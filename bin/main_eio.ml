@@ -3294,10 +3294,9 @@ let doctor_cmd =
   let json = Arg.(value & flag & info ["json"]
     ~doc:"Print the shared read-only onboarding state as JSON.") in
   let inspect requested json =
-    let selected = match requested with
-      | Some path -> Some path
-      | None -> Option.map snd (Env_config_core.base_path_source_opt ()) in
-    let state = Onboarding_status.inspect ~base_path:selected in
+    (* The setup journey asks doctor which workspace to offer, so doctor answers
+       in the same order `masc start` boots in; a workspace cwd is found here. *)
+    let state = Onboarding_status.inspect ~base_path:(selected_base_path requested) in
     print_endline (if json then Yojson.Safe.to_string (Onboarding_status.to_json state)
                    else Onboarding_status.to_text state);
     (* Reporting incomplete preparation is successful observation, never a
@@ -3377,15 +3376,16 @@ let setup_cmd =
       if not no_tui && profile = None && backend = None && network_mode = None && stdio_is_a_terminal () then
         `Ok (Masc_cli_onboarding.run ~base_path ~port:requested_port ~resume:false ~sandbox_step:false)
       else
-        let resolved = match base_path with
-          | Some path -> Some path
-          | None -> Option.map snd (Env_config_core.base_path_source_opt ()) in
-        match resolved with
-        | Some path ->
+        match Workspace_root.resolve_current ~flag:base_path with
+        | Ok workspace ->
+          publish_workspace_root workspace;
+          let path = workspace.Workspace_root.root in
           (match resolve_connection_port (Some path) requested_port with
            | Ok port -> `Ok (setup_cmd_exit path (Workspace_connection.to_int port) no_tui profile backend network_mode)
            | Error error -> `Error (false, Workspace_connection.error_message error))
-        | None -> `Error (false, "Choose a workspace with --base-path, or run masc setup in a terminal.")
+        | Error error ->
+          `Error (false, Workspace_root.error_message error
+                         ^ "\nOr run masc setup in a terminal to choose one.")
   in
   Cmd.v
     (Cmd.info "setup"

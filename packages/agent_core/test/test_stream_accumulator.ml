@@ -624,6 +624,122 @@ let test_finalize_thinking_signature_block () =
      | _ -> Alcotest.fail "expected Thinking")
 ;;
 
+(* A reasoning detail as an OpenAI-compatible stream sends it, one per token,
+   with its text read the way the stream parser reads it. *)
+let reasoning_text_detail ?(format = "unknown") ?(index = 0) piece : reasoning_detail =
+  { raw =
+      `Assoc
+        [ "type", `String "reasoning.text"
+        ; "text", `String piece
+        ; "format", `String format
+        ; "index", `Int index
+        ]
+  ; text = (if String.trim piece = "" then None else Some piece)
+  }
+;;
+
+let finalize_reasoning_details deltas =
+  let acc = Streaming.create_stream_acc () in
+  acc_events
+    acc
+    ([ MessageStart { id = "m"; model = "m"; usage = None }
+     ; ContentBlockStart
+         { index = 0; content_type = "reasoning_details"; tool_id = None; tool_name = None }
+     ]
+     @ List.map
+         (fun (reasoning_content, details) ->
+            ContentBlockDelta
+              { index = 0; delta = ReasoningDetailsDelta { reasoning_content; details } })
+         deltas);
+  match (finalize_with_end_turn acc).content with
+  | [ ReasoningDetails { reasoning_content; details } ] -> reasoning_content, details
+  | _ -> Alcotest.fail "expected one ReasoningDetails block"
+;;
+
+let raw_details details =
+  List.map (fun (detail : reasoning_detail) -> Yojson.Safe.to_string detail.raw) details
+;;
+
+(* Token-sized fragments of one detail close as one detail. Whitespace tokens
+   carry no [text] of their own, and the joined detail keeps them. *)
+let test_finalize_joins_token_sized_reasoning_text () =
+  let pieces = [ "Let"; " "; "me"; " "; "check"; "\n"; "it" ] in
+  let reasoning_content, details =
+    finalize_reasoning_details
+      (List.map (fun piece -> Some piece, [ reasoning_text_detail piece ]) pieces)
+  in
+  let joined = String.concat "" pieces in
+  Alcotest.(check (option string))
+    "reasoning_content still accumulates every token"
+    (Some joined)
+    reasoning_content;
+  Alcotest.(check int) "one detail for the block" 1 (List.length details);
+  Alcotest.(check (list string))
+    "the detail carries the joined text beside its own fields"
+    (raw_details [ reasoning_text_detail joined ])
+    (raw_details details);
+  Alcotest.(check (option string))
+    "and reads it as its text"
+    (Some joined)
+    (List.hd details).text
+;;
+
+(* Joining stops at anything that is not one more fragment of the same detail:
+   a field beyond type/text/format/index, another index or format, or another
+   detail type. Every such detail is kept as it arrived, in order. *)
+let test_finalize_keeps_reasoning_details_that_are_not_fragments () =
+  let signed : reasoning_detail =
+    { raw =
+        `Assoc
+          [ "type", `String "reasoning.text"
+          ; "text", `String ""
+          ; "signature", `String "sig"
+          ; "format", `String "unknown"
+          ; "index", `Int 0
+          ]
+    ; text = None
+    }
+  in
+  let encrypted : reasoning_detail =
+    { raw =
+        `Assoc
+          [ "type", `String "reasoning.encrypted"
+          ; "data", `String "opaque"
+          ; "format", `String "unknown"
+          ; "index", `Int 0
+          ]
+    ; text = None
+    }
+  in
+  let reasoning_content, details =
+    finalize_reasoning_details
+      (List.map
+         (fun detail -> None, [ detail ])
+         [ reasoning_text_detail "a"
+         ; reasoning_text_detail "b"
+         ; signed
+         ; reasoning_text_detail "c"
+         ; reasoning_text_detail ~index:1 "d"
+         ; reasoning_text_detail ~index:1 ~format:"other" "e"
+         ; encrypted
+         ; reasoning_text_detail "f"
+         ])
+  in
+  Alcotest.(check (option string)) "no reasoning_content was sent" None reasoning_content;
+  Alcotest.(check (list string))
+    "only the adjacent fragments of one detail are joined"
+    (raw_details
+       [ reasoning_text_detail "ab"
+       ; signed
+       ; reasoning_text_detail "c"
+       ; reasoning_text_detail ~index:1 "d"
+       ; reasoning_text_detail ~index:1 ~format:"other" "e"
+       ; encrypted
+       ; reasoning_text_detail "f"
+       ])
+    (raw_details details)
+;;
+
 let test_finalize_redacted_thinking_block () =
   let acc = Streaming.create_stream_acc () in
   acc_events
@@ -1351,6 +1467,14 @@ let () =
             "thinking signature block"
             `Quick
             test_finalize_thinking_signature_block
+        ; Alcotest.test_case
+            "token-sized reasoning text joins into one detail"
+            `Quick
+            test_finalize_joins_token_sized_reasoning_text
+        ; Alcotest.test_case
+            "reasoning details that are not fragments stay as sent"
+            `Quick
+            test_finalize_keeps_reasoning_details_that_are_not_fragments
         ; Alcotest.test_case
             "redacted thinking block"
             `Quick

@@ -4376,7 +4376,11 @@ max_context_tokens = 8192
 max_output_tokens = 1024
 supports_tools = true
 |} in
-      let content candidates = Printf.sprintf {|[runtime]
+      {|[turn]
+context_window_tokens = 8192
+
+[runtime]
+default =s = Printf.sprintf {|[runtime]
 default = "fixture.alpha"
 [runtime.lanes.primary]
 candidates = %s

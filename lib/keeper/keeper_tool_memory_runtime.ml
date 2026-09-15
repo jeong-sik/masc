@@ -517,6 +517,31 @@ let keeper_context_status_json
 
 (* --- Explicit memory write surface ------------------------------- *)
 
+(** Which half of a derivation arrived without the other. *)
+type derivation_half =
+  | Rule_id_without_premise_ids
+  | Premise_ids_without_rule_id
+
+(** Why the [rule_id] and [premise_ids] this call carried cannot name a
+    derivation. Closed and produced only by {!validate_memory_write_args}, so a
+    new refusal has to say what to change before it can be made.
+    [Keeper_memory_os_types.is_memory_id] stays the single premise grammar;
+    this type only records which element broke it and where. *)
+type derivation_rejection =
+  | Rule_id_not_a_string
+  | Premise_ids_not_an_array
+  | Rule_id_blank
+  | Premise_ids_empty
+  | Premise_not_a_string of { index : int }
+  | Premise_repeated of
+      { index : int
+      ; premise_id : string
+      }
+  | Premise_not_a_memory_id of
+      { index : int
+      ; premise_id : string
+      }
+
 (** Pure validation result for a [keeper_memory_write] call. Splitting
     this from the persistence step lets tests pin the error_kind
     taxonomy without constructing a [Workspace.config]. *)
@@ -524,8 +549,8 @@ type memory_write_error_kind =
   | Content_empty
   | Source_path_invalid
   | Source_read_failed of Keeper_memory_source_current.source_read_failure
-  | Derivation_incomplete
-  | Derivation_invalid
+  | Derivation_incomplete of derivation_half
+  | Derivation_invalid of derivation_rejection
   | Derived_source_path_unsupported
   | Board_ref_invalid
   | Board_comment_without_post
@@ -540,8 +565,8 @@ let memory_write_error_kind_to_string = function
   | Content_empty -> "content_empty"
   | Source_path_invalid -> "source_path_invalid"
   | Source_read_failed _ -> "source_read_failed"
-  | Derivation_incomplete -> "derivation_incomplete"
-  | Derivation_invalid -> "derivation_invalid"
+  | Derivation_incomplete _ -> "derivation_incomplete"
+  | Derivation_invalid _ -> "derivation_invalid"
   | Derived_source_path_unsupported -> "derived_source_path_unsupported"
   | Board_ref_invalid -> "board_ref_invalid"
   | Board_comment_without_post -> "board_comment_without_post"
@@ -561,8 +586,8 @@ let memory_write_error_kind_to_string = function
 let class_of_memory_write_error_kind = function
   | Content_empty
   | Source_path_invalid
-  | Derivation_incomplete
-  | Derivation_invalid
+  | Derivation_incomplete _
+  | Derivation_invalid _
   | Derived_source_path_unsupported
   | Board_ref_invalid
   | Board_comment_without_post
@@ -601,8 +626,8 @@ let memory_write_failure_effect = function
   | Content_empty
   | Source_path_invalid
   | Source_read_failed _
-  | Derivation_incomplete
-  | Derivation_invalid
+  | Derivation_incomplete _
+  | Derivation_invalid _
   | Derived_source_path_unsupported
   | Board_ref_invalid
   | Board_comment_without_post
@@ -630,6 +655,100 @@ let memory_write_failure_effect = function
     ( Tool_result.Effect_outcome_unknown
     , "The claim may or may not have been committed. Search memory for it before \
        writing it again." )
+;;
+
+(* A memory identity is the one argument a model cannot guess, and the
+   refusals show it guessing: across 2026-09-01..15 every one of the 20
+   derivation_invalid calls broke on a premise that was not a memory identity.
+   19 had no "sha256:" prefix at all ("mem_01K4Z5...", "c-c6ba9d...",
+   "fact-20260911154720", bare 40-digit hex, "7") and one was a digit too long.
+   So the sentence that rejects one also names the shape and the two tools that
+   hand a real one out. *)
+let premise_id_expectation =
+  Printf.sprintf
+    "A memory identity is %s. keeper_memory_search returns one as memory_id for \
+     each match it finds, and a successful keeper_memory_write returns the \
+     memory_id it committed."
+    Keeper_memory_os_types.memory_id_shape
+;;
+
+(* What to change to make this exact call pass, at the field that failed.
+
+   A refusal that names only its kind leaves the model to pick a field, and
+   the pick it made was to drop the derivation: of the 54 derivation refusals
+   in 2026-09-01..15, one was later written again with rule_id and premise_ids
+   intact. The same keeper's next successful write carried neither in the other
+   53, ten of them with the refused content. Naming the field and what it takes
+   is the answer [Keeper_invocation_contract.exact_fields] already gives for an
+   unknown field.
+
+   The kinds answering [] already carry their own coordinates: a source read
+   failure reports the path and the operation, and the rest name a single field
+   in their own tag. *)
+let memory_write_rejection_fields error_kind =
+  let at field expected = [ "rejected_field", `String field; "expected", `String expected ] in
+  let at_premise index expected =
+    at (Printf.sprintf "premise_ids[%d]" index) expected
+  in
+  match error_kind with
+  | Derivation_incomplete Rule_id_without_premise_ids ->
+    at
+      "premise_ids"
+      ("rule_id names a rule, so premise_ids has to name what the rule was \
+        applied to. " ^ premise_id_expectation)
+  | Derivation_incomplete Premise_ids_without_rule_id ->
+    at
+      "rule_id"
+      "premise_ids names premises, so rule_id has to name the rule that drew \
+       this claim from them."
+  | Derivation_invalid Rule_id_not_a_string -> at "rule_id" "rule_id is a string."
+  | Derivation_invalid Premise_ids_not_an_array ->
+    at
+      "premise_ids"
+      ("premise_ids is an array of memory identity strings. " ^ premise_id_expectation)
+  | Derivation_invalid Rule_id_blank ->
+    at "rule_id" "rule_id names the rule that drew this claim from its premises."
+  | Derivation_invalid Premise_ids_empty ->
+    at
+      "premise_ids"
+      ("A derived claim rests on at least one premise, each a memory identity. "
+       ^ premise_id_expectation)
+  | Derivation_invalid (Premise_not_a_string { index }) ->
+    at_premise
+      index
+      ("Each premise is a memory identity string. " ^ premise_id_expectation)
+  | Derivation_invalid (Premise_repeated { index; premise_id }) ->
+    at_premise
+      index
+      (Printf.sprintf
+         "%S is already named earlier in premise_ids. Each premise is named once."
+         premise_id)
+  | Derivation_invalid (Premise_not_a_memory_id { index; premise_id }) ->
+    at_premise
+      index
+      (Printf.sprintf
+         "%S is not a memory identity. %s"
+         premise_id
+         premise_id_expectation)
+  (* The store holds no fact under these identities, so this claim cannot rest
+     on them yet. Writing a premise returns the memory_id to cite. *)
+  | Unsupported_derivation ->
+    at
+      "premise_ids"
+      "The ids under missing_premise_ids name no fact in the store. Write those \
+       premises first and cite the memory_id each write returns, or write this \
+       claim without rule_id and premise_ids as the observation it is."
+  | Content_empty
+  | Source_path_invalid
+  | Source_read_failed _
+  | Derived_source_path_unsupported
+  | Board_ref_invalid
+  | Board_comment_without_post
+  | Board_ref_with_derivation_unsupported
+  | Board_ref_with_source_path_unsupported
+  | Persistence_failed (Ordinary_current | Source_bound_current)
+  | Commit_receipt_inconsistent
+  | No_memory_write_error -> []
 ;;
 
 let memory_write_error_effect_disposition error_kind =
@@ -695,30 +814,38 @@ let validate_memory_write_args (args : Yojson.Safe.t) : memory_write_validation 
          Ok (Keeper_memory_os_types.Observed Keeper_memory_os_types.Transcript))
     | `String raw_rule_id, `List premise_values ->
       let rule_id = String.trim raw_rule_id in
-      let rec premise_ids seen acc = function
+      (* Each arm names the element and the constraint it broke, because the
+         caller can only correct the premise it actually got wrong. The rule is
+         checked before the premises so a call wrong in both is not refused
+         twice. *)
+      let rec premise_ids index seen acc = function
         | [] ->
-          if String.equal rule_id "" || acc = []
-          then Error Derivation_invalid
-          else
-            Ok
-              (Keeper_memory_os_types.Derived
-                 [ { rule_id; premise_ids = List.rev acc } ])
-        | `String raw :: rest ->
-          let premise_id = raw in
-          if
-            not (Keeper_memory_os_types.is_memory_id premise_id)
-            || StringSet.mem premise_id seen
-          then Error Derivation_invalid
+          (match acc with
+           | [] -> Error (Derivation_invalid Premise_ids_empty)
+           | _ :: _ ->
+             Ok
+               (Keeper_memory_os_types.Derived
+                  [ { rule_id; premise_ids = List.rev acc } ]))
+        | `String premise_id :: rest ->
+          if StringSet.mem premise_id seen
+          then Error (Derivation_invalid (Premise_repeated { index; premise_id }))
+          else if not (Keeper_memory_os_types.is_memory_id premise_id)
+          then Error (Derivation_invalid (Premise_not_a_memory_id { index; premise_id }))
           else
             premise_ids
+              (index + 1)
               (StringSet.add premise_id seen)
               (premise_id :: acc)
               rest
-        | _ -> Error Derivation_invalid
+        | _ -> Error (Derivation_invalid (Premise_not_a_string { index }))
       in
-      premise_ids StringSet.empty [] premise_values
-    | (`Null, _) | (_, `Null) -> Error Derivation_incomplete
-    | _ -> Error Derivation_invalid
+      if String.equal rule_id ""
+      then Error (Derivation_invalid Rule_id_blank)
+      else premise_ids 0 StringSet.empty [] premise_values
+    | `Null, _ -> Error (Derivation_incomplete Premise_ids_without_rule_id)
+    | _, `Null -> Error (Derivation_incomplete Rule_id_without_premise_ids)
+    | `String _, _ -> Error (Derivation_invalid Premise_ids_not_an_array)
+    | _, _ -> Error (Derivation_invalid Rule_id_not_a_string)
   in
   match source_path, derivation, board_ref with
   | Error error_kind, _, _ | _, Error error_kind, _ | _, _, Error error_kind ->
@@ -834,7 +961,10 @@ let keeper_memory_write_with_outcome
                , `String (Tool_result.failure_effect_disposition_to_string effect_disposition) )
              ; "what_committed", `String what_committed
              ]
-           @ extras)
+           @ extras
+           (* Which field to change follows from the kind, so no failure site
+              states it. *)
+           @ memory_write_rejection_fields error_kind)
       in
       Keeper_tool_execution.failure
         ~class_:(class_of_memory_write_error_kind error_kind)

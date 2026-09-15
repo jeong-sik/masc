@@ -29,6 +29,13 @@ for file in manifest.json background.js; do
 done
 ```
 
+From a source checkout, `scripts/install-local-build.sh` builds `masc`,
+`masc-tui` and `masc-browser-host`, installs them into `~/.local/bin`, and
+reinstalls every host registered under a workspace's
+`.masc/browser-lane/host` from the new binary under its own host name. It then
+stops the running hosts from those workspaces; the extension reconnects after
+five seconds and starts the new copy.
+
 Adjust `--binary` for a custom installation prefix. Start the MASC server with
 the same base path. In Firefox, open `about:debugging#/runtime/this-firefox`,
 choose **Load Temporary Add-on**, and select `manifest.json` in the extension

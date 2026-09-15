@@ -50,7 +50,7 @@ description: Walk the release checklist before shipping.
 | 없는 능력 / 스키마·권한·typed 오류 계약 / 외부 호출 | Tool |
 | 중간 판단 없는 고정 도구 사슬 | Composition skill (쓰임새는 TOML `description`) |
 | 갈림길 판단·함정·절차 | Instruction skill |
-| 런타임이 이미 매 요청 넣는 정보 (예: 현재 시각은 `[Temporal]` 로 들어간다) | 두지 않는다 |
+| 런타임이 턴의 첫 요청에 이미 넣는 정보 (예: 현재 시각은 `[Temporal]` 로 들어간다. 도구 결과 뒤 요청에는 다시 넣지 않는다) | 두지 않는다 |
 | 도구·하네스 결함을 피해 가는 절차 | 스킬로 만들지 않고 결함을 고친다 |
 
 - 노드가 하나뿐인 합성은 그 도구를 직접 부르는 것과 같다. 스킬로 만들 이유가 없다.

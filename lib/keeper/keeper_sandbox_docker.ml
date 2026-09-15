@@ -465,7 +465,9 @@ let run_docker_shell_command_with_status_internal
           |> Keeper_alerting_path.normalize_path_for_check
           |> Keeper_alerting_path.strip_trailing_slashes
         in
-        let container_name = keeper_sandbox_container_name meta in
+        let container_name =
+          Keeper_sandbox_container_name.to_string (keeper_sandbox_container_name meta)
+        in
               let container_root = keeper_private_container_root meta in
               let container_cwd = docker_private_workspace_cwd ~config ~meta cwd in
               match Keeper_sandbox_runtime.docker_network_args network_mode with

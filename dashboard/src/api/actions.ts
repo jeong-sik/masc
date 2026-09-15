@@ -253,7 +253,6 @@ export type PurgeAgentResponse =
       agent_name: string
       cleanup_results: Array<{
         agent_name: string
-        heartbeats_stopped: number
         workspace_unbound: boolean
       }>
     }

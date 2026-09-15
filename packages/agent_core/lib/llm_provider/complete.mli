@@ -92,9 +92,9 @@ type 'clock measurement_next_stage = 'clock Prepared_completion_request.next_sta
     existing typed [Unsupported] measurement error; no estimate is used. *)
 val measure_request
   :  ?connection_cache:Http_client.cache
-  -> ?clock:_ Eio.Time.clock
+  -> ?clock:'clock Eio.Time.clock
   -> ?timeout_s:float
-  -> next_stage:_ Eio.Time.clock measurement_next_stage
+  -> next_stage:'clock Eio.Time.clock measurement_next_stage
   -> ?permit_wait:Provider_admission.permit_wait Atomic.t
   -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t

@@ -197,32 +197,55 @@ let test_browser_configuration () =
     | Error detail -> fail detail | Ok toml -> Masc.Browser_configuration.parse toml in
   (match parse "" with Ok Masc.Browser_configuration.Disabled -> () | _ -> fail "missing browser config");
   (match parse {|[browser]
-webdriver_url = "http://127.0.0.1:4444/"
+geckodriver = "/test/geckodriver"
 binary = "/test/Zen.app"
 |} with
-   | Ok (Masc.Browser_configuration.Webdriver {endpoint="http://127.0.0.1:4444";binary=Some "/test/Zen.app"}) -> ()
+   | Ok (Masc.Browser_configuration.Geckodriver {driver="/test/geckodriver";binary=Some "/test/Zen.app"}) -> ()
    | _ -> fail "explicit browser configuration lost");
-  List.iter (fun text -> check bool "invalid browser config is refused" true (Result.is_error (parse text)))
-    [{|[browser]
-binary = "/test/Zen.app"|}; {|[browser]
-webdriver_url = "http://example.org:4444"|}; {|[browser]
-webdriver_url = "http://127.0.0.1:4444"
-binary = "Zen.app"|}; {|[browser]
-webdriver_url = "http://127.0.0.1:4444"
-binary = false|}];
-  (* The error message says "loopback HTTP origin" and the check used to list
-     three literals, which is narrower. Masc_network_defaults.is_loopback_host
-     decides it now: the whole of 127.0.0.0/8 -- a resolver stub on
-     127.0.0.53 is as unreachable from off-host as 127.0.0.1 -- and
-     "localhost" in any case. It still says no to a host that only looks like
-     an address, which a prefix match would have let through. *)
-  List.iter (fun text -> check bool "loopback origin is accepted" true (Result.is_ok (parse text)))
-    [{|[browser]
-webdriver_url = "http://127.0.0.53:4444/"|}; {|[browser]
-webdriver_url = "http://LOCALHOST:4444/"|}];
-  check bool "a host that merely starts with 127. is refused" true
-    (Result.is_error (parse {|[browser]
-webdriver_url = "http://127.invalid:4444/"|}))
+  (match parse {|[browser]
+geckodriver = "/test/geckodriver"
+|} with
+   | Ok (Masc.Browser_configuration.Geckodriver {driver="/test/geckodriver";binary=None}) -> ()
+   | _ -> fail "a driver without a binary lets geckodriver discover the browser");
+  List.iter (fun (why, text) -> check bool why true (Result.is_error (parse text)))
+    [ "a binary needs the driver that launches it", {|[browser]
+binary = "/test/Zen.app"|};
+      "the driver is an absolute path, never a PATH lookup", {|[browser]
+geckodriver = "geckodriver"|};
+      "a relative binary is refused", {|[browser]
+geckodriver = "/test/geckodriver"
+binary = "Zen.app"|};
+      "a non-string binary is refused", {|[browser]
+geckodriver = "/test/geckodriver"
+binary = false|} ]
+
+(* The server owns the driver it starts. On 2026-09-15 a driver started by hand
+   on 2026-09-08 still held the session a dead server opened, and every later
+   server was refused while reporting no open session. What the next server
+   stops is decided from the record and the process table, never from a pid
+   alone: a pid reused by another program is left running. *)
+let test_driver_ownership_record () =
+  let module P = Masc.Browser_driver_process in
+  let owner = { P.pid = 4242; driver = "/ws/.masc/browser-lane/driver/geckodriver" } in
+  (match P.owner_of_string (P.owner_to_string owner) with
+   | Ok read -> check bool "record round-trips" true (read = owner)
+   | Error detail -> fail detail);
+  List.iter (fun text -> check bool "malformed record is refused" true (Result.is_error (P.owner_of_string text)))
+    [ "not json"; {|[4242]|}; {|{"pid":0,"driver":"/x"}|}; {|{"pid":42,"driver":"relative"}|}; {|{"pid":42}|} ];
+  let decision command = P.leftover owner ~command in
+  check bool "the recorded driver still running is stopped" true
+    (decision (Some (owner.driver ^ " --host 127.0.0.1 --port 50931 --websocket-port 0"))
+     = P.Stop_recorded_driver 4242);
+  check bool "a pid now running another program is left alone" true
+    (decision (Some "/usr/bin/vim notes.txt") = P.Not_the_recorded_driver);
+  check bool "a longer path that only starts with the driver is not the driver" true
+    (decision (Some (owner.driver ^ "-old --port 1")) = P.Not_the_recorded_driver);
+  check bool "a pid with no process is nothing to stop" true (decision None = P.Not_the_recorded_driver);
+  check (list string) "driver listens on loopback and lets Firefox pick the BiDi port"
+    [ owner.driver; "--host"; "127.0.0.1"; "--port"; "50931"; "--websocket-port"; "0" ]
+    (P.argv ~driver:owner.driver ~port:50931);
+  check string "record lives beside the lane host"
+    "/ws/.masc/browser-lane/geckodriver-owner.json" (P.owner_record_path ~masc_root:"/ws/.masc")
 
 (* A keeper's first question is whether a session already exists. Every other
    verb answers that only by being refused, which costs a lane round trip and
@@ -434,4 +457,5 @@ let () = run "native Firefox lane" ["behavior", [
   test_case "deadline cancels I/O and releases the session" `Quick test_timeout_releases_session;
   test_case "shutdown uses a live cleanup transport" `Quick test_shutdown_transport_lifetime;
   test_case "explicit Zen binary never falls back" `Quick test_selected_binary;
-  test_case "browser configuration" `Quick test_browser_configuration]]
+  test_case "browser configuration" `Quick test_browser_configuration;
+  test_case "driver ownership record" `Quick test_driver_ownership_record]]

@@ -86,7 +86,14 @@ def native_setup_command(binary, command, payload=None, arguments=()):
                 raise VerificationError(receipt['runtime_id'], receipt.get('failure'))
             if model_text(receipt.get('error')):
                 raise SetupError(receipt['error'])
-        raise SetupError('Runtime setup did not finish. Inspect the workspace before retrying.')
+            # The kind is one of the binary's fixed names, so it is safe to show
+            # even when the sentence beside it is not; without it the operator
+            # could not tell a killed verification from a locked workspace.
+            if model_text(receipt.get('kind')):
+                raise SetupError('Runtime setup did not finish ({}). Inspect the workspace before retrying.'
+                                 .format(terminal_text(receipt['kind'])))
+        raise SetupError('Runtime setup did not finish (exit {}). Inspect the workspace before retrying.'
+                         .format(result.returncode))
     return receipt
 
 

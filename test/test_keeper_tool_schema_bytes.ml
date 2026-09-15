@@ -236,7 +236,15 @@ open Alcotest
    acknowledgements, so Keepers can consume Lane output on their next turn.
    Official-client CLI turns carry the full schema; agent_core can defer it.
    Pin to the measured inventory with no added headroom. *)
-let ceiling_bytes = 118_048
+(* 2026-09-15: +509 rendered bytes (production renderer rules replayed on the
+   three TOML files; not a CI reading). masc_schedule_list 380 -> 734 takes a
+   required owner selector, owner_name and cursor, so a Keeper reads its own
+   schedules a page of summary rows at a time instead of the whole store
+   (339 of 339 what-arrived listings this month were externalized blobs,
+   median 141,638 bytes). masc_schedule_create 4,024 -> 4,106 and
+   masc_schedule_cancel 579 -> 652 say which refusal carries typed fields.
+   Added to main's ceiling with no headroom; the next CI run measures it. *)
+let ceiling_bytes = 118_557
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc

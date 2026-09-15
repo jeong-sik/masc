@@ -176,6 +176,7 @@ let create_schedule_exn config ~schedule_id ~scheduled_by =
   match
     Schedule_service.create
       config
+      ~now:100.0
       ~schedule_id
       ~requested_at:100.0
       ~requested_by:(human "operator")

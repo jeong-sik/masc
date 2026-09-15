@@ -25,8 +25,10 @@ module Make (E : Error) : sig
     -> (unit -> 'a)
     -> 'a
   (** Install the adapter's optional idle deadline. A deadline owned by this
-      wrapper raises [Idle_timeout seconds]; an [Eio.Time.Timeout] raised by
-      [f] keeps its original identity and remains caller-owned control flow. *)
+      wrapper raises [Idle_timeout seconds] when [f] has not finished by
+      then; a value [f] finished as the deadline passed is returned. An
+      [Eio.Time.Timeout] raised by [f] keeps its original identity and
+      remains caller-owned control flow. *)
 
   val validate_unique_object_keys :
     stage:string -> path:string -> Yojson.Safe.t -> (unit, E.t) result

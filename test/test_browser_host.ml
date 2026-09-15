@@ -38,6 +38,24 @@ let with_host f =
   @@ fun sw -> f ~sw ~clock
 ;;
 
+(* A stdout the extension is not reading: the frame write blocks until the
+   case lets it through, so the window closes while the host is still
+   writing. *)
+module Blocked_sink = struct
+  type t = unit Eio.Promise.t
+
+  let single_write t bufs =
+    Eio.Promise.await t;
+    Cstruct.lenv bufs
+  ;;
+
+  let copy t ~src = Eio.Flow.Pi.simple_copy ~single_write t ~src
+end
+
+let blocked_sink promise =
+  Eio.Resource.T (promise, Eio.Flow.Pi.sink (module Blocked_sink))
+;;
+
 let forward_in_background ~sw ~clock pending =
   let frames = Buffer.create 256 in
   let forwarded =
@@ -145,6 +163,27 @@ let test_a_step_still_running_at_its_deadline_is_none () =
   check (option string) "the deadline is the verdict" None (Eio.Promise.await_exn stepped)
 ;;
 
+(* The window closes while the frame is still being written: the exchange
+   is [Write_timed_out], which ends the host, and not a reply the extension
+   never saw. *)
+let test_a_frame_still_being_written_when_the_window_closes_stops_the_host () =
+  with_host
+  @@ fun ~sw ~clock ->
+  let pending = Host.no_pending () in
+  let unblocked, _let_it_through = Eio.Promise.create () in
+  let forwarded =
+    Eio.Fiber.fork_promise ~sw (fun () ->
+      Host.forward ~clock ~stdout:(blocked_sink unblocked) pending command)
+  in
+  Eio_mock.Clock.set_time clock Host.extension_timeout_sec;
+  match Eio.Promise.await_exn forwarded with
+  | Host.Write_timed_out -> ()
+  | Host.Replied envelope ->
+    failf
+      "the frame never reached the extension, yet the exchange replied: %s"
+      (Yojson.Safe.to_string envelope)
+;;
+
 let () =
   Alcotest.run
     "browser_host"
@@ -165,6 +204,10 @@ let () =
             "a reply for another command does not settle the exchange"
             `Quick
             test_a_reply_for_another_command_does_not_settle_the_exchange
+        ; test_case
+            "a frame still being written when the window closes stops the host"
+            `Quick
+            test_a_frame_still_being_written_when_the_window_closes_stops_the_host
         ] )
     ; ( "within"
       , [ test_case

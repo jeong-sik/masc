@@ -390,6 +390,15 @@ let core_provider_error_fields error =
     ; "stop_reason", `String (Llm_provider.Types.stop_reason_to_string stop_reason)
     ; "detail", `String detail
     ]
+  | Llm_provider.Error.RepeatingGeneration { provider; shape; occurrences; unit_bytes; detail } ->
+    [ "variant", `String "repeating_generation"
+    ; "message", `String message
+    ; "provider", `String provider
+    ; "shape", `String (Llm_provider.Types.repeating_shape_to_string shape)
+    ; "occurrences", `Int occurrences
+    ; "unit_bytes", `Int unit_bytes
+    ; "detail", `String detail
+    ]
   | Llm_provider.Error.RateLimit { provider; retry_after; detail } ->
     [ "variant", `String "rate_limited"
     ; "message", `String message

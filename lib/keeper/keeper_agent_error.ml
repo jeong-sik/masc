@@ -234,6 +234,10 @@ let provider_error_terminal_reason_code = function
     Printf.sprintf "provider_error_unknown_variant:%s" type_name
   | Llm_provider.Error.ProviderUnavailable _ -> "provider_error_unavailable"
   | Llm_provider.Error.EmptyCompletion _ -> "provider_error_empty_completion"
+  | Llm_provider.Error.RepeatingGeneration { shape; _ } ->
+    Printf.sprintf
+      "provider_error_repeating_generation:%s"
+      (Llm_provider.Types.repeating_shape_to_string shape)
   | Llm_provider.Error.RateLimit _ -> "provider_error_rate_limited"
   | Llm_provider.Error.HardQuota _ -> "provider_error_hard_quota"
   | Llm_provider.Error.CapacityExhausted { scope; _ } ->

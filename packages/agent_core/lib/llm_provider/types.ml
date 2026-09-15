@@ -1557,6 +1557,11 @@ type repeating_shape =
   | Repeated_paragraph
   | Repeated_reasoning_cycle
 
+let repeating_shape_to_string = function
+  | Repeated_paragraph -> "repeated_paragraph"
+  | Repeated_reasoning_cycle -> "repeated_reasoning_cycle"
+;;
+
 (* One spelling for both readers of a repeat: the transport's provider
    failure and the Keeper chat bridge's protocol error. *)
 let repeating_generation_message ~repeated ~occurrences ~bytes_seen shape =

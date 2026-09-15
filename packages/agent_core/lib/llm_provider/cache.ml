@@ -51,6 +51,7 @@ let request_fingerprint
                      ; enable_thinking
                      ; preserve_thinking
                      ; reasoning_effort
+                     ; reasoning_uncontrolled
                      ; clear_thinking
                      ; tool_stream
                      ; tool_choice
@@ -85,7 +86,11 @@ let request_fingerprint
      already in the key; [credential_source] is where the credential came from
      rather than what it is, and a refreshable one has no stable account
      identity in this snapshot -- Complete disables response caching for those
-     before calling this function. *)
+     before calling this function. [reasoning_uncontrolled] only says whether a
+     request with no reasoning effort may be sent on a wire that reasons by
+     itself; the request it admits is byte-for-byte the one with no effort,
+     [reasoning_effort] is already in the key, and Complete runs that admission
+     before the cache lookup, so a refused request never reaches the key. *)
   (* See the exclusion note above for why this one is not in the key. *)
   ignore credential_source;
   ignore max_request_body_bytes;
@@ -97,6 +102,7 @@ let request_fingerprint
   ignore supports_tool_choice_override;
   ignore supports_structured_output_override;
   ignore model_capabilities_override;
+  ignore reasoning_uncontrolled;
   let json =
     `Assoc
       [ "kind", `String (Provider_config.string_of_provider_kind kind)

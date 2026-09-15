@@ -70,14 +70,14 @@ let parse_sync_response
        | Error message ->
          Error
            (Http_client.HttpError
-              { code = 400; body = message; retry_after_header = None }))
+              { code = 400; body = Http_client.Received message; retry_after_header = None }))
     | Provider_http_codec.Openai_responses ->
       (match Backend_openai_responses.parse_response_result body with
        | Ok response -> Ok response
        | Error message ->
          Error
            (Http_client.HttpError
-              { code = 400; body = message; retry_after_header = None }))
+              { code = 400; body = Http_client.Received message; retry_after_header = None }))
     | Provider_http_codec.Openai_chat ->
       (match
          Backend_openai_parse.parse_openai_response_result
@@ -88,7 +88,7 @@ let parse_sync_response
        | Error (Backend_openai_parse.Provider_error message) ->
          Error
            (Http_client.HttpError
-              { code = 400; body = message; retry_after_header = None })
+              { code = 400; body = Http_client.Received message; retry_after_header = None })
        | Error (Backend_openai_parse.Empty_completion empty) ->
          Error (Http_client.empty_completion_error ~stop_reason:empty.stop_reason))
     | Provider_http_codec.Gemini_generate_content ->
@@ -110,7 +110,10 @@ let parse_sync_response
   | Backend_gemini.Gemini_api_error message ->
     Error
       (Http_client.HttpError
-         { code = 400; body = "Gemini API error: " ^ message; retry_after_header = None })
+         { code = 400
+         ; body = Http_client.Received ("Gemini API error: " ^ message)
+         ; retry_after_header = None
+         })
   | Backend_glm.Glm_api_error error ->
     (match error.origin with
      | Backend_glm.Response_parse -> provider_parse_failure ~parser:"glm" error.message
@@ -141,14 +144,17 @@ let parse_sync_response
           in
           Error
             (Http_client.HttpError
-               { code = semantic_code; body; retry_after_header = None })))
+               { code = semantic_code
+               ; body = Http_client.Received body
+               ; retry_after_header = None
+               })))
   | exn ->
     Reserved_exn.reraise_if_reserved exn;
     let message = Printexc.to_string exn in
     Error
       (Http_client.HttpError
          { code = 500
-         ; body = "Unexpected parsing exception: " ^ message
+         ; body = Http_client.Received ("Unexpected parsing exception: " ^ message)
          ; retry_after_header = None
          })
 ;;
@@ -307,11 +313,12 @@ let complete_http
             (Http_client.HttpError
                { code = 0
                ; body =
-                   Printf.sprintf
-                     "pre-flight: unbalanced JSON body (%d bytes, first=%C last=%C)"
-                     body_len
-                     body_str.[0]
-                     body_str.[body_len - 1]
+                   Http_client.Received
+                     (Printf.sprintf
+                        "pre-flight: unbalanced JSON body (%d bytes, first=%C last=%C)"
+                        body_len
+                        body_str.[0]
+                        body_str.[body_len - 1])
                ; retry_after_header = None
                })
         , None ))
@@ -477,7 +484,7 @@ let complete_http
               Error
                 (Http_client.HttpError
                    { code
-                   ; body
+                   ; body = Http_client.Received body
                    ; retry_after_header = response.retry_after_header
                    }))
         in

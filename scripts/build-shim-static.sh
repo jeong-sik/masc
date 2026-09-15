@@ -61,6 +61,8 @@ shim_sources=(
   lib/exec_shim/shim_clock.ml
   lib/exec_shim/shim_clock.mli
   lib/exec_shim/shim_build_id.mli
+  lib/exec_shim/fdpass_stub.c
+  lib/exec_shim/shim_fdpass.ml
   bin/masc_exec_shim.ml
 )
 
@@ -141,6 +143,15 @@ cat > "$stage/src/dune" <<'EOF'
  (foreign_stubs
   (language c)
   (names monotonic_stub)))
+
+(library
+ (name shim_fdpass)
+ (wrapped false)
+ (modules shim_fdpass)
+ (libraries unix)
+ (foreign_stubs
+  (language c)
+  (names fdpass_stub)))
 
 (library
  (name exec_shim)

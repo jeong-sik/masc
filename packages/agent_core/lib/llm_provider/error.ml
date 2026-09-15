@@ -36,6 +36,13 @@ type provider_error =
       ; stop_reason : Types.stop_reason
       ; detail : string
       }
+  | RepeatingGeneration of
+      { provider : string
+      ; shape : Types.repeating_shape
+      ; occurrences : int
+      ; unit_bytes : int
+      ; detail : string
+      }
   | RateLimit of
       { provider : string
       ; retry_after : float option
@@ -160,6 +167,15 @@ let to_string = function
   | UnknownVariant r -> Printf.sprintf "Unknown %s variant: %s" r.type_name r.value
   | ProviderUnavailable r ->
     Printf.sprintf "Provider '%s' unavailable: %s" r.provider r.detail
+  | RepeatingGeneration r ->
+    Printf.sprintf
+      "Provider '%s' model repeated itself (%s: one %d-byte unit %d times); the stream \
+       was ended and the next candidate must be a different model: %s"
+      r.provider
+      (Types.repeating_shape_to_string r.shape)
+      r.unit_bytes
+      r.occurrences
+      r.detail
   | EmptyCompletion r ->
     Printf.sprintf
       "Provider '%s' unavailable: empty completion (stop_reason=%s): %s"
@@ -355,6 +371,10 @@ let of_provider_failure ?provider kind message =
           other unavailability producers matches this variant instead of a
           rendered prefix. *)
        EmptyCompletion { provider; stop_reason; detail = message })
+  | Http_client.Repeating_generation { shape; occurrences; unit_bytes } ->
+    (* The stream ended because the model repeated itself. Kept typed so a
+       lane walk can rotate away from the model, not merely the provider. *)
+    RepeatingGeneration { provider; shape; occurrences; unit_bytes; detail = message }
   | Http_client.Context_overflow { limit } ->
     (* agent-core boundary: same agent-core-boundary flattening as the Empty_overflow arm above —
        the typed overflow value is rendered via [Retry.error_message] into
@@ -376,7 +396,7 @@ let of_provider_failure ?provider kind message =
 
 let of_http_error ?provider = function
   | Http_client.HttpError { code; body; retry_after_header } ->
-    Retry.classify_error ~retry_after_header ~status:code ~body
+    Retry.classify_refusal ~retry_after_header ~status:code ~body
     |> of_retry_api_error ?provider
   | Http_client.NetworkError { message; kind } ->
     NetworkError
@@ -412,6 +432,7 @@ let is_retryable = function
   | UnknownVariant _
   | ProviderUnavailable _
   | EmptyCompletion _
+  | RepeatingGeneration _
   | HardQuota _
   | AuthError _
   | AuthorizationError _

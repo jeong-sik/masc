@@ -38,6 +38,7 @@ let invalid_request_reason_to_wire = function
   | Agent_core.Retry.Request_body_too_large _ -> "request_body_too_large"
   | Agent_core.Retry.Request_body_refused_by_provider _ ->
     "request_body_refused_by_provider"
+  | Agent_core.Retry.Refusal_body_not_received -> "refusal_body_not_received"
   | Agent_core.Retry.Unknown_invalid_request -> "unknown_invalid_request"
 ;;
 
@@ -167,6 +168,7 @@ let core_api_error_fields = function
          [ "status", `Int status ]
        | Agent_core.Retry.Json_parse_error
        | Agent_core.Retry.Attempt_rejected
+       | Agent_core.Retry.Refusal_body_not_received
        | Agent_core.Retry.Unknown_invalid_request -> [])
   | Agent_core.Retry.NotFound { message } ->
     [ "variant", `String "not_found"; "message", `String message ]
@@ -388,6 +390,15 @@ let core_provider_error_fields error =
     ; "message", `String message
     ; "provider", `String provider
     ; "stop_reason", `String (Llm_provider.Types.stop_reason_to_string stop_reason)
+    ; "detail", `String detail
+    ]
+  | Llm_provider.Error.RepeatingGeneration { provider; shape; occurrences; unit_bytes; detail } ->
+    [ "variant", `String "repeating_generation"
+    ; "message", `String message
+    ; "provider", `String provider
+    ; "shape", `String (Llm_provider.Types.repeating_shape_to_string shape)
+    ; "occurrences", `Int occurrences
+    ; "unit_bytes", `Int unit_bytes
     ; "detail", `String detail
     ]
   | Llm_provider.Error.RateLimit { provider; retry_after; detail } ->

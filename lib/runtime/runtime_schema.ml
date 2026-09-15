@@ -211,6 +211,13 @@ type model_spec =
     (** [min_p] — per-model minimum probability sampling value forwarded through
         the materialized AGENT_CORE [Provider_config]. [None] leaves the caller/AGENT_CORE
         profile unchanged. *)
+  ; reasoning_uncontrolled : bool
+    (** [reasoning-uncontrolled] — this lane sends no thinking control at all
+        and takes whatever the provider does on its own. Only a wire that
+        enables reasoning without a control needs it said: there, a row that
+        declares neither an effort nor this is refused, because silence and a
+        deliberate provider default make the same request and nothing else
+        tells them apart. Default [false]. *)
   ; reasoning_effort : Llm_provider.Reasoning_effort.t option
        [@equal fun a b -> a = b]
     (* Reasoning_effort.t is a plain variant with no derived [equal];

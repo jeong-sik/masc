@@ -190,15 +190,29 @@ let with_connection ~env ~timeout ~url use =
           incr sequence;let id= !sequence in
           let reply,resolve=Eio.Promise.create () in Hashtbl.add pending id resolve;
           Endpoint.Wsd.send_text wsd (Yojson.Safe.to_string (obj ["id",`Int id;"method",str method_;"params",params]));
-          (try Eio.Time.with_timeout_exn clock timeout (fun ()->Eio.Promise.await reply)
-           with Eio.Time.Timeout->
+          (* A reply that arrived as the deadline passed is the reply: the
+             connection is ended only for a command that got none. *)
+          (match
+             Watched_work.run
+               ~watcher:(fun ()->Eio.Time.sleep clock timeout; Error `Deadline_exceeded)
+               (fun ()->Ok (Eio.Promise.await reply))
+           with
+           | Ok reply->reply
+           | Error `Deadline_exceeded->
              disconnect "BiDi transport deadline exceeded";
              Error "BiDi transport deadline exceeded") in
       (* The host owns the whole command deadline. A cancelled command ends this
          connection instead of admitting another write behind an unknown one. *)
       Ok (create ~command) in
     try
-      let peer=match Eio.Time.with_timeout_exn clock timeout connect with
+      (* A connection established as the deadline passed is the connection. *)
+      let peer=match
+          Watched_work.run
+            ~watcher:(fun ()->
+              Eio.Time.sleep clock timeout;
+              Error "BiDi connection or command deadline exceeded")
+            connect
+        with
         | Ok peer->peer | Error reason->raise (Peer_finished (Error reason)) in
       (* ws-direct forks its reader/writer on [sw]. Returning normally would
          wait for that open socket before release hooks run. Exit the scope

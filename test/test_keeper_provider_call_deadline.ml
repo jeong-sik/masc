@@ -314,6 +314,30 @@ let test_resumed_provider_retains_later_stream_progress () =
        ~sample:(sample ~last_progress_at:(now -. 1.0) ~active_tool_count:0 ()))
 ;;
 
+(* {1 preempt_pre_first_token -- the first-token-wait preemption verdict (#36203/RFC-0441)} *)
+
+let test_pre_first_token_with_a_person_queued_preempts () =
+  check bool "no first event yet and a person waits -> preempt" true
+    (Try_provider.preempt_pre_first_token ~first_event_seen:false ~person_queued:true)
+;;
+
+let test_first_event_seen_never_preempts () =
+  (* Once the provider has produced anything, the tool-boundary yield owns the
+     handover; preemption must not fire even with a person queued. *)
+  check bool "first event seen and a person waits -> do not preempt" false
+    (Try_provider.preempt_pre_first_token ~first_event_seen:true ~person_queued:true)
+;;
+
+let test_no_one_queued_never_preempts () =
+  check bool "pre-first-token but no one queued -> do not preempt" false
+    (Try_provider.preempt_pre_first_token ~first_event_seen:false ~person_queued:false)
+;;
+
+let test_first_event_seen_and_no_one_queued_never_preempts () =
+  check bool "first event seen and no one queued -> do not preempt" false
+    (Try_provider.preempt_pre_first_token ~first_event_seen:true ~person_queued:false)
+;;
+
 let () =
   run
     "keeper_provider_call_deadline"
@@ -364,6 +388,16 @@ let () =
             test_wall_clock_timeout_joins_existing_provider_timeout_observation
         ; test_case "a non-timeout error is not misclassified" `Quick
             test_non_timeout_error_does_not_trip_the_observation_channel
+        ] )
+    ; ( "preempt_pre_first_token"
+      , [ test_case "a person queued pre-first-token preempts" `Quick
+            test_pre_first_token_with_a_person_queued_preempts
+        ; test_case "first event seen never preempts" `Quick
+            test_first_event_seen_never_preempts
+        ; test_case "no one queued never preempts" `Quick
+            test_no_one_queued_never_preempts
+        ; test_case "first event seen and no one queued never preempts" `Quick
+            test_first_event_seen_and_no_one_queued_never_preempts
         ] )
     ]
 ;;

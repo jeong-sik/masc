@@ -97,6 +97,14 @@ slots = ["glm-coding.glm-5-3", "ollama_cloud.ollama-cloud-deepseek-v4-flash"]
 # capabilities = []                   # reserved Phase 2 markers: "kvm",
 #                                     # "firecracker"; unknown values warn-and-ignore
 
+# Every model row bound here carries `reasoning-uncontrolled = true`.
+# ollama.com /v1 turns reasoning on when a request carries no control, so a
+# reasoning-capable row that declares neither an effort nor this key is
+# refused before dispatch (#36412). These rows sent no control before that
+# refusal existed and their answers were the provider's own default; the key
+# says that on purpose rather than picking an effort none of them was probed
+# with. A row that should run at a named depth declares `reasoning-effort`
+# instead -- the two together are refused when runtime.toml is read.
 [providers.ollama_cloud]
 display-name = "Ollama Cloud"
 protocol = "openai-compatible-http"
@@ -459,6 +467,7 @@ supports-response-format-json = true
 supports-structured-output = false
 
 [models.deepseek-v4-flash]
+reasoning-uncontrolled = true
 # Context comes from each provider's AGENT_CORE catalog binding.
 api-name = "deepseek-v4-flash"
 tools-support = true
@@ -658,6 +667,7 @@ supports-response-format-json = true
 # api-name originally verified 2026-06-18 against
 # https://ollama.com/v1/chat/completions.
 [models.minimax-m3]
+reasoning-uncontrolled = true
 api-name = "minimax-m3"
 tools-support = true
 thinking-support = true
@@ -682,6 +692,7 @@ supports-multimodal-inputs = true
 # Official Kimi docs checked 2026-07-04: kimi-k2.7-code is the latest
 # code-focused thinking model; keep the short Kimi seed on the current model.
 [models.kimi-k2-7-code]
+reasoning-uncontrolled = true
 api-name = "kimi-k2.7-code"
 max-context = 262144
 tools-support = true
@@ -706,6 +717,7 @@ supports-multimodal-inputs = true
 # Runtime model keys are TOML-safe slugs; api-name preserves the official Cloud model id.
 
 [models.ollama-cloud-deepseek-v4-flash]
+reasoning-uncontrolled = true
 api-name = "deepseek-v4-flash"
 max-context = 1048576
 tools-support = true
@@ -743,6 +755,7 @@ supports-multimodal-inputs = false
 max-tokens = 16384
 
 [models.ollama-cloud-deepseek-v4-pro]
+reasoning-uncontrolled = true
 api-name = "deepseek-v4-pro"
 tools-support = true
 thinking-support = true
@@ -757,6 +770,7 @@ supports-multimodal-inputs = false
 [ollama_cloud.ollama-cloud-deepseek-v4-pro]
 
 [models.ollama-cloud-gemma4-31b]
+reasoning-uncontrolled = true
 api-name = "gemma4:31b"
 max-context = 262144
 tools-support = true
@@ -776,6 +790,7 @@ supports-multimodal-inputs = true
 max-request-body-bytes = 20971520
 
 [models.ollama-cloud-glm-5-1]
+reasoning-uncontrolled = true
 api-name = "glm-5.1"
 max-context = 202752
 tools-support = true
@@ -791,6 +806,7 @@ supports-multimodal-inputs = false
 [ollama_cloud.ollama-cloud-glm-5-1]
 
 [models.ollama-cloud-glm-5-2]
+reasoning-uncontrolled = true
 api-name = "glm-5.2"
 tools-support = true
 thinking-support = true
@@ -810,6 +826,7 @@ supports-multimodal-inputs = false
 # ollama_cloud wire and carries that wire's control truth (see the "none"
 # note the sibling rows share).
 [models.ollama-cloud-glm-5-3]
+reasoning-uncontrolled = true
 api-name = "glm-5.3"
 max-context = 1048576
 tools-support = true
@@ -834,6 +851,7 @@ supports-multimodal-inputs = false
 # is convention rather than measurement here — it stays a generic document flag
 # with no per-provider file-input contract behind it (#27908).
 [models.ollama-cloud-glm-5-3-flash]
+reasoning-uncontrolled = true
 api-name = "glm-5.3-flash"
 max-context = 1048576
 tools-support = true
@@ -859,6 +877,7 @@ supports-multimodal-inputs = true
 wizard-default = true
 
 [models.ollama-cloud-gpt-oss-20b]
+reasoning-uncontrolled = true
 api-name = "gpt-oss:20b"
 max-context = 131072
 tools-support = true
@@ -874,6 +893,7 @@ supports-multimodal-inputs = false
 [ollama_cloud.ollama-cloud-gpt-oss-20b]
 
 [models.ollama-cloud-gpt-oss-120b]
+reasoning-uncontrolled = true
 api-name = "gpt-oss:120b"
 max-context = 131072
 tools-support = true
@@ -889,6 +909,7 @@ supports-multimodal-inputs = false
 [ollama_cloud.ollama-cloud-gpt-oss-120b]
 
 [models.ollama-cloud-kimi-k2-6]
+reasoning-uncontrolled = true
 api-name = "kimi-k2.6"
 max-context = 262144
 tools-support = true
@@ -904,6 +925,7 @@ supports-multimodal-inputs = true
 [ollama_cloud.ollama-cloud-kimi-k2-6]
 
 [models.ollama-cloud-kimi-k2-7-code]
+reasoning-uncontrolled = true
 api-name = "kimi-k2.7-code"
 max-context = 262144
 tools-support = true
@@ -924,6 +946,7 @@ supports-multimodal-inputs = true
 # kimi-k3 under a separate subscription, and an unqualified row would make the
 # catalog join ambiguous.
 [models.ollama-cloud-kimi-k3]
+reasoning-uncontrolled = true
 api-name = "kimi-k3"
 max-context = 1048576
 tools-support = true
@@ -939,6 +962,7 @@ supports-multimodal-inputs = true
 [ollama_cloud.ollama-cloud-kimi-k3]
 
 [models.ollama-cloud-minimax-m2-7]
+reasoning-uncontrolled = true
 api-name = "minimax-m2.7"
 max-context = 196608
 tools-support = true
@@ -954,6 +978,7 @@ supports-multimodal-inputs = false
 [ollama_cloud.ollama-cloud-minimax-m2-7]
 
 [models.ollama-cloud-minimax-m3]
+reasoning-uncontrolled = true
 api-name = "minimax-m3"
 tools-support = true
 thinking-support = true
@@ -986,6 +1011,7 @@ supports-multimodal-inputs = true
 [ollama_cloud.ollama-cloud-mistral-large-3-675b]
 
 [models.ollama-cloud-nemotron-3-nano-30b]
+reasoning-uncontrolled = true
 api-name = "nemotron-3-nano:30b"
 max-context = 262144
 tools-support = true
@@ -1001,6 +1027,7 @@ supports-multimodal-inputs = false
 [ollama_cloud.ollama-cloud-nemotron-3-nano-30b]
 
 [models.ollama-cloud-nemotron-3-super]
+reasoning-uncontrolled = true
 api-name = "nemotron-3-super"
 max-context = 262144
 tools-support = true
@@ -1016,6 +1043,7 @@ supports-multimodal-inputs = false
 [ollama_cloud.ollama-cloud-nemotron-3-super]
 
 [models.ollama-cloud-nemotron-3-ultra]
+reasoning-uncontrolled = true
 api-name = "nemotron-3-ultra"
 max-context = 262144
 tools-support = true
@@ -1031,6 +1059,7 @@ supports-multimodal-inputs = false
 [ollama_cloud.ollama-cloud-nemotron-3-ultra]
 
 [models.ollama-cloud-qwen3-5-397b]
+reasoning-uncontrolled = true
 api-name = "qwen3.5:397b"
 max-context = 262144
 tools-support = true

@@ -115,7 +115,8 @@ let transport_of_sync sync_response =
 ;;
 
 let string_of_http_error = function
-  | Http_client.HttpError { code; body; _ } -> Printf.sprintf "HTTP %d: %s" code body
+  | Http_client.HttpError { code; body; _ } ->
+    Printf.sprintf "HTTP %d: %s" code (Http_client.refusal_body_text body)
   | NetworkError { message; _ } -> message
   | TimeoutError { message; _ } -> message
   | AcceptRejected { reason } -> reason
@@ -356,7 +357,7 @@ let test_complete_transport_failure_is_one_shot () =
       { Llm_transport.response =
           Error
             (Http_client.HttpError
-               { code = 500; body = "temporary"; retry_after_header = None })
+               { code = 500; body = Http_client.Received "temporary"; retry_after_header = None })
       ; latency_ms = Some 3
       })
   in
@@ -370,7 +371,7 @@ let test_complete_transport_failure_is_one_shot () =
        ~metrics
        ()
    with
-   | Error (Http_client.HttpError { code = 500; body = "temporary"; _ }) -> ()
+   | Error (Http_client.HttpError { code = 500; body = Http_client.Received "temporary"; _ }) -> ()
    | Error err -> failf "unexpected typed error: %s" (string_of_http_error err)
    | Ok _ -> fail "expected provider failure");
   check int "one provider attempt" 1 !attempts;

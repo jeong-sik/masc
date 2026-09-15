@@ -9,7 +9,8 @@ let capacity_backpressure_source_to_failure_scope = function
     Llm_provider.Http_client.Failure_scope_unknown
 
 let http_error ~code ~body =
-  Llm_provider.Http_client.HttpError { code; body; retry_after_header = None }
+  Llm_provider.Http_client.HttpError
+    { code; body = Llm_provider.Http_client.Received body; retry_after_header = None }
 
 let provider_error_to_http_error = function
   | Llm_provider.Error.RateLimit { retry_after; detail; _ }
@@ -60,6 +61,11 @@ let provider_error_to_http_error = function
   | Llm_provider.Error.ProviderWireError { format; kind; detail; _ } ->
     Llm_provider.Http_client.ProviderFailure
       { kind = Llm_provider.Http_client.Provider_wire_error { format; kind }
+      ; message = detail
+      }
+  | Llm_provider.Error.RepeatingGeneration { shape; occurrences; unit_bytes; detail; _ } ->
+    Llm_provider.Http_client.ProviderFailure
+      { kind = Llm_provider.Http_client.Repeating_generation { shape; occurrences; unit_bytes }
       ; message = detail
       }
   | Llm_provider.Error.ProviderReportedError { error_type; detail; _ } ->
@@ -137,7 +143,10 @@ let core_error_to_runtime_outcome err =
               carrier on [HttpError], so it re-enters here rather than being
               dropped. *)
            Llm_provider.Http_client.HttpError
-             { code = 429; body = message; retry_after_header = retry_after }
+             { code = 429
+    ; body = Llm_provider.Http_client.Received message
+    ; retry_after_header = retry_after
+    }
          | PaymentRequired { message } ->
            http_error ~code:402 ~body:message
          | NotFound { message } ->

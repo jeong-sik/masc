@@ -107,7 +107,10 @@ type invocation =
 let detail_of_http_error (err : Llm_provider.Http_client.http_error) : string =
   match err with
   | Llm_provider.Http_client.HttpError { code; body; _ } ->
-    Printf.sprintf "HTTP %d: %s" code (String.trim body)
+    Printf.sprintf
+      "HTTP %d: %s"
+      code
+      (String.trim (Llm_provider.Http_client.refusal_body_text body))
   | Llm_provider.Http_client.NetworkError { message; _ } ->
     Printf.sprintf "network: %s" message
   | Llm_provider.Http_client.TimeoutError { message; _ } ->

@@ -19,14 +19,18 @@ end
 module Make (E : Error) : sig
   exception Idle_timeout of float
 
-  val with_optional_timeout
+  val with_idle_timeout
     :  _ Eio.Time.clock
-    -> float option
+    -> float
     -> (unit -> 'a)
     -> 'a
-  (** Install the adapter's optional idle deadline. A deadline owned by this
-      wrapper raises [Idle_timeout seconds]; an [Eio.Time.Timeout] raised by
-      [f] keeps its original identity and remains caller-owned control flow. *)
+  (** Run [f] under the adapter's idle deadline, in seconds: a lane's
+      per-phase window capped by the turn's wall-clock ceiling, or that
+      ceiling's remainder where the phase declares none, so always a number.
+      Raises [Idle_timeout seconds] when [f] has not finished by then; a
+      value [f] finished as the deadline passed is returned. An
+      [Eio.Time.Timeout] raised by [f] keeps its original identity and
+      remains caller-owned control flow. *)
 
   val validate_unique_object_keys :
     stage:string -> path:string -> Yojson.Safe.t -> (unit, E.t) result

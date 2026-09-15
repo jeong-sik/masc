@@ -529,6 +529,118 @@ let test_one_deadline_over_the_permit_wait_and_the_work () =
   Eio.Promise.resolve resolve_release ()
 ;;
 
+(* What a bounded wait writes to its caller's cell: nothing when the permit
+   is granted at once; [Waiting_for_permit] while it waits, then
+   [Wait_settled_at] the instant the wait ended, however it ended -- granted
+   late, expired, or cancelled from outside. A caller stands its watchdog
+   down on the first and counts again from the second, so the second must
+   come on every path, and before the work runs. *)
+let test_a_bounded_wait_writes_its_callers_cell_on_every_path () =
+  Eio_main.run
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run
+  @@ fun sw ->
+  let config =
+    make_config ~base_url:"http://wait-observer.test:1" ~max_concurrent_requests:1 ()
+  in
+  let wait = Atomic.make Provider_admission.Before_any_wait in
+  let deadline_at () = Eio.Time.now clock +. call_deadline_s in
+  let describe = function
+    | Provider_admission.Before_any_wait -> "Before_any_wait"
+    | Provider_admission.Waiting_for_permit -> "Waiting_for_permit"
+    | Provider_admission.Wait_settled_at at -> Printf.sprintf "Wait_settled_at %.3f" at
+  in
+  (* A settle instant: after the wait began, and not after now. *)
+  let check_settled ~label ~began_at =
+    match Atomic.get wait with
+    | Provider_admission.Wait_settled_at at ->
+      let now = Eio.Time.now clock in
+      if at < began_at || at > now
+      then failf "%s: settled at %.3f, outside [%.3f, %.3f]" label at began_at now
+    | other -> failf "%s: expected Wait_settled_at, got %s" label (describe other)
+  in
+  (* Granted at once: no wait, nothing written. *)
+  (match
+     Provider_admission.with_admission_until ~wait ~clock ~deadline_at:(deadline_at ()) ~config (fun () -> ())
+   with
+   | Ok () -> ()
+   | Error `Permit_wait_expired -> fail "a free permit expired");
+  check string "a permit granted at once is no wait" "Before_any_wait" (describe (Atomic.get wait));
+  (* Held until released before the deadline: waited, then granted. The
+     holder's release fiber reads the cell while the wait is on. *)
+  let release, resolve_release = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Provider_admission.with_admission ~config (fun () -> Eio.Promise.await release));
+  let seen_while_held = ref None in
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Time.sleep clock (call_deadline_s /. 4.0);
+    seen_while_held := Some (Atomic.get wait);
+    Eio.Promise.resolve resolve_release ());
+  let began_at = Eio.Time.now clock in
+  let seen_by_the_work = ref None in
+  (match
+     Provider_admission.with_admission_until
+       ~wait
+       ~clock
+       ~deadline_at:(deadline_at ())
+       ~config
+       (fun () -> seen_by_the_work := Some (Atomic.get wait))
+   with
+   | Ok () -> ()
+   | Error `Permit_wait_expired -> fail "a permit released before the deadline expired");
+  check
+    (option string)
+    "the cell said Waiting_for_permit while the permit was held"
+    (Some "Waiting_for_permit")
+    (Option.map describe !seen_while_held);
+  (match !seen_by_the_work with
+   | Some (Provider_admission.Wait_settled_at _) -> ()
+   | Some other -> failf "the work ran with the cell at %s, not settled" (describe other)
+   | None -> fail "the work did not run once the permit came");
+  check_settled ~label:"granted late" ~began_at;
+  (* Held past the deadline: waited, then expired. *)
+  Atomic.set wait Provider_admission.Before_any_wait;
+  let release, resolve_release = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Provider_admission.with_admission ~config (fun () -> Eio.Promise.await release));
+  let began_at = Eio.Time.now clock in
+  (match
+     Provider_admission.with_admission_until
+       ~wait
+       ~clock
+       ~deadline_at:(deadline_at ())
+       ~config
+       (fun () -> fail "the work ran while the permit was held")
+   with
+   | Error `Permit_wait_expired -> ()
+   | Ok () -> fail "a held permit was granted");
+  check_settled ~label:"expired" ~began_at;
+  (* Cancelled from outside while waiting: still settled. *)
+  Atomic.set wait Provider_admission.Before_any_wait;
+  let began_at = Eio.Time.now clock in
+  (match
+     Eio.Fiber.first
+       (fun () ->
+          match
+            Provider_admission.with_admission_until
+              ~wait
+              ~clock
+              ~deadline_at:(deadline_at ())
+              ~config
+              (fun () -> fail "the work ran while the permit was held")
+          with
+          | Ok () | Error `Permit_wait_expired -> `Wait_ended)
+       (fun () ->
+          Eio.Time.sleep clock (call_deadline_s /. 4.0);
+          `Cancelled_from_outside)
+   with
+   | `Cancelled_from_outside -> ()
+   | `Wait_ended -> fail "the wait ended before the outside cancel");
+  check_settled ~label:"cancelled from outside" ~began_at;
+  Eio.Promise.resolve resolve_release ()
+;;
+
 let () =
   run
     "provider_admission"
@@ -577,6 +689,10 @@ let () =
             "one deadline over the permit wait and the work"
             `Quick
             test_one_deadline_over_the_permit_wait_and_the_work
+        ; test_case
+            "a bounded wait writes its caller's cell on every path"
+            `Quick
+            test_a_bounded_wait_writes_its_callers_cell_on_every_path
         ] )
     ]
 ;;

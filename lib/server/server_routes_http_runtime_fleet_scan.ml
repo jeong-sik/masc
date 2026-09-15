@@ -760,9 +760,11 @@ let keeper_identity_drift_health_json config =
 
 let active_task_owner_fiber_scan_semantics =
   "reports keeper-shaped active task owners without executable keeper fibers; \
-   a keeper the boot path skips -- paused, or an activation mode that does \
-   not autoboot -- is reported separately as an advisory autoboot-excluded \
-   owner row naming the reason, never as a Keeper blocker; matching keeper \
+   an owner with an executable fiber is never reported; a keeper the boot \
+   path skips -- paused, or an activation mode that does not autoboot -- is \
+   reported separately as an advisory autoboot-excluded owner row naming the \
+   reason, never as a Keeper blocker; a keeper whose profile does not load is \
+   a scan error, and its tasks are neither rows nor blockers; matching keeper \
    rows can degrade fleet status; AwaitingVerification obligations are \
    reported separately as system-LLM completion-authority pending rows and \
    never as Keeper blockers; credentialed non-keeper client task owners are \
@@ -953,46 +955,51 @@ let keeper_agent_bindings ?profile_snapshot config =
   |> List.fold_left
        (fun scan name ->
          match Keeper_meta_store.read_meta config name with
-         | Ok (Some meta) -> (
-             (* A profile this binary cannot read says nothing about whether
-                the keeper should be running. The exclusion reason reads it as
-                "policy admits it" so the boot path reports the precise error
-                itself; here that would turn a broken profile into a fleet
-                blocker. The mode-only reader this replaced read it as
-                disabled and said nothing at all, which is how a fixture with
-                no [keeper.instructions] passed for a manual keeper. It is a
-                scan error naming the keeper, kept apart from meta read
-                errors: the meta was read, so the scan still knows this name
-                is a keeper and every other name is not. *)
-             match profile_defaults ?profile_snapshot config meta.name with
-             | Error error ->
-               {
-                 scan with
-                 profile_read_errors =
-                   (meta.name, Keeper_types_profile.keeper_toml_load_error_to_string error)
-                   :: scan.profile_read_errors;
-               }
-             | Ok (_ : Keeper_types_profile.keeper_profile_defaults) -> (
-               match
-                 Keeper_runtime.autoboot_exclusion_reason ?profile_snapshot config meta.name
-               with
-               | None ->
-                 {
-                   scan with
-                   admitted_keeper_names = meta.name :: scan.admitted_keeper_names;
-                 }
-               | Some reason ->
-                 {
-                   scan with
-                   excluded_keeper_reasons =
-                     (meta.name, reason) :: scan.excluded_keeper_reasons;
-                 }))
-         | Ok None -> scan
          | Error err ->
              {
                scan with
                binding_read_errors = (name, err) :: scan.binding_read_errors;
-             })
+             }
+         | Ok meta -> (
+             let keeper_name =
+               match meta with
+               | Some (meta : Keeper_meta_contract.keeper_meta) -> meta.name
+               | None -> name
+             in
+             (* One read of each, handed to the rule the boot path applies,
+                so the answer cannot come from a second read that raced a
+                rewrite. When the rule admits the keeper because its profile
+                does not load, this scan does not follow: admitting an
+                unreadable keeper here names it a fleet blocker. The
+                mode-only reader this replaced read the same keeper as
+                disabled and said nothing, which is how a fixture with no
+                [keeper.instructions] passed for a manual keeper. It is a
+                scan error naming the keeper, kept apart from meta read
+                errors: the meta was read, so the scan still knows every
+                other name is not a keeper. *)
+             let profile = profile_defaults ?profile_snapshot config keeper_name in
+             match
+               Keeper_runtime.autoboot_exclusion_reason_of_reads ~meta ~profile, profile
+             with
+             | Some reason, _ ->
+                 {
+                   scan with
+                   excluded_keeper_reasons =
+                     (keeper_name, reason) :: scan.excluded_keeper_reasons;
+                 }
+             | None, Error error ->
+                 {
+                   scan with
+                   profile_read_errors =
+                     ( keeper_name,
+                       Keeper_types_profile.keeper_toml_load_error_to_string error )
+                     :: scan.profile_read_errors;
+                 }
+             | None, Ok (_ : Keeper_types_profile.keeper_profile_defaults) ->
+                 {
+                   scan with
+                   admitted_keeper_names = keeper_name :: scan.admitted_keeper_names;
+                 }))
        empty_keeper_agent_binding_scan
   |> fun scan ->
   {
@@ -1063,10 +1070,10 @@ let active_task_owner_fiber_scan ?profile_snapshot config ~executable_names =
                  , excluded_rows )
              | Some (Keeper_task_owner { assignee; task_status }) ->
                  let keeper_names = keeper_names_for_agent agent_bindings assignee in
-                 if
-                   List.exists
-                     (fun keeper_name -> String_set.mem keeper_name executable_set)
-                     keeper_names
+                 (* A live fiber answers the question whatever policy says: a
+                    manual keeper a message started is doing the work it
+                    holds, and a row saying it waits would be false. *)
+                 if String_set.mem assignee executable_set
                  then (pending_rows, blocking_rows, non_keeper_rows, excluded_rows)
                  else (
                    match keeper_names with
@@ -1081,17 +1088,10 @@ let active_task_owner_fiber_scan ?profile_snapshot config ~executable_names =
                          }
                          :: non_keeper_rows
                        , excluded_rows )
-                   | [] when List.mem_assoc assignee binding_scan.profile_read_errors ->
-                       (* Whether the boot path would run this keeper is not
-                          known while its profile is unreadable. The error is
-                          reported on its own. *)
-                       (pending_rows, blocking_rows, non_keeper_rows, excluded_rows)
-                   | [] when meta_read_errors <> [] ->
-                       (* The scan could not read every keeper's meta, so
-                          "no keeper by this name" is not a fact it has. The
-                          errors are reported on their own. *)
-                       (pending_rows, blocking_rows, non_keeper_rows, excluded_rows)
                    | [] -> (
+                       (* The reason is a fact about this keeper, read from
+                          its own meta; another keeper's unreadable file does
+                          not take it away. *)
                        match List.assoc_opt assignee binding_scan.excluded_keeper_reasons with
                        | Some reason ->
                            ( pending_rows
@@ -1104,6 +1104,17 @@ let active_task_owner_fiber_scan ?profile_snapshot config ~executable_names =
                                exclusion_reason = reason;
                              }
                              :: excluded_rows )
+                       | None
+                         when List.mem_assoc assignee binding_scan.profile_read_errors ->
+                           (* Whether the boot path would run this keeper is
+                              not known while its profile is unreadable. The
+                              error is reported on its own. *)
+                           (pending_rows, blocking_rows, non_keeper_rows, excluded_rows)
+                       | None when meta_read_errors <> [] ->
+                           (* The scan could not read every keeper's meta, so
+                              "no keeper by this name" is not a fact it has.
+                              The errors are reported on their own. *)
+                           (pending_rows, blocking_rows, non_keeper_rows, excluded_rows)
                        | None ->
                            ( pending_rows
                            , {

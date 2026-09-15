@@ -103,6 +103,17 @@ val autoboot_exclusion_reason
     [profile_snapshot] is a caller's already-read profile table, for a reader
     answering for the whole fleet in one pass. *)
 
+val autoboot_exclusion_reason_of_reads
+  :  meta:Keeper_meta_contract.keeper_meta option
+  -> profile:(Keeper_types_profile.keeper_profile_defaults, 'e) result
+  -> autoboot_exclusion_reason option
+(** The rule {!autoboot_exclusion_reason} applies, over a meta and profile the
+    caller already read — for a reader that holds both and must not answer
+    from a second read of either. The meta decides first: a paused keeper is
+    [Paused] whatever the profile says. A profile that did not load gives
+    [None], so the boot path reaches the keeper and reports the error; a
+    reader for which that is the unsafe direction checks [profile] itself. *)
+
 val autoboot_excluded_keeper_reasons : Workspace.config -> autoboot_exclusion list
 (** Configured keepers skipped by autoboot with operator-facing reason labels. *)
 

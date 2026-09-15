@@ -138,40 +138,51 @@ type autoboot_exclusion = {
 (* [profile_snapshot] is the caller's already-read profile table, for a
    reader that answers for the whole fleet in one pass; without one each
    keeper's profile is loaded from its own file, which is what the boot
-   path does. Same answer either way. *)
+   path does. The two agree for a well-formed profile directory. They do
+   not for a file whose [keeper.name] differs from its file name, or a name
+   two files claim: the snapshot refuses both and the per-file load checks
+   neither. *)
 let profile_defaults_for ?profile_snapshot config name =
   match profile_snapshot with
   | Some snapshot -> Keeper_types_profile.snapshot_profile_defaults snapshot name
   | None -> profile_defaults_result_for_config config name
 ;;
 
+(* The rule, over reads the caller already made. The meta decides first: a
+   paused keeper is excluded whatever its profile says. A profile that does
+   not load admits the keeper, so the boot path reaches it and reports the
+   precise error; a reader for which admitting it is the unsafe direction
+   inspects [profile] itself when this answers [None]. *)
+let autoboot_exclusion_reason_of_reads
+    ~(meta : Keeper_meta_contract.keeper_meta option)
+    ~(profile : (Keeper_types_profile.keeper_profile_defaults, _) result) =
+  match meta, profile with
+  | Some { paused = true; _ }, _ -> Some Paused
+  | (Some _ | None), Error _ -> None
+  | Some meta, Ok defaults ->
+    (match defaults.activation_mode with
+     | Some (Keeper_activation_mode.On_demand | Autonomous) -> None
+     | Some Keeper_activation_mode.Manual -> Some Declarative_autoboot_disabled
+     | None ->
+       if Keeper_activation_mode.restore_owner meta.activation_mode
+       then None
+       else Some Autoboot_disabled)
+  | None, Ok defaults ->
+    (match defaults.activation_mode with
+     | Some Keeper_activation_mode.Manual -> Some Declarative_autoboot_disabled
+     | Some (Keeper_activation_mode.On_demand | Autonomous) | None -> None)
+;;
+
 let autoboot_exclusion_reason ?profile_snapshot config name =
-  let profile_defaults_result_for_config name =
-    profile_defaults_for ?profile_snapshot config name
-  in
   match
     read_meta_file_path
       ~ownership_root:config.Workspace.base_path
       (keeper_meta_path config name)
   with
-  | Ok (Some meta) ->
-    if meta.paused then Some Paused
-    else
-      (match profile_defaults_result_for_config name with
-       | Error _ -> None
-       | Ok defaults ->
-         (match defaults.activation_mode with
-          | Some (Keeper_activation_mode.On_demand | Autonomous) -> None
-          | Some Keeper_activation_mode.Manual -> Some Declarative_autoboot_disabled
-          | None ->
-            if Keeper_activation_mode.restore_owner meta.activation_mode then None else Some Autoboot_disabled))
-  | Ok None ->
-    (match profile_defaults_result_for_config name with
-     | Error _ -> None
-     | Ok defaults ->
-       (match defaults.activation_mode with
-        | Some Keeper_activation_mode.Manual -> Some Declarative_autoboot_disabled
-        | Some (Keeper_activation_mode.On_demand | Autonomous) | None -> None))
+  | Ok meta ->
+    autoboot_exclusion_reason_of_reads
+      ~meta
+      ~profile:(profile_defaults_for ?profile_snapshot config name)
   | Error _ ->
     (* Preserve existing behavior: corrupt/unreadable meta still enters the
        boot path so load_or_materialize_boot_meta can emit the precise error. *)

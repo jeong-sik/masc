@@ -2476,6 +2476,102 @@ let test_health_json_reports_unreadable_keeper_profile_as_scan_error () =
            |> to_list
            |> List.map (fun row -> row |> member "task_id" |> to_string))))
 
+(* Three neighbours whose answers each come from their own reads, found by
+   review before merge. omega is manual but a message started it: its fiber
+   is doing the work, so no row may say the work waits. pi is paused and its
+   profile does not load: the boot path reads the pause first, and so does
+   this scan -- one answer, [paused]. beta's meta is corrupt: that hides
+   whether some unknown name is a keeper, not the reason already read for
+   pi. *)
+let test_health_json_owner_rows_answer_from_each_keepers_own_reads () =
+  with_temp_dir "health-owner-rows-own-reads" (fun dir ->
+    let config_root = make_config_root dir in
+    let keepers_dir = Filename.concat config_root "keepers" in
+    Sys.remove (Filename.concat keepers_dir "example.toml");
+    write_config_root_keeper_toml ~autoboot_enabled:false config_root "omega";
+    write_file (Filename.concat keepers_dir "pi.toml")
+      "[keeper]\nactivation_mode = \"autonomous\"\n";
+    write_config_root_keeper_toml config_root "beta";
+    with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+    let previous_state = Server_auth.For_testing.snapshot_server_state () in
+    Config_dir_resolver.reset ();
+    Fun.protect
+      ~finally:(fun () ->
+        Server_auth.For_testing.restore_server_state @@ previous_state;
+        Config_dir_resolver.reset ())
+      (fun () ->
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
+        Server_auth.For_testing.restore_server_state @@ Some state;
+        let config = Mcp_server.workspace_config state in
+        write_keeper_meta_exn config
+          (make_keeper_meta ~name:"omega" ~trace_id:"trace-omega" ());
+        write_keeper_meta_exn config
+          (make_keeper_meta ~name:"pi" ~trace_id:"trace-pi" ~paused:true ());
+        write_file (Keeper_types_profile.keeper_meta_path config "beta")
+          "{ invalid keeper meta";
+        let in_progress ~id assignee =
+          make_task ~id ~title:id
+            ~status:
+              (Types.InProgress { assignee; started_at = "2026-06-26T00:00:01Z" })
+            ()
+        in
+        let tasks =
+          [ in_progress ~id:"task-omega-running" "omega"
+          ; in_progress ~id:"task-pi-paused" "pi"
+          ]
+        in
+        Workspace.write_backlog config
+          { Types.tasks; task_deletion_receipts = []; pending_completion_rejections = []; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
+        let phase_counts :
+            Server_routes_http_runtime_fleet_scan.keeper_phase_counts =
+          { running = 1; failing = 0; recovering = 0 }
+        in
+        let phase_snapshot :
+            Server_routes_http_runtime_fleet_scan.keeper_phase_snapshot =
+          {
+            counts = phase_counts;
+            running_names = [ "omega" ];
+            recovering_names = [];
+            configuration_blocked_names = [];
+            phase_values = [];
+            phase_details = [];
+          }
+        in
+        let execution_snapshot :
+            Server_routes_http_runtime_fleet_scan.keeper_execution_snapshot =
+          { owners = []; executable_names = [ "omega" ] }
+        in
+        let fleet_safety =
+          Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
+            ~bootable_names:[]
+            ~autoboot_scan:
+              Server_routes_http_runtime_fleet_scan.empty_autoboot_keeper_scan
+            ~phase_snapshot
+            ~execution_snapshot
+            ~phase_counts
+            ~paused_keepers_json:(`Assoc [ ("count", `Int 0) ])
+            ()
+        in
+        let open Yojson.Safe.Util in
+        let excluded =
+          fleet_safety |> member "excluded_keeper_active_task_owners" |> to_list
+          |> List.map (fun row ->
+                 ( row |> member "keeper_name" |> to_string,
+                   row |> member "exclusion_reason" |> to_string ))
+        in
+        Alcotest.(check (list (pair string string)))
+          "only pi's work waits, and it waits on the pause"
+          [ ("pi", "paused") ]
+          excluded;
+        Alcotest.(check (list string)) "beta's meta is the only scan error"
+          [ "beta" ]
+          (fleet_safety |> member "active_task_owner_scan_errors" |> to_list
+           |> List.map (fun row -> row |> member "source" |> to_string));
+        Alcotest.(check int) "and nobody is a blocker" 0
+          (fleet_safety
+           |> member "active_task_owner_without_executable_fiber_count"
+           |> to_int)))
+
 let test_health_json_preserves_active_task_owner_meta_read_error () =
   with_temp_dir "health-active-task-owner-meta-read-error" (fun dir ->
     let config_root = make_config_root dir in
@@ -5421,6 +5517,10 @@ let () =
             "health json reports an unreadable keeper profile as a scan error"
             `Quick
             test_health_json_reports_unreadable_keeper_profile_as_scan_error;
+          Alcotest.test_case
+            "health json owner rows answer from each keeper's own reads"
+            `Quick
+            test_health_json_owner_rows_answer_from_each_keepers_own_reads;
           Alcotest.test_case
             "health json keeps awaiting verification in system LLM lane"
             `Quick

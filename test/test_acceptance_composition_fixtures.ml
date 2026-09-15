@@ -92,7 +92,7 @@ let execution_error_detail = function
     Printf.sprintf
       "input of %s refused: %s"
       (Plan.Node_id.to_string node_id)
-      (Tool_result.message rejection)
+      (Tool_result.message (Masc.Tool_input_validation.rejection_result rejection))
   | Plan.Output_validation_failed { node_id; _ } ->
     "output of " ^ Plan.Node_id.to_string node_id ^ " does not match its schema"
   | Plan.Output_not_composable { node_id; _ } ->

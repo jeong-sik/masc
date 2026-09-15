@@ -5601,6 +5601,9 @@ value = { unsupported = true }
 |}
 ;;
 
+(* The post input reads the board list's [kind], a string, into
+   [mention_user_ids], an array. That value exists only after the read runs, so
+   the post is refused when its own node runs, after the write took effect. *)
 let post_effect_terminal_failure_composition =
   {|[[compositions]]
 name = "write-then-invalid-post"
@@ -5612,6 +5615,52 @@ tool = "keeper_memory_write"
 [compositions.nodes.input]
 kind = "literal"
 value = { title = "composition effect", content = "must execute exactly once" }
+
+[[compositions.nodes]]
+id = "read"
+tool = "masc_board_list"
+after = ["write"]
+[compositions.nodes.input]
+kind = "literal"
+value = {}
+
+[[compositions.nodes]]
+id = "post"
+tool = "keeper_surface_post"
+after = ["read"]
+[compositions.nodes.input]
+kind = "object"
+[[compositions.nodes.input.fields]]
+name = "surface"
+[compositions.nodes.input.fields.value]
+kind = "literal"
+value = "dashboard"
+[[compositions.nodes.input.fields]]
+name = "content"
+[compositions.nodes.input.fields.value]
+kind = "literal"
+value = "must not be reached"
+[[compositions.nodes.input.fields]]
+name = "mention_user_ids"
+[compositions.nodes.input.fields.value]
+kind = "output"
+node = "read"
+pointer = "/kind"
+|}
+;;
+
+(* The post input is a literal, so it is refused before the write runs. *)
+let literal_invalid_post_after_write_composition =
+  {|[[compositions]]
+name = "write-then-literal-invalid-post"
+execution = "inline"
+
+[[compositions.nodes]]
+id = "write"
+tool = "keeper_memory_write"
+[compositions.nodes.input]
+kind = "literal"
+value = { title = "composition effect", content = "must not execute" }
 
 [[compositions.nodes]]
 id = "post"
@@ -7131,9 +7180,20 @@ let test_terminal_composition_post_effect_failure_closes_official_client_loop ()
             let failure_payload = parse_json result.content in
             let cause = Yojson.Safe.Util.member "cause" failure_payload in
             check string
-              "invalid node is rejected before dispatch"
+              "invalid node is rejected before its dispatch"
               "plan_execution_failed"
               Yojson.Safe.Util.(member "kind" cause |> to_string);
+            check string
+              "the post is refused after the write and the read settled"
+              "post"
+              Yojson.Safe.Util.(member "node_id" cause |> to_string);
+            check (list string)
+              "write and read ran before the refusal"
+              [ "write"; "read" ]
+              Yojson.Safe.Util.
+                (member "settled" failure_payload
+                 |> to_list
+                 |> List.map (fun node -> member "node_id" node |> to_string));
             let plan_error = Yojson.Safe.Util.member "error" cause in
             check string
               "plan failure retains input validation kind"
@@ -7163,6 +7223,102 @@ let test_terminal_composition_post_effect_failure_closes_official_client_loop ()
             | Some (Masc.Keeper_official_client_host.Repeated_tool_call _)
             | None ->
               fail "official-client provider loop remained open after prior effect"))
+;;
+
+let test_terminal_composition_literal_input_failure_runs_no_node () =
+  with_exec_fixture ~require_sandbox:true "composition-literal-input-terminal-failure"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       (match
+          Masc.Keeper_gate_mode.set
+            config
+            ~actor:"composition-test"
+            Masc.Keeper_gate_mode.Always_allow
+        with
+        | Ok _ -> ()
+        | Error detail -> fail ("failed to allow composition effect: " ^ detail));
+       let skill_catalog =
+         skill_catalog_of_composition
+           ~name:"write-then-literal-invalid-post"
+           literal_invalid_post_after_write_composition
+       in
+       let bundle =
+         Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ~skill_catalog
+           ()
+       in
+       Fun.protect
+         ~finally:bundle.cleanup
+         (fun () ->
+            let terminal_error = ref None in
+            let projected =
+              match
+                Masc.Keeper_official_client_host.dynamic_tools
+                  ~accepts_image_input:true
+                  ~content_transport:Runtime_official_client_tool.Codex
+                  ~tool_approval:None
+                  ~pre_tool_rejects:(ref [])
+                  ~runtime_label:"test-official-client"
+                  ~keeper_name:meta.name
+                  ~turn_count:7
+                  ~tools:bundle.tools
+                  ~hooks:Agent_core.Hooks.empty
+                  ~event_bus:None
+                  ~context_injector:None
+                  ~context:(Some (Agent_core.Context.create_sync ()))
+                  ~terminal_effect_state:bundle.terminal_effect_state
+                  ~terminal_error
+                  ~raw_trace_run:None
+                  ()
+              with
+              | Ok tools -> tools
+              | Error error -> fail (Agent_core.Error.to_string error)
+            in
+            let tool =
+              projected
+              |> List.find_opt
+                   (fun (tool : Masc.Keeper_official_client_host.dynamic_tool) ->
+                      String.equal
+                        tool.name
+                        "keeper_compose_write-then-literal-invalid-post")
+              |> function
+              | Some tool -> tool
+              | None -> fail "terminal composition was not projected"
+            in
+            let result = tool.call ~call_id:"literal-input-composition" (`Assoc []) in
+            check bool "invalid literal input is visible" false result.success;
+            let failure_payload = parse_json result.content in
+            check string
+              "nothing ran, so nothing took effect"
+              "proven_pre_effect"
+              Yojson.Safe.Util.(member "effect_disposition" failure_payload |> to_string);
+            check int
+              "the write did not run"
+              0
+              Yojson.Safe.Util.(member "settled" failure_payload |> to_list |> List.length);
+            let cause = Yojson.Safe.Util.member "cause" failure_payload in
+            check string
+              "the post is named as the failed node"
+              "post"
+              Yojson.Safe.Util.(member "node_id" cause |> to_string);
+            check string
+              "plan failure retains input validation kind"
+              "input_validation_failed"
+              Yojson.Safe.Util.(member "error" cause |> member "kind" |> to_string);
+            (match bundle.terminal_effect_state () with
+             | Masc.Keeper_tools_agent_core.Terminal_effect_open -> ()
+             | Masc.Keeper_tools_agent_core.Deferred_tool_result
+             | Masc.Keeper_tools_agent_core.External_effect_deferred
+             | Masc.Keeper_tools_agent_core.Terminal_effect_completed _
+             | Masc.Keeper_tools_agent_core.Terminal_effect_failed _ ->
+               fail "a refusal before any node changed the terminal effect state");
+            check bool
+              "the provider turn stays open for a corrected call"
+              true
+              (Option.is_none result.abort_turn)))
 ;;
 
 let test_terminal_composition_unknown_write_failure_closes_official_client_loop () =
@@ -9326,6 +9482,8 @@ let () =
         (test_composition_read_failure_preserves_same_turn ~observe:true ~break_receipt:false ~terminal:false ~unknown_write:true);
       test_case "post-effect composition closes official-client loop" `Quick
         test_terminal_composition_post_effect_failure_closes_official_client_loop;
+      test_case "literal input failure runs no composition node" `Quick
+        test_terminal_composition_literal_input_failure_runs_no_node;
       test_case "unknown-effect composition closes official-client loop" `Quick
         test_terminal_composition_unknown_write_failure_closes_official_client_loop;
       test_case "write then unchanged read completes" `Quick

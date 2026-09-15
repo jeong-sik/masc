@@ -4824,13 +4824,22 @@ let render_lanes_overview (state : state) =
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
+  (* The two key hints this heading carried -- "o / A:Lane Add-ons" and
+     "a:append slot" -- were the key table's own words, byte for byte
+     ([b Navigate "o / A" "Lane Add-ons"] and [b Act "a" "append slot"] in
+     masc_tui_keys.ml), so the footer and the [?] sheet were already saying
+     them. They cost 32 cells of a row whose own fact is when the standalone
+     snapshot was read, and the frame cuts from the tail: at 80 columns the
+     row read "observed 16:4", at 72 "obser", and at 66 the fact was gone
+     while both copies stood. What the footer may drop and the sheet still
+     answers does not get to push a reading off the row that carries it. *)
   let standalone_heading =
     match state.standalone_lanes with
-    | None -> "  Standalone LLM lanes · o / A:Lane Add-ons · a:append slot"
+    | None -> "  Standalone LLM lanes"
     | Some snapshot ->
         let observed = Unix.localtime snapshot.sls_observed_at_unix in
         Printf.sprintf
-          "  Standalone LLM lanes · o / A:Lane Add-ons · a:append slot · observed %02d:%02d:%02d"
+          "  Standalone LLM lanes · observed %02d:%02d:%02d"
           observed.Unix.tm_hour observed.Unix.tm_min observed.Unix.tm_sec
   in
   box_line_styled buf cols ~style:(Ansi.bold ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)) standalone_heading;

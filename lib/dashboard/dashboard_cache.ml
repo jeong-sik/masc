@@ -774,19 +774,32 @@ let offloaded_payload ~preparation compute () =
   Executor_pool_ref.submit_or_inline (fun () ->
     payload_of_json ~preparation ~origin:Computed (compute ()))
 
+(* One compute under the caller's window. A compute that finished as the
+   window closed is the answer: [Eio.Time.with_timeout] kept whichever arm
+   finished first and would report a payload it already had as a timeout --
+   and this timeout is not a one-off, it opens the key's circuit, so the
+   next reads answer "circuit_open" without computing at all. *)
+let compute_under_timeout ~clock ~timeout_sec ~key f =
+  match
+    Watched_work.run
+      ~watcher:(fun () ->
+        Eio.Time.sleep clock timeout_sec;
+        Error `Timeout)
+      (fun () -> Ok (f ()))
+  with
+  | Ok value -> value
+  | Error `Timeout ->
+    Log.Dashboard.warn "cache compute timeout: %s (%.0fs)" key timeout_sec;
+    raise (Compute_timeout (key, false))
+;;
+
 let get_or_compute_payload_with_timeout ?(preparation = Identity_only)
     key ~ttl ~clock ~timeout_sec compute =
   if Option.is_none (peek key) && timeout_circuit_is_open key then
     payload_of_json ~origin:Timeout (timeout_error_json ~timeout_kind:"circuit_open" key timeout_sec)
   else
     let compute = offloaded_payload ~preparation compute in
-    let with_timeout f =
-      match Eio.Time.with_timeout clock timeout_sec (fun () -> Ok (f ())) with
-      | Ok value -> value
-      | Error `Timeout ->
-          Log.Dashboard.warn "cache compute timeout: %s (%.0fs)" key timeout_sec;
-          raise (Compute_timeout (key, false))
-    in
+    let with_timeout f = compute_under_timeout ~clock ~timeout_sec ~key f in
     try
       let entry =
         if Eio_guard.is_ready () then
@@ -893,6 +906,8 @@ module For_testing = struct
     Fun.protect
       ~finally:(fun () -> Atomic.set payload_prepared_hook previous)
       f
+
+  let compute_under_timeout = compute_under_timeout
 end
 
 (* Slot kind string used in [stats ()] entry list and tests.  Kept as a

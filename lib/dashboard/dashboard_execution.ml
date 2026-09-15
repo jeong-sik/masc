@@ -902,9 +902,14 @@ let json ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
     (* Guard: abort render if it exceeds render_timeout_s.
        PG connection failures during render can block fibers for hours
        (observed: 11,018s render on 2026-03-21). *)
+    (* A render that finished as the window closed is the render;
+       [Eio.Time.with_timeout] would have replaced it with the error page. *)
     (match
-       Eio.Time.with_timeout clock render_timeout_s (fun () ->
-         Ok (json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr ()))
+       Watched_work.run
+         ~watcher:(fun () ->
+           Eio.Time.sleep clock render_timeout_s;
+           Error `Timeout)
+         (fun () -> Ok (json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr ()))
      with
      | Ok result -> result
      | Error `Timeout ->

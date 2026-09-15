@@ -3854,10 +3854,7 @@ let test_degraded_assignment_isolation_preserves_routing_and_recovers () =
   let catalog_row id = Printf.sprintf
     "[[models]]\nid_prefix = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 8192\nmax_output_tokens = 1024\nsupports_tools = true\nsupports_native_streaming = false\n" id in
   let catalog = catalog_row "good" in
-  let runtime_toml = Printf.sprintf {|[turn]
-context_window_tokens = 8192
-
-[runtime]
+  let runtime_toml = Printf.sprintf {|[runtime]
 default = "fixture.good"
 [runtime.assignments]
 affected = "fixture.missing"
@@ -4376,14 +4373,11 @@ max_context_tokens = 8192
 max_output_tokens = 1024
 supports_tools = true
 |} in
-      {|[turn]
+      let content candidates = Printf.sprintf {|[turn]
 context_window_tokens = 8192
 
 [runtime]
-default ="fixture.alpha"
-[runtime.lanes.primary]
-candidates = %s
- "fixture.alpha"
+default = "fixture.alpha"
 [runtime.lanes.primary]
 candidates = %s
 [providers.fixture]

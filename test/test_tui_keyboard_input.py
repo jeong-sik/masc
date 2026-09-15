@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import argparse
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stdout
+from dataclasses import dataclass
+from functools import partial
 import base64
 import errno
 import fcntl
@@ -1690,6 +1693,51 @@ def path_without_masc(path: str) -> str:
     )
 
 
+@dataclass(frozen=True)
+class RunEveryScenario:
+    """Every scenario a family calls runs. A suite importing this module gets this."""
+
+
+@dataclass(frozen=True)
+class RunNamedScenarios:
+    """Only scenarios whose description is in ``names`` run; each one that does is kept in ``ran``."""
+
+    names: frozenset[str]
+    ran: list[str]
+
+
+@dataclass(frozen=True)
+class CollectScenarioNames:
+    """No terminal is opened; each description a family would run is kept in ``names``."""
+
+    names: list[str]
+
+
+ScenarioSelection = RunEveryScenario | RunNamedScenarios | CollectScenarioNames
+
+# main() sets this once from the command line, before a family runs. The
+# choice lives here and not in a parameter because a family reaches this
+# runner through nested helpers, and the focused suites that import this module
+# call the runner directly; neither should have to thread a selection through.
+scenario_selection: ScenarioSelection = RunEveryScenario()
+
+
+def tui_executable(path: str) -> str:
+    """[path] made absolute, once it is known to name an executable file.
+
+    The launcher shell reports a missing file and stops itself, as it does
+    after any exit. Without this check the harness sees a live process and
+    waits 30s for "MASC Overview" on a screen that is never drawn, and the
+    real cause sits at the end of the timeout message.
+    """
+    executable = os.path.abspath(path)
+    if not (os.path.isfile(executable) and os.access(executable, os.X_OK)):
+        raise AssertionError(
+            f"no executable TUI at {executable} (build it first: dune build bin/masc_tui.exe)"
+        )
+    return executable
+
+
 def run_terminal_scenario(
     executable: str,
     *,
@@ -1705,6 +1753,17 @@ def run_terminal_scenario(
     extra_env: dict[str, str] | None = None,
     conflicting_env_base_path: bool = False,
 ) -> None:
+    match scenario_selection:
+        case RunEveryScenario():
+            pass
+        case RunNamedScenarios(names=names, ran=ran):
+            if description not in names:
+                return
+            ran.append(description)
+        case CollectScenarioNames(names=collected):
+            collected.append(description)
+            return
+    executable = tui_executable(executable)
     master_fd, slave_fd = os.openpty()
     output = bytearray()
     process: subprocess.Popen[bytes] | None = None
@@ -16940,173 +16999,201 @@ def run_fusion_history_regression(executable: str) -> None:
     )
 
 
+@dataclass(frozen=True)
+class ScenarioFamily:
+    """Scenarios run together under one name: a dune lane, or the default walk."""
+
+    name: str
+    label: str
+    runs: tuple[Callable[[str], None], ...]
+
+
+KEYBOARD_FAMILY = ScenarioFamily(
+    "keyboard", "keyboard PTY regression", (run_keyboard_regression,)
+)
+
+# A dune rule for this file names one of these after the binary; with no name
+# the keyboard walk runs.
+SCENARIO_FAMILIES: tuple[ScenarioFamily, ...] = (
+    KEYBOARD_FAMILY,
+    ScenarioFamily("browser-scene", "Browser scene regression", (run_browser_scene_regression,)),
+    ScenarioFamily("fusion-history", "historical Fusion inspection", (run_fusion_history_regression,)),
+    ScenarioFamily("cli-base-path", "CLI base-path regression", (run_cli_base_path_regression,)),
+    ScenarioFamily("send-on-stop", "send_on_stop regression", (run_send_on_stop_regression,)),
+    ScenarioFamily("chat-atomic", "atomic chat admission regression", (run_atomic_chat_regression,)),
+    ScenarioFamily("quit-waiting", "quit with waiting messages regression", (run_quit_waiting_regression,)),
+    ScenarioFamily("ctrl-y", "Ctrl-Y regression", (run_ctrl_y_regression,)),
+    ScenarioFamily("planning-review", "Planning Task Review regression", (run_planning_review_regression,)),
+    ScenarioFamily("repositories", "Repositories regression", (run_repositories_regression,)),
+    ScenarioFamily("project-changes", "project Git changes regression", (run_project_changes_regression,)),
+    ScenarioFamily(
+        "browser-screenshot",
+        "Browser screenshot regression",
+        (
+            run_browser_screenshot_regression,
+            run_browser_client_picker_regression,
+            run_browser_scene_regression,
+        ),
+    ),
+    ScenarioFamily("config", "Config regression", (run_config_regression,)),
+    ScenarioFamily(
+        "voice-wizard",
+        "Voice wizard regression",
+        (run_voice_wizard_regression, run_voice_scroll_regression),
+    ),
+    ScenarioFamily("held-back-override", "held-back override regression", (run_held_back_override_regression,)),
+    ScenarioFamily("theme-scheme", "theme scheme regression", (run_theme_scheme_regression,)),
+    ScenarioFamily("msx-palette", "MSX palette regression", (run_msx_palette_regression,)),
+    ScenarioFamily("msx-spectator", "MSX spectator regression", (run_msx_spectator_regression,)),
+    ScenarioFamily("msx-retained", "MSX retained pixels regression", (run_msx_retained_regression,)),
+    ScenarioFamily(
+        "msx-retained-tick",
+        "MSX retained pixels over tick regression",
+        (partial(run_msx_retained_regression, retained_tick=True),),
+    ),
+    ScenarioFamily("msx-background-poll", "MSX background poll regression", (run_msx_background_poll_regression,)),
+    ScenarioFamily("msx-size", "MSX size regression", (run_msx_size_regression,)),
+    ScenarioFamily(
+        "board-compose-footer",
+        "board compose footer regression",
+        (run_board_list_footer_regression, run_board_compose_footer_regression),
+    ),
+    ScenarioFamily("schedule-delivery", "schedule delivery regression", (run_schedule_delivery_regression,)),
+    ScenarioFamily(
+        "schedule-source-status",
+        "schedule source status regression",
+        (run_schedule_source_status_regression,),
+    ),
+    ScenarioFamily("changes-newline", "Changes newline projection regression", (run_changes_newline_regression,)),
+    ScenarioFamily("mermaid-chat", "mermaid chat regression", (run_mermaid_chat_regression,)),
+    ScenarioFamily("chat-clarity", "chat clarity regression", (run_chat_clarity_regression,)),
+    ScenarioFamily("runtime", "Runtime regression", (run_runtime_regression,)),
+    ScenarioFamily("resources", "Resources regression", (run_resources_regression,)),
+    ScenarioFamily("keepers-lanes", "Keepers/Lanes regression", (run_keeper_lanes_regression,)),
+    ScenarioFamily("board-json", "Board JSON regression", (run_board_json_regression,)),
+    ScenarioFamily("code-memo", "Code memo regression", (run_code_memo_regression,)),
+    ScenarioFamily("memory-journal", "Memory journal regression", (run_memory_journal_regression,)),
+    ScenarioFamily(
+        "skill-usage-coverage",
+        "Skill usage coverage regression",
+        (run_skill_usage_coverage_regression, run_skill_usage_coverage_error_regression),
+    ),
+    ScenarioFamily(
+        "tools-request-identity",
+        "Tools request identity regression",
+        (run_tools_request_identity_regression,),
+    ),
+    ScenarioFamily("tools-purpose", "Tools purpose regression", (run_tools_purpose_regression,)),
+    ScenarioFamily("observer-reconnect", "observer reconnect regression", (run_observer_reconnect_regression,)),
+    ScenarioFamily("acting-call-evidence", "Acting call evidence regression", (run_acting_call_evidence_regression,)),
+)
+
+
+def run_family(family: ScenarioFamily, executable: str, selection: ScenarioSelection) -> None:
+    global scenario_selection
+    scenario_selection = selection
+    try:
+        for run in family.runs:
+            run(executable)
+    finally:
+        scenario_selection = RunEveryScenario()
+
+
+def collect_scenario_names(family: ScenarioFamily, executable: str) -> list[str]:
+    """The descriptions [family] runs, in order, without opening a terminal.
+
+    The binary is still needed: two families hash it for their evidence
+    before their first scenario. A family's own prints (msx-retained-tick
+    writes its pixel log after its scenario) go to stderr, so stdout holds
+    only the names.
+    """
+    selection = CollectScenarioNames([])
+    with redirect_stdout(sys.stderr):
+        run_family(family, executable, selection)
+    return selection.names
+
+
 def main() -> None:
-    if len(sys.argv) == 3 and sys.argv[2] == "browser-scene":
-        run_browser_scene_regression(os.path.abspath(sys.argv[1]))
-        print("tui Browser scene regression: PASS")
+    families = {family.name: family for family in SCENARIO_FAMILIES}
+    parser = argparse.ArgumentParser(
+        allow_abbrev=False,
+        usage="%(prog)s <masc_tui.exe> [family] [--list | --scenario DESCRIPTION ...]",
+        description=(
+            "Drive masc_tui through a real PTY. With no family the keyboard walk "
+            "runs; each dune rule for this file names one family."
+        ),
+    )
+    parser.add_argument("operands", nargs="*", help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--scenario",
+        action="append",
+        default=[],
+        metavar="DESCRIPTION",
+        help=(
+            "run only the scenario with this description inside the family; "
+            "repeat for more than one"
+        ),
+    )
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        help=(
+            "print the scenario descriptions instead of running them: "
+            "every family's, or only the named family's"
+        ),
+    )
+    args = parser.parse_intermixed_args()
+    match args.operands:
+        case [executable]:
+            chosen = None
+        case [executable, family_name] if family_name in families:
+            chosen = families[family_name]
+        case [_, family_name]:
+            parser.error(f"unknown family {family_name!r}; --list prints the names")
+        case _:
+            parser.error("expected <masc_tui.exe> and at most one family")
+    executable = tui_executable(executable)
+    if args.list:
+        if args.scenario:
+            parser.error("--list and --scenario do not go together")
+        for family in SCENARIO_FAMILIES if chosen is None else (chosen,):
+            print(family.name)
+            for name in collect_scenario_names(family, executable):
+                print(f"  {name}")
         return
-    if len(sys.argv) == 3 and sys.argv[2] == "fusion-history":
-        run_fusion_history_regression(os.path.abspath(sys.argv[1]))
-        print("tui historical Fusion inspection: PASS")
+    family = KEYBOARD_FAMILY if chosen is None else chosen
+    if not args.scenario:
+        run_family(family, executable, RunEveryScenario())
+        print(f"tui {family.label}: PASS")
         return
-    if len(sys.argv) == 3 and sys.argv[2] == "cli-base-path":
-        run_cli_base_path_regression(os.path.abspath(sys.argv[1]))
-        print("tui CLI base-path regression: PASS")
-        return
-    if len(sys.argv) == 3 and sys.argv[2] == "send-on-stop":
-        run_send_on_stop_regression(os.path.abspath(sys.argv[1]))
-        print("tui send_on_stop regression: PASS")
-        return
-    if len(sys.argv) == 3 and sys.argv[2] == "chat-atomic":
-        run_atomic_chat_regression(os.path.abspath(sys.argv[1]))
-        print("tui atomic chat admission regression: PASS")
-        return
-    if len(sys.argv) == 3 and sys.argv[2] == "quit-waiting":
-        run_quit_waiting_regression(os.path.abspath(sys.argv[1]))
-        print("tui quit with waiting messages regression: PASS")
-        return
-    if len(sys.argv) == 3 and sys.argv[2] == "ctrl-y":
-        run_ctrl_y_regression(os.path.abspath(sys.argv[1]))
-        print("tui Ctrl-Y regression: PASS")
-        return
-    if len(sys.argv) == 3 and sys.argv[2] == "planning-review":
-        run_planning_review_regression(os.path.abspath(sys.argv[1]))
-        print("tui Planning Task Review regression: PASS")
-        return
-    if len(sys.argv) == 3 and sys.argv[2] == "repositories":
-        run_repositories_regression(os.path.abspath(sys.argv[1]))
-        print("tui Repositories regression: PASS")
-        return
-    if len(sys.argv) == 3 and sys.argv[2] == "project-changes":
-        run_project_changes_regression(os.path.abspath(sys.argv[1]))
-        print("tui project Git changes regression: PASS")
-        return
-    if len(sys.argv) == 3 and sys.argv[2] == "browser-screenshot":
-        run_browser_screenshot_regression(os.path.abspath(sys.argv[1]))
-        run_browser_client_picker_regression(os.path.abspath(sys.argv[1]))
-        run_browser_scene_regression(os.path.abspath(sys.argv[1]))
-        print("tui Browser screenshot regression: PASS")
-        return
-    if len(sys.argv) == 3 and sys.argv[2] == "config":
-        run_config_regression(os.path.abspath(sys.argv[1]))
-        print("tui Config regression: PASS")
-        return
-    if len(sys.argv) == 3 and sys.argv[2] == "voice-wizard":
-        run_voice_wizard_regression(os.path.abspath(sys.argv[1]))
-        run_voice_scroll_regression(os.path.abspath(sys.argv[1]))
-        print("tui Voice wizard regression: PASS")
-        return
-    if len(sys.argv) == 3 and sys.argv[2] == "held-back-override":
-        run_held_back_override_regression(os.path.abspath(sys.argv[1]))
-        print("tui held-back override regression: PASS")
-        return
-    if len(sys.argv) == 3 and sys.argv[2] == "theme-scheme":
-        run_theme_scheme_regression(os.path.abspath(sys.argv[1]))
-        print("tui theme scheme regression: PASS")
-        return
-    if len(sys.argv) == 3 and sys.argv[2] == "msx-palette":
-        run_msx_palette_regression(os.path.abspath(sys.argv[1]))
-        print("tui MSX palette regression: PASS")
-        return
-    if len(sys.argv) == 3 and sys.argv[2] == "msx-spectator":
-        run_msx_spectator_regression(os.path.abspath(sys.argv[1]))
-        print("tui MSX spectator regression: PASS")
-        return
-    if len(sys.argv) == 3 and sys.argv[2] == "msx-retained":
-        run_msx_retained_regression(os.path.abspath(sys.argv[1]))
-        raise SystemExit(0)
-    if len(sys.argv) == 3 and sys.argv[2] == "msx-retained-tick":
-        run_msx_retained_regression(os.path.abspath(sys.argv[1]), retained_tick=True)
-        raise SystemExit(0)
-
-    if len(sys.argv) == 3 and sys.argv[2] == "msx-background-poll":
-        run_msx_background_poll_regression(os.path.abspath(sys.argv[1]))
-        raise SystemExit(0)
-
-    if len(sys.argv) == 3 and sys.argv[2] == "msx-size":
-        run_msx_size_regression(os.path.abspath(sys.argv[1]))
-        print("tui MSX size regression: PASS")
-        return
-    if len(sys.argv) == 3 and sys.argv[2] == "board-compose-footer":
-        run_board_list_footer_regression(os.path.abspath(sys.argv[1]))
-        run_board_compose_footer_regression(os.path.abspath(sys.argv[1]))
-        print("tui board compose footer regression: PASS")
-        return
-    if len(sys.argv) == 3 and sys.argv[2] == "schedule-delivery":
-        run_schedule_delivery_regression(os.path.abspath(sys.argv[1]))
-        print("tui schedule delivery regression: PASS")
-        return
-    if len(sys.argv) == 3 and sys.argv[2] == "schedule-source-status":
-        run_schedule_source_status_regression(os.path.abspath(sys.argv[1]))
-        print("tui schedule source status regression: PASS")
-        return
-    if len(sys.argv) == 3 and sys.argv[2] == "changes-newline":
-        run_changes_newline_regression(os.path.abspath(sys.argv[1]))
-        print("tui Changes newline projection regression: PASS")
-        return
-    if len(sys.argv) == 3 and sys.argv[2] == "mermaid-chat":
-        run_mermaid_chat_regression(os.path.abspath(sys.argv[1]))
-        print("tui mermaid chat regression: PASS")
-        return
-    if len(sys.argv) == 3 and sys.argv[2] == "chat-clarity":
-        run_chat_clarity_regression(os.path.abspath(sys.argv[1]))
-        print("tui chat clarity regression: PASS")
-        return
-    if len(sys.argv) == 3 and sys.argv[2] == "runtime":
-        run_runtime_regression(os.path.abspath(sys.argv[1]))
-        print("tui Runtime regression: PASS")
-        return
-    if len(sys.argv) == 3 and sys.argv[2] == "resources":
-        run_resources_regression(os.path.abspath(sys.argv[1]))
-        print("tui Resources regression: PASS")
-        return
-    if len(sys.argv) == 3 and sys.argv[2] == "keepers-lanes":
-        run_keeper_lanes_regression(os.path.abspath(sys.argv[1]))
-        print("tui Keepers/Lanes regression: PASS")
-        return
-    if len(sys.argv) == 3 and sys.argv[2] == "board-json":
-        run_board_json_regression(os.path.abspath(sys.argv[1]))
-        print("tui Board JSON regression: PASS")
-        return
-    if len(sys.argv) == 3 and sys.argv[2] == "code-memo":
-        run_code_memo_regression(os.path.abspath(sys.argv[1]))
-        print("tui Code memo regression: PASS")
-        return
-    if len(sys.argv) == 3 and sys.argv[2] == "memory-journal":
-        run_memory_journal_regression(os.path.abspath(sys.argv[1]))
-        print("tui Memory journal regression: PASS")
-        return
-    if len(sys.argv) == 3 and sys.argv[2] == "skill-usage-coverage":
-        run_skill_usage_coverage_regression(os.path.abspath(sys.argv[1]))
-        run_skill_usage_coverage_error_regression(os.path.abspath(sys.argv[1]))
-        print("tui Skill usage coverage regression: PASS")
-        return
-    if len(sys.argv) == 3 and sys.argv[2] == "tools-request-identity":
-        run_tools_request_identity_regression(os.path.abspath(sys.argv[1]))
-        print("tui Tools request identity regression: PASS")
-        return
-    if len(sys.argv) == 3 and sys.argv[2] == "tools-purpose":
-        run_tools_purpose_regression(os.path.abspath(sys.argv[1]))
-        print("tui Tools purpose regression: PASS")
-        return
-    if len(sys.argv) == 3 and sys.argv[2] == "observer-reconnect":
-        run_observer_reconnect_regression(os.path.abspath(sys.argv[1]))
-        sys.exit(0)
-    if len(sys.argv) == 3 and sys.argv[2] == "acting-call-evidence":
-        run_acting_call_evidence_regression(os.path.abspath(sys.argv[1]))
-        print("tui Acting call evidence regression: PASS")
-        return
-    if len(sys.argv) != 2:
-        raise SystemExit(
-            "usage: test_tui_keyboard_input.py <masc_tui.exe> "
-            "[chat-atomic|cli-base-path|planning-review|repositories|project-changes|config|"
-            "chat-clarity|mermaid-chat|changes-newline|schedule-delivery|"
-            "schedule-source-status|board-compose-footer|runtime|resources|"
-            "keepers-lanes|board-json|code-memo|memory-journal|"
-            "skill-usage-coverage|tools-purpose|tools-request-identity]"
+    known = set(collect_scenario_names(family, executable))
+    unknown = [name for name in args.scenario if name not in known]
+    if unknown:
+        # A description copied from a traceback may belong to another family;
+        # say which, so the next command is the right one.
+        by_family = {
+            other.name: set(collect_scenario_names(other, executable))
+            for other in SCENARIO_FAMILIES
+        }
+        parser.error(
+            f"no scenario in family {family.name!r} is described as: "
+            + "; ".join(
+                f"{name!r} (it is in: {', '.join(n for n, names in by_family.items() if name in names)})"
+                if any(name in names for names in by_family.values())
+                else repr(name)
+                for name in unknown
+            )
         )
-    run_keyboard_regression(os.path.abspath(sys.argv[1]))
-    print("tui keyboard PTY regression: PASS")
+    selection = RunNamedScenarios(frozenset(args.scenario), [])
+    run_family(family, executable, selection)
+    # Collection saw every name, but a description a family computes from
+    # what its earlier scenarios did could still differ on the real run.
+    not_run = [name for name in args.scenario if name not in selection.ran]
+    if not_run:
+        raise SystemExit(
+            f"tui {family.label}: these selected scenarios did not run: {not_run!r}"
+        )
+    print(f"tui {family.label}: PASS ({len(selection.ran)} selected scenario runs)")
 
 
 if __name__ == "__main__":

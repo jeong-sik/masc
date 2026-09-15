@@ -207,6 +207,45 @@ let test_raw_io_routes_require_admin () =
     Alcotest.(check bool) "safe history does not return raw ledger output" false
       (String_util.contains_substring (Yojson.Safe.to_string safe_body) secret))
 
+(* How long the history request is given to answer while the only executor
+   worker is busy. Encoded on the serving fiber it answers within a few
+   milliseconds; encoded on the executor it cannot answer at all until the
+   worker frees. *)
+let busy_worker_polls = 100
+let busy_worker_poll_interval_s = 0.01
+
+(* The history body is large and polled, so its serialisation, validator and
+   compression run on the CPU executor: with the only worker busy the response
+   waits, and once the worker frees it is served. *)
+let test_chat_history_body_is_encoded_on_the_cpu_executor () =
+  with_workspace (fun env sw state _config _store ->
+    let pool = Eio.Executor_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+    Executor_pool_ref.For_testing.with_pool pool (fun () ->
+      let occupied, occupied_u = Eio.Promise.create () in
+      let release, release_u = Eio.Promise.create () in
+      Eio.Fiber.fork ~sw (fun () ->
+        Executor_pool_ref.submit_or_inline (fun () ->
+          Eio.Promise.resolve occupied_u ();
+          Eio.Promise.await release));
+      Eio.Promise.await occupied;
+      let answered = ref None in
+      let clock = Eio.Stdenv.clock env in
+      Eio.Fiber.both
+        (fun () -> answered := Some (get state "/api/v1/keepers/editor/chat/history"))
+        (fun () ->
+          let rec wait polls =
+            if polls > 0 && Option.is_none !answered then (
+              Eio.Time.sleep clock busy_worker_poll_interval_s;
+              wait (polls - 1))
+          in
+          wait busy_worker_polls;
+          Alcotest.(check bool) "the response waits for the busy worker" true
+            (Option.is_none !answered);
+          Eio.Promise.resolve release_u ());
+      match !answered with
+      | Some (status, _) -> Alcotest.(check int) "then it is served" 200 status
+      | None -> Alcotest.fail "the history route never answered"))
+
 let () =
   Alcotest.run "keeper_exact_tool_output_http"
     [ "GET /tool-calls?execution_id",
@@ -214,4 +253,6 @@ let () =
       ; Alcotest.test_case "ambiguity and invalid query are rejected" `Quick test_ambiguity_and_invalid_query
       ; Alcotest.test_case "storage failure remains unavailable" `Quick test_store_failure_is_unavailable
       ; Alcotest.test_case "raw I/O requires an Admin token" `Quick test_raw_io_routes_require_admin
+      ; Alcotest.test_case "the chat history body is encoded on the CPU executor" `Quick
+          test_chat_history_body_is_encoded_on_the_cpu_executor
       ] ]

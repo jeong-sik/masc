@@ -395,6 +395,13 @@ let shutdown t =
           t.connect_failures <- Host_map.empty;
           all)
       in
+      (* Every signal first, then the joins. Shutdown is the one caller that
+         waits for teardown, and its walk has the shape that stranded clients
+         in the eviction sweep: these are already out of [t.idle], so a join
+         that unwinds part way through would leave the rest holding sockets
+         nothing can reach. Signalling up front makes the order of the joins
+         -- and whether one of them unwinds -- stop mattering. *)
+      List.iter (fun e -> request_close_client e.client) leftover;
       List.iter (fun e ->
         try close_client e.client with
         | Eio.Cancel.Cancelled _ as exn -> raise exn

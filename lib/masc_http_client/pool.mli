@@ -30,7 +30,8 @@ type t
 
     [idle_ttl_seconds]: idle connection's max age before eviction. A
     pool fiber walks idle queues periodically; expired entries are
-    closed and dropped.
+    dropped from the pool and told to stop, and their own daemon closes
+    them.
 
     [connect_timeout_seconds]: max wait when establishing a fresh
     connection, shared by DNS resolution, every TCP probe address, and
@@ -76,8 +77,9 @@ val create :
     transport (h1/h2 client creation). Each client has a child switch owned
     by a daemon on [sw]. Failed/cancelled creation closes that child switch
     before returning; successful clients retain it through idle reuse.
-    Eviction and shutdown cancel and join the child's fibers before closing
-    its sockets. *)
+    Shutdown joins those fibers before returning. Eviction does not: it
+    signals and returns, because a walk that joins cannot be interrupted
+    part way through without stranding the clients it has not reached yet. *)
 
 (* ── Request API ───────────────────────────────────────────────── *)
 

@@ -565,6 +565,11 @@ let fold_newline_segments buffer f init =
   in
   loop 0 0 init
 
+type tail_row =
+  { offset : int
+  ; line : string
+  }
+
 let rec segment_has_content buffer index stop =
   index < stop
   && (not (trim_whitespace (Bytes.get buffer index))
@@ -586,7 +591,7 @@ let rec segment_has_content buffer index stop =
 
    Two scans over the buffer allocate nothing; only surviving lines become
    strings. *)
-let last_non_empty_lines buffer ~max_lines =
+let last_non_empty_rows buffer ~base ~max_lines =
   let count =
     fold_newline_segments buffer
       (fun total start stop ->
@@ -599,12 +604,15 @@ let last_non_empty_lines buffer ~max_lines =
       (fun (seen, acc) start stop ->
          if not (segment_has_content buffer start stop) then (seen, acc)
          else if seen < skip then (seen + 1, acc)
-         else (seen + 1, Bytes.sub_string buffer start (stop - start) :: acc))
+         else
+           ( seen + 1
+           , { offset = base + start; line = Bytes.sub_string buffer start (stop - start) }
+             :: acc ))
       (0, [])
   in
   List.rev reversed
 
-let load_tail_lines_from_channel input ~max_lines =
+let load_tail_rows_from_channel input ~max_lines =
   if max_lines <= 0
   then []
   else
@@ -648,9 +656,11 @@ let load_tail_lines_from_channel input ~max_lines =
           0
           !chunks
       in
-      last_non_empty_lines combined ~max_lines
+      last_non_empty_rows combined ~base:!position ~max_lines
     end
 ;;
+
+let tail_lines rows = List.map (fun row -> row.line) rows
 
 (* One day file's tail read, split and parse is a single job on the process
    domain pool when one is installed: the reads are blocking syscalls, the
@@ -662,19 +672,25 @@ let load_tail_lines_from_channel input ~max_lines =
    section 8.8). *)
 let off_fiber f = Domain_pool_ref.submit_io_or_inline f
 
-let load_tail_lines_inline path ~max_lines =
+let load_tail_rows_inline path ~max_lines =
   if max_lines <= 0 || not (Fs_compat.file_exists path)
   then []
   else
     let input = open_in_bin path in
     Fun.protect
       ~finally:(fun () -> close_in_noerr input)
-      (fun () -> load_tail_lines_from_channel input ~max_lines)
+      (fun () -> load_tail_rows_from_channel input ~max_lines)
 ;;
 
-let load_tail_lines path ~max_lines =
-  off_fiber (fun () -> load_tail_lines_inline path ~max_lines)
+let load_tail_lines_inline path ~max_lines =
+  tail_lines (load_tail_rows_inline path ~max_lines)
 ;;
+
+let load_tail_rows path ~max_lines =
+  off_fiber (fun () -> load_tail_rows_inline path ~max_lines)
+;;
+
+let load_tail_lines path ~max_lines = tail_lines (load_tail_rows path ~max_lines)
 
 let load_tail_lines_result_inline path ~max_lines =
   if max_lines <= 0
@@ -686,8 +702,8 @@ let load_tail_lines_result_inline path ~max_lines =
       Fun.protect
         ~finally:(fun () -> close_in_noerr input)
         (fun () ->
-           match load_tail_lines_from_channel input ~max_lines with
-           | lines -> Ok lines
+           match load_tail_rows_from_channel input ~max_lines with
+           | rows -> Ok (tail_lines rows)
            | exception Sys_error detail ->
              Error (Io_error { operation = Read_file; path; detail })
            | exception End_of_file ->

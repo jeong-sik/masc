@@ -1067,29 +1067,27 @@ let journal_entry_of_json = function
   | _ -> Error "journal line is not a JSON object"
 ;;
 
+(* The journal only grows (10-13 MB on live keepers) and a reader asks for its
+   last 20-500 lines. Reading the whole file and splitting every line on each
+   dashboard or TUI request put that copy and split on the scheduler domain;
+   the tail is read backwards on the pool and only the returned lines are
+   parsed, also on the pool. Each line is named by the byte offset it starts
+   at, which does not depend on the window it was read in. *)
 let read_journal_tail_indexed ~keepers_dir ~keeper_id ~limit =
   if limit <= 0
   then []
   else (
     let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
-    match Fs_compat.load_file_opt path with
-    | None -> []
-    | Some contents ->
-      let lines =
-        String.split_on_char '\n' contents
-        |> List.filter (fun line -> not (String.equal (String.trim line) ""))
-      in
-      let total = List.length lines in
-      let skip = if total > limit then total - limit else 0 in
-      lines
-      |> List.mapi (fun index line -> index, line)
-      |> List.filter (fun (index, _) -> index >= skip)
-      |> List.map (fun (index, line) ->
-        match Yojson.Safe.from_string line with
-        | json -> index, journal_entry_of_json json
-        | exception Yojson.Json_error message ->
-          ( index
-          , Error (Printf.sprintf "journal line is not valid JSON: %s" message) )))
+    let rows = Dated_jsonl.load_tail_rows path ~max_lines:limit in
+    Domain_pool_ref.submit_cpu_or_inline (fun () ->
+      List.map
+        (fun { Dated_jsonl.offset; line } ->
+           match Yojson.Safe.from_string line with
+           | json -> offset, journal_entry_of_json json
+           | exception Yojson.Json_error message ->
+             ( offset
+             , Error (Printf.sprintf "journal line is not valid JSON: %s" message) ))
+        rows))
 ;;
 
 let read_journal_tail ~keepers_dir ~keeper_id ~limit =
@@ -1564,19 +1562,19 @@ let journal_line_to_json = function
   | Error reason -> `Assoc [ "ok", `Bool false; "error", `String reason ]
 ;;
 
-let journal_projection_identity ~keeper_id line_index =
+let journal_projection_identity ~keeper_id line_offset =
   Printf.sprintf "memory:journal:%d:%s:%d" (String.length keeper_id) keeper_id
-    line_index
+    line_offset
 ;;
 
 let read_journal_tail_projection ~keepers_dir ~keeper_id ~limit =
   read_journal_tail_indexed ~keepers_dir ~keeper_id ~limit
-  |> List.map (fun (line_index, result) ->
+  |> List.map (fun (line_offset, result) ->
        match journal_line_to_json result with
        | `Assoc fields ->
          `Assoc
            (( "structural_id"
-            , `String (journal_projection_identity ~keeper_id line_index) )
+            , `String (journal_projection_identity ~keeper_id line_offset) )
             :: fields)
        | json -> json)
 ;;

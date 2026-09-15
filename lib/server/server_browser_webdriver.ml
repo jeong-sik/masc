@@ -215,6 +215,7 @@ let launch_driver ~sw ~env ~masc_root ~record_path ~driver =
           , log_path )
 
 let start ~sw ~env =
+  let clock = Eio.Stdenv.clock env in
   let base_path = Config_dir_resolver.base_path_or_cwd () in
   let masc_root = Config_dir_resolver.masc_root ~base_path in
   let record_path = Browser_driver_process.owner_record_path ~masc_root in

@@ -73,6 +73,14 @@ type config = {
           dispatch it is one window over both permit waits, the count-tokens
           request's and the stream's. The keeper passes its no-progress
           threshold. *)
+  permit_wait : Llm_provider.Provider_admission.permit_wait Atomic.t option;
+      (** The cell a bounded wait for the provider's admission permit writes
+          as it begins and ends, handed to AGENT_CORE
+          [Builder.with_permit_wait]. The keeper stands its attempt watchdog
+          down while the wait is on, the wait having a deadline of its own,
+          and counts again from the instant the wait settled. Nothing in the
+          types makes that deadline shorter than the watchdog's threshold;
+          the keeper passes the same value as both. *)
   max_tokens : int option;
       (** Caller-level output-token override. [None] adds no override, so an
           explicit [provider_cfg.max_tokens] remains authoritative; when both

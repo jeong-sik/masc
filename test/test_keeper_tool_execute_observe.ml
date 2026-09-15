@@ -16,7 +16,8 @@ let trailer_of_status status : Exec_ssh_protocol.trailer =
   let exit, signal = match status with
     | Unix.WEXITED code -> Some code, None
     | Unix.WSIGNALED signal | Unix.WSTOPPED signal -> None, Some signal in
-  { v = Exec_ssh_protocol.newest; exit; signal; timed_out = false; shim_error = None }
+  { v = Exec_ssh_protocol.newest; exit; signal; timed_out = false; shim_error = None
+  ; observed_syscalls = [] }
 ;;
 
 (* These Gate/dispatch tests use a controlled receipt fixture. The actual

@@ -447,14 +447,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
              | None -> [])
           in
           let trace_history_count = List.length m.runtime.trace_history in
-          (* RFC-0149 §3.3 — removed [_effective_runtime_id] zombie
-             binding (commit f0075c3611, "domain-owned counter").  The
-             bound name was unused; the line existed only to trigger
-             [Runtime_metrics.on_resolve_live_fallback] through the
-             silent-fallback path — exactly the workaround RFC-0149
-             §3.3 sunsets.  No replacement needed: unresolved runtimes
-             surface on the canonical JSON field via the Result-returning
-             resolver at the other call site below. *)
           let metrics_store = Keeper_types_support.keeper_metrics_store config m.name in
           (* Cap metrics lines to avoid O(n) slowdown as keepers accumulate turns.
              [series_points] is both the read and output bound. *)

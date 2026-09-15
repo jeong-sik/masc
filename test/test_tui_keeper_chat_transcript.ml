@@ -1468,7 +1468,12 @@ let test_drawn_items_carry_superseded_runtime_id () =
 let test_the_wait_says_why_once_the_server_has_said () =
   check bool "before the acceptance there is nothing to say but that it went out"
     true
-    (contains ~needle:"waiting for the run to start" (progress_text (fresh ())));
+    (contains ~needle:"sent; not accepted yet" (progress_text (fresh ())));
+  (* And it is not the wording for a run the server did accept. Those are
+     opposite readings -- nothing known against accepted and starting -- and
+     they read alike until #36447. *)
+  check bool "which is not what an accepted request says" false
+    (contains ~needle:"the run is starting" (progress_text (fresh ())));
   let queued length =
     let t = fresh () in
     feed t [ Live.Accepted { admission = Live.Queued; queue_length = length; interactive = None } ];

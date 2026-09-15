@@ -138,7 +138,7 @@ let test_frame_stdin_len_mismatch_is_transport_error () =
 
 let test_trailer_roundtrip () =
   let t = Exec_ssh_protocol.{ v = Exec_ssh_protocol.newest; exit = Some 3; signal = None
-                            ; timed_out = false; shim_error = None } in
+                            ; timed_out = false; shim_error = None; observed_syscalls = [] } in
   let rendered = Exec_ssh_protocol.render_trailer t in
   check bool "starts with RS" true (String.length rendered > 2 && rendered.[0] = '\x1e');
   check bool "ends with RS" true
@@ -146,6 +146,38 @@ let test_trailer_roundtrip () =
   match Exec_ssh_protocol.parse_trailer rendered with
   | Error e -> fail e
   | Ok t' -> check (option int) "exit" t.exit t'.exit
+
+(* task-1575 item 4: the observed-syscalls evidence rides in the trailer's
+   own typed field, distinct from exit/signal/shim_error, and survives a
+   render/parse round trip -- not just a construction-site smoke test. *)
+let test_trailer_observed_syscalls_roundtrip () =
+  let t = Exec_ssh_protocol.{ v = Exec_ssh_protocol.newest; exit = Some 0; signal = None
+                            ; timed_out = false; shim_error = None
+                            ; observed_syscalls = [ 41; 41 ] } in
+  match Exec_ssh_protocol.parse_trailer (Exec_ssh_protocol.render_trailer t) with
+  | Error e -> fail e
+  | Ok t' -> check (list int) "observed_syscalls" [ 41; 41 ] t'.observed_syscalls
+
+(* A trailer from an older peer that never heard of this field must decode
+   to [[]], not fail to parse: the field is additive on the wire. *)
+let test_trailer_missing_observed_syscalls_is_empty () =
+  let wire =
+    Printf.sprintf "\x1e%s\x1e"
+      (Yojson.Safe.to_string
+         (`Assoc
+            [ "masc_exec_result",
+              `Assoc
+                [ "v", `Int (Exec_ssh_protocol.int_of_major Exec_ssh_protocol.newest)
+                ; "exit", `Int 0
+                ; "signal", `Null
+                ; "timed_out", `Bool false
+                ; "shim_error", `Null
+                ]
+            ]))
+  in
+  match Exec_ssh_protocol.parse_trailer wire with
+  | Error e -> fail e
+  | Ok t -> check (list int) "no observed_syscalls key decodes to []" [] t.observed_syscalls
 
 let test_trailer_malformed_is_transport_error () =
   match Exec_ssh_protocol.parse_trailer "\x1e not json \x1e" with
@@ -163,7 +195,7 @@ let test_trailer_last_match_wins () =
      trailer, an earlier malformed pair must not poison it *)
   let real = Exec_ssh_protocol.render_trailer
       Exec_ssh_protocol.{ v = Exec_ssh_protocol.newest; exit = Some 7; signal = None
-                        ; timed_out = false; shim_error = None } in
+                        ; timed_out = false; shim_error = None; observed_syscalls = [] } in
   let tail = "payload says \x1e{not the result}\x1e then more stderr " ^ real in
   match Exec_ssh_protocol.parse_trailer tail with
   | Error e -> fail e
@@ -187,7 +219,7 @@ let test_exit_zero_is_a_real_exit () =
   (* exit 0 round-trips as data: the codec never fabricates or
      special-cases it *)
   let t = Exec_ssh_protocol.{ v = Exec_ssh_protocol.newest; exit = Some 0; signal = None
-                            ; timed_out = false; shim_error = None } in
+                            ; timed_out = false; shim_error = None; observed_syscalls = [] } in
   match Exec_ssh_protocol.parse_trailer (Exec_ssh_protocol.render_trailer t) with
   | Error e -> fail e
   | Ok t' -> check (option int) "exit 0 survives" (Some 0) t'.exit
@@ -195,7 +227,7 @@ let test_exit_zero_is_a_real_exit () =
 let test_trailer_exclusivity_violation_is_transport_error () =
   (* exit and signal both set is malformed, not ambiguously "exit 1" *)
   let t = Exec_ssh_protocol.{ v = Exec_ssh_protocol.newest; exit = Some 1; signal = Some 9
-                            ; timed_out = false; shim_error = None } in
+                            ; timed_out = false; shim_error = None; observed_syscalls = [] } in
   match Exec_ssh_protocol.parse_trailer (Exec_ssh_protocol.render_trailer t) with
   | Ok _ -> fail "expected transport error"
   | Error msg ->
@@ -203,7 +235,7 @@ let test_trailer_exclusivity_violation_is_transport_error () =
 
 let test_signal_vs_exit () =
   let t = Exec_ssh_protocol.{ v = Exec_ssh_protocol.newest; exit = None; signal = Some 9
-                            ; timed_out = false; shim_error = None } in
+                            ; timed_out = false; shim_error = None; observed_syscalls = [] } in
   match Exec_ssh_protocol.parse_trailer (Exec_ssh_protocol.render_trailer t) with
   | Error e -> fail e
   | Ok t' -> check (option int) "signal" (Some 9) t'.signal
@@ -253,7 +285,7 @@ let test_a_v2_frame_cannot_carry_a_box () =
   | Error msg -> check bool "named version error" true (contains "remote_ssh_version_error" msg)
 
 let test_a_v2_trailer_is_read () =
-  let t = Exec_ssh_protocol.{ v = V2; exit = Some 3; signal = None; timed_out = false; shim_error = None } in
+  let t = Exec_ssh_protocol.{ v = V2; exit = Some 3; signal = None; timed_out = false; shim_error = None; observed_syscalls = [] } in
   match Exec_ssh_protocol.parse_trailer ("noise" ^ Exec_ssh_protocol.render_trailer t) with
   | Error e -> fail e
   | Ok t' ->
@@ -352,7 +384,7 @@ let test_probe_major_is_spoken_or_a_skew () =
 let test_execution_receipts_preserve_process_outcome () =
   let open Exec_ssh_protocol in
   let trailer = { v = newest; exit = Some 127; signal = None;
-                  timed_out = false; shim_error = None } in
+                  timed_out = false; shim_error = None; observed_syscalls = [] } in
   List.iter (fun mode ->
     List.iter (fun boundary ->
       let execution_receipt = { mode; boundary } in
@@ -395,6 +427,10 @@ let () =
     ; "trailer", [ test_case "execution receipts preserve process outcome" `Quick
                      test_execution_receipts_preserve_process_outcome
                  ; test_case "roundtrip" `Quick test_trailer_roundtrip
+                 ; test_case "observed_syscalls roundtrip" `Quick
+                     test_trailer_observed_syscalls_roundtrip
+                 ; test_case "missing observed_syscalls is empty" `Quick
+                     test_trailer_missing_observed_syscalls_is_empty
                  ; test_case "malformed is transport error" `Quick test_trailer_malformed_is_transport_error
                  ; test_case "absent is transport error" `Quick test_trailer_absent_is_transport_error
                  ; test_case "last match wins" `Quick test_trailer_last_match_wins

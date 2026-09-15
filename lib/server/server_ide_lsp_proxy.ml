@@ -654,6 +654,24 @@ let resolve_document_request ~anchor params =
        Ok { uri; relative_path; line; language = resolve_lang relative_path })
 ;;
 
+(* An initialize answer that arrived as the window closed is the answer; the
+   server is not refused as one that never initialized. Extracted from
+   [ensure_lsp_process] so the deadline-safe path -- [Watched_work.run] keeps
+   the work's outcome when the answer's last byte and the deadline land in the
+   same scheduler pass -- is exercised without spawning a server
+   ([For_testing]). *)
+let await_initialize_under_deadline ~clock ~timeout_sec ~lang_id promise =
+  Watched_work.run
+    ~watcher:(fun () ->
+      Eio.Time.sleep clock timeout_sec;
+      Error
+        (Printf.sprintf
+           "LSP initialize timeout for %s (%.0fs)"
+           lang_id
+           timeout_sec))
+    (fun () -> Ok (Eio.Promise.await promise))
+;;
+
 (** Ensure LSP process exists for a language.
     Spawns + initializes on first use, blocking until ready. *)
 let ensure_lsp_process cs lang_id =
@@ -707,18 +725,12 @@ let ensure_lsp_process cs lang_id =
              ~params:init_params
              ~client_id:(-1)
          in
-         (* An initialize answer that arrived as the window closed is the
-            answer; the server is not refused as one that never initialized. *)
          let init_result =
-           Watched_work.run
-             ~watcher:(fun () ->
-               Eio.Time.sleep cs.clock Lsp_proxy_limits.initialize_timeout_sec;
-               Error
-                 (Printf.sprintf
-                    "LSP initialize timeout for %s (%.0fs)"
-                    lang_id
-                    Lsp_proxy_limits.initialize_timeout_sec))
-             (fun () -> Ok (Eio.Promise.await promise))
+           await_initialize_under_deadline
+             ~clock:cs.clock
+             ~timeout_sec:Lsp_proxy_limits.initialize_timeout_sec
+             ~lang_id
+             promise
          in
          (match init_result with
           | Ok (Ok _) ->
@@ -1135,6 +1147,7 @@ module For_testing = struct
   let workspace_root_for_initialize = workspace_root_for_initialize
   let initialize_result_json = initialize_result_json
   let inbound_dispatch_worker_count = Lsp_proxy_limits.inbound_dispatch_worker_count
+  let await_initialize_under_deadline = await_initialize_under_deadline
 
   type nonrec resolved_lang = resolved_lang =
     | Known_lang of string

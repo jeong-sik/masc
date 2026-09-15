@@ -5431,11 +5431,34 @@
  (name runtest)
  (deps (alias runtest-test_shim_execution_receipts)))
 
+(rule
+ (alias runtest-test_shim_observe_supervise_drain)
+ (enabled_if (= %{system} linux))
+ (deps test_shim_observe_supervise_drain.py ../bin/masc_exec_shim.exe)
+ (action
+  (run python3 %{dep:test_shim_observe_supervise_drain.py} %{dep:../bin/masc_exec_shim.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_shim_observe_supervise_drain)))
+
 (test
  (name test_exec_shim_observe)
  (modules test_exec_shim_observe)
  (enabled_if (= %{system} linux))
  (libraries alcotest exec_shim unix eio eio_main fs_compat))
+
+(test
+ (name test_exec_shim_fdpass)
+ (modules test_exec_shim_fdpass)
+ (enabled_if (= %{system} linux))
+ (libraries alcotest shim_fdpass unix))
+
+(test
+ (name test_exec_shim_observe_drain)
+ (modules test_exec_shim_observe_drain)
+ (enabled_if (= %{system} linux))
+ (libraries alcotest exec_shim shim_fdpass unix))
 
 (test
  (name test_shim_clock)

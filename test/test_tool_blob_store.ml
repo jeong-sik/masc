@@ -388,6 +388,47 @@ let test_idempotent_put () =
         "same content -> same sha" (sha_of r1) (sha_of r2);
       Alcotest.(check int) "single entry" 1 (List.length (B.list_all store)))
 
+(* The demotion puts every aged tool result on every provider request. A put
+   of an address this process already wrote leaves the file alone, so the file
+   keeps its inode. A file that disappears or is damaged behind the store is
+   noticed by fetch, and the next put writes it again. *)
+let test_put_writes_an_address_again_only_after_fetch_finds_it_gone () =
+  with_temp_dir (fun dir ->
+      let store = B.create ~base_path:dir in
+      let payload = String.make 4_096 'p' in
+      let put () = ignore (B.put store ~bytes:payload ~mime:"text/plain" : O.t) in
+      let reference =
+        stored_ref_exn (B.put store ~bytes:payload ~mime:"text/plain")
+      in
+      let sha256 = reference.O.sha256 in
+      let path =
+        Filename.concat
+          (Filename.concat (B.root_dir store) (String.sub sha256 0 2))
+          sha256
+      in
+      let inode () = (Unix.stat path).Unix.st_ino in
+      let written = inode () in
+      put ();
+      Alcotest.(check int) "a second put leaves the written file in place" written (inode ());
+      Unix.unlink path;
+      Alcotest.(check (option string)) "fetch reports the removed file" None
+        (fetch_ok store ~sha256);
+      put ();
+      Alcotest.(check (option string)) "and the next put writes it again" (Some payload)
+        (fetch_ok store ~sha256);
+      (match Fs_compat.save_file_atomic path (String.make 4_096 'q') with
+       | Ok () -> ()
+       | Error error -> Alcotest.failf "failed to damage fixture: %s" error);
+      (match B.fetch store ~sha256 with
+       | Error (B.Integrity_mismatch _) -> ()
+       | Error error ->
+         Alcotest.failf "damaged blob returned wrong error: %s"
+           (B.fetch_error_to_string error)
+       | Ok _ -> Alcotest.fail "damaged blob passed content-address validation");
+      put ();
+      Alcotest.(check (option string)) "a put after the mismatch repairs the bytes"
+        (Some payload) (fetch_ok store ~sha256))
+
 let test_sharding_layout () =
   with_temp_dir (fun dir ->
       let store = B.create ~base_path:dir in
@@ -1347,6 +1388,8 @@ let () =
             test_fetch_range_revalidates_changed_snapshot;
           Alcotest.test_case "fetch miss = None" `Quick test_fetch_miss;
           Alcotest.test_case "idempotent put" `Quick test_idempotent_put;
+          Alcotest.test_case "put writes an address again only after fetch finds it gone" `Quick
+            test_put_writes_an_address_again_only_after_fetch_finds_it_gone;
           Alcotest.test_case "sharding layout" `Quick test_sharding_layout;
         ] );
       ( "gc",

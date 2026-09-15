@@ -19,6 +19,9 @@ let owner_of_string text =
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
     Error "driver record is not an object"
 
+(* The driver binds the same loopback address the MASC HTTP server binds, so
+   only this machine can reach it. Naming the constant keeps the two from
+   drifting apart, which is what SSOT rule R2 is for. *)
 let argv ~driver ~port =
   [ driver
   ; "--host"

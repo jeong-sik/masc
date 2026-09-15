@@ -66,6 +66,21 @@ val tokens_of_bytes : density -> int -> int
 (** Bytes measured with the cut's encoder, read as tokens through this
     density. *)
 
+val bytes_of_tokens : density -> int -> int
+(** Tokens read as bytes of the cut's encoder through this density: the
+    inverse of {!tokens_of_bytes}, up to integer rounding. *)
+
+val share_bytes
+  :  window_tokens:int
+  -> share_percent:int
+  -> density option
+  -> int option
+(** [share_percent] of a [window_tokens] window, as bytes through the
+    runtime's observed density: the ceiling a pinned block the cut cannot
+    remove, such as the world-state briefing, may occupy. [None] while the
+    runtime's density is unobserved, because no byte figure stands for the
+    window yet. *)
+
 val capacity_to_json : capacity -> Yojson.Safe.t
 
 (** Process-local density observations, keyed by runtime id. The tokenizer

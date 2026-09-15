@@ -368,7 +368,7 @@ A  = B − R − 핀 − 서문
 | 단계 | 내용 | 상태 |
 |---|---|---|
 | 1 | HTTP 레인. `[turn] context_window_tokens`, 밀도, target 자르기, shrink 를 토큰으로, `uncapped` 경로 삭제, 후보별 `max-context` 검사 | 이 RFC 와 같은 PR |
-| 2 | 브리핑 예산(§4 2번): `keeper.context.briefing.share_percent` 를 C 가 아니라 창의 몫으로. 토큰→바이트는 같은 밀도 | 이슈 |
+| 2 | 브리핑 예산(§4 2번): `keeper.context.briefing.share_percent` 를 C 가 아니라 창의 몫으로. 토큰→바이트는 같은 밀도. 공식 클라이언트 레인은 4단계까지 `max-prompt-bytes` 의 몫(C 는 빠짐) | #36710 PR |
 | 3 | librarian 입력(§4 8번): 사다리의 가장 작은 슬롯이 아니라 실제 디스패치할 슬롯에 맞춘다 | 이슈 |
 | 4 | 공식 클라이언트 레인(§4 4·5·6번): `max-prompt-bytes` 는 판정만, 창은 같은 토큰 선언 | 이슈 |
 | 5 | 밀도 씨앗: 재기동 뒤 Keeper 의 최신 턴 레코드(`usage.input_tokens`, `body_bytes`)로 첫 요청부터 창을 쓴다. floor 요청 빈도(§12)를 잰 뒤 | 이슈 |

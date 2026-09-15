@@ -36,7 +36,18 @@ let test_no_density_is_unmeasured_not_a_guess () =
 let test_tokens_of_bytes_inverts_the_density () =
   let d = density ~input_tokens:100_000 ~measured_bytes:400_000 in
   check int "400,000 bytes read as 100,000 tokens" 100_000 (Window.tokens_of_bytes d 400_000);
-  check int "a reserve of 40,000 bytes is 10,000 tokens" 10_000 (Window.tokens_of_bytes d 40_000)
+  check int "a reserve of 40,000 bytes is 10,000 tokens" 10_000 (Window.tokens_of_bytes d 40_000);
+  check int "10,000 tokens read back as 40,000 bytes" 40_000 (Window.bytes_of_tokens d 10_000)
+;;
+
+(* The briefing's ceiling is a share of the window, in the bytes the cut
+   measures: half of 85K tokens at four bytes per token is 170,000 bytes. *)
+let test_share_bytes_is_the_windows_share_through_the_density () =
+  let d = density ~input_tokens:100_000 ~measured_bytes:400_000 in
+  check (option int) "half the window as bytes" (Some 170_000)
+    (Window.share_bytes ~window_tokens:85_000 ~share_percent:50 (Some d));
+  check (option int) "no density, no byte figure" None
+    (Window.share_bytes ~window_tokens:85_000 ~share_percent:50 None)
 ;;
 
 (* A halved window keeps the declaration beside it, and returning to the
@@ -116,6 +127,8 @@ let () =
             test_no_density_is_unmeasured_not_a_guess
         ; test_case "tokens_of_bytes inverts the density" `Quick
             test_tokens_of_bytes_inverts_the_density
+        ; test_case "share_bytes is the window's share through the density" `Quick
+            test_share_bytes_is_the_windows_share_through_the_density
         ] )
     ; ( "source"
       , [ test_case "with_tokens keeps the declaration visible" `Quick

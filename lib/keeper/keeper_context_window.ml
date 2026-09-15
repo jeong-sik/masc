@@ -64,6 +64,12 @@ let capacity t = function
 ;;
 
 let tokens_of_bytes density bytes = bytes * density.input_tokens / density.measured_bytes
+let bytes_of_tokens density tokens = tokens * density.measured_bytes / density.input_tokens
+
+let share_bytes ~window_tokens ~share_percent = function
+  | None -> None
+  | Some density -> Some (bytes_of_tokens density (window_tokens * share_percent / 100))
+;;
 
 let capacity_to_json = function
   | Measured { window_tokens; density; capacity_bytes } ->

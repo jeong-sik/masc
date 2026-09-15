@@ -1250,6 +1250,73 @@ let test_validate_reasoning_effort_subset_rejects_unsupported () =
     | Ok () -> Alcotest.fail "high effort should be rejected by accepted subset")
 ;;
 
+(* A wire that turns reasoning on when the request carries no control cannot
+   treat an absent effort as "nothing to check": the turn reasons and the
+   configuration says nothing about it. Live probe 2026-09-15,
+   https://ollama.com/v1 with deepseek-v4.1-flash:cloud, three runs of one
+   reasoning prompt: no control 1985 median reasoning characters, "none" 0. *)
+let test_an_auto_enabling_wire_needs_a_declared_effort () =
+  let auto_enabling =
+    { Capabilities.default_capabilities with
+      supports_reasoning = true
+    ; thinking_control_format = Capabilities.Reasoning_effort
+    ; uncontrolled_reasoning = Capabilities.Provider_enables_reasoning
+    ; accepted_reasoning_efforts =
+        Some [ Reasoning_effort.None_; Reasoning_effort.High ]
+    }
+  in
+  let cfg ?reasoning_effort capabilities =
+    Provider_config.make
+      ~kind:OpenAI_compat
+      ~model_id:"auto-enabling-model"
+      ~base_url:"https://ollama.com/v1"
+      ~model_capabilities_override:capabilities
+      ?reasoning_effort
+      ()
+  in
+  let validate ?reasoning_effort capabilities =
+    Provider_config.validate_reasoning_effort_request_typed (cfg ?reasoning_effort capabilities)
+  in
+  (match validate auto_enabling with
+   | Error (Provider_config.Reasoning_undeclared_on_auto_enabling_wire { model_id; _ }) ->
+     Alcotest.(check string) "the rejection names the model" "auto-enabling-model" model_id
+   | Error rejection ->
+     Alcotest.failf
+       "unexpected rejection: %s"
+       (Provider_config.reasoning_effort_request_rejection_to_message rejection)
+   | Ok () -> Alcotest.fail "an undeclared effort on an auto-enabling wire was admitted");
+  Alcotest.(check bool)
+    "the declared off value is admitted"
+    true
+    (Result.is_ok (validate ~reasoning_effort:Reasoning_effort.None_ auto_enabling));
+  Alcotest.(check bool)
+    "a declared thinking effort is admitted"
+    true
+    (Result.is_ok (validate ~reasoning_effort:Reasoning_effort.High auto_enabling));
+  Alcotest.(check bool)
+    "a model that does not reason needs no effort"
+    true
+    (Result.is_ok (validate { auto_enabling with supports_reasoning = false }));
+  Alcotest.(check bool)
+    "an ordinary wire still admits an absent effort"
+    true
+    (Result.is_ok
+       (validate
+          { auto_enabling with
+            uncontrolled_reasoning = Capabilities.Provider_default_reasoning
+          }));
+  (* The preset the live fleet binds to is the one that carries the
+     declaration; this is what makes the rule reach production. *)
+  match Capabilities.capabilities_for_provider_label "ollama_cloud_v1" with
+  | Some capabilities ->
+    Alcotest.(check bool)
+      "the ollama /v1 preset declares that it enables reasoning on its own"
+      true
+      (capabilities.Capabilities.uncontrolled_reasoning
+       = Capabilities.Provider_enables_reasoning)
+  | None -> Alcotest.fail "the ollama_cloud_v1 preset is no longer reachable by label"
+;;
+
 let test_validate_reasoning_effort_checks_the_explicit_disable () =
   let manifest =
     Yojson.Safe.from_string
@@ -2484,6 +2551,10 @@ let () =
             "reasoning effort checks the explicit disable"
             `Quick
             test_validate_reasoning_effort_checks_the_explicit_disable
+        ; Alcotest.test_case
+            "an auto-enabling wire needs a declared effort"
+            `Quick
+            test_an_auto_enabling_wire_needs_a_declared_effort
         ; Alcotest.test_case
             "clear_thinking object request field"
             `Quick

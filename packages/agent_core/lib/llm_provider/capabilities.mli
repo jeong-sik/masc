@@ -29,6 +29,12 @@ type preserve_thinking_control_format =
   (** Provider [thinking] object whose [clear_thinking] member gates prior-turn
       reasoning replay. See {!Capability_vocab.preserve_thinking_control_format}. *)
 
+type uncontrolled_reasoning = Capability_vocab.uncontrolled_reasoning =
+  | Provider_default_reasoning
+  | Provider_enables_reasoning
+      (** The wire turns reasoning on when the request carries no control, so
+          an absent control is not thinking off. *)
+
 type reasoning_replay_override = Capability_vocab.reasoning_replay_override =
   | Default_reasoning_replay
   | Force_no_replay
@@ -136,6 +142,11 @@ type capabilities =
   ; content_inline_reasoning : content_inline_reasoning
   ; reasoning_output_format : reasoning_output_format
   ; reasoning_streaming_format : reasoning_streaming_format
+  ; uncontrolled_reasoning : uncontrolled_reasoning
+    (** What the wire does about reasoning when the request declares no
+        control. Only [Provider_enables_reasoning] constrains anything: on
+        such a wire a reasoning-capable model must be told an effort, because
+        silence means reasoning on. *)
   ; reasoning_replay_override : reasoning_replay_override
   ; (* Output format *)
     supports_response_format_json : bool

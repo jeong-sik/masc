@@ -10,7 +10,23 @@ module Window = Masc.Keeper_context_window
 open Alcotest
 
 let density ~input_tokens ~measured_bytes : Window.density =
-  { input_tokens; measured_bytes }
+  match Window.density_of ~input_tokens ~measured_bytes with
+  | Some density -> density
+  | None -> failf "fixture density %d tokens / %d bytes must be positive" input_tokens measured_bytes
+;;
+
+(* The record is private: the only way to hold a density is through the
+   constructor, and it refuses either side at zero, so the divisions in
+   [capacity] and [tokens_of_bytes] never see a zero. *)
+let test_density_of_refuses_a_zero_side () =
+  check bool "zero tokens is not a density" true
+    (Option.is_none (Window.density_of ~input_tokens:0 ~measured_bytes:400_000));
+  check bool "zero bytes is not a density" true
+    (Option.is_none (Window.density_of ~input_tokens:100_000 ~measured_bytes:0));
+  check bool "a negative side is not a density" true
+    (Option.is_none (Window.density_of ~input_tokens:(-1) ~measured_bytes:400_000));
+  check bool "two positive sides are" true
+    (Option.is_some (Window.density_of ~input_tokens:1 ~measured_bytes:1))
 ;;
 
 (* 85K tokens against a request that measured 400,000 bytes for 100,000
@@ -137,7 +153,9 @@ let () =
             test_to_json_carries_window_declared_and_source
         ] )
     ; ( "density"
-      , [ test_case "starts unobserved and records the newest" `Quick
+      , [ test_case "density_of refuses a zero side" `Quick
+            test_density_of_refuses_a_zero_side
+        ; test_case "starts unobserved and records the newest" `Quick
             test_density_starts_unobserved_and_records_the_newest
         ; test_case "ignores a non-measurement" `Quick
             test_density_ignores_a_non_measurement

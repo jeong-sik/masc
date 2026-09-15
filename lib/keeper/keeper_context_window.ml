@@ -42,6 +42,12 @@ type density =
   ; measured_bytes : int
   }
 
+let density_of ~input_tokens ~measured_bytes =
+  if input_tokens > 0 && measured_bytes > 0
+  then Some { input_tokens; measured_bytes }
+  else None
+;;
+
 type capacity =
   | Measured of
       { window_tokens : int
@@ -94,11 +100,11 @@ module Density = struct
   let global = { observed = Table.empty; mutex = Eio.Mutex.create () }
 
   let observe ~runtime_id ~measured_bytes ~input_tokens =
-    if measured_bytes > 0 && input_tokens > 0
-    then
+    match density_of ~input_tokens ~measured_bytes with
+    | None -> ()
+    | Some density ->
       Eio.Mutex.use_rw ~protect:true global.mutex (fun () ->
-        global.observed <-
-          Table.add runtime_id { input_tokens; measured_bytes } global.observed)
+        global.observed <- Table.add runtime_id density global.observed)
   ;;
 
   let lookup ~runtime_id =

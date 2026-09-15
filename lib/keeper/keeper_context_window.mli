@@ -42,7 +42,7 @@ val declared_tokens : t -> int
 val source_to_string : source -> string
 val to_json : t -> Yojson.Safe.t
 
-type density =
+type density = private
   { input_tokens : int
         (** The provider's inclusive prompt total for one request. *)
   ; measured_bytes : int
@@ -50,6 +50,13 @@ type density =
             (tool schemas, system prompt) plus the transmitted history, with
             the encoder the cut uses. *)
   }
+(** Readable everywhere, made only by {!density_of}, so every density the
+    arithmetic below divides by has two positive sides. *)
+
+val density_of : input_tokens:int -> measured_bytes:int -> density option
+(** [None] unless both sides are positive. A report of zero prompt tokens,
+    or a request that measured nothing, is not an observation: a density
+    made from it would divide by zero or read every window as empty. *)
 
 type capacity =
   | Measured of

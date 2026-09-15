@@ -2099,7 +2099,7 @@ let test_read_backlog_snapshot_preserves_unreadable_observation () =
       ; explicit_mention = false
       ; matched_targets = []
       ; self_commented = false
-      ; new_external_since = 0
+      ; external_since = []
       ; latest_external_author = None
       ; latest_external_preview = None
       }

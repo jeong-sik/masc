@@ -283,13 +283,15 @@ RFC-0445 의 `Operator_must_act (Fix_keeper_record)` 와 같은 값이다. 재�
 | PR | 내용 | 판정 |
 |---|---|---|
 | PR-0 (#36461, 병합됨) | Keeper 없는 제출자의 전달 의무를 한 번에 끝냄. `Keeper_producer_route` 도입 | `completion repair remains pending` 새 줄 0 |
-| PR-1 | §3.2. `reconcile_pending` 의 `No_keeper` 분기가 의무를 끝내고 Task 를 `Todo` 로 되돌린다 + 판정 레인 행위자의 typed 되돌림 | fixture: No_keeper 거절 1건 → Task `todo`, outbox 0, `handoff_context.reason` 유지 |
-| PR-2 | §3.3 투영 + 세 표면 | fixture: 포기 청구 1 + 주인 없는 점유 1 → 세 표면 모두 두 생성자 exhaustive |
-| PR-3 | §3.4. 제출 시점에 검증 기록이 포기 사유 사본을 갖는다 | fixture: 포기 청구 1건 → 기록에서 사유가 읽힌다. 기존 기록은 `None` |
+| PR-1 (#36500) | §3.2. `reconcile_pending` 의 `No_keeper` 분기가 의무를 끝내고 Task 를 `Todo` 로 되돌린다 + 판정 레인 행위자의 typed 되돌림 | fixture: No_keeper 거절 1건 → Task `todo`, outbox 0, `handoff_context.reason` 유지 |
+| PR-2 (#36513) | §3.3 투영 + §3.4 기록의 사유 사본 + 첫 표면(TUI agenda) | fixture: 포기 청구 1 + 주인 없는 점유 1 + 안 읽히는 기록 1 → 세 생성자 exhaustive, 사유가 기록에서 읽힘 |
+| PR-3 | §3.3 나머지 두 표면 — 웹 verify-queue, `Dashboard_attention` | fixture: 같은 투영을 읽고 두 화면이 같은 개수를 그린다 |
 | PR-4 | §3.5 변경 증거 | fixture: 병합된 PR 1건 → 스냅샷이 기록에 남고 판정자가 읽음. 조회 실패 → typed 미열람 |
-| 운영 | 지금 쌓인 62 + 9건 처리 | 운영자 결정. 코드 없음 |
+| 운영 | 지금 쌓인 63 + 9건 처리 | 운영자 결정. 코드 없음 |
 
-PR-1 은 PR-0 위에서만 의미가 있다. PR-2~4 는 서로 독립이다.
+PR-1 은 PR-0 위에서만 의미가 있다. §3.4 는 §3.3 과 한 PR 로 묶었다 — 기록에 사유를 쓰는 변경은
+그걸 읽는 목록과 같이 들어가야 한다. 따로 넣으면 #33218 이 "읽는 쪽이 없다" 며 지웠던 필드를
+읽는 쪽 없이 되살리는 셈이 된다. PR-3 과 PR-4 는 서로 독립이다.
 
 ## 6. 판정 기준
 

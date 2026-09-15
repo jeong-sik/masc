@@ -737,6 +737,8 @@ let test_failed_durable_completion_is_explicitly_visible () =
 
 let test_observation_reads_do_not_wait_for_durable_writer () =
   let path = fresh_log_path "exact-lane-read-projection-" in
+  (* The child locks the log file itself, so the file exists before the fork. *)
+  Unix.close (Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL; Unix.O_CLOEXEC ] 0o600);
   let registry = R.create ~path () in
   let ready_read, ready_write = Unix.pipe ~cloexec:true () in
   match Unix.fork () with

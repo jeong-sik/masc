@@ -84,7 +84,7 @@ let stop_driver_left_behind ~record_path =
 (* A browser that relaunched itself is outside the driver's process group, so
    it is found by the profile it still uses and stopped by pid. Its content
    processes exit when it does. *)
-let stop_pids pids =
+let stop_pids ~clock pids =
   let signal number pid =
     try Unix.kill pid number with Unix.Unix_error ((Unix.ESRCH | Unix.EPERM), _, _) -> () in
   let alive pid = match Unix.kill pid 0 with () -> true | exception Unix.Unix_error _ -> false in
@@ -94,11 +94,11 @@ let stop_pids pids =
     match List.filter alive pids with
     | [] -> ()
     | survivors when Monotonic_deadline.passed deadline -> List.iter (signal Sys.sigkill) survivors
-    | _ :: _ -> Unix.sleepf driver_ready_poll_s; wait ()
+    | _ :: _ -> Eio.Time.sleep clock driver_ready_poll_s; wait ()
   in
   wait ()
 
-let stop_browsers_using ~profile_root =
+let stop_browsers_using ~clock ~profile_root =
   match Process_eio.run_argv_with_status [ "ps"; "-ww"; "-axo"; "pid=,command=" ] with
   | (Unix.WEXITED 0, process_table) ->
     (match Browser_driver_process.browsers_using_profile_root ~profile_root ~process_table with
@@ -106,7 +106,7 @@ let stop_browsers_using ~profile_root =
      | pids ->
        Log.Server.warn "browser-lane: stopping automation browser pid %s still using %s"
          (String.concat ", " (List.map string_of_int pids)) profile_root;
-       Eio_unix.run_in_systhread (fun () -> stop_pids pids);
+       stop_pids ~clock pids;
        Ok ())
   | ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _) ->
     Error "the process table could not be read"
@@ -179,7 +179,7 @@ let launch_driver ~sw ~env ~masc_root ~record_path ~driver =
     let clock = Eio.Stdenv.clock env in
     let profile_root = Browser_driver_process.profile_root ~masc_root in
     Eio.Switch.on_release sw (fun () ->
-      (match stop_browsers_using ~profile_root with
+      (match stop_browsers_using ~clock ~profile_root with
        | Ok () -> ()
        | Error detail -> Log.Server.warn "browser-lane: browsers under %s not checked: %s" profile_root detail);
       remove_owner_record record_path);
@@ -219,10 +219,11 @@ let start ~sw ~env =
   let masc_root = Config_dir_resolver.masc_root ~base_path in
   let record_path = Browser_driver_process.owner_record_path ~masc_root in
   let profile_root = Browser_driver_process.profile_root ~masc_root in
+  let clock = Eio.Stdenv.clock env in
   Eio.Fiber.fork ~sw (fun () ->
     stop_driver_left_behind ~record_path;
     (* Profiles are cleared only once no browser can still be using one. *)
-    (match Result.bind (stop_browsers_using ~profile_root) (fun () -> clear_profile_root ~profile_root) with
+    (match Result.bind (stop_browsers_using ~clock ~profile_root) (fun () -> clear_profile_root ~profile_root) with
      | Ok () -> ()
      | Error detail -> Log.Server.warn "browser-lane: profiles under %s kept: %s" profile_root detail);
     match configured_browser () with
@@ -234,7 +235,6 @@ let start ~sw ~env =
       | Error detail -> Log.Server.error "browser-lane: %s" detail
       | Ok (endpoint, process, pid, log_path) ->
         let pool = Masc_http_client.Pool.create ~sw ~env () in
-        let clock = Eio.Stdenv.clock env in
         match await_driver ~clock ~pool ~endpoint ~process ~log_path with
         | Error detail -> Log.Server.error "browser-lane: %s" detail
         | Ok () ->

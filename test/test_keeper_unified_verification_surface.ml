@@ -51,7 +51,7 @@ let sample_board_event : WO.pending_board_event =
     explicit_mention = false;
     matched_targets = [];
     self_commented = false;
-    new_external_since = 0;
+    external_since = [];
     latest_external_author = None;
     latest_external_preview = None;
   }
@@ -1230,7 +1230,7 @@ let test_a_comment_on_your_own_post_says_who_and_what () =
     { sample_board_event with
       event_kind = WO.Board_comment_added
     ; self_commented = false
-    ; new_external_since = 1
+    ; external_since = []
     ; latest_external_author = Some "bob"
     ; latest_external_preview = Some "I hit this too, here is the trace"
     }
@@ -1248,14 +1248,26 @@ let test_a_comment_on_your_own_post_says_who_and_what () =
   (* The count keeps its condition: with no own comment there is no "since own"
      to count from, so stating it would be false rather than merely absent. *)
   check bool "no since-own count without an own comment" false
-    (contains_sub "new_replies_since_own" world_state)
+    (contains_sub "new_replies_since_own" world_state);
+  check bool "no since-own reply ids without an own comment" false
+    (contains_sub "new_reply_ids" world_state)
+
+(* The count comes with the ids it counts, so a Keeper that already read one
+   of those replies can see that from the row itself. *)
+let first_reply_id = "c-0ca32143f0b39bebaab0d8e7d7b723c1"
+let second_reply_id = "c-5f89fad928ec2ef5b94968bf02460ec9"
 
 let test_a_reply_after_your_own_comment_still_counts () =
+  let comment_id raw =
+    match Masc.Board.Comment_id.of_string raw with
+    | Ok id -> id
+    | Error _ -> fail ("fixture comment id " ^ raw)
+  in
   let replied_after_me =
     { sample_board_event with
       event_kind = WO.Board_comment_added
     ; self_commented = true
-    ; new_external_since = 2
+    ; external_since = [ comment_id first_reply_id; comment_id second_reply_id ]
     ; latest_external_author = Some "carol"
     ; latest_external_preview = Some "two of us saw it"
     }
@@ -1266,6 +1278,10 @@ let test_a_reply_after_your_own_comment_still_counts () =
   in
   check bool "count still rendered for a participant" true
     (contains_sub "new_replies_since_own=\"2\"" world_state);
+  check bool "the counted reply ids are rendered, oldest first" true
+    (contains_sub
+       (Printf.sprintf "new_reply_ids=\"%s,%s\"" first_reply_id second_reply_id)
+       world_state);
   check bool "commenter still named" true
     (contains_sub "latest_external_author=\"carol\"" world_state)
 

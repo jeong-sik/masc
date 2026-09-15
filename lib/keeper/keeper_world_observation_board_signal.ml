@@ -28,7 +28,7 @@ type 'a board_read =
 type comment_state =
   [ `Never
   | `No_new_external
-  | `New_external of int * string * string
+  | `New_external of Board.Comment_id.t list * string * string
   ]
 
 type comment_status = comment_state board_read
@@ -352,7 +352,7 @@ let check_self_comment_status ~self_ids ~(post_id : string) : comment_status =
         in
         Available
           (`New_external
-             ( List.length external_after
+             ( List.map (fun (c : Board.comment) -> c.id) external_after
              , Board.Agent_id.to_string latest.author
              , short_preview ~max_len:60 latest.content )))
 ;;

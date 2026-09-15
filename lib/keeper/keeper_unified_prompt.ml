@@ -738,10 +738,18 @@ let board_event_fields
      — the wake #27288 added arrived empty, and reading it back cost a
      masc_board_post_get. The count keeps its condition because its name is only
      true under it; the two content fields follow the data instead. *)
+  (* The ids travel with the count so the reader can tell which of the replies
+     it already read in an earlier turn. The reader makes that comparison;
+     nothing here records what it has read. *)
   let fields =
-    if event.self_commented && event.new_external_since > 0
-    then fields @ [ "new_replies_since_own", string_of_int event.new_external_since ]
-    else fields
+    match event.self_commented, event.external_since with
+    | true, (_ :: _ as external_since) ->
+      fields
+      @ [ "new_replies_since_own", string_of_int (List.length external_since)
+        ; ( "new_reply_ids"
+          , String.concat "," (List.map Board.Comment_id.to_string external_since) )
+        ]
+    | true, [] | false, _ -> fields
   in
   let fields =
     match event.latest_external_author, event.latest_external_preview with

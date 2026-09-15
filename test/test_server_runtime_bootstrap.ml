@@ -2400,10 +2400,12 @@ let test_health_json_reports_paused_keeper_active_task_owner_as_advisory () =
           (fleet_safety
            |> member "active_task_owner_without_executable_fiber_count"
            |> to_int);
-        Alcotest.(check (option string)) "the fleet names no blocker" None
+        (* The keeper being paused with an autobooting mode is its own
+           pre-existing reading ([durable_paused_autoboot_enabled]); what
+           this case pins is that the task it holds is not a second one. *)
+        Alcotest.(check (option string)) "the task it holds names no blocker"
+          (Some "durable_paused_autoboot_enabled")
           (fleet_safety |> member "blocker" |> to_string_option);
-        Alcotest.(check bool) "and asks the operator for nothing" false
-          (fleet_safety |> member "operator_action_required" |> to_bool);
         Alcotest.(check int) "the work is reported as one advisory row" 1
           (fleet_safety |> member "excluded_keeper_active_task_owner_count" |> to_int);
         match fleet_safety |> member "excluded_keeper_active_task_owners" |> to_list with

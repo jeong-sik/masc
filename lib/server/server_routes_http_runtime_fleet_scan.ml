@@ -948,17 +948,36 @@ let keeper_agent_bindings ?profile_snapshot config =
        (fun scan name ->
          match Keeper_meta_store.read_meta config name with
          | Ok (Some meta) -> (
-             match Keeper_runtime.autoboot_exclusion_reason ?profile_snapshot config meta.name with
-             | None ->
+             (* A profile this binary cannot read says nothing about whether
+                the keeper should be running, and the exclusion reason reads
+                an unreadable profile as "policy admits it" so the boot path
+                can report the precise error itself. Here that would make an
+                unreadable profile a fleet blocker, so it is a read error --
+                the same answer the scan gave before it asked this
+                question. *)
+             match profile_defaults ?profile_snapshot config meta.name with
+             | Error error ->
                {
                  scan with
-                 admitted_keeper_names = meta.name :: scan.admitted_keeper_names;
+                 binding_read_errors =
+                   (name, Keeper_types_profile.keeper_toml_load_error_to_string error)
+                   :: scan.binding_read_errors;
                }
-             | Some reason ->
-               {
-                 scan with
-                 excluded_keeper_reasons = (meta.name, reason) :: scan.excluded_keeper_reasons;
-               })
+             | Ok (_ : Keeper_types_profile.keeper_profile_defaults) -> (
+               match
+                 Keeper_runtime.autoboot_exclusion_reason ?profile_snapshot config meta.name
+               with
+               | None ->
+                 {
+                   scan with
+                   admitted_keeper_names = meta.name :: scan.admitted_keeper_names;
+                 }
+               | Some reason ->
+                 {
+                   scan with
+                   excluded_keeper_reasons =
+                     (meta.name, reason) :: scan.excluded_keeper_reasons;
+                 }))
          | Ok None -> scan
          | Error err ->
              {

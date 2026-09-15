@@ -75,6 +75,35 @@ val quota_ordered_deferred_runtime_lane :
     preserving its assignment and failure evidence. Call once before building
     pre-dispatch execution so prompt shaping and dispatch consume the same
     selected runtime. *)
+
+(** Whether one runtime path is resting at a given instant
+    (RFC-provider-path-rest §3.3). Read from the 429 candidate observation and
+    the quota window. [walk_promotes_at_release] is [true] when the walk order
+    stops holding the path back at [release_at]: every rest on it was stated by
+    the provider and not cut by the cap. An id the runtime table cannot resolve
+    is serving. *)
+type path_rest =
+  | Path_serving
+  | Path_resting of
+      { release_at : float
+      ; walk_promotes_at_release : bool
+      }
+
+val path_rest : now:float -> string -> path_rest
+
+(** What a deferred suffix sends next. A serving head in walk order takes the
+    input. A resting head waits until the next turn's head can serve: the
+    head's release, or an earlier release of a later path the walk order
+    promotes at that moment; [resting_runtime_id] owns that release. *)
+type deferred_lane_rest =
+  | Deferred_path_serving of { runtime_id : string }
+  | Deferred_paths_resting of
+      { release_at : float
+      ; resting_runtime_id : string
+      }
+
+val deferred_lane_rest : now:float -> deferred_runtime_lane -> deferred_lane_rest
+
 val equal_deferred_runtime_lane :
   deferred_runtime_lane -> deferred_runtime_lane -> bool
 

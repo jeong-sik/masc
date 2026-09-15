@@ -295,34 +295,35 @@ let retry_after_of_route = function
   | Rotate_now _ -> None
   | Exhausted_visible_alive _ -> None
 
-(* A provider rate-limit ([429]) or capacity failure route means the lane
-   itself is the thing that must back off: re-running the turn at the plain
-   cadence keeps hammering the provider while the crash-accounting streak
-   climbs like a clock (#26068). [retry_backoff_sec] derives the backoff from
-   the route's own [Retry-After] hint when present, else from the cadence, and
-   always clamps to the configured cap so a misread hint (or an out-of-range
-   env override) cannot park the lane for longer than the cap. Both lanes that
-   retry against a provider share this one rule: the heartbeat cycle sleep and
-   the chat lane's deferred-retry [not_before]. *)
-let retry_backoff_sec ~cap_sec ~retry_after_hint ~cadence_sec =
+(* How long a path rests after a provider refused it (RFC-provider-path-rest).
+   The rest belongs to the path that received the answer, so its length comes
+   from that answer alone: the keeper's cadence spaces periodic turns and says
+   nothing about a provider's window.
+
+   A usable hint rests that long. A positive fractional hint still rests at
+   least one second so the chat lane cannot re-fire in a tight loop (#35246).
+   Without a usable hint (absent, zero, negative, NaN) the class decides: a
+   throttle rests the named floor, and an account exhaustion rests the cap,
+   because a quota that said nothing about its end is not known to come back
+   within a minute. Every result is clamped to [cap_sec] so a misread header
+   cannot park a path longer than the operator allows. *)
+let path_rest_sec ~cap_sec ~retry_class ~retry_after_hint =
   let cap_sec = Float.max 0.0 cap_sec in
-  (* No hint, or a garbage one (zero, negative, NaN, infinite), is still a
-     signal the provider rate-limited this lane but carries no usable
-     duration: all of them take the same named floor
-     ({!Env_config_keeper.KeeperKeepalive.rate_limit_backoff_floor_sec})
-     rather than diverging. The option stays an option to this point so the
-     caller never has to invent a sentinel for "no hint".
-     A positive fractional hint (e.g. 0.001s) must not cause an immediate
-     re-fire loop when cadence_sec is 0.0 (chat lane); clamp positive hints to
-     at least 1.0s (#35246). *)
-  let no_usable_hint () =
-    Float.max cadence_sec Env_config_keeper.KeeperKeepalive.rate_limit_backoff_floor_sec
+  let unstated () =
+    match retry_class with
+    | Hard_quota -> cap_sec
+    | Rate_limited
+    | Capacity_backpressure
+    | Server_error
+    | Network_transient
+    | Provider_timeout ->
+      Env_config_keeper.KeeperKeepalive.rate_limit_backoff_floor_sec
   in
   let base =
     match retry_after_hint with
-    | None -> no_usable_hint ()
-    | Some hint when Float.is_nan hint || hint <= 0.0 -> no_usable_hint ()
-    | Some hint -> Float.max (Float.max hint 1.0) cadence_sec
+    | None -> unstated ()
+    | Some hint when Float.is_nan hint || hint <= 0.0 -> unstated ()
+    | Some hint -> Float.max hint 1.0
   in
   Float.min cap_sec base
 ;;

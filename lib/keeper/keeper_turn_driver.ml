@@ -174,6 +174,105 @@ let quota_ordered_deferred_runtime_lane ~now hint =
   | [] -> hint
 ;;
 
+type path_rest =
+  | Path_serving
+  | Path_resting of
+      { release_at : float
+      ; walk_promotes_at_release : bool
+      }
+
+type deferred_lane_rest =
+  | Deferred_path_serving of { runtime_id : string }
+  | Deferred_paths_resting of
+      { release_at : float
+      ; resting_runtime_id : string
+      }
+
+(* When one runtime path is released, read from the same two stores the walk
+   order reads (RFC-provider-path-rest §3.3). The order holds a stated rest back
+   until the provider's own time, so at that release the walk promotes the path
+   again. It holds an unstated rest back until a success, so that release ends
+   only the wait, not the demotion; a stated time beyond the cap is the same,
+   because the cap ends the wait before the provider's time ends the demotion.
+   A quota observation carries no noted time and rests from [now]. An id the
+   table cannot resolve is no evidence of a rest. *)
+let path_rest ~now runtime_id =
+  match Runtime.get_runtime_by_id runtime_id with
+  | None -> Path_serving
+  | Some (runtime : Runtime.t) ->
+    let cap_sec = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec in
+    let rest_sec retry_class retry_after_hint =
+      Keeper_runtime_failure_route.path_rest_sec ~cap_sec ~retry_class ~retry_after_hint
+    in
+    let rate_limit_rest =
+      match
+        Runtime_lane_preference.candidate_backpressure
+          ~now
+          ~candidate:runtime.candidate_preference
+      with
+      | None -> None
+      | Some (Runtime_lane_preference.Unknown_scope_rate_limit { noted_at; retry_after }) ->
+        let promotes =
+          match retry_after with
+          | Some seconds when (not (Float.is_nan seconds)) && seconds > 0.0 ->
+            Float.compare seconds cap_sec <= 0
+          | Some _ | None -> false
+        in
+        Some
+          ( noted_at +. rest_sec Keeper_runtime_failure_route.Rate_limited retry_after
+          , promotes )
+    in
+    let quota_rest =
+      let scope = Runtime.quota_scope_of_runtime runtime in
+      match Runtime_quota_window.active_until ~scope ~now with
+      | Some resets_at ->
+        let cap_at = now +. cap_sec in
+        Some (Float.min resets_at cap_at, Float.compare resets_at cap_at <= 0)
+      | None ->
+        if Runtime_quota_window.is_exhausted ~scope ~now
+        then Some (now +. rest_sec Keeper_runtime_failure_route.Hard_quota None, false)
+        else None
+    in
+    let rest =
+      match rate_limit_rest, quota_rest with
+      | None, None -> None
+      | Some rest, None | None, Some rest -> Some rest
+      | Some (rate_limit_at, rate_limit_promotes), Some (quota_at, quota_promotes) ->
+        Some (Float.max rate_limit_at quota_at, rate_limit_promotes && quota_promotes)
+    in
+    (match rest with
+     | Some (release_at, walk_promotes_at_release) when Float.compare now release_at < 0 ->
+       Path_resting { release_at; walk_promotes_at_release }
+     | Some _ | None -> Path_serving)
+;;
+
+(* The next turn dispatches the suffix in walk order
+   ([quota_ordered_deferred_runtime_lane]), so its head decides: a serving head
+   takes the input now. A resting head waits for the first moment the next
+   turn's head can serve: the head's own release, or an earlier release of a
+   later path that the walk order promotes at that moment. A later path whose
+   release the order does not follow stays behind the head and cannot shorten
+   the wait. *)
+let deferred_lane_rest ~now hint =
+  let ordered = quota_ordered_deferred_runtime_lane ~now hint in
+  match path_rest ~now ordered.next_runtime_id with
+  | Path_serving -> Deferred_path_serving { runtime_id = ordered.next_runtime_id }
+  | Path_resting { release_at = head_release_at; walk_promotes_at_release = _ } ->
+    let release_at, resting_runtime_id =
+      List.fold_left
+        (fun ((earliest, _) as found) runtime_id ->
+           match path_rest ~now runtime_id with
+           | Path_resting { release_at; walk_promotes_at_release = true }
+             when Float.compare release_at earliest < 0 ->
+             release_at, runtime_id
+           | Path_resting { release_at = _; walk_promotes_at_release = _ } | Path_serving ->
+             found)
+        (head_release_at, ordered.next_runtime_id)
+        ordered.later_runtime_ids
+    in
+    Deferred_paths_resting { release_at; resting_runtime_id }
+;;
+
 let equal_deferred_runtime_lane left right =
   String.equal left.assignment_id right.assignment_id
   && String.equal left.failed_runtime_id right.failed_runtime_id

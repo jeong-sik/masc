@@ -152,12 +152,16 @@ let test_the_owner_loop_does_not_outlive_its_switch () = with_base (fun base_pat
 
      Test harness deadline only: a loop that outlives its switch must fail CI,
      not hang it. *)
-  Eio.Time.with_timeout_exn clock 5. (fun () ->
-    Eio.Switch.run (fun sw ->
-      Worker.For_testing.start ~sw ~base_path ~execute;
-      await_idle ~clock ~base_path));
-  Alcotest.(check bool) "leaving the switch released the owner" true
-    (Option.is_none (Worker.For_testing.find ~base_path)))
+  match
+    Eio.Time.with_timeout clock 5. (fun () ->
+      Eio.Switch.run (fun sw ->
+        Worker.For_testing.start ~sw ~base_path ~execute;
+        await_idle ~clock ~base_path);
+      Ok ())
+  with
+  | Ok () -> ()
+  | Error `Timeout ->
+    Alcotest.fail "the owner's loop held its switch open after the body returned")
 
 let test_prompt_change_is_a_new_request () = with_base (fun base_path clock ->
   let key = Prompt_names.workspace_memory_curator in

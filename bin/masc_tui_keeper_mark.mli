@@ -1,11 +1,9 @@
 (** One character for what a keeper is doing, for the columns too narrow to
     carry a word.
 
-    The mark used to come from a string match on the health label, with
-    everything the match did not name falling to the healthy dot: a stale
-    keeper, one whose status file would not decode, and one whose fiber had
-    already ended all drew what a working keeper draws. Six readings now get
-    six marks, and a seventh member of the health vocabulary is a compile
+    The mark used to come from a string match on the health label, and every
+    label the match did not name drew the healthy dot. Each reading now gets
+    its own mark, and a new member of the health vocabulary is a compile
     error here rather than a keeper that looks fine. *)
 
 val glyph : paused:bool -> Masc.Tui_decode.keeper_health_reading option -> string

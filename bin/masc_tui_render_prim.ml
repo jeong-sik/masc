@@ -917,6 +917,7 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
         match reading_of_health with
         | Some Tui_decode.Health_running -> Pane.Ok
         | Some Tui_decode.Health_idle -> Pane.Dim
+        | Some Tui_decode.Health_failing -> Pane.Warn
         | Some Tui_decode.Health_offline -> Pane.Bad
         | None -> Pane.Dim
     in

@@ -50,13 +50,15 @@ let keeper_health_of_string = Keeper_status_runtime.keeper_health_of_string_opt
 type keeper_health_reading =
   | Health_running
   | Health_idle
+  | Health_failing
   | Health_offline
 
-(* Exhaustive on purpose: a fourth member of [Keeper_types.keeper_health]
-   stops the build here rather than arriving on screen as one of these three. *)
+(* Exhaustive on purpose: a fifth member of [Keeper_types.keeper_health]
+   stops the build here rather than arriving on screen as one of these four. *)
 let keeper_health_reading : keeper_health -> keeper_health_reading = function
   | Keeper_types.KH_healthy -> Health_running
   | Keeper_types.KH_idle -> Health_idle
+  | Keeper_types.KH_failing -> Health_failing
   | Keeper_types.KH_offline -> Health_offline
 
 let keeper_next_action_of_string =

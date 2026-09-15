@@ -33,8 +33,13 @@ val workspace_surface_json : keeper_meta -> Yojson.Safe.t
 val live_override_fields :
   keeper_meta -> keeper_profile_defaults -> string list
 
+val runtime_phase :
+  Workspace_utils.config -> keeper_meta -> Keeper_state_machine.phase option
+(** The keeper's registry phase, [None] when it has no registry entry. *)
+
 val runtime_keepalive_running :
   Workspace_utils.config -> keeper_meta -> bool
+(** {!Keeper_status_runtime.keepalive_running_of_phase} of {!runtime_phase}. *)
 
 val runtime_keepalive_started_at :
   Workspace_utils.config -> keeper_meta -> float option

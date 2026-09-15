@@ -804,18 +804,19 @@ let test_reused_chunks_keep_presentation_inputs_live () =
   in
   check bool "initial event age on the header" true
     (contains "last event 10.0s" (header_of "tester" initial));
-  let changed = { input with Pane.now = now +. 20.; selected = Some "probe";
-    keepers = Option.map (List.map (fun (keeper : Pane.keeper) ->
-      (* Idle, not offline: an offline keeper has no fleet row to read. *)
-      if keeper.name = "tester" then { keeper with health = Some Masc.Tui_decode.Health_idle }
-      else keeper)) input.keepers } in
+  let changed = { input with Pane.now = now +. 20.; selected = Some "probe" } in
   let later = Pane.lines ~rows ~cols ~scroll:0 changed in
   check bool "age advances independently of chunks" true
     (contains "last event 1m55s" (header_of "probe" later));
-  (* The state column, not a glyph: a record whose keeper is gone reads "gone"
-     where a live one reads "unsettled". *)
-  check bool "new health changes the state column" true
-    (contains "gone" (row_for "tester" later));
+  (* Health is read on every frame as well: over the same reused chunks, a
+     keeper whose keepalive has gone loses its fleet row. Running and idle
+     draw the same record state, so offline is the reading that shows. *)
+  let gone = { changed with
+    keepers = Option.map (List.map (fun (keeper : Pane.keeper) ->
+      if keeper.name = "tester" then { keeper with health = Some Masc.Tui_decode.Health_offline }
+      else keeper)) changed.keepers } in
+  check bool "new health changes the fleet rows" false
+    (List.mem (Pane.Target_keeper "tester") (Pane.lines ~rows ~cols ~scroll:0 gone).Pane.targets);
   let later_text = List.map text later.Pane.rows in
   check bool "new selection changes focus keeper" true
     (contains "turn 41" (List.nth later_text (last_index_of_in later_text "probe")));

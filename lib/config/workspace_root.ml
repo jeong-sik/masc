@@ -28,6 +28,7 @@ type error =
       { cwd : string option
       ; stale_record : (string * string) option
       }
+  | Unanchored of { source : source; requested : string }
 
 let present value =
   match value with
@@ -37,23 +38,20 @@ let present value =
     if String.equal trimmed "" then None else Some trimmed
 
 let absolute ~cwd path =
-  if not (Filename.is_relative path) then path
-  else
-    match cwd with
-    | Some cwd -> Filename.concat cwd path
-    | None -> path
-
-let root_of observation raw =
-  let normalized =
-    Env_config_core.normalize_masc_base_path_input
-      (absolute ~cwd:observation.cwd raw)
-  in
-  match observation.realpath normalized with
-  | Some canonical -> canonical
-  | None -> normalized
+  if not (Filename.is_relative path) then Some path
+  else Option.map (fun cwd -> Filename.concat cwd path) cwd
 
 let chosen observation source raw =
-  Ok { root = root_of observation raw; requested = raw; source }
+  match absolute ~cwd:observation.cwd raw with
+  | None -> Error (Unanchored { source; requested = raw })
+  | Some path ->
+    let normalized = Env_config_core.normalize_masc_base_path_input path in
+    let root =
+      match observation.realpath normalized with
+      | Some canonical -> canonical
+      | None -> normalized
+    in
+    Ok { root; requested = raw; source }
 
 let inferred_recorded observation =
   match observation.recorded with
@@ -117,7 +115,30 @@ let source_label = function
   | Recorded _ -> "persisted_default"
   | Current_directory -> "current_directory"
 
-let error_message (No_workspace { cwd; stale_record }) =
+let choices config =
+  [ "Choose one:"
+  ; "  masc <command> --base-path <workspace>"
+  ; "  MASC_BASE_PATH=<workspace> masc <command>"
+  ; Printf.sprintf "  run the command inside a workspace (a directory holding %s)" config
+  ; "`masc init --base-path <workspace> --record-default` makes that workspace the default."
+  ]
+
+let error_message = function
+  | Unanchored { source; requested } ->
+    let config = Filename.concat Common.masc_dirname "config" in
+    let named =
+      match source with
+      | Flag -> "--base-path"
+      | Environment -> "MASC_BASE_PATH"
+      | Current_directory | Recorded _ -> "The workspace"
+    in
+    String.concat "\n"
+      (Printf.sprintf
+         "%s is the relative path %s, and the current directory cannot be read to \
+          anchor it. Give an absolute path."
+         named requested
+       :: choices config)
+  | No_workspace { cwd; stale_record } ->
   let config = Filename.concat Common.masc_dirname "config" in
   let cwd_line =
     match cwd with
@@ -134,11 +155,4 @@ let error_message (No_workspace { cwd; stale_record }) =
     | None -> []
   in
   String.concat "\n"
-    ([ "No MASC workspace was found."; cwd_line ]
-     @ record_line
-     @ [ "Choose one:"
-       ; "  masc <command> --base-path <workspace>"
-       ; "  MASC_BASE_PATH=<workspace> masc <command>"
-       ; Printf.sprintf "  run the command inside a workspace (a directory holding %s)" config
-       ; "`masc init --base-path <workspace> --record-default` makes that workspace the default."
-       ])
+    ([ "No MASC workspace was found."; cwd_line ] @ record_line @ choices config)

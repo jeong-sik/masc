@@ -112,6 +112,7 @@ heartbeat 나이 판정이 없어도 아래가 이미 답한다. 나이 판정�
 - [ ] **PR-B** 대시보드: heartbeat 판정 3벌 제거, `KeeperHealthState` 세 값, `keeperDisplayStatus` phase 우선. 검증: `pnpm typecheck`, `pnpm lint`, `pnpm test`(CI 는 대시보드 테스트를 돌리지 않는다).
 - [ ] **PR-A1** 서버 + TUI: `keeper_health` 세 값, persisted snapshot 모듈·wire 키 삭제, TUI 마크, 테스트, 이 RFC.
 - [ ] **PR-A2** (A1 위): `Surface_inactive`, `klc_inactive` 삭제 (`keeper_surface_status` 가 더는 만들지 않는다).
+- [ ] **PR-B2** (A2 병합 뒤, 대시보드): keeper `status` 를 읽는 자리의 `'inactive'` 토큰 삭제 — `keeper-store-normalize.ts`, `lib/unified-status.ts`, `runtime-counts.ts`, `lib/keeper-operational-state.ts`, `lib/monitoring-runtime.ts`, `lib/keeper-classifiers.ts`. agent status 의 `inactive`(`lib/agent-status.ts`, `types/core.ts` Agent) 는 다른 어휘라 그대로 둔다.
 - [ ] **PR-C** (A1 위): continuity 축 정리. `keepalive_recovery_window_s` 는 "heartbeat 증거가 아직 안 쓰였을 60초 동안 판정 보류" 용이었다. 증거 판정이 사라지면 `Continuity_recovering` 은 근거가 없고 `keeper_continuity` 는 `keepalive_running` 하나와 같다. 함께: `lib/workspace/heartbeat.ml`(MCP 시절 타이머 표, `start` 호출자 0, `stop_by_agent` 는 항상 0 반환)과 `heartbeats_stopped` 필드.
 - [ ] **PR-D** TUI Activity pane: chunk 를 keeper 턴 id 로 묶는다. agent-core `turn` 은 provider 호출 순번이라 keeper 턴 하나가 호출 수만큼 `unsettled` 줄로 쪼개진다. `run_id` 는 키로 못 쓴다 — `Sink_degraded` 면 이벤트마다 새 `evt-…` 가 찍히고(오늘 실측 goo-yang-bong 577건), provider 로테이션마다 갈린다. 대신 서버 브리지가 agent-core 프레임에 registry 의 `current_turn_observation.turn_id` 를 `keeper_turn` 으로 찍고, `keeper_tool_call` 도 같은 값을 싣는다. TUI 는 `(keeper, keeper_turn)` 으로만 묶는다.
 

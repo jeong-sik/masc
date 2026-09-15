@@ -251,11 +251,9 @@ let test_detailed_row_carries_lifecycle_phase () =
 ;;
 
 (* Four separate readings describe one keeper, and a row that answers all four
-   with a single word forces its readers to guess. The TUI header read the
-   folded "inactive" as running while the dashboard read it as attention -
-   neither was wrong about the word, because the word does not say which
-   question it answers. Each axis gets its own field so no reader has to fold
-   or unfold anything. *)
+   with a single word forces its readers to guess which question the word
+   answers. Each axis gets its own field so no reader has to fold or unfold
+   anything. *)
 let detailed_row f =
   keeper_list
     ~names:[ "alpha" ]
@@ -283,7 +281,7 @@ let test_detailed_row_carries_every_axis () =
    shared value proves nothing about which one a field answers with. Only the
    words unique to each side can tell them apart. *)
 let health_only_words = [ "healthy" ]
-let surface_only_words = [ "active"; "inactive"; "busy"; "listening" ]
+let surface_only_words = [ "active"; "busy"; "listening" ]
 
 let test_health_is_a_health_word_not_a_surface_word () =
   (* [status] answers with the surface vocabulary. [health] must answer from

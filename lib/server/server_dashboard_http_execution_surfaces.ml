@@ -888,11 +888,8 @@ let patched_keeper_status row ~event ~keepalive_running =
           "dashboard execution cache: keeper row has no current status"
     in
     match Keeper_status_runtime.control_plane_status_of_string_opt status with
-    | Some
-        (Cp_surface
-           ((Surface_active | Surface_idle) as s)) ->
+    | Some (Cp_surface s) ->
       `String (Keeper_status_runtime.surface_status_to_string s)
-    | Some (Cp_surface (Surface_offline | Surface_inactive)) -> `String "offline"
     | Some Cp_paused ->
       `String
         (Keeper_status_runtime.control_plane_status_to_string

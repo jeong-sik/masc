@@ -2061,9 +2061,7 @@ let test_health_json_reports_dormant_task_owner_as_advisory () =
   with_temp_dir "health-active-task-owner-without-fiber" (fun dir ->
     let config_root = make_config_root dir in
     Sys.remove (Filename.concat (Filename.concat config_root "keepers") "example.toml");
-    write_file
-      (Filename.concat (Filename.concat config_root "keepers") "omega.toml")
-      "[keeper]\nactivation_mode = \"manual\"\n";
+    write_config_root_keeper_toml ~autoboot_enabled:false config_root "omega";
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
     let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
@@ -2403,7 +2401,7 @@ let test_health_json_reports_paused_keeper_active_task_owner_as_advisory () =
         (* The keeper being paused with an autobooting mode is its own
            pre-existing reading ([durable_paused_autoboot_enabled]); what
            this case pins is that the task it holds is not a second one. *)
-        Alcotest.(check (option string)) "the task it holds names no blocker"
+        Alcotest.(check (option string)) "the only blocker is the pause itself"
           (Some "durable_paused_autoboot_enabled")
           (fleet_safety |> member "blocker" |> to_string_option);
         Alcotest.(check int) "the work is reported as one advisory row" 1
@@ -2419,6 +2417,64 @@ let test_health_json_reports_paused_keeper_active_task_owner_as_advisory () =
           Alcotest.(check bool) "and does not blame the fleet" false
             (row |> member "fleet_blocking" |> to_bool)
         | rows -> Alcotest.failf "expected one excluded owner row, got %d" (List.length rows)))
+
+(* A keeper whose profile does not load: the scan cannot say whether the boot
+   path would run it, so its work is neither a blocker nor an advisory row,
+   and the profile error is reported by name. The mode-only reader this scan
+   used to have read the same keeper as disabled and reported nothing, which
+   let the dormant fixture above stand for a manual keeper with no
+   [keeper.instructions]. The meta itself was read, so the scan still knows
+   every other name is not a keeper: a task held by one stays a blocker. *)
+let test_health_json_reports_unreadable_keeper_profile_as_scan_error () =
+  with_temp_dir "health-unreadable-keeper-profile" (fun dir ->
+    let config_root = make_config_root dir in
+    Sys.remove (Filename.concat (Filename.concat config_root "keepers") "example.toml");
+    write_file
+      (Filename.concat (Filename.concat config_root "keepers") "omega.toml")
+      "[keeper]\nactivation_mode = \"manual\"\n";
+    with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+    let previous_state = Server_auth.For_testing.snapshot_server_state () in
+    Config_dir_resolver.reset ();
+    Fun.protect
+      ~finally:(fun () ->
+        Server_auth.For_testing.restore_server_state @@ previous_state;
+        Config_dir_resolver.reset ())
+      (fun () ->
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
+        Server_auth.For_testing.restore_server_state @@ Some state;
+        let config = Mcp_server.workspace_config state in
+        let executor = make_keeper_meta ~name:"omega" ~trace_id:"trace-omega" () in
+        write_keeper_meta_exn config executor;
+        let in_progress ~id ~title assignee =
+          make_task ~id ~title
+            ~status:
+              (Types.InProgress { assignee; started_at = "2026-06-26T00:00:01Z" })
+            ()
+        in
+        let tasks =
+          [ in_progress ~id:"task-unreadable-profile" ~title:"Held by omega"
+              executor.Keeper_meta_contract.name
+          ; in_progress ~id:"task-no-such-keeper" ~title:"Held by nobody" "ghost"
+          ]
+        in
+        Workspace.write_backlog config
+          { Types.tasks; task_deletion_receipts = []; pending_completion_rejections = []; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
+        let request = Httpun.Request.create `GET "/health" in
+        let json = Server_routes_http_runtime.make_health_json request in
+        let open Yojson.Safe.Util in
+        let fleet_safety = json |> member "keeper_fleet_safety" in
+        Alcotest.(check (list string)) "the unreadable profile is one scan error, by name"
+          [ "omega" ]
+          (fleet_safety |> member "active_task_owner_scan_errors" |> to_list
+           |> List.map (fun row -> row |> member "source" |> to_string));
+        Alcotest.(check int) "its work is not an advisory row" 0
+          (fleet_safety |> member "excluded_keeper_active_task_owner_count" |> to_int);
+        Alcotest.(check (list string)) "and not a blocker; the ghost's task still is"
+          [ "task-no-such-keeper" ]
+          (fleet_safety
+           |> member "active_task_owner_without_executable_fiber_tasks"
+           |> to_list
+           |> List.map (fun row -> row |> member "task_id" |> to_string))))
 
 let test_health_json_preserves_active_task_owner_meta_read_error () =
   with_temp_dir "health-active-task-owner-meta-read-error" (fun dir ->
@@ -5361,6 +5417,10 @@ let () =
             "health json reports a paused keeper's task as advisory"
             `Quick
             test_health_json_reports_paused_keeper_active_task_owner_as_advisory;
+          Alcotest.test_case
+            "health json reports an unreadable keeper profile as a scan error"
+            `Quick
+            test_health_json_reports_unreadable_keeper_profile_as_scan_error;
           Alcotest.test_case
             "health json keeps awaiting verification in system LLM lane"
             `Quick

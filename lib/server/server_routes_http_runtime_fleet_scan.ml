@@ -932,11 +932,17 @@ let non_keeper_active_task_owner_json row =
 type keeper_agent_binding_scan = {
   admitted_keeper_names : string list;
   excluded_keeper_reasons : (string * Keeper_runtime.autoboot_exclusion_reason) list;
+  profile_read_errors : (string * string) list;
   binding_read_errors : (string * string) list;
 }
 
 let empty_keeper_agent_binding_scan =
-  { admitted_keeper_names = []; excluded_keeper_reasons = []; binding_read_errors = [] }
+  {
+    admitted_keeper_names = [];
+    excluded_keeper_reasons = [];
+    profile_read_errors = [];
+    binding_read_errors = [];
+  }
 
 let compare_excluded_keeper_reason (left_name, _) (right_name, _) =
   String.compare left_name right_name
@@ -949,19 +955,22 @@ let keeper_agent_bindings ?profile_snapshot config =
          match Keeper_meta_store.read_meta config name with
          | Ok (Some meta) -> (
              (* A profile this binary cannot read says nothing about whether
-                the keeper should be running, and the exclusion reason reads
-                an unreadable profile as "policy admits it" so the boot path
-                can report the precise error itself. Here that would make an
-                unreadable profile a fleet blocker, so it is a read error --
-                the same answer the scan gave before it asked this
-                question. *)
+                the keeper should be running. The exclusion reason reads it as
+                "policy admits it" so the boot path reports the precise error
+                itself; here that would turn a broken profile into a fleet
+                blocker. The mode-only reader this replaced read it as
+                disabled and said nothing at all, which is how a fixture with
+                no [keeper.instructions] passed for a manual keeper. It is a
+                scan error naming the keeper, kept apart from meta read
+                errors: the meta was read, so the scan still knows this name
+                is a keeper and every other name is not. *)
              match profile_defaults ?profile_snapshot config meta.name with
              | Error error ->
                {
                  scan with
-                 binding_read_errors =
-                   (name, Keeper_types_profile.keeper_toml_load_error_to_string error)
-                   :: scan.binding_read_errors;
+                 profile_read_errors =
+                   (meta.name, Keeper_types_profile.keeper_toml_load_error_to_string error)
+                   :: scan.profile_read_errors;
                }
              | Ok (_ : Keeper_types_profile.keeper_profile_defaults) -> (
                match
@@ -990,6 +999,8 @@ let keeper_agent_bindings ?profile_snapshot config =
     admitted_keeper_names = sorted_unique_strings scan.admitted_keeper_names;
     excluded_keeper_reasons =
       List.sort_uniq compare_excluded_keeper_reason scan.excluded_keeper_reasons;
+    profile_read_errors =
+      List.sort_uniq compare_string_pair scan.profile_read_errors;
     binding_read_errors =
       List.sort_uniq compare_string_pair scan.binding_read_errors;
   }
@@ -1009,6 +1020,7 @@ let active_task_owner_fiber_scan ?profile_snapshot config ~executable_names =
   let binding_scan = keeper_agent_bindings ?profile_snapshot config in
   let agent_bindings = binding_scan.admitted_keeper_names in
   let meta_read_errors = binding_scan.binding_read_errors in
+  let keeper_read_errors = meta_read_errors @ binding_scan.profile_read_errors in
   match Workspace.read_backlog_observation_with_source_r config with
   | Error err ->
       {
@@ -1017,7 +1029,7 @@ let active_task_owner_fiber_scan ?profile_snapshot config ~executable_names =
         non_keeper_active_task_owners = [];
         excluded_keeper_active_task_owners = [];
         active_task_owner_scan_errors =
-          ("backlog", err) :: meta_read_errors;
+          ("backlog", err) :: keeper_read_errors;
       }
   | Ok observation ->
       let backlog = observation.observed_backlog in
@@ -1069,6 +1081,11 @@ let active_task_owner_fiber_scan ?profile_snapshot config ~executable_names =
                          }
                          :: non_keeper_rows
                        , excluded_rows )
+                   | [] when List.mem_assoc assignee binding_scan.profile_read_errors ->
+                       (* Whether the boot path would run this keeper is not
+                          known while its profile is unreadable. The error is
+                          reported on its own. *)
+                       (pending_rows, blocking_rows, non_keeper_rows, excluded_rows)
                    | [] when meta_read_errors <> [] ->
                        (* The scan could not read every keeper's meta, so
                           "no keeper by this name" is not a fact it has. The
@@ -1134,7 +1151,7 @@ let active_task_owner_fiber_scan ?profile_snapshot config ~executable_names =
         completion_authority_pending_tasks = pending_rows;
         non_keeper_active_task_owners = non_keeper_rows;
         excluded_keeper_active_task_owners = excluded_rows;
-        active_task_owner_scan_errors = backlog_read_errors @ meta_read_errors;
+        active_task_owner_scan_errors = backlog_read_errors @ keeper_read_errors;
       }
 
 

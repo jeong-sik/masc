@@ -40,8 +40,9 @@ type permit_wait =
     [Error `Permit_wait_expired] when no slot was granted by then (the waiter
     leaves the queue), [Ok (f ())] otherwise, including when the slot was
     granted in the same instant the deadline passed: the wait this deadline
-    bounds is over, and the slot is the caller's. [f] runs without this
-    deadline; the caller bounds it. *)
+    bounds is over, and the slot is the caller's. A deadline already passed
+    asks for no slot. [f] runs without this deadline; the caller bounds
+    it. *)
 val with_permit_until
   :  ?wait:permit_wait Atomic.t
   -> clock:_ Eio.Time.clock

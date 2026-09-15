@@ -258,7 +258,6 @@ let test_default_base_path_ignores_parent_base_path_override_in_tests () =
   Unix.mkdir (Filename.concat repo Common.masc_dirname) 0o755;
   with_cwd repo @@ fun () ->
   with_env "MASC_BASE_PATH" (Some base_path) @@ fun () ->
-  with_env "MASC_BASE_PATH_INPUT" None @@ fun () ->
   Alcotest.(check string)
     "default base path ignores parent base path override in tests"
     (canonical_path repo)
@@ -272,7 +271,6 @@ let test_default_base_path_ignores_base_path_override_without_local_masc () =
   Unix.mkdir (Filename.concat base_path Common.masc_dirname) 0o755;
   with_cwd repo @@ fun () ->
   with_env "MASC_BASE_PATH" (Some base_path) @@ fun () ->
-  with_env "MASC_BASE_PATH_INPUT" None @@ fun () ->
   Alcotest.(check string)
     "default base path ignores base path override without local .masc"
     (canonical_path repo)
@@ -286,7 +284,6 @@ let test_default_base_path_uses_cwd_when_unset () =
   mkdir_p home;
   with_cwd repo @@ fun () ->
   with_env "MASC_BASE_PATH" None @@ fun () ->
-  with_env "MASC_BASE_PATH_INPUT" None @@ fun () ->
   with_env "HOME" (Some home) @@ fun () ->
   Alcotest.(check string) "default base path uses cwd"
     (canonical_path repo)

@@ -313,11 +313,12 @@ let complete_http
             (Http_client.HttpError
                { code = 0
                ; body =
-                   Printf.sprintf
-                     "pre-flight: unbalanced JSON body (%d bytes, first=%C last=%C)"
-                     body_len
-                     body_str.[0]
-                     body_str.[body_len - 1]
+                   Http_client.Received
+                     (Printf.sprintf
+                        "pre-flight: unbalanced JSON body (%d bytes, first=%C last=%C)"
+                        body_len
+                        body_str.[0]
+                        body_str.[body_len - 1])
                ; retry_after_header = None
                })
         , None ))

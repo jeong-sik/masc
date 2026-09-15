@@ -418,7 +418,7 @@ let%test "is_retryable: flat Ollama provider prose is not retryable" =
   | InvalidRequest
       { reason =
           Json_parse_error | Attempt_rejected | Request_body_too_large _
-          | Request_body_refused_by_provider _
+          | Request_body_refused_by_provider _ | Refusal_body_not_received
       ; _
       } -> false
   | RateLimited _
@@ -443,7 +443,7 @@ let%test "HTTP 400 prose does not synthesize ContextOverflow" =
   | InvalidRequest
       { reason =
           Json_parse_error | Attempt_rejected | Request_body_too_large _
-          | Request_body_refused_by_provider _
+          | Request_body_refused_by_provider _ | Refusal_body_not_received
       ; _
       }
   | ContextOverflow _
@@ -606,7 +606,7 @@ let%test "classify_error returns Unknown InvalidRequest for non-overflow 400" =
   | InvalidRequest
       { reason =
           Json_parse_error | Attempt_rejected | Request_body_too_large _
-          | Request_body_refused_by_provider _
+          | Request_body_refused_by_provider _ | Refusal_body_not_received
       ; _
       } -> false
   | RateLimited _

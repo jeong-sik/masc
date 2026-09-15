@@ -22,6 +22,20 @@ val backend_of_id : string -> backend option
 val profile : backend -> Keeper_sandbox_config.sandbox_profile
 val microvm_backend : backend -> Keeper_microvm_backend.t option
 val detect_host : run:runner -> host
+type builder_rosetta = Rosetta_not_used | Rosetta_installed | Rosetta_missing
+(** Whether Apple Container's image builder can start on this Mac. The builder
+    VM uses Rosetta unless [build] rosetta = false, and does not start when
+    Rosetta is absent. [Rosetta_not_used]: Rosetta is absent and the setting
+    is false. [Rosetta_missing]: Rosetta is absent and the setting is true or
+    could not be read, which Apple's default makes true. *)
+val apple_builder_rosetta : run:runner -> (builder_rosetta, string) result
+(** Reads Rosetta's installer receipt, then
+    [container system property list --format json] only when Rosetta is
+    absent. [Error] only when the receipt could not be asked about. *)
+val apple_container_needs_rosetta : run:runner -> bool
+(** The Apple Container service answered its inventory, and its builder cannot
+    start: [apple_builder_rosetta] is [Rosetta_missing]. False for a service
+    that is absent or stopped, which needs installing or starting first. *)
 val probe : host:host -> run:runner -> require_rootless:bool -> require_userns:bool -> backend -> entry
 val recommend : host:host -> configured:backend option -> entry list -> backend option
 val catalog_json : host:host -> configured:backend option -> entry list -> Yojson.Safe.t

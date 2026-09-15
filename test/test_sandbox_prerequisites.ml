@@ -198,7 +198,7 @@ let test_whisper_offers_a_package_and_a_model () =
       ; "/somewhere/cache/whisper/ggml-large-v3-turbo.bin"
       ]
       publish
-  | P.Run_commands _ | P.Open_official_installer _ | P.Install_official_cli _ ->
+  | P.Run_commands _ | P.Open_official_installer _ | P.Install_official_cli _ | P.Build_without_rosetta _ ->
     fail "the model step must fetch beside the path and then publish"
 
 (* Offering a download with nowhere to write would produce a command that
@@ -207,7 +207,7 @@ let test_without_a_directory_the_model_is_a_page_not_a_command () =
   let actions = whisper (mac S.Arm64 26) P.Other in
   match (find "whisper_model_page" actions).action_effect with
   | P.Open_official_installer _ -> ()
-  | P.Run_commands _ | P.Install_official_cli _ ->
+  | P.Run_commands _ | P.Install_official_cli _ | P.Build_without_rosetta _ ->
     fail "with no directory there is no download command to offer"
 
 (* Homebrew is the only route this catalog can name a command for. Naming an
@@ -225,7 +225,7 @@ let test_linux_gets_instructions_rather_than_a_guessed_package () =
         (fun id ->
           match (find id actions).action_effect with
           | P.Open_official_installer _ -> ()
-          | P.Run_commands _ | P.Install_official_cli _ ->
+          | P.Run_commands _ | P.Install_official_cli _ | P.Build_without_rosetta _ ->
             fail "no package name is guessed for whisper.cpp on Linux")
         [ "whisper_cli_build_instructions"; "whisper_model_page" ])
     [ P.Debian; P.Ubuntu; P.Other ]
@@ -241,12 +241,12 @@ let test_the_recorder_is_named_where_the_package_manager_is_known () =
       | P.Run_commands steps ->
         check (list (list string)) "the package, installed"
           [ [ "apt-get"; "install"; "-y"; "sox" ] ] steps
-      | P.Open_official_installer _ | P.Install_official_cli _ ->
+      | P.Open_official_installer _ | P.Install_official_cli _ | P.Build_without_rosetta _ ->
         fail "a known package manager can name the package")
     [ P.Debian; P.Ubuntu ];
   match (find "sox_project_page" (whisper (S.Linux S.X64) P.Other)).action_effect with
   | P.Open_official_installer _ -> ()
-  | P.Run_commands _ | P.Install_official_cli _ ->
+  | P.Run_commands _ | P.Install_official_cli _ | P.Build_without_rosetta _ ->
     fail "an unknown distribution gets a link, not a guessed package"
 
 (* Transcribing a file and making one are different halves, and only the first
@@ -259,7 +259,7 @@ let test_hearing_names_the_recorder_not_only_the_transcriber () =
   | P.Run_commands steps ->
     check (list (list string)) "the formula that carries rec and play"
       [ [ "brew"; "install"; "sox" ] ] steps
-  | P.Open_official_installer _ | P.Install_official_cli _ ->
+  | P.Open_official_installer _ | P.Install_official_cli _ | P.Build_without_rosetta _ ->
     fail "Homebrew can name this one"
 
 
@@ -287,8 +287,108 @@ let test_linux_with_a_cache_gets_the_same_download () =
       ; "/var/cache/whisper/ggml-large-v3-turbo.bin"
       ]
       publish
-  | P.Run_commands _ | P.Open_official_installer _ | P.Install_official_cli _ ->
+  | P.Run_commands _ | P.Open_official_installer _ | P.Install_official_cli _ | P.Build_without_rosetta _ ->
     fail "linux with a cache directory must get the download too"
+
+let apple_catalog apple_builder =
+  P.catalog ~apple_builder ~host:(mac S.Arm64 26) ~distribution:P.Other (P.Sandbox S.Apple_container)
+let needs_rosetta user_config = P.Needs_missing_rosetta {user_config}
+
+(* A running Apple Container whose image builder needs a Rosetta this Mac does
+   not have is missing one thing. The operator chooses how past it; the
+   installers for a service that already answered are not offered. *)
+let test_a_builder_without_rosetta_offers_the_two_ways_past_it () =
+  let ids apple_builder = List.map (fun (action : P.action) -> action.id) (apple_catalog apple_builder) in
+  check (list string) "building without Rosetta, then installing it"
+    ["apple_container_build_without_rosetta"; "rosetta_install"]
+    (ids (needs_rosetta (Some "/Users/u/.config/container/config.toml")));
+  check (list string) "with nowhere to record the setting, installing Rosetta remains"
+    ["rosetta_install"] (ids (needs_rosetta None));
+  check (list string) "an unchecked builder keeps the installers"
+    ["apple_container_official_install"; "apple_container_start"] (ids P.Builder_unchecked);
+  let install = find "rosetta_install" (apple_catalog (needs_rosetta None)) in
+  check bool "installing Rosetta discloses administrator permission" true install.requires_admin;
+  (match install.action_effect with
+   | P.Run_commands steps ->
+     check (list (list string)) "Apple's installer, which shows its license to the operator"
+       [["softwareupdate";"--install-rosetta"]] steps
+   | P.Open_official_installer _ | P.Install_official_cli _ | P.Build_without_rosetta _ ->
+     fail "installing Rosetta runs Apple's installer");
+  let without = find "apple_container_build_without_rosetta"
+      (apple_catalog (needs_rosetta (Some "/Users/u/.config/container/config.toml"))) in
+  check bool "building without Rosetta needs no administrator" false without.requires_admin;
+  check (option string) "the file it writes is published" (Some "/Users/u/.config/container/config.toml") without.writes
+
+let rec remove_tree path =
+  match (Unix.lstat path).Unix.st_kind with
+  | Unix.S_DIR ->
+    Array.iter (fun name -> remove_tree (Filename.concat path name)) (Sys.readdir path);
+    Unix.rmdir path
+  | _ -> Sys.remove path
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+let read path = In_channel.with_open_text path In_channel.input_all
+let write path contents = Out_channel.with_open_text path (fun out -> output_string out contents)
+let restart = [["container";"system";"stop"];["container";"system";"start"]]
+let build_without_rosetta user_config =
+  find "apple_container_build_without_rosetta" (apple_catalog (needs_rosetta (Some user_config)))
+let rosetta_setting path =
+  match Otoml.Parser.from_string_result (read path) with
+  | Ok document -> Otoml.find_opt document (fun value -> Otoml.get_boolean value) ["build"; "rosetta"]
+  | Error _ -> None
+
+(* The setting is one line in a file the operator owns, so the edit leaves every
+   other line where it was, keeps a dotfile manager's symlink a symlink, refuses
+   a file Apple Container could not read either, and only then restarts the
+   service that reads it. *)
+let test_building_without_rosetta_writes_one_line_then_restarts () =
+  let dir = Filename.temp_dir "masc-container-config-" "" in
+  Fun.protect ~finally:(fun () -> remove_tree dir) @@ fun () ->
+  let calls = ref [] in
+  let recording argv = calls := argv :: !calls; Ok () in
+  let fresh = Filename.concat (Filename.concat (Filename.concat dir "fresh") "container") "config.toml" in
+  check bool "a restarted service still needs a recheck" true
+    (P.execute ~run:recording (build_without_rosetta fresh) = P.Commands_completed_recheck_required);
+  check (option bool) "a file that did not exist now holds the setting" (Some false) (rosetta_setting fresh);
+  check (list (list string)) "the service restarts after the write, stopping before starting"
+    restart (List.rev !calls);
+  let existing = Filename.concat dir "config.toml" in
+  let before = "# kept as written\n[container]\ncpus = 4\n\n[build]\n# why this builder\nrosetta = true\nmemory = \"2048mb\"\n" in
+  write existing before;
+  ignore (P.execute ~run:(fun _ -> Ok ()) (build_without_rosetta existing));
+  check string "only the rosetta line changed"
+    "# kept as written\n[container]\ncpus = 4\n\n[build]\n# why this builder\nrosetta = false\nmemory = \"2048mb\"\n"
+    (read existing);
+  let managed = Filename.concat dir "managed.toml" in
+  write managed "[build]\nrosetta = true\n";
+  let link = Filename.concat dir "linked.toml" in
+  Unix.symlink managed link;
+  ignore (P.execute ~run:(fun _ -> Ok ()) (build_without_rosetta link));
+  check bool "the link is still a link" true ((Unix.lstat link).Unix.st_kind = Unix.S_LNK);
+  check (option bool) "the link's target holds the setting" (Some false) (rosetta_setting managed);
+  let dangling = Filename.concat dir "dangling.toml" in
+  let not_yet = Filename.concat dir "not-yet-created.toml" in
+  Unix.symlink not_yet dangling;
+  ignore (P.execute ~run:(fun _ -> Ok ()) (build_without_rosetta dangling));
+  check bool "a link to a file not yet created is still a link" true ((Unix.lstat dangling).Unix.st_kind = Unix.S_LNK);
+  check (option bool) "and the file it names now holds the setting" (Some false) (rosetta_setting not_yet);
+  let restricted = Filename.concat dir "restricted.toml" in
+  write restricted "[build]\nrosetta = true\n";
+  Unix.chmod restricted 0o640;
+  ignore (P.execute ~run:(fun _ -> Ok ()) (build_without_rosetta restricted));
+  check int "the file keeps the permissions it had" 0o640 ((Unix.stat restricted).Unix.st_perm);
+  let broken = Filename.concat dir "broken.toml" in
+  write broken "[build\nrosetta = true\n";
+  let restarted = ref 0 in
+  (match P.execute ~run:(fun _ -> incr restarted; Ok ()) (build_without_rosetta broken) with
+   | P.Failed {step=1; _} -> ()
+   | P.Failed _ | P.External_step_pending | P.Commands_completed_recheck_required ->
+     fail "a file that is not TOML is refused at the write");
+  check string "the refused file is untouched" "[build\nrosetta = true\n" (read broken);
+  check int "nothing restarts after a refused write" 0 !restarted;
+  match P.execute ~run:(fun _ -> Error P.Did_not_finish) (build_without_rosetta existing) with
+  | P.Failed {step=2; _} -> ()
+  | P.Failed _ | P.External_step_pending | P.Commands_completed_recheck_required ->
+    fail "a stop that did not finish is the step after the write"
 
 let () = run "prerequisite actions" ["user-selected plans",[
   test_case "distribution data is never shell" `Quick test_distribution_boundary;
@@ -297,7 +397,11 @@ let () = run "prerequisite actions" ["user-selected plans",[
   test_case "official client install selection" `Quick test_official_clients_are_explicit_and_not_ready;
   test_case "presentation workspace parser and host renderer" `Quick test_presentation_install_is_workspace_owned;
   test_case "PDF package manager selection" `Quick test_pdf_tools_reuse_selected_package_managers;
-  test_case "effects are not readiness" `Quick test_completion_never_means_ready];
+  test_case "effects are not readiness" `Quick test_completion_never_means_ready;
+  test_case "a builder without Rosetta offers the two ways past it" `Quick
+    test_a_builder_without_rosetta_offers_the_two_ways_past_it;
+  test_case "building without Rosetta writes one line, then restarts" `Quick
+    test_building_without_rosetta_writes_one_line_then_restarts];
   "hearing on a fresh machine",[
   test_case "whisper offers a package and a model" `Quick
     test_whisper_offers_a_package_and_a_model;

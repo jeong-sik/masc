@@ -10,6 +10,10 @@ let docker security = [ ["docker";"info";"--format";"{{json .}}"],
     "SecurityOptions",`List (List.map (fun s -> `String s) security)])) ]
 let probe ?(rootless=false) ?(userns=false) host responses backend =
   S.probe ~host ~run:(run_fixture responses) ~require_rootless:rootless ~require_userns:userns backend
+let apple_inventory = ["container";"list";"-a";"--format";"json"], Ok "[]"
+let apple_build ~rosetta = ["container";"system";"property";"list";"--format";"json"],
+  Ok (Printf.sprintf {|{"build":{"cpus":2,"memory":"2048mb","rosetta":%b},"container":{"cpus":4}}|} rosetta)
+let rosetta_receipt = ["pkgutil";"--pkg-info";"com.apple.pkg.RosettaUpdateAuto"]
 let test_service_not_presence () =
   let missing = probe linux [] S.Docker in
   check bool "missing command classified" true
@@ -48,7 +52,7 @@ let test_hardening () =
     ((probe ~rootless:true ~userns:true linux (docker ["name=rootless";"name=userns"]) S.Docker).state = S.Service_ready)
 let test_recommendation () =
   let rows = [probe mac (docker []) S.Docker;
-    probe mac [["container";"list";"-a";"--format";"json"],Ok "[]"] S.Apple_container] in
+    probe mac apple_ready S.Apple_container] in
   check bool "new supported Mac recommends Apple" true
     (S.recommend ~host:mac ~configured:None rows = Some S.Apple_container);
   check bool "existing healthy Docker preserved" true
@@ -99,7 +103,7 @@ let test_commit_conflict () =
         check string "other editor bytes preserved" edited
           (In_channel.with_open_text path In_channel.input_all)))
 let microvm_without_backend = "[keeper]\nactivation_mode = \"manual\"\nsandbox_profile = \"microvm\"\nnetwork_mode = \"inherit\"\ninstructions = \"Respond to the operator.\"\n"
-let apple_ready = [["container";"list";"-a";"--format";"json"], Ok "[]"]
+let apple_ready = [apple_inventory; rosetta_receipt, Ok "package-id: com.apple.pkg.RosettaUpdateAuto\n"]
 (* F107. A microvm declaration that names no backend is refused by the
    selection itself; on origin/main it silently became Apple Container on
    macOS 26 arm64 while every other host was refused, so the written TOML on a
@@ -162,6 +166,45 @@ let test_declaration_reasons () =
     Out_channel.with_open_text path (fun out -> output_string out contents);
     check bool "readable docker declaration selects" true
       (match S.declaration ~base_path with Ok selection -> selection.backend = S.Docker | Error _ -> false))
+(* Apple Container answers as a running service on a Mac without Rosetta, and
+   then cannot start the VM it builds images in: that VM uses Rosetta unless
+   [build] rosetta = false. Measured 2026-09-15 on a colleague's Mac: setup
+   called the service ready and failed while preparing imp's image. The
+   fixture answers only the commands a case names, so a command the probe was
+   not supposed to run reads as missing and fails the case. *)
+let test_an_apple_builder_that_cannot_start_is_not_ready () =
+  let asked = ref [] in
+  let recording responses argv = asked := argv :: !asked; run_fixture responses argv in
+  let state responses =
+    asked := [];
+    (S.probe ~host:mac ~run:(recording responses) ~require_rootless:false ~require_userns:false
+       S.Apple_container).state in
+  let no_rosetta = rosetta_receipt, Error S.Command_failed in
+  check bool "with Rosetta installed the builder is ready" true
+    (state apple_ready = S.Service_ready);
+  check bool "and its configuration is not read, so a changed reply cannot unready it" false
+    (List.mem ["container";"system";"property";"list";"--format";"json"] !asked);
+  check bool "without Rosetta, a builder set not to use it is ready" true
+    (state [apple_inventory; no_rosetta; apple_build ~rosetta:false] = S.Service_ready);
+  let needs_rosetta = [apple_inventory; no_rosetta; apple_build ~rosetta:true] in
+  check bool "without Rosetta, a builder that uses it is a missing prerequisite" true
+    (match state needs_rosetta with S.Missing_prerequisite _ -> true | _ -> false);
+  List.iter (fun unread -> check bool "a setting that cannot be read is Apple's default, which uses Rosetta" true
+    (match state (apple_inventory :: no_rosetta :: unread) with S.Missing_prerequisite _ -> true | _ -> false))
+    [[]; [["container";"system";"property";"list";"--format";"json"], Ok {|{"build":{}}|}];
+     [["container";"system";"property";"list";"--format";"json"], Ok "not json"]];
+  check bool "no receipt tool is neither ready nor missing" true
+    (match state [apple_inventory] with S.Probe_failed _ -> true | _ -> false);
+  check bool "the CLI's answer: a service that answered and needs Rosetta" true
+    (S.apple_container_needs_rosetta ~run:(run_fixture needs_rosetta));
+  check bool "a stopped service is not a Rosetta question, whatever Rosetta says" false
+    (S.apple_container_needs_rosetta
+       ~run:(run_fixture [["container";"list";"-a";"--format";"json"], Error S.Command_failed; no_rosetta]));
+  check bool "an absent service is not one either" false
+    (S.apple_container_needs_rosetta ~run:(run_fixture [no_rosetta]));
+  check bool "a Mac whose builder needs Rosetta is not steered to Apple Container" true
+    (S.recommend ~host:mac ~configured:None
+       [probe mac needs_rosetta S.Apple_container; probe mac (docker []) S.Docker] = Some S.Docker)
 let () = run "sandbox readiness" ["selection",[
   test_case "real service reply, not CLI presence" `Quick test_service_not_presence;
   test_case "catalog selection boundary" `Quick test_catalog_selection_boundary;
@@ -171,4 +214,6 @@ let () = run "sandbox readiness" ["selection",[
   test_case "stale setup cannot overwrite newer selection" `Quick test_commit_conflict;
   test_case "validated staged selection preserves decisions" `Quick test_staging;
   test_case "no host default for a microvm backend" `Quick test_no_host_default_backend;
-  test_case "declaration errors carry kind and reason" `Quick test_declaration_reasons]]
+  test_case "declaration errors carry kind and reason" `Quick test_declaration_reasons;
+  test_case "an Apple builder that cannot start is not ready" `Quick
+    test_an_apple_builder_that_cannot_start_is_not_ready]]

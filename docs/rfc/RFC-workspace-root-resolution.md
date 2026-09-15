@@ -155,6 +155,8 @@ val source_label : source -> string
 - 자식 프로세스를 띄울 때만 `MASC_BASE_PATH=<root>` 를 환경에 넣는다. 자식은 그것을
   Environment 로 다시 `resolve` 한다.
 - `MASC_BASE_PATH_INPUT` 은 쓰지도 읽지도 않는다. 원래 입력은 `t.requested` 에 있다.
+- 4단계 전까지는 lib 안쪽이 아직 env 로 workspace 를 읽는다. 그동안 CLI 진입점은
+  `publish_workspace_root` 한 곳에서만 `MASC_BASE_PATH` 를 쓴다(1단계, `bin/main_eio.ml`).
 
 ## 4. 단계
 
@@ -163,9 +165,9 @@ val source_label : source -> string
 | 단계 | 범위 | 끝난 상태 |
 |---|---|---|
 | 1 | `Workspace_root` 모듈과 표 테스트. `masc`, `start`, `init`, 그리고 `base_path` term 을 쓰는 CLI 가 이것을 부른다. guard 의 `Implicit_default`·`format_violation`, `default_base_path ()` 의 cwd 계산과 `exit 1` 을 지운다 | workspace 안에서 `masc start` 가 부팅한다. 없으면 `No_workspace` 메시지 하나로 끝난다 |
-| 2 | `doctor`, `setup`, `masc-tui`, stdio 서버가 `Workspace_root` 를 부른다. `Config_dir_resolver.base_path_or_cwd` 를 지운다 | 모든 진입점이 같은 workspace 를 고른다(#30904) |
+| 2 | `doctor`, `setup`, `masc-tui` 가 `Workspace_root` 를 부른다(stdio 서버는 1단계에 포함) | 모든 진입점이 같은 workspace 를 고른다(#30904) |
 | 3 | `MASC_BASE_PATH_INPUT` 을 lib·bin·scripts·harness 에서 지운다 | env 이름이 하나 |
-| 4 | lib 의 env 직접 읽기와 `Host_config.base_path` 읽기를 인자로 바꾼다. 파일 5개 단위로 나눈다. 테스트 전용 git root 탐색과 `resolved_base_path_cache` 를 지운다 | base path 를 env 에서 읽는 곳이 `observe` 하나 |
+| 4 | lib 의 env 직접 읽기와 `Host_config.base_path` 읽기를 인자로 바꾼다. 파일 5개 단위로 나눈다. `Config_dir_resolver.base_path_or_cwd`, 테스트 전용 git root 탐색, `resolved_base_path_cache`, `publish_workspace_root` 를 지운다 | base path 를 env 에서 읽는 곳이 `observe` 하나 |
 | 5 | 기본값 기록: 사람이 터미널에서 고를 때만 쓴다(installer 대화형, 설정 화면의 workspace 선택). 비대화형 installer 와 `setup --no-tui` 는 `--record-default` 가 있을 때만. 기록 판정도 `.masc/config` 로 맞춘다. installer 제안도 설정 화면과 같은 `~/MASC` 로 맞춘다 | 검증용 설치가 기계 기본값을 바꾸지 않는다 |
 | 6 | README·INSTALL(영/한)·`--help` 문구를 3.1 순서로 고친다. 아무 데서도 안 도는 `scripts/imp-onboarding-setup-pty.py` 를 지운다 | 문서와 코드가 같은 순서를 말한다 |
 

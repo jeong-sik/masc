@@ -11794,11 +11794,16 @@ let render_code (state : state) =
              did not, leaving two cyans in one column. *)
           let marker =
             if node.Masc.Tui_decode.wt_has_children then
-              if selected then Masc_tui_theme.Glyph.current_entry ^ " "
+              if selected then File_icon.folder_glyph ^ " "
               (* The mark colour the files below it take. A folder is not a
                  kind of file, and the arrow already says which of the two
-                 this row is. *)
-              else (Theme.category Theme.Slot_1) ^ "\xe2\x96\xb8 " ^ Ansi.reset
+                 this row is. Both rows read the arrow from the module that
+                 also hands it to the help sheet: they were two literals a
+                 branch apart, one of them borrowed from the current-entry
+                 glyph, which is the same byte under another name. *)
+              else
+                (Theme.category Theme.Slot_1) ^ File_icon.folder_glyph ^ " "
+                ^ Ansi.reset
             else
               let kind =
                 File_icon.kind_of_name node.Masc.Tui_decode.wt_label

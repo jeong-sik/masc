@@ -414,6 +414,24 @@ let test_the_two_p50s_on_the_lanes_screen_agree () =
        ~binding_name:"standalone_lane_detail_lines"
        ~needle:" \xc2\xb7 p50 latency %.2fs")
 
+(* The Code tree draws one arrow on a row that opens rather than reads, and
+   it drew it from two places a branch apart: the selected row reached for
+   [Masc_tui_theme.Glyph.current_entry] -- the same byte under another name --
+   and the row beside it spelled the bytes. Either moving would have left the
+   column showing two marks for one thing depending on where the cursor was.
+
+   Both now read [Masc_tui_file_icon.folder_glyph], which is also what the
+   help sheet prints; test_tui_keys holds the sheet half. *)
+let test_the_code_tree_draws_one_folder_arrow () =
+  Alcotest.(check int) "both rows read the arrow from the mark module" 2
+    (Ast_grep.count_identifiers_outside_calls_in_value_binding
+       ~module_path:render ~binding_name:"render_code" ~callees:[]
+       ~identifiers:[ "File_icon.folder_glyph" ]);
+  Alcotest.(check int) "and neither borrows the current-entry glyph" 0
+    (Ast_grep.count_identifiers_outside_calls_in_value_binding
+       ~module_path:render ~binding_name:"render_code" ~callees:[]
+       ~identifiers:[ "Masc_tui_theme.Glyph.current_entry" ])
+
 let test_repositories_show_the_server_resolved_checkout_path () =
   let producer = "lib/server/server_routes_http_routes_repositories.ml" in
   Alcotest.(check int) "the route names one resolved path field" 1
@@ -797,6 +815,8 @@ let () =
             test_a_detail_heading_is_spelled_the_way_a_heading_is
         ; Alcotest.test_case "the two p50s on the Lanes screen agree" `Quick
             test_the_two_p50s_on_the_lanes_screen_agree
+        ; Alcotest.test_case "the Code tree draws one folder arrow" `Quick
+            test_the_code_tree_draws_one_folder_arrow
         ; Alcotest.test_case "the Logs header says the floor that was set" `Quick
             test_the_logs_header_says_the_floor_the_reader_set
         ; Alcotest.test_case "a labelled field does not bracket its reading" `Quick

@@ -893,8 +893,16 @@ let test_the_file_marks_are_in_the_sheet () =
         true
         (List.mem mark explained))
     Masc_tui_file_icon.kinds;
+  (* The eighth mark. The tree draws an arrow on a row that opens rather than
+     reads, and the sheet explained the seven file kinds beside it and not
+     that one -- the mark that says which of the two a row is. *)
+  Alcotest.(check bool) "the sheet explains the folder arrow" true
+    (List.mem Masc_tui_file_icon.folder_glyph explained);
   (* And nothing in the sheet the tree cannot draw. *)
-  let drawable = List.map Masc_tui_file_icon.glyph Masc_tui_file_icon.kinds in
+  let drawable =
+    Masc_tui_file_icon.folder_glyph
+    :: List.map Masc_tui_file_icon.glyph Masc_tui_file_icon.kinds
+  in
   List.iter
     (fun (mark, _) ->
       Alcotest.(check bool)

@@ -710,6 +710,7 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
       ()
     |> Server_base_path_diagnostics.to_yojson
   in
+  Server_startup_state.note_input_base_path input_base_path;
   Server_startup_state.note_runtime_resolution ~path_diagnostics
     ~config_resolution;
   (* RFC-0107 Phase D.4 — wire piaf connection pool Otel_metric_store exporter.

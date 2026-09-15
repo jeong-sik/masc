@@ -1008,8 +1008,6 @@ let tool_definition_fields definition =
   | None -> []
 ;;
 
-let enum_vocabulary_separator = " | "
-
 (* Provider-compat projection (#34033): OpenAI's function tools reject JSON-Schema
    combinators (enum, oneOf, anyOf, allOf) inside parameter schemas. The
    dispatcher's [[params]] validation remains the authority for what a tool
@@ -1026,7 +1024,7 @@ let conformant_schema_value json =
          | other -> Yojson.Safe.to_string other)
         values
     in
-    "one of: " ^ String.concat enum_vocabulary_separator vocabulary
+    Types.enum_vocabulary_text vocabulary
   in
   let rec walk value =
     match value with

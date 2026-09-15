@@ -202,6 +202,15 @@ val tool_schema_of_input_schema
   -> unit
   -> (tool_schema, string) result
 
+(** Separates enum members when they are written as text instead of carried
+    as [enum], as ["one of: a | b"] in a parameter description for a provider
+    whose tool schemas cannot carry [enum]. Members are written unquoted, so a
+    member containing this character cannot be told apart from two members. *)
+val enum_member_separator : char
+
+(** [members] written as text, separated by {!enum_member_separator}. *)
+val enum_vocabulary_text : string list -> string
+
 val tool_schema_to_json : tool_schema -> Yojson.Safe.t
 
 (** Inverse of {!tool_schema_to_json}, and total: malformed input is reported

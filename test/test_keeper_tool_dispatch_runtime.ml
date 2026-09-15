@@ -6882,7 +6882,10 @@ let test_composition_enum_param_is_refused_before_the_handler () =
 ;;
 
 (* The two shipped browser compositions offer scene and regions; BrowserRead
-   itself also takes text, so only the composition's own schema can refuse it. *)
+   itself also takes text, so only the composition's own schema can refuse it.
+   The same arguments with mode scene must pass that schema, and text must fail
+   on mode alone, or the refusal could come from an argument this test does not
+   send. *)
 let test_shipped_browser_composition_refuses_text_mode skill_name arguments () =
   with_exec_fixture ("composition-enum-" ^ skill_name)
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
@@ -6901,15 +6904,39 @@ let test_shipped_browser_composition_refuses_text_mode skill_name arguments () =
            ()
        in
        let tool_name = "keeper_compose_" ^ skill_name in
-       (match find_tool_by_name tools tool_name with
-        | Some _ -> ()
-        | None -> failf "%s was not materialized from its shipped skill" tool_name);
+       let tool =
+         match find_tool_by_name tools tool_name with
+         | Some tool -> tool
+         | None -> failf "%s was not materialized from its shipped skill" tool_name
+       in
+       let input mode = `Assoc (arguments @ [ "mode", `String mode ]) in
+       (match
+          Agent_core.Tool_input_validation.validate
+            tool.Agent_core.Tool.schema
+            (input "scene")
+        with
+        | Agent_core.Tool_input_validation.Valid _ -> ()
+        | Agent_core.Tool_input_validation.Invalid errors ->
+          failf
+            "%s refused mode scene with the arguments this test sends: %s"
+            tool_name
+            (Agent_core.Tool_input_validation.format_errors_inline
+               ~tool_name
+               ~args:(input "scene")
+               errors));
+       (match
+          Agent_core.Tool_input_validation.validate
+            tool.Agent_core.Tool.schema
+            (input "text")
+        with
+        | Agent_core.Tool_input_validation.Invalid
+            [ { Agent_core.Tool_input_validation.path = "/mode"; _ } ] -> ()
+        | Agent_core.Tool_input_validation.Invalid _
+        | Agent_core.Tool_input_validation.Valid _ ->
+          failf "%s did not refuse mode text on mode alone" tool_name);
        check_refused_before_handler
          ~label:"mode text"
-         (call_through_agent_core
-            tools
-            tool_name
-            (`Assoc (arguments @ [ "mode", `String "text" ]))))
+         (call_through_agent_core tools tool_name (input "text")))
 ;;
 
 let test_composition_read_failure_preserves_same_turn

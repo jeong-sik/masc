@@ -84,6 +84,12 @@ type client = {
   piaf : Piaf.Client.t;
   scope : Eio.Switch.t;
   closed : (unit, exn) result Eio.Promise.t;
+  (* Deliver the stop signal and return. Protected and suspending nowhere, so
+     it is not a cancellation point: cleanup must never change its caller's
+     outcome, and a loop closing several clients must reach all of them. *)
+  request_close : unit -> unit;
+  (* The signal, then a join on the daemon's teardown. Only a caller that owns
+     exactly this client and needs it torn down before proceeding uses it. *)
   close : unit -> unit;
 }
 
@@ -165,17 +171,12 @@ let piaf_error_message (err : Piaf.Error.t) =
     | `Internal_server_error ) as err ->
     Piaf.Error.to_string err
 
-let reraise_after_close close exn =
+(* [cleanup] delivers stop signals and returns. It is not a cancellation
+   point, so it can neither replace [exn] nor skip the re-raise below, and no
+   protection is needed here to guarantee either. *)
+let reraise_after_close cleanup exn =
   let bt = Printexc.get_raw_backtrace () in
-  (* [close] protects the half that must not be skipped -- the stop signal --
-     and leaves its join cancellable, so this needs no protection of its own.
-     Wrapping it in one made the [Cancelled] arm below unreachable: a
-     protected [close] cannot raise it. *)
-  (try close () with
-   | Eio.Cancel.Cancelled _ ->
-     (* Cleanup cannot replace the caller's original exception, including
-        its cancellation. Preserve that exception and its backtrace. *)
-     Printexc.raise_with_backtrace exn bt
+  (try cleanup () with
    | cleanup_exn ->
      Log.Http.warn "HTTP client scope cleanup: %s"
        (exn_message cleanup_exn));
@@ -185,18 +186,21 @@ let create_scoped_client ~sw env uri =
   let ready, publish = Eio.Promise.create () in
   let stop, stop_request = Eio.Promise.create () in
   let closed, finished = Eio.Promise.create () in
-  let close () =
-    (* Two halves with different owners. Delivering [stop] is this caller's
-       job and must happen even while it unwinds, so it stays protected; it
-       suspends nowhere. Waiting for [closed] is a join on the daemon, which
-       resolves it only after the client switch has torn down every Piaf
-       protocol fiber. Nothing in this module bounds that teardown -- it ends
-       when Piaf's fibers honour their cancellation -- so protecting the join
-       handed the operator's interrupt to a library: a caller pinned here
-       could not answer one. The daemon reaches [closed] on its own either
-       way, for [client_is_live] and the [with_client_scope] watcher. *)
+  let request_close () =
+    (* Delivering [stop] is this caller's job and must happen even while it
+       unwinds. It suspends nowhere, so protecting it costs nothing and buys
+       the guarantee every cleanup site depends on: this call returns. *)
     Eio.Cancel.protect (fun () ->
-      if not (Eio.Promise.is_resolved stop) then Eio.Promise.resolve stop_request ());
+      if not (Eio.Promise.is_resolved stop) then Eio.Promise.resolve stop_request ())
+  in
+  let close () =
+    request_close ();
+    (* [closed] resolves only after the client switch has torn down every Piaf
+       protocol fiber, and nothing in this module bounds that teardown -- it
+       ends when Piaf's fibers honour their cancellation. So the join stays
+       cancellable: a caller pinned here could not answer an operator
+       interrupt. The daemon reaches [closed] either way, for
+       [client_is_live] and the [with_client_scope] watcher. *)
     match Eio.Promise.await closed with
     | Ok () | Error (Eio.Cancel.Cancelled _) -> ()
     | Error exn -> raise exn
@@ -233,16 +237,19 @@ let create_scoped_client ~sw env uri =
          cancellation at the construction boundary before handing off. *)
       Eio.Fiber.check ();
       Eio.Switch.check client_sw;
-      Ok { piaf; scope = client_sw; closed; close }
+      Ok { piaf; scope = client_sw; closed; request_close; close }
     | Error err ->
-      close ();
+      (* Signal only: the explicit [Fiber.check] below is where this path
+         propagates cancellation, and it must not lose [err] to a join. *)
+      request_close ();
       Eio.Fiber.check ();
       Error err
   with
-  | Eio.Cancel.Cancelled _ as exn -> reraise_after_close close exn
-  | exn -> reraise_after_close close exn
+  | Eio.Cancel.Cancelled _ as exn -> reraise_after_close request_close exn
+  | exn -> reraise_after_close request_close exn
 
 let close_client client = client.close ()
+let request_close_client client = client.request_close ()
 let client_is_live client =
   match Eio.Switch.get_error client.scope with
   | Some _ -> false
@@ -346,44 +353,11 @@ let evict_expired_entries t now =
     in
     t.idle <- remaining;
     !evicted_clients)
-  |> List.iter (fun c ->
-       try close_client c
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | _ -> ()
-       (* Shutdown is best-effort; the pool already dropped the ref so
-          a Piaf-level error here cannot leak a client.  But
-          [Eio.Cancel.Cancelled] must propagate so the enclosing fiber
-          honors structured-concurrency cancellation (RFC-0106) — the
-          previous bare [with _ -> ()] silently swallowed Cancelled,
-          letting a dying fiber finish iterating clients instead of
-          unwinding promptly. *))
-
-let start_eviction_fiber t =
-  Eio.Fiber.fork_daemon ~sw:t.sw (fun () ->
-    let clock = Eio.Stdenv.clock t.env in
-    let rec loop () =
-      if Atomic.get t.stop then `Stop_daemon
-      else begin
-        Eio.Time.sleep clock (t.config.idle_ttl_seconds /. 2.0);
-        let now = Eio.Time.now clock in
-        (try evict_expired_entries t now
-         with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | exn ->
-             t.counters.evict_failure_count_total
-               <- t.counters.evict_failure_count_total + 1;
-             Log.Http.error
-               "[masc_http_client.pool] eviction fiber caught \
-                exception (count=%d): %s"
-               t.counters.evict_failure_count_total
-               (exn_message exn));
-        loop ()
-      end
-    in
-    loop ())
-
-(* ── create / shutdown ─────────────────────────────────────────── *)
+  (* Signal only, and every one of them. The pool has already dropped these
+     refs and counted them evicted, so a client skipped here is a socket no
+     later call can reach. Nothing waits for the teardown: the daemon runs it
+     once the signal lands. *)
+  |> List.iter request_close_client
 
 let shutdown t =
   Eio.Cancel.protect (fun () ->
@@ -482,13 +456,9 @@ let try_acquire_idle t key ~now =
          | None -> ());
         taken)
   in
-  (* Outside the lock, like the eviction fiber does. *)
-  List.iter
-    (fun c ->
-      try close_client c with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | _ -> ())
-    !expired;
+  (* Outside the lock, like the eviction fiber does, and signal only for the
+     same reason: these are already out of [t.idle]. *)
+  List.iter request_close_client !expired;
   client
 
 (* ── Connect backoff ───────────────────────────────────────────── *)
@@ -598,13 +568,13 @@ let create_probed_client t key uri =
         | Error err -> Error (piaf_error_message (err :> Piaf.Error.t)))
     in
     (match result with
-     | Error _ -> Option.iter close_client !pending
+     | Error _ -> Option.iter request_close_client !pending
      | Ok _ -> ());
     result
   with
   | Eio.Cancel.Cancelled _ as exn ->
-    reraise_after_close (fun () -> Option.iter close_client !pending) exn
-  | exn -> reraise_after_close (fun () -> Option.iter close_client !pending) exn
+    reraise_after_close (fun () -> Option.iter request_close_client !pending) exn
+  | exn -> reraise_after_close (fun () -> Option.iter request_close_client !pending) exn
 
 (* Build a fresh piaf client for [key], gated on the per-host
    connect-failure backoff and a TCP reachability probe (see
@@ -628,8 +598,8 @@ let create_fresh t key uri =
          Ok c
        with
        | Eio.Cancel.Cancelled _ as exn ->
-         reraise_after_close (fun () -> close_client c) exn
-       | exn -> reraise_after_close (fun () -> close_client c) exn)
+         reraise_after_close (fun () -> request_close_client c) exn
+       | exn -> reraise_after_close (fun () -> request_close_client c) exn)
     | Error err ->
       record_connect_failure t key ~now:(now_ts t);
       Error (Printf.sprintf "%s: %s"
@@ -674,18 +644,15 @@ let release t key client ~close_only =
         parked := true
       end);
     if not !parked then begin
-      (try close_client client
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | _ -> ());
+      (* Signal only. A raise here skipped the count below, and on the
+         success tail ([close_only:false] after a fully read body) it would
+         have reached [Watched_work.run] as a lost race and reported a
+         finished request as a timeout. *)
+      request_close_client client;
       with_mu t (fun () ->
         t.counters.evict_count_total <- t.counters.evict_count_total + 1)
     end
-  end else
-    try close_client client
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | _ -> ()
+  end else request_close_client client
 
 (* ── Public request API ────────────────────────────────────────── *)
 

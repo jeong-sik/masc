@@ -1048,10 +1048,10 @@ let non_blank_row_from rows ~position =
 
 (* Where a page from the first row starts reading when a seq is held. Skipping
    to it one row at a time decoded every row at or before the held seq: the
-   TUI resumes a turn it partly holds that way, with no offset, and a
-   43,000-row journal was decoded whole on each history refresh (91 MB/s of
-   allocation on a live server, 2026-09-16). Seqs increase down the journal,
-   so the byte range is bisected instead, decoding one row per step.
+   TUI resumes a turn it partly holds that way, with no offset, so resuming
+   near the end of a 43,000-row journal decoded nearly all of it to serve a
+   few rows. Seqs increase down the journal, so the byte range is bisected
+   instead, decoding one row per step.
 
    Rows starting before [low] are at or before the held seq, and rows
    starting at or after [high] are past it. When the two meet, [low] is the

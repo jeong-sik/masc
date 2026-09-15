@@ -253,30 +253,35 @@ let repeated_exact_tool_call ~threshold tool_calls =
     else None
 ;;
 
-(* Constitution exception (named bound + rationale): the same repetition count
-   as the two axes above, on the one key they cannot use.
+(* Constitution exception (named bound + rationale): a repetition count like
+   the two axes above (3 each there, 5 here), on the one key they cannot use.
 
    [same_exact_tool_call] requires the output fingerprint to match, and that is
    deliberate -- an unchanged output is the proof that the world did not move.
-   A tool whose result is a clock has no such proof available: every call
-   returns a different value while nothing advances, so no threshold on that
-   axis can ever fire. Live, one keeper called [keeper_time_now] 280 times in a
-   single turn out of 281 tool calls, writing the same sentence between them
-   with only the freshly read timestamp changed, and neither the tool axis nor
-   the text axis saw it (masc #33021).
+   A call whose result moves while nothing advances -- a clock read is the
+   plain case -- has no such proof available: identical input, a different
+   output every time, so no threshold on that axis can ever fire. The case
+   that showed it (masc #33021) was one keeper making 280 of a single turn's
+   281 tool calls to a clock-reading tool, writing the same sentence between
+   them with only the timestamp changed, and neither the tool axis nor the
+   text axis saw it.
 
    So this axis drops the output and keeps adjacency instead. Adjacency is what
    the output fingerprint was buying: consecutive identical calls with nothing
    in between is the same "nothing happened" evidence, without asking the
    result to stand still.
 
-   5 = the first call plus four consecutive repeats. Measured over three days
-   of live tool calls (2026-09-01..03), adjacent runs of an identical
-   (tool, input) pair separate cleanly at that point: runs of 3-4 are ordinary
-   work (keeper_tasks_list 101, keeper_spawn_read 40, masc_board_post_get 60,
-   Execute 33), while 35 of the 36 runs reaching 5 were one tool -- the clock --
-   under the two keepers that were looping. A yield here persists a checkpoint
-   and resumes, so the one non-clock run of that length cost a resume. *)
+   5 = the first call plus four consecutive repeats. It was read off three
+   days of live tool calls (2026-09-01..03): adjacent runs of 3-4 of an
+   identical (tool, input) pair were ordinary work (keeper_tasks_list 101,
+   keeper_spawn_read 40, masc_board_post_get 60, Execute 33), while 35 of the
+   36 runs reaching 5 were that clock-reading tool under the two keepers that
+   were looping. The Keeper surface has no dedicated clock tool now, and a
+   round after tool results carries no [Temporal] line, so a Keeper that wants
+   the time mid-turn runs [Execute date] -- the same shape, and this axis still
+   catches it. The count has not been measured against the calls that remain
+   (masc #36503). A yield here persists a checkpoint and resumes, so a run that
+   reaches it costs one resume. *)
 let repeated_tool_call_input_yield_threshold = 5
 
 let same_tool_call_input
@@ -289,12 +294,12 @@ let same_tool_call_input
 
 (* A call whose handler declared [Progress] is the world moving, which is
    the one thing this axis cannot otherwise tell: it dropped the output
-   fingerprint to catch a clock, and a tool that advances an emulator by a
-   fixed number of frames has the same shape as a clock -- identical input,
-   a different result every time -- while being the opposite thing. One
-   keeper's every game turn ended in this yield after five
+   fingerprint to catch a result that moves while nothing advances, and a
+   tool that advances an emulator by a fixed number of frames has that same
+   shape -- identical input, a different result every time -- while being the
+   opposite thing. One keeper's every game turn ended in this yield after five
    [masc_msx_step {frames: 300}] in a row (2026-09-14, receipts all day), the
-   reply deferred each time. The clock declares nothing and is still caught. *)
+   reply deferred each time. A call that declares nothing is still caught. *)
 let declared_progress (call : Keeper_agent_result.tool_call_detail) =
   match call.typed_outcome with
   | Some Keeper_tool_outcome.Progress -> true

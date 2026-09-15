@@ -104,6 +104,13 @@ val fail_lazy_task : task:string -> error:string -> unit
 
 val mark_degraded : error:string -> unit
 
+(** The workspace path as the operator gave it to this server, before
+    normalization; [None] before bootstrap records it. Health and dashboard
+    path diagnostics report it as [input_base_path]. *)
+val note_input_base_path : string option -> unit
+
+val input_base_path : unit -> string option
+
 (** Persist path-diagnostics and config-resolution JSON snapshots
     for the next {!to_yojson} call. *)
 val note_runtime_resolution :

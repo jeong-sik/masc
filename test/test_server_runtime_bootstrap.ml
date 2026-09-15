@@ -4185,6 +4185,8 @@ let test_create_server_state_preserves_raw_input_base_path () =
         raw_input
         (json |> member "path_diagnostics" |> member "input_base_path"
        |> to_string);
+      Alcotest.(check (option string)) "health and dashboard read the same spelling"
+        (Some raw_input) (Server_startup_state.input_base_path ());
       Alcotest.(check string) "normalized env remains effective workspace root"
         dir (Sys.getenv "MASC_BASE_PATH"))
 

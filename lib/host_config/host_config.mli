@@ -76,10 +76,10 @@ type t =
             normalisation.  RFC-0085 PR-9 replaces
             [Env_config_core.base_path_opt]. *)
   ; base_path_raw : string option
-        (** Raw base-path input as read from [MASC_BASE_PATH], or the recorded
-            default, with whitespace trimmed but no path
-            normalisation.  Used by routes / dashboard / config diagnostics
-            inputs that surface the operator's literal input.  RFC-0085
+        (** Raw base-path value as read from [MASC_BASE_PATH], or the recorded
+            default, with whitespace trimmed but no path normalisation. In a
+            server this is the canonical owner it published; the operator's own
+            spelling is {!Server_startup_state.input_base_path}.  RFC-0085
             PR-9 replaces [Env_config_core.base_path_raw_opt]. *)
   ; config_dir : string option
         (** Resolved [MASC_CONFIG_DIR].  [None] when unset. *)

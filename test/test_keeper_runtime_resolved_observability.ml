@@ -53,13 +53,13 @@ let test_resolved_config_exposes_timeout_knobs () =
    resolves to [None], and a runtime.toml value reaches the reader through
    the boot-override layer like the other turn settings. *)
 let test_context_window_is_declared_or_none () =
-  Masc.Config_boot_overrides.reset_for_tests ();
+  Config_boot_overrides.reset_for_tests ();
   Rr.reset_for_tests ();
   Alcotest.(check (option int))
     "undeclared resolves to None, not a compiled figure"
     None
     (Rr.context_window_tokens ());
-  Masc.Config_boot_overrides.set
+  Config_boot_overrides.set
     Masc.Env_config_keeper.KeeperContext.window_tokens_env_key
     "65536";
   Rr.reset_for_tests ();
@@ -67,7 +67,7 @@ let test_context_window_is_declared_or_none () =
     "a declared value resolves verbatim"
     (Some 65536)
     (Rr.context_window_tokens ());
-  Masc.Config_boot_overrides.reset_for_tests ();
+  Config_boot_overrides.reset_for_tests ();
   Rr.reset_for_tests ()
 
 let test_to_yojson_is_a_json_object () =

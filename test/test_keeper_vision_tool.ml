@@ -1726,7 +1726,7 @@ let test_candidate_rows_join_parent_tool_call () =
           Eio_main.run (fun env ->
             Eio.Switch.run (fun sw ->
               Vt.run_vision ~complete ~sw ~clock:(Eio.Stdenv.clock env)
-                ~net:(Eio.Stdenv.net env) ~tool_use_id:"call-vision-join"
+                ~net:(Eio.Stdenv.net env) ~parent_tool_use_id:"call-vision-join"
                 ~trace_id:"trace-vision-join" ~query:"read the screenshot"
                 ~media_type:"image/png" ~bytes:"\x89PNG\r\n\x1a\nraw" ()))
         in
@@ -1743,7 +1743,7 @@ let test_candidate_rows_join_parent_tool_call () =
         assert (events = [ "started"; "error"; "started"; "ok" ]);
         List.iter
           (fun row ->
-            assert (row_top_string row "tool_use_id" = "call-vision-join");
+            assert (row_top_string row "parent_tool_use_id" = "call-vision-join");
             assert (row_top_string row "trace_id" = "trace-vision-join"))
           rows;
         match rows with
@@ -1782,7 +1782,7 @@ let test_cancelled_candidate_leaves_start_and_cancelled_rows () =
          Eio_main.run (fun env ->
            Eio.Switch.run (fun sw ->
              ignore (Vt.run_vision ~complete ~sw ~clock:env#clock ~net:env#net
-                       ~tool_use_id:"call-vision-cancel"
+                       ~parent_tool_use_id:"call-vision-cancel"
                        ~query:"inspect" ~media_type:"image/png"
                        ~bytes:"\x89PNG\r\n\x1a\nprovider-cancel" ())));
          failwith "provider cancellation was swallowed"
@@ -1801,7 +1801,7 @@ let test_cancelled_candidate_leaves_start_and_cancelled_rows () =
       let fields = row_input_fields cancelled_row in
       assert (row_string_field "runtime_id" fields = "p1.vision-a");
       assert (row_string_field "reason" fields = "parent_cancelled");
-      assert (row_top_string cancelled_row "tool_use_id" = "call-vision-cancel")))
+      assert (row_top_string cancelled_row "parent_tool_use_id" = "call-vision-cancel")))
 
 let test_fallback_reference_projection_is_explicitly_unread () =
   let image source_type data =

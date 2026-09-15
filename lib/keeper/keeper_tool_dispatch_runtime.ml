@@ -184,7 +184,7 @@ let runtime_context
       ?continuation_channel
       ?gate_context
       ?gate_grant
-      ?tool_use_id
+      ?parent_tool_use_id
       ?trace_id
       ~capability_authority
       ()
@@ -203,7 +203,7 @@ let runtime_context
     ; continuation_channel
     ; gate_context
     ; gate_grant
-    ; tool_use_id
+    ; tool_use_id = parent_tool_use_id
     ; trace_id
     ; capability_authority
     }
@@ -225,7 +225,7 @@ let execute_keeper_tool_descriptor_with_authority
       ?continuation_channel
       ?gate_context
       ?gate_grant
-      ?tool_use_id
+      ?parent_tool_use_id
       ?trace_id
       ~(descriptor : Keeper_tool_descriptor.t)
       ~(input : Yojson.Safe.t)
@@ -256,7 +256,7 @@ let execute_keeper_tool_descriptor_with_authority
         ?continuation_channel
         ?gate_context
         ?gate_grant
-        ?tool_use_id
+        ?parent_tool_use_id
         ?trace_id
         ~capability_authority
         ()
@@ -308,7 +308,7 @@ let execute_keeper_tool_call_with_authority
       ?continuation_channel
       ?gate_context
       ?gate_grant
-      ?tool_use_id
+      ?parent_tool_use_id
       ?trace_id
       ~(name : string)
       ~(input : Yojson.Safe.t)
@@ -335,7 +335,7 @@ let execute_keeper_tool_call_with_authority
            ?continuation_channel
            ?gate_context
            ?gate_grant
-           ?tool_use_id
+           ?parent_tool_use_id
            ?trace_id
            ~capability_authority
            ()

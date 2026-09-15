@@ -75,7 +75,7 @@ let execute_with_observers_with_authority
             ?continuation_channel
             ?gate_context
             ?gate_grant
-            ?tool_use_id:parent_tool_use_id
+            ?parent_tool_use_id
             ~name
             ~input
             ()
@@ -95,7 +95,7 @@ let execute_with_observers_with_authority
             ?continuation_channel
             ?gate_context
             ?gate_grant
-            ?tool_use_id:parent_tool_use_id
+            ?parent_tool_use_id
             ~descriptor
             ~input
             ()
@@ -114,7 +114,7 @@ let execute_with_observers_with_authority
             ?continuation_channel
             ?gate_context
             ?gate_grant
-            ?tool_use_id:parent_tool_use_id
+            ?parent_tool_use_id
             ~name
             ~input
             ()
@@ -133,7 +133,7 @@ let execute_with_observers_with_authority
             ?continuation_channel
             ?gate_context
             ?gate_grant
-            ?tool_use_id:parent_tool_use_id
+            ?parent_tool_use_id
             ~descriptor
             ~input
             ())

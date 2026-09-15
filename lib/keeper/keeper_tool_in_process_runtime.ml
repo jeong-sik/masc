@@ -2324,7 +2324,7 @@ let handle_masc_fusion_status ~config ~(meta : keeper_meta) ~args () =
 (* Image files use the existing sandbox Read boundary before entering the
    same per-Keeper artifact/vision path as browser screenshots and uploads. *)
 let handle_analyze_image_with_outcome ?complete ?config ?turn_sandbox_factory
-    ?tool_use_id ?trace_id
+    ?parent_tool_use_id ?trace_id
     ?sw ?clock ?net ~(meta : keeper_meta) ~args () =
   let invalid detail = Keeper_tool_execution.failure
       ~class_:Tool_result.Policy_rejection
@@ -2337,7 +2337,7 @@ let handle_analyze_image_with_outcome ?complete ?config ?turn_sandbox_factory
   | None, _ ->
       Keeper_vision_tool.handle_with_outcome
         ?base_path:(Option.map (fun (config : Workspace.config) -> config.base_path) config)
-        ?complete ?tool_use_id ?trace_id ?sw ?clock ?net ~meta ~args ()
+        ?complete ?parent_tool_use_id ?trace_id ?sw ?clock ?net ~meta ~args ()
   | Some _, Some _ -> invalid "Provide exactly one of artifact or path."
   | Some (`String path), None when String.trim path <> "" ->
       (match Json_util.assoc_member_opt "query" args, config, sw, clock, net with
@@ -2365,7 +2365,7 @@ let handle_analyze_image_with_outcome ?complete ?config ?turn_sandbox_factory
             | Ok handle ->
                 let handle = Multimodal.Vision_artifact_store.to_string handle in
                 let args = `Assoc (("artifact", `String handle) :: List.remove_assoc "path" fields) in
-                let result = Keeper_vision_tool.handle_with_outcome ~base_path:config.base_path ?complete ?tool_use_id ?trace_id ?sw ?clock ?net ~meta ~args () in
+                let result = Keeper_vision_tool.handle_with_outcome ~base_path:config.base_path ?complete ?parent_tool_use_id ?trace_id ?sw ?clock ?net ~meta ~args () in
                 (match result.disposition, result.data with
                  | Tool_result.Completed (), Some (`Assoc output) ->
                      Keeper_tool_execution.success_data

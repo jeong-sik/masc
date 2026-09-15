@@ -567,7 +567,7 @@ let handle_in_process ctx descriptor args =
       (Keeper_tool_in_process_runtime.handle_analyze_image_with_outcome
          ~config:ctx.config
          ?turn_sandbox_factory:ctx.turn_sandbox_factory
-         ?tool_use_id:ctx.tool_use_id
+         ?parent_tool_use_id:ctx.tool_use_id
          ?trace_id:ctx.trace_id
          ?sw:ctx.sw
          ?clock:ctx.clock

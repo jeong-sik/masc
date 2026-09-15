@@ -132,7 +132,7 @@ val outcome_of_response :
 val run_vision
   :  ?base_path:string
   -> ?complete:complete_fn
-  -> ?tool_use_id:string
+  -> ?parent_tool_use_id:string
      (* #35456: parent invocation identity carried onto candidate provenance
         rows so each attempt joins the tool call that requested it. *)
   -> ?trace_id:string
@@ -187,7 +187,7 @@ val run_vision
 val handle
   :  ?base_path:string
   -> ?complete:complete_fn
-  -> ?tool_use_id:string
+  -> ?parent_tool_use_id:string
   -> ?trace_id:string
   -> ?sw:Eio.Switch.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
@@ -200,7 +200,7 @@ val handle
 val handle_with_outcome
   :  ?base_path:string
   -> ?complete:complete_fn
-  -> ?tool_use_id:string
+  -> ?parent_tool_use_id:string
   -> ?trace_id:string
   -> ?sw:Eio.Switch.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t

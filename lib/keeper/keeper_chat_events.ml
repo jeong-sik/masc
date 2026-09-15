@@ -285,13 +285,19 @@ let reader_gone t =
     (* A publisher already suspended in [Eio.Stream.add] does not see the
        field change: a parked writer wakes only from a take, which is where
        eio calls [Waiters.wake_one t.writers] (eio 1.3 stream.ml, in [take]
-       and [take_nonblocking] alike). One take releases it, because a bus has
-       a single publisher fiber and therefore at most one parked writer. The
-       item that writer then queues is never read. Neither the field write nor
-       the take suspends, so a reader leaving under cancellation still gets
-       here. *)
-    (match Eio.Stream.take_nonblocking t.stream with
-     | Some _ | None -> ())
+       and [take_nonblocking] alike). Emptying the bus releases all of them
+       without assuming how many there are. It terminates: waking a writer
+       re-queues its item inside [wake_one] while the lock is held, so that
+       writer cannot add a second one before this loop ends, and every
+       iteration drops one item for good. Nothing here suspends, so a reader
+       leaving under cancellation still gets through. The items go nowhere;
+       the journal already has them and this bus has no reader. *)
+    let rec release_every_parked_writer () =
+      match Eio.Stream.take_nonblocking t.stream with
+      | Some _ -> release_every_parked_writer ()
+      | None -> ()
+    in
+    release_every_parked_writer ()
 ;;
 
 let subscribe_published t =

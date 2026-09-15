@@ -192,6 +192,24 @@ let test_the_composer_row_says_what_a_slash_word_is () =
        ~module_path:"bin/masc_tui_render_chat.ml"
        ~binding_name:"render_keeper_message" ~callee:"slash_hint_text")
 
+(* The Browser Lane is a page reader: it owns j/k, Enter and the rest, so
+   there is no composer to draw and no cursor to place. Both rows still ask
+   before drawing, and the row the composer would take is now empty. It used
+   to draw the lane's name, its source and its browser, which is what the
+   surface title says two rows under the tab strip -- the same three facts
+   twenty rows apart, that a reader had to match up by position. *)
+let test_the_browser_lane_row_does_not_repeat_its_title () =
+  List.iter
+    (fun binding_name ->
+       check int (binding_name ^ " asks whether the page reader is up") 1
+         (Ast_grep.count_calls_in_value_binding
+            ~module_path:"bin/masc_tui_render_prim.ml" ~binding_name
+            ~callee:"browser_lane_on_screen"))
+    [ "composer_line"; "composer_cursor" ];
+  check int "and the label that restated the title is gone" 0
+    (Ast_grep.count_value_bindings ~module_path:"bin/masc_tui_types.ml"
+       ~name:"context_label")
+
 let () =
   run "tui-composer-projection"
     [ ( "state projection"
@@ -205,5 +223,7 @@ let () =
             test_state_projection_has_one_structural_owner
         ; test_case "the composer row says what a slash word is" `Quick
             test_the_composer_row_says_what_a_slash_word_is
+        ; test_case "the browser lane row does not repeat its title" `Quick
+            test_the_browser_lane_row_does_not_repeat_its_title
         ] )
     ]

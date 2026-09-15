@@ -393,13 +393,16 @@ let launch_supervised_fiber_body
                   terminalize_crash
                 : (unit, string) result))
         ~finally:(fun () ->
-          (* Finally runs best-effort. Any exception raised here (including
-           Eio.Cancel.Cancelled, which propagates during concurrent fiber
-           teardown) would be re-wrapped by [Fun.protect] as
-           [Fun.Finally_raised], masking the original body exception and
-           crashing the server (see masc crash 2026-04-17). Swallow
-           everything and log — cleanup is advisory, state-machine events
-           already fired on the body's happy/error paths. *)
+          (* Finally runs best-effort. Cleanup is advisory and the
+           state-machine events already fired on the body's happy and error
+           paths, so an exception from here must not become the fiber's
+           outcome. Where such an exception would land depends on which
+           wrapper ran: [Eio_guard.protect] inside a fiber registers this as
+           [Eio.Switch.on_release], and eio runs every release hook under
+           [Eio.Cancel.protect], so a raise there fails the switch rather than
+           wrapping anything; outside a fiber it falls back to [Fun.protect],
+           where a raise becomes [Fun.Finally_raised] and masks the body
+           exception (masc crash 2026-04-17). Swallow everything and log. *)
           match run_cleanup_best_effort (fun () ->
             Keeper_registry.cleanup_tracking ~base_path meta.name;
             Keeper_turn_attempt_observer.reset_keeper ~base_path ~keeper:meta.name;
@@ -562,29 +565,27 @@ let launch_supervised_fiber_body
           with
           | Cleanup_completed -> ()
           | Cleanup_cancelled ->
-            (* Swallow cleanup cancellation without incrementing the cleanup
-             failure counter. Re-raising Cancelled here is what the docstring
-             above warns against: [Fun.protect] would wrap it as
-             [Fun.Finally_raised], masking the body exception and crashing
-             the supervisor. See 2026-05-05 cycle9 incident: 5+ FATALs/day
-             traced to a re-raise at this exact site (commit bb10b80ee4
-             leftover from #12910 revert). *)
-            Log.Keeper.debug
-              "%s: supervisor finally cleanup cancelled (suppressed to avoid \
-               Fun.Finally_raised)"
+            (* The scheduler cannot deliver a cancellation into this block:
+             the fiber path runs it as a release hook, which eio wraps in
+             [Eio.Cancel.protect], and the fallback path has no cancellation
+             context to be cancelled from. So arriving here means the cleanup
+             raised [Cancelled] itself, which is worth seeing. Still
+             swallowed: a raise from cleanup is not the fiber's outcome. *)
+            Log.Keeper.warn
+              "%s: supervisor finally cleanup raised a cancellation, which the \
+               release hook's cancellation guard should rule out"
               meta.name
           | Cleanup_failed exn ->
-            (* Swallow non-cancellation cleanup failures too. Cleanup is
-             advisory; re-raising here would still become [Fun.Finally_raised]
-             and could mask the body outcome. Count only these unexpected
-             cleanup exceptions so the metric remains actionable. *)
+            (* Swallow ordinary cleanup failures too, for the same reason:
+             cleanup is advisory and a raise from here is not the fiber's
+             outcome. These are the ones the metric counts, so it stays a
+             count of cleanup that did not finish. *)
             Otel_metric_store.inc_counter
               Keeper_metrics.(to_string SupervisorCleanupFailures)
               ~labels:[ "keeper", meta.name ]
               ();
             Log.Keeper.warn
-              "%s: supervisor finally cleanup failed (suppressed to avoid \
-               Fun.Finally_raised): %s"
+              "%s: supervisor finally cleanup failed and was suppressed: %s"
               meta.name
               (Printexc.to_string exn))))
 ;;

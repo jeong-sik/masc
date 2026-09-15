@@ -4976,6 +4976,41 @@ let antigravity_file_credential =
    path = \"/tmp/antigravity-oauth-token\""
 ;;
 
+(* A "~/" credential path is the operator's home at read time. The seed
+   config ships the Antigravity token that way, one file for every workspace
+   on a machine, and [Runtime_adapter]'s absolute-path rule sees the expanded
+   value rather than the tilde. *)
+let test_file_credential_path_expands_home () =
+  let home =
+    match Sys.getenv_opt "HOME" with
+    | Some home when home <> "" -> home
+    | Some _ | None -> fail "HOME must be set for this case"
+  in
+  with_temp_runtime_toml
+    (antigravity_cli_runtime_toml
+       ~credential:
+         "[providers.antigravity.credentials]\n\
+          type = \"file\"\n\
+          path = \"~/.gemini/antigravity-cli/antigravity-oauth-token\""
+       ~options:"timeout-s = 45.0"
+       ())
+    (fun path ->
+       match load_list_text ~config_path:path with
+       | Error error -> failf "antigravity-cli runtime should load: %s" error
+       | Ok (_, default, _, _, _) ->
+         (match default.execution with
+          | Runtime_execution.Antigravity_cli config ->
+            check
+              string
+              "OAuth source is the home-expanded path"
+              (Filename.concat home ".gemini/antigravity-cli/antigravity-oauth-token")
+              config.oauth_source
+          | Runtime_execution.Agent_core _
+          | Runtime_execution.Claude_code _
+          | Runtime_execution.Codex_app_server _ ->
+            fail "antigravity-cli runtime expected"))
+;;
+
 let test_antigravity_cli_materializes_typed_process_options () =
   let options =
     "agent = \"fixture-agent\"\n\
@@ -5295,6 +5330,8 @@ let () =
             test_codex_app_server_rejects_declared_credentials;
           test_case "antigravity CLI options materialize" `Quick
             test_antigravity_cli_materializes_typed_process_options;
+          test_case "a file credential path expands a leading ~/" `Quick
+            test_file_credential_path_expands_home;
           test_case "antigravity add-dirs reach the execution config" `Quick
             test_antigravity_cli_add_dirs_reach_the_execution_config;
           test_case "antigravity add-dirs reject relative entries" `Quick

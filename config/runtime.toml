@@ -357,98 +357,108 @@ path = "/api/tags"
 # [mlx_server.mlx-served-model]
 # max-concurrent = 1
 
-# Official Claude Code runtime example. This stays commented so
-# a fresh install does not claim the local CLI is installed or logged in.
-# Claude Code owns its stored login or supported API/token environment.
-# MASC preserves declared client authentication and isolates unrelated settings.
+# ── Official client runtimes ──────────────────────────────────────────────────
+# Claude Code, Codex and Antigravity are catalog entries like every provider
+# above. A declaration says what the runtime is; it does not say the CLI is
+# installed or logged in. Whether a keeper or a lane uses one is assignment
+# ([runtime], a keeper's TOML, an exact-output slot list), and whether it can
+# run is what `masc doctor` and a dispatch refusal report. Each CLI owns its
+# stored login or supported API/token environment; MASC preserves declared
+# client authentication and isolates unrelated settings.
 #
 # The interactive wizard lists every enabled binding. For scripted --provider
 # selection with multiple models, set wizard-default on the binding to use.
-# [providers.claude_code]
-# display-name = "Claude Code"
-# protocol = "claude-code"
-# command = "claude"
-# is-non-interactive = true
-#
-# [models.claude-code-sonnet]
-# api-name = "claude-sonnet-5"
-# max-context = 1000000
-# tools-support = true
-# streaming = true
-#
+[providers.claude_code]
+display-name = "Claude Code"
+protocol = "claude-code"
+command = "claude"
+is-non-interactive = true
+
+# max-prompt-bytes: the history MASC seeds the client's first turn with. The
+# client owns its own context window and refuses an oversized seed in a typed
+# terminal; without this ceiling a keeper learned 524288 from that refusal one
+# 29-minute attempt at a time (2026-08-24).
+[models.claude-code-sonnet]
+api-name = "claude-sonnet-5"
+max-context = 1000000
+max-prompt-bytes = 524288
+tools-support = true
+streaming = true
+
 # Claude Code carries images over the stream-json content-block array, and Codex
 # over its turn/start input list, so a model that reads them says so here. Both
 # halves are required: without this key the turn's images are read by the
 # analyze_image sub-call instead, which costs a provider round-trip and leaves
 # later questions about the same image unanswerable.
-# [models.claude-code-sonnet.capabilities]
-# supports-image-input = true
-#
-# [claude_code.claude-code-sonnet]
-#
+[models.claude-code-sonnet.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-sonnet]
+
 # Thinking depth on an official client is a model-level `reasoning-effort`, not
 # a capability: the CLI owns the wire, so MASC selects a level rather than
 # encoding a control. One model row per level is the whole mechanism — bind
 # claude-opus-5 three times at low/high/max and assign keepers to the level the
 # work deserves. Claude Code rejects "none" and "minimal"; Codex takes both.
-#
-# [models.claude-code-opus-high]
-# api-name = "claude-opus-5"
-# max-context = 1000000
-# tools-support = true
-# streaming = true
-# reasoning-effort = "high"
-# turn-timeout-s = 600.0
-#
-# [claude_code.claude-code-opus-high]
+[models.claude-code-opus-high]
+api-name = "claude-opus-5"
+max-context = 1000000
+max-prompt-bytes = 524288
+tools-support = true
+streaming = true
+reasoning-effort = "high"
+turn-timeout-s = 600.0
 
-# Codex account/provider runtime example, same shape and same reason for
-# staying commented. Codex reads images from its turn/start input list, so the
-# image capability key means the same thing here as it does above.
-# [providers.codex_subscription]
-# display-name = "Codex ChatGPT Subscription"
-# protocol = "codex-app-server"
-# command = "codex"
-# is-non-interactive = true
-#
-# [models.codex-gpt-5-6]
-# api-name = "gpt-5.6-sol"
-# max-context = 272000
-# tools-support = true
-# streaming = true
-# reasoning-effort = "low"
-#
-# [codex_subscription.codex-gpt-5-6]
+[claude_code.claude-code-opus-high]
 
-# Antigravity CLI runtime example. Unlike the other two official clients this
-# one does need a credentials table, and it is a file reference rather than an
-# environment variable: the CLI writes an OAuth token to disk and MASC points at
-# it. `timeout-s` is required on the provider — the CLI gives no progress signal
-# to time a turn against, so the bound has to be declared rather than inferred.
-# [providers.antigravity_subscription]
-# display-name = "Antigravity Google Subscription"
-# protocol = "antigravity-cli"
-# command = "agy"
-# is-non-interactive = true
-# timeout-s = 180.0
-#
-# Write the path out in full. Nothing in the runtime expands "~", so a
-# tilde reaches the filesystem literally and the token read fails.
-# [providers.antigravity_subscription.credentials]
-# type = "file"
-# path = "/home/you/.gemini/antigravity-cli/antigravity-oauth-token"
-#
+# Codex reads images from its turn/start input list, so the image capability
+# key means the same thing here as it does above.
+[providers.codex_subscription]
+display-name = "Codex ChatGPT Subscription"
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+
+[models.codex-gpt-5-6]
+api-name = "gpt-5.6-sol"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "low"
+
+[codex_subscription.codex-gpt-5-6]
+
+# Antigravity is the one official client that needs a credentials table, and it
+# is a file reference rather than an environment variable: the CLI writes an
+# OAuth token to disk and MASC points at it. `timeout-s` is required on the
+# provider — the CLI gives no progress signal to time a turn against, so the
+# bound has to be declared rather than inferred.
+[providers.antigravity_subscription]
+display-name = "Antigravity Google Subscription"
+protocol = "antigravity-cli"
+command = "agy"
+is-non-interactive = true
+timeout-s = 180.0
+
+# A leading "~/" is expanded to the home directory when runtime.toml is read,
+# so this one path serves every workspace on the machine. The CLI writes its
+# token here by default.
+[providers.antigravity_subscription.credentials]
+type = "file"
+path = "~/.gemini/antigravity-cli/antigravity-oauth-token"
+
 # The effort level is part of the model name on this CLI, not a separate knob:
 # `agy --model gemini-3.7-flash-high` is one model to Antigravity. Probed
 # 2026-08-29, all answering in 7-9s: gemini-3.7-flash-high, gemini-3.6-flash-high,
 # gemini-3.1-pro-high, claude-opus-4-6-thinking, claude-sonnet-4-6.
-# [models.antigravity-gemini-3-7-flash-high]
-# api-name = "gemini-3.7-flash-high"
-# max-context = 1000000
-# tools-support = true
-# streaming = true
-#
-# [antigravity_subscription.antigravity-gemini-3-7-flash-high]
+[models.antigravity-gemini-3-7-flash-high]
+api-name = "gemini-3.7-flash-high"
+max-context = 1000000
+max-prompt-bytes = 131072
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-gemini-3-7-flash-high]
 
 [models.deepseek-v4-pro]
 api-name = "deepseek-v4-pro"

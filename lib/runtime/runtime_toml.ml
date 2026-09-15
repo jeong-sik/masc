@@ -356,8 +356,14 @@ let parse_credential (tbl : Otoml.t) (path : string)
             ~key:"key"
             ~message:"credential type 'env' requires non-empty 'key'")
      | "file" ->
+       (* A leading "~/" is the operator's home at read time, the same rule
+          [Env_config_core.normalize_path_lexically] applies to every other
+          path a config names. The seed config ships the Antigravity token
+          under "~/.gemini/…" so it is one file for every workspace on a
+          machine; expanding here keeps [Runtime_adapter]'s absolute-path
+          rule true of the value it sees. *)
        Result.map
-         (fun path -> Runtime_schema.File path)
+         (fun path -> Runtime_schema.File (Env_config_core.expand_home_prefix path))
          (required_non_empty_string
             ~trim_result:true
             tbl

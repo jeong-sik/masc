@@ -220,7 +220,6 @@ let start ~sw ~env =
   let masc_root = Config_dir_resolver.masc_root ~base_path in
   let record_path = Browser_driver_process.owner_record_path ~masc_root in
   let profile_root = Browser_driver_process.profile_root ~masc_root in
-  let clock = Eio.Stdenv.clock env in
   Eio.Fiber.fork ~sw (fun () ->
     stop_driver_left_behind ~record_path;
     (* Profiles are cleared only once no browser can still be using one. *)

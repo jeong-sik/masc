@@ -225,18 +225,25 @@ val complete
 
 (** Dispatch an already measured and admitted request. The transport receives
     the request owned by [admitted_request]; callers cannot substitute config,
-    messages, tools, or trace context after measurement. *)
+    messages, tools, or trace context after measurement.
+
+    [call_window] is the whole-call window the caller opened before measuring
+    the request, the one the measurement already spent from. The completion
+    spends what is left of it from the same [deadline_at], with the
+    [call_timeout_s] contract below: a permit wait still going when it closes
+    ends as [Queue] with nothing sent, a round trip as [Non_streaming_body],
+    and the messages name [call_timeout_s] with the budget as declared. *)
 val complete_admitted
   :  sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
-  -> ?clock:_ Eio.Time.clock
+  -> ?clock:'a Eio.Time.clock
   -> ?transport:Llm_transport.t
   -> admitted_request
   -> ?cache:Cache.t
   -> ?connection_cache:Http_client.cache
   -> ?metrics:Metrics.t
   -> ?body_timeout_s:float
-  -> ?call_timeout_s:float
+  -> call_window:'a Eio.Time.clock Deadline_window.t
   -> ?permit_wait:Provider_admission.permit_wait Atomic.t
   -> ?request_wire_observer:Request_wire_observer.try_observe
   -> unit
@@ -409,8 +416,8 @@ val complete_serialized
     [TimeoutError { phase = Queue }] with nothing sent; once the permit is
     granted the stream runs under its own budgets and this value plays no
     further part. Requires [clock]; omitted, the wait is unbounded. The same
-    parameter is on {!complete_stream_admitted} and
-    {!complete_stream_serialized}. *)
+    parameter is on {!complete_stream_serialized}; {!complete_stream_admitted}
+    takes the window the caller opened before measuring instead. *)
 val complete_stream
   :  sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
@@ -437,12 +444,18 @@ val complete_stream
 (** Streaming counterpart of {!complete_admitted}. Capture identity and idle
     deadline are fixed when the request is prepared. Pre-dispatch serialization
     observation remains an AGENT_CORE-owned operational sink and cannot alter provider
-    payload fields. *)
+    payload fields.
+
+    [admission_window] is the admission window the caller opened before
+    measuring the request; the measurement's permit wait and count round trip
+    already spent from it. The stream's permit wait ends at the same
+    [deadline_at] as [TimeoutError { phase = Queue }] with nothing sent, and
+    the message names [admission_timeout_s] with the budget as declared. *)
 val complete_stream_admitted
   :  sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
-  -> ?clock:_ Eio.Time.clock
-  -> ?admission_timeout_s:float
+  -> ?clock:'a Eio.Time.clock
+  -> admission_window:'a Eio.Time.clock Deadline_window.t
   -> ?permit_wait:Provider_admission.permit_wait Atomic.t
   -> ?transport:Llm_transport.t
   -> ?wire_observer:Wire_observer.try_observe

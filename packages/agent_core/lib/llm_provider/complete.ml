@@ -74,6 +74,20 @@ let inspect_serialized_request
       (serialize_final_http_request_unadmitted ~stream ~config ~messages ~tools))
 ;;
 
+(* A caller's bound as it arrives: the seconds it declared, which the call
+   resolves once the request is validated and opens there, or a window the
+   caller opened before measuring the request and has been spending from. *)
+type 'clock bound =
+  | Declared of float option
+  | Opened of 'clock Deadline_window.t
+
+let open_bound ~operation ~parameter ~clock = function
+  | Opened window -> Ok window
+  | Declared timeout_s ->
+    Http_client.resolve_explicit_deadline ~operation ~parameter ~clock ~timeout_s
+    |> Result.map Deadline_window.open_
+;;
+
 let complete_prepared_sync
       ~sw
       ~net
@@ -84,7 +98,7 @@ let complete_prepared_sync
       ?(connection_cache : Http_client.cache option)
       ?(metrics : Metrics.t option)
       ?body_timeout_s
-      ?call_timeout_s
+      ~call_bound
       ?permit_wait
       ?request_wire_observer
       ?admitted_body
@@ -119,16 +133,16 @@ let complete_prepared_sync
        | Error err -> Error err
        | Ok body_deadline ->
          Result.map
-           (fun call_deadline -> body_deadline, call_deadline)
-           (Http_client.resolve_explicit_deadline
+           (fun call_window -> body_deadline, call_window)
+           (open_bound
               ~operation:"Complete.complete"
               ~parameter:"call_timeout_s"
               ~clock
-              ~timeout_s:call_timeout_s))
+              call_bound))
   in
   match preflight with
   | Error err -> Error err
-  | Ok (body_deadline, call_deadline) ->
+  | Ok (body_deadline, call_window) ->
     let m =
       match metrics with
       | Some m -> m
@@ -218,10 +232,11 @@ let complete_prepared_sync
             what the wait left, as [Non_streaming_body]. A declared
             body_timeout_s still arms inside it, so the narrower bound fires
             and names its own knob. *)
-         match call_deadline with
-         | Http_client.Unbounded ->
+         match call_window with
+         | Deadline_window.Unbounded ->
            Provider_admission.with_admission ~config:request_config dispatch
-         | Http_client.Bounded (call_clock, call_timeout_s) ->
+         | Deadline_window.Bounded
+             { clock = call_clock; timeout_s = call_timeout_s; deadline_at } ->
            let call_deadline_exceeded ~phase ~stage =
              { Llm_transport.response =
                  Error
@@ -240,7 +255,7 @@ let complete_prepared_sync
               Provider_admission.with_admission_and_work_until
                 ?wait:permit_wait
                 ~clock:call_clock
-                ~deadline_at:(Eio.Time.now call_clock +. call_timeout_s)
+                ~deadline_at
                 ~config:request_config
                 dispatch
             with
@@ -365,7 +380,7 @@ let complete
     ?connection_cache
     ?metrics
     ?body_timeout_s
-    ?call_timeout_s
+    ~call_bound:(Declared call_timeout_s)
     ?request_wire_observer
     ()
 ;;
@@ -380,7 +395,7 @@ let complete_admitted
       ?connection_cache
       ?metrics
       ?body_timeout_s
-      ?call_timeout_s
+      ~call_window
       ?permit_wait
       ?request_wire_observer
       ()
@@ -397,7 +412,7 @@ let complete_admitted
     ?connection_cache
     ?metrics
     ?body_timeout_s
-    ?call_timeout_s
+    ~call_bound:(Opened call_window)
     ?permit_wait
     ?request_wire_observer
     ()
@@ -429,7 +444,7 @@ let complete_serialized
     ?connection_cache
     ?metrics
     ?body_timeout_s
-    ?call_timeout_s
+    ~call_bound:(Declared call_timeout_s)
     ?permit_wait
     ?request_wire_observer
     ()
@@ -441,7 +456,7 @@ let complete_prepared_stream
       ~sw
       ~net
       ?clock
-      ?admission_timeout_s
+      ~admission_bound
       ?permit_wait
       ?(transport : Llm_transport.t option)
       ?wire_observer
@@ -467,15 +482,15 @@ let complete_prepared_stream
     match validation with
     | Error err -> Error err
     | Ok () ->
-      Http_client.resolve_explicit_deadline
+      open_bound
         ~operation:"Complete.complete_stream"
         ~parameter:"admission_timeout_s"
         ~clock
-        ~timeout_s:admission_timeout_s
+        admission_bound
   in
   match preflight with
   | Error err -> Error err
-  | Ok admission_deadline ->
+  | Ok admission_window ->
     let on_event = emit_stream_event on_event in
     let request_config = config in
     let latency_counter = start_latency_counter ?clock () in
@@ -577,15 +592,16 @@ let complete_prepared_stream
          the call that is not the stream: a stream's length is its own, and
          nothing here bounds it, but a caller that says how long it will
          queue ends the wait as [Queue] with nothing sent. *)
-      match admission_deadline with
-      | Http_client.Unbounded ->
+      match admission_window with
+      | Deadline_window.Unbounded ->
         Provider_admission.with_admission ~config:request_config dispatch
-      | Http_client.Bounded (admission_clock, admission_timeout_s) ->
+      | Deadline_window.Bounded
+          { clock = admission_clock; timeout_s = admission_timeout_s; deadline_at } ->
         (match
            Provider_admission.with_admission_until
              ?wait:permit_wait
              ~clock:admission_clock
-             ~deadline_at:(Eio.Time.now admission_clock +. admission_timeout_s)
+             ~deadline_at
              ~config:request_config
              dispatch
          with
@@ -656,7 +672,7 @@ let complete_stream
     ~sw
     ~net
     ?clock
-    ?admission_timeout_s
+    ~admission_bound:(Declared admission_timeout_s)
     ?transport
     ?wire_observer
     ?request_wire_observer
@@ -672,7 +688,7 @@ let complete_stream_admitted
       ~sw
       ~net
       ?clock
-      ?admission_timeout_s
+      ~admission_window
       ?permit_wait
       ?transport
       ?wire_observer
@@ -689,7 +705,7 @@ let complete_stream_admitted
     ~sw
     ~net
     ?clock
-    ?admission_timeout_s
+    ~admission_bound:(Opened admission_window)
     ?permit_wait
     ?transport
     ?wire_observer
@@ -723,7 +739,7 @@ let complete_stream_serialized
     ~sw
     ~net
     ?clock
-    ?admission_timeout_s
+    ~admission_bound:(Declared admission_timeout_s)
     ?permit_wait
     ?transport
     ?wire_observer

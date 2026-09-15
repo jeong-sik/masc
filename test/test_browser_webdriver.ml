@@ -241,9 +241,25 @@ let test_driver_ownership_record () =
   check bool "a longer path that only starts with the driver is not the driver" true
     (decision (Some (owner.driver ^ "-old --port 1")) = P.Not_the_recorded_driver);
   check bool "a pid with no process is nothing to stop" true (decision None = P.Not_the_recorded_driver);
-  check (list string) "driver listens on loopback and lets Firefox pick the BiDi port"
-    [ owner.driver; "--host"; "127.0.0.1"; "--port"; "50931"; "--websocket-port"; "0" ]
-    (P.argv ~driver:owner.driver ~port:50931);
+  let profile_root = P.profile_root ~masc_root:"/ws/.masc" in
+  check string "profiles live under the workspace lane" "/ws/.masc/browser-lane/profiles" profile_root;
+  check (list string) "driver listens on loopback, lets Firefox pick the BiDi port, and keeps profiles under the lane"
+    [ owner.driver; "--host"; "127.0.0.1"; "--port"; "50931"; "--websocket-port"; "0";
+      "--profile-root"; profile_root ]
+    (P.argv ~driver:owner.driver ~port:50931 ~profile_root);
+  (* Process table shape measured 2026-09-15: the driver, the browser it
+     launched, the same browser after it relaunched itself with no parent, a
+     content process, and a browser of another workspace. *)
+  let process_table = String.concat "\n"
+    [ "  68072 " ^ owner.driver ^ " --host 127.0.0.1 --port 64009 --websocket-port 0 --profile-root " ^ profile_root;
+      "  73227 /Applications/Zen.app/Contents/MacOS/zen --marionette -headless --remote-debugging-port 52416 -no-remote -profile " ^ profile_root ^ "/rust_mozprofileGLlAmp";
+      "  74640 /Applications/Zen.app/Contents/MacOS/zen --marionette --remote-debugging-port 9222 -no-remote -profile " ^ profile_root ^ "/rust_mozprofileGLlAmp";
+      "  74809 /Applications/Zen.app/Contents/MacOS/plugin-container.app/Contents/MacOS/plugin-container -isForBrowser -prefsHandle 0:53546";
+      "  81000 /Applications/Zen.app/Contents/MacOS/zen --marionette -profile /other/.masc/browser-lane/profiles/rust_mozprofileX";
+      "  81001 /Applications/Zen.app/Contents/MacOS/zen --marionette -profile " ^ profile_root ^ "-old/rust_mozprofileY";
+      "" ] in
+  check (list int) "the launched browser and its relaunch are ours; the driver, content process and other roots are not"
+    [ 73227; 74640 ] (P.browsers_using_profile_root ~profile_root ~process_table);
   check string "record lives beside the lane host"
     "/ws/.masc/browser-lane/geckodriver-owner.json" (P.owner_record_path ~masc_root:"/ws/.masc")
 

@@ -7,7 +7,7 @@ val name : package -> string
 val bundled_revision : package -> string
 (** Complete revision of this immutable binary-embedded package value. *)
 
-type ownership = Recorded | Untracked | Modified
+type ownership = Builtin_skill_judgement.ownership = Recorded | Untracked | Modified
 type inspection =
   | Missing
   | Present of { revision : string; bundled_revision : string; ownership : ownership }
@@ -20,7 +20,7 @@ type inspection =
     writes receipts for trees that already equal this release. Everything that
     changes or moves an installed tree is left to {!install}, which a person
     runs ([masc init]), and startup reports it as pending. *)
-type bundled_verdict =
+type bundled_verdict = Builtin_skill_judgement.bundled_verdict =
   | Install_missing
       (** No package directory existed; the bundled package and its receipt were published. *)
   | Up_to_date
@@ -47,7 +47,10 @@ type bundled_verdict =
       (** {!reconcile_at_startup} only. The receipt matches the installed tree
           and this release differs; {!install} replaces it. *)
   | Keep_modified of { revision : string }
-      (** The tree changed since its receipt was written and differs from this release. *)
+      (** The receipt does not match the tree, and the tree differs from this
+          release. An operator edit and a replacement that stopped between
+          publishing and writing its receipt leave the same state, so both
+          are kept. *)
   | Keep_untracked_different of { revision : string }
       (** No receipt, and the files or their bytes differ from this release. It
           may be the operator's own version, so it is not replaced. *)
@@ -56,7 +59,7 @@ type bundled_verdict =
           files, unreadable directories). Nothing was changed. *)
 
 (** What reconciliation did with a receipt whose package this binary no longer ships. *)
-type retired_verdict =
+type retired_verdict = Builtin_skill_judgement.retired_verdict =
   | Retire_recorded of { backup : string option }
       (** {!install} only. The receipt matched the installed tree: the tree was
           moved to [backup] and the receipt removed. [None]: the package
@@ -65,7 +68,8 @@ type retired_verdict =
       (** {!reconcile_at_startup} only. What [Retire_recorded] would do;
           [None]: only the receipt is left. *)
   | Keep_retired_modified of { revision : string }
-      (** The tree changed since installation. Tree and receipt are kept. *)
+      (** The receipt does not match the tree, for either reason
+          [Keep_modified] names. Tree and receipt are kept. *)
   | Keep_retired_uninspectable of { reason : string }
 
 type error =

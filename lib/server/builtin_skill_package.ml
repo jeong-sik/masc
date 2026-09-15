@@ -1,3 +1,7 @@
+module Revision = Builtin_skill_revision
+module Judgement = Builtin_skill_judgement
+module Install_lock = Builtin_skill_install_lock
+
 type package = { name : string; files : (string * string) list }
 let name package = package.name
 
@@ -19,11 +23,11 @@ let make ~name ~files =
   then Error "a builtin package needs unique relative files and a root SKILL.md"
   else Ok { name; files }
 
-type ownership = Recorded | Untracked | Modified
+type ownership = Judgement.ownership = Recorded | Untracked | Modified
 type inspection =
   | Missing
   | Present of { revision : string; bundled_revision : string; ownership : ownership }
-type bundled_verdict =
+type bundled_verdict = Judgement.bundled_verdict =
   | Install_missing
   | Up_to_date
   | Adopt_identical
@@ -34,7 +38,7 @@ type bundled_verdict =
   | Keep_modified of { revision : string }
   | Keep_untracked_different of { revision : string }
   | Keep_uninspectable of { reason : string }
-type retired_verdict =
+type retired_verdict = Judgement.retired_verdict =
   | Retire_recorded of { backup : string option }
   | Retire_pending of { revision : string option }
   | Keep_retired_modified of { revision : string }
@@ -81,10 +85,6 @@ let lock_filename = "install.lock"
    else in the receipt directory carries it: the staging and backups entries
    are directories and atomic-write temporaries use their own shape. *)
 let receipt_suffix = ".sha256"
-(* The modes every published package has. They are part of the revision, so a
-   tree whose modes differ is a different tree. *)
-let release_directory_mode = 0o700
-let release_file_mode = 0o644
 let owner_only_file_mode = 0o600
 let installer_command = "masc init --skills-only --base-path BASE"
 
@@ -116,6 +116,12 @@ let error_message = function
     ^ " is in the Skill source, the backup entry or staging, so staging was not emptied;"
     ^ " look for the tree in staging, then delete the note"
 
+(* An operator edit and a replacement that stopped between publishing and
+   writing its receipt leave the same state, so the message names both. *)
+let receipt_mismatch =
+  "its files no longer match its installation receipt: edited since installation, \
+   or published by a replacement that stopped before recording it"
+
 let review_hint name =
   "review with masc skills-refresh " ^ name ^ " --base-path BASE"
 
@@ -139,7 +145,7 @@ let report_to_string = function
     ^ " is unchanged since installation and differs from this release (revision=" ^ revision
     ^ "); server start does not replace installed Skills, " ^ installer_command ^ " does"
   | Bundled { name; result = Ok (Keep_modified { revision }) } ->
-    "kept Skill " ^ name ^ " (edited since installation, revision=" ^ revision ^ "; "
+    "kept Skill " ^ name ^ " (" ^ receipt_mismatch ^ ", revision=" ^ revision ^ "; "
     ^ review_hint name ^ ")"
   | Bundled { name; result = Ok (Keep_untracked_different { revision }) } ->
     "kept Skill " ^ name
@@ -163,7 +169,7 @@ let report_to_string = function
     ^ " is no longer shipped by this release and its directory is already gone; "
     ^ installer_command ^ " removes its installation receipt"
   | Retired { name; result = Ok (Keep_retired_modified { revision }) } ->
-    "kept Skill " ^ name ^ " that this release no longer ships (edited since installation, revision="
+    "kept Skill " ^ name ^ " that this release no longer ships (" ^ receipt_mismatch ^ ", revision="
     ^ revision ^ "; delete " ^ state_dirname ^ "/" ^ name ^ receipt_suffix
     ^ " to keep it as your own Skill, or delete the Skill directory too)"
   | Retired { name; result = Ok (Keep_retired_uninspectable { reason }) } ->
@@ -220,7 +226,7 @@ let sync_dir path =
 let ensure_dir_with_sync ~sync_parent path =
   (match stat path with
    | None ->
-     (try Unix.mkdir path release_directory_mode with Unix.Unix_error (Unix.EEXIST, _, _) ->
+     (try Unix.mkdir path (Revision.release_mode Revision.Directory) with Unix.Unix_error (Unix.EEXIST, _, _) ->
        match stat path with
        | Some info when info.Unix.st_kind = Unix.S_DIR -> ()
        | None | Some _ -> raise (Rejected (Invalid_path path)))
@@ -246,38 +252,7 @@ let load_receipt ~root path =
   | Ok (Some _) -> raise (Rejected (Invalid_path path))
   | Error _ -> raise (Rejected (Invalid_path path))
 
-let hash content = Digestif.SHA256.(to_hex (digest_string content))
-
-type entry_kind = Directory | File
-type entry = { kind : entry_kind; path : string; mode : int; digest : string }
-
-let entry_kind_tag = function Directory -> "directory" | File -> "file"
-let release_mode = function Directory -> release_directory_mode | File -> release_file_mode
-
-(* Include directory entries and permissions: empty operator directories and
-   chmod edits must not disappear merely because all file bytes still match. *)
-let revision entries =
-  entries
-  |> List.map (fun { kind; path; mode; digest } -> entry_kind_tag kind, path, mode, digest)
-  |> List.sort compare
-  |> List.map (fun (kind, path, mode, digest) ->
-    `List [ `String kind; `String path; `Int mode; `String digest ])
-  |> (fun items -> `List items)
-  |> Yojson.Safe.to_string |> hash
-
-let directory_entries files =
-  let rec parents path acc =
-    let parent = Filename.dirname path in
-    if parent = "." then acc else parents parent (parent :: acc)
-  in
-  List.fold_left (fun acc (path, _) -> parents path acc) [ "" ] files
-  |> List.sort_uniq String.compare
-  |> List.map (fun path ->
-    { kind = Directory; path; mode = release_mode Directory; digest = "" })
-
-let bundled_revision package =
-  revision (directory_entries package.files @ List.map (fun (path, content) ->
-    { kind = File; path; mode = release_mode File; digest = hash content }) package.files)
+let bundled_revision package = Revision.revision (Revision.bundled_entries package.files)
 
 let tree_entries ~root directory =
   match require_chain ~root directory with
@@ -292,7 +267,7 @@ let tree_entries ~root directory =
          | Fs_compat.Owned_directory _ -> ()
          | Fs_compat.Owned_directory_missing -> raise (Rejected (Invalid_path path)));
         let children = Sys.readdir path |> Array.to_list |> List.sort String.compare in
-        { kind = Directory; path = rel; mode = info.st_perm; digest = "" }
+        { Revision.kind = Revision.Directory; path = rel; mode = info.st_perm; digest = "" }
         :: List.concat_map (fun child ->
           visit (if rel = "" then child else rel ^ "/" ^ child)) children
       | Unix.S_REG ->
@@ -300,28 +275,14 @@ let tree_entries ~root directory =
            semantics that a distribution replacement cannot preserve. *)
         if info.st_nlink <> 1 then raise (Rejected (Invalid_path path));
         (match Fs_compat.sha256_owned_regular_file ~ownership_root:root path with
-         | Ok (Some digest) -> [ { kind = File; path = rel; mode = info.st_perm; digest } ]
+         | Ok (Some digest) -> [ { Revision.kind = Revision.File; path = rel; mode = info.st_perm; digest } ]
          | Ok None | Error _ -> raise (Rejected (Invalid_path path)))
       | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK ->
         raise (Rejected (Invalid_path path))
     in
     Some (visit "")
 
-let tree_revision ~root directory = Option.map revision (tree_entries ~root directory)
-
-type files_match = Same_tree | Same_files_other_permissions | Different_files
-
-(* Compare with the release twice: as installed, and with every mode set to
-   the release's. The second tells a tree whose files and bytes are this
-   release's apart from one whose files differ. *)
-let files_match package ~revision:installed entries =
-  let bundled = bundled_revision package in
-  let with_release_modes =
-    List.map (fun entry -> { entry with mode = release_mode entry.kind }) entries in
-  match String.equal installed bundled, String.equal (revision with_release_modes) bundled with
-  | true, (true | false) -> Same_tree
-  | false, true -> Same_files_other_permissions
-  | false, false -> Different_files
+let tree_revision ~root directory = Option.map Revision.revision (tree_entries ~root directory)
 
 type locations =
   { root : string; skills : string; state : string; staging : string; backups : string
@@ -354,7 +315,6 @@ let locations ~base_path =
 let package_target paths name = Filename.concat paths.skills name
 let backup_target paths name = Filename.concat paths.backups name
 let receipt_path paths name = Filename.concat paths.state (name ^ receipt_suffix)
-let receipt_content revision = revision ^ "\n"
 let lock_path paths = Filename.concat paths.state lock_filename
 let move_note_path paths name = Filename.concat paths.moves (name ^ receipt_suffix)
 
@@ -366,19 +326,13 @@ let observe_installed paths name =
   let tree = tree_entries ~root:paths.root (package_target paths name) in
   receipt, tree
 
-let ownership_of receipt revision =
-  match receipt with
-  | None -> Untracked
-  | Some recorded when String.equal recorded (receipt_content revision) -> Recorded
-  | Some _ -> Modified
-
 let observe paths package =
   match observe_installed paths package.name with
   | _, None -> Missing
   | receipt, Some entries ->
-    let revision = revision entries in
+    let revision = Revision.revision entries in
     Present { revision; bundled_revision = bundled_revision package
-            ; ownership = ownership_of receipt revision }
+            ; ownership = Judgement.ownership ~receipt ~revision }
 
 let inspect ~base_path package =
   protect (fun () -> observe (locations ~base_path) package)
@@ -390,7 +344,7 @@ let write_file path content =
   Fun.protect ~finally:(fun () -> close_out_noerr channel) (fun () ->
     output_string channel content;
     flush channel;
-    Unix.fchmod fd (release_mode File);
+    Unix.fchmod fd (Revision.release_mode Revision.File);
     Unix.fsync fd)
 
 (* Build [package] inside [directory], which exists and is empty, then sync
@@ -403,7 +357,10 @@ let stage_into directory package =
     let destination = Filename.concat directory rel in
     create_parents (Filename.dirname destination);
     write_file destination content) package.files;
-  directory_entries package.files |> List.rev |> List.iter (fun { path; _ } ->
+  Revision.bundled_entries package.files |> List.filter_map (fun entry ->
+    match entry.Revision.kind with
+    | Revision.Directory -> Some entry.Revision.path
+    | Revision.File -> None) |> List.rev |> List.iter (fun path ->
     sync_dir (if path = "" then directory else Filename.concat directory path));
   sync_dir (Filename.dirname directory)
 
@@ -430,81 +387,32 @@ let export_with_sync ~sync_parent ~destination package =
 
 let export = export_with_sync ~sync_parent:sync_dir
 
-(* lockf belongs to the process: another systhread of this process is granted
-   the same lock, and closing any descriptor of the lock file releases it. One
-   mutex per receipt directory excludes those threads, so installations into
-   different base paths in one process do not wait for each other and a busy
-   report names the lock that was actually held. The table grows only by the
-   receipt directories this process installs into. No Eio effects inside. *)
-let installer_mutexes : (int * int, Mutex.t) Hashtbl.t = Hashtbl.create 1
-let installer_mutexes_guard = Mutex.create ()
-
-let installer_mutex paths =
+let lock_directories paths =
   ensure_dir paths.root;
-  ensure_dir paths.state;
-  let state = Unix.lstat paths.state in
-  let key = state.Unix.st_dev, state.Unix.st_ino in
-  Mutex.protect installer_mutexes_guard (fun () ->
-    match Hashtbl.find_opt installer_mutexes key with
-    | Some mutex -> mutex
-    | None ->
-      let mutex = Mutex.create () in
-      Hashtbl.replace installer_mutexes key mutex;
-      mutex)
+  ensure_dir paths.state
 
-let open_lock paths =
-  let path = lock_path paths in
-  (match stat path with
-   | None -> ()
-   | Some info when info.Unix.st_kind = Unix.S_REG -> ()
-   | Some _ -> raise (Rejected (Invalid_path path)));
-  let fd = Unix.openfile path [ Unix.O_RDWR; Unix.O_CREAT; Unix.O_CLOEXEC ] owner_only_file_mode in
-  let same_file = protect (fun () ->
-    let descriptor = Unix.fstat fd in
-    let named = Unix.lstat path in
-    if named.st_kind <> Unix.S_REG || named.st_dev <> descriptor.st_dev
-       || named.st_ino <> descriptor.st_ino then raise (Rejected (Invalid_path path))) in
-  match same_file with
-  | Ok () -> fd
-  | Error error -> close_quietly fd; raise (Rejected error)
-
-let lock_is_free fd =
-  match Unix.lockf fd Unix.F_TLOCK 0 with
-  | () -> true
-  | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EACCES), _, _) -> false
+let lock_rejected = function
+  | Install_lock.Lock_file_not_regular path -> raise (Rejected (Invalid_path path))
 
 (* A person runs the installer, and what usually holds the lock is a server
    start publishing a missing package, which ends on its own. So the installer
    waits, and says once which lock it waits for. *)
 let with_installer_lock ~on_wait paths action =
-  let mutex = installer_mutex paths in
-  let waited = not (Mutex.try_lock mutex) in
-  if waited then (on_wait (lock_path paths); Mutex.lock mutex);
-  Fun.protect ~finally:(fun () -> Mutex.unlock mutex) (fun () ->
-    let fd = open_lock paths in
-    Fun.protect ~finally:(fun () -> close_quietly fd) (fun () ->
-      if not (lock_is_free fd) then begin
-        if not waited then on_wait (lock_path paths);
-        Unix.lockf fd Unix.F_LOCK 0
-      end;
-      action ()))
+  lock_directories paths;
+  match Install_lock.with_waiting ~on_wait ~directory:paths.state ~lock:(lock_path paths) action with
+  | Ok value -> value
+  | Error rejection -> lock_rejected rejection
 
 (* Server start never waits: a stopped installer holding the lock must not
-   stop the server with it. [None] when either lock is held. *)
+   stop the server with it. [None] when the lock is held. *)
 let with_lock_if_free paths action =
-  let mutex = installer_mutex paths in
-  match Mutex.try_lock mutex with
-  | false -> None
-  | true ->
-    Fun.protect ~finally:(fun () -> Mutex.unlock mutex) (fun () ->
-      let fd = open_lock paths in
-      Fun.protect ~finally:(fun () -> close_quietly fd) (fun () ->
-        match lock_is_free fd with
-        | false -> None
-        | true -> Some (action ())))
+  lock_directories paths;
+  match Install_lock.with_if_free ~directory:paths.state ~lock:(lock_path paths) action with
+  | Ok value -> value
+  | Error rejection -> lock_rejected rejection
 
 let write_receipt paths name ~revision =
-  match Fs_compat.save_file_atomic_strict (receipt_path paths name) (receipt_content revision) with
+  match Fs_compat.save_file_atomic_strict (receipt_path paths name) (Revision.recorded revision) with
   | Ok () -> ()
   | Error reason -> raise (Rejected (Io_error reason))
 
@@ -521,7 +429,7 @@ let write_move_note paths name ~revision =
   (match stat note with
    | None -> ()
    | Some _ -> raise (Rejected (Backup_move_pending { note })));
-  match Fs_compat.save_file_atomic_strict note (receipt_content revision) with
+  match Fs_compat.save_file_atomic_strict note (Revision.recorded revision) with
   | Ok () -> ()
   | Error reason -> raise (Rejected (Io_error reason))
 
@@ -546,7 +454,7 @@ let new_holder paths name =
 let stage_in_holder paths package =
   let holder, tree = new_holder paths package.name in
   match protect (fun () ->
-    Unix.mkdir tree release_directory_mode;
+    Unix.mkdir tree (Revision.release_mode Revision.Directory);
     stage_into tree package) with
   | Ok () -> holder, tree
   | Error error -> remove_quietly holder; raise (Rejected error)
@@ -659,11 +567,13 @@ let set_release_mode ~root absolute kind =
     let same_entry =
       named.Unix.st_dev = opened.Unix.st_dev && named.Unix.st_ino = opened.Unix.st_ino in
     match same_entry, kind, opened.Unix.st_kind with
-    | true, Directory, Unix.S_DIR | true, File, Unix.S_REG -> Unix.fchmod fd (release_mode kind)
-    | false, (Directory | File),
+    | true, Revision.Directory, Unix.S_DIR | true, Revision.File, Unix.S_REG ->
+      Unix.fchmod fd (Revision.release_mode kind)
+    | false, (Revision.Directory | Revision.File),
       (Unix.S_DIR | Unix.S_REG | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK)
-    | true, Directory, (Unix.S_REG | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK)
-    | true, File, (Unix.S_DIR | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK) ->
+    | true, Revision.Directory,
+      (Unix.S_REG | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK)
+    | true, Revision.File, (Unix.S_DIR | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK) ->
       raise (Rejected (Invalid_path absolute)))
 
 (* Files and bytes already equal this release; only modes differ. The whole
@@ -672,7 +582,7 @@ let set_release_permissions paths package ~revision ~entries =
   require_unchanged paths package
     (Present { revision; bundled_revision = bundled_revision package; ownership = Untracked });
   let target = package_target paths package.name in
-  List.iter (fun { kind; path; mode = _; digest = _ } ->
+  List.iter (fun { Revision.kind; path; mode = _; digest = _ } ->
     set_release_mode ~root:paths.root (if path = "" then target else Filename.concat target path) kind)
     entries;
   let expected = bundled_revision package in
@@ -722,72 +632,31 @@ let remove_receipt paths name =
   sync_dir paths.state;
   Retire_recorded { backup = None }
 
-type authority = Startup | Installer
-
-type bundled_step =
-  | Settled of bundled_verdict
-  | Publish
-  | Record of { revision : string }
-  | Record_with_release_permissions of { revision : string; entries : entry list }
-  | Exchange of { revision : string }
-
-type retired_step =
-  | Settled_retired of retired_verdict
-  | Remove_receipt
-  | Move_aside of { revision : string }
-
-(* The one judgement of an installed package. [authority] decides only whether
-   a change to an installed tree runs now or is reported as pending. Server
-   start publishes missing packages and writes receipts for trees that already
-   equal its release, and nothing else: binaries with different packages start
-   against the same base path, and each would undo the other on every start. *)
+(* Read the receipt and the installed tree, then judge. A tree or receipt that
+   cannot be inspected is kept and reported. *)
 let bundled_step ~authority paths package =
   match protect (fun () -> observe_installed paths package.name) with
   | Error ((Invalid_path _ | Io_error _) as error) ->
-    Settled (Keep_uninspectable { reason = error_message error })
+    Judgement.Settled (Keep_uninspectable { reason = error_message error })
   | Error ((Revision_conflict _ | Bundled_revision_conflict _ | Published_but_unrecorded _
            | Exported_but_unsynced _ | Retired_but_unrecorded _ | Backup_move_pending _
            | Backup_move_unresolved _) as error) ->
     raise (Rejected error)
-  | Ok (_, None) -> Publish
-  | Ok (receipt, Some entries) ->
-    let revision = revision entries in
-    match ownership_of receipt revision, files_match package ~revision entries, authority with
-    | Recorded, Same_tree, (Startup | Installer) -> Settled Up_to_date
-    | (Untracked | Modified), Same_tree, (Startup | Installer) -> Record { revision }
-    | Untracked, Same_files_other_permissions, Installer ->
-      Record_with_release_permissions { revision; entries }
-    | Untracked, Same_files_other_permissions, Startup ->
-      Settled (Permissions_pending { revision })
-    | Recorded, (Same_files_other_permissions | Different_files), Installer -> Exchange { revision }
-    | Recorded, (Same_files_other_permissions | Different_files), Startup ->
-      Settled (Replace_pending { revision })
-    | Modified, (Same_files_other_permissions | Different_files), (Startup | Installer) ->
-      Settled (Keep_modified { revision })
-    | Untracked, Different_files, (Startup | Installer) ->
-      Settled (Keep_untracked_different { revision })
+  | Ok (receipt, installed) ->
+    Judgement.bundled_step authority ~receipt ~installed ~bundled_revision:(bundled_revision package)
 
 (* [None] when the receipt is gone by the time it is read: the name then has
    no installation record left to reconcile. *)
 let retired_step ~authority paths name =
   match protect (fun () -> observe_installed paths name) with
   | Error ((Invalid_path _ | Io_error _) as error) ->
-    Some (Ok (Settled_retired (Keep_retired_uninspectable { reason = error_message error })))
+    Some (Ok (Judgement.Settled_retired (Keep_retired_uninspectable { reason = error_message error })))
   | Error ((Revision_conflict _ | Bundled_revision_conflict _ | Published_but_unrecorded _
            | Exported_but_unsynced _ | Retired_but_unrecorded _ | Backup_move_pending _
            | Backup_move_unresolved _) as error) ->
     Some (Error error)
   | Ok (None, _) -> None
-  | Ok (Some _, None) ->
-    Some (Ok (match authority with
-      | Installer -> Remove_receipt
-      | Startup -> Settled_retired (Retire_pending { revision = None })))
-  | Ok (Some recorded, Some entries) ->
-    let revision = revision entries in
-    Some (Ok (match String.equal recorded (receipt_content revision), authority with
-      | true, Installer -> Move_aside { revision }
-      | true, Startup -> Settled_retired (Retire_pending { revision = Some revision })
-      | false, (Startup | Installer) -> Settled_retired (Keep_retired_modified { revision })))
+  | Ok (Some receipt, installed) -> Some (Ok (Judgement.retired_step authority ~receipt ~installed))
 
 (* Package names of the receipt-shaped files in [directory]: receipts in the
    receipt directory, move notes in the moves directory. *)
@@ -809,8 +678,8 @@ let noted_names directory =
 let recorded_names paths = noted_names paths.state
 
 type plan =
-  { bundled : (package * (bundled_step, error) result) list
-  ; retired : (string * (retired_step, error) result) list }
+  { bundled : (package * (Judgement.bundled_step, error) result) list
+  ; retired : (string * (Judgement.retired_step, error) result) list }
 
 (* Every package is judged before anything is changed. *)
 let plan ~authority paths ~recorded packages =
@@ -824,25 +693,26 @@ let plan ~authority paths ~recorded packages =
 
 let changes_anything plan =
   List.exists (fun (_, step) -> match step with
-    | Ok (Settled _) | Error _ -> false
-    | Ok (Publish | Record _ | Record_with_release_permissions _ | Exchange _) -> true) plan.bundled
+    | Ok (Judgement.Settled _) | Error _ -> false
+    | Ok (Judgement.Publish | Judgement.Record _ | Judgement.Record_with_release_permissions _
+         | Judgement.Exchange _) -> true) plan.bundled
   || List.exists (fun (_, step) -> match step with
-    | Ok (Settled_retired _) | Error _ -> false
-    | Ok (Remove_receipt | Move_aside _) -> true) plan.retired
+    | Ok (Judgement.Settled_retired _) | Error _ -> false
+    | Ok (Judgement.Remove_receipt | Judgement.Move_aside _) -> true) plan.retired
 
 let apply_bundled ~interrupt paths package = function
-  | Settled verdict -> verdict
-  | Publish -> publish_missing paths package; Install_missing
-  | Record { revision } -> write_receipt paths package.name ~revision; Adopt_identical
-  | Record_with_release_permissions { revision; entries } ->
+  | Judgement.Settled verdict -> verdict
+  | Judgement.Publish -> publish_missing paths package; Install_missing
+  | Judgement.Record { revision } -> write_receipt paths package.name ~revision; Adopt_identical
+  | Judgement.Record_with_release_permissions { revision; entries } ->
     set_release_permissions paths package ~revision ~entries; Adopt_with_release_permissions
-  | Exchange { revision } ->
+  | Judgement.Exchange { revision } ->
     Replace_recorded { backup = publish_over ~interrupt paths package ~revision ~ownership:Recorded }
 
 let apply_retired ~interrupt paths name = function
-  | Settled_retired verdict -> verdict
-  | Remove_receipt -> remove_receipt paths name
-  | Move_aside { revision } -> retire ~interrupt paths name ~revision
+  | Judgement.Settled_retired verdict -> verdict
+  | Judgement.Remove_receipt -> remove_receipt paths name
+  | Judgement.Move_aside { revision } -> retire ~interrupt paths name ~revision
 
 let execute ~interrupt paths plan =
   List.map (fun (package, step) ->
@@ -875,7 +745,7 @@ let resume_move paths name =
   | Some noted ->
     let holds directory =
       match protect (fun () -> tree_revision ~root:paths.root directory) with
-      | Ok (Some revision) -> String.equal (receipt_content revision) noted
+      | Ok (Some revision) -> String.equal (Revision.recorded revision) noted
       | Ok None | Error _ -> false
     in
     let outcome =
@@ -920,13 +790,13 @@ let reconcile_at_startup ~base_path packages =
   protect (fun () ->
     Fs_compat.mkdir_p base_path;
     let paths = locations ~base_path in
-    let unlocked = plan ~authority:Startup paths ~recorded:(recorded_names paths) packages in
+    let unlocked = plan ~authority:Judgement.Startup paths ~recorded:(recorded_names paths) packages in
     match changes_anything unlocked with
     | false -> Reconciled (execute ~interrupt:no_interruption paths unlocked)
     | true ->
       match with_lock_if_free paths (fun () ->
         execute ~interrupt:no_interruption paths
-          (plan ~authority:Startup paths ~recorded:(recorded_names paths) packages)) with
+          (plan ~authority:Judgement.Startup paths ~recorded:(recorded_names paths) packages)) with
       | Some reports -> Reconciled reports
       | None -> Busy { lock = lock_path paths })
 
@@ -945,7 +815,7 @@ let install_with ~interrupt ~on_wait ~base_path packages =
       in
       List.map (fun (name, result) -> Interrupted { name; result }) moves
       @ unfinished
-      @ execute ~interrupt paths (plan ~authority:Installer paths ~recorded packages)))
+      @ execute ~interrupt paths (plan ~authority:Judgement.Installer paths ~recorded packages)))
 
 let install = install_with ~interrupt:no_interruption
 

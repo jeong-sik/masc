@@ -48,6 +48,9 @@ type entry = {
   stdout : stream_buffer;
   stderr : stream_buffer;
   changed : Eio.Condition.t;
+  clock : float Eio.Time.clock_ty Eio.Resource.t;
+    (* The clock of the process runtime that started this process, so a wait
+       on it never has to ask whether one is installed. *)
   await_status : unit -> Unix.process_status;
   signal_process : int -> unit;
   mutable lifecycle : lifecycle;
@@ -161,9 +164,9 @@ let drain ~flow ~buffer ~limit ~changed =
    the tool with no way to pass what it was given, so it passed nothing and
    the parameter it advertised was discarded. *)
 let spawn ~sw registry ?env ?cwd argv =
-  match Process_eio.get_proc_mgr (), Process_eio.cwd_path cwd with
-  | Error message, _ | _, Error message -> Error message
-  | Ok manager, Ok cwd ->
+  match Process_eio.get_proc_mgr (), Process_eio.get_clock (), Process_eio.cwd_path cwd with
+  | Error message, _, _ | _, Error message, _ | _, _, Error message -> Error message
+  | Ok manager, Ok clock, Ok cwd ->
     (match argv with
      | [] -> Error "spawn needs a program to run"
      | _ :: _ ->
@@ -178,6 +181,7 @@ let spawn ~sw registry ?env ?cwd argv =
          { stdout = empty_buffer ()
          ; stderr = empty_buffer ()
          ; changed = Eio.Condition.create ()
+         ; clock
          ; await_status = (fun () -> unix_status (Eio.Process.await process))
          ; signal_process = (fun signal -> Eio.Process.signal process signal)
          ; lifecycle = Running
@@ -262,35 +266,32 @@ let wait registry handle ~until ~timeout_sec =
   match entry_of registry handle with
   | None -> Error `Unknown_handle
   | Some entry ->
-    (match Process_eio.get_clock () with
-     | Error _ -> Error `Timed_out
-     | Ok clock ->
-       let awaited () =
-         match until with
-         | Exit ->
-           (* The process ending does not mean its pipes are read, so this
-              waits for the status *and* for both drains to reach EOF. A caller
-              handed a status that says "complete" beside a truncated tail
-              would have no way to tell. *)
-           Eio.Condition.loop_no_mutex entry.changed (fun () ->
-             match entry.lifecycle with
-             | Exited_with status when entry.stdout.at_eof && entry.stderr.at_eof ->
-               Some (Exited status)
-             (* Signalled by the switch: that is what ended it, and saying so
-                is more honest than reporting a status nobody observed. *)
-             | Released -> Some (Exited (Unix.WSIGNALED Sys.sigterm))
-             | Exited_with _ | Running -> None)
-         | Output_contains { stream; needle } ->
-           let buffer = buffer_of entry stream in
-           Eio.Condition.loop_no_mutex entry.changed (fun () ->
-             match match_end buffer ~needle with
-             | Some offset -> Some (Matched offset)
-             | None -> if buffer.at_eof then Some (Matched (stream_end buffer)) else None)
-       in
-       (* A program that exited, or spoke, as the bound passed has done so. *)
-       Watched_work.run
-         ~watcher:(fun () ->
-           Eio.Time.sleep clock timeout_sec;
-           Error `Timed_out)
-         (fun () -> Ok (awaited ())))
+    let awaited () =
+      match until with
+      | Exit ->
+        (* The process ending does not mean its pipes are read, so this
+           waits for the status *and* for both drains to reach EOF. A caller
+           handed a status that says "complete" beside a truncated tail
+           would have no way to tell. *)
+        Eio.Condition.loop_no_mutex entry.changed (fun () ->
+          match entry.lifecycle with
+          | Exited_with status when entry.stdout.at_eof && entry.stderr.at_eof ->
+            Some (Exited status)
+          (* Signalled by the switch: that is what ended it, and saying so
+             is more honest than reporting a status nobody observed. *)
+          | Released -> Some (Exited (Unix.WSIGNALED Sys.sigterm))
+          | Exited_with _ | Running -> None)
+      | Output_contains { stream; needle } ->
+        let buffer = buffer_of entry stream in
+        Eio.Condition.loop_no_mutex entry.changed (fun () ->
+          match match_end buffer ~needle with
+          | Some offset -> Some (Matched offset)
+          | None -> if buffer.at_eof then Some (Matched (stream_end buffer)) else None)
+    in
+    (* A program that exited, or spoke, as the bound passed has done so. *)
+    Watched_work.run
+      ~watcher:(fun () ->
+        Eio.Time.sleep entry.clock timeout_sec;
+        Error `Timed_out)
+      (fun () -> Ok (awaited ()))
 ;;

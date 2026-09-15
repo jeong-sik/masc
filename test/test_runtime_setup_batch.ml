@@ -179,7 +179,34 @@ let test_credential_commit_join () = fixture (fun base _runtime binary _spec _or
       ~expected_revision:revision ~specs:[] ~runtime_ids:[id] ~default_runtime_id:id ~verify:false ());
     Runtime_setup_credentials.remove_uncommitted rejected;
     Alcotest.check Alcotest.bool "stale transaction does not retain unused key" false (Sys.file_exists rejected_path)))
+(* 2026-09-15, a MacBook without this repository: the verification child died
+   by SIGKILL before its first Claude turn. The summary read "(signal -7; ...)"
+   followed by the child's log, and the setup screen dropped the whole sentence
+   for its newlines, leaving "Runtime setup did not finish". *)
+let test_error_summary_is_one_line () =
+  let contains text piece =
+    let n = String.length piece and m = String.length text in
+    let rec at i = i + n <= m && (String.equal (String.sub text i n) piece || at (i + 1)) in
+    at 0 in
+  let killed = Batch.Verification_unreadable
+    { runtime_id = "setup.runtime"; exit = Unix.WSIGNALED Sys.sigkill
+    ; stderr = "[INFO] catalog loaded\n[INFO] overlay installed\n"
+    ; reason = "stdout is not JSON: Blank input data" } in
+  let summary = Batch.error_message killed in
+  Alcotest.check Alcotest.bool "the summary has no newline" false (String.contains summary '\n');
+  Alcotest.check Alcotest.bool "the summary names the signal, not OCaml's number" true
+    (contains summary "killed by SIGKILL" && not (contains summary "-7"));
+  Alcotest.check Alcotest.bool "the summary leaves the child's log out" false (contains summary "catalog loaded");
+  Alcotest.check Alcotest.(option string) "the detail keeps the child's log"
+    (Some "[INFO] catalog loaded\n[INFO] overlay installed") (Batch.error_detail killed);
+  let refused = Batch.Validation_failed { exit = Unix.WEXITED 3; stderr = " \n" } in
+  Alcotest.check Alcotest.string "a validation refusal says how the validator ended"
+    "Selected runtime configuration did not pass validation (exit 3)" (Batch.error_message refused);
+  Alcotest.check Alcotest.(option string) "a blank stderr is no detail" None (Batch.error_detail refused);
+  Alcotest.check Alcotest.(option string) "an error with no child has no detail" None
+    (Batch.error_detail Batch.Lock_unavailable)
 let () = Alcotest.run "runtime setup batch" ["workspace",[
+  Alcotest.test_case "an error summary is one line and names the signal" `Quick test_error_summary_is_one_line;
   Alcotest.test_case "ordered multi-selection and existing bytes" `Quick test_batch;
   Alcotest.test_case "runtime and overlay compare-and-swap" `Quick test_cas;
   Alcotest.test_case "native refusal publishes nothing" `Quick test_refusal;

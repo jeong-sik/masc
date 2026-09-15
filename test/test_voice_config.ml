@@ -108,8 +108,7 @@ let write_file path contents =
     [voice] section and no voice_config.json exist. *)
 let with_unconfigured_voice f =
   with_temp_dir "voice-config-load-" @@ fun root ->
-  with_env "MASC_BASE_PATH" (Some root) @@ fun () ->
-  with_env "MASC_BASE_PATH_INPUT" (Some root) @@ f
+  with_env "MASC_BASE_PATH" (Some root) @@ f
 
 (** Like {!with_unconfigured_voice} but with [contents] written to the
     resolved voice_config.json path (an explicit configuration). *)

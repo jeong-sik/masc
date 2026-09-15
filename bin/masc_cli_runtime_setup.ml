@@ -23,7 +23,8 @@ let report = function
       [ "schema", `String "masc.runtime_setup_error.v1";
         "kind", `String kind; "runtime_id", runtime_id;
         "error", `String (Batch.error_message error)]
-      @ match failure with None -> [] | Some failure -> [ "failure", failure ] in
+      @ (match failure with None -> [] | Some failure -> [ "failure", failure ])
+      @ (match Batch.error_detail error with None -> [] | Some detail -> [ "detail", `String detail ]) in
     print_endline (Yojson.Safe.to_string (`Assoc fields)); 1
 
 let read_json path =

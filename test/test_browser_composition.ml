@@ -4,12 +4,35 @@ module Catalog = Masc.Keeper_tool_composition_catalog
 module Plan = Masc.Keeper_tool_plan
 module Executor = Masc.Keeper_tool_plan_executor
 
-let skill_entry name =
+let shipped_skill name =
   let path = Filename.concat (Filename.concat "../skills" name) "SKILL.md" in
   let body = In_channel.with_open_bin path In_channel.input_all in
   match Skills.parse_skill ~directory:name body with
-  | Ok {surface=Skills.Composition entry;_} -> entry
-  | _ -> fail "shipped browser composition is not a valid native MASC Skill"
+  | Ok skill -> skill
+  | Error _ -> fail "shipped browser composition is not a valid native MASC Skill"
+
+let skill_entry name =
+  match (shipped_skill name).Skills.surface with
+  | Skills.Composition entry -> entry
+  | Skills.Instruction -> fail "shipped browser composition is not a valid native MASC Skill"
+
+(* A Keeper meets this text in two places: as the keeper_compose_<name> tool
+   description (the TOML copy) and as the capability search hit (the
+   frontmatter copy). They are one text. Only the frontmatter parser bounds its
+   length, so keeping the copies equal also keeps the tool description inside
+   that bound. *)
+let test_description_is_one_text skill_name () =
+  let skill = shipped_skill skill_name in
+  match skill.Skills.surface with
+  | Skills.Instruction -> fail "shipped browser composition declares no composition"
+  | Skills.Composition entry ->
+    (match entry.Catalog.description with
+     | None -> fail "the tool would show only the generic composition sentence"
+     | Some description ->
+       check bool "the tool description says something" false
+         (String.equal description "");
+       check string "capability search shows the tool description"
+         description skill.Skills.description)
 
 let test_follow_output_contract () =
   let descriptor = List.find (fun (d : Masc.Keeper_tool_descriptor.t) ->
@@ -229,6 +252,8 @@ let test_navigate_then_read observation case () =
 
 let () = run "browser composition" ["native skill",[
   test_case "runtime destination output contract" `Quick test_follow_output_contract;
+  test_case "live follow description is one text" `Quick (test_description_is_one_text follow_skill);
+  test_case "navigation description is one text" `Quick (test_description_is_one_text navigate_skill);
   test_case "live follow offers only scene and regions" `Quick (test_mode_is_a_closed_choice follow_skill);
   test_case "navigation offers only scene and regions" `Quick (test_mode_is_a_closed_choice navigate_skill);
   test_case "observed follow then region read" `Quick (test_follow_then_read Regions Navigated);

@@ -1,6 +1,6 @@
 ---
 name: browser-navigate-read
-description: Navigates an observed automation tab to a known HTTP(S) URL and reads the landing page in the same call, either as visible content (mode scene) or as a region map (mode regions). Use when no site decision is needed between navigating and reading, on an isolated automation tab rather than a live logged-in browser.
+description: "Automation lane only: navigate one observed tab to a known HTTP(S) URL, then read the landing page in the same call. Use it when no site decision is needed between navigating and reading. mode=scene returns visible content; mode=regions returns landmarks whose documentId/nodeId references scope a later BrowserRead. The read is pinned to the navigation's landing URL, redirect included. If navigation succeeded and only the read failed, do not call this again: retry BrowserRead alone on the same tab. If the URL changed again, read without expectedUrl and check the actual destination before using its URL. A matching URL does not show the site is ready or right: check title and content; a login page or unrelated redirect stays unverified. This tool does not act on the operator's live browser: to follow an observed link there, use keeper_compose_browser-live-follow-read when your tool list has it."
 ---
 
 This package declares the callable tool `keeper_compose_browser-navigate-read`:
@@ -9,16 +9,17 @@ guarded by the navigation receipt's landing URL. The caller picks the read with
 `mode`.
 
 This body is not sent to a Keeper. The tool description a Keeper reads is the
-TOML `description` with the parameter descriptions, and capability search
-matches the frontmatter `description`. The recovery rules a Keeper needs (retry
-only the read, verify site content) therefore live in the TOML description. The
+TOML `description` with the parameter descriptions. Capability search matches
+and returns the frontmatter `description`, so it holds the same text. The
+recovery rules a Keeper needs (retry only the read, verify site content)
+therefore live in that description. The
 live-browser counterpart is `browser-live-follow-read`; the broader navigation
 guidance is in `browser-lanes/references/composition.md`.
 
 ```toml composition
 [[compositions]]
 name = "browser-navigate-read"
-description = "Automation lane only: navigate one observed tab to a known HTTP(S) URL, then read the landing page in the same call. mode=scene returns visible content; mode=regions returns landmarks whose documentId/nodeId references scope a later BrowserRead. The read is pinned to the navigation's landing URL, redirect included. If navigation succeeded and only the read failed, do not call this again: retry BrowserRead alone on the same tab. If the URL changed again, read without expectedUrl and check the actual destination before using its URL. A matching URL does not show the site is ready or right: check title and content; a login page or unrelated redirect stays unverified. For a link in the operator's live browser use keeper_compose_browser-live-follow-read instead."
+description = "Automation lane only: navigate one observed tab to a known HTTP(S) URL, then read the landing page in the same call. Use it when no site decision is needed between navigating and reading. mode=scene returns visible content; mode=regions returns landmarks whose documentId/nodeId references scope a later BrowserRead. The read is pinned to the navigation's landing URL, redirect included. If navigation succeeded and only the read failed, do not call this again: retry BrowserRead alone on the same tab. If the URL changed again, read without expectedUrl and check the actual destination before using its URL. A matching URL does not show the site is ready or right: check title and content; a login page or unrelated redirect stays unverified. This tool does not act on the operator's live browser: to follow an observed link there, use keeper_compose_browser-live-follow-read when your tool list has it."
 execution = "inline"
 
 [[compositions.params]]

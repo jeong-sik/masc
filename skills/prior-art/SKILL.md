@@ -24,7 +24,8 @@ Keeper 에게 보이는 설명은 아래 fence 의 `description` 과 params 설�
   와 `masc_board_search` 는 `Concurrent` 라 같은 batch 에서 함께 돈다. 한 batch 가 실패하면
   그 뒤 batch 는 돌지 않는다.
 - 세 도구 모두 대소문자를 가리지 않는 부분 문자열 일치로 찾는다. 긴 문장이나 짐작한 원인은
-  거의 걸리지 않는다. 보드는 글의 제목·본문·작성자만 보고 댓글은 보지 않는다.
+  거의 걸리지 않는다. 보드는 글의 제목·본문·작성자와, 글에 hearth(주제 이름)가 있으면
+  그것까지 보고 댓글은 보지 않는다 (`lib/board/board_dispatch.ml` `search`).
 - 세 도구 모두 결과가 없을 때 오류가 아니라 성공 결과를 돌려준다. `keeper_memory_search` 는
   기억 저장소를 못 읽으면 실패하고, 그러면 이 호출 전체가 실패한다.
 

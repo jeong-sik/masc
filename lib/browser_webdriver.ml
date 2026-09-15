@@ -234,6 +234,19 @@ let execute_action t action =
            The caller observes the resulting page with a separate read. *)
         Ok (`Assoc ["tabId",`Int id;"performed",`Bool true;"result",result]))
   in result, !phase
+(* The remote end's own answer to "can a session be created now" (W3C
+   WebDriver, Status: [ready] and [message]). A driver that does not answer is
+   reported in place, so a status call never fails because of it. *)
+let driver_status t =
+  match t.request ~method_:`GET ~path:"/status" ~body:None with
+  | Error error -> `Assoc [ "error", `String (error_message error) ]
+  | Ok value ->
+    match field "ready" value, field "message" value with
+    | Some (`Bool ready), Some (`String message) ->
+      `Assoc [ "ready", `Bool ready; "message", `String message ]
+    | (Some _ | None), (Some _ | None) ->
+      `Assoc [ "error", `String "WebDriver /status answered without ready and message" ]
+
 let execute_unlocked t = function
   | Browser_lane.Session_open { headless } ->
     (match t.session with
@@ -270,12 +283,16 @@ let execute_unlocked t = function
   | Browser_lane.Session_close ->
     let* () = close_unlocked t in Ok (`Assoc ["closed", `Bool true])
   | Browser_lane.Session_status ->
-    (* Reports the backend's own record. No request is issued, so this answers
-       whether or not a session exists, and cannot itself fail on a closed one.
-       [downloads] is reported because a session can be open with BiDi setup
-       incomplete, and every later download call refuses with that detail. *)
+    (* Reports the backend's own record, and never fails on a closed session.
+       With no session open it adds the driver's own status. On 2026-09-15
+       three Keepers read a bare {"open":false} as a broken lane, and that
+       morning the same answer hid a driver still holding a session this record
+       did not know, which /status reports as ready=false, "Session already
+       started". [downloads] is reported because a session can be open with
+       BiDi setup incomplete, and every later download call refuses with that
+       detail. *)
     (match t.session with
-     | None -> Ok (`Assoc ["open", `Bool false])
+     | None -> Ok (`Assoc ["open", `Bool false; "driver", driver_status t])
      | Some session ->
        Ok (`Assoc
          [ "open", `Bool true

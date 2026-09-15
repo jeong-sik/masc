@@ -95,18 +95,26 @@ type turn_usage =
   ; cache_read_input_tokens : int
   }
 
-(* Token counts summed over the assistant frames of one turn. Each assistant
-   frame carries the usage of the API call that produced it, and parallel
-   tool calls repeat one message id with identical usage, so ids are
-   deduplicated (code.claude.com/docs/en/agent-sdk/cost-tracking, read
-   2026-09-03). A host stop reports this sum: the result frame that would
-   carry the turn total never arrives once the host ends the turn, which is
-   why every host-stopped turn recorded output_tokens = 0 until now.
-   Declared here, before handle_control_request reads assistant_usage.total,
-   so the field is in scope at its use site. *)
+(* Token counts over the assistant frames of one turn. Each assistant frame
+   carries the usage of the API call that produced it, and parallel tool
+   calls repeat one message id with identical usage, so ids are deduplicated
+   (code.claude.com/docs/en/agent-sdk/cost-tracking, read 2026-09-03).
+
+   [last] is the usage of the newest counted call, and it is what the turn
+   reports: a turn issues one API call per tool round, every call carries
+   the whole context again as cache reads, and the sum of those calls is not
+   a size any request had. On 2026-09-15 a Keeper on a 1M-token model
+   recorded 3.75M input tokens for one turn that way, and every reader that
+   compared the figure with the window (the context observation, the TUI)
+   was refused or misled. The CLI's result frame carries the same sum, so
+   [last] outranks it there too; the turn's consumption is the raw trace's
+   to add up, not this record's to state as one request.
+
+   Declared here, before handle_control_request reads the accumulator, so
+   the field is in scope at its use site. *)
 type assistant_usage =
   { seen_message_ids : (string, unit) Hashtbl.t
-  ; mutable total : turn_usage option
+  ; mutable last : turn_usage option
   }
 
 type turn_result =
@@ -600,7 +608,7 @@ let handle_control_request
       in
       (match !abort_turn with
        | None -> Ok ()
-       | Some stop -> Error (Stopped_by_host { stop; usage = assistant_usage.total }))
+       | Some stop -> Error (Stopped_by_host { stop; usage = assistant_usage.last }))
   | unsupported ->
     let* () =
       send_control_response
@@ -872,25 +880,10 @@ let turn_usage_of_fields fields =
   | Some _ -> None
 ;;
 
-let new_assistant_usage () = { seen_message_ids = Hashtbl.create 8; total = None }
-
-let add_turn_usage (a : turn_usage) (b : turn_usage) =
-  { input_tokens = a.input_tokens + b.input_tokens
-  ; output_tokens = a.output_tokens + b.output_tokens
-  ; cache_creation_input_tokens =
-      a.cache_creation_input_tokens + b.cache_creation_input_tokens
-  ; cache_read_input_tokens = a.cache_read_input_tokens + b.cache_read_input_tokens
-  }
-;;
+let new_assistant_usage () = { seen_message_ids = Hashtbl.create 8; last = None }
 
 let observe_assistant_usage acc ~message_id usage =
-  let count usage =
-    acc.total
-    <- Some
-         (match acc.total with
-          | None -> usage
-          | Some total -> add_turn_usage total usage)
-  in
+  let count usage = acc.last <- Some usage in
   match usage with
   | None -> ()
   | Some usage ->
@@ -1203,6 +1196,15 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       | None -> protocol_error "result message" "successful turn has no text"
     in
     emit_stream_event on_stream_event (Turn_finished { text });
+    (* The result frame's usage is the CLI's sum over the turn's calls. The
+       newest assistant frame is one request's, which is what the turn
+       reports; the frame's figure stands in only when no assistant frame
+       carried usage at all. *)
+    let usage =
+      match assistant_usage.last with
+      | Some last -> Some last
+      | None -> usage
+    in
     Ok
       { session_id = expected_session_id
       ; turn_id

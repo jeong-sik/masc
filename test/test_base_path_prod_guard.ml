@@ -17,13 +17,11 @@ module EC = Env_config_core
 
 (* Ensure no explicit MASC_BASE_PATH is set. *)
 let clear_base_path () =
-  Unix.putenv "MASC_BASE_PATH" "";
-  Unix.putenv "MASC_BASE_PATH_INPUT" ""
+  Unix.putenv "MASC_BASE_PATH" ""
 
 let test_guard_raises_on_explicit_home_path () =
   let home = Option.value ~default:"/tmp" (Sys.getenv_opt "HOME") in
   Unix.putenv "MASC_BASE_PATH" home;
-  Unix.putenv "MASC_BASE_PATH_INPUT" home;
   Unix.putenv "MASC_TEST_ALLOW_HOME_BASE_PATH" "";
   (* test_base_path_prod_guard executable has basename "test_...",
      so [running_under_test_executable] returns true. HOME-prefixed
@@ -61,7 +59,6 @@ let test_guard_honors_explicit_tmp_override () =
       (Printf.sprintf "masc-test-base-path-guard-%d" (Unix.getpid ()))
   in
   Unix.putenv "MASC_BASE_PATH" tmp_base;
-  Unix.putenv "MASC_BASE_PATH_INPUT" tmp_base;
   Unix.putenv "MASC_TEST_ALLOW_HOME_BASE_PATH" "";
   let path = EC.base_path () in
   let is_tmp =
@@ -76,7 +73,6 @@ let test_guard_honors_explicit_tmp_override () =
 let test_guard_bypass_escape_hatch () =
   let home = Option.value ~default:"/tmp" (Sys.getenv_opt "HOME") in
   Unix.putenv "MASC_BASE_PATH" home;
-  Unix.putenv "MASC_BASE_PATH_INPUT" home;
   Unix.putenv "MASC_TEST_ALLOW_HOME_BASE_PATH" "1";
   (* With the escape hatch set, HOME-prefixed paths are allowed even under
      a test executable. *)

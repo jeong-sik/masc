@@ -311,6 +311,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-event-queue-admit-all-ready | 이벤트 큐 — 준비된 자극은 한 턴이 전부 본다, 턴 실패는 자극을 버리지 않는다 | Draft | - |
 | RFC-event-spine-and-source-contract | 사건 척추와 이벤트 소스 계약 | Draft | - |
 | RFC-exact-lane-delivery-channel | exact 레인이 답을 받는 통로를 고른다 — 본문 JSON 이 후보를 절반 떨어뜨린다 | Draft | - |
+| RFC-exact-lane-run-payloads-outside-the-log | exact lane 실행 기록의 프롬프트와 응답은 로그 밖 파일에 둔다 | Active | - |
 | RFC-execute-boundary-is-the-sandbox | The subset judges; the sandbox contains | Draft | - |
 | RFC-execute-command-string | Execute 는 명령 하나를 받는다 — typed 파이프라인 객체는 걷어내고, 도구 표면은 캐시 접두사로 다룬다 | Draft | - |
 | RFC-execute-subset-dispositions | Execute subset dispositions: resolve it, spawn it, or name the replacement | Draft | - |

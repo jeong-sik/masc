@@ -42,8 +42,7 @@ let with_env name value_opt f =
       f ())
 
 let with_isolated_runtime_env f =
-  with_env "MASC_BASE_PATH" None (fun () ->
-    with_env "MASC_BASE_PATH_INPUT" None f)
+  with_env "MASC_BASE_PATH" None f
 
 (* Test registry — each [test] call appends; final [let ()] dispatches
    via Alcotest.run. *)

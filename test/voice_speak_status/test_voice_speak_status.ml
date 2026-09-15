@@ -100,7 +100,6 @@ let () =
        template);
   write ~perm:0o755 (Filename.concat bin "afplay") "#!/bin/sh\nexit 0\n";
   Unix.putenv "MASC_BASE_PATH" base;
-  Unix.putenv "MASC_BASE_PATH_INPUT" base;
   Unix.putenv "PATH" (bin ^ ":/bin");
   at_exit (fun () -> rm_rf base)
 

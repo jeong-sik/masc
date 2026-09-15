@@ -32,7 +32,6 @@ let voice_session_test_base =
 
 let () =
   Unix.putenv "MASC_BASE_PATH" voice_session_test_base;
-  Unix.putenv "MASC_BASE_PATH_INPUT" voice_session_test_base;
   at_exit (fun () -> rm_rf voice_session_test_base)
 ;;
 

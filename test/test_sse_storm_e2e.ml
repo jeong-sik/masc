@@ -404,7 +404,6 @@ let with_server f =
     merge_env_overrides ~remove:[ "AGENT_CORE_MODEL_CATALOG" ]
       [
         ("MASC_BASE_PATH", base_path);
-        ("MASC_BASE_PATH_INPUT", base_path);
         ("MASC_ADMIN_TOKEN", main_eio_test_admin_token);
         ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
       ]

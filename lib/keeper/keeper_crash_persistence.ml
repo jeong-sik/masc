@@ -50,28 +50,41 @@ let write_event (event : crash_event) =
        ])
 ;;
 
+let write_event_reporting_failure event =
+  try write_event event with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string CrashPersistenceFailures)
+      ~labels:
+        [ "site", Keeper_crash_persistence_failure_site.(to_label Crash_write) ]
+      ();
+    Log.Keeper.warn
+      "crash persistence write failed for %s: %s"
+      event.name
+      (Printexc.to_string exn)
+;;
+
+(* [drain_batch] pops, so the take and the write are one step: a cancellation
+   landing between them would leave the event in neither the queue nor the
+   store. *)
+let flush_pending () =
+  Eio.Cancel.protect (fun () ->
+    drain_batch () |> List.iter write_event_reporting_failure)
+;;
+
 let start_drain_fiber ~sw ~clock =
+  (* The switch cancels the drain fiber, and a crash record is most likely to
+     be waiting in the queue exactly then: the keepers exit as the server goes
+     down, enqueue, and the fiber's next wake never comes. The release hook is
+     that last wake. *)
+  Eio.Switch.on_release sw flush_pending;
   Eio.Fiber.fork_daemon ~sw (fun () ->
     while true do
       Eio.Time.sleep
         clock
         Env_config_keeper.KeeperPollIntervals.crash_persistence_drain_sec;
-      drain_batch ()
-      |> List.iter (fun event ->
-        try write_event event with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn ->
-          Otel_metric_store.inc_counter
-            Keeper_metrics.(to_string CrashPersistenceFailures)
-            ~labels:
-              [ ( "site"
-                , Keeper_crash_persistence_failure_site.(to_label Crash_write) )
-              ]
-            ();
-          Log.Keeper.warn
-            "crash persistence write failed for %s: %s"
-            event.name
-            (Printexc.to_string exn))
+      flush_pending ()
     done;
     `Stop_daemon)
 ;;

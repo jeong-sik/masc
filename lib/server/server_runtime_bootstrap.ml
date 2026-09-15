@@ -679,6 +679,16 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
       "keeper provider-call no-progress threshold resolved: %.1fs (source: %s)"
       threshold.value
       (source_to_string threshold.source));
+  (* The transmission window (RFC keeper-context-window-in-tokens): the one
+     number that says how much a request carries, stated with its source so
+     an operator can tell the compiled default from a declared value. *)
+  Keeper_runtime_resolved.(
+    let window = (current ()).context_window_tokens in
+    Log.Runtime.info
+      ~category:Log.Boundary
+      "keeper context window resolved: %d tokens per request (source: %s)"
+      window.value
+      (source_to_string window.source));
   Keeper_task_owner_backend.install_hooks ();
   Server_dashboard_http_execution_surfaces.install_task_mutation_cache_invalidation
     ~invalidate_full_health_snapshot:

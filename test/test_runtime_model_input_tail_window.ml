@@ -839,6 +839,105 @@ let test_deterministic () =
     (String.equal (first_text a) (first_text b))
 ;;
 
+
+(* {1 Target projection (RFC keeper-context-window-in-tokens)} *)
+
+let target ?(reserved_bytes = 0) ~target_bytes history =
+  Window.project_target ~measure_message_bytes ~target_bytes ~reserved_bytes history
+;;
+
+(* Inside the target, the cut is the quantized one [project] makes, and the
+   transmitted bytes are what the kept messages measure. *)
+let test_target_within_budget_matches_the_quantized_cut () =
+  let history = atoms (3 * k) in
+  let target_bytes = total_bytes history / 2 in
+  let projected = ok_exn ~what:"project" (project ~capacity_bytes:target_bytes history) in
+  let t = target ~target_bytes history in
+  Alcotest.(check int)
+    "same number of messages as the refusing projection"
+    (List.length projected)
+    (List.length t.Window.projection.Window.messages);
+  Alcotest.(check bool) "within target" true (t.Window.fit = Window.Within_target);
+  Alcotest.(check int)
+    "transmitted bytes are the kept messages' bytes"
+    (total_bytes t.Window.projection.Window.messages)
+    t.Window.transmitted_bytes
+;;
+
+(* Fixed parts alone over the target: the newest atom rides anyway and the
+   overrun names the fixed parts. *)
+let test_target_fixed_parts_overrun_keeps_the_newest_atom () =
+  let history = extra_context :: atoms 5 in
+  let reserved_bytes = 10 * atom_bytes in
+  let t = target ~reserved_bytes ~target_bytes:(reserved_bytes / 2) history in
+  (match t.Window.fit with
+   | Window.Overrun { cause = Window.Fixed_parts_exceed_target; by_bytes } ->
+     Alcotest.(check int)
+       "overrun is the request beyond the target"
+       (reserved_bytes + t.Window.transmitted_bytes - (reserved_bytes / 2))
+       by_bytes
+   | Window.Overrun { cause = Window.Newest_atom_exceeds_target; _ } | Window.Within_target ->
+     Alcotest.fail "the reservation alone passes the target");
+  Alcotest.(check int) "one atom transmitted" 1 (count_atoms t.Window.projection.Window.messages);
+  Alcotest.(check int) "four atoms dropped" 4 t.Window.projection.Window.dropped_atoms;
+  Alcotest.(check bool)
+    "pinned context survives"
+    true
+    (List.exists
+       (fun (m : Types.message) -> m == extra_context)
+       t.Window.projection.Window.messages)
+;;
+
+(* Fixed parts fit but the newest atom does not: it rides anyway and the
+   overrun names it. *)
+let test_target_newest_atom_overrun_is_reported_not_refused () =
+  let history = atoms 5 in
+  let target_bytes = atom_bytes / 2 in
+  let t = target ~target_bytes history in
+  (match t.Window.fit with
+   | Window.Overrun { cause = Window.Newest_atom_exceeds_target; by_bytes } ->
+     Alcotest.(check bool) "overrun is positive" true (by_bytes > 0)
+   | Window.Overrun { cause = Window.Fixed_parts_exceed_target; _ } | Window.Within_target ->
+     Alcotest.fail "the newest atom alone passes the target");
+  Alcotest.(check int) "one atom transmitted" 1 (count_atoms t.Window.projection.Window.messages);
+  (match project ~capacity_bytes:target_bytes history with
+   | Error (Window.Newest_atom_exceeds_available _) -> ()
+   | Error error -> Alcotest.fail (Window.budget_error_to_string error)
+   | Ok _ -> Alcotest.fail "the refusing projection must refuse this budget")
+;;
+
+(* The newest-atom view is the smallest transmission that still carries the
+   turn: pinned context, the newest atom, and the preamble when that atom's
+   head is not a user message. *)
+let test_newest_atom_view_keeps_pinned_and_prepends_the_preamble () =
+  let history = extra_context :: atoms 4 in
+  let projection, transmitted_bytes =
+    Window.project_newest_atom ~measure_message_bytes history
+  in
+  Alcotest.(check int) "one atom" 1 (count_atoms projection.Window.messages);
+  Alcotest.(check int) "three atoms dropped" 3 projection.Window.dropped_atoms;
+  Alcotest.(check int) "four atoms counted" 4 projection.Window.atom_count;
+  Alcotest.(check bool)
+    "the newest atom opened with an assistant, so the preamble leads"
+    true
+    (is_preamble (List.nth projection.Window.messages 0));
+  Alcotest.(check bool)
+    "pinned context survives"
+    true
+    (List.exists (fun (m : Types.message) -> m == extra_context) projection.Window.messages);
+  Alcotest.(check int)
+    "transmitted bytes are the kept messages' bytes"
+    (total_bytes projection.Window.messages)
+    transmitted_bytes
+;;
+
+let test_newest_atom_view_of_a_user_head_needs_no_preamble () =
+  let history = atoms 3 in
+  let projection, _ = Window.project_newest_atom ~measure_message_bytes history in
+  Alcotest.(check int) "one atom" 1 (count_atoms projection.Window.messages);
+  Alcotest.(check bool) "no preamble" false (List.exists is_preamble projection.Window.messages)
+;;
+
 let () =
   Alcotest.run
     "runtime_model_input_tail_window"
@@ -911,6 +1010,16 @@ let () =
             test_never_returns_an_over_budget_projection
         ; Alcotest.test_case "leading orphan tools drop" `Quick
             test_leading_orphan_tools_drop_with_first_atom
+        ; Alcotest.test_case "target within budget matches the quantized cut" `Quick
+            test_target_within_budget_matches_the_quantized_cut
+        ; Alcotest.test_case "target fixed-parts overrun keeps the newest atom" `Quick
+            test_target_fixed_parts_overrun_keeps_the_newest_atom
+        ; Alcotest.test_case "target newest-atom overrun is reported, not refused" `Quick
+            test_target_newest_atom_overrun_is_reported_not_refused
+        ; Alcotest.test_case "newest-atom view keeps pinned and prepends the preamble" `Quick
+            test_newest_atom_view_keeps_pinned_and_prepends_the_preamble
+        ; Alcotest.test_case "newest-atom view of a user head needs no preamble" `Quick
+            test_newest_atom_view_of_a_user_head_needs_no_preamble
         ; Alcotest.test_case "deterministic" `Quick test_deterministic
         ] )
     ]

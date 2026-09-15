@@ -888,6 +888,47 @@ let validate_provider_request_cap ~runtime_id
   | Ok cap -> Ok cap
   | Error error -> Error (runtime_candidate_invalid_request_cap_error error)
 
+(* The declared transmission window, in tokens, checked against the model's
+   declared context (RFC keeper-context-window-in-tokens §7.9): a window the
+   model cannot carry is a configuration contradiction named here, before
+   dispatch, rather than a request the provider refuses every turn. Token
+   against token; the request-body cap is not consulted. *)
+let model_input_window_for_candidate ~runtime_id =
+  let window_tokens = Keeper_runtime_resolved.context_window_tokens () in
+  match Runtime.max_context_of_runtime_id runtime_id with
+  | Some max_context when window_tokens > max_context ->
+    Error
+      (Agent_core.Error.Config
+         (Agent_core.Error.InvalidConfig
+            { field = "turn.context_window_tokens"
+            ; detail =
+                Printf.sprintf
+                  "%d tokens exceed the %d-token max-context of runtime %s; declare a window the model can carry or route the keeper elsewhere"
+                  window_tokens
+                  max_context
+                  runtime_id
+            }))
+  | Some _ -> Ok (Keeper_context_window.declared ~window_tokens)
+  | None ->
+    (* Every materialized runtime resolves a context window at load
+       ([Runtime.validate_runtime_max_context]); an id that resolves none
+       here names no runtime this attempt can dispatch to. *)
+    Error
+      (Agent_core.Error.Config
+         (Agent_core.Error.InvalidConfig
+            { field = "max-context"
+            ; detail = Printf.sprintf "runtime %s resolves no context window" runtime_id
+            }))
+;;
+
+let request_cap_and_window ~runtime_id provider_config =
+  let* max_request_body_bytes =
+    validate_provider_request_cap ~runtime_id provider_config
+  in
+  let* model_input_window = model_input_window_for_candidate ~runtime_id in
+  Ok (max_request_body_bytes, model_input_window)
+;;
+
 let resolve_runtime_candidate id =
   match Runtime.get_runtime_by_id id with
   | Some runtime ->
@@ -2143,7 +2184,7 @@ let run_named
            , Keeper_attempt_dispatch.Rejected_before_dispatch )
          | Ok () ->
           (match
-             validate_provider_request_cap
+             request_cap_and_window
                ~runtime_id:attempt_runtime_id
                provider_config
            with
@@ -2151,7 +2192,7 @@ let run_named
              Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
              Error err, None, Keeper_provider_attempt_effect.No_effect_observed,
              Keeper_attempt_dispatch.Rejected_before_dispatch
-           | Ok max_request_body_bytes ->
+           | Ok (max_request_body_bytes, model_input_window) ->
             let candidate = Runtime_candidate.of_provider_config provider_config in
             (* Cached provider health is observation only. Every eligible runtime
                reaches the real provider boundary; only the resulting typed error
@@ -2161,13 +2202,11 @@ let run_named
             { runtime_id = attempt_runtime_id
             ; error_runtime_id
             ; max_request_body_bytes
-            ; (* #27320: the first attempt's windowing budget starts at the
-                 full declared cap; [run_try_provider_with_context_overflow_shrink]
-                 is the one that consults #27320's remembered starting point
-                 and shrinks it on a typed overflow. A direct (non-shrink)
-                 caller of [run_try_provider] gets the un-shrunk cap, same as
-                 before this change. *)
-              model_input_capacity_bytes = max_request_body_bytes
+            ; (* The declared window. [run_try_provider_with_context_overflow_shrink]
+                 consults #27320's remembered starting point below it and
+                 shrinks on a typed overflow; a direct (non-shrink) caller of
+                 [run_try_provider] runs at the declared window. *)
+              model_input_window
             ; base_path
             ; keeper_name
             ; name

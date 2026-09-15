@@ -316,6 +316,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-execute-boundary-is-the-sandbox | The subset judges; the sandbox contains | Draft | - |
 | RFC-execute-command-string | Execute 는 명령 하나를 받는다 — typed 파이프라인 객체는 걷어내고, 도구 표면은 캐시 접두사로 다룬다 | Draft | - |
 | RFC-execute-subset-dispositions | Execute subset dispositions: resolve it, spawn it, or name the replacement | Draft | - |
+| RFC-keeper-context-window-in-tokens | Size the Keeper transmission window in tokens; the request-body cap only judges | Active | - |
 | RFC-keeper-conversation-hitl-flow | Keeper conversation and non-blocking HITL | Implemented | - |
 | RFC-keeper-external-tools-and-produced-artifacts | Keeper 외부 도구와 생성 이미지 증거를 선언형 계약으로 연결한다 | Draft | - |
 | RFC-keeper-github-apps | keeper별 GitHub App 신원 — 공유 봇 계정을 App installation 토큰으로 교체 | Draft | - |

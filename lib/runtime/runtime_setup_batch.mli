@@ -22,6 +22,11 @@ type readiness = Not_probed | Verified
 type receipt = { runtime_id:string; runtime_ids:string list; models:string list;
                  readiness:readiness }
 val error_message : error -> string
+(** One line: how the step ended and why, never a child's log. *)
+val error_detail : error -> string option
+(** The stderr of the stage validator or verification child, when one ran and
+    wrote something. A diagnostic for the operator's own terminal, not for
+    HTTP responses. *)
 val revision_to_string : revision -> string
 val revision_of_string : string -> (revision,error) result
 val observe : base_path:string -> (revision,error) result

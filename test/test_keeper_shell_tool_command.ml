@@ -44,8 +44,8 @@ let () =
         assert (String.length message > 0)
       | Ok _ -> assert false);
      (* A schema with no required key states zero required parameters, so
-        an optional-only tool answers the path alone.  This is the review
-        finding that made [masc board list] and [masc lane status] work. *)
+        an optional-only tool answers the path alone, which is what lets
+        [masc board list] and [masc lane status] run with no words. *)
      (match Masc.Keeper_tool_runtime.descriptor_for_internal "masc_board_list" with
       | None -> assert false
       | Some list_descriptor -> (

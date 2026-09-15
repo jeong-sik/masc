@@ -2127,6 +2127,25 @@ let test_health_json_reports_dormant_task_owner_as_advisory () =
         in
         Alcotest.(check int) "health exposes no dormant owner task row" 0
           (List.length dormant_tasks);
+        (* The row the name promised. A manual keeper holding work was
+           invisible here until 2026-09-15: no blocker, and no row either. *)
+        Alcotest.(check int) "health exposes one autoboot-excluded owner row" 1
+          (fleet_safety |> member "excluded_keeper_active_task_owner_count" |> to_int);
+        let excluded =
+          fleet_safety |> member "excluded_keeper_active_task_owners" |> to_list
+        in
+        (match excluded with
+         | [ row ] ->
+           Alcotest.(check string) "the row names the keeper" "omega"
+             (row |> member "keeper_name" |> to_string);
+           Alcotest.(check string) "and its task" "task-active-owner"
+             (row |> member "task_id" |> to_string);
+           Alcotest.(check string) "and why the boot path skips it"
+             "declarative_autoboot_disabled"
+             (row |> member "exclusion_reason" |> to_string);
+           Alcotest.(check bool) "and does not blame the fleet" false
+             (row |> member "fleet_blocking" |> to_bool)
+         | rows -> Alcotest.failf "expected one excluded owner row, got %d" (List.length rows));
         Alcotest.(check string) "health documents active owner scan semantics"
           Server_routes_http_runtime_fleet_scan.active_task_owner_fiber_scan_semantics
           (fleet_safety |> member "active_task_owner_fiber_scan_semantics" |> to_string);
@@ -2327,6 +2346,77 @@ let test_health_json_reports_non_keeper_active_task_owner_as_advisory () =
           (keepers_not_running fleet_safety);
         Alcotest.(check bool) "health does not ask operator action" false
           (fleet_safety |> member "operator_action_required" |> to_bool)))
+
+(* An operator pause is a decision, already recorded. The work the keeper
+   holds waits for that decision to change, and the fleet is not at fault
+   for it. Until 2026-09-15 this scan derived "should be running" from the
+   activation mode alone, which does not read [paused]: keeper rondo, paused
+   by its operator the night before, still owned task-701, and the fleet
+   read degraded with operator_action_required until somebody intervened --
+   asking the operator to act on the pause they had just chosen. *)
+let test_health_json_reports_paused_keeper_active_task_owner_as_advisory () =
+  with_temp_dir "health-paused-keeper-active-task-owner" (fun dir ->
+    let config_root = make_config_root dir in
+    Sys.remove (Filename.concat (Filename.concat config_root "keepers") "example.toml");
+    write_config_root_keeper_toml config_root "omega";
+    with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+    let previous_state = Server_auth.For_testing.snapshot_server_state () in
+    Config_dir_resolver.reset ();
+    Fun.protect
+      ~finally:(fun () ->
+        Server_auth.For_testing.restore_server_state @@ previous_state;
+        Config_dir_resolver.reset ())
+      (fun () ->
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
+        Server_auth.For_testing.restore_server_state @@ Some state;
+        let config = Mcp_server.workspace_config state in
+        let executor =
+          make_keeper_meta ~name:"omega" ~trace_id:"trace-omega" ~paused:true ()
+        in
+        write_keeper_meta_exn config executor;
+        let task =
+          make_task
+            ~id:"task-paused-owner"
+            ~title:"Task held by a paused keeper"
+            ~status:
+              (Types.InProgress
+                 {
+                   assignee = executor.Keeper_meta_contract.name;
+                   started_at = "2026-06-26T00:00:01Z";
+                 })
+            ()
+        in
+        Workspace.write_backlog config
+          { Types.tasks = [ task ]; task_deletion_receipts = []; pending_completion_rejections = []; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
+        let request = Httpun.Request.create `GET "/health" in
+        let json = Server_routes_http_runtime.make_health_json request in
+        let open Yojson.Safe.Util in
+        let fleet_safety = json |> member "keeper_fleet_safety" in
+        Alcotest.(check bool) "a paused owner is not a keeper blocker" false
+          (fleet_safety
+           |> member "active_task_owner_without_executable_fiber"
+           |> to_bool);
+        Alcotest.(check int) "and leaves no blocking row" 0
+          (fleet_safety
+           |> member "active_task_owner_without_executable_fiber_count"
+           |> to_int);
+        Alcotest.(check (option string)) "the fleet names no blocker" None
+          (fleet_safety |> member "blocker" |> to_string_option);
+        Alcotest.(check bool) "and asks the operator for nothing" false
+          (fleet_safety |> member "operator_action_required" |> to_bool);
+        Alcotest.(check int) "the work is reported as one advisory row" 1
+          (fleet_safety |> member "excluded_keeper_active_task_owner_count" |> to_int);
+        match fleet_safety |> member "excluded_keeper_active_task_owners" |> to_list with
+        | [ row ] ->
+          Alcotest.(check string) "the row names the keeper" "omega"
+            (row |> member "keeper_name" |> to_string);
+          Alcotest.(check string) "and the task it holds" "task-paused-owner"
+            (row |> member "task_id" |> to_string);
+          Alcotest.(check string) "and why nothing is moving" "paused"
+            (row |> member "exclusion_reason" |> to_string);
+          Alcotest.(check bool) "and does not blame the fleet" false
+            (row |> member "fleet_blocking" |> to_bool)
+        | rows -> Alcotest.failf "expected one excluded owner row, got %d" (List.length rows)))
 
 let test_health_json_preserves_active_task_owner_meta_read_error () =
   with_temp_dir "health-active-task-owner-meta-read-error" (fun dir ->
@@ -5265,6 +5355,10 @@ let () =
             "health json reports dormant task owner as advisory"
             `Quick
             test_health_json_reports_dormant_task_owner_as_advisory;
+          Alcotest.test_case
+            "health json reports a paused keeper's task as advisory"
+            `Quick
+            test_health_json_reports_paused_keeper_active_task_owner_as_advisory;
           Alcotest.test_case
             "health json keeps awaiting verification in system LLM lane"
             `Quick

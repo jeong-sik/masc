@@ -37,6 +37,12 @@ let effective_activation_mode ?profile_snapshot config name meta =
   (* DET-OK: falls back to the keeper's own stored meta, not a random or clock-derived value. *)
   | Ok defaults -> Option.value defaults.activation_mode ~default:meta.Keeper_meta_contract.activation_mode
 
+(* Whether the keeper's activation mode alone admits it. Not the answer to
+   "should this keeper be running" -- that one reads [paused] as well and
+   lives in [Keeper_runtime.autoboot_exclusion_reason]. The two readers left
+   here ask about mode on purpose: the paused-keeper detail says which of
+   the paused would boot if resumed, and the autoboot target count pairs it
+   with its own [not meta.paused]. *)
 let effective_autoboot_enabled ?profile_snapshot config name meta =
   match profile_defaults ?profile_snapshot config name with
   | Error _ -> false
@@ -754,11 +760,18 @@ let keeper_identity_drift_health_json config =
 
 let active_task_owner_fiber_scan_semantics =
   "reports keeper-shaped active task owners without executable keeper fibers; \
-   disabled keepers are excluded; matching keeper rows can degrade fleet \
-   status; AwaitingVerification obligations are reported separately as \
-   system-LLM completion-authority pending rows and never as Keeper blockers; \
-   credentialed non-keeper client task owners are reported separately as \
-   advisory rows"
+   a keeper the boot path skips -- paused, or an activation mode that does \
+   not autoboot -- is reported separately as an advisory autoboot-excluded \
+   owner row naming the reason, never as a Keeper blocker; matching keeper \
+   rows can degrade fleet status; AwaitingVerification obligations are \
+   reported separately as system-LLM completion-authority pending rows and \
+   never as Keeper blockers; credentialed non-keeper client task owners are \
+   reported separately as advisory rows"
+
+let excluded_keeper_active_task_owner_semantics =
+  "active tasks owned by a keeper the boot path skips, with the reason it \
+   skips it; the exclusion is a decision already made, so these rows never \
+   degrade fleet status and never ask for operator action"
 
 
 
@@ -782,11 +795,24 @@ type non_keeper_active_task_owner = {
   task_status : string;
 }
 
+(* A keeper the boot path skips, holding work. Not a fault: the exclusion is
+   a decision somebody made -- an operator pause, a manual activation mode --
+   and the work waits for that decision to change. Reported with the reason
+   so the row says why nothing is moving, and not counted against the fleet:
+   a fleet degraded by its operator's own pause asks them to undo it. *)
+type excluded_keeper_active_task_owner = {
+  excluded_keeper_name : string;
+  excluded_task_id : string;
+  excluded_task_status : string;
+  exclusion_reason : Keeper_runtime.autoboot_exclusion_reason;
+}
+
 type active_task_owner_fiber_scan = {
   active_task_owner_without_executable_fibers :
     active_task_owner_without_executable_fiber list;
   completion_authority_pending_tasks : completion_authority_pending_task list;
   non_keeper_active_task_owners : non_keeper_active_task_owner list;
+  excluded_keeper_active_task_owners : excluded_keeper_active_task_owner list;
   active_task_owner_scan_errors : (string * string) list;
 }
 
@@ -795,6 +821,7 @@ let empty_active_task_owner_fiber_scan =
     active_task_owner_without_executable_fibers = [];
     completion_authority_pending_tasks = [];
     non_keeper_active_task_owners = [];
+    excluded_keeper_active_task_owners = [];
     active_task_owner_scan_errors = [];
   }
 
@@ -821,6 +848,10 @@ let compare_completion_authority_pending_task left right =
 let compare_non_keeper_active_task_owner left right =
   let cmp = String.compare left.agent_name right.agent_name in
   if cmp <> 0 then cmp else String.compare left.task_id right.task_id
+
+let compare_excluded_keeper_active_task_owner left right =
+  let cmp = String.compare left.excluded_keeper_name right.excluded_keeper_name in
+  if cmp <> 0 then cmp else String.compare left.excluded_task_id right.excluded_task_id
 
 type active_task_assignment =
   | Keeper_task_owner of { assignee : string; task_status : string }
@@ -866,6 +897,20 @@ let completion_authority_pending_task_json row =
       ("fleet_blocking", `Bool false);
     ]
 
+let excluded_keeper_active_task_owner_json row =
+  `Assoc
+    [
+      ("keeper_name", `String row.excluded_keeper_name);
+      ("agent_name", `String row.excluded_keeper_name);
+      ("task_id", `String row.excluded_task_id);
+      ("task_status", `String row.excluded_task_status);
+      ("owner_kind", `String "autoboot_excluded_keeper");
+      ( "exclusion_reason",
+        Keeper_runtime.autoboot_exclusion_reason_to_yojson row.exclusion_reason );
+      ("executable", `Bool false);
+      ("fleet_blocking", `Bool false);
+    ]
+
 let non_keeper_active_task_owner_json row =
   `Assoc
     [
@@ -876,14 +921,25 @@ let non_keeper_active_task_owner_json row =
       ("fleet_blocking", `Bool false);
     ]
 
+(* Who the boot path expects to be running, and who it skips with a reason.
+
+   Both answers come from [Keeper_runtime.autoboot_exclusion_reason], the
+   function the boot path itself consults. This scan used to derive its own
+   from the activation mode alone, which does not read [paused]: an
+   operator-paused keeper read here as one that should be running, so the
+   work it still owned became a fleet fault asking the operator to act on
+   the pause they had just chosen (2026-09-15, keeper rondo, task-701). *)
 type keeper_agent_binding_scan = {
-  enabled_keeper_names : string list;
-  disabled_agent_names : string list;
+  admitted_keeper_names : string list;
+  excluded_keeper_reasons : (string * Keeper_runtime.autoboot_exclusion_reason) list;
   binding_read_errors : (string * string) list;
 }
 
 let empty_keeper_agent_binding_scan =
-  { enabled_keeper_names = []; disabled_agent_names = []; binding_read_errors = [] }
+  { admitted_keeper_names = []; excluded_keeper_reasons = []; binding_read_errors = [] }
+
+let compare_excluded_keeper_reason (left_name, _) (right_name, _) =
+  String.compare left_name right_name
 
 let keeper_agent_bindings ?profile_snapshot config =
   configured_keeper_names ?profile_snapshot config
@@ -891,17 +947,18 @@ let keeper_agent_bindings ?profile_snapshot config =
   |> List.fold_left
        (fun scan name ->
          match Keeper_meta_store.read_meta config name with
-         | Ok (Some meta) ->
-             if effective_autoboot_enabled ?profile_snapshot config name meta then
+         | Ok (Some meta) -> (
+             match Keeper_runtime.autoboot_exclusion_reason ?profile_snapshot config meta.name with
+             | None ->
                {
                  scan with
-                 enabled_keeper_names = meta.name :: scan.enabled_keeper_names;
+                 admitted_keeper_names = meta.name :: scan.admitted_keeper_names;
                }
-             else
+             | Some reason ->
                {
                  scan with
-                 disabled_agent_names = meta.name :: scan.disabled_agent_names;
-               }
+                 excluded_keeper_reasons = (meta.name, reason) :: scan.excluded_keeper_reasons;
+               })
          | Ok None -> scan
          | Error err ->
              {
@@ -911,14 +968,15 @@ let keeper_agent_bindings ?profile_snapshot config =
        empty_keeper_agent_binding_scan
   |> fun scan ->
   {
-    enabled_keeper_names = sorted_unique_strings scan.enabled_keeper_names;
-    disabled_agent_names = sorted_unique_strings scan.disabled_agent_names;
+    admitted_keeper_names = sorted_unique_strings scan.admitted_keeper_names;
+    excluded_keeper_reasons =
+      List.sort_uniq compare_excluded_keeper_reason scan.excluded_keeper_reasons;
     binding_read_errors =
       List.sort_uniq compare_string_pair scan.binding_read_errors;
   }
 
-let keeper_names_for_agent enabled_keeper_names assignee =
-  List.filter (String.equal assignee) enabled_keeper_names
+let keeper_names_for_agent admitted_keeper_names assignee =
+  List.filter (String.equal assignee) admitted_keeper_names
 
 let is_credentialed_external_client config assignee =
   (not (List.mem assignee (Keeper_meta_store.keeper_names config)))
@@ -953,12 +1011,12 @@ let active_task_owner_fiber_scan ?profile_snapshot config ~executable_names =
                 recovery.recovery_path
                 recovery.primary_error ) ]
       in
-      let pending_rows, blocking_rows, non_keeper_rows =
+      let pending_rows, blocking_rows, non_keeper_rows, excluded_rows =
         backlog.tasks
         |> List.fold_left
-             (fun (pending_rows, blocking_rows, non_keeper_rows) task ->
+             (fun (pending_rows, blocking_rows, non_keeper_rows, excluded_rows) task ->
              match active_task_assignment task with
-             | None -> (pending_rows, blocking_rows, non_keeper_rows)
+             | None -> (pending_rows, blocking_rows, non_keeper_rows, excluded_rows)
              | Some
                  (Completion_authority_pending
                     { producer_agent_name; submitted_at; verification_id }) ->
@@ -969,14 +1027,15 @@ let active_task_owner_fiber_scan ?profile_snapshot config ~executable_names =
                    }
                    :: pending_rows
                  , blocking_rows
-                 , non_keeper_rows )
+                 , non_keeper_rows
+                 , excluded_rows )
              | Some (Keeper_task_owner { assignee; task_status }) ->
                  let keeper_names = keeper_names_for_agent agent_bindings assignee in
                  if
                    List.exists
                      (fun keeper_name -> String_set.mem keeper_name executable_set)
                      keeper_names
-                 then (pending_rows, blocking_rows, non_keeper_rows)
+                 then (pending_rows, blocking_rows, non_keeper_rows, excluded_rows)
                  else (
                    match keeper_names with
                    | []
@@ -988,21 +1047,37 @@ let active_task_owner_fiber_scan ?profile_snapshot config ~executable_names =
                            task_id = task.id;
                            task_status;
                          }
-                         :: non_keeper_rows )
-                   | []
-                     when List.mem assignee binding_scan.disabled_agent_names
-                          || meta_read_errors <> [] ->
-                       (pending_rows, blocking_rows, non_keeper_rows)
-                   | [] ->
-                       ( pending_rows
-                       , {
-                           keeper_name = None;
-                           agent_name = assignee;
-                           task_id = task.id;
-                           task_status;
-                         }
-                         :: blocking_rows
-                       , non_keeper_rows )
+                         :: non_keeper_rows
+                       , excluded_rows )
+                   | [] when meta_read_errors <> [] ->
+                       (* The scan could not read every keeper's meta, so
+                          "no keeper by this name" is not a fact it has. The
+                          errors are reported on their own. *)
+                       (pending_rows, blocking_rows, non_keeper_rows, excluded_rows)
+                   | [] -> (
+                       match List.assoc_opt assignee binding_scan.excluded_keeper_reasons with
+                       | Some reason ->
+                           ( pending_rows
+                           , blocking_rows
+                           , non_keeper_rows
+                           , {
+                               excluded_keeper_name = assignee;
+                               excluded_task_id = task.id;
+                               excluded_task_status = task_status;
+                               exclusion_reason = reason;
+                             }
+                             :: excluded_rows )
+                       | None ->
+                           ( pending_rows
+                           , {
+                               keeper_name = None;
+                               agent_name = assignee;
+                               task_id = task.id;
+                               task_status;
+                             }
+                             :: blocking_rows
+                           , non_keeper_rows
+                           , excluded_rows ))
                    | keeper_names ->
                        ( pending_rows
                        , keeper_names
@@ -1016,8 +1091,9 @@ let active_task_owner_fiber_scan ?profile_snapshot config ~executable_names =
                                 }
                                 :: rows)
                               blocking_rows
-                       , non_keeper_rows )))
-             ([], [], [])
+                       , non_keeper_rows
+                       , excluded_rows )))
+             ([], [], [], [])
       in
       let pending_rows =
         pending_rows
@@ -1030,10 +1106,14 @@ let active_task_owner_fiber_scan ?profile_snapshot config ~executable_names =
       let non_keeper_rows =
         non_keeper_rows |> List.sort_uniq compare_non_keeper_active_task_owner
       in
+      let excluded_rows =
+        excluded_rows |> List.sort_uniq compare_excluded_keeper_active_task_owner
+      in
       {
         active_task_owner_without_executable_fibers = rows;
         completion_authority_pending_tasks = pending_rows;
         non_keeper_active_task_owners = non_keeper_rows;
+        excluded_keeper_active_task_owners = excluded_rows;
         active_task_owner_scan_errors = backlog_read_errors @ meta_read_errors;
       }
 
@@ -1131,6 +1211,9 @@ let keeper_fleet_safety_health_json
   in
   let non_keeper_active_task_owner_count =
     List.length active_task_owner_scan.non_keeper_active_task_owners
+  in
+  let excluded_keeper_active_task_owner_count =
+    List.length active_task_owner_scan.excluded_keeper_active_task_owners
   in
   let active_task_owner_without_executable_fiber =
     active_task_owner_without_executable_fiber_count > 0
@@ -1266,6 +1349,15 @@ let keeper_fleet_safety_health_json
       , `String
           "active tasks owned by credentialed non-keeper clients; visible for \
            operators but not keeper fleet blockers" )
+    ; ( "excluded_keeper_active_task_owner_count"
+      , `Int excluded_keeper_active_task_owner_count )
+    ; ( "excluded_keeper_active_task_owners"
+      , `List
+          (List.map
+             excluded_keeper_active_task_owner_json
+             active_task_owner_scan.excluded_keeper_active_task_owners) )
+    ; ( "excluded_keeper_active_task_owner_semantics"
+      , `String excluded_keeper_active_task_owner_semantics )
     ; ( "active_task_owner_fiber_scan_semantics"
       , `String active_task_owner_fiber_scan_semantics )
     ; ( "active_task_owner_scan_error_count"

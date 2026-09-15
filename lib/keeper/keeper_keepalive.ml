@@ -415,8 +415,13 @@ let fork_board_attention_worker
   =
   Eio.Fiber.fork ~sw (fun () ->
     Eio.Switch.run ~name:("keeper " ^ keeper_name ^ " board-attention") @@ fun _ ->
+    (* Both arms are real endings, and the worker's is the one that says why.
+       A worker that failed as the lane stopped is still a worker that failed:
+       [Eio.Fiber.first] kept whichever wake-up was queued first, so a fatal
+       that landed in the same scheduler pass as the stop went unlogged and
+       the lane's only record of it was gone. *)
     match
-      Eio.Fiber.first
+      Watched_work.run
         (fun () ->
            `Worker
              (Keeper_board_attention_worker.run
@@ -425,7 +430,7 @@ let fork_board_attention_worker
                 ~net:ctx.net
                 ~base_path:ctx.config.base_path
                 ~keeper_name))
-        (fun () ->
+        ~watcher:(fun () ->
            Eio.Promise.await stop;
            `Stopped)
     with

@@ -3110,10 +3110,18 @@ let armed_budget ~phase ~first_event_timeout ~body_timeout ~idle_timeout =
 ;;
 
 (* Run [read] inside what is left of the budget measured from [anchor],
-   taking the anchor now when none is set. Already past the deadline: raise
-   what [with_timeout_exn] would, rather than arming a non-positive duration
-   and depending on a scheduler race to produce it. *)
-let read_within_budget ~clock ~anchor ~seconds read =
+   taking the anchor now when none is set, and raise [Eio.Time.Timeout] when
+   the budget ends it.
+
+   A read that started inside the budget and finished stands, even when it
+   finished in the pass the budget ran out: what it read had been asked for
+   in time. A read that starts once the budget has run out stands only when
+   it took nothing new from [reader]'s flow -- the lines that had already
+   arrived, such as the delimiter that came with a first token. Taking new
+   bytes then is a timeout even when the flow hands them over: a submitted
+   read can still complete after its fiber was cancelled, so a stream that
+   kept sending would otherwise outlast a total budget line by line. *)
+let read_within_budget ~clock ~anchor ~seconds ~reader read =
   let anchored_at =
     match !anchor with
     | Some t -> t
@@ -3123,9 +3131,14 @@ let read_within_budget ~clock ~anchor ~seconds read =
       t
   in
   let remaining = anchored_at +. seconds -. Eio.Time.now clock in
-  if Float.compare remaining 0. <= 0
-  then raise Eio.Time.Timeout
-  else Eio.Time.with_timeout_exn clock remaining read
+  let received () = Eio.Buf_read.consumed_bytes reader + Eio.Buf_read.buffered_bytes reader in
+  let received_before = received () in
+  match Under_deadline.run clock remaining read with
+  | Error `Timeout -> raise Eio.Time.Timeout
+  | Ok line ->
+    if Float.compare remaining 0. > 0 || received () = received_before
+    then line
+    else raise Eio.Time.Timeout
 ;;
 
 (* A payload line was read under [budget]: a gap starts again, a total does
@@ -3176,7 +3189,7 @@ let read_sse
   require_clock_when_idle ~site ~clock ~idle_timeout;
   require_clock_when_first_event ~site ~clock ~first_event_timeout ~body_timeout;
   (* SSE keepalive comments carry no payload. Skipping them inside the
-     SAME [with_timeout_exn] window preserves the armed deadline so a
+     SAME budgeted read preserves the armed deadline so a
      provider that emits only keepalives still trips it when no real event
      arrives.
      Agent Core contract: the wait for the consumer's first [Output] is the
@@ -3230,7 +3243,7 @@ let read_sse
     let parsed =
       match clock, budget with
       | Some c, Some (Gap seconds | Total seconds) ->
-        read_within_budget ~clock:c ~anchor:budget_anchor ~seconds inner
+        read_within_budget ~clock:c ~anchor:budget_anchor ~seconds ~reader inner
       | Some _, None -> inner ()
       (* No clock: nothing can be armed. Misconfiguration (an explicit
          deadline without a clock) already failed loud at entry, so this is
@@ -3369,7 +3382,7 @@ let read_ndjson
     let line =
       match clock, budget with
       | Some c, Some (Gap seconds | Total seconds) ->
-        read_within_budget ~clock:c ~anchor:budget_anchor ~seconds (fun () ->
+        read_within_budget ~clock:c ~anchor:budget_anchor ~seconds ~reader (fun () ->
           Eio.Buf_read.line reader)
       | Some _, None -> Eio.Buf_read.line reader
       (* No clock: nothing can be armed. See [read_sse] for why this is

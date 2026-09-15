@@ -50,6 +50,40 @@ let test_a_result_that_never_arrives_is_a_timeout () =
   | Ok () -> fail "nothing arrived, yet the wait did not end as a timeout"
 ;;
 
+(* Readers run the work with what is left of a budget, and that can be
+   nothing or less. The work still runs: a result it produces without waiting
+   stands, and a wait it starts ends at once. *)
+let passed_deadlines_s = [ 0.0; -1.0 ]
+
+let test_a_result_that_needs_no_wait_stands_once_the_deadline_has_passed () =
+  List.iter
+    (fun seconds ->
+       Eio_mock.Backend.run
+       @@ fun () ->
+       let clock = Eio_mock.Clock.make () in
+       Eio_mock.Clock.set_time clock deadline_s;
+       match Under_deadline.run clock seconds (fun () -> "already here") with
+       | Ok answer ->
+         check string (Printf.sprintf "with %gs left" seconds) "already here" answer
+       | Error `Timeout ->
+         failf "with %gs left, a result that needed no wait was dropped" seconds)
+    passed_deadlines_s
+;;
+
+let test_a_wait_started_once_the_deadline_has_passed_ends_at_once () =
+  List.iter
+    (fun seconds ->
+       Eio_mock.Backend.run
+       @@ fun () ->
+       let clock = Eio_mock.Clock.make () in
+       Eio_mock.Clock.set_time clock deadline_s;
+       let never, _ = Eio.Promise.create () in
+       match Under_deadline.run clock seconds (fun () -> Eio.Promise.await never) with
+       | Error `Timeout -> ()
+       | Ok () -> failf "with %gs left, a wait for nothing did not end as a timeout" seconds)
+    passed_deadlines_s
+;;
+
 let () =
   Alcotest.run
     "under_deadline"
@@ -62,6 +96,16 @@ let () =
             "a result that never arrives is a timeout"
             `Quick
             test_a_result_that_never_arrives_is_a_timeout
+        ] )
+    ; ( "a deadline that has already passed"
+      , [ test_case
+            "a result that needs no wait stands"
+            `Quick
+            test_a_result_that_needs_no_wait_stands_once_the_deadline_has_passed
+        ; test_case
+            "a wait started then ends at once"
+            `Quick
+            test_a_wait_started_once_the_deadline_has_passed_ends_at_once
         ] )
     ]
 ;;

@@ -831,11 +831,18 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
       ("attempts", `Int attempts);
       ("timestamp", `String (Masc_domain.now_iso ()));
     ]
+    @ (match Tool_result.failure_class result with
+       | Some failure_class ->
+         [ ( "failure_class"
+           , `String (Tool_result.tool_failure_class_to_string failure_class) ) ]
+       | None -> [])
     @
-    match Tool_result.failure_class result with
-    | Some failure_class ->
-      [ ( "failure_class"
-        , `String (Tool_result.tool_failure_class_to_string failure_class) ) ]
+    (* The handler's own typed metadata, the same object the Keeper bridge
+       hands a model turn as the tool output's [_meta]. An MCP client that
+       continues a paged read gets the page's position here instead of
+       parsing the text a model reads. *)
+    match Tool_result.metadata result with
+    | Some metadata -> [ "metadata", metadata ]
     | None -> []
   in
   (* [CallToolResult] defines [content], [structuredContent], [isError] and

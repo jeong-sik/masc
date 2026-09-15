@@ -242,7 +242,11 @@ let inline_ceiling_bytes = function
 
 type result_boundary =
   | Projected_for_model of model_projection
-  | Unprojected
+  | Sent_to_client
+
+let result_ceiling_bytes = function
+  | Projected_for_model projection -> inline_ceiling_bytes projection
+  | Sent_to_client -> Common.max_tool_result_wire_bytes
 
 let marker_prefix = "[masc:blob sha256="
 

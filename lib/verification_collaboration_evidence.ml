@@ -183,7 +183,7 @@ let read_board ~submitted_evidence ~args = protect (fun () ->
        | Board.Comment_page.Page page ->
          page_source ~args (`Assoc ["source", `String "board"; "post", post;
            "comments", `List page.Board.Comment_page.items;
-           "pagination", Board.Comment_page.pagination_to_yojson page]))
+           "pagination", Board.Comment_page.Position.(to_yojson (of_page page))]))
   | _ -> Error (Storage_failed "invalid submitted Board snapshot"))
 
 let read_fusion ~submitted_evidence ~args = protect (fun () ->

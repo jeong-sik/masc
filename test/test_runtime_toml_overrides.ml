@@ -836,13 +836,71 @@ let test_an_out_of_range_provider_call_deadline_is_a_configuration_error () =
        | None -> failf "%g read as unset" seconds);
       Config_boot_overrides.reset_for_tests ())
     [ below; above ];
-  Config_boot_overrides.set
-    "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC"
-    (Printf.sprintf "%g" Env_config_keeper.KeeperKeepalive.provider_call_deadline_min_sec);
-  check (option (float 0.0001))
-    "the lower bound itself is a declared value"
-    (Some Env_config_keeper.KeeperKeepalive.provider_call_deadline_min_sec)
-    (Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override ())
+  List.iter
+    (fun (label, bound) ->
+      Config_boot_overrides.set "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" (Printf.sprintf "%g" bound);
+      check (option (float 0.0001))
+        (label ^ " itself is a declared value")
+        (Some bound)
+        (Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override ());
+      Config_boot_overrides.reset_for_tests ())
+    [ "the lower bound", Env_config_keeper.KeeperKeepalive.provider_call_deadline_min_sec
+    ; "the upper bound", Env_config_keeper.KeeperKeepalive.provider_call_deadline_max_sec
+    ]
+;;
+
+(* The refusal quotes what the operator wrote. Rendering the parsed number
+   instead made "29.9999999" read as "invalid ...=30 (expected a value within
+   [30, 3600] seconds)", a sentence that contradicts itself. *)
+let test_a_range_refusal_quotes_the_text_the_operator_wrote () =
+  with_env "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" None @@ fun () ->
+  with_clean_boot_overrides @@ fun () ->
+  let written = "29.9999999" in
+  Config_boot_overrides.set "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" written;
+  match Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override () with
+  | exception Env_config_core.Config_error message ->
+    check string
+      "the message is the text, the setting and the range"
+      (Printf.sprintf
+         "invalid MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC=%S (expected a value within [30, 3600] seconds)"
+         written)
+      message
+  | Some read -> failf "%s read as %g seconds instead of being refused" written read
+  | None -> failf "%s read as unset" written
+;;
+
+(* The body deadline has the same range rule as the provider-call deadline,
+   under its own bounds. *)
+let test_an_out_of_range_body_deadline_is_a_configuration_error () =
+  with_env "MASC_KEEPER_BODY_TIMEOUT_SEC" None @@ fun () ->
+  with_clean_boot_overrides @@ fun () ->
+  let min_sec = Env_config_keeper.KeeperKeepalive.body_timeout_min_sec in
+  let max_sec = Env_config_keeper.KeeperKeepalive.body_timeout_max_sec in
+  List.iter
+    (fun seconds ->
+      Config_boot_overrides.set "MASC_KEEPER_BODY_TIMEOUT_SEC" (Printf.sprintf "%g" seconds);
+      (match Env_config_keeper.KeeperKeepalive.body_timeout_sec_override () with
+       | exception Env_config_core.Config_error message ->
+         check bool
+           (Printf.sprintf "%g names the setting and the range" seconds)
+           true
+           (Astring.String.is_infix ~affix:"MASC_KEEPER_BODY_TIMEOUT_SEC" message
+            && Astring.String.is_infix
+                 ~affix:(Printf.sprintf "within [%g, %g]" min_sec max_sec)
+                 message)
+       | Some read -> failf "%g read as %g seconds instead of being refused" seconds read
+       | None -> failf "%g read as unset" seconds);
+      Config_boot_overrides.reset_for_tests ())
+    [ min_sec -. 1.0; max_sec +. 1.0 ];
+  List.iter
+    (fun (label, bound) ->
+      Config_boot_overrides.set "MASC_KEEPER_BODY_TIMEOUT_SEC" (Printf.sprintf "%g" bound);
+      check (option (float 0.0001))
+        (label ^ " itself is a declared value")
+        (Some bound)
+        (Env_config_keeper.KeeperKeepalive.body_timeout_sec_override ());
+      Config_boot_overrides.reset_for_tests ())
+    [ "the lower bound", min_sec; "the upper bound", max_sec ]
 ;;
 
 let test_the_provider_call_deadline_applied_from_toml_is_read_live () =
@@ -996,6 +1054,10 @@ let () =
             test_a_malformed_provider_call_deadline_is_a_configuration_error
         ; test_case "an out-of-range provider call deadline is a configuration error" `Quick
             test_an_out_of_range_provider_call_deadline_is_a_configuration_error
+        ; test_case "a range refusal quotes the text the operator wrote" `Quick
+            test_a_range_refusal_quotes_the_text_the_operator_wrote
+        ; test_case "an out-of-range body deadline is a configuration error" `Quick
+            test_an_out_of_range_body_deadline_is_a_configuration_error
         ; test_case "the provider call deadline applied from toml is read live" `Quick
             test_the_provider_call_deadline_applied_from_toml_is_read_live
         ; test_case "explicit MASC_CONFIG_DIR wins over base path" `Quick test_explicit_config_dir_wins_over_base_path

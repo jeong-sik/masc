@@ -58,7 +58,8 @@ let stub_main () =
   let frame = header ^ read_exact Unix.stdin body_len in
   let trailer ?exit ?shim_error () =
     Exec_ssh_protocol.render_trailer
-      { v = Exec_ssh_protocol.newest; exit; signal = None; timed_out = false; shim_error }
+      { v = Exec_ssh_protocol.newest; exit; signal = None; timed_out = false; shim_error
+      ; observed_syscalls = [] }
   in
   match Exec_ssh_protocol.decode_request frame with
   | Error error ->

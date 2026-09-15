@@ -75,6 +75,7 @@ let stub_main () =
       ; signal = None
       ; timed_out = false
       ; shim_error = None
+      ; observed_syscalls = []
       }
   in
   match Exec_ssh_protocol.decode_request frame with

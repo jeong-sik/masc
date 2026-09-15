@@ -2561,7 +2561,6 @@ let dashboard_tools_http_result ?keeper ?timing (config : Workspace.config) =
     let usage =
       run Tools_compute (fun () ->
         Tool_unified.summary_report
-          ~runtime_metrics:Runtime_observation.runtime_metrics_json
           ~public_names:
             Keeper_tool_descriptor_resolution.public_names_for_internal
           ()

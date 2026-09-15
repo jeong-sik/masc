@@ -69,9 +69,8 @@ let tool_info_to_json (info : tool_info) : Yojson.Safe.t =
    empty list is the honest answer for a tool no model can call. *)
 (* Which public names a tool is offered under is a fact the Keeper domain
    owns, and this module is a tool surface: RFC-0194 has the dependency
-   pointing the other way. It arrives as an argument, the way
-   [runtime_metrics] already does -- the caller is the server, which is above
-   both domains and may name either.
+   pointing the other way. It arrives as an argument -- the caller is the
+   server, which is above both domains and may name either.
 
    [None] is the honest answer where a caller has no descriptor set to ask,
    and it is what the empty default gives: a tool no model can call has no
@@ -99,7 +98,6 @@ let tool_stats_to_json ~public_names (stats : Tool_metrics.tool_stats) =
     ]
 
 let summary_report
-      ?(runtime_metrics = fun () -> `Null)
       ?(public_names = fun _ -> [])
       ()
   : Yojson.Safe.t
@@ -178,5 +176,4 @@ let summary_report
     ("never_called", `List (List.map (named_tool_to_json ~public_names) never_called));
     ("tool_distribution", tool_dist);
     ("registered_count", `Int (Tool_dispatch.registered_count ()));
-    ("runtime_metrics", runtime_metrics ());
   ]

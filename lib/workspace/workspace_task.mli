@@ -154,6 +154,11 @@ type unroutable_rejection_release =
       (** The Task moved on between the verdict and this delivery — a new
           submission, an operator recovery, a cancellation. Whatever is there
           now answers for it, so nothing is released. *)
+  | Producer_became_routable
+      (** A Keeper queue appeared at the producer's name between the routing
+          decision and the lock this release takes. The verdict can be
+          delivered after all, so the task is left where the delivery expects
+          to find it and the obligation is kept. *)
   | Task_absent
 
 val release_unroutable_rejected_task_r :
@@ -163,6 +168,7 @@ val release_unroutable_rejected_task_r :
   producer:string ->
   verification_id:string ->
   reason:string ->
+  still_unroutable:(unit -> (bool, string) result) ->
   unit ->
   unroutable_rejection_release Masc_domain.masc_result
 (** Return a rejected task to [Todo] when the rejection has no producer Keeper
@@ -170,12 +176,24 @@ val release_unroutable_rejected_task_r :
     session is gone, so the ordinary [Release] — which only its own assignee
     may call — can never run, and the task would sit in [InProgress] for good.
 
-    Released only from [Claimed] or [InProgress] still held by [producer];
-    every other status is {!Not_held_by_producer} and a missing task is
-    {!Task_absent}, both of which leave the backlog untouched so a repeated
-    delivery is idempotent. The released-by actor is read from [authority],
-    never supplied by the caller: recording the vanished assignee would leave
-    the ledger claiming that agent released its own task.
+    Released only from [Claimed] or [InProgress] still held by [producer], and
+    only while [still_unroutable] — asked inside the lock that decides, so a
+    Keeper queue appearing after the routing decision is seen rather than
+    raced past — answers [true]. Every other status is
+    {!Not_held_by_producer} and a missing task is {!Task_absent}, both of
+    which leave the backlog untouched.
+
+    The guard is the status and the assignee, nothing finer. A replay after a
+    crash between this release and its acknowledgement therefore finds the
+    task in [Todo] and does nothing — unless, inside that window, an agent
+    carrying the same name claimed and started it again, which the replay
+    would release. That producer is by construction a name with no Keeper
+    queue, so nothing in the fleet claims under it; a caller for whom that is
+    not true should not use this function.
+
+    The released-by actor is read from [authority], never supplied by the
+    caller: recording the vanished assignee would leave the ledger claiming
+    that agent released its own task.
 
     The verdict's [reason] and [verification_id] are written onto the task's
     handoff context, so whoever claims it next reads why it came back. *)

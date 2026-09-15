@@ -1040,7 +1040,6 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
   in
   let registry = Session.create () in
   Session.start_loop registry ~sw;
-  Runtime_observation.start_actor_if_needed ~sw;
   Subscriptions.set_session_push_fn (fun event ->
     Session.push_notification_to_active_agents registry ~event
   );

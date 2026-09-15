@@ -21,13 +21,13 @@ Task 상태 기계는 "이 상태에서 나가게 할 수 있는 사람은 X 뿐
 
 이 RFC 는 하나의 불변식을 둔다.
 
-> 끝나지 않은 Task 상태마다, 그 상태를 벗어나게 할 행위자가 **판정 시점에 존재하는 값**이거나,
+> 끝나지 않은 Task 상태마다, 그 상태를 벗어나게 할 행위자가 **그 자리에서 확인되는 값**이거나,
 > 그 Task 가 **운영자 작업 목록에 투영**된다. 시간으로 닫는 장치(타이머·자동 확정·재시도 상한)는 두지 않는다.
 
 여기서 나오는 변경은 네 가지다. 새 Task 상태를 만들지 않는다.
 
-1. 제출자가 Keeper 인지 여부는 **판정 시점에 Keeper 저장소에서 계산**한다 (RFC-0445 §2.2 U1 수정).
-2. Keeper 큐가 없는 제출자의 거절은 사유를 남기고 Task 를 `Todo` 로 되돌린다.
+1. 제출자가 Keeper 인지 여부는 저장하지 않고 **쓰는 자리에서 Keeper 저장소에 물어본다** (RFC-0445 §2.2 U1 수정).
+2. 받을 Keeper 가 없다고 전달 단계가 확정하면, 사유를 남기고 Task 를 `Todo` 로 되돌린다.
 3. 운영자만 풀 수 있는 Task(포기 청구·주인 없는 점유)는 운영자가 보는 화면에 목록으로 나온다.
 4. 병합된 변경(PR·커밋)을 증거 형식으로 받는다. 지금은 증거가 작업자 playground 의 파일뿐이다.
 
@@ -62,8 +62,8 @@ polisher 3, code-reviewer 2, analyst 1, lane-smith 1, pr-updater 1, codex-mcp-cl
 | 09-14 | 12,807 |
 | 09-15 04:46 까지 | 2,511 |
 
-#36461 (병합됨) 이 이 재시도를 끝냈다. 임시 조치다 — 아래 §3.2 가 들어오면 그런 거절에는
-전달 의무 자체가 생기지 않는다.
+#36461 (병합됨) 이 이 재시도를 끝냈다. 다만 거기서 Task 는 `InProgress` 로 남는다 — 아래 §3.2 가
+그 자리를 마저 고친다.
 
 ### 1.3 증거는 대부분 읽히지 않는다
 
@@ -89,7 +89,7 @@ polisher 3, code-reviewer 2, analyst 1, lane-smith 1, pr-updater 1, codex-mcp-cl
 
 ## 2. 원칙
 
-1. **나갈 수 있어야 한다.** 끝나지 않은 상태에는 (a) 판정 시점에 존재가 확인된 행위자가 있거나
+1. **나갈 수 있어야 한다.** 끝나지 않은 상태에는 (a) 그 자리에서 존재가 확인된 행위자가 있거나
    (b) 운영자 작업 목록에 투영이 있다. 둘 다 없으면 그 상태로 들어가는 전이를 설계하지 않는다.
 2. **시간이 닫지 않는다.** 타이머·자동 취소·재시도 상한을 두지 않는다 (RFC-0417 §5 계승).
 3. **가시성은 투영이다.** 운영자 목록은 기존 사실을 읽어 만든다. 새 상태·새 필드를 만들지 않는다
@@ -98,10 +98,10 @@ polisher 3, code-reviewer 2, analyst 1, lane-smith 1, pr-updater 1, codex-mcp-cl
 
 ## 3. 설계
 
-### 3.1 제출자가 Keeper 인지는 판정 시점에 계산한다 — RFC-0445 §2.2 U1 수정
+### 3.1 제출자가 Keeper 인지는 쓰는 자리에서 물어본다 — RFC-0445 §2.2 U1 수정
 
 RFC-0445 는 `producer` 를 제출 시점에 `Keeper | Mcp_session` 으로 저장한다고 적었다. 이 RFC 는
-**저장하지 않고 판정 시점에 계산한다**. 이유 세 가지다.
+**저장하지 않고 그 값을 쓰는 자리에서 계산한다**. 이유 세 가지다.
 
 - 생명주기가 묻는 것은 "지금 이 이름으로 큐를 읽을 Keeper 가 있는가" 다. 제출 뒤 Keeper 가 지워지면
   저장된 값은 거짓이 된다.
@@ -111,35 +111,47 @@ RFC-0445 는 `producer` 를 제출 시점에 `Keeper | Mcp_session` 으로 저�
   live registry → Keeper meta 파일 존재 순으로 보고 `Keeper of name | No_keeper` 를 돌려주며,
   meta 가 있는데 이 바이너리가 못 읽는 경우는 `Error`("지금은 아님") 로 나눈다.
 
-호출 자리: 판정을 커밋하는 두 곳(`completion_authority_agent.ml:721`,
-`server_routes_http_routes_verification.ml:142`)이 계산해서 workspace 계층에 **타입 인자**로 넘긴다.
-workspace 는 Keeper 저장소를 모른다. 의존 방향을 지킨다.
+호출 자리는 둘이다. 거절 전달을 조정하는 `Completion_authority_wakeup.reconcile_pending`(§3.2)과
+운영자 목록을 만드는 투영(§3.3)이다. 둘 다 keeper 계층 위에 있어서 Keeper 저장소를 읽을 수 있다.
+workspace 계층은 그대로 Keeper 를 모른다. 의존 방향을 지킨다.
 
 RFC-0445 의 다른 결정(`next_actor` 합, `Nobody_will_retry {recipient}`, `Unroutable_producer` 삭제)은
 그대로 따른다. 이 RFC 는 그 값을 **어디서 얻는지**만 바꾼다.
 
-### 3.2 Keeper 큐가 없는 제출자의 거절은 `Todo` 로 되돌린다
+### 3.2 받을 Keeper 가 없다고 확정되면 Task 를 `Todo` 로 되돌린다
 
-`decide_verdict` 가 typed 인자를 받는다.
+판정 함수(`decide_verdict`)는 바꾸지 않는다. 거절은 지금처럼 `InProgress { assignee }` 로 되돌리고
+전달 의무를 기록한다. 바뀌는 곳은 **전달 단계**다.
 
-```
-producer_route = Keeper_queue of keeper_name | No_keeper_queue
-```
+전달을 조정하는 `Completion_authority_wakeup.reconcile_pending` 은 §3.1 의 계산으로 세 답 중 하나를
+얻는다.
 
-- `Keeper_queue`: 지금과 같다. `InProgress { assignee }` 로 되돌리고 전달 의무를 기록한다.
-- `No_keeper_queue`: `Todo` 로 되돌린다. 거절 사유는 이미 같은 커밋이 쓰는 `handoff_context`
-  (`reason`, `evidence_refs = [verification_id]`) 에 남는다. 전달 의무는 **기록하지 않는다** —
-  읽을 큐가 없다. `next_actor` 는 RFC-0445 의 `Nobody_will_retry { Verdict_rejected { delivered_via = Task_record }; recipient }` 다.
+| 계산 결과 | 지금 (#36461) | 이 RFC |
+|---|---|---|
+| `Keeper name` | 그 Keeper 큐에 넣고 깨운다 | 같다 |
+| `Error`(meta 를 못 읽음) | 남겨 두고 다음에 다시 | 같다 |
+| `No_keeper` | 의무만 끝낸다. Task 는 `InProgress` 로 남는다 | **의무를 끝내고 Task 를 `Todo` 로 되돌린다** |
 
-이유: `InProgress` 는 "이 사람이 지금 하고 있다" 는 뜻인데, 그 사람이 없으면 거짓이다. `Todo` 는
-"아무나 집을 수 있다" 는 사실이고, 기록은 Task 에 남아 다음 사람이 읽는다. 같은 이름의 세션이
-다시 붙으면 그대로 다시 claim 하면 된다.
+되돌림은 이미 있는 `Release` 전이를 쓴다(`workspace_task.ml:112 release_task_r`). Keeper 가 내려갈 때
+자기 Task 를 놓는 것과 같은 길이다(`keeper_shutdown_finalize.ml:161`). 거절 사유는 같은 커밋이 쓴
+`handoff_context`(`reason`, `evidence_refs = [verification_id]`) 에 그대로 남고, 되돌림은 그 위에
+"받을 Keeper 가 없어 놓았다" 는 handoff 를 덧쓴다.
 
-RFC-0445 U1 은 이 경우 Task 를 제출자에게 남기고 "확인 시점은 그 producer 의 다음 제출" 이라고
-적었다. 그 producer 가 다시 오지 않으면 Task 는 영원히 남는다 — 지금 9건이 그 상태다. 이 RFC 는
-그 지점을 수정한다.
+**결정이 필요한 것 — 되돌리는 행위자를 무엇으로 기록하는가.**
+`release_task_r ~agent_name` 은 담당자 본인이 놓는 모양이라 사실과 다르다. 이 RFC 는
+`workspace_task.ml:recover_owned_task_to_todo_r` 옆에 **판정 레인이 행위자인 typed 되돌림**을 두기를
+권한다. 운영자 복구와 같은 자리, 다른 행위자다.
 
-승인(`Verdict_approved`) 은 바뀌지 않는다. `Done` 으로 끝나고, 알림은 지금처럼 최선 노력이다.
+왜 판정이 아니라 전달에서 하는가:
+
+- "받을 Keeper 가 있는가" 는 판정 시점이 아니라 **전달 시점의 사실**이다. 판정과 전달 사이에 Keeper 가
+  지워질 수도 있고, 그 경우도 같은 답이 필요하다.
+- `commit_verdict_r` 에 인자를 더하면 테스트 호출 자리 23곳(11파일)이 같이 바뀐다. 같은 결과를
+  전달 단계 한 곳에서 얻을 수 있으면 그쪽이 맞다.
+- 원장에는 사실이 둘로 남는다. "거절되어 제출자에게 돌아갔다", 그리고 "받을 사람이 없어 놓았다".
+  두 번째를 첫 번째에 접으면 왜 `Todo` 인지가 사라진다.
+
+승인(`Verdict_approved`) 은 바뀌지 않는다. `Done` 으로 끝나고 알림은 지금처럼 최선 노력이다.
 
 ### 3.3 운영자만 풀 수 있는 Task 를 목록으로 만든다
 
@@ -203,7 +215,7 @@ Evidence_change of { repository : string; reference : Pull_request of int | Comm
 | PR | 내용 | 판정 |
 |---|---|---|
 | PR-0 (#36461, 병합됨) | Keeper 없는 제출자의 전달 의무를 한 번에 끝냄. `Keeper_producer_route` 도입 | `completion repair remains pending` 새 줄 0 |
-| PR-1 | §3.1 + §3.2. `decide_verdict ~producer_route`, `No_keeper_queue` 거절은 `Todo`. 그때 PR-0 의 `No_keeper` 분기와 `unroutable` 카운트는 지운다 | fixture: No_keeper 거절 1건 → `Todo`, outbox 0, `handoff_context.reason` 유지 |
+| PR-1 | §3.2. `reconcile_pending` 의 `No_keeper` 분기가 의무를 끝내고 Task 를 `Todo` 로 되돌린다 + 판정 레인 행위자의 typed 되돌림 | fixture: No_keeper 거절 1건 → Task `todo`, outbox 0, `handoff_context.reason` 유지 |
 | PR-2 | §3.3 투영 + 세 표면 | fixture: 포기 청구 1 + 주인 없는 점유 1 → 세 표면 모두 두 생성자 exhaustive |
 | PR-3 | §3.4 사유 요구 | fixture: 사유 없는 포기 청구 → typed 거절 |
 | PR-4 | §3.5 변경 증거 | fixture: 병합된 PR 1건 → 스냅샷이 기록에 남고 판정자가 읽음. 조회 실패 → typed 미열람 |
@@ -213,7 +225,9 @@ PR-1 은 PR-0 위에서만 의미가 있다. PR-2~4 는 서로 독립이다.
 
 ## 6. 판정 기준
 
-- `rg 'Unroutable_producer' lib` = 0 (PR-1 뒤). RFC-0445 §3 과 같은 기준이다.
+- `Unroutable_producer` 는 남는다. RFC-0445 §3 은 이것을 0 으로 두었지만, 판정 뒤 전달 전에 Keeper 가
+  지워지는 경우가 실제로 있다. 이 RFC 에서 그 생성자는 "전달 시점에 받을 사람이 없다" 는 사실이고,
+  분기의 동작이 `Todo` 되돌림으로 바뀐다.
 - `No_keeper` 제출자의 거절 1건을 만든 뒤: `backlog.json` 에 그 Task 가 `todo`, `handoff_context.reason`
   이 거절 사유, `pending_completion_rejections` 에 항목 0.
 - `rg 'Cancel_task' bin/` > 0 (PR-2 뒤). 지금 0.

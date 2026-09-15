@@ -335,6 +335,32 @@ let test_the_logs_header_says_the_floor_the_reader_set () =
        ~module_path:render ~binding_name:"render_system_logs" ~callees:[]
        ~identifiers:[ "filter_note" ])
 
+(* Config / params draws one row of prose above its list, and it used to
+   spend its first forty cells on two key phrases the footer already carried:
+   "Enter edits by type \xc2\xb7 E is advanced JSON \xc2\xb7 overrides persist in
+   .masc/runtime_params.json". The row is cut to the frame, so what went
+   first was the part with no other home -- at eighty columns ".masc/run\xe2\x80\xa6",
+   at sixty-four "overrides pers\xe2\x80\xa6".
+
+   [Enter] is pinned into the footer at every width, so naming it here was the
+   footer's hint a second time; [E] is dropped from the footer at eighty, so
+   this row is where it lives below that. The store leads. *)
+let test_the_params_row_leads_with_what_only_it_says () =
+  Alcotest.(check int) "the row the pane draws, in this order" 1
+    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render
+       ~binding_name:"render_runtime_params"
+       ~needle:
+         "  overrides persist in .masc/runtime_params.json \xc2\xb7 E is advanced JSON");
+  (* And the phrase it stopped saying is gone rather than moved. The footer
+     is pinned to keep [Enter] at every width, which is what made the row's
+     copy of it dead weight; [Masc_tui_footer.never_dropped_keys] is where
+     that pin lives and test_tui_keys is what holds it. *)
+  Alcotest.(check int) "the footer's own hint is not said here twice" 0
+    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render
+       ~binding_name:"render_runtime_params"
+       ~needle:
+         "  Enter edits by type \xc2\xb7 E is advanced JSON \xc2\xb7 overrides persist in .masc/runtime_params.json")
+
 let test_repositories_show_the_server_resolved_checkout_path () =
   let producer = "lib/server/server_routes_http_routes_repositories.ml" in
   Alcotest.(check int) "the route names one resolved path field" 1
@@ -712,6 +738,8 @@ let () =
             test_a_lane_mark_says_what_its_colour_says
         ; Alcotest.test_case "the schedule subject is measured" `Quick
             test_the_schedule_subject_is_measured_not_given_the_line
+        ; Alcotest.test_case "the params row leads with what only it says" `Quick
+            test_the_params_row_leads_with_what_only_it_says
         ; Alcotest.test_case "the Logs header says the floor that was set" `Quick
             test_the_logs_header_says_the_floor_the_reader_set
         ; Alcotest.test_case "a labelled field does not bracket its reading" `Quick

@@ -857,7 +857,9 @@ choose_install_base_path() {
   [ -z "$BASE_PATH" ] || return 0
   local suggested="$PWD" answer
   if [ "$WIZARD" != "0" ] && is_tty; then
-    [ -d "$PWD/.masc/config" ] || suggested="$HOME"
+    # The same new-workspace suggestion the setup journey makes. $HOME itself
+    # would put the workspace in ~/.masc, which is also the user skill source.
+    [ -d "$PWD/.masc/config" ] || suggested="$HOME/MASC"
     printf '\nMASC stores configuration, Keepers and workspace data in <workspace>/.masc.\n' >&2
     printf '? Workspace directory [%s]: ' "$suggested" >&2
     read_terminal_line answer || die "workspace selection cancelled"
@@ -1644,10 +1646,13 @@ if [ "$SEED_CONFIG" -eq 1 ]; then
     # `init` writes what is missing and leaves the rest; --force overwrites.
     log "seeding configs and model catalog overlay to $CONFIG_DIR from the binary"
     mkdir -p "$CONFIG_DIR"
-    # --record-default: this is the operator's workspace, so later commands
-    # should find it without being told again. `masc init` does not record by
-    # default, because a throwaway workspace must not become the machine's.
-    init_args=(init --config-only --base-path "$BASE_PATH" --record-default)
+    # --record-default only when a person runs the installer on a terminal:
+    # that workspace is theirs, so later commands should find it without being
+    # told again. A scripted install (release verification, CI, provisioning)
+    # keeps its workspace to itself; one such run left a temp directory as a
+    # developer machine's default (measured 2026-09-15).
+    init_args=(init --config-only --base-path "$BASE_PATH")
+    if is_tty; then init_args+=(--record-default); fi
     [ "$RESET_CONFIG" -eq 1 ] && init_args+=(--force)
     if ! init_output="$("$DEST" "${init_args[@]}" 2>&1)"; then
       die "config seed failed ($DEST ${init_args[*]}): $init_output"

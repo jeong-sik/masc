@@ -744,7 +744,7 @@ class Journey(unittest.TestCase):
             self.assertEqual(picker.call_args.args[1][0], 'Use ' + base)
             preflight.assert_called_once_with('/bin/masc', base)
             self.assertEqual([call.args[0] for call in run.call_args_list], [
-                ['/bin/masc', 'init', '--base-path', base],
+                ['/bin/masc', 'init', '--base-path', base, '--record-default'],
                 ['/bin/masc', 'setup', '--base-path', base, '--port', '9876', '--no-tui']])
             opened.assert_called_once_with('/bin/masc', base, 9876)
             self.assertFalse(Path(base).exists())  # renderer did not mutate workspace

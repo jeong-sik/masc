@@ -1947,7 +1947,10 @@ def journey(binary, base_path, port, timeout, resume=False):
     port = select_setup_server(binary, base, port)
     if port is None:
         return 1
-    if subprocess.run([str(binary), 'init', '--base-path', base], stdout=sys.stderr).returncode != 0:
+    # The workspace was chosen on this screen, so it becomes the default the next
+    # bare `masc` finds, including when the operator finishes later.
+    if subprocess.run([str(binary), 'init', '--base-path', base, '--record-default'],
+                      stdout=sys.stderr).returncode != 0:
         raise SetupError('Workspace initialization stopped. Existing files were preserved; run masc setup to resume.')
     workspace_port(binary, base, port, save=True)
     print('\n2 · Connect a model\nA subscription or API credit may be required by your provider.', file=sys.stderr)

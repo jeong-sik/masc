@@ -492,7 +492,8 @@ let persisted_default_base_path () =
          | Some recorded ->
            let normalized = normalize_masc_base_path_input recorded in
            if normalized <> "" && not (Filename.is_relative normalized)
-              && existing_dir (Filename.concat normalized Common.masc_dirname)
+              && existing_dir
+                   (Filename.concat (Filename.concat normalized Common.masc_dirname) "config")
            then Usable { record; base_path = normalized }
            else Stale { record; recorded_path = recorded }))
 
@@ -607,7 +608,7 @@ let base_path_not_set_message () =
     | Stale { record; recorded_path } ->
       Printf.sprintf
         " The recorded default %s in %s does not name an existing absolute \
-         workspace containing a %s directory, so it was ignored."
+         workspace containing a %s/config directory, so it was ignored."
         recorded_path record Common.masc_dirname
     | Unread_under_test { record } ->
       (* Without this the developer reads "not set" while their shell resolves

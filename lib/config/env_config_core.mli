@@ -185,7 +185,8 @@ type base_path_source =
 val base_path_source_opt : unit -> (base_path_source * string) option
 (** Resolution order: [MASC_BASE_PATH_INPUT] > [MASC_BASE_PATH] > the workspace
     a past [masc setup] recorded. Explicit input always wins over the record.
-    A record that no longer holds a [.masc] directory is not used. *)
+    A record whose path holds no [.masc/config] directory is not used: [.masc]
+    alone also exists under a home directory as the user skill source. *)
 
 type persisted_default =
   | No_record

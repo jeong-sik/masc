@@ -26,6 +26,7 @@ let workspace_with_masc_dir () =
   Sys.remove dir;
   Unix.mkdir dir 0o700;
   Unix.mkdir (Filename.concat dir Common.masc_dirname) 0o700;
+  Unix.mkdir (Filename.concat (Filename.concat dir Common.masc_dirname) "config") 0o700;
   dir
 
 let recorded_path outcome =
@@ -94,6 +95,23 @@ let test_a_record_without_a_masc_dir_is_stale_not_absent () =
         (Option.map snd (EC.base_path_source_opt ()))
     | EC.Usable { base_path; _ } ->
       failf "%s has no %s directory" base_path Common.masc_dirname
+    | EC.No_record -> fail "a record exists; it just does not name a workspace"
+    | EC.Unread_under_test { record } ->
+      failf "%s is a temp config home, not the operator's" record)
+
+(* <home>/.masc exists on machines that only keep user skills there. A record
+   naming such a directory must not select it as a workspace. *)
+let test_a_record_with_masc_but_no_config_is_stale () =
+  with_config_home (fun _ ->
+    let skills_only = Filename.temp_file "masc-skills-home" "" in
+    Sys.remove skills_only;
+    Unix.mkdir skills_only 0o700;
+    Unix.mkdir (Filename.concat skills_only Common.masc_dirname) 0o700;
+    let _ = recorded_path (EC.record_default_base_path skills_only) in
+    match EC.persisted_default_base_path () with
+    | EC.Stale _ -> ()
+    | EC.Usable { base_path; _ } ->
+      failf "%s holds .masc but no .masc/config, so it is not a workspace" base_path
     | EC.No_record -> fail "a record exists; it just does not name a workspace"
     | EC.Unread_under_test { record } ->
       failf "%s is a temp config home, not the operator's" record)
@@ -206,6 +224,10 @@ let () =
             "a record without a .masc dir is stale, not absent"
             `Quick
             test_a_record_without_a_masc_dir_is_stale_not_absent
+        ; test_case
+            "a record with .masc but no config is stale"
+            `Quick
+            test_a_record_with_masc_but_no_config_is_stale
         ; test_case
             "explicit input wins over the record"
             `Quick

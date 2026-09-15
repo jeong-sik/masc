@@ -165,14 +165,14 @@ print('init complete')
                 thread.join()
 
 
-    def test_new_workspace_prompts_and_defaults_to_home(self):
+    def test_new_workspace_prompts_and_defaults_to_masc_under_home(self):
         with tempfile.TemporaryDirectory() as directory:
             result, terminal = run_shell(
                 '\ncd ' + shlex.quote(directory) + '\nBASE_PATH=""\n'
                 'choose_install_base_path\nprintf "workspace=%s\\n" "$BASE_PATH"\n', b'\n')
         self.assertEqual(result.returncode, 0, terminal)
         self.assertIn('Workspace directory', terminal)
-        self.assertIn('workspace=' + os.environ['HOME'], result.stdout)
+        self.assertIn('workspace=' + os.environ['HOME'] + '/MASC\n', result.stdout)
 
     def test_existing_workspace_remains_the_suggested_location(self):
         with tempfile.TemporaryDirectory() as directory:

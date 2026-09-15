@@ -3182,9 +3182,10 @@ let setup_cmd_exit base_path port no_tui sandbox_profile microvm_backend network
   let base_path = Env_config.normalize_masc_base_path_input base_path in
   Masc_cli_setup.run_with_selection ~network_mode ~base_path ~port ~open_tui:(not no_tui)
     ~sandbox_profile ~microvm_backend
-    (* setup is an operator command: the workspace it prepares becomes the
-       default for later ones. *)
-    ~initialize:(fun () -> init_cmd_exit base_path false All true)
+    (* A person running setup on a terminal makes the workspace the default for
+       later commands; a scripted `setup --no-tui` does not change the machine's
+       default. *)
+    ~initialize:(fun () -> init_cmd_exit base_path false All (stdio_is_a_terminal ()))
     ~validate_runtime:(fun () -> setup_validate_runtime base_path)
     ~prepare_image:(fun ~selection ->
       let runtime = Masc.Sandbox_readiness.microvm_backend selection.Masc.Sandbox_readiness.backend in

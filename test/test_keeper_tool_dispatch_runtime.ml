@@ -4564,7 +4564,28 @@ let test_a_failed_memory_call_never_ends_the_turn () =
   check int
     "an applied file write ends the turn"
     1
-    (marks KTD.Tool_write_file Tool_result.Proven_post_effect)
+    (marks KTD.Tool_write_file Tool_result.Proven_post_effect);
+  (* The rest of the table, because a composition now asks it for every failed
+     node (#36662): a write ends the turn only when its change is proven
+     applied, and a handler that may leave a running effect ends it on any
+     failure it cannot prove clean. *)
+  List.iter
+    (fun disposition ->
+       check int
+         (Printf.sprintf
+            "a file write that did not prove its change with %s keeps the turn"
+            (Tool_result.failure_effect_disposition_to_string disposition))
+         0
+         (marks KTD.Tool_write_file disposition))
+    [ Tool_result.Proven_pre_effect; Tool_result.Effect_outcome_unknown ];
+  check int
+    "a spawn that cannot prove it left nothing running ends the turn"
+    1
+    (marks KTD.Tool_execute Tool_result.Effect_outcome_unknown);
+  check int
+    "a spawn refused before it ran keeps the turn"
+    0
+    (marks KTD.Tool_execute Tool_result.Proven_pre_effect)
 ;;
 
 let with_openai_tool_call_server ?second_response ~tool_name ~tool_input f =
@@ -7455,10 +7476,23 @@ value = {}
 |}
 ;;
 
-let test_composition_over_an_empty_msx_lane_returns_the_refusal () =
-  with_exec_fixture ~always_allow:true ~bind_eio_context:true "composition-empty-msx-lane"
+let test_composition_over_an_empty_msx_lane_returns_the_refusal ?(break_evidence = false) () =
+  with_exec_fixture ~always_allow:true ~bind_eio_context:true
+    (if break_evidence
+     then "composition-empty-msx-lane-unpublished-evidence"
+     else "composition-empty-msx-lane")
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
        ignore (Msx_lane.eject () : (unit, Msx_lane.error) result);
+       (* A file where the evidence directory belongs makes the recovery
+          record unpublishable. Evidence fences a turn because it is the record
+          of what already took effect; this refusal took none, so there is
+          nothing to record and nothing to fence. *)
+       if break_evidence
+       then (
+         let path =
+           Filename.concat (Masc.Workspace.masc_root_dir config) "skill-composition-evidence-v1"
+         in
+         Out_channel.with_open_bin path (fun channel -> output_string channel "occupied"));
        let skill_catalog =
          skill_catalog_of_composition
            ~name:"msx-end-command"
@@ -9709,7 +9743,9 @@ let () =
       test_case "literal input failure runs no composition node" `Quick
         test_terminal_composition_literal_input_failure_runs_no_node;
       test_case "composition over an empty MSX lane returns the refusal" `Quick
-        test_composition_over_an_empty_msx_lane_returns_the_refusal;
+        (test_composition_over_an_empty_msx_lane_returns_the_refusal ?break_evidence:None);
+      test_case "a refusal that took no effect is not fenced by unpublished evidence" `Quick
+        (test_composition_over_an_empty_msx_lane_returns_the_refusal ~break_evidence:true);
       test_case "unknown-effect composition closes official-client loop" `Quick
         test_terminal_composition_unknown_write_failure_closes_official_client_loop;
       test_case "write then unchanged read completes" `Quick

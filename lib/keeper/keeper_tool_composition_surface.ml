@@ -1575,7 +1575,17 @@ end
    provider restart. Only acknowledged atomic settlements keep the provider
    loop open, so every settled node needs a committed receipt, and a graph
    holding a terminal, nested or async node keeps its terminal fence. The
-   failed result and its aggregate effect evidence stay intact. *)
+   failed result and its aggregate effect evidence stay intact.
+
+   What a returning failure does not give back is the retry granularity of a
+   direct call. A model that made the calls itself retries the one that failed;
+   a model that called this macro can only call the macro again, and a node
+   that already completed with an effect runs a second time. #35703 accepted
+   that for a completed navigation before a failed read, and this rule keeps
+   it. The result carries [settled] with each node's effect disposition, so the
+   model can see what already ran and call the failed tool directly instead.
+   Narrowing this to graphs with no completed effect would fence exactly the
+   browser case #35703 opened. *)
 let failure_returns_to_model ~plan ~committed (failure : Executor.failure) =
   let ordinary_atomic descriptor =
     match descriptor.Keeper_tool_descriptor.execution, descriptor.tool_kind with
@@ -1960,10 +1970,19 @@ let make_tools_with_authority
                ~on_publication_failure:(fun detail ->
                  match execution with
                  | Error failure when failure_returns_to_model ~plan ~committed:!committed_receipts failure ->
-                   Option.iter (fun mark_failed -> mark_failed
-                     { Keeper_tools_agent_core.failure_class = Tool_result.Runtime_failure;
-                       effect_disposition = failure.effect_disposition;
-                       diagnostic = "composition recovery evidence persistence failed: " ^ detail }) on_failed
+                   (* Unpublished evidence fences the turn because the record of
+                      what already took effect is what lets the turn go on. A
+                      refusal that took no effect has nothing to record, and the
+                      native loop ends the turn on any terminal-effect failure
+                      (Keeper_tool_terminal_boundary), so fencing here would end
+                      a turn over a file that describes nothing. *)
+                   (match failure.effect_disposition with
+                    | Tool_result.Proven_pre_effect -> ()
+                    | Tool_result.Proven_post_effect | Tool_result.Effect_outcome_unknown ->
+                      Option.iter (fun mark_failed -> mark_failed
+                        { Keeper_tools_agent_core.failure_class = Tool_result.Runtime_failure;
+                          effect_disposition = failure.effect_disposition;
+                          diagnostic = "composition recovery evidence persistence failed: " ^ detail }) on_failed)
                  | Ok _ | Error _ -> ())
                ~config
                ~reference:skill.reference

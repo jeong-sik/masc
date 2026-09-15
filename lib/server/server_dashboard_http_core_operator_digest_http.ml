@@ -21,9 +21,21 @@
        JSON. The compute has no window of its own:
        [Dashboard_cache.get_or_compute_with_timeout] bounds it at
        [dashboard_request_timeout_s], and a compute that runs past that
-       is a timeout the cache raises, not a value it stores — so the key
-       keeps serving its last good digest and the repeated-timeout
-       circuit still opens.
+       raises inside the cache rather than returning a value the cache
+       would store. What the caller gets then depends on what the key
+       holds, and the two cases exclude each other:
+
+       - the key holds an entry (fresh, stale or dead): the cache puts
+         it back and answers with it, and the repeated-timeout circuit
+         is cleared rather than advanced. A key that keeps timing out
+         keeps answering with an older digest.
+       - the key holds nothing: the timeout envelope is the answer, it
+         is not cached, and three of those inside the circuit's window
+         open the circuit.
+
+       That envelope carries [computation_timeout], which the HTTP
+       layer answers as 504. The compute's own window used to answer
+       200 with a body saying it had timed out.
 
     Pure helper move (no callback injection). All references reach
     existing siblings or top-level libraries. *)

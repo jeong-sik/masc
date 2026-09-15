@@ -330,10 +330,14 @@ let issue_live ?(only_if_idle = false) client ~verb ~timeout_sec =
         (fun () -> Eio.Stream.add client.commands {id; verb_json=verb_json verb};
           Answered (Eio.Promise.await promise))
         ~watcher:(fun () -> Time_compat.sleep timeout_sec; Timed_out)))
-(* The port this process serves the browser-lane routes on, installed once
-   the HTTP listener is bound. A process that serves no routes has none. *)
-let serving_port_cell : int option Atomic.t = Atomic.make None
-let install_serving_port port = Atomic.set serving_port_cell (Some port)
+(* The port this process serves the browser-lane routes on: the port its HTTP
+   listener actually bound, installed once it is bound and withdrawn when that
+   listener's switch ends. Before that, and in a process that serves no
+   routes, the port is unknown rather than any number. *)
+type serving_port = Serving_port of int | Serving_port_unknown
+let serving_port_cell : serving_port Atomic.t = Atomic.make Serving_port_unknown
+let install_serving_port port = Atomic.set serving_port_cell (Serving_port port)
+let withdraw_serving_port () = Atomic.set serving_port_cell Serving_port_unknown
 let serving_port () = Atomic.get serving_port_cell
 let automation_executor : (verb -> answer) option Atomic.t = Atomic.make None
 let install_automation_executor executor = Atomic.set automation_executor executor

@@ -3386,11 +3386,6 @@ module Browser_lane_view = struct
     | Automation, _ -> Some "browser"
     | Live, Some client -> Some (browser_name client.browser)
     | Live, None -> None
-  let context_label t =
-    match browser_label t with
-    | Some browser ->
-      Printf.sprintf "Browser Lane · %s · %s page reader" (source_name t.source) browser
-    | None -> Printf.sprintf "Browser Lane · %s · no browser" (source_name t.source)
   let create () =
     { clients = None; selected_client = None; client_picker = None;
       source = Live; selected_tab = None; scroll = 0;

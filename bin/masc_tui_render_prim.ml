@@ -520,8 +520,11 @@ let slash_hint_text ~restore draft =
 
 let composer_line state ~cols =
   match browser_lane_on_screen state with
-  | Some view ->
-      Theme.recede () ^ fit_width (Browser_lane_view.context_label view) cols ^ Ansi.reset
+  (* The page reader owns the keys here, so there is no composer to draw. The
+     row it would take stays empty: the title already names the lane, its
+     source and its browser, and a second copy down here is a state the reader
+     has to match up by position. *)
+  | Some _ -> Theme.recede () ^ fit_width "" cols ^ Ansi.reset
   | None ->
   let composer = Composer_projection.of_state state in
   let prompt = composer_prompt_text ~voice:(voice_meter_text state) composer in

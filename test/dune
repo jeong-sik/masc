@@ -5468,7 +5468,7 @@
 (test
  (name test_browser_host)
  (modules test_browser_host)
- (libraries alcotest eio eio.mock yojson masc.browser_host))
+ (libraries alcotest eio eio.mock cstruct yojson masc.browser_host))
 
 (include stanzas/test_browser_native_host.inc)
 

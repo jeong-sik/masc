@@ -5,6 +5,8 @@ Wait for a spawned process to exit or output matching text.
 The wait ends as soon as the event occurs. timeout_sec is required."""
 additional_properties = false
 
+defer_loading = true
+
 [[params]]
 name = "handle"
 type = "string"

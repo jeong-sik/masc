@@ -7,6 +7,8 @@ before you call this; the tool records what was decided and judges nothing.\
 """
 additional_properties = false
 
+defer_loading = true
+
 [[params]]
 name = "text"
 type = "string"

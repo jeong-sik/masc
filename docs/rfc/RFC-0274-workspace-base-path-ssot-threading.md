@@ -14,7 +14,7 @@ status: Draft
 Two state spaces carry the workspace base path, and they are never synchronized at runtime:
 
 - **Write path**: `Mcp_server.set_workspace_config` (`lib/mcp_server.ml:492`) performs `Atomic.set state.workspace_config config`. It does not call `Unix.putenv MASC_BASE_PATH`.
-- **Read path**: `Env_config_core.base_path ()` (`lib/config/env_config_core.ml:376`) reads `MASC_BASE_PATH` / `MASC_BASE_PATH_INPUT` via `raw_value_opt` (env → `Sys.getenv_opt` → `Config_boot_overrides`). It never consults the `Workspace.config` Atomic.
+- **Read path**: `Env_config_core.base_path ()` (`lib/config/env_config_core.ml:376`) reads `MASC_BASE_PATH` via `raw_value_opt` (env → `Sys.getenv_opt` → `Config_boot_overrides`). It never consults the `Workspace.config` Atomic.
 
 Runtime workspace switches (`lib/mcp_tool_runtime_workspace.ml:100,104`, reached via the `masc_start` tool route `lib/mcp_tool_runtime.ml:122`) therefore leave every `base_path ()` call site reading the **stale boot-time env** instead of the switched workspace. This is a silent cross-workspace data leak — the same read/write source-asymmetry class as #21798.
 

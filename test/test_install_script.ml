@@ -916,7 +916,7 @@ let test_binary_checks_use_install_environment () =
     script
     {|MASC_BASE_PATH="$BASE_PATH"|};
   assert_contains
-    "binary helper documents dual base path env"
+    "binary helper documents the base path env"
     script
     "MASC_BASE_PATH is the resolved runtime root";
   assert_not_contains
@@ -948,7 +948,7 @@ let test_binary_checks_use_install_environment () =
     script
     {|start_env="MASC_ASSETS_DIR=\"$DASHBOARD_ASSETS_DIR\" ${runtime_events_start_env}MASC_BASE_PATH=\"$BASE_PATH\""|};
   assert_contains
-    "start hint documents dual base path env"
+    "start hint documents the runtime events default"
     script
     "let the binary's default-on contract apply";
   assert_not_contains

@@ -511,12 +511,15 @@ let request t command =
   then Error Owner_closed
   else (
     let response, resolve = Eio.Promise.create () in
+    (* A command the mailbox took as the owner closed is enqueued: the owner
+       has it, so its caller waits for the answer below instead of being told
+       the owner refused it. *)
     match
-      Eio.Fiber.first
+      Watched_work.run
         (fun () ->
            Eio.Stream.add t.mailbox (Command (command, resolve));
            `Enqueued)
-        (fun () ->
+        ~watcher:(fun () ->
            Eio.Promise.await t.closed_p;
            `Closed)
     with

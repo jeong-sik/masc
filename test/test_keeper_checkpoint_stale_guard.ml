@@ -1220,7 +1220,9 @@ let test_exact_snapshot_preserves_locked_canonical_bytes () =
    disk. Both hashes run in the pool job that encodes or decodes the same
    bytes. This drives the store from a fiber through a real one-domain pool,
    so the pooled path is the one under test, and expects every reference to be
-   the SHA-256 of the file on disk at that moment. *)
+   the SHA-256 of the file on disk at that moment. The seed file is rewritten
+   pretty-printed first, so a reference taken over re-encoded bytes instead of
+   the bytes on disk would not match. *)
 let test_pooled_saves_and_loads_derive_the_digest_of_the_file () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -1242,6 +1244,11 @@ let test_pooled_saves_and_loads_derive_the_digest_of_the_file () =
   save_ok ~session_dir
     (make_checkpoint ~session_id ~turn_count:3 ~marker:"seed")
     "pooled seed save";
+  let canonical_path = Filename.concat session_dir (session_id ^ ".json") in
+  Fs_compat.load_file canonical_path
+  |> Yojson.Safe.from_string
+  |> Yojson.Safe.pretty_to_string
+  |> Fs_compat.save_file canonical_path;
   let source =
     match
       Keeper_checkpoint_store.load_agent_core_exact_snapshot ~session_dir ~session_id

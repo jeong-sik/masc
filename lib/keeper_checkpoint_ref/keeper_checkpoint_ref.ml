@@ -14,6 +14,26 @@ let validate_coordinates ~turn_count =
   else Ok ()
 ;;
 
+(* Digestif's string update hashes its whole argument in one [@@noalloc] C
+   call, and an OCaml 5 domain answers a stop-the-world request only at a
+   poll point. While one domain hashed a 13-109 MB checkpoint in a single
+   call, every other domain that reached a minor collection's barrier, the
+   scheduler domain included, waited for the hash to end. Feeding one slice
+   per call returns to OCaml between slices. *)
+let digest_slice_bytes = 1 lsl 20
+
+let sha256_of_canonical_bytes bytes =
+  let length = String.length bytes in
+  let rec feed ctx off =
+    if off >= length
+    then ctx
+    else (
+      let len = Int.min digest_slice_bytes (length - off) in
+      feed (Digestif.SHA256.feed_string ctx ~off ~len bytes) (off + len))
+  in
+  Digestif.SHA256.(to_hex (get (feed empty 0)))
+;;
+
 let create ~trace_id ~turn_count ~canonical_checkpoint_bytes =
   match validate_coordinates ~turn_count with
   | Error _ as error -> error
@@ -21,7 +41,7 @@ let create ~trace_id ~turn_count ~canonical_checkpoint_bytes =
     Ok
       { trace_id
       ; turn_count
-      ; sha256 = Digestif.SHA256.(digest_string canonical_checkpoint_bytes |> to_hex)
+      ; sha256 = sha256_of_canonical_bytes canonical_checkpoint_bytes
       }
 ;;
 

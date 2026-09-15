@@ -690,7 +690,6 @@ let run_cmd ?(record_default = false) host port cli_base_path accept_store_quara
     Log.Server.warn
       "Normalizing --base-path from %s to %s because runtime base paths must point at the workspace root, not the .masc directory."
       raw_base_path canonical_base_path;
-  Unix.putenv "MASC_BASE_PATH_INPUT" raw_base_path;
   Unix.putenv "MASC_BASE_PATH" canonical_base_path;
   Workspace_utils_backend_setup.cache_resolved_base_path canonical_base_path;
   Unix.putenv "MASC_BASE_PATH_RESOLUTION_SOURCE" resolution_source;
@@ -1873,7 +1872,6 @@ let voice_verify_cmd_exit requested_base_path message audio agent as_json =
      has already resolved once by the time a subcommand runs. *)
   Option.iter
     (fun raw ->
-      Unix.putenv "MASC_BASE_PATH_INPUT" raw;
       Unix.putenv "MASC_BASE_PATH" (Env_config.normalize_masc_base_path_input raw);
       Config_dir_resolver.reset ())
     requested_base_path;

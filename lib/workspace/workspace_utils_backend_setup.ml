@@ -101,7 +101,6 @@ let sync_test_base_path_env resolved_path =
     | Some current when String.equal current resolved_path -> ()
     | _ ->
         Unix.putenv Env_config_core.base_path_env_key resolved_path;
-        Unix.putenv Env_config_core.base_path_input_env_key resolved_path;
         Log.Workspace.info "Synchronized MASC_BASE_PATH=%s for test executable %s"
           resolved_path (Filename.basename Sys.executable_name)
 

@@ -262,7 +262,6 @@ let test_runtime_base_path_result_prefers_explicit_base_path () =
 
 let test_runtime_base_path_result_fails_without_base_path () =
   with_env Env_config_core.base_path_env_key None @@ fun () ->
-  with_env Env_config_core.base_path_input_env_key None @@ fun () ->
   match Routes.runtime_sidecar_dir_result "telegram" with
   | Ok dir -> failf "expected missing base path error, got %s" dir
   | Error msg ->
@@ -306,30 +305,18 @@ let test_missing_sidecar_dir_message_mentions_sidecar_root_hint () =
 let test_runtime_base_path_uses_resolver_precedence () =
   with_temp_dir "sidecar-runtime-base-ssot" (fun dir ->
     let admitted = Filename.concat dir "admitted" in
-    let input = Filename.concat dir "input" in
-    (* Startup publishes the admitted owner separately from the operator's
-       input spelling. Sidecar IO must follow that same owner as config IO. *)
+    (* Startup publishes the admitted owner in MASC_BASE_PATH. Sidecar IO must
+       follow that same owner as config IO. *)
     with_env "MASC_BASE_PATH" (Some (Filename.concat admitted ".masc")) (fun () ->
-      with_env
-        "MASC_BASE_PATH_INPUT"
-        (Some (Filename.concat input ".masc"))
+      Config_dir_resolver.reset ();
+      Fun.protect
+        ~finally:Config_dir_resolver.reset
         (fun () ->
-           Config_dir_resolver.reset ();
-           Fun.protect
-             ~finally:Config_dir_resolver.reset
-             (fun () ->
-                check
-                  string
-                  "admitted owner wins and .masc collapses"
-                  admitted
-                  (Routes.runtime_base_path ());
-                check (option string) "input remains available for diagnostics"
-                  (Some (Filename.concat input ".masc"))
-                  (Sys.getenv_opt "MASC_BASE_PATH_INPUT");
-                with_env "MASC_BASE_PATH" None (fun () ->
-                  Config_dir_resolver.reset ();
-                  check string "input is used when no admitted owner is published"
-                    input (Routes.runtime_base_path ()))))));
+           check
+             string
+             "admitted owner wins and .masc collapses"
+             admitted
+             (Routes.runtime_base_path ()))));
   check
     string
     "explicit base_path still wins"
@@ -346,15 +333,14 @@ let test_runtime_base_path_anchors_relative_env_base () =
         Config_dir_resolver.reset ())
       (fun () ->
          Sys.chdir dir;
-         with_env Env_config_core.base_path_input_env_key None (fun () ->
-           with_env Env_config_core.base_path_env_key (Some "relative-root") (fun () ->
-             Config_dir_resolver.reset ();
-             (* Relative base anchors to [Sys.getcwd ()], which is the
-                symlink-canonical cwd (macOS temp [/var/…] → [/private/var/…]).
-                Canonicalize [dir] so the expected matches the real anchor. *)
-             let expected = Ok (Filename.concat (Unix.realpath dir) "relative-root") in
-             let actual = Routes.runtime_base_path_result () in
-             check result_t "relative env base anchors to cwd" expected actual))))
+         with_env Env_config_core.base_path_env_key (Some "relative-root") (fun () ->
+           Config_dir_resolver.reset ();
+           (* Relative base anchors to [Sys.getcwd ()], which is the
+              symlink-canonical cwd (macOS temp [/var/…] → [/private/var/…]).
+              Canonicalize [dir] so the expected matches the real anchor. *)
+           let expected = Ok (Filename.concat (Unix.realpath dir) "relative-root") in
+           let actual = Routes.runtime_base_path_result () in
+           check result_t "relative env base anchors to cwd" expected actual)))
 ;;
 
 let test_status_file_prefers_existing_project_root_candidate () =

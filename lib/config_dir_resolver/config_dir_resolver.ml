@@ -57,9 +57,8 @@ let allow_inherited_test_config_paths () =
   Env_config_core.get_bool ~default:false
     test_config_path_override_env
 
-(* Startup publishes the admitted canonical owner in MASC_BASE_PATH while
-   preserving the operator spelling in MASC_BASE_PATH_INPUT for diagnostics.
-   Configuration IO must follow that owner, not reinterpret the input alias. *)
+(* Startup publishes the admitted canonical owner in MASC_BASE_PATH.
+   Configuration IO follows that owner. *)
 let effective_env_base_path () =
   match Env_config_core.raw_value_opt Env_config_core.base_path_env_key |> trim_opt with
   | Some path -> Some (Env_config_core.normalize_masc_base_path_input path)

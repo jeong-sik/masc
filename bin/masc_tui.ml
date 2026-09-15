@@ -13989,12 +13989,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              if not state.msg_journal_reads_refused then
                journal_targets :=
                  journal_fetch_targets
-                   ~held:
-                     (journal_held_request_ids state keeper_name
-                     @ List.map
-                         (fun entry -> entry.sent_request.Keeper_chat.request_id)
-                         state.msg_inflight
-                     @ state.msg_journal_inflight)
+                   ~held:(journal_held_request_ids state keeper_name)
                    ~unavailable:state.msg_journal_unavailable
                    (List.filter_map
                       (fun (row : Keeper_chat_history.row) ->
@@ -14680,6 +14675,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                displayed-time projection across that complete window; scroll
                pins retain row identity rather than this cache position. *)
             state.msg_loaded <- rows @ state.msg_loaded;
+            (* Loaded rows arrive here too: a held turn whose rows only an
+               older page carries gets its calls' outcome and duration the
+               same way a refreshed page gives them. *)
+            enrich_held_logs_from_rows state ~keeper_name rows;
             state.msg_loaded_dropped <-
               state.msg_loaded_dropped
               + page.Keeper_chat_history.decoded.Keeper_chat_history.dropped;

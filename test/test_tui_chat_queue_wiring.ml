@@ -1369,11 +1369,22 @@ let test_the_reload_rebuilds_loaded_turns_from_their_journals () =
   in
   let folds = in_binding ~binding_name:"apply_async_message" ~callee:"turn_log_add_journaled" in
   let holds = in_binding ~binding_name:"apply_async_message" ~callee:"hold_settled_log" in
-  if targets < 1 || launches < 1 || fetches < 1 || folds < 1 || holds < 1 then
+  (* What a load does not read again is the one held set, so a batch's other
+     requests are not asked for on every load. *)
+  let held = in_binding ~binding_name:"apply_async_message" ~callee:"journal_held_request_ids" in
+  (* Held logs take durable outcomes where loaded rows arrive -- a refreshed
+     page and an older page -- and where a journal log is held. *)
+  let enrichments =
+    in_binding ~binding_name:"apply_async_message" ~callee:"enrich_held_logs_from_rows"
+  in
+  let enrichment_sites = 3 in
+  if targets < 1 || launches < 1 || fetches < 1 || folds < 1 || holds < 1 || held < 1
+     || enrichments < enrichment_sites
+  then
     failf
       "the journal reload must be wired end to end: targets=%d launches=%d \
-       fetches=%d folds=%d holds=%d"
-      targets launches fetches folds holds
+       fetches=%d folds=%d holds=%d held=%d enrichments=%d"
+      targets launches fetches folds holds held enrichments
 ;;
 
 
@@ -2660,7 +2671,10 @@ let test_every_request_of_a_held_batch_is_held_for_journal_reads () =
     (Tui_types.journal_fetch_targets ~held ~unavailable:[]
        [ ("batch-owner", 1.); ("batch-follower", 1.) ]);
   check (list string) "another keeper holds nothing" []
-    (Tui_types.journal_held_request_ids state "beta")
+    (Tui_types.journal_held_request_ids state "beta");
+  Tui_types.journal_read_started state "being-read";
+  check bool "a journal being read is held" true
+    (List.mem "being-read" (Tui_types.journal_held_request_ids state "alpha"))
 ;;
 
 let () =

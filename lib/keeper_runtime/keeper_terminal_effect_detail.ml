@@ -4,6 +4,29 @@ type failed_node =
   ; message : string
   }
 
+type plan_execution_error =
+  | Unknown_node_id
+  | Input_template_resolution_failed
+  | Input_validation_failed
+  | Output_validation_failed
+  | Output_not_composable
+
+type composition_cause =
+  | Node_failed of failed_node
+  | Node_observation_failed of
+      { node_id : string
+      ; model_tool_name : string
+      ; detail : string
+      }
+  | Plan_execution_failed of
+      { node_id : string
+      ; error : plan_execution_error
+      }
+  | Outer_completion_mismatch of
+      { expected : Agent_core.Tool_contract.completion
+      ; actual : Agent_core.Tool_contract.completion
+      }
+
 type recovery_rejection =
   | Recovery_store_failed
   | Recovery_source_unavailable
@@ -17,7 +40,7 @@ type t =
       }
   | Composition_failed of
       { composition_tool : string
-      ; failed_node : failed_node option
+      ; cause : composition_cause
       ; payload : Yojson.Safe.t
       }
   | Composition_result_manifest_unpersisted of
@@ -47,6 +70,33 @@ type t =
       }
   | Agent_core_terminal_effect of { detail : string }
 
+let plan_execution_error_to_string = function
+  | Unknown_node_id -> "unknown_node_id"
+  | Input_template_resolution_failed -> "input_template_resolution_failed"
+  | Input_validation_failed -> "input_validation_failed"
+  | Output_validation_failed -> "output_validation_failed"
+  | Output_not_composable -> "output_not_composable"
+;;
+
+let plan_execution_error_of_string = function
+  | "unknown_node_id" -> Some Unknown_node_id
+  | "input_template_resolution_failed" -> Some Input_template_resolution_failed
+  | "input_validation_failed" -> Some Input_validation_failed
+  | "output_validation_failed" -> Some Output_validation_failed
+  | "output_not_composable" -> Some Output_not_composable
+  | _ -> None
+;;
+
+let completion_label = function
+  | Agent_core.Tool_contract.Continue_after_success -> "continue_after_success"
+  | Agent_core.Tool_contract.Terminal_after_success Agent_core.Tool_contract.Proven_pre_effect ->
+    "terminal_after_success(proven_pre_effect)"
+  | Agent_core.Tool_contract.Terminal_after_success Agent_core.Tool_contract.Proven_post_effect ->
+    "terminal_after_success(proven_post_effect)"
+  | Agent_core.Tool_contract.Terminal_after_success Agent_core.Tool_contract.Effect_outcome_unknown ->
+    "terminal_after_success(effect_outcome_unknown)"
+;;
+
 let recovery_rejection_to_string = function
   | Recovery_store_failed -> "store_failed"
   | Recovery_source_unavailable -> "source_unavailable"
@@ -71,7 +121,7 @@ let summary = function
     Printf.sprintf "%s failed: %s" internal_tool_name (one_line message)
   | Composition_failed
       { composition_tool
-      ; failed_node = Some { node_id; model_tool_name; message }
+      ; cause = Node_failed { node_id; model_tool_name; message }
       ; payload = _
       } ->
     Printf.sprintf
@@ -80,8 +130,33 @@ let summary = function
       node_id
       model_tool_name
       (one_line message)
-  | Composition_failed { composition_tool; failed_node = None; payload = _ } ->
-    Printf.sprintf "%s failed" composition_tool
+  | Composition_failed
+      { composition_tool
+      ; cause = Node_observation_failed { node_id; model_tool_name; detail }
+      ; payload = _
+      } ->
+    Printf.sprintf
+      "%s: %s (%s) completed but its result was not recorded: %s"
+      composition_tool
+      node_id
+      model_tool_name
+      (one_line detail)
+  | Composition_failed
+      { composition_tool; cause = Plan_execution_failed { node_id; error }; payload = _ }
+    ->
+    Printf.sprintf
+      "%s: plan stopped at %s: %s"
+      composition_tool
+      node_id
+      (plan_execution_error_to_string error)
+  | Composition_failed
+      { composition_tool; cause = Outer_completion_mismatch { expected; actual }; payload = _ }
+    ->
+    Printf.sprintf
+      "%s: plan requires %s but the call declared %s"
+      composition_tool
+      (completion_label expected)
+      (completion_label actual)
   | Composition_result_manifest_unpersisted { composition_tool; detail } ->
     Printf.sprintf
       "%s: result manifest was not persisted: %s"
@@ -116,12 +191,33 @@ let summary = function
   | Agent_core_terminal_effect { detail } -> one_line detail
 ;;
 
-let failed_node_to_yojson { node_id; model_tool_name; message } =
-  `Assoc
-    [ "node_id", `String node_id
-    ; "model_tool_name", `String model_tool_name
-    ; "message", `String message
-    ]
+let composition_cause_to_yojson = function
+  | Node_failed { node_id; model_tool_name; message } ->
+    `Assoc
+      [ "kind", `String "node_failed"
+      ; "node_id", `String node_id
+      ; "model_tool_name", `String model_tool_name
+      ; "message", `String message
+      ]
+  | Node_observation_failed { node_id; model_tool_name; detail } ->
+    `Assoc
+      [ "kind", `String "node_observation_failed"
+      ; "node_id", `String node_id
+      ; "model_tool_name", `String model_tool_name
+      ; "detail", `String detail
+      ]
+  | Plan_execution_failed { node_id; error } ->
+    `Assoc
+      [ "kind", `String "plan_execution_failed"
+      ; "node_id", `String node_id
+      ; "error", `String (plan_execution_error_to_string error)
+      ]
+  | Outer_completion_mismatch { expected; actual } ->
+    `Assoc
+      [ "kind", `String "outer_completion_mismatch"
+      ; "expected", Agent_core.Tool_contract.completion_to_yojson expected
+      ; "actual", Agent_core.Tool_contract.completion_to_yojson actual
+      ]
 ;;
 
 let to_yojson = function
@@ -131,14 +227,11 @@ let to_yojson = function
       ; "internal_tool_name", `String internal_tool_name
       ; "message", `String message
       ]
-  | Composition_failed { composition_tool; failed_node; payload } ->
+  | Composition_failed { composition_tool; cause; payload } ->
     `Assoc
       [ "kind", `String "composition_failed"
       ; "composition_tool", `String composition_tool
-      ; ( "failed_node"
-        , match failed_node with
-          | Some node -> failed_node_to_yojson node
-          | None -> `Null )
+      ; "cause", composition_cause_to_yojson cause
       ; "payload", payload
       ]
   | Composition_result_manifest_unpersisted { composition_tool; detail } ->
@@ -225,18 +318,54 @@ let string_field ~context fields name =
     Error (Printf.sprintf "%s.%s is not a string" context name)
 ;;
 
-let failed_node_of_yojson json =
-  let context = "failed_node" in
-  let* fields =
-    object_with_fields
-      ~context
-      ~expected:[ "node_id"; "model_tool_name"; "message" ]
-      json
+let enum_field ~context fields name of_string =
+  let* raw = string_field ~context fields name in
+  match of_string raw with
+  | Some value -> Ok value
+  | None -> Error (Printf.sprintf "%s.%s has unknown value %S" context name raw)
+;;
+
+let completion_field ~context fields name =
+  let* value = field ~context fields name in
+  Agent_core.Tool_contract.completion_of_yojson value
+  |> Result.map_error (fun error -> Printf.sprintf "%s.%s: %s" context name error)
+;;
+
+let composition_cause_of_yojson json =
+  let* kind =
+    match json with
+    | `Assoc fields -> string_field ~context:"composition cause" fields "kind"
+    | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+      Error "composition cause is not an object"
   in
-  let* node_id = string_field ~context fields "node_id" in
-  let* model_tool_name = string_field ~context fields "model_tool_name" in
-  let* message = string_field ~context fields "message" in
-  Ok { node_id; model_tool_name; message }
+  let context = "composition cause " ^ kind in
+  let with_fields expected =
+    object_with_fields ~context ~expected:("kind" :: expected) json
+  in
+  match kind with
+  | "node_failed" ->
+    let* fields = with_fields [ "node_id"; "model_tool_name"; "message" ] in
+    let* node_id = string_field ~context fields "node_id" in
+    let* model_tool_name = string_field ~context fields "model_tool_name" in
+    let* message = string_field ~context fields "message" in
+    Ok (Node_failed { node_id; model_tool_name; message })
+  | "node_observation_failed" ->
+    let* fields = with_fields [ "node_id"; "model_tool_name"; "detail" ] in
+    let* node_id = string_field ~context fields "node_id" in
+    let* model_tool_name = string_field ~context fields "model_tool_name" in
+    let* detail = string_field ~context fields "detail" in
+    Ok (Node_observation_failed { node_id; model_tool_name; detail })
+  | "plan_execution_failed" ->
+    let* fields = with_fields [ "node_id"; "error" ] in
+    let* node_id = string_field ~context fields "node_id" in
+    let* error = enum_field ~context fields "error" plan_execution_error_of_string in
+    Ok (Plan_execution_failed { node_id; error })
+  | "outer_completion_mismatch" ->
+    let* fields = with_fields [ "expected"; "actual" ] in
+    let* expected = completion_field ~context fields "expected" in
+    let* actual = completion_field ~context fields "actual" in
+    Ok (Outer_completion_mismatch { expected; actual })
+  | unknown -> Error (Printf.sprintf "composition cause has unknown kind %S" unknown)
 ;;
 
 let of_yojson json =
@@ -257,17 +386,12 @@ let of_yojson json =
     let* message = string_field ~context fields "message" in
     Ok (Tool_failed { internal_tool_name; message })
   | "composition_failed" ->
-    let* fields = with_fields [ "composition_tool"; "failed_node"; "payload" ] in
+    let* fields = with_fields [ "composition_tool"; "cause"; "payload" ] in
     let* composition_tool = string_field ~context fields "composition_tool" in
-    let* failed_node =
-      let* node = field ~context fields "failed_node" in
-      match node with
-      | `Null -> Ok None
-      | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `String _ ->
-        Result.map Option.some (failed_node_of_yojson node)
-    in
+    let* cause = field ~context fields "cause" in
+    let* cause = composition_cause_of_yojson cause in
     let* payload = field ~context fields "payload" in
-    Ok (Composition_failed { composition_tool; failed_node; payload })
+    Ok (Composition_failed { composition_tool; cause; payload })
   | "composition_result_manifest_unpersisted" ->
     let* fields = with_fields [ "composition_tool"; "detail" ] in
     let* composition_tool = string_field ~context fields "composition_tool" in
@@ -307,12 +431,8 @@ let of_yojson json =
   | "recovery_proposal_rejected" ->
     let* fields = with_fields [ "model_tool_name"; "rejection"; "message" ] in
     let* model_tool_name = string_field ~context fields "model_tool_name" in
-    let* raw_rejection = string_field ~context fields "rejection" in
     let* rejection =
-      match recovery_rejection_of_string raw_rejection with
-      | Some rejection -> Ok rejection
-      | None ->
-        Error (Printf.sprintf "%s.rejection has unknown value %S" context raw_rejection)
+      enum_field ~context fields "rejection" recovery_rejection_of_string
     in
     let* message = string_field ~context fields "message" in
     Ok (Recovery_proposal_rejected { model_tool_name; rejection; message })

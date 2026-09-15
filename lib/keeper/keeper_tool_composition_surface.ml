@@ -629,19 +629,39 @@ let failure_data ~tool_name ~tool_kind (failure : Executor.failure) =
     ~settled:(List.map node_result_to_json failure.settled)
 ;;
 
-let failed_node (failure : Executor.failure) =
+let plan_execution_error_kind = function
+  | Keeper_tool_plan.Unknown_node_id _ -> Keeper_terminal_effect_detail.Unknown_node_id
+  | Keeper_tool_plan.Input_template_resolution_failed _ ->
+    Keeper_terminal_effect_detail.Input_template_resolution_failed
+  | Keeper_tool_plan.Input_validation_failed _ ->
+    Keeper_terminal_effect_detail.Input_validation_failed
+  | Keeper_tool_plan.Output_validation_failed _ ->
+    Keeper_terminal_effect_detail.Output_validation_failed
+  | Keeper_tool_plan.Output_not_composable _ ->
+    Keeper_terminal_effect_detail.Output_not_composable
+;;
+
+let composition_cause (failure : Executor.failure) =
   match failure.cause with
   | Executor.Tool_did_not_complete node ->
-    Some
-      { Keeper_terminal_effect_detail.node_id =
-          Keeper_tool_plan.Node_id.to_string node.node_id
+    Keeper_terminal_effect_detail.Node_failed
+      { node_id = Keeper_tool_plan.Node_id.to_string node.node_id
       ; model_tool_name = node.tool_name
       ; message = Tool_result.message node.result
       }
-  | Executor.Plan_execution_failed _
-  | Executor.Node_observation_failed _
-  | Executor.Outer_completion_mismatch _ ->
-    None
+  | Executor.Node_observation_failed { node; detail } ->
+    Keeper_terminal_effect_detail.Node_observation_failed
+      { node_id = Keeper_tool_plan.Node_id.to_string node.node_id
+      ; model_tool_name = node.tool_name
+      ; detail
+      }
+  | Executor.Plan_execution_failed { node_id; schedule = _; error } ->
+    Keeper_terminal_effect_detail.Plan_execution_failed
+      { node_id = Keeper_tool_plan.Node_id.to_string node_id
+      ; error = plan_execution_error_kind error
+      }
+  | Executor.Outer_completion_mismatch { expected; actual } ->
+    Keeper_terminal_effect_detail.Outer_completion_mismatch { expected; actual }
 ;;
 
 let failure_class (failure : Executor.failure) =
@@ -1938,7 +1958,7 @@ let make_tools_with_authority
                        ; detail =
                            Keeper_terminal_effect_detail.Composition_failed
                              { composition_tool = tool_name
-                             ; failed_node = failed_node failure
+                             ; cause = composition_cause failure
                              ; payload =
                                  failure_data
                                    ~tool_name

@@ -7681,15 +7681,20 @@ let test_terminal_composition_unknown_write_failure_closes_official_client_loop 
                  match failure.detail with
                  | Keeper_terminal_effect_detail.Composition_failed
                      { composition_tool
-                     ; failed_node = Some { node_id; model_tool_name; message }
+                     ; cause = Node_failed { node_id; model_tool_name; message }
                      ; payload
                      } ->
                    check string "composition tool"
                      "keeper_compose_unknown-write-before-post" composition_tool;
                    check string "failed node" "write" node_id;
                    check string "failed node tool" "keeper_memory_write" model_tool_name;
-                   check bool "failed node keeps its own message" true
-                     (not (String.equal message ""));
+                   (* The node's own result message, as the failure object
+                      records it. *)
+                   check string "failed node keeps its own message"
+                     Yojson.Safe.Util.
+                       (payload |> member "cause" |> member "node" |> member "result"
+                        |> member "message" |> to_string)
+                     message;
                    payload
                  | other ->
                    failf "composition failure became %s"

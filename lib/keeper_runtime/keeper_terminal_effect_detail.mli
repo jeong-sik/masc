@@ -21,6 +21,36 @@ type failed_node =
   ; message : string
   }
 
+(** Which plan execution error stopped a composition node, by kind. The typed
+    error lives above this library; [payload] keeps its full JSON. *)
+type plan_execution_error =
+  | Unknown_node_id
+  | Input_template_resolution_failed
+  | Input_validation_failed
+  | Output_validation_failed
+  | Output_not_composable
+
+(** The composition executor's failure cause, projected without its JSON. *)
+type composition_cause =
+  | Node_failed of failed_node
+      (** A node did not complete. *)
+  | Node_observation_failed of
+      { node_id : string
+      ; model_tool_name : string
+      ; detail : string
+      }
+      (** A node completed and recording its result failed. *)
+  | Plan_execution_failed of
+      { node_id : string
+      ; error : plan_execution_error
+      }
+  | Outer_completion_mismatch of
+      { expected : Agent_core.Tool_contract.completion
+            (** The completion the plan's nodes require. *)
+      ; actual : Agent_core.Tool_contract.completion
+            (** The completion the invocation declared. *)
+      }
+
 (** Why the recovery proposal tool refused a proposal. *)
 type recovery_rejection =
   | Recovery_store_failed
@@ -35,10 +65,9 @@ type t =
       }
   | Composition_failed of
       { composition_tool : string
-      ; failed_node : failed_node option
-            (** The node the executor cause names as not completing. [None]
-                when the cause is not a node that failed. A typed projection of
-                that node, not another copy of its JSON. *)
+      ; cause : composition_cause
+            (** A typed projection of the executor cause, not another copy of
+                its JSON. *)
       ; payload : Yojson.Safe.t
             (** The composition's failure object as the tool result carries
                 it. Display only; never read to decide. *)

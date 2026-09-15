@@ -80,39 +80,28 @@ TUI `bin/masc_tui_keeper_chat_history.ml` `interruption_of_failure` 는 row 의 
 
 ### 2.1 D1 — 중첩 원인은 typed 값
 
+D1 은 두 단계로 들어간다. terminal effect 쪽은 P1a, fence 두 kind 는 P1b 다.
+
 `lib/keeper_runtime/keeper_internal_error.ml`:
 
 ```ocaml
-type fenced_cause =
+type fenced_cause =                              (* P1b *)
   | Fenced_masc of masc_internal_error          (* carrier 로 온 masc 에러 *)
   | Fenced_core of Keeper_request_failure_core.t (* §2.2 의 agent-core 투영 *)
 
-and terminal_effect_detail =
-  | Composition_node_failed of
-      { composition_tool : string
-      ; node_id : string
-      ; tool_name : string
-      ; message : string
-      ; payload : Yojson.Safe.t   (* 지금의 failure_data. 문자열이 아니다 *)
-      }
-  | Terminal_tool_failed of { tool_name : string; message : string }
-  | Terminal_receipt_missing of { tool_name : string }
-  | Output_artifact_storage_failed of { detail : string }
-  | Composition_evidence_persistence_failed of { detail : string }
-
 and masc_internal_error =
   | ...
-  | Terminal_effect_failed of
+  | Terminal_effect_failed of                    (* P1a *)
       { failure_class : Tool_result.tool_failure_class
       ; effect_disposition : Tool_result.failure_effect_disposition
-      ; detail : terminal_effect_detail
+      ; detail : Keeper_terminal_effect_detail.t
       }
-  | Provider_attempt_effect_fenced of
+  | Provider_attempt_effect_fenced of             (* P1b *)
       { runtime_id : string
       ; effect_disposition : Keeper_provider_attempt_effect_core.t
       ; cause : fenced_cause
       }
-  | Tool_correction_lost of
+  | Tool_correction_lost of                       (* P1b *)
       { runtime_id : string
       ; effect_disposition : Keeper_provider_attempt_effect_core.t
       ; reject_count : int
@@ -120,16 +109,17 @@ and masc_internal_error =
       }
 ```
 
-- `diagnostic : string` 은 세 곳이 아니라 다섯 곳이다. 위 셋에 더해 `keeper_tools_agent_core.ml` 12-16 의 `terminal_effect_failure` 와 `runtime_official_client_tool.mli` 16-20(복사본은 `keeper_official_client_host.ml` 1037)이 같은 필드를 나른다. 다섯 곳을 함께 바꾼다.
-- `terminal_effect_detail` 의 생성자 목록은 지금 `diagnostic` 을 채우는 곳에서 나왔다: composition 실패(`keeper_tool_composition_surface.ml` 1889), "composition result manifest persistence failed"(1926), "composition recovery evidence persistence failed"(1948), 도구가 돌려준 `message`(`keeper_tools_agent_core_handler.ml` 113-116), "terminal tool completed without a typed effect receipt"·"tool output artifact storage failed"(`keeper_tools_agent_core_bundle.ml` 21, 439, 588), official-client host 1145, recovery worker 556(`cause_to_string`), agent-core `TerminalTool{Effect,Durability}Failed.detail`(`keeper_internal_error.ml` 1096-1128). P1 에서 이 목록대로 맞춘다.
-- composition 쪽 detail 은 JSON 이 아니라 typed `Executor.failure` 에서 만든다. `Executor.cause` 는 네 변형이다(`keeper_tool_plan_executor.ml` 150-163): `Tool_did_not_complete`, `Node_observation_failed`, `Plan_execution_failed`, `Outer_completion_mismatch`. P1a 의 `Composition_failed` 는 첫 변형일 때만 그 노드를 `failed_node` 로 담고, 나머지 셋은 `None` 으로 두며 실패 객체는 `payload` 에 남긴다.
-- `payload : Yojson.Safe.t` 는 화면 표시용이다. 판정에 쓰지 않는다. `cause` 와 `settled` 에 같은 노드가 두 번 들어가는 중복은 P1 에서 없애지 않고 미룬다. 그 객체가 도구 결과 row 와 모델이 읽는 내용이기도 해서다. 실패한 노드(`failed_node`)는 그 노드를 typed 로 투영한 값이고, 노드 JSON 의 세 번째 사본이 아니다.
-- `masc_internal_error_to_json` 은 `cause`·`detail` 을 JSON 객체로 쓴다. `parse_masc_internal_error_json` 도 같이 바꾼다.
-- `keeper_turn_driver.ml` fence 분기는 `Agent_core.Error.to_string error` 대신, carrier 가 있으면 `Fenced_masc`, 없으면 §2.2 투영으로 `Fenced_core` 를 만든다.
+- `Keeper_terminal_effect_detail.t` 의 생성자와 JSON 모양은 `lib/keeper_runtime/keeper_terminal_effect_detail.mli` 가 정본이다. 이 문서에 다시 적지 않는다.
+- `diagnostic : string` 은 다섯 곳에 있었다. terminal 쪽 세 곳(`Keeper_internal_error.Terminal_effect_failed`, `Keeper_tools_agent_core.terminal_effect_failure`, `Runtime_official_client_tool.Terminal_failed` 와 그 re-export)은 P1a 가 바꿨다. fence 쪽 두 곳(`Provider_attempt_effect_fenced`, `Tool_correction_lost`)은 P1b 가 바꾼다.
+- terminal detail 의 생성자는 `diagnostic` 을 채우던 생산자에서 나왔다: composition 실패·결과 manifest·복구 증거(composition surface), 도구가 돌려준 `message`(handler), receipt 누락과 도구 출력 투영 실패(bundle), 결과 전달 실패와 경계 관찰 실패(official-client host), 복구 제안 거절(recovery worker), agent-core `TerminalTool{Effect,Durability}Failed.detail`.
+- composition detail 은 JSON 이 아니라 typed `Executor.failure` 에서 만든다. `Composition_failed.cause` 는 `Executor.cause` 네 변형(`Tool_did_not_complete`, `Node_observation_failed`, `Plan_execution_failed`, `Outer_completion_mismatch`)을 모두 typed 로 투영한다. plan 실행 에러는 종류만 담는다.
+- `payload : Yojson.Safe.t` 는 화면 표시용이다. 판정에 쓰지 않는다. `cause` 는 원인을 typed 로 투영한 값이지 노드 JSON 의 세 번째 사본이 아니다. 실패 객체 안에서 같은 노드가 `cause` 와 `settled` 에 두 번 들어가는 중복과 크기 제한 없는 `settled` 는 P2 에서 다룬다. 그 객체가 도구 결과 row 와 모델이 읽는 내용이기도 해서다.
+- `masc_internal_error_to_json` 은 `detail`(P1a)·`cause`(P1b)를 JSON 객체로 쓴다. `parse_masc_internal_error_json` 도 같이 바꾼다.
+- `keeper_turn_driver.ml` fence 분기는 `Agent_core.Error.to_string error` 대신, carrier 가 있으면 `Fenced_masc`, 없으면 §2.2 투영으로 `Fenced_core` 를 만든다(P1b).
 
 ### 2.2 D2 — `Keeper_request_failure.t`
 
-새 모듈 둘. `Keeper_request_failure_core`(agent-core 투영)는 P1 에서 `keeper_internal_error` 와 같은 층에 만든다. fence 원인이 쓰기 때문이다. `Keeper_request_failure`(요청 실패 전체)는 P2 에서 의존 방향을 보고 위치를 정한다:
+새 모듈 둘. `Keeper_request_failure_core`(agent-core 투영)는 P1b 에서 `keeper_internal_error` 와 같은 층에 만든다. fence 원인이 쓰기 때문이다. `Keeper_request_failure`(요청 실패 전체)는 P2 에서 의존 방향을 보고 위치를 정한다:
 
 ```ocaml
 type cause =
@@ -186,7 +176,7 @@ val summary : t -> string   (* 저장하지 않는다. cause 에서 계산한다
 
 - 표의 투영 필드는 `Retry.api_error` 의 `RateLimited` 만 확인했다. 나머지는 P2 에서 확인해 맞춘다.
 - `Core_internal` 은 임시 자리다. agent-core 안에서 문자열로 나는 실패(예: `packages/agent_core/lib/pipeline/pipeline_checkpoint.ml` 의 checkpoint sink)는 P5 에서 agent-core 에 typed 값을 넣어 없앤다. P2 는 `Internal` 을 만드는 생산자 목록을 RFC 에 적고 끝낸다. 목록에 없는 새 `Internal` 이 들어오면 lint 로 막는다.
-- `summary_of_masc_internal_error` 는 지금 10개 kind(`Resumable_cli_session`, `Internal_*` 셋, `Incomplete_tool_transcript`, `Terminal_effect_failed`, `Provider_attempt_effect_fenced`, `Tool_correction_lost`, `Receipt_persistence_failed`, `Gate_replay_repair_required`)에 `None` 을 돌려준다. 모든 kind 에 한 줄을 만들게 한다. fenced 는 안쪽 cause 요약에 "tool effect may have happened" 를 붙인다. terminal 의 `Composition_node_failed` 는 `<composition_tool>: <node_id> (<tool_name>) failed: <message>` 다.
+- `summary_of_masc_internal_error` 는 9개 kind(`Resumable_cli_session`, `Internal_*` 셋, `Incomplete_tool_transcript`, `Provider_attempt_effect_fenced`, `Tool_correction_lost`, `Receipt_persistence_failed`, `Gate_replay_repair_required`)에 `None` 을 돌려준다. 모든 kind 에 한 줄을 만들게 한다. fenced 는 안쪽 cause 요약에 "tool effect may have happened" 를 붙인다. `Terminal_effect_failed` 는 P1a 부터 `Terminal tool effect failed (effect_disposition=<disposition>): <detail 요약>` 한 줄이고, detail 요약은 `Keeper_terminal_effect_detail.summary` 가 만든다.
 - **typed 값은 dispatch 경계를 그대로 건넌다.** 지금 `Tool_result` 로 내보내고 서버가 JSON 으로 다시 읽는 모양은 같은 프로세스 안에서의 왕복이라 경계가 아니다. `` `Ran (disposition, body) `` 가 `data` 를 이미 버린다(stream 1191, 1273). P2 에서 dispatch 반환 타입에 실패 값을 실어 보낸다.
 
 ### 2.3 D3 — 채팅 row
@@ -225,7 +215,7 @@ end
 ## 3. 지우는 것 / 남기는 것
 
 지운다:
-- `diagnostic : string` 세 필드와, 에러를 `to_string` 해서 그 필드에 넣는 코드.
+- `diagnostic : string` 다섯 필드와, 에러를 `to_string` 해서 그 필드에 넣는 코드.
 - `persisted_error_reply` 의 `"Keeper request failed: "` 접두어, 대시보드·TUI 의 같은 접두어.
 - TUI `interruption_of_failure` 의 부분 문자열 탐색 전부.
 - 지운 동작을 고정하던 테스트.
@@ -251,7 +241,7 @@ end
 | P0 | 이 RFC (이 수정 포함) | `docs/rfc/` | 인덱스 `--check` |
 | P1a | D1 중 `Terminal_effect_failed` 의 `diagnostic` 을 `Keeper_terminal_effect_detail.t` 로 (생성자 목록은 `lib/keeper_runtime/keeper_terminal_effect_detail.mli` 가 정본) | `keeper_internal_error.ml`, 새 detail 모듈, composition surface, bundle, handler, official-client host, recovery worker, `keeper_tools_agent_core.ml`, `runtime_official_client_tool` | 사고 composition 재현 테스트에서 실패 객체가 escape 되지 않은 객체로 직렬화된다 |
 | P1b | D1 중 `Provider_attempt_effect_fenced`·`Tool_correction_lost` 의 원인 + `Keeper_request_failure_core` 투영 + `diagnostic` 을 읽는 TUI 두 곳 갱신 | `keeper_internal_error.ml`, 새 core 투영 모듈, `keeper_turn_driver.ml`, `bin/masc_tui_keeper_chat_history.ml` | 사고 에러의 JSON 에 escape 된 JSON 문자열이 0개. TUI 의 host-shutdown 표시가 유지된다 |
-| P2 | D2·D3 + 런타임 typed 원인 + wire 다섯 곳 | `keeper_turn.ml`, stream, `keeper_chat_store.ml`, owner registry, `keeper_codex_runtime.ml`, surface read, broadcast, Slack·Discord | §2.2 생산자 표의 각 경로마다 fixture → 생성자 고정. 옛 row·저널 hard cut 테스트 |
+| P2 | D2·D3 + 런타임 typed 원인 + wire 다섯 곳 + composition 실패 객체의 `cause`/`settled` 노드 중복과 `settled` 크기 경계 | `keeper_turn.ml`, stream, `keeper_chat_store.ml`, owner registry, `keeper_codex_runtime.ml`, surface read, broadcast, Slack·Discord | §2.2 생산자 표의 각 경로마다 fixture → 생성자 고정. 옛 row·저널 hard cut 테스트 |
 | P3 | D5 TUI | `bin/masc_tui*.ml` | PTY 시나리오: 사고 에러가 3줄 이하 |
 | P4 | D5 대시보드 | `dashboard/` | 컴포넌트 테스트 + 브라우저 스크린샷 |
 | P5 | agent-core 안의 `Internal` 문자열 생산자를 typed 로 | `packages/agent_core/` | `Core_internal` 로 떨어지는 경로 0개 |

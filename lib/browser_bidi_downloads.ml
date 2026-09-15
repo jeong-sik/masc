@@ -70,8 +70,9 @@ let start ~sw ~env ~root ~publish:publish_artifact ~session_id ~websocket_url =
         let net = Eio.Stdenv.net env and clock = Eio.Stdenv.clock env in
         let addr = match Eio.Net.getaddrinfo_stream net host ~service:(string_of_int port) with
           | addr :: _ -> addr | [] -> failwith "BiDi loopback address unavailable" in
-        (* A socket connected as the deadline passed is the socket; dropping
-           it would leave it open on the session switch behind a failed setup. *)
+        (* A socket connected as the deadline passed is the socket: the setup
+           goes on with it instead of failing the download session for a
+           connection it already has. *)
         let flow =
           match
             Watched_work.run

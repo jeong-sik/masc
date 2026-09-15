@@ -84,6 +84,42 @@ let test_a_wait_started_once_the_deadline_has_passed_ends_at_once () =
     passed_deadlines_s
 ;;
 
+(* The transport's explicit deadline is the same window for the requests
+   that are not a completion's own dispatch: model discovery, provider files,
+   image and speech generation. An answer that arrived as it passed is the
+   answer, in the order the first case above puts the two wake-ups. *)
+let test_an_http_answer_that_arrived_as_its_explicit_deadline_passed_stands () =
+  Eio_mock.Backend.run
+  @@ fun () ->
+  let clock = Eio_mock.Clock.make () in
+  Eio_mock.Clock.set_time clock 0.0;
+  let deadline =
+    match
+      Llm_provider.Http_client.resolve_explicit_deadline
+        ~operation:"test"
+        ~parameter:"timeout_s"
+        ~clock:(Some clock)
+        ~timeout_s:(Some deadline_s)
+    with
+    | Ok deadline -> deadline
+    | Error _ -> fail "a finite positive deadline with a clock was refused"
+  in
+  Eio.Switch.run
+  @@ fun sw ->
+  let answer, arrive = Eio.Promise.create () in
+  let request =
+    Eio.Fiber.fork_promise ~sw (fun () ->
+      Llm_provider.Http_client.with_explicit_deadline deadline (fun () ->
+        Eio.Promise.await answer))
+  in
+  Eio_mock.Clock.set_time clock deadline_s;
+  Eio.Promise.resolve arrive "the answer";
+  match Eio.Promise.await_exn request with
+  | answer -> check string "the answer that arrived is the result" "the answer" answer
+  | exception Eio.Time.Timeout ->
+    fail "an answer that arrived as the explicit deadline passed was reported as a timeout"
+;;
+
 let () =
   Alcotest.run
     "under_deadline"
@@ -96,6 +132,12 @@ let () =
             "a result that never arrives is a timeout"
             `Quick
             test_a_result_that_never_arrives_is_a_timeout
+        ] )
+    ; ( "the transport's explicit deadline"
+      , [ test_case
+            "an answer that arrived as it passed stands"
+            `Quick
+            test_an_http_answer_that_arrived_as_its_explicit_deadline_passed_stands
         ] )
     ; ( "a deadline that has already passed"
       , [ test_case

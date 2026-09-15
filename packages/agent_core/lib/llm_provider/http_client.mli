@@ -348,9 +348,10 @@ val resolve_explicit_deadline
   -> timeout_s:float option
   -> ('clock explicit_deadline, http_error) result
 
-(** Run [f] unbounded or under the resolved Eio deadline. A bounded expiry
-    raises [Eio.Time.Timeout]; the owning call site must project it to its
-    phase-specific [TimeoutError].
+(** Run [f] unbounded or under the resolved Eio deadline. An [f] that
+    finished as the deadline passed is the answer: the deadline raises
+    [Eio.Time.Timeout] only when [f] had not finished, and the owning call
+    site must project it to its phase-specific [TimeoutError].
 
     @stability Internal *)
 val with_explicit_deadline : _ Eio.Time.clock explicit_deadline -> (unit -> 'a) -> 'a

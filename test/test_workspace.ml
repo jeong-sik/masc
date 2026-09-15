@@ -2098,8 +2098,7 @@ let test_read_backlog_snapshot_preserves_unreadable_observation () =
       ; updated_at = 0.0
       ; explicit_mention = false
       ; matched_targets = []
-      ; self_commented = false
-      ; external_since = []
+      ; replies_after_own_comment = None
       ; latest_external_author = None
       ; latest_external_preview = None
       }

@@ -707,7 +707,9 @@ let test_unknown_lane_and_duplicate_identity_fail_explicitly () =
 ;;
 
 let test_detail_preserves_outcome_when_original_payloads_are_unavailable () =
-  let path = Filename.temp_file "lane-detail-payload-" ".jsonl" in
+  let path =
+    Filename.concat (Filename.temp_dir "lane-detail-payload-" "") Exact.storage_filename
+  in
   Fun.protect
     ~finally:(fun () -> if Sys.file_exists path then Sys.remove path)
     (fun () ->
@@ -754,22 +756,30 @@ let test_detail_preserves_outcome_when_original_payloads_are_unavailable () =
         (match completed with
          | `Assoc fields -> List.assoc_opt "output" fields = Some `Null
          | _ -> false);
-      Sys.remove path;
+      let payload leaf =
+        Filename.concat
+          (Filename.concat
+             (Filename.concat (Filename.dirname path) Exact.payload_dirname)
+             run_id)
+          leaf
+      in
+      Sys.remove (payload "input.json");
+      Sys.remove (payload "output.json");
       let unread = detail () in
       check string "payload read failure does not change execution outcome"
         "succeeded"
         (unread |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string);
       List.iter
-        (fun name ->
+        (fun (name, code) ->
           check string (name ^ " is explicitly unavailable") "unavailable"
             (state name unread);
           let error = availability name unread |> Yojson.Safe.Util.member "error" in
-          check string (name ^ " names the source failure") "source_unavailable"
+          check string (name ^ " names its missing payload") code
             (error |> Yojson.Safe.Util.member "code" |> Yojson.Safe.Util.to_string);
           check bool (name ^ " retains a failure explanation") true
             (error |> Yojson.Safe.Util.member "message"
              |> Yojson.Safe.Util.to_string |> String.length |> ( < ) 0))
-        [ "input"; "output" ])
+        [ "input", "missing_registration"; "output", "missing_completion" ])
 ;;
 
 let () =

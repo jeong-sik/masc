@@ -19,9 +19,10 @@ export type ExactLaneIntendedStatus = 'succeeded' | 'cancelled' | 'failed'
 export type ExactLanePersistenceState = 'not_persisted' | 'durability_unknown'
 
 export type ExactLaneRunInput = { kind: 'exact'; payload: unknown }
-export type ExactLanePayloadError =
-  | { code: 'source_unavailable' | 'missing_registration' | 'missing_completion' | 'snapshot_changed'; message: string }
-  | { code: 'invalid_record'; message: string; line: number; detail: string }
+export type ExactLanePayloadError = {
+  code: 'source_unavailable' | 'missing_registration' | 'missing_completion' | 'invalid_payload' | 'snapshot_changed'
+  message: string
+}
 export type ExactLanePayloadAvailability =
   | { state: 'available' }
   | { state: 'not_loaded' }
@@ -138,17 +139,10 @@ function parsePayloadAvailability(raw: unknown, context: string): ExactLanePaylo
   if (!isRecord(error)) fail(`${context}.error must be an object`)
   const message = string(error.message, `${context}.error.message`)
   switch (error.code) {
-    case 'invalid_record': {
-      exactFields(error, ['code', 'message', 'line', 'detail'], [], `${context}.error`)
-      const line = number(error.line, `${context}.error.line`)
-      if (!Number.isSafeInteger(line) || line === 0) fail(`${context}.error.line must be a positive safe integer`)
-      return { state: 'unavailable', error: {
-        code: error.code, message, line, detail: string(error.detail, `${context}.error.detail`),
-      } }
-    }
     case 'source_unavailable':
     case 'missing_registration':
     case 'missing_completion':
+    case 'invalid_payload':
     case 'snapshot_changed':
       exactFields(error, ['code', 'message'], [], `${context}.error`)
       return { state: 'unavailable', error: { code: error.code, message } }

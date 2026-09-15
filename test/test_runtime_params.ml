@@ -585,7 +585,22 @@ let () =
 
   (* ── crash persistence ───────────────────────────────────── *)
 
+  (* The crash store reaches [store_mu] through [Eio_guard], and the guard
+     runs the body with no lock at all until [enable] is called
+     ([lib/core/eio_guard.ml] takes the [false, _] branch). Without it these
+     cases exercise a path the server never takes: in production the flush
+     holds an [Eio.Mutex] inside [Eio.Cancel.protect] inside a
+     [Switch.on_release] hook, which is the arrangement the tail case exists
+     to prove. [disable] runs outside the switch rather than from a release
+     hook of its own, because hooks are LIFO and one registered here would
+     turn the guard off before the flush it is meant to cover. *)
+  let with_eio_guard f =
+    Eio_guard.enable ();
+    Fun.protect ~finally:Eio_guard.disable f
+  in
+
   let test_crash_persistence_enqueue_read () =
+    with_eio_guard @@ fun () ->
     let tmp_dir = Filename.temp_dir "masc_crash_" "" in
     let clock = Eio.Stdenv.clock env in
     Eio.Switch.run @@ fun sw ->
@@ -616,6 +631,7 @@ let () =
   in
 
   let test_crash_tail_is_written_when_the_switch_closes () =
+    with_eio_guard @@ fun () ->
     let tmp_dir = Filename.temp_dir "masc_crash_tail_" "" in
     let clock = Eio.Stdenv.clock env in
     let keepers_dir = Filename.concat tmp_dir "keepers" in

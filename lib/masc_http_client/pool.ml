@@ -167,15 +167,18 @@ let piaf_error_message (err : Piaf.Error.t) =
 
 let reraise_after_close close exn =
   let bt = Printexc.get_raw_backtrace () in
-  Eio.Cancel.protect (fun () ->
-    try close () with
-    | Eio.Cancel.Cancelled _ ->
-      (* Cleanup cannot replace the caller's original exception, including
-         its cancellation. Preserve that exception and its backtrace. *)
-      Printexc.raise_with_backtrace exn bt
-    | cleanup_exn ->
-      Log.Http.warn "HTTP client scope cleanup: %s"
-        (exn_message cleanup_exn));
+  (* [close] protects the half that must not be skipped -- the stop signal --
+     and leaves its join cancellable, so this needs no protection of its own.
+     Wrapping it in one made the [Cancelled] arm below unreachable: a
+     protected [close] cannot raise it. *)
+  (try close () with
+   | Eio.Cancel.Cancelled _ ->
+     (* Cleanup cannot replace the caller's original exception, including
+        its cancellation. Preserve that exception and its backtrace. *)
+     Printexc.raise_with_backtrace exn bt
+   | cleanup_exn ->
+     Log.Http.warn "HTTP client scope cleanup: %s"
+       (exn_message cleanup_exn));
   Printexc.raise_with_backtrace exn bt
 
 let create_scoped_client ~sw env uri =
@@ -183,12 +186,20 @@ let create_scoped_client ~sw env uri =
   let stop, stop_request = Eio.Promise.create () in
   let closed, finished = Eio.Promise.create () in
   let close () =
+    (* Two halves with different owners. Delivering [stop] is this caller's
+       job and must happen even while it unwinds, so it stays protected; it
+       suspends nowhere. Waiting for [closed] is a join on the daemon, which
+       resolves it only after the client switch has torn down every Piaf
+       protocol fiber. Nothing in this module bounds that teardown -- it ends
+       when Piaf's fibers honour their cancellation -- so protecting the join
+       handed the operator's interrupt to a library: a caller pinned here
+       could not answer one. The daemon reaches [closed] on its own either
+       way, for [client_is_live] and the [with_client_scope] watcher. *)
     Eio.Cancel.protect (fun () ->
-      if not (Eio.Promise.is_resolved stop) then
-        Eio.Promise.resolve stop_request ();
-      match Eio.Promise.await closed with
-      | Ok () | Error (Eio.Cancel.Cancelled _) -> ()
-      | Error exn -> raise exn)
+      if not (Eio.Promise.is_resolved stop) then Eio.Promise.resolve stop_request ());
+    match Eio.Promise.await closed with
+    | Ok () | Error (Eio.Cancel.Cancelled _) -> ()
+    | Error exn -> raise exn
   in
   (* Eio's fork contract runs the child immediately, before any other fiber.
      With no yield after this check, the daemon registers and publishes

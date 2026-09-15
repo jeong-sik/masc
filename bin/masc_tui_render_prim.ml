@@ -3596,7 +3596,7 @@ let context_composition_lines ~cols ~turn_back
     in
     let inputs =
       List.filter_map
-        (fun r ->
+        (fun (r : Inspector.recent_turn) ->
           match r.Inspector.input_tokens with
           | Some n when n > 0 -> Some n
           | _ -> None)

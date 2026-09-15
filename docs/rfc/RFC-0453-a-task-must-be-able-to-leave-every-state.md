@@ -137,10 +137,14 @@ RFC-0445 의 다른 결정(`next_actor` 합, `Nobody_will_retry {recipient}`, `U
 `handoff_context`(`reason`, `evidence_refs = [verification_id]`) 에 그대로 남고, 되돌림은 그 위에
 "받을 Keeper 가 없어 놓았다" 는 handoff 를 덧쓴다.
 
-**결정이 필요한 것 — 되돌리는 행위자를 무엇으로 기록하는가.**
-`release_task_r ~agent_name` 은 담당자 본인이 놓는 모양이라 사실과 다르다. 이 RFC 는
-`workspace_task.ml:recover_owned_task_to_todo_r` 옆에 **판정 레인이 행위자인 typed 되돌림**을 두기를
-권한다. 운영자 복구와 같은 자리, 다른 행위자다.
+**되돌리는 행위자는 판정을 내린 authority 다.**
+`release_task_r ~agent_name` 은 담당자 본인이 놓는 모양이라 사실과 다르다. 그 세션은 이미 없고,
+없는 이름으로 기록하면 원장이 "그 에이전트가 스스로 놓았다" 는 거짓을 남긴다. 되돌림은
+`workspace_task.ml:recover_owned_task_to_todo_r` 옆에 typed 함수로 두고, 행위자는 자유 문자열이 아니라
+의무에 이미 실려 있는 `completion_authority` 에서 읽는다. `Human_operator` 면 `Operator`,
+`System_llm_agent` 면 `System` — 판정을 기록할 때 쓰는 대응 그대로다
+(`workspace_task_transitions.ml:903`). 원장에 남는 말은 "거절을 내린 쪽이, 돌려줄 사람이 없어 놓았다"
+가 된다.
 
 왜 판정이 아니라 전달에서 하는가:
 

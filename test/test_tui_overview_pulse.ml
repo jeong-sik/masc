@@ -7,10 +7,15 @@ let fresh () =
 let pulse state = Masc_tui_render_prim.overview_pulse_text state ~now:1000.
 
 let test_an_unread_pulse_is_not_a_flat_line () =
-  Alcotest.(check string) "unread" "(not loaded)" (pulse (fresh ()));
+  (* #36320 moved this row from the title's bracketed words to the labelled
+     field's own (field_missing_reading, no brackets) because the "Pulse:"
+     label in front of it already says these words are a reading's state,
+     not a count -- the brackets said that a second time. This assertion
+     tracked the pre-#36320 title spelling and went stale the same day. *)
+  Alcotest.(check string) "unread" "not loaded" (pulse (fresh ()));
   let failed = fresh () in
   failed.Masc_tui_types.keeper_turns_error <- Some "keeper turns: HTTP 503";
-  Alcotest.(check string) "failed" "(load failed)" (pulse failed)
+  Alcotest.(check string) "failed" "load failed" (pulse failed)
 
 let test_a_read_pulse_counts_its_windows () =
   let quiet = fresh () in

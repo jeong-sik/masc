@@ -3475,7 +3475,7 @@ let context_composition_lines ~cols ~turn_back
          about this turn, while a per-request provider that reported nothing
          simply reported nothing. One None in the data covers both, so the
          scope -- which the record owns -- decides. *)
-      let marker = if index = turn_back then Ansi.bold ^ "▸" else " " in
+      let marker = if index = turn_back then Ansi.bold ^ Masc_tui_theme.Glyph.current_entry else " " in
       match recent.scope, recent.input_tokens with
       | Runtime_usage_scope.Conversation_cumulative, _ ->
           [ marker
@@ -3488,7 +3488,7 @@ let context_composition_lines ~cols ~turn_back
       | _, Some input ->
           fact
             (Printf.sprintf "%s #%-4d %s  in %-7s  cache read %-7s  out %s"
-               (if index = turn_back then "▸" else " ")
+               (if index = turn_back then Masc_tui_theme.Glyph.current_entry else " ")
                recent.turn ts
                (Inspector.format_tokens input)
                (match recent.cache_read with
@@ -3498,7 +3498,7 @@ let context_composition_lines ~cols ~turn_back
                  | Some tokens -> Inspector.format_tokens tokens
                  | None -> "-"))
       | _, None ->
-          [ (if index = turn_back then Ansi.bold ^ "▸" else " ")
+          [ (if index = turn_back then Ansi.bold ^ Masc_tui_theme.Glyph.current_entry else " ")
             ^ Ansi.dim
             ^ Printf.sprintf
                 " #%-4d %s  input not reported for this turn"

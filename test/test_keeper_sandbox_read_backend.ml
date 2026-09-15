@@ -575,6 +575,7 @@ exit 0
        ; signal = None
        ; timed_out = false
        ; shim_error = None
+       ; observed_syscalls = []
        })
 
 let test_remote_ssh_read_skips_host_existence_preflight () =
@@ -638,7 +639,7 @@ remote_endpoint = "fixture"
     write_file endpoint_file png;
     let trailer = Exec_ssh_protocol.render_trailer
         { v = Exec_ssh_protocol.newest; exit = Some 0; signal = None
-        ; timed_out = false; shim_error = None } in
+        ; timed_out = false; shim_error = None; observed_syscalls = [] } in
     let script = "#!/bin/sh\ncat >/dev/null 2>/dev/null &\ncat "
         ^ Filename.quote endpoint_file ^ "\nprintf '%s' "
         ^ Filename.quote trailer ^ " >&2\nexit 0\n" in

@@ -270,14 +270,14 @@ let stub_main () =
   let trailer exit_code =
     Exec_ssh_protocol.render_trailer
       { v = Exec_ssh_protocol.newest; exit = Some exit_code; signal = None
-      ; timed_out = false; shim_error = None }
+      ; timed_out = false; shim_error = None; observed_syscalls = [] }
   in
   match Exec_ssh_protocol.decode_request frame with
   | Error error ->
     write_all Unix.stderr
       (Exec_ssh_protocol.render_trailer
          { v = Exec_ssh_protocol.newest; exit = None; signal = None
-         ; timed_out = false; shim_error = Some error });
+         ; timed_out = false; shim_error = Some error; observed_syscalls = [] });
     exit 1
   | Ok (request, stdin) ->
     let fs_dir = frame_path ^ ".fs" in

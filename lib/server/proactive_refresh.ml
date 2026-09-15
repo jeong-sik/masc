@@ -137,8 +137,13 @@ let start ~sw ~clock ~config:raw_config ~compute ~on_result =
     end;
     let t0 = Time_compat.now () in
     (try
+       (* A warm compute that finished as its window closed is the result. *)
        match
-         Eio.Time.with_timeout clock config.timeout_s (fun () -> Ok (compute ()))
+         Watched_work.run
+           ~watcher:(fun () ->
+             Eio.Time.sleep clock config.timeout_s;
+             Error `Timeout)
+           (fun () -> Ok (compute ()))
        with
        | Ok v ->
          on_result v;
@@ -200,10 +205,15 @@ let start ~sw ~clock ~config:raw_config ~compute ~on_result =
       wait_for_interval_or_wakeup (!current_interval +. jitter);
       let t0 = Time_compat.now () in
       (try
+         (* A refresh that finished as its window closed is the result. *)
          match
-           Eio.Time.with_timeout clock config.timeout_s (fun () ->
-             (* Named per refresh so a tracer attached later still sees it. *)
-             Ok (Eio.Switch.run ~name:(config.label ^ " refresh") (fun _ -> compute ())))
+           Watched_work.run
+             ~watcher:(fun () ->
+               Eio.Time.sleep clock config.timeout_s;
+               Error `Timeout)
+             (fun () ->
+                (* Named per refresh so a tracer attached later still sees it. *)
+                Ok (Eio.Switch.run ~name:(config.label ^ " refresh") (fun _ -> compute ())))
          with
          | Ok v ->
          on_result v;

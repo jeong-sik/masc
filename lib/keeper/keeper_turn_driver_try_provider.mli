@@ -148,6 +148,7 @@ val provider_lease_stalled :
   -> now:float
   -> threshold_sec:float
   -> attempt_started_at:float
+  -> permit_wait:Llm_provider.Provider_admission.permit_wait
   -> sample:provider_progress_sample option
   -> bool
 (** A yielded main-provider lease cannot be stalled. On reacquisition, the
@@ -158,10 +159,19 @@ val attempt_stalled :
   now:float
   -> threshold_sec:float
   -> attempt_started_at:float
+  -> permit_wait:Llm_provider.Provider_admission.permit_wait
   -> sample:provider_progress_sample option
   -> bool
 (** The stall verdict for a running provider attempt (#28417), pure in its
     inputs so it is testable without Eio or a registry.
+
+    Never stalled while [permit_wait] is [Waiting_for_permit]: a bounded wait
+    for the binding's admission permit is queueing with a deadline of its
+    own, and Agent Core writes the cell for no other kind of wait, so
+    standing down for it leaves nothing unbounded and lets the admission
+    bound alone end it, as [Queue]. [Wait_settled_at] is the instant that
+    wait ended, and the verdict counts from it: the attempt's own budgets
+    start there, so the silence that is a stall is the silence after it.
 
     With a [sample], the attempt is stalled when no tool is in flight AND the
     last progress signal is older than [threshold_sec]. A tool call that runs

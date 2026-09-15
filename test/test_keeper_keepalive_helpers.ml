@@ -1180,123 +1180,40 @@ let test_comment_routes_bystander_lane_to_attention_judgment () =
          (board_attention_count config meta.Keeper_meta_contract.name))
 ;;
 
-let test_autoboot_warmup_bounds_first_cadence_sleep () =
-  let next = Keeper_heartbeat_loop.For_testing.next_keepalive_sleep_duration_sec in
-  check (float 0.001) "fresh warmup" 66.0
-    (next
-       ~proactive_warmup_sec:66
-       ~proactive_warmup_elapsed:false
-       ~keepalive_started_ts:100.0
-       ~now_ts:100.0
-       ~cadence_sec:300.0
-       ~rate_limited_backoff_sec:300.0);
-  check (float 0.001) "partially elapsed warmup" 26.0
-    (next
-       ~proactive_warmup_sec:66
-       ~proactive_warmup_elapsed:false
-       ~keepalive_started_ts:100.0
-       ~now_ts:140.0
-       ~cadence_sec:300.0
-       ~rate_limited_backoff_sec:300.0)
-;;
-
-let test_warmup_boundary_and_steady_cadence () =
-  let next = Keeper_heartbeat_loop.For_testing.next_keepalive_sleep_duration_sec in
-  check (float 0.001) "warmup crossed during pre-warmup cycle" 0.0
-    (next
-       ~proactive_warmup_sec:66
-       ~proactive_warmup_elapsed:false
-       ~keepalive_started_ts:100.0
-       ~now_ts:166.0
-       ~cadence_sec:300.0
-       ~rate_limited_backoff_sec:300.0);
-  check (float 0.001) "elapsed warmup" 300.0
-    (next
-       ~proactive_warmup_sec:66
-       ~proactive_warmup_elapsed:true
-       ~keepalive_started_ts:100.0
-       ~now_ts:166.0
-       ~cadence_sec:300.0
-       ~rate_limited_backoff_sec:300.0);
-  check (float 0.001) "disabled warmup" 300.0
-    (next
-       ~proactive_warmup_sec:0
-       ~proactive_warmup_elapsed:true
-       ~keepalive_started_ts:100.0
-       ~now_ts:100.0
-       ~cadence_sec:300.0
-       ~rate_limited_backoff_sec:300.0)
-;;
-
-(* #26068 / task-1200: the sleep calculation must actually distinguish
-   failure routes. A rate-limit route with a provider [Retry-After] hint
-   backs off to that hint; a hint below the cadence defers to the cadence;
-   a hint beyond the configured cap is clamped, so a misread header can
-   never park the lane; and a route with no hint at all, or with a zero,
-   negative or NaN hint, is still a rate-limit signal and waits for the one
-   named floor ([Env_config_keeper.KeeperKeepalive.rate_limit_backoff_floor_sec])
-   instead of the plain cadence or an immediate retry.
-
-   Audit F171/F029: [None] is passed through as an option end to end (no
-   [0.0] sentinel is minted on the way), and the no-hint floor is the named
-   constant that also clamps the cap, not a literal repeated in two files.
-   This proves the option arrives at [retry_backoff_sec] and lands on that
-   constant. *)
-let test_rate_limit_backoff_sec_clamps_and_escalates () =
-  let backoff = Keeper_runtime_failure_route.retry_backoff_sec in
+(* RFC-provider-path-rest §3.3: a path's rest comes from the provider's answer
+   alone. A usable hint rests that long (at least 1 s, #35246) whatever the
+   keeper cadence is; without one a throttle rests the named floor and a hard
+   quota rests the cap; every result is clamped to the cap so a misread header
+   cannot rest a path longer than the operator allows. *)
+let test_path_rest_follows_the_answer_not_the_cadence () =
+  let rest = Keeper_runtime_failure_route.path_rest_sec ~cap_sec:900.0 in
   let floor_sec = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_floor_sec in
-  check (float 0.001) "provider retry-after hint wins when above cadence" 120.0
-    (backoff ~cap_sec:900.0 ~retry_after_hint:(Some 120.0) ~cadence_sec:30.0);
-  check (float 0.001) "hint below cadence defers to the cadence" 30.0
-    (backoff ~cap_sec:900.0 ~retry_after_hint:(Some 5.0) ~cadence_sec:30.0);
-  check (float 0.001) "no hint at all backs off to the named floor" floor_sec
-    (backoff ~cap_sec:900.0 ~retry_after_hint:None ~cadence_sec:30.0);
-  check (float 0.001) "no hint with a cadence above the floor keeps the cadence"
-    120.0
-    (backoff ~cap_sec:900.0 ~retry_after_hint:None ~cadence_sec:120.0);
-  check (float 0.001) "zero hint backs off to the named floor" floor_sec
-    (backoff ~cap_sec:900.0 ~retry_after_hint:(Some 0.0) ~cadence_sec:30.0);
-  check (float 0.001) "cap clamps an absurd provider hint" 900.0
-    (backoff ~cap_sec:900.0 ~retry_after_hint:(Some 120000.0) ~cadence_sec:30.0);
-  check (float 0.001) "negative hint backs off to the named floor" floor_sec
-    (backoff ~cap_sec:900.0 ~retry_after_hint:(Some (-5.0)) ~cadence_sec:30.0);
-  check (float 0.5) "NaN hint backs off to the named floor" floor_sec
-    (backoff ~cap_sec:900.0 ~retry_after_hint:(Some nan) ~cadence_sec:30.0);
-  (* Read at module init from an unset env: the default cap never sits below
-     the floor, so a no-hint backoff is never cut by the cap by default. *)
+  let rate_limited = Keeper_runtime_failure_route.Rate_limited in
+  let hard_quota = Keeper_runtime_failure_route.Hard_quota in
+  check (float 0.001) "a stated 5 s rests 5 s" 5.0
+    (rest ~retry_class:rate_limited ~retry_after_hint:(Some 5.0));
+  check (float 0.001) "a stated 120 s rests 120 s" 120.0
+    (rest ~retry_class:hard_quota ~retry_after_hint:(Some 120.0));
+  check (float 0.001) "a sub-second hint rests one second" 1.0
+    (rest ~retry_class:rate_limited ~retry_after_hint:(Some 0.001));
+  check (float 0.001) "an unstated throttle rests the floor" floor_sec
+    (rest ~retry_class:rate_limited ~retry_after_hint:None);
+  check (float 0.001) "an unstated capacity refusal rests the floor" floor_sec
+    (rest ~retry_class:Keeper_runtime_failure_route.Capacity_backpressure
+       ~retry_after_hint:None);
+  check (float 0.001) "an unstated hard quota rests the cap" 900.0
+    (rest ~retry_class:hard_quota ~retry_after_hint:None);
+  check (float 0.001) "a zero hint is unstated" floor_sec
+    (rest ~retry_class:rate_limited ~retry_after_hint:(Some 0.0));
+  check (float 0.001) "a negative hint is unstated" floor_sec
+    (rest ~retry_class:rate_limited ~retry_after_hint:(Some (-5.0)));
+  check (float 0.5) "a NaN hint is unstated" floor_sec
+    (rest ~retry_class:rate_limited ~retry_after_hint:(Some nan));
+  check (float 0.001) "the cap clamps an absurd hint" 900.0
+    (rest ~retry_class:rate_limited ~retry_after_hint:(Some 120000.0));
   check bool "default cap is not below the named floor" true
     (Float.compare Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec floor_sec
-     >= 0);
-  (* Fractional Retry-After hint when cadence is zero floors at 1.0s (#35246) *)
-  check (float 0.001) "fractional hint with zero cadence floors at 1.0s" 1.0
-    (backoff ~cap_sec:900.0 ~retry_after_hint:(Some 0.001) ~cadence_sec:0.0);
-  check (float 0.001) "sub-second hint with zero cadence floors at 1.0s" 1.0
-    (backoff ~cap_sec:900.0 ~retry_after_hint:(Some 0.5) ~cadence_sec:0.0);
-  check (float 0.001) "usable hint above 1s with zero cadence is preserved" 5.0
-    (backoff ~cap_sec:900.0 ~retry_after_hint:(Some 5.0) ~cadence_sec:0.0)
-;;
-
-let test_sleep_distinguishes_rate_limited_route_from_cadence () =
-  let next = Keeper_heartbeat_loop.For_testing.next_keepalive_sleep_duration_sec in
-  (* A non-rate-limited cycle passes the cadence through unchanged. *)
-  check (float 0.001) "plain cycle keeps the cadence" 30.0
-    (next
-       ~proactive_warmup_sec:0
-       ~proactive_warmup_elapsed:true
-       ~keepalive_started_ts:100.0
-       ~now_ts:100.0
-       ~cadence_sec:30.0
-       ~rate_limited_backoff_sec:30.0);
-  (* The same cycle routed as rate-limited with a 120s hint sleeps the
-     capped backoff, not the cadence. *)
-  check (float 0.001) "rate-limited cycle sleeps the route backoff" 120.0
-    (next
-       ~proactive_warmup_sec:0
-       ~proactive_warmup_elapsed:true
-       ~keepalive_started_ts:100.0
-       ~now_ts:100.0
-       ~cadence_sec:30.0
-       ~rate_limited_backoff_sec:120.0)
+     >= 0)
 ;;
 
 (* ── Test runner ─── *)
@@ -1418,14 +1335,8 @@ let () =
             test_cadence_wake_consumes_only_active_sleep
         ; test_case "cadence handshake precedes duration resolution" `Quick
             test_cadence_handshake_precedes_duration_resolution
-        ; test_case "autoboot warmup bounds the first cadence sleep" `Quick
-            test_autoboot_warmup_bounds_first_cadence_sleep
-        ; test_case "elapsed warmup keeps the configured cadence" `Quick
-            test_warmup_boundary_and_steady_cadence
-        ; test_case "rate-limit backoff clamps and escalates" `Quick
-            test_rate_limit_backoff_sec_clamps_and_escalates
-        ; test_case "sleep distinguishes rate-limited route from cadence" `Quick
-            test_sleep_distinguishes_rate_limited_route_from_cadence
+        ; test_case "a path's rest follows the answer, not the cadence" `Quick
+            test_path_rest_follows_the_answer_not_the_cadence
         ; test_case "backoff sleep serves a wakeup only after the duration" `Quick
             test_backoff_sleep_serves_a_wakeup_only_after_the_duration
         ; test_case "backoff sleep without a wakeup times out" `Quick

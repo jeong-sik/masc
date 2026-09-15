@@ -151,9 +151,9 @@ let test_cancel_releases_both_inputs () = with_path (fun path -> with_open path 
   check bool "both bodies released" true (cancelled.input = None && (execution store).input = None)))
 
 let test_cooling_retry_is_not_claimable_until_not_before () = with_path (fun path ->
-  (* 2026-09-10 drain investigation: a deferred retry whose failure was the
-     provider throttling carries [not_before]; claiming it earlier re-issues
-     the rejected call in a tight loop. *)
+  (* A deferred retry whose next path rests carries [not_before]; claiming it
+     earlier re-issues a refused call in a tight loop (2026-09-10 drain
+     investigation, RFC-provider-path-rest §3.4). *)
   let retry_with_backoff not_before =
     Semantic.runtime_retry ~not_before:(Some not_before)
       ~checkpoint:(checkpoint "provider throttled the original call")

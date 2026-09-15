@@ -50,17 +50,22 @@ let deferred_lane =
     ~failure:error
 ;;
 
-(* #34653 / #34663 review: a rate limit or exhausted quota parks the lane
-   until the backoff ends; capacity backpressure also arrives from MASC's own
-   slot and client capacity envelopes, which clear on their own, so that
-   backoff stays interruptible. Every other route keeps the plain cadence. *)
-let backoff_of_route route =
-  Loop.For_testing.failure_route_rate_limited_backoff_hint
+(* RFC-provider-path-rest §3.1: a failed cycle decides the next dispatch from
+   the path the input goes to next. The ids here are not in the runtime table,
+   so a deferred suffix's head and a fresh walk of the assignment both serve;
+   resting walks are pinned against a real table in
+   test_keeper_turn_driver_failover. *)
+let now = 1000.0
+
+let decide ?deferred_runtime_lane route =
+  Loop.For_testing.after_failure
+    ~now
+    ~assignment_id:"lane-a"
     { Turn.error
     ; runtime_id = "lane-a"
     ; route
     ; source_disposition = Turn.Follow_failure_route
-    ; deferred_runtime_lane = None
+    ; deferred_runtime_lane
     }
 ;;
 
@@ -69,48 +74,76 @@ let policy_name = function
   | Masc.Keeper_keepalive_signal.Serve_wakeup_after_duration -> "serve_wakeup_after_duration"
 ;;
 
-let check_backoff label route expected =
-  let show = function
-    | None -> "none"
-    | Some (b : Loop.provider_backoff) ->
-      let hint =
-        match b.retry_after_hint with
-        | None -> "no-hint"
-        | Some seconds -> Printf.sprintf "%.1f" seconds
-      in
-      Printf.sprintf "%s/%s" hint (policy_name b.wake_policy)
+let show_after_failure = function
+  | None -> "cadence"
+  | Some (Loop.Continue_on_deferred_lane { next_runtime_id }) ->
+    Printf.sprintf "continue on %s" next_runtime_id
+  | Some (Loop.Wait_for_path_release { release_at; wake_policy; waiting_on }) ->
+    Printf.sprintf
+      "wait for %s until %.1f (%s)"
+      waiting_on
+      release_at
+      (policy_name wake_policy)
+;;
+
+let check_decision label expected actual =
+  check string label (show_after_failure expected) (show_after_failure actual)
+;;
+
+let wait ~after ~policy =
+  Some
+    (Loop.Wait_for_path_release
+       { release_at = now +. after; wake_policy = policy; waiting_on = "lane-a" })
+;;
+
+(* #34653: with no other path for the input, a rate limit or quota waits for
+   the failed path's own rest and a wakeup does not cut that wait short
+   ([Serve_wakeup_after_duration], pinned in test_keeper_keepalive_helpers).
+   The rest is the provider's answer: a stated 5 s waits 5 s, not a cadence. *)
+let test_a_refusal_without_a_suffix_waits_for_the_failed_path () =
+  let serve = Masc.Keeper_keepalive_signal.Serve_wakeup_after_duration in
+  let cap_sec = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec in
+  let floor_sec = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_floor_sec in
+  check_decision "a rate limit stating 5 s"
+    (wait ~after:5.0 ~policy:serve)
+    (decide (KFR.Retry_after_observed { retry_class = KFR.Rate_limited; retry_after = Some 5.0 }));
+  check_decision "a rate limit stating nothing"
+    (wait ~after:floor_sec ~policy:serve)
+    (decide (KFR.Retry_after_observed { retry_class = KFR.Rate_limited; retry_after = None }));
+  check_decision "a hard quota stating nothing"
+    (wait ~after:cap_sec ~policy:serve)
+    (decide (KFR.Retry_after_observed { retry_class = KFR.Hard_quota; retry_after = None }))
+;;
+
+let test_capacity_waits_interruptibly_with_or_without_a_suffix () =
+  let route =
+    KFR.Retry_after_observed { retry_class = KFR.Capacity_backpressure; retry_after = Some 5.0 }
   in
-  check string label (show expected) (show (backoff_of_route route))
+  let expected = wait ~after:5.0 ~policy:Masc.Keeper_keepalive_signal.Interrupt_on_wakeup in
+  check_decision "capacity without a suffix" expected (decide route);
+  check_decision "capacity with a suffix" expected
+    (decide ~deferred_runtime_lane:deferred_lane route)
 ;;
 
-let test_rate_limit_and_quota_park_until_the_backoff_ends () =
-  check_backoff "rate limited with a Retry-After"
-    (KFR.Retry_after_observed { retry_class = KFR.Rate_limited; retry_after = Some 120.0 })
-    (Some
-       { retry_after_hint = Some 120.0
-       ; wake_policy = Masc.Keeper_keepalive_signal.Serve_wakeup_after_duration
-       });
-  check_backoff "hard quota without a hint"
-    (KFR.Retry_after_observed { retry_class = KFR.Hard_quota; retry_after = None })
-    (Some
-       { retry_after_hint = None
-       ; wake_policy = Masc.Keeper_keepalive_signal.Serve_wakeup_after_duration
-       })
-;;
-
-let test_capacity_backpressure_stays_interruptible () =
-  check_backoff "capacity backpressure"
-    (KFR.Retry_after_observed
-       { retry_class = KFR.Capacity_backpressure; retry_after = Some 5.0 })
-    (Some
-       { retry_after_hint = Some 5.0
-       ; wake_policy = Masc.Keeper_keepalive_signal.Interrupt_on_wakeup
-       })
-;;
-
-let test_other_routes_keep_the_cadence () =
+(* #36583: the driver deferred the input to a path that is not resting, so the
+   keeper does not wait for the path that refused it. *)
+let test_a_suffix_on_a_serving_path_continues_without_waiting () =
   List.iter
-    (fun (label, route) -> check_backoff label route None)
+    (fun (label, route) ->
+       check_decision label
+         (Some (Loop.Continue_on_deferred_lane { next_runtime_id = "lane-b" }))
+         (decide ~deferred_runtime_lane:deferred_lane route))
+    [ ( "rate limit"
+      , KFR.Retry_after_observed { retry_class = KFR.Rate_limited; retry_after = None } )
+    ; ( "hard quota"
+      , KFR.Retry_after_observed { retry_class = KFR.Hard_quota; retry_after = Some 600.0 } )
+    ; "repeated generation", KFR.Rotate_now { rotate = KFR.Generation_repeated }
+    ]
+;;
+
+let test_other_failures_without_a_suffix_keep_the_cadence () =
+  List.iter
+    (fun (label, route) -> check_decision label None (decide route))
     [ ( "network transient"
       , KFR.Retry_after_observed
           { retry_class = KFR.Network_transient; retry_after = None } )
@@ -465,19 +498,23 @@ let () =
             `Quick
             test_recorded_settlement_follows_the_batch_disposition
         ] )
-    ; ( "provider backoff of a failure route"
+    ; ( "next dispatch after a failed cycle"
       , [ test_case
-            "rate limit and quota park until the backoff ends"
+            "a refusal without a suffix waits for the failed path"
             `Quick
-            test_rate_limit_and_quota_park_until_the_backoff_ends
+            test_a_refusal_without_a_suffix_waits_for_the_failed_path
         ; test_case
-            "capacity backpressure stays interruptible"
+            "capacity waits interruptibly with or without a suffix"
             `Quick
-            test_capacity_backpressure_stays_interruptible
+            test_capacity_waits_interruptibly_with_or_without_a_suffix
         ; test_case
-            "other routes keep the cadence"
+            "a suffix on a serving path continues without waiting"
             `Quick
-            test_other_routes_keep_the_cadence
+            test_a_suffix_on_a_serving_path_continues_without_waiting
+        ; test_case
+            "other failures without a suffix keep the cadence"
+            `Quick
+            test_other_failures_without_a_suffix_keep_the_cadence
         ] )
     ]
 ;;

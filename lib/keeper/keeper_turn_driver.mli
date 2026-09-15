@@ -75,6 +75,71 @@ val quota_ordered_deferred_runtime_lane :
     preserving its assignment and failure evidence. Call once before building
     pre-dispatch execution so prompt shaping and dispatch consume the same
     selected runtime. *)
+
+(** Whether one runtime path is resting at a given instant
+    (RFC-provider-path-rest §3.3). Read from the 429 candidate observation and
+    the quota window. [walk_promotes_at_release] is [true] when the walk order
+    stops holding the path back at [release_at]: every rest on it was stated by
+    the provider and not cut by the cap. An id the runtime table cannot resolve
+    is serving. *)
+type path_rest =
+  | Path_serving
+  | Path_resting of
+      { release_at : float
+      ; walk_promotes_at_release : bool
+      }
+
+val path_rest : now:float -> string -> path_rest
+
+(** What a walk dispatches first. [Walk_head_serving]: the head in walk order
+    is not resting and takes the input. [Walk_waits_until]: the head rests; the
+    wait ends at the head's release, or at an earlier release of a later path
+    the walk order promotes at that moment, and [resting_runtime_id] owns that
+    release. *)
+type walk_rest =
+  | Walk_head_serving of { runtime_id : string }
+  | Walk_waits_until of
+      { release_at : float
+      ; resting_runtime_id : string
+      }
+
+(** A deferred suffix in the order the next turn walks it. *)
+val deferred_lane_rest : now:float -> deferred_runtime_lane -> walk_rest
+
+(** A fresh walk of an assignment, ordered as a turn without a deferred suffix
+    orders it. *)
+val assignment_walk_rest : now:float -> string -> walk_rest
+
+(** Whether a wakeup may end a failure wait: a capacity release is MASC's own
+    envelope and may; a path release is a provider's rest and may not
+    (#34653). *)
+type failure_wait =
+  | Capacity_release
+  | Path_release
+
+(** The next dispatch after a failed turn (RFC-provider-path-rest §3.1),
+    shared by the heartbeat cycle and the chat lane's deferred retry.
+    Capacity backpressure waits for its own rest. A deferred suffix dispatches
+    now when its walk head serves, else waits as {!deferred_lane_rest} says.
+    Without a suffix a rate limit or quota waits for the later of the failed
+    path's rest and {!assignment_walk_rest}; [waiting_on] then names the
+    assignment or the resting head. Every other failure without a suffix is
+    [None]: no provider wait. *)
+type next_dispatch =
+  | Dispatch_now of { runtime_id : string }
+  | Wait_until of
+      { release_at : float
+      ; waiting_on : string
+      ; wait : failure_wait
+      }
+
+val next_dispatch_after_failure :
+  now:float ->
+  route:Keeper_runtime_failure_route.route ->
+  assignment_id:string ->
+  deferred_runtime_lane option ->
+  next_dispatch option
+
 val equal_deferred_runtime_lane :
   deferred_runtime_lane -> deferred_runtime_lane -> bool
 

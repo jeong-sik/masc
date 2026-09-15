@@ -199,9 +199,14 @@ let all =
       ~exposure:Env_only
       ~value_kind:Float
       ~default:"900.0"
-      ~consumers:[ "Env_config_keeper.KeeperKeepalive"; "Keeper_heartbeat_loop" ]
+      ~consumers:
+        [ "Env_config_keeper.KeeperKeepalive"
+        ; "Keeper_runtime_failure_route"
+        ; "Keeper_turn_driver"
+        ; "Keeper_heartbeat_loop"
+        ]
       ~category:"heartbeat"
-      "Upper bound for rate-limit failure-route backoff in seconds"
+      "Longest rest of a provider path after a refusal, in seconds"
   ; setting
       ~env_name:"MASC_KEEPER_WIRE_CAPTURE"
       ~exposure:(Toml_and_env "wire_capture.enabled")

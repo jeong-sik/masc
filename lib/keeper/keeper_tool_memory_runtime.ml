@@ -765,7 +765,6 @@ let keeper_memory_write_with_outcome
   : Keeper_tool_execution.t
   =
   let respond
-        ?memory_revision
         ?(effect_disposition = Tool_result.Effect_outcome_unknown)
         ~ok
         ~error_kind
@@ -778,13 +777,7 @@ let keeper_memory_write_with_outcome
         (`Assoc ([ "ok", `Bool ok; "error_kind", `String error_kind ] @ extras))
     in
     if ok
-    then
-      let completed = Keeper_tool_execution.success payload in
-      Option.fold
-        ~none:completed
-        ~some:(fun revision ->
-          Keeper_tool_execution.with_memory_write_receipt ~revision completed)
-        memory_revision
+    then Keeper_tool_execution.success payload
     else
       Keeper_tool_execution.failure ~class_ ~effect_disposition payload
   in
@@ -823,7 +816,6 @@ let keeper_memory_write_with_outcome
            with
            | Some source_sha256 ->
              respond
-               ~memory_revision:snapshot.revision
                ~ok:true
                ~error_kind:No_memory_write_error
                [ "rows_written", `Int 1
@@ -884,7 +876,6 @@ let keeper_memory_write_with_outcome
        (match written_fact with
         | Some written_fact ->
           respond
-            ~memory_revision:snapshot.revision
             ~ok:true
             ~error_kind:No_memory_write_error
             [ "rows_written", `Int 1
@@ -1006,7 +997,6 @@ let keeper_memory_retract_with_outcome
   : Keeper_tool_execution.t
   =
   let respond
-        ?revision
         ?(effect_disposition = Tool_result.Effect_outcome_unknown)
         ~ok
         ~error_kind
@@ -1022,13 +1012,7 @@ let keeper_memory_retract_with_outcome
              @ extras))
     in
     if ok
-    then
-      let completed = Keeper_tool_execution.success payload in
-      Option.fold
-        ~none:completed
-        ~some:(fun revision ->
-          Keeper_tool_execution.with_memory_retract_receipt ~revision completed)
-        revision
+    then Keeper_tool_execution.success payload
     else
       Keeper_tool_execution.failure
         ~class_:(class_of_memory_retract_error_kind error_kind)
@@ -1079,7 +1063,6 @@ let keeper_memory_retract_with_outcome
          memory_id
          (List.length snapshot.change.invalidated);
        respond
-         ~revision:snapshot.revision
          ~ok:true
          ~error_kind:No_memory_retract_error
          [ "revision", `Int snapshot.revision

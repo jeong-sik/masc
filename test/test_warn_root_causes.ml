@@ -254,7 +254,6 @@ let test_bundle_exactly_matches_model_visible_descriptors () =
                     true
                     (Agent_core.Tool.completion tool
                      = Agent_core.Tool_contract.Continue_after_success)
-                | Keeper_tool_descriptor.Direct_terminal
                 | Keeper_tool_descriptor.Terminal ->
                   check bool
                     (name ^ " terminal tools are serial")
@@ -420,6 +419,127 @@ let test_explicit_concurrent_tools_enter_one_agent_core_batch () =
                  (fun (schedule : Agent_core.Tool_contract.schedule) ->
                     schedule.planned_index)
                  schedules)))
+
+(* A memory write is an ordinary serial write. The model can record what it
+   learned and keep working in the same provider turn: Agent Core admits the
+   write beside another call instead of rejecting the batch as a terminal
+   mix, and the batch leaves the turn open. *)
+let test_memory_write_runs_beside_another_tool_in_one_provider_turn () =
+  ignore (init_registry ());
+  let dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc_test_memory_write_batch_%d" (Random.int 1_000_000))
+  in
+  (try Unix.mkdir dir 0o755 with
+   | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  Fun.protect
+    ~finally:(fun () ->
+      try Unix.rmdir dir with
+      | _ -> ())
+    (fun () ->
+       Eio_main.run
+       @@ fun env ->
+       Eio.Switch.run
+       @@ fun sw ->
+       Masc_test_deps.with_publication_recovery_registry
+         ~sw
+         ~fs:(Eio.Stdenv.fs env)
+         ~registry_root:dir
+       @@ fun publication_recovery_registry ->
+       let config = Workspace.default_config dir in
+       let meta = make_meta ~name:"test-memory-write-batch" () in
+       let publication_recovery =
+         publication_recovery_turn_context
+           ~registry:publication_recovery_registry
+           ~keeper_name:meta.name
+       in
+       let ctx_snapshot =
+         Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
+       in
+       let bundle =
+         Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot
+           ()
+       in
+       Fun.protect
+         ~finally:bundle.cleanup
+         (fun () ->
+            let require_tool name =
+              match
+                List.find_opt
+                  (fun (tool : Agent_core.Tool.t) ->
+                     String.equal tool.schema.name name)
+                  bundle.tools
+              with
+              | Some tool -> tool
+              | None -> failf "missing bundle tool %s" name
+            in
+            let ran = ref [] in
+            let wrap (tool : Agent_core.Tool.t) =
+              { tool with
+                handler =
+                  (fun _execution_env _input ->
+                     ran := tool.schema.name :: !ran;
+                     Ok
+                       { Agent_core.Types.content = "ran"
+                       ; content_blocks = None
+                       ; _meta = None
+                       })
+              }
+            in
+            let tools =
+              [ wrap (require_tool "keeper_memory_write")
+              ; wrap (require_tool "masc_board_stats")
+              ]
+            in
+            match
+              Agent_core.Agent_tools.execute_tools
+                ~context:(Agent_core.Context.create ())
+                ~tools
+                ~hooks:Agent_core.Hooks.empty
+                ~event_bus:None
+                ~tracer:Agent_core.Tracing.null
+                ~agent_name:"test-memory-write-batch-agent"
+                ~turn_count:3
+                ~usage:Agent_core.Types.empty_usage
+                [ Agent_core.Types.ToolUse
+                    { id = "memory-1"
+                    ; name = "keeper_memory_write"
+                    ; input = `Assoc [ "content", `String "batched claim" ]
+                    }
+                ; Agent_core.Types.ToolUse
+                    { id = "stats-1"; name = "masc_board_stats"; input = `Assoc [] }
+                ]
+            with
+            | Error _ -> fail "memory write batch returned an execution failure"
+            | Ok
+                ({ completed_results; completion; _ }
+                 : Agent_core.Agent_tools.execution_report) ->
+              check
+                (list string)
+                "both handlers ran"
+                [ "keeper_memory_write"; "masc_board_stats" ]
+                (List.sort String.compare !ran);
+              check
+                (list bool)
+                "no call was rejected"
+                [ false; false ]
+                (List.map
+                   (fun (result : Agent_core.Agent_tools.tool_execution_result) ->
+                      Agent_core.Types.tool_result_outcome_is_error result.outcome)
+                   completed_results);
+              check
+                bool
+                "the batch leaves the turn open"
+                true
+                (match completion with
+                 | Agent_core.Agent_tools.Continue_after_batch -> true
+                 | Agent_core.Agent_tools.Terminal_completed _
+                 | Agent_core.Agent_tools.Terminal_failed _ -> false)))
 
 let test_missing_current_task_reconciled_before_transition_hint () =
   ignore (init_registry ());
@@ -704,6 +824,8 @@ let () =
             test_bundle_exactly_matches_model_visible_descriptors;
           test_case "explicit concurrent tools enter one Agent Core batch" `Quick
             test_explicit_concurrent_tools_enter_one_agent_core_batch;
+          test_case "memory write runs beside another tool in one provider turn" `Quick
+            test_memory_write_runs_beside_another_tool_in_one_provider_turn;
           test_case "missing current task reconciles before transition hint" `Quick
             test_missing_current_task_reconciled_before_transition_hint;
           test_case "bundle assembly does not emit assignment" `Quick

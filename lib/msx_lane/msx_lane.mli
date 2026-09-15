@@ -69,6 +69,14 @@ type entry = { at_frame : int; who : string; key_name : string; down : bool }
 val entry_json : entry -> Yojson.Safe.t
 (** The native input ledger's record encoding. *)
 
+(** Every [error] is answered before the call changes what the workspace
+    keeps: the machine, its input ledger, a checkpoint's contents. A disk boot
+    or a disk swap that fails ran on a private copy of the machine; a key the
+    matrix has no place for is released before a frame runs; a checkpoint or
+    ledger write that fails leaves the old file, because the new one is
+    renamed into place last. A caller can therefore report any [error] as a
+    refusal that took no effect. An exception is not an [error]: a ledger
+    append that raises mid-press has already moved the machine. *)
 type error =
   | No_machine  (** nothing loaded — [masc_msx_load] first *)
   | Invalid_request of string  (** the caller's arguments *)

@@ -69,7 +69,6 @@ let scrubbed_env_names =
       "MASC_HOST";
       "MASC_BASE_PATH";
       "MASC_SIDECAR_ROOT";
-      "MASC_BASE_PATH_INPUT";
       "MASC_BASE_PATH_RESOLUTION_SOURCE";
       "MASC_CONFIG_DIR";
       "MASC_WS_ENABLED";

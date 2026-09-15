@@ -23,8 +23,7 @@ let with_env name value_opt f =
       f ())
 
 let with_isolated_runtime_env f =
-  with_env "MASC_BASE_PATH" None (fun () ->
-    with_env "MASC_BASE_PATH_INPUT" None f)
+  with_env "MASC_BASE_PATH" None f
 
 let with_default_runtime_id_hook f =
   let previous = Atomic.get Workspace_hooks.get_default_runtime_id_fn in

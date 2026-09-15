@@ -37,11 +37,9 @@ let with_temp_base f =
       (Printf.sprintf "fusion-obligation-%d-%06x" (Unix.getpid ()) (Random.bits ()))
   in
   let old_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
-  let old_base_path_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
   let registry = Fusion_run_registry.create () in
   Unix.mkdir base_path 0o700;
   Unix.putenv "MASC_BASE_PATH" base_path;
-  Unix.putenv "MASC_BASE_PATH_INPUT" base_path;
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Fun.protect
@@ -49,7 +47,6 @@ let with_temp_base f =
       Board_dispatch.reset_for_test ();
       Board.reset_global_for_test ();
       restore_env "MASC_BASE_PATH" old_base_path;
-      restore_env "MASC_BASE_PATH_INPUT" old_base_path_input;
       remove_tree base_path)
     (fun () -> f base_path registry)
 ;;

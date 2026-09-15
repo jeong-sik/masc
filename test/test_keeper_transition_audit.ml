@@ -119,8 +119,7 @@ let with_invalid_default_store f =
       let oc = open_out base_file in
       close_out oc;
       with_env "MASC_KEEPER_TRANSITION_LOG" "" (fun () ->
-          with_env "MASC_BASE_PATH" base_file (fun () ->
-              with_env "MASC_BASE_PATH_INPUT" base_file f)))
+          with_env "MASC_BASE_PATH" base_file f))
 
 let read_jsonl path =
   let ic = open_in path in
@@ -178,7 +177,6 @@ let test_store_branch_filters_by_keeper () =
          is configured, which would make this test vacuous. *)
       with_env "MASC_KEEPER_TRANSITION_LOG" "" (fun () ->
         with_env "MASC_BASE_PATH" base_dir (fun () ->
-          with_env "MASC_BASE_PATH_INPUT" base_dir (fun () ->
             Audit.For_testing.reset_state ();
             let record keeper_name turn_id =
               Audit.record_completed_turn
@@ -208,7 +206,7 @@ let test_store_branch_filters_by_keeper () =
             check (list int) "store branch returns only keeper-a's turns"
               [ 1; 3; 5 ] (ids "keeper-a");
             check (list int) "store branch returns only keeper-b's turns"
-              [ 2; 4 ] (ids "keeper-b")))))
+              [ 2; 4 ] (ids "keeper-b"))))
 
 (* The ring branch keys by keeper name, so its filtering is structural. Pinned
    separately because the two branches answer the same question differently. *)
@@ -426,7 +424,6 @@ let test_async_queue_defers_store_write_until_flush () =
     (fun () ->
       with_env "MASC_KEEPER_TRANSITION_LOG" "" (fun () ->
           with_env "MASC_BASE_PATH" base_dir (fun () ->
-              with_env "MASC_BASE_PATH_INPUT" base_dir (fun () ->
                   Audit.For_testing.set_async_append_active true;
                   KTF.emit_transition
                     ~keeper_name:"async-queue-keeper"
@@ -442,7 +439,7 @@ let test_async_queue_defers_store_write_until_flush () =
                   check int "queue drained" 0 (Audit.For_testing.queued_count ());
                   check int "nothing dropped" 0 (Audit.For_testing.dropped_count ());
                   check bool "store materialized by flush" true
-                    (Sys.file_exists (default_store_dir base_dir))))))
+                    (Sys.file_exists (default_store_dir base_dir)))))
 
 (* Synchronous fallback: before [start_flush_fiber] (tests, non-server
    embedders) recording appends inline, preserving previous behavior. *)
@@ -456,7 +453,6 @@ let test_sync_fallback_appends_inline () =
     (fun () ->
       with_env "MASC_KEEPER_TRANSITION_LOG" "" (fun () ->
           with_env "MASC_BASE_PATH" base_dir (fun () ->
-              with_env "MASC_BASE_PATH_INPUT" base_dir (fun () ->
                   KTF.emit_transition
                     ~keeper_name:"sync-fallback-keeper"
                     ~turn_id:8
@@ -465,7 +461,7 @@ let test_sync_fallback_appends_inline () =
                   check int "nothing queued in sync mode" 0
                     (Audit.For_testing.queued_count ());
                   check bool "store written inline" true
-                    (Sys.file_exists (default_store_dir base_dir))))))
+                    (Sys.file_exists (default_store_dir base_dir)))))
 
 (* Ordering is a documented contract — keeper_transition_audit.mli:22 promises
    "recent transitions for a keeper, newest first" — and both read paths used to
@@ -498,7 +494,6 @@ let test_ring_returns_newest_first () =
     (fun () ->
       with_env "MASC_KEEPER_TRANSITION_LOG" "" (fun () ->
           with_env "MASC_BASE_PATH" base_dir (fun () ->
-              with_env "MASC_BASE_PATH_INPUT" base_dir (fun () ->
                   let keeper_name = "ordering-ring-keeper" in
                   List.iter
                     (fun ts -> Audit.record_transition ~keeper_name (stamped ts))
@@ -514,7 +509,7 @@ let test_ring_returns_newest_first () =
                   | other ->
                       fail
                         (Printf.sprintf "expected 2 transitions, got %d"
-                           (List.length other))))))
+                           (List.length other)))))
 
 let test_store_fallback_returns_newest_first () =
   Audit.For_testing.reset_state ();
@@ -526,7 +521,6 @@ let test_store_fallback_returns_newest_first () =
     (fun () ->
       with_env "MASC_KEEPER_TRANSITION_LOG" "" (fun () ->
           with_env "MASC_BASE_PATH" base_dir (fun () ->
-              with_env "MASC_BASE_PATH_INPUT" base_dir (fun () ->
                   let keeper_name = "ordering-store-keeper" in
                   List.iter
                     (fun ts -> Audit.record_transition ~keeper_name (stamped ts))
@@ -540,7 +534,7 @@ let test_store_fallback_returns_newest_first () =
                       (Audit.recent_transitions_json ~keeper_name ~limit:2)
                   in
                   check (list (float 0.001)) "newest two, newest first"
-                    [ 500.0; 400.0 ] stamps))))
+                    [ 500.0; 400.0 ] stamps)))
 
 let test_default_transition_append_failure_is_observed_and_ring_retained () =
   Audit.For_testing.reset_state ();

@@ -3283,8 +3283,9 @@ let setup_stop_owner_cmd =
 
 let sandbox_catalog_cmd =
   let inspect requested =
-    let base_path = match requested with Some path -> Some path
-      | None -> Option.map snd (Env_config_core.base_path_source_opt ()) in
+    (* The setup journey reads this catalog for the workspace doctor offered;
+       both answer in Workspace_root's order. *)
+    let base_path = selected_base_path requested in
     print_endline (Yojson.Safe.to_string (Masc.Sandbox_readiness.inspect ~base_path));
     0 in
   Cmd.v (Cmd.info "sandbox-catalog" ~doc:"Inspect sandbox choices and host prerequisites without changing settings.")

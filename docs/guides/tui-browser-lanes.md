@@ -203,9 +203,9 @@ The Keeper verifies the chosen checkout and hash before editing. JSX locations
 identify the opening element; HTM locations identify the tagged template. External
 pages without instrumentation explicitly report source unavailable.
 
-The builtin browser-design, frontend-implement and frontend-verify packages cover
-visual intent, verified source editing and browser evidence. They are discoverable
-skills; users need not name a skill for an ordinary UI request. Newly built MASC
+The builtin frontend-change package covers visual intent, verified source editing
+and browser evidence as one design, implement and verify flow. It is a discoverable
+skill; users need not name a skill for an ordinary UI request. Newly built MASC
 installs seed missing packages through the existing builtin-skill installer.
 
 In screenshot view, the mouse wheel scrolls the area under the pointer, allowing

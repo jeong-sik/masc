@@ -69,6 +69,10 @@ fi
 # directory and the SHA256SUMS the installer verifies against.
 VERSION="v0.0.0-install-smoke"
 work="$(mktemp -d)"
+# The installer records the default workspace when a terminal is attached, and
+# a developer runs this smoke from one. Keep that record inside $work so the
+# smoke never replaces the machine's real default with a directory it deletes.
+export XDG_CONFIG_HOME="$work/config"
 PID=""
 cleanup() {
   [ -n "$PID" ] && kill "$PID" 2>/dev/null || true

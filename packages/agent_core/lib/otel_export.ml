@@ -154,20 +154,26 @@ let post_otlp ~sw ~clock ~client ~config ~endpoint body =
     Cohttp.Header.of_list ([ "content-type", "application/json" ] @ config.headers)
   in
   let body_s = Cohttp_eio.Body.of_string body in
+  (* A collector answer that arrived as the window closed is the answer. The
+     batch retries on an error, so a 2xx dropped here would send the same
+     spans or metrics again. *)
   try
-    Eio.Time.with_timeout_exn clock config.timeout_sec (fun () ->
-      let resp, resp_body =
-        Cohttp_eio.Client.post ~sw ~headers:base_headers ~body:body_s client uri
-      in
-      let status = Cohttp.Response.status resp in
-      let code = Cohttp.Code.code_of_status status in
-      let _ =
-        Eio.Buf_read.of_flow ~max_size:(1024 * 64) resp_body |> Eio.Buf_read.take_all
-      in
-      if code >= 200 && code < 300 then Ok () else Error (Printf.sprintf "HTTP %d" code))
+    match
+      Llm_provider.Under_deadline.run clock config.timeout_sec (fun () ->
+        let resp, resp_body =
+          Cohttp_eio.Client.post ~sw ~headers:base_headers ~body:body_s client uri
+        in
+        let status = Cohttp.Response.status resp in
+        let code = Cohttp.Code.code_of_status status in
+        let _ =
+          Eio.Buf_read.of_flow ~max_size:(1024 * 64) resp_body |> Eio.Buf_read.take_all
+        in
+        if code >= 200 && code < 300 then Ok () else Error (Printf.sprintf "HTTP %d" code))
+    with
+    | Ok result -> result
+    | Error `Timeout -> Error (Printf.sprintf "timeout after %.1fs" config.timeout_sec)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
-  | Eio.Time.Timeout -> Error (Printf.sprintf "timeout after %.1fs" config.timeout_sec)
   | exn -> Error (Printexc.to_string exn)
 ;;
 

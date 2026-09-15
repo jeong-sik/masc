@@ -44,9 +44,9 @@ access = "read-only"
 |}
 let bundled_files = [
   "lane.toml";
-  "skills/msx-observe/SKILL.md";
-  "skills/msx-observe/references/observations.md";
-  "skills/msx-observe/scripts/summarize.py";
+  "skills/msx-observation-rows/SKILL.md";
+  "skills/msx-observation-rows/references/observations.md";
+  "skills/msx-observation-rows/scripts/summarize.py";
 ]
 let fixture_package_source =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with
@@ -138,7 +138,7 @@ let detach clock fixture =
   (* Exercise the maintenance publication after cleanup completes. This
      fixture drives reconciliation explicitly rather than starting Pulse. *)
   ignore (reconcile fixture);
-  await clock (fun () -> absent (snapshot fixture) "msx-observe")
+  await clock (fun () -> absent (snapshot fixture) "msx-observation-rows")
 
 let with_fixture ?(runtime_text=base_config) f =
   let root = Filename.temp_dir "lane-skill-workflow-" "" in
@@ -185,14 +185,14 @@ let test_declaration_catalog_and_resources () = with_fixture (fun clock fixture 
   await_observer clock fixture;
   let published = snapshot fixture in
   check int "ordinary and package Skill are both discovered" 2 (List.length (Snapshot.effective_entries published));
-  let entry = skill published "msx-observe" in
+  let entry = skill published "msx-observation-rows" in
   let reference = Snapshot.entry_reference entry in
   check string "stable declaration-owned source identity"
     (Lane.skill_source_id (Lane.Declaration "msx-installation"))
     (Skill_source_config.source_id_to_string entry.identity.source_id);
   let source = Snapshot.sources published |> List.find (fun (scan : Snapshot.source_scan) -> scan.source.source.id = entry.identity.source_id) in
   check bool "package source is read-only" true (source.source.source.access = Skill_source_config.Read_only);
-  let raw_document = read (Filename.concat fixture.package "skills/msx-observe/SKILL.md") in
+  let raw_document = read (Filename.concat fixture.package "skills/msx-observation-rows/SKILL.md") in
   check string "content revision identifies exact SKILL.md bytes"
     (Skill_reference.content_revision_of_source_text raw_document
      |> Skill_reference.content_revision_to_string)
@@ -201,7 +201,7 @@ let test_declaration_catalog_and_resources () = with_fixture (fun clock fixture 
   checked_read reader "read-skill" (Skill_reference.to_yojson reference) entry.document.body;
   List.iter (fun file ->
     checked_read reader ("read-" ^ file) (with_file reference file)
-      (read (Filename.concat fixture.package ("skills/msx-observe/" ^ file))))
+      (read (Filename.concat fixture.package ("skills/msx-observation-rows/" ^ file))))
     ["scripts/summarize.py"; "references/observations.md"];
   let catalog, diagnostics = Catalog.of_snapshot published in
   check int "instruction projection is valid" 0 (List.length diagnostics);
@@ -212,7 +212,7 @@ let test_declaration_catalog_and_resources () = with_fixture (fun clock fixture 
   check int "existing explicit empty selection still exposes none" 0 (List.length (Catalog.skills none.catalog));
   checked_read reader "ordinary-still-readable" (Skill_reference.to_yojson ordinary_reference) ordinary_body;
   ignore (refresh_base fixture);
-  check bool "ordinary refresh retains registered package sources" false (absent (snapshot fixture) "msx-observe");
+  check bool "ordinary refresh retains registered package sources" false (absent (snapshot fixture) "msx-observation-rows");
   check string "publication does not edit runtime configuration" original_config (read fixture.runtime_config);
   detach clock fixture)
 
@@ -220,22 +220,22 @@ let test_invalid_document_and_detach_preserve_ordinary_work () = with_fixture (f
   ignore (reconcile fixture);
   await_observer clock fixture;
   let published = snapshot fixture in
-  let entry = skill published "msx-observe" in
+  let entry = skill published "msx-observation-rows" in
   let reference = Snapshot.entry_reference entry in
   let frozen_reader = tool fixture in
   let ordinary_reference = skill published "ordinary-guide" |> Snapshot.entry_reference in
-  let path = Filename.concat fixture.package "skills/msx-observe/SKILL.md" in
+  let path = Filename.concat fixture.package "skills/msx-observation-rows/SKILL.md" in
   let original = read path in
-  write path "---\nname: msx-observe\n---\nMissing required description.\n";
+  write path "---\nname: msx-observation-rows\n---\nMissing required description.\n";
   ignore (refresh_base fixture);
-  check bool "malformed package document is absent from new discovery" true (absent (snapshot fixture) "msx-observe");
+  check bool "malformed package document is absent from new discovery" true (absent (snapshot fixture) "msx-observation-rows");
   check int "malformed document remains diagnosed" 1 (List.length (Snapshot.rejections (snapshot fixture)));
   checked_read (tool fixture) "ordinary-after-invalid" (Skill_reference.to_yojson ordinary_reference) ordinary_body;
   checked_read frozen_reader "frozen-turn-after-invalid" (Skill_reference.to_yojson reference) entry.document.body;
   check int "an invalid optional Skill does not stop its observer" 0 !(fixture.stops);
   write path original;
   ignore (refresh_base fixture);
-  check bool "corrected document is discoverable" false (absent (snapshot fixture) "msx-observe");
+  check bool "corrected document is discoverable" false (absent (snapshot fixture) "msx-observation-rows");
   detach clock fixture;
   check bool "managed detach removes the installation declaration" false (Sys.file_exists fixture.declaration);
   checked_read (tool fixture) "ordinary-after-detach" (Skill_reference.to_yojson ordinary_reference) ordinary_body;

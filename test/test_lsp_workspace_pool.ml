@@ -201,6 +201,60 @@ let real_server_cases =
     [])
 ;;
 
+(* #36431: an answer whose last byte and the deadline land in the same
+   scheduler pass. The mock clock queues the watcher's wake ahead of the
+   work's on purpose -- set_time past the deadline, then resolve -- so an
+   answer that had arrived must not be reported as a timeout. Exercises the
+   await_answer deadline gate the pool's ensure/ask both call, without a live
+   server. *)
+let test_answer_that_arrived_as_window_closed_stands () =
+  Eio_mock.Backend.run
+  @@ fun () ->
+  let clock = Eio_mock.Clock.make () in
+  Eio_mock.Clock.set_time clock 0.0;
+  Eio.Switch.run
+  @@ fun sw ->
+  let answer, arrive = Eio.Promise.create () in
+  let work =
+    Eio.Fiber.fork_promise ~sw (fun () ->
+      Lsp_workspace_pool.For_testing.await_answer
+        ~clock:(clock :> float Eio.Time.clock_ty Eio.Resource.t)
+        ~timeout:1.0
+        ~what:"initialize"
+        answer)
+  in
+  Eio_mock.Clock.set_time clock 1.0;
+  Eio.Promise.resolve arrive (Ok "capabilities");
+  match Eio.Promise.await_exn work with
+  | Ok "capabilities" -> ()
+  | Ok other -> failf "unexpected answer %S" other
+  | Error _ ->
+    fail "an answer that arrived as the window closed was dropped as a timeout"
+;;
+
+(* The ordinary expiry: nothing answers, and the deadline ends the wait. *)
+let test_answer_that_never_arrives_is_a_timeout () =
+  Eio_mock.Backend.run
+  @@ fun () ->
+  let clock = Eio_mock.Clock.make () in
+  Eio_mock.Clock.set_time clock 0.0;
+  Eio.Switch.run
+  @@ fun sw ->
+  let never : (string, string) result Eio.Promise.t = fst (Eio.Promise.create ()) in
+  let work =
+    Eio.Fiber.fork_promise ~sw (fun () ->
+      Lsp_workspace_pool.For_testing.await_answer
+        ~clock:(clock :> float Eio.Time.clock_ty Eio.Resource.t)
+        ~timeout:1.0
+        ~what:"initialize"
+        never)
+  in
+  Eio_mock.Clock.set_time clock 1.0;
+  match Eio.Promise.await_exn work with
+  | Error _ -> ()
+  | Ok _ -> fail "nothing answered, yet the wait did not end as a timeout"
+;;
+
 let () =
   run
     "lsp_workspace_pool"
@@ -229,5 +283,15 @@ let () =
             test_missing_command_is_not_an_empty_answer
         ] )
     ; "live server", real_server_cases
+    ; ( "initialize deadline"
+      , [ test_case
+            "an answer that arrived as the window closed stands"
+            `Quick
+            test_answer_that_arrived_as_window_closed_stands
+        ; test_case
+            "an answer that never arrives is a timeout"
+            `Quick
+            test_answer_that_never_arrives_is_a_timeout
+        ] )
     ]
 ;;

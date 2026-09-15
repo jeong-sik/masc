@@ -16,7 +16,7 @@
 
 composition은 `keeper_skill`의 Available instruction 목록에서 읽는 문서가 아니라
 `keeper_compose_<name>` 형태로 노출되는 호출 도구다. 현재 도구 목록에서 정확한
-이름과 입력 스키마를 확인하고 호출한다. 사이트별 판단 규칙은 instruction Skill에서
+이름과 입력 스키마를 확인하고 호출한다. 사이트별 판단 규칙은 사이트 참조 파일에서
 필요할 때 읽는다. 도구가 없으면 composition 지원을 가정하거나 `keeper_skill`로
 composition을 읽으려 하지 않는다.
 
@@ -45,7 +45,7 @@ SPA 채널 내용 전환을 증명하지 않는다. 링크가 새 탭을 열 수
 이동 전에 거절된다. 후속 본문 또는 영역 읽기는 `destinationUrl`을 `expectedUrl`로 확인한다.
 전환 오류이면 같은 clientId/tabId를 expectedUrl 없이 읽어 실제 URL과 내용을
 확인한다. 원래 urlBefore이면 아직 이동 중일 수 있다. 다른 URL이면 리다이렉트·
-정규화·로그인 화면일 수 있으므로 자동 승인하지 않는다. 사이트 Skill로 workspace·
+정규화·로그인 화면일 수 있으므로 자동 승인하지 않는다. 사이트 참조로 workspace·
 채널·제목·본문을 검증한 뒤 실제 관측 URL을 새 expectedUrl로 지정한다. 미확인
 목적지는 미확인으로 남긴다. 원래 URL 검사나 이동을 무조건 반복하지 않는다.
 일치하는 URL도 사이트 내용의 준비 완료는 아니며 채널 제목과 본문을 검증한다.

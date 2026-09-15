@@ -791,7 +791,7 @@ let handle_board_context_inference_request ~state ~sw ~clock ~request reqd body 
           respond_board_context_inference_error request reqd ~status:`Bad_request
             ~message
       | Ok { post_id; target_keeper } -> (
-          match Board_dispatch.get_post_and_comments ~post_id () with
+          match Board_dispatch.get_post_and_comments ~post_id with
           | Error err ->
               respond_board_context_inference_error request reqd
                 ~status:`Bad_request

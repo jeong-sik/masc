@@ -22,6 +22,14 @@ val note_evidence_ref_form : string
     {!Workspace_verification_store.note_reference_form} so the prose cannot
     name a prefix the classifier no longer matches. *)
 
+val change_evidence_ref_form : string
+(** The change form alone, for the sentence that tells a caller where work
+    that landed as a pull request goes. Without it both refusal messages sent
+    a producer's pull request to [note:], where the reviewer reads the text
+    and nothing else; with it the reviewer reads whether the change merged.
+    Taken from {!Workspace_verification_store.change_reference_form} for the
+    same reason as the note form. *)
+
 val non_empty_trimmed_strings : string list -> string list
 
 (** task-1664: typed split of a task's verification evidence.

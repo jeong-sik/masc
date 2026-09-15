@@ -158,12 +158,15 @@ let parse_handoff_context ~(agent_name : string)
               (Printf.sprintf
                  "handoff_context.evidence_refs entries must be %s for \
                   action=%s. The verification store cannot read any other \
-                  form, and the reviewer sees it as missing evidence. Wrap \
-                  narrative, a commit, or a URL as %s. \
+                  form, and the reviewer sees it as missing evidence. Work \
+                  that landed as a pull request goes as %s -- the reviewer \
+                  reads whether it merged. Wrap narrative, a commit, or any \
+                  other URL as %s. \
                   Example: {\"summary\": \"tests green\", \"evidence_refs\": \
                   [\"%s\"]}."
                  Tool_task_completion_review.resolvable_evidence_ref_forms
                  (Masc_domain.task_action_to_string action)
+                 Tool_task_completion_review.change_evidence_ref_form
                  Tool_task_completion_review.note_evidence_ref_form
                  handoff_example_evidence_ref)
           else if String.equal summary "" then

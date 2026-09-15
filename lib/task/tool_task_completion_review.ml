@@ -36,6 +36,7 @@ let resolvable_evidence_ref_forms =
 ;;
 
 let note_evidence_ref_form = Workspace_verification_store.note_reference_form
+let change_evidence_ref_form = Workspace_verification_store.change_reference_form
 
 let non_empty_trimmed_strings values =
   values

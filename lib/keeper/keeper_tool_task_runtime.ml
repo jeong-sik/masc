@@ -261,9 +261,11 @@ let parse_keeper_task_done_evidence_refs args =
              Error
                (Printf.sprintf
                   "evidence_refs entries must be %s. Nothing else can be read \
-                   back at review. Wrap a commit, a URL, or \
-                   any narrative as %s."
+                   back at review. Work that landed as a pull request goes as \
+                   %s -- the reviewer reads whether it merged. Wrap a commit, \
+                   any other URL, or any narrative as %s."
                   Task.Completion_review.resolvable_evidence_ref_forms
+                  Task.Completion_review.change_evidence_ref_form
                   Task.Completion_review.note_evidence_ref_form)
            else collect (String.trim ref_ :: acc) rest
          | _ :: _ -> Error "evidence_refs must be an array of non-empty strings."

@@ -32,7 +32,7 @@ Task 상태 기계는 "이 상태에서 나가게 할 수 있는 사람은 X 뿐
 
 어휘는 RFC-0445 의 `next_actor` 합을 그대로 쓴다. 두 번째 어휘를 만들지 않는다.
 
-## 1. 실측 (2026-09-15 05:30 UTC, `~/me/.masc`)
+## 1. 실측 (2026-09-15 05:30 UTC, `<base-path>/.masc`)
 
 ### 1.1 나갈 수 없는 Task
 
@@ -320,12 +320,12 @@ PR-1 은 PR-0 위에서만 의미가 있다. §3.4 는 §3.3 과 한 PR 로 묶�
   `lib/server/server_routes_http_routes_verification.ml:100-123` (카드의 intent),
   `lib/tool/tool_catalog.ml:321` (`masc_operator_task_recovery_resolve`),
   `lib/keeper/keeper_shutdown_finalize.ml:161` (Keeper 는 내려갈 때 자기 Task 를 release 한다).
-- 포기 청구의 사유는 `~/me/.masc/board_posts.jsonl` 의 `Cancellation requested for task ...` 글에서
+- 포기 청구의 사유는 `<base-path>/.masc/board_posts.jsonl` 의 `Cancellation requested for task ...` 글에서
   센다. 검증 기록의 `submitted_evidence` 를 세면 안 된다 — 포기 경로는 거기 쓰지 않는다. 이 초안의
   첫 판이 그렇게 세어 "26건 무사유" 라는 틀린 값을 실었다.
-- 실측: `~/me/.masc/tasks/backlog.json` (2026-09-15 05:30 UTC), `~/me/.masc/verifications/vrf-*.json`
-  1,368건, `~/me/.masc/logs/system_log_2026-09-1{2,3,4,5}.jsonl`,
-  `~/me/.masc/verification-runs.jsonl` (판정 129건 — 도구 호출은 `complete` 이벤트의
+- 실측: `<base-path>/.masc/tasks/backlog.json` (2026-09-15 05:30 UTC), `<base-path>/.masc/verifications/vrf-*.json`
+  1,368건, `<base-path>/.masc/logs/system_log_2026-09-1{2,3,4,5}.jsonl`,
+  `<base-path>/.masc/verification-runs.jsonl` (판정 129건 — 도구 호출은 `complete` 이벤트의
   `completion.tools` 에 있다. `register` 이벤트만 보면 기록이 없는 줄 안다).
 - 관련 RFC: RFC-0445(next-actor 합, §2.2 U1 수정 대상), RFC-0417(취소 판정은 운영자),
   RFC-0416(새 상태 없이 보이게 한다), RFC-0221(원자적 검증 제출), RFC-0446(계약 없는 제출 거절),

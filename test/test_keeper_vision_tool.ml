@@ -1773,21 +1773,35 @@ let test_cancelled_candidate_leaves_start_and_cancelled_rows () =
   with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
     with_candidate_row_ledger (fun () ->
       let calls = ref 0 in
-      let cancelled = Eio.Cancel.Cancelled (Failure "cancel vision candidate") in
-      let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () =
-        incr calls;
-        raise cancelled
-      in
+      (* A real cancellation, not a [Cancelled] value raised by hand:
+         [complete] cancels the context the walk runs in, so the cancelled
+         row is written from a fiber whose context is cancelled. The append
+         guard yields before each ledger write, standing in for the store's
+         mutex held by another writer -- the one place that write suspends.
+         Written without protection, the row is lost at that yield. *)
       (try
          Eio_main.run (fun env ->
-           Eio.Switch.run (fun sw ->
-             ignore (Vt.run_vision ~complete ~sw ~clock:env#clock ~net:env#net
-                       ~tool_use_id:"call-vision-cancel"
-                       ~query:"inspect" ~media_type:"image/png"
-                       ~bytes:"\x89PNG\r\n\x1a\nprovider-cancel" ())));
+           Dated_jsonl.set_append_guard (fun append ->
+             Eio.Fiber.yield ();
+             append ());
+           Fun.protect
+             ~finally:(fun () -> Dated_jsonl.set_append_guard (fun append -> append ()))
+             (fun () ->
+               Eio.Switch.run (fun sw ->
+                 Eio.Cancel.sub (fun walk ->
+                   let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () =
+                     incr calls;
+                     Eio.Cancel.cancel walk (Failure "cancel vision candidate");
+                     Eio.Fiber.check ();
+                     failwith "a cancelled context did not raise at its check"
+                   in
+                   ignore (Vt.run_vision ~complete ~sw ~clock:env#clock ~net:env#net
+                             ~tool_use_id:"call-vision-cancel"
+                             ~query:"inspect" ~media_type:"image/png"
+                             ~bytes:"\x89PNG\r\n\x1a\nprovider-cancel" ())))));
          failwith "provider cancellation was swallowed"
        with
-       | Eio.Cancel.Cancelled _ as observed -> assert (observed == cancelled));
+       | Eio.Cancel.Cancelled _ -> ());
       assert (!calls = 1);
       let rows = vision_candidate_rows () in
       assert (List.length rows = 2);

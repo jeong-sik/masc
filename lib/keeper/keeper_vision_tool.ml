@@ -190,30 +190,39 @@ let record_vision_candidate_start
 
 (* The cancelled row terminates a candidate whose provider call the parent
    killed. Without it the walk's cancellation left no row at all: the start
-   row said the candidate began and nothing ever said how it ended. *)
+   row said the candidate began and nothing ever said how it ended.
+
+   Its callers are the [Cancelled] arms, so it always runs in a fiber whose
+   context is already cancelled, and the ledger append can suspend (the
+   store's [Eio.Mutex] when another writer holds it). A suspension there
+   raises [Cancelled] again and the row is lost; the exception that escapes
+   is the same [Cancelled], so nothing outside can tell. The write runs in
+   its own uncancelled context; the caller re-raises the original
+   cancellation afterwards. *)
 let record_vision_candidate_cancelled ?tool_use_id ?trace_id ~runtime_id () =
-  Otel_metric_store.inc_counter
-    Keeper_metrics.(to_string VisionCandidateAttempts)
-    ~labels:
-      [ "runtime_id", runtime_id
-      ; "result", "cancelled"
-      ; "reason", "parent_cancelled"
-      ]
-    ();
-  Keeper_tool_call_log.log_call
-    ~keeper_name:"system"
-    ~tool_name:"vision_candidate"
-    ~input:(`Assoc
-              [ "runtime_id", `String runtime_id
-              ; "result", `String "cancelled"
-              ; "reason", `String "parent_cancelled"
-              ])
-    ~output_text:""
-    ~success:false
-    ~duration_ms:0.0
-    ?tool_use_id
-    ?trace_id
-    ()
+  Eio.Cancel.protect (fun () ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string VisionCandidateAttempts)
+      ~labels:
+        [ "runtime_id", runtime_id
+        ; "result", "cancelled"
+        ; "reason", "parent_cancelled"
+        ]
+      ();
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"system"
+      ~tool_name:"vision_candidate"
+      ~input:(`Assoc
+                [ "runtime_id", `String runtime_id
+                ; "result", `String "cancelled"
+                ; "reason", `String "parent_cancelled"
+                ])
+      ~output_text:""
+      ~success:false
+      ~duration_ms:0.0
+      ?tool_use_id
+      ?trace_id
+      ())
 ;;
 
 (* Default to Runtime_failure: an unclassified error is treated as an internal

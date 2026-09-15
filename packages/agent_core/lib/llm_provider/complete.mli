@@ -72,10 +72,10 @@ val admit_request_body
 
 (** What the measurement is ahead of, and the caller's bounds for it; see
     {!Prepared_completion_request.next_stage}. *)
-type measurement_next_stage = Prepared_completion_request.next_stage =
-  | Completion of { call_timeout_s : float option }
+type 'clock measurement_next_stage = 'clock Prepared_completion_request.next_stage =
+  | Completion of { call_window : 'clock Deadline_window.t }
   | Stream of
-      { admission_timeout_s : float option
+      { admission_window : 'clock Deadline_window.t
       ; first_event_timeout_s : float option
       }
 
@@ -86,14 +86,15 @@ type measurement_next_stage = Prepared_completion_request.next_stage =
     after it. [timeout_s] bounds the count round trip on its own;
     [next_stage] carries the bounds of the stage the measurement is ahead of,
     which the permit wait and the round trip run under (the phases are named
-    there). Either given without [clock] is refused as [AcceptRejected]
-    before any I/O, never applied loosely. Unsupported protocols return the
+    there). A first-event budget given without [clock] is refused as
+    [AcceptRejected] before any I/O, never applied loosely; the call and
+    admission windows carry their own clock. Unsupported protocols return the
     existing typed [Unsupported] measurement error; no estimate is used. *)
 val measure_request
   :  ?connection_cache:Http_client.cache
   -> ?clock:_ Eio.Time.clock
   -> ?timeout_s:float
-  -> next_stage:measurement_next_stage
+  -> next_stage:_ Eio.Time.clock measurement_next_stage
   -> ?permit_wait:Provider_admission.permit_wait Atomic.t
   -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t

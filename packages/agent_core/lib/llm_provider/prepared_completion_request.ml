@@ -23,10 +23,10 @@ type measured =
   ; count_round_trip_s : float option
   }
 
-type next_stage =
-  | Completion of { call_timeout_s : float option }
+type 'clock next_stage =
+  | Completion of { call_window : 'clock Deadline_window.t }
   | Stream of
-      { admission_timeout_s : float option
+      { admission_window : 'clock Deadline_window.t
       ; first_event_timeout_s : float option
       }
 
@@ -176,22 +176,22 @@ let measure_prepared ?connection_cache ?clock ?timeout_s ~next_stage ?permit_wai
   | Error error -> transport_failure error
   | Ok () ->
     (match next_stage with
-     | Completion { call_timeout_s } ->
+     | Completion { call_window } ->
        (* Ahead of a non-streaming completion the caller's bound is the whole
           call: the measurement takes the endpoint's permit like the
-          completion does, so the call deadline bounds that wait and the
-          count round trip under it the same way; a declared [timeout_s]
-          still arms inside. *)
-       (match deadline ~parameter:"call_timeout_s" call_timeout_s with
-        | Error error -> Error error
-        | Ok Http_client.Unbounded -> Provider_admission.with_admission ~config measured
-        | Ok (Http_client.Bounded (call_clock, call_timeout_s)) ->
+          completion does, so the call window bounds that wait and the count
+          round trip under it the same way; a declared [timeout_s] still arms
+          inside. *)
+       (match call_window with
+        | Deadline_window.Unbounded -> Provider_admission.with_admission ~config measured
+        | Deadline_window.Bounded
+            { clock = call_clock; timeout_s = call_timeout_s; deadline_at } ->
           let exceeded = deadline_exceeded ~parameter:"call_timeout_s" ~seconds:call_timeout_s in
           (match
              Provider_admission.with_admission_and_work_until
                ?wait:permit_wait
                ~clock:call_clock
-               ~deadline_at:(Eio.Time.now call_clock +. call_timeout_s)
+               ~deadline_at
                ~config
                measured
            with
@@ -208,7 +208,7 @@ let measure_prepared ?connection_cache ?clock ?timeout_s ~next_stage ?permit_wai
              exceeded
                ~phase:Http_client.Non_streaming_body
                ~stage:"during the count-tokens round trip"))
-     | Stream { admission_timeout_s; first_event_timeout_s } ->
+     | Stream { admission_window; first_event_timeout_s } ->
        (* Ahead of a stream the caller's bounds are the stream's. The
           admission budget spans the permit wait and the count round trip
           after it, as it spans the stream's own wait: the route refuses to
@@ -220,71 +220,68 @@ let measure_prepared ?connection_cache ?clock ?timeout_s ~next_stage ?permit_wai
           when both end together it is the first-event budget, provider
           silence being the more exact of the two. A declared [timeout_s]
           arms inside. *)
-       (match deadline ~parameter:"admission_timeout_s" admission_timeout_s with
+       (match deadline ~parameter:"first_event_timeout_s" first_event_timeout_s with
         | Error error -> Error error
-        | Ok admission_deadline ->
-          (match deadline ~parameter:"first_event_timeout_s" first_event_timeout_s with
-           | Error error -> Error error
-           | Ok first_event_deadline ->
-             let first_event_expired first_event_timeout_s =
-               deadline_exceeded
-                 ~parameter:"first_event_timeout_s"
-                 ~seconds:first_event_timeout_s
-                 ~phase:Http_client.First_token
-                 ~stage:"during the count-tokens round trip, before the stream's first token"
-             in
-             let admission_expired admission_timeout_s =
-               deadline_exceeded
-                 ~parameter:"admission_timeout_s"
-                 ~seconds:admission_timeout_s
-                 ~phase:Http_client.Queue
-                 ~stage:
-                   "during the count-tokens round trip, which the admission budget spans ahead \
-                    of the stream"
-             in
-             let under clock window_s expired =
-               match Under_deadline.run clock window_s measured with
-               | Ok result -> result
-               | Error `Timeout -> expired
-             in
-             (* The round trip, under what the admission budget has left
-                when there is one. *)
-             let round_trip admission_left () =
-               match first_event_deadline, admission_left with
-               | Http_client.Unbounded, None -> measured ()
-               | Http_client.Bounded (clock, first_event_timeout_s), None ->
-                 under clock first_event_timeout_s (first_event_expired first_event_timeout_s)
-               | Http_client.Unbounded, Some (clock, admission_timeout_s, left_s) ->
-                 under clock left_s (admission_expired admission_timeout_s)
-               | ( Http_client.Bounded (clock, first_event_timeout_s)
-                 , Some (_, admission_timeout_s, left_s) ) ->
-                 if Float.compare first_event_timeout_s left_s <= 0
-                 then under clock first_event_timeout_s (first_event_expired first_event_timeout_s)
-                 else under clock left_s (admission_expired admission_timeout_s)
-             in
-             (match admission_deadline with
-              | Http_client.Unbounded -> Provider_admission.with_admission ~config (round_trip None)
-              | Http_client.Bounded (clock, admission_timeout_s) ->
-                let deadline_at = Eio.Time.now clock +. admission_timeout_s in
-                (match
-                   Provider_admission.with_admission_until ?wait:permit_wait ~clock ~deadline_at ~config (fun () ->
-                     let left_s = deadline_at -. Eio.Time.now clock in
-                     if Float.compare left_s 0.0 <= 0
-                     then
-                       deadline_exceeded
-                         ~parameter:"admission_timeout_s"
-                         ~seconds:admission_timeout_s
-                         ~phase:Http_client.Queue
-                         ~stage:
-                           "with a provider admission permit for the count-tokens request granted \
-                            as the deadline passed"
-                     else round_trip (Some (clock, admission_timeout_s, left_s)) ())
-                 with
-                 | Ok result -> result
-                 | Error `Permit_wait_expired ->
-                   permit_wait_expired
-                     ~parameter:"admission_timeout_s"
-                     ~seconds:admission_timeout_s)))))
+        | Ok first_event_deadline ->
+          let first_event_expired first_event_timeout_s =
+            deadline_exceeded
+              ~parameter:"first_event_timeout_s"
+              ~seconds:first_event_timeout_s
+              ~phase:Http_client.First_token
+              ~stage:"during the count-tokens round trip, before the stream's first token"
+          in
+          let admission_expired admission_timeout_s =
+            deadline_exceeded
+              ~parameter:"admission_timeout_s"
+              ~seconds:admission_timeout_s
+              ~phase:Http_client.Queue
+              ~stage:
+                "during the count-tokens round trip, which the admission budget spans ahead \
+                 of the stream"
+          in
+          let under clock window_s expired =
+            match Under_deadline.run clock window_s measured with
+            | Ok result -> result
+            | Error `Timeout -> expired
+          in
+          (* The round trip, under what the admission budget has left
+             when there is one. *)
+          let round_trip admission_left () =
+            match first_event_deadline, admission_left with
+            | Http_client.Unbounded, None -> measured ()
+            | Http_client.Bounded (clock, first_event_timeout_s), None ->
+              under clock first_event_timeout_s (first_event_expired first_event_timeout_s)
+            | Http_client.Unbounded, Some (clock, admission_timeout_s, left_s) ->
+              under clock left_s (admission_expired admission_timeout_s)
+            | ( Http_client.Bounded (clock, first_event_timeout_s)
+              , Some (_, admission_timeout_s, left_s) ) ->
+              if Float.compare first_event_timeout_s left_s <= 0
+              then under clock first_event_timeout_s (first_event_expired first_event_timeout_s)
+              else under clock left_s (admission_expired admission_timeout_s)
+          in
+          (match admission_window with
+           | Deadline_window.Unbounded ->
+             Provider_admission.with_admission ~config (round_trip None)
+           | Deadline_window.Bounded { clock; timeout_s = admission_timeout_s; deadline_at } ->
+             (match
+                Provider_admission.with_admission_until ?wait:permit_wait ~clock ~deadline_at ~config (fun () ->
+                  let left_s = deadline_at -. Eio.Time.now clock in
+                  if Float.compare left_s 0.0 <= 0
+                  then
+                    deadline_exceeded
+                      ~parameter:"admission_timeout_s"
+                      ~seconds:admission_timeout_s
+                      ~phase:Http_client.Queue
+                      ~stage:
+                        "with a provider admission permit for the count-tokens request granted \
+                         as the deadline passed"
+                  else round_trip (Some (clock, admission_timeout_s, left_s)) ())
+              with
+              | Ok result -> result
+              | Error `Permit_wait_expired ->
+                permit_wait_expired
+                  ~parameter:"admission_timeout_s"
+                  ~seconds:admission_timeout_s))))
 ;;
 
 let measure

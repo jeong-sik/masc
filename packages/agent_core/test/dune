@@ -458,7 +458,7 @@
 (test
  (name test_anthropic_input_token_count)
  (modules test_anthropic_input_token_count)
- (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main))
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main eio.mock))
 
 (test
  (name test_exact_fit_call_window)

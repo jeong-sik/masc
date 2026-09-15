@@ -988,7 +988,7 @@ let is_credentialed_external_client config assignee =
 let active_task_owner_fiber_scan ?profile_snapshot config ~executable_names =
   let executable_set = string_set_of_list executable_names in
   let binding_scan = keeper_agent_bindings ?profile_snapshot config in
-  let agent_bindings = binding_scan.enabled_keeper_names in
+  let agent_bindings = binding_scan.admitted_keeper_names in
   let meta_read_errors = binding_scan.binding_read_errors in
   match Workspace.read_backlog_observation_with_source_r config with
   | Error err ->

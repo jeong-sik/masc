@@ -112,7 +112,7 @@ let transport_failure error =
   Error (Count_tokens_sync.Input_count_failed (Input_token_count.Transport error))
 ;;
 
-let measure_prepared ?connection_cache ?clock ?timeout_s ~next_stage ~sw ~net prepared =
+let measure_prepared ?connection_cache ?clock ?timeout_s ~next_stage ?permit_wait ~sw ~net prepared =
   let config = prepared.request.Llm_transport.config in
   let count () =
     Count_tokens_sync.measure_completion_request
@@ -189,6 +189,7 @@ let measure_prepared ?connection_cache ?clock ?timeout_s ~next_stage ~sw ~net pr
           let exceeded = deadline_exceeded ~parameter:"call_timeout_s" ~seconds:call_timeout_s in
           (match
              Provider_admission.with_admission_and_work_until
+               ?wait:permit_wait
                ~clock:call_clock
                ~deadline_at:(Eio.Time.now call_clock +. call_timeout_s)
                ~config
@@ -239,6 +240,7 @@ let measure_prepared ?connection_cache ?clock ?timeout_s ~next_stage ~sw ~net pr
               | Http_client.Bounded (clock, admission_timeout_s) ->
                 (match
                    Provider_admission.with_admission_until
+                     ?wait:permit_wait
                      ~clock
                      ~deadline_at:(Eio.Time.now clock +. admission_timeout_s)
                      ~config
@@ -251,11 +253,28 @@ let measure_prepared ?connection_cache ?clock ?timeout_s ~next_stage ~sw ~net pr
                      ~seconds:admission_timeout_s)))))
 ;;
 
-let measure ?connection_cache ?clock ?timeout_s ~next_stage ~sw ~net (serialized : serialized) =
+let measure
+      ?connection_cache
+      ?clock
+      ?timeout_s
+      ~next_stage
+      ?permit_wait
+      ~sw
+      ~net
+      (serialized : serialized)
+  =
   let prepared = serialized.prepared in
   Result.map
     (fun measured -> { measured with admitted_body = Some serialized.admitted_body })
-    (measure_prepared ?connection_cache ?clock ?timeout_s ~next_stage ~sw ~net prepared)
+    (measure_prepared
+       ?connection_cache
+       ?clock
+       ?timeout_s
+       ~next_stage
+       ?permit_wait
+       ~sw
+       ~net
+       prepared)
 ;;
 
 let attach_measurement

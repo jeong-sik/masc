@@ -55,6 +55,7 @@ type options = Agent_types.options =
   ; body_timeout_s : float option
   ; call_timeout_s : float option
   ; admission_timeout_s : float option
+  ; permit_wait : Llm_provider.Provider_admission.permit_wait Atomic.t option
   ; hooks : Hooks.hooks
   ; guardrails_async : Guardrails_async.t
   ; tracer : Tracing.t

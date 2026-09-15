@@ -53,9 +53,9 @@ jobs:
             test/test_lane_addon_skills.exe test/test_lane_addon_composition.exe \
             test/test_lane_addon_actions.exe test/test_lane_addon_subscription.exe \
             addons/msx-observer/lane.toml \
-            addons/msx-observer/skills/msx-observe/SKILL.md \
-            addons/msx-observer/skills/msx-observe/scripts/summarize.py \
-            addons/msx-observer/skills/msx-observe/references/observations.md \
+            addons/msx-observer/skills/msx-observation-rows/SKILL.md \
+            addons/msx-observer/skills/msx-observation-rows/scripts/summarize.py \
+            addons/msx-observer/skills/msx-observation-rows/references/observations.md \
             addons/protocol.py addons/output-statistics/server.py \
             addons/msx-observer/server.py addons/tests/test_packages.py \
             test/test_tui_palette_matching.exe test/test_tui_lane_addons.exe \

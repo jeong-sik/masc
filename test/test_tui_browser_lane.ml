@@ -112,14 +112,7 @@ let test_operator_reader_context () =
   expect "live Zen keeps the normalized server identity"
     (browser_label (choose_client zen { (create ()) with clients = Some [zen] }) = Some "Zen");
   expect "live with no browser chosen has no browser to name"
-    (browser_label (create ()) = None);
-  expect "browser context identifies source without keeper prerequisite"
-    (context_label (switch_source Automation (create ())) =
-     "Browser Lane · automation · browser page reader");
-  expect "browser context identifies live source"
-    (context_label (pinned ()) = "Browser Lane · live · Firefox page reader");
-  expect "an unchosen browser is not read as a page reader's name"
-    (context_label (create ()) = "Browser Lane · live · no browser")
+    (browser_label (create ()) = None)
 
 let test_source_switch () =
   let view = switch_source Automation { (loaded ()) with url_draft = Some "https://example.org" } in

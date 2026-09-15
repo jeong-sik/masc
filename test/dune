@@ -6297,6 +6297,13 @@
 
 (include stanzas/test_browser_bidi_peer.inc)
 
+; An attempt that published its answer must not publish a failure over it:
+; the light body refresh, and the window around the attempt, run after it.
+(test
+ (name test_server_dashboard_http_execution_surfaces_attempt)
+ (modules test_server_dashboard_http_execution_surfaces_attempt)
+ (libraries masc_test_deps))
+
 (rule
  (alias runtest-test_tui_lane_visual_pty)
  (deps test_tui_lane_visual_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)

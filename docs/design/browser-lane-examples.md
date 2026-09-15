@@ -20,19 +20,13 @@ bash connectors/browser/install-host.sh \
 ```
 
 확장 manifest: `connectors/browser/extension/manifest.json`.
-Automation은 geckodriver를 실행하고, resolved configuration directory의
-`runtime.toml`에 endpoint를 설정한 뒤 MASC를 재시작한다.
-
-```sh
-geckodriver --host 127.0.0.1 --port 4444 --websocket-port 0
-```
-
-BiDi 포트는 OS가 빈 포트를 배정하도록 `0`을 사용한다. HTTP 포트만 바꾸면
-다른 브라우저가 사용하는 기본 BiDi 포트 9222와 충돌할 수 있다.
+Automation은 resolved configuration directory의 `runtime.toml`에 geckodriver
+실행 파일 경로를 적고 MASC를 재시작한다. 서버가 그 geckodriver를 빈 loopback
+포트로 직접 띄우고, 서버가 끝날 때 같이 내린다.
 
 ```toml
 [browser]
-webdriver_url = "http://127.0.0.1:4444"
+geckodriver = "/absolute/path/to/geckodriver"
 # Optional: an absolute path to the installed Zen executable/app bundle.
 # binary = "/path/to/Zen.app/Contents/MacOS/zen"
 ```

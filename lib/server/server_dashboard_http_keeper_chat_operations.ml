@@ -179,6 +179,45 @@ let parse_since_seq request =
      | None -> rejected)
 ;;
 
+(* The byte-offset cursor beside [since_seq]: absent reads from the first row,
+   [n >= 0] is the [next_since_offset] of the page before
+   ([Keeper_chat_event_log.page_start_of_wire]). *)
+let parse_since_offset request =
+  let rejected =
+    Error
+      (invalid_input
+         "since_offset must be an integer >= 0, the next_since_offset of the page \
+          before; omit it to read from the first row")
+  in
+  let raw =
+    match Server_utils.query_param request "since_offset" with
+    | None -> Ok None
+    | Some raw ->
+      (match int_of_string_opt (String.trim raw) with
+       | Some value -> Ok (Some value)
+       | None -> rejected)
+  in
+  match raw with
+  | Error _ as error -> error
+  | Ok raw ->
+    (match Keeper_chat_event_log.page_start_of_wire raw with
+     | Some start -> Ok start
+     | None -> rejected)
+;;
+
+(* A cursor the journal cannot place is the client's request, 400; a corrupt
+   row is the journal, the same 503 a whole read reports. *)
+let page_failure_error failure =
+  let message = Keeper_chat_event_log.page_failure_to_string failure in
+  match failure with
+  | Keeper_chat_event_log.Page_offset_past_rows _ ->
+    { status = `Bad_request; code = "since_offset_past_rows"; message }
+  | Page_offset_inside_row _ ->
+    { status = `Bad_request; code = "since_offset_inside_row"; message }
+  | Page_cursor_mismatch _ -> { status = `Bad_request; code = "cursor_mismatch"; message }
+  | Page_corrupt _ -> unavailable "journal_corrupt" message
+;;
+
 let parse_limit request =
   match Server_utils.query_param request "limit" with
   | None -> Ok Keeper_chat_event_log.page_default_limit
@@ -198,12 +237,6 @@ let parse_operation_id_query request =
   match Server_utils.query_param request "operation_id" with
   | None -> Error (invalid_input "operation_id is required")
   | Some raw -> operation_id (String.trim raw)
-;;
-
-let rec take_at_most n acc = function
-  | rest when n = 0 -> List.rev acc, rest
-  | [] -> List.rev acc, []
-  | entry :: rest -> take_at_most (n - 1) (entry :: acc) rest
 ;;
 
 (* What a missing journal means depends on what the store holds for the
@@ -232,19 +265,13 @@ let no_journal_for_settled_operation_message ~operation_id =
   "no journal exists for Keeper chat operation " ^ operation_id ^ ", which has ended"
 ;;
 
-let chat_events_page ~operation_id ~since_seq ~limit ~redact_json entries =
-  let page, rest =
-    entries
-    |> List.filter (fun (entry : Keeper_chat_event_log.journaled_event) ->
-      Keeper_chat_event_log.seq_is_after since_seq entry.seq)
-    |> take_at_most limit []
-  in
+let chat_events_page ~operation_id ~since_seq ~redact_json (page : Keeper_chat_event_log.page) =
   (* The position to feed back: after the last event served, or the caller's
      own position when the page is empty — [null] when that was the whole
      journal, since a response field cannot be absent the way a request field
      can. *)
   let next_since_seq =
-    match List.rev page with
+    match List.rev page.events with
     | [] -> since_seq
     | (last : Keeper_chat_event_log.journaled_event) :: _ ->
       Keeper_chat_event_log.After_seq last.seq
@@ -256,9 +283,10 @@ let chat_events_page ~operation_id ~since_seq ~limit ~redact_json entries =
       , `List
           (List.map
              (fun entry -> redact_json (Keeper_chat_event_log.journaled_event_to_json entry))
-             page) )
-    ; "has_more", `Bool (not (List.is_empty rest))
+             page.events) )
+    ; "has_more", `Bool page.has_more
     ; "next_since_seq", Keeper_chat_event_log.replay_position_to_yojson next_since_seq
+    ; "next_since_offset", `Int page.next_offset
     ]
 ;;
 
@@ -268,11 +296,12 @@ let handle_get state request reqd = function
     (match
        let* operation_id = parse_operation_id_query request in
        let* since_seq = parse_since_seq request in
+       let* start = parse_since_offset request in
        let* limit = parse_limit request in
-       Ok (operation_id, since_seq, limit)
+       Ok (operation_id, since_seq, start, limit)
      with
      | Error error -> respond_error request reqd error
-     | Ok (operation_id, since_seq, limit) ->
+     | Ok (operation_id, since_seq, start, limit) ->
        let base_path = base_path state in
        let operation_id_text = Operation_id.to_string operation_id in
        let path =
@@ -281,30 +310,41 @@ let handle_get state request reqd = function
            ~keeper_name
            ~operation_id:operation_id_text
        in
-       let respond entries =
+       let respond_page ~served body =
          Log.Dashboard.debug
-           "keeper_chat_events keeper=%s operation_id=%s since_seq=%s limit=%d journaled=%d"
+           "keeper_chat_events keeper=%s operation_id=%s since_seq=%s since_offset=%d limit=%d served=%d"
            keeper_name
            operation_id_text
            (Keeper_chat_event_log.replay_position_to_string since_seq)
+           (Keeper_chat_event_log.page_start_offset start)
            limit
-           (List.length entries);
-         (* Same second redaction layer the SSE projection and the reconnect
-            replay apply: the journal is redacted at publish, this covers
-            lines written before that held. *)
-         let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
-         Server_auth.respond_json_value_with_cors
-           request
-           reqd
-           (chat_events_page
-              ~operation_id:operation_id_text
-              ~since_seq
-              ~limit
-              ~redact_json:(Keeper_secret_redaction.redact_json redaction)
-              entries)
+           served;
+         Server_auth.respond_json_value_with_cors request reqd body
        in
-       (match Keeper_chat_event_log.read_journal_path_result path with
-        | Ok entries -> respond entries
+       (match Keeper_chat_event_log.read_journal_rows_path path with
+        | Ok rows ->
+          (* Same second redaction layer the SSE projection and the reconnect
+             replay apply: the journal is redacted at publish, this covers
+             lines written before that held. The snapshot is taken here, where
+             its secret files are statted; its compiled patterns guard their
+             own automaton with a mutex (Re 1.14), and the chat store already
+             redacts with a caller's snapshot inside a pool job. Decoding the
+             page, redacting it and building its JSON are one CPU job off the
+             serving fiber. *)
+          let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
+          (match
+             Domain_pool_ref.submit_cpu_or_inline (fun () ->
+               Keeper_chat_event_log.page_of_rows ~path ~since_seq ~start ~limit rows
+               |> Result.map (fun (page : Keeper_chat_event_log.page) ->
+                 ( List.length page.events
+                 , chat_events_page
+                     ~operation_id:operation_id_text
+                     ~since_seq
+                     ~redact_json:(Keeper_secret_redaction.redact_json redaction)
+                     page )))
+           with
+           | Ok (served, body) -> respond_page ~served body
+           | Error failure -> respond_error request reqd (page_failure_error failure))
         | Error Keeper_chat_event_log.Journal_missing ->
           (match Registry.exact_operation ~base_path ~keeper_name operation_id with
            | Ok operation ->
@@ -312,7 +352,14 @@ let handle_get state request reqd = function
                 classify_missing_journal
                   (Option.map (fun (operation : Operation.t) -> operation.state) operation)
               with
-              | Nothing_journaled_yet -> respond []
+              | Nothing_journaled_yet ->
+                respond_page
+                  ~served:0
+                  (chat_events_page
+                     ~operation_id:operation_id_text
+                     ~since_seq
+                     ~redact_json:Fun.id
+                     (Keeper_chat_event_log.empty_page start))
               | No_journal_for_settled_operation ->
                 (* The [journal_pruned] code is the client's contract for
                    "nothing to reload, now or later"; the message states only

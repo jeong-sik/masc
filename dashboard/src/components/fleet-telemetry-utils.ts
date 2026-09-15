@@ -293,17 +293,6 @@ export function isOfflineDiagnosticHealthState(state: string | null): boolean {
   return state === 'offline'
 }
 
-// The three health readings that need someone to look. `status` folds all
-// three into the single word 'inactive', which is why this list used to be
-// backed up by a `status === 'inactive'` test below: the fold was the only
-// signal if the diagnostic was missing. The diagnostic carries health for
-// every row, so the fold is no longer read — and reading it cost a keeper
-// that was merely resting an attention badge, because 'inactive' does not
-// distinguish resting from stalled.
-function isAttentionDiagnosticHealthState(state: string | null): boolean {
-  return state === 'stale' || state === 'degraded' || state === 'zombie'
-}
-
 export function fleetBand(row: FleetRow): FleetBand {
   const normalizedStatus = normalizeText(row.status)?.toLowerCase() ?? 'unknown'
   const diagnosticHealthState = normalizedDiagnosticHealthState(row)
@@ -315,8 +304,11 @@ export function fleetBand(row: FleetRow): FleetBand {
     return 'offline'
   }
   if (normalizedStatus === 'paused') return 'paused'
+  // A failing keeper still runs, so it is not offline, and its status word
+  // stays `active`. Health is the field that says its turns are failing, and
+  // that alone is reason to look at it.
   if (
-    isAttentionDiagnosticHealthState(diagnosticHealthState)
+    diagnosticHealthState === 'failing'
     || row.runtime_blocker_class != null
     || row.runtime_trust_attention === true
     || row.terminal_reason_severity === 'bad'
@@ -495,8 +487,7 @@ export function statusClass(row: FleetRow): string {
     return 'text-[var(--bad-light)]'
   }
   if (
-    isAttentionDiagnosticHealthState(diagnosticHealthState)
-    || row.runtime_blocker_class != null
+    row.runtime_blocker_class != null
     || row.runtime_trust_attention === true
     || row.terminal_reason_severity === 'bad'
   ) {

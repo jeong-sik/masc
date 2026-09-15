@@ -71,4 +71,11 @@ val injected_on_post_tool_round : t -> bool
     blocks therefore stay on the first round only; a block answers [true]
     only when its appearance genuinely is someone speaking mid-turn
     ([Operator_note], RFC-0366). A new constructor must declare its class
-    here before it can ride a post-tool round. *)
+    here before it can ride a post-tool round.
+
+    [Temporal_summary] is one of those first-round blocks for the same
+    reason, so the clock a Keeper reads is the one rendered for its turn's
+    first provider request: a round that follows tool results carries no
+    [[Temporal]] line, however long those tools ran. An official client gets
+    the assembly once per dispatch, and its own tool loop runs on that one
+    reading. *)

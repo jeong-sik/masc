@@ -459,9 +459,10 @@ let handle_memory_retract_with_outcome
 (* Browser lane tools preserve selected native-client identity. The closed
    state-layer verb set distinguishes reads from explicit-tab interactions;
    session ownership and direct navigation remain automation-only. *)
-let handle_browser_tabs_with_outcome ~args =
+let handle_browser_tabs_with_outcome ~(config : Workspace.config) ~args =
   Keeper_tool_execution.of_tool_result
-    (Tool_misc_browser_lane.handle_tabs ~tool_name:"masc_browser_tabs" ~start_time:0.0 args)
+    (Tool_misc_browser_lane.handle_tabs ~base_path:config.base_path
+       ~tool_name:"masc_browser_tabs" ~start_time:0.0 args)
 ;;
 
 let handle_browser_read_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args =
@@ -487,9 +488,10 @@ let handle_browser_session_with_outcome ~args =
     (Tool_misc_browser_lane.handle_session ~tool_name:"masc_browser_session" ~start_time:0.0 args)
 ;;
 
-let handle_browser_interact_with_outcome ~args =
+let handle_browser_interact_with_outcome ~(config : Workspace.config) ~args =
   let result, failure_effect_disposition =
-    Tool_misc_browser_lane.handle_interact_with_phase ~tool_name:"masc_browser_interact" ~start_time:0.0 args in
+    Tool_misc_browser_lane.handle_interact_with_phase ~base_path:config.base_path
+      ~tool_name:"masc_browser_interact" ~start_time:0.0 args in
   Keeper_tool_execution.of_tool_result ~failure_effect_disposition result
 ;;
 
@@ -498,10 +500,10 @@ let handle_browser_goto_with_outcome ~args =
     (Tool_misc_browser_lane.handle_goto ~tool_name:"masc_browser_goto" ~start_time:0.0 args)
 ;;
 
-let handle_browser_act_with_outcome ~turn_sandbox_factory ~config ~meta ~args =
+let handle_browser_act_with_outcome ~turn_sandbox_factory ~(config : Workspace.config) ~meta ~args =
   let invoke ?upload_paths () =
     let result, failure_effect_disposition =
-      Tool_misc_browser_lane.handle_act_with_phase ?upload_paths
+      Tool_misc_browser_lane.handle_act_with_phase ?upload_paths ~base_path:config.base_path
         ~tool_name:"masc_browser_act" ~start_time:0.0 args in
     Keeper_tool_execution.of_tool_result ~failure_effect_disposition result in
   match Browser_lane.Action.parse args with
@@ -2060,7 +2062,7 @@ let handle_masc_schedule_with_outcome
   =
   let ctx : Tool_schedule.context =
     { config
-    ; agent_name = meta.name
+    ; caller = Tool_schedule.Named_caller meta.name
     ; stamp_keeper_wake_result_delivery =
         (fun ~payload ->
            Schedule_payload_projection.set_keeper_wake_result_delivery

@@ -433,6 +433,36 @@ class RuntimeSetupAdapter(unittest.TestCase):
                 SETUP.native_setup_command('/fixture/masc', 'runtime-setup-batch', {})
         self.assertEqual(error.exception.failure, {})
 
+    def test_a_killed_verification_says_how_it_ended_without_its_log(self):
+        # 2026-09-15: the child died by SIGKILL and this screen said only that
+        # runtime setup did not finish.
+        response = dict(schema='masc.runtime_setup_error.v1', kind='verification_unreadable', runtime_id='setup.runtime',
+                        error='Runtime "setup.runtime" verification returned no readable report '
+                              '(killed by SIGKILL; stdout is not JSON: Blank input data)',
+                        detail='[INFO] catalog loaded\n[INFO] overlay installed')
+        with patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 1, json.dumps(response), 'private provider diagnostics')):
+            with self.assertRaises(SETUP.SetupError) as error:
+                SETUP.native_setup_command('/fixture/masc', 'runtime-setup-batch', {})
+        self.assertNotIsInstance(error.exception, SETUP.VerificationError)
+        self.assertIn('killed by SIGKILL', str(error.exception))
+        self.assertNotIn('catalog loaded', str(error.exception))
+        self.assertNotIn('private provider diagnostics', str(error.exception))
+
+    def test_an_error_sentence_the_terminal_cannot_show_still_names_its_kind(self):
+        response = dict(schema='masc.runtime_setup_error.v1', kind='validation_failed', runtime_id=None,
+                        error='did not pass validation\nwith a second line')
+        with patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 1, json.dumps(response), '')):
+            with self.assertRaises(SETUP.SetupError) as error:
+                SETUP.native_setup_command('/fixture/masc', 'runtime-setup-batch', {})
+        self.assertIn('(validation_failed)', str(error.exception))
+        self.assertNotIn('second line', str(error.exception))
+
+    def test_a_failure_without_the_error_schema_names_the_exit(self):
+        with patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 3, json.dumps(dict(unexpected=True)), '')):
+            with self.assertRaises(SETUP.SetupError) as error:
+                SETUP.native_setup_command('/fixture/masc', 'runtime-setup-batch', {})
+        self.assertIn('(exit 3)', str(error.exception))
+
     def test_verification_reason_prints_the_native_account_of_the_failure(self):
         with patch.object(SETUP.sys, 'stderr', io.StringIO()) as stderr:
             SETUP.print_verification_reason(dict(code='client_not_authenticated',
@@ -1017,6 +1047,60 @@ class MultipleSelection(unittest.TestCase):
             self.assertEqual(result['base_path'], str(base.resolve()) + '-new')
             self.assertEqual(old.read_bytes(), b'preserve this state')
             self.assertFalse(Path(result['base_path']).exists())
+
+
+@unittest.skipUnless(BINARY, 'actual binary is supplied by targeted CI')
+class WorkspaceFromCurrentDirectory(unittest.TestCase):
+    """RFC workspace-root-resolution stage 1, run against the real binary.
+
+    Measured on 0.35.16 with an empty HOME: inside a workspace, `masc init`
+    exited 1 with "MASC_BASE_PATH is not set" right after logging the cwd.
+    """
+
+    def run_masc(self, home, cwd, *argv):
+        environment = dict(HOME=str(home), PATH=os.environ.get('PATH', '/usr/bin:/bin'),
+                           XDG_CONFIG_HOME=str(home / 'config'))
+        return subprocess.run([BINARY, *argv], cwd=cwd, env=environment,
+                              capture_output=True, text=True, timeout=120)
+
+    def test_init_inside_a_workspace_uses_it_and_outside_names_the_choices(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            workspace = home / 'ws'
+            elsewhere = home / 'elsewhere'
+            workspace.mkdir()
+            elsewhere.mkdir()
+            seeded = self.run_masc(home, elsewhere, 'init', '--config-only', '--base-path', str(workspace))
+            self.assertEqual(seeded.returncode, 0, seeded.stderr)
+            inside = self.run_masc(home, workspace, 'init', '--config-only')
+            self.assertEqual(inside.returncode, 0, inside.stderr)
+            root = os.path.realpath(workspace) + '/.masc/config'
+            self.assertIn('root=' + root + ')', inside.stdout)
+            outside = self.run_masc(home, elsewhere, 'init', '--config-only')
+            self.assertNotEqual(outside.returncode, 0)
+            self.assertIn('No MASC workspace was found', outside.stderr)
+            self.assertIn('--base-path', outside.stderr)
+            self.assertFalse((elsewhere / '.masc').exists())
+
+    def test_doctor_and_setup_answer_in_the_same_order_as_init(self):
+        # The setup journey offers the workspace doctor reports, so a workspace
+        # cwd has to reach doctor too; setup without a terminal refuses by name.
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            workspace = home / 'ws'
+            elsewhere = home / 'elsewhere'
+            workspace.mkdir()
+            elsewhere.mkdir()
+            seeded = self.run_masc(home, elsewhere, 'init', '--config-only', '--base-path', str(workspace))
+            self.assertEqual(seeded.returncode, 0, seeded.stderr)
+            doctor = self.run_masc(home, workspace, 'doctor', '--json')
+            self.assertEqual(doctor.returncode, 0, doctor.stderr)
+            self.assertEqual(json.loads(doctor.stdout)['base_path'], os.path.realpath(workspace))
+            nowhere = self.run_masc(home, elsewhere, 'doctor', '--json')
+            self.assertIsNone(json.loads(nowhere.stdout)['base_path'])
+            setup = self.run_masc(home, elsewhere, 'setup', '--no-tui')
+            self.assertNotEqual(setup.returncode, 0)
+            self.assertIn('No MASC workspace was found', setup.stderr)
 
 
 @unittest.skipUnless(BINARY, 'actual binary is supplied by targeted CI')

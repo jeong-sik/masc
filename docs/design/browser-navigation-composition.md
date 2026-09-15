@@ -5,27 +5,31 @@ The three-channel fixture used three `BrowserGoto` calls followed by three
 The landing acknowledgement did not need a separate model decision in this
 workflow. The following scoped content read still does.
 
-`browser-navigate-regions` declares that pair through MASC's existing inline
-composition grammar. It takes an observed automation tab and a known URL, then
-binds the navigation receipt's landing URL into the region read. The model sees
+`browser-navigate-read` declares that pair through MASC's existing inline
+composition grammar. It takes an observed automation tab, a known URL and a
+read `mode`, then binds the navigation receipt's landing URL into the read. The model sees
 the ordered node results, and the runtime retains each node's execution record.
 If observation fails after navigation, the completed navigation receipt remains
 the recovery source: retry only the read. A redirect or a matching URL does not
 establish that the site's requested content is ready.
 
-`browser-navigate-content` uses the same ordered navigation boundary and reads
-the landing page's visible content with `mode=scene`. It serves pages whose
-visible body can already answer the request. The model checks that content and
-asks for a region map or a scoped read when coverage is insufficient. The two
-compositions are alternatives selected for the page and task; a successful
-content read does not require another region read by convention.
+`mode` is a closed choice of `scene` and `regions`. `mode=regions` returns the
+region map for a later scoped read. `mode=scene` reads the landing page's
+visible content and serves pages whose visible body can already answer the
+request. The model checks that content and asks for a region map or a scoped
+read when coverage is insufficient. The two modes are alternatives selected for
+the page and task; a successful content read does not require another region
+read by convention. `BrowserRead` itself accepts more modes; a value outside
+the two is refused by Agent-Core's input-schema check before the composition
+runs any node.
 
-This content route is the Skill used in the committed
-[three-channel native experiment](../evidence/browser-readable-20260913/README.md):
-six outer calls, three compositions and no tool errors. The current package
-ships that previously experimental declaration. Those measurements establish
-that route's observed behavior, not universal speed or completeness on every
-site. The instruction and runtime revisions of that capture remain recorded
+The committed
+[three-channel native experiment](../evidence/browser-readable-20260913/README.md)
+ran an earlier declaration with the same nodes as the `mode=scene` route but a
+fixed mode and its own name and description: six outer calls, three
+compositions and no tool errors. It did not exercise this tool's description or
+`mode` schema. Those measurements establish that route's observed behavior, not
+universal speed or completeness on every site. The instruction and runtime revisions of that capture remain recorded
 separately from this package change.
 
 The `BrowserGoto` descriptor declares the `url` and `title` object produced by
@@ -35,19 +39,19 @@ absent. The shipped Skill test parses the actual file against runtime descriptor
 then executes redirect, navigation-failure, malformed-receipt and read-failure
 cases. A Skill file alone cannot supply a missing runtime output contract.
 
-The live browser has `browser-live-click-content` and
-`browser-live-click-regions`. Both follow a verified same-tab anchor and retain
-its source document guard. The content route reads the destination body
-directly; the regions route supports a subsequent choice of scope. Site
+The live browser has `browser-live-follow-read`. It follows a verified
+same-tab anchor and retains its source document guard. With `mode=scene` it
+reads the destination body directly; with `mode=regions` it supports a
+subsequent choice of scope. Site
 instructions choose the needed observation and verify its content, without
 guessing site selectors. These follow the href directly rather than executing
 page click handlers, so their navigation semantics differ from an ordinary
 control click and from automation `BrowserGoto`.
 
-The live content route removes the required region-selection round trip for a
-page whose visible body already answers the request. This describes the call
-graph, not a measured latency improvement. Executor tests load both actual
-Skill files and check pinned source identities, destination URL/document guards,
+The live `mode=scene` route removes the required region-selection round trip
+for a page whose visible body already answers the request. This describes the
+call graph, not a measured latency improvement. Executor tests load both actual
+Skill files in both modes and check pinned source identities, destination URL/document guards,
 ordered dispatch, malformed receipts, and preservation of the completed follow receipt
 without replaying navigation after a read failure. They do not prove that a
 subsequent read retry was executed.

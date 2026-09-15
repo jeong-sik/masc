@@ -201,22 +201,24 @@ let msx_capture ~store ~id =
       "entry_count", `Int capture.input_count; "evidence", evidence_json input_ledger]] in
   Ok (envelope ~id ~incarnation:capture.incarnation ~cursor ~complete:true ~detail:`Null [observation])
 let browser_document ~store ~max_bytes ~id ~selection ~tab_id ~target_id ~environment ~request_id =
-  let lane, client_id = match selection with
-    | Live client -> "live", Some client
-    | Automation -> "automation", None in
-  let* target = Browser_lane.resolve_target ~lane_name:lane ~client_id in
+  let route = match selection with
+    | Live client -> Browser_lane.Live_route (Some client)
+    | Automation -> Browser_lane.Automation_route in
+  let* target = Browser_lane.resolve_target route
+    |> Result.map_error Browser_lane.selection_error_code in
   (* Reuse the existing transport deadline; never create a new session, select
      a different document or wait for a primary browser action to finish. *)
   let* fields = match Browser_lane.issue_document_if_idle ~target ~tab_id
       ~timeout_sec:Tool_misc_browser_lane.default_timeout_sec with
-    | Browser_lane.Answered (`Assoc envelope) ->
+    | Error error -> Error (Browser_lane.selection_error_code error)
+    | Ok (Browser_lane.Answered (`Assoc envelope)) ->
         (match List.assoc_opt "ok" envelope, List.assoc_opt "data" envelope with
          | Some (`Bool true), Some (`Assoc fields) -> Ok fields
          | _ -> Error "browser did not produce a document capture")
-    | Browser_lane.Answered _ -> Error "invalid browser envelope"
-    | Browser_lane.Lane_absent -> Error "browser lane unavailable"
-    | Browser_lane.Timed_out -> Error "browser transport deadline elapsed"
-    | Browser_lane.Refused reason | Browser_lane.Rejected_before_effect reason -> Error reason in
+    | Ok (Browser_lane.Answered _) -> Error "invalid browser envelope"
+    | Ok Browser_lane.Lane_absent -> Error "browser lane unavailable"
+    | Ok Browser_lane.Timed_out -> Error "browser transport deadline elapsed"
+    | Ok (Browser_lane.Refused reason | Browser_lane.Rejected_before_effect reason) -> Error reason in
   let* url = text fields "url" in let* document_id = text fields "documentId" in
   let* client = text fields "clientId" in
   let* () = match selection with

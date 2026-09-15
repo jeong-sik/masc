@@ -14,6 +14,7 @@ import { describe, it, expect } from 'vitest'
 import { keeperDisplayStatus } from './keeper-runtime-display'
 import { PHASE_TONE, PHASE_LABEL_KO, PHASE_DESCRIPTION_KO, toKeeperPhaseToken, type KeeperPhaseToken } from './fleet-tone'
 import { resolveUnifiedStatus } from './unified-status'
+import { statusLabel } from './status-label'
 import { keeperPhaseLabel } from '../components/keeper-workspace/keeper-workspace-shared'
 import { PHASE_STYLES, getPhaseStyle } from '../components/keeper-phase-indicator'
 import type { Keeper, KeeperPhase } from '../types/core'
@@ -68,9 +69,9 @@ describe('keeperDisplayStatus stays inside the token union', () => {
   // that used to escape it at runtime and surface as `확인 필요`.
   const escapees: Array<[string, Keeper, KeeperPhaseToken]> = [
     [
-      'heartbeat alive with no lifecycle phase',
-      { name: 'k', status: 'offline', last_heartbeat: new Date().toISOString() } as Keeper,
-      'idle',
+      'registry phase Running with no lifecycle phase',
+      { name: 'k', status: 'offline', phase: 'Running' } as Keeper,
+      'running',
     ],
     ['backend status idle', { name: 'k', status: 'idle' } as Keeper, 'idle'],
     ['backend status listening', { name: 'k', status: 'listening' } as Keeper, 'listening'],
@@ -118,5 +119,14 @@ describe('the unknown fallback does not assert a state', () => {
     expect(getPhaseStyle('NoSuchPhase').label).toBe(PHASE_LABEL_KO.unknown)
     expect(getPhaseStyle(null).label).toBe(PHASE_LABEL_KO.unknown)
     expect(PHASE_STYLES.Offline.label).toBe(PHASE_LABEL_KO.unbooted)
+  })
+})
+
+describe('the failing health word is the Failing phase word', () => {
+  // Keeper_status_runtime publishes health `failing` for exactly the keepers
+  // whose phase is Failing, so the health word and the phase word name one
+  // state and must read as one word.
+  it('statusLabel(failing) is the Failing phase label', () => {
+    expect(statusLabel('failing')).toBe(PHASE_LABEL_KO.failing)
   })
 })

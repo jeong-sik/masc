@@ -182,8 +182,9 @@ order. It stores environment variable names for API credentials, never their val
 ## First-install wizard
 
 Use **↑/↓ to move, Space to select several items, and Enter to continue**.
-Single-choice screens use Enter. Press `q` to return or cancel. Terminals without
-cursor support show numbered choices; enter `1,3` to select multiple items.
+Single-choice screens use Enter. Typing filters the list, Esc clears the
+filter, and Ctrl-C cancels. Terminals without cursor support show numbered
+choices; enter `1,3` to select multiple items, or `q` to cancel.
 
 The model list comes from your CLI cache, HTTP server, existing workspace
 connections, and the installed catalog. Catalog suggestions are checked before
@@ -335,7 +336,7 @@ The setup journey asks **3 · Give imp a voice (optional)** between the model
 connection and the sandbox. Speaking uses `say`, which every Mac has, so it
 downloads nothing. Hearing is a second question and needs `whisper-cli`, a
 1.6GB model file, and `sox` for the microphone; the journey offers all three.
-Choosing **Stay text only** or `q` leaves the voice settings untouched.
+Choosing **Stay text only** leaves the voice settings untouched.
 
 Outside the journey, choose the voice from the list `say` prints. A name that
 is not in that list is refused and nothing is written:
@@ -451,7 +452,9 @@ image for MASC development, not part of a regular install.
 ## Initial prompts, skills, and Keepers
 
 The default installation prepares **one Keeper, `imp`, that does not start on its own** and the
-built-in skills `browser-lanes`, `frontend-change`, and `evidence-review`.
+built-in skills `browser-lanes`, `frontend-change`, `evidence-review`, `run-and-read`,
+`prior-art`, `verify-before-claiming-done`, `root-cause-first`, `diagram-in-chat`,
+`skill-authoring`, and `work-intake`.
 Configure a model and a sandbox, then start the Keeper.
 
 Task and Goal verification agents can also read the instruction Skills

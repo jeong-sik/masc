@@ -19,10 +19,25 @@ type 'a board_read =
   | Available of 'a
   | Unavailable of board_unavailable
 
+(** The comments after the keeper's latest comment on a post, which are by
+    definition all written by someone else. They run to the end of the thread
+    in {!Board_dispatch.get_comments} order, the order [masc_board_post_get]
+    pages through. There is at least one: [oldest] always exists and [newer]
+    holds the rest, oldest first. *)
+type replies_after_own_comment =
+  { comment_offset : int
+    (** Where [oldest] sits in the thread: the [comment_offset] that makes
+        [masc_board_post_get] start its page at it. *)
+  ; oldest : Board.Comment_id.t
+  ; newer : Board.Comment_id.t list
+  }
+
 type comment_state =
   [ `Never
   | `No_new_external
-  | `New_external of int * string * string
+  | `New_external of replies_after_own_comment * string * string
+    (** The replies after the keeper's latest comment, then the author and a
+        preview of the newest one. *)
   ]
 
 type comment_status = comment_state board_read

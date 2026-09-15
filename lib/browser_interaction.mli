@@ -1,5 +1,5 @@
 (** Closed browser actions; selectors and text remain data. *)
-type request = { source : Browser_surface.source; tab_id : int; client_id : Browser_lane.client_id option;
+type request = { route : Browser_lane.route; tab_id : int;
   expected_url : string option; action : Browser_lane.interaction }
 val parse : Yojson.Safe.t -> (request, string) result
 val perform : request -> (Yojson.Safe.t, string) result

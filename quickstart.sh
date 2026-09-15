@@ -92,7 +92,7 @@ write_mcp_client_env() {
 
   [ -x "$exe" ] || die "built MASC binary not found at $exe"
   mkdir -p "$(dirname "$env_file")"
-  if ! (umask 077; MASC_BASE_PATH="$BASE_PATH" MASC_BASE_PATH_INPUT="$BASE_PATH" \
+  if ! (umask 077; MASC_BASE_PATH="$BASE_PATH" \
     "$exe" login \
       --base-path "$BASE_PATH" \
       --host 127.0.0.1 \

@@ -11,11 +11,49 @@ type state =
   ; notes : Schedule_domain.schedule_note list
   }
 
+(** The caller-requested transitions that only a [Scheduled] or [Due]
+    request accepts. *)
+type attempted_transition =
+  | Modify_schedule
+  | Cancel_schedule
+  | Cancel_for_consumer_retirement
+      (** {!cancel_matching}: the schedules of a consumer that is being
+          retired, which a wake still in delivery holds back. *)
+
+val attempted_transition_to_string : attempted_transition -> string
+
 type store_error =
   | Schedule_already_exists
   | Schedule_not_found
   | Invalid_initial_status of string
-  | Invalid_status_transition of string
+  | Transition_refused of
+      { schedule_id : string
+      ; current : Schedule_domain.schedule_status
+      ; attempted : attempted_transition
+      ; last_wake : Schedule_domain.wake_record option
+      }
+      (** The request is [Running] or terminal. [current] is the status the
+          store read under its lock, and [last_wake] is that instance's
+          newest wake, so a refused caller sees what already happened
+          without a second read. *)
+  | Changed_due_already_past of
+      { schedule_id : string
+      ; stored_due_at : float
+      ; due_at : float
+      ; now : float
+      }
+      (** {!update_request} refused a replacement whose due time differs from
+          the stored one at whole-second resolution and is before [now], the
+          updating call's clock cut to the whole second. *)
+  | Running_wake_absent of { schedule_id : string }
+      (** A [Running] request has no wake record at all to settle or
+          recover. *)
+  | Running_wake_settled of
+      { schedule_id : string
+      ; wake : Schedule_domain.wake_record
+      }
+      (** A [Running] request whose newest wake already succeeded or failed,
+          so there is no running wake to settle or recover. *)
   | Schedule_not_due_candidate
   | Schedule_not_running
   | Persistence_failed of string
@@ -101,13 +139,17 @@ val insert_request :
 
 val update_request :
   Workspace_utils.config ->
+  now:float ->
   Schedule_domain.schedule_request ->
   (Schedule_domain.schedule_request, store_error) result
 (** Atomically replaces an existing [Scheduled] or [Due] request. The caller
     supplies a newly validated request with the same stable [schedule_id] and
     a fresh [schedule_instance_id], so wakes from the previous definition do
     not become evidence for the replacement. Running and terminal requests
-    are immutable. *)
+    are immutable. [now] is the updating call's clock: a due time that
+    changes and lands before the current whole second is
+    [Changed_due_already_past]; the stored due time sent back unchanged is
+    accepted whatever the clock says. *)
 
 val cancel_request :
   Workspace_utils.config ->
@@ -208,8 +250,10 @@ val cancel_matching :
   Workspace_utils.config ->
   should_cancel:(Schedule_domain.schedule_request -> bool) ->
   (unit, store_error) result
-(** Atomically cancels every matching [Scheduled] or [Due] request. A matching
-    [Running] request is rejected because wake delivery is still in progress. *)
+(** Atomically cancels every matching [Scheduled] or [Due] request, for a
+    consumer that is being retired. A matching [Running] request refuses the
+    whole call with [Transition_refused] and [Cancel_for_consumer_retirement],
+    because wake delivery is still in progress. *)
 
 val prune_completed :
   Workspace_utils.config ->

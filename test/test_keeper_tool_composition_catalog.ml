@@ -532,15 +532,159 @@ name = "query"
        ^ Catalog.error_to_string error)
 ;;
 
+(* One read whose mode the caller picks from a closed set. [param_lines] is
+   spliced between the param's name and description so each case varies only
+   the declaration under test. *)
+let read_mode_composition ~param_lines =
+  {|[[compositions]]
+name = "read-mode"
+description = "Read one automation tab in the chosen mode."
+execution = "inline"
+
+[[compositions.params]]
+name = "mode"
+|}
+  ^ param_lines
+  ^ {|
+description = "Which read to return."
+
+[[compositions.nodes]]
+id = "read"
+tool = "BrowserRead"
+input = { kind = "object", fields = [
+  { name = "lane", value = { kind = "literal", value = "automation" } },
+  { name = "tabId", value = { kind = "literal", value = 1 } },
+  { name = "mode", value = { kind = "param", name = "mode" } }
+] }
+|}
+;;
+
+let read_mode_entry () =
+  let catalog =
+    parse_ok
+      (read_mode_composition
+         ~param_lines:{|type = "string"
+enum = ["scene", "regions"]|})
+  in
+  match Catalog.find catalog "read-mode" with
+  | Some entry -> entry
+  | None -> fail "enum param composition lookup missed exact name"
+;;
+
+let test_enum_param_projects_members_and_binds () =
+  let entry = read_mode_entry () in
+  (match entry.Catalog.params with
+   | [ { Catalog.param_type = Catalog.Enum_param [ "scene"; "regions" ]; _ } ] -> ()
+   | _ -> fail "enum param did not keep its members in declared order");
+  let schema = Catalog.input_schema_of_params entry.Catalog.params in
+  let open Yojson.Safe.Util in
+  let property = schema |> member "properties" |> member "mode" in
+  check string "enum property is a string" "string" (property |> member "type" |> to_string);
+  check
+    (list string)
+    "schema lists the members"
+    [ "scene"; "regions" ]
+    (property |> member "enum" |> to_list |> List.map to_string);
+  (* The composition handler checks its arguments again with masc's own input
+     validation before binding, so a member has to pass that check too. *)
+  (match
+     Masc.Tool_input_validation.validate_args
+       ~schema
+       ~name:"keeper_compose_read-mode"
+       ~args:(`Assoc [ "mode", `String "regions" ])
+       ()
+   with
+   | Ok _ -> ()
+   | Error _ -> fail "input validation refused a declared member");
+  let descriptors = Masc.Keeper_tool_descriptor.all_descriptors () in
+  (match
+     Catalog.instantiate ~descriptors ~args:(`Assoc [ "mode", `String "regions" ]) entry
+   with
+   | Ok plan ->
+     let bound_mode =
+       Plan.nodes plan
+       |> List.find_map (fun (node : Plan.node) ->
+         match node.input with
+         | Plan.Json_template.Object fields -> List.assoc_opt "mode" fields
+         | Plan.Json_template.Literal _
+         | Plan.Json_template.Output _
+         | Plan.Json_template.Param _
+         | Plan.Json_template.Array _ -> None)
+     in
+     (match bound_mode with
+      | Some (Plan.Json_template.Literal (`String "regions")) -> ()
+      | Some _ | None -> fail "the chosen member was not bound as a literal")
+   | Error error ->
+     fail ("a declared member failed to bind: " ^ Catalog.instantiation_error_to_string error));
+  match Catalog.instantiate ~descriptors ~args:(`Assoc []) entry with
+  | Error (Catalog.Missing_argument "mode") -> ()
+  | Ok _ -> fail "a missing enum argument was bound"
+  | Error error ->
+    fail ("wrong refusal for a missing value: " ^ Catalog.instantiation_error_to_string error)
+;;
+
+let test_enum_param_declaration_errors () =
+  let parse_error param_lines =
+    match Catalog.parse (read_mode_composition ~param_lines) with
+    | Error error -> error
+    | Ok _ -> fail ("declaration was accepted: " ^ param_lines)
+  in
+  (match parse_error {|type = "integer"
+enum = ["scene", "regions"]|} with
+   | Catalog.Param_enum_requires_string_type { type_name = "integer"; _ } -> ()
+   | error -> fail ("enum on integer: " ^ Catalog.error_to_string error));
+  (match parse_error {|type = "string"
+enum = []|} with
+   | Catalog.Empty_param_enum _ -> ()
+   | error -> fail ("empty enum: " ^ Catalog.error_to_string error));
+  (match parse_error {|type = "string"
+enum = ["scene", "scene"]|} with
+   | Catalog.Duplicate_param_enum_value { value = "scene"; _ } -> ()
+   | error -> fail ("repeated member: " ^ Catalog.error_to_string error));
+  List.iter
+    (fun (label, members, expected_value, expected_fault) ->
+       match parse_error ("type = \"string\"\nenum = " ^ members) with
+       | Catalog.Unsendable_param_enum_value { value; fault; _ }
+         when String.equal value expected_value && fault = expected_fault -> ()
+       | error -> fail (label ^ ": " ^ Catalog.error_to_string error))
+    [ "empty member", {|["scene", ""]|}, "", Catalog.Empty_value
+    ; "leading whitespace", {|[" scene", "regions"]|}, " scene", Catalog.Padded_value
+    ; "trailing whitespace", {|["scene", "regions "]|}, "regions ", Catalog.Padded_value
+    ; "line feed inside", {|["scene", "re\ngions"]|}, "re\ngions", Catalog.Line_break_in_value
+    ; ( "carriage return inside"
+      , {|["scene", "re\rgions"]|}
+      , "re\rgions"
+      , Catalog.Line_break_in_value )
+    ; ( "spaced separator inside"
+      , {|["scene | regions", "text"]|}
+      , "scene | regions"
+      , Catalog.Separator_in_value )
+    ; "separator ending a member", {|["x |", "y"]|}, "x |", Catalog.Separator_in_value
+    ; ( "padding is reported before a separator"
+      , {|[" x|y", "z"]|}
+      , " x|y"
+      , Catalog.Padded_value )
+    ];
+  (match parse_error {|type = "string"
+enum = "scene"|} with
+   | Catalog.Wrong_value_kind { field = "enum"; expected = Catalog.String_array_value; _ } ->
+     ()
+   | error -> fail ("scalar enum: " ^ Catalog.error_to_string error));
+  match parse_error {|type = "string"
+values = ["scene", "regions"]|} with
+  | Catalog.Unknown_field { field = "values"; _ } -> ()
+  | error -> fail ("unknown member field: " ^ Catalog.error_to_string error)
+;;
+
 (* A composition tool ships no TOML, so "which file defines this" has to
    resolve to the SKILL.md the catalog read. Composed from the name, which is
    sound only because the tool exists as a consequence of that file. *)
 let test_skill_source_names_the_skill_file () =
-  match Catalog.skill_source_of_tool_name "keeper_compose_mission-snapshot" with
+  match Catalog.skill_source_of_tool_name "keeper_compose_work-intake" with
   | Some rel ->
     Alcotest.(check string)
       "skill definition path"
-      "skills/mission-snapshot/SKILL.md"
+      "skills/work-intake/SKILL.md"
       rel
   | None -> Alcotest.fail "a composition tool must name its skill file"
 ;;
@@ -660,6 +804,14 @@ let () =
             "param declaration mismatches are rejected"
             `Quick
             test_catalog_rejects_param_declaration_mismatches
+        ; test_case
+            "an enum param projects its members and binds a member"
+            `Quick
+            test_enum_param_projects_members_and_binds
+        ; test_case
+            "enum param declarations are checked at load"
+            `Quick
+            test_enum_param_declaration_errors
         ; test_case
             "a composition tool names its skill file"
             `Quick

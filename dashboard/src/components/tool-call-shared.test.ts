@@ -270,11 +270,11 @@ describe('toolSubject', () => {
         identity: {
           source_id: 'project-masc',
           package_id: 'masc-keeper-autonomy',
-          name: 'turn-opening',
+          name: 'root-cause-first',
         },
         content_revision: 'a1b2c3',
       }),
-    ).toBe('turn-opening')
+    ).toBe('root-cause-first')
     expect(
       toolSubject({
         identity: {
@@ -288,7 +288,7 @@ describe('toolSubject', () => {
 
   it('lets a direct key outrank a nested one', () => {
     expect(
-      toolSubject({ file_path: 'lib/a.ml', identity: { name: 'turn-opening' } }),
+      toolSubject({ file_path: 'lib/a.ml', identity: { name: 'root-cause-first' } }),
     ).toBe('lib/a.ml')
   })
 

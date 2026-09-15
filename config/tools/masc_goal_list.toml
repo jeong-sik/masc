@@ -6,6 +6,9 @@ additional_properties = false
 # The enum mirrors Goal_phase.all (issue #8392: hand-rolled enums drop
 # constructors); test_enum_mirror_sync compares the published values against
 # the variant.
+
+defer_loading = true
+
 [[params]]
 name = "phase"
 type = "string"

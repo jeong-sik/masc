@@ -20,10 +20,14 @@ let keeper_lifecycle_to_string = function
 
 (** What the published keeper status says about progress. Kept separate from
     {!keeper_lifecycle} because a paused keeper is an operator decision, not a
-    liveness reading, and reporting it as either offline or running is wrong. *)
+    liveness reading, and reporting it as either offline or running is wrong.
+    A failing keeper has its own value for a similar reason: its keepalive
+    runs, so it is not offline, and its turns fail, so the live branch's
+    "정상 동작 중" would be false. *)
 type continuity_liveness =
   | Cl_offline
   | Cl_paused
+  | Cl_failing
   | Cl_live
 
 (** Keeper execution state — derived from lifecycle and turn metrics.
@@ -243,8 +247,7 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
      not failing, and it is also not going to make progress, so it carries its
      own liveness rather than borrowing either verdict. *)
   (* Two readings, read separately. [paused] is a person's decision and health
-     is an observation; the status string this used to parse folded the two
-     into one word, and folded stale, degraded and zombie together on the way.
+     is an observation; a single status word cannot answer both.
 
      Health is parsed whether or not the keeper is paused, so a health this
      build cannot read is rejected either way. Validating it only on the
@@ -272,16 +275,14 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
     if paused then Cl_paused
     else
       match health with
-      | Keeper_types.KH_offline | KH_zombie -> Cl_offline
-      (* Stale is a keeper whose heartbeat is late, not one that stopped: its
-         fiber is alive and it may still be taking turns. Reading it as offline
-         sent an operator to boot a keeper that was already up. *)
-      | KH_healthy | KH_idle | KH_stale | KH_degraded -> Cl_live
+      | Keeper_types.KH_offline -> Cl_offline
+      | KH_failing -> Cl_failing
+      | KH_healthy | KH_idle -> Cl_live
   in
   let continuity_offline =
     match liveness with
     | Cl_offline -> true
-    | Cl_paused | Cl_live -> false
+    | Cl_paused | Cl_failing | Cl_live -> false
   in
   let lifecycle =
     if liveness = Cl_paused then Lc_idle
@@ -302,6 +303,10 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
     match liveness with
     | Cl_offline -> (Exec_critical, Tone_bad, "keeper 오프라인")
     | Cl_paused -> (Exec_warning, Tone_warn, "운영자 일시정지")
+    (* The word and tone the dashboard already gives the Failing phase
+       (dashboard/src/lib/fleet-tone.ts), so this row and that phase chip say
+       the same thing. *)
+    | Cl_failing -> (Exec_critical, Tone_bad, "오류 발생")
     | Cl_live ->
       match lifecycle with
       | Lc_handoff_imminent ->

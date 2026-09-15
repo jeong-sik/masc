@@ -314,9 +314,11 @@ let record_state ~health (chunk : Acting.chunk) =
   if chunk.Acting.ck_settled then Record_settled
   else
     match health with
-    | Some Reading.Health_offline | Some Reading.Health_zombie -> Record_unfinished
-    | Some (Reading.Health_running | Reading.Health_idle | Reading.Health_stale
-           | Reading.Health_degraded) | None -> Record_open
+    | Some Reading.Health_offline -> Record_unfinished
+    (* A failing keeper's process is still there, so "process gone" would be
+       false for it. *)
+    | Some (Reading.Health_running | Reading.Health_idle | Reading.Health_failing)
+    | None -> Record_open
 
 (* The record's state in words, for the focus header and the earlier-turn
    rows; a fleet row carries only the glyph. An unsettled record is a turn
@@ -467,17 +469,16 @@ let tab_pill ~active tab =
    agent present is doing nothing. Offline rows are dropped so the ones that are
    working are not read past.
 
-   Only Health_offline. Zombie, stale and degraded are keepers that should be
-   running and are not -- the readings an operator most needs to see -- and a
-   filter that took them too would hide the fleet's problems and call it tidier.
+   Only Health_offline. An idle keeper is one that has not turned yet, which is
+   a keeper an operator may still be waiting on, so it stays in the pane.
+   A failing keeper is still turning, and its turns are the ones an operator
+   most needs to read, so it stays too.
    A keeper whose health did not read at all stays: no reading is not a reading
    of "offline", and dropping those empties the pane whenever the roster fails. *)
 let is_offline keeper =
   match keeper.health with
   | Some Reading.Health_offline -> true
-  | Some
-      ( Reading.Health_running | Reading.Health_idle | Reading.Health_stale
-      | Reading.Health_degraded | Reading.Health_zombie )
+  | Some (Reading.Health_running | Reading.Health_idle | Reading.Health_failing)
   | None -> false
 
 (* A roster that was never read has no rows to draw, so the rows read it as
@@ -736,19 +737,16 @@ let call_detail_line ~cols ~now (tool : Acting.chunk_tool) part =
   | Detail_input -> preview_row ~label:"in" tool.Acting.ct_input
   | Detail_output -> preview_row ~label:"out" tool.Acting.ct_output
 
-(* The turn number a settle confirmed is the keeper's own count. An
-   unsettled chunk still carries the agent session's numbering, which the
-   viewer does not trust: a session restart renumbers from zero, so the
-   same turn once drew as 1740 on the header and 3084 on the summary
-   (live capture 2026-09-06). A settle that carried no number settles the
-   chunk without naming it, and [turn_text] would draw that as [turn ?] --
-   a question the row cannot answer and the reader cannot act on (live
-   capture 2026-09-06). Only a number the settle confirmed becomes a
-   name. *)
+(* The pane names a turn by the number its settle confirmed; the header
+   then shows that number in place of the state word. An open turn spells
+   its state instead, whatever number an observation gave it. A settle that
+   carried no number settles the chunk without naming it: [turn_text] would
+   draw that as [turn ?], a question the row cannot answer and the reader
+   cannot act on. *)
 let turn_name (chunk : Acting.chunk) =
-  match chunk.Acting.ck_turn with
-  | Some _ when chunk.Acting.ck_settled -> Some (Acting.turn_text chunk.Acting.ck_turn)
-  | _ -> None
+  match (chunk.Acting.ck_turn, chunk.Acting.ck_settled) with
+  | (Some _ as turn), true -> Some (Acting.turn_text turn)
+  | Some _, false | None, (true | false) -> None
 
 let turn_summary_line ~cols ~health (chunk : Acting.chunk) =
   let state = record_state ~health chunk in

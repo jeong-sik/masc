@@ -33,11 +33,15 @@ let submit_request_spec ~(config : Workspace.config) ~(task : Masc_domain.task)
   (* The Board post names what was asked. A stop carries the producer's
      reason where a completion carries its evidence references: the reason is
      the whole claim, so the post states it for the operator who closes the
-     stop (RFC-0417 §4.1). The record keeps no copy of that sentence. Which
-     question was asked is the Task's status to answer, the authority routes
-     a stop to the operator before it opens the record's output, and the
-     operator reads the post. The task contract describes work the producer
-     says should not be finished, and is not what a stop is judged on. *)
+     stop (RFC-0417 §4.1). The task contract describes work the producer says
+     should not be finished, and is not what a stop is judged on.
+
+     The record keeps a copy of that sentence. #33218 removed the copy because
+     nothing read it — the authority routes a stop to the operator before it
+     opens the record, and the operator read the post. The operator's work list
+     (RFC-0453 §3.3) reads it: a list built from the backlog cannot reach into
+     an unlisted Board post's body, and cutting the sentence out of that body
+     would be string parsing. One write at submission, one typed reader. *)
   (* The title carries the request id: one task is re-submitted many times
      and a reader must tell the posts apart by their title alone. *)
   let board_title, board_content, evidence_refs =
@@ -52,6 +56,17 @@ let submit_request_spec ~(config : Workspace.config) ~(task : Masc_domain.task)
       , Printf.sprintf "Cancellation requested for task %s (%s) by %s: %s"
           task.id task.title assignee reason
       , [] )
+  in
+  (* Keyed on the claim, not on the Task's status: the status answers which
+     question was asked, and reading it here would let the two disagree about
+     one submission. A completion carries no reason field at all rather than a
+     null one, so a reader cannot mistake "not a stop" for "a stop that said
+     nothing". *)
+  let claim_fields =
+    match claim with
+    | Masc_domain.Completion_evidence _ -> []
+    | Masc_domain.Cancellation_reason { reason } ->
+      [ Workspace_verification_store.cancellation_reason_field, `String reason ]
   in
   let criteria =
     match task.contract with
@@ -84,6 +99,7 @@ let submit_request_spec ~(config : Workspace.config) ~(task : Masc_domain.task)
       ([ ("evidence_refs", `List (List.map (fun s -> `String s) evidence_refs));
          ("task_title", `String task.title);
        ]
+       @ claim_fields
        @ evidence_fields)
   in
   { criteria

@@ -54,6 +54,7 @@
   masc.tool_catalog_surfaces
   masc.config_dir_resolver
   masc.workspace_connection
+  masc.browser_lane
   uri
   mtime
   mtime.clock

@@ -112,7 +112,6 @@ let () =
   write (Filename.concat base "catalogue.txt") catalogue;
   write runtime_toml voice_section;
   Unix.putenv "MASC_BASE_PATH" base;
-  Unix.putenv "MASC_BASE_PATH_INPUT" base;
   Unix.putenv "PATH" (bin ^ ":/bin");
   at_exit (fun () -> rm_rf base)
 

@@ -277,27 +277,19 @@ let enrich_keeper_with_diagnostic ~(config : Workspace.config) (keeper_json : Yo
         | `String name ->
           (match Keeper_meta_store.read_meta_resolved config name with
            | Ok (Some (_resolved_name, meta)) ->
-             let keepalive_running =
-               match Option.value ~default:`Null (Json_util.assoc_member_opt "keepalive_running" keeper_json) with
-               | `Bool value -> value
-               | _ -> Keeper_status_bridge.runtime_keepalive_running config meta
-             in
              let now_ts = Time_compat.now () in
              let diagnostic =
                match existing_diagnostic with
                | Some diagnostic -> diagnostic
                | None ->
+                 (* Health needs the phase itself, which the row's
+                    [keepalive_running] boolean cannot give back: Running and
+                    Failing both publish [true]. *)
                  Keeper_status_runtime.keeper_diagnostic_json
-                   ~config
                    ~meta
-                   ~keepalive_running
+                   ~phase:(Keeper_status_bridge.runtime_phase config meta)
                    ~history_items:[]
                    ~now_ts
-                 |> Keeper_status_runtime.augment_keeper_diagnostic_json
-                      ~keepalive_running
-                      ~keepalive_started_at:
-                        (Keeper_status_bridge.runtime_keepalive_started_at config meta)
-                      ~now_ts
              in
              let trust =
                match existing_trust with
@@ -441,7 +433,6 @@ let keeper_queue_last_seen keeper trust =
     [ Json_util.assoc_string_opt "ts" latest_causal
     ; Json_util.assoc_string_opt "observed_at" latest_causal
     ; Json_util.assoc_string_opt "tool_audit_at" keeper
-    ; Json_util.assoc_string_opt "last_heartbeat" keeper
     ; Json_util.assoc_string_opt "updated_at" keeper
     ; Json_util.assoc_string_opt "created_at" keeper
     ]
@@ -894,6 +885,16 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
          @ [ "messages", `List (List.map message_json messages) ]))
 ;;
 
+(* A render that finished as the window closed is the render;
+   [Eio.Time.with_timeout] would have replaced it with the error page. *)
+let render_under_timeout ~clock ~timeout_s render =
+  Watched_work.run
+    ~watcher:(fun () ->
+      Eio.Time.sleep clock timeout_s;
+      Error `Timeout)
+    (fun () -> Ok (render ()))
+;;
+
 let json ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
   let effective_actor = Dashboard_projection_cache.normalize_actor_name actor in
   match dashboard_fixture_name ?fixture () with
@@ -902,14 +903,9 @@ let json ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
     (* Guard: abort render if it exceeds render_timeout_s.
        PG connection failures during render can block fibers for hours
        (observed: 11,018s render on 2026-03-21). *)
-    (* A render that finished as the window closed is the render;
-       [Eio.Time.with_timeout] would have replaced it with the error page. *)
     (match
-       Watched_work.run
-         ~watcher:(fun () ->
-           Eio.Time.sleep clock render_timeout_s;
-           Error `Timeout)
-         (fun () -> Ok (json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr ()))
+       render_under_timeout ~clock ~timeout_s:render_timeout_s (fun () ->
+         json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr ())
      with
      | Ok result -> result
      | Error `Timeout ->
@@ -926,4 +922,5 @@ let json ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
 
 module For_test = struct
   let agents_json = agents_json
+  let render_under_timeout = render_under_timeout
 end

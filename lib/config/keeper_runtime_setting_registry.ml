@@ -199,9 +199,14 @@ let all =
       ~exposure:Env_only
       ~value_kind:Float
       ~default:"900.0"
-      ~consumers:[ "Env_config_keeper.KeeperKeepalive"; "Keeper_heartbeat_loop" ]
+      ~consumers:
+        [ "Env_config_keeper.KeeperKeepalive"
+        ; "Keeper_runtime_failure_route"
+        ; "Keeper_turn_driver"
+        ; "Keeper_heartbeat_loop"
+        ]
       ~category:"heartbeat"
-      "Upper bound for rate-limit failure-route backoff in seconds"
+      "Longest rest of a provider path after a refusal, in seconds"
   ; setting
       ~env_name:"MASC_KEEPER_WIRE_CAPTURE"
       ~exposure:(Toml_and_env "wire_capture.enabled")
@@ -327,6 +332,18 @@ let all =
         ]
       ~category:"turn"
       "No-progress threshold for a provider call attempt and a tool's provider sub-call"
+  ; setting
+      ~range:(int_range ~min:Env_config_keeper.KeeperContext.window_tokens_min ())
+      ~env_name:Env_config_keeper.KeeperContext.window_tokens_env_key
+      ~exposure:(Toml_and_env "turn.context_window_tokens")
+      ~value_kind:Integer
+      ~default:(string_of_int Env_config_keeper.KeeperContext.window_tokens_default)
+      ~consumers:
+        [ "Keeper_runtime_resolved"
+        ; "Keeper_turn_driver_try_provider model input window"
+        ]
+      ~category:"turn"
+      "Tokens one AGENT_CORE-lane request carries: fixed prompt plus recent verbatim history"
   ; setting
       ~range:
         (float_range

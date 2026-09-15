@@ -17,4 +17,8 @@ val defer : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_o
 module For_testing : sig
   val validate_scope : operation_id:Keeper_chat_operation.Operation_id.t ->
     Agent_core.Checkpoint.t -> (unit, string) result
+
+  (** When a deferred chat retry becomes claimable: [None] now, [Some t] at
+      [t] (RFC-provider-path-rest §3.4). *)
+  val retry_not_before : now:float -> Keeper_turn_driver.deferred_runtime_lane -> float option
 end

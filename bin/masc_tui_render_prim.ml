@@ -520,8 +520,11 @@ let slash_hint_text ~restore draft =
 
 let composer_line state ~cols =
   match browser_lane_on_screen state with
-  | Some view ->
-      Theme.recede () ^ fit_width (Browser_lane_view.context_label view) cols ^ Ansi.reset
+  (* The page reader owns the keys here, so there is no composer to draw. The
+     row it would take stays empty: the title already names the lane, its
+     source and its browser, and a second copy down here is a state the reader
+     has to match up by position. *)
+  | Some _ -> Theme.recede () ^ fit_width "" cols ^ Ansi.reset
   | None ->
   let composer = Composer_projection.of_state state in
   let prompt = composer_prompt_text ~voice:(voice_meter_text state) composer in
@@ -917,8 +920,8 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
         match reading_of_health with
         | Some Tui_decode.Health_running -> Pane.Ok
         | Some Tui_decode.Health_idle -> Pane.Dim
-        | Some (Tui_decode.Health_stale | Tui_decode.Health_degraded) -> Pane.Warn
-        | Some (Tui_decode.Health_offline | Tui_decode.Health_zombie) -> Pane.Bad
+        | Some Tui_decode.Health_failing -> Pane.Warn
+        | Some Tui_decode.Health_offline -> Pane.Bad
         | None -> Pane.Dim
     in
     { Pane.name = keeper.k_name
@@ -1252,20 +1255,18 @@ let keeper_roster_pane_shown (state : state) ~cols =
      word    how it is reporting   from health
 
    The lifecycle cell is the fourth and has its own column. The cell used to
-   show a single word from [surface_status], which restates health with stale,
-   degraded and zombie folded together and hides health entirely while a keeper
-   is paused. *)
+   show a single word from [surface_status], which restates health and hides
+   it entirely while a keeper is paused. *)
 let keeper_action_color
     (action : Status.keeper_next_action_path option) =
   match action with
   | None -> Ansi.dim
-  | Some Status.Auto_restart -> (Theme.bad ())
   | Some Status.Recover -> (Theme.warn ())
   | Some Status.Probe -> Theme.action_probe ()
-  (* Green until this measurement. The cell draws four readings in four
-     channels and this is the only one carried by colour alone, so the four
-     colours have to stay apart for a reader who cannot separate red from
-     green -- roughly one man in twelve.
+  (* Green until this measurement. The cell draws its readings in separate
+     channels and this is the only one carried by colour alone, so the three
+     action colours have to stay apart for a reader who cannot separate red
+     from green -- roughly one man in twelve.
 
      Simulated (Machado 2009, severity 1.0) over the twelve base16 schemes the
      contrast harness measures, the closest pair was not red against green but
@@ -3088,10 +3089,10 @@ let context_branch ~index ~last =
   else "  \xe2\x94\x9c "
 
 (* Everything a composition row spends outside the producer name and the
-   component name: the indent, the elbow, the shade, the share and the byte
-   count with their separators. Taken from the row below so the two move
-   together. *)
-let context_flow_row_chrome_cells = 2 + 4 + 1 + 1 + 1 + 6 + 2 + 9
+   component name: the indent, the elbow, the shade, the share and the
+   estimated token figure ("≈" and six cells, then " tok") with their
+   separators. Taken from the row below so the two move together. *)
+let context_flow_row_chrome_cells = 2 + 4 + 1 + 1 + 1 + 6 + 2 + 11
 
 (* The longest component name the record can carry ("Keeper instructions",
    "Redacted thinking") sits inside this, so the column is as wide as the
@@ -3182,17 +3183,48 @@ let context_composition_lines ~cols ~turn_back
       (Keeper_chat.terminal_safe_text record.trace_id)
       Ansi.reset
   in
-  let wire_headline =
+  (* Every size on this screen is read in tokens: the window is sized in
+     tokens and the provider counts them, while masc measured bytes before
+     dispatch. The scale is this record's own wire body over its
+     per-request count when it has both, else the page's median, else the
+     fleet figure; the sentence under the rows names which. *)
+  let scale = Masc_tui_token_scale.of_turn ~rows:selection.Inspector.rows record in
+  (* The count the provider made leads the band; the estimate from the
+     prepared body follows it, with the bytes it was read from. *)
+  let wire_lines =
     match record.request_wire_observation with
     | Some observation ->
-        Printf.sprintf "  %s%s%s  %sprepared request  ·  %s%s" Ansi.bold
-          (Inspector.format_bytes observation.body_bytes)
-          Ansi.reset Ansi.dim
-          (Keeper_chat.terminal_safe_text observation.runtime_profile)
-          Ansi.reset
+        [ Printf.sprintf "  %s%s tok prepared request  ·  %s%s" Ansi.dim
+            (Masc_tui_token_scale.format_estimate scale observation.body_bytes)
+            (Keeper_chat.terminal_safe_text observation.runtime_profile)
+            Ansi.reset
+        ]
     | None ->
-        Printf.sprintf "  %sProvider request bytes were not observed%s"
-          (Theme.bad ()) Ansi.reset
+        (* No body was serialized here, which is the ordinary case on a lane
+           whose client assembles the request itself, not a failure to
+           observe one. What masc handed that client is the composition
+           above, when it belongs to this turn; a resumed client session
+           already holds the earlier turns, so that figure is a ceiling on
+           what went out and not a count of it. *)
+        let handed =
+          match selection.Inspector.attributed with
+          | Some { Inspector.record = attributed; components; _ }
+            when attributed.Turn_record.absolute_turn = record.absolute_turn ->
+              let total =
+                List.fold_left
+                  (fun sum (component : Turn_record.input_component) ->
+                    sum + component.bytes)
+                  0 components
+              in
+              Printf.sprintf
+                "; masc handed it the %s tok of prompt, tools and history \
+                 above, which a resumed session already held in part"
+                (Masc_tui_token_scale.format_estimate scale total)
+          | Some _ | None -> ""
+        in
+        prose
+          ("No body was serialized here: the runtime client assembled the \
+            request itself" ^ handed ^ ".")
   in
   let token_lines =
     match record.usage.scope with
@@ -3221,6 +3253,16 @@ let context_composition_lines ~cols ~turn_back
     | Runtime_usage_scope.Per_request
     | Runtime_usage_scope.Usage_scope_unavailable -> (
         match record.usage.input_tokens, record.context_window with
+        (* A figure above the window is not one request's input: a request
+           that size would have been refused. Drawing it as an occupancy
+           would print 375% of a window. *)
+        | Some tokens, Some maximum when maximum > 0 && tokens > maximum ->
+            fact
+              (Printf.sprintf
+                 "%s tokens counted this turn, more than the %s-token window: \
+                  not one request's count"
+                 (Inspector.format_tokens tokens)
+                 (Inspector.format_tokens maximum))
         | Some tokens, Some maximum when maximum > 0 ->
             fact
               (Printf.sprintf
@@ -3270,23 +3312,44 @@ let context_composition_lines ~cols ~turn_back
         let share =
           if total <= 0 then 0. else float transmitted /. float total *. 100.
         in
+        (* What the newest run is depends on what was measured. A wire shape
+           is the body that went out. A durable shape is the history masc
+           holds, projected the same way: on a lane whose client assembles
+           the request it is what masc could hand over, and a resumed client
+           session already holds the earlier turns, so "sent" would claim a
+           transmission nothing observed. *)
+        let measured, label, reach_prose =
+          match window.measurement with
+          | Turn_record.Wire_shape ->
+              ( "wire shape"
+              , Context_bars.sent_pointer_label
+              , Printf.sprintf
+                  "%d older atoms stayed behind. A cut falls between atoms, so \
+                   a tool result and the call it answers either both travel \
+                   or neither does."
+                  (max 0 (total - transmitted)) )
+          | Turn_record.Durable_shape ->
+              ( "durable shape"
+              , "in reach this turn"
+              , Printf.sprintf
+                  "%d older atoms stayed behind. Measured on the durable \
+                   history masc holds, not on a body that went out: on a lane \
+                   whose client assembles the request, these atoms are what \
+                   masc could hand over, and a resumed client session already \
+                   holds the earlier ones. A cut falls between atoms, so a \
+                   tool result and the call it answers stay together."
+                  (max 0 (total - transmitted)) )
+        in
         [ Printf.sprintf "  %s%d of %d atoms%s  ·  %.1f%%  ·  %s%s%s" Ansi.bold
-            transmitted total Ansi.reset share Ansi.dim
-            (match window.measurement with
-             | Turn_record.Wire_shape -> "wire shape"
-             | Turn_record.Durable_shape -> "durable shape")
-            Ansi.reset
+            transmitted total Ansi.reset share Ansi.dim measured Ansi.reset
         ; "  "
           ^ Context_bars.reach_bar ~width:bar_width ~transmitted ~total
               ~sent_style:(Theme.info ())
-        ; "  " ^ Context_bars.reach_pointer ~width:bar_width ~transmitted ~total
+        ; "  "
+          ^ Context_bars.reach_pointer ~label ~width:bar_width ~transmitted
+              ~total
         ]
-        @ prose
-            (Printf.sprintf
-               "%d older atoms stayed behind. A cut falls between atoms, so a \
-                tool result and the call it answers either both travel or \
-                neither does."
-               (max 0 (total - transmitted)))
+        @ prose reach_prose
     | None ->
         [ (Theme.bad ())
           ^ "  Conversation history window was not observed" ^ Ansi.reset
@@ -3392,6 +3455,12 @@ let context_composition_lines ~cols ~turn_back
           min context_flow_label_cells
             (max 10 (width - source_width - context_flow_row_chrome_cells))
         in
+        (* The row's size in the unit the window is sized in. The bytes it
+           was read from stand once under the rows, beside the basis. *)
+        let token_cell bytes =
+          Printf.sprintf "\xe2\x89\x88%6s tok"
+            (Inspector.format_tokens (Masc_tui_token_scale.estimate scale bytes))
+        in
         let rows =
           List.concat_map
             (fun (source, grouped) ->
@@ -3426,28 +3495,43 @@ let context_composition_lines ~cols ~turn_back
                     ; Ansi.reset
                     ; Printf.sprintf " %6s  " share_text
                     ; Ansi.dim
-                    ; Printf.sprintf "%9s" (Inspector.format_bytes component.bytes)
+                    ; token_cell component.bytes
                     ; Ansi.reset
                     ])
                 grouped)
             by_source
         in
-        (* Attributed bytes and serialized bytes are compared on the same turn, never
-           across two. They still disagree: on 2026-09-01 the attributed total
-           ran about a fifth above the serialized-body figure across 1,556 turns, and the
-           cause is not identified. Printing the gap is what keeps an operator
-           from reading these bytes as the volume shipped. *)
+        (* Attributed and serialized figures are compared on the same turn,
+           never across two, and they measure different things: the rows
+           count the content of each block, the request counts the JSON it
+           was wrapped in. On 2026-09-01 the attributed total ran about a
+           fifth above the body across 1,556 turns. Naming both is what keeps
+           an operator from reading the rows as the volume shipped. *)
         let against_wire =
-          match attributed.Turn_record.request_wire_observation with
-          | Some observation when total > 0 && observation.body_bytes > 0 ->
-              prose
-                (Printf.sprintf
-                   "%s attributed here against %s in the serialized request, \
-                    and the gap is unexplained. Read the shares as proportions \
-                    and the prepared-request line as this turn's size."
-                   (Inspector.format_bytes total)
-                   (Inspector.format_bytes observation.body_bytes))
-          | Some _ | None -> []
+          (match attributed.Turn_record.request_wire_observation with
+           | Some observation when total > 0 && observation.body_bytes > 0 ->
+               prose
+                 (Printf.sprintf
+                    "%s tok attributed here, %s tok in the serialized request. \
+                     The rows count content and the request counts the JSON \
+                     around it, so the two are compared on one turn and not \
+                     expected to match. Read the shares as proportions and the \
+                     prepared-request line as this turn's size."
+                    (Masc_tui_token_scale.format_estimate scale total)
+                    (Masc_tui_token_scale.format_estimate scale observation.body_bytes))
+           | Some _ ->
+               prose
+                 (Printf.sprintf
+                    "%s tok attributed here; the serialized request recorded \
+                     no size to set it against."
+                    (Masc_tui_token_scale.format_estimate scale total))
+           | None ->
+               prose
+                 (Printf.sprintf
+                    "%s tok attributed here. No body was serialized on this \
+                     lane, so there is no request figure to set it against."
+                    (Masc_tui_token_scale.format_estimate scale total)))
+          @ prose (Masc_tui_token_scale.note scale)
         in
         (* The arrow says the rows above are what the request below is made
            of. Drawn only when both readings are the same turn: where the
@@ -3478,7 +3562,7 @@ let context_composition_lines ~cols ~turn_back
          about this turn, while a per-request provider that reported nothing
          simply reported nothing. One None in the data covers both, so the
          scope -- which the record owns -- decides. *)
-      let marker = if index = turn_back then Ansi.bold ^ "▸" else " " in
+      let marker = if index = turn_back then Ansi.bold ^ Masc_tui_theme.Glyph.current_entry else " " in
       match recent.scope, recent.input_tokens with
       | Runtime_usage_scope.Conversation_cumulative, _ ->
           [ marker
@@ -3491,7 +3575,7 @@ let context_composition_lines ~cols ~turn_back
       | _, Some input ->
           fact
             (Printf.sprintf "%s #%-4d %s  in %-7s  cache read %-7s  out %s"
-               (if index = turn_back then "▸" else " ")
+               (if index = turn_back then Masc_tui_theme.Glyph.current_entry else " ")
                recent.turn ts
                (Inspector.format_tokens input)
                (match recent.cache_read with
@@ -3501,7 +3585,7 @@ let context_composition_lines ~cols ~turn_back
                  | Some tokens -> Inspector.format_tokens tokens
                  | None -> "-"))
       | _, None ->
-          [ (if index = turn_back then Ansi.bold ^ "▸" else " ")
+          [ (if index = turn_back then Ansi.bold ^ Masc_tui_theme.Glyph.current_entry else " ")
             ^ Ansi.dim
             ^ Printf.sprintf
                 " #%-4d %s  input not reported for this turn"
@@ -3551,14 +3635,15 @@ let context_composition_lines ~cols ~turn_back
   [ identity; turn; trace; "" ]
   @ [ "  "
       ^ Context_bars.band ~width ~title:"COMPOSITION"
-          ~caption:"where this turn's bytes came in"
+          ~caption:"where this turn's input came from, in estimated tokens"
     ]
   @ component_lines @ [ "" ]
   @ [ "  "
       ^ Context_bars.band ~width ~title:"SERIALIZED REQUEST"
-          ~caption:"bytes prepared before dispatch"
+          ~caption:"tokens the provider counted, then the estimate from the prepared body"
     ]
-  @ (wire_headline :: token_lines)
+  @ token_lines
+  @ wire_lines
   @ cache_lines
   @ [ "" ]
   @ [ "  "
@@ -3586,7 +3671,7 @@ type context_pane_body =
       ; right : string list
       }
 
-let context_exact_item_detail_lines ~width
+let context_exact_item_detail_lines ~width ~scale
     (item : Masc_tui_context_inspector.exact_input_item) =
   let module Inspector = Masc_tui_context_inspector in
   (* A message's text is wire JSON; its typed blocks are where the prose
@@ -3615,9 +3700,12 @@ let context_exact_item_detail_lines ~width
   in
   [ Ansi.bold ^ Theme.info () ^ "[ RETAINED ITEM ]" ^ Ansi.reset
   ; Ansi.bold ^ Inspector.exact_input_label item.kind ^ Ansi.reset
-  ; Printf.sprintf "%s  ·  sha256 %s"
+  ; Printf.sprintf "%s tok (%s)  ·  sha256 %s"
+      (Masc_tui_token_scale.format_estimate scale item.bytes)
       (Inspector.format_bytes item.bytes)
       (String.sub item.sha256 0 12)
+  ; ""
+  ; Ansi.dim ^ Masc_tui_token_scale.note scale ^ Ansi.reset
   ; ""
   ; Ansi.dim ^ "RETAINED PRE-DISPATCH CONTENT" ^ Ansi.reset
   ]
@@ -3628,7 +3716,7 @@ let context_exact_item_detail_lines ~width
    this request made of" before it answers "what is item 34". Counted from the
    same items the list below draws, never from the composition tab's separate
    meter. *)
-let context_exact_input_summary ~width
+let context_exact_input_summary ~width ~scale
     (items : Masc_tui_context_inspector.exact_input_item list) =
   let module Inspector = Masc_tui_context_inspector in
   let tally = Hashtbl.create 8 in
@@ -3705,27 +3793,30 @@ let context_exact_input_summary ~width
               (max 0 (22 - Message_layout.display_width key))
               ' '
         in
-        Printf.sprintf "  %s%s %s%s %s%3d %s%s  %9s  %6s"
+        Printf.sprintf "  %s%s %s%s %s%3d %s%s  \xe2\x89\x88%6s tok  %6s"
           (context_source_style source)
           (context_source_glyph source)
           label Ansi.reset Ansi.dim count
           (if count = 1 then "item " else "items")
           Ansi.reset
-          (Masc_tui_context_inspector.format_bytes bytes)
+          (Masc_tui_context_inspector.format_tokens
+             (Masc_tui_token_scale.estimate scale bytes))
           share_text)
       ranked
   in
   ( [ "  "
       ^ Context_bars.band ~width ~title:"BY KIND"
           ~caption:
-            (Printf.sprintf "%s, %s retained" (Masc_tui_message_layout.count_noun (List.length items) "item")
+            (Printf.sprintf "%s, %s tok (%s) retained"
+               (Masc_tui_message_layout.count_noun (List.length items) "item")
+               (Masc_tui_token_scale.format_estimate scale total)
                (Masc_tui_context_inspector.format_bytes total))
     ]
     @ bar @ rows
   , total )
 
 
-let context_exact_input_lines ~cols state ~response ~response_parts
+let context_exact_input_lines ~cols ~scale state ~response ~response_parts
     (input : Masc_tui_context_inspector.provider_input) =
   let module Inspector = Masc_tui_context_inspector in
   let items = Inspector.exact_input_items input in
@@ -3741,7 +3832,7 @@ let context_exact_input_lines ~cols state ~response ~response_parts
              , None )
        | Some item ->
            let detail =
-             context_exact_item_detail_lines ~width item
+             context_exact_item_detail_lines ~width ~scale item
              |> List.map (fun line -> "  " ^ line)
            in
            Plain (detail, None))
@@ -3753,21 +3844,29 @@ let context_exact_input_lines ~cols state ~response ~response_parts
           (Masc_domain.iso8601_of_unix_seconds input.captured_at)
       in
       let wire =
-        Printf.sprintf "  Prepared request  %s · %s · %s · %s" input.wire.provider
-          input.wire.model
+        Printf.sprintf "  Prepared request  %s · %s · %s tok (%s) · %s"
+          input.wire.provider input.wire.model
+          (Masc_tui_token_scale.format_estimate scale input.wire.body_bytes)
           (Inspector.format_bytes input.wire.body_bytes)
           (String.sub input.wire.body_sha256 0 12)
       in
-      let summary, retained = context_exact_input_summary ~width items in
+      let summary, retained =
+        context_exact_input_summary ~width ~scale items
+      in
       let against_wire =
-        if retained > 0 && input.wire.body_bytes > 0 then
-          [ Printf.sprintf "  %s%s retained here, %s in the serialized request%s"
-              Ansi.dim
-              (Inspector.format_bytes retained)
-              (Inspector.format_bytes input.wire.body_bytes)
-              Ansi.reset
-          ]
-        else []
+        (if retained > 0 && input.wire.body_bytes > 0 then
+           [ Printf.sprintf
+               "  %s%s tok (%s) retained here, %s tok (%s) in the serialized \
+                request%s"
+               Ansi.dim
+               (Masc_tui_token_scale.format_estimate scale retained)
+               (Inspector.format_bytes retained)
+               (Masc_tui_token_scale.format_estimate scale input.wire.body_bytes)
+               (Inspector.format_bytes input.wire.body_bytes)
+               Ansi.reset
+           ]
+         else [])
+        @ [ Ansi.dim ^ "  " ^ Masc_tui_token_scale.note scale ^ Ansi.reset ]
       in
       (* What came back for this exact request, to the extent the turn
          record observed it. The response text lives in the chat store and
@@ -3890,7 +3989,7 @@ let context_exact_input_lines ~cols state ~response ~response_parts
              let marker, style =
                if selected then ">", Theme.selection else " ", Ansi.reset
              in
-             let label_width = max 8 (width - 20) in
+             let label_width = max 8 (width - 22) in
              (* The list carries the producer's colour the summary above it
                 groups by, except under the selection band, whose own styling
                 owns the whole row. *)
@@ -3903,9 +4002,11 @@ let context_exact_input_lines ~cols state ~response ~response_parts
                  context_source_style (Inspector.exact_input_source item.kind)
                  ^ label ^ Ansi.reset
              in
-             Printf.sprintf "%s %s %2d %s  %s  %9s%s" style marker (index + 1)
-               (kind_letter index item) label
-               (Inspector.format_bytes item.bytes) Ansi.reset)
+             Printf.sprintf "%s %s %2d %s  %s  \xe2\x89\x88%6s tok%s" style
+               marker (index + 1) (kind_letter index item) label
+               (Inspector.format_tokens
+                  (Masc_tui_token_scale.estimate scale item.bytes))
+               Ansi.reset)
           items
       in
       let legend =
@@ -3938,7 +4039,7 @@ let context_exact_input_lines ~cols state ~response ~response_parts
           match selected with
           | None -> [ Ansi.dim ^ "  Select an item with j/k" ^ Ansi.reset ]
           | Some item ->
-              context_exact_item_detail_lines ~width:right_width item
+              context_exact_item_detail_lines ~width:right_width ~scale item
         in
         (* The detail column starts at the top of its own window and keeps
            its own scroll. It used to be padded down to sit beside the
@@ -3983,7 +4084,7 @@ let context_exact_input_lines ~cols state ~response ~response_parts
           , selected )
 
 
-let context_input_map_detail_lines ~width
+let context_input_map_detail_lines ~width ~scale
     (row : Masc_tui_context_inspector.input_map_row) =
   let module Inspector = Masc_tui_context_inspector in
   let digest =
@@ -4009,7 +4110,8 @@ let context_input_map_detail_lines ~width
   in
   [ context_evidence_badge row.evidence
   ; Ansi.bold ^ Inspector.input_component_label row.component ^ Ansi.reset
-  ; Printf.sprintf "%s  ·  %s"
+  ; Printf.sprintf "%s tok (%s)  ·  %s"
+      (Masc_tui_token_scale.format_estimate scale row.bytes)
       (Inspector.format_bytes row.bytes)
       (Inspector.input_source_label row.source)
   ; Ansi.dim ^ digest ^ Ansi.reset
@@ -4023,7 +4125,7 @@ let context_input_map_detail_lines ~width
       [ ""; Ansi.dim ^ "VERIFIED TEXT" ^ Ansi.reset ] @ wrap text
 
 
-let context_input_map_lines ~cols state (record : Turn_record.t)
+let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
     (provider_input : Masc_tui_context_inspector.provider_input option) =
   let module Inspector = Masc_tui_context_inspector in
   let rows = Inspector.input_map_rows record provider_input in
@@ -4033,10 +4135,11 @@ let context_input_map_lines ~cols state (record : Turn_record.t)
        | Some ({ exact_text = Some text; _ } as row) ->
            let width = max 8 (framed_inner_width cols - 4) in
            let heading =
-             Printf.sprintf "  %s%s%s  ·  %s  ·  %s  ·  %s"
+             Printf.sprintf "  %s%s%s  ·  %s tok (%s)  ·  %s  ·  %s"
                Ansi.bold
                (Inspector.input_component_label row.component)
                Ansi.reset
+               (Masc_tui_token_scale.format_estimate scale row.bytes)
                (Inspector.format_bytes row.bytes)
                (Inspector.input_source_label row.source)
                (context_evidence_badge row.evidence)
@@ -4083,13 +4186,14 @@ let context_input_map_lines ~cols state (record : Turn_record.t)
              in
              let branch = if index = List.length rows - 1 then "└─" else "├─" in
              let badge_cells = Inspector.input_evidence_badge_cells row.evidence in
-             let label_width = max 4 (width - 17 - badge_cells) in
-             Printf.sprintf "%s %s %s %s%s%s %9s %s%s"
+             let label_width = max 4 (width - 19 - badge_cells) in
+             Printf.sprintf "%s %s %s %s%s%s \xe2\x89\x88%6s tok %s%s"
                selection marker branch
                (context_component_style row.component)
                (fit_width (Inspector.input_component_label row.component) label_width)
                Ansi.reset
-               (Inspector.format_bytes row.bytes)
+               (Inspector.format_tokens
+                  (Masc_tui_token_scale.estimate scale row.bytes))
                (context_evidence_badge row.evidence)
                Ansi.reset)
           rows
@@ -4113,7 +4217,8 @@ let context_input_map_lines ~cols state (record : Turn_record.t)
         let selected_detail =
           match List.nth_opt rows cursor with
           | None -> [ Ansi.dim ^ "  Select a block with j/k" ^ Ansi.reset ]
-          | Some row -> context_input_map_detail_lines ~width:right_width row
+          | Some row ->
+              context_input_map_detail_lines ~width:right_width ~scale row
         in
         let right =
           (Ansi.bold
@@ -4121,11 +4226,21 @@ let context_input_map_lines ~cols state (record : Turn_record.t)
            ^ Ansi.reset)
           :: selected_detail
         in
-        Split { common = [ identity; "  " ^ joined; "" ]; left; right }
+        Split
+          { common =
+              [ identity
+              ; "  " ^ joined
+              ; Ansi.dim ^ "  " ^ Masc_tui_token_scale.note scale ^ Ansi.reset
+              ; ""
+              ]
+          ; left
+          ; right
+          }
       else
         let header =
           [ identity
           ; "  " ^ joined
+          ; Ansi.dim ^ "  " ^ Masc_tui_token_scale.note scale ^ Ansi.reset
           ; ""
           ; Ansi.bold ^ "  What the runtime prepared, and why" ^ Ansi.reset
           ]
@@ -4148,7 +4263,8 @@ let context_input_map_lines ~cols state (record : Turn_record.t)
                        | None -> []
                        | Some row ->
                            context_input_map_detail_lines
-                             ~width:(max 8 (framed_inner_width cols - 4)) row
+                             ~width:(max 8 (framed_inner_width cols - 4))
+                             ~scale row
                            |> List.map (fun detail -> "    " ^ detail)
                      in
                      line
@@ -4216,7 +4332,18 @@ let context_inspector_content_lines ~cols state : context_pane_body =
                         | Error _ -> None) )
                   | Error _ -> (None, None)
                 in
-                context_exact_input_lines ~cols state ~response
+                (* The request tab reads sizes at the newest turn's scale;
+                   its body is that turn's, whichever row is stepped to
+                   on the stack tab. *)
+                let scale =
+                  match reading.turn with
+                  | Ok selection ->
+                      Masc_tui_token_scale.of_turn
+                        ~rows:selection.Masc_tui_context_inspector.rows
+                        selection.Masc_tui_context_inspector.latest
+                  | Error _ -> Masc_tui_token_scale.fleet
+                in
+                context_exact_input_lines ~cols ~scale state ~response
                   ~response_parts input
             | Error detail ->
                 Plain
@@ -4273,7 +4400,12 @@ let context_inspector_content_lines ~cols state : context_pane_body =
                       | Ok input -> Some input
                       | Error _ -> None
                     in
-                    context_input_map_lines ~cols state record provider_input)))
+                    let scale =
+                      Masc_tui_token_scale.of_turn
+                        ~rows:selection.Masc_tui_context_inspector.rows record
+                    in
+                    context_input_map_lines ~cols ~scale state record
+                      provider_input)))
 
 
 (* The rows a split body holds below the common summary: one pinned header

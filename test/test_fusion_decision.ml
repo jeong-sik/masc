@@ -34,13 +34,12 @@ let original_evidence ?task () =
 let with_fixture f = Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base = Filename.temp_dir "fusion-decision-" "" in
-  let old = Sys.getenv_opt "MASC_BASE_PATH" and old_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
-  Unix.putenv "MASC_BASE_PATH" base; Unix.putenv "MASC_BASE_PATH_INPUT" base;
+  let old = Sys.getenv_opt "MASC_BASE_PATH" in
+  Unix.putenv "MASC_BASE_PATH" base;
   Board.reset_global_for_test (); Board_dispatch.reset_for_test ();
   Fun.protect ~finally:(fun () ->
     Board.reset_global_for_test (); Board_dispatch.reset_for_test ();
-    Unix.putenv "MASC_BASE_PATH" (Option.value old ~default:"");
-    Unix.putenv "MASC_BASE_PATH_INPUT" (Option.value old_input ~default:""); remove base)
+    Unix.putenv "MASC_BASE_PATH" (Option.value old ~default:""); remove base)
     (fun () ->
       let config = Workspace.default_config base in
       ignore (Workspace.init config ~agent_name:(Some "fusion-keeper"));
@@ -68,7 +67,7 @@ let test_runtime_record_and_read () = with_fixture (fun config task_id goal_id -
     ctx_work=Keeper_context_runtime.create ~eio:true ~system_prompt:"fixture";
     turn_sandbox_factory=None; sw=None; clock=None; proc_mgr=None; net=None; mcp_session_id=None;
     continuation_channel=None; gate_context=Some (fun () -> {Keeper_gate.turn_id=Some 7; snapshot=`Assoc []});
-    gate_grant=None; tool_use_id=None; trace_id=None;
+    gate_grant=None; tool_use_id=None; trace_id=None; result_projection=None;
     capability_authority=Keeper_tool_runtime.Compatibility_meta} in
   let descriptor = match Keeper_tool_runtime.descriptor_for_internal "masc_fusion_decision" with
     | Some descriptor -> descriptor | None -> fail "missing descriptor" in

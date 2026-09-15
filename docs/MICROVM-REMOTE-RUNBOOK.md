@@ -68,7 +68,7 @@ CLI 를 놓고 읽으면 된다. 아래 계약 표의 항목 1·2 는 백엔드�
 shim 설정(`masc-exec-shim.conf`)은 서버가 부팅마다 같은 디렉터리에 다시
 쓴다. 내용은 `remote_root=/masc-work`, `path=<이미지의 PATH>`
 (`MASC_KEEPER_MICROVM_PAYLOAD_PATH`), `env_allowlist=MASC_BASE_PATH,
-MASC_BASE_PATH_INPUT,MASC_CONFIG_DIR`. 손으로 고칠 것이 없다. `scratch_root=` 는
+MASC_CONFIG_DIR`. 손으로 고칠 것이 없다. `scratch_root=` 는
 쓰지 않는다. shim 은 그 줄이 없으면 `/tmp` 를 쓰고, 부팅은 거기에 tmpfs 를 올린다.
 한 상수를 양쪽이 같이 읽는다.
 서버와 shim 은 따로 배포되므로 한 버전 차이는 서로 참는다. 서버는 첫 실행 전에

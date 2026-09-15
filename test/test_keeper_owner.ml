@@ -422,7 +422,15 @@ let test_mailbox_backpressures_without_drop () =
   check int "mailbox drained" 0 (Owner.For_testing.mailbox_depth owner)
 ;;
 
-let test_enqueued_request_settles_before_cancellation_unwinds () =
+(* A caller cancelled after it handed a command over stays until the owner has
+   answered, when the owner answers that command in the step that takes it.
+   [Keeper_owner_registry.apply_meta] holds the keeper's lifecycle key lock and
+   reservation across this call; a caller that left early would release them
+   while its write was still in the store, and the write would land under the
+   next holder. The case cancels the caller while the owner is inside that
+   write. With only the answer wait protected, the handover's own return let
+   the caller leave here on every 0.35.18 release build. *)
+let test_a_cancelled_caller_stays_until_its_command_is_answered () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
   let replace_entered, resolve_replace_entered = Eio.Promise.create () in
@@ -452,25 +460,43 @@ let test_enqueued_request_settles_before_cancellation_unwinds () =
          ignore
            (Owner.apply_meta
               owner
-              (Set_activation_mode { mode = Masc.Keeper_activation_mode.Autonomous; updated_at = "committed" })))
+              (Set_activation_mode
+                 { mode = Masc.Keeper_activation_mode.Autonomous
+                 ; updated_at = "committed"
+                 })))
      with
      | Eio.Cancel.Cancelled _ -> Atomic.set caller_unwound true);
     Eio.Promise.resolve resolve_caller_done ());
   let context = Eio.Promise.await cancel_context in
+  (* The owner has taken the command off the mailbox and is inside the store
+     write. *)
   Eio.Promise.await replace_entered;
-  Eio.Cancel.cancel context (Failure "cancel after owner enqueue");
-  for _ = 1 to 10 do
+  Eio.Cancel.cancel context (Failure "cancel while the owner writes");
+  (* A caller that can leave does so within a few scheduler passes; the
+     release builds saw it inside ten. *)
+  for _ = 1 to 100 do
     Eio.Fiber.yield ()
   done;
-  check bool "caller remains inside committed request" false (Atomic.get caller_unwound);
-  Eio.Promise.resolve resolve_release_replace ();
-  Eio.Promise.await caller_done;
-  check bool "protected request returns after settlement" false (Atomic.get caller_unwound);
   check
     bool
-    "enqueued mutation committed before authority scope unwound"
+    "the cancelled caller is still waiting while the owner writes"
+    false
+    (Atomic.get caller_unwound);
+  Eio.Promise.resolve resolve_release_replace ();
+  Eio.Promise.await caller_done;
+  check
+    bool
+    "the caller returned with the answer, not with its cancellation"
+    false
+    (Atomic.get caller_unwound);
+  (* [apply_transition] publishes the projection before the owner answers, so
+     reading it here says the write landed before the caller returned. *)
+  check
+    bool
+    "the command committed before its caller returned"
     true
-    (Masc.Keeper_activation_mode.restore_owner (Option.get (Owner.projection owner).meta).activation_mode)
+    (Masc.Keeper_activation_mode.restore_owner
+       (Option.get (Owner.projection owner).meta).activation_mode)
 ;;
 
 let test_store_failure_fences_mutations () =
@@ -1305,6 +1331,126 @@ let test_gate_wait_releases_owner_without_repeated_children () =
     |> owner_ok |> ignore;
   Eio.Promise.await finished_p;
   check int "resolution resumes exactly one original child" 2 !attempts
+;;
+
+(* An interrupt ends a turn that is waiting on an answer its own owner cannot
+   give while the turn runs. [await_idle_after_shutdown] is such an answer: the
+   owner parks its resolver until no child is active, and the child asking for
+   it is that child. The ask used to run under [Eio.Cancel.protect], so failing
+   the child switch left the child exactly where it was: the slot stayed taken,
+   [turn_in_flight] stayed set, and the keeper answered every later request
+   with "the previous turn has not settled". The budget below only decides how
+   long a wedge takes to be reported; a turn that unwinds does so at once. *)
+let turn_unwind_budget_s = 10.0
+
+let test_an_interrupt_ends_a_turn_waiting_on_its_own_owner () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let clock = Eio.Stdenv.clock env in
+  let owner =
+    start_owner_with_executor_ready
+      ~operation_ready:(fun ~keeper_name:_ -> true)
+      ~sw
+      ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+      ~operation_executor:None
+      ~keeper_name:"interrupt-waiting-turn"
+      ~initial_meta:(Some (make_meta "interrupt-waiting-turn"))
+      ()
+    |> owner_ok
+  in
+  let waiting, wait_started = Eio.Promise.create () in
+  let turn = ref None in
+  (match
+     Eio.Time.with_timeout clock turn_unwind_budget_s (fun () ->
+       Eio.Fiber.both
+         (fun () ->
+            turn
+            := Some
+                 (Owner.run_autonomous_if_idle owner (fun () ->
+                    Eio.Promise.resolve wait_started ();
+                    ignore (Owner.await_idle_after_shutdown owner))))
+         (fun () ->
+            Eio.Promise.await waiting;
+            match Owner.turn_in_flight owner with
+            | None -> fail "the turn took the slot without publishing a token to aim at"
+            | Some in_flight ->
+              ignore
+                (Owner.pause_and_interrupt
+                   owner
+                   (Owner.Observed_turn { interrupt_token = in_flight.interrupt_token })));
+       Ok ())
+   with
+   | Ok () -> ()
+   | Error `Timeout -> fail "the interrupt did not end a turn waiting on its own owner");
+  (match !turn with
+   | Some (Ok `Interrupted) -> ()
+   | Some (Ok (`Ran ())) -> fail "the turn finished on its own; the wait under test did not happen"
+   | Some (Ok (`Busy _)) -> fail "the owner never admitted the turn"
+   | Some (Error _) -> fail "the owner refused the turn"
+   | None -> fail "the turn produced no outcome");
+  check bool "the slot is free again" true (Option.is_none (Owner.turn_in_flight owner))
+;;
+
+(* A cancelled caller leaves an answer that waits for the child, and not only
+   for the command above. [begin_stopping] commits the stop, stops the running
+   child and answers when that child ends. The child below ends only when the
+   case releases it, so a caller held until the answer cannot leave first. The
+   child is released before any verdict, so a held caller fails the case instead
+   of hanging it. *)
+let test_a_cancelled_caller_leaves_a_stop_that_waits_for_the_child () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let clock = Eio.Stdenv.clock env in
+  let owner =
+    owner_ok
+      (start_owner
+         ~sw
+         ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+         ~keeper_name:"cancel-while-stopping"
+         ~initial_meta:(Some (make_meta "cancel-while-stopping")))
+  in
+  let child_started, resolve_child_started = Eio.Promise.create () in
+  let release_child, resolve_release_child = Eio.Promise.create () in
+  let turn_done, resolve_turn_done = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    ignore
+      (Owner.run_autonomous_if_idle owner (fun () ->
+         Eio.Promise.resolve resolve_child_started ();
+         (* The stop fails the child switch; only the case ends this child. *)
+         Eio.Cancel.protect (fun () -> Eio.Promise.await release_child)));
+    Eio.Promise.resolve resolve_turn_done ());
+  Eio.Promise.await child_started;
+  let cancel_context, resolve_cancel_context = Eio.Promise.create () in
+  let caller_left, resolve_caller_left = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    (try
+       Eio.Cancel.sub (fun context ->
+         Eio.Promise.resolve resolve_cancel_context context;
+         ignore (Owner.begin_stopping owner))
+     with
+     | Eio.Cancel.Cancelled _ -> ());
+    Eio.Promise.resolve resolve_caller_left ());
+  let context = Eio.Promise.await cancel_context in
+  let left =
+    Eio.Time.with_timeout clock turn_unwind_budget_s (fun () ->
+      (* The owner commits the stop in the step that parks the answer. *)
+      while not (Owner.projection owner).stopping do
+        Eio.Time.sleep clock 0.001
+      done;
+      Eio.Cancel.cancel context (Failure "cancel while the stop waits for the child");
+      Eio.Promise.await caller_left;
+      Ok ())
+  in
+  Eio.Promise.resolve resolve_release_child ();
+  (match left with
+   | Ok () -> ()
+   | Error `Timeout -> fail "a caller of a stop waiting for the child could not leave");
+  Eio.Promise.await turn_done;
+  check bool "the slot is free again" true (Option.is_none (Owner.turn_in_flight owner))
 ;;
 
 let test_cooling_retry_readiness_refreshes_on_wake () =
@@ -4484,9 +4630,9 @@ let () =
             `Quick
             test_mailbox_backpressures_without_drop
         ; test_case
-            "enqueued request settles before cancellation"
+            "a cancelled caller stays until its command is answered"
             `Quick
-            test_enqueued_request_settles_before_cancellation_unwinds
+            test_a_cancelled_caller_stays_until_its_command_is_answered
         ; test_case
             "a command the mailbox took as the owner closed is enqueued"
             `Quick
@@ -4618,6 +4764,14 @@ let () =
         ; test_case "interactive Enter resolves batch member before wire binding" `Quick (test_batch_member_interrupt_before_wire_binding ~interactive:true)
         ; test_case "cooling retry publishes readiness on wake" `Quick
             test_cooling_retry_readiness_refreshes_on_wake
+        ; test_case
+            "an interrupt ends a turn waiting on its own owner"
+            `Quick
+            test_an_interrupt_ends_a_turn_waiting_on_its_own_owner
+        ; test_case
+            "a cancelled caller leaves a stop that waits for the child"
+            `Quick
+            test_a_cancelled_caller_leaves_a_stop_that_waits_for_the_child
         ; test_case "retry deadline crossing automatically wakes" `Quick
             test_retry_deadline_crossing_automatically_wakes
         ; test_case "runtime-deferred child drains the same original operation" `Quick

@@ -63,5 +63,4 @@ val metric_llm_provider_input_tokens : string
 val metric_llm_provider_output_tokens : string
 val metric_llm_provider_reasoning_tokens : string
 val metric_llm_provider_tool_calls : string
-val metric_llm_provider_circuit_state : string
 

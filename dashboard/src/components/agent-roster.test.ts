@@ -239,7 +239,7 @@ describe('rosterStateNote — RFC-0135 §1.1 typed-state conditioning', () => {
         phase: 'Running',
         diagnostic: {
           last_error: 'tool call failed',
-          health_state: 'degraded',
+          health_state: 'healthy',
           next_action_path: 'recover',
           last_reply_status: 'error',
         },
@@ -257,7 +257,7 @@ describe('rosterStateNote — RFC-0135 §1.1 typed-state conditioning', () => {
         status: 'offline',
         diagnostic: {
           last_error: 'fiber died',
-          health_state: 'degraded',
+          health_state: 'offline',
           next_action_path: 'recover',
           last_reply_status: 'error',
         },
@@ -723,7 +723,6 @@ describe('AgentRoster live-only cards', () => {
       {
         name: 'nick0cave',
         status: 'idle',
-        last_heartbeat: '2026-04-23T09:59:00Z',
         last_activity_ago_s: 75,
         recent_output_preview: 'live runtime output preview',
         recent_input_preview: 'live runtime input preview',
@@ -1637,7 +1636,7 @@ describe('AgentRoster live-only cards', () => {
     expect(presence.textContent).toContain('큐 2')
   })
 
-  it('uses heartbeat and shared runtime labels for cards when action/model fallbacks disagree', async () => {
+  it('uses the last action and shared runtime labels for cards when activity/model fallbacks disagree', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-24T18:00:00Z'))
     agents.value = [
@@ -1655,7 +1654,7 @@ describe('AgentRoster live-only cards', () => {
         runtime_canonical: 'agentCore.primary',
         active_model: 'claude-code:auto',
         model: 'claude',
-        last_heartbeat: '2026-04-24T17:54:00Z',
+        tool_audit_at: '2026-04-24T17:54:00Z',
         last_activity_ago_s: 21_600,
         recent_output_preview: '지금 필요한 코드 변경을 바로 만들고 결과를 확인한다.',
         recent_tool_names: ['keeper_tasks_list'],
@@ -1669,7 +1668,7 @@ describe('AgentRoster live-only cards', () => {
 
     const text = container.textContent ?? ''
     expect(text).toContain('sangsu')
-    expect(text).toContain('하트비트')
+    expect(text).toContain('마지막 행동')
     expect(text).toContain('6분 전')
     expect(text).toContain('agentCore.primary')
     expect(text).not.toContain('claude-code:auto')

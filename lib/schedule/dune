@@ -27,6 +27,7 @@
   masc_core
   masc_cancel_safe
   masc_random_id
+  masc.time_codec
   unix
   yojson)
  (preprocess

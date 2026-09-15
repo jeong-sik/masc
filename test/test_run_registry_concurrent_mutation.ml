@@ -35,10 +35,10 @@ let remove_if_exists path =
   | Sys_error _ -> ()
 ;;
 
+(* A directory of its own per store: the exact-lane registry keeps payload
+   files next to its log. *)
 let fresh_path suffix =
-  let path = Filename.temp_file "run-registry-concurrent-" suffix in
-  remove_if_exists path;
-  path
+  Filename.concat (Filename.temp_dir "run-registry-concurrent-" "") ("store" ^ suffix)
 ;;
 
 let register t ~verification_id ~started_at =

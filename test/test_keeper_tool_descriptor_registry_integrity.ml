@@ -904,22 +904,6 @@ let test_memory_retract_descriptor_schema_is_closed () =
     (schema_forbids_additional_properties descriptor.input_schema)
 ;;
 
-let test_memory_write_descriptor_is_terminal () =
-  let descriptor = required_internal_descriptor "keeper_memory_write" in
-  match descriptor.execution with
-  | Descriptor.Direct_terminal -> ()
-  | Descriptor.Ordinary _ | Descriptor.Terminal ->
-    Alcotest.fail "keeper_memory_write lost its direct-only terminal boundary"
-;;
-
-let test_memory_retract_descriptor_is_terminal () =
-  let descriptor = required_internal_descriptor "keeper_memory_retract" in
-  match descriptor.execution with
-  | Descriptor.Direct_terminal -> ()
-  | Descriptor.Ordinary _ | Descriptor.Terminal ->
-    Alcotest.fail "keeper_memory_retract lost its direct-only terminal boundary"
-;;
-
 let test_memory_write_rejects_retired_lifetime_argument () =
   let descriptor = required_internal_descriptor "keeper_memory_write" in
   match
@@ -1414,7 +1398,6 @@ let test_concurrent_execution_opt_ins_are_exact () =
       match descriptor.execution with
       | Descriptor.Ordinary Descriptor.Concurrent -> Some descriptor.internal_name
       | Descriptor.Ordinary Descriptor.Serial
-      | Descriptor.Direct_terminal
       | Descriptor.Terminal -> None)
     |> List.sort_uniq String.compare
   in
@@ -1481,9 +1464,7 @@ let test_concurrent_opt_ins_are_statically_read_only () =
       Alcotest.fail
         (descriptor.internal_name
          ^ " opts into concurrent batches without a static read-only hint")
-    | ( Descriptor.Ordinary Descriptor.Serial
-      | Descriptor.Direct_terminal
-      | Descriptor.Terminal ), _ -> ())
+    | (Descriptor.Ordinary Descriptor.Serial | Descriptor.Terminal), _ -> ())
 
 let test_readonly_policy_is_descriptor_input_aware () =
   let public_input =
@@ -2037,17 +2018,9 @@ let () =
         ] )
     ; ( "agent-contract"
       , [ test_case
-            "keeper_memory_retract ends a successful turn"
-            `Quick
-            test_memory_retract_descriptor_is_terminal
-        ; test_case
             "keeper_memory_retract descriptor schema is closed"
             `Quick
             test_memory_retract_descriptor_schema_is_closed
-        ; test_case
-            "keeper_memory_write ends a successful turn"
-            `Quick
-            test_memory_write_descriptor_is_terminal
         ; test_case
             "keeper_memory_write descriptor schema is closed"
             `Quick

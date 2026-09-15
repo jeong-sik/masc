@@ -118,7 +118,7 @@ let test_update_replaces_active_definition_with_fresh_instance () =
     { (make_request ~schedule_id:original.schedule_id ()) with due_at = 350.0 }
   in
   let before = read_state config in
-  let updated = store_ok "update" (update_request config replacement) in
+  let updated = store_ok "update" (update_request config ~now:100.0 replacement) in
   let after = read_state config in
   check string "stable public id" original.schedule_id updated.schedule_id;
   check bool "fresh instance" false
@@ -136,20 +136,170 @@ let test_update_accepts_due_but_refuses_terminal_definition () =
   ignore (insert_ok config due);
   ignore (store_ok "refresh due" (refresh_due config ~now:201.0));
   let replacement = make_request ~schedule_id:due.schedule_id () in
-  ignore (store_ok "replace due" (update_request config replacement));
+  ignore (store_ok "replace due" (update_request config ~now:201.0 replacement));
   ignore (store_ok "cancel replacement" (cancel_request config ~schedule_id:due.schedule_id));
   let before = read_state config in
-  check_error "terminal update"
-    (Invalid_status_transition "only scheduled or due requests can be modified")
-    (update_request config (make_request ~schedule_id:due.schedule_id ()));
+  (match update_request config ~now:201.0 (make_request ~schedule_id:due.schedule_id ()) with
+   | Error (Transition_refused { schedule_id; current; attempted; last_wake }) ->
+     check string "the refusal names the schedule" due.schedule_id schedule_id;
+     check_status "the refusal reads the stored status" Cancelled current;
+     check string "the refusal names the transition" "modify"
+       (attempted_transition_to_string attempted);
+     check bool "a schedule that never woke has no last wake" true
+       (Option.is_none last_wake)
+   | Ok _ -> fail "terminal update must be refused"
+   | Error err -> fail (store_error_to_string err));
   check int "refusal does not bump" before.version (read_state config).version
+;;
+
+(* The TUI's edit form sends a due row's due time back as it read it, and a
+   Keeper editing only the message does the same: that is not a new due time,
+   and refusing it would make a due row uneditable. Moving the due time
+   behind the clock is a new one, and it would fire at once. *)
+let test_update_refuses_only_a_changed_due_time_behind_the_clock () =
+  with_workspace
+  @@ fun config ->
+  let original = make_request ~schedule_id:"modify-past" () in
+  ignore (insert_ok config original);
+  let unchanged = make_request ~schedule_id:original.schedule_id () in
+  ignore
+    (store_ok "the stored due time sent back is accepted"
+       (update_request config ~now:500.0 unchanged));
+  let moved = { (make_request ~schedule_id:original.schedule_id ()) with due_at = 150.0 } in
+  let before = read_state config in
+  (match update_request config ~now:500.9 moved with
+   | Error (Changed_due_already_past { schedule_id; stored_due_at; due_at; now }) ->
+     check string "the refusal names the schedule" original.schedule_id schedule_id;
+     check (float 0.0) "the stored due time" 200.0 stored_due_at;
+     check (float 0.0) "the refused due time" 150.0 due_at;
+     check (float 0.0) "now is the whole second compared" 500.0 now
+   | Ok _ -> fail "a due time moved into the past was accepted"
+   | Error err -> fail (store_error_to_string err));
+  check int "refusal does not bump" before.version (read_state config).version;
+  let future = { (make_request ~schedule_id:original.schedule_id ()) with due_at = 900.0 } in
+  ignore
+    (store_ok "a due time moved into the future is accepted"
+       (update_request config ~now:500.0 future))
+;;
+
+(* A running schedule with no running wake is one of two facts: the wake was
+   never written, or it already finished. The second means the delivery
+   happened, so the error carries that wake. *)
+let test_running_wake_missing_says_whether_the_wake_finished () =
+  with_workspace
+  @@ fun config ->
+  let settled = make_request ~schedule_id:"running-settled" () in
+  let absent = make_request ~schedule_id:"running-absent" () in
+  ignore (insert_ok config settled);
+  ignore (insert_ok config absent);
+  ignore (store_ok "refresh" (refresh_due config ~now:201.0));
+  ignore
+    (store_ok "start settled"
+       (start_due_candidate config ~now:202.0 ~schedule_id:settled.schedule_id));
+  ignore
+    (store_ok "start absent"
+       (start_due_candidate config ~now:202.0 ~schedule_id:absent.schedule_id));
+  let state = read_state config in
+  let wakes =
+    List.filter_map
+      (fun (wake : Schedule_domain.wake_record) ->
+         if String.equal wake.schedule_id absent.schedule_id
+         then None
+         else if String.equal wake.schedule_id settled.schedule_id
+         then Some { wake with status = Wake_succeeded; finished_at = Some 203.0 }
+         else Some wake)
+      state.wakes
+  in
+  let state_json : Yojson.Safe.t =
+    `Assoc
+      [ "version", `Int state.version
+      ; "updated_at", `Float state.updated_at
+      ; ( "schedules"
+        , `List (List.map Schedule_domain.schedule_request_to_yojson state.schedules) )
+      ; "wakes", `List (List.map Schedule_domain.wake_record_to_yojson wakes)
+      ]
+  in
+  Workspace_core.write_text config (schedules_path config) (Yojson.Safe.to_string state_json);
+  (match fail_running config ~now:204.0 ~schedule_id:settled.schedule_id ~error:"x" with
+   | Error (Running_wake_settled { schedule_id; wake }) ->
+     check string "settled names the schedule" settled.schedule_id schedule_id;
+     check string "settled carries the finished wake" "succeeded"
+       (Schedule_domain.wake_status_to_string wake.status)
+   | Ok _ -> fail "a running schedule without a running wake was failed"
+   | Error err -> fail (store_error_to_string err));
+  (match fail_running config ~now:204.0 ~schedule_id:absent.schedule_id ~error:"x" with
+   | Error (Running_wake_absent { schedule_id }) ->
+     check string "absent names the schedule" absent.schedule_id schedule_id
+   | Ok _ -> fail "a running schedule without any wake was failed"
+   | Error err -> fail (store_error_to_string err));
+  match cancel_matching config ~should_cancel:(fun _ -> true) with
+  | Error (Transition_refused { current = Running; attempted; _ }) ->
+    check string "retiring a consumer is its own attempted transition"
+      "cancel_for_consumer_retirement"
+      (attempted_transition_to_string attempted)
+  | Ok () -> fail "cancel_matching cancelled around a running schedule"
+  | Error err -> fail (store_error_to_string err)
+;;
+
+(* A recurring request keeps its instance id across occurrences, so the
+   ledger holds the finished wakes of occurrences already delivered. A running
+   occurrence whose own wake is missing is absent, not settled by an older
+   occurrence's wake. *)
+let test_a_recurring_occurrence_is_not_settled_by_an_earlier_wake () =
+  with_workspace
+  @@ fun config ->
+  let request =
+    make_request ~schedule_id:"recurring-missing"
+      ~recurrence:(Interval { interval_sec = 60 }) ()
+  in
+  ignore (insert_ok config request);
+  let schedule_id = request.schedule_id in
+  ignore (store_ok "first refresh" (refresh_due config ~now:201.0));
+  ignore (store_ok "first start" (start_due_candidate config ~now:202.0 ~schedule_id));
+  let advanced = store_ok "first accept" (accept_running config ~now:203.0 ~schedule_id ()) in
+  let second_due = advanced.due_at +. 1.0 in
+  ignore (store_ok "second refresh" (refresh_due config ~now:second_due));
+  ignore
+    (store_ok "second start" (start_due_candidate config ~now:second_due ~schedule_id));
+  let state = read_state config in
+  let wakes =
+    List.filter
+      (fun (wake : Schedule_domain.wake_record) ->
+         not
+           (String.equal wake.schedule_id schedule_id
+            && Float.equal wake.due_at advanced.due_at))
+      state.wakes
+  in
+  check int "the earlier occurrence's wake stays" 1
+    (List.length
+       (List.filter
+          (fun (wake : Schedule_domain.wake_record) ->
+             String.equal wake.schedule_id schedule_id)
+          wakes));
+  let state_json : Yojson.Safe.t =
+    `Assoc
+      [ "version", `Int state.version
+      ; "updated_at", `Float state.updated_at
+      ; ( "schedules"
+        , `List (List.map Schedule_domain.schedule_request_to_yojson state.schedules) )
+      ; "wakes", `List (List.map Schedule_domain.wake_record_to_yojson wakes)
+      ]
+  in
+  Workspace_core.write_text config (schedules_path config) (Yojson.Safe.to_string state_json);
+  match fail_running config ~now:(second_due +. 1.0) ~schedule_id ~error:"x" with
+  | Error (Running_wake_absent { schedule_id = refused }) ->
+    check string "absent names the schedule" schedule_id refused
+  | Error (Running_wake_settled _) ->
+    fail "an earlier occurrence's wake was read as this occurrence's"
+  | Ok _ -> fail "a running occurrence without its wake was failed"
+  | Error err -> fail (store_error_to_string err)
 ;;
 
 let test_update_requires_an_existing_schedule () =
   with_workspace
   @@ fun config ->
   check_error "missing update" Schedule_not_found
-    (update_request config (make_request ~schedule_id:"missing" ()))
+    (update_request config ~now:100.0 (make_request ~schedule_id:"missing" ()))
 ;;
 
 let test_store_rejects_non_scheduled_initial_status () =
@@ -207,7 +357,13 @@ let test_running_wake_is_settleable_so_prune_keeps_it () =
   (* Trying to cancel a Running schedule must refuse -- a runner owns the
      wake, and the store must not orphan it under the runner. *)
   (match cancel_request config ~schedule_id:req.schedule_id with
-   | Error (Invalid_status_transition _) -> ()
+   | Error
+       (Transition_refused
+          { current = Running
+          ; attempted = Cancel_schedule
+          ; last_wake = Some { status = Wake_running; _ }
+          ; schedule_id = _
+          }) -> ()
    | Ok _ -> fail "cancel of Running schedule must be refused"
    | Error err -> fail (store_error_to_string err));
   let after_cancel_refused = read_state config in
@@ -1195,6 +1351,30 @@ let test_contract_vocabularies_own_strings_and_errors () =
        Schedule_contract_values.wake_status_strings,
        (fun v -> Result.is_ok (Schedule_contract_values.wake_status_of_string v)),
        rejection_error (Schedule_contract_values.wake_status_of_string "nope"))
+    ; ("owner",
+       [ "self"; "wake_target"; "scheduled_by"; "all" ],
+       Schedule_contract_values.owner_kind_strings,
+       (fun v -> Result.is_ok (Schedule_contract_values.owner_kind_of_string v)),
+       rejection_error (Schedule_contract_values.owner_kind_of_string "nope"))
+    ; ("status",
+       [ "scheduled"; "due"; "running"; "succeeded"; "failed"; "cancelled"; "expired"
+       ; "active"
+       ],
+       Schedule_contract_values.status_selector_strings,
+       (fun v -> Result.is_ok (Schedule_contract_values.status_selector_of_string v)),
+       rejection_error (Schedule_contract_values.status_selector_of_string "nope"))
+    ; ("error_kind",
+       [ "due_already_past"
+       ; "transition_refused"
+       ; "due_inputs_conflict"
+       ; "due_input_missing"
+       ; "caller_unidentified"
+       ; "argument_out_of_range"
+       ; "cursor_mismatch"
+       ],
+       Schedule_contract_values.refusal_kind_strings,
+       (fun v -> Result.is_ok (Schedule_contract_values.refusal_kind_of_string v)),
+       rejection_error (Schedule_contract_values.refusal_kind_of_string "nope"))
     ]
   in
   List.iter
@@ -1250,6 +1430,12 @@ let () =
             test_update_accepts_due_but_refuses_terminal_definition;
           test_case "update requires existing schedule" `Quick
             test_update_requires_an_existing_schedule;
+          test_case "update refuses only a changed due time behind the clock" `Quick
+            test_update_refuses_only_a_changed_due_time_behind_the_clock;
+          test_case "running wake missing says whether the wake finished" `Quick
+            test_running_wake_missing_says_whether_the_wake_finished;
+          test_case "a recurring occurrence is not settled by an earlier wake" `Quick
+            test_a_recurring_occurrence_is_not_settled_by_an_earlier_wake;
           test_case "corrupt primary recovers from last-good" `Quick
             test_recovers_from_last_good;
         ] );

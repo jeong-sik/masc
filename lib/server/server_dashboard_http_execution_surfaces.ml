@@ -281,6 +281,45 @@ let publish_execution_error_if_current ~generation exn =
       true))
 ;;
 
+(* One attempt at publishing the execution surface: the generation it began
+   under, and whether it got its answer published. What an attempt does after
+   that -- refreshing the light body from what it published -- can fail on its
+   own or be cut by the window around the attempt, and neither unmakes the
+   answer this attempt already published. So an attempt publishes a failure
+   only while it has published nothing.
+
+   The guard is per attempt, not per generation. [begin_execution_publication_attempt]
+   reads the generation without advancing it -- only invalidation advances it --
+   so two forced refreshes running at once share one generation, each with its
+   own [answered]. The second one's failure still reaches
+   [publish_execution_error_if_current] and lands on the first one's answer.
+   Nothing on the route serialises forced refreshes, so that race is open; it
+   is open on the publication layer, which has no notion of which answer is
+   newer, and closing it means giving publications an order rather than giving
+   attempts a flag. *)
+type execution_attempt =
+  { generation : int
+  ; answered : bool Atomic.t
+  }
+
+let begin_execution_attempt () =
+  { generation = begin_execution_publication_attempt (); answered = Atomic.make false }
+;;
+
+let publish_execution_attempt_success attempt json =
+  if publish_execution_success_if_current ~generation:attempt.generation json
+  then (
+    Atomic.set attempt.answered true;
+    true)
+  else false
+;;
+
+let publish_execution_attempt_failure attempt exn =
+  if Atomic.get attempt.answered
+  then false
+  else publish_execution_error_if_current ~generation:attempt.generation exn
+;;
+
 let publish_execution_error_message_if_current ~generation message =
   with_execution_publication_lock (fun () ->
     if generation <> !execution_publication_generation
@@ -858,11 +897,8 @@ let patched_keeper_status row ~event ~keepalive_running =
           "dashboard execution cache: keeper row has no current status"
     in
     match Keeper_status_runtime.control_plane_status_of_string_opt status with
-    | Some
-        (Cp_surface
-           ((Surface_active | Surface_idle) as s)) ->
+    | Some (Cp_surface s) ->
       `String (Keeper_status_runtime.surface_status_to_string s)
-    | Some (Cp_surface (Surface_offline | Surface_inactive)) -> `String "offline"
     | Some Cp_paused ->
       `String
         (Keeper_status_runtime.control_plane_status_to_string
@@ -1182,13 +1218,16 @@ let dashboard_execution_cached_http_representation context =
 ;;
 
 module For_testing = struct
+  type nonrec execution_attempt = execution_attempt
+
   let cached_representation ~config request =
     let parameters = execution_parameters ~config request in
     execution_cached_http_representation ~config ~parameters request
   let execution_publication_generation = current_execution_publication_generation
-  let begin_execution_publication_attempt = begin_execution_publication_attempt
   let publish_execution_success_if_current = publish_execution_success_if_current
-  let publish_execution_error_if_current = publish_execution_error_if_current
+  let begin_execution_attempt = begin_execution_attempt
+  let publish_execution_attempt_success = publish_execution_attempt_success
+  let publish_execution_attempt_failure = publish_execution_attempt_failure
   let refresh_execution_default_light_http_body
         ?(prepare = Http_response_payload.prepare) ~config () =
     refresh_execution_default_light_http_body_with ~prepare ~config ()
@@ -1337,13 +1376,20 @@ let dashboard_execution_http_response ~sw ~clock context =
   match fixture, actor, full_mode with
   | None, None, false when force ->
     let timeout_sec = Env_config_runtime.Dashboard.execution_timeout_sec in
-    let attempt_generation = Atomic.make 0 in
+    let attempt = ref None in
+    let publish_failure exn =
+      Option.iter
+        (fun attempt ->
+          let (_ : bool) = publish_execution_attempt_failure attempt exn in
+          ())
+        !attempt
+    in
     let compute_and_track () =
-      let generation = begin_execution_publication_attempt () in
-      Atomic.set attempt_generation generation;
+      let this_attempt = begin_execution_attempt () in
+      attempt := Some this_attempt;
       try
         let json = compute ~light:true () in
-        if publish_execution_success_if_current ~generation json
+        if publish_execution_attempt_success this_attempt json
         then (
           let (_ : Yojson.Safe.t) =
             refresh_execution_default_light_http_body ~config
@@ -1353,7 +1399,7 @@ let dashboard_execution_http_response ~sw ~clock context =
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
-        let (_ : bool) = publish_execution_error_if_current ~generation exn in
+        publish_failure exn;
         raise exn
     in
     (* A refresh that finished, and published, as its window closed is the
@@ -1370,10 +1416,7 @@ let dashboard_execution_http_response ~sw ~clock context =
        let exn =
          Dashboard_cache.Compute_timeout (execution_default_light_cache_key, false)
        in
-       ignore
-         (publish_execution_error_if_current
-            ~generation:(Atomic.get attempt_generation)
-            exn);
+       publish_failure exn;
        Log.Dashboard.warn
          "dashboard execution force refresh timed out: %s (%.0fs)"
          execution_default_light_cache_key

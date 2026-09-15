@@ -60,6 +60,37 @@ val keeper_memory_write_with_outcome
     Memory OS snapshot. The write stays inside MASC and never enters the
     external-effect Gate or approval replay path. *)
 
+(** The two stores an explicit memory write reaches: the ordinary current
+    Memory OS snapshot, or the source-bound store a [source_path] selects. *)
+type fact_store =
+  | Ordinary_current
+  | Source_bound_current
+
+(** Which half of a derivation arrived without the other. *)
+type derivation_half =
+  | Rule_id_without_premise_ids
+  | Premise_ids_without_rule_id
+
+(** Why the [rule_id] and [premise_ids] a call carried cannot name a
+    derivation. Closed and produced only by {!validate_memory_write_args}, so a
+    new refusal has to say what to change before it can be made.
+    {!Keeper_memory_os_types.is_memory_id} stays the single premise grammar;
+    this type only records which element broke it and where. *)
+type derivation_rejection =
+  | Rule_id_not_a_string
+  | Premise_ids_not_an_array
+  | Rule_id_blank
+  | Premise_ids_empty
+  | Premise_not_a_string of { index : int }
+  | Premise_repeated of
+      { index : int
+      ; premise_id : string
+      }
+  | Premise_not_a_memory_id of
+      { index : int
+      ; premise_id : string
+      }
+
 (** Result of validating a [keeper_memory_write] call's args. Exposed
     so tests can pin the error_kind taxonomy without constructing a
     [Workspace.config]. *)
@@ -67,8 +98,8 @@ type memory_write_error_kind =
   | Content_empty
   | Source_path_invalid
   | Source_read_failed of Keeper_memory_source_current.source_read_failure
-  | Derivation_incomplete
-  | Derivation_invalid
+  | Derivation_incomplete of derivation_half
+  | Derivation_invalid of derivation_rejection
   | Derived_source_path_unsupported
   | Board_ref_invalid
       (** [board_post_id] or [board_comment_id] is not a string, is blank, or
@@ -82,11 +113,28 @@ type memory_write_error_kind =
       (** A source-bound claim already names its file; it cannot also name a
           Board post. *)
   | Unsupported_derivation
-  | Persistence_failed
+  | Persistence_failed of fact_store
+      (** The store did not answer; which store decides what a repeat write
+          does. *)
   | Commit_receipt_inconsistent
   | No_memory_write_error
 
 val memory_write_error_kind_to_string : memory_write_error_kind -> string
+
+val memory_write_rejection_fields
+  :  memory_write_error_kind
+  -> (string * Yojson.Safe.t) list
+(** [rejected_field] and [expected] for a refusal this kind can answer: which
+    field to change and what it takes. Empty for the kinds whose payload
+    already carries its own coordinates. Derived from the kind, so no failure
+    site states it. *)
+
+val memory_write_error_effect_disposition
+  :  memory_write_error_kind
+  -> Tool_result.failure_effect_disposition
+(** What a failed write with this kind committed. The same match on the kind
+    also picks the payload's [what_committed] sentence, so no failure site
+    states either. *)
 
 type memory_write_validation =
   | Memory_write_ok of

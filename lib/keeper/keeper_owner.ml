@@ -519,27 +519,137 @@ let enqueue_unless_closed mailbox command ~closed =
        `Closed)
 ;;
 
+(* When the owner answers a command it has taken.
+
+   [In_its_drain_step]: the step that takes the command decides it, commits
+   whatever it changes and answers before taking the next one. Nothing in that
+   step waits on a child.
+
+   [Possibly_when_the_child_finishes]: the step may park the resolver until the
+   running child finishes. [Await_idle_after_shutdown] and [Begin_stopping] wait
+   for an active child; [Run_if_idle] answers with the turn it admitted, when
+   that turn ends. *)
+type answer =
+  | In_its_drain_step
+  | Possibly_when_the_child_finishes
+
+let answer : type response. response command -> answer = function
+  | Exact_projection -> In_its_drain_step
+  | Apply_meta _ -> In_its_drain_step
+  | Exact_operation _ -> In_its_drain_step
+  | Direct_checkpoint _ -> In_its_drain_step
+  | Defer_direct_checkpoint _ -> In_its_drain_step
+  | Resume_direct_checkpoint _ -> In_its_drain_step
+  | Direct_runtime_retry _ -> In_its_drain_step
+  | Defer_direct_runtime_retry _ -> In_its_drain_step
+  | Resume_direct_runtime_retry _ -> In_its_drain_step
+  | Direct_gate_bindings -> In_its_drain_step
+  | Reconcile_direct_gate_binding _ -> In_its_drain_step
+  | Direct_gate_waits -> In_its_drain_step
+  | Discharge_direct_gate _ -> In_its_drain_step
+  | Direct_gate_state _ -> In_its_drain_step
+  | Direct_gate_binding _ -> In_its_drain_step
+  | Direct_gate_obligations _ -> In_its_drain_step
+  | Defer_direct_gate_reconciliation _ -> In_its_drain_step
+  | Defer_direct_gate _ -> In_its_drain_step
+  | Resolve_direct_gate _ -> In_its_drain_step
+  | Resume_direct_gate _ -> In_its_drain_step
+  | Pause_and_interrupt _ -> In_its_drain_step
+  | Run_next_operation _ -> In_its_drain_step
+  | Interrupt_running_operation _ -> In_its_drain_step
+  | Submit_operation _ -> In_its_drain_step
+  | Submit_interactive_operation _ -> In_its_drain_step
+  | List_queued_operations _ -> In_its_drain_step
+  | Edit_queued_operation _ -> In_its_drain_step
+  | Move_queued_operation_to_front _ -> In_its_drain_step
+  | Move_queued_operation_to_end _ -> In_its_drain_step
+  | Cancel_queued_operation _ -> In_its_drain_step
+  | Batch_operations _ -> In_its_drain_step
+  | Claim_next_operation -> In_its_drain_step
+  | Succeed_running_operation _ -> In_its_drain_step
+  | Fail_running_operation _ -> In_its_drain_step
+  | Wake_operation_drain -> In_its_drain_step
+  | Run_if_idle _ -> Possibly_when_the_child_finishes
+  | Begin_shutdown _ -> In_its_drain_step
+  | Rollback_shutdown _ -> In_its_drain_step
+  | Restore_shutdown _ -> In_its_drain_step
+  | Transition_shutdown _ -> In_its_drain_step
+  | Await_idle_after_shutdown -> Possibly_when_the_child_finishes
+  | Child_finished _ -> In_its_drain_step
+  | Begin_stopping -> Possibly_when_the_child_finishes
+;;
+
 let request t command =
-  if Atomic.get t.closed
-  then Error Owner_closed
-  else (
-    let response, resolve = Eio.Promise.create () in
-    match
-      enqueue_unless_closed t.mailbox (Command (command, resolve)) ~closed:t.closed_p
-    with
-    | `Closed -> Error Owner_closed
-    | `Enqueued ->
-      (* A response that arrived as the owner closed is the answer: the
-         command ran, and its caller must not be told the owner was closed
-         to it. [Fiber.first] kept whichever wake-up was queued first, and a
-         closing owner queues its close ahead of the response it settled in
-         the same pass. *)
-      Eio.Cancel.protect (fun () ->
+  let ask () =
+    if Atomic.get t.closed
+    then Error Owner_closed
+    else (
+      let response, resolve = Eio.Promise.create () in
+      match
+        enqueue_unless_closed t.mailbox (Command (command, resolve)) ~closed:t.closed_p
+      with
+      | `Closed -> Error Owner_closed
+      | `Enqueued ->
+        (* A response that arrived as the owner closed is the answer: the
+           command ran, and its caller must not be told the owner was closed
+           to it. [Fiber.first] kept whichever wake-up was queued first, and a
+           closing owner queues its close ahead of the response it settled in
+           the same pass. *)
         Watched_work.run
           (fun () -> Eio.Promise.await response)
           ~watcher:(fun () ->
              Eio.Promise.await t.closed_p;
-             Error Owner_closed)))
+             Error Owner_closed))
+  in
+  match answer command with
+  | In_its_drain_step ->
+    (* A cancelled caller stays until the owner has answered. Callers change
+       the owner inside an authority they release on return:
+       [Keeper_owner_registry.apply_meta] holds the keeper's lifecycle key lock
+       and reservation across its write. Leaving early would release them while
+       the write is still queued, and it would commit after another holder took
+       them. A claim's answer is also the only record of which row the child
+       took.
+
+       The handover is inside the protected region too. [enqueue_unless_closed]
+       races the add against the owner's close with [Fiber.first], and
+       [Fiber.first] raises its caller's cancellation even when the add has
+       already returned (eio 1.3 fiber.ml [any_gen]: [(OK _ | New), Some ex]).
+       Protecting only the wait left that return as a window: the owner took
+       the command and ran it while its caller left. Every release build for
+       0.35.18 hit it.
+
+       Both waits end when the owner drains or closes, and a drain step never
+       waits on a child. A cancelled caller blocked on a full mailbox therefore
+       waits for room, and its command then runs. *)
+    Eio.Cancel.protect ask
+  | Possibly_when_the_child_finishes ->
+    (* A cancelled caller leaves. The answer may wait for the child, and the
+       caller can be that child: a turn asking [Await_idle_after_shutdown]
+       waits for its own end. Under a protected wait an operator interrupt
+       could not unwind it, so the slot was never released. None of these
+       callers holds an authority across the wait. A command already handed
+       over still runs after its caller left. *)
+    ask ()
+;;
+
+(* Hand a command over without reading the answer.
+
+   The settle path needs this. A child that an interrupt just cancelled still
+   has to tell the owner it finished, and its [Child_finished] answer is
+   discarded anyway; asking for that answer would have to survive the child's
+   own cancellation. Only the handover is protected here, and the mailbox
+   drains continuously, so the protected region ends with the owner's next
+   take rather than with its answer. *)
+let notify t command =
+  if not (Atomic.get t.closed)
+  then (
+    let _, resolve = Eio.Promise.create () in
+    Eio.Cancel.protect (fun () ->
+      match
+        enqueue_unless_closed t.mailbox (Command (command, resolve)) ~closed:t.closed_p
+      with
+      | `Enqueued | `Closed -> ()))
 ;;
 
 (* The first fault is otherwise visible only as [store_unavailable = true] in
@@ -957,7 +1067,7 @@ let start
               (try
                  Eio.Time.sleep clock (Float.max 0.0 (not_before -. t.now ()));
                  (* fire-and-forget: the sleeper exists only to deliver the wake; if the owner has closed by then there is nothing to wake. *)
-                 ignore (request t Wake_operation_drain)
+                 notify t Wake_operation_drain
                with
                | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
                | exn ->
@@ -1003,7 +1113,7 @@ let start
            (try
               Eio.Time.sleep clock transient_retry_wake_sec;
               (* fire-and-forget: the sleeper exists only to deliver the wake; if the owner has closed by then there is nothing to wake. *)
-              ignore (request t Wake_operation_drain)
+              notify t Wake_operation_drain
             with
             | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
             | exn ->
@@ -1161,9 +1271,10 @@ let start
                durably Failed/Succeeded operation implies its wire synthesis
                already ran (the stopping test relies on this ordering).
                Cancellation of the owner switch inside the hook skips the
-               Child_finished commit below exactly as it always could during
-               [request]; [settle_running_after_restart] clears that window
-               on the next boot. *)
+               Child_finished handover below, as it always could here;
+               [settle_running_after_restart] clears that window on the next
+               boot. The handover itself is protected, so an interrupted child
+               still reports what it settled. *)
             (try
                runner.on_execution_settled
                  ~keeper_name:t.keeper_name
@@ -1174,12 +1285,11 @@ let start
              | exn ->
                Log.Keeper.error "operation settle hook raised for %s: %s"
                  t.keeper_name (Printexc.to_string exn));
-            ignore
-              (request
-                 t
-                 (Child_finished
-                    (Operation_child_finished
-                       { claimed_operation_id = !claimed_operation_id; execution })))
+            notify
+              t
+              (Child_finished
+                 (Operation_child_finished
+                    { claimed_operation_id = !claimed_operation_id; execution }))
           ))
     and loop state shutdown_operation_id =
         let exact_interrupt target =
@@ -1762,11 +1872,10 @@ let start
                          | exn -> Error (exn, Printexc.get_raw_backtrace ())
                        in
                        Atomic.set t.child_cancel None;
-                       ignore
-                         (request
-                            t
-                            (Child_finished
-                               (Autonomous_child_finished { outcome; resolve }))))
+                       notify
+                         t
+                         (Child_finished
+                            (Autonomous_child_finished { outcome; resolve })))
                    in
                    (match lane with
                     | Chat_operation | Maintenance -> run_admitted_turn ()

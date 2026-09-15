@@ -17,7 +17,6 @@ let execution_mode_of_descriptor descriptor =
   | Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Concurrent ->
     Agent_core.Tool_contract.Concurrent
   | Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Serial
-  | Keeper_tool_descriptor.Direct_terminal
   | Keeper_tool_descriptor.Terminal -> Agent_core.Tool_contract.Serial
 ;;
 
@@ -44,7 +43,6 @@ let unscheduled_layer plan nodes =
        | Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Concurrent ->
          build batches ((node, descriptor) :: concurrent) rest
        | Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Serial
-       | Keeper_tool_descriptor.Direct_terminal
        | Keeper_tool_descriptor.Terminal ->
          let batches = flush_concurrent batches concurrent in
          build (Unscheduled_serial (node, descriptor) :: batches) [] rest)
@@ -101,7 +99,6 @@ let outer_completion plan =
                    (Keeper_tool_descriptor.Serial | Keeper_tool_descriptor.Concurrent)
              ; _
              }
-         | Some { execution = Keeper_tool_descriptor.Direct_terminal; _ }
          | None -> false)
       (Keeper_tool_plan.nodes plan)
   then
@@ -189,6 +186,7 @@ type node_settlement =
 let execute_one
       ~plan
       ~run_id
+      ~prepared_inputs
       ~outputs
       ~tool_use_id_for_node
       ~dispatch
@@ -203,17 +201,27 @@ let execute_one
     ; cause = Some (Plan_execution_failed { node_id; schedule = scheduled.schedule; error })
     }
   in
-  match
-    Keeper_tool_plan.resolve_input
-      plan
-      ~run_id
-      ~node_id
-      ~lookup:(fun dependency ->
-        List.find_map
-          (fun (id, output) ->
-             if Keeper_tool_plan.Node_id.equal id dependency then Some output else None)
-          outputs)
-  with
+  let input =
+    match
+      List.find_map
+        (fun (id, prepared) ->
+           if Keeper_tool_plan.Node_id.equal id node_id then Some prepared else None)
+        prepared_inputs
+    with
+    | Some (Keeper_tool_plan.Checked_before_run input) -> Ok input
+    | Some Keeper_tool_plan.Checked_when_node_runs ->
+      Keeper_tool_plan.resolve_input
+        plan
+        ~run_id
+        ~node_id
+        ~lookup:(fun dependency ->
+          List.find_map
+            (fun (id, output) ->
+               if Keeper_tool_plan.Node_id.equal id dependency then Some output else None)
+            outputs)
+    | None -> Error (Keeper_tool_plan.Unknown_node_id node_id)
+  in
+  match input with
   | Error error -> plan_failure error
   | Ok input ->
     (* The executor owns both occurrence identities. Mint them before entering
@@ -334,13 +342,14 @@ let execute_with_tool_use_id
       Tool_result.Proven_pre_effect
       settled
   in
-  let rec run_batches settled outputs = function
+  let rec run_batches ~prepared_inputs settled outputs = function
     | [] -> Ok settled
     | batch :: rest ->
       let execute scheduled =
         execute_one
           ~plan
           ~run_id
+          ~prepared_inputs
           ~outputs
           ~tool_use_id_for_node
           ~dispatch
@@ -372,9 +381,39 @@ let execute_with_tool_use_id
              outputs
              settlements
          in
-         run_batches settled outputs rest)
+         run_batches ~prepared_inputs settled outputs rest)
   in
-  run_batches [] [] (schedule plan)
+  let batches = schedule plan in
+  match Keeper_tool_plan.prepare_inputs plan with
+  | Ok prepared_inputs -> run_batches ~prepared_inputs [] [] batches
+  | Error (node_id, error) ->
+    let scheduled =
+      List.find_map
+        (fun batch ->
+           let scheduled_nodes =
+             match batch with
+             | Serial_batch scheduled -> [ scheduled ]
+             | Concurrent_batch scheduled -> scheduled
+           in
+           List.find_opt
+             (fun (scheduled : scheduled_node) ->
+                Keeper_tool_plan.Node_id.equal scheduled.node.Keeper_tool_plan.id node_id)
+             scheduled_nodes)
+        batches
+    in
+    (match scheduled with
+     | Some (scheduled : scheduled_node) ->
+       Error
+         { settled = []
+         ; cause =
+             Plan_execution_failed { node_id; schedule = scheduled.schedule; error }
+         ; effect_disposition = Tool_result.Proven_pre_effect
+         }
+     | None ->
+       invalid_arg
+         (Printf.sprintf
+            "validated composition plan lost the schedule of node %s"
+            (Keeper_tool_plan.Node_id.to_string node_id)))
 ;;
 
 (* TEL-OK: forwards to [execute_with_tool_use_id] below; no new effect
@@ -480,8 +519,8 @@ let execute_keeper_with_authority
       match descriptor.Keeper_tool_descriptor.execution with
       | Keeper_tool_descriptor.Terminal -> on_completed, on_failed
       | Keeper_tool_descriptor.Ordinary
-          (Keeper_tool_descriptor.Serial | Keeper_tool_descriptor.Concurrent)
-       | Keeper_tool_descriptor.Direct_terminal -> None, None
+          (Keeper_tool_descriptor.Serial | Keeper_tool_descriptor.Concurrent) ->
+        None, None
     in
     let execution_evidence = ref None in
     let make_handler =

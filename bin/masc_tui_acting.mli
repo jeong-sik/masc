@@ -48,8 +48,10 @@ val retain :
   'a list ->
   'a list * int
 (** Trim a newest-first ring to a budget per class, answering what was kept
-    and how many were dropped. Events [visible Actions] spend [actions];
-    everything else spends [quiet].
+    and how many were dropped. Events [visible Actions] and turn
+    observations spend [actions] -- the Turns fold needs an observation
+    exactly as long as the calls it numbers, so it leaves with them in
+    arrival order; everything else spends [quiet].
 
     Trimming by arrival alone let one class evict the other: a chat stream
     sends one frame per token, so a single long reply spent the whole ring
@@ -139,14 +141,14 @@ type wire_tool = {
 type chunk = {
   ck_keeper : string;
   ck_turn : int option;
-      (** What the row shows: the settle's number once the turn settled, the
-          agent session's before that. *)
-  ck_session_turn : int option;
-      (** The same turn as the agent session numbers it. The turn markers,
-          the wire and the keeper ledger all write this plane; only the
-          settle is on the keeper's own lifetime plane. One live turn was
-          1157 here and 719 on its settle (2026-09-07), so a member is only
-          ever matched against the plane it was written on. *)
+      (** The keeper's own number for the turn, from its settle or from the
+          observation of any provider call inside it; [None] until either
+          has arrived, and the row says so. *)
+  ck_session_turns : int list;
+      (** The agent session's ordinals for the provider calls this turn has
+          absorbed, oldest first. The turn markers, the wire and the keeper
+          ledger number their frames by the call; a row that states an
+          ordinal no observation has named yet is filed by this list. *)
   ck_at : float;  (** newest member's arrival — the chunk's feed position *)
   ck_wire_tools : wire_tool list;  (** oldest-first, from the agent-core wire *)
   ck_ledger_tools : chunk_tool list;  (** oldest-first, from the keeper ledger *)
@@ -188,10 +190,11 @@ val chunk_rows : traces:(string * string) list -> entry list -> row list
     (composite pushes, heartbeats, stream frames, waiting-queue changes,
     snapshots) stays hidden here too; the fold never readmits it as a
     pass-through row. Rows come back newest
-    first by latest activity. Every member that carries a turn number keys its
-    chunk, the keeper-ledger events included: they state the turn they ran
-    in, so a row reported after the next turn opened still goes to the turn
-    that made it. A settled
+    first by latest activity. A chunk is one keeper turn. A member that
+    states the agent session's ordinal for its provider call goes to the
+    keeper turn a retained turn observation gives that ordinal, even when it
+    is reported after the next turn opened; a member that states no ordinal
+    joins the keeper's newest chunk. A settled
     chunk names its tools (ledger plane preferred, wire plane standing in
     when the ledger is silent), tokens, and cost; a running one shows the
     calls so far. *)

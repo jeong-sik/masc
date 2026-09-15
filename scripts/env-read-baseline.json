@@ -29,7 +29,6 @@
     "lib/runtime_model/provider_runtime_projection.ml": 1,
     "lib/runtime_model/runtime_model_resolve.ml": 1,
     "lib/runtime_model/runtime_model_string.ml": 1,
-    "lib/server/server_base_path_guard.ml": 1,
     "lib/server/server_bootstrap_http.ml": 1,
     "lib/server/server_bootstrap_loops.ml": 1,
     "lib/server/server_bootstrap_maintenance.ml": 1,

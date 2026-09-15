@@ -5,6 +5,8 @@ Read output stream bytes from a spawned process starting at an offset.
 Returns newly produced bytes and the next offset to continue reading from."""
 additional_properties = false
 
+defer_loading = true
+
 [[params]]
 name = "handle"
 type = "string"

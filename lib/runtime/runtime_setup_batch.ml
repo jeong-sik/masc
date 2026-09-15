@@ -10,13 +10,31 @@ type readiness = Not_probed | Verified
 type receipt = { runtime_id:string; runtime_ids:string list; models:string list;
                  readiness:readiness }
 let ( let* ) = Result.bind
+(* [Unix.WSIGNALED] carries OCaml's own signal numbers ([Sys.sigkill] is -7),
+   which no operator can look up; a signal the runtime does not name arrives
+   as the host's positive number. *)
+let signal_names =
+  [ Sys.sigabrt, "SIGABRT"; Sys.sigalrm, "SIGALRM"; Sys.sigbus, "SIGBUS"
+  ; Sys.sigchld, "SIGCHLD"; Sys.sigcont, "SIGCONT"; Sys.sigfpe, "SIGFPE"
+  ; Sys.sighup, "SIGHUP"; Sys.sigill, "SIGILL"; Sys.sigint, "SIGINT"
+  ; Sys.sigkill, "SIGKILL"; Sys.sigpipe, "SIGPIPE"; Sys.sigpoll, "SIGPOLL"
+  ; Sys.sigprof, "SIGPROF"; Sys.sigquit, "SIGQUIT"; Sys.sigsegv, "SIGSEGV"
+  ; Sys.sigstop, "SIGSTOP"; Sys.sigsys, "SIGSYS"; Sys.sigterm, "SIGTERM"
+  ; Sys.sigtrap, "SIGTRAP"; Sys.sigtstp, "SIGTSTP"; Sys.sigttin, "SIGTTIN"
+  ; Sys.sigttou, "SIGTTOU"; Sys.sigurg, "SIGURG"; Sys.sigusr1, "SIGUSR1"
+  ; Sys.sigusr2, "SIGUSR2"; Sys.sigvtalrm, "SIGVTALRM"; Sys.sigxcpu, "SIGXCPU"
+  ; Sys.sigxfsz, "SIGXFSZ" ]
+let signal_text signal = match List.assoc_opt signal signal_names with
+  | Some name -> name
+  | None -> Printf.sprintf "signal %d" signal
 let exit_text status = match Process_eio.exit_reason_of_status status with
   | Process_eio.Completed code -> Printf.sprintf "exit %d" code
   | Process_eio.Timed_out -> "timed out"
-  | Process_eio.Signaled signal -> Printf.sprintf "signal %d" signal
-  | Process_eio.Stopped signal -> Printf.sprintf "stopped by signal %d" signal
+  | Process_eio.Signaled signal -> "killed by " ^ signal_text signal
+  | Process_eio.Stopped signal -> "stopped by " ^ signal_text signal
 let with_detail = function
   | None -> "" | Some detail -> (match String.trim detail with "" -> "" | detail -> ": " ^ detail)
+let child_detail stderr = match String.trim stderr with "" -> None | text -> Some text
 let error_message = function
   | Invalid_selection -> "Select a default from the selected runtimes."
   | Invalid_configuration -> "The workspace runtime configuration is invalid."
@@ -24,15 +42,23 @@ let error_message = function
   | Configuration_unavailable -> "The workspace configuration could not be read."
   | Child_not_started refusal ->
     "The MASC executable could not be started for stage validation: " ^ Process_eio.spawn_refusal_to_string refusal
-  | Validation_failed { exit; stderr } ->
-    Printf.sprintf "Selected runtime configuration did not pass validation (%s)%s" (exit_text exit) (with_detail (Some stderr))
+  (* The child's stderr is its log, several lines long, and stays out of this
+     one-line summary: {!error_detail} carries it. A summary with a newline in
+     it was dropped whole by the setup screen, which then said only that setup
+     did not finish. *)
+  | Validation_failed { exit; stderr = _ } ->
+    Printf.sprintf "Selected runtime configuration did not pass validation (%s)" (exit_text exit)
   | Verification_failed { runtime_id; code; detail } ->
     Printf.sprintf "Runtime %S did not pass response and tool verification (%s)%s" runtime_id code (with_detail detail)
-  | Verification_unreadable { runtime_id; exit; stderr; reason } ->
-    Printf.sprintf "Runtime %S verification returned no readable report (%s; %s)%s" runtime_id (exit_text exit) reason (with_detail (Some stderr))
+  | Verification_unreadable { runtime_id; exit; stderr = _; reason } ->
+    Printf.sprintf "Runtime %S verification returned no readable report (%s; %s)" runtime_id (exit_text exit) reason
   | Write_failed -> "Configuration could not be saved; previous configuration was restored."
   | Rollback_failed -> "Configuration restoration was incomplete; inspect the workspace before retrying."
   | Lock_unavailable -> "Another configuration operation is active; retry after it finishes."
+let error_detail = function
+  | Validation_failed { stderr; _ } | Verification_unreadable { stderr; _ } -> child_detail stderr
+  | Invalid_selection | Invalid_configuration | Changed_configuration | Configuration_unavailable
+  | Child_not_started _ | Verification_failed _ | Write_failed | Rollback_failed | Lock_unavailable -> None
 let revision_to_string (Revision value) = value
 let revision_of_string value =
   if String.length value = 64 && String.for_all (function '0'..'9'|'a'..'f' -> true | _ -> false) value

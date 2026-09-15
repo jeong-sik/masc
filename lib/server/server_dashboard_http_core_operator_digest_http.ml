@@ -9,18 +9,33 @@
        [operator_digest_cache] surface immediately (0ms), decorated
        with the default query metadata.
 
-    2. **Parameterized request** — computes on-demand with a 5s SWR
-       cache. Cache key is the colon-delimited concatenation of
+    2. **Parameterized request** — computes on-demand behind the SWR
+       cache ([standard_cache_ttl_s]). Cache key is the colon-delimited
+       concatenation of
        [actor | effective_target_type | target_id | include_workers]
        so distinct query shapes are cached independently. The compute
        closure runs [Operator_control.digest_json] inside
        [run_dashboard_compute ~mode:Offloaded_readonly] and decorates
        with [with_projection_diagnostics ~surface:"operator_digest"].
        Validation errors are surfaced as `{error, message, generated_at}`
-       JSON; the outer [Eio.Time.with_timeout] enforces
-       [dashboard_request_timeout_s] and surfaces `Error \`Timeout`
-       as `{error:"timeout", message:"Operator digest timed out
-       after 30s", generated_at}`.
+       JSON. The compute has no window of its own:
+       [Dashboard_cache.get_or_compute_with_timeout] bounds it at
+       [dashboard_request_timeout_s], and a compute that runs past that
+       raises inside the cache rather than returning a value the cache
+       would store. What the caller gets then depends on what the key
+       holds, and the two cases exclude each other:
+
+       - the key holds an entry (fresh, stale or dead): the cache puts
+         it back and answers with it, and the repeated-timeout circuit
+         is cleared rather than advanced. A key that keeps timing out
+         keeps answering with an older digest.
+       - the key holds nothing: the timeout envelope is the answer, it
+         is not cached, and three of those inside the circuit's window
+         open the circuit.
+
+       That envelope carries [computation_timeout], which the HTTP
+       layer answers as 504. The compute's own window used to answer
+       200 with a body saying it had timed out.
 
     Pure helper move (no callback injection). All references reach
     existing siblings or top-level libraries. *)
@@ -106,62 +121,48 @@ let operator_digest_http_json ~state ~sw ~clock request =
         ""
     in
     let compute () =
-      (* A digest that finished as its window closed is the digest. *)
-      match
-        Watched_work.run
-          ~watcher:(fun () ->
-            Eio.Time.sleep clock Core_cache.dashboard_request_timeout_s;
-            Error `Timeout)
-          (fun () ->
-          Ok
-            (Core_runtime.run_dashboard_compute
-               ~mode:Offloaded_readonly
-               ?net
-               ?mono_clock
-               ~sw
-               ~clock
-               ~config
-               (fun ~config ~sw ->
-                  let ctx : _ Operator_control.context =
-                    { config
-                    ; agent_name = Option.value ~default:"dashboard" actor
-                    ; sw
-                    ; clock
-                    ; proc_mgr = state.Mcp_server.proc_mgr
-                    ; net = state.Mcp_server.net
-                    ; delegated_dispatch = None
-                    ; mcp_session_id = None
-                    }
-                  in
-                  match
-                    Operator_control.digest_json
-                      ?actor
-                      ~target_type:effective_target_type
-                      ?target_id
-                      ?include_workers
-                      ctx
-                  with
-                  | Ok json -> json
-                  | Error err ->
-                    `Assoc
-                      [ "error", `String "validation_error"
-                      ; "message", `String err
-                      ; "generated_at", `String (Masc_domain.now_iso ())
-                      ])))
-      with
-      | Ok json ->
-        Core_cache.with_projection_diagnostics
-          ~surface:"operator_digest"
-          ~started_at
-          ~extra:
-            [ "readonly_pool", Workspace_utils.domain_local_pg_backend_diagnostics_json () ]
-          json
-      | Error `Timeout ->
-        `Assoc
-          [ "error", `String "timeout"
-          ; "message", `String "Operator digest timed out after 30s"
-          ; "generated_at", `String (Masc_domain.now_iso ())
-          ]
+      let json =
+        Core_runtime.run_dashboard_compute
+          ~mode:Offloaded_readonly
+          ?net
+          ?mono_clock
+          ~sw
+          ~clock
+          ~config
+          (fun ~config ~sw ->
+             let ctx : _ Operator_control.context =
+               { config
+               ; agent_name = Option.value ~default:"dashboard" actor
+               ; sw
+               ; clock
+               ; proc_mgr = state.Mcp_server.proc_mgr
+               ; net = state.Mcp_server.net
+               ; delegated_dispatch = None
+               ; mcp_session_id = None
+               }
+             in
+             match
+               Operator_control.digest_json
+                 ?actor
+                 ~target_type:effective_target_type
+                 ?target_id
+                 ?include_workers
+                 ctx
+             with
+             | Ok json -> json
+             | Error err ->
+               `Assoc
+                 [ "error", `String "validation_error"
+                 ; "message", `String err
+                 ; "generated_at", `String (Masc_domain.now_iso ())
+                 ])
+      in
+      Core_cache.with_projection_diagnostics
+        ~surface:"operator_digest"
+        ~started_at
+        ~extra:
+          [ "readonly_pool", Workspace_utils.domain_local_pg_backend_diagnostics_json () ]
+        json
     in
     Ok
       (Dashboard_cache.get_or_compute_with_timeout

@@ -552,6 +552,238 @@ let test_outer_completion_owns_terminal_boundary () =
     fail "ordinary composition became terminal"
 ;;
 
+module Validation = Masc.Tool_input_validation
+
+let object_template fields =
+  match Plan.Json_template.object_ fields with
+  | Ok template -> template
+  | Error (Plan.Json_template.Duplicate_field name) ->
+    failf "unexpected duplicate template field: %S" name
+;;
+
+let json_pointer value =
+  match Plan.Json_pointer.of_string value with
+  | Ok pointer -> pointer
+  | Error _ -> failf "unexpected invalid JSON pointer: %S" value
+;;
+
+let never_dispatched ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+  failf "node %s ran although a later node input was invalid" (node_name node)
+;;
+
+let expect_rejected_before_any_node ~label ~node failure =
+  check int (label ^ ": no node settled") 0 (List.length failure.Executor.settled);
+  check string
+    (label ^ ": nothing ran, so nothing took effect")
+    "proven_pre_effect"
+    (Tool_result.failure_effect_disposition_to_string failure.effect_disposition);
+  match failure.cause with
+  | Executor.Plan_execution_failed
+      { node_id = failed
+      ; error = Plan.Input_validation_failed { node_id = rejected; rejection; _ }
+      ; _
+      }
+    when Plan.Node_id.equal failed (node_id node)
+         && Plan.Node_id.equal rejected (node_id node) -> rejection.Validation.violation
+  | Executor.Plan_execution_failed _
+  | Executor.Tool_did_not_complete _
+  | Executor.Node_observation_failed _
+  | Executor.Outer_completion_mismatch _ ->
+    failf "%s: the invalid node input lost its typed plan cause" label
+;;
+
+(* The prior-art shape: a Serial search runs alone, then two Concurrent
+   searches share a batch. Only the last node's input breaks a declared bound,
+   and it breaks it with a literal, so nothing about it depends on the searches
+   before it. The plan used to run the first search, then fail the batch and
+   throw its result away. *)
+let test_static_input_rejection_runs_no_node () =
+  Eio_main.run @@ fun _env ->
+  let search ~id ~tool query =
+    Plan.node
+      ~id:(node_id id)
+      ~tool_name:tool
+      ~input:(object_template [ "query", Plan.Json_template.literal (`String query) ])
+      ()
+  in
+  let over_the_board_bound = String.make 201 'q' in
+  let plan =
+    match
+      Plan.create
+        ~descriptors:
+          [ canonical_descriptor "keeper_memory_search"
+          ; canonical_descriptor "keeper_library_search"
+          ; canonical_descriptor "masc_board_search"
+          ]
+        [ search ~id:"memory" ~tool:"keeper_memory_search" "EACCES"
+        ; search ~id:"library" ~tool:"keeper_library_search" "EACCES"
+        ; search ~id:"board" ~tool:"masc_board_search" over_the_board_bound
+        ]
+    with
+    | Ok plan -> plan
+    | Error error -> fail ("prior-art shaped plan was rejected: " ^ Plan.error_to_string error)
+  in
+  (match Executor.schedule plan with
+   | [ Executor.Serial_batch memory; Executor.Concurrent_batch concurrent ] ->
+     check string "the serial search runs first" "memory" (node_name memory.node);
+     check
+       (list string)
+       "the concurrent searches share the next batch"
+       [ "board"; "library" ]
+       (List.map (fun (scheduled : Executor.scheduled_node) -> node_name scheduled.node)
+          concurrent
+        |> List.sort String.compare)
+   | _ -> fail "prior-art shaped plan no longer schedules serial then concurrent");
+  match
+    Executor.execute ~plan ~run_id:(Plan.Run_id.fresh ()) ~dispatch:never_dispatched ()
+  with
+  | Ok _ -> fail "an over-long board query completed the plan"
+  | Error failure ->
+    (match expect_rejected_before_any_node ~label:"board bound" ~node:"board" failure with
+     | Validation.Argument_out_of_range
+         { path = "query"; keyword = Validation.Count_bound Validation.Max_length } -> ()
+     | _ -> fail "the board query was not refused by its maxLength")
+;;
+
+(* A composition node and a top-level call go through one validator, so a
+   literal outside the node tool's enum is refused like a direct call is, and
+   before the node ahead of it runs. *)
+let test_enum_literal_is_refused_before_any_node () =
+  Eio_main.run @@ fun _env ->
+  let plan =
+    match
+      Plan.create
+        ~descriptors:
+          [ canonical_descriptor "keeper_lane_status"
+          ; canonical_descriptor "keeper_memory_search"
+          ]
+        [ Plan.node
+            ~id:(node_id "lane")
+            ~tool_name:"keeper_lane_status"
+            ~input:(Plan.Json_template.literal (`Assoc []))
+            ()
+        ; Plan.node
+            ~id:(node_id "search")
+            ~tool_name:"keeper_memory_search"
+            ~after:[ node_id "lane" ]
+            ~input:
+              (object_template
+                 [ "query", Plan.Json_template.literal (`String "EACCES")
+                 ; "source", Plan.Json_template.literal (`String "durable")
+                 ])
+            ()
+        ]
+    with
+    | Ok plan -> plan
+    | Error error -> fail ("enum literal plan was rejected: " ^ Plan.error_to_string error)
+  in
+  match
+    Executor.execute ~plan ~run_id:(Plan.Run_id.fresh ()) ~dispatch:never_dispatched ()
+  with
+  | Ok _ -> fail "a source outside the enum completed the plan"
+  | Error failure ->
+    (match expect_rejected_before_any_node ~label:"enum literal" ~node:"search" failure with
+     | Validation.Field_errors
+         [ { Agent_core.Tool_input_validation.path = "/source"
+           ; expected = Agent_core.Tool_input_validation.Expected_enum { allowed; _ }
+           ; _
+           }
+         ] ->
+       check
+         (list string)
+         "the refusal names the declared members"
+         [ "memory"; "history"; "all" ]
+         (List.map Yojson.Safe.Util.to_string allowed)
+     | _ -> fail "the source literal was not refused by its enum")
+;;
+
+(* An input that reads a producer output cannot be checked before the producer
+   runs. It is checked when its own node runs, with the same enum rule, after
+   the producer has settled. *)
+let test_output_value_outside_enum_is_refused_when_its_node_runs () =
+  Eio_main.run @@ fun _env ->
+  let read_id = node_id "read" in
+  let plan =
+    match
+      Plan.create
+        ~descriptors:[ canonical_descriptor "Read"; canonical_descriptor "keeper_memory_search" ]
+        [ Plan.node
+            ~id:read_id
+            ~tool_name:"Read"
+            ~input:
+              (object_template [ "file_path", Plan.Json_template.literal (`String "a.ml") ])
+            ()
+        ; Plan.node
+            ~id:(node_id "search")
+            ~tool_name:"keeper_memory_search"
+            ~input:
+              (object_template
+                 [ "query", Plan.Json_template.literal (`String "probe")
+                 ; ( "source"
+                   , Plan.Json_template.output ~node_id:read_id ~pointer:(json_pointer "/path") )
+                 ])
+            ()
+        ]
+    with
+    | Ok plan -> plan
+    | Error error -> fail ("Read -> search plan was rejected: " ^ Plan.error_to_string error)
+  in
+  let dispatched = ref [] in
+  let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+    dispatched := node_name node :: !dispatched;
+    match node_name node with
+    | "read" ->
+      Executor.dispatch_result
+        (completed
+           ~tool_name:"Read"
+           ~data:
+             (`Assoc
+                [ "ok", `Bool true
+                ; "path", `String "/keeper/probe/a.ml"
+                ; "bytes", `Int 5
+                ; "truncated", `Bool false
+                ; "offset", `Int 1
+                ; "returned_lines", `Int 1
+                ; "content", `String "probe"
+                ]))
+    | name -> failf "node %s ran with a source outside the enum" name
+  in
+  match Executor.execute ~plan ~run_id:(Plan.Run_id.fresh ()) ~dispatch () with
+  | Ok _ -> fail "a path read back as a source completed the plan"
+  | Error failure ->
+    check (list string) "the producer ran first" [ "read" ] !dispatched;
+    check
+      (list string)
+      "the producer stays settled"
+      [ "read" ]
+      (List.map (fun result -> Plan.Node_id.to_string result.Executor.node_id) failure.settled);
+    (match failure.cause with
+     | Executor.Plan_execution_failed
+         { error =
+             Plan.Input_validation_failed
+               { node_id = rejected
+               ; rejection =
+                   { Validation.violation =
+                       Validation.Field_errors
+                         [ { Agent_core.Tool_input_validation.path = "/source"
+                           ; expected = Agent_core.Tool_input_validation.Expected_enum _
+                           ; _
+                           }
+                         ]
+                   ; _
+                   }
+               ; _
+               }
+         ; _
+         }
+       when Plan.Node_id.equal rejected (node_id "search") -> ()
+     | Executor.Plan_execution_failed _
+     | Executor.Tool_did_not_complete _
+     | Executor.Node_observation_failed _
+     | Executor.Outer_completion_mismatch _ ->
+       fail "the output-bound source was not refused by its enum at run time")
+;;
+
 let () =
   run
     "keeper_tool_plan_executor"
@@ -593,6 +825,20 @@ let () =
             "outer completion owns terminal boundary"
             `Quick
             test_outer_completion_owns_terminal_boundary
+        ] )
+    ; ( "node input validation"
+      , [ test_case
+            "a literal input violation runs no node"
+            `Quick
+            test_static_input_rejection_runs_no_node
+        ; test_case
+            "an enum literal is refused before any node"
+            `Quick
+            test_enum_literal_is_refused_before_any_node
+        ; test_case
+            "an output value outside the enum is refused when its node runs"
+            `Quick
+            test_output_value_outside_enum_is_refused_when_its_node_runs
         ] )
     ]
 ;;

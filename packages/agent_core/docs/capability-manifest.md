@@ -125,7 +125,7 @@ are rejected when the manifest is parsed.
 | `kimi` | Kimi (262K ctx, reasoning) |
 | `openai_compat` | OpenAI-compatible base preset |
 | `ollama` | Ollama local server |
-| `openai_chat` | OpenAI GPT (chat completions, 128K ctx) |
+| `openai_chat` | OpenAI-compatible chat completions; declares no context window (per-model rows or the caller declare it) |
 | `openai`, `openai_compat_chat_extended` | OpenAI-compatible aliases |
 | `openai_chat_extended` | OpenAI GPT with reasoning + top\_k/min\_p |
 | `ollama_cloud` | Ollama Cloud native `/api/chat`; parsed reasoning may be final visible text |

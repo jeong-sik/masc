@@ -144,8 +144,9 @@ val read_journal_tail :
   -> (journal_entry, string) result list
 
 (** Dashboard projection of the last [limit] lines. Every row carries a
-    producer-stable [structural_id] derived from the keeper and its absolute
-    nonblank journal-line number, including rows this build cannot decode. *)
+    producer-stable [structural_id] derived from the keeper and the byte offset
+    its line starts at in the journal, including rows this build cannot
+    decode. *)
 val read_journal_tail_projection :
   keepers_dir:string -> keeper_id:string -> limit:int -> Yojson.Safe.t list
 

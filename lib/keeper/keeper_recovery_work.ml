@@ -164,8 +164,10 @@ let verify_artifacts config t =
   let* bytes = fetch_verified config ~sha256:t.source_record.sha256 ~bytes:t.source_record.bytes in
   let* trace_id = Keeper_id.Trace_id.of_string t.source_record.trace_id
     |> Result.map_error (fun e -> Invalid_record e) in
-  let* snapshot = Domain_pool_ref.submit_cpu_or_inline (fun () ->
-    Keeper_checkpoint_store.exact_snapshot_of_canonical_bytes ~expected_session_id:trace_id bytes)
+  (* The store runs the decode and the digest as one pool job. Wrapping that
+     call in a second job made a pool worker wait on a job queued behind it. *)
+  let* snapshot =
+    Keeper_checkpoint_store.exact_snapshot_of_canonical_bytes ~expected_session_id:trace_id bytes
     |> Result.map_error (fun _ -> Invalid_record "source artifact is not the recorded checkpoint") in
   let* () = if Keeper_checkpoint_ref.equal (source t)
       (Keeper_checkpoint_store.exact_snapshot_reference snapshot) then Ok ()

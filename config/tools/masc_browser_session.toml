@@ -1,6 +1,6 @@
 name = "masc_browser_session"
 description = """
-Manage the isolated automation Gecko browser; operator live sessions are not managed. Configure browser.webdriver_url and optional browser.binary (e.g. Zen). After open, use BrowserGoto/Read with lane=automation."""
+Manage the isolated automation Gecko browser; operator live sessions are not managed. Configure browser.geckodriver (the server starts and stops it) and optional browser.binary (e.g. Zen). After open, use BrowserGoto/Read with lane=automation."""
 additional_properties = false
 
 [[params]]
@@ -8,7 +8,7 @@ name = "action"
 type = "string"
 enum = ["open", "close", "status"]
 required = true
-description = "open launches; close stops; status observes tab count/download readiness."
+description = "open launches; close stops; status observes the session. With none open, status adds driver.ready (true: open can start one now; false: driver.message says why, e.g. \"Session already started\") or driver.error (the driver did not answer)."
 
 [[params]]
 name = "headless"

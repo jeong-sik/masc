@@ -520,6 +520,7 @@ let test_board_runtime_rejects_unknown_route () =
   let raw =
     Masc.Keeper_tool_board_runtime.handle_board_tool
       ~meta
+      ~result_projection:Tool_output.default_model_projection
       ~name:"masc_board_not_registered"
       ~args:(`Assoc [])
   in
@@ -4371,6 +4372,201 @@ let test_invalid_surface_post_input_stays_correction_capable () =
          fail "later failure was hidden by the completed terminal effect")
 ;;
 
+(* Memory calls share a provider batch with another tool through the real
+   handlers and the batch planner. A claim commits, a retraction of a fact the
+   snapshot does not hold is refused before the store, and a store that cannot
+   take the next write and retraction leaves their commit unknown. Every
+   failure comes back to the model naming what committed, and none of them
+   ends the turn. *)
+let test_memory_calls_in_a_mixed_batch_answer_the_model_whatever_they_committed () =
+  with_exec_fixture
+    "memory_calls_mixed_batch"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let bundle =
+         Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ()
+       in
+       Fun.protect ~finally:bundle.cleanup
+       @@ fun () ->
+       let tools =
+         List.map
+           (fun name ->
+              match find_tool_by_name bundle.tools name with
+              | Some tool -> tool
+              | None -> failf "%s missing from Keeper tool bundle" name)
+           [ "keeper_memory_write"; "keeper_memory_retract"; "keeper_lane_status" ]
+       in
+       let run_batch label calls =
+         match
+           Agent_core.Agent_tools.execute_tools
+             ~context:(Agent_core.Context.create ())
+             ~tools
+             ~hooks:Agent_core.Hooks.empty
+             ~event_bus:None
+             ~tracer:Agent_core.Tracing.null
+             ~agent_name:meta.name
+             ~turn_count:1
+             ~usage:Agent_core.Types.empty_usage
+             (List.map
+                (fun (id, name, input) -> Agent_core.Types.ToolUse { id; name; input })
+                calls)
+         with
+         | Error _ -> failf "%s: the batch returned an execution failure" label
+         | Ok { Agent_core.Agent_tools.completed_results; completion } ->
+           (match completion with
+            | Agent_core.Agent_tools.Continue_after_batch -> ()
+            | Agent_core.Agent_tools.Terminal_completed _ ->
+              failf "%s: a memory call completed the turn" label
+            | Agent_core.Agent_tools.Terminal_failed _ ->
+              failf "%s: a memory call failed the turn" label);
+           (match bundle.terminal_effect_state () with
+            | Masc.Keeper_tools_agent_core.Terminal_effect_open -> ()
+            | Masc.Keeper_tools_agent_core.Deferred_tool_result ->
+              failf "%s: a memory call deferred a tool result" label
+            | Masc.Keeper_tools_agent_core.External_effect_deferred ->
+              failf "%s: a memory call deferred an external effect" label
+            | Masc.Keeper_tools_agent_core.Terminal_effect_completed _ ->
+              failf "%s: a memory call closed the turn" label
+            | Masc.Keeper_tools_agent_core.Terminal_effect_failed _ ->
+              failf "%s: a memory call failed the turn" label);
+           check int (label ^ ": every call ran") (List.length calls) (List.length completed_results);
+           fun id ->
+             match
+               List.find_opt
+                 (fun (result : Agent_core.Agent_tools.tool_execution_result) ->
+                    String.equal
+                      (Agent_core.Tool_contract.Invocation.tool_use_id result.invocation)
+                      id)
+                 completed_results
+             with
+             | Some result -> result
+             | None -> failf "%s: no result for %s" label id
+       in
+       let succeeded label (result : Agent_core.Agent_tools.tool_execution_result) =
+         check bool (label ^ " succeeded") false
+           (Agent_core.Types.tool_result_outcome_is_error result.outcome)
+       in
+       let failed_naming disposition label
+             (result : Agent_core.Agent_tools.tool_execution_result) =
+         check bool (label ^ " is an error result") true
+           (Agent_core.Types.tool_result_outcome_is_error result.outcome);
+         let payload = parse_json result.content in
+         check string (label ^ " names what committed")
+           (Tool_result.failure_effect_disposition_to_string disposition)
+           Yojson.Safe.Util.(member "effect_disposition" payload |> to_string);
+         check bool (label ^ " says what committed") false
+           (String.equal "" Yojson.Safe.Util.(member "what_committed" payload |> to_string))
+       in
+       let lane_status id = id, "keeper_lane_status", `Assoc [] in
+       let keepers_dir =
+         Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+       in
+       let first =
+         run_batch
+           "first batch"
+           [ "write-kept", "keeper_memory_write", `Assoc [ "content", `String "a claim the batch keeps" ]
+           ; ( "retract-missing"
+             , "keeper_memory_retract"
+             , `Assoc
+                 [ "memory_id", `String ("sha256:" ^ String.make 64 '0')
+                 ; "reason", `String "no such fact was ever written"
+                 ] )
+           ; lane_status "lane-first"
+           ]
+       in
+       succeeded "the claim" (first "write-kept");
+       failed_naming Tool_result.Proven_pre_effect "the missing retraction"
+         (first "retract-missing");
+       succeeded "lane status beside memory calls" (first "lane-first");
+       let kept_id =
+         match
+           Masc.Keeper_memory_os_current.read_for_keepers_dir
+             ~keepers_dir
+             ~keeper_id:meta.name
+         with
+         | Ok (Some { facts = [ fact ]; _ }) -> Masc.Keeper_memory_os_types.memory_id fact
+         | Ok (Some { facts; _ }) ->
+           failf "the batch committed %d facts, not one" (List.length facts)
+         | Ok None -> fail "the claim persisted no snapshot"
+         | Error detail -> fail detail
+       in
+       (* A directory where the snapshot file belongs: the next write and
+          retraction fail inside the store, whatever user the test runs as. *)
+       let snapshot_path =
+         Masc.Keeper_memory_os_current.path_for_keepers_dir
+           ~keepers_dir
+           ~keeper_id:meta.name
+       in
+       Unix.unlink snapshot_path;
+       Unix.mkdir snapshot_path 0o755;
+       let second =
+         run_batch
+           "store failure batch"
+           [ ( "write-unknown"
+             , "keeper_memory_write"
+             , `Assoc [ "content", `String "a claim the store cannot take" ] )
+           ; ( "retract-unknown"
+             , "keeper_memory_retract"
+             , `Assoc
+                 [ "memory_id", `String kept_id
+                 ; "reason", `String "the store is not answering"
+                 ] )
+           ; lane_status "lane-second"
+           ]
+       in
+       failed_naming Tool_result.Effect_outcome_unknown "the write the store failed"
+         (second "write-unknown");
+       failed_naming Tool_result.Effect_outcome_unknown "the retraction the store failed"
+         (second "retract-unknown");
+       succeeded "lane status beside failed memory calls" (second "lane-second"))
+;;
+
+(* The one failure a memory call used to end the turn on was a proven
+   post-effect one. No store here produces it, so the callback the bundle hands
+   every ordinary handler is driven directly with each disposition, beside a
+   file write whose applied change still ends the turn. *)
+let test_a_failed_memory_call_never_ends_the_turn () =
+  let failure disposition =
+    { Masc.Keeper_tools_agent_core.failure_class = Tool_result.Runtime_failure
+    ; effect_disposition = disposition
+    ; diagnostic = "memory store failed"
+    }
+  in
+  let marks handler disposition =
+    let marked = ref 0 in
+    Masc.Keeper_tools_agent_core_bundle.For_testing.ordinary_on_failed
+      ~mark_terminal_effect_failed:(fun (_ : Masc.Keeper_tools_agent_core.terminal_effect_failure) ->
+        incr marked)
+      handler
+      (failure disposition);
+    !marked
+  in
+  List.iter
+    (fun (label, handler) ->
+       List.iter
+         (fun disposition ->
+            check int
+              (Printf.sprintf
+                 "a %s failure with %s keeps the turn"
+                 label
+                 (Tool_result.failure_effect_disposition_to_string disposition))
+              0
+              (marks handler disposition))
+         [ Tool_result.Proven_pre_effect
+         ; Tool_result.Proven_post_effect
+         ; Tool_result.Effect_outcome_unknown
+         ])
+    [ "memory write", KTD.Tool_memory_write; "memory retract", KTD.Tool_memory_retract ];
+  check int
+    "an applied file write ends the turn"
+    1
+    (marks KTD.Tool_write_file Tool_result.Proven_post_effect)
+;;
+
 let with_openai_tool_call_server ?second_response ~tool_name ~tool_input f =
   let sw =
     match Eio_context.get_switch_opt () with
@@ -5311,19 +5507,11 @@ value = { query = "must-not-queue" }
 ;;
 
 (* #30220 made skills the only composition source: [make_tools] reads
-   [Keeper_skill_catalog.composition_entries], not a bare catalog. The fixtures
-   here are still composition TOML -- what changed is who carries it to the
-   bundle -- so this wraps one in the skill document that now does. The
+   [Keeper_skill_catalog.composition_entries], not a bare catalog. A skill
+   document, fixture or shipped, becomes the catalog [make_tools] reads. The
    directory has to match the frontmatter name, which has to match the
    composition's own name; that is what decides the [keeper_compose_*] tool. *)
-let skill_catalog_of_composition ~name toml =
-  let document =
-    Printf.sprintf
-      "---\nname: %s\ndescription: %s\n---\n\nComposition fixture.\n\n```toml composition\n%s```\n"
-      name
-      name
-      toml
-  in
+let skill_catalog_of_document ~name document =
   let config_text =
     {|[skills]
 resource-read-max-bytes = 65536
@@ -5373,6 +5561,18 @@ access = "read-write"
       (Masc.Keeper_skill_catalog.error_to_string diagnostic.error)
 ;;
 
+(* The fixtures here are composition TOML, wrapped in the skill document that
+   carries a composition to the bundle. *)
+let skill_catalog_of_composition ~name toml =
+  skill_catalog_of_document
+    ~name
+    (Printf.sprintf
+       "---\nname: %s\ndescription: %s\n---\n\nComposition fixture.\n\n```toml composition\n%s```\n"
+       name
+       name
+       toml)
+;;
+
 let one_node_terminal_composition =
   {|[[compositions]]
 name = "surface"
@@ -5401,6 +5601,9 @@ value = { unsupported = true }
 |}
 ;;
 
+(* The post input reads the board list's [kind], a string, into
+   [mention_user_ids], an array. That value exists only after the read runs, so
+   the post is refused when its own node runs, after the write took effect. *)
 let post_effect_terminal_failure_composition =
   {|[[compositions]]
 name = "write-then-invalid-post"
@@ -5412,6 +5615,52 @@ tool = "keeper_memory_write"
 [compositions.nodes.input]
 kind = "literal"
 value = { title = "composition effect", content = "must execute exactly once" }
+
+[[compositions.nodes]]
+id = "read"
+tool = "masc_board_list"
+after = ["write"]
+[compositions.nodes.input]
+kind = "literal"
+value = {}
+
+[[compositions.nodes]]
+id = "post"
+tool = "keeper_surface_post"
+after = ["read"]
+[compositions.nodes.input]
+kind = "object"
+[[compositions.nodes.input.fields]]
+name = "surface"
+[compositions.nodes.input.fields.value]
+kind = "literal"
+value = "dashboard"
+[[compositions.nodes.input.fields]]
+name = "content"
+[compositions.nodes.input.fields.value]
+kind = "literal"
+value = "must not be reached"
+[[compositions.nodes.input.fields]]
+name = "mention_user_ids"
+[compositions.nodes.input.fields.value]
+kind = "output"
+node = "read"
+pointer = "/kind"
+|}
+;;
+
+(* The post input is a literal, so it is refused before the write runs. *)
+let literal_invalid_post_after_write_composition =
+  {|[[compositions]]
+name = "write-then-literal-invalid-post"
+execution = "inline"
+
+[[compositions.nodes]]
+id = "write"
+tool = "keeper_memory_write"
+[compositions.nodes.input]
+kind = "literal"
+value = { title = "composition effect", content = "must not execute" }
 
 [[compositions.nodes]]
 id = "post"
@@ -5489,6 +5738,30 @@ name = "query"
 [compositions.nodes.input.fields.value]
 kind = "param"
 name = "query"
+|}
+;;
+
+let enum_param_memory_composition =
+  {|[[compositions]]
+name = "memory-by-mode"
+execution = "inline"
+
+[[compositions.params]]
+name = "mode"
+type = "string"
+enum = ["scene", "regions"]
+description = "Which word to search durable memory for."
+
+[[compositions.nodes]]
+id = "search"
+tool = "keeper_memory_search"
+[compositions.nodes.input]
+kind = "object"
+[[compositions.nodes.input.fields]]
+name = "query"
+[compositions.nodes.input.fields.value]
+kind = "param"
+name = "mode"
 |}
 ;;
 
@@ -6606,6 +6879,129 @@ let test_composition_plan_failure_exposes_typed_cause () =
            Yojson.Safe.Util.(member "error" cause |> member "kind" |> to_string))
 ;;
 
+(* A turn calls a composition tool through Agent-Core's own tool execution,
+   which checks the call against the tool's input schema before any handler
+   runs. *)
+let call_through_agent_core tools name input =
+  match
+    Agent_core.Agent_tools.find_and_execute_tool
+      ~context:(Agent_core.Context.create_sync ())
+      ~tools
+      ~hooks:Agent_core.Hooks.empty
+      ~event_bus:None
+      ~tracer:Agent_core.Tracing.null
+      ~agent_name:"composition-enum-probe"
+      ~invocation:
+        (composition_invocation
+           ~completion:Agent_core.Tool_contract.Continue_after_success)
+      name
+      input
+  with
+  | Ok result -> result
+  | Error (Agent_core.Agent_tools.Hook_execution_failed { detail; _ }) ->
+    failf "a composition call with no hooks failed in a hook: %s" detail
+;;
+
+let check_refused_before_handler ~label (result : Agent_core.Agent_tools.tool_execution_result) =
+  match result.outcome with
+  | Agent_core.Types.Tool_failed { failure_kind = Agent_core.Types.Validation_error; _ } -> ()
+  | Agent_core.Types.Tool_failed _ | Agent_core.Types.Tool_succeeded ->
+    failf "%s was not refused by the input schema check: %s" label result.content
+;;
+
+(* The materialized composition tool carries its enum into the schema
+   Agent-Core checks, so a value outside the members never reaches the
+   composition handler, while a member does and is bound into the plan. *)
+let test_composition_enum_param_is_refused_before_the_handler () =
+  with_exec_fixture "composition-enum-param-refusal"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let tool_name = "keeper_compose_memory-by-mode" in
+       let tools =
+         Masc.Keeper_tools_agent_core_bundle.For_testing.make_tools
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ~skill_catalog:
+             (skill_catalog_of_composition
+                ~name:"memory-by-mode"
+                enum_param_memory_composition)
+           ()
+       in
+       let member_call =
+         call_through_agent_core tools tool_name (`Assoc [ "mode", `String "regions" ])
+       in
+       let payload = parse_json member_call.content in
+       check string
+         "a member reaches the composition handler"
+         tool_name
+         Yojson.Safe.Util.(payload |> member "composition_tool" |> to_string);
+       check_refused_before_handler
+         ~label:"a string outside the members"
+         (call_through_agent_core tools tool_name (`Assoc [ "mode", `String "text" ]));
+       check_refused_before_handler
+         ~label:"a non-string value"
+         (call_through_agent_core tools tool_name (`Assoc [ "mode", `Int 1 ])))
+;;
+
+(* The two shipped browser compositions offer scene and regions; BrowserRead
+   itself also takes text, so only the composition's own schema can refuse it.
+   The same arguments with mode scene must pass that schema, and text must fail
+   on mode alone, or the refusal could come from an argument this test does not
+   send. *)
+let test_shipped_browser_composition_refuses_text_mode skill_name arguments () =
+  with_exec_fixture ("composition-enum-" ^ skill_name)
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let document =
+         In_channel.with_open_bin
+           (Filename.concat (Filename.concat "../skills" skill_name) "SKILL.md")
+           In_channel.input_all
+       in
+       let tools =
+         Masc.Keeper_tools_agent_core_bundle.For_testing.make_tools
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ~skill_catalog:(skill_catalog_of_document ~name:skill_name document)
+           ()
+       in
+       let tool_name = "keeper_compose_" ^ skill_name in
+       let tool =
+         match find_tool_by_name tools tool_name with
+         | Some tool -> tool
+         | None -> failf "%s was not materialized from its shipped skill" tool_name
+       in
+       let input mode = `Assoc (arguments @ [ "mode", `String mode ]) in
+       (match
+          Agent_core.Tool_input_validation.validate
+            tool.Agent_core.Tool.schema
+            (input "scene")
+        with
+        | Agent_core.Tool_input_validation.Valid _ -> ()
+        | Agent_core.Tool_input_validation.Invalid errors ->
+          failf
+            "%s refused mode scene with the arguments this test sends: %s"
+            tool_name
+            (Agent_core.Tool_input_validation.format_errors_inline
+               ~tool_name
+               ~args:(input "scene")
+               errors));
+       (match
+          Agent_core.Tool_input_validation.validate
+            tool.Agent_core.Tool.schema
+            (input "text")
+        with
+        | Agent_core.Tool_input_validation.Invalid
+            [ { Agent_core.Tool_input_validation.path = "/mode"; _ } ] -> ()
+        | Agent_core.Tool_input_validation.Invalid _
+        | Agent_core.Tool_input_validation.Valid _ ->
+          failf "%s did not refuse mode text on mode alone" tool_name);
+       check_refused_before_handler
+         ~label:"mode text"
+         (call_through_agent_core tools tool_name (input "text")))
+;;
+
 let test_composition_read_failure_preserves_same_turn
     ?(break_evidence = false) ~observe ~break_receipt ~terminal ~unknown_write () =
   with_exec_fixture ~always_allow:true ~bind_eio_context:true "composition-read-recovery"
@@ -6684,19 +7080,26 @@ value = {surface="dashboard", content="must not run"}
         check string "aggregate effect evidence is unchanged"
           (if unknown_write then "effect_outcome_unknown" else "proven_post_effect")
           Yojson.Safe.Util.(payload |> member "effect_disposition" |> to_string);
-        let recoverable = observe && not break_receipt && not break_evidence && not terminal && not unknown_write in
-        check bool "only acknowledged ordinary read failures preserve the provider turn"
-          recoverable (Option.is_none result.abort_turn);
-        if recoverable then (
+        (* BrowserGoto and BrowserRead both return a failure to the model when
+           called directly, so the composition does too once every settled
+           node is acknowledged and no terminal node is in the graph. *)
+        let returns_to_model = observe && not break_receipt && not break_evidence && not terminal in
+        check bool "an acknowledged failure whose nodes' own calls return keeps the provider turn"
+          returns_to_model (Option.is_none result.abort_turn);
+        if returns_to_model then (
           (match bundle.terminal_effect_state () with
            | Masc.Keeper_tools_agent_core.Terminal_effect_open -> ()
-           | _ -> fail "read failure called the terminal failure hook");
-          let retried = (find "BrowserRead").call ~call_id:"same-turn-read-retry"
-            (`Assoc ["lane",`String "automation";"tabId",`Int 7;"mode",`String "scene";
-                     "expectedUrl",`String "https://example.org/next"]) in
-          check bool "next read succeeds in the same materialized provider turn" true retried.success;
-          check int "navigation is never replayed" 1 !navigations;
-          check int "only the failed read is retried" 2 !reads)
+           | _ -> fail "a failure the model can act on called the terminal failure hook");
+          if unknown_write then (
+            check int "the navigation with an unknown outcome ran once" 1 !navigations;
+            check int "the read after it never ran" 0 !reads)
+          else (
+            let retried = (find "BrowserRead").call ~call_id:"same-turn-read-retry"
+              (`Assoc ["lane",`String "automation";"tabId",`Int 7;"mode",`String "scene";
+                       "expectedUrl",`String "https://example.org/next"]) in
+            check bool "next read succeeds in the same materialized provider turn" true retried.success;
+            check int "navigation is never replayed" 1 !navigations;
+            check int "only the failed read is retried" 2 !reads))
         else match bundle.terminal_effect_state () with
           | Masc.Keeper_tools_agent_core.Terminal_effect_failed failure ->
             if break_evidence then (
@@ -6708,6 +7111,98 @@ value = {surface="dashboard", content="must not run"}
               check bool "canonical failed result is not a schema refusal" false
                 (String_util.contains_substring failure.diagnostic "does not match Tool_result.to_json"))
           | _ -> fail "unsafe or unobserved composition escaped its terminal fence"))
+;;
+
+(* #36662: the navigation completes (a post effect), then the second node
+   fails with an unknown outcome. Called directly, BrowserInteract hands that
+   failure back to the model and BrowserAct ends the turn
+   (Keeper_tool_failure_boundary). The composition does the same, whatever the
+   aggregate says. Neither node is read-only, so #35703's read exception
+   cannot be what decides. *)
+let test_composition_failure_after_navigation_follows_the_failed_node ~second () =
+  with_exec_fixture ~always_allow:true ~bind_eio_context:true "composition-node-boundary"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+      let name, second_node =
+        match second with
+        | `Interact ->
+          ( "navigate-then-interact"
+          , {|tool = "BrowserInteract"
+after = ["navigate"]
+[compositions.nodes.input]
+kind = "literal"
+value = {lane="automation", tabId=7, action="scroll", x=0, y=100, expectedUrl="https://example.org/next"}
+|} )
+        | `Act ->
+          ( "navigate-then-act"
+          , {|tool = "BrowserAct"
+after = ["navigate"]
+[compositions.nodes.input]
+kind = "literal"
+value = {lane="automation", tabId=7, action="click", selector="#next"}
+|} )
+      in
+      let declaration =
+        Printf.sprintf {|[[compositions]]
+name = "%s"
+execution = "inline"
+[[compositions.nodes]]
+id = "navigate"
+tool = "BrowserGoto"
+[compositions.nodes.input]
+kind = "literal"
+value = {tabId=7, url="https://example.org/next"}
+[[compositions.nodes]]
+id = "second"
+%s|} name second_node
+      in
+      let skill_catalog = skill_catalog_of_composition ~name declaration in
+      let navigations = ref 0 and seconds = ref 0 in
+      Masc.Keeper_tool_call_log.reset_for_testing ();
+      Masc.Keeper_tool_call_log.init ~base_path:config.base_path ();
+      Browser_lane.install_automation_executor (Some (function
+        | Browser_lane.Page_goto _ ->
+          incr navigations;
+          Browser_lane.Answered (`Assoc ["ok",`Bool true;"data",`Assoc [
+            "url",`String "https://example.org/next";"title",`String "Observed page"]])
+        | Browser_lane.Page_interact _ | Browser_lane.Page_act _ ->
+          incr seconds;
+          Browser_lane.Refused "the page went away mid-action"
+        | _ -> fail "unexpected browser effect in node boundary fixture"));
+      let turn_ctx_cell = Some (Masc.Keeper_tool_call_log.create_turn_ctx_cell ()) in
+      let bundle = Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
+        ~config ~meta ~publication_recovery ~ctx_snapshot:ctx_work ~skill_catalog ?turn_ctx_cell () in
+      Fun.protect ~finally:(fun () -> bundle.cleanup ();
+        Browser_lane.install_automation_executor None; Masc.Keeper_tool_call_log.reset_for_testing ())
+      (fun () ->
+        let projected = match Masc.Keeper_official_client_host.dynamic_tools
+          ~content_transport:Runtime_official_client_tool.Codex ~accepts_image_input:false
+          ~tool_approval:None ~pre_tool_rejects:(ref []) ~runtime_label:"node-boundary-test"
+          ~keeper_name:meta.name ~turn_count:7 ~tools:bundle.tools
+          ~hooks:Agent_core.Hooks.empty ~event_bus:None ~context_injector:None
+          ~context:(Some (Agent_core.Context.create_sync ()))
+          ~terminal_effect_state:bundle.terminal_effect_state ~terminal_error:(ref None)
+          ~raw_trace_run:None () with
+          | Ok tools -> tools | Error error -> fail (Agent_core.Error.to_string error) in
+        let tool = match List.find_opt
+          (fun (tool : Masc.Keeper_official_client_host.dynamic_tool) ->
+             String.equal tool.name ("keeper_compose_" ^ name)) projected with
+          | Some tool -> tool | None -> fail ("missing materialized tool: " ^ name) in
+        let result = tool.call ~call_id:("node-boundary-" ^ name) (`Assoc []) in
+        check bool "the composition reports its failure" false result.success;
+        check int "the navigation ran once" 1 !navigations;
+        check int "the second node ran once" 1 !seconds;
+        let payload = parse_json result.content in
+        check string "the completed navigation keeps the aggregate post-effect"
+          "proven_post_effect"
+          Yojson.Safe.Util.(payload |> member "effect_disposition" |> to_string);
+        match second, bundle.terminal_effect_state (), result.abort_turn with
+        | `Interact, Masc.Keeper_tools_agent_core.Terminal_effect_open, None -> ()
+        | `Interact, _, _ ->
+          fail "a failed interaction ended the turn though a direct BrowserInteract hands it back"
+        | `Act, Masc.Keeper_tools_agent_core.Terminal_effect_failed _,
+          Some (Masc.Keeper_official_client_host.Terminal_tool_boundary _) -> ()
+        | `Act, _, _ ->
+          fail "a failed browser action left the turn open though a direct BrowserAct ends it"))
 ;;
 
 let test_terminal_composition_post_effect_failure_closes_official_client_loop () =
@@ -6784,9 +7279,20 @@ let test_terminal_composition_post_effect_failure_closes_official_client_loop ()
             let failure_payload = parse_json result.content in
             let cause = Yojson.Safe.Util.member "cause" failure_payload in
             check string
-              "invalid node is rejected before dispatch"
+              "invalid node is rejected before its dispatch"
               "plan_execution_failed"
               Yojson.Safe.Util.(member "kind" cause |> to_string);
+            check string
+              "the post is refused after the write and the read settled"
+              "post"
+              Yojson.Safe.Util.(member "node_id" cause |> to_string);
+            check (list string)
+              "write and read ran before the refusal"
+              [ "write"; "read" ]
+              Yojson.Safe.Util.
+                (member "settled" failure_payload
+                 |> to_list
+                 |> List.map (fun node -> member "node_id" node |> to_string));
             let plan_error = Yojson.Safe.Util.member "error" cause in
             check string
               "plan failure retains input validation kind"
@@ -6816,6 +7322,223 @@ let test_terminal_composition_post_effect_failure_closes_official_client_loop ()
             | Some (Masc.Keeper_official_client_host.Repeated_tool_call _)
             | None ->
               fail "official-client provider loop remained open after prior effect"))
+;;
+
+let test_terminal_composition_literal_input_failure_runs_no_node () =
+  with_exec_fixture ~require_sandbox:true "composition-literal-input-terminal-failure"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       (match
+          Masc.Keeper_gate_mode.set
+            config
+            ~actor:"composition-test"
+            Masc.Keeper_gate_mode.Always_allow
+        with
+        | Ok _ -> ()
+        | Error detail -> fail ("failed to allow composition effect: " ^ detail));
+       let skill_catalog =
+         skill_catalog_of_composition
+           ~name:"write-then-literal-invalid-post"
+           literal_invalid_post_after_write_composition
+       in
+       let bundle =
+         Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ~skill_catalog
+           ()
+       in
+       Fun.protect
+         ~finally:bundle.cleanup
+         (fun () ->
+            let terminal_error = ref None in
+            let projected =
+              match
+                Masc.Keeper_official_client_host.dynamic_tools
+                  ~accepts_image_input:true
+                  ~content_transport:Runtime_official_client_tool.Codex
+                  ~tool_approval:None
+                  ~pre_tool_rejects:(ref [])
+                  ~runtime_label:"test-official-client"
+                  ~keeper_name:meta.name
+                  ~turn_count:7
+                  ~tools:bundle.tools
+                  ~hooks:Agent_core.Hooks.empty
+                  ~event_bus:None
+                  ~context_injector:None
+                  ~context:(Some (Agent_core.Context.create_sync ()))
+                  ~terminal_effect_state:bundle.terminal_effect_state
+                  ~terminal_error
+                  ~raw_trace_run:None
+                  ()
+              with
+              | Ok tools -> tools
+              | Error error -> fail (Agent_core.Error.to_string error)
+            in
+            let tool =
+              projected
+              |> List.find_opt
+                   (fun (tool : Masc.Keeper_official_client_host.dynamic_tool) ->
+                      String.equal
+                        tool.name
+                        "keeper_compose_write-then-literal-invalid-post")
+              |> function
+              | Some tool -> tool
+              | None -> fail "terminal composition was not projected"
+            in
+            let result = tool.call ~call_id:"literal-input-composition" (`Assoc []) in
+            check bool "invalid literal input is visible" false result.success;
+            let failure_payload = parse_json result.content in
+            check string
+              "nothing ran, so nothing took effect"
+              "proven_pre_effect"
+              Yojson.Safe.Util.(member "effect_disposition" failure_payload |> to_string);
+            check int
+              "the write did not run"
+              0
+              Yojson.Safe.Util.(member "settled" failure_payload |> to_list |> List.length);
+            let cause = Yojson.Safe.Util.member "cause" failure_payload in
+            check string
+              "the post is named as the failed node"
+              "post"
+              Yojson.Safe.Util.(member "node_id" cause |> to_string);
+            check string
+              "plan failure retains input validation kind"
+              "input_validation_failed"
+              Yojson.Safe.Util.(member "error" cause |> member "kind" |> to_string);
+            (match bundle.terminal_effect_state () with
+             | Masc.Keeper_tools_agent_core.Terminal_effect_open -> ()
+             | Masc.Keeper_tools_agent_core.Deferred_tool_result
+             | Masc.Keeper_tools_agent_core.External_effect_deferred
+             | Masc.Keeper_tools_agent_core.Terminal_effect_completed _
+             | Masc.Keeper_tools_agent_core.Terminal_effect_failed _ ->
+               fail "a refusal before any node changed the terminal effect state");
+            check bool
+              "the provider turn stays open for a corrected call"
+              true
+              (Option.is_none result.abort_turn)))
+;;
+
+(* The msx-retro-mania request of 2026-09-15: a server restart emptied the MSX
+   lane, and the Keeper's province-end macro pressed keys into it. The lane
+   refused before touching anything, but the refusal was undeclared, so the
+   composition read it as effect-outcome-unknown and ended the whole request.
+   The same composition, same nodes, against an empty lane. *)
+let sangokushi_end_command_composition =
+  {|[[compositions]]
+name = "msx-end-command"
+execution = "inline"
+
+[[compositions.nodes]]
+id = "press"
+tool = "masc_msx_press"
+[compositions.nodes.input]
+kind = "literal"
+value = { keys = ["0", "Return", "y"], sequence = true }
+
+[[compositions.nodes]]
+id = "settle"
+tool = "masc_msx_step_until_change"
+after = ["press"]
+[compositions.nodes.input]
+kind = "literal"
+value = {}
+
+[[compositions.nodes]]
+id = "screen"
+tool = "masc_msx_screen"
+after = ["settle"]
+[compositions.nodes.input]
+kind = "literal"
+value = {}
+|}
+;;
+
+let test_composition_over_an_empty_msx_lane_returns_the_refusal () =
+  with_exec_fixture ~always_allow:true ~bind_eio_context:true "composition-empty-msx-lane"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       ignore (Msx_lane.eject () : (unit, Msx_lane.error) result);
+       let skill_catalog =
+         skill_catalog_of_composition
+           ~name:"msx-end-command"
+           sangokushi_end_command_composition
+       in
+       let bundle =
+         Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ~skill_catalog
+           ()
+       in
+       Fun.protect
+         ~finally:bundle.cleanup
+         (fun () ->
+            let projected =
+              match
+                Masc.Keeper_official_client_host.dynamic_tools
+                  ~accepts_image_input:true
+                  ~content_transport:Runtime_official_client_tool.Codex
+                  ~tool_approval:None
+                  ~pre_tool_rejects:(ref [])
+                  ~runtime_label:"test-official-client"
+                  ~keeper_name:meta.name
+                  ~turn_count:7
+                  ~tools:bundle.tools
+                  ~hooks:Agent_core.Hooks.empty
+                  ~event_bus:None
+                  ~context_injector:None
+                  ~context:(Some (Agent_core.Context.create_sync ()))
+                  ~terminal_effect_state:bundle.terminal_effect_state
+                  ~terminal_error:(ref None)
+                  ~raw_trace_run:None
+                  ()
+              with
+              | Ok tools -> tools
+              | Error error -> fail (Agent_core.Error.to_string error)
+            in
+            let tool =
+              projected
+              |> List.find_opt
+                   (fun (tool : Masc.Keeper_official_client_host.dynamic_tool) ->
+                      String.equal tool.name "keeper_compose_msx-end-command")
+              |> function
+              | Some tool -> tool
+              | None -> fail "the MSX composition was not projected"
+            in
+            let result = tool.call ~call_id:"empty-msx-lane-composition" (`Assoc []) in
+            check bool "the refusal is visible" false result.success;
+            let failure_payload = parse_json result.content in
+            check string
+              "the lane touched nothing, and the composition says so"
+              "proven_pre_effect"
+              Yojson.Safe.Util.(member "effect_disposition" failure_payload |> to_string);
+            let node = Yojson.Safe.Util.(member "cause" failure_payload |> member "node") in
+            check string
+              "the press is the node that did not complete"
+              "press"
+              Yojson.Safe.Util.(member "node_id" node |> to_string);
+            check string
+              "the Keeper reads what to do next"
+              (Msx_lane.error_to_string Msx_lane.No_machine)
+              Yojson.Safe.Util.(member "result" node |> member "message" |> to_string);
+            check int
+              "nothing after the press ran"
+              1
+              Yojson.Safe.Util.(member "settled" failure_payload |> to_list |> List.length);
+            (match bundle.terminal_effect_state () with
+             | Masc.Keeper_tools_agent_core.Terminal_effect_open -> ()
+             | Masc.Keeper_tools_agent_core.Deferred_tool_result
+             | Masc.Keeper_tools_agent_core.External_effect_deferred
+             | Masc.Keeper_tools_agent_core.Terminal_effect_completed _
+             | Masc.Keeper_tools_agent_core.Terminal_effect_failed _ ->
+               fail "a refusal before any effect changed the terminal effect state");
+            check bool
+              "the provider turn stays open so the Keeper can load or restore"
+              true
+              (Option.is_none result.abort_turn)))
 ;;
 
 let test_terminal_composition_unknown_write_failure_closes_official_client_loop () =
@@ -8908,6 +9631,10 @@ let () =
         test_deferred_web_search_keeps_the_turn_going;
       test_case "invalid surface input stays correction-capable" `Quick
         test_invalid_surface_post_input_stays_correction_capable;
+      test_case "memory calls in a mixed batch answer the model whatever they committed" `Quick
+        test_memory_calls_in_a_mixed_batch_answer_the_model_whatever_they_committed;
+      test_case "a failed memory call never ends the turn" `Quick
+        test_a_failed_memory_call_never_ends_the_turn;
       test_case "surface append failure is not terminal completion" `Quick
         test_surface_post_append_failure_does_not_complete_terminal_effect;
       test_case "frozen surface rejects a registered-only tool" `Quick
@@ -8946,20 +9673,43 @@ let () =
         test_terminal_composition_materializes_terminal_completion;
       test_case "composition failure exposes typed plan cause" `Quick
         test_composition_plan_failure_exposes_typed_cause;
+      test_case "composition enum param is refused before the handler" `Quick
+        test_composition_enum_param_is_refused_before_the_handler;
+      test_case "shipped navigate-read refuses mode text" `Quick
+        (test_shipped_browser_composition_refuses_text_mode
+           "browser-navigate-read"
+           [ "tabId", `Int 7; "url", `String "https://example.org/start" ]);
+      test_case "shipped live-follow-read refuses mode text" `Quick
+        (test_shipped_browser_composition_refuses_text_mode
+           "browser-live-follow-read"
+           [ "clientId", `String "11111111-1111-4111-8111-111111111111"
+           ; "tabId", `Int 7
+           ; "documentId", `String "observed"
+           ; "nodeId", `String "link"
+           ; "expectedUrl", `String "https://example.org/before"
+           ]);
       test_case "durable ordinary read failure permits same-turn read retry" `Quick
         (test_composition_read_failure_preserves_same_turn ~observe:true ~break_receipt:false ~terminal:false ~unknown_write:false);
-      test_case "no observer cannot authorize read recovery" `Quick
+      test_case "no observer keeps a failed read composition fenced" `Quick
         (test_composition_read_failure_preserves_same_turn ~observe:false ~break_receipt:false ~terminal:false ~unknown_write:false);
       test_case "missing read receipt keeps composition fenced" `Quick
         (test_composition_read_failure_preserves_same_turn ~observe:true ~break_receipt:true ~terminal:false ~unknown_write:false);
-      test_case "terminal graph cannot use ordinary read recovery" `Quick
+      test_case "a terminal graph keeps its fence after a failed read" `Quick
         (test_composition_read_failure_preserves_same_turn ~observe:true ~break_receipt:false ~terminal:true ~unknown_write:false);
       test_case "recovery evidence persistence failure keeps the turn fenced" `Quick
         (test_composition_read_failure_preserves_same_turn ~break_evidence:true ~observe:true ~break_receipt:false ~terminal:false ~unknown_write:false);
-      test_case "unknown navigation remains fenced" `Quick
+      test_case "unknown navigation returns to the model like a direct BrowserGoto" `Quick
         (test_composition_read_failure_preserves_same_turn ~observe:true ~break_receipt:false ~terminal:false ~unknown_write:true);
+      test_case "failed interaction after navigation returns to the model" `Quick
+        (test_composition_failure_after_navigation_follows_the_failed_node ~second:`Interact);
+      test_case "failed browser action after navigation closes the loop" `Quick
+        (test_composition_failure_after_navigation_follows_the_failed_node ~second:`Act);
       test_case "post-effect composition closes official-client loop" `Quick
         test_terminal_composition_post_effect_failure_closes_official_client_loop;
+      test_case "literal input failure runs no composition node" `Quick
+        test_terminal_composition_literal_input_failure_runs_no_node;
+      test_case "composition over an empty MSX lane returns the refusal" `Quick
+        test_composition_over_an_empty_msx_lane_returns_the_refusal;
       test_case "unknown-effect composition closes official-client loop" `Quick
         test_terminal_composition_unknown_write_failure_closes_official_client_loop;
       test_case "write then unchanged read completes" `Quick

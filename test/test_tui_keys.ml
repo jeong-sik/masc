@@ -18,6 +18,66 @@ let every_surface =
   ; Memory
   ]
 
+(* [Masc_tui_footer.never_dropped_keys] pins the Enter atom, and the comment
+   that justifies the pin rests on a claim about this table: that every
+   surface names exactly one key holding that atom, so the pin costs one item
+   per row and keeps the key the surface exists for. Nothing checked the
+   claim, and it is not true of five of the sheet's surfaces -- four name no
+   Enter key at all and Code names two.
+
+   Four of the five are the same answer in different words: a surface with no
+   row cursor has nothing for Enter to open. Clients is not. It moves a
+   cursor, jumps that cursor to a search match and draws the row it lands on
+   selected, and then no key acts on the selection -- [masc_tui.ml] gives it
+   cursor scrolling and [Clients -> None] for the row's link.
+
+   Named together the way the [ / ] table below is, so the next surface that
+   arrives with a cursor and nothing to open has to be a decision. *)
+let enter_atom_count_exceptions =
+  [ (* Charts, not a list: [j/k] scrolls. *)
+    "Metrics", 0
+  ; (* A detail screen. Its tabs carry their own keys. *)
+    "Keeper detail", 0
+  ; (* A roster with a cursor and nothing the cursor opens. *)
+    "Config / Runtime / Clients", 0
+  ; (* A scrolling reading, not a row list. *)
+    "Config / Tools", 0
+  ; (* The second is the history overlay's, which [footer_hints_code] drops
+       from the panes that have no commits. *)
+    "Workspace / Code", 2
+  ]
+
+let test_every_surface_names_one_key_that_acts_on_the_cursor () =
+  List.iter
+    (fun (label, surface) ->
+      let enter_keys =
+        List.filter_map
+          (fun (b : Masc_tui_keys.binding) ->
+            if List.exists (String.equal "Enter") (Masc_tui_keys.key_atoms b.Masc_tui_keys.key)
+            then Some b.Masc_tui_keys.key
+            else None)
+          (Masc_tui_keys.for_surface surface)
+      in
+      let want =
+        match List.assoc_opt label enter_atom_count_exceptions with
+        | Some n -> n
+        | None -> 1
+      in
+      Alcotest.(check int)
+        (Printf.sprintf "%s names %d key(s) holding the Enter atom (found: %s)"
+           label want (String.concat " | " enter_keys))
+        want (List.length enter_keys))
+    Masc_tui_keys.help_surfaces
+
+(* An exception that names a surface the sheet no longer lists stops being a
+   decision and becomes a line nobody reads. *)
+let test_every_enter_atom_exception_names_a_sheet_surface () =
+  List.iter
+    (fun (label, _) ->
+      Alcotest.(check bool) (Printf.sprintf "%s is still a surface the sheet lists" label) true
+        (List.mem_assoc label Masc_tui_keys.help_surfaces))
+    enter_atom_count_exceptions
+
 let test_every_surface_answers () =
   List.iter
     (fun surface ->
@@ -833,8 +893,16 @@ let test_the_file_marks_are_in_the_sheet () =
         true
         (List.mem mark explained))
     Masc_tui_file_icon.kinds;
+  (* The eighth mark. The tree draws an arrow on a row that opens rather than
+     reads, and the sheet explained the seven file kinds beside it and not
+     that one -- the mark that says which of the two a row is. *)
+  Alcotest.(check bool) "the sheet explains the folder arrow" true
+    (List.mem Masc_tui_file_icon.folder_glyph explained);
   (* And nothing in the sheet the tree cannot draw. *)
-  let drawable = List.map Masc_tui_file_icon.glyph Masc_tui_file_icon.kinds in
+  let drawable =
+    Masc_tui_file_icon.folder_glyph
+    :: List.map Masc_tui_file_icon.glyph Masc_tui_file_icon.kinds
+  in
   List.iter
     (fun (mark, _) ->
       Alcotest.(check bool)
@@ -843,9 +911,153 @@ let test_the_file_marks_are_in_the_sheet () =
         (List.mem mark drawable))
     Masc_tui_file_icon.legend
 
+(* Config's two list panes draw a mark in their first column and say what it
+   means only in the detail pane below the list, for the one row the cursor is
+   on. A reader scanning twenty prompt rows could tell a marked row from an
+   unmarked one and not what the mark said; the sheet carried seven legends
+   and neither of these.
+
+   Same two halves as the memory and file marks above: every mark a pane can
+   draw has a word, and nothing has a word the pane cannot draw. A source
+   added to [prompt_source] stops [Masc_tui_config_mark] compiling until it
+   has a mark, and this stops a mark being added without a word beside it. *)
+let prompt_sources =
+  [ Masc.Tui_decode.Prompt_override
+  ; Masc.Tui_decode.Prompt_file
+  ; Masc.Tui_decode.Prompt_missing
+  ]
+
+let test_the_config_marks_are_in_the_sheet () =
+  List.iter
+    (fun section ->
+      Alcotest.(check bool)
+        (Printf.sprintf "the sheet carries %S" section)
+        true
+        (List.exists
+           (fun (label, _) -> String.equal label section)
+           (Masc_tui_keys.help_sections ())))
+    [ "Prompt marks"; "Param marks" ];
+  let prompt_explained = List.map fst Masc_tui_config_mark.prompt_legend in
+  (* Held back outranks the source, so every source wears the same mark under
+     it, and that mark has a word. *)
+  List.iter
+    (fun source ->
+      let mark = Masc_tui_config_mark.prompt_glyph ~held_back:true source in
+      Alcotest.(check bool)
+        (Printf.sprintf "the sheet explains the held-back mark %S" mark)
+        true
+        (List.mem mark prompt_explained))
+    prompt_sources;
+  (* Unheld, the shipped file is the one row that draws nothing, and a state
+     with no mark needs no word. The other two do. *)
+  List.iter
+    (fun source ->
+      let mark = Masc_tui_config_mark.prompt_glyph ~held_back:false source in
+      let explained = List.mem mark prompt_explained in
+      match source with
+      | Masc.Tui_decode.Prompt_file ->
+          Alcotest.(check string) "the shipped file draws a blank" " " mark;
+          Alcotest.(check bool) "so the blank is no sheet row" false explained
+      | Masc.Tui_decode.Prompt_override | Masc.Tui_decode.Prompt_missing ->
+          Alcotest.(check bool)
+            (Printf.sprintf "the sheet explains the mark %S" mark)
+            true
+            explained)
+    prompt_sources;
+  let prompt_drawable =
+    List.concat_map
+      (fun held_back ->
+        List.map
+          (fun source -> Masc_tui_config_mark.prompt_glyph ~held_back source)
+          prompt_sources)
+      [ true; false ]
+  in
+  List.iter
+    (fun (mark, _) ->
+      Alcotest.(check bool)
+        (Printf.sprintf "the prompt registry can draw %S" mark)
+        true
+        (List.mem mark prompt_drawable))
+    Masc_tui_config_mark.prompt_legend;
+  (* The params list fills its column on every row, so both marks are words. *)
+  let param_drawable =
+    List.map
+      (fun has_override -> Masc_tui_config_mark.param_glyph ~has_override)
+      [ true; false ]
+  in
+  let param_explained = List.map fst Masc_tui_config_mark.param_legend in
+  List.iter
+    (fun mark ->
+      Alcotest.(check bool)
+        (Printf.sprintf "the sheet explains the param mark %S" mark)
+        true
+        (List.mem mark param_explained))
+    param_drawable;
+  List.iter
+    (fun (mark, _) ->
+      Alcotest.(check bool)
+        (Printf.sprintf "the params list can draw %S" mark)
+        true
+        (List.mem mark param_drawable))
+    Masc_tui_config_mark.param_legend
+
 (* Lanes is the operator's top-level concurrent lane workspace. Runtime still
    owns configuration and substrate probes; [p] remains the explicit return
    path from the standalone run browser. *)
+(* A sheet section answers "what can I do here", and a label is the answer.
+   Two rows carrying the same label are one answer given twice: the reader
+   reads the second to find what it adds and finds a pronoun.
+
+   Config / Runtime / Clients listed [p] and [Esc] as "runtime", one row under
+   the other, helped "back to the Runtime surface this hangs off" and "...it
+   hangs off". Both call goto_surface Runtime. The repo spells two doors to
+   one action as one binding -- [Left / Esc], [y / n], [o / A] -- and
+   [Masc_tui_keys.key_atoms] splits the slash, so both keys stay counted. *)
+(* Two rows that share a label but not an action. The label under-describes
+   them and the help beside it tells them apart; which word each should carry
+   instead is a wording decision, not a duplicate key, so they are named here
+   rather than fixed in passing.
+
+   Board: [Ctrl-W] swaps the two panes and [h/l] focuses one of them by
+   direction. Workspace / Code: [Left / Esc] leaves the file, then the
+   directory, then the surface, and [B] walks back through definition
+   jumps -- unrelated, and both called "back". *)
+let shared_label_exceptions =
+  [ ("Board", "pane"); ("Workspace / Code", "back") ]
+
+let test_no_surface_gives_one_answer_two_rows () =
+  let found = ref [] in
+  List.iter
+    (fun (name, surface) ->
+      let labels = List.map (fun b -> b.Masc_tui_keys.label) (Masc_tui_keys.for_surface surface) in
+      let sorted = List.sort compare labels in
+      let rec first_repeat = function
+        | a :: (b :: _ as rest) -> if String.equal a b then Some a else first_repeat rest
+        | [ _ ] | [] -> None
+      in
+      match first_repeat sorted with
+      | None -> ()
+      | Some label ->
+          if not (List.mem (name, label) shared_label_exceptions) then
+            found := Printf.sprintf "%s names two keys %S" name label :: !found)
+    Masc_tui_keys.help_surfaces;
+  Alcotest.(check (list string)) "every label answers for one key" [] (List.rev !found);
+  (* And every exception still shares its label, so one that was renamed or
+     removed does not sit here claiming to hold something. *)
+  List.iter
+    (fun ((name, label) as entry) ->
+      let surface = List.assoc name Masc_tui_keys.help_surfaces in
+      let count =
+        List.length
+          (List.filter
+             (fun b -> String.equal b.Masc_tui_keys.label label)
+             (Masc_tui_keys.for_surface surface))
+      in
+      Alcotest.(check bool)
+        (Printf.sprintf "%s still shares %S" (fst entry) label)
+        true (count >= 2))
+    shared_label_exceptions
+
 let test_lanes_is_a_main_destination () =
   Alcotest.(check bool) "Lanes is a top-level ring entry" true
     (List.exists (fun (surface, _) -> surface = Lanes) surface_ring);
@@ -1017,8 +1229,8 @@ let test_visible_surface_ring_declutter () =
   Alcotest.(check bool) "Approvals shown when pending items exist" true
     (List.exists (fun (s, _) -> s = Approvals) ring_with_pending)
 
-(* The sheet is the only place the eight keeper marks are named where a reader
-   can read all eight at once: the Keepers rows pair each glyph with its word
+(* The sheet is the only place the keeper marks are named where a reader
+   can read all of them at once: the Keepers rows pair each glyph with its word
    but show only the states the fleet is in, and the 34-cell roster pane beside
    the chat draws the glyph with no word at all. The list lived in
    Masc_tui_keeper_mark with no reader until the sheet took it. *)
@@ -2201,6 +2413,10 @@ let () =
             test_detail_tab_hint_projects_the_table
         ; Alcotest.test_case "detail tab keys reach the help sheet" `Quick
             test_detail_tab_keys_reach_the_help_sheet
+        ; Alcotest.test_case "every surface names one key that acts on the cursor"
+            `Quick test_every_surface_names_one_key_that_acts_on_the_cursor
+        ; Alcotest.test_case "every Enter exception names a sheet surface"
+            `Quick test_every_enter_atom_exception_names_a_sheet_surface
         ; Alcotest.test_case "every surface answers" `Quick
             test_every_surface_answers
         ; Alcotest.test_case "no surface repeats a key" `Quick
@@ -2319,6 +2535,10 @@ let () =
             test_keeper_operations_are_not_top_level_tabs
         ; Alcotest.test_case "the memory marks are in the sheet" `Quick
             test_the_memory_marks_are_in_the_sheet_not_on_the_roster
+        ; Alcotest.test_case "the Config marks are in the sheet" `Quick
+            test_the_config_marks_are_in_the_sheet
+        ; Alcotest.test_case "no surface gives one answer two rows" `Quick
+            test_no_surface_gives_one_answer_two_rows
         ; Alcotest.test_case "the file marks are in the sheet" `Quick
             test_the_file_marks_are_in_the_sheet
         ; Alcotest.test_case "Lanes is a main destination" `Quick

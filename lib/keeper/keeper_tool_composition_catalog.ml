@@ -8,6 +8,12 @@ type expected_value =
   | Table_array_value
   | Array_value
 
+type enum_value_fault =
+  | Empty_value
+  | Padded_value
+  | Line_break_in_value
+  | Separator_in_value
+
 type error =
   | Toml_syntax of string
   | Empty_catalog
@@ -67,6 +73,20 @@ type error =
       { path : string list
       ; type_name : string
       }
+  | Param_enum_requires_string_type of
+      { path : string list
+      ; type_name : string
+      }
+  | Empty_param_enum of { path : string list }
+  | Unsendable_param_enum_value of
+      { path : string list
+      ; value : string
+      ; fault : enum_value_fault
+      }
+  | Duplicate_param_enum_value of
+      { path : string list
+      ; value : string
+      }
   | Duplicate_param_name of
       { name : string
       ; param : string
@@ -93,6 +113,7 @@ type param_type =
   | Integer_param
   | Number_param
   | Boolean_param
+  | Enum_param of string list
 
 type param =
   { param_name : string
@@ -164,6 +185,15 @@ let first_duplicate fields =
       if List.mem name seen then Some name else find_duplicate (name :: seen) rest
   in
   find_duplicate [] fields
+;;
+
+let first_repeated_string values =
+  let rec find_repeated seen = function
+    | [] -> None
+    | value :: rest ->
+      if List.mem value seen then Some value else find_repeated (value :: seen) rest
+  in
+  find_repeated [] values
 ;;
 
 let validate_fields ~path ~allowed fields =
@@ -375,6 +405,61 @@ and parse_array_template ~path fields =
           parse_items 0 [] raw_items))
 ;;
 
+(* A member the model could not send back exactly. A provider that cannot
+   carry [enum] gets the members written unquoted into the parameter's own
+   description (Agent_core.Types.enum_vocabulary_text), while the call is
+   still checked against the exact member. Any separator character in a
+   member is refused, not only the spaced form the text uses: ["x |"] next to
+   ["y"] would read as ["x"] and ["| y"]. *)
+let enum_value_fault value =
+  if String.equal value ""
+  then Some Empty_value
+  else if not (String.equal (String.trim value) value)
+  then Some Padded_value
+  else if String.contains value '\n' || String.contains value '\r'
+  then Some Line_break_in_value
+  else if String.contains value Agent_core.Types.enum_member_separator
+  then Some Separator_in_value
+  else None
+;;
+
+let first_unsendable_member ~path members =
+  List.find_map
+    (fun value ->
+       Option.map
+         (fun fault -> Unsendable_param_enum_value { path; value; fault })
+         (enum_value_fault value))
+    members
+;;
+
+(* [enum] narrows a string param to a closed member set. The key and the
+   list shape are the ones config/tools uses; the accepted members are
+   narrower here: strings only, no repeats, nothing empty or padded. The pair
+   is read together: an [enum] on any other type has no JSON meaning the
+   schema could carry, and an empty or repeated member list declares a
+   choice the model cannot make sense of. *)
+let parse_param_type ~path ~raw_type fields =
+  match raw_type, List.assoc_opt "enum" fields with
+  | "string", None -> Ok String_param
+  | "string", Some raw_members ->
+    (match string_array ~path ~field:"enum" raw_members with
+     | Error _ as error -> error
+     | Ok [] -> Error (Empty_param_enum { path })
+     | Ok members ->
+       (match first_unsendable_member ~path members with
+        | Some error -> Error error
+        | None ->
+          (match first_repeated_string members with
+           | Some value -> Error (Duplicate_param_enum_value { path; value })
+           | None -> Ok (Enum_param members))))
+  | "integer", None -> Ok Integer_param
+  | "number", None -> Ok Number_param
+  | "boolean", None -> Ok Boolean_param
+  | ("integer" | "number" | "boolean"), Some _ ->
+    Error (Param_enum_requires_string_type { path; type_name = raw_type })
+  | type_name, (None | Some _) -> Error (Invalid_param_type { path; type_name })
+;;
+
 let parse_params ~path fields =
   match List.assoc_opt "params" fields with
   | None -> Ok []
@@ -392,7 +477,7 @@ let parse_params ~path fields =
               (match
                  validate_fields
                    ~path:param_path
-                   ~allowed:[ "name"; "type"; "description" ]
+                   ~allowed:[ "name"; "type"; "enum"; "description" ]
                    param_fields
                with
                | Error _ as error -> error
@@ -406,14 +491,7 @@ let parse_params ~path fields =
                      | Error _ as error -> error
                      | Ok raw_type ->
                        (match
-                          (match raw_type with
-                           | "string" -> Ok String_param
-                           | "integer" -> Ok Integer_param
-                           | "number" -> Ok Number_param
-                           | "boolean" -> Ok Boolean_param
-                           | type_name ->
-                             Error
-                               (Invalid_param_type { path = param_path; type_name }))
+                          parse_param_type ~path:param_path ~raw_type param_fields
                         with
                         | Error _ as error -> error
                         | Ok param_type ->
@@ -439,12 +517,7 @@ let parse_params ~path fields =
    template reads is config without a consumer. *)
 let validate_declared_params ~name ~params plan =
   let declared = List.map (fun param -> param.param_name) params in
-  let rec first_duplicate seen = function
-    | [] -> None
-    | value :: rest ->
-      if List.mem value seen then Some value else first_duplicate (value :: seen) rest
-  in
-  match first_duplicate [] declared with
+  match first_repeated_string declared with
   | Some param -> Error (Duplicate_param_name { name; param })
   | None ->
     let used =
@@ -677,6 +750,27 @@ let error_to_string = function
       "invalid param type %S at %s (expected string, integer, number, or boolean)"
       type_name
       (String.concat "." path)
+  | Param_enum_requires_string_type { path; type_name } ->
+    Printf.sprintf
+      "enum at %s needs type \"string\", not %S"
+      (String.concat "." path)
+      type_name
+  | Empty_param_enum { path } ->
+    "enum must list at least one member at " ^ String.concat "." path
+  | Unsendable_param_enum_value { path; value; fault } ->
+    let problem =
+      match fault with
+      | Empty_value -> "is empty"
+      | Padded_value -> "has leading or trailing whitespace"
+      | Line_break_in_value -> "contains a line break"
+      | Separator_in_value ->
+        Printf.sprintf
+          "contains %C, which separates members when they are written into a description"
+          Agent_core.Types.enum_member_separator
+    in
+    Printf.sprintf "enum member %S at %s %s" value (String.concat "." path) problem
+  | Duplicate_param_enum_value { path; value } ->
+    Printf.sprintf "enum lists member %S twice at %s" value (String.concat "." path)
   | Duplicate_param_name { name; param } ->
     Printf.sprintf "composition %S declares param %S twice" name param
   | Unknown_param_reference { name; param } ->
@@ -694,10 +788,24 @@ let error_to_string = function
 ;;
 
 let param_type_to_string = function
-  | String_param -> "string"
+  | String_param | Enum_param _ -> "string"
   | Integer_param -> "integer"
   | Number_param -> "number"
   | Boolean_param -> "boolean"
+;;
+
+let param_property_schema param =
+  let type_field = "type", `String (param_type_to_string param.param_type) in
+  let description_field = "description", `String param.param_description in
+  match param.param_type with
+  | Enum_param members ->
+    `Assoc
+      [ type_field
+      ; "enum", `List (List.map (fun member -> `String member) members)
+      ; description_field
+      ]
+  | String_param | Integer_param | Number_param | Boolean_param ->
+    `Assoc [ type_field; description_field ]
 ;;
 
 let input_schema_of_params = function
@@ -715,12 +823,7 @@ let input_schema_of_params = function
       ; ( "properties"
         , `Assoc
             (List.map
-               (fun param ->
-                  ( param.param_name
-                  , `Assoc
-                      [ "type", `String (param_type_to_string param.param_type)
-                      ; "description", `String param.param_description
-                      ] ))
+               (fun param -> param.param_name, param_property_schema param)
                params) )
       ; ( "required"
         , `List (List.map (fun param -> `String param.param_name) params) )

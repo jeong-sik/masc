@@ -174,6 +174,199 @@ let quota_ordered_deferred_runtime_lane ~now hint =
   | [] -> hint
 ;;
 
+type path_rest =
+  | Path_serving
+  | Path_resting of
+      { release_at : float
+      ; walk_promotes_at_release : bool
+      }
+
+type walk_rest =
+  | Walk_head_serving of { runtime_id : string }
+  | Walk_waits_until of
+      { release_at : float
+      ; resting_runtime_id : string
+      }
+
+type failure_wait =
+  | Capacity_release
+  | Path_release
+
+type next_dispatch =
+  | Dispatch_now of { runtime_id : string }
+  | Wait_until of
+      { release_at : float
+      ; waiting_on : string
+      ; wait : failure_wait
+      }
+
+(* When one runtime path is released, read from the same two stores the walk
+   order reads (RFC-provider-path-rest §3.3). The order holds a stated rest back
+   until the provider's own time, so at that release the walk promotes the path
+   again. It holds an unstated rest back until a success, so that release ends
+   only the wait, not the demotion; a stated time beyond the cap is the same,
+   because the cap ends the wait before the provider's time ends the demotion.
+   A quota observation carries no noted time and rests from [now]. An id the
+   table cannot resolve is no evidence of a rest. *)
+let path_rest ~now runtime_id =
+  match Runtime.get_runtime_by_id runtime_id with
+  | None -> Path_serving
+  | Some (runtime : Runtime.t) ->
+    let cap_sec = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec in
+    let rest_sec retry_class retry_after_hint =
+      Keeper_runtime_failure_route.path_rest_sec ~cap_sec ~retry_class ~retry_after_hint
+    in
+    let rate_limit_rest =
+      match
+        Runtime_lane_preference.candidate_backpressure
+          ~now
+          ~candidate:runtime.candidate_preference
+      with
+      | None -> None
+      | Some (Runtime_lane_preference.Unknown_scope_rate_limit { noted_at; retry_after }) ->
+        let promotes =
+          match retry_after with
+          | Some seconds when (not (Float.is_nan seconds)) && seconds > 0.0 ->
+            Float.compare seconds cap_sec <= 0
+          | Some _ | None -> false
+        in
+        Some
+          ( noted_at +. rest_sec Keeper_runtime_failure_route.Rate_limited retry_after
+          , promotes )
+    in
+    let quota_rest =
+      let scope = Runtime.quota_scope_of_runtime runtime in
+      match Runtime_quota_window.active_until ~scope ~now with
+      | Some resets_at ->
+        let cap_at = now +. cap_sec in
+        Some (Float.min resets_at cap_at, Float.compare resets_at cap_at <= 0)
+      | None ->
+        if Runtime_quota_window.is_exhausted ~scope ~now
+        then Some (now +. rest_sec Keeper_runtime_failure_route.Hard_quota None, false)
+        else None
+    in
+    let rest =
+      match rate_limit_rest, quota_rest with
+      | None, None -> None
+      | Some rest, None | None, Some rest -> Some rest
+      | Some (rate_limit_at, rate_limit_promotes), Some (quota_at, quota_promotes) ->
+        Some (Float.max rate_limit_at quota_at, rate_limit_promotes && quota_promotes)
+    in
+    (match rest with
+     | Some (release_at, walk_promotes_at_release) when Float.compare now release_at < 0 ->
+       Path_resting { release_at; walk_promotes_at_release }
+     | Some _ | None -> Path_serving)
+;;
+
+(* A walk dispatches its head first, so the head decides: a serving head takes
+   the input now. A resting head waits for the first moment the walk's head can
+   serve: the head's own release, or an earlier release of a later path that
+   the walk order promotes at that moment. A later path whose release the order
+   does not follow stays behind the head and cannot shorten the wait. *)
+let walk_rest ~now ~head ~later =
+  match path_rest ~now head with
+  | Path_serving -> Walk_head_serving { runtime_id = head }
+  | Path_resting { release_at = head_release_at; walk_promotes_at_release = _ } ->
+    let release_at, resting_runtime_id =
+      List.fold_left
+        (fun ((earliest, _) as found) runtime_id ->
+           match path_rest ~now runtime_id with
+           | Path_resting { release_at; walk_promotes_at_release = true }
+             when Float.compare release_at earliest < 0 ->
+             release_at, runtime_id
+           | Path_resting { release_at = _; walk_promotes_at_release = _ } | Path_serving ->
+             found)
+        (head_release_at, head)
+        later
+    in
+    Walk_waits_until { release_at; resting_runtime_id }
+;;
+
+(* The deferred suffix in the order the next turn walks it
+   ([quota_ordered_deferred_runtime_lane]). *)
+let deferred_lane_rest ~now hint =
+  let ordered = quota_ordered_deferred_runtime_lane ~now hint in
+  walk_rest ~now ~head:ordered.next_runtime_id ~later:ordered.later_runtime_ids
+;;
+
+(* A fresh walk of an assignment, ordered as [run_named] orders a turn without
+   a deferred suffix: sticky preference, then quota and backpressure demotion.
+   An id that names no lane or runtime is its own single candidate. *)
+let assignment_walk_rest ~now assignment_id =
+  let ordered =
+    match Runtime.resolve_assignment assignment_id with
+    | `Lane lane ->
+      let lane_id = Runtime_lane.id lane in
+      Runtime_lane_preference.prefer_order ~lane_id (Runtime_lane.ordered_candidates lane)
+      |> quota_ordered_runtime_ids ~now
+    | `Unavailable _ | `Missing -> [ assignment_id ]
+  in
+  match ordered with
+  | [] -> Walk_head_serving { runtime_id = assignment_id }
+  | head :: later -> walk_rest ~now ~head ~later
+;;
+
+(* The next dispatch after a failed turn, shared by the heartbeat cycle and
+   the chat lane's deferred retry so both answer one failure the same way
+   (RFC-provider-path-rest §3.1).
+
+   Capacity backpressure is MASC's own slot and client envelope, not one
+   path's, so it waits for its own rest whatever was deferred. A deferred
+   suffix names where the input goes next, and its walk decides. Without a
+   suffix the turn used every path the input may take: a rate limit or quota
+   waits for the failed path's rest, and no less than the moment a fresh walk
+   of the assignment can start on a serving path, so the wait never ends on a
+   head that still rests. Every other failure without a suffix has no provider
+   wait. *)
+let next_dispatch_after_failure ~now ~route ~assignment_id deferred =
+  let module Route = Keeper_runtime_failure_route in
+  let cap_sec = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec in
+  let route_release retry_class retry_after =
+    now +. Route.path_rest_sec ~cap_sec ~retry_class ~retry_after_hint:retry_after
+  in
+  match route, deferred with
+  | Route.Retry_after_observed { retry_class = Route.Capacity_backpressure; retry_after }, _ ->
+    Some
+      (Wait_until
+         { release_at = route_release Route.Capacity_backpressure retry_after
+         ; waiting_on = assignment_id
+         ; wait = Capacity_release
+         })
+  | ( ( Route.Retry_after_observed
+          { retry_class =
+              ( Route.Rate_limited | Route.Hard_quota | Route.Server_error
+              | Route.Network_transient | Route.Provider_timeout )
+          ; _
+          }
+      | Route.Rotate_now _ | Route.Exhausted_visible_alive _ )
+    , Some hint ) ->
+    Some
+      (match deferred_lane_rest ~now hint with
+       | Walk_head_serving { runtime_id } -> Dispatch_now { runtime_id }
+       | Walk_waits_until { release_at; resting_runtime_id } ->
+         Wait_until { release_at; waiting_on = resting_runtime_id; wait = Path_release })
+  | ( Route.Retry_after_observed
+        { retry_class = (Route.Rate_limited | Route.Hard_quota) as retry_class; retry_after }
+    , None ) ->
+    let failed_release_at = route_release retry_class retry_after in
+    let release_at, waiting_on =
+      match assignment_walk_rest ~now assignment_id with
+      | Walk_waits_until { release_at; resting_runtime_id }
+        when Float.compare release_at failed_release_at > 0 ->
+        release_at, resting_runtime_id
+      | Walk_waits_until { release_at = _; resting_runtime_id = _ } | Walk_head_serving _ ->
+        failed_release_at, assignment_id
+    in
+    Some (Wait_until { release_at; waiting_on; wait = Path_release })
+  | ( ( Route.Retry_after_observed
+          { retry_class = Route.Server_error | Route.Network_transient | Route.Provider_timeout
+          ; _
+          }
+      | Route.Rotate_now _ | Route.Exhausted_visible_alive _ )
+    , None ) ->
+    None
+;;
+
 let equal_deferred_runtime_lane left right =
   String.equal left.assignment_id right.assignment_id
   && String.equal left.failed_runtime_id right.failed_runtime_id
@@ -694,6 +887,47 @@ let validate_provider_request_cap ~runtime_id
   match Runtime.validate_request_body_cap ~runtime_id provider_config with
   | Ok cap -> Ok cap
   | Error error -> Error (runtime_candidate_invalid_request_cap_error error)
+
+(* The declared transmission window, in tokens, checked against the model's
+   declared context (RFC keeper-context-window-in-tokens §7.9): a window the
+   model cannot carry is a configuration contradiction named here, before
+   dispatch, rather than a request the provider refuses every turn. Token
+   against token; the request-body cap is not consulted. *)
+let model_input_window_for_candidate ~runtime_id =
+  let window_tokens = Keeper_runtime_resolved.context_window_tokens () in
+  match Runtime.max_context_of_runtime_id runtime_id with
+  | Some max_context when window_tokens > max_context ->
+    Error
+      (Agent_core.Error.Config
+         (Agent_core.Error.InvalidConfig
+            { field = "turn.context_window_tokens"
+            ; detail =
+                Printf.sprintf
+                  "%d tokens exceed the %d-token max-context of runtime %s; declare a window the model can carry or route the keeper elsewhere"
+                  window_tokens
+                  max_context
+                  runtime_id
+            }))
+  | Some _ -> Ok (Keeper_context_window.declared ~window_tokens)
+  | None ->
+    (* Every materialized runtime resolves a context window at load
+       ([Runtime.validate_runtime_max_context]); an id that resolves none
+       here names no runtime this attempt can dispatch to. *)
+    Error
+      (Agent_core.Error.Config
+         (Agent_core.Error.InvalidConfig
+            { field = "max-context"
+            ; detail = Printf.sprintf "runtime %s resolves no context window" runtime_id
+            }))
+;;
+
+let request_cap_and_window ~runtime_id provider_config =
+  let* max_request_body_bytes =
+    validate_provider_request_cap ~runtime_id provider_config
+  in
+  let* model_input_window = model_input_window_for_candidate ~runtime_id in
+  Ok (max_request_body_bytes, model_input_window)
+;;
 
 let resolve_runtime_candidate id =
   match Runtime.get_runtime_by_id id with
@@ -1950,7 +2184,7 @@ let run_named
            , Keeper_attempt_dispatch.Rejected_before_dispatch )
          | Ok () ->
           (match
-             validate_provider_request_cap
+             request_cap_and_window
                ~runtime_id:attempt_runtime_id
                provider_config
            with
@@ -1958,7 +2192,7 @@ let run_named
              Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
              Error err, None, Keeper_provider_attempt_effect.No_effect_observed,
              Keeper_attempt_dispatch.Rejected_before_dispatch
-           | Ok max_request_body_bytes ->
+           | Ok (max_request_body_bytes, model_input_window) ->
             let candidate = Runtime_candidate.of_provider_config provider_config in
             (* Cached provider health is observation only. Every eligible runtime
                reaches the real provider boundary; only the resulting typed error
@@ -1968,13 +2202,11 @@ let run_named
             { runtime_id = attempt_runtime_id
             ; error_runtime_id
             ; max_request_body_bytes
-            ; (* #27320: the first attempt's windowing budget starts at the
-                 full declared cap; [run_try_provider_with_context_overflow_shrink]
-                 is the one that consults #27320's remembered starting point
-                 and shrinks it on a typed overflow. A direct (non-shrink)
-                 caller of [run_try_provider] gets the un-shrunk cap, same as
-                 before this change. *)
-              model_input_capacity_bytes = max_request_body_bytes
+            ; (* The declared window. [run_try_provider_with_context_overflow_shrink]
+                 consults #27320's remembered starting point below it and
+                 shrinks on a typed overflow; a direct (non-shrink) caller of
+                 [run_try_provider] runs at the declared window. *)
+              model_input_window
             ; base_path
             ; keeper_name
             ; name

@@ -20,7 +20,10 @@
       exception-based loop.
    3. a transient read failure is not collapsed into the permanent-consume
       path: the exact queue selection remains pending and provider dispatch
-      is blocked until a later intake can render it. *)
+      is blocked until a later intake can render it.
+   4. a readable comment event names the replies after the keeper's latest
+      comment by where they start in the thread and the ids at either end.
+   5. the Board replay path names the same replies. *)
 
 open Alcotest
 open Masc
@@ -521,6 +524,167 @@ let test_transient_head_does_not_block_the_entry_behind_it () =
     (Keeper_event_queue.length queued)
 ;;
 
+(* Comments are ordered by [created_at], and by random id when two share it,
+   so each post and comment lands strictly after the one before to keep the
+   thread in the order this test writes it. *)
+let write_spacing_seconds = 0.01
+
+let create_thread ~title content =
+  Unix.sleepf write_spacing_seconds;
+  match
+    Board_dispatch.create_post
+      ~author:"external-author"
+      ~content
+      ~title
+      ~post_kind:Board.Human_post
+      ()
+  with
+  | Ok post -> Board.Post_id.to_string post.id
+  | Error error -> failf "post: %s" (Board.show_board_error error)
+;;
+
+let add_comment ~post_id ~author content =
+  Unix.sleepf write_spacing_seconds;
+  match Board_dispatch.add_comment ~post_id ~author ~content () with
+  | Ok comment -> Board.Comment_id.to_string comment.id
+  | Error error -> failf "comment: %s" (Board.show_board_error error)
+;;
+
+let comment_event ~meta ~post_id ~author content =
+  let stimulus : Keeper_event_queue.stimulus =
+    { Keeper_event_queue.post_id
+    ; urgency = Keeper_event_queue.Normal
+    ; arrived_at = Time_compat.now ()
+    ; payload =
+        Keeper_event_queue.Board_signal
+          { kind = Keeper_event_queue.Comment_added
+          ; author
+          ; title = "thread"
+          ; content
+          ; hearth = None
+          ; updated_at = Some (Time_compat.now ())
+          }
+    }
+  in
+  match Keeper_world_observation.pending_board_event_of_stimulus ~meta stimulus with
+  | Error unavailable ->
+    failf
+      "comment event read failed: %s"
+      (Keeper_world_observation_board_signal.unavailable_to_string unavailable)
+  | Ok None -> fail "a comment stimulus produced no event"
+  | Ok (Some event) -> event
+;;
+
+(* The replies as (offset, oldest id, newer ids). *)
+let replies = option (triple int string (list string))
+
+let replies_of (event : Keeper_world_observation.pending_board_event) =
+  Option.map
+    (fun { Keeper_world_observation_board_signal.comment_offset; oldest; newer } ->
+       ( comment_offset
+       , Board.Comment_id.to_string oldest
+       , List.map Board.Comment_id.to_string newer ))
+    event.Keeper_world_observation.replies_after_own_comment
+;;
+
+(* (4) The thread: a peer, the keeper, a peer, the keeper again, then three
+   peers. Before the keeper speaks the event names no replies. Right after its
+   second comment it names none either, although a peer answered its first.
+   After the three replies it names them from offset 4, and a thread read at
+   that offset starts at the first of them. *)
+let test_comment_event_names_the_replies_after_the_latest_own_comment () =
+  let keeper_name = "reply-ids" in
+  let meta = test_meta keeper_name in
+  let post_id = create_thread ~title:"thread" "thread topic" in
+  let (_ : string) = add_comment ~post_id ~author:"peer-early" "before the keeper spoke" in
+  check
+    replies
+    "no own comment yet"
+    None
+    (replies_of
+       (comment_event ~meta ~post_id ~author:"peer-early" "before the keeper spoke"));
+  let (_ : string) = add_comment ~post_id ~author:keeper_name "keeper was here" in
+  let answer_to_first = add_comment ~post_id ~author:"peer-a" "answer to the first" in
+  let (_ : string) = add_comment ~post_id ~author:keeper_name "keeper again" in
+  check
+    replies
+    "nothing after the latest own comment"
+    None
+    (replies_of (comment_event ~meta ~post_id ~author:keeper_name "keeper again"));
+  let first_reply = add_comment ~post_id ~author:"peer-b" "first reply" in
+  let second_reply = add_comment ~post_id ~author:"peer-c" "second reply" in
+  let third_reply = add_comment ~post_id ~author:"peer-d" "third reply" in
+  let event = comment_event ~meta ~post_id ~author:"peer-d" "third reply" in
+  check
+    replies
+    "the replies after the latest own comment"
+    (Some (4, first_reply, [ second_reply; third_reply ]))
+    (replies_of event);
+  let fields = Keeper_unified_prompt.For_testing.board_event_fields event in
+  let field name = List.assoc_opt name fields in
+  check (option string) "the count" (Some "3") (field "new_replies_since_own");
+  check (option string) "the offset" (Some "4") (field "new_replies_comment_offset");
+  check (option string) "the oldest id" (Some first_reply) (field "oldest_new_reply_id");
+  check (option string) "the newest id" (Some third_reply) (field "newest_new_reply_id");
+  let read =
+    Board_tool.handle_tool
+      ~result_boundary:Tool_output.Sent_to_client
+      "masc_board_post_get"
+      (`Assoc [ "post_id", `String post_id; "comment_offset", `Int 4 ])
+  in
+  let position =
+    match Board.Comment_page.Position.of_metadata (Tool_result.metadata read) with
+    | Some position -> position
+    | None -> failf "the thread read carries no page position"
+  in
+  check
+    (list int)
+    "the thread read at offset 4 is the last three of seven comments"
+    [ 4; 3; 7 ]
+    Board.Comment_page.Position.[ position.offset; position.returned; position.total ];
+  let thread = Tool_result.message read in
+  let on_page id = String_util.contains_substring thread id in
+  check
+    (list bool)
+    "the page shows the three replies and not the earlier answer"
+    [ true; true; true; false ]
+    (List.map on_page [ first_reply; second_reply; third_reply; answer_to_first ])
+;;
+
+(* (5) The Board replay path. The keeper's cursor is set at the head, then a
+   thread gets a keeper comment and two replies, which moves the thread past
+   the cursor. The replay row for it names the two replies the same way. *)
+let test_board_replay_row_names_the_replies_after_the_own_comment () =
+  let base_path = Sys.getenv "MASC_BASE_PATH" in
+  let keeper_name = "replay-replies" in
+  let meta = test_meta keeper_name in
+  Keeper_registry.For_testing.clear ();
+  Fun.protect ~finally:(fun () -> Keeper_registry.For_testing.clear ())
+  @@ fun () ->
+  ignore (Keeper_registry.For_testing.register ~base_path keeper_name meta);
+  let (_ : string) = create_thread ~title:"earlier" "a post before the cursor" in
+  let events, _, _ = Keeper_world_observation.collect_board_events ~base_path ~meta in
+  check int "the first collection only places the cursor" 0 (List.length events);
+  let post_id = create_thread ~title:"thread" "thread topic" in
+  let (_ : string) = add_comment ~post_id ~author:keeper_name "keeper was here" in
+  let first_reply = add_comment ~post_id ~author:"peer-a" "first reply" in
+  let second_reply = add_comment ~post_id ~author:"peer-b" "second reply" in
+  let events, _, _ = Keeper_world_observation.collect_board_events ~base_path ~meta in
+  match
+    List.filter
+      (fun (event : Keeper_world_observation.pending_board_event) ->
+         String.equal event.post_id post_id)
+      events
+  with
+  | [ event ] ->
+    check
+      replies
+      "the replay row names the replies after the keeper's comment"
+      (Some (1, first_reply, [ second_reply ]))
+      (replies_of event)
+  | rows -> failf "expected one replay row for the thread, got %d" (List.length rows)
+;;
+
 let () =
   run
     "keeper_board_unavailable"
@@ -557,6 +721,16 @@ let () =
             "a transient head does not block the entry behind it"
             `Quick
             test_transient_head_does_not_block_the_entry_behind_it
+        ] )
+    ; ( "replies after own comment"
+      , [ test_case
+            "a comment event names the replies after the latest own comment"
+            `Quick
+            (with_eio test_comment_event_names_the_replies_after_the_latest_own_comment)
+        ; test_case
+            "a Board replay row names the replies after the own comment"
+            `Quick
+            (with_eio test_board_replay_row_names_the_replies_after_the_own_comment)
         ] )
     ]
 ;;

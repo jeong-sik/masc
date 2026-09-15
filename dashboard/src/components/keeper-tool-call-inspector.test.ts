@@ -98,7 +98,7 @@ describe('blobMarkerOfOutput', () => {
 describe('groupToolCallTree', () => {
   const compositionChild = (overrides: Partial<ToolCallEntry> = {}): ToolCallEntry =>
     toolCall({
-      composition_tool: 'keeper_compose_mission-snapshot',
+      composition_tool: 'keeper_compose_work-intake',
       composition_run_id: 'run-1',
       composition_execution: 'inline',
       parent_tool_use_id: 'call_parent',
@@ -108,7 +108,7 @@ describe('groupToolCallTree', () => {
   it('nests composition children under their composite parent', () => {
     const parent = toolCall({
       ts: 100,
-      tool: 'keeper_compose_mission-snapshot',
+      tool: 'keeper_compose_work-intake',
       tool_use_id: 'call_parent',
     })
     const childBoard = compositionChild({ ts: 95, tool: 'masc_board_stats', composition_node_id: 'board' })
@@ -133,9 +133,9 @@ describe('groupToolCallTree', () => {
   })
 
   it('attaches a run to the nearest parent at or after its newest child when provider ids repeat', () => {
-    const lateParent = toolCall({ ts: 200, tool: 'keeper_compose_mission-snapshot', tool_use_id: 'call_dup' })
-    const nearParent = toolCall({ ts: 100, tool: 'keeper_compose_mission-snapshot', tool_use_id: 'call_dup' })
-    const staleParent = toolCall({ ts: 50, tool: 'keeper_compose_mission-snapshot', tool_use_id: 'call_dup' })
+    const lateParent = toolCall({ ts: 200, tool: 'keeper_compose_work-intake', tool_use_id: 'call_dup' })
+    const nearParent = toolCall({ ts: 100, tool: 'keeper_compose_work-intake', tool_use_id: 'call_dup' })
+    const staleParent = toolCall({ ts: 50, tool: 'keeper_compose_work-intake', tool_use_id: 'call_dup' })
     const child = compositionChild({ ts: 90, tool: 'keeper_lane_status', composition_node_id: 'lane', parent_tool_use_id: 'call_dup' })
 
     const nodes = groupToolCallTree([lateParent, nearParent, child, staleParent])
@@ -150,7 +150,7 @@ describe('groupToolCallTree', () => {
     // parent row is written at dispatch, so its ts precedes every child ts.
     const parent = toolCall({
       ts: 1_787_025_233.044336,
-      tool: 'keeper_compose_mission-snapshot',
+      tool: 'keeper_compose_work-intake',
       tool_use_id: 'call_async',
     })
     const childLane = compositionChild({
@@ -176,8 +176,8 @@ describe('groupToolCallTree', () => {
   })
 
   it('attaches an async run to its dispatch parent, not a later reuse of the provider id', () => {
-    const dispatchParent = toolCall({ ts: 80, tool: 'keeper_compose_mission-snapshot', tool_use_id: 'call_dup' })
-    const laterReuse = toolCall({ ts: 200, tool: 'keeper_compose_mission-snapshot', tool_use_id: 'call_dup' })
+    const dispatchParent = toolCall({ ts: 80, tool: 'keeper_compose_work-intake', tool_use_id: 'call_dup' })
+    const laterReuse = toolCall({ ts: 200, tool: 'keeper_compose_work-intake', tool_use_id: 'call_dup' })
     const child = compositionChild({
       ts: 90,
       tool: 'keeper_lane_status',
@@ -195,7 +195,7 @@ describe('groupToolCallTree', () => {
   it('leaves a run unattributed when every candidate sits strictly inside the child ts window', () => {
     // Neither recorded shape: the candidate is after the oldest child and
     // before the newest child, so attaching would be a guess.
-    const interiorCandidate = toolCall({ ts: 95, tool: 'keeper_compose_mission-snapshot', tool_use_id: 'call_mid' })
+    const interiorCandidate = toolCall({ ts: 95, tool: 'keeper_compose_work-intake', tool_use_id: 'call_mid' })
     const childEarly = compositionChild({ ts: 90, tool: 'keeper_lane_status', composition_node_id: 'lane', parent_tool_use_id: 'call_mid' })
     const childLate = compositionChild({ ts: 100, tool: 'masc_board_stats', composition_node_id: 'board', parent_tool_use_id: 'call_mid' })
 
@@ -206,7 +206,7 @@ describe('groupToolCallTree', () => {
   })
 
   it('never joins on blank provider ids', () => {
-    const parent = toolCall({ ts: 100, tool: 'keeper_compose_mission-snapshot', tool_use_id: '' })
+    const parent = toolCall({ ts: 100, tool: 'keeper_compose_work-intake', tool_use_id: '' })
     const child = compositionChild({ ts: 90, tool: 'keeper_lane_status', parent_tool_use_id: '' })
 
     const nodes = groupToolCallTree([parent, child])

@@ -603,19 +603,36 @@ let test_pressure_rank_orders_by_surface_status () =
         Dashboard_briefing_assembly.build_keeper_briefs config rows
         |> List.map (fun row -> row |> member "name" |> to_string)
       in
-      (* Ranked by health. The status word this used to read spelled stale,
-         degraded and zombie all "inactive", so a keeper with a late heartbeat
-         sorted level with one whose fiber had died. *)
+      (* Ranked by health: a keeper whose keepalive is gone outranks one
+         that has not turned yet, which outranks one that is working. *)
       Alcotest.(check (list string))
-        "zombie and offline outrank idle, which outranks healthy"
-        [ "k-zombie"; "k-offline"; "k-idle"; "k-healthy"; "k-stale" ]
+        "offline outranks idle, which outranks healthy"
+        [ "k-offline"; "k-idle"; "k-healthy" ]
         (names
            [ row "k-healthy" "healthy"
            ; row "k-idle" "idle"
-           ; row "k-stale" "stale"
-           ; row "k-zombie" "zombie"
            ; row "k-offline" "offline"
-           ]))
+           ]);
+      (* A failing keeper is not doing its work either, so it shares the top
+         rank with offline. Tied rows sort by when they were last seen, which
+         is the same moment here, so the pair is pinned and its order is
+         not. *)
+      let ranked =
+        names
+          [ row "k-healthy" "healthy"
+          ; row "k-failing" "failing"
+          ; row "k-idle" "idle"
+          ; row "k-offline" "offline"
+          ]
+      in
+      Alcotest.(check (list string))
+        "failing and offline share the top rank"
+        [ "k-failing"; "k-offline" ]
+        (List.sort String.compare (List.filteri (fun index _ -> index < 2) ranked));
+      Alcotest.(check (list string))
+        "both outrank idle, which outranks healthy"
+        [ "k-idle"; "k-healthy" ]
+        (List.filteri (fun index _ -> index >= 2) ranked))
 ;;
 
 let test_keeper_brief_publishes_health_and_phase () =
@@ -629,12 +646,12 @@ let test_keeper_brief_publishes_health_and_phase () =
       let brief =
         Dashboard_briefing_assembly.build_keeper_briefs config
           [ `Assoc
-              [ ("name", `String "k-stale")
-              ; ("agent_name", `String "k-stale")
-              ; ("status", `String "inactive")
+              [ ("name", `String "k-idle")
+              ; ("agent_name", `String "k-idle")
+              ; ("status", `String "idle")
               ; ("phase", `String "Running")
               ; ("paused", `Bool false)
-              ; ("diagnostic", `Assoc [ ("health_state", `String "stale") ])
+              ; ("diagnostic", `Assoc [ ("health_state", `String "idle") ])
               ; ("updated_at", `String (Masc_domain.now_iso ()))
               ; ("latest_tool_names", `List [])
               ]
@@ -642,10 +659,9 @@ let test_keeper_brief_publishes_health_and_phase () =
         |> List.hd
       in
       (* The rank this row is sorted by comes from health, so the row has to
-         carry health -- otherwise a reader sees only the status word, which
-         spells stale, degraded and zombie alike as "inactive". *)
+         carry health -- otherwise a reader sees only the status word. *)
       let field name = Yojson.Safe.to_string (brief |> member name) in
-      Alcotest.(check string) "health travels with the row" {|"stale"|} (field "health");
+      Alcotest.(check string) "health travels with the row" {|"idle"|} (field "health");
       (* An operator asks two questions the fold answered with one word:
          is it running (health), and did someone stop it (phase). *)
       Alcotest.(check string) "phase travels with the row" {|"Running"|} (field "phase"))

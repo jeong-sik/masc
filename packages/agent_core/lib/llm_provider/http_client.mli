@@ -339,8 +339,15 @@ val governing_timeout_knob
     [Unbounded] means no timeout was requested and therefore needs no clock.
     [Bounded] carries the exact clock and timeout supplied by the caller.
 
+    Private: [resolve_explicit_deadline] is the only way to build one, so the
+    check it makes is the only shape that exists. A [Bounded] carrying
+    [infinity] reads as a deadline everywhere and bounds nothing -- an eio
+    sleep of an infinite span never wakes -- and the resolver rejects it along
+    with [nan] and anything not greater than zero. Consumers still match on
+    the constructors; they just cannot build one.
+
     @stability Internal *)
-type 'clock explicit_deadline =
+type 'clock explicit_deadline = private
   | Unbounded
   | Bounded of 'clock * float
 
@@ -595,38 +602,9 @@ val post_sync_once_with_evidence
   -> unit
   -> (sync_transport_receipt, post_sync_once_error) result
 
-(** POST JSON body for SSE/NDJSON streaming.
-    Returns [Ok reader] on HTTP 200 (10 MB buffer).
-    Returns [Error] on non-200 or network failure.
-
-    The connection is bound to [sw]; prefer {!with_post_stream} to
-    ensure the connection fd is released when the stream is consumed.
-
-    [cache] is accepted for API symmetry but is currently ignored: the
-    returned [Buf_read.t] outlives this function, so the client cannot
-    be safely parked until consumption finishes. Use {!with_post_stream}
-    for cache-aware streaming.
-
-    Only an explicitly supplied [connect_timeout_s] bounds the connect +
-    initial response headers phase. Enforcing it also requires [clock];
-    supplying [connect_timeout_s] without [clock] returns [AcceptRejected].
-    Body consumption through the returned reader is the caller's
-    responsibility to timebox. *)
-val post_stream
-  :  ?cache:cache
-  -> ?clock:_ Eio.Time.clock
-  -> ?connect_timeout_s:float
-  -> sw:Eio.Switch.t
-  -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
-  -> url:string
-  -> headers:(string * string) list
-  -> body:string
-  -> unit
-  -> (Eio.Buf_read.t, http_error) result
-
-(** Like {!post_stream} but manages connection lifetime internally.
-    [f] receives the reader; when [f] returns the connection is closed
-    and its fd is released immediately.
+(** POST a JSON body and read the SSE/NDJSON response under a managed
+    connection lifetime. [f] receives the reader; when [f] returns the
+    connection is closed and its fd is released immediately.
 
     When [cache] is supplied, the streaming connection is bound to the
     cache's long-lived switch and is parked back after [f] returns, so

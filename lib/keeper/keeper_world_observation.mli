@@ -74,10 +74,16 @@ type pending_board_event = {
   updated_at : float;
   explicit_mention : bool;
   matched_targets : string list;
-  self_commented : bool;
-  (** [true] if this keeper has previously commented on this post. *)
-  new_external_since : int;
-  (** Number of external comments posted after the keeper's latest comment. *)
+  replies_after_own_comment :
+    Keeper_world_observation_board_signal.replies_after_own_comment option;
+  (** [Some] on a Board comment row, or a Board replay row, for a post where
+      this keeper has a comment and other comments came after its latest one.
+      [None] when there is nothing to state: the keeper has no comment on the
+      post, nothing came after its latest one, or the row is not one of those
+      two kinds (a reaction or vote row states who did what, and the other
+      rows carry no Board thread). The prompt states how many replies there
+      are, where the thread read starts at them, and the oldest and newest id,
+      so the row stays the same size however long the thread grows. *)
   latest_external_author : string option;
   (** Author of the most recent external comment (for prompt context). *)
   latest_external_preview : string option;

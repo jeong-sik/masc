@@ -4,6 +4,9 @@
                                 empty window the host loops on
    POST /browser-lane/result  — {id, ok, data | error}: resolves the waiting
                                 tool call
+   POST /browser-lane/ping    — {ok:true} when this server holds the lane
+                                token; registers no client, so a host can
+                                ask an address before it moves there
 
    Auth is a lane token, not a dashboard session: the host process is not a
    person. The token lives at <base>/.masc/browser-lane/token (0600, written
@@ -144,6 +147,9 @@ let add_routes router =
                  | _ ->
                    respond_json_value_with_cors ~status:`Bad_request request reqd
                      (error_json "id is required")))))
+  |> Http.Router.post "/browser-lane/ping" (fun request reqd ->
+       if not (lane_authorized request) then refuse request reqd
+       else respond_json_value_with_cors request reqd (`Assoc ["ok", `Bool true]))
   |> Http.Router.post "/browser-lane/disconnect" (fun request reqd ->
        if not (lane_authorized request) then refuse request reqd
        else match client_of_request request with

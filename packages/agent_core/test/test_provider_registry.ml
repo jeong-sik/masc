@@ -513,8 +513,10 @@ let test_default_endpoints_ignore_ambient_overrides () =
 
 let test_default_max_context () =
   let reg = Provider_registry.default () in
+  (* Providers whose base is the generic OpenAI-compatible preset declare no
+     window of their own, so the registry reports none rather than a guess. *)
   (match Provider_registry.find reg "nous" with
-   | Some e -> check (option int) "llama 128K" (Some 128_000) e.max_context
+   | Some e -> check (option int) "llama context unknown" None e.max_context
    | None -> fail "llama should exist");
   (match Provider_registry.find reg "claude" with
    | Some e -> check (option int) "claude 200K" (Some 200_000) e.max_context
@@ -529,14 +531,14 @@ let test_default_max_context () =
    | Some e -> check (option int) "kimi 256K" (Some 256_000) e.max_context
    | None -> fail "kimi should exist");
   (match Provider_registry.find reg "groq" with
-   | Some e -> check (option int) "groq 128K" (Some 128_000) e.max_context
+   | Some e -> check (option int) "groq context unknown" None e.max_context
    | None -> fail "groq should exist");
   (match Provider_registry.find reg "deepseek" with
    | Some e ->
-     check (option int) "deepseek provider capability 128K" (Some 128_000) e.max_context
+     check (option int) "deepseek provider context unknown" None e.max_context
    | None -> fail "deepseek should exist");
   match Provider_registry.find reg "siliconflow" with
-  | Some e -> check (option int) "siliconflow 128K" (Some 128_000) e.max_context
+  | Some e -> check (option int) "siliconflow context unknown" None e.max_context
   | None -> fail "siliconflow should exist"
 ;;
 

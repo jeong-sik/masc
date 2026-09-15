@@ -236,7 +236,28 @@ open Alcotest
    acknowledgements, so Keepers can consume Lane output on their next turn.
    Official-client CLI turns carry the full schema; agent_core can defer it.
    Pin to the measured inventory with no added headroom. *)
-let ceiling_bytes = 118_048
+(* 2026-09-15: +509 rendered bytes (production renderer rules replayed on the
+   three TOML files; not a CI reading). masc_schedule_list 380 -> 734 takes a
+   required owner selector, owner_name and cursor, so a Keeper reads its own
+   schedules a page of summary rows at a time instead of the whole store
+   (339 of 339 compositions that listed schedules with no arguments this
+   month were externalized blobs, median 141,638 bytes). masc_schedule_create 4,024 -> 4,106 and
+   masc_schedule_cancel 579 -> 652 say which refusal carries typed fields.
+   Added to main's ceiling with no headroom; the next CI run measures it. *)
+(* 2026-09-15: +765 rendered bytes, again the production renderer's rules
+   replayed on the seven schedule TOML files (10,847 -> 11,612; the replay
+   gives the 734/4,106/652 the entry above recorded, so the two agree with
+   each other, and neither is a CI reading -- the 118,557 base has not been
+   measured either, because the build broke before this test ran).
+   masc_schedule_create 4,106 -> 4,385 and masc_schedule_update 3,298 -> 3,562
+   take due_in_sec, say that a call gives exactly one due input, and say that
+   a Keeper has the current time only on its turn's first request, so a delay
+   is the due time it can give exactly after a tool round.
+   masc_schedule_list 734 -> 892 declares limit's minimum and maximum and
+   takes status=active; masc_schedule_notes_list 701 -> 718 declares limit's
+   bounds; masc_schedule_note_add 1,018 -> 1,065 says when author_id is
+   required. No headroom. *)
+let ceiling_bytes = 119_322
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc

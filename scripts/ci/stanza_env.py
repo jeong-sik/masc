@@ -159,10 +159,24 @@ def collect_literal_deps(form) -> list[str]:
     if not isinstance(form, list) or not form:
         return []
     if form[0] == "deps":
-        return [
-            item for item in form[1:]
-            if isinstance(item, str) and not VAR_RE.search(item)
-        ]
+        collected = []
+        for item in form[1:]:
+            if not isinstance(item, str):
+                continue
+            if VAR_RE.search(item):
+                # A %{project_root}/ dep names a file inside this checkout:
+                # the project root is what this script resolves against
+                # (REPO_ROOT), so rewriting the prefix is not a guess. The
+                # suite runs in test/ relative to the root, and the runner
+                # prefixes each dep with the stanza directory, so ../ keeps
+                # the target at the checkout root. Dune variables the reader
+                # cannot resolve stay refused -- guessing them would run the
+                # suite with a literal '%{...}'.
+                if item.startswith("%{project_root}/"):
+                    collected.append("../" + item[len("%{project_root}/"):])
+                continue
+            collected.append(item)
+        return collected
     return [dep for item in form for dep in collect_literal_deps(item)]
 
 
@@ -366,7 +380,7 @@ FIXTURE_PLAIN = """
  (action
   (setenv MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED false
    (setenv MASC_BASE_PATH /tmp/test-alpha
-    (setenv MASC_BASE_PATH_INPUT /tmp/test-alpha
+    (setenv MASC_CONFIG_DIR /tmp/test-alpha/.masc/config
      (run %{test})))))
  (libraries alcotest))
 """
@@ -431,7 +445,7 @@ def self_test() -> int:
         [
             ("MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED", "false"),
             ("MASC_BASE_PATH", "/tmp/test-alpha"),
-            ("MASC_BASE_PATH_INPUT", "/tmp/test-alpha"),
+            ("MASC_CONFIG_DIR", "/tmp/test-alpha/.masc/config"),
         ],
     )
     check("plain values need nothing built", deps, [])
@@ -495,6 +509,40 @@ def self_test() -> int:
 
     env, _ = suite_env("test_beta", FIXTURE_SPLIT)
     check("a setenv split across lines is one pair", env, [("HOME", "/tmp/beta-home")])
+
+    # test/stanzas/test_keeper_turn_fsm_tla_parity.inc builds against a spec
+    # file named from the project root. The reader used to drop every dep
+    # that mentioned a dune variable, so the targeted runner built the suite
+    # without the file and the run failed with a Sys_error naming the path.
+    _, deps = suite_env(
+        "test_prroot",
+        "(test (name test_prroot)"
+        " (deps %{project_root}/specs/keeper-turn-fsm/KeeperTurnFSM.tla))",
+    )
+    check(
+        "a %{project_root}/ dep resolves to the checkout root", deps,
+        ["../specs/keeper-turn-fsm/KeeperTurnFSM.tla"],
+    )
+    check(
+        "and the runner sees it from the repo root",
+        [os.path.normpath(os.path.join("test", d)) for d in deps],
+        ["specs/keeper-turn-fsm/KeeperTurnFSM.tla"],
+    )
+    try:
+        suite_env(
+            "test_var",
+            "(test (name test_var) (deps %{unknown_var}/spec.tla))",
+        )
+    except StanzaError:
+        raise AssertionError("deps are not env values; an unknown one is dropped, not refused")
+    _, deps = suite_env(
+        "test_var",
+        "(test (name test_var) (deps %{unknown_var}/spec.tla))",
+    )
+    check(
+        "a variable only dune can name stays in runtest's hands", deps,
+        [],
+    )
 
     env, deps = suite_env("test_gamma", FIXTURE_DEP)
     check("a dep value becomes its path", env, [("MASC_MAIN_EIO_EXE", "../bin/main_eio.exe")])
@@ -586,7 +634,7 @@ def self_test() -> int:
         check("shared-file sibling environment does not leak", env,
               [("MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED", "false"),
                ("MASC_BASE_PATH", "/tmp/test-alpha"),
-               ("MASC_BASE_PATH_INPUT", "/tmp/test-alpha")])
+               ("MASC_CONFIG_DIR", "/tmp/test-alpha/.masc/config")])
         write("stanzas/nested/group.inc", "(include ../shared.inc)")
         try:
             stanza_text("test_absent", fixture)
@@ -606,7 +654,7 @@ def self_test() -> int:
     check("coverage members are included in check-all",
           "test_types_coverage" in inline_suite_names(), True)
 
-    # The one suite test.yml used to hardcode still reads the same three.
+    # The one suite test.yml used to hardcode still reads what it hardcoded.
     real = os.path.join(stanza_dir(DEFAULT_SUITE_DIR), "test_heartbeat_integration.inc")
     if os.path.exists(real):
         with open(real, encoding="utf-8") as handle:
@@ -614,10 +662,7 @@ def self_test() -> int:
         check(
             "the real stanza reads what test.yml hardcoded",
             env,
-            [
-                ("MASC_BASE_PATH", "/tmp/test-heartbeat-integ"),
-                ("MASC_BASE_PATH_INPUT", "/tmp/test-heartbeat-integ"),
-            ],
+            [("MASC_BASE_PATH", "/tmp/test-heartbeat-integ")],
         )
 
     # A suite outside test/ reads its own directory's dune, not test/dune.

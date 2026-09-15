@@ -43,8 +43,22 @@ type context =
        start/termination rows to this call. [None] on callers without
        invocation context (tests, direct dispatch). *)
   ; trace_id : string option
+  ; result_projection : Tool_output.model_projection option
+    (* The projection this call's result crosses on its way to the model,
+       resolved for the lane running the call. [None] when the caller did not
+       resolve a lane (composition sub-calls, tests); see
+       [result_projection_for]. *)
   ; capability_authority : capability_authority
   }
+
+(* A caller that resolved the lane says which projection applies. Without it
+   the descriptor's own projection stands, which is the narrower of the two a
+   lane can widen it to. *)
+let result_projection_for ctx (descriptor : Keeper_tool_descriptor.t) =
+  match ctx.result_projection with
+  | Some projection -> projection
+  | None -> descriptor.model_output_projection
+;;
 
 let descriptor_for_internal internal_name =
   match Keeper_tool_descriptor.descriptors_for_internal internal_name with
@@ -359,6 +373,7 @@ let handle_in_process ctx descriptor args =
     Some
       (Keeper_tool_board_runtime.handle_board_tool_with_outcome
          ~meta:ctx.meta
+         ~result_projection:(result_projection_for ctx descriptor)
          ~name
          ~args)
   | Tool_masc_task_dispatch ->
@@ -423,7 +438,7 @@ let handle_in_process ctx descriptor args =
          ~args
          ())
   | Tool_browser_tabs ->
-    Some (Keeper_tool_in_process_runtime.handle_browser_tabs_with_outcome ~args)
+    Some (Keeper_tool_in_process_runtime.handle_browser_tabs_with_outcome ~config:ctx.config ~args)
   | Tool_browser_read ->
     Some (Keeper_tool_in_process_runtime.handle_browser_read_with_outcome ~config:ctx.config ~meta:ctx.meta ~args)
   | Tool_browser_session ->
@@ -434,7 +449,7 @@ let handle_in_process ctx descriptor args =
     Some (Keeper_tool_in_process_runtime.handle_browser_act_with_outcome
       ~turn_sandbox_factory:ctx.turn_sandbox_factory ~config:ctx.config ~meta:ctx.meta ~args)
   | Tool_browser_interact ->
-    Some (Keeper_tool_in_process_runtime.handle_browser_interact_with_outcome ~args)
+    Some (Keeper_tool_in_process_runtime.handle_browser_interact_with_outcome ~config:ctx.config ~args)
   | Tool_masc_control_dispatch ->
     Some
       (Keeper_tool_in_process_runtime.handle_masc_control_with_outcome

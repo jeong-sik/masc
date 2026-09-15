@@ -177,7 +177,8 @@ let sweep store =
           | None -> ());
          Hashtbl.remove store.posts id;
          Hashtbl.remove store.comments_by_post id;
-         Stdlib.decr store.post_count)
+         Stdlib.decr store.post_count;
+         mark_dirty_post store id)
       expired_posts;
     let expired_comments =
       Hashtbl.fold
@@ -193,16 +194,29 @@ let sweep store =
         store.comments
         []
     in
+    (* [reply_count] is kept by the write that adds a comment and rebuilt
+       from the comments on load; a comment the sweeper removes has to take
+       its count with it, or the post keeps announcing a reply nobody can
+       read until the next restart. Each removal is marked dirty the way
+       [add_comment] marks its write, so the next flush writes the snapshot
+       without the expired rows instead of waiting for an unrelated edit. *)
     List.iter
       (fun cid ->
          (match Hashtbl.find_opt store.comments cid with
           | Some c ->
-            remove_from_list_index
-              store.comments_by_post
-              (Post_id.to_string c.post_id)
-              cid
+            let post_key = Post_id.to_string c.post_id in
+            remove_from_list_index store.comments_by_post post_key cid;
+            (match Hashtbl.find_opt store.posts post_key with
+             | Some post ->
+               Hashtbl.replace
+                 store.posts
+                 post_key
+                 { post with reply_count = post.reply_count - 1 };
+               mark_dirty_post store post_key
+             | None -> ())
           | None -> ());
-         Hashtbl.remove store.comments cid)
+         Hashtbl.remove store.comments cid;
+         mark_dirty_comment store cid)
       expired_comments;
     (* Reclaim reactions and votes whose target post/comment no longer exists.
        [sweep] removes posts/comments but historically left [store.reactions] and
@@ -248,7 +262,9 @@ let sweep store =
         "sweep reclaimed %d orphaned reactions, %d orphaned votes"
         removed_reactions
         removed_votes;
-    if !removed_posts > 0 then invalidate_post_caches store;
+    (* The sorted post cache holds post records, so a changed [reply_count]
+       invalidates it as much as a removed post does. *)
+    if !removed_posts > 0 || !removed_comments > 0 then invalidate_post_caches store;
     if !removed_comments > 0 then invalidate_comment_caches store;
     store.last_sweep <- now;
     !removed_posts, !removed_comments)

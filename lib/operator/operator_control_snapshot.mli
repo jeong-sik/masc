@@ -40,11 +40,6 @@
     every entry exposed at this boundary therefore
     transitively re-exposed at the action layer. *)
 
-module U = Yojson.Safe.Util
-(** Yojson utilities re-exported because
-    {!Operator_control_action} reaches them via the
-    runtime-include of this module. *)
-
 include module type of struct
   include Operator_pending_confirm
 end

@@ -456,17 +456,17 @@ let kimi_capabilities =
 ;;
 
 let openai_compat_chat_capabilities =
+  (* [max_context_tokens] and [max_output_tokens] stay [None] (inherited from
+     [default_capabilities]): this preset covers arbitrary OpenAI-compatible
+     endpoints whose real windows agent core cannot know. A family-level guess
+     becomes the limit of every catalog-silent model. For output it is the wire
+     [max_tokens] and truncates long thinking; for context a caller that takes
+     the smaller of its declared window and this value clamps a 1M-token model
+     to the guess. Unknown means unknown — request builders omit the output
+     field, context consumers use the caller's declared window or fail with a
+     typed unknown-limit error, and per-model rows declare real ceilings. *)
   { default_capabilities with
-    max_context_tokens =
-      Some 128_000
-      (* [max_output_tokens] stays [None]: this preset covers arbitrary
-       OpenAI-compatible endpoints whose real output ceiling agent core
-       cannot know. A family-level guess here becomes the wire
-       [max_tokens] for every catalog-silent model and truncates long
-       thinking (thinking and answer share the value). Unknown means
-       unknown — request builders omit the field and the server applies
-       the model's own limit; per-model rows declare real ceilings. *)
-  ; supports_tools = true
+    supports_tools = true
   ; supports_tool_choice = true
   ; supports_required_tool_choice = true
   ; supports_named_tool_choice = true

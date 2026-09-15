@@ -437,7 +437,6 @@ let render_overview (state : state) =
                 else Some (Printf.sprintf "%d %s" count label))
               [ (l.klc_paused, "paused")
               ; (l.klc_offline, "offline")
-              ; (l.klc_inactive, "inactive")
               ; (l.klc_idle, "idle")
               ; (l.klc_unreadable, "unreadable")
               ]
@@ -3814,7 +3813,12 @@ let schedule_detail_lines ~width (row : schedule_row)
   ]
   @ target_link
   @ [ field "Digest" row.sch_payload_digest
-  ; Ansi.bold, "  Summary"
+  (* The four headings around this one -- SCHEDULE, PAYLOAD, PAYLOAD JSON and
+     DELIVERY EVIDENCE -- are drawn bold at this indent, and so are the field
+     labels. Caps are what tells the two apart: "Summary" sat directly under
+     "Digest  digest-..." with nothing beside it, which reads as a field whose
+     value is missing rather than as the section that follows. *)
+  ; Ansi.bold, "  SUMMARY"
   ]
   @ (Message_layout.wrap_body ~markdown:document_markdown
        ~max_cells:(max 1 (width - 4)) ~sanitize:Terminal_text.single_line summary
@@ -3940,7 +3944,7 @@ let render_schedules (state : state) =
    row said "healthy" while the heading counted "11 healthy" and the summary
    said "fleet ok" — the same fact four times, and the glyph beside the word
    already carries the health colour. Only a deviation earns a word, so the
-   one stale row is the only row with text in the column. The single-keeper
+   one deviating row is the only row with text in the column. The single-keeper
    chat header keeps {!keeper_health_word}: alone, the word is identity, not
    repetition. *)
 let keeper_health_deviation_word (health : Tui_decode.keeper_health option) =
@@ -3949,9 +3953,7 @@ let keeper_health_deviation_word (health : Tui_decode.keeper_health option) =
   | Some value -> (
       match Tui_decode.keeper_health_reading value with
       | Tui_decode.Health_running -> ""
-      | Tui_decode.Health_idle | Tui_decode.Health_offline
-      | Tui_decode.Health_stale | Tui_decode.Health_degraded
-      | Tui_decode.Health_zombie ->
+      | Tui_decode.Health_idle | Tui_decode.Health_failing | Tui_decode.Health_offline ->
           Tui_decode.keeper_health_to_string value)
 
 (* [runtime_id] is the producer-owned runtime identity. Keep it whole instead
@@ -4042,11 +4044,8 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
     ~now ~frame ~yolo ~paused ~health ~turn ~next_action ~keeper ~runtime =
   let status_color = keeper_action_color next_action in
   (* A running turn takes the cell whole -- both the mark and the word.
-     Splitting them is what this column used to do, and it produced rows
-     that argued with themselves: the mark came from the heartbeat and the
-     word from the turn, so a keeper answering on a stale heartbeat drew
-     "? answering". One of those was wrong and the reader could not tell
-     which.
+     Split, the mark and the word can answer from different readings and
+     the row argues with itself.
 
      The word is the elapsed time rather than "answering". The mark already
      says it is answering, and it says so by moving; spending eight columns
@@ -4066,15 +4065,14 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
 
      The elapsed stays -- a turn open two minutes is the fact -- but the mark
      stops. Motion here means work is progressing, and for a keeper the health
-     reading calls offline or zombie, nothing is. *)
+     reading calls offline, nothing is. A failing keeper's keepalive still runs
+     its turns, so its open turn is being worked; whether it fails is known
+     only when it ends. *)
   let turn_is_being_worked =
     match Option.map Tui_decode.keeper_health_reading health with
-    | Some (Tui_decode.Health_offline | Tui_decode.Health_zombie) -> false
-    | Some
-        ( Tui_decode.Health_running | Tui_decode.Health_idle
-        | Tui_decode.Health_stale | Tui_decode.Health_degraded )
-    | None ->
-      true
+    | Some Tui_decode.Health_offline -> false
+    | Some (Tui_decode.Health_running | Tui_decode.Health_idle | Tui_decode.Health_failing)
+    | None -> true
   in
   let glyph, status_word, status_color =
     match (turn : Tui_decode.keeper_turn_state option) with
@@ -4147,14 +4145,19 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
 (* Counted from the same readings the rows are drawn from, so the heading
    cannot disagree with the list under it. *)
 (* Tally words come from [Keeper_control.health_label], so this paints the
-   health vocabulary. [unread] is the roster not answering, which is dim rather
-   than any health colour. *)
-let keeper_roster_status_color = function
-  | "healthy" -> (Theme.ok ())
-  | "stale" | "degraded" -> (Theme.warn ())
-  | "zombie" -> (Theme.bad ())
-  | "offline" | "idle" -> (Theme.muted ())
-  | _ -> Ansi.dim
+   health vocabulary. A word is parsed back into a health reading rather than
+   compared as text, so a new reading is a compile error here instead of a word
+   that falls to dim. A word that is not a health -- [unread], [absent],
+   [config error] -- is the roster not answering, which is dim rather than any
+   health colour. *)
+let keeper_roster_status_color label =
+  match Tui_decode.keeper_health_of_string label with
+  | None -> Ansi.dim
+  | Some health -> (
+      match Tui_decode.keeper_health_reading health with
+      | Tui_decode.Health_running -> Theme.ok ()
+      | Tui_decode.Health_failing -> Theme.warn ()
+      | Tui_decode.Health_idle | Tui_decode.Health_offline -> Theme.muted ())
 
 (* The tally is [Keeper_control.status_tally], so every word here is a word the
    status column shows for the same keeper. This function only paints it. *)
@@ -4733,8 +4736,13 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
         float_of_int lane.sl_succeeded_count /. float_of_int total *. 100.0
       in
       let p50_str =
+        (* One decimal, the way the P50 column above draws the same
+           [sl_p50_elapsed_s]: the row read "8.0s" and this line "8.00s" of
+           one number on one screen, which leaves the reader deciding whether
+           they are the same figure. The column is the constrained one -- six
+           cells -- so the detail follows it rather than the other way. *)
         match lane.sl_p50_elapsed_s with
-        | Some s -> Printf.sprintf " · p50 latency %.2fs" s
+        | Some s -> Printf.sprintf " · p50 latency %.1fs" s
         | None -> ""
       in
       Printf.sprintf "Runs: %d retained (%d ok / %d fail / %d cancel) · %.1f%% success%s"
@@ -6496,7 +6504,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                       in
                       let line =
                         Printf.sprintf "    %s %s → %s%s"
-                          (if selected then "▸" else " ")
+                          (if selected then Masc_tui_theme.Glyph.current_entry else " ")
                           (binding_reference binding)
                           (Terminal_text.single_line binding.cb_keeper_name)
                           (if here then "  (this Keeper)"
@@ -7103,13 +7111,18 @@ let system_log_detail_lines (state : state) ~seq ~width =
             entry.sl_message
       in
       let details =
+        (* One name for the section, whichever branch draws it: the empty
+           branch called it "Details" and the other "Structured details", so
+           the same part of the pane answered to two names depending on
+           whether it had anything in it. Caps for the heading, the way every
+           other detail pane spells one. *)
         match entry.sl_details with
-        | `Null -> [ Ansi.dim, "  Details: none" ]
+        | `Null -> [ Ansi.dim, "  STRUCTURED DETAILS  none" ]
         | json ->
             let source =
               "```json\n" ^ Yojson.Safe.pretty_to_string json ^ "\n```"
             in
-            (Ansi.bold, "  Structured details")
+            (Ansi.bold, "  STRUCTURED DETAILS")
             :: (document_markdown ~width source
                 |> List.map (fun line -> Ansi.reset, "  " ^ line))
       in
@@ -7200,13 +7213,18 @@ let render_system_logs (state : state) =
       now.Unix.tm_sec
   in
   (* The active filters ride in the header, so a page trimmed to twelve rows
-     says why it is twelve rather than reading as a quiet ring. *)
+     says why it is twelve rather than reading as a quiet ring.
+
+     [verbose] is not a second field: [v] and [l] write the one floor, and
+     verbose is the floor being DEBUG. The header spent thirteen cells saying
+     that a second time, on a row that drops the tab strip at a hundred
+     columns and the connection badge below eighty. *)
   let filter_note =
     let level =
       match state.system_logs_min_level with
-      | None -> "  level\xe2\x89\xa5DEBUG  verbose:on"
+      | None -> "  level\xe2\x89\xa5DEBUG"
       | Some floor ->
-          Printf.sprintf "  level\xe2\x89\xa5%s  verbose:off"
+          Printf.sprintf "  level\xe2\x89\xa5%s"
             (String.trim (Masc.Tui_decode.system_log_level_label floor))
     in
     let category =
@@ -7217,13 +7235,26 @@ let render_system_logs (state : state) =
     in
     level ^ category
   in
+  (* What the reader set, on a read that brought back nothing. [l] and [v]
+     write the floor and refetch; with the fetch failing the rows are the only
+     other thing that moves, so pressing either redrew a frame identical to
+     the one before it. The default floor is not something anyone pressed, and
+     the note's other job -- saying why a short page is short -- needs a page,
+     so at the default this stays off the row rather than spending its width
+     on the surface that has least to spare. *)
+  let set_filter_note =
+    match state.system_logs_min_level, state.system_logs_category with
+    | None, None -> ""
+    | _ -> filter_note
+  in
   let header =
     match state.system_logs with
     | None ->
         Printf.sprintf "%s  %s  %s"
           (activity_title ~cols ~on_logs:true
              ~after:(Printf.sprintf "  %s  %s" timestamp (connection_badge state))
-             (title_missing_reading ~error:state.system_logs_error))
+             (title_missing_reading ~error:state.system_logs_error
+              ^ set_filter_note))
           timestamp (connection_badge state)
     | Some snapshot ->
         (* [total] counts what the ring has seen, not what this page holds.
@@ -11298,6 +11329,7 @@ let render_acting (state : state) =
       | Masc_tui_observer.Agent_core _ | Masc_tui_observer.Keeper_heartbeat _
       | Masc_tui_observer.Keeper_tool_call _
       | Masc_tui_observer.Keeper_turn_complete _
+      | Masc_tui_observer.Keeper_turn_observation _
       | Masc_tui_observer.Keeper_composite_changed _
       | Masc_tui_observer.Keeper_chat_appended _
       | Masc_tui_observer.Keeper_chat_stream_frame _
@@ -11772,11 +11804,16 @@ let render_code (state : state) =
              did not, leaving two cyans in one column. *)
           let marker =
             if node.Masc.Tui_decode.wt_has_children then
-              if selected then "\xe2\x96\xb8 "
+              if selected then File_icon.folder_glyph ^ " "
               (* The mark colour the files below it take. A folder is not a
                  kind of file, and the arrow already says which of the two
-                 this row is. *)
-              else (Theme.category Theme.Slot_1) ^ "\xe2\x96\xb8 " ^ Ansi.reset
+                 this row is. Both rows read the arrow from the module that
+                 also hands it to the help sheet: they were two literals a
+                 branch apart, one of them borrowed from the current-entry
+                 glyph, which is the same byte under another name. *)
+              else
+                (Theme.category Theme.Slot_1) ^ File_icon.folder_glyph ^ " "
+                ^ Ansi.reset
             else
               let kind =
                 File_icon.kind_of_name node.Masc.Tui_decode.wt_label
@@ -12632,10 +12669,23 @@ let render_runtime_params (state : state) =
   let before = screen_title " MASC Config" ^ tab_strip_gap in
   box_line buf cols
     (config_pane_title ~cols ~before state);
+  (* Where the overrides live leads, because it is the only thing on this row
+     the reader cannot get anywhere else, and it was what the row cut first:
+     at eighty columns it read "overrides persist in .masc/run\xe2\x80\xa6" and at
+     sixty-four "overrides pers\xe2\x80\xa6", while the two key phrases in front of it
+     survived whole.
+
+     [Enter] is gone from the row. The footer is pinned to keep it at every
+     width ([Masc_tui_footer.never_dropped_keys]), so "Enter edits by type"
+     was the footer's own hint said a second time on a row that had no space
+     for it -- and [e] opens the same editor, which the row never said.
+
+     [E] stays. The footer drops it at eighty columns, so below that this row
+     is the only place the advanced editor is named. *)
   (match state.runtime_params_notice with
    | None ->
      box_line_styled buf cols ~style:(Theme.recede ())
-       "  Enter edits by type · E is advanced JSON · overrides persist in .masc/runtime_params.json"
+       "  overrides persist in .masc/runtime_params.json · E is advanced JSON"
    | Some (ok, detail) ->
      box_line_styled buf cols ~style:(if ok then Theme.ok () else Theme.bad ())
        ("  " ^ Terminal_text.single_line detail));
@@ -12746,7 +12796,8 @@ let render_runtime_params (state : state) =
            let open Tui_decode in
            let line =
              Printf.sprintf "    %s %-41s %-16s%s"
-               (if row.rpr_has_override then "\xe2\x97\x8f" else "\xe2\x97\x8b")
+               (Masc_tui_config_mark.param_glyph
+                  ~has_override:row.rpr_has_override)
                (Terminal_text.single_line row.rpr_key)
                (Terminal_text.single_line
                   (runtime_param_value_text ~value_type:row.rpr_value_type
@@ -12923,14 +12974,17 @@ let render_prompt_registry (state : state) =
       if index >= first && index < first + list_height then begin
         incr drawn;
         let mark =
-          (* Held back outranks the source, which reads [Prompt_file] for
-             exactly these rows: the file is what a turn gets, and saying so
-             is what hides the override the reader still has on disk. *)
-          match held_back_for row.Tui_decode.pr_key, row.Tui_decode.pr_source with
-          | Some _, _ -> (Theme.bad ()) ^ "\xe2\x8a\x98" ^ Ansi.reset
-          | None, Tui_decode.Prompt_override -> (Theme.warn ()) ^ "*" ^ Ansi.reset
-          | None, Tui_decode.Prompt_file -> " "
-          | None, Tui_decode.Prompt_missing -> (Theme.bad ()) ^ "!" ^ Ansi.reset
+          let held_back = Option.is_some (held_back_for row.Tui_decode.pr_key) in
+          let glyph =
+            Masc_tui_config_mark.prompt_glyph ~held_back row.Tui_decode.pr_source
+          in
+          (* Colour is this pane's, the glyph the mark module's, because the
+             help sheet draws the same glyph with no colour at all. *)
+          match held_back, row.Tui_decode.pr_source with
+          | true, _ -> (Theme.bad ()) ^ glyph ^ Ansi.reset
+          | false, Tui_decode.Prompt_override -> (Theme.warn ()) ^ glyph ^ Ansi.reset
+          | false, Tui_decode.Prompt_file -> glyph
+          | false, Tui_decode.Prompt_missing -> (Theme.bad ()) ^ glyph ^ Ansi.reset
         in
         let category =
           match row.Tui_decode.pr_category with
@@ -14425,7 +14479,7 @@ let render_palette (state : state) =
       |> List.filteri (fun i _ -> i >= first && i < first + budget)
       |> List.iteri (fun visible_index (label, _) ->
            if first + visible_index = cursor then
-             c.push_selected (" \xe2\x96\xb8 " ^ label)
+             c.push_selected (" " ^ Masc_tui_theme.Glyph.current_entry ^ " " ^ label)
            else c.push ("   " ^ label));
       if total = 0 then c.push (Ansi.dim ^ "   (no match)" ^ Ansi.reset))
 
@@ -14699,7 +14753,7 @@ let render_answering (state : state) =
     (* The cursor is a gutter caret, not a full-row band: the row keeps its
        tone, and rows Enter cannot act on never wear the caret. *)
     let caret =
-      if selected && Option.is_some line.Masc_tui_answering.target then "\xe2\x96\xb8 "
+      if selected && Option.is_some line.Masc_tui_answering.target then Masc_tui_theme.Glyph.current_entry ^ " "
       else "  "
     in
     caret ^ tone_prefix ^ line.Masc_tui_answering.text ^ Ansi.reset

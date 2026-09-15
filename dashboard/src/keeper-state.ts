@@ -722,7 +722,7 @@ export function attachKeeperAudioClip(name: string, rawAudio: unknown): boolean 
 // export needed.
 const KEEPER_HEALTH_STATES: ReadonlySet<NonNullable<KeeperDiagnostic['health_state']>> =
   new Set<NonNullable<KeeperDiagnostic['health_state']>>([
-    'healthy', 'idle', 'stale', 'degraded', 'offline',
+    'healthy', 'idle', 'failing', 'offline',
   ])
 
 const KEEPER_QUIET_REASONS: ReadonlySet<NonNullable<KeeperDiagnostic['quiet_reason']>> =
@@ -732,17 +732,12 @@ const KEEPER_QUIET_REASONS: ReadonlySet<NonNullable<KeeperDiagnostic['quiet_reas
 
 const KEEPER_NEXT_ACTION_PATHS: ReadonlySet<NonNullable<KeeperDiagnostic['next_action_path']>> =
   new Set<NonNullable<KeeperDiagnostic['next_action_path']>>([
-    'auto_restart', 'recover', 'probe', 'direct_message',
+    'recover', 'probe', 'direct_message',
   ])
 
 const KEEPER_REPLY_STATUSES: ReadonlySet<NonNullable<KeeperDiagnostic['last_reply_status']>> =
   new Set<NonNullable<KeeperDiagnostic['last_reply_status']>>([
     'never', 'awaiting_reply', 'delivered', 'fresh', 'stale', 'error', 'unknown',
-  ])
-
-const KEEPER_CONTINUITY_STATES: ReadonlySet<NonNullable<KeeperDiagnostic['continuity_state']>> =
-  new Set<NonNullable<KeeperDiagnostic['continuity_state']>>([
-    'not_running', 'recovering', 'healthy', 'disabled', 'offline',
   ])
 
 // Generic typed-parse helper. Returns the input value typed as `T` if
@@ -782,7 +777,6 @@ export function normalizeKeeperDiagnostic(raw: unknown): KeeperDiagnostic | null
     recoverable: typeof raw.recoverable === 'boolean' ? raw.recoverable : undefined,
     summary: asString(raw.summary),
     keepalive_running: typeof raw.keepalive_running === 'boolean' ? raw.keepalive_running : undefined,
-    continuity_state: membershipParse(KEEPER_CONTINUITY_STATES, asString(raw.continuity_state)),
   }
 }
 

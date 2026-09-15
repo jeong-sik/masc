@@ -2098,8 +2098,7 @@ let test_read_backlog_snapshot_preserves_unreadable_observation () =
       ; updated_at = 0.0
       ; explicit_mention = false
       ; matched_targets = []
-      ; self_commented = false
-      ; new_external_since = 0
+      ; replies_after_own_comment = None
       ; latest_external_author = None
       ; latest_external_preview = None
       }
@@ -2387,30 +2386,6 @@ let test_rejoin_event_log () =
     ) events in
     Alcotest.(check bool) "rejoin event logged" true has_rejoin
   )
-
-(** BUG-6: Heartbeat Mutex protects concurrent access *)
-let test_heartbeat_concurrent_start_stop () =
-  Eio_main.run @@ fun _env ->
-  (* Reset heartbeats *)
-  List.iter (fun (hb : Heartbeat.t) -> ignore (Heartbeat.stop hb.id))
-    (Heartbeat.list ());
-
-  (* Start multiple heartbeats *)
-  let ids = List.init 20 (fun i ->
-    Heartbeat.start ~agent_name:(Printf.sprintf "agent-%d" i) ~interval:60 ~message:"ping"
-  ) in
-  Alcotest.(check int) "20 heartbeats started" 20 (List.length (Heartbeat.list ()));
-
-  (* Stop all by agent — interleaved *)
-  let stopped_count = ref 0 in
-  List.iteri (fun i _id ->
-    let n = Heartbeat.stop_by_agent ~agent_name:(Printf.sprintf "agent-%d" i) in
-    stopped_count := !stopped_count + n
-  ) ids;
-  Alcotest.(check int) "all 20 stopped" 20 !stopped_count;
-
-  (* List should be empty now *)
-  Alcotest.(check int) "list empty after cleanup" 0 (List.length (Heartbeat.list ()))
 
 (** The task surface compares actors by exact identity: a task claimed under the
     canonical "keeper-bob-agent" is not transitionable by the alias
@@ -2812,7 +2787,6 @@ let () =
     (* === Lifecycle Bug Fix Tests (#1655) === *)
     "lifecycle_bugs", [
       Alcotest.test_case "BUG-1: rejoin event log" `Quick test_rejoin_event_log;
-      Alcotest.test_case "BUG-6: heartbeat concurrent start/stop" `Quick test_heartbeat_concurrent_start_stop;
     ];
 
     (* === BUG-006: Task identity mismatch (unsuffixed keeper name) === *)

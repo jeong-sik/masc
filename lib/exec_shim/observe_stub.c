@@ -401,7 +401,10 @@ CAMLprim value ocaml_shim_user_notif_supported(value vunit)
    supervisor (SECCOMP_RET_USER_NOTIF) instead of the filter itself, so
    the supervisor can record the attempt and then answer EPERM.  The
    child calls this through install_user_notif below, which hands the
-   listener fd back across [sock] before execvpe. */
+   listener fd back across [sock] before execvpe.  Linux only, like every
+   helper above: the filter constants and prctl/syscall are Linux headers,
+   and the macOS release build compiles this file. */
+#ifdef __linux__
 static int install_observe_sockets(int sock)
 {
   struct shim_sock_filter filter[] = {
@@ -429,6 +432,7 @@ static int install_observe_sockets(int sock)
   }
   return rc;
 }
+#endif /* __linux__ */
 
 /* Child-side entry: install the observe filter and hand the listener fd to
    the shim over [sock].  Returns true when the filter applied and the fd
@@ -451,6 +455,7 @@ CAMLprim value ocaml_shim_observe_install(value vsock)
 CAMLprim value ocaml_shim_user_notif_drain(value vlistener)
 {
   CAMLparam1(vlistener);
+#ifdef __linux__
   int fd = Int_val(vlistener);
   int seen = 0;
   for (;;) {
@@ -468,6 +473,13 @@ CAMLprim value ocaml_shim_user_notif_drain(value vlistener)
        ENOTCONN (child gone) ends the loop. */
   }
   CAMLreturn(Val_int(seen));
+#else
+  /* No listener can exist here: ocaml_shim_observe_install answers false
+     off Linux. A call is a caller error, so it raises like restrict_self
+     instead of reporting zero attempts seen. */
+  unix_error(ENOSYS, "user_notif_drain", Nothing);
+  CAMLreturn(Val_unit);
+#endif
 }
 
 /* Applies the box and reports which rule refused the setup, so the refusal

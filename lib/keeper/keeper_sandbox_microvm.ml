@@ -978,8 +978,7 @@ let delete_force_argv_for backend ~container_name =
 
 (** Volume names reach [container] as an argument and become a directory name
     under its state directory, so a name outside this set is refused rather
-    than escaped. Keeper names already satisfy it -- they are the same names
-    that appear in [masc-keeper-vm-<name>-<hash>]. *)
+    than escaped. *)
 let valid_volume_segment segment =
   (not (String.equal segment ""))
   && String.for_all

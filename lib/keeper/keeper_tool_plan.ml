@@ -1126,7 +1126,6 @@ let validate_terminal_dependency_boundary descriptors nodes =
                    (Keeper_tool_descriptor.Serial | Keeper_tool_descriptor.Concurrent)
              ; _
              }
-         | Some { execution = Keeper_tool_descriptor.Direct_terminal; _ }
          | None -> false)
       nodes
   in
@@ -1240,7 +1239,7 @@ type execution_error =
   | Input_validation_failed of
       { node_id : Node_id.t
       ; tool_name : string
-      ; rejection : Tool_result.result
+      ; rejection : Tool_input_validation.rejection
       }
   | Output_validation_failed of
       { node_id : Node_id.t
@@ -1280,6 +1279,24 @@ let validate_output plan ~run_id ~node_id value =
                   { node_id; tool_name = node.tool_name; error }))))
 ;;
 
+let validate_node_input plan (node : node) input =
+  match descriptor_for_name plan.descriptors node.tool_name with
+  | None -> Error (Unknown_node_id node.id)
+  | Some descriptor ->
+    (match
+       Tool_input_validation.validate
+         ~schema:descriptor.Keeper_tool_descriptor.input_schema
+         ~name:node.tool_name
+         ~args:input
+         ()
+     with
+     | Ok input -> Ok input
+     | Error rejection ->
+       Error
+         (Input_validation_failed
+            { node_id = node.id; tool_name = node.tool_name; rejection }))
+;;
+
 let resolve_input plan ~run_id ~node_id ~lookup =
   match node_for_id plan.nodes node_id with
   | None -> Error (Unknown_node_id node_id)
@@ -1295,20 +1312,28 @@ let resolve_input plan ~run_id ~node_id ~lookup =
     in
     (match Json_template.resolve ~lookup:lookup_value node.input with
      | Error error -> Error (Input_template_resolution_failed { node_id; error })
-     | Ok input ->
-       (match descriptor_for_name plan.descriptors node.tool_name with
-        | None -> Error (Unknown_node_id node_id)
-        | Some descriptor ->
-          (match
-             Tool_input_validation.validate_args
-               ~schema:descriptor.Keeper_tool_descriptor.input_schema
-               ~name:node.tool_name
-               ~args:input
-               ()
-           with
-           | Ok input -> Ok input
-           | Error rejection ->
-             Error
-               (Input_validation_failed
-                  { node_id; tool_name = node.tool_name; rejection }))))
+     | Ok input -> validate_node_input plan node input)
+;;
+
+type prepared_input =
+  | Checked_before_run of Yojson.Safe.t
+  | Checked_when_node_runs
+
+let prepare_inputs plan =
+  let no_output _ = None in
+  let rec prepare prepared : node list -> _ = function
+    | [] -> Ok (List.rev prepared)
+    | node :: rest ->
+      (match Json_template.dependencies node.input with
+       | _ :: _ -> prepare ((node.id, Checked_when_node_runs) :: prepared) rest
+       | [] ->
+         (match Json_template.resolve ~lookup:no_output node.input with
+          | Error error ->
+            Error (node.id, Input_template_resolution_failed { node_id = node.id; error })
+          | Ok input ->
+            (match validate_node_input plan node input with
+             | Error error -> Error (node.id, error)
+             | Ok input -> prepare ((node.id, Checked_before_run input) :: prepared) rest)))
+  in
+  prepare [] plan.nodes
 ;;

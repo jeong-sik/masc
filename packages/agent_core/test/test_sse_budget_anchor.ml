@@ -7,8 +7,9 @@
     fields, unknown field names, and bare blank dispatch delimiters, any of
     which a provider could otherwise emit just under each budget to hold a
     stream open without ever producing an event. Where the budget ends, a line
-    that landed as it closed is read, and one the flow hands over after it
-    closed is not.
+    that landed as it closed is read, so is one whose bytes were already in
+    hand when it closed, and one the read had to wait for after it closed is
+    not.
 
     These tests drive a mock clock from inside the mock flow's read, so they
     assert the deadline arithmetic itself with no wall-clock sleeping. *)
@@ -37,6 +38,11 @@ let emit_after_gap ~clock ~now line () =
    that admits any single gap. Which budget is armed at each read then shows
    in how many events are delivered before the trip. *)
 let inter_token_budget_under_one_gap_s = 0.3
+
+(* An inter-token budget with room for exactly one line gap and not two
+   (0.4 < 0.5 < 0.8): a stream that renews it every line runs to EOF, and one
+   that renews it only on production trips on the second unrenewed gap. *)
+let inter_token_budget_over_one_gap_s = 0.5
 
 (* [classify] is what the consumer tells the reader about each dispatched
    event; every event is [Output] unless a test says otherwise. *)
@@ -70,6 +76,16 @@ let read_sse_over ?(classify = fun (_ : string) -> Http_client.Output) ~budget_k
         ~clock
         ~first_event_timeout:first_event_budget_s
         ~idle_timeout:inter_token_budget_under_one_gap_s
+        ~reader
+        ~on_data:(fun ~event_type data ->
+          events := (event_type, data) :: !events;
+          Http_client.Continue (classify data))
+        ()
+    | `Both_with_room_for_one_gap ->
+      Http_client.read_sse
+        ~clock
+        ~first_event_timeout:first_event_budget_s
+        ~idle_timeout:inter_token_budget_over_one_gap_s
         ~reader
         ~on_data:(fun ~event_type data ->
           events := (event_type, data) :: !events;
@@ -252,7 +268,14 @@ type arrival =
         lands in that same pass: the budget's wake-up is queued first and the
         read's behind it *)
   | At_once of string
-    (** the flow hands the chunk over the moment the read asks *)
+    (** the flow hands the chunk over the moment the read asks, with no
+        waiting: in production those are bytes that had already arrived and
+        were sitting in one of the buffers between the socket and this
+        reader *)
+  | Once_the_read_waited_past_the_budget of string
+    (** the read waits, the budget closes and cancels it, and the flow
+        completes the read anyway: what an io_uring read does when the kernel
+        had already been asked for the bytes *)
 
 let output_is_out data =
   if String.equal data "out" then Http_client.Output else Http_client.Prelude
@@ -284,6 +307,13 @@ let read_sse_arriving arrivals =
     | After_a_gap chunk -> `Run (emit_after_gap ~clock ~now chunk)
     | As_the_first_event_budget_closes chunk -> `Run (lands_as_the_budget_closes chunk)
     | At_once chunk -> `Return chunk
+    | Once_the_read_waited_past_the_budget chunk ->
+      `Run
+        (fun () ->
+          (* The yield lets the closed budget cancel this read; the read
+             completes regardless, as a submitted one does. *)
+          Eio.Cancel.protect Eio.Fiber.yield;
+          chunk)
   in
   let flow = Eio_mock.Flow.make "sse-arrival" in
   Eio_mock.Flow.on_read flow (List.map action arrivals @ [ `Raise End_of_file ]);
@@ -327,13 +357,41 @@ let test_a_first_token_that_lands_as_the_budget_closes_is_delivered () =
       (List.length delivered)
 ;;
 
-let test_a_line_handed_over_after_the_budget_closed_is_not_read () =
+let test_a_line_the_read_waited_for_past_the_budget_is_not_read () =
   (* A [Prelude] "ping" lands as the budget closes and stands, delimiter and
-     all. The flow hands over the next chunk at once, but the budget had
-     closed before the read asked for it: the budget ends the stream there
-     and "out" is never delivered. A reader that took whatever the flow gave
-     after the budget closed would read on for as long as a provider kept
-     sending. *)
+     all. The next read starts past the close and has to wait for the flow;
+     the chunk completes anyway, as a submitted read does. The budget ends
+     the stream there and "out" is never delivered. A reader that took
+     whatever the flow completed after the budget closed would read on for as
+     long as a provider kept sending. *)
+  match
+    read_sse_arriving
+      [ After_a_gap "data: created\n\n"
+      ; As_the_first_event_budget_closes "data: ping\n\n"
+      ; Once_the_read_waited_past_the_budget "data: out\n\n"
+      ]
+  with
+  | Error (`Timed_out delivered) ->
+    check
+      (list (pair (option string) string))
+      "what landed by the close is delivered, and nothing the read waited for"
+      [ None, "created"; None, "ping" ]
+      delivered
+  | Ok events ->
+    failf
+      "a line the read waited for past the first-event budget was read: ran to EOF with \
+       %d events"
+      (List.length events)
+;;
+
+let test_a_line_already_in_hand_when_the_budget_closed_is_read () =
+  (* The same stream, except the last chunk needs no waiting: the flow hands
+     it over the moment the read asks, which in production is a buffer
+     between the socket and this reader holding bytes that had already
+     arrived -- the response's opening chunk carrying the headers and the
+     first event together. Judging by bytes read rather than by waiting
+     dropped exactly this token, since this reader's own buffer is the last
+     of four and had not seen them yet. *)
   match
     read_sse_arriving
       [ After_a_gap "data: created\n\n"
@@ -341,17 +399,39 @@ let test_a_line_handed_over_after_the_budget_closed_is_not_read () =
       ; At_once "data: out\n\n"
       ]
   with
-  | Error (`Timed_out delivered) ->
+  | Ok events ->
     check
       (list (pair (option string) string))
-      "what landed by the close is delivered, and nothing after it"
-      [ None, "created"; None, "ping" ]
-      delivered
-  | Ok events ->
+      "the event already in hand is delivered"
+      [ None, "created"; None, "ping"; None, "out" ]
+      events
+  | Error (`Timed_out delivered) ->
     failf
-      "a line handed over after the first-event budget closed was read: ran to EOF with \
-       %d events"
-      (List.length events)
+      "an event already in the buffers when the budget closed was dropped after %d \
+       events"
+      (List.length delivered)
+;;
+
+(* A keep-alive carries a data field, so a reader that renews on data lines
+   renews on it. After the first token that is the inter-token gap, and a
+   provider that sends nothing but keep-alives then holds the stream for as
+   long as it keeps sending them -- the model producing nothing the whole
+   time. The consumer names each event, and only production renews. *)
+let keepalive_payload = "ping"
+
+let test_a_keepalive_does_not_renew_the_inter_token_gap () =
+  read_sse_over
+    ~budget_kind:`Both_with_room_for_one_gap
+    ~classify:(fun data ->
+      if String.equal data keepalive_payload then Http_client.Prelude else Http_client.Output)
+    [ "data: token\n"
+    ; "\n"
+    ; "data: " ^ keepalive_payload ^ "\n"
+    ; "\n"
+    ; "data: " ^ keepalive_payload ^ "\n"
+    ; "\n"
+    ]
+  |> check_timed_out "keep-alives renewed the inter-token gap"
 ;;
 
 let () =
@@ -375,6 +455,12 @@ let () =
             `Quick
             test_event_fields_do_not_end_first_event_budget
         ] )
+    ; ( "inter_token"
+      , [ test_case
+            "a keep-alive does not renew the inter-token gap"
+            `Quick
+            test_a_keepalive_does_not_renew_the_inter_token_gap
+        ] )
     ; ( "prelude"
       , [ test_case
             "a prelude event keeps the first-event budget"
@@ -395,9 +481,13 @@ let () =
             `Quick
             test_a_first_token_that_lands_as_the_budget_closes_is_delivered
         ; test_case
-            "a line handed over after the budget closed is not read"
+            "a line the read waited for past the budget is not read"
             `Quick
-            test_a_line_handed_over_after_the_budget_closed_is_not_read
+            test_a_line_the_read_waited_for_past_the_budget_is_not_read
+        ; test_case
+            "a line already in hand when the budget closed is read"
+            `Quick
+            test_a_line_already_in_hand_when_the_budget_closed_is_read
         ] )
     ; ( "idle"
       , [ test_case

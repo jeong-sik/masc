@@ -805,14 +805,26 @@ let exact_snapshot_of_value ~expected_session_id checkpoint =
         ~canonical_bytes:(Yojson.Safe.to_string json) checkpoint)
 ;;
 
+(* The reference is a SHA-256 over the whole canonical file, 13-109 MB, which
+   costs as much CPU as the decode. Both run in the one pool job: hashed on the
+   calling fiber, every save and every source check stalled the scheduler
+   domain for the length of the file. The job answers the decoded value apart
+   from the snapshot so a caller can still publish the summary of a value that
+   decoded but whose identity failed. *)
+let decode_exact_snapshot_off_scheduler ~expected_session_id canonical_bytes =
+  offload_checkpoint_cpu (fun () ->
+    match Agent_core.Checkpoint.of_string canonical_bytes with
+    | Error error -> Error error
+    | Ok checkpoint ->
+      Ok
+        ( checkpoint
+        , exact_snapshot_of_checkpoint ~expected_session_id ~canonical_bytes checkpoint ))
+;;
+
 let exact_snapshot_of_canonical_bytes ~expected_session_id canonical_bytes =
-  match decode_checkpoint_off_scheduler canonical_bytes with
+  match decode_exact_snapshot_off_scheduler ~expected_session_id canonical_bytes with
   | Error error -> Error (Ref_read_failed (classify_core_error error))
-  | Ok checkpoint ->
-    exact_snapshot_of_checkpoint
-      ~expected_session_id
-      ~canonical_bytes
-      checkpoint
+  | Ok (_, snapshot) -> snapshot
 ;;
 
 let load_ref_locked ~session_dir ~expected_session_id =
@@ -821,14 +833,18 @@ let load_ref_locked ~session_dir ~expected_session_id =
       ~session_dir
       ~session_id:(Keeper_id.Trace_id.to_string expected_session_id)
   in
-  match load_canonical_bytes_and_checkpoint_strict canonical_path with
+  match load_canonical_bytes_strict canonical_path with
   | Error error -> Error (Ref_read_failed error)
   | Ok None -> Error Ref_not_found
-  | Ok (Some (canonical_bytes, checkpoint)) ->
-    exact_snapshot_of_checkpoint
-      ~expected_session_id
-      ~canonical_bytes
-      checkpoint
+  | Ok (Some (identity_before, canonical_bytes)) ->
+    (match decode_exact_snapshot_off_scheduler ~expected_session_id canonical_bytes with
+     | Error error -> Error (Ref_read_failed (classify_core_error error))
+     | Ok (checkpoint, snapshot) ->
+       publish_summary_after_parse
+         ~canonical_path
+         ~identity_before:(Some identity_before)
+         checkpoint;
+       snapshot)
 
 let load_agent_core_exact_snapshot ~session_dir ~session_id =
   match Keeper_id.Trace_id.of_string session_id with
@@ -881,11 +897,12 @@ let save_agent_core_if_source_with
     ~session_dir
     ~(expected_source_ref : Keeper_checkpoint_ref.t)
     (candidate : Agent_core.Checkpoint.t) =
-  let candidate_bytes =
+  let candidate_bytes, candidate_identity =
     offload_checkpoint_cpu (fun () ->
-      Yojson.Safe.to_string (Agent_core.Checkpoint.to_json candidate))
+      let bytes = Yojson.Safe.to_string (Agent_core.Checkpoint.to_json candidate) in
+      bytes, checkpoint_ref_of_canonical_bytes bytes candidate)
   in
-  match checkpoint_ref_of_canonical_bytes candidate_bytes candidate with
+  match candidate_identity with
   | Error error -> not_installed (Candidate_identity_invalid error)
   | Ok candidate_ref
     when not
@@ -1004,9 +1021,10 @@ let save_agent_core_if_source ~session_dir ~expected_source_ref candidate =
 ;;
 
 let save_agent_core_if_absent ~session_dir candidate =
-  let bytes = offload_checkpoint_cpu (fun () ->
-    Agent_core.Checkpoint.to_json candidate |> Yojson.Safe.to_string) in
-  match checkpoint_ref_of_canonical_bytes bytes candidate with
+  let candidate_identity = offload_checkpoint_cpu (fun () ->
+    let bytes = Agent_core.Checkpoint.to_json candidate |> Yojson.Safe.to_string in
+    checkpoint_ref_of_canonical_bytes bytes candidate) in
+  match candidate_identity with
   | Error error -> not_installed (Candidate_identity_invalid error)
   | Ok candidate_ref ->
     save_agent_core_if_source_with
@@ -1064,7 +1082,7 @@ let find_exact_snapshot_for_retention ~session_dir ~reference =
              | Error error -> Error (unavailable (Fs_compat.owned_regular_file_read_error_to_string error))
              | Ok None -> find rest
              | Ok (Some bytes) ->
-               if offload_checkpoint_cpu (fun () -> Digestif.SHA256.(digest_string bytes |> to_hex)) <> reference.sha256 then find rest
+               if offload_checkpoint_cpu (fun () -> Keeper_checkpoint_ref.sha256_of_canonical_bytes bytes) <> reference.sha256 then find rest
                else match exact_snapshot_of_canonical_bytes ~expected_session_id:reference.trace_id bytes with
                  | Error error -> Error (Source_unavailable error)
                  | Ok snapshot when Keeper_checkpoint_ref.equal reference snapshot.reference -> Ok snapshot
@@ -1234,6 +1252,7 @@ let save_outcome_after_write ~session_dir ~canonical_path ~known ckpt =
 
 let save_agent_core_classified_typed
     ~(session_dir : string)
+    ~(encoding_memo : Agent_core.Checkpoint.encoding_memo)
     (ckpt : Agent_core.Checkpoint.t)
   : (save_agent_core_outcome, save_agent_core_error) result =
   match Keeper_transcript_unit.validate ckpt.messages with
@@ -1288,11 +1307,11 @@ let save_agent_core_classified_typed
         let known = Option.map (fun (w : watermark) -> w.turn_count) existing in
         let ownership_root = Filename.dirname session_dir in
         let write payload =
-          Keeper_fs.save_json_durable_atomic_from
+          Keeper_fs.save_encoded_durable_atomic_from
             ~ownership_root
-            ~pretty:false
             canonical_path
-            (fun () -> Agent_core.Checkpoint.to_json payload)
+            (fun () ->
+               Agent_core.Checkpoint.to_string_with_encoding_memo encoding_memo payload)
         in
         (match write ckpt with
          | Ok () -> save_outcome_after_write ~session_dir ~canonical_path ~known ckpt
@@ -1320,7 +1339,17 @@ let save_agent_core_classified_typed
                 save_outcome_after_write ~session_dir ~canonical_path ~known recovered))
          | Error error -> Error (Canonical_write_failed error)))
 
+let save_agent_core_classified_with_encoding_memo
+    ~(session_dir : string)
+    ~(encoding_memo : Agent_core.Checkpoint.encoding_memo)
+    (ckpt : Agent_core.Checkpoint.t)
+  : (save_agent_core_outcome, string) result =
+  save_agent_core_classified_typed ~session_dir ~encoding_memo ckpt
+  |> Result.map_error save_agent_core_error_to_string
+
 let save_agent_core_classified ~(session_dir : string) (ckpt : Agent_core.Checkpoint.t)
   : (save_agent_core_outcome, string) result =
-  save_agent_core_classified_typed ~session_dir ckpt
-  |> Result.map_error save_agent_core_error_to_string
+  save_agent_core_classified_with_encoding_memo
+    ~session_dir
+    ~encoding_memo:(Agent_core.Checkpoint.create_encoding_memo ())
+    ckpt

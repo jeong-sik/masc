@@ -121,31 +121,12 @@ function quietReasonLabel(
 
 function nextActionLabel(path: KeeperDiagnostic['next_action_path']): string {
   switch (path) {
-    case 'auto_restart':
-      return 'auto restart'
     case 'recover':
       return 'recover'
     case 'probe':
       return 'probe'
     case 'direct_message':
       return 'message'
-  }
-}
-
-function continuityStateLabel(state?: KeeperDiagnostic['continuity_state']): string | null {
-  switch (state) {
-    case 'healthy':
-      return 'healthy'
-    case 'recovering':
-      return 'recovering'
-    case 'disabled':
-      return 'disabled'
-    case 'not_running':
-      return 'not running'
-    case 'offline':
-      return 'offline'
-    default:
-      return null
   }
 }
 
@@ -325,9 +306,6 @@ export function KeeperDiagnosticSummary({
         <//>
       </div>
       <div class="flex flex-wrap gap-1.5 mb-2 v2-monitoring-row">
-        ${continuityStateLabel(diagnostic?.continuity_state)
-          ? html`<${DiagChip} label=${continuityStateLabel(diagnostic?.continuity_state)} />`
-          : null}
         ${diagnostic?.health_state
           ? html`<${DiagChip} label=${diagnostic.health_state} />`
           : null}

@@ -23,7 +23,7 @@
 
 let dashboard_shell_paths_json (config : Workspace.config) : Yojson.Safe.t =
   Server_base_path_diagnostics.detect
-    ?input_base_path:((Host_config.from_env ()).base_path_raw)
+    ?input_base_path:(Server_startup_state.input_base_path ())
     ?env_masc_base_path:((Host_config.from_env ()).base_path_raw)
     ~effective_base_path:config.base_path
     ~effective_masc_root:(Workspace.masc_root_dir config)

@@ -268,16 +268,6 @@ max-concurrent = 1
   | Ok () -> ()
   | Error err -> Alcotest.failf "Runtime.init_default failed: %s" err
 
-let append_heartbeat_snapshot config keeper_name ~timestamp ~timestamp_unix =
-  Dated_jsonl.append
-    (Keeper_types_support.keeper_metrics_store config keeper_name)
-    (`Assoc
-      (Keeper_metrics_record.fields Keeper_metrics_record.Heartbeat
-       @ [ "ts", `String timestamp
-         ; "ts_unix", `Float timestamp_unix
-         ; "name", `String keeper_name
-         ]))
-
 let test_snapshot_keeps_context_unobserved_and_usage_separate () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -346,12 +336,6 @@ let test_snapshot_keeps_context_unobserved_and_usage_separate () =
             };
         }
       in
-      let heartbeat_timestamp = "2026-08-12T01:02:03Z" in
-      append_heartbeat_snapshot
-        config
-        keeper_name
-        ~timestamp:heartbeat_timestamp
-        ~timestamp_unix:1_786_499_323.0;
       (match
          Keeper_owner_registry.commit_turn_runtime
            ~base_path:config.base_path
@@ -395,11 +379,6 @@ let test_snapshot_keeps_context_unobserved_and_usage_separate () =
       Alcotest.(check (float 0.1)) "summary snapshot cadence is projected" 300.0
         Yojson.Safe.Util.(
           keeper |> member "keeper_snapshot_interval_s" |> to_float);
-      Alcotest.(check (float 0.1)) "summary stale window is projected" 360.0
-        Yojson.Safe.Util.(keeper |> member "heartbeat_stale_after_s" |> to_float);
-      Alcotest.(check string) "summary heartbeat comes from persisted producer"
-        heartbeat_timestamp
-        Yojson.Safe.Util.(keeper |> member "last_heartbeat" |> to_string);
       Alcotest.(check string) "missing owner remains explicit" "not_observed"
         Yojson.Safe.Util.(
           keeper
@@ -508,12 +487,6 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
             ("error", `Assoc [ ("kind", `String "runtime") ]);
             ("ended_at", `String (Masc_domain.now_iso ()));
           ]);
-      let heartbeat_timestamp = "2026-08-12T02:03:04Z" in
-      append_heartbeat_snapshot
-        config
-        keeper_name
-        ~timestamp:heartbeat_timestamp
-        ~timestamp_unix:1_786_502_584.0;
       Operator_control.invalidate_snapshot_cache ();
       let snapshot =
         Operator_control.snapshot_json ~view:"summary" ~include_messages:false
@@ -533,9 +506,6 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
         (keeper |> member "runtime_blocker_class" |> to_string);
       Alcotest.(check bool) "attention surfaced" true
         (keeper |> member "needs_attention" |> to_bool);
-      Alcotest.(check string) "paused lightweight heartbeat is persisted truth"
-        heartbeat_timestamp
-        (keeper |> member "last_heartbeat" |> to_string);
       let trust = keeper |> member "runtime_trust" in
       Alcotest.(check string) "trust disposition blocks" "Blocked"
         (trust |> member "disposition" |> to_string);
@@ -566,141 +536,108 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
       Alcotest.(check string) "full pause state" "paused"
         (full_keeper |> member "pause_state" |> to_string);
       Alcotest.(check string) "full paused pipeline" "paused"
-        (full_keeper |> member "pipeline_stage" |> to_string);
-      Alcotest.(check string) "full paused heartbeat is persisted truth"
-        heartbeat_timestamp
-        (full_keeper |> member "last_heartbeat" |> to_string))
+        (full_keeper |> member "pipeline_stage" |> to_string))
 
-(* PR #28216 regression: an unreadable heartbeat ledger must not be relabeled
-   as an absent/missing heartbeat.  Corrupt the metrics ledger with an invalid
-   month directory so [Keeper_heartbeat_persisted_snapshot.latest] fails, then
-   assert the operator row surfaces [heartbeat_observation_error] and keeps
-   [last_heartbeat] null instead of substituting a fallback. *)
-let test_lightweight_snapshot_surfaces_heartbeat_read_error () =
-  Eio_main.run @@ fun env ->
-  ensure_fs env;
-  Eio.Switch.run @@ fun sw ->
-  let base_dir = temp_dir () in
-  let keeper_name = "heartbeat-read-error" in
-  Fun.protect
-    ~finally:(fun () ->
-      Keeper_keepalive.stop_keepalive keeper_name;
-      Keeper_registry.For_testing.clear ();
-      Keeper_runtime.reset_test_state base_dir;
-      cleanup_dir base_dir)
-    (fun () ->
-      let config = Workspace.default_config base_dir in
-      init_runtime_default_for_snapshot base_dir;
-      ignore (Workspace.init config ~agent_name:(Some "operator"));
-      let meta =
-        match
-          Masc_test_deps.meta_of_json_fixture
-            (`Assoc
-              [ ("name", `String keeper_name)
-              ; ("trace_id", `String "trace-heartbeat-read-error")
-              ])
-        with
-        | Ok meta -> { meta with paused = true }
-        | Error err -> Alcotest.fail ("keeper meta fixture failed: " ^ err)
-      in
-      (match Keeper_meta_store.replace_snapshot config meta with
-       | Ok () -> ()
-       | Error err -> Alcotest.fail err);
-      (* Corrupt the heartbeat metrics ledger: an invalid month directory is a
-         layout violation, so the persisted-snapshot read returns an error. *)
-      let metrics_dir =
-        Keeper_types_support.keeper_metrics_dir config keeper_name
-      in
-      let rec mkdir_p path =
-        if not (Sys.file_exists path)
-        then (
-          mkdir_p (Filename.dirname path);
-          Unix.mkdir path 0o755)
-      in
-      mkdir_p (Filename.concat metrics_dir "2026-13");
-      Operator_control.invalidate_snapshot_cache ();
-      let snapshot =
-        Operator_control.snapshot_json ~view:"summary" ~include_messages:false
-          ~include_keepers:true ~include_summary_fields:false
-          ~lightweight_summary:true
-          (operator_ctx env sw config "operator")
-      in
-      let open Yojson.Safe.Util in
-      let keeper =
-        snapshot |> member "keepers" |> member "items" |> to_list
-        |> List.find_opt (fun row -> row |> member "name" |> to_string = keeper_name)
-        |> Option.value ~default:`Null
-      in
-      Alcotest.(check bool) "keeper present" true (keeper <> `Null);
-      Alcotest.(check bool) "last_heartbeat is not relabeled" true
-        (keeper |> member "last_heartbeat" = `Null);
-      Alcotest.(check bool) "heartbeat observation error surfaced" true
-        (keeper |> member "heartbeat_observation_error" <> `Null))
+let health_projection_meta ~total_turns =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+        [ "name", `String "health-projection"
+        ; "trace_id", `String "trace-health-projection"
+        ; "total_turns", `Int total_turns
+        ; "activation_mode", `String "autonomous"
+        ])
+  with
+  | Ok meta -> meta
+  | Error error -> Alcotest.fail error
 
-let test_diagnostic_uses_persisted_heartbeat_freshness () =
-  Eio_main.run @@ fun env ->
-  ensure_fs env;
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_dir)
-    (fun () ->
-      let config = Workspace.default_config base_dir in
-      let keeper_name = "heartbeat-health" in
-      let now_ts = Unix.gettimeofday () in
-      let heartbeat_ts = now_ts -. 30.0 in
-      let heartbeat_timestamp =
-        Masc_domain.iso8601_of_unix_seconds heartbeat_ts
-      in
-      let meta =
-        match
-          Masc_test_deps.meta_of_json_fixture
-            (`Assoc
-              [ "name", `String keeper_name
-              ; "trace_id", `String "trace-heartbeat-health"
-              ; "total_turns", `Int 1
-              ])
-        with
-        | Ok meta -> meta
-        | Error error -> Alcotest.fail error
-      in
-      append_heartbeat_snapshot
-        config
-        keeper_name
-        ~timestamp:heartbeat_timestamp
-        ~timestamp_unix:heartbeat_ts;
+let health_projection_diagnostic ~total_turns ~phase =
+  Keeper_status_runtime.keeper_diagnostic_json
+    ~meta:(health_projection_meta ~total_turns)
+    ~phase
+    ~history_items:[]
+    ~now_ts:(Unix.gettimeofday ())
+
+(* Health is a projection of the phase and the turn history: a phase that
+   admits no turn reads offline, Running without a turn yet reads idle,
+   Running with a turn behind it reads healthy, and Failing reads failing
+   whatever its history. Nothing on disk is read for it. *)
+let test_diagnostic_health_is_a_projection_of_phase_and_turns () =
+  let open Yojson.Safe.Util in
+  let health ~total_turns ~phase =
+    health_projection_diagnostic ~total_turns ~phase
+    |> member "health_state"
+    |> to_string
+  in
+  Alcotest.(check string) "a keeper with no registry entry reads offline"
+    "offline"
+    (health ~total_turns:1 ~phase:None);
+  Alcotest.(check string) "running without a turn yet reads idle" "idle"
+    (health ~total_turns:0 ~phase:(Some Keeper_state_machine.Running));
+  Alcotest.(check string) "running with a turn behind it reads healthy"
+    "healthy"
+    (health ~total_turns:1 ~phase:(Some Keeper_state_machine.Running));
+  List.iter
+    (fun total_turns ->
+      Alcotest.(check string)
+        (Printf.sprintf "failing with %d turns behind it reads failing"
+           total_turns)
+        "failing"
+        (health ~total_turns ~phase:(Some Keeper_state_machine.Failing)))
+    [ 0; 1 ];
+  (* Every phase, so the enumeration in the projection and the state
+     machine's own [can_execute_turn] cannot drift apart: offline is exactly
+     the phases that admit no turn, and the published [keepalive_running]
+     is that same answer. *)
+  List.iter
+    (fun phase ->
+      let label = Keeper_state_machine.phase_to_string phase in
+      let admits_turn = Keeper_state_machine.can_execute_turn phase in
       let diagnostic =
-        Keeper_status_runtime.keeper_diagnostic_json
-          ~config
-          ~meta
-          ~keepalive_running:true
-          ~history_items:[]
-          ~now_ts
+        health_projection_diagnostic ~total_turns:1 ~phase:(Some phase)
       in
-      let open Yojson.Safe.Util in
-      Alcotest.(check string) "fresh heartbeat keeps runtime healthy"
-        "healthy"
-        (diagnostic |> member "health_state" |> to_string);
-      Alcotest.(check string) "diagnostic exposes persisted heartbeat"
-        heartbeat_timestamp
-        (diagnostic |> member "last_heartbeat" |> to_string);
-      let active_keeper_name = "active-health" in
-      let active_meta = { meta with name = active_keeper_name } in
-      append_heartbeat_snapshot
-        config
-        active_keeper_name
-        ~timestamp:(Masc_domain.iso8601_of_unix_seconds (now_ts -. 900.0))
-        ~timestamp_unix:(now_ts -. 900.0);
-      let active_diagnostic =
-        Keeper_status_runtime.keeper_diagnostic_json
-          ~config
-          ~meta:active_meta
-          ~keepalive_running:true
-          ~history_items:[]
-          ~now_ts
-      in
-      Alcotest.(check string) "stale heartbeat stays visible"
-        "stale"
-        (active_diagnostic |> member "health_state" |> to_string))
+      Alcotest.(check bool)
+        (label ^ " reads offline exactly when it admits no turn")
+        (not admits_turn)
+        (String.equal
+           (diagnostic |> member "health_state" |> to_string)
+           "offline");
+      Alcotest.(check bool)
+        (label ^ " publishes keepalive_running as the phase answers it")
+        admits_turn
+        (diagnostic |> member "keepalive_running" |> to_bool))
+    Keeper_state_machine.all_phases
+
+(* A failing keeper is told to read its error first: the Failing phase says its
+   turns fail, not that a restart fixes them. Its restart stays available,
+   because the operator's keeper_recover action skips only keepers whose
+   diagnostic is not [recoverable]. The same keeper in Running is the contrast:
+   it is sent a message and nothing about its history makes it recoverable. *)
+let test_failing_keeper_is_probed_and_stays_recoverable () =
+  let open Yojson.Safe.Util in
+  let failing =
+    health_projection_diagnostic ~total_turns:4
+      ~phase:(Some Keeper_state_machine.Failing)
+  in
+  let running =
+    health_projection_diagnostic ~total_turns:4
+      ~phase:(Some Keeper_state_machine.Running)
+  in
+  Alcotest.(check string) "a failing keeper's next action is probe"
+    "probe"
+    (failing |> member "next_action_path" |> to_string);
+  Alcotest.(check bool) "a failing keeper is still recoverable" true
+    (failing |> member "recoverable" |> to_bool);
+  Alcotest.(check bool) "its keepalive is still running" true
+    (failing |> member "keepalive_running" |> to_bool);
+  Alcotest.(check string) "its status word stays active: it is still turning"
+    "active"
+    (Keeper_status_runtime.keeper_surface_status ~diagnostic:failing);
+  Alcotest.(check string) "the same keeper in Running is sent a message"
+    "direct_message"
+    (running |> member "next_action_path" |> to_string);
+  Alcotest.(check bool) "and is not recoverable" false
+    (running |> member "recoverable" |> to_bool)
 
 let test_digest_workspace_includes_keeper_runtime_attention () =
   Eio_main.run @@ fun env ->
@@ -1603,13 +1540,13 @@ let () =
       ( "runtime status"
       , [
           Alcotest.test_case
-            "diagnostic uses persisted heartbeat freshness"
+            "diagnostic health is a projection of phase and turns"
             `Quick
-            test_diagnostic_uses_persisted_heartbeat_freshness;
+            test_diagnostic_health_is_a_projection_of_phase_and_turns;
           Alcotest.test_case
-            "lightweight snapshot surfaces heartbeat read error"
+            "a failing keeper is probed and stays recoverable"
             `Quick
-            test_lightweight_snapshot_surfaces_heartbeat_read_error;
+            test_failing_keeper_is_probed_and_stays_recoverable;
         ] );
       ( "context metrics ledger"
       , [ Alcotest.test_case

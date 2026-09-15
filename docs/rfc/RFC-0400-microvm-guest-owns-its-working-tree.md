@@ -185,8 +185,7 @@ start argv. Config and identity stay read-only mounts, as today.
   volume. `Keeper_turn_sandbox_runtime`'s `docker exec` entrypoints refuse a
   microvm keeper (`microvm_exec_is_remote`), and `spawn` refuses it as it
   refuses `remote_ssh`.
-- The config env (`MASC_BASE_PATH`, `MASC_BASE_PATH_INPUT`,
-  `MASC_CONFIG_DIR`) that the Docker exec passes as `--env` travels as the
+- The config env (`MASC_BASE_PATH`, `MASC_CONFIG_DIR`) that the Docker exec passes as `--env` travels as the
   endpoint's injected env; the shim config written at boot allowlists those
   names (`env_allowlist=`). One list, `config_env_names`, feeds both.
 - The RFC-0399 `_build` link machinery, its status rows, the build volume

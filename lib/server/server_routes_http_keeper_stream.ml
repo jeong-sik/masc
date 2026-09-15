@@ -1365,13 +1365,12 @@ let canonical_reply_payload_of_body ~redact_text body =
   in
   let* external_effect_target =
     (* The outcome and the terminal-effect receipt are decided from the same
-       [terminal_effect_state] (keeper_agent_run.ml), so an
-       External_effect_completed payload carries exactly one receipt proof:
-       the surface-post delivery target, or a memory-write revision
-       (keeper_turn.ml terminal_effect_fields). The decoder holds both
-       directions for each key - present iff that outcome - so [Some] here
-       is the proof the External_effect_completed event needs, and [None] on
-       that outcome means the completed effect was a memory write. *)
+       [terminal_effect_state] (keeper_agent_run.ml), and the only terminal
+       effect receipt is a surface post (keeper_turn.ml
+       terminal_effect_fields). The decoder holds both directions - the
+       delivery target is present iff the outcome is Terminal_effect_settled -
+       so [Some] here is the proof the External_effect_completed event
+       needs. *)
     let completed_external_effect =
       Keeper_turn_outcome.equal turn_outcome
         Keeper_turn_outcome.Terminal_effect_settled
@@ -1382,38 +1381,13 @@ let canonical_reply_payload_of_body ~redact_text body =
            if String.equal field key then Some value else None)
         fields
     in
-    let* memory_revision =
-      match values_of Keeper_tool_execution.memory_revision_wire_key with
-      | [] -> Ok None
-      | [ value ] ->
-        if not completed_external_effect
-        then
-          Error
-            (Invalid_external_effect_target
-               (Printf.sprintf
-                  "%s present on turn_outcome %s"
-                  Keeper_tool_execution.memory_revision_wire_key
-                  (Keeper_turn_outcome.to_label turn_outcome)))
-        else (
-          match value with
-          | `Int revision -> Ok (Some revision)
-          | _ ->
-            Error
-              (Invalid_payload_field_type
-                 Keeper_tool_execution.memory_revision_wire_key))
-      | _ ->
-        Error
-          (Duplicate_payload_field
-             Keeper_tool_execution.memory_revision_wire_key)
-    in
     match values_of Keeper_surface_post.delivery_target_wire_key with
     | [] ->
-      (match completed_external_effect, memory_revision with
-       | false, _ -> Ok None
-       | true, Some _ -> Ok None
-       | true, None ->
-         Error
-           (Missing_payload_field Keeper_surface_post.delivery_target_wire_key))
+      if completed_external_effect
+      then
+        Error
+          (Missing_payload_field Keeper_surface_post.delivery_target_wire_key)
+      else Ok None
     | [ value ] ->
       if not completed_external_effect
       then
@@ -1422,14 +1396,6 @@ let canonical_reply_payload_of_body ~redact_text body =
              (Printf.sprintf
                 "present on turn_outcome %s"
                 (Keeper_turn_outcome.to_label turn_outcome)))
-      else if Option.is_some memory_revision
-      then
-        Error
-          (Invalid_external_effect_target
-             (Printf.sprintf
-                "carries both %s and %s"
-                Keeper_surface_post.delivery_target_wire_key
-                Keeper_tool_execution.memory_revision_wire_key))
       else (
         match Keeper_surface_post.delivery_target_of_yojson value with
         | Ok target -> Ok (Some target)
@@ -2837,29 +2803,25 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
               (* See terminal delivery race: the first resolver is authoritative. *)
               ignore (Eio.Promise.try_resolve resolve_delivery result : bool)
             in
-            (* Every adapter reads the bus until the publisher closes it. A
-               terminal event says what to deliver; it does not end the read,
-               because a reader that leaves early strands the publisher on a
-               full bus and the turn never settles. *)
-            let drain_events () =
-              let rec loop () =
-                match Keeper_chat_events.subscribe events with
-                | Keeper_chat_events.Closed -> ()
-                | Keeper_chat_events.Next _ -> loop ()
-              in
-              loop ()
-            in
             let no_terminal_before_close =
               "Keeper turn closed its event bus without a terminal event"
             in
+            (* Whatever ends an adapter — a terminal event, a failure, or an
+               operator interrupt — it declares its departure on the way out,
+               and the bus stops suspending the publisher on a full window.
+               That is what lets an adapter return as soon as it is done
+               instead of reading events it does not want. [reader_gone]
+               suspends nowhere, so the cancelled arm reaches it too. *)
             let fork_adapter run =
               Eio.Fiber.fork ~sw (fun () ->
-                match run () with
-                | () -> ()
-                | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-                | exception exn ->
-                  settle_delivery (Error (Printexc.to_string exn));
-                  drain_events ())
+                Fun.protect
+                  ~finally:(fun () -> Keeper_chat_events.reader_gone events)
+                  (fun () ->
+                     match run () with
+                     | () -> ()
+                     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+                     | exception exn ->
+                       settle_delivery (Error (Printexc.to_string exn))))
             in
             (match operation_payload.source.continuation_channel with
              | Keeper_continuation_channel.Dashboard _ ->
@@ -2909,7 +2871,7 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                       ())
                 | None ->
                   settle_delivery (Error "DISCORD_BOT_TOKEN is not configured");
-                  fork_adapter drain_events)
+                  Keeper_chat_events.reader_gone events)
              | Keeper_continuation_channel.Slack { channel_id; thread_ts; _ } ->
                (match Env_config_slack.bot_token_opt () with
                 | Some token ->
@@ -2929,7 +2891,7 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                       ())
                 | None ->
                   settle_delivery (Error "SLACK_BOT_TOKEN is not configured");
-                  fork_adapter drain_events)
+                  Keeper_chat_events.reader_gone events)
              (* The asker is another Keeper, so the answer goes onto its own
                 event queue rather than to a screen. Unlike the connector
                 adapters there is nothing to stream: [Reply_details] carries
@@ -2948,7 +2910,7 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                (match Channel_gate_imessage_state.reply_target ~chat_guid with
                 | Error detail ->
                   settle_delivery (Error detail);
-                  fork_adapter drain_events
+                  Keeper_chat_events.reader_gone events
                 | Ok target_chat_guid ->
                   fork_adapter (fun () ->
                     let rec loop reply =
@@ -2979,11 +2941,9 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                              Channel_gate_imessage_state.send_message
                                ~chat_guid:target_chat_guid ~content:reply ()
                              |> Result.map_error
-                                  Imessage_applescript.error_to_string);
-                        drain_events ()
+                                  Imessage_applescript.error_to_string)
                       | Keeper_chat_events.Next (Keeper_chat_events.Event_error { message }) ->
-                        settle_delivery (Error message);
-                        drain_events ()
+                        settle_delivery (Error message)
                       | Keeper_chat_events.Next _ -> loop reply
                     in
                     loop None))
@@ -3024,17 +2984,15 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                       | Ok None -> commit
                           (match reply with
                            | Some reply -> Keeper_event_queue.Delegate_replied reply
-                           | None -> Keeper_event_queue.Delegate_no_reply));
-                     drain_events ()
+                           | None -> Keeper_event_queue.Delegate_no_reply))
                    | Keeper_chat_events.Next (Keeper_chat_events.Event_error { message }) ->
-                     commit (Keeper_event_queue.Delegate_failed message);
-                     drain_events ()
+                     commit (Keeper_event_queue.Delegate_failed message)
                    | Keeper_chat_events.Next _ -> loop reply
                  in
                  loop None)
              | Keeper_continuation_channel.Unrouted { reason } ->
                settle_delivery (Error ("unrouted Keeper chat operation: " ^ reason));
-               fork_adapter drain_events);
+               Keeper_chat_events.reader_gone events);
             let agent_name =
               if has_external_speaker payload
               then

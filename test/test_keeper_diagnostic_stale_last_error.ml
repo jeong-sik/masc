@@ -6,13 +6,6 @@ open Masc
 
 let now_ts = 1_781_100_000.0
 
-let diagnostic_config =
-  Workspace.default_config
-    (Filename.concat
-       (Filename.get_temp_dir_name ())
-       (Printf.sprintf "keeper-diagnostic-%d" (Unix.getpid ())))
-;;
-
 let member key json =
   match json with
   | `Assoc fields -> List.assoc_opt key fields
@@ -38,17 +31,18 @@ let meta_with_persisted_reason ~last_turn_ts =
   | Error error -> Alcotest.failf "meta_of_json_fixture failed: %s" error
 ;;
 
-let diagnostic ~keepalive_running ~last_turn_ts =
+let diagnostic ~phase ~last_turn_ts =
   Keeper_status_runtime.keeper_diagnostic_json
-    ~config:diagnostic_config
     ~meta:(meta_with_persisted_reason ~last_turn_ts)
-    ~keepalive_running
+    ~phase:(Some phase)
     ~history_items:[]
     ~now_ts
 ;;
 
 let test_proactive_reason_is_not_reclassified_as_error () =
-  let row = diagnostic ~keepalive_running:true ~last_turn_ts:(now_ts -. 120.0) in
+  let row =
+    diagnostic ~phase:Keeper_state_machine.Running ~last_turn_ts:(now_ts -. 120.0)
+  in
   Alcotest.(check bool)
     "display reason is not an error authority"
     true
@@ -56,7 +50,9 @@ let test_proactive_reason_is_not_reclassified_as_error () =
 ;;
 
 let test_running_keeper_uses_keeper_health_evidence () =
-  let row = diagnostic ~keepalive_running:true ~last_turn_ts:(now_ts -. 120.0) in
+  let row =
+    diagnostic ~phase:Keeper_state_machine.Running ~last_turn_ts:(now_ts -. 120.0)
+  in
   Alcotest.(check bool)
     "running keeper is healthy"
     true
@@ -64,7 +60,9 @@ let test_running_keeper_uses_keeper_health_evidence () =
 ;;
 
 let test_stopped_keeper_is_offline () =
-  let row = diagnostic ~keepalive_running:false ~last_turn_ts:(now_ts -. 120.0) in
+  let row =
+    diagnostic ~phase:Keeper_state_machine.Stopped ~last_turn_ts:(now_ts -. 120.0)
+  in
   Alcotest.(check bool)
     "stopped keeper is offline"
     true

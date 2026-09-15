@@ -95,7 +95,7 @@ let test_timeout_releases_session () =
     Eio.Switch.run (fun sw ->
       Lane.install_automation_executor (Some (Driver.execute driver));
       Eio.Switch.on_release sw (fun () -> Lane.install_automation_executor None);
-      let read () = Lane.issue ~lane_name:"automation"
+      let read () = Lane.issue_automation
           ~verb:(Lane.Page_read {tab_id=None;max_chars=None}) ~timeout_sec:0.01 in
       (match read () with Lane.Timed_out -> () | _ -> fail "native deadline not enforced");
       check bool "I/O cancelled before timeout returns" true !cancelled;
@@ -197,32 +197,72 @@ let test_browser_configuration () =
     | Error detail -> fail detail | Ok toml -> Masc.Browser_configuration.parse toml in
   (match parse "" with Ok Masc.Browser_configuration.Disabled -> () | _ -> fail "missing browser config");
   (match parse {|[browser]
-webdriver_url = "http://127.0.0.1:4444/"
+geckodriver = "/test/geckodriver"
 binary = "/test/Zen.app"
 |} with
-   | Ok (Masc.Browser_configuration.Webdriver {endpoint="http://127.0.0.1:4444";binary=Some "/test/Zen.app"}) -> ()
+   | Ok (Masc.Browser_configuration.Geckodriver {driver="/test/geckodriver";binary=Some "/test/Zen.app"}) -> ()
    | _ -> fail "explicit browser configuration lost");
-  List.iter (fun text -> check bool "invalid browser config is refused" true (Result.is_error (parse text)))
-    [{|[browser]
-binary = "/test/Zen.app"|}; {|[browser]
-webdriver_url = "http://example.org:4444"|}; {|[browser]
-webdriver_url = "http://127.0.0.1:4444"
-binary = "Zen.app"|}; {|[browser]
-webdriver_url = "http://127.0.0.1:4444"
-binary = false|}];
-  (* The error message says "loopback HTTP origin" and the check used to list
-     three literals, which is narrower. Masc_network_defaults.is_loopback_host
-     decides it now: the whole of 127.0.0.0/8 -- a resolver stub on
-     127.0.0.53 is as unreachable from off-host as 127.0.0.1 -- and
-     "localhost" in any case. It still says no to a host that only looks like
-     an address, which a prefix match would have let through. *)
-  List.iter (fun text -> check bool "loopback origin is accepted" true (Result.is_ok (parse text)))
-    [{|[browser]
-webdriver_url = "http://127.0.0.53:4444/"|}; {|[browser]
-webdriver_url = "http://LOCALHOST:4444/"|}];
-  check bool "a host that merely starts with 127. is refused" true
-    (Result.is_error (parse {|[browser]
-webdriver_url = "http://127.invalid:4444/"|}))
+  (match parse {|[browser]
+geckodriver = "/test/geckodriver"
+|} with
+   | Ok (Masc.Browser_configuration.Geckodriver {driver="/test/geckodriver";binary=None}) -> ()
+   | _ -> fail "a driver without a binary lets geckodriver discover the browser");
+  List.iter (fun (why, text) -> check bool why true (Result.is_error (parse text)))
+    [ "a binary needs the driver that launches it", {|[browser]
+binary = "/test/Zen.app"|};
+      "the driver is an absolute path, never a PATH lookup", {|[browser]
+geckodriver = "geckodriver"|};
+      "a relative binary is refused", {|[browser]
+geckodriver = "/test/geckodriver"
+binary = "Zen.app"|};
+      "a non-string binary is refused", {|[browser]
+geckodriver = "/test/geckodriver"
+binary = false|} ]
+
+(* The server owns the driver it starts. On 2026-09-15 a driver started by hand
+   on 2026-09-08 still held the session a dead server opened, and every later
+   server was refused while reporting no open session. What the next server
+   stops is decided from the record and the process table, never from a pid
+   alone: a pid reused by another program is left running. *)
+let test_driver_ownership_record () =
+  let module P = Masc.Browser_driver_process in
+  let owner = { P.pid = 4242; driver = "/ws/.masc/browser-lane/driver/geckodriver" } in
+  (match P.owner_of_string (P.owner_to_string owner) with
+   | Ok read -> check bool "record round-trips" true (read = owner)
+   | Error detail -> fail detail);
+  List.iter (fun text -> check bool "malformed record is refused" true (Result.is_error (P.owner_of_string text)))
+    [ "not json"; {|[4242]|}; {|{"pid":0,"driver":"/x"}|}; {|{"pid":42,"driver":"relative"}|}; {|{"pid":42}|} ];
+  let decision command = P.leftover owner ~command in
+  check bool "the recorded driver still running is stopped" true
+    (decision (Some (owner.driver ^ " --host 127.0.0.1 --port 50931 --websocket-port 0"))
+     = P.Stop_recorded_driver 4242);
+  check bool "a pid now running another program is left alone" true
+    (decision (Some "/usr/bin/vim notes.txt") = P.Not_the_recorded_driver);
+  check bool "a longer path that only starts with the driver is not the driver" true
+    (decision (Some (owner.driver ^ "-old --port 1")) = P.Not_the_recorded_driver);
+  check bool "a pid with no process is nothing to stop" true (decision None = P.Not_the_recorded_driver);
+  let profile_root = P.profile_root ~masc_root:"/ws/.masc" in
+  check string "profiles live under the workspace lane" "/ws/.masc/browser-lane/profiles" profile_root;
+  check (list string) "driver listens on loopback, lets Firefox pick the BiDi port, and keeps profiles under the lane"
+    [ owner.driver; "--host"; "127.0.0.1"; "--port"; "50931"; "--websocket-port"; "0";
+      "--profile-root"; profile_root ]
+    (P.argv ~driver:owner.driver ~port:50931 ~profile_root);
+  (* Process table shape measured 2026-09-15: the driver, the browser it
+     launched, the same browser after it relaunched itself with no parent, a
+     content process of that browser (Zen passes it the same -profile), and
+     browsers of other roots. *)
+  let process_table = String.concat "\n"
+    [ "  68072 " ^ owner.driver ^ " --host 127.0.0.1 --port 64009 --websocket-port 0 --profile-root " ^ profile_root;
+      "  73227 /Applications/Zen.app/Contents/MacOS/zen --marionette -headless --remote-debugging-port 52416 -no-remote -profile " ^ profile_root ^ "/rust_mozprofileGLlAmp";
+      "  74640 /Applications/Zen.app/Contents/MacOS/zen --marionette --remote-debugging-port 9222 -no-remote -profile " ^ profile_root ^ "/rust_mozprofileGLlAmp";
+      "  74809 /Applications/Zen.app/Contents/MacOS/plugin-container.app/Contents/MacOS/plugin-container -parentBuildID 20260904060728 -isForBrowser -prefsHandle 0:53546 -profile " ^ profile_root ^ "/rust_mozprofileGLlAmp org.mozilla.machname.1 tab";
+      "  81000 /Applications/Zen.app/Contents/MacOS/zen --marionette -profile /other/.masc/browser-lane/profiles/rust_mozprofileX";
+      "  81001 /Applications/Zen.app/Contents/MacOS/zen --marionette -profile " ^ profile_root ^ "-old/rust_mozprofileY";
+      "" ] in
+  check (list int) "the launched browser, its relaunch and their content process are ours; the driver and other roots are not"
+    [ 73227; 74640; 74809 ] (P.browsers_using_profile_root ~profile_root ~process_table);
+  check string "record lives beside the lane host"
+    "/ws/.masc/browser-lane/geckodriver-owner.json" (P.owner_record_path ~masc_root:"/ws/.masc")
 
 (* A keeper's first question is whether a session already exists. Every other
    verb answers that only by being refused, which costs a lane round trip and
@@ -231,9 +271,12 @@ webdriver_url = "http://127.invalid:4444/"|}))
 let test_session_status_answers_while_closed () =
   Eio_main.run (fun _ ->
     let calls = ref [] in
+    let driver_answer : (Yojson.Safe.t, Driver.error) result ref =
+      ref (Ok (`Assoc ["ready", `Bool true; "message", `String ""])) in
     let request ~method_ ~path ~body:_ =
       calls := (method_, path) :: !calls;
       match method_, path with
+      | `GET, "/status" -> !driver_answer
       | `POST, "/session" ->
         Ok (`Assoc ["sessionId", `String "owned";
                     "capabilities", `Assoc ["webSocketUrl", `String "ws://localhost:1234/session/owned"]])
@@ -247,9 +290,25 @@ let test_session_status_answers_while_closed () =
          | _ -> fail "status answer carries no data")
       | _ -> fail "status must answer whether or not a session exists"
     in
+    let closed = status () in
     check bool "closed session reports open=false" true
-      (List.assoc_opt "open" (status ()) = Some (`Bool false));
-    check int "status on a closed session contacts no backend" 0 (List.length !calls);
+      (List.assoc_opt "open" closed = Some (`Bool false));
+    (* {"open":false} alone read as a broken lane (2026-09-15). The driver's
+       own readiness says whether open can start a session now. *)
+    check bool "closed session carries the driver's readiness" true
+      (List.assoc_opt "driver" closed
+       = Some (`Assoc ["ready", `Bool true; "message", `String ""]));
+    check bool "status on a closed session asks only the driver's /status" true
+      (!calls = [ (`GET, "/status") ]);
+    driver_answer := Ok (`Assoc ["ready", `Bool false; "message", `String "Session already started"]);
+    check bool "a driver holding a session this record does not own says so" true
+      (List.assoc_opt "driver" (status ())
+       = Some (`Assoc ["ready", `Bool false; "message", `String "Session already started"]));
+    driver_answer := Error (Driver.Transport "connection refused");
+    check bool "a driver that does not answer is reported, and status still answers" true
+      (List.assoc_opt "driver" (status ()) = Some (`Assoc ["error", `String "connection refused"]));
+    driver_answer := Ok (`Assoc ["ready", `Bool true; "message", `String ""]);
+    calls := [];
     ignore (Driver.execute driver (Lane.Session_open {headless = Some true}));
     let opened = status () in
     check bool "open session reports open=true" true
@@ -259,6 +318,8 @@ let test_session_status_answers_while_closed () =
     check bool "open session reports its tab count" true
       (List.assoc_opt "tabs" opened = Some (`Int 0));
     check int "status on an open session adds no backend request" 1 (List.length !calls);
+    check bool "open session status carries no driver probe" true
+      (List.assoc_opt "driver" opened = None);
     check bool "status is a read" true (Lane.verb_is_read Lane.Session_status);
     check bool "status is not offered on the live lane" false
       (Lane.verb_allowed_on_live Lane.Session_status))
@@ -406,6 +467,7 @@ let test_remote_error_is_a_closed_sum () =
           "capabilities", `Assoc ["webSocketUrl", `String "ws://localhost:1234/session/owned"]])
       | `POST, "/session/owned/frame" -> Ok `Null
       | `POST, "/session/owned/url" -> decode "invalid session id"
+      | `GET, "/status" -> Ok (`Assoc ["ready", `Bool true; "message", `String ""])
       | _ -> fail ("unexpected request: " ^ path) in
     let driver = Driver.create ~start_downloads ~request () in
     ignore (Driver.execute driver (Lane.Session_open {headless = Some true}));
@@ -434,4 +496,5 @@ let () = run "native Firefox lane" ["behavior", [
   test_case "deadline cancels I/O and releases the session" `Quick test_timeout_releases_session;
   test_case "shutdown uses a live cleanup transport" `Quick test_shutdown_transport_lifetime;
   test_case "explicit Zen binary never falls back" `Quick test_selected_binary;
-  test_case "browser configuration" `Quick test_browser_configuration]]
+  test_case "browser configuration" `Quick test_browser_configuration;
+  test_case "driver ownership record" `Quick test_driver_ownership_record]]

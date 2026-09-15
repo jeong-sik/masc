@@ -54,10 +54,9 @@ type max_context_resolution =
   { requested_override : int option
   ; primary_budget : int
   ; runtime_budget : int
-  ; runtime_budget_source : Runtime.max_context_source option
+  ; runtime_budget_source : Runtime.max_context_source
     (** Where [runtime_budget] came from (capability catalog, runtime.toml
-        override, or override clamped by capability). [None] only when the
-        legacy ordered-label path fell back to the precomputed default. *)
+        override, or override clamped by capability). *)
   ; requested_context_window : int
   ; effective_budget : int
   }
@@ -106,13 +105,6 @@ val dispatch_keeper_phase_event_result
 
 val generate_trace_id : ?now:float -> unit -> string
 (** {1 Model and Workspace Utilities} *)
-
-val effective_model_labels_for_turn : keeper_meta -> string list
-
-val resolve_max_context_resolution
-  :  requested_override:int option
-  -> string list
-  -> max_context_resolution
 
 val resolve_max_context_resolution_for_runtime_id
   :  requested_override:int option

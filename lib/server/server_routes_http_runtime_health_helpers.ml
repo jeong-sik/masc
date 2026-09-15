@@ -34,7 +34,7 @@ let health_path_diagnostics () =
   | Some state ->
       let config = Mcp_server.workspace_config state in
       Server_base_path_diagnostics.detect
-        ?input_base_path:((Host_config.from_env ()).base_path_raw)
+        ?input_base_path:(Server_startup_state.input_base_path ())
         ?env_masc_base_path:((Host_config.from_env ()).base_path_raw)
         ~effective_base_path:config.base_path
         ~effective_masc_root:(Workspace.masc_root_dir config)
@@ -43,7 +43,7 @@ let health_path_diagnostics () =
       let effective_base_path = default_base_path () in
       let effective_masc_root = Common.masc_dir_from_base_path ~base_path:effective_base_path in
       Server_base_path_diagnostics.detect
-        ?input_base_path:((Host_config.from_env ()).base_path_raw)
+        ?input_base_path:(Server_startup_state.input_base_path ())
         ?env_masc_base_path:((Host_config.from_env ()).base_path_raw)
         ~effective_base_path ~effective_masc_root ()
 

@@ -14,7 +14,6 @@ val keeper_quiet_reason_to_string : keeper_quiet_reason -> string
     is dropped when the diagnostic is normalised. *)
 
 type keeper_next_action_path =
-  | Auto_restart
   | Recover
   | Probe
   | Direct_message
@@ -36,12 +35,6 @@ val keeper_next_action_path_of_string_opt :
 val active_model_of_meta : keeper_meta -> string
 val active_model_label_of_meta : keeper_meta -> string
 val string_of_fiber_health : fiber_health -> string
-val keeper_heartbeat_stale_after_s :
-  keepalive_interval_s:float -> snapshot_interval_s:float -> float
-(** Operator-facing Keeper freshness window. The persisted heartbeat producer
-    is bounded by both the cycle cadence and the snapshot cadence, so the
-    window follows the slower resolved cadence plus one minute of scheduling /
-    transport jitter. The ordinary-agent 120-second floor is preserved. *)
 val keeper_turn_record_freshness_slo_s : keepalive_interval_s:float -> float
 (** Turn-record freshness window.  A record is emitted after a Keeper cycle,
     so the SLO covers the configured sleep cadence plus two minutes of cycle
@@ -93,34 +86,35 @@ val keeper_metric_producer_active : base_path:string -> bool
     turn's lane is in its legitimate inter-cycle cadence sleep. These are the
     two intervals in which the next metrics-ledger append is still owned by a
     live producer even when the prior row exceeds its age-only SLO. *)
+val keepalive_running_of_phase : Keeper_state_machine.phase option -> bool
+(** Whether a keeper's keepalive is running, read from its registry phase:
+    [true] exactly in the phases that may execute a turn (Running and
+    Failing), [false] for every other phase and for a keeper with no registry
+    entry. *)
+
 val keeper_diagnostic_json :
-  config:Workspace.config ->
   meta:keeper_meta ->
-  keepalive_running:bool ->
+  phase:Keeper_state_machine.phase option ->
   history_items:Yojson.Safe.t list ->
   now_ts:float ->
   Yojson.Safe.t
-
-val augment_keeper_diagnostic_json :
-  keepalive_running:bool ->
-  keepalive_started_at:float option ->
-  now_ts:float ->
-  Yojson.Safe.t ->
-  Yojson.Safe.t
+(** [phase] is the keeper's registry phase, [None] when it has no registry
+    entry. [health_state], [keepalive_running] and [recoverable] are all
+    derived from that one value; a caller that also publishes the phase or
+    the liveness should read the phase once and pass the same value here. *)
 
 (** Keeper display status derived from keeper health. Closed so consumers that
     classify it match exhaustively. "paused" is an operator override applied
     above this layer, not a member of this domain. *)
 type surface_status =
   | Surface_active
-  | Surface_inactive
   | Surface_offline
   | Surface_idle
 
 val surface_status_to_string : surface_status -> string
 
 (** Parse a wire/display status string into {!surface_status}; [None] when the
-    value is outside the six labels (e.g. "paused" or drift). *)
+    value is outside the three labels (e.g. "paused" or drift). *)
 val surface_status_of_string_opt : string -> surface_status option
 
 (** The [status] field the operator snapshot publishes: a

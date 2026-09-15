@@ -571,13 +571,6 @@ let adapter_loop_with_transport
     let remaining = min_edit_interval_s -. (now () -. last_edit_time) in
     if remaining > 0.0 then sleep remaining
   in
-  (* After the reply is delivered the bus is read to its close, so the turn's
-     publisher never waits on a reader that already left. *)
-  let rec drain_until_closed () =
-    match Keeper_chat_events.subscribe events with
-    | Keeper_chat_events.Closed -> ()
-    | Keeper_chat_events.Next _ -> drain_until_closed ()
-  in
   let rec loop ~acc_text ~acc_blocks ~run_id_opt ~message_id
       ~last_edit_time ~last_edited_text ~post_attempts_left =
     let continue ?(acc_text = acc_text) ?(acc_blocks = acc_blocks)
@@ -700,7 +693,7 @@ let adapter_loop_with_transport
               (Error (Other "Slack terminal reply contained no text or blocks"))
         end;
         clear_activity ();
-        drain_until_closed ()
+        Keeper_chat_events.reader_gone events
     | External_effect_completed _ ->
         external_effect_completed := true;
         (match streaming_transport, message_id with
@@ -719,7 +712,7 @@ let adapter_loop_with_transport
         in
         on_send_result result;
         clear_activity ();
-        drain_until_closed ()
+        Keeper_chat_events.reader_gone events
     | Run_started { run_id; thread_id = _ } ->
         update_activity "답변을 준비하고 있어요…";
         (* A new run's work is its own; the previous run's trail went out with

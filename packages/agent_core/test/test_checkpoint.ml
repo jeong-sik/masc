@@ -195,6 +195,78 @@ let check_checkpoint_json_contract checkpoint =
        Alcotest.fail ("serializer emitted an undecodable checkpoint: " ^ Error.to_string error))
 ;;
 
+(* 한 턴의 단계별 저장처럼 같은 레코드 뒤에 메시지를 붙여 가며 저장한다. memo 가
+   앞 저장의 인코딩을 다시 써도 바이트는 [to_string] 과 같아야 한다. 값은 같고
+   [-0.0] 만 [0.0] 으로 바뀐 새 레코드는 다시 인코딩돼야 하고, 계약을 어긴 저장이
+   거절된 뒤에도 memo 는 다음 저장에 맞는 바이트를 낸다. *)
+let test_encoding_memo_writes_to_string_bytes () =
+  let open Types in
+  let history =
+    [ message ~metadata:[ "weight", `Float (-0.0) ] User (Text "hello \"quoted\" \xed\x95\x9c")
+    ; { role = Assistant
+      ; content =
+          [ Text "Let me check."
+          ; ToolUse
+              { id = "t1"
+              ; name = "search"
+              ; input = `Assoc [ "q", `String "test"; "limit", `Float 0.5 ]
+              }
+          ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ; message
+        Tool
+        (ToolResult
+           { tool_use_id = "t1"
+           ; content = "found it"
+           ; outcome = reported_tool_failure
+           ; json = Some (`Assoc [ "rows", `Int 3 ])
+           ; content_blocks =
+               Some [ Image { media_type = "image/png"; data = "aW1hZ2U="; source_type = Base64 } ]
+           })
+    ]
+  in
+  let memo = Checkpoint.create_encoding_memo () in
+  let check_same label cp =
+    Alcotest.(check string)
+      label
+      (Checkpoint.to_string cp)
+      (Checkpoint.to_string_with_encoding_memo memo cp)
+  in
+  let checkpoint ~turn_count messages =
+    make_checkpoint ~messages ~tools:[ sample_tool_schema ] ~turn_count ()
+  in
+  check_same "first save" (checkpoint ~turn_count:1 history);
+  let appended = history @ [ message Assistant (Text "done") ] in
+  check_same "a save that appends to the same records" (checkpoint ~turn_count:2 appended);
+  let zero_flipped =
+    List.map
+      (fun (m : message) ->
+         { m with
+           metadata =
+             List.map
+               (fun (key, value) ->
+                  match value with
+                  | `Float _ -> key, `Float 0.0
+                  | other -> key, other)
+               m.metadata
+         })
+      appended
+  in
+  check_same "rebuilt records whose zero changed sign" (checkpoint ~turn_count:3 zero_flipped);
+  let refused =
+    checkpoint
+      ~turn_count:4
+      (zero_flipped @ [ message Assistant (ToolUse { id = ""; name = "read"; input = `Assoc [] }) ])
+  in
+  (match Checkpoint.to_string_with_encoding_memo memo refused with
+   | (_ : string) -> Alcotest.fail "a checkpoint with an empty tool id was written"
+   | exception Invalid_argument _ -> ());
+  check_same "the save after a refusal" (checkpoint ~turn_count:5 zero_flipped)
+;;
+
 let test_image_carriers_remain_canonical () =
   let open Types in
   let images =
@@ -341,6 +413,8 @@ let () =
             | Ok _ -> fail "invalid current checkpoint was serialized")
         ; test_case "to_json_result Ok is serializable and decodable" `Quick (fun () ->
             check_checkpoint_json_contract (make_checkpoint ()))
+        ; test_case "the encoding memo writes the bytes of to_string" `Quick
+            test_encoding_memo_writes_to_string_bytes
         ; test_case "drop_unencodable_json is None for an encodable checkpoint" `Quick (fun () ->
             match Checkpoint.drop_unencodable_json (make_checkpoint ()) with
             | None -> ()

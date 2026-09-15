@@ -7,8 +7,6 @@ module Board_dispatch = Masc.Board_dispatch
 
 open Cmdliner
 
-let default_base_path () = Server_mcp_transport_http.default_base_path ()
-
 let base_path =
   let doc =
     "Workspace root for MASC data. Runtime state lives under <base-path>/.masc; do not pass the .masc directory itself."
@@ -17,18 +15,14 @@ let base_path =
 
 let run_cmd cli_base_path =
   Printexc.record_backtrace true;
-  let resolved_base_path =
-    Server_base_path_guard.resolve_startup_base_path ~cli_base_path
-      ~default_base_path ()
+  let workspace =
+    Server_base_path_guard.exit_on_no_workspace
+      (Server_base_path_guard.startup_root ~cli_base_path)
   in
-  Server_base_path_guard.exit_on_violation
-    (Server_base_path_guard.enforce resolved_base_path);
-  let normalized_base_path = resolved_base_path.normalized_base_path in
-  Unix.putenv "MASC_BASE_PATH_INPUT" resolved_base_path.raw_base_path;
+  let normalized_base_path = workspace.Workspace_root.root in
   Unix.putenv
     "MASC_BASE_PATH_RESOLUTION_SOURCE"
-    (Server_base_path_guard.resolution_source_label
-       resolved_base_path.resolution_source);
+    (Workspace_root.source_label workspace.Workspace_root.source);
   (* Create an explicit missing workspace root, then freeze the canonical
      owner identity before the lease, environment, backend, or runtime sees it. *)
   Fs_compat.mkdir_p normalized_base_path;
@@ -41,16 +35,13 @@ let run_cmd cli_base_path =
         (Server_base_path_guard.format_canonicalization_error error);
       exit 1
   in
-  Server_base_path_guard.exit_on_violation
-    (Server_base_path_guard.enforce
-       { resolved_base_path with normalized_base_path = base_path });
   Unix.putenv "MASC_BASE_PATH" base_path;
   Workspace_utils_backend_setup.cache_resolved_base_path base_path;
   Eio_main.run @@ fun env ->
   Crypto_rng.ensure_default ();
   Eio_guard.enable ();
   Time_compat.set_clock (Eio.Stdenv.clock env);
-  Eio.Switch.run @@ fun sw ->
+  Server_session_switch.run @@ fun sw ->
   let clock, mono_clock, net, domain_mgr, proc_mgr, fs =
     Server_runtime_bootstrap.init_runtime_context env
   in
@@ -84,7 +75,7 @@ let run_cmd cli_base_path =
         ~sw
         ~env
         ~base_path
-        ~input_base_path:resolved_base_path.raw_base_path
+        ~input_base_path:workspace.Workspace_root.requested
           (* The stdio runtime has no --accept-store-quarantine: a keeper store
              this build cannot decode makes it refuse, and the operator strips
              the file or starts the HTTP runtime with the flag (RFC-0420). *)

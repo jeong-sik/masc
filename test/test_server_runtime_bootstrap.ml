@@ -89,7 +89,6 @@ let with_config_input name value f =
 
 let with_clean_base_path_env f =
   with_config_input "MASC_BASE_PATH" None @@ fun () ->
-  with_config_input "MASC_BASE_PATH_INPUT" None @@ fun () ->
   with_config_input "MASC_BASE_PATH_RESOLUTION_SOURCE" None f
 
 let write_file path content =
@@ -4167,7 +4166,6 @@ let test_create_server_state_preserves_raw_input_base_path () =
       with_env "AGENT_CORE_MODEL_CATALOG" None @@ fun () ->
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       with_env "MASC_BASE_PATH" None @@ fun () ->
-      with_env "MASC_BASE_PATH_INPUT" None @@ fun () ->
       with_cwd repo @@ fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -4185,9 +4183,8 @@ let test_create_server_state_preserves_raw_input_base_path () =
         raw_input
         (json |> member "path_diagnostics" |> member "input_base_path"
        |> to_string);
-      Alcotest.(check (option string)) "raw input env preserved"
-        (Some raw_input)
-        ((Host_config.from_env ()).base_path_raw);
+      Alcotest.(check (option string)) "health and dashboard read the same spelling"
+        (Some raw_input) (Server_startup_state.input_base_path ());
       Alcotest.(check string) "normalized env remains effective workspace root"
         dir (Sys.getenv "MASC_BASE_PATH"))
 

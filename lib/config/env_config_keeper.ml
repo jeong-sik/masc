@@ -151,7 +151,10 @@ module KeeperPollIntervals = struct
       Drain fiber batches in-memory crash events and persists them
       to the dated jsonl store. Lower values reduce write batching
       (more, smaller writes); higher values risk losing the
-      in-memory tail on a hard kill. Must be >= 0.1.
+      in-memory tail on a hard kill. A switch that closes writes
+      whatever is still queued, so no record is lost to an orderly
+      shutdown -- a larger value only means more of them are written
+      then. Must be >= 0.1.
       Default: 2.0 — used at {!Keeper_crash_persistence}. *)
   let crash_persistence_drain_sec =
     Float.max 0.1 (get_float ~default:2.0 "MASC_KEEPER_CRASH_PERSIST_DRAIN_INTERVAL_SEC")
@@ -551,23 +554,20 @@ module KeeperKeepalive = struct
     Float.max 0.1 (Float.min 10.0 (get_float ~default:0.5 "MASC_KEEPER_SLEEP_CHUNK_SEC"))
   ;;
 
-  (* Lower bound of the failure-route backoff sleep when the provider
-     rate-limited or capacity-refused the lane but sent no usable
-     [Retry-After] (absent, zero, negative, NaN, infinite). The signal is
-     real even without a duration, so the lane must wait longer than a short
-     cadence would: at 60s a lane that keeps hitting a 429 re-tries once a
-     minute instead of once every heartbeat (#26068). The cap's lower clamp
-     is this same value so an env override can never set the cap below the
-     no-hint backoff. Not env-configurable. *)
+  (* How long a path rests after a throttle that stated no usable
+     [Retry-After] (absent, zero, negative, NaN): a path that keeps answering
+     429 is tried once a minute (RFC-provider-path-rest §3.3). The cap's lower
+     clamp is this same value so an env override can never set the cap below
+     it. Not env-configurable. *)
   let rate_limit_backoff_floor_sec = 60.0
 
-  (** Upper bound for the failure-route backoff sleep computed after a failed
-      keepalive cycle. A provider rate-limit ([429]) or capacity route makes
-      the next cycle wait longer than the plain cadence would, but the wait is
-      capped so a misread [Retry-After] header (or a stale env override) can
-      never park a lane for longer than this. A rate-limit or quota backoff
-      sleeps to its end and serves queued stimuli then (#34653); a capacity
-      backoff still wakes within [sleep_chunk_sec]. Default: 900 (15 min).
+  (** The longest a path rests after a provider refusal, so a misread
+      [Retry-After] header (or a stale env override) cannot rest a path longer
+      than this, and the rest of a hard quota that stated no end
+      (RFC-provider-path-rest §3.3). A keeper waits only while the path it
+      would send next rests; a rate-limit or quota wait serves queued stimuli
+      when it ends (#34653), a capacity wait still wakes within
+      [sleep_chunk_sec]. Default: 900 (15 min).
       Range: [[rate_limit_backoff_floor_sec], 3600.0].
       @category Thresholds
       @ops_class operator *)
@@ -769,6 +769,61 @@ module KeeperKeepalive = struct
       provider_call_deadline_env_key
   ;;
 
+end
+
+(** {1 Keeper Context Window} *)
+
+module KeeperContext = struct
+  (** Tokens one AGENT_CORE-lane request carries: the fixed prompt (system
+      prompt, tool schemas, pinned context) and the recent verbatim history
+      together. The cut aims at this target; the request-body cap and the
+      provider's own context judge the request separately
+      (RFC keeper-context-window-in-tokens).
+
+      The compiled default is the input size measured on 2026-09-15 across
+      the eight live HTTP bindings while the previous byte-shaped window was
+      at 512 KiB: a median of about 85K tokens per request, at which the
+      operator judged turn quality acceptable and p90 latency stayed under a
+      minute. MASC has no compaction, so this is the working set every
+      request re-sends; the surveyed agents that summarize can afford far
+      larger defaults. It is a starting point to re-measure against a quality
+      harness, not a tuned optimum. An explicit env or runtime.toml value
+      overrides it verbatim.
+
+      Env: [MASC_KEEPER_CONTEXT_WINDOW_TOKENS]; runtime.toml
+      [turn.context_window_tokens]. *)
+  let window_tokens_env_key = "MASC_KEEPER_CONTEXT_WINDOW_TOKENS"
+
+  let window_tokens_min = 1
+  let window_tokens_default = 85_000
+
+  let refuse_declared_window raw detail =
+    raise
+      (Env_config_core.Config_error
+         (Printf.sprintf "invalid %s=%S (%s)" window_tokens_env_key raw detail))
+  ;;
+
+  (* A declared value that is not a positive integer is an operator
+     configuration error, never a fallback: read as unset it would silently
+     swap the operator's window for the compiled default. *)
+  let window_tokens_override () =
+    match Env_config_core.raw_value_opt window_tokens_env_key with
+    | None -> None
+    | Some raw ->
+      (match Safe_ops.int_of_string_safe (String.trim raw) with
+       | Some tokens when tokens >= window_tokens_min -> Some tokens
+       | Some _ ->
+         refuse_declared_window
+           raw
+           (Printf.sprintf "expected an integer of at least %d tokens" window_tokens_min)
+       | None -> refuse_declared_window raw "expected an integer number of tokens")
+  ;;
+
+  let window_tokens () =
+    match window_tokens_override () with
+    | Some tokens -> tokens
+    | None -> window_tokens_default
+  ;;
 end
 
 (** {1 gRPC Heartbeat Reconnect} *)

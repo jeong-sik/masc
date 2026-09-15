@@ -437,9 +437,14 @@ let for_surface = function
       @ row_list_jumps @ listing_meta
   | Clients ->
       [ b Navigate "j/k" "move" ~help:"move the roster cursor"
-      ; b Navigate "p" "runtime"
+        (* Two doors, one action: both call [goto_surface Runtime]. As two
+           bindings the sheet printed the answer twice, one row under the
+           other, and the second row's help differed from the first by a
+           pronoun. The compound spelling is the one the table already uses
+           for [Left / Esc] and [o / A], and [key_atoms] splits the slash, so
+           the footer keeps its Esc pin and both keys stay counted. *)
+      ; b Act "p / Esc" "runtime"
           ~help:"back to the Runtime surface this hangs off"
-      ; b Act "Esc" "runtime" ~help:"back to the Runtime surface it hangs off"
       ; b Search "/" "find"
           ~help:"jump the cursor to a matching attached name"
       ; b Search "n / N" "next / previous match"
@@ -1262,8 +1267,7 @@ let help_sections ?current () =
            draws the glyph alone (masc_tui_render_prim.ml: "Without it the pane
            says a keeper exists and nothing else"). Selecting keepers until
            every state has been seen was the only way that reader could learn
-           the eight, and two of them -- stale and zombie -- may never be
-           selected.
+           the marks, and a rare one such as failing may never be selected.
 
            Masc_tui_keeper_mark carried this list for exactly this and nothing
            read it. Its shape is already the sheet's: a mark, and what it
@@ -1301,6 +1305,13 @@ let help_sections ?current () =
              an operator reading them asked what "받아서 씀" received and
              wrote (2026-09-14). *)
           ; ("Chat marks", Masc_tui_keeper_chat_transcript.legend)
+          (* The first column of Config's two list panes. The prompt registry
+             draws three marks and the params list two, and the words for
+             them were only in the detail pane below the list -- for the one
+             row the cursor was on. A reader scanning twenty rows could tell
+             a marked row from an unmarked one and not what the mark said. *)
+          ; ("Prompt marks", Masc_tui_config_mark.prompt_legend)
+          ; ("Param marks", Masc_tui_config_mark.param_legend)
           ])
 
 let footer_hints_browser_lane =

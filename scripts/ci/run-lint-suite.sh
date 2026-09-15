@@ -205,6 +205,8 @@ blocking_lints() {
   run_lint "Execute async surface" bash scripts/check-execute-async-surface.sh
   run_lint "HITL exact-flow boundary" bash scripts/check-hitl-exact-flow-boundary.sh
   run_lint "Turn-records envelope parity" bash scripts/check-turn-records-envelope-parity.sh
+  run_lint "Feature flag consistency self-test" \
+    bash scripts/check-feature-flag-consistency.sh --self-test
   run_lint "Feature flag consistency" bash scripts/check-feature-flag-consistency.sh
   run_lint "Drain loops yield" bash scripts/ci/check-drain-loop-yields.sh
   run_lint "Log severity anti-patterns" bash scripts/ci/check-log-severity-anti-patterns.sh
@@ -259,6 +261,11 @@ blocking_lints() {
   run_lint "TLA annotation drift" \
     bash scripts/audit-tla-annotation-drift.sh --check-cross-spec
   run_lint "Model prefix inheritance" python3 scripts/ci/check_model_prefix_inheritance.py
+  # The masc.opam↔dune-project regeneration check (#36410 drift class) is
+  # NOT here: `dune build masc.opam` needs the OCaml switch, and the lint
+  # job is deliberately toolchain-free. It runs as a step in the
+  # "dune build @check" job of pr-check.yml, next to the two #34018 guards
+  # that were moved there for the same reason.
   run_lint "Every check script is reached" \
     python3 scripts/ci/check-guards-are-wired.py
 }
@@ -406,6 +413,11 @@ blocking_pr_lints() {
   # the image's switch stayed on 5.5.0, which no workflow builds, so the image
   # was unbuildable for a day before anyone ran the build by hand.
   run_lint "Sandbox OCaml version" bash scripts/check-sandbox-ocaml-version.sh
+  # Third drift of the same family — but this one is NOT wired here:
+  # `dune build masc.opam` needs the OCaml switch and the lint job is
+  # deliberately toolchain-free, so it runs as a step in the
+  # "dune build @check" job of pr-check.yml (next to the two #34018 guards
+  # moved there for the same reason). See the comment there.
   run_lint "Checkpoint legacy purge" \
     bash scripts/check-checkpoint-installation-legacy-purge.sh
   run_lint "Checkpoint legacy purge regression" \

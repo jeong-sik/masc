@@ -185,7 +185,6 @@ let test_inputs_from_env_honors_base_path_override_opt_in () =
   let _config = make_config_root (Filename.concat base Common.masc_dirname) in
   with_env "MASC_CONFIG_DIR" None @@ fun () ->
   with_env "MASC_BASE_PATH" (Some base) @@ fun () ->
-  with_env "MASC_BASE_PATH_INPUT" (Some base) @@ fun () ->
   let inputs = Config_dir_resolver.inputs_from_env () in
   check (option string) "inputs preserve base env" (Some base)
     inputs.env_base_path;
@@ -203,7 +202,6 @@ let test_inputs_from_env_survives_deleted_cwd () =
   let _config = make_config_root (Filename.concat base Common.masc_dirname) in
   with_env "MASC_CONFIG_DIR" None @@ fun () ->
   with_env "MASC_BASE_PATH" (Some base) @@ fun () ->
-  with_env "MASC_BASE_PATH_INPUT" (Some base) @@ fun () ->
   let saved_cwd = Sys.getcwd () in
   Unix.chdir doomed;
   Fun.protect
@@ -446,7 +444,6 @@ let test_current_working_dir_survives_deleted_cwd () =
   Unix.mkdir home 0o755;
   Unix.mkdir doomed 0o755;
   with_env "MASC_BASE_PATH" None @@ fun () ->
-  with_env "MASC_BASE_PATH_INPUT" None @@ fun () ->
   with_env "HOME" (Some home) @@ fun () ->
   Config_dir_resolver.reset ();
   let saved_cwd = Sys.getcwd () in
@@ -471,22 +468,21 @@ let test_base_path_or_cwd_anchors_relative_env_to_cwd () =
   let cwd = Filename.concat root "cwd" in
   Unix.mkdir cwd 0o755;
   with_env "MASC_BASE_PATH" (Some "relative-root") (fun () ->
-    with_env "MASC_BASE_PATH_INPUT" None (fun () ->
-      Config_dir_resolver.reset ();
-      let saved_cwd = Sys.getcwd () in
-      Unix.chdir cwd;
-      Fun.protect
-        ~finally:(fun () ->
-          Unix.chdir saved_cwd;
-          Config_dir_resolver.reset ())
-        (fun () ->
-          (* The resolver anchors relative base_path to [Sys.getcwd ()],
-             which returns the symlink-canonical cwd (on macOS the temp dir
-             [/var/…] resolves to [/private/var/…]). Canonicalize the known
-             cwd so the expected value matches the resolver's real anchor. *)
-          check string "base_path_or_cwd anchors relative env under cwd"
-            (Filename.concat (Unix.realpath cwd) "relative-root")
-            (Config_dir_resolver.base_path_or_cwd ()))))
+    Config_dir_resolver.reset ();
+    let saved_cwd = Sys.getcwd () in
+    Unix.chdir cwd;
+    Fun.protect
+      ~finally:(fun () ->
+        Unix.chdir saved_cwd;
+        Config_dir_resolver.reset ())
+      (fun () ->
+        (* The resolver anchors relative base_path to [Sys.getcwd ()],
+           which returns the symlink-canonical cwd (on macOS the temp dir
+           [/var/…] resolves to [/private/var/…]). Canonicalize the known
+           cwd so the expected value matches the resolver's real anchor. *)
+        check string "base_path_or_cwd anchors relative env under cwd"
+          (Filename.concat (Unix.realpath cwd) "relative-root")
+          (Config_dir_resolver.base_path_or_cwd ())))
 
 let test_base_path_or_cwd_falls_back_to_cwd () =
   with_env "MASC_BASE_PATH" None (fun () ->
@@ -507,7 +503,7 @@ let test_resolve_publishes_one_immutable_snapshot_across_domains () =
     check bool "all domains receive the published snapshot" true
       (List.for_all (fun resolution -> resolution == first) rest)
 
-let test_canonical_owner_over_input_alias () =
+let test_canonical_owner_over_a_symlink_alias () =
   with_temp_dir "config-owner-alias" (fun root ->
     let owner = Filename.concat root "owner" in
     Unix.mkdir owner 0o755;
@@ -519,21 +515,18 @@ let test_canonical_owner_over_input_alias () =
       mkdir_p config;
       write_file (Filename.concat config "runtime.toml") "[runtime]\n";
       with_env "MASC_CONFIG_DIR" None (fun () ->
-        with_env "MASC_BASE_PATH_INPUT" (Some alias) (fun () ->
-          with_env "MASC_BASE_PATH" (Some owner) (fun () ->
-            Config_dir_resolver.reset ();
-            let locked = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path:owner in
-            let resolved = Config_dir_resolver.resolve () in
-            check string "runtime reader uses the exact admitted configuration path"
-              locked (Filename.concat resolved.config_root.path Config_dir_resolver.runtime_toml_filename);
-            check (option string) "operator input remains available for diagnostics"
-              (Some alias) (Sys.getenv_opt "MASC_BASE_PATH_INPUT");
-            check (option string) "host diagnostics retain the operator input alias"
-              (Some alias) (Host_config.from_env ()).base_path_raw)))))
+        with_env "MASC_BASE_PATH" (Some owner) (fun () ->
+          Config_dir_resolver.reset ();
+          let locked = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path:owner in
+          let resolved = Config_dir_resolver.resolve () in
+          check string "runtime reader uses the exact admitted configuration path"
+            locked (Filename.concat resolved.config_root.path Config_dir_resolver.runtime_toml_filename);
+          check bool "the alias exists but is not the published owner" true
+            (Sys.file_exists alias && not (String.equal alias owner))))))
 
 let () =
   run "config_dir_resolver"
-    [ ("canonical owner", [test_case "symlink input follows admitted owner" `Quick test_canonical_owner_over_input_alias]);
+    [ ("canonical owner", [test_case "config follows the admitted owner, not a symlink alias" `Quick test_canonical_owner_over_a_symlink_alias]);
       ( "resolution",
         [
           test_case "env override valid" `Quick test_env_override_valid;

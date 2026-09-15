@@ -25,7 +25,11 @@ type try_provider_ctx =
   { runtime_id : string
   ; error_runtime_id : string
   ; max_request_body_bytes : int option
-  ; model_input_capacity_bytes : int option
+  ; model_input_window : Keeper_context_window.t
+        (** The window this attempt cuts its history to, in tokens. The byte
+            capacity one request cuts to comes from the runtime's observed
+            token density, per request (RFC keeper-context-window-in-tokens).
+            [max_request_body_bytes] judges the serialized request only. *)
   ; base_path : string
   ; keeper_name : string
   ; name : string
@@ -191,36 +195,38 @@ val preempt_pre_first_token : first_event_seen:bool -> person_queued:bool -> boo
     is [false]; with no one queued it is [false] and the attempt keeps its full
     first-event/idle bounds. *)
 
-val default_context_overflow_shrink_capacity : capacity_bytes:int -> int
+val default_context_overflow_shrink_capacity : capacity:int -> int
 (** The shared provider-oracle target for one ordinary shrink step. The
     runtime-specific caller may clamp this target further to structural
     message boundaries. *)
 
 val context_overflow_shrink_sequence :
   ?shrink_capacity:
-    (capacity_bytes:int -> default_capacity_bytes:int -> int) ->
-  ?final_shrink_capacity:(capacity_bytes:int -> int option) ->
-  starting_capacity_bytes:int ->
+    (capacity:int -> default_capacity:int -> int) ->
+  ?final_shrink_capacity:(capacity:int -> int option) ->
+  starting_capacity:int ->
   same_run_retry_authorized:(unit -> bool) ->
-  shrink_admits_history:(capacity_bytes:int -> bool) ->
-  record_success:(capacity_bytes:int -> unit) ->
+  shrink_admits_history:(capacity:int -> bool) ->
+  record_success:(capacity:int -> unit) ->
   on_shrink_retry:
     (shrink_attempt:int ->
-     previous_capacity_bytes:int ->
-     capacity_bytes:int ->
+     previous_capacity:int ->
+     capacity:int ->
      unit) ->
-  attempt:(capacity_bytes:int -> ('ok, Agent_core.Error.t) result) ->
+  attempt:(capacity:int -> ('ok, Agent_core.Error.t) result) ->
   unit ->
   ('ok, Agent_core.Error.t) result
 (** Provider-oracle retry policy shared by AGENT_CORE and official-client
-    runtimes. [default_capacity_bytes] is the policy's ordinary halved value;
+    runtimes. The capacity's unit is the caller's windowing unit: tokens on
+    the AGENT_CORE lane, bytes on the official-client lanes.
+    [default_capacity] is the policy's ordinary halved value;
     a custom [shrink_capacity] can replace only exceptional starting values
     without copying the shared divisor. The walk carries no attempt count:
     it ends where no strictly smaller view exists. [final_shrink_capacity]
     names a measured structural floor; once the ordinary target would reach
     or pass it, the floor itself is attempted, and its refusal ends the
     sequence. A custom value that does not strictly decrease
-    [capacity_bytes] terminates the sequence without another provider attempt.
+    [capacity] terminates the sequence without another provider attempt.
 
     [shrink_admits_history] answers whether a proposed capacity leaves room
     for any conversation history once the caller's non-history reserve is
@@ -329,18 +335,19 @@ module For_testing : sig
   val memoize_message_measurement :
     (Agent_core.Types.message -> int) -> Agent_core.Types.message -> int
 
+  val message_measurement_hash : Agent_core.Types.message -> int
+
   val plan_and_window_model_input :
     measure_message_bytes:(Agent_core.Types.message -> int) ->
-    capacity_bytes:int ->
+    target_bytes:int ->
     reserved_bytes:int ->
+    wire_cap_bytes:int option ->
     base_path:string ->
     demote_before:int ->
     Agent_core.Types.message list ->
-    (Keeper_model_input_demotion.plan_result
-     * Runtime_model_input_tail_window.projection
-     * int,
-     Runtime_model_input_tail_window.budget_error)
-    result
+    Keeper_model_input_demotion.plan_result
+    * Runtime_model_input_tail_window.target_projection
+    * int
 
   val offload_model_input_cpu : (unit -> 'a) -> 'a
 

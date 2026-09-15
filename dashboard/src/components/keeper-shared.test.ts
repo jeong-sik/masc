@@ -759,10 +759,10 @@ describe('KeeperConversationPanel', () => {
       name: 'sangsu',
       status: 'inactive',
       diagnostic: {
-        health_state: 'stale',
-        next_action_path: 'recover',
+        health_state: 'idle',
+        next_action_path: 'direct_message',
         last_reply_status: 'stale',
-        summary: 'Snapshot says the keeper heartbeat is stale.',
+        summary: 'Snapshot says the keeper has not taken a turn yet.',
       },
     } as any
 
@@ -772,8 +772,8 @@ describe('KeeperConversationPanel', () => {
     )
     await Promise.resolve()
 
-    expect(container.textContent).toContain('stale')
-    expect(container.textContent).toContain('Snapshot says the keeper heartbeat is stale.')
+    expect(container.textContent).toContain('idle')
+    expect(container.textContent).toContain('Snapshot says the keeper has not taken a turn yet.')
   })
 
   it('shows the running owner state while a Keeper turn is active', async () => {

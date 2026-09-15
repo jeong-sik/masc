@@ -4,7 +4,7 @@ import { formatDuration } from '../lib/format-time'
 import { keeperActivityDisplay, keeperWorkPreview } from '../lib/keeper-runtime-display'
 import type { Keeper } from '../types'
 
-// SSOT: 활동 시간 표시는 raw `keeper.last_heartbeat`를 직접 읽지 않고
+// SSOT: 활동 시간 표시는 raw timestamp 필드를 직접 읽지 않고
 // `keeperActivityDisplay()`로 통일한다. 헤드라인/사이드바/헤더가
 // 같은 helper를 소비해 다른 timestamp field가 동시에 렌더링되는
 // "26초 전 / 18시간 전 / 27일 전" 3중 표시 모순을 봉인한다.

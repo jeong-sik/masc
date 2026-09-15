@@ -12,7 +12,18 @@
     strings, and a string that means nothing to us must not mean "due". *)
 
 open Alcotest
-module Agenda = Masc_tui_agenda
+
+module Agenda = struct
+  include Masc_tui_agenda
+
+  (* Every case written before the stuck section states the same thing about
+     it: the list was read and it was empty. Shadowing the three-argument
+     [project] here says that once rather than at fifty call sites, and a case
+     that is about stuck tasks calls {!Masc_tui_agenda.project} directly. *)
+  let project ~scheduled ~awaiting =
+    Masc_tui_agenda.project ~scheduled ~awaiting ~stalled:(Masc_tui_agenda.Read [])
+  ;;
+end
 
 (* Asia/Seoul, so 02:45Z reads as the 11:45 the operator sees. *)
 let seoul t = Unix.gmtime (t +. (9.0 *. 3600.0))
@@ -394,8 +405,9 @@ let test_empty_sections_answer_in_words () =
                             ~awaiting:(Agenda.Read [])) in
   let text = joined lines in
   check bool "the wake section answers" true (contains ~needle:"nothing is scheduled" text);
-  check bool "so does the other" true (contains ~needle:"nobody is waiting" text);
-  check int "both headings are still drawn" 2 (List.length (tones_of lines Agenda.Heading))
+  check bool "so does the waiting section" true (contains ~needle:"nobody is waiting" text);
+  check bool "and the stuck section" true (contains ~needle:"no task is stuck on you" text);
+  check int "all three headings are still drawn" 3 (List.length (tones_of lines Agenda.Heading))
 ;;
 
 (* An empty section is an answer only once its list was read. With the server
@@ -530,6 +542,92 @@ let test_the_kind_prefix_comes_off_a_target () =
     (Agenda.short_who "keeper:")
 ;;
 
+(* A task that only the operator can move is a reason to draw the strip. The
+   whole point of the row is that nothing else was saying so. *)
+let stuck ?(since_iso = "2026-08-20T00:00:00Z") what : Agenda.stalled =
+  { what; since_iso }
+;;
+
+let with_stuck rows =
+  Masc_tui_agenda.project
+    ~scheduled:(Agenda.Read [])
+    ~awaiting:(Agenda.Read [])
+    ~stalled:(Agenda.Read rows)
+;;
+
+let test_a_stuck_task_alone_takes_the_row () =
+  let t = with_stuck [ stuck "task-348: goo-yang-bong gave up - the issue closed" ] in
+  check int "a stuck task is something to say" 1 (Agenda.rows_taken t);
+  match strip_of t with
+  | None -> fail "the strip must draw when a task is stuck on the operator"
+  | Some strip ->
+    check bool "and it says so in the badge" true
+      (contains ~needle:"Awaiting you" strip.Agenda.waiting)
+;;
+
+(* One number over both lists: a keeper holding a tool call and a task only the
+   operator can grant are the same answer to "is anything waiting on me". Two
+   badges would be an addition the operator has to do. *)
+let test_the_badge_counts_blocked_and_stuck_together () =
+  let t =
+    Masc_tui_agenda.project
+      ~scheduled:(Agenda.Read [])
+      ~awaiting:(Agenda.Read [ ask "lane-smith" "Execute" ])
+      ~stalled:(Agenda.Read [ stuck "task-348: a stop nobody granted" ])
+  in
+  match strip_of t with
+  | None -> fail "there is work waiting"
+  | Some strip ->
+    check bool "one badge, both counts" true
+      (contains ~needle:"Awaiting you\xc2\xb72" strip.Agenda.waiting)
+;;
+
+(* Sixty-two rows is a wall. The oldest few are what the operator reads, and
+   the count is the part that has to be exact. *)
+let test_the_stuck_section_shows_a_few_and_counts_the_rest () =
+  let rows =
+    List.init 9 (fun index ->
+      stuck
+        ~since_iso:(Printf.sprintf "2026-08-%02dT00:00:00Z" (index + 10))
+        (Printf.sprintf "task-%03d: held by a session that is gone" index))
+  in
+  let lines = overlay_of (with_stuck rows) in
+  let text = joined lines in
+  check int "only the oldest few are drawn" 5
+    (List.length
+       (List.filter
+          (fun (line : Agenda.line) ->
+             contains ~needle:"held by a session that is gone" line.Agenda.text)
+          lines));
+  check bool "and the rest are counted" true (contains ~needle:"and 4 more" text)
+;;
+
+let test_the_stuck_section_answers_in_words () =
+  let read = joined (overlay_of (with_stuck [])) in
+  check bool "an empty list read is an answer" true
+    (contains ~needle:"no task is stuck on you" read);
+  let unread =
+    joined
+      (overlay_of
+         (Masc_tui_agenda.project
+            ~scheduled:(Agenda.Read [])
+            ~awaiting:(Agenda.Read [])
+            ~stalled:Agenda.Not_read))
+  in
+  check bool "a list nobody read does not say it is empty" false
+    (contains ~needle:"no task is stuck on you" unread)
+;;
+
+(* The wait is why the row exists, so it is what the right column says. *)
+let test_a_stuck_row_says_how_long_it_has_waited () =
+  let text =
+    joined
+      (overlay_of (with_stuck [ stuck ~since_iso:"2026-08-15T03:00:00Z" "task-348" ]))
+  in
+  check bool "eleven days is the fact the row carries" true
+    (contains ~needle:"11d waiting" text)
+;;
+
 let () =
   run
     "tui agenda"
@@ -586,6 +684,18 @@ let () =
             test_rows_fit_the_width_they_were_given
         ; test_case "the kind prefix comes off a target" `Quick
             test_the_kind_prefix_comes_off_a_target
+        ] )
+    ; ( "tasks stuck on the operator"
+      , [ test_case "a stuck task alone takes the row" `Quick
+            test_a_stuck_task_alone_takes_the_row
+        ; test_case "the badge counts blocked and stuck together" `Quick
+            test_the_badge_counts_blocked_and_stuck_together
+        ; test_case "the section shows a few and counts the rest" `Quick
+            test_the_stuck_section_shows_a_few_and_counts_the_rest
+        ; test_case "the section answers in words" `Quick
+            test_the_stuck_section_answers_in_words
+        ; test_case "a stuck row says how long it has waited" `Quick
+            test_a_stuck_row_says_how_long_it_has_waited
         ] )
     ]
 ;;

@@ -553,13 +553,15 @@
  ; masc_tui_memory_mark the marks the Memory roster's ST column draws,
  ; masc_tui_planning_proof_mark the marks Planning's JUDGE column draws and
  ; masc_tui_keeper_chat_transcript the marks and phrases on a chat's tool
- ; rows and masc_tui_file_icon the marks the Code tree draws beside a
- ; file; the sheet this module builds is where a reader looks up what one
- ; means.
+ ; rows, masc_tui_file_icon the marks the Code tree draws beside a file and
+ ; masc_tui_config_mark the marks the prompt registry and the params list
+ ; draw in their first column; the sheet this module builds is where a
+ ; reader looks up what one means.
  (libraries
   masc_tui_types
   masc_tui_keeper_mark
   masc_tui_board_kind_mark
+  masc_tui_config_mark
   masc_tui_file_icon
   masc_tui_memory_mark
   masc_tui_planning_proof_mark
@@ -892,6 +894,12 @@
  (libraries masc_tui_types))
 
 (library
+ (name masc_tui_config_mark)
+ (wrapped false)
+ (modules masc_tui_config_mark)
+ (libraries masc))
+
+(library
  (name masc_tui_planning_proof_mark)
  (wrapped false)
  (modules masc_tui_planning_proof_mark)
@@ -1213,6 +1221,7 @@
   masc
   masc_types
   masc_tui_ansi
+  masc_tui_token_scale
   masc_tui_context_inspector
   masc_keeper_registry
   masc_tui_json
@@ -1295,6 +1304,16 @@
 ; (wrapped false) matches every other module in this directory -- the names
 ; already carry the masc_tui_ prefix by hand, which is the case dune's manual
 ; names as the reason the option exists.
+; One unit for every context size the TUI shows. Its own library so the
+; inspector's interface stays what the types library and every surface were
+; compiled against, and so the two renderers that read sizes read them
+; through one conversion.
+(library
+ (name masc_tui_token_scale)
+ (wrapped false)
+ (modules masc_tui_token_scale)
+ (libraries masc_tui_context_inspector masc.masc_types))
+
 (library
  (name masc_tui_render_prim)
  (wrapped false)
@@ -1313,6 +1332,7 @@
   masc_tui_keys
   masc_tui_planning_proof_mark
   masc_tui_runtime_config_view
+  masc_tui_token_scale
   masc_tui_context_inspector
   masc_tui_command
   yojson
@@ -1543,6 +1563,7 @@
   masc_tui_render_metrics
   masc_tui_render_memory
   masc_tui_board_kind_mark
+  masc_tui_config_mark
   masc_tui_memory_mark
   masc_tui_planning_proof_mark
   masc_tui_context_bars

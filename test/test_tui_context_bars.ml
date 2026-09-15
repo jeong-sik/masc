@@ -226,13 +226,13 @@ let test_the_pointer_ends_on_the_cut () =
   in
   check int "flag ends on the first sent cell" (width - sent + 1)
     (cells
-       (Bars.reach_pointer ~width ~transmitted:history_transmitted
+       (Bars.reach_pointer ~label:Bars.sent_pointer_label ~width ~transmitted:history_transmitted
           ~total:history_total));
   (* With the whole conversation sent there is no room on the left, so the
      label sits to the right of the cut and the row is longer than the cut. *)
   check bool "a full reach labels from the right" true
     (cells
-       (Bars.reach_pointer ~width ~transmitted:history_total
+       (Bars.reach_pointer ~label:Bars.sent_pointer_label ~width ~transmitted:history_total
           ~total:history_total)
     > 0)
 
@@ -263,7 +263,7 @@ let test_preview () =
     (Bars.reach_bar ~width:60 ~transmitted:history_transmitted
        ~total:history_total ~sent_style:"");
   print_endline
-    (Bars.reach_pointer ~width:60 ~transmitted:history_transmitted
+    (Bars.reach_pointer ~label:Bars.sent_pointer_label ~width:60 ~transmitted:history_transmitted
        ~total:history_total);
   print_endline
     (Bars.band ~width ~title:"COMPOSITION"

@@ -97,9 +97,14 @@ let schedule_tool_name action =
   schema.name
 ;;
 
-let schedule_ctx ?continuation_channel config : Tool_schedule.context =
+let schedule_ctx
+      ?continuation_channel
+      ?(caller = Tool_schedule.Named_caller "scheduler-agent")
+      config
+  : Tool_schedule.context
+  =
   { config
-  ; agent_name = "scheduler-agent"
+  ; caller
   ; stamp_keeper_wake_result_delivery =
       (fun ~payload ->
          Schedule_payload_projection.set_keeper_wake_result_delivery
@@ -109,17 +114,23 @@ let schedule_ctx ?continuation_channel config : Tool_schedule.context =
   }
 ;;
 
-let dispatch_exn ?continuation_channel config action args =
+let dispatch_exn ?continuation_channel ?caller config action args =
   let name = schedule_tool_name action in
   match
     Tool_schedule.dispatch
-      (schedule_ctx ?continuation_channel config)
+      (schedule_ctx ?continuation_channel ?caller config)
       ~name
       ~args
   with
   | Some result -> result
   | None -> fail ("schedule dispatch returned None: " ^ name)
 ;;
+
+(* Creation reads the dispatch clock and refuses a due time behind it, so a
+   schedule created through the tool is due in 2100 (2100-01-01T00:00:00Z).
+   Tests that drive the runner create through the service, where [now] is an
+   argument. *)
+let future_due_at = 4_102_444_800.0
 
 let create_args
       ?schedule_id
@@ -128,7 +139,7 @@ let create_args
       ()
   =
   `Assoc
-    ([ "due_at_unix", `Float 200.0
+    ([ "due_at_unix", `Float future_due_at
      ; "keeper_name", `String "schedule-keeper"
      ; "message", `String message
      ; "requested_by_id", `String "operator"
@@ -143,9 +154,35 @@ let create_args
      | Some value -> [ "schedule_id", `String value ])
 ;;
 
+(* The typed refusal a result carries, decoded through its owner so a test
+   compares variants rather than the wire spelling. *)
+let refusal_kind result =
+  let open Yojson.Safe.Util in
+  match Tool_result.data result |> member "error_kind" with
+  | `String wire ->
+    (match Schedule_contract_values.refusal_kind_of_string wire with
+     | Ok kind -> Some kind
+     | Error error -> fail (Schedule_contract_values.decode_error_to_string error))
+  | _ -> None
+;;
+
+let check_refusal label expected result =
+  check bool (label ^ ": refused") false (Tool_result.is_success result);
+  match refusal_kind result with
+  | Some kind when kind = expected -> ()
+  | Some kind ->
+    failf "%s: error_kind %s, expected %s" label
+      (Schedule_contract_values.refusal_kind_to_string kind)
+      (Schedule_contract_values.refusal_kind_to_string expected)
+  | None ->
+    failf "%s: no error_kind, expected %s (message: %s)" label
+      (Schedule_contract_values.refusal_kind_to_string expected)
+      (Tool_result.message result)
+;;
+
 let create_service_exn config ~schedule_id ~due_at ~payload ?recurrence () =
   match
-    Schedule_service.create config ~schedule_id ~requested_at:100.0
+    Schedule_service.create config ~now:100.0 ~schedule_id ~requested_at:100.0
       ~requested_by:(human "operator")
       ~scheduled_by:(automated "scheduler-agent")
       ~due_at ~payload ~source:Schedule_domain.Operator_request ?recurrence ()
@@ -232,7 +269,15 @@ let test_flat_tool_surface () =
   in
   check (list string) "get requires the durable schedule pointer"
     [ "schedule_id" ]
-    (required_names get_schema.input_schema)
+    (required_names get_schema.input_schema);
+  let list_schema : Masc_domain.tool_schema =
+    (schedule_definition Tool_schemas_schedule.List_requests).schema
+  in
+  (* 521 of the listing calls in September sent no arguments and read every
+     row. Whose rows is now a choice the call has to make. *)
+  check (list string) "list requires the owner selector"
+    [ "owner" ]
+    (required_names list_schema.input_schema)
 ;;
 
 let test_create_list_get_cancel () =
@@ -257,7 +302,7 @@ let test_create_list_get_cancel () =
      |> to_string);
   let list_result =
     dispatch_exn config Tool_schemas_schedule.List_requests
-      (`Assoc [ "limit", `Int 10 ])
+      (`Assoc [ "owner", `String "all"; "limit", `Int 10 ])
   in
   check bool "list succeeds" true (Tool_result.is_success list_result);
   check int "one schedule listed" 1
@@ -301,7 +346,7 @@ let test_update_keeps_public_id_and_replaces_instance () =
     dispatch_exn config Tool_schemas_schedule.Update_request
       (`Assoc
         [ "schedule_id", `String schedule_id
-        ; "due_at_unix", `Float 300.0
+        ; "due_at_unix", `Float (future_due_at +. 300.0)
         ; "keeper_name", `String "schedule-keeper"
         ; "message", `String "after"
         ])
@@ -317,7 +362,7 @@ let test_update_keeps_public_id_and_replaces_instance () =
     | Some request -> request
     | None -> fail "updated schedule missing"
   in
-  check (float 0.0) "new due time persisted" 300.0 stored.due_at;
+  check (float 0.0) "new due time persisted" (future_due_at +. 300.0) stored.due_at;
   check string "new message persisted" "after"
     (Schedule_domain.payload_to_yojson stored.payload
      |> member "body"
@@ -352,11 +397,13 @@ let test_update_requires_id_and_active_row () =
     dispatch_exn config Tool_schemas_schedule.Update_request
       (create_args ~schedule_id ~message:"too late" ())
   in
-  check bool "terminal row is immutable" false (Tool_result.is_success refused);
-  check bool "refusal explains the state rule" true
-    (String_util.contains_substring
-       (Tool_result.message refused)
-       "only scheduled or due requests can be modified")
+  check_refusal "terminal row is immutable"
+    Schedule_contract_values.Refusal_transition_refused refused;
+  let open Yojson.Safe.Util in
+  check string "refusal names the status the row is in" "cancelled"
+    (Tool_result.data refused |> member "current_status" |> to_string);
+  check string "refusal names the attempted transition" "modify"
+    (Tool_result.data refused |> member "attempted" |> to_string)
 ;;
 
 (* The checkpoint encoder rejects an object that binds the same key twice,
@@ -390,7 +437,7 @@ let test_results_survive_the_checkpoint_encoder () =
   check_no_duplicate_keys "update result" (Tool_result.data update);
   let list_result =
     dispatch_exn config Tool_schemas_schedule.List_requests
-      (`Assoc [ "limit", `Int 10 ])
+      (`Assoc [ "owner", `String "all"; "limit", `Int 10 ])
   in
   check_no_duplicate_keys "list result" (Tool_result.data list_result);
   let get_result =
@@ -428,7 +475,7 @@ let test_creation_boundary_owns_result_delivery_destination () =
       Tool_schemas_schedule.Create_request
       (`Assoc
         [ "schedule_id", `String "sched-owned-result-destination"
-        ; "due_at_unix", `Float 200.0
+        ; "due_at_unix", `Float future_due_at
         ; "keeper_name", `String "schedule-keeper"
         ; "message", `String "return the result to the invoking thread"
         ])
@@ -529,11 +576,11 @@ let test_create_accepts_explicit_iso8601_offset () =
   let result =
     create
       ~schedule_id:"sched-kst-offset"
-      ~due_at_iso:"2026-08-02T09:00:00+09:00"
+      ~due_at_iso:"2099-08-02T09:00:00+09:00"
   in
   check bool "explicit ISO-8601 offset accepted" true (Tool_result.is_success result);
   let open Yojson.Safe.Util in
-  check string "offset normalized to UTC" "2026-08-02T00:00:00Z"
+  check string "offset normalized to UTC" "2099-08-02T00:00:00Z"
     (Tool_result.data result |> member "due_at_iso" |> to_string);
   let west =
     create
@@ -585,7 +632,7 @@ let test_removed_convenience_input_does_not_synthesize_payload () =
     dispatch_exn config Tool_schemas_schedule.Create_request
       (`Assoc
         [ "schedule_id", `String "sched-removed-convenience"
-        ; "due_at_unix", `Float 200.0
+        ; "due_at_unix", `Float future_due_at
         ; "board_content", `String "must not become a scheduled product effect"
         ; "requested_by_id", `String "operator"
         ; "scheduled_by_id", `String "scheduler-agent"
@@ -606,7 +653,7 @@ let test_unregistered_wake_target_rejected () =
   let ghost_args allow =
     `Assoc
       ([ "schedule_id", `String "sched-ghost-target"
-       ; "due_at_unix", `Float 200.0
+       ; "due_at_unix", `Float future_due_at
        ; "keeper_name", `String "ghost-keeper"
        ; "message", `String "wake for a keeper that does not exist"
        ; "requested_by_id", `String "operator"
@@ -672,7 +719,7 @@ let test_unknown_field_is_rejected_before_persistence () =
       ~args:
         (`Assoc
           [ "schedule_id", `String "sched-unknown-body-field"
-          ; "due_at_unix", `Float 200.0
+          ; "due_at_unix", `Float future_due_at
           ; "keeper_name", `String "alpha"
           ; "message", `String "wake up"
           ; "channel_id", `String "C123"
@@ -717,7 +764,7 @@ let test_known_fields_still_create () =
     dispatch_exn config Tool_schemas_schedule.Create_request
       (`Assoc
         [ "schedule_id", `String "sched-known-body-fields"
-        ; "due_at_unix", `Float 200.0
+        ; "due_at_unix", `Float future_due_at
         ; "keeper_name", `String "alpha"
         ; "message", `String "wake up"
         ; "title", `String "a title"
@@ -758,7 +805,7 @@ let test_keeper_wake_schema_validation () =
     dispatch_exn config Tool_schemas_schedule.Create_request
       (`Assoc
         [ "schedule_id", `String "sched-wake"
-        ; "due_at_unix", `Float 200.0
+        ; "due_at_unix", `Float future_due_at
         ; "keeper_name", `String "schedule-keeper"
         ; "message", `String "run maintenance"
         ; "urgency", `String "normal"
@@ -769,7 +816,7 @@ let test_keeper_wake_schema_validation () =
     dispatch_exn config Tool_schemas_schedule.Create_request
       (`Assoc
         [ "schedule_id", `String "sched-wake-invalid"
-        ; "due_at_unix", `Float 200.0
+        ; "due_at_unix", `Float future_due_at
         ; "keeper_name", `String "schedule-keeper"
         ; "message", `String "run maintenance"
         ; "urgency", `String "urgent-ish"
@@ -848,7 +895,8 @@ let test_schedule_store_error_is_explicit () =
     (Filename.concat (Workspace_utils.masc_dir config) "schedules.json")
     "{not-json";
   let result =
-    dispatch_exn config Tool_schemas_schedule.List_requests (`Assoc [])
+    dispatch_exn config Tool_schemas_schedule.List_requests
+      (`Assoc [ "owner", `String "all" ])
   in
   check bool "list fails" false (Tool_result.is_success result);
   check bool "store failure visible" true
@@ -876,7 +924,7 @@ let test_keeper_wake_target_validation_is_inside_creation_fence () =
   in
   let ctx : Tool_schedule.context =
     { config
-    ; agent_name = "scheduler-agent"
+    ; caller = Tool_schedule.Named_caller "scheduler-agent"
     ; stamp_keeper_wake_result_delivery =
         (fun ~payload ->
            Schedule_payload_projection.set_keeper_wake_result_delivery
@@ -1001,7 +1049,8 @@ let test_tool_response_carries_structured_recurrence () =
   (* The dashboard projection and the tool response describe the same
      `schedule_request`. Sending only `recurrence_kind` here made the client
      rebuild the structure from flattened strings, with an unknown-shape
-     fallback at the end of that chain. *)
+     fallback at the end of that chain. The full request is
+     masc_schedule_get's; a listing row carries the summary sentence. *)
   let recurrence = Schedule_domain.Interval { interval_sec = 60 } in
   let _request =
     create_service_exn
@@ -1012,23 +1061,582 @@ let test_tool_response_carries_structured_recurrence () =
       ~recurrence
       ()
   in
-  let listed =
-    dispatch_exn config Tool_schemas_schedule.List_requests (`Assoc [])
+  let got =
+    dispatch_exn config Tool_schemas_schedule.Get_request
+      (`Assoc [ "schedule_id", `String "sched-structured-recurrence" ])
   in
   let open Yojson.Safe.Util in
-  let entry =
-    Tool_result.data listed
-    |> member "schedules"
-    |> to_list
-    |> List.find (fun item ->
-      match item |> member "schedule_id" with
-      | `String id -> String.equal id "sched-structured-recurrence"
-      | _ -> false)
-  in
+  let entry = Tool_result.data got in
   check bool "recurrence is present" true (entry |> member "recurrence" <> `Null);
   check string "recurrence matches the domain serialiser"
     (Yojson.Safe.to_string (Schedule_domain.recurrence_to_yojson recurrence))
-    (Yojson.Safe.to_string (entry |> member "recurrence"))
+    (Yojson.Safe.to_string (entry |> member "recurrence"));
+  let listed =
+    dispatch_exn config Tool_schemas_schedule.List_requests
+      (`Assoc [ "owner", `String "all" ])
+  in
+  let row =
+    match Tool_result.data listed |> member "schedules" |> to_list with
+    | [ row ] -> row
+    | rows -> failf "expected one listed row, got %d" (List.length rows)
+  in
+  check string "listing row carries the recurrence summary"
+    (Schedule_domain.recurrence_summary recurrence)
+    (row |> member "recurrence_summary" |> to_string)
+;;
+
+(* Jazz-developer created a wake at 03:37:42Z due at 03:36:00Z. It was stored
+   as scheduled, the next refresh marked it due, and it fired at 03:37:54Z --
+   a delay measurement that measured nothing, and nothing said so. *)
+let test_create_refuses_a_due_time_behind_the_clock () =
+  with_config
+  @@ fun config ->
+  let refused =
+    dispatch_exn config Tool_schemas_schedule.Create_request
+      (`Assoc
+        [ "schedule_id", `String "sched-already-past"
+        ; "due_at_iso", `String "2026-09-15T03:36:00Z"
+        ; "keeper_name", `String "schedule-keeper"
+        ; "message", `String "measure the wake delay"
+        ])
+  in
+  check_refusal "a past due time"
+    Schedule_contract_values.Refusal_due_already_past refused;
+  let open Yojson.Safe.Util in
+  check string "the refusal echoes the due time it read" "2026-09-15T03:36:00Z"
+    (Tool_result.data refused |> member "due_at_iso" |> to_string);
+  check bool "the refusal says what now was" true
+    (Tool_result.data refused |> member "now_iso" <> `Null);
+  check int "nothing is stored" 0
+    (List.length (Schedule_store.read_state config).schedules)
+;;
+
+(* The comparison is with the current whole second, because an RFC 3339 due
+   time arrives cut to whole seconds: "now" written as an ISO time is the
+   current second, and it must not be refused for the fraction it lost. *)
+let test_the_current_second_is_not_past () =
+  with_config
+  @@ fun config ->
+  let create ~schedule_id ~due_at =
+    Schedule_service.create config ~now:1_000.9 ~schedule_id
+      ~requested_by:(human "operator")
+      ~scheduled_by:(automated "scheduler-agent")
+      ~due_at ~payload:(keeper_wake_payload "now") ~source:Schedule_domain.Operator_request ()
+  in
+  (match create ~schedule_id:"sched-this-second" ~due_at:1_000.0 with
+   | Ok request ->
+     check string "the current second is accepted" "scheduled"
+       (Schedule_domain.schedule_status_to_string request.Schedule_domain.status)
+   | Error err -> fail (Schedule_service.service_error_to_string err));
+  match create ~schedule_id:"sched-last-second" ~due_at:999.0 with
+  | Ok _ -> fail "the previous second was accepted"
+  | Error (Schedule_service.Due_already_past { due_at; now }) ->
+    check (float 0.0) "the refused due time" 999.0 due_at;
+    check (float 0.0) "now is the whole second compared" 1_000.0 now
+  | Error err -> fail (Schedule_service.service_error_to_string err)
+;;
+
+(* The analyst's cancel of a wake that had already fired said only "only
+   scheduled or due requests can be cancelled", which left the question it
+   was asked -- what state is it in -- unanswered. *)
+let test_cancel_refusal_says_the_state_and_the_last_wake () =
+  with_config
+  @@ fun config ->
+  let schedule_id = "sched-already-fired" in
+  ignore
+    (create_service_exn config ~schedule_id ~due_at:200.0
+       ~payload:(keeper_wake_payload "fire once") ()
+     : Schedule_domain.schedule_request);
+  let store_ok label = function
+    | Ok value -> value
+    | Error err -> fail (label ^ ": " ^ Schedule_store.store_error_to_string err)
+  in
+  ignore (store_ok "refresh" (Schedule_store.refresh_due config ~now:200.0));
+  ignore (store_ok "start" (Schedule_store.start_due_candidate config ~now:201.0 ~schedule_id));
+  ignore (store_ok "accept" (Schedule_store.accept_running config ~now:202.0 ~schedule_id ()));
+  let refused =
+    dispatch_exn config Tool_schemas_schedule.Cancel_request
+      (`Assoc
+        [ "schedule_id", `String schedule_id
+        ; "cancelled_by_id", `String "analyst"
+        ; "reason", `String "no longer needed"
+        ])
+  in
+  check_refusal "a fired schedule is not cancelled"
+    Schedule_contract_values.Refusal_transition_refused refused;
+  let open Yojson.Safe.Util in
+  let data = Tool_result.data refused in
+  check string "current status" "succeeded" (data |> member "current_status" |> to_string);
+  check string "attempted transition" "cancel" (data |> member "attempted" |> to_string);
+  check string "last wake result" "succeeded"
+    (data |> member "last_wake" |> member "status" |> to_string);
+  check bool "the sentence names the status too" true
+    (String_util.contains_substring (Tool_result.message refused) "is succeeded")
+;;
+
+let keeper_wake_payload_for keeper_name message =
+  `Assoc
+    [ "kind", `String Schedule_supported_kinds.keeper_wake
+    ; ( "body"
+      , `Assoc [ "keeper_name", `String keeper_name; "message", `String message ] )
+    ]
+;;
+
+let listed_ids result =
+  let open Yojson.Safe.Util in
+  Tool_result.data result
+  |> member "schedules"
+  |> to_list
+  |> List.map (fun row -> row |> member "schedule_id" |> to_string)
+;;
+
+(* Three schedules, one per relation to the caller ([schedule_ctx] calls as
+   scheduler-agent): one it created, one that wakes it, one that is neither.
+   A caller that could not tell its own rows from 1,232 others read a 144 KB
+   listing and still did not find them. *)
+let test_list_reads_the_owner_it_is_asked_for () =
+  with_config
+  @@ fun config ->
+  let create schedule_id ~scheduled_by ~wakes =
+    match
+      Schedule_service.create config ~now:100.0 ~schedule_id
+        ~requested_by:(human "operator")
+        ~scheduled_by:(automated scheduled_by)
+        ~due_at:200.0
+        ~payload:(keeper_wake_payload_for wakes ("wake " ^ schedule_id))
+        ~source:Schedule_domain.Operator_request ()
+    with
+    | Ok _ -> ()
+    | Error err -> fail (Schedule_service.service_error_to_string err)
+  in
+  create "sched-a" ~scheduled_by:"scheduler-agent" ~wakes:"schedule-keeper";
+  create "sched-b" ~scheduled_by:"other-actor" ~wakes:"scheduler-agent";
+  create "sched-c" ~scheduled_by:"other-actor" ~wakes:"schedule-keeper";
+  let list_with args =
+    dispatch_exn config Tool_schemas_schedule.List_requests (`Assoc args)
+  in
+  check (list string) "self is either side of the caller" [ "sched-a"; "sched-b" ]
+    (listed_ids (list_with [ "owner", `String "self" ]));
+  check (list string) "wake_target reads the woken keeper" [ "sched-a"; "sched-c" ]
+    (listed_ids
+       (list_with
+          [ "owner", `String "wake_target"; "owner_name", `String "schedule-keeper" ]));
+  check (list string) "scheduled_by reads the creator" [ "sched-b"; "sched-c" ]
+    (listed_ids
+       (list_with
+          [ "owner", `String "scheduled_by"; "owner_name", `String "other-actor" ]));
+  check (list string) "all is every row" [ "sched-a"; "sched-b"; "sched-c" ]
+    (listed_ids (list_with [ "owner", `String "all" ]));
+  let open Yojson.Safe.Util in
+  check string "self echoes whom it resolved to" "scheduler-agent"
+    (Tool_result.data (list_with [ "owner", `String "self" ])
+     |> member "owner_name"
+     |> to_string);
+  List.iter
+    (fun (label, args, fragment) ->
+       let refused = list_with args in
+       check bool label false (Tool_result.is_success refused);
+       check bool (label ^ " says why") true
+         (String_util.contains_substring (Tool_result.message refused) fragment))
+    [ "owner is required", [], "owner is required"
+    ; ( "a name next to self is refused"
+      , [ "owner", `String "self"; "owner_name", `String "someone" ]
+      , "owner_name is not accepted with owner=self" )
+    ; ( "wake_target needs a name"
+      , [ "owner", `String "wake_target" ]
+      , "owner_name is required with owner=wake_target" )
+    ; "an unknown owner is refused", [ "owner", `String "mine" ], "unknown owner: mine"
+    ];
+  let row =
+    match
+      Tool_result.data (list_with [ "owner", `String "all"; "limit", `Int 1 ])
+      |> member "schedules"
+      |> to_list
+    with
+    | [ row ] -> row
+    | rows -> failf "expected one row, got %d" (List.length rows)
+  in
+  check (list string) "a row is a summary"
+    [ "schedule_id"
+    ; "status"
+    ; "due_at_iso"
+    ; "recurrence_summary"
+    ; "wake_target"
+    ; "scheduled_by"
+    ; "summary"
+    ; "last_wake_status"
+    ]
+    (row |> to_assoc |> List.map fst);
+  check string "wake target is the bare keeper name" "schedule-keeper"
+    (row |> member "wake_target" |> to_string)
+;;
+
+(* Pages follow schedule_id: the next page is every matching row after the
+   last id a page showed. The last page has no cursor. *)
+let test_list_pages_by_schedule_id () =
+  with_config
+  @@ fun config ->
+  List.iter
+    (fun schedule_id ->
+       ignore
+         (create_service_exn config ~schedule_id ~due_at:200.0
+            ~payload:(keeper_wake_payload schedule_id) ()
+          : Schedule_domain.schedule_request))
+    [ "sched-3"; "sched-1"; "sched-2" ];
+  let list_with args =
+    dispatch_exn config Tool_schemas_schedule.List_requests (`Assoc args)
+  in
+  let open Yojson.Safe.Util in
+  let first = list_with [ "owner", `String "all"; "limit", `Int 2 ] in
+  check (list string) "first page in id order" [ "sched-1"; "sched-2" ] (listed_ids first);
+  let cursor = Tool_result.data first |> member "next_cursor" |> to_string in
+  let second =
+    list_with [ "owner", `String "all"; "limit", `Int 2; "cursor", `String cursor ]
+  in
+  check (list string) "second page continues after it" [ "sched-3" ] (listed_ids second);
+  check bool "the last page has no cursor" true
+    (Tool_result.data second |> member "next_cursor" = `Null)
+;;
+
+let wake_args ?(extra = []) () =
+  `Assoc
+    ([ "keeper_name", `String "schedule-keeper"; "message", `String "wake" ] @ extra)
+;;
+
+(* An MCP caller that gave no name has only a name the endpoint minted for
+   its session, which nobody owns across sessions. Where the tool would stand
+   on the caller's name -- owner=self, the scheduler, a note's author -- such a
+   caller names the actor itself or is refused. *)
+let test_an_unnamed_caller_names_the_actor_itself () =
+  with_config
+  @@ fun config ->
+  let caller = Tool_schedule.Unnamed_caller in
+  check_refusal "owner=self"
+    Schedule_contract_values.Refusal_caller_unidentified
+    (dispatch_exn ~caller config Tool_schemas_schedule.List_requests
+       (`Assoc [ "owner", `String "self" ]));
+  check bool "a named owner still lists" true
+    (Tool_result.is_success
+       (dispatch_exn ~caller config Tool_schemas_schedule.List_requests
+          (`Assoc
+            [ "owner", `String "scheduled_by"; "owner_name", `String "scheduler-agent" ])));
+  check_refusal "create without scheduled_by_id"
+    Schedule_contract_values.Refusal_caller_unidentified
+    (dispatch_exn ~caller config Tool_schemas_schedule.Create_request
+       (wake_args ~extra:[ "due_in_sec", `Int 60 ] ()));
+  check int "nothing stored for the unnamed create" 0
+    (List.length (Schedule_store.read_state config).schedules);
+  let created =
+    dispatch_exn ~caller config Tool_schemas_schedule.Create_request
+      (wake_args
+         ~extra:
+           [ "due_in_sec", `Int 60
+           ; "schedule_id", `String "sched-named-scheduler"
+           ; "scheduled_by_id", `String "named-scheduler"
+           ]
+         ())
+  in
+  check bool "create with scheduled_by_id succeeds" true (Tool_result.is_success created);
+  check_refusal "note without author_id"
+    Schedule_contract_values.Refusal_caller_unidentified
+    (dispatch_exn ~caller config Tool_schemas_schedule.Add_note
+       (`Assoc
+         [ "schedule_id", `String "sched-named-scheduler"; "body", `String "why" ]))
+;;
+
+(* A call gives one due input, or none when a calendar recurrence derives
+   it. Two inputs are refused with the names the call gave, and an input of
+   the wrong JSON type is refused rather than read as absent. *)
+let test_a_call_gives_exactly_one_due_input () =
+  with_config
+  @@ fun config ->
+  let create extra =
+    dispatch_exn config Tool_schemas_schedule.Create_request (wake_args ~extra ())
+  in
+  let conflict =
+    create [ "due_at_unix", `Float future_due_at; "due_at_iso", `String "2100-01-01T00:00:00Z" ]
+  in
+  check_refusal "unix and iso together"
+    Schedule_contract_values.Refusal_due_inputs_conflict conflict;
+  let open Yojson.Safe.Util in
+  check (list string) "the refusal names what the call gave"
+    [ "due_at_unix"; "due_at_iso" ]
+    (Tool_result.data conflict |> member "given" |> to_list |> List.map to_string);
+  check_refusal "a delay with an absolute time"
+    Schedule_contract_values.Refusal_due_inputs_conflict
+    (create [ "due_in_sec", `Int 60; "due_at_unix", `Float future_due_at ]);
+  check_refusal "no due input on a one-shot"
+    Schedule_contract_values.Refusal_due_input_missing
+    (create []);
+  check_refusal "a zero delay"
+    Schedule_contract_values.Refusal_argument_out_of_range
+    (create [ "due_in_sec", `Int 0 ]);
+  let wrong_type = create [ "due_in_sec", `String "60"; "due_at_unix", `Float future_due_at ] in
+  check bool "a mistyped delay is refused, not skipped" false
+    (Tool_result.is_success wrong_type);
+  check bool "the refusal names the type" true
+    (String_util.contains_substring (Tool_result.message wrong_type) "due_in_sec must be an integer");
+  check int "no refused call is stored" 0
+    (List.length (Schedule_store.read_state config).schedules)
+;;
+
+(* A Keeper has the current time on its turn's first request only. A delay
+   counts from the server's dispatch clock, so it needs none. *)
+let test_due_in_sec_counts_from_the_dispatch_clock () =
+  with_config
+  @@ fun config ->
+  let delay = 90 in
+  let before = Unix.gettimeofday () in
+  let created =
+    dispatch_exn config Tool_schemas_schedule.Create_request
+      (wake_args ~extra:[ "due_in_sec", `Int delay ] ())
+  in
+  let after = Unix.gettimeofday () in
+  check bool "a delay creates" true (Tool_result.is_success created);
+  let open Yojson.Safe.Util in
+  let due_at = Tool_result.data created |> member "due_at" |> to_number in
+  let clock_resolution = 1.0 in
+  check bool "due is the delay after the dispatch clock" true
+    (due_at >= before +. Float.of_int delay -. clock_resolution
+     && due_at <= after +. Float.of_int delay +. clock_resolution)
+;;
+
+(* requested_at_unix is a replay field a caller may set, so no due time
+   counts from it: a daily schedule with no due time takes its first due
+   after the dispatch clock whatever requested_at_unix says. *)
+let test_a_calendar_first_due_counts_from_dispatch_not_requested_at () =
+  with_config
+  @@ fun config ->
+  let before = Unix.gettimeofday () in
+  let created =
+    dispatch_exn config Tool_schemas_schedule.Create_request
+      (wake_args
+         ~extra:
+           [ "requested_at_unix", `Float 100.0
+           ; "recurrence_kind", `String "daily"
+           ; "recurrence_hour", `Int 9
+           ; "recurrence_minute", `Int 0
+           ; "recurrence_timezone", `String "UTC"
+           ]
+         ())
+  in
+  check bool "a daily schedule with an old requested_at creates" true
+    (Tool_result.is_success created);
+  let open Yojson.Safe.Util in
+  check bool "its first due is after the dispatch clock" true
+    (Tool_result.data created |> member "due_at" |> to_number >= before);
+  check (float 0.0) "requested_at is recorded as given" 100.0
+    (Tool_result.data created |> member "requested_at" |> to_number)
+;;
+
+(* The TUI edit form sends a due row's due time back as it read it. That is
+   not a new due time; moving it behind the clock is, and it would fire at
+   once. *)
+let test_update_refuses_a_due_time_moved_behind_the_clock () =
+  with_config
+  @@ fun config ->
+  let schedule_id = "sched-edit-past-due" in
+  ignore
+    (create_service_exn config ~schedule_id ~due_at:200.0
+       ~payload:(keeper_wake_payload "fire once") ()
+     : Schedule_domain.schedule_request);
+  let update extra =
+    dispatch_exn config Tool_schemas_schedule.Update_request
+      (wake_args ~extra:(("schedule_id", `String schedule_id) :: extra) ())
+  in
+  check bool "the stored due time sent back unchanged is accepted" true
+    (Tool_result.is_success (update [ "due_at_iso", `String "1970-01-01T00:03:20Z" ]));
+  let moved = update [ "due_at_unix", `Float 150.0 ] in
+  check_refusal "a due time moved into the past"
+    Schedule_contract_values.Refusal_due_already_past moved;
+  let open Yojson.Safe.Util in
+  check string "the refusal names the stored due time" "1970-01-01T00:03:20Z"
+    (Tool_result.data moved |> member "stored_due_at_iso" |> to_string);
+  check bool "a delay is always later and is accepted" true
+    (Tool_result.is_success (update [ "due_in_sec", `Int 60 ]))
+;;
+
+(* A limit outside 1..200 is refused with the range, so the page a caller
+   gets is always the size it asked for. *)
+let test_a_limit_outside_its_range_is_refused () =
+  with_config
+  @@ fun config ->
+  let list_with limit =
+    dispatch_exn config Tool_schemas_schedule.List_requests
+      (`Assoc [ "owner", `String "all"; "limit", limit ])
+  in
+  let zero = list_with (`Int 0) in
+  check_refusal "limit 0" Schedule_contract_values.Refusal_argument_out_of_range zero;
+  let open Yojson.Safe.Util in
+  check int "the refusal names the maximum" Tool_schedule.max_list_limit
+    (Tool_result.data zero |> member "maximum" |> to_int);
+  check_refusal "limit above the maximum"
+    Schedule_contract_values.Refusal_argument_out_of_range
+    (list_with (`Int (Tool_schedule.max_list_limit + 1)));
+  check bool "the maximum itself is accepted" true
+    (Tool_result.is_success (list_with (`Int Tool_schedule.max_list_limit)));
+  check_refusal "notes limit 0"
+    Schedule_contract_values.Refusal_argument_out_of_range
+    (dispatch_exn config Tool_schemas_schedule.List_notes
+       (`Assoc [ "schedule_id", `String "sched-any"; "limit", `Int 0 ]))
+;;
+
+(* A cursor carries the filters of the listing that issued it. Under other
+   filters it would skip rows those filters never compared against its id, so
+   it is refused, as are an empty cursor and one no listing issued. *)
+let test_a_cursor_belongs_to_the_filters_that_issued_it () =
+  with_config
+  @@ fun config ->
+  List.iter
+    (fun schedule_id ->
+       ignore
+         (create_service_exn config ~schedule_id ~due_at:200.0
+            ~payload:(keeper_wake_payload schedule_id) ()
+          : Schedule_domain.schedule_request))
+    [ "sched-1"; "sched-2"; "sched-3" ];
+  let list_with args =
+    dispatch_exn config Tool_schemas_schedule.List_requests (`Assoc args)
+  in
+  let open Yojson.Safe.Util in
+  let first = list_with [ "owner", `String "all"; "limit", `Int 1 ] in
+  let cursor = Tool_result.data first |> member "next_cursor" |> to_string in
+  let mismatch =
+    list_with
+      [ "owner", `String "all"
+      ; "status", `String "scheduled"
+      ; "limit", `Int 1
+      ; "cursor", `String cursor
+      ]
+  in
+  check_refusal "the cursor under another status"
+    Schedule_contract_values.Refusal_cursor_mismatch mismatch;
+  check string "the refusal names the cursor's owner" "all"
+    (Tool_result.data mismatch |> member "cursor_owner" |> to_string);
+  check_refusal "the cursor under another owner"
+    Schedule_contract_values.Refusal_cursor_mismatch
+    (list_with
+       [ "owner", `String "scheduled_by"
+       ; "owner_name", `String "scheduler-agent"
+       ; "cursor", `String cursor
+       ]);
+  List.iter
+    (fun (label, raw, fragment) ->
+       let refused = list_with [ "owner", `String "all"; "cursor", `String raw ] in
+       check bool label false (Tool_result.is_success refused);
+       check bool (label ^ " says why") true
+         (String_util.contains_substring (Tool_result.message refused) fragment))
+    [ "an empty cursor", "", "cursor is empty"
+    ; "a cursor no listing issued", "not-a-cursor", "cursor is not one a listing issued"
+    ; "a bare schedule id", "sched-1", "cursor is not one a listing issued"
+    ];
+  check (list string) "the same filters continue" [ "sched-2" ]
+    (listed_ids
+       (list_with
+          [ "owner", `String "all"; "limit", `Int 1; "cursor", `String cursor ]))
+;;
+
+(* status=active reads a Keeper's live schedules in one call. Which statuses
+   it covers is the domain's [is_terminal], not a list the caller keeps. *)
+let test_status_active_lists_every_status_that_is_not_terminal () =
+  with_config
+  @@ fun config ->
+  let create schedule_id ~due_at =
+    ignore
+      (create_service_exn config ~schedule_id ~due_at
+         ~payload:(keeper_wake_payload schedule_id) ()
+       : Schedule_domain.schedule_request)
+  in
+  create "sched-live" ~due_at:future_due_at;
+  create "sched-due" ~due_at:200.0;
+  create "sched-gone" ~due_at:future_due_at;
+  (match Schedule_store.refresh_due config ~now:201.0 with
+   | Ok _ -> ()
+   | Error err -> fail (Schedule_store.store_error_to_string err));
+  (match Schedule_service.cancel config ~schedule_id:"sched-gone" with
+   | Ok _ -> ()
+   | Error err -> fail (Schedule_service.service_error_to_string err));
+  let list_with args =
+    dispatch_exn config Tool_schemas_schedule.List_requests (`Assoc args)
+  in
+  check (list string) "active is every status that is not terminal"
+    [ "sched-due"; "sched-live" ]
+    (listed_ids (list_with [ "owner", `String "all"; "status", `String "active" ]));
+  check (list string) "one status still selects that status" [ "sched-gone" ]
+    (listed_ids (list_with [ "owner", `String "all"; "status", `String "cancelled" ]));
+  let open Yojson.Safe.Util in
+  let cursor =
+    Tool_result.data
+      (list_with [ "owner", `String "all"; "status", `String "active"; "limit", `Int 1 ])
+    |> member "next_cursor"
+    |> to_string
+  in
+  check_refusal "an active cursor under one status"
+    Schedule_contract_values.Refusal_cursor_mismatch
+    (list_with
+       [ "owner", `String "all"; "status", `String "due"; "cursor", `String cursor ]);
+  check (list string) "the active cursor continues under active" [ "sched-live" ]
+    (listed_ids
+       (list_with
+          [ "owner", `String "all"
+          ; "status", `String "active"
+          ; "cursor", `String cursor
+          ]))
+;;
+
+(* The arguments that decide which rows a call makes or reads are refused
+   when they arrive as another JSON type. Read as absent, a string expiry
+   would store a row that never expires and a numeric status would list
+   every status. *)
+let test_a_mistyped_deciding_argument_is_refused () =
+  with_config
+  @@ fun config ->
+  let expiry =
+    dispatch_exn config Tool_schemas_schedule.Create_request
+      (wake_args
+         ~extra:[ "due_in_sec", `Int 60; "expires_at_unix", `String "tomorrow" ]
+         ())
+  in
+  check bool "a string expiry is refused" false (Tool_result.is_success expiry);
+  check bool "the refusal names the expiry type" true
+    (String_util.contains_substring
+       (Tool_result.message expiry)
+       "expires_at_unix must be a number");
+  check int "nothing is stored" 0
+    (List.length (Schedule_store.read_state config).schedules);
+  let status =
+    dispatch_exn config Tool_schemas_schedule.List_requests
+      (`Assoc [ "owner", `String "all"; "status", `Int 1 ])
+  in
+  check bool "a numeric status is refused" false (Tool_result.is_success status);
+  check bool "the refusal names the status type" true
+    (String_util.contains_substring (Tool_result.message status) "status must be a string")
+;;
+
+(* The schema advertises the same bounds the handler enforces. The TOML
+   cannot read an OCaml constant, so the two are compared here. *)
+let test_declared_bounds_match_the_handler () =
+  let property action name =
+    let schema : Masc_domain.tool_schema = (schedule_definition action).schema in
+    let open Yojson.Safe.Util in
+    schema.input_schema |> member "properties" |> member name
+  in
+  let bound json key =
+    let open Yojson.Safe.Util in
+    json |> member key |> to_int_option
+  in
+  List.iter
+    (fun action ->
+       let limit = property action "limit" in
+       check (option int) "limit minimum" (Some Tool_schedule.min_list_limit)
+         (bound limit "minimum");
+       check (option int) "limit maximum" (Some Tool_schedule.max_list_limit)
+         (bound limit "maximum"))
+    [ Tool_schemas_schedule.List_requests; Tool_schemas_schedule.List_notes ];
+  List.iter
+    (fun action ->
+       check (option int) "due_in_sec minimum" (Some Tool_schedule.min_due_in_sec)
+         (bound (property action "due_in_sec") "minimum"))
+    [ Tool_schemas_schedule.Create_request; Tool_schemas_schedule.Update_request ]
 ;;
 
 let () =
@@ -1078,6 +1686,36 @@ let () =
             test_keeper_wake_creation_respects_shutdown_fence
         ; test_case "tool response carries structured recurrence" `Quick
             test_tool_response_carries_structured_recurrence
+        ; test_case "create refuses a due time behind the clock" `Quick
+            test_create_refuses_a_due_time_behind_the_clock
+        ; test_case "the current second is not past" `Quick
+            test_the_current_second_is_not_past
+        ; test_case "cancel refusal says the state and the last wake" `Quick
+            test_cancel_refusal_says_the_state_and_the_last_wake
+        ; test_case "list reads the owner it is asked for" `Quick
+            test_list_reads_the_owner_it_is_asked_for
+        ; test_case "list pages by schedule_id" `Quick
+            test_list_pages_by_schedule_id
+        ; test_case "an unnamed caller names the actor itself" `Quick
+            test_an_unnamed_caller_names_the_actor_itself
+        ; test_case "a call gives exactly one due input" `Quick
+            test_a_call_gives_exactly_one_due_input
+        ; test_case "due_in_sec counts from the dispatch clock" `Quick
+            test_due_in_sec_counts_from_the_dispatch_clock
+        ; test_case "a calendar first due counts from dispatch, not requested_at" `Quick
+            test_a_calendar_first_due_counts_from_dispatch_not_requested_at
+        ; test_case "update refuses a due time moved behind the clock" `Quick
+            test_update_refuses_a_due_time_moved_behind_the_clock
+        ; test_case "a limit outside its range is refused" `Quick
+            test_a_limit_outside_its_range_is_refused
+        ; test_case "a cursor belongs to the filters that issued it" `Quick
+            test_a_cursor_belongs_to_the_filters_that_issued_it
+        ; test_case "status active lists every status that is not terminal" `Quick
+            test_status_active_lists_every_status_that_is_not_terminal
+        ; test_case "a mistyped deciding argument is refused" `Quick
+            test_a_mistyped_deciding_argument_is_refused
+        ; test_case "declared bounds match the handler" `Quick
+            test_declared_bounds_match_the_handler
         ] )
     ]
 ;;

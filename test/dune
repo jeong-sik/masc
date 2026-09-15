@@ -44,6 +44,16 @@
  (modules test_completion_repair_delivery)
  (libraries masc_test_deps))
 
+(test
+ (name test_keeper_producer_route)
+ (modules test_keeper_producer_route)
+ (libraries masc_test_deps))
+
+(test
+ (name test_operator_task_attention)
+ (modules test_operator_task_attention)
+ (libraries masc_test_deps))
+
 ; Test Environment Configuration
 
 (test
@@ -274,7 +284,6 @@
   test_multi_workspace
   test_worktree_detection
   test_mention
-  test_heartbeat_qw
   test_sse_qw
   test_sse_stream
   test_health
@@ -354,6 +363,7 @@
   test_keeper_unified_claim_progress
   test_keeper_unified_context_overflow
   test_keeper_context_overflow_shrink
+  test_keeper_context_window
   test_keeper_provider_call_deadline
   test_keeper_failed_selection_disposition
   test_keeper_cycle_failed_runtime_attribution
@@ -629,7 +639,6 @@
   test_multi_workspace
   test_worktree_detection
   test_mention
-  test_heartbeat_qw
   test_sse_qw
   test_sse_stream
   test_health
@@ -710,6 +719,7 @@
   test_keeper_unified_claim_progress
   test_keeper_unified_context_overflow
   test_keeper_context_overflow_shrink
+  test_keeper_context_window
   test_keeper_provider_call_deadline
   test_keeper_failed_selection_disposition
   test_keeper_cycle_failed_runtime_attribution
@@ -2330,6 +2340,7 @@
 (include stanzas/test_auth_token_inventory.inc)
 (include stanzas/test_config_root_embedded_seed.inc)
 (include stanzas/test_builtin_skill_package.inc)
+(include stanzas/test_builtin_skill_judgement.inc)
 (include stanzas/test_front_door.inc)
 
 (include stanzas/test_gate_surface.inc)
@@ -4091,6 +4102,24 @@
  (name runtest)
  (deps (alias runtest-test_tui_keyboard_input)))
 
+; The harness decides what runs from --list, --scenario and the family name
+; before a terminal opens, and no rule here passes either flag. This suite
+; drives that choice with a stand-in binary, and holds the harness's family
+; table and the rules in this file to each other.
+(rule
+ (alias runtest-test_tui_keyboard_scenario_selection)
+ (deps
+  test_tui_keyboard_scenario_selection.py
+  test_tui_keyboard_input.py
+  dune
+  (glob_files stanzas/*.inc))
+ (action
+  (run python3 %{dep:test_tui_keyboard_scenario_selection.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_scenario_selection)))
+
 ; The named lanes below are the same suite sliced by scenario family. They
 ; existed only as local commands, so every assertion in them was dead in CI:
 ; a PR could "fix" a lane scenario that nothing ever ran (found by the
@@ -4349,6 +4378,22 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_keyboard_input-quit-waiting)))
+
+(rule
+ (alias runtest-test_tui_keyboard_input-chat-retained-stop)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   chat-retained-stop)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-chat-retained-stop)))
 
 (rule
  (alias runtest-test_tui_keyboard_input-ctrl-y)
@@ -5078,6 +5123,7 @@
 (include stanzas/test_tui_data_unreliable_row.inc)
 (include stanzas/test_tui_tab_strip.inc)
 (include stanzas/test_tui_burn_hud.inc)
+(include stanzas/test_tui_context_tokens.inc)
 (include stanzas/test_tui_coordinator_status_row.inc)
 (include stanzas/test_tui_board_list_reading.inc)
 (include stanzas/test_tui_planning_summary_rows.inc)
@@ -5506,6 +5552,7 @@
  (libraries alcotest eio eio.mock cstruct yojson masc.browser_host))
 
 (include stanzas/test_browser_native_host.inc)
+(include stanzas/test_browser_lane_routes.inc)
 
 (test
  (name test_shell_ir_with_sandbox)
@@ -5579,6 +5626,13 @@
 
 (include stanzas/test_browser_downloads.inc)
 (include stanzas/test_browser_bidi_lifecycle.inc)
+
+; Mock clock as the BiDi command window's clock: a reply that arrived as the
+; window closed is the reply, not a timeout that interrupts the session.
+(test
+ (name test_browser_bidi_downloads_reply_window)
+ (modules test_browser_bidi_downloads_reply_window)
+ (libraries masc alcotest eio eio.mock))
 (include stanzas/test_browser_webdriver.inc)
 (include stanzas/test_browser_controls.inc)
 
@@ -5985,6 +6039,8 @@
 
 (include stanzas/test_browser_composition.inc)
 
+(include stanzas/test_shipped_skills.inc)
+
 (rule
  (alias runtest-test_setup_cli)
  (deps test_setup_cli.py ../bin/main_eio.exe
@@ -5995,6 +6051,21 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_setup_cli)))
+
+; A local install replaces every registered browser lane host copy, so the
+; lane Firefox starts is the build that was just installed.
+(rule
+ (alias runtest-test_install_local_build)
+ (deps
+  test_install_local_build.py
+  ../scripts/install-local-build.sh
+  ../connectors/browser/install-host.sh)
+ (action
+  (run python3 %{dep:test_install_local_build.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_install_local_build)))
 
 (test
  (name test_workspace_memory_proposals)
@@ -6121,6 +6192,7 @@
  (libraries alcotest masc.runtime masc.agent_core masc.agent_core.llm_provider))
 
 (include stanzas/test_prerequisite_terminal.inc)
+(include stanzas/test_process_group_terminal_stdin.inc)
 (include stanzas/test_workspace_connection.inc)
 
 (test
@@ -6193,6 +6265,13 @@
  (name test_dashboard_compute_window)
  (modules test_dashboard_compute_window)
  (libraries alcotest eio eio.mock masc.dashboard))
+
+; Mock clock as the execution dashboard render's clock: a render that finished
+; as its window closed is the render, not the timeout page.
+(test
+ (name test_dashboard_execution_render_window)
+ (modules test_dashboard_execution_render_window)
+ (libraries alcotest eio eio.mock yojson masc.dashboard))
 
 ; Mock clock orders the timer's wake-up ahead of the read's: the official
 ; client lanes' idle window keeps a line that arrived as it passed.
@@ -6282,6 +6361,13 @@
  (libraries masc_test_deps))
 
 (include stanzas/test_browser_bidi_peer.inc)
+
+; An attempt that published its answer must not publish a failure over it:
+; the light body refresh, and the window around the attempt, run after it.
+(test
+ (name test_server_dashboard_http_execution_surfaces_attempt)
+ (modules test_server_dashboard_http_execution_surfaces_attempt)
+ (libraries masc_test_deps))
 
 (rule
  (alias runtest-test_tui_lane_visual_pty)

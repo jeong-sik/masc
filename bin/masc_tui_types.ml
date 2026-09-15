@@ -1609,8 +1609,9 @@ let observer_replay_description = function
 
    That rate held while every event was something a keeper did. A chat stream
    sends one frame per token, so the two budgets below are separate: this one
-   is spent only on events the Acting screen's [Actions] filter shows, and the
-   stream frames, heartbeats and snapshots share the smaller one. Trimming by
+   is spent on events the Acting screen's [Actions] filter shows and on the
+   turn observations the Turns fold reads, and the stream frames, heartbeats
+   and snapshots share the smaller one. Trimming by
    arrival alone let a single long reply spend all 1000 and leave the screen
    holding about a second. *)
 let acting_retained_entries = 1000
@@ -1632,7 +1633,6 @@ let acting_retained_quiet = 200
     says so rather than picking the convenient neighbour. *)
 type keeper_liveness_counts = {
   klc_active: int;
-  klc_inactive: int;
   klc_offline: int;
   klc_idle: int;
   klc_paused: int;
@@ -3386,11 +3386,6 @@ module Browser_lane_view = struct
     | Automation, _ -> Some "browser"
     | Live, Some client -> Some (browser_name client.browser)
     | Live, None -> None
-  let context_label t =
-    match browser_label t with
-    | Some browser ->
-      Printf.sprintf "Browser Lane · %s · %s page reader" (source_name t.source) browser
-    | None -> Printf.sprintf "Browser Lane · %s · no browser" (source_name t.source)
   let create () =
     { clients = None; selected_client = None; client_picker = None;
       source = Live; selected_tab = None; scroll = 0;
@@ -4459,6 +4454,11 @@ type state = {
      drops exactly those rows. Replaced wholesale with [tasks] on each load. *)
   mutable tasks_domain: Masc_domain.task list;
   mutable task_flow: Masc_tui_task_flow.t option;
+  (* Tasks whose only exit belongs to the operator, as
+     [Operator_task_attention] projected them from the same load. [None] until
+     the first load answers: an empty list is a fact about the workspace and
+     "not looked yet" is not. *)
+  mutable operator_stalled: Masc_tui_agenda.stalled list option;
   mutable task_focus: pane_focus;
   (* The [?] help overlay: open replaces the surface body until Esc/? closes
      it. The scroll survives only while it is open. *)
@@ -5391,7 +5391,7 @@ type state = {
   mutable observer_cursor: Sse_wire.observer_cursor option;
       (** Last applied complete event, scoped to the responding process. *)
   mutable observer_replay: observer_replay_status;
-  mutable acting: Masc_tui_acting.entry list;  (** newest first, at most [acting_retained_entries] *)
+  mutable acting: Masc_tui_acting.entry list;  (** newest first, at most [acting_retained_entries] + [acting_retained_quiet] *)
   mutable acting_dropped: int;  (** events that fell off the end of [acting] *)
   mutable acting_undecodable: int;  (** frames the feed reader could not read *)
   mutable acting_undecodable_last: string option;  (** why, for the most recent one *)
@@ -6415,6 +6415,7 @@ let create_state
   tasks = [];
   tasks_domain = [];
   task_flow = None;
+  operator_stalled = None;
   task_focus = Left_pane;
   help_open = false;
   keeper_deletions_open = false;
@@ -7474,7 +7475,14 @@ let agenda (state : state) : Masc_tui_agenda.t =
               })
            state.keeper_tool_approvals)
   in
-  Masc_tui_agenda.project ~scheduled ~awaiting
+  let stalled =
+    match state.operator_stalled, state.tasks_error with
+    | None, Some error ->
+      Masc_tui_agenda.Read_failed (Tui_decode.sanitize_terminal_text error)
+    | None, None -> Masc_tui_agenda.Not_read
+    | Some rows, _ -> Masc_tui_agenda.Read rows
+  in
+  Masc_tui_agenda.project ~scheduled ~awaiting ~stalled
 ;;
 
 (* Rows the agenda strip takes from every surface. Added once, here, rather

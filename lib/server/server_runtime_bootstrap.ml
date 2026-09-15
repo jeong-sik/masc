@@ -625,9 +625,6 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
   Option.iter Eio_context.set_env env;
   Process_eio.init ~cwd_default:Eio.Path.(fs / base_path) ~proc_mgr ~clock;
   Exec_tap.install_from_env ();
-  Unix.putenv
-    Env_config_core.base_path_input_env_key
-    (Option.value ~default:"" input_base_path);
   Unix.putenv Env_config_core.base_path_env_key base_path;
   Config_dir_resolver.reset ();
   bootstrap_base_path_config_root ~base_path;
@@ -682,6 +679,16 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
       "keeper provider-call no-progress threshold resolved: %.1fs (source: %s)"
       threshold.value
       (source_to_string threshold.source));
+  (* The transmission window (RFC keeper-context-window-in-tokens): the one
+     number that says how much a request carries, stated with its source so
+     an operator can tell the compiled default from a declared value. *)
+  Keeper_runtime_resolved.(
+    let window = (current ()).context_window_tokens in
+    Log.Runtime.info
+      ~category:Log.Boundary
+      "keeper context window resolved: %d tokens per request (source: %s)"
+      window.value
+      (source_to_string window.source));
   Keeper_task_owner_backend.install_hooks ();
   Server_dashboard_http_execution_surfaces.install_task_mutation_cache_invalidation
     ~invalidate_full_health_snapshot:
@@ -713,6 +720,7 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
       ()
     |> Server_base_path_diagnostics.to_yojson
   in
+  Server_startup_state.note_input_base_path input_base_path;
   Server_startup_state.note_runtime_resolution ~path_diagnostics
     ~config_resolution;
   (* RFC-0107 Phase D.4 — wire piaf connection pool Otel_metric_store exporter.
@@ -1112,13 +1120,15 @@ let initialize_owner_state_blocking
     | None -> Error Runtime_startup_state.Config_missing
     | Some runtime_config_path ->
       Runtime.load_config_observation ~runtime_config_path ()
-      |> Result.map_error (fun _ -> Runtime_startup_state.Config_unreadable)
+      |> Result.map_error (fun detail -> Runtime_startup_state.Config_unreadable { detail })
   in
   let runtime_initialization = match runtime_config_observation with
     | Error reason -> Error reason
     | Ok observation ->
       Runtime.init_default_degraded_observation observation
-      |> Result.map_error (fun _ -> Runtime_startup_state.Config_invalid)
+      |> Result.map_error (fun error ->
+        Runtime_startup_state.Config_invalid
+          { detail = Runtime.strict_init_error_to_string error })
   in
   (match runtime_initialization with
    | Ok Runtime.Initialized -> Log.Server.info "Runtime default initialized: %s" (Runtime.get_default_runtime_id ())
@@ -1532,20 +1542,31 @@ let start_goal_verifier ~sw (state : Mcp_server.server_state) =
 
 let resume_model_configuration () =
   match Runtime.config_path () with
-  | None -> Error Server_model_setup_resume.Configuration_unavailable
+  | None ->
+    Error
+      (Server_model_setup_resume.Configuration_unavailable
+         { detail = "this workspace has no runtime.toml path" })
   | Some path ->
     let resumed = Runtime.with_config_lock ~runtime_config_path:path (fun () ->
-      let catalog_ready =
-        try
-          let (_ : string option) =
-            configure_agent_core_model_catalog_overlay ~config_root:(Filename.dirname path) ()
-          in
-          true
-        with Env_config_core.Config_error _ -> false
+      let initialized =
+        match
+          configure_agent_core_model_catalog_overlay ~config_root:(Filename.dirname path) ()
+        with
+        | (_ : string option) ->
+          Runtime.init_default_degraded_report ~config_path:path
+          |> Result.map_error Runtime.strict_init_error_to_string
+        | exception Env_config_core.Config_error detail -> Error detail
       in
-      if not catalog_ready then Error "configuration unavailable" else
-      match Runtime.init_default_degraded_report ~config_path:path with
-      | Error _ -> Error "configuration unavailable"
+      match initialized with
+      | Error detail ->
+        (* A running runtime stays as it is. While setup is still required,
+           the cause an operator reads becomes this attempt's cause, so a
+           fixed boot error is not reported after a different one replaced it. *)
+        if Runtime_startup_state.requires_setup () then
+          Runtime_startup_state.set
+            (Runtime_startup_state.Setup_required
+               (Runtime_startup_state.Config_invalid { detail }));
+        Error detail
       | Ok _ ->
         let registry_published =
           try configure_exact_output_registry ~config_root:(Filename.dirname path) (); true
@@ -1565,7 +1586,9 @@ let resume_model_configuration () =
           in
           Ok authority_available)
     in
-    Result.map_error (fun _ -> Server_model_setup_resume.Configuration_unavailable) resumed
+    Result.map_error
+      (fun detail -> Server_model_setup_resume.Configuration_unavailable { detail })
+      resumed
 
 let start_post_ready_owner_lanes
       ~sw
@@ -2108,29 +2131,44 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ?on_ready ~accept_store
      log and exit so external process managers can restart the server.
      Prevents zombie-listener state where the socket is open but HTTP
      requests hang because init is stuck. *)
-  Eio.Fiber.fork ~sw (fun () ->
-    Eio.Switch.run ~name:"startup-watchdog" @@ fun _ ->
-    try
-      let timeout_sec = Server_startup_state.watchdog_timeout_sec () in
-      Eio.Time.sleep clock timeout_sec;
-      let current = Server_startup_state.snapshot () in
-      if not current.state_ready then (
-        let elapsed = Server_startup_state.elapsed_since_start () in
-        Log.Server.error
-          "[watchdog] Server init did not complete within %.0fs (elapsed=%.1fs, phase=%s). Exiting."
-          timeout_sec elapsed
-          (Server_startup_state.phase_to_string current.phase);
-        exit 1)
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      Log.Server.error "startup watchdog fiber failed: %s"
-        (Printexc.to_string exn));
+  (* A daemon: the watchdog only sleeps and then reads a flag, so nothing
+     waits for it and the switch must not either. As an ordinary fiber it
+     kept a normally returning [Switch.run] parked for the rest of the
+     timeout. Cancelling it loses nothing -- a closing switch means the
+     process is already ending, which is what the watchdog would force. *)
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Eio.Switch.run ~name:"startup-watchdog" (fun _ ->
+      try
+        let timeout_sec = Server_startup_state.watchdog_timeout_sec () in
+        Eio.Time.sleep clock timeout_sec;
+        let current = Server_startup_state.snapshot () in
+        if not current.state_ready then (
+          let elapsed = Server_startup_state.elapsed_since_start () in
+          Log.Server.error
+            "[watchdog] Server init did not complete within %.0fs (elapsed=%.1fs, phase=%s). Exiting."
+            timeout_sec elapsed
+            (Server_startup_state.phase_to_string current.phase);
+          exit 1)
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+        Log.Server.error "startup watchdog fiber failed: %s"
+          (Printexc.to_string exn));
+    `Stop_daemon);
 
   (* 3. Start serving -- /health responds before init completes *)
   let run_serving ~sw ~socket ~routes:_ ~request_handler ~h2_request_handler
       ~h2_error_handler =
     Eio.Promise.resolve publish_listener_bound ();
+    (* The browser tools compare an installed host's port with the port this
+       listener actually bound, which differs from [config.port] when that
+       asks for any free port. A Unix-domain listener has no port to compare,
+       so the port stays unknown. *)
+    (match Eio.Net.listening_addr socket with
+     | `Tcp (_, port) ->
+       Browser_lane.install_serving_port port;
+       Eio.Switch.on_release sw Browser_lane.withdraw_serving_port
+     | `Unix _ -> ());
     (* The listener is bound. Persist only the desired connection, not readiness. *)
     (match Workspace_connection.port config.port with
      | Error error -> Log.Server.warn "%s" (Workspace_connection.error_message error)

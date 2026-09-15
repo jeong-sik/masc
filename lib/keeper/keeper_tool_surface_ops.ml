@@ -225,31 +225,31 @@ let keeper_list_row_json ~runtime_class config name =
   | Ok None -> None
   | Ok (Some (meta : keeper_meta)) ->
       let now_ts = Time_compat.now () in
-      let keepalive_running = Keeper_status_bridge.runtime_keepalive_running config meta in
+      (* One registry read for [phase], [health] and [keepalive_running], so
+         the row cannot pair a health from one moment with a phase from
+         another. *)
+      let registry_phase = Keeper_status_bridge.runtime_phase config meta in
+      let keepalive_running =
+        Keeper_status_runtime.keepalive_running_of_phase registry_phase
+      in
       let diagnostic =
         Keeper_status_runtime.keeper_diagnostic_json
-          ~config
           ~meta
-          ~keepalive_running ~history_items:[] ~now_ts
-        |> Keeper_status_runtime.augment_keeper_diagnostic_json
-             ~keepalive_running
-             ~keepalive_started_at:
-               (Keeper_status_bridge.runtime_keepalive_started_at config meta)
-             ~now_ts
+          ~phase:registry_phase ~history_items:[] ~now_ts
       in
       (* One keeper is described by four separate readings, and each row
          carries its own field for one of them rather than a single word that
          answers for all four:
 
            phase        lifecycle state machine  - which cell it is in
-           health       observed signal          - is it reporting on time
+           health       phase and turn history   - is it running, has it turned,
+                                                   are its turns failing
            paused       operator override        - did a person stop it
            next_action  what to do about it      - already derived from health
 
-         [status] is a fifth field that re-answers [health] with three of its
-         values folded into "inactive". The TUI counted that word as running
-         while the dashboard counted it as attention, because a folded word
-         leaves the reader to guess. Both are published here so neither has to.
+         [status] is the display word for [health] ({!Keeper_status_runtime.
+         keeper_surface_status}). Both are published so a reader compares the
+         reading, not the word.
 
          The diagnostic already carries health and next_action; this only stops
          discarding them. *)
@@ -268,7 +268,7 @@ let keeper_list_row_json ~runtime_class config name =
           (Json_util.get_string diagnostic "next_action_path")
       in
       let phase =
-        match Keeper_registry.get_phase ~base_path:config.base_path meta.name with
+        match registry_phase with
         | Some p -> Keeper_state_machine.phase_to_string p
         | None -> "offline"
       in

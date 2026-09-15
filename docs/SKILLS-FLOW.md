@@ -47,7 +47,7 @@ flowchart TD
 rejection으로 격리한다. 디렉터리 이름으로 복구하거나 다른 Skill까지 멈추지 않는다.
 
 **문서 → 스킬**: `Keeper_skill_catalog.parse_skill`
-(`lib/keeper/keeper_skill_catalog.ml:83`)가 본문의 composition fence를 본다.
+(`lib/keeper/keeper_skill_catalog.ml`)가 본문의 composition fence를 본다.
 
 ```mermaid
 flowchart LR
@@ -121,7 +121,7 @@ Task Skill은 실행 projection과 prompt에서 unavailable이며 admission 전�
   `keeper_compose_<name>` 도구. activation recorder는 도구 이름에서 reference를 역추론하지
   않는다.
 - 지시 스킬 → `keeper_skill` 도구 하나(`make_instruction_skill_tool`,
-  `keeper_tool_composition_surface.ml:959`). 본문은 이 도구가 서빙한다(#30635 이후
+  `keeper_tool_composition_surface.ml`). 본문은 이 도구가 서빙한다(#30635 이후
   파일시스템 프로비저닝 불필요).
 
 ### 2b. 프롬프트 — 지명된 스킬 안내
@@ -175,7 +175,13 @@ Tools 화면에서 `J/K`로 published Skill을 고르고 `e`를 누르면 `$EDIT
 
 외부 편집이 먼저 들어갔으면 `revision_conflict`로 저장하지 않는다. write 뒤 재발행만
 실패한 드문 경우는 `saved_but_unpublished`로 분리해 파일이 바뀐 사실을 숨기지 않는다.
-현재 TUI 편집은 기존 published Skill만 대상으로 하며 생성·삭제는 별도 기능이다.
+
+새 Skill은 같은 화면에서 `c`(지시 스킬)나 `C`(합성 스킬 starter)로 만든다. `$EDITOR`에서
+쓴 원문을 첫 번째 쓰기 가능한 source로 `/api/v1/skills/editor/create`에 보낸다. 같은 이름의
+package가 이미 있으면 덮어쓰지 않고 `package_already_exists`로 거절한다. 대시보드는
+Skills › Skill Studio의 **+ New Skill**이 같은 경로를 쓴다. `Enter`는 선택한 revision의
+activation 기록과 마지막으로 끝난 합성 실행을 `/api/v1/skills/evidence`로 불러온다.
+삭제는 `DELETE /api/v1/skills/editor`만 있고 TUI·대시보드 조작은 없다.
 
 ## 3. 실행과 관측
 

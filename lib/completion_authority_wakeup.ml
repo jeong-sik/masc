@@ -78,6 +78,116 @@ let wake_rejected_producer
 
 type recovery_report = { delivered : int; unroutable : int; retained : int }
 
+(* A rejection with no Keeper queue leaves the Task held by a producer that
+   will never act on it again. Ending the delivery obligation alone (#36461)
+   stopped the retry but left the Task in [InProgress] for good, so the Task is
+   put back before the obligation is acknowledged. Release-then-acknowledge is
+   the safe order: a crash between the two replays the release, which reads the
+   status again and does nothing the second time, while acknowledging first
+   would strand the Task with nothing left to retry. *)
+(* Which release failures can be ended here rather than kept for the next
+   interval. Two conditions, and both have to hold.
+
+   It has to be permanent: #36461 removed a retry that could never succeed,
+   and a release that fails the same way every interval would put it back.
+
+   It also has to be *dischargeable*, which is the condition the first pass
+   of this got wrong. Ending an obligation means acknowledging it, and
+   {!Workspace_task_rejection_outbox.acknowledge} takes the same lock and
+   makes the same backlog write the release just failed at. So a failure that
+   says the backlog cannot be read, written or locked cannot be ended either:
+   the only thing left to do with it is keep it, which is also the right thing.
+   [NotInitialized] was in the permanent set and is wrong twice over — the
+   acknowledgement would fail for the same reason, and an uninitialised
+   workspace fails the outbox read long before a release is attempted.
+
+   That leaves the two that fail while the backlog is still writable: an
+   obligation carrying a task id that is not a task id, and one carrying an
+   authority with no identity. Neither can change while the obligation stands.
+   Both are close to unreachable — the verdict path refuses a blank authority
+   before the obligation exists — which is the point: if one does appear, it
+   appeared through a route nobody expected, and retrying it forever is how
+   that stays invisible. *)
+let release_failure_is_permanent (error : Masc_domain.masc_error) =
+  match error with
+  | Masc_domain.System system ->
+    (match system with
+     | Masc_domain.System_error.ValidationError _ -> true
+     (* Every one of these says the backlog itself is unavailable, so the
+        acknowledgement that would end the obligation fails with it. *)
+     | Masc_domain.System_error.NotInitialized
+     | Masc_domain.System_error.IoError _
+     | Masc_domain.System_error.StorageError _
+     | Masc_domain.System_error.LockContention _
+     | Masc_domain.System_error.InvalidJson _
+     | Masc_domain.System_error.InvalidFilePath _
+     | Masc_domain.System_error.AlreadyInitialized -> false)
+  | Masc_domain.Task task ->
+    (match task with
+     | Masc_domain.Task_error.InvalidId _ -> true
+     | Masc_domain.Task_error.NotFound _
+     | Masc_domain.Task_error.AlreadyClaimed _
+     | Masc_domain.Task_error.NotClaimed _
+     | Masc_domain.Task_error.InvalidState _ -> false)
+  (* Spelled out rather than left to a catch-all: the release cannot raise
+     these today, and a change that makes it raise one has to decide here
+     instead of inheriting "retry forever". *)
+  | Masc_domain.Agent _
+  | Masc_domain.Auth _
+  | Masc_domain.RateLimitExceeded _
+  | Masc_domain.CacheError _ -> false
+;;
+
+let release_unroutable_task ~config (item : Masc_domain.pending_completion_rejection) =
+  (* Asked again inside the backlog lock: the routing answer above was read
+     before it, and a Keeper meta can land at the producer's name in between.
+     Through the reader that writes nothing — [resolve] repairs an off-canon
+     meta in place, and an fsync of another Keeper's file under a lease-backed
+     lock widens the window where the lease expires while still held. *)
+  let still_unroutable () =
+    Ok (Keeper_producer_route.has_no_queue_without_writing ~config item.producer)
+  in
+  match
+    Workspace_task.release_unroutable_rejected_task_r
+      config
+      ~authority:item.authority
+      ~task_id:item.task_id
+      ~producer:item.producer
+      ~verification_id:item.verification_id
+      ~reason:item.reason
+      ~still_unroutable
+      ()
+  with
+  | Error error when release_failure_is_permanent error ->
+    Log.Misc.error
+      "completion rejection cannot be released and retrying cannot change that \
+       task_id=%s verification_id=%s producer=%s detail=%s"
+      item.task_id
+      item.verification_id
+      item.producer
+      (Masc_domain.masc_error_to_string error);
+    Ok `Release_refused
+  | Error error -> Error (Masc_domain.masc_error_to_string error)
+  | Ok (Workspace_task.Released { previous_status; backlog_version; post_commit_errors })
+    ->
+    List.iter
+      (fun detail ->
+         Log.Misc.warn
+           "completion rejection release projection failed task_id=%s detail=%s"
+           item.task_id detail)
+      post_commit_errors;
+    Ok
+      (`Released
+        (Masc_domain.task_status_to_string previous_status, backlog_version))
+  | Ok (Workspace_task.Not_held_by_producer { task_status }) ->
+    Ok (`Already_moved (Masc_domain.task_status_to_string task_status))
+  (* A queue exists after all. Keep the obligation: the next interval routes
+     to that Keeper and delivers what this one could not. *)
+  | Ok Workspace_task.Producer_became_routable ->
+    Error "a Keeper queue appeared at the producer's name; delivering next interval"
+  | Ok Workspace_task.Task_absent -> Ok `Task_absent
+;;
+
 let reconcile_pending ~config =
   match Workspace_task_rejection_outbox.pending config with
   | Error detail -> Error detail
@@ -102,9 +212,10 @@ let reconcile_pending ~config =
            no queue will ever be read for it: an MCP client that submitted
            the Task is the usual producer here. Retrying cannot create one.
            The verdict and its reason already stand on the Task (the rejection
-           handoff committed with it), so the delivery obligation ends here
-           instead of being retried every interval for good. *)
-        | Unroutable_producer _ -> Ok `No_keeper
+           handoff committed with it), so the obligation ends here instead of
+           being retried every interval for good — and the Task goes back to
+           the backlog, because the producer named on it cannot act again. *)
+        | Unroutable_producer _ -> release_unroutable_task ~config item
         | Producer_identity_lookup_failed { detail; _ }
         | Durable_queue_failed { detail; _ } -> Error detail
       in
@@ -123,11 +234,28 @@ let reconcile_pending ~config =
           "completion repair delivered task_id=%s verification_id=%s producer=%s"
           item.task_id item.verification_id item.producer;
         { report with delivered = report.delivered + 1 }
-      | Ok `No_keeper ->
+      | Ok (`Released (previous_status, backlog_version)) ->
         Log.Misc.warn
-          "completion rejection has no Keeper to deliver to; the verdict stays \
-           on the Task task_id=%s verification_id=%s producer=%s"
+          "completion rejection has no Keeper to deliver to; the task returned \
+           to the backlog task_id=%s verification_id=%s producer=%s from=%s \
+           version=%d"
+          item.task_id item.verification_id item.producer previous_status
+          backlog_version;
+        { report with unroutable = report.unroutable + 1 }
+      | Ok (`Already_moved task_status) ->
+        Log.Misc.warn
+          "completion rejection has no Keeper to deliver to; the task already \
+           moved on task_id=%s verification_id=%s producer=%s status=%s"
+          item.task_id item.verification_id item.producer task_status;
+        { report with unroutable = report.unroutable + 1 }
+      | Ok `Task_absent ->
+        Log.Misc.warn
+          "completion rejection has no Keeper to deliver to; the task no longer \
+           exists task_id=%s verification_id=%s producer=%s"
           item.task_id item.verification_id item.producer;
+        { report with unroutable = report.unroutable + 1 }
+      | Ok `Release_refused ->
+        (* Already logged as an error with the reason at the refusal. *)
         { report with unroutable = report.unroutable + 1 }
       | Error detail ->
         Log.Misc.error

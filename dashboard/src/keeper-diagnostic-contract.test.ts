@@ -4,17 +4,25 @@ import { normalizeKeeperDiagnostic } from './keeper-state'
 const base = {
   health_state: 'healthy',
   last_reply_status: 'delivered',
-  continuity_state: 'healthy',
 }
 
 describe('keeper diagnostic wire contract', () => {
+  // Exactly Keeper_status_runtime.keeper_health_to_string. A word missing here
+  // makes the normaliser drop the whole diagnostic, so a failing keeper would
+  // lose its summary and its recover action on every dashboard surface.
+  it('accepts every health_state the server emits', () => {
+    for (const health of ['healthy', 'idle', 'failing', 'offline']) {
+      const parsed = normalizeKeeperDiagnostic({
+        ...base,
+        health_state: health,
+        next_action_path: 'recover',
+      })
+      expect(parsed?.health_state, `health_state=${health}`).toBe(health)
+    }
+  })
+
   it('accepts every next_action_path the server emits', () => {
-    for (const path of [
-      'auto_restart',
-      'recover',
-      'probe',
-      'direct_message',
-    ]) {
+    for (const path of ['recover', 'probe', 'direct_message']) {
       expect(
         normalizeKeeperDiagnostic({ ...base, next_action_path: path }),
         `next_action_path=${path}`,

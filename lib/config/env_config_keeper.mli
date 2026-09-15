@@ -171,20 +171,18 @@ module KeeperKeepalive : sig
   val sleep_chunk_sec : float
 
   val rate_limit_backoff_floor_sec : float
-  (** Lower bound of the failure-route backoff sleep when a provider
-      rate-limit ([429]) or capacity route carries no usable [Retry-After]
-      (absent, zero, negative, NaN, infinite): the signal is real even
-      without a duration, so the lane waits at least this long (#26068).
-      Also the lower clamp of {!rate_limit_backoff_cap_sec}. Fixed at
-      [60.0]; not env-configurable. *)
+  (** How long a path rests after a provider throttle ([429], capacity, or a
+      transient class) that stated no usable [Retry-After] (absent, zero,
+      negative, NaN): the signal is real even without a duration
+      (RFC-provider-path-rest §3.3). Also the lower clamp of
+      {!rate_limit_backoff_cap_sec}. Fixed at [60.0]; not env-configurable. *)
 
   val rate_limit_backoff_cap_sec : float
-  (** Upper bound for the failure-route backoff sleep after a provider
-      rate-limit ([429]) or capacity cycle (#26068). Clamped to
+  (** The longest a path rests after a provider refusal, and the rest of a
+      hard quota that stated no end (RFC-provider-path-rest §3.3). Clamped to
       [{!rate_limit_backoff_floor_sec}, 3600.0]; env
-      [MASC_KEEPER_RATE_LIMIT_BACKOFF_CAP_SEC], default [900.0]. The sleep
-      stays interruptible ({!sleep_chunk_sec} granularity), so the cap
-      bounds only the wait, never lane reactivity. *)
+      [MASC_KEEPER_RATE_LIMIT_BACKOFF_CAP_SEC], default [900.0]. A keeper
+      waits for a rest only when the path it would send next is resting. *)
   val stream_idle_failsafe_floor_sec : float
   (** Resolved runtime fallback used only when the explicit idle timeout is
       absent. Kept here so runtime execution and operator projection share one
@@ -272,6 +270,29 @@ module KeeperKeepalive : sig
 
       Env: [MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC]. *)
 
+end
+
+(** {1 Keeper context window} *)
+
+module KeeperContext : sig
+  val window_tokens_env_key : string
+  (** [MASC_KEEPER_CONTEXT_WINDOW_TOKENS]; runtime.toml
+      [turn.context_window_tokens]. *)
+
+  val window_tokens_min : int
+  val window_tokens_default : int
+  (** The compiled default, in tokens, and the smallest value the reader
+      accepts. The settings registry projects and validates against these. *)
+
+  val window_tokens_override : unit -> int option
+  (** The operator's declared window, or [None] when unset. A declared value
+      that is not an integer of at least {!window_tokens_min} raises
+      {!Env_config_core.Config_error}. *)
+
+  val window_tokens : unit -> int
+  (** Tokens one AGENT_CORE-lane request carries, fixed prompt and recent
+      verbatim history together: {!window_tokens_override} or
+      {!window_tokens_default} (RFC keeper-context-window-in-tokens). *)
 end
 
 (** {1 gRPC heartbeat reconnect} *)

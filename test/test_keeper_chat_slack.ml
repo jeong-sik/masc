@@ -411,7 +411,7 @@ let test_protocol_diagnostic_cannot_mask_final_failure () =
     check string "final error wins" "final send failed" message
   | _ -> fail "only the terminal final-send failure settles the callback"
 
-let test_adapter_reads_past_the_terminal_until_the_bus_closes () =
+let test_a_settled_adapter_delivers_nothing_the_turn_publishes_after_it () =
   let sends = ref [] in
   let outcomes =
     run_adapter
@@ -432,7 +432,7 @@ let test_adapter_reads_past_the_terminal_until_the_bus_closes () =
         Ok ())
   in
   check int "delivery settles exactly once" 1 (List.length outcomes);
-  check bool "events after the terminal are read, not delivered" false
+  check bool "events after the terminal never reach the channel" false
     (List.exists (fun content -> contains content "published after the terminal") !sends)
 
 (* The failure this bus contract exists for: a publisher that keeps writing
@@ -469,12 +469,13 @@ let test_publisher_is_not_wedged_behind_the_settled_adapter () =
     ~on_send_result:(fun result -> outcomes := result :: !outcomes)
     ();
   check int "delivery settles exactly once" 1 (List.length !outcomes);
-  (* The adapter returns once it has taken the sentinel. A [close] that parked
-     on the full bus was handed over inside that take and is runnable again
-     with no suspension point left, so one yield lets it set the flag. A
-     publisher still parked in [add] stays parked and the flag stays false. *)
+  (* The adapter settles at the terminal event and tells the bus it is gone,
+     which releases a publisher parked in [add] and makes every publish after
+     that skip the bus. Nothing the publisher does from there suspends, so one
+     yield carries it through the remaining writes and the close. A publisher
+     left parked stays parked and the flag stays false. *)
   Eio.Fiber.yield ();
-  check bool "the publisher drained past the terminal and closed" true
+  check bool "the publisher ran past the terminal and closed" true
     !publisher_finished
 
 let test_adapter_settles_when_the_bus_closes_without_a_terminal () =
@@ -940,8 +941,8 @@ let () =
             test_unknown_outcome_post_retries_once_then_degrades
         ; test_case "native activity failure is isolated" `Quick
             test_native_activity_failure_does_not_affect_delivery
-        ; test_case "reads past the terminal until the bus closes" `Quick
-            test_adapter_reads_past_the_terminal_until_the_bus_closes
+        ; test_case "a settled adapter delivers nothing published after it" `Quick
+            test_a_settled_adapter_delivers_nothing_the_turn_publishes_after_it
         ; test_case "a publisher is not wedged behind the settled adapter" `Quick
             test_publisher_is_not_wedged_behind_the_settled_adapter
         ; test_case "a bus closed without a terminal settles once" `Quick

@@ -304,27 +304,21 @@ describe('fleetBand', () => {
     expect(fleetBand(makeRow({ status: 'paused' }))).toBe('paused')
   })
 
-  // `status` answers with a vocabulary that folds stale, degraded and zombie
-  // into one word, so it cannot say which of the three a row is in — or
-  // whether the keeper is simply resting. The band reads the health the
-  // diagnostic carries instead, and each of the three still raises attention.
-  it.each(['stale', 'degraded', 'zombie'])(
-    'classifies attention for %s diagnostic health state',
-    state => {
-      expect(fleetBand(makeRow({ status: 'inactive', diagnostic_health_state: state })))
-        .toBe('attention')
-    },
-  )
-
-  it('does not raise attention on the folded status word alone', () => {
-    // A resting keeper and a stalled one both reach the wire as 'inactive'.
-    // Badging the word made every resting keeper look like it needed a look.
-    expect(fleetBand(makeRow({ status: 'inactive', keepalive_running: true }))).toBe('active')
+  it('raises attention for a failing keeper whose status still says active', () => {
+    // The Failing phase still runs turns, so the row is neither offline nor
+    // paused and its status word is `active`. Health is the only field that
+    // says the turns are failing.
+    expect(fleetBand(makeRow({
+      status: 'active',
+      keepalive_running: true,
+      diagnostic_health_state: 'failing',
+    }))).toBe('attention')
   })
 
-  it('still raises attention for an idle keeper the diagnostic calls stale', () => {
-    expect(fleetBand(makeRow({ status: 'idle', diagnostic_health_state: 'stale' })))
-      .toBe('attention')
+  it('does not raise attention on the folded status word alone', () => {
+    // A resting keeper reaches the wire as 'inactive'. Badging the word made
+    // every resting keeper look like it needed a look.
+    expect(fleetBand(makeRow({ status: 'inactive', keepalive_running: true }))).toBe('active')
   })
 
   it('classifies attention for runtime blocker', () => {
@@ -441,10 +435,6 @@ describe('statusClass', () => {
 
   it('returns warn for runtime blocker', () => {
     expect(statusClass(makeRow({ runtime_blocker_class: 'fiber_unresolved' }))).toContain('var(--color-status-warn)')
-  })
-
-  it('returns warn for stale diagnostic health state', () => {
-    expect(statusClass(makeRow({ status: 'inactive', diagnostic_health_state: 'stale' }))).toContain('var(--color-status-warn)')
   })
 
   it('returns bad-light for offline diagnostic health state', () => {

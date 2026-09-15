@@ -1,74 +1,19 @@
 (** Shared startup guard for server runtime base paths. *)
 
-type resolution_source =
-  | Explicit_cli
-  | Explicit_env
-  | Persisted_default
-  | Implicit_default
-
-type resolved = {
-  raw_base_path : string;
-  normalized_base_path : string;
-  resolution_source : resolution_source;
-}
-
-type violation = Implicit_base_path of resolved
-
 type canonicalization_error =
   { base_path : string
   ; cause : exn
   ; backtrace : Printexc.raw_backtrace
   }
 
-let resolution_source_label = function
-  | Explicit_cli -> "explicit_cli"
-  | Explicit_env -> "explicit_env"
-  | Persisted_default -> "persisted_default"
-  | Implicit_default -> "implicit_base_path"
+let startup_root ~cli_base_path = Workspace_root.resolve_current ~flag:cli_base_path
 
-let non_blank value =
-  match value with
-  | Some raw ->
-      let trimmed = String.trim raw in
-      if trimmed = "" then None else Some trimmed
-  | None -> None
-
-let normalize raw =
-  Env_config.normalize_masc_base_path_input raw
-
-(* The workspace `masc setup` / `masc init` recorded, if it still holds a
-   .masc/config directory. This is not the implicit default the guard exists to
-   refuse: the implicit default is the process cwd, which nobody chose, while
-   this path was named on an earlier command line and is re-checked here. *)
-let recorded_default () =
-  match Env_config.persisted_default_base_path () with
-  | Env_config.Usable { base_path; _ } -> Some base_path
-  | Env_config.No_record | Env_config.Stale _
-  | Env_config.Unread_under_test _ ->
-    None
-
-let resolve_startup_base_path ?(getenv = Sys.getenv_opt)
-    ?(persisted_default = recorded_default) ~cli_base_path ~default_base_path () =
-  let raw_base_path, resolution_source =
-    match non_blank cli_base_path with
-    | Some raw -> raw, Explicit_cli
-    | None -> (
-        match non_blank (getenv "MASC_BASE_PATH") with
-        | Some raw -> raw, Explicit_env
-        | None -> (
-            match non_blank (persisted_default ()) with
-            | Some raw -> raw, Persisted_default
-            | None -> default_base_path (), Implicit_default))
-  in
-  { raw_base_path;
-    normalized_base_path = normalize raw_base_path;
-    resolution_source;
-  }
-
-let enforce resolved =
-  match resolved.resolution_source with
-  | Implicit_default -> Error (Implicit_base_path resolved)
-  | Explicit_cli | Explicit_env | Persisted_default -> Ok ()
+let exit_on_no_workspace = function
+  | Ok root -> root
+  | Error error ->
+    Printf.eprintf "[FATAL] Server refused to start without a workspace.\n%s\n"
+      (Workspace_root.error_message error);
+    exit 1
 
 let canonicalize_existing base_path =
   match Unix.realpath base_path with
@@ -88,22 +33,3 @@ let format_canonicalization_error { base_path; cause; backtrace = _ } =
     base_path
     (Printexc.to_string cause)
 ;;
-
-let format_violation = function
-  | Implicit_base_path resolved ->
-      Printf.sprintf
-        "[FATAL] Server refused to start with an implicit base path.\n\
-         Resolution source: %s\n\
-         Resolved path: %s\n\n\
-         Start the server with an explicit base path:\n\
-         --base-path /path/to/workspace     (CLI flag)\n\
-         MASC_BASE_PATH=/path/to/workspace  (environment variable)\n\n\
-         Choose the intended runtime root explicitly; no directory kind is inferred.\n"
-        (resolution_source_label resolved.resolution_source)
-        resolved.normalized_base_path
-
-let exit_on_violation = function
-  | Ok () -> ()
-  | Error violation ->
-      Printf.eprintf "%s" (format_violation violation);
-      exit 1

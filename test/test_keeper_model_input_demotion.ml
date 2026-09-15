@@ -317,6 +317,45 @@ let stored_results_are_not_demoted_again () =
     (List.length planned.Demotion.pending)
 ;;
 
+(* [materialize] finds each marker's body by its tool_use_id among every
+   pending demotion. A lookup that answered with another entry would still
+   write a well-formed marker, pointing at another result's bytes, so each
+   stored blob is read back and compared with the body its message held. *)
+let each_marker_stores_its_own_body () =
+  let store = Tool_blob_store.create ~base_path:(Filename.temp_dir "demote" "") in
+  let bodies = List.init 40 (fun i -> Printf.sprintf "result %d:" i ^ String.make 4000 'a') in
+  let messages = history_with_tool_bodies bodies in
+  let planned =
+    Demotion.plan ~measure_message_bytes ~demote_before:(List.length bodies) messages
+  in
+  Alcotest.(check int)
+    "every aged body is planned"
+    (List.length bodies)
+    (List.length planned.Demotion.pending);
+  let outcome =
+    Demotion.materialize
+      ~store
+      ~pending:planned.Demotion.pending
+      planned.Demotion.messages
+  in
+  Alcotest.(check int) "no revert in a healthy store" 0 outcome.Demotion.reverted;
+  let stored =
+    List.map
+      (fun content ->
+         match Tool_output.decode_from_agent_core content with
+         | Tool_output.Decoded reference ->
+           (match Tool_blob_store.fetch store ~sha256:reference.Tool_output.sha256 with
+            | Ok (Some bytes) -> bytes
+            | Ok None -> Alcotest.fail "a marker names a blob the store does not hold"
+            | Error error ->
+              Alcotest.fail (Tool_blob_store.fetch_error_to_string error))
+         | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
+           Alcotest.fail "every planned body leaves as a marker")
+      (markers outcome.Demotion.messages)
+  in
+  Alcotest.(check (list string)) "each marker stores its own body" bodies stored
+;;
+
 (* --- 5. Atoms retained by the raw cut keep their bodies ---------------- *)
 
 let raw_cut_retained_atoms_are_verbatim () =
@@ -425,10 +464,63 @@ let measurer_counts_the_same_bytes_as_to_string () =
     (measure repeated)
 ;;
 
+(* 요청마다 [Complete_common.transmitted_history] 가 메시지 레코드를 전부 새로
+   만든다. live 체크포인트처럼 [name] 과 [tool_call_id] 가 없는 메시지로, 새로
+   만든 레코드가 앞 요청의 측정을 그대로 쓰는지 본다. *)
+let rebuilt_records_reuse_measurements () =
+  let envelope_free role text : Types.message =
+    { role; content = [ Types.Text text ]; name = None; tool_call_id = None; metadata = [] }
+  in
+  let history =
+    List.init 200 (fun i ->
+      envelope_free
+        (if i mod 2 = 0 then Types.Assistant else Types.Tool)
+        (Printf.sprintf "message %d" i))
+  in
+  let raw_measurements = ref 0 in
+  let measure_message_bytes =
+    Masc.Keeper_turn_driver_try_provider.For_testing.memoize_message_measurement
+      (fun message ->
+         incr raw_measurements;
+         measure_message_bytes message)
+  in
+  let request () =
+    List.iter
+      (fun (message : Types.message) ->
+         ignore (measure_message_bytes { message with content = message.content }))
+      history
+  in
+  request ();
+  request ();
+  request ();
+  Alcotest.(check int)
+    "three requests encode each message once"
+    (List.length history)
+    !raw_measurements
+;;
+
+(* 캐시 조회는 해시가 같은 항목을 전부 비교한다. [name] 과 [tool_call_id] 가 없는
+   메시지는 content 로만 구분되므로, 해시가 content 를 안 읽으면 역할마다 값이
+   하나가 되고 조회가 그 역할의 히스토리 전체를 훑는다. 짧은 id 와 긴 본문 모두
+   서로 다른 값이 나와야 한다. *)
+let measurement_hash_reads_content () =
+  let hash = Masc.Keeper_turn_driver_try_provider.For_testing.message_measurement_hash in
+  let distinct messages =
+    List.sort_uniq Int.compare (List.map hash messages) |> List.length
+  in
+  let short_texts = List.init 200 (fun i -> assistant (Printf.sprintf "message %d" i)) in
+  let tool_results =
+    List.init 200 (fun i ->
+      tool_message ~id:(Printf.sprintf "call_%08d" i) (String.make 5000 'x'))
+    |> List.map (fun (message : Types.message) -> { message with tool_call_id = None })
+  in
+  Alcotest.(check int) "short texts" 200 (distinct short_texts);
+  Alcotest.(check int) "tool results that differ only by id" 200 (distinct tool_results)
+;;
+
 (* The production pipeline measures the raw history, rewrites only atoms below
    that cut, then measures the planned list. This fixture makes every atom
-   eligible so the per-projection identity cache must reuse every candidate
-   measurement without retaining independently allocated equal messages. *)
+   eligible so the memo must reuse every candidate measurement. *)
 let projection_reuses_candidate_measurements () =
   let bodies = List.init 20 (fun _ -> String.make 4000 'a') in
   let messages = history_with_tool_bodies bodies in
@@ -463,7 +555,7 @@ let projection_reuses_candidate_measurements () =
     (* The window's synthetic preamble. *)
   in
   Alcotest.(check int)
-    "each original, candidate, and preamble identity is encoded once"
+    "each original, candidate, and preamble is encoded once"
     expected_unique_measurements
     !raw_measurements
 ;;
@@ -479,11 +571,15 @@ let projection_reuses_candidate_measurements () =
    as externalized markers instead of the turn failing. *)
 module Try_provider = Masc.Keeper_turn_driver_try_provider
 
-let compose ~base_path ~capacity_bytes ~demote_before messages =
+(* The window is a target (RFC keeper-context-window-in-tokens): the
+   composition never refuses, and the one axis on which it still reshapes a
+   request is the request-body cap. [wire_cap_bytes] is that cap. *)
+let compose ~base_path ~target_bytes ~wire_cap_bytes ~demote_before messages =
   Try_provider.For_testing.plan_and_window_model_input
     ~measure_message_bytes
-    ~capacity_bytes
+    ~target_bytes
     ~reserved_bytes:0
+    ~wire_cap_bytes
     ~base_path
     ~demote_before
     messages
@@ -512,88 +608,93 @@ let oversized_newest_history () =
   earlier, earlier @ newest, bytes_of newest
 ;;
 
+let is_overrun_by_newest_atom (windowed : Window.target_projection) =
+  match windowed.Window.fit with
+  | Window.Overrun { cause = Window.Newest_atom_exceeds_target; _ } -> true
+  | Window.Overrun { cause = Window.Fixed_parts_exceed_target; _ } | Window.Within_target -> false
+;;
+
 let oversized_newest_atom_is_demoted_as_last_resort () =
   let earlier, messages, newest_bytes = oversized_newest_history () in
-  (* [capacity] admits the newest atom only demoted: the raw history budget is
-     exactly the atom's own bytes, which the charged preamble pushes over. *)
-  let capacity_bytes = newest_bytes in
+  (* The target admits the newest atom only demoted: the raw history budget is
+     exactly the atom's own bytes, which the charged preamble pushes over. The
+     request-body cap is the same size, so the raw view cannot be sent. *)
+  let target_bytes = newest_bytes in
   let demote_before =
     Window.first_atom_at_or_after
       messages
       ~message_index:(List.length earlier)
   in
   let store = Tool_blob_store.create ~base_path:(Filename.temp_dir "demote" "") in
-  (match
-     Window.project_with_drop
-       ~measure_message_bytes
-       ~capacity_bytes
-       ~reserved_bytes:0
-       messages
-   with
-   | Error (Window.Newest_atom_exceeds_available _) -> ()
-   | Error error -> Alcotest.fail (Window.budget_error_to_string error)
-   | Ok _ -> Alcotest.fail "fixture must not fit without the last resort");
-  match
+  let raw = Window.project_target ~measure_message_bytes ~target_bytes ~reserved_bytes:0 messages in
+  Alcotest.(check bool)
+    "fixture: the raw view is the newest atom and it passes the target"
+    true
+    (is_overrun_by_newest_atom raw);
+  let planned, windowed, history_atom_count =
     compose
       ~base_path:(Filename.temp_dir "demote" "")
-      ~capacity_bytes
+      ~target_bytes
+      ~wire_cap_bytes:(Some newest_bytes)
       ~demote_before
       messages
-  with
-  | Error error -> Alcotest.fail (Window.budget_error_to_string error)
-  | Ok (planned, windowed, history_atom_count) ->
-    Alcotest.(check int)
-      "each of the newest atom's results is demoted"
-      (List.length newest_bodies)
-      (List.length planned.Demotion.pending);
-    Alcotest.(check int)
-      "the denominator is still the whole history"
-      3
-      history_atom_count;
-    let outcome =
-      Demotion.materialize ~store ~pending:planned.Demotion.pending windowed.Window.messages
-    in
-    Alcotest.(check int) "a healthy store reverts nothing" 0 outcome.Demotion.reverted;
-    let transmitted = markers outcome.Demotion.messages in
-    List.iteri
-      (fun i size ->
-         let body = String.make size (Char.chr (Char.code 'a' + i)) in
-         Alcotest.(check bool)
-           (Printf.sprintf "body %d left as a reference, not its bytes" i)
-           false
-           (List.exists (String.equal body) transmitted))
-      newest_bodies;
-    Alcotest.(check int)
-      "the references are readable blob markers"
-      (List.length newest_bodies)
-      (List.length (List.filter Tool_output.is_marker transmitted))
+  in
+  Alcotest.(check int)
+    "each of the newest atom's results is demoted"
+    (List.length newest_bodies)
+    (List.length planned.Demotion.pending);
+  Alcotest.(check int)
+    "the denominator is still the whole history"
+    3
+    history_atom_count;
+  let outcome =
+    Demotion.materialize
+      ~store
+      ~pending:planned.Demotion.pending
+      windowed.Window.projection.Window.messages
+  in
+  Alcotest.(check int) "a healthy store reverts nothing" 0 outcome.Demotion.reverted;
+  let transmitted = markers outcome.Demotion.messages in
+  List.iteri
+    (fun i size ->
+       let body = String.make size (Char.chr (Char.code 'a' + i)) in
+       Alcotest.(check bool)
+         (Printf.sprintf "body %d left as a reference, not its bytes" i)
+         false
+         (List.exists (String.equal body) transmitted))
+    newest_bodies;
+  Alcotest.(check int)
+    "the references are readable blob markers"
+    (List.length newest_bodies)
+    (List.length (List.filter Tool_output.is_marker transmitted))
 ;;
 
 (* The last resort is not a blank cheque: an oversized atom with nothing
-   demotable in it keeps the typed refusal, with the original measured
-   values. *)
-let oversized_atom_without_demotable_body_still_refuses () =
+   demotable in it is transmitted as it is, with the overrun on record, and
+   the wire is what refuses it. *)
+let oversized_atom_without_demotable_body_is_transmitted_with_its_overrun () =
   let newest = [ assistant (String.make 50_000 'x') ] in
   let messages = history_with_tool_bodies [ "tick" ] @ newest in
-  let capacity_bytes = bytes_of newest in
-  match
+  let target_bytes = bytes_of newest in
+  let planned, windowed, _ =
     compose
       ~base_path:(Filename.temp_dir "demote" "")
-      ~capacity_bytes
+      ~target_bytes
+      ~wire_cap_bytes:(Some target_bytes)
       ~demote_before:1
       messages
-  with
-  | Ok _ -> Alcotest.fail "an atom with no tool results cannot be demoted"
-  | Error (Window.Newest_atom_exceeds_available { newest_atom_bytes; _ }) ->
-    Alcotest.(check int)
-      "the refusal carries the atom's real bytes"
-      capacity_bytes
-      newest_atom_bytes
-  | Error error -> Alcotest.fail (Window.budget_error_to_string error)
+  in
+  Alcotest.(check int) "an atom with no tool results plans nothing" 0
+    (List.length planned.Demotion.pending);
+  Alcotest.(check bool) "the overrun is on record" true (is_overrun_by_newest_atom windowed);
+  Alcotest.(check int)
+    "the newest atom is what is transmitted"
+    (List.length newest + 1 (* the preamble: the kept head is an assistant *))
+    (List.length windowed.Window.projection.Window.messages)
 ;;
 
-(* Without a blob store there is nothing a marker could reference, so the
-   refusal stands exactly as it did before #28845. *)
+(* Without a blob store there is nothing a marker could reference, so the raw
+   view stands and the overrun says why. *)
 let last_resort_requires_a_blob_store () =
   let earlier, messages, newest_bytes = oversized_newest_history () in
   let demote_before =
@@ -601,19 +702,46 @@ let last_resort_requires_a_blob_store () =
       messages
       ~message_index:(List.length earlier)
   in
-  match
-    compose ~base_path:"" ~capacity_bytes:newest_bytes ~demote_before messages
-  with
-  | Ok _ -> Alcotest.fail "demotion without a store would dangle its markers"
-  | Error (Window.Newest_atom_exceeds_available _) -> ()
-  | Error error -> Alcotest.fail (Window.budget_error_to_string error)
+  let planned, windowed, _ =
+    compose
+      ~base_path:""
+      ~target_bytes:newest_bytes
+      ~wire_cap_bytes:(Some newest_bytes)
+      ~demote_before
+      messages
+  in
+  Alcotest.(check int) "no store, no demotion" 0 (List.length planned.Demotion.pending);
+  Alcotest.(check bool) "the overrun is on record" true (is_overrun_by_newest_atom windowed)
+;;
+
+(* Only the request-body cap reshapes a request: a newest atom that passes
+   the target but not the cap is transmitted whole, overrun on record, and
+   the provider judges it. *)
+let target_overrun_under_the_cap_demotes_nothing () =
+  let earlier, messages, newest_bytes = oversized_newest_history () in
+  let demote_before =
+    Window.first_atom_at_or_after
+      messages
+      ~message_index:(List.length earlier)
+  in
+  let planned, windowed, _ =
+    compose
+      ~base_path:(Filename.temp_dir "demote" "")
+      ~target_bytes:newest_bytes
+      ~wire_cap_bytes:(Some (newest_bytes * 4))
+      ~demote_before
+      messages
+  in
+  Alcotest.(check int) "the cap carries the view, so nothing is demoted" 0
+    (List.length planned.Demotion.pending);
+  Alcotest.(check bool) "the target overrun is still on record" true
+    (is_overrun_by_newest_atom windowed)
 ;;
 
 (* Demotion can shrink an atom only down to its non-demotable residue. When
-   that residue alone exceeds the budget, the last resort still refuses — and
-   the refusal must carry the atom's true bytes, not the placeholder-saturated
-   measurement the re-cut saw. *)
-let still_oversized_after_demotion_reports_true_magnitude () =
+   that residue alone exceeds the target, the demoted view is transmitted and
+   the overrun measured on it, not on the raw atom, is what is reported. *)
+let still_oversized_after_demotion_reports_the_demoted_overrun () =
   let earlier = history_with_tool_bodies [ "tick" ] in
   let residue = assistant (String.make 50_000 'x') in
   let newest =
@@ -625,8 +753,7 @@ let still_oversized_after_demotion_reports_true_magnitude () =
   let messages = earlier @ newest in
   let _, atom_count = Window.annotate messages in
   (* [plan] is pure, so this probe is exactly the plan the last-resort arm
-     computes: it proves the composition took the demotion branch and still
-     refused, rather than refusing for want of anything demotable. *)
+     computes: it proves the composition took the demotion branch. *)
   let probe =
     Demotion.plan ~measure_message_bytes ~demote_before:atom_count messages
   in
@@ -634,23 +761,26 @@ let still_oversized_after_demotion_reports_true_magnitude () =
     "the atom carries demotable results, so the last resort planned demotions"
     2
     (List.length probe.Demotion.pending);
-  (* [capacity] admits neither the raw atom nor its demoted residue: even the
-     assistant text alone overruns the budget once the preamble is charged. *)
-  let capacity_bytes = bytes_of [ residue ] in
-  match
+  (* The target admits neither the raw atom nor its demoted residue: even the
+     assistant text alone overruns once the preamble is charged. *)
+  let target_bytes = bytes_of [ residue ] in
+  let planned, windowed, _ =
     compose
       ~base_path:(Filename.temp_dir "demote" "")
-      ~capacity_bytes
+      ~target_bytes
+      ~wire_cap_bytes:(Some target_bytes)
       ~demote_before:1
       messages
-  with
-  | Ok _ -> Alcotest.fail "the residue alone exceeds the budget"
-  | Error (Window.Newest_atom_exceeds_available { newest_atom_bytes; _ }) ->
-    Alcotest.(check int)
-      "the refusal carries the atom's true bytes, not the demoted measurement"
-      (bytes_of newest)
-      newest_atom_bytes
-  | Error error -> Alcotest.fail (Window.budget_error_to_string error)
+  in
+  Alcotest.(check int) "both results were demoted" 2 (List.length planned.Demotion.pending);
+  match windowed.Window.fit with
+  | Window.Overrun { by_bytes; cause = Window.Newest_atom_exceeds_target } ->
+    Alcotest.(check bool)
+      "the overrun is the demoted view's, smaller than the raw atom's excess"
+      true
+      (by_bytes > 0 && by_bytes < bytes_of newest - target_bytes)
+  | Window.Overrun { cause = Window.Fixed_parts_exceed_target; _ } | Window.Within_target ->
+    Alcotest.fail "the residue alone exceeds the target"
 ;;
 
 let () =
@@ -689,6 +819,10 @@ let () =
             `Quick
             stored_results_are_not_demoted_again
         ; Alcotest.test_case
+            "each marker stores its own body"
+            `Quick
+            each_marker_stores_its_own_body
+        ; Alcotest.test_case
             "raw-cut-retained atoms keep their bodies"
             `Quick
             raw_cut_retained_atoms_are_verbatim
@@ -709,23 +843,35 @@ let () =
             `Quick
             oversized_newest_atom_is_demoted_as_last_resort
         ; Alcotest.test_case
-            "oversized atom without a demotable body still refuses"
+            "oversized atom without a demotable body is transmitted with its overrun"
             `Quick
-            oversized_atom_without_demotable_body_still_refuses
+            oversized_atom_without_demotable_body_is_transmitted_with_its_overrun
         ; Alcotest.test_case
             "last resort requires a blob store"
             `Quick
             last_resort_requires_a_blob_store
         ; Alcotest.test_case
-            "still oversized after demotion reports the true magnitude"
+            "a target overrun under the cap demotes nothing"
             `Quick
-            still_oversized_after_demotion_reports_true_magnitude
+            target_overrun_under_the_cap_demotes_nothing
+        ; Alcotest.test_case
+            "still oversized after demotion reports the demoted overrun"
+            `Quick
+            still_oversized_after_demotion_reports_the_demoted_overrun
         ] )
     ; ( "measurement"
       , [ Alcotest.test_case
             "the measurer counts the same bytes as to_string"
             `Quick
             measurer_counts_the_same_bytes_as_to_string
+        ; Alcotest.test_case
+            "rebuilt records reuse earlier measurements"
+            `Quick
+            rebuilt_records_reuse_measurements
+        ; Alcotest.test_case
+            "the measurement hash reads content"
+            `Quick
+            measurement_hash_reads_content
         ] )
     ]
 ;;

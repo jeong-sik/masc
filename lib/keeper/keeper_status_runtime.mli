@@ -105,14 +105,13 @@ val augment_keeper_diagnostic_json :
     above this layer, not a member of this domain. *)
 type surface_status =
   | Surface_active
-  | Surface_inactive
   | Surface_offline
   | Surface_idle
 
 val surface_status_to_string : surface_status -> string
 
 (** Parse a wire/display status string into {!surface_status}; [None] when the
-    value is outside the six labels (e.g. "paused" or drift). *)
+    value is outside the three labels (e.g. "paused" or drift). *)
 val surface_status_of_string_opt : string -> surface_status option
 
 (** The [status] field the operator snapshot publishes: a

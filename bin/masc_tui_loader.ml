@@ -1083,7 +1083,6 @@ let load_transport_health ~(host : string) ~(port : int) :
 let keeper_liveness_of_briefs briefs =
   let empty =
     { klc_active = 0
-    ; klc_inactive = 0
     ; klc_offline = 0
     ; klc_idle = 0
     ; klc_paused = 0
@@ -1101,8 +1100,6 @@ let keeper_liveness_of_briefs briefs =
               match surface with
               | Keeper_status_runtime.Surface_active ->
                   { counts with klc_active = counts.klc_active + 1 }
-              | Keeper_status_runtime.Surface_inactive ->
-                  { counts with klc_inactive = counts.klc_inactive + 1 }
               | Keeper_status_runtime.Surface_offline ->
                   { counts with klc_offline = counts.klc_offline + 1 }
               | Keeper_status_runtime.Surface_idle ->

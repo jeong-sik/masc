@@ -1632,7 +1632,6 @@ let acting_retained_quiet = 200
     says so rather than picking the convenient neighbour. *)
 type keeper_liveness_counts = {
   klc_active: int;
-  klc_inactive: int;
   klc_offline: int;
   klc_idle: int;
   klc_paused: int;

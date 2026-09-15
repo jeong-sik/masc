@@ -131,18 +131,15 @@ let with_isolated_eio_base_path prefix f =
   let base_dir = temp_base_path prefix in
   Unix.mkdir base_dir 0o700;
   let old_base = Sys.getenv_opt "MASC_BASE_PATH" in
-  let old_base_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
   let registry = Fusion_run_registry.create () in
   Fun.protect
     ~finally:(fun () ->
       Board_dispatch.reset_for_test ();
       Board.reset_global_for_test ();
       restore_env "MASC_BASE_PATH" old_base;
-      restore_env "MASC_BASE_PATH_INPUT" old_base_input;
       try remove_tree base_dir with _ -> ())
     (fun () ->
       Unix.putenv "MASC_BASE_PATH" base_dir;
-      Unix.putenv "MASC_BASE_PATH_INPUT" base_dir;
       Board_dispatch.reset_for_test ();
       Board.reset_global_for_test ();
       Eio_main.run @@ fun env ->

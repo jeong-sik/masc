@@ -208,6 +208,23 @@ let () = test "watchdog start failure terminates fail-closed" (fun () ->
         (status =
          Unix.WEXITED Shutdown.process_deadline_start_failure_exit_code))
 
+let () = test "a parked lane does not hold the session switch" (fun () ->
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  (* The lane parks on a promise nobody resolves, the way an owner loop parks
+     on its wake once the backlog is empty. Returning from the switch would
+     join it; the session switch fails instead. The deadline is the harness
+     observing a hang, not a bound on the code under test. *)
+  let parked, _never = Eio.Promise.create () in
+  match
+    Eio.Time.with_timeout clock 5. (fun () ->
+      Server_session_switch.run (fun sw ->
+        Eio.Fiber.fork ~sw (fun () -> Eio.Promise.await parked));
+      Ok ())
+  with
+  | Ok () -> ()
+  | Error `Timeout -> failwith "the session switch waited for a parked lane")
+
 (* ── Summary ──────────────────────────────────── *)
 
 let () =

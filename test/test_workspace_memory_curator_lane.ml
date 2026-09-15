@@ -142,6 +142,27 @@ let test_directory_alias () = with_base (fun base_path clock ->
       Alcotest.(check int) "physical event wakes the alias-started owner" 2 !count;
       Worker.For_testing.stop ~base_path:alias)))
 
+let test_the_owner_loop_does_not_outlive_its_switch () = with_base (fun base_path clock ->
+  commit base_path "Original observation";
+  let execute ~rendered_prompt:_ context = Ok (proposal context, "test.slot") in
+  (* Nothing calls [For_testing.stop] here, because the server does not either:
+     the switch is the owner's whole life. The loop parks on [owner.wake] once
+     the backlog is empty, and the release hook that sets [stopped] runs only
+     after every ordinary fiber has finished, so it cannot be what ends it.
+
+     Test harness deadline only: a loop that outlives its switch must fail CI,
+     not hang it. *)
+  match
+    Eio.Time.with_timeout clock 5. (fun () ->
+      Eio.Switch.run (fun sw ->
+        Worker.For_testing.start ~sw ~base_path ~execute;
+        await_idle ~clock ~base_path);
+      Ok ())
+  with
+  | Ok () -> ()
+  | Error `Timeout ->
+    Alcotest.fail "the owner's loop held its switch open after the body returned")
+
 let test_prompt_change_is_a_new_request () = with_base (fun base_path clock ->
   let key = Prompt_names.workspace_memory_curator in
   let mutation = Server_prompt_override_mutation.apply ~base_path in
@@ -234,4 +255,5 @@ let () = Alcotest.run "workspace curator lane"
     ; Alcotest.test_case "commits coalesce, reader sees proposals, restart reconciles" `Quick test_commit_coalescing_and_restart
     ; Alcotest.test_case "failure stays visible and a later commit proceeds" `Quick test_failure_then_changed_input
     ; Alcotest.test_case "canonical directory aliases share an owner" `Quick test_directory_alias
-    ; Alcotest.test_case "changed prompt is delivered and recorded with unchanged facts" `Quick test_prompt_change_is_a_new_request ] ]
+    ; Alcotest.test_case "changed prompt is delivered and recorded with unchanged facts" `Quick test_prompt_change_is_a_new_request
+    ; Alcotest.test_case "the owner's loop does not outlive its switch" `Quick test_the_owner_loop_does_not_outlive_its_switch ] ]

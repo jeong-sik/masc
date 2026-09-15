@@ -903,6 +903,96 @@ let test_the_file_marks_are_in_the_sheet () =
         (List.mem mark drawable))
     Masc_tui_file_icon.legend
 
+(* Config's two list panes draw a mark in their first column and say what it
+   means only in the detail pane below the list, for the one row the cursor is
+   on. A reader scanning twenty prompt rows could tell a marked row from an
+   unmarked one and not what the mark said; the sheet carried seven legends
+   and neither of these.
+
+   Same two halves as the memory and file marks above: every mark a pane can
+   draw has a word, and nothing has a word the pane cannot draw. A source
+   added to [prompt_source] stops [Masc_tui_config_mark] compiling until it
+   has a mark, and this stops a mark being added without a word beside it. *)
+let prompt_sources =
+  [ Masc.Tui_decode.Prompt_override
+  ; Masc.Tui_decode.Prompt_file
+  ; Masc.Tui_decode.Prompt_missing
+  ]
+
+let test_the_config_marks_are_in_the_sheet () =
+  List.iter
+    (fun section ->
+      Alcotest.(check bool)
+        (Printf.sprintf "the sheet carries %S" section)
+        true
+        (List.exists
+           (fun (label, _) -> String.equal label section)
+           (Masc_tui_keys.help_sections ())))
+    [ "Prompt marks"; "Param marks" ];
+  let prompt_explained = List.map fst Masc_tui_config_mark.prompt_legend in
+  (* Held back outranks the source, so every source wears the same mark under
+     it, and that mark has a word. *)
+  List.iter
+    (fun source ->
+      let mark = Masc_tui_config_mark.prompt_glyph ~held_back:true source in
+      Alcotest.(check bool)
+        (Printf.sprintf "the sheet explains the held-back mark %S" mark)
+        true
+        (List.mem mark prompt_explained))
+    prompt_sources;
+  (* Unheld, the shipped file is the one row that draws nothing, and a state
+     with no mark needs no word. The other two do. *)
+  List.iter
+    (fun source ->
+      let mark = Masc_tui_config_mark.prompt_glyph ~held_back:false source in
+      let explained = List.mem mark prompt_explained in
+      match source with
+      | Masc.Tui_decode.Prompt_file ->
+          Alcotest.(check string) "the shipped file draws a blank" " " mark;
+          Alcotest.(check bool) "so the blank is no sheet row" false explained
+      | Masc.Tui_decode.Prompt_override | Masc.Tui_decode.Prompt_missing ->
+          Alcotest.(check bool)
+            (Printf.sprintf "the sheet explains the mark %S" mark)
+            true
+            explained)
+    prompt_sources;
+  let prompt_drawable =
+    List.concat_map
+      (fun held_back ->
+        List.map
+          (fun source -> Masc_tui_config_mark.prompt_glyph ~held_back source)
+          prompt_sources)
+      [ true; false ]
+  in
+  List.iter
+    (fun (mark, _) ->
+      Alcotest.(check bool)
+        (Printf.sprintf "the prompt registry can draw %S" mark)
+        true
+        (List.mem mark prompt_drawable))
+    Masc_tui_config_mark.prompt_legend;
+  (* The params list fills its column on every row, so both marks are words. *)
+  let param_drawable =
+    List.map
+      (fun has_override -> Masc_tui_config_mark.param_glyph ~has_override)
+      [ true; false ]
+  in
+  let param_explained = List.map fst Masc_tui_config_mark.param_legend in
+  List.iter
+    (fun mark ->
+      Alcotest.(check bool)
+        (Printf.sprintf "the sheet explains the param mark %S" mark)
+        true
+        (List.mem mark param_explained))
+    param_drawable;
+  List.iter
+    (fun (mark, _) ->
+      Alcotest.(check bool)
+        (Printf.sprintf "the params list can draw %S" mark)
+        true
+        (List.mem mark param_drawable))
+    Masc_tui_config_mark.param_legend
+
 (* Lanes is the operator's top-level concurrent lane workspace. Runtime still
    owns configuration and substrate probes; [p] remains the explicit return
    path from the standalone run browser. *)
@@ -2383,6 +2473,8 @@ let () =
             test_keeper_operations_are_not_top_level_tabs
         ; Alcotest.test_case "the memory marks are in the sheet" `Quick
             test_the_memory_marks_are_in_the_sheet_not_on_the_roster
+        ; Alcotest.test_case "the Config marks are in the sheet" `Quick
+            test_the_config_marks_are_in_the_sheet
         ; Alcotest.test_case "the file marks are in the sheet" `Quick
             test_the_file_marks_are_in_the_sheet
         ; Alcotest.test_case "Lanes is a main destination" `Quick

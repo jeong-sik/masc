@@ -63,7 +63,6 @@ def run(binary: Path, server_binary: Path, stamp: str | None,
         # visible while testing the separate no-Git informational contract.
         environment["MASC_LOG_MCP_LEVEL"] = "warn"
         environment["MASC_BASE_PATH"] = str(blocked_base / "runtime")
-        environment["MASC_BASE_PATH_INPUT"] = str(blocked_base / "runtime")
 
         def footprint() -> set[str]:
             return {str(path.relative_to(root)) for path in root.rglob("*")}

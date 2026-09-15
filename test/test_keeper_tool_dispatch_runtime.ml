@@ -520,6 +520,7 @@ let test_board_runtime_rejects_unknown_route () =
   let raw =
     Masc.Keeper_tool_board_runtime.handle_board_tool
       ~meta
+      ~result_projection:Tool_output.default_model_projection
       ~name:"masc_board_not_registered"
       ~args:(`Assoc [])
   in

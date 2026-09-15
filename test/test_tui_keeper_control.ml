@@ -96,18 +96,17 @@ let test_live_paused_offers_resume () =
     "primary is resume" (Some Control.Resume) (Control.primary r)
 
 (* Pause is a person's decision and health is an observation, so neither
-   replaces the other. The composition this replaced let pause overwrite the
-   status word, which meant a paused keeper whose fiber had died read exactly
-   like one that was resting. *)
+   replaces the other: a paused keeper whose keepalive is gone reads offline
+   and paused, not one word for both. *)
 let test_pause_and_health_are_read_separately () =
-  let live = runtime ~health:(health "zombie") "analyst" in
+  let live = runtime ~health:(health "offline") "analyst" in
   let resting = reading ~liveness:(Control.Present live) "analyst" in
   let stopped = reading ~paused:true ~liveness:(Control.Present live) "analyst" in
   Alcotest.(check string)
-    "health reads the same either way" "zombie"
+    "health reads the same either way" "offline"
     (Control.health_label resting);
   Alcotest.(check string)
-    "pause does not overwrite it" "zombie" (Control.health_label stopped);
+    "pause does not overwrite it" "offline" (Control.health_label stopped);
   Alcotest.(check bool) "and pause is still readable" true stopped.Control.paused
 
 (* A row can be in the roster with its keepalive fiber stopped. Pause has
@@ -771,20 +770,20 @@ let present ?(health = health "healthy") ?(paused = false) name =
 let test_tally_uses_the_column_word () =
   let readings =
     [ present ~health:(health "healthy") "a"
-    ; present ~health:(health "stale") "b"
-    ; present ~health:(health "stale") "c"
+    ; present ~health:(health "idle") "b"
+    ; present ~health:(health "idle") "c"
     ]
   in
   Alcotest.(check (list (pair string int)))
-    "stale is counted as stale, not folded into a healthier word"
-    [ ("healthy", 1); ("stale", 2) ]
+    "idle is counted as idle, not folded into a healthier word"
+    [ ("healthy", 1); ("idle", 2) ]
     (Control.health_tally readings)
 
 let test_tally_never_names_a_word_the_column_hides () =
   let readings =
     [ present ~health:(health "healthy") "a"
-    ; present ~health:(health "stale") "b"
-    ; present ~health:(health "zombie") "c"
+    ; present ~health:(health "idle") "b"
+    ; present ~health:(health "offline") "c"
     ; present ~health:(health "healthy") ~paused:true "d"
     ; { Control.name = "e"; paused = true; liveness = Control.Absent }
     ; reading "f"
@@ -805,18 +804,18 @@ let test_tally_never_names_a_word_the_column_hides () =
     (List.fold_left (fun sum (_, n) -> sum + n) 0 (Control.health_tally readings))
 
 (* Pausing is a person's decision and health is an observation. Folding one
-   into the other is what [status_label] does, and it is why a paused keeper
-   whose fiber had died read the same as one that was simply resting. *)
+   into the other is what [status_label] does, and it would make a paused
+   keeper whose keepalive is gone read the same as one that is resting. *)
 let test_pause_does_not_hide_health () =
-  let paused_zombie =
-    present ~health:(health "zombie") ~paused:true "stopped-and-dead"
+  let paused_offline =
+    present ~health:(health "offline") ~paused:true "stopped-and-gone"
   in
   Alcotest.(check string)
     "a paused keeper still reports the health underneath"
-    "zombie"
-    (Control.health_label paused_zombie);
+    "offline"
+    (Control.health_label paused_offline);
   Alcotest.(check bool) "and still reports being paused" true
-    paused_zombie.Control.paused
+    paused_offline.Control.paused
 
 (* The row publishes four separate readings, and the decoder has to keep them
    separate. A null action is the runtime naming none, which is not an action
@@ -826,20 +825,20 @@ let test_roster_decode_keeps_the_axes_apart () =
   let json =
     Yojson.Safe.from_string
       (Printf.sprintf {|{"count":1,"total":1,"truncated":false,"keepers":[%s]}|}
-         (gate_row ~health:"zombie" ~paused:true
-            ~next_action:{|"auto_restart"|} "wreck"))
+         (gate_row ~health:"offline" ~paused:true
+            ~next_action:{|"recover"|} "wreck"))
   in
   match Decode.decode_keeper_runtime_list json with
   | Error err -> Alcotest.fail ("roster must decode: " ^ err)
   | Ok ([ row ], _, _, _) ->
-      Alcotest.(check string) "health survives the surface fold" "zombie"
+      Alcotest.(check string) "health survives the surface fold" "offline"
         (Decode.keeper_health_to_string row.Decode.kr_health);
       Alcotest.(check bool) "pause is its own field" true row.Decode.kr_paused;
       Alcotest.(check bool) "and does not replace the health" true
         (Decode.keeper_health_to_string row.Decode.kr_health <> "paused");
       Alcotest.(check bool) "the action is carried" true
         (row.Decode.kr_next_action
-         = Some Masc.Keeper_status_runtime.Auto_restart)
+         = Some Masc.Keeper_status_runtime.Recover)
   | Ok (rows, _, _, _) ->
       Alcotest.failf "expected one row, got %d" (List.length rows)
 
@@ -938,7 +937,7 @@ let test_configuration_error_identity_must_match_the_row () =
 let () =
   Alcotest.run "tui-keeper-control"
     [ ( "health_tally"
-      , [ Alcotest.test_case "stale is not folded into a healthier word" `Quick
+      , [ Alcotest.test_case "idle is not folded into a healthier word" `Quick
             test_tally_uses_the_column_word
         ; Alcotest.test_case "every counted word appears in the column" `Quick
             test_tally_never_names_a_word_the_column_hides

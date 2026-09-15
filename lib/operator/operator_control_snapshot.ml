@@ -1,4 +1,3 @@
-module U = Yojson.Safe.Util
 include Operator_pending_confirm
 include Operator_digest
 
@@ -96,26 +95,6 @@ let with_keeper_slot ~sem ~name f =
 
 let compact_keeper_runtime_trust_json = Operator_control_snapshot_trust.compact_keeper_runtime_trust_json
 
-(* Returns the persisted heartbeat timestamp JSON and, when the heartbeat
-   ledger could not be read, the typed unavailable reason.  The error is
-   surfaced separately from [last_heartbeat] so an unreadable ledger is not
-   relabeled as an absent/missing heartbeat by downstream consumers. *)
-let persisted_last_heartbeat_json config keeper_name =
-  match
-    Keeper_heartbeat_persisted_snapshot.latest
-      ~config
-      ~keeper_name
-  with
-  | Ok (Some snapshot) -> (`String snapshot.timestamp, None)
-  | Ok None -> (`Null, None)
-  | Error error ->
-    Log.Dashboard.warn
-      "operator snapshot heartbeat read failed for keeper %s: %s"
-      keeper_name
-      error;
-    (`Null, Some error)
-;;
-
 let keepers_json
       ?keeper_names
       ?(include_recent_activity = false)
@@ -133,11 +112,6 @@ let keepers_json
   in
   let keeper_snapshot_interval_s =
     Runtime_params.get Runtime_settings.keeper_snapshot_sec |> float_of_int
-  in
-  let heartbeat_stale_after_s =
-    Keeper_status_runtime.keeper_heartbeat_stale_after_s
-      ~keepalive_interval_s:keeper_keepalive_interval_s
-      ~snapshot_interval_s:keeper_snapshot_interval_s
   in
   (* Parallel keeper I/O with concurrency cap: at most
      _keeper_snapshot_max_concurrency fibers run simultaneously.
@@ -203,9 +177,6 @@ let keepers_json
                   dt_meta := Time_compat.now () -. t0;
                   if lightweight && meta.paused
                   then (
-                    let last_heartbeat, heartbeat_observation_error =
-                      persisted_last_heartbeat_json config meta.name
-                    in
                     let t_ph = Time_compat.now () in
                     let phase_str =
                       match
@@ -248,10 +219,6 @@ let keepers_json
                              , `Float keeper_keepalive_interval_s )
                            ; ( "keeper_snapshot_interval_s"
                              , `Float keeper_snapshot_interval_s )
-                           ; "heartbeat_stale_after_s", `Float heartbeat_stale_after_s
-                           ; "last_heartbeat", last_heartbeat
-                           ; ( "heartbeat_observation_error"
-                             , Json_util.string_opt_to_json heartbeat_observation_error )
                            ; "updated_at", `String meta.updated_at
                            ; "created_at", `String meta.created_at
                            ]
@@ -300,7 +267,6 @@ let keepers_json
                     in
                     let diagnostic =
                       Keeper_status_runtime.keeper_diagnostic_json
-                        ~config
                         ~meta
                         ~keepalive_running
                         ~history_items:[]
@@ -309,9 +275,6 @@ let keepers_json
                            ~keepalive_running
                            ~keepalive_started_at
                            ~now_ts
-                    in
-                    let last_heartbeat =
-                      U.member "last_heartbeat" diagnostic
                     in
                     let t_audit = Time_compat.now () in
                     let audit_json =
@@ -409,8 +372,6 @@ let keepers_json
                            , `Float keeper_keepalive_interval_s )
                          ; ( "keeper_snapshot_interval_s"
                            , `Float keeper_snapshot_interval_s )
-                         ; "heartbeat_stale_after_s", `Float heartbeat_stale_after_s
-                         ; "last_heartbeat", last_heartbeat
                          ; "last_turn_ago_s", Json_util.float_opt_to_json last_turn_ago_s
                          ; "last_handoff_ago_s", Json_util.float_opt_to_json last_handoff_ago_s
                          ; "last_proactive_ago_s", Json_util.float_opt_to_json last_proactive_ago_s

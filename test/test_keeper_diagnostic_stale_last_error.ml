@@ -6,13 +6,6 @@ open Masc
 
 let now_ts = 1_781_100_000.0
 
-let diagnostic_config =
-  Workspace.default_config
-    (Filename.concat
-       (Filename.get_temp_dir_name ())
-       (Printf.sprintf "keeper-diagnostic-%d" (Unix.getpid ())))
-;;
-
 let member key json =
   match json with
   | `Assoc fields -> List.assoc_opt key fields
@@ -40,7 +33,6 @@ let meta_with_persisted_reason ~last_turn_ts =
 
 let diagnostic ~keepalive_running ~last_turn_ts =
   Keeper_status_runtime.keeper_diagnostic_json
-    ~config:diagnostic_config
     ~meta:(meta_with_persisted_reason ~last_turn_ts)
     ~keepalive_running
     ~history_items:[]

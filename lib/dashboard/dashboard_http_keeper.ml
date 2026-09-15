@@ -526,11 +526,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
             Runtime_params.get Runtime_settings.keeper_snapshot_sec
             |> float_of_int
           in
-          let heartbeat_stale_after_s =
-            Keeper_status_runtime.keeper_heartbeat_stale_after_s
-              ~keepalive_interval_s
-              ~snapshot_interval_s
-          in
           let registry_entry =
             Keeper_registry.get ~base_path:config.base_path m.name in
           let phase =
@@ -660,7 +655,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               in
               let diagnostic =
 	                Keeper_status_runtime.keeper_diagnostic_json
-	                  ~config
 	                  ~meta:m
 	                  ~keepalive_running
 	                  ~history_items:conversation_items
@@ -800,7 +794,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ("keepalive_running", `Bool keepalive_running);
               ("keeper_keepalive_interval_s", `Float keepalive_interval_s);
               ("keeper_snapshot_interval_s", `Float snapshot_interval_s);
-              ("heartbeat_stale_after_s", `Float heartbeat_stale_after_s);
               ("activation_mode", Keeper_activation_mode.to_yojson m.activation_mode);
               ( "status",
                 `String
@@ -971,7 +964,6 @@ let execution_trust_row_of_meta
      that state, so the trust surface must not read the conversation log. *)
   let diagnostic =
     Keeper_status_runtime.keeper_diagnostic_json
-      ~config
       ~meta:m
       ~keepalive_running
       ~history_items:[]

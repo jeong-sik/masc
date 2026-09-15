@@ -5462,6 +5462,13 @@
  (modules test_browser_lane_watched_work)
  (libraries alcotest eio eio.mock yojson masc.browser_lane masc.time_compat))
 
+; Mock clock as the native host's clock: a reply that lands as the extension
+; window closes is the reply, not the host's timeout.
+(test
+ (name test_browser_host)
+ (modules test_browser_host)
+ (libraries alcotest eio eio.mock yojson masc.browser_host))
+
 (include stanzas/test_browser_native_host.inc)
 
 (test

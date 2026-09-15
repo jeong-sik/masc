@@ -228,6 +228,26 @@ val inspect_submitted_evidence_for_authority :
     authority. The task id and producer must still match the durable request. *)
 val verifications_dir : string -> string
 val request_path : string -> string -> string
+
+val cancellation_reason_field : string
+(** The output key a stop's reason is written under. Named once so the writer
+    in {!Verification_protocol} and the reader here cannot drift. *)
+
+type cancellation_reason_read =
+  | Cancellation_reason_stated of string
+  | Cancellation_reason_absent
+      (** The record is readable and states none: a stop submitted before the
+          record kept a copy, or a request that is not a stop. *)
+  | Cancellation_reason_unreadable of string
+
+val cancellation_reason_of_request_json : Yojson.Safe.t -> string option
+
+val read_cancellation_reason :
+  base_path:string -> verification_id:string -> cancellation_reason_read
+(** The producer's whole claim when it gives up on a task, as the operator's
+    work list reads it. A missing file, an unparseable one and a record that
+    states no reason are three different answers: the first two are the list's
+    to report, the third is a stop from before the record kept the copy. *)
 val collaboration_reference : string -> (collaboration_kind * string) option
 val submitted_evidence_item_to_yojson : submitted_evidence_item -> Yojson.Safe.t
 val submitted_evidence_item_of_yojson : Yojson.Safe.t -> (submitted_evidence_item, string) result

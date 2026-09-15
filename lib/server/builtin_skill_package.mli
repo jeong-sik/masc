@@ -39,8 +39,10 @@ type bundled_verdict =
   | Replace_recorded of { backup : string }
       (** {!install} only. The receipt matches the installed tree and this
           release differs. The tree that was installed is kept at [backup],
-          the package's one backup directory, replacing the tree an earlier
-          replacement or retirement of the same package kept there. *)
+          the package's one backup entry, replacing the tree an earlier
+          replacement or retirement of the same package kept there. The backup
+          entry is not touched until the installed tree has left the Skill
+          source. *)
   | Replace_pending of { revision : string }
       (** {!reconcile_at_startup} only. The receipt matches the installed tree
           and this release differs; {!install} replaces it. *)
@@ -74,8 +76,25 @@ type error =
   | Published_but_unrecorded of { backup : string option; reason : string }
   | Exported_but_unsynced of { destination : string; reason : string }
   | Retired_but_unrecorded of { backup : string; reason : string }
+  | Backup_move_pending of { note : string }
+      (** A move note for this package already exists: an earlier replacement
+          or retirement did not finish. The package is not replaced or retired
+          until {!install} finishes that move. *)
+  | Backup_move_unresolved of { note : string }
+      (** {!install} found no tree with the revision in [note] in the Skill
+          source, the backup entry or staging. Staging is kept. *)
+
+(** How {!install} finished a replacement or retirement that stopped after
+    writing its move note. *)
+type backup_move =
+  | Move_never_started  (** The Skill source still holds the tree. *)
+  | Move_completed  (** The backup entry already holds the tree. *)
+  | Move_finished of { backup : string }
+      (** The tree was in a staging holder and now is at [backup]. *)
 
 type report =
+  | Interrupted of { name : string; result : (backup_move, error) result }
+      (** {!install} only. One per move note found when it starts. *)
   | Bundled of { name : string; result : (bundled_verdict, error) result }
   | Retired of { name : string; result : (retired_verdict, error) result }
   | Unfinished of { path : string; result : (unit, error) result }
@@ -108,9 +127,15 @@ val install :
   on_wait:(string -> unit) -> base_path:string -> package list -> (report list, error) result
 (** Everything {!reconcile_at_startup} does, plus replacing and retiring
     recorded trees and setting release permissions on untracked trees whose
-    files equal this release. First one [Unfinished] report per directory an
-    interrupted installation left behind, then the reports of
-    {!reconcile_at_startup}.
+    files equal this release. First one [Interrupted] report per move note an
+    interrupted replacement or retirement left, then, when every one of them
+    was finished, one [Unfinished] report per staging holder it removed, then
+    the reports of {!reconcile_at_startup}.
+
+    A replacement or retirement writes a move note naming the installed
+    tree's revision before that tree leaves the Skill source, and removes it
+    once the backup entry is verified to hold that tree. Staging, where the
+    tree waits in between, is emptied only when no note is left unfinished.
 
     A tree is replaced or retired only when its receipt matches it. A tree
     without a receipt is never removed: MASC cannot tell a former builtin from
@@ -139,7 +164,10 @@ val replace_reviewed :
     review rejects the replacement. The old package is kept in the package's
     backup directory, as for [Replace_recorded]. Publication exchanges directories atomically; unsupported
     filesystems return an error with the original package intact. [on_wait]
-    is {!install}'s. *)
+    is {!install}'s. It does not finish earlier moves; while a move note for
+    this package exists it returns [Backup_move_pending]. The next replacement
+    or retirement of the package, including a routine {!install}, replaces the
+    backup, so operator changes kept only there are deleted then. *)
 
 val error_message : error -> string
 val report_to_string : report -> string
@@ -147,6 +175,13 @@ val report_to_string : report -> string
     operator has one. *)
 
 module For_testing : sig
+  type interruption = After_move_note | After_leaving_skill_source | After_backup_placed
+  val install :
+    interrupt:(interruption -> unit) ->
+    on_wait:(string -> unit) -> base_path:string -> package list -> (report list, error) result
+  (** {!install}, calling [interrupt] between the steps of each replacement
+      and retirement so a test can stop the process there. *)
+
   val ensure_directory : sync_parent:(string -> unit) -> string -> (unit, error) result
   (** Observe or fail parent sync after actual directory creation. *)
   val export : sync_parent:(string -> unit) -> destination:string -> package -> (unit, error) result

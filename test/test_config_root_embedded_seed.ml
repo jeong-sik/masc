@@ -122,7 +122,8 @@ let bundled_verdicts reports =
       | Builtin_skill_package.Bundled { name; result = Ok verdict } -> Some (name, verdict)
       | Builtin_skill_package.Bundled { name; result = Error error } ->
         fail (name ^ ": " ^ Builtin_skill_package.error_message error)
-      | Builtin_skill_package.Retired _ | Builtin_skill_package.Unfinished _ -> None)
+      | Builtin_skill_package.Retired _ | Builtin_skill_package.Interrupted _
+      | Builtin_skill_package.Unfinished _ -> None)
     reports
 
 let test_builtin_skill_package () =
@@ -213,7 +214,8 @@ let test_existing_root_startup_only_adds () =
     List.filter_map
       (function
         | Builtin_skill_package.Retired { name; result } -> Some (name, result)
-        | Builtin_skill_package.Bundled _ | Builtin_skill_package.Unfinished _ -> None)
+        | Builtin_skill_package.Bundled _ | Builtin_skill_package.Interrupted _
+        | Builtin_skill_package.Unfinished _ -> None)
       (reconciled base_path)
   in
   (match retirements with

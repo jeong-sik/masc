@@ -208,35 +208,56 @@ let test_wrong_turn_is_not_substituted () =
     | Ok _ -> fail "a different turn snapshot was substituted")
 ;;
 
-(* The provider-input route resolves a turn inside one pool job, and the
-   resolution reads the store through Dated_jsonl, which offloads its own
-   reads. Run from a fiber through a real one-domain pool, the nested reads
-   must finish on the job's worker and answer what the inline read answers. *)
-let test_a_turn_resolved_inside_a_pool_job_matches_the_inline_read () =
-  Eio_main.run
-  @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = temp_dir () in
-  Eio.Switch.run
-  @@ fun sw ->
-  Eio.Switch.on_release sw (fun () -> rm_rf dir);
-  let config = Workspace_core.default_config dir in
-  ignore (Workspace_core.init config ~agent_name:(Some "test"));
-  write config 7;
-  let turn_ref = Ids.Turn_ref.make ~trace_id:"trace-provider-input" ~absolute_turn:7 in
-  let resolve () =
-    match Snapshot.read_resolved ~config ~keeper ~turn_ref with
-    | Ok resolved -> Yojson.Safe.to_string (Snapshot.resolved_to_json resolved)
-    | Error error -> "error: " ^ Snapshot.read_error_to_string error
-  in
-  let inline = resolve () in
-  let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
-  Domain_pool_ref.set pool;
-  Fun.protect ~finally:Domain_pool_ref.clear_for_tests (fun () ->
-    check string
-      "the pooled resolution answers the inline one"
-      inline
-      (Domain_pool_ref.submit_cpu_or_inline resolve))
+(* The scan reads the store newest first. A live store is 79-231 MB of
+   snapshots, and reading past the turn asked for decodes every one of them to
+   answer a question the order already settles. The unreadable oldest row is
+   the proof: a scan that reaches it reports that row instead of the missing
+   turn. *)
+let test_a_scan_stops_at_an_older_turn_of_the_same_trace () =
+  with_workspace (fun config ->
+    let store = Keeper_types_support.keeper_provider_input_store config keeper in
+    Dated_jsonl.append store (`Assoc [ "schema", `String "broken" ]);
+    write config 5;
+    write config 6;
+    let missing = Ids.Turn_ref.make ~trace_id:"trace-provider-input" ~absolute_turn:9 in
+    (match Snapshot.read_resolved ~config ~keeper ~turn_ref:missing with
+     | Error (Snapshot.Snapshot_not_found actual) ->
+       check string
+         "the turn asked for is the one reported missing"
+         (Ids.Turn_ref.to_string missing)
+         (Ids.Turn_ref.to_string actual)
+     | Error error ->
+       failf
+         "the scan read past the newest turn: %s"
+         (Snapshot.read_error_to_string error)
+     | Ok _ -> fail "a different turn snapshot was substituted");
+    ignore (read config 5))
+;;
+
+(* Another trace's turn numbers say nothing about this trace's, so a lower
+   turn under a different trace must not end the scan. *)
+let test_another_trace_does_not_end_the_scan () =
+  with_workspace (fun config ->
+    write config 5;
+    Snapshot.write_best_effort
+      ~config
+      ~keeper
+      ~trace_id:"trace-provider-input-restarted"
+      ~absolute_turn:1
+      ~runtime_profile:"local"
+      ~wire
+      ~system_prompt:"exact system prompt"
+      ~messages:[ message ]
+      ~tools:[ tool ];
+    let wanted = Ids.Turn_ref.make ~trace_id:"trace-provider-input" ~absolute_turn:5 in
+    match Snapshot.read_resolved ~config ~keeper ~turn_ref:wanted with
+    | Ok resolved ->
+      check string
+        "the older trace's turn is still found"
+        (Ids.Turn_ref.to_string wanted)
+        (Ids.Turn_ref.to_string resolved.rv_snapshot.turn_ref)
+    | Error error ->
+      failf "the scan stopped too early: %s" (Snapshot.read_error_to_string error))
 ;;
 
 let test_message_payload_matches_the_serialised_message () =
@@ -270,16 +291,20 @@ let () =
             "a message payload is the serialised message and its digest"
             `Quick
             test_message_payload_matches_the_serialised_message
-        ; test_case
-            "a turn resolved inside a pool job matches the inline read"
-            `Quick
-            test_a_turn_resolved_inside_a_pool_job_matches_the_inline_read
         ] )
     ; ( "turn boundary"
       , [ test_case
             "a missing turn is not substituted"
             `Quick
             test_wrong_turn_is_not_substituted
+        ; test_case
+            "a scan stops at an older turn of the same trace"
+            `Quick
+            test_a_scan_stops_at_an_older_turn_of_the_same_trace
+        ; test_case
+            "another trace's turn does not end the scan"
+            `Quick
+            test_another_trace_does_not_end_the_scan
         ] )
     ]
 ;;

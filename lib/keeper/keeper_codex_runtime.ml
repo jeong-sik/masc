@@ -1286,38 +1286,38 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
   in
   let observed_next_shrink_capacity_bytes = ref None in
   let starting_capacity_bytes =
-    Keeper_context_overflow_shrink_state.starting_capacity_bytes
+    Keeper_context_overflow_shrink_state.starting_capacity
       ~keeper_name
       ~runtime_id
-      ~max_capacity_bytes:unbounded_model_input_capacity_bytes
+      ~max_capacity:unbounded_model_input_capacity_bytes
   in
   let result =
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
       Keeper_turn_driver_try_provider.context_overflow_shrink_sequence
-      ~starting_capacity_bytes
+      ~starting_capacity:starting_capacity_bytes
       ~same_run_retry_authorized:(fun () ->
         Keeper_provider_attempt_effect.allows_same_turn_retry
           (Atomic.get effect_disposition)
         && Option.is_some !observed_next_shrink_capacity_bytes)
-      ~shrink_capacity:(fun ~capacity_bytes:_ ~default_capacity_bytes ->
+      ~shrink_capacity:(fun ~capacity:_ ~default_capacity ->
         Option.value
           !observed_next_shrink_capacity_bytes
-          ~default:(max 1 default_capacity_bytes))
+          ~default:(max 1 default_capacity))
       (* This runtime shrinks to the size the provider itself named
          ([observed_next_shrink_capacity_bytes]), not to a fraction of a
          declared request-body cap, and it charges no MASC-side reserve
          against that size. There is no local account that could rule the
          next size out, so the provider's own target stands. *)
-      ~shrink_admits_history:(fun ~capacity_bytes:_ -> true)
-      ~record_success:(fun ~capacity_bytes ->
-        if capacity_bytes <> unbounded_model_input_capacity_bytes
+      ~shrink_admits_history:(fun ~capacity:_ -> true)
+      ~record_success:(fun ~capacity ->
+        if capacity <> unbounded_model_input_capacity_bytes
         then
           Keeper_context_overflow_shrink_state.record_success
             ~keeper_name
             ~runtime_id
-            ~capacity_bytes)
+            ~capacity)
       ~on_shrink_retry:
-        (fun ~shrink_attempt ~previous_capacity_bytes ~capacity_bytes ->
+        (fun ~shrink_attempt ~previous_capacity:previous_capacity_bytes ~capacity:capacity_bytes ->
           resolve_input_rejected_for_shrink_retry ~official_client_continuation
             ~base_path
             ~keeper_name
@@ -1329,7 +1329,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
             shrink_attempt
             previous_capacity_bytes
             capacity_bytes)
-      ~attempt:(fun ~capacity_bytes ->
+      ~attempt:(fun ~capacity:capacity_bytes ->
         run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled ~official_client_continuation ~official_client_original_turn
           ~required_native_posture
           ~runtime_id

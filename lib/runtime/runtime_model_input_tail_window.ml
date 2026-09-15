@@ -307,9 +307,11 @@ let exact_drop ~available_bytes ~atom_count suffix =
   scan 0
 ;;
 
-let assemble ~allow_empty_history ~atom_count ~drop ~messages labelled =
+(* [assemble] and whether it prepended the synthetic preamble, which the
+   target projection charges only when it is transmitted. *)
+let assemble_with_preamble ~allow_empty_history ~atom_count ~drop ~messages labelled =
   if drop = 0
-  then messages
+  then messages, false
   else (
     let kept_labelled =
       List.filter
@@ -329,11 +331,15 @@ let assemble ~allow_empty_history ~atom_count ~drop ~messages labelled =
     in
     let kept = List.map fst kept_labelled in
     match first_kept_atom_role with
-    | None when allow_empty_history && drop >= atom_count -> preamble_message :: kept
-    | Some Agent_core.Types.User | None -> kept
+    | None when allow_empty_history && drop >= atom_count -> preamble_message :: kept, true
+    | Some Agent_core.Types.User | None -> kept, false
     | Some Agent_core.Types.Assistant
     | Some Agent_core.Types.Tool
-    | Some Agent_core.Types.System -> preamble_message :: kept)
+    | Some Agent_core.Types.System -> preamble_message :: kept, true)
+;;
+
+let assemble ~allow_empty_history ~atom_count ~drop ~messages labelled =
+  fst (assemble_with_preamble ~allow_empty_history ~atom_count ~drop ~messages labelled)
 ;;
 
 let project_with_drop
@@ -407,4 +413,112 @@ let project ?(allow_empty_history = false) ~measure_message_bytes ~capacity_byte
        ~capacity_bytes
        ~reserved_bytes
        messages)
+;;
+
+(* {1 Target projection} *)
+
+type overrun_cause =
+  | Fixed_parts_exceed_target
+  | Newest_atom_exceeds_target
+
+type target_fit =
+  | Within_target
+  | Overrun of
+      { by_bytes : int
+      ; cause : overrun_cause
+      }
+
+type target_projection =
+  { projection : projection
+  ; fit : target_fit
+  ; transmitted_bytes : int
+  }
+
+let target_fit_to_string = function
+  | Within_target -> "within_target"
+  | Overrun { by_bytes; cause = Fixed_parts_exceed_target } ->
+    Printf.sprintf "overrun_by_fixed_parts:%d" by_bytes
+  | Overrun { by_bytes; cause = Newest_atom_exceeds_target } ->
+    Printf.sprintf "overrun_by_newest_atom:%d" by_bytes
+;;
+
+let pinned_bytes_of ~measure_message_bytes labelled =
+  List.fold_left
+    (fun acc (msg, label) ->
+       match label with
+       | Pinned -> acc + measure_message_bytes msg
+       | Atom _ -> acc)
+    0
+    labelled
+;;
+
+(* The same quantized cut as [project_with_drop], with one difference in what
+   happens when no suffix fits: the newest atom is transmitted anyway and the
+   overrun is reported. The window is a target, and the parts no cut can
+   remove -- the reservation, pinned context, the newest atom -- are what the
+   turn is about; whether the provider can take them is the request-body
+   cap's and the provider's verdict, not this stage's. *)
+let project_target ~measure_message_bytes ~target_bytes ~reserved_bytes messages =
+  let labelled, atom_count = annotate messages in
+  let pinned_bytes = pinned_bytes_of ~measure_message_bytes labelled in
+  let preamble_bytes = measure_message_bytes preamble_message in
+  let available_bytes = target_bytes - reserved_bytes - pinned_bytes - preamble_bytes in
+  let fit ~overrun_cause ~transmitted_bytes =
+    let request_bytes = reserved_bytes + transmitted_bytes in
+    match overrun_cause with
+    | Some cause when request_bytes > target_bytes ->
+      Overrun { by_bytes = request_bytes - target_bytes; cause }
+    | Some _ | None -> Within_target
+  in
+  if atom_count = 0
+  then (
+    let transmitted_bytes = pinned_bytes in
+    { projection = { messages; dropped_atoms = 0; atom_count }
+    ; fit = fit ~overrun_cause:(Some Fixed_parts_exceed_target) ~transmitted_bytes
+    ; transmitted_bytes
+    })
+  else (
+    let _, suffix = atom_suffix_bytes ~measure_message_bytes ~atom_count labelled in
+    let newest_only = atom_count - 1 in
+    let drop, overrun_cause =
+      if available_bytes < 0
+      then newest_only, Some Fixed_parts_exceed_target
+      else (
+        match quantized_drop ~available_bytes ~atom_count suffix with
+        | Some drop -> drop, None
+        | None ->
+          let drop = exact_drop ~available_bytes ~atom_count suffix in
+          if drop >= atom_count
+          then newest_only, Some Newest_atom_exceeds_target
+          else drop, None)
+    in
+    let assembled, preamble_prepended =
+      assemble_with_preamble ~allow_empty_history:false ~atom_count ~drop ~messages labelled
+    in
+    let transmitted_bytes =
+      pinned_bytes + suffix.(drop) + (if preamble_prepended then preamble_bytes else 0)
+    in
+    { projection = { messages = assembled; dropped_atoms = drop; atom_count }
+    ; fit = fit ~overrun_cause ~transmitted_bytes
+    ; transmitted_bytes
+    })
+;;
+
+let project_newest_atom ~measure_message_bytes messages =
+  let labelled, atom_count = annotate messages in
+  let pinned_bytes = pinned_bytes_of ~measure_message_bytes labelled in
+  if atom_count = 0
+  then { messages; dropped_atoms = 0; atom_count }, pinned_bytes
+  else (
+    let _, suffix = atom_suffix_bytes ~measure_message_bytes ~atom_count labelled in
+    let drop = atom_count - 1 in
+    let assembled, preamble_prepended =
+      assemble_with_preamble ~allow_empty_history:false ~atom_count ~drop ~messages labelled
+    in
+    let transmitted_bytes =
+      pinned_bytes
+      + suffix.(drop)
+      + if preamble_prepended then measure_message_bytes preamble_message else 0
+    in
+    { messages = assembled; dropped_atoms = drop; atom_count }, transmitted_bytes)
 ;;

@@ -1,19 +1,20 @@
 (** Keeper_context_overflow_shrink_state — process-local memory of the last
     model-input windowing capacity that completed a turn successfully for a
-    given (keeper, runtime) pair.
+    given (keeper, runtime) pair. The unit is the lane's windowing unit; see
+    the interface.
 
     #27320: {!Keeper_turn_driver_try_provider.run_try_provider_with_context_overflow_shrink}
     retries a provider-reported context overflow on the SAME runtime with a
     halved windowing capacity. Remembering the capacity that last succeeded
     lets the next turn on that (keeper, runtime) start from it instead of
-    re-discovering it by shrinking again from the full declared request-body
-    cap every time.
+    re-discovering it by shrinking again from the full declared window every
+    time.
 
     Deliberately not durable: this is a same-process optimization to avoid
     repeated rediscovery, not a state transition anything depends on for
     correctness. A process restart, an unseen (keeper, runtime) pair, or a
-    remembered value above the runtime's current declared cap all fall back
-    to that cap via {!starting_capacity_bytes}. *)
+    remembered value above the lane's current declaration all fall back to
+    that declaration via {!starting_capacity}. *)
 
 module Key = struct
   type t = { keeper_name : string; runtime_id : string }
@@ -28,31 +29,29 @@ end
 module Capacity_map = Map.Make (Key)
 
 type t =
-  { mutable last_successful_capacity_bytes : int Capacity_map.t
+  { mutable last_successful_capacity : int Capacity_map.t
   ; mutex : Eio.Mutex.t
   }
 
-let global = { last_successful_capacity_bytes = Capacity_map.empty; mutex = Eio.Mutex.create () }
+let global = { last_successful_capacity = Capacity_map.empty; mutex = Eio.Mutex.create () }
 
-let starting_capacity_bytes ~keeper_name ~runtime_id ~max_capacity_bytes =
+let starting_capacity ~keeper_name ~runtime_id ~max_capacity =
   let key = { Key.keeper_name; runtime_id } in
   let remembered =
     Eio.Mutex.use_ro global.mutex (fun () ->
-      Capacity_map.find_opt key global.last_successful_capacity_bytes)
+      Capacity_map.find_opt key global.last_successful_capacity)
   in
   match remembered with
-  | Some remembered_bytes
-    when remembered_bytes > 0 && remembered_bytes <= max_capacity_bytes ->
-    remembered_bytes
-  | Some _ (* stale: now exceeds the runtime's current declared cap, or non-positive *)
-  | None -> max_capacity_bytes
+  | Some remembered when remembered > 0 && remembered <= max_capacity -> remembered
+  | Some _ (* stale: now exceeds the lane's current declaration, or non-positive *)
+  | None -> max_capacity
 ;;
 
-let record_success ~keeper_name ~runtime_id ~capacity_bytes =
+let record_success ~keeper_name ~runtime_id ~capacity =
   let key = { Key.keeper_name; runtime_id } in
   Eio.Mutex.use_rw ~protect:true global.mutex (fun () ->
-    global.last_successful_capacity_bytes <-
-      Capacity_map.add key capacity_bytes global.last_successful_capacity_bytes)
+    global.last_successful_capacity <-
+      Capacity_map.add key capacity global.last_successful_capacity)
 ;;
 
 (* A remembered capacity is a claim that this (keeper, runtime) pair
@@ -60,21 +59,21 @@ let record_success ~keeper_name ~runtime_id ~capacity_bytes =
    claim: the reserve this turn has to transmit -- tool schemas, system
    prompt, pinned messages -- grew past what that capacity can carry, and no
    later turn shrinks it back on its own. Keeping the disproved value would
-   start every following turn below the runtime's declared cap and refuse
+   start every following turn below the lane's declaration and refuse
    there, which is what #31684 measured on a live keeper: capacity 131072
    against a 469638-byte reserve, every turn, until the process restarted.
-   Forgetting returns the pair to [max_capacity_bytes] on the next turn, so
-   the discovery runs again against the reserve that exists now. *)
+   Forgetting returns the pair to [max_capacity] on the next turn, so the
+   discovery runs again against the reserve that exists now. *)
 let forget ~keeper_name ~runtime_id =
   let key = { Key.keeper_name; runtime_id } in
   Eio.Mutex.use_rw ~protect:true global.mutex (fun () ->
-    global.last_successful_capacity_bytes <-
-      Capacity_map.remove key global.last_successful_capacity_bytes)
+    global.last_successful_capacity <-
+      Capacity_map.remove key global.last_successful_capacity)
 ;;
 
 module For_testing = struct
   let reset () =
     Eio.Mutex.use_rw ~protect:true global.mutex (fun () ->
-      global.last_successful_capacity_bytes <- Capacity_map.empty)
+      global.last_successful_capacity <- Capacity_map.empty)
   ;;
 end

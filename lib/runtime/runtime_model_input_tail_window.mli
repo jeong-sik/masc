@@ -241,3 +241,58 @@ val project
     Never raises. Returns the input list physically unchanged when the whole
     history fits (including the empty list), so a request that needs no cut
     is byte-identical to the uncut one. *)
+
+(** {1 Target projection}
+
+    The transmission window as a target rather than a limit (RFC
+    keeper-context-window-in-tokens). [project_target] never refuses: what
+    the cut cannot remove is transmitted and the overrun is reported, because
+    the request-body cap and the provider judge whether the request can be
+    sent, and this stage only decides how much history rides along. *)
+
+type overrun_cause =
+  | Fixed_parts_exceed_target
+      (** The reservation plus the pinned messages and preamble already pass
+          the target on their own, before any atom is considered. *)
+  | Newest_atom_exceeds_target
+      (** The fixed parts fit but the newest atom, which no cut may drop,
+          does not fit beside them. *)
+
+type target_fit =
+  | Within_target
+  | Overrun of
+      { by_bytes : int
+      ; cause : overrun_cause
+      }
+
+type target_projection =
+  { projection : projection
+  ; fit : target_fit
+  ; transmitted_bytes : int
+        (** Bytes of [projection.messages] as [measure_message_bytes] counts
+            them: pinned messages, the kept atoms, and the preamble when one
+            was prepended. Excludes the caller's reservation. *)
+  }
+
+val target_fit_to_string : target_fit -> string
+
+val project_target
+  :  measure_message_bytes:(Agent_core.Types.message -> int)
+  -> target_bytes:int
+  -> reserved_bytes:int
+  -> Agent_core.Types.message list
+  -> target_projection
+(** The most recent suffix whose measured size fits [target_bytes -
+    reserved_bytes], cut at the same quantized boundaries as {!project}. When
+    no suffix fits, the newest atom alone is kept and [fit] says by how much
+    and why the request passes the target. Never raises. *)
+
+val project_newest_atom
+  :  measure_message_bytes:(Agent_core.Types.message -> int)
+  -> Agent_core.Types.message list
+  -> projection * int
+(** The smallest transmission that still carries the turn: pinned messages,
+    the newest atom, and the preamble when the cut lands on a non-[User]
+    head. The second component is that view's measured bytes, as
+    [target_projection.transmitted_bytes] counts them. For a runtime whose
+    token density has not been observed yet. *)

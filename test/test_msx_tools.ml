@@ -43,15 +43,27 @@ let is_completed result = Tool_result.failure_class result = None
 (* A failure the lane refused before touching anything says so. Undeclared, it
    reads as effect-outcome-unknown and ends the turn of a Keeper that ran the
    tool inside a composition. *)
-let took_no_effect = function
-  | Tool_result.Failed { effect_disposition = Tool_result.Proven_pre_effect; _ } -> true
+let took_no_effect (result : Tool_result.result) =
+  match result with
   | Tool_result.Failed
-      { effect_disposition =
+      { Tool_result.effect_disposition = Tool_result.Proven_pre_effect; _ } ->
+    true
+  | Tool_result.Failed
+      { Tool_result.effect_disposition =
           Tool_result.Proven_post_effect | Tool_result.Effect_outcome_unknown
       ; _
       }
   | Tool_result.Completed _ | Tool_result.Deferred _ ->
     false
+;;
+
+(* The history the lane is running. A fresh ROM-less load starts at the same
+   frame as the one it replaces, so only this tells a kept machine from a
+   replaced one. *)
+let incarnation () =
+  match Msx_lane.capture_with_identity () with
+  | Ok capture -> capture.Msx_lane.incarnation
+  | Error e -> fail (Msx_lane.error_to_string e)
 ;;
 
 let rejected result =
@@ -373,14 +385,14 @@ let test_press_validation () =
   check int "refusals do not move the clock" before
     (frame_of (dispatch ~base_path "masc_msx_screen" []));
   check int "refusals write no ledger edge" 0 (List.length (Msx_lane.ledger ()));
+  let loaded = incarnation () in
   let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String "/nonexistent/roms") ] in
   check (option string) "a missing BIOS directory is a runtime failure"
     (Some Tool_result.Runtime_failure |> Option.map Tool_result.tool_failure_class_to_string)
     (Option.map Tool_result.tool_failure_class_to_string (Tool_result.failure_class r));
   check bool "the missing BIOS directory is refused before the machine changes" true
     (took_no_effect r);
-  check int "the refused load leaves the loaded machine's clock" before
-    (frame_of (dispatch ~base_path "masc_msx_screen" []))
+  check string "the refused load leaves the loaded machine in place" loaded (incarnation ())
 ;;
 
 let test_inventory () =

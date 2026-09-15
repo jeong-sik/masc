@@ -22,6 +22,7 @@ let finalize
     ~(acc : Keeper_run_tools.hook_accumulator)
     ~(result : Runtime_agent.run_result)
     ~last_persisted_checkpoint
+    ~checkpoint_encoding_memo
     ~final_agent_core_turn_ordinal
     ~checkpoint_persistence_error
     ~post_turn_t0
@@ -139,8 +140,9 @@ let finalize
            if already_persisted
            then Ok `Reused
            else
-             Keeper_checkpoint_store.save_agent_core_classified
+             Keeper_checkpoint_store.save_agent_core_classified_with_encoding_memo
                ~session_dir:session.session_dir
+               ~encoding_memo:checkpoint_encoding_memo
                patched
              |> Result.map (fun outcome -> `Written outcome)
          in

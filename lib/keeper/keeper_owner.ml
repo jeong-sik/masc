@@ -519,6 +519,66 @@ let enqueue_unless_closed mailbox command ~closed =
        `Closed)
 ;;
 
+(* When the owner answers a command it has taken.
+
+   [In_its_drain_step]: the step that takes the command decides it, commits
+   whatever it changes and answers before taking the next one. Nothing in that
+   step waits on a child.
+
+   [Possibly_when_the_child_finishes]: the step may park the resolver until the
+   running child finishes. [Await_idle_after_shutdown] and [Begin_stopping] wait
+   for an active child; [Run_if_idle] answers with the turn it admitted, when
+   that turn ends. *)
+type answer =
+  | In_its_drain_step
+  | Possibly_when_the_child_finishes
+
+let answer : type response. response command -> answer = function
+  | Exact_projection -> In_its_drain_step
+  | Apply_meta _ -> In_its_drain_step
+  | Exact_operation _ -> In_its_drain_step
+  | Direct_checkpoint _ -> In_its_drain_step
+  | Defer_direct_checkpoint _ -> In_its_drain_step
+  | Resume_direct_checkpoint _ -> In_its_drain_step
+  | Direct_runtime_retry _ -> In_its_drain_step
+  | Defer_direct_runtime_retry _ -> In_its_drain_step
+  | Resume_direct_runtime_retry _ -> In_its_drain_step
+  | Direct_gate_bindings -> In_its_drain_step
+  | Reconcile_direct_gate_binding _ -> In_its_drain_step
+  | Direct_gate_waits -> In_its_drain_step
+  | Discharge_direct_gate _ -> In_its_drain_step
+  | Direct_gate_state _ -> In_its_drain_step
+  | Direct_gate_binding _ -> In_its_drain_step
+  | Direct_gate_obligations _ -> In_its_drain_step
+  | Defer_direct_gate_reconciliation _ -> In_its_drain_step
+  | Defer_direct_gate _ -> In_its_drain_step
+  | Resolve_direct_gate _ -> In_its_drain_step
+  | Resume_direct_gate _ -> In_its_drain_step
+  | Pause_and_interrupt _ -> In_its_drain_step
+  | Run_next_operation _ -> In_its_drain_step
+  | Interrupt_running_operation _ -> In_its_drain_step
+  | Submit_operation _ -> In_its_drain_step
+  | Submit_interactive_operation _ -> In_its_drain_step
+  | List_queued_operations _ -> In_its_drain_step
+  | Edit_queued_operation _ -> In_its_drain_step
+  | Move_queued_operation_to_front _ -> In_its_drain_step
+  | Move_queued_operation_to_end _ -> In_its_drain_step
+  | Cancel_queued_operation _ -> In_its_drain_step
+  | Batch_operations _ -> In_its_drain_step
+  | Claim_next_operation -> In_its_drain_step
+  | Succeed_running_operation _ -> In_its_drain_step
+  | Fail_running_operation _ -> In_its_drain_step
+  | Wake_operation_drain -> In_its_drain_step
+  | Run_if_idle _ -> Possibly_when_the_child_finishes
+  | Begin_shutdown _ -> In_its_drain_step
+  | Rollback_shutdown _ -> In_its_drain_step
+  | Restore_shutdown _ -> In_its_drain_step
+  | Transition_shutdown _ -> In_its_drain_step
+  | Await_idle_after_shutdown -> Possibly_when_the_child_finishes
+  | Child_finished _ -> In_its_drain_step
+  | Begin_stopping -> Possibly_when_the_child_finishes
+;;
+
 let request t command =
   if Atomic.get t.closed
   then Error Owner_closed
@@ -533,35 +593,33 @@ let request t command =
          command ran, and its caller must not be told the owner was closed
          to it. [Fiber.first] kept whichever wake-up was queued first, and a
          closing owner queues its close ahead of the response it settled in
-         the same pass.
-
-         The wait belongs to the caller, so a cancelled caller leaves it. It
-         used to run under [Eio.Cancel.protect], which made every call on this
-         module uninterruptible -- including a turn's call for an answer the
-         owner cannot give while that turn runs ([Await_idle_after_shutdown]
-         parks its resolver until no child is active). An operator interrupt
-         fails the child switch, but a child parked there could not unwind, so
-         the slot was never released and no interrupt, deadline or operator
-         command could end it. Two calls do need to survive a cancelled
-         caller, and both say so at their own site: the handover on the settle
-         path ([notify]) and the claim, whose answer is the only record of
-         which row the child took ([request_keeping_the_answer]). *)
-      Watched_work.run
-        (fun () -> Eio.Promise.await response)
-        ~watcher:(fun () ->
-           Eio.Promise.await t.closed_p;
-           Error Owner_closed))
-;;
-
-(* Ask, and keep the answer even if the caller is cancelled.
-
-   [Claim_next_operation] is the one ask whose answer is a fact the caller
-   alone holds: the owner commits the row as Running and then answers with
-   which row it was. A caller that leaves that wait leaves a Running row no
-   child in this process will settle, and only the next boot's
-   [settle_running_after_restart] clears it. The wait itself is owner-local --
-   one drain step, no network, no lock held across it. *)
-let request_keeping_the_answer t command = Eio.Cancel.protect (fun () -> request t command)
+         the same pass. *)
+      let await_answer () =
+        Watched_work.run
+          (fun () -> Eio.Promise.await response)
+          ~watcher:(fun () ->
+             Eio.Promise.await t.closed_p;
+             Error Owner_closed)
+      in
+      (match answer command with
+       | In_its_drain_step ->
+         (* A cancelled caller stays until the owner has answered. Callers
+            change the owner inside an authority they release on return:
+            [Keeper_owner_registry.apply_meta] holds the keeper's lifecycle key
+            lock and reservation across its write. Leaving early would release
+            them while the write is still queued, and it would commit after
+            another holder took them. A claim's answer is also the only record
+            of which row the child took. The wait is bounded by one drain step,
+            which never waits on a child. *)
+         Eio.Cancel.protect await_answer
+       | Possibly_when_the_child_finishes ->
+         (* A cancelled caller leaves. The answer may wait for the child, and
+            the caller can be that child: a turn asking
+            [Await_idle_after_shutdown] waits for its own end. Under a protected
+            wait an operator interrupt could not unwind it, so the slot was
+            never released. None of these callers holds an authority across
+            the wait. *)
+         await_answer ()))
 ;;
 
 (* Hand a command over without reading the answer.
@@ -1141,7 +1199,7 @@ let start
           Eio.Fiber.fork ~sw (fun () ->
             let claimed_operation_id = ref None in
             let claim () =
-              match request_keeping_the_answer t Claim_next_operation with
+              match request t Claim_next_operation with
               | Ok (Some operation) as result ->
                 claimed_operation_id := Some operation.Chat_operation.operation_id;
                 result

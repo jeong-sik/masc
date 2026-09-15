@@ -155,8 +155,10 @@ val source_label : source -> string
 - 자식 프로세스를 띄울 때만 `MASC_BASE_PATH=<root>` 를 환경에 넣는다. 자식은 그것을
   Environment 로 다시 `resolve` 한다.
 - `MASC_BASE_PATH_INPUT` 은 쓰지도 읽지도 않는다. 원래 입력은 `t.requested` 에 있다.
-- 4단계 전까지는 lib 안쪽이 아직 env 로 workspace 를 읽는다. 그동안 CLI 진입점은
-  `publish_workspace_root` 한 곳에서만 `MASC_BASE_PATH` 를 쓴다(1단계, `bin/main_eio.ml`).
+- 4단계 전까지는 lib 안쪽이 아직 env 로 workspace 를 읽는다. 그래서 진입점마다
+  `MASC_BASE_PATH` 를 직접 쓴다. `base_path` term 은 `publish_workspace_root`, 서버 부팅은
+  `server_runtime_bootstrap`, 그 밖에 `voice-verify`·stdio 서버·`masc-tui` 가 각자 쓴다.
+  하나라도 빠뜨리면 그 명령은 다른 workspace 를 읽는다. 이 줄들은 4단계에서 지운다.
 
 ## 4. 단계
 
@@ -169,7 +171,7 @@ val source_label : source -> string
 | 3 | `MASC_BASE_PATH_INPUT` 을 lib·bin·scripts·harness 에서 지운다. 운영자가 적은 원래 경로는 부팅 path diagnostics 가 명시 인자(`~input_base_path`)로 보관한다. 같은 값만 넣던 테스트 줄은 별도로 정리한다 | env 이름이 하나 |
 | 4 | 부팅 뒤의 읽기는 RFC-0274(wave A–E)가 맡는다. 이 RFC 는 진입점에서 정하는 순서만 소유한다. RFC-0274 가 끝나면 `Config_dir_resolver.base_path_or_cwd`, 테스트 전용 git root 탐색, `resolved_base_path_cache`, `publish_workspace_root` 를 지운다 | base path 를 env 에서 읽는 곳이 `observe` 와 부팅 입력뿐 |
 | 5 | 기본값 기록: 사람이 터미널에서 고를 때만 쓴다(installer 대화형, 설정 화면의 workspace 선택). 비대화형 installer 와 `setup --no-tui` 는 `--record-default` 가 있을 때만. 기록 판정도 `.masc/config` 로 맞춘다. installer 제안도 설정 화면과 같은 `~/MASC` 로 맞춘다 | 검증용 설치가 기계 기본값을 바꾸지 않는다 |
-| 6 | README·INSTALL(영/한)·`--help` 문구를 3.1 순서로 고친다. 아무 데서도 안 도는 `scripts/imp-onboarding-setup-pty.py` 를 지운다 | 문서와 코드가 같은 순서를 말한다 |
+| 6 | README·INSTALL(영/한)·`--help` 문구를 3.1 순서로 고친다. `scripts/imp-onboarding-setup-pty.py` 는 imp 의 sandbox 를 넘겨 설정이 native 로 돌게 고친다(evidence README 가 이 스크립트를 쓴다) | 문서와 코드가 같은 순서를 말한다 |
 
 ## 5. 검증
 

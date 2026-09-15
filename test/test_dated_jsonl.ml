@@ -531,10 +531,12 @@ let test_find_latest_entry_result_scans_backwards_across_chunks () =
       (Dated_jsonl.read_error_to_string error)
 ;;
 
-(* Every line shape the backwards scan joins across reads: empty and
-   whitespace-only lines, lines one byte either side of a chunk, lines many
-   chunks long, a malformed row, and an unterminated newest row. The scan
-   must hand the filter each non-empty line exactly once, newest first. *)
+(* Line shapes the backwards scan joins across reads: empty and
+   whitespace-only lines, lines around a chunk long, lines many chunks long, a
+   malformed row, and an unterminated newest row. The scan must hand the
+   filter each non-empty line exactly once, newest first. Reads are counted
+   from the end of the file, so these lengths do not put a newline on a read
+   edge. *)
 let test_a_backwards_scan_visits_every_line_once_newest_first () =
   let dir = tmpdir "dated_jsonl_scan_shapes" in
   let chunk = 8192 in

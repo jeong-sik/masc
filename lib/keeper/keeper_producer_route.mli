@@ -24,3 +24,16 @@ val resolve :
     it, or the read fails. That Keeper exists and the boot path
     re-materialises its meta, so the answer is "not now", never
     {!No_keeper}. *)
+
+val has_no_queue_without_writing :
+  config:Workspace_utils_backend_setup.config -> string -> bool
+(** [true] exactly when there is no registry entry and no file at the Keeper
+    meta path. For callers that must not write: {!resolve} repairs an
+    off-canon meta in place, which is a durable rewrite and an fsync of
+    another Keeper's file, and a caller holding a lease-backed lock cannot
+    afford one.
+
+    Every answer other than "no file" is [false]. A meta this decoder will not
+    read might still be a Keeper, and treating it as one costs a skipped
+    release and a kept obligation, which the next interval retries. The other
+    direction releases a task on a guess. *)

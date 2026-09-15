@@ -332,6 +332,12 @@ let test_only_a_chat_appended_event_names_a_reload_keeper () =
        ; composite_frame; chat_stream_delta_frame; chat_stream_custom_frame
        ; waiting_inventory_frame; operator_digest_frame
        ; transport_health_frame; fusion_run_status_frame
+       (* A turn observation numbers a provider call inside a keeper turn and
+          carries no transcript. It was absent from this list when the frame
+          was added, and the reader silently stopped being exhaustive. Every
+          frame this suite can build belongs here, so the next one cannot
+          skip the question. *)
+       ; turn_observation_frame
        ]);
   check (list string) "the appended frame answers its keeper" [ "lane-smith" ]
     (reload_keepers [ chat_appended_frame ])

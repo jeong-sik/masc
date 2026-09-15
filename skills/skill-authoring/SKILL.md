@@ -55,8 +55,10 @@ YAML description that contains `:`, `#`, or a leading backtick.
   `keeper_compose_<name>` has a 64-byte limit).
 - Every node `tool` is a registered tool on the Keeper surface. Check each input field
   name, type and enum against the tool's `config/tools/<tool>.toml`. Inputs are
-  validated when the node runs, not when the Skill loads, so a misspelled field loads
-  cleanly and fails on first use.
+  validated when the composition is called, not when the Skill loads, so a misspelled
+  field loads cleanly and fails on first use. An input made only of literals and
+  params is checked before any node runs; an input that reads another node's output
+  is checked when its node runs, after the nodes before it.
 - `kind = "output"` reads a field of an earlier node only when that tool declares a JSON
   output schema (`keeper_spawn` declares `/handle`). Most tools do not; their output
   cannot feed another node.

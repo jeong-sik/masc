@@ -611,7 +611,7 @@ let test_complete_http_empty_error_body_has_context () =
     in
     match Complete.complete ~sw ~net:env#net ~config ~messages () with
     | Ok _ -> fail "expected Error"
-    | Error (Http_client.HttpError { code; body; _ }) ->
+    | Error (Http_client.HttpError { code; body = Http_client.Received body; _ }) ->
       check int "status 404" 404 code;
       check
         string
@@ -863,7 +863,8 @@ let test_complete_stream_openai_responses_ok () =
          | Http_client.TimeoutError { message; _ }
          | Http_client.ProviderTerminal { message; _ }
          | Http_client.ProviderFailure { message; _ } -> message
-         | Http_client.HttpError { code; body; _ } -> Printf.sprintf "HTTP %d: %s" code body
+         | Http_client.HttpError { code; body; _ } ->
+           Printf.sprintf "HTTP %d: %s" code (Http_client.refusal_body_text body)
          | Http_client.AcceptRejected { reason } -> reason)
   with
   | Exit -> ()

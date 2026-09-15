@@ -115,7 +115,8 @@ let transport_of_sync sync_response =
 ;;
 
 let string_of_http_error = function
-  | Http_client.HttpError { code; body; _ } -> Printf.sprintf "HTTP %d: %s" code body
+  | Http_client.HttpError { code; body; _ } ->
+    Printf.sprintf "HTTP %d: %s" code (Http_client.refusal_body_text body)
   | NetworkError { message; _ } -> message
   | TimeoutError { message; _ } -> message
   | AcceptRejected { reason } -> reason

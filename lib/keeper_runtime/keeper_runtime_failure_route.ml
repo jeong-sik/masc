@@ -17,9 +17,9 @@ type rotate_class =
   | No_progress_empty
   | No_progress_thinking_only
   | No_progress_truncated
+  | Refusal_body_not_received
   | Generation_repeated
   | Attempt_rejected
-  | Refusal_body_not_received
 
 type fence_disposition =
   | Fenced_effect_attempted

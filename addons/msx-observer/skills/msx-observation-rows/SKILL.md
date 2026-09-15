@@ -1,6 +1,6 @@
 ---
-name: msx-observe
-description: Read selected MSX frames and input history with their machine incarnation, source coverage, and original evidence.
+name: msx-observation-rows
+description: Read selected MSX frames and input history from existing Lane observation rows with their machine incarnation, source coverage, and original evidence.
 ---
 
 Use this skill when a task needs an explanation of existing MSX observations.

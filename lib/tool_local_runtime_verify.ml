@@ -110,9 +110,13 @@ let probe_chat_completion_compatible
         Llm_provider.Complete.complete ~sw:env.sw ~net:env.net
           ~config:provider_config ~messages ()
       in
+      (* A completion that arrived as the window closed is the completion. *)
       let outcome =
-        try Ok (Eio.Time.with_timeout_exn env.clock (Stdlib.Float.of_int timeout_sec) run_completion)
-        with Eio.Time.Timeout -> Error "timeout"
+        Watched_work.run
+          ~watcher:(fun () ->
+            Eio.Time.sleep env.clock (Stdlib.Float.of_int timeout_sec);
+            Error "timeout")
+          (fun () -> Ok (run_completion ()))
       in
       match outcome with
       | Error message -> (Some false, Some message)

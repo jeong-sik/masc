@@ -28,6 +28,7 @@
   masc.voice_config
   masc.voice_setup
   masc
+  masc.watched_work
   masc.masc_goal
   masc.keeper_toml
   masc.keeper_types_profile_sandbox

@@ -7,6 +7,7 @@ import json
 import re
 import sys
 import tempfile
+import tomllib
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -27,6 +28,12 @@ CATALOG_PATH = (
     / "keeper-multi-collaboration"
     / "missions.json"
 )
+# Spelled out whole: PR CI picks the suites that name a changed file as an
+# exact string literal, so an edit to one fixture runs this suite.
+COMPOSITION_FIXTURE_SOURCES = {
+    "acceptance-inline-probe": "scripts/fixtures/keeper-multi-collaboration/skills/acceptance-inline-probe/SKILL.md",
+    "acceptance-async-probe": "scripts/fixtures/keeper-multi-collaboration/skills/acceptance-async-probe/SKILL.md",
+}
 
 
 def load_acceptance_module():
@@ -505,23 +512,23 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
             catalog["keeper_required_skill_identities"],
             [
                 skill_identity(
-                    "mission-snapshot",
+                    acceptance.INLINE_FIXTURE,
                     source_id="project-masc",
                 ),
                 skill_identity(
-                    "background-snapshot",
+                    acceptance.ASYNC_FIXTURE,
                     source_id="project-masc",
                 ),
             ],
         )
 
     def test_required_exact_reference_resolves_from_snapshot(self):
-        required_identity = skill_identity("mission-snapshot")
-        required_reference = skill_reference("mission-snapshot", "a" * 64)
+        required_identity = skill_identity(acceptance.INLINE_FIXTURE)
+        required_reference = skill_reference(acceptance.INLINE_FIXTURE, "a" * 64)
         report = acceptance.composition_surface_status(
             skills={
                 "state": "ready",
-                "snapshot": {"skills": [published_skill("mission-snapshot", "a" * 64)]},
+                "snapshot": {"skills": [published_skill(acceptance.INLINE_FIXTURE, "a" * 64)]},
                 "surfaces": [
                     {
                         "reference": required_reference,
@@ -565,19 +572,19 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
         )
 
     def test_composition_preflight_rejects_same_name_at_another_revision(self):
-        required_identity = skill_identity("mission-snapshot")
-        required_reference = skill_reference("mission-snapshot", "a" * 64)
-        other_revision = skill_reference("mission-snapshot", "b" * 64)
+        required_identity = skill_identity(acceptance.INLINE_FIXTURE)
+        required_reference = skill_reference(acceptance.INLINE_FIXTURE, "a" * 64)
+        other_revision = skill_reference(acceptance.INLINE_FIXTURE, "b" * 64)
 
         report = acceptance.composition_surface_status(
             skills={
                 "state": "ready",
-                "snapshot": {"skills": [published_skill("mission-snapshot", "a" * 64)]},
+                "snapshot": {"skills": [published_skill(acceptance.INLINE_FIXTURE, "a" * 64)]},
                 "surfaces": [
                     {
                         "reference": other_revision,
                         "kind": "composition",
-                        "tool_name": "keeper_compose_mission-snapshot",
+                        "tool_name": acceptance.INLINE_FIXTURE_TOOL,
                     }
                 ],
             },
@@ -591,8 +598,8 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
         self.assertEqual(report["installed_skill_references"], [other_revision])
 
     def test_unrelated_unavailable_is_observed_without_blocking(self):
-        required_identity = skill_identity("mission-snapshot")
-        required_reference = skill_reference("mission-snapshot", "a" * 64)
+        required_identity = skill_identity(acceptance.INLINE_FIXTURE)
+        required_reference = skill_reference(acceptance.INLINE_FIXTURE, "a" * 64)
         unrelated_reference = skill_reference("unrelated", "c" * 64)
 
         report = acceptance.composition_surface_status(
@@ -600,7 +607,7 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
                 "state": "ready",
                 "snapshot": {
                     "skills": [
-                        published_skill("mission-snapshot", "a" * 64),
+                        published_skill(acceptance.INLINE_FIXTURE, "a" * 64),
                         published_skill("unrelated", "c" * 64),
                     ]
                 },
@@ -608,7 +615,7 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
                     {
                         "reference": required_reference,
                         "kind": "composition",
-                        "tool_name": "keeper_compose_mission-snapshot",
+                        "tool_name": acceptance.INLINE_FIXTURE_TOOL,
                     },
                     {
                         "reference": unrelated_reference,
@@ -632,6 +639,549 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
                 }
             ],
         )
+
+    @staticmethod
+    def fixture_document(name):
+        path = REPO_ROOT / COMPOSITION_FIXTURE_SOURCES[name]
+        text = path.read_text(encoding="utf-8")
+        opening = "```toml composition\n"
+        start = text.index(opening) + len(opening)
+        end = text.index("\n```", start)
+        (composition,) = tomllib.loads(text[start:end])["compositions"]
+        frontmatter = text.split("---\n", 2)[1]
+        return text, frontmatter, composition
+
+    def test_fixtures_declare_the_shape_the_assertions_judge(self):
+        catalog = acceptance.load_catalog(CATALOG_PATH)
+        self.assertEqual(
+            [
+                identity["package_id"]
+                for identity in catalog["keeper_required_skill_identities"]
+            ],
+            [acceptance.INLINE_FIXTURE, acceptance.ASYNC_FIXTURE],
+        )
+        self.assertIn(acceptance.INLINE_FIXTURE_TOOL, catalog["keeper_required_tools"])
+        self.assertIn(acceptance.ASYNC_FIXTURE_TOOL, catalog["keeper_required_tools"])
+        self.assertEqual(
+            {
+                identity["package_id"]: acceptance.composition_fixture_path(
+                    catalog_path=CATALOG_PATH,
+                    identity_key=acceptance.canonical_skill_identity_key(
+                        identity, context="catalog"
+                    ),
+                )
+                for identity in catalog["keeper_required_skill_identities"]
+            },
+            {
+                name: REPO_ROOT / source
+                for name, source in COMPOSITION_FIXTURE_SOURCES.items()
+            },
+        )
+
+        for name in (acceptance.INLINE_FIXTURE, acceptance.ASYNC_FIXTURE):
+            text, frontmatter, composition = self.fixture_document(name)
+            self.assertEqual(text.count("```toml composition"), 1, name)
+            self.assertEqual(composition["name"], name)
+            self.assertIn(f"name: {name}\n", frontmatter)
+            # The model reads the TOML description; the frontmatter carries the
+            # same sentence so the catalog and the tool never disagree.
+            self.assertIn(
+                "description: " + json.dumps(composition["description"]) + "\n",
+                frontmatter,
+            )
+            self.assertNotIn("params", composition)
+
+        _, _, inline = self.fixture_document(acceptance.INLINE_FIXTURE)
+        self.assertEqual(inline["execution"], "inline")
+        nodes = {node["id"]: node for node in inline["nodes"]}
+        self.assertEqual(
+            [node["id"] for node in inline["nodes"]],
+            list(acceptance.INLINE_FIXTURE_NODES),
+        )
+        for node_id in acceptance.INLINE_FIXTURE_PARALLEL_NODES:
+            self.assertEqual(nodes[node_id]["input"]["kind"], "literal")
+            self.assertNotIn("after", nodes[node_id])
+        dataflow = nodes[acceptance.INLINE_FIXTURE_DATAFLOW_NODE]
+        self.assertNotIn("after", dataflow)
+        self.assertEqual(
+            [
+                field
+                for field in dataflow["input"]["fields"]
+                if field["value"]["kind"] == "output"
+            ],
+            [
+                {
+                    "name": acceptance.INLINE_FIXTURE_DATAFLOW_INPUT_FIELD,
+                    "value": {
+                        "kind": "output",
+                        "node": acceptance.INLINE_FIXTURE_DATAFLOW_SOURCE_NODE,
+                        "pointer": "/" + acceptance.INLINE_FIXTURE_DATAFLOW_SOURCE_FIELD,
+                    },
+                }
+            ],
+        )
+
+        _, _, background = self.fixture_document(acceptance.ASYNC_FIXTURE)
+        self.assertEqual(background["execution"], "async")
+        self.assertEqual(
+            [node["id"] for node in background["nodes"]],
+            list(acceptance.ASYNC_FIXTURE_NODES),
+        )
+
+    def test_fixture_install_uses_the_skill_editor_routes_and_outcomes(self):
+        dashboard = (
+            REPO_ROOT / "lib" / "server" / "server_routes_http_routes_dashboard.ml"
+        ).read_text(encoding="utf-8")
+        for route in (
+            acceptance.SKILL_EDITOR_CREATE_ROUTE,
+            acceptance.SKILL_EDITOR_SAVE_ROUTE,
+        ):
+            self.assertIn(f'Http.Router.post "{route}"', dashboard)
+        editor = (REPO_ROOT / "lib" / "server" / "server_skill_editor.ml").read_text(
+            encoding="utf-8"
+        )
+        for outcomes in acceptance.SKILL_EDITOR_PUBLISHED_OUTCOMES.values():
+            for outcome in outcomes:
+                self.assertIn(f'"status", `String "{outcome}"', editor)
+
+    @staticmethod
+    def editor_outcome(status, identity_key, revision, batches=None):
+        # The flow the server reports for a fixture, shaped as
+        # Keeper_skill_observability.to_yojson writes it.
+        planned = (
+            acceptance.COMPOSITION_FIXTURE_BATCHES[identity_key[1]]
+            if batches is None
+            else batches
+        )
+        return {
+            "status": status,
+            "preview": {
+                "profile": {
+                    "reference": acceptance.skill_reference_json(
+                        (*identity_key, revision)
+                    ),
+                    "flow": {
+                        "nodes": [],
+                        "batches": [
+                            {"index": index, "execution_mode": mode, "node_ids": nodes}
+                            for index, (mode, nodes) in enumerate(planned)
+                        ],
+                    },
+                },
+                "diagnostics": [],
+            },
+            "snapshot_revision": "snapshot-1",
+        }
+
+    def test_run_creates_unpublished_fixtures_and_saves_published_ones(self):
+        catalog = acceptance.load_catalog(CATALOG_PATH)
+        inline_key = ("project-masc", acceptance.INLINE_FIXTURE, acceptance.INLINE_FIXTURE)
+        async_key = ("project-masc", acceptance.ASYNC_FIXTURE, acceptance.ASYNC_FIXTURE)
+        stale_async = acceptance.skill_reference_json((*async_key, "d" * 64))
+        calls = []
+
+        class Response:
+            def __init__(self, value):
+                self.value = value
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return json.dumps(self.value).encode("utf-8")
+
+        def fake_urlopen(request, timeout):
+            body = json.loads(request.data.decode("utf-8"))
+            calls.append((request.full_url, request.get_header("Authorization"), body))
+            if request.full_url.endswith(acceptance.SKILL_EDITOR_CREATE_ROUTE):
+                return Response(
+                    self.editor_outcome("created_and_published", inline_key, "e" * 64)
+                )
+            return Response(
+                self.editor_outcome("saved_and_published", async_key, "f" * 64)
+            )
+
+        with unittest.mock.patch.object(acceptance.urllib.request, "urlopen", fake_urlopen):
+            receipts = acceptance.install_composition_fixtures(
+                catalog=catalog,
+                catalog_path=CATALOG_PATH,
+                skills={"state": "ready", "snapshot": {"skills": [stale_async]}},
+                mcp_url="http://127.0.0.1:9418/mcp",
+                token="tok",
+                timeout=5.0,
+            )
+
+        inline_text, _, _ = self.fixture_document(acceptance.INLINE_FIXTURE)
+        async_text, _, _ = self.fixture_document(acceptance.ASYNC_FIXTURE)
+        self.assertEqual(
+            calls,
+            [
+                (
+                    "http://127.0.0.1:9418" + acceptance.SKILL_EDITOR_CREATE_ROUTE,
+                    "Bearer tok",
+                    {
+                        "source_id": "project-masc",
+                        "package_id": acceptance.INLINE_FIXTURE,
+                        "source_text": inline_text,
+                    },
+                ),
+                (
+                    "http://127.0.0.1:9418" + acceptance.SKILL_EDITOR_SAVE_ROUTE,
+                    "Bearer tok",
+                    {"reference": stale_async, "source_text": async_text},
+                ),
+            ],
+        )
+        self.assertEqual(
+            [(receipt["status"], receipt["reference"]) for receipt in receipts],
+            [
+                (
+                    "created_and_published",
+                    acceptance.skill_reference_json((*inline_key, "e" * 64)),
+                ),
+                (
+                    "saved_and_published",
+                    acceptance.skill_reference_json((*async_key, "f" * 64)),
+                ),
+            ],
+        )
+
+    def test_fixture_install_fails_when_the_editor_did_not_publish(self):
+        catalog = acceptance.load_catalog(CATALOG_PATH)
+        inline_key = ("project-masc", acceptance.INLINE_FIXTURE, acceptance.INLINE_FIXTURE)
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                outcome = KeeperMultiCollaborationAcceptanceTest.editor_outcome(
+                    "created_but_unpublished", inline_key, "e" * 64
+                )
+                outcome["reason"] = "snapshot refresh failed"
+                return json.dumps(outcome).encode("utf-8")
+
+        with unittest.mock.patch.object(
+            acceptance.urllib.request, "urlopen", lambda request, timeout: Response()
+        ):
+            with self.assertRaisesRegex(
+                acceptance.AcceptanceError, "not published.*snapshot refresh failed"
+            ):
+                acceptance.install_composition_fixtures(
+                    catalog=catalog,
+                    catalog_path=CATALOG_PATH,
+                    skills={"state": "ready", "snapshot": {"skills": []}},
+                    mcp_url="http://127.0.0.1:9418/mcp",
+                    token="tok",
+                    timeout=5.0,
+                )
+
+        def conflict(request, timeout):
+            raise acceptance.urllib.error.HTTPError(
+                request.full_url,
+                409,
+                "Conflict",
+                {},
+                io.BytesIO(b'{"ok":false,"code":"package_already_exists"}'),
+            )
+
+        with unittest.mock.patch.object(acceptance.urllib.request, "urlopen", conflict):
+            with self.assertRaisesRegex(
+                acceptance.AcceptanceError, "HTTP 409.*package_already_exists"
+            ):
+                acceptance.install_composition_fixtures(
+                    catalog=catalog,
+                    catalog_path=CATALOG_PATH,
+                    skills={"state": "ready", "snapshot": {"skills": []}},
+                    mcp_url="http://127.0.0.1:9418/mcp",
+                    token="tok",
+                    timeout=5.0,
+                )
+
+    def test_fixture_install_fails_when_the_server_plans_another_shape(self):
+        catalog = acceptance.load_catalog(CATALOG_PATH)
+        inline_key = ("project-masc", acceptance.INLINE_FIXTURE, acceptance.INLINE_FIXTURE)
+        # The dataflow node promoted into the first concurrent batch: every
+        # node would still run, and the dataflow assertion would fail at the end.
+        flattened = [
+            (
+                "concurrent",
+                sorted(
+                    [
+                        *acceptance.INLINE_FIXTURE_PARALLEL_NODES,
+                        acceptance.INLINE_FIXTURE_DATAFLOW_NODE,
+                    ]
+                ),
+            )
+        ]
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return json.dumps(
+                    KeeperMultiCollaborationAcceptanceTest.editor_outcome(
+                        "created_and_published", inline_key, "e" * 64, flattened
+                    )
+                ).encode("utf-8")
+
+        with unittest.mock.patch.object(
+            acceptance.urllib.request, "urlopen", lambda request, timeout: Response()
+        ):
+            with self.assertRaisesRegex(acceptance.AcceptanceError, "is planned as"):
+                acceptance.install_composition_fixtures(
+                    catalog=catalog,
+                    catalog_path=CATALOG_PATH,
+                    skills={"state": "ready", "snapshot": {"skills": []}},
+                    mcp_url="http://127.0.0.1:9418/mcp",
+                    token="tok",
+                    timeout=5.0,
+                )
+
+    def test_read_only_preflight_lists_pending_fixtures_and_needs_a_writable_source(self):
+        catalog = acceptance.load_catalog(CATALOG_PATH)
+        operator_tools = set(catalog["operator_required_tools"])
+        inline_key = ("project-masc", acceptance.INLINE_FIXTURE, acceptance.INLINE_FIXTURE)
+        inline_reference = acceptance.skill_reference_json((*inline_key, "a" * 64))
+
+        class Client:
+            def __init__(self, url, token, timeout):
+                pass
+
+            def initialize(self):
+                return None
+
+            def list_tools(self):
+                return operator_tools
+
+        def no_request(request, timeout):
+            raise AssertionError(f"read-only preflight sent: {request.full_url}")
+
+        def run_preflight(skills, writable):
+            with contextlib.ExitStack() as stack:
+                stack.enter_context(
+                    unittest.mock.patch.object(
+                        acceptance,
+                        "read_health",
+                        lambda url, token, timeout: {
+                            "paths": {"effective_base_path": "/campaign"}
+                        },
+                    )
+                )
+                stack.enter_context(unittest.mock.patch.object(acceptance, "McpClient", Client))
+                stack.enter_context(
+                    unittest.mock.patch.object(
+                        acceptance, "read_skills", lambda url, token, timeout: skills
+                    )
+                )
+                stack.enter_context(
+                    unittest.mock.patch.object(
+                        acceptance,
+                        "read_writable_skill_source_ids",
+                        lambda url, token, timeout: writable,
+                    )
+                )
+                stack.enter_context(
+                    unittest.mock.patch.object(
+                        acceptance.urllib.request, "urlopen", no_request
+                    )
+                )
+                return acceptance.preflight(
+                    catalog=catalog,
+                    catalog_path=CATALOG_PATH,
+                    mcp_url="http://127.0.0.1:9418/mcp",
+                    health_url="http://127.0.0.1:9418/health?full=1",
+                    token="tok",
+                    timeout=5.0,
+                    expected_base_path="/campaign",
+                    expected_source_sha=None,
+                    install_fixtures=False,
+                )
+
+        empty = {"state": "ready", "snapshot": {"skills": []}, "surfaces": []}
+        _, _, result = run_preflight(empty, ["project-masc"])
+        self.assertEqual(result["status"], "passed")
+        self.assertEqual(
+            result["composition_surfaces"]["status"], "required_identity_not_published"
+        )
+        self.assertEqual(
+            result["composition_fixture_installation"],
+            {
+                "requested": False,
+                "receipts": [],
+                "pending": sorted(
+                    catalog["keeper_required_skill_identities"],
+                    key=lambda identity: identity["package_id"],
+                ),
+                "published_more_than_once": [],
+                "writable_source_ids": ["project-masc"],
+            },
+        )
+        with self.assertRaisesRegex(acceptance.AcceptanceError, "not writable and ready"):
+            run_preflight(empty, ["project-agents"])
+
+        # One fixture pending does not excuse the other one being published
+        # and refused as a composition.
+        inline_refused = {
+            "state": "ready",
+            "snapshot": {"skills": [inline_reference]},
+            "surfaces": [
+                {"reference": inline_reference, "kind": "unavailable", "error": "rejected"}
+            ],
+        }
+        with self.assertRaisesRegex(acceptance.AcceptanceError, "surface_unavailable|not ready"):
+            run_preflight(inline_refused, ["project-masc"])
+
+        published_twice = {
+            "state": "ready",
+            "snapshot": {
+                "skills": [
+                    inline_reference,
+                    acceptance.skill_reference_json((*inline_key, "b" * 64)),
+                ]
+            },
+            "surfaces": [],
+        }
+        with self.assertRaisesRegex(acceptance.AcceptanceError, "published more than once"):
+            run_preflight(published_twice, ["project-masc"])
+
+    def test_writable_sources_are_read_from_the_editor_sources_body(self):
+        class Response:
+            def __init__(self, body):
+                self.body = body
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return self.body
+
+        seen = []
+
+        def answer(body):
+            def fake_urlopen(request, timeout):
+                seen.append((request.get_method(), request.full_url, request.get_header("Authorization")))
+                return Response(body)
+
+            return fake_urlopen
+
+        url = "http://127.0.0.1:9418" + acceptance.SKILL_EDITOR_SOURCES_ROUTE
+        body = b'{"status":"ready","sources":[{"source_id":"project-masc"},{"source_id":"project-agents"}]}'
+        with unittest.mock.patch.object(acceptance.urllib.request, "urlopen", answer(body)):
+            self.assertEqual(
+                acceptance.read_writable_skill_source_ids(url, "tok", 5.0),
+                ["project-agents", "project-masc"],
+            )
+        self.assertEqual(seen, [("GET", url, "Bearer tok")])
+        with unittest.mock.patch.object(
+            acceptance.urllib.request, "urlopen", answer(b'{"status":"ready"}')
+        ):
+            with self.assertRaisesRegex(acceptance.AcceptanceError, "no source list"):
+                acceptance.read_writable_skill_source_ids(url, "tok", 5.0)
+        dashboard = (
+            REPO_ROOT / "lib" / "server" / "server_routes_http_routes_dashboard.ml"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            f'Http.Router.get "{acceptance.SKILL_EDITOR_SOURCES_ROUTE}"', dashboard
+        )
+
+    def test_fixture_install_never_writes_to_an_unpinned_workspace(self):
+        catalog = acceptance.load_catalog(CATALOG_PATH)
+
+        def forbidden(request, timeout):
+            raise AssertionError(f"request left before the workspace was pinned: {request.full_url}")
+
+        with unittest.mock.patch.object(acceptance.urllib.request, "urlopen", forbidden):
+            for base_path, source_sha in ((None, "a" * 40), ("", "a" * 40), ("/campaign", None)):
+                with self.assertRaisesRegex(
+                    acceptance.AcceptanceError, "--expected-base-path and --expected-source-sha"
+                ):
+                    acceptance.preflight(
+                        catalog=catalog,
+                        catalog_path=CATALOG_PATH,
+                        mcp_url="http://127.0.0.1:9418/mcp",
+                        health_url="http://127.0.0.1:9418/health?full=1",
+                        token="tok",
+                        timeout=5.0,
+                        expected_base_path=base_path,
+                        expected_source_sha=source_sha,
+                        install_fixtures=True,
+                    )
+
+    def test_run_settles_every_precondition_before_preflight_writes(self):
+        preflight_calls = []
+
+        def recording_preflight(**kwargs):
+            preflight_calls.append(kwargs)
+            raise AssertionError("preflight ran before the run's preconditions settled")
+
+        def forbidden(request, timeout):
+            raise AssertionError(f"request left before preconditions settled: {request.full_url}")
+
+        with tempfile.TemporaryDirectory() as tmp_name:
+            tmp = Path(tmp_name)
+            token_file = tmp / "token"
+            token_file.write_text("tok", encoding="utf-8")
+            full = [
+                "acceptance",
+                "--run",
+                "--allow-mutation",
+                "--sandbox-profile",
+                "docker",
+                "--turn-settle-budget",
+                "300",
+                "--expected-base-path",
+                "/campaign",
+                "--expected-source-sha",
+                "a" * 40,
+                "--token-file",
+                str(token_file),
+                "--browser-proof-script",
+                str(tmp / "proof.mjs"),
+                "--runtime-id",
+                "runtime-a",
+            ]
+
+            def without(flag, has_value=True):
+                index = full.index(flag)
+                return full[:index] + full[index + (2 if has_value else 1):]
+
+            occupied = tmp / "occupied"
+            occupied.mkdir()
+            (occupied / "left-over.json").write_text("{}", encoding="utf-8")
+            cases = [
+                (without("--expected-base-path") + ["--output-dir", str(tmp / "a")],
+                 "--run requires exact --expected-base-path"),
+                (without("--runtime-id") + ["--output-dir", str(tmp / "b")],
+                 "exact runtime selection"),
+                (full + ["--output-dir", str(occupied)], "output directory must be empty"),
+                ([*full[:6], "0", *full[7:], "--output-dir", str(tmp / "c")],
+                 "--turn-settle-budget must be positive"),
+            ]
+            for argv, message in cases:
+                with unittest.mock.patch.object(sys, "argv", argv):
+                    with unittest.mock.patch.object(acceptance, "preflight", recording_preflight):
+                        with unittest.mock.patch.object(
+                            acceptance.urllib.request, "urlopen", forbidden
+                        ):
+                            with contextlib.redirect_stderr(io.StringIO()) as stderr:
+                                code = acceptance.main()
+                self.assertEqual(code, 2, message)
+                self.assertIn(message, stderr.getvalue())
+        self.assertEqual(preflight_calls, [])
 
     def test_catalog_has_exact_rw20_rw21_delivery_and_debate_missions(self):
         catalog = acceptance.load_catalog(CATALOG_PATH)

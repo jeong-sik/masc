@@ -425,8 +425,17 @@ let test_mailbox_backpressures_without_drop () =
 (* [request] enqueues the command and then waits for the answer, and only the
    wait belongs to the caller. It used to run under [Eio.Cancel.protect], so a
    child parked there could not unwind on an operator interrupt and the turn
-   slot it held was never released. What the owner already took, it still
-   runs: a caller that leaves does not take the command back. *)
+   slot it held was never released.
+
+   A cancelled caller always unwinds. What it leaves behind depends on where
+   the cancellation caught it, and the line is [Eio.Stream.add] returning, not
+   the owner taking the command -- the drain loop never asks whether the
+   requester is still there. Cancelled while still waiting on a full mailbox,
+   the command never existed: Eio queues the item only when the waiter woke
+   without an error (eio 1.3 stream.ml:54-64), and [enqueue_unless_closed]
+   leaves that wait cancellable. Cancelled after the add returned, the command
+   runs, whether or not the owner has reached it yet. This case pins the far
+   end, where the owner is already inside the store write. *)
 let test_cancelled_caller_unwinds_while_its_command_commits () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->

@@ -6728,6 +6728,7 @@ let launch_context_inspector_load state ~mailbox ~keeper_name =
          server stops writing a body nobody reads. *)
       let superseded, supersede = Eio.Promise.create () in
       supersede_context_inspector_load state
+        (* fire-and-forget: the bool try_resolve returns (already resolved?) is not needed. *)
         (Some (fun () -> ignore (Eio.Promise.try_resolve supersede ())));
       Eio.Fiber.fork_daemon ~sw (fun () ->
           Eio.Fiber.first

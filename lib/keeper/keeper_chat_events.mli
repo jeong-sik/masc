@@ -275,7 +275,7 @@ val publish : t -> keeper_chat_event -> unit
 val close : t -> unit
 
 (** [reader_gone t] declares that the bus's consumer has stopped reading and
-    will not read again. Idempotent, suspends nowhere, and releases a
+    will not read again. Idempotent, suspends nowhere, and releases every
     publisher already waiting for room.
 
     The bus holds one turn's events for one consumer, and its bounded window

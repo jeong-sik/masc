@@ -66,8 +66,6 @@ module Server_runtime_bootstrap = Server_runtime_bootstrap
 module Server_routes_http_runtime = Server_routes_http_runtime
 module Server_startup_takeover = Server_startup_takeover
 
-let default_base_path = Server_mcp_transport_http.default_base_path
-
 let is_valid_protocol_version =
   Server_mcp_transport_http.is_valid_protocol_version
 
@@ -429,10 +427,28 @@ let host =
 let run_base_path =
   Arg.(value & opt (some string) None & info ["base-path"] ~docv:"PATH"
     ~doc:"Workspace root; runtime state lives under its .masc directory.")
-let base_path = Term.(const (function Some raw -> raw | None -> default_base_path ()) $ run_base_path)
+(* In-process readers still find the workspace through MASC_BASE_PATH until
+   RFC workspace-root-resolution stage 4 passes the root as an argument. Without
+   this, a workspace found from the cwd would reach the command and then be lost
+   to every reader below it. *)
+let publish_workspace_root (workspace : Workspace_root.t) =
+  Unix.putenv Env_config_core.base_path_env_key workspace.Workspace_root.root;
+  Config_dir_resolver.reset ();
+  Workspace_utils_backend_setup.cache_resolved_base_path workspace.Workspace_root.root
+
+(* Every command that takes a workspace resolves it here, in Workspace_root's
+   order, so `masc init` run inside a workspace finds it the way `masc start` does. *)
+let base_path =
+  Term.(ret (const (fun requested ->
+    match Workspace_root.resolve_current ~flag:requested with
+    | Ok workspace ->
+      publish_workspace_root workspace;
+      `Ok workspace.Workspace_root.root
+    | Error error -> `Error (false, Workspace_root.error_message error)) $ run_base_path))
 let selected_base_path requested =
-  let selected = match requested with Some _ -> requested | None -> Option.map snd (Env_config_core.base_path_source_opt ()) in
-  Option.map Env_config.normalize_masc_base_path_input selected
+  match Workspace_root.resolve_current ~flag:requested with
+  | Ok workspace -> Some workspace.Workspace_root.root
+  | Error (Workspace_root.No_workspace _) -> None
 let resolve_connection_port requested cli =
   Workspace_connection.resolve ~base_path:(selected_base_path requested) ~cli
     ~environment:(Env_config_core.raw_value_opt Env_config_core.http_port_env_key)
@@ -582,18 +598,13 @@ let acquire_base_path_lock ~run_dir base_path =
 
 let run_cmd ?(record_default = false) host port cli_base_path accept_store_quarantine =
   Printexc.record_backtrace true;
-  let resolved_base_path =
-    Server_base_path_guard.resolve_startup_base_path ~cli_base_path
-      ~default_base_path ()
+  let workspace =
+    Server_base_path_guard.exit_on_no_workspace
+      (Server_base_path_guard.startup_root ~cli_base_path)
   in
-  Server_base_path_guard.exit_on_violation
-    (Server_base_path_guard.enforce resolved_base_path);
-  let raw_base_path = resolved_base_path.raw_base_path in
-  let normalized_base_path = resolved_base_path.normalized_base_path in
-  let resolution_source =
-    Server_base_path_guard.resolution_source_label
-      resolved_base_path.resolution_source
-  in
+  let raw_base_path = workspace.Workspace_root.requested in
+  let normalized_base_path = workspace.Workspace_root.root in
+  let resolution_source = Workspace_root.source_label workspace.Workspace_root.source in
   let stripped_base_path =
     Env_config.strip_path_trailing_slashes (String.trim raw_base_path)
   in
@@ -610,13 +621,10 @@ let run_cmd ?(record_default = false) host port cli_base_path accept_store_quara
         (Server_base_path_guard.format_canonicalization_error error);
       exit 1
   in
-  Server_base_path_guard.exit_on_violation
-    (Server_base_path_guard.enforce
-       { resolved_base_path with normalized_base_path = canonical_base_path });
   let on_ready () =
     if record_default then
-    (match resolved_base_path.resolution_source with
-     | Server_base_path_guard.Explicit_cli | Server_base_path_guard.Explicit_env ->
+    (match workspace.Workspace_root.source with
+     | Workspace_root.Flag | Workspace_root.Environment | Workspace_root.Current_directory ->
        (match Env_config.record_default_base_path canonical_base_path with
         | Env_config.Recorded _ -> ()
         | Env_config.No_record_location ->
@@ -629,7 +637,7 @@ let run_cmd ?(record_default = false) host port cli_base_path accept_store_quara
           Log.Server.warn
             "default workspace not recorded: could not write %s (%s); pass --base-path to later commands"
             record reason)
-     | Server_base_path_guard.Persisted_default | Server_base_path_guard.Implicit_default -> ())
+     | Workspace_root.Recorded _ -> ())
   in
   let masc_dir = Filename.concat canonical_base_path Common.masc_dirname in
   let lease_dir = (Host_config.host ()).base_path_lease_dir in
@@ -3477,7 +3485,12 @@ let prerequisite_actions_cmd =
        is not set" -- advice that does not install anything. *)
     Term.(const (fun base_path dependency action ->
       Masc_cli_prerequisites.run
-        ~base_path:(fun () -> match base_path with Some raw -> raw | None -> default_base_path ())
+        ~base_path:(fun () ->
+          match Workspace_root.resolve_current ~flag:base_path with
+          | Ok workspace ->
+            publish_workspace_root workspace;
+            workspace.Workspace_root.root
+          | Error error -> prerr_endline (Workspace_root.error_message error); exit 1)
         ~dependency ~action)
       $ run_base_path $ dependency $ action)
 

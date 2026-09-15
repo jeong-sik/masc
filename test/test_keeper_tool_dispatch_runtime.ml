@@ -5069,16 +5069,21 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                     { failure_class = Tool_result.Runtime_failure
                     ; effect_disposition = Tool_result.Effect_outcome_unknown
                     ; detail =
-                        Keeper_terminal_effect_detail.Tool_failed { message; _ }
+                        Keeper_terminal_effect_detail.Agent_core_terminal_effect { detail }
                     }) ->
+               (* The provider loop fails the terminal tool inside Agent Core
+                  before the boundary probe runs, so the runtime error carries
+                  Agent Core's detail rather than the bundle's own. *)
                check bool
                  "Runtime_agent error retains the exact full chat target"
                  true
-                 (String_util.contains_substring message chat_path)
+                 (String_util.contains_substring detail chat_path)
              | Some other ->
                failf
-                 "Runtime_agent returned %s instead of terminal_effect_failed"
-                 (Keeper_internal_error.kind_of_masc_internal_error other)
+                 "Runtime_agent returned %s instead of an Agent Core terminal effect failure"
+                 (match Keeper_internal_error.summary_of_masc_internal_error other with
+                  | Some summary -> summary
+                  | None -> Keeper_internal_error.kind_of_masc_internal_error other)
              | None -> fail "Runtime_agent flattened the typed terminal failure");
             (match runtime_bundle.terminal_effect_state () with
              | Masc.Keeper_tools_agent_core.Terminal_effect_failed failure ->

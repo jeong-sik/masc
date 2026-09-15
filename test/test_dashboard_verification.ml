@@ -48,17 +48,14 @@ let restore_process_config_input name (prior_env, prior_boot) =
   | None -> Config_boot_overrides.clear name
 
 (** Create an isolated MASC base_path for the duration of [f].
-    Restores [MASC_BASE_PATH] and [MASC_BASE_PATH_INPUT] afterwards so
+    Restores [MASC_BASE_PATH] afterwards so
     subsequent tests in the same binary see the original value. *)
 let with_temp_base_path f =
   let dir = Filename.temp_dir "masc_dashboard_verify_test" "" in
   let prior_base = snapshot_config_input "MASC_BASE_PATH" in
-  let prior_input = snapshot_config_input "MASC_BASE_PATH_INPUT" in
   override_config_input "MASC_BASE_PATH" dir;
-  override_config_input "MASC_BASE_PATH_INPUT" dir;
   let cleanup () =
     restore_config_input "MASC_BASE_PATH" prior_base;
-    restore_config_input "MASC_BASE_PATH_INPUT" prior_input;
     rm_rf dir
   in
   Fun.protect ~finally:cleanup (fun () -> f dir)
@@ -120,27 +117,18 @@ let member key j = Yojson.Safe.Util.member key j
 
 let test_temp_base_path_overrides_and_restores_env_inputs () =
   let prior_base = snapshot_config_input "MASC_BASE_PATH" in
-  let prior_input = snapshot_config_input "MASC_BASE_PATH_INPUT" in
   Fun.protect
     ~finally:(fun () ->
-      restore_process_config_input "MASC_BASE_PATH" prior_base;
-      restore_process_config_input "MASC_BASE_PATH_INPUT" prior_input)
+      restore_process_config_input "MASC_BASE_PATH" prior_base)
     (fun () ->
       let original_base =
         Filename.concat (Filename.get_temp_dir_name ())
           "masc-dashboard-verify-original-base"
       in
-      let original_input =
-        Filename.concat (Filename.get_temp_dir_name ())
-          "masc-dashboard-verify-original-input"
-      in
       Unix.putenv "MASC_BASE_PATH" original_base;
-      Unix.putenv "MASC_BASE_PATH_INPUT" original_input;
       with_temp_base_path (fun base_path ->
         Alcotest.(check (option string)) "base path overridden"
           (Some base_path) (Sys.getenv_opt "MASC_BASE_PATH");
-        Alcotest.(check (option string)) "base path input overridden"
-          (Some base_path) (Sys.getenv_opt "MASC_BASE_PATH_INPUT");
         let _ =
           create_pending_request ~base_path ~task_id:"task-env-override"
             ~worker:"keeper-alpha" ~criteria:[ "env isolated" ]
@@ -154,9 +142,7 @@ let test_temp_base_path_overrides_and_restores_env_inputs () =
               (Printf.sprintf "expected temp base_path request, got %d" n)
         | _ -> Alcotest.fail "total not int");
       Alcotest.(check (option string)) "base path restored"
-        (Some original_base) (Sys.getenv_opt "MASC_BASE_PATH");
-      Alcotest.(check (option string)) "base path input restored"
-        (Some original_input) (Sys.getenv_opt "MASC_BASE_PATH_INPUT"))
+        (Some original_base) (Sys.getenv_opt "MASC_BASE_PATH"))
 
 (* ── Tests ──────────────────────────────────────────── *)
 
@@ -246,13 +232,10 @@ let test_requests_json_uses_explicit_base_path_not_env () =
   let workspace_base = Filename.temp_dir "masc_dashboard_verify_workspace" "" in
   let env_base = Filename.temp_dir "masc_dashboard_verify_env" "" in
   let prior_base = snapshot_config_input "MASC_BASE_PATH" in
-  let prior_input = snapshot_config_input "MASC_BASE_PATH_INPUT" in
   override_config_input "MASC_BASE_PATH" env_base;
-  override_config_input "MASC_BASE_PATH_INPUT" env_base;
   Fun.protect
     ~finally:(fun () ->
       restore_config_input "MASC_BASE_PATH" prior_base;
-      restore_config_input "MASC_BASE_PATH_INPUT" prior_input;
       rm_rf workspace_base;
       rm_rf env_base)
     (fun () ->

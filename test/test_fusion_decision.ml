@@ -34,13 +34,12 @@ let original_evidence ?task () =
 let with_fixture f = Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base = Filename.temp_dir "fusion-decision-" "" in
-  let old = Sys.getenv_opt "MASC_BASE_PATH" and old_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
-  Unix.putenv "MASC_BASE_PATH" base; Unix.putenv "MASC_BASE_PATH_INPUT" base;
+  let old = Sys.getenv_opt "MASC_BASE_PATH" in
+  Unix.putenv "MASC_BASE_PATH" base;
   Board.reset_global_for_test (); Board_dispatch.reset_for_test ();
   Fun.protect ~finally:(fun () ->
     Board.reset_global_for_test (); Board_dispatch.reset_for_test ();
-    Unix.putenv "MASC_BASE_PATH" (Option.value old ~default:"");
-    Unix.putenv "MASC_BASE_PATH_INPUT" (Option.value old_input ~default:""); remove base)
+    Unix.putenv "MASC_BASE_PATH" (Option.value old ~default:""); remove base)
     (fun () ->
       let config = Workspace.default_config base in
       ignore (Workspace.init config ~agent_name:(Some "fusion-keeper"));

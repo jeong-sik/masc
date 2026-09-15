@@ -31,14 +31,6 @@ let enqueue_record ~keepers_dir ~name ~ts ~reason ~restart_count =
   Queue.push { keepers_dir; name; ts; reason; restart_count } queue
 ;;
 
-let drain_batch () =
-  let batch = ref [] in
-  while not (Queue.is_empty queue) do
-    batch := Queue.pop queue :: !batch
-  done;
-  List.rev !batch
-;;
-
 let write_event (event : crash_event) =
   let store = crash_store ~keepers_dir:event.keepers_dir event.name in
   Dated_jsonl.append
@@ -65,12 +57,22 @@ let write_event_reporting_failure event =
       (Printexc.to_string exn)
 ;;
 
-(* [drain_batch] pops, so the take and the write are one step: a cancellation
-   landing between them would leave the event in neither the queue nor the
-   store. *)
-let flush_pending () =
-  Eio.Cancel.protect (fun () ->
-    drain_batch () |> List.iter write_event_reporting_failure)
+(* One event per protected step. Taking and writing together is what keeps a
+   cancellation from leaving an event in neither the queue nor the store, and
+   keeping the step to one event is what keeps the uncancellable stretch to one
+   append: whatever has not been taken yet is still queued, so a cancellation
+   between two events costs nothing and the release hook writes the rest. *)
+let rec flush_pending () =
+  match
+    Eio.Cancel.protect (fun () ->
+      match Queue.take_opt queue with
+      | None -> `Drained
+      | Some event ->
+        write_event_reporting_failure event;
+        `Wrote)
+  with
+  | `Drained -> ()
+  | `Wrote -> flush_pending ()
 ;;
 
 let start_drain_fiber ~sw ~clock =

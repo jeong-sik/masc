@@ -151,9 +151,10 @@ module KeeperPollIntervals = struct
       Drain fiber batches in-memory crash events and persists them
       to the dated jsonl store. Lower values reduce write batching
       (more, smaller writes); higher values risk losing the
-      in-memory tail on a hard kill. A switch that closes flushes
-      the tail, so an orderly shutdown does not depend on this value.
-      Must be >= 0.1.
+      in-memory tail on a hard kill. A switch that closes writes
+      whatever is still queued, so no record is lost to an orderly
+      shutdown -- a larger value only means more of them are written
+      then. Must be >= 0.1.
       Default: 2.0 — used at {!Keeper_crash_persistence}. *)
   let crash_persistence_drain_sec =
     Float.max 0.1 (get_float ~default:2.0 "MASC_KEEPER_CRASH_PERSIST_DRAIN_INTERVAL_SEC")

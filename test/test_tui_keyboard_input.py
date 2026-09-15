@@ -1755,7 +1755,6 @@ def run_terminal_scenario(
                 environment.update(
                     {
                         "MASC_BASE_PATH": env_base_path,
-                        "MASC_BASE_PATH_INPUT": env_base_path,
                         "MASC_HOST": "127.0.0.1",
                         "MASC_TUI_SYNC": "off",
                         "TERM": "xterm-256color",

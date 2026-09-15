@@ -422,7 +422,15 @@ let test_mailbox_backpressures_without_drop () =
   check int "mailbox drained" 0 (Owner.For_testing.mailbox_depth owner)
 ;;
 
-let test_enqueued_request_settles_before_cancellation_unwinds () =
+(* A caller cancelled after it handed a command over stays until the owner has
+   answered, when the owner answers that command in the step that takes it.
+   [Keeper_owner_registry.apply_meta] holds the keeper's lifecycle key lock and
+   reservation across this call; a caller that left early would release them
+   while its write was still in the store, and the write would land under the
+   next holder. The case cancels the caller while the owner is inside that
+   write. With only the answer wait protected, the handover's own return let
+   the caller leave here on every 0.35.18 release build. *)
+let test_a_cancelled_caller_stays_until_its_command_is_answered () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
   let replace_entered, resolve_replace_entered = Eio.Promise.create () in
@@ -452,25 +460,43 @@ let test_enqueued_request_settles_before_cancellation_unwinds () =
          ignore
            (Owner.apply_meta
               owner
-              (Set_activation_mode { mode = Masc.Keeper_activation_mode.Autonomous; updated_at = "committed" })))
+              (Set_activation_mode
+                 { mode = Masc.Keeper_activation_mode.Autonomous
+                 ; updated_at = "committed"
+                 })))
      with
      | Eio.Cancel.Cancelled _ -> Atomic.set caller_unwound true);
     Eio.Promise.resolve resolve_caller_done ());
   let context = Eio.Promise.await cancel_context in
+  (* The owner has taken the command off the mailbox and is inside the store
+     write. *)
   Eio.Promise.await replace_entered;
-  Eio.Cancel.cancel context (Failure "cancel after owner enqueue");
-  for _ = 1 to 10 do
+  Eio.Cancel.cancel context (Failure "cancel while the owner writes");
+  (* A caller that can leave does so within a few scheduler passes; the
+     release builds saw it inside ten. *)
+  for _ = 1 to 100 do
     Eio.Fiber.yield ()
   done;
-  check bool "caller remains inside committed request" false (Atomic.get caller_unwound);
-  Eio.Promise.resolve resolve_release_replace ();
-  Eio.Promise.await caller_done;
-  check bool "protected request returns after settlement" false (Atomic.get caller_unwound);
   check
     bool
-    "enqueued mutation committed before authority scope unwound"
+    "the cancelled caller is still waiting while the owner writes"
+    false
+    (Atomic.get caller_unwound);
+  Eio.Promise.resolve resolve_release_replace ();
+  Eio.Promise.await caller_done;
+  check
+    bool
+    "the caller returned with the answer, not with its cancellation"
+    false
+    (Atomic.get caller_unwound);
+  (* [apply_transition] publishes the projection before the owner answers, so
+     reading it here says the write landed before the caller returned. *)
+  check
+    bool
+    "the command committed before its caller returned"
     true
-    (Masc.Keeper_activation_mode.restore_owner (Option.get (Owner.projection owner).meta).activation_mode)
+    (Masc.Keeper_activation_mode.restore_owner
+       (Option.get (Owner.projection owner).meta).activation_mode)
 ;;
 
 let test_store_failure_fences_mutations () =
@@ -4604,9 +4630,9 @@ let () =
             `Quick
             test_mailbox_backpressures_without_drop
         ; test_case
-            "enqueued request settles before cancellation"
+            "a cancelled caller stays until its command is answered"
             `Quick
-            test_enqueued_request_settles_before_cancellation_unwinds
+            test_a_cancelled_caller_stays_until_its_command_is_answered
         ; test_case
             "a command the mailbox took as the owner closed is enqueued"
             `Quick

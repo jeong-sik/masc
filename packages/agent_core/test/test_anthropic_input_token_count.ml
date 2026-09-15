@@ -83,9 +83,14 @@ let config
     ()
 ;;
 
-(* The stage these measurements are ahead of, with no bound on it: the
-   cases here are about what is measured, not when the wait ends. *)
-let unbounded_completion = Complete.Completion { call_timeout_s = None }
+(* A window with no bound on it: the cases that use it are about what is
+   measured and sent, not when the wait ends. *)
+let unbounded_window : float Eio.Time.clock_ty Eio.Resource.t Deadline_window.t =
+  Deadline_window.open_ Http_client.Unbounded
+;;
+
+(* The stage these measurements are ahead of, with no bound on it. *)
+let unbounded_completion = Complete.Completion { call_window = unbounded_window }
 
 let serialize_sync prepared =
   match Complete.admit_request_body ~stream:false prepared with
@@ -311,6 +316,10 @@ let test_anthropic_synthesizes_type_for_combinator_only_schema () =
     (List.assoc_opt "type" schema = Some (`String "object"))
 ;;
 
+(* Nothing listens on loopback port 1, so a request sent there never reaches
+   a server. *)
+let unreachable_base_url = "http://127.0.0.1:1"
+
 let fresh_port () =
   let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
   Unix.setsockopt socket Unix.SO_REUSEADDR true;
@@ -517,6 +526,7 @@ let test_admitted_body_is_frozen_across_catalog_mutation () =
                observations := observation :: !observations;
                Ok ())
              admitted
+             ~call_window:unbounded_window
              ()
          in
          result, admitted_evidence, fresh_serialization
@@ -674,7 +684,9 @@ let test_prepared_measure_admit_dispatch () =
           (fun ?on_telemetry:_ ~on_event:_ _ -> fail "unexpected streaming dispatch")
       }
     in
-    let result = Complete.complete_admitted ~sw ~net ~transport admitted () in
+    let result =
+      Complete.complete_admitted ~sw ~net ~transport admitted ~call_window:unbounded_window ()
+    in
     result, fit, !dispatched
   in
   (match result with
@@ -1085,7 +1097,7 @@ let test_serialization_admission_validates_before_io () =
   Eio.Switch.run
   @@ fun sw ->
   let cfg =
-    config ~request_path:"/v1/responses" ~max_concurrent_requests:0 "http://127.0.0.1:1"
+    config ~request_path:"/v1/responses" ~max_concurrent_requests:0 unreachable_base_url
   in
   let prepared = Complete.prepare_request ~config:cfg ~messages ~tools:[ tool ] () in
   match Complete.admit_request_body ~stream:false prepared with
@@ -1097,6 +1109,144 @@ let test_serialization_admission_validates_before_io () =
       true
       (Option.is_none (Provider_admission.snapshot_for ~config:cfg))
   | Ok _ | Error _ -> fail "invalid prepared request must fail before provider I/O"
+;;
+
+(* Any positive budget: the window's clock is moved to its end before the
+   window is handed on. *)
+let spent_window_budget_s = 1.0
+
+let spent_window () =
+  let clock = Eio_mock.Clock.make () in
+  Eio_mock.Clock.set_time clock 0.0;
+  let window = Deadline_window.open_ (Http_client.Bounded (clock, spent_window_budget_s)) in
+  Eio_mock.Clock.set_time clock spent_window_budget_s;
+  window
+;;
+
+(* The measurement spends from the window its caller opened and opens none of
+   its own. A window the caller spent before measuring leaves the count round
+   trip nothing, so the measurement ends at the permit as a [Queue] timeout
+   and the count request is not sent. A measurement that read the clock and
+   added the budget again would send it, and would end as whatever the
+   connection to [unreachable_base_url] did. *)
+let measure_under_a_spent_window ~stream next_stage =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let prepared =
+    Complete.prepare_request
+      ~config:(config ~max_context:512 unreachable_base_url)
+      ~messages
+      ~tools:[ tool ]
+      ()
+  in
+  let serialized =
+    match Complete.admit_request_body ~stream prepared with
+    | Ok serialized -> serialized
+    | Error _ -> fail "request serialization admission failed"
+  in
+  match
+    Complete.measure_request
+      ~sw
+      ~net:(Eio.Stdenv.net env)
+      ~next_stage:(next_stage (spent_window ()))
+      serialized
+  with
+  | Error
+      (Count_tokens_sync.Input_count_failed
+         (Count.Transport (Http_client.TimeoutError { phase = Http_client.Queue; _ }))) -> ()
+  | Error _ -> fail "a spent window ended the measurement somewhere other than the permit"
+  | Ok _ -> fail "a spent window still measured the request"
+;;
+
+let test_a_spent_call_window_ends_the_measurement_at_the_permit () =
+  measure_under_a_spent_window ~stream:false (fun call_window ->
+    Complete.Completion { call_window })
+;;
+
+let test_a_spent_admission_window_ends_the_measurement_at_the_permit () =
+  measure_under_a_spent_window ~stream:true (fun admission_window ->
+    Complete.Stream { admission_window; first_event_timeout_s = None })
+;;
+
+(* The admitted completion spends from the same window, after the
+   measurement, and opens none of its own either. Handed a window the
+   measurement left spent, it ends at the endpoint's permit as a [Queue]
+   timeout and the transport is never reached. A completion that read the
+   clock and added the budget again would take the free permit and reach
+   it. *)
+let complete_admitted_under_a_spent_window ~stream =
+  let (result, reached), _captured =
+    with_mock ~status:`OK ~response:{|{"input_tokens":321}|}
+    @@ fun ~sw ~net ~base_url ->
+    let cfg = config ~max_context:512 ~max_concurrent_requests:1 base_url in
+    let prepared = Complete.prepare_request ~config:cfg ~messages ~tools:[ tool ] () in
+    let serialized =
+      match Complete.admit_request_body ~stream prepared with
+      | Ok serialized -> serialized
+      | Error _ -> fail "request serialization admission failed"
+    in
+    let next_stage =
+      if stream
+      then Complete.Stream { admission_window = unbounded_window; first_event_timeout_s = None }
+      else unbounded_completion
+    in
+    let admitted =
+      match Complete.measure_request ~sw ~net ~next_stage serialized with
+      | Error _ -> fail "expected an unbounded measurement to measure"
+      | Ok measured ->
+        (match Complete.admit_request ~now_unix_s:0 ~max_context_tokens:512 measured with
+         | Ok admitted -> admitted
+         | Error _ -> fail "expected the measured request to fit")
+    in
+    let reached = ref false in
+    let transport =
+      { Llm_transport.complete_sync =
+          (fun _ ->
+            reached := true;
+            { Llm_transport.response = Ok response; latency_ms = None })
+      ; complete_stream =
+          (fun ?on_telemetry:_ ~on_event:_ _ ->
+            reached := true;
+            Ok response)
+      }
+    in
+    let result =
+      if stream
+      then
+        Complete.complete_stream_admitted
+          ~sw
+          ~net
+          ~admission_window:(spent_window ())
+          ~transport
+          admitted
+          ~on_event:ignore
+          ()
+      else
+        Complete.complete_admitted
+          ~sw
+          ~net
+          ~transport
+          admitted
+          ~call_window:(spent_window ())
+          ()
+    in
+    result, !reached
+  in
+  (match result with
+   | Error (Http_client.TimeoutError { phase = Http_client.Queue; _ }) -> ()
+   | Error _ -> fail "a spent window ended the completion somewhere other than the permit"
+   | Ok _ -> fail "a spent window still completed the request");
+  check bool "the transport was never reached" false reached
+;;
+
+let test_a_spent_call_window_ends_the_admitted_completion_at_the_permit () =
+  complete_admitted_under_a_spent_window ~stream:false
+;;
+
+let test_a_spent_admission_window_ends_the_admitted_stream_at_the_permit () =
+  complete_admitted_under_a_spent_window ~stream:true
 ;;
 
 let test_measurement_uses_provider_admission () =
@@ -1272,7 +1422,7 @@ let run_failing_projection projection =
   @@ fun env ->
   Eio.Switch.run
   @@ fun sw ->
-  let provider_config = config ~max_context:512 "http://127.0.0.1:1" in
+  let provider_config = config ~max_context:512 unreachable_base_url in
   let transport =
     { Llm_transport.complete_sync = (fun _ -> fail "unexpected sync dispatch")
     ; complete_stream =
@@ -1594,6 +1744,22 @@ let () =
             "prepared measure admit dispatch"
             `Quick
             test_prepared_measure_admit_dispatch
+        ; test_case
+            "a spent call window ends the measurement at the permit"
+            `Quick
+            test_a_spent_call_window_ends_the_measurement_at_the_permit
+        ; test_case
+            "a spent admission window ends the measurement at the permit"
+            `Quick
+            test_a_spent_admission_window_ends_the_measurement_at_the_permit
+        ; test_case
+            "a spent call window ends the admitted completion at the permit"
+            `Quick
+            test_a_spent_call_window_ends_the_admitted_completion_at_the_permit
+        ; test_case
+            "a spent admission window ends the admitted stream at the permit"
+            `Quick
+            test_a_spent_admission_window_ends_the_admitted_stream_at_the_permit
         ; test_case
             "prepared context overflow is typed"
             `Quick

@@ -646,7 +646,15 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
     ~selected_model:runtime.model.api_name
     ~challenge:(Random_id.hex ~bytes:16)
     ~run:(fun tool ~prompt ->
-      try Eio.Time.with_timeout_exn clock timeout_s (fun () -> run tool ~prompt) with
+      (* A run that finished as the window closed is the run's verdict, not
+         [Timed_out]. *)
+      try
+        Watched_work.run
+          ~watcher:(fun () ->
+            Eio.Time.sleep clock timeout_s;
+            Error Timed_out)
+          (fun () -> run tool ~prompt)
+      with
       | Eio.Time.Timeout -> Error Timed_out
       | (Eio.Io _ | Unix.Unix_error _ | Sys_error _) as exn ->
         Error (Provider_rejected (Printexc.to_string exn)))

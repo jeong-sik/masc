@@ -3430,7 +3430,17 @@ let render_schedule_list (state : state) =
 
          let count = List.length snapshot.scs_rows in
          if count = 0 then begin
-           c.push (Ansi.dim ^ "  (no scheduled automation)" ^ Ansi.reset)
+           (* The key that fills this list, on the row that says it is empty.
+              [n] is an Act key on a surface whose Navigate keys take the
+              footer first -- j/k, PgUp/PgDn, [ / ] -- so at a hundred and ten
+              columns the footer drops every action this screen has, [n] with
+              them. An operator looking at an empty Schedules screen then has
+              nowhere on it saying a schedule can be made at all. Same move
+              [page_unread_note] made for [r]. *)
+           c.push
+             (Ansi.dim
+             ^ "  (no scheduled automation \xe2\x80\x94 press n to create one)"
+             ^ Ansi.reset)
          end else begin
            (* Keep two factual rows below the list for delivery state. Without
               it the list says when a wake is due but not whether the dispatch,

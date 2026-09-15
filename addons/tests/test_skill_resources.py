@@ -7,7 +7,7 @@ import sys
 import unittest
 
 
-SCRIPT = Path(__file__).resolve().parents[1] / "msx-observer/skills/msx-observe/scripts/summarize.py"
+SCRIPT = Path(__file__).resolve().parents[1] / "msx-observer/skills/msx-observation-rows/scripts/summarize.py"
 
 
 def capture(identity, incarnation, frame):

@@ -591,6 +591,47 @@ let test_identity_and_delete_guards () =
   check bool "delete clears metadata" true (Option.is_none (Owner.projection empty).meta)
 ;;
 
+(* A full mailbox takes the command in the same scheduler pass the owner
+   closes. The close's wake is queued ahead of the add's on purpose -- resolve
+   [closed], then take from the mailbox, which hands the blocked add its slot
+   -- so a race that kept whichever wake came first would report [`Closed]
+   for a command the mailbox already holds. *)
+let test_a_command_the_mailbox_took_as_the_owner_closed_is_enqueued () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let mailbox = Eio.Stream.create 1 in
+  Eio.Stream.add mailbox "already queued";
+  let closed, close = Eio.Promise.create () in
+  let outcome =
+    Eio.Fiber.fork_promise ~sw (fun () ->
+      Owner.For_testing.enqueue_unless_closed mailbox "handed over" ~closed)
+  in
+  Eio.Promise.resolve close ();
+  check string "the command queued first leaves first" "already queued" (Eio.Stream.take mailbox);
+  (match Eio.Promise.await_exn outcome with
+   | `Enqueued -> ()
+   | `Closed -> fail "a command the mailbox took as the owner closed was reported as refused");
+  check string "the mailbox holds the command it took" "handed over" (Eio.Stream.take mailbox)
+;;
+
+(* The ordinary close: the mailbox stays full, and the close ends the wait. *)
+let test_a_command_the_full_mailbox_never_took_is_closed () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let mailbox = Eio.Stream.create 1 in
+  Eio.Stream.add mailbox "already queued";
+  let closed, close = Eio.Promise.create () in
+  let outcome =
+    Eio.Fiber.fork_promise ~sw (fun () ->
+      Owner.For_testing.enqueue_unless_closed mailbox "never taken" ~closed)
+  in
+  Eio.Promise.resolve close ();
+  (match Eio.Promise.await_exn outcome with
+   | `Closed -> ()
+   | `Enqueued -> fail "a command the full mailbox never took was reported as enqueued");
+  check int "only the command queued first is in the mailbox" 1 (Eio.Stream.length mailbox)
+;;
+
 let test_shutdown_releases_full_mailbox_requests () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun test_sw ->
@@ -4446,6 +4487,14 @@ let () =
             "enqueued request settles before cancellation"
             `Quick
             test_enqueued_request_settles_before_cancellation_unwinds
+        ; test_case
+            "a command the mailbox took as the owner closed is enqueued"
+            `Quick
+            test_a_command_the_mailbox_took_as_the_owner_closed_is_enqueued
+        ; test_case
+            "a command the full mailbox never took is closed"
+            `Quick
+            test_a_command_the_full_mailbox_never_took_is_closed
         ; test_case
             "store failure fences mutations"
             `Quick

@@ -506,19 +506,26 @@ let autonomous_block_to_yojson = function
       ]
 ;;
 
+(* A command the mailbox took as the owner closed is enqueued: the owner
+   has it, so its caller waits for the answer instead of being told the owner
+   refused it. *)
+let enqueue_unless_closed mailbox command ~closed =
+  Watched_work.run
+    (fun () ->
+       Eio.Stream.add mailbox command;
+       `Enqueued)
+    ~watcher:(fun () ->
+       Eio.Promise.await closed;
+       `Closed)
+;;
+
 let request t command =
   if Atomic.get t.closed
   then Error Owner_closed
   else (
     let response, resolve = Eio.Promise.create () in
     match
-      Eio.Fiber.first
-        (fun () ->
-           Eio.Stream.add t.mailbox (Command (command, resolve));
-           `Enqueued)
-        (fun () ->
-           Eio.Promise.await t.closed_p;
-           `Closed)
+      enqueue_unless_closed t.mailbox (Command (command, resolve)) ~closed:t.closed_p
     with
     | `Closed -> Error Owner_closed
     | `Enqueued ->
@@ -1964,6 +1971,7 @@ let begin_stopping t = request t Begin_stopping
 
 module For_testing = struct
   let mailbox_depth t = Eio.Stream.length t.mailbox
+  let enqueue_unless_closed = enqueue_unless_closed
 
   let observe_state_changes ~sw observer =
     let previous = Atomic.get state_change_observer in

@@ -88,6 +88,13 @@ type memory_write_error_kind =
 
 val memory_write_error_kind_to_string : memory_write_error_kind -> string
 
+val memory_write_error_effect_disposition
+  :  memory_write_error_kind
+  -> Tool_result.failure_effect_disposition
+(** What a failed write with this kind committed. A failure's typed
+    disposition and the [effect_disposition] and [what_committed] fields of its
+    payload all come from this, so no failure site states its own. *)
+
 type memory_write_validation =
   | Memory_write_ok of
       { body : string

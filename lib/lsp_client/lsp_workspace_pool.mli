@@ -91,3 +91,16 @@ val notify
   -> method_:string
   -> params:Yojson.Safe.t
   -> (unit, error) result
+
+module For_testing : sig
+  (** Await an answer under a deadline. An answer that arrived as the window
+      closed stands (see [Watched_work]); the timeout [Error] is the result
+      only when none had. Takes the clock so it is exercised with a mock
+      clock, not the whole pool. *)
+  val await_answer :
+    clock:float Eio.Time.clock_ty Eio.Resource.t ->
+    timeout:float ->
+    what:string ->
+    ('a, string) result Eio.Promise.t ->
+    ('a, string) result
+end

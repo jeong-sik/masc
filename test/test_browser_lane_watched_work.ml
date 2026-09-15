@@ -45,7 +45,7 @@ let connect ~sw ~clock browser =
 let live client =
   match Lane.resolve_target ~lane_name:"live" ~client_id:(Some client.Lane.client_id) with
   | Ok target -> target
-  | Error error -> fail error
+  | Error error -> fail (Lane.selection_error_code error)
 ;;
 
 let with_lane f =

@@ -191,6 +191,7 @@
   masc.masc_tool_surface
   masc.otel_metrics
   masc.config
+  masc.workspace_connection
   masc.agent_observation
   masc.ide
   masc.ide_memo

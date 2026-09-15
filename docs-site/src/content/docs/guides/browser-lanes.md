@@ -25,9 +25,12 @@ workspace containing `.masc`, not the `.masc` directory itself.
 ```bash
 bash connectors/browser/install-host.sh \
   --binary /path/to/masc-browser-host \
-  --base-path /path/to/workspace \
-  --server http://127.0.0.1:8935
+  --base-path /path/to/workspace
 ```
+
+The launcher records no server address: the host reads the port from the
+workspace's `.masc/config/connection.toml` and reads it again after a failed
+poll, so a server restarted on another port is found without reinstalling.
 
 The installer supports macOS and Linux and registers a Mozilla native-messaging
 manifest. `--manifest-dir` selects a different manifest directory when needed.

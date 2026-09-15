@@ -19,8 +19,7 @@ curl -fsSL "https://raw.githubusercontent.com/jeong-sik/masc/$TAG/connectors/bro
 less /tmp/masc-install-host.sh
 bash /tmp/masc-install-host.sh \
   --binary "$HOME/.local/bin/masc-browser-host" \
-  --base-path "$BASE_PATH" \
-  --server http://127.0.0.1:8935
+  --base-path "$BASE_PATH"
 
 EXTENSION_DIR="$BASE_PATH/.masc/browser-lane/extension"
 mkdir -p "$EXTENSION_DIR"
@@ -44,8 +43,14 @@ host. Rerun installation to promote another built executable. The token is
 created with mode `0600` if absent; an existing nonempty token is preserved.
 The launcher carries file paths, never the token value.
 
-`--base-path` defaults to the existing `MASC_BASE_PATH` setting. `--server`
-defaults to existing `MASC_HTTP_BASE_URL`, or the configured MASC host/port.
+`--base-path` defaults to the existing `MASC_BASE_PATH` setting. The launcher
+names no server address. The host reads the port from
+`<base-path>/.masc/config/connection.toml`, which the MASC server rewrites each
+time it starts listening. When a poll fails, the host reads that file again
+before the next poll, so a server that restarted on another port is found
+without reinstalling. `MASC_HTTP_BASE_URL` or `MASC_HTTP_PORT` in the browser's
+environment still take precedence; `masc-browser-host --server URL` fixes the
+address for a manual run and is never re-read.
 `--token-file` defaults to `<base-path>/.masc/browser-lane/token`; relative
 paths resolve against the base path. For a browser launched by the desktop,
 use explicit installer arguments so its shell environment is unnecessary.

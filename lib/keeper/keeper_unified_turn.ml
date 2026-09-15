@@ -811,14 +811,39 @@ let run_keeper_cycle
                in
                (* The briefing is pinned, so it is bounded here rather than
                   left to the model input projection, which can only cut the
-                  conversation window. Sized from the runtime's own declared
-                  input ceiling: a runtime that declares none gets no bound,
-                  the same answer its projection gives it. Rotation to a larger
-                  lane only makes this conservative. *)
+                  conversation window. The bound is a share of the same
+                  window that projection cuts to (RFC
+                  keeper-context-window-in-tokens): the declared token window,
+                  read as bytes through this runtime's observed density. A
+                  runtime whose density is not observed yet gets no bound this
+                  turn, the same answer its projection gives it by sending the
+                  newest atom only. Rotation to another lane changes the
+                  density, not the window, so the share it reads is the same
+                  declaration.
+
+                  The official-client lanes have no token window yet
+                  (#36712); their bound stays the client's own prompt byte
+                  cap, which is that client's transmission limit, and the
+                  request-body cap no longer enters it. *)
                let context_budget_bytes =
-                 Runtime.declared_input_byte_ceiling_of_runtime_id effective_runtime_id
-                 |> Option.map (fun cap ->
-                   cap * Keeper_config.keeper_context_briefing_share_percent () / 100)
+                 let share_percent =
+                   Keeper_config.keeper_context_briefing_share_percent ()
+                 in
+                 match Runtime.get_runtime_by_id effective_runtime_id with
+                 | None -> None
+                 | Some runtime ->
+                   (match runtime.Runtime.execution with
+                    | Runtime_execution.Agent_core _ ->
+                      Keeper_context_window.share_bytes
+                        ~window_tokens:(Keeper_runtime_resolved.context_window_tokens ())
+                        ~share_percent
+                        (Keeper_context_window.Density.lookup
+                           ~runtime_id:effective_runtime_id)
+                    | Runtime_execution.Claude_code _
+                    | Runtime_execution.Antigravity_cli _
+                    | Runtime_execution.Codex_app_server _ ->
+                      Runtime.max_prompt_bytes_of_runtime_id effective_runtime_id
+                      |> Option.map (fun cap -> cap * share_percent / 100))
                in
                let { Keeper_unified_prompt.system_prompt; world_state; user_message } =
                  (* Named so a run on the main domain during prompt assembly

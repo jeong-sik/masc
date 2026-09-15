@@ -10,7 +10,23 @@ module Window = Masc.Keeper_context_window
 open Alcotest
 
 let density ~input_tokens ~measured_bytes : Window.density =
-  { input_tokens; measured_bytes }
+  match Window.density_of ~input_tokens ~measured_bytes with
+  | Some density -> density
+  | None -> failf "fixture density %d tokens / %d bytes must be positive" input_tokens measured_bytes
+;;
+
+(* The record is private: the only way to hold a density is through the
+   constructor, and it refuses either side at zero, so the divisions in
+   [capacity] and [tokens_of_bytes] never see a zero. *)
+let test_density_of_refuses_a_zero_side () =
+  check bool "zero tokens is not a density" true
+    (Option.is_none (Window.density_of ~input_tokens:0 ~measured_bytes:400_000));
+  check bool "zero bytes is not a density" true
+    (Option.is_none (Window.density_of ~input_tokens:100_000 ~measured_bytes:0));
+  check bool "a negative side is not a density" true
+    (Option.is_none (Window.density_of ~input_tokens:(-1) ~measured_bytes:400_000));
+  check bool "two positive sides are" true
+    (Option.is_some (Window.density_of ~input_tokens:1 ~measured_bytes:1))
 ;;
 
 (* 85K tokens against a request that measured 400,000 bytes for 100,000
@@ -36,7 +52,18 @@ let test_no_density_is_unmeasured_not_a_guess () =
 let test_tokens_of_bytes_inverts_the_density () =
   let d = density ~input_tokens:100_000 ~measured_bytes:400_000 in
   check int "400,000 bytes read as 100,000 tokens" 100_000 (Window.tokens_of_bytes d 400_000);
-  check int "a reserve of 40,000 bytes is 10,000 tokens" 10_000 (Window.tokens_of_bytes d 40_000)
+  check int "a reserve of 40,000 bytes is 10,000 tokens" 10_000 (Window.tokens_of_bytes d 40_000);
+  check int "10,000 tokens read back as 40,000 bytes" 40_000 (Window.bytes_of_tokens d 10_000)
+;;
+
+(* The briefing's ceiling is a share of the window, in the bytes the cut
+   measures: half of 85K tokens at four bytes per token is 170,000 bytes. *)
+let test_share_bytes_is_the_windows_share_through_the_density () =
+  let d = density ~input_tokens:100_000 ~measured_bytes:400_000 in
+  check (option int) "half the window as bytes" (Some 170_000)
+    (Window.share_bytes ~window_tokens:85_000 ~share_percent:50 (Some d));
+  check (option int) "no density, no byte figure" None
+    (Window.share_bytes ~window_tokens:85_000 ~share_percent:50 None)
 ;;
 
 (* A halved window keeps the declaration beside it, and returning to the
@@ -116,6 +143,8 @@ let () =
             test_no_density_is_unmeasured_not_a_guess
         ; test_case "tokens_of_bytes inverts the density" `Quick
             test_tokens_of_bytes_inverts_the_density
+        ; test_case "share_bytes is the window's share through the density" `Quick
+            test_share_bytes_is_the_windows_share_through_the_density
         ] )
     ; ( "source"
       , [ test_case "with_tokens keeps the declaration visible" `Quick
@@ -124,7 +153,9 @@ let () =
             test_to_json_carries_window_declared_and_source
         ] )
     ; ( "density"
-      , [ test_case "starts unobserved and records the newest" `Quick
+      , [ test_case "density_of refuses a zero side" `Quick
+            test_density_of_refuses_a_zero_side
+        ; test_case "starts unobserved and records the newest" `Quick
             test_density_starts_unobserved_and_records_the_newest
         ; test_case "ignores a non-measurement" `Quick
             test_density_ignores_a_non_measurement

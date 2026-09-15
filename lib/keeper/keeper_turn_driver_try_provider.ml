@@ -983,6 +983,11 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
      request at a time inside an attempt, so the request the projection just
      measured is the one [AfterTurn] answers. *)
   let last_request_measured_bytes = ref None in
+  (* Once per attempt: a provider that reports no usage leaves this runtime
+     unmeasured, and an unmeasured runtime sends the newest atom only. That
+     is a fact about the provider adapter an operator has to see, not a
+     silence to sit in. *)
+  let usage_missing_reported = ref false in
   let config_result =
     let base_config =
       Runtime_candidate.default_config
@@ -1025,7 +1030,22 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
                      ~runtime_id:ctx.runtime_id
                      ~measured_bytes
                      ~input_tokens:usage.Agent_core.Types.input_tokens
-                 | Some _, None | None, (Some _ | None) -> ());
+                 | None, (Some _ | None) ->
+                   if
+                     (not !usage_missing_reported)
+                     && Option.is_none
+                          (Keeper_context_window.Density.lookup
+                             ~runtime_id:ctx.runtime_id)
+                   then (
+                     usage_missing_reported := true;
+                     Log.Keeper.warn
+                       ~keeper_name:ctx.keeper_name
+                       "provider response carried no usage runtime=%s: the \
+                        runtime's token density stays unobserved, so its \
+                        requests carry the newest atom only until a response \
+                        reports usage"
+                       ctx.runtime_id)
+                 | Some _, None -> ());
                 Agent_core.Hooks.Continue
               | Agent_core.Hooks.BeforeTurn _
               | Agent_core.Hooks.BeforeTurnParams _

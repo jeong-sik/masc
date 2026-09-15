@@ -17,7 +17,7 @@ related: ["0380", "0089"]
 
 - `keeper_health` = `KH_healthy | KH_idle | KH_failing | KH_offline`. `KH_stale`, `KH_degraded`, `KH_zombie` 는 지운다.
 - 도출식은 하나다. keepalive 가 안 돌면(`can_execute_turn phase = false`) `offline`, phase 가 `Failing` 이면 `failing`, `Running` 인데 턴 기록이 없으면(`total_turns = 0 && proactive count = 0`) `idle`, 나머지 `Running` 은 `healthy`.
-- `failing` 을 따로 두는 이유: `can_execute_turn` 은 `Running` 과 `Failing` 에서 모두 참이다. 그래서 값이 셋일 때는 턴이 실패하고 있는 keeper 도 `healthy` 로 읽혔고, 2026-09-15 TUI 채팅 헤더가 턴 4번 연속 실패한 msx-retro-mania 에 `● healthy` 와 phase `failing` 을 한 줄에 그렸다. `failing` 의 다음 행동은 `recover` 다. 운영자 `keeper_recover` 는 `recoverable` 이 아닌 keeper 를 건너뛰기 때문이다.
+- `failing` 을 따로 두는 이유: `can_execute_turn` 은 `Running` 과 `Failing` 에서 모두 참이다. 그래서 값이 셋일 때는 턴이 실패하고 있는 keeper 도 `healthy` 로 읽혔고, 2026-09-15 TUI 채팅 헤더가 턴 4번 연속 실패한 msx-retro-mania 에 `● healthy` 와 phase `failing` 을 한 줄에 그렸다. `failing` 의 다음 행동은 `probe`(최근 오류부터 읽기)다. Failing 은 턴이 실패한다는 사실만 말하고, 재시작으로 고쳐지는지는 말하지 않는다. 깨끗한 턴이 나오면 phase 가 Running 으로 돌아가고, 실패 한도를 넘으면 Crashed 가 되어 supervisor 가 재시작한다. `recoverable` 은 참이라서, 오류를 읽은 운영자는 `keeper_recover` 로 재시작할 수 있다.
 - heartbeat 원장 줄을 쓰는 코드(`write_heartbeat_snapshot`)와 SSE `keeper_heartbeat` 이벤트는 남긴다. 지우는 것은 그 줄의 **나이를 읽어 판정하는 코드**뿐이다.
 - wire 에서 `last_heartbeat`, `last_heartbeat_age_s`, `heartbeat_observation_error`, `heartbeat_stale_after_s` 를 지운다. 호환 코드는 만들지 않는다(hard cut).
 - 지운 동작의 회귀 테스트는 지운다. 남는 기능 테스트는 네 값 기준으로 고친다.

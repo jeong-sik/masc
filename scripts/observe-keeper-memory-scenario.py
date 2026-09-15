@@ -105,19 +105,21 @@ def main():
             if state in ('Failed', 'Cancelled'):
                 raise RuntimeError(f'turn {index}: terminal {state}; no replacement submitted')
             time.sleep(3)
-        events, since = [], None
+        events, since, offset = [], None, None
         while True:
             path = route + 'events?operation_id=' + operation_id + '&limit=2000'
             if since is not None:
                 path += '&since_seq=' + str(since)
+            if offset is not None:
+                path += '&since_offset=' + str(offset)
             page = request(path)
             events.extend(page['events'])
             if not page['has_more']:
                 break
-            next_since = page['next_since_seq']
-            if next_since == since:
+            next_since, next_offset = page['next_since_seq'], page['next_since_offset']
+            if next_since == since or next_offset == offset:
                 raise RuntimeError('event cursor made no progress')
-            since = next_since
+            since, offset = next_since, next_offset
         save(out / f'turn-{index:02d}-events.json', events)
         text = ''.join(row['event'].get('delta','') for row in events
                        if row['event'].get('type') == 'text_delta')

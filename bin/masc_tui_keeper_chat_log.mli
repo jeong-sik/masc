@@ -82,6 +82,10 @@ type events_page =
         (** The position to ask the next page from, in the response spelling
             ({!Masc.Keeper_chat_event_log.replay_position_of_yojson}: null is
             the whole journal, an integer >= 0 the seq to read after). *)
+  ; next_since_offset : int
+        (** The byte offset past the last event served, or the offset the
+            page was asked from when it served none: where the next page
+            starts reading, sent back beside [next_since_seq]. *)
   }
 
 val decode_events_page : Yojson.Safe.t -> (events_page, string) result
@@ -122,11 +126,14 @@ val decode_events_error : status:int -> credential_sent:bool -> string -> events
 val read_whole_journal :
   fetch:
     (since_seq:Masc.Keeper_chat_event_log.replay_position ->
+     since_offset:Masc.Keeper_chat_event_log.page_start ->
      (events_page, events_error) result) ->
   since_seq:Masc.Keeper_chat_event_log.replay_position ->
   (Masc.Keeper_chat_event_log.journaled_event list, events_error) result
 (** Every line past [since_seq] (the whole journal, or after a held seq),
-    page by page through [fetch], following [has_more] while
-    [next_since_seq] advances past the position asked from. The first error
-    ends the read; a page that claims more without advancing is
-    {!Events_undecodable}, naming both positions, never a shorter [Ok]. *)
+    page by page through [fetch]. The first page is asked from the first row
+    ([From_first_row]), every later one from the [next_since_offset] of the
+    page before, beside its [next_since_seq]. The read follows [has_more]
+    while both cursors advance past the ones asked from. The first error ends
+    the read; a page that claims more without advancing is
+    {!Events_undecodable}, naming the positions, never a shorter [Ok]. *)

@@ -1012,13 +1012,14 @@ let fetch_lane_run_detail ~(host : string) ~(port : int) ~(run_id : string) :
     Defined before {!fetch_keeper_context_inspector}, which reads the answer
     to a turn through it. *)
 (** One page of a turn's journal
-    ([GET /api/v1/keepers/:name/chat/events?operation_id=&since_seq=&limit=],
+    ([GET /api/v1/keepers/:name/chat/events?operation_id=&since_seq=&since_offset=&limit=],
     RFC-0412 §3.2). The page is checked against the operation it was asked
     for; every failure is typed ({!Masc_tui_keeper_chat_log.events_error}) so
     the caller decides by code, not by reading the server's sentence. *)
 let fetch_keeper_chat_events ~(host : string) ~(port : int)
     ~(keeper_name : string) ~(operation_id : string)
-    ~(since_seq : Masc.Keeper_chat_event_log.replay_position) ~(limit : int) :
+    ~(since_seq : Masc.Keeper_chat_event_log.replay_position)
+    ~(since_offset : Masc.Keeper_chat_event_log.page_start) ~(limit : int) :
     ( Masc_tui_keeper_chat_log.events_page
     , Masc_tui_keeper_chat_log.events_error )
     result =
@@ -1028,11 +1029,18 @@ let fetch_keeper_chat_events ~(host : string) ~(port : int)
     | None -> ""
     | Some seq -> Printf.sprintf "&since_seq=%d" seq
   in
+  (* The first row is the parameter's absence; a page's handed-back offset is
+     the offset. *)
+  let since_offset_query =
+    match Masc.Keeper_chat_event_log.page_start_to_wire since_offset with
+    | None -> ""
+    | Some offset -> Printf.sprintf "&since_offset=%d" offset
+  in
   let path =
-    Printf.sprintf "/api/v1/keepers/%s/chat/events?operation_id=%s%s&limit=%d"
+    Printf.sprintf "/api/v1/keepers/%s/chat/events?operation_id=%s%s%s&limit=%d"
       (percent_encode_path_segment keeper_name)
       (percent_encode_query_value operation_id)
-      since_seq_query limit
+      since_seq_query since_offset_query limit
   in
   match http_get ~host ~port ~path with
   | Error detail -> Error (Masc_tui_keeper_chat_log.Events_transport detail)

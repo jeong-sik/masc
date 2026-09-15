@@ -136,12 +136,17 @@ let materialize ~store ~pending messages =
   if pending = []
   then { messages; reverted = 0 }
   else (
-    let body_of id =
-      List.find_map
-        (fun entry ->
-           if String.equal entry.tool_use_id id then Some entry.bytes else None)
-        pending
-    in
+    (* [pending] holds one entry per aged tool result of the whole history,
+       thousands on a long-lived keeper, and every surviving marker looks up
+       its body. One table built per call keeps that lookup constant. The
+       first entry for an id wins, as a scan in plan order would. *)
+    let bodies = Hashtbl.create (List.length pending) in
+    List.iter
+      (fun entry ->
+         if not (Hashtbl.mem bodies entry.tool_use_id)
+         then Hashtbl.add bodies entry.tool_use_id entry.bytes)
+      pending;
+    let body_of id = Hashtbl.find_opt bodies id in
     let reverted = ref 0 in
     let messages =
       List.map

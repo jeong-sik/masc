@@ -18,10 +18,9 @@ let is_token_char ch =
   | _ -> false
 ;;
 
-let token_len s pos =
-  let len = String.length s in
-  let rec scan i = if i < len && is_token_char s.[i] then scan (i + 1) else i in
-  scan pos - pos
+(* Where the token that starts at [pos] ends, reading no further than [stop]. *)
+let rec token_end s ~stop pos =
+  if pos < stop && is_token_char s.[pos] then token_end s ~stop (pos + 1) else pos
 ;;
 
 let redaction_marker = "[REDACTED]"
@@ -124,48 +123,66 @@ let redact_media_data_url s =
     Some (Buffer.contents buf)
 ;;
 
+(* The scanning helpers are top-level recursions over explicit arguments. A
+   local [let rec] that closes over the string allocates a closure on every
+   call, and these run once per byte per prefix: 8.4 GB of a live server's
+   allocation in four hours (2026-09-16). *)
+let rec prefix_matches s pos prefix index =
+  index = String.length prefix
+  || (Char.equal s.[pos + index] prefix.[index] && prefix_matches s pos prefix (index + 1))
+;;
+
 let has_prefix_at s pos prefix =
-  let len = String.length s in
-  let n = String.length prefix in
-  if pos < 0 || pos + n > len
-  then false
-  else (
-    let rec loop i = i = n || (Char.equal s.[pos + i] prefix.[i] && loop (i + 1)) in
-    loop 0)
+  pos >= 0 && pos + String.length prefix <= String.length s && prefix_matches s pos prefix 0
 ;;
 
-let find_prefix s pos prefix =
-  let len = String.length s in
-  let n = String.length prefix in
-  let rec scan i =
-    if i + n > len then None else if has_prefix_at s i prefix then Some i else scan (i + 1)
-  in
-  scan pos
+(* The first occurrence of [prefix] that starts at or after [pos] and ends by
+   [stop]. *)
+let rec find_prefix_before s ~stop prefix pos =
+  if pos + String.length prefix > stop
+  then None
+  else if has_prefix_at s pos prefix
+  then Some pos
+  else find_prefix_before s ~stop prefix (pos + 1)
 ;;
 
-(** Redact every occurrence of [prefix] by replacing the token that follows
-    it with {!redaction_marker}. *)
+let find_prefix s pos prefix = find_prefix_before s ~stop:(String.length s) prefix pos
+
+(* The first prefix in list order that occurs in [[pos, stop)], at its first
+   occurrence. *)
+let rec first_listed_occurrence s ~pos ~stop = function
+  | [] -> None
+  | prefix :: rest ->
+    (match find_prefix_before s ~stop prefix pos with
+     | Some index -> Some (index, prefix)
+     | None -> first_listed_occurrence s ~pos ~stop rest)
+;;
+
+(** Redact every occurrence of a prefix by replacing the token that follows it
+    with {!redaction_marker}.
+
+    The range is split at the first occurrence of the first listed prefix
+    found in it, and the text before that occurrence is redacted the same way.
+    Copying that text verbatim, as this used to, let a credential through when
+    its prefix came before an earlier-listed one: [key=SECRET Bearer TOKEN]
+    kept [SECRET]. The split keeps what a listed prefix claimed: in
+    [Authorization: Bearer TOKEN] the token belongs to [Bearer ], and the text
+    before it holds [Authorization:] with no token after it, which is left as
+    it is rather than marked. *)
 let redact_prefixes s prefixes =
   let buf = Buffer.create (String.length s) in
-  let rec loop pos =
-    if pos >= String.length s
-    then ()
-    else (
-      match
-        List.find_map
-          (fun prefix -> Option.map (fun i -> i, prefix) (find_prefix s pos prefix))
-          prefixes
-      with
-      | None -> Buffer.add_substring buf s pos (String.length s - pos)
-      | Some (i, prefix) ->
-        Buffer.add_substring buf s pos (i - pos);
-        Buffer.add_string buf prefix;
-        let token_pos = i + String.length prefix in
-        let tok_len = token_len s token_pos in
-        Buffer.add_string buf redaction_marker;
-        loop (token_pos + tok_len))
+  let rec redact_range pos stop =
+    match first_listed_occurrence s ~pos ~stop prefixes with
+    | None -> Buffer.add_substring buf s pos (stop - pos)
+    | Some (index, prefix) ->
+      redact_range pos index;
+      Buffer.add_string buf prefix;
+      let token_pos = index + String.length prefix in
+      let token_stop = token_end s ~stop token_pos in
+      if token_stop > token_pos then Buffer.add_string buf redaction_marker;
+      redact_range token_stop stop
   in
-  loop 0;
+  redact_range 0 (String.length s);
   Buffer.contents buf
 ;;
 

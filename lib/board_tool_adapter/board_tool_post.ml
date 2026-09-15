@@ -305,52 +305,30 @@ let handle_post_list ~tool_name ~start_time args : Tool_result.result =
         ())
 ;;
 
-(* A thread read is cut into pages that each fit the ceiling that decides
-   whether a tool result reaches the model inline
-   ([Common.max_tool_result_wire_bytes], the same number the result boundary
-   stores blobs above). A count alone cannot promise that: a live comment
-   runs about 1.4KB (median of 6,847, measured 2026-09-15), so 50 of them are
-   several times the ceiling, and a result over it becomes a blob the Keeper
-   has to fetch back with keeper_artifact_read before it can read the thread.
+(* A thread read is cut into pages, and a page is as large as the reader of
+   this call carries inline. A Keeper call names the projection its lane
+   resolved: the official-client lane stores a result above
+   [Common.max_tool_result_wire_bytes] as a blob, the agent-core lane only
+   above [Common.max_agent_core_inline_result_bytes]. A count alone cannot
+   promise either: a live comment runs about 1.4KB (median of 6,847, measured
+   2026-09-15), so 50 of them are several times the lower ceiling, and a
+   result over it becomes a blob the Keeper has to fetch back with
+   keeper_artifact_read before it can read the thread.
 
-   [comment_limit] stays as an upper bound a caller can ask for; the byte
-   ceiling usually ends a page first, and the page says where the next one
-   starts. *)
-let comment_page_line ~offset ~shown ~total ~next_offset =
-  match next_offset with
-  | Some next ->
-    Printf.sprintf
-      "[comment page: offset=%d shown=%d total=%d next_offset=%d. Call again with \
-       comment_offset=%d for the rest.]"
-      offset
-      shown
-      total
-      next
-      next
-  | None ->
-    Printf.sprintf
-      "[comment page: offset=%d shown=%d total=%d next_offset=none. No comments \
-       after this page.]"
-      offset
-      shown
-      total
-;;
+   A caller with no projection (an MCP client, an HTTP route) takes the result
+   whole, so its page ends at [comment_limit] only.
 
-let render_post_page ~post_block ~comment_lines ~offset ~total ~next_offset =
-  let page_line =
-    comment_page_line ~offset ~shown:(List.length comment_lines) ~total ~next_offset
-  in
+   The size is measured on the serialized JSON, the same bytes the projection
+   compares. [comment_limit] stays an upper bound a caller can ask for, and
+   [pagination.next_offset] says where the next page starts. *)
+let render_thread ~post_block ~comment_lines =
   match comment_lines with
-  | [] -> Printf.sprintf "%s\n\nNo comments.\n%s" post_block page_line
+  | [] -> Printf.sprintf "%s\n\nNo comments." post_block
   | _ :: _ ->
-    Printf.sprintf
-      "%s\n\n**Comments**:\n%s\n%s"
-      post_block
-      (String.concat "\n" comment_lines)
-      page_line
+    Printf.sprintf "%s\n\n**Comments**:\n%s" post_block (String.concat "\n" comment_lines)
 ;;
 
-let handle_post_get ~tool_name ~start_time args : Tool_result.result =
+let handle_post_get ~result_boundary ~tool_name ~start_time args : Tool_result.result =
   let post_id = get_string args "post_id" "" in
   (* Injected by the MCP dispatch from the caller's own identity, never
      model-supplied (same rewrite as vote's [voter]). Absent on paths with no
@@ -379,11 +357,7 @@ let handle_post_get ~tool_name ~start_time args : Tool_result.result =
       | Ok vote -> vote
       | Error _ -> None)
   in
-  match
-    Board.Comment_page.request
-      ~offset:(get_int args "comment_offset" 0)
-      ~limit:(get_int args "comment_limit" Board.Limits.default_comment_page_limit)
-  with
+  match Board.Comment_page.request_of_args args with
   | Error error ->
     Tool_result.make_err
       ~tool_name
@@ -420,23 +394,28 @@ let handle_post_get ~tool_name ~start_time args : Tool_result.result =
            Hashtbl.replace votes key vote;
            vote
        in
-       let render ~offset ~next_offset page_comments =
-         render_post_page
-           ~post_block
-           ~comment_lines:
-             (Board_tool_format.format_comment_tree ~viewer_vote_of page_comments)
-           ~offset
-           ~total
-           ~next_offset
+       (* [pagination] leads so a reader that sees only the head of the result
+          still learns where the next page starts. *)
+       let page_data (page : Board.comment Board.Comment_page.page) =
+         `Assoc
+           [ "pagination", Board.Comment_page.pagination_to_yojson page
+           ; ( "thread"
+             , `String
+                 (render_thread
+                    ~post_block
+                    ~comment_lines:
+                      (Board_tool_format.format_comment_tree
+                         ~viewer_vote_of
+                         page.Board.Comment_page.items)) )
+           ]
        in
-       let render_page (page : Board.comment Board.Comment_page.page) =
-         render
-           ~offset:page.Board.Comment_page.offset
-           ~next_offset:page.Board.Comment_page.next_offset
-           page.Board.Comment_page.items
-       in
-       let fits page =
-         String.length (render_page page) <= Common.max_tool_result_wire_bytes
+       let fits =
+         match result_boundary with
+         | Tool_output.Projected_for_model projection ->
+           let ceiling = Tool_output.inline_ceiling_bytes projection in
+           fun page -> String.length (Yojson.Safe.to_string (page_data page)) <= ceiling
+         | Tool_output.Unprojected ->
+           fun (_ : Board.comment Board.Comment_page.page) -> true
        in
        (match Board.Comment_page.select ~fits request comments with
         | Board.Comment_page.Offset_out_of_range { requested; total } ->
@@ -453,15 +432,14 @@ let handle_post_get ~tool_name ~start_time args : Tool_result.result =
                  (Board.Post_id.to_string post.id)
              | _ ->
                Printf.sprintf
-                 "comment_offset %d names no comment of %s: the thread has %d \
-                  comments, at offsets 0-%d. Nothing was deleted; start again \
-                  from comment_offset=0."
+                 "comment_offset %d names no comment of %s: the thread now has %d \
+                  comments, at offsets 0-%d. Start again from comment_offset=0."
                  requested
                  (Board.Post_id.to_string post.id)
                  total
                  (total - 1))
         | Board.Comment_page.Page page ->
-          Tool_result.make_ok ~tool_name ~start_time ~data:(`String (render_page page)) ()))
+          Tool_result.make_ok ~tool_name ~start_time ~data:(page_data page) ()))
 ;;
 
 let handle_comment_add ~tool_name ~start_time args : Tool_result.result =

@@ -52,5 +52,7 @@
   masc.board_handlers
   masc.masc_tool_dispatch
   masc.masc_tool_surface
+  ; Board_tool_post pages a thread against the call's Tool_output.result_boundary.
+  masc.masc_tool_blob_store
   masc.tool_types
   masc_types))

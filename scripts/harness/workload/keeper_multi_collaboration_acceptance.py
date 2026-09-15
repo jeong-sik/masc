@@ -192,6 +192,10 @@ TRANSPORT_RETRY_ATTEMPTS = 30
 # bucket's drain unattributed because the rejection leaves no server log.
 RATE_LIMIT_RETRY_ATTEMPTS = 30
 RATE_LIMIT_RETRY_FALLBACK_SEC = 1.0
+# The largest comment page masc_board_post_get accepts
+# (Board_types.Limits.max_comment_page_limit). A page can still end sooner
+# than this, so the thread read follows pagination.next_offset.
+BOARD_COMMENT_PAGE_LIMIT = 100
 
 
 def retry_after_seconds(error: urllib.error.HTTPError) -> float:
@@ -2590,10 +2594,6 @@ class MissionRun:
                 "masc_board_search",
                 {"query": self.marker, "limit": 50, "compact": False},
             ),
-            "board-post": (
-                "masc_board_post_get",
-                {"post_id": post_id, "comment_offset": 0, "comment_limit": 100},
-            ),
             "schedule": ("masc_schedule_get", {"schedule_id": self.schedule_id}),
         }
         for label, (tool, arguments) in calls.items():
@@ -2603,6 +2603,12 @@ class MissionRun:
                 f"observations/{label}.json",
                 {"tool": tool, "text": observation.text, "data": observation.data},
             )
+        board_post = self.read_board_thread(post_id)
+        self.observations["board-post"] = board_post
+        self.writer.write_json(
+            "observations/board-post.json",
+            {"tool": board_post.tool, "text": board_post.text, "data": board_post.data},
+        )
         for key, task_id in self.task_ids.items():
             observation = self.call(
                 f"observe-task-history-{key}",
@@ -2614,6 +2620,54 @@ class MissionRun:
                 f"observations/task-history-{key}.json",
                 {"tool": "masc_task_history", "text": observation.text, "data": observation.data},
             )
+
+    def read_board_thread(self, post_id: str) -> ToolObservation:
+        """The whole Board thread, every page of it.
+
+        A page ends where its bytes fill what the reader carries inline, so a
+        thread longer than that arrives in several pages. Checking only the
+        first would call a later comment missing. Each page's
+        pagination.next_offset says where the next starts; the read stops at
+        the page that names none.
+        """
+        pages: list[ToolObservation] = []
+        offset = 0
+        while True:
+            page = self.call(
+                f"observe-board-post-{len(pages)}",
+                "masc_board_post_get",
+                {
+                    "post_id": post_id,
+                    "comment_offset": offset,
+                    "comment_limit": BOARD_COMMENT_PAGE_LIMIT,
+                },
+            )
+            pages.append(page)
+            pagination = page.data.get("pagination") if isinstance(page.data, dict) else None
+            if not isinstance(pagination, dict) or "next_offset" not in pagination:
+                raise AcceptanceError(
+                    f"masc_board_post_get page at offset {offset} carries no pagination"
+                )
+            next_offset = pagination["next_offset"]
+            if next_offset is None:
+                break
+            if (
+                isinstance(next_offset, bool)
+                or not isinstance(next_offset, int)
+                or next_offset <= offset
+            ):
+                raise AcceptanceError(
+                    f"masc_board_post_get page at offset {offset} names next_offset "
+                    f"{next_offset!r}, which does not move the read forward"
+                )
+            offset = next_offset
+        return ToolObservation(
+            tool="masc_board_post_get",
+            arguments={"post_id": post_id},
+            response={"pages": [page.response for page in pages]},
+            text="\n".join(page.text for page in pages),
+            data={"pages": [page.data for page in pages]},
+        )
 
     def _completion_verdict(self, key: str) -> tuple[bool, str]:
         """Whether this task's own history shows it passed verification.

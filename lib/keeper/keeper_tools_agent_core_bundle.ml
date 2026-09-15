@@ -469,9 +469,13 @@ let make_tool_bundle_for_descriptors_with_policy
                ~description:descriptor.description
                ~input_schema:descriptor.input_schema
                (fun execution_env input ->
+                 (* The handler is told the projection its result will cross,
+                    asked the same way the bridge asks, so a handler that
+                    pages its output fills what this lane carries inline. *)
                  h
                    ?agent_core_invocation:
                      (Agent_core.Tool.Execution_env.invocation execution_env)
+                   ~result_projection:(model_projection_for_call descriptor ())
                    input)))
       descriptors
   in

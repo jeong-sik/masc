@@ -629,12 +629,21 @@ let test_comment_event_names_the_replies_after_the_latest_own_comment () =
   let page =
     Tool_result.message
       (Board_tool.handle_tool
+         ~result_boundary:Tool_output.Unprojected
          "masc_board_post_get"
          (`Assoc [ "post_id", `String post_id; "comment_offset", `Int 4 ]))
+    |> Yojson.Safe.from_string
   in
-  if not (String_util.contains_substring page "[comment page: offset=4 shown=3 total=7 ")
-  then failf "the thread read at offset 4 is not the last three comments: %s" page;
-  let on_page id = String_util.contains_substring page id in
+  let pagination = Yojson.Safe.Util.member "pagination" page in
+  check
+    (list int)
+    "the thread read at offset 4 is the last three of seven comments"
+    [ 4; 3; 7 ]
+    (List.map
+       (fun key -> Yojson.Safe.Util.(member key pagination |> to_int))
+       [ "offset"; "returned"; "total" ]);
+  let thread = Yojson.Safe.Util.(member "thread" page |> to_string) in
+  let on_page id = String_util.contains_substring thread id in
   check
     (list bool)
     "the page shows the three replies and not the earlier answer"

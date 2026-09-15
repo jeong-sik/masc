@@ -177,7 +177,8 @@ let sweep store =
           | None -> ());
          Hashtbl.remove store.posts id;
          Hashtbl.remove store.comments_by_post id;
-         Stdlib.decr store.post_count)
+         Stdlib.decr store.post_count;
+         mark_dirty_post store id)
       expired_posts;
     let expired_comments =
       Hashtbl.fold
@@ -196,7 +197,9 @@ let sweep store =
     (* [reply_count] is kept by the write that adds a comment and rebuilt
        from the comments on load; a comment the sweeper removes has to take
        its count with it, or the post keeps announcing a reply nobody can
-       read until the next restart. *)
+       read until the next restart. Each removal is marked dirty the way
+       [add_comment] marks its write, so the next flush writes the snapshot
+       without the expired rows instead of waiting for an unrelated edit. *)
     List.iter
       (fun cid ->
          (match Hashtbl.find_opt store.comments cid with
@@ -208,10 +211,12 @@ let sweep store =
                Hashtbl.replace
                  store.posts
                  post_key
-                 { post with reply_count = post.reply_count - 1 }
+                 { post with reply_count = post.reply_count - 1 };
+               mark_dirty_post store post_key
              | None -> ())
           | None -> ());
-         Hashtbl.remove store.comments cid)
+         Hashtbl.remove store.comments cid;
+         mark_dirty_comment store cid)
       expired_comments;
     (* Reclaim reactions and votes whose target post/comment no longer exists.
        [sweep] removes posts/comments but historically left [store.reactions] and

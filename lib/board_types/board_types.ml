@@ -306,19 +306,69 @@ module Comment_page = struct
     ; limit : int
     }
 
+  type argument =
+    | Comment_offset
+    | Comment_limit
+
   type request_error =
+    | Arguments_not_an_object
+    | Not_an_integer of
+        { argument : argument
+        ; given : string
+        }
+    | Integer_out_of_range of
+        { argument : argument
+        ; literal : string
+        }
     | Negative_offset of int
     | Limit_out_of_bounds of int
 
-  let request ~offset ~limit =
-    if offset < 0
-    then Error (Negative_offset offset)
-    else if limit < 1 || limit > Limits.max_comment_page_limit
-    then Error (Limit_out_of_bounds limit)
-    else Ok { offset; limit }
+  let argument_name = function
+    | Comment_offset -> "comment_offset"
+    | Comment_limit -> "comment_limit"
+  ;;
+
+  let integer_argument (fields : (string * Yojson.Safe.t) list) argument ~absent =
+    match List.assoc_opt (argument_name argument) fields with
+    | None -> Ok absent
+    | Some (`Int value) -> Ok value
+    | Some (`Intlit literal) -> Error (Integer_out_of_range { argument; literal })
+    | Some ((`Null | `Bool _ | `Float _ | `String _ | `Assoc _ | `List _) as value) ->
+      Error (Not_an_integer { argument; given = Json_util.kind_name value })
+  ;;
+
+  let request_of_args (args : Yojson.Safe.t) =
+    match args with
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+      Error Arguments_not_an_object
+    | `Assoc fields ->
+      (match integer_argument fields Comment_offset ~absent:0 with
+       | Error error -> Error error
+       | Ok offset ->
+         (match
+            integer_argument
+              fields
+              Comment_limit
+              ~absent:Limits.default_comment_page_limit
+          with
+          | Error error -> Error error
+          | Ok limit ->
+            if offset < 0
+            then Error (Negative_offset offset)
+            else if limit < 1 || limit > Limits.max_comment_page_limit
+            then Error (Limit_out_of_bounds limit)
+            else Ok { offset; limit }))
   ;;
 
   let request_error_to_string = function
+    | Arguments_not_an_object -> "the arguments must be a JSON object"
+    | Not_an_integer { argument; given } ->
+      Printf.sprintf "%s must be an integer (got %s)" (argument_name argument) given
+    | Integer_out_of_range { argument; literal } ->
+      Printf.sprintf
+        "%s must be an integer this server can hold (got %s)"
+        (argument_name argument)
+        literal
     | Negative_offset offset ->
       Printf.sprintf "comment_offset must be 0 or greater (got %d)" offset
     | Limit_out_of_bounds limit ->
@@ -373,6 +423,19 @@ module Comment_page = struct
       Page
         (page_of
            (extend [] 0 (List.filteri (fun index _ -> index >= request.offset) items))))
+  ;;
+
+  let pagination_to_yojson (page : 'a page) =
+    `Assoc
+      [ "offset", `Int page.offset
+      ; "returned", `Int (List.length page.items)
+      ; "total", `Int page.total
+      ; "has_more", `Bool (Option.is_some page.next_offset)
+      ; ( "next_offset"
+        , match page.next_offset with
+          | Some next -> `Int next
+          | None -> `Null )
+      ]
   ;;
 end
 

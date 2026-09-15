@@ -341,6 +341,9 @@ val add_comment
   -> ?ttl_hours:int
   -> unit
   -> (comment, board_error) Result.t
+(** {!add_comment_with_audience} without the routing, and with its refusal:
+    a comment already standing under the same post, parent, author and
+    content comes back as [Already_exists]. *)
 
 val add_comment_with_audience
   :  store
@@ -352,7 +355,15 @@ val add_comment_with_audience
   -> unit
   -> (comment_creation, board_error) Result.t
 (** Validate and freeze comment routing before the Board mutation, returning
-    the same audience with the committed comment. *)
+    the same audience with the committed comment.
+
+    A comment whose post, parent, author and content all match one already
+    standing in the thread is refused with [Already_exists] naming that
+    comment, and nothing is written: the board is already in the state the
+    call asks for. It is a refusal rather than the standing comment returned
+    as a success, because a success reads as a new write to the caller. The
+    refusal has no time window and no cap on how far back it looks — it is a
+    question about the thread, answered from the thread. *)
 
 (** Returns the comments for [post_id] oldest first: by [created_at], and by
     comment id among comments with the same [created_at], so every read of an

@@ -271,6 +271,9 @@ val add_comment :
   ?ttl_hours:int ->
   unit ->
   (Board.comment, Board.board_error) Result.t
+(** A comment already standing under the same post, parent, author and content
+    is refused with [Already_exists] naming it. Nothing is written and no
+    board signal or SSE event is emitted. *)
 
 val get_comments :
   post_id:string ->

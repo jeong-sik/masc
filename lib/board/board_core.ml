@@ -177,6 +177,88 @@ let search_posts store ~predicate ~limit : post list =
 
 (** {1 Comment Operations} *)
 
+(* A comment is identified by what it says and where it says it: the post, the
+   parent it answers, the author, and the content. Asking to write one that is
+   already standing is asking for a state the board is already in, so there is
+   nothing to write.
+
+   The answer is a refusal, not the standing comment handed back as a success.
+   A success reads to the caller as "written", and success is exactly what the
+   repeating model below kept receiving. [Already_exists] reaches the tool
+   caller as a workflow rejection, which tells a Keeper that the same call
+   cannot succeed if repeated.
+
+   Without this the tool answered every repeat with a fresh id, which is the
+   one result shape the keeper's repeat detector cannot read: it proves "the
+   world did not move" from an unchanged output fingerprint, and a new id every
+   time looks like a clock. Live on 2026-09-15, keeper code-reviewer sent the
+   same 603-character comment to post p-ef396b35148eb8ac1cff38bbb23ce5c2 five times
+   between 04:28:38Z and 04:32:23Z; all five were admitted
+   (c-97bd4994ece75126bb96246e37b40871, c-9131064bc43e846b8628ae65f07cc915,
+   c-3e9635d7a2b93a3b7d2c15aaa5efd157, c-170c6573cd92541bd0a1ac49c93ec910,
+   c-5800d7ff2b15a4139b37374a67c215f5) and the run only ended on the
+   input-only repeat axis, five calls in.
+
+   The scope is the thread, not a time window or a count of recent rows: "is
+   this comment already there" is a question the store answers outright, and a
+   window would make the answer depend on when it was asked.
+
+   Ties go to the oldest standing row under {!compare_comments_oldest_first},
+   the same total order a thread read returns, so the refusal names the same
+   comment however the index happens to be ordered. *)
+let standing_duplicate_comment_unlocked
+      store
+      ~post_key
+      ~(parent_cid : Comment_id.t option)
+      ~(author_id : Agent_id.t)
+      ~content
+  : comment option
+  =
+  let comment_keys =
+    match Hashtbl.find_opt store.comments_by_post post_key with
+    | None -> []
+    | Some keys -> keys
+  in
+  let same_parent (candidate : comment) =
+    match candidate.parent_id, parent_cid with
+    | None, None -> true
+    | Some left, Some right ->
+      String.equal (Comment_id.to_string left) (Comment_id.to_string right)
+    | Some _, None | None, Some _ -> false
+  in
+  List.fold_left
+    (fun (oldest : comment option) key ->
+       match Hashtbl.find_opt store.comments key with
+       | None -> oldest
+       | Some (candidate : comment) ->
+         if
+           same_parent candidate
+           && String.equal
+                (Agent_id.to_string candidate.author)
+                (Agent_id.to_string author_id)
+           && String.equal candidate.content content
+         then (
+           match oldest with
+           | None -> Some candidate
+           | Some standing ->
+             if compare_comments_oldest_first candidate standing < 0
+             then Some candidate
+             else Some standing)
+         else oldest)
+    None
+    comment_keys
+;;
+
+(* Names the comment that already stands so the caller can read or reply to
+   it instead of writing it again. *)
+let standing_comment_refusal (standing : comment) =
+  Already_exists
+    (Printf.sprintf
+       "Comment %s already says this, from the same author under the same \
+        parent. Nothing was written."
+       (Comment_id.to_string standing.id))
+;;
+
 let add_comment_with_audience
       store
       ~post_id
@@ -226,24 +308,34 @@ let add_comment_with_audience
            with
            | Error e -> Error e
            | Ok () ->
-             let now = Time_compat.now () in
-             Ok
-               { id = Comment_id.generate ()
-               ; post_id = pid
-               ; parent_id = parent_cid
-               ; author = author_id
-               ; content
-               ; created_at = now
-               ; expires_at =
-                   (if ttl_hours = 0
-                    then 0.0
-                    else
-                      now
-                      +. (Stdlib.Float.of_int ttl_hours
-                          *. Masc_time_constants.hour))
-               ; votes_up = 0
-               ; votes_down = 0
-               }))
+             (match
+                standing_duplicate_comment_unlocked
+                  store
+                  ~post_key:(Post_id.to_string pid)
+                  ~parent_cid
+                  ~author_id
+                  ~content
+              with
+              | Some standing -> Error (standing_comment_refusal standing)
+              | None ->
+                let now = Time_compat.now () in
+                Ok
+                  { id = Comment_id.generate ()
+                  ; post_id = pid
+                  ; parent_id = parent_cid
+                  ; author = author_id
+                  ; content
+                  ; created_at = now
+                  ; expires_at =
+                      (if ttl_hours = 0
+                       then 0.0
+                       else
+                         now
+                         +. (Stdlib.Float.of_int ttl_hours
+                             *. Masc_time_constants.hour))
+                  ; votes_up = 0
+                  ; votes_down = 0
+                  })))
     in
     (match staged with
      | Error _ as e -> e
@@ -271,38 +363,56 @@ let add_comment_with_audience
                  | Error _ as e -> e
                  | Ok () ->
                    let post_key = Post_id.to_string pid in
-                   let comment_key = Comment_id.to_string comment.id in
-                   Hashtbl.add store.comments comment_key comment;
-                   let existing =
-                     Hashtbl.find_opt store.comments_by_post post_key
-                     |> Option.value ~default:[]
-                   in
-                   Hashtbl.replace
-                     store.comments_by_post
-                     post_key
-                     (comment_key :: existing);
-                   Hashtbl.replace
-                     store.posts
-                     post_key
-                     { post with
-                       reply_count = post.reply_count + 1
-                     ; updated_at =
-                         (* Never move [updated_at] backwards: a
-                            concurrent mutation can land between staging
-                            and commit with a newer timestamp. *)
-                         Stdlib.Float.max post.updated_at comment.created_at
-                     };
-                   mark_dirty_post store post_key;
-                   mark_dirty_comment store comment_key;
-                   invalidate_post_caches store;
-                   invalidate_comment_caches store;
-                   Ok { comment; audience }))
+                   (* Identity is re-checked here for the same reason the
+                      policy is: an identical comment can commit while this
+                      one's append is in flight, and commit is the
+                      authoritative gate. Losing here takes the same exit as
+                      losing the policy check, so the appended row is
+                      disposed rather than left as a second copy. *)
+                   (match
+                      standing_duplicate_comment_unlocked
+                        store
+                        ~post_key
+                        ~parent_cid
+                        ~author_id
+                        ~content
+                    with
+                    | Some standing -> Error (standing_comment_refusal standing)
+                    | None ->
+                      let comment_key = Comment_id.to_string comment.id in
+                      Hashtbl.add store.comments comment_key comment;
+                      let existing =
+                        match Hashtbl.find_opt store.comments_by_post post_key with
+                        | None -> []
+                        | Some keys -> keys
+                      in
+                      Hashtbl.replace
+                        store.comments_by_post
+                        post_key
+                        (comment_key :: existing);
+                      Hashtbl.replace
+                        store.posts
+                        post_key
+                        { post with
+                          reply_count = post.reply_count + 1
+                        ; updated_at =
+                            (* Never move [updated_at] backwards: a
+                               concurrent mutation can land between staging
+                               and commit with a newer timestamp. *)
+                            Stdlib.Float.max post.updated_at comment.created_at
+                        };
+                      mark_dirty_post store post_key;
+                      mark_dirty_comment store comment_key;
+                      invalidate_post_caches store;
+                      invalidate_comment_caches store;
+                      Ok { comment; audience })))
           in
           (match committed with
            | Ok _ as ok -> ok
            | Error _ as e ->
-             (* The durable append won but the commit lost (post deleted
-                or policy flipped mid-append), so the appended row is an
+             (* The durable append won but the commit lost (post deleted,
+                policy flipped, or an identical comment committed first
+                mid-append), so the appended row is an
                 orphan on disk. Rewrite the comments snapshot to dispose
                 of it — the snapshot cannot contain the orphan because
                 it never reached memory. If the rewrite itself fails,

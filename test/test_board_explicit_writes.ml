@@ -54,32 +54,56 @@ let test_identical_posts_are_distinct_writes () =
     (List.length (Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent ~limit:10 ()))
 ;;
 
-let test_identical_comments_are_distinct_writes () =
+(* Live 2026-09-15: keeper code-reviewer sent one 603-character comment to
+   p-ef396b35148eb8ac1cff38bbb23ce5c2 five times between 04:28:38Z and
+   04:32:23Z. Every call came back with a fresh id, so the board kept all five.
+   A comment whose post, parent, author and content already stand is the state
+   the call asks for: the call is refused, the refusal names the standing
+   comment, and nothing is written or signalled. *)
+let test_standing_comment_is_refused_and_named () =
   let post = create_post ~content:"comment target" in
   let post_id = Board.Post_id.to_string post.id in
-  let add () =
-    match
-      Board_dispatch.add_comment
-        ~post_id
-        ~author:"explicit-writer"
-        ~content:"intentional duplicate comment"
-        ()
-    with
+  let content = "this is my last entry on this stage" in
+  let add ?parent_id ?(content = content) ~author () =
+    Board_dispatch.add_comment ~post_id ~author ~content ?parent_id ()
+  in
+  let first =
+    match add ~author:"explicit-writer" () with
     | Ok comment -> comment
     | Error error -> Alcotest.fail (Board.show_board_error error)
   in
-  let first = add () in
-  let second = add () in
-  Alcotest.(check bool)
-    "distinct ids"
-    true
-    (not
-       (String.equal
-          (Board.Comment_id.to_string first.id)
-          (Board.Comment_id.to_string second.id)));
+  let standing_id = Board.Comment_id.to_string first.id in
+  let signals = ref 0 in
+  Board_dispatch.set_board_signal_hook (fun _ -> incr signals);
+  (match add ~author:"explicit-writer" () with
+   | Ok _ -> Alcotest.fail "a standing comment must not be written again"
+   | Error (Board.Already_exists message) ->
+     Alcotest.(check bool)
+       "refusal names the standing comment"
+       true
+       (String_util.string_contains_substring ~needle:standing_id message)
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  Alcotest.(check int) "refusal emits no board signal" 0 !signals;
+  (match Board_dispatch.get_post ~post_id with
+   | Error error -> Alcotest.fail (Board.show_board_error error)
+   | Ok updated -> Alcotest.(check int) "reply count unchanged" 1 updated.reply_count);
+  (* The same words are a different comment from another author, under
+     another parent, or with any other change to the content. *)
+  let admit label result =
+    match result with
+    | Ok (_ : Board.comment) -> ()
+    | Error error ->
+      Alcotest.failf "%s: %s" label (Board.show_board_error error)
+  in
+  admit "another author" (add ~author:"other-writer" ());
+  admit "another parent" (add ~parent_id:standing_id ~author:"explicit-writer" ());
+  admit
+    "other content"
+    (add ~content:(content ^ " and one more thing") ~author:"explicit-writer" ());
+  Alcotest.(check int) "each admitted comment emits its signal" 3 !signals;
   match Board_dispatch.get_post ~post_id with
   | Error error -> Alcotest.fail (Board.show_board_error error)
-  | Ok updated -> Alcotest.(check int) "reply count" 2 updated.reply_count
+  | Ok updated -> Alcotest.(check int) "reply count" 4 updated.reply_count
 ;;
 
 let test_long_post_is_not_locally_rejected () =
@@ -152,9 +176,9 @@ let () =
             `Quick
             (with_board test_identical_posts_are_distinct_writes)
         ; Alcotest.test_case
-            "identical comments remain distinct"
+            "a standing comment is refused and named"
             `Quick
-            (with_board test_identical_comments_are_distinct_writes)
+            (with_board test_standing_comment_is_refused_and_named)
         ; Alcotest.test_case
             "long post has no local content cap"
             `Quick

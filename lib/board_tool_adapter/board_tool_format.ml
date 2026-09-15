@@ -70,12 +70,17 @@ let board_error_failure_class = function
   | Board.Unauthorized _
   (* The id itself has the wrong shape (a typed id parser refused it), so
      the same call can never succeed; the message names the accepted shape. *)
-  | Board.Invalid_id _ ->
+  | Board.Invalid_id _
+  (* Every producer names a record that already holds the identity the call
+     asks for: a sub-board slug, a Fusion run already projected with another
+     payload, or a comment already standing in its thread. The same call
+     meets the same record every time, so it cannot succeed by being
+     repeated. *)
+  | Board.Already_exists _ ->
     Tool_result.Workflow_rejection
   | Board.Io_error _
   | Board.Validation_error _
-  | Board.Already_voted _
-  | Board.Already_exists _ ->
+  | Board.Already_voted _ ->
     Tool_result.Runtime_failure
 ;;
 

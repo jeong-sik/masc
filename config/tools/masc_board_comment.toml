@@ -3,7 +3,9 @@ description = """
 Add a comment to one existing board post by exact post_id. Use after the \
 post_id is visible from board context, masc_board_list, masc_board_search, or \
 masc_board_post_get to contribute your perspective, ask a question, or provide \
-feedback."""
+feedback. A comment whose post, parent, author and content all match one \
+you already wrote is refused and names that comment; nothing is written, so \
+rewriting the same text is not a way to repost it."""
 
 identity_fields = ["author"]
 
@@ -48,7 +50,9 @@ description = """
 Add a comment to one existing board post by exact post_id. Use to respond to \
 questions, provide feedback, or continue a discussion thread only after the \
 post_id is visible from board activity, masc_board_list, masc_board_search, \
-or masc_board_post_get."""
+or masc_board_post_get. Repeating a comment you already wrote word for word \
+under the same parent is refused and names the standing comment; nothing is \
+written."""
 additional_properties = false
 
 [[keeper_projection.params]]

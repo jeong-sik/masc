@@ -2155,6 +2155,32 @@ let test_comment_add_missing_post () =
     result;
   Alcotest.(check bool) "has error" true (String.length body > 0)
 
+(* The tool caller learns two things from a repeated comment: which comment
+   already says it, and that repeating the call cannot change the answer. The
+   second is the failure class, which a Keeper reads as "do not retry". *)
+let test_comment_add_repeat_is_workflow_rejection_naming_the_standing_comment () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let post_id = create_post_with_comments ~count:0 in
+  let content = "the same words twice" in
+  let standing_id = add_comment_id ~post_id content in
+  let result =
+    dispatch_result "masc_board_comment"
+      (make_args
+         [ "post_id", `String post_id
+         ; "content", `String content
+         ; "author", `String "thread-reader"
+         ])
+  in
+  Alcotest.(check bool) "repeat is not a success" false (Tool_result.is_success result);
+  check_failure_class
+    "repeat is a workflow rejection"
+    (Some "workflow_rejection")
+    result;
+  Alcotest.(check bool) "refusal names the standing comment" true
+    (String_util.contains_substring (Tool_result.message result) standing_id)
+
 let test_comment_add_missing_author_rejected () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2571,6 +2597,8 @@ let () =
       ( "comments",
         [
           Alcotest.test_case "comment missing post" `Quick test_comment_add_missing_post;
+          Alcotest.test_case "comment repeat names the standing comment" `Quick
+            test_comment_add_repeat_is_workflow_rejection_naming_the_standing_comment;
           Alcotest.test_case "comment missing author rejected" `Quick
             test_comment_add_missing_author_rejected;
           Alcotest.test_case "comment anonymous author rejected" `Quick

@@ -4,7 +4,6 @@ module Mcp_eio = Masc.Mcp_server_eio
 module Server_startup_state = Masc.Server_startup_state
 module Shutdown_hooks = Masc.Shutdown_hooks
 module Board_dispatch = Masc.Board_dispatch
-module Server_session_switch = Masc.Server_session_switch
 
 open Cmdliner
 

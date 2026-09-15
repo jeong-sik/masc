@@ -448,7 +448,7 @@ let base_path =
 let selected_base_path requested =
   match Workspace_root.resolve_current ~flag:requested with
   | Ok workspace -> Some workspace.Workspace_root.root
-  | Error (Workspace_root.No_workspace _) -> None
+  | Error (Workspace_root.No_workspace _ | Workspace_root.Unanchored _) -> None
 let resolve_connection_port requested cli =
   Workspace_connection.resolve ~base_path:(selected_base_path requested) ~cli
     ~environment:(Env_config_core.raw_value_opt Env_config_core.http_port_env_key)

@@ -800,11 +800,11 @@ let test_one_keeper_turn_of_three_calls_is_one_row () =
         (tools chunk)
   | chunks -> failf "three calls and a settle drew %d rows" (List.length chunks)
 
-(* The hook sends a call's observation when the response is collected:
-   after the call's turn markers, before its tools run. On a live feed every
-   tool frame of 37 observed calls arrived after the observation. The wire
-   relays agent-core frames on a fiber of its own, though, so a frame can
-   still arrive before the observation that numbers it. The fold reads every
+(* The hook sends a call's observation when the call's response is
+   collected. A call the agent-core loop makes runs its tools after that, so
+   its tool frames follow the observation. A CLI lane runs a whole keeper
+   turn as one call with its tools inside it, so the turn's frames arrive
+   first and the observation comes at the end. The fold reads every
    observation in the ring first, so frames that arrived unnumbered are
    filed once the observation lands. *)
 let test_an_observation_after_its_frames_still_files_them () =
@@ -819,6 +819,58 @@ let test_an_observation_after_its_frames_still_files_them () =
   | [ chunk ] ->
       check (option int) "filed under keeper turn 12" (Some 12) chunk.Acting.ck_turn
   | chunks -> failf "expected one chunk, got %d" (List.length chunks)
+
+(* The shape a live claude_code keeper's turns took (critic, 2026-09-15):
+   every ledger call of the turn arrived first, then the observation, then
+   the settle. No observation names a lane turn while it runs, so its row
+   has no number until the end; the turn settled before it keeps its own
+   call. *)
+let test_a_cli_lane_turn_is_numbered_when_its_observation_lands () =
+  let k = "critic" in
+  let before =
+    [ ledger_tool ~duration_ms:75. ~turn:6 ~keeper:k "masc_board_comment"
+    ; observation ~keeper:k ~session:6 ~completed:2273
+    ; turn_settled ~keeper:k ~turn:2274 ~input:853484 ~output:1662 ~cost:0.0100
+    ]
+  in
+  let running =
+    before
+    @ [ ledger_tool ~duration_ms:1. ~turn:7 ~keeper:k "masc_board_list"
+      ; ledger_tool ~duration_ms:1. ~turn:7 ~keeper:k "masc_ask_status"
+      ]
+  in
+  let tools chunk =
+    List.map (fun t -> t.Acting.ct_tool) (Acting.chunk_tools chunk)
+  in
+  (match Acting.chunks ~traces:[] (entries_of running) with
+   | [ current; previous ] ->
+       check (option int) "the running lane turn has no number yet" None
+         current.Acting.ck_turn;
+       check bool "and is not settled" false current.Acting.ck_settled;
+       check (list string) "its calls so far" [ "masc_board_list"; "masc_ask_status" ]
+         (tools current);
+       check (option int) "the turn before keeps its number" (Some 2274)
+         previous.Acting.ck_turn;
+       check (list string) "and its own call" [ "masc_board_comment" ] (tools previous)
+   | chunks -> failf "a running lane turn drew %d rows" (List.length chunks));
+  let ended =
+    running
+    @ [ ledger_tool ~duration_ms:1. ~turn:7 ~keeper:k "masc_board_post_get"
+      ; observation ~keeper:k ~session:7 ~completed:2274
+      ; turn_settled ~keeper:k ~turn:2275 ~input:1288966 ~output:1779 ~cost:0.0100
+      ]
+  in
+  match Acting.chunks ~traces:[] (entries_of ended) with
+  | [ current; previous ] ->
+      check (option int) "the observation and the settle number the turn" (Some 2275)
+        current.Acting.ck_turn;
+      check bool "and close it" true current.Acting.ck_settled;
+      check (list string) "with every call of the turn"
+        [ "masc_board_list"; "masc_ask_status"; "masc_board_post_get" ]
+        (tools current);
+      check (list string) "the turn before is unchanged" [ "masc_board_comment" ]
+        (tools previous)
+  | chunks -> failf "an ended lane turn drew %d rows" (List.length chunks)
 
 (* The call in flight has no observation yet -- its response has not come
    back -- but a keeper runs one turn at a time, so its frames join the
@@ -1101,6 +1153,8 @@ let () =
             test_one_keeper_turn_of_three_calls_is_one_row
         ; test_case "an observation after its frames still files them" `Quick
             test_an_observation_after_its_frames_still_files_them
+        ; test_case "a cli lane turn is numbered when its observation lands" `Quick
+            test_a_cli_lane_turn_is_numbered_when_its_observation_lands
         ; test_case "a call in flight joins the open keeper turn" `Quick
             test_a_call_in_flight_joins_the_open_keeper_turn
         ; test_case "a new keeper turn after a settle opens its own row" `Quick

@@ -81,10 +81,11 @@ let visible filter (event : Observer.event) =
    yet the Turns fold reads it to number the calls it reports. Counted with
    the quiet class, it would be trimmed by token-sized stream frames long
    before those calls, and the turn it named would split back into
-   unnumbered rows. It gets a budget of its own the size of [actions]. Each
-   provider call it numbers also sends a turn-start and a turn-ready frame,
-   both actions, so observations fill their budget more slowly than actions
-   fill theirs and outlast the calls they number. *)
+   unnumbered rows. It gets a budget of its own the size of [actions], and
+   every observation comes with actions from its own call: the turn start
+   and ready of a call the agent-core loop makes, or the tool frames and the
+   settle of a CLI lane that runs a whole keeper turn as one call. So the
+   observations fill their budget more slowly than actions fill theirs. *)
 type retention_class = Retain_action | Retain_observation | Retain_quiet
 
 let retention_class (event : Observer.event) =
@@ -790,12 +791,15 @@ let file_member ~existing ~keeper ~at ~session ~keeper_turn member =
 
    An agent session created without a checkpoint numbers its calls from
    zero again, so one keeper can observe the same ordinal twice in the ring.
-   A member takes the observation nearest to it in feed position: the
-   frames of one call sit around that call's observation, and a new session
-   starts between calls, not inside one. This assumes the relay delay of a
-   frame is shorter than a session restart; an old session's frame that
-   arrives after the new session's observation of the same ordinal is
-   filed under the new turn.
+   A member takes the observation nearest to it in feed position, which is
+   the right one while a call's frames sit nearer their own observation than
+   an older session's. On the agent-core loop they sit right around it: the
+   call's turn markers just before, its tools just after. A CLI lane runs a
+   whole keeper turn as one call, so every frame of the turn comes before
+   the observation, and a frame from early in a long lane turn can sit
+   nearer an older session's observation of the same ordinal and be filed
+   under that older turn. A frame relayed late, after the new session's
+   observation of its ordinal, is filed under the new turn.
 
    [traces] resolves agent-core correlation ids to keeper names, exactly as
    the flat view does. The ring holds up to [acting_retained_entries] rows

@@ -1,16 +1,15 @@
 (** The phase before the first body read is bounded.
 
-    A server that accepts the request and never answers held
-    [Http_client.with_post_stream] for as long as the socket stayed open
-    unless the provider declared a connect budget: the first-event budget is
-    armed on the reader, and such a server never lets the caller reach the
-    reader. A server that answers with a refusing status line and no body
-    held it the same way, past the headers. These cases run the real client
-    against loopback listeners that stall at one of those points, and read
-    the elapsed time off the clock, so a hang is a failure at
+    [Http_client.with_post_stream] bounds the connection, the request and the
+    wait for the status line by the narrower of the connect and first-event
+    budgets, and reads a refusal's body under what that window has left: a
+    server that accepts the request and never answers, or answers with a
+    refusing status line and no body, is ended by the window. These cases run
+    the real client against loopback listeners that stall at one of those
+    points, and read the elapsed time off the clock, so a hang is a failure at
     [outer_budget_s] and not a wait. The last group crosses the headers: the
-    reader arms what the pre-header phase left of the first-event budget,
-    not a second full one. *)
+    reader arms what the pre-header phase left of the first-event budget, not
+    a second full one. *)
 
 module Http_client = Llm_provider.Http_client
 
@@ -249,15 +248,32 @@ let test_the_budget_covers_the_tls_handshake () =
 
 (* The refusal body is read under what the window has left, and the status
    line already is the provider's answer: when the window closes the caller
-   gets that answer -- the status and its Retry-After, with no body -- and
-   not a timeout that says the provider was silent. *)
+   gets that answer -- the status, its Retry-After, and a body that says it
+   never arrived -- and not a timeout that says the provider was silent. A
+   body that did not arrive is not a body the provider left empty: the
+   reason it carried is unread, so the classification says so instead of
+   naming a cause read off nothing. *)
 let test_a_refusal_whose_body_never_arrives_is_still_the_refusal () =
   with_env @@ fun ~sw ~clock ~net ->
   let port = start_refusing_server ~sw ~net ~sends_body:false in
   let budget_s = 0.5 in
   match run ~clock ~net ~scheme:"http" ~port ~first_event_timeout_s:budget_s () with
   | Ended (Error (Http_client.HttpError { code = 429; body; retry_after_header })), elapsed ->
-    Alcotest.(check string) "no body arrived, none is reported" "" body;
+    (match body with
+     | Http_client.Not_received_in_window -> ()
+     | Http_client.Received body ->
+       Alcotest.failf "no body arrived, yet one is reported: %S" body);
+    (* And the classification says the cause is unread, not that the
+       provider named none. *)
+    (match
+       Llm_provider.Retry.classify_refusal ~retry_after_header ~status:429 ~body
+     with
+     | Llm_provider.Retry.InvalidRequest
+         { reason = Llm_provider.Retry.Refusal_body_not_received; _ } -> ()
+     | classified ->
+       Alcotest.failf
+         "a refusal whose body never arrived classified as %s"
+         (Llm_provider.Retry.error_message classified));
     Alcotest.(check (option (float 0.001)))
       "the Retry-After the peer sent is kept"
       (Some (float_of_int refusal_retry_after_s))
@@ -282,7 +298,11 @@ let test_a_complete_refusal_is_still_the_typed_http_error () =
   let port = start_refusing_server ~sw ~net ~sends_body:true in
   match run ~clock ~net ~scheme:"http" ~port ~first_event_timeout_s:5.0 () with
   | Ended (Error (Http_client.HttpError { code = 429; body; _ })), elapsed ->
-    Alcotest.(check string) "the refusal body is the one the peer sent" refusal_body body;
+    (match body with
+     | Http_client.Received body ->
+       Alcotest.(check string) "the refusal body is the one the peer sent" refusal_body body
+     | Http_client.Not_received_in_window ->
+       Alcotest.fail "the peer sent a body; it is not reported as one that never arrived");
     if elapsed >= slack_s
     then Alcotest.failf "a complete refusal took %.2fs; it must not wait on the budget" elapsed
   | other, elapsed ->

@@ -24,6 +24,7 @@ let to_message (err : Llm_provider.Http_client.http_error) : string =
   | Llm_provider.Http_client.ProviderFailure { kind; message } ->
       Llm_provider.Http_client.provider_failure_to_string ~kind ~message
   | Llm_provider.Http_client.HttpError { code; body; _ } ->
+      let body = Llm_provider.Http_client.refusal_body_text body in
       Printf.sprintf "HTTP %d: %s" code
         (if String.length body > max_body_length
          then String.sub body 0 max_body_length ^ body_truncation_suffix

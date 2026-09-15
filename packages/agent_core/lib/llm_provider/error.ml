@@ -396,7 +396,7 @@ let of_provider_failure ?provider kind message =
 
 let of_http_error ?provider = function
   | Http_client.HttpError { code; body; retry_after_header } ->
-    Retry.classify_error ~retry_after_header ~status:code ~body
+    Retry.classify_refusal ~retry_after_header ~status:code ~body
     |> of_retry_api_error ?provider
   | Http_client.NetworkError { message; kind } ->
     NetworkError

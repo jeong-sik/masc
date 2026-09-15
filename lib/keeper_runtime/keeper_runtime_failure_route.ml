@@ -17,6 +17,7 @@ type rotate_class =
   | No_progress_empty
   | No_progress_thinking_only
   | No_progress_truncated
+  | Refusal_body_not_received
   | Generation_repeated
   | Attempt_rejected
 
@@ -196,6 +197,13 @@ let route_of_api_error ~err (api : Llm_provider.Retry.api_error) =
      itself refused does not change on the next candidate. *)
   | Llm_provider.Retry.InvalidRequest { reason = Llm_provider.Retry.Attempt_rejected; _ } ->
     rotate Attempt_rejected
+  (* The provider refused and the body that would have named the cause did
+     not arrive before the caller's window closed. Nothing says the request
+     is what it refused, so the lane moves to its next candidate rather than
+     ending the turn on a reason nobody read. *)
+  | Llm_provider.Retry.InvalidRequest
+      { reason = Llm_provider.Retry.Refusal_body_not_received; _ } ->
+    rotate Refusal_body_not_received
   | Llm_provider.Retry.InvalidRequest
       { reason =
           ( Llm_provider.Retry.Json_parse_error
@@ -342,6 +350,7 @@ let rotate_class_label = function
   | No_progress_thinking_only -> "no_progress_thinking_only"
   | No_progress_truncated -> "no_progress_truncated"
   | Attempt_rejected -> "attempt_rejected"
+  | Refusal_body_not_received -> "refusal_body_not_received"
   | Generation_repeated -> "generation_repeated"
 
 let terminal_class_label = function
@@ -406,6 +415,9 @@ let response_observed = function
      | Attempt_rejected
      (* the candidate's own policy refused the request before the wire
         (#34475): no generation. *)
+     | Refusal_body_not_received
+     (* the provider refused the request; the body naming why never
+        arrived, and a refusal is not an answer. *)
      | Runtime_exhausted ->
        (* a whole-runtime exhaustion wrapper: it carries no answer. *)
        false

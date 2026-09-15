@@ -360,6 +360,7 @@ let test_response_observed_per_class () =
     ; rotate KFR.Resumable_cli_session
     ; rotate KFR.Candidates_filtered
     ; rotate KFR.Attempt_rejected
+    ; rotate KFR.Refusal_body_not_received
     ; rotate KFR.Runtime_exhausted
     ; terminal KFR.Deterministic_request
     ; terminal KFR.Context_overflow

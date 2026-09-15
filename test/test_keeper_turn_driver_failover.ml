@@ -2417,7 +2417,11 @@ let test_attempt_loop_does_not_gate_network_retry () =
    the Api.RateLimited variant returned by the real provider path. *)
 let rate_limit_error_from_a_429 ?(retry_after_header = None) ~body () =
   Agent_core.Provider_failure_attribution.core_error_of_http_error
-    (Llm_provider.Http_client.HttpError { code = 429; body; retry_after_header })
+    (Llm_provider.Http_client.HttpError
+       { code = 429
+       ; body = Llm_provider.Http_client.Received body
+       ; retry_after_header
+       })
 ;;
 
 let observed_candidate runtime_id =
@@ -3742,7 +3746,7 @@ let access_error_from_http code =
   Agent_core.Provider_failure_attribution.core_error_of_http_error
     ~provider:"candidate-access-fixture"
     (Llm_provider.Http_client.HttpError
-       { code; body = "candidate access denied"; retry_after_header = None })
+       { code; body = Llm_provider.Http_client.Received "candidate access denied"; retry_after_header = None })
 ;;
 
 (* Exercise the lane with both API and official-client error carriage. Codex

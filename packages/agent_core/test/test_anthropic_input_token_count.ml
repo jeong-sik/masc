@@ -1504,7 +1504,9 @@ let test_transport_error () =
     Count_tokens_sync.count_anthropic ~sw ~net ~config:(config base_url) ~messages ()
   in
   match result with
-  | Error (Count.Transport (Http_client.HttpError { code = 429; body; _ })) ->
+  | Error
+      (Count.Transport
+         (Http_client.HttpError { code = 429; body = Http_client.Received body; _ })) ->
     check string "provider body" "rate limited" body
   | Ok _ | Error _ -> fail "expected typed HTTP 429"
 ;;

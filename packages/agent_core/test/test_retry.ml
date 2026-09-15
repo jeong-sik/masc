@@ -250,6 +250,54 @@ let test_invalid_request_reason_boundary () =
           }))
 ;;
 
+(* A refusal whose body the caller's own window closed on is not a refusal
+   whose body arrived empty. The provider named a status and nothing else
+   that was read, so the classification says the cause is unread and the
+   attempt may be tried again; a body that did arrive and named nothing this
+   classifier knows still ends the attempt. *)
+let test_a_refusal_body_that_never_arrived_is_not_an_empty_body () =
+  let statuses = [ 400; 413; 422; 429; 500; 529 ] in
+  List.iter
+    (fun status ->
+       match
+         Retry.classify_refusal
+           ~retry_after_header:None
+           ~status
+           ~body:Llm_provider.Http_client.Not_received_in_window
+       with
+       | Retry.InvalidRequest { reason = Retry.Refusal_body_not_received; _ } as err ->
+         check
+           bool
+           "a refusal nobody read is retryable"
+           true
+           (Retry.is_retryable err)
+       | other ->
+         failf
+           "HTTP %d with an unread body classified as %s"
+           status
+           (Retry.error_message other))
+    statuses;
+  (* The same statuses with a body that arrived keep their classification. *)
+  (match
+     Retry.classify_refusal
+       ~retry_after_header:None
+       ~status:400
+       ~body:(Llm_provider.Http_client.Received "")
+   with
+   | Retry.InvalidRequest { reason = Retry.Unknown_invalid_request; _ } as err ->
+     check bool "a body that arrived empty still ends the attempt" false (Retry.is_retryable err)
+   | other -> failf "an empty body that arrived classified as %s" (Retry.error_message other));
+  match
+    Retry.classify_refusal
+      ~retry_after_header:None
+      ~status:429
+      ~body:(Llm_provider.Http_client.Received {|{"error":{"message":"slow down"}}|})
+  with
+  | Retry.RateLimited { message; _ } ->
+    check string "the provider's message survives" "slow down" message
+  | other -> failf "a 429 that arrived classified as %s" (Retry.error_message other)
+;;
+
 let test_error_message_all_variants () =
   let cases =
     [ Retry.RateLimited { retry_after = None; message = "slow" }, "Rate limited: slow"
@@ -294,6 +342,10 @@ let () =
     [ ( "classify"
       , [ test_case "http status mapping" `Quick test_classify_error
         ; test_case "edge cases" `Quick test_classify_error_edge_cases
+        ; test_case
+            "a refusal body that never arrived is not an empty body"
+            `Quick
+            test_a_refusal_body_that_never_arrived_is_not_an_empty_body
         ; test_case "402 payment required" `Quick test_classify_error_402_payment_required
         ; test_case
             "403 authorization denied"

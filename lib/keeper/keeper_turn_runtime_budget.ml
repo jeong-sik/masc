@@ -435,7 +435,13 @@ let capacity_refusal_of_error
   | Agent_core.Error.Api (InputCapacity _)
   | Agent_core.Error.Api
       (InvalidRequest
-         { reason = Json_parse_error | Attempt_rejected | Unknown_invalid_request; _ })
+         { reason =
+             ( Json_parse_error
+             | Attempt_rejected
+             | Refusal_body_not_received
+             | Unknown_invalid_request )
+         ; _
+         })
   | Agent_core.Error.Api
       ( RateLimited _ | Overloaded _ | ServerError _ | AuthError _
       | AuthorizationError _ | PaymentRequired _ | NotFound _ | NetworkError _

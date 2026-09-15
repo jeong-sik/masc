@@ -31,12 +31,12 @@ let make_workflow_err ~tool_name ~start_time message =
 
 (* The lane names are the closed set the state module admits; anything else
    is refused here rather than queued into a lane that cannot exist. *)
-let lane_of ~tool_name ~start_time args =
+let route_of ~tool_name ~start_time args =
   match args with
   | `Assoc fields ->
     (match List.assoc_opt "lane" fields with
-     | None -> Ok "live"
-     | Some (`String ("live" | "automation" as lane)) -> Ok lane
+     | None | Some (`String "live") -> Ok (Browser_lane.Live_route None)
+     | Some (`String "automation") -> Ok Browser_lane.Automation_route
      | _ -> Error (make_input_err ~tool_name ~start_time "lane must be live or automation"))
   | _ -> Error (make_input_err ~tool_name ~start_time "browser arguments must be an object")
 ;;
@@ -84,30 +84,31 @@ let no_client_retry host =
     | Browser_lane_launcher.Absent | Browser_lane_launcher.Misconfigured ->
       Browser_lane_launcher.message host
     | Browser_lane_launcher.Aligned ->
-      "The installed host is configured for this server's port, so no browser with the MASC \
-       extension is running and polling it. The operator opens that browser profile with the \
-       extension loaded, or reloads the extension so a new host starts." in
+      Browser_lane_launcher.message host ^ " No browser with the MASC extension is polling \
+       this server. The operator opens that browser profile with the extension loaded, or \
+       reloads the extension so a new host starts." in
   cause ^ " Only the operator can change this; retrying before they do returns the same \
            answer. No browser command was dispatched."
 
 (* Keep the discovery payload in both channels: Keeper's adapter retains [data]
    but its model-facing raw output uses the error message. No tab command runs
-   until resolution succeeds, including when a formerly pinned client vanished. *)
-let selection_error ~base_path ~tool_name ~start_time ~source error =
-  let clients = match source with
-    | Browser_surface.Live -> Browser_lane.active_clients () |> List.map Browser_lane.client_json
-    | Automation -> [] in
+   until resolution succeeds, including when a formerly pinned client vanished,
+   and a browser that leaves after resolution is answered the same way. *)
+let selection_error ~base_path ~tool_name ~start_time error =
+  let clients = Browser_lane.active_clients () |> List.map Browser_lane.client_json in
   let rejection fields =
     let data = `Assoc (("error", `String (Browser_lane.selection_error_code error))
                        :: ("clients", `List clients) :: fields) in
     Tool_result.make_err ~tool_name ~start_time
       ~class_:Tool_result.Workflow_rejection ~data (Yojson.Safe.to_string data) in
+  let observe () =
+    Browser_lane_launcher.observe ~base_path ~serving_port:(Browser_lane.serving_port ()) in
   match error with
   | Browser_lane.No_live_client ->
-    let host = Browser_lane_launcher.observe ~base_path in
+    let host = observe () in
     rejection ["host", Browser_lane_launcher.to_json host; "retry", `String (no_client_retry host)]
   | Browser_lane.Selected_client_disconnected client_id ->
-    let host = Browser_lane_launcher.observe ~base_path in
+    let host = observe () in
     let retry = match clients with
       | _ :: _ -> "That browser is no longer connected. Choose a browser from clients and retry \
                    with its clientId. No browser command was dispatched."
@@ -117,21 +118,21 @@ let selection_error ~base_path ~tool_name ~start_time ~source error =
   | Browser_lane.Ambiguous_clients _ ->
     rejection ["retry", `String "Choose a connected browser and retry with its clientId. No \
                                  browser command was dispatched."]
-  (* Parsing already refuses both before resolution; reaching them is a caller
-     argument error, not a browser state. *)
-  | Browser_lane.Client_id_requires_live | Browser_lane.Unknown_lane ->
-    make_input_err ~tool_name ~start_time (Browser_lane.selection_error_code error)
+
+let read_failure ~base_path ~tool_name ~start_time = function
+  | Browser_surface.Unselected error -> selection_error ~base_path ~tool_name ~start_time error
+  | Browser_surface.Unobserved detail -> make_workflow_err ~tool_name ~start_time detail
 
 let handle_tabs ~base_path ~tool_name ~start_time args : Tool_result.result =
   match tool_request args with
   | Error error -> make_input_err ~tool_name ~start_time error
   | Ok request ->
-    match Browser_surface.resolved_target request with
-    | Error error -> selection_error ~base_path ~tool_name ~start_time ~source:request.source error
+    match Browser_lane.resolve_target request.route with
+    | Error error -> selection_error ~base_path ~tool_name ~start_time error
     | Ok target ->
-      answer_to_result ~tool_name ~start_time
-        (Browser_lane.issue_for ~target ~verb:Browser_lane.Tabs_list ~timeout_sec:default_timeout_sec
-         |> add_client target)
+      match Browser_lane.issue_for ~target ~verb:Browser_lane.Tabs_list ~timeout_sec:default_timeout_sec with
+      | Error error -> selection_error ~base_path ~tool_name ~start_time error
+      | Ok answer -> answer_to_result ~tool_name ~start_time (add_client target answer)
 ;;
 
 (* Sessions and navigations are automation-lane verbs; the state module
@@ -143,18 +144,17 @@ let handle_session ~tool_name ~start_time args : Tool_result.result =
   | "open" ->
     let headless = Some (get_bool args "headless" true) in
     answer_to_result ~tool_name ~start_time
-      (Browser_lane.issue
-         ~lane_name:"automation"
+      (Browser_lane.issue_automation
          ~verb:(Browser_lane.Session_open { headless })
          ~timeout_sec:60.0)
   | "close" ->
     answer_to_result ~tool_name ~start_time
-      (Browser_lane.issue ~lane_name:"automation" ~verb:Browser_lane.Session_close ~timeout_sec:60.0)
+      (Browser_lane.issue_automation ~verb:Browser_lane.Session_close ~timeout_sec:60.0)
   | "status" ->
     (* Reads the backend's record rather than the browser, so the short timeout
        is the lane round trip, not a page load. *)
     answer_to_result ~tool_name ~start_time
-      (Browser_lane.issue ~lane_name:"automation" ~verb:Browser_lane.Session_status ~timeout_sec:10.0)
+      (Browser_lane.issue_automation ~verb:Browser_lane.Session_status ~timeout_sec:10.0)
   | _ ->
     make_input_err ~tool_name ~start_time
       "action must be one of: open, close, status"
@@ -168,8 +168,7 @@ let handle_goto ~tool_name ~start_time args : Tool_result.result =
       "url must be a valid http or https URL"
   else
     answer_to_result ~tool_name ~start_time
-      (Browser_lane.issue
-         ~lane_name:"automation"
+      (Browser_lane.issue_automation
          ~verb:(Browser_lane.Page_goto { url; tab_id = get_int_opt args "tabId" })
          ~timeout_sec:45.0)
 ;;
@@ -183,7 +182,9 @@ let handle_read ?keeper_name ~base_path ~tool_name ~start_time args : Tool_resul
   match tool_request args with
   | Error error -> make_input_err ~tool_name ~start_time error
   | Ok request ->
-    let lane = if request.source = Browser_surface.Automation then "automation" else "live" in
+    let automation = match request.route with
+      | Browser_lane.Automation_route -> true
+      | Browser_lane.Live_route _ -> false in
     match Browser_lane.Action.parse_frame_path args with
     | Error detail -> make_input_err ~tool_name ~start_time detail
     | Ok frame_path ->
@@ -195,7 +196,7 @@ let handle_read ?keeper_name ~base_path ~tool_name ~start_time args : Tool_resul
     else if scope_present && (frame_path <> [] || not (List.mem mode ["scene";"regions"])) then
       make_input_err ~tool_name ~start_time "scope supports top-document scene or regions only"
     else if frame_path <> [] || mode = "frames" || mode = "dialog" then
-      if lane <> "automation" then make_input_err ~tool_name ~start_time "frame and dialog reads require automation"
+      if not automation then make_input_err ~tool_name ~start_time "frame and dialog reads require automation"
       else (match get_int_opt args "tabId" with
         | None -> make_input_err ~tool_name ~start_time "contextual read requires an observed tabId"
         | Some tab_id when tab_id < 0 -> make_input_err ~tool_name ~start_time "tabId must be nonnegative"
@@ -208,7 +209,7 @@ let handle_read ?keeper_name ~base_path ~tool_name ~start_time args : Tool_resul
           match mode with
           | Error detail -> make_input_err ~tool_name ~start_time detail
           | Ok mode -> answer_to_result ~tool_name ~start_time
-              (Browser_lane.issue ~lane_name:lane
+              (Browser_lane.issue_automation
                 ~verb:(Browser_lane.Page_context {tab_id;frame_path;mode}) ~timeout_sec:default_timeout_sec))
     else
     let max_chars = max 1 (min 100_000 (get_int args "maxChars" 50_000)) in
@@ -237,38 +238,27 @@ let handle_read ?keeper_name ~base_path ~tool_name ~start_time args : Tool_resul
             match parsed with
             | Error detail -> make_input_err ~tool_name ~start_time detail
             | Ok (navigation_source, expected_url, scope) ->
-              match Browser_surface.resolved_target request with
-              | Error error -> selection_error ~base_path ~tool_name ~start_time ~source:request.source error
-              | Ok target ->
-              (* The read resolves again from this request; naming the client
-                 just resolved lets it find only that browser. *)
               match Browser_scene.read ?navigation_source ?expected_url
                 ~view:(if mode = "regions" then Browser_lane.Regions else Browser_lane.Content)
-                ?scope {request with tab_id=Some tab_id; client_id=Browser_lane.target_client_id target}
-                ~max_chars with
+                ?scope {request with tab_id=Some tab_id} ~max_chars with
               | Ok data -> Tool_result.make_ok ~tool_name ~start_time ~data ()
-              | Error detail -> make_workflow_err ~tool_name ~start_time detail)
+              | Error failure -> read_failure ~base_path ~tool_name ~start_time failure)
        | _ -> make_input_err ~tool_name ~start_time "scene requires an observed tabId")
     | "downloads" ->
-      if lane <> "automation" then make_input_err ~tool_name ~start_time "downloads require automation"
+      if not automation then make_input_err ~tool_name ~start_time "downloads require automation"
       else (match get_int_opt args "tabId" with
         | Some tab_id when tab_id >= 0 -> answer_to_result ~tool_name ~start_time
-            (Browser_lane.issue ~lane_name:lane ~verb:(Browser_lane.Page_downloads {tab_id}) ~timeout_sec:default_timeout_sec)
+            (Browser_lane.issue_automation ~verb:(Browser_lane.Page_downloads {tab_id}) ~timeout_sec:default_timeout_sec)
         | _ -> make_input_err ~tool_name ~start_time "downloads require an observed nonnegative tabId")
     | "screenshot" ->
       (match keeper_name, get_int_opt args "tabId" with
        | None, _ -> make_workflow_err ~tool_name ~start_time "screenshot requires an owning Keeper"
        | _, None -> make_input_err ~tool_name ~start_time "screenshot requires an observed tabId"
        | Some keeper_name, Some tab_id ->
-         match Browser_surface.resolved_target request with
-         | Error error -> selection_error ~base_path ~tool_name ~start_time ~source:request.source error
-         | Ok target ->
-         (* As for scenes: the capture finds only the browser just resolved. *)
-         let result = Result.bind
-             (Ok {request with tab_id=Some tab_id; client_id=Browser_lane.target_client_id target})
-             Browser_surface.capture in
-         let result = Result.bind result (Browser_screenshot.persist ~keeper_name) in
-         match result with
+         match Browser_surface.capture {request with tab_id=Some tab_id} with
+         | Error failure -> read_failure ~base_path ~tool_name ~start_time failure
+         | Ok data ->
+         match Browser_screenshot.persist ~keeper_name data with
          | Ok data -> Tool_result.make_ok ~tool_name ~start_time ~data ()
          | Error detail -> make_workflow_err ~tool_name ~start_time detail)
     | mode ->
@@ -279,10 +269,12 @@ let handle_read ?keeper_name ~base_path ~tool_name ~start_time args : Tool_resul
       match verb with
       | Error detail -> make_input_err ~tool_name ~start_time detail
       | Ok verb ->
-        (match Browser_surface.resolved_target request with
-         | Error error -> selection_error ~base_path ~tool_name ~start_time ~source:request.source error
-         | Ok target -> answer_to_result ~tool_name ~start_time
-           (Browser_lane.issue_for ~target ~verb ~timeout_sec:default_timeout_sec |> add_client target))
+        (match Browser_lane.resolve_target request.route with
+         | Error error -> selection_error ~base_path ~tool_name ~start_time error
+         | Ok target ->
+           match Browser_lane.issue_for ~target ~verb ~timeout_sec:default_timeout_sec with
+           | Error error -> selection_error ~base_path ~tool_name ~start_time error
+           | Ok answer -> answer_to_result ~tool_name ~start_time (add_client target answer))
 ;;
 
 (* Retention requires an owner that will commit the observation receipt. *)
@@ -312,45 +304,53 @@ let handle_read_with_retention ~base_path ?keeper_name ~tool_name ~start_time ar
   |> retain_read_result ~base_path ~tool_name ~start_time args
 ;;
 
-let handle_act_with_phase ?upload_paths ~tool_name ~start_time args =
+let handle_act_with_phase ?upload_paths ~base_path ~tool_name ~start_time args =
   let pre_error detail =
     make_workflow_err ~tool_name ~start_time detail, Tool_result.Proven_pre_effect in
   let args = match args with
     | `Assoc fields when not (List.mem_assoc "lane" fields) -> `Assoc (("lane",`String "automation") :: fields)
     | _ -> args in
-  match lane_of ~tool_name ~start_time args, Browser_lane.Action.parse args with
+  match route_of ~tool_name ~start_time args, Browser_lane.Action.parse args with
   | Error error, _ -> error, Tool_result.Proven_pre_effect
   | _, Error detail -> make_input_err ~tool_name ~start_time detail, Tool_result.Proven_pre_effect
   | Ok _, Ok (Browser_lane.Action.On_tab {interaction=Upload _;_}) when upload_paths = None ->
     pre_error "upload requires an authoritative Keeper file context"
-  | Ok lane, Ok action ->
+  | Ok route, Ok action ->
     let action = match action, upload_paths with
       | Browser_lane.Action.On_tab ({interaction=Upload {selector;_};_} as target), Some paths ->
         Browser_lane.Action.On_tab {target with interaction=Upload {selector;paths}}
       | _ -> action in
-    let answer = Browser_lane.issue ~lane_name:lane ~verb:(Browser_lane.Page_act action) ~timeout_sec:60. in
-    let phase = match answer with
-      | Browser_lane.Rejected_before_effect _ | Browser_lane.Lane_absent -> Tool_result.Proven_pre_effect
-      | Browser_lane.Refused _ when lane = "live" -> Tool_result.Proven_pre_effect
-      | Browser_lane.Refused _ | Browser_lane.Timed_out | Browser_lane.Answered _ -> Tool_result.Effect_outcome_unknown in
-    answer_to_result ~tool_name ~start_time answer, phase
+    let issued = Result.bind (Browser_lane.resolve_target route) (fun target ->
+      Browser_lane.issue_for ~target ~verb:(Browser_lane.Page_act action) ~timeout_sec:60.) in
+    match issued with
+    | Error error ->
+      selection_error ~base_path ~tool_name ~start_time error, Tool_result.Proven_pre_effect
+    | Ok answer ->
+      let phase = match answer, route with
+        | (Browser_lane.Rejected_before_effect _ | Browser_lane.Lane_absent), _ -> Tool_result.Proven_pre_effect
+        | Browser_lane.Refused _, Browser_lane.Live_route _ -> Tool_result.Proven_pre_effect
+        | Browser_lane.Refused _, Browser_lane.Automation_route
+        | (Browser_lane.Timed_out | Browser_lane.Answered _), _ -> Tool_result.Effect_outcome_unknown in
+      answer_to_result ~tool_name ~start_time answer, phase
 ;;
-let handle_act ~tool_name ~start_time args = fst (handle_act_with_phase ~tool_name ~start_time args)
+let handle_act ~base_path ~tool_name ~start_time args =
+  fst (handle_act_with_phase ~base_path ~tool_name ~start_time args)
 
 let handle_interact_with_phase ~base_path ~tool_name ~start_time args =
   match Browser_interaction.parse args with
   | Error error -> make_input_err ~tool_name ~start_time error, Tool_result.Proven_pre_effect
   | Ok request ->
-    let lane_name = match request.source with Browser_surface.Live -> "live" | Automation -> "automation" in
-    (match Browser_lane.resolve_target ~lane_name ~client_id:request.client_id with
+    let issued = Result.bind (Browser_lane.resolve_target request.route) (fun target ->
+      Browser_lane.issue_for ~target
+        ~verb:(Browser_lane.Page_interact {tab_id=request.tab_id;
+          expected_url=request.expected_url; action=request.action})
+        ~timeout_sec:default_timeout_sec
+      |> Result.map (fun answer -> target, answer)) in
+    (match issued with
      | Error error ->
-       selection_error ~base_path ~tool_name ~start_time ~source:request.source error,
+       selection_error ~base_path ~tool_name ~start_time error,
        Tool_result.Proven_pre_effect
-     | Ok target ->
-       let answer = Browser_lane.issue_for ~target
-         ~verb:(Browser_lane.Page_interact {tab_id=request.tab_id;
-           expected_url=request.expected_url; action=request.action})
-         ~timeout_sec:default_timeout_sec in
+     | Ok (target, answer) ->
        let phase = match answer with
          | Browser_lane.Rejected_before_effect _ | Browser_lane.Lane_absent -> Tool_result.Proven_pre_effect
          | Browser_lane.Answered (`Assoc fields) when

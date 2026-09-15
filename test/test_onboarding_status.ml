@@ -132,7 +132,9 @@ let a_load_failure_says_what_failed () = with_workspace @@ fun base ->
        (message Onboarding_status.Model_connection dangling)
        "ollama_cloud.deepseek-v4-flash")
 
-let browser_lane_fixture ?(server_argument="") ?(connection_port="") () f =
+(* The launcher and, when [declared], the launch.json install-host.sh writes
+   beside it. *)
+let browser_lane_fixture ?(declared=true) ?(connection_port="") () f =
   with_workspace @@ fun base ->
   let root = Filename.concat base ".masc" in
   List.iter (fun path -> Unix.mkdir path 0o700)
@@ -143,7 +145,10 @@ let browser_lane_fixture ?(server_argument="") ?(connection_port="") () f =
       ("[server]\nhttp_port = " ^ connection_port ^ "\n");
   write (Filename.concat (Filename.concat root "browser-lane") "host/launch")
     ("#!/bin/sh\nexec /unused/masc-browser-host --base-path " ^ base
-     ^ " --token-file /unused/token" ^ server_argument ^ " \"$@\"\n");
+     ^ " --token-file /unused/token --server http://127.0.0.1:8935 \"$@\"\n");
+  if declared then
+    write (Filename.concat (Filename.concat root "browser-lane") "host/launch.json")
+      "{\"destination\":\"workspace_connection\"}\n";
   f base
 
 let browser_lane_absent_launcher_is_unobserved () = with_workspace @@ fun base ->
@@ -153,40 +158,34 @@ let browser_lane_absent_launcher_is_unobserved () = with_workspace @@ fun base -
     (List.find_opt (fun (c : Onboarding_status.check) -> c.id = Onboarding_status.Browser_lane)
        observed.Onboarding_status.checks = None)
 
-let browser_lane_drift_is_invalid_and_names_both_ports () =
-  browser_lane_fixture
-    ~server_argument:" --server http://127.0.0.1:8935"
-    ~connection_port:"64850" () @@ fun base ->
+(* The fixture launcher's shell text names a port; only the declaration beside
+   it says where the host takes its address from, so without one the doctor
+   cannot vouch for that host and says to install it again. *)
+let browser_lane_undeclared_launcher_is_invalid_and_says_reinstall () =
+  browser_lane_fixture ~declared:false ~connection_port:"64850" () @@ fun base ->
   let observed = Onboarding_status.inspect ~base_path:(Some base) in
-  check bool "a launcher aimed at a stale port is invalid" true
+  check bool "a launcher with no declaration is invalid" true
     (condition Onboarding_status.Browser_lane observed = Onboarding_status.Invalid);
-  check bool "the stale port is named" true
-    (String_util.contains_substring (message Onboarding_status.Browser_lane observed) "8935");
-  check bool "the workspace port is named" true
-    (String_util.contains_substring (message Onboarding_status.Browser_lane observed) "64850")
+  check bool "the missing declaration is named" true
+    (String_util.contains_substring (message Onboarding_status.Browser_lane observed) "launch.json");
+  check bool "the operator is told to run the installer again" true
+    (String_util.contains_substring (message Onboarding_status.Browser_lane observed)
+       "install-host.sh")
 
-let browser_lane_aligned_launcher_is_satisfied () =
-  browser_lane_fixture
-    ~server_argument:" --server http://127.0.0.1:64850"
-    ~connection_port:"64850" () @@ fun base ->
-  let observed = Onboarding_status.inspect ~base_path:(Some base) in
-  check bool "a launcher aimed at the workspace port is satisfied" true
-    (condition Onboarding_status.Browser_lane observed = Onboarding_status.Satisfied)
-
-let browser_lane_dynamic_launcher_is_satisfied () =
+let browser_lane_declared_launcher_follows_the_workspace () =
   browser_lane_fixture ~connection_port:"64850" () @@ fun base ->
   let observed = Onboarding_status.inspect ~base_path:(Some base) in
-  check bool "a launcher without --server follows the workspace" true
-    (condition Onboarding_status.Browser_lane observed = Onboarding_status.Satisfied)
+  check bool "a declared launcher follows the workspace" true
+    (condition Onboarding_status.Browser_lane observed = Onboarding_status.Satisfied);
+  check bool "the workspace port is named" true
+    (String_util.contains_substring (message Onboarding_status.Browser_lane observed) "64850")
 
 (* The front door opened imp's history only when no check at all was Invalid, so
    a browser lane launcher left on an old port sent an operator with a working
    imp back to "choose a workspace" on every bare `masc` (measured 2026-09-15:
    launcher on 64850, workspace connection on 61372). *)
 let a_stale_browser_lane_does_not_hold_imp_history_closed () =
-  browser_lane_fixture
-    ~server_argument:" --server http://127.0.0.1:8935"
-    ~connection_port:"64850" () @@ fun base ->
+  browser_lane_fixture ~declared:false ~connection_port:"64850" () @@ fun base ->
   let root = Filename.concat base ".masc" in
   let config = Filename.concat root "config" in
   let keepers = Filename.concat config "keepers" in
@@ -252,12 +251,10 @@ let () = run "Onboarding observations"
                    a_load_failure_says_what_failed;
                  test_case "an uninstalled browser lane is not observed" `Quick
                    browser_lane_absent_launcher_is_unobserved;
-                 test_case "a stale browser lane port is invalid and names both ports" `Quick
-                   browser_lane_drift_is_invalid_and_names_both_ports;
-                 test_case "a browser lane aimed at the workspace port is satisfied" `Quick
-                   browser_lane_aligned_launcher_is_satisfied;
-                 test_case "a browser lane without --server follows the workspace" `Quick
-                   browser_lane_dynamic_launcher_is_satisfied;
+                 test_case "an undeclared browser lane launcher is invalid and says reinstall" `Quick
+                   browser_lane_undeclared_launcher_is_invalid_and_says_reinstall;
+                 test_case "a declared browser lane launcher follows the workspace" `Quick
+                   browser_lane_declared_launcher_follows_the_workspace;
                  test_case "a stale browser lane does not hold imp's history closed" `Quick
                    a_stale_browser_lane_does_not_hold_imp_history_closed;
                  test_case "only the browser lane is advisory" `Quick

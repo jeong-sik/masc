@@ -46,11 +46,18 @@ The launcher carries file paths, never the token value.
 `--base-path` defaults to the existing `MASC_BASE_PATH` setting. The launcher
 names no server address. The host reads the port from
 `<base-path>/.masc/config/connection.toml`, which the MASC server rewrites each
-time it starts listening. When a poll fails, the host reads that file again
-before the next poll, so a server that restarted on another port is found
-without reinstalling. `MASC_HTTP_BASE_URL` or `MASC_HTTP_PORT` in the browser's
-environment still take precedence; `masc-browser-host --server URL` fixes the
-address for a manual run and is never re-read.
+time it starts listening and `masc workspace-connection --save` also writes.
+The file is the desired port, not proof that a server is there. When a poll
+fails, the host reads the file again and moves to the port it names only when
+its current server no longer answers `/browser-lane/ping` and the new port
+does; otherwise it retries where it is. `MASC_HTTP_BASE_URL` or
+`MASC_HTTP_PORT` in the browser's environment fixes the address instead, as
+`masc-browser-host --server URL` does for a manual run; neither is re-read.
+The installer also writes `launch.json` beside the launcher, which `masc
+doctor` and the browser tools read to say where the host takes its address
+from. If a host was installed before `launch.json` existed, its launcher may
+fix a port: run the installer again for that workspace and reload the
+extension.
 `--token-file` defaults to `<base-path>/.masc/browser-lane/token`; relative
 paths resolve against the base path. For a browser launched by the desktop,
 use explicit installer arguments so its shell environment is unnecessary.

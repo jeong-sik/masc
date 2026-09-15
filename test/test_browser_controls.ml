@@ -135,7 +135,7 @@ let test_pre_effect_tool_outcome () = with_upload_context (fun config meta -> fi
     let denied = invoke upload in
     check bool "outside upload is pre-effect" true (denied.failure_effect_disposition = Tool_result.Proven_pre_effect);
     check int "denied upload sends no browser commands, including clear" 0 (List.length !calls);
-    let _,phase = Masc.Tool_misc_browser_lane.handle_act_with_phase
+    let _,phase = Masc.Tool_misc_browser_lane.handle_act_with_phase ~base_path:config.base_path
         ~tool_name:"masc_browser_act" ~start_time:0.0 (`Assoc upload) in
     check bool "generic upload requires owner" true (phase = Tool_result.Proven_pre_effect);
     check int "generic upload sends no browser commands" 0 (List.length !calls))))

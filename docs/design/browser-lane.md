@@ -8,6 +8,10 @@ for the WebDriver endpoint configuration.
 The live extension bridges typed tab reads, viewport capture and explicit-tab interaction commands through
 native messaging. Its host polls `/browser-lane/poll` and returns results to
 `/browser-lane/result`; these transport endpoints require the lane token.
+`/browser-lane/ping` answers `{ok:true}` to the same token without registering
+a client. After a failed request, a host that takes its port from the workspace
+connection moves to a newly named port only when its current server no longer
+answers the ping and the new address does.
 They accept only `live`. Automation requires the configured in-process
 WebDriver executor and reports `Lane_absent` when it is not installed.
 Session management and direct URL navigation are automation-only. The live lane
@@ -140,12 +144,14 @@ returns `no_live_client`. An explicit missing/retired ID returns
 requests omit `clientId` and return it as null.
 
 When a Keeper browser tool meets `no_live_client` or
-`selected_client_disconnected`, its result also carries `host`: the installed
-launcher's server argument (`follows_workspace`, `pinned` with
-`launcher_port`, `unusable_origin`, `unreadable` or `not_installed`), the
-`workspace_port` connection.toml names, and the same verdict and message
-`masc doctor` reports for the browser lane. The Keeper cannot change either
-side, so the retry text names what the operator does.
+`selected_client_disconnected`, before or after its target was resolved, its
+result also carries `host`: the installed launcher (`follows_workspace` from
+the `launch.json` the installer writes, `undeclared`, `unreadable` or
+`not_installed`), the `workspace_port` connection.toml names, the
+`serving_port` this server listens on, and the same verdict and message
+`masc doctor` reports for the browser lane. The verdict is `aligned` only when
+the workspace port is the serving port. The Keeper cannot change either side,
+so the retry text names what the operator does.
 
 Tab IDs belong to their selected client. The operator read resolves that client
 once before listing tabs and keeps it for the subsequent page request. Successful

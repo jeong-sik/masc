@@ -5084,6 +5084,7 @@
 (include stanzas/test_tui_overview_pulse.inc)
 (include stanzas/test_tui_overview_transport_row.inc)
 (include stanzas/test_tui_lane_addon_reading.inc)
+(include stanzas/test_tui_lane_heading_keeps_its_reading.inc)
 (include stanzas/test_tui_mermaid.inc)
 (include stanzas/test_tui_keeper_deletions_hints.inc)
 

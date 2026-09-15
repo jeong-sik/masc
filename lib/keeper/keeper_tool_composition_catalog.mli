@@ -13,6 +13,19 @@ type expected_value =
   | Table_array_value
   | Array_value
 
+(** Why an [enum] member cannot be offered to a model. A provider that
+    cannot carry [enum] writes the members unquoted into the parameter's
+    description, joined by
+    [Llm_provider.Backend_openai_serialize.enum_vocabulary_separator]. There
+    an empty member shows as nothing, surrounding whitespace is lost, a line
+    break splits the text, and a member containing the separator reads as two
+    members, while the call is still checked against the exact member. *)
+type enum_value_fault =
+  | Empty_value
+  | Padded_value
+  | Line_break_in_value
+  | Separator_in_value
+
 type error =
   | Toml_syntax of string
   | Empty_catalog
@@ -77,10 +90,10 @@ type error =
       ; type_name : string
       }
   | Empty_param_enum of { path : string list }
-  | Empty_param_enum_value of { path : string list }
-  | Padded_param_enum_value of
+  | Unsendable_param_enum_value of
       { path : string list
       ; value : string
+      ; fault : enum_value_fault
       }
   | Duplicate_param_enum_value of
       { path : string list
@@ -113,8 +126,8 @@ type execution_mode =
 
     [Enum_param members] is a closed set of strings, written in the document
     as [type = "string"] with [enum = [...]]. The list is non-empty and free of
-    repeats, and no member is empty or has leading or trailing whitespace;
-    each of these is a load error. *)
+    repeats, and every member can be sent back exactly
+    ({!enum_value_fault}); each violation is a load error. *)
 type param_type =
   | String_param
   | Integer_param

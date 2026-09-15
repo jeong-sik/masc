@@ -5463,19 +5463,11 @@ value = { query = "must-not-queue" }
 ;;
 
 (* #30220 made skills the only composition source: [make_tools] reads
-   [Keeper_skill_catalog.composition_entries], not a bare catalog. The fixtures
-   here are still composition TOML -- what changed is who carries it to the
-   bundle -- so this wraps one in the skill document that now does. The
+   [Keeper_skill_catalog.composition_entries], not a bare catalog. A skill
+   document, fixture or shipped, becomes the catalog [make_tools] reads. The
    directory has to match the frontmatter name, which has to match the
    composition's own name; that is what decides the [keeper_compose_*] tool. *)
-let skill_catalog_of_composition ~name toml =
-  let document =
-    Printf.sprintf
-      "---\nname: %s\ndescription: %s\n---\n\nComposition fixture.\n\n```toml composition\n%s```\n"
-      name
-      name
-      toml
-  in
+let skill_catalog_of_document ~name document =
   let config_text =
     {|[skills]
 resource-read-max-bytes = 65536
@@ -5523,6 +5515,18 @@ access = "read-write"
       "composition fixture %S was rejected as a skill: %s"
       name
       (Masc.Keeper_skill_catalog.error_to_string diagnostic.error)
+;;
+
+(* The fixtures here are composition TOML, wrapped in the skill document that
+   carries a composition to the bundle. *)
+let skill_catalog_of_composition ~name toml =
+  skill_catalog_of_document
+    ~name
+    (Printf.sprintf
+       "---\nname: %s\ndescription: %s\n---\n\nComposition fixture.\n\n```toml composition\n%s```\n"
+       name
+       name
+       toml)
 ;;
 
 let one_node_terminal_composition =
@@ -5641,6 +5645,30 @@ name = "query"
 [compositions.nodes.input.fields.value]
 kind = "param"
 name = "query"
+|}
+;;
+
+let enum_param_memory_composition =
+  {|[[compositions]]
+name = "memory-by-mode"
+execution = "inline"
+
+[[compositions.params]]
+name = "mode"
+type = "string"
+enum = ["scene", "regions"]
+description = "Which word to search durable memory for."
+
+[[compositions.nodes]]
+id = "search"
+tool = "keeper_memory_search"
+[compositions.nodes.input]
+kind = "object"
+[[compositions.nodes.input.fields]]
+name = "query"
+[compositions.nodes.input.fields.value]
+kind = "param"
+name = "mode"
 |}
 ;;
 
@@ -6756,6 +6784,102 @@ let test_composition_plan_failure_exposes_typed_cause () =
            "typed plan failure"
            "input_validation_failed"
            Yojson.Safe.Util.(member "error" cause |> member "kind" |> to_string))
+;;
+
+(* A turn calls a composition tool through Agent-Core's own tool execution,
+   which checks the call against the tool's input schema before any handler
+   runs. *)
+let call_through_agent_core tools name input =
+  match
+    Agent_core.Agent_tools.find_and_execute_tool
+      ~context:(Agent_core.Context.create_sync ())
+      ~tools
+      ~hooks:Agent_core.Hooks.empty
+      ~event_bus:None
+      ~tracer:Agent_core.Tracing.null
+      ~agent_name:"composition-enum-probe"
+      ~invocation:
+        (composition_invocation
+           ~completion:Agent_core.Tool_contract.Continue_after_success)
+      name
+      input
+  with
+  | Ok result -> result
+  | Error (Agent_core.Agent_tools.Hook_execution_failed { detail; _ }) ->
+    failf "a composition call with no hooks failed in a hook: %s" detail
+;;
+
+let check_refused_before_handler ~label (result : Agent_core.Agent_tools.tool_execution_result) =
+  match result.outcome with
+  | Agent_core.Types.Tool_failed { failure_kind = Agent_core.Types.Validation_error; _ } -> ()
+  | Agent_core.Types.Tool_failed _ | Agent_core.Types.Tool_succeeded ->
+    failf "%s was not refused by the input schema check: %s" label result.content
+;;
+
+(* The materialized composition tool carries its enum into the schema
+   Agent-Core checks, so a value outside the members never reaches the
+   composition handler, while a member does and is bound into the plan. *)
+let test_composition_enum_param_is_refused_before_the_handler () =
+  with_exec_fixture "composition-enum-param-refusal"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let tool_name = "keeper_compose_memory-by-mode" in
+       let tools =
+         Masc.Keeper_tools_agent_core_bundle.For_testing.make_tools
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ~skill_catalog:
+             (skill_catalog_of_composition
+                ~name:"memory-by-mode"
+                enum_param_memory_composition)
+           ()
+       in
+       let member_call =
+         call_through_agent_core tools tool_name (`Assoc [ "mode", `String "regions" ])
+       in
+       let payload = parse_json member_call.content in
+       check string
+         "a member reaches the composition handler"
+         tool_name
+         Yojson.Safe.Util.(payload |> member "composition_tool" |> to_string);
+       check_refused_before_handler
+         ~label:"a string outside the members"
+         (call_through_agent_core tools tool_name (`Assoc [ "mode", `String "text" ]));
+       check_refused_before_handler
+         ~label:"a non-string value"
+         (call_through_agent_core tools tool_name (`Assoc [ "mode", `Int 1 ])))
+;;
+
+(* The two shipped browser compositions offer scene and regions; BrowserRead
+   itself also takes text, so only the composition's own schema can refuse it. *)
+let test_shipped_browser_composition_refuses_text_mode skill_name arguments () =
+  with_exec_fixture ("composition-enum-" ^ skill_name)
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let document =
+         In_channel.with_open_bin
+           (Filename.concat (Filename.concat "../skills" skill_name) "SKILL.md")
+           In_channel.input_all
+       in
+       let tools =
+         Masc.Keeper_tools_agent_core_bundle.For_testing.make_tools
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ~skill_catalog:(skill_catalog_of_document ~name:skill_name document)
+           ()
+       in
+       let tool_name = "keeper_compose_" ^ skill_name in
+       (match find_tool_by_name tools tool_name with
+        | Some _ -> ()
+        | None -> failf "%s was not materialized from its shipped skill" tool_name);
+       check_refused_before_handler
+         ~label:"mode text"
+         (call_through_agent_core
+            tools
+            tool_name
+            (`Assoc (arguments @ [ "mode", `String "text" ]))))
 ;;
 
 let test_composition_read_failure_preserves_same_turn
@@ -9100,6 +9224,21 @@ let () =
         test_terminal_composition_materializes_terminal_completion;
       test_case "composition failure exposes typed plan cause" `Quick
         test_composition_plan_failure_exposes_typed_cause;
+      test_case "composition enum param is refused before the handler" `Quick
+        test_composition_enum_param_is_refused_before_the_handler;
+      test_case "shipped navigate-read refuses mode text" `Quick
+        (test_shipped_browser_composition_refuses_text_mode
+           "browser-navigate-read"
+           [ "tabId", `Int 7; "url", `String "https://example.org/start" ]);
+      test_case "shipped live-follow-read refuses mode text" `Quick
+        (test_shipped_browser_composition_refuses_text_mode
+           "browser-live-follow-read"
+           [ "clientId", `String "11111111-1111-4111-8111-111111111111"
+           ; "tabId", `Int 7
+           ; "documentId", `String "observed"
+           ; "nodeId", `String "link"
+           ; "expectedUrl", `String "https://example.org/before"
+           ]);
       test_case "durable ordinary read failure permits same-turn read retry" `Quick
         (test_composition_read_failure_preserves_same_turn ~observe:true ~break_receipt:false ~terminal:false ~unknown_write:false);
       test_case "no observer cannot authorize read recovery" `Quick

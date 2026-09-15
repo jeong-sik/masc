@@ -108,3 +108,8 @@ val build_openai_tool_json : Yojson.Safe.t -> Yojson.Safe.t
     providers whose function-tool validation rejects those JSON-Schema
     constructs. The dispatcher's [[params]] validation stays authoritative. *)
 val conformant_tool_json : Yojson.Safe.t -> Yojson.Safe.t
+
+(** Joins enum members when {!conformant_tool_json} writes them into a
+    parameter's description as ["one of: a | b"]. The members are written
+    unquoted, so a member that contains this text reads as two members. *)
+val enum_vocabulary_separator : string

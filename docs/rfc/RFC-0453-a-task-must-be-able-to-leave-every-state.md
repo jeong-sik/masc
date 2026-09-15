@@ -236,6 +236,20 @@ RFC-0445 의 `Operator_must_act (Fix_keeper_record)` 와 같은 값이다. 재�
 **(5) 되돌림 자체가 실패하면.** backlog 버전 충돌 같은 일시적 실패는 의무를 남긴다. 다음 회차에
 다시 시도한다 — 지금 큐 쓰기 실패와 같은 취급이다.
 
+## 3.7 더 그려 본 경우
+
+| 경우 | 지금이면 | 이 RFC 의 답 |
+|---|---|---|
+| 의무가 남아 있는데 Task 가 지워졌다 (`task_deletion_receipts`) | 되돌림이 `NotFound` 로 실패 → 매 회차 재시도 | 되돌릴 Task 가 없으면 의무만 끝낸다 |
+| 운영자가 먼저 복구해 이미 `Todo` | `Release` 가 `Invalid_transition` | 되돌림은 `Claimed`/`InProgress` 이고 담당자가 그 이름일 때만. 그 밖에는 의무만 끝낸다 |
+| 되돌림은 됐는데 ack 전에 죽었다 | 다음 회차에 같은 일을 다시 | 위 규칙이 그대로 적용돼 두 번째는 의무만 끝낸다. 멱등하다 |
+| 같은 Task 가 두 번 거절돼 의무가 둘 | 둘 다 재시도 | 첫 번째가 `Todo` 로 돌리고, 두 번째는 의무만 끝낸다 |
+| 나중에 같은 이름의 Keeper 가 생긴다 | — | 그때부터 route 는 `Keeper` 다. 이미 되돌아간 Task 는 `Todo` 로 남고, 그 Keeper 가 집으면 된다 |
+| 살아 있는 Keeper 를 `No_keeper` 로 잘못 보는가 | — | 확인되지 않았다. Keeper 는 `meta.name` 으로 claim 하고(`keeper_tool_shared_runtime.ml:284`), route 도 같은 이름의 meta 경로를 본다 |
+| 전달에 성공한 직후 그 Keeper 가 지워진다 | 큐의 stimulus 를 아무도 읽지 않는다 | Keeper 삭제 경로가 자기 Task 를 `Release` 하므로 Task 는 살아난다. 잃는 것은 알림 한 건이고 사유는 Task 에 남아 있다 |
+| RFC-0446(계약 없는 제출 거절, Draft)이 들어온다 | 판정이 그 제출을 건너뛰어 `AwaitingVerification` 에 남는다 | 같은 투영이 필요하다. 그 Task 의 다음 행위자는 제출자이고, 제출자가 없으면 운영자다. 지금은 미구현이라 해당 Task 0건 |
+| 운영자 목록이 71건처럼 길다 | — | 표면은 개수와 상위 몇 건을 그린다. 목록 자체는 도구로 본다 |
+
 ## 4. 하지 않는 것
 
 - 타이머, 자동 취소, 재시도 상한, "N일 지나면 회수".

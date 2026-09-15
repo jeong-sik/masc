@@ -47,6 +47,21 @@ class Setup(unittest.TestCase):
                 self.assertEqual(resolved.returncode, 0, resolved.stderr)
                 self.assertEqual(json.loads(resolved.stdout)['base_path'], str(expected))
 
+    def test_scripted_setup_initializes_without_recording_the_default(self):
+        # A scripted `setup --no-tui` (no terminal) prepares the workspace but
+        # leaves the machine's default alone; only a person on a terminal
+        # records one. Model validation fails here with no model configured,
+        # which is after initialization.
+        assert BINARY is not None
+        with tempfile.TemporaryDirectory(prefix='masc-scripted-setup-') as tmp:
+            root = Path(tmp)
+            workspace = root / 'workspace'
+            env = {'PATH': '/usr/bin:/bin', 'HOME': tmp, 'XDG_CONFIG_HOME': str(root / 'config')}
+            subprocess.run([BINARY, 'setup', '--base-path', str(workspace), '--no-tui', '--port', '1'],
+                           env=env, capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
+            self.assertTrue((workspace / '.masc/config').is_dir())
+            self.assertFalse((root / 'config/masc/default-base-path').exists())
+
     def test_recording_does_not_overwrite_a_preexisting_partial_file(self):
         assert BINARY is not None
         with tempfile.TemporaryDirectory(prefix='masc-default-partial-') as tmp:

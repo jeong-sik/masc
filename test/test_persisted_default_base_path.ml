@@ -26,6 +26,7 @@ let workspace_with_masc_dir () =
   Sys.remove dir;
   Unix.mkdir dir 0o700;
   Unix.mkdir (Filename.concat dir Common.masc_dirname) 0o700;
+  Unix.mkdir (Filename.concat (Filename.concat dir Common.masc_dirname) "config") 0o700;
   dir
 
 let recorded_path outcome =
@@ -35,6 +36,16 @@ let recorded_path outcome =
   | EC.Refused_under_test ->
     fail "this config home is a temp dir, not the operator's, so it is writable"
   | EC.Record_failed { record; reason } -> failf "recording %s failed: %s" record reason
+  | EC.Not_a_workspace { path } -> failf "%s was expected to hold .masc/config" path
+
+(* A record left behind by a workspace that has since lost its .masc/config.
+   Written by hand because the writer refuses such a path. *)
+let write_record config_home path =
+  let dir = Filename.concat config_home "masc" in
+  if not (Sys.file_exists dir) then Unix.mkdir dir 0o700;
+  Out_channel.with_open_bin (Filename.concat dir "default-base-path") (fun ch ->
+    output_string ch (path ^ "\n"));
+  path
 
 (* The reason this suite points XDG_CONFIG_HOME at a temp dir. A test binary
    that lets the write land under the real HOME leaves its sandbox path as the
@@ -57,7 +68,9 @@ let test_a_test_binary_does_not_write_the_operators_default () =
            failf "a test binary wrote %s as the operator's default" path
          | EC.No_record_location -> fail "HOME is set, so a location exists"
          | EC.Record_failed { record; reason } ->
-           failf "refused for the wrong reason: %s (%s)" record reason))
+           failf "refused for the wrong reason: %s (%s)" record reason
+         | EC.Not_a_workspace { path } ->
+           failf "refused for the wrong reason: %s holds no .masc/config" path))
 
 let test_record_then_read () =
   with_config_home (fun config_home ->
@@ -78,11 +91,11 @@ let test_record_then_read () =
       failf "%s is a temp config home, not the operator's" record)
 
 let test_a_record_without_a_masc_dir_is_stale_not_absent () =
-  with_config_home (fun _ ->
+  with_config_home (fun config_home ->
     let gone = Filename.temp_file "masc-gone" "" in
     Sys.remove gone;
     Unix.mkdir gone 0o700;
-    let written = recorded_path (EC.record_default_base_path gone) in
+    let written = write_record config_home (Unix.realpath gone) in
     match EC.persisted_default_base_path () with
     | EC.Stale { record; recorded_path } ->
       check bool "names the record file" true (Filename.basename record = "default-base-path");
@@ -94,6 +107,28 @@ let test_a_record_without_a_masc_dir_is_stale_not_absent () =
         (Option.map snd (EC.base_path_source_opt ()))
     | EC.Usable { base_path; _ } ->
       failf "%s has no %s directory" base_path Common.masc_dirname
+    | EC.No_record -> fail "a record exists; it just does not name a workspace"
+    | EC.Unread_under_test { record } ->
+      failf "%s is a temp config home, not the operator's" record)
+
+(* <home>/.masc exists on machines that only keep user skills there. A record
+   naming such a directory must not select it as a workspace. *)
+let test_a_record_with_masc_but_no_config_is_stale () =
+  with_config_home (fun config_home ->
+    let skills_only = Filename.temp_file "masc-skills-home" "" in
+    Sys.remove skills_only;
+    Unix.mkdir skills_only 0o700;
+    Unix.mkdir (Filename.concat skills_only Common.masc_dirname) 0o700;
+    check bool "the writer refuses a directory without .masc/config" true
+      (match EC.record_default_base_path skills_only with
+       | EC.Not_a_workspace _ -> true
+       | EC.Recorded _ | EC.No_record_location | EC.Refused_under_test
+       | EC.Record_failed _ -> false);
+    let _ = write_record config_home (Unix.realpath skills_only) in
+    match EC.persisted_default_base_path () with
+    | EC.Stale _ -> ()
+    | EC.Usable { base_path; _ } ->
+      failf "%s holds .masc but no .masc/config, so it is not a workspace" base_path
     | EC.No_record -> fail "a record exists; it just does not name a workspace"
     | EC.Unread_under_test { record } ->
       failf "%s is a temp config home, not the operator's" record)
@@ -206,6 +241,10 @@ let () =
             "a record without a .masc dir is stale, not absent"
             `Quick
             test_a_record_without_a_masc_dir_is_stale_not_absent
+        ; test_case
+            "a record with .masc but no config is stale"
+            `Quick
+            test_a_record_with_masc_but_no_config_is_stale
         ; test_case
             "explicit input wins over the record"
             `Quick

@@ -83,9 +83,13 @@ polisher 3, code-reviewer 2, analyst 1, lane-smith 1, pr-updater 1, codex-mcp-cl
 `Evidence_outside_worker_playground`). 일은 git worktree 와 PR 에서 끝나는데, 증거는 거기서
 읽을 수 없다.
 
-그 결과가 포기 청구의 내용이다. 62건 중 **16건이 "PR 로 main 에 이미 병합됐지만 계약이 요구하는
+그 결과가 포기 청구의 내용이다. 63건 중 **46건이 "PR 로 main 에 이미 병합됐지만 계약이 요구하는
 증거를 sandbox 에서 보여 줄 수 없다"** 는 취지다 (예: task-361 → PR #30715, task-366 → PR #30633).
-**26건은 사유 note 가 아예 없다.**
+
+사유 자체는 63건 모두 남아 있다. 짧은 것이 131자, 중앙값 442자다. 다만 그 문장이 있는 곳이
+Board 글 하나뿐이다 — 검증 기록은 사유 사본을 일부러 두지 않는다
+(`verification_protocol.ml:36` "The record keeps no copy of that sentence"). Task 에도, 기록에도
+없으니 운영자가 목록에서 볼 수 있는 값이 아니다.
 
 ## 2. 원칙
 
@@ -179,14 +183,26 @@ task_awaiting_operator =
 - `masc_dashboard` 의 `Dashboard_attention` — 감지 규칙이 둘뿐이다(멈춘 에이전트, 쉬는 에이전트).
   위 두 생성자를 규칙으로 추가하고, 권하는 행동에 복구 도구 이름을 싣는다.
 
-### 3.4 포기 청구는 사유를 요구한다
+### 3.4 포기 청구의 사유를 운영자가 읽을 수 있는 자리에 둔다
 
-62건 중 26건은 사유가 없다. 운영자는 근거 없이 승인 여부를 정해야 한다.
+이 초안은 처음에 "포기 청구에 사유를 요구한다" 를 제안했다. **틀렸다.** 그 요구는 이미 있다.
+`transition_task_r` 이 사유 없는 포기 청구를 거절한다(`workspace_task_transitions.ml:360`,
+2026-09-04 #33046). 실측해 보니 63건 전부가 사유를 갖고 있다. 앞선 초안의 "26건은 사유가 없다" 는
+검증 기록의 `submitted_evidence` 를 센 값이고, 포기 청구의 사유는 거기 쓰이지 않는다.
 
-`Cancel` 전이는 이미 "혼자 끝낼 수 없다" 는 계약을 갖고 있다. 여기에 **비어 있지 않은 사유**를
-요구한다. 완료 판정이 거절 사유를 요구하는 것(`Verdict_rejection_reason_required`)과 같은 모양이고,
-계약 없는 제출을 경계에서 거절하는 RFC-0446 과 같은 자리다. 새 상태가 아니라 이미 있는 인자의
-파싱이다.
+남는 문제는 요구가 아니라 **자리**다. 사유는 `visibility: unlisted` 인 Board 글 본문 한 줄에만 있다.
+
+- Task 레코드에 없다 — `handoff_context` 는 이 경로에서 안 쓰인다.
+- 검증 기록에 없다 — 사본을 두지 않는 것이 명시된 설계다.
+- 그래서 `backlog.json` 만 읽는 어떤 화면도 사유를 못 그린다.
+
+§3.3 투영의 `Cancel_claim` 은 사유를 `string option` 으로 들고 있는데, 그 값을 채우려면 Board 글을
+찾아 본문에서 잘라내야 한다 — 문자열 파싱이다. 그러지 말고 **제출 시점에 기록이 사유 사본을
+갖게 한다.** `Cancellation_reason { reason }` 은 이미 typed 로 전달 단계까지 온다. 기록에 그 필드를
+쓰고, 투영은 기록에서 읽는다. Board 글은 지금처럼 남는다 — 사람이 읽는 알림이지 조회 대상이 아니다.
+
+기존 63건은 기록에 사유가 없다. 마이그레이션하지 않는다. 투영은 사유 없는 항목을 `None` 으로
+그리고, 운영자는 Board 글을 본다. 새로 들어오는 청구부터 목록에서 읽힌다.
 
 ### 3.5 병합된 변경을 증거 형식으로 받는다
 
@@ -233,9 +249,9 @@ RFC-0445 의 `Operator_must_act (Fix_keeper_record)` 와 같은 값이다. 재�
 `Todo` 에서의 취소는 누구나 할 수 있으므로 닫는 비용이 낮다. 자동으로 집는 코드는 없다 —
 `orchestrator.ml:43` 은 "중요한 todo 가 있는데 활동 중인 에이전트가 없다" 를 알릴 뿐이다.
 
-**(4) 사유를 요구하면 Keeper 가 포기조차 못 하게 되는가.** 아니다. `Cancel` 을 부르는 자리는 전부
-에이전트의 도구 호출이다 — 내부에서 자동으로 부르는 코드는 없다(Keeper 가 내려갈 때는 `Release` 를
-쓴다, `keeper_shutdown_finalize.ml:161`). 거절 메시지가 빠진 인자를 이름 대면 다음 호출에서 채운다.
+**(4) 기록에 사유 사본을 두면 SSOT 가 둘이 되는가.** 사유의 출처는 제출 호출 하나다. 기록과 Board
+글은 둘 다 그 한 번의 값을 받아 적는 사본이고, 둘 중 어느 쪽도 나중에 고쳐 쓰지 않는다. 지금은
+사본이 하나뿐이라 조회가 안 되는 쪽에만 있다.
 
 **(5) 되돌림 자체가 실패하면.** backlog 버전 충돌 같은 일시적 실패는 의무를 남긴다. 다음 회차에
 다시 시도한다 — 지금 큐 쓰기 실패와 같은 취급이다.
@@ -269,7 +285,7 @@ RFC-0445 의 `Operator_must_act (Fix_keeper_record)` 와 같은 값이다. 재�
 | PR-0 (#36461, 병합됨) | Keeper 없는 제출자의 전달 의무를 한 번에 끝냄. `Keeper_producer_route` 도입 | `completion repair remains pending` 새 줄 0 |
 | PR-1 | §3.2. `reconcile_pending` 의 `No_keeper` 분기가 의무를 끝내고 Task 를 `Todo` 로 되돌린다 + 판정 레인 행위자의 typed 되돌림 | fixture: No_keeper 거절 1건 → Task `todo`, outbox 0, `handoff_context.reason` 유지 |
 | PR-2 | §3.3 투영 + 세 표면 | fixture: 포기 청구 1 + 주인 없는 점유 1 → 세 표면 모두 두 생성자 exhaustive |
-| PR-3 | §3.4 사유 요구 | fixture: 사유 없는 포기 청구 → typed 거절 |
+| PR-3 | §3.4. 제출 시점에 검증 기록이 포기 사유 사본을 갖는다 | fixture: 포기 청구 1건 → 기록에서 사유가 읽힌다. 기존 기록은 `None` |
 | PR-4 | §3.5 변경 증거 | fixture: 병합된 PR 1건 → 스냅샷이 기록에 남고 판정자가 읽음. 조회 실패 → typed 미열람 |
 | 운영 | 지금 쌓인 62 + 9건 처리 | 운영자 결정. 코드 없음 |
 
@@ -283,7 +299,7 @@ PR-1 은 PR-0 위에서만 의미가 있다. PR-2~4 는 서로 독립이다.
 - `No_keeper` 제출자의 거절 1건을 만든 뒤: `backlog.json` 에 그 Task 가 `todo`, `handoff_context.reason`
   이 거절 사유, `pending_completion_rejections` 에 항목 0.
 - `rg 'Cancel_task' bin/` > 0 (PR-2 뒤). 지금 0.
-- 사유 없는 포기 청구가 `Error` 로 거절되는 테스트 (PR-3).
+- 포기 청구의 사유가 검증 기록에서 읽힌다 (PR-3). 지금은 Board 글 본문에만 있다.
 - 09-15 기준 757 / 1,368 이던 "읽지 못한 참조를 가진 검증 기록" 비율이 PR-4 배포 30일 뒤 다시 측정된다.
   같은 스크립트로 센다 (§8).
 - 어느 단계에서도 새 Task 상태가 늘지 않는다: `task_status` 생성자 6개 유지.
@@ -298,8 +314,8 @@ PR-1 은 PR-0 위에서만 의미가 있다. PR-2~4 는 서로 독립이다.
   이 RFC 의 계산 결과를 읽는다.
 - **"운영자 목록은 또 하나의 게이트다."** — 게이트가 아니다. 아무것도 막지 않고 기존 사실을 읽어
   보여 줄 뿐이다. 승인 권한은 RFC-0417 그대로 운영자에게 있다.
-- **"사유 요구는 새 게이트다."** — 이미 있는 인자를 경계에서 파싱하는 것이다. 완료 거절은 이미
-  사유를 요구한다. 한쪽만 비어 있어도 되는 이유가 없다.
+- **"사유 요구는 새 게이트다."** — 요구는 새로 넣지 않는다. 이미 있고 63건 전부가 지키고 있다.
+  이 RFC 가 고치는 것은 그 문장이 조회되지 않는 자리에만 있다는 점이다.
 - **"변경 증거는 GitHub 의존을 늘린다."** — 이미 keeper 들이 PR 을 만들고 GitHub App broker 가 있다.
   새 자격 증명을 만들지 않는다. 조회 실패는 typed 미열람으로 남아 판정자가 그 사실을 본다.
 - **"71건을 코드로 정리하면 빠르다."** — 과거 데이터용 이관 코드를 만들지 않는다는 규칙이 있다.
@@ -316,6 +332,9 @@ PR-1 은 PR-0 위에서만 의미가 있다. PR-2~4 는 서로 독립이다.
   `lib/server/server_routes_http_routes_verification.ml:100-123` (카드의 intent),
   `lib/tool/tool_catalog.ml:321` (`masc_operator_task_recovery_resolve`),
   `lib/keeper/keeper_shutdown_finalize.ml:161` (Keeper 는 내려갈 때 자기 Task 를 release 한다).
+- 포기 청구의 사유는 `~/me/.masc/board_posts.jsonl` 의 `Cancellation requested for task ...` 글에서
+  센다. 검증 기록의 `submitted_evidence` 를 세면 안 된다 — 포기 경로는 거기 쓰지 않는다. 이 초안의
+  첫 판이 그렇게 세어 "26건 무사유" 라는 틀린 값을 실었다.
 - 실측: `~/me/.masc/tasks/backlog.json` (2026-09-15 05:30 UTC), `~/me/.masc/verifications/vrf-*.json`
   1,368건, `~/me/.masc/logs/system_log_2026-09-1{2,3,4,5}.jsonl`.
 - 관련 RFC: RFC-0445(next-actor 합, §2.2 U1 수정 대상), RFC-0417(취소 판정은 운영자),

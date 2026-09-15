@@ -4371,11 +4371,15 @@ let test_invalid_surface_post_input_stays_correction_capable () =
          fail "later failure was hidden by the completed terminal effect")
 ;;
 
-(* A memory write is an ordinary serial write: two claims in one turn each
-   commit, and neither closes the turn. *)
-let test_memory_writes_through_the_bundle_leave_the_turn_open () =
+(* Memory calls share a provider batch with another tool through the real
+   handlers and the batch planner. A claim commits, a retraction of a fact the
+   snapshot does not hold is refused before the store, and a store that cannot
+   take the next write and retraction leaves their commit unknown. Every
+   failure comes back to the model naming what committed, and none of them
+   ends the turn: doing the call again adds no second copy. *)
+let test_memory_calls_in_a_mixed_batch_answer_the_model_whatever_they_committed () =
   with_exec_fixture
-    "memory_write_bundle_turn_open"
+    "memory_calls_mixed_batch"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
        let bundle =
          Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
@@ -4385,50 +4389,137 @@ let test_memory_writes_through_the_bundle_leave_the_turn_open () =
            ~ctx_snapshot:ctx_work
            ()
        in
-       let memory_write =
-         match find_tool_by_name bundle.tools "keeper_memory_write" with
-         | Some tool -> tool
-         | None -> fail "keeper_memory_write missing from Keeper tool bundle"
+       Fun.protect ~finally:bundle.cleanup
+       @@ fun () ->
+       let tools =
+         List.map
+           (fun name ->
+              match find_tool_by_name bundle.tools name with
+              | Some tool -> tool
+              | None -> failf "%s missing from Keeper tool bundle" name)
+           [ "keeper_memory_write"; "keeper_memory_retract"; "keeper_lane_status" ]
        in
-       (match Agent_core.Tool.completion memory_write with
-        | Agent_core.Tool_contract.Continue_after_success -> ()
-        | Agent_core.Tool_contract.Terminal_after_success _ ->
-          fail "keeper_memory_write was materialized as a terminal tool");
-       let write ~title ~content =
+       let run_batch label calls =
          match
-           Agent_core.Tool.execute
-             memory_write
-             (`Assoc [ "title", `String title; "content", `String content ])
+           Agent_core.Agent_tools.execute_tools
+             ~context:(Agent_core.Context.create ())
+             ~tools
+             ~hooks:Agent_core.Hooks.empty
+             ~event_bus:None
+             ~tracer:Agent_core.Tracing.null
+             ~agent_name:meta.name
+             ~turn_count:1
+             ~usage:Agent_core.Types.empty_usage
+             (List.map
+                (fun (id, name, input) -> Agent_core.Types.ToolUse { id; name; input })
+                calls)
          with
-         | Ok _ -> ()
-         | Error error ->
-           failf "memory write failed: %s" error.Agent_core.Types.message
+         | Error _ -> failf "%s: the batch returned an execution failure" label
+         | Ok { Agent_core.Agent_tools.completed_results; completion } ->
+           (match completion with
+            | Agent_core.Agent_tools.Continue_after_batch -> ()
+            | Agent_core.Agent_tools.Terminal_completed _ ->
+              failf "%s: a memory call completed the turn" label
+            | Agent_core.Agent_tools.Terminal_failed _ ->
+              failf "%s: a memory call failed the turn" label);
+           (match bundle.terminal_effect_state () with
+            | Masc.Keeper_tools_agent_core.Terminal_effect_open -> ()
+            | Masc.Keeper_tools_agent_core.Deferred_tool_result ->
+              failf "%s: a memory call deferred a tool result" label
+            | Masc.Keeper_tools_agent_core.External_effect_deferred ->
+              failf "%s: a memory call deferred an external effect" label
+            | Masc.Keeper_tools_agent_core.Terminal_effect_completed _ ->
+              failf "%s: a memory call closed the turn" label
+            | Masc.Keeper_tools_agent_core.Terminal_effect_failed _ ->
+              failf "%s: a memory call failed the turn" label);
+           check int (label ^ ": every call ran") (List.length calls) (List.length completed_results);
+           fun id ->
+             match
+               List.find_opt
+                 (fun (result : Agent_core.Agent_tools.tool_execution_result) ->
+                    String.equal
+                      (Agent_core.Tool_contract.Invocation.tool_use_id result.invocation)
+                      id)
+                 completed_results
+             with
+             | Some result -> result
+             | None -> failf "%s: no result for %s" label id
        in
-       write ~title:"first" ~content:"the first claim of this turn";
-       write ~title:"second" ~content:"the second claim of this turn";
+       let succeeded label (result : Agent_core.Agent_tools.tool_execution_result) =
+         check bool (label ^ " succeeded") false
+           (Agent_core.Types.tool_result_outcome_is_error result.outcome)
+       in
+       let failed_naming disposition label
+             (result : Agent_core.Agent_tools.tool_execution_result) =
+         check bool (label ^ " is an error result") true
+           (Agent_core.Types.tool_result_outcome_is_error result.outcome);
+         check bool (label ^ " names what committed") true
+           (String_util.contains_substring
+              result.content
+              (Tool_result.failure_effect_disposition_to_string disposition))
+       in
+       let lane_status id = id, "keeper_lane_status", `Assoc [] in
        let keepers_dir =
-         Config_dir_resolver.keepers_dir_for_base_path
-           ~base_path:config.base_path
+         Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
        in
-       (match
-          Masc.Keeper_memory_os_current.read_for_keepers_dir
-            ~keepers_dir
-            ~keeper_id:meta.name
-        with
-        | Ok (Some snapshot) ->
-          check int "both claims committed" 2 (List.length snapshot.facts)
-        | Ok None -> fail "memory writes persisted no snapshot"
-        | Error detail -> fail detail);
-       match bundle.terminal_effect_state () with
-       | Masc.Keeper_tools_agent_core.Terminal_effect_open -> ()
-       | Masc.Keeper_tools_agent_core.Deferred_tool_result ->
-         fail "memory writes deferred a tool result"
-       | Masc.Keeper_tools_agent_core.External_effect_deferred ->
-         fail "memory writes deferred an external effect"
-       | Masc.Keeper_tools_agent_core.Terminal_effect_completed _ ->
-         fail "a memory write closed the turn"
-       | Masc.Keeper_tools_agent_core.Terminal_effect_failed _ ->
-         fail "a successful memory write failed the turn")
+       let first =
+         run_batch
+           "first batch"
+           [ "write-kept", "keeper_memory_write", `Assoc [ "content", `String "a claim the batch keeps" ]
+           ; ( "retract-missing"
+             , "keeper_memory_retract"
+             , `Assoc
+                 [ "memory_id", `String ("sha256:" ^ String.make 64 '0')
+                 ; "reason", `String "no such fact was ever written"
+                 ] )
+           ; lane_status "lane-first"
+           ]
+       in
+       succeeded "the claim" (first "write-kept");
+       failed_naming Tool_result.Proven_pre_effect "the missing retraction"
+         (first "retract-missing");
+       succeeded "lane status beside memory calls" (first "lane-first");
+       let kept_id =
+         match
+           Masc.Keeper_memory_os_current.read_for_keepers_dir
+             ~keepers_dir
+             ~keeper_id:meta.name
+         with
+         | Ok (Some { facts = [ fact ]; _ }) -> Masc.Keeper_memory_os_types.memory_id fact
+         | Ok (Some { facts; _ }) ->
+           failf "the batch committed %d facts, not one" (List.length facts)
+         | Ok None -> fail "the claim persisted no snapshot"
+         | Error detail -> fail detail
+       in
+       (* A directory where the snapshot file belongs: the next write and
+          retraction fail inside the store, whatever user the test runs as. *)
+       let snapshot_path =
+         Masc.Keeper_memory_os_current.path_for_keepers_dir
+           ~keepers_dir
+           ~keeper_id:meta.name
+       in
+       Unix.unlink snapshot_path;
+       Unix.mkdir snapshot_path 0o755;
+       let second =
+         run_batch
+           "store failure batch"
+           [ ( "write-unknown"
+             , "keeper_memory_write"
+             , `Assoc [ "content", `String "a claim the store cannot take" ] )
+           ; ( "retract-unknown"
+             , "keeper_memory_retract"
+             , `Assoc
+                 [ "memory_id", `String kept_id
+                 ; "reason", `String "the store is not answering"
+                 ] )
+           ; lane_status "lane-second"
+           ]
+       in
+       failed_naming Tool_result.Effect_outcome_unknown "the write the store failed"
+         (second "write-unknown");
+       failed_naming Tool_result.Effect_outcome_unknown "the retraction the store failed"
+         (second "retract-unknown");
+       succeeded "lane status beside failed memory calls" (second "lane-second"))
 ;;
 
 let with_openai_tool_call_server ?second_response ~tool_name ~tool_input f =
@@ -8968,8 +9059,8 @@ let () =
         test_deferred_web_search_keeps_the_turn_going;
       test_case "invalid surface input stays correction-capable" `Quick
         test_invalid_surface_post_input_stays_correction_capable;
-      test_case "memory writes through the bundle leave the turn open" `Quick
-        test_memory_writes_through_the_bundle_leave_the_turn_open;
+      test_case "memory calls in a mixed batch answer the model whatever they committed" `Quick
+        test_memory_calls_in_a_mixed_batch_answer_the_model_whatever_they_committed;
       test_case "surface append failure is not terminal completion" `Quick
         test_surface_post_append_failure_does_not_complete_terminal_effect;
       test_case "frozen surface rejects a registered-only tool" `Quick

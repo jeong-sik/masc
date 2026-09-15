@@ -79,6 +79,14 @@ module For_testing : sig
   (** Test seam for a closed per-turn descriptor set. Production obtains the
 *)
 
+  val ordinary_failure_ends_turn
+    :  Keeper_tool_descriptor.runtime_handler
+    -> Tool_result.failure_effect_disposition
+    -> bool
+  (** Whether a failed ordinary call of this handler, with this effect
+      disposition, fails the provider turn. The bundle wires each ordinary
+      descriptor's failure callback from this. *)
+
   val initial_terminal_effect_state :
     Keeper_tools_agent_core.gate_replay_delivery option ->
     Keeper_tools_agent_core.terminal_effect_state

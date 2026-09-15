@@ -26,7 +26,8 @@ python3 scripts/imp-onboarding-acceptance.py \
 ```
 
 The PTY check uses the caller's configured runtime and authentication environment.
-It starts `masc setup` with no existing server, verifies an actual TUI frame and
+It starts `masc setup` naming the sandbox imp already declares (so setup runs
+natively instead of the interactive journey) with no existing server, verifies an actual TUI frame and
 an already-live imp, then checks that leaving the TUI stops the owned server.
 The conversation check copies only the supplied Codex credential into a private
 temporary home and removes that home at exit. It uses real model inference and

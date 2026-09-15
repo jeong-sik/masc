@@ -85,10 +85,13 @@ val unit_disposition_of_string
 
 (** Payload carried by a completed or deferred tool invocation.  [metadata]
     is an opaque one-way boundary projection; MASC consumers must branch on
-    {!disposition}, never recover semantics by inspecting it. The two keyed
-    entries the boundary itself owns are the exception, each with a typed
-    codec and a total decoder: the artifact manifest (Tool_bridge) and the
-    handler's {!Tool_outcome_declaration}. *)
+    {!disposition}, never recover semantics by inspecting it. The keyed
+    entries owned by a typed codec with a total decoder are the exception:
+    the artifact manifest (Tool_bridge), the handler's
+    {!Tool_outcome_declaration}, and the position of a comment page a thread
+    read returned (Board_types.Comment_page.Position), which a caller
+    continuing the read decodes instead of parsing the page's text. Each is
+    read back through its own decoder, never by matching keys here. *)
 type output_payload =
   { retained_artifacts : Tool_output.artifact_ref list
     (** Durable observer roots. Intentionally omitted from [to_json] so nested

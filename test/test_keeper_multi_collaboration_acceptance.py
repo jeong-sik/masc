@@ -292,21 +292,44 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
             {"keeper": "rw-x-build-a", "mode": "yolo"},
         )
 
-    def test_board_thread_read_follows_next_offset_to_the_last_page(self):
+    @staticmethod
+    def board_page_response(offset, next_offset, text):
+        return {
+            "result": {
+                "content": [{"type": "text", "text": text}],
+                "_meta": {
+                    acceptance.MASC_CALL_META_KEY: {
+                        "metadata": {
+                            acceptance.COMMENT_PAGE_METADATA_KEY: {
+                                "offset": offset,
+                                "returned": 1,
+                                "total": 3,
+                                "has_more": next_offset is not None,
+                                "next_offset": next_offset,
+                            }
+                        }
+                    }
+                },
+            }
+        }
+
+    def test_board_thread_read_follows_the_page_position_to_the_last_page(self):
         pages = {
-            0: {"pagination": {"offset": 0, "next_offset": 2}, "thread": "first COORDINATOR_READY"},
-            2: {"pagination": {"offset": 2, "next_offset": 3}, "thread": "second"},
-            3: {"pagination": {"offset": 3, "next_offset": None}, "thread": "last REVIEWER_OBSERVED"},
+            0: (2, "first COORDINATOR_READY"),
+            2: (3, "second"),
+            3: (None, "last REVIEWER_OBSERVED"),
         }
         calls = []
+        outer = self
 
         class Stub:
             def call(self, label, tool, arguments):
                 calls.append((label, tool, dict(arguments)))
-                data = pages[arguments["comment_offset"]]
-                return acceptance.ToolObservation(
-                    tool, arguments, {"result": data}, json.dumps(data), data
+                next_offset, text = pages[arguments["comment_offset"]]
+                response = outer.board_page_response(
+                    arguments["comment_offset"], next_offset, text
                 )
+                return acceptance.ToolObservation(tool, arguments, response, text, text)
 
         thread = acceptance.MissionRun.read_board_thread(Stub(), "p-1")
         self.assertEqual(
@@ -320,12 +343,23 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
         )
         self.assertTrue(acceptance.text_contains(thread.data, "REVIEWER_OBSERVED"))
         self.assertTrue(acceptance.text_contains(thread.data, "COORDINATOR_READY"))
+        self.assertIn("REVIEWER_OBSERVED", thread.text)
 
     def test_board_thread_read_refuses_a_page_that_does_not_move_forward(self):
+        outer = self
+
         class Stub:
             def call(self, label, tool, arguments):
-                data = {"pagination": {"offset": 0, "next_offset": 0}, "thread": "loop"}
-                return acceptance.ToolObservation(tool, arguments, {}, "", data)
+                response = outer.board_page_response(0, 0, "loop")
+                return acceptance.ToolObservation(tool, arguments, response, "loop", "loop")
+
+        with self.assertRaises(acceptance.AcceptanceError):
+            acceptance.MissionRun.read_board_thread(Stub(), "p-1")
+
+    def test_board_thread_read_refuses_a_page_without_a_position(self):
+        class Stub:
+            def call(self, label, tool, arguments):
+                return acceptance.ToolObservation(tool, arguments, {"result": {}}, "text", "text")
 
         with self.assertRaises(acceptance.AcceptanceError):
             acceptance.MissionRun.read_board_thread(Stub(), "p-1")

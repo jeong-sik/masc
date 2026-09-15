@@ -72,7 +72,7 @@ let handle_tool ~result_boundary name args : Tool_result.result =
 let register () =
   (* The registry serves callers outside a Keeper turn, which take a result
      whole. *)
-  let handler ~name ~args = handle_tool ~result_boundary:Tool_output.Unprojected name args in
+  let handler ~name ~args = handle_tool ~result_boundary:Tool_output.Sent_to_client name args in
   let make_spec board_name =
     let s = Board_tool_registry.schema_for_board_name board_name in
     let policy = Board_tool_registry.operation_policy board_name in

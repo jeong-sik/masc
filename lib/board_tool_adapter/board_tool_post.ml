@@ -315,12 +315,18 @@ let handle_post_list ~tool_name ~start_time args : Tool_result.result =
    result over it becomes a blob the Keeper has to fetch back with
    keeper_artifact_read before it can read the thread.
 
-   A caller with no projection (an MCP client, an HTTP route) takes the result
-   whole, so its page ends at [comment_limit] only.
+   A caller outside a Keeper turn (an MCP client, an HTTP route) is bounded by
+   the same wire ceiling: MASC stores nothing for it, and the client that
+   reads threads is a CLI harness that spills a larger result to a file.
 
-   The size is measured on the serialized JSON, the same bytes the projection
-   compares. [comment_limit] stays an upper bound a caller can ask for, and
-   [pagination.next_offset] says where the next page starts. *)
+   What the model reads is the thread as text. A result whose data is a JSON
+   object reaches the model as that object serialized on one line
+   ([Tool_result.message]), which is how a page of comments became
+   [{"pagination":{...},"thread":"**p-…**\n\n…"}] — the escaped wrapper a
+   Keeper cannot read a thread through. The page's position rides the result's
+   metadata instead, so a caller continuing the read never parses the text.
+   The size is measured on that text, the same bytes the boundary compares.
+   [comment_limit] stays an upper bound a caller can ask for. *)
 let render_thread ~post_block ~comment_lines =
   match comment_lines with
   | [] -> Printf.sprintf "%s\n\nNo comments." post_block
@@ -394,29 +400,22 @@ let handle_post_get ~result_boundary ~tool_name ~start_time args : Tool_result.r
            Hashtbl.replace votes key vote;
            vote
        in
-       (* [pagination] leads so a reader that sees only the head of the result
-          still learns where the next page starts. *)
-       let page_data (page : Board.comment Board.Comment_page.page) =
-         `Assoc
-           [ "pagination", Board.Comment_page.pagination_to_yojson page
-           ; ( "thread"
-             , `String
-                 (render_thread
-                    ~post_block
-                    ~comment_lines:
-                      (Board_tool_format.format_comment_tree
-                         ~viewer_vote_of
-                         page.Board.Comment_page.items)) )
-           ]
+       (* The position leads the page so a reader that sees only the head of a
+          stored result still learns where the next page starts. *)
+       let page_text (page : Board.comment Board.Comment_page.page) =
+         let position = Board.Comment_page.Position.of_page page in
+         Printf.sprintf
+           "%s\n%s"
+           (Board.Comment_page.Position.line position)
+           (render_thread
+              ~post_block
+              ~comment_lines:
+                (Board_tool_format.format_comment_tree
+                   ~viewer_vote_of
+                   page.Board.Comment_page.items))
        in
-       let fits =
-         match result_boundary with
-         | Tool_output.Projected_for_model projection ->
-           let ceiling = Tool_output.inline_ceiling_bytes projection in
-           fun page -> String.length (Yojson.Safe.to_string (page_data page)) <= ceiling
-         | Tool_output.Unprojected ->
-           fun (_ : Board.comment Board.Comment_page.page) -> true
-       in
+       let ceiling = Tool_output.result_ceiling_bytes result_boundary in
+       let fits page = String.length (page_text page) <= ceiling in
        (match Board.Comment_page.select ~fits request comments with
         | Board.Comment_page.Offset_out_of_range { requested; total } ->
           Tool_result.make_err
@@ -439,7 +438,14 @@ let handle_post_get ~result_boundary ~tool_name ~start_time args : Tool_result.r
                  total
                  (total - 1))
         | Board.Comment_page.Page page ->
-          Tool_result.make_ok ~tool_name ~start_time ~data:(page_data page) ()))
+          Tool_result.make_ok
+            ~tool_name
+            ~start_time
+            ~data:(`String (page_text page))
+            ~metadata:
+              (Board.Comment_page.Position.to_metadata
+                 (Board.Comment_page.Position.of_page page))
+            ()))
 ;;
 
 let handle_comment_add ~tool_name ~start_time args : Tool_result.result =

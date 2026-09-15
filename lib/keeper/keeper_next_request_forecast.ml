@@ -247,7 +247,22 @@ let history_cut_to_json = function
       [ "kind", `String "cut"
       ; "kept_atoms", `Int kept_atoms
       ; "transmitted_bytes", `Int transmitted_bytes
-      ; "fit", `String (Runtime_model_input_tail_window.target_fit_to_string fit)
+      ; ( "fit"
+        , match fit with
+          | Runtime_model_input_tail_window.Within_target ->
+            `Assoc [ "kind", `String "within_target" ]
+          | Runtime_model_input_tail_window.Overrun { by_bytes; cause } ->
+            `Assoc
+              [ "kind", `String "overrun"
+              ; "by_bytes", `Int by_bytes
+              ; ( "cause"
+                , `String
+                    (match cause with
+                     | Runtime_model_input_tail_window.Fixed_parts_exceed_target ->
+                       "fixed_parts_exceed_target"
+                     | Runtime_model_input_tail_window.Newest_atom_exceeds_target ->
+                       "newest_atom_exceeds_target") )
+              ] )
       ]
   | Newest_atom_only { transmitted_bytes } ->
     `Assoc

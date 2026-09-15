@@ -877,9 +877,7 @@ let bounded_model_input_projection
                  the RFC-0363 demotion effect can be measured on and off in
                  one deployment. Default on preserves current behavior. *)
               ~base_path:
-                (if
-                   Feature_flag_registry.get_bool
-                     "MASC_KEEPER_MODEL_INPUT_DEMOTION_ENABLED"
+                (if Feature_flag_registry.get_bool "MASC_KEEPER_MODEL_INPUT_DEMOTION_ENABLED"
                  then ctx.base_path
                  else "")
               ~demote_before

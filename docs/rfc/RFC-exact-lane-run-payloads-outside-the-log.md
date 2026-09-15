@@ -27,7 +27,7 @@ related: []
 
 ## 1. 현재 동작과 측정
 
-측정: live `~/me/.masc/exact-lane-runs-v5.jsonl`, 2026-09-15.
+측정: live `<base-path>/.masc/exact-lane-runs-v5.jsonl`, 2026-09-15.
 
 | 항목 | 값 |
 |---|---|

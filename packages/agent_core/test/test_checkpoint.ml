@@ -424,6 +424,38 @@ let test_a_failure_deep_in_nested_lists_names_its_element () =
     (v11_detail (checkpoint_json_with_raw_messages [ valid; valid; unknown_field ]))
 ;;
 
+(* A tool result may hold tool results, to any depth. A validator that checked
+   a failing element again to name it did so at every level, so a bad leaf this
+   deep was checked 2^34 times and decoding never returned. One pass names the
+   whole path. *)
+let nested_tool_result_depth = 32
+
+let test_a_bad_leaf_under_nested_tool_results_fails_once_with_its_path () =
+  let tool_result content =
+    `Assoc
+      [ "type", `String "tool_result"
+      ; "tool_use_id", `String "call-1"
+      ; "content", `List [ content ]
+      ; "is_error", `Bool false
+      ]
+  in
+  let rec nest depth leaf = if depth = 0 then leaf else nest (depth - 1) (tool_result leaf) in
+  let bad_leaf = `Assoc [ "type", `String "text"; "text", `Int 1 ] in
+  let message =
+    `Assoc
+      [ "role", `String "tool"
+      ; "content", `List [ nest nested_tool_result_depth bad_leaf ]
+      ]
+  in
+  let path =
+    String.concat "" (List.init nested_tool_result_depth (fun _ -> ".content[0]"))
+  in
+  Alcotest.(check string)
+    "the error names every level down to the leaf"
+    (Printf.sprintf "Checkpoint v11 message[0] content[0]%s.text must be a string" path)
+    (v11_detail (checkpoint_json_with_raw_messages [ message ]))
+;;
+
 let () =
   let open Alcotest in
   run
@@ -435,7 +467,9 @@ let () =
             test_tool_image_survives_dispatch_and_checkpoint ] )
     ; ( "v11 contract"
       , [ test_case "a failure deep in nested lists names its element" `Quick
-            test_a_failure_deep_in_nested_lists_names_its_element ] )
+            test_a_failure_deep_in_nested_lists_names_its_element
+        ; test_case "a bad leaf under nested tool results fails once with its path" `Quick
+            test_a_bad_leaf_under_nested_tool_results_fails_once_with_its_path ] )
     ; ( "version"
       , [ test_case "checkpoint_version is 11" `Quick (fun () ->
             check int "version" 11 Checkpoint.checkpoint_version)

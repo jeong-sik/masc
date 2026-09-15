@@ -144,6 +144,10 @@ type delivery = {
    wildcard. *)
 let chat_appended_keeper = function
   | Keeper_chat_appended { keeper; _ } -> Some keeper
+  (* A turn observation numbers a provider call inside a keeper turn; it
+     carries no transcript. Even the turn's own settle does not reload the
+     chat, so a frame from mid-turn does not either. *)
+  | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _ | Keeper_composite_changed _
   | Keeper_chat_stream_frame _ | Keeper_waiting_inventory_changed _

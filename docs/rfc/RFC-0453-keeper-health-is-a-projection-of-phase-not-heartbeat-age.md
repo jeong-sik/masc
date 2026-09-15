@@ -27,7 +27,7 @@ related: ["0380", "0089"]
 
 `keeper_health_state` 는 keeper 의 metrics 원장에서 가장 최근 `record_kind=heartbeat` 줄을 읽고, 그 나이가 `keepalive_interval_s + 60s`(기본 360s)를 넘으면 `KH_stale` 을 냈다. 이 줄은 keepalive 루프가 **턴을 끝낸 뒤** 한 번 쓴다. 턴이 6분 넘게 걸리면 keeper 가 일하는 도중에 `stale` 이 된다.
 
-실측(2026-09-15 06:55Z 기준 직전 24시간, `~/me/.masc`, 살아 있는 keeper 13개). 방법: 각 keeper 의 heartbeat 줄을 시간순으로 놓고, 이웃한 두 줄 사이 간격에서 360초를 넘긴 부분을 모두 더해 24시간으로 나눴다. 05:08Z 에 같은 방법으로 잰 값도 keeper 별로 ±3%p 안에 있었다.
+실측(2026-09-15 06:55Z 기준 직전 24시간, 운영 workspace 의 `.masc`(`MASC_BASE_PATH`), 살아 있는 keeper 13개). 방법: 각 keeper 의 heartbeat 줄을 시간순으로 놓고, 이웃한 두 줄 사이 간격에서 360초를 넘긴 부분을 모두 더해 24시간으로 나눴다. 05:08Z 에 같은 방법으로 잰 값도 keeper 별로 ±3%p 안에 있었다.
 
 | keeper | heartbeat 줄 수 | 360s 넘긴 간격 | `stale` 로 읽힌 비율 | 가장 긴 간격 |
 |---|---:|---:|---:|---:|
@@ -124,4 +124,4 @@ heartbeat 나이 판정이 없어도 아래가 이미 답한다. 나이 판정�
 
 ## 8. 건드리지 않는 것
 
-keepalive 루프(`keeper_heartbeat_loop.ml`), in-turn pulse, `Workspace.heartbeat` presence, phase FSM, `fiber_health_of`, heartbeat 원장 줄 쓰기, SSE `keeper_heartbeat` 이벤트, `keeper_keepalive_interval_s`/`keeper_snapshot_interval_s` 설정 표시, `~/me/.masc` 런타임 데이터. TLA+ specs 에는 keeper health 규칙이 없다(`KeeperHeartbeat.tla` 는 stale 을 모델링하지 않는다).
+keepalive 루프(`keeper_heartbeat_loop.ml`), in-turn pulse, `Workspace.heartbeat` presence, phase FSM, `fiber_health_of`, heartbeat 원장 줄 쓰기, SSE `keeper_heartbeat` 이벤트, `keeper_keepalive_interval_s`/`keeper_snapshot_interval_s` 설정 표시, 운영 workspace 의 런타임 데이터. TLA+ specs 에는 keeper health 규칙이 없다(`KeeperHeartbeat.tla` 는 stale 을 모델링하지 않는다).

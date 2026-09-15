@@ -62,6 +62,14 @@ let shell_quote value =
   "'" ^ String.concat "'\"'\"'" (String.split_on_char '\'' value) ^ "'"
 ;;
 
+(* What the fixture does with the prompt on stdin. [Close_unread] hangs up on
+   it; [Leave_unread] answers with the prompt still sitting in the pipe, which
+   is what a write outside the lane's window waits on forever. *)
+type fixture_stdin =
+  | Read_to_end
+  | Close_unread
+  | Leave_unread
+
 (* [line_delays]: seconds the fixture sleeps before printing the line at that
    index, so one gap can be placed inside or after a chosen step. *)
 let fixture_script
@@ -69,7 +77,7 @@ let fixture_script
     ?required_home
     ?(sleep_s = 0.0)
     ?capture_prompt
-    ?(close_stdin = false)
+    ?(stdin = Read_to_end)
     ?line_delay_s
     ?(line_delays = [])
     ?pipe_holder_s
@@ -104,11 +112,14 @@ let fixture_script
         output
         "test -z \"${XDG_CACHE_HOME+x}\" && test -z \"${XDG_CONFIG_HOME+x}\" && test -z \"${XDG_DATA_HOME+x}\" || exit 95\n")
     required_home;
-  if close_stdin then output_string output "exec 0<&-\nexit 62\n"
-  else output_string output
-    (match capture_prompt with
-     | None -> "cat >/dev/null\n"
-     | Some path -> "cat >" ^ shell_quote path ^ "\n");
+  (match stdin with
+   | Close_unread -> output_string output "exec 0<&-\nexit 62\n"
+   | Leave_unread -> ()
+   | Read_to_end ->
+     output_string output
+       (match capture_prompt with
+        | None -> "cat >/dev/null\n"
+        | Some path -> "cat >" ^ shell_quote path ^ "\n"));
   if sleep_s > 0.0 then output_string output (Printf.sprintf "sleep %.3f\n" sleep_s);
   List.iteri
     (fun index line ->
@@ -142,7 +153,7 @@ let fixture_script
   path
 ;;
 
-let with_fixture ?require_resume ?required_home ?sleep_s ?capture_prompt ?close_stdin ?line_delay_s
+let with_fixture ?require_resume ?required_home ?sleep_s ?capture_prompt ?stdin ?line_delay_s
     ?line_delays ?pipe_holder_s ?exit_delay_s ?exit_code lines f =
   let path =
     fixture_script
@@ -150,7 +161,7 @@ let with_fixture ?require_resume ?required_home ?sleep_s ?capture_prompt ?close_
       ?required_home
       ?sleep_s
       ?capture_prompt
-      ?close_stdin
+      ?stdin
       ?line_delay_s
       ?line_delays
       ?pipe_holder_s
@@ -388,7 +399,7 @@ let test_incomplete_prompt_is_not_reported () =
    | Error (Runtime_antigravity.Spawn_failed _) -> ()
    | _ -> fail "missing CLI did not fail at spawn");
   check int "spawn failure does not report transmission" 0 !sent;
-  with_fixture ~close_stdin:true [] (fun path ->
+  with_fixture ~stdin:Close_unread [] (fun path ->
     (* Larger than the pipe buffer: the child closes stdin without consuming
        it, so a successful spawn cannot imply a complete prompt write. *)
     let result = run_fixture ~prompt:(String.make 1_100_000 'x')
@@ -397,6 +408,33 @@ let test_incomplete_prompt_is_not_reported () =
     check int "write failure occurs after real spawn" 1 !spawned;
     check bool "incomplete input does not complete a turn" true (Result.is_error result);
     check int "partial write does not report transmission" 0 !sent)
+;;
+
+let test_a_cli_that_answers_without_reading_the_prompt_does_not_hold_the_turn () =
+  (* The CLI never reads stdin and lingers after answering, so a prompt past
+     the pipe buffer is still in the pipe when the answer arrives. The turn
+     ends on the lane's own admission window; before it covered the write, it
+     ended only when the CLI finally left. *)
+  let ready = ref false in
+  with_fixture ~stdin:Leave_unread ~exit_delay_s:5.0 [ init (); result () ] (fun path ->
+    match
+      run_fixture
+        ~prompt:(String.make 1_100_000 'x')
+        ~admission_timeout_s:0.5
+        ~timeout_s:5.0
+        ~on_conversation_ready:(fun ~conversation_id:_ ->
+          ready := true;
+          Ok ())
+        path
+    with
+    | Error (Runtime_antigravity.Timeout seconds) ->
+      check bool "the CLI had answered while the prompt was still in the pipe" true !ready;
+      check (float 0.001) "the window is the lane's admission window" 0.5 seconds
+    | Error error ->
+      fail
+        ("an unread prompt ended the turn some other way: "
+         ^ Runtime_antigravity.error_to_string error)
+    | Ok _ -> fail "an unread prompt produced a completed turn")
 ;;
 
 let test_transmitted_prompt_survives_provider_rejection () =
@@ -1140,6 +1178,8 @@ let () =
             test_large_prompt_streams_over_stdin
         ; test_case "incomplete prompt is not reported as transmitted" `Quick
             test_incomplete_prompt_is_not_reported
+        ; test_case "a CLI that answers without reading the prompt does not hold the turn"
+            `Quick test_a_cli_that_answers_without_reading_the_prompt_does_not_hold_the_turn
         ; test_case "transmission survives provider rejection" `Quick
             test_transmitted_prompt_survives_provider_rejection
         ; test_case

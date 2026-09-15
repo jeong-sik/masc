@@ -25,14 +25,19 @@ file's bytes, every directory, and permissions. Each package gets one result:
 | Tree equals this release, receipt absent or describing another tree | receipt written; no Skill file changes | same |
 | No receipt; files and bytes equal this release, permissions differ | permissions set to the release's, receipt written | reported as pending |
 | Receipt matches the tree, this release differs | replaced; the previous tree is kept as the package's backup | reported as pending |
-| Receipt does not match the tree (an edit since installation) | kept | kept |
+| Receipt does not match the tree (an edit since installation, or a replacement that stopped before writing its receipt) | kept | kept |
 | No receipt, files or bytes differ from this release | kept | kept |
 | Links, special files or unreadable directories | kept | kept |
 | Receipt for a package this release no longer ships, matching its tree | tree moved to the package's backup, receipt removed | reported as pending |
-| Receipt for a package this release no longer ships, tree edited | kept | kept |
+| Receipt for a package this release no longer ships, receipt does not match the tree | kept | kept |
 
 A package without a receipt is never removed. MASC cannot tell whether it is
-an untouched former builtin or the operator's own Skill. Setting permissions
+an untouched former builtin or the operator's own Skill. The reverse holds for
+a missing package directory: it is installed even when another release retired
+it here, because nothing on disk tells that apart from a package this release
+adds. When `masc init` of a binary that ships a package and of one that does
+not alternate on one base path, each run installs or retires it again, keeps
+the retired tree as the backup, and prints a line for it. Setting permissions
 changes no bytes and no file list; it applies only when the files, directories
 and bytes are the release's. Each mode is changed through a descriptor that is
 checked to be the entry that was inspected, so a symlink put in its place is

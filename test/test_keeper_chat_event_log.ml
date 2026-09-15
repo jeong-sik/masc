@@ -648,6 +648,65 @@ let test_an_interrupted_reader_does_not_strand_the_turn () =
     true
     !turn_finished
 
+(* The case above parks no writer at [reader_gone]: it leaves an idle bus and
+   publishes afterwards, when publish's Gone arm is a no-op. The regression
+   #36727 closed is the other arrangement — writers already parked in
+   [Eio.Stream.add] on a full bus when the reader's finaliser runs
+   [reader_gone]. A parked writer wakes only from a take, so the release has
+   to keep draining until every one of them has landed, not just the one a
+   single take happens to wake. Two turns publish past [bus_capacity] while
+   the reading fiber holds one event and parks between takes, the way it does
+   when the client behind it applies backpressure; cancelling that fiber runs
+   the same finaliser every adapter is forked with. Both daemons finishing is
+   the invariant: under a single-take release at least one turn stays parked
+   on the bus for good and its flag never gets set. *)
+let test_reader_gone_releases_every_parked_publisher () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let bus = Masc.Keeper_chat_events.create () in
+  let reader_context = ref None in
+  let backpressure = Eio.Promise.create () in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Eio.Cancel.sub (fun context ->
+      reader_context := Some context;
+      Fun.protect
+        ~finally:(fun () -> Masc.Keeper_chat_events.reader_gone bus)
+        (fun () ->
+          match Masc.Keeper_chat_events.subscribe bus with
+          | Masc.Keeper_chat_events.Next _ ->
+            (* Never resolved: the reading fiber stays between takes until
+               the cancel below reaches it. *)
+            Eio.Promise.await backpressure
+          | Masc.Keeper_chat_events.Closed -> ())));
+  let turn_finished = Array.make 2 false in
+  List.iteri
+    (fun index () ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+        for _ = 1 to 2 * Masc.Keeper_chat_events.bus_capacity do
+          Masc.Keeper_chat_events.publish bus (E.Text_delta "still streaming")
+        done;
+        turn_finished.(index) <- true;
+        `Stop_daemon))
+    [ (); () ];
+  (* Every publish that can land without a take has landed; what is left of
+     both turns is parked on the full bus. *)
+  for _ = 1 to 8 do Eio.Fiber.yield () done;
+  (match !reader_context with
+   | Some context ->
+     Eio.Cancel.cancel context (Failure "operator interrupt")
+   | None -> Alcotest.failf "the reading fiber never entered its take");
+  for _ = 1 to 8 do Eio.Fiber.yield () done;
+  Array.iteri
+    (fun index finished ->
+      Alcotest.(check bool)
+        (Printf.sprintf
+           "parked publisher %d was released with the reader gone"
+           index)
+        true
+        finished)
+    turn_finished;
+  Masc.Keeper_chat_events.close bus
+
 let test_publish_after_close_is_a_publisher_defect () =
   let bus = Masc.Keeper_chat_events.create () in
   Masc.Keeper_chat_events.close bus;
@@ -1049,6 +1108,10 @@ let () =
             "an interrupted reader does not strand the turn"
             `Quick
             test_an_interrupted_reader_does_not_strand_the_turn
+        ; Alcotest.test_case
+            "reader gone releases every parked publisher"
+            `Quick
+            test_reader_gone_releases_every_parked_publisher
         ] )
     ; ( "integration"
       , [ Alcotest.test_case

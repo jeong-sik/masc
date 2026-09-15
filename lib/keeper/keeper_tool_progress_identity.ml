@@ -97,12 +97,10 @@ let compute_tool_io ~tool_name ~input ~output_text =
   | None, _ | _, None -> None
 ;;
 
-(* Answers already computed, kept because the same questions come back.
-   [Keeper_run_tools_setup.seed_tool_calls_from_history] walks the whole
-   resumed history at the start of every turn, and [Keeper_run_context]
-   re-reads the checkpoint from disk on each run, so turn N+1 serialises and
-   hashes everything turn N already did. Measured on a live keeper: 1,278,158
-   B of history, 55-222 ms per turn, growing with the session (#33719).
+(* Answers already computed, kept because the same questions come back. The
+   live hook asks once per executed call, and the next turn's history walk asks
+   again for that call when [History_memo] does not hold it yet: a keeper's
+   first walk in this process, or the calls of its last turn.
 
    The key is what the answer depends on, not the [tool_use_id] the call
    arrived under. [Keeper_checkpoint_purge.clear_tool_result_blocks] replaces
@@ -111,15 +109,14 @@ let compute_tool_io ~tool_name ~input ~output_text =
    for bytes that are gone. Keyed on the bytes, a rewritten body misses and
    is computed once more, which is the whole of the invalidation rule.
 
-   Bounded in bytes rather than entries because the key holds [output_text]:
-   a history grows without limit and one tool output can be large. Eviction
-   is oldest-inserted. The walk asks for every live entry once per turn, so
-   recency separates nothing, while insertion order does put the bodies that
-   have fallen out of every history first. *)
+   Bounded in bytes rather than entries because the key holds [output_text]
+   and one tool output can be large. Eviction is oldest-inserted, so the calls
+   of the last turns stay while older bodies, which [History_memo] holds for
+   the histories that still name them, go first. *)
 module Io_memo = struct
-  (* Several times the 1.2 MB history that motivated this, so a keeper's live
-     walk stays resident and eviction only reaches bodies no walk still
-     names. *)
+  (* The live calls of recent turns across all keepers: the 8,660 pairs of one
+     live history averaged 3.9 KB of input and output (2026-09-15), so this
+     holds fewer than 2,200 such calls. A whole history is [History_memo]'s to keep. *)
   let capacity_bytes = 8 * 1024 * 1024
 
   module Key = struct
@@ -221,6 +218,69 @@ let digest_tool_io ~tool_name ~input ~output_text =
     let answer = compute_tool_io ~tool_name ~input ~output_text in
     Io_memo.add key answer;
     answer
+;;
+
+type history_pair = Io_memo.key =
+  { tool_name : string
+  ; input : Yojson.Safe.t
+  ; output_text : string
+  }
+
+(* [Keeper_run_tools_setup.seed_tool_calls_from_history] asks for every matched
+   pair of a keeper's history at the start of every turn. One live keeper held
+   8,660 pairs with 30.2 MB of output and 3.5 MB of input (2026-09-15), several
+   times what [Io_memo] retains for every keeper together, so most of each walk
+   was parsed and hashed again.
+
+   A history memo keeps the pairs of one keeper's previous walk. A walk looks a
+   pair up there, asks [digest_tool_io] for a pair it does not hold (a call the
+   keeper made live last turn is still in [Io_memo]), and publishes the pairs
+   it walked as the next generation. The memo is as large as the history the
+   keeper already holds, and a pair that left the history, such as a purged
+   body, leaves the memo with the next walk. The key is still the bytes, so a
+   rewritten body misses. A published table is never written again: two walks
+   of one keeper each read a finished table and the later publication wins,
+   with the same answers. *)
+module History_memo = struct
+  type t = io_fingerprints option Io_memo.Table.t Atomic.t
+
+  let create () : t = Atomic.make (Io_memo.Table.create 0)
+end
+
+let history_memos : (string * string, History_memo.t) Hashtbl.t = Hashtbl.create 16
+let history_memos_lock = Stdlib.Mutex.create ()
+
+let history_memo ~base_path ~keeper_name =
+  Stdlib.Mutex.protect history_memos_lock (fun () ->
+    match Hashtbl.find_opt history_memos (base_path, keeper_name) with
+    | Some memo -> memo
+    | None ->
+      let memo = History_memo.create () in
+      Hashtbl.replace history_memos (base_path, keeper_name) memo;
+      memo)
+;;
+
+let digest_history_pairs (memo : History_memo.t) pairs =
+  let previous = Atomic.get memo in
+  let next = Io_memo.Table.create (List.length pairs) in
+  let answers =
+    List.map
+      (fun (pair : history_pair) ->
+         let answer =
+           match Io_memo.Table.find_opt previous pair with
+           | Some answer -> answer
+           | None ->
+             digest_tool_io
+               ~tool_name:pair.tool_name
+               ~input:pair.input
+               ~output_text:pair.output_text
+         in
+         Io_memo.Table.replace next pair answer;
+         answer)
+      pairs
+  in
+  Atomic.set memo next;
+  answers
 ;;
 
 module For_testing = struct

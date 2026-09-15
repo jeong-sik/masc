@@ -1195,7 +1195,7 @@ let test_direct_no_progress_retry_loop_runs_fallback_attempt () =
       { requested_override = None
       ; primary_budget = 4096
       ; runtime_budget = 4096
-      ; runtime_budget_source = Some Runtime.Capability
+      ; runtime_budget_source = Runtime.Capability
       ; requested_context_window = 4096
       ; effective_budget = 4096
       }
@@ -1217,7 +1217,7 @@ let test_direct_no_progress_retry_loop_runs_fallback_attempt () =
       { requested_override = None
       ; primary_budget = 1024
       ; runtime_budget = 1024
-      ; runtime_budget_source = Some Runtime.Capability
+      ; runtime_budget_source = Runtime.Capability
       ; requested_context_window = 1024
       ; effective_budget = 1024
       }
@@ -1388,7 +1388,7 @@ let test_direct_retry_loop_publishes_non_retry_terminal_cascade () =
         { requested_override = None
         ; primary_budget = 2048
         ; runtime_budget = 2048
-        ; runtime_budget_source = Some Runtime.Capability
+        ; runtime_budget_source = Runtime.Capability
         ; requested_context_window = 2048
         ; effective_budget = 2048
         }

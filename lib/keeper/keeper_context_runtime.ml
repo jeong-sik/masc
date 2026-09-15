@@ -53,11 +53,9 @@ type max_context_resolution = {
   runtime_budget : int;
   (* Where [runtime_budget] came from: the AGENT_CORE capability catalog, a
      runtime.toml override, or that override clamped by the capability.
-     [None] only on the legacy ordered-label path when no label resolved and
-     the precomputed default budget filled in. Dropping this rendered a
-     runtime.toml override as "runtime_provider_cap" in keeper status JSON,
+     Dropping this rendered a runtime.toml override as "runtime_provider_cap" in keeper status JSON,
      disguising the #25463 config drift as a provider fact. *)
-  runtime_budget_source : Runtime.max_context_source option;
+  runtime_budget_source : Runtime.max_context_source;
   requested_context_window : int;
   effective_budget : int;
 }
@@ -109,9 +107,7 @@ let context_budget_json_of_resolution
      key provider_context_window, which disguised the #25463 262144 config
      drift as a provider fact for weeks. *)
   let runtime_budget_source =
-    match resolution.runtime_budget_source with
-    | Some source -> Runtime.max_context_source_to_string source
-    | None -> "default_fallback"
+    Runtime.max_context_source_to_string resolution.runtime_budget_source
   in
   `Assoc
     [ ("runtime_id", `String runtime_id)
@@ -174,59 +170,6 @@ let dispatch_keeper_phase_event ~config ?origin ~keeper_name event =
 
 let generate_trace_id = Keeper_identity.generate_trace_id
 
-let effective_model_labels_for_turn (m : keeper_meta) : string list =
-  (* Provider selection is runtime.toml SSOT; the former ~provider_filter
-     plumbing was dead and deleted (audit F8). *)
-  let configured = Keeper_model_labels.configured_model_labels_of_meta m in
-  match String.trim (Keeper_status_runtime.active_model_of_meta m) with
-  | "" -> configured
-  | model ->
-      let model_allowed =
-        List.mem model configured
-        || List.exists
-             (fun label ->
-               Runtime_provider_binding.label_matches_runtime_id
-                 ~label
-                 ~runtime_id:model)
-             configured
-      in
-      if model_allowed
-      then dedupe_keep_order (model :: configured)
-      else configured
-
-let resolve_max_context_resolution ~requested_override (labels : string list)
-    : max_context_resolution =
-  let default_budget = Runtime.default_max_context () in
-  let runtime_budget, runtime_budget_source =
-    match
-      labels
-      |> List.find_map (fun label ->
-             String.trim label
-             |> Runtime.resolve_max_context_of_runtime_id)
-    with
-    | Some (budget, source) -> budget, Some source
-    (* Labels are an ordered runtime-budget preference list. If none resolve,
-       the precomputed default runtime budget preserves config-less tests.
-       DET-OK: dispatch still fail-fast validates the selected runtime id before
-       provider execution. *)
-    | None -> default_budget, None
-  in
-  (* RFC-0207: budget against the same per-keeper runtime id that dispatch uses. *)
-  let primary_budget = runtime_budget in
-  let requested_context_window =
-    match requested_override with
-    | Some requested when requested > 0 -> requested
-    | _ -> primary_budget
-  in
-  let effective_budget = min requested_context_window primary_budget in
-  { requested_override
-  ; primary_budget
-  ; runtime_budget
-  ; runtime_budget_source
-  ; requested_context_window
-  ; effective_budget
-  }
-
 let resolve_max_context_resolution_for_runtime
       ~requested_override
       (runtime : Runtime.t)
@@ -249,7 +192,7 @@ let resolve_max_context_resolution_for_runtime
          { requested_override
          ; primary_budget = runtime_budget
          ; runtime_budget
-         ; runtime_budget_source = Some runtime_budget_source
+         ; runtime_budget_source
          ; requested_context_window
          ; effective_budget
          })

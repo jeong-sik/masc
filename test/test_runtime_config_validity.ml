@@ -5225,11 +5225,70 @@ let test_runtime_lsp_servers_answers_the_operator_then_the_table () =
       (servers Lsp_process_manager.Ocaml)
 ;;
 
+(* Every binding the repo ships is one a turn can actually send.
+
+   #36412 made a request with no reasoning control a refusal on a wire that
+   turns reasoning on by itself, and #36424 gave a row a second way to answer
+   (ride the provider's default on purpose). Neither touched config/runtime.toml,
+   and nothing here asked the shipped rows the question: the refusal is a
+   request-time verdict, not a load-time one, so a config that loads cleanly
+   still had 21 of its 44 bindings refused -- the fleet default among them
+   (#36430).
+
+   The check is the one a turn makes. A binding that cannot be materialized is
+   not this suite's subject and is skipped; every one that materializes must
+   pass its own admission. *)
+let test_every_shipped_binding_is_admissible () =
+  with_deployment_agent_core_model_catalog @@ fun _catalog ->
+  let path = Filename.concat (repo_root ()) "config/runtime.toml" in
+  match Runtime_toml.parse_file path with
+  | Error errors ->
+    failf
+      "repo runtime.toml should parse: %s"
+      (String.concat "; "
+         (List.map
+            (fun (err : Runtime_toml.parse_error) ->
+               Printf.sprintf "%s: %s" err.path err.message)
+            errors))
+  | Ok cfg ->
+    let refused =
+      List.filter_map
+        (fun (binding : Runtime_schema.binding) ->
+           match Runtime_adapter.binding_to_provider_config cfg binding with
+           | Error _ -> None
+           | Ok provider_config ->
+             (match
+                Llm_provider.Provider_config.validate_reasoning_effort_request_typed
+                  provider_config
+              with
+              | Ok () -> None
+              | Error rejection ->
+                Some
+                  (Printf.sprintf
+                     "%s.%s: %s"
+                     binding.Runtime_schema.provider_id
+                     binding.Runtime_schema.model_id
+                     (Llm_provider.Provider_config
+                      .reasoning_effort_request_rejection_to_message
+                        rejection))))
+        cfg.Runtime_schema.bindings
+    in
+    (match refused with
+     | [] -> ()
+     | refused ->
+       failf
+         "%d shipped binding(s) a turn cannot send:\n%s"
+         (List.length refused)
+         (String.concat "\n" refused))
+;;
+
 let () =
   run "runtime_config_validity"
     [ ( "runtime TOML gate",
         [ test_case "runtime.json is not a repo config source" `Quick
             test_runtime_json_not_in_repo_config;
+          test_case "every shipped binding is admissible" `Quick
+            test_every_shipped_binding_is_admissible;
           test_case "codex app-server is a distinct turn runtime" `Quick
             test_codex_app_server_materializes_as_turn_runtime;
           test_case "codex app-server rejects declared credentials" `Quick

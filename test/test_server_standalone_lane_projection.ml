@@ -756,15 +756,12 @@ let test_detail_preserves_outcome_when_original_payloads_are_unavailable () =
         (match completed with
          | `Assoc fields -> List.assoc_opt "output" fields = Some `Null
          | _ -> false);
-      let payload leaf =
-        Filename.concat
-          (Filename.concat
-             (Filename.concat (Filename.dirname path) Exact.payload_dirname)
-             run_id)
-          leaf
+      let payload_dir =
+        Filename.concat (Filename.concat (Filename.dirname path) Exact.payload_dirname) run_id
       in
-      Sys.remove (payload "input.json");
-      Sys.remove (payload "output.json");
+      Array.iter
+        (fun name -> Sys.remove (Filename.concat payload_dir name))
+        (Sys.readdir payload_dir);
       let unread = detail () in
       check string "payload read failure does not change execution outcome"
         "succeeded"

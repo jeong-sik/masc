@@ -10,16 +10,34 @@
 
 type owner = { pid : int; driver : string }
 (** [pid] leads the driver's process group, so stopping the group also stops
-    the browser the driver launched. [driver] is the executable path started. *)
+    the browser the driver launched, unless that browser relaunched itself
+    (see {!browsers_using_profile_root}). [driver] is the executable path
+    started. *)
 
 val owner_record_path : masc_root:string -> string
 val owner_to_string : owner -> string
 val owner_of_string : string -> (owner, string) result
 
-val argv : driver:string -> port:int -> string list
+val profile_root : masc_root:string -> string
+(** The directory geckodriver creates every automation browser profile in.
+    It belongs to this workspace's server, so a process using a profile under
+    it is this server's browser. *)
+
+val argv : driver:string -> port:int -> profile_root:string -> string list
 (** Loopback only. [--websocket-port 0] lets Firefox pick the WebDriver BiDi
     port, so drivers of two workspaces never meet on geckodriver's default
-    9222; the session capabilities report the port it picked. *)
+    9222; the session capabilities report the port it picked.
+    [--profile-root] puts each session's profile under [profile_root]. *)
+
+val browsers_using_profile_root : profile_root:string -> process_table:string -> int list
+(** [process_table] is [ps -axo pid=,command=] output. Returns every pid whose
+    command carries [-profile <profile_root>/...].
+
+    On 2026-09-15 a Zen the driver launched crashed and relaunched itself with
+    [MOZ_LAUNCHED_CHILD=1]: no parent, its own process group, the same
+    [-profile] argument. Stopping the driver's group did not reach it, and it
+    kept BiDi port 9222. The profile path is what that relaunch keeps, so it
+    is what ownership is decided by. *)
 
 type leftover = Stop_recorded_driver of int | Not_the_recorded_driver
 

@@ -81,6 +81,36 @@ let stop_driver_left_behind ~record_path =
     Safe_ops.remove_file_logged ~context:"browser-lane driver record" record_path
   end
 
+(* A browser that relaunched itself is outside the driver's process group, so
+   it is found by the profile it still uses and stopped by pid. Its content
+   processes exit when it does. *)
+let stop_pids pids =
+  let signal number pid =
+    try Unix.kill pid number with Unix.Unix_error ((Unix.ESRCH | Unix.EPERM), _, _) -> () in
+  let alive pid = match Unix.kill pid 0 with () -> true | exception Unix.Unix_error _ -> false in
+  List.iter (signal Sys.sigterm) pids;
+  let deadline = Monotonic_deadline.after ~seconds:driver_stop_grace_s in
+  let rec wait () =
+    match List.filter alive pids with
+    | [] -> ()
+    | survivors when Monotonic_deadline.passed deadline -> List.iter (signal Sys.sigkill) survivors
+    | _ :: _ -> Unix.sleepf driver_ready_poll_s; wait ()
+  in
+  wait ()
+
+let stop_browsers_using ~profile_root =
+  match Process_eio.run_argv_with_status [ "ps"; "-ww"; "-axo"; "pid=,command=" ] with
+  | (Unix.WEXITED 0, process_table) ->
+    (match Browser_driver_process.browsers_using_profile_root ~profile_root ~process_table with
+     | [] -> Ok ()
+     | pids ->
+       Log.Server.warn "browser-lane: stopping automation browser pid %s still using %s"
+         (String.concat ", " (List.map string_of_int pids)) profile_root;
+       Eio_unix.run_in_systhread (fun () -> stop_pids pids);
+       Ok ())
+  | ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _) ->
+    Error "the process table could not be read"
+
 let free_loopback_port () =
   match Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 with
   | exception Unix.Unix_error (code, _, _) -> Error (Unix.error_message code)
@@ -97,6 +127,15 @@ let free_loopback_port () =
 let remove_owner_record record_path =
   if Sys.file_exists record_path then
     Safe_ops.remove_file_logged ~context:"browser-lane driver record" record_path
+
+(* Profiles a crashed session left behind are removed once no browser uses
+   them; the directory belongs to this server alone. *)
+let clear_profile_root ~profile_root =
+  match Fs_compat.remove_tree profile_root; Fs_compat.mkdir_p profile_root with
+  | () -> Ok ()
+  | exception (Eio.Io _ as exn) -> Error (Printexc.to_string exn)
+  | exception Unix.Unix_error (code, _, path) -> Error (path ^ ": " ^ Unix.error_message code)
+  | exception Sys_error detail -> Error detail
 
 (* Readiness races the driver's exit, so a driver that dies at start is
    reported at once instead of after the whole readiness timeout. *)
@@ -118,14 +157,16 @@ let await_driver ~clock ~pool ~endpoint ~process ~log_path =
 
 (* The driver is spawned on the server's switch through the posix_spawn
    manager: fork is refused once the server runs several domains, and the
-   manager terminates the driver's whole process group, browser included,
-   when the switch is released. The record is removed by a hook registered
-   before the spawn, so it runs after that termination. *)
+   manager terminates the driver's whole process group when the switch is
+   released. A hook registered before the spawn runs after that termination:
+   it stops any browser still using this server's profile root, which a
+   browser that relaunched itself outside the group does, then removes the
+   record. *)
 let launch_driver ~sw ~env ~masc_root ~record_path ~driver =
   let lane = Filename.concat masc_root "browser-lane" in
   let log_path = Filename.concat lane "geckodriver.log" in
   let prepared =
-    match Fs_compat.mkdir_p lane with
+    match Fs_compat.mkdir_p (Browser_driver_process.profile_root ~masc_root) with
     | () -> Result.map_error (fun detail -> "no free loopback port: " ^ detail) (free_loopback_port ())
     | exception (Eio.Io _ as exn) ->
       Error (Printf.sprintf "cannot create %s: %s" lane (Printexc.to_string exn))
@@ -136,14 +177,19 @@ let launch_driver ~sw ~env ~masc_root ~record_path ~driver =
   | Error detail -> Error detail
   | Ok port ->
     let clock = Eio.Stdenv.clock env in
-    Eio.Switch.on_release sw (fun () -> remove_owner_record record_path);
+    let profile_root = Browser_driver_process.profile_root ~masc_root in
+    Eio.Switch.on_release sw (fun () ->
+      (match stop_browsers_using ~profile_root with
+       | Ok () -> ()
+       | Error detail -> Log.Server.warn "browser-lane: browsers under %s not checked: %s" profile_root detail);
+      remove_owner_record record_path);
     match
       let output =
         Eio.Path.open_out ~sw ~create:(`Or_truncate 0o600) Eio.Path.(Eio.Stdenv.fs env / log_path) in
       Eio.Process.spawn ~sw
         (Posix_spawn_process_mgr.foreground_mgr ~clock ~grace_seconds:driver_stop_grace_s)
         ~stdout:output ~stderr:output
-        (Browser_driver_process.argv ~driver ~port)
+        (Browser_driver_process.argv ~driver ~port ~profile_root)
     with
     | exception (Eio.Io _ as exn) -> Error ("geckodriver did not start: " ^ Printexc.to_string exn)
     | exception Unix.Unix_error (code, call, target) ->
@@ -172,8 +218,13 @@ let start ~sw ~env =
   let base_path = Config_dir_resolver.base_path_or_cwd () in
   let masc_root = Config_dir_resolver.masc_root ~base_path in
   let record_path = Browser_driver_process.owner_record_path ~masc_root in
+  let profile_root = Browser_driver_process.profile_root ~masc_root in
   Eio.Fiber.fork ~sw (fun () ->
     stop_driver_left_behind ~record_path;
+    (* Profiles are cleared only once no browser can still be using one. *)
+    (match Result.bind (stop_browsers_using ~profile_root) (fun () -> clear_profile_root ~profile_root) with
+     | Ok () -> ()
+     | Error detail -> Log.Server.warn "browser-lane: profiles under %s kept: %s" profile_root detail);
     match configured_browser () with
     | Error detail -> Log.Server.error "browser-lane: %s" detail
     | Ok Browser_configuration.Disabled ->

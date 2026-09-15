@@ -150,7 +150,7 @@ let handle_schedule_write_request
     let config = (Mcp_server.workspace_scope state).Mcp_server.config in
     let context : Tool_schedule.context =
       { config
-      ; agent_name
+      ; caller = Tool_schedule.Named_caller agent_name
       ; stamp_keeper_wake_result_delivery =
           (fun ~payload ->
              Schedule_payload_projection.set_keeper_wake_result_delivery

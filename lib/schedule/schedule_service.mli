@@ -39,6 +39,7 @@ val create :
 
 val update :
   Workspace_utils.config ->
+  now:float ->
   schedule_id:string ->
   ?requested_at:float ->
   ?expires_at:float ->
@@ -52,7 +53,10 @@ val update :
   (Schedule_domain.schedule_request, service_error) result
 (** Replaces one active definition under its stable [schedule_id]. The new
     request receives a fresh instance id; the store refuses running and
-    terminal schedules. *)
+    terminal schedules. [now] is the updating call's clock: the store refuses
+    a due time that changes and lands before the current whole second
+    ({!Schedule_store.Changed_due_already_past}), and accepts the stored due
+    time sent back unchanged. *)
 
 val cancel :
   Workspace_utils.config ->

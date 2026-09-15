@@ -80,14 +80,15 @@ let test_update_reuses_create_fields_and_requires_identity () =
 (* [masc_schedule_create] is deferred: until the model asks for its schema,
    the listing carries only the first line of its description, cut at the
    listing's 80-byte cap ([Keeper_identity_tool_search.summary_of]). That
-   line is the only
-   thing a Keeper deciding how to wait for a later time ever reads, so it is
-   pinned here next to the prose it summarises. *)
+   line is the only thing a Keeper deciding how to wait for a later time ever
+   reads, so it is pinned here next to the prose it summarises. It names
+   due_in_sec because a Keeper sees the current time only on its turn's first
+   request: after a tool round, a delay is the due time it can give exactly. *)
 let test_the_deferred_listing_names_the_wait () =
   check
     string
     "masc_schedule_create summary"
-    "Wake a Keeper at a later time; the way to wait instead of polling the clock."
+    "Wake a Keeper at a later time. due_in_sec counts seconds from this call."
     (Masc.Keeper_identity_tool_search.summary_of (find "masc_schedule_create").description)
 ;;
 

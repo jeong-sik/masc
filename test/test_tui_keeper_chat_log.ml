@@ -117,13 +117,15 @@ let test_commit_is_idempotent_and_bumps_once () =
 
 let line seq ts event : Journal.journaled_event = { seq; ts; event }
 
-let page_json ?(schema = "masc.keeper_chat_events.v2") ~has_more ~next_since_seq lines =
+let page_json ?(schema = "masc.keeper_chat_events.v2") ?(next_since_offset = `Int 0)
+    ~has_more ~next_since_seq lines =
   `Assoc
     [ "schema", `String schema
     ; "operation_id", `String "tui-req-1"
     ; "events", `List (List.map Journal.journaled_event_to_json lines)
     ; "has_more", `Bool has_more
     ; "next_since_seq", Journal.replay_position_to_yojson next_since_seq
+    ; "next_since_offset", next_since_offset
     ]
 
 let test_decode_events_page () =
@@ -134,14 +136,41 @@ let test_decode_events_page () =
   in
   (match
      Log.decode_events_page
-       (page_json ~has_more:true ~next_since_seq:(Journal.After_seq 1) lines)
+       (page_json ~next_since_offset:(`Int 212) ~has_more:true
+          ~next_since_seq:(Journal.After_seq 1) lines)
    with
    | Ok page ->
        check string "operation id" "tui-req-1" page.operation_id;
        check int "two events" 2 (List.length page.events);
        check bool "has_more" true page.has_more;
-       check position "cursor" (Journal.After_seq 1) page.next_since_seq
+       check position "cursor" (Journal.After_seq 1) page.next_since_seq;
+       check int "byte cursor" 212 page.next_since_offset
    | Error detail -> fail detail);
+  (* The byte cursor is required and never negative: a page without it cannot
+     be continued from where it ended. *)
+  (match
+     Log.decode_events_page
+       (`Assoc
+          [ "schema", `String "masc.keeper_chat_events.v2"
+          ; "operation_id", `String "x"
+          ; "events", `List []
+          ; "has_more", `Bool false
+          ; "next_since_seq", `Int 3
+          ])
+   with
+   | Ok _ -> fail "a page without next_since_offset decoded"
+   | Error detail ->
+       check string "the missing byte cursor is named"
+         "events body has no next_since_offset" detail);
+  (match
+     Log.decode_events_page
+       (page_json ~next_since_offset:(`Int (-1)) ~has_more:false
+          ~next_since_seq:(Journal.After_seq 3) [])
+   with
+   | Ok _ -> fail "a negative byte cursor decoded"
+   | Error detail ->
+       check string "the negative byte cursor is named"
+         "events body's next_since_offset is not an integer >= 0" detail);
   (* An empty whole-journal page hands back null: the whole journal again. *)
   (match
      Log.decode_events_page
@@ -164,6 +193,7 @@ let test_decode_events_page () =
           ; "events", `List []
           ; "has_more", `Bool false
           ; "next_since_seq", `Int (-1)
+          ; "next_since_offset", `Int 0
           ])
    with
    | Ok _ -> fail "a negative cursor decoded"
@@ -176,6 +206,7 @@ let test_decode_events_page () =
          ; "events", `List [ `Assoc [ "v", `Int 1; "seq", `Int 9 ] ]
          ; "has_more", `Bool false
          ; "next_since_seq", `Int 9
+         ; "next_since_offset", `Int 0
          ])
   with
   | Ok _ -> fail "a malformed line decoded"
@@ -367,81 +398,105 @@ let test_decode_events_error_by_code () =
     (Log.decode_events_error ~status:403 ~credential_sent:false "forbidden")
 ;;
 
-(* The pager follows has_more only while the position advances, starts where
-   it is told, and stops at the first error. *)
+(* The pager follows has_more only while both cursors advance, starts where
+   it is told from the first row, asks every later page from the byte offset
+   the page before handed back, and stops at the first error. *)
 let test_read_whole_journal_pages_until_the_position_stops_moving () =
   let asked = ref [] in
-  let page_of (since_seq : Journal.replay_position) =
-    asked := since_seq :: !asked;
-    let l seq = line seq (float_of_int seq) (E.Text_delta (string_of_int seq)) in
-    match since_seq with
-    | Journal.Whole_turn ->
-        Ok { Log.operation_id = "op"; events = [ l 0; l 1 ]; has_more = true
-           ; next_since_seq = Journal.After_seq 1 }
-    | Journal.After_seq 1 ->
-        Ok { Log.operation_id = "op"; events = [ l 2 ]; has_more = true
-           ; next_since_seq = Journal.After_seq 2 }
-    | Journal.After_seq 2 ->
-        Ok { Log.operation_id = "op"; events = []; has_more = false
-           ; next_since_seq = Journal.After_seq 2 }
-    | Journal.After_seq _ -> Error (Log.Events_transport "unexpected page")
+  let l seq = line seq (float_of_int seq) (E.Text_delta (string_of_int seq)) in
+  let page ~events ~has_more ~next_since_seq ~next_since_offset =
+    Ok { Log.operation_id = "op"; events; has_more; next_since_seq; next_since_offset }
   in
+  let page_of (since_seq : Journal.replay_position)
+      (since_offset : Journal.page_start) =
+    asked := (since_seq, Journal.page_start_to_wire since_offset) :: !asked;
+    match since_seq, since_offset with
+    | Journal.Whole_turn, Journal.From_first_row ->
+        page ~events:[ l 0; l 1 ] ~has_more:true ~next_since_seq:(Journal.After_seq 1)
+          ~next_since_offset:20
+    | Journal.After_seq 1, (Journal.From_first_row | Journal.From_offset 20) ->
+        page ~events:[ l 2 ] ~has_more:true ~next_since_seq:(Journal.After_seq 2)
+          ~next_since_offset:30
+    | Journal.After_seq 2, Journal.From_offset 30 ->
+        page ~events:[] ~has_more:false ~next_since_seq:(Journal.After_seq 2)
+          ~next_since_offset:30
+    | (Journal.Whole_turn | Journal.After_seq _),
+      (Journal.From_first_row | Journal.From_offset _) ->
+        Error (Log.Events_transport "unexpected page")
+  in
+  let asked_list = list (pair position (option int)) in
   (match
      Log.read_whole_journal ~since_seq:Journal.Whole_turn
-       ~fetch:(fun ~since_seq -> page_of since_seq)
+       ~fetch:(fun ~since_seq ~since_offset -> page_of since_seq since_offset)
    with
    | Ok lines ->
        check (list int) "every line once, in order" [ 0; 1; 2 ]
          (List.map (fun (l : Journal.journaled_event) -> l.seq) lines)
    | Error error -> failf "unexpected %s" (Log.events_error_to_string error));
-  check (list position) "each page asked once, from the whole journal"
-    [ Journal.Whole_turn; Journal.After_seq 1; Journal.After_seq 2 ]
+  check asked_list
+    "each page asked once: the first from the first row, the rest from the offset handed back"
+    [ Journal.Whole_turn, None; Journal.After_seq 1, Some 20; Journal.After_seq 2, Some 30 ]
     (List.rev !asked);
-  (* A resume starts where the log ends. *)
+  (* A resume starts where the log ends, from the first row. *)
   asked := [];
   (match
      Log.read_whole_journal ~since_seq:(Journal.After_seq 1)
-       ~fetch:(fun ~since_seq -> page_of since_seq)
+       ~fetch:(fun ~since_seq ~since_offset -> page_of since_seq since_offset)
    with
    | Ok lines -> check int "only what the log lacks" 1 (List.length lines)
    | Error error -> failf "unexpected %s" (Log.events_error_to_string error));
-  check (list position) "asked from the resume position"
-    [ Journal.After_seq 1; Journal.After_seq 2 ]
+  check asked_list "asked from the resume position"
+    [ Journal.After_seq 1, None; Journal.After_seq 2, Some 30 ]
     (List.rev !asked);
   (* A page that claims more without advancing is an error naming the
-     position, asked once: the lines read so far are not the journal, and a
+     positions, asked once: the lines read so far are not the journal, and a
      shorter [Ok] would have the handler hold a truncated turn as the record
      and say nothing. The whole journal is never past anything, so a null
      cursor is stuck too. *)
   asked := [];
-  let stuck ~since_seq =
-    asked := since_seq :: !asked;
-    Ok { Log.operation_id = "op"; events = [ line 0 1.0 (E.Text_delta "0") ]
-       ; has_more = true; next_since_seq = since_seq }
+  let stuck ~since_seq ~since_offset =
+    asked := (since_seq, Journal.page_start_to_wire since_offset) :: !asked;
+    page ~events:[ line 0 1.0 (E.Text_delta "0") ] ~has_more:true ~next_since_seq:since_seq
+      ~next_since_offset:(Journal.page_start_offset since_offset)
   in
   (match Log.read_whole_journal ~since_seq:Journal.Whole_turn ~fetch:stuck with
    | Ok lines -> failf "a stuck page read as %d line(s)" (List.length lines)
    | Error (Log.Events_undecodable detail) ->
-       check string "the error names the position that did not advance"
-         "page after since_seq=whole_turn claims more but did not advance \
-          (next_since_seq=whole_turn)"
+       check string "the error names the positions that did not advance"
+         "page after since_seq=whole_turn since_offset=0 claims more but did not \
+          advance (next_since_seq=whole_turn next_since_offset=0)"
          detail
    | Error error -> failf "unexpected %s" (Log.events_error_to_string error));
-  check (list position) "the stuck page is asked once" [ Journal.Whole_turn ]
+  check asked_list "the stuck page is asked once" [ Journal.Whole_turn, None ]
     (List.rev !asked);
   (match Log.read_whole_journal ~since_seq:(Journal.After_seq 4) ~fetch:stuck with
    | Ok lines -> failf "a stuck page after a held seq read as %d line(s)" (List.length lines)
    | Error (Log.Events_undecodable detail) ->
        check string "the error names the held seq that did not advance"
-         "page after since_seq=4 claims more but did not advance (next_since_seq=4)"
+         "page after since_seq=4 since_offset=0 claims more but did not advance \
+          (next_since_seq=4 next_since_offset=0)"
+         detail
+   | Error error -> failf "unexpected %s" (Log.events_error_to_string error));
+  (* A seq that moves is not enough: a byte cursor that stays would have the
+     server decode the same rows again for every page. *)
+  let offset_stuck ~since_seq:_ ~since_offset =
+    page ~events:[ l 0 ] ~has_more:true ~next_since_seq:(Journal.After_seq 0)
+      ~next_since_offset:(Journal.page_start_offset since_offset)
+  in
+  (match Log.read_whole_journal ~since_seq:Journal.Whole_turn ~fetch:offset_stuck with
+   | Ok lines -> failf "a page whose offset stayed read as %d line(s)" (List.length lines)
+   | Error (Log.Events_undecodable detail) ->
+       check string "the error names the offset that did not advance"
+         "page after since_seq=whole_turn since_offset=0 claims more but did not \
+          advance (next_since_seq=0 next_since_offset=0)"
          detail
    | Error error -> failf "unexpected %s" (Log.events_error_to_string error));
   (* An error ends the read as that error. *)
-  let failing ~since_seq =
+  let failing ~since_seq ~since_offset:_ =
     match since_seq with
     | Journal.Whole_turn ->
-        Ok { Log.operation_id = "op"; events = []; has_more = true
-           ; next_since_seq = Journal.After_seq 5 }
+        page ~events:[] ~has_more:true ~next_since_seq:(Journal.After_seq 5)
+          ~next_since_offset:40
     | Journal.After_seq _ -> Error Log.Journal_pruned
   in
   check bool "the first error is the result" true

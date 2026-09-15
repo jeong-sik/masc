@@ -355,6 +355,25 @@ let test_journal_torn_tail_reads_complete_rows () =
           Alcotest.fail ("torn tail read as unreadable: " ^ detail)
         | Error (L.Journal_corrupt detail) ->
           Alcotest.fail ("torn tail read as corrupt: " ^ detail));
+       (* A page reads the same rows: the fragment is not one, and the offset
+          it hands back is the end of the complete rows, not of the file. *)
+       (match L.read_journal_rows_path path with
+        | Error _ -> Alcotest.fail "the rows of a torn journal did not read"
+        | Ok rows ->
+          (match
+             L.page_of_rows ~path ~since_seq:L.Whole_turn ~start:L.From_first_row
+               ~limit:L.page_max_limit rows
+           with
+           | Error failure ->
+             Alcotest.fail ("a page of a torn journal: " ^ L.page_failure_to_string failure)
+           | Ok page ->
+             Alcotest.(check (list int)) "a page serves the complete rows" [ 0; 1 ]
+               (seqs page.events);
+             Alcotest.(check bool) "and nothing follows them" false page.has_more;
+             Alcotest.(check int) "the offset handed back ends the complete rows"
+               (String.length rows) page.next_offset;
+             Alcotest.(check bool) "which is before the fragment" true
+               (page.next_offset < (Unix.stat path).Unix.st_size)));
        (* A file holding only a fragment has no row yet. *)
        let fragment_only = Filename.concat (Filename.dirname path) "op-fragment.jsonl" in
        let oc = open_out_bin fragment_only in

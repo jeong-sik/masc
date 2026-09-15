@@ -6668,12 +6668,12 @@ let launch_keeper_chat_journal_loads state ~mailbox ~keeper_name targets =
     let journal =
       try
         Keeper_chat_log.read_whole_journal ~since_seq
-          ~fetch:(fun ~since_seq ->
+          ~fetch:(fun ~since_seq ~since_offset ->
             (* Pages at the journal's own ceiling: one definition, the
                server's and this client's, so the ask can never exceed
                what the endpoint admits. *)
             Masc_tui_http.fetch_keeper_chat_events ~host ~port ~keeper_name
-              ~operation_id ~since_seq
+              ~operation_id ~since_seq ~since_offset
               ~limit:Masc.Keeper_chat_event_log.page_max_limit)
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn

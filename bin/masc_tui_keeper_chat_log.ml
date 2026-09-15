@@ -203,6 +203,7 @@ type events_page =
   ; events : Journal.journaled_event list
   ; has_more : bool
   ; next_since_seq : Journal.replay_position
+  ; next_since_offset : int
   }
 
 let events_schema = "masc.keeper_chat_events.v2"
@@ -237,6 +238,14 @@ let decode_events_page (json : Yojson.Safe.t) =
          | None -> Error "events body's next_since_seq is neither null nor an integer >= 0")
       | None -> Error "events body has no next_since_seq"
     in
+    let* next_since_offset =
+      (* The byte offset past the last event served, handed back beside the
+         seq so the next page starts reading there. *)
+      match List.assoc_opt "next_since_offset" fields with
+      | Some (`Int offset) when offset >= 0 -> Ok offset
+      | Some _ -> Error "events body's next_since_offset is not an integer >= 0"
+      | None -> Error "events body has no next_since_offset"
+    in
     let* raw_events =
       match List.assoc_opt "events" fields with
       | Some (`List events) -> Ok events
@@ -252,7 +261,7 @@ let decode_events_page (json : Yojson.Safe.t) =
         raw_events
       |> Result.map List.rev
     in
-    Ok { operation_id; events; has_more; next_since_seq }
+    Ok { operation_id; events; has_more; next_since_seq; next_since_offset }
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
     Error "events body is not an object"
 ;;
@@ -312,27 +321,36 @@ let position_advanced ~from (next : Journal.replay_position) =
 
 (* A whole journal, page by page, through the caller's fetch. [since_seq] is
    where to start (the whole journal, or a held log's {!resume_position} to
-   read only what it lacks). The loop follows [has_more] while
-   [next_since_seq] advances. A page that claims more without advancing
-   would be read forever, and the lines read so far are not the journal:
-   such a read is an error naming the position, not a shorter [Ok]. *)
+   read only what it lacks). The first page reads from the journal's first
+   row; every later page starts at the byte offset the page before handed
+   back, so the server decodes each row once over the whole read. The loop
+   follows [has_more] while both cursors advance: [next_since_seq] past the
+   seq asked from and [next_since_offset] past the offset asked from. A page
+   that claims more without advancing would be read forever, and the lines
+   read so far are not the journal: such a read is an error naming both
+   positions, not a shorter [Ok]. *)
 let read_whole_journal ~fetch ~since_seq =
-  let rec page since_seq acc =
-    match fetch ~since_seq with
+  let rec page since_seq since_offset acc =
+    match fetch ~since_seq ~since_offset with
     | Error error -> Error error
-    | Ok { events; has_more; next_since_seq; _ } ->
+    | Ok { events; has_more; next_since_seq; next_since_offset; _ } ->
       let acc = List.rev_append events acc in
       if not has_more
       then Ok (List.rev acc)
-      else if position_advanced ~from:since_seq next_since_seq
-      then page next_since_seq acc
+      else if
+        position_advanced ~from:since_seq next_since_seq
+        && next_since_offset > Journal.page_start_offset since_offset
+      then page next_since_seq (Journal.From_offset next_since_offset) acc
       else
         Error
           (Events_undecodable
              (Printf.sprintf
-                "page after since_seq=%s claims more but did not advance (next_since_seq=%s)"
+                "page after since_seq=%s since_offset=%d claims more but did not \
+                 advance (next_since_seq=%s next_since_offset=%d)"
                 (Journal.replay_position_to_string since_seq)
-                (Journal.replay_position_to_string next_since_seq)))
+                (Journal.page_start_offset since_offset)
+                (Journal.replay_position_to_string next_since_seq)
+                next_since_offset))
   in
-  page since_seq []
+  page since_seq Journal.From_first_row []
 ;;

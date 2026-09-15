@@ -707,19 +707,18 @@ let ensure_lsp_process cs lang_id =
              ~params:init_params
              ~client_id:(-1)
          in
+         (* An initialize answer that arrived as the window closed is the
+            answer; the server is not refused as one that never initialized. *)
          let init_result =
-           try
-             Ok
-               (Eio.Time.with_timeout_exn
-                  cs.clock
-                  Lsp_proxy_limits.initialize_timeout_sec
-                  (fun () -> Eio.Promise.await promise))
-           with Eio.Time.Timeout ->
-             Error
-               (Printf.sprintf
-                  "LSP initialize timeout for %s (%.0fs)"
-                  lang_id
-                  Lsp_proxy_limits.initialize_timeout_sec)
+           Watched_work.run
+             ~watcher:(fun () ->
+               Eio.Time.sleep cs.clock Lsp_proxy_limits.initialize_timeout_sec;
+               Error
+                 (Printf.sprintf
+                    "LSP initialize timeout for %s (%.0fs)"
+                    lang_id
+                    Lsp_proxy_limits.initialize_timeout_sec))
+             (fun () -> Ok (Eio.Promise.await promise))
          in
          (match init_result with
           | Ok (Ok _) ->

@@ -1315,10 +1315,17 @@
  (libraries masc_tui_context_inspector masc.masc_types))
 
 (library
+ (name masc_tui_next_request_band)
+ (wrapped false)
+ (modules masc_tui_next_request_band)
+ (libraries masc_tui_context_inspector masc_tui_token_scale masc_tui_ansi))
+
+(library
  (name masc_tui_render_prim)
  (wrapped false)
  (modules masc_tui_render_prim)
  (libraries
+  masc_tui_next_request_band
   masc_tui_answering
   masc_tui_composer_projection
   masc_tui_roster_pane

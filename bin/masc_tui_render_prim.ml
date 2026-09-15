@@ -3130,6 +3130,7 @@ let context_split_width cols =
 
 
 let context_composition_lines ~cols ~turn_back
+    ~(forecast : (Masc_tui_context_inspector.forecast, string) result)
     (selection : Masc_tui_context_inspector.selection) =
   let module Inspector = Masc_tui_context_inspector in
   (* The usable cells after the two-space indent every row carries. No floor
@@ -3628,6 +3629,10 @@ let context_composition_lines ~cols ~turn_back
     @ velocity_lines
     @ List.concat (List.mapi row selection.Inspector.recent)
   in
+  let next_request_lines =
+    Masc_tui_next_request_band.lines ~prose ~fact
+      ~safe:Keeper_chat.terminal_safe_text ~scale forecast
+  in
   (* Read top to bottom as the turn is built: what came in, what was sent,
      how far back it reached, and what the provider counted on the turns
      before it. The request stood above the components it is made of, so the
@@ -3651,6 +3656,12 @@ let context_composition_lines ~cols ~turn_back
           ~caption:"how far back this turn looked"
     ]
   @ history_lines
+  @ [ "" ]
+  @ [ "  "
+      ^ Context_bars.band ~width ~title:"NEXT REQUEST"
+          ~caption:"what the next Agent Core request would carry, computed now"
+    ]
+  @ next_request_lines
   @ [ "" ]
   @ recent_turns_lines @ [ "" ]
   @ prose
@@ -4312,7 +4323,9 @@ let context_inspector_content_lines ~cols state : context_pane_body =
             | Ok selection ->
                 Plain
                   ( context_composition_lines ~cols
-                      ~turn_back:state.context_inspector_turn_back selection
+                      ~turn_back:state.context_inspector_turn_back
+                      ~forecast:reading.Masc_tui_context_inspector.forecast
+                      selection
                   , None )
             | Error detail ->
                 Plain

@@ -541,12 +541,22 @@ let find_snapshot ~config ~keeper ~turn_ref =
   then Error (Unknown_keeper keeper)
   else
     let store = Keeper_types_support.keeper_provider_input_store config keeper in
+    let wanted_trace = Ids.Turn_ref.trace_id turn_ref in
+    let wanted_turn = Ids.Turn_ref.absolute_turn turn_ref in
     match
       Dated_jsonl.find_latest_entry_result store (fun entry ->
         match snapshot_of_recent_entry entry with
         | Error error -> Some (Error error)
         | Ok snapshot when Ids.Turn_ref.equal snapshot.turn_ref turn_ref ->
           Some (Ok snapshot)
+        | Ok snapshot
+          when String.equal snapshot.trace_id wanted_trace
+               && snapshot.absolute_turn < wanted_turn ->
+          (* A trace appends its turns in order, so the entries before this one
+             are older turns of it: the turn asked for was never written here.
+             Reading on would decode every remaining snapshot, and a live
+             store is 79-231 MB of them. *)
+          Some (Error (Snapshot_not_found turn_ref))
         | Ok _ -> None)
     with
     | Error error -> Error (Store_read_failed error)

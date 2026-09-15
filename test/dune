@@ -3355,6 +3355,11 @@
   masc_tui_types))
 
 (test
+ (name test_tui_context_inspector_supersede)
+ (modules test_tui_context_inspector_supersede)
+ (libraries masc_tui_image_preview alcotest masc_tui_types))
+
+(test
  (name test_tui_chat_timeline_assembly)
  (modules test_tui_chat_timeline_assembly)
  (libraries masc_tui_image_preview alcotest masc_tui_keeper_chat_transcript masc_tui_types))

@@ -93,10 +93,12 @@ type rate_limit =
   ; overage_disabled_reason : string option
   }
 
-(** Usage counts read from a CLI frame: the result frame carries the turn
-    total, and each assistant frame carries the usage of the API call that
-    produced it (summed, deduplicated by message id, when a host stop ends
-    the turn before the result frame). The CLI mirrors Anthropic
+(** Usage counts read from a CLI frame. Each assistant frame carries the
+    usage of the API call that produced it, and the turn reports the newest
+    counted call's, deduplicated by message id: one request's input is what
+    a window is compared with, and the sum the result frame carries over a
+    turn's calls (each carrying the whole context again as cache reads) is
+    not a size any request had. The CLI mirrors Anthropic
     Messages semantics: [input_tokens] is the exclusive wire count (tokens
     after the last cache breakpoint); absent cache fields read as 0. The
     keeper mapping builds the canonical inclusive
@@ -202,10 +204,11 @@ type error =
   | Stopped_by_host of
       { stop : host_stop
       ; usage : turn_usage option
-        (** Token counts summed over the assistant frames seen before the
-            host ended the turn, deduplicated by message id. The result
-            frame that would carry the turn total never arrives after a
-            host stop, so this sum is what the keeper records. *)
+        (** The newest assistant frame's usage seen before the host ended
+            the turn, deduplicated by message id: the same one request's
+            figure a completed turn reports. The result frame never
+            arrives after a host stop, so without this the keeper recorded
+            nothing. *)
       }
   | Quota_blocked of
       { api_error_status : int option

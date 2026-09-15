@@ -15,10 +15,11 @@ let observation ?flag ?environment ?cwd ?(recorded = Workspace_root.No_record)
 let source_label = function
   | Ok root -> Workspace_root.source_label root.Workspace_root.source
   | Error (Workspace_root.No_workspace _) -> "no_workspace"
+  | Error (Workspace_root.Unanchored _) -> "unanchored"
 
 let root_of = function
   | Ok root -> root.Workspace_root.root
-  | Error (Workspace_root.No_workspace _) -> "(none)"
+  | Error (Workspace_root.No_workspace _ | Workspace_root.Unanchored _) -> "(none)"
 
 let resolves label ~source ~root observed =
   let resolved = Workspace_root.resolve observed in
@@ -82,6 +83,16 @@ let named_roots_are_absolute_and_canonical () =
     (observation ~flag:"/cwd/ws/.masc" ~cwd:"/cwd" ());
   resolves "linked flag" ~source:"explicit_cli" ~root:"/private/tmp/ws"
     (observation ~flag:"/tmp/ws" ~links:[ "/tmp/ws", "/private/tmp/ws" ] ())
+
+(* Reported by review of #36447: with an unreadable cwd a relative flag used to
+   come back as a relative root, although the interface promises an absolute one. *)
+let a_relative_named_value_without_a_cwd_is_unanchored () =
+  check string "relative flag" "unanchored"
+    (source_label (Workspace_root.resolve (observation ~flag:"ws" ())));
+  check string "relative environment" "unanchored"
+    (source_label (Workspace_root.resolve (observation ~environment:"ws" ())));
+  check string "absolute flag needs no cwd" "explicit_cli"
+    (source_label (Workspace_root.resolve (observation ~flag:"/ws" ())))
 
 let rec rm_rf path =
   if Sys.file_exists path then
@@ -153,6 +164,8 @@ let () =
         ; test_case "a relative record is stale" `Quick a_relative_record_is_stale
         ; test_case "named roots are absolute and canonical" `Quick
             named_roots_are_absolute_and_canonical
+        ; test_case "a relative named value without a cwd is unanchored" `Quick
+            a_relative_named_value_without_a_cwd_is_unanchored
         ; test_case "observe requires .masc/config" `Quick
             observe_requires_masc_config
         ] )

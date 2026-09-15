@@ -46,6 +46,9 @@ type error =
             (** [(record file, path it names)] when a record exists but its path
                 is relative or holds no [.masc/config]. *)
       }
+  | Unanchored of { source : source; requested : string }
+      (** A relative flag or variable while the current directory cannot be
+          read, so no absolute root exists to name. *)
 
 val resolve : observation -> (t, error) result
 (** Pure. Blank flag or variable values count as absent. *)

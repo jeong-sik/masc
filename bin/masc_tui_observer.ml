@@ -149,7 +149,7 @@ let chat_appended_keeper = function
      chat, so a frame from mid-turn does not either. *)
   | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
-  | Keeper_turn_complete _ | Keeper_turn_observation _
+  | Keeper_turn_complete _
   | Keeper_composite_changed _
   | Keeper_chat_stream_frame _ | Keeper_waiting_inventory_changed _
   | Fusion_run_status _ | Snapshot _ | Other _ ->

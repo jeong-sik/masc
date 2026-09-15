@@ -17,8 +17,11 @@ not run, because its verdicts look real.
 
 Build targets include literal files in the stanza's (deps ...) as well as
 %{dep:...} environment values. This is not a Dune dependency-expression
-evaluator: source_tree, glob, alias and variable-bearing deps remain owned by
-Dune's runtest action.
+evaluator: glob, alias and variable-bearing deps remain owned by Dune's
+runtest action. A (source_tree DIR) dep is passed through as the target
+`dune build DIR` accepts from the root -- building it is a normal build, not
+the runtest action, and a targeted run without it misses the tree the suite
+reads.
 
 The two forms spell the same file differently on purpose. A stanza writes a
 path relative to test/, which is where the runner stands
@@ -162,6 +165,14 @@ def collect_literal_deps(form) -> list[str]:
         collected = []
         for item in form[1:]:
             if not isinstance(item, str):
+                # A list dep is a dependency expression: (source_tree DIR),
+                # (glob_files ...), (alias ...). Only source_tree names a
+                # target `dune build` accepts from the root -- the directory
+                # itself, which copies the tree into _build. The others name
+                # nothing a build target can be, so they stay with Dune's
+                # runtest action.
+                if item and item[0] == "source_tree":
+                    collected.extend(str(d) for d in item[1:] if isinstance(d, str))
                 continue
             if VAR_RE.search(item):
                 # A %{project_root}/ dep names a file inside this checkout:
@@ -543,6 +554,29 @@ def self_test() -> int:
         "a variable only dune can name stays in runtest's hands", deps,
         [],
     )
+
+    # test/stanzas/test_shipped_skills.inc carries (deps (source_tree
+    # ../skills)). The reader used to drop every list-shaped dep, so the
+    # targeted runner built the suite without the tree and the run failed on
+    # the files it reads -- a verdict about the runner, not the change.
+    _, deps = suite_env(
+        "test_tree",
+        "(test (name test_tree) (deps (source_tree ../skills)))",
+    )
+    check("a source_tree dep is a build target", deps, ["../skills"])
+    check(
+        "and dune takes it from the root, not from test/",
+        [os.path.normpath(os.path.join("test", d)) for d in deps],
+        ["skills"],
+    )
+    # The other list shapes name nothing a build target can be; they stay
+    # dropped rather than handed to `dune build` as garbage.
+    _, deps = suite_env(
+        "test_glob",
+        "(test (name test_glob)"
+        " (deps (glob_files *.json) (alias runtest-deps) (source_tree ../lib)))",
+    )
+    check("glob and alias deps stay with dune's runtest action", deps, ["../lib"])
 
     env, deps = suite_env("test_gamma", FIXTURE_DEP)
     check("a dep value becomes its path", env, [("MASC_MAIN_EIO_EXE", "../bin/main_eio.exe")])

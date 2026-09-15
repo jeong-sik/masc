@@ -796,6 +796,52 @@ let test_disk_backup_failure_preserves_machine () =
   read_guest_disk '~'
 ;;
 
+(* #36670: a press whose ledger edge cannot be written raises. The keys it had
+   put down used to stay down, so the next checkpoint carried them, and the next
+   refusal that released its own keys released them too while reporting that
+   nothing changed. The edge that failed to write stayed in the in-memory
+   ledger as well. A directory where the ledger file was makes every append
+   raise before a frame runs, so the whole machine must read as it did. *)
+let test_press_that_raises_releases_its_keys () =
+  with_workspace @@ fun base_path ->
+  let loaded = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String "") ] in
+  check bool "machine load completes" true (is_completed loaded);
+  let ledger_path =
+    Filename.concat
+      (Filename.concat (Filename.concat base_path ".masc") "msx")
+      "ledger.jsonl"
+  in
+  let probe = Filename.concat base_path "probe.json" in
+  let machine () =
+    ignore (Msx_lane.save ~path:probe |> lane_observation "probe save");
+    match Yojson.Safe.from_file probe with
+    | `Assoc fields ->
+      (match List.assoc_opt "machine" fields with
+       | Some (`String bytes) -> bytes
+       | Some _ | None -> fail "the checkpoint carries no machine")
+    | _ -> fail "the checkpoint is not an object"
+  in
+  let before = machine () in
+  let edges_before = List.length (Msx_lane.ledger ()) in
+  Sys.remove ledger_path;
+  Sys.mkdir ledger_path 0o755;
+  List.iter
+    (fun sequence ->
+      (match
+         Msx_lane.press ~who:"msx-test" ~keys:[ Msx.Space; Msx.Return ]
+           ~hold_frames:2 ~step_frames:4 ~sequence
+       with
+       | exception Sys_error _ -> ()
+       | Ok _ | Error _ -> fail "a press whose ledger cannot be written must raise");
+      check string
+        (Printf.sprintf "sequence=%b: no key stays held and no frame ran" sequence)
+        before (machine ());
+      check int
+        (Printf.sprintf "sequence=%b: the unwritten edge is not in the ledger" sequence)
+        edges_before (List.length (Msx_lane.ledger ())))
+    [ false; true ]
+;;
+
 (* Bitmap modes draw into pixels, so their name table is noise; the
    observation sends an empty screen_text there instead of ~2 KB of it. The
    classification is what the diet hangs on, so pin every variant of
@@ -1117,6 +1163,7 @@ let () =
         ; test_case "disk swaps retain guest writes across checkpoint restore" `Quick test_disk_swap_retains_guest_writes_and_checkpoint
         ; test_case "failed disk backup preserves machine and ledger" `Quick test_disk_backup_failure_preserves_machine
         ; test_case "failed disk boot preserves machine and ledger" `Quick test_rejected_disk_preserves_machine
+        ; test_case "a press that raises releases its keys" `Quick test_press_that_raises_releases_its_keys
         ; test_case "disk boot smoke (host ROMs)" `Quick test_disk_boot_smoke
         ; test_case "key vocabulary" `Quick test_key_vocabulary
         ; test_case "bitmap mode classification" `Quick test_bitmap_mode_classification

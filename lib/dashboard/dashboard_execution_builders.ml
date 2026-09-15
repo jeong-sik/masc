@@ -243,8 +243,7 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
      not failing, and it is also not going to make progress, so it carries its
      own liveness rather than borrowing either verdict. *)
   (* Two readings, read separately. [paused] is a person's decision and health
-     is an observation; the status string this used to parse folded the two
-     into one word, and folded stale, degraded and zombie together on the way.
+     is an observation; a single status word cannot answer both.
 
      Health is parsed whether or not the keeper is paused, so a health this
      build cannot read is rejected either way. Validating it only on the
@@ -272,11 +271,8 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
     if paused then Cl_paused
     else
       match health with
-      | Keeper_types.KH_offline | KH_zombie -> Cl_offline
-      (* Stale is a keeper whose heartbeat is late, not one that stopped: its
-         fiber is alive and it may still be taking turns. Reading it as offline
-         sent an operator to boot a keeper that was already up. *)
-      | KH_healthy | KH_idle | KH_stale | KH_degraded -> Cl_live
+      | Keeper_types.KH_offline -> Cl_offline
+      | KH_healthy | KH_idle -> Cl_live
   in
   let continuity_offline =
     match liveness with

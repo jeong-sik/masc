@@ -108,10 +108,9 @@ let quiet_reason_wire =
 
 let next_action_path_wire =
   let open Keeper_status_runtime in
-  [ Auto_restart; Recover; Probe; Direct_message ]
+  [ Recover; Probe; Direct_message ]
   |> List.map (fun path ->
        ( match path with
-         | Auto_restart -> "auto_restart"
          | Recover -> "recover"
          | Probe -> "probe"
          | Direct_message -> "direct_message" )

@@ -403,8 +403,7 @@ let oklab_distance first second =
 let action_separation_floor = 0.025
 
 let keeper_action_colours =
-  [ "Auto_restart", Masc_tui_theme.Bright_red
-  ; "Recover", Masc_tui_theme.Bright_yellow
+  [ "Recover", Masc_tui_theme.Bright_yellow
   ; "Probe", Masc_tui_theme.Bright_cyan
   ; "Direct_message", Masc_tui_theme.Bright_magenta
   ]
@@ -415,7 +414,7 @@ let rec pairs = function
   | first :: rest -> List.map (fun other -> first, other) rest @ pairs rest
 ;;
 
-let test_keeper_action_colours_stay_apart_without_red_and_green () =
+let test_keeper_action_colours_stay_apart_under_red_green_deficiency () =
   List.iter
     (fun scheme ->
       List.iter
@@ -847,8 +846,8 @@ let () =
         ; Alcotest.test_case "an unanswered palette changes nothing" `Quick
             test_an_unanswered_palette_changes_nothing
         ; Alcotest.test_case
-            "keeper action colours stay apart without red and green" `Quick
-            test_keeper_action_colours_stay_apart_without_red_and_green
+            "keeper action colours stay apart under red-green deficiency" `Quick
+            test_keeper_action_colours_stay_apart_under_red_green_deficiency
         ; Alcotest.test_case "no categorical slot aliases a drawn status token"
             `Quick test_no_categorical_slot_aliases_a_drawn_status_token
         ; Alcotest.test_case "categorical slots hold their measured floor"

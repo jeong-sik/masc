@@ -314,9 +314,8 @@ let record_state ~health (chunk : Acting.chunk) =
   if chunk.Acting.ck_settled then Record_settled
   else
     match health with
-    | Some Reading.Health_offline | Some Reading.Health_zombie -> Record_unfinished
-    | Some (Reading.Health_running | Reading.Health_idle | Reading.Health_stale
-           | Reading.Health_degraded) | None -> Record_open
+    | Some Reading.Health_offline -> Record_unfinished
+    | Some (Reading.Health_running | Reading.Health_idle) | None -> Record_open
 
 (* The record's state in words, for the focus header and the earlier-turn
    rows; a fleet row carries only the glyph. An unsettled record is a turn
@@ -467,18 +466,14 @@ let tab_pill ~active tab =
    agent present is doing nothing. Offline rows are dropped so the ones that are
    working are not read past.
 
-   Only Health_offline. Zombie, stale and degraded are keepers that should be
-   running and are not -- the readings an operator most needs to see -- and a
-   filter that took them too would hide the fleet's problems and call it tidier.
+   Only Health_offline. An idle keeper is one that has not turned yet, which is
+   a keeper an operator may still be waiting on, so it stays in the pane.
    A keeper whose health did not read at all stays: no reading is not a reading
    of "offline", and dropping those empties the pane whenever the roster fails. *)
 let is_offline keeper =
   match keeper.health with
   | Some Reading.Health_offline -> true
-  | Some
-      ( Reading.Health_running | Reading.Health_idle | Reading.Health_stale
-      | Reading.Health_degraded | Reading.Health_zombie )
-  | None -> false
+  | Some (Reading.Health_running | Reading.Health_idle) | None -> false
 
 (* A roster that was never read has no rows to draw, so the rows read it as
    empty; only the header, which counts them, has to tell the two apart. *)

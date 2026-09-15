@@ -69,7 +69,6 @@ type keeper_heartbeat = {
   hb_phase : string option;
   hb_in_turn : bool option;
   hb_in_flight_ms : float option;
-  hb_since_progress_ms : float option;
   hb_at : float;
 }
 
@@ -249,7 +248,6 @@ let decode_keeper_heartbeat fields =
        ; hb_phase = string_field fields "phase"
        ; hb_in_turn = bool_field fields "in_turn"
        ; hb_in_flight_ms = float_field fields "in_flight_elapsed_ms"
-       ; hb_since_progress_ms = float_field fields "since_last_progress_ms"
        ; hb_at
        })
 

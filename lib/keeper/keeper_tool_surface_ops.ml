@@ -228,7 +228,6 @@ let keeper_list_row_json ~runtime_class config name =
       let keepalive_running = Keeper_status_bridge.runtime_keepalive_running config meta in
       let diagnostic =
         Keeper_status_runtime.keeper_diagnostic_json
-          ~config
           ~meta
           ~keepalive_running ~history_items:[] ~now_ts
         |> Keeper_status_runtime.augment_keeper_diagnostic_json

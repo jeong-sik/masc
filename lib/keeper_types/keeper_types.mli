@@ -13,16 +13,12 @@
 type fiber_health =
   | Fiber_alive
   | Fiber_zombie
-  | Fiber_dead
   | Fiber_unknown
 
 type keeper_health =
   | KH_healthy
   | KH_idle
   | KH_offline
-  | KH_stale
-  | KH_degraded
-  | KH_zombie
 
 type keeper_continuity =
   | Continuity_healthy

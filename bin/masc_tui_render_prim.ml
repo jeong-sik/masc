@@ -917,8 +917,7 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
         match reading_of_health with
         | Some Tui_decode.Health_running -> Pane.Ok
         | Some Tui_decode.Health_idle -> Pane.Dim
-        | Some (Tui_decode.Health_stale | Tui_decode.Health_degraded) -> Pane.Warn
-        | Some (Tui_decode.Health_offline | Tui_decode.Health_zombie) -> Pane.Bad
+        | Some Tui_decode.Health_offline -> Pane.Bad
         | None -> Pane.Dim
     in
     { Pane.name = keeper.k_name
@@ -1252,20 +1251,18 @@ let keeper_roster_pane_shown (state : state) ~cols =
      word    how it is reporting   from health
 
    The lifecycle cell is the fourth and has its own column. The cell used to
-   show a single word from [surface_status], which restates health with stale,
-   degraded and zombie folded together and hides health entirely while a keeper
-   is paused. *)
+   show a single word from [surface_status], which restates health and hides
+   it entirely while a keeper is paused. *)
 let keeper_action_color
     (action : Status.keeper_next_action_path option) =
   match action with
   | None -> Ansi.dim
-  | Some Status.Auto_restart -> (Theme.bad ())
   | Some Status.Recover -> (Theme.warn ())
   | Some Status.Probe -> Theme.action_probe ()
-  (* Green until this measurement. The cell draws four readings in four
-     channels and this is the only one carried by colour alone, so the four
-     colours have to stay apart for a reader who cannot separate red from
-     green -- roughly one man in twelve.
+  (* Green until this measurement. The cell draws its readings in separate
+     channels and this is the only one carried by colour alone, so the three
+     action colours have to stay apart for a reader who cannot separate red
+     from green -- roughly one man in twelve.
 
      Simulated (Machado 2009, severity 1.0) over the twelve base16 schemes the
      contrast harness measures, the closest pair was not red against green but

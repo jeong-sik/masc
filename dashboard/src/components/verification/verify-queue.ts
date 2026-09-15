@@ -3,7 +3,8 @@
 // Design: prototypes/keeper-v2/verify-queue.jsx + styles/keeper-v2/verify.css.
 // Queue: store `tasks` rows in `awaiting_verification`, enriched per task_id
 // from GET /api/v1/verification/requests (submitted_by / created_at /
-// request_summary / evidence_projection_error). Mutations go through
+// request_summary / evidence_projection_error / cancellation_reason).
+// Mutations go through
 // POST /api/v1/verification/verdict (승인 · 통과 / 반려).
 //
 // Gate checklist rows are the task's completion-contract clauses. The backend
@@ -72,6 +73,10 @@ interface VqQueueItem {
   submitActor: string | null
   submitAt: string | null
   projectionError: string | null
+  // Set when the producer asked to stop rather than to finish. The operator
+  // judges that sentence and nothing else, and until now it reached this
+  // screen nowhere: it lived in the body of an unlisted Board post.
+  cancellationReason: string | null
 }
 
 interface VqSessionVerdict {
@@ -110,6 +115,7 @@ function buildQueueItem(
     submitActor,
     submitAt: request?.created_at ?? null,
     projectionError,
+    cancellationReason: request?.cancellation_reason ?? null,
   }
 }
 
@@ -299,6 +305,9 @@ function VqReview(props: {
     ${task.predecessor_task_id
       ? html`<div class="vq-note rerun">↻ 재실행 제출 · predecessor <b>${task.predecessor_task_id}</b> — 반려 후 재검증</div>`
       : null}
+    ${item.cancellationReason
+      ? html`<div class="vq-note rerun">■ 중단 요청 · 완료가 아니라 포기를 판정합니다 — ${item.cancellationReason}</div>`
+      : null}
     <${VqGate} item=${item} checks=${props.checks} onToggleGate=${props.onToggleGate} />
     ${handoff && handoff.summary
       ? html`<div class="vq-note"><b>핸드오프</b> · ${handoff.summary}${handoff.next_step ? ` → ${handoff.next_step}` : ''}</div>`
@@ -462,6 +471,9 @@ function VqTriage(props: VqBodyProps) {
               </div>
               <button class="vq-tri-more" onClick=${() => setExpand(item.task.id)}>게이트 증거 검토 →</button>
             ` : html`
+              ${item.cancellationReason
+                ? html`<div class="vq-note rerun">■ 중단 요청 · 완료가 아니라 포기를 판정합니다 — ${item.cancellationReason}</div>`
+                : null}
               <${VqGate} item=${item} checks=${props.checks} onToggleGate=${props.onToggleGate} />
               <${VqActions}
                 item=${item}

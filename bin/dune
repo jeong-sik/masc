@@ -1435,11 +1435,6 @@
   masc_tui_diff
   masc_tui_keeper_chat_diff
   masc
-  ;; The loader projects the tasks only an operator can move
-  ;; (Operator_task_attention) onto the agenda strip. It reached this
-  ;; executable only as a transitive dependency, which dune passes with -H:
-  ;; visible to the type checker through an alias, unbound when named.
-  masc.operator
   masc.ide_memo
   masc.auth
   masc.masc_random_id

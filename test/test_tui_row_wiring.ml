@@ -396,6 +396,24 @@ let test_a_detail_heading_is_spelled_the_way_a_heading_is () =
     ; "system_log_detail_lines", "  Details: none"
     ]
 
+(* The Lanes list and the detail under it draw the same [sl_p50_elapsed_s] on
+   one screen, and they drew it to different precisions: the P50 column "8.0s"
+   and the detail "p50 latency 8.00s". A reader comparing the two is left
+   deciding whether they are the same figure. The column is the constrained
+   one -- [standalone_lane_p50_cells] is six -- so the detail follows it. *)
+let test_the_two_p50s_on_the_lanes_screen_agree () =
+  Alcotest.(check int) "the column draws one decimal" 1
+    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render
+       ~binding_name:"standalone_lane_row" ~needle:"%.1fs");
+  Alcotest.(check int) "and the detail draws the same" 1
+    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render
+       ~binding_name:"standalone_lane_detail_lines"
+       ~needle:" \xc2\xb7 p50 latency %.1fs");
+  Alcotest.(check int) "the two-decimal spelling is gone" 0
+    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render
+       ~binding_name:"standalone_lane_detail_lines"
+       ~needle:" \xc2\xb7 p50 latency %.2fs")
+
 let test_repositories_show_the_server_resolved_checkout_path () =
   let producer = "lib/server/server_routes_http_routes_repositories.ml" in
   Alcotest.(check int) "the route names one resolved path field" 1
@@ -777,6 +795,8 @@ let () =
             test_the_params_row_leads_with_what_only_it_says
         ; Alcotest.test_case "a detail heading is spelled like a heading" `Quick
             test_a_detail_heading_is_spelled_the_way_a_heading_is
+        ; Alcotest.test_case "the two p50s on the Lanes screen agree" `Quick
+            test_the_two_p50s_on_the_lanes_screen_agree
         ; Alcotest.test_case "the Logs header says the floor that was set" `Quick
             test_the_logs_header_says_the_floor_the_reader_set
         ; Alcotest.test_case "a labelled field does not bracket its reading" `Quick

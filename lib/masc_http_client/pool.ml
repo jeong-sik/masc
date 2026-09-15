@@ -359,6 +359,32 @@ let evict_expired_entries t now =
      once the signal lands. *)
   |> List.iter request_close_client
 
+let start_eviction_fiber t =
+  Eio.Fiber.fork_daemon ~sw:t.sw (fun () ->
+    let clock = Eio.Stdenv.clock t.env in
+    let rec loop () =
+      if Atomic.get t.stop then `Stop_daemon
+      else begin
+        Eio.Time.sleep clock (t.config.idle_ttl_seconds /. 2.0);
+        let now = Eio.Time.now clock in
+        (try evict_expired_entries t now
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+             t.counters.evict_failure_count_total
+               <- t.counters.evict_failure_count_total + 1;
+             Log.Http.error
+               "[masc_http_client.pool] eviction fiber caught \
+                exception (count=%d): %s"
+               t.counters.evict_failure_count_total
+               (exn_message exn));
+        loop ()
+      end
+    in
+    loop ())
+
+(* ── create / shutdown ──────────────────────────────────────── *)
+
 let shutdown t =
   Eio.Cancel.protect (fun () ->
     if Atomic.compare_and_set t.stop false true then (

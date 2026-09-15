@@ -1,5 +1,5 @@
 type source = Live | Automation
-type request = { source : source; tab_id : int option; client_id : Browser_lane.client_id option }
+type request = { route : Browser_lane.route; tab_id : int option }
 type tab = { id : int; title : string; url : string; active : bool }
 type selection = Requested of tab | Active of tab | None_active
 let ( let* ) = Result.bind
@@ -22,11 +22,19 @@ let parse_request = function
       | Some (`Int id) when id >= 0 -> Ok (Some id)
       | _ -> Error "tabId must be a nonnegative integer" in
     let* client_id = parse_client_id (`Assoc fields) in
-    let* () = if source = Automation && Option.is_some client_id then Error "client_id_requires_live" else Ok () in
+    let* route = match source, client_id with
+      | Live, selected -> Ok (Browser_lane.Live_route selected)
+      | Automation, None -> Ok Browser_lane.Automation_route
+      | Automation, Some _ -> Error "client_id_requires_live" in
     let* () = if List.for_all (fun (key, _) -> List.mem key ["lane";"tabId";"clientId"]) fields
       then Ok () else Error "unknown browser read argument" in
-    Ok {source; tab_id; client_id}
+    Ok {route; tab_id}
   | _ -> Error "body must be a JSON object"
+type failure = Unselected of Browser_lane.selection_error | Unobserved of string
+let failure_message = function
+  | Unselected error -> Browser_lane.selection_error_code error
+  | Unobserved detail -> detail
+let unobserved result = Result.map_error (fun detail -> Unobserved detail) result
 let decode_answer = function
   | Browser_lane.Lane_absent -> Error "browser lane is disconnected"
   | Browser_lane.Timed_out -> Error "browser lane timed out"
@@ -49,7 +57,9 @@ let rec decode_tabs = function
   | json :: rest -> let* tab = decode_tab json in let* tabs = decode_tabs rest in Ok (tab :: tabs)
 let tab_json tab = `Assoc ["id",`Int tab.id;"title",`String tab.title;
   "url",`String tab.url;"active",`Bool tab.active]
-let source_name = function Live -> "live" | Automation -> "automation"
+let source_name = function
+  | Browser_lane.Live_route _ -> "live"
+  | Browser_lane.Automation_route -> "automation"
 let select ~tab_id tabs = match tab_id with
   | Some id -> (match List.find_opt (fun tab -> tab.id = id) tabs with
       | Some tab -> Ok (Requested tab)
@@ -58,21 +68,27 @@ let select ~tab_id tabs = match tab_id with
       | Some tab -> Active tab | None -> None_active)
 let selection_json = function
   | Requested _ -> `String "requested" | Active _ -> `String "active" | None_active -> `String "none_active"
-let resolved_target request = Browser_lane.resolve_target
-  ~lane_name:(source_name request.source) ~client_id:request.client_id
+(* One exchange with the resolved browser: a browser that left after it was
+   resolved is a selection failure, not an unreadable answer. *)
+let exchange ~target ~verb =
+  match Browser_lane.issue_for ~target ~verb ~timeout_sec:20. with
+  | Error error -> Error (Unselected error)
+  | Ok answer -> decode_answer answer |> unobserved
 let client_id_json target = match Browser_lane.target_client_id target with
   | None -> `Null | Some id -> `String (Browser_lane.client_id_to_string id)
 let read request =
   let started = Mtime_clock.elapsed_ns () in
-  let lane_name = source_name request.source in
-  let* target = resolved_target request |> Result.map_error Browser_lane.selection_error_code in
-  let issue verb = Browser_lane.issue_for ~target ~verb ~timeout_sec:20. |> decode_answer in
+  let lane_name = source_name request.route in
+  let* target = Browser_lane.resolve_target request.route
+    |> Result.map_error (fun error -> Unselected error) in
+  let issue verb = exchange ~target ~verb in
   let* raw_tabs = issue Browser_lane.Tabs_list in
-  let* tabs = match raw_tabs with `List tabs -> decode_tabs tabs | _ -> Error "browser tabs must be a list" in
+  let* tabs = unobserved (match raw_tabs with
+    | `List tabs -> decode_tabs tabs | _ -> Error "browser tabs must be a list") in
   (* Without a requested tab and without an active tab no page is read: the
      answer says [selection = none_active] and [page = null] instead of the
      caller receiving whichever tab the browser listed first. *)
-  let* selection = select ~tab_id:request.tab_id tabs in
+  let* selection = select ~tab_id:request.tab_id tabs |> unobserved in
   let* page = match selection with
     | None_active -> Ok `Null
     | Requested tab | Active tab ->
@@ -83,7 +99,7 @@ let read request =
          Some (`Int chars), Some (`Bool truncated) ->
          Ok (`Assoc ["tabId",`Int tab.id;"url",`String url;"title",`String title;
            "text",`String text;"chars",`Int chars;"truncated",`Bool truncated])
-       | _ -> Error "browser page lacks URL/title/text/length metadata; update the browser connector") in
+       | _ -> Error (Unobserved "browser page lacks URL/title/text/length metadata; update the browser connector")) in
   let elapsed_ms = Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) started) /. 1e6 in
   Ok (`Assoc ["tabs",`List (List.map tab_json tabs);"selection",selection_json selection;"page",page;
     "source",`String lane_name; "clientId", client_id_json target;
@@ -100,12 +116,13 @@ let parse_capture_request json =
 
 let capture request =
   let* tab_id = match request.tab_id with
-    | Some id -> Ok id | None -> Error "tabId is required for a screenshot" in
+    | Some id -> Ok id | None -> Error (Unobserved "tabId is required for a screenshot") in
   let started = Mtime_clock.elapsed_ns () in
-  let lane_name = source_name request.source in
-  let* target = resolved_target request |> Result.map_error Browser_lane.selection_error_code in
-  let* data = Browser_lane.issue_for ~target ~verb:(Browser_lane.Page_capture {tab_id})
-      ~timeout_sec:20. |> decode_answer in
+  let lane_name = source_name request.route in
+  let* target = Browser_lane.resolve_target request.route
+    |> Result.map_error (fun error -> Unselected error) in
+  let* data = exchange ~target ~verb:(Browser_lane.Page_capture {tab_id}) in
+  unobserved @@
   match field "tabId" data, field "url" data, field "title" data,
         field "mimeType" data, field "data" data with
   | Some (`Int actual), Some (`String url), Some (`String title),

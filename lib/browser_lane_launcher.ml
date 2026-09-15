@@ -1,110 +1,118 @@
-type launcher = Not_installed | Unreadable | Follows_workspace | Pinned of int | Unusable_origin
+type launcher = Not_installed | Undeclared | Unreadable | Follows_workspace
 
-type t = { launcher : launcher; workspace_port : (int, Workspace_connection.error) result }
+type t =
+  { base_path : string
+  ; launcher : launcher
+  ; workspace_port : (int, Workspace_connection.error) result
+  ; serving_port : int option
+  }
 
 type verdict = Absent | Aligned | Misconfigured
 
-(* An http origin without an explicit port is port 80 (RFC 9110, section 4.2.1). *)
-let http_scheme_port = 80
+let host_directory base_path =
+  List.fold_left Filename.concat base_path [ Common.masc_dirname; "browser-lane"; "host" ]
 
-let launcher_path base_path =
-  List.fold_left Filename.concat base_path
-    [ Common.masc_dirname; "browser-lane"; "host"; "launch" ]
+(* install-host.sh writes this declaration beside the launcher it installs;
+   the two names are the contract between that script and this reader. *)
+let launcher_name = "launch"
+let declaration_name = "launch.json"
 
-(* install-host.sh writes the launcher as one exec line of shell-quoted words,
-   so the scan reads whole words, never substrings. *)
-let server_argument text =
-  let rec scan = function
-    | "--server" :: origin :: _ ->
-        let uri = Uri.of_string origin in
-        if Uri.scheme uri = Some "http" then
-          match Uri.port uri with
-          | Some port when port > 0 && port <= 65535 -> Pinned port
-          | Some _ -> Unusable_origin
-          | None -> Pinned http_scheme_port
-        else Unusable_origin
-    | _ :: rest -> scan rest
-    | [] -> Follows_workspace
+let declared = function
+  | `Assoc [ ("destination", `String "workspace_connection") ] -> Follows_workspace
+  | _ -> Unreadable
+
+let observe ~base_path ~serving_port =
+  let directory = host_directory base_path in
+  let exists name =
+    match Sys.file_exists (Filename.concat directory name) with
+    | present -> present
+    | exception Sys_error _ -> false
   in
-  scan (List.filter (fun word -> word <> "") (String.split_on_char ' ' text))
-
-let observe ~base_path =
-  let path = launcher_path base_path in
   let launcher =
-    match Sys.file_exists path with
-    | false -> Not_installed
-    | true ->
-        (match In_channel.with_open_bin path In_channel.input_all with
-         | text -> server_argument text
-         | exception Sys_error _ -> Unreadable)
-    | exception Sys_error _ -> Not_installed
+    match exists launcher_name, exists declaration_name with
+    | false, _ -> Not_installed
+    | true, false -> Undeclared
+    | true, true ->
+        (match Yojson.Safe.from_file (Filename.concat directory declaration_name) with
+         | json -> declared json
+         | exception (Sys_error _ | Yojson.Json_error _) -> Unreadable)
   in
   let workspace_port =
-    match Workspace_connection.read ~base_path with
-    | Error error -> Error error
-    | Ok None -> Ok Masc_network_defaults.masc_http_default_port
-    | Ok (Some port) -> Ok (Workspace_connection.to_int port)
+    Workspace_connection.resolve ~base_path:(Some base_path) ~cli:None ~environment:None
+    |> Result.map Workspace_connection.to_int
   in
-  { launcher; workspace_port }
+  { base_path; launcher; workspace_port; serving_port }
 
 let verdict t =
-  match t.launcher, t.workspace_port with
-  | Not_installed, _ -> Absent
-  | (Unreadable | Unusable_origin), _ | (Follows_workspace | Pinned _), Error _ -> Misconfigured
-  | Follows_workspace, Ok _ -> Aligned
-  | Pinned port, Ok expected when port = expected -> Aligned
-  | Pinned _, Ok _ -> Misconfigured
+  match t.launcher, t.workspace_port, t.serving_port with
+  | Not_installed, _, _ -> Absent
+  | (Undeclared | Unreadable), _, _ | Follows_workspace, Error _, _ -> Misconfigured
+  | Follows_workspace, Ok port, Some serving when port = serving -> Aligned
+  | Follows_workspace, Ok _, Some _ -> Misconfigured
+  | Follows_workspace, Ok _, None -> Aligned
 
-let reinstall =
-  "Re-run connectors/browser/install-host.sh so the lane follows the workspace, then reload \
-   the browser extension so a new host starts."
+let install ~base_path =
+  Printf.sprintf
+    "the MASC browser host installer, install-host.sh (connectors/browser/host/README.md in the \
+     MASC repository), with --base-path %s"
+    base_path
+
+let reinstall ~base_path =
+  Printf.sprintf
+    "The operator runs %s, then reloads the browser extension so a new host starts."
+    (install ~base_path)
+
+let environment_note =
+  "An exported MASC_HTTP_BASE_URL or MASC_HTTP_PORT in the browser's environment fixes the \
+   address instead, which this observation cannot see."
 
 let message t =
-  match t.launcher, t.workspace_port with
-  | Not_installed, _ ->
-      "No browser lane host is installed in this workspace. The operator installs it with \
-       connectors/browser/install-host.sh and loads the MASC extension in the browser."
-  | Unreadable, _ -> "The browser lane launcher cannot be read."
-  | (Follows_workspace | Pinned _ | Unusable_origin), Error error ->
-      Workspace_connection.error_message error
-  | Unusable_origin, Ok _ ->
-      "The browser lane launcher's --server is not an http origin with a usable port. " ^ reinstall
-  | Follows_workspace, Ok port ->
+  let base_path = t.base_path in
+  match t.launcher, t.workspace_port, t.serving_port with
+  | Not_installed, _, _ ->
       Printf.sprintf
-        "The browser lane launcher follows the workspace connection port, now %d, and reads it \
-         again after a failed poll. An exported MASC_HTTP_BASE_URL or MASC_HTTP_PORT in the \
-         browser's environment still takes precedence, which this observation cannot see."
-        port
-  | Pinned port, Ok expected when port = expected ->
+        "No browser lane host is installed in this workspace. The operator runs %s and loads \
+         the MASC extension in the browser."
+        (install ~base_path)
+  | Undeclared, _, _ ->
       Printf.sprintf
-        "The browser lane launcher is fixed to port %d, which the workspace connection names \
-         now. It will not follow a later port change. %s"
-        port reinstall
-  | Pinned port, Ok expected ->
+        "The browser lane launcher in %s has no %s beside it, so where that host polls is \
+         unknown. %s"
+        (host_directory base_path) declaration_name (reinstall ~base_path)
+  | Unreadable, _, _ ->
+      Printf.sprintf "The browser lane launcher declaration %s cannot be read. %s"
+        (Filename.concat (host_directory base_path) declaration_name) (reinstall ~base_path)
+  | Follows_workspace, Error error, _ -> Workspace_connection.error_message error
+  | Follows_workspace, Ok port, Some serving when port = serving ->
       Printf.sprintf
-        "The browser lane launcher is fixed to port %d while the workspace connection port is \
-         %d. %s"
-        port expected reinstall
+        "The browser lane host follows the workspace connection port, %d, which is the port \
+         this server listens on. %s"
+        port environment_note
+  | Follows_workspace, Ok port, Some serving ->
+      Printf.sprintf
+        "The browser lane host follows the workspace connection port, %d, but this server \
+         listens on %d, so the host polls another address. `masc workspace-connection --port \
+         %d --save` points the connection at this server. %s"
+        port serving serving environment_note
+  | Follows_workspace, Ok port, None ->
+      Printf.sprintf
+        "The browser lane host follows the workspace connection port, now %d. It moves to a new \
+         port only once its current server stops answering and the new one answers. %s"
+        port environment_note
 
 let to_json t =
-  let launcher, launcher_port =
-    match t.launcher with
-    | Not_installed -> "not_installed", `Null
-    | Unreadable -> "unreadable", `Null
-    | Follows_workspace -> "follows_workspace", `Null
-    | Pinned port -> "pinned", `Int port
-    | Unusable_origin -> "unusable_origin", `Null
-  in
   let workspace_port, workspace_port_error =
     match t.workspace_port with
     | Ok port -> `Int port, `Null
     | Error error -> `Null, `String (Workspace_connection.error_message error)
   in
   `Assoc
-    [ "launcher", `String launcher
-    ; "launcher_port", launcher_port
+    [ "launcher", `String (match t.launcher with
+        | Not_installed -> "not_installed" | Undeclared -> "undeclared"
+        | Unreadable -> "unreadable" | Follows_workspace -> "follows_workspace")
     ; "workspace_port", workspace_port
     ; "workspace_port_error", workspace_port_error
+    ; "serving_port", (match t.serving_port with Some port -> `Int port | None -> `Null)
     ; "verdict", `String (match verdict t with
         | Absent -> "absent" | Aligned -> "aligned" | Misconfigured -> "misconfigured")
     ; "message", `String (message t)

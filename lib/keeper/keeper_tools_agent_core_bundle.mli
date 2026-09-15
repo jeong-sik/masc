@@ -34,7 +34,8 @@ val make_tool_bundle_for_capability_surface
     the loop and would spill anything larger to a file the Keeper cannot open,
     {!Common.max_agent_core_inline_result_bytes} when MASC owns the wire and
     nothing spills. Omitted, or before an attempt has been observed, the
-    descriptor's own projection stands, which is the narrower answer. *)
+    descriptor's own projection stands, which is the narrower answer. The
+    handler receives the same answer, so a thread read sizes its page by it. *)
 
 module For_testing : sig
   val make_tool_bundle

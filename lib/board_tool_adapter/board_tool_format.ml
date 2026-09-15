@@ -162,10 +162,15 @@ let format_post_compact ~replies (p : Board.post) =
     replies
 ;;
 
-let format_comment ?(indent = 0) ?viewer_vote (c : Board.comment) =
+let format_comment ?(indent = 0) ?viewer_vote ?reply_to (c : Board.comment) =
   let prefix = String.make indent ' ' in
   let tree_prefix = if indent > 0 then "└─ " else "" in
   let time_str = format_timestamp_absolute c.created_at in
+  let reply_to_str =
+    match reply_to with
+    | Some parent_id -> ", reply to " ^ Board.Comment_id.to_string parent_id
+    | None -> ""
+  in
   let vote_str =
     (if c.votes_up > 0 || c.votes_down > 0
      then Printf.sprintf ", 👍%d 👎%d" c.votes_up c.votes_down
@@ -180,12 +185,13 @@ let format_comment ?(indent = 0) ?viewer_vote (c : Board.comment) =
      were c-placeholder, c-b1, c-???, and in 28 calls the comment's own text in
      place of an id. *)
   Printf.sprintf
-    "%s%s%s: %s [%s, %s%s]"
+    "%s%s%s: %s [%s%s, %s%s]"
     prefix
     tree_prefix
     (Board.Agent_id.to_string c.author)
     c.content
     (Board.Comment_id.to_string c.id)
+    reply_to_str
     time_str
     vote_str
 ;;
@@ -195,7 +201,11 @@ let format_comment ?(indent = 0) ?viewer_vote (c : Board.comment) =
    cap, because the page counts every comment it holds and a reader who sees
    fewer lines than that count reads it as comments gone missing. Replies run
    deeper than the cap in live threads (one post, measured 2026-09-15, has six
-   comments at depth 6 to 8). *)
+   comments at depth 6 to 8).
+
+   Past the cap a reply sits at the same indentation as its parent, and a reply
+   whose parent is on another page starts at the left edge like a new comment.
+   Both lines name the parent's id, so neither reads as something it is not. *)
 let comment_indent_width = 4
 let max_comment_indent_depth = 5
 
@@ -226,16 +236,29 @@ let format_comment_tree
     | None -> []
   in
   let drawn = Hashtbl.create (List.length comments) in
-  let rec render depth (comment : Board.comment) =
+  (* [under_parent] is true when the line is drawn right below its parent's
+     subtree; the indentation then shows the parent up to the cap. *)
+  let rec render ~under_parent depth (comment : Board.comment) =
     if Hashtbl.mem drawn (comment_key comment)
     then []
     else (
       Hashtbl.replace drawn (comment_key comment) ();
       let indent = comment_indent_width * min depth max_comment_indent_depth in
-      let self =
-        format_comment ~indent ?viewer_vote:(viewer_vote_of comment.id) comment
+      let reply_to =
+        match comment.parent_id, under_parent with
+        | None, (true | false) -> None
+        | Some _, true when depth <= max_comment_indent_depth -> None
+        | Some parent_id, (true | false) -> Some parent_id
       in
-      self :: List.concat_map (render (depth + 1)) (children_of comment))
+      let self =
+        format_comment
+          ~indent
+          ?viewer_vote:(viewer_vote_of comment.id)
+          ?reply_to
+          comment
+      in
+      self
+      :: List.concat_map (render ~under_parent:true (depth + 1)) (children_of comment))
   in
   let is_root (comment : Board.comment) =
     match comment.parent_id with
@@ -244,13 +267,14 @@ let format_comment_tree
   in
   let from_roots =
     List.concat_map
-      (fun comment -> if is_root comment then render 0 comment else [])
+      (fun comment ->
+         if is_root comment then render ~under_parent:false 0 comment else [])
       comments
   in
   (* Every listed comment is drawn exactly once. A comment reachable from no
      root (a parent chain that loops back on itself) is drawn here instead of
      disappearing; [render] skips everything the root walk already drew. *)
-  from_roots @ List.concat_map (render 0) comments
+  from_roots @ List.concat_map (render ~under_parent:false 0) comments
 ;;
 
 (** {1 Source-entry rendering} *)

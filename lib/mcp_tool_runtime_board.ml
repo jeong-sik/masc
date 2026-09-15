@@ -265,7 +265,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
   let arguments = bind_caller_identity ~name ~agent_name arguments in
   match (name : string) with
   | "masc_board_post" ->
-      let result_tr = Board_tool.handle_tool name arguments in
+      let result_tr = Board_tool.handle_tool ~result_boundary:Tool_output.Unprojected name arguments in
       let result_tr =
         if Tool_result.is_success result_tr then begin
         let author = Safe_ops.json_string ~default:"anonymous" "author" arguments in
@@ -334,7 +334,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
       Some result_tr
 
   | "masc_board_comment" ->
-      let result_tr = Board_tool.handle_tool name arguments in
+      let result_tr = Board_tool.handle_tool ~result_boundary:Tool_output.Unprojected name arguments in
       let result_tr =
         if Tool_result.is_success result_tr then begin
         let author = Safe_ops.json_string ~default:"anonymous" "author" arguments in
@@ -402,7 +402,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
       Some result_tr
 
   | "masc_board_vote" | "masc_board_comment_vote" ->
-      let result_tr = Board_tool.handle_tool name arguments in
+      let result_tr = Board_tool.handle_tool ~result_boundary:Tool_output.Unprojected name arguments in
       (* Record vote activity as a fitness metric (Issue #1861). *)
       let result_tr =
         if Tool_result.is_success result_tr then begin
@@ -458,7 +458,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
       Some result_tr
 
   | "masc_board_delete" ->
-      let result_tr = Board_tool.handle_tool name arguments in
+      let result_tr = Board_tool.handle_tool ~result_boundary:Tool_output.Unprojected name arguments in
       let result_tr =
         if Tool_result.is_success result_tr then begin
         let post_id = Safe_ops.json_string ~default:"unknown" "post_id" arguments in
@@ -495,7 +495,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
       let arguments =
         enforce_caller_identity ~tool:name ~field:"viewer" ~agent_name arguments
       in
-      Some (Board_tool.handle_tool name arguments)
+      Some (Board_tool.handle_tool ~result_boundary:Tool_output.Unprojected name arguments)
 
   | "masc_board_list"
   | "masc_board_stats"
@@ -516,6 +516,6 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
      "Unknown tool (registry inconsistency)". *)
   | "masc_board_post_update"
   | "masc_board_cleanup" ->
-      Some (Board_tool.handle_tool name arguments)
+      Some (Board_tool.handle_tool ~result_boundary:Tool_output.Unprojected name arguments)
 
   | _ -> None

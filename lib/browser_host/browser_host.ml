@@ -124,10 +124,11 @@ let write_frame stdout json =
     Eio.Flow.copy_string payload stdout;
     Ok ())
 
-(* Where polls go. An explicit --server or MASC_HTTP_BASE_URL is a fixed
-   choice. Otherwise the workspace connection.toml names the port: the server
-   rewrites it whenever it binds, so the host reads it again after a failed
-   poll instead of keeping the port it saw at launch. *)
+(* Where polls go. An explicit --server, MASC_HTTP_BASE_URL or MASC_HTTP_PORT
+   is a fixed choice. Otherwise the workspace connection.toml names the port.
+   That file is the desired endpoint, which the server and other commands
+   write, not proof that a server answers there, so the host moves to the
+   port it names only once that address answers the lane. *)
 type destination = Fixed | Workspace of string
 type config = { destination : destination; server : Uri.t; token_file : string; client_id : string }
 type browser_info = { browser : string; version : string; engine_version : string }
@@ -164,10 +165,10 @@ let loopback_origin raw =
 
 (* A port that fails to resolve is reported, never silently replaced by a
    default the server may not be listening on. *)
-let workspace_server base =
+let workspace_server ~environment base =
   try
     match Workspace_connection.resolve ~base_path:(Some base)
-            ~cli:None ~environment:(Env_config_core.masc_http_port_opt ()) with
+            ~cli:None ~environment with
     | Error error -> Error (Workspace_connection.error_message error)
     | Ok port ->
         Uri.make ~scheme:"http"
@@ -197,12 +198,12 @@ let resolve_config ~base_path ~server ~token_file =
       else base
     in
     let* destination, server =
-      match server with
-      | Some url -> Result.map (fun server -> Fixed, server) (loopback_origin url)
-      | None ->
-          (match Env_config_core.masc_http_base_url_opt () with
-           | Some url -> Result.map (fun server -> Fixed, server) (loopback_origin url)
-           | None -> Result.map (fun server -> Workspace base, server) (workspace_server base))
+      match server, Env_config_core.masc_http_base_url_opt (), Env_config_core.masc_http_port_opt () with
+      | Some url, _, _ | None, Some url, _ -> Result.map (fun server -> Fixed, server) (loopback_origin url)
+      | None, None, (Some _ as environment) ->
+          Result.map (fun server -> Fixed, server) (workspace_server ~environment base)
+      | None, None, None ->
+          Result.map (fun server -> Workspace base, server) (workspace_server ~environment:None base)
     in
     let token_file =
       match token_file with
@@ -231,6 +232,9 @@ let endpoint server path =
 type http_error = Http_status of int | Transport_failed | Response_invalid | Response_too_large | Request_timed_out
 type poll_error = Invalid_client | Poll_unanswered of http_error | Poll_failed of string
 type destination_change = Unchanged | Moved
+(* Whether an address answers this workspace's lane: a ping that holds the
+   lane token and registers no client. *)
+type lane_answer = Answers | Silent
 
 let http_error_message = function
   | Http_status status -> Printf.sprintf "HTTP %d" status
@@ -334,21 +338,45 @@ let run env config =
   let forward = forward ~clock ~stdout:(Eio.Stdenv.stdout env) pending in
   (* Single Eio domain; no suspension point between reading and replacing it. *)
   let server = ref config.server in
+  let ask_lane info origin =
+    match read_token config.token_file with
+    | Error _ -> Silent
+    | Ok token ->
+        (match post ~clock ~client ~server:origin ~config ~info ~token "ping" (`Assoc []) with
+         | Ok (`Assoc fields) when List.assoc_opt "ok" fields = Some (`Bool true) -> Answers
+         | Ok _ | Error _ -> Silent)
+  in
   (* Called only after a request to [!server] failed: that failure is the
-     event that the server may have moved. A fixed destination never moves. *)
-  let follow_workspace () =
+     event that the server may have moved. A fixed destination never moves.
+     The connection file is only the desired port, so a failure alone moves
+     nothing: the host stays while its server still answers the lane, and
+     moves only to an address that answers it. *)
+  let follow_workspace info =
     match config.destination with
     | Fixed -> Unchanged
     | Workspace base ->
-        (match workspace_server base with
+        (match workspace_server ~environment:None base with
          | Error detail ->
              Log.Transport.warn "browser-host: workspace connection unreadable after a failed request: %s" detail;
              Unchanged
          | Ok resolved when Uri.equal resolved !server -> Unchanged
          | Ok resolved ->
-             Log.Transport.info "browser-host: workspace connection now names %s" (Uri.to_string resolved);
-             server := resolved;
-             Moved)
+             (match ask_lane info !server with
+              | Answers ->
+                  Log.Transport.info "browser-host: %s still answers; staying while the connection names %s"
+                    (Uri.to_string !server) (Uri.to_string resolved);
+                  Unchanged
+              | Silent ->
+                  (match ask_lane info resolved with
+                   | Silent ->
+                       Log.Transport.info "browser-host: the connection names %s, which does not answer yet"
+                         (Uri.to_string resolved);
+                       Unchanged
+                   | Answers ->
+                       Log.Transport.info "browser-host: moving to %s, which answers the lane"
+                         (Uri.to_string resolved);
+                       server := resolved;
+                       Moved)))
   in
   let rec publish info payload =
     let* token = read_token config.token_file in
@@ -364,10 +392,10 @@ let run env config =
         Log.Transport.warn "browser-host: result delivery failed: %s"
           (http_error_message error);
         Eio.Time.sleep clock reconnect_delay_sec;
-        (match follow_workspace () with
+        (match follow_workspace info with
          | Unchanged -> publish info payload
-         (* The request belongs to the server that issued it, not to the one
-            the workspace names now; polling there registers the lane again. *)
+         (* The server that issued the request no longer answers and another
+            does; polling there registers the lane again. *)
          | Moved -> Error "workspace server moved; request ownership was lost")
   in
   let rec poll info () =
@@ -396,7 +424,7 @@ let run env config =
     | Error (Poll_unanswered error) ->
         Log.Transport.warn "browser-host: poll failed: %s" (http_error_message error);
         Eio.Time.sleep clock reconnect_delay_sec;
-        (match follow_workspace () with Unchanged | Moved -> poll info ())
+        (match follow_workspace info with Unchanged | Moved -> poll info ())
     | Error (Poll_failed detail) ->
         Log.Transport.warn "browser-host: poll failed: %s" detail;
         Eio.Time.sleep clock reconnect_delay_sec;

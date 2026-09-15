@@ -7,7 +7,7 @@
     registry via {!Tool_spec.register_all}. All handler arms return
     {!Tool_result.result}. *)
 
-let handle_tool name args : Tool_result.result =
+let handle_tool ~result_boundary name args : Tool_result.result =
   let start_time = Time_compat.now () in
   let module B = Tool_name.Board_name in
   (* [register] advertises one tool per [B.all] constructor, so routing has to
@@ -31,7 +31,7 @@ let handle_tool name args : Tool_result.result =
   | Some B.Board_list ->
     Board_tool_post.handle_post_list ~tool_name:name ~start_time args
   | Some B.Board_post_get ->
-    Board_tool_post.handle_post_get ~tool_name:name ~start_time args
+    Board_tool_post.handle_post_get ~result_boundary ~tool_name:name ~start_time args
   | Some B.Board_comment ->
     Board_tool_format.with_yojson_boundary ~tool_name:name ~start_time (fun () ->
       Board_tool_post.handle_comment_add ~tool_name:name ~start_time args)
@@ -70,7 +70,9 @@ let handle_tool name args : Tool_result.result =
 ;;
 
 let register () =
-  let handler ~name ~args = handle_tool name args in
+  (* The registry serves callers outside a Keeper turn, which take a result
+     whole. *)
+  let handler ~name ~args = handle_tool ~result_boundary:Tool_output.Unprojected name args in
   let make_spec board_name =
     let s = Board_tool_registry.schema_for_board_name board_name in
     let policy = Board_tool_registry.operation_policy board_name in

@@ -251,14 +251,33 @@ module Comment_page : sig
     { offset : int
     ; limit : int
     }
-  (** Built only by {!request}: [offset >= 0] and
+  (** Built only by {!request_of_args}: [offset >= 0] and
       [1 <= limit <= Limits.max_comment_page_limit]. *)
 
+  type argument =
+    | Comment_offset
+    | Comment_limit
+
   type request_error =
+    | Arguments_not_an_object
+    | Not_an_integer of
+        { argument : argument
+        ; given : string
+          (** The JSON kind that arrived, as {!Json_util.kind_name} names it. *)
+        }
+    | Integer_out_of_range of
+        { argument : argument
+        ; literal : string
+        }
     | Negative_offset of int
     | Limit_out_of_bounds of int
 
-  val request : offset:int -> limit:int -> (request, request_error) result
+  val request_of_args : Yojson.Safe.t -> (request, request_error) result
+  (** Reads [comment_offset] (absent: [0]) and [comment_limit] (absent:
+      {!Limits.default_comment_page_limit}) from a tool call's arguments. A
+      value that is present but is not a JSON integer literal is refused, so
+      [null], ["abc"], [true] and [2.9] never turn into a page. *)
+
   val request_error_to_string : request_error -> string
 
   type 'a page =
@@ -287,6 +306,11 @@ module Comment_page : sig
       first item: an item larger than the budget is delivered whole and the
       tool-output boundary decides how it travels, so no comment becomes
       unreadable. *)
+
+  val pagination_to_yojson : 'a page -> Yojson.Safe.t
+  (** [{offset, returned, total, has_more, next_offset}] — where a page sits
+      in its thread, in the shape both reading surfaces return. [next_offset]
+      is [null] on the last page. *)
 end
 
 (** {1 Vote Direction} *)

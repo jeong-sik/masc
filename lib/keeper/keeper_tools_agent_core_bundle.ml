@@ -340,18 +340,23 @@ let make_tool_bundle_for_descriptors_with_policy
                   same effect-outcome-unknown shape Execute has. *)
                | Keeper_tool_descriptor.Tool_keeper_webmcp_dispatch ->
                  Some mark_terminal_effect_failed
-               (* A memory write or retract that failed after its commit left a
-                  durable change the caller cannot see; retrying it would
-                  record the claim twice. Same shape as a file write. *)
                | Keeper_tool_descriptor.Tool_peer_artifact
                | Keeper_tool_descriptor.Tool_edit_file
-               | Keeper_tool_descriptor.Tool_write_file
-               | Keeper_tool_descriptor.Tool_memory_retract
-               | Keeper_tool_descriptor.Tool_memory_write ->
+               | Keeper_tool_descriptor.Tool_write_file ->
                  Some (fun failure ->
                    match failure.Keeper_tools_agent_core.effect_disposition with
                    | Tool_result.Proven_post_effect -> mark_terminal_effect_failed failure
                    | Tool_result.Proven_pre_effect | Tool_result.Effect_outcome_unknown -> ())
+               (* A failed memory write or retract goes back to the model
+                  whatever it committed, because doing it again adds no
+                  second copy: the same claim is the same fact (an ordinary
+                  fact is keyed by its claim's SHA-256, a source-bound one by
+                  its path), and retracting a fact that is gone commits
+                  nothing. The result names what committed, so the Keeper can
+                  read memory before it tries again. *)
+               | Keeper_tool_descriptor.Tool_memory_retract
+               | Keeper_tool_descriptor.Tool_memory_write ->
+                 None
                (* A code query starts a language server, but the pool owns it
                   and the turn ends it either way, so a failed call leaves the
                   caller holding nothing. It answers with the readers. *)
@@ -464,9 +469,13 @@ let make_tool_bundle_for_descriptors_with_policy
                ~description:descriptor.description
                ~input_schema:descriptor.input_schema
                (fun execution_env input ->
+                 (* The handler is told the projection its result will cross,
+                    asked the same way the bridge asks, so a handler that
+                    pages its output fills what this lane carries inline. *)
                  h
                    ?agent_core_invocation:
                      (Agent_core.Tool.Execution_env.invocation execution_env)
+                   ~result_projection:(model_projection_for_call descriptor ())
                    input)))
       descriptors
   in

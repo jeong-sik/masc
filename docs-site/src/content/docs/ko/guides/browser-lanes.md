@@ -18,7 +18,7 @@ bash connectors/browser/install-host.sh \
   --base-path /path/to/workspace
 ```
 
-launcher에는 서버 주소를 적지 않습니다. host는 워크스페이스의 `.masc/config/connection.toml`에서 포트를 읽고, poll이 실패하면 그 파일을 다시 읽습니다. 그래서 서버가 다른 포트로 다시 떠도 다시 설치하지 않아도 됩니다.
+launcher에는 서버 주소를 적지 않습니다. host는 워크스페이스의 `.masc/config/connection.toml`에서 포트를 읽습니다. poll이 실패하면 그 파일을 다시 읽고, 지금 서버가 더 이상 답하지 않으면서 파일이 가리키는 새 포트가 답할 때만 옮겨 갑니다. 그래서 서버가 다른 포트로 다시 떠도 다시 설치하지 않아도 됩니다.
 
 설치기는 macOS와 Linux를 지원하며 Mozilla native messaging manifest를 등록합니다. 다른 manifest 디렉터리가 필요하면 `--manifest-dir`로 지정합니다. Firefox 또는 Zen의 `about:debugging` → **임시 부가 기능 로드**에서 `connectors/browser/extension/manifest.json`을 선택합니다. 브라우저가 종료되면 임시 로드도 끝납니다.
 

@@ -186,6 +186,7 @@ let runtime_context
       ?gate_grant
       ?tool_use_id
       ?trace_id
+      ?result_projection
       ~capability_authority
       ()
   =
@@ -205,6 +206,7 @@ let runtime_context
     ; gate_grant
     ; tool_use_id
     ; trace_id
+    ; result_projection
     ; capability_authority
     }
 ;;
@@ -227,6 +229,7 @@ let execute_keeper_tool_descriptor_with_authority
       ?gate_grant
       ?tool_use_id
       ?trace_id
+      ?result_projection
       ~(descriptor : Keeper_tool_descriptor.t)
       ~(input : Yojson.Safe.t)
       ()
@@ -258,6 +261,7 @@ let execute_keeper_tool_descriptor_with_authority
         ?gate_grant
         ?tool_use_id
         ?trace_id
+        ?result_projection
         ~capability_authority
         ()
     in
@@ -310,6 +314,7 @@ let execute_keeper_tool_call_with_authority
       ?gate_grant
       ?tool_use_id
       ?trace_id
+      ?result_projection
       ~(name : string)
       ~(input : Yojson.Safe.t)
       ()
@@ -337,6 +342,7 @@ let execute_keeper_tool_call_with_authority
            ?gate_grant
            ?tool_use_id
            ?trace_id
+           ?result_projection
            ~capability_authority
            ()
        in

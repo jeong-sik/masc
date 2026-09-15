@@ -294,6 +294,58 @@ let verdict_question_of_request (request : Verification.verification_request) =
    typed: an artifact the judge cannot open whole counts as nothing. An
    unavailable snapshot is the same posture as an empty one — the judge
    already sees the typed reason beside the question. *)
+(* The change the producer named, read at the moment it is judged.
+
+   Not at submission: that path runs inside the backlog lock
+   (workspace_task_transitions.ml holds it through the verification-request
+   hook), and a repository that answers slowly would put every claim, release
+   and verdict in the workspace behind it. Here there is no such lock, the
+   fiber already makes model calls, and the answer is about the repository as
+   it stands when the verdict is being formed — which is the question the
+   verdict is actually asking.
+
+   The persisted record is not rewritten. It keeps the reference; what the
+   lookup found travels to the judge and into the verdict, and a later read
+   asks again.
+
+   [lookup] is injected so this rule — which items are read, which are left
+   alone — is pinned without a network or a GitHub token. *)
+let read_changes_being_judged ~lookup
+      (access : Workspace_verification_store.submitted_evidence_access)
+  =
+  match access with
+  | Workspace_verification_store.Evidence_unavailable _ -> access
+  | Workspace_verification_store.Evidence_available { request; items } ->
+    let resolved =
+      List.map
+        (fun (item : Workspace_verification_store.submitted_evidence_item) ->
+           match item with
+           | Workspace_verification_store.Evidence_change
+               { repository
+               ; pull_request
+               ; lookup = Workspace_verification_store.Change_not_looked_up
+               } ->
+             Workspace_verification_store.Evidence_change
+               { repository; pull_request; lookup = lookup ~repository ~pull_request }
+           (* Already answered, or not a change at all. Spelled out so a new
+              evidence form has to decide whether it is read here. *)
+           | Workspace_verification_store.Evidence_change
+               { lookup =
+                   ( Workspace_verification_store.Change_seen _
+                   | Workspace_verification_store.Change_lookup_failed _ )
+               ; _
+               }
+           | Workspace_verification_store.Evidence_collaboration _
+           | Workspace_verification_store.Evidence_note _
+           | Workspace_verification_store.Evidence_artifact _
+           | Workspace_verification_store.Evidence_invalid_reference
+           | Workspace_verification_store.Evidence_artifact_unreadable _
+           | Workspace_verification_store.Evidence_artifact_binary _ -> item)
+        items
+    in
+    Workspace_verification_store.Evidence_available { request; items = resolved }
+;;
+
 let evidence_posture_of_snapshot
       (snapshot : Workspace_verification_store.submitted_evidence_access) =
   let usable =
@@ -311,7 +363,30 @@ let evidence_posture_of_snapshot
                 size, and the filed body are the facts the verdict can rest
                 on (RFC-0436 §4.1). *)
              true
-           | _ -> false)
+           | Workspace_verification_store.Evidence_change
+               { lookup = Workspace_verification_store.Change_seen _; _ } ->
+             (* A change the lookup actually saw carries whether it merged, the
+                commit it merged as, and how many files moved. That is the
+                strongest thing a producer can hand over and it is what most
+                of the stalled stops were trying to say (RFC-0453 §1.3). *)
+             true
+           | Workspace_verification_store.Evidence_change
+               { lookup =
+                   ( Workspace_verification_store.Change_not_looked_up
+                   | Workspace_verification_store.Change_lookup_failed _ )
+               ; _
+               } ->
+             (* A reference nobody could read is a claim, not evidence. The
+                item still travels so the authority sees the reference and why
+                it is blank. *)
+             false
+           (* Spelled out rather than left to a catch-all: a new evidence form
+              has to be classified here, and the previous `_ -> false` would
+              have counted one as note-only without anyone deciding. *)
+           | Workspace_verification_store.Evidence_note _
+           | Workspace_verification_store.Evidence_artifact { truncated = true; _ }
+           | Workspace_verification_store.Evidence_invalid_reference
+           | Workspace_verification_store.Evidence_artifact_unreadable _ -> false)
       |> List.length
   in
   if usable = 0 then Task.Anti_rationalization.Note_only
@@ -365,6 +440,7 @@ let evidence_images_of_snapshot ~base_path
            | Store.Evidence_note _ -> images, unread
            | Store.Evidence_artifact _ -> images, unread
            | Store.Evidence_invalid_reference -> images, unread
+           | Store.Evidence_change _ -> images, unread
            | Store.Evidence_artifact_unreadable _ -> images, unread)
         ([], [])
         items
@@ -434,6 +510,8 @@ let prepare_review
         ~task_id:task.id
         ~task_worker:assignee
         ~authority
+      |> read_changes_being_judged
+           ~lookup:(Keeper_github_change_lookup.reader ~config ~worker:assignee)
     in
     match evidence_access with
     | Workspace_verification_store.Evidence_unavailable { request_id; reason } ->
@@ -1288,6 +1366,7 @@ module For_testing = struct
     }
 
   let evidence_images_of_snapshot = evidence_images_of_snapshot
+  let read_changes_being_judged = read_changes_being_judged
 
   type nonrec retry_request = retry_request =
     | Retry_requested

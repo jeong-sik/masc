@@ -27,6 +27,7 @@ let unresolvable_evidence_ref value =
   | Workspace_verification_store.Unresolvable_reference -> true
   | Workspace_verification_store.Artifact_reference _
   | Workspace_verification_store.Note_reference _
+  | Workspace_verification_store.Change_reference _
   | Workspace_verification_store.Collaboration_reference _ -> false
 ;;
 

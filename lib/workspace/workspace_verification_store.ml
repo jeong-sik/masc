@@ -31,6 +31,26 @@ type artifact_read_result = (artifact_payload, evidence_read_failure) result
 
 type collaboration_kind = Board_source | Fusion_source
 
+(* What a lookup of a merged change found, asked once when the producer
+   submitted and never again. Three answers, not an option: "nobody looked"
+   and "the look failed" are different facts about the same missing snapshot,
+   and an authority deciding on a change it cannot see should know which. *)
+type change_lookup =
+  | Change_not_looked_up
+  | Change_seen of
+      { merged : bool
+      ; merge_commit : string option
+      ; title : string
+      ; changed_files : int
+      }
+  | Change_lookup_failed of string
+
+let change_lookup_code = function
+  | Change_not_looked_up -> "not_looked_up"
+  | Change_seen _ -> "seen"
+  | Change_lookup_failed _ -> "failed"
+;;
+
 type submitted_evidence_item =
   | Evidence_collaboration of { reference : string; content : string; sha256 : string }
   | Evidence_note of string
@@ -53,6 +73,11 @@ type submitted_evidence_item =
       ; body : string option
       (* base_path-relative path of the persisted bytes; [None] when the
          caller gave no request to file the body under (RFC-0436 §4.2). *)
+      }
+  | Evidence_change of
+      { repository : string  (* "owner/repo", as the producer wrote it *)
+      ; pull_request : int
+      ; lookup : change_lookup
       }
 
 type evidence_access_failure =
@@ -165,6 +190,27 @@ let submitted_evidence_item_to_yojson = function
       @ (match body with
          | Some path -> [ ("body", `String path) ]
          | None -> []))
+  | Evidence_change { repository; pull_request; lookup } ->
+    `Assoc
+      ([ "kind", `String "change"
+       ; "repository", `String repository
+       ; "pull_request", `Int pull_request
+       ]
+       @
+       match lookup with
+       | Change_not_looked_up -> [ ("lookup", `String "not_looked_up") ]
+       | Change_lookup_failed detail ->
+         [ ("lookup", `String "failed"); ("detail", `String detail) ]
+       | Change_seen { merged; merge_commit; title; changed_files } ->
+         [ ("lookup", `String "seen")
+         ; ("merged", `Bool merged)
+         ; ("title", `String title)
+         ; ("changed_files", `Int changed_files)
+         ]
+         @
+         (match merge_commit with
+          | Some sha -> [ ("merge_commit", `String sha) ]
+          | None -> []))
 
 let request_header_to_yojson request =
   `Assoc
@@ -295,6 +341,27 @@ let submitted_evidence_item_transport_to_yojson = function
       @ (match body with
          | Some path -> [ ("body", `String path) ]
          | None -> []))
+  | Evidence_change { repository; pull_request; lookup } ->
+    `Assoc
+      ([ "kind", `String "change"
+       ; "repository", `String repository
+       ; "pull_request", `Int pull_request
+       ]
+       @
+       match lookup with
+       | Change_not_looked_up -> [ ("lookup", `String "not_looked_up") ]
+       | Change_lookup_failed detail ->
+         [ ("lookup", `String "failed"); ("detail", `String detail) ]
+       | Change_seen { merged; merge_commit; title; changed_files } ->
+         [ ("lookup", `String "seen")
+         ; ("merged", `Bool merged)
+         ; ("title", `String title)
+         ; ("changed_files", `Int changed_files)
+         ]
+         @
+         (match merge_commit with
+          | Some sha -> [ ("merge_commit", `String sha) ]
+          | None -> []))
 ;;
 
 (* The per-item cap above bounds one artifact. Nothing bounded their sum, so a
@@ -335,6 +402,7 @@ let submitted_evidence_item_withheld_to_yojson = function
       ]
   | (Evidence_note _ | Evidence_invalid_reference | Evidence_artifact_unreadable _
     | Evidence_artifact_binary _
+    | Evidence_change _
     | Evidence_collaboration _) as item ->
     (* Only a full-content artifact can be withheld for the aggregate budget;
        the rest carry no content to withhold. A binary item is already
@@ -372,6 +440,7 @@ let carried_artifact_indices items =
              | Evidence_invalid_reference
              | Evidence_artifact_unreadable _
              | Evidence_artifact_binary _
+             | Evidence_change _
              | Evidence_collaboration _ ) ) -> None)
   in
   let sorted =
@@ -408,6 +477,7 @@ let submitted_evidence_items_transport_to_yojson items =
       | Evidence_invalid_reference
       | Evidence_artifact_unreadable _
       | Evidence_artifact_binary _
+      | Evidence_change _
       | Evidence_collaboration _ -> submitted_evidence_item_transport_to_yojson item)
     items
 ;;
@@ -461,6 +531,13 @@ let submitted_evidence_item_metadata_to_yojson = function
       @ (match body with
          | Some path -> [ ("body", `String path) ]
          | None -> []))
+  | Evidence_change { repository; pull_request; lookup } ->
+    `Assoc
+      [ "kind", `String "change"
+      ; "repository", `String repository
+      ; "pull_request", `Int pull_request
+      ; "lookup", `String (change_lookup_code lookup)
+      ]
 ;;
 
 let submitted_evidence_access_metadata_to_yojson = function
@@ -613,6 +690,86 @@ let submitted_evidence_item_of_yojson = function
          | None -> Ok None
        in
        Ok (Evidence_artifact_binary { reference; bytes; sha256; format; body })
+     | Some (`String "change") ->
+       let open Result.Syntax in
+       let* () =
+         Json_util.reject_unknown_fields
+           ~surface:"submitted evidence change"
+           ~allowed:
+             [ "kind"
+             ; "repository"
+             ; "pull_request"
+             ; "lookup"
+             ; "detail"
+             ; "merged"
+             ; "title"
+             ; "changed_files"
+             ; "merge_commit"
+             ]
+           fields
+       in
+       let* repository = string_field "repository" in
+       let* pull_request =
+         match List.assoc_opt "pull_request" fields with
+         | Some (`Int value) when value > 0 -> Ok value
+         | Some value ->
+           Error
+             (Printf.sprintf
+                "submitted evidence change pull_request must be a positive integer, \
+                 got %s"
+                (Json_util.excerpt value))
+         | None -> Error "submitted evidence change is missing pull_request"
+       in
+       let* lookup =
+         match List.assoc_opt "lookup" fields with
+         | Some (`String "not_looked_up") -> Ok Change_not_looked_up
+         | Some (`String "failed") ->
+           let* detail = string_field "detail" in
+           Ok (Change_lookup_failed detail)
+         | Some (`String "seen") ->
+           let* title = string_field "title" in
+           let* merged =
+             match List.assoc_opt "merged" fields with
+             | Some (`Bool merged) -> Ok merged
+             | Some value ->
+               Error
+                 (Printf.sprintf
+                    "submitted evidence change merged must be a boolean, got %s"
+                    (Json_util.excerpt value))
+             | None -> Error "submitted evidence change snapshot is missing merged"
+           in
+           let* changed_files =
+             match List.assoc_opt "changed_files" fields with
+             | Some (`Int value) when value >= 0 -> Ok value
+             | Some value ->
+               Error
+                 (Printf.sprintf
+                    "submitted evidence change changed_files must be a non-negative \
+                     integer, got %s"
+                    (Json_util.excerpt value))
+             | None ->
+               Error "submitted evidence change snapshot is missing changed_files"
+           in
+           let* merge_commit =
+             match List.assoc_opt "merge_commit" fields with
+             | Some (`String sha) -> Ok (Some sha)
+             | Some value ->
+               Error
+                 (Printf.sprintf
+                    "submitted evidence change merge_commit must be a string, got %s"
+                    (Json_util.excerpt value))
+             | None -> Ok None
+           in
+           Ok (Change_seen { merged; merge_commit; title; changed_files })
+         | Some value ->
+           Error
+             (Printf.sprintf
+                "submitted evidence change lookup must be not_looked_up, failed or \
+                 seen; got %s"
+                (Json_util.excerpt value))
+         | None -> Error "submitted evidence change is missing lookup"
+       in
+       Ok (Evidence_change { repository; pull_request; lookup })
      | Some (`String kind) ->
        Error (Printf.sprintf "unknown submitted evidence snapshot kind %S" kind)
      | Some value ->
@@ -881,6 +1038,41 @@ let read_regular_file_prefix ~ownership_root path =
 
 let artifact_reference_prefix = "artifact:"
 let note_reference_prefix = "note:"
+let change_reference_prefix = "change:"
+
+(* [<owner>/<repo>#<number>]. The work this workspace produces lands as merged
+   pull requests, and until now a producer that said so was told its reference
+   was invalid: the grammar knew files in a sandbox and nothing about the place
+   the work actually went (RFC-0453 §3.5). Parsed into the two parts a lookup
+   needs, so nothing downstream re-splits the string. *)
+let parse_change_reference payload =
+  match String.index_opt payload '#' with
+  | None -> None
+  | Some hash ->
+    let repository = String.sub payload 0 hash in
+    let number = String.sub payload (hash + 1) (String.length payload - hash - 1) in
+    let slashes = String.fold_left (fun n c -> if c = '/' then n + 1 else n) 0 repository in
+    let owner_and_name_present =
+      slashes = 1
+      && not (String.equal repository "")
+      && repository.[0] <> '/'
+      && repository.[String.length repository - 1] <> '/'
+    in
+    let digits_only =
+      not (String.equal number "")
+      && String.for_all (function '0' .. '9' -> true | _ -> false) number
+    in
+    if not (owner_and_name_present && digits_only)
+    then None
+    else (
+      match int_of_string_opt number with
+      | Some pull_request when pull_request > 0 -> Some (repository, pull_request)
+      | Some _ | None -> None)
+;;
+
+let change_reference_string ~repository ~pull_request =
+  Printf.sprintf "%s%s#%d" change_reference_prefix repository pull_request
+;;
 
 let strip_prefix ~prefix value =
   if String.starts_with ~prefix value
@@ -899,6 +1091,7 @@ type reference_form =
   | Artifact_reference of string
   | Note_reference of string
   | Collaboration_reference of collaboration_kind * string
+  | Change_reference of { repository : string; pull_request : int }
   | Unresolvable_reference
 
 let classify_evidence_reference reference =
@@ -910,7 +1103,14 @@ let classify_evidence_reference reference =
     (match strip_prefix ~prefix:note_reference_prefix reference with
      | Some note when not (String.equal (String.trim note) "") ->
        Note_reference note
-     | Some _ | None -> Unresolvable_reference)
+     | Some _ | None ->
+       (match strip_prefix ~prefix:change_reference_prefix reference with
+        | Some payload ->
+          (match parse_change_reference payload with
+           | Some (repository, pull_request) ->
+             Change_reference { repository; pull_request }
+           | None -> Unresolvable_reference)
+        | None -> Unresolvable_reference))
 ;;
 
 let artifact_reference_form =
@@ -918,7 +1118,15 @@ let artifact_reference_form =
 ;;
 
 let note_reference_form = note_reference_prefix ^ "<text>"
-let resolvable_reference_forms = [ artifact_reference_form; note_reference_form; "board:<post-id>"; "fusion:<run-id>" ]
+let change_reference_form = change_reference_prefix ^ "<owner>/<repo>#<pull-request>"
+
+let resolvable_reference_forms =
+  [ artifact_reference_form
+  ; note_reference_form
+  ; change_reference_form
+  ; "board:<post-id>"
+  ; "fusion:<run-id>"
+  ]
 
 let valid_producer_relative_path path =
   Filename.is_relative path
@@ -1019,6 +1227,7 @@ let read_binary_body_base64 ~base_path (item : submitted_evidence_item) =
   | Evidence_artifact _ -> Error Not_binary
   | Evidence_invalid_reference -> Error Not_binary
   | Evidence_artifact_unreadable _ -> Error Not_binary
+  | Evidence_change _ -> Error Not_binary
 
 let inspect_producer_relative_artifact ?artifact_read ?request_id ?index ~base_path
     ~worker ~reference relative_path =
@@ -1094,6 +1303,14 @@ let snapshot_submitted_evidence_item ?artifact_read ?request_id ?index ~base_pat
       ~reference
       relative_path
   | Note_reference note -> Evidence_note note
+  (* Recorded here, read elsewhere. This call runs inside the backlog lock
+     (workspace_task_transitions.ml holds it through the verification-request
+     hook), so a repository that answers slowly would put every claim, release
+     and verdict in the workspace behind it. The authority reads the change
+     when it judges, off that lock, and the persisted item says nobody has
+     looked yet. *)
+  | Change_reference { repository; pull_request } ->
+    Evidence_change { repository; pull_request; lookup = Change_not_looked_up }
   | Collaboration_reference _ | Unresolvable_reference -> Evidence_invalid_reference
 
 let snapshot_submitted_evidence_json ?artifact_read ?request_id ~base_path ~worker
@@ -1133,6 +1350,18 @@ let submitted_evidence_identity_line (item : Yojson.Safe.t) =
          "%s (unreadable: %s)"
          reference
          (evidence_read_failure_code reason))
+  | Ok (Evidence_change { repository; pull_request; lookup }) ->
+    let reference = change_reference_string ~repository ~pull_request in
+    Ok
+      (match lookup with
+       | Change_not_looked_up -> Printf.sprintf "%s (not looked up)" reference
+       | Change_lookup_failed detail ->
+         Printf.sprintf "%s (unreadable: %s)" reference detail
+       | Change_seen { merged = true; merge_commit; _ } ->
+         (match merge_commit with
+          | Some sha -> Printf.sprintf "%s (merged as %s)" reference sha
+          | None -> Printf.sprintf "%s (merged)" reference)
+       | Change_seen { merged = false; _ } -> Printf.sprintf "%s (not merged)" reference)
   | Ok (Evidence_artifact_binary { reference; sha256; _ }) ->
     Ok
       (Printf.sprintf
@@ -1174,6 +1403,7 @@ let truncated_snapshot_items (json : Yojson.Safe.t) : (string * int) list =
          | Ok Evidence_invalid_reference -> None
          | Ok (Evidence_artifact_unreadable _) -> None
          | Ok (Evidence_artifact_binary _) -> None
+         | Ok (Evidence_change _) -> None
          | Error _ -> None)
       items
   | _ -> []

@@ -16,6 +16,22 @@ type evidence_read_failure =
 
 type collaboration_kind = Board_source | Fusion_source
 
+type change_lookup =
+  | Change_not_looked_up
+      (** Nobody has asked yet. Every persisted item carries this: the submit
+          boundary records the reference without reading it. *)
+  | Change_seen of
+      { merged : bool
+      ; merge_commit : string option
+      ; title : string
+      ; changed_files : int
+      }
+  | Change_lookup_failed of string
+(** What a lookup of a submitted change found. Three answers rather than an
+    option: "nobody looked" and "the look failed" are different facts about the
+    same missing snapshot, and an authority deciding without one should know
+    which. *)
+
 type submitted_evidence_item =
   | Evidence_collaboration of { reference : string; content : string; sha256 : string }
   | Evidence_note of string
@@ -37,6 +53,15 @@ type submitted_evidence_item =
       ; format : string
       ; body : string option
       }
+  | Evidence_change of
+      { repository : string
+      ; pull_request : int
+      ; lookup : change_lookup
+      }
+      (** Work that landed as a merged pull request. The workspace's output
+          goes to a repository, and the artifact form reads only the
+          producer's sandbox, so a producer saying "it is in PR #30715" used
+          to have its evidence discarded as an invalid reference. *)
 
 type evidence_access_failure =
   | Completion_authority_identity_missing
@@ -108,11 +133,20 @@ type reference_form =
   | Artifact_reference of string
   | Note_reference of string
   | Collaboration_reference of collaboration_kind * string
+  | Change_reference of { repository : string; pull_request : int }
   | Unresolvable_reference
 
 val classify_evidence_reference : string -> reference_form
 (** Shared submission grammar. Collaboration sources are captured by the
     application submit boundary before calling the artifact/note snapshotter. *)
+
+val change_reference_form : string
+(** [change:<owner>/<repo>#<pull-request>], spelled from the prefix this
+    module matches on. *)
+
+val change_reference_string : repository:string -> pull_request:int -> string
+(** The reference as the producer would write it, rebuilt from the parsed
+    parts so no reader has to re-split the string. *)
 
 val note_reference_form : string
 (** The accepted form for narrative evidence, spelled from the prefix this
@@ -201,7 +235,13 @@ val snapshot_submitted_evidence_json :
     ["note:<text>"] preserves non-file evidence explicitly. [bytes] reports the
     source size, which exceeds the persisted [content] length when [truncated]
     is set by the projection cap. Bare and absolute references are persisted as
-    a payload-free typed invalid-reference item. *)
+    a payload-free typed invalid-reference item.
+
+    ["change:<owner>/<repo>#<n>"] is recorded and not read. This call runs
+    inside the backlog lock, and a repository that answers slowly would put
+    every other transition behind it, so the persisted item always says
+    {!Change_not_looked_up}. The authority reads the change when it judges,
+    off that lock, and replaces the answer in what it sends to the judge. *)
 
 
 val submitted_evidence_identity_lines :

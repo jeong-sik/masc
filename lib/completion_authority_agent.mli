@@ -44,6 +44,20 @@ module For_testing : sig
   (** Reads every image-format binary artifact's filed body. An unavailable
       snapshot yields two empty lists. Item order is preserved in both. *)
 
+  val read_changes_being_judged :
+    lookup:
+      (repository:string ->
+       pull_request:int ->
+       Workspace_verification_store.change_lookup) ->
+    Workspace_verification_store.submitted_evidence_access ->
+    Workspace_verification_store.submitted_evidence_access
+  (** RFC-0453 §3.5: replaces [Change_not_looked_up] on every change item with
+      what [lookup] found, leaving every other item and an unavailable
+      snapshot untouched. The submit boundary records the reference without
+      reading it, because it runs inside the backlog lock; this lane holds no
+      lock, so the change is read here, against the repository as it stands
+      when the verdict is formed. Item order is preserved. *)
+
   val review_notes :
     request:Verification.verification_request ->
     evidence_access:Workspace_verification_store.submitted_evidence_access ->

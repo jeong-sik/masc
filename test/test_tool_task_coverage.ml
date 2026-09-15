@@ -822,7 +822,14 @@ let () = test "handle_transition_rejects_unresolvable_evidence_ref_entries" (fun
   reject "board:";
   reject "fusion:";
   reject "file:///Users/x/repo/out.diff";
+  (* The URL form is still not the grammar -- the accepted one names the
+     repository and the number so nothing downstream has to parse a link. A
+     change reference missing either half names no pull request. *)
   reject "https://github.com/o/r/pull/1";
+  reject "change:";
+  reject "change:jeong-sik/masc";
+  reject "change:jeong-sik#30715";
+  reject "change:jeong-sik/masc#0";
   reject "artifacts/relative/but/unprefixed.md";
   reject "task-002:approved"
 )
@@ -850,6 +857,7 @@ let () = test "handle_transition_accepts_resolvable_evidence_ref_forms" (fun () 
                     ; `String "note:board post p-b8655a19 carries the rationale"
                     ; `String "board:p-b8655a197dcf2f5da46655e10b3acbd1"
                     ; `String "fusion:fusion-run-501"
+                    ; `String "change:jeong-sik/masc#30715"
                     ] );
               ] );
         ])

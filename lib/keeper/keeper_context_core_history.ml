@@ -56,7 +56,7 @@ let persist_message ?source session msg =
     (* The session directory appears when something is stored in it, so the
        first append is what opens it. The three durable-save primitives the
        checkpoint store uses create their own parent — [save_atomic] directly,
-       [save_bytes_durable_atomic_observed] and [save_json_durable_atomic_from]
+       [save_bytes_durable_atomic_observed] and [save_encoded_durable_atomic_from]
        through [save_bytes_durable_atomic_core] — and this is the only writer
        under a session directory that appends instead. *)
     let (_created : string) = Keeper_fs.ensure_dir (Filename.dirname path) in

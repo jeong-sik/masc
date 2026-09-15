@@ -39,6 +39,15 @@ type spec =
       ; started_ms : int
       }
       (** A one-shot Docker container for one read. Unique per run. *)
+  | Docker_managed of
+      { keeper_name : string
+      ; network_mode : Keeper_types_profile_sandbox.network_mode
+      ; pid : int
+      ; started_ms : int
+      ; seq : int
+      }
+      (** A Docker container started through sandbox control rather than by a
+          turn. Unique per run. *)
 
 val make : spec -> t
 (** Deterministic: the same [spec] always gives the same name.

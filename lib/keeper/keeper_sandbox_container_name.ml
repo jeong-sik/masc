@@ -23,6 +23,13 @@ type spec =
       ; pid : int
       ; started_ms : int
       }
+  | Docker_managed of
+      { keeper_name : string
+      ; network_mode : Keeper_types_profile_sandbox.network_mode
+      ; pid : int
+      ; started_ms : int
+      ; seq : int
+      }
 
 (* apple/container [ManagedContainer.nameValid], unchanged from 1.3.1 to
    1.4.1: at most 63 characters (the DNS label length) and
@@ -118,6 +125,16 @@ let make spec =
       ~prefix:"masc-keeper-read"
       ~keeper_segment:(Workspace_utils.safe_filename keeper_name)
       ~qualifiers:[ string_of_int pid; string_of_int started_ms ]
+  | Docker_managed { keeper_name; network_mode; pid; started_ms; seq } ->
+    spell
+      ~prefix:"masc-keeper-managed"
+      ~keeper_segment:(Workspace_utils.safe_filename keeper_name)
+      ~qualifiers:
+        [ Keeper_types_profile_sandbox.network_mode_to_string network_mode
+        ; string_of_int pid
+        ; string_of_int started_ms
+        ; string_of_int seq
+        ]
 ;;
 
 let to_string name = name

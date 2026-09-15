@@ -81,6 +81,15 @@ let base_path_segment base_path =
 
 let segments name = String.split_on_char '-' name
 
+module Name = Masc.Keeper_sandbox_container_name
+
+let spelled spec = Name.to_string (Name.make spec)
+
+(* A one-shot name's per-run inputs, fixed so its spelling can be pinned. *)
+let run_pid = 4242
+let run_started_ms = 1_757_900_000_000
+let run_seq = 7
+
 let () =
   run "keeper_sandbox_persistent"
     [ ( "container_name"
@@ -177,6 +186,26 @@ let () =
                    "-"
                    [ "masc-keeper-vm"; "alpha"; "none"; base_path_segment guest_base_path ])
                 (guest_name ~network_mode:Profile.Network_none "alpha"))
+        ; test_case "a cut that ends on a hyphen still boots" `Quick
+            (fun () ->
+              (* Fourteen characters are kept in inherit mode; the
+                 fourteenth here is a hyphen, so the name carries "--". *)
+              let keeper = "abcdefghijklm-nopqrstuvwxyz-0123456789" in
+              let name = guest_name ~network_mode:Profile.Network_inherit keeper in
+              check bool
+                (Printf.sprintf "Apple's container accepts %s" name)
+                true
+                (apple_container_accepts name);
+              check bool
+                "the kept part ends where the cut fell"
+                true
+                (String.starts_with ~prefix:"masc-keeper-vm-abcdefghijklm--inherit-" name);
+              check bool
+                "a keeper that differs only after the cut is another guest"
+                false
+                (String.equal
+                   name
+                   (guest_name ~network_mode:Profile.Network_inherit (keeper ^ "x"))))
         ; test_case "the longest keeper id fits in every mode" `Quick
             (fun () ->
               (* Validation.Id_shape admits 64 characters with one namespace
@@ -190,6 +219,53 @@ let () =
                      true
                      (apple_container_accepts name))
                 Profile.all_network_modes)
+        ] )
+    ; ( "docker_names"
+      , [ test_case "Docker names are spelled in full, however long" `Quick
+            (fun () ->
+              check
+                string
+                "one-shot"
+                "masc-keeper-alpha-4242-1757900000000-7"
+                (spelled
+                   (Name.Docker_oneshot
+                      { keeper_name = "alpha"
+                      ; pid = run_pid
+                      ; started_ms = run_started_ms
+                      ; seq = run_seq
+                      }));
+              check
+                string
+                "read"
+                "masc-keeper-read-alpha-4242-1757900000000"
+                (spelled
+                   (Name.Docker_read
+                      { keeper_name = "alpha"; pid = run_pid; started_ms = run_started_ms }));
+              check
+                string
+                "managed"
+                "masc-keeper-managed-alpha-inherit-4242-1757900000000-7"
+                (spelled
+                   (Name.Docker_managed
+                      { keeper_name = "alpha"
+                      ; network_mode = Profile.Network_inherit
+                      ; pid = run_pid
+                      ; started_ms = run_started_ms
+                      ; seq = run_seq
+                      }));
+              (* Docker bounds no length, so the keeper that a guest name
+                 has to cut keeps its whole name here. *)
+              check
+                string
+                "a long keeper is not cut"
+                ("masc-keeper-" ^ refused_keeper ^ "-4242-1757900000000-7")
+                (spelled
+                   (Name.Docker_oneshot
+                      { keeper_name = refused_keeper
+                      ; pid = run_pid
+                      ; started_ms = run_started_ms
+                      ; seq = run_seq
+                      })))
         ] )
     ]
 ;;

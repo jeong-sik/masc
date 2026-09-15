@@ -263,6 +263,63 @@ SOURCES
   module_suites=$( { printf '%s\n' "${module_suites}" \
     | grep -v '^[[:space:]]*$' || [ $? -eq 1 ]; } | sort -u)
 
+  # A third way a suite says which module it stands over: its dune stanza
+  # links it. bin/ TUI libraries are (wrapped false) single-module libraries,
+  # so the library name is the module name, and a suite that lists it in
+  # (libraries ...) is built against that module and nothing between them.
+  #
+  # The two rules above miss exactly the suites named after what they assert
+  # rather than after a module, when they also do not open a file. The
+  # regression: test_tui_theme_contrast measures all 53 shipped base16 schemes
+  # -- foreground against background, the receding token, the whole palette --
+  # and links masc_tui_color, masc_tui_theme_catalog and masc_tui_theme_choice.
+  # None of those three selected it, so the contrast formula itself could
+  # change with that harness never run.
+  #
+  # Measured 2026-09-15 over the 138 bin/masc_tui*.ml modules: eight that
+  # selected nothing now select one to three suites, and the whole set gains
+  # 63 selections -- 0.46 a module. The cap above applies unchanged and is
+  # what keeps the wide ones out: masc_tui_types is linked by 58 suites,
+  # masc_tui_message_layout by 34, masc_tui_theme by 15.
+  library_suites=""
+  while IFS= read -r changed_source; do
+    changed_source=$(printf '%s' "${changed_source}" \
+      | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+    [ -n "${changed_source}" ] || continue
+    stem=$(basename "${changed_source}")
+    stem=${stem%.mli}
+    stem=${stem%.ml}
+    # One pass over the stanzas, tracking the (name ...) each (libraries ...)
+    # belongs to. A (test ...) with no libraries resets on the next one rather
+    # than lending its name to the following stanza.
+    matches=$(awk -v want="${stem}" '
+      /\(test$|\(test[ \t]/ { in_test = 1; name = "" }
+      in_test && match($0, /\(name[ \t]+[A-Za-z0-9_]+/) {
+        if (name == "") { name = substr($0, RSTART + 6, RLENGTH - 6); gsub(/[ \t]/, "", name) }
+      }
+      in_test && /\(libraries/ { in_libs = 1; sub(/.*\(libraries/, "") }
+      in_libs {
+        line = $0
+        gsub(/\)/, " ", line)
+        n = split(line, tok, /[ \t]+/)
+        for (i = 1; i <= n; i++) if (tok[i] == want && name != "") print "test/" name ".ml"
+        if ($0 ~ /\)/) { in_libs = 0; in_test = 0 }
+      }
+    ' test/dune test/stanzas/*.inc 2>/dev/null | sort -u)
+    [ -n "${matches}" ] || continue
+    matched=$(printf '%s\n' "${matches}" | wc -l | tr -d ' ')
+    if [ "${matched}" -gt "${max_suites_per_module}" ]; then
+      echo "-- ${changed_source}: ${matched} suites link it, too broad to attribute"
+      continue
+    fi
+    library_suites=$(printf '%s\n%s\n' "${library_suites}" "${matches}")
+  done <<LIBSOURCES
+  ${changed_sources}
+LIBSOURCES
+
+  library_suites=$( { printf '%s\n' "${library_suites}" \
+    | grep -v '^[[:space:]]*$' || [ $? -eq 1 ]; } | sort -u)
+
   # A structural guard is named after what it asserts, not after the module it
   # reads, so the name mapping above cannot find it -- and the modules those
   # guards watch are the umbrella ones it deliberately skips. But such a guard
@@ -331,7 +388,8 @@ DECLARED
   # is none of those. Left out, a theme-only pull request returned here before
   # reaching the trigger below and reported no suite at all.
   if [ -z "${sources}" ] && [ -z "${assets}" ] && [ -z "${themes_changed}" ] \
-    && [ -z "${module_suites}" ] && [ -z "${declared_suites}" ]; then
+    && [ -z "${module_suites}" ] && [ -z "${library_suites}" ] \
+    && [ -z "${declared_suites}" ]; then
     echo "no test source, config asset or named suite in this pull request"
       return 1
   fi
@@ -375,6 +433,13 @@ DECLARED
       | grep -v '^[[:space:]]*$' | sort -u)
   fi
 
+  if [ -n "${library_suites}" ]; then
+    echo "suites whose dune stanza links the sources this pull request edits:"
+    printf '%s\n' "${library_suites}" | sed 's/^/  /'
+    sources=$(printf '%s\n%s\n' "${sources}" "${library_suites}" \
+      | grep -v '^[[:space:]]*$' | sort -u)
+  fi
+
   if [ -n "${declared_suites}" ]; then
     echo "guards that name the sources this pull request edits:"
     printf '%s\n' "${declared_suites}" | sed 's/^/  /'
@@ -409,7 +474,13 @@ self_test() {
     changed=$(printf '%s\n' "$@")
     local got=""
     if select_sources > /dev/null 2>&1; then
-      got=$(printf '%s\n' "${sources}" | grep -v '^[[:space:]]*$' | sort -u \
+      # LC_ALL=C: the first case whose two suites differ only at "." against
+      # "_" -- test_tui_browser.ml and test_tui_browser_history.py -- ordered
+      # one way on a developer's machine and the other on the runner, because
+      # a locale collation that ignores punctuation reverses them. The order
+      # here decides whether a case passes, so it is pinned rather than
+      # inherited.
+      got=$(printf '%s\n' "${sources}" | grep -v '^[[:space:]]*$' | LC_ALL=C sort -u \
         | tr '\n' ' ' | sed 's/ $//')
     fi
     local matches=false
@@ -576,6 +647,19 @@ self_test() {
   check "an interface edit selects the suites named after its module" \
     "packages/agent_core/test/test_provider_admission.ml" \
     "packages/agent_core/lib/llm_provider/provider_admission.mli"
+  # The third way: the suite's dune stanza links the module. Neither rule
+  # above reaches test_tui_theme_contrast from the contrast formula -- the
+  # suite is named after what it asserts and opens config/themes, not this
+  # source -- and it is the only suite that measures the 53 shipped schemes.
+  check "a module its suite links selects that suite" \
+    "test/test_tui_theme_contrast.ml" \
+    "bin/masc_tui_color.ml"
+  # And the cap holds on that rule too. 34 suites link masc_tui_message_layout,
+  # so the link says nothing about an edit there and only the suite named
+  # after the module is left. Without the cap this answer would be 34 suites.
+  check "a module many suites link is too broad to attribute" \
+    "test/test_tui_message_layout.ml" \
+    "bin/masc_tui_message_layout.ml"
   # Both halves together, deduplicated.
   check "a source and its own suite are one entry" \
     "test/test_tui_msx_graphics.ml test/test_tui_msx_load.ml test/test_tui_msx_tick.ml" \
@@ -590,12 +674,14 @@ self_test() {
   check "an edited terminal scenario is selected" \
     "test/test_tui_keyboard_input.py" "test/test_tui_keyboard_input.py"
   # tui_browser names five suites, over the per-module cap, so the name
-  # mapping attributes nothing to this interface and the declared scenario
-  # is all that is left.
-  check "an interface over the cap selects only its declared PTY scenario" \
-    "test/test_tui_browser_history.py" "bin/masc_tui_browser.mli"
+  # mapping attributes nothing to this interface. What is left is the
+  # scenario that declares the path and the one suite whose stanza links the
+  # library -- two precise claims where the name was a namespace.
+  check "an interface over the cap still reaches two precise claims" \
+    "test/test_tui_browser.ml test/test_tui_browser_history.py" \
+    "bin/masc_tui_browser.mli"
   check "an interface and its edited PTY suite select one entry" \
-    "test/test_tui_browser_history.py" \
+    "test/test_tui_browser.ml test/test_tui_browser_history.py" \
     "bin/masc_tui_browser.mli" "test/test_tui_browser_history.py"
   # No dune rule declares an alias for this one, so nothing can run it and
   # selecting it would fail the step on a file that is not a suite.

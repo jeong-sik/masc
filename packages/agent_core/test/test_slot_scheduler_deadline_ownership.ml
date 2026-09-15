@@ -79,6 +79,52 @@ let test_a_wait_that_ends_before_any_grant_leaves_the_queue () =
   check int "the holder returned the slot" 0 (Slot_scheduler.snapshot scheduler).Slot_scheduler.active
 ;;
 
+(* A holder cancelled while its work runs returns the slot, and the waiter
+   queued behind it is granted it. This pins the cancellation path of the
+   contract; it does not tell a protected release from an unprotected one,
+   which differ only when another domain holds the scheduler's mutex at the
+   instant the cancelled holder releases. *)
+let test_a_holder_cancelled_with_the_slot_returns_it_to_the_next_waiter () =
+  Eio_mock.Backend.run
+  @@ fun () ->
+  let clock = Eio_mock.Clock.make () in
+  Eio_mock.Clock.set_time clock 0.0;
+  let scheduler = Slot_scheduler.create ~max_slots:1 in
+  Eio.Switch.run
+  @@ fun sw ->
+  let holds, holding = Eio.Promise.create () in
+  let cancel_the_holder, cancel = Eio.Promise.create () in
+  (* [Fiber.first] cancels the holder once the second arm returns. *)
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Fiber.first
+      (fun () ->
+         Slot_scheduler.with_permit scheduler (fun () ->
+           Eio.Promise.resolve holding ();
+           Eio.Fiber.await_cancel ()))
+      (fun () -> Eio.Promise.await cancel_the_holder));
+  Eio.Promise.await holds;
+  check int "the holder has the slot" 1 (Slot_scheduler.snapshot scheduler).Slot_scheduler.active;
+  let ran = ref false in
+  let waiter =
+    Eio.Fiber.fork_promise ~sw (fun () ->
+      Slot_scheduler.with_permit_until ~clock ~deadline_at:deadline_s scheduler (fun () ->
+        ran := true))
+  in
+  check
+    int
+    "the waiter is queued behind the holder"
+    1
+    (Slot_scheduler.snapshot scheduler).Slot_scheduler.queue_length;
+  Eio.Promise.resolve cancel ();
+  (match Eio.Promise.await_exn waiter with
+   | Ok () -> ()
+   | Error `Permit_wait_expired -> fail "the slot the cancelled holder returned was not granted");
+  check bool "the waiter ran with the slot" true !ran;
+  let snapshot = Slot_scheduler.snapshot scheduler in
+  check int "the slot came back" 0 snapshot.Slot_scheduler.active;
+  check int "nobody is left in the queue" 0 snapshot.Slot_scheduler.queue_length
+;;
+
 let () =
   Alcotest.run
     "slot scheduler deadline ownership"
@@ -91,6 +137,10 @@ let () =
             "a wait that ends before any grant leaves the queue"
             `Quick
             test_a_wait_that_ends_before_any_grant_leaves_the_queue
+        ; test_case
+            "a holder cancelled with the slot returns it to the next waiter"
+            `Quick
+            test_a_holder_cancelled_with_the_slot_returns_it_to_the_next_waiter
         ] )
     ]
 ;;

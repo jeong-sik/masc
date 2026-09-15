@@ -103,6 +103,7 @@ type config = Runtime_agent_context.config = {
   body_timeout_s : float option;
   call_timeout_s : float option;
   admission_timeout_s : float option;
+  permit_wait : Llm_provider.Provider_admission.permit_wait Atomic.t option;
   max_tokens : int option;
   temperature : float option;
   hooks : Agent_core.Hooks.hooks option;
@@ -171,6 +172,13 @@ type run_result = {
   runtime_observation : Runtime_observation.runtime_observation option;
   stop_reason : stop_reason;
 }
+
+val yielded_pre_first_token : session_id:string -> run_result
+(** A synthesized [run_result] for a turn that abandoned its provider attempt
+    before the first streaming event because a person queued behind it (the
+    pre-first-token gap; RFC-0441). [turns_used = 0], no checkpoint,
+    [stop_reason = Yielded_to_durable_stimulus] so downstream treats it as a
+    durable-stimulus yield and re-runs the source wake fresh next cycle. *)
 
 (** {1 Label resolution} *)
 

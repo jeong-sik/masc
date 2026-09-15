@@ -40,16 +40,25 @@
     declare. *)
 val with_admission : config:Provider_config.t -> (unit -> 'a) -> 'a
 
+(** {!Slot_scheduler.permit_wait}: the caller's cell the bounded waits
+    below write as a wait begins and ends. An unbounded [with_admission]
+    writes nothing, so a caller that stands its own watchdog down while
+    [Waiting_for_permit] never does so for a wait nothing else ends. *)
+type permit_wait = Slot_scheduler.permit_wait =
+  | Before_any_wait
+  | Waiting_for_permit
+  | Wait_settled_at of float
+
 (** [with_admission] whose wait for a permit ends at [deadline_at] on
     [clock]. [Error `Permit_wait_expired] means the endpoint stayed saturated
     until the deadline and [f] never ran; the waiter has left the FIFO. A
     permit granted in the same instant the deadline passed is the caller's
     and [f] runs with it. Without a declaration there is no wait and [f]
-    runs at once. [f] itself
-    runs without this deadline, so a caller that bounds the whole call arms
-    what is left of it around [f]. *)
+    runs at once. [f] itself runs without this deadline, so a caller that
+    bounds the whole call arms what is left of it around [f]. *)
 val with_admission_until
-  :  clock:_ Eio.Time.clock
+  :  ?wait:permit_wait Atomic.t
+  -> clock:_ Eio.Time.clock
   -> deadline_at:float
   -> config:Provider_config.t
   -> (unit -> 'a)
@@ -71,7 +80,8 @@ type deadline_expiry =
     phase each expiry is: the first two are queueing, the third is the work.
     The work's own narrower bounds still arm inside it. *)
 val with_admission_and_work_until
-  :  clock:_ Eio.Time.clock
+  :  ?wait:permit_wait Atomic.t
+  -> clock:_ Eio.Time.clock
   -> deadline_at:float
   -> config:Provider_config.t
   -> (unit -> 'a)

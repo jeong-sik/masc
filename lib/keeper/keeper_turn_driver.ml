@@ -297,6 +297,7 @@ let attempt_runtime_candidates
     ?(on_attempt_error = fun ~runtime_id:_ ~attempt:_ ~dispatch:_ _error -> ())
     ?(on_lane_terminal_error = fun (_ : lane_terminal_error) -> ())
     ?quota_scope_of
+    ?model_of
     ?candidate_preference_of
     ?candidate_dispatchable
     ~runtime_id ~runtime_id_of
@@ -348,6 +349,50 @@ let attempt_runtime_candidates
       fun candidate ->
         Option.is_some (Runtime.get_runtime_by_id (runtime_id_of candidate))
   in
+  (* The model behind a candidate, for the one failure that belongs to the
+     model rather than to its provider: a generation that repeated itself.
+     The same model reached through another provider repeats the same way,
+     so once a candidate has repeated, every later candidate on that model is
+     refused before dispatch and the walk moves to a different model.
+
+     The identity is the name the provider serves ([model.api_name]), not the
+     runtime.toml model id: operators declare one [models.*] row per provider
+     for the same model, each under its own id, so ids never meet across
+     providers and a skip keyed on them would fire nowhere. A provider that
+     serves the same model under a prefixed name is not recognised as the
+     same model by this rule; that gap is named (RFC-0419 §9), not guessed
+     at. The id-table default reads the registry; richer callers inject it. *)
+  let model_of =
+    match model_of with
+    | Some model_of -> model_of
+    | None ->
+      fun candidate ->
+        Runtime.get_runtime_by_id (runtime_id_of candidate)
+        |> Option.map (fun (runtime : Runtime.t) -> runtime.model.api_name)
+  in
+  (* The refusal a candidate earns from the models that repeated so far: its
+     served name and the terminal record that observed the repeat. One pure
+     lookup, read once per candidate. *)
+  let refusal_for ~(repeated_models : (string * lane_terminal_error) list) candidate =
+    match model_of candidate with
+    | None -> None
+    | Some model ->
+      Option.map (fun observed -> model, observed) (List.assoc_opt model repeated_models)
+  in
+  let repeated_generation (error : Agent_core.Error.t) =
+    match error with
+    | Agent_core.Error.Provider (Llm_provider.Error.RepeatingGeneration _) -> true
+    | Agent_core.Error.Provider _
+    | Agent_core.Error.Api _
+    | Agent_core.Error.Agent _
+    | Agent_core.Error.Mcp _
+    | Agent_core.Error.Config _
+    | Agent_core.Error.Serialization _
+    | Agent_core.Error.Io _
+    | Agent_core.Error.Orchestration _
+    | Agent_core.Error.Internal _
+    | Agent_core.Error.Internal_carried _ -> false
+  in
   let demote_rest rest =
     let dispatchable, undispatchable =
       List.partition candidate_dispatchable rest
@@ -364,7 +409,11 @@ let attempt_runtime_candidates
     on_lane_terminal_error terminal;
     Error terminal.lane_error
   in
-  let rec loop ~(observed_overflow : lane_terminal_error option) idx = function
+  let rec loop
+      ~(observed_overflow : lane_terminal_error option)
+      ~(repeated_models : (string * lane_terminal_error) list)
+      idx
+    = function
     | [] ->
       (match observed_overflow with
        | Some overflow -> lane_terminal overflow
@@ -375,198 +424,257 @@ let attempt_runtime_candidates
                  "runtime lane %S exhausted all candidates"
                  runtime_id)))
     | candidate :: rest ->
-      let is_last = rest = [] in
-      let attempt_runtime_id = runtime_id_of candidate in
-      (* Bind quota ownership to the exact candidate that will be dispatched.
-         [run_attempt] may span a runtime.toml reload; resolving the id after
-         the provider returns could then attribute the old credential's
-         response to the replacement catalog row. *)
-      let attempt_quota_scope = quota_scope_of candidate in
-      let attempt_candidate_preference = candidate_preference_of candidate in
-      emit_runtime_manifest
-        ~status:"attempt"
-        ~decision:(runtime_attempt_decision ~idx ~runtime_id:attempt_runtime_id)
-        Keeper_runtime_manifest.Runtime_routed;
-      (match
-         run_attempt ~idx ~runtime_id:attempt_runtime_id candidate
-       with
-       | Ok value, _checkpoint_after, _effect_disposition, _dispatch ->
-         emit_runtime_manifest
-           ~status:"completed"
-           ~decision:(runtime_attempt_decision ~idx ~runtime_id:attempt_runtime_id)
-           Keeper_runtime_manifest.Runtime_completed;
-         (* Sticky failover: remember the winning candidate so later turns on
-            this lane start from it (idx 0 or a failover success alike).
+      (match refusal_for ~repeated_models candidate with
+       | Some refusal -> refuse ~observed_overflow ~repeated_models idx candidate rest refusal
+       | None -> attempt ~observed_overflow ~repeated_models idx candidate rest)
+  (* The candidate's model already repeated itself earlier in the walk.
+     Refusing it is the walk's own policy, so it is recorded as a rejection
+     before dispatch, like the reasoning-effort ladder's. If it was the last
+     candidate, the lane's error is what the walk observed: an overflow seen
+     anywhere in the rotation still outranks it, then the repeat itself,
+     never this refusal. *)
+  and refuse ~observed_overflow ~repeated_models idx candidate rest
+      (model, (observed : lane_terminal_error)) =
+    let attempt_runtime_id = runtime_id_of candidate in
+    let error =
+      Agent_core.Error.Api
+        (Llm_provider.Retry.InvalidRequest
+           { reason = Llm_provider.Retry.Attempt_rejected
+           ; message =
+               Printf.sprintf
+                 "candidate %s refused before dispatch: model %s repeated itself on %s \
+                  in this walk"
+                 attempt_runtime_id
+                 model
+                 observed.origin_runtime_id
+           })
+    in
+    emit_runtime_manifest
+      ~status:"attempt"
+      ~decision:(runtime_attempt_decision ~idx ~runtime_id:attempt_runtime_id)
+      Keeper_runtime_manifest.Runtime_routed;
+    emit_runtime_manifest
+      ~status:"failed"
+      ~decision:(runtime_failed_decision ~idx ~runtime_id:attempt_runtime_id error)
+      Keeper_runtime_manifest.Runtime_failed;
+    on_attempt_error
+      ~runtime_id:attempt_runtime_id
+      ~attempt:idx
+      ~dispatch:Keeper_attempt_dispatch.Rejected_before_dispatch
+      error;
+    if rest = []
+    then (
+      match observed_overflow with
+      | Some overflow -> lane_terminal overflow
+      | None -> lane_terminal observed)
+    else loop ~observed_overflow ~repeated_models (idx + 1) rest
+  and attempt ~observed_overflow ~repeated_models idx candidate rest =
+    let is_last = rest = [] in
+    let attempt_runtime_id = runtime_id_of candidate in
+    (* Bind quota ownership to the exact candidate that will be dispatched.
+       [run_attempt] may span a runtime.toml reload; resolving the id after
+       the provider returns could then attribute the old credential's
+       response to the replacement catalog row. *)
+    let attempt_quota_scope = quota_scope_of candidate in
+    let attempt_candidate_preference = candidate_preference_of candidate in
+    emit_runtime_manifest
+      ~status:"attempt"
+      ~decision:(runtime_attempt_decision ~idx ~runtime_id:attempt_runtime_id)
+      Keeper_runtime_manifest.Runtime_routed;
+    (match
+       run_attempt ~idx ~runtime_id:attempt_runtime_id candidate
+     with
+     | Ok value, _checkpoint_after, _effect_disposition, _dispatch ->
+       emit_runtime_manifest
+         ~status:"completed"
+         ~decision:(runtime_attempt_decision ~idx ~runtime_id:attempt_runtime_id)
+         Keeper_runtime_manifest.Runtime_completed;
+       (* Sticky failover: remember the winning candidate so later turns on
+          this lane start from it (idx 0 or a failover success alike).
 
-            Only a candidate the lane declares. The media walk reaches past
-            the lane into media_failover, and a winner from out there cannot
-            be remembered for this lane: [prefer_order] would find it in no lane list and
-            promote nothing, while the record has already replaced the last
-            in-lane success. The next text turn then starts from the declared
-            head again, and if that head is the one that was failing, it
-            fails again every turn (#34823).
+          Only a candidate the lane declares. The media walk reaches past
+          the lane into media_failover, and a winner from out there cannot
+          be remembered for this lane: [prefer_order] would find it in no lane list and
+          promote nothing, while the record has already replaced the last
+          in-lane success. The next text turn then starts from the declared
+          head again, and if that head is the one that was failing, it
+          fails again every turn (#34823).
 
-            A lane_id naming no configured lane records nothing either. There
-            is no candidate list for [prefer_order] to reorder, so the entry
-            could never be read. *)
-         (match lane_id with
-          | Some lane_id when lane_declares ~lane_id attempt_runtime_id ->
-            Runtime_lane_preference.note_success ~lane_id
-              ~candidate:attempt_runtime_id
-          | Some _ | None -> ());
+          A lane_id naming no configured lane records nothing either. There
+          is no candidate list for [prefer_order] to reorder, so the entry
+          could never be read. *)
+       (match lane_id with
+        | Some lane_id when lane_declares ~lane_id attempt_runtime_id ->
+          Runtime_lane_preference.note_success ~lane_id
+            ~candidate:attempt_runtime_id
+        | Some _ | None -> ());
+       Option.iter
+         (fun candidate -> Runtime_lane_preference.note_candidate_success ~candidate)
+         attempt_candidate_preference;
+       (* A call getting through is the only evidence a quota came back that
+          a provider stating no reset time leaves available, so it is what
+          clears the observation. A stated window is left alone: it names a
+          time, and one success inside it does not make that untrue. *)
+       (match attempt_quota_scope with
+        | Some scope -> Runtime_quota_window.note_succeeded ~scope
+        | None -> ());
+       Ok value
+     | Error error, checkpoint_after, effect_disposition, dispatch ->
+       emit_runtime_manifest
+         ~status:"failed"
+         ~decision:(runtime_failed_decision ~idx ~runtime_id:attempt_runtime_id error)
+         Keeper_runtime_manifest.Runtime_failed;
+       on_attempt_error
+         ~runtime_id:attempt_runtime_id
+         ~attempt:idx
+         ~dispatch
+         error;
+       (* HTTP 429 and coarse Provider.RateLimit do not identify the
+          exhausted resource. Keep that unknown scope and the optional
+          provider hint as candidate-only ordering evidence. A shared
+          credential quota requires the distinct HardQuota/402 contract. *)
+       let note_quota retry_after =
+         match attempt_quota_scope, retry_after with
+         | None, _ -> ()
+         | Some scope, Some retry_after_s ->
+           Runtime_quota_window.note_exhausted
+             ~scope
+             (* NDT-OK: convert the provider's relative reset at ingress. *)
+             ~resets_at:(Unix.gettimeofday () +. retry_after_s)
+         | Some scope, None ->
+           Runtime_quota_window.note_observed_exhausted ~scope
+       in
+       let note_rate_limit retry_after =
          Option.iter
-           (fun candidate -> Runtime_lane_preference.note_candidate_success ~candidate)
-           attempt_candidate_preference;
-         (* A call getting through is the only evidence a quota came back that
-            a provider stating no reset time leaves available, so it is what
-            clears the observation. A stated window is left alone: it names a
-            time, and one success inside it does not make that untrue. *)
-         (match attempt_quota_scope with
-          | Some scope -> Runtime_quota_window.note_succeeded ~scope
-          | None -> ());
-         Ok value
-       | Error error, checkpoint_after, effect_disposition, dispatch ->
-         emit_runtime_manifest
-           ~status:"failed"
-           ~decision:(runtime_failed_decision ~idx ~runtime_id:attempt_runtime_id error)
-           Keeper_runtime_manifest.Runtime_failed;
-         on_attempt_error
-           ~runtime_id:attempt_runtime_id
-           ~attempt:idx
-           ~dispatch
-           error;
-         (* HTTP 429 and coarse Provider.RateLimit do not identify the
-            exhausted resource. Keep that unknown scope and the optional
-            provider hint as candidate-only ordering evidence. A shared
-            credential quota requires the distinct HardQuota/402 contract. *)
-         let note_quota retry_after =
-           match attempt_quota_scope, retry_after with
-           | None, _ -> ()
-           | Some scope, Some retry_after_s ->
-             Runtime_quota_window.note_exhausted
-               ~scope
-               (* NDT-OK: convert the provider's relative reset at ingress. *)
-               ~resets_at:(Unix.gettimeofday () +. retry_after_s)
-           | Some scope, None ->
-             Runtime_quota_window.note_observed_exhausted ~scope
-         in
-         let note_rate_limit retry_after =
-           Option.iter
-             (fun candidate -> Runtime_lane_preference.note_rate_limit ~candidate ~retry_after)
-             attempt_candidate_preference
-         in
-         (match error with
-          | Agent_core.Error.Api (Llm_provider.Retry.RateLimited { retry_after; _ })
-          | Agent_core.Error.Provider (Llm_provider.Error.RateLimit { retry_after; _ }) ->
-              note_rate_limit retry_after
-          | Agent_core.Error.Provider (Llm_provider.Error.HardQuota { retry_after; _ }) ->
-              note_quota retry_after
-          | Agent_core.Error.Api (Llm_provider.Retry.PaymentRequired _) -> note_quota None
-          | _ -> ());
-         (* Stable demotion retains every declared candidate, including when
-            all are observed unavailable. Neither hint causes a wait or gate. *)
-         let rest = demote_rest rest in
-         let retry_admitted =
-           allow_retry ~runtime_id:attempt_runtime_id ~attempt:idx error
-         in
-         let effect_retry_admitted =
-           Keeper_provider_attempt_effect.allows_same_turn_retry
-             effect_disposition
-         in
-         let terminal_error =
-           match effect_disposition with
-           | Keeper_provider_attempt_effect.No_effect_observed -> error
-           | Keeper_provider_attempt_effect.Effect_attempted
-           | Keeper_provider_attempt_effect.Observation_unavailable ->
-             (* masc#28885: a fence on a turn that also recorded typed
-                pre_tool_use rejections gets its own terminal label — the
-                model's correction round-trip was the visible casualty.
-                Disposition is identical to the plain fence. *)
-             (match !pre_tool_rejects with
-              | [] ->
-                core_error_of_masc_internal_error
-                  (Provider_attempt_effect_fenced
-                     { runtime_id = attempt_runtime_id
-                     ; effect_disposition
-                     ; diagnostic = Agent_core.Error.to_string error
-                     })
-              | rejects ->
-                core_error_of_masc_internal_error
-                  (Tool_correction_lost
-                     { runtime_id = attempt_runtime_id
-                     ; effect_disposition
-                     ; reject_count = List.length rejects
-                     ; diagnostic = Agent_core.Error.to_string error
-                     }))
-         in
-         let allow_accept_no_progress_retry =
+           (fun candidate -> Runtime_lane_preference.note_rate_limit ~candidate ~retry_after)
+           attempt_candidate_preference
+       in
+       (match error with
+        | Agent_core.Error.Api (Llm_provider.Retry.RateLimited { retry_after; _ })
+        | Agent_core.Error.Provider (Llm_provider.Error.RateLimit { retry_after; _ }) ->
+            note_rate_limit retry_after
+        | Agent_core.Error.Provider (Llm_provider.Error.HardQuota { retry_after; _ }) ->
+            note_quota retry_after
+        | Agent_core.Error.Api (Llm_provider.Retry.PaymentRequired _) -> note_quota None
+        | _ -> ());
+       (* Stable demotion retains every declared candidate, including when
+          all are observed unavailable. Neither hint causes a wait or gate. *)
+       let rest = demote_rest rest in
+       let retry_admitted =
+         allow_retry ~runtime_id:attempt_runtime_id ~attempt:idx error
+       in
+       let effect_retry_admitted =
+         Keeper_provider_attempt_effect.allows_same_turn_retry
+           effect_disposition
+       in
+       let terminal_error =
+         match effect_disposition with
+         | Keeper_provider_attempt_effect.No_effect_observed -> error
+         | Keeper_provider_attempt_effect.Effect_attempted
+         | Keeper_provider_attempt_effect.Observation_unavailable ->
+           (* masc#28885: a fence on a turn that also recorded typed
+              pre_tool_use rejections gets its own terminal label — the
+              model's correction round-trip was the visible casualty.
+              Disposition is identical to the plain fence. *)
+           (match !pre_tool_rejects with
+            | [] ->
+              core_error_of_masc_internal_error
+                (Provider_attempt_effect_fenced
+                   { runtime_id = attempt_runtime_id
+                   ; effect_disposition
+                   ; diagnostic = Agent_core.Error.to_string error
+                   })
+            | rejects ->
+              core_error_of_masc_internal_error
+                (Tool_correction_lost
+                   { runtime_id = attempt_runtime_id
+                   ; effect_disposition
+                   ; reject_count = List.length rejects
+                   ; diagnostic = Agent_core.Error.to_string error
+                   }))
+       in
+       let allow_accept_no_progress_retry =
+         if
+           Keeper_turn_driver_try_runtime.accept_no_progress_should_try_next
+             error
+         then
+           allow_accept_no_progress_retry
+             ~runtime_id:attempt_runtime_id
+             ~attempt:idx
+             error
+         else true
+       in
+       let error_is_retryable =
+         lane_should_retry
+           ~is_last
+           ~allow_retry:true
+           ~allow_accept_no_progress_retry
+           error
+       in
+       let observed_overflow =
+         match observed_overflow with
+         | Some _ -> observed_overflow
+         | None ->
            if
-             Keeper_turn_driver_try_runtime.accept_no_progress_should_try_next
+             Keeper_turn_driver_try_runtime.context_overflow_should_try_next
                error
            then
-             allow_accept_no_progress_retry
-               ~runtime_id:attempt_runtime_id
-               ~attempt:idx
-               error
-           else true
+             Some
+               { origin_runtime_id = attempt_runtime_id
+               ; origin_attempt = idx
+               ; lane_error = error
+               ; checkpoint_after
+               }
+           else None
+       in
+       let this_candidate lane_error =
+         { origin_runtime_id = attempt_runtime_id
+         ; origin_attempt = idx
+         ; lane_error
+         ; checkpoint_after
+         }
+       in
+       let repeated_models =
+         match repeated_generation error, model_of candidate with
+         | true, Some model -> (model, this_candidate error) :: repeated_models
+         | true, None | false, _ -> repeated_models
+       in
+       if not effect_retry_admitted
+       then lane_terminal (this_candidate terminal_error)
+       else if retry_admitted && error_is_retryable
+       then loop ~observed_overflow ~repeated_models (idx + 1) rest
+       else if is_last
+       then (
+         (* Lane fully exhausted: an overflow seen anywhere in the rotation
+            outranks the last candidate's error so the failure route and
+            blocker report the deterministic capacity bound. Cascade
+            telemetry already published each candidate's own error. *)
+         match observed_overflow with
+         | Some overflow -> lane_terminal overflow
+         | None -> lane_terminal (this_candidate error))
+       else (
+         (* The next cycle starts from this hint with an empty memory of
+            repeats, so a candidate whose model repeated in this walk must
+            not be named in it: the hint is the only thing that carries the
+            refusal across the cycle boundary. *)
+         let rest_for_next_cycle =
+           List.filter
+             (fun candidate -> Option.is_none (refusal_for ~repeated_models candidate))
+             rest
          in
-         let error_is_retryable =
-           lane_should_retry
-             ~is_last
-             ~allow_retry:true
-             ~allow_accept_no_progress_retry
-             error
-         in
-         let observed_overflow =
-           match observed_overflow with
-           | Some _ -> observed_overflow
-           | None ->
-             if
-               Keeper_turn_driver_try_runtime.context_overflow_should_try_next
-                 error
-             then
-               Some
-                 { origin_runtime_id = attempt_runtime_id
-                 ; origin_attempt = idx
-                 ; lane_error = error
-                 ; checkpoint_after
-                 }
-             else None
-         in
-         let this_candidate lane_error =
-           { origin_runtime_id = attempt_runtime_id
-           ; origin_attempt = idx
-           ; lane_error
-           ; checkpoint_after
-           }
-         in
-         if not effect_retry_admitted
-         then lane_terminal (this_candidate terminal_error)
-         else if retry_admitted && error_is_retryable
-         then loop ~observed_overflow (idx + 1) rest
-         else if is_last
-         then (
-           (* Lane fully exhausted: an overflow seen anywhere in the rotation
-              outranks the last candidate's error so the failure route and
-              blocker report the deterministic capacity bound. Cascade
-              telemetry already published each candidate's own error. *)
-           match observed_overflow with
-           | Some overflow -> lane_terminal overflow
-           | None -> lane_terminal (this_candidate error))
-         else (
-           (match error_is_retryable, effect_retry_admitted, rest with
-            | true, true, next :: later ->
-              on_retry_deferred
-                { assignment_id = runtime_id
-                ; failed_runtime_id = attempt_runtime_id
-                ; next_runtime_id = runtime_id_of next
-                ; later_runtime_ids = List.map runtime_id_of later
-                ; failure = error
-                }
-            | false, _, _ | true, false, _ | true, true, [] -> ());
-           lane_terminal (this_candidate terminal_error)))
+         (match error_is_retryable, effect_retry_admitted, rest_for_next_cycle with
+          | true, true, next :: later ->
+            on_retry_deferred
+              { assignment_id = runtime_id
+              ; failed_runtime_id = attempt_runtime_id
+              ; next_runtime_id = runtime_id_of next
+              ; later_runtime_ids = List.map runtime_id_of later
+              ; failure = error
+              }
+          | false, _, _ | true, false, _ | true, true, [] -> ());
+         lane_terminal (this_candidate terminal_error)))
   in
-  loop ~observed_overflow:None 0 candidates
+  loop ~observed_overflow:None ~repeated_models:[] 0 candidates
 
 let runtime_candidate_missing_error id =
   Agent_core.Error.Internal
@@ -997,6 +1105,7 @@ let run_named
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
     ?enable_thinking
     ?cooperative_yield_probe
+    ?person_queued_probe
     ?agent_core_checkpoint
     ?(continue_from_checkpoint = false)
     ?trace_link
@@ -1317,6 +1426,12 @@ let run_named
       | Missing_runtime _ -> None)
     ~candidate_preference_of:(function
       | Resolved_runtime runtime -> Some runtime.Runtime.candidate_preference
+      | Missing_runtime _ -> None)
+    ~model_of:(function
+      (* The served name comes from the same frozen snapshot as the quota
+         scope and preference above: a runtime.toml reload mid-walk must not
+         turn the same-model refusal off by dropping the id from the table. *)
+      | Resolved_runtime runtime -> Some runtime.Runtime.model.api_name
       | Missing_runtime _ -> None)
     ~candidate_dispatchable:(function
       (* A materialized snapshot stays dispatchable even if a runtime.toml
@@ -1934,6 +2049,7 @@ let run_named
                         keeper_name
                         (Printexc.to_string exn);
                       None)
+            ; person_queued_probe
             ; temperature
             ; accept
             ; hooks

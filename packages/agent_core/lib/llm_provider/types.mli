@@ -682,6 +682,8 @@ type repeating_shape =
   | Repeated_paragraph
   | Repeated_reasoning_cycle
 
+val repeating_shape_to_string : repeating_shape -> string
+
 val repeating_generation_message
   :  repeated:string
   -> occurrences:int

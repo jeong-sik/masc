@@ -21,9 +21,7 @@ type network_error_kind =
   | End_of_file
   | Unknown
 
-type stream_idle_state =
-  | Awaiting_first_event
-  | Awaiting_first_delta
+type stream_production =
   | Streaming_answer
   | Streaming_thinking
   | Streaming_tool_call
@@ -31,6 +29,12 @@ type stream_idle_state =
   | Streaming_substrate
   | Streaming_done
   | Streaming_unknown
+[@@deriving yojson, show]
+
+type stream_idle_state =
+  | Awaiting_first_event
+  | Awaiting_first_delta
+  | Producing of stream_production
 [@@deriving yojson, show]
 
 type timeout_phase =
@@ -41,7 +45,7 @@ type timeout_phase =
   | Http_operation
   | Non_streaming_body
   | Stream_body
-  | Stream_idle of stream_idle_state
+  | Stream_idle of stream_production
   | Provider_step
   | Cli_stdout_idle
   | Unknown_timeout
@@ -74,7 +78,6 @@ type provider_wire_error_kind =
   | Malformed_payload
   | Unknown_event
   | Incomplete_stream
-  | Repeating_generation
   | Oversized_payload
 
 let cli_startup_failure_reason_to_string = function
@@ -94,7 +97,6 @@ let provider_wire_error_kind_to_string = function
   | Malformed_payload -> "malformed_payload"
   | Unknown_event -> "unknown_event"
   | Incomplete_stream -> "incomplete_stream"
-  | Repeating_generation -> "repeating_generation"
   | Oversized_payload -> "oversized_payload"
 ;;
 
@@ -130,12 +132,30 @@ type provider_failure_kind =
      kept typed so consumers reach their compaction/shrink path instead of
      seeing a generic invalid-request. *)
   | Context_overflow of { limit : int option }
+  (* agent-core boundary: the model's own generation repeated itself and the
+     stream was ended for it. The bytes arrived intact, so this is not a wire
+     error: the same model called through another provider repeats the same
+     way, and a caller rotating candidates needs to know that it is the model,
+     not the connection, that failed. *)
+  | Repeating_generation of
+      { shape : Types.repeating_shape
+      ; occurrences : int
+      ; unit_bytes : int
+      }
   | Unknown_provider_failure of { reason : string option }
+
+type refusal_body =
+  | Received of string
+  | Not_received_in_window
+
+let refusal_body_text = function
+  | Received body -> body
+  | Not_received_in_window -> ""
 
 type http_error =
   | HttpError of
       { code : int
-      ; body : string
+      ; body : refusal_body
       ; retry_after_header : float option
       }
   | NetworkError of
@@ -209,6 +229,12 @@ let provider_failure_kind_to_string = function
   | Context_overflow { limit = Some limit } ->
     Printf.sprintf "context_overflow:limit_%d" limit
   | Context_overflow { limit = None } -> "context_overflow"
+  | Repeating_generation { shape; occurrences; unit_bytes } ->
+    Printf.sprintf
+      "repeating_generation:%s:%dx%d"
+      (Types.repeating_shape_to_string shape)
+      occurrences
+      unit_bytes
   | Unknown_provider_failure { reason = Some reason } ->
     Printf.sprintf "unknown_provider_failure:%s" reason
   | Unknown_provider_failure { reason = None } -> "unknown_provider_failure"
@@ -238,9 +264,7 @@ let request_body_too_large_error ~actual_bytes ~limit_bytes =
     }
 ;;
 
-let stream_idle_state_to_label = function
-  | Awaiting_first_event -> "awaiting_first_event"
-  | Awaiting_first_delta -> "awaiting_first_delta"
+let stream_production_to_label = function
   | Streaming_answer -> "streaming_answer"
   | Streaming_thinking -> "streaming_thinking"
   | Streaming_tool_call -> "streaming_tool_call"
@@ -250,9 +274,10 @@ let stream_idle_state_to_label = function
   | Streaming_unknown -> "streaming_unknown"
 ;;
 
-let timeout_phase_of_stream_idle_state = function
-  | Awaiting_first_event | Awaiting_first_delta -> First_token
-  | state -> Stream_idle state
+let stream_idle_state_to_label = function
+  | Awaiting_first_event -> "awaiting_first_event"
+  | Awaiting_first_delta -> "awaiting_first_delta"
+  | Producing production -> stream_production_to_label production
 ;;
 
 let timeout_phase_to_label = function
@@ -264,7 +289,7 @@ let timeout_phase_to_label = function
   | Non_streaming_body -> "non_streaming_body"
   | Stream_body -> "stream_body"
   | Stream_idle state ->
-    Printf.sprintf "stream_idle:%s" (stream_idle_state_to_label state)
+    Printf.sprintf "stream_idle:%s" (stream_production_to_label state)
   | Provider_step -> "provider_step"
   | Cli_stdout_idle -> "cli_stdout_idle"
   | Unknown_timeout -> "unknown_timeout"
@@ -304,7 +329,10 @@ let resolve_explicit_deadline ~operation ~parameter ~clock ~timeout_s =
 let with_explicit_deadline deadline f =
   match deadline with
   | Unbounded -> f ()
-  | Bounded (clock, timeout_s) -> Eio.Time.with_timeout_exn clock timeout_s f
+  | Bounded (clock, timeout_s) ->
+    (match Under_deadline.run clock timeout_s f with
+     | Ok answer -> answer
+     | Error `Timeout -> raise Eio.Time.Timeout)
 ;;
 
 let%test "explicit deadline: clock alone remains unbounded" =
@@ -1049,13 +1077,6 @@ let%test "classify_network_exn: Eio.Time.Timeout is Http_operation" =
 
 let%test "classify_network_exn: non-network exn is None (propagates)" =
   classify_network_exn Not_found = None
-;;
-
-let%test "timeout_phase_of_stream_idle_state: Awaiting_first_* -> First_token" =
-  (* Prefill (no first chunk yet) must surface as [First_token], never
-     [Http_operation]. Guards the phase-accuracy fix. *)
-  timeout_phase_of_stream_idle_state Awaiting_first_event = First_token
-  && timeout_phase_of_stream_idle_state Awaiting_first_delta = First_token
 ;;
 
 (* ── Retry-After header parsing (RFC 9110 S10.2.3) ────────── *)
@@ -2447,7 +2468,7 @@ let post_stream ?cache ?clock ?connect_timeout_s ~sw ~net ~url ~headers ~body ()
         ~request_headers:headers_with_length
         ~request_body:body
         ~response_body:body_str;
-      Error (HttpError { code; body = body_str; retry_after_header }))
+      Error (HttpError { code; body = Received body_str; retry_after_header }))
 ;;
 
 let track_connection_eof connection =
@@ -2638,15 +2659,20 @@ let with_post_stream
         | Unbounded -> None
         | Bounded (clock, timeout_s) -> Some (clock, Eio.Time.now clock +. timeout_s)
       in
+      (* A connection handed back as the window closes is the connection:
+         the window's verdict stands only when nothing had returned. The
+         timeout is raised as [Eio.Time.Timeout] so [catch_network] names it
+         as it names any window's. *)
       let under_the_window f =
         match closes_at with
         | None -> f ()
         | Some (clock, closes_at) ->
-          Eio.Time.with_timeout_exn clock (closes_at -. Eio.Time.now clock) f
+          (match Under_deadline.run clock (closes_at -. Eio.Time.now clock) f with
+           | Ok answer -> answer
+           | Error `Timeout -> raise Eio.Time.Timeout)
       in
-      (* Held outside the window: when the window closes in the same
-         scheduler pass as the fiber returns, [Fiber.first] keeps the timeout
-         and drops what the fiber returned, connection included. *)
+      (* Held outside the window for the cancellation that comes from
+         outside it, at the handoff. *)
       let connection = ref None in
       let close_connection () = Option.iter Eio.Resource.close !connection in
       let* answer =
@@ -2719,8 +2745,11 @@ let with_post_stream
         (* A refusal's body is the rest of the provider's answer, read under
            what the window has left. The status line and its headers are
            already the answer: a body that does not arrive in time does not
-           turn a refusal into silence, so the refusal is returned with what
-           was received and no body. A refusal's connection is never reused. *)
+           turn a refusal into silence, so the refusal is returned with the
+           status and headers received and its body [Not_received_in_window]
+           -- which a consumer must not read as a body the provider left
+           empty, the reason it carried being unread. A refusal's connection
+           is never reused. *)
         let refusal body = Error (HttpError { code; body; retry_after_header }) in
         Fun.protect
           ~finally:(fun () -> Eio.Cancel.protect (fun () -> Eio.Resource.close conn))
@@ -2736,14 +2765,16 @@ let with_post_stream
                   | None when !transport_eof_seen -> Error (eof_error exn)
                   | None -> raise exn)
              in
+             (* No guard on a window already spent: [Under_deadline.run]
+                keeps the read's outcome whenever the read finished, and a
+                body cohttp already buffered with the headers finishes
+                without suspending. A read that does suspend ends at the
+                window as it did. *)
              let body_result =
                match closes_at with
                | None -> Ok (read_body ())
                | Some (clock, closes_at) ->
-                 let left_s = closes_at -. Eio.Time.now clock in
-                 if Float.compare left_s 0.0 <= 0
-                 then Error `Timeout
-                 else Under_deadline.run clock left_s read_body
+                 Under_deadline.run clock (closes_at -. Eio.Time.now clock) read_body
              in
              match body_result with
              | Ok (Ok refusal_body) ->
@@ -2754,9 +2785,9 @@ let with_post_stream
                  ~request_headers:headers_with_length
                  ~request_body:body
                  ~response_body:refusal_body;
-               refusal refusal_body
+               refusal (Received refusal_body)
              | Ok (Error err) -> Error err
-             | Error `Timeout -> refusal "")
+             | Error `Timeout -> refusal Not_received_in_window)
       | `Stream_headers (conn, transport_eof_seen, resp, resp_body) ->
         (try
            (* EOF proves the body was drained; it does not prove the connection
@@ -3088,10 +3119,18 @@ let armed_budget ~phase ~first_event_timeout ~body_timeout ~idle_timeout =
 ;;
 
 (* Run [read] inside what is left of the budget measured from [anchor],
-   taking the anchor now when none is set. Already past the deadline: raise
-   what [with_timeout_exn] would, rather than arming a non-positive duration
-   and depending on a scheduler race to produce it. *)
-let read_within_budget ~clock ~anchor ~seconds read =
+   taking the anchor now when none is set, and raise [Eio.Time.Timeout] when
+   the budget ends it.
+
+   A read that started inside the budget and finished stands, even when it
+   finished in the pass the budget ran out: what it read had been asked for
+   in time. A read that starts once the budget has run out stands only when
+   it took nothing new from [reader]'s flow -- the lines that had already
+   arrived, such as the delimiter that came with a first token. Taking new
+   bytes then is a timeout even when the flow hands them over: a submitted
+   read can still complete after its fiber was cancelled, so a stream that
+   kept sending would otherwise outlast a total budget line by line. *)
+let read_within_budget ~clock ~anchor ~seconds ~reader read =
   let anchored_at =
     match !anchor with
     | Some t -> t
@@ -3101,9 +3140,14 @@ let read_within_budget ~clock ~anchor ~seconds read =
       t
   in
   let remaining = anchored_at +. seconds -. Eio.Time.now clock in
-  if Float.compare remaining 0. <= 0
-  then raise Eio.Time.Timeout
-  else Eio.Time.with_timeout_exn clock remaining read
+  let received () = Eio.Buf_read.consumed_bytes reader + Eio.Buf_read.buffered_bytes reader in
+  let received_before = received () in
+  match Under_deadline.run clock remaining read with
+  | Error `Timeout -> raise Eio.Time.Timeout
+  | Ok line ->
+    if Float.compare remaining 0. > 0 || received () = received_before
+    then line
+    else raise Eio.Time.Timeout
 ;;
 
 (* A payload line was read under [budget]: a gap starts again, a total does
@@ -3154,7 +3198,7 @@ let read_sse
   require_clock_when_idle ~site ~clock ~idle_timeout;
   require_clock_when_first_event ~site ~clock ~first_event_timeout ~body_timeout;
   (* SSE keepalive comments carry no payload. Skipping them inside the
-     SAME [with_timeout_exn] window preserves the armed deadline so a
+     SAME budgeted read preserves the armed deadline so a
      provider that emits only keepalives still trips it when no real event
      arrives.
      Agent Core contract: the wait for the consumer's first [Output] is the
@@ -3208,7 +3252,7 @@ let read_sse
     let parsed =
       match clock, budget with
       | Some c, Some (Gap seconds | Total seconds) ->
-        read_within_budget ~clock:c ~anchor:budget_anchor ~seconds inner
+        read_within_budget ~clock:c ~anchor:budget_anchor ~seconds ~reader inner
       | Some _, None -> inner ()
       (* No clock: nothing can be armed. Misconfiguration (an explicit
          deadline without a clock) already failed loud at entry, so this is
@@ -3347,7 +3391,7 @@ let read_ndjson
     let line =
       match clock, budget with
       | Some c, Some (Gap seconds | Total seconds) ->
-        read_within_budget ~clock:c ~anchor:budget_anchor ~seconds (fun () ->
+        read_within_budget ~clock:c ~anchor:budget_anchor ~seconds ~reader (fun () ->
           Eio.Buf_read.line reader)
       | Some _, None -> Eio.Buf_read.line reader
       (* No clock: nothing can be armed. See [read_sse] for why this is

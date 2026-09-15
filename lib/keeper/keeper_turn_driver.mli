@@ -166,6 +166,7 @@ val run_named :
   ?terminal_effect_state:(unit -> Keeper_tools_agent_core.terminal_effect_state) ->
   ?enable_thinking:bool ->
   ?cooperative_yield_probe:Runtime_agent.cooperative_yield_probe ->
+  ?person_queued_probe:(unit -> bool) ->
   ?agent_core_checkpoint:Agent_core.Checkpoint.t ->
   ?continue_from_checkpoint:bool ->
   ?trace_link:string * string ->
@@ -409,6 +410,7 @@ module For_testing : sig
       unit) ->
     ?on_lane_terminal_error:(lane_terminal_error -> unit) ->
     ?quota_scope_of:('candidate -> Runtime_quota_window.scope option) ->
+    ?model_of:('candidate -> string option) ->
     ?candidate_preference_of:('candidate -> Runtime_lane_preference.candidate option) ->
     ?candidate_dispatchable:('candidate -> bool) ->
     runtime_id:string ->

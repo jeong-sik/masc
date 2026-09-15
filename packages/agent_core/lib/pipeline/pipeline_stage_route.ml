@@ -295,6 +295,7 @@ let dispatch_sync
            serialized
            ?body_timeout_s:agent.options.body_timeout_s
            ?call_timeout_s:agent.options.call_timeout_s
+           ?permit_wait:agent.options.permit_wait
            ?request_wire_observer:agent.pre_dispatch_serialization_observer
            ()
          |> Result.map_error (Provider_failure_attribution.of_http_error ~binding ~provider)
@@ -326,6 +327,7 @@ let dispatch_sync
                    ~next_stage:
                      (Llm_provider.Complete.Completion
                         { call_timeout_s = agent.options.call_timeout_s })
+                   ?permit_wait:agent.options.permit_wait
                    serialized
                  |> Result.map_error
                       (measurement_error
@@ -369,6 +371,7 @@ let dispatch_sync
                           admitted
                           ?body_timeout_s:agent.options.body_timeout_s
                           ?call_timeout_s
+                          ?permit_wait:agent.options.permit_wait
                           ?request_wire_observer:agent.pre_dispatch_serialization_observer
                           ()
                         |> Result.map_error
@@ -437,6 +440,7 @@ let dispatch_stream
            ~net:agent.net
            ?clock
            ?admission_timeout_s:agent.options.admission_timeout_s
+           ?permit_wait:agent.options.permit_wait
            ?transport:agent.options.transport
            serialized
            ~on_event
@@ -460,8 +464,8 @@ let dispatch_stream
              | Ok admission_deadline ->
                (* Two of the stream's budgets are one window from here. The
                   admission budget spans both permit waits, the measurement's
-                  and the stream's, with the count round trip between them
-                  not paused. The first-event budget is provider silence
+                  and the stream's, and the count round trip between them,
+                  which runs under what the budget has left. The first-event budget is provider silence
                   before the first token: the count round trip spends from
                   it, and the stream arms what that left; permit waits are
                   queueing and spend none of it. *)
@@ -477,6 +481,7 @@ let dispatch_stream
                         { admission_timeout_s = agent.options.admission_timeout_s
                         ; first_event_timeout_s = agent.options.first_event_timeout_s
                         })
+                   ?permit_wait:agent.options.permit_wait
                    serialized
                  |> Result.map_error
                       (measurement_error
@@ -487,54 +492,57 @@ let dispatch_stream
                (match measured with
                 | Error error -> Error error
                 | Ok measured ->
-                  let first_event_left =
-                    match
-                      ( agent.options.first_event_timeout_s
-                      , Llm_provider.Complete.count_round_trip_s measured )
-                    with
-                    | None, _ -> Ok None
-                    | Some budget_s, None ->
-                      (* Not timed: no clock, and the stream stage refuses
-                         the budget as unenforceable itself. *)
-                      Ok (Some budget_s)
-                    | Some budget_s, Some spent_s ->
-                      let left_s = budget_s -. spent_s in
-                      if Float.compare left_s 0.0 <= 0
-                      then
-                        Error
-                          (window_spent_by_the_measurement
-                             ~operation:"dispatch_stream"
-                             ~parameter:"first_event_timeout_s"
-                             ~seconds:budget_s
-                             ~phase:Llm_provider.Http_client.First_token
-                             ~next_stage:"stream")
-                      else Ok (Some left_s)
-                  in
-                  let admission_left =
-                    match Window.remaining admission_window with
-                    | `Unbounded -> Ok None
-                    | `Remaining remaining_s -> Ok (Some remaining_s)
-                    | `Spent seconds ->
-                      Error
-                        (window_spent_by_the_measurement
-                           ~operation:"dispatch_stream"
-                           ~parameter:"admission_timeout_s"
-                           ~seconds
-                           ~phase:Llm_provider.Http_client.Queue
-                           ~next_stage:"stream")
-                  in
-                  (match first_event_left, admission_left with
-                   | Error error, _ | Ok _, Error error ->
-                     Error (Provider_failure_attribution.of_http_error ~binding ~provider error)
-                   | Ok first_event_timeout_s, Ok admission_timeout_s ->
-                     (match
-                        Llm_provider.Complete.admit_request
-                          ~now_unix_s
-                          ~max_context_tokens
-                          measured
-                      with
-                      | Error error -> Error (fit_error ~binding error)
-                      | Ok admitted ->
+                  (* Fit first, as [dispatch_sync] does: a request that does
+                     not fit is refused as such however the windows stand,
+                     not reported as a timeout the caller would retry. *)
+                  (match
+                     Llm_provider.Complete.admit_request
+                       ~now_unix_s
+                       ~max_context_tokens
+                       measured
+                   with
+                   | Error error -> Error (fit_error ~binding error)
+                   | Ok admitted ->
+                     let first_event_left =
+                       match
+                         ( agent.options.first_event_timeout_s
+                         , Llm_provider.Complete.count_round_trip_s measured )
+                       with
+                       | None, _ -> Ok None
+                       | Some budget_s, None ->
+                         (* Not timed: no clock, and the stream stage refuses
+                            the budget as unenforceable itself. *)
+                         Ok (Some budget_s)
+                       | Some budget_s, Some spent_s ->
+                         let left_s = budget_s -. spent_s in
+                         if Float.compare left_s 0.0 <= 0
+                         then
+                           Error
+                             (window_spent_by_the_measurement
+                                ~operation:"dispatch_stream"
+                                ~parameter:"first_event_timeout_s"
+                                ~seconds:budget_s
+                                ~phase:Llm_provider.Http_client.First_token
+                                ~next_stage:"stream")
+                         else Ok (Some left_s)
+                     in
+                     let admission_left =
+                       match Window.remaining admission_window with
+                       | `Unbounded -> Ok None
+                       | `Remaining remaining_s -> Ok (Some remaining_s)
+                       | `Spent seconds ->
+                         Error
+                           (window_spent_by_the_measurement
+                              ~operation:"dispatch_stream"
+                              ~parameter:"admission_timeout_s"
+                              ~seconds
+                              ~phase:Llm_provider.Http_client.Queue
+                              ~next_stage:"stream")
+                     in
+                     (match first_event_left, admission_left with
+                      | Error error, _ | Ok _, Error error ->
+                        Error (Provider_failure_attribution.of_http_error ~binding ~provider error)
+                      | Ok first_event_timeout_s, Ok admission_timeout_s ->
                         let admitted =
                           match first_event_timeout_s with
                           | None -> admitted
@@ -548,6 +556,7 @@ let dispatch_stream
                           ~net:agent.net
                           ?clock
                           ?admission_timeout_s
+                          ?permit_wait:agent.options.permit_wait
                           ?transport:agent.options.transport
                           admitted
                           ~on_event

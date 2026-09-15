@@ -25,14 +25,11 @@ type network_error_kind =
   | End_of_file (** Peer closed the connection unexpectedly. *)
   | Unknown (** Unclassified network error. *)
 
-(** Last observed streaming state when an inter-line idle deadline fired.
-
-    This is deliberately transport-generic.  Provider-specific parsers
-    translate chunks into AGENT_CORE SSE events first; the timeout evidence only
-    records the broad activity the stream was in when progress stopped. *)
-type stream_idle_state =
-  | Awaiting_first_event
-  | Awaiting_first_delta
+(** What a stream was producing when it went idle: the state its last
+    named production left it in. Transport-generic: provider parsers
+    translate chunks into AGENT_CORE SSE events first, and the evidence
+    records only the broad activity. *)
+type stream_production =
   | Streaming_answer
   | Streaming_thinking
   | Streaming_tool_call
@@ -40,6 +37,18 @@ type stream_idle_state =
   | Streaming_substrate
   | Streaming_done
   | Streaming_unknown
+[@@deriving yojson, show]
+
+(** Where a stream reader stands before its first output: waiting for the
+    first frame, waiting for a delta after a frame that carried none, or on
+    a production a frame named before any output arrived (a heartbeat, a
+    block opening). Read for the message a first-token timeout carries; the
+    phase of such a timeout is {!First_token}, never {!Stream_idle}, which
+    is why {!timeout_phase} takes a {!stream_production}. *)
+type stream_idle_state =
+  | Awaiting_first_event
+  | Awaiting_first_delta
+  | Producing of stream_production
 [@@deriving yojson, show]
 
 (** Typed timeout source.
@@ -65,7 +74,7 @@ type timeout_phase =
   | Http_operation
   | Non_streaming_body
   | Stream_body
-  | Stream_idle of stream_idle_state
+  | Stream_idle of stream_production
   | Provider_step
   | Cli_stdout_idle
   | Unknown_timeout
@@ -128,10 +137,6 @@ type provider_wire_error_kind =
   | Malformed_payload
   | Unknown_event
   | Incomplete_stream
-  | Repeating_generation
-  (** The generation repeated one paragraph past the threshold and was ended
-        by this client. Bytes and framing are both fine; what ended is the
-        answer, not the transport. *)
   | Oversized_payload
   (** One payload unit — a joined SSE event, or a single line — exceeded the
         byte limit this client reads under. Distinct from
@@ -195,13 +200,38 @@ type provider_failure_kind =
       only the consumer's context recovery (compaction/shrink) can make
       progress. [limit] is the provider-reported token limit when the
       envelope carries one. *)
+  | Repeating_generation of
+      { shape : Types.repeating_shape
+      ; occurrences : int
+      ; unit_bytes : int
+      }
+      (** The model's generation repeated one unit — a paragraph of the
+          answer, or a reasoning cycle — past the threshold and this client
+          ended the stream. Bytes and framing were fine, so this is not a
+          [Provider_wire_error]: what failed is the model, and the same model
+          reached through another provider repeats the same way. *)
   | Unknown_provider_failure of { reason : string option }
+
+(** The body of a refusing response. [Received] is what the provider sent,
+    empty when it sent nothing. [Not_received_in_window] is a body the
+    caller's own window closed on before it arrived: the status line and its
+    headers are the answer, and the reason they carried is unread. The two
+    are not the same fact -- a provider code that names a recoverable cause
+    is absent from one and unknown in the other -- so they are not the same
+    value. *)
+type refusal_body =
+  | Received of string
+  | Not_received_in_window
+
+(** The text a refusal carried, empty when none arrived. For rendering; a
+    decision reads the variant. *)
+val refusal_body_text : refusal_body -> string
 
 (** Transport-level error. *)
 type http_error =
   | HttpError of
       { code : int
-      ; body : string
+      ; body : refusal_body
       ; retry_after_header : float option
         (** Parsed [Retry-After] response header (RFC 9110 S10.2.3), resolved
           to a delay in seconds relative to when the response was observed.
@@ -267,8 +297,8 @@ val empty_completion_error : stop_reason:Types.stop_reason -> http_error
     serialized request body that exceeds its resolved target limit. *)
 val request_body_too_large_error : actual_bytes:int -> limit_bytes:int -> http_error
 
+val stream_production_to_label : stream_production -> string
 val stream_idle_state_to_label : stream_idle_state -> string
-val timeout_phase_of_stream_idle_state : stream_idle_state -> timeout_phase
 val timeout_phase_to_label : timeout_phase -> string
 
 (** Agent Core contract: the caller-supplied knob a streaming deadline came from. A
@@ -327,9 +357,10 @@ val resolve_explicit_deadline
   -> timeout_s:float option
   -> ('clock explicit_deadline, http_error) result
 
-(** Run [f] unbounded or under the resolved Eio deadline. A bounded expiry
-    raises [Eio.Time.Timeout]; the owning call site must project it to its
-    phase-specific [TimeoutError].
+(** Run [f] unbounded or under the resolved Eio deadline. An [f] that
+    finished as the deadline passed is the answer: the deadline raises
+    [Eio.Time.Timeout] only when [f] had not finished, and the owning call
+    site must project it to its phase-specific [TimeoutError].
 
     @stability Internal *)
 val with_explicit_deadline : _ Eio.Time.clock explicit_deadline -> (unit -> 'a) -> 'a
@@ -613,8 +644,10 @@ val post_stream
     first token. A refusing status line is the provider's answer: its body
     is read under what the window has left, and a body that does not
     arrive in time still yields [HttpError] with the status and the
-    Retry-After received and an empty body, not a timeout. A window that
-    closes as the connection is handed back closes that connection too.
+    Retry-After received and the body [Not_received_in_window], not a
+    timeout. A connection handed back as the window closes is the
+    connection: the window's verdict stands only when nothing had returned,
+    and a connection it cut off before the handoff is closed.
     With neither budget supplied the phase is unbounded. Two steps run
     outside the window's reach: DNS resolution, in a systhread the window
     cannot cancel (a closed window is observed once the lookup returns, and

@@ -327,6 +327,27 @@ let%test "OpenAI-compatible provider error result finalizes Error" =
   | Ok _ -> false
 ;;
 
+(* Where a stream stands for the timeout that may end it. Before the first
+   output the reader holds a label: waiting for the first frame, waiting for
+   a delta after a frame that carried none, or a production a frame named
+   before any output (a heartbeat, a block opening). After the first output
+   it holds only the production the last named frame left it in. A stall
+   before the first output is a [First_token] timeout whatever the label; a
+   stall after it is [Stream_idle production]. The first output is also what
+   the reader is told through [Http_client.Continue], so the budget that
+   fired and the knob in the message come from one fact. Every event
+   [Streaming.sse_event_is_first_token_signal] accepts is one
+   [classify_chunk_kind] names a production for, so the move to
+   [After_first_output] always has a production to carry. *)
+type stream_position =
+  | Before_first_output of Http_client.stream_idle_state
+  | After_first_output of Http_client.stream_production
+
+let stream_position_label = function
+  | Before_first_output state -> Http_client.stream_idle_state_to_label state
+  | After_first_output production -> Http_client.stream_production_to_label production
+;;
+
 let complete_stream_http
       ~sw
       ~net
@@ -486,13 +507,26 @@ let complete_stream_http
       let inter_chunk_samples = ref [] in
       let terminal_state = ref Telemetry_event.Terminal_done in
       let summary_published = ref false in
-      let stream_idle_state = ref Http_client.Awaiting_first_event in
-      (* Whether a token-bearing event has been projected. This is what the
-         reader is told through [Http_client.Continue] and what names the
-         governing knob on a timeout, so the budget that fired and the knob
-         in the message come from one fact. Kept apart from
-         [first_token_at_ref], which also needs a latency counter. *)
-      let first_output_seen = ref false in
+      let position = ref (Before_first_output Http_client.Awaiting_first_event) in
+      (* Kept apart from [first_token_at_ref], which also needs a latency
+         counter. *)
+      let first_output_seen () =
+        match !position with
+        | After_first_output _ -> true
+        | Before_first_output _ -> false
+      in
+      (* The last named production moves the position; before the first
+         output it is the label a stall is reported under, after it the
+         phase. *)
+      let produce ~first_token production =
+        position
+        := (match !position with
+            | After_first_output _ -> After_first_output production
+            | Before_first_output _ ->
+              if first_token
+              then After_first_output production
+              else Before_first_output (Http_client.Producing production))
+      in
       (* [block_kind_at] answers for a stop event, which carries only the
          block's index: closing a tool_use block is a tool call completing,
          closing any other block is that block ending and moves the stream's
@@ -693,14 +727,15 @@ let complete_stream_http
                      leaves the stream where its last production put it: a
                      stall after such a frame is an idle gap in that state,
                      not a wait for a first delta that has already come. *)
-                  if not !first_output_seen
-                  then stream_idle_state := Http_client.Awaiting_first_delta);
+                  match !position with
+                  | Before_first_output _ ->
+                    position := Before_first_output Http_client.Awaiting_first_delta
+                  | After_first_output _ -> ());
                 let project_event emitted_evt =
-                  if Streaming.sse_event_is_first_token_signal emitted_evt
-                  then (
-                    first_output_seen := true;
-                    if Option.is_none !first_token_at_ref
-                    then first_token_at_ref := elapsed_ms);
+                  let first_token = Streaming.sse_event_is_first_token_signal emitted_evt in
+                  if first_token && Option.is_none !first_token_at_ref
+                  then first_token_at_ref := elapsed_ms;
+                  let produce = produce ~first_token in
                   emit_stream_event on_event emitted_evt;
                   match
                     classify_chunk_kind
@@ -709,41 +744,41 @@ let complete_stream_http
                   with
                   | `Skip -> ()
                   | `Thinking ->
-                    stream_idle_state := Http_client.Streaming_thinking;
+                    produce Http_client.Streaming_thinking;
                     incr n_thinking
                   | `Answer ->
-                    stream_idle_state := Http_client.Streaming_answer;
+                    produce Http_client.Streaming_answer;
                     incr n_answer
                   | `Tool_call_start ->
-                    stream_idle_state := Http_client.Streaming_tool_call;
+                    produce Http_client.Streaming_tool_call;
                     incr n_tool_call_start
                   | `Tool_call_arg_delta ->
-                    stream_idle_state := Http_client.Streaming_tool_call;
+                    produce Http_client.Streaming_tool_call;
                     incr n_tool_call_arg_delta
                   | `Tool_call_complete ->
-                    stream_idle_state := Http_client.Streaming_tool_call;
+                    produce Http_client.Streaming_tool_call;
                     incr n_tool_call_complete
                   | `Substrate ->
-                    stream_idle_state := Http_client.Streaming_substrate;
+                    produce Http_client.Streaming_substrate;
                     incr n_substrate
                   | `Heartbeat ->
-                    stream_idle_state := Http_client.Streaming_heartbeat;
+                    produce Http_client.Streaming_heartbeat;
                     incr n_heartbeat
                   | `Done ->
-                    stream_idle_state := Http_client.Streaming_done;
+                    produce Http_client.Streaming_done;
                     incr n_done
                   | `Wire_error format ->
-                    stream_idle_state := Http_client.Streaming_unknown;
+                    produce Http_client.Streaming_unknown;
                     terminal_state
                     := Telemetry_event.Terminal_error
                          (Complete_stream_error.wire_error_terminal_label format)
                   | `Provider_reported_error ->
-                    stream_idle_state := Http_client.Streaming_unknown;
+                    produce Http_client.Streaming_unknown;
                     terminal_state
                     := Telemetry_event.Terminal_error
                          Complete_stream_error.provider_reported_terminal_label
                   | `Capability_mismatch ->
-                    stream_idle_state := Http_client.Streaming_unknown;
+                    produce Http_client.Streaming_unknown;
                     terminal_state
                     := Telemetry_event.Terminal_error
                          Complete_stream_error.capability_mismatch_terminal_label
@@ -837,7 +872,7 @@ let complete_stream_http
               let continue_unless_failed () =
                 if Complete_stream_acc.stream_failed acc
                 then Http_client.Stop
-                else if !first_output_seen
+                else if first_output_seen ()
                 then Http_client.Continue Http_client.Output
                 else Http_client.Continue Http_client.Prelude
               in
@@ -1011,14 +1046,21 @@ let complete_stream_http
                        ~actual_bytes:None
                        ~limit_bytes:Api_common.max_response_body)
                 | Eio.Time.Timeout ->
-                  (* The phase and the knob below come from one fact: until
-                     the consumer has reported an [Output] the budget that
-                     fired was the first-event one, whatever structural frame
-                     or ping last moved [stream_idle_state]. *)
-                  let phase =
-                    if !first_output_seen
-                    then Http_client.timeout_phase_of_stream_idle_state !stream_idle_state
-                    else Http_client.First_token
+                  (* The phase, the knob and the telemetry come from one
+                     fact, the position: until the first output the budget
+                     that fired was the first-event one, whatever structural
+                     frame or ping last moved the label; after it, the idle
+                     gap is in the last production. *)
+                  let phase, budget_phase, timeout_type =
+                    match !position with
+                    | Before_first_output _ ->
+                      ( Http_client.First_token
+                      , Http_client.Before_first_output
+                      , Telemetry_event.Ttft_exceeded )
+                    | After_first_output production ->
+                      ( Http_client.Stream_idle production
+                      , Http_client.After_first_output
+                      , Telemetry_event.Stream_idle production )
                   in
                   (* Agent Core contract: name the knob that actually armed this
                      deadline. Before the TTFT split every phase was governed
@@ -1029,40 +1071,21 @@ let complete_stream_http
                   let governing_knob =
                     Http_client.timeout_knob_to_param
                       (Http_client.governing_timeout_knob
-                         ~phase:
-                           (if !first_output_seen
-                            then Http_client.After_first_output
-                            else Http_client.Before_first_output)
+                         ~phase:budget_phase
                          ~first_event_timeout:first_event_timeout_s
                          ~body_timeout:body_timeout_s
                          ~idle_timeout:stream_idle_timeout_s)
                   in
+                  let label = stream_position_label !position in
                   let message =
-                    Printf.sprintf
-                      "%s deadline exceeded while %s"
-                      governing_knob
-                      (Http_client.stream_idle_state_to_label !stream_idle_state)
+                    Printf.sprintf "%s deadline exceeded while %s" governing_knob label
                   in
                   emit_stream_event on_event (Types.Timeout message);
-                  emit_telemetry
-                    (Telemetry_event.Timeout
-                       { provider
-                       ; model
-                       ; (* The same fact the phase states: before the first
-                            output the budget that ran out was the one to the
-                            first token, whatever frame last moved the state. *)
-                         timeout_type =
-                           (if !first_output_seen
-                            then Telemetry_event.Stream_idle !stream_idle_state
-                            else Telemetry_event.Ttft_exceeded)
-                       });
+                  emit_telemetry (Telemetry_event.Timeout { provider; model; timeout_type });
                   publish_summary
                     ~terminal:
                       (Telemetry_event.Terminal_error
-                         (Printf.sprintf
-                            "%s_exceeded:%s"
-                            governing_knob
-                            (Http_client.stream_idle_state_to_label !stream_idle_state)))
+                         (Printf.sprintf "%s_exceeded:%s" governing_knob label))
                     ();
                   Error (Http_client.TimeoutError { message; phase })
               in
@@ -1181,7 +1204,10 @@ let complete_stream_http
           match http_codec with
           | Provider_http_codec.Glm_chat ->
             (match err with
-             | Http_client.HttpError { body; _ } ->
+             (* Only a body that arrived carries the envelope's code; a
+                refusal whose body the caller's window cut has none to read
+                and keeps the classification the status alone supports. *)
+             | Http_client.HttpError { body = Http_client.Received body; _ } ->
                (match Backend_glm.check_glm_error body with
                 | Some
                     { Backend_glm.error_class = Backend_glm.Glm_context_overflow
@@ -1191,6 +1217,7 @@ let complete_stream_http
                   Http_client.ProviderFailure
                     { kind = Http_client.Context_overflow { limit = None }; message }
                 | Some _ | None -> err)
+             | Http_client.HttpError { body = Http_client.Not_received_in_window; _ }
              | Http_client.NetworkError _
              | Http_client.TimeoutError _
              | Http_client.AcceptRejected _

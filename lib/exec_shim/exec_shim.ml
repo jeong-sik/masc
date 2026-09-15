@@ -38,6 +38,16 @@ let observe_supported () = observe_support_abi () >= 1
    deferred to the PR that adds that loop. *)
 external user_notif_supported : unit -> bool = "ocaml_shim_user_notif_supported"
 
+(* task-1575 (phase 3, observe drain wiring). The fd passing primitive is
+   shim_fdpass; install_observe_sockets does the seccomp side from the
+   child and sends the listener fd over [sock].  [drain_one] is the parent
+   side: receive one notification, answer EPERM, and return the recorded
+   syscall number as the wired surface — distinct from the N/W ack
+   because it answers "what did the payload try?" not "did the box
+   apply?". *)
+external observe_install : Unix.file_descr -> bool = "ocaml_shim_observe_install"
+external drain_one : Unix.file_descr -> int = "ocaml_shim_user_notif_drain_one"
+
 let observe_unsupported_code = "observe_unsupported"
 let observe_scratch_code = "observe_scratch_error"
 
@@ -109,14 +119,16 @@ let kill_policy ?(grace_sec = kill_grace_sec) = function
 (* [v] is the request's own major, echoed: a v2 server reads a v2 trailer,
    and a v3 one a v3, so the shim never answers in a version its caller did
    not speak to it in. *)
-let trailer_of_status ~v ~timed_out status : Exec_ssh_protocol.trailer =
+let trailer_of_status ?(observed_syscalls = []) ~v ~timed_out status
+  : Exec_ssh_protocol.trailer =
   match status with
   | Unix.WEXITED n ->
     Exec_ssh_protocol.{ v
                       ; exit = Some n
                       ; signal = None
                       ; timed_out
-                      ; shim_error = None }
+                      ; shim_error = None
+                      ; observed_syscalls }
   | Unix.WSIGNALED n | Unix.WSTOPPED n ->
     (* WSTOPPED is unreachable (waitpid without WUNTRACED); map it like
        WSIGNALED defensively rather than fabricating an exit code.  The
@@ -126,7 +138,8 @@ let trailer_of_status ~v ~timed_out status : Exec_ssh_protocol.trailer =
                       ; exit = None
                       ; signal = Some (host_signal_number n)
                       ; timed_out
-                      ; shim_error = None }
+                      ; shim_error = None
+                      ; observed_syscalls }
 
 (* {1 Path jail} *)
 
@@ -458,7 +471,9 @@ let refusal_of_rule_bytes (rule : bytes) =
   | padded -> failwith ("box setup refused by unknown rule: " ^ padded)
 ;;
 
-let spawn ?(before_exec = fun () -> ()) ~argv ~env ~cwd () =
+let spawn ?(before_exec = fun () -> ()) ?observe_sock
+    ~argv ~env ~cwd ()
+  =
   let opened = ref [] in
   let pipe ?(cloexec = false) () =
     match Unix.pipe ~cloexec () with
@@ -500,6 +515,24 @@ let spawn ?(before_exec = fun () -> ()) ~argv ~env ~cwd () =
        (* The box goes on last, after every path the shim itself needs is
           resolved, and before the payload has run one instruction. *)
        before_exec ();
+       (* task-1575 phase 3: install the observe filter and hand the
+          listener fd to the parent over the socketpair's child end. The
+          filter must be installed here (after prctl, before execvpe), so
+          the listener fd is valid for the whole lifetime of the payload.
+          The child's copy of the parent's end is closed first: a
+          socketpair has two ends, one per side, and a child that kept
+          both would be sending itself a message nobody reads (verified:
+          this was exactly the earlier bug -- both sides using the same
+          fd meant the parent's [recv_fd] blocked forever on a message
+          the child never actually delivered to it). *)
+       (match observe_sock with
+        | Some (child_end, parent_end) ->
+          (try Unix.close parent_end with
+           | Unix.Unix_error _ -> ());
+          let installed = observe_install child_end in
+          Unix.close child_end;
+          if not installed then exit 127
+        | None -> ());
        (* This private pipe carries at most two bytes and never payload text.
           Only the child can acknowledge applied restrictions. The write end
           closes on exec; no acknowledgement is not evidence of success. *)
@@ -561,7 +594,29 @@ let spawn ?(before_exec = fun () -> ()) ~argv ~env ~cwd () =
         Unix.set_nonblock stderr_r;
         Unix.set_nonblock stdin_w;
         Unix.set_nonblock boundary_r;
-        let handles = (pid, stdin_w, stdout_r, stderr_r, boundary_r) in
+        (* task-1575: receive the listener fd the child just sent over the
+           socketpair's parent end. [None] is "observe mode was not
+           requested". The parent's own copy of the child's end is closed
+           first -- keeping it open would not corrupt this single
+           exchange, but it would leave an extra live reference on the
+           end the child uses, and a fd this process has no business
+           holding once the handoff is done. The fd is non-blocking so
+           the supervise select loop can treat readable == one available
+           notification. *)
+        let listener_fd =
+          match observe_sock with
+          | None -> Unix.stdin
+          | Some (child_end, parent_end) ->
+            (try Unix.close child_end with
+             | Unix.Unix_error _ -> ());
+            let fd = Shim_fdpass.recv_fd parent_end in
+            Unix.close parent_end;
+            Unix.set_nonblock fd;
+            fd
+        in
+        let handles =
+          (pid, stdin_w, stdout_r, stderr_r, boundary_r, listener_fd)
+        in
         prepared := true;
         handles)
 
@@ -593,7 +648,10 @@ let read_child_boundary fd =
 (* Every instant in this loop is an interval's endpoint -- the timeout, the
    SIGKILL grace, the post-reap drain -- and none is reported as a time. So
    they are read off a clock no correction moves; see [Shim_clock]. *)
-let supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload ~timeout_sec =
+let supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload
+    ~listener_fd ~timeout_sec =
+  let observe_active = ref (listener_fd <> Unix.stdin) in
+  let observed = ref [] in
   let deadline = Shim_clock.elapsed_seconds () +. timeout_sec in
   let payload_off = ref 0 in
   let payload_len = String.length stdin_payload in
@@ -702,6 +760,7 @@ let supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload ~timeout_sec =
     let readfds =
       (if !out_open then [ stdout_r ] else [])
       @ (if !err_open then [ stderr_r ] else [])
+      @ (if !observe_active then [ listener_fd ] else [])
       @ if !chan_eof then [] else [ Unix.stdin ] in
     let writefds = if !stdin_open then [ stdin_w ] else [] in
     let select_timeout =
@@ -723,6 +782,33 @@ let supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload ~timeout_sec =
     then out_open := pump ~dst_dead:out_dead stdout_r Unix.stdout;
     if !err_open && List.memq stderr_r rdy_r
     then err_open := pump ~dst_dead:err_dead stderr_r Unix.stderr;
+    (* task-1575 phase 3: drain every pending notification, reply EPERM,
+       record the syscall number. Loop on EAGAIN — the listener is
+       non-blocking so readable could mean one or more. Stop on ENOTCONN /
+       EBADF (peer closed = child exited) or when the C-side send fails:
+       the reviewer's concern about draining beyond [seen > 64] in the old
+       loop is addressed by reading until the queue is empty, not by a
+       magic ceiling. *)
+    if !observe_active && List.memq listener_fd rdy_r
+    then (
+      let rec drain_loop () =
+        match drain_one listener_fd with
+        | -2 ->
+          (* Queue empty (EAGAIN): the listener is non-blocking, so this is
+             the normal end of a drain burst. Keep observing — the select
+             loop calls back when the next notification arrives. *)
+          ()
+        | -1 ->
+          (* RECV failed with ENOTCONN/EBADF (child gone) or SEND failed
+             (payload side broken). Stop observing and release the fd. *)
+          (observe_active := false;
+           Unix.close listener_fd)
+        | syscall_no ->
+          (observed := syscall_no :: !observed;
+           drain_loop ())
+      in
+      drain_loop ()
+    );
     if (not !chan_eof) && List.memq Unix.stdin rdy_r
     then (
       (* After the frame, stdin carries no more data; readability means
@@ -778,7 +864,11 @@ let supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload ~timeout_sec =
       | Sigkill_pgid -> send_to_pgid Sys.sigkill
       | Wait_grace _ -> ())
     (kill_policy On_child_exit);
-  trailer_of_status ~v ~timed_out:!timed_out st
+  (* task-1575 phase 3: the observed-attempts accumulator rides in the
+     trailer's own [observed_syscalls] field -- a type distinct from the
+     exit/signal/shim_error ack, not a side-channel stderr text line (the
+     shape a completion verdict rejected: vrf-75b5116cabdef13de98a595b19a8295d). *)
+  trailer_of_status ~v ~timed_out:!timed_out ~observed_syscalls:(List.rev !observed) st
 
 let emit_trailer_stderr ?execution_receipt (t : Exec_ssh_protocol.trailer) =
   let s = Exec_ssh_protocol.render_trailer ?execution_receipt t in
@@ -796,7 +886,8 @@ let shim_fail ?(v = Exec_ssh_protocol.newest) ?execution_receipt msg =
                       ; exit = None
                       ; signal = None
                       ; timed_out = false
-                      ; shim_error = Some msg };
+                      ; shim_error = Some msg
+                      ; observed_syscalls = [] };
   exit 1
 
 (* The jail this one call runs in, decided from what the host allows and what
@@ -843,6 +934,22 @@ let run () =
                  ~base_env:(env_of_process ())
                  ~allowlist:config.env_allowlist
                  ~request_env:req.Exec_ssh_protocol.env in
+             (* task-1575: whether this run's socket(2) will be observed via
+                the SECCOMP_FILTER_FLAG_NEW_LISTENER filter installed below.
+                Two seccomp filters on the same syscall do not layer: the
+                kernel takes the highest-priority action among all matching
+                filters, and SECCOMP_RET_ERRNO outranks SECCOMP_RET_USER_NOTIF
+                (verified empirically -- installing both, the static ERRNO
+                filter's EPERM always wins and the listener never sees a
+                notification). So when the observe filter is going to own
+                socket(2), the static deny_sockets() filter below must not
+                also claim it -- deny_net here would silently make the
+                observe path permanently inert. *)
+             let observe_notif_active =
+               match req.Exec_ssh_protocol.mode with
+               | Exec_ssh_protocol.Observe -> user_notif_supported ()
+               | Exec_ssh_protocol.Effect | Exec_ssh_protocol.Guest_local -> false
+             in
              let box =
                match
                  plan_for_mode ~supported:(observe_supported ())
@@ -868,6 +975,7 @@ let run () =
                    match make_scratch ~root:config.scratch_root with
                    | Ok path -> path
                    | Error message -> shim_fail message in
+                 let deny_net = deny_net && not observe_notif_active in
                  Some (deny_fs, deny_net, scratch) in
              let env, before_exec, cleanup =
                match box with
@@ -888,19 +996,47 @@ let run () =
                        then ()
                        else raise (refusal_of_rule_bytes refusing_rule))
                  , (fun () -> remove_tree scratch) ) in
-             let (pid, stdin_w, stdout_r, stderr_r, boundary_r) =
-               try spawn ~before_exec ~argv ~env ~cwd () with
+             let (pid, stdin_w, stdout_r, stderr_r, boundary_r, listener_fd) =
+               (* A socketpair has two ends; [spawn] uses one in the child
+                  (to hand the listener fd over) and the other in the
+                  parent (to receive it) -- passing the same end to both
+                  would have the parent waiting on a message the child
+                  never actually delivers to that end (verified: this was
+                  the shape of the earlier bug, and it hung every Observe
+                  request, not only ones that reached the drain loop). *)
+               let observe_sock =
+                 if observe_notif_active
+                 then (
+                   try Some (Unix.socketpair Unix.PF_UNIX Unix.SOCK_STREAM 0)
+                   with Unix.Unix_error _ -> None)
+                 else None
+               in
+               try spawn ~before_exec ?observe_sock ~argv ~env ~cwd () with
                | exn ->
+                 (match observe_sock with
+                  | Some (child_end, parent_end) ->
+                    (try Unix.close child_end with
+                     | Unix.Unix_error _ -> ());
+                    (try Unix.close parent_end with
+                     | Unix.Unix_error _ -> ())
+                  | None -> ());
                  cleanup ();
                  shim_fail ~boundary:Child_ack_unavailable
                    (Printf.sprintf "%s: spawn failed: %s" shim_error_code
                       (Printexc.to_string exn)) in
              let trailer, boundary =
                Fun.protect
-                 ~finally:(fun () -> Unix.close boundary_r; cleanup ())
+                 ~finally:(fun () ->
+                   Unix.close boundary_r;
+                   (if listener_fd <> Unix.stdin
+                    then
+                      try Unix.close listener_fd with
+                      | Unix.Unix_error _ -> ());
+                   cleanup ())
                  (fun () ->
                    let trailer =
                      supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload
+                       ~listener_fd:listener_fd
                        ~timeout_sec:req.Exec_ssh_protocol.timeout_sec in
                    trailer, read_child_boundary boundary_r)
              in

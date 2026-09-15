@@ -56,6 +56,7 @@ let qwen_model =
   ; top_p = None
   ; top_k = None
   ; min_p = None
+  ; reasoning_uncontrolled = false
   ; reasoning_effort = None
   ; turn_timeout_s = None
   ; wall_clock_ceiling_s = None

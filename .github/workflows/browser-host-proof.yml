@@ -10,6 +10,12 @@ on:
     # dune build @check on every pull request; nothing about Firefox
     # depends on it.
     paths:
+      # The host's logic and its command line. The logic moved from
+      # bin/masc_browser_host.ml into this library on 2026-09-15 and the
+      # filter stayed behind, which left every later change to the host's
+      # exchanges outside the only workflow that runs them against a real
+      # Firefox -- the same way the scene runtime slipped past below.
+      - 'lib/browser_host/**'
       - 'bin/masc_browser_host.ml'
       - 'lib/browser_lane/**'
       - 'lib/browser_webdriver.*'

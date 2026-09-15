@@ -756,7 +756,7 @@ let test_explicit_vision_runtime_selection () =
         assert (assoc_string "text" json = "selected reader");
         let json, calls = run (`String "p2.vision-b")
           (Error (Llm_provider.Http_client.HttpError
-            { code = 500; body = "selected unavailable"; retry_after_header = None })) in
+            { code = 500; body = Llm_provider.Http_client.Received "selected unavailable"; retry_after_header = None })) in
         assert (calls = ["vision-b"]);
         assert (assoc_string "error" json = "provider_error");
         List.iter (fun (selected, code) ->
@@ -798,7 +798,7 @@ let test_retryable_provider_error_tries_next_runtime () =
         if !calls = 1 then
           Error
             (Llm_provider.Http_client.HttpError
-               { code = 500; body = "down"; retry_after_header = None })
+               { code = 500; body = Llm_provider.Http_client.Received "down"; retry_after_header = None })
         else Ok (ok_response "second runtime answered")
       in
       let raw =
@@ -929,7 +929,7 @@ let test_candidate_policy_error_tries_next_runtime () =
           Error
             (Llm_provider.Http_client.HttpError
                { code = 400
-               ; body = "{\"error\":{\"code\":\"1210\",\"message\":\"max_tokens illegal\"}}"
+               ; body = Llm_provider.Http_client.Received "{\"error\":{\"code\":\"1210\",\"message\":\"max_tokens illegal\"}}"
                ; retry_after_header = None
                })
         else Ok (ok_response "second runtime answered")
@@ -1003,7 +1003,7 @@ let test_vision_402_marks_the_account_exhausted_and_moves_on () =
             Error
               (Llm_provider.Http_client.HttpError
                  { code = 402
-                 ; body = "{\"error\":{\"message\":\"Insufficient Balance\"}}"
+                 ; body = Llm_provider.Http_client.Received "{\"error\":{\"message\":\"Insufficient Balance\"}}"
                  ; retry_after_header = None
                  })
           else Ok (ok_response "second account answered")
@@ -1041,7 +1041,7 @@ let test_policy_error_on_every_candidate_is_reported () =
         incr calls;
         Error
           (Llm_provider.Http_client.HttpError
-             { code = 400; body = "field refused"; retry_after_header = None })
+             { code = 400; body = Llm_provider.Http_client.Received "field refused"; retry_after_header = None })
       in
       let raw =
         Eio_main.run (fun env ->
@@ -1075,11 +1075,11 @@ let test_policy_error_then_transient_reports_the_last_candidate () =
         if !calls = 1 then
           Error
             (Llm_provider.Http_client.HttpError
-               { code = 400; body = "field refused"; retry_after_header = None })
+               { code = 400; body = Llm_provider.Http_client.Received "field refused"; retry_after_header = None })
         else
           Error
             (Llm_provider.Http_client.HttpError
-               { code = 500; body = "down"; retry_after_header = None })
+               { code = 500; body = Llm_provider.Http_client.Received "down"; retry_after_header = None })
       in
       let raw =
         Eio_main.run (fun env ->
@@ -1108,7 +1108,7 @@ let test_capacity_failover_preserves_image_and_declared_caps () =
         ; message = "image context exceeds this candidate"
         }
     ; Llm_provider.Http_client.HttpError
-        { code = 413; body = "payload refused"; retry_after_header = None }
+        { code = 413; body = Llm_provider.Http_client.Received "payload refused"; retry_after_header = None }
     ]
   in
   List.iter
@@ -1155,7 +1155,7 @@ let test_capacity_exhaustion_retains_size_failure () =
       incr calls;
       Error
         (Llm_provider.Http_client.HttpError
-           { code = 413; body = "payload refused"; retry_after_header = None })
+           { code = 413; body = Llm_provider.Http_client.Received "payload refused"; retry_after_header = None })
     in
     let outcome =
       Eio_main.run (fun env ->
@@ -1183,7 +1183,7 @@ let test_candidate_failover_is_not_cut_off_by_local_deadline () =
         models := config.Llm_provider.Provider_config.model_id :: !models;
         Error
           (Llm_provider.Http_client.HttpError
-             { code = 500; body = "down"; retry_after_header = None })
+             { code = 500; body = Llm_provider.Http_client.Received "down"; retry_after_header = None })
       in
       let raw =
         Eio_main.run (fun env ->
@@ -1227,7 +1227,7 @@ let test_credential_error_tries_next_runtime () =
         if !calls = 1 then
           Error
             (Llm_provider.Http_client.HttpError
-               { code = 401; body = "bad credentials"; retry_after_header = None })
+               { code = 401; body = Llm_provider.Http_client.Received "bad credentials"; retry_after_header = None })
         else Ok (ok_response "second runtime answered")
       in
       let raw =
@@ -2238,7 +2238,10 @@ let test_length_failover_preserves_candidate_http_recovery () =
             incr calls;
             if !calls = 1 then
               Error (Llm_provider.Http_client.HttpError
-                { code; body = "max_tokens request rejected"; retry_after_header = None })
+                { code
+                ; body = Llm_provider.Http_client.Received "max_tokens request rejected"
+                ; retry_after_header = None
+                })
             else Ok (ok_response "candidate HTTP fallback")
           in
           let outcome =

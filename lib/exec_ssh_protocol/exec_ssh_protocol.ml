@@ -33,6 +33,7 @@ type trailer =
   ; signal : int option
   ; timed_out : bool
   ; shim_error : string option
+  ; observed_syscalls : int list
   }
 
 type execution_boundary =
@@ -275,6 +276,16 @@ let expect_b64_list ~what name json : (string list, string) result =
   in
   go [] l
 
+let expect_int_list ~what name : Yojson.Safe.t -> (int list, string) result = function
+  | `List l ->
+    let rec go acc = function
+      | [] -> Ok (List.rev acc)
+      | `Int i :: tl -> go (i :: acc) tl
+      | _ -> transport_error "%s field %S is not an int list" what name
+    in
+    go [] l
+  | _ -> transport_error "%s field %S is not an int list" what name
+
 let expect_opt_int ~what name : Yojson.Safe.t -> (int option, string) result = function
   | `Null -> Ok None
   | `Int i -> Ok (Some i)
@@ -441,7 +452,10 @@ let render_trailer ?execution_receipt (t : trailer) : string =
       ; "signal", opt_json (fun i -> `Int i) t.signal
       ; "timed_out", `Bool t.timed_out
       ; "shim_error", opt_json (fun s -> `String s) t.shim_error
-      ] @ match execution_receipt with
+      ]
+      @ (if t.observed_syscalls = [] then []
+         else [ "observed_syscalls", `List (List.map (fun i -> `Int i) t.observed_syscalls) ])
+      @ match execution_receipt with
       | None -> []
       | Some receipt -> ["execution_receipt", execution_receipt_to_yojson receipt])
   in
@@ -460,6 +474,11 @@ let trailer_of_json (json : Yojson.Safe.t) : (trailer, string) result =
   let* shim_error =
     member ~what "shim_error" wrapped >>= expect_opt_string ~what "shim_error"
   in
+  let* observed_syscalls =
+    match List.assoc_opt "observed_syscalls" wrapped with
+    | None -> Ok []
+    | Some json -> expect_int_list ~what "observed_syscalls" json
+  in
   let set_count =
     (if exit = None then 0 else 1)
     + (if signal = None then 0 else 1)
@@ -472,7 +491,7 @@ let trailer_of_json (json : Yojson.Safe.t) : (trailer, string) result =
     transport_error
       "malformed trailer: no exit, signal or shim_error and timed_out is false"
   else
-    Ok { v; exit; signal; timed_out; shim_error }
+    Ok { v; exit; signal; timed_out; shim_error; observed_syscalls }
 
 let parse_trailer (tail : string) : (trailer, string) result =
   match String.rindex_opt tail rs with

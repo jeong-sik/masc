@@ -46,7 +46,7 @@ let to_user_message = function
       (String_util.utf8_safe
          ~max_bytes:(Runtime_provider_defaults.max_error_body_length + 3)
          ~suffix:"..."
-         body
+         (Llm_provider.Http_client.refusal_body_text body)
        |> String_util.to_string)
   | Some (Llm_provider.Http_client.AcceptRejected { reason }) -> reason
   | Some (Llm_provider.Http_client.NetworkError { message; _ }) -> message

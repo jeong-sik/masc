@@ -49,6 +49,10 @@ type try_provider_ctx =
         (** Reads the keeper's live progress signal. Must not raise; return
             [None] when unavailable, which degrades the deadline to the
             pre-#28417 elapsed ceiling. *)
+  ; person_queued_probe : (unit -> bool) option
+        (** Reads whether a person's chat operation is queued behind this turn.
+            Present only on the autonomous lane; [None] disables first-token-wait
+            preemption (RFC-0441 pre-first-token gap). Must not raise. *)
   ; temperature : float option
   ; accept : Agent_core.Types.api_response -> bool
   ; hooks : Agent_core.Hooks.hooks option
@@ -144,6 +148,7 @@ val provider_lease_stalled :
   -> now:float
   -> threshold_sec:float
   -> attempt_started_at:float
+  -> permit_wait:Llm_provider.Provider_admission.permit_wait
   -> sample:provider_progress_sample option
   -> bool
 (** A yielded main-provider lease cannot be stalled. On reacquisition, the
@@ -154,10 +159,19 @@ val attempt_stalled :
   now:float
   -> threshold_sec:float
   -> attempt_started_at:float
+  -> permit_wait:Llm_provider.Provider_admission.permit_wait
   -> sample:provider_progress_sample option
   -> bool
 (** The stall verdict for a running provider attempt (#28417), pure in its
     inputs so it is testable without Eio or a registry.
+
+    Never stalled while [permit_wait] is [Waiting_for_permit]: a bounded wait
+    for the binding's admission permit is queueing with a deadline of its
+    own, and Agent Core writes the cell for no other kind of wait, so
+    standing down for it leaves nothing unbounded and lets the admission
+    bound alone end it, as [Queue]. [Wait_settled_at] is the instant that
+    wait ended, and the verdict counts from it: the attempt's own budgets
+    start there, so the silence that is a stall is the silence after it.
 
     With a [sample], the attempt is stalled when no tool is in flight AND the
     last progress signal is older than [threshold_sec]. A tool call that runs
@@ -168,6 +182,14 @@ val attempt_stalled :
     verdict falls back to elapsed time since [attempt_started_at] — the
     pre-#28417 behaviour, so a lost progress signal cannot silently disable
     enforcement. *)
+
+val preempt_pre_first_token : first_event_seen:bool -> person_queued:bool -> bool
+(** First-token-wait preemption verdict (RFC-0441 pre-first-token gap), pure in
+    its inputs. [true] only when the provider has produced no streaming event
+    yet ([not first_event_seen]) and a person's chat operation is queued. Once
+    the first event arrives the tool-boundary yield owns the handover, so this
+    is [false]; with no one queued it is [false] and the attempt keeps its full
+    first-event/idle bounds. *)
 
 val default_context_overflow_shrink_capacity : capacity_bytes:int -> int
 (** The shared provider-oracle target for one ordinary shrink step. The

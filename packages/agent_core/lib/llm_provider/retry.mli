@@ -29,6 +29,15 @@ type invalid_request_reason =
           two apart. [status] rather than a bare marker so a provider that signals
           this with a status other than 413 leaves that fact in the type instead of
           in a comment. *)
+  | Refusal_body_not_received
+      (** The provider refused and the body that would have named the cause
+          did not arrive before the caller's own window closed
+          ({!Http_client.Not_received_in_window}). Distinct from
+          {!Unknown_invalid_request}, where the body arrived and named
+          nothing this classifier knows: there the provider has spoken, here
+          it has not been heard. Retryable for that reason -- the next
+          attempt opens a fresh window -- while a refusal whose body arrived
+          ends the attempt. *)
   | Unknown_invalid_request
 
 type input_capacity_reason =
@@ -135,4 +144,13 @@ val classify_error
   :  retry_after_header:float option
   -> status:int
   -> body:string
+  -> api_error
+
+(** {!classify_error} over a transport's refusal. A [Received] body is
+    classified from what it says; [Not_received_in_window] is classified
+    from the status alone, as {!Refusal_body_not_received}. *)
+val classify_refusal
+  :  retry_after_header:float option
+  -> status:int
+  -> body:Http_client.refusal_body
   -> api_error

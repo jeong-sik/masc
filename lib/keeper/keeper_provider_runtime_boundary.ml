@@ -2,9 +2,7 @@
     MASC. This boundary classifies transport facts only; it never decides a
     Keeper lifecycle transition. *)
 
-type stream_idle_state =
-  | Awaiting_first_event
-  | Awaiting_first_delta
+type stream_production =
   | Streaming_answer
   | Streaming_thinking
   | Streaming_tool_call
@@ -13,9 +11,7 @@ type stream_idle_state =
   | Streaming_done
   | Streaming_unknown
 
-let stream_idle_state_of_label = function
-  | "awaiting_first_event" -> Some Awaiting_first_event
-  | "awaiting_first_delta" -> Some Awaiting_first_delta
+let stream_production_of_label = function
   | "streaming_answer" -> Some Streaming_answer
   | "streaming_thinking" -> Some Streaming_thinking
   | "streaming_tool_call" -> Some Streaming_tool_call
@@ -31,7 +27,7 @@ type timeout_phase =
   | Http_operation
   | Non_streaming_body
   | Stream_body
-  | Stream_idle of stream_idle_state
+  | Stream_idle of stream_production
   | Provider_step
   | Cli_stdout_idle
   | Caller_budget
@@ -55,8 +51,8 @@ let timeout_phase_of_label label =
   then (
     let prefix_len = String.length stream_idle_prefix in
     String.sub label prefix_len (String.length label - prefix_len)
-    |> stream_idle_state_of_label
-    |> Option.map (fun state -> Stream_idle state))
+    |> stream_production_of_label
+    |> Option.map (fun production -> Stream_idle production))
   else
     match label with
     | "first_token" | "no_first_token" | "time_to_first_token" | "ttft" ->
@@ -95,12 +91,10 @@ type t =
    vocabulary — a typed->string->typed round trip inside one function. Both
    matches are exhaustive and total, so a new constructor on either side is
    a compile error here. *)
-let stream_idle_state_of_agent_core :
-      Llm_provider.Http_client.stream_idle_state -> stream_idle_state
+let stream_production_of_agent_core :
+      Llm_provider.Http_client.stream_production -> stream_production
   = function
-  | Llm_provider.Http_client.Awaiting_first_event -> Awaiting_first_event
-  | Awaiting_first_delta -> Awaiting_first_delta
-  | Streaming_answer -> Streaming_answer
+  | Llm_provider.Http_client.Streaming_answer -> Streaming_answer
   | Streaming_thinking -> Streaming_thinking
   | Streaming_tool_call -> Streaming_tool_call
   | Streaming_heartbeat -> Streaming_heartbeat
@@ -116,7 +110,7 @@ let timeout_phase_of_agent_core_phase :
   | Http_operation -> Http_operation
   | Non_streaming_body -> Non_streaming_body
   | Stream_body -> Stream_body
-  | Stream_idle state -> Stream_idle (stream_idle_state_of_agent_core state)
+  | Stream_idle production -> Stream_idle (stream_production_of_agent_core production)
   | Provider_step -> Provider_step
   | Cli_stdout_idle -> Cli_stdout_idle
   | Wall_clock -> Wall_clock
@@ -245,6 +239,7 @@ let classify_provider_error = function
   | Llm_provider.Error.UnknownVariant _
   | Llm_provider.Error.ProviderUnavailable _
   | Llm_provider.Error.EmptyCompletion _
+  | Llm_provider.Error.RepeatingGeneration _
   | Llm_provider.Error.RateLimit _
   | Llm_provider.Error.HardQuota _
   | Llm_provider.Error.CapacityExhausted _

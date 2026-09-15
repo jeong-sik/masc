@@ -686,7 +686,7 @@ let test_full_tool_use_sequence () =
 let test_map_http_error_http_error () =
   let http_err =
     Llm_provider.Http_client.HttpError
-      { code = 429; body = "rate limited"; retry_after_header = None }
+      { code = 429; body = Llm_provider.Http_client.Received "rate limited"; retry_after_header = None }
   in
   let core_err = Streaming.map_http_error http_err in
   match core_err with
@@ -710,7 +710,7 @@ let test_map_http_error_server_error () =
   let http_err =
     Llm_provider.Http_client.HttpError
       { code = 500
-      ; body = {|{"error":{"message":"Internal server error"}}|}
+      ; body = Llm_provider.Http_client.Received {|{"error":{"message":"Internal server error"}}|}
       ; retry_after_header = None
       }
   in
@@ -723,7 +723,7 @@ let test_map_http_error_server_error () =
 let test_map_http_error_auth_error () =
   let http_err =
     Llm_provider.Http_client.HttpError
-      { code = 401; body = "unauthorized"; retry_after_header = None }
+      { code = 401; body = Llm_provider.Http_client.Received "unauthorized"; retry_after_header = None }
   in
   let core_err = Streaming.map_http_error http_err in
   match core_err with

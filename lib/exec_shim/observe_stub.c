@@ -60,10 +60,13 @@
 #include <stdint.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/ioctl.h>
 #include <sys/prctl.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/sysmacros.h>
+#include <sys/uio.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 
@@ -143,6 +146,46 @@ struct shim_sock_fprog {
 #endif
 #define SECCOMP_SET_MODE_FILTER 1U
 #define SECCOMP_FILTER_FLAG_NEW_LISTENER (1U << 3)
+#define SECCOMP_RET_USER_NOTIF 0x7fc00000U
+#define SECCOMP_USER_NOTIF_FLAG_CONTINUE (1UL << 0)
+
+/* seccomp user-notif ABI, mirrored from include/uapi/linux/seccomp.h:
+   native-endian structs at natural alignment (notif 80 bytes, notif_resp 24
+   on both supported architectures). */
+struct shim_seccomp_data {
+  int32_t nr;
+  uint32_t arch;
+  uint64_t instruction_pointer;
+  uint64_t args[6];
+};
+struct shim_seccomp_notif {
+  uint64_t id;
+  uint32_t pid;
+  uint32_t flags;
+  struct shim_seccomp_data data;
+};
+struct shim_seccomp_notif_resp {
+  uint64_t id;
+  int64_t val;
+  int32_t error;
+  uint32_t flags;
+};
+
+/* _IOWR from <asm-generic/ioctl.h>, spelled out because the static musl
+   build has no linux-headers: dir<<30 | size<<16 | type<<8 | nr. */
+#define SHIM_IOC_DIRSHIFT 30
+#define SHIM_IOC_SIZESHIFT 16
+#define SHIM_IOC_TYPESHIFT 8
+#define SHIM_IOC_NRSHIFT 0
+#define SHIM_IOC_READ 2U
+#define SHIM_IOC_WRITE 1U
+#define SHIM_IOWR(type, nr, size)                                          \
+  ((((uint32_t) SHIM_IOC_READ | SHIM_IOC_WRITE) << SHIM_IOC_DIRSHIFT)       \
+   | ((uint32_t) (size) << SHIM_IOC_SIZESHIFT)                             \
+   | ((uint32_t) (type) << SHIM_IOC_TYPESHIFT)                             \
+   | ((uint32_t) (nr) << SHIM_IOC_NRSHIFT))
+#define SECCOMP_IOCTL_NOTIF_RECV SHIM_IOWR('!', 0, sizeof(struct shim_seccomp_notif))
+#define SECCOMP_IOCTL_NOTIF_SEND SHIM_IOWR('!', 1, sizeof(struct shim_seccomp_notif_resp))
 #if defined(__aarch64__)
 #define SHIM_AUDIT_ARCH 0xC00000B7U
 #elif defined(__x86_64__)
@@ -258,17 +301,24 @@ static int deny_sockets(void)
    An allow-all filter: the probe cares whether the kernel accepts the
    NEW_LISTENER flag at all, not about filtering anything, and the child
    never runs a payload past this point. Exits 0 when the kernel handed
-   back a listener fd, 1 otherwise (old kernel, or the syscall itself is
-   filtered out by an ancestor's seccomp policy, e.g. running the probe
-   itself inside masc's own Execute sandbox). */
+   back a listener fd, 1 otherwise (old kernel, or a seccomp policy that
+   refuses the syscall outright).  no_new_privs is set first: without it
+   SECCOMP_SET_MODE_FILTER reads EACCES on an unprivileged kernel that
+   would otherwise accept the listener. */
 static int probe_user_notif_child(void)
 {
   struct shim_sock_filter filter[] = {
     { BPF_RET_K, 0, 0, SECCOMP_RET_ALLOW },
   };
   struct shim_sock_fprog prog = { sizeof filter / sizeof filter[0], filter };
-  long fd = syscall(SYS_seccomp, SECCOMP_SET_MODE_FILTER,
-                     (unsigned long) SECCOMP_FILTER_FLAG_NEW_LISTENER, &prog);
+  long fd;
+  /* SECCOMP_SET_MODE_FILTER is allowed with CAP_SYS_ADMIN *or* the
+     no_new_privs bit; the unprivileged case is the one that matters, and
+     without this the probe reads EACCES on a kernel that would accept the
+     listener. */
+  if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0) return 1;
+  fd = syscall(SYS_seccomp, SECCOMP_SET_MODE_FILTER,
+               (unsigned long) SECCOMP_FILTER_FLAG_NEW_LISTENER, &prog);
   if (fd < 0) return 1;
   close((int) fd);
   return 0;
@@ -287,6 +337,36 @@ static int user_notif_supported(void)
     if (waited != pid) return 0;
     return WIFEXITED(status) && WEXITSTATUS(status) == 0;
   }
+}
+
+/* SCM_RIGHTS send usable from the forked exec child, where no OCaml
+   runtime call is safe between fork and execvpe. Mirrors the OCaml-side
+   primitive in fdpass_stub.c (shim_fdpass), which stays the parent-side
+   receive path; the ten duplicated lines buy a child that only ever runs
+   raw syscalls (task-1571). */
+static int send_fd_raw(int sock, int fd)
+{
+  char payload = 'F';
+  struct iovec iov;
+  struct msghdr msg;
+  char control[CMSG_SPACE(sizeof(int))];
+  struct cmsghdr *cmsg;
+  ssize_t sent;
+  iov.iov_base = &payload;
+  iov.iov_len = 1;
+  memset(&msg, 0, sizeof(msg));
+  memset(control, 0, sizeof(control));
+  msg.msg_iov = &iov;
+  msg.msg_iovlen = 1;
+  msg.msg_control = control;
+  msg.msg_controllen = sizeof(control);
+  cmsg = CMSG_FIRSTHDR(&msg);
+  cmsg->cmsg_level = SOL_SOCKET;
+  cmsg->cmsg_type = SCM_RIGHTS;
+  cmsg->cmsg_len = CMSG_LEN(sizeof(int));
+  memcpy(CMSG_DATA(cmsg), &fd, sizeof(int));
+  do { sent = sendmsg(sock, &msg, 0); } while (sent < 0 && errno == EINTR);
+  return sent < 0 ? -1 : 0;
 }
 #endif /* __linux__ */
 
@@ -313,6 +393,81 @@ CAMLprim value ocaml_shim_user_notif_supported(value vunit)
 #else
   CAMLreturn(Val_bool(0));
 #endif
+}
+
+/* --- task-1571: the observation filter and the supervisor drain --------- */
+
+/* The observe variant of deny_sockets: socket(2) is answered by the
+   supervisor (SECCOMP_RET_USER_NOTIF) instead of the filter itself, so
+   the supervisor can record the attempt and then answer EPERM.  The
+   child calls this through install_user_notif below, which hands the
+   listener fd back across [sock] before execvpe. */
+static int install_observe_sockets(int sock)
+{
+  struct shim_sock_filter filter[] = {
+    { BPF_LD_W_ABS, 0, 0, 4 },
+    { BPF_JMP_JEQ_K, 1, 0, SHIM_AUDIT_ARCH },
+    { BPF_RET_K, 0, 0, SECCOMP_RET_KILL_PROCESS },
+    { BPF_LD_W_ABS, 0, 0, 0 },
+    { BPF_JMP_JEQ_K, 0, 1, (uint32_t) SYS_socket },
+    { BPF_RET_K, 0, 0, SECCOMP_RET_USER_NOTIF },
+    { BPF_RET_K, 0, 0, SECCOMP_RET_ALLOW },
+  };
+  struct shim_sock_fprog prog = { sizeof filter / sizeof filter[0], filter };
+  long fd;
+  int rc;
+
+  if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0) return -1;
+  fd = syscall(SYS_seccomp, SECCOMP_SET_MODE_FILTER,
+               (unsigned long) SECCOMP_FILTER_FLAG_NEW_LISTENER, &prog);
+  if (fd < 0) return -1;
+  rc = send_fd_raw(sock, (int) fd);
+  {
+    int saved = errno;
+    close((int) fd);
+    errno = saved;
+  }
+  return rc;
+}
+
+/* Child-side entry: install the observe filter and hand the listener fd to
+   the shim over [sock].  Returns true when the filter applied and the fd
+   was sent.  Runs in the forked exec child, so it touches no OCaml runtime
+   state beyond the argument. */
+CAMLprim value ocaml_shim_observe_install(value vsock)
+{
+  CAMLparam1(vsock);
+#ifdef __linux__
+  CAMLreturn(Val_bool(install_observe_sockets(Int_val(vsock)) == 0));
+#else
+  CAMLreturn(Val_bool(0));
+#endif
+}
+
+/* The shim's drain loop: one RECV per recorded attempt, answer EPERM,
+   return how many were seen.  Poll-free for now: the payload makes at
+   most a handful of socket attempts and this is called after it exits —
+   a blocking select gate comes with the live-payload wiring. */
+CAMLprim value ocaml_shim_user_notif_drain(value vlistener)
+{
+  CAMLparam1(vlistener);
+  int fd = Int_val(vlistener);
+  int seen = 0;
+  for (;;) {
+    struct shim_seccomp_notif req;
+    struct shim_seccomp_notif_resp resp;
+    memset(&req, 0, sizeof(req));
+    if (ioctl(fd, SECCOMP_IOCTL_NOTIF_RECV, &req) != 0) break;
+    memset(&resp, 0, sizeof(resp));
+    resp.id = req.id;
+    resp.error = -EPERM;
+    resp.flags = 0;
+    if (ioctl(fd, SECCOMP_IOCTL_NOTIF_SEND, &resp) != 0) break;
+    seen++;
+    /* No magic ceiling: RECV returning EAGAIN (non-blocking listener) or
+       ENOTCONN (child gone) ends the loop. */
+  }
+  CAMLreturn(Val_int(seen));
 }
 
 /* Applies the box and reports which rule refused the setup, so the refusal
@@ -354,5 +509,38 @@ report:
   (void) refusing_rule; (void) vdeny_fs; (void) vdeny_net;
   unix_error(ENOSYS, "restrict_self", Nothing);
   CAMLreturn(Val_unit);
+#endif
+}
+
+/* One iteration of the supervisor drain (task-1575 phase 3 wiring).
+   Returns the syscall number from the next pending notification and
+   replies EPERM. -2: queue empty (EAGAIN) -- the caller keeps observing.
+   -1: the child is gone (ENOTCONN/EBADF) or the SEND itself failed --
+   the caller stops. Single-call drain so the cap on outstanding
+   notifications moves to the OCaml loop (reviewer concern: drain until
+   EAGAIN, not a magic ceiling); the return value alone carries
+   everything the caller needs, no errno out-param. */
+CAMLprim value ocaml_shim_user_notif_drain_one(value vlistener)
+{
+  CAMLparam1(vlistener);
+#ifdef __linux__
+  int fd = Int_val(vlistener);
+  struct shim_seccomp_notif req;
+  struct shim_seccomp_notif_resp resp;
+  memset(&req, 0, sizeof(req));
+  if (ioctl(fd, SECCOMP_IOCTL_NOTIF_RECV, &req) != 0)
+  {
+    int e = errno;
+    CAMLreturn(Val_int((e == EAGAIN || e == EWOULDBLOCK) ? -2 : -1));
+  }
+  memset(&resp, 0, sizeof(resp));
+  resp.id = req.id;
+  resp.error = -EPERM;
+  resp.flags = 0;
+  if (ioctl(fd, SECCOMP_IOCTL_NOTIF_SEND, &resp) != 0)
+    CAMLreturn(Val_int(-1));
+  CAMLreturn(Val_int((int) req.data.nr));
+#else
+  CAMLreturn(Val_int(-1));
 #endif
 }

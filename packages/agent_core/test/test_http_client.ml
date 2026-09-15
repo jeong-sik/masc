@@ -699,11 +699,12 @@ let test_timeout_phase_policy_labels () =
     cases
 ;;
 
-let test_timeout_phase_of_stream_idle_state () =
+(* Every production has its own idle-phase label; a stall before the first
+   output is [First_token] and never reaches [Stream_idle], which the phase's
+   argument type now says. *)
+let test_every_production_has_its_own_idle_phase_label () =
   let cases =
-    [ Http_client.Awaiting_first_event, "first_token"
-    ; Http_client.Awaiting_first_delta, "first_token"
-    ; Http_client.Streaming_answer, "stream_idle:streaming_answer"
+    [ Http_client.Streaming_answer, "stream_idle:streaming_answer"
     ; Http_client.Streaming_thinking, "stream_idle:streaming_thinking"
     ; Http_client.Streaming_tool_call, "stream_idle:streaming_tool_call"
     ; Http_client.Streaming_heartbeat, "stream_idle:streaming_heartbeat"
@@ -713,12 +714,11 @@ let test_timeout_phase_of_stream_idle_state () =
     ]
   in
   List.iter
-    (fun (state, expected) ->
-       let phase = Http_client.timeout_phase_of_stream_idle_state state in
+    (fun (production, expected) ->
        Alcotest.(check string)
          expected
          expected
-         (Http_client.timeout_phase_to_label phase))
+         (Http_client.timeout_phase_to_label (Http_client.Stream_idle production)))
     cases
 ;;
 
@@ -772,6 +772,12 @@ let test_provider_failure_string_helpers () =
       , "empty_completion:end_turn" )
     ; ( Http_client.Empty_completion { stop_reason = Types.MaxTokens }
       , "empty_completion:max_tokens" )
+    ; ( Http_client.Repeating_generation
+          { shape = Types.Repeated_reasoning_cycle; occurrences = 3; unit_bytes = 749 }
+      , "repeating_generation:repeated_reasoning_cycle:3x749" )
+    ; ( Http_client.Repeating_generation
+          { shape = Types.Repeated_paragraph; occurrences = 4; unit_bytes = 61 }
+      , "repeating_generation:repeated_paragraph:4x61" )
     ; ( Http_client.Unknown_provider_failure { reason = Some "exit_status" }
       , "unknown_provider_failure:exit_status" )
     ; Http_client.Unknown_provider_failure { reason = None }, "unknown_provider_failure"
@@ -1259,9 +1265,9 @@ let () =
     ; ( "timeout_phase"
       , [ Alcotest.test_case "policy labels" `Quick test_timeout_phase_policy_labels
         ; Alcotest.test_case
-            "stream idle pre-token maps to first_token"
+            "every production has its own idle-phase label"
             `Quick
-            test_timeout_phase_of_stream_idle_state
+            test_every_production_has_its_own_idle_phase_label
         ; Alcotest.test_case
             "HTTP deadlines without clock are rejected"
             `Quick

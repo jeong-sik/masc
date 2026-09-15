@@ -47,6 +47,10 @@ type preserve_thinking_control_format =
     replaying [reasoning_content] on every turn, so [Force_preserve_always]).
 
     @since 0.207.16 *)
+type uncontrolled_reasoning = Capability_vocab.uncontrolled_reasoning =
+  | Provider_default_reasoning
+  | Provider_enables_reasoning
+
 type reasoning_replay_override = Capability_vocab.reasoning_replay_override =
   | Default_reasoning_replay
   | Force_no_replay
@@ -177,6 +181,7 @@ type capabilities =
         derives the parser field from [thinking_control_format]; catalog entries
         set a concrete value when the endpoint stream field differs from the
         request-side thinking control shape. *)
+  ; uncontrolled_reasoning : uncontrolled_reasoning
   ; reasoning_replay_override : reasoning_replay_override
     (** Optional override for the multi-turn reasoning replay policy. Defaults to
         the policy implied by [thinking_control_format]; catalog entries set this
@@ -252,6 +257,7 @@ let default_capabilities =
   ; content_inline_reasoning = No_content_inline_reasoning
   ; reasoning_output_format = No_reasoning_output_format
   ; reasoning_streaming_format = Default_reasoning_streaming
+  ; uncontrolled_reasoning = Provider_default_reasoning
   ; reasoning_replay_override = Default_reasoning_replay
   ; supports_response_format_json = false
   ; supports_structured_output = false
@@ -594,6 +600,15 @@ let ollama_cloud_capabilities =
 let ollama_cloud_v1_capabilities =
   { ollama_cloud_capabilities with
     thinking_control_format = Reasoning_effort
+    (* The sentence above, as a value the admission can read: this endpoint
+       turns reasoning on by itself when the request carries no
+       [reasoning_effort], so a model row that declares no effort here runs
+       with reasoning on while its operator reads the config as off. Measured
+       2026-09-15 against https://ollama.com/v1 with deepseek-v4.1-flash:cloud,
+       three runs of one reasoning prompt, median reasoning characters: no
+       control 1985, "high" 1996, "medium" 1767, "low" 1671, "none" 0. An
+       uncontrolled request sits at the reasoning-on end of that ladder. *)
+  ; uncontrolled_reasoning = Provider_enables_reasoning
   ; accepted_reasoning_efforts =
       Some
         [ Reasoning_effort.None_

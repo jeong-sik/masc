@@ -57,7 +57,13 @@ let candidate_access_should_try_next = function
 let attempt_rejected_should_try_next = function
   | Agent_core.Error.Api
       (Agent_core.Retry.InvalidRequest
-         { reason = Agent_core.Retry.Attempt_rejected; _ }) -> true
+         { reason =
+             ( Agent_core.Retry.Attempt_rejected
+             (* The refusal's cause was never read: the next candidate may
+                read it, or succeed. *)
+             | Agent_core.Retry.Refusal_body_not_received )
+         ; _
+         }) -> true
   | Agent_core.Error.Api
       (Agent_core.Retry.InvalidRequest
          { reason =

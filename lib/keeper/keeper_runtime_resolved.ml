@@ -33,7 +33,7 @@ let source_to_string = function
   | Default -> "default"
   | Failsafe_floor -> "failsafe_floor"
 
-(* The parse and the clamp of the two deadlines belong to Env_config_keeper;
+(* The parse and the range check of the two deadlines belong to Env_config_keeper;
    a second copy here read the same variables and would drift on any change
    to either. AGENT_CORE applies the body override only to non-streaming
    sync body reads and it stays opt-in. Durable channel (#27416):

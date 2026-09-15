@@ -99,6 +99,7 @@ type config =
   body_timeout_s : float option;
   call_timeout_s : float option;
   admission_timeout_s : float option;
+  permit_wait : Llm_provider.Provider_admission.permit_wait Atomic.t option;
   max_tokens : int option;
   temperature : float option;
   hooks : Agent_core.Hooks.hooks option;
@@ -949,6 +950,29 @@ let stop_reason_of_cooperative_yield ~turns_used = function
      the typed reply effect already completed. This is successful completion,
      not a continuation checkpoint that should replay on the next cycle. *)
   | Terminal_tool_completed -> Completed
+;;
+
+(* A turn that abandoned its provider attempt before the first streaming event
+   arrived, because a person queued behind it and there was no tool boundary to
+   yield at (the pre-first-token gap RFC-0441 leaves open). It produced nothing:
+   [turns_used = 0], no checkpoint. The keeper race layer synthesizes this so the
+   attempt reads downstream exactly like a durable-stimulus yield -- the source
+   wake stays pending and re-runs fresh next cycle -- without entering AGENT_CORE
+   or persisting a checkpoint. It is not a forced cancel of a productive turn
+   (nothing was produced); it is the same cooperative yield, one turn-phase
+   earlier. *)
+let yielded_pre_first_token ~session_id : run_result =
+  { response = Runtime_agent_checkpoint.partial_response_of_stop ~session_id ~text:""
+  ; checkpoint = None
+  ; cooperative_boundary = None
+  ; session_id
+  ; session_resumed = None
+  ; turns = 0
+  ; trace_ref = None
+  ; run_validation = None
+  ; runtime_observation = None
+  ; stop_reason = Yielded_to_durable_stimulus { turns_used = 0 }
+  }
 ;;
 
 let cooperative_boundary_callback

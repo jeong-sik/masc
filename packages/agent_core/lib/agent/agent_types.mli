@@ -85,10 +85,16 @@ type options =
         back to [body_timeout_s], then to [stream_idle_timeout_s], and stays
         unarmed only when none of the three is set; inter-token idle still
         guards once the stream produces, and [connect_timeout_s] still guards
-        connection setup. On the exact-fit path the count-tokens round trip
-        is provider silence before the first token too: it spends from this
-        window first (ending as [TimeoutError { phase = First_token }]) and
-        the stream arms what it left. @since 0.218.0 *)
+        connection setup. On the exact-fit path, when this is declared, the
+        count-tokens round trip is provider silence before the first token
+        too: it spends from this window first and the stream arms what it
+        left. The round trip runs under one window, the shorter of this
+        budget and what [admission_timeout_s] has left after the permit
+        wait, and ends as the phase of the budget that ended it
+        ([TimeoutError { phase = First_token }], or [Queue] after a late
+        permit); when the two end together it is [First_token]. The
+        fallbacks above do not reach the round trip, whose only other bound
+        is [body_timeout_s]. @since 0.218.0 *)
   ; body_timeout_s : float option
     (** Per-call total deadline applied to non-streaming HTTP response body
         consumption. Threaded through {!Pipeline.stage_route} into both the
@@ -129,9 +135,20 @@ type options =
         into {!Llm_provider.Complete.complete_stream_serialized} and
         {!Llm_provider.Complete.complete_stream_admitted}; on the exact-fit
         path it is one window from the call over both permit waits, the
-        count-tokens request's and the stream's. The non-streaming path's
-        whole-call bound is [call_timeout_s]. Requires [clock].
+        count-tokens request's and the stream's, and over the count round
+        trip between them, which a late permit leaves only what the window
+        has left. The non-streaming path's whole-call bound is
+        [call_timeout_s]. Requires [clock].
         @since 0.231.15 *)
+  ; permit_wait : Llm_provider.Provider_admission.permit_wait Atomic.t option
+    (** The caller's cell a bounded wait for a provider admission permit
+        writes as it begins and ends, on every route ({!Pipeline.stage_route}
+        hands it to each completion and to the count-tokens measurement).
+        Only a wait with a deadline of its own ([call_timeout_s] or
+        [admission_timeout_s]) writes; a permit granted at once is no wait.
+        A caller with a no-progress watchdog stands it down while
+        [Waiting_for_permit], knowing the wait it sees is bounded, and counts
+        again from [Wait_settled_at]. *)
   ; hooks : Hooks.hooks
   ; guardrails_async : Guardrails_async.t
   ; tracer : Tracing.t

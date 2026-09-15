@@ -238,12 +238,14 @@ module KeeperKeepalive : sig
   (** Total HTTP body-consumption deadline for non-streaming AGENT_CORE
       completion calls, read on every call from the environment (the setting
       has no runtime.toml key). [None] (unset) leaves the runtime builder wire
-      untouched. [Some s] forwards to [Builder.with_body_timeout] for sync
-      completion paths. Streaming paths ignore it: their liveness is bounded
-      by the operator's {!stream_idle_timeout_sec} or its floor, and by the
-      attempt watchdog. A declared value that is not a finite positive number
-      of seconds within the declared range raises
-      {!Env_config_core.Config_error}.
+      untouched. [Some s] forwards to [Builder.with_body_timeout]: it bounds
+      a non-streaming completion's round trip, and the count-tokens
+      measurement an exact-fit binding makes before either kind of
+      completion. A streaming completion itself is bounded by
+      {!first_event_timeout_sec} and {!stream_idle_timeout_sec} (the
+      operator's values or their floors) and by the attempt watchdog. A
+      declared value that is not a finite positive number of seconds within
+      the declared range raises {!Env_config_core.Config_error}.
 
       Env: [MASC_KEEPER_BODY_TIMEOUT_SEC]. *)
 

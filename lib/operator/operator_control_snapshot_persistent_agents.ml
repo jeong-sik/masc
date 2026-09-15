@@ -90,14 +90,12 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
            match Keeper_meta_store.read_meta config name with
            | Error _ | Ok None -> None
            | Ok (Some meta) ->
-             let keepalive_running =
-               Keeper_status_bridge.runtime_keepalive_running config meta
-             in
+             let phase = Keeper_status_bridge.runtime_phase config meta in
              let now_ts = Time_compat.now () in
              let diagnostic =
                Keeper_status_runtime.keeper_diagnostic_json
                  ~meta
-                 ~keepalive_running
+                 ~phase
                  ~history_items:[]
                  ~now_ts
              in

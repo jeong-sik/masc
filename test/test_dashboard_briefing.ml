@@ -612,7 +612,27 @@ let test_pressure_rank_orders_by_surface_status () =
            [ row "k-healthy" "healthy"
            ; row "k-idle" "idle"
            ; row "k-offline" "offline"
-           ]))
+           ]);
+      (* A failing keeper is not doing its work either, so it shares the top
+         rank with offline. Tied rows sort by when they were last seen, which
+         is the same moment here, so the pair is pinned and its order is
+         not. *)
+      let ranked =
+        names
+          [ row "k-healthy" "healthy"
+          ; row "k-failing" "failing"
+          ; row "k-idle" "idle"
+          ; row "k-offline" "offline"
+          ]
+      in
+      Alcotest.(check (list string))
+        "failing and offline share the top rank"
+        [ "k-failing"; "k-offline" ]
+        (List.sort String.compare (List.filteri (fun index _ -> index < 2) ranked));
+      Alcotest.(check (list string))
+        "both outrank idle, which outranks healthy"
+        [ "k-idle"; "k-healthy" ]
+        (List.filteri (fun index _ -> index >= 2) ranked))
 ;;
 
 let test_keeper_brief_publishes_health_and_phase () =

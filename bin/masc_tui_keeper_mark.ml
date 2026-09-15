@@ -9,6 +9,7 @@ let unread_glyph = "-"
 let health_glyph : Reading.keeper_health_reading -> string = function
   | Reading.Health_running -> "\xe2\x97\x8f" (* ● filled: keepalive running, has turned *)
   | Reading.Health_idle -> "\xc2\xb7" (* · small: keepalive running, no turn yet *)
+  | Reading.Health_failing -> "!" (* keepalive running, its turns failing *)
   | Reading.Health_offline -> "\xc3\x97" (* × gone *)
 
 let glyph ~paused reading =
@@ -19,6 +20,7 @@ let glyph ~paused reading =
 
 let legend =
   [ health_glyph Reading.Health_running, "healthy"
+  ; health_glyph Reading.Health_failing, "failing"
   ; health_glyph Reading.Health_idle, "idle"
   ; paused_glyph, "paused"
   ; health_glyph Reading.Health_offline, "offline"

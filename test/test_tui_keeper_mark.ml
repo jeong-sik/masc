@@ -1,8 +1,9 @@
-(** Three health readings, three marks.
+(** Four health readings, four marks.
 
     Exhaustiveness is the compiler's job; what it cannot check is that two
     readings did not quietly settle on the same character, or that a keeper
-    that is not turning drew what a working keeper draws. *)
+    that is not turning, or whose turns are failing, drew what a working
+    keeper draws. *)
 
 module Mark = Masc_tui_keeper_mark
 module Reading = Masc.Tui_decode
@@ -14,13 +15,23 @@ let check_string = Alcotest.(check string)
 let readings =
   [ "running", Reading.Health_running
   ; "idle", Reading.Health_idle
+  ; "failing", Reading.Health_failing
   ; "offline", Reading.Health_offline
   ]
 
 let test_every_reading_gets_its_own_mark () =
   let marks = List.map (fun (_, r) -> Mark.glyph ~paused:false (Some r)) readings in
   let distinct = List.sort_uniq String.compare marks in
-  check_int "three readings, three marks" (List.length readings) (List.length distinct)
+  check_int "each reading draws its own mark" (List.length readings) (List.length distinct)
+
+(* A failing keeper is still turning, so the test below does not cover it,
+   and it is the keeper that most needs to look unlike a working one: before
+   it had a reading of its own, the chat header drew "healthy" beside its
+   "failing" phase. *)
+let test_a_failing_keeper_does_not_draw_the_working_mark () =
+  let working = Mark.glyph ~paused:false (Some Reading.Health_running) in
+  check_bool "failing reads differently from a working keeper" true
+    (Mark.glyph ~paused:false (Some Reading.Health_failing) <> working)
 
 let test_a_keeper_that_is_not_turning_does_not_draw_the_working_mark () =
   let working = Mark.glyph ~paused:false (Some Reading.Health_running) in
@@ -62,6 +73,7 @@ let test_the_legend_names_every_mark_once () =
   check_int "no mark is listed twice" (List.length marks)
     (List.length (List.sort_uniq String.compare marks));
   let words = List.map snd Mark.legend in
+  check_bool "the legend covers failing" true (List.mem "failing" words);
   check_bool "the legend covers offline" true (List.mem "offline" words);
   check_bool "the legend covers unread" true (List.mem "unread" words);
   check_string "a working keeper heads the legend" "healthy" (List.hd words)
@@ -103,6 +115,8 @@ let () =
             test_every_reading_gets_its_own_mark
         ; Alcotest.test_case "a keeper that is not turning does not draw the working mark"
             `Quick test_a_keeper_that_is_not_turning_does_not_draw_the_working_mark
+        ; Alcotest.test_case "a failing keeper does not draw the working mark" `Quick
+            test_a_failing_keeper_does_not_draw_the_working_mark
         ; Alcotest.test_case "pause outranks the reading" `Quick
             test_pause_outranks_the_reading
         ; Alcotest.test_case "an unread roster is not a health" `Quick

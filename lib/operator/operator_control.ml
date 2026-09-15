@@ -26,14 +26,12 @@ let keeper_diagnostic_for_name (ctx : 'a context) ~(name : string) =
   match resolve_keeper_meta_for_name ctx ~name with
   | Error err -> Error err
   | Ok (_resolved_name, meta) ->
-      let keepalive_running =
-        Keeper_status_bridge.runtime_keepalive_running ctx.config meta
-      in
+      let phase = Keeper_status_bridge.runtime_phase ctx.config meta in
       let now_ts = Time_compat.now () in
       Ok
         (Keeper_status_runtime.keeper_diagnostic_json
            ~meta
-           ~keepalive_running
+           ~phase
            ~history_items:[]
            ~now_ts)
 

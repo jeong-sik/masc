@@ -11,15 +11,16 @@ related: ["0380", "0089"]
 # RFC-0453 — keeper health 는 phase 의 투영이지 heartbeat 나이가 아니다
 
 - Status: **Accepted (2026-09-15).** 결정은 §0 과 §3. 구현 PR 과 결과는 §6.
-- 한 줄: metrics 원장(ledger)의 `record_kind=heartbeat` 줄 나이를 읽어 keeper 를 `stale` 로 판정하던 코드를 서버·TUI·대시보드에서 전부 지운다. keeper health 는 `healthy | idle | offline` 세 값이 되고, phase 와 턴 이력만으로 정해진다.
+- 한 줄: metrics 원장(ledger)의 `record_kind=heartbeat` 줄 나이를 읽어 keeper 를 `stale` 로 판정하던 코드를 서버·TUI·대시보드에서 전부 지운다. keeper health 는 `healthy | idle | failing | offline` 네 값이 되고, phase 와 턴 이력만으로 정해진다.
 
 ## 0. 결정 요약
 
-- `keeper_health` = `KH_healthy | KH_idle | KH_offline`. `KH_stale`, `KH_degraded`, `KH_zombie` 는 지운다.
-- 도출식은 하나다. keepalive 가 안 돌면(`can_execute_turn phase = false`) `offline`, 돌지만 턴 기록이 없으면(`total_turns = 0 && proactive count = 0`) `idle`, 나머지는 `healthy`.
+- `keeper_health` = `KH_healthy | KH_idle | KH_failing | KH_offline`. `KH_stale`, `KH_degraded`, `KH_zombie` 는 지운다.
+- 도출식은 하나다. keepalive 가 안 돌면(`can_execute_turn phase = false`) `offline`, phase 가 `Failing` 이면 `failing`, `Running` 인데 턴 기록이 없으면(`total_turns = 0 && proactive count = 0`) `idle`, 나머지 `Running` 은 `healthy`.
+- `failing` 을 따로 두는 이유: `can_execute_turn` 은 `Running` 과 `Failing` 에서 모두 참이다. 그래서 값이 셋일 때는 턴이 실패하고 있는 keeper 도 `healthy` 로 읽혔고, 2026-09-15 TUI 채팅 헤더가 턴 4번 연속 실패한 msx-retro-mania 에 `● healthy` 와 phase `failing` 을 한 줄에 그렸다. `failing` 의 다음 행동은 `recover` 다. 운영자 `keeper_recover` 는 `recoverable` 이 아닌 keeper 를 건너뛰기 때문이다.
 - heartbeat 원장 줄을 쓰는 코드(`write_heartbeat_snapshot`)와 SSE `keeper_heartbeat` 이벤트는 남긴다. 지우는 것은 그 줄의 **나이를 읽어 판정하는 코드**뿐이다.
 - wire 에서 `last_heartbeat`, `last_heartbeat_age_s`, `heartbeat_observation_error`, `heartbeat_stale_after_s` 를 지운다. 호환 코드는 만들지 않는다(hard cut).
-- 지운 동작의 회귀 테스트는 지운다. 남는 기능 테스트는 세 값 기준으로 고친다.
+- 지운 동작의 회귀 테스트는 지운다. 남는 기능 테스트는 네 값 기준으로 고친다.
 
 ## 1. 문제
 
@@ -86,11 +87,11 @@ heartbeat 나이 판정이 없어도 아래가 이미 답한다. 나이 판정�
 
 | 지운다 | 남긴다 |
 |---|---|
-| `KH_stale`, `KH_degraded`, `KH_zombie`, `Fiber_dead`, `Auto_restart` | `KH_healthy`, `KH_idle`, `KH_offline` |
+| `KH_stale`, `KH_degraded`, `KH_zombie`, `Fiber_dead`, `Auto_restart` | `KH_healthy`, `KH_idle`, `KH_failing`, `KH_offline` |
 | `keeper_heartbeat_stale_after_s`, `heartbeat_transport_jitter_s` | `keeper_keepalive_interval_s`, `keeper_snapshot_interval_s` (설정값 표시) |
 | `Keeper_heartbeat_persisted_snapshot` 모듈 | `write_heartbeat_snapshot` (원장 줄 쓰기, stage_timing 등 telemetry) |
 | wire 키 `last_heartbeat`, `last_heartbeat_age_s`, `heartbeat_observation_error`, `heartbeat_stale_after_s` | `last_activity_at`, `last_turn_ago_s`, `updated_at` |
-| TUI 마크 `?`/`!`/`‡` 와 범례 | `●`/`·`/`×`/`○`(paused)/`-`(unread) |
+| TUI 마크 `?`/`‡` 와 그 범례 | `●`/`!`(failing)/`·`/`×`/`○`(paused)/`-`(unread) |
 | 대시보드 `staleKeepers`, `keeperHeartbeats`, `deriveHeartbeatProjection`, `hbStale`, `keeperFreshnessTs`, `isHeartbeatAlive`, `heartbeatEtaSeconds` | SSE `keeper_heartbeat` 표시 소비자(저널, 라이브 타임라인, transport-health) |
 
 "마지막 heartbeat" 라는 이름 자체가 오해의 뿌리였다. 실제 뜻은 "루프가 마지막으로 한 바퀴를 끝낸 시각" 이다. 표시가 필요하면 이미 있는 `last_activity_at`/`last_turn_ago_s` 를 쓴다.

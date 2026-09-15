@@ -3953,7 +3953,7 @@ let keeper_health_deviation_word (health : Tui_decode.keeper_health option) =
   | Some value -> (
       match Tui_decode.keeper_health_reading value with
       | Tui_decode.Health_running -> ""
-      | Tui_decode.Health_idle | Tui_decode.Health_offline ->
+      | Tui_decode.Health_idle | Tui_decode.Health_failing | Tui_decode.Health_offline ->
           Tui_decode.keeper_health_to_string value)
 
 (* [runtime_id] is the producer-owned runtime identity. Keep it whole instead
@@ -4065,11 +4065,14 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
 
      The elapsed stays -- a turn open two minutes is the fact -- but the mark
      stops. Motion here means work is progressing, and for a keeper the health
-     reading calls offline, nothing is. *)
+     reading calls offline, nothing is. A failing keeper's keepalive still runs
+     its turns, so its open turn is being worked; whether it fails is known
+     only when it ends. *)
   let turn_is_being_worked =
     match Option.map Tui_decode.keeper_health_reading health with
     | Some Tui_decode.Health_offline -> false
-    | Some (Tui_decode.Health_running | Tui_decode.Health_idle) | None -> true
+    | Some (Tui_decode.Health_running | Tui_decode.Health_idle | Tui_decode.Health_failing)
+    | None -> true
   in
   let glyph, status_word, status_color =
     match (turn : Tui_decode.keeper_turn_state option) with
@@ -4142,12 +4145,19 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
 (* Counted from the same readings the rows are drawn from, so the heading
    cannot disagree with the list under it. *)
 (* Tally words come from [Keeper_control.health_label], so this paints the
-   health vocabulary. [unread] is the roster not answering, which is dim rather
-   than any health colour. *)
-let keeper_roster_status_color = function
-  | "healthy" -> (Theme.ok ())
-  | "offline" | "idle" -> (Theme.muted ())
-  | _ -> Ansi.dim
+   health vocabulary. A word is parsed back into a health reading rather than
+   compared as text, so a new reading is a compile error here instead of a word
+   that falls to dim. A word that is not a health -- [unread], [absent],
+   [config error] -- is the roster not answering, which is dim rather than any
+   health colour. *)
+let keeper_roster_status_color label =
+  match Tui_decode.keeper_health_of_string label with
+  | None -> Ansi.dim
+  | Some health -> (
+      match Tui_decode.keeper_health_reading health with
+      | Tui_decode.Health_running -> Theme.ok ()
+      | Tui_decode.Health_failing -> Theme.warn ()
+      | Tui_decode.Health_idle | Tui_decode.Health_offline -> Theme.muted ())
 
 (* The tally is [Keeper_control.status_tally], so every word here is a word the
    status column shows for the same keeper. This function only paints it. *)

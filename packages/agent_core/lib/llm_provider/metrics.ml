@@ -1,22 +1,5 @@
 (** Metrics hooks for LLM completion observability. *)
 
-type circuit_state =
-  | Circuit_closed
-  | Circuit_open
-  | Circuit_half_open
-
-let circuit_state_to_int = function
-  | Circuit_closed -> 0
-  | Circuit_open -> 1
-  | Circuit_half_open -> 2
-;;
-
-let circuit_state_to_string = function
-  | Circuit_closed -> "closed"
-  | Circuit_open -> "open"
-  | Circuit_half_open -> "half_open"
-;;
-
 type error_reason =
   | Rate_limit
   | Timeout
@@ -35,12 +18,6 @@ type t =
   ; on_request_end : model_id:string -> latency_ms:int option -> unit
   ; on_error : model_id:string -> message:string -> reason:error_reason -> unit
   ; on_http_status : provider:string -> model_id:string -> status:int -> unit
-  ; on_circuit_state :
-      provider:string
-      -> model_id:string
-      -> provider_key:string
-      -> state:circuit_state
-      -> unit
   ; on_capability_drop : model_id:string -> field:string -> unit
     (** Fired when a request parameter is silently dropped because the
       model's capability record reports it as unsupported.
@@ -73,7 +50,6 @@ let noop =
   ; on_request_end = (fun ~model_id:_ ~latency_ms:_ -> ())
   ; on_error = (fun ~model_id:_ ~message:_ ~reason:_ -> ())
   ; on_http_status = (fun ~provider:_ ~model_id:_ ~status:_ -> ())
-  ; on_circuit_state = (fun ~provider:_ ~model_id:_ ~provider_key:_ ~state:_ -> ())
   ; on_capability_drop = (fun ~model_id:_ ~field:_ -> ())
   ; on_retry = (fun ~provider:_ ~model_id:_ ~attempt:_ -> ())
   ; on_token_usage = (fun ~provider:_ ~model_id:_ ~input_tokens:_ ~output_tokens:_ -> ())
@@ -321,9 +297,6 @@ module Aggregating = struct
     ; on_http_status =
         (fun ~provider ~model_id ~status ->
           agg.hooks.on_http_status ~provider ~model_id ~status)
-    ; on_circuit_state =
-        (fun ~provider ~model_id ~provider_key ~state ->
-          agg.hooks.on_circuit_state ~provider ~model_id ~provider_key ~state)
     ; on_capability_drop =
         (fun ~model_id ~field -> agg.hooks.on_capability_drop ~model_id ~field)
     ; on_retry =

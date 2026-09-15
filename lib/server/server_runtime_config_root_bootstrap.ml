@@ -289,9 +289,14 @@ let builtin_skills () =
     | Error reason -> invalid_arg reason)
 ;;
 
-let reconcile_builtin_skills ~base_path =
+let install_builtin_skills ~on_wait ~base_path =
+  Eio_guard.run_in_systhread ~label:"builtin-skill-install" (fun () ->
+    Builtin_skill_package.install ~on_wait ~base_path (builtin_skills ()))
+;;
+
+let reconcile_builtin_skills_at_startup ~base_path =
   Eio_guard.run_in_systhread ~label:"builtin-skill-reconcile" (fun () ->
-    Builtin_skill_package.reconcile ~base_path (builtin_skills ()))
+    Builtin_skill_package.reconcile_at_startup ~base_path (builtin_skills ()))
 ;;
 
 type builtin_skill_log_level =
@@ -307,15 +312,19 @@ let builtin_skill_log_level = function
           Ok
             ( Builtin_skill_package.Install_missing
             | Builtin_skill_package.Adopt_identical
+            | Builtin_skill_package.Adopt_with_release_permissions
             | Builtin_skill_package.Replace_recorded _ )
       ; _
       }
   | Builtin_skill_package.Retired
-      { result = Ok (Builtin_skill_package.Retire_recorded _); _ } -> Changed
+      { result = Ok (Builtin_skill_package.Retire_recorded _); _ }
+  | Builtin_skill_package.Unfinished { result = Ok (); _ } -> Changed
   | Builtin_skill_package.Bundled
       { result =
           Ok
-            ( Builtin_skill_package.Keep_modified _
+            ( Builtin_skill_package.Permissions_pending _
+            | Builtin_skill_package.Replace_pending _
+            | Builtin_skill_package.Keep_modified _
             | Builtin_skill_package.Keep_untracked_different _
             | Builtin_skill_package.Keep_uninspectable _ )
       ; _
@@ -323,29 +332,37 @@ let builtin_skill_log_level = function
   | Builtin_skill_package.Retired
       { result =
           Ok
-            ( Builtin_skill_package.Keep_retired_modified _
+            ( Builtin_skill_package.Retire_pending _
+            | Builtin_skill_package.Keep_retired_modified _
             | Builtin_skill_package.Keep_retired_uninspectable _ )
       ; _
       }
   | Builtin_skill_package.Bundled { result = Error _; _ }
-  | Builtin_skill_package.Retired { result = Error _; _ } -> Needs_operator
+  | Builtin_skill_package.Retired { result = Error _; _ }
+  | Builtin_skill_package.Unfinished { result = Error _; _ } -> Needs_operator
 ;;
 
 let builtin_skill_report_name = function
   | Builtin_skill_package.Bundled { name; _ } | Builtin_skill_package.Retired { name; _ } -> name
+  | Builtin_skill_package.Unfinished { path; _ } -> path
 ;;
 
-(* Startup reconciles on every root, fresh or existing, so a binary that
-   changed its builtin packages reaches the runtime without an installer run.
-   A failure here never stops startup: each package that was not reconciled,
-   or that the operator has to look at, is its own warning line. *)
+(* Startup reconciles on every root it bootstraps, fresh or existing, but only
+   adds: a missing package is published and a tree that already equals this
+   release gets its receipt. A replacement, a retirement or a permission change
+   waits for [masc init], and each one is a warning line naming that command.
+   A failure here never stops startup. *)
 let log_builtin_skill_reconciliation ~base_path =
-  match reconcile_builtin_skills ~base_path with
+  match reconcile_builtin_skills_at_startup ~base_path with
   | Error error ->
     Log.Server.warn
       "builtin Skills were not reconciled: %s"
       (Builtin_skill_package.error_message error)
-  | Ok reports ->
+  | Ok (Builtin_skill_package.Busy { lock }) ->
+    Log.Server.warn
+      "builtin Skills were not reconciled: another Skill installation holds %s; the next start reconciles them"
+      lock
+  | Ok (Builtin_skill_package.Reconciled reports) ->
     let unchanged =
       List.filter_map
         (fun report ->

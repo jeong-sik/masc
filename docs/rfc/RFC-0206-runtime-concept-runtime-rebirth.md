@@ -155,7 +155,6 @@ P1-P3(자립 schema/parser/adapter + runtime.ml 재배선 + `tool_strict` 제거
 
 - **transport/dispatch 부분그래프 restore-rename** (RFC §9.2): `runtime_transport`(+14 transport_* 하위) + `runtime_agent_context` + `runtime_wire_overlay` + `runtime_oas_runner` + `runtime_runner` → `Runtime_transport*` / `Runtime_agent_context` / `Runtime_wire_overlay` / `Runtime_oas_runner` / `Runtime_agent`. ~3000 LoC, 결정론적 rename. 경계 rewire: `Runtime_config`→`Runtime_schema`/`Runtime`, `Runtime_name`→`string`, `Runtime_observation` 참조(runner 2건) 외과 제거.
 - **`Runtime_agent`** (dispatch entry): `stop_reason`/`run_result`(runtime_observation 필드 제거)/`response`/`cli_transport_overrides` 타입 + `run`/`run_with_masc_tools` single-binding wrapper(Agent_sdk.Agent.run 위).
-- **`runtime_constants`**: `fallback_context_window = 128000`.
 - **`runtime_deadline`**: `of_seconds_from_now` 등 (Runtime_deadline 단순 이식).
 - **`Runtime.config_path : unit -> string option`** 추가 (Runtime_runtime.runtime_config_path 대체).
 - 샘플링 상수: `Llm_provider.Constants.Worker_sampling`(외부 lib, 존재 시 reuse) — 신규 모듈 회피.
@@ -191,7 +190,6 @@ restored substrate + 120 consumer가 참조하는 semantic 심볼의 확정 매�
 | `Runtime_config.filter_healthy_strict` / `health_filter_rejection_to_string` | 2 | keeper_binding_health 또는 discard (single binding = 필터 불요) |
 | `Runtime_config.resolve_strategy` | 1 | DISCARD (routing) |
 | `Runtime_runtime.models_of_runtime_id(_result)` | 8 | single-binding collapse: `[ (get_default_runtime ()).model ]` (multi-candidate 리스트→단일) |
-| `Runtime_runtime.fallback_context_window` | 5 | **신규** `Runtime_constants.fallback_context_window = 128000` |
 | `Runtime_runtime.runtime_config_path` | 5 | **신규** `Runtime.config_path : unit -> string option` |
 | `Runtime_runtime.{local_model_label,default_model_strings,resolve_*_context,max_output_tokens_ceiling*,local_capacity_for_selections,ensure_api_keys_for_labels}` | ~15 | Runtime.t/Runtime_schema 조회로 collapse (single binding) |
 | `Runtime_metrics.on_{provider_cooldown,runtime_audit_failure,resolve_live_fallback,runtime_metrics_eviction}` | 9 | **신규** `Runtime_metrics.on_*` legacy metrics backend emitter (오염 runtime_metrics 미복원; 순수 카운터만) |
@@ -202,7 +200,7 @@ restored substrate + 120 consumer가 참조하는 semantic 심볼의 확정 매�
 | `Runtime_tier_wait_scheduler` | 1 | DISCARD (tier 제거됨 #19436) |
 | `Runtime_error_classify` (substrate 내) | 1 | `Keeper_meta_contract` |
 
-신규 substrate addition 모듈: `runtime_constants`(fallback_context_window), `runtime_metrics`(on_* emitter), `Runtime`에 `parse_model_string`/`config_path`/model-resolution 헬퍼 추가.
+신규 substrate addition 모듈: `runtime_metrics`(on_* emitter), `Runtime`에 `parse_model_string`/`config_path`/model-resolution 헬퍼 추가.
 
 ### 검증 순서
 

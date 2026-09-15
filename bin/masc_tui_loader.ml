@@ -170,11 +170,11 @@ let load_active_tasks (base_path : string) :
          a frame that touches the filesystem per row is a frame that stutters.
          Same rows, same load, same answer the rejection delivery computes. *)
       , Some
-          (Operator_task_attention.project ~config
+          (Masc.Operator_task_attention.project ~config
              observation.observed_backlog.tasks
            |> List.map (fun item ->
-                { Masc_tui_agenda.what = Operator_task_attention.summary item
-                ; since_iso = Operator_task_attention.waiting_since item
+                { Masc_tui_agenda.what = Masc.Operator_task_attention.summary item
+                ; since_iso = Masc.Operator_task_attention.waiting_since item
                 })) )
 
 (** Apply one strict bounded metrics snapshot to the mutable screen state. *)

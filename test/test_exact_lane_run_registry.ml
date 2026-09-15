@@ -11,10 +11,21 @@ let remove_if_exists path =
    payload files. *)
 let fresh_log_path prefix = Filename.concat (Filename.temp_dir prefix "") R.storage_filename
 
-let payload_file path ~run_id leaf =
-  Filename.concat
-    (Filename.concat (Filename.concat (Filename.dirname path) R.payload_dirname) run_id)
-    leaf
+let payload_run_dir path ~run_id =
+  Filename.concat (Filename.concat (Filename.dirname path) R.payload_dirname) run_id
+;;
+
+(* The one [kind] file ("input" or "output") the run's directory holds. Its
+   name carries the value's digest. *)
+let payload_file path ~run_id kind =
+  let dir = payload_run_dir path ~run_id in
+  match
+    Sys.readdir dir
+    |> Array.to_list
+    |> List.filter (fun name -> String.starts_with ~prefix:(kind ^ "-") name)
+  with
+  | [ name ] -> Filename.concat dir name
+  | names -> failf "expected one %s payload in %s, found %d" kind dir (List.length names)
 ;;
 
 let mark_completed_exn t ~run_id ~outcome ~elapsed_s ~output =
@@ -592,7 +603,7 @@ let test_exact_history_is_not_pruned_across_lanes () =
   let permissions = (Unix.stat path).Unix.st_perm land 0o777 in
   check int "durable registry is private" 0o600 permissions;
   let payload_permissions =
-    (Unix.stat (payload_file path ~run_id:"run-00" "input.json")).Unix.st_perm land 0o777
+    (Unix.stat (payload_file path ~run_id:"run-00" "input")).Unix.st_perm land 0o777
   in
   check int "payload files are as private as the log" 0o600 payload_permissions;
   remove_if_exists path
@@ -608,7 +619,7 @@ let test_replay_removes_payload_files_no_row_names () =
     ~started_at:1.0 ~input:(R.Exact_input (`String "kept input"));
   mark_completed_exn registry ~run_id:"kept" ~outcome:R.Succeeded ~elapsed_s:0.1
     ~output:(`String "kept output");
-  let orphan = payload_file path ~run_id:"orphan" "input.json" in
+  let orphan = Filename.concat (payload_run_dir path ~run_id:"orphan") "input-0.json" in
   Unix.mkdir (Filename.dirname orphan) 0o700;
   Fs_compat.save_file orphan "{}";
   let replayed = R.replay path in
@@ -1006,6 +1017,53 @@ let test_memory_only_and_disk_null_are_available_values () =
     (fun () -> verify (R.create ~path ()))
 ;;
 
+(* A replay that stopped at a torn tail publishes fewer runs than the log
+   holds. Sweeping against that set would delete payloads the log still names,
+   so such a replay removes nothing. *)
+let test_a_partial_replay_leaves_payload_files_alone () =
+  let path = fresh_log_path "exact-lane-partial-replay-" in
+  let registry = R.create ~path () in
+  R.register_running registry ~run_id:"kept" ~lane:R.Librarian ~actor:"fixture"
+    ~started_at:1.0 ~input:(R.Exact_input (`String "kept input"));
+  mark_completed_exn registry ~run_id:"kept" ~outcome:R.Succeeded ~elapsed_s:0.1
+    ~output:(`String "kept output");
+  let unnamed = payload_run_dir path ~run_id:"not-in-this-read" in
+  Unix.mkdir unnamed 0o700;
+  Fs_compat.save_file (Filename.concat unnamed "input-0.json") "{}";
+  Fs_compat.save_file path (Fs_compat.load_file path ^ "{\"event\":\"reg");
+  Fs_compat.invalidate_cached_writer path;
+  let replayed = R.replay path in
+  check bool "a replay that stopped at a torn tail sweeps nothing" true
+    (Sys.file_exists unnamed);
+  let kept = R.get replayed ~run_id:"kept" |> Option.get in
+  check bool "the runs it did read stay readable" true
+    (kept.input_availability = R.Available && kept.output_availability = Some R.Available);
+  remove_if_exists path
+;;
+
+(* A second registration of one id writes its input under a new name before
+   the append. If that append fails, the row and the entry still name the first
+   input, and its file is untouched. *)
+let test_a_failed_second_registration_keeps_the_first_payload () =
+  let path = fresh_log_path "exact-lane-second-registration-" in
+  let registry = R.create ~path () in
+  let register input =
+    R.register_running registry ~run_id:"same-id" ~lane:R.Librarian ~actor:"fixture"
+      ~started_at:1.0 ~input:(R.Exact_input (`String input))
+  in
+  register "first input";
+  Sys.remove path;
+  Unix.mkdir path 0o700;
+  (match register "second input" with
+   | () -> fail "a registration whose append cannot land was accepted"
+   | exception (Sys_error _ | Unix.Unix_error _) -> ());
+  let run = R.get registry ~run_id:"same-id" |> Option.get in
+  check bool "the first registration's input is still served" true
+    (run.input_availability = R.Available
+     && run.input = R.Exact_input (`String "first input"));
+  Unix.rmdir path
+;;
+
 let with_completed_payload_source f =
   let path = fresh_log_path "exact-payload-source-" in
   Fun.protect ~finally:(fun () -> remove_if_exists path) (fun () ->
@@ -1020,8 +1078,8 @@ let with_completed_payload_source f =
 
 let test_missing_payload_files_do_not_erase_terminal_identity () =
   with_completed_payload_source (fun registry path ->
-    let input = payload_file path ~run_id:"payload-run" "input.json" in
-    let output = payload_file path ~run_id:"payload-run" "output.json" in
+    let input = payload_file path ~run_id:"payload-run" "input" in
+    let output = payload_file path ~run_id:"payload-run" "output" in
     Sys.remove input;
     Sys.remove output;
     let run = R.get registry ~run_id:"payload-run" |> Option.get in
@@ -1044,8 +1102,8 @@ let test_missing_payload_files_do_not_erase_terminal_identity () =
 
 let test_each_payload_file_reports_its_own_availability () =
   with_completed_payload_source (fun registry path ->
-    let input = payload_file path ~run_id:"payload-run" "input.json" in
-    let output = payload_file path ~run_id:"payload-run" "output.json" in
+    let input = payload_file path ~run_id:"payload-run" "input" in
+    let output = payload_file path ~run_id:"payload-run" "output" in
     let output_bytes = Fs_compat.load_file output in
     Sys.remove output;
     let run = R.get registry ~run_id:"payload-run" |> Option.get in
@@ -1063,7 +1121,7 @@ let test_each_payload_file_reports_its_own_availability () =
 
 let test_a_changed_payload_file_is_refused_not_served () =
   with_completed_payload_source (fun registry path ->
-    let output = payload_file path ~run_id:"payload-run" "output.json" in
+    let output = payload_file path ~run_id:"payload-run" "output" in
     let original = Fs_compat.load_file output in
     let refused label bytes =
       Fs_compat.save_file output bytes;
@@ -1084,7 +1142,7 @@ let test_a_changed_payload_file_is_refused_not_served () =
     Fs_compat.save_file output original;
     R.register_running registry ~run_id:"another-run" ~lane:R.Librarian
       ~actor:"fixture" ~started_at:2.0 ~input:(R.Exact_input (`String "other input"));
-    Fs_compat.save_file (payload_file path ~run_id:"another-run" "input.json") "not json";
+    Fs_compat.save_file (payload_file path ~run_id:"another-run" "input") "not json";
     let run = R.get registry ~run_id:"payload-run" |> Option.get in
     check bool "a damaged file of another run does not touch this one" true
       (run.input_availability = R.Available && run.output_availability = Some R.Available))
@@ -1105,6 +1163,10 @@ let () =
             test_a_changed_payload_file_is_refused_not_served
         ; test_case "replay removes payload files no row names" `Quick
             test_replay_removes_payload_files_no_row_names
+        ; test_case "a partial replay leaves payload files alone" `Quick
+            test_a_partial_replay_leaves_payload_files_alone
+        ; test_case "a failed second registration keeps the first payload" `Quick
+            test_a_failed_second_registration_keeps_the_first_payload
         ; test_case "latest payloads survive blank rows and repeated replay" `Quick
             test_replay_selects_latest_payloads_across_blank_rows
         ; test_case "missing receipt is explicit null" `Quick

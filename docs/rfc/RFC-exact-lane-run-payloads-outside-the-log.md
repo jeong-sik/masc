@@ -27,7 +27,7 @@ related: []
 
 ## 1. 현재 동작과 측정
 
-측정: live `~/me/.masc/exact-lane-runs-v5.jsonl`, 2026-09-15.
+측정: live 운영 workspace 의 `<base-path>/.masc/exact-lane-runs-v5.jsonl`, 2026-09-15.
 
 | 항목 | 값 |
 |---|---|
@@ -56,8 +56,8 @@ related: []
 
 ```
 <masc_root>/exact-lane-runs-v6.jsonl          실행 기록. payload 는 참조만
-<masc_root>/exact-lane-run-payloads/<run_id>/input.json
-<masc_root>/exact-lane-run-payloads/<run_id>/output.json
+<masc_root>/exact-lane-run-payloads/<run_id>/input-<sha256>.json
+<masc_root>/exact-lane-run-payloads/<run_id>/output-<sha256>.json
 ```
 
 로그 줄의 `registration.input` 과 `completion.output` 자리에는 값이 어디 있는지를 닫힌 합타입
@@ -72,6 +72,8 @@ related: []
 - `row`: 값이 줄 안에 있다. replay 가 재시작으로 끊긴 run 에 만드는 종료 판정은 파일을 쓸
   시점이 없어서 이쪽이다. path 없는 메모리 store 의 값도 이쪽이다.
 - run id 는 디렉터리 이름이 되므로 경로 조각 하나가 아니면(`/`, `..` 등) 등록 전에 거절한다.
+- 파일 이름에 SHA-256 을 넣는다. 같은 id 를 다시 등록하다 append 가 실패해도, durable 줄이 가리키는
+  이전 파일은 덮이지 않는다.
 
 - payload 파일은 로그 줄보다 먼저 durable 하게 쓴다(`Keeper_fs` durable atomic write). 로그
   줄이 가리키는 파일은 항상 존재한다.
@@ -90,8 +92,10 @@ related: []
 ### 2.3 보존과 정리
 
 - 보존에서 빠진 run 은 projection 을 갱신할 때(등록·완료마다) payload 디렉터리를 지운다.
-- replay 가 끝나면 retained row 가 가리키지 않는 payload 디렉터리를 지운다. 등록 줄 append 가
-  실패해서 남은 파일이 여기서 지워진다.
+- replay 가 로그를 끝까지 읽고 거절한 줄이 없을 때만(`Replayed { reached_end = true;
+  malformed_lines = 0 }`), retained row 가 가리키지 않는 디렉터리와 파일을 지운다. 등록 줄 append 가
+  실패해서 남은 파일, 같은 id 의 이전 등록 파일, 끊긴 임시 파일이 여기서 지워진다. 읽기가 실패했거나
+  끊긴 줄에서 멈춘 replay 는 로그가 아직 가리키는 파일을 지울 수 있어서 아무것도 지우지 않는다.
 - 지우기가 실패하면 경고를 남기고 디렉터리는 남는다. 읽는 곳은 없다.
 
 ### 2.4 hard cut

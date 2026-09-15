@@ -47,4 +47,3 @@ let metric_llm_provider_input_tokens = Otel_metric_store_core.declare_counter "m
 let metric_llm_provider_output_tokens = Otel_metric_store_core.declare_counter "masc_llm_provider_output_tokens_total"
 let metric_llm_provider_reasoning_tokens = Otel_metric_store_core.declare_counter "masc_llm_provider_reasoning_tokens_total"
 let metric_llm_provider_tool_calls = Otel_metric_store_core.declare_counter "masc_llm_provider_tool_calls_total"
-let metric_llm_provider_circuit_state = "masc_llm_provider_circuit_state"

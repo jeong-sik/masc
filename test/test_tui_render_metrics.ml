@@ -235,6 +235,30 @@ let test_retained_task_outcomes () =
   check bool "old glow cache is not presented as history" false (contains output "Heatmap")
 ;;
 
+(* Every other surface reads a span on one ladder -- two figures, no tenths:
+   "7s", "1m30s", "1h01m", "1d12h". This pane had its own, a single unit with
+   a tenth after it, so the same question read "7.6s" here and "7s" on the
+   Board beside it. The tenth is precision nobody acts on and the single unit
+   drops the second figure at every step above minutes.
+
+   [Masc_tui_message_layout.span_text] is that ladder, and its comment records
+   the two callers that were joined onto it before this one. *)
+let test_a_span_reads_the_one_ladder () =
+  (* An hour and a hundred seconds back, which is twenty seconds clear of
+     either minute boundary, so the clock moving while the test runs cannot
+     change the figure. *)
+  let observed_at = Unix.gettimeofday () -. 3700. in
+  let flow = Masc_tui_task_flow.of_tasks ~now:observed_at [] in
+  let state = make_state () in
+  state.task_flow <- Some flow;
+  let output =
+    String.concat "\n" (Render_metrics.render_section_resources ~cols:160 state)
+  in
+  check bool "the snapshot age carries both figures" true
+    (contains output "snapshot 1h01m ago");
+  check bool "and not one unit with a tenth" false (contains output "1.0h")
+;;
+
 let test_assignee_work_and_daily_flow () =
   let now = Option.get (Masc_domain.parse_iso8601_opt "2026-09-12T00:00:00Z") in
   let task id created_at status = domain_task ~id ~created_at ~status in
@@ -700,6 +724,8 @@ let () =
         ; test_case "compact metrics preserve source labels" `Quick test_compact_metrics_preserve_source_labels
         ; test_case "one word for a source nothing came back from" `Quick
             test_one_word_for_a_source_nothing_came_back_from
+        ; test_case "a span reads the one ladder" `Quick
+            test_a_span_reads_the_one_ladder
         ; test_case "all_sections" `Quick test_render_metrics_body_all_sections
         ] )
     ]

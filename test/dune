@@ -1945,6 +1945,14 @@
  (modules test_keeper_stream_idle_floor)
  (libraries alcotest exact_output_fixture masc_test_deps eio_main unix))
 
+; A run_named turn queued behind a held admission permit ends as Queue at the
+; keeper's deadline: the admission bound ends the wait and the watchdog stands
+; down for it. Slow: the deadline's declared minimum is thirty seconds.
+(test
+ (name test_keeper_queue_cap)
+ (modules test_keeper_queue_cap)
+ (libraries alcotest exact_output_fixture masc_test_deps eio_main unix))
+
 ; A process with no clock in Eio_context refuses the provider attempt in the
 ; name of the deadline it could not set. The only driver suite that installs
 ; no clock.

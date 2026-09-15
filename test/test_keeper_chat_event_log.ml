@@ -677,7 +677,8 @@ let test_reader_gone_releases_every_parked_publisher () =
             (* Never resolved: the reading fiber stays between takes until
                the cancel below reaches it. *)
             Eio.Promise.await backpressure
-          | Masc.Keeper_chat_events.Closed -> ())));
+          | Masc.Keeper_chat_events.Closed -> ()));
+    `Stop_daemon);
   let turn_finished = Array.make 2 false in
   List.iteri
     (fun index () ->

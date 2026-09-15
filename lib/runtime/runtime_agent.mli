@@ -103,6 +103,7 @@ type config = Runtime_agent_context.config = {
   body_timeout_s : float option;
   call_timeout_s : float option;
   admission_timeout_s : float option;
+  permit_wait : Llm_provider.Provider_admission.permit_wait Atomic.t option;
   max_tokens : int option;
   temperature : float option;
   hooks : Agent_core.Hooks.hooks option;

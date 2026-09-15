@@ -168,17 +168,22 @@ let handle_connection ~net ~clock ~keeper_name ~rules ~on_event ~read_timeout_s 
 
        The timeout covers reading the head, not the tunnel: a client that
        connects and says nothing must not hold the fiber, while an admitted
-       tunnel is allowed to be long-lived. *)
-    Eio.Time.with_timeout clock read_timeout_s (fun () ->
-      let reader = Eio.Buf_read.of_flow flow ~max_size:request_head_max_bytes in
-      let request_line = Eio.Buf_read.line reader in
-      let rec consume_headers () =
-        match Eio.Buf_read.line reader with
-        | "" | "\r" -> ()
-        | _ -> consume_headers ()
-      in
-      consume_headers ();
-      Ok (request_line, reader))
+       tunnel is allowed to be long-lived. A head that arrived as the timeout
+       expired is the head. *)
+    Watched_work.run
+      ~watcher:(fun () ->
+        Eio.Time.sleep clock read_timeout_s;
+        Error `Timeout)
+      (fun () ->
+         let reader = Eio.Buf_read.of_flow flow ~max_size:request_head_max_bytes in
+         let request_line = Eio.Buf_read.line reader in
+         let rec consume_headers () =
+           match Eio.Buf_read.line reader with
+           | "" | "\r" -> ()
+           | _ -> consume_headers ()
+         in
+         consume_headers ();
+         Ok (request_line, reader))
   in
   match read_request_line () with
   | Error `Timeout ->

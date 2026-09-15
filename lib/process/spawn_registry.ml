@@ -287,6 +287,10 @@ let wait registry handle ~until ~timeout_sec =
              | Some offset -> Some (Matched offset)
              | None -> if buffer.at_eof then Some (Matched (stream_end buffer)) else None)
        in
-       (try Ok (Eio.Time.with_timeout_exn clock timeout_sec awaited) with
-        | Eio.Time.Timeout -> Error `Timed_out))
+       (* A program that exited, or spoke, as the bound passed has done so. *)
+       Watched_work.run
+         ~watcher:(fun () ->
+           Eio.Time.sleep clock timeout_sec;
+           Error `Timed_out)
+         (fun () -> Ok (awaited ())))
 ;;

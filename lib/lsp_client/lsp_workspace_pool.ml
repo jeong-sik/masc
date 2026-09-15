@@ -85,11 +85,14 @@ let spawn_lock_for t key =
       lock)
 ;;
 
+(* An answer that arrived as the window closed is the answer; the window's
+   verdict stands only when none had. *)
 let await_answer t ~timeout ~what promise =
-  match Eio.Time.with_timeout_exn t.clock timeout (fun () -> Eio.Promise.await promise) with
-  | Ok json -> Ok json
-  | Error msg -> Error msg
-  | exception Eio.Time.Timeout -> Error (Printf.sprintf "%s timed out after %.0fs" what timeout)
+  Watched_work.run
+    ~watcher:(fun () ->
+      Eio.Time.sleep t.clock timeout;
+      Error (Printf.sprintf "%s timed out after %.0fs" what timeout))
+    (fun () -> Eio.Promise.await promise)
 ;;
 
 let initialize_params ~workspace_root =

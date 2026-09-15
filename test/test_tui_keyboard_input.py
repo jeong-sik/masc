@@ -7539,7 +7539,7 @@ def context_inspector_interaction() -> Interaction:
             process, master_fd, output, b"/context", composer_showing(b"/context")
         )
         composition = send_and_wait(
-            process, master_fd, output, b"\r", b"HISTORY REACH"
+            process, master_fd, output, b"\r", b"HOW FAR BACK"
         )
         composition_plain = CSI_RE.sub(b"", composition)
         for needle in (
@@ -7551,8 +7551,8 @@ def context_inspector_interaction() -> Interaction:
             # The section is headed in plain words now, and the count reads
             # "of" rather than a fraction. Both are pinned: the heading says
             # which section this is, the count says what it carried.
-            b"how far back this turn looked",
-            b"7 of 9 atoms",
+            b"how much of the kept conversation this request carried",
+            b"7 of 9 kept atoms",
         ):
             if needle not in composition_plain:
                 raise AssertionError(

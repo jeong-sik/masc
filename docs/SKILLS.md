@@ -132,10 +132,28 @@ name = "query"
 
 ## 3. 파라미터 — Parallel as a Tool 의 손잡이
 
-`[[compositions.params]]` 가 스칼라 파라미터(`string`/`integer`/`number`/`boolean`)를
+`[[compositions.params]]` 가 파라미터(`string`/`integer`/`number`/`boolean`)를
 선언하면 도구의 input schema 가 거기서 생성된다 — required·타입·설명이 그대로 실려
 모델이 여느 도구처럼 검증받으며 인자를 넘긴다.
 
+값을 몇 개로 정해 두려면 `type = "string"` 에 `enum` 을 붙인다. 표기는
+`config/tools/*.toml` 의 도구 정의와 같다.
+
+```toml
+[[compositions.params]]
+name = "mode"
+type = "string"
+enum = ["scene", "regions"]
+description = "scene: 보이는 내용, regions: 이후 범위 읽기에 쓸 영역 목록."
+```
+
+- input schema 의 그 속성에 `"enum": ["scene", "regions"]` 이 실려 모델에게 선택지로
+  보인다.
+- masc 의 실행 전 인자 검증은 타입과 required 만 본다. 목록 밖 값은 plan 에 바인딩할 때
+  `argument_outside_enum` 오류로 거절된다. 노드 도구가 더 많은 값을 받아도
+  (`BrowserRead` 는 `text` 도 받는다) 합성이 정한 목록 밖 값으로는 돌지 않는다.
+- `enum` 은 `string` 에만 붙는다. 빈 목록, 같은 값이 두 번 든 목록, 다른 타입에 붙은
+  `enum` 은 로드 오류다.
 - 선언과 참조는 정확히 일치해야 한다: 선언 안 된 `param` 참조도, 아무 노드도 안 읽는
   선언도 로드 오류다.
 - 파라미터는 전부 required 다.

@@ -996,6 +996,7 @@ let active_task_owner_fiber_scan ?profile_snapshot config ~executable_names =
         active_task_owner_without_executable_fibers = [];
         completion_authority_pending_tasks = [];
         non_keeper_active_task_owners = [];
+        excluded_keeper_active_task_owners = [];
         active_task_owner_scan_errors =
           ("backlog", err) :: meta_read_errors;
       }

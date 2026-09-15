@@ -320,12 +320,18 @@ let split_on_double_space text =
    Act key and this fitter drops from the back, so the surface's own action is
    the first thing to go once the row is full.
 
-   [Enter] is what that action is called. Every surface in
-   [Masc_tui_keys.for_surface] names exactly one key holding the Enter atom,
-   and on every one of them it opens, reads or sends what the cursor is on --
-   so pinning the atom costs one item per row and buys back the one key the
-   surface exists for. Code names two, and [footer_hints_code] already drops
-   the history overlay's from the panes that have no commits. *)
+   [Enter] is what that action is called. Nearly every surface the sheet
+   lists names exactly one key holding the Enter atom, and on every one of
+   them it opens, reads or sends what the cursor is on -- so pinning the atom
+   costs one item per row and buys back the one key the surface exists for.
+   Code names two, and [footer_hints_code] already drops the history
+   overlay's from the panes that have no commits.
+
+   The rest name none, and the pin costs them nothing. Metrics, Keeper detail
+   and Config / Tools have no row cursor for Enter to act on. Clients has one
+   and no key acts on it, which is a gap in that surface rather than in this
+   pin. test_tui_keys names all of them and counts the atom per surface, so
+   this paragraph cannot drift from the table it describes. *)
 let never_dropped_keys = [ "Esc"; "q"; "y / n"; "/approve /deny"; "Enter" ]
 
 (* A compound key names its doors one per atom: [Left / Esc], [Right / Esc]

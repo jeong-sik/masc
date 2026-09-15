@@ -1112,13 +1112,15 @@ let initialize_owner_state_blocking
     | None -> Error Runtime_startup_state.Config_missing
     | Some runtime_config_path ->
       Runtime.load_config_observation ~runtime_config_path ()
-      |> Result.map_error (fun _ -> Runtime_startup_state.Config_unreadable)
+      |> Result.map_error (fun detail -> Runtime_startup_state.Config_unreadable { detail })
   in
   let runtime_initialization = match runtime_config_observation with
     | Error reason -> Error reason
     | Ok observation ->
       Runtime.init_default_degraded_observation observation
-      |> Result.map_error (fun _ -> Runtime_startup_state.Config_invalid)
+      |> Result.map_error (fun error ->
+        Runtime_startup_state.Config_invalid
+          { detail = Runtime.strict_init_error_to_string error })
   in
   (match runtime_initialization with
    | Ok Runtime.Initialized -> Log.Server.info "Runtime default initialized: %s" (Runtime.get_default_runtime_id ())
@@ -1532,20 +1534,31 @@ let start_goal_verifier ~sw (state : Mcp_server.server_state) =
 
 let resume_model_configuration () =
   match Runtime.config_path () with
-  | None -> Error Server_model_setup_resume.Configuration_unavailable
+  | None ->
+    Error
+      (Server_model_setup_resume.Configuration_unavailable
+         { detail = "this workspace has no runtime.toml path" })
   | Some path ->
     let resumed = Runtime.with_config_lock ~runtime_config_path:path (fun () ->
-      let catalog_ready =
-        try
-          let (_ : string option) =
-            configure_agent_core_model_catalog_overlay ~config_root:(Filename.dirname path) ()
-          in
-          true
-        with Env_config_core.Config_error _ -> false
+      let initialized =
+        match
+          configure_agent_core_model_catalog_overlay ~config_root:(Filename.dirname path) ()
+        with
+        | (_ : string option) ->
+          Runtime.init_default_degraded_report ~config_path:path
+          |> Result.map_error Runtime.strict_init_error_to_string
+        | exception Env_config_core.Config_error detail -> Error detail
       in
-      if not catalog_ready then Error "configuration unavailable" else
-      match Runtime.init_default_degraded_report ~config_path:path with
-      | Error _ -> Error "configuration unavailable"
+      match initialized with
+      | Error detail ->
+        (* A running runtime stays as it is. While setup is still required,
+           the cause an operator reads becomes this attempt's cause, so a
+           fixed boot error is not reported after a different one replaced it. *)
+        if Runtime_startup_state.requires_setup () then
+          Runtime_startup_state.set
+            (Runtime_startup_state.Setup_required
+               (Runtime_startup_state.Config_invalid { detail }));
+        Error detail
       | Ok _ ->
         let registry_published =
           try configure_exact_output_registry ~config_root:(Filename.dirname path) (); true
@@ -1565,7 +1578,9 @@ let resume_model_configuration () =
           in
           Ok authority_available)
     in
-    Result.map_error (fun _ -> Server_model_setup_resume.Configuration_unavailable) resumed
+    Result.map_error
+      (fun detail -> Server_model_setup_resume.Configuration_unavailable { detail })
+      resumed
 
 let start_post_ready_owner_lanes
       ~sw

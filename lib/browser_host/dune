@@ -8,4 +8,4 @@
  (public_name masc.browser_host)
  (modules browser_host)
  (libraries masc masc.config masc.workspace_connection masc_core masc.masc_log
-  masc.watched_work masc.masc_random_id eio eio.unix cohttp cohttp-eio yojson uri unix))
+  masc.watched_work masc.masc_random_id eio eio.unix cohttp cohttp-eio yojson uri))

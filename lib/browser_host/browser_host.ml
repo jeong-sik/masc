@@ -373,7 +373,12 @@ let run env config =
       let* info = browser_info reply in
       observed_info := Some info;
       poll info () in
-  let outcome = Eio.Fiber.first receive run_poll in
+  (* Both arms are real endings, and the poll's is the one that says why:
+     Firefox closing stdin and the server refusing the lane in the same
+     scheduler pass would otherwise end the host with [Ok ()] and no
+     word. [Fiber.first] keeps whichever finished first, so the poll's
+     outcome is named the work and stands. *)
+  let outcome = Watched_work.run ~watcher:receive run_poll in
   (* EOF ends this native-process identity. Cleanup is best effort and bounded;
      a dead server must not keep Firefox's native child alive. *)
   (match !observed_info, read_token config.token_file with

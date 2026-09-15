@@ -47,7 +47,8 @@ val forward
 (** [settle pending reply] decodes a reply frame from the extension and,
     when its id is the pending command's, resolves that exchange with the
     reply envelope; a reply for any other id is dropped. [Error] is a frame
-    that is not a reply. *)
+    this protocol cannot read as a reply: no id, no boolean [ok], or a
+    successful reply with no [data]. *)
 val settle : pending -> Yojson.Safe.t -> (unit, string) result
 
 type config

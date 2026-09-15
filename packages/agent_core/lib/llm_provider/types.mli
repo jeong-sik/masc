@@ -532,7 +532,8 @@ type inference_telemetry =
   ; reasoning_source : Reasoning_source.t option
     (** Exact replay provenance stamped by the live inference boundary. *)
   ; effective_context_window : int option
-    (** Model's context window in tokens, from capabilities *)
+    (** Context window in tokens the request was sized against, as
+        [Provider_config.context_window] reports it for the request config. *)
   ; provider_internal_action_count : int option
     (** Telemetry-only count of provider-native actions that are not surfaced as AGENT_CORE tool calls. *)
   ; ttfrc_ms : float option

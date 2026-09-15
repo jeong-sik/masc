@@ -2291,6 +2291,65 @@ let test_capability_provider_label_ollama_cloud_requires_explicit_id () =
 
 (* ── Suite ────────────────────────────────────────────── *)
 
+(* ── context_window: one answer for admission and telemetry ── *)
+
+(* Response telemetry used to read only the capability window while
+   context-limit admission read the caller's max_context first. A model the
+   catalog has no window for, sized by an explicit max_context, then logged
+   context_max=- although every request was budgeted against that window. *)
+let context_window_config ?max_context ~window () =
+  Provider_config.make
+    ~kind:OpenAI_compat
+    ~provider_id:"test"
+    ~model_id:"uncatalogued-wide"
+    ~base_url:"http://mock.local"
+    ~request_path:"/v1/chat/completions"
+    ?max_context
+    ~model_capabilities_override:
+      { Capabilities.default_capabilities with max_context_tokens = window }
+    ()
+;;
+
+let test_context_window_prefers_explicit_then_model_row () =
+  let check_window = Alcotest.(check (option int)) in
+  check_window
+    "explicit max_context is the window"
+    (Some 1_048_576)
+    (Provider_config.context_window
+       (context_window_config ~max_context:1_048_576 ~window:None ()));
+  check_window
+    "explicit max_context wins over the model row"
+    (Some 100_000)
+    (Provider_config.context_window
+       (context_window_config ~max_context:100_000 ~window:(Some 262_144) ()));
+  check_window
+    "model row window when nothing is explicit"
+    (Some 262_144)
+    (Provider_config.context_window (context_window_config ~window:(Some 262_144) ()));
+  check_window
+    "no explicit value and no row window stays unknown"
+    None
+    (Provider_config.context_window (context_window_config ~window:None ()))
+;;
+
+let test_patch_telemetry_reports_the_request_window () =
+  let config = context_window_config ~max_context:1_048_576 ~window:None () in
+  let response : Types.api_response =
+    { id = "ctx-1"
+    ; model = "uncatalogued-wide"
+    ; stop_reason = Types.EndTurn
+    ; content = [ Types.Text "ok" ]
+    ; usage = None
+    ; telemetry = Some Types.default_inference_telemetry
+    }
+  in
+  let patched = Complete_common.patch_telemetry response ~config (Some 10) in
+  Alcotest.(check (option int))
+    "telemetry window is the window the request was sized against"
+    (Some 1_048_576)
+    (Option.bind patched.telemetry (fun t -> t.Types.effective_context_window))
+;;
+
 let () =
   Alcotest.run
     "provider_config"
@@ -2703,6 +2762,16 @@ let () =
             "ollama cloud identity requires explicit provider id"
             `Quick
             test_capability_provider_label_ollama_cloud_requires_explicit_id
+        ] )
+    ; ( "context_window"
+      , [ Alcotest.test_case
+            "explicit max_context, then the model row window"
+            `Quick
+            test_context_window_prefers_explicit_then_model_row
+        ; Alcotest.test_case
+            "response telemetry reports the request window"
+            `Quick
+            test_patch_telemetry_reports_the_request_window
         ] )
     ]
 ;;

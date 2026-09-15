@@ -255,7 +255,7 @@ let patch_telemetry
   let pk = Some config.kind in
   let model = if String.trim resp.model = "" then config.model_id else resp.model in
   let caps, capability_source = resolve_capabilities_for_config config in
-  let ctx_window = caps.max_context_tokens in
+  let ctx_window = Provider_config.context_window config in
   let canonical = Some config.model_id in
   let reasoning_source =
     match Reasoning_dialect.reasoning_source_for_provider_config config with

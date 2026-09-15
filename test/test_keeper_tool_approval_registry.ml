@@ -2,9 +2,9 @@ open Alcotest
 
 module Registry = Masc.Keeper_tool_approval_registry
 
-(* Real clock with sub-second waits, the way test_pool.ml does it: this Eio
-   version has no mock clock, and the logic is generic over [clock], so real
-   time is a faithful driver as long as the waits stay small. *)
+(* Real clock with sub-second waits for the cases that need only "before"
+   and "after"; the mock clock for the one case that needs two wake-ups in a
+   fixed order inside one scheduler pass. *)
 
 let outcome_to_string : Registry.outcome -> string = function
   | Registry.Answered Registry.Approve -> "approved"
@@ -259,11 +259,39 @@ let test_decision_labels_round_trip () =
   check bool "an unknown label is not guessed at" true
     (Option.is_none (Registry.decision_of_string "maybe"))
 
+(* An answer settled as the timeout passed is the answer. The operator was
+   told it applied ([settle] returned [true]); the wait raced the answer
+   against the timer with [Fiber.first], which kept the timer's wake-up when
+   it was queued first, and the call ran as timed out under an approval. The
+   mock clock queues the timer's wake-up first on purpose. *)
+let test_an_answer_settled_as_the_timeout_passed_is_the_answer () =
+  Eio_mock.Backend.run (fun () ->
+      let clock = Eio_mock.Clock.make () in
+      Eio_mock.Clock.set_time clock 0.0;
+      let registry = Registry.create () in
+      Eio.Switch.run (fun sw ->
+          let waited =
+            Eio.Fiber.fork_promise ~sw (fun () ->
+                Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
+                  ~question:"run?" ~because:"policy: ask" ~keeper_name:keeper
+                  ~tool_call_id:"call-late" ~timeout_sec:1.0)
+          in
+          check int "the wait is registered" 1 (List.length (Registry.pending registry));
+          Eio_mock.Clock.set_time clock 1.0;
+          check bool "the operator is told the answer applied" true
+            (Registry.settle registry ~keeper_name:keeper ~tool_call_id:"call-late"
+               Registry.Approve);
+          check outcome "the answer that arrived is the outcome"
+            (Registry.Answered Registry.Approve)
+            (Eio.Promise.await_exn waited)))
+
 let () =
   run "keeper_tool_approval_registry"
     [ ( "answering"
       , [ test_case "an answer releases the wait" `Quick
             test_an_answer_releases_the_wait
+        ; test_case "an answer settled as the timeout passed is the answer" `Quick
+            test_an_answer_settled_as_the_timeout_passed_is_the_answer
         ; test_case "a denial is carried as itself" `Quick
             test_a_denial_is_carried_as_itself
         ; test_case "decision labels round-trip" `Quick

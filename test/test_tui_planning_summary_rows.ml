@@ -71,7 +71,7 @@ let test_one_mark_means_one_stage_across_the_two_rows () =
       Alcotest.(check string)
         (backlog_key ^ " wears the same mark")
         (mark ^ " " ^ backlog_key) (backlog_label backlog_key))
-    [ ("Exec", "running", progress_active)
+    [ ("Exec", "in_progress", progress_active)
     ; ("Done", "done", progress_done)
     ; ("Drop", "cancelled", progress_ended)
     ];
@@ -97,6 +97,31 @@ let test_the_row_names_the_goals_with_no_outcome () =
   Alcotest.(check bool) "the difference, named" true (contains "2 with no outcome" row);
   Alcotest.(check bool) "not the subset count" false (contains "3" row)
 
+(* One state, one word. This count decodes the wire's [in_progress] field and
+   a Task row draws [Masc_domain.task_status_to_string] beside the same mark,
+   so a Backlog label that renamed it left one state reading as two on one
+   screen -- "running" here, "in_progress" on the row and in the CLI tally. *)
+let test_the_backlog_spells_a_state_as_a_task_row_does () =
+  let backlog =
+    Masc_tui_render_prim.planning_backlog_counts
+      { pb_todo = 0; pb_claimed = 1; pb_running = 1; pb_done = 0; pb_cancelled = 0 }
+  in
+  let label key =
+    match List.find_opt (fun (k, _, _) -> String.equal k key) backlog with
+    | Some (_, _, label) -> label
+    | None -> Alcotest.failf "no Backlog count %s" key
+  in
+  List.iter
+    (fun (key, status) ->
+       Alcotest.(check string)
+         (key ^ " is spelled as a Task row spells it")
+         (Masc_tui_theme.Glyph.progress_active ^ " "
+          ^ Masc_domain.task_status_to_string status)
+         (label key))
+    [ ("claimed", Masc_domain.Claimed { assignee = "a"; claimed_at = "t" })
+    ; ("in_progress", Masc_domain.InProgress { assignee = "a"; started_at = "t" })
+    ]
+
 let () =
   Alcotest.run "tui_planning_summary_rows"
     [ ( "planning summary rows"
@@ -108,6 +133,8 @@ let () =
             test_an_empty_phase_is_not_counted
         ; Alcotest.test_case "one mark means one stage across the two rows" `Quick
             test_one_mark_means_one_stage_across_the_two_rows
+        ; Alcotest.test_case "the backlog spells a state as a task row does" `Quick
+            test_the_backlog_spells_a_state_as_a_task_row_does
         ; Alcotest.test_case "all ended says the count once" `Quick
             test_all_ended_says_the_count_once
         ; Alcotest.test_case "the row names the goals with no outcome" `Quick

@@ -423,7 +423,54 @@ let test_a_threshold_covering_the_stream_budgets_is_frozen () =
     (Keeper_runtime_resolved.provider_call_deadline_sec ());
   check (float 0.0001) "the budget is frozen as declared"
     allowance
-    (Keeper_runtime_resolved.first_event_timeout_sec ())
+    (Keeper_runtime_resolved.first_event_timeout_sec ());
+  check (float 0.0001) "the other budget stays at its floor under the same threshold"
+    Keeper_runtime_resolved.stream_idle_failsafe_floor_sec
+    (Keeper_runtime_resolved.stream_idle_timeout_sec ())
+
+(* The same refusal when the budget comes from the environment: the rule
+   reads the budget's source, and both declared sources must count. *)
+let test_a_stream_budget_declared_in_the_environment_is_refused_the_same_way () =
+  with_env "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" None @@ fun () ->
+  with_clean_boot_overrides @@ fun () ->
+  let longer_than_the_floor =
+    Keeper_runtime_resolved.provider_call_deadline_failsafe_floor_sec +. 600.0
+  in
+  with_env
+    "MASC_KEEPER_FIRST_EVENT_TIMEOUT_SEC"
+    (Some (Printf.sprintf "%g" longer_than_the_floor))
+  @@ fun () ->
+  Keeper_runtime_resolved.reset_for_tests ();
+  match Keeper_runtime_resolved.provider_call_deadline_sec () with
+  | _ -> fail "a first-event budget from the environment above the floored threshold was frozen"
+  | exception Env_config_core.Config_error message ->
+    let names needle = Astring.String.is_infix ~affix:needle message in
+    check bool "the refusal names the budget and its env source" true
+      (names "turn.first_event_timeout_sec" && names "env")
+
+(* A budget no threshold can cover is refused where it is read, naming the
+   ceiling, instead of at every boot by the freeze rule with advice the
+   threshold's own range would then reject. *)
+let test_a_stream_budget_no_threshold_can_cover_is_refused_where_it_is_read () =
+  with_clean_boot_overrides @@ fun () ->
+  let beyond_any_threshold =
+    Env_config_keeper.KeeperKeepalive.provider_call_deadline_max_sec +. 1.0
+  in
+  List.iter
+    (fun (env_key, read) ->
+       with_env env_key (Some (Printf.sprintf "%g" beyond_any_threshold)) @@ fun () ->
+       match read () with
+       | _ -> failf "%s beyond the longest threshold was read" env_key
+       | exception Env_config_core.Config_error message ->
+         check bool (env_key ^ " refusal names the ceiling") true
+           (Astring.String.is_infix
+              ~affix:(Printf.sprintf "at most %g" Env_config_keeper.KeeperKeepalive.provider_call_deadline_max_sec)
+              message))
+    [ ( Env_config_keeper.KeeperKeepalive.stream_idle_timeout_env_key
+      , Env_config_keeper.KeeperKeepalive.stream_idle_timeout_sec )
+    ; ( Env_config_keeper.KeeperKeepalive.first_event_timeout_env_key
+      , Env_config_keeper.KeeperKeepalive.first_event_timeout_sec )
+    ]
 
 let test_an_explicit_threshold_under_the_floored_budgets_stands () =
   with_env "MASC_KEEPER_FIRST_EVENT_TIMEOUT_SEC" None @@ fun () ->
@@ -555,13 +602,14 @@ let test_resolved_provider_call_deadline_prefers_env () =
 
 let test_resolved_stream_idle_timeout_does_not_clamp () =
   with_clean_boot_overrides @@ fun () ->
-  with_env "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" (Some "3600") @@ fun () ->
-  (* A declared gap this long needs a threshold that covers it; the case is
+  (* The longest gap a threshold can cover, declared as such: the case is
      about the value not being clamped, not about the pair. *)
-  with_env "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" (Some "3600") @@ fun () ->
+  let longest = Env_config_keeper.KeeperKeepalive.provider_call_deadline_max_sec in
+  with_env "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" (Some (Printf.sprintf "%g" longest)) @@ fun () ->
+  with_env "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" (Some (Printf.sprintf "%g" longest)) @@ fun () ->
   Keeper_runtime_resolved.init ();
   check (float 0.0001) "explicit value is preserved"
-    3600.0
+    longest
     (Keeper_runtime_resolved.stream_idle_timeout_sec ())
 
 let test_resolved_stream_idle_timeout_env_below_floor_preserved () =
@@ -605,10 +653,12 @@ let test_stream_idle_timeout_invalid_toml_returns_error () =
   | Error failure ->
     check bool "classified as a validate failure" true
       (failure.Keeper_runtime_config.kind = Keeper_runtime_config.Validate);
-    check bool "diagnostic names the TOML key" true
+    (* The row now carries the ceiling too, so the diagnostic reads the
+       declared range the way provider_call_deadline_sec's does. *)
+    check bool "diagnostic names the TOML key and the declared range" true
       (String.ends_with
          ~suffix:
-           "turn.stream_idle_timeout_sec: expected a finite, positive number of seconds"
+           "turn.stream_idle_timeout_sec: value is outside the declared range (0, 3600]"
          (Keeper_runtime_config.load_failure_to_string failure))
 
 let test_stream_idle_timeout_toml_wrong_type_returns_error () =
@@ -713,6 +763,29 @@ let test_settings_projection_uses_typed_effective_values () =
   in
   check string "deadline projection shows the value in effect, floor included" expected_deadline
     (deadline |> member "effective_value" |> to_string)
+;;
+
+(* The projector behind [effective_value] is a match on the env name,
+   written apart from the registry it projects and from the [*_env_key]
+   constants the readers use; a row it does not name reaches the operator
+   panel with a null value and an error string. Every registered row must
+   read, so a renamed or misspelled arm shows here and not on the panel. *)
+let test_every_registered_setting_reads_in_the_projection () =
+  let open Yojson.Safe.Util in
+  let unreadable =
+    Keeper_runtime_config.settings_projection_to_yojson (parse_or_fail "")
+    |> to_list
+    |> List.filter_map (fun row ->
+      match row |> member "effective_error" with
+      | `Null -> None
+      | error ->
+        Some
+          (Printf.sprintf
+             "%s: %s"
+             (row |> member "env" |> to_string)
+             (Yojson.Safe.to_string error)))
+  in
+  check (list string) "every registered setting has a typed effective value" [] unreadable
 ;;
 
 (* The provider-call threshold is the keeper's only bound on a sub-call
@@ -917,6 +990,8 @@ let () =
             test_removed_toml_overlay_is_pending_restart
         ; test_case "settings projection uses typed effective values" `Quick
             test_settings_projection_uses_typed_effective_values
+        ; test_case "every registered setting reads in the projection" `Quick
+            test_every_registered_setting_reads_in_the_projection
         ; test_case "a malformed provider call deadline is a configuration error" `Quick
             test_a_malformed_provider_call_deadline_is_a_configuration_error
         ; test_case "an out-of-range provider call deadline is a configuration error" `Quick
@@ -930,6 +1005,8 @@ let () =
         ; test_case "resolved first-event timeout defaults to fail-safe floor" `Quick test_resolved_first_event_timeout_defaults_to_failsafe_floor
         ; test_case "resolved provider-call threshold defaults to fail-safe floor" `Quick test_resolved_provider_call_deadline_defaults_to_failsafe_floor
         ; test_case "a stream budget longer than the threshold is refused" `Quick test_a_stream_budget_longer_than_the_threshold_is_refused
+        ; test_case "a stream budget declared in the environment is refused the same way" `Quick test_a_stream_budget_declared_in_the_environment_is_refused_the_same_way
+        ; test_case "a stream budget no threshold can cover is refused where it is read" `Quick test_a_stream_budget_no_threshold_can_cover_is_refused_where_it_is_read
         ; test_case "a threshold covering the stream budgets is frozen" `Quick test_a_threshold_covering_the_stream_budgets_is_frozen
         ; test_case "an explicit threshold under the floored budgets stands" `Quick test_an_explicit_threshold_under_the_floored_budgets_stands
         ; test_case "resolved first-event timeout uses toml" `Quick test_resolved_first_event_timeout_uses_toml

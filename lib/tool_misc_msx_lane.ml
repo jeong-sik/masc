@@ -43,12 +43,23 @@ let observation_fields ?(sprites = false) (o : Msx_lane.observation) =
   @ (if sprites then [ ("sprites", `List (List.map sprite o.sprites)) ] else [])
 ;;
 
-let of_lane ?(extra = []) ?sprites ~tool_name ~start_time
+(* The calls that move the machine's time declare it. The keeper's input-axis
+   repeat guard drops the output fingerprint to catch a clock,
+   and five [masc_msx_step {frames: 300}] in a row -- 25 seconds of play --
+   have a clock's shape on that axis: identical input, a different result
+   every time. Every game turn of one keeper ended in that yield on
+   2026-09-14, its reply deferred each time. [Progress] beside the
+   observation says the frames were run; a read ([masc_msx_screen]) declares
+   nothing, so polling a screen five times still yields. *)
+let moved_the_machine = Tool_outcome_declaration.to_metadata Tool_outcome_declaration.Progress
+
+let of_lane ?(extra = []) ?sprites ?metadata ~tool_name ~start_time
     (result : (Msx_lane.observation, Msx_lane.error) result) =
   match result with
   | Ok o ->
     Tool_result.make_ok ~tool_name ~start_time
       ~data:(`Assoc (observation_fields ?sprites o @ extra))
+      ?metadata
       ()
   | Error ((Msx_lane.No_machine | Msx_lane.Invalid_request _) as e) ->
     reject ~tool_name ~start_time (Msx_lane.error_to_string e)
@@ -310,7 +321,8 @@ let handle_screen ~tool_name ~start_time args =
 ;;
 
 let handle_step ~tool_name ~start_time args =
-  of_lane ~tool_name ~start_time (Msx_lane.step ~frames:(get_int args "frames" 60))
+  of_lane ~tool_name ~start_time ~metadata:moved_the_machine
+    (Msx_lane.step ~frames:(get_int args "frames" 60))
 ;;
 
 (* 화면이 안착할 때까지 한 번에 논다 — 키퍼가 step+screen 을 반복하며
@@ -321,7 +333,12 @@ let handle_step_until_change ~tool_name ~start_time args =
     Msx_lane.step_until_change ~max_frames:(get_int args "max_frames" 300)
   with
   | Ok (observation, r) ->
+    (* Frames always run here, so the declaration follows the screen: a run
+       that changed it moved the game; one that settled on the same picture
+       is the key-wait signal, and a keeper asking five times in a row on a
+       key-wait scene declares nothing and is still caught. *)
     of_lane ~tool_name ~start_time
+      ?metadata:(if r.Msx_lane.changed then Some moved_the_machine else None)
       ~extra:
         [ ("frames_run", `Int r.Msx_lane.frames_run)
         ; ("changed", `Bool r.changed)
@@ -343,7 +360,7 @@ let handle_press ~tool_name ~start_time ~who args =
   match parse [] names with
   | Error message -> reject ~tool_name ~start_time message
   | Ok keys ->
-    of_lane ~tool_name ~start_time
+    of_lane ~tool_name ~start_time ~metadata:moved_the_machine
       (Msx_lane.press ~who ~keys
          ~hold_frames:(get_int args "hold_frames" 5)
          ~step_frames:(get_int args "frames" 30)

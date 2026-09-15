@@ -490,8 +490,13 @@
  (modules check_public_mli_callbacks)
  (libraries agent_core_test_deps compiler-libs.common))
 
+; Named so the pull-request gate can build it on its own: the rule reads two
+; library interfaces, and a change to either is a change to what it checks,
+; yet nothing in the edited-test selection reaches an unnamed runtest rule.
+; #36289 relabelled with_post_stream's ~f and merged green while this rule
+; went red on main for the rest of the day.
 (rule
- (alias runtest)
+ (alias exact-output-single-surface)
  (deps
   ../scripts/check-exact-output-single-surface.sh
   ../scripts/check-exact-output-resolver-boundary.sh
@@ -595,7 +600,7 @@
     "measure_completion_request|?connection_cache|constr(Http_client.cache)"
     --allow-callback-in
     http_client.mli
-    "with_post_stream|~f|arrow(_,constr(Eio.Buf_read.t),var(a))"
+    "with_post_stream|~f|arrow(~pre_header_elapsed_s,constr(float),arrow(_,constr(Eio.Buf_read.t),var(a)))"
     --allow-callback-in
     http_client.mli
     "with_post_stream|?on_response_status|arrow(_,constr(int),constr(unit))"
@@ -719,6 +724,11 @@
     --check-exact-transport
     %{dep:fixtures/exact_output_single_surface/exact_transport_legitimate_local_alias.ml.fixture}))))
 
+(alias
+ (name runtest)
+ (deps
+  (alias exact-output-single-surface)))
+
 ; A stale allowance used to hide the violations found in the same run: the
 ; unused-allowance branch exited before the violations were printed (#34607).
 ; Exit code alone cannot tell those two apart, so this fixture compares stderr.
@@ -771,6 +781,11 @@
 (test
  (name test_slot_scheduler_deadline_ownership)
  (modules test_slot_scheduler_deadline_ownership)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio.mock))
+
+(test
+ (name test_under_deadline)
+ (modules test_under_deadline)
  (libraries agent_core_test_deps agent_core llm_provider alcotest eio.mock))
 
 (test
@@ -870,6 +885,13 @@
 (test
  (name test_stream_pre_header_budget)
  (modules test_stream_pre_header_budget)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest cstruct eio eio_main))
+
+; A loopback listener that accepts and stays silent: the sync path ends the
+; wait for the response headers at the provider's connect budget.
+(test
+ (name test_complete_sync_connect_budget)
+ (modules test_complete_sync_connect_budget)
  (libraries agent_core_test_deps agent_core llm_provider alcotest cstruct eio eio_main))
 
 (test

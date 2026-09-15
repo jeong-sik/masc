@@ -1038,6 +1038,17 @@ let test_operator_approvals_use_current_contract () =
        ~module_path:"bin/masc_tui_render_tools.ml"
        ~binding_name:"tools_display_lines"
        ~callee:"Skill_reference.list_to_yojson");
+  (* Both timestamps on the approvals meta row go through the terminal's own
+     clock. [expires] used to keep the server's RFC 3339 string as it arrived,
+     so the row put a UTC reading beside a local one -- nine hours apart in
+     Seoul, on the row an operator reads to decide whether a decision is still
+     live (#36333). *)
+  check bool "the approvals meta row draws both its times in one zone" true
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"render_approvals"
+       ~callee:"Terminal_text.short_timestamp"
+     >= 2);
   check bool "approval renderer measures its name column" true
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"

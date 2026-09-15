@@ -275,8 +275,12 @@ let all =
       ~category:"turn"
       "Pass the thinking-mode request to the selected runtime"
   ; setting
-      ~range:(float_range ~min_exclusive:0.0 ())
-      ~env_name:"MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC"
+      ~range:
+        (float_range
+           ~min_exclusive:0.0
+           ~max:Env_config_keeper.KeeperKeepalive.provider_call_deadline_max_sec
+           ())
+      ~env_name:Env_config_keeper.KeeperKeepalive.stream_idle_timeout_env_key
       ~exposure:(Toml_and_env "turn.stream_idle_timeout_sec")
       ~value_kind:Float
       ~default:
@@ -287,8 +291,12 @@ let all =
       ~category:"turn"
       "Streaming provider inter-line idle timeout"
   ; setting
-      ~range:(float_range ~min_exclusive:0.0 ())
-      ~env_name:"MASC_KEEPER_FIRST_EVENT_TIMEOUT_SEC"
+      ~range:
+        (float_range
+           ~min_exclusive:0.0
+           ~max:Env_config_keeper.KeeperKeepalive.provider_call_deadline_max_sec
+           ())
+      ~env_name:Env_config_keeper.KeeperKeepalive.first_event_timeout_env_key
       ~exposure:(Toml_and_env "turn.first_event_timeout_sec")
       ~value_kind:Float
       ~default:
@@ -304,7 +312,7 @@ let all =
            ~min:Env_config_keeper.KeeperKeepalive.provider_call_deadline_min_sec
            ~max:Env_config_keeper.KeeperKeepalive.provider_call_deadline_max_sec
            ())
-      ~env_name:"MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC"
+      ~env_name:Env_config_keeper.KeeperKeepalive.provider_call_deadline_env_key
       ~exposure:(Toml_and_env "turn.provider_call_deadline_sec")
       ~value_kind:Float
       ~default:
@@ -325,7 +333,7 @@ let all =
            ~min:Env_config_keeper.KeeperKeepalive.body_timeout_min_sec
            ~max:Env_config_keeper.KeeperKeepalive.body_timeout_max_sec
            ())
-      ~env_name:"MASC_KEEPER_BODY_TIMEOUT_SEC"
+      ~env_name:Env_config_keeper.KeeperKeepalive.body_timeout_env_key
       ~exposure:Env_only
       ~value_kind:Float
       ~default:"(none)"

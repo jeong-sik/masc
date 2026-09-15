@@ -17,3 +17,10 @@ val kind_of_name : string -> kind
 (* A one-column plain-unicode glyph for a kind (no Nerd Font private-use
    codepoints, so any monospace terminal draws it). *)
 val glyph : kind -> string
+
+(* Every kind, in the order the sheet lists them. *)
+val kinds : kind list
+
+(* Each mark and what the file behind it is. The tree draws the mark with no
+   word beside it, so this is what the help sheet prints. *)
+val legend : (string * string) list

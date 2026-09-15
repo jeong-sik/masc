@@ -463,6 +463,34 @@ def wait_for_output(
     )
 
 
+def wait_for_fixture_state(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    output: bytearray,
+    ready: Callable[[], bool],
+    *,
+    timeout: float,
+) -> bool:
+    """Wait for a fixture to record something, as its sibling waits for a signal.
+
+    A key whose whole effect is a request the screen is already showing the
+    answer to cannot be waited for on the screen. Frame_presenter.present
+    writes nothing at all -- not even a frame terminator -- when a frame equals
+    the one before it, so a refresh that is meant to come back with the same
+    scene draws no bytes, and send_and_wait waits out its three seconds for a
+    needle that is already on the screen and will not be written again.
+    """
+    deadline = time.monotonic() + timeout
+    while not ready():
+        read_available(master_fd, output)
+        if process.poll() is not None:
+            return False
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.02)
+    return True
+
+
 def wait_for_fixture_event(
     process: subprocess.Popen[bytes],
     master_fd: int,
@@ -6088,7 +6116,18 @@ def quit_names_waiting_messages_interaction(fixture: AtomicChatFixture) -> Inter
                 raise AssertionError(f"navigation dispatched input before control acknowledgement: {fixture.received!r}")
             # Confirm exit before releasing the server handler. Goodbye is a
             # visible completed exit; the harness still verifies terminal mode.
-            send_and_wait(process, master_fd, output, b"q", b"Goodbye!")
+            #
+            # Waited for on its own, not through send_and_wait: the farewell is
+            # the last thing written. Terminal_restore.finish_after_restore
+            # restores the terminal and only then prints it, so the frame
+            # terminator send_and_wait looks for after a needle has already
+            # gone by and no other follows.
+            read_available(master_fd, output)
+            start = len(output)
+            write_all(master_fd, output, b"q")
+            wait_for_output(
+                process, master_fd, output, b"Goodbye!", start=start, timeout=3.0
+            )
         finally:
             fixture.release_interrupt.set()
             fixture.release.set()
@@ -10211,7 +10250,6 @@ def keeper_lanes_ia_interaction(
             "Config: [runtime.exact_output_lanes.board_attention_exact]",
             "Catalog attempts (admitted order): 1 glm-coding.glm-5-turbo",
             "Then CLI (after catalog exhaustion): (none)",
-            "Lane configuration is TOML. Run Input/Output is retained JSON evidence.",
             "Output meaning: the accepted candidate judgment JSON.",
             "Evidence: structured-output generation, not a MASC tool loop;",
         ):
@@ -11825,18 +11863,23 @@ def runtime_surface_interaction(
             if b"MASC Config / Runtime detail" in lane_screen:
                 raise AssertionError("Runtime left arrow did not return to the lane list")
 
-            all_list = send_and_wait(
+            send_and_wait(
                 process,
                 master_fd,
                 output,
                 b"p",
                 b"All runtimes (5)",
             )
-            if b"runtime-a" not in CSI_RE.sub(b"", all_list):
+            # Read off the screen, the way the lane list above is read: only
+            # the rows that changed are repainted, so a row the catalog kept
+            # unchanged carries no bytes in the frames that press drew and
+            # cannot be found in them.
+            all_list = screen_text(bytes(output))
+            if b"runtime-a" not in all_list:
                 raise AssertionError("Runtime catalog did not keep the selected runtime")
-            if b"Lanes (3 lanes, 4 slots)" not in CSI_RE.sub(b"", all_list):
+            if b"Lanes (3 lanes, 4 slots)" not in all_list:
                 raise AssertionError("Runtime catalog counted runtimes as lane slots")
-            if b"ready / reachable" not in CSI_RE.sub(b"", all_list):
+            if b"ready / reachable" not in all_list:
                 raise AssertionError("Runtime catalog omitted independent probe status")
             catalog_detail = send_and_wait(
                 process,
@@ -14513,11 +14556,30 @@ def run_browser_scene_regression(executable: str) -> None:
         send_and_wait(process, master, output, b"m", b"SCOPED CHANNEL CONTENT")
         assert scenes[-1]["scope"] == {"documentId":"document-after","nodeId":"channel-region"}
         focused = scenes[-1]
-        send_and_wait(process, master, output, b"r", b"SCOPED CHANNEL CONTENT")
+        # These three keys are answered on the wire and, by design, leave the
+        # screen as it stands: the refresh is asserted to return the same scene
+        # just below, and the scroll moves the page the scene was read from
+        # rather than the rows drawn from it. An unchanged frame is written as
+        # nothing, so each is waited for where its effect actually lands.
+        def press_and_await(key: bytes, ready: Callable[[], bool], what: str) -> None:
+            read_available(master, output)
+            write_all(master, output, key)
+            # Five seconds, as wait_for_fixture_event is given elsewhere: a
+            # scroll is two round trips, the move and the re-read after it.
+            if not wait_for_fixture_state(
+                process, master, output, ready, timeout=5.0
+            ):
+                raise AssertionError(f"{key!r} did not reach the fixture: {what}")
+
+        def scrolled(sent: int, read: int) -> Callable[[], bool]:
+            return lambda: len(scrolls) > sent and len(scene_viewports) > read
+
+        scoped = len(scenes)
+        press_and_await(b"r", lambda: len(scenes) > scoped, "a scoped refresh")
         assert scenes[-1] == focused and len(actions)==1, "scoped refresh widened or caused an effect"
-        send_and_wait(process, master, output, b"J", b"SCOPED CHANNEL CONTENT")
+        press_and_await(b"J", scrolled(len(scrolls), len(scene_viewports)), "a scroll and its re-read")
         assert scrolls[-1]["y"] == 600 and scene_viewports[-1]["scrollY"] == 600
-        send_and_wait(process, master, output, b"K", b"SCOPED CHANNEL CONTENT")
+        press_and_await(b"K", scrolled(len(scrolls), len(scene_viewports)), "a scroll and its re-read")
         assert scrolls[-1]["y"] == -600 and scene_viewports[-1]["scrollY"] == 0
         send_and_wait(process, master, output, b"\x1b", b"MASC Overview")
         os.write(master, b"q")
@@ -15183,9 +15245,15 @@ def voice_wizard_interaction(requests: HttpRequests) -> Interaction:
                 f"the save did not carry the revision the pane read: {body!r}"
             )
         changes = {change.get("change"): change for change in body.get("changes", [])}
-        for wanted in ("put_endpoint", "set_tts_default_voice"):
-            if wanted not in changes:
-                raise AssertionError(f"the save omitted {wanted}: {body!r}")
+        if "put_endpoint" not in changes:
+            raise AssertionError(f"the save omitted put_endpoint: {body!r}")
+        # A voice name is provider vocabulary, so it is only right as the
+        # section default while everything falling back to it shares this
+        # endpoint's kind. This section holds a voice_mcp endpoint beside the
+        # elevenlabs one, so voice_placement puts the voice on the endpoint and
+        # leaves the section default the other endpoint can still read.
+        if "set_tts_default_voice" in changes:
+            raise AssertionError(f"the save rewrote the section's voice: {body!r}")
         # The model rides on the endpoint. Sent as the section's default it
         # became the model every other endpoint in the section was asked for.
         if "set_default_model" in changes:
@@ -15200,8 +15268,8 @@ def voice_wizard_interaction(requests: HttpRequests) -> Interaction:
         # The name of the variable, never its value: runtime.toml is committed.
         if any("sk-" in str(value) for value in endpoint.values()):
             raise AssertionError(f"the save carried something key-shaped: {endpoint!r}")
-        if changes["set_tts_default_voice"].get("voice") != "pty-voice-id":
-            raise AssertionError(f"the default voice was lost: {changes!r}")
+        if endpoint.get("default_voice") != "pty-voice-id":
+            raise AssertionError(f"the endpoint lost its voice: {endpoint!r}")
 
         # Esc leaves. The pane is underneath and no step counter remains.
         closed = press_and_settle(process, master_fd, output, b"\x1b")

@@ -19,18 +19,13 @@ type t = {
   provider_call_deadline_sec : float field;
 }
 
-(** Exhaustive boundary for the labels emitted by
-    {!Config_boot_overrides.source}. Unknown labels are an internal contract
-    violation and must not be displayed as a fabricated default source. *)
+(* The layer {!Config_boot_overrides.source} names, as this module's
+   source; a boot override is the runtime file's value. *)
 let source_of_env_name name : source =
   match Config_boot_overrides.source name with
-  | "env" -> Env
-  | "boot_override" -> Toml
-  | "default" -> Default
-  | label ->
-    raise
-      (Env_config_core.Config_error
-         (Printf.sprintf "unknown config source for %s: %S" name label))
+  | Config_boot_overrides.Env -> Env
+  | Config_boot_overrides.Boot_override -> Toml
+  | Config_boot_overrides.Default -> Default
 
 let source_to_string = function
   | Env -> "env"
@@ -94,7 +89,7 @@ let freeze_from_current () =
       (* Explicit env or runtime.toml value: honoured verbatim, no floor. *)
       {
         value = seconds;
-        source = source_of_env_name "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC";
+        source = source_of_env_name Env_config_keeper.KeeperKeepalive.stream_idle_timeout_env_key;
       }
     | None ->
       (* Unset: substitute the fail-safe liveness floor so a hung provider stream
@@ -112,7 +107,7 @@ let freeze_from_current () =
       (* Explicit env or runtime.toml value: honoured verbatim, no floor. *)
       {
         value = seconds;
-        source = source_of_env_name "MASC_KEEPER_FIRST_EVENT_TIMEOUT_SEC";
+        source = source_of_env_name Env_config_keeper.KeeperKeepalive.first_event_timeout_env_key;
       }
     | None ->
       (* Unset: substitute the silent-prefill liveness ceiling so the
@@ -128,7 +123,7 @@ let freeze_from_current () =
   let body_timeout_override_sec =
     {
       value = Env_config_keeper.KeeperKeepalive.body_timeout_sec_override ();
-      source = source_of_env_name "MASC_KEEPER_BODY_TIMEOUT_SEC";
+      source = source_of_env_name Env_config_keeper.KeeperKeepalive.body_timeout_env_key;
     }
   in
   let provider_call_deadline_sec =
@@ -137,7 +132,7 @@ let freeze_from_current () =
       (* Explicit env or runtime.toml value: honoured verbatim. *)
       {
         value = seconds;
-        source = source_of_env_name "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC";
+        source = source_of_env_name Env_config_keeper.KeeperKeepalive.provider_call_deadline_env_key;
       }
     | None ->
       (* Unset: substitute the no-progress floor so a default install has an

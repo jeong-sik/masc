@@ -2075,7 +2075,11 @@ let planning_backlog_counts (backlog : planning_backlog) =
   let open Masc_tui_theme.Glyph in
   [ ("todo", backlog.pb_todo, progress_waiting ^ " todo")
   ; ("claimed", backlog.pb_claimed, progress_active ^ " claimed")
-  ; ("running", backlog.pb_running, progress_active ^ " running")
+  (* "in_progress", not "running": the wire field this count decodes is
+     [in_progress], the Task row two screens over draws the same state as
+     [in_progress], and so does the CLI's own tally. This row was the only
+     place that renamed it, so one state read as two on one screen. *)
+  ; ("in_progress", backlog.pb_running, progress_active ^ " in_progress")
   ; ("done", backlog.pb_done, progress_done ^ " done")
   ; ("cancelled", backlog.pb_cancelled, progress_ended ^ " cancelled")
   ]

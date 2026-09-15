@@ -322,7 +322,18 @@ let for_surface = function
       @ row_list_jumps @ listing_meta
   | Keepers Keeper_detail ->
       [ b Navigate "h/l" "pane" ~help:"move between roster and detail"
-      ; b Navigate "[ / ]" "tabs" ~help:"detail tabs: Info / Settings / Secrets / GitHub"
+        (* The tabs come from the list the strip draws. Named by hand this row
+           said "Info / Settings / Secrets / GitHub" while the strip drew
+           nine, so a reader who trusted the sheet did not know Sandbox,
+           Identity, Channels, Automation or Runs existed -- and Sandbox is
+           the second tab. Config's [p] had the same drift and a test to
+           catch it; this row cannot drift at all now. *)
+      ; b Navigate "[ / ]" "tabs"
+          ~help:
+            ("detail tabs: "
+             ^ String.concat " / "
+                 (List.map Masc_tui_types.keeper_detail_tab_label
+                    Masc_tui_types.keeper_detail_tabs))
       ; b Act "o" "logs"
           ~help:"open container logs in Sandbox; Keeper activity elsewhere"
       ; b Act "U" "runtime" ~help:"pick a runtime lane"
@@ -406,8 +417,15 @@ let for_surface = function
           ~help:"open the standalone lane's exact runs"
       ; b Act "a" "append slot"
           ~help:"add a failover candidate to this lane's walk order"
+        (* The lane detail spent four rows on the file's shape and on this
+           key, the same two sentences under every lane. They are here, where
+           the key is. *)
       ; b Navigate "e" "lane config"
-          ~help:"open this lane's runtime.exact_output_lanes section"
+          ~help:
+            "open this lane's runtime.exact_output_lanes section in the \
+             preview-checked runtime.toml editor; slots is a required \
+             non-empty catalog-ref array and cli_slots an optional \
+             official-client runtime-id array"
       ; b Navigate "p" "runtime"
           ~help:"open the Runtime surface"
       ; b Act "Esc" "overview" ~help:"back to Overview"
@@ -463,6 +481,13 @@ let for_surface = function
                  Home/End reach its ends, [ / ] step asks, Esc goes back"
       ; approval_decide
       ; approval_retry
+        (* The footer names this key and the sheet did not, so an operator who
+           pressed [?] to find out how to answer a Keeper's question found
+           every other key on the surface and not that one. The approval queue
+           owns this surface's arrows and its y/n, which is why answering
+           opens as its own mode rather than as a key on the row. *)
+      ; b Act "a" "answer a question"
+          ~help:"open the selected Keeper question in its own mode; Esc leaves it"
       ; b Navigate "[ / ]" "previous / next"
           ~help:"while a detail is open, step to the row before or after it"
       ; b Act "w" "Workspace Gate mode"
@@ -1079,7 +1104,13 @@ let help_surfaces : (string * surface) list =
   ; "Planning / Task Review", Verification
   ; "Planning / Task Verdicts", Harness
   ; "Fusion", Fusion
-  ; "Keeper detail / Automation", Schedules
+  (* "Schedules", the name the title bar and the palette both use. It read
+     "Keeper detail / Automation" -- a Keeper detail tab that has no keys of
+     its own and no route to this screen -- so a reader who typed "go
+     Schedules" and pressed [?] found this screen's keys under the name of a
+     screen they were not on. The family is Keepers, which is where the strip
+     puts the highlight while this surface is open. *)
+  ; "Keepers / Schedules", Schedules
   ; "Memory", Memory
   ; "Workspace", Repositories
   ; "Workspace / Code", Code
@@ -1255,6 +1286,11 @@ let help_sections ?current () =
              column draws with. *)
           ; ("Memory marks", Masc_tui_memory_mark.legend)
           ; ("Board marks", Masc_tui_board_kind_mark.legend)
+          (* The Code tree's file marks. A folder takes the arrow and a file
+             takes its kind's mark, and neither carries a word -- the name
+             beside it says the extension the mark was read from, not what the
+             mark means. Seven marks drew with nothing anywhere saying so. *)
+          ; ("File marks", Masc_tui_file_icon.legend)
           (* Planning's own legend says the marks its list is drawing, which
              is what keeps that line inside a narrow frame -- so a mark no
              goal carries right now has nowhere else to be explained. Here. *)

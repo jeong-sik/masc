@@ -191,17 +191,26 @@ module KeeperKeepalive : sig
       value. *)
 
 
+  (** Env names of the four turn budgets. The readers below, the resolved
+      layer's source attribution and the suites that declare a budget use
+      these, never a re-spelled literal; the settings panel's projector
+      still names them as literals. *)
+
   val stream_idle_timeout_env_key : string
-  (** Env name of {!stream_idle_timeout_sec}; a suite that must not run under
-      an ambient operator value checks this name, not a re-spelled literal. *)
+  val first_event_timeout_env_key : string
+  val body_timeout_env_key : string
+  val provider_call_deadline_env_key : string
 
   val stream_idle_timeout_sec : unit -> float option
   (** Explicit streaming-provider idle-gap timeout as the operator wrote it.
       [None] means no explicit value (the resolved layer substitutes
       {!stream_idle_failsafe_floor_sec}, RFC-0345); MASC does not infer a
-      timeout from provider/model kind. A configured value must be finite and
-      strictly positive or configuration loading raises
-      {!Env_config_core.Config_error}. *)
+      timeout from provider/model kind. A configured value must be finite,
+      strictly positive and at most {!provider_call_deadline_max_sec}: a
+      budget longer than the longest no-progress threshold could never be
+      allowed by any threshold, so it is refused where it is read rather
+      than at every boot by the freeze rule. Otherwise configuration loading
+      raises {!Env_config_core.Config_error}. *)
 
   val first_event_failsafe_floor_sec : float
   (** Resolved runtime fallback used only when the explicit first-event
@@ -215,8 +224,9 @@ module KeeperKeepalive : sig
       {!stream_idle_timeout_sec} bounds inter-line gaps after it
       (RFC-AC-037). [None] means no explicit
       value (the resolved layer substitutes the fail-safe floor). A configured
-      value must be finite and strictly positive or configuration loading
-      raises {!Env_config_core.Config_error}. *)
+      value must be finite, strictly positive and at most
+      {!provider_call_deadline_max_sec}, as for {!stream_idle_timeout_sec},
+      or configuration loading raises {!Env_config_core.Config_error}. *)
 
   val body_timeout_min_sec : float
   val body_timeout_max_sec : float
@@ -229,10 +239,11 @@ module KeeperKeepalive : sig
       completion calls, read on every call from the environment (the setting
       has no runtime.toml key). [None] (unset) leaves the runtime builder wire
       untouched. [Some s] forwards to [Builder.with_body_timeout] for sync
-      completion paths. Streaming paths ignore it and rely on
-      {!stream_idle_timeout_sec} plus attempt liveness observation. A declared
-      value that is not a finite positive number of seconds within the
-      declared range raises {!Env_config_core.Config_error}.
+      completion paths. Streaming paths ignore it: their liveness is bounded
+      by the operator's {!stream_idle_timeout_sec} or its floor, and by the
+      attempt watchdog. A declared value that is not a finite positive number
+      of seconds within the declared range raises
+      {!Env_config_core.Config_error}.
 
       Env: [MASC_KEEPER_BODY_TIMEOUT_SEC]. *)
 

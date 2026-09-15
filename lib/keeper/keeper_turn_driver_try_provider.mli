@@ -329,6 +329,8 @@ module For_testing : sig
   val memoize_message_measurement :
     (Agent_core.Types.message -> int) -> Agent_core.Types.message -> int
 
+  val message_measurement_hash : Agent_core.Types.message -> int
+
   val plan_and_window_model_input :
     measure_message_bytes:(Agent_core.Types.message -> int) ->
     capacity_bytes:int ->

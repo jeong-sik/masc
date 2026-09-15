@@ -1307,6 +1307,66 @@ let test_gate_wait_releases_owner_without_repeated_children () =
   check int "resolution resumes exactly one original child" 2 !attempts
 ;;
 
+(* An interrupt ends a turn that is waiting on an answer its own owner cannot
+   give while the turn runs. [await_idle_after_shutdown] is such an answer: the
+   owner parks its resolver until no child is active, and the child asking for
+   it is that child. The ask used to run under [Eio.Cancel.protect], so failing
+   the child switch left the child exactly where it was: the slot stayed taken,
+   [turn_in_flight] stayed set, and the keeper answered every later request
+   with "the previous turn has not settled". The budget below only decides how
+   long a wedge takes to be reported; a turn that unwinds does so at once. *)
+let turn_unwind_budget_s = 10.0
+
+let test_an_interrupt_ends_a_turn_waiting_on_its_own_owner () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let clock = Eio.Stdenv.clock env in
+  let owner =
+    start_owner_with_executor_ready
+      ~operation_ready:(fun ~keeper_name:_ -> true)
+      ~sw
+      ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+      ~operation_executor:None
+      ~keeper_name:"interrupt-waiting-turn"
+      ~initial_meta:(Some (make_meta "interrupt-waiting-turn"))
+      ()
+    |> owner_ok
+  in
+  let waiting, wait_started = Eio.Promise.create () in
+  let turn = ref None in
+  (match
+     Eio.Time.with_timeout clock turn_unwind_budget_s (fun () ->
+       Eio.Fiber.both
+         (fun () ->
+            turn
+            := Some
+                 (Owner.run_autonomous_if_idle owner (fun () ->
+                    Eio.Promise.resolve wait_started ();
+                    ignore (Owner.await_idle_after_shutdown owner))))
+         (fun () ->
+            Eio.Promise.await waiting;
+            match Owner.turn_in_flight owner with
+            | None -> fail "the turn took the slot without publishing a token to aim at"
+            | Some in_flight ->
+              ignore
+                (Owner.pause_and_interrupt
+                   owner
+                   (Owner.Observed_turn { interrupt_token = in_flight.interrupt_token })));
+       Ok ())
+   with
+   | Ok () -> ()
+   | Error `Timeout -> fail "the interrupt did not end a turn waiting on its own owner");
+  (match !turn with
+   | Some (Ok `Interrupted) -> ()
+   | Some (Ok (`Ran ())) -> fail "the turn finished on its own; the wait under test did not happen"
+   | Some (Ok (`Busy _)) -> fail "the owner never admitted the turn"
+   | Some (Error _) -> fail "the owner refused the turn"
+   | None -> fail "the turn produced no outcome");
+  check bool "the slot is free again" true (Option.is_none (Owner.turn_in_flight owner))
+;;
+
 let test_cooling_retry_readiness_refreshes_on_wake () =
   Eio_main.run @@ fun _env -> Eio.Switch.run @@ fun sw ->
   let now = ref 42.0 in
@@ -4618,6 +4678,10 @@ let () =
         ; test_case "interactive Enter resolves batch member before wire binding" `Quick (test_batch_member_interrupt_before_wire_binding ~interactive:true)
         ; test_case "cooling retry publishes readiness on wake" `Quick
             test_cooling_retry_readiness_refreshes_on_wake
+        ; test_case
+            "an interrupt ends a turn waiting on its own owner"
+            `Quick
+            test_an_interrupt_ends_a_turn_waiting_on_its_own_owner
         ; test_case "retry deadline crossing automatically wakes" `Quick
             test_retry_deadline_crossing_automatically_wakes
         ; test_case "runtime-deferred child drains the same original operation" `Quick

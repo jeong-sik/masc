@@ -26,22 +26,16 @@ launcher에는 서버 주소를 적지 않습니다. host는 워크스페이스�
 
 ## 설정: automation
 
-geckodriver를 loopback에서 실행합니다.
-
-```bash
-geckodriver --host 127.0.0.1 --port 4444
-```
-
-해석된 설정 디렉터리의 `runtime.toml`에 다음을 넣고 MASC를 재시작합니다.
+해석된 설정 디렉터리의 `runtime.toml`에 geckodriver 실행 파일 경로를 넣고 MASC를 재시작합니다.
 
 ```toml
 [browser]
-webdriver_url = "http://127.0.0.1:4444"
+geckodriver = "/absolute/path/to/geckodriver"
 # 선택 사항: 설치된 Firefox 또는 Zen 실행 파일 지정.
 # binary = "/path/to/Zen.app/Contents/MacOS/zen"
 ```
 
-`webdriver_url`은 loopback HTTP origin이어야 합니다. `binary`는 절대 경로여야 하며 `webdriver_url`이 함께 필요합니다. 생략하면 geckodriver가 브라우저를 탐색하므로, Firefox 또는 Zen을 명시적으로 고르려면 지정합니다. 이 설정은 live 연결을 선택하지 않습니다. automation은 기본적으로 headless로 열립니다.
+MASC가 그 geckodriver를 빈 loopback 포트로 띄우고 서버가 끝날 때 내리므로, 드라이버를 따로 실행하거나 포트를 고를 일이 없습니다. `geckodriver`는 절대 경로여야 합니다. `binary`도 절대 경로여야 하며 `geckodriver`가 함께 필요합니다. 생략하면 geckodriver가 브라우저를 탐색하므로, Firefox 또는 Zen을 명시적으로 고르려면 지정합니다. 이 설정은 live 연결을 선택하지 않습니다. automation은 기본적으로 headless로 열립니다.
 
 ## Keeper와 MCP 도구
 

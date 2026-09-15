@@ -1,6 +1,6 @@
 name = "masc_browser_session"
 description = """
-Manage the isolated automation Gecko browser; operator live sessions are not managed. Configure browser.webdriver_url and optional browser.binary (e.g. Zen). After open, use BrowserGoto/Read with lane=automation."""
+Manage the isolated automation Gecko browser; operator live sessions are not managed. Configure browser.geckodriver (the server starts and stops it) and optional browser.binary (e.g. Zen). After open, use BrowserGoto/Read with lane=automation."""
 additional_properties = false
 
 [[params]]

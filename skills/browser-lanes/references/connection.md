@@ -22,23 +22,19 @@
 
 ## 운영자가 automation을 설정할 때
 
-```sh
-geckodriver --host 127.0.0.1 --port 4444 --websocket-port 0
-```
-
 ```toml
 [browser]
-webdriver_url = "http://127.0.0.1:4444"
+geckodriver = "/absolute/path/to/geckodriver"
 # 필요하면 설치된 Firefox/Zen 실행 파일의 절대 경로를 지정한다.
 # binary = "/path/to/Zen.app/Contents/MacOS/zen"
 ```
 
-HTTP 포트와 BiDi 포트는 별개다. `--websocket-port 0`은 OS가 빈 포트를 배정하게
-한다. 기본 9222가 점유돼 있으면 HTTP driver가 ready여도 BiDi handshake가
-실패할 수 있다. **404만으로 포트 충돌을 확정하지 말고** 해당 driver 로그의
-address-in-use와 반환 endpoint를 함께 확인한다.
+geckodriver는 MASC 서버가 직접 띄우고 서버가 끝날 때 내린다. 빈 loopback 포트와
+`--websocket-port 0`을 쓰므로 포트를 고를 일이 없다. 드라이버 출력은
+`.masc/browser-lane/geckodriver.log`에 있다.
 
-복구할 때는 종료된 자기 테스트 세션과 자신이 시작한 driver만 대상으로 한다.
+복구할 때는 종료된 자기 테스트 세션만 대상으로 한다. geckodriver 프로세스는
+서버 몫이라 Keeper가 종료하거나 새로 띄우지 않는다.
 다른 브라우저나 9222의 기존 프로세스를 종료하지 않는다. Keeper에게 운영자
 프로세스 제어 권한이 주어진 것으로 해석하지 않는다.
 

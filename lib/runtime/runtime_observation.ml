@@ -211,8 +211,6 @@ let runtime_metrics_for_candidates () =
           ~error:(Some message));
       on_capability_drop = (fun ~model_id:_ ~field:_ -> ());
       on_http_status = (fun ~provider:_ ~model_id:_ ~status:_ -> ());
-      on_circuit_state =
-        (fun ~provider:_ ~model_id:_ ~provider_key:_ ~state:_ -> ());
       on_retry = (fun ~provider:_ ~model_id:_ ~attempt:_ -> ());
       on_token_usage =
         (fun ~provider:_ ~model_id:_ ~input_tokens:_ ~output_tokens:_ -> ());

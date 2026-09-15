@@ -22,10 +22,9 @@ type 'clock t = private
 (** Opens the window now on the deadline's clock. *)
 val open_ : (_ Eio.Time.clock as 'clock) Http_client.explicit_deadline -> 'clock t
 
-(** What the window has left now, in seconds. A window with nothing left is
-    [`Spent], so no stage is handed a bound that is not greater than zero;
-    [`Spent] carries the budget as declared, and the caller names the phase
-    it ends as. *)
+(** What the window has left now, in seconds, or [`Spent] with the budget as
+    declared once nothing is left. A caller that asks between two stages
+    names the phase a window the earlier stage spent ends as. *)
 val remaining
   :  _ Eio.Time.clock t
   -> [ `Unbounded | `Remaining of float | `Spent of float ]

@@ -1294,6 +1294,18 @@ let test_an_auto_enabling_wire_needs_a_declared_effort () =
     true
     (Result.is_ok (validate ~reasoning_effort:Reasoning_effort.High auto_enabling));
   Alcotest.(check bool)
+    "a lane that says it rides the provider default is admitted"
+    true
+    (Result.is_ok
+       (Provider_config.validate_reasoning_effort_request_typed
+          (Provider_config.make
+             ~kind:OpenAI_compat
+             ~model_id:"auto-enabling-model"
+             ~base_url:"https://ollama.com/v1"
+             ~model_capabilities_override:auto_enabling
+             ~reasoning_uncontrolled:true
+             ())));
+  Alcotest.(check bool)
     "a model that does not reason needs no effort"
     true
     (Result.is_ok (validate { auto_enabling with supports_reasoning = false }));

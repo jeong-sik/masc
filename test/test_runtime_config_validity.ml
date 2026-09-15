@@ -953,6 +953,58 @@ let test_model_without_reasoning_effort_leaves_it_unset () =
          (model.Runtime_schema.reasoning_effort = None)
      | _ -> fail "exactly one model must parse")
 
+(* [reasoning-uncontrolled] is the other half of the same declaration: on a
+   wire that turns reasoning on when the request carries no control, a row
+   either names an effort or says out loud that it rides the provider's own
+   default. Saying nothing is what Provider_config refuses, so the parsed
+   value has to reach the model spec rather than being accepted and dropped. *)
+let test_model_reasoning_uncontrolled_parses_into_the_spec () =
+  let config =
+    "[models.probe]\napi-name = \"probe\"\nreasoning-uncontrolled = true\n"
+  in
+  match Runtime_toml.parse_string config with
+  | Error _ -> fail "a model declaring reasoning-uncontrolled must parse"
+  | Ok parsed ->
+    (match parsed.Runtime_schema.models with
+     | [ model ] ->
+       check
+         bool
+         "reasoning-uncontrolled true reaches the model spec"
+         true
+         model.Runtime_schema.reasoning_uncontrolled
+     | _ -> fail "exactly one model must parse")
+
+let test_model_declaring_both_reasoning_controls_is_rejected () =
+  let config =
+    "[models.probe]\napi-name = \"probe\"\nreasoning-effort = \"low\"\n\
+     reasoning-uncontrolled = true\n"
+  in
+  match Runtime_toml.parse_string config with
+  | Ok _ -> fail "a row declaring both reasoning controls must be refused"
+  | Error errors ->
+    check
+      bool
+      "the refusal names the reasoning-uncontrolled key"
+      true
+      (List.exists
+         (fun (e : Runtime_toml.parse_error) ->
+            e.path = "models.probe.reasoning-uncontrolled")
+         errors)
+
+let test_model_without_reasoning_uncontrolled_stays_silent () =
+  let config = "[models.probe]\napi-name = \"probe\"\n" in
+  match Runtime_toml.parse_string config with
+  | Error _ -> fail "a model without reasoning-uncontrolled must still parse"
+  | Ok parsed ->
+    (match parsed.Runtime_schema.models with
+     | [ model ] ->
+       check
+         bool
+         "an undeclared reasoning-uncontrolled is false, not a declaration"
+         false
+         model.Runtime_schema.reasoning_uncontrolled
+     | _ -> fail "exactly one model must parse")
+
 (* [turn-timeout-s] exists because reasoning effort is per model while the only
    pre-existing bound was per provider (antigravity [timeout-s]) or absent
    entirely (claude-code, codex-app-server, both fixed at 300s in the adapter).
@@ -5417,6 +5469,15 @@ let () =
         ; test_case
             "a model without reasoning-effort leaves it unset"
             `Quick test_model_without_reasoning_effort_leaves_it_unset
+        ; test_case
+            "a model declaring reasoning-uncontrolled reaches the spec"
+            `Quick test_model_reasoning_uncontrolled_parses_into_the_spec
+        ; test_case
+            "a model without reasoning-uncontrolled is not a declaration"
+            `Quick test_model_without_reasoning_uncontrolled_stays_silent
+        ; test_case
+            "a model declaring both reasoning controls is refused"
+            `Quick test_model_declaring_both_reasoning_controls_is_rejected
         ; test_case
             "turn-timeout-s parses as a positive float"
             `Quick test_model_turn_timeout_parses_as_a_positive_float

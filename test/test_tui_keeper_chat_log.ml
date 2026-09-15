@@ -144,7 +144,8 @@ let test_decode_events_page () =
        check int "two events" 2 (List.length page.events);
        check bool "has_more" true page.has_more;
        check position "cursor" (Journal.After_seq 1) page.next_since_seq;
-       check int "byte cursor" 212 page.next_since_offset
+       check int "byte cursor" 212
+         (Journal.page_start_offset page.next_since_offset)
    | Error detail -> fail detail);
   (* The byte cursor is required and never negative: a page without it cannot
      be continued from where it ended. *)
@@ -383,6 +384,16 @@ let test_decode_events_error_by_code () =
   check events_error "an unknown code is undecodable with the status and message"
     (Log.Events_undecodable "400 operation_id is required")
     (decode ~status:400 (envelope "invalid_input" "operation_id is required"));
+  (* The three cursor codes are the journal's own; the pane is told the read's
+     positions no longer place, not that the body was unreadable. *)
+  List.iter
+    (fun refusal ->
+       let code = Journal.cursor_refusal_to_wire refusal in
+       check events_error
+         ("400 " ^ code ^ " is a typed cursor refusal")
+         (Log.Cursor_refused { refusal; message = "cursor says no" })
+         (decode ~status:400 (envelope code "cursor says no")))
+    [ Journal.Offset_past_rows; Journal.Offset_inside_row; Journal.Cursor_pair_mismatch ];
   check events_error "a body that is not JSON is undecodable as it came"
     (Log.Events_undecodable "502 <html>bad gateway</html>")
     (decode ~status:502 "<html>bad gateway</html>");
@@ -398,14 +409,51 @@ let test_decode_events_error_by_code () =
     (Log.decode_events_error ~status:403 ~credential_sent:false "forbidden")
 ;;
 
+(* The request the pager sends: both cursors in their request spelling, each
+   absent for its own start. The executable's HTTP module cannot be linked by
+   a test, so the query it sends is built here, where this can hold it: a
+   dropped or misspelled cursor would still read correctly, one whole prefix
+   decoded per page on the server, with nothing else to fail. *)
+let test_events_query_spells_both_cursors () =
+  let query ~since_seq ~since_offset =
+    Log.events_query ~encode_value:(fun value -> value ^ "%20") ~operation_id:"op 1"
+      ~since_seq ~since_offset ~limit:2000
+  in
+  let offset value =
+    match Journal.page_start_of_wire (Some value) with
+    | Some start -> start
+    | None -> failf "offset %d is not a cursor" value
+  in
+  check string "the first page names neither cursor"
+    "operation_id=op 1%20&limit=2000"
+    (query ~since_seq:Journal.Whole_turn ~since_offset:Journal.first_row);
+  check string "a resumed read names the seq it holds"
+    "operation_id=op 1%20&since_seq=7&limit=2000"
+    (query ~since_seq:(Journal.After_seq 7) ~since_offset:Journal.first_row);
+  check string "a later page names both cursors"
+    "operation_id=op 1%20&since_seq=7&since_offset=212&limit=2000"
+    (query ~since_seq:(Journal.After_seq 7) ~since_offset:(offset 212))
+;;
+
 (* The pager follows has_more only while both cursors advance, starts where
    it is told from the first row, asks every later page from the byte offset
    the page before handed back, and stops at the first error. *)
 let test_read_whole_journal_pages_until_the_position_stops_moving () =
   let asked = ref [] in
   let l seq = line seq (float_of_int seq) (E.Text_delta (string_of_int seq)) in
+  let offset value =
+    match Journal.page_start_of_wire (Some value) with
+    | Some start -> start
+    | None -> failf "offset %d is not a cursor" value
+  in
   let page ~events ~has_more ~next_since_seq ~next_since_offset =
-    Ok { Log.operation_id = "op"; events; has_more; next_since_seq; next_since_offset }
+    Ok
+      { Log.operation_id = "op"
+      ; events
+      ; has_more
+      ; next_since_seq
+      ; next_since_offset = offset next_since_offset
+      }
   in
   let page_of (since_seq : Journal.replay_position)
       (since_offset : Journal.page_start) =
@@ -627,6 +675,8 @@ let () =
             test_decode_events_error_by_code
         ; test_case "hold_seq counts without an entry" `Quick
             test_hold_seq_counts_without_an_entry
+        ; test_case "the events query spells both cursors" `Quick
+            test_events_query_spells_both_cursors
         ; test_case "read_whole_journal pages until the position stops moving" `Quick
             test_read_whole_journal_pages_until_the_position_stops_moving
         ] )

@@ -82,7 +82,7 @@ type events_page =
         (** The position to ask the next page from, in the response spelling
             ({!Masc.Keeper_chat_event_log.replay_position_of_yojson}: null is
             the whole journal, an integer >= 0 the seq to read after). *)
-  ; next_since_offset : int
+  ; next_since_offset : Masc.Keeper_chat_event_log.page_start
         (** The byte offset past the last event served, or the offset the
             page was asked from when it served none: where the next page
             starts reading, sent back beside [next_since_seq]. *)
@@ -106,6 +106,16 @@ type events_error =
           there is. *)
   | Journal_unavailable of string
       (** The journal exists and could not be read now; the server's message. *)
+  | Cursor_refused of
+      { refusal : Masc.Keeper_chat_event_log.cursor_refusal
+      ; message : string
+      }
+      (** 400 on one of the journal's cursor codes: the seq and byte cursors
+          this read held no longer place in the journal, which is what a
+          journal replaced or shortened under a page-by-page read looks like.
+          Nothing is remembered for the operation: the next load starts from
+          the first row, where no cursor is held, so it cannot be refused the
+          same way. *)
   | Events_refused of string
       (** 401/403: this client's credential, not the journal. One sentence
           for the operator; the pane stops asking for journals this session. *)
@@ -117,11 +127,25 @@ type events_error =
 
 val events_error_to_string : events_error -> string
 
+val events_query
+  :  encode_value:(string -> string)
+  -> operation_id:string
+  -> since_seq:Masc.Keeper_chat_event_log.replay_position
+  -> since_offset:Masc.Keeper_chat_event_log.page_start
+  -> limit:int
+  -> string
+(** The query string of one events request, after the ["?"]: [operation_id],
+    the two cursors in their request spelling (each absent for its own "from
+    the start"), and [limit]. [encode_value] encodes the operation id for a
+    query value. *)
+
 val decode_events_error : status:int -> credential_sent:bool -> string -> events_error
 (** The typed error behind a non-2xx events response: 401/403 are
     {!Events_refused} ([credential_sent] is whether the request carried a
-    bearer), the envelope's [error] code names the journal errors, anything
-    else is {!Events_undecodable}. *)
+    bearer), the envelope's [error] code names the journal errors and the
+    three cursor refusals
+    ({!Masc.Keeper_chat_event_log.cursor_refusal_of_wire}), anything else is
+    {!Events_undecodable}. *)
 
 val read_whole_journal :
   fetch:
@@ -132,7 +156,8 @@ val read_whole_journal :
   (Masc.Keeper_chat_event_log.journaled_event list, events_error) result
 (** Every line past [since_seq] (the whole journal, or after a held seq),
     page by page through [fetch]. The first page is asked from the first row
-    ([From_first_row]), every later one from the [next_since_offset] of the
+    ({!Masc.Keeper_chat_event_log.first_row}), every later one from the
+    [next_since_offset] of the
     page before, beside its [next_since_seq]. The read follows [has_more]
     while both cursors advance past the ones asked from. The first error ends
     the read; a page that claims more without advancing is

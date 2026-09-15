@@ -628,7 +628,11 @@ let run_cmd ?(record_default = false) host port cli_base_path accept_store_quara
         | Env_config.Record_failed { record; reason } ->
           Log.Server.warn
             "default workspace not recorded: could not write %s (%s); pass --base-path to later commands"
-            record reason)
+            record reason
+        | Env_config.Not_a_workspace { path } ->
+          Log.Server.warn
+            "default workspace not recorded: %s holds no .masc/config (is MASC_CONFIG_DIR set?); pass --base-path to later commands"
+            path)
      | Server_base_path_guard.Persisted_default | Server_base_path_guard.Implicit_default -> ())
   in
   let masc_dir = Filename.concat canonical_base_path Common.masc_dirname in
@@ -1290,8 +1294,9 @@ let init_record_default =
   let doc =
     "Record this workspace as the default for later commands (in \
      XDG_CONFIG_HOME/masc/default-base-path, else ~/.config). Off by default: \
-     a throwaway workspace must not become the machine's default. `masc setup` \
-     and the installer pass it."
+     a throwaway workspace must not become the machine's default. The installer \
+     and `masc setup` pass it only when run on a terminal, and the setup journey \
+     passes it for the workspace chosen there."
   in
   Arg.(value & flag & info [ "record-default" ] ~doc)
 
@@ -1369,8 +1374,8 @@ let init_cmd_exit base_path force scope record_default =
 
      Off unless asked. `init` is what suites and scripts call to make a
      throwaway workspace, and a default recorded from one of those points the
-     next process at a directory that is about to vanish. Only the operator
-     paths ask: `masc setup`, and the installer's own seed. *)
+     next process at a directory that is about to vanish. Only a person asks:
+     the installer and `masc setup` on a terminal, and the setup journey. *)
   if record_default && result.failed = 0 then (
     match Env_config.record_default_base_path base_path with
     | Env_config.Recorded path ->
@@ -1384,6 +1389,11 @@ let init_cmd_exit base_path force scope record_default =
         "default workspace not recorded: could not write %s (%s); pass --base-path \
          to later commands\n"
         record reason
+    | Env_config.Not_a_workspace { path } ->
+      Printf.printf
+        "default workspace not recorded: %s holds no .masc/config; pass --base-path \
+         to later commands\n"
+        path
     | Env_config.Refused_under_test ->
       (* Says so rather than staying silent: a suite that expected a default
          to exist should fail on the missing default, not on its absence

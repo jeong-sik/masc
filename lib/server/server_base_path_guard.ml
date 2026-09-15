@@ -37,7 +37,7 @@ let normalize raw =
   Env_config.normalize_masc_base_path_input raw
 
 (* The workspace `masc setup` / `masc init` recorded, if it still holds a
-   .masc directory. This is not the implicit default the guard exists to
+   .masc/config directory. This is not the implicit default the guard exists to
    refuse: the implicit default is the process cwd, which nobody chose, while
    this path was named on an earlier command line and is re-checked here. *)
 let recorded_default () =

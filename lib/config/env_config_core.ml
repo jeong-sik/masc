@@ -640,6 +640,7 @@ type record_outcome =
   | No_record_location
   | Refused_under_test
   | Record_failed of { record : string; reason : string }
+  | Not_a_workspace of { path : string }
 
 
 let record_default_base_path path =
@@ -651,6 +652,13 @@ let record_default_base_path path =
     let normalized = normalize_masc_base_path_input path in
     if normalized = ""
     then Record_failed { record; reason = "the workspace path normalized to nothing" }
+    else if not
+              (existing_dir
+                 (Filename.concat (Filename.concat normalized Common.masc_dirname) "config"))
+    then
+      (* The reader accepts only a record whose path holds .masc/config. Writing
+         one it would call stale leaves the operator believing a default exists. *)
+      Not_a_workspace { path = normalized }
     else (
       try
         (* A later process can run from any directory. Persist the workspace

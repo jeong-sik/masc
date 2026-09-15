@@ -217,6 +217,9 @@ type record_outcome =
           a suite that seeds a workspace in a temp dir would otherwise leave
           that path as the machine's default until the directory vanished. *)
   | Record_failed of { record : string; reason : string }
+  | Not_a_workspace of { path : string }
+      (** [path] holds no [.masc/config] directory, so the reader would ignore
+          the record as stale; nothing is written. *)
 
 val record_default_base_path : string -> record_outcome
 (** Record the absolute canonical identity of the existing [path] as the

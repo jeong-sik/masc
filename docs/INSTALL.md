@@ -164,9 +164,11 @@ suggests `$HOME/MASC`, the same directory the setup journey suggests. If the
 current directory already has a `.masc/config`, it suggests that workspace. An
 explicit `--base-path` is used without asking, and a noninteractive run or
 `--no-wizard` keeps the current directory. `.masc` is created under the given
-base path. An install on a terminal records the workspace as the default that a
-later bare `masc` finds; a scripted install without a terminal records nothing,
-so a verification or CI install does not change the machine's default. The install location and the working-data
+base path. When an install on a terminal seeds the workspace configuration, it
+records the workspace as the default that a later bare `masc` finds. A reinstall
+that keeps an existing configuration leaves the recorded default as it is, and a
+scripted install without a terminal records nothing, so a verification or CI
+install does not change the machine's default. The install location and the working-data
 location are independent. The `install.sh` on the release page installs that
 version's assets, and installer fixes are recorded in the release notes with
 their source commit. The binary tag is not changed. A missing or mismatched

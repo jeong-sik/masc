@@ -4377,7 +4377,7 @@ let test_invalid_surface_post_input_stays_correction_capable () =
    snapshot does not hold is refused before the store, and a store that cannot
    take the next write and retraction leaves their commit unknown. Every
    failure comes back to the model naming what committed, and none of them
-   ends the turn: doing the call again adds no second copy. *)
+   ends the turn. *)
 let test_memory_calls_in_a_mixed_batch_answer_the_model_whatever_they_committed () =
   with_exec_fixture
     "memory_calls_mixed_batch"
@@ -4454,10 +4454,12 @@ let test_memory_calls_in_a_mixed_batch_answer_the_model_whatever_they_committed 
              (result : Agent_core.Agent_tools.tool_execution_result) =
          check bool (label ^ " is an error result") true
            (Agent_core.Types.tool_result_outcome_is_error result.outcome);
-         check bool (label ^ " names what committed") true
-           (String_util.contains_substring
-              result.content
-              (Tool_result.failure_effect_disposition_to_string disposition))
+         let payload = parse_json result.content in
+         check string (label ^ " names what committed")
+           (Tool_result.failure_effect_disposition_to_string disposition)
+           Yojson.Safe.Util.(member "effect_disposition" payload |> to_string);
+         check bool (label ^ " says what committed") false
+           (String.equal "" Yojson.Safe.Util.(member "what_committed" payload |> to_string))
        in
        let lane_status id = id, "keeper_lane_status", `Assoc [] in
        let keepers_dir =
@@ -4521,6 +4523,34 @@ let test_memory_calls_in_a_mixed_batch_answer_the_model_whatever_they_committed 
        failed_naming Tool_result.Effect_outcome_unknown "the retraction the store failed"
          (second "retract-unknown");
        succeeded "lane status beside failed memory calls" (second "lane-second"))
+;;
+
+(* The one failure a memory call used to end the turn on was a proven
+   post-effect one. No store here produces it, so the bundle's own rule is
+   checked for every disposition, beside a file write that still ends the
+   turn once its change is applied. *)
+let test_a_failed_memory_call_never_ends_the_turn () =
+  let ends_turn = Masc.Keeper_tools_agent_core_bundle.For_testing.ordinary_failure_ends_turn in
+  List.iter
+    (fun (label, handler) ->
+       List.iter
+         (fun disposition ->
+            check bool
+              (Printf.sprintf
+                 "a %s failure with %s keeps the turn"
+                 label
+                 (Tool_result.failure_effect_disposition_to_string disposition))
+              false
+              (ends_turn handler disposition))
+         [ Tool_result.Proven_pre_effect
+         ; Tool_result.Proven_post_effect
+         ; Tool_result.Effect_outcome_unknown
+         ])
+    [ "memory write", KTD.Tool_memory_write; "memory retract", KTD.Tool_memory_retract ];
+  check bool
+    "an applied file write ends the turn"
+    true
+    (ends_turn KTD.Tool_write_file Tool_result.Proven_post_effect)
 ;;
 
 let with_openai_tool_call_server ?second_response ~tool_name ~tool_input f =
@@ -5463,19 +5493,11 @@ value = { query = "must-not-queue" }
 ;;
 
 (* #30220 made skills the only composition source: [make_tools] reads
-   [Keeper_skill_catalog.composition_entries], not a bare catalog. The fixtures
-   here are still composition TOML -- what changed is who carries it to the
-   bundle -- so this wraps one in the skill document that now does. The
+   [Keeper_skill_catalog.composition_entries], not a bare catalog. A skill
+   document, fixture or shipped, becomes the catalog [make_tools] reads. The
    directory has to match the frontmatter name, which has to match the
    composition's own name; that is what decides the [keeper_compose_*] tool. *)
-let skill_catalog_of_composition ~name toml =
-  let document =
-    Printf.sprintf
-      "---\nname: %s\ndescription: %s\n---\n\nComposition fixture.\n\n```toml composition\n%s```\n"
-      name
-      name
-      toml
-  in
+let skill_catalog_of_document ~name document =
   let config_text =
     {|[skills]
 resource-read-max-bytes = 65536
@@ -5523,6 +5545,18 @@ access = "read-write"
       "composition fixture %S was rejected as a skill: %s"
       name
       (Masc.Keeper_skill_catalog.error_to_string diagnostic.error)
+;;
+
+(* The fixtures here are composition TOML, wrapped in the skill document that
+   carries a composition to the bundle. *)
+let skill_catalog_of_composition ~name toml =
+  skill_catalog_of_document
+    ~name
+    (Printf.sprintf
+       "---\nname: %s\ndescription: %s\n---\n\nComposition fixture.\n\n```toml composition\n%s```\n"
+       name
+       name
+       toml)
 ;;
 
 let one_node_terminal_composition =
@@ -5641,6 +5675,30 @@ name = "query"
 [compositions.nodes.input.fields.value]
 kind = "param"
 name = "query"
+|}
+;;
+
+let enum_param_memory_composition =
+  {|[[compositions]]
+name = "memory-by-mode"
+execution = "inline"
+
+[[compositions.params]]
+name = "mode"
+type = "string"
+enum = ["scene", "regions"]
+description = "Which word to search durable memory for."
+
+[[compositions.nodes]]
+id = "search"
+tool = "keeper_memory_search"
+[compositions.nodes.input]
+kind = "object"
+[[compositions.nodes.input.fields]]
+name = "query"
+[compositions.nodes.input.fields.value]
+kind = "param"
+name = "mode"
 |}
 ;;
 
@@ -6756,6 +6814,129 @@ let test_composition_plan_failure_exposes_typed_cause () =
            "typed plan failure"
            "input_validation_failed"
            Yojson.Safe.Util.(member "error" cause |> member "kind" |> to_string))
+;;
+
+(* A turn calls a composition tool through Agent-Core's own tool execution,
+   which checks the call against the tool's input schema before any handler
+   runs. *)
+let call_through_agent_core tools name input =
+  match
+    Agent_core.Agent_tools.find_and_execute_tool
+      ~context:(Agent_core.Context.create_sync ())
+      ~tools
+      ~hooks:Agent_core.Hooks.empty
+      ~event_bus:None
+      ~tracer:Agent_core.Tracing.null
+      ~agent_name:"composition-enum-probe"
+      ~invocation:
+        (composition_invocation
+           ~completion:Agent_core.Tool_contract.Continue_after_success)
+      name
+      input
+  with
+  | Ok result -> result
+  | Error (Agent_core.Agent_tools.Hook_execution_failed { detail; _ }) ->
+    failf "a composition call with no hooks failed in a hook: %s" detail
+;;
+
+let check_refused_before_handler ~label (result : Agent_core.Agent_tools.tool_execution_result) =
+  match result.outcome with
+  | Agent_core.Types.Tool_failed { failure_kind = Agent_core.Types.Validation_error; _ } -> ()
+  | Agent_core.Types.Tool_failed _ | Agent_core.Types.Tool_succeeded ->
+    failf "%s was not refused by the input schema check: %s" label result.content
+;;
+
+(* The materialized composition tool carries its enum into the schema
+   Agent-Core checks, so a value outside the members never reaches the
+   composition handler, while a member does and is bound into the plan. *)
+let test_composition_enum_param_is_refused_before_the_handler () =
+  with_exec_fixture "composition-enum-param-refusal"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let tool_name = "keeper_compose_memory-by-mode" in
+       let tools =
+         Masc.Keeper_tools_agent_core_bundle.For_testing.make_tools
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ~skill_catalog:
+             (skill_catalog_of_composition
+                ~name:"memory-by-mode"
+                enum_param_memory_composition)
+           ()
+       in
+       let member_call =
+         call_through_agent_core tools tool_name (`Assoc [ "mode", `String "regions" ])
+       in
+       let payload = parse_json member_call.content in
+       check string
+         "a member reaches the composition handler"
+         tool_name
+         Yojson.Safe.Util.(payload |> member "composition_tool" |> to_string);
+       check_refused_before_handler
+         ~label:"a string outside the members"
+         (call_through_agent_core tools tool_name (`Assoc [ "mode", `String "text" ]));
+       check_refused_before_handler
+         ~label:"a non-string value"
+         (call_through_agent_core tools tool_name (`Assoc [ "mode", `Int 1 ])))
+;;
+
+(* The two shipped browser compositions offer scene and regions; BrowserRead
+   itself also takes text, so only the composition's own schema can refuse it.
+   The same arguments with mode scene must pass that schema, and text must fail
+   on mode alone, or the refusal could come from an argument this test does not
+   send. *)
+let test_shipped_browser_composition_refuses_text_mode skill_name arguments () =
+  with_exec_fixture ("composition-enum-" ^ skill_name)
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let document =
+         In_channel.with_open_bin
+           (Filename.concat (Filename.concat "../skills" skill_name) "SKILL.md")
+           In_channel.input_all
+       in
+       let tools =
+         Masc.Keeper_tools_agent_core_bundle.For_testing.make_tools
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ~skill_catalog:(skill_catalog_of_document ~name:skill_name document)
+           ()
+       in
+       let tool_name = "keeper_compose_" ^ skill_name in
+       let tool =
+         match find_tool_by_name tools tool_name with
+         | Some tool -> tool
+         | None -> failf "%s was not materialized from its shipped skill" tool_name
+       in
+       let input mode = `Assoc (arguments @ [ "mode", `String mode ]) in
+       (match
+          Agent_core.Tool_input_validation.validate
+            tool.Agent_core.Tool.schema
+            (input "scene")
+        with
+        | Agent_core.Tool_input_validation.Valid _ -> ()
+        | Agent_core.Tool_input_validation.Invalid errors ->
+          failf
+            "%s refused mode scene with the arguments this test sends: %s"
+            tool_name
+            (Agent_core.Tool_input_validation.format_errors_inline
+               ~tool_name
+               ~args:(input "scene")
+               errors));
+       (match
+          Agent_core.Tool_input_validation.validate
+            tool.Agent_core.Tool.schema
+            (input "text")
+        with
+        | Agent_core.Tool_input_validation.Invalid
+            [ { Agent_core.Tool_input_validation.path = "/mode"; _ } ] -> ()
+        | Agent_core.Tool_input_validation.Invalid _
+        | Agent_core.Tool_input_validation.Valid _ ->
+          failf "%s did not refuse mode text on mode alone" tool_name);
+       check_refused_before_handler
+         ~label:"mode text"
+         (call_through_agent_core tools tool_name (input "text")))
 ;;
 
 let test_composition_read_failure_preserves_same_turn
@@ -9062,6 +9243,8 @@ let () =
         test_invalid_surface_post_input_stays_correction_capable;
       test_case "memory calls in a mixed batch answer the model whatever they committed" `Quick
         test_memory_calls_in_a_mixed_batch_answer_the_model_whatever_they_committed;
+      test_case "a failed memory call never ends the turn" `Quick
+        test_a_failed_memory_call_never_ends_the_turn;
       test_case "surface append failure is not terminal completion" `Quick
         test_surface_post_append_failure_does_not_complete_terminal_effect;
       test_case "frozen surface rejects a registered-only tool" `Quick
@@ -9100,6 +9283,21 @@ let () =
         test_terminal_composition_materializes_terminal_completion;
       test_case "composition failure exposes typed plan cause" `Quick
         test_composition_plan_failure_exposes_typed_cause;
+      test_case "composition enum param is refused before the handler" `Quick
+        test_composition_enum_param_is_refused_before_the_handler;
+      test_case "shipped navigate-read refuses mode text" `Quick
+        (test_shipped_browser_composition_refuses_text_mode
+           "browser-navigate-read"
+           [ "tabId", `Int 7; "url", `String "https://example.org/start" ]);
+      test_case "shipped live-follow-read refuses mode text" `Quick
+        (test_shipped_browser_composition_refuses_text_mode
+           "browser-live-follow-read"
+           [ "clientId", `String "11111111-1111-4111-8111-111111111111"
+           ; "tabId", `Int 7
+           ; "documentId", `String "observed"
+           ; "nodeId", `String "link"
+           ; "expectedUrl", `String "https://example.org/before"
+           ]);
       test_case "durable ordinary read failure permits same-turn read retry" `Quick
         (test_composition_read_failure_preserves_same_turn ~observe:true ~break_receipt:false ~terminal:false ~unknown_write:false);
       test_case "no observer cannot authorize read recovery" `Quick

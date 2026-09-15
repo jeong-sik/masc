@@ -392,8 +392,8 @@ let keepers_section now : section =
   { title; content; empty_msg = "(no keepers registered)" }
 
 (** Attention section: items requiring operator action *)
-let attention_section now (snapshots : workspace_snapshot list) : section =
-  let items = Dashboard_attention.collect ~now snapshots in
+let attention_section now ~operator_tasks (snapshots : workspace_snapshot list) : section =
+  let items = Dashboard_attention.collect ~now ~operator_tasks snapshots in
   let content = Dashboard_attention.format_items items in
   { title = "Attention Required"; content; empty_msg = "No action needed" }
 
@@ -410,6 +410,8 @@ let generate ?(scope = Dashboard_scope_all) (config : Workspace_utils.config) : 
   let workspace_id = active_workspace_id in
   let all_agents = List.concat_map (fun s -> s.agents) snapshots in
   let all_tasks = List.concat_map (fun s -> s.tasks) snapshots in
+  (* The same rows, asked one more question: can anyone still move this. *)
+  let operator_tasks = Operator_task_attention.project ~config all_tasks in
   let header =
     Printf.sprintf
       "========================================\n   MASC Dashboard   %s\n   Workspace: %s | %d agents\n========================================"
@@ -420,7 +422,7 @@ let generate ?(scope = Dashboard_scope_all) (config : Workspace_utils.config) : 
   (* Operator-first section order *)
   let sections =
     [
-      attention_section now snapshots;
+      attention_section now ~operator_tasks snapshots;
       agents_grouped_section now all_agents;
       keepers_section now;
       tasks_section all_tasks;
@@ -446,6 +448,8 @@ let generate_compact ?(scope = Dashboard_scope_all) (config : Workspace_utils.co
   let workspace_id = active_workspace_id in
   let all_agents = List.concat_map (fun s -> s.agents) snapshots in
   let all_tasks = List.concat_map (fun s -> s.tasks) snapshots in
+  (* The same rows, asked one more question: can anyone still move this. *)
+  let operator_tasks = Operator_task_attention.project ~config all_tasks in
   let (active_tasks, pending_tasks) = split_tasks all_tasks in
   let blocked_tasks =
     List.filter (fun (t : Masc_domain.task) ->
@@ -487,7 +491,7 @@ let generate_compact ?(scope = Dashboard_scope_all) (config : Workspace_utils.co
   let k_running = keeper_by_phase Running in
   let k_other = List.length keeper_entries - k_running in
   (* Attention *)
-  let attention_items = Dashboard_attention.collect ~now snapshots in
+  let attention_items = Dashboard_attention.collect ~now ~operator_tasks snapshots in
   let attention_line = Dashboard_attention.compact_summary attention_items in
   String.concat "\n"
     [

@@ -101,6 +101,7 @@ function makeRequest(overrides: Partial<VerificationRequest> = {}): Verification
     required_artifacts: [],
     submitted_evidence: [],
     evidence_projection_error: null,
+    cancellation_reason: null,
     ...overrides,
   }
 }

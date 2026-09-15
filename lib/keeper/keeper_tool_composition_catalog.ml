@@ -8,6 +8,12 @@ type expected_value =
   | Table_array_value
   | Array_value
 
+type enum_value_fault =
+  | Empty_value
+  | Padded_value
+  | Line_break_in_value
+  | Separator_in_value
+
 type error =
   | Toml_syntax of string
   | Empty_catalog
@@ -72,10 +78,10 @@ type error =
       ; type_name : string
       }
   | Empty_param_enum of { path : string list }
-  | Empty_param_enum_value of { path : string list }
-  | Padded_param_enum_value of
+  | Unsendable_param_enum_value of
       { path : string list
       ; value : string
+      ; fault : enum_value_fault
       }
   | Duplicate_param_enum_value of
       { path : string list
@@ -399,19 +405,30 @@ and parse_array_template ~path fields =
           parse_items 0 [] raw_items))
 ;;
 
-(* A member the model could not send back exactly. Providers that cannot
-   carry [enum] get the members folded into the tool description as plain
-   text (Backend_openai_serialize.conformant_schema_value), where an empty
-   member shows as nothing and surrounding whitespace is lost, while the
-   call is still checked against the exact member. *)
+(* A member the model could not send back exactly. A provider that cannot
+   carry [enum] gets the members written unquoted into the parameter's own
+   description (Agent_core.Types.enum_vocabulary_text), while the call is
+   still checked against the exact member. Any separator character in a
+   member is refused, not only the spaced form the text uses: ["x |"] next to
+   ["y"] would read as ["x"] and ["| y"]. *)
+let enum_value_fault value =
+  if String.equal value ""
+  then Some Empty_value
+  else if not (String.equal (String.trim value) value)
+  then Some Padded_value
+  else if String.contains value '\n' || String.contains value '\r'
+  then Some Line_break_in_value
+  else if String.contains value Agent_core.Types.enum_member_separator
+  then Some Separator_in_value
+  else None
+;;
+
 let first_unsendable_member ~path members =
   List.find_map
-    (fun member ->
-       if String.equal member ""
-       then Some (Empty_param_enum_value { path })
-       else if String.equal (String.trim member) member
-       then None
-       else Some (Padded_param_enum_value { path; value = member }))
+    (fun value ->
+       Option.map
+         (fun fault -> Unsendable_param_enum_value { path; value; fault })
+         (enum_value_fault value))
     members
 ;;
 
@@ -740,13 +757,18 @@ let error_to_string = function
       type_name
   | Empty_param_enum { path } ->
     "enum must list at least one member at " ^ String.concat "." path
-  | Empty_param_enum_value { path } ->
-    "enum lists an empty member at " ^ String.concat "." path
-  | Padded_param_enum_value { path; value } ->
-    Printf.sprintf
-      "enum member %S at %s has leading or trailing whitespace"
-      value
-      (String.concat "." path)
+  | Unsendable_param_enum_value { path; value; fault } ->
+    let problem =
+      match fault with
+      | Empty_value -> "is empty"
+      | Padded_value -> "has leading or trailing whitespace"
+      | Line_break_in_value -> "contains a line break"
+      | Separator_in_value ->
+        Printf.sprintf
+          "contains %C, which separates members when they are written into a description"
+          Agent_core.Types.enum_member_separator
+    in
+    Printf.sprintf "enum member %S at %s %s" value (String.concat "." path) problem
   | Duplicate_param_enum_value { path; value } ->
     Printf.sprintf "enum lists member %S twice at %s" value (String.concat "." path)
   | Duplicate_param_name { name; param } ->

@@ -559,25 +559,53 @@ let message_measurer () =
     Buffer.length buffer
 ;;
 
-module Message_identity = struct
+(* The memo is keyed by message value. Each request passes its history through
+   [Complete_common.transmitted_history], which allocates a new record for every
+   message ([Reasoning_history_projection.project]), so the key has to survive a
+   rebuilt record.
+
+   Messages equal under [Stdlib.compare] encode to the same bytes with one
+   exception: a float zero inside a raw JSON payload ([ToolUse.input],
+   [ToolResult.json], [reasoning_detail.raw], [metadata]): [0.0] and [-0.0]
+   compare equal, and [-0.0] encodes one byte longer. Two such messages in one
+   attempt share the first measurement, a difference of one byte per zero that
+   [unmeasured_request_reserve_divisor] already absorbs.
+
+   [Stdlib.compare] returns at once for physically equal values, and a
+   projected record still points at the same content blocks, so a hit walks the
+   block list rather than the bodies. It raises on functional or abstract
+   values; [Agent_core.Types.message] holds neither today, and a field of such a
+   type would have to change this key. *)
+module Message_value = struct
   type t = Agent_core.Types.message
 
-  let equal left right = left == right
+  let equal (left : t) (right : t) = Stdlib.compare left right = 0
 
   let mix accumulator value = ((accumulator * 65599) lxor value) land max_int
 
-  (* A constant-work string hint keeps the hash independent of tool-result body
-     size. Equality remains physical, so collisions only share a bucket. *)
+  (* A string contributes its length, bytes at a fixed stride of
+     [length / string_hint_samples] (fewer than [2 * string_hint_samples] of
+     them), and its last byte, so the hash stays independent of tool-result body
+     size. [Hashtbl.hash] would hash every byte of the first strings it reaches.
+     A string shorter than [2 * string_hint_samples] contributes every byte: ids
+     such as [call_00000123] share their length and most of their bytes. *)
+  let string_hint_samples = 32
+
   let string_hint value =
     let length = String.length value in
     if length = 0
     then 0
-    else
-      let sample index = Char.code (String.unsafe_get value index) in
-      mix
-        (mix (mix (mix length (sample 0)) (sample (length / 3)))
-           (sample ((2 * length) / 3)))
-        (sample (length - 1))
+    else (
+      let step = max 1 (length / string_hint_samples) in
+      let rec sample accumulator index =
+        if index >= length
+        then accumulator
+        else
+          sample
+            (mix accumulator (Char.code (String.unsafe_get value index)))
+            (index + step)
+      in
+      mix (sample length 0) (Char.code (String.unsafe_get value (length - 1))))
   ;;
 
   let optional_string_hint = function
@@ -592,19 +620,40 @@ module Message_identity = struct
     | Agent_core.Types.Tool -> 4
   ;;
 
+  (* The content blocks carry the distinguishing bytes. [name] and
+     [tool_call_id] are [None] on every message of a live 13,871-message
+     checkpoint (2026-09-15), so without the blocks the hash takes one value per
+     role and a lookup walks that role's whole history. *)
+  let block_hint (block : Agent_core.Types.content_block) =
+    match block with
+    | Agent_core.Types.Text text -> mix 1 (string_hint text)
+    | Agent_core.Types.Thinking { content; signature } ->
+      mix (mix 2 (string_hint content)) (optional_string_hint signature)
+    | Agent_core.Types.ReasoningDetails { reasoning_content; details } ->
+      mix (mix 3 (optional_string_hint reasoning_content)) (List.length details)
+    | Agent_core.Types.RedactedThinking data -> mix 4 (string_hint data)
+    | Agent_core.Types.ToolUse { id; name; _ } ->
+      mix (mix 5 (string_hint id)) (string_hint name)
+    | Agent_core.Types.ToolResult { tool_use_id; content; _ } ->
+      mix (mix 6 (string_hint tool_use_id)) (string_hint content)
+    | Agent_core.Types.Image { data; _ } -> mix 7 (string_hint data)
+    | Agent_core.Types.Document { data; _ } -> mix 8 (string_hint data)
+    | Agent_core.Types.Audio { data; _ } -> mix 9 (string_hint data)
+  ;;
+
   let hash (message : t) =
-    mix
-      (mix (role_hint message.role) (optional_string_hint message.name))
-      (optional_string_hint message.tool_call_id)
+    List.fold_left
+      (fun accumulator block -> mix accumulator (block_hint block))
+      (mix
+         (mix (role_hint message.role) (optional_string_hint message.name))
+         (optional_string_hint message.tool_call_id))
+      message.content
   ;;
 end
 
-module Message_measurement_cache = Hashtbl.Make (Message_identity)
+module Message_measurement_cache = Hashtbl.Make (Message_value)
 
 let memoize_message_measurement measure =
-  (* A polymorphic hash would scan large strings inside the message. This
-     table hashes only constant-size identity hints, then confirms hits with
-     physical equality. *)
   let cache = Message_measurement_cache.create 128 in
   fun message ->
     match Message_measurement_cache.find_opt cache message with
@@ -776,9 +825,9 @@ let bounded_model_input_projection
      [Eio.Executor_pool.submit_exn], which blocks until the job finishes, so
      successive jobs are ordered even when they land on different domains.
 
-     The message records are physically shared across a turn's requests — only
-     the list spine is rebuilt — which is what makes the memo hit at all: it
-     confirms every lookup with physical equality. *)
+     The memo is keyed by message value ([Message_value]), so a record that
+     projection rebuilt for this request still hits the entry an earlier
+     request measured. *)
   let measure_message_bytes = memoize_message_measurement (message_measurer ()) in
   (* Scoped to the attempt, written by the one fiber that drives it. The
      closure below runs per provider request — 62 to 83 of them in one keeper
@@ -1856,6 +1905,7 @@ module For_testing = struct
   let observe_request_wire_error = observe_request_wire_error
   let message_measurer = message_measurer
   let memoize_message_measurement = memoize_message_measurement
+  let message_measurement_hash = Message_value.hash
   let plan_and_window_model_input = plan_and_window_model_input
   let offload_model_input_cpu = offload_model_input_cpu
 end

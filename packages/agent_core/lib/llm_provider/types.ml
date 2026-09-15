@@ -711,6 +711,13 @@ let tool_schema_of_input_schema ?strict ~name ~description ~input_schema ()
           Ok { name; description; parameters; strict; input_schema = Some schema }))
 ;;
 
+let enum_member_separator = '|'
+
+let enum_vocabulary_text members =
+  "one of: "
+  ^ String.concat (Printf.sprintf " %c " enum_member_separator) members
+;;
+
 let tool_schema_of_input_schema_with_parameters
       ?strict
       ~name

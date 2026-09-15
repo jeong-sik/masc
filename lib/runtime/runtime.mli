@@ -930,18 +930,6 @@ val set_exact_output_lane_slots :
     fail-closed without one, so a lane that resolves to nothing is not the
     edit an operator is making. *)
 
-val default_max_context : unit -> int
-(** Effective context-window budget of the default runtime's model (RFC-0206
-    single-binding), clamped by the AGENT_CORE provider capability catalog when that
-    cap is available. Replaces the deleted
-    [Runtime_runtime.resolve_*_max_context] label scans. Falls back to
-    [Runtime_constants.fallback_context_window] before {!init_default} runs. *)
-
-(** API model name of the default runtime, sent to the runtime completion
-    endpoint (RFC-0206 single-binding). Replaces the deleted
-    [Runtime_runtime.default_local_model_label_and_id]. Falls back to ["auto"]
-    before {!init_default} runs. *)
-
 val enter_setup_required : reason:Runtime_startup_state.reason -> unit -> unit
 (** Clear model dispatch state after startup configuration failure. Owner and
     workspace readiness are managed independently by server bootstrap. *)

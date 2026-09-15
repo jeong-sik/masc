@@ -432,6 +432,31 @@ let test_the_code_tree_draws_one_folder_arrow () =
        ~module_path:render ~binding_name:"render_code" ~callees:[]
        ~identifiers:[ "Masc_tui_theme.Glyph.current_entry" ])
 
+(* The keeper chat draws two failure rows a few lines apart. The history one
+   draws the loader's sentence and nothing else -- "Cause first", its comment
+   says. The memory one put "memory journal unavailable: " in front of a
+   sentence that already opened "memory journal:", so thirty cells went on the
+   subject a second time before the part that differs, which the box then cut.
+
+   The rule is written down at the gate lanes row: a prefix is for a detail
+   that does not name itself. Every failure of this read does. *)
+let chat = "bin/masc_tui_render_chat.ml"
+
+let test_the_chat_failure_rows_say_the_subject_once () =
+  Alcotest.(check int) "the memory row no longer names the subject twice" 0
+    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:chat
+       ~binding_name:"render_keeper_message"
+       ~needle:"  memory journal unavailable: ");
+  (* And the one failure path that did not name itself now does. The refusal,
+     the decode and the transport all open with the subject or the URL; the
+     exception catch-all handed the row a bare Printexc string, which without
+     the prefix would have reached the screen with nothing saying what it was
+     about. *)
+  Alcotest.(check int) "the exception path names the read it failed" 1
+    (Ast_grep.count_exact_string_literals_in_value_binding
+       ~module_path:"bin/masc_tui.ml"
+       ~binding_name:"launch_keeper_history_load" ~needle:"memory journal: ")
+
 let test_repositories_show_the_server_resolved_checkout_path () =
   let producer = "lib/server/server_routes_http_routes_repositories.ml" in
   Alcotest.(check int) "the route names one resolved path field" 1
@@ -817,6 +842,8 @@ let () =
             test_the_two_p50s_on_the_lanes_screen_agree
         ; Alcotest.test_case "the Code tree draws one folder arrow" `Quick
             test_the_code_tree_draws_one_folder_arrow
+        ; Alcotest.test_case "the chat failure rows say the subject once" `Quick
+            test_the_chat_failure_rows_say_the_subject_once
         ; Alcotest.test_case "the Logs header says the floor that was set" `Quick
             test_the_logs_header_says_the_floor_the_reader_set
         ; Alcotest.test_case "a labelled field does not bracket its reading" `Quick

@@ -98,10 +98,13 @@ let broadcast_payload_mu = Stdlib.Mutex.create ()
    caller that may yield takes it. [still_current] is asked after the encoding
    returns, and nothing between that answer and the broadcast yields, so a
    payload another publication replaced meanwhile is not broadcast after the
-   newer one. *)
+   newer one; [on_superseded] runs instead. *)
 type surface_encoding =
   | Encode_inline
-  | Encode_on_pool of { still_current : unit -> bool }
+  | Encode_on_pool of
+      { still_current : unit -> bool
+      ; on_superseded : unit -> unit
+      }
 
 (** Broadcast a single cached surface to all Observer SSE sessions.
     [event_type] becomes the SSE event "type" field. Skips the broadcast when
@@ -110,15 +113,21 @@ let broadcast_cached_surface ~encoding ~event_type (json : Yojson.Safe.t) : unit
   let payload =
     match encoding with
     | Encode_inline -> Some (Sse_wire.encode_json json)
-    | Encode_on_pool { still_current } ->
+    | Encode_on_pool { still_current; on_superseded } ->
       let payload =
         Domain_pool_ref.submit_cpu_or_inline (fun () -> Sse_wire.encode_json json)
       in
-      if still_current () then Some payload else None
+      if still_current ()
+      then Some payload
+      else (
+        Log.Dashboard.routine
+          "%s: payload superseded while encoding, skipping broadcast"
+          event_type;
+        on_superseded ();
+        None)
   in
   match payload with
-  | None ->
-    Log.Dashboard.routine "%s: payload superseded while encoding, skipping broadcast" event_type
+  | None -> ()
   | Some payload ->
     let should_broadcast =
       Stdlib.Mutex.protect broadcast_payload_mu (fun () ->
@@ -161,10 +170,10 @@ let operator_snapshot_publication_is_current
   && Int.equal current.terminal_sequence publication.terminal_sequence
 ;;
 
-(* A successful publication carries the computed snapshot and comes from the
-   refresh loop, which holds nothing while it broadcasts. The others carry the
-   small invalidated or unavailable envelope, and an invalidation reaches here
-   from whatever mutation invalidated the snapshot, so it does not yield. *)
+let operator_snapshot_json =
+  Server_dashboard_http_core_operator.operator_snapshot_publication_json
+;;
+
 let broadcast_operator_snapshot
       (publication :
         Server_dashboard_http_core_operator.operator_snapshot_publication)
@@ -172,17 +181,35 @@ let broadcast_operator_snapshot
     if operator_snapshot_publication_is_current publication
     then
       broadcast_cached_surface
-        ~encoding:
-          (if publication.has_success
-           then
-             Encode_on_pool
-               { still_current =
-                   (fun () -> operator_snapshot_publication_is_current publication)
-               }
-           else Encode_inline)
+        ~encoding:Encode_inline
         ~event_type:"operator_snapshot"
-        (Server_dashboard_http_core_operator.operator_snapshot_publication_json
-           publication)
+        (operator_snapshot_json publication)
+;;
+
+(* A publication that replaced this one while it was encoding is handed on.
+   An invalidation or a failure was broadcast by whoever published it; a
+   success the /api/v1/operator route published is broadcast by nobody else,
+   so the current success is broadcast in this one's place. When its publisher
+   has already sent it, the delta check drops it. *)
+let rec broadcast_refreshed_operator_snapshot
+      (publication :
+        Server_dashboard_http_core_operator.operator_snapshot_publication)
+  =
+    if operator_snapshot_publication_is_current publication
+    then
+      broadcast_cached_surface
+        ~encoding:
+          (Encode_on_pool
+             { still_current =
+                 (fun () -> operator_snapshot_publication_is_current publication)
+             ; on_superseded = broadcast_current_successful_operator_snapshot
+             })
+        ~event_type:"operator_snapshot"
+        (operator_snapshot_json publication)
+
+and broadcast_current_successful_operator_snapshot () =
+  let current = Server_dashboard_http_core_operator.operator_snapshot_publication () in
+  if current.has_success then broadcast_refreshed_operator_snapshot current
 ;;
 
 let () =

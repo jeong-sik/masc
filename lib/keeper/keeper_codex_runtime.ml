@@ -165,10 +165,10 @@ let model_input_projection_for_capacity
         if capacity_bytes = unbounded_model_input_capacity_bytes
         then
           Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
-            ~capacity_bytes:full_bytes
+            ~capacity:full_bytes
         else
           Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
-            ~capacity_bytes
+            ~capacity:capacity_bytes
       in
       observed_next_shrink_capacity_bytes :=
         Runtime_model_input_tail_window.next_shrink_capacity_bytes

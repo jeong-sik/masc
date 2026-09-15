@@ -191,6 +191,17 @@ val release_unroutable_rejected_task_r :
     queue, so nothing in the fleet claims under it; a caller for whom that is
     not true should not use this function.
 
+    [reclaim_policy] and [do_not_reclaim_reason] are left as they stand, which
+    is where this differs from {!recover_owned_task_to_todo_r} beside it. That
+    one clears them because an operator is deliberately overriding what the
+    previous owner set; this one is a system reacting to an owner that is no
+    longer there, and clearing a [Block_reclaim] would erase a stop somebody
+    chose. The pair survives claim, start and submit unchanged, so a task
+    released under [Block_reclaim] can come back to exactly the [InProgress]
+    this function fires on still carrying it; it is also what the next ordinary
+    [Release] inherits, and what two surfaces print. Unifying the two functions
+    here would drop all three.
+
     The released-by actor is read from [authority], never supplied by the
     caller: recording the vanished assignee would leave the ledger claiming
     that agent released its own task.

@@ -68,9 +68,10 @@ let ordinary_failure_boundary (handler : Keeper_tool_descriptor.runtime_handler)
   (* A failed memory write or retract goes back to the model whatever it
      committed, because doing it again adds no second fact row: an ordinary
      fact is keyed by the SHA-256 of its title and content, a source-bound one
-     by its path, and retracting a fact that is gone commits nothing. A repeat
-     write does commit another revision and journal line. The result names
-     what committed, so the Keeper can read memory before it tries again. *)
+     by its path (a new claim for that path replaces the old one), and
+     retracting a fact that is gone commits nothing. A repeat write still
+     commits another revision. The result names what committed, so the Keeper
+     can read memory before it tries again. *)
   | Keeper_tool_descriptor.Tool_memory_retract
   | Keeper_tool_descriptor.Tool_memory_write ->
     Failure_returns_to_model
@@ -140,6 +141,18 @@ let ordinary_failure_ends_turn
   | ( Failure_returns_to_model
     , (Tool_result.Proven_post_effect | Tool_result.Effect_outcome_unknown) ) ->
     false
+;;
+
+(* The failure callback every ordinary descriptor's handler receives. The
+   handler calls it only for a post-effect or unknown failure; whether that
+   ends the turn is decided here and nowhere else. *)
+let ordinary_on_failed
+      ~mark_terminal_effect_failed
+      handler
+      (failure : Keeper_tools_agent_core.terminal_effect_failure)
+  =
+  if ordinary_failure_ends_turn handler failure.effect_disposition
+  then mark_terminal_effect_failed failure
 ;;
 
 let make_tool_bundle_for_descriptors_with_policy
@@ -430,19 +443,12 @@ let make_tool_bundle_for_descriptors_with_policy
              , Some mark_completed_terminal_externalization_failed )
            | Keeper_tool_descriptor.Ordinary
                (Keeper_tool_descriptor.Serial | Keeper_tool_descriptor.Concurrent) ->
-             let on_failed =
-               match ordinary_failure_boundary descriptor.runtime_handler with
-               | Failure_returns_to_model -> None
-               | Any_effect_ends_turn | Applied_effect_ends_turn ->
-                 Some
-                   (fun (failure : Keeper_tools_agent_core.terminal_effect_failure) ->
-                      if
-                        ordinary_failure_ends_turn
-                          descriptor.runtime_handler
-                          failure.effect_disposition
-                      then mark_terminal_effect_failed failure)
-             in
-             None, on_failed, None
+             ( None
+             , Some
+                 (ordinary_on_failed
+                    ~mark_terminal_effect_failed
+                    descriptor.runtime_handler)
+             , None )
          in
          Keeper_tool_descriptor.keeper_model_names descriptor
          |> List.map (fun model_name ->
@@ -911,7 +917,7 @@ module For_testing = struct
   ;;
 
   let initial_terminal_effect_state = initial_terminal_effect_state
-  let ordinary_failure_ends_turn = ordinary_failure_ends_turn
+  let ordinary_on_failed = ordinary_on_failed
 
   let terminal_externalization_failure =
     terminal_externalization_failure

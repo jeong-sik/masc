@@ -532,7 +532,7 @@ type memory_write_error_kind =
   | Board_ref_with_derivation_unsupported
   | Board_ref_with_source_path_unsupported
   | Unsupported_derivation
-  | Persistence_failed
+  | Persistence_failed of fact_store
   | Commit_receipt_inconsistent
   | No_memory_write_error
 
@@ -548,7 +548,7 @@ let memory_write_error_kind_to_string = function
   | Board_ref_with_derivation_unsupported -> "board_ref_with_derivation_unsupported"
   | Board_ref_with_source_path_unsupported -> "board_ref_with_source_path_unsupported"
   | Unsupported_derivation -> "unsupported_derivation"
-  | Persistence_failed -> "persistence_failed"
+  | Persistence_failed (Ordinary_current | Source_bound_current) -> "persistence_failed"
   | Commit_receipt_inconsistent -> "commit_receipt_inconsistent"
   | No_memory_write_error -> ""
 ;;
@@ -576,7 +576,7 @@ let class_of_memory_write_error_kind = function
       | Keeper_memory_source_current.Source_too_large _ ) ->
     Tool_result.Policy_rejection
   | Source_read_failed (Keeper_memory_source_current.Source_io_failed _)
-  | Persistence_failed ->
+  | Persistence_failed (Ordinary_current | Source_bound_current) ->
     Tool_result.Dependency_unavailable
   (* The store committed and then did not show what it committed: a
      producer bug, not a dependency that can answer on a later turn. *)
@@ -588,13 +588,15 @@ let class_of_memory_write_error_kind = function
    failure site states either.
 
    A refusal means this claim was not committed. It does not mean the store
-   wrote nothing: a snapshot this build cannot decode is moved aside and
-   journaled, the write goes on from empty state, and a derivation can then
-   find its premises gone.
+   wrote nothing: the ordinary store moves a snapshot this build cannot decode
+   aside, goes on from empty state, and a derivation can then find its
+   premises gone.
 
-   Writing the same title and content again adds no second fact row (the
-   fact is keyed by their SHA-256; a source-bound fact by its path), but every
-   write commits another revision and journal line. *)
+   What a repeat write does depends on the store, so a store failure names
+   it. In the ordinary store the same title and content are the same fact
+   (keyed by their SHA-256). In the source-bound store the path is the key: a
+   write for the same path replaces that path's claim. Either store commits
+   another revision for every write. *)
 let memory_write_failure_effect = function
   | Content_empty
   | Source_path_invalid
@@ -612,13 +614,22 @@ let memory_write_failure_effect = function
     ( Tool_result.Proven_post_effect
     , "A new snapshot revision was committed, but this claim is not in it. Search \
        memory for the claim before writing it again." )
-  (* The "no error" kind reaching a failure is a producer bug; it proves
-     nothing about the store. *)
-  | Persistence_failed | No_memory_write_error ->
+  | Persistence_failed Ordinary_current ->
     ( Tool_result.Effect_outcome_unknown
     , "The claim may or may not have been committed. Search memory for it before \
        writing it again: the same title and content make the same fact, but each \
        write commits another revision." )
+  | Persistence_failed Source_bound_current ->
+    ( Tool_result.Effect_outcome_unknown
+    , "The claim may or may not have been committed. Search memory for it before \
+       writing it again: a write for the same source_path replaces that path's \
+       claim, and each write commits another revision." )
+  (* The "no error" kind reaching a failure is a producer bug; it proves
+     nothing about the store. *)
+  | No_memory_write_error ->
+    ( Tool_result.Effect_outcome_unknown
+    , "The claim may or may not have been committed. Search memory for it before \
+       writing it again." )
 ;;
 
 let memory_write_error_effect_disposition error_kind =
@@ -900,7 +911,7 @@ let keeper_memory_write_with_outcome
             "explicit source-bound memory write failed keeper=%s: %s"
             meta.name
             detail;
-          respond ~ok:false ~error_kind:Persistence_failed [ "detail", `String detail ]
+          respond ~ok:false ~error_kind:(Persistence_failed Source_bound_current) [ "detail", `String detail ]
         | exception (Eio.Cancel.Cancelled _ as error) -> raise error
         | exception exn ->
           let detail = Printexc.to_string exn in
@@ -908,7 +919,7 @@ let keeper_memory_write_with_outcome
             "explicit source-bound memory write failed keeper=%s: %s"
             meta.name
             detail;
-          respond ~ok:false ~error_kind:Persistence_failed [ "detail", `String detail ])
+          respond ~ok:false ~error_kind:(Persistence_failed Source_bound_current) [ "detail", `String detail ])
      | None ->
     (match upsert_explicit_fact ~keepers_dir ~meta ~body ~basis with
      | Ok snapshot ->
@@ -965,7 +976,7 @@ let keeper_memory_write_with_outcome
          "explicit current Memory write failed keeper=%s: %s"
          meta.name
          detail;
-       respond ~ok:false ~error_kind:Persistence_failed [ "detail", `String detail ]
+       respond ~ok:false ~error_kind:(Persistence_failed Ordinary_current) [ "detail", `String detail ]
      | exception (Eio.Cancel.Cancelled _ as e) -> raise e
      | exception exn ->
        (* The store is the only place a long-term claim survives, so a
@@ -976,7 +987,7 @@ let keeper_memory_write_with_outcome
          "explicit current Memory write failed keeper=%s: %s"
          meta.name
          detail;
-       respond ~ok:false ~error_kind:Persistence_failed [ "detail", `String detail ]))
+       respond ~ok:false ~error_kind:(Persistence_failed Ordinary_current) [ "detail", `String detail ]))
 ;;
 
 (* --- Explicit memory retraction surface -------------------------- *)

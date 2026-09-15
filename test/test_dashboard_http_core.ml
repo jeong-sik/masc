@@ -1123,6 +1123,84 @@ let test_operator_snapshot_publication_rejects_stale_races () =
           ~compute:old_generation_compute
           (`Assoc [ "winner", `String "old-generation" ])))
 
+(* A successful operator snapshot is encoded on the domain pool, and one that
+   another publication replaced while it was encoding is not broadcast. The
+   2.8 MB snapshot used to be encoded twice and hashed on the calling fiber. *)
+let busy_worker_polls = 50
+let busy_worker_poll_interval_s = 0.01
+
+let test_operator_snapshot_broadcast_encodes_on_the_pool_and_drops_a_superseded_one () =
+  with_test_env @@ fun ~env ~sw ~config:_ ->
+  let workspace = Masc_test_deps.setup_test_workspace () in
+  let auth = Masc_test_deps.make_sse_auth workspace "operator-snapshot-observer" in
+  let session_id = "operator-snapshot-observer" in
+  ignore (Lib.Session.McpSessionStore.get_or_create ~id:session_id ());
+  let previous_pool = Domain_pool_ref.get () in
+  Fun.protect
+    ~finally:(fun () ->
+      Lib.Sse.unregister session_id;
+      (match previous_pool with
+       | None -> Domain_pool_ref.clear_for_tests ()
+       | Some previous -> Domain_pool_ref.set previous);
+      Masc_test_deps.cleanup_test_workspace workspace)
+  @@ fun () ->
+  (match Lib.Sse.register ~kind:Lib.Sse.Observer ~auth session_id ~last_event_id:0 with
+   | Ok _ -> ()
+   | Error error -> fail (Lib.Sse.registration_error_to_string error));
+  let publish marker =
+    match
+      Server_dashboard_http_core_operator.For_testing.publish_operator_snapshot_success
+        (`Assoc [ "marker", `String marker ])
+    with
+    | Some publication -> publication
+    | None -> fail ("the " ^ marker ^ " snapshot did not publish")
+  in
+  let first = publish "first" in
+  Domain_pool_ref.set (Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env));
+  let occupied, occupied_u = Eio.Promise.create () in
+  let release, release_u = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Domain_pool_ref.submit_cpu_or_inline (fun () ->
+      Eio.Promise.resolve occupied_u ();
+      Eio.Promise.await release));
+  Eio.Promise.await occupied;
+  let returned = ref false in
+  let second = ref None in
+  let clock = Eio.Stdenv.clock env in
+  Eio.Fiber.both
+    (fun () ->
+      Server_dashboard_http_execution_surfaces.broadcast_operator_snapshot first;
+      returned := true)
+    (fun () ->
+      let rec wait polls =
+        if polls > 0 && not !returned
+        then (
+          Eio.Time.sleep clock busy_worker_poll_interval_s;
+          wait (polls - 1))
+      in
+      wait busy_worker_polls;
+      check bool "the broadcast waits for the busy worker" false !returned;
+      second := Some (publish "second");
+      Eio.Promise.resolve release_u ());
+  check (option string) "the superseded snapshot is not broadcast" None
+    (Lib.Sse.try_pop session_id);
+  match !second with
+  | None -> fail "the second snapshot was never published"
+  | Some second ->
+    Server_dashboard_http_execution_surfaces.broadcast_operator_snapshot second;
+    (match Lib.Sse.try_pop session_id with
+     | None -> fail "the current snapshot was not broadcast"
+     | Some frame ->
+       (match Lib.Sse.data_payload_of_frame frame with
+        | Error Lib.Sse.Missing_data_payload -> fail "the frame has no data"
+        | Ok data ->
+          let open Yojson.Safe.Util in
+          let event = Yojson.Safe.from_string data in
+          check string "the frame is an operator snapshot" "operator_snapshot"
+            (event |> member "type" |> to_string);
+          check string "and carries the current snapshot" "second"
+            (event |> member "payload" |> member "marker" |> to_string)))
+
 let test_operator_snapshot_error_clears_previous_success () =
   let success =
     match
@@ -5873,6 +5951,8 @@ let () =
             test_keeper_github_login_stream_flushes_each_event;
           test_case "operator snapshot rejects stale publication races" `Quick
             test_operator_snapshot_publication_rejects_stale_races;
+          test_case "operator snapshot broadcast encodes on the pool and drops a superseded one" `Quick
+            test_operator_snapshot_broadcast_encodes_on_the_pool_and_drops_a_superseded_one;
           test_case "operator snapshot error clears previous success" `Quick
             test_operator_snapshot_error_clears_previous_success;
           test_case

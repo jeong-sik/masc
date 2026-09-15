@@ -148,6 +148,10 @@ val current_id : unit -> int
 
 val broadcast : Yojson.Safe.t -> unit
 val broadcast_to : broadcast_target -> Yojson.Safe.t -> unit
+
+val broadcast_encoded_to : broadcast_target -> Sse_wire.encoded_json -> unit
+(** {!broadcast_to} of [encoded.json], its frame written from [encoded.text]
+    so the value is not encoded again under the fan-out lock. *)
 val broadcast_presence : Yojson.Safe.t -> unit
 val send_to : string -> Yojson.Safe.t -> unit
 val pop : string -> string option

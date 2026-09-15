@@ -53,8 +53,9 @@
 
     Internal helpers stay private at this boundary
     ([shell_prewarm_timeout_s],
-    [_last_broadcast_hash] /
-    [_broadcast_hash_mu] / [broadcast_cached_surface],
+    [last_broadcast_payload] /
+    [broadcast_payload_mu] / [broadcast_cached_surface] /
+    [operator_snapshot_publication_is_current],
     [_transport_health_cache],
     [keeper_top_level_status_opt] / [patched_keeper_status],
     [patch_keeper_rows] SSE-event row patcher helper,

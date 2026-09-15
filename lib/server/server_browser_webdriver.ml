@@ -83,7 +83,7 @@ let stop_driver_left_behind ~record_path =
 
 (* A browser that relaunched itself is outside the driver's process group, so
    it is found by the profile it still uses and stopped by pid. Its content
-   processes exit when it does. *)
+   processes carry the same -profile argument and are stopped with it. *)
 let stop_pids ~clock pids =
   let signal number pid =
     try Unix.kill pid number with Unix.Unix_error ((Unix.ESRCH | Unix.EPERM), _, _) -> () in

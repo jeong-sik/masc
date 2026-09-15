@@ -340,9 +340,14 @@ let make_tool_bundle_for_descriptors_with_policy
                   same effect-outcome-unknown shape Execute has. *)
                | Keeper_tool_descriptor.Tool_keeper_webmcp_dispatch ->
                  Some mark_terminal_effect_failed
+               (* A memory write or retract that failed after its commit left a
+                  durable change the caller cannot see; retrying it would
+                  record the claim twice. Same shape as a file write. *)
                | Keeper_tool_descriptor.Tool_peer_artifact
                | Keeper_tool_descriptor.Tool_edit_file
-               | Keeper_tool_descriptor.Tool_write_file ->
+               | Keeper_tool_descriptor.Tool_write_file
+               | Keeper_tool_descriptor.Tool_memory_retract
+               | Keeper_tool_descriptor.Tool_memory_write ->
                  Some (fun failure ->
                    match failure.Keeper_tools_agent_core.effect_disposition with
                    | Tool_result.Proven_post_effect -> mark_terminal_effect_failed failure
@@ -360,8 +365,6 @@ let make_tool_bundle_for_descriptors_with_policy
                  | Keeper_tool_descriptor.Tool_artifact_read
                  | Keeper_tool_descriptor.Tool_workspace_memory_read
                  | Keeper_tool_descriptor.Tool_memory_search
-                 | Keeper_tool_descriptor.Tool_memory_retract
-                 | Keeper_tool_descriptor.Tool_memory_write
                  | Keeper_tool_descriptor.Tool_constitution_write
                  | Keeper_tool_descriptor.Tool_constitution_remove
                  | Keeper_tool_descriptor.Tool_library_search

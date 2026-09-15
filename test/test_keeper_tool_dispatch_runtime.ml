@@ -4371,6 +4371,66 @@ let test_invalid_surface_post_input_stays_correction_capable () =
          fail "later failure was hidden by the completed terminal effect")
 ;;
 
+(* A memory write is an ordinary serial write: two claims in one turn each
+   commit, and neither closes the turn. *)
+let test_memory_writes_through_the_bundle_leave_the_turn_open () =
+  with_exec_fixture
+    "memory_write_bundle_turn_open"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let bundle =
+         Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ()
+       in
+       let memory_write =
+         match find_tool_by_name bundle.tools "keeper_memory_write" with
+         | Some tool -> tool
+         | None -> fail "keeper_memory_write missing from Keeper tool bundle"
+       in
+       (match Agent_core.Tool.completion memory_write with
+        | Agent_core.Tool_contract.Continue_after_success -> ()
+        | Agent_core.Tool_contract.Terminal_after_success _ ->
+          fail "keeper_memory_write was materialized as a terminal tool");
+       let write ~title ~content =
+         match
+           Agent_core.Tool.execute
+             memory_write
+             (`Assoc [ "title", `String title; "content", `String content ])
+         with
+         | Ok _ -> ()
+         | Error error ->
+           failf "memory write failed: %s" error.Agent_core.Types.message
+       in
+       write ~title:"first" ~content:"the first claim of this turn";
+       write ~title:"second" ~content:"the second claim of this turn";
+       let keepers_dir =
+         Config_dir_resolver.keepers_dir_for_base_path
+           ~base_path:config.base_path
+       in
+       (match
+          Masc.Keeper_memory_os_current.read_for_keepers_dir
+            ~keepers_dir
+            ~keeper_id:meta.name
+        with
+        | Ok (Some snapshot) ->
+          check int "both claims committed" 2 (List.length snapshot.facts)
+        | Ok None -> fail "memory writes persisted no snapshot"
+        | Error detail -> fail detail);
+       match bundle.terminal_effect_state () with
+       | Masc.Keeper_tools_agent_core.Terminal_effect_open -> ()
+       | Masc.Keeper_tools_agent_core.Deferred_tool_result ->
+         fail "memory writes deferred a tool result"
+       | Masc.Keeper_tools_agent_core.External_effect_deferred ->
+         fail "memory writes deferred an external effect"
+       | Masc.Keeper_tools_agent_core.Terminal_effect_completed _ ->
+         fail "a memory write closed the turn"
+       | Masc.Keeper_tools_agent_core.Terminal_effect_failed _ ->
+         fail "a successful memory write failed the turn")
+;;
+
 let with_openai_tool_call_server ?second_response ~tool_name ~tool_input f =
   let sw =
     match Eio_context.get_switch_opt () with
@@ -8908,6 +8968,8 @@ let () =
         test_deferred_web_search_keeps_the_turn_going;
       test_case "invalid surface input stays correction-capable" `Quick
         test_invalid_surface_post_input_stays_correction_capable;
+      test_case "memory writes through the bundle leave the turn open" `Quick
+        test_memory_writes_through_the_bundle_leave_the_turn_open;
       test_case "surface append failure is not terminal completion" `Quick
         test_surface_post_append_failure_does_not_complete_terminal_effect;
       test_case "frozen surface rejects a registered-only tool" `Quick

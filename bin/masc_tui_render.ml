@@ -4726,8 +4726,13 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
         float_of_int lane.sl_succeeded_count /. float_of_int total *. 100.0
       in
       let p50_str =
+        (* One decimal, the way the P50 column above draws the same
+           [sl_p50_elapsed_s]: the row read "8.0s" and this line "8.00s" of
+           one number on one screen, which leaves the reader deciding whether
+           they are the same figure. The column is the constrained one -- six
+           cells -- so the detail follows it rather than the other way. *)
         match lane.sl_p50_elapsed_s with
-        | Some s -> Printf.sprintf " · p50 latency %.2fs" s
+        | Some s -> Printf.sprintf " · p50 latency %.1fs" s
         | None -> ""
       in
       Printf.sprintf "Runs: %d retained (%d ok / %d fail / %d cancel) · %.1f%% success%s"

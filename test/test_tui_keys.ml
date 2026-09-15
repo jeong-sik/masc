@@ -1004,6 +1004,60 @@ let test_the_config_marks_are_in_the_sheet () =
 (* Lanes is the operator's top-level concurrent lane workspace. Runtime still
    owns configuration and substrate probes; [p] remains the explicit return
    path from the standalone run browser. *)
+(* A sheet section answers "what can I do here", and a label is the answer.
+   Two rows carrying the same label are one answer given twice: the reader
+   reads the second to find what it adds and finds a pronoun.
+
+   Config / Runtime / Clients listed [p] and [Esc] as "runtime", one row under
+   the other, helped "back to the Runtime surface this hangs off" and "...it
+   hangs off". Both call goto_surface Runtime. The repo spells two doors to
+   one action as one binding -- [Left / Esc], [y / n], [o / A] -- and
+   [Masc_tui_keys.key_atoms] splits the slash, so both keys stay counted. *)
+(* Two rows that share a label but not an action. The label under-describes
+   them and the help beside it tells them apart; which word each should carry
+   instead is a wording decision, not a duplicate key, so they are named here
+   rather than fixed in passing.
+
+   Board: [Ctrl-W] swaps the two panes and [h/l] focuses one of them by
+   direction. Workspace / Code: [Left / Esc] leaves the file, then the
+   directory, then the surface, and [B] walks back through definition
+   jumps -- unrelated, and both called "back". *)
+let shared_label_exceptions =
+  [ ("Board", "pane"); ("Workspace / Code", "back") ]
+
+let test_no_surface_gives_one_answer_two_rows () =
+  let found = ref [] in
+  List.iter
+    (fun (name, surface) ->
+      let labels = List.map (fun b -> b.Masc_tui_keys.label) (Masc_tui_keys.for_surface surface) in
+      let sorted = List.sort compare labels in
+      let rec first_repeat = function
+        | a :: (b :: _ as rest) -> if String.equal a b then Some a else first_repeat rest
+        | [ _ ] | [] -> None
+      in
+      match first_repeat sorted with
+      | None -> ()
+      | Some label ->
+          if not (List.mem (name, label) shared_label_exceptions) then
+            found := Printf.sprintf "%s names two keys %S" name label :: !found)
+    Masc_tui_keys.help_surfaces;
+  Alcotest.(check (list string)) "every label answers for one key" [] (List.rev !found);
+  (* And every exception still shares its label, so one that was renamed or
+     removed does not sit here claiming to hold something. *)
+  List.iter
+    (fun ((name, label) as entry) ->
+      let surface = List.assoc name Masc_tui_keys.help_surfaces in
+      let count =
+        List.length
+          (List.filter
+             (fun b -> String.equal b.Masc_tui_keys.label label)
+             (Masc_tui_keys.for_surface surface))
+      in
+      Alcotest.(check bool)
+        (Printf.sprintf "%s still shares %S" (fst entry) label)
+        true (count >= 2))
+    shared_label_exceptions
+
 let test_lanes_is_a_main_destination () =
   Alcotest.(check bool) "Lanes is a top-level ring entry" true
     (List.exists (fun (surface, _) -> surface = Lanes) surface_ring);
@@ -2483,6 +2537,8 @@ let () =
             test_the_memory_marks_are_in_the_sheet_not_on_the_roster
         ; Alcotest.test_case "the Config marks are in the sheet" `Quick
             test_the_config_marks_are_in_the_sheet
+        ; Alcotest.test_case "no surface gives one answer two rows" `Quick
+            test_no_surface_gives_one_answer_two_rows
         ; Alcotest.test_case "the file marks are in the sheet" `Quick
             test_the_file_marks_are_in_the_sheet
         ; Alcotest.test_case "Lanes is a main destination" `Quick

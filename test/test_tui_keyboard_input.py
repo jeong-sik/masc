@@ -12973,12 +12973,13 @@ def fusion_live_reload_interaction(
 
 # The hook's per-call observation names the keeper turn (total_turns + 1)
 # the session-numbered call below belongs to; without it the row would say
-# "turn ?".
+# "turn ?". The session ordinal (7) and the keeper turn (42) differ, so a
+# needle can tell which of the two numbers a row drew.
 OBSERVER_TOOL_CALLED_FRAME = (
     b"id: 1\n"
     b"event: message\n"
     b'data: {"type":"keeper_turn_observation","name":"alpha","turn":7,'
-    b'"total_turns":6,"ts_unix":1787505641.0}\n\n'
+    b'"total_turns":41,"ts_unix":1787505641.0}\n\n'
     b"id: 2\n"
     b"event: message\n"
     b'data: {"type":"agent_core:tool_called","event_type":"tool_called",'
@@ -12990,7 +12991,7 @@ OBSERVER_TOOL_CALLED_FRAME = (
 
 
 def observer_http_fixtures() -> HttpFixtures:
-    """The MCP session handshake and a one-frame observer stream."""
+    """The MCP session handshake and a two-frame observer stream."""
 
     return {
         # The feed opens only after a refresh reaches the server, and the
@@ -13302,14 +13303,14 @@ def observer_feed_interaction(requests: HttpRequests) -> Interaction:
         for needle, what in (
             ("(1 row \u00b7 2 events held)".encode(), "the shown rows and held events"),
             (b"alpha", "the keeper that acted"),
-            (b"turn 7", "the turn"),
+            (b"turn 42", "the keeper turn"),
             (b"read_file", "the in-flight tool"),
         ):
             if needle not in acting:
                 raise AssertionError(f"Acting did not draw {what}: {acting!r}")
         # The count belongs to the open reading, not to the Logs tab it
         # follows: a dot stands between the strip and the count.
-        if "Logs  \u00b7  (1 row \u00b7 1 event held)".encode() not in CSI_RE.sub(b"", acting):
+        if "Logs  \u00b7  (1 row \u00b7 2 events held)".encode() not in CSI_RE.sub(b"", acting):
             raise AssertionError(
                 f"Activity's count sat against the Logs tab: {CSI_RE.sub(b'', acting)!r}"
             )
@@ -13322,11 +13323,14 @@ def observer_feed_interaction(requests: HttpRequests) -> Interaction:
         for needle, what in (
             ("\u25b6 call".encode(), "the call glyph and label"),
             (b"read_file", "the tool"),
-            (b"turn 7", "the turn"),
             (b"task-1", "the task"),
         ):
             if needle not in flat:
                 raise AssertionError(f"Actions did not draw {what}: {flat!r}")
+        # The frame's turn is the agent session's ordinal, not a keeper turn,
+        # so the flat row leaves it to the event evidence.
+        if b"turn 7" in flat:
+            raise AssertionError(f"Actions drew the session ordinal as a turn: {flat!r}")
         os.write(master_fd, b"q")
 
     return interact

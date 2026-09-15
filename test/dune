@@ -45,6 +45,11 @@
  (libraries masc_test_deps))
 
 (test
+ (name test_change_evidence)
+ (modules test_change_evidence)
+ (libraries masc_test_deps))
+
+(test
  (name test_operator_task_attention)
  (modules test_operator_task_attention)
  (libraries masc_test_deps))

@@ -311,7 +311,18 @@ let evidence_posture_of_snapshot
                 size, and the filed body are the facts the verdict can rest
                 on (RFC-0436 §4.1). *)
              true
-           | _ -> false)
+           (* A reference is a claim, not a materialised artifact: nothing
+              here read the change. It still travels, so the authority sees
+              what the producer named and can go and look; what it must not do
+              is count as evidence already in hand. *)
+           | Workspace_verification_store.Evidence_change _ -> false
+           (* Spelled out rather than left to a catch-all: a new evidence form
+              has to be classified here, and the previous `_ -> false` would
+              have counted one as note-only without anyone deciding. *)
+           | Workspace_verification_store.Evidence_note _
+           | Workspace_verification_store.Evidence_artifact { truncated = true; _ }
+           | Workspace_verification_store.Evidence_invalid_reference
+           | Workspace_verification_store.Evidence_artifact_unreadable _ -> false)
       |> List.length
   in
   if usable = 0 then Task.Anti_rationalization.Note_only
@@ -365,6 +376,7 @@ let evidence_images_of_snapshot ~base_path
            | Store.Evidence_note _ -> images, unread
            | Store.Evidence_artifact _ -> images, unread
            | Store.Evidence_invalid_reference -> images, unread
+           | Store.Evidence_change _ -> images, unread
            | Store.Evidence_artifact_unreadable _ -> images, unread)
         ([], [])
         items

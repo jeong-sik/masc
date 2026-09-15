@@ -37,6 +37,20 @@ type submitted_evidence_item =
       ; format : string
       ; body : string option
       }
+  | Evidence_change of
+      { repository : string
+      ; pull_request : int
+      }
+      (** Work that landed as a pull request. The workspace's output goes to a
+          repository, and the artifact form reads only the producer's sandbox,
+          so a producer saying "it is in #30715" used to have its evidence
+          discarded as an invalid reference.
+
+          The reference is recorded, not fetched. Reading it would be a
+          network call on the submit path, which runs inside the backlog lock,
+          and one slow answer there stops every transition in the workspace.
+          Whoever judges it holds the repository access; this type holds what
+          the producer named. *)
 
 type evidence_access_failure =
   | Completion_authority_identity_missing
@@ -108,11 +122,20 @@ type reference_form =
   | Artifact_reference of string
   | Note_reference of string
   | Collaboration_reference of collaboration_kind * string
+  | Change_reference of { repository : string; pull_request : int }
   | Unresolvable_reference
 
 val classify_evidence_reference : string -> reference_form
 (** Shared submission grammar. Collaboration sources are captured by the
     application submit boundary before calling the artifact/note snapshotter. *)
+
+val change_reference_form : string
+(** [change:<owner>/<repo>#<pull-request>], spelled from the prefix this
+    module matches on. *)
+
+val change_reference_string : repository:string -> pull_request:int -> string
+(** The reference as the producer would write it, rebuilt from the parsed
+    parts so no reader has to re-split the string. *)
 
 val note_reference_form : string
 (** The accepted form for narrative evidence, spelled from the prefix this
@@ -201,7 +224,12 @@ val snapshot_submitted_evidence_json :
     ["note:<text>"] preserves non-file evidence explicitly. [bytes] reports the
     source size, which exceeds the persisted [content] length when [truncated]
     is set by the projection cap. Bare and absolute references are persisted as
-    a payload-free typed invalid-reference item. *)
+    a payload-free typed invalid-reference item.
+
+    ["change:<owner>/<repo>#<n>"] is recorded as the repository and number the
+    producer named. Nothing is fetched: this call runs inside the backlog
+    lock, and a repository that answers slowly would hold every other
+    transition behind it. *)
 
 
 val submitted_evidence_identity_lines :

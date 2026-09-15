@@ -1571,7 +1571,7 @@ let recoverable_read_failure ~plan ~committed (failure : Executor.failure) =
   let ordinary_atomic descriptor =
     match descriptor.Keeper_tool_descriptor.execution, descriptor.tool_kind with
     | Ordinary _, Atomic_tool -> true
-    | (Terminal | Direct_terminal), _
+    | Terminal, _
     | Ordinary _, (Composition_tool | Async_composition_tool) -> false
   in
   let descriptor node_id = Keeper_tool_plan.descriptor plan node_id in

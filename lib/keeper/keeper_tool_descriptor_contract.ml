@@ -164,7 +164,6 @@ let composable_output_fields = function
 let execution_name = function
   | Descriptor.Ordinary Descriptor.Serial -> "serial"
   | Descriptor.Ordinary Descriptor.Concurrent -> "concurrent"
-  | Descriptor.Direct_terminal -> "direct_terminal"
   | Descriptor.Terminal -> "terminal"
 ;;
 
@@ -247,7 +246,6 @@ let composable_output_of_fields name output_schema =
 let execution_of_string = function
   | "serial" -> Ok (Descriptor.Ordinary Descriptor.Serial)
   | "concurrent" -> Ok (Descriptor.Ordinary Descriptor.Concurrent)
-  | "direct_terminal" -> Ok Descriptor.Direct_terminal
   | "terminal" -> Ok Descriptor.Terminal
   | value -> Error (Invalid_execution value)
 ;;
@@ -308,7 +306,6 @@ let projection_equal left right =
 let execution_equal left right =
   match left, right with
   | Descriptor.Ordinary left, Descriptor.Ordinary right -> left = right
-  | Descriptor.Direct_terminal, Descriptor.Direct_terminal
   | Descriptor.Terminal, Descriptor.Terminal -> true
   | _ -> false
 ;;

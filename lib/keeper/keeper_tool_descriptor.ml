@@ -38,13 +38,11 @@ type ordinary_execution_mode =
 
 type execution =
   | Ordinary of ordinary_execution_mode
-  | Direct_terminal
   | Terminal
 
 let execution_to_string = function
   | Ordinary Serial -> "serial"
   | Ordinary Concurrent -> "concurrent"
-  | Direct_terminal -> "direct_terminal"
   | Terminal -> "terminal"
 ;;
 
@@ -449,12 +447,9 @@ let descriptor
   let execution =
     match runtime_handler with
     | Tool_surface_post -> Terminal
-    | Tool_memory_write | Tool_memory_retract -> Direct_terminal
-    (* The constitution tools are the memory writes' peers in layer (both are
-       durable self-writes on base_tools) but not on this axis. A memory write
-       is the conclusion of a turn; recording a decision the board already made
-       is not, so these stay Ordinary and the keeper keeps working. *)
     | ( Tool_execute
+      | Tool_memory_write
+      | Tool_memory_retract
       | Tool_constitution_write
       | Tool_constitution_remove
       | Tool_keeper_code_query_dispatch
@@ -522,7 +517,7 @@ let descriptor
           "descriptor %S declares Concurrent execution without a static \
            read-only policy hint"
           internal_name)
-   | Ordinary Serial, _ | Direct_terminal, _ | Terminal, _ -> ());
+   | Ordinary Serial, _ | Terminal, _ -> ());
   let receipt_labels =
     [ "descriptor_id", id
     ; "capability_id", capability_id

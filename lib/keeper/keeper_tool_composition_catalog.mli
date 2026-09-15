@@ -77,6 +77,11 @@ type error =
       ; type_name : string
       }
   | Empty_param_enum of { path : string list }
+  | Empty_param_enum_value of { path : string list }
+  | Padded_param_enum_value of
+      { path : string list
+      ; value : string
+      }
   | Duplicate_param_enum_value of
       { path : string list
       ; value : string
@@ -103,12 +108,13 @@ type execution_mode =
   | Async
 
 (** Parameter types a composition can declare. The generated input schema
-    mirrors them, so the provider-side validation the model already gets for
-    every tool applies to composition arguments unchanged.
+    mirrors them, and Agent-Core checks every call against that schema before
+    the composition tool's handler runs, as it does for any other tool.
 
     [Enum_param members] is a closed set of strings, written in the document
-    as [type = "string"] with [enum = [...]]. The member list is non-empty and
-    free of repeats; both are load errors. *)
+    as [type = "string"] with [enum = [...]]. The list is non-empty and free of
+    repeats, and no member is empty or has leading or trailing whitespace;
+    each of these is a load error. *)
 type param_type =
   | String_param
   | Integer_param
@@ -188,11 +194,6 @@ val input_schema_of_params : param list -> Yojson.Safe.t
 
 type instantiation_error =
   | Missing_argument of string
-  | Argument_outside_enum of
-      { param : string
-      ; members : string list
-      ; actual : Yojson.Safe.t
-      }
   | Instantiated_plan_rejected of Keeper_tool_plan.error
 
 val instantiation_error_to_string : instantiation_error -> string
@@ -208,10 +209,7 @@ val instantiate
     revalidated by {!Keeper_tool_plan.create}. A zero-param entry returns its
     declared plan unchanged.
 
-    An [Enum_param] value outside its members is refused with
-    [Argument_outside_enum] before anything is bound. This is the one place
-    masc refuses it: the input schema hands the members to the provider, but
-    pre-dispatch validation ([Tool_input_validation.validate_args]) checks
-    only JSON type and required fields, and the node tool's own schema may
-    admit more values ([BrowserRead] takes [text] as a mode too), so a wrong
-    member would otherwise run as a different read rather than fail. *)
+    The arguments are the ones Agent-Core already checked against
+    {!input_schema_of_params} before the composition handler ran, so a value
+    outside an [Enum_param]'s members never reaches binding. Binding does not
+    check them again. *)

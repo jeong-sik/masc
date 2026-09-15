@@ -1716,7 +1716,6 @@ let make_tools_with_authority
                    let class_ =
                      match error with
                      | Catalog.Missing_argument _
-                     | Catalog.Argument_outside_enum _
                      | Catalog.Instantiated_plan_rejected _ ->
                        Tool_result.Policy_rejection
                    in
@@ -1785,17 +1784,14 @@ let make_tools_with_authority
                      entry
                  with
                  | Error error ->
-                   (* A missing argument cannot get here — the validated
-                      schema enforces required params — but the match stays
-                      total. A value outside an enum param's members does get
-                      here: validation reads only type and required, so
-                      binding is where it is refused, naming the argument
-                      instead of executing a half-bound plan. *)
+                   (* Unreachable through the validated schema — required
+                      params are enforced there — but total: a rejected
+                      binding names the argument instead of executing a
+                      half-bound plan. *)
                    let message = Catalog.instantiation_error_to_string error in
                    let class_ =
                      match error with
                      | Catalog.Missing_argument _
-                     | Catalog.Argument_outside_enum _
                      | Catalog.Instantiated_plan_rejected _ ->
                        Tool_result.Policy_rejection
                    in

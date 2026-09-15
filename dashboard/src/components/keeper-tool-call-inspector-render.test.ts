@@ -570,9 +570,9 @@ describe('KeeperToolCallInspector render', () => {
         {
           ts: 1_777_100_000,
           keeper: 'analyst',
-          tool: 'keeper_time_now',
+          tool: 'keeper_lane_status',
           input: {},
-          output: '{"now_iso":"2026-08-18T05:00:00Z"}',
+          output: '{"profile":"docker","lane":null,"endpoint":null,"operator_action":null}',
           success: true,
           duration_ms: 1,
           thinking_enabled: true,
@@ -587,18 +587,18 @@ describe('KeeperToolCallInspector render', () => {
             path_resolution: { read_implicit_cwd: false, read_explicit_cwd_supported: true },
           },
           action_radius: {
-            action_key: 'keeper_time_now',
+            action_key: 'keeper_lane_status',
             target_kind: 'tool',
             target_path: null,
             observed_paths: [],
             error: null,
           },
           route_evidence: {
-            descriptor_id: 'keeper.time.now',
-            capability_id: 'keeper_time_now',
+            descriptor_id: 'keeper.lane.status',
+            capability_id: 'keeper_lane_status',
             executor: 'in_process',
             backend: 'ocaml_runtime',
-            runtime_handler: 'tool_time_now',
+            runtime_handler: 'tool_lane_status',
             readonly: true,
             receipt_labels: { lane: 'meta' },
           },
@@ -624,10 +624,10 @@ describe('KeeperToolCallInspector render', () => {
     expect(evidence).not.toBeNull()
     const text = evidence?.textContent ?? ''
     expect(text).toContain('route evidence')
-    expect(text).toContain('keeper.time.now')
+    expect(text).toContain('keeper.lane.status')
     expect(text).toContain('in_process')
     expect(text).toContain('ocaml_runtime')
-    expect(text).toContain('tool_time_now')
+    expect(text).toContain('tool_lane_status')
     expect(text).toContain('lane=meta')
     expect(text).toContain('runtime contract')
     expect(text).toContain('/sandbox/analyst/')
@@ -652,14 +652,14 @@ describe('KeeperToolCallInspector render', () => {
         {
           ts: 1_777_100_000,
           keeper: 'analyst',
-          tool: 'keeper_time_now',
+          tool: 'keeper_lane_status',
           input: {},
           output: 'now',
           success: true,
           duration_ms: 1,
           composition_tool: 'keeper_compose_mission-snapshot',
           composition_run_id: 'run-1',
-          composition_node_id: 'clock',
+          composition_node_id: 'lane',
           composition_execution: 'inline',
           parent_tool_use_id: 'call_parent',
           disposition: 'completed',
@@ -701,10 +701,10 @@ describe('KeeperToolCallInspector render', () => {
 
     const childGroup = container.querySelector('[data-composition-children="call_parent"]')
     expect(childGroup).not.toBeNull()
-    expect(childGroup?.querySelector('[data-composition-node="clock"]')).not.toBeNull()
+    expect(childGroup?.querySelector('[data-composition-node="lane"]')).not.toBeNull()
     expect(childGroup?.querySelector('[data-composition-node="board"]')).not.toBeNull()
     // The children render only inside the parent's group, not as top-level rows.
-    expect(container.querySelectorAll('[data-composition-node="clock"]')).toHaveLength(1)
+    expect(container.querySelectorAll('[data-composition-node="lane"]')).toHaveLength(1)
     const parentRow = childGroup?.parentElement
     expect(parentRow?.textContent).toContain('keeper_compose_mission-snapshot')
   })

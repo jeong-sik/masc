@@ -354,7 +354,7 @@ let test_explicit_concurrent_tools_enter_one_agent_core_batch () =
               }
             in
             let tools =
-              [ wrap (require_tool "keeper_time_now")
+              [ wrap (require_tool "keeper_lane_status")
               ; wrap (require_tool "masc_board_stats")
               ]
             in
@@ -377,8 +377,8 @@ let test_explicit_concurrent_tools_enter_one_agent_core_batch () =
                              ~turn_count:7
                              ~usage:Agent_core.Types.empty_usage
                              [ Agent_core.Types.ToolUse
-                                 { id = "time-1"
-                                 ; name = "keeper_time_now"
+                                 { id = "lane-1"
+                                 ; name = "keeper_lane_status"
                                  ; input = `Assoc []
                                  }
                              ; Agent_core.Types.ToolUse

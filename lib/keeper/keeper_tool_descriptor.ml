@@ -102,7 +102,6 @@ type runtime_handler =
   | Tool_read_file
   | Tool_edit_file
   | Tool_write_file
-  | Tool_time_now
   | Tool_lane_status
   | Tool_tools_list
   | Tool_capability_search
@@ -235,7 +234,6 @@ let runtime_handler_to_string = function
   | Tool_read_file -> "tool_read_file"
   | Tool_edit_file -> "tool_edit_file"
   | Tool_write_file -> "tool_write_file"
-  | Tool_time_now -> "tool_time_now"
   | Tool_lane_status -> "tool_lane_status"
   | Tool_tools_list -> "tool_tools_list"
   | Tool_capability_search -> "tool_capability_search"
@@ -465,7 +463,6 @@ let descriptor
       | Tool_read_file
       | Tool_edit_file
       | Tool_write_file
-      | Tool_time_now
       | Tool_lane_status
       | Tool_tools_list
       | Tool_capability_search
@@ -1243,12 +1240,6 @@ let keeper_tools_list_schema =
   | None -> invalid_arg "missing base tool schema for keeper_tools_list"
 ;;
 
-let time_now_schema =
-  match find_base_schema_opt "keeper_time_now" with
-  | Some schema -> schema
-  | None -> invalid_arg "missing base tool schema for keeper_time_now"
-;;
-
 let lane_status_schema =
   match find_base_schema_opt "keeper_lane_status" with
   | Some schema -> schema
@@ -1496,15 +1487,6 @@ let msx_screen_output_schema =
       [ "frame"; "mode"; "pc"; "halted"; "cartridge"; "disk"
       ; "screen_text"; "screen_view"; "tiles"; "artifact"
       ; "media_type"; "width"; "height"; "bytes" ]
-;;
-
-let time_now_output_schema =
-  object_output_schema
-    ~properties:
-      [ "now_iso", `Assoc [ "type", `String "string" ]
-      ; "now_unix", `Assoc [ "type", `String "number" ]
-      ]
-    ~required:[ "now_iso"; "now_unix" ]
 ;;
 
 (* Producer: Keeper_tool_lane_status.handle. [lane], [endpoint] and
@@ -2340,21 +2322,8 @@ let masc_local_runtime_descriptors =
 ;;
 
 let internal_descriptors : t list =
-  [ (* ── time / catalog (RFC-0179 PR-2 + PR-3) ────────── *)
+  [ (* ── lane / catalog ────────── *)
     (in_process_descriptor_with_schema_source
-       ~capability_identity:Internal_name_identity
-       ~keeper_model_projection:Internal_name
-       ~input_schema_source:Canonical_registry
-       ~id:"keeper.time.now"
-       ~name:"keeper_time_now"
-       ~description:time_now_schema.description
-       ~input_schema:time_now_schema.input_schema
-       ~ordinary_execution_mode:Concurrent
-       ~policy:(read_only_in_process_policy ())
-       ~handler:Tool_time_now
-       ()
-     |> with_composable_output (Json_output { schema = time_now_output_schema }))
-  ; (in_process_descriptor_with_schema_source
        ~capability_identity:Internal_name_identity
        ~keeper_model_projection:Internal_name
        ~input_schema_source:Canonical_registry

@@ -112,23 +112,23 @@ describe('groupToolCallTree', () => {
       tool_use_id: 'call_parent',
     })
     const childBoard = compositionChild({ ts: 95, tool: 'masc_board_stats', composition_node_id: 'board' })
-    const childClock = compositionChild({ ts: 90, tool: 'keeper_time_now', composition_node_id: 'clock' })
+    const childLane = compositionChild({ ts: 90, tool: 'keeper_lane_status', composition_node_id: 'lane' })
 
     // Newest-first display order, as the inspector passes it.
-    const nodes = groupToolCallTree([parent, childBoard, childClock])
+    const nodes = groupToolCallTree([parent, childBoard, childLane])
 
     expect(nodes).toHaveLength(1)
     expect(nodes[0]?.entry).toBe(parent)
-    expect(nodes[0]?.children).toEqual([childBoard, childClock])
+    expect(nodes[0]?.children).toEqual([childBoard, childLane])
   })
 
   it('keeps children top-level when the parent row is outside the window', () => {
     const childBoard = compositionChild({ ts: 95, tool: 'masc_board_stats', composition_node_id: 'board' })
-    const childClock = compositionChild({ ts: 90, tool: 'keeper_time_now', composition_node_id: 'clock' })
+    const childLane = compositionChild({ ts: 90, tool: 'keeper_lane_status', composition_node_id: 'lane' })
 
-    const nodes = groupToolCallTree([childBoard, childClock])
+    const nodes = groupToolCallTree([childBoard, childLane])
 
-    expect(nodes.map(node => node.entry)).toEqual([childBoard, childClock])
+    expect(nodes.map(node => node.entry)).toEqual([childBoard, childLane])
     expect(nodes.every(node => node.children.length === 0)).toBe(true)
   })
 
@@ -136,7 +136,7 @@ describe('groupToolCallTree', () => {
     const lateParent = toolCall({ ts: 200, tool: 'keeper_compose_mission-snapshot', tool_use_id: 'call_dup' })
     const nearParent = toolCall({ ts: 100, tool: 'keeper_compose_mission-snapshot', tool_use_id: 'call_dup' })
     const staleParent = toolCall({ ts: 50, tool: 'keeper_compose_mission-snapshot', tool_use_id: 'call_dup' })
-    const child = compositionChild({ ts: 90, tool: 'keeper_time_now', composition_node_id: 'clock', parent_tool_use_id: 'call_dup' })
+    const child = compositionChild({ ts: 90, tool: 'keeper_lane_status', composition_node_id: 'lane', parent_tool_use_id: 'call_dup' })
 
     const nodes = groupToolCallTree([lateParent, nearParent, child, staleParent])
 
@@ -153,10 +153,10 @@ describe('groupToolCallTree', () => {
       tool: 'keeper_compose_mission-snapshot',
       tool_use_id: 'call_async',
     })
-    const childClock = compositionChild({
+    const childLane = compositionChild({
       ts: 1_787_025_233.045521,
-      tool: 'keeper_time_now',
-      composition_node_id: 'clock',
+      tool: 'keeper_lane_status',
+      composition_node_id: 'lane',
       composition_execution: 'async',
       parent_tool_use_id: 'call_async',
     })
@@ -168,11 +168,11 @@ describe('groupToolCallTree', () => {
       parent_tool_use_id: 'call_async',
     })
 
-    const nodes = groupToolCallTree([childBoard, childClock, parent])
+    const nodes = groupToolCallTree([childBoard, childLane, parent])
 
     expect(nodes).toHaveLength(1)
     expect(nodes[0]?.entry).toBe(parent)
-    expect(nodes[0]?.children).toEqual([childBoard, childClock])
+    expect(nodes[0]?.children).toEqual([childBoard, childLane])
   })
 
   it('attaches an async run to its dispatch parent, not a later reuse of the provider id', () => {
@@ -180,8 +180,8 @@ describe('groupToolCallTree', () => {
     const laterReuse = toolCall({ ts: 200, tool: 'keeper_compose_mission-snapshot', tool_use_id: 'call_dup' })
     const child = compositionChild({
       ts: 90,
-      tool: 'keeper_time_now',
-      composition_node_id: 'clock',
+      tool: 'keeper_lane_status',
+      composition_node_id: 'lane',
       composition_execution: 'async',
       parent_tool_use_id: 'call_dup',
     })
@@ -196,7 +196,7 @@ describe('groupToolCallTree', () => {
     // Neither recorded shape: the candidate is after the oldest child and
     // before the newest child, so attaching would be a guess.
     const interiorCandidate = toolCall({ ts: 95, tool: 'keeper_compose_mission-snapshot', tool_use_id: 'call_mid' })
-    const childEarly = compositionChild({ ts: 90, tool: 'keeper_time_now', composition_node_id: 'clock', parent_tool_use_id: 'call_mid' })
+    const childEarly = compositionChild({ ts: 90, tool: 'keeper_lane_status', composition_node_id: 'lane', parent_tool_use_id: 'call_mid' })
     const childLate = compositionChild({ ts: 100, tool: 'masc_board_stats', composition_node_id: 'board', parent_tool_use_id: 'call_mid' })
 
     const nodes = groupToolCallTree([childLate, interiorCandidate, childEarly])
@@ -207,7 +207,7 @@ describe('groupToolCallTree', () => {
 
   it('never joins on blank provider ids', () => {
     const parent = toolCall({ ts: 100, tool: 'keeper_compose_mission-snapshot', tool_use_id: '' })
-    const child = compositionChild({ ts: 90, tool: 'keeper_time_now', parent_tool_use_id: '' })
+    const child = compositionChild({ ts: 90, tool: 'keeper_lane_status', parent_tool_use_id: '' })
 
     const nodes = groupToolCallTree([parent, child])
 

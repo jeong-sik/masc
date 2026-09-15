@@ -87,7 +87,6 @@ let handle_filesystem ctx descriptor args =
          ())
   | Tool_execute
   | Tool_search_files
-  | Tool_time_now
   | Tool_lane_status
   | Tool_tools_list
   | Tool_capability_search
@@ -168,7 +167,6 @@ let handle_shell_ir ctx ~(dispatch : Keeper_shell_tool_command.dispatch) descrip
   | Tool_read_file
   | Tool_edit_file
   | Tool_write_file
-  | Tool_time_now
   | Tool_lane_status
   | Tool_tools_list
   | Tool_capability_search
@@ -223,10 +221,6 @@ let handle_shell_ir ctx ~(dispatch : Keeper_shell_tool_command.dispatch) descrip
 let handle_in_process ctx descriptor args =
   let name = descriptor.Keeper_tool_descriptor.internal_name in
   match descriptor.Keeper_tool_descriptor.runtime_handler with
-  | Tool_time_now ->
-    Some
-      (Keeper_tool_execution.success_data
-         (Keeper_tool_in_process_runtime.handle_time_now ~args))
   | Tool_lane_status ->
     Some
       (Keeper_tool_execution.success_data

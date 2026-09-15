@@ -51,7 +51,7 @@ let domain_of_tool name =
     is "tool_read_file" || is "tool_edit_file" || is "tool_write_file"
     || is "tool_search_files" || is "keeper_memory" || is "keeper_voice"
     || is "keeper_broadcast" || is "keeper_context_status"
-    || is "keeper_time_now" || is "keeper_tools_list"
+    || is "keeper_tools_list"
   then Some "keeper self"
   else if
     is "masc_config" || is "masc_tool_help" || is "masc_runtime"

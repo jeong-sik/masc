@@ -868,10 +868,10 @@ describe('parseSSEMessage', () => {
     const msg = parseSSEMessage({
       type: 'keeper_tool_call_evidence_committed',
       name: 'analyst',
-      tool_name: 'keeper_time_now',
+      tool_name: 'keeper_lane_status',
       composition_tool: 'keeper_compose_mission-snapshot',
       composition_run_id: '019d1234-5678-7abc-8def-0123456789ab',
-      composition_node_id: 'clock',
+      composition_node_id: 'lane',
       composition_execution: 'inline',
       parent_tool_use_id: '',
       tool_use_id: 'nested-call',
@@ -889,7 +889,7 @@ describe('parseSSEMessage', () => {
     expect(msg).toMatchObject({
       type: 'keeper_tool_call_evidence_committed',
       name: 'analyst',
-      composition_node_id: 'clock',
+      composition_node_id: 'lane',
       parent_tool_use_id: '',
       tool_use_id: 'nested-call',
     })
@@ -902,10 +902,10 @@ describe('parseSSEMessage', () => {
     expect(parseSSEMessage({
       type: 'keeper_tool_call_evidence_committed',
       name: 'analyst',
-      tool_name: 'keeper_time_now',
+      tool_name: 'keeper_lane_status',
       composition_tool: 'keeper_compose_mission-snapshot',
       composition_run_id: '',
-      composition_node_id: 'clock',
+      composition_node_id: 'lane',
       composition_execution: 'inline',
       parent_tool_use_id: 'outer-call',
       tool_use_id: 'nested-call',

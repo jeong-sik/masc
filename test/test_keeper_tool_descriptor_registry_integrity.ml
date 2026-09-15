@@ -332,7 +332,6 @@ let descriptions_owned_elsewhere =
   ; "keeper_memory_search"
   ; "keeper_memory_write"
   ; "keeper_person_note_set"
-  ; "keeper_time_now"
   ; "keeper_tools_list"
   ; "keeper_capability_search"
   ]
@@ -592,7 +591,7 @@ let test_seed_eval_tags_are_registered () =
   check "keeper_capability_search" [ "capability_introspection" ];
   check "keeper_surface_read" [ "surface_context_read" ];
   check "masc_agent_card" [ "agent_profile_lookup" ];
-  check "keeper_time_now" []
+  check "keeper_lane_status" []
 ;;
 
 let internal_name_charset_ok c =
@@ -1429,7 +1428,6 @@ let test_concurrent_execution_opt_ins_are_exact () =
     ; "keeper_surface_read"
     ; "keeper_tasks_audit"
     ; "keeper_tasks_list"
-    ; "keeper_time_now"
     ; "keeper_tools_list"
     ; "keeper_workspace_memory_read"
     ; "masc_agent_card"

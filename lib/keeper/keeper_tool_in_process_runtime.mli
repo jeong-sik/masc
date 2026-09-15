@@ -9,8 +9,6 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
-val handle_time_now : args:Yojson.Safe.t -> Yojson.Safe.t
-
 val handle_tools_list
   :  capability_surface:Keeper_capability_surface.t
   -> args:Yojson.Safe.t

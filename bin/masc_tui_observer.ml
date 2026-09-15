@@ -69,7 +69,6 @@ type keeper_heartbeat = {
   hb_phase : string option;
   hb_in_turn : bool option;
   hb_in_flight_ms : float option;
-  hb_since_progress_ms : float option;
   hb_at : float;
 }
 
@@ -82,6 +81,13 @@ type keeper_turn_complete = {
   tc_cost_usd : float option;
   tc_tool_calls : int option;
   tc_at : float;
+}
+
+type keeper_turn_observation = {
+  to_keeper : string;
+  to_session_turn : int option;
+  to_total_turns : int option;
+  to_at : float;
 }
 
 type keeper_tool_call = {
@@ -104,6 +110,7 @@ type event =
   | Keeper_heartbeat of keeper_heartbeat
   | Keeper_tool_call of keeper_tool_call
   | Keeper_turn_complete of keeper_turn_complete
+  | Keeper_turn_observation of keeper_turn_observation
   | Keeper_composite_changed of { keeper : string; at : float }
   | Keeper_chat_appended of { keeper : string; connector : string option; at : float }
   | Keeper_chat_stream_frame of
@@ -137,8 +144,13 @@ type delivery = {
    wildcard. *)
 let chat_appended_keeper = function
   | Keeper_chat_appended { keeper; _ } -> Some keeper
+  (* A turn observation numbers a provider call inside a keeper turn; it
+     carries no transcript. Even the turn's own settle does not reload the
+     chat, so a frame from mid-turn does not either. *)
+  | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
-  | Keeper_turn_complete _ | Keeper_composite_changed _
+  | Keeper_turn_complete _
+  | Keeper_composite_changed _
   | Keeper_chat_stream_frame _ | Keeper_waiting_inventory_changed _
   | Fusion_run_status _ | Snapshot _ | Other _ ->
       None
@@ -249,7 +261,6 @@ let decode_keeper_heartbeat fields =
        ; hb_phase = string_field fields "phase"
        ; hb_in_turn = bool_field fields "in_turn"
        ; hb_in_flight_ms = float_field fields "in_flight_elapsed_ms"
-       ; hb_since_progress_ms = float_field fields "since_last_progress_ms"
        ; hb_at
        })
 
@@ -344,6 +355,20 @@ let decode_keeper_waiting_inventory_changed fields =
     (Keeper_waiting_inventory_changed
        { keeper; queue_kind = string_field fields "queue_kind"; at })
 
+(* The hook's per-call report: [turn] is the agent session's ordinal for
+   the call and [total_turns] the keeper turns completed before it. *)
+let decode_keeper_turn_observation fields =
+  let event = "keeper_turn_observation" in
+  let* to_keeper = required string_field fields "name" ~event in
+  let* to_at = required float_field fields "ts_unix" ~event in
+  Ok
+    (Keeper_turn_observation
+       { to_keeper
+       ; to_session_turn = int_field fields "turn"
+       ; to_total_turns = int_field fields "total_turns"
+       ; to_at
+       })
+
 let decode_named_keeper_event ~event fields make =
   let* keeper = required string_field fields "name" ~event in
   let* at = required float_field fields "ts_unix" ~event in
@@ -360,6 +385,7 @@ let event_of_json (json : Yojson.Safe.t) =
       | Some "keeper_heartbeat" -> decode_keeper_heartbeat fields
       | Some "keeper_tool_call" -> decode_keeper_tool_call fields
       | Some "keeper_turn_complete" -> decode_keeper_turn_complete fields
+      | Some "keeper_turn_observation" -> decode_keeper_turn_observation fields
       | Some ("keeper_composite_changed" as event) ->
           decode_named_keeper_event ~event fields (fun ~keeper ~at ->
               Keeper_composite_changed { keeper; at })

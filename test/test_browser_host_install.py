@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Executable installation survives removal of its source checkout."""
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -34,6 +35,12 @@ class Installation(unittest.TestCase):
             self.assertNotIn(original.strip(), launcher.read_text())
             result = subprocess.run([str(launcher), str(manifests / "masc_browser_host.json"), "browser-lane@masc.local"], check=True, capture_output=True, text=True)
             self.assertEqual(result.stdout.splitlines(), ["--base-path", str(base), "--token-file", str(token), str(manifests / "masc_browser_host.json"), "browser-lane@masc.local"])
+            # masc doctor and the browser tools read this instead of the shell text.
+            declaration = json.loads((launcher.parent / "launch.json").read_text())
+            self.assertEqual(declaration, {
+                "destination": "workspace_connection",
+                "launcher_sha256": hashlib.sha256(launcher.read_bytes()).hexdigest(),
+            })
 
     def test_missing_base_path_is_explicit(self):
         env = {k: v for k, v in os.environ.items() if k != "MASC_BASE_PATH"}

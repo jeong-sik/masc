@@ -299,7 +299,9 @@ type execution_error =
   | Input_validation_failed of
       { node_id : Node_id.t
       ; tool_name : string
-      ; rejection : Tool_result.result
+      ; rejection : Tool_input_validation.rejection
+          (** The same validator a direct call of [tool_name] goes through;
+              [rejection.violation] names the field and the rule. *)
       }
   | Output_validation_failed of
       { node_id : Node_id.t
@@ -331,3 +333,24 @@ val resolve_input
   -> node_id:Node_id.t
   -> lookup:(Node_id.t -> output option)
   -> (Yojson.Safe.t, execution_error) result
+
+(** When a node's input is known and checked. [private]: only
+    {!prepare_inputs} produces [Checked_before_run], so a value carrying it has
+    passed validation. *)
+type prepared_input = private
+  | Checked_before_run of Yojson.Safe.t
+      (** The template reads no producer output, so its value is fixed once
+          parameters are bound. This is the validated value to dispatch. *)
+  | Checked_when_node_runs
+      (** The template reads a producer output; {!resolve_input} resolves and
+          validates it after that producer settles. *)
+
+(** Resolve and validate, before any node runs, every node input whose
+    template reads no producer output. Nodes are visited in canonical plan
+    order and the first rejection is returned with its node, so a plan whose
+    later node carries a bad literal or parameter fails without running the
+    nodes before it. Each node is validated at most once: a
+    [Checked_before_run] value is dispatched as is. *)
+val prepare_inputs
+  :  t
+  -> ((Node_id.t * prepared_input) list, Node_id.t * execution_error) result

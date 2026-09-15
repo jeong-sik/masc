@@ -585,9 +585,8 @@ let test_enum_param_projects_members_and_binds () =
     "schema lists the members"
     [ "scene"; "regions" ]
     (property |> member "enum" |> to_list |> List.map to_string);
-  (* The projected schema still passes the pre-dispatch check for a member.
-     That check does not read [enum], so refusing an outside value is left to
-     binding below. *)
+  (* The composition handler checks its arguments again with masc's own input
+     validation before binding, so a member has to pass that check too. *)
   (match
      Masc.Tool_input_validation.validate_args
        ~schema
@@ -617,28 +616,6 @@ let test_enum_param_projects_members_and_binds () =
       | Some _ | None -> fail "the chosen member was not bound as a literal")
    | Error error ->
      fail ("a declared member failed to bind: " ^ Catalog.instantiation_error_to_string error));
-  (* BrowserRead itself takes "text" as a mode, so only binding can refuse it
-     for this composition. *)
-  (match
-     Catalog.instantiate ~descriptors ~args:(`Assoc [ "mode", `String "text" ]) entry
-   with
-   | Error
-       (Catalog.Argument_outside_enum
-          { param = "mode"; members = [ "scene"; "regions" ]; actual = `String "text" } as
-        error) ->
-     check
-       string
-       "typed projection kind"
-       "argument_outside_enum"
-       (Catalog.instantiation_error_to_json error |> member "kind" |> to_string)
-   | Ok _ -> fail "a value outside the members was bound"
-   | Error error ->
-     fail ("wrong refusal for an outside value: " ^ Catalog.instantiation_error_to_string error));
-  (match Catalog.instantiate ~descriptors ~args:(`Assoc [ "mode", `Int 1 ]) entry with
-   | Error (Catalog.Argument_outside_enum { param = "mode"; actual = `Int 1; _ }) -> ()
-   | Ok _ -> fail "a non-string value was bound to an enum param"
-   | Error error ->
-     fail ("wrong refusal for a non-string value: " ^ Catalog.instantiation_error_to_string error));
   match Catalog.instantiate ~descriptors ~args:(`Assoc []) entry with
   | Error (Catalog.Missing_argument "mode") -> ()
   | Ok _ -> fail "a missing enum argument was bound"
@@ -664,6 +641,30 @@ enum = []|} with
 enum = ["scene", "scene"]|} with
    | Catalog.Duplicate_param_enum_value { value = "scene"; _ } -> ()
    | error -> fail ("repeated member: " ^ Catalog.error_to_string error));
+  List.iter
+    (fun (label, members, expected_value, expected_fault) ->
+       match parse_error ("type = \"string\"\nenum = " ^ members) with
+       | Catalog.Unsendable_param_enum_value { value; fault; _ }
+         when String.equal value expected_value && fault = expected_fault -> ()
+       | error -> fail (label ^ ": " ^ Catalog.error_to_string error))
+    [ "empty member", {|["scene", ""]|}, "", Catalog.Empty_value
+    ; "leading whitespace", {|[" scene", "regions"]|}, " scene", Catalog.Padded_value
+    ; "trailing whitespace", {|["scene", "regions "]|}, "regions ", Catalog.Padded_value
+    ; "line feed inside", {|["scene", "re\ngions"]|}, "re\ngions", Catalog.Line_break_in_value
+    ; ( "carriage return inside"
+      , {|["scene", "re\rgions"]|}
+      , "re\rgions"
+      , Catalog.Line_break_in_value )
+    ; ( "spaced separator inside"
+      , {|["scene | regions", "text"]|}
+      , "scene | regions"
+      , Catalog.Separator_in_value )
+    ; "separator ending a member", {|["x |", "y"]|}, "x |", Catalog.Separator_in_value
+    ; ( "padding is reported before a separator"
+      , {|[" x|y", "z"]|}
+      , " x|y"
+      , Catalog.Padded_value )
+    ];
   (match parse_error {|type = "string"
 enum = "scene"|} with
    | Catalog.Wrong_value_kind { field = "enum"; expected = Catalog.String_array_value; _ } ->
@@ -679,11 +680,11 @@ values = ["scene", "regions"]|} with
    resolve to the SKILL.md the catalog read. Composed from the name, which is
    sound only because the tool exists as a consequence of that file. *)
 let test_skill_source_names_the_skill_file () =
-  match Catalog.skill_source_of_tool_name "keeper_compose_mission-snapshot" with
+  match Catalog.skill_source_of_tool_name "keeper_compose_work-intake" with
   | Some rel ->
     Alcotest.(check string)
       "skill definition path"
-      "skills/mission-snapshot/SKILL.md"
+      "skills/work-intake/SKILL.md"
       rel
   | None -> Alcotest.fail "a composition tool must name its skill file"
 ;;
@@ -804,7 +805,7 @@ let () =
             `Quick
             test_catalog_rejects_param_declaration_mismatches
         ; test_case
-            "an enum param projects its members and binds only a member"
+            "an enum param projects its members and binds a member"
             `Quick
             test_enum_param_projects_members_and_binds
         ; test_case

@@ -84,23 +84,43 @@ describe('keeperDisplayStatus', () => {
       expect(keeperDisplayStatus(keeper)).toBe('stopped')
     })
 
-    it('uses lifecycle_phase when heartbeat is alive but status is offline', () => {
+    it('uses lifecycle_phase over a phase that says Running when status is offline', () => {
       const keeper = makeKeeper({
         status: 'offline',
         phase: 'Running',
         lifecycle_phase: 'Stopped',
-        last_heartbeat: new Date().toISOString(),
       })
       expect(keeperDisplayStatus(keeper)).toBe('stopped')
     })
 
-    it('does not turn exact Offline lifecycle into idle just because heartbeat is recent', () => {
+    it('reads exact Offline lifecycle as unbooted', () => {
       const keeper = makeKeeper({
         status: 'offline',
         lifecycle_phase: 'Offline',
-        last_heartbeat: new Date().toISOString(),
       })
       expect(keeperDisplayStatus(keeper)).toBe('unbooted')
+    })
+
+    it('shows the registry phase when status says offline but the phase is Running', () => {
+      const keeper = makeKeeper({
+        status: 'offline',
+        phase: 'Running',
+        turn_count: 12,
+      })
+      expect(keeperDisplayStatus(keeper)).toBe('running')
+    })
+
+    it.each([
+      ['Crashed', 'crashed'],
+      ['Restarting', 'restarting'],
+      ['Failing', 'failing'],
+    ] as const)('shows phase %s when status says offline', (phase, expected) => {
+      const keeper = makeKeeper({
+        status: 'offline',
+        phase,
+        turn_count: 3,
+      })
+      expect(keeperDisplayStatus(keeper)).toBe(expected)
     })
 
     it('lets terminal lifecycle override stale active status', () => {
@@ -168,18 +188,17 @@ describe('keeperPauseDisplay', () => {
         health_state: 'offline',
         next_action_path: 'recover',
         last_reply_status: 'unknown',
-        continuity_state: 'not_running',
       },
     }))
 
     expect(display).toMatchObject({
       reason: 'Fiber 미해결',
       nextAction: 'inspect blocker before resume',
-      diagnostic: 'offline/not running',
+      diagnostic: 'offline',
     })
     expect(display?.detail).toContain('원인 Fiber 미해결')
     expect(display?.detail).toContain('다음 inspect blocker before resume')
-    expect(display?.detail).toContain('진단 offline/not running')
+    expect(display?.detail).toContain('진단 offline')
     expect(display?.title).toContain('paused=true')
     expect(display?.title).toContain('status=paused')
   })
@@ -271,27 +290,11 @@ describe('keeperActivityDisplay', () => {
     vi.useRealTimers()
   })
 
-  it('uses heartbeat as the latest live signal when autonomous action is older', () => {
-    expect(
-      keeperActivityDisplay({
-        tool_audit_at: '2026-04-24T12:00:00Z',
-        last_heartbeat: '2026-04-24T17:54:00Z',
-      }),
-    ).toEqual({
-      source: 'heartbeat',
-      label: '하트비트',
-      detail: null,
-      timestamp: '2026-04-24T17:54:00Z',
-      ageSeconds: 360,
-    })
-  })
-
   it('uses live activity source labels for tool and approval activity', () => {
     expect(
       keeperActivityDisplay({
         last_activity_at: '2026-04-24T17:59:30Z',
         last_activity_source: 'approval_pending',
-        last_heartbeat: '2026-04-24T17:54:00Z',
       }),
     ).toEqual({
       source: 'approval_pending',
@@ -355,18 +358,9 @@ describe('keeperActivityDisplay', () => {
   it('does not let agent last_seen override keeper runtime signals', () => {
     expect(
       keeperActivityDisplay(
-        { last_heartbeat: '2026-04-24T17:54:00Z' },
+        { tool_audit_at: '2026-04-24T17:54:00Z' },
         '2026-04-24T17:59:00Z',
       ).source,
-    ).toBe('heartbeat')
-  })
-
-  it('uses autonomous action when it is newer than heartbeat', () => {
-    expect(
-      keeperActivityDisplay({
-        tool_audit_at: '2026-04-24T17:59:00Z',
-        last_heartbeat: '2026-04-24T17:54:00Z',
-      }).source,
     ).toBe('autonomous_action')
   })
 
@@ -385,21 +379,20 @@ describe('keeperActivityDisplay', () => {
     })
   })
 
-  // SSOT regression guard: keeper detail에서 헤드라인(last_heartbeat raw),
-  // 사이드바(activityDisplay), 헤더(created_at raw)가 서로 다른 필드를 읽어
-  // "26초 전 / 18시간 전 / 27일 전"이 동시에 렌더링되던 문제.
-  // 동일 keeper 입력에 대해 helper가 단일 source/timestamp/ageSeconds를
-  // 반환해야 모든 surface가 동일 값을 표시할 수 있다.
-  it('picks a single freshest source when heartbeat, turn, and created_at all coexist', () => {
+  // SSOT regression guard: keeper detail에서 헤드라인, 사이드바(activityDisplay),
+  // 헤더(created_at raw)가 서로 다른 필드를 읽어 "26초 전 / 18시간 전 / 27일 전"이
+  // 동시에 렌더링되던 문제. 동일 keeper 입력에 대해 helper가 단일
+  // source/timestamp/ageSeconds를 반환해야 모든 surface가 동일 값을 표시할 수 있다.
+  it('picks a single freshest source when action, turn, and created_at all coexist', () => {
     const result = keeperActivityDisplay({
       // 26초 전 — freshest, 우승해야 함
-      last_heartbeat: '2026-04-24T17:59:34Z',
+      tool_audit_at: '2026-04-24T17:59:34Z',
       // 18시간 전
       last_turn_ago_s: 18 * 3600,
       // 27일 전 — 활동 후보가 있을 때는 절대 선택되면 안 됨
       created_at: '2026-03-28T18:00:00Z',
     })
-    expect(result.source).toBe('heartbeat')
+    expect(result.source).toBe('autonomous_action')
     expect(result.timestamp).toBe('2026-04-24T17:59:34Z')
     expect(result.ageSeconds).toBe(26)
   })

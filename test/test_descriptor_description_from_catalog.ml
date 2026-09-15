@@ -15,7 +15,7 @@
     accept a descriptor reading some other tool's file; this does not.
 
     A descriptor carrying its own literal is the defect this pins:
-    five keeper_* tools (#32494, #32525, #32528), Execute,
+    the keeper_* tools of #32494, #32525 and #32528, Execute,
     whose literal still said a script line is not handed to a shell after
     #32087 made it one (#32546, #32555), and masc_library_list, whose literal
     named its siblings by the keeper_* names while the row named the masc_*

@@ -690,7 +690,6 @@ let run_cmd ?(record_default = false) host port cli_base_path accept_store_quara
     Log.Server.warn
       "Normalizing --base-path from %s to %s because runtime base paths must point at the workspace root, not the .masc directory."
       raw_base_path canonical_base_path;
-  Unix.putenv "MASC_BASE_PATH_INPUT" raw_base_path;
   Unix.putenv "MASC_BASE_PATH" canonical_base_path;
   Workspace_utils_backend_setup.cache_resolved_base_path canonical_base_path;
   Unix.putenv "MASC_BASE_PATH_RESOLUTION_SOURCE" resolution_source;
@@ -1346,7 +1345,9 @@ let seed_one ~target_root ~force tally (rel, dest_rel) =
 type init_skills = { changed : int; skill_failed : bool }
 
 (* Every package's verdict is printed. A package that was not reconciled
-   fails the command; packages kept for operator review do not. *)
+   fails the command; packages kept for operator review do not, and neither
+   does a leftover staging directory that could not be removed, which the next
+   installation tries again. *)
 let init_builtin_skills_reconcile = function
   | Error error ->
     Printf.eprintf "init: builtin Skills were not reconciled: %s\n"
@@ -1359,22 +1360,39 @@ let init_builtin_skills_reconcile = function
       | Builtin_skill_package.Bundled
           { result = Ok (Builtin_skill_package.Install_missing
                         | Builtin_skill_package.Adopt_identical
+                        | Builtin_skill_package.Adopt_with_release_permissions
                         | Builtin_skill_package.Replace_recorded _); _ }
       | Builtin_skill_package.Retired
-          { result = Ok (Builtin_skill_package.Retire_recorded _); _ } ->
+          { result = Ok (Builtin_skill_package.Retire_recorded _); _ }
+      | Builtin_skill_package.Interrupted
+          { result = Ok (Builtin_skill_package.Move_finished _); _ } ->
         { tally with changed = tally.changed + 1 }
       | Builtin_skill_package.Bundled
           { result = Ok (Builtin_skill_package.Up_to_date
+                        | Builtin_skill_package.Permissions_pending _
+                        | Builtin_skill_package.Replace_pending _
                         | Builtin_skill_package.Keep_modified _
                         | Builtin_skill_package.Keep_untracked_different _
                         | Builtin_skill_package.Keep_uninspectable _); _ }
       | Builtin_skill_package.Retired
-          { result = Ok (Builtin_skill_package.Keep_retired_modified _
-                        | Builtin_skill_package.Keep_retired_uninspectable _); _ } -> tally
+          { result = Ok (Builtin_skill_package.Retire_pending _
+                        | Builtin_skill_package.Keep_retired_modified _
+                        | Builtin_skill_package.Keep_retired_uninspectable _); _ }
+      | Builtin_skill_package.Interrupted
+          { result = Ok (Builtin_skill_package.Move_never_started
+                        | Builtin_skill_package.Move_completed); _ }
+      | Builtin_skill_package.Unfinished _ -> tally
       | Builtin_skill_package.Bundled { result = Error _; _ }
-      | Builtin_skill_package.Retired { result = Error _; _ } ->
+      | Builtin_skill_package.Retired { result = Error _; _ }
+      | Builtin_skill_package.Interrupted { result = Error _; _ } ->
         { tally with skill_failed = true })
       { changed = 0; skill_failed = false } reports
+
+(* Says once which lock the installer waits for, so an installation stopped
+   while holding it shows up instead of a silent pause. Standard error, because
+   the installer script keeps standard output for its own summary. *)
+let print_skill_lock_wait lock =
+  Printf.eprintf "waiting for another Skill installation to release %s\n%!" lock
 
 let init_cmd_exit base_path force scope record_default =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
@@ -1406,7 +1424,8 @@ let init_cmd_exit base_path force scope record_default =
     | Config_only -> { changed = 0; skill_failed = false }
     | All | Skills_only ->
       init_builtin_skills_reconcile
-        (Server_runtime_config_root_bootstrap.reconcile_builtin_skills ~base_path) in
+        (Server_runtime_config_root_bootstrap.install_builtin_skills
+           ~on_wait:print_skill_lock_wait ~base_path) in
   Printf.printf "init: %d written, %d skipped, %d failed, %d builtin Skill package(s) changed (root=%s)\n"
     result.written result.skipped result.failed skills.changed target_root;
   (* A seeded workspace is the one thing a later bare `masc` needs to know
@@ -1456,8 +1475,11 @@ let init_cmd =
      Existing config files are kept unless --force. Builtin Skill packages are \
      reconciled with this binary: missing ones are installed, unmodified recorded \
      ones are updated or, when no longer shipped, moved aside, and packages whose \
-     files already match are recorded. Operator edits and packages without \
-     installation receipts are kept, and each package's result is printed."
+     files already match are recorded, with their permissions set to the \
+     release's when only those differ. Server start only installs missing \
+     packages and records matching ones; the rest waits for this command. \
+     Operator edits and other packages without installation receipts are kept, \
+     and each package's result is printed."
   in
   let info = Cmd.info "init" ~doc in
   Cmd.v info
@@ -1486,10 +1508,10 @@ let skills_refresh_exit base_path name apply expected_revision expected_bundle_r
       | (None, _) | (Some _, None) ->
         prerr_endline "--apply requires --expected-revision and --expected-bundle-revision from a reviewed package"; 1
       | Some installed_revision, Some bundled_revision ->
-        (match Builtin_skill_package.replace_reviewed ~base_path
+        (match Builtin_skill_package.replace_reviewed ~on_wait:print_skill_lock_wait ~base_path
                  ~installed_revision ~bundled_revision package with
          | Ok (Builtin_skill_package.Replaced { backup }) ->
-           Printf.printf "Updated %s; previous package: %s\nRefresh the running Skill catalog before a new instruction invocation.\n" name backup; 0
+           Printf.printf "Updated %s; previous package: %s\nThe next replacement or retirement of %s, including masc init, replaces that backup; copy it elsewhere to keep your changes.\nRefresh the running Skill catalog before a new instruction invocation.\n" name backup name; 0
          | Ok Builtin_skill_package.Already_current -> print_endline "Package is current"; 0
          | Error error -> prerr_endline (Builtin_skill_package.error_message error); 1)
     else if Option.is_some expected_revision || Option.is_some expected_bundle_revision then (
@@ -1850,7 +1872,6 @@ let voice_verify_cmd_exit requested_base_path message audio agent as_json =
      has already resolved once by the time a subcommand runs. *)
   Option.iter
     (fun raw ->
-      Unix.putenv "MASC_BASE_PATH_INPUT" raw;
       Unix.putenv "MASC_BASE_PATH" (Env_config.normalize_masc_base_path_input raw);
       Config_dir_resolver.reset ())
     requested_base_path;
@@ -3329,8 +3350,9 @@ let setup_stop_owner_cmd =
 
 let sandbox_catalog_cmd =
   let inspect requested =
-    let base_path = match requested with Some path -> Some path
-      | None -> Option.map snd (Env_config_core.base_path_source_opt ()) in
+    (* The setup journey reads this catalog for the workspace doctor offered;
+       both answer in Workspace_root's order. *)
+    let base_path = selected_base_path requested in
     print_endline (Yojson.Safe.to_string (Masc.Sandbox_readiness.inspect ~base_path));
     0 in
   Cmd.v (Cmd.info "sandbox-catalog" ~doc:"Inspect sandbox choices and host prerequisites without changing settings.")
@@ -3340,10 +3362,9 @@ let doctor_cmd =
   let json = Arg.(value & flag & info ["json"]
     ~doc:"Print the shared read-only onboarding state as JSON.") in
   let inspect requested json =
-    let selected = match requested with
-      | Some path -> Some path
-      | None -> Option.map snd (Env_config_core.base_path_source_opt ()) in
-    let state = Onboarding_status.inspect ~base_path:selected in
+    (* The setup journey asks doctor which workspace to offer, so doctor answers
+       in the same order `masc start` boots in; a workspace cwd is found here. *)
+    let state = Onboarding_status.inspect ~base_path:(selected_base_path requested) in
     print_endline (if json then Yojson.Safe.to_string (Onboarding_status.to_json state)
                    else Onboarding_status.to_text state);
     (* Reporting incomplete preparation is successful observation, never a
@@ -3423,15 +3444,16 @@ let setup_cmd =
       if not no_tui && profile = None && backend = None && network_mode = None && stdio_is_a_terminal () then
         `Ok (Masc_cli_onboarding.run ~base_path ~port:requested_port ~resume:false ~sandbox_step:false)
       else
-        let resolved = match base_path with
-          | Some path -> Some path
-          | None -> Option.map snd (Env_config_core.base_path_source_opt ()) in
-        match resolved with
-        | Some path ->
+        match Workspace_root.resolve_current ~flag:base_path with
+        | Ok workspace ->
+          publish_workspace_root workspace;
+          let path = workspace.Workspace_root.root in
           (match resolve_connection_port (Some path) requested_port with
            | Ok port -> `Ok (setup_cmd_exit path (Workspace_connection.to_int port) no_tui profile backend network_mode)
            | Error error -> `Error (false, Workspace_connection.error_message error))
-        | None -> `Error (false, "Choose a workspace with --base-path, or run masc setup in a terminal.")
+        | Error error ->
+          `Error (false, Workspace_root.error_message error
+                         ^ "\nOr run masc setup in a terminal to choose one.")
   in
   Cmd.v
     (Cmd.info "setup"

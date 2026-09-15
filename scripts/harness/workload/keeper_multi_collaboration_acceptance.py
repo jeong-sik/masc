@@ -192,6 +192,17 @@ TRANSPORT_RETRY_ATTEMPTS = 30
 # bucket's drain unattributed because the rejection leaves no server log.
 RATE_LIMIT_RETRY_ATTEMPTS = 30
 RATE_LIMIT_RETRY_FALLBACK_SEC = 1.0
+# The largest comment page masc_board_post_get accepts
+# (Board_types.Limits.max_comment_page_limit). A page can still end sooner
+# than this, so the thread read follows the page position the result carries.
+BOARD_COMMENT_PAGE_LIMIT = 100
+# The page a thread read returned, as the result carries it beside the text a
+# model reads: the server's own _meta key (Mcp_server.tool_call_meta_key), the
+# handler's metadata under it, and the page position under its own key
+# (Board_types.Comment_page.Position.metadata_key). The text is for the model;
+# a caller that continues the read takes these instead of parsing it.
+MASC_CALL_META_KEY = "com.github.yousleepwhen.masc/call"
+COMMENT_PAGE_METADATA_KEY = "masc.comment_page"
 
 
 def retry_after_seconds(error: urllib.error.HTTPError) -> float:
@@ -373,6 +384,30 @@ def parse_json_exact(text: str) -> Any:
         return json.loads(text)
     except (json.JSONDecodeError, TypeError):
         return text
+
+
+def board_comment_page_position(response: Any) -> dict[str, Any] | None:
+    """The page position a masc_board_post_get result carries beside its text.
+
+    The text is what a model reads; a caller continuing the read takes the
+    position from the result's metadata rather than parsing that text.
+    """
+    if not isinstance(response, dict):
+        return None
+    result = response.get("result")
+    if not isinstance(result, dict):
+        return None
+    meta = result.get("_meta")
+    if not isinstance(meta, dict):
+        return None
+    call_meta = meta.get(MASC_CALL_META_KEY)
+    if not isinstance(call_meta, dict):
+        return None
+    metadata = call_meta.get("metadata")
+    if not isinstance(metadata, dict):
+        return None
+    position = metadata.get(COMMENT_PAGE_METADATA_KEY)
+    return position if isinstance(position, dict) else None
 
 
 def text_contains(value: Any, needle: str) -> bool:
@@ -2590,10 +2625,6 @@ class MissionRun:
                 "masc_board_search",
                 {"query": self.marker, "limit": 50, "compact": False},
             ),
-            "board-post": (
-                "masc_board_post_get",
-                {"post_id": post_id, "comment_offset": 0, "comment_limit": 100},
-            ),
             "schedule": ("masc_schedule_get", {"schedule_id": self.schedule_id}),
         }
         for label, (tool, arguments) in calls.items():
@@ -2603,6 +2634,12 @@ class MissionRun:
                 f"observations/{label}.json",
                 {"tool": tool, "text": observation.text, "data": observation.data},
             )
+        board_post = self.read_board_thread(post_id)
+        self.observations["board-post"] = board_post
+        self.writer.write_json(
+            "observations/board-post.json",
+            {"tool": board_post.tool, "text": board_post.text, "data": board_post.data},
+        )
         for key, task_id in self.task_ids.items():
             observation = self.call(
                 f"observe-task-history-{key}",
@@ -2614,6 +2651,56 @@ class MissionRun:
                 f"observations/task-history-{key}.json",
                 {"tool": "masc_task_history", "text": observation.text, "data": observation.data},
             )
+
+    def read_board_thread(self, post_id: str) -> ToolObservation:
+        """The whole Board thread, every page of it.
+
+        A page ends where its bytes fill what the reader carries inline, so a
+        thread longer than that arrives in several pages. Checking only the
+        first would call a later comment missing. The page position the result
+        carries says where the next page starts; the read stops at the page
+        that names none.
+        """
+        pages: list[ToolObservation] = []
+        positions: list[dict[str, Any]] = []
+        offset = 0
+        while True:
+            page = self.call(
+                f"observe-board-post-{len(pages)}",
+                "masc_board_post_get",
+                {
+                    "post_id": post_id,
+                    "comment_offset": offset,
+                    "comment_limit": BOARD_COMMENT_PAGE_LIMIT,
+                },
+            )
+            pages.append(page)
+            position = board_comment_page_position(page.response)
+            if position is None or "next_offset" not in position:
+                raise AcceptanceError(
+                    f"masc_board_post_get page at offset {offset} carries no page position"
+                )
+            positions.append(position)
+            next_offset = position["next_offset"]
+            if next_offset is None:
+                break
+            if (
+                isinstance(next_offset, bool)
+                or not isinstance(next_offset, int)
+                or next_offset <= offset
+            ):
+                raise AcceptanceError(
+                    f"masc_board_post_get page at offset {offset} names next_offset "
+                    f"{next_offset!r}, which does not move the read forward"
+                )
+            offset = next_offset
+        return ToolObservation(
+            tool="masc_board_post_get",
+            arguments={"post_id": post_id},
+            response={"pages": [page.response for page in pages]},
+            text="\n".join(page.text for page in pages),
+            data={"pages": [page.text for page in pages], "positions": positions},
+        )
 
     def _completion_verdict(self, key: str) -> tuple[bool, str]:
         """Whether this task's own history shows it passed verification.

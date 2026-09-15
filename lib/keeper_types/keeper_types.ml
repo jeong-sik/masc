@@ -14,26 +14,16 @@
 type fiber_health =
   | Fiber_alive (** Fiber running, promise unresolved *)
   | Fiber_zombie (** Registry entry exists but fiber terminated *)
-  | Fiber_dead (** Fiber resolved; lane restart is required *)
   | Fiber_unknown (** Not in supervised registry *)
 
-(** Keeper-level health state — derived from agent status, keepalive
-    fiber, and supervisor monitoring. Serialized to string at JSON
-    boundaries only. Defined here (not in Keeper_status_runtime) so
-    operator_control_snapshot can parse JSON into the same type. *)
+(** Keeper-level health, a projection of the registry phase and the turn
+    history. Serialized to string at JSON boundaries only. Defined here (not
+    in Keeper_status_runtime) so operator_control_snapshot can parse JSON
+    into the same type. *)
 type keeper_health =
-  | KH_healthy (** Keepalive alive, recent turns, no quiet_reason *)
-  | KH_idle (** Keepalive alive but no recent activity *)
-  | KH_offline (** Agent not present or status=offline/inactive *)
-  | KH_stale (** Last observed signal is outside the health projection window *)
-  | KH_degraded (** agent status file unreadable or undecodable *)
-  | KH_zombie (** Fiber terminated but registry entry exists *)
-
-(** Keeper continuity state — derived from health + keepalive status. *)
-type keeper_continuity =
-  | Continuity_healthy (** Runtime aligned with durable state *)
-  | Continuity_recovering (** Reconciling back into live presence *)
-  | Continuity_not_running (** Keepalive fiber not running *)
+  | KH_healthy (** Keepalive running and at least one turn recorded *)
+  | KH_idle (** Keepalive running, no turn recorded yet *)
+  | KH_offline (** Keepalive not running: the phase admits no turn *)
 
 (** Per-tool usage entry for keeper tool tracking.
     Defined here so Keeper_registry can embed it without depending

@@ -175,7 +175,6 @@ val host_fd_pressure_poll_interval_sec : unit -> float
 (** {1 Base path / storage} *)
 
 val base_path_env_key : string
-val base_path_input_env_key : string
 
 type base_path_source =
   | From_env of string
@@ -183,8 +182,8 @@ type base_path_source =
       (** Path of the record file the installer wrote, not an env var. *)
 
 val base_path_source_opt : unit -> (base_path_source * string) option
-(** Resolution order: [MASC_BASE_PATH_INPUT] > [MASC_BASE_PATH] > the workspace
-    a past [masc setup] recorded. Explicit input always wins over the record.
+(** Resolution order: [MASC_BASE_PATH] > the workspace a past [masc setup]
+    recorded. Explicit input always wins over the record.
     A record whose path holds no [.masc/config] directory is not used: [.masc]
     alone also exists under a home directory as the user skill source. *)
 

@@ -1842,12 +1842,6 @@ let make_connection ~sw ~net ~origin : (connection, http_error) result =
 (** Client wrapper that tracks the socket for explicit close.
     The caller provides the concrete URI so host resolution and TLS
     availability can be checked up front and reported as typed errors. *)
-let make_closing_client ~sw ~net ~origin =
-  let+ client, close = make_client ~net ~origin in
-  Eio.Switch.on_release sw close;
-  client
-;;
-
 (** Run [f client] with a client obtained either from [cache] or created
     for one request. When [cache] is supplied, a hit reuses a parked
     connection, a miss creates one and parks it on success, and any error
@@ -2416,59 +2410,6 @@ let post_sync_once
   with
   | Ok receipt -> Ok receipt.response
   | Error error -> Error error
-;;
-
-let post_stream ?cache ?clock ?connect_timeout_s ~sw ~net ~url ~headers ~body () =
-  let* deadline =
-    resolve_explicit_deadline
-      ~operation:"post_stream"
-      ~parameter:"connect_timeout_s"
-      ~clock
-      ~timeout_s:connect_timeout_s
-  in
-  (* Cache is intentionally ignored for the streaming reader variant: the
-     returned [Buf_read.t] outlives this function, so we cannot safely park
-     the client until consumption finishes. Use [with_post_stream] for
-     cache-aware streaming. *)
-  ignore cache;
-  catch_network (fun () ->
-    let* origin = parse_uri url in
-    let* client = make_closing_client ~sw ~net ~origin in
-    let headers_with_length =
-      ("content-length", string_of_int (String.length body))
-      :: add_connection_close headers
-    in
-    let hdr = Http.Header.of_list headers_with_length in
-    (* Only the connect + initial response headers are bounded; body
-       consumption happens in the returned reader and is the caller's
-       responsibility to timebox. *)
-    let* resp, resp_body =
-      with_explicit_deadline deadline (fun () ->
-        Ok
-          (Cohttp_eio.Client.post
-             ~sw
-             client
-             ~headers:hdr
-             ~body:(Cohttp_eio.Body.of_string body)
-             origin.uri))
-    in
-    match Cohttp.Response.status resp with
-    | `OK ->
-      let safe_body = safe_cohttp_response_flow resp_body in
-      Ok (Eio.Buf_read.of_flow ~max_size:Api_common.max_response_body safe_body)
-    | status ->
-      let code = Cohttp.Code.code_of_status status in
-      let resp_headers = Cohttp.Response.headers resp in
-      let retry_after_header = retry_after_header_of_response_headers resp_headers in
-      let* body_str = read_response_body resp_body in
-      profile_opaque_client_error
-        ~url
-        ~code
-        ~resp_headers
-        ~request_headers:headers_with_length
-        ~request_body:body
-        ~response_body:body_str;
-      Error (HttpError { code; body = Received body_str; retry_after_header }))
 ;;
 
 let track_connection_eof connection =
@@ -3271,18 +3212,14 @@ let read_sse
          behaviour. *)
       | None, _ -> inner ()
     in
-    (* Only a payload line renews a gap budget; a total budget runs to the
-       first token whatever arrives in between. The switch to the inter-token
-       budget is not made here: a data field is provider bytes, not
-       necessarily model output, and only the consumer can tell an opening
-       frame from a token. [dispatch_event] moves [phase] when [on_data]
-       reports [Output].
-       [Sse_comment] is already filtered inside [inner]; the only non-field
-       line [inner] can return is [Sse_blank]. *)
-    (match parsed with
-     | Sse_data _ -> renew_after_payload ~anchor:budget_anchor budget
-     | Sse_event_type _ | Sse_blank | Sse_ignored_field -> ()
-     | Sse_comment -> () (* unreachable: filtered in [inner] *));
+    (* Nothing renews a budget here. A data field is provider bytes, not model
+       output -- a keep-alive carries one, and renewing on it let a provider
+       hold an open stream for the whole turn while producing nothing. Only
+       the consumer can tell production from a keep-alive, so renewal happens
+       per dispatched event in [dispatch_event]: before the first output any
+       event renews a gap standing in for the first-event bound, after it only
+       production does. A total budget is not renewed at all: it runs to the
+       first output whatever arrives in between. *)
     parsed
   in
   let current_event_type = ref None in
@@ -3297,6 +3234,12 @@ let read_sse
         in
         Buffer.clear data_buffer;
         data_seen := false;
+        let renew_gap () =
+          renew_after_payload
+            ~anchor:budget_anchor
+            (armed_budget ~phase:!phase ~first_event_timeout ~body_timeout ~idle_timeout)
+        in
+        let phase_before_dispatch = !phase in
         (match continuation with
          | Continue Output ->
            enter_after_first_output
@@ -3304,8 +3247,22 @@ let read_sse
              ~anchor:budget_anchor
              ~first_event_timeout
              ~body_timeout
-             ~idle_timeout
-         | Continue Prelude | Stop -> ());
+             ~idle_timeout;
+           (* Production is what an inter-token gap measures between, so this
+              is where that gap starts again. [renew_after_payload] leaves a
+              total budget alone. *)
+           renew_gap ()
+         | Continue Prelude ->
+           (* Before the first output there is no production to measure
+              between: a gap standing in for the first-event bound is the wait
+              for the provider to send anything, and any event it sends
+              renews it. Demanding production there would turn that gap into a
+              total. After the first output the gap measures between
+              productions, and a keep-alive is not one. *)
+           (match phase_before_dispatch with
+            | Before_first_output -> renew_gap ()
+            | After_first_output -> ())
+         | Stop -> ());
         continuation)
       else Continue Prelude
     in

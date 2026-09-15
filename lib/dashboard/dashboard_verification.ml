@@ -119,6 +119,14 @@ let request_to_json (req : V.verification_request) : Yojson.Safe.t =
      `List (List.map (fun s -> `String s) submitted_evidence));
     ("evidence_projection_error",
      Json_util.string_opt_to_json evidence_projection_error);
+    (* The producer's whole claim when it gave up. A one-way signal: a record
+       carrying this is a stop, and only the stop path writes it. Its absence
+       is not "a completion" — stops submitted before the record kept the copy
+       have none either, and saying "completion" about those would be the
+       queue inventing an answer the record does not hold. *)
+    (Workspace_verification_store.cancellation_reason_field,
+     Json_util.string_opt_to_json
+       (Workspace_verification_store.cancellation_reason_of_output req.output));
   ]
 
 (* ── Snapshot assembly ──────────────────────────────── *)

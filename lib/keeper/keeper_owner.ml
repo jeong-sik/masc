@@ -533,13 +533,54 @@ let request t command =
          command ran, and its caller must not be told the owner was closed
          to it. [Fiber.first] kept whichever wake-up was queued first, and a
          closing owner queues its close ahead of the response it settled in
-         the same pass. *)
-      Eio.Cancel.protect (fun () ->
-        Watched_work.run
-          (fun () -> Eio.Promise.await response)
-          ~watcher:(fun () ->
-             Eio.Promise.await t.closed_p;
-             Error Owner_closed)))
+         the same pass.
+
+         The wait belongs to the caller, so a cancelled caller leaves it. It
+         used to run under [Eio.Cancel.protect], which made every call on this
+         module uninterruptible -- including a turn's call for an answer the
+         owner cannot give while that turn runs ([Await_idle_after_shutdown]
+         parks its resolver until no child is active). An operator interrupt
+         fails the child switch, but a child parked there could not unwind, so
+         the slot was never released and no interrupt, deadline or operator
+         command could end it. Two calls do need to survive a cancelled
+         caller, and both say so at their own site: the handover on the settle
+         path ([notify]) and the claim, whose answer is the only record of
+         which row the child took ([request_keeping_the_answer]). *)
+      Watched_work.run
+        (fun () -> Eio.Promise.await response)
+        ~watcher:(fun () ->
+           Eio.Promise.await t.closed_p;
+           Error Owner_closed))
+;;
+
+(* Ask, and keep the answer even if the caller is cancelled.
+
+   [Claim_next_operation] is the one ask whose answer is a fact the caller
+   alone holds: the owner commits the row as Running and then answers with
+   which row it was. A caller that leaves that wait leaves a Running row no
+   child in this process will settle, and only the next boot's
+   [settle_running_after_restart] clears it. The wait itself is owner-local --
+   one drain step, no network, no lock held across it. *)
+let request_keeping_the_answer t command = Eio.Cancel.protect (fun () -> request t command)
+;;
+
+(* Hand a command over without reading the answer.
+
+   The settle path needs this. A child that an interrupt just cancelled still
+   has to tell the owner it finished, and its [Child_finished] answer is
+   discarded anyway; asking for that answer would have to survive the child's
+   own cancellation. Only the handover is protected here, and the mailbox
+   drains continuously, so the protected region ends with the owner's next
+   take rather than with its answer. *)
+let notify t command =
+  if not (Atomic.get t.closed)
+  then (
+    let _, resolve = Eio.Promise.create () in
+    Eio.Cancel.protect (fun () ->
+      match
+        enqueue_unless_closed t.mailbox (Command (command, resolve)) ~closed:t.closed_p
+      with
+      | `Enqueued | `Closed -> ()))
 ;;
 
 (* The first fault is otherwise visible only as [store_unavailable = true] in
@@ -957,7 +998,7 @@ let start
               (try
                  Eio.Time.sleep clock (Float.max 0.0 (not_before -. t.now ()));
                  (* fire-and-forget: the sleeper exists only to deliver the wake; if the owner has closed by then there is nothing to wake. *)
-                 ignore (request t Wake_operation_drain)
+                 notify t Wake_operation_drain
                with
                | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
                | exn ->
@@ -1003,7 +1044,7 @@ let start
            (try
               Eio.Time.sleep clock transient_retry_wake_sec;
               (* fire-and-forget: the sleeper exists only to deliver the wake; if the owner has closed by then there is nothing to wake. *)
-              ignore (request t Wake_operation_drain)
+              notify t Wake_operation_drain
             with
             | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
             | exn ->
@@ -1100,7 +1141,7 @@ let start
           Eio.Fiber.fork ~sw (fun () ->
             let claimed_operation_id = ref None in
             let claim () =
-              match request t Claim_next_operation with
+              match request_keeping_the_answer t Claim_next_operation with
               | Ok (Some operation) as result ->
                 claimed_operation_id := Some operation.Chat_operation.operation_id;
                 result
@@ -1161,9 +1202,10 @@ let start
                durably Failed/Succeeded operation implies its wire synthesis
                already ran (the stopping test relies on this ordering).
                Cancellation of the owner switch inside the hook skips the
-               Child_finished commit below exactly as it always could during
-               [request]; [settle_running_after_restart] clears that window
-               on the next boot. *)
+               Child_finished handover below, as it always could here;
+               [settle_running_after_restart] clears that window on the next
+               boot. The handover itself is protected, so an interrupted child
+               still reports what it settled. *)
             (try
                runner.on_execution_settled
                  ~keeper_name:t.keeper_name
@@ -1174,12 +1216,11 @@ let start
              | exn ->
                Log.Keeper.error "operation settle hook raised for %s: %s"
                  t.keeper_name (Printexc.to_string exn));
-            ignore
-              (request
-                 t
-                 (Child_finished
-                    (Operation_child_finished
-                       { claimed_operation_id = !claimed_operation_id; execution })))
+            notify
+              t
+              (Child_finished
+                 (Operation_child_finished
+                    { claimed_operation_id = !claimed_operation_id; execution }))
           ))
     and loop state shutdown_operation_id =
         let exact_interrupt target =
@@ -1762,11 +1803,10 @@ let start
                          | exn -> Error (exn, Printexc.get_raw_backtrace ())
                        in
                        Atomic.set t.child_cancel None;
-                       ignore
-                         (request
-                            t
-                            (Child_finished
-                               (Autonomous_child_finished { outcome; resolve }))))
+                       notify
+                         t
+                         (Child_finished
+                            (Autonomous_child_finished { outcome; resolve })))
                    in
                    (match lane with
                     | Chat_operation | Maintenance -> run_admitted_turn ()

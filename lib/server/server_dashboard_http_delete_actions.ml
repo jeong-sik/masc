@@ -13,7 +13,6 @@ open Server_auth
 
 type agent_purge_cleanup_result =
   { agent_name : string
-  ; heartbeats_stopped : int
   ; workspace_unbound : bool
   }
 
@@ -213,12 +212,10 @@ let plain_agent_resolve_status = function
 
 let agent_purge_cleanup_result_to_json
     { agent_name
-    ; heartbeats_stopped
     ; workspace_unbound
     } =
   `Assoc
     [ ("agent_name", `String agent_name)
-    ; ("heartbeats_stopped", `Int heartbeats_stopped)
     ; ("workspace_unbound", `Bool workspace_unbound)
     ]
 ;;
@@ -342,9 +339,7 @@ let purge_agent_filesystem_artifacts ~validate_alias config agent_names =
           let cleanup_results =
             List.map
               (fun agent_name ->
-                 let heartbeats_stopped = Heartbeat.stop_by_agent ~agent_name in
                  { agent_name
-                 ; heartbeats_stopped
                  ; workspace_unbound =
                      List.exists (String.equal agent_name) unbound
                  })
@@ -367,9 +362,8 @@ let purge_agent_filesystem_artifacts ~validate_alias config agent_names =
                 List.iter
                   (fun result ->
                      Log.Misc.info
-                       "[agent_purge] exact owner=%s heartbeats_stopped=%d workspace_unbound=%b"
+                       "[agent_purge] exact owner=%s workspace_unbound=%b"
                        result.agent_name
-                       result.heartbeats_stopped
                        result.workspace_unbound)
                   cleanup_results;
                 Ok cleanup_results))))

@@ -97,12 +97,14 @@ let bind_board_identity ~keeper_name board_name args =
 
 let handle_board_name_with_outcome
       ~(meta : keeper_meta)
+      ~(result_projection : Tool_output.model_projection)
       ~(board_name : Tool_name.Board_name.t)
       ~(args : Yojson.Safe.t)
   =
+  let result_boundary = Tool_output.Projected_for_model result_projection in
   let dispatch tool_name tool_args =
     Keeper_tool_execution.of_tool_result
-      (Board_tool_dispatch.handle_tool tool_name tool_args)
+      (Board_tool_dispatch.handle_tool ~result_boundary tool_name tool_args)
   in
   (* PR-S1: the board runtime speaks the domain name type [Board_name.t]
      directly rather than routing through the MASC god-enum. *)
@@ -159,6 +161,7 @@ let handle_board_name_with_outcome
     Log.Keeper.debug "board_args: %s" (Yojson.Safe.pretty_to_string board_args);
     let result =
       Board_tool_dispatch.handle_tool
+        ~result_boundary
         (Tool_name.Board_name.to_string Tool_name.Board_name.Board_post)
         board_args
     in
@@ -189,17 +192,19 @@ let handle_board_name_with_outcome
 
 let handle_board_tool_with_outcome
       ~(meta : keeper_meta)
+      ~(result_projection : Tool_output.model_projection)
       ~(name : string)
       ~(args : Yojson.Safe.t)
   =
   match Tool_name.Board_name.of_string name with
-  | Some board_name -> handle_board_name_with_outcome ~meta ~board_name ~args
+  | Some board_name ->
+    handle_board_name_with_outcome ~meta ~result_projection ~board_name ~args
   | None ->
     Keeper_tool_execution.failure
       ~class_:Tool_result.Policy_rejection
       (error_json ~fields:[ "tool", `String name ] "unknown_board_tool")
 ;;
 
-let handle_board_tool ~meta ~name ~args =
-  (handle_board_tool_with_outcome ~meta ~name ~args).raw_output
+let handle_board_tool ~meta ~result_projection ~name ~args =
+  (handle_board_tool_with_outcome ~meta ~result_projection ~name ~args).raw_output
 ;;

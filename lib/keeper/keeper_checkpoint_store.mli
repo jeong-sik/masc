@@ -64,6 +64,17 @@ val save_agent_core_classified :
   Agent_core.Checkpoint.t ->
   (save_agent_core_outcome, string) result
 
+(** [save_agent_core_classified] for a sequence of saves of one checkpoint
+    lineage, such as the stages of one keeper turn. [encoding_memo] carries the
+    encoded messages of the previous successful save, so a save encodes only the
+    messages that save did not write ({!Agent_core.Checkpoint.to_string_with_encoding_memo}).
+    The written bytes are the same as without the memo. *)
+val save_agent_core_classified_with_encoding_memo :
+  session_dir:string ->
+  encoding_memo:Agent_core.Checkpoint.encoding_memo ->
+  Agent_core.Checkpoint.t ->
+  (save_agent_core_outcome, string) result
+
 (** Run [f] under the stable checkpoint lock for [session_dir]. The lock inode
     is a sibling of the session subtree, so deleting/recreating that subtree
     cannot replace it. [f] receives the canonical session location used to

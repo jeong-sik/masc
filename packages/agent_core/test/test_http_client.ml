@@ -545,18 +545,16 @@ let test_read_ndjson_prelude_lines_keep_the_first_event_budget () =
     (List.rev !delivered)
 ;;
 
-let test_post_stream_invalid_url_returns_network_error () =
+let test_with_post_stream_invalid_url_returns_network_error () =
   Eio_main.run
   @@ fun env ->
-  Eio.Switch.run
-  @@ fun sw ->
   match
-    Http_client.post_stream
-      ~sw
+    Http_client.with_post_stream
       ~net:env#net
       ~url:"http://"
       ~headers:[ "Content-Type", "application/json" ]
       ~body:"{}"
+      ~f:(fun ~pre_header_elapsed_s:_ _reader -> ())
       ()
   with
   | Error (Http_client.NetworkError { message; _ }) ->
@@ -600,17 +598,6 @@ let test_http_deadlines_without_clock_are_rejected () =
     "timeout_s"
     (Http_client.post_sync
        ~timeout_s:1.0
-       ~sw
-       ~net:env#net
-       ~url:"http://"
-       ~headers:[]
-       ~body:"{}"
-       ());
-  check
-    "post_stream"
-    "connect_timeout_s"
-    (Http_client.post_stream
-       ~connect_timeout_s:1.0
        ~sw
        ~net:env#net
        ~url:"http://"
@@ -1242,7 +1229,7 @@ let () =
         ; Alcotest.test_case
             "invalid url returns network error"
             `Quick
-            test_post_stream_invalid_url_returns_network_error
+            test_with_post_stream_invalid_url_returns_network_error
         ] )
     ; ( "read_ndjson"
       , [ Alcotest.test_case

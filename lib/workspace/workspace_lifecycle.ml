@@ -224,11 +224,6 @@ let end_session config ~agent_name =
   (* Support both exact nickname match and agent_type prefix match *)
   let actual_name = resolve_agent_name config agent_name in
 
-  (* Stop any heartbeats owned by this agent *)
-  let _stopped =
-    Heartbeat.stop_by_agent ~agent_name:actual_name
-  in
-
   let agent_file = Filename.concat (agents_dir config) (safe_filename actual_name ^ ".json") in
   let in_fs = Sys.file_exists agent_file in
   if in_fs then begin

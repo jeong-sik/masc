@@ -11,5 +11,11 @@
 
 val run : watcher:(unit -> 'a) -> (unit -> 'a) -> 'a
 (** [run ~watcher work] runs both. The one still running when the other
-    finishes is cancelled, as with [Eio.Fiber.first]; when both finished,
-    [work]'s result is the result. An exception from either propagates. *)
+    finishes is cancelled, as with [Eio.Fiber.first]. [work]'s value stands
+    whenever [work] produced one, including when the watcher's verdict
+    arrived first in the same scheduler pass; the watcher's verdict is the
+    result only when [work] produced none. An exception from either
+    propagates.
+
+    The watcher starts before [work], so a watcher counting a deadline counts
+    from the call rather than from [work]'s first pause. *)

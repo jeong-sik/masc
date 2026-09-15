@@ -261,8 +261,8 @@ assert files(active) == previous, 'bundle rejection changed active package'
 result = cli('--apply', '--expected-revision', reviewed, '--expected-bundle-revision', reviewed_bundle)
 assert result.returncode == 0, result.stderr
 assert files(active) == files(exported), 'explicit update did not publish the whole package'
-backups = [p for p in (base / '.masc/skill-packages').iterdir() if p.is_dir()]
-assert any(files(p) == previous for p in backups), 'operator package backup missing'
+backup = base / '.masc/skill-packages/previous/browser-lanes'
+assert files(backup) == previous, 'operator package backup missing'
 print('install-smoke: reviewed native package update, stale resource rejection, and backup verified')
 PYSKILL
 
@@ -271,7 +271,7 @@ PORT="${INSTALL_SMOKE_PORT:-18946}"
 log="$work/server.log"
 mkdir -p "$work/outside-checkout"
 cd "$work/outside-checkout"
-env -u MASC_ASSETS_DIR MASC_BASE_PATH="$base" MASC_BASE_PATH_INPUT="$base" MASC_OTEL_ENABLED=0 \
+env -u MASC_ASSETS_DIR MASC_BASE_PATH="$base" MASC_OTEL_ENABLED=0 \
   "$prefix/masc" --base-path "$base" --host 127.0.0.1 --port "$PORT" >"$log" 2>&1 &
 PID=$!
 

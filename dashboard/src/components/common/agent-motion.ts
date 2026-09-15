@@ -1,4 +1,5 @@
 import { formatPct } from '../../lib/format-number'
+import { keeperActivityDisplay } from '../../lib/keeper-runtime-display'
 import type { Message, Task, JournalEntry, BoardPost, Keeper } from '../../types'
 import { trimText as trimTextBase } from '../../lib/truncate'
 
@@ -31,16 +32,11 @@ function trimText(value: string, max = 88): string {
   return trimTextBase(value, max) ?? ''
 }
 
-function timestampFromAgeSeconds(ageSeconds: number | null | undefined): string | null {
-  if (typeof ageSeconds !== 'number' || !Number.isFinite(ageSeconds) || ageSeconds < 0) return null
-  return new Date(Date.now() - ageSeconds * 1000).toISOString()
-}
-
+// The keeper's own activity (turn, tool call, live activity), through the
+// one helper every surface reads it from. A keeper that has never acted has
+// no signal here: creation time is not motion.
 function keeperSignalTimestamp(keeper: Keeper): string | null {
-  return keeper.last_heartbeat
-    ?? timestampFromAgeSeconds(keeper.last_turn_ago_s)
-    ?? timestampFromAgeSeconds(keeper.last_proactive_ago_s)
-    ?? timestampFromAgeSeconds(keeper.last_handoff_ago_s)
+  return keeperActivityDisplay(keeper, null, { includeCreated: false }).timestamp
 }
 
 function boardPreview(post: BoardPost): string {
@@ -51,9 +47,7 @@ function boardPreview(post: BoardPost): string {
 
 function keeperPreview(keeper: Keeper): string {
   const ratio = formatPct(keeper.context_ratio, '?')
-  return keeper.last_heartbeat
-    ? `Heartbeat ctx=${ratio}`
-    : `Keeper snapshot ctx=${ratio}`
+  return `Keeper snapshot ctx=${ratio}`
 }
 
 export function buildAgentMotion(

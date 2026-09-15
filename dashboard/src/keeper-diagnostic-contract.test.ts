@@ -4,17 +4,11 @@ import { normalizeKeeperDiagnostic } from './keeper-state'
 const base = {
   health_state: 'healthy',
   last_reply_status: 'delivered',
-  continuity_state: 'healthy',
 }
 
 describe('keeper diagnostic wire contract', () => {
   it('accepts every next_action_path the server emits', () => {
-    for (const path of [
-      'auto_restart',
-      'recover',
-      'probe',
-      'direct_message',
-    ]) {
+    for (const path of ['recover', 'probe', 'direct_message']) {
       expect(
         normalizeKeeperDiagnostic({ ...base, next_action_path: path }),
         `next_action_path=${path}`,

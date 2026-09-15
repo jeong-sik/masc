@@ -306,19 +306,82 @@ module Comment_page = struct
     ; limit : int
     }
 
+  type argument =
+    | Comment_offset
+    | Comment_limit
+
   type request_error =
+    | Arguments_not_an_object
+    | Not_an_integer of
+        { argument : argument
+        ; given : string
+        }
+    | Integer_out_of_range of
+        { argument : argument
+        ; literal : string
+        }
     | Negative_offset of int
     | Limit_out_of_bounds of int
 
-  let request ~offset ~limit =
-    if offset < 0
-    then Error (Negative_offset offset)
-    else if limit < 1 || limit > Limits.max_comment_page_limit
-    then Error (Limit_out_of_bounds limit)
-    else Ok { offset; limit }
+  let argument_name = function
+    | Comment_offset -> "comment_offset"
+    | Comment_limit -> "comment_limit"
+  ;;
+
+  let integer_argument (fields : (string * Yojson.Safe.t) list) argument ~absent =
+    match List.assoc_opt (argument_name argument) fields with
+    | None -> Ok absent
+    | Some (`Int value) -> Ok value
+    | Some (`Intlit literal) -> Error (Integer_out_of_range { argument; literal })
+    (* A JSON number with no fractional part is an integer, which is the rule
+       the tool-call validator applies before a call reaches a handler
+       (Agent_core.Tool_input_validation's integer type check). Refusing 50.0
+       here rejected a call the schema had already accepted. The two cannot
+       share one function: the validator ships in the agent_core package,
+       which takes no MASC library. *)
+    | Some (`Float value)
+      when Float.is_finite value
+           && Float.is_integer value
+           && value >= Float.of_int Int.min_int
+           && value < Float.of_int Int.max_int -> Ok (int_of_float value)
+    | Some (`Float value) when Float.is_finite value && Float.is_integer value ->
+      Error (Integer_out_of_range { argument; literal = Printf.sprintf "%.0f" value })
+    | Some ((`Null | `Bool _ | `Float _ | `String _ | `Assoc _ | `List _) as value) ->
+      Error (Not_an_integer { argument; given = Json_util.kind_name value })
+  ;;
+
+  let request_of_args (args : Yojson.Safe.t) =
+    match args with
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+      Error Arguments_not_an_object
+    | `Assoc fields ->
+      (match integer_argument fields Comment_offset ~absent:0 with
+       | Error error -> Error error
+       | Ok offset ->
+         (match
+            integer_argument
+              fields
+              Comment_limit
+              ~absent:Limits.default_comment_page_limit
+          with
+          | Error error -> Error error
+          | Ok limit ->
+            if offset < 0
+            then Error (Negative_offset offset)
+            else if limit < 1 || limit > Limits.max_comment_page_limit
+            then Error (Limit_out_of_bounds limit)
+            else Ok { offset; limit }))
   ;;
 
   let request_error_to_string = function
+    | Arguments_not_an_object -> "the arguments must be a JSON object"
+    | Not_an_integer { argument; given } ->
+      Printf.sprintf "%s must be an integer (got %s)" (argument_name argument) given
+    | Integer_out_of_range { argument; literal } ->
+      Printf.sprintf
+        "%s must be an integer this server can hold (got %s)"
+        (argument_name argument)
+        literal
     | Negative_offset offset ->
       Printf.sprintf "comment_offset must be 0 or greater (got %d)" offset
     | Limit_out_of_bounds limit ->
@@ -346,6 +409,10 @@ module Comment_page = struct
 
   let select ?(fits = accept_every_page) (request : request) items =
     let total = List.length items in
+    let after_offset =
+      List.filteri (fun index _ -> index >= request.offset) items
+    in
+    let available = List.length after_offset in
     let page_of taken =
       let reached = request.offset + List.length taken in
       { offset = request.offset
@@ -354,26 +421,114 @@ module Comment_page = struct
       ; next_offset = (if reached < total then Some reached else None)
       }
     in
+    let prefix count = List.filteri (fun index _ -> index < count) after_offset in
     if request.offset > 0 && request.offset >= total
     then Offset_out_of_range { requested = request.offset; total }
     else (
-      let rec extend taken count remaining =
-        match remaining with
-        | [] -> taken
-        | next :: rest when count < request.limit ->
-          let candidate = taken @ [ next ] in
-          (match taken with
-           | [] -> extend candidate (count + 1) rest
-           | _ :: _ ->
-             if fits (page_of candidate)
-             then extend candidate (count + 1) rest
-             else taken)
-        | _ :: _ -> taken
+      let most = min request.limit available in
+      (* A page never stops before its first item, so one item is always
+         taken and the search starts above it. The rest is a halving search
+         for the longest page [fits] accepts: rendering a candidate costs as
+         much as the page is large, and extending one item at a time rendered
+         it once per comment. *)
+      let rec longest_fitting low high best =
+        if low > high
+        then best
+        else (
+          let midpoint = low + ((high - low) / 2) in
+          if fits (page_of (prefix midpoint))
+          then longest_fitting (midpoint + 1) high midpoint
+          else longest_fitting low (midpoint - 1) best)
       in
-      Page
-        (page_of
-           (extend [] 0 (List.filteri (fun index _ -> index >= request.offset) items))))
+      let taken =
+        match most with
+        | 0 -> []
+        | 1 -> prefix 1
+        | _ -> prefix (longest_fitting 2 most 1)
+      in
+      Page (page_of taken))
   ;;
+
+  module Position = struct
+    type t =
+      { offset : int
+      ; returned : int
+      ; total : int
+      ; next_offset : int option
+      }
+
+    let of_page (page : 'a page) =
+      { offset = page.offset
+      ; returned = List.length page.items
+      ; total = page.total
+      ; next_offset = page.next_offset
+      }
+    ;;
+
+    let to_yojson position =
+      `Assoc
+        [ "offset", `Int position.offset
+        ; "returned", `Int position.returned
+        ; "total", `Int position.total
+        ; "has_more", `Bool (Option.is_some position.next_offset)
+        ; ( "next_offset"
+          , match position.next_offset with
+            | Some next -> `Int next
+            | None -> `Null )
+        ]
+    ;;
+
+    let int_field fields name =
+      match List.assoc_opt name fields with
+      | Some (`Int value) -> Some value
+      | Some (`Null | `Bool _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _)
+      | None -> None
+    ;;
+
+    let of_yojson (json : Yojson.Safe.t) =
+      match json with
+      | `Assoc fields ->
+        (match int_field fields "offset", int_field fields "returned", int_field fields "total" with
+         | Some offset, Some returned, Some total ->
+           (match List.assoc_opt "next_offset" fields with
+            | Some (`Int next) -> Some { offset; returned; total; next_offset = Some next }
+            | Some `Null | None -> Some { offset; returned; total; next_offset = None }
+            | Some (`Bool _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) -> None)
+         | (None | Some _), _, _ -> None)
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
+    ;;
+
+    let line position =
+      match position.returned, position.next_offset with
+      | 0, _ -> "[no comments]"
+      | returned, Some next ->
+        Printf.sprintf
+          "[comments %d-%d of %d. Read the rest with comment_offset=%d.]"
+          position.offset
+          (position.offset + returned - 1)
+          position.total
+          next
+      | returned, None ->
+        Printf.sprintf
+          "[comments %d-%d of %d. No comments after this page.]"
+          position.offset
+          (position.offset + returned - 1)
+          position.total
+    ;;
+
+    let metadata_key = "masc.comment_page"
+    let to_metadata position = `Assoc [ metadata_key, to_yojson position ]
+
+    let of_metadata (metadata : Yojson.Safe.t option) =
+      match metadata with
+      | Some (`Assoc fields) ->
+        (match List.assoc_opt metadata_key fields with
+         | Some json -> of_yojson json
+         | None -> None)
+      | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _)
+      | None -> None
+    ;;
+  end
 end
 
 (** {1 Vote Direction} *)

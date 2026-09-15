@@ -82,7 +82,6 @@ type keeper_heartbeat = {
   hb_phase : string option;  (** absent on the bare liveness beat *)
   hb_in_turn : bool option;
   hb_in_flight_ms : float option;
-  hb_since_progress_ms : float option;
   hb_at : float;
 }
 
@@ -97,19 +96,31 @@ type keeper_turn_complete = {
   tc_at : float;
 }
 
+(** One provider call inside a keeper turn, as the keeper's Agent-Core hook
+    reports it ([keeper_turn_observation]). [to_session_turn] is the agent
+    session's ordinal for the call -- the [turn] every [agent_core:*] frame
+    and every {!keeper_tool_call} carries -- and [to_total_turns] is how many
+    keeper turns had completed when the call ran, so the call belongs to
+    keeper turn [to_total_turns + 1], the number that turn's
+    {!keeper_turn_complete} settles with. The Activity fold reads these to
+    file session-numbered frames under their keeper turn. *)
+type keeper_turn_observation = {
+  to_keeper : string;
+  to_session_turn : int option;
+  to_total_turns : int option;
+  to_at : float;
+}
+
 (** A keeper's tool call as the keeper layer records it: named by keeper,
     with the call's duration and disposition. The agent_core family reports
     the same call from the runtime's side, named by lane. *)
 type keeper_tool_call = {
   kt_keeper : string;
   kt_turn : int option;
-      (** The turn the call ran in, on the same plane the agent-core wire
-          numbers turns -- measured 2026-09-07 over a live observer capture,
-          [keeper_tool_call.turn] equalled [keeper_turn_observation.turn] for
-          all eight keepers that ran, and differed from the settle's own
-          number ([keeper_turn_complete.turn]), which counts the keeper's
-          lifetime. [None] for a call the server reported without an
-          invocation. *)
+      (** The agent session's ordinal for the provider call this ran in --
+          the plane the agent-core wire and {!keeper_turn_observation} number
+          calls on; the settle numbers the keeper turn. [None] for a call the
+          server reported without an invocation. *)
   kt_tool : string;
   kt_duration_ms : float option;
   kt_disposition : (Masc.Tui_decode.keeper_call_disposition, string) result option;
@@ -133,6 +144,7 @@ type event =
   | Keeper_heartbeat of keeper_heartbeat
   | Keeper_tool_call of keeper_tool_call
   | Keeper_turn_complete of keeper_turn_complete
+  | Keeper_turn_observation of keeper_turn_observation
   | Keeper_composite_changed of { keeper : string; at : float }
   | Keeper_chat_appended of { keeper : string; connector : string option; at : float }
   | Keeper_chat_stream_frame of

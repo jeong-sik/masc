@@ -206,6 +206,51 @@ let test_unencodable_payload_is_recovered_at_the_sink () =
        fail ("the stored recovery copy must decode: " ^ Agent_core.Error.to_string error))
 ;;
 
+(* 한 턴의 단계별 저장과 finalize 는 encoding memo 하나를 같이 쓴다. 저장마다 같은
+   레코드 뒤에 메시지가 붙고, 마지막 저장은 복구가 필요한 payload 를 붙인다. 매번
+   canonical 파일은 memo 없이 인코딩한 바이트와 같아야 한다. *)
+let test_stage_saves_sharing_one_memo_write_canonical_bytes () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
+  let sid = "stage-saves-memo" in
+  let path = Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:sid in
+  let encoding_memo = Agent_core.Checkpoint.create_encoding_memo () in
+  let append (cp : Agent_core.Checkpoint.t) ~turn_count messages =
+    { cp with Agent_core.Checkpoint.turn_count; messages = cp.messages @ messages }
+  in
+  let text role body : Agent_core.Types.message =
+    { role; content = [ Agent_core.Types.Text body ]; name = None; tool_call_id = None; metadata = [] }
+  in
+  let first = make_checkpoint ~session_id:sid ~turn_count:1 ~marker:"stage one" in
+  let second = append first ~turn_count:2 [ text Agent_core.Types.User "stage two" ] in
+  let third = append second ~turn_count:3 [ text Agent_core.Types.Assistant "stage three" ] in
+  let poisoned =
+    append
+      third
+      ~turn_count:4
+      (checkpoint_with_unencodable_tool_use ~session_id:sid).Agent_core.Checkpoint.messages
+  in
+  let save label (cp : Agent_core.Checkpoint.t) expected =
+    match
+      Keeper_checkpoint_store.save_agent_core_classified_with_encoding_memo
+        ~session_dir
+        ~encoding_memo
+        cp
+    with
+    | Error message -> fail (label ^ ": " ^ message)
+    | Ok _ -> check string label (Agent_core.Checkpoint.to_string expected) (Fs_compat.load_file path)
+  in
+  save "first stage" first first;
+  save "second stage" second second;
+  save "third stage" third third;
+  match Agent_core.Checkpoint.drop_unencodable_json poisoned with
+  | None -> fail "the poisoned checkpoint has a droppable payload"
+  | Some recovered -> save "a save that needs the recovery copy" poisoned recovered
+;;
+
 let test_valid_checkpoint_still_saves () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -1491,6 +1536,8 @@ let () =
             test_structurally_invalid_checkpoint_is_refused_at_the_store;
           test_case "a valid checkpoint still saves" `Quick
             test_valid_checkpoint_still_saves;
+          test_case "stage saves sharing one encoding memo write canonical bytes" `Quick
+            test_stage_saves_sharing_one_memo_write_canonical_bytes;
           test_case "an unencodable payload is recovered at the sink" `Quick
             test_unencodable_payload_is_recovered_at_the_sink;
           test_case "summary answers watermark and count without reading" `Quick

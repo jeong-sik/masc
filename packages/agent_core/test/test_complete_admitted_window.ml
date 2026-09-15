@@ -36,17 +36,38 @@ let messages =
    window is handed on. *)
 let spent_window_budget_s = 1.0
 
+(* The resolver is the only door onto a deadline, here as on the call path.
+   Its rejection carries the operation, the parameter and the value it
+   refused, so a fixture budget the resolver will not take says which suite
+   and which number. *)
+let deadline_of ~clock ~timeout_s =
+  match
+    Http_client.resolve_explicit_deadline
+      ~operation:"test_complete_admitted_window"
+      ~parameter:"timeout_s"
+      ~clock
+      ~timeout_s
+  with
+  | Ok deadline -> deadline
+  | Error (Http_client.AcceptRejected { reason }) -> failwith reason
+  | Error _ ->
+    failwith "test_complete_admitted_window: the fixture deadline was refused for another reason"
+;;
+
 let spent_window () =
   let clock = Eio_mock.Clock.make () in
   Eio_mock.Clock.set_time clock 0.0;
-  let window = Deadline_window.open_ (Http_client.Bounded (clock, spent_window_budget_s)) in
+  let window =
+    Deadline_window.open_
+      (deadline_of ~clock:(Some clock) ~timeout_s:(Some spent_window_budget_s))
+  in
   Eio_mock.Clock.set_time clock spent_window_budget_s;
   window
 ;;
 
 (* A window with no bound on it, for the measurement ahead of the case. *)
 let unbounded_window : float Eio.Time.clock_ty Eio.Resource.t Deadline_window.t =
-  Deadline_window.open_ Http_client.Unbounded
+  Deadline_window.open_ (deadline_of ~clock:None ~timeout_s:None)
 ;;
 
 let response =

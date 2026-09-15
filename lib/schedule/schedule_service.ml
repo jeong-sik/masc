@@ -54,10 +54,11 @@ let make_request
   | Error msg -> Error (Invalid_request msg)
 ;;
 
-(* The first due is checked here and nowhere later: a Scheduled row whose
-   due has passed is not wrong in the store -- the runner's refresh exists to
-   find exactly that -- so the only place a past due is a caller's mistake
-   is the call that proposes it. *)
+(* The first due is checked here, when a call proposes it: a Scheduled row
+   whose due has passed is not wrong in the store -- the runner's refresh
+   exists to find exactly that -- so a past due is a caller's mistake only in
+   the call that writes it. [update] proposes one too; the store judges that
+   one under its lock, because "unchanged" is read against the stored row. *)
 let due_not_before_now ~now ~due_at =
   let current_second = Float.floor now in
   if Float.compare due_at current_second < 0
@@ -90,6 +91,7 @@ let create
 
 let update
       config
+      ~now
       ~schedule_id
       ?requested_at
       ?expires_at
@@ -105,7 +107,7 @@ let update
     make_request ~schedule_id ?requested_at ?expires_at ~requested_by
       ~scheduled_by ~due_at ~payload ~source ?recurrence ()
   in
-  Schedule_store.update_request config request |> map_store
+  Schedule_store.update_request config ~now request |> map_store
 ;;
 
 let cancel config ~schedule_id =

@@ -1,6 +1,5 @@
 import { html } from 'htm/preact'
 import { formatTokens, formatTokPerSec, isFiniteMetricValue } from '../lib/format-number'
-import { Eyebrow } from './common/eyebrow'
 import { StatTile } from './common/stat-tile'
 import type { Keeper, KeeperMetricPoint } from '../types'
 import {
@@ -27,22 +26,6 @@ function kpiToneToStatus(tone: KpiTone): 'ok' | 'warn' | 'crit' | undefined {
   return tone
 }
 
-// KpiTone + KPI_TONE/KPI_VALUE_TONE retained: used by inline heartbeat/compression/drop elements.
-
-const KPI_TONE: Record<KpiTone, string> = {
-  default: 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)]',
-  ok: 'border-[var(--ok-20)] bg-[var(--ok-6)]',
-  warn: 'border-[var(--warn-20)] bg-[var(--warn-8)]',
-  bad: 'border-[var(--bad-20)] bg-[var(--bad-6)]',
-}
-
-const KPI_VALUE_TONE: Record<KpiTone, string> = {
-  default: 'text-[var(--color-fg-secondary)]',
-  ok: 'text-[var(--color-status-ok)]',
-  warn: 'text-[var(--color-status-warn)]',
-  bad: 'text-[var(--color-status-err)]',
-}
-
 // ── Detail Card (shared container) ───────────────────────
 
 export function DetailCard({ class: cx, children }: {
@@ -51,30 +34,6 @@ export function DetailCard({ class: cx, children }: {
 }) {
   return html`
     <div class="p-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] ${cx ?? ''} v2-monitoring-card">${children}</div>
-  `
-}
-
-// ── Operational Health ───────────────────────────────────
-
-export function OperationalHealth({ keeper }: { keeper: Keeper }) {
-  const hb = keeper.last_heartbeat
-
-  const hbTone: KpiTone = !hb ? 'default' : 'ok'
-
-  if (!hb) return null
-
-  return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 v2-monitoring-panel">
-      <div class="mb-2 text-3xs font-semibold tracking-[var(--track-caps)] uppercase text-[var(--color-fg-muted)]">운영 건강도</div>
-      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        ${hb ? html`
-          <div class="p-2 rounded-[var(--r-1)] border ${KPI_TONE[hbTone]} flex flex-col gap-0.5 v2-monitoring-card">
-            <${Eyebrow}>하트비트</${Eyebrow}>
-            <span class="text-xs font-mono ${KPI_VALUE_TONE[hbTone]}">${hb.replace('T', ' ').slice(0, 19)}</span>
-          </div>
-        ` : null}
-      </div>
-    </div>
   `
 }
 
@@ -161,7 +120,6 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
                 />`
               : null}
           </div>
-          <${OperationalHealth} keeper=${keeper} />
         </div>
       <//>
 

@@ -437,7 +437,6 @@ let render_overview (state : state) =
                 else Some (Printf.sprintf "%d %s" count label))
               [ (l.klc_paused, "paused")
               ; (l.klc_offline, "offline")
-              ; (l.klc_inactive, "inactive")
               ; (l.klc_idle, "idle")
               ; (l.klc_unreadable, "unreadable")
               ]
@@ -3940,7 +3939,7 @@ let render_schedules (state : state) =
    row said "healthy" while the heading counted "11 healthy" and the summary
    said "fleet ok" — the same fact four times, and the glyph beside the word
    already carries the health colour. Only a deviation earns a word, so the
-   one stale row is the only row with text in the column. The single-keeper
+   one deviating row is the only row with text in the column. The single-keeper
    chat header keeps {!keeper_health_word}: alone, the word is identity, not
    repetition. *)
 let keeper_health_deviation_word (health : Tui_decode.keeper_health option) =
@@ -3949,9 +3948,7 @@ let keeper_health_deviation_word (health : Tui_decode.keeper_health option) =
   | Some value -> (
       match Tui_decode.keeper_health_reading value with
       | Tui_decode.Health_running -> ""
-      | Tui_decode.Health_idle | Tui_decode.Health_offline
-      | Tui_decode.Health_stale | Tui_decode.Health_degraded
-      | Tui_decode.Health_zombie ->
+      | Tui_decode.Health_idle | Tui_decode.Health_offline ->
           Tui_decode.keeper_health_to_string value)
 
 (* [runtime_id] is the producer-owned runtime identity. Keep it whole instead
@@ -4042,11 +4039,8 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
     ~now ~frame ~yolo ~paused ~health ~turn ~next_action ~keeper ~runtime =
   let status_color = keeper_action_color next_action in
   (* A running turn takes the cell whole -- both the mark and the word.
-     Splitting them is what this column used to do, and it produced rows
-     that argued with themselves: the mark came from the heartbeat and the
-     word from the turn, so a keeper answering on a stale heartbeat drew
-     "? answering". One of those was wrong and the reader could not tell
-     which.
+     Split, the mark and the word can answer from different readings and
+     the row argues with itself.
 
      The word is the elapsed time rather than "answering". The mark already
      says it is answering, and it says so by moving; spending eight columns
@@ -4066,15 +4060,11 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
 
      The elapsed stays -- a turn open two minutes is the fact -- but the mark
      stops. Motion here means work is progressing, and for a keeper the health
-     reading calls offline or zombie, nothing is. *)
+     reading calls offline, nothing is. *)
   let turn_is_being_worked =
     match Option.map Tui_decode.keeper_health_reading health with
-    | Some (Tui_decode.Health_offline | Tui_decode.Health_zombie) -> false
-    | Some
-        ( Tui_decode.Health_running | Tui_decode.Health_idle
-        | Tui_decode.Health_stale | Tui_decode.Health_degraded )
-    | None ->
-      true
+    | Some Tui_decode.Health_offline -> false
+    | Some (Tui_decode.Health_running | Tui_decode.Health_idle) | None -> true
   in
   let glyph, status_word, status_color =
     match (turn : Tui_decode.keeper_turn_state option) with
@@ -4151,8 +4141,6 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
    than any health colour. *)
 let keeper_roster_status_color = function
   | "healthy" -> (Theme.ok ())
-  | "stale" | "degraded" -> (Theme.warn ())
-  | "zombie" -> (Theme.bad ())
   | "offline" | "idle" -> (Theme.muted ())
   | _ -> Ansi.dim
 
@@ -6496,7 +6484,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                       in
                       let line =
                         Printf.sprintf "    %s %s → %s%s"
-                          (if selected then "▸" else " ")
+                          (if selected then Masc_tui_theme.Glyph.current_entry else " ")
                           (binding_reference binding)
                           (Terminal_text.single_line binding.cb_keeper_name)
                           (if here then "  (this Keeper)"
@@ -11298,6 +11286,7 @@ let render_acting (state : state) =
       | Masc_tui_observer.Agent_core _ | Masc_tui_observer.Keeper_heartbeat _
       | Masc_tui_observer.Keeper_tool_call _
       | Masc_tui_observer.Keeper_turn_complete _
+      | Masc_tui_observer.Keeper_turn_observation _
       | Masc_tui_observer.Keeper_composite_changed _
       | Masc_tui_observer.Keeper_chat_appended _
       | Masc_tui_observer.Keeper_chat_stream_frame _
@@ -11772,7 +11761,7 @@ let render_code (state : state) =
              did not, leaving two cyans in one column. *)
           let marker =
             if node.Masc.Tui_decode.wt_has_children then
-              if selected then "\xe2\x96\xb8 "
+              if selected then Masc_tui_theme.Glyph.current_entry ^ " "
               (* The mark colour the files below it take. A folder is not a
                  kind of file, and the arrow already says which of the two
                  this row is. *)
@@ -14425,7 +14414,7 @@ let render_palette (state : state) =
       |> List.filteri (fun i _ -> i >= first && i < first + budget)
       |> List.iteri (fun visible_index (label, _) ->
            if first + visible_index = cursor then
-             c.push_selected (" \xe2\x96\xb8 " ^ label)
+             c.push_selected (" " ^ Masc_tui_theme.Glyph.current_entry ^ " " ^ label)
            else c.push ("   " ^ label));
       if total = 0 then c.push (Ansi.dim ^ "   (no match)" ^ Ansi.reset))
 
@@ -14699,7 +14688,7 @@ let render_answering (state : state) =
     (* The cursor is a gutter caret, not a full-row band: the row keeps its
        tone, and rows Enter cannot act on never wear the caret. *)
     let caret =
-      if selected && Option.is_some line.Masc_tui_answering.target then "\xe2\x96\xb8 "
+      if selected && Option.is_some line.Masc_tui_answering.target then Masc_tui_theme.Glyph.current_entry ^ " "
       else "  "
     in
     caret ^ tone_prefix ^ line.Masc_tui_answering.text ^ Ansi.reset

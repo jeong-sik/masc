@@ -286,6 +286,86 @@ let test_validation_taxonomy () =
   |> assert_invalid ~expected:"derived_source_path_unsupported"
 ;;
 
+let mentions ~what text =
+  let width = String.length what
+  and length = String.length text in
+  let rec scan index =
+    index + width <= length
+    && (String.equal (String.sub text index width) what || scan (index + 1))
+  in
+  scan 0
+;;
+
+(* A refusal that named only its kind left the model to pick a field, and the
+   pick was to drop the derivation: of the 54 derivation refusals in
+   2026-09-01..15, one was later written again with rule_id and premise_ids
+   intact. The refusal has to name the field and what it takes. *)
+let test_a_refused_derivation_names_the_field_and_what_it_takes () =
+  let refusal args =
+    match Runtime.validate_memory_write_args args with
+    | Runtime.Memory_write_ok _ -> Alcotest.failf "expected a refused derivation"
+    | Runtime.Memory_write_invalid { error_kind; _ } ->
+      let fields = Runtime.memory_write_rejection_fields error_kind in
+      let string_field name =
+        match List.assoc_opt name fields with
+        | Some (`String value) -> value
+        | Some _ | None ->
+          Alcotest.failf "%s refusal carries no %s" (error_label error_kind) name
+      in
+      string_field "rejected_field", string_field "expected"
+  in
+  let derived premise_ids =
+    make_derived_args ~content:"derived" ~rule_id:"rule" ~premise_ids
+  in
+  let check_field what expected args =
+    Alcotest.(check string) what expected (fst (refusal args))
+  in
+  check_field
+    "a rule without premises names premise_ids"
+    "premise_ids"
+    (`Assoc [ "content", `String "derived"; "rule_id", `String "rule" ]);
+  check_field
+    "premises without a rule name rule_id"
+    "rule_id"
+    (`Assoc
+       [ "content", `String "derived"
+       ; "premise_ids", `List [ `String (memory_id 'a') ]
+       ]);
+  check_field
+    "a blank rule names rule_id"
+    "rule_id"
+    (make_derived_args
+       ~content:"derived"
+       ~rule_id:"  "
+       ~premise_ids:[ memory_id 'a' ]);
+  check_field "an empty premise list names premise_ids" "premise_ids" (derived []);
+  (* The index is the element that broke, not the first one. *)
+  check_field
+    "a repeated premise names the repeat"
+    "premise_ids[1]"
+    (derived [ memory_id 'a'; memory_id 'a' ]);
+  check_field
+    "a premise that is not a memory identity names its own position"
+    "premise_ids[1]"
+    (derived [ memory_id 'a'; "mem_01K4Z5BGD2FC555J0HVRNQ3959" ]);
+  (* What the model actually needs: the value it sent back, the shape it
+     missed, and a tool that hands out a real one. The shape is quoted from the
+     predicate, so changing the grammar without the sentence fails here. *)
+  let _, expected = refusal (derived [ "premise-1" ]) in
+  Alcotest.(check bool)
+    "the refusal quotes the value it rejected"
+    true
+    (mentions ~what:"premise-1" expected);
+  Alcotest.(check bool)
+    "the refusal states the shape the predicate accepts"
+    true
+    (mentions ~what:Masc.Keeper_memory_os_types.memory_id_shape expected);
+  Alcotest.(check bool)
+    "the refusal names a tool that returns one"
+    true
+    (mentions ~what:"keeper_memory_search" expected)
+;;
+
 let test_retract_validation_taxonomy () =
   let error_label = Runtime.memory_retract_error_kind_to_string in
   let assert_invalid expected = function
@@ -539,6 +619,10 @@ let test_retract_cascades_through_public_tool_and_journals_reason () =
     true
     (missing.Masc.Keeper_tool_execution.failure_effect_disposition
      = Tool_result.Proven_pre_effect);
+  Alcotest.(check string)
+    "the refusal tells the model nothing committed"
+    (Tool_result.failure_effect_disposition_to_string Tool_result.Proven_pre_effect)
+    (string_field "effect_disposition" missing_json);
   let current =
     match Current.read_for_keepers_dir ~keepers_dir ~keeper_id:meta.name with
     | Ok (Some snapshot) -> snapshot
@@ -617,6 +701,8 @@ let test_unsupported_derived_write_is_proven_pre_effect () =
   in
   Alcotest.(check string) "typed rejection" "unsupported_derivation"
     (string_field "error_kind" response);
+  Alcotest.(check string) "the payload names the field to change" "premise_ids"
+    (string_field "rejected_field" response);
   Alcotest.(check bool) "no snapshot effect is possible" true
     (execution.Masc.Keeper_tool_execution.failure_effect_disposition
      = Tool_result.Proven_pre_effect);
@@ -1157,9 +1243,10 @@ let test_corrupt_snapshot_is_a_dependency_failure () =
   Alcotest.(check bool) "the detail names the file" true (mentions_path 0)
 ;;
 
-(* A write that cannot reach its store is the same dependency failure; the
-   claim is reported as not saved, and the class tells the model that other
-   arguments will not save it either. *)
+(* A write that cannot reach its store is the same dependency failure. The
+   class tells the model that other arguments will not save the claim. A store
+   error does not say whether the new snapshot was moved into place before it,
+   so the commit is reported as unknown rather than as not saved. *)
 let test_unwritable_store_is_a_dependency_failure () =
   with_temp_dir
   @@ fun base_path ->
@@ -1184,7 +1271,27 @@ let test_unwritable_store_is_a_dependency_failure () =
   Alcotest.(check string)
     "persistence, not validation"
     "persistence_failed"
-    (string_field "error_kind" response)
+    (string_field "error_kind" response);
+  Alcotest.(check bool)
+    "the commit is unknown"
+    true
+    (execution.Masc.Keeper_tool_execution.failure_effect_disposition
+     = Tool_result.Effect_outcome_unknown);
+  Alcotest.(check string)
+    "the payload names the same disposition"
+    (Tool_result.failure_effect_disposition_to_string Tool_result.Effect_outcome_unknown)
+    (string_field "effect_disposition" response)
+;;
+
+(* A store that commits a revision without the claim in it is past the
+   effect: a revision was written. No store here produces it, so the kind's
+   own disposition is what keeps it from being reported as unknown. *)
+let test_a_commit_that_omits_the_claim_is_after_the_effect () =
+  Alcotest.(check bool)
+    "commit_receipt_inconsistent is after the effect"
+    true
+    (Runtime.memory_write_error_effect_disposition Runtime.Commit_receipt_inconsistent
+     = Tool_result.Proven_post_effect)
 ;;
 
 (* Input the caller can correct is a policy rejection, like a schema
@@ -1460,6 +1567,10 @@ let () =
     ; ( "validation"
       , [ Alcotest.test_case "typed validation failures" `Quick test_validation_taxonomy
         ; Alcotest.test_case
+            "a refused derivation names the field and what it takes"
+            `Quick
+            test_a_refused_derivation_names_the_field_and_what_it_takes
+        ; Alcotest.test_case
             "board reference validation"
             `Quick
             test_board_reference_validation
@@ -1547,6 +1658,10 @@ let () =
             "unwritable store is a dependency failure"
             `Quick
             test_unwritable_store_is_a_dependency_failure
+        ; Alcotest.test_case
+            "a commit that omits the claim is after the effect"
+            `Quick
+            test_a_commit_that_omits_the_claim_is_after_the_effect
         ; Alcotest.test_case
             "input and state failures keep their own classes"
             `Quick

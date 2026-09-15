@@ -288,16 +288,10 @@ let enrich_keeper_with_diagnostic ~(config : Workspace.config) (keeper_json : Yo
                | Some diagnostic -> diagnostic
                | None ->
                  Keeper_status_runtime.keeper_diagnostic_json
-                   ~config
                    ~meta
                    ~keepalive_running
                    ~history_items:[]
                    ~now_ts
-                 |> Keeper_status_runtime.augment_keeper_diagnostic_json
-                      ~keepalive_running
-                      ~keepalive_started_at:
-                        (Keeper_status_bridge.runtime_keepalive_started_at config meta)
-                      ~now_ts
              in
              let trust =
                match existing_trust with
@@ -441,7 +435,6 @@ let keeper_queue_last_seen keeper trust =
     [ Json_util.assoc_string_opt "ts" latest_causal
     ; Json_util.assoc_string_opt "observed_at" latest_causal
     ; Json_util.assoc_string_opt "tool_audit_at" keeper
-    ; Json_util.assoc_string_opt "last_heartbeat" keeper
     ; Json_util.assoc_string_opt "updated_at" keeper
     ; Json_util.assoc_string_opt "created_at" keeper
     ]

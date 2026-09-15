@@ -1234,6 +1234,7 @@ let save_outcome_after_write ~session_dir ~canonical_path ~known ckpt =
 
 let save_agent_core_classified_typed
     ~(session_dir : string)
+    ~(encoding_memo : Agent_core.Checkpoint.encoding_memo)
     (ckpt : Agent_core.Checkpoint.t)
   : (save_agent_core_outcome, save_agent_core_error) result =
   match Keeper_transcript_unit.validate ckpt.messages with
@@ -1288,11 +1289,11 @@ let save_agent_core_classified_typed
         let known = Option.map (fun (w : watermark) -> w.turn_count) existing in
         let ownership_root = Filename.dirname session_dir in
         let write payload =
-          Keeper_fs.save_json_durable_atomic_from
+          Keeper_fs.save_encoded_durable_atomic_from
             ~ownership_root
-            ~pretty:false
             canonical_path
-            (fun () -> Agent_core.Checkpoint.to_json payload)
+            (fun () ->
+               Agent_core.Checkpoint.to_string_with_encoding_memo encoding_memo payload)
         in
         (match write ckpt with
          | Ok () -> save_outcome_after_write ~session_dir ~canonical_path ~known ckpt
@@ -1320,7 +1321,17 @@ let save_agent_core_classified_typed
                 save_outcome_after_write ~session_dir ~canonical_path ~known recovered))
          | Error error -> Error (Canonical_write_failed error)))
 
+let save_agent_core_classified_with_encoding_memo
+    ~(session_dir : string)
+    ~(encoding_memo : Agent_core.Checkpoint.encoding_memo)
+    (ckpt : Agent_core.Checkpoint.t)
+  : (save_agent_core_outcome, string) result =
+  save_agent_core_classified_typed ~session_dir ~encoding_memo ckpt
+  |> Result.map_error save_agent_core_error_to_string
+
 let save_agent_core_classified ~(session_dir : string) (ckpt : Agent_core.Checkpoint.t)
   : (save_agent_core_outcome, string) result =
-  save_agent_core_classified_typed ~session_dir ckpt
-  |> Result.map_error save_agent_core_error_to_string
+  save_agent_core_classified_with_encoding_memo
+    ~session_dir
+    ~encoding_memo:(Agent_core.Checkpoint.create_encoding_memo ())
+    ckpt

@@ -398,24 +398,28 @@ let tool_call ?(input = Some "input") ?(output = Some "output") ?typed_outcome t
   ; output_fingerprint = output
   }
 
-(* The clock axis. [repeated_exact_tool_call] needs the output fingerprint to
-   stand still as proof that nothing advanced, so a tool whose result is a
-   timestamp escapes it by construction: live, one keeper made 280 of a turn's
-   281 tool calls to keeper_time_now and neither the tool axis nor the text
-   axis saw it (masc #33021). This axis drops the output and requires the
-   repeats to be adjacent instead. *)
+(* The moving-result axis. [repeated_exact_tool_call] needs the output
+   fingerprint to stand still as proof that nothing advanced, so a call whose
+   result is a timestamp escapes it by construction: live, one keeper made 280
+   of a turn's 281 tool calls to a clock read and neither the tool axis nor the
+   text axis saw it (masc #33021). This axis drops the output and requires the
+   repeats to be adjacent instead. The clock read here is one shell command
+   run again. *)
 let test_repeated_tool_call_input_boundary () =
   let detect =
     Masc.Keeper_agent_run.For_testing.repeated_tool_call_input ~threshold:5
   in
   let clock n =
     List.init n (fun i ->
-      tool_call ~output:(Some (Printf.sprintf "11:07:%02dZ" i)) "keeper_time_now")
+      tool_call
+        ~input:(Some "date -u")
+        ~output:(Some (Printf.sprintf "11:07:%02dZ" i))
+        "Execute")
   in
   check
     (option (pair string int))
     "a moving result no longer hides the loop"
-    (Some ("keeper_time_now", 5))
+    (Some ("Execute", 5))
     (detect (clock 5));
   check
     (option (pair string int))
@@ -453,7 +457,7 @@ let test_repeated_tool_call_input_boundary () =
     (option (pair string int))
     "missing fingerprints never guess"
     None
-    (detect (List.init 5 (fun _ -> tool_call ~input:None "keeper_time_now")));
+    (detect (List.init 5 (fun _ -> tool_call ~input:None "Execute")));
   (* The emulator step has a clock's shape on this axis -- identical input,
      a different frame every time -- and is the opposite thing: the frames
      ran. Its handler declares [Progress] beside the observation, and the
@@ -745,6 +749,52 @@ let test_checkpoint_history_is_not_current_tool_execution () =
     (List.length acc.historical_tool_calls)
 ;;
 
+(* 턴마다 같은 Keeper 의 history memo 로 히스토리를 다시 걷는다. 두 번째 걷기는
+   앞 걷기의 답을 쓰지만, purge 가 본문을 바꾼 결과는 바뀐 바이트로 다시 답해야
+   한다(tool_use_id 는 그대로다). 그리고 memo 의 답은 live hook 이 같은 바이트로
+   구한 지문과 같아야 detector 가 둘을 같은 호출로 본다. *)
+let test_history_memo_answers_a_purged_body_from_its_new_bytes () =
+  let open Agent_core.Types in
+  let message role content = { role; content; name = None; tool_call_id = None; metadata = [] } in
+  let input = `Assoc [ ("argv", `List [ `String "status" ]) ] in
+  let history body =
+    [ message Assistant [ ToolUse { id = "u1"; name = "masc_status"; input } ]
+    ; message
+        User
+        [ ToolResult
+            { tool_use_id = "u1"; content = body; outcome = Tool_succeeded; json = None; content_blocks = None }
+        ]
+    ]
+  in
+  let history_memo = Masc.Keeper_tool_progress_identity.History_memo.create () in
+  let walk body =
+    match
+      Masc.Keeper_run_tools_setup.seed_tool_calls_from_history
+        ~history_memo
+        ~history_messages:(history body)
+    with
+    | [ { Masc.Keeper_agent_result.output_fingerprint = Some output; _ } ] -> output
+    | calls -> failf "expected one seeded call, got %d" (List.length calls)
+  in
+  let live body =
+    match
+      Masc.Keeper_tool_progress_identity.digest_tool_io
+        ~tool_name:"masc_status"
+        ~input
+        ~output_text:body
+    with
+    | Some { Masc.Keeper_tool_progress_identity.output_fingerprint; _ } -> output_fingerprint
+    | None -> fail "digest_tool_io refused the fixture"
+  in
+  let body = "{\"ok\":true,\"rows\":3}" in
+  let first = walk body in
+  check string "a walk answers what the live hook answers" (live body) first;
+  check string "the next walk answers the same" first (walk body);
+  let cleared = walk "[tool result cleared]" in
+  check bool "a purged body is not answered from the old one" false (String.equal first cleared);
+  check string "and it is answered from its own bytes" (live "[tool result cleared]") cleared
+;;
+
 let test_repeated_exact_tool_call_seeded_from_checkpoint_history () =
   let open Agent_core.Types in
   let message role content = { role; content; name = None; tool_call_id = None; metadata = [] } in
@@ -771,6 +821,7 @@ let test_repeated_exact_tool_call_seeded_from_checkpoint_history () =
   in
   let seed =
     Masc.Keeper_run_tools_setup.seed_tool_calls_from_history
+      ~history_memo:(Masc.Keeper_tool_progress_identity.History_memo.create ())
       ~history_messages:prior_run_history
   in
   (* Newest first, matching the live accumulator's order. *)
@@ -808,12 +859,15 @@ let test_repeated_exact_tool_call_seeded_from_checkpoint_history () =
   check int "unanswered tool use does not seed" 0
     (List.length
        (Masc.Keeper_run_tools_setup.seed_tool_calls_from_history
+          ~history_memo:(Masc.Keeper_tool_progress_identity.History_memo.create ())
           ~history_messages:unmatched_history));
   (* The wiring seam: production acc creation goes through
      [initial_tool_calls], so this is what run 2's detector actually folds
      over after a checkpoint restart with [prior_run_history] persisted. *)
   let run_2_starts_from =
-    Masc.Keeper_run_tools_setup.initial_tool_calls ~history_messages:prior_run_history
+    Masc.Keeper_run_tools_setup.initial_tool_calls
+      ~history_memo:(Masc.Keeper_tool_progress_identity.History_memo.create ())
+      ~history_messages:prior_run_history
   in
   (* Run 2 then executes the same two identical calls live. Build them with
      the production digest so their fingerprints are byte-identical to the
@@ -1558,6 +1612,8 @@ let () =
             test_checkpoint_history_is_not_current_tool_execution;
           test_case "repeated exact tool call seeded from checkpoint history" `Quick
             test_repeated_exact_tool_call_seeded_from_checkpoint_history;
+          test_case "history memo answers a purged body from its new bytes" `Quick
+            test_history_memo_answers_a_purged_body_from_its_new_bytes;
           test_case "tool io digest is keyed on the bytes" `Quick
             test_tool_io_digest_is_keyed_on_the_bytes;
           test_case "tool io digest keeps similar calls apart" `Quick

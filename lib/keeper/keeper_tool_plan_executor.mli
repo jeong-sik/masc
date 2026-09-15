@@ -82,8 +82,13 @@ type dispatch =
   -> input:Yojson.Safe.t
   -> dispatch_result
 
-(** Execute dependency batches to completion. Concurrent siblings are all
-    settled before the lowest-planned-index cause is selected. A [Deferred]
+(** Execute dependency batches to completion. Before the first batch, every
+    node input that reads no producer output is validated
+    ({!Keeper_tool_plan.prepare_inputs}); a rejection there ends the plan with
+    [Plan_execution_failed], no settled node and [Proven_pre_effect]. Inputs
+    that read a producer output are validated when their node runs.
+    Concurrent siblings are all settled before the lowest-planned-index cause
+    is selected. A [Deferred]
     or [Failed] tool result is carried unchanged in [Tool_did_not_complete];
     no text or payload inference is performed. A deferred node produces no
     composable output, so it cannot satisfy a downstream output reference and

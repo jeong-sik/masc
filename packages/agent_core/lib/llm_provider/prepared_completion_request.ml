@@ -245,19 +245,25 @@ let measure_prepared ?connection_cache ?clock ?timeout_s ~next_stage ?permit_wai
             | Error `Timeout -> expired
           in
           (* The round trip, under what the admission budget has left
-             when there is one. *)
+             when there is one. Each budget is counted on the clock it came
+             from: [left_s] was measured on the admission window's clock and
+             [first_event_timeout_s] was declared against the caller's, and
+             the signature keeps those two clocks independent
+             ([?clock] and [next_stage] carry separate type variables). Two
+             durations compare whatever they were measured on; a duration run
+             on the wrong clock does not. *)
           let round_trip admission_left () =
             match first_event_deadline, admission_left with
             | Http_client.Unbounded, None -> measured ()
             | Http_client.Bounded (clock, first_event_timeout_s), None ->
               under clock first_event_timeout_s (first_event_expired first_event_timeout_s)
-            | Http_client.Unbounded, Some (clock, admission_timeout_s, left_s) ->
-              under clock left_s (admission_expired admission_timeout_s)
+            | Http_client.Unbounded, Some (admission_clock, admission_timeout_s, left_s) ->
+              under admission_clock left_s (admission_expired admission_timeout_s)
             | ( Http_client.Bounded (clock, first_event_timeout_s)
-              , Some (_, admission_timeout_s, left_s) ) ->
+              , Some (admission_clock, admission_timeout_s, left_s) ) ->
               if Float.compare first_event_timeout_s left_s <= 0
               then under clock first_event_timeout_s (first_event_expired first_event_timeout_s)
-              else under clock left_s (admission_expired admission_timeout_s)
+              else under admission_clock left_s (admission_expired admission_timeout_s)
           in
           (match admission_window with
            | Deadline_window.Unbounded ->
@@ -327,15 +333,7 @@ let attach_measurement
    limit failure is decidable before any measurement round-trip. *)
 let resolve_context_limit prepared =
   let config = prepared.request.config in
-  let max_context =
-    match config.max_context with
-    | Some _ as explicit -> explicit
-    | None ->
-      Option.bind
-        (Provider_config.capabilities_for_config_model config)
-        (fun capabilities -> capabilities.Capabilities.max_context_tokens)
-  in
-  match max_context with
+  match Provider_config.context_window config with
   | None -> Error (Context_limit_unknown { model_id = config.model_id })
   | Some max_context_tokens when max_context_tokens <= 0 ->
     Error (Invalid_context_limit { model_id = config.model_id; max_context_tokens })

@@ -234,6 +234,7 @@ let deferred_names_absent_from ~declared_names ~actual_names =
    identical pairs of the previous run were invisible to it and a repeat
    split 2+2 across two runs escaped at threshold 3. *)
 let seed_tool_calls_from_history
+    ~(history_memo : Keeper_tool_progress_identity.History_memo.t)
     ~(history_messages : Agent_core.Types.message list)
   : Keeper_agent_result.tool_call_detail list
   =
@@ -252,44 +253,53 @@ let seed_tool_calls_from_history
      ToolUse/ToolResult pairs seed the detector: [same_exact_tool_call]
      compares both input and output fingerprints, so an unanswered ToolUse
      alone could never match a live call anyway. *)
-  List.rev history_messages
-  |> List.concat_map
-       (fun (message : Agent_core.Types.message) ->
-          List.filter_map
-            (fun (block : Agent_core.Types.content_block) ->
-               match block with
-               | Agent_core.Types.ToolUse { id; name; input; _ } -> (
-                   match Hashtbl.find_opt result_by_id id with
-                   | Some output_text -> (
-                       match
-                         Keeper_tool_progress_identity.digest_tool_io
-                           ~tool_name:name
-                           ~input
-                           ~output_text
-                       with
-                       | Some
-                           { Keeper_tool_progress_identity.input_fingerprint;
-                             output_fingerprint } ->
-                         Some
-                           { Keeper_agent_result.tool_name = name
-                           ; provider = "history"
-                           ; execution_outcome = Tool_result.Ok
-                           ; typed_outcome = None
-                           ; latency_ms = 0.
-                           ; task_id = None
-                           ; route_evidence = None
-                           ; input_fingerprint = Some input_fingerprint
-                           ; output_fingerprint = Some output_fingerprint
-                           }
-                       | None -> None)
-                   | None -> None)
-               | _ -> None)
-            message.content)
+  let pairs =
+    List.rev history_messages
+    |> List.concat_map
+         (fun (message : Agent_core.Types.message) ->
+            List.filter_map
+              (fun (block : Agent_core.Types.content_block) ->
+                 match block with
+                 | Agent_core.Types.ToolUse { id; name; input; _ } ->
+                   Option.map
+                     (fun output_text ->
+                        { Keeper_tool_progress_identity.tool_name = name
+                        ; input
+                        ; output_text
+                        })
+                     (Hashtbl.find_opt result_by_id id)
+                 | _ -> None)
+              message.content)
+  in
+  List.map2
+    (fun (pair : Keeper_tool_progress_identity.history_pair) fingerprints ->
+       match fingerprints with
+       | Some
+           { Keeper_tool_progress_identity.input_fingerprint; output_fingerprint } ->
+         Some
+           { Keeper_agent_result.tool_name = pair.tool_name
+           ; provider = "history"
+           ; execution_outcome = Tool_result.Ok
+           ; typed_outcome = None
+           ; latency_ms = 0.
+           ; task_id = None
+           ; route_evidence = None
+           ; input_fingerprint = Some input_fingerprint
+           ; output_fingerprint = Some output_fingerprint
+           }
+       | None -> None)
+    pairs
+    (Keeper_tool_progress_identity.digest_history_pairs history_memo pairs)
+  |> List.filter_map Fun.id
+;;
+
 (* The wiring seam for the task-1204 fix: what a fresh run's accumulator
    starts from, given the checkpoint-resumed history. Production acc creation
    and the regression test both go through this function, so reverting its
    body to [] is exactly the pre-fix behavior. *)
-let initial_tool_calls ~(history_messages : Agent_core.Types.message list) :
+let initial_tool_calls
+    ~(history_memo : Keeper_tool_progress_identity.History_memo.t)
+    ~(history_messages : Agent_core.Types.message list) :
     Keeper_agent_result.tool_call_detail list =
   (* Serialising and hashing every tool call in the history is pure, so the
      pool does it. The walk is over the whole history, which measured
@@ -298,7 +308,7 @@ let initial_tool_calls ~(history_messages : Agent_core.Types.message list) :
      trace shows that stretch as the longest run left on the main domain,
      55-222 ms across five Keepers. *)
   Domain_pool_ref.submit_cpu_or_inline (fun () ->
-    seed_tool_calls_from_history ~history_messages)
+    seed_tool_calls_from_history ~history_memo ~history_messages)
 ;;
 
 let prepare_agent_setup
@@ -516,7 +526,14 @@ let prepare_agent_setup
          a previous repetition yield already judged
          ([Keeper_repetition_judged]); the count the run was set up over is
          what a yield in it records. *)
-      let pairs = initial_tool_calls ~history_messages in
+      let pairs =
+        initial_tool_calls
+          ~history_memo:
+            (Keeper_tool_progress_identity.history_memo
+               ~base_path:config.base_path
+               ~keeper_name:meta.name)
+          ~history_messages
+      in
       Ok (Keeper_repetition_judged.seed_beyond ~judged pairs, Some (List.length pairs))
     | Some execution ->
       Keeper_repetition_scope.Execution.prepare execution

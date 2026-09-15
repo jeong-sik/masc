@@ -804,19 +804,19 @@ let test_reused_chunks_keep_presentation_inputs_live () =
   in
   check bool "initial event age on the header" true
     (contains "last event 10.0s" (header_of "tester" initial));
-  let changed = { input with Pane.now = now +. 20.; selected = Some "probe";
-    keepers = Option.map (List.map (fun (keeper : Pane.keeper) ->
-      (* Zombie, not offline: both read as an unfinished record and give the
-         row the same glyph, and an offline keeper has no fleet row to read. *)
-      if keeper.name = "tester" then { keeper with health = Some Masc.Tui_decode.Health_zombie }
-      else keeper)) input.keepers } in
+  let changed = { input with Pane.now = now +. 20.; selected = Some "probe" } in
   let later = Pane.lines ~rows ~cols ~scroll:0 changed in
   check bool "age advances independently of chunks" true
     (contains "last event 1m55s" (header_of "probe" later));
-  (* The state column, not a glyph: a record whose keeper is gone reads "gone"
-     where a live one reads "unsettled". *)
-  check bool "new health changes the state column" true
-    (contains "gone" (row_for "tester" later));
+  (* Health is read on every frame as well: over the same reused chunks, a
+     keeper whose keepalive has gone loses its fleet row. Running and idle
+     draw the same record state, so offline is the reading that shows. *)
+  let gone = { changed with
+    keepers = Option.map (List.map (fun (keeper : Pane.keeper) ->
+      if keeper.name = "tester" then { keeper with health = Some Masc.Tui_decode.Health_offline }
+      else keeper)) changed.keepers } in
+  check bool "new health changes the fleet rows" false
+    (List.mem (Pane.Target_keeper "tester") (Pane.lines ~rows ~cols ~scroll:0 gone).Pane.targets);
   let later_text = List.map text later.Pane.rows in
   check bool "new selection changes focus keeper" true
     (contains "turn 41" (List.nth later_text (last_index_of_in later_text "probe")));
@@ -1183,31 +1183,28 @@ let test_an_unread_roster_is_not_counted_as_none () =
   check bool "a read roster with no keepers still counts them" true
     (contains "0 keepers" empty)
 
-(* Only Health_offline. A zombie is a keeper that should be running and is not,
-   which is the reading an operator most needs; a filter that took it too would
-   hide the fleet's problems. A keeper whose health did not read is not a keeper
-   reading offline, and dropping those empties the pane whenever the roster
-   fails to load. *)
+(* Only Health_offline. An idle keeper has its keepalive running and has not
+   turned yet, which is a row an operator wants to see. A keeper whose health
+   did not read is not a keeper reading offline, and dropping those empties
+   the pane whenever the roster fails to load. *)
 let test_only_offline_is_dropped () =
   let with_health h name = keeper ~health:(Some h) name in
   let input =
     { fixture with
       Pane.keepers =
         Some
-          [ with_health Masc.Tui_decode.Health_zombie "zombie-one"
-          ; with_health Masc.Tui_decode.Health_stale "stale-one"
-          ; with_health Masc.Tui_decode.Health_degraded "degraded-one"
+          [ with_health Masc.Tui_decode.Health_running "running-one"
+          ; with_health Masc.Tui_decode.Health_idle "idle-one"
           ; keeper "unread-one"
           ; with_health Masc.Tui_decode.Health_offline "gone-one"
           ]
-    ; selected = Some "zombie-one"
+    ; selected = Some "running-one"
     }
   in
   let drawn = List.map text (Pane.lines ~rows ~cols ~scroll:0 input).Pane.rows in
   let says name = List.exists (fun row -> contains name row) drawn in
-  check bool "a zombie still draws" true (says "zombie-one");
-  check bool "a stale keeper still draws" true (says "stale-one");
-  check bool "a degraded one still draws" true (says "degraded-one");
+  check bool "a running keeper draws" true (says "running-one");
+  check bool "an idle one still draws" true (says "idle-one");
   check bool "and one whose health did not read" true (says "unread-one");
   check bool "only the offline one is gone" false (says "gone-one")
 

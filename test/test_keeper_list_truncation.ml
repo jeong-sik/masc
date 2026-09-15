@@ -251,11 +251,9 @@ let test_detailed_row_carries_lifecycle_phase () =
 ;;
 
 (* Four separate readings describe one keeper, and a row that answers all four
-   with a single word forces its readers to guess. The TUI header read the
-   folded "inactive" as running while the dashboard read it as attention -
-   neither was wrong about the word, because the word does not say which
-   question it answers. Each axis gets its own field so no reader has to fold
-   or unfold anything. *)
+   with a single word forces its readers to guess which question the word
+   answers. Each axis gets its own field so no reader has to fold or unfold
+   anything. *)
 let detailed_row f =
   keeper_list
     ~names:[ "alpha" ]
@@ -282,13 +280,13 @@ let test_detailed_row_carries_every_axis () =
 (* The two vocabularies share "idle" and "offline", so a keeper sitting on a
    shared value proves nothing about which one a field answers with. Only the
    words unique to each side can tell them apart. *)
-let health_only_words = [ "healthy"; "stale"; "zombie"; "degraded" ]
-let surface_only_words = [ "active"; "inactive"; "busy"; "listening" ]
+let health_only_words = [ "healthy" ]
+let surface_only_words = [ "active"; "busy"; "listening" ]
 
 let test_health_is_a_health_word_not_a_surface_word () =
-  (* [status] answers with the surface vocabulary, which folds stale, degraded
-     and zombie into "inactive". [health] must answer from the vocabulary those
-     three come from, or the new field is the old fold under a new name. *)
+  (* [status] answers with the surface vocabulary. [health] must answer from
+     the keeper_health vocabulary, or the new field is the old fold under a
+     new name. *)
   detailed_row (fun row ->
     let health = string_field row "health" in
     check bool
@@ -305,9 +303,10 @@ let test_health_is_a_health_word_not_a_surface_word () =
    its health is "offline" and [status] spells it "offline" too - legitimately
    the one value both vocabularies share. Publishing [status] under the
    [health] key passes every assertion above, and did, until the mutation was
-   run. The two fields are told apart in test_keeper_surface_status, which
-   feeds one diagnostic to both readers and pins that "stale", "degraded" and
-   "zombie" survive one and fold to "inactive" in the other. *)
+   run. The two fields are told apart in test_keeper_surface_status
+   ([test_two_readers_of_one_diagnostic_differ_on_healthy]), which feeds one
+   diagnostic to both readers and pins that "healthy" survives one and
+   becomes "active" in the other. *)
 
 let test_absent_next_action_is_null_not_empty () =
   (* An action the diagnostic did not name is absent, not the empty string:
@@ -320,8 +319,7 @@ let test_absent_next_action_is_null_not_empty () =
       check bool
         (Printf.sprintf "next_action %S is a known action" value)
         true
-        (List.mem value
-           [ "auto_restart"; "recover"; "probe"; "direct_message" ])
+        (List.mem value [ "recover"; "probe"; "direct_message" ])
     | other ->
       failf "next_action must be a string or null, got %s"
         (Yojson.Safe.to_string other))

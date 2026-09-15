@@ -6,9 +6,8 @@ let yojson = testable Yojson.Safe.pp Yojson.Safe.equal
 (* [tool_audit_at] dates the last action now: it comes from the tool call log
    rather than from a keeper-meta mirror of it. *)
 (* Liveness is read from two fields now, not from one status word: [paused] is
-   a person's decision and [diagnostic.health_state] is an observation. The
-   word this fixture used to set folded both, so a paused keeper's health was
-   unreachable and stale could not be told from offline. *)
+   a person's decision and [diagnostic.health_state] is an observation. A
+   single word cannot carry both. *)
 let keeper ?(health = "offline") ?(status = "offline") ?(tool_audit_at = "")
     ?(updated_at = "") ?(keepalive_running = false) ?(turn_count = 0)
     ?(paused = `Bool false) () =
@@ -90,36 +89,16 @@ let test_reconciled_active_status_is_healthy_active () =
   check string "lifecycle" "active" (lifecycle_of row);
   check string "state" "healthy" (state_of row)
 
-(* A late heartbeat is not a stopped keeper. The status word spelled stale and
-   offline the same way, so a keeper whose fiber was alive and taking turns
-   read as critical and sent an operator to boot something already up. Health
-   separates the two, and stale stays live. *)
-let test_a_stale_heartbeat_is_not_a_stopped_keeper () =
+(* Health, not the status word, decides whether a keeper is stopped: an
+   offline reading is critical even when the row's other signals look fresh. *)
+let test_offline_health_is_stopped () =
   let row =
     build_one
-      (keeper
-         ~health:"stale"
-         ~status:"inactive"
-         ~keepalive_running:true
-         ~tool_audit_at:"2001-09-09T01:46:40Z"
-         ~turn_count:1
-         ())
+      (keeper ~health:"offline" ~status:"offline" ~keepalive_running:true
+         ~tool_audit_at:"2001-09-09T01:46:40Z" ~turn_count:1 ())
   in
-  check string "lifecycle" "active" (lifecycle_of row);
-  check string "state" "healthy" (state_of row)
-
-(* The readings that do mean stopped still do. *)
-let test_zombie_and_offline_are_stopped () =
-  List.iter
-    (fun health ->
-      let row =
-        build_one
-          (keeper ~health ~status:"inactive" ~keepalive_running:true
-             ~tool_audit_at:"2001-09-09T01:46:40Z" ~turn_count:1 ())
-      in
-      check string (health ^ " lifecycle") "offline" (lifecycle_of row);
-      check string (health ^ " state") "critical" (state_of row))
-    [ "zombie"; "offline" ]
+  check string "lifecycle" "offline" (lifecycle_of row);
+  check string "state" "critical" (state_of row)
 
 (* The operator pauses a keeper that was running a moment ago. Every activity
    signal still looks fresh, so the healthy branch is the one this row falls
@@ -187,10 +166,8 @@ let () =
             test_running_flag_does_not_override_offline_status;
           test_case "reconciled active status -> healthy active" `Quick
             test_reconciled_active_status_is_healthy_active;
-          test_case "a stale heartbeat is not a stopped keeper" `Quick
-            test_a_stale_heartbeat_is_not_a_stopped_keeper;
-          test_case "zombie and offline are stopped" `Quick
-            test_zombie_and_offline_are_stopped;
+          test_case "offline health is stopped" `Quick
+            test_offline_health_is_stopped;
           test_case "paused keeper with fresh activity is not healthy" `Quick
             test_paused_keeper_with_fresh_activity_is_not_healthy;
           test_case "paused keeper is not critical" `Quick

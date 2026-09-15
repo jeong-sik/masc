@@ -21,6 +21,19 @@ let test_url_credential_redacted () =
   Alcotest.(check bool) "no raw password" true
     (not (String_util.contains_substring preview "secretpass"))
 
+(* 패턴을 한 번의 alternation 으로 합치면 가장 왼쪽 매치를 먼저 잡는다. Bearer 값
+   안에 [://user] 가 있고 [@] 앞에 탭이 오면 Bearer 매치가 탭에서 끝나고, URL
+   인증 정보의 나머지(탭, 비밀번호, [@])가 그대로 남는다. 순서대로 돌리는
+   치환은 URL 인증 정보를 먼저 지운다. 비밀값이 없는 텍스트는 그대로 돌아온다. *)
+let test_ordered_passes_cover_a_bearer_value_holding_a_url_credential () =
+  Alcotest.(check string)
+    "the whole value is masked"
+    "[REDACTED]"
+    (Observability_redact.redact_text "Bearer ab://x\tpw@host");
+  let plain = "keeper=msx-retro-mania turn=12 tool=Execute status=ok" in
+  Alcotest.(check string) "text with no secret is returned as is" plain
+    (Observability_redact.redact_text plain)
+
 let test_max_length_enforced () =
   let long_input = String.make 500 'x' in
   let preview = Observability_redact.redact_preview long_input in
@@ -379,6 +392,8 @@ let () =
             `Quick test_github_stateless_installation_token_redacted;
           Alcotest.test_case "github prefixes no false positive" `Quick
             test_github_prefix_no_false_positive;
+          Alcotest.test_case "ordered passes cover a bearer value holding a url credential" `Quick
+            test_ordered_passes_cover_a_bearer_value_holding_a_url_credential;
         ] );
       ( "tool_observability",
         [

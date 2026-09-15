@@ -23,7 +23,8 @@ description = "Note text. Empty or whitespace-only bodies are rejected."
 [[params]]
 name = "author_id"
 type = "string"
-description = "Author actor id. Defaults to the calling agent name."
+description = """Author actor id. Defaults to the caller's name; required when the
+endpoint cannot name the caller."""
 
 [[params]]
 name = "author_kind"

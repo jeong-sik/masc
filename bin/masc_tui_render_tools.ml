@@ -464,7 +464,7 @@ let tools_display_lines (state : state) =
                     else Ansi.dim)
                  , Printf.sprintf
                      " %s %-22s %-11s nodes=%d batches=%d parallel=%d discovery=%dB body=%dB"
-                     (if index = state.tools_skill_cursor then "▸" else " ")
+                     (if index = state.tools_skill_cursor then Masc_tui_theme.Glyph.current_entry else " ")
                      (Terminal_text.single_line profile.esp_name)
                      (Terminal_text.single_line execution)
                      profile.esp_node_count

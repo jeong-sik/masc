@@ -12,7 +12,7 @@ description: "Decides whether recurring work belongs in a Tool, a composition Sk
 | A capability that does not exist yet, a schema, permission or typed error contract, or a call to an outside system | A Tool |
 | A fixed chain of tool calls with no judgement between the steps | A composition Skill |
 | A judgement at a fork, a known trap, or an order of steps that needs reading | An instruction Skill |
-| Something the runtime already puts in every request (the current time arrives as `[Temporal]`) | Nothing |
+| Something the runtime already puts in the turn's first request (the current time arrives there as `[Temporal]`; a request after tool results does not repeat it) | Nothing |
 | A procedure that steps around a tool or harness defect | No Skill. Fix the defect |
 
 A Skill that works around a defect turns the defect into the documented way of working,
@@ -55,8 +55,10 @@ YAML description that contains `:`, `#`, or a leading backtick.
   `keeper_compose_<name>` has a 64-byte limit).
 - Every node `tool` is a registered tool on the Keeper surface. Check each input field
   name, type and enum against the tool's `config/tools/<tool>.toml`. Inputs are
-  validated when the node runs, not when the Skill loads, so a misspelled field loads
-  cleanly and fails on first use.
+  validated when the composition is called, not when the Skill loads, so a misspelled
+  field loads cleanly and fails on first use. An input made only of literals and
+  params is checked before any node runs; an input that reads another node's output
+  is checked when its node runs, after the nodes before it.
 - `kind = "output"` reads a field of an earlier node only when that tool declares a JSON
   output schema (`keeper_spawn` declares `/handle`). Most tools do not; their output
   cannot feed another node.

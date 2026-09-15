@@ -205,8 +205,8 @@ let test_settled_composition_row_names_what_finished () =
   ensure_keeper config keeper_name;
   let completion =
     { Keeper_event_queue.cc_request_id = "kmsg-bbb"
-    ; cc_tool = "keeper_compose_background-snapshot"
-    ; cc_terminal = Keeper_event_queue.Composition_failed "node board: store unavailable"
+    ; cc_tool = "keeper_compose_memory-background"
+    ; cc_terminal = Keeper_event_queue.Composition_failed "node search: store unavailable"
     }
   in
   Keeper_event_queue_persistence.persist
@@ -231,7 +231,7 @@ let test_settled_composition_row_names_what_finished () =
        check string "the producer names the composition broker" "keeper_composition"
          (json_string_member "wake_producer" row);
        check string "the row says which composition and how it ended"
-         "keeper_compose_background-snapshot 실패 · kmsg-bbb"
+         "keeper_compose_memory-background 실패 · kmsg-bbb"
          (json_string_member "what" row);
        let detail = U.member "detail" row in
        check string "the typed payload label survives" "keeper_composition_completed"
@@ -240,7 +240,7 @@ let test_settled_composition_row_names_what_finished () =
        check string "the request id to read the result with" "kmsg-bbb"
          (json_string_member "composition_request_id" detail);
        check string "and the tool that produced it"
-         "keeper_compose_background-snapshot"
+         "keeper_compose_memory-background"
          (json_string_member "composition_tool" detail)
      | [] -> fail "the settled composition put no row in front of the operator")
 ;;

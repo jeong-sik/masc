@@ -24,7 +24,7 @@ import tempfile
 import termios
 import threading
 import time
-from typing import Any, cast
+from typing import Any, assert_never, cast
 
 Interaction = Callable[[subprocess.Popen[bytes], int, int, bytearray, str], None]
 HttpResponse = tuple[int, object]
@@ -1715,11 +1715,40 @@ class CollectScenarioNames:
 
 ScenarioSelection = RunEveryScenario | RunNamedScenarios | CollectScenarioNames
 
-# main() sets this once from the command line, before a family runs. The
-# choice lives here and not in a parameter because a family reaches this
-# runner through nested helpers, and the focused suites that import this module
-# call the runner directly; neither should have to thread a selection through.
+# run_family sets this for the length of one family and puts RunEveryScenario
+# back when the family ends, raised or not. It is a module value and not a
+# parameter because a family reaches run_terminal_scenario through nested
+# helpers, and the focused suites that import this module call the runner
+# directly; none of them should have to thread a selection through.
+# run_terminal_scenario is its only reader.
 scenario_selection: ScenarioSelection = RunEveryScenario()
+
+
+def scenario_admitted(selection: ScenarioSelection, description: str) -> bool:
+    """Whether the scenario described as [description] opens a terminal.
+
+    --scenario picks by description, so a family that used one description
+    twice could only ever run both. Collecting the family's names is where that
+    shows, and it fails there instead of listing the name twice.
+    """
+    match selection:
+        case RunEveryScenario():
+            return True
+        case RunNamedScenarios(names=names, ran=ran):
+            if description not in names:
+                return False
+            ran.append(description)
+            return True
+        case CollectScenarioNames(names=collected):
+            if description in collected:
+                raise AssertionError(
+                    f"two scenarios in one family are described as {description!r}; "
+                    "give each its own description so --scenario can pick one"
+                )
+            collected.append(description)
+            return False
+        case _:
+            assert_never(selection)
 
 
 def tui_executable(path: str) -> str:
@@ -1753,16 +1782,8 @@ def run_terminal_scenario(
     extra_env: dict[str, str] | None = None,
     conflicting_env_base_path: bool = False,
 ) -> None:
-    match scenario_selection:
-        case RunEveryScenario():
-            pass
-        case RunNamedScenarios(names=names, ran=ran):
-            if description not in names:
-                return
-            ran.append(description)
-        case CollectScenarioNames(names=collected):
-            collected.append(description)
-            return
+    if not scenario_admitted(scenario_selection, description):
+        return
     executable = tui_executable(executable)
     master_fd, slave_fd = os.openpty()
     output = bytearray()
@@ -12950,8 +12971,15 @@ def fusion_live_reload_interaction(
     return interact
 
 
+# The hook's per-call observation names the keeper turn (total_turns + 1)
+# the session-numbered call below belongs to; without it the row would say
+# "turn ?".
 OBSERVER_TOOL_CALLED_FRAME = (
     b"id: 1\n"
+    b"event: message\n"
+    b'data: {"type":"keeper_turn_observation","name":"alpha","turn":7,'
+    b'"total_turns":6,"ts_unix":1787505641.0}\n\n'
+    b"id: 2\n"
     b"event: message\n"
     b'data: {"type":"agent_core:tool_called","event_type":"tool_called",'
     b'"event_id":"evt-1","ts_unix":1787505641.28,"correlation_id":"trace-1",'
@@ -13245,7 +13273,7 @@ def observer_feed_interaction(requests: HttpRequests) -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        # The fixture closes the stream right after its one frame, so the
+        # The fixture closes the stream right after its two frames, so the
         # row the test can rely on is the closed one. What this scenario is
         # about is the MCP session and the subscription under it, so it waits
         # for the row to exist and not for the number on it: the count and
@@ -13266,12 +13294,13 @@ def observer_feed_interaction(requests: HttpRequests) -> Interaction:
         payload = json.loads(initialize[0])
         if payload.get("method") != "initialize":
             raise AssertionError(f"MCP POST was not an initialize: {payload!r}")
-        # The one frame the fixture streamed is a row on the Acting surface.
-        # The default view folds it into a turn chunk: the running turn names
-        # its in-flight call.
+        # The call frame the fixture streamed is a row on the Acting surface;
+        # the observation is held but hidden. The default view folds the call
+        # into a turn chunk: the running turn names its in-flight call under
+        # the keeper's number.
         acting = send_and_wait(process, master_fd, output, b"\t", b"MASC Activity")
         for needle, what in (
-            ("(1 row \u00b7 1 event held)".encode(), "the shown rows and held events"),
+            ("(1 row \u00b7 2 events held)".encode(), "the shown rows and held events"),
             (b"alpha", "the keeper that acted"),
             (b"turn 7", "the turn"),
             (b"read_file", "the in-flight tool"),
@@ -14283,28 +14312,7 @@ def run_quit_waiting_regression(executable: str) -> None:
     )
 
 
-def run_atomic_chat_regression(executable: str) -> None:
-    for description, interaction in (
-        ("Enter admits server queue before model completion", chat_queue_interaction),
-        ("Enter resumes only after fresh Esc acknowledgement", lambda fixture: chat_steer_interaction(fixture, requests)),
-    ):
-        fixture = AtomicChatFixture()
-        requests: HttpRequests = []
-        run_terminal_scenario(executable, description=description,
-            interact=interaction(fixture), http_fixtures=fixture.fixtures,
-            http_requests=requests, refresh=0.2)
-    working = AtomicChatFixture(first_working=True)
-    run_terminal_scenario(executable, description="Working direct execution outranks stale autonomous observer",
-        interact=chat_working_target_interaction(working), http_fixtures=working.fixtures, refresh=0.2)
-    requests = []
-    fixtures, gate = chat_reconcile_http_fixtures()
-    run_terminal_scenario(executable, description="New Enter does not await unrelated reconciliation",
-        interact=chat_reconcile_interaction(gate, requests), http_fixtures=fixtures,
-        http_requests=requests)
-    pending = AtomicChatFixture(first_working=True)
-    run_terminal_scenario(executable, description="Pending stop leaves chat without another interrupt",
-        interact=chat_pending_stop_leave_interaction(pending), http_fixtures=pending.fixtures, refresh=0.2)
-    run_quit_waiting_regression(executable)
+def run_chat_retained_stop_regression(executable: str) -> None:
     retained = AtomicChatFixture()
     run_terminal_scenario(executable, description="Stopped input stays retained after ack until explicit Enter",
         interact=chat_retained_stop_interaction(retained), http_fixtures=retained.fixtures, refresh=0.2)
@@ -14756,7 +14764,9 @@ def run_browser_viewport_regression(executable: str, *, cell_geometry: bool = Tr
         os.write(master, b"q")
 
     try:
-        run_terminal_scenario(executable, description="Browser visual viewport input and late frame ownership",
+        run_terminal_scenario(executable,
+            description=("Browser visual viewport input and late frame ownership" if cell_geometry
+                else "Browser visual viewport input when the terminal reports no cell size"),
             interact=interact, http_fixtures=fixtures, prepare_workspace=prepare,
             preload_input=(b"\x1b[6;20;10t" if cell_geometry else b"")+GRAPHICS_SUPPORTED_REPLY)
     finally:
@@ -16574,7 +16584,9 @@ def run_msx_retained_regression(executable: str, *, retained_tick: bool = False)
         os.write(master, b"q")
 
     run_terminal_scenario(
-        executable, description="MSX retains Kitty pixels between live polls",
+        executable,
+        description=("MSX tick sends a reference for pixels the TUI already holds" if retained_tick
+                     else "MSX retains Kitty pixels between live polls"),
         interact=interact, preload_input=GRAPHICS_SUPPORTED_REPLY,
         http_fixtures={"/api/v1/msx/frame": (200, original),
                        "/api/v1/msx/tick": RequestHttpResponse(tick) if retained_tick else tick},
@@ -17012,15 +17024,21 @@ KEYBOARD_FAMILY = ScenarioFamily(
     "keyboard", "keyboard PTY regression", (run_keyboard_regression,)
 )
 
-# A dune rule for this file names one of these after the binary; with no name
-# the keyboard walk runs.
+# Each family has one dune rule that names it after the binary, except the
+# keyboard walk, whose rule names none, and each rule is on the runtest alias.
+# test_tui_keyboard_scenario_selection.py reads those rules from test/dune and
+# test/stanzas/*.inc and fails on a family with no rule, a rule naming no
+# family, or a rule off runtest that its exception list does not name.
 SCENARIO_FAMILIES: tuple[ScenarioFamily, ...] = (
     KEYBOARD_FAMILY,
-    ScenarioFamily("browser-scene", "Browser scene regression", (run_browser_scene_regression,)),
     ScenarioFamily("fusion-history", "historical Fusion inspection", (run_fusion_history_regression,)),
     ScenarioFamily("cli-base-path", "CLI base-path regression", (run_cli_base_path_regression,)),
     ScenarioFamily("send-on-stop", "send_on_stop regression", (run_send_on_stop_regression,)),
-    ScenarioFamily("chat-atomic", "atomic chat admission regression", (run_atomic_chat_regression,)),
+    ScenarioFamily(
+        "chat-retained-stop",
+        "stopped chat input retained regression",
+        (run_chat_retained_stop_regression,),
+    ),
     ScenarioFamily("quit-waiting", "quit with waiting messages regression", (run_quit_waiting_regression,)),
     ScenarioFamily("ctrl-y", "Ctrl-Y regression", (run_ctrl_y_regression,)),
     ScenarioFamily("planning-review", "Planning Task Review regression", (run_planning_review_regression,)),
@@ -17113,8 +17131,11 @@ def collect_scenario_names(family: ScenarioFamily, executable: str) -> list[str]
     return selection.names
 
 
-def main() -> None:
-    families = {family.name: family for family in SCENARIO_FAMILIES}
+def main(
+    argv: list[str], families: tuple[ScenarioFamily, ...], default: ScenarioFamily
+) -> None:
+    """The command line over [families]; with no family named, [default] runs."""
+    by_name = {family.name: family for family in families}
     parser = argparse.ArgumentParser(
         allow_abbrev=False,
         usage="%(prog)s <masc_tui.exe> [family] [--list | --scenario DESCRIPTION ...]",
@@ -17142,12 +17163,12 @@ def main() -> None:
             "every family's, or only the named family's"
         ),
     )
-    args = parser.parse_intermixed_args()
+    args = parser.parse_intermixed_args(argv)
     match args.operands:
         case [executable]:
             chosen = None
-        case [executable, family_name] if family_name in families:
-            chosen = families[family_name]
+        case [executable, family_name] if family_name in by_name:
+            chosen = by_name[family_name]
         case [_, family_name]:
             parser.error(f"unknown family {family_name!r}; --list prints the names")
         case _:
@@ -17156,12 +17177,12 @@ def main() -> None:
     if args.list:
         if args.scenario:
             parser.error("--list and --scenario do not go together")
-        for family in SCENARIO_FAMILIES if chosen is None else (chosen,):
+        for family in families if chosen is None else (chosen,):
             print(family.name)
             for name in collect_scenario_names(family, executable):
                 print(f"  {name}")
         return
-    family = KEYBOARD_FAMILY if chosen is None else chosen
+    family = default if chosen is None else chosen
     if not args.scenario:
         run_family(family, executable, RunEveryScenario())
         print(f"tui {family.label}: PASS")
@@ -17173,7 +17194,7 @@ def main() -> None:
         # say which, so the next command is the right one.
         by_family = {
             other.name: set(collect_scenario_names(other, executable))
-            for other in SCENARIO_FAMILIES
+            for other in families
         }
         parser.error(
             f"no scenario in family {family.name!r} is described as: "
@@ -17197,4 +17218,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:], SCENARIO_FAMILIES, KEYBOARD_FAMILY)

@@ -39,6 +39,11 @@ let emit_after_gap ~clock ~now line () =
    in how many events are delivered before the trip. *)
 let inter_token_budget_under_one_gap_s = 0.3
 
+(* An inter-token budget with room for exactly one line gap and not two
+   (0.4 < 0.5 < 0.8): a stream that renews it every line runs to EOF, and one
+   that renews it only on production trips on the second unrenewed gap. *)
+let inter_token_budget_over_one_gap_s = 0.5
+
 (* [classify] is what the consumer tells the reader about each dispatched
    event; every event is [Output] unless a test says otherwise. *)
 let read_sse_over ?(classify = fun (_ : string) -> Http_client.Output) ~budget_kind lines =
@@ -71,6 +76,16 @@ let read_sse_over ?(classify = fun (_ : string) -> Http_client.Output) ~budget_k
         ~clock
         ~first_event_timeout:first_event_budget_s
         ~idle_timeout:inter_token_budget_under_one_gap_s
+        ~reader
+        ~on_data:(fun ~event_type data ->
+          events := (event_type, data) :: !events;
+          Http_client.Continue (classify data))
+        ()
+    | `Both_with_room_for_one_gap ->
+      Http_client.read_sse
+        ~clock
+        ~first_event_timeout:first_event_budget_s
+        ~idle_timeout:inter_token_budget_over_one_gap_s
         ~reader
         ~on_data:(fun ~event_type data ->
           events := (event_type, data) :: !events;
@@ -397,6 +412,28 @@ let test_a_line_already_in_hand_when_the_budget_closed_is_read () =
       (List.length delivered)
 ;;
 
+(* A keep-alive carries a data field, so a reader that renews on data lines
+   renews on it. After the first token that is the inter-token gap, and a
+   provider that sends nothing but keep-alives then holds the stream for as
+   long as it keeps sending them -- the model producing nothing the whole
+   time. The consumer names each event, and only production renews. *)
+let keepalive_payload = "ping"
+
+let test_a_keepalive_does_not_renew_the_inter_token_gap () =
+  read_sse_over
+    ~budget_kind:`Both_with_room_for_one_gap
+    ~classify:(fun data ->
+      if String.equal data keepalive_payload then Http_client.Prelude else Http_client.Output)
+    [ "data: token\n"
+    ; "\n"
+    ; "data: " ^ keepalive_payload ^ "\n"
+    ; "\n"
+    ; "data: " ^ keepalive_payload ^ "\n"
+    ; "\n"
+    ]
+  |> check_timed_out "keep-alives renewed the inter-token gap"
+;;
+
 let () =
   run
     "SSE budget anchor"
@@ -417,6 +454,12 @@ let () =
             "event fields without data do not end first-event budget"
             `Quick
             test_event_fields_do_not_end_first_event_budget
+        ] )
+    ; ( "inter_token"
+      , [ test_case
+            "a keep-alive does not renew the inter-token gap"
+            `Quick
+            test_a_keepalive_does_not_renew_the_inter_token_gap
         ] )
     ; ( "prelude"
       , [ test_case

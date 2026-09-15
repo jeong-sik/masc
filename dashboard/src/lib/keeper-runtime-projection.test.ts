@@ -5,7 +5,6 @@ import type { KeeperRuntimeTraceResponse } from '../api/keeper'
 import type { KeeperCompositeSnapshot } from '../api/schemas/keeper-composite'
 import { deriveKeeperRuntimeProjection } from './keeper-runtime-projection'
 
-const NOW_MS = Date.parse('2026-05-21T00:10:00Z')
 
 function keeper(overrides: Partial<Keeper> = {}): Keeper {
   return {
@@ -128,35 +127,9 @@ function runtimeTrace(overrides: Partial<KeeperRuntimeTraceResponse> = {}): Keep
 }
 
 describe('deriveKeeperRuntimeProjection', () => {
-  it('uses the server-resolved Keeper heartbeat freshness window', () => {
-    const lastHeartbeat = '2026-05-21T00:05:00Z'
-    const shortCadence = deriveKeeperRuntimeProjection({
-      keeper: keeper({
-        last_heartbeat: lastHeartbeat,
-        heartbeat_stale_after_s: 120,
-      }),
-      composite: composite(),
-      nowMs: NOW_MS,
-    })
-    const defaultCadence = deriveKeeperRuntimeProjection({
-      keeper: keeper({
-        last_heartbeat: lastHeartbeat,
-        heartbeat_stale_after_s: 360,
-      }),
-      composite: composite(),
-      nowMs: NOW_MS,
-    })
-
-    expect(shortCadence.heartbeat.thresholdMs).toBe(120_000)
-    expect(shortCadence.heartbeat.stale).toBe(true)
-    expect(defaultCadence.heartbeat.thresholdMs).toBe(360_000)
-    expect(defaultCadence.heartbeat.stale).toBe(false)
-  })
-
-  it('couples heartbeat, context, fiber, stop, trace, tool, and FSM lanes', () => {
+  it('couples context, fiber, stop, trace, tool, and FSM lanes', () => {
     const projection = deriveKeeperRuntimeProjection({
       keeper: keeper({
-        last_heartbeat: '2026-05-21T00:00:00Z',
         context_ratio: 0.97,
         runtime_warning_ctx_ratio: 0.95,
       }),
@@ -171,18 +144,15 @@ describe('deriveKeeperRuntimeProjection', () => {
         warnings: ['Runtime build commit differs from server repo HEAD.'],
         source_mismatch: true,
       },
-      nowMs: NOW_MS,
     })
 
     expect(projection.headline).toBe('조치 필요')
-    expect(projection.heartbeat.stale).toBe(true)
     expect(projection.context.breach).toBe(true)
     expect(projection.fiberAlive.alive).toBe(true)
     expect(projection.fsmLanes.map(lane => lane.axis)).toEqual(['KSM', 'KTC', 'KDP', 'KCL'])
     expect(projection.signals.map(signal => signal.kind)).toEqual([
       'operational_state',
       'ksm_phase',
-      'heartbeat',
       'context_ratio',
       'blocked_tasks',
       'fiber_alive',
@@ -191,7 +161,6 @@ describe('deriveKeeperRuntimeProjection', () => {
       'runtime_warning',
       'fsm_raw_lanes',
     ])
-    expect(projection.synchronizationDetail).toContain('hb stale')
     expect(projection.synchronizationDetail).toContain('ctx breach')
     expect(projection.synchronizationDetail).toContain('fiber alive')
     expect(projection.synchronizationDetail).toContain('stop clear')
@@ -207,7 +176,6 @@ describe('deriveKeeperRuntimeProjection', () => {
           fiber_stop_requested: true,
         },
       }),
-      nowMs: NOW_MS,
     })
 
     expect(projection.stopRequested).toBe(true)
@@ -229,7 +197,6 @@ describe('deriveKeeperRuntimeProjection', () => {
         },
       }),
       runtimeTrace: runtimeTrace(),
-      nowMs: NOW_MS,
     })
 
     expect(projection.headline).toBe('턴 진행 중')
@@ -266,7 +233,6 @@ describe('deriveKeeperRuntimeProjection', () => {
       keeper: keeper({}),
       composite: composite({}),
       runtimeTrace: traceWithGaps(gaps),
-      nowMs: NOW_MS,
     }).traceEvidence.tone
 
   it('reads an info-only gap as ok, not warn', () => {
@@ -307,7 +273,7 @@ describe('deriveKeeperRuntimeProjection', () => {
 // so the same keeper read 주의 on one surface and 실행 중 on the other.
 describe('attention axis', () => {
   const attentionKinds = (k: Keeper) =>
-    deriveKeeperRuntimeProjection({ keeper: k, composite: null, nowMs: NOW_MS })
+    deriveKeeperRuntimeProjection({ keeper: k, composite: null })
       .signals.filter(signal => signal.contributesToAttention)
       .map(signal => signal.kind)
 
@@ -327,7 +293,6 @@ describe('attention axis', () => {
     const signal = deriveKeeperRuntimeProjection({
       keeper: keeper({ blocked_task_count: 3 }),
       composite: null,
-      nowMs: NOW_MS,
     }).signals.find(s => s.kind === 'blocked_tasks')
     expect(signal?.detail).toBe('blocked_task_count 3')
     expect(signal?.hint).toContain('3건')

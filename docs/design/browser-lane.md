@@ -8,6 +8,13 @@ for the WebDriver endpoint configuration.
 The live extension bridges typed tab reads, viewport capture and explicit-tab interaction commands through
 native messaging. Its host polls `/browser-lane/poll` and returns results to
 `/browser-lane/result`; these transport endpoints require the lane token.
+`/browser-lane/ping` answers `{ok:true}` to the same token without registering
+a client. After a failed request, a host that takes its port from the workspace
+connection moves to a newly named port only when its current server no longer
+answers the ping and the new address does. A result is sent again only when
+its request may not have reached the server (no connection, a broken exchange
+or no answer in time); a result the server answered with any status is logged
+as undelivered and the host returns to polling.
 They accept only `live`. Automation requires the configured in-process
 WebDriver executor and reports `Lane_absent` when it is not installed.
 Session management and direct URL navigation are automation-only. The live lane
@@ -105,7 +112,14 @@ observation instead of rediscovering the tab. A copied observation is evidence
 of what was displayed, not a guarantee that the page has stayed unchanged.
 
 The generic [browser-lanes instruction](../../skills/browser-lanes/SKILL.md)
-combines with a site instruction selected from the Keeper's available Skills.
+carries its site instructions as reference files under
+`skills/browser-lanes/references/sites/`. Keeper reads only the file for the
+requested site, through `keeper_skill` with that `file`. A separate site Skill
+that appears in the Keeper's available Skills, such as one an operator added,
+is read and used together with browser-lanes; where it disagrees with a bundled
+site reference, the separate Skill wins. Reference files are read from disk on
+each call and carry no revision a Keeper can see, so a Keeper reads a needed
+reference again in a new turn.
 Site instructions describe how to recognize the requested content; execution
 compositions are separately advertised `keeper_compose_<name>` tools.
 For an observed same-tab link, `browser-live-follow-read` with `mode=scene`
@@ -133,12 +147,19 @@ returns `no_live_client`. An explicit missing/retired ID returns
 requests omit `clientId` and return it as null.
 
 When a Keeper browser tool meets `no_live_client` or
-`selected_client_disconnected`, its result also carries `host`: the installed
-launcher's server argument (`follows_workspace`, `pinned` with
-`launcher_port`, `unusable_origin`, `unreadable` or `not_installed`), the
-`workspace_port` connection.toml names, and the same verdict and message
-`masc doctor` reports for the browser lane. The Keeper cannot change either
-side, so the retry text names what the operator does.
+`selected_client_disconnected`, before or after its target was resolved, its
+result also carries `host`: the installed launcher (`follows_workspace` when
+the installer's `launch.json` carries the SHA-256 of the `launch` beside it,
+`describes_another_launcher` when it does not, `undeclared`, `unreadable` or
+`not_installed`), the `workspace_port` connection.toml names, the
+`serving_port` this server's listener actually bound with `polling_hosts`, the
+browser hosts whose poll lease is current (both null where no bound listener
+is known), and the same verdict and message the onboarding check reports.
+The verdict is `connected` while a host polls this server, whatever the
+launcher or file says; otherwise `aligned` only when a declared launcher's
+workspace port is the bound port, `unverified` where no bound port is known,
+such as `masc doctor`, and `misconfigured` for the rest. The Keeper cannot
+change either side, so the retry text names what the operator does.
 
 Tab IDs belong to their selected client. The operator read resolves that client
 once before listing tabs and keeps it for the subsequent page request. Successful

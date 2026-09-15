@@ -293,6 +293,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0450 | witness 원장은 먼저 재고, 그 다음 WAL 이다 | Draft | - |
 | 0451 | CLI 레인은 턴이 시작될 때 집합을 고른다 — 매 요청 82KB 는 스스로 안 실려도 된다고 적은 도구들이다 | Draft | - |
 | 0452 | 소비는 lane 이 아니라 다룬 주체가 한다 — 채팅 턴도 자기가 처리한 자극을 ack 한다 | Rejected | - |
+| 0453 | keeper health 는 phase 의 투영이지 heartbeat 나이가 아니다 | Accepted | - |
 | RFC-a-language-server-the-keeper-can-ask | A language server the Keeper can ask | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
 | RFC-attached-service-tool-scoping | 도구 스키마를 매 턴 전량 싣는 것을 그만둔다 | Accepted | - |
@@ -353,6 +354,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-webmcp-dashboard-agent-surface | 대시보드를 WebMCP 도구 표면으로 — 읽기 전용 MCP allowlist relay 와 CDP 소비 브리지 | Draft | - |
 | RFC-webmcp-keeper-consumption | keeper 의 WebMCP 소비 — Yolo Bash 브리지 lane(지금)과 typed 도구 모듈 lane(트리거 뒤) | Active | - |
 | RFC-widen-whole-sets | 도구 검색은 묶음을 데려온다 — 회수 단위가 호출 하나면 필요한 세트가 남는다 | Dropped | - |
+| RFC-workspace-root-resolution | workspace 는 진입점에서 한 번 정하고, 모든 명령이 같은 순서로 정한다 | Draft | - |
 
 ### 신규 RFC
 

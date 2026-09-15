@@ -440,7 +440,7 @@ let test_held_task_skills_section_renders () =
         held_task_skills =
           [ { Inputs.held_task_id = "task-364"
             ; held_skills =
-                [ skill_reference "mission-snapshot" 'a'
+                [ skill_reference "prior-art" 'a'
                 ; skill_reference "work-intake" 'b'
                 ]
             }
@@ -450,7 +450,7 @@ let test_held_task_skills_section_renders () =
   check bool "heading" true (contains ~needle:"### Skills Named by Tasks You Hold" user);
   check bool "line names the task and exact skills" true
     (contains ~needle:"task-364 (held by you) names exact Skill catalog rows: [{" user
-     && contains ~needle:"\"name\":\"mission-snapshot\"" user
+     && contains ~needle:"\"name\":\"prior-art\"" user
      && contains ~needle:"\"name\":\"work-intake\"" user);
   check bool "unprojected refs are explicitly unavailable" true
     (contains ~needle:"\"kind\":\"unavailable\"" user);
@@ -638,7 +638,7 @@ let test_direct_turn_carries_held_task_skills () =
       ~current_task:Inputs.No_current_task
       ~held_task_skills:
         [ { Inputs.held_task_id = "task-364"
-          ; held_skills = [ skill_reference "mission-snapshot" 'a' ]
+          ; held_skills = [ skill_reference "prior-art" 'a' ]
           }
         ]
       ~task_skill_surfaces:[]
@@ -652,7 +652,7 @@ let test_direct_turn_carries_held_task_skills () =
     (contains ~needle:"### Skills Named by Tasks You Hold" context);
   check bool "held exact skills line" true
     (contains ~needle:"task-364 (held by you) names exact Skill catalog rows: [{" context
-     && contains ~needle:"\"name\":\"mission-snapshot\"" context);
+     && contains ~needle:"\"name\":\"prior-art\"" context);
   check bool "catalog row is conditional on this attempt's schema" true
     (contains ~needle:"only when that tool is present in the current attempt's tool schema" context
      && contains ~needle:"a runtime may suppress all tools" context);

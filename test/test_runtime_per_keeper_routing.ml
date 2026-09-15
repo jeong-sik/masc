@@ -1452,27 +1452,29 @@ let test_rerank_resolver_rejects_missing_declared_env_credential () =
             (string_contains detail env_key)))
 ;;
 
+let resolve_budget ~requested_override runtime_id =
+  match
+    Keeper_context_runtime.resolve_max_context_resolution_for_runtime_id
+      ~requested_override
+      ~runtime_id
+  with
+  | Ok resolution -> resolution
+  | Error error ->
+    Alcotest.failf
+      "%s must resolve a context budget: %s"
+      runtime_id
+      (Keeper_context_runtime.max_context_resolution_error_to_string error)
+;;
+
 let test_context_budget_uses_selected_runtime () =
   with_runtime_initialized (fun () ->
     let default_budget =
-      Keeper_context_runtime.resolve_max_context_resolution
-        ~requested_override:None
-        [ "runpod_mtp.qwen" ]
+      resolve_budget ~requested_override:None "runpod_mtp.qwen"
     in
-    let selected_budget =
-      Keeper_context_runtime.resolve_max_context_resolution
-        ~requested_override:None
-        [ "openai.gpt" ]
-    in
-    let small_budget =
-      Keeper_context_runtime.resolve_max_context_resolution
-        ~requested_override:None
-        [ "openai.small" ]
-    in
+    let selected_budget = resolve_budget ~requested_override:None "openai.gpt" in
+    let small_budget = resolve_budget ~requested_override:None "openai.small" in
     let oversized_override =
-      Keeper_context_runtime.resolve_max_context_resolution
-        ~requested_override:(Some 128_001)
-        [ "openai.small" ]
+      resolve_budget ~requested_override:(Some 128_001) "openai.small"
     in
     Alcotest.(check int)
       "default runtime budget"
@@ -1521,9 +1523,7 @@ let test_strict_context_budget_rejects_unavailable_and_invalid_override () =
 let test_context_budget_source_is_shared_ssot () =
   with_runtime_initialized (fun () ->
     let source requested_override =
-      Keeper_context_runtime.resolve_max_context_resolution
-        ~requested_override
-        [ "openai.gpt" ]
+      resolve_budget ~requested_override "openai.gpt"
       |> Keeper_context_runtime.context_budget_source_of_resolution
       |> Keeper_context_runtime.context_budget_source_to_string
     in
@@ -1560,12 +1560,11 @@ let test_runtime_budget_source_survives_to_status_json () =
         (Keeper_context_runtime.max_context_resolution_error_to_string error)
     | Ok resolution ->
       (match resolution.Keeper_context_runtime.runtime_budget_source with
-       | Some Runtime.Override -> ()
-       | Some other ->
+       | Runtime.Override -> ()
+       | (Runtime.Capability | Runtime.Override_clamped_by_capability) as other ->
          Alcotest.failf
            "expected the runtime.toml override source, got %s"
-           (Runtime.max_context_source_to_string other)
-       | None -> Alcotest.fail "runtime budget source dropped on the strict path");
+           (Runtime.max_context_source_to_string other));
       let json =
         Keeper_context_runtime.context_budget_json_of_resolution
           ~runtime_id:"openai.gpt"
@@ -2167,14 +2166,59 @@ let test_max_context_accessor_clamps_to_provider_cap () =
       (Some 131072)
       (Runtime.max_context_of_runtime_id "ollama_cloud.stalecontext");
     let resolution =
-      Keeper_context_runtime.resolve_max_context_resolution
-        ~requested_override:None
-        [ "ollama_cloud.stalecontext" ]
+      resolve_budget ~requested_override:None "ollama_cloud.stalecontext"
     in
     Alcotest.(check int)
       "keeper context budget uses provider-effective cap"
       131072
       resolution.Keeper_context_runtime.effective_budget)
+;;
+
+(* A model the embedded catalog has no row for, served over ollama_cloud's
+   OpenAI-compatible wire. Its only window is the runtime.toml declaration, so
+   that value must stand: the provider preset has no window to clamp it with.
+   Live 2026-09-15: glm-5.3-flash declared 1048576 (ollama.com /api/show) was
+   clamped to a 128000 preset guess and pulled its lanes' turn budget down. *)
+let runtime_config_uncatalogued_wide_context =
+  {|
+[runtime]
+default = "ollama_cloud.wide"
+
+[providers.ollama_cloud]
+display-name = "Ollama Cloud"
+protocol = "openai-compatible-http"
+endpoint = "https://ollama.example/v1"
+
+[models.wide]
+api-name = "not-yet-catalogued-wide-model"
+max-context = 1048576
+tools-support = true
+streaming = true
+
+[ollama_cloud.wide]
+max-concurrent = 1
+|}
+;;
+
+let test_max_context_of_uncatalogued_model_keeps_runtime_declaration () =
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  with_temp_dir "runtime-uncatalogued-context" @@ fun dir ->
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
+    (fun () ->
+      let path = Filename.concat dir "runtime.toml" in
+      write_file path runtime_config_uncatalogued_wide_context;
+      (match Runtime.init_default ~config_path:path with
+       | Ok () -> ()
+       | Error msg -> Alcotest.failf "runtime init_default failed: %s" msg);
+      match Runtime.resolve_max_context_of_runtime_id "ollama_cloud.wide" with
+      | None -> Alcotest.fail "ollama_cloud.wide must resolve a context window"
+      | Some (window, source) ->
+        Alcotest.(check int) "runtime.toml window stands" 1048576 window;
+        Alcotest.(check string)
+          "source is the runtime.toml override, not a preset clamp"
+          "override"
+          (Runtime.max_context_source_to_string source))
 ;;
 
 let test_historical_qwen36_context_overflow_fixture_replays_provider_cap () =
@@ -2204,11 +2248,7 @@ let test_historical_qwen36_context_overflow_fixture_replays_provider_cap () =
       "current runtime accessor replays fixture through provider cap"
       (Some agent_core_provider_limit)
       (Runtime.max_context_of_runtime_id runtime_id);
-    let resolution =
-      Keeper_context_runtime.resolve_max_context_resolution
-        ~requested_override:None
-        [ runtime_id ]
-    in
+    let resolution = resolve_budget ~requested_override:None runtime_id in
     Alcotest.(check int)
       "current keeper budget no longer reproduces historical oversized value"
       agent_core_provider_limit
@@ -2547,6 +2587,10 @@ let () =
             "max_context_of_runtime_id clamps runtime TOML to provider cap"
             `Quick
             test_max_context_accessor_clamps_to_provider_cap
+        ; Alcotest.test_case
+            "uncatalogued model keeps its runtime.toml window"
+            `Quick
+            test_max_context_of_uncatalogued_model_keeps_runtime_declaration
         ; Alcotest.test_case
             "historical qwen36 overflow fixture replays provider cap"
             `Quick

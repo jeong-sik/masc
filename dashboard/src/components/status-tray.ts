@@ -17,7 +17,6 @@ import {
 import { route } from '../router'
 import {
   keepers,
-  staleKeepers,
   tasks,
 } from '../store'
 import {
@@ -53,8 +52,6 @@ export interface StatusTraySummary {
   latestJournalEntries: JournalEntry[]
   counts: {
     totalKeepers: number
-    freshKeepers: number
-    staleKeepers: number
     keeperAttention: number
     pendingVerificationTasks: number
     unacknowledgedErrors: number
@@ -74,7 +71,6 @@ export interface StatusTrayInput {
   reconnectCount: number
   lastDisconnectedAt: number
   keepers: readonly Keeper[]
-  staleKeeperNames: ReadonlySet<string>
   tasks: readonly Task[]
   journalEntries: readonly JournalEntry[]
   unacknowledgedErrors: number
@@ -129,14 +125,12 @@ type TransportInput = Pick<StatusTrayInput,
   | 'reconnectCount' | 'lastDisconnectedAt' | 'now'>
 
 type FleetInput = Pick<StatusTrayInput,
-  'keepers' | 'staleKeeperNames' | 'tasks' | 'journalEntries' | 'unacknowledgedErrors'>
+  'keepers' | 'tasks' | 'journalEntries' | 'unacknowledgedErrors'>
 
 interface FleetSummary {
   items: { fleet: StatusTrayItem; activity: StatusTrayItem; attention: StatusTrayItem }
   counts: {
     totalKeepers: number
-    freshKeepers: number
-    staleKeepers: number
     keeperAttention: number
     pendingVerificationTasks: number
     unacknowledgedErrors: number
@@ -196,23 +190,19 @@ function computeTransportItem(input: TransportInput): StatusTrayItem {
 }
 
 // Fleet/activity/attention items + their counts. `now`-independent and ws-independent —
-// memoizable on [keepers, staleKeeperNames, tasks, journalEntries, unacknowledgedErrors].
+// memoizable on [keepers, tasks, journalEntries, unacknowledgedErrors].
 function computeFleetAttention(input: FleetInput): FleetSummary {
   const latest = latestEntries(input.journalEntries)
   const latestEntry = latest[0]
   const totalKeepers = input.keepers.length
-  const staleCount = input.keepers.filter(keeper => input.staleKeeperNames.has(keeper.name)).length
   const keeperAttention = countKeeperAttention(input.keepers)
-  const freshKeepers = Math.max(0, totalKeepers - staleCount)
   const pendingVerificationTasks = countPendingVerification(input.tasks)
 
   const fleetTone: StatusTrayTone = totalKeepers === 0
     ? 'muted'
-    : staleCount === totalKeepers
-      ? 'err'
-      : staleCount > 0 || keeperAttention > 0
-        ? 'warn'
-        : 'ok'
+    : keeperAttention > 0
+      ? 'warn'
+      : 'ok'
 
   const activityTone: StatusTrayTone = !latestEntry
     ? 'muted'
@@ -233,8 +223,6 @@ function computeFleetAttention(input: FleetInput): FleetSummary {
     latestJournalEntries: latest,
     counts: {
       totalKeepers,
-      freshKeepers,
-      staleKeepers: staleCount,
       keeperAttention,
       pendingVerificationTasks,
       unacknowledgedErrors: input.unacknowledgedErrors,
@@ -244,12 +232,10 @@ function computeFleetAttention(input: FleetInput): FleetSummary {
         key: 'fleet',
         tone: fleetTone,
         label: 'Keepers',
-        value: totalKeepers === 0 ? 'none' : `fresh ${freshKeepers}/${totalKeepers}`,
-        detail: staleCount > 0
-          ? `${staleCount} stale heartbeat${staleCount === 1 ? '' : 's'}; freshness is separate from running fibers`
-          : keeperAttention > 0
-            ? `${keeperAttention} keeper${keeperAttention === 1 ? '' : 's'} need attention; heartbeat freshness is current`
-            : 'keeper heartbeats are current',
+        value: totalKeepers === 0 ? 'none' : `${totalKeepers}`,
+        detail: keeperAttention > 0
+          ? `${keeperAttention} keeper${keeperAttention === 1 ? '' : 's'} need attention`
+          : 'no keeper needs attention',
       },
       activity: {
         key: 'activity',
@@ -376,14 +362,10 @@ function PopoverContent({
   if (activeKey === 'fleet') {
     return html`
       <div class="grid gap-3">
-        <div class="grid grid-cols-3 gap-2">
+        <div class="grid grid-cols-2 gap-2">
           <div class="v2-shell-card tray-stat rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
-            <div class="tray-stat-label font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Fresh</div>
-            <div class="tray-stat-value mt-0.5 text-sm font-semibold tabular-nums">${summary.counts.freshKeepers}/${summary.counts.totalKeepers}</div>
-          </div>
-          <div class="v2-shell-card tray-stat rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
-            <div class="tray-stat-label font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Stale</div>
-            <div class="tray-stat-value mt-0.5 text-sm font-semibold tabular-nums">${summary.counts.staleKeepers}</div>
+            <div class="tray-stat-label font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Keepers</div>
+            <div class="tray-stat-value mt-0.5 text-sm font-semibold tabular-nums">${summary.counts.totalKeepers}</div>
           </div>
           <div class="v2-shell-card tray-stat rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
             <div class="tray-stat-label font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Attention</div>
@@ -475,12 +457,11 @@ function FleetChips({
     () =>
       computeFleetAttention({
         keepers: keepers.value,
-        staleKeeperNames: staleKeepers.value,
         tasks: tasks.value,
         journalEntries: journal.value,
         unacknowledgedErrors: unacknowledgedCount.value,
       }),
-    [keepers.value, staleKeepers.value, tasks.value, journal.value, unacknowledgedCount.value],
+    [keepers.value, tasks.value, journal.value, unacknowledgedCount.value],
   )
   return html`
     ${FLEET_TRAY_KEYS.map(key => html`
@@ -510,8 +491,6 @@ function StatusTrayPopover({
       latestJournalEntries: [],
       counts: {
         totalKeepers: 0,
-        freshKeepers: 0,
-        staleKeepers: 0,
         keeperAttention: 0,
         pendingVerificationTasks: 0,
         unacknowledgedErrors: 0,
@@ -539,7 +518,6 @@ function StatusTrayPopover({
   } else {
     const fleet = computeFleetAttention({
       keepers: keepers.value,
-      staleKeeperNames: staleKeepers.value,
       tasks: tasks.value,
       journalEntries: journal.value,
       unacknowledgedErrors: unacknowledgedCount.value,

@@ -917,8 +917,7 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
         match reading_of_health with
         | Some Tui_decode.Health_running -> Pane.Ok
         | Some Tui_decode.Health_idle -> Pane.Dim
-        | Some (Tui_decode.Health_stale | Tui_decode.Health_degraded) -> Pane.Warn
-        | Some (Tui_decode.Health_offline | Tui_decode.Health_zombie) -> Pane.Bad
+        | Some Tui_decode.Health_offline -> Pane.Bad
         | None -> Pane.Dim
     in
     { Pane.name = keeper.k_name
@@ -1252,20 +1251,18 @@ let keeper_roster_pane_shown (state : state) ~cols =
      word    how it is reporting   from health
 
    The lifecycle cell is the fourth and has its own column. The cell used to
-   show a single word from [surface_status], which restates health with stale,
-   degraded and zombie folded together and hides health entirely while a keeper
-   is paused. *)
+   show a single word from [surface_status], which restates health and hides
+   it entirely while a keeper is paused. *)
 let keeper_action_color
     (action : Status.keeper_next_action_path option) =
   match action with
   | None -> Ansi.dim
-  | Some Status.Auto_restart -> (Theme.bad ())
   | Some Status.Recover -> (Theme.warn ())
   | Some Status.Probe -> Theme.action_probe ()
-  (* Green until this measurement. The cell draws four readings in four
-     channels and this is the only one carried by colour alone, so the four
-     colours have to stay apart for a reader who cannot separate red from
-     green -- roughly one man in twelve.
+  (* Green until this measurement. The cell draws its readings in separate
+     channels and this is the only one carried by colour alone, so the three
+     action colours have to stay apart for a reader who cannot separate red
+     from green -- roughly one man in twelve.
 
      Simulated (Machado 2009, severity 1.0) over the twelve base16 schemes the
      contrast harness measures, the closest pair was not red against green but
@@ -3478,7 +3475,7 @@ let context_composition_lines ~cols ~turn_back
          about this turn, while a per-request provider that reported nothing
          simply reported nothing. One None in the data covers both, so the
          scope -- which the record owns -- decides. *)
-      let marker = if index = turn_back then Ansi.bold ^ "▸" else " " in
+      let marker = if index = turn_back then Ansi.bold ^ Masc_tui_theme.Glyph.current_entry else " " in
       match recent.scope, recent.input_tokens with
       | Runtime_usage_scope.Conversation_cumulative, _ ->
           [ marker
@@ -3491,7 +3488,7 @@ let context_composition_lines ~cols ~turn_back
       | _, Some input ->
           fact
             (Printf.sprintf "%s #%-4d %s  in %-7s  cache read %-7s  out %s"
-               (if index = turn_back then "▸" else " ")
+               (if index = turn_back then Masc_tui_theme.Glyph.current_entry else " ")
                recent.turn ts
                (Inspector.format_tokens input)
                (match recent.cache_read with
@@ -3501,7 +3498,7 @@ let context_composition_lines ~cols ~turn_back
                  | Some tokens -> Inspector.format_tokens tokens
                  | None -> "-"))
       | _, None ->
-          [ (if index = turn_back then Ansi.bold ^ "▸" else " ")
+          [ (if index = turn_back then Ansi.bold ^ Masc_tui_theme.Glyph.current_entry else " ")
             ^ Ansi.dim
             ^ Printf.sprintf
                 " #%-4d %s  input not reported for this turn"

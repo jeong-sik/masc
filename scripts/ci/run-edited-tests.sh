@@ -671,8 +671,11 @@ self_test() {
   # wrote. The same gap was found for the five node rules (#34837) and closed
   # by building them unconditionally; a scenario that boots a terminal costs
   # 9s against their 0.7s, so it is attributed instead.
+  # The harness brings the suite that names it: which scenarios a family
+  # holds and which --scenario picks is checked there without a terminal.
   check "an edited terminal scenario is selected" \
-    "test/test_tui_keyboard_input.py" "test/test_tui_keyboard_input.py"
+    "test/test_tui_keyboard_input.py test/test_tui_keyboard_scenario_selection.py" \
+    "test/test_tui_keyboard_input.py"
   # tui_browser names five suites, over the per-module cap, so the name
   # mapping attributes nothing to this interface. What is left is the
   # scenario that declares the path and the one suite whose stanza links the

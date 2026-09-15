@@ -159,7 +159,7 @@ let () =
   assert (Lane.scene_target_action control = Some Click_control);
   assert (control_action |> member "tool" = `String "BrowserInteract");
   (match Masc.Browser_interaction.parse (control_action |> member "input") with
-   | Ok {action=Browser_lane.Click_node target;expected_url=Some url;client_id=None;_} ->
+   | Ok {action=Browser_lane.Click_node target;expected_url=Some url;route=Browser_lane.Automation_route;_} ->
        assert (target.document_id=content.document_id && target.node_id=control.node_id && url=content.url)
    | _ -> failwith "copied control action does not satisfy the actual interaction contract");
   let link = {node with node_id="link"; kind=Control {
@@ -172,7 +172,7 @@ let () =
   assert (link_context |> member "href" = `String "https://example.org/observed");
   assert (link_action |> member "kind" = `String "follow_link");
   (match Masc.Browser_interaction.parse (link_action |> member "input") with
-   | Ok {action=Browser_lane.Follow_link target;expected_url=Some url;client_id=None;_} ->
+   | Ok {action=Browser_lane.Follow_link target;expected_url=Some url;route=Browser_lane.Automation_route;_} ->
        assert (target.document_id=content.document_id && target.node_id=link.node_id && url=content.url)
    | _ -> failwith "copied link action does not satisfy the actual follow contract");
   let raster = {node with node_id="image";kind=Raster;tag="img";text="Preview"} in

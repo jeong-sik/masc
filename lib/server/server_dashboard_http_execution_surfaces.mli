@@ -130,6 +130,18 @@ module For_testing : sig
 
   val publish_execution_error_if_current : generation:int -> exn -> bool
 
+  type execution_attempt
+
+  val begin_execution_attempt : unit -> execution_attempt
+
+  val publish_execution_attempt_success : execution_attempt -> Yojson.Safe.t -> bool
+
+  val publish_execution_attempt_failure : execution_attempt -> exn -> bool
+  (** One forced-refresh attempt. It publishes a failure only while it has
+      published no answer: the light body refresh that follows a published
+      answer, and the window around the whole attempt, must not replace what
+      this generation already answered. *)
+
   val cached_representation :
     config:Workspace.config -> Httpun.Request.t ->
     (string * string * (string * string) list) option

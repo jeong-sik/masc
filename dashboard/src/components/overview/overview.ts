@@ -6,7 +6,7 @@
 //   1. (Removed: Highlight moved to Lab)
 //   2. Funnel          — 5 task-count cells (new/active/verify/done/target)
 //   3. Mission party   — one active session (goal, members, progress bar, blocker)
-//   4. Keeper strip    — top three keepers by recent heartbeat
+//   4. Keeper strip    — top three keepers by recency
 //
 // Keeper-v2 port additions:
 //   - Header surface  — namespace, keeper count, operator, live clock
@@ -29,8 +29,9 @@ import type {
 } from '../../api/dashboard'
 import { SYSTEM_ACTOR_NAME } from '../../types/core'
 import { useNowSecondsTicker } from '../../lib/now-signal'
-import { keeperDisplayRuntime, keeperDisplayStatus, keeperRuntimeBlockerLabel } from '../../lib/keeper-runtime-display'
+import { keeperActivityDisplay, keeperDisplayRuntime, keeperDisplayStatus, keeperRuntimeBlockerLabel } from '../../lib/keeper-runtime-display'
 import { isKeeperPaused } from '../../lib/keeper-predicates'
+import { keeperRecencyMs } from '../../lib/keeper-recency'
 import { attentionReasonLabel, nextHumanActionLabel } from '../../lib/keeper-attention-labels'
 import { isAgentOffline } from '../../lib/agent-status'
 import {
@@ -889,13 +890,16 @@ export function deriveFleetTickerEvents({
     })
   }
   for (const keeper of keeperList) {
-    if (!keeper.last_heartbeat) continue
+    // A ticker row is something the keeper did. Creation and metadata
+    // updates are not activity, so a keeper that never acted has no row.
+    const activity = keeperActivityDisplay(keeper, null, { includeCreated: false })
+    if (activity.timestamp === null) continue
     const displayStatus = keeperDisplayStatus(keeper)
     pushTickerEvent(events, {
       id: `keeper:${keeper.name}`,
-      timestamp: keeper.last_heartbeat,
+      timestamp: activity.timestamp,
       actor: keeper.koreanName && keeper.koreanName !== '' ? keeper.koreanName : keeper.name,
-      label: 'heartbeat',
+      label: 'keeper',
       text: keeperStatusLabel(displayStatus),
       kind: 'keeper',
       tone: keeperTickerTone(displayStatus),
@@ -964,10 +968,11 @@ export function formatTargetRatio(counts: FunnelCounts): string {
 // ─── Keeper Strip ────────────────────────────────────────────────────────────
 
 export function pickActiveKeepers(keeperList: readonly Keeper[], max = 3): Keeper[] {
+  const nowMs = Date.now()
   return [...keeperList]
     .sort((a, b) => {
-      const tsA = parseIsoMs(a.last_heartbeat) ?? 0
-      const tsB = parseIsoMs(b.last_heartbeat) ?? 0
+      const tsA = keeperRecencyMs(a, nowMs)
+      const tsB = keeperRecencyMs(b, nowMs)
       const pausedA = isKeeperPaused(a) ? -1e15 : 0
       const pausedB = isKeeperPaused(b) ? -1e15 : 0
       return tsB + pausedB - (tsA + pausedA)

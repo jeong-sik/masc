@@ -5,11 +5,9 @@ import { isKeeperPaused } from './keeper-predicates'
 // `fleet-tone` is leaf-level (it imports only `format-string`), so this
 // direction introduces no cycle.
 import { toKeeperPhaseToken, type KeeperPhaseToken } from './fleet-tone'
-import { keeperHeartbeatStaleMs } from '../config/constants'
 
 export type KeeperActivitySource =
   | 'autonomous_action'
-  | 'heartbeat'
   | 'keeper_meta'
   | 'tool_call'
   | 'approval_pending'
@@ -24,7 +22,7 @@ export interface KeeperActivityDisplay {
   label: string
   /** Concrete subject of the activity when the server identified one —
    *  currently the tool name behind a tool_call / approval_pending signal.
-   *  null when the activity has no finer identity (heartbeat, keeper_meta). */
+   *  null when the activity has no finer identity (keeper_meta). */
   detail: string | null
   timestamp: string | null
   ageSeconds: number | null
@@ -54,7 +52,6 @@ type KeeperRuntimeDisplaySource = {
 }
 
 type KeeperActivityDisplaySource = {
-  last_heartbeat?: string | null
   tool_audit_at?: string | null
   last_activity_at?: string | null
   last_activity_source?: Keeper['last_activity_source'] | null
@@ -193,7 +190,6 @@ export function keeperActivityDisplay(
       activityDetail,
     ),
     timestampCandidate('autonomous_action', '마지막 행동', keeper?.tool_audit_at),
-    timestampCandidate('heartbeat', '하트비트', keeper?.last_heartbeat),
     // The ago_s fallback describes the same underlying activity as
     // last_activity_at — keep the source-derived label/detail instead of
     // collapsing to a generic '최근 활동'.
@@ -293,10 +289,7 @@ function attentionReasonForPause(value: string | null | undefined): string | nul
 }
 
 function diagnosticStateLabel(keeper: Keeper): string | null {
-  const health = codeLabel(keeper.diagnostic?.health_state)
-  const continuity = codeLabel(keeper.diagnostic?.continuity_state)
-  if (health && continuity && health !== continuity) return `${health}/${continuity}`
-  return health ?? continuity
+  return codeLabel(keeper.diagnostic?.health_state)
 }
 
 function transientProviderRuntimeText(value: string | null | undefined): boolean {
@@ -373,35 +366,20 @@ export function keeperPauseDisplay(keeper: Keeper): KeeperPauseDisplay | null {
 }
 
 /** Distinguish "never booted" from "was running but stopped" keepers.
- *  A recent heartbeat is authoritative for a live keeper; otherwise activity
- *  counters distinguish a cold start from a stopped process. */
+ *  Reached only when no lifecycle phase named the state. The registry phase
+ *  is the authority for a process that is up; without one, the turn counter
+ *  separates a cold start from a stopped process. */
 function refineOfflineStatus(keeper: Keeper | null | undefined): KeeperPhaseToken {
   if (!keeper) return 'offline'
 
-  // Heartbeat alive — keepalive fiber is running. Show actual phase instead of
-  // misleading "offline".
-  //
-  // `keeper.phase` carries the typed `KeeperPhase` PascalCase token
-  // (`dashboard/src/types/core.ts:879-892`), normalised by
-  // `toKeeperPhase` at the wire boundary. Lowercasing it here is for
-  // the display layer (`keeperDisplayStatus` callers expect lowercase
-  // status labels like `'idle' / 'unbooted' / 'stopped'`).
-  //
-  // Only `'offline'` is filtered — that is the `'Offline'.toLowerCase()`
-  // case we are refining away. The prior version also filtered
-  // `'inactive'`, but `KeeperPhase` does not contain that variant
-  // (audit: `keeper_state_machine.ml:21-34` `phase_to_string` emits
-  // only the 13 PascalCase phases, none of which lowercase to
-  // `'inactive'`), so the guard was dead defensive.
-  if (keeper.last_heartbeat && isHeartbeatAlive(keeper, keeper.last_heartbeat)) {
-    // Route through `keeperLifecycleStatus`, not an open-ended lowercase
-    // conversion, so only the closed KeeperPhase vocabulary reaches the
-    // display token layer. Unrecognized phases still fall through to `idle`.
-    const phase = (keeper.lifecycle_phase ?? keeper.phase)?.trim()
-    if (phase && phase.toLowerCase() !== 'offline') {
-      return keeperLifecycleStatus(phase) ?? toKeeperPhaseToken(phase) ?? 'idle'
-    }
-    return 'idle'
+  // `keeper.phase` carries the typed `KeeperPhase` PascalCase token,
+  // normalised by `toKeeperPhase` at the wire boundary. Route it through
+  // `keeperLifecycleStatus` so only the closed vocabulary reaches the display
+  // token layer; `Offline` is the case being refined, so it falls through.
+  const phase = keeper.phase?.trim()
+  if (phase && phase !== 'Offline') {
+    const status = keeperLifecycleStatus(phase) ?? toKeeperPhaseToken(phase)
+    if (status) return status
   }
 
   const turnCount = keeper.turn_count ?? 0
@@ -412,17 +390,7 @@ function refineOfflineStatus(keeper: Keeper | null | undefined): KeeperPhaseToke
   }
 
   // Had activity before but now offline — stopped/crashed
-  if (turnCount > 0) {
-    return 'stopped'
-  }
-
-  return 'offline'
-}
-
-function isHeartbeatAlive(keeper: Keeper, heartbeat: string): boolean {
-  const ts = new Date(heartbeat).getTime()
-  if (Number.isNaN(ts)) return false
-  return Date.now() - ts < keeperHeartbeatStaleMs(keeper.heartbeat_stale_after_s)
+  return 'stopped'
 }
 
 const runtimeBlockerLabels = {
@@ -486,12 +454,6 @@ export function keeperRuntimeBlockerHint(keeper: Keeper | null | undefined): str
     return 'Keeper 런타임 예외가 기록되어 로그와 최근 turn 상태 확인이 필요합니다.'
   }
   return null
-}
-
-export function keeperRecentHeartbeatLabel(keeper: Keeper | null | undefined): string {
-  return keeper?.last_heartbeat
-    ? `최근 하트비트 · ${relativeTime(keeper.last_heartbeat)}`
-    : '최근 하트비트 · 기록 없음'
 }
 
 export function keeperRecentActionLabel(

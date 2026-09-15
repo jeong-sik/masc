@@ -1388,18 +1388,15 @@ model_catalog_env_value() {
 run_masc_with_install_env() {
   local catalog
   catalog=$(model_catalog_env_value)
-  # MASC_BASE_PATH is the resolved runtime root. MASC_BASE_PATH_INPUT mirrors
-  # the explicit --base-path input for bootstrap/diagnostic readers that report
-  # the operator-provided path before the runtime finishes normalizing config.
+  # MASC_BASE_PATH is the resolved runtime root; every masc command reads the
+  # workspace from it (or from --base-path) and from nothing else.
   if [ -n "$catalog" ]; then
     MASC_BASE_PATH="$BASE_PATH" \
-      MASC_BASE_PATH_INPUT="$BASE_PATH" \
       AGENT_CORE_MODEL_CATALOG="$catalog" \
       MASC_RUNTIME_EVENTS="${MASC_RUNTIME_EVENTS:-0}" \
       "$@"
   else
     MASC_BASE_PATH="$BASE_PATH" \
-      MASC_BASE_PATH_INPUT="$BASE_PATH" \
       MASC_RUNTIME_EVENTS="${MASC_RUNTIME_EVENTS:-0}" \
       "$@"
   fi
@@ -1804,8 +1801,11 @@ BUNDLE_TRANSACTION_ACTIVE=0
 # --- committed builtin Skill refresh ----------------------------------------
 # A later package error must not restore an older executable underneath newer
 # instructions. The complete previous package remains in its own backup.
+# Only standard output is captured: init waits for another Skill installation
+# that holds its lock and says so on standard error, which has to reach the
+# terminal while it waits rather than after it ends.
 if [ "$SEED_CONFIG" -eq 1 ]; then
-  if ! init_output="$("$DEST" init --skills-only --base-path "$BASE_PATH" 2>&1)"; then
+  if ! init_output="$("$DEST" init --skills-only --base-path "$BASE_PATH")"; then
     die "binary/dashboard committed; builtin Skill refresh failed: $init_output"
   fi
   log "$init_output"
@@ -1823,7 +1823,7 @@ runtime_events_start_env=""
 if [ "${MASC_RUNTIME_EVENTS+x}" = "x" ]; then
   runtime_events_start_env="MASC_RUNTIME_EVENTS=\"$MASC_RUNTIME_EVENTS\" "
 fi
-start_env="MASC_ASSETS_DIR=\"$DASHBOARD_ASSETS_DIR\" ${runtime_events_start_env}MASC_BASE_PATH=\"$BASE_PATH\" MASC_BASE_PATH_INPUT=\"$BASE_PATH\""
+start_env="MASC_ASSETS_DIR=\"$DASHBOARD_ASSETS_DIR\" ${runtime_events_start_env}MASC_BASE_PATH=\"$BASE_PATH\""
 if [ -n "$catalog_hint" ]; then
   start_env="AGENT_CORE_MODEL_CATALOG=\"$catalog_hint\" $start_env"
 fi

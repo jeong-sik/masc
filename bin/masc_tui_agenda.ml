@@ -29,6 +29,15 @@ type awaiting =
   ; timeout_sec : float
   }
 
+(* A task whose only exit belongs to the operator, as
+   [Operator_task_attention] projected it. Flattened to text here: the panel
+   draws rows, and three surfaces describing the same row three ways is what
+   the projection exists to prevent, so the sentence is made once over there. *)
+type stalled =
+  { what : string
+  ; since_iso : string
+  }
+
 type 'row reading =
   | Not_read
   | Read_failed of string
@@ -37,6 +46,7 @@ type 'row reading =
 type t =
   { coming : scheduled reading  (** earliest first *)
   ; blocked : awaiting reading
+  ; stuck : stalled reading  (** longest wait first *)
   }
 
 let rows_of = function
@@ -67,12 +77,13 @@ let is_coming row = match row.standing with
    somebody else's sort is a strip that changes when their sort does. *)
 let by_time left right = String.compare left.at_iso right.at_iso
 
-let project ~scheduled ~awaiting =
+let project ~scheduled ~awaiting ~stalled =
   { coming =
       (match scheduled with
        | Read rows -> Read (rows |> List.filter is_coming |> List.sort by_time)
        | (Not_read | Read_failed _) as unread -> unread)
   ; blocked = awaiting
+  ; stuck = stalled
   }
 ;;
 
@@ -82,7 +93,8 @@ let next t = match rows_of t.coming with row :: _ -> Some row | [] -> None
    keypress bound subtracts are the same row or neither exists. A section
    that was never read has no row to name, so the strip stays down for it
    the same way; the overlay is where the difference is said. *)
-let is_silent t = rows_of t.coming = [] && rows_of t.blocked = []
+let is_silent t =
+  rows_of t.coming = [] && rows_of t.blocked = [] && rows_of t.stuck = []
 let rows_taken t = if is_silent t then 0 else 1
 
 type strip =
@@ -141,7 +153,12 @@ let strip ~now ~localtime ~cols t =
   if is_silent t
   then None
   else begin
-    let waiting = waiting_half (List.length (rows_of t.blocked)) in
+    (* One number for both: a keeper holding a tool call and a task only the
+       operator can move are the same answer to "is anything waiting on me",
+       and two badges beside each other would make the operator add them up. *)
+    let waiting =
+      waiting_half (List.length (rows_of t.blocked) + List.length (rows_of t.stuck))
+    in
     let reserved =
       if waiting = "" then 0 else Masc_tui_message_layout.display_width waiting + 2
     in
@@ -215,6 +232,30 @@ let time_left ~now (held : awaiting) =
   end
 ;;
 
+(* How long the operator has not answered. Coarse on purpose: the row exists
+   because the wait is long, and minutes past the first day are noise. A stamp
+   this cannot read says nothing rather than saying zero. *)
+let waited ~now since_iso =
+  match Time_codec.parse_rfc3339_opt since_iso with
+  | None -> ""
+  | Some since ->
+    let seconds = now -. since in
+    if Float.compare seconds 0.0 <= 0
+    then "just now"
+    else (
+      let whole = int_of_float seconds in
+      if whole >= 86_400
+      then Printf.sprintf "%dd waiting" (whole / 86_400)
+      else if whole >= 3_600
+      then Printf.sprintf "%dh waiting" (whole / 3_600)
+      else Printf.sprintf "%dm waiting" (whole / 60))
+;;
+
+(* Sixty-two rows is not a panel, it is a wall, and the operator reads the
+   oldest few and then goes to the tool. The count is the part that has to be
+   exact; the rows are the part that has to fit. *)
+let stalled_rows_shown = 5
+
 let overlay ~now ~localtime ~cols t =
   let quiet text = { tone = Quiet; text = "  " ^ text } in
   (* Why it failed, not only that it did. The reason is beside the flag in the
@@ -267,7 +308,28 @@ let overlay ~now ~localtime ~cols t =
            })
         rows
   in
+  let stuck =
+    match t.stuck with
+    | Not_read -> [ quiet "not loaded yet" ]
+    | Read_failed reason -> [ failure ~cols reason ]
+    | Read [] -> [ quiet "no task is stuck on you" ]
+    | Read rows ->
+      let shown = List.filteri (fun index _ -> index < stalled_rows_shown) rows in
+      let hidden = List.length rows - List.length shown in
+      List.map
+        (fun (row : stalled) ->
+           { tone = Question
+           ; text = two_column ~cols row.what (waited ~now row.since_iso)
+           })
+        shown
+      @
+      if hidden <= 0
+      then []
+      else [ quiet (Printf.sprintf "and %d more \xe2\x80\x94 masc_operator_digest" hidden) ]
+  in
   ({ tone = Heading; text = "Coming up" } :: wakes)
   @ [ { tone = Quiet; text = "" }; { tone = Heading; text = "Waiting on you" } ]
   @ questions
+  @ [ { tone = Quiet; text = "" }; { tone = Heading; text = "Stuck on you" } ]
+  @ stuck
 ;;

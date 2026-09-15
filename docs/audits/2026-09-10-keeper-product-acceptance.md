@@ -158,7 +158,7 @@ continuous autonomy or automatic multi-runtime failover result is established.
 - #34972 has CI-built browser evidence for the actual IDE heartbeat panel with
   synthetic inputs, including four states and a 390px viewport. It removes
   unsupported saved/conflict claims; it does not establish memo persistence or
-  full IDE behavior. See [browser evidence](../evidence/2026-09-10-ide-heartbeat/README.md).
+  full IDE behavior.
 - Goal creation already requires nonblank metric and target fields. Actual
   isolated MCP accepted a declared criterion, rejected a missing target, and
   returned only the accepted Goal with its original criterion revision.

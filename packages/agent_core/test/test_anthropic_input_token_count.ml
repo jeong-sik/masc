@@ -83,10 +83,29 @@ let config
     ()
 ;;
 
+(* The resolver is the only door onto a deadline, here as on the call path.
+   Its rejection carries the operation, the parameter and the value it
+   refused, so a fixture budget the resolver will not take says which suite
+   and which number. *)
+let deadline_of ~clock ~timeout_s =
+  match
+    Http_client.resolve_explicit_deadline
+      ~operation:"test_anthropic_input_token_count"
+      ~parameter:"timeout_s"
+      ~clock
+      ~timeout_s
+  with
+  | Ok deadline -> deadline
+  | Error (Http_client.AcceptRejected { reason }) -> failwith reason
+  | Error _ ->
+    failwith "test_anthropic_input_token_count: the fixture deadline was refused for another reason"
+;;
+
 (* A window with no bound on it: the cases that use it are about what is
    measured and sent, not when the wait ends. *)
+
 let unbounded_window : float Eio.Time.clock_ty Eio.Resource.t Deadline_window.t =
-  Deadline_window.open_ Http_client.Unbounded
+  Deadline_window.open_ (deadline_of ~clock:None ~timeout_s:None)
 ;;
 
 (* The stage these measurements are ahead of, with no bound on it. *)

@@ -433,6 +433,36 @@ class RuntimeSetupAdapter(unittest.TestCase):
                 SETUP.native_setup_command('/fixture/masc', 'runtime-setup-batch', {})
         self.assertEqual(error.exception.failure, {})
 
+    def test_a_killed_verification_says_how_it_ended_without_its_log(self):
+        # 2026-09-15: the child died by SIGKILL and this screen said only that
+        # runtime setup did not finish.
+        response = dict(schema='masc.runtime_setup_error.v1', kind='verification_unreadable', runtime_id='setup.runtime',
+                        error='Runtime "setup.runtime" verification returned no readable report '
+                              '(killed by SIGKILL; stdout is not JSON: Blank input data)',
+                        detail='[INFO] catalog loaded\n[INFO] overlay installed')
+        with patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 1, json.dumps(response), 'private provider diagnostics')):
+            with self.assertRaises(SETUP.SetupError) as error:
+                SETUP.native_setup_command('/fixture/masc', 'runtime-setup-batch', {})
+        self.assertNotIsInstance(error.exception, SETUP.VerificationError)
+        self.assertIn('killed by SIGKILL', str(error.exception))
+        self.assertNotIn('catalog loaded', str(error.exception))
+        self.assertNotIn('private provider diagnostics', str(error.exception))
+
+    def test_an_error_sentence_the_terminal_cannot_show_still_names_its_kind(self):
+        response = dict(schema='masc.runtime_setup_error.v1', kind='validation_failed', runtime_id=None,
+                        error='did not pass validation\nwith a second line')
+        with patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 1, json.dumps(response), '')):
+            with self.assertRaises(SETUP.SetupError) as error:
+                SETUP.native_setup_command('/fixture/masc', 'runtime-setup-batch', {})
+        self.assertIn('(validation_failed)', str(error.exception))
+        self.assertNotIn('second line', str(error.exception))
+
+    def test_a_failure_without_the_error_schema_names_the_exit(self):
+        with patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 3, json.dumps(dict(unexpected=True)), '')):
+            with self.assertRaises(SETUP.SetupError) as error:
+                SETUP.native_setup_command('/fixture/masc', 'runtime-setup-batch', {})
+        self.assertIn('(exit 3)', str(error.exception))
+
     def test_verification_reason_prints_the_native_account_of_the_failure(self):
         with patch.object(SETUP.sys, 'stderr', io.StringIO()) as stderr:
             SETUP.print_verification_reason(dict(code='client_not_authenticated',
@@ -1051,6 +1081,26 @@ class WorkspaceFromCurrentDirectory(unittest.TestCase):
             self.assertIn('No MASC workspace was found', outside.stderr)
             self.assertIn('--base-path', outside.stderr)
             self.assertFalse((elsewhere / '.masc').exists())
+
+    def test_doctor_and_setup_answer_in_the_same_order_as_init(self):
+        # The setup journey offers the workspace doctor reports, so a workspace
+        # cwd has to reach doctor too; setup without a terminal refuses by name.
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            workspace = home / 'ws'
+            elsewhere = home / 'elsewhere'
+            workspace.mkdir()
+            elsewhere.mkdir()
+            seeded = self.run_masc(home, elsewhere, 'init', '--config-only', '--base-path', str(workspace))
+            self.assertEqual(seeded.returncode, 0, seeded.stderr)
+            doctor = self.run_masc(home, workspace, 'doctor', '--json')
+            self.assertEqual(doctor.returncode, 0, doctor.stderr)
+            self.assertEqual(json.loads(doctor.stdout)['base_path'], os.path.realpath(workspace))
+            nowhere = self.run_masc(home, elsewhere, 'doctor', '--json')
+            self.assertIsNone(json.loads(nowhere.stdout)['base_path'])
+            setup = self.run_masc(home, elsewhere, 'setup', '--no-tui')
+            self.assertNotEqual(setup.returncode, 0)
+            self.assertIn('No MASC workspace was found', setup.stderr)
 
 
 @unittest.skipUnless(BINARY, 'actual binary is supplied by targeted CI')

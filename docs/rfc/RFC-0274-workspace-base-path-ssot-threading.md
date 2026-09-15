@@ -8,7 +8,7 @@ status: Draft
 - Status: Draft
 - Supersedes: —
 - Related: RFC workspace-root-resolution (the order an entry point uses to choose the root; this RFC owns every read after that choice), #21798 (read/write source asymmetry, same structure), RFC-0085 PR-8 (`Host_config.from_env` boundary)
-- Starts after: RFC workspace-root-resolution stage 3 (#36457), which removes `MASC_BASE_PATH_INPUT`. Everything below describes the tree after that PR.
+- Starts after: RFC workspace-root-resolution stage 3, which removed `MASC_BASE_PATH_INPUT` from lib, bin and the shipped scripts (#36565, merged; #36571 and the batches after it clear the remaining test-only setters). Everything below describes the tree after that.
 
 ## 1. Problem
 

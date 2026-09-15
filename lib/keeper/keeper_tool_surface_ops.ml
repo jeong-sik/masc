@@ -241,14 +241,13 @@ let keeper_list_row_json ~runtime_class config name =
          answers for all four:
 
            phase        lifecycle state machine  - which cell it is in
-           health       observed signal          - is it reporting on time
+           health       keepalive and turn history - is it running, has it turned
            paused       operator override        - did a person stop it
            next_action  what to do about it      - already derived from health
 
-         [status] is a fifth field that re-answers [health] with three of its
-         values folded into "inactive". The TUI counted that word as running
-         while the dashboard counted it as attention, because a folded word
-         leaves the reader to guess. Both are published here so neither has to.
+         [status] is the display word for [health] ({!Keeper_status_runtime.
+         keeper_surface_status}). Both are published so a reader compares the
+         reading, not the word.
 
          The diagnostic already carries health and next_action; this only stops
          discarding them. *)

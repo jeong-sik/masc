@@ -149,9 +149,17 @@ type result_boundary =
   | Projected_for_model of model_projection
       (** A Keeper tool call: the result reaches the model through this
           projection, already resolved for the lane running the call. *)
-  | Unprojected
-      (** An MCP client, an HTTP route, or in-process code: MASC hands the
-          result over whole and sets no size of its own. *)
+  | Sent_to_client
+      (** A caller outside a Keeper turn: an MCP client, an HTTP route, or
+          in-process code. MASC stores nothing and sends the result as it is,
+          so the ceiling is the client's own: the one that reads threads is a
+          CLI harness, and {!Common.max_tool_result_wire_bytes} is the
+          measured line below which such a harness does not spill a result to
+          a file. *)
+
+val result_ceiling_bytes : result_boundary -> int
+(** How many bytes of one result this boundary carries before the reader
+    stops seeing it whole. *)
 
 val marker_prefix : string
 (** Exact wire-grammar introducer [[masc:blob sha256=]. Prose placeholders

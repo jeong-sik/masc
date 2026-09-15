@@ -437,7 +437,6 @@ let render_overview (state : state) =
                 else Some (Printf.sprintf "%d %s" count label))
               [ (l.klc_paused, "paused")
               ; (l.klc_offline, "offline")
-              ; (l.klc_inactive, "inactive")
               ; (l.klc_idle, "idle")
               ; (l.klc_unreadable, "unreadable")
               ]

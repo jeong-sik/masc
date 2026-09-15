@@ -357,20 +357,17 @@ let augment_keeper_diagnostic_json
    of this domain; it is an operator override applied one layer above. *)
 type surface_status =
   | Surface_active
-  | Surface_inactive
   | Surface_offline
   | Surface_idle
 
 let surface_status_to_string = function
   | Surface_active -> "active"
-  | Surface_inactive -> "inactive"
   | Surface_offline -> "offline"
   | Surface_idle -> "idle"
 
 let surface_status_of_string_opt s =
   match String.lowercase_ascii (String.trim s) with
   | "active" -> Some Surface_active
-  | "inactive" -> Some Surface_inactive
   | "offline" -> Some Surface_offline
   | "idle" -> Some Surface_idle
   | _ -> None

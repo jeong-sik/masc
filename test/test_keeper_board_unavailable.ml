@@ -626,23 +626,23 @@ let test_comment_event_names_the_replies_after_the_latest_own_comment () =
   check (option string) "the offset" (Some "4") (field "new_replies_comment_offset");
   check (option string) "the oldest id" (Some first_reply) (field "oldest_new_reply_id");
   check (option string) "the newest id" (Some third_reply) (field "newest_new_reply_id");
-  let page =
-    Tool_result.message
-      (Board_tool.handle_tool
-         ~result_boundary:Tool_output.Unprojected
-         "masc_board_post_get"
-         (`Assoc [ "post_id", `String post_id; "comment_offset", `Int 4 ]))
-    |> Yojson.Safe.from_string
+  let read =
+    Board_tool.handle_tool
+      ~result_boundary:Tool_output.Sent_to_client
+      "masc_board_post_get"
+      (`Assoc [ "post_id", `String post_id; "comment_offset", `Int 4 ])
   in
-  let pagination = Yojson.Safe.Util.member "pagination" page in
+  let position =
+    match Board.Comment_page.Position.of_metadata (Tool_result.metadata read) with
+    | Some position -> position
+    | None -> failf "the thread read carries no page position"
+  in
   check
     (list int)
     "the thread read at offset 4 is the last three of seven comments"
     [ 4; 3; 7 ]
-    (List.map
-       (fun key -> Yojson.Safe.Util.(member key pagination |> to_int))
-       [ "offset"; "returned"; "total" ]);
-  let thread = Yojson.Safe.Util.(member "thread" page |> to_string) in
+    Board.Comment_page.Position.[ position.offset; position.returned; position.total ];
+  let thread = Tool_result.message read in
   let on_page id = String_util.contains_substring thread id in
   check
     (list bool)

@@ -3,7 +3,7 @@
    keeper_surface_status derives a display status from keeper_health and emits
    it as a string; the server row patcher re-classifies that string. These
    tests pin:
-   (1) surface_status_of_string_opt parses the six labels and rejects values
+   (1) surface_status_of_string_opt parses the three labels and rejects values
        outside the domain ("paused" override, drift, garbage),
    (2) to_string is the inverse on the closed domain,
    (3) keeper_surface_status produces the expected wire string for each
@@ -23,7 +23,6 @@ let test_of_string_known () =
       (K.surface_status_of_string_opt label = Some ctor)
   in
   one "active" K.Surface_active;
-  one "inactive" K.Surface_inactive;
   one "offline" K.Surface_offline;
   one "idle" K.Surface_idle;
   check bool "case + whitespace insensitive" true
@@ -48,7 +47,6 @@ let test_to_string_inverse () =
         = Some ctor))
     [
       K.Surface_active;
-      K.Surface_inactive;
       K.Surface_offline;
       K.Surface_idle;
     ]

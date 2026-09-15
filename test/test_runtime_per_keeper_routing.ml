@@ -2177,6 +2177,53 @@ let test_max_context_accessor_clamps_to_provider_cap () =
       resolution.Keeper_context_runtime.effective_budget)
 ;;
 
+(* A model the embedded catalog has no row for, served over ollama_cloud's
+   OpenAI-compatible wire. Its only window is the runtime.toml declaration, so
+   that value must stand: the provider preset has no window to clamp it with.
+   Live 2026-09-15: glm-5.3-flash declared 1048576 (ollama.com /api/show) was
+   clamped to a 128000 preset guess and pulled its lanes' turn budget down. *)
+let runtime_config_uncatalogued_wide_context =
+  {|
+[runtime]
+default = "ollama_cloud.wide"
+
+[providers.ollama_cloud]
+display-name = "Ollama Cloud"
+protocol = "openai-compatible-http"
+endpoint = "https://ollama.example/v1"
+
+[models.wide]
+api-name = "not-yet-catalogued-wide-model"
+max-context = 1048576
+tools-support = true
+streaming = true
+
+[ollama_cloud.wide]
+max-concurrent = 1
+|}
+;;
+
+let test_max_context_of_uncatalogued_model_keeps_runtime_declaration () =
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  with_temp_dir "runtime-uncatalogued-context" @@ fun dir ->
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
+    (fun () ->
+      let path = Filename.concat dir "runtime.toml" in
+      write_file path runtime_config_uncatalogued_wide_context;
+      (match Runtime.init_default ~config_path:path with
+       | Ok () -> ()
+       | Error msg -> Alcotest.failf "runtime init_default failed: %s" msg);
+      match Runtime.resolve_max_context_of_runtime_id "ollama_cloud.wide" with
+      | None -> Alcotest.fail "ollama_cloud.wide must resolve a context window"
+      | Some (window, source) ->
+        Alcotest.(check int) "runtime.toml window stands" 1048576 window;
+        Alcotest.(check string)
+          "source is the runtime.toml override, not a preset clamp"
+          "override"
+          (Runtime.max_context_source_to_string source))
+;;
+
 let test_historical_qwen36_context_overflow_fixture_replays_provider_cap () =
   let fields =
     parse_key_value_fixture
@@ -2547,6 +2594,10 @@ let () =
             "max_context_of_runtime_id clamps runtime TOML to provider cap"
             `Quick
             test_max_context_accessor_clamps_to_provider_cap
+        ; Alcotest.test_case
+            "uncatalogued model keeps its runtime.toml window"
+            `Quick
+            test_max_context_of_uncatalogued_model_keeps_runtime_declaration
         ; Alcotest.test_case
             "historical qwen36 overflow fixture replays provider cap"
             `Quick

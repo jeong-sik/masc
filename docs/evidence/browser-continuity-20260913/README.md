@@ -33,7 +33,7 @@ The read failure now reaches the model without terminating its turn, but the ext
 - `firefox-final.png` shows Alpha loaded after the failed read. This demonstrates the navigation result; it does not establish a successful channel extraction or prove why Firefox rejected the intermediate read.
 - The terminal assistant slot contains a runtime error, not a completed answer. The audit preserves it as `terminal_text` and leaves `answer` null.
 
-[PR #35703](https://github.com/jeong-sik/masc/pull/35703) permits a later read in the same provider turn after fully recorded ordinary read failure. It preserves failure/effect evidence and does not automatically replay navigation or resume a graph after provider restart.
+[PR #35703](https://github.com/jeong-sik/masc/pull/35703) permits a later read in the same provider turn after fully recorded ordinary read failure. It preserves failure/effect evidence and does not automatically replay navigation or resume a graph after provider restart. [PR #36715](https://github.com/jeong-sik/masc/pull/36715) widened that rule: a composition failure returns to the model whenever every failed node, called directly, would have returned too. The recorded-settlement and no-replay conditions are unchanged.
 
 ## Completed TUI gestures, stale screenshot
 

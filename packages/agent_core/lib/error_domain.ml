@@ -23,6 +23,8 @@ type provider_error =
       * Http_client.provider_wire_error_kind
       * string
   | `Provider_reported_error of string * string option * string
+  | `Repeating_generation of
+      string * Llm_provider.Types.repeating_shape * int * int * string
   | `Payment_required of string
   ]
 
@@ -146,6 +148,8 @@ let of_provider_error (err : Llm_provider.Error.provider_error) : provider_error
          "empty completion (stop_reason=%s): %s"
          (Llm_provider.Types.stop_reason_to_string r.stop_reason)
          r.detail)
+  | Llm_provider.Error.RepeatingGeneration r ->
+    `Repeating_generation (r.provider, r.shape, r.occurrences, r.unit_bytes, r.detail)
   | Llm_provider.Error.ProviderTerminal r ->
     `Invalid_request
       (Retry.Unknown_invalid_request, Printf.sprintf "%s: %s" r.reason r.detail)
@@ -227,6 +231,10 @@ let provider_to_error : provider_error -> Error.t = function
   | `Provider_reported_error (provider, error_type, detail) ->
     Error.Provider
       (Llm_provider.Error.ProviderReportedError { provider; error_type; detail })
+  | `Repeating_generation (provider, shape, occurrences, unit_bytes, detail) ->
+    Error.Provider
+      (Llm_provider.Error.RepeatingGeneration
+         { provider; shape; occurrences; unit_bytes; detail })
   | `Payment_required msg -> Error.Api (Retry.PaymentRequired { message = msg })
 ;;
 
@@ -320,6 +328,7 @@ let is_retryable (err : [< core_error_poly ]) : bool =
   | `Input_capacity _
   | `Provider_wire_error _
   | `Provider_reported_error _
+  | `Repeating_generation _
   | `Payment_required _
   | `Tool_exec_failed _
   | `Tool_timeout _

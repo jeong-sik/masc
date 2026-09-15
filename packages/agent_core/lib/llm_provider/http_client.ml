@@ -74,7 +74,6 @@ type provider_wire_error_kind =
   | Malformed_payload
   | Unknown_event
   | Incomplete_stream
-  | Repeating_generation
   | Oversized_payload
 
 let cli_startup_failure_reason_to_string = function
@@ -94,7 +93,6 @@ let provider_wire_error_kind_to_string = function
   | Malformed_payload -> "malformed_payload"
   | Unknown_event -> "unknown_event"
   | Incomplete_stream -> "incomplete_stream"
-  | Repeating_generation -> "repeating_generation"
   | Oversized_payload -> "oversized_payload"
 ;;
 
@@ -130,6 +128,16 @@ type provider_failure_kind =
      kept typed so consumers reach their compaction/shrink path instead of
      seeing a generic invalid-request. *)
   | Context_overflow of { limit : int option }
+  (* agent-core boundary: the model's own generation repeated itself and the
+     stream was ended for it. The bytes arrived intact, so this is not a wire
+     error: the same model called through another provider repeats the same
+     way, and a caller rotating candidates needs to know that it is the model,
+     not the connection, that failed. *)
+  | Repeating_generation of
+      { shape : Types.repeating_shape
+      ; occurrences : int
+      ; unit_bytes : int
+      }
   | Unknown_provider_failure of { reason : string option }
 
 type http_error =
@@ -209,6 +217,12 @@ let provider_failure_kind_to_string = function
   | Context_overflow { limit = Some limit } ->
     Printf.sprintf "context_overflow:limit_%d" limit
   | Context_overflow { limit = None } -> "context_overflow"
+  | Repeating_generation { shape; occurrences; unit_bytes } ->
+    Printf.sprintf
+      "repeating_generation:%s:%dx%d"
+      (Types.repeating_shape_to_string shape)
+      occurrences
+      unit_bytes
   | Unknown_provider_failure { reason = Some reason } ->
     Printf.sprintf "unknown_provider_failure:%s" reason
   | Unknown_provider_failure { reason = None } -> "unknown_provider_failure"

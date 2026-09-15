@@ -229,6 +229,32 @@ let test_provider_wire_error_is_provider_integration () =
     Alcotest.failf "provider wire error should exhaust provider integration, got %s"
       (KFR.route_kind_label other)
 
+(* A generation that repeated itself arrived intact: it is the model's
+   failure, so the lane rotates to another model instead of exhausting the
+   turn as a provider integration defect (which counted toward the crash
+   threshold). The model did answer, so the input was observed. *)
+let test_repeating_generation_rotates_the_model () =
+  let route =
+    route_of_agent_core_error
+      (Agent_core.Error.Provider
+         (Llm_provider.Error.RepeatingGeneration
+            { provider = "ollama_cloud"
+            ; shape = Llm_provider.Types.Repeated_reasoning_cycle
+            ; occurrences = 3
+            ; unit_bytes = 749
+            ; detail = "reasoning repeated one 749-byte unit 3 times verbatim"
+            }))
+  in
+  (match route with
+   | KFR.Rotate_now { rotate = KFR.Generation_repeated } -> ()
+   | other ->
+     Alcotest.failf "a repeating generation should rotate the model, got %s"
+       (KFR.route_kind_label other));
+  Alcotest.(check string) "the rotate class has its own label" "generation_repeated"
+    (KFR.route_class_label route);
+  Alcotest.(check bool) "the model answered, so the input was observed" true
+    (KFR.response_observed route)
+
 let test_masc_internal_backpressure_hint () =
   let err =
     internal_err
@@ -349,6 +375,7 @@ let test_response_observed_per_class () =
     [ rotate KFR.No_progress_empty
     ; rotate KFR.No_progress_thinking_only
     ; rotate KFR.No_progress_truncated
+    ; rotate KFR.Generation_repeated
     ; terminal KFR.Contract_violation
     ; terminal KFR.Terminal_effect_dependency_unavailable
     ; terminal KFR.Terminal_effect_policy_rejection
@@ -481,6 +508,10 @@ let () =
             "wire error is provider integration"
             `Quick
             test_provider_wire_error_is_provider_integration
+        ; Alcotest.test_case
+            "repeating generation rotates the model"
+            `Quick
+            test_repeating_generation_rotates_the_model
         ] )
     ; ( "masc_internal"
       , [ Alcotest.test_case "backpressure hint" `Quick test_masc_internal_backpressure_hint

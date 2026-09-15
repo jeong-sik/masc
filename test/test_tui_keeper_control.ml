@@ -845,14 +845,14 @@ let test_roster_decode_keeps_the_axes_apart () =
 (* A keeper in the Failing phase publishes health "failing". The roster reads
    it as its own reading rather than rejecting the row, the column and the
    tally both say failing, and the action the server derived for it is
-   recover. Its keepalive still runs, so it offers what a running keeper
+   probe. Its keepalive still runs, so it offers what a running keeper
    offers. *)
 let test_roster_decode_reads_a_failing_keeper () =
   let json =
     Yojson.Safe.from_string
       (Printf.sprintf {|{"count":1,"total":1,"truncated":false,"keepers":[%s]}|}
          (gate_row ~health:"failing" ~phase:"failing"
-            ~next_action:{|"recover"|} "retro"))
+            ~next_action:{|"probe"|} "retro"))
   in
   match Decode.decode_keeper_runtime_list json with
   | Error err -> Alcotest.fail ("a failing keeper's row must decode: " ^ err)
@@ -860,9 +860,9 @@ let test_roster_decode_reads_a_failing_keeper () =
       Alcotest.(check bool) "health is the failing reading" true
         (Decode.keeper_health_reading row.Decode.kr_health
          = Decode.Health_failing);
-      Alcotest.(check bool) "the action is recover" true
+      Alcotest.(check bool) "the action is probe" true
         (row.Decode.kr_next_action
-         = Some Masc.Keeper_status_runtime.Recover);
+         = Some Masc.Keeper_status_runtime.Probe);
       let r =
         { Control.name = "retro"; paused = false; liveness = Control.Present row }
       in

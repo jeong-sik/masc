@@ -208,6 +208,37 @@ let test_wrong_turn_is_not_substituted () =
     | Ok _ -> fail "a different turn snapshot was substituted")
 ;;
 
+(* The provider-input route resolves a turn inside one pool job, and the
+   resolution reads the store through Dated_jsonl, which offloads its own
+   reads. Run from a fiber through a real one-domain pool, the nested reads
+   must finish on the job's worker and answer what the inline read answers. *)
+let test_a_turn_resolved_inside_a_pool_job_matches_the_inline_read () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = temp_dir () in
+  Eio.Switch.run
+  @@ fun sw ->
+  Eio.Switch.on_release sw (fun () -> rm_rf dir);
+  let config = Workspace_core.default_config dir in
+  ignore (Workspace_core.init config ~agent_name:(Some "test"));
+  write config 7;
+  let turn_ref = Ids.Turn_ref.make ~trace_id:"trace-provider-input" ~absolute_turn:7 in
+  let resolve () =
+    match Snapshot.read_resolved ~config ~keeper ~turn_ref with
+    | Ok resolved -> Yojson.Safe.to_string (Snapshot.resolved_to_json resolved)
+    | Error error -> "error: " ^ Snapshot.read_error_to_string error
+  in
+  let inline = resolve () in
+  let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+  Domain_pool_ref.set pool;
+  Fun.protect ~finally:Domain_pool_ref.clear_for_tests (fun () ->
+    check string
+      "the pooled resolution answers the inline one"
+      inline
+      (Domain_pool_ref.submit_cpu_or_inline resolve))
+;;
+
 let test_message_payload_matches_the_serialised_message () =
   let bytes =
     Keeper_context_core_message_json.message_to_json message |> Yojson.Safe.to_string
@@ -239,6 +270,10 @@ let () =
             "a message payload is the serialised message and its digest"
             `Quick
             test_message_payload_matches_the_serialised_message
+        ; test_case
+            "a turn resolved inside a pool job matches the inline read"
+            `Quick
+            test_a_turn_resolved_inside_a_pool_job_matches_the_inline_read
         ] )
     ; ( "turn boundary"
       , [ test_case

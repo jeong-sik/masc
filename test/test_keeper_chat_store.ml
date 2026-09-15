@@ -1045,6 +1045,51 @@ let test_window_drops_old_tool_lines_before_the_conversation () =
       | first :: _ -> Alcotest.(check string) "the window still opens on the oldest user line" "u1" first.content
       | [] -> Alcotest.fail "expected non-empty window")
 
+(* Both bounds at once. Conversation rows overflow first at the front of the
+   window, and the rows ahead of the oldest conversation row leave with it,
+   tool rows included; tool rows past their own bound then leave oldest
+   first. With four tool rows a turn, the window ends up holding the newest
+   fifty turns whole. *)
+let test_window_keeps_whole_newest_turns_when_both_bounds_overflow () =
+  let base_dir = temp_base_path "keeper-chat-store-both-bounds" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-both-bounds" in
+      let turns = 120 in
+      let tools_per_turn = 4 in
+      for turn = 1 to turns do
+        K.append_turn ~base_dir ~keeper_name
+          ~user_content:(Printf.sprintf "u%d" turn)
+          ~user_attachments:[]
+          ~tool_calls:
+            (List.init tools_per_turn (fun i ->
+               { K.call_id = Printf.sprintf "t%d-%d" turn i
+               ; execution_id = None
+               ; call_name = "masc_msx_step"
+               ; args = "{}"
+               }))
+          ~assistant_content:(Printf.sprintf "a%d" turn)
+          ()
+      done;
+      let page = K.load_page ~base_dir ~keeper_name () in
+      let expected =
+        List.concat_map
+          (fun turn ->
+            (Printf.sprintf "user u%d" turn
+             :: List.init tools_per_turn (fun i -> Printf.sprintf "tool t%d-%d" turn i))
+            @ [ Printf.sprintf "assistant a%d" turn ])
+          (List.init 50 (fun index -> turns - 49 + index))
+      in
+      let describe (m : K.chat_message) =
+        match m.tool_call_id with
+        | Some id -> K.Role.to_label m.role ^ " " ^ id
+        | None -> K.Role.to_label m.role ^ " " ^ m.content
+      in
+      Alcotest.(check (list string)) "the newest fifty turns, whole and in order"
+        expected (List.map describe page.K.messages);
+      Alcotest.(check bool) "older rows were left out" true page.K.has_more)
+
 let test_orphan_leading_tool_lines_trimmed () =
   let base_dir = temp_base_path "keeper-chat-store-orphan" in
   Fun.protect
@@ -3447,6 +3492,8 @@ let () =
             test_window_keeps_tool_lines_of_retained_turns;
           Alcotest.test_case "window drops old tool lines before the conversation" `Quick
             test_window_drops_old_tool_lines_before_the_conversation;
+          Alcotest.test_case "window keeps whole newest turns when both bounds overflow" `Quick
+            test_window_keeps_whole_newest_turns_when_both_bounds_overflow;
           Alcotest.test_case "orphan leading tool lines trimmed" `Quick
             test_orphan_leading_tool_lines_trimmed;
           Alcotest.test_case "leading failure tool batch is retained" `Quick

@@ -160,11 +160,15 @@ For a reinstall, append `--force` or `--wizard` to the `bash /tmp/masc-install.s
 
 `--prefix` defaults to `$HOME/.local/bin`. A first install on a terminal asks
 for the workspace path that will hold `.masc`. For a new workspace it
-suggests `$HOME`, so accepting that creates the data in `.masc` under that
-workspace. If the current directory already has a `.masc/config`, it suggests
-that workspace. An explicit `--base-path` is used without asking, and a
-noninteractive run or `--no-wizard` keeps the current directory. `.masc` is
-created under the given base path. The install location and the working-data
+suggests `$HOME/MASC`, the same directory the setup journey suggests. If the
+current directory already has a `.masc/config`, it suggests that workspace. An
+explicit `--base-path` is used without asking, and a noninteractive run or
+`--no-wizard` keeps the current directory. `.masc` is created under the given
+base path. When an install on a terminal seeds the workspace configuration, it
+records the workspace as the default that a later bare `masc` finds. A reinstall
+that keeps an existing configuration leaves the recorded default as it is, and a
+scripted install without a terminal records nothing, so a verification or CI
+install does not change the machine's default. The install location and the working-data
 location are independent. The `install.sh` on the release page installs that
 version's assets, and installer fixes are recorded in the release notes with
 their source commit. The binary tag is not changed. A missing or mismatched
@@ -447,9 +451,8 @@ image for MASC development, not part of a regular install.
 ## Initial prompts, skills, and Keepers
 
 The default installation prepares **one Keeper, `imp`, that does not start on its own** and the
-built-in skills `browser-lanes`, `browser-design`, `frontend-implement`,
-`frontend-verify`, and `evidence-review`. Configure a model and a sandbox,
-then start the Keeper.
+built-in skills `browser-lanes`, `frontend-change`, and `evidence-review`.
+Configure a model and a sandbox, then start the Keeper.
 
 Task and Goal verification agents can also read the instruction Skills
 published in the workspace through `keeper_skill`. The default
@@ -604,7 +607,7 @@ first.
 
 To remove the data as well, you have to name **the workspace path you
 actually installed into**. The example below deletes `.masc` under that
-workspace. If you chose HOME as the workspace, that is `--base-path "$HOME"`.
+workspace. If you accepted the suggested workspace, that is `--base-path "$HOME/MASC"`.
 Do not pass the `.masc` directory itself as the base path.
 
 ```bash

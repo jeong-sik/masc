@@ -215,6 +215,36 @@ let test_keeper_model_input_projection_uses_shared_pool () =
       check bool "Keeper model-input CPU work leaves the Eio domain" true
         (projection_domain <> caller_domain)))
 
+(* A job that submits again through the process-wide ref, as store code
+   reached from inside pool work does. The inner submit runs inline on the
+   outer job's worker. Before, it queued behind the outer job on the only
+   worker, which waited for it forever; the deadline turns that hang into a
+   failure. *)
+let nested_submit_deadline_s = 10.0
+
+let test_a_job_that_submits_again_runs_the_inner_work_on_its_worker () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      R.clear_for_tests ();
+      let dm = Eio.Stdenv.domain_mgr env in
+      let pool = D.create ~sw ~domain_count:1 dm in
+      R.set pool;
+      Fun.protect ~finally:R.clear_for_tests (fun () ->
+        let within_deadline f =
+          Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) nested_submit_deadline_s f
+        in
+        let nested () =
+          let outer = (Domain.self () :> int) in
+          outer, R.submit_cpu_or_inline (fun () -> (Domain.self () :> int))
+        in
+        let outer, inner = within_deadline (fun () -> D.submit_cpu pool nested) in
+        check int "a cpu job's inner submit runs on its worker" outer inner;
+        let outer, inner =
+          within_deadline (fun () ->
+            Eio.Promise.await_exn (D.submit_io_async ~sw pool nested))
+        in
+        check int "an async io job's inner submit runs on its worker" outer inner)))
+
 let test_ref_inline_from_raw_domain_with_pool () =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
@@ -283,5 +313,7 @@ let () =
         test_keeper_model_input_projection_uses_shared_pool;
       test_case "inline from raw domain with pool installed" `Quick
         test_ref_inline_from_raw_domain_with_pool;
+      test_case "a job that submits again runs the inner work on its worker" `Quick
+        test_a_job_that_submits_again_runs_the_inner_work_on_its_worker;
     ];
   ]

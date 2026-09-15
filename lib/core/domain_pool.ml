@@ -38,9 +38,15 @@ let tune_minor_heap () =
   then Gc.set { control with Gc.minor_heap_size = tuned_minor_heap_words }
 ;;
 
+(* Every job also runs marked as pool work. The process-wide submits
+   ([Domain_pool_ref.submit_*_or_inline], [Executor_pool_ref.submit_or_inline])
+   run inline when the caller is already pool work. Without the mark a job
+   that called one of them queued a second job and waited for it: on a
+   one-domain pool, or whenever every worker held such a job, nothing was
+   left to run the second job, and the workers waited forever. *)
 let with_tuned_minor_heap f =
   tune_minor_heap ();
-  f ()
+  Executor_pool_ref.with_worker_context f
 ;;
 
 let create ~sw ?domain_count dm =

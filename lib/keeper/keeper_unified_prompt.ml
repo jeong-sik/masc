@@ -731,25 +731,29 @@ let board_event_fields
      The author of the post is the case that has none: [check_self_comment_status]
      answers [`Never], and the observation still fills
      [latest_external_author]/[latest_external_preview] with the commenter and
-     what they said.
+     what they said, because a wake that names no content is one the author has
+     to spend a masc_board_post_get on before it can act.
 
-     Those two used to be gated on [self_commented] together with the count, so
-     the author of a post learned that a comment existed and not one word of it
-     — the wake #27288 added arrived empty, and reading it back cost a
-     masc_board_post_get. The count keeps its condition because its name is only
-     true under it; the two content fields follow the data instead. *)
-  (* The ids travel with the count so the reader can tell which of the replies
-     it already read in an earlier turn. The reader makes that comparison;
-     nothing here records what it has read. *)
+     The replies are the end of the thread, in the order the thread read pages
+     through, and the row repeats on every wake until this Keeper comments
+     again. So the row names where they start and the two ids at either end
+     rather than every id: its size does not grow with the thread. The reader
+     that last read up to some id can tell from the newest id whether anything
+     came after it, and the offset is what masc_board_post_get takes to start
+     there. Nothing here records what the reader has read. *)
   let fields =
-    match event.self_commented, event.external_since with
-    | true, (_ :: _ as external_since) ->
+    match event.replies_after_own_comment with
+    | None -> fields
+    | Some { Keeper_world_observation_board_signal.comment_offset; oldest; newer } ->
+      let newest =
+        List.fold_left (fun (_ : Board.Comment_id.t) id -> id) oldest newer
+      in
       fields
-      @ [ "new_replies_since_own", string_of_int (List.length external_since)
-        ; ( "new_reply_ids"
-          , String.concat "," (List.map Board.Comment_id.to_string external_since) )
+      @ [ "new_replies_since_own", string_of_int (List.length (oldest :: newer))
+        ; "new_replies_comment_offset", string_of_int comment_offset
+        ; "oldest_new_reply_id", Board.Comment_id.to_string oldest
+        ; "newest_new_reply_id", Board.Comment_id.to_string newest
         ]
-    | true, [] | false, _ -> fields
   in
   let fields =
     match event.latest_external_author, event.latest_external_preview with

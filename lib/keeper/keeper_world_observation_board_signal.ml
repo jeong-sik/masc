@@ -25,10 +25,16 @@ type 'a board_read =
   | Available of 'a
   | Unavailable of board_unavailable
 
+type replies_after_own_comment =
+  { comment_offset : int
+  ; oldest : Board.Comment_id.t
+  ; newer : Board.Comment_id.t list
+  }
+
 type comment_state =
   [ `Never
   | `No_new_external
-  | `New_external of Board.Comment_id.t list * string * string
+  | `New_external of replies_after_own_comment * string * string
   ]
 
 type comment_status = comment_state board_read
@@ -304,57 +310,52 @@ let match_signal
     else { explicit_mention = false; matched_targets = [] })
 ;;
 
-(** Check whether this keeper has commented on a post, and whether new
-    external comments arrived after the keeper's latest comment.
+(** Check whether this keeper has commented on a post, and which comments
+    came after the keeper's latest comment.
     Uses actual comment stream as ground truth (no proxy like reply_count
     or updated_at). A prior response is reconsidered only when a new external
-    comment arrives. *)
+    comment arrives.
+
+    "After" is position in the thread as {!Board_dispatch.get_comments}
+    returns it, the same order the thread read pages through, so
+    [comment_offset] is an offset that read accepts and the replies are
+    exactly the comments from there to the end of the thread. *)
 let check_self_comment_status ~self_ids ~(post_id : string) : comment_status =
   match Board_dispatch.get_comments ~post_id with
   | Error error -> Unavailable { operation = Get_comments; post_id; error }
   | Ok comments ->
-    let my_comments =
-      List.filter
-        (fun (c : Board.comment) ->
-           Message_scope.is_self_author
-             ~self_ids
-             (Board.Agent_id.to_string c.author))
+    let latest_own_offset =
+      List.fold_left
+        (fun (offset, latest_own) (c : Board.comment) ->
+           let latest_own =
+             if Message_scope.is_self_author
+                  ~self_ids
+                  (Board.Agent_id.to_string c.author)
+             then Some offset
+             else latest_own
+           in
+           offset + 1, latest_own)
+        (0, None)
         comments
+      |> snd
     in
-    if my_comments = []
-    then Available `Never
-    else (
-      let my_latest_ts =
-        List.fold_left
-          (fun acc (c : Board.comment) -> max acc c.created_at)
-          0.0
-          my_comments
-      in
-      let external_after =
-        List.filter
-          (fun (c : Board.comment) ->
-             (not
-                (Message_scope.is_self_author
-                   ~self_ids
-                   (Board.Agent_id.to_string c.author)))
-             && c.created_at > my_latest_ts)
-          comments
-      in
-      match external_after with
-      | [] -> Available `No_new_external
-      | hd :: tl ->
-        let latest =
-          List.fold_left
-            (fun (acc : Board.comment) (c : Board.comment) ->
-               if c.created_at > acc.created_at then c else acc)
-            hd
-            tl
-        in
-        Available
-          (`New_external
-             ( List.map (fun (c : Board.comment) -> c.id) external_after
-             , Board.Agent_id.to_string latest.author
-             , short_preview ~max_len:60 latest.content )))
+    (match latest_own_offset with
+     | None -> Available `Never
+     | Some latest_own ->
+       (match List.filteri (fun offset _ -> offset > latest_own) comments with
+        | [] -> Available `No_new_external
+        | oldest :: newer ->
+          let newest =
+            List.fold_left (fun (_ : Board.comment) (c : Board.comment) -> c) oldest newer
+          in
+          Available
+            (`New_external
+               ( { comment_offset = latest_own + 1
+                 ; oldest = oldest.id
+                 ; newer = List.map (fun (c : Board.comment) -> c.id) newer
+                 }
+               , Board.Agent_id.to_string newest.author
+               , short_preview ~max_len:60 newest.content ))))
 ;;
 
 (** Why a keeper woke for a board signal. Closed set replacing the prior

@@ -51,8 +51,8 @@ type pending_board_event =
   ; updated_at : float
   ; explicit_mention : bool
   ; matched_targets : string list
-  ; self_commented : bool
-  ; external_since : Board.Comment_id.t list
+  ; replies_after_own_comment :
+      Keeper_world_observation_board_signal.replies_after_own_comment option
   ; latest_external_author : string option
   ; latest_external_preview : string option
   }
@@ -587,29 +587,23 @@ let pending_board_event_of_board_signal
     let event_kind = pending_board_event_kind_of_signal signal in
     let comment_derived =
       match signal.kind with
-      | Board_dispatch.Board_post_created -> Ok (false, [], None, None)
+      | Board_dispatch.Board_post_created -> Ok (None, None, None)
       | Board_dispatch.Board_comment_added ->
         (match check_self_comment_status ~self_ids ~post_id:signal.post_id with
          | Board_signal.Unavailable unavailable -> Error unavailable
-         | Board_signal.Available (`New_external (external_since, author, preview)) ->
-           Ok (true, external_since, Some author, Some preview)
-         | Board_signal.Available `No_new_external ->
-           Ok (true, [], Some signal.author, Some (short_preview ~max_len:60 signal.content))
-         | Board_signal.Available `Never ->
-           Ok (false, [], Some signal.author, Some (short_preview ~max_len:60 signal.content)))
-      | Board_dispatch.Board_reaction_changed _ ->
-        (match check_self_comment_status ~self_ids ~post_id:signal.post_id with
-         | Board_signal.Unavailable unavailable -> Error unavailable
-         | Board_signal.Available `Never -> Ok (false, [], None, None)
-         | Board_signal.Available (`No_new_external | `New_external _) ->
-           Ok (true, [], None, None))
-      (* The vote row states who voted which way on what; the reply counters
-         belong to comment events, so none are derived here. *)
-      | Board_dispatch.Board_vote_cast _ -> Ok (false, [], None, None)
+         | Board_signal.Available (`New_external (replies, author, preview)) ->
+           Ok (Some replies, Some author, Some preview)
+         | Board_signal.Available (`No_new_external | `Never) ->
+           Ok (None, Some signal.author, Some (short_preview ~max_len:60 signal.content)))
+      (* A reaction or vote row states who did what to which target; the
+         replies after the keeper's own comment belong to comment rows, so
+         none are derived here. *)
+      | Board_dispatch.Board_reaction_changed _ | Board_dispatch.Board_vote_cast _ ->
+        Ok (None, None, None)
     in
     (match comment_derived with
      | Error unavailable -> Error unavailable
-     | Ok (self_commented, external_since, latest_external_author, latest_external_preview) ->
+     | Ok (replies_after_own_comment, latest_external_author, latest_external_preview) ->
        Ok
          { event_kind
          ; post_id = signal.post_id
@@ -621,8 +615,7 @@ let pending_board_event_of_board_signal
          ; updated_at
          ; explicit_mention = matched.explicit_mention
          ; matched_targets = matched.matched_targets
-         ; self_commented
-         ; external_since
+         ; replies_after_own_comment
          ; latest_external_author
          ; latest_external_preview
          })
@@ -710,8 +703,7 @@ let pending_board_event_of_fusion_completion
   ; updated_at = arrived_at
   ; explicit_mention = false
   ; matched_targets = []
-  ; self_commented = false
-  ; external_since = []
+  ; replies_after_own_comment = None
   ; latest_external_author = None
   ; latest_external_preview = None
   }
@@ -755,8 +747,7 @@ let pending_board_event_of_composition_completion
   ; updated_at = arrived_at
   ; explicit_mention = false
   ; matched_targets = []
-  ; self_commented = false
-  ; external_since = []
+  ; replies_after_own_comment = None
   ; latest_external_author = None
   ; latest_external_preview = None
   }
@@ -794,8 +785,7 @@ let pending_board_event_of_delegate_completion
   ; updated_at = arrived_at
   ; explicit_mention = false
   ; matched_targets = []
-  ; self_commented = false
-  ; external_since = []
+  ; replies_after_own_comment = None
   ; latest_external_author = None
   ; latest_external_preview = None
   }
@@ -833,8 +823,7 @@ let pending_board_event_of_scheduled_wake
   ; updated_at = arrived_at
   ; explicit_mention = false
   ; matched_targets = []
-  ; self_commented = false
-  ; external_since = []
+  ; replies_after_own_comment = None
   ; latest_external_author = None
   ; latest_external_preview = None
   }
@@ -884,8 +873,7 @@ let pending_board_event_of_external_attention
   ; updated_at = item.received_at
   ; explicit_mention
   ; matched_targets
-  ; self_commented = false
-  ; external_since = []
+  ; replies_after_own_comment = None
   ; latest_external_author = Some actor
   ; latest_external_preview = Some (short_preview ~max_len:80 item.content_preview)
   }
@@ -974,8 +962,7 @@ let pending_board_event_of_ask_answer
   ; updated_at = answered_at
   ; explicit_mention = true
   ; matched_targets = [ meta.name ]
-  ; self_commented = false
-  ; external_since = []
+  ; replies_after_own_comment = None
   ; latest_external_author = Some who
   ; latest_external_preview = Some (short_preview ~max_len:80 body)
   }
@@ -1011,8 +998,7 @@ let pending_board_event_of_completion_authority_rejection
   ; updated_at = arrived_at
   ; explicit_mention = false
   ; matched_targets = []
-  ; self_commented = false
-  ; external_since = []
+  ; replies_after_own_comment = None
   ; latest_external_author =
       Some (Masc_domain.completion_authority_actor rejection.car_authority)
   ; latest_external_preview = Some (short_preview ~max_len:80 rejection.car_reason)
@@ -1060,8 +1046,7 @@ let pending_board_event_of_task_cancellation
   ; updated_at = arrived_at
   ; explicit_mention = false
   ; matched_targets = []
-  ; self_commented = false
-  ; external_since = []
+  ; replies_after_own_comment = None
   ; latest_external_author = Some cancellation.tc_cancelled_by
   ; latest_external_preview = Some (short_preview ~max_len:80 reason_text)
   }
@@ -1101,8 +1086,7 @@ let pending_board_event_of_task_outcome
   ; updated_at = arrived_at
   ; explicit_mention = false
   ; matched_targets = []
-  ; self_commented = false
-  ; external_since = []
+  ; replies_after_own_comment = None
   ; latest_external_author =
       Some (Masc_domain.completion_authority_actor outcome.to_authority)
   ; latest_external_preview = None
@@ -1420,14 +1404,13 @@ let collect_board_events_with_cursor_policy
                     ; updated_at = p.updated_at
                     ; explicit_mention = matched.explicit_mention
                     ; matched_targets = matched.matched_targets
-                    ; self_commented = false
-                    ; external_since = []
+                    ; replies_after_own_comment = None
                     ; latest_external_author = None
                     ; latest_external_preview = None
                     }
                     :: acc)
                    rest))
-         | Board_signal.Available (`New_external (external_since, ext_author, ext_preview)) ->
+         | Board_signal.Available (`New_external (replies, ext_author, ext_preview)) ->
            (
              let signal : Board_dispatch.board_signal =
                { kind = Board_dispatch.Board_post_created
@@ -1453,8 +1436,7 @@ let collect_board_events_with_cursor_policy
                 ; updated_at = p.updated_at
                 ; explicit_mention = matched.explicit_mention
                 ; matched_targets = matched.matched_targets
-                ; self_commented = true
-                ; external_since
+                ; replies_after_own_comment = Some replies
                 ; latest_external_author = Some ext_author
                 ; latest_external_preview = Some ext_preview
                 }

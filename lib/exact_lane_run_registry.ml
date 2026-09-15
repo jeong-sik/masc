@@ -43,7 +43,7 @@ type payload_read_error =
   | Source_unavailable of string
   | Missing_registration
   | Missing_completion
-  | Invalid_record of { line : int; detail : string }
+  | Invalid_payload of string
   | Snapshot_changed
 
 type payload_availability =
@@ -55,7 +55,7 @@ let payload_read_error_to_string = function
   | Source_unavailable detail -> detail
   | Missing_registration -> "The retained run's registration payload is missing"
   | Missing_completion -> "The retained run's completion payload is missing"
-  | Invalid_record { line; detail } -> Printf.sprintf "Record %d: %s" line detail
+  | Invalid_payload detail -> detail
   | Snapshot_changed -> "The selected run changed while its payload was being read"
 ;;
 
@@ -68,8 +68,7 @@ let availability_to_yojson = function
       | Source_unavailable _ -> "source_unavailable", []
       | Missing_registration -> "missing_registration", []
       | Missing_completion -> "missing_completion", []
-      | Invalid_record { line; detail } ->
-        "invalid_record", [ "line", `Int line; "detail", `String detail ]
+      | Invalid_payload _ -> "invalid_payload", []
       | Snapshot_changed -> "snapshot_changed", []
     in
     `Assoc
@@ -97,18 +96,14 @@ let availability_of_yojson json =
     let* message = Json.string_field "message" fields in
     let* error =
       match code with
-      | "invalid_record" ->
-        let* () = Json.exact_fields ~required:[ "code"; "message"; "line"; "detail" ] fields in
-        let* detail = Json.string_field "detail" fields in
-        (match List.assoc_opt "line" fields with
-         | Some (`Int line) when line > 0 -> Ok (Invalid_record { line; detail })
-         | _ -> Error "invalid_record requires a positive line number")
-      | "source_unavailable" | "missing_registration" | "missing_completion" | "snapshot_changed" ->
+      | "source_unavailable" | "missing_registration" | "missing_completion"
+      | "invalid_payload" | "snapshot_changed" ->
         let* () = Json.exact_fields ~required:[ "code"; "message" ] fields in
         Ok (match code with
             | "source_unavailable" -> Source_unavailable message
             | "missing_registration" -> Missing_registration
             | "missing_completion" -> Missing_completion
+            | "invalid_payload" -> Invalid_payload message
             | _ -> Snapshot_changed)
       | _ -> Error (Printf.sprintf "unknown payload error code %S" code)
     in
@@ -158,18 +153,43 @@ let input_to_yojson = function
   | Exact_input payload -> `Assoc [ "kind", `String "exact"; "payload", payload ]
 ;;
 
-let input_of_yojson json =
+(* Where a run's input or output value is kept. The prompt and the response
+   are most of this registry's bytes (2026-09-15: 12,407 rows, 781.7 MB, row
+   p90 152,676 B), so a disk-backed store writes each one to the run's payload
+   file and the log row records its size and SHA-256. [In_row] is a value the
+   row carries itself: the verdict replay writes for a run that did not survive
+   a restart, and every value of a store with no path. *)
+type payload_source =
+  | In_file of
+      { bytes : int
+      ; sha256 : string
+      }
+  | In_row
+
+let payload_source_to_yojson ~value source =
+  match source with
+  | In_file { bytes; sha256 } ->
+    `Assoc [ "kind", `String "file"; "bytes", `Int bytes; "sha256", `String sha256 ]
+  | In_row -> `Assoc [ "kind", `String "row"; "value", value ]
+;;
+
+let payload_source_of_yojson json =
   let ( let* ) = Result.bind in
-  let* fields = Run_registry_core.Json.object_fields json in
-  let* kind = Run_registry_core.Json.string_field "kind" fields in
+  let module Json = Run_registry_core.Json in
+  let* fields = Json.object_fields json in
+  let* kind = Json.string_field "kind" fields in
   match kind with
-  | "exact" ->
-    let* () = Run_registry_core.Json.exact_fields ~required:[ "kind"; "payload" ] fields in
-    let* payload =
-      List.assoc_opt "payload" fields |> Option.to_result ~none:"missing field payload"
-    in
-    Ok (Exact_input payload)
-  | value -> Error (Printf.sprintf "unknown exact lane input kind %S" value)
+  | "file" ->
+    let* () = Json.exact_fields ~required:[ "kind"; "bytes"; "sha256" ] fields in
+    let* sha256 = Json.string_field "sha256" fields in
+    (match List.assoc_opt "bytes" fields with
+     | Some (`Int bytes) when bytes >= 0 -> Ok (In_file { bytes; sha256 }, `Null)
+     | Some _ | None -> Error "payload bytes must be a non-negative integer")
+  | "row" ->
+    let* () = Json.exact_fields ~required:[ "kind"; "value" ] fields in
+    let* value = List.assoc_opt "value" fields |> Option.to_result ~none:"missing field value" in
+    Ok (In_row, value)
+  | value -> Error (Printf.sprintf "unknown payload source kind %S" value)
 ;;
 
 module Payload = struct
@@ -177,12 +197,14 @@ module Payload = struct
     { lane : lane
     ; actor : string
     ; input : run_input
+    ; input_source : payload_source
     }
 
   type completion =
     { outcome : outcome
     ; elapsed_s : float
     ; output : Yojson.Safe.t
+    ; output_source : payload_source
     ; selected_slot : string option
     }
 
@@ -204,6 +226,7 @@ module Payload = struct
                [ "reason", `String "server_restarted"
                ; "detail", `String restart_reason
                ]
+         ; output_source = In_row
          ; selected_slot = None
          })
   ;;
@@ -222,7 +245,7 @@ module Payload = struct
      with cursor pagination and [exact_lane_run_page_max = 200], so a bound has
      to be a multiple of that page size or the operator's "older" button walks
      off the end of the store. 2 000 is ten full pages at the maximum size, or
-     forty at the default of 50, and brings the boot replay to ~416 ms.
+     forty at the default of 50.
 
      [Run_registry_core.prune] keeps every in-process running entry regardless.
      On replay, the vanished fiber is converted to a durable
@@ -237,30 +260,32 @@ module Payload = struct
      compaction was indistinguishable from "never ran" (lane audit W8). *)
   let retention_group = Some (fun registration -> lane_key registration.lane)
 
-  (* The prompt and the response, dropped from the copy the store keeps.
-
-     They are 98% of this registry's bytes: the log is 347 MB across 12,079
-     rows and [registration.input] alone is 340 MB (measured 2026-09-05). The
-     store holds 2 000 completed rows per lane across four lanes, and the list
-     projection reads none of it -- [projected_run_of_entry] already sets both
-     to [`Null] -- while the detail route reads one row at a time. That was
-     498 MB of live heap, the largest single item in the server.
-
-     Nothing is lost: the row on disk still carries both, and [get] re-reads
-     it. What stays here is what a projection reads -- the lane, the actor and
-     the outcome -- so [retention_group] above and the list keep working on
-     the shed copy. *)
-  let shed_registration registration = { registration with input = Exact_input `Null }
+  (* A value kept in a payload file is dropped from the copy the store keeps.
+     The list projection reads none of it -- [projected_run_of_entry] sets both
+     to [`Null] -- and the detail route reads the file of the one run it
+     serves. What stays is what a projection reads (lane, actor, outcome) and
+     the size and digest the detail read checks the file against. An [In_row]
+     value has no other source and stays. *)
+  let shed_registration registration =
+    match registration.input_source with
+    | In_file _ -> { registration with input = Exact_input `Null }
+    | In_row -> registration
+  ;;
 
   let shed_completion (completion : completion) =
-    { completion with output = `Null }
+    match completion.output_source with
+    | In_file _ -> { completion with output = `Null }
+    | In_row -> completion
   ;;
 
   let registration_to_yojson registration =
     `Assoc
       [ "lane", `String (lane_key registration.lane)
       ; "actor", `String registration.actor
-      ; "input", input_to_yojson registration.input
+      ; ( "input"
+        , match registration.input with
+          | Exact_input value ->
+            payload_source_to_yojson ~value registration.input_source )
       ]
   ;;
 
@@ -275,12 +300,12 @@ module Payload = struct
     let* lane_key = Run_registry_core.Json.string_field "lane" fields in
     let* lane = lane_of_key lane_key in
     let* actor = Run_registry_core.Json.string_field "actor" fields in
-    let* input =
+    let* input_source, value =
       match List.assoc_opt "input" fields with
-      | Some value -> input_of_yojson value
+      | Some value -> payload_source_of_yojson value
       | None -> Error "missing field input"
     in
-    Ok { lane; actor; input }
+    Ok { lane; actor; input = Exact_input value; input_source }
   ;;
 
   let completion_to_yojson completion =
@@ -293,7 +318,7 @@ module Payload = struct
     `Assoc
       ([ "outcome", `String (outcome_label completion.outcome)
        ; "elapsed_s", `Float completion.elapsed_s
-       ; "output", completion.output
+       ; "output", payload_source_to_yojson ~value:completion.output completion.output_source
        ; ( "selected_slot"
          , match completion.selected_slot with
            | None -> `Null
@@ -319,9 +344,9 @@ module Payload = struct
         fields
     in
     let* elapsed_s = Run_registry_core.Json.float_field "elapsed_s" fields in
-    let* output =
+    let* output_source, output =
       match List.assoc_opt "output" fields with
-      | Some value -> Ok value
+      | Some value -> payload_source_of_yojson value
       | None -> Error "missing field output"
     in
     let* outcome =
@@ -342,7 +367,7 @@ module Payload = struct
       | Some _ -> Error "field selected_slot must be a non-empty string"
       | None -> Error "missing field selected_slot"
     in
-    Ok { outcome; elapsed_s; output; selected_slot }
+    Ok { outcome; elapsed_s; output; output_source; selected_slot }
   ;;
 end
 
@@ -375,19 +400,59 @@ let completion_error_to_string = function
   | Persistence_failed failure -> failure.detail
 ;;
 
-(* v4 -> v5: #29598 removed [subject_id] from the registration payload. The
-   payload decoder is exact-field, so every v4 registration row written before
-   that cut is skipped on replay (not refused as a file: [Run_registry_core]
-   skips a row it cannot decode, logs the count, and then declines to compact
-   a store that has skipped rows). Live on 2026-08-23 that was 2,000 of 4,090
-   rows, every completed run gone from the monitor, one 2,000-line WARN per
-   boot, and a 36 MB file that can no longer shrink. The removed field rides
-   on the store version instead, as #29553 did for the event queue: this
-   binary reads only v5 and never opens v4. The rows the cut binary wrote to
-   v4 after the field was gone (45 by 11:00Z) are left behind with it.
-   [test_store_version_pins_the_registration_shape] holds the row shape and
-   this name together. *)
-let storage_filename = "exact-lane-runs-v5.jsonl"
+(* The row shape is tied to this name: a row records where its input and
+   output are kept ([payload_source]) rather than the values, and this binary
+   reads only this generation. [test_store_version_pins_the_registration_shape]
+   holds the row shape and this name together. *)
+let storage_filename = "exact-lane-runs-v6.jsonl"
+
+(* Next to the log: [<dir>/exact-lane-run-payloads/<run_id>/input.json] and
+   [output.json]. *)
+let payload_dirname = "exact-lane-run-payloads"
+
+type payload_kind =
+  | Input_payload
+  | Output_payload
+
+let payload_leaf = function
+  | Input_payload -> "input.json"
+  | Output_payload -> "output.json"
+;;
+
+(* A run id names a directory. Producers mint them with [Random_id.prefixed];
+   an id that is not one plain path segment could escape the payload
+   directory, so it is refused before anything is written. *)
+let run_id_is_a_segment run_id =
+  (not (String.equal run_id ""))
+  && (not (String.equal run_id "."))
+  && (not (String.equal run_id ".."))
+  && not (String.exists (fun c -> Char.equal c '/' || Char.equal c '\\' || Char.equal c '\000') run_id)
+;;
+
+let payload_run_dir ~log_path ~run_id =
+  Filename.concat (Filename.concat (Filename.dirname log_path) payload_dirname) run_id
+;;
+
+let payload_path ~log_path ~run_id kind =
+  Filename.concat (payload_run_dir ~log_path ~run_id) (payload_leaf kind)
+;;
+
+let encoded_payload value =
+  let text = Yojson.Safe.to_string value in
+  text, In_file { bytes = String.length text; sha256 = Digestif.SHA256.(digest_string text |> to_hex) }
+;;
+
+(* Written before the row that points at it, so a durable row always names a
+   file that exists. A row whose append then fails leaves the file behind. *)
+let write_payload ~log_path ~run_id kind value =
+  let text, source = encoded_payload value in
+  match
+    Keeper_fs.save_bytes_durable_atomic (payload_path ~log_path ~run_id kind)
+      text
+  with
+  | Ok () -> Ok source
+  | Error error -> Error (Keeper_fs.durable_write_error_to_string error)
+;;
 
 (* Re-exported from the store rather than re-derived from [Payload], so the
    bound a test reads is the bound [prune] applies. *)
@@ -477,11 +542,65 @@ let full_run_of_entry failed_completions (entry : Store.entry) =
   }
 ;;
 
+module String_set = Set.Make (String)
+
+(* A run's payload files leave with the run: when retention evicts it from the
+   store, or when replay finds a directory no retained row names (a payload
+   written before a row whose append failed). A removal that fails is logged
+   and the directory stays; nothing reads it. *)
+let remove_payload_dir ~log_path ~run_id =
+  try
+    List.iter
+      (fun kind ->
+         let path = payload_path ~log_path ~run_id kind in
+         if Sys.file_exists path then Sys.remove path)
+      [ Input_payload; Output_payload ];
+    let dir = payload_run_dir ~log_path ~run_id in
+    if Sys.file_exists dir then Unix.rmdir dir
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | (Sys_error _ | Unix.Unix_error _) as exn ->
+    Log.Keeper.warn
+      "exact_lane_run_registry: could not remove payload files of %s: %s"
+      run_id
+      (Printexc.to_string exn)
+;;
+
 let publish_projection t =
   let failed_completions = Atomic.get t.failed_completions in
-  Store.list_entries t.store
-  |> List.map (projected_run_of_entry failed_completions)
-  |> Atomic.set t.projection
+  let previous = Atomic.get t.projection in
+  let next =
+    Store.list_entries t.store |> List.map (projected_run_of_entry failed_completions)
+  in
+  Atomic.set t.projection next;
+  match t.path with
+  | None -> ()
+  | Some log_path ->
+    let retained = String_set.of_list (List.map (fun run -> run.run_id) next) in
+    List.iter
+      (fun run ->
+         if not (String_set.mem run.run_id retained)
+         then remove_payload_dir ~log_path ~run_id:run.run_id)
+      previous
+;;
+
+let remove_unreferenced_payload_dirs t ~log_path =
+  let root = Filename.concat (Filename.dirname log_path) payload_dirname in
+  match Sys.readdir root with
+  | exception Sys_error _ when not (Sys.file_exists root) -> ()
+  | exception (Sys_error _ as exn) ->
+    Log.Keeper.warn
+      "exact_lane_run_registry: could not list payload files under %s: %s"
+      root
+      (Printexc.to_string exn)
+  | names ->
+    let retained =
+      String_set.of_list (List.map (fun run -> run.run_id) (Atomic.get t.projection))
+    in
+    Array.iter
+      (fun run_id ->
+         if not (String_set.mem run_id retained) then remove_payload_dir ~log_path ~run_id)
+      names
 ;;
 
 let make ?path store =
@@ -498,7 +617,11 @@ let make ?path store =
 ;;
 
 let create ?path () = make ?path (Store.create ?path ())
-let replay path = make ~path (Store.replay path)
+let replay path =
+  let t = make ~path (Store.replay path) in
+  remove_unreferenced_payload_dirs t ~log_path:path;
+  t
+;;
 
 (* [Cross_context_mutex], not [Stdlib.Mutex]: this lock wraps
    [Store.register] / [Store.complete], whose critical section performs a
@@ -514,28 +637,60 @@ let replay path = make ~path (Store.replay path)
    ("Board attention worker raised unexpectedly"), which swallows them, plus
    10 through the librarian lane. *)
 let register_running t ~run_id ~lane ~actor ~started_at ~input =
+  if not (run_id_is_a_segment run_id)
+  then invalid_arg (Printf.sprintf "exact lane run id %S is not a path segment" run_id);
   Cross_context_mutex.with_durable_lock t.observation_mutex (fun () ->
+    let input_source =
+      match t.path, input with
+      | None, Exact_input _ -> In_row
+      | Some log_path, Exact_input value ->
+        (match write_payload ~log_path ~run_id Input_payload value with
+         | Ok source -> source
+         | Error detail -> raise (Sys_error detail))
+    in
     Store.register
       t.store
       ~id:run_id
       ~started_at
-      ~registration:{ Payload.lane; actor; input };
+      ~registration:{ Payload.lane; actor; input; input_source };
     remove_failed_completion t run_id;
     publish_projection t);
   notify_changed ()
 ;;
 
 let mark_completed_internal t ~run_id ~outcome ~elapsed_s ~selected_slot ~output =
-  let completion = { Payload.outcome; elapsed_s; output; selected_slot } in
   let result =
     Cross_context_mutex.with_durable_lock t.observation_mutex (fun () ->
-      match Store.complete t.store ~id:run_id ~completion with
-      | `Completed ->
+      let stored =
+        match t.path with
+        | None -> Ok In_row
+        | Some log_path ->
+          (match Store.get_metadata t.store ~id:run_id with
+           | None -> Error `Unknown
+           | Some _ ->
+             (match write_payload ~log_path ~run_id Output_payload output with
+              | Ok source -> Ok source
+              | Error detail ->
+                Error
+                  (`Persistence_failed
+                    { Run_registry_core.detail; state = Run_registry_core.Not_persisted })))
+      in
+      let completed =
+        match stored with
+        | Error _ as error -> error
+        | Ok output_source ->
+          let completion = { Payload.outcome; elapsed_s; output; output_source; selected_slot } in
+          (match Store.complete t.store ~id:run_id ~completion with
+           | `Completed -> Ok ()
+           | (`Unknown | `Persistence_failed _) as error -> Error error)
+      in
+      match completed with
+      | Ok () ->
         remove_failed_completion t run_id;
         publish_projection t;
         Ok ()
-      | `Unknown -> Error Unknown_run
-      | `Persistence_failed failure ->
+      | Error `Unknown -> Error Unknown_run
+      | Error (`Persistence_failed (failure : Run_registry_core.persistence_failure)) ->
         let state =
           match failure.state with
           | Run_registry_core.Not_persisted -> Not_persisted
@@ -610,127 +765,43 @@ let recent_runs t ~limit ~before =
     { runs; total = List.length all; has_more })
 ;;
 
-type disk_payloads =
-  { registration : ((float * Payload.registration), payload_read_error) result
-  ; completion : (Payload.completion, payload_read_error) result
-  }
-
-let unread_payloads error =
-  { registration = Error error; completion = Error error }
+(* A detail read opens the run's payload file and checks it against the size
+   and SHA-256 its row recorded. It never reads the log. *)
+let read_payload_file ~log_path ~run_id kind ~bytes ~sha256 ~missing =
+  let path = payload_path ~log_path ~run_id kind in
+  match Fs_compat.load_file path with
+  | exception Sys_error detail ->
+    (match Unix.stat path with
+     | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Error missing
+     | exception Unix.Unix_error (error, operation, _) ->
+       Error (Source_unavailable (Printf.sprintf "%s: %s" operation (Unix.error_message error)))
+     | _ -> Error (Source_unavailable detail))
+  | text when String.length text <> bytes ->
+    Error
+      (Invalid_payload
+         (Printf.sprintf "%s holds %d bytes; its row recorded %d" path (String.length text) bytes))
+  | text when not (String.equal (Digestif.SHA256.(digest_string text |> to_hex)) sha256) ->
+    Error (Invalid_payload (Printf.sprintf "%s does not match the SHA-256 its row recorded" path))
+  | text ->
+    (match Yojson.Safe.from_string text with
+     | value -> Ok value
+     | exception Yojson.Json_error detail ->
+       Error (Invalid_payload (Printf.sprintf "%s is not JSON: %s" path detail)))
 ;;
 
-(* Parse identity before interpreting a record. A malformed record of another
-   known id does not alter this run. An unidentifiable record cannot prove that
-   it was unrelated, so it invalidates the preceding payloads until a later
-   registration/completion supplies their values again. *)
-let fold_payload_record ~run_id ~line payloads text =
-  let ( let* ) = Result.bind in
-  let module Json = Run_registry_core.Json in
-  let invalid detail = Invalid_record { line; detail } in
-  let envelope =
-    let* json =
-      try Ok (Yojson.Safe.from_string text) with
-      | Yojson.Json_error detail -> Error detail
-    in
-    let* fields = Json.object_fields json in
-    let* id =
-      match List.filter (fun (key, _) -> String.equal key "id") fields with
-      | [ _, `String id ] -> Ok id
-      | _ -> Error "record requires exactly one string id"
-    in
-    Ok (id, fields)
-  in
-  match envelope with
-  | Error detail -> unread_payloads (invalid detail)
-  | Ok (id, _) when not (String.equal id run_id) -> payloads
-  | Ok (_, fields) ->
-    (match Json.string_field "event" fields with
-     | Ok "register" ->
-       let registration =
-         let* () = Json.exact_fields
-             ~required:[ "event"; "id"; "started_at"; "registration" ] fields in
-         let* started_at = Json.float_field "started_at" fields in
-         let* () = if Float.is_finite started_at then Ok ()
-             else Error "started_at must be finite" in
-         let* json = List.assoc_opt "registration" fields
-             |> Option.to_result ~none:"missing registration" in
-         let* registration = Payload.registration_of_yojson json in
-         Ok (started_at, registration)
-       in
-       { registration = Result.map_error invalid registration
-       ; completion = Error Missing_completion
-       }
-     | Ok "complete" ->
-       let completion =
-         let* () = Json.exact_fields ~required:[ "event"; "id"; "completion" ] fields in
-         let* json = List.assoc_opt "completion" fields
-             |> Option.to_result ~none:"missing completion" in
-         Payload.completion_of_yojson json
-       in
-       { payloads with completion = Result.map_error invalid completion }
-     | Ok other -> unread_payloads (invalid (Printf.sprintf "unknown event %S" other))
-     | Error detail -> unread_payloads (invalid detail))
+let payload_value ~log_path ~run_id kind ~value ~source ~missing =
+  match source with
+  | In_row -> Ok value
+  | In_file { bytes; sha256 } -> read_payload_file ~log_path ~run_id kind ~bytes ~sha256 ~missing
 ;;
 
-let load_payloads_from_disk ~path ~run_id =
-    try
-      (* A boolean existence probe would collapse permission failures into
-         "absent" and discard the filesystem's original diagnostic. *)
-      let _source = Unix.stat path in
-      let initial =
-        { registration = Error Missing_registration; completion = Error Missing_completion }
-      in
-      let (payloads, count), boundary =
-        Fs_compat.fold_appended_lines ~path ~from:0 ~init:(initial, 0)
-          ~f:(fun (payloads, count) text ->
-            let line = count + 1 in
-            fold_payload_record ~run_id ~line payloads text, line)
-      in
-      (* An unterminated record cannot be identified as belonging to this run
-         or another one. Never silently reuse an older value behind it. *)
-      if (Unix.stat path).st_size = boundary then payloads
-      else unread_payloads
-          (Invalid_record { line = count + 1; detail = "registry has an unterminated or changing final record" })
-    with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | (Sys_error _ | Unix.Unix_error _ | Eio.Io _) as exn ->
-      unread_payloads (Source_unavailable (Printexc.to_string exn))
+let availability_of = function
+  | Ok _ -> Available
+  | Error error -> Unavailable error
 ;;
 
 let selected_entry t run_id =
   Store.get_metadata t.store ~id:run_id
-;;
-
-let apply_payloads (entry : Store.entry) base_run payloads =
-  let input, input_availability =
-    match payloads.registration with
-    | Ok (started_at, registration)
-      when Float.equal started_at entry.started_at
-           && registration.Payload.lane = entry.registration.lane
-           && String.equal registration.actor entry.registration.actor ->
-      registration.input, Available
-    | Ok _ -> Exact_input `Null, Unavailable Snapshot_changed
-    | Error error -> Exact_input `Null, Unavailable error
-  in
-  let status, output_availability =
-    match base_run.status with
-    | Running -> Running, None
-    | Completion_persistence_failed _ as status ->
-      (* The failed append retained this exact output in memory. Disk failure
-         affects the input independently and must not erase the new result. *)
-      status, Some Available
-    | Completed completion ->
-      (match payloads.completion with
-       | Ok disk when disk.outcome = completion.outcome
-                      && Float.equal disk.elapsed_s completion.elapsed_s
-                      && Option.equal String.equal disk.selected_slot completion.selected_slot ->
-         Completed { completion with output = disk.output }, Some Available
-       | Ok _ ->
-         Completed { completion with output = `Null }, Some (Unavailable Snapshot_changed)
-       | Error error ->
-         Completed { completion with output = `Null }, Some (Unavailable error))
-  in
-  { base_run with input; input_availability; status; output_availability }
 ;;
 
 let get t ~run_id =
@@ -739,20 +810,76 @@ let get t ~run_id =
   | Some entry ->
     let failed_completions = Atomic.get t.failed_completions in
     let base_run = full_run_of_entry failed_completions entry in
-    match t.path with
-    | None -> Some base_run
-    | Some path ->
-      let payloads =
-        Eio_guard.run_in_systhread ~label:"exact-lane-payload-read"
-          (fun () -> load_payloads_from_disk ~path ~run_id)
-      in
-      let unchanged =
-        Option.equal ( == ) (Some entry) (selected_entry t run_id)
-        && Option.equal ( == ) (List.assoc_opt run_id failed_completions)
-             (List.assoc_opt run_id (Atomic.get t.failed_completions))
-      in
-      Some (apply_payloads entry base_run
-              (if unchanged then payloads else unread_payloads Snapshot_changed))
+    (match t.path with
+     | None -> Some base_run
+     | Some log_path ->
+       let read kind ~value ~source ~missing =
+         Eio_guard.run_in_systhread ~label:"exact-lane-payload-read" (fun () ->
+           payload_value ~log_path ~run_id kind ~value ~source ~missing)
+       in
+       let input =
+         match entry.registration.input with
+         | Exact_input value ->
+           read
+             Input_payload
+             ~value
+             ~source:entry.registration.input_source
+             ~missing:Missing_registration
+       in
+       let stored_output =
+         match entry.status with
+         | Store.Running -> None
+         | Store.Completed completion ->
+           Some
+             ( completion
+             , read
+                 Output_payload
+                 ~value:completion.output
+                 ~source:completion.output_source
+                 ~missing:Missing_completion )
+       in
+       let unchanged =
+         Option.equal ( == ) (Some entry) (selected_entry t run_id)
+         && Option.equal ( == ) (List.assoc_opt run_id failed_completions)
+              (List.assoc_opt run_id (Atomic.get t.failed_completions))
+       in
+       let settled read = if unchanged then read else Error Snapshot_changed in
+       let input = settled input in
+       let value_or_null = function
+         | Ok value -> value
+         | Error _ -> `Null
+       in
+       let status, output_availability =
+         match stored_output, List.assoc_opt run_id failed_completions with
+         | Some (completion, output), _ ->
+           (* A committed completion always wins over a diagnostic overlay. *)
+           let output = settled output in
+           ( Completed
+               { outcome = completion.outcome
+               ; elapsed_s = completion.elapsed_s
+               ; output = value_or_null output
+               ; selected_slot = completion.selected_slot
+               }
+           , Some (availability_of output) )
+         | None, Some failed ->
+           (* The failed append retained this exact output in memory. *)
+           ( Completion_persistence_failed
+               { intended_outcome = failed.intended_outcome
+               ; elapsed_s = failed.elapsed_s
+               ; output = failed.output
+               ; selected_slot = failed.selected_slot
+               ; failure = failed.failure
+               }
+           , Some Available )
+         | None, None -> Running, None
+       in
+       Some
+         { base_run with
+           input = Exact_input (value_or_null input)
+         ; input_availability = availability_of input
+         ; status
+         ; output_availability
+         })
 ;;
 
 let status_label = function

@@ -1,7 +1,7 @@
 ---
 rfc: "exact-lane-run-payloads-outside-the-log"
 title: "exact lane 실행 기록의 프롬프트와 응답은 로그 밖 파일에 둔다"
-status: Draft
+status: Active
 created: 2026-09-15
 updated: 2026-09-15
 author: claude
@@ -60,11 +60,18 @@ related: []
 <masc_root>/exact-lane-run-payloads/<run_id>/output.json
 ```
 
-로그 줄의 `registration.input` 과 `completion.output` 자리에는 다음을 쓴다.
+로그 줄의 `registration.input` 과 `completion.output` 자리에는 값이 어디 있는지를 닫힌 합타입
+(`payload_source`)으로 쓴다.
 
 ```json
-{ "payload": "input.json", "bytes": 152676, "sha256": "<hex>" }
+{ "kind": "file", "bytes": 152676, "sha256": "<hex>" }
+{ "kind": "row", "value": { "reason": "server_restarted", "detail": "..." } }
 ```
+
+- `file`: 값은 run 의 payload 파일에 있다. 등록·완료가 쓰는 실제 입력과 출력은 모두 이쪽이다.
+- `row`: 값이 줄 안에 있다. replay 가 재시작으로 끊긴 run 에 만드는 종료 판정은 파일을 쓸
+  시점이 없어서 이쪽이다. path 없는 메모리 store 의 값도 이쪽이다.
+- run id 는 디렉터리 이름이 되므로 경로 조각 하나가 아니면(`/`, `..` 등) 등록 전에 거절한다.
 
 - payload 파일은 로그 줄보다 먼저 durable 하게 쓴다(`Keeper_fs` durable atomic write). 로그
   줄이 가리키는 파일은 항상 존재한다.
@@ -74,14 +81,18 @@ related: []
 
 - replay 는 작은 줄만 파싱한다. payload 는 열지 않는다.
 - 상세 조회는 메모리 entry 의 run id 로 두 파일을 연다. 로그를 다시 돌지 않는다.
-  - 파일이 없거나 `bytes`·`sha256` 이 다르면 지금의 `Unavailable` 계열로 답한다. 새 오류
-    variant 가 필요하면 `payload_read_error` 에 닫힌 생성자로 추가한다.
+  - 파일이 없으면 `Missing_registration` / `Missing_completion`, 읽을 수 없으면
+    `Source_unavailable`, 크기·SHA-256 이 다르거나 JSON 이 아니면 `Invalid_payload` 로 답한다.
+    로그 줄 번호를 담던 `Invalid_record` 는 없어졌고, 대시보드 TS 계약도 `invalid_payload` 로
+    바뀐다.
 - `Snapshot_changed` 판정(메모리 entry 가 읽는 동안 바뀌었는지)은 그대로 둔다.
 
 ### 2.3 보존과 정리
 
-- 보존에서 빠진 run 은 로그 compaction 과 같은 시점에 payload 디렉터리도 지운다.
-- replay 가 끝나면 로그가 가리키지 않는 payload 디렉터리를 지운다. 고아 정리는 이 한 곳이다.
+- 보존에서 빠진 run 은 projection 을 갱신할 때(등록·완료마다) payload 디렉터리를 지운다.
+- replay 가 끝나면 retained row 가 가리키지 않는 payload 디렉터리를 지운다. 등록 줄 append 가
+  실패해서 남은 파일이 여기서 지워진다.
+- 지우기가 실패하면 경고를 남기고 디렉터리는 남는다. 읽는 곳은 없다.
 
 ### 2.4 hard cut
 
@@ -113,6 +124,5 @@ related: []
 
 ## 6. 단계
 
-1. payload 파일 쓰기·읽기와 v6 로그 모양(2.1, 2.2). 테스트 포함.
-2. 보존·고아 정리(2.3).
-3. 실측(5)과 이 RFC status 갱신.
+1. payload 파일 쓰기·읽기와 v6 로그 모양(2.1, 2.2), 보존·고아 정리(2.3). 테스트 포함.
+2. 실측(5)과 이 RFC status 갱신.

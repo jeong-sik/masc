@@ -6,8 +6,24 @@ type action = Choose_workspace | Initialize_workspace | Configure_models
 
 type condition = Satisfied | Needs_setup | Needs_verification | Invalid
 
+type check_id =
+  | Workspace
+  | Model_connection
+  | Keeper_declaration
+  | Sandbox
+  | Keeper_persistence
+  | Browser_lane
+
+(** Whether an [Invalid] check keeps imp's existing conversation from opening.
+    [Advisory] checks are reported but never send the operator back into setup. *)
+type role = Required_to_open | Advisory
+
+(** What a bare [masc] does with this observation: open imp's persisted
+    conversation, or walk the setup journey. *)
+type opening = Open_existing_history | Needs_journey
+
 type check =
-  { id : string
+  { id : check_id
   ; condition : condition
   ; message : string
   ; actions : action list
@@ -24,5 +40,15 @@ type t =
     metadata. Absence is Needs_setup; unreadable or noncurrent metadata is
     Invalid. Persistence does not establish model, sandbox or running health. *)
 val inspect : base_path:string option -> t
+
+(** The wire name of a check, as serialized in [id]. *)
+val check_id_name : check_id -> string
+
+val role : check_id -> role
+
+(** [Open_existing_history] needs a workspace, [keeper_persistence] Satisfied,
+    and no [Required_to_open] check Invalid. It is a statement about readable
+    history, never about a running imp, model or sandbox. *)
+val opening : t -> opening
 val to_json : t -> Yojson.Safe.t
 val to_text : t -> string

@@ -5,9 +5,10 @@
     workflow rejections. Those are MASC domain outcomes, not provider/runtime
     failures. It also does not decide Keeper lifecycle transitions. *)
 
-type stream_idle_state =
-  | Awaiting_first_event
-  | Awaiting_first_delta
+(** What a stream was producing when an idle gap ended it. A stall before
+    the first output is {!First_token}; the two "awaiting" labels a reader
+    holds before then are never a {!Stream_idle}. *)
+type stream_production =
   | Streaming_answer
   | Streaming_thinking
   | Streaming_tool_call
@@ -21,7 +22,7 @@ type timeout_phase =
   | Http_operation
   | Non_streaming_body
   | Stream_body
-  | Stream_idle of stream_idle_state
+  | Stream_idle of stream_production
   | Provider_step
   | Cli_stdout_idle
   | Caller_budget

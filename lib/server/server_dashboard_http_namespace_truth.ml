@@ -73,8 +73,11 @@ let schedule_namespace_truth_shell_refresh ~sw ~clock config =
              try
                let result =
                  match
-                   Eio.Time.with_timeout clock timeout_s (fun () ->
-                       Ok (dashboard_shell_http_json ~clock config))
+                   Watched_work.run
+                     ~watcher:(fun () ->
+                       Eio.Time.sleep clock timeout_s;
+                       Error `Timeout)
+                     (fun () -> Ok (dashboard_shell_http_json ~clock config))
                  with
                  | Ok json -> json
                  | Error `Timeout ->
@@ -152,7 +155,15 @@ let dashboard_namespace_truth_http_json ~state ~sw ~clock _request =
         let base_timeout_s = if is_cold then cold_timeout_s else warm_timeout_s in
         let fiber_with_timeout ?(timeout_s = base_timeout_s) label f fallback =
           try
-            match Eio.Time.with_timeout clock timeout_s (fun () -> Ok (f ())) with
+            (* A fiber that finished as its window closed is the result, not
+               the fallback. *)
+            match
+              Watched_work.run
+                ~watcher:(fun () ->
+                  Eio.Time.sleep clock timeout_s;
+                  Error `Timeout)
+                (fun () -> Ok (f ()))
+            with
             | Ok v -> v
             | Error `Timeout ->
                 Log.Dashboard.warn "project-snapshot fiber %s timed out (%.0fs)" label

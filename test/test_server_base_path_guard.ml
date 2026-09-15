@@ -59,6 +59,8 @@ let a_stale_record_is_named_in_the_error () =
   with
   | Ok root ->
     failf "a record without .masc/config resolved to %s" root.Workspace_root.root
+  | Error (Workspace_root.Unanchored { requested; _ }) ->
+    failf "an absolute cwd and record cannot be unanchored (%s)" requested
   | Error (Workspace_root.No_workspace { cwd; stale_record } as error) ->
     check (option string) "cwd" (Some "/elsewhere") cwd;
     check (option (pair string string)) "stale record"

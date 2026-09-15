@@ -46,7 +46,7 @@ external user_notif_supported : unit -> bool = "ocaml_shim_user_notif_supported"
    because it answers "what did the payload try?" not "did the box
    apply?". *)
 external observe_install : Unix.file_descr -> bool = "ocaml_shim_observe_install"
-external drain_one : Unix.file_descr -> int ref -> int = "ocaml_shim_user_notif_drain_one"
+external drain_one : Unix.file_descr -> int = "ocaml_shim_user_notif_drain_one"
 
 let observe_unsupported_code = "observe_unsupported"
 let observe_scratch_code = "observe_scratch_error"
@@ -119,14 +119,16 @@ let kill_policy ?(grace_sec = kill_grace_sec) = function
 (* [v] is the request's own major, echoed: a v2 server reads a v2 trailer,
    and a v3 one a v3, so the shim never answers in a version its caller did
    not speak to it in. *)
-let trailer_of_status ~v ~timed_out status : Exec_ssh_protocol.trailer =
+let trailer_of_status ?(observed_syscalls = []) ~v ~timed_out status
+  : Exec_ssh_protocol.trailer =
   match status with
   | Unix.WEXITED n ->
     Exec_ssh_protocol.{ v
                       ; exit = Some n
                       ; signal = None
                       ; timed_out
-                      ; shim_error = None }
+                      ; shim_error = None
+                      ; observed_syscalls }
   | Unix.WSIGNALED n | Unix.WSTOPPED n ->
     (* WSTOPPED is unreachable (waitpid without WUNTRACED); map it like
        WSIGNALED defensively rather than fabricating an exit code.  The
@@ -136,7 +138,8 @@ let trailer_of_status ~v ~timed_out status : Exec_ssh_protocol.trailer =
                       ; exit = None
                       ; signal = Some (host_signal_number n)
                       ; timed_out
-                      ; shim_error = None }
+                      ; shim_error = None
+                      ; observed_syscalls }
 
 (* {1 Path jail} *)
 
@@ -788,9 +791,8 @@ let supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload
        magic ceiling. *)
     if !observe_active && List.memq listener_fd rdy_r
     then (
-      let send_err = ref 0 in
       let rec drain_loop () =
-        match drain_one listener_fd send_err with
+        match drain_one listener_fd with
         | -2 ->
           (* Queue empty (EAGAIN): the listener is non-blocking, so this is
              the normal end of a drain burst. Keep observing — the select
@@ -862,25 +864,11 @@ let supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload
       | Sigkill_pgid -> send_to_pgid Sys.sigkill
       | Wait_grace _ -> ())
     (kill_policy On_child_exit);
-  (* task-1575 phase 3: give the observed-attempts accumulator a real
-     consumer instead of leaving it collected-but-unread (the exact "dead
-     surface" shape rejected twice in this PR's lineage per the phase-2
-     design note). A full structured trailer field
-     (Exec_ssh_protocol.trailer.observed_syscalls) is the design note's
-     stated destination for this evidence, but that touches ~20 files'
-     worth of trailer record literals across the codebase -- out of this
-     turn's safe blast radius without a dedicated review. This stderr
-     line is the narrow, single-file interim consumer; the structured
-     field is tracked as follow-up work. *)
-  (if !observed <> [] then
-     let line =
-       Printf.sprintf "shim: observe: denied %d syscall attempt(s) [%s]\n"
-         (List.length !observed)
-         (String.concat "," (List.map string_of_int (List.rev !observed)))
-     in
-     try write_all Unix.stderr line 0 (String.length line) with
-     | Unix.Unix_error (Unix.EPIPE, _, _) -> ());
-  trailer_of_status ~v ~timed_out:!timed_out st
+  (* task-1575 phase 3: the observed-attempts accumulator rides in the
+     trailer's own [observed_syscalls] field -- a type distinct from the
+     exit/signal/shim_error ack, not a side-channel stderr text line (the
+     shape a completion verdict rejected: vrf-75b5116cabdef13de98a595b19a8295d). *)
+  trailer_of_status ~v ~timed_out:!timed_out ~observed_syscalls:(List.rev !observed) st
 
 let emit_trailer_stderr ?execution_receipt (t : Exec_ssh_protocol.trailer) =
   let s = Exec_ssh_protocol.render_trailer ?execution_receipt t in
@@ -898,7 +886,8 @@ let shim_fail ?(v = Exec_ssh_protocol.newest) ?execution_receipt msg =
                       ; exit = None
                       ; signal = None
                       ; timed_out = false
-                      ; shim_error = Some msg };
+                      ; shim_error = Some msg
+                      ; observed_syscalls = [] };
   exit 1
 
 (* The jail this one call runs in, decided from what the host allows and what

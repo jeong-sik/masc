@@ -2074,9 +2074,15 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ?on_ready ~accept_store
           Env_config_runtime.Dashboard.shell_prewarm_outer_timeout_sec
         in
         try
-           match Eio.Time.with_timeout clock outer_timeout_sec (fun () ->
-             Server_dashboard_http.warm_dashboard_surfaces state;
-             Ok ())
+           (* A pre-warm that finished as its window closed has finished. *)
+           match
+             Watched_work.run
+               ~watcher:(fun () ->
+                 Eio.Time.sleep clock outer_timeout_sec;
+                 Error `Timeout)
+               (fun () ->
+                  Server_dashboard_http.warm_dashboard_surfaces state;
+                  Ok ())
            with
            | Ok () -> ()
            | Error `Timeout ->

@@ -59,9 +59,14 @@ val admit_serialized_body
     non-streaming completion that is the whole-call bound: the permit wait
     ends as [TimeoutError { phase = Queue }] and the round trip as
     [TimeoutError { phase = Non_streaming_body }]. Ahead of a stream the
-    permit wait ends under the admission budget as [Queue] and the round
-    trip under the first-event budget as [First_token], the count round trip
-    being provider silence before the first token. Each is carried as
+    admission budget spans the permit wait and the round trip after it, as
+    it spans the stream's own wait, since the stream would not be sent past
+    it; the round trip is also provider silence before the first token, so
+    the first-event budget bounds it too. The wait ends as [Queue]. The
+    round trip runs under one window, the shorter of the first-event budget
+    and what the admission budget has left, and ends as the phase of the
+    budget that ended it: [First_token], or [Queue] after a late permit;
+    when the two end together it is [First_token]. Each is carried as
     [Input_count_failed (Transport _)]; none is a bound without [clock]. *)
 type next_stage =
   | Completion of { call_timeout_s : float option }

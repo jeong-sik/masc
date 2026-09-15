@@ -6051,6 +6051,21 @@
  (name runtest)
  (deps (alias runtest-test_setup_cli)))
 
+; A local install replaces every registered browser lane host copy, so the
+; lane Firefox starts is the build that was just installed.
+(rule
+ (alias runtest-test_install_local_build)
+ (deps
+  test_install_local_build.py
+  ../scripts/install-local-build.sh
+  ../connectors/browser/install-host.sh)
+ (action
+  (run python3 %{dep:test_install_local_build.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_install_local_build)))
+
 (test
  (name test_workspace_memory_proposals)
  (modules test_workspace_memory_proposals)

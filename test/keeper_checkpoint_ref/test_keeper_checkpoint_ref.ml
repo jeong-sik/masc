@@ -65,6 +65,27 @@ let test_persisted_roundtrip_is_canonical () =
     [ String.uppercase_ascii expected.sha256; String.sub expected.sha256 0 62; " " ^ expected.sha256 ]
 ;;
 
+(* The digest is fed in bounded slices. Sizes cover the empty string, one
+   byte, and a 4 MiB string and one byte either side of it: an exact multiple
+   of any power-of-two slice up to 4 MiB, and a short last slice both ways. The
+   bytes vary by position, so a slice fed twice, skipped or out of order
+   changes the digest. *)
+let test_sliced_digest_equals_one_shot_digest () =
+  let four_mib = 1 lsl 22 in
+  List.iter
+    (fun size ->
+       let bytes = String.init size (fun index -> Char.chr ((index * 31 + 7) land 255)) in
+       Alcotest.(check string)
+         (Printf.sprintf "%d bytes" size)
+         Digestif.SHA256.(to_hex (digest_string bytes))
+         (Keeper_checkpoint_ref.sha256_of_canonical_bytes bytes);
+       Alcotest.(check string)
+         (Printf.sprintf "a reference over %d bytes carries that digest" size)
+         (Keeper_checkpoint_ref.sha256_of_canonical_bytes bytes)
+         (create bytes).sha256)
+    [ 0; 1; four_mib - 1; four_mib; four_mib + 1 ]
+;;
+
 let () =
   Alcotest.run
     "keeper checkpoint ref"
@@ -75,5 +96,9 @@ let () =
             "persisted canonical roundtrip"
             `Quick
             test_persisted_roundtrip_is_canonical
+        ; Alcotest.test_case
+            "sliced digest equals the one-shot digest"
+            `Quick
+            test_sliced_digest_equals_one_shot_digest
         ] )
     ]

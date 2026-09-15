@@ -1082,7 +1082,7 @@ let find_exact_snapshot_for_retention ~session_dir ~reference =
              | Error error -> Error (unavailable (Fs_compat.owned_regular_file_read_error_to_string error))
              | Ok None -> find rest
              | Ok (Some bytes) ->
-               if offload_checkpoint_cpu (fun () -> Digestif.SHA256.(digest_string bytes |> to_hex)) <> reference.sha256 then find rest
+               if offload_checkpoint_cpu (fun () -> Keeper_checkpoint_ref.sha256_of_canonical_bytes bytes) <> reference.sha256 then find rest
                else match exact_snapshot_of_canonical_bytes ~expected_session_id:reference.trace_id bytes with
                  | Error error -> Error (Source_unavailable error)
                  | Ok snapshot when Keeper_checkpoint_ref.equal reference snapshot.reference -> Ok snapshot

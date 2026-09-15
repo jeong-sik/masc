@@ -122,8 +122,8 @@ and masc_internal_error =
 
 - `diagnostic : string` 은 세 곳이 아니라 다섯 곳이다. 위 셋에 더해 `keeper_tools_agent_core.ml` 12-16 의 `terminal_effect_failure` 와 `runtime_official_client_tool.mli` 16-20(복사본은 `keeper_official_client_host.ml` 1037)이 같은 필드를 나른다. 다섯 곳을 함께 바꾼다.
 - `terminal_effect_detail` 의 생성자 목록은 지금 `diagnostic` 을 채우는 곳에서 나왔다: composition 실패(`keeper_tool_composition_surface.ml` 1889), "composition result manifest persistence failed"(1926), "composition recovery evidence persistence failed"(1948), 도구가 돌려준 `message`(`keeper_tools_agent_core_handler.ml` 113-116), "terminal tool completed without a typed effect receipt"·"tool output artifact storage failed"(`keeper_tools_agent_core_bundle.ml` 21, 439, 588), official-client host 1145, recovery worker 556(`cause_to_string`), agent-core `TerminalTool{Effect,Durability}Failed.detail`(`keeper_internal_error.ml` 1096-1128). P1 에서 이 목록대로 맞춘다.
-- composition 쪽 detail 은 JSON 이 아니라 typed `Executor.failure` 에서 만든다. `Executor.cause` 는 네 변형이다(`keeper_tool_plan_executor.ml` 150-163): `Tool_did_not_complete`, `Node_observation_failed`, `Plan_execution_failed`, `Outer_completion_mismatch`. `Composition_node_failed` 는 첫 변형만 덮으므로 나머지 셋에도 생성자를 준다.
-- `payload : Yojson.Safe.t` 는 화면 표시용이다. 판정에 쓰지 않는다. 지금 `cause` 와 `settled` 에 같은 노드가 두 번 들어가는 중복도 P1 에서 없앤다.
+- composition 쪽 detail 은 JSON 이 아니라 typed `Executor.failure` 에서 만든다. `Executor.cause` 는 네 변형이다(`keeper_tool_plan_executor.ml` 150-163): `Tool_did_not_complete`, `Node_observation_failed`, `Plan_execution_failed`, `Outer_completion_mismatch`. P1a 의 `Composition_failed` 는 첫 변형일 때만 그 노드를 `failed_node` 로 담고, 나머지 셋은 `None` 으로 두며 실패 객체는 `payload` 에 남긴다.
+- `payload : Yojson.Safe.t` 는 화면 표시용이다. 판정에 쓰지 않는다. `cause` 와 `settled` 에 같은 노드가 두 번 들어가는 중복은 P1 에서 없애지 않고 미룬다. 그 객체가 도구 결과 row 와 모델이 읽는 내용이기도 해서다. 실패한 노드(`failed_node`)는 그 노드를 typed 로 투영한 값이고, 노드 JSON 의 세 번째 사본이 아니다.
 - `masc_internal_error_to_json` 은 `cause`·`detail` 을 JSON 객체로 쓴다. `parse_masc_internal_error_json` 도 같이 바꾼다.
 - `keeper_turn_driver.ml` fence 분기는 `Agent_core.Error.to_string error` 대신, carrier 가 있으면 `Fenced_masc`, 없으면 §2.2 투영으로 `Fenced_core` 를 만든다.
 
@@ -249,13 +249,14 @@ end
 | 단계 | 내용 | 주 파일 | 검증 |
 |---|---|---|---|
 | P0 | 이 RFC (이 수정 포함) | `docs/rfc/` | 인덱스 `--check` |
-| P1 | D1 + `Keeper_request_failure_core` 투영 + `diagnostic` 을 읽는 TUI 두 곳 갱신 | `keeper_internal_error.ml`, 새 core 투영 모듈, `keeper_turn_driver.ml`, composition surface, bundle, handler, official-client host, recovery worker, `keeper_tools_agent_core.ml`, `runtime_official_client_tool`, `bin/masc_tui_keeper_chat_history.ml` | 사고 composition 재현 테스트의 JSON 에 escape 된 JSON 문자열이 0개. TUI 의 host-shutdown 표시가 유지된다 |
+| P1a | D1 중 `Terminal_effect_failed` 의 `diagnostic` 을 `Keeper_terminal_effect_detail.t` 로 (생성자 목록은 `lib/keeper_runtime/keeper_terminal_effect_detail.mli` 가 정본) | `keeper_internal_error.ml`, 새 detail 모듈, composition surface, bundle, handler, official-client host, recovery worker, `keeper_tools_agent_core.ml`, `runtime_official_client_tool` | 사고 composition 재현 테스트에서 실패 객체가 escape 되지 않은 객체로 직렬화된다 |
+| P1b | D1 중 `Provider_attempt_effect_fenced`·`Tool_correction_lost` 의 원인 + `Keeper_request_failure_core` 투영 + `diagnostic` 을 읽는 TUI 두 곳 갱신 | `keeper_internal_error.ml`, 새 core 투영 모듈, `keeper_turn_driver.ml`, `bin/masc_tui_keeper_chat_history.ml` | 사고 에러의 JSON 에 escape 된 JSON 문자열이 0개. TUI 의 host-shutdown 표시가 유지된다 |
 | P2 | D2·D3 + 런타임 typed 원인 + wire 다섯 곳 | `keeper_turn.ml`, stream, `keeper_chat_store.ml`, owner registry, `keeper_codex_runtime.ml`, surface read, broadcast, Slack·Discord | §2.2 생산자 표의 각 경로마다 fixture → 생성자 고정. 옛 row·저널 hard cut 테스트 |
 | P3 | D5 TUI | `bin/masc_tui*.ml` | PTY 시나리오: 사고 에러가 3줄 이하 |
 | P4 | D5 대시보드 | `dashboard/` | 컴포넌트 테스트 + 브라우저 스크린샷 |
 | P5 | agent-core 안의 `Internal` 문자열 생산자를 typed 로 | `packages/agent_core/` | `Core_internal` 로 떨어지는 경로 0개 |
 
-P1 은 혼자 들어갈 수 있다. 단 `diagnostic` 을 읽는 TUI 두 곳을 같은 PR 에서 함께 고쳐야 한다. 안 그러면 host-shutdown 표시가 조용히 사라진다(`bin/masc_tui_keeper_chat_history.ml` 170, 테스트는 손으로 만든 옛 모양을 쓰므로 초록으로 남는다: `test/test_tui_keeper_chat_history.ml` 358).
+P1a 와 P1b 는 각각 혼자 들어갈 수 있다. 단 P1b 는 fenced `diagnostic` 을 읽는 TUI 두 곳을 같은 PR 에서 함께 고쳐야 한다. 안 그러면 host-shutdown 표시가 조용히 사라진다(`bin/masc_tui_keeper_chat_history.ml` 170, 테스트는 손으로 만든 옛 모양을 쓰므로 초록으로 남는다: `test/test_tui_keeper_chat_history.ml` 358).
 
 ## 6. 성공 기준
 

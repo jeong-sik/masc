@@ -629,6 +629,21 @@ let failure_data ~tool_name ~tool_kind (failure : Executor.failure) =
     ~settled:(List.map node_result_to_json failure.settled)
 ;;
 
+let failed_node (failure : Executor.failure) =
+  match failure.cause with
+  | Executor.Tool_did_not_complete node ->
+    Some
+      { Keeper_terminal_effect_detail.node_id =
+          Keeper_tool_plan.Node_id.to_string node.node_id
+      ; model_tool_name = node.tool_name
+      ; message = Tool_result.message node.result
+      }
+  | Executor.Plan_execution_failed _
+  | Executor.Node_observation_failed _
+  | Executor.Outer_completion_mismatch _ ->
+    None
+;;
+
 let failure_class (failure : Executor.failure) =
   match failure.cause with
   | Executor.Tool_did_not_complete result ->
@@ -1875,7 +1890,10 @@ let make_tools_with_authority
                  ?gate_context
                  ?gate_grant
                  ?record_gate_result
-                 ?on_completed
+                 ?on_completed:
+                   (Option.map
+                      (fun completed -> completed ~composition_tool:tool_name)
+                      on_completed)
                  ?on_deferred
                  ?on_external_effect_deferred
                  ?on_failed
@@ -1913,18 +1931,20 @@ let make_tools_with_authority
                 if not (failure_returns_to_model ~plan ~committed:!committed_receipts failure) then
                 Option.iter
                   (fun mark_failed ->
-                     let diagnostic =
-                       failure_data
-                         ~tool_name
-                         ~tool_kind:(Catalog.tool_kind entry)
-                         failure
-                       |> Yojson.Safe.to_string
-                     in
                      mark_failed
                        { Keeper_tools_agent_core.failure_class =
                            failure_class failure
                        ; effect_disposition = failure.effect_disposition
-                       ; diagnostic
+                       ; detail =
+                           Keeper_terminal_effect_detail.Composition_failed
+                             { composition_tool = tool_name
+                             ; failed_node = failed_node failure
+                             ; payload =
+                                 failure_data
+                                   ~tool_name
+                                   ~tool_kind:(Catalog.tool_kind entry)
+                                   failure
+                             }
                        })
                   on_failed
               | Ok _
@@ -1948,16 +1968,15 @@ let make_tools_with_authority
                with
                | Ok result -> result
                | Error { message; _ } ->
-                 let diagnostic =
-                   "composition result manifest persistence failed: " ^ message
-                 in
                  Option.iter
                    (fun mark_failed ->
                       mark_failed
                         { Keeper_tools_agent_core.failure_class =
                             Tool_result.Runtime_failure
                         ; effect_disposition = Tool_result.Effect_outcome_unknown
-                        ; diagnostic
+                        ; detail =
+                            Keeper_terminal_effect_detail.Composition_result_manifest_unpersisted
+                              { composition_tool = tool_name; detail = message }
                         })
                    on_failed;
                  Tool_result.make_err
@@ -1982,7 +2001,9 @@ let make_tools_with_authority
                       Option.iter (fun mark_failed -> mark_failed
                         { Keeper_tools_agent_core.failure_class = Tool_result.Runtime_failure;
                           effect_disposition = failure.effect_disposition;
-                          diagnostic = "composition recovery evidence persistence failed: " ^ detail }) on_failed)
+                          detail =
+                            Keeper_terminal_effect_detail.Composition_evidence_unpublished
+                              { composition_tool = tool_name; detail } }) on_failed)
                  | Ok _ | Error _ -> ())
                ~config
                ~reference:skill.reference

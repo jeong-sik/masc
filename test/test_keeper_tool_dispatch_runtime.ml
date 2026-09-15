@@ -4533,7 +4533,9 @@ let test_a_failed_memory_call_never_ends_the_turn () =
   let failure disposition =
     { Masc.Keeper_tools_agent_core.failure_class = Tool_result.Runtime_failure
     ; effect_disposition = disposition
-    ; diagnostic = "memory store failed"
+    ; detail =
+        Keeper_terminal_effect_detail.Tool_failed
+          { internal_tool_name = "keeper_memory_write"; message = "memory store failed" }
     }
   in
   let marks handler disposition =
@@ -4956,7 +4958,10 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                check bool
                  "terminal failure retains the exact full chat target"
                  true
-                 (String_util.contains_substring failure.diagnostic chat_path)
+                 (match failure.detail with
+                  | Keeper_terminal_effect_detail.Tool_failed { message; _ } ->
+                    String_util.contains_substring message chat_path
+                  | _ -> false)
              | Masc.Keeper_tools_agent_core.Terminal_effect_open ->
                fail "failed surface delivery left the terminal effect open"
              | Masc.Keeper_tools_agent_core.Deferred_tool_result ->
@@ -5063,12 +5068,13 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                  (Keeper_internal_error.Terminal_effect_failed
                     { failure_class = Tool_result.Runtime_failure
                     ; effect_disposition = Tool_result.Effect_outcome_unknown
-                    ; diagnostic
+                    ; detail =
+                        Keeper_terminal_effect_detail.Tool_failed { message; _ }
                     }) ->
                check bool
                  "Runtime_agent error retains the exact full chat target"
                  true
-                 (String_util.contains_substring diagnostic chat_path)
+                 (String_util.contains_substring message chat_path)
              | Some other ->
                failf
                  "Runtime_agent returned %s instead of terminal_effect_failed"
@@ -5088,7 +5094,10 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                check bool
                  "runtime terminal state retains the exact full chat target"
                  true
-                 (String_util.contains_substring failure.diagnostic chat_path)
+                 (match failure.detail with
+                  | Keeper_terminal_effect_detail.Tool_failed { message; _ } ->
+                    String_util.contains_substring message chat_path
+                  | _ -> false)
              | Masc.Keeper_tools_agent_core.Terminal_effect_open ->
                fail "runtime terminal failure was not recorded"
              | Masc.Keeper_tools_agent_core.Deferred_tool_result ->
@@ -5125,7 +5134,11 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                 (Keeper_internal_error.Terminal_effect_failed
                    { failure_class = Tool_result.Dependency_unavailable
                    ; effect_disposition = Tool_result.Effect_outcome_unknown
-                   ; diagnostic = "unknown transient terminal effect"
+                   ; detail =
+                       Keeper_terminal_effect_detail.Tool_failed
+                         { internal_tool_name = "keeper_surface_post"
+                         ; message = "unknown transient terminal effect"
+                         }
                    })
             in
             (match
@@ -7124,13 +7137,18 @@ value = {surface="dashboard", content="must not run"}
         else match bundle.terminal_effect_state () with
           | Masc.Keeper_tools_agent_core.Terminal_effect_failed failure ->
             if break_evidence then (
-              check string "broken evidence fixture reaches the directory preparation fence"
-                "composition recovery evidence persistence failed: Skill composition evidence directory preparation failed"
-                failure.diagnostic;
+              (match failure.detail with
+               | Keeper_terminal_effect_detail.Composition_evidence_unpublished { detail; _ } ->
+                 check string "broken evidence fixture reaches the directory preparation fence"
+                   "Skill composition evidence directory preparation failed"
+                   detail;
+                 check bool "canonical failed result is not a schema refusal" false
+                   (String_util.contains_substring detail "does not match Tool_result.to_json")
+               | other ->
+                 failf "broken evidence produced %s"
+                   (Keeper_terminal_effect_detail.summary other));
               check bool "storage failure remains a typed runtime failure" true
-                (failure.failure_class = Tool_result.Runtime_failure);
-              check bool "canonical failed result is not a schema refusal" false
-                (String_util.contains_substring failure.diagnostic "does not match Tool_result.to_json"))
+                (failure.failure_class = Tool_result.Runtime_failure))
           | _ -> fail "unsafe or unobserved composition escaped its terminal fence"))
 ;;
 
@@ -7656,7 +7674,53 @@ let test_terminal_composition_unknown_write_failure_closes_official_client_loop 
                  "producer-owned unknown disposition"
                  "effect_outcome_unknown"
                  (Tool_result.failure_effect_disposition_to_string
-                    failure.effect_disposition)
+                    failure.effect_disposition);
+               (* RFC-0454 D1: the failure names the node that failed, and its
+                  failure object travels as an object. *)
+               let payload =
+                 match failure.detail with
+                 | Keeper_terminal_effect_detail.Composition_failed
+                     { composition_tool
+                     ; failed_node = Some { node_id; model_tool_name; message }
+                     ; payload
+                     } ->
+                   check string "composition tool"
+                     "keeper_compose_unknown-write-before-post" composition_tool;
+                   check string "failed node" "write" node_id;
+                   check string "failed node tool" "keeper_memory_write" model_tool_name;
+                   check bool "failed node keeps its own message" true
+                     (not (String.equal message ""));
+                   payload
+                 | other ->
+                   failf "composition failure became %s"
+                     (Keeper_terminal_effect_detail.summary other)
+               in
+               let internal =
+                 Keeper_internal_error.Terminal_effect_failed
+                   { failure_class = failure.failure_class
+                   ; effect_disposition = failure.effect_disposition
+                   ; detail = failure.detail
+                   }
+               in
+               let serialized =
+                 Yojson.Safe.to_string
+                   (Keeper_internal_error.masc_internal_error_to_json internal)
+               in
+               (* Embedded as an object, the payload's own text appears verbatim.
+                  Stringified into a field, every quote in it would be escaped
+                  and this text would not occur. *)
+               check bool "composition payload is not a JSON document inside a string"
+                 true
+                 (String_util.contains_substring serialized
+                    (Yojson.Safe.to_string payload));
+               (match
+                  Keeper_internal_error.parse_masc_internal_error_json
+                    (Yojson.Safe.from_string serialized)
+                with
+                | Some decoded ->
+                  check bool "serialized terminal failure decodes to the same value" true
+                    (decoded = internal)
+                | None -> fail "serialized terminal failure did not decode")
              | _ -> fail "unknown writable failure did not terminalize the bundle");
             match result.abort_turn with
             | Some

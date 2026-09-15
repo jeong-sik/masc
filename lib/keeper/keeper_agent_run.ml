@@ -1836,7 +1836,7 @@ let run_turn
                             Error
                               (Agent_core.Error.Internal
                                  ("successful Keeper run retained a failed terminal effect: "
-                                  ^ failure.diagnostic))
+                                  ^ Keeper_terminal_effect_detail.summary failure.detail))
                           | Keeper_tools_agent_core.Terminal_effect_open
                           | Keeper_tools_agent_core.Deferred_tool_result
                           | Keeper_tools_agent_core.External_effect_deferred ->

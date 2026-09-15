@@ -62,6 +62,14 @@ done
 
 repo_root="$(git rev-parse --show-toplevel)"
 compiler_version="$(sed -n 's/^  (ocaml (= \([0-9.]*\)))$/\1/p' "$repo_root/dune-project")"
+if [ -z "$compiler_version" ]; then
+  # dune-project carries the published constraint ((ocaml (>= 5.5)) since
+  # #36410), not an exact pin. The exact CI compiler contract lives in
+  # .github/actions/setup-ocaml-toolchain (default 5.5.1); mirror it here so
+  # shim images keep keying on a single compiler contract.
+  compiler_version="5.5.1"
+  echo "build-shim: no exact OCaml pin in dune-project; using CI toolchain version $compiler_version" >&2
+fi
 case "$compiler_version" in
   '' | *[!0-9.]*) echo "build-shim: expected one exact OCaml version in dune-project" >&2; exit 1 ;;
 esac

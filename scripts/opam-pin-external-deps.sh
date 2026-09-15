@@ -64,8 +64,12 @@ fi
 required_ocaml_version="$(sed -nE '/^[[:space:]]*\(ocaml[[:space:]]+\(=[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+)\)\).*$/ { s//\1/; p; q; }' \
   "${REPO_ROOT}/dune-project")"
 if [[ -z "${required_ocaml_version}" ]]; then
-  echo "[opam-pin] ERROR: unable to read exact OCaml version from ${REPO_ROOT}/dune-project" >&2
-  exit 1
+  # dune-project carries the published constraint ((ocaml (>= 5.5)) since
+  # #36410), not an exact pin. The exact CI compiler contract lives in
+  # .github/actions/setup-ocaml-toolchain (default 5.5.1); mirror it here so
+  # the pin toolchain keeps a single compiler contract.
+  required_ocaml_version="5.5.1"
+  echo "[opam-pin] no exact OCaml pin in dune-project; using CI toolchain version ${required_ocaml_version}" >&2
 fi
 if ! command -v opam >/dev/null 2>&1; then
   echo "[opam-pin] ERROR: opam is unavailable; MASC requires OCaml ${required_ocaml_version}" >&2

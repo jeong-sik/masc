@@ -202,6 +202,31 @@ let test_a_held_seq_without_an_offset_serves_what_a_row_by_row_skip_serves () =
     (List.init (journal_length + 2) (fun index -> index - 1))
 ;;
 
+(* A corrupt row fails only a page that reads it. A probe that lands on it
+   cannot say which side of the held seq it is on, so the page reads on row by
+   row from what the bisection had settled: a page whose last row, and the
+   row after it that decides [has_more], come before the corrupt row is
+   served, and a page that reaches it fails. *)
+let test_a_corrupt_row_fails_only_a_first_row_page_that_reads_it () =
+  let upto_four, past_four =
+    List.partition (fun (entry : L.journaled_event) -> entry.seq <= 4) journal
+  in
+  let rows = rows_of upto_four ^ "this complete row is not an envelope\n" ^ rows_of past_four in
+  List.iter
+    (fun held ->
+       let page = served_page ~since_seq:(L.After_seq held) ~limit:(3 - held) rows in
+       check (list int)
+         (Printf.sprintf "held %d: the rows up to seq 3" held)
+         (List.init (3 - held) (fun index -> held + 1 + index))
+         (List.map (fun (entry : L.journaled_event) -> entry.seq) page.L.events);
+       check bool (Printf.sprintf "held %d: seq 4 says more follow" held) true page.L.has_more)
+    [ 0; 1; 2 ];
+  match L.page_of_rows ~path:journal_file ~since_seq:(L.After_seq 3) ~start:L.first_row ~limit:1 rows with
+  | Error (L.Page_corrupt _) -> ()
+  | Error failure -> fail ("wrong refusal: " ^ L.page_failure_to_string failure)
+  | Ok _ -> fail "a page that reads the corrupt row was served"
+;;
+
 (* The skip is bisected, so a page near the end of a long journal decodes a
    handful of rows, not the journal. Decoding every row allocates many times
    the journal's length; the budget is its length once. *)
@@ -801,6 +826,10 @@ let () =
             "a held seq near the end of a long journal decodes a handful of rows"
             `Quick
             test_a_held_seq_near_the_end_of_a_long_journal_decodes_a_handful_of_rows
+        ; test_case
+            "a corrupt row fails only a first-row page that reads it"
+            `Quick
+            test_a_corrupt_row_fails_only_a_first_row_page_that_reads_it
         ; test_case
             "page refuses what it cannot place"
             `Quick

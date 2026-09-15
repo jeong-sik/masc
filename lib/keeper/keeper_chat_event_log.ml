@@ -1046,7 +1046,7 @@ let non_blank_row_from rows ~position =
   from first_start
 ;;
 
-(* Where a page from the first row starts serving when a seq is held. Skipping
+(* Where a page from the first row starts reading when a seq is held. Skipping
    to it one row at a time decoded every row at or before the held seq: the
    TUI resumes a turn it partly holds that way, with no offset, and a
    43,000-row journal was decoded whole on each history refresh (91 MB/s of
@@ -1056,12 +1056,15 @@ let non_blank_row_from rows ~position =
    Rows starting before [low] are at or before the held seq, and rows
    starting at or after [high] are past it. When the two meet, [low] is the
    end of the last row at or before the seq, or 0, which is the offset such a
-   page hands back, and every row from it on is past the seq. The rows
-   skipped are not decoded, as rows before a held offset are not. *)
-let offset_past_held_seq ~path ~held rows =
+   page hands back. A probed row that does not decode cannot say which side
+   of the seq it is on, so the bisection stops there and the page reads on
+   from [low] one row at a time: the corrupt row fails the page only if the
+   page reaches it. The rows skipped below [low] are not decoded, as rows
+   before a held offset are not. *)
+let offset_past_held_seq ~held rows =
   let rec bisect ~low ~high =
     if low >= high
-    then Ok low
+    then low
     else (
       let middle = low + ((high - low) / 2) in
       match non_blank_row_from rows ~position:middle with
@@ -1069,7 +1072,7 @@ let offset_past_held_seq ~path ~held rows =
       | Some (row_start, _, _) when row_start >= high -> bisect ~low ~high:middle
       | Some (row_start, line, row_end) ->
         (match journaled_event_of_string line with
-         | Error detail -> Error (corrupt_row ~path ~offset:row_start detail)
+         | Error _ -> low
          | Ok (journaled : journaled_event) ->
            if journaled.seq > held
            then bisect ~low ~high:row_start
@@ -1078,7 +1081,8 @@ let offset_past_held_seq ~path ~held rows =
   bisect ~low:0 ~high:(String.length rows)
 ;;
 
-(* Rows are decoded one at a time from [start], and only until the page is
+(* Rows are decoded one at a time from [start] (from the first row with a held
+   seq, from where [offset_past_held_seq] puts it), and only until the page is
    full and one more row past [since_seq] has shown whether another page
    follows. A request used to decode every row of the journal to serve at most
    [limit] of them, so reading a whole journal page by page decoded it once
@@ -1143,10 +1147,8 @@ let page_of_rows ~path ~since_seq ~start ~limit rows =
       in
       (match since_seq, offset with
        | After_seq held, 0 ->
-         (match offset_past_held_seq ~path ~held rows with
-          | Error failure -> Error failure
-          | Ok row_start ->
-            loop ~row_start ~first:false ~served:[] ~count:0 ~next_offset:row_start)
+         let row_start = offset_past_held_seq ~held rows in
+         loop ~row_start ~first:false ~served:[] ~count:0 ~next_offset:row_start
        | (After_seq _ | Whole_turn), _ ->
          loop ~row_start:offset ~first:true ~served:[] ~count:0 ~next_offset:offset))
 ;;

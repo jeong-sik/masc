@@ -12639,10 +12639,23 @@ let render_runtime_params (state : state) =
   let before = screen_title " MASC Config" ^ tab_strip_gap in
   box_line buf cols
     (config_pane_title ~cols ~before state);
+  (* Where the overrides live leads, because it is the only thing on this row
+     the reader cannot get anywhere else, and it was what the row cut first:
+     at eighty columns it read "overrides persist in .masc/run\xe2\x80\xa6" and at
+     sixty-four "overrides pers\xe2\x80\xa6", while the two key phrases in front of it
+     survived whole.
+
+     [Enter] is gone from the row. The footer is pinned to keep it at every
+     width ([Masc_tui_footer.never_dropped_keys]), so "Enter edits by type"
+     was the footer's own hint said a second time on a row that had no space
+     for it -- and [e] opens the same editor, which the row never said.
+
+     [E] stays. The footer drops it at eighty columns, so below that this row
+     is the only place the advanced editor is named. *)
   (match state.runtime_params_notice with
    | None ->
      box_line_styled buf cols ~style:(Theme.recede ())
-       "  Enter edits by type · E is advanced JSON · overrides persist in .masc/runtime_params.json"
+       "  overrides persist in .masc/runtime_params.json · E is advanced JSON"
    | Some (ok, detail) ->
      box_line_styled buf cols ~style:(if ok then Theme.ok () else Theme.bad ())
        ("  " ^ Terminal_text.single_line detail));

@@ -326,7 +326,10 @@ let resolve_explicit_deadline ~operation ~parameter ~clock ~timeout_s =
 let with_explicit_deadline deadline f =
   match deadline with
   | Unbounded -> f ()
-  | Bounded (clock, timeout_s) -> Eio.Time.with_timeout_exn clock timeout_s f
+  | Bounded (clock, timeout_s) ->
+    (match Under_deadline.run clock timeout_s f with
+     | Ok answer -> answer
+     | Error `Timeout -> raise Eio.Time.Timeout)
 ;;
 
 let%test "explicit deadline: clock alone remains unbounded" =

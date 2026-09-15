@@ -800,8 +800,8 @@ let test_disk_backup_failure_preserves_machine () =
    put down used to stay down, so the next checkpoint carried them, and the next
    refusal that released its own keys released them too while reporting that
    nothing changed. The edge that failed to write stayed in the in-memory
-   ledger as well. A directory where the ledger file was makes every append
-   raise before a frame runs, so the whole machine must read as it did. *)
+   ledger as well. Each broken ledger below makes the first append raise
+   before a frame runs, so the whole machine must read as it did. *)
 let test_press_that_raises_releases_its_keys () =
   with_workspace @@ fun base_path ->
   let loaded = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String "") ] in
@@ -823,23 +823,40 @@ let test_press_that_raises_releases_its_keys () =
   in
   let before = machine () in
   let edges_before = List.length (Msx_lane.ledger ()) in
+  let presses_raise ~ledger =
+    List.iter
+      (fun sequence ->
+        (match
+           Msx_lane.press ~who:"msx-test" ~keys:[ Msx.Space; Msx.Return ]
+             ~hold_frames:2 ~step_frames:4 ~sequence
+         with
+         | exception Sys_error _ -> ()
+         | Ok _ | Error _ ->
+           fail (Printf.sprintf "a press over %s must raise" ledger));
+        check string
+          (Printf.sprintf "%s, sequence=%b: no key stays held and no frame ran"
+             ledger sequence)
+          before (machine ());
+        check int
+          (Printf.sprintf "%s, sequence=%b: the unwritten edge is not in the ledger"
+             ledger sequence)
+          edges_before (List.length (Msx_lane.ledger ())))
+      [ false; true ]
+  in
+  (* A directory refuses the open. *)
   Sys.remove ledger_path;
   Sys.mkdir ledger_path 0o755;
-  List.iter
-    (fun sequence ->
-      (match
-         Msx_lane.press ~who:"msx-test" ~keys:[ Msx.Space; Msx.Return ]
-           ~hold_frames:2 ~step_frames:4 ~sequence
-       with
-       | exception Sys_error _ -> ()
-       | Ok _ | Error _ -> fail "a press whose ledger cannot be written must raise");
-      check string
-        (Printf.sprintf "sequence=%b: no key stays held and no frame ran" sequence)
-        before (machine ());
-      check int
-        (Printf.sprintf "sequence=%b: the unwritten edge is not in the ledger" sequence)
-        edges_before (List.length (Msx_lane.ledger ())))
-    [ false; true ]
+  presses_raise ~ledger:"a directory";
+  (* /dev/full takes the open and fails the write with ENOSPC. The line reaches
+     the device only when the channel flushes, and a close that swallows the
+     error let the press finish with the edge kept in memory alone. Linux has
+     the device; macOS does not. *)
+  if Sys.file_exists "/dev/full" then begin
+    Sys.rmdir ledger_path;
+    Unix.symlink "/dev/full" ledger_path;
+    presses_raise ~ledger:"/dev/full"
+  end
+  else Printf.printf "not run: this host has no /dev/full, so a failing write is unchecked\n%!"
 ;;
 
 (* Bitmap modes draw into pixels, so their name table is noise; the

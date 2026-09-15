@@ -109,7 +109,10 @@ carries its site instructions as reference files under
 `skills/browser-lanes/references/sites/`. Keeper reads only the file for the
 requested site, through `keeper_skill` with that `file`. A separate site Skill
 that appears in the Keeper's available Skills, such as one an operator added,
-is read and used together with browser-lanes.
+is read and used together with browser-lanes; where it disagrees with a bundled
+site reference, the separate Skill wins. Reference files are read from disk on
+each call and carry no revision a Keeper can see, so a Keeper reads a needed
+reference again in a new turn.
 Site instructions describe how to recognize the requested content; execution
 compositions are separately advertised `keeper_compose_<name>` tools.
 For an observed same-tab link, `browser-live-follow-read` with `mode=scene`

@@ -37,9 +37,42 @@ let read_mode = function
   | Regions -> "regions"
   | Content -> "scene"
 
+(* One call through Agent-Core's own tool execution, on a tool built the way
+   the composition surface builds a composition tool: the same bridge
+   constructor, name and generated input schema. The handler stands in for the
+   composition handler and only records that it ran. *)
+let call_through_agent_core entry args =
+  let tool_name = Catalog.tool_name entry in
+  let handler_ran = ref false in
+  let tool =
+    Masc.Tool_bridge.agent_core_tool_of_masc_with_execution_env
+      ~name:tool_name ~description:"shipped composition input schema probe"
+      ~input_schema:(Catalog.input_schema_of_params entry.Catalog.params)
+      (fun _execution_env _input ->
+         handler_ran := true;
+         Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String "ran") ())
+  in
+  let invocation =
+    Agent_core.Tool_contract.Invocation.create ~tool_use_id:"browser-composition-probe"
+      ~turn:1 ~completion:Agent_core.Tool_contract.Continue_after_success
+      ~schedule:{ Agent_core.Tool_contract.planned_index = 0; batch_index = 0; batch_size = 1;
+                  execution_mode = Agent_core.Tool_contract.Serial }
+  in
+  match
+    Agent_core.Agent_tools.find_and_execute_tool
+      ~context:(Agent_core.Context.create_sync ()) ~tools:[ tool ]
+      ~hooks:Agent_core.Hooks.empty ~event_bus:None ~tracer:Agent_core.Tracing.null
+      ~agent_name:"browser-composition-probe" ~invocation tool_name args
+  with
+  | Ok result -> result.Agent_core.Agent_tools.outcome, !handler_ran
+  | Error (Agent_core.Agent_tools.Hook_execution_failed { detail; _ }) ->
+    fail ("a tool call with no hooks failed in a hook: " ^ detail)
+
 (* Both shipped compositions offer the same two reads and nothing else. The
    node tool, BrowserRead, also takes "text", so a value outside the declared
-   members has to be refused while binding rather than run as another read. *)
+   members has to be refused before the composition runs rather than run as
+   another read. Agent-Core refuses it while checking the call against the
+   composition's input schema, before the composition handler. *)
 let test_mode_is_a_closed_choice skill_name () =
   let entry = skill_entry skill_name in
   let open Yojson.Safe.Util in
@@ -54,7 +87,7 @@ let test_mode_is_a_closed_choice skill_name () =
     (Catalog.input_schema_of_params entry.Catalog.params
      |> member "required" |> to_list |> List.mem (`String "mode"));
   (* Every other argument is valid for whichever composition declares it, so
-     the only thing binding can refuse is the mode. *)
+     the only thing Agent-Core can refuse is the mode. *)
   let valid_arguments =
     [ "clientId", `String "11111111-1111-4111-8111-111111111111"
     ; "tabId", `Int 7
@@ -69,18 +102,24 @@ let test_mode_is_a_closed_choice skill_name () =
       (fun param -> String.equal param.Catalog.param_name name)
       entry.Catalog.params
   in
-  let args =
+  let args mode =
     `Assoc
       (List.filter (fun (name, _) -> declared name) valid_arguments
-       @ [ "mode", `String "text" ])
+       @ [ "mode", `String mode ])
   in
-  match
-    Catalog.instantiate ~descriptors:(Masc.Keeper_tool_descriptor.all_descriptors ())
-      ~args entry
-  with
-  | Error (Catalog.Argument_outside_enum { param = "mode"; actual = `String "text"; _ }) -> ()
-  | Ok _ -> fail "a read mode outside scene and regions was bound"
-  | Error error -> fail (Catalog.instantiation_error_to_string error)
+  Eio_main.run (fun _ ->
+    List.iter
+      (fun mode ->
+         match call_through_agent_core entry (args mode) with
+         | Agent_core.Types.Tool_succeeded, true -> ()
+         | (Agent_core.Types.Tool_succeeded | Agent_core.Types.Tool_failed _), _ ->
+           fail ("declared mode " ^ mode ^ " did not reach the composition handler"))
+      [ "scene"; "regions" ];
+    match call_through_agent_core entry (args "text") with
+    | Agent_core.Types.Tool_failed { failure_kind = Agent_core.Types.Validation_error; _ }, false ->
+      ()
+    | (Agent_core.Types.Tool_succeeded | Agent_core.Types.Tool_failed _), _ ->
+      fail "a read mode outside scene and regions was not refused before the handler")
 
 let test_follow_then_read observation case () =
   Eio_main.run (fun _ ->

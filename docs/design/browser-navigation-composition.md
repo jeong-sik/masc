@@ -19,8 +19,9 @@ visible content and serves pages whose visible body can already answer the
 request. The model checks that content and asks for a region map or a scoped
 read when coverage is insufficient. The two modes are alternatives selected for
 the page and task; a successful content read does not require another region
-read by convention. `BrowserRead` itself accepts more modes, so a value outside
-the two is refused when the composition binds its arguments.
+read by convention. `BrowserRead` itself accepts more modes; a value outside
+the two is refused by Agent-Core's input-schema check before the composition
+runs any node.
 
 The committed
 [three-channel native experiment](../evidence/browser-readable-20260913/README.md)

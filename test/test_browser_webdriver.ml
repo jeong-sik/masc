@@ -249,17 +249,18 @@ let test_driver_ownership_record () =
     (P.argv ~driver:owner.driver ~port:50931 ~profile_root);
   (* Process table shape measured 2026-09-15: the driver, the browser it
      launched, the same browser after it relaunched itself with no parent, a
-     content process, and a browser of another workspace. *)
+     content process of that browser (Zen passes it the same -profile), and
+     browsers of other roots. *)
   let process_table = String.concat "\n"
     [ "  68072 " ^ owner.driver ^ " --host 127.0.0.1 --port 64009 --websocket-port 0 --profile-root " ^ profile_root;
       "  73227 /Applications/Zen.app/Contents/MacOS/zen --marionette -headless --remote-debugging-port 52416 -no-remote -profile " ^ profile_root ^ "/rust_mozprofileGLlAmp";
       "  74640 /Applications/Zen.app/Contents/MacOS/zen --marionette --remote-debugging-port 9222 -no-remote -profile " ^ profile_root ^ "/rust_mozprofileGLlAmp";
-      "  74809 /Applications/Zen.app/Contents/MacOS/plugin-container.app/Contents/MacOS/plugin-container -isForBrowser -prefsHandle 0:53546";
+      "  74809 /Applications/Zen.app/Contents/MacOS/plugin-container.app/Contents/MacOS/plugin-container -parentBuildID 20260904060728 -isForBrowser -prefsHandle 0:53546 -profile " ^ profile_root ^ "/rust_mozprofileGLlAmp org.mozilla.machname.1 tab";
       "  81000 /Applications/Zen.app/Contents/MacOS/zen --marionette -profile /other/.masc/browser-lane/profiles/rust_mozprofileX";
       "  81001 /Applications/Zen.app/Contents/MacOS/zen --marionette -profile " ^ profile_root ^ "-old/rust_mozprofileY";
       "" ] in
-  check (list int) "the launched browser and its relaunch are ours; the driver, content process and other roots are not"
-    [ 73227; 74640 ] (P.browsers_using_profile_root ~profile_root ~process_table);
+  check (list int) "the launched browser, its relaunch and their content process are ours; the driver and other roots are not"
+    [ 73227; 74640; 74809 ] (P.browsers_using_profile_root ~profile_root ~process_table);
   check string "record lives beside the lane host"
     "/ws/.masc/browser-lane/geckodriver-owner.json" (P.owner_record_path ~masc_root:"/ws/.masc")
 

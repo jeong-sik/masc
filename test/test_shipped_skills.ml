@@ -208,27 +208,38 @@ let test_work_intake_names_every_page_bound () =
      | Error _ -> fail "work-intake did not complete against valid tool answers");
     check
       (list string)
-      "all four reads run"
-      [ "answers"; "board"; "scheduled"; "tasks" ]
+      "every read runs"
+      [ "answers"; "board"; "claimed"; "due"; "running"; "scheduled"; "tasks" ]
       (List.sort String.compare (List.map fst calls));
     check_inputs_declared plan calls;
-    let tasks = input_of calls "tasks" in
     let board = input_of calls "board" in
     let answers = input_of calls "answers" in
-    let scheduled = input_of calls "scheduled" in
     let names_limit json = Yojson.Safe.Util.member "limit" json <> `Null in
-    check string "tasks reads who holds work" "in_progress" (string_member "status" tasks);
-    check string "tasks asks for compact rows" "compact" (string_member "projection" tasks);
-    check bool "tasks names its limit" true (names_limit tasks);
+    (* Both list tools match one status exactly, so every state that means
+       "held" or "not finished" needs its own node. *)
+    List.iter
+      (fun (node_id, status) ->
+         let tasks = input_of calls node_id in
+         check string (node_id ^ " reads one held state") status (string_member "status" tasks);
+         check string (node_id ^ " asks for compact rows") "compact"
+           (string_member "projection" tasks);
+         check bool (node_id ^ " names its limit") true (names_limit tasks))
+      [ "tasks", "in_progress"; "claimed", "claimed" ];
     check string "board orders by latest activity" "updated" (string_member "sort_by" board);
     check bool "board asks for compact rows" true
       (Yojson.Safe.Util.member "compact" board = `Bool true);
     check bool "board names its limit" true (names_limit board);
     check bool "answers reads open questions only" true
       (Yojson.Safe.Util.member "include_resolved" answers = `Bool false);
-    check string "schedules are the caller's own" "self" (string_member "owner" scheduled);
-    check string "schedules still waiting to fire" "scheduled" (string_member "status" scheduled);
-    check bool "schedules name their limit" true (names_limit scheduled))
+    List.iter
+      (fun status ->
+         let schedules = input_of calls status in
+         check string (status ^ " lists the caller's schedules") "self"
+           (string_member "owner" schedules);
+         check string (status ^ " reads one unfinished state") status
+           (string_member "status" schedules);
+         check bool (status ^ " names its limit") true (names_limit schedules))
+      [ "scheduled"; "due"; "running" ])
 ;;
 
 let () =

@@ -76,7 +76,7 @@ val entry_json : entry -> Yojson.Safe.t
     ledger write that fails leaves the old file, because the new one is
     renamed into place last. A caller can therefore report any [error] as a
     refusal that took no effect. An exception is not an [error]: a ledger
-    append that raises mid-press has already moved the machine. *)
+    append that raises mid-press may already have run frames. *)
 type error =
   | No_machine  (** nothing loaded — [masc_msx_load] first *)
   | Invalid_request of string  (** the caller's arguments *)
@@ -181,7 +181,12 @@ val press :
     the rest of [step_frames] idle) so [keys] is a menu sequence, not a chord;
     the call advances [List.length keys * step_frames] frames.
     [1 <= hold_frames <= step_frames <= max_frames_per_call]. A key the matrix
-    has no place for is refused before anything is pressed. *)
+    has no place for is refused before anything is pressed.
+
+    Keys go down only inside this call. If recording an edge raises -- the
+    ledger file will not take it -- the keys the call put down are released
+    before the exception leaves, and the edge that was not written is not in
+    {!ledger}; frames the call already ran stay run. *)
 
 val ledger : unit -> entry list
 (** Oldest first. Empty when no machine is loaded. *)

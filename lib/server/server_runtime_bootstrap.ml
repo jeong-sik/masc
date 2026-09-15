@@ -625,9 +625,6 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
   Option.iter Eio_context.set_env env;
   Process_eio.init ~cwd_default:Eio.Path.(fs / base_path) ~proc_mgr ~clock;
   Exec_tap.install_from_env ();
-  Unix.putenv
-    Env_config_core.base_path_input_env_key
-    (Option.value ~default:"" input_base_path);
   Unix.putenv Env_config_core.base_path_env_key base_path;
   Config_dir_resolver.reset ();
   bootstrap_base_path_config_root ~base_path;

@@ -400,7 +400,6 @@ let host_fd_pressure_poll_interval_sec () =
     lookup, config auth diagnostics, runtime-bootstrap putenv) can
     reference the same literal. Issue 8352. *)
 let base_path_env_key = "MASC_BASE_PATH"
-let base_path_input_env_key = "MASC_BASE_PATH_INPUT"
 (* http_base_url_env_key is defined above (before masc_http_base_url) so the
    SSOT constant is in scope at first use. *)
 
@@ -504,17 +503,14 @@ type base_path_source =
   | From_persisted_default of string
 
 let base_path_source_opt () =
-  match raw_value_opt base_path_input_env_key |> trim_opt with
-  | Some value -> Some (From_env base_path_input_env_key, value)
+  match raw_value_opt base_path_env_key |> trim_opt with
+  | Some value -> Some (From_env base_path_env_key, value)
   | None ->
-      (match raw_value_opt base_path_env_key |> trim_opt with
-       | Some value -> Some (From_env base_path_env_key, value)
-       | None ->
-         (* Explicit input always wins over what a past install recorded. *)
-         (match persisted_default_base_path () with
-          | Usable { record; base_path } ->
-            Some (From_persisted_default record, base_path)
-          | No_record | Stale _ | Unread_under_test _ -> None))
+    (* Explicit input always wins over what a past install recorded. *)
+    (match persisted_default_base_path () with
+     | Usable { record; base_path } ->
+       Some (From_persisted_default record, base_path)
+     | No_record | Stale _ | Unread_under_test _ -> None)
 
 let base_path_raw_opt () =
   match base_path_source_opt () with

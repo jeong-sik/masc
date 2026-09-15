@@ -2159,15 +2159,9 @@ let runtime_resolution_json (config : Workspace.config) =
   let workspace_commit = git_rev_parse_short config.workspace_path in
   let resolved_base_commit = git_rev_parse_short config.base_path in
   let base_path_input =
-    (* SSOT: Env_config_core.base_path_source_opt prefers
-       MASC_BASE_PATH_INPUT over MASC_BASE_PATH, preserving an
-       operator's raw "<base>/.masc" input.
-       Host_config.base_path_raw only reads MASC_BASE_PATH and strips
-       a preserved ".masc" suffix when both env vars are set.
-       RFC-0085 PR-9 keeps the raw helper private, so use
-       base_path_source_opt's value component.
-       Test: "runtime base_path preserves raw input"
-       (test/test_dashboard_http_core.ml:260). *)
+    (* The server publishes its canonical owner in MASC_BASE_PATH. The
+       operator's own spelling is kept in the startup path diagnostics, which
+       bootstrap computes from the explicit ~input_base_path argument. *)
     Env_config_core.base_path_source_opt ()
     |> Option.map snd
     |> Option.value ~default:config.workspace_path

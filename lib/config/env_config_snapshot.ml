@@ -344,8 +344,6 @@ let path_entries =
   [
     entry ~default:"(none)" "MASC_ASSETS_DIR"
       "Assets directory override; None when unset";
-    entry ~default:"(none)" "MASC_BASE_PATH_INPUT"
-      "Base path input override; None when unset";
     entry ~default:"(none)" "MASC_BASE_PATH_RESOLUTION_SOURCE"
       "Base path resolution source override; None when unset";
     entry ~default:"(none)" "MASC_BASE_PATH_STRICT"

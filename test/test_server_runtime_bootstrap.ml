@@ -4185,9 +4185,6 @@ let test_create_server_state_preserves_raw_input_base_path () =
         raw_input
         (json |> member "path_diagnostics" |> member "input_base_path"
        |> to_string);
-      Alcotest.(check (option string)) "raw input env preserved"
-        (Some raw_input)
-        ((Host_config.from_env ()).base_path_raw);
       Alcotest.(check string) "normalized env remains effective workspace root"
         dir (Sys.getenv "MASC_BASE_PATH"))
 

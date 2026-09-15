@@ -1523,8 +1523,6 @@ let test_docker_config_mount_and_env_args () =
     [ "--env"
     ; "MASC_BASE_PATH=/tmp/masc-runtime"
     ; "--env"
-    ; "MASC_BASE_PATH_INPUT=/tmp/masc-runtime"
-    ; "--env"
     ; "MASC_CONFIG_DIR=/tmp/masc-runtime/.masc/config"
     ]
     (Keeper_sandbox_runtime.docker_config_env_args

@@ -1385,18 +1385,15 @@ model_catalog_env_value() {
 run_masc_with_install_env() {
   local catalog
   catalog=$(model_catalog_env_value)
-  # MASC_BASE_PATH is the resolved runtime root. MASC_BASE_PATH_INPUT mirrors
-  # the explicit --base-path input for bootstrap/diagnostic readers that report
-  # the operator-provided path before the runtime finishes normalizing config.
+  # MASC_BASE_PATH is the resolved runtime root; every masc command reads the
+  # workspace from it (or from --base-path) and from nothing else.
   if [ -n "$catalog" ]; then
     MASC_BASE_PATH="$BASE_PATH" \
-      MASC_BASE_PATH_INPUT="$BASE_PATH" \
       AGENT_CORE_MODEL_CATALOG="$catalog" \
       MASC_RUNTIME_EVENTS="${MASC_RUNTIME_EVENTS:-0}" \
       "$@"
   else
     MASC_BASE_PATH="$BASE_PATH" \
-      MASC_BASE_PATH_INPUT="$BASE_PATH" \
       MASC_RUNTIME_EVENTS="${MASC_RUNTIME_EVENTS:-0}" \
       "$@"
   fi
@@ -1817,7 +1814,7 @@ runtime_events_start_env=""
 if [ "${MASC_RUNTIME_EVENTS+x}" = "x" ]; then
   runtime_events_start_env="MASC_RUNTIME_EVENTS=\"$MASC_RUNTIME_EVENTS\" "
 fi
-start_env="MASC_ASSETS_DIR=\"$DASHBOARD_ASSETS_DIR\" ${runtime_events_start_env}MASC_BASE_PATH=\"$BASE_PATH\" MASC_BASE_PATH_INPUT=\"$BASE_PATH\""
+start_env="MASC_ASSETS_DIR=\"$DASHBOARD_ASSETS_DIR\" ${runtime_events_start_env}MASC_BASE_PATH=\"$BASE_PATH\""
 if [ -n "$catalog_hint" ]; then
   start_env="AGENT_CORE_MODEL_CATALOG=\"$catalog_hint\" $start_env"
 fi

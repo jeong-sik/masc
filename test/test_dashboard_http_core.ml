@@ -846,14 +846,14 @@ let test_dashboard_shell_http_json_includes_paths () =
     ((diagnostics |> member "projection_timing_top" |> to_list |> List.length)
      > 0)
 
-let test_dashboard_shell_http_json_prefers_preserved_base_path_input () =
+(* The server publishes its canonical owner in MASC_BASE_PATH and nothing else;
+   the operator's own spelling lives in the startup path diagnostics. *)
+let test_dashboard_shell_http_json_reports_the_published_base_path () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
-  let raw_input = Filename.concat config.base_path Common.masc_dirname in
-  with_env "MASC_BASE_PATH_INPUT" raw_input @@ fun () ->
   with_env "MASC_BASE_PATH" config.base_path @@ fun () ->
   let json = Server_dashboard_http_core.dashboard_shell_http_json config in
   let open Yojson.Safe.Util in
-  check string "runtime base_path preserves raw input" raw_input
+  check string "runtime base_path is the published owner" config.base_path
     (json |> member "runtime_resolution" |> member "base_path" |> member "path"
    |> to_string)
 
@@ -5730,7 +5730,7 @@ let () =
           test_case "shell payload includes paths diagnostics" `Quick
             test_dashboard_shell_http_json_includes_paths;
           test_case "shell runtime base_path prefers preserved input" `Quick
-            test_dashboard_shell_http_json_prefers_preserved_base_path_input;
+            test_dashboard_shell_http_json_reports_the_published_base_path;
           test_case "runtime resolution accepts server repo under base path" `Quick
             test_runtime_resolution_accepts_server_repo_inside_base_path;
           test_case "shell bootstrap payload while prewarming" `Quick

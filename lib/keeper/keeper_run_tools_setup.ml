@@ -498,19 +498,38 @@ let prepare_agent_setup
     |> Result.map_error (fun error ->
          Agent_core.Error.Internal (Keeper_tool_load_receipts.error_to_string error))
   in
-  let* historical_tool_calls =
+  (* Restored on both lanes, next to the load receipts: a direct turn runs
+     on its own context and persists it whole, so a key only the
+     autonomous lane carried would leave the checkpoint at the first
+     operator message. *)
+  let* judged =
+    Keeper_repetition_judged.restore
+      ~source:(Keeper_context_core.agent_core_context_of_context ctx_work)
+      ~target:shared_context
+    |> Result.map_error (fun error ->
+         Agent_core.Error.Internal (Keeper_repetition_judged.error_to_string error))
+  in
+  let* historical_tool_calls, history_pairs_at_setup =
     match repetition_execution with
-    | None -> Ok (initial_tool_calls ~history_messages)
+    | None ->
+      (* The autonomous lane, seeded from the checkpoint history past what
+         a previous repetition yield already judged
+         ([Keeper_repetition_judged]); the count the run was set up over is
+         what a yield in it records. *)
+      let pairs = initial_tool_calls ~history_messages in
+      Ok (Keeper_repetition_judged.seed_beyond ~judged pairs, Some (List.length pairs))
     | Some execution ->
       Keeper_repetition_scope.Execution.prepare execution
         ~source:(Keeper_context_core.agent_core_context_of_context ctx_work)
         ~target:shared_context
+      |> Result.map (fun calls -> calls, None)
       |> Result.map_error (fun error ->
            Agent_core.Error.Internal (Keeper_repetition_snapshot.error_to_string error))
   in
   let acc =
     Keeper_run_tools_hook_accumulator.create ~meta
       ~historical_tool_calls
+      ~history_pairs_at_setup
       ~tool_surface:
         { turn_lane = Keeper_agent_tool_surface.Lane_text_only
         ; config_root

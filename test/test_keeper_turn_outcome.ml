@@ -806,6 +806,7 @@ let test_checkpoint_history_is_not_current_tool_execution () =
   in
   let acc =
     Acc.create ~meta ~historical_tool_calls:[ prior; prior ]
+      ~history_pairs_at_setup:(Some 2)
       ~tool_surface:
         { turn_lane = Masc.Keeper_agent_tool_surface.Lane_text_only
         ; config_root = "fixture"
@@ -981,6 +982,98 @@ let test_repeated_exact_tool_call_seeded_from_checkpoint_history () =
   (match official [ live_call (); List.hd run_2_starts_from ] with
    | Ok None -> ()
    | _ -> fail "official-client boundary without a scope stopped an ordinary retry")
+
+(* A yield is the judgment; the calls behind it are not evidence again.
+   The seed from checkpoint history stops where the previous repetition
+   yield already judged, so a keeper that reads the same idle screen three
+   times in a day is not stopped on every later read of it. *)
+let test_seed_stops_where_a_yield_already_judged () =
+  let pairs = List.init 5 (fun i -> tool_call ~input:(Some (string_of_int i)) "Read") in
+  let names calls =
+    List.map (fun (c : Masc.Keeper_agent_result.tool_call_detail) ->
+      Option.value ~default:"" c.input_fingerprint) calls
+  in
+  check (list string) "nothing judged seeds everything, newest first"
+    [ "0"; "1"; "2"; "3"; "4" ]
+    (names (Masc.Keeper_repetition_judged.seed_beyond ~judged:0 pairs));
+  check (list string) "the oldest judged pairs drop off the tail"
+    [ "0"; "1"; "2" ]
+    (names (Masc.Keeper_repetition_judged.seed_beyond ~judged:2 pairs));
+  check (list string) "judged at the length seeds nothing" []
+    (names (Masc.Keeper_repetition_judged.seed_beyond ~judged:5 pairs));
+  check (list string) "a history cut shorter than the boundary seeds nothing" []
+    (names (Masc.Keeper_repetition_judged.seed_beyond ~judged:9 pairs))
+;;
+
+(* What a yield records is what the next setup will count for this run:
+   the pairs it was set up over, plus its own calls that carry both
+   fingerprints -- a call the digest refused has no pair the seeder can
+   match either. *)
+let test_a_yield_records_the_pairs_it_judged () =
+  let judged = Masc.Keeper_repetition_judged.pairs_judged_by in
+  let live = [ tool_call "Read"; tool_call "Grep"; tool_call "Read" ] in
+  check int "setup pairs plus the run's fingerprinted calls" 44
+    (judged ~history_pairs_at_setup:41 live);
+  check int "a call without an output fingerprint is not a pair" 44
+    (judged ~history_pairs_at_setup:41 (tool_call ~output:None "Execute" :: live));
+  check int "a run with no calls records what it was set up over" 41
+    (judged ~history_pairs_at_setup:41 []);
+  (* Then the next setup seeds only the pairs past that boundary: the
+     forty-four are gone, and a pair a later turn appended stays. *)
+  let history = List.init 45 (fun i -> tool_call ~input:(Some (string_of_int i)) "Read") in
+  check (list string) "one pair past the boundary seeds" [ "0" ]
+    (List.map
+       (fun (c : Masc.Keeper_agent_result.tool_call_detail) ->
+         Option.value ~default:"" c.input_fingerprint)
+       (Masc.Keeper_repetition_judged.seed_beyond ~judged:44 history))
+;;
+
+let test_judged_boundary_rides_the_context () =
+  let module Judged = Masc.Keeper_repetition_judged in
+  let module Context = Agent_core.Context in
+  let held context =
+    Context.get_scoped context Context.Session Judged.context_key
+  in
+  let source = Context.create_sync () in
+  let target = Context.create_sync () in
+  (match Judged.restore ~source ~target with
+   | Ok 0 -> ()
+   | Ok n -> failf "a context holding no record read as %d judged" n
+   | Error error -> fail (Judged.error_to_string error));
+  check bool "no record leaves the target without one" true (Option.is_none (held target));
+  Judged.record source 5;
+  (match Judged.restore ~source ~target with
+   | Ok 5 -> ()
+   | Ok n -> failf "the recorded boundary read as %d" n
+   | Error error -> fail (Judged.error_to_string error));
+  check bool "the boundary rides into the run's context" true
+    (Option.equal ( = ) (held source) (held target));
+  (* A yield on a lane that persists no checkpoint records into the live
+     context only. The durable count behind it must not pull the boundary
+     back down: restore keeps the larger. *)
+  Judged.record target 7;
+  (match Judged.restore ~source ~target with
+   | Ok 7 -> ()
+   | Ok n -> failf "the live boundary was pulled back to %d" n
+   | Error error -> fail (Judged.error_to_string error));
+  check bool "and the live context keeps its own" true
+    (Option.equal ( = ) (Some (`Assoc [ ("history_pairs", `Int 7) ])) (held target));
+  (* When the durable count is the larger, it is what the run's context
+     ends up holding. *)
+  Judged.record source 9;
+  (match Judged.restore ~source ~target with
+   | Ok 9 -> ()
+   | Ok n -> failf "the durable boundary read as %d" n
+   | Error error -> fail (Judged.error_to_string error));
+  check bool "the run's context is raised to it" true
+    (Option.equal ( = ) (held source) (held target));
+  let malformed = Context.create_sync () in
+  Context.set_scoped malformed Context.Session Judged.context_key
+    (`Assoc [ ("history_pairs", `String "five") ]);
+  match Judged.restore ~source:malformed ~target:(Context.create_sync ()) with
+  | Error (Judged.Invalid_record _) -> ()
+  | Ok n -> failf "a record that does not decode read as %d rather than an error" n
+;;
 
 let test_repeated_assistant_text_boundary () =
   let detect =
@@ -1557,6 +1650,12 @@ let () =
             test_tool_io_digest_survives_eviction;
           test_case "repeated tool input boundary" `Quick
             test_repeated_tool_call_input_boundary;
+          test_case "the seed stops where a yield already judged" `Quick
+            test_seed_stops_where_a_yield_already_judged;
+          test_case "a yield records the pairs it judged" `Quick
+            test_a_yield_records_the_pairs_it_judged;
+          test_case "the judged boundary rides the context" `Quick
+            test_judged_boundary_rides_the_context;
           test_case "repeated assistant text boundary" `Quick
             test_repeated_assistant_text_boundary;
           test_case "autonomous yield boundary contract" `Quick

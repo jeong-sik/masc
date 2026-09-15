@@ -36,7 +36,10 @@ let messages =
    window is handed on. *)
 let spent_window_budget_s = 1.0
 
-(* The resolver is the only door onto a deadline, here as on the call path. *)
+(* The resolver is the only door onto a deadline, here as on the call path.
+   Its rejection carries the operation, the parameter and the value it
+   refused, so a fixture budget the resolver will not take says which suite
+   and which number. *)
 let deadline_of ~clock ~timeout_s =
   match
     Http_client.resolve_explicit_deadline
@@ -46,7 +49,9 @@ let deadline_of ~clock ~timeout_s =
       ~timeout_s
   with
   | Ok deadline -> deadline
-  | Error _ -> failwith "the fixture budget was rejected"
+  | Error (Http_client.AcceptRejected { reason }) -> failwith reason
+  | Error _ ->
+    failwith "test_complete_admitted_window: the fixture deadline was refused for another reason"
 ;;
 
 let spent_window () =

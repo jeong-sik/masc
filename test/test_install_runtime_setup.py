@@ -1052,6 +1052,26 @@ class WorkspaceFromCurrentDirectory(unittest.TestCase):
             self.assertIn('--base-path', outside.stderr)
             self.assertFalse((elsewhere / '.masc').exists())
 
+    def test_doctor_and_setup_answer_in_the_same_order_as_init(self):
+        # The setup journey offers the workspace doctor reports, so a workspace
+        # cwd has to reach doctor too; setup without a terminal refuses by name.
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            workspace = home / 'ws'
+            elsewhere = home / 'elsewhere'
+            workspace.mkdir()
+            elsewhere.mkdir()
+            seeded = self.run_masc(home, elsewhere, 'init', '--config-only', '--base-path', str(workspace))
+            self.assertEqual(seeded.returncode, 0, seeded.stderr)
+            doctor = self.run_masc(home, workspace, 'doctor', '--json')
+            self.assertEqual(doctor.returncode, 0, doctor.stderr)
+            self.assertEqual(json.loads(doctor.stdout)['base_path'], os.path.realpath(workspace))
+            nowhere = self.run_masc(home, elsewhere, 'doctor', '--json')
+            self.assertIsNone(json.loads(nowhere.stdout)['base_path'])
+            setup = self.run_masc(home, elsewhere, 'setup', '--no-tui')
+            self.assertNotEqual(setup.returncode, 0)
+            self.assertIn('No MASC workspace was found', setup.stderr)
+
 
 @unittest.skipUnless(BINARY, 'actual binary is supplied by targeted CI')
 class InstalledModelCatalog(unittest.TestCase):

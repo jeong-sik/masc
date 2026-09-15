@@ -92,8 +92,26 @@ let journal : L.journaled_event list =
     { L.seq; ts = 1_762_300_000.0 +. (float_of_int seq *. 0.5); event })
 ;;
 
-let page ?(redact_json = Fun.id) ~since_seq ~limit () =
-  Api.chat_events_page ~operation_id:"kmsg-events" ~since_seq ~limit ~redact_json journal
+(* The journal as the store holds it: one encoded row per line. *)
+let rows_of entries =
+  String.concat "" (List.map (fun entry -> L.journaled_event_to_string entry ^ "\n") entries)
+;;
+
+let rows = rows_of journal
+let journal_file = "kmsg-events.jsonl"
+
+let served_page ?(start = L.From_first_row) ~since_seq ~limit rows =
+  match L.page_of_rows ~path:journal_file ~since_seq ~start ~limit rows with
+  | Ok page -> page
+  | Error failure -> fail ("page refused: " ^ L.page_failure_to_string failure)
+;;
+
+let page ?(redact_json = Fun.id) ?start ~since_seq ~limit () =
+  Api.chat_events_page
+    ~operation_id:"kmsg-events"
+    ~since_seq
+    ~redact_json
+    (served_page ?start ~since_seq ~limit rows)
 ;;
 
 let field name = function
@@ -168,10 +186,132 @@ let test_chat_events_page_walks_by_seq () =
        (Api.chat_events_page
           ~operation_id:"kmsg-events"
           ~since_seq:L.Whole_turn
-          ~limit:3
           ~redact_json:Fun.id
-          [])
-     = `Null)
+          (L.empty_page L.From_first_row))
+     = `Null);
+  check int
+    "an empty page from the first row hands back offset 0"
+    0
+    (int_field
+       "next_since_offset"
+       (Api.chat_events_page
+          ~operation_id:"kmsg-events"
+          ~since_seq:L.Whole_turn
+          ~redact_json:Fun.id
+          (L.empty_page L.From_first_row)))
+;;
+
+(* The pages a client reads by feeding both cursors back are the journal
+   filtered past the position it started from: no row twice, none missing,
+   and each page starts where the page before ended in the bytes. *)
+let test_chat_events_page_walks_by_offset () =
+  let seqs_of entries = List.map (fun (entry : L.journaled_event) -> entry.seq) entries in
+  let walk ~since_seq =
+    let rec next ~since_seq ~start acc =
+      let body = page ~start ~since_seq ~limit:3 () in
+      let acc = List.rev_append (seqs body) acc in
+      let next_since_seq =
+        match field "next_since_seq" body with
+        | `Int seq -> L.After_seq seq
+        | `Null -> L.Whole_turn
+        | _ -> fail "next_since_seq is neither an int nor null"
+      in
+      let start = L.From_offset (int_field "next_since_offset" body) in
+      if bool_field "has_more" body
+      then next ~since_seq:next_since_seq ~start acc
+      else List.rev acc
+    in
+    next ~since_seq ~start:L.From_first_row []
+  in
+  check (list int)
+    "a walk from the whole journal serves every row once"
+    (seqs_of journal)
+    (walk ~since_seq:L.Whole_turn);
+  check (list int)
+    "a walk from a held seq serves the rows past it once"
+    (seqs_of (List.filter (fun (entry : L.journaled_event) -> entry.seq > 1) journal))
+    (walk ~since_seq:(L.After_seq 1));
+  let first = page ~since_seq:L.Whole_turn ~limit:3 () in
+  check int
+    "the first page ends in the bytes after its last row"
+    (String.length (rows_of (List.filteri (fun index _ -> index < 3) journal)))
+    (int_field "next_since_offset" first);
+  let last = page ~since_seq:L.Whole_turn ~limit:L.page_max_limit () in
+  check int
+    "a page to the end hands back the end of the rows"
+    (String.length rows)
+    (int_field "next_since_offset" last);
+  check bool
+    "the wire spells the first row as an absent offset"
+    true
+    (L.page_start_of_wire None = Some L.From_first_row
+     && L.page_start_of_wire (Some 0) = Some (L.From_offset 0)
+     && Option.is_none (L.page_start_of_wire (Some (-1))))
+;;
+
+(* A page decodes the rows it serves and the one after, not the rest: a
+   corrupt row further down fails only the page that reaches it. A cursor the
+   rows cannot place is refused by its own name. *)
+let test_chat_events_page_refuses_what_it_cannot_place () =
+  let with_corrupt_tail = rows ^ "this complete row is not an envelope\n" in
+  check (list int)
+    "a page before the corrupt row is served"
+    [ 0; 1; 2 ]
+    (List.map
+       (fun (entry : L.journaled_event) -> entry.seq)
+       (served_page ~since_seq:L.Whole_turn ~limit:3 with_corrupt_tail).events);
+  let refused ~since_seq ~start ~limit rows =
+    match L.page_of_rows ~path:journal_file ~since_seq ~start ~limit rows with
+    | Ok page ->
+      failf "a page was served with %d events" (List.length page.L.events)
+    | Error failure -> failure
+  in
+  check bool
+    "the page that reaches the corrupt row is corrupt"
+    true
+    (match
+       refused
+         ~since_seq:(L.After_seq 5)
+         ~start:(L.From_offset (String.length (rows_of (List.filteri (fun index _ -> index < 6) journal))))
+         ~limit:3
+         with_corrupt_tail
+     with
+     | L.Page_corrupt _ -> true
+     | L.Page_offset_past_rows _ | L.Page_offset_inside_row _ | L.Page_cursor_mismatch _ ->
+       false);
+  check bool
+    "an offset inside a row is refused"
+    true
+    (match refused ~since_seq:L.Whole_turn ~start:(L.From_offset 1) ~limit:3 rows with
+     | L.Page_offset_inside_row 1 -> true
+     | L.Page_offset_inside_row _ | L.Page_offset_past_rows _ | L.Page_cursor_mismatch _
+     | L.Page_corrupt _ -> false);
+  check bool
+    "an offset past the rows is refused"
+    true
+    (match
+       refused
+         ~since_seq:L.Whole_turn
+         ~start:(L.From_offset (String.length rows + 1))
+         ~limit:3
+         rows
+     with
+     | L.Page_offset_past_rows { offset; rows_end } ->
+       offset = String.length rows + 1 && rows_end = String.length rows
+     | L.Page_offset_inside_row _ | L.Page_cursor_mismatch _ | L.Page_corrupt _ -> false);
+  let first = page ~since_seq:L.Whole_turn ~limit:3 () in
+  check bool
+    "an offset paired with a seq from a later page is refused"
+    true
+    (match
+       refused
+         ~since_seq:(L.After_seq 5)
+         ~start:(L.From_offset (int_field "next_since_offset" first))
+         ~limit:3
+         rows
+     with
+     | L.Page_cursor_mismatch { since_seq; row_seq; _ } -> since_seq = 5 && row_seq = 3
+     | L.Page_offset_past_rows _ | L.Page_offset_inside_row _ | L.Page_corrupt _ -> false)
 ;;
 
 (* The response is the journal as written: each element is the stage-1
@@ -426,6 +566,11 @@ let () =
         ] )
     ; ( "chat events"
       , [ test_case "page walks by seq" `Quick test_chat_events_page_walks_by_seq
+        ; test_case "page walks by offset" `Quick test_chat_events_page_walks_by_offset
+        ; test_case
+            "page refuses what it cannot place"
+            `Quick
+            test_chat_events_page_refuses_what_it_cannot_place
         ; test_case
             "events are the journal lines"
             `Quick

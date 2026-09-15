@@ -45,6 +45,11 @@
  (libraries masc_test_deps))
 
 (test
+ (name test_keeper_producer_route)
+ (modules test_keeper_producer_route)
+ (libraries masc_test_deps))
+
+(test
  (name test_operator_task_attention)
  (modules test_operator_task_attention)
  (libraries masc_test_deps))

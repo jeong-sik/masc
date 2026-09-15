@@ -189,9 +189,12 @@ let create_scoped_client ~sw env uri =
   let request_close () =
     (* Delivering [stop] is this caller's job and must happen even while it
        unwinds. It suspends nowhere, so protecting it costs nothing and buys
-       the guarantee every cleanup site depends on: this call returns. *)
+       the guarantee every cleanup site now depends on: this call returns.
+       [try_resolve] rather than a check and a resolve, so that guarantee
+       holds by construction instead of by an argument about which callers
+       can reach the same client at once. *)
     Eio.Cancel.protect (fun () ->
-      if not (Eio.Promise.is_resolved stop) then Eio.Promise.resolve stop_request ())
+      ignore (Eio.Promise.try_resolve stop_request () : bool))
   in
   let close () =
     request_close ();
@@ -395,6 +398,13 @@ let shutdown t =
           t.connect_failures <- Host_map.empty;
           all)
       in
+      (* Every signal first, then the joins. Shutdown is the one caller that
+         waits for teardown, and its walk has the shape that stranded clients
+         in the eviction sweep: these are already out of [t.idle], so a join
+         that unwinds part way through would leave the rest holding sockets
+         nothing can reach. Signalling up front makes the order of the joins
+         -- and whether one of them unwinds -- stop mattering. *)
+      List.iter (fun e -> request_close_client e.client) leftover;
       List.iter (fun e ->
         try close_client e.client with
         | Eio.Cancel.Cancelled _ as exn -> raise exn

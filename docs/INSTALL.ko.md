@@ -153,10 +153,13 @@ bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
 재설치할 때 `--force`나 `--wizard`는 `bash /tmp/masc-install.sh` 명령 끝에 붙입니다.
 
 `--prefix` 기본값은 `$HOME/.local/bin`입니다. 터미널의 첫 설치에서는
-`.masc`를 담을 workspace 경로를 묻습니다. 새 workspace에는 `$HOME`을
-제안하므로 그대로 선택하면 데이터는 그 workspace 아래 `.masc`에 생깁니다. 현재 디렉터리에
-기존 `.masc/config`가 있으면 그 workspace를 제안합니다. 명시한 `--base-path`는
-질문 없이 사용하며, 비대화형 또는 `--no-wizard`에서는 현재 디렉터리를 유지합니다. `.masc`는 지정한 base path 아래에 생깁니다. 설치 위치와
+`.masc`를 담을 workspace 경로를 묻습니다. 새 workspace에는 설정 화면과 같은
+`$HOME/MASC`를 제안합니다. 현재 디렉터리에 기존 `.masc/config`가 있으면 그
+workspace를 제안합니다. 명시한 `--base-path`는 질문 없이 사용하며, 비대화형 또는
+`--no-wizard`에서는 현재 디렉터리를 유지합니다. `.masc`는 지정한 base path 아래에 생깁니다.
+터미널에서 설치하면서 workspace 설정을 새로 만들 때, 그 workspace를 이후 `masc`가 찾는
+기본값으로 기록합니다. 기존 설정을 유지하는 재설치는 기록된 기본값을 건드리지 않습니다. 터미널
+없이 스크립트로 설치하면 기록하지 않으므로, 검증이나 CI 설치가 이 컴퓨터의 기본값을 바꾸지 않습니다. 설치 위치와
 작업 데이터 위치는 독립적입니다. 릴리스 페이지의 `install.sh`는 해당 버전의 자산을 설치하며, 설치기 수정은
 릴리스 노트에 소스 커밋과 함께 기록합니다. 바이너리 태그는 바꾸지 않습니다.
 체크섬이 없거나 불일치하면 설치를 중단합니다.
@@ -530,8 +533,8 @@ bash /tmp/masc-install.sh --uninstall
 중단된 설치 transaction이 남아 있으면 이를 먼저 복구하라는 오류를 냅니다.
 
 데이터도 제거하려면 **실제 설치했던 workspace 경로**를 명시해야 합니다.
-아래 예시는 그 workspace 아래 `.masc`를 삭제합니다. HOME을 workspace로
-선택했다면 `--base-path "$HOME"`입니다. `.masc` 디렉터리 자체를 base path로 넣지 마세요.
+아래 예시는 그 workspace 아래 `.masc`를 삭제합니다. 제안된 workspace를 그대로
+골랐다면 `--base-path "$HOME/MASC"`입니다. `.masc` 디렉터리 자체를 base path로 넣지 마세요.
 
 ```bash
 bash /tmp/masc-install.sh --uninstall --purge-data \

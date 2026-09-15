@@ -13,7 +13,7 @@ def section(start, end):
 
 
 class UpgradeConfigTest(unittest.TestCase):
-    def exercise(self, reset=False, missing_overlay=False, init_failure="", later_failure=False):
+    def exercise(self, reset=False, missing_overlay=False, init_failure="", later_failure=False, terminal=None):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
             config = base / '.masc/config'
@@ -45,20 +45,21 @@ seed_base=""
 skills_only=0
 config_only=0
 force_seed=0
+record_default=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --base-path) seed_base="$2"; shift 2 ;;
     --skills-only) skills_only=1; shift ;;
     --config-only) config_only=1; shift ;;
     --force) force_seed=1; shift ;;
-    # The installer's seed asks for this; `masc init` does not record a
-    # default workspace without it. Accepted and ignored: what this fake
-    # stands in for is the config seed, not the record.
-    --record-default) shift ;;
+    # The installer asks for this only on a terminal. The fake leaves a marker
+    # so the test can tell a terminal install from a scripted one.
+    --record-default) record_default=1; shift ;;
     *) echo "unexpected init argument: $1" >&2; exit 2 ;;
   esac
 done
 test -n "$seed_base"
+if [ "$record_default" -eq 1 ]; then touch "$seed_base/record-default-requested"; fi
 cfg="$seed_base/.masc/config"
 if [ "$skills_only" -eq 0 ]; then
   for name in runtime.toml agent-core-models-overlay.toml optional.toml; do
@@ -108,6 +109,7 @@ PARTIAL_FILES=()
 log() { printf '%s\\n' "$*"; }
 die() { echo "$*" >&2; exit 1; }
 run_wizard() { touch "$BASE_PATH/wizard-ran"; }
+is_tty() { [ "$TEST_TERMINAL" = 1 ]; }
 verify_checksum() { :; }
 curl() {
   local output=""
@@ -132,7 +134,8 @@ curl() {
             script += commit + section(commit, '\nconfigure_shell_path') + '\n'
             self.assertLess(INSTALLER.index('# --- 4. seed minimum config'), INSTALLER.index(commit))
             env = dict(os.environ, BASE_PATH=str(base), PREFIX=str(base), DEST=str(binary), TEST_RESET=str(int(reset)),
-                       TEST_INIT_FAILURE=init_failure, TEST_LATER_FAILURE=str(int(later_failure)))
+                       TEST_INIT_FAILURE=init_failure, TEST_LATER_FAILURE=str(int(later_failure)),
+                       TEST_TERMINAL=str(int(bool(terminal))))
             result = subprocess.run(['bash', '-c', script], env=env, text=True, capture_output=True)
             diagnostics = result.stdout + result.stderr
             if later_failure or init_failure == 'config':
@@ -161,6 +164,8 @@ curl() {
                              'ordinary upgrade must preserve removed optional config')
             self.assertEqual(skill.read_text(), 'operator skill\n')
             self.assertEqual((base / '.masc/skills/browser-lanes/SKILL.md').read_text(), 'builtin\n')
+            if terminal is not None:
+                self.assertEqual((base / 'record-default-requested').exists(), terminal)
 
     def test_force_upgrade_preserves_custom_config_and_team(self):
         self.exercise()
@@ -170,6 +175,14 @@ curl() {
 
     def test_skill_seed_failure_preserves_full_diagnostics_and_fails_install(self):
         self.exercise(init_failure="skills")
+
+    # A scripted install once left a temp workspace as a developer machine's
+    # default (measured 2026-09-15). Only a person on a terminal records one.
+    def test_scripted_config_seed_does_not_record_the_default_workspace(self):
+        self.exercise(missing_overlay=True, terminal=False)
+
+    def test_terminal_config_seed_records_the_default_workspace(self):
+        self.exercise(missing_overlay=True, terminal=True)
 
     def test_config_seed_failure_preserves_full_diagnostics_and_fails_install(self):
         self.exercise(missing_overlay=True, init_failure="config")

@@ -189,37 +189,6 @@ let provider_config_for_turn ?on_provider_failure ~turn_config agent =
     Error detailed.error
 ;;
 
-(* A caller's budget as one window across the exact-fit path: the
-   count-tokens measurement first, then the completion or the stream.
-   [open_] anchors it at the resolved deadline as the measurement starts;
-   [remaining] is what the next stage may arm from it, in seconds from now,
-   and says when the measurement spent it, so no stage is handed a bound
-   that is not greater than zero. The caller names the phase a spent window
-   is. *)
-module Window = struct
-  type 'clock t =
-    | Unbounded
-    | Bounded of
-        { clock : 'clock
-        ; timeout_s : float
-        ; deadline_at : float
-        }
-
-  let open_ = function
-    | Llm_provider.Http_client.Unbounded -> Unbounded
-    | Llm_provider.Http_client.Bounded (clock, timeout_s) ->
-      Bounded { clock; timeout_s; deadline_at = Eio.Time.now clock +. timeout_s }
-  ;;
-
-  (* [`Spent] carries the budget as declared, for the message. *)
-  let remaining = function
-    | Unbounded -> `Unbounded
-    | Bounded { clock; timeout_s; deadline_at } ->
-      let remaining_s = deadline_at -. Eio.Time.now clock in
-      if Float.compare remaining_s 0.0 <= 0 then `Spent timeout_s else `Remaining remaining_s
-  ;;
-end
-
 (* The measurement spent the caller's whole window; the next stage is not
    sent. *)
 let window_spent_by_the_measurement ~operation ~parameter ~seconds ~phase ~next_stage =
@@ -315,18 +284,16 @@ let dispatch_sync
              | Ok call_deadline ->
                (* The call deadline is one window from here. The measurement
                   spends from it -- its permit wait and its count round trip
-                  -- and the completion arms what that left, permit wait
+                  -- and the completion spends the rest of it, permit wait
                   included. *)
-               let call_window = Window.open_ call_deadline in
+               let call_window = Llm_provider.Deadline_window.open_ call_deadline in
                let measured =
                  Llm_provider.Complete.measure_request
                    ~sw
                    ~net:agent.net
                    ?clock
                    ?timeout_s:agent.options.body_timeout_s
-                   ~next_stage:
-                     (Llm_provider.Complete.Completion
-                        { call_timeout_s = agent.options.call_timeout_s })
+                   ~next_stage:(Llm_provider.Complete.Completion { call_window })
                    ?permit_wait:agent.options.permit_wait
                    serialized
                  |> Result.map_error
@@ -346,23 +313,19 @@ let dispatch_sync
                    with
                    | Error error -> Error (fit_error ~binding error)
                    | Ok admitted ->
-                     (match
-                        match Window.remaining call_window with
-                        | `Unbounded -> Ok None
-                        | `Remaining remaining_s -> Ok (Some remaining_s)
-                        | `Spent seconds ->
-                          Error
-                            (window_spent_by_the_measurement
-                               ~operation:"dispatch_sync"
-                               ~parameter:"call_timeout_s"
-                               ~seconds
-                               ~phase:Llm_provider.Http_client.Non_streaming_body
-                               ~next_stage:"completion")
-                      with
-                      | Error error ->
+                     (match Llm_provider.Deadline_window.remaining call_window with
+                      | `Spent seconds ->
                         Error
-                          (Provider_failure_attribution.of_http_error ~binding ~provider error)
-                      | Ok call_timeout_s ->
+                          (Provider_failure_attribution.of_http_error
+                             ~binding
+                             ~provider
+                             (window_spent_by_the_measurement
+                                ~operation:"dispatch_sync"
+                                ~parameter:"call_timeout_s"
+                                ~seconds
+                                ~phase:Llm_provider.Http_client.Non_streaming_body
+                                ~next_stage:"completion"))
+                      | `Unbounded | `Remaining _ ->
                         Llm_provider.Complete.complete_admitted
                           ~sw
                           ~net:agent.net
@@ -370,7 +333,7 @@ let dispatch_sync
                           ?transport:agent.options.transport
                           admitted
                           ?body_timeout_s:agent.options.body_timeout_s
-                          ?call_timeout_s
+                          ~call_window
                           ?permit_wait:agent.options.permit_wait
                           ?request_wire_observer:agent.pre_dispatch_serialization_observer
                           ()
@@ -469,7 +432,7 @@ let dispatch_stream
                   before the first token: the count round trip spends from
                   it, and the stream arms what that left; permit waits are
                   queueing and spend none of it. *)
-               let admission_window = Window.open_ admission_deadline in
+               let admission_window = Llm_provider.Deadline_window.open_ admission_deadline in
                let measured =
                  Llm_provider.Complete.measure_request
                    ~sw
@@ -478,7 +441,7 @@ let dispatch_stream
                    ?timeout_s:agent.options.body_timeout_s
                    ~next_stage:
                      (Llm_provider.Complete.Stream
-                        { admission_timeout_s = agent.options.admission_timeout_s
+                        { admission_window
                         ; first_event_timeout_s = agent.options.first_event_timeout_s
                         })
                    ?permit_wait:agent.options.permit_wait
@@ -526,10 +489,9 @@ let dispatch_stream
                                 ~next_stage:"stream")
                          else Ok (Some left_s)
                      in
-                     let admission_left =
-                       match Window.remaining admission_window with
-                       | `Unbounded -> Ok None
-                       | `Remaining remaining_s -> Ok (Some remaining_s)
+                     let admission_unspent =
+                       match Llm_provider.Deadline_window.remaining admission_window with
+                       | `Unbounded | `Remaining _ -> Ok ()
                        | `Spent seconds ->
                          Error
                            (window_spent_by_the_measurement
@@ -539,10 +501,10 @@ let dispatch_stream
                               ~phase:Llm_provider.Http_client.Queue
                               ~next_stage:"stream")
                      in
-                     (match first_event_left, admission_left with
+                     (match first_event_left, admission_unspent with
                       | Error error, _ | Ok _, Error error ->
                         Error (Provider_failure_attribution.of_http_error ~binding ~provider error)
-                      | Ok first_event_timeout_s, Ok admission_timeout_s ->
+                      | Ok first_event_timeout_s, Ok () ->
                         let admitted =
                           match first_event_timeout_s with
                           | None -> admitted
@@ -555,7 +517,7 @@ let dispatch_stream
                           ~sw
                           ~net:agent.net
                           ?clock
-                          ?admission_timeout_s
+                          ~admission_window
                           ?permit_wait:agent.options.permit_wait
                           ?transport:agent.options.transport
                           admitted

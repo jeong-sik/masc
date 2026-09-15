@@ -120,11 +120,11 @@ type options =
         the wait left. [body_timeout_s] still arms inside it, so the narrower
         bound fires and names its own knob. Threaded through
         {!Pipeline.stage_route} into {!Llm_provider.Complete.complete_serialized}
-        and {!Llm_provider.Complete.complete_admitted} as their
-        [call_timeout_s]; on the exact-fit path the count-tokens request,
-        its permit wait and its round trip, spends from the same window
-        first, and the completion arms what it left. The streaming path does
-        not read it, a stream's duration being its own. Requires [clock].
+        as its [call_timeout_s]. On the exact-fit path it is opened once as a
+        window: the count-tokens request, its permit wait and its round trip,
+        spends from it first, and {!Llm_provider.Complete.complete_admitted}
+        spends the rest from the same deadline. The streaming path does not
+        read it, a stream's duration being its own. Requires [clock].
         @since 0.231.15 *)
   ; admission_timeout_s : float option
     (** Bound on the wait for a provider admission permit before a streaming
@@ -132,12 +132,12 @@ type options =
         call still queued when it runs out ends as
         [TimeoutError { phase = Queue }] with nothing sent; a granted stream
         runs under its own budgets. Threaded through {!Pipeline.stage_route}
-        into {!Llm_provider.Complete.complete_stream_serialized} and
-        {!Llm_provider.Complete.complete_stream_admitted}; on the exact-fit
-        path it is one window from the call over both permit waits, the
-        count-tokens request's and the stream's, and over the count round
+        into {!Llm_provider.Complete.complete_stream_serialized}. On the
+        exact-fit path it is one window from the call over both permit waits,
+        the count-tokens request's and the stream's, and over the count round
         trip between them, which a late permit leaves only what the window
-        has left. The non-streaming path's whole-call bound is
+        has left; {!Llm_provider.Complete.complete_stream_admitted} is handed
+        that window. The non-streaming path's whole-call bound is
         [call_timeout_s]. Requires [clock].
         @since 0.231.15 *)
   ; permit_wait : Llm_provider.Provider_admission.permit_wait Atomic.t option

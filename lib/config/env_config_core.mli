@@ -184,7 +184,8 @@ type base_path_source =
 val base_path_source_opt : unit -> (base_path_source * string) option
 (** Resolution order: [MASC_BASE_PATH] > the workspace a past [masc setup]
     recorded. Explicit input always wins over the record.
-    A record that no longer holds a [.masc] directory is not used. *)
+    A record whose path holds no [.masc/config] directory is not used: [.masc]
+    alone also exists under a home directory as the user skill source. *)
 
 type persisted_default =
   | No_record
@@ -215,6 +216,9 @@ type record_outcome =
           a suite that seeds a workspace in a temp dir would otherwise leave
           that path as the machine's default until the directory vanished. *)
   | Record_failed of { record : string; reason : string }
+  | Not_a_workspace of { path : string }
+      (** [path] holds no [.masc/config] directory, so the reader would ignore
+          the record as stale; nothing is written. *)
 
 val record_default_base_path : string -> record_outcome
 (** Record the absolute canonical identity of the existing [path] as the

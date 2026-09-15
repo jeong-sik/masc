@@ -1,6 +1,6 @@
 ---
 name: browser-lanes
-description: Use MASC Browser tools to read or operate Firefox/Zen tabs, inspect images, and verify requested web actions. Use for Browser Lane work and session, selector, or browser connection failures.
+description: Use MASC Browser tools to read or operate Firefox/Zen tabs, inspect images, and verify requested web actions. Use for Browser Lane work, Slack Web channel and message collection, public Reddit or X/Twitter-style feeds and threads, and session, selector, or browser connection failures.
 ---
 
 # Browser Lane
@@ -32,12 +32,16 @@ scope가 null이면 생략한다. 선택 요소와 읽기 범위는 다르므로
 
 ## 필요한 동선만 선택하기
 
-현재 사이트·요청에 맞는 instruction을 Available 목록에서 골라 `keeper_skill`로 읽고
-이 스킬과 합쳐 쓴다. identity는 그 목록에서 복사한다. 같은 revision의 지침을 이미
-읽어 가지고 있으면 재호출하지 않는다. 다른 사이트나 모든 참조를 미리 읽지 않는다.
-공개 Reddit·X/Twitter형 피드·스레드라면 `browser-public-social`을 사이트 지침으로
-선택하고, 요청한 페이지 계열의 reference 하나만 추가로 읽는다. 로그인·게시·투표·DM은
-이 read-only 지침의 범위가 아니다.
+사이트별 지침은 이 스킬의 참조 파일에 있다. 요청한 사이트에 맞는 파일만 읽고, 다른
+사이트나 모든 참조를 미리 읽지 않는다. 같은 revision의 파일을 이미 읽어 가지고 있으면
+다시 읽지 않는다.
+
+- Slack Web 채널 찾기, 메시지·스레드 수집: [Slack Web](references/sites/slack.md).
+- 공개 Reddit·X/Twitter형 피드·스레드: [공개 소셜 공통](references/sites/public-social.md)과
+  요청한 페이지 계열 하나만 — [Reddit형](references/sites/reddit.md) 또는
+  [X/Twitter형](references/sites/microblog.md). 로그인·게시·투표·DM은 이 read-only
+  지침의 범위가 아니다.
+
 TUI Browser Lane에 여러 관측 탭이 보이면 `1`–`9`로 표시된 탭을 직접 선택할 수
 있다. 같은 탭을 다시 누르면 현재 관측과 스크롤을 유지하며, 다른 탭을 고르면 그
 탭을 새로 읽는다. 숫자 위치만으로 URL이나 페이지 정체성을 추측하지 말고, 새 읽기의

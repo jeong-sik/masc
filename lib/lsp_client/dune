@@ -20,6 +20,7 @@
   masc.masc_core
   masc.masc_log
   masc.masc_process
+  masc.watched_work
   cstruct
   eio
   eio.unix

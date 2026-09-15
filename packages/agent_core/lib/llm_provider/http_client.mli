@@ -339,8 +339,15 @@ val governing_timeout_knob
     [Unbounded] means no timeout was requested and therefore needs no clock.
     [Bounded] carries the exact clock and timeout supplied by the caller.
 
+    Private: [resolve_explicit_deadline] is the only way to build one, so the
+    check it makes is the only shape that exists. A [Bounded] carrying
+    [infinity] reads as a deadline everywhere and bounds nothing -- an eio
+    sleep of an infinite span never wakes -- and the resolver rejects it along
+    with [nan] and anything not greater than zero. Consumers still match on
+    the constructors; they just cannot build one.
+
     @stability Internal *)
-type 'clock explicit_deadline =
+type 'clock explicit_deadline = private
   | Unbounded
   | Bounded of 'clock * float
 

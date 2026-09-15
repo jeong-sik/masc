@@ -171,7 +171,7 @@ let is_dsk_path path =
 let relay_to_board ~author content =
   try
     let result =
-      Board_tool_dispatch.handle_tool "masc_board_post"
+      Board_tool_dispatch.handle_tool ~result_boundary:Tool_output.Unprojected "masc_board_post"
         (`Assoc
           [ ("title", `String "MSX 아케이드")
           ; ("content", `String content)

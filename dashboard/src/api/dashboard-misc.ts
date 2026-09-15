@@ -432,6 +432,11 @@ export interface VerificationRequest {
   required_artifacts: string[]
   submitted_evidence: string[]
   evidence_projection_error: string | null
+  // The producer's whole claim when it gave up on the task. A one-way signal:
+  // a request carrying this is a stop, and only the stop path writes it. Null
+  // does not mean "a completion" — stops submitted before the record kept the
+  // copy have none either.
+  cancellation_reason: string | null
 }
 
 export interface VerificationRequestsResponse {

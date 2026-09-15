@@ -32,6 +32,7 @@ val execute_with_observers
   -> ?gate_context:(unit -> Keeper_gate.causal_context)
   -> ?gate_grant:Keeper_gate.cycle_grant
   -> ?agent_core_invocation:Agent_core.Tool_contract.Invocation.t
+  -> ?result_projection:Tool_output.model_projection
   -> input:Yojson.Safe.t
   -> unit
   -> execution_result
@@ -54,6 +55,7 @@ val execute_with_observers_from_meta
   -> ?gate_context:(unit -> Keeper_gate.causal_context)
   -> ?gate_grant:Keeper_gate.cycle_grant
   -> ?agent_core_invocation:Agent_core.Tool_contract.Invocation.t
+  -> ?result_projection:Tool_output.model_projection
   -> input:Yojson.Safe.t
   -> unit
   -> execution_result

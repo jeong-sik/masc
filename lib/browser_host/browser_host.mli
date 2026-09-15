@@ -72,9 +72,14 @@ val resolve_config
     from the workspace connection file, the host reads that file again. The
     file is the desired port, not proof of a server, so the host moves only
     when its current address no longer answers [/browser-lane/ping] and the
-    address the file names does; otherwise it retries where it is. A result
-    whose server moved is not retried at the new address: its request
-    belonged to the server that issued it, so the host returns to polling. *)
+    address the file names does; otherwise it retries where it is.
+
+    A result is sent again only when the request may not have reached the
+    server: no connection, a broken exchange, or no answer in time. A result
+    the server answered, with any status or a body the host cannot accept, is
+    logged as undelivered and the host returns to polling. A result whose
+    server moved is not sent to the new address either: its request belonged
+    to the server that issued it. *)
 val run : Eio_unix.Stdenv.base -> config -> (unit, string) result
 
 (** The BiDi host: the same poll loop with commands dispatched to a loopback

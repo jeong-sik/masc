@@ -2,7 +2,8 @@ module Types = Masc_domain
 
 (** Unit tests for Tool_input_validation — AGENT_CORE-delegated strict validation.
 
-    Tests the integration: MASC JSON Schema -> Tool_bridge.params_of_json_schema
+    Tests the integration: MASC JSON Schema
+    -> Agent_core.Types.tool_schema_of_input_schema
     -> Agent_core.Tool_input_validation.validate -> pre_hook_action mapping.
 
     AGENT_CORE 0.212 (agent_core@6f3648d6, "hard-cut implicit agent governance") removed
@@ -32,25 +33,23 @@ let assert_contains label haystack needle =
 (* Helper: validate via the same pipeline as the pre-hook            *)
 (* ================================================================ *)
 
-(** Reproduce the exact validation pipeline used in the pre-hook:
-    JSON Schema -> params_of_json_schema -> AGENT_CORE validate. *)
+(** Reproduce the Agent-Core half of the pre-hook: the full JSON Schema becomes
+    the authoritative Agent-Core schema, then AGENT_CORE validate. *)
 let validate_via_agent_core ~tool_name ~(schema : Yojson.Safe.t) ~(args : Yojson.Safe.t)
   : Tool_dispatch.pre_hook_action =
-  let parameters = Tool_bridge.params_of_json_schema schema in
-  if parameters = [] then Pass
+  let agent_core_schema : Agent_core.Types.tool_schema =
+    match
+      Agent_core.Types.tool_schema_of_input_schema
+        ~name:tool_name
+        ~description:""
+        ~input_schema:schema
+        ()
+    with
+    | Ok s -> s
+    | Error err -> failwith ("test_tool_input_validation: " ^ err)
+  in
+  if agent_core_schema.Agent_core.Types.parameters = [] then Pass
   else
-    let json =
-      `Assoc
-        [ ("name", `String tool_name)
-        ; ("description", `String "")
-        ; ("parameters", `List (List.map Agent_core.Types.tool_param_to_json parameters))
-        ]
-    in
-    let agent_core_schema : Agent_core.Types.tool_schema =
-      match Agent_core.Types.tool_schema_of_json json with
-      | Ok s -> s
-      | Error err -> failwith ("test_tool_input_validation: " ^ err)
-    in
     match Agent_core.Tool_input_validation.validate agent_core_schema args with
     | Agent_core.Tool_input_validation.Valid coerced ->
       if Yojson.Safe.equal coerced args then Pass
@@ -939,7 +938,7 @@ let test_keeper_up_accepts_live_traffic_fields () =
     `Assoc
       [ "name", `String "alpha"
       ; "instructions", `String "do the thing"
-      ; "sandbox_profile", `String "local"
+      ; "sandbox_profile", `String "docker"
       ; "mention_targets", `List [ `String "alpha" ]
       ; "activation_mode", `String "autonomous"
       ; "runtime_id", `String "rt"
@@ -985,12 +984,10 @@ let test_keeper_clear_accepts_live_traffic_fields () =
    created with no network because of that gap, so the guard now pins the
    declaration rather than its absence.
 
-   This door checks declared-ness and type, not enum membership -- nothing in
-   [Tool_input_validation] or [Agent_core.Tool_middleware] reads "enum". The
-   advertised spellings are held to their typed owner by
-   [test_enum_mirror_sync], and an unparseable value is refused one layer in by
-   [Keeper_turn_up_args.resolve_requested_network_mode], which has its own
-   case. *)
+   This door checks declared-ness, type and enum membership. The advertised
+   spellings are held to their typed owner by [test_enum_mirror_sync], and
+   [Keeper_turn_up_args.resolve_requested_network_mode] parses the member it
+   receives, with its own case. *)
 let test_keeper_up_accepts_network_mode () =
   match
     Tool_input_validation.validate_args
@@ -1630,9 +1627,9 @@ let test_validate_args_tool_execute_rejects_bad_argv_type () =
        packages/agent_core/lib/tool_input_validation.ml, shared by every tool
        in the fleet, so a wording change there fails this test rather than
        anything in tool_execute — look at the formatter first.  This call
-       reaches the params branch of [validate], not [validate_authoritative]:
-       lib/tool_input_validation.ml builds the agent-core schema with
-       [Types.tool_schema_of_params], which leaves [input_schema = None]. *)
+       reaches [validate_authoritative]: lib/tool_input_validation.ml builds
+       the agent-core schema with [Types.tool_schema_of_input_schema], so the
+       type error is read off the full argv property schema. *)
     let expected =
       "Your call to \"tool_execute\":\n"
       ^ "{\"argv\":\"rg --files lib\"}\n"
@@ -1925,25 +1922,31 @@ let test_registered_hook_transition_strips_internal_agent_marker () =
   Alcotest.(check bool) "caller identity is not forwarded as a tool argument" true
     (Yojson.Safe.Util.member "agent_name" forwarded = `Null)
 
-let test_registered_hook_goal_list_preserves_blank_optional_enums () =
-  let args =
-    `Assoc
-      [
-        ("phase", `String " ");
-      ]
+(* The pre-hook holds a registered call to the enum Agent-Core holds a Keeper
+   call to. A blank string gets no exception: an optional enum field that is
+   present must still be a member, and a required one must be too. *)
+let test_registered_hook_goal_list_refuses_phases_outside_the_enum () =
+  let blocked_for phase =
+    let blocked, _forwarded =
+      run_registered_hook
+        ~schema:masc_goal_list_schema
+        ~tool_name:"masc_goal_list"
+        ~args:(`Assoc [ ("phase", `String phase) ])
+        ()
+    in
+    blocked
   in
-  let blocked, forwarded =
-    run_registered_hook
-      ~schema:masc_goal_list_schema
-      ~tool_name:"masc_goal_list"
-      ~args
-      ()
-  in
-  Alcotest.(check bool) "not blocked" true (Option.is_none blocked);
-  Alcotest.(check string)
-    "blank phase reaches the owning handler for explicit rejection"
-    " "
-    (assoc_string "phase" forwarded)
+  Alcotest.(check bool) "a declared phase passes" true
+    (Option.is_none (blocked_for "executing"));
+  List.iter
+    (fun phase ->
+       match blocked_for phase with
+       | Some rejection ->
+         assert_policy_validation_payload
+           ~label:(Printf.sprintf "phase %S" phase)
+           rejection
+       | None -> Alcotest.failf "phase %S outside the enum reached the handler" phase)
+    [ "notaphase"; " "; "" ]
 
 let test_registered_hook_goal_list_rejects_status_filter () =
   let args = `Assoc [ ("status", `String "active") ] in
@@ -1956,22 +1959,7 @@ let test_registered_hook_goal_list_rejects_status_filter () =
   in
   Alcotest.(check bool) "blocked" true (Option.is_some blocked)
 
-let test_registered_hook_goal_list_preserves_invalid_enum_for_handler () =
-  (* An invalid enum value must pass the hook so the handler performs the
-     rejection. *)
-  let args = `Assoc [("phase", `String "notaphase")] in
-  let blocked, forwarded =
-    run_registered_hook
-      ~schema:masc_goal_list_schema
-      ~tool_name:"masc_goal_list"
-      ~args
-      ()
-  in
-  Alcotest.(check bool) "not blocked" true (Option.is_none blocked);
-  Alcotest.(check string) "invalid value preserved for handler validation" "notaphase"
-    (assoc_string "phase" forwarded)
-
-let test_registered_hook_required_enum_blank_is_not_stripped () =
+let test_validate_names_the_enum_a_required_blank_missed () =
   let schema =
     `Assoc
       [
@@ -1989,17 +1977,30 @@ let test_registered_hook_required_enum_blank_is_not_stripped () =
         ("required", `List [ `String "mode" ]);
       ]
   in
-  let args = `Assoc [("mode", `String "")] in
-  let blocked, forwarded =
-    run_registered_hook
+  match
+    Tool_input_validation.validate
       ~schema
-      ~tool_name:"__tool_input_validation_required_enum_blank"
-      ~args
+      ~name:"__tool_input_validation_required_enum_blank"
+      ~args:(`Assoc [ ("mode", `String "") ])
       ()
-  in
-  Alcotest.(check bool) "not blocked" true (Option.is_none blocked);
-  Alcotest.(check string) "required blank preserved for handler validation" ""
-    (assoc_string "mode" forwarded)
+  with
+  | Error
+      { Tool_input_validation.violation =
+          Tool_input_validation.Field_errors
+            [ { Agent_core.Tool_input_validation.path = "/mode"
+              ; expected = Agent_core.Tool_input_validation.Expected_enum { allowed; _ }
+              ; _
+              }
+            ]
+      ; _
+      } ->
+    Alcotest.(check (list string))
+      "the refusal names the declared members"
+      [ "strict"; "lenient" ]
+      (List.map Yojson.Safe.Util.to_string allowed)
+  | Error { Tool_input_validation.message; _ } ->
+    Alcotest.failf "a blank required enum was refused for another rule: %s" message
+  | Ok _ -> Alcotest.fail "a blank required enum value passed validation"
 
 let schema_required_fields schema =
   match Yojson.Safe.Util.member "required" schema with
@@ -2583,14 +2584,12 @@ let () =
         test_registered_hook_transition_preserves_canonical_action;
       Alcotest.test_case "masc_transition strips internal markers" `Quick
         test_registered_hook_transition_strips_internal_agent_marker;
-      Alcotest.test_case "masc_goal_list preserves blank optional enum filters"
-        `Quick test_registered_hook_goal_list_preserves_blank_optional_enums;
+      Alcotest.test_case "masc_goal_list refuses phases outside the enum"
+        `Quick test_registered_hook_goal_list_refuses_phases_outside_the_enum;
       Alcotest.test_case "masc_goal_list rejects status filter" `Quick
         test_registered_hook_goal_list_rejects_status_filter;
-      Alcotest.test_case "masc_goal_list preserves invalid enum filters" `Quick
-        test_registered_hook_goal_list_preserves_invalid_enum_for_handler;
-      Alcotest.test_case "required enum blanks are not stripped" `Quick
-        test_registered_hook_required_enum_blank_is_not_stripped;
+      Alcotest.test_case "a required enum blank is refused by name" `Quick
+        test_validate_names_the_enum_a_required_blank_missed;
     ]);
     ("typed_tool_contract_harness", [
       Alcotest.test_case "rejects invalid typed call corpus" `Quick

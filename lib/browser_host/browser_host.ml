@@ -236,12 +236,37 @@ type destination_change = Unchanged | Moved
    lane token and registers no client. *)
 type lane_answer = Answers | Silent
 
+(* Whether a failed request reached the server. [Reached] is an answer the
+   server gave: a status, or a body this host could not accept. [Unreached]
+   is a request the server may never have received: no connection, an
+   exchange broken before an answer, or no answer within the window. *)
+type reach = Reached | Unreached
+
+let reach = function
+  | Http_status _ | Response_invalid | Response_too_large -> Reached
+  | Transport_failed | Request_timed_out -> Unreached
+
+(* Why a result stayed undelivered. Each is recorded once and the host
+   returns to polling; none is sent again. *)
+type result_undelivered =
+  | Refused_by_server of http_error
+  | Not_acknowledged
+  | Issuer_moved
+  | Token_unreadable of string
+
 let http_error_message = function
   | Http_status status -> Printf.sprintf "HTTP %d" status
   | Transport_failed -> "HTTP transport failed"
   | Response_invalid -> "invalid HTTP response"
   | Response_too_large -> "HTTP response exceeds 1 MiB"
   | Request_timed_out -> "HTTP request timed out"
+
+let result_undelivered_message = function
+  | Refused_by_server error ->
+      "the server received the result and did not accept it (" ^ http_error_message error ^ ")"
+  | Not_acknowledged -> "the server answered the result without an acknowledgement"
+  | Issuer_moved -> "the server that issued the request stopped answering and another answers"
+  | Token_unreadable detail -> detail
 
 (* A transport step under its deadline. The step's outcome stands when the
    step finished, even as the deadline passed; [None] only when it had not.
@@ -336,7 +361,10 @@ let run env config =
         receive ()
   in
   let forward = forward ~clock ~stdout:(Eio.Stdenv.stdout env) pending in
-  (* Single Eio domain; no suspension point between reading and replacing it. *)
+  (* Only the poll fiber reads and replaces this; the stdin fiber never
+     touches it, and the EOF disconnect reads it after both fibers end. The
+     pings between reading and replacing it suspend, but no other writer can
+     run in between. *)
   let server = ref config.server in
   let ask_lane info origin =
     match read_token config.token_file with
@@ -379,24 +407,34 @@ let run env config =
                        Moved)))
   in
   let rec publish info payload =
-    let* token = read_token config.token_file in
-    match post ~clock ~client ~server:!server ~config ~info ~token "result" payload with
-    | Ok (`Assoc fields) when List.assoc_opt "ok" fields = Some (`Bool true) -> Ok ()
-    | Ok _ -> Error "invalid result acknowledgement"
-    | Error (Http_status 400) ->
-        (* A restarted server no longer owns this request. Return to polling
-           so it can register the lane; retrying the old result would deadlock
-           reconnection. Record the lost receipt instead of claiming delivery. *)
-        Error "server rejected result; request ownership was lost"
-    | Error error ->
-        Log.Transport.warn "browser-host: result delivery failed: %s"
-          (http_error_message error);
-        Eio.Time.sleep clock reconnect_delay_sec;
-        (match follow_workspace info with
-         | Unchanged -> publish info payload
-         (* The server that issued the request no longer answers and another
-            does; polling there registers the lane again. *)
-         | Moved -> Error "workspace server moved; request ownership was lost")
+    match read_token config.token_file with
+    | Error detail -> Error (Token_unreadable detail)
+    | Ok token ->
+        (match post ~clock ~client ~server:!server ~config ~info ~token "result" payload with
+         | Ok (`Assoc fields) when List.assoc_opt "ok" fields = Some (`Bool true) -> Ok ()
+         | Ok _ -> Error Not_acknowledged
+         | Error error ->
+             (match reach error with
+              (* The server received these bytes and answered: a 400 for a
+                 request it no longer owns, a 413 for a body over its limit, a
+                 5xx for a failure it already met. The same bytes ask the same
+                 question again, so the host records the answer and polls. *)
+              | Reached -> Error (Refused_by_server error)
+              | Unreached ->
+                  Log.Transport.warn "browser-host: result delivery failed: %s"
+                    (http_error_message error);
+                  Eio.Time.sleep clock reconnect_delay_sec;
+                  (match follow_workspace info with
+                   | Unchanged -> publish info payload
+                   (* The server that issued the request no longer answers and
+                      another does; polling there registers the lane again. *)
+                   | Moved -> Error Issuer_moved)))
+  in
+  let record_delivery = function
+    | Ok () -> ()
+    | Error undelivered ->
+        Log.Transport.warn "browser-host: result not delivered: %s"
+          (result_undelivered_message undelivered)
   in
   let rec poll info () =
     let result =
@@ -410,10 +448,10 @@ let run env config =
         match next with
         | Empty -> Ok Continue
         | Reject id ->
-          let* () = publish info (failure id "unsupported live browser verb") in Ok Continue
+          record_delivery (publish info (failure id "unsupported live browser verb")); Ok Continue
         | Forward command ->
           match forward command with
-          | Replied payload -> let* () = publish info payload in Ok Continue
+          | Replied payload -> record_delivery (publish info payload); Ok Continue
           | Write_timed_out -> Ok (Stop "native frame write timed out") in
       dispatch () |> Result.map_error (fun detail -> Poll_failed detail)
     in

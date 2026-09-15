@@ -8,8 +8,9 @@
   - `ambiguous_browser_clients`: `clients`에서 하나를 골라 그 clientId로 다시 부른다.
   - `selected_client_disconnected`: `clients`에 남은 연결이 있으면 고른다. 없으면
     `no_live_client`와 같이 한다.
-  - `no_live_client`: `host`에 워크스페이스 포트(`workspace_port`)와 이 서버가 듣는
-    포트(`serving_port`), 판정(`verdict`)과 `message`가 있다. 이
+  - `no_live_client`: `host`에 워크스페이스 포트(`workspace_port`), 이 서버가 실제로
+    듣는 포트(`serving_port`), 지금 이 서버를 poll 하는 host 수(`polling_hosts`),
+    판정(`verdict`)과 `message`가 있다. 이
     `message`와 `retry`를 운영자에게 그대로 전한다. 고칠 수 있는 사람은 운영자뿐이라
     같은 호출을 되풀이해도 답은 같다.
 - 닫힌 automation 세션에서 작업해야 한다면 자신의 새 세션을 연다.

@@ -1341,7 +1341,7 @@ let add_routes ~sw ~clock router =
              in
              let voter = board_actor_author_for_write agent_name in
              let* args = json_upsert_string_field "voter" voter args in
-             let result = Board_tool.handle_tool "masc_board_vote" args in
+             let result = Board_tool.handle_tool ~result_boundary:Tool_output.Unprojected "masc_board_vote" args in
              let ok = Tool_result.is_success result in
              let msg = Tool_result.message result in
              let status = if ok then `OK else `Bad_request in
@@ -1381,7 +1381,7 @@ let add_routes ~sw ~clock router =
                    args
              in
              let* args = json_ensure_meta_source "dashboard_board_post" args in
-             let result = Board_tool.handle_tool "masc_board_post" args in
+             let result = Board_tool.handle_tool ~result_boundary:Tool_output.Unprojected "masc_board_post" args in
              let ok = Tool_result.is_success result in
              let msg = Tool_result.message result in
              let status = if ok then `Created else `Bad_request in
@@ -1412,7 +1412,7 @@ let add_routes ~sw ~clock router =
              in
              let author = board_actor_author_for_write agent_name in
              let* args = json_upsert_string_field "author" author args in
-             let result = Board_tool.handle_tool "masc_board_comment" args in
+             let result = Board_tool.handle_tool ~result_boundary:Tool_output.Unprojected "masc_board_comment" args in
              let ok = Tool_result.is_success result in
              let msg = Tool_result.message result in
              let status = if ok then `Created else `Bad_request in
@@ -1445,7 +1445,7 @@ let add_routes ~sw ~clock router =
              in
              let voter = board_actor_author_for_write agent_name in
              let* args = json_upsert_string_field "voter" voter args in
-             let result = Board_tool.handle_tool "masc_board_comment_vote" args in
+             let result = Board_tool.handle_tool ~result_boundary:Tool_output.Unprojected "masc_board_comment_vote" args in
              let ok = Tool_result.is_success result in
              let msg = Tool_result.message result in
              let status = if ok then `OK else `Bad_request in

@@ -1024,7 +1024,7 @@ let conformant_schema_value json =
          | other -> Yojson.Safe.to_string other)
         values
     in
-    "one of: " ^ String.concat " | " vocabulary
+    Types.enum_vocabulary_text vocabulary
   in
   let rec walk value =
     match value with

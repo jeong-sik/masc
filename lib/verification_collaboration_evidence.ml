@@ -49,15 +49,6 @@ let required_id args field =
   | Some value when value <> "" -> Ok value
   | Some _ | None -> Error (Invalid_request (field ^ " is required for an exact source lookup"))
 
-let optional_integer args field ~default =
-  match args with
-  | `Assoc fields ->
-    (match List.assoc_opt field fields with
-     | None -> Ok default
-     | Some (`Int value) -> Ok value
-     | Some _ -> Error (Invalid_request (field ^ " must be an integer when provided")))
-  | _ -> Error (Invalid_request "source lookup arguments must be an object")
-
 (* The same wire budget used by the verifier's bridge. Pages carry exact
    JSON text, not an excerpt; the digest pins every cursor to one observation. *)
 let page_source ~args source =
@@ -176,9 +167,7 @@ let submitted_source ~submitted_evidence reference =
 
 let read_board ~submitted_evidence ~args = protect (fun () ->
   let* post_id = required_id args "post_id" in
-  let* offset = optional_integer args "comment_offset" ~default:0 in
-  let* limit = optional_integer args "comment_limit" ~default:Board.Limits.default_comment_page_limit in
-  let* request = Board.Comment_page.request ~offset ~limit
+  let* request = Board.Comment_page.request_of_args args
     |> Result.map_error (fun error ->
       Invalid_request (Board.Comment_page.request_error_to_string error)) in
   let* source = submitted_source ~submitted_evidence ("board:" ^ post_id) in
@@ -191,12 +180,10 @@ let read_board ~submitted_evidence ~args = protect (fun () ->
        | Board.Comment_page.Offset_out_of_range { requested; total } ->
          Error (Invalid_request (Printf.sprintf
            "comment_offset %d names no comment: the submitted thread has %d" requested total))
-       | Board.Comment_page.Page { Board.Comment_page.offset; items; total; next_offset } ->
+       | Board.Comment_page.Page page ->
          page_source ~args (`Assoc ["source", `String "board"; "post", post;
-           "comments", `List items; "pagination", `Assoc ["offset", `Int offset;
-             "returned", `Int (List.length items); "total", `Int total;
-             "has_more", `Bool (Option.is_some next_offset);
-             "next_offset", (match next_offset with Some next -> `Int next | None -> `Null)]]))
+           "comments", `List page.Board.Comment_page.items;
+           "pagination", Board.Comment_page.pagination_to_yojson page]))
   | _ -> Error (Storage_failed "invalid submitted Board snapshot"))
 
 let read_fusion ~submitted_evidence ~args = protect (fun () ->

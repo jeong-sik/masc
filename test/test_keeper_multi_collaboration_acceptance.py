@@ -292,6 +292,44 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
             {"keeper": "rw-x-build-a", "mode": "yolo"},
         )
 
+    def test_board_thread_read_follows_next_offset_to_the_last_page(self):
+        pages = {
+            0: {"pagination": {"offset": 0, "next_offset": 2}, "thread": "first COORDINATOR_READY"},
+            2: {"pagination": {"offset": 2, "next_offset": 3}, "thread": "second"},
+            3: {"pagination": {"offset": 3, "next_offset": None}, "thread": "last REVIEWER_OBSERVED"},
+        }
+        calls = []
+
+        class Stub:
+            def call(self, label, tool, arguments):
+                calls.append((label, tool, dict(arguments)))
+                data = pages[arguments["comment_offset"]]
+                return acceptance.ToolObservation(
+                    tool, arguments, {"result": data}, json.dumps(data), data
+                )
+
+        thread = acceptance.MissionRun.read_board_thread(Stub(), "p-1")
+        self.assertEqual(
+            [arguments["comment_offset"] for _, _, arguments in calls], [0, 2, 3]
+        )
+        self.assertTrue(
+            all(
+                arguments["comment_limit"] == acceptance.BOARD_COMMENT_PAGE_LIMIT
+                for _, _, arguments in calls
+            )
+        )
+        self.assertTrue(acceptance.text_contains(thread.data, "REVIEWER_OBSERVED"))
+        self.assertTrue(acceptance.text_contains(thread.data, "COORDINATOR_READY"))
+
+    def test_board_thread_read_refuses_a_page_that_does_not_move_forward(self):
+        class Stub:
+            def call(self, label, tool, arguments):
+                data = {"pagination": {"offset": 0, "next_offset": 0}, "thread": "loop"}
+                return acceptance.ToolObservation(tool, arguments, {}, "", data)
+
+        with self.assertRaises(acceptance.AcceptanceError):
+            acceptance.MissionRun.read_board_thread(Stub(), "p-1")
+
     def test_run_refuses_to_start_without_a_turn_settle_budget(self):
         argv = ["acceptance", "--run", "--sandbox-profile", "microvm"]
         with unittest.mock.patch.object(sys, "argv", argv):

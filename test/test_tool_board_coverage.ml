@@ -42,12 +42,13 @@ let cleanup () =
   remove_path (Filename.concat _test_base_path Common.masc_dirname);
   Board_dispatch.init_jsonl ()
 
+(* The MCP route: MASC hands the result over whole. *)
 let dispatch name args =
-  let result = Board_tool.handle_tool name args in
+  let result = Board_tool.handle_tool ~result_boundary:Tool_output.Unprojected name args in
   ((Tool_result.is_success result), (Tool_result.message result))
 
 let dispatch_result name args =
-  Board_tool.handle_tool name args
+  Board_tool.handle_tool ~result_boundary:Tool_output.Unprojected name args
 
 let check_failure_class name expected result =
   let actual =
@@ -646,6 +647,7 @@ let test_masc_board_post_preserves_meta_reason () =
   let body =
     Keeper_tool_board_runtime.handle_board_tool
       ~meta:keeper_meta
+      ~result_projection:Tool_output.default_model_projection
       ~name:"masc_board_post"
       ~args:
         (make_args
@@ -680,6 +682,7 @@ let test_keeper_board_sub_board_owner_is_runtime_bound () =
   let created =
     Keeper_tool_board_runtime.handle_board_tool
       ~meta:keeper_meta
+      ~result_projection:Tool_output.default_model_projection
       ~name:"masc_board_sub_board_create"
       ~args:
         (make_args
@@ -694,6 +697,7 @@ let test_keeper_board_sub_board_owner_is_runtime_bound () =
   let fetched =
     Keeper_tool_board_runtime.handle_board_tool
       ~meta:keeper_meta
+      ~result_projection:Tool_output.default_model_projection
       ~name:"masc_board_sub_board_get"
       ~args:(make_args [ "sub_board_id", `String slug ])
   in
@@ -722,6 +726,7 @@ let test_direct_board_reaction_binds_keeper_identity () =
   let reacted =
     Keeper_tool_board_runtime.handle_board_tool
       ~meta:keeper_meta
+      ~result_projection:Tool_output.default_model_projection
       ~name:"masc_board_reaction"
       ~args:
         (make_args
@@ -748,6 +753,7 @@ let test_model_visible_board_maintenance_dispatches_in_process () =
   let cleanup_result =
     Keeper_tool_board_runtime.handle_board_tool
       ~meta:keeper_meta
+      ~result_projection:Tool_output.default_model_projection
       ~name:"masc_board_cleanup"
       ~args:(make_args [ "dry_run", `Bool true ])
   in
@@ -769,6 +775,7 @@ let test_model_visible_board_maintenance_dispatches_in_process () =
   let delete_result =
     Keeper_tool_board_runtime.handle_board_tool
       ~meta:keeper_meta
+      ~result_projection:Tool_output.default_model_projection
       ~name:"masc_board_delete"
       ~args:
         (make_args
@@ -788,6 +795,7 @@ let test_keeper_board_dispatch_uses_typed_tool_names () =
   let fake =
     Keeper_tool_board_runtime.handle_board_tool
       ~meta:keeper_meta
+      ~result_projection:Tool_output.default_model_projection
       ~name:"masc_board_fake"
       ~args:(make_args [])
   in
@@ -796,6 +804,7 @@ let test_keeper_board_dispatch_uses_typed_tool_names () =
   let comment_vote =
     Keeper_tool_board_runtime.handle_board_tool
       ~meta:keeper_meta
+      ~result_projection:Tool_output.default_model_projection
       ~name:"masc_board_comment_vote"
       ~args:(make_args [ ("comment_id", `String ""); ("direction", `String "up") ])
   in
@@ -806,6 +815,7 @@ let test_keeper_board_dispatch_uses_typed_tool_names () =
   let curation =
     Keeper_tool_board_runtime.handle_board_tool
       ~meta:keeper_meta
+      ~result_projection:Tool_output.default_model_projection
       ~name:"masc_board_curation_read"
       ~args:(make_args [])
   in
@@ -815,6 +825,7 @@ let test_keeper_board_dispatch_uses_typed_tool_names () =
   let curation_submit =
     Keeper_tool_board_runtime.handle_board_tool
       ~meta:keeper_meta
+      ~result_projection:Tool_output.default_model_projection
       ~name:"masc_board_curation_submit"
       ~args:
         (make_args
@@ -1394,16 +1405,59 @@ let create_post_with_comments ~count =
 
 let post_get_args post_id args = make_args (("post_id", `String post_id) :: args)
 
-let get_page ~label post_id args =
-  let ok, body = dispatch "masc_board_post_get" (post_get_args post_id args) in
-  Alcotest.(check bool) (label ^ " get ok") true ok;
-  body
+let contains haystack needle = String_util.contains_substring haystack needle
 
-let check_get_page ~label post_id args expected =
+(* A Keeper call on each lane: the official-client lane stores a result above
+   the wire ceiling as a blob, the agent-core lane only above its own. *)
+let official_client_lane =
+  Tool_output.Projected_for_model Tool_output.default_model_projection
+
+let agent_core_lane =
+  Tool_output.Projected_for_model Tool_output.agent_core_model_projection
+
+(* A page as its reader gets it: [body] is the whole result text, the bytes a
+   projection measures; the rest is read back from its JSON. *)
+type page_view =
+  { body : string
+  ; thread : string
+  ; offset : int
+  ; returned : int
+  ; total : int
+  ; next_offset : int option
+  }
+
+let page_view_of body =
+  let open Yojson.Safe.Util in
+  let json = Yojson.Safe.from_string body in
+  let pagination = member "pagination" json in
+  let next_offset = member "next_offset" pagination |> to_int_option in
   Alcotest.(check bool)
-    (label ^ ": " ^ expected)
-    true
-    (String_util.contains_substring (get_page ~label post_id args) expected)
+    "has_more agrees with next_offset"
+    (Option.is_some next_offset)
+    (member "has_more" pagination |> to_bool);
+  { body
+  ; thread = member "thread" json |> to_string
+  ; offset = member "offset" pagination |> to_int
+  ; returned = member "returned" pagination |> to_int
+  ; total = member "total" pagination |> to_int
+  ; next_offset
+  }
+
+let read_page ~result_boundary ~label post_id args =
+  let result =
+    Board_tool.handle_tool
+      ~result_boundary
+      "masc_board_post_get"
+      (post_get_args post_id args)
+  in
+  Alcotest.(check bool) (label ^ " get ok") true (Tool_result.is_success result);
+  page_view_of (Tool_result.message result)
+
+let check_page ~label page ~offset ~returned ~total ~next_offset =
+  Alcotest.(check int) (label ^ ": offset") offset page.offset;
+  Alcotest.(check int) (label ^ ": returned") returned page.returned;
+  Alcotest.(check int) (label ^ ": total") total page.total;
+  Alcotest.(check (option int)) (label ^ ": next_offset") next_offset page.next_offset
 
 let check_get_rejected ~label post_id args expected =
   let result = dispatch_result "masc_board_post_get" (post_get_args post_id args) in
@@ -1413,7 +1467,7 @@ let check_get_rejected ~label post_id args expected =
   Alcotest.(check bool)
     (label ^ ": " ^ expected)
     true
-    (String_util.contains_substring (Tool_result.message result) expected)
+    (contains (Tool_result.message result) expected)
 
 let add_comment_id ~post_id ?parent_id content =
   let parent_arg =
@@ -1434,57 +1488,74 @@ let add_comment_id ~post_id ?parent_id content =
   Alcotest.(check bool) (content ^ " comment ok") true ok;
   parse_create_response_json body |> Yojson.Safe.Util.member "id" |> Yojson.Safe.Util.to_string
 
-let next_offset_marker = "next_offset="
-
-(* Reads the page's own next_offset field, the way a caller continues. *)
-let next_offset_of_page body =
-  let marker_length = String.length next_offset_marker in
-  let rec find index =
-    if index + marker_length > String.length body
-    then Alcotest.failf "page names no next_offset: %s" body
-    else if String.equal (String.sub body index marker_length) next_offset_marker
-    then index + marker_length
-    else find (index + 1)
+(* Every page from offset 0 until one names no next page, the way a caller
+   continues. *)
+let walk_thread ~result_boundary post_id =
+  let rec walk offset pages =
+    let label = Printf.sprintf "page at %d" offset in
+    let page = read_page ~result_boundary ~label post_id [ "comment_offset", `Int offset ] in
+    Alcotest.(check int) (label ^ " starts where it was asked") offset page.offset;
+    Alcotest.(check bool) (label ^ " makes progress") true (page.returned > 0);
+    let pages = pages @ [ page ] in
+    match page.next_offset with
+    | Some next ->
+      Alcotest.(check int) (label ^ ": next_offset follows it") (offset + page.returned) next;
+      walk next pages
+    | None -> pages
   in
-  let start = find 0 in
-  let rec digits_end index =
-    if index < String.length body && body.[index] >= '0' && body.[index] <= '9'
-    then digits_end (index + 1)
-    else index
-  in
-  let stop = digits_end start in
-  if stop > start
-  then Some (int_of_string (String.sub body start (stop - start)))
-  else if String_util.contains_substring body (next_offset_marker ^ "none")
-  then None
-  else Alcotest.failf "unreadable next_offset: %s" body
+  walk 0 []
 
-let test_post_get_comment_pages_name_their_range () =
+let long_comment_bytes = 1_500
+
+let create_thread_of_long_comments ~count =
+  let post_id = create_post_with_comments ~count:0 in
+  let ids =
+    List.init count (fun index ->
+      add_comment_id
+        ~post_id
+        (Printf.sprintf "long-%03d %s" index (String.make long_comment_bytes 'x')))
+  in
+  post_id, ids
+
+let test_post_get_comment_pages_carry_their_range () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let post_id = create_post_with_comments ~count:105 in
-  check_get_page
+  let read ~label args =
+    read_page ~result_boundary:Tool_output.Unprojected ~label post_id args
+  in
+  let default_page = read ~label:"default page" [] in
+  check_page
     ~label:"default page"
-    post_id
-    []
-    "[comment page: offset=0 shown=50 total=105 next_offset=50.";
-  check_get_page ~label:"header counts the thread it pages" post_id [] "[105 replies]";
-  check_get_page
+    default_page
+    ~offset:0
+    ~returned:50
+    ~total:105
+    ~next_offset:(Some 50);
+  Alcotest.(check bool)
+    "header counts the thread it pages"
+    true
+    (contains default_page.thread "[105 replies]");
+  check_page
     ~label:"normal page advances"
-    post_id
-    [ "comment_offset", `Int 2; "comment_limit", `Int 2 ]
-    "[comment page: offset=2 shown=2 total=105 next_offset=4.";
-  check_get_page
+    (read ~label:"normal page" [ "comment_offset", `Int 2; "comment_limit", `Int 2 ])
+    ~offset:2
+    ~returned:2
+    ~total:105
+    ~next_offset:(Some 4);
+  check_page
     ~label:"final page"
-    post_id
-    [ "comment_offset", `Int 100; "comment_limit", `Int 100 ]
-    "[comment page: offset=100 shown=5 total=105 next_offset=none.";
+    (read ~label:"final page" [ "comment_offset", `Int 100; "comment_limit", `Int 100 ])
+    ~offset:100
+    ~returned:5
+    ~total:105
+    ~next_offset:None;
   check_get_rejected
     ~label:"offset at the end"
     post_id
     [ "comment_offset", `Int 105 ]
-    "the thread has 105 comments, at offsets 0-104";
+    "the thread now has 105 comments, at offsets 0-104";
   check_get_rejected
     ~label:"negative offset"
     post_id
@@ -1501,73 +1572,287 @@ let test_post_get_comment_pages_name_their_range () =
     [ "comment_limit", `Int 0 ]
     "comment_limit must be between 1 and 100";
   let small_post_id = create_post_with_comments ~count:2 in
-  check_get_page
+  check_page
     ~label:"small thread in one page"
-    small_post_id
-    []
-    "[comment page: offset=0 shown=2 total=2 next_offset=none.";
+    (read_page ~result_boundary:Tool_output.Unprojected ~label:"small" small_post_id [])
+    ~offset:0
+    ~returned:2
+    ~total:2
+    ~next_offset:None;
   let empty_post_id = create_post_with_comments ~count:0 in
-  check_get_page
-    ~label:"empty thread"
-    empty_post_id
-    []
-    "No comments.\n[comment page: offset=0 shown=0 total=0 next_offset=none.";
+  let empty_page =
+    read_page ~result_boundary:Tool_output.Unprojected ~label:"empty" empty_post_id []
+  in
+  check_page ~label:"empty thread" empty_page ~offset:0 ~returned:0 ~total:0 ~next_offset:None;
+  Alcotest.(check bool) "empty thread says so" true (contains empty_page.thread "No comments.");
   check_get_rejected
     ~label:"offset into an empty thread"
     empty_post_id
     [ "comment_offset", `Int 1 ]
     "the thread has no comments"
 
-(* A thread whose comments do not fit one inline result arrives as pages that
-   each do, chained by next_offset, and every comment is read exactly once. *)
+(* A value that is present but is not a JSON integer is refused by name. It
+   used to fall back to the default page, so a caller that sent null or 2.9
+   read a page it had not asked for. *)
+let test_post_get_refuses_page_arguments_that_are_not_integers () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let post_id = create_post_with_comments ~count:2 in
+  List.iter
+    (fun (label, args, expected) -> check_get_rejected ~label post_id args expected)
+    [ "null limit", [ "comment_limit", `Null ], "comment_limit must be an integer (got null)"
+    ; ( "string offset"
+      , [ "comment_offset", `String "abc" ]
+      , "comment_offset must be an integer (got string)" )
+    ; ( "boolean offset"
+      , [ "comment_offset", `Bool true ]
+      , "comment_offset must be an integer (got bool)" )
+    ; ( "fractional limit"
+      , [ "comment_limit", `Float 2.9 ]
+      , "comment_limit must be an integer (got float)" )
+    ; ( "literal past the int range"
+      , [ "comment_offset", `Intlit "99999999999999999999999" ]
+      , "comment_offset must be an integer this server can hold" )
+    ]
+
+(* On the official-client lane a thread whose comments do not fit one inline
+   result arrives as pages that each do, chained by next_offset, and every
+   comment is read exactly once. *)
 let test_post_get_long_thread_pages_fit_inline_and_chain () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
-  let post_id = create_post_with_comments ~count:0 in
-  let long_comment_bytes = 1_500 in
-  let comment_count = 40 in
-  let ids =
-    List.init comment_count (fun index ->
-      add_comment_id
-        ~post_id
-        (Printf.sprintf "long-%03d %s" index (String.make long_comment_bytes 'x')))
+  let post_id, ids = create_thread_of_long_comments ~count:40 in
+  let pages = walk_thread ~result_boundary:official_client_lane post_id in
+  List.iter
+    (fun page ->
+       Alcotest.(check bool)
+         (Printf.sprintf "page at %d fits the wire ceiling" page.offset)
+         true
+         (String.length page.body <= Common.max_tool_result_wire_bytes))
+    pages;
+  let seen =
+    List.concat_map (fun page -> List.filter (contains page.thread) ids) pages
   in
-  let rec walk offset seen pages =
-    let body =
-      get_page
-        ~label:(Printf.sprintf "page at %d" offset)
-        post_id
-        [ "comment_offset", `Int offset ]
-    in
-    Alcotest.(check bool)
-      (Printf.sprintf "page at %d fits the inline ceiling" offset)
-      true
-      (String.length body <= Common.max_tool_result_wire_bytes);
-    let on_page = List.filter (fun id -> String_util.contains_substring body id) ids in
-    Alcotest.(check bool)
-      (Printf.sprintf "page at %d makes progress" offset)
-      true
-      (on_page <> []);
-    match next_offset_of_page body with
-    | Some next ->
-      Alcotest.(check int)
-        "next_offset starts after this page"
-        (offset + List.length on_page)
-        next;
-      walk next (seen @ on_page) (pages + 1)
-    | None -> seen @ on_page, pages
-  in
-  let seen, pages = walk 0 [] 1 in
-  Alcotest.(check bool) "the thread took more than one page" true (pages > 1);
-  Alcotest.(check int) "no comment is read twice" comment_count (List.length seen);
+  Alcotest.(check bool) "the thread took more than one page" true (List.length pages > 1);
+  Alcotest.(check int) "no comment is read twice" (List.length ids) (List.length seen);
   Alcotest.(check (list string))
     "every comment is read"
     (List.sort String.compare ids)
     (List.sort String.compare seen)
 
+(* The same thread is one page where the reader carries it inline. On the
+   agent-core lane MASC owns the wire and nothing spills below its own
+   ceiling, so cutting the thread at the official-client ceiling would only
+   cost the Keeper extra calls. An MCP caller takes the result whole and pages
+   by count. *)
+let test_post_get_page_follows_the_lane_ceiling () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let comment_count = 30 in
+  let post_id, _ids = create_thread_of_long_comments ~count:comment_count in
+  let agent_core =
+    read_page ~result_boundary:agent_core_lane ~label:"agent-core lane" post_id []
+  in
+  check_page
+    ~label:"agent-core lane"
+    agent_core
+    ~offset:0
+    ~returned:comment_count
+    ~total:comment_count
+    ~next_offset:None;
+  Alcotest.(check bool)
+    "the agent-core page is larger than the wire ceiling"
+    true
+    (String.length agent_core.body > Common.max_tool_result_wire_bytes);
+  Alcotest.(check bool)
+    "and still inside the agent-core ceiling"
+    true
+    (String.length agent_core.body <= Common.max_agent_core_inline_result_bytes);
+  check_page
+    ~label:"MCP caller"
+    (read_page ~result_boundary:Tool_output.Unprojected ~label:"MCP caller" post_id [])
+    ~offset:0
+    ~returned:comment_count
+    ~total:comment_count
+    ~next_offset:None;
+  Alcotest.(check bool)
+    "the official-client lane needs more than one page"
+    true
+    (List.length (walk_thread ~result_boundary:official_client_lane post_id) > 1)
+
+(* The Keeper board runtime pages by the projection it is handed, which is
+   the one the bundle resolved for the lane running the call. *)
+let test_keeper_board_read_pages_by_the_projection_it_is_given () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let comment_count = 30 in
+  let post_id, _ids = create_thread_of_long_comments ~count:comment_count in
+  let keeper_meta = make_keeper_meta ~name:"thread-reader-keeper" () in
+  let read result_projection =
+    Keeper_tool_board_runtime.handle_board_tool
+      ~meta:keeper_meta
+      ~result_projection
+      ~name:"masc_board_post_get"
+      ~args:(post_get_args post_id [])
+    |> page_view_of
+  in
+  check_page
+    ~label:"agent-core projection"
+    (read Tool_output.agent_core_model_projection)
+    ~offset:0
+    ~returned:comment_count
+    ~total:comment_count
+    ~next_offset:None;
+  let official = read Tool_output.default_model_projection in
+  Alcotest.(check bool)
+    "the default projection stops the page early"
+    true
+    (Option.is_some official.next_offset);
+  Alcotest.(check bool)
+    "inside the wire ceiling"
+    true
+    (String.length official.body <= Common.max_tool_result_wire_bytes)
+
+(* A comment larger than a page travels alone and whole; the projection then
+   decides how it reaches the reader. The pages around it still fit. *)
+let test_post_get_a_comment_larger_than_the_page_arrives_alone () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let post_id = create_post_with_comments ~count:0 in
+  let before = add_comment_id ~post_id "before the large comment" in
+  let large =
+    add_comment_id
+      ~post_id
+      ("large " ^ String.make (Common.max_tool_result_wire_bytes + 1) 'y')
+  in
+  let after = add_comment_id ~post_id "after the large comment" in
+  match walk_thread ~result_boundary:official_client_lane post_id with
+  | [ first; middle; last ] ->
+    Alcotest.(check bool) "the first page holds the comment before" true (contains first.thread before);
+    Alcotest.(check int) "and only that one" 1 first.returned;
+    Alcotest.(check bool) "the large comment is on its own page" true (contains middle.thread large);
+    Alcotest.(check int) "alone" 1 middle.returned;
+    Alcotest.(check bool)
+      "whole, past the ceiling"
+      true
+      (String.length middle.body > Common.max_tool_result_wire_bytes);
+    Alcotest.(check bool) "the last page holds the comment after" true (contains last.thread after)
+  | pages -> Alcotest.failf "expected three pages, got %d" (List.length pages)
+
+(* The body travels on the first page. When it alone passes the ceiling the
+   page still carries one comment, so the read moves forward, and the pages
+   after it name the post in one line and fit. *)
+let test_post_get_a_body_larger_than_the_page_still_advances () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let body = String.make (Common.max_tool_result_wire_bytes + 1) 'b' in
+  let ok, created =
+    dispatch
+      "masc_board_post"
+      (make_args
+         [ "title", `String "large body"; "content", `String body; "author", `String "tester" ])
+  in
+  Alcotest.(check bool) "create ok" true ok;
+  let post_id =
+    parse_create_response_json created |> Yojson.Safe.Util.member "id" |> Yojson.Safe.Util.to_string
+  in
+  let comment_count = 3 in
+  for index = 1 to comment_count do
+    ignore (add_comment_id ~post_id (Printf.sprintf "after-large-body-%d" index))
+  done;
+  match walk_thread ~result_boundary:official_client_lane post_id with
+  | first :: rest ->
+    Alcotest.(check bool) "the first page carries the body" true (contains first.thread body);
+    Alcotest.(check int) "and one comment" 1 first.returned;
+    Alcotest.(check int)
+      "the pages after it carry the rest"
+      (comment_count - 1)
+      (List.fold_left (fun sum page -> sum + page.returned) 0 rest);
+    List.iter
+      (fun page ->
+         Alcotest.(check bool)
+           (Printf.sprintf "page at %d fits the wire ceiling" page.offset)
+           true
+           (String.length page.body <= Common.max_tool_result_wire_bytes))
+      rest
+  | [] -> Alcotest.fail "the thread returned no page"
+
+(* The TTL sweep is the one thing that removes a comment from a live thread.
+   An offset is a position, so a sweep between two reads moves the thread under
+   it; the next page counts the thread as it is now, an offset past the new end
+   says so, and the sweep schedules its removal for the next flush. *)
+let test_post_get_a_sweep_between_pages_shows_in_the_next_page () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let comment_count = 4 in
+  let page_limit = 2 in
+  let post_id = create_post_with_comments ~count:comment_count in
+  check_page
+    ~label:"before the sweep"
+    (read_page
+       ~result_boundary:Tool_output.Unprojected
+       ~label:"before the sweep"
+       post_id
+       [ "comment_limit", `Int page_limit ])
+    ~offset:0
+    ~returned:page_limit
+    ~total:comment_count
+    ~next_offset:(Some page_limit);
+  let (Board_dispatch.Jsonl store) = Board_dispatch.backend () in
+  let oldest =
+    match Board_dispatch.get_post_and_comments ~post_id with
+    | Ok (_, oldest :: _) -> oldest
+    | Ok (_, []) | Error _ -> Alcotest.fail "the thread has no comment to expire"
+  in
+  let comment_key = Board.Comment_id.to_string oldest.Board.id in
+  (* Expired at epoch + 1s, then swept, the way the sweeper finds it. *)
+  Hashtbl.replace store.Board.comments comment_key { oldest with Board.expires_at = 1.0 };
+  store.Board.dirty_posts <- false;
+  store.Board.dirty_comments <- false;
+  Hashtbl.reset store.Board.dirty_post_ids;
+  Hashtbl.reset store.Board.dirty_comment_ids;
+  let _ : int * int = Board.sweep store in
+  Alcotest.(check bool)
+    "the sweep schedules the post for the next flush"
+    true
+    (store.Board.dirty_posts && Hashtbl.mem store.Board.dirty_post_ids post_id);
+  Alcotest.(check bool)
+    "and the removed comment"
+    true
+    (store.Board.dirty_comments && Hashtbl.mem store.Board.dirty_comment_ids comment_key);
+  let remaining = comment_count - 1 in
+  let next =
+    read_page
+      ~result_boundary:Tool_output.Unprojected
+      ~label:"after the sweep"
+      post_id
+      [ "comment_offset", `Int page_limit; "comment_limit", `Int page_limit ]
+  in
+  Alcotest.(check int) "the next page counts the thread as it is now" remaining next.total;
+  check_get_rejected
+    ~label:"the old last offset"
+    post_id
+    [ "comment_offset", `Int remaining ]
+    (Printf.sprintf
+       "the thread now has %d comments, at offsets 0-%d"
+       remaining
+       (remaining - 1))
+
+(* The deepest reply depth whose indentation still grows
+   (Board_tool_format.max_comment_indent_depth). *)
+let indent_cap_depth = 5
+
 (* A reply chain deeper than the indentation cap is still drawn, so the page's
-   count and its lines are the same set of comments. *)
+   count and its lines are the same set of comments. A reply whose place the
+   indentation cannot show — past the cap, or with its parent on another page —
+   names its parent. *)
 let test_post_get_draws_replies_below_the_indent_cap () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1585,18 +1870,75 @@ let test_post_get_draws_replies_below_the_indent_cap () =
       (root, [ root ])
       (List.init chain_depth (fun index -> index + 1))
   in
-  let body = get_page ~label:"deep thread" post_id [] in
+  let total = chain_depth + 1 in
+  let page = read_page ~result_boundary:Tool_output.Unprojected ~label:"deep thread" post_id [] in
+  List.iter (fun id -> Alcotest.(check bool) (id ^ " is drawn") true (contains page.thread id)) ids;
+  check_page ~label:"deep thread page" page ~offset:0 ~returned:total ~total ~next_offset:None;
+  Alcotest.(check bool)
+    "deep thread header"
+    true
+    (contains page.thread (Printf.sprintf "[%d replies]" total));
+  (* A comment's own line opens its bracket with its id; a reply names it
+     only after "reply to". *)
+  let own_line_marker id = "[" ^ id in
+  let line_of thread id =
+    match
+      List.find_opt
+        (fun line -> contains line (own_line_marker id))
+        (String.split_on_char '\n' thread)
+    with
+    | Some line -> line
+    | None -> Alcotest.failf "%s has no line" id
+  in
+  List.iteri
+    (fun depth id ->
+       match depth with
+       | 0 -> ()
+       | _ ->
+         let parent = List.nth ids (depth - 1) in
+         Alcotest.(check bool)
+           (Printf.sprintf "depth %d names its parent only past the indentation cap" depth)
+           (depth > indent_cap_depth)
+           (contains (line_of page.thread id) ("reply to " ^ parent)))
+    ids;
+  let continued_offset = 3 in
+  let continued_limit = 2 in
+  let continued =
+    read_page
+      ~result_boundary:Tool_output.Unprojected
+      ~label:"page starting mid-chain"
+      post_id
+      [ "comment_offset", `Int continued_offset; "comment_limit", `Int continued_limit ]
+  in
+  let parent_of =
+    List.mapi
+      (fun depth id ->
+         match depth with
+         | 0 -> id, None
+         | _ -> id, Some (List.nth ids (depth - 1)))
+      ids
+  in
+  let drawn = List.filter (fun id -> contains continued.thread (own_line_marker id)) ids in
+  Alcotest.(check int) "the continued page draws its comments" continued_limit (List.length drawn);
+  let parent_off_page id =
+    match List.assoc id parent_of with
+    | Some parent -> not (List.mem parent drawn)
+    | None -> false
+  in
+  Alcotest.(check bool)
+    "the continued page holds a reply whose parent is on another page"
+    true
+    (List.exists parent_off_page drawn);
   List.iter
     (fun id ->
-       Alcotest.(check bool) (id ^ " is drawn") true (String_util.contains_substring body id))
-    ids;
-  let total = chain_depth + 1 in
-  check_get_page
-    ~label:"deep thread page"
-    post_id
-    []
-    (Printf.sprintf "[comment page: offset=0 shown=%d total=%d next_offset=none." total total);
-  check_get_page ~label:"deep thread header" post_id [] (Printf.sprintf "[%d replies]" total)
+       match List.assoc id parent_of with
+       | None -> ()
+       | Some parent ->
+         Alcotest.(check bool)
+           (id ^ " names its parent only when the parent is not on the page")
+           (parent_off_page id)
+           (contains (line_of continued.thread id) ("reply to " ^ parent)))
+    drawn
 
 (* The header counts the comments the read returned, not the stored counter. *)
 let test_post_get_header_counts_the_comments_it_read () =
@@ -1608,12 +1950,9 @@ let test_post_get_header_counts_the_comments_it_read () =
   let post = Hashtbl.find store.Board.posts post_id in
   let drifted_count = 999 in
   Hashtbl.replace store.Board.posts post_id { post with Board.reply_count = drifted_count };
-  check_get_page ~label:"header" post_id [] "[3 replies]";
-  check_get_page
-    ~label:"page"
-    post_id
-    []
-    "[comment page: offset=0 shown=3 total=3 next_offset=none."
+  let page = read_page ~result_boundary:Tool_output.Unprojected ~label:"header" post_id [] in
+  Alcotest.(check bool) "header" true (contains page.thread "[3 replies]");
+  check_page ~label:"page" page ~offset:0 ~returned:3 ~total:3 ~next_offset:None
 
 let test_post_get_not_found () =
   with_eio @@ fun env ->
@@ -2088,13 +2427,37 @@ let () =
             test_post_list_filter_combinations;
           Alcotest.test_case "get success" `Quick test_post_get_success;
           Alcotest.test_case
-            "get comment pages name their range"
+            "get comment pages carry their range"
             `Quick
-            test_post_get_comment_pages_name_their_range;
+            test_post_get_comment_pages_carry_their_range;
+          Alcotest.test_case
+            "get refuses page arguments that are not integers"
+            `Quick
+            test_post_get_refuses_page_arguments_that_are_not_integers;
           Alcotest.test_case
             "get long thread pages fit inline and chain"
             `Quick
             test_post_get_long_thread_pages_fit_inline_and_chain;
+          Alcotest.test_case
+            "get page follows the lane ceiling"
+            `Quick
+            test_post_get_page_follows_the_lane_ceiling;
+          Alcotest.test_case
+            "keeper board read pages by the projection it is given"
+            `Quick
+            test_keeper_board_read_pages_by_the_projection_it_is_given;
+          Alcotest.test_case
+            "get comment larger than the page arrives alone"
+            `Quick
+            test_post_get_a_comment_larger_than_the_page_arrives_alone;
+          Alcotest.test_case
+            "get body larger than the page still advances"
+            `Quick
+            test_post_get_a_body_larger_than_the_page_still_advances;
+          Alcotest.test_case
+            "get sweep between pages shows in the next page"
+            `Quick
+            test_post_get_a_sweep_between_pages_shows_in_the_next_page;
           Alcotest.test_case
             "get draws replies below the indent cap"
             `Quick

@@ -1481,7 +1481,7 @@ let test_shim_travels_read_only_with_its_config () =
      config mount, so the names that point at it must get through. *)
   Alcotest.(check string)
     "config names the work root, the image's PATH and the config env, and no scratch_root a v2 shim would refuse"
-    "remote_root=/masc-work\npath=/home/opam/.opam/5.5/bin:/usr/bin\nenv_allowlist=MASC_BASE_PATH,MASC_BASE_PATH_INPUT,MASC_CONFIG_DIR\n"
+    "remote_root=/masc-work\npath=/home/opam/.opam/5.5/bin:/usr/bin\nenv_allowlist=MASC_BASE_PATH,MASC_CONFIG_DIR\n"
     (M.shim_config_content ~payload_path:"/home/opam/.opam/5.5/bin:/usr/bin");
   (* The boot mounts the scratch at the shim's default scratch root: the
      same constant on both sides, so the box the shim builds has a place to

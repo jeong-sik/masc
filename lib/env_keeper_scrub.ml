@@ -29,7 +29,7 @@ let allow_exact : string list =
 
     (* MASC operational — these are read by Env_config_core and friends.
        This is an exact list; arbitrary [MASC_*] keys are not inherited. *)
-  ; "MASC_BASE_PATH"; "MASC_BASE_PATH_INPUT"
+  ; "MASC_BASE_PATH"
   ; "MASC_BASE_PATH_RESOLUTION_SOURCE"
   ; "MASC_CONFIG_DIR"
   ; "MASC_HOST"; "MASC_HTTP_PORT"; "MASC_HTTP_BASE_URL"; "MASC_URL"

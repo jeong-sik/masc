@@ -916,13 +916,13 @@ let test_binary_checks_use_install_environment () =
     script
     {|MASC_BASE_PATH="$BASE_PATH"|};
   assert_contains
-    "binary helper documents dual base path env"
+    "binary helper documents the base path env"
     script
     "MASC_BASE_PATH is the resolved runtime root";
-  assert_contains
-    "binary helper exports base path input"
+  assert_not_contains
+    "binary helper exports no second base path variable"
     script
-    {|MASC_BASE_PATH_INPUT="$BASE_PATH"|};
+    "MASC_BASE_PATH_INPUT";
   assert_contains
     "binary helper preserves explicit model catalog override"
     script
@@ -946,15 +946,15 @@ let test_binary_checks_use_install_environment () =
   assert_contains
     "start hint selects installed assets and omits runtime events default"
     script
-    {|start_env="MASC_ASSETS_DIR=\"$DASHBOARD_ASSETS_DIR\" ${runtime_events_start_env}MASC_BASE_PATH=\"$BASE_PATH\" MASC_BASE_PATH_INPUT=\"$BASE_PATH\""|};
+    {|start_env="MASC_ASSETS_DIR=\"$DASHBOARD_ASSETS_DIR\" ${runtime_events_start_env}MASC_BASE_PATH=\"$BASE_PATH\""|};
   assert_contains
-    "start hint documents dual base path env"
+    "start hint documents the runtime events default"
     script
     "let the binary's default-on contract apply";
   assert_not_contains
     "start hint does not disable runtime events by default"
     script
-    {|start_env="MASC_RUNTIME_EVENTS=\"${MASC_RUNTIME_EVENTS:-0}\" MASC_BASE_PATH=\"$BASE_PATH\" MASC_BASE_PATH_INPUT=\"$BASE_PATH\""|};
+    {|start_env="MASC_RUNTIME_EVENTS=\"${MASC_RUNTIME_EVENTS:-0}\" MASC_BASE_PATH=\"$BASE_PATH\""|};
   assert_contains
     "smoke reads reported version through install env"
     script

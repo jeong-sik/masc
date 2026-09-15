@@ -891,11 +891,7 @@ let parse_args () =
     | "full" -> Tools_full
     | _ -> Tools_compact
   in
-  let base_path_input =
-    if !base_path <> "" then !base_path else base
-  in
-  ( base_path_input
-  , base
+  ( base
   , r
   , resolved_port
   , !refresh
@@ -14928,7 +14924,7 @@ let enter_terminal_session ~cleanup ~terminate ~request_interrupt
 
 (** Main loop *)
 let main
-    (base_path_input, base_path, workspace, port, refresh,
+    (base_path, workspace, port, refresh,
      reasoning_visibility, tool_visibility) () =
   (* The provider layer reports through [Llm_provider.Diag], whose default sink
      writes to stderr -- which here is the terminal this draws on. One INFO line
@@ -14941,7 +14937,6 @@ let main
   (* Publish the path selected by this process before any workspace-backed
      store opens. Otherwise inherited path variables can make the screen read
      local Keeper metadata from a different workspace than its server. *)
-  Unix.putenv Env_config_core.base_path_input_env_key base_path_input;
   Unix.putenv Env_config_core.base_path_env_key base_path;
   Workspace_utils_backend_setup.cache_resolved_base_path base_path;
   require_interactive_terminal ();

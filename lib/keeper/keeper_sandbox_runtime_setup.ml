@@ -490,7 +490,6 @@ let docker_workspace_state_mount_args ~base_path ~container_root =
    (the guest's shim allowlists them by name, from {!config_env_names}). *)
 let config_env ~container_base_path ~container_config_root =
   [ "MASC_BASE_PATH", container_base_path
-  ; "MASC_BASE_PATH_INPUT", container_base_path
   ; "MASC_CONFIG_DIR", container_config_root
   ]
 ;;

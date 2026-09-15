@@ -49,7 +49,7 @@ cp config/runtime.toml "$tmp/.masc/config/runtime.toml"
 # for the environment only when it is absent.
 argv_help="$tmp/argv-help.txt"
 argv_status=0
-env -u MASC_BASE_PATH -u MASC_BASE_PATH_INPUT MASC_OTEL_ENABLED=0 TERM=dumb \
+env -u MASC_BASE_PATH MASC_OTEL_ENABLED=0 TERM=dumb \
   "$BINARY" --help=plain >"$argv_help" 2>&1 || argv_status=$?
 if [ "$argv_status" -ne 0 ]; then
   echo "smoke: --help exited $argv_status with MASC_BASE_PATH unset" >&2
@@ -67,7 +67,6 @@ log="$tmp/boot.log"
 echo "smoke: booting $BINARY on :$PORT under $tmp"
 # Release smoke validates boot/listening and README drift; CI has no OTLP collector.
 MASC_BASE_PATH="$tmp" \
-MASC_BASE_PATH_INPUT="$tmp" \
 MASC_OTEL_ENABLED=0 \
   "$BINARY" --base-path "$tmp" --port "$PORT" >"$log" 2>&1 &
 PID=$!
@@ -101,7 +100,6 @@ esac
 # --- README ↔ CLI subcommand drift -------------------------------------------
 help_txt="$tmp/help.txt"
 MASC_BASE_PATH="$tmp" \
-MASC_BASE_PATH_INPUT="$tmp" \
 MASC_OTEL_ENABLED=0 \
 TERM=dumb \
   "$BINARY" --help=plain >"$help_txt" 2>/dev/null || true

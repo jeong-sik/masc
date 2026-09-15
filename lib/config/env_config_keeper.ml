@@ -590,35 +590,40 @@ module KeeperKeepalive = struct
      operator configuration error, never a fallback: an unparsable string
      read as unset would switch a deadline off, and NaN would pass every
      comparison against it. *)
-  let declared_timeout_seconds env_key =
+  let refuse_declared_timeout env_key raw detail =
+    raise
+      (Env_config_core.Config_error
+         (Printf.sprintf "invalid %s=%S (%s)" env_key raw detail))
+  ;;
+
+  (* The seconds a declared timeout setting names, with the text the
+     operator wrote: every refusal quotes that text, never a rendering of
+     the parsed number, so "29.9999999" is refused as itself and not as
+     "30". *)
+  let declared_timeout_seconds_with_raw env_key =
     match Env_config_core.raw_value_opt env_key with
     | None -> None
     | Some raw ->
       (match parse_timeout_seconds raw with
-       | Ok seconds -> Some seconds
-       | Error detail ->
-         raise
-           (Env_config_core.Config_error
-              (Printf.sprintf "invalid %s=%S (%s)" env_key raw detail)))
+       | Ok seconds -> Some (raw, seconds)
+       | Error detail -> refuse_declared_timeout env_key raw detail)
   ;;
 
-  (* [declared_timeout_seconds] for a setting with a declared range: a value
+  (* [declared_timeout_seconds_with_raw] for a setting with a declared range: a value
      outside it is refused the way an unparsable one is, and the way the
      runtime.toml validator refuses it, instead of being moved to the nearest
      bound behind the operator's back. *)
   let declared_timeout_seconds_within ~min_sec ~max_sec env_key =
-    match declared_timeout_seconds env_key with
-    | Some seconds
-      when Float.compare seconds min_sec < 0 || Float.compare seconds max_sec > 0 ->
-      raise
-        (Env_config_core.Config_error
-           (Printf.sprintf
-              "invalid %s=%g (expected a value within [%g, %g] seconds)"
-              env_key
-              seconds
-              min_sec
-              max_sec))
-    | declared -> declared
+    match declared_timeout_seconds_with_raw env_key with
+    | None -> None
+    | Some (raw, seconds) ->
+      if Float.compare seconds min_sec < 0 || Float.compare seconds max_sec > 0
+      then
+        refuse_declared_timeout
+          env_key
+          raw
+          (Printf.sprintf "expected a value within [%g, %g] seconds" min_sec max_sec)
+      else Some seconds
   ;;
 
   (* The declared range of the provider-call no-progress threshold, ahead of
@@ -629,17 +634,18 @@ module KeeperKeepalive = struct
   let provider_call_deadline_max_sec = 3600.0
 
   let declared_stream_budget_seconds env_key =
-    match declared_timeout_seconds env_key with
-    | Some seconds when Float.compare seconds provider_call_deadline_max_sec > 0 ->
-      raise
-        (Env_config_core.Config_error
-           (Printf.sprintf
-              "invalid %s=%g (expected at most %g seconds, the longest \
-               provider_call_deadline_sec can cover)"
-              env_key
-              seconds
-              provider_call_deadline_max_sec))
-    | declared -> declared
+    match declared_timeout_seconds_with_raw env_key with
+    | None -> None
+    | Some (raw, seconds) ->
+      if Float.compare seconds provider_call_deadline_max_sec > 0
+      then
+        refuse_declared_timeout
+          env_key
+          raw
+          (Printf.sprintf
+             "expected at most %g seconds, the longest provider_call_deadline_sec can cover"
+             provider_call_deadline_max_sec)
+      else Some seconds
   ;;
 
   let stream_idle_timeout_env_key = "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC"
@@ -694,9 +700,10 @@ module KeeperKeepalive = struct
 
       Opt-in: unset leaves [None] so {!Runtime_agent_context} skips the
       builder wiring. Set only for sync completion callers that need a
-      body-read ceiling. Read on every call, so a runtime.toml value applied
-      at boot is seen; a declared value that is not a finite positive number
-      of seconds raises {!Env_config_core.Config_error}.
+      body-read ceiling. Read on every call; the setting is declared in the
+      environment only, runtime.toml has no key for it. A declared value that
+      is not a finite positive number of seconds raises
+      {!Env_config_core.Config_error}.
 
       Env: [MASC_KEEPER_BODY_TIMEOUT_SEC]. Default: unset -> [None].
       Declared range: [{!body_timeout_min_sec}, {!body_timeout_max_sec}]; a

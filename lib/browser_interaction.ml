@@ -92,7 +92,8 @@ let parse = function
 
 let perform request =
   let lane_name = match request.source with Browser_surface.Live -> "live" | Automation -> "automation" in
-  let* target = Browser_lane.resolve_target ~lane_name ~client_id:request.client_id in
+  let* target = Browser_lane.resolve_target ~lane_name ~client_id:request.client_id
+    |> Result.map_error Browser_lane.selection_error_code in
   Browser_lane.issue_for ~target
     ~verb:(Browser_lane.Page_interact {tab_id=request.tab_id;
       expected_url=request.expected_url; action=request.action})

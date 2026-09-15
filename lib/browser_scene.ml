@@ -205,7 +205,8 @@ let of_json json =
 let read ?navigation_source ?expected_url ?(view=Browser_lane.Content) ?scope (request : Browser_surface.request) ~max_chars =
   let started = Mtime_clock.elapsed_ns () in
   let* tab_id = match request.tab_id with Some id -> Ok id | None -> Error "scene requires tabId" in
-  let* target = Browser_surface.resolved_target request in
+  let* target = Browser_surface.resolved_target request
+    |> Result.map_error Browser_lane.selection_error_code in
   let* json = Browser_lane.issue_for ~target ~verb:(Browser_lane.Page_scene {tab_id;max_chars;view;scope})
     ~timeout_sec:20. |> Browser_surface.decode_answer in
   let* scene = of_json json in

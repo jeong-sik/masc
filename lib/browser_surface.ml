@@ -65,7 +65,7 @@ let client_id_json target = match Browser_lane.target_client_id target with
 let read request =
   let started = Mtime_clock.elapsed_ns () in
   let lane_name = source_name request.source in
-  let* target = resolved_target request in
+  let* target = resolved_target request |> Result.map_error Browser_lane.selection_error_code in
   let issue verb = Browser_lane.issue_for ~target ~verb ~timeout_sec:20. |> decode_answer in
   let* raw_tabs = issue Browser_lane.Tabs_list in
   let* tabs = match raw_tabs with `List tabs -> decode_tabs tabs | _ -> Error "browser tabs must be a list" in
@@ -103,7 +103,7 @@ let capture request =
     | Some id -> Ok id | None -> Error "tabId is required for a screenshot" in
   let started = Mtime_clock.elapsed_ns () in
   let lane_name = source_name request.source in
-  let* target = resolved_target request in
+  let* target = resolved_target request |> Result.map_error Browser_lane.selection_error_code in
   let* data = Browser_lane.issue_for ~target ~verb:(Browser_lane.Page_capture {tab_id})
       ~timeout_sec:20. |> decode_answer in
   match field "tabId" data, field "url" data, field "title" data,

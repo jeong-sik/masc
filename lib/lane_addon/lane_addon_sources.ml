@@ -204,7 +204,8 @@ let browser_document ~store ~max_bytes ~id ~selection ~tab_id ~target_id ~enviro
   let lane, client_id = match selection with
     | Live client -> "live", Some client
     | Automation -> "automation", None in
-  let* target = Browser_lane.resolve_target ~lane_name:lane ~client_id in
+  let* target = Browser_lane.resolve_target ~lane_name:lane ~client_id
+    |> Result.map_error Browser_lane.selection_error_code in
   (* Reuse the existing transport deadline; never create a new session, select
      a different document or wait for a primary browser action to finish. *)
   let* fields = match Browser_lane.issue_document_if_idle ~target ~tab_id

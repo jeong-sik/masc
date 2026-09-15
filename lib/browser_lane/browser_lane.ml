@@ -220,10 +220,29 @@ let client_json info = `Assoc ["clientId", `String (client_id_to_string info.cli
   "browser", `String (browser_name info.browser); "version", `String info.version;
   "engineVersion", `String info.engine_version]
 let target_client_id = function Automation -> None | Live_client client -> Some client.info.client_id
+
+(* Why a request names no browser to send its command to. Each case has a
+   different next step: a browser has to connect, the caller has to choose
+   one of several, or the request carries an argument its source does not
+   take. No command is dispatched in any of them. *)
+type selection_error =
+  | No_live_client
+  | Selected_client_disconnected of client_id
+  | Ambiguous_clients of client_id list
+  | Client_id_requires_live
+  | Unknown_lane
+
+let selection_error_code = function
+  | No_live_client -> "no_live_client"
+  | Selected_client_disconnected _ -> "selected_client_disconnected"
+  | Ambiguous_clients _ -> "ambiguous_browser_clients"
+  | Client_id_requires_live -> "client_id_requires_live"
+  | Unknown_lane -> "unknown_lane"
+
 let resolve_target ~lane_name ~client_id =
   match lane_name, client_id with
   | "automation", None -> Ok Automation
-  | "automation", Some _ -> Error "client_id_requires_live"
+  | "automation", Some _ -> Error Client_id_requires_live
   | "live", selected ->
     Eio.Mutex.use_rw ~protect:true clients_mutex (fun () ->
       prune_unlocked ();
@@ -231,13 +250,17 @@ let resolve_target ~lane_name ~client_id =
       | Some id ->
         (match Hashtbl.find_opt clients (client_id_to_string id) with
          | Some client when connected client -> Ok (Live_client client)
-         | Some _ | None -> Error "client_not_connected")
+         | Some _ | None -> Error (Selected_client_disconnected id))
       | None ->
         match Hashtbl.fold (fun _ client acc -> if connected client then client :: acc else acc) clients [] with
         | [client] -> Ok (Live_client client)
-        | [] -> Error "client_not_connected"
-        | _ :: _ -> Error "ambiguous_browser_clients")
-  | _ -> Error "unknown_lane"
+        | [] -> Error No_live_client
+        | _ :: _ as several ->
+          Error (Ambiguous_clients
+            (List.map (fun client -> client.info.client_id) several
+             |> List.sort (fun left right ->
+                  String.compare (client_id_to_string left) (client_id_to_string right)))))
+  | _ -> Error Unknown_lane
 let register info =
   Eio.Mutex.use_rw ~protect:true clients_mutex (fun () ->
     prune_unlocked ();
@@ -288,7 +311,8 @@ let disconnect_client ~client_id =
     | None -> Error "unknown_client"
     | Some client -> retire_unlocked key client; Ok ())
 let issue_live ?(only_if_idle = false) client ~verb ~timeout_sec =
-  if not (connected client) then Rejected_before_effect "client_not_connected"
+  if not (connected client) then
+    Rejected_before_effect (selection_error_code (Selected_client_disconnected client.info.client_id))
   else if not (verb_allowed_on_live verb) then
     Rejected_before_effect "session ownership and direct navigation belong to the automation lane"
   else
@@ -321,7 +345,7 @@ let issue_for ~target ~verb ~timeout_sec =
         ~watcher:(fun () -> Time_compat.sleep timeout_sec; Timed_out)
 let issue ~lane_name ~verb ~timeout_sec =
   match resolve_target ~lane_name ~client_id:None with
-  | Error error -> Rejected_before_effect error
+  | Error error -> Rejected_before_effect (selection_error_code error)
   | Ok target -> issue_for ~target ~verb ~timeout_sec
 
 (** Additional observations never queue behind an existing browser command.

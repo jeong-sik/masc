@@ -1,5 +1,8 @@
 open Alcotest
 module Surface = Masc.Browser_surface
+(* A workspace path nothing creates: these scenarios never reach an installed
+   browser-lane host, so the tools observe no launcher there. *)
+let no_workspace = Filename.concat (Filename.get_temp_dir_name ()) "masc-browser-surface-no-workspace"
 let test_strict_input () =
   List.iter (fun json -> match Surface.parse_request json with
       | Error _ -> () | Ok _ -> fail "invalid read request accepted")
@@ -25,14 +28,14 @@ let test_tool_input_recovery () =
       let interact id = `Assoc ["lane",`String "live";"clientId",`String id;
         "tabId",`Int 1;"action",`String "follow_link";"expectedUrl",`String "https://example.org/";
         "documentId",`String "observed";"nodeId",`String "link"] in
-      let read fields = Tools.handle_read ~tool_name:"BrowserRead" ~start_time:0.
+      let read fields = Tools.handle_read ~base_path:no_workspace ~tool_name:"BrowserRead" ~start_time:0.
         (`Assoc (["tabId",`Int 1] @ fields)) in
       let cases = [
-        "malformed connection in tabs", (fun () -> Tools.handle_tabs ~tool_name:"BrowserTabs"
+        "malformed connection in tabs", (fun () -> Tools.handle_tabs ~base_path:no_workspace ~tool_name:"BrowserTabs"
           ~start_time:0. (input_id invalid_id));
         "malformed connection in read", (fun () -> read ["clientId",`String invalid_id]);
         "malformed connection in follow", (fun () ->
-          let result, phase = Tools.handle_interact_with_phase ~tool_name:"BrowserInteract"
+          let result, phase = Tools.handle_interact_with_phase ~base_path:no_workspace ~tool_name:"BrowserInteract"
             ~start_time:0. (interact invalid_id) in
           check bool "argument failure happens before interaction effects" true
             (phase = Tool_result.Proven_pre_effect); result);
@@ -41,7 +44,7 @@ let test_tool_input_recovery () =
         "malformed scene source", (fun () -> read ["mode",`String "scene";"navigationSource",`Assoc []]);
         "malformed scene scope", (fun () -> read ["mode",`String "scene";"scope",`Assoc []]);
         "malformed scene URL", (fun () -> read ["mode",`String "scene";"expectedUrl",`Int 1]);
-        "missing scene tab", (fun () -> Tools.handle_read ~tool_name:"BrowserRead"
+        "missing scene tab", (fun () -> Tools.handle_read ~base_path:no_workspace ~tool_name:"BrowserRead"
           ~start_time:0. (`Assoc ["mode",`String "scene"]));
         "malformed act", (fun () -> Tools.handle_act ~tool_name:"BrowserAct"
           ~start_time:0. (`Assoc []));
@@ -61,13 +64,13 @@ let test_tool_input_recovery () =
         | _ -> fail (name ^ " was accepted")) cases;
       check bool "malformed requests queued no command to the connected browser" true
         (Browser_lane.take_command ~client_info:info ~window_sec:0.001 = Ok None);
-      let unavailable, phase = Tools.handle_interact_with_phase ~tool_name:"BrowserInteract"
+      let unavailable, phase = Tools.handle_interact_with_phase ~base_path:no_workspace ~tool_name:"BrowserInteract"
         ~start_time:0. (interact "30000000-0000-4000-8000-000000000002") in
       check bool "valid identity of an absent browser remains a state rejection" true
         (Tool_result.failure_class unavailable = Some Tool_result.Workflow_rejection
          && phase = Tool_result.Proven_pre_effect);
       let corrected = Eio.Fiber.fork_promise ~sw (fun () ->
-        Tools.handle_tabs ~tool_name:"BrowserTabs" ~start_time:0. (input_id valid_id)) in
+        Tools.handle_tabs ~base_path:no_workspace ~tool_name:"BrowserTabs" ~start_time:0. (input_id valid_id)) in
       let command = match Browser_lane.take_command ~client_info:info ~window_sec:1. with
         | Ok (Some command) -> command | _ -> fail "corrected request did not reach the same browser" in
       ignore (Browser_lane.deliver_result ~client_id ~id:command.id
@@ -239,7 +242,7 @@ let test_keeper_discovers_clients_without_dispatch () =
           ignore (Browser_lane.disconnect_client ~client_id:info.Browser_lane.client_id));
         ignore (Browser_lane.take_command ~client_info:info ~window_sec:0.001)) clients;
       let result = Masc.Tool_misc_browser_lane.handle_tabs
-        ~tool_name:"BrowserTabs" ~start_time:0.0 (`Assoc []) in
+        ~base_path:no_workspace ~tool_name:"BrowserTabs" ~start_time:0.0 (`Assoc []) in
       let data = Tool_result.data result in
       check bool "ambiguous failure stays actionable" true
         (Yojson.Safe.Util.member "error" data = `String "ambiguous_browser_clients");
@@ -249,6 +252,63 @@ let test_keeper_discovers_clients_without_dispatch () =
         (Yojson.Safe.from_string (Tool_result.message result) = data);
       List.iter (fun info -> check bool "no dispatch before explicit selection" true
         (Browser_lane.take_command ~client_info:info ~window_sec:0.001 = Ok None)) clients))
+
+(* Measured 2026-09-15: a Keeper's BrowserTabs answered only
+   {"error":"client_not_connected","clients":[]} for days while the installed
+   host launcher was fixed to port 64850 and the workspace connection named
+   61372. The rejection now carries the host configuration the doctor reads. *)
+let test_keeper_hears_why_no_browser_is_connected () =
+  let base = Filename.temp_dir "masc-browser-host-endpoint-" "" in
+  let masc = Filename.concat base ".masc" in
+  let lane = Filename.concat masc "browser-lane" in
+  let host = Filename.concat lane "host" in
+  let config = Filename.concat masc "config" in
+  List.iter (fun dir -> Sys.mkdir dir 0o700) [masc; lane; host; config];
+  let write path text = Out_channel.with_open_bin path (fun ch -> output_string ch text) in
+  let launcher = Filename.concat host "launch" in
+  let connection = Filename.concat config "connection.toml" in
+  write connection "[server]\nhttp_port = 61372\n";
+  let launch server_argument =
+    write launcher ("#!/bin/sh\nexec /unused/masc-browser-host --base-path " ^ base
+                    ^ " --token-file /unused/token" ^ server_argument ^ " \"$@\"\n") in
+  Fun.protect ~finally:(fun () ->
+      List.iter Sys.remove [launcher; connection];
+      List.iter Sys.rmdir [host; lane; config; masc; base]) @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Time_compat.set_clock (Eio.Stdenv.clock env);
+  let module U = Yojson.Safe.Util in
+  let rejected result =
+    match result with
+    | Tool_result.Failed (failure : Tool_result.failure_payload) ->
+      check bool "no connected browser is a workflow state, not bad input" true
+        (failure.class_ = Tool_result.Workflow_rejection);
+      check bool "model-facing text carries the same payload" true
+        (Yojson.Safe.from_string (Tool_result.message result) = failure.data);
+      failure.data
+    | _ -> fail "a browser tool succeeded with no browser connected" in
+  launch " --server http://127.0.0.1:64850";
+  let data = rejected (Masc.Tool_misc_browser_lane.handle_tabs ~base_path:base
+    ~tool_name:"BrowserTabs" ~start_time:0. (`Assoc [])) in
+  check string "the case is named" "no_live_client" U.(data |> member "error" |> to_string);
+  check string "the launcher is fixed" "pinned" U.(data |> member "host" |> member "launcher" |> to_string);
+  check int "the port the host polls" 64850 U.(data |> member "host" |> member "launcher_port" |> to_int);
+  check int "the port the workspace names" 61372 U.(data |> member "host" |> member "workspace_port" |> to_int);
+  check string "the two disagree" "misconfigured" U.(data |> member "host" |> member "verdict" |> to_string);
+  launch "";
+  let absent = "40000000-0000-4000-8000-000000000001" in
+  let result, phase = Masc.Tool_misc_browser_lane.handle_interact_with_phase ~base_path:base
+    ~tool_name:"BrowserInteract" ~start_time:0.
+    (`Assoc ["lane",`String "live";"clientId",`String absent;"tabId",`Int 1;
+      "action",`String "click";"selector",`String "a";"expectedUrl",`String "https://example.org/"]) in
+  check bool "a vanished browser rejects before any effect" true (phase = Tool_result.Proven_pre_effect);
+  let data = rejected result in
+  check string "the selected browser is named as gone" "selected_client_disconnected"
+    U.(data |> member "error" |> to_string);
+  check string "the gone browser is echoed" absent U.(data |> member "clientId" |> to_string);
+  check string "a launcher without --server follows the workspace" "follows_workspace"
+    U.(data |> member "host" |> member "launcher" |> to_string);
+  check string "configuration agrees, so the browser itself is absent" "aligned"
+    U.(data |> member "host" |> member "verdict" |> to_string)
 
 let test_scoped_scene_acknowledgement () =
   Eio_main.run (fun env ->
@@ -279,7 +339,7 @@ let test_scoped_scene_acknowledgement () =
         (Result.is_ok (Masc.Browser_scene.read ~expected_url:"https://example.org"
           (request (Some 7)) ~max_chars:1000));
       let guarded_tool url = Masc.Tool_misc_browser_lane.handle_read
-        ~tool_name:"BrowserRead" ~start_time:0.
+        ~base_path:no_workspace ~tool_name:"BrowserRead" ~start_time:0.
         (`Assoc ["lane",`String "automation";"tabId",`Int 7;"mode",`String "regions";
           "expectedUrl",`String url]) in
       check bool "tool surface accepts matching destination guard" true
@@ -297,7 +357,7 @@ let test_scoped_scene_acknowledgement () =
       check bool "verified observed URL can be pinned without another follow" true
         (match guarded_tool actual_url with Tool_result.Completed _ -> true | _ -> false);
       let source : Masc.Browser_scene.navigation_source = {url= !observed_url;document_id= !observed_document} in
-      let same_url_read ?(pin=true) () = Masc.Tool_misc_browser_lane.handle_read ~tool_name:"BrowserRead" ~start_time:0.
+      let same_url_read ?(pin=true) () = Masc.Tool_misc_browser_lane.handle_read ~base_path:no_workspace ~tool_name:"BrowserRead" ~start_time:0.
         (`Assoc (["lane",`String "automation";"tabId",`Int 7;"mode",`String "regions";
           "navigationSource",`Assoc ["url",`String source.url;
             "documentId",`String source.document_id]] @
@@ -334,4 +394,5 @@ let () = run "browser surface" ["behavior",[
   test_case "backend failure is visible" `Quick test_remote_failure;
   test_case "capture target and image identity" `Quick test_capture_identity;
   test_case "Keeper discovers ambiguous clients without dispatch" `Quick test_keeper_discovers_clients_without_dispatch;
+  test_case "Keeper hears why no browser is connected" `Quick test_keeper_hears_why_no_browser_is_connected;
   test_case "live read pins client across both hops" `Quick test_live_read_pins_client_between_hops]]

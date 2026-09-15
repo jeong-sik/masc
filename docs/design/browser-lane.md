@@ -126,9 +126,18 @@ location or a configured label.
 `{ok:true,data:{clients:[{clientId,browser,version,engineVersion}]}}` for live
 connections whose poll lease is current. Browser reads, screenshots, and
 interactions accept `clientId`. With no ID, only one connected live client can
-be selected; multiple connections return `ambiguous_browser_clients`. An
-explicit missing/retired ID returns `client_not_connected`; it never selects a
-replacement. Automation requests omit `clientId` and return it as null.
+be selected; multiple connections return `ambiguous_browser_clients`, and none
+returns `no_live_client`. An explicit missing/retired ID returns
+`selected_client_disconnected`; it never selects a replacement. Automation
+requests omit `clientId` and return it as null.
+
+When a Keeper browser tool meets `no_live_client` or
+`selected_client_disconnected`, its result also carries `host`: the installed
+launcher's server argument (`follows_workspace`, `pinned` with
+`launcher_port`, `unusable_origin`, `unreadable` or `not_installed`), the
+`workspace_port` connection.toml names, and the same verdict and message
+`masc doctor` reports for the browser lane. The Keeper cannot change either
+side, so the retry text names what the operator does.
 
 Tab IDs belong to their selected client. The operator read resolves that client
 once before listing tabs and keeps it for the subsequent page request. Successful

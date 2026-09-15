@@ -76,26 +76,58 @@ let add_client target = function
       | Some other -> other | None -> `Null in
     Browser_lane.Answered (`Assoc (("data", data) :: List.remove_assoc "data" envelope))
   | other -> other
+(* What a Keeper is told when no connected browser can take its command. The
+   Keeper cannot start a browser or move a host, so the text names the cause
+   the doctor reports for the same configuration and says the operator acts. *)
+let no_client_retry host =
+  let cause = match Browser_lane_launcher.verdict host with
+    | Browser_lane_launcher.Absent | Browser_lane_launcher.Misconfigured ->
+      Browser_lane_launcher.message host
+    | Browser_lane_launcher.Aligned ->
+      "The installed host is configured for this server's port, so no browser with the MASC \
+       extension is running and polling it. The operator opens that browser profile with the \
+       extension loaded, or reloads the extension so a new host starts." in
+  cause ^ " Only the operator can change this; retrying before they do returns the same \
+           answer. No browser command was dispatched."
+
 (* Keep the discovery payload in both channels: Keeper's adapter retains [data]
    but its model-facing raw output uses the error message. No tab command runs
    until resolution succeeds, including when a formerly pinned client vanished. *)
-let selection_error ~tool_name ~start_time request error =
-  let clients = match request.Browser_surface.source with
-    | Live -> Browser_lane.active_clients () |> List.map Browser_lane.client_json
+let selection_error ~base_path ~tool_name ~start_time ~source error =
+  let clients = match source with
+    | Browser_surface.Live -> Browser_lane.active_clients () |> List.map Browser_lane.client_json
     | Automation -> [] in
-  let data = `Assoc [
-    "error", `String error;
-    "clients", `List clients;
-    "retry", `String "Choose a connected browser and retry BrowserTabs with its clientId. No browser command was dispatched."] in
-  Tool_result.make_err ~tool_name ~start_time
-    ~class_:Tool_result.Workflow_rejection ~data (Yojson.Safe.to_string data)
+  let rejection fields =
+    let data = `Assoc (("error", `String (Browser_lane.selection_error_code error))
+                       :: ("clients", `List clients) :: fields) in
+    Tool_result.make_err ~tool_name ~start_time
+      ~class_:Tool_result.Workflow_rejection ~data (Yojson.Safe.to_string data) in
+  match error with
+  | Browser_lane.No_live_client ->
+    let host = Browser_lane_launcher.observe ~base_path in
+    rejection ["host", Browser_lane_launcher.to_json host; "retry", `String (no_client_retry host)]
+  | Browser_lane.Selected_client_disconnected client_id ->
+    let host = Browser_lane_launcher.observe ~base_path in
+    let retry = match clients with
+      | _ :: _ -> "That browser is no longer connected. Choose a browser from clients and retry \
+                   with its clientId. No browser command was dispatched."
+      | [] -> "That browser is no longer connected and none is. " ^ no_client_retry host in
+    rejection ["clientId", `String (Browser_lane.client_id_to_string client_id);
+               "host", Browser_lane_launcher.to_json host; "retry", `String retry]
+  | Browser_lane.Ambiguous_clients _ ->
+    rejection ["retry", `String "Choose a connected browser and retry with its clientId. No \
+                                 browser command was dispatched."]
+  (* Parsing already refuses both before resolution; reaching them is a caller
+     argument error, not a browser state. *)
+  | Browser_lane.Client_id_requires_live | Browser_lane.Unknown_lane ->
+    make_input_err ~tool_name ~start_time (Browser_lane.selection_error_code error)
 
-let handle_tabs ~tool_name ~start_time args : Tool_result.result =
+let handle_tabs ~base_path ~tool_name ~start_time args : Tool_result.result =
   match tool_request args with
   | Error error -> make_input_err ~tool_name ~start_time error
   | Ok request ->
     match Browser_surface.resolved_target request with
-    | Error error -> selection_error ~tool_name ~start_time request error
+    | Error error -> selection_error ~base_path ~tool_name ~start_time ~source:request.source error
     | Ok target ->
       answer_to_result ~tool_name ~start_time
         (Browser_lane.issue_for ~target ~verb:Browser_lane.Tabs_list ~timeout_sec:default_timeout_sec
@@ -142,7 +174,7 @@ let handle_goto ~tool_name ~start_time args : Tool_result.result =
          ~timeout_sec:45.0)
 ;;
 
-let handle_read ?keeper_name ~tool_name ~start_time args : Tool_result.result =
+let handle_read ?keeper_name ~base_path ~tool_name ~start_time args : Tool_result.result =
   let unknown_argument = match args with
     | `Assoc fields -> List.exists (fun (key,_) -> not (List.mem key ["lane";"tabId";"maxChars";"mode";"framePath";"clientId";"scope";"expectedUrl";"navigationSource"])) fields
     | _ -> false in
@@ -205,9 +237,15 @@ let handle_read ?keeper_name ~tool_name ~start_time args : Tool_result.result =
             match parsed with
             | Error detail -> make_input_err ~tool_name ~start_time detail
             | Ok (navigation_source, expected_url, scope) ->
+              match Browser_surface.resolved_target request with
+              | Error error -> selection_error ~base_path ~tool_name ~start_time ~source:request.source error
+              | Ok target ->
+              (* The read resolves again from this request; naming the client
+                 just resolved lets it find only that browser. *)
               match Browser_scene.read ?navigation_source ?expected_url
                 ~view:(if mode = "regions" then Browser_lane.Regions else Browser_lane.Content)
-                ?scope {request with tab_id=Some tab_id} ~max_chars with
+                ?scope {request with tab_id=Some tab_id; client_id=Browser_lane.target_client_id target}
+                ~max_chars with
               | Ok data -> Tool_result.make_ok ~tool_name ~start_time ~data ()
               | Error detail -> make_workflow_err ~tool_name ~start_time detail)
        | _ -> make_input_err ~tool_name ~start_time "scene requires an observed tabId")
@@ -222,8 +260,12 @@ let handle_read ?keeper_name ~tool_name ~start_time args : Tool_result.result =
        | None, _ -> make_workflow_err ~tool_name ~start_time "screenshot requires an owning Keeper"
        | _, None -> make_input_err ~tool_name ~start_time "screenshot requires an observed tabId"
        | Some keeper_name, Some tab_id ->
+         match Browser_surface.resolved_target request with
+         | Error error -> selection_error ~base_path ~tool_name ~start_time ~source:request.source error
+         | Ok target ->
+         (* As for scenes: the capture finds only the browser just resolved. *)
          let result = Result.bind
-             (Ok {request with tab_id=Some tab_id})
+             (Ok {request with tab_id=Some tab_id; client_id=Browser_lane.target_client_id target})
              Browser_surface.capture in
          let result = Result.bind result (Browser_screenshot.persist ~keeper_name) in
          match result with
@@ -238,7 +280,7 @@ let handle_read ?keeper_name ~tool_name ~start_time args : Tool_result.result =
       | Error detail -> make_input_err ~tool_name ~start_time detail
       | Ok verb ->
         (match Browser_surface.resolved_target request with
-         | Error error -> selection_error ~tool_name ~start_time request error
+         | Error error -> selection_error ~base_path ~tool_name ~start_time ~source:request.source error
          | Ok target -> answer_to_result ~tool_name ~start_time
            (Browser_lane.issue_for ~target ~verb ~timeout_sec:default_timeout_sec |> add_client target))
 ;;
@@ -266,7 +308,7 @@ let retain_read_result ~base_path ~tool_name ~start_time args result =
 ;;
 
 let handle_read_with_retention ~base_path ?keeper_name ~tool_name ~start_time args =
-  handle_read ?keeper_name ~tool_name ~start_time args
+  handle_read ?keeper_name ~base_path ~tool_name ~start_time args
   |> retain_read_result ~base_path ~tool_name ~start_time args
 ;;
 
@@ -295,14 +337,15 @@ let handle_act_with_phase ?upload_paths ~tool_name ~start_time args =
 ;;
 let handle_act ~tool_name ~start_time args = fst (handle_act_with_phase ~tool_name ~start_time args)
 
-let handle_interact_with_phase ~tool_name ~start_time args =
-  let pre_error error = make_workflow_err ~tool_name ~start_time error, Tool_result.Proven_pre_effect in
+let handle_interact_with_phase ~base_path ~tool_name ~start_time args =
   match Browser_interaction.parse args with
   | Error error -> make_input_err ~tool_name ~start_time error, Tool_result.Proven_pre_effect
   | Ok request ->
     let lane_name = match request.source with Browser_surface.Live -> "live" | Automation -> "automation" in
     (match Browser_lane.resolve_target ~lane_name ~client_id:request.client_id with
-     | Error error -> pre_error error
+     | Error error ->
+       selection_error ~base_path ~tool_name ~start_time ~source:request.source error,
+       Tool_result.Proven_pre_effect
      | Ok target ->
        let answer = Browser_lane.issue_for ~target
          ~verb:(Browser_lane.Page_interact {tab_id=request.tab_id;
@@ -316,4 +359,5 @@ let handle_interact_with_phase ~tool_name ~start_time args =
          | Browser_lane.Answered _ | Browser_lane.Refused _ | Browser_lane.Timed_out -> Tool_result.Effect_outcome_unknown in
        answer_to_result ~tool_name ~start_time (add_client target answer), phase)
 ;;
-let handle_interact ~tool_name ~start_time args = fst (handle_interact_with_phase ~tool_name ~start_time args)
+let handle_interact ~base_path ~tool_name ~start_time args =
+  fst (handle_interact_with_phase ~base_path ~tool_name ~start_time args)

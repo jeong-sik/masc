@@ -93,6 +93,55 @@ let test_failed_scope mode () =
     with Eio.Time.Timeout ->
       Alcotest.fail "outer fixture deadline expired: the failed client scope did not settle its caller")
 
+(* An interrupt during idle eviction has to reach every client. The pool takes
+   the whole expired set out of [t.idle] and counts it evicted inside the lock,
+   then closes them one at a time outside it. A cleanup step that raises
+   therefore strands every client after the first: their daemons still hold a
+   socket, and [shutdown] can no longer find them because they are out of the
+   map. [evict_expired_entries] returning while its caller is cancelled is what
+   says the walk reached its end. *)
+let test_eviction_under_cancellation_reaches_every_client () =
+  Eio_main.run (fun env ->
+    try
+      Eio.Time.with_timeout_exn env#clock 5.0 (fun () ->
+        Eio.Switch.run (fun sw ->
+          let requests = ref [] in
+          let url = start_server ~sw ~net:env#net requests in
+          let pool = Pool.create ~sw ~env () in
+          let send () =
+            match
+              Pool.request pool ~method_:`POST ~url ~headers:[] ~body:"request" ()
+            with
+            | Ok response ->
+              Alcotest.(check int) "parked response status" 200 response.status
+            | Error message -> Alcotest.failf "request failed: %s" message
+          in
+          (* Both at once. A sequential second call would reuse the first
+             client, and one parked client cannot show a walk stopping early. *)
+          Eio.Fiber.both send send;
+          Alcotest.(check int) "two clients parked" 2 (Pool.stats pool).total_idle;
+          let escaped = ref None in
+          (try
+             Eio.Cancel.sub (fun context ->
+               Eio.Cancel.cancel context (Failure "operator interrupt during eviction");
+               Pool.For_testing.evict_expired_entries
+                 pool
+                 (Eio.Time.now env#clock +. 1.0e6))
+           with
+           | Eio.Cancel.Cancelled _ as exn -> escaped := Some exn);
+          (match !escaped with
+           | None -> ()
+           | Some _ ->
+             Alcotest.fail
+               "eviction stopped at its first client: every client after it keeps \
+                its socket and is already out of the pool");
+          Alcotest.(check int) "the pool kept none of them" 0 (Pool.stats pool).total_idle;
+          Pool.shutdown pool))
+    with
+    | Eio.Time.Timeout ->
+      Alcotest.fail "outer fixture deadline expired during eviction")
+;;
+
 let () =
   Alcotest.run "Pool scope failure"
     [ "real HTTP/1",
@@ -100,5 +149,7 @@ let () =
           (test_failed_scope Buffered_request)
       ; Alcotest.test_case "streaming headers observe sending-fiber failure" `Quick
           (test_failed_scope Streaming_request)
+      ; Alcotest.test_case "an interrupt during eviction reaches every client" `Quick
+          test_eviction_under_cancellation_reaches_every_client
       ]
     ]

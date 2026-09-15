@@ -453,8 +453,8 @@ image for MASC development, not part of a regular install.
 
 The default installation prepares **one Keeper, `imp`, that does not start on its own** and the
 built-in skills `browser-lanes`, `frontend-change`, `evidence-review`, `run-and-read`,
-`prior-art`, `verify-before-claiming-done`, `root-cause-first`, `diagram-in-chat`, and
-`skill-authoring`.
+`prior-art`, `verify-before-claiming-done`, `root-cause-first`, `diagram-in-chat`,
+`skill-authoring`, and `work-intake`.
 Configure a model and a sandbox, then start the Keeper.
 
 Task and Goal verification agents can also read the instruction Skills

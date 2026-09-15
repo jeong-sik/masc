@@ -657,7 +657,7 @@ describe('KeeperToolCallInspector render', () => {
           output: 'now',
           success: true,
           duration_ms: 1,
-          composition_tool: 'keeper_compose_mission-snapshot',
+          composition_tool: 'keeper_compose_work-intake',
           composition_run_id: 'run-1',
           composition_node_id: 'lane',
           composition_execution: 'inline',
@@ -672,7 +672,7 @@ describe('KeeperToolCallInspector render', () => {
           output: 'stats',
           success: true,
           duration_ms: 2,
-          composition_tool: 'keeper_compose_mission-snapshot',
+          composition_tool: 'keeper_compose_work-intake',
           composition_run_id: 'run-1',
           composition_node_id: 'board',
           composition_execution: 'inline',
@@ -682,7 +682,7 @@ describe('KeeperToolCallInspector render', () => {
         {
           ts: 1_777_100_010,
           keeper: 'analyst',
-          tool: 'keeper_compose_mission-snapshot',
+          tool: 'keeper_compose_work-intake',
           input: {},
           output: 'snapshot',
           success: true,
@@ -706,7 +706,7 @@ describe('KeeperToolCallInspector render', () => {
     // The children render only inside the parent's group, not as top-level rows.
     expect(container.querySelectorAll('[data-composition-node="lane"]')).toHaveLength(1)
     const parentRow = childGroup?.parentElement
-    expect(parentRow?.textContent).toContain('keeper_compose_mission-snapshot')
+    expect(parentRow?.textContent).toContain('keeper_compose_work-intake')
   })
 
   it('surfaces coverage gap provenance when tool-call IO is stale', async () => {

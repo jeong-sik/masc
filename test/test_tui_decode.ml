@@ -2494,11 +2494,11 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
       ; "native_posture", `String "read"
       ; "skill_snapshot_revision", `String (String.make 64 'c')
       ; "instruction_skills", `List [ exact_reference "ocaml-coding" 'a' ]
-      ; "composition_skills", `List [ exact_reference "mission-snapshot" 'b' ]
+      ; "composition_skills", `List [ exact_reference "work-intake" 'b' ]
       ; ( "skill_profiles"
         , `List
             [ `Assoc
-                [ "reference", exact_reference "mission-snapshot" 'b'
+                [ "reference", exact_reference "work-intake" 'b'
                 ; "kind", `String "composition"
                 ; "execution", `String "async"
                 ; ( "load_reasons"
@@ -2550,12 +2550,12 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
       ; ( "tools"
         , `List
             [ `Assoc
-                [ "name", `String "keeper_compose_mission-snapshot"
+                [ "name", `String "keeper_compose_work-intake"
                 ; ( "origin"
                   , `Assoc
                       [ "kind", `String "composition_skill"
                       ; "skill_source"
-                        , `String "skills/mission-snapshot/SKILL.md"
+                        , `String "skills/work-intake/SKILL.md"
                       ] )
                 ] ] )
       ; "tool_surface_sha256", `String (String.make 64 'a')
@@ -2591,10 +2591,10 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
         (Skill_reference.list_to_yojson ets_instruction_skills
          |> Yojson.Safe.to_string);
       Alcotest.(check string) "tool origin" "composition_skill" tool.et_origin;
-      Alcotest.(check string) "profile name" "mission-snapshot" profile.esp_name;
+      Alcotest.(check string) "profile name" "work-intake" profile.esp_name;
       Alcotest.(check string)
         "profile keeps the exact editable reference"
-        (Yojson.Safe.to_string (exact_reference "mission-snapshot" 'b'))
+        (Yojson.Safe.to_string (exact_reference "work-intake" 'b'))
         (Skill_reference.to_yojson profile.esp_reference |> Yojson.Safe.to_string);
       Alcotest.(check string) "profile execution" "async" profile.esp_execution;
       Alcotest.(check int) "profile nodes" 4 profile.esp_node_count;
@@ -2616,7 +2616,7 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
       Alcotest.(check int) "Skill eager bytes" 0 ets_skill_eager_body_bytes;
       Alcotest.(check int) "Skill body bytes" 4981 ets_skill_body_bytes;
       Alcotest.(check (option string)) "SKILL.md source"
-        (Some "skills/mission-snapshot/SKILL.md") tool.et_skill_source;
+        (Some "skills/work-intake/SKILL.md") tool.et_skill_source;
       Alcotest.(check int) "digest length" 64 (String.length digest)
   | Ok _ -> Alcotest.fail "expected an available effective Keeper surface"
 

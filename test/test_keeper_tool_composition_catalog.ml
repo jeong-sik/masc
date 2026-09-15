@@ -679,11 +679,11 @@ values = ["scene", "regions"]|} with
    resolve to the SKILL.md the catalog read. Composed from the name, which is
    sound only because the tool exists as a consequence of that file. *)
 let test_skill_source_names_the_skill_file () =
-  match Catalog.skill_source_of_tool_name "keeper_compose_mission-snapshot" with
+  match Catalog.skill_source_of_tool_name "keeper_compose_work-intake" with
   | Some rel ->
     Alcotest.(check string)
       "skill definition path"
-      "skills/mission-snapshot/SKILL.md"
+      "skills/work-intake/SKILL.md"
       rel
   | None -> Alcotest.fail "a composition tool must name its skill file"
 ;;

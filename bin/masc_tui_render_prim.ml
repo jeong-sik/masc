@@ -3194,7 +3194,7 @@ let context_composition_lines ~cols ~turn_back
   let wire_lines =
     match record.request_wire_observation with
     | Some observation ->
-        [ Printf.sprintf "  %s%s tok prepared request  ·  %s%s" Ansi.dim
+        [ Printf.sprintf "  %s%s tok in the body masc sent  ·  %s%s" Ansi.dim
             (Masc_tui_token_scale.format_estimate scale observation.body_bytes)
             (Keeper_chat.terminal_safe_text observation.runtime_profile)
             Ansi.reset
@@ -3324,23 +3324,26 @@ let context_composition_lines ~cols ~turn_back
               ( "wire shape"
               , Context_bars.sent_pointer_label
               , Printf.sprintf
-                  "%d older atoms stayed behind. A cut falls between atoms, so \
-                   a tool result and the call it answers either both travel \
-                   or neither does."
+                  "An atom is one user message, or one assistant message \
+                   with the tool results it caused. %d older atoms stayed \
+                   behind. A cut falls between atoms, so a tool result and \
+                   the call it answers either both travel or neither does."
                   (max 0 (total - transmitted)) )
           | Turn_record.Durable_shape ->
               ( "durable shape"
               , "in reach this turn"
               , Printf.sprintf
-                  "%d older atoms stayed behind. Measured on the durable \
-                   history masc holds, not on a body that went out: on a lane \
+                  "An atom is one user message, or one assistant message \
+                   with the tool results it caused. %d older atoms stayed \
+                   behind. Measured on the durable history masc holds, not on \
+                   a body that went out: on a lane \
                    whose client assembles the request, these atoms are what \
                    masc could hand over, and a resumed client session already \
                    holds the earlier ones. A cut falls between atoms, so a \
                    tool result and the call it answers stay together."
                   (max 0 (total - transmitted)) )
         in
-        [ Printf.sprintf "  %s%d of %d atoms%s  ·  %.1f%%  ·  %s%s%s" Ansi.bold
+        [ Printf.sprintf "  %s%d of %d kept atoms%s  ·  %.1f%%  ·  %s%s%s" Ansi.bold
             transmitted total Ansi.reset share Ansi.dim measured Ansi.reset
         ; "  "
           ^ Context_bars.reach_bar ~width:bar_width ~transmitted ~total
@@ -3516,7 +3519,7 @@ let context_composition_lines ~cols ~turn_back
                      The rows count content and the request counts the JSON \
                      around it, so the two are compared on one turn and not \
                      expected to match. Read the shares as proportions and the \
-                     prepared-request line as this turn's size."
+                     request band as this turn's size."
                     (Masc_tui_token_scale.format_estimate scale total)
                     (Masc_tui_token_scale.format_estimate scale observation.body_bytes))
            | Some _ ->
@@ -3634,21 +3637,21 @@ let context_composition_lines ~cols ~turn_back
      screen opened on a total whose parts were three sections further down. *)
   [ identity; turn; trace; "" ]
   @ [ "  "
-      ^ Context_bars.band ~width ~title:"COMPOSITION"
-          ~caption:"where this turn's input came from, in estimated tokens"
+      ^ Context_bars.band ~width ~title:"WHAT WENT IN"
+          ~caption:"the pieces this request was built from, in estimated tokens"
     ]
   @ component_lines @ [ "" ]
   @ [ "  "
-      ^ Context_bars.band ~width ~title:"SERIALIZED REQUEST"
-          ~caption:"tokens the provider counted, then the estimate from the prepared body"
+      ^ Context_bars.band ~width ~title:"THIS REQUEST, AS SENT"
+          ~caption:"the provider's count of it, then the estimate from the body masc built"
     ]
   @ token_lines
   @ wire_lines
   @ cache_lines
   @ [ "" ]
   @ [ "  "
-      ^ Context_bars.band ~width ~title:"HISTORY REACH"
-          ~caption:"how far back this turn looked"
+      ^ Context_bars.band ~width ~title:"HOW FAR BACK"
+          ~caption:"how much of the kept conversation this request carried"
     ]
   @ history_lines
   @ [ "" ]

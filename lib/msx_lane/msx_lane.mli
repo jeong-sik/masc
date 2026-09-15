@@ -183,10 +183,13 @@ val press :
     [1 <= hold_frames <= step_frames <= max_frames_per_call]. A key the matrix
     has no place for is refused before anything is pressed.
 
-    Keys go down only inside this call. If recording an edge raises -- the
-    ledger file will not take it -- the keys the call put down are released
-    before the exception leaves, and the edge that was not written is not in
-    {!ledger}; frames the call already ran stay run. *)
+    A press puts keys down only inside its own call. If recording an edge
+    raises -- the ledger file will not open or will not take the write -- the
+    keys the call put down are released before the exception leaves, and the
+    edge that was not written is not in {!ledger}. Frames the call already ran
+    stay run, and edges it wrote before the failure stay written: the ledger
+    can then hold a key-down with no key-up after it while the machine has
+    that key up, so replaying that ledger no longer reproduces the machine. *)
 
 val ledger : unit -> entry list
 (** Oldest first. Empty when no machine is loaded. *)

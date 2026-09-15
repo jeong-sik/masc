@@ -264,7 +264,10 @@ let entry_json (e : entry) : Yojson.Safe.t =
 ;;
 
 (* The file first: an edge the ledger file did not take is not an input the
-   machine's history records, so a checkpoint never carries it. *)
+   machine's history records, so a checkpoint never carries it. The line sits
+   in the channel buffer until it is flushed, and [with_open_gen] closes with
+   [close_out_noerr], which drops a failed write (ENOSPC, EIO) without a word.
+   Flushing inside makes that failure raise here, before the edge is kept. *)
 let append_entry st e =
   Out_channel.with_open_gen
     [ Open_append; Open_creat; Open_wronly ]
@@ -272,7 +275,8 @@ let append_entry st e =
     st.ledger_path
     (fun oc ->
       output_string oc (Yojson.Safe.to_string (entry_json e));
-      output_char oc '\n');
+      output_char oc '\n';
+      flush oc);
   st.entries <- e :: st.entries;
   st.input_count <- st.input_count + 1
 ;;

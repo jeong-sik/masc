@@ -71,10 +71,15 @@ let last_good_shell : Yojson.Safe.t Atomic.t = Atomic.make (`Assoc [])
 let last_good_shell_light : Yojson.Safe.t Atomic.t = Atomic.make (`Assoc [])
 
 (** Wrap a dashboard computation with a configurable timeout.
-    Returns a partial-response JSON on timeout instead of hanging. *)
+    Returns a partial-response JSON on timeout instead of hanging; a
+    computation that finished as the timeout expired is the response. *)
 let with_dashboard_timeout ~clock compute =
   match
-    Eio.Time.with_timeout clock dashboard_request_timeout_s (fun () -> Ok (compute ()))
+    Watched_work.run
+      ~watcher:(fun () ->
+        Eio.Time.sleep clock dashboard_request_timeout_s;
+        Error `Timeout)
+      (fun () -> Ok (compute ()))
   with
   | Ok v -> v
   | Error `Timeout ->

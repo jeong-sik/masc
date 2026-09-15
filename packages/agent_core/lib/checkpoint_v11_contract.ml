@@ -15,15 +15,25 @@ let json_errorf format =
     format
 ;;
 
-let result_all items =
-  List.fold_left
-    (fun acc item ->
-       let* values = acc in
-       let* value = item in
-       Ok (value :: values))
-    (Ok [])
-    items
-  |> Result.map List.rev
+(* Every validator here is pure and uses its scope only to spell an error.
+   Validating each element under the enclosing scope first therefore answers
+   the same Ok without building an element scope string, and an element that
+   fails is validated again under its own scope, so the error names it exactly
+   as before. A checkpoint carrying a reasoning block's token-sized details
+   holds hundreds of thousands of elements, and the scope strings, the result
+   lists and the sorted field names were most of what decoding one allocated. *)
+let validate_each ~scope ~element_scope validate values =
+  let rec loop index = function
+    | [] -> Ok ()
+    | value :: rest ->
+      (match validate ~scope value with
+       | Ok _ -> loop (index + 1) rest
+       | Error _ ->
+         (match validate ~scope:(element_scope index) value with
+          | Ok _ -> loop (index + 1) rest
+          | Error error -> Error error))
+  in
+  loop 0 values
 ;;
 
 let duplicate_names names =
@@ -39,7 +49,32 @@ let duplicate_names names =
   |> List.sort_uniq String.compare
 ;;
 
+(* Objects this small are checked for a repeated name pair by pair, which
+   allocates nothing; a larger one sorts its names. *)
+let pairwise_duplicate_scan_limit = 16
+
+let has_duplicate_name fields =
+  let rec pairwise = function
+    | [] -> false
+    | (name, _) :: rest ->
+      List.exists (fun (other, _) -> String.equal name other) rest || pairwise rest
+  in
+  if List.compare_length_with fields pairwise_duplicate_scan_limit <= 0
+  then pairwise fields
+  else not (List.is_empty (duplicate_names (List.map fst fields)))
+;;
+
+(* The mismatch lists are built only for an object that has one. *)
+let object_shape_holds ~required ~optional fields =
+  List.for_all (fun name -> List.mem_assoc name fields) required
+  && List.for_all
+       (fun (name, _) -> List.mem name required || List.mem name optional)
+       fields
+  && not (has_duplicate_name fields)
+;;
+
 let validate_object_shape ~scope ~required ~optional = function
+  | `Assoc fields when object_shape_holds ~required ~optional fields -> Ok fields
   | `Assoc fields ->
     let names = List.map fst fields in
     let duplicates = duplicate_names names in
@@ -103,15 +138,16 @@ let validate_string_value ~scope ~allowed = function
 
 let validate_list ~scope validate = function
   | `List values ->
-    values
-    |> List.mapi (fun index value ->
-      validate ~scope:(Printf.sprintf "%s[%d]" scope index) value)
-    |> result_all
-    |> Result.map (fun _ -> ())
+    validate_each
+      ~scope
+      ~element_scope:(fun index -> Printf.sprintf "%s[%d]" scope index)
+      validate
+      values
   | _ -> json_errorf "%s must be an array" scope
 ;;
 
 let validate_unique_object ~scope = function
+  | `Assoc fields when not (has_duplicate_name fields) -> Ok ()
   | `Assoc fields ->
     let duplicates = duplicate_names (List.map fst fields) in
     if duplicates = []
@@ -359,11 +395,11 @@ let rec validate_tool_result ~scope json =
     match content with
     | `String _ -> Ok ()
     | `List blocks ->
-      blocks
-      |> List.mapi (fun index block ->
-        validate_content_block ~scope:(Printf.sprintf "%s.content[%d]" scope index) block)
-      |> result_all
-      |> Result.map (fun _ -> ())
+      validate_each
+        ~scope
+        ~element_scope:(fun index -> Printf.sprintf "%s.content[%d]" scope index)
+        validate_content_block
+        blocks
     | _ -> json_errorf "%s.content must be a string or an array" scope
   in
   let* () =
@@ -514,8 +550,9 @@ and validate_content_block ~scope json =
   | _ -> json_errorf "%s must be a JSON object" scope
 ;;
 
-let validate_message index json =
-  let scope = Printf.sprintf "%s message[%d]" checkpoint_scope index in
+let message_scope index = Printf.sprintf "%s message[%d]" checkpoint_scope index
+
+let validate_message_in ~scope json =
   let* fields =
     validate_object_shape
       ~scope
@@ -569,20 +606,32 @@ let validate_message index json =
       | ("system" | "user" | "assistant"), _, false -> Ok ()
       | _ -> json_errorf "%s has an unsupported role/content combination" scope
     in
-    let* _ =
-      blocks
-      |> List.mapi (fun block_index block ->
+    let* () =
+      validate_each
+        ~scope
+        ~element_scope:(fun block_index -> Printf.sprintf "%s content[%d]" scope block_index)
         validate_content_block
-          ~scope:(Printf.sprintf "%s content[%d]" scope block_index)
-          block)
-      |> result_all
+        blocks
     in
     Ok json
   | _ -> json_errorf "%s content must be an array" scope
 ;;
 
+(* One message on its own, for the per-message encoding memo. Same answer and
+   the same error text as the message validated inside [validate_messages]. *)
+let validate_message index json =
+  match validate_message_in ~scope:checkpoint_scope json with
+  | Ok _ as valid -> valid
+  | Error _ -> validate_message_in ~scope:(message_scope index) json
+;;
+
 let validate_messages = function
-  | `List messages -> messages |> List.mapi validate_message |> result_all
+  | `List messages ->
+    validate_each
+      ~scope:checkpoint_scope
+      ~element_scope:message_scope
+      validate_message_in
+      messages
   | _ -> json_errorf "%s messages must be an array" checkpoint_scope
 ;;
 
@@ -601,8 +650,7 @@ let transport_kind_of_json ~scope = function
   | _ -> json_errorf "%s must be a string" scope
 ;;
 
-let validate_mcp_session index json =
-  let scope = Printf.sprintf "%s mcp_sessions[%d]" checkpoint_scope index in
+let validate_mcp_session ~scope json =
   let* fields =
     validate_object_shape ~scope ~required:mcp_session_http_fields ~optional:[] json
   in
@@ -636,7 +684,13 @@ let validate_mcp_session index json =
 ;;
 
 let validate_mcp_sessions = function
-  | `List sessions -> sessions |> List.mapi validate_mcp_session |> result_all
+  | `List sessions ->
+    validate_each
+      ~scope:checkpoint_scope
+      ~element_scope:(fun index ->
+        Printf.sprintf "%s mcp_sessions[%d]" checkpoint_scope index)
+      validate_mcp_session
+      sessions
   | _ -> json_errorf "%s mcp_sessions must be an array" checkpoint_scope
 ;;
 

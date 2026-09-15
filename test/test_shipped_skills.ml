@@ -52,9 +52,9 @@ let instantiate name args =
   | Error error -> fail (Catalog.instantiation_error_to_string error)
 ;;
 
-(* Node inputs are checked against each tool's input schema only when the node
-   runs, so a misspelled field loads cleanly. Running the plan with a stub
-   dispatch goes through that check for every node. *)
+(* Node inputs are checked against each tool's input schema when the plan runs,
+   not when the Skill loads, so a misspelled field loads cleanly. Running the
+   plan with a stub dispatch goes through that check for every node. *)
 let run_plan plan ~answer =
   let calls = ref [] in
   let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input =
@@ -150,6 +150,142 @@ let test_prior_art_bounds_every_search () =
       (Yojson.Safe.Util.member "compact" board = `Bool true))
 ;;
 
+(* A tool whose schema leaves additionalProperties open accepts a misspelled
+   field without a word, and the node then runs on the tool default the
+   composition meant to replace -- keeper_tasks_list is one of them. So the
+   field names are held against the declared properties, not only against
+   the schema check that running the plan applies. *)
+let check_inputs_declared plan calls =
+  List.iter
+    (fun (node : Plan.node) ->
+       let node_id = Plan.Node_id.to_string node.id in
+       match Plan.descriptor plan node.id with
+       | None -> fail ("no descriptor for node " ^ node_id)
+       | Some descriptor ->
+         let declared =
+           Yojson.Safe.Util.(
+             descriptor.Masc.Keeper_tool_descriptor.input_schema
+             |> member "properties"
+             |> keys)
+         in
+         Yojson.Safe.Util.keys (input_of calls node_id)
+         |> List.iter (fun field ->
+           check
+             bool
+             (node_id ^ " passes a field " ^ node.tool_name ^ " declares: " ^ field)
+             true
+             (List.mem field declared)))
+    (Plan.nodes plan)
+;;
+
+let test_work_intake_names_every_page_bound () =
+  Eio_main.run (fun _ ->
+    let plan = instantiate "work-intake" (`Assoc []) in
+    let answer = function
+      | "keeper_tasks_list" ->
+        `Assoc
+          [ "backlog_authority", `String "primary"
+          ; "degraded", `Bool false
+          ; "projection", `String "compact"
+          ; "kind", `String "snapshot"
+          ; "revision", `String "tasks:fixture"
+          ; "snapshot", `List []
+          ]
+      | "masc_board_list" ->
+        `Assoc
+          [ "kind", `String "snapshot"
+          ; "revision", `String "board:fixture"
+          ; "snapshot", `String "Posts (0)"
+          ]
+      | "masc_ask_status" ->
+        `Assoc [ "open_count", `Int 0; "returned", `Int 0; "asks", `List [] ]
+      | "masc_schedule_list" -> `Assoc [ "status", `String "ok"; "schedules", `List [] ]
+      | tool -> fail ("unexpected tool: " ^ tool)
+    in
+    let result, calls = run_plan plan ~answer in
+    (match result with
+     | Ok _ -> ()
+     | Error _ -> fail "work-intake did not complete against valid tool answers");
+    check
+      (list string)
+      "every read runs"
+      [ "answers"; "board"; "claimed"; "due"; "running"; "scheduled"; "tasks" ]
+      (List.sort String.compare (List.map fst calls));
+    check_inputs_declared plan calls;
+    let board = input_of calls "board" in
+    let answers = input_of calls "answers" in
+    let names_limit json = Yojson.Safe.Util.member "limit" json <> `Null in
+    (* Both list tools match one status exactly, so every state that means
+       "held" or "not finished" needs its own node. *)
+    List.iter
+      (fun (node_id, status) ->
+         let tasks = input_of calls node_id in
+         check string (node_id ^ " reads one held state") status (string_member "status" tasks);
+         check string (node_id ^ " asks for compact rows") "compact"
+           (string_member "projection" tasks);
+         check bool (node_id ^ " names its limit") true (names_limit tasks))
+      [ "tasks", "in_progress"; "claimed", "claimed" ];
+    check string "board orders by latest activity" "updated" (string_member "sort_by" board);
+    check bool "board asks for compact rows" true
+      (Yojson.Safe.Util.member "compact" board = `Bool true);
+    check bool "board names its limit" true (names_limit board);
+    check bool "answers reads open questions only" true
+      (Yojson.Safe.Util.member "include_resolved" answers = `Bool false);
+    List.iter
+      (fun status ->
+         let schedules = input_of calls status in
+         check string (status ^ " lists the caller's schedules") "self"
+           (string_member "owner" schedules);
+         check string (status ^ " reads one unfinished state") status
+           (string_member "status" schedules);
+         check bool (status ^ " names its limit") true (names_limit schedules))
+      [ "scheduled"; "due"; "running" ])
+;;
+
+(* [query] reaches all three searches, and only masc_board_search bounds it (200
+   characters). The bound is a property of a bound parameter, not of any
+   search result, so the call is refused before the memory search runs instead
+   of after it. *)
+let test_prior_art_refuses_an_over_long_query_before_any_search () =
+  Eio_main.run (fun _ ->
+    let plan =
+      instantiate "prior-art" (`Assoc [ "query", `String (String.make 201 'q') ])
+    in
+    let result, calls =
+      run_plan plan ~answer:(fun tool -> fail ("a search ran with an invalid query: " ^ tool))
+    in
+    check (list string) "no search ran" [] (List.map fst calls);
+    match result with
+    | Ok _ -> fail "prior-art completed with a query over the board bound"
+    | Error failure ->
+      check int "nothing settled" 0 (List.length failure.Executor.settled);
+      (match failure.cause with
+       | Executor.Plan_execution_failed
+           { error =
+               Plan.Input_validation_failed
+                 { node_id
+                 ; rejection =
+                     { Masc.Tool_input_validation.violation =
+                         Masc.Tool_input_validation.Argument_out_of_range
+                           { path = "query"
+                           ; keyword =
+                               Masc.Tool_input_validation.Count_bound
+                                 Masc.Tool_input_validation.Max_length
+                           }
+                     ; _
+                     }
+                 ; _
+                 }
+           ; _
+           } ->
+         check string "the board search owns the bound" "board" (Plan.Node_id.to_string node_id)
+       | Executor.Plan_execution_failed _
+       | Executor.Tool_did_not_complete _
+       | Executor.Node_observation_failed _
+       | Executor.Outer_completion_mismatch _ ->
+         fail "the over-long query lost its typed refusal"))
+;;
+
 let () =
   run
     "shipped skills"
@@ -168,6 +304,14 @@ let () =
             "prior-art bounds every search"
             `Quick
             test_prior_art_bounds_every_search
+        ; test_case
+            "work-intake names every page bound"
+            `Quick
+            test_work_intake_names_every_page_bound
+        ; test_case
+            "prior-art refuses an over-long query before any search"
+            `Quick
+            test_prior_art_refuses_an_over_long_query_before_any_search
         ] )
     ]
 ;;

@@ -39,6 +39,12 @@ type context =
         start/termination rows to this call. [None] on callers without
         invocation context (tests, direct dispatch). *)
   ; trace_id : string option
+  ; result_projection : Tool_output.model_projection option
+    (** The projection this call's result crosses on its way to the model,
+        resolved for the lane running the call. [None] when the caller did
+        not resolve a lane (composition sub-calls, tests); a handler that
+        sizes its output then uses its descriptor's own projection, the
+        narrower one. *)
   ; capability_authority : capability_authority
     (** Production Keeper turns carry [Frozen_surface]. [Compatibility_meta]
         is explicit and reserved for direct callers without a turn. *)

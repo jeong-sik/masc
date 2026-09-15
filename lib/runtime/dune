@@ -56,11 +56,9 @@
   masc.fd_accountant
   masc.types_boundary
   time_compat
-  masc.dated_jsonl
   masc_random_id
   masc.masc_process
   masc.otel_spans
-  masc.otel_metric_store
   tls-eio)
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq)))

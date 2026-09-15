@@ -121,8 +121,6 @@ function quietReasonLabel(
 
 function nextActionLabel(path: KeeperDiagnostic['next_action_path']): string {
   switch (path) {
-    case 'auto_restart':
-      return 'auto restart'
     case 'recover':
       return 'recover'
     case 'probe':

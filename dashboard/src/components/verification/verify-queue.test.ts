@@ -73,6 +73,7 @@ function requestsResponse(rows: Partial<VerificationRequestsResponse['requests']
       required_artifacts: [],
       submitted_evidence: [],
       evidence_projection_error: null,
+      cancellation_reason: null,
       ...row,
     })),
   }
@@ -223,6 +224,35 @@ describe('VerifyQueue', () => {
     expect(container.querySelector('.vq-gate-ev')?.textContent).toBe('p99 측정 < 400ms')
     const submitted = [...container.querySelectorAll('.vq-submitted')].map(n => n.textContent)
     expect(submitted.some(t => t?.includes('제출'))).toBe(true)
+  })
+
+  // The operator judging a stop reads the producer's sentence and nothing
+  // else. Until the record kept a copy of it, that sentence existed only in
+  // the body of an unlisted Board post and never reached this screen.
+  it('names a stop and shows the reason the producer gave', () => {
+    tasks.value = [makeTask()]
+    mockState.value = {
+      loading: false,
+      error: null,
+      data: requestsResponse([{
+        cancellation_reason: '이 태스크가 답하는 이슈가 상류에서 닫혔다',
+      }]),
+    }
+    const { container } = render(html`<${VerifyQueue} />`)
+
+    const notes = [...container.querySelectorAll('.vq-note')].map(n => n.textContent ?? '')
+    expect(notes.some(t => t.includes('중단 요청'))).toBe(true)
+    expect(notes.some(t => t.includes('상류에서 닫혔다'))).toBe(true)
+  })
+
+  // Null is not "a completion": a stop submitted before the record kept the
+  // copy has none either, so the card must not label it.
+  it('does not call a request a stop when the record states no reason', () => {
+    tasks.value = [makeTask()]
+    const { container } = render(html`<${VerifyQueue} />`)
+
+    const notes = [...container.querySelectorAll('.vq-note')].map(n => n.textContent ?? '')
+    expect(notes.some(t => t.includes('중단 요청'))).toBe(false)
   })
 
   it('renders a rerun note and handoff note from task fields', () => {

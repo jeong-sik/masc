@@ -251,14 +251,33 @@ module Comment_page : sig
     { offset : int
     ; limit : int
     }
-  (** Built only by {!request}: [offset >= 0] and
+  (** Built only by {!request_of_args}: [offset >= 0] and
       [1 <= limit <= Limits.max_comment_page_limit]. *)
 
+  type argument =
+    | Comment_offset
+    | Comment_limit
+
   type request_error =
+    | Arguments_not_an_object
+    | Not_an_integer of
+        { argument : argument
+        ; given : string
+          (** The JSON kind that arrived, as {!Json_util.kind_name} names it. *)
+        }
+    | Integer_out_of_range of
+        { argument : argument
+        ; literal : string
+        }
     | Negative_offset of int
     | Limit_out_of_bounds of int
 
-  val request : offset:int -> limit:int -> (request, request_error) result
+  val request_of_args : Yojson.Safe.t -> (request, request_error) result
+  (** Reads [comment_offset] (absent: [0]) and [comment_limit] (absent:
+      {!Limits.default_comment_page_limit}) from a tool call's arguments. A
+      value that is present but is not a JSON integer literal is refused, so
+      [null], ["abc"], [true] and [2.9] never turn into a page. *)
+
   val request_error_to_string : request_error -> string
 
   type 'a page =
@@ -281,12 +300,51 @@ module Comment_page : sig
             lost its comments. *)
 
   val select : ?fits:('a page -> bool) -> request -> 'a list -> 'a t
-  (** Items from [offset], at most [limit] of them, extended one at a time
-      while [fits] accepts the whole candidate page, [next_offset] included
-      ([fits] defaults to accepting every page). A page never stops before its
-      first item: an item larger than the budget is delivered whole and the
-      tool-output boundary decides how it travels, so no comment becomes
-      unreadable. *)
+  (** Items from [offset], at most [limit] of them: the longest page [fits]
+      accepts, [next_offset] included, found by halving ([fits] defaults to
+      accepting every page). A page never stops before its first item: an item
+      larger than the budget is delivered whole and the tool-output boundary
+      decides how it travels, so no comment becomes unreadable. Every page
+      returned is one [fits] accepted; the halving finds the longest such page
+      when [fits] stays false once it turns false, which a page whose size
+      grows with each item satisfies. *)
+
+  (** Where a page sits in its thread. Both reading surfaces return it, and a
+      caller reads it back without parsing the page's text. *)
+  module Position : sig
+    type t =
+      { offset : int
+      ; returned : int
+      ; total : int
+      ; next_offset : int option
+      }
+
+    val of_page : 'a page -> t
+
+    val to_yojson : t -> Yojson.Safe.t
+    (** [{offset, returned, total, has_more, next_offset}]; [next_offset] is
+        [null] on the last page. *)
+
+    val of_yojson : Yojson.Safe.t -> t option
+    (** Total decoder: [None] for anything this module did not write. *)
+
+    val line : t -> string
+    (** The one line a text page carries, naming the range it holds and the
+        [comment_offset] that continues it. Every text rendering of a page
+        uses this printer, so the sentence cannot drift between surfaces. *)
+
+    val metadata_key : string
+    (** ["masc.comment_page"]. *)
+
+    val to_metadata : t -> Yojson.Safe.t
+    (** The metadata object carrying the position under {!metadata_key}, for a
+        handler with no other metadata to merge. A tool result's text is for
+        the model; this rides beside it for a caller that continues the read. *)
+
+    val of_metadata : Yojson.Safe.t option -> t option
+    (** The position in a result's metadata: [None] for absent metadata, an
+        absent key, or a value this module did not write. *)
+  end
 end
 
 (** {1 Vote Direction} *)

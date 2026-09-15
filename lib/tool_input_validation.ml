@@ -1,15 +1,10 @@
-(** Tool_input_validation — Pre-dispatch validation via AGENT_CORE Tool_middleware.
+(** Tool_input_validation — Pre-dispatch validation of one tool argument object.
 
-    Delegates to [Agent_core.Tool_middleware.make_validation_hook] for strict
-    schema checking and structured error feedback. AGENT_CORE 0.212 removed implicit
-    type coercion: a mistyped scalar (e.g. string for integer) is a
-    deterministic Reject carrying the field name, not a silent repair.
-
-    @since 2.220.0 — AGENT_CORE delegation
-    @since 2.221.0 — use Tool_middleware.make_validation_hook *)
-
-(** Register input validation as a Tool_dispatch pre-hook.
-    Must be called after all tool schemas are registered (server init).
+    Root-property type/enum/const/required go to
+    [Agent_core.Tool_input_validation.validate] with the tool's full input
+    schema, so a node inside a composition and a top-level Agent-Core call are
+    held to the same rule. A mistyped scalar (e.g. string for integer) is a
+    deterministic rejection carrying the field name, not a silent repair.
 
     Tools without a registered schema are rejected fail-closed.  Empty
     schemas are accepted only for empty/no-arg calls. *)
@@ -21,6 +16,50 @@ let strip_internal_marker_args (args : Yojson.Safe.t) : Yojson.Safe.t =
     `Assoc (List.filter (fun (key, _) -> not (is_internal_marker_key key)) fields)
   | _ -> args
 ;;
+
+type numeric_keyword =
+  | Minimum
+  | Maximum
+  | Exclusive_minimum
+  | Exclusive_maximum
+
+type count_keyword =
+  | Min_length
+  | Max_length
+  | Min_items
+  | Max_items
+
+type bound_keyword =
+  | Numeric_bound of numeric_keyword
+  | Count_bound of count_keyword
+
+type violation =
+  | Schema_not_registered
+  | Schema_declares_required_without_properties
+  | Schema_unusable of { detail : string }
+  | Schema_bound_malformed of
+      { path : string
+      ; keyword : bound_keyword
+      }
+  | Arguments_for_fieldless_schema
+  | Retired_transition_alias of { fields : string list }
+  | Arguments_did_not_arrive
+  | Unsupported_fields of { fields : string list }
+  | No_one_of_branch_matches
+  | Several_one_of_branches_match
+  | Field_errors of Agent_core.Tool_input_validation.field_error list
+  | Argument_out_of_range of
+      { path : string
+      ; keyword : bound_keyword
+      }
+  | Validation_raised of { exception_text : string }
+
+type rejection =
+  { tool_name : string
+  ; schema : Yojson.Safe.t option
+  ; violation : violation
+  ; message : string
+  }
 
 let required_names schema =
   match Json_util.assoc_member_opt "required" schema with
@@ -165,8 +204,6 @@ let schema_shape_json schema =
   `Assoc fields
 ;;
 
-let prepare_args ?schema:_ ~name:_ args = strip_internal_marker_args args
-
 let schema_has_properties = function
   | `Assoc fields ->
     (match List.assoc_opt "properties" fields with
@@ -281,15 +318,18 @@ let one_of_required_shape_error schema = function
         let options =
           branches |> List.map branch_label |> String.concat " | "
         in
-        Some (Printf.sprintf "arguments must include exactly one of: %s" options)
+        Some
+          ( No_one_of_branch_matches
+          , Printf.sprintf "arguments must include exactly one of: %s" options )
       | _ :: _ :: _ ->
         let options =
           matching |> List.map branch_label |> String.concat " | "
         in
         Some
-          (Printf.sprintf
-             "arguments match multiple mutually exclusive schemas: %s"
-             options))
+          ( Several_one_of_branches_match
+          , Printf.sprintf
+              "arguments match multiple mutually exclusive schemas: %s"
+              options ))
   | _ -> None
 ;;
 
@@ -307,34 +347,22 @@ let schema_shape_error schema args =
       | accepted -> String.concat ", " accepted
     in
     Some
-      (Printf.sprintf
-         "received unsupported field(s): %s; accepted: %s"
-         names_text
-         accepted)
+      ( Unsupported_fields { fields = name :: names }
+      , Printf.sprintf
+          "received unsupported field(s): %s; accepted: %s"
+          names_text
+          accepted )
   | [] -> one_of_required_shape_error schema args
 ;;
 
 (* ---------------------------------------------------------------- *)
 (* Declared range/length constraints                                  *)
 (*                                                                    *)
-(* [Tool_bridge.params_of_json_schema] projects a JSON Schema onto the *)
-(* AGENT_CORE [tool_param] record, which carries name/type/required only.     *)
-(* Every minimum/maximum/minLength/maxLength/minItems/maxItems is      *)
-(* dropped there, so agent core validation hook cannot see it. These      *)
-(* checks therefore read the raw JSON Schema masc already holds.       *)
+(* Agent-Core's authoritative check reads type/enum/const/required on  *)
+(* root properties only. Every minimum/maximum/minLength/maxLength/    *)
+(* minItems/maxItems, at any depth, is left unread there. These checks *)
+(* therefore read the raw JSON Schema masc already holds.              *)
 (* ---------------------------------------------------------------- *)
-
-type numeric_keyword =
-  | Minimum
-  | Maximum
-  | Exclusive_minimum
-  | Exclusive_maximum
-
-type count_keyword =
-  | Min_length
-  | Max_length
-  | Min_items
-  | Max_items
 
 let numeric_keyword_json_name = function
   | Minimum -> "minimum"
@@ -358,13 +386,26 @@ let constraint_keyword_json_names =
   @ List.map count_keyword_json_name count_keywords
 ;;
 
-(** A rejection caused by declared constraints. [Argument_out_of_range] is
-    the caller's fault; [Schema_bound_malformed] is masc's — a declared
-    bound that cannot be read. Both fail closed, and both keep the field
-    path so the message names what to change. *)
+let bound_keyword_json_name = function
+  | Numeric_bound keyword -> numeric_keyword_json_name keyword
+  | Count_bound keyword -> count_keyword_json_name keyword
+;;
+
+(** A rejection caused by declared constraints. [Out_of_range] is the
+    caller's fault; [Malformed_bound] is masc's — a declared bound that
+    cannot be read. Both fail closed, and both keep the field path and the
+    keyword so the message names what to change. *)
 type constraint_failure =
-  | Argument_out_of_range of string
-  | Schema_bound_malformed of string
+  | Out_of_range of
+      { path : string
+      ; keyword : bound_keyword
+      ; message : string
+      }
+  | Malformed_bound of
+      { path : string
+      ; keyword : bound_keyword
+      ; message : string
+      }
 
 type numeric_value =
   | Numeric_int of int
@@ -459,12 +500,16 @@ let schema_value_to_diagnostic_string = function
 ;;
 
 let malformed_bound ~path ~keyword ~declared =
-  Schema_bound_malformed
-    (Printf.sprintf
-       "schema declares an unreadable %s for %s: %s"
-       keyword
-       path
-       (schema_value_to_diagnostic_string declared))
+  Malformed_bound
+    { path
+    ; keyword
+    ; message =
+        Printf.sprintf
+          "schema declares an unreadable %s for %s: %s"
+          (bound_keyword_json_name keyword)
+          path
+          (schema_value_to_diagnostic_string declared)
+    }
 ;;
 
 (* A value whose JSON kind the keyword does not apply to is left alone:
@@ -474,23 +519,19 @@ let malformed_bound ~path ~keyword ~declared =
    schema does. *)
 let numeric_constraint_failure ~path ~keyword ~declared value =
   match numeric_of_json declared with
-  | None ->
-    Some
-      (malformed_bound
-         ~path
-         ~keyword:(numeric_keyword_json_name keyword)
-         ~declared)
+  | None -> Some (malformed_bound ~path ~keyword:(Numeric_bound keyword) ~declared)
   | Some bound ->
+    let out_of_range message =
+      Out_of_range { path; keyword = Numeric_bound keyword; message }
+    in
     (match numeric_of_json value with
      | None ->
        (match value with
         | `Float value when not (Float.is_finite value) ->
-          Some
-            (Argument_out_of_range
-               (Printf.sprintf "%s must be a finite number" path))
+          Some (out_of_range (Printf.sprintf "%s must be a finite number" path))
         | `Intlit literal ->
           Some
-            (Argument_out_of_range
+            (out_of_range
                (Printf.sprintf
                   "%s integer literal %s is outside the native exact-comparison range"
                   path
@@ -512,7 +553,7 @@ let numeric_constraint_failure ~path ~keyword ~declared value =
          let actual_text = numeric_to_string actual in
          let bound_text = numeric_to_string bound in
          Some
-           (Argument_out_of_range
+           (out_of_range
               (match keyword with
                | Minimum ->
                  Printf.sprintf
@@ -551,9 +592,7 @@ let count_constraint_failure ~path ~keyword ~declared value =
   | None -> None
   | Some actual ->
     (match count_bound_of_json declared with
-     | None ->
-       Some
-         (malformed_bound ~path ~keyword:(count_keyword_json_name keyword) ~declared)
+     | None -> Some (malformed_bound ~path ~keyword:(Count_bound keyword) ~declared)
      | Some bound ->
        let violated =
          match keyword with
@@ -564,7 +603,10 @@ let count_constraint_failure ~path ~keyword ~declared value =
        then None
        else
          Some
-           (Argument_out_of_range
+           (Out_of_range
+              { path
+              ; keyword = Count_bound keyword
+              ; message =
               (match keyword with
                | Min_length ->
                  Printf.sprintf
@@ -589,7 +631,8 @@ let count_constraint_failure ~path ~keyword ~declared value =
                    "%s has %d item(s), above maxItems %d"
                    path
                    actual
-                   bound)))
+                   bound)
+              }))
 ;;
 
 let child_property_path parent name =
@@ -670,10 +713,7 @@ let rec malformed_schema_bound_failures ~path schema =
               | Some _ -> None
               | None ->
                 Some
-                  (malformed_bound
-                     ~path
-                     ~keyword:(numeric_keyword_json_name keyword)
-                     ~declared)))
+                  (malformed_bound ~path ~keyword:(Numeric_bound keyword) ~declared)))
         numeric_keywords
       @ List.filter_map
           (fun keyword ->
@@ -686,10 +726,7 @@ let rec malformed_schema_bound_failures ~path schema =
                 | Some _ -> None
                 | None ->
                   Some
-                    (malformed_bound
-                       ~path
-                       ~keyword:(count_keyword_json_name keyword)
-                       ~declared)))
+                    (malformed_bound ~path ~keyword:(Count_bound keyword) ~declared)))
           count_keywords
     in
     let nested_properties =
@@ -833,243 +870,257 @@ let emit_validation_telemetry ~tool ~result ~reason =
     ()
 ;;
 
-let pass_reason ~schema ~args ~prepared_args =
-  match schema with
-  | Some schema when not (schema_has_properties schema) -> "empty_schema"
-  | Some _ when not (Yojson.Safe.equal prepared_args args) -> "normalized"
-  | Some _ -> "valid"
-  | None -> "missing_schema"
+(* Why an argument object was accepted; the telemetry reason label. *)
+type accepted =
+  | Accepted_empty_schema
+  | Accepted_valid
+  | Accepted_normalized
+
+let accepted_reason = function
+  | Accepted_empty_schema -> "empty_schema"
+  | Accepted_valid -> "valid"
+  | Accepted_normalized -> "normalized"
 ;;
 
-(* Typed end to end: the params this hook already holds go straight into the
-   authoritative constructor. The previous version rendered them to JSON and
-   reparsed via [tool_schema_of_json], with a [failwith] on the reparse — a
-   round-trip through a wire format that never left the process
-   (RFC-0371 §3.1). *)
-let validation_schema_of_json ~name json_schema : Agent_core.Types.tool_schema =
-  let parameters = Tool_bridge.params_of_json_schema json_schema in
-  Agent_core.Types.tool_schema_of_params ~name ~description:"" ~parameters ()
+let violation_class = function
+  | Schema_not_registered
+  | Arguments_for_fieldless_schema
+  | Retired_transition_alias _
+  | Arguments_did_not_arrive
+  | Unsupported_fields _
+  | No_one_of_branch_matches
+  | Several_one_of_branches_match
+  | Field_errors _
+  | Argument_out_of_range _ -> Tool_result.Policy_rejection
+  | Schema_declares_required_without_properties
+  | Schema_unusable _
+  | Schema_bound_malformed _
+  | Validation_raised _ -> Tool_result.Runtime_failure
 ;;
 
-(* [~schema] rather than [?schema]: every caller passes it, and the value is
-   already an option, so an optional parameter here could not be erased and
-   made the caller's [option] the wrong type. *)
-let reject_validation ~class_ ~(schema : Yojson.Safe.t option) ~name ~reason ~message =
-  emit_validation_telemetry ~tool:name ~result:"fail" ~reason;
-  Log.Tool_validation.info "tool_input_validation rejected %s: %s" name message;
-  let base_data =
-    [ "error", `String message
-    ; "validation", `String "agent_core_tool_middleware"
-    ; "reason", `String reason
-    ; ( "failure_class"
-      , `String
-          (Tool_result.tool_failure_class_to_string class_) )
-    ]
-  in
+let violation_reason = function
+  | Schema_not_registered -> "missing_schema"
+  | Schema_declares_required_without_properties
+  | Schema_unusable _
+  | Schema_bound_malformed _ -> "malformed_schema"
+  | Arguments_for_fieldless_schema -> "empty_schema_args"
+  | Arguments_did_not_arrive -> "empty_args_required"
+  | Retired_transition_alias _
+  | Unsupported_fields _
+  | No_one_of_branch_matches
+  | Several_one_of_branches_match
+  | Field_errors _
+  | Argument_out_of_range _ -> "invalid_args"
+  | Validation_raised _ -> "validation_exception"
+;;
+
+let rejection_result (rejection : rejection) =
+  let class_ = violation_class rejection.violation in
   let data =
-    match schema with
-    | None -> `Assoc base_data
-    | Some schema -> `Assoc (("schema_shape", schema_shape_json schema) :: base_data)
+    match rejection.violation with
+    | Validation_raised { exception_text } ->
+      `Assoc
+        [ "error", `String rejection.message
+        ; "validation", `String "agent_core_tool_middleware"
+        ; "exception", `String exception_text
+        ]
+    | Schema_not_registered
+    | Schema_declares_required_without_properties
+    | Schema_unusable _
+    | Schema_bound_malformed _
+    | Arguments_for_fieldless_schema
+    | Retired_transition_alias _
+    | Arguments_did_not_arrive
+    | Unsupported_fields _
+    | No_one_of_branch_matches
+    | Several_one_of_branches_match
+    | Field_errors _
+    | Argument_out_of_range _ ->
+      let base_data =
+        [ "error", `String rejection.message
+        ; "validation", `String "agent_core_tool_middleware"
+        ; "reason", `String (violation_reason rejection.violation)
+        ; "failure_class", `String (Tool_result.tool_failure_class_to_string class_)
+        ]
+      in
+      (match rejection.schema with
+       | None -> `Assoc base_data
+       | Some schema -> `Assoc (("schema_shape", schema_shape_json schema) :: base_data))
   in
-  Tool_dispatch.Reject
-    (Tool_result.Failed
-       { Tool_result.effect_disposition = Tool_result.Effect_outcome_unknown
-       ; class_ = class_
-       ; message
-       ; data
-       ; metadata = None
-       ; tool_name = name
-       ; duration_ms = 0.0
-       })
+  Tool_result.Failed
+    { Tool_result.effect_disposition = Tool_result.Effect_outcome_unknown
+    ; class_
+    ; message = rejection.message
+    ; data
+    ; metadata = None
+    ; tool_name = rejection.tool_name
+    ; duration_ms = 0.0
+    }
 ;;
 
-let validation_exception_action ~name exn : Tool_dispatch.pre_hook_action =
-  let error_text = Printexc.to_string exn in
-  let message =
-    Printf.sprintf
-      "Tool '%s' parameter validation failed before dispatch: %s"
-      name
-      error_text
+let check_arguments ~(schema : Yojson.Safe.t option) ~name ~args =
+  let prepared_args = strip_internal_marker_args args in
+  let reject ~schema violation message =
+    Error { tool_name = name; schema; violation; message }
   in
-  emit_validation_telemetry ~tool:name ~result:"fail" ~reason:"validation_exception";
-  Log.Tool_validation.error "%s" message;
-  Tool_dispatch.Reject
-    (Tool_result.Failed
-       { Tool_result.effect_disposition = Tool_result.Effect_outcome_unknown
-       ; class_ = Tool_result.Runtime_failure
-       ; message
-       ; data =
-           `Assoc
-             [ "error", `String message
-             ; "validation", `String "agent_core_tool_middleware"
-             ; "exception", `String error_text
-             ]
-       ; metadata = None
-       ; tool_name = name
-       ; duration_ms = 0.0
-       })
+  match schema with
+  | None ->
+    reject
+      ~schema:None
+      Schema_not_registered
+      (Printf.sprintf
+         "Tool '%s' has no registered input schema; refusing schema-less dispatch"
+         name)
+  | Some schema when not (schema_has_properties schema) ->
+    if required_names schema <> []
+    then
+      reject
+        ~schema:(Some schema)
+        Schema_declares_required_without_properties
+        (Printf.sprintf
+           "Tool '%s' schema declares required fields without input properties"
+           name)
+    else if empty_tool_args prepared_args
+    then Ok (prepared_args, Accepted_empty_schema)
+    else
+      reject
+        ~schema:(Some schema)
+        Arguments_for_fieldless_schema
+        (Printf.sprintf "Tool '%s' declares no input fields but received arguments" name)
+  | Some schema ->
+    let reject = reject ~schema:(Some schema) in
+    (match retired_transition_alias_names ~name prepared_args with
+     | alias :: aliases ->
+       reject
+         (Retired_transition_alias { fields = alias :: aliases })
+         (Printf.sprintf
+            "Tool '%s' received retired transition alias field(s): %s; use action \
+             and notes"
+            name
+            (String.concat ", " (alias :: aliases)))
+     | [] ->
+       (match empty_args_rejection schema prepared_args with
+        | Some message ->
+          reject Arguments_did_not_arrive (Printf.sprintf "Tool '%s' %s" name message)
+        | None ->
+          (match schema_shape_error schema prepared_args with
+           | Some (violation, message) ->
+             reject violation (Printf.sprintf "Tool '%s' %s" name message)
+           | None ->
+             (* The full schema, not its parameter projection: the projection
+                keeps name/type/required only, so a composition node validated
+                through it passed an [enum] value Agent-Core refuses on a
+                top-level call. *)
+             (match
+                Agent_core.Types.tool_schema_of_input_schema
+                  ~name
+                  ~description:""
+                  ~input_schema:schema
+                  ()
+              with
+              | Error detail ->
+                reject
+                  (Schema_unusable { detail })
+                  (Printf.sprintf "Tool '%s' input schema cannot be validated: %s" name detail)
+              | Ok authoritative ->
+                (* Declared ranges are checked only once agent core has accepted
+                   the declared types, so a mistyped value reports its type
+                   error rather than a confusing range error. *)
+                (match Agent_core.Tool_input_validation.validate authoritative prepared_args with
+                 | Agent_core.Tool_input_validation.Invalid errors ->
+                   reject
+                     (Field_errors errors)
+                     (Agent_core.Tool_input_validation.format_errors_inline
+                        ~tool_name:name
+                        ~args:prepared_args
+                        errors)
+                 | Agent_core.Tool_input_validation.Valid _ ->
+                   (match schema_constraint_failure schema prepared_args with
+                    | Some (Out_of_range { path; keyword; message }) ->
+                      reject
+                        (Argument_out_of_range { path; keyword })
+                        (Printf.sprintf "Tool '%s' %s" name message)
+                    | Some (Malformed_bound { path; keyword; message }) ->
+                      reject
+                        (Schema_bound_malformed { path; keyword })
+                        (Printf.sprintf "Tool '%s' %s" name message)
+                    | None ->
+                      if Yojson.Safe.equal prepared_args args
+                      then Ok (prepared_args, Accepted_valid)
+                      else Ok (prepared_args, Accepted_normalized)))))))
 ;;
 
-let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
-  try
-    let schema =
-      match schema with
-      | Some _ as schema -> schema
-      | None -> Tool_dispatch.lookup_schema name
-    in
-    let prepared_args = prepare_args ?schema ~name args in
-    match schema with
-    | None ->
-      reject_validation
-        ~class_:Tool_result.Policy_rejection
-        ~schema
-        ~name
-        ~reason:"missing_schema"
-        ~message:
-          (Printf.sprintf
-             "Tool '%s' has no registered input schema; refusing schema-less dispatch"
-             name)
-    | Some schema when not (schema_has_properties schema) ->
-      let required = required_names schema in
-      if required <> []
-      then
-        reject_validation
-          ~class_:Tool_result.Runtime_failure
-          ~schema:(Some schema)
-          ~name
-          ~reason:"malformed_schema"
-          ~message:
-            (Printf.sprintf
-               "Tool '%s' schema declares required fields without input properties"
-               name)
-      else if empty_tool_args prepared_args
-      then (
-        emit_validation_telemetry ~tool:name ~result:"pass" ~reason:"empty_schema";
-        if Yojson.Safe.equal prepared_args args
-        then Tool_dispatch.Pass
-        else Tool_dispatch.Proceed prepared_args)
-      else
-        reject_validation
-          ~class_:Tool_result.Policy_rejection
-          ~schema:(Some schema)
-          ~name
-          ~reason:"empty_schema_args"
-          ~message:
-            (Printf.sprintf
-               "Tool '%s' declares no input fields but received arguments"
-               name)
-    | Some schema ->
-      (match retired_transition_alias_names ~name prepared_args with
-       | alias :: aliases ->
-         let aliases = String.concat ", " (alias :: aliases) in
-         reject_validation
-           ~class_:Tool_result.Policy_rejection
-           ~schema:(Some schema)
-           ~name
-           ~reason:"invalid_args"
-           ~message:
-             (Printf.sprintf
-                "Tool '%s' received retired transition alias field(s): %s; use \
-                 action and notes"
-                name
-                aliases)
-       | [] ->
-      (match empty_args_rejection schema prepared_args with
-       | Some message ->
-         reject_validation
-           ~class_:Tool_result.Policy_rejection
-           ~schema:(Some schema)
-           ~name
-           ~reason:"empty_args_required"
-           ~message:(Printf.sprintf "Tool '%s' %s" name message)
-       | None ->
-      (match schema_shape_error schema prepared_args with
-       | Some message ->
-         reject_validation
-           ~class_:Tool_result.Policy_rejection
-           ~schema:(Some schema)
-           ~name
-           ~reason:"invalid_args"
-           ~message:(Printf.sprintf "Tool '%s' %s" name message)
-       | None ->
-         let lookup lookup_name =
-           let schema_opt =
-             if String.equal lookup_name name
-             then Some schema
-             else Tool_dispatch.lookup_schema lookup_name
-           in
-           Option.map (validation_schema_of_json ~name:lookup_name) schema_opt
-         in
-         let hook = Agent_core.Tool_middleware.make_validation_hook ~lookup in
-         (* Declared ranges are checked only once agent core has accepted the
-            declared types, so a mistyped value reports its type error
-            rather than a confusing range error. *)
-         (match hook ~name ~args:prepared_args with
-    | Agent_core.Tool_middleware.Pass ->
-      (match schema_constraint_failure schema prepared_args with
-       | Some (Argument_out_of_range message) ->
-         reject_validation
-           ~class_:Tool_result.Policy_rejection
-           ~schema:(Some schema)
-           ~name
-           ~reason:"invalid_args"
-           ~message:(Printf.sprintf "Tool '%s' %s" name message)
-       | Some (Schema_bound_malformed message) ->
-         reject_validation
-           ~class_:Tool_result.Runtime_failure
-           ~schema:(Some schema)
-           ~name
-           ~reason:"malformed_schema"
-           ~message:(Printf.sprintf "Tool '%s' %s" name message)
-       | None ->
-         let reason = pass_reason ~schema:(Some schema) ~args ~prepared_args in
-         emit_validation_telemetry ~tool:name ~result:"pass" ~reason;
-         if Yojson.Safe.equal prepared_args args
-         then Tool_dispatch.Pass
-         else (
-           Log.Tool_validation.debug
-             "tool_input_validation normalized args for %s"
-             name;
-           Tool_dispatch.Proceed prepared_args))
-    | Agent_core.Tool_middleware.Reject { message; _ } ->
-      emit_validation_telemetry ~tool:name ~result:"fail" ~reason:"invalid_args";
-      Log.Tool_validation.info "tool_input_validation rejected %s: %s" name message;
-      (* Input-schema / policy rejection — classify so the
-         dispatch-level metric label (failure_class) reflects the
-         actual category instead of bucketing as "unclassified". *)
-      Tool_dispatch.Reject
-        (Tool_result.Failed
-           { Tool_result.effect_disposition = Tool_result.Effect_outcome_unknown
-       ; class_ = Tool_result.Policy_rejection
-           ; message
-           ; data =
-               `Assoc
-                 ( [ "schema_shape", schema_shape_json schema
-                   ; "error", `String message
-                   ; "validation", `String "agent_core_tool_middleware"
-                   ; "reason", `String "invalid_args"
-                   ; ( "failure_class"
-                     , `String
-                         (Tool_result.tool_failure_class_to_string
-                            Tool_result.Policy_rejection) )
-                   ] )
-           ; metadata = None
-           ; tool_name = name
-           ; duration_ms = 0.0
-           })
-      ))))
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn -> validation_exception_action ~name exn
+let validate ?schema ~name ~args () =
+  let checked =
+    try
+      let schema =
+        match schema with
+        | Some _ as schema -> schema
+        | None -> Tool_dispatch.lookup_schema name
+      in
+      check_arguments ~schema ~name ~args
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
+      let exception_text = Printexc.to_string exn in
+      Error
+        { tool_name = name
+        ; schema = None
+        ; violation = Validation_raised { exception_text }
+        ; message =
+            Printf.sprintf
+              "Tool '%s' parameter validation failed before dispatch: %s"
+              name
+              exception_text
+        }
+  in
+  match checked with
+  | Ok (prepared_args, accepted) ->
+    emit_validation_telemetry ~tool:name ~result:"pass" ~reason:(accepted_reason accepted);
+    (match accepted with
+     | Accepted_normalized ->
+       Log.Tool_validation.debug "tool_input_validation normalized args for %s" name
+     | Accepted_empty_schema | Accepted_valid -> ());
+    Ok prepared_args
+  | Error rejection ->
+    emit_validation_telemetry
+      ~tool:name
+      ~result:"fail"
+      ~reason:(violation_reason rejection.violation);
+    (match rejection.violation with
+     | Validation_raised _ -> Log.Tool_validation.error "%s" rejection.message
+     | Schema_not_registered
+     | Schema_declares_required_without_properties
+     | Schema_unusable _
+     | Schema_bound_malformed _
+     | Arguments_for_fieldless_schema
+     | Retired_transition_alias _
+     | Arguments_did_not_arrive
+     | Unsupported_fields _
+     | No_one_of_branch_matches
+     | Several_one_of_branches_match
+     | Field_errors _
+     | Argument_out_of_range _ ->
+       Log.Tool_validation.info
+         "tool_input_validation rejected %s: %s"
+         name
+         rejection.message);
+    Error rejection
 ;;
 
 let validate_args ?schema ~name ~args () =
-  match validation_action ?schema ~name ~args () with
-  | Tool_dispatch.Pass -> Ok args
-  | Tool_dispatch.Proceed coerced -> Ok coerced
-  | Tool_dispatch.Reject result -> Error result
+  match validate ?schema ~name ~args () with
+  | Ok prepared_args -> Ok prepared_args
+  | Error rejection -> Error (rejection_result rejection)
+;;
+
+let validation_action ~name ~args : Tool_dispatch.pre_hook_action =
+  match validate ~name ~args () with
+  | Ok prepared_args when Yojson.Safe.equal prepared_args args -> Tool_dispatch.Pass
+  | Ok prepared_args -> Tool_dispatch.Proceed prepared_args
+  | Error rejection -> Tool_dispatch.Reject (rejection_result rejection)
 ;;
 
 let register_pre_hook () =
-  Tool_dispatch.register_pre_hook (fun ~name ~args -> validation_action ~name ~args ())
+  Tool_dispatch.register_pre_hook (fun ~name ~args -> validation_action ~name ~args)
 ;;

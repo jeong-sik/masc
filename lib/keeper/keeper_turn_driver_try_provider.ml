@@ -559,52 +559,16 @@ let message_measurer () =
     Buffer.length buffer
 ;;
 
-module Message_identity = struct
-  type t = Agent_core.Types.message
-
-  let equal left right = left == right
-
-  let mix accumulator value = ((accumulator * 65599) lxor value) land max_int
-
-  (* A constant-work string hint keeps the hash independent of tool-result body
-     size. Equality remains physical, so collisions only share a bucket. *)
-  let string_hint value =
-    let length = String.length value in
-    if length = 0
-    then 0
-    else
-      let sample index = Char.code (String.unsafe_get value index) in
-      mix
-        (mix (mix (mix length (sample 0)) (sample (length / 3)))
-           (sample ((2 * length) / 3)))
-        (sample (length - 1))
-  ;;
-
-  let optional_string_hint = function
-    | None -> 0
-    | Some value -> string_hint value
-  ;;
-
-  let role_hint = function
-    | Agent_core.Types.System -> 1
-    | Agent_core.Types.User -> 2
-    | Agent_core.Types.Assistant -> 3
-    | Agent_core.Types.Tool -> 4
-  ;;
-
-  let hash (message : t) =
-    mix
-      (mix (role_hint message.role) (optional_string_hint message.name))
-      (optional_string_hint message.tool_call_id)
-  ;;
-end
-
-module Message_measurement_cache = Hashtbl.Make (Message_identity)
+(* The memo is keyed by message value ([Agent_core.Types.Message_value]). Each
+   request passes its history through [Complete_common.transmitted_history],
+   which allocates a new record for every message
+   ([Reasoning_history_projection.project]), so the key has to survive a rebuilt
+   record. A float zero and its negative inside a raw JSON payload share one
+   entry while encoding one byte apart; [unmeasured_request_reserve_divisor]
+   absorbs that difference. *)
+module Message_measurement_cache = Hashtbl.Make (Agent_core.Types.Message_value)
 
 let memoize_message_measurement measure =
-  (* A polymorphic hash would scan large strings inside the message. This
-     table hashes only constant-size identity hints, then confirms hits with
-     physical equality. *)
   let cache = Message_measurement_cache.create 128 in
   fun message ->
     match Message_measurement_cache.find_opt cache message with
@@ -776,9 +740,9 @@ let bounded_model_input_projection
      [Eio.Executor_pool.submit_exn], which blocks until the job finishes, so
      successive jobs are ordered even when they land on different domains.
 
-     The message records are physically shared across a turn's requests — only
-     the list spine is rebuilt — which is what makes the memo hit at all: it
-     confirms every lookup with physical equality. *)
+     The memo is keyed by message value ([Agent_core.Types.Message_value]), so
+     a record that projection rebuilt for this request still hits the entry an
+     earlier request measured. *)
   let measure_message_bytes = memoize_message_measurement (message_measurer ()) in
   (* Scoped to the attempt, written by the one fiber that drives it. The
      closure below runs per provider request — 62 to 83 of them in one keeper
@@ -1856,6 +1820,7 @@ module For_testing = struct
   let observe_request_wire_error = observe_request_wire_error
   let message_measurer = message_measurer
   let memoize_message_measurement = memoize_message_measurement
+  let message_measurement_hash = Agent_core.Types.Message_value.hash
   let plan_and_window_model_input = plan_and_window_model_input
   let offload_model_input_cpu = offload_model_input_cpu
 end

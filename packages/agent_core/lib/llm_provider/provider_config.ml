@@ -234,6 +234,14 @@ let capabilities_for_config_model (config : t) =
       ~model_id:config.model_id
 ;;
 
+let context_window (config : t) =
+  match config.max_context with
+  | Some _ as explicit -> explicit
+  | None ->
+    Option.bind (capabilities_for_config_model config) (fun capabilities ->
+      capabilities.Capabilities.max_context_tokens)
+;;
+
 (** Compute auth headers from a provider kind and secret. This is the core
     implementation shared by {!auth_headers_for_config} and
     {!auth_headers_for_kind_and_key}; it avoids constructing a dummy

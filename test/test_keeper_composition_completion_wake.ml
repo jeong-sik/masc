@@ -25,7 +25,7 @@ module Prompt = Masc.Keeper_unified_prompt
 
 let submitter = "alpha"
 let request_id = "kmsg-0001"
-let composition_tool = "keeper_compose_background-snapshot"
+let composition_tool = "keeper_compose_memory-background"
 
 let with_workspace f =
   let dir =
@@ -140,7 +140,7 @@ let a_failure_carries_its_detail () =
     ensure_keeper config ~keeper_name:submitter;
     deliver_or_fail
       config
-      ~terminal:(Event_queue.Composition_failed "node board: store unavailable");
+      ~terminal:(Event_queue.Composition_failed "node search: store unavailable");
     match
       queued_results ~base_path:config.Workspace.base_path ~keeper_name:submitter
     with
@@ -148,7 +148,7 @@ let a_failure_carries_its_detail () =
       check
         string
         "the failure detail travels with the wake"
-        "node board: store unavailable"
+        "node search: store unavailable"
         detail
     | _ -> fail "a failed composition must arrive as Composition_failed")
 ;;
@@ -178,7 +178,7 @@ let the_turn_can_read_the_result () =
     ensure_keeper config ~keeper_name:submitter;
     deliver_or_fail
       config
-      ~terminal:(Event_queue.Composition_failed "node clock: timed out");
+      ~terminal:(Event_queue.Composition_failed "node search: timed out");
     match
       queued_results ~base_path:config.Workspace.base_path ~keeper_name:submitter
     with
@@ -212,7 +212,7 @@ let the_turn_can_read_the_result () =
            bool
            "the failure detail is what the turn reads"
            true
-           (String.equal event.WO.preview "node clock: timed out"))
+           (String.equal event.WO.preview "node search: timed out"))
     | _ -> fail "the submitter's queue holds no result")
 ;;
 

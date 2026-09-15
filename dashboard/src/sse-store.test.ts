@@ -9,7 +9,6 @@ const route: { value: RouteState } = {
 }
 type CurrentRoute = typeof route.value
 
-const keeperHeartbeats = signal(new Map<string, number>())
 const serverStatus = signal<unknown>(null)
 const boardPosts = signal<BoardPost[]>([])
 const boardSortMode = signal<BoardSortMode>('recent')
@@ -56,7 +55,6 @@ async function flushAsyncWork(): Promise<void> {
 async function loadSseStore() {
   vi.resetModules()
   vi.doMock('./store', () => ({
-    keeperHeartbeats,
     invalidateDashboardCache,
     hydrateBoardSnapshot,
     hydrateShellSnapshot,
@@ -154,7 +152,6 @@ describe('setupServerPushReaction reconnect hydration', () => {
     boardAuthorFilter.value = ''
     boardHearthFilter.value = ''
     boardOffset.value = 0
-    keeperHeartbeats.value = new Map()
     serverStatus.value = null
     compositeTick.value = { name: '', ts_unix: 0 }
   })

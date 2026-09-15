@@ -1112,13 +1112,15 @@ let initialize_owner_state_blocking
     | None -> Error Runtime_startup_state.Config_missing
     | Some runtime_config_path ->
       Runtime.load_config_observation ~runtime_config_path ()
-      |> Result.map_error (fun _ -> Runtime_startup_state.Config_unreadable)
+      |> Result.map_error (fun detail -> Runtime_startup_state.Config_unreadable { detail })
   in
   let runtime_initialization = match runtime_config_observation with
     | Error reason -> Error reason
     | Ok observation ->
       Runtime.init_default_degraded_observation observation
-      |> Result.map_error (fun _ -> Runtime_startup_state.Config_invalid)
+      |> Result.map_error (fun error ->
+        Runtime_startup_state.Config_invalid
+          { detail = Runtime.strict_init_error_to_string error })
   in
   (match runtime_initialization with
    | Ok Runtime.Initialized -> Log.Server.info "Runtime default initialized: %s" (Runtime.get_default_runtime_id ())
@@ -1532,20 +1534,31 @@ let start_goal_verifier ~sw (state : Mcp_server.server_state) =
 
 let resume_model_configuration () =
   match Runtime.config_path () with
-  | None -> Error Server_model_setup_resume.Configuration_unavailable
+  | None ->
+    Error
+      (Server_model_setup_resume.Configuration_unavailable
+         { detail = "this workspace has no runtime.toml path" })
   | Some path ->
     let resumed = Runtime.with_config_lock ~runtime_config_path:path (fun () ->
-      let catalog_ready =
-        try
-          let (_ : string option) =
-            configure_agent_core_model_catalog_overlay ~config_root:(Filename.dirname path) ()
-          in
-          true
-        with Env_config_core.Config_error _ -> false
+      let initialized =
+        match
+          configure_agent_core_model_catalog_overlay ~config_root:(Filename.dirname path) ()
+        with
+        | (_ : string option) ->
+          Runtime.init_default_degraded_report ~config_path:path
+          |> Result.map_error Runtime.strict_init_error_to_string
+        | exception Env_config_core.Config_error detail -> Error detail
       in
-      if not catalog_ready then Error "configuration unavailable" else
-      match Runtime.init_default_degraded_report ~config_path:path with
-      | Error _ -> Error "configuration unavailable"
+      match initialized with
+      | Error detail ->
+        (* A running runtime stays as it is. While setup is still required,
+           the cause an operator reads becomes this attempt's cause, so a
+           fixed boot error is not reported after a different one replaced it. *)
+        if Runtime_startup_state.requires_setup () then
+          Runtime_startup_state.set
+            (Runtime_startup_state.Setup_required
+               (Runtime_startup_state.Config_invalid { detail }));
+        Error detail
       | Ok _ ->
         let registry_published =
           try configure_exact_output_registry ~config_root:(Filename.dirname path) (); true
@@ -1565,7 +1578,9 @@ let resume_model_configuration () =
           in
           Ok authority_available)
     in
-    Result.map_error (fun _ -> Server_model_setup_resume.Configuration_unavailable) resumed
+    Result.map_error
+      (fun detail -> Server_model_setup_resume.Configuration_unavailable { detail })
+      resumed
 
 let start_post_ready_owner_lanes
       ~sw
@@ -2131,6 +2146,15 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ?on_ready ~accept_store
   let run_serving ~sw ~socket ~routes:_ ~request_handler ~h2_request_handler
       ~h2_error_handler =
     Eio.Promise.resolve publish_listener_bound ();
+    (* The browser tools compare an installed host's port with the port this
+       listener actually bound, which differs from [config.port] when that
+       asks for any free port. A Unix-domain listener has no port to compare,
+       so the port stays unknown. *)
+    (match Eio.Net.listening_addr socket with
+     | `Tcp (_, port) ->
+       Browser_lane.install_serving_port port;
+       Eio.Switch.on_release sw Browser_lane.withdraw_serving_port
+     | `Unix _ -> ());
     (* The listener is bound. Persist only the desired connection, not readiness. *)
     (match Workspace_connection.port config.port with
      | Error error -> Log.Server.warn "%s" (Workspace_connection.error_message error)

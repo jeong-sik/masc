@@ -1,6 +1,6 @@
 ---
 name: browser-live-follow-read
-description: Follows an observed same-tab HTTP(S) link in the operator's live browser and reads the destination in the same call, either as visible content (mode scene) or as a region map (mode regions). Use when the link target is already observed and the page needs no click handler.
+description: "Live lane only: follow one observed same-tab HTTP(S) anchor in the operator's browser and read the destination in one call. It opens the href without page click handlers; if the page needs one, use an ordinary BrowserInteract click. New-window targets and downloads are refused before navigating. mode=scene reads visible content; mode=regions returns landmarks that scope a later read. The read is pinned to the receipt's destinationUrl and navigationSource. If the follow succeeded and only the read failed, do not call this again: retry BrowserRead alone on the same clientId/tabId with navigationSource. A read still showing the source URL and document means the follow is pending. For a same-URL follow keep expectedUrl too: a reload counts only with a new document ID. To inspect a redirect, drop only expectedUrl. A matching URL does not show the site is ready: check title and content; a login page or unrelated destination stays unverified."
 ---
 
 This package declares the callable tool `keeper_compose_browser-live-follow-read`:
@@ -9,16 +9,16 @@ on the same live client and tab, guarded by the follow receipt's
 `destinationUrl` and `navigationSource`. The caller picks the read with `mode`.
 
 This body is not sent to a Keeper. The tool description a Keeper reads is the
-TOML `description` with the parameter descriptions, and capability search
-matches the frontmatter `description`. The follow semantics and recovery rules
-a Keeper needs therefore live in the TOML description. The automation
-counterpart is `browser-navigate-read`; the broader navigation guidance is in
-`browser-lanes/references/composition.md`.
+TOML `description` with the parameter descriptions. Capability search matches
+and returns the frontmatter `description`, so it holds the same text. The follow
+semantics and recovery rules a Keeper needs therefore live in that description.
+The automation counterpart is `browser-navigate-read`; the broader navigation
+guidance is in `browser-lanes/references/composition.md`.
 
 ```toml composition
 [[compositions]]
 name = "browser-live-follow-read"
-description = "Live lane only: follow one observed same-tab HTTP(S) anchor in the operator's browser, then read the destination in the same call. follow_link goes straight to the anchor's href and does not run page click handlers; if the page needs its handler, use an ordinary BrowserInteract click instead. New-window targets and downloads are refused before navigating. mode=scene returns visible content; mode=regions returns landmarks whose references scope a later read. The read is pinned to the follow receipt's destinationUrl and navigationSource. If the follow succeeded and only the read failed, never call this again: retry BrowserRead alone on the same clientId/tabId with navigationSource. For a same-URL follow keep expectedUrl as well: a reload counts only with a new document identity. To inspect a redirect, drop only expectedUrl and verify the destination before using its URL. A matching URL does not show the site is ready: check title and content."
+description = "Live lane only: follow one observed same-tab HTTP(S) anchor in the operator's browser and read the destination in one call. It opens the href without page click handlers; if the page needs one, use an ordinary BrowserInteract click. New-window targets and downloads are refused before navigating. mode=scene reads visible content; mode=regions returns landmarks that scope a later read. The read is pinned to the receipt's destinationUrl and navigationSource. If the follow succeeded and only the read failed, do not call this again: retry BrowserRead alone on the same clientId/tabId with navigationSource. A read still showing the source URL and document means the follow is pending. For a same-URL follow keep expectedUrl too: a reload counts only with a new document ID. To inspect a redirect, drop only expectedUrl. A matching URL does not show the site is ready: check title and content; a login page or unrelated destination stays unverified."
 execution = "inline"
 
 [[compositions.params]]

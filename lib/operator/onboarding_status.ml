@@ -147,11 +147,15 @@ let keeper_checks base_path =
 (* The browser tools read the same observation when no browser answers, so an
    operator and a Keeper are told the same cause. *)
 let browser_lane_check base_path =
-  let observation = Browser_lane_launcher.observe ~base_path in
+  let observation =
+    Browser_lane_launcher.observe ~base_path ~server:(Browser_lane_launcher.current_server ()) in
   let message = Browser_lane_launcher.message observation in
   match Browser_lane_launcher.verdict observation with
   | Browser_lane_launcher.Absent -> []
-  | Browser_lane_launcher.Aligned -> [check Browser_lane Satisfied message [Inspect_configuration]]
+  | Browser_lane_launcher.Connected | Browser_lane_launcher.Aligned ->
+    [check Browser_lane Satisfied message [Inspect_configuration]]
+  | Browser_lane_launcher.Unverified ->
+    [check Browser_lane Needs_verification message [Inspect_configuration]]
   | Browser_lane_launcher.Misconfigured -> [check Browser_lane Invalid message [Inspect_configuration]]
 
 let inspect ~base_path =

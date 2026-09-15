@@ -85,8 +85,21 @@ let config
 
 (* A window with no bound on it: the cases that use it are about what is
    measured and sent, not when the wait ends. *)
+(* The resolver is the only door onto a deadline, here as on the call path. *)
+let deadline_of ~clock ~timeout_s =
+  match
+    Http_client.resolve_explicit_deadline
+      ~operation:"test_anthropic_input_token_count"
+      ~parameter:"timeout_s"
+      ~clock
+      ~timeout_s
+  with
+  | Ok deadline -> deadline
+  | Error _ -> failwith "the fixture budget was rejected"
+;;
+
 let unbounded_window : float Eio.Time.clock_ty Eio.Resource.t Deadline_window.t =
-  Deadline_window.open_ Http_client.Unbounded
+  Deadline_window.open_ (deadline_of ~clock:None ~timeout_s:None)
 ;;
 
 (* The stage these measurements are ahead of, with no bound on it. *)

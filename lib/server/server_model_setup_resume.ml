@@ -1,10 +1,10 @@
-type error = Owner_not_ready | Workspace_mismatch | Configuration_unavailable
+type error = Owner_not_ready | Workspace_mismatch | Configuration_unavailable of { detail : string }
 type owner = { base_path : string; resume : unit -> (bool, error) result; lock : Eio.Mutex.t }
 let owner : owner option Atomic.t = Atomic.make None
 let error_message = function
   | Owner_not_ready -> "The workspace owner has not finished preparing model setup. Retry shortly."
   | Workspace_mismatch -> "Model setup resume belongs to another workspace."
-  | Configuration_unavailable -> "The saved model connection is not ready. Review connection settings and retry."
+  | Configuration_unavailable { detail } -> "The saved model connection is not ready. Review connection settings and retry. Cause: " ^ detail
 let install ~sw ~base_path ~resume =
   let installed = Some {base_path;resume;lock=Eio.Mutex.create ()} in
   if not (Atomic.compare_and_set owner None installed) then

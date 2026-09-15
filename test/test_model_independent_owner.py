@@ -61,6 +61,9 @@ class OwnerWithoutModel(unittest.TestCase):
                         observation = health['startup']['model_runtime']
                         self.assertEqual(observation['status'], 'setup_required' if reason else 'available')
                         self.assertEqual(observation['reason'], reason)
+                        if reason == 'config_invalid':
+                            # The operator must see which binding is wrong, not only that one is.
+                            self.assertIn('missing.model', observation['message'])
                         self.assertIn(get('/api/v1/runtime/config/raw')[0], (401, 403))
                         subprocess.run([BINARY, 'login', '--base-path', tmp, '--port', str(port),
                                         '--agent', 'local-admin', '--role', 'admin',

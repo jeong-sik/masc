@@ -38,7 +38,7 @@ let execution_on runtime_id =
         { Masc.Keeper_context_runtime.requested_override = None
         ; primary_budget = 200_000
         ; runtime_budget = 200_000
-        ; runtime_budget_source = None
+        ; runtime_budget_source = Runtime.Capability
         ; requested_context_window = 200_000
         ; effective_budget = 200_000
         }

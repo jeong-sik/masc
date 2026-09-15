@@ -35,10 +35,19 @@ let run_with_body_deadline body_deadline f =
 let%test "run_with_body_deadline does not relabel a nested timeout exception" =
   Eio_main.run
   @@ fun env ->
-  let deadline = Http_client.Bounded (Eio.Stdenv.clock env, 1.0) in
-  match run_with_body_deadline deadline (fun () -> raise Eio.Time.Timeout) with
-  | exception Eio.Time.Timeout -> true
-  | (exception _) | Body_completed _ | Body_deadline_exceeded _ -> false
+  (* Any positive budget: [f] raises before the deadline is ever read. *)
+  match
+    Http_client.resolve_explicit_deadline
+      ~operation:"run_with_body_deadline"
+      ~parameter:"body_timeout_s"
+      ~clock:(Some (Eio.Stdenv.clock env))
+      ~timeout_s:(Some 1.0)
+  with
+  | Error _ -> false
+  | Ok deadline ->
+    (match run_with_body_deadline deadline (fun () -> raise Eio.Time.Timeout) with
+     | exception Eio.Time.Timeout -> true
+     | (exception _) | Body_completed _ | Body_deadline_exceeded _ -> false)
 ;;
 
 let provider_parse_failure ?parser message =

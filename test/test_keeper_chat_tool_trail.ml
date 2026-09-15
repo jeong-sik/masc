@@ -73,8 +73,8 @@ let test_subject_reaches_a_nested_identity () =
   check_subject
     "a skill call names the skill, not its envelope"
     ~args:
-      {|{"identity":{"source_id":"project-masc","package_id":"masc-keeper-autonomy","name":"turn-opening"},"content_revision":"a1b2c3"}|}
-    (Some "turn-opening")
+      {|{"identity":{"source_id":"project-masc","package_id":"masc-keeper-autonomy","name":"root-cause-first"},"content_revision":"a1b2c3"}|}
+    (Some "root-cause-first")
 ;;
 
 (* Two skills from one source used to render alike: the shared prefix is what
@@ -85,7 +85,7 @@ let test_two_skills_from_one_source_read_apart () =
   in
   let first =
     subject_of
-      {|{"identity":{"source_id":"project-masc","package_id":"masc-keeper-autonomy","name":"turn-opening"}}|}
+      {|{"identity":{"source_id":"project-masc","package_id":"masc-keeper-autonomy","name":"root-cause-first"}}|}
   in
   let second =
     subject_of
@@ -101,7 +101,7 @@ let test_two_skills_from_one_source_read_apart () =
 let test_a_direct_key_still_wins () =
   check_subject
     "the object's own key comes first"
-    ~args:{|{"file_path":"lib/a.ml","identity":{"name":"turn-opening"}}|}
+    ~args:{|{"file_path":"lib/a.ml","identity":{"name":"root-cause-first"}}|}
     (Some "lib/a.ml")
 ;;
 

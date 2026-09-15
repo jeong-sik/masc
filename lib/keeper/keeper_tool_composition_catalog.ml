@@ -8,6 +8,12 @@ type expected_value =
   | Table_array_value
   | Array_value
 
+type enum_value_fault =
+  | Empty_value
+  | Padded_value
+  | Line_break_in_value
+  | Separator_in_value
+
 type error =
   | Toml_syntax of string
   | Empty_catalog
@@ -72,6 +78,11 @@ type error =
       ; type_name : string
       }
   | Empty_param_enum of { path : string list }
+  | Unsendable_param_enum_value of
+      { path : string list
+      ; value : string
+      ; fault : enum_value_fault
+      }
   | Duplicate_param_enum_value of
       { path : string list
       ; value : string
@@ -394,11 +405,39 @@ and parse_array_template ~path fields =
           parse_items 0 [] raw_items))
 ;;
 
-(* [enum] narrows a string param to a closed member set, spelled the way the
-   tool definitions under config/tools spell it, so one habit covers both.
-   The pair is read together: an [enum] on any other type has no JSON
-   meaning the schema could carry, and an empty or repeated member list
-   declares a choice the model cannot make sense of. *)
+(* A member the model could not send back exactly. A provider that cannot
+   carry [enum] gets the members written unquoted into the parameter's own
+   description (Agent_core.Types.enum_vocabulary_text), while the call is
+   still checked against the exact member. Any separator character in a
+   member is refused, not only the spaced form the text uses: ["x |"] next to
+   ["y"] would read as ["x"] and ["| y"]. *)
+let enum_value_fault value =
+  if String.equal value ""
+  then Some Empty_value
+  else if not (String.equal (String.trim value) value)
+  then Some Padded_value
+  else if String.contains value '\n' || String.contains value '\r'
+  then Some Line_break_in_value
+  else if String.contains value Agent_core.Types.enum_member_separator
+  then Some Separator_in_value
+  else None
+;;
+
+let first_unsendable_member ~path members =
+  List.find_map
+    (fun value ->
+       Option.map
+         (fun fault -> Unsendable_param_enum_value { path; value; fault })
+         (enum_value_fault value))
+    members
+;;
+
+(* [enum] narrows a string param to a closed member set. The key and the
+   list shape are the ones config/tools uses; the accepted members are
+   narrower here: strings only, no repeats, nothing empty or padded. The pair
+   is read together: an [enum] on any other type has no JSON meaning the
+   schema could carry, and an empty or repeated member list declares a
+   choice the model cannot make sense of. *)
 let parse_param_type ~path ~raw_type fields =
   match raw_type, List.assoc_opt "enum" fields with
   | "string", None -> Ok String_param
@@ -407,9 +446,12 @@ let parse_param_type ~path ~raw_type fields =
      | Error _ as error -> error
      | Ok [] -> Error (Empty_param_enum { path })
      | Ok members ->
-       (match first_repeated_string members with
-        | Some value -> Error (Duplicate_param_enum_value { path; value })
-        | None -> Ok (Enum_param members)))
+       (match first_unsendable_member ~path members with
+        | Some error -> Error error
+        | None ->
+          (match first_repeated_string members with
+           | Some value -> Error (Duplicate_param_enum_value { path; value })
+           | None -> Ok (Enum_param members))))
   | "integer", None -> Ok Integer_param
   | "number", None -> Ok Number_param
   | "boolean", None -> Ok Boolean_param
@@ -715,6 +757,18 @@ let error_to_string = function
       type_name
   | Empty_param_enum { path } ->
     "enum must list at least one member at " ^ String.concat "." path
+  | Unsendable_param_enum_value { path; value; fault } ->
+    let problem =
+      match fault with
+      | Empty_value -> "is empty"
+      | Padded_value -> "has leading or trailing whitespace"
+      | Line_break_in_value -> "contains a line break"
+      | Separator_in_value ->
+        Printf.sprintf
+          "contains %C, which separates members when they are written into a description"
+          Agent_core.Types.enum_member_separator
+    in
+    Printf.sprintf "enum member %S at %s %s" value (String.concat "." path) problem
   | Duplicate_param_enum_value { path; value } ->
     Printf.sprintf "enum lists member %S twice at %s" value (String.concat "." path)
   | Duplicate_param_name { name; param } ->
@@ -779,21 +833,10 @@ let input_schema_of_params = function
 
 type instantiation_error =
   | Missing_argument of string
-  | Argument_outside_enum of
-      { param : string
-      ; members : string list
-      ; actual : Yojson.Safe.t
-      }
   | Instantiated_plan_rejected of Plan.error
 
 let instantiation_error_to_string = function
   | Missing_argument param -> Printf.sprintf "missing required argument %S" param
-  | Argument_outside_enum { param; members; actual } ->
-    Printf.sprintf
-      "argument %S must be one of %s, got %s"
-      param
-      (String.concat ", " (List.map (Printf.sprintf "%S") members))
-      (Yojson.Safe.to_string actual)
   | Instantiated_plan_rejected error ->
     "instantiated plan rejected: " ^ Plan.error_to_string error
 ;;
@@ -801,13 +844,6 @@ let instantiation_error_to_string = function
 let instantiation_error_to_json = function
   | Missing_argument param ->
     `Assoc [ "kind", `String "missing_argument"; "argument", `String param ]
-  | Argument_outside_enum { param; members; actual } ->
-    `Assoc
-      [ "kind", `String "argument_outside_enum"
-      ; "argument", `String param
-      ; "members", `List (List.map (fun member -> `String member) members)
-      ; "actual", actual
-      ]
   | Instantiated_plan_rejected error ->
     `Assoc
       [ "kind", `String "instantiated_plan_rejected"
@@ -826,21 +862,6 @@ let instantiate ~descriptors ~args entry =
     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _
     | `Tuple _ | `Variant _ -> None
   in
-  let enum_violation =
-    List.find_map
-      (fun param ->
-         match param.param_type with
-         | Enum_param members ->
-           (match lookup param.param_name with
-            | Some (`String value) when List.mem value members -> None
-            | Some actual ->
-              Some (Argument_outside_enum { param = param.param_name; members; actual })
-            (* An absent argument is the substitution's to name below, as
-               [Missing_argument], exactly as for any other type. *)
-            | None -> None)
-         | String_param | Integer_param | Number_param | Boolean_param -> None)
-      entry.params
-  in
   let rec rebuild rebuilt = function
     | [] ->
       (match Plan.create ~descriptors (List.rev rebuilt) with
@@ -856,7 +877,5 @@ let instantiate ~descriptors ~args entry =
             :: rebuilt)
            rest)
   in
-  match enum_violation with
-  | Some error -> Error error
-  | None -> rebuild [] (Plan.nodes entry.plan)
+  rebuild [] (Plan.nodes entry.plan)
 ;;

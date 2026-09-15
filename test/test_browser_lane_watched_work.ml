@@ -43,7 +43,7 @@ let connect ~sw ~clock browser =
 ;;
 
 let live client =
-  match Lane.resolve_target ~lane_name:"live" ~client_id:(Some client.Lane.client_id) with
+  match Lane.resolve_target (Lane.Live_route (Some client.Lane.client_id)) with
   | Ok target -> target
   | Error error -> fail (Lane.selection_error_code error)
 ;;
@@ -79,9 +79,9 @@ let test_an_answer_delivered_as_the_timeout_passed_is_the_answer () =
    | Ok () -> ()
    | Error error -> fail error);
   match Eio.Promise.await_exn issued with
-  | Lane.Answered value -> check bool "the delivered answer is the answer" true (value = payload)
-  | Lane.Timed_out -> fail "an answer delivered as the timeout passed was dropped"
-  | Lane.Lane_absent | Lane.Refused _ | Lane.Rejected_before_effect _ ->
+  | Ok (Lane.Answered value) -> check bool "the delivered answer is the answer" true (value = payload)
+  | Ok Lane.Timed_out -> fail "an answer delivered as the timeout passed was dropped"
+  | Ok (Lane.Lane_absent | Lane.Refused _ | Lane.Rejected_before_effect _) | Error _ ->
     fail "the issue ended before any answer could arrive"
 ;;
 
@@ -110,8 +110,8 @@ let test_a_command_taken_as_the_window_passed_is_delivered () =
    | Ok () -> ()
    | Error error -> fail error);
   match Eio.Promise.await_exn issued with
-  | Lane.Answered value -> check bool "the issuer got its answer" true (value = payload)
-  | Lane.Timed_out | Lane.Lane_absent | Lane.Refused _ | Lane.Rejected_before_effect _ ->
+  | Ok (Lane.Answered value) -> check bool "the issuer got its answer" true (value = payload)
+  | Ok (Lane.Timed_out | Lane.Lane_absent | Lane.Refused _ | Lane.Rejected_before_effect _) | Error _ ->
     fail "the issuer did not get the answer to the command its client took"
 ;;
 
@@ -123,7 +123,7 @@ let test_an_automation_answer_that_arrived_as_the_timeout_passed_stands () =
     (Some (fun _verb -> Lane.Answered (Eio.Promise.await answer)));
   let issued =
     Eio.Fiber.fork_promise ~sw (fun () ->
-      Lane.issue ~lane_name:"automation" ~verb:Lane.Tabs_list ~timeout_sec:window_s)
+      Lane.issue_automation ~verb:Lane.Tabs_list ~timeout_sec:window_s)
   in
   Eio_mock.Clock.set_time clock (Eio.Time.now clock +. window_s);
   Eio.Promise.resolve arrive payload;

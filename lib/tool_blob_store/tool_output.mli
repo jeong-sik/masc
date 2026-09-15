@@ -137,6 +137,30 @@ val agent_core_model_projection : model_projection
     and the lower ceiling only forces a blob the model must read back. The
     lane is resolved where it is known, not here. *)
 
+val inline_ceiling_bytes : model_projection -> int
+(** The largest result that stays inline under this projection. Above it a
+    [Store_above] result becomes a blob and an [Inline_up_to] result is
+    refused. *)
+
+(** What a result meets between the handler that builds it and its reader.
+    A handler that cuts its output into pages reads this to know how large
+    one page may be. *)
+type result_boundary =
+  | Projected_for_model of model_projection
+      (** A Keeper tool call: the result reaches the model through this
+          projection, already resolved for the lane running the call. *)
+  | Sent_to_client
+      (** A caller outside a Keeper turn: an MCP client, an HTTP route, or
+          in-process code. MASC stores nothing and sends the result as it is,
+          so the ceiling is the client's own: the one that reads threads is a
+          CLI harness, and {!Common.max_tool_result_wire_bytes} is the
+          measured line below which such a harness does not spill a result to
+          a file. *)
+
+val result_ceiling_bytes : result_boundary -> int
+(** How many bytes of one result this boundary carries before the reader
+    stops seeing it whole. *)
+
 val marker_prefix : string
 (** Exact wire-grammar introducer [[masc:blob sha256=]. Prose placeholders
     such as [[masc:blob ...]] are not artifact references. *)

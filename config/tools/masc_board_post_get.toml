@@ -4,8 +4,8 @@ name = "masc_board_post_get"
 shell_command = "board post get"
 description = """
 Read one existing board post by exact post_id. Comments are paginated by \
-default: a page ends with its next_offset; pass it as comment_offset to \
-continue. Use only after you have a post_id from masc_board_list, \
+default: the page's first line names the comment_offset that reads the \
+rest. Use only after you have a post_id from masc_board_list, \
 masc_board_search, or visible board context. If no post_id is visible, call \
 masc_board_list or masc_board_search first; never call this tool with empty \
 arguments."""

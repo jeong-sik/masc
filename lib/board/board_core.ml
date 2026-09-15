@@ -56,6 +56,18 @@ let list_posts_by_run_origin store =
        | order -> order)
 ;;
 
+(* A thread's comments in the order they were written. [created_at] alone
+   leaves comments stamped in the same instant in whatever order the post's
+   index holds them, so two reads could disagree about which of them comes
+   first. The id settles that tie the same way on every read. The thread read
+   pages through this order by offset, and a Keeper wake names the replies
+   after its own comment by where they start in it, so both reads must agree. *)
+let compare_comments_oldest_first (a : comment) (b : comment) =
+  match Stdlib.Float.compare a.created_at b.created_at with
+  | 0 -> String.compare (Comment_id.to_string a.id) (Comment_id.to_string b.id)
+  | order -> order
+;;
+
 (* Reads post + comments under a single critical section. The previous
    two-call sequence (get_post then get_comments) acquired
    [store.mutex] twice with [maybe_sweep] dispatching to the flusher
@@ -80,13 +92,7 @@ let get_post_and_comments store ~post_id : (post * comment list, board_error) Re
         let comments =
           List.filter_map (fun cid -> Hashtbl.find_opt store.comments cid) comment_ids
         in
-        let sorted =
-          List.sort
-            (fun (a : comment) (b : comment) ->
-               Stdlib.Float.compare a.created_at b.created_at)
-            comments
-        in
-        Ok (post, sorted))
+        Ok (post, List.sort compare_comments_oldest_first comments))
 ;;
 
 let list_posts store ?(visibility_filter = None) ?hearth ?(limit = 50) () : post list =
@@ -333,11 +339,7 @@ let get_comments store ~post_id : (comment list, board_error) Result.t =
       let comments =
         List.filter_map (fun cid -> Hashtbl.find_opt store.comments cid) comment_ids
       in
-      Ok
-        (List.sort
-           (fun (a : comment) (b : comment) ->
-              Stdlib.Float.compare a.created_at b.created_at)
-           comments))
+      Ok (List.sort compare_comments_oldest_first comments))
 ;;
 
 let get_comment store ~comment_id : (comment, board_error) Result.t =
@@ -358,10 +360,7 @@ let list_comments store ?(limit = 1000) () : comment list =
   with_lock store (fun () ->
     let all = Hashtbl.fold (fun _ c acc -> c :: acc) store.comments [] in
     let sorted =
-      List.sort
-        (fun (a : comment) (b : comment) ->
-           Stdlib.Float.compare b.created_at a.created_at)
-        all
+      List.sort (fun (a : comment) (b : comment) -> compare_comments_oldest_first b a) all
     in
     List.filteri (fun i _ -> i < limit) sorted)
 ;;

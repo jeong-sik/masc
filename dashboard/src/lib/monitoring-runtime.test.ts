@@ -197,7 +197,6 @@ describe('summarizeKeeperMonitoring', () => {
       name: 'keeper-a',
       status: 'idle',
       phase: 'Running',
-      last_heartbeat: new Date().toISOString(),
       runtime_blocker_class: 'fiber_unresolved',
       runtime_blocker_summary: 'turn timed out after queue wait',
     } as Keeper)
@@ -212,7 +211,6 @@ describe('summarizeKeeperMonitoring', () => {
       name: 'keeper-stale',
       status: 'idle',
       phase: 'Running',
-      last_heartbeat: new Date().toISOString(),
       runtime_blocker_class: 'fiber_unresolved',
       runtime_blocker_summary: 'turn timed out after queue wait',
     } as Keeper
@@ -265,17 +263,16 @@ describe('summarizeKeeperMonitoring', () => {
     })
   })
 
-  it('routes heartbeat and context attention through the runtime projection', () => {
+  it('routes context attention through the runtime projection', () => {
     const summary = summarizeKeeperMonitoring({
       name: 'keeper-organism',
       status: 'idle',
       phase: 'Running',
-      last_heartbeat: '1970-01-01T00:00:00Z',
       context_ratio: 0.99,
     } as Keeper)
 
     expect(summary.band.key).toBe('attention')
-    expect(summary.hint).toBe('오래 응답이 없어 실제 상태 확인이 필요합니다.')
+    expect(summary.hint).toBe('컨텍스트 사용량이 99%입니다.')
   })
 
   // The autonomous transient FSM phase Restarting routes to
@@ -439,7 +436,6 @@ describe('summarizeKeeperMonitoring', () => {
         diagnostic: { health_state: 'offline' },
         phase: 'Draining',
         pipeline_stage: 'draining',
-        last_heartbeat: new Date().toISOString(),
       } as Keeper)
       expect(summary.band.key).toBe('offline')
     })

@@ -4,6 +4,7 @@ set -euo pipefail
 
 exec python3 - "$@" <<'PY'
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -83,12 +84,22 @@ binary = host_dir / "masc-browser-host"
 atomic_file(binary, source.read_bytes(), 0o755)
 launcher = host_dir / "launch"
 # The launcher names no server. The host reads the port from the workspace
-# connection.toml, which the server rewrites whenever it binds, and reads it
-# again after a failed poll; a port written here would outlive a restart.
+# connection.toml and, after a failed request, moves only to an address that
+# answers the lane; a port written here would outlive a restart.
 command = [str(binary), "--base-path", str(base), "--token-file", str(token_file)]
 # Firefox supplies its manifest path and extension id. Forward these after
 # the explicit configuration; no token value is written into this launcher.
-atomic_file(launcher, ("#!/bin/sh\nexec " + shlex.join(command) + ' "$@"\n').encode(), 0o755)
+launcher_bytes = ("#!/bin/sh\nexec " + shlex.join(command) + ' "$@"\n').encode()
+atomic_file(launcher, launcher_bytes, 0o755)
+# masc doctor and the browser tools read where this host takes its server
+# address from here rather than from the shell text above
+# (lib/browser_lane_launcher.ml). The digest ties the declaration to the
+# launcher this installation wrote; a launcher edited or written elsewhere
+# no longer matches it.
+atomic_file(host_dir / "launch.json", (json.dumps({
+    "destination": "workspace_connection",
+    "launcher_sha256": hashlib.sha256(launcher_bytes).hexdigest(),
+}) + "\n").encode(), 0o644)
 manifest = manifest_dir / (args.host_name + ".json")
 atomic_file(manifest, (json.dumps({
     "name": args.host_name,

@@ -4,12 +4,35 @@ module Catalog = Masc.Keeper_tool_composition_catalog
 module Plan = Masc.Keeper_tool_plan
 module Executor = Masc.Keeper_tool_plan_executor
 
-let skill_entry name =
+let shipped_skill name =
   let path = Filename.concat (Filename.concat "../skills" name) "SKILL.md" in
   let body = In_channel.with_open_bin path In_channel.input_all in
   match Skills.parse_skill ~directory:name body with
-  | Ok {surface=Skills.Composition entry;_} -> entry
-  | _ -> fail "shipped browser composition is not a valid native MASC Skill"
+  | Ok skill -> skill
+  | Error _ -> fail "shipped browser composition is not a valid native MASC Skill"
+
+let skill_entry name =
+  match (shipped_skill name).Skills.surface with
+  | Skills.Composition entry -> entry
+  | Skills.Instruction -> fail "shipped browser composition is not a valid native MASC Skill"
+
+(* A Keeper meets this text in two places: as the keeper_compose_<name> tool
+   description (the TOML copy) and as the capability search hit (the
+   frontmatter copy). They are one text. Only the frontmatter parser bounds its
+   length, so keeping the copies equal also keeps the tool description inside
+   that bound. *)
+let test_description_is_one_text skill_name () =
+  let skill = shipped_skill skill_name in
+  match skill.Skills.surface with
+  | Skills.Instruction -> fail "shipped browser composition declares no composition"
+  | Skills.Composition entry ->
+    (match entry.Catalog.description with
+     | None -> fail "the tool would show only the generic composition sentence"
+     | Some description ->
+       check bool "the tool description says something" false
+         (String.equal description "");
+       check string "capability search shows the tool description"
+         description skill.Skills.description)
 
 let test_follow_output_contract () =
   let descriptor = List.find (fun (d : Masc.Keeper_tool_descriptor.t) ->
@@ -37,9 +60,9 @@ let read_mode = function
   | Regions -> "regions"
   | Content -> "scene"
 
-(* Both shipped compositions offer the same two reads and nothing else. The
-   node tool, BrowserRead, also takes "text", so a value outside the declared
-   members has to be refused while binding rather than run as another read. *)
+(* Both shipped compositions offer the same two reads and nothing else.
+   BrowserRead itself also takes "text"; the materialized tools refuse it in
+   Agent-Core's input check (test_keeper_tool_dispatch_runtime). *)
 let test_mode_is_a_closed_choice skill_name () =
   let entry = skill_entry skill_name in
   let open Yojson.Safe.Util in
@@ -52,35 +75,7 @@ let test_mode_is_a_closed_choice skill_name () =
     (mode |> member "enum" |> to_list |> List.map to_string);
   check bool "mode is required" true
     (Catalog.input_schema_of_params entry.Catalog.params
-     |> member "required" |> to_list |> List.mem (`String "mode"));
-  (* Every other argument is valid for whichever composition declares it, so
-     the only thing binding can refuse is the mode. *)
-  let valid_arguments =
-    [ "clientId", `String "11111111-1111-4111-8111-111111111111"
-    ; "tabId", `Int 7
-    ; "documentId", `String "observed"
-    ; "nodeId", `String "link"
-    ; "expectedUrl", `String "https://example.org/before"
-    ; "url", `String "https://example.org/start"
-    ]
-  in
-  let declared name =
-    List.exists
-      (fun param -> String.equal param.Catalog.param_name name)
-      entry.Catalog.params
-  in
-  let args =
-    `Assoc
-      (List.filter (fun (name, _) -> declared name) valid_arguments
-       @ [ "mode", `String "text" ])
-  in
-  match
-    Catalog.instantiate ~descriptors:(Masc.Keeper_tool_descriptor.all_descriptors ())
-      ~args entry
-  with
-  | Error (Catalog.Argument_outside_enum { param = "mode"; actual = `String "text"; _ }) -> ()
-  | Ok _ -> fail "a read mode outside scene and regions was bound"
-  | Error error -> fail (Catalog.instantiation_error_to_string error)
+     |> member "required" |> to_list |> List.mem (`String "mode"))
 
 let test_follow_then_read observation case () =
   Eio_main.run (fun _ ->
@@ -229,6 +224,8 @@ let test_navigate_then_read observation case () =
 
 let () = run "browser composition" ["native skill",[
   test_case "runtime destination output contract" `Quick test_follow_output_contract;
+  test_case "live follow description is one text" `Quick (test_description_is_one_text follow_skill);
+  test_case "navigation description is one text" `Quick (test_description_is_one_text navigate_skill);
   test_case "live follow offers only scene and regions" `Quick (test_mode_is_a_closed_choice follow_skill);
   test_case "navigation offers only scene and regions" `Quick (test_mode_is_a_closed_choice navigate_skill);
   test_case "observed follow then region read" `Quick (test_follow_then_read Regions Navigated);

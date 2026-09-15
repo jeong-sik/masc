@@ -500,10 +500,10 @@ let handle_browser_goto_with_outcome ~args =
     (Tool_misc_browser_lane.handle_goto ~tool_name:"masc_browser_goto" ~start_time:0.0 args)
 ;;
 
-let handle_browser_act_with_outcome ~turn_sandbox_factory ~config ~meta ~args =
+let handle_browser_act_with_outcome ~turn_sandbox_factory ~(config : Workspace.config) ~meta ~args =
   let invoke ?upload_paths () =
     let result, failure_effect_disposition =
-      Tool_misc_browser_lane.handle_act_with_phase ?upload_paths
+      Tool_misc_browser_lane.handle_act_with_phase ?upload_paths ~base_path:config.base_path
         ~tool_name:"masc_browser_act" ~start_time:0.0 args in
     Keeper_tool_execution.of_tool_result ~failure_effect_disposition result in
   match Browser_lane.Action.parse args with
@@ -2062,7 +2062,7 @@ let handle_masc_schedule_with_outcome
   =
   let ctx : Tool_schedule.context =
     { config
-    ; agent_name = meta.name
+    ; caller = Tool_schedule.Named_caller meta.name
     ; stamp_keeper_wake_result_delivery =
         (fun ~payload ->
            Schedule_payload_projection.set_keeper_wake_result_delivery

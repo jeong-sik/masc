@@ -32,10 +32,12 @@ val startup_config_resolution : base_path:string -> Config_dir_resolver.resoluti
 
 val builtin_skills : unit -> Builtin_skill_package.package list
 
-val reconcile_builtin_skills :
+val install_builtin_skills :
+  on_wait:(string -> unit) ->
   base_path:string ->
   (Builtin_skill_package.report list, Builtin_skill_package.error) result
-(** {!Builtin_skill_package.reconcile} with every package this binary embeds.
-    [masc init] and server startup both call it; startup runs it on existing
-    config roots as well as fresh ones and logs every report instead of
-    failing. *)
+(** {!Builtin_skill_package.install} with every package this binary embeds.
+    [masc init] calls it. Server startup instead runs
+    {!Builtin_skill_package.reconcile_at_startup} from
+    {!bootstrap_initial_config_root}, which never changes an installed tree,
+    and logs every report instead of failing. *)

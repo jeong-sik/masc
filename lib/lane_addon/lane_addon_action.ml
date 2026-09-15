@@ -136,14 +136,6 @@ let rec validate_node ~name schema value =
     "required", `List [`String "value"]; "additionalProperties", `Bool false] in
   let* _ = Tool_input_validation.validate_args ~schema:wrapper ~name
     ~args:(`Assoc ["value", value]) () |> Result.map_error Tool_result.message in
-  (* Agent core retains const and enum in its authoritative schema; the host
-     middleware's parameter projection does not retain every nested keyword. *)
-  let* schema_view = Agent_core.Types.tool_schema_of_input_schema ~name ~description:"Lane action"
-    ~input_schema:wrapper () in
-  let* () = match Agent_core.Tool_input_validation.validate schema_view (`Assoc ["value", value]) with
-    | Agent_core.Tool_input_validation.Valid _ -> Ok ()
-    | Agent_core.Tool_input_validation.Invalid errors ->
-        Error (Agent_core.Tool_input_validation.format_errors ~tool_name:name errors) in
   let* fields = object_ schema in
   match value with
   | `Assoc values ->

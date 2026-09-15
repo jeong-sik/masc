@@ -331,24 +331,6 @@ export function deriveLifecycleState(keeper: Keeper): KeeperLifecycleState {
   return 'active'
 }
 
-export function keeperFreshnessTs(keeper: Keeper, heartbeats: Map<string, number>): number | null {
-  const mapped = heartbeats.get(keeper.name)
-  if (mapped != null) return mapped
-
-  const direct = keeper.last_heartbeat ? Date.parse(keeper.last_heartbeat) : Number.NaN
-  if (!Number.isNaN(direct)) return direct
-
-  const ageSeconds = [
-    keeper.last_turn_ago_s,
-    keeper.last_proactive_ago_s,
-    keeper.last_handoff_ago_s,
-  ].find(value => typeof value === 'number' && Number.isFinite(value) && value >= 0)
-
-  return typeof ageSeconds === 'number'
-    ? Date.now() - (ageSeconds * 1000)
-    : null
-}
-
 function normalizeKeeperTrustLatestEvent(raw: unknown): KeeperTrustLatestEvent | null {
   if (!isRecord(raw)) return null
   const kind = asString(raw.kind)
@@ -720,8 +702,6 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
           typeof row.keepalive_running === 'boolean' ? row.keepalive_running : undefined,
         keeper_keepalive_interval_s:
           asNumber(row.keeper_keepalive_interval_s) ?? null,
-        heartbeat_stale_after_s:
-          asNumber(row.heartbeat_stale_after_s) ?? null,
         activation_mode: parseKeeperActivationMode(row.activation_mode) ?? undefined,
         pause_state: asKeeperPauseState(row.pause_state),
         runtime_blocker_state: asKeeperRuntimeBlockerState(row.runtime_blocker_state),
@@ -749,10 +729,6 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
           : null,
         created_at: toIsoTimestamp(row.created_at) ?? asString(row.created_at),
         updated_at: toIsoTimestamp(row.updated_at) ?? asString(row.updated_at),
-        last_heartbeat: asString(row.heartbeat_observation_error)
-          ? undefined
-          : asString(row.last_heartbeat),
-        heartbeat_observation_error: asString(row.heartbeat_observation_error) ?? null,
         turn_count: asNumber(row.turn_count) ?? asNumber(row.total_turns),
         total_turns: asNumber(row.total_turns) ?? asNumber(row.turn_count),
         total_tokens: asNumber(row.total_tokens),

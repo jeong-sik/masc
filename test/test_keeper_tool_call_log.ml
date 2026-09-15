@@ -760,7 +760,7 @@ let test_composition_action_context_persisted () =
    a per-run cell, read back as a record, passed explicitly to log_call. *)
 let test_composition_rows_separate_submitted_from_autonomous_turn () =
   with_tmp_log (fun () ->
-    let node_ids = [ "clock"; "board"; "board-peer"; "memory" ] in
+    let node_ids = [ "tasks"; "board"; "answers"; "scheduled" ] in
     let log_composition_run ~turn_kind ~keeper_turn_id ~run_id =
       let cell = Keeper_tool_call_log.create_turn_ctx_cell () in
       Keeper_tool_call_log.set_turn_context
@@ -790,7 +790,7 @@ let test_composition_rows_separate_submitted_from_autonomous_turn () =
              ?trace_id:context.trace_id
              ?session_id:context.session_id
              ?keeper_turn_id:context.keeper_turn_id
-             ~composition_tool:"keeper_compose_mission-snapshot"
+             ~composition_tool:"keeper_compose_work-intake"
              ~composition_run_id:run_id
              ~composition_node_id:node_id
              ~composition_execution:Keeper_tool_composition_catalog.Inline

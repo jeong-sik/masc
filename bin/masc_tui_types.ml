@@ -4458,6 +4458,11 @@ type state = {
      drops exactly those rows. Replaced wholesale with [tasks] on each load. *)
   mutable tasks_domain: Masc_domain.task list;
   mutable task_flow: Masc_tui_task_flow.t option;
+  (* Tasks whose only exit belongs to the operator, as
+     [Operator_task_attention] projected them from the same load. [None] until
+     the first load answers: an empty list is a fact about the workspace and
+     "not looked yet" is not. *)
+  mutable operator_stalled: Masc_tui_agenda.stalled list option;
   mutable task_focus: pane_focus;
   (* The [?] help overlay: open replaces the surface body until Esc/? closes
      it. The scroll survives only while it is open. *)
@@ -6414,6 +6419,7 @@ let create_state
   tasks = [];
   tasks_domain = [];
   task_flow = None;
+  operator_stalled = None;
   task_focus = Left_pane;
   help_open = false;
   keeper_deletions_open = false;
@@ -7473,7 +7479,14 @@ let agenda (state : state) : Masc_tui_agenda.t =
               })
            state.keeper_tool_approvals)
   in
-  Masc_tui_agenda.project ~scheduled ~awaiting
+  let stalled =
+    match state.operator_stalled, state.tasks_error with
+    | None, Some error ->
+      Masc_tui_agenda.Read_failed (Tui_decode.sanitize_terminal_text error)
+    | None, None -> Masc_tui_agenda.Not_read
+    | Some rows, _ -> Masc_tui_agenda.Read rows
+  in
+  Masc_tui_agenda.project ~scheduled ~awaiting ~stalled
 ;;
 
 (* Rows the agenda strip takes from every surface. Added once, here, rather

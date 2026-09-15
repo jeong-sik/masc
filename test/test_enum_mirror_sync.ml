@@ -146,7 +146,7 @@ let test_schedule_contract_mirrors () =
         (Printf.sprintf "Schedule property %s matches its typed owner" property)
         (List.sort_uniq String.compare owner)
         (advertised_values_for_schemas Tool_schemas_schedule.schemas ~property))
-    [ "status", Schedule_contract_values.schedule_status_strings
+    [ "status", Schedule_contract_values.status_selector_strings
     ; "requested_by_kind", Schedule_contract_values.actor_kind_strings
     ; "scheduled_by_kind", Schedule_contract_values.actor_kind_strings
     ; "cancelled_by_kind", Schedule_contract_values.actor_kind_strings
@@ -154,6 +154,57 @@ let test_schedule_contract_mirrors () =
     ; "recurrence_kind", Schedule_contract_values.recurrence_kind_strings
     ; "owner", Schedule_contract_values.owner_kind_strings
     ]
+;;
+
+(* A refusal's [error_kind] is output, so no schema enum carries it; the
+   descriptions name the kinds a caller should expect in prose instead
+   ("refused with error_kind due_already_past"). Every kind a description
+   names has to be one [Schedule_contract_values.refusal_kind] decodes, or
+   the description promises a value the tool never sends. *)
+let test_schedule_refusal_kinds_named_in_descriptions_decode () =
+  let named_after_error_kind description =
+    let words =
+      String.split_on_char ' ' (String.map (function '\n' -> ' ' | c -> c) description)
+      |> List.filter (fun word -> not (String.equal word ""))
+    in
+    let trim_punctuation word =
+      let is_word_char = function
+        | 'a' .. 'z' | '_' -> true
+        | _ -> false
+      in
+      String.to_seq word |> Seq.filter is_word_char |> String.of_seq
+    in
+    let rec walk acc = function
+      | "error_kind" :: next :: rest -> walk (trim_punctuation next :: acc) rest
+      | _ :: rest -> walk acc rest
+      | [] -> List.rev acc
+    in
+    walk [] words
+  in
+  let rec parameter_descriptions (json : Yojson.Safe.t) =
+    match json with
+    | `Assoc fields ->
+      List.concat_map
+        (fun (key, value) ->
+          match key, value with
+          | "description", `String text -> [ text ]
+          | _, value -> parameter_descriptions value)
+        fields
+    | `List items -> List.concat_map parameter_descriptions items
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> []
+  in
+  let advertised =
+    Tool_schemas_schedule.schemas
+    |> List.concat_map (fun (schema : Masc_domain.tool_schema) ->
+      schema.description :: parameter_descriptions schema.input_schema)
+    |> List.concat_map named_after_error_kind
+    |> List.sort_uniq String.compare
+  in
+  check_every_advertised_value_decodes
+    ~label:"Schedule error_kind named in descriptions"
+    ~decodes:(fun value ->
+      Result.is_ok (Schedule_contract_values.refusal_kind_of_string value))
+    ~advertised
 ;;
 (* The three Goal tool schemas moved into config/tools/masc_goal_*.toml, where
    the enum arrays are literals: nothing in TOML can read an OCaml variant. The
@@ -517,6 +568,8 @@ let () =
         ; test_case "constitution article id pattern" `Quick
             test_article_id_pattern_mirror
         ; test_case "schedule contract enums" `Quick test_schedule_contract_mirrors
+        ; test_case "schedule refusal kinds named in descriptions" `Quick
+            test_schedule_refusal_kinds_named_in_descriptions_decode
         ; test_case "library source enum" `Quick test_library_source_mirrors_its_owner
         ; test_case "runtime tool owners" `Quick test_runtime_tool_owners_match
         ; test_case "keeper tool enums" `Quick test_keeper_tool_enum_mirrors

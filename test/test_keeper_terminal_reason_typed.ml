@@ -1089,8 +1089,7 @@ max-concurrent = 1
       ; updated_at = 0.0
       ; explicit_mention = false
       ; matched_targets = []
-      ; self_commented = false
-      ; external_since = []
+      ; replies_after_own_comment = None
       ; latest_external_author = Some "peer"
       ; latest_external_preview = Some "Continue ordinary work."
       }

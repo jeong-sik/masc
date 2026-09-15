@@ -425,10 +425,63 @@ let measurer_counts_the_same_bytes_as_to_string () =
     (measure repeated)
 ;;
 
+(* 요청마다 [Complete_common.transmitted_history] 가 메시지 레코드를 전부 새로
+   만든다. live 체크포인트처럼 [name] 과 [tool_call_id] 가 없는 메시지로, 새로
+   만든 레코드가 앞 요청의 측정을 그대로 쓰는지 본다. *)
+let rebuilt_records_reuse_measurements () =
+  let envelope_free role text : Types.message =
+    { role; content = [ Types.Text text ]; name = None; tool_call_id = None; metadata = [] }
+  in
+  let history =
+    List.init 200 (fun i ->
+      envelope_free
+        (if i mod 2 = 0 then Types.Assistant else Types.Tool)
+        (Printf.sprintf "message %d" i))
+  in
+  let raw_measurements = ref 0 in
+  let measure_message_bytes =
+    Masc.Keeper_turn_driver_try_provider.For_testing.memoize_message_measurement
+      (fun message ->
+         incr raw_measurements;
+         measure_message_bytes message)
+  in
+  let request () =
+    List.iter
+      (fun (message : Types.message) ->
+         ignore (measure_message_bytes { message with content = message.content }))
+      history
+  in
+  request ();
+  request ();
+  request ();
+  Alcotest.(check int)
+    "three requests encode each message once"
+    (List.length history)
+    !raw_measurements
+;;
+
+(* 캐시 조회는 해시가 같은 항목을 전부 비교한다. [name] 과 [tool_call_id] 가 없는
+   메시지는 content 로만 구분되므로, 해시가 content 를 안 읽으면 역할마다 값이
+   하나가 되고 조회가 그 역할의 히스토리 전체를 훑는다. 짧은 id 와 긴 본문 모두
+   서로 다른 값이 나와야 한다. *)
+let measurement_hash_reads_content () =
+  let hash = Masc.Keeper_turn_driver_try_provider.For_testing.message_measurement_hash in
+  let distinct messages =
+    List.sort_uniq Int.compare (List.map hash messages) |> List.length
+  in
+  let short_texts = List.init 200 (fun i -> assistant (Printf.sprintf "message %d" i)) in
+  let tool_results =
+    List.init 200 (fun i ->
+      tool_message ~id:(Printf.sprintf "call_%08d" i) (String.make 5000 'x'))
+    |> List.map (fun (message : Types.message) -> { message with tool_call_id = None })
+  in
+  Alcotest.(check int) "short texts" 200 (distinct short_texts);
+  Alcotest.(check int) "tool results that differ only by id" 200 (distinct tool_results)
+;;
+
 (* The production pipeline measures the raw history, rewrites only atoms below
    that cut, then measures the planned list. This fixture makes every atom
-   eligible so the per-projection identity cache must reuse every candidate
-   measurement without retaining independently allocated equal messages. *)
+   eligible so the memo must reuse every candidate measurement. *)
 let projection_reuses_candidate_measurements () =
   let bodies = List.init 20 (fun _ -> String.make 4000 'a') in
   let messages = history_with_tool_bodies bodies in
@@ -463,7 +516,7 @@ let projection_reuses_candidate_measurements () =
     (* The window's synthetic preamble. *)
   in
   Alcotest.(check int)
-    "each original, candidate, and preamble identity is encoded once"
+    "each original, candidate, and preamble is encoded once"
     expected_unique_measurements
     !raw_measurements
 ;;
@@ -726,6 +779,14 @@ let () =
             "the measurer counts the same bytes as to_string"
             `Quick
             measurer_counts_the_same_bytes_as_to_string
+        ; Alcotest.test_case
+            "rebuilt records reuse earlier measurements"
+            `Quick
+            rebuilt_records_reuse_measurements
+        ; Alcotest.test_case
+            "the measurement hash reads content"
+            `Quick
+            measurement_hash_reads_content
         ] )
     ]
 ;;

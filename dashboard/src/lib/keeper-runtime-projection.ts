@@ -8,7 +8,6 @@ import {
   type KeeperOperationalState,
 } from './keeper-operational-state'
 import { formatDuration } from './format-time'
-import { keeperHeartbeatStaleMs } from '../config/constants'
 
 export type KeeperLinkedRuntimeState = 'offline' | 'online' | 'unlinked'
 export type KeeperRuntimeProjectionTone = 'ok' | 'warn' | 'bad' | 'info' | 'neutral'
@@ -16,7 +15,6 @@ export type KeeperRuntimeProjectionTone = 'ok' | 'warn' | 'bad' | 'info' | 'neut
 export type KeeperRuntimeProjectionSignalKind =
   | 'operational_state'
   | 'ksm_phase'
-  | 'heartbeat'
   | 'context_ratio'
   | 'fiber_alive'
   | 'stop_requested'
@@ -64,13 +62,6 @@ export interface KeeperRuntimeProjectionFsmLane {
   readonly contributesToAttention: boolean
 }
 
-export interface KeeperHeartbeatProjection {
-  readonly stale: boolean
-  readonly lastHeartbeat: string | null
-  readonly ageMs: number | null
-  readonly thresholdMs: number
-}
-
 export interface KeeperContextProjection {
   readonly breach: boolean
   readonly ratio: number | null
@@ -91,7 +82,6 @@ export interface KeeperRuntimeProjection {
   readonly activeTurn: boolean
   readonly blocked: boolean
   readonly stopRequested: boolean
-  readonly heartbeat: KeeperHeartbeatProjection
   readonly context: KeeperContextProjection
   readonly traceEvidence: KeeperRuntimeTraceProjection
   readonly runtimeWarnings: string[]
@@ -114,7 +104,6 @@ interface DeriveKeeperRuntimeProjectionInput {
   readonly runtimeTrace?: KeeperRuntimeTraceResponse | null
   readonly runtimeResolution?: KeeperRuntimeProjectionRuntimeInput | null
   readonly linkedState?: KeeperLinkedRuntimeState
-  readonly nowMs?: number
 }
 
 /** The attention axis of a keeper runtime projection.
@@ -123,8 +112,8 @@ interface DeriveKeeperRuntimeProjectionInput {
  *  list. The keepers roster used to answer it from two flat record fields
  *  (`needs_attention`, `blocked_task_count`) while the monitoring roster read
  *  these signals, so the same keeper showed 주의 on one surface and 실행 중 on
- *  the other — a stale heartbeat, a context breach or a dead fiber was
- *  visible in monitoring and invisible in the roster. */
+ *  the other — a context breach or a dead fiber was visible in monitoring
+ *  and invisible in the roster. */
 export function keeperAttentionSignals(
   projection: KeeperRuntimeProjection,
 ): KeeperRuntimeProjectionSignal[] {
@@ -158,7 +147,6 @@ export function deriveKeeperRuntimeProjection({
   runtimeTrace = null,
   runtimeResolution = null,
   linkedState = deriveKeeperLinkedRuntimeState(keeper),
-  nowMs = Date.now(),
 }: DeriveKeeperRuntimeProjectionInput): KeeperRuntimeProjection {
   const opState = deriveKeeperOperationalState({ keeper, composite })
   const turnPhase = compactToken(opState.turnPhase)
@@ -168,7 +156,6 @@ export function deriveKeeperRuntimeProjection({
   const stopRequested =
     composite?.runtime_attention?.fiber_stop_requested === true
     || composite?.phase_diagnosis?.conditions.stop_requested === true
-  const heartbeat = deriveHeartbeatProjection(keeper, nowMs)
   const context = deriveContextProjection(keeper)
   const traceEvidence = terminalEventLabel(runtimeTrace)
   const runtimeWarnings = runtimeWarningList(runtimeResolution)
@@ -195,7 +182,6 @@ export function deriveKeeperRuntimeProjection({
 
   const signals = buildProjectionSignals({
     opState,
-    heartbeat,
     context,
     fiberAlive,
     stopRequested,
@@ -231,7 +217,6 @@ export function deriveKeeperRuntimeProjection({
               ? 'warn'
               : 'neutral'
   const synchronizationDetail = [
-    `hb ${heartbeat.stale ? 'stale' : heartbeat.lastHeartbeat ? 'fresh' : 'unknown'}`,
     `ctx ${context.breach ? 'breach' : context.ratio === null ? 'unknown' : 'ok'}`,
     `fiber ${fiberAlive.alive ? 'alive' : 'not_proven'}`,
     stopRequested ? 'stop requested' : 'stop clear',
@@ -245,7 +230,6 @@ export function deriveKeeperRuntimeProjection({
     activeTurn,
     blocked,
     stopRequested,
-    heartbeat,
     context,
     traceEvidence,
     runtimeWarnings,
@@ -260,35 +244,6 @@ export function deriveKeeperRuntimeProjection({
     runtimeRepoLabel,
     synchronizationLabel: attentionSignals.length > 0 ? `${attentionSignals.length} attention signal${attentionSignals.length === 1 ? '' : 's'}` : 'signals aligned',
     synchronizationDetail,
-  }
-}
-
-function deriveHeartbeatProjection(keeper: Keeper, nowMs: number): KeeperHeartbeatProjection {
-  const lastHeartbeat = keeper.last_heartbeat ?? null
-  const thresholdMs = keeperHeartbeatStaleMs(keeper.heartbeat_stale_after_s)
-  if (!lastHeartbeat) {
-    return {
-      stale: false,
-      lastHeartbeat,
-      ageMs: null,
-      thresholdMs,
-    }
-  }
-  const ts = Date.parse(lastHeartbeat)
-  if (Number.isNaN(ts)) {
-    return {
-      stale: false,
-      lastHeartbeat,
-      ageMs: null,
-      thresholdMs,
-    }
-  }
-  const ageMs = nowMs - ts
-  return {
-    stale: ageMs > thresholdMs,
-    lastHeartbeat,
-    ageMs,
-    thresholdMs,
   }
 }
 
@@ -421,7 +376,6 @@ function fsmLaneSummary(lanes: readonly KeeperRuntimeProjectionFsmLane[]): strin
 function buildProjectionSignals({
   opState,
   backlog,
-  heartbeat,
   context,
   fiberAlive,
   stopRequested,
@@ -431,7 +385,6 @@ function buildProjectionSignals({
   runtimeReason,
 }: {
   readonly opState: KeeperOperationalState
-  readonly heartbeat: KeeperHeartbeatProjection
   readonly context: KeeperContextProjection
   readonly fiberAlive: FiberAliveDecision
   readonly stopRequested: boolean
@@ -443,7 +396,6 @@ function buildProjectionSignals({
 }): KeeperRuntimeProjectionSignal[] {
   const blockerAttention = opState.kind === 'stuck' || opState.attention !== 'clean'
   const ksmAttention = fsmLanes.some(lane => lane.axis === 'KSM' && lane.contributesToAttention)
-  const heartbeatAge = heartbeat.ageMs === null ? 'age unknown' : `${Math.round(heartbeat.ageMs / 1000)}s old`
   const contextValue = context.ratio === null ? 'unknown' : `${Math.round(context.ratio * 100)}%`
   const contextThreshold = `${Math.round(context.threshold * 100)}%`
   const blockerHint = blockerAttention && runtimeReason !== 'no blocker reason' ? runtimeReason : null
@@ -467,16 +419,6 @@ function buildProjectionSignals({
       state: ksmAttention ? 'attention' : 'ok',
       contributesToAttention: ksmAttention,
       hint: ksmAttention ? 'FSM phase가 복구/오류/전이 상태입니다.' : null,
-    },
-    {
-      kind: 'heartbeat',
-      label: 'heartbeat',
-      value: heartbeat.stale ? 'stale' : heartbeat.lastHeartbeat ? 'fresh' : 'unknown',
-      detail: heartbeatAge,
-      tone: heartbeat.stale ? 'warn' : 'neutral',
-      state: heartbeat.stale ? 'attention' : heartbeat.lastHeartbeat ? 'ok' : 'unknown',
-      contributesToAttention: heartbeat.stale,
-      hint: heartbeat.stale ? '오래 응답이 없어 실제 상태 확인이 필요합니다.' : null,
     },
     {
       kind: 'context_ratio',

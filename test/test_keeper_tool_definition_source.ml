@@ -16,11 +16,11 @@ let test_shipped_tool_names_its_toml () =
 ;;
 
 let test_composition_tool_names_its_skill () =
-  match Source.resolve "keeper_compose_mission-snapshot" with
+  match Source.resolve "keeper_compose_work-intake" with
   | Some rel ->
     Alcotest.(check string)
       "composition definition path"
-      "skills/mission-snapshot/SKILL.md"
+      "skills/work-intake/SKILL.md"
       rel
   | None -> Alcotest.fail "a composition tool must name the SKILL.md that made it"
 ;;

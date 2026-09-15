@@ -50,8 +50,7 @@ let sample_board_event : WO.pending_board_event =
     updated_at = 0.0;
     explicit_mention = false;
     matched_targets = [];
-    self_commented = false;
-    external_since = [];
+    replies_after_own_comment = None;
     latest_external_author = None;
     latest_external_preview = None;
   }
@@ -1221,16 +1220,15 @@ let test_board_activity_renders_every_admitted_row () =
     (contains_sub "board-post-01" world_state)
 
 (* The post author is the one participant who never commented on their own
-   thread, so [check_self_comment_status] answers [`Never] and [self_commented]
-   stays false. The observation still resolves the commenter and a preview of
-   what they wrote. Gating those two on [self_commented] meant the wake #27288
-   added told the author only that something had happened. *)
+   thread, so [check_self_comment_status] answers [`Never] and the row carries
+   no replies after an own comment. The observation still resolves the
+   commenter and a preview of what they wrote, so the author learns more from
+   the wake than that something happened. *)
 let test_a_comment_on_your_own_post_says_who_and_what () =
   let commented_on_by_someone_else =
     { sample_board_event with
       event_kind = WO.Board_comment_added
-    ; self_commented = false
-    ; external_since = []
+    ; replies_after_own_comment = None
     ; latest_external_author = Some "bob"
     ; latest_external_preview = Some "I hit this too, here is the trace"
     }
@@ -1249,13 +1247,17 @@ let test_a_comment_on_your_own_post_says_who_and_what () =
      to count from, so stating it would be false rather than merely absent. *)
   check bool "no since-own count without an own comment" false
     (contains_sub "new_replies_since_own" world_state);
-  check bool "no since-own reply ids without an own comment" false
-    (contains_sub "new_reply_ids" world_state)
+  check bool "no reply offset without an own comment" false
+    (contains_sub "new_replies_comment_offset" world_state)
 
-(* The count comes with the ids it counts, so a Keeper that already read one
-   of those replies can see that from the row itself. *)
-let first_reply_id = "c-0ca32143f0b39bebaab0d8e7d7b723c1"
-let second_reply_id = "c-5f89fad928ec2ef5b94968bf02460ec9"
+(* A thread with three replies after the Keeper's comment, the oldest of them
+   sixth in the thread. The row names the count, where the thread read starts
+   at them, and the two ids at either end. The id in the middle is not in the
+   row: the row keeps its size however many replies pile up. *)
+let oldest_reply_id = "c-0ca32143f0b39bebaab0d8e7d7b723c1"
+let middle_reply_id = "c-5f89fad928ec2ef5b94968bf02460ec9"
+let newest_reply_id = "c-9d2e6b1f4a7c3e8b5d0f2a6c9e1b4d7a"
+let oldest_reply_offset = 5
 
 let test_a_reply_after_your_own_comment_still_counts () =
   let comment_id raw =
@@ -1266,8 +1268,13 @@ let test_a_reply_after_your_own_comment_still_counts () =
   let replied_after_me =
     { sample_board_event with
       event_kind = WO.Board_comment_added
-    ; self_commented = true
-    ; external_since = [ comment_id first_reply_id; comment_id second_reply_id ]
+    ; replies_after_own_comment =
+        Some
+          { Masc.Keeper_world_observation_board_signal.comment_offset =
+              oldest_reply_offset
+          ; oldest = comment_id oldest_reply_id
+          ; newer = [ comment_id middle_reply_id; comment_id newest_reply_id ]
+          }
     ; latest_external_author = Some "carol"
     ; latest_external_preview = Some "two of us saw it"
     }
@@ -1277,11 +1284,21 @@ let test_a_reply_after_your_own_comment_still_counts () =
     build_prompt ~meta:minimal_meta obs
   in
   check bool "count still rendered for a participant" true
-    (contains_sub "new_replies_since_own=\"2\"" world_state);
-  check bool "the counted reply ids are rendered, oldest first" true
+    (contains_sub "new_replies_since_own=\"3\"" world_state);
+  check bool "the offset the thread read starts at is rendered" true
     (contains_sub
-       (Printf.sprintf "new_reply_ids=\"%s,%s\"" first_reply_id second_reply_id)
+       (Printf.sprintf "new_replies_comment_offset=\"%d\"" oldest_reply_offset)
        world_state);
+  check bool "the oldest reply id is rendered" true
+    (contains_sub
+       (Printf.sprintf "oldest_new_reply_id=\"%s\"" oldest_reply_id)
+       world_state);
+  check bool "the newest reply id is rendered" true
+    (contains_sub
+       (Printf.sprintf "newest_new_reply_id=\"%s\"" newest_reply_id)
+       world_state);
+  check bool "a reply between the two ends is not listed" false
+    (contains_sub middle_reply_id world_state);
   check bool "commenter still named" true
     (contains_sub "latest_external_author=\"carol\"" world_state)
 

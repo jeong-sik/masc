@@ -124,6 +124,7 @@ val host_signal_number : int -> int
     [host_signal_number Sys.sigterm = 15] on Linux and macOS. *)
 
 val trailer_of_status :
+  ?observed_syscalls:int list ->
   v:Exec_ssh_protocol.major -> timed_out:bool -> Unix.process_status -> Exec_ssh_protocol.trailer
 (** Maps a reaped child status to the result trailer: [WEXITED n] →
     [exit = Some n], [WSIGNALED n] → [signal = Some] of the {b host OS}
@@ -132,7 +133,10 @@ val trailer_of_status :
     shim never passes [WUNTRACED] to [waitpid]; it is mapped like
     [WSIGNALED] defensively.)  The result always satisfies the codec's
     trailer invariants (exactly one of [exit]/[signal] set,
-    [shim_error = None]). *)
+    [shim_error = None]).  [observed_syscalls] defaults to [[]]; a
+    caller running Observe mode passes the supervisor drain's
+    accumulated syscall numbers through to carry them in the same
+    typed result rather than a side-channel text line. *)
 
 (** {1 Server-side path jail}
 

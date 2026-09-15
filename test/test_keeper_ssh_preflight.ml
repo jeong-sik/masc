@@ -91,6 +91,7 @@ let stub_main () =
         ; signal = None
         ; timed_out = false
         ; shim_error = None
+        ; observed_syscalls = []
         }
     in
     match request.argv with

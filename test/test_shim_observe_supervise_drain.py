@@ -122,18 +122,26 @@ def main():
         if "first:EPERM" not in text_out or "second:EPERM" not in text_out:
             raise AssertionError(
                 f"observe must still deny both socket attempts: stdout={text_out!r}")
-        # The supervise-loop evidence line (Exec_shim.supervise's stderr
-        # consumer for the observed-attempts accumulator). Its count is the
-        # regression pin: 0 means bug (1) or (3) reopened (nothing ever
-        # observed), 1 means bug (2) reopened (only the first burst seen).
-        marker = "shim: observe: denied "
-        line = next((l for l in text_err.splitlines() if l.startswith(marker)), None)
-        if line is None:
+        # The evidence lives in the wire trailer itself now (Exec_ssh_protocol
+        # .trailer.observed_syscalls), not a side-channel stderr text line --
+        # a completion verdict (vrf-75b5116cabdef13de98a595b19a8295d) rejected
+        # the raw-printf shape as indistinguishable from an arbitrary log
+        # line, not a type the caller can rely on. The trailer rides between
+        # the last two \x1e (RS, 0x1e) bytes in stderr, same delimiter
+        # Exec_ssh_protocol.render_trailer/parse_trailer use.
+        rs = "\x1e"
+        last = text_err.rfind(rs)
+        if last <= 0:
+            raise AssertionError(f"no trailer delimiter in stderr: {text_err!r}")
+        first = text_err.rfind(rs, 0, last)
+        if first < 0:
+            raise AssertionError(f"only one trailer delimiter in stderr: {text_err!r}")
+        trailer = json.loads(text_err[first + 1:last])["masc_exec_result"]
+        if "observed_syscalls" not in trailer:
             raise AssertionError(
-                f"no observed-attempts evidence at all -- readfds wiring or the "
-                f"seccomp filter race is back. stderr={text_err!r}")
-        count_text = line[len(marker):].split(" ", 1)[0]
-        count = int(count_text)
+                f"no observed_syscalls field in the trailer at all -- readfds "
+                f"wiring or the seccomp filter race is back. trailer={trailer!r}")
+        count = len(trailer["observed_syscalls"])
         if count != 2:
             raise AssertionError(
                 f"expected exactly 2 observed socket attempts, got {count} "

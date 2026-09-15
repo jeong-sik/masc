@@ -14,7 +14,6 @@ open Keeper_execution
 open Keeper_keepalive_signal
 module Observations = Keeper_heartbeat_loop_observations
 module Cycle = Keeper_heartbeat_loop_cycle
-module Route = Keeper_runtime_failure_route
 
 (* Presence/identity sync extracted to
    [Keeper_heartbeat_loop_presence] (godfile decomp). *)
@@ -171,18 +170,19 @@ let owner_turn_rejection_cycle_status
 (* What a failed cycle leaves the next one (RFC-provider-path-rest). A rest
    belongs to the path that received the rate limit or quota answer, so the
    keeper waits only while the path it would send next rests.
-   [Continue_on_deferred_lane]: the driver deferred the input to a path that
-   is not resting, and a pending input runs on it without a sleep.
-   [Wait_for_path_release]: that path rests; the sleep lasts until its release.
-   A rate limit or quota wait is not cut short by a wakeup (#34653); capacity
-   backpressure comes from MASC's own slot and client envelopes, which clear on
-   their own, so that wait stays interruptible (#34663 review). *)
+   [Continue_on_deferred_lane]: the walk head of the deferred suffix is not
+   resting, and a pending input runs on it without a sleep.
+   [Wait_for_path_release]: the sleep lasts until [release_at]; [waiting_on]
+   names the runtime or assignment whose release that is. A rate limit or
+   quota wait is not cut short by a wakeup (#34653); capacity backpressure
+   comes from MASC's own slot and client envelopes, which clear on their own,
+   so that wait stays interruptible (#34663 review). *)
 type after_failure =
   | Continue_on_deferred_lane of { next_runtime_id : string }
   | Wait_for_path_release of
       { release_at : float
       ; wake_policy : Keeper_keepalive_signal.wake_policy
-      ; resting_runtime_id : string
+      ; waiting_on : string
       }
 
 type keepalive_turn_outcome = {
@@ -205,55 +205,31 @@ let consume_deferred_runtime_lane_hint hint_ref expected =
   | None | Some _ -> false
 ;;
 
-(* The next dispatch after a failed turn (RFC-provider-path-rest §3.1).
-   Capacity backpressure is MASC's own envelope rather than a path's, so it
-   keeps its interruptible wait whatever the driver deferred. A deferred suffix
-   names the path the input goes to next: its rest, not the failed path's,
-   decides whether the keeper waits. Without a suffix this turn already used
-   every path the input may take, and the failed path's own answer decides. *)
-let after_failure ~now (failure : Keeper_unified_turn.turn_failure) : after_failure option =
-  let cap_sec = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec in
-  let wait_failed_path retry_class retry_after wake_policy =
-    Some
-      (Wait_for_path_release
-         { release_at =
-             now
-             +. Route.path_rest_sec ~cap_sec ~retry_class ~retry_after_hint:retry_after
-         ; wake_policy
-         ; resting_runtime_id = failure.runtime_id
-         })
-  in
-  match failure.route, failure.deferred_runtime_lane with
-  | Route.Retry_after_observed { retry_class = Capacity_backpressure; retry_after }, _ ->
-    wait_failed_path
-      Route.Capacity_backpressure
-      retry_after
-      Keeper_keepalive_signal.Interrupt_on_wakeup
-  | ( ( Route.Retry_after_observed
-          { retry_class =
-              ( Rate_limited | Hard_quota | Server_error | Network_transient
-              | Provider_timeout )
-          ; _
-          }
-      | Route.Rotate_now _ | Route.Exhausted_visible_alive _ )
-    , Some hint ) ->
-    (match Keeper_turn_driver.deferred_lane_rest ~now hint with
-     | Keeper_turn_driver.Deferred_path_serving { runtime_id } ->
-       Some (Continue_on_deferred_lane { next_runtime_id = runtime_id })
-     | Keeper_turn_driver.Deferred_paths_resting { release_at; resting_runtime_id } ->
-       Some
-         (Wait_for_path_release
-            { release_at
-            ; wake_policy = Keeper_keepalive_signal.Serve_wakeup_after_duration
-            ; resting_runtime_id
-            }))
-  | Route.Retry_after_observed { retry_class = (Rate_limited | Hard_quota) as retry_class; retry_after }, None ->
-    wait_failed_path retry_class retry_after Keeper_keepalive_signal.Serve_wakeup_after_duration
-  | ( Route.Retry_after_observed
-        { retry_class = Server_error | Network_transient | Provider_timeout; _ }
-    | Route.Rotate_now _ | Route.Exhausted_visible_alive _ )
-  , None ->
-    None
+(* The next dispatch after a failed turn. The decision is
+   [Keeper_turn_driver.next_dispatch_after_failure], which the chat lane's
+   deferred retry also reads; this maps it onto the heartbeat's sleep. The
+   assignment is the one a turn without a deferred suffix walks. *)
+let after_failure ~now ~assignment_id (failure : Keeper_unified_turn.turn_failure)
+  : after_failure option
+  =
+  match
+    Keeper_turn_driver.next_dispatch_after_failure
+      ~now
+      ~route:failure.route
+      ~assignment_id
+      failure.deferred_runtime_lane
+  with
+  | None -> None
+  | Some (Keeper_turn_driver.Dispatch_now { runtime_id }) ->
+    Some (Continue_on_deferred_lane { next_runtime_id = runtime_id })
+  | Some (Keeper_turn_driver.Wait_until { release_at; waiting_on; wait }) ->
+    let wake_policy =
+      match wait with
+      | Keeper_turn_driver.Capacity_release -> Keeper_keepalive_signal.Interrupt_on_wakeup
+      | Keeper_turn_driver.Path_release ->
+        Keeper_keepalive_signal.Serve_wakeup_after_duration
+    in
+    Some (Wait_for_path_release { release_at; wake_policy; waiting_on })
 ;;
 
 exception Event_queue_cycle_failed of string
@@ -1060,8 +1036,11 @@ let run_keepalive_unified_turn
       ; stimuli_acked = !stimuli_acked
       ; after_failure =
           (match !cycle_outcome_ref with
-           | Some (Cycle.Failed { failure; _ }) ->
-             after_failure ~now:(Time_compat.now ()) failure
+           | Some (Cycle.Failed { failure; meta }) ->
+             after_failure
+               ~now:(Time_compat.now ())
+               ~assignment_id:(Keeper_meta_contract.runtime_id_of_meta meta)
+               failure
            | Some
                ( Cycle.Completed _
                | Cycle.Checkpointed _
@@ -1526,7 +1505,7 @@ let run_heartbeat_loop
               the next cycle takes it without waiting"
              m.name
              next_runtime_id
-         | Some (Wait_for_path_release { release_at; wake_policy; resting_runtime_id }) ->
+         | Some (Wait_for_path_release { release_at; wake_policy; waiting_on }) ->
            let stimulus_note =
              match wake_policy with
              | Keeper_keepalive_signal.Serve_wakeup_after_duration ->
@@ -1536,16 +1515,16 @@ let run_heartbeat_loop
            in
            Log.Keeper.warn
              ~keeper_name:m.name
-             "%s: the next path %s is resting; waiting %.0fs for its release at %.0f; %s"
+             "%s: the next dispatch waits %.0fs for %s to be released at %.0f; %s"
              m.name
-             resting_runtime_id
              (Float.max 0.0 (release_at -. Time_compat.now ()))
+             waiting_on
              release_at
              stimulus_note
          | None -> ());
         let wake_policy =
           match turn_outcome.after_failure with
-          | Some (Wait_for_path_release { wake_policy; release_at = _; resting_runtime_id = _ }) ->
+          | Some (Wait_for_path_release { wake_policy; release_at = _; waiting_on = _ }) ->
             wake_policy
           | Some (Continue_on_deferred_lane _) | None ->
             Keeper_keepalive_signal.Interrupt_on_wakeup
@@ -1559,7 +1538,7 @@ let run_heartbeat_loop
            which is true, only later than the outcome vocabulary can say. *)
         let sleep_duration () =
           match turn_outcome.after_failure with
-          | Some (Wait_for_path_release { release_at; wake_policy = _; resting_runtime_id = _ }) ->
+          | Some (Wait_for_path_release { release_at; wake_policy = _; waiting_on = _ }) ->
             Float.max 0.0 (release_at -. Time_compat.now ())
           | Some (Continue_on_deferred_lane _) | None ->
             Keeper_keepalive_signal.periodic_remaining

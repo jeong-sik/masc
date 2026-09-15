@@ -51,14 +51,16 @@ let deferred_lane =
 ;;
 
 (* RFC-provider-path-rest §3.1: a failed cycle decides the next dispatch from
-   the path the input goes to next. The runtime ids here are not in the
-   runtime table, so a deferred suffix's path is serving; the resting-suffix
-   case is pinned against a real table in test_keeper_turn_driver_failover. *)
+   the path the input goes to next. The ids here are not in the runtime table,
+   so a deferred suffix's head and a fresh walk of the assignment both serve;
+   resting walks are pinned against a real table in
+   test_keeper_turn_driver_failover. *)
 let now = 1000.0
 
 let decide ?deferred_runtime_lane route =
   Loop.For_testing.after_failure
     ~now
+    ~assignment_id:"lane-a"
     { Turn.error
     ; runtime_id = "lane-a"
     ; route
@@ -76,10 +78,10 @@ let show_after_failure = function
   | None -> "cadence"
   | Some (Loop.Continue_on_deferred_lane { next_runtime_id }) ->
     Printf.sprintf "continue on %s" next_runtime_id
-  | Some (Loop.Wait_for_path_release { release_at; wake_policy; resting_runtime_id }) ->
+  | Some (Loop.Wait_for_path_release { release_at; wake_policy; waiting_on }) ->
     Printf.sprintf
       "wait for %s until %.1f (%s)"
-      resting_runtime_id
+      waiting_on
       release_at
       (policy_name wake_policy)
 ;;
@@ -91,7 +93,7 @@ let check_decision label expected actual =
 let wait ~after ~policy =
   Some
     (Loop.Wait_for_path_release
-       { release_at = now +. after; wake_policy = policy; resting_runtime_id = "lane-a" })
+       { release_at = now +. after; wake_policy = policy; waiting_on = "lane-a" })
 ;;
 
 (* #34653: with no other path for the input, a rate limit or quota waits for

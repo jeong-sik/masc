@@ -97,17 +97,28 @@ let consume ~base_path ~keeper_name ~operation_id admission =
   Owner.resume_direct_runtime_retry ~base_path ~keeper_name ~operation_id
     ~observed:admission.observed |> owner_result
 
-(* A deferred chat retry waits only while the path it goes to next rests
-   (RFC-provider-path-rest §3.4). Re-claiming the instant the child exits on a
-   resting path re-issues the same refused call in a tight loop (the chat-lane
-   retry storm of the 2026-09-10 drain investigation); re-claiming on a path
-   that is not resting is how the suffix recovers. The heartbeat lane reads the
-   same [Keeper_turn_driver.deferred_lane_rest], so the two lanes cannot
-   disagree about a path. *)
+(* A deferred chat retry is claimable when the next dispatch the heartbeat
+   would make is (RFC-provider-path-rest §3.4). Both lanes read
+   [Keeper_turn_driver.next_dispatch_after_failure], so they answer one failure
+   the same way: a suffix whose walk head serves is claimable now; a resting
+   head or capacity backpressure keeps the retry until its release. Claiming a
+   retry on a resting path re-issues a refused call in a tight loop (the chat
+   lane retry storm of the 2026-09-10 drain investigation). *)
 let retry_not_before ~now (lane : Keeper_turn_driver.deferred_runtime_lane) =
-  match Keeper_turn_driver.deferred_lane_rest ~now lane with
-  | Keeper_turn_driver.Deferred_path_serving { runtime_id = _ } -> None
-  | Keeper_turn_driver.Deferred_paths_resting { release_at; resting_runtime_id = _ } ->
+  let route =
+    Keeper_runtime_failure_route.route_of_error
+      ~boundary:Keeper_runtime_failure_route.Agent_core_execution
+      lane.failure
+  in
+  match
+    Keeper_turn_driver.next_dispatch_after_failure
+      ~now
+      ~route
+      ~assignment_id:lane.assignment_id
+      (Some lane)
+  with
+  | None | Some (Keeper_turn_driver.Dispatch_now { runtime_id = _ }) -> None
+  | Some (Keeper_turn_driver.Wait_until { release_at; waiting_on = _; wait = _ }) ->
     Some release_at
 
 let defer ~base_path ~keeper_name ~operation_id ~session_dir ~session_id
@@ -132,4 +143,5 @@ let defer ~base_path ~keeper_name ~operation_id ~session_dir ~session_id
 
 module For_testing = struct
   let validate_scope = validate_scope
+  let retry_not_before = retry_not_before
 end

@@ -136,17 +136,18 @@ val owner_turn_rejection_cycle_status :
 (** What a failed cycle leaves the next one (RFC-provider-path-rest). A rest
     belongs to the path that received the rate limit or quota answer; the
     keeper waits only while the path it would send next rests.
-    [Continue_on_deferred_lane] names the non-resting path the driver deferred
-    the input to; a pending input runs on it without a sleep.
-    [Wait_for_path_release] names the resting path and its release; a rate
-    limit or quota wait is [Serve_wakeup_after_duration] (#34653), a capacity
-    wait [Interrupt_on_wakeup]. *)
+    [Continue_on_deferred_lane] names the walk head of the deferred suffix,
+    which is not resting; a pending input runs on it without a sleep.
+    [Wait_for_path_release] sleeps until [release_at]; [waiting_on] names the
+    runtime or assignment whose release that is. A rate limit or quota wait is
+    [Serve_wakeup_after_duration] (#34653), a capacity wait
+    [Interrupt_on_wakeup]. *)
 type after_failure =
   | Continue_on_deferred_lane of { next_runtime_id : string }
   | Wait_for_path_release of
       { release_at : float
       ; wake_policy : Keeper_keepalive_signal.wake_policy
-      ; resting_runtime_id : string
+      ; waiting_on : string
       }
 
 type keepalive_turn_outcome = {
@@ -303,13 +304,14 @@ module For_testing : sig
       queue source is acknowledged. *)
   val batch_disposition_records_continuation : batch_disposition -> bool
 
-  (** The next dispatch after a failed turn (RFC-provider-path-rest §3.1).
-      Capacity backpressure waits for its own rest, interruptibly. A deferred
-      suffix continues on its first non-resting path, or waits for the
-      earliest release when every path rests. Without a suffix a rate limit or
-      quota waits for the failed path's rest; every other failure is [None]. *)
+  (** {!Keeper_turn_driver.next_dispatch_after_failure} mapped onto the
+      heartbeat sleep. [assignment_id] is what a turn without a deferred suffix
+      walks. *)
   val after_failure :
-    now:float -> Keeper_unified_turn.turn_failure -> after_failure option
+    now:float ->
+    assignment_id:string ->
+    Keeper_unified_turn.turn_failure ->
+    after_failure option
 
   (** Deferred runtime lane hints have nothing to do with continuation
       delivery; they only shared this module with it. The implementation and

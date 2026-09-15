@@ -181,11 +181,23 @@ type path_rest =
       ; walk_promotes_at_release : bool
       }
 
-type deferred_lane_rest =
-  | Deferred_path_serving of { runtime_id : string }
-  | Deferred_paths_resting of
+type walk_rest =
+  | Walk_head_serving of { runtime_id : string }
+  | Walk_waits_until of
       { release_at : float
       ; resting_runtime_id : string
+      }
+
+type failure_wait =
+  | Capacity_release
+  | Path_release
+
+type next_dispatch =
+  | Dispatch_now of { runtime_id : string }
+  | Wait_until of
+      { release_at : float
+      ; waiting_on : string
+      ; wait : failure_wait
       }
 
 (* When one runtime path is released, read from the same two stores the walk
@@ -246,17 +258,14 @@ let path_rest ~now runtime_id =
      | Some _ | None -> Path_serving)
 ;;
 
-(* The next turn dispatches the suffix in walk order
-   ([quota_ordered_deferred_runtime_lane]), so its head decides: a serving head
-   takes the input now. A resting head waits for the first moment the next
-   turn's head can serve: the head's own release, or an earlier release of a
-   later path that the walk order promotes at that moment. A later path whose
-   release the order does not follow stays behind the head and cannot shorten
-   the wait. *)
-let deferred_lane_rest ~now hint =
-  let ordered = quota_ordered_deferred_runtime_lane ~now hint in
-  match path_rest ~now ordered.next_runtime_id with
-  | Path_serving -> Deferred_path_serving { runtime_id = ordered.next_runtime_id }
+(* A walk dispatches its head first, so the head decides: a serving head takes
+   the input now. A resting head waits for the first moment the walk's head can
+   serve: the head's own release, or an earlier release of a later path that
+   the walk order promotes at that moment. A later path whose release the order
+   does not follow stays behind the head and cannot shorten the wait. *)
+let walk_rest ~now ~head ~later =
+  match path_rest ~now head with
+  | Path_serving -> Walk_head_serving { runtime_id = head }
   | Path_resting { release_at = head_release_at; walk_promotes_at_release = _ } ->
     let release_at, resting_runtime_id =
       List.fold_left
@@ -267,10 +276,95 @@ let deferred_lane_rest ~now hint =
              release_at, runtime_id
            | Path_resting { release_at = _; walk_promotes_at_release = _ } | Path_serving ->
              found)
-        (head_release_at, ordered.next_runtime_id)
-        ordered.later_runtime_ids
+        (head_release_at, head)
+        later
     in
-    Deferred_paths_resting { release_at; resting_runtime_id }
+    Walk_waits_until { release_at; resting_runtime_id }
+;;
+
+(* The deferred suffix in the order the next turn walks it
+   ([quota_ordered_deferred_runtime_lane]). *)
+let deferred_lane_rest ~now hint =
+  let ordered = quota_ordered_deferred_runtime_lane ~now hint in
+  walk_rest ~now ~head:ordered.next_runtime_id ~later:ordered.later_runtime_ids
+;;
+
+(* A fresh walk of an assignment, ordered as [run_named] orders a turn without
+   a deferred suffix: sticky preference, then quota and backpressure demotion.
+   An id that names no lane or runtime is its own single candidate. *)
+let assignment_walk_rest ~now assignment_id =
+  let ordered =
+    match Runtime.resolve_assignment assignment_id with
+    | `Lane lane ->
+      let lane_id = Runtime_lane.id lane in
+      Runtime_lane_preference.prefer_order ~lane_id (Runtime_lane.ordered_candidates lane)
+      |> quota_ordered_runtime_ids ~now
+    | `Unavailable _ | `Missing -> [ assignment_id ]
+  in
+  match ordered with
+  | [] -> Walk_head_serving { runtime_id = assignment_id }
+  | head :: later -> walk_rest ~now ~head ~later
+;;
+
+(* The next dispatch after a failed turn, shared by the heartbeat cycle and
+   the chat lane's deferred retry so both answer one failure the same way
+   (RFC-provider-path-rest §3.1).
+
+   Capacity backpressure is MASC's own slot and client envelope, not one
+   path's, so it waits for its own rest whatever was deferred. A deferred
+   suffix names where the input goes next, and its walk decides. Without a
+   suffix the turn used every path the input may take: a rate limit or quota
+   waits for the failed path's rest, and no less than the moment a fresh walk
+   of the assignment can start on a serving path, so the wait never ends on a
+   head that still rests. Every other failure without a suffix has no provider
+   wait. *)
+let next_dispatch_after_failure ~now ~route ~assignment_id deferred =
+  let module Route = Keeper_runtime_failure_route in
+  let cap_sec = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec in
+  let route_release retry_class retry_after =
+    now +. Route.path_rest_sec ~cap_sec ~retry_class ~retry_after_hint:retry_after
+  in
+  match route, deferred with
+  | Route.Retry_after_observed { retry_class = Route.Capacity_backpressure; retry_after }, _ ->
+    Some
+      (Wait_until
+         { release_at = route_release Route.Capacity_backpressure retry_after
+         ; waiting_on = assignment_id
+         ; wait = Capacity_release
+         })
+  | ( ( Route.Retry_after_observed
+          { retry_class =
+              ( Route.Rate_limited | Route.Hard_quota | Route.Server_error
+              | Route.Network_transient | Route.Provider_timeout )
+          ; _
+          }
+      | Route.Rotate_now _ | Route.Exhausted_visible_alive _ )
+    , Some hint ) ->
+    Some
+      (match deferred_lane_rest ~now hint with
+       | Walk_head_serving { runtime_id } -> Dispatch_now { runtime_id }
+       | Walk_waits_until { release_at; resting_runtime_id } ->
+         Wait_until { release_at; waiting_on = resting_runtime_id; wait = Path_release })
+  | ( Route.Retry_after_observed
+        { retry_class = (Route.Rate_limited | Route.Hard_quota) as retry_class; retry_after }
+    , None ) ->
+    let failed_release_at = route_release retry_class retry_after in
+    let release_at, waiting_on =
+      match assignment_walk_rest ~now assignment_id with
+      | Walk_waits_until { release_at; resting_runtime_id }
+        when Float.compare release_at failed_release_at > 0 ->
+        release_at, resting_runtime_id
+      | Walk_waits_until { release_at = _; resting_runtime_id = _ } | Walk_head_serving _ ->
+        failed_release_at, assignment_id
+    in
+    Some (Wait_until { release_at; waiting_on; wait = Path_release })
+  | ( ( Route.Retry_after_observed
+          { retry_class = Route.Server_error | Route.Network_transient | Route.Provider_timeout
+          ; _
+          }
+      | Route.Rotate_now _ | Route.Exhausted_visible_alive _ )
+    , None ) ->
+    None
 ;;
 
 let equal_deferred_runtime_lane left right =

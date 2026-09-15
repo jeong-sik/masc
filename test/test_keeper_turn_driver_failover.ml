@@ -2511,73 +2511,96 @@ let test_rate_limit_order_never_excludes_and_success_clears () =
         Alcotest.fail "actual Retry-After hint was lost")
 ;;
 
+let quota_lane_candidate id =
+  (Option.get (Runtime.get_runtime_by_id id)).Runtime.candidate_preference
+;;
+
+(* Every quota_lane path starts serving: no candidate observation, no quota
+   window, no sticky preference. *)
+let reset_quota_lane_rests () =
+  Runtime_quota_window.reset_for_testing ();
+  Runtime_lane_preference.reset_for_testing ();
+  List.iter
+    (fun id ->
+       Runtime_lane_preference.note_candidate_success ~candidate:(quota_lane_candidate id))
+    [ "shared_a.test_model"; "shared_b.test_model"; "other.test_model" ]
+;;
+
+let quota_lane_suffix ?(failure = retryable_network_error "previous attempt") = function
+  | next_runtime_id :: later_runtime_ids ->
+    Driver.For_testing.make_deferred_runtime_lane
+      ~assignment_id:"quota_lane" ~failed_runtime_id:"previous.test_model"
+      ~next_runtime_id ~later_runtime_ids ~failure
+  | [] -> Alcotest.fail "a deferred suffix names at least one path"
+;;
+
+let rate_limited_route =
+  Keeper_runtime_failure_route.Retry_after_observed
+    { retry_class = Keeper_runtime_failure_route.Rate_limited; retry_after = None }
+;;
+
+let describe_dispatch ~now = function
+  | None -> "no provider wait"
+  | Some (Driver.Dispatch_now { runtime_id }) -> "dispatch " ^ runtime_id
+  | Some (Driver.Wait_until { release_at; waiting_on; wait }) ->
+    Printf.sprintf "wait %.0fs for %s (%s)" (release_at -. now) waiting_on
+      (match wait with
+       | Driver.Capacity_release -> "capacity"
+       | Driver.Path_release -> "path")
+;;
+
 (* RFC-provider-path-rest §3.3 and #34653: the head of a deferred suffix in
    walk order decides whether a failed cycle waits. A serving head takes the
-   input. A resting head waits for the first moment the next turn's head can
-   serve, and that wait does not serve a wakeup before it ends, so a stimulus
-   arriving meanwhile cannot re-dispatch a resting path. *)
-let test_a_deferred_suffix_waits_only_while_every_path_rests () =
+   input at once. A resting head waits until the next turn's head can serve,
+   and that wait does not serve a wakeup before it ends, so a stimulus arriving
+   meanwhile cannot re-dispatch a resting path. *)
+let test_a_deferred_suffix_waits_only_while_its_walk_head_rests () =
   with_runtime_config runtime_toml_quota_lane (fun () ->
-    Runtime_quota_window.reset_for_testing ();
     Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
-      let candidate id =
-        (Option.get (Runtime.get_runtime_by_id id)).Runtime.candidate_preference
-      in
-      List.iter
-        (fun id -> Runtime_lane_preference.note_candidate_success ~candidate:(candidate id))
-        [ "shared_a.test_model"; "shared_b.test_model"; "other.test_model" ];
+      reset_quota_lane_rests ();
       let now = Unix.gettimeofday () in
       Runtime_lane_preference.note_rate_limit
-        ~candidate:(candidate "shared_a.test_model") ~retry_after:(Some 300.);
+        ~candidate:(quota_lane_candidate "shared_a.test_model") ~retry_after:(Some 300.);
       Runtime_lane_preference.note_rate_limit
-        ~candidate:(candidate "shared_b.test_model") ~retry_after:(Some 120.);
-      let suffix = function
-        | next_runtime_id :: later_runtime_ids ->
-          Driver.For_testing.make_deferred_runtime_lane
-            ~assignment_id:"quota_lane" ~failed_runtime_id:"previous.test_model"
-            ~next_runtime_id ~later_runtime_ids
-            ~failure:(retryable_network_error "previous attempt")
-        | [] -> Alcotest.fail "a deferred suffix names at least one path"
-      in
+        ~candidate:(quota_lane_candidate "shared_b.test_model") ~retry_after:(Some 120.);
       let describe = function
-        | Driver.Deferred_path_serving { runtime_id } -> "serving " ^ runtime_id
-        | Driver.Deferred_paths_resting { release_at; resting_runtime_id } ->
+        | Driver.Walk_head_serving { runtime_id } -> "serving " ^ runtime_id
+        | Driver.Walk_waits_until { release_at; resting_runtime_id } ->
           Printf.sprintf "resting %s for %.0fs" resting_runtime_id (release_at -. now)
       in
       let all_three = [ "shared_a.test_model"; "shared_b.test_model"; "other.test_model" ] in
       let both_shared = [ "shared_a.test_model"; "shared_b.test_model" ] in
-      Alcotest.(check string) "the suffix continues on its serving path"
+      Alcotest.(check string) "a serving head in walk order takes the input"
         "serving other.test_model"
-        (describe (Driver.deferred_lane_rest ~now (suffix all_three)));
-      Alcotest.(check string) "every path resting waits for the earliest release"
+        (describe (Driver.deferred_lane_rest ~now (quota_lane_suffix all_three)));
+      Alcotest.(check string) "a resting head waits for the earliest promoted release"
         "resting shared_b.test_model for 120s"
-        (describe (Driver.deferred_lane_rest ~now (suffix both_shared)));
+        (describe (Driver.deferred_lane_rest ~now (quota_lane_suffix both_shared)));
       Runtime_quota_window.note_exhausted
         ~scope:(Option.get (Runtime.quota_scope_of_runtime_id "other.test_model"))
         ~resets_at:(now +. 30.);
       Alcotest.(check string) "a stated quota reset is a release too"
         "resting other.test_model for 30s"
-        (describe (Driver.deferred_lane_rest ~now (suffix all_three)));
+        (describe (Driver.deferred_lane_rest ~now (quota_lane_suffix all_three)));
       (* An unstated rest ends the wait but not the demotion, so the walk keeps
          that path behind the resting head: waiting for its shorter release
          would dispatch the head while it still rests. *)
       Runtime_lane_preference.note_candidate_success
-        ~candidate:(candidate "shared_b.test_model");
+        ~candidate:(quota_lane_candidate "shared_b.test_model");
       Runtime_lane_preference.note_rate_limit
-        ~candidate:(candidate "shared_b.test_model") ~retry_after:None;
+        ~candidate:(quota_lane_candidate "shared_b.test_model") ~retry_after:None;
       Alcotest.(check string) "an unstated rest behind the head does not shorten the wait"
         "resting shared_a.test_model for 300s"
-        (describe (Driver.deferred_lane_rest ~now (suffix both_shared)));
+        (describe (Driver.deferred_lane_rest ~now (quota_lane_suffix both_shared)));
       let decision =
         Masc.Keeper_heartbeat_loop.For_testing.after_failure
           ~now
+          ~assignment_id:"quota_lane"
           { Masc.Keeper_unified_turn.error = retryable_network_error "rate limited"
           ; runtime_id = "previous.test_model"
-          ; route =
-              Keeper_runtime_failure_route.Retry_after_observed
-                { retry_class = Keeper_runtime_failure_route.Rate_limited; retry_after = None }
+          ; route = rate_limited_route
           ; source_disposition = Masc.Keeper_unified_turn.Follow_failure_route
-          ; deferred_runtime_lane = Some (suffix both_shared)
+          ; deferred_runtime_lane = Some (quota_lane_suffix both_shared)
           }
       in
       let waits_without_serving_a_wakeup =
@@ -2586,7 +2609,7 @@ let test_a_deferred_suffix_waits_only_while_every_path_rests () =
             (Masc.Keeper_heartbeat_loop.Wait_for_path_release
                { wake_policy = Masc.Keeper_keepalive_signal.Serve_wakeup_after_duration
                ; release_at = _
-               ; resting_runtime_id = _
+               ; waiting_on = _
                }) ->
           true
         | Some
@@ -2596,8 +2619,81 @@ let test_a_deferred_suffix_waits_only_while_every_path_rests () =
         | None ->
           false
       in
-      Alcotest.(check bool) "a failed cycle whose next paths rest waits without serving a wakeup"
+      Alcotest.(check bool) "a failed cycle whose walk head rests waits without serving a wakeup"
         true waits_without_serving_a_wakeup))
+;;
+
+(* A failure without a suffix used every path the input may take. Its wait
+   covers the failed path's own rest and never ends before a fresh walk of the
+   assignment can start on a serving head: with A resting 600 s and B failing
+   on an unstated 429, the walk still starts on A, so B's 60 s is not enough. *)
+let test_a_failure_without_a_suffix_waits_until_a_fresh_walk_head_serves () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
+      reset_quota_lane_rests ();
+      let now = Unix.gettimeofday () in
+      let floor_sec = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_floor_sec in
+      let decide () =
+        describe_dispatch ~now
+          (Driver.next_dispatch_after_failure
+             ~now ~route:rate_limited_route ~assignment_id:"quota_lane" None)
+      in
+      Alcotest.(check string) "a serving fresh walk head waits only for the failed path"
+        (Printf.sprintf "wait %.0fs for quota_lane (path)" floor_sec)
+        (decide ());
+      Runtime_lane_preference.note_rate_limit
+        ~candidate:(quota_lane_candidate "shared_a.test_model") ~retry_after:(Some 600.);
+      Runtime_lane_preference.note_rate_limit
+        ~candidate:(quota_lane_candidate "shared_b.test_model") ~retry_after:None;
+      Runtime_quota_window.note_exhausted
+        ~scope:(Option.get (Runtime.quota_scope_of_runtime_id "other.test_model"))
+        ~resets_at:(now +. 900.);
+      Alcotest.(check string) "a resting fresh walk head extends the wait to its release"
+        "wait 600s for shared_a.test_model (path)"
+        (decide ())))
+;;
+
+(* RFC-provider-path-rest §3.4: the chat lane's deferred retry reads the same
+   next dispatch as the heartbeat. A suffix whose walk head serves is claimable
+   at once; a resting head holds the retry until its release; capacity
+   backpressure holds it for its own rest whatever the suffix is. *)
+let test_a_chat_retry_follows_the_shared_next_dispatch () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
+      reset_quota_lane_rests ();
+      let now = Unix.gettimeofday () in
+      Runtime_lane_preference.note_rate_limit
+        ~candidate:(quota_lane_candidate "shared_a.test_model") ~retry_after:(Some 300.);
+      let not_before lane =
+        match Masc.Keeper_direct_runtime_continuation.For_testing.retry_not_before ~now lane with
+        | None -> "claimable now"
+        | Some at -> Printf.sprintf "claimable in %.0fs" (at -. now)
+      in
+      let rate_limited =
+        Agent_core.Error.Provider
+          (Llm_provider.Error.RateLimit
+             { provider = "shared_a"; retry_after = None; detail = "rate limited" })
+      in
+      let capacity =
+        Agent_core.Error.Provider
+          (Llm_provider.Error.CapacityExhausted
+             { scope = Llm_provider.Error.CapacityUnknown
+             ; affected = []
+             ; retry_after = Some 5.0
+             ; detail = "pool saturated"
+             })
+      in
+      Alcotest.(check string) "a serving walk head is claimable at once"
+        "claimable now"
+        (not_before
+           (quota_lane_suffix ~failure:rate_limited
+              [ "shared_a.test_model"; "other.test_model" ]));
+      Alcotest.(check string) "a resting walk head holds the retry until its release"
+        "claimable in 300s"
+        (not_before (quota_lane_suffix ~failure:rate_limited [ "shared_a.test_model" ]));
+      Alcotest.(check string) "capacity backpressure holds the retry for its own rest"
+        "claimable in 5s"
+        (not_before (quota_lane_suffix ~failure:capacity [ "other.test_model" ]))))
 ;;
 
 let test_rate_limit_candidate_survives_unchanged_reload_only () =
@@ -4110,8 +4206,12 @@ let () =
             test_http_429_preserves_unknown_scope_and_fallback;
           Alcotest.test_case "rate limit never excludes and success clears" `Quick
             test_rate_limit_order_never_excludes_and_success_clears;
-          Alcotest.test_case "a deferred suffix waits only while every path rests" `Quick
-            test_a_deferred_suffix_waits_only_while_every_path_rests;
+          Alcotest.test_case "a deferred suffix waits only while its walk head rests" `Quick
+            test_a_deferred_suffix_waits_only_while_its_walk_head_rests;
+          Alcotest.test_case "a failure without a suffix waits until a fresh walk head serves"
+            `Quick test_a_failure_without_a_suffix_waits_until_a_fresh_walk_head_serves;
+          Alcotest.test_case "a chat retry follows the shared next dispatch" `Quick
+            test_a_chat_retry_follows_the_shared_next_dispatch;
           Alcotest.test_case "rate limit survives only unchanged binding reload" `Quick
             test_rate_limit_candidate_survives_unchanged_reload_only;
           Alcotest.test_case "rate limit identity detects same-reference credential rotation" `Quick

@@ -22,13 +22,57 @@ REGISTERED=$(sed -n \
 # Registry-backed reads exist in config modules and in runtime gates. Scan the
 # complete library and accept the typed [get_bool*] accessor family so a strict
 # security reader is not misreported as a stale registry entry.
-CONSUMED=$(
-  { grep -rh 'Feature_flag_registry.get_bool' "$LIB_DIR" || true; } \
-    | grep -o '"MASC_[A-Z_]*"' \
-    | tr -d '"' \
-    | sort -u \
-    || true
-)
+#
+# The reader is line-free: the formatter puts the flag name on the line after
+# [get_bool] once the call sits deep enough (keeper_turn_driver_try_provider.ml
+# after #36709), and a line-at-a-time scan then reported a live consumer as a
+# stale entry and failed every PR.
+read_consumers() {
+  python3 - "$1" <<'PYEOF'
+import os, re, sys
+
+root = sys.argv[1]
+call = re.compile(r'Feature_flag_registry\.get_bool[A-Za-z_]*\s*(?:\(\s*)?"(MASC_[A-Z_]+)"')
+found = set()
+for directory, _subdirs, files in os.walk(root):
+    for name in files:
+        if not name.endswith((".ml", ".mli")):
+            continue
+        with open(os.path.join(directory, name), encoding="utf-8", errors="replace") as handle:
+            found.update(call.findall(handle.read()))
+for flag in sorted(found):
+    print(flag)
+PYEOF
+}
+
+if [ "${1:-}" = "--self-test" ]; then
+  fixture="$(mktemp -d)"
+  trap 'rm -rf "$fixture"' EXIT
+  cat > "$fixture/same_line.ml" <<'EOF'
+let a = Feature_flag_registry.get_bool "MASC_SAME_LINE"
+EOF
+  cat > "$fixture/next_line.ml" <<'EOF'
+let b =
+  if
+    Feature_flag_registry.get_bool
+      "MASC_NEXT_LINE"
+  then 1
+  else 0
+EOF
+  cat > "$fixture/typed_reader.ml" <<'EOF'
+let c = Feature_flag_registry.get_bool_strict "MASC_TYPED_READER"
+EOF
+  actual="$(read_consumers "$fixture" | tr '\n' ' ')"
+  expected="MASC_NEXT_LINE MASC_SAME_LINE MASC_TYPED_READER "
+  if [ "$actual" = "$expected" ]; then
+    echo "self-test: the reader finds a flag on the call line, on the next line, and through a typed accessor (PASS)"
+    exit 0
+  fi
+  echo "self-test FAIL: expected [$expected] got [$actual]"
+  exit 1
+fi
+
+CONSUMED=$(read_consumers "$LIB_DIR" | sort -u)
 
 echo ""
 echo "--- Checking consumer coverage ---"

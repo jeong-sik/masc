@@ -32,7 +32,9 @@ let test_block_id_unknown_rejected () =
 (* Recurring world-state blocks stay on the first provider round of a turn;
    only a genuine mid-turn message (the operator note) rides a post-tool
    round. Pinned per constructor so a new block declares its class rather
-   than inheriting one (task-514). *)
+   than inheriting one (task-514). [Temporal_summary] is pinned [false] on
+   purpose: a round after tool results carries no clock, and letting it ride
+   would end every tool round's request with a User message again. *)
 let test_block_id_post_tool_round_classes () =
   List.iter
     (fun (block, expected) ->
@@ -45,6 +47,7 @@ let test_block_id_post_tool_round_classes () =
     ; (Prompt_block_id.Temporal_summary, false)
     ; (Prompt_block_id.Memory_os_recall, false)
     ; (Prompt_block_id.Operator_note, true)
+    ; (Prompt_block_id.Skill_compositions, false)
     ]
 
 (* ── TurnRecord codec ─────────────────────────────────── *)

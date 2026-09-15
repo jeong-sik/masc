@@ -18,6 +18,9 @@
         → "[Temporal] time=... elapsed=... tools=... last=...(ok)"
         → append to extra_system_context in before_turn_params hook
     ]}
+    The hook renders it on every provider round but delivers it only on the
+    first round of a keeper turn ({!Prompt_block_id.injected_on_post_tool_round}
+    is [false] for it), so a round after tool results carries no clock.
 
     @since context_injector integration *)
 
@@ -58,7 +61,6 @@ val render_temporal_summary : ?now:float -> Agent_core.Context.t -> string
     [now] is a Unix timestamp in seconds; pass it to inject a fixed clock
     in tests.
 
-    Returns [None] when no tool has executed yet (turn 0).
     Format: [[Temporal] time=<ISO8601> elapsed=<N>s tools=<N> last=<name>(<outcome>)] *)
 
 val iso8601_of_float : float -> string

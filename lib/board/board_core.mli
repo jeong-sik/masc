@@ -297,15 +297,11 @@ val list_posts_by_run_origin : store -> post list
     {!with_lock} block to avoid the two-call lock churn
     that previously surfaced as
     [Mutex.lock: Resource deadlock avoided] under contended
-    repeated agent polling.  Omitted pagination arguments preserve
-    the full-thread read; supplied pagination arguments are clamped
-    to the board comment page limits. *)
+    repeated agent polling.  Returns the whole thread, oldest comment
+    first; paging is {!Board_types.Comment_page}'s job. *)
 val get_post_and_comments
   :  store
   -> post_id:string
-  -> ?comment_offset:int
-  -> ?comment_limit:int
-  -> unit
   -> (post * comment list, board_error) Result.t
 
 (** Returns posts sorted by [(score desc, created_at desc)]

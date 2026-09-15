@@ -241,6 +241,54 @@ module Limits : sig
   val sweeper_batch_size : int
 end
 
+(** {1 Comment pages}
+
+    The one place a comment thread is cut into pages. [masc_board_post_get]
+    and the verifier's read of a submitted Board snapshot both page through
+    it, so an offset means the same thing on either surface. *)
+module Comment_page : sig
+  type request = private
+    { offset : int
+    ; limit : int
+    }
+  (** Built only by {!request}: [offset >= 0] and
+      [1 <= limit <= Limits.max_comment_page_limit]. *)
+
+  type request_error =
+    | Negative_offset of int
+    | Limit_out_of_bounds of int
+
+  val request : offset:int -> limit:int -> (request, request_error) result
+  val request_error_to_string : request_error -> string
+
+  type 'a page =
+    { offset : int
+    ; items : 'a list
+    ; total : int
+    ; next_offset : int option
+      (** [None] when [items] reaches the last comment. *)
+    }
+
+  type 'a t =
+    | Page of 'a page
+    | Offset_out_of_range of
+        { requested : int
+        ; total : int
+        }
+        (** [requested] names no comment. Offset [0] of an empty thread is a
+            [Page] with no items; every other offset at or past [total] is
+            this case, so an empty page is never mistaken for a thread that
+            lost its comments. *)
+
+  val select : ?fits:('a page -> bool) -> request -> 'a list -> 'a t
+  (** Items from [offset], at most [limit] of them, extended one at a time
+      while [fits] accepts the whole candidate page, [next_offset] included
+      ([fits] defaults to accepting every page). A page never stops before its
+      first item: an item larger than the budget is delivered whole and the
+      tool-output boundary decides how it travels, so no comment becomes
+      unreadable. *)
+end
+
 (** {1 Vote Direction} *)
 
 type vote_direction = Up | Down

@@ -108,7 +108,7 @@ let viewer_vote_marker = function
   | Some Board.Down -> ", 내 투표: 👎"
 ;;
 
-let format_post ?viewer_vote (p : Board.post) =
+let format_post ?viewer_vote ~replies (p : Board.post) =
   let vis_str = Board.visibility_to_string p.visibility in
   let time_str = format_timestamp_absolute p.created_at in
   let ttl_str = format_expiry p.expires_at in
@@ -137,13 +137,13 @@ let format_post ?viewer_vote (p : Board.post) =
     p.votes_down
     score
     (viewer_vote_marker viewer_vote)
-    p.reply_count
+    replies
     thread_str
 ;;
 
 (** Compact one-line format: id, title, author, time, score. Omits
     body/TTL/visibility/thread to minimize token usage. *)
-let format_post_compact (p : Board.post) =
+let format_post_compact ~replies (p : Board.post) =
   let time_str = format_timestamp_absolute p.created_at in
   let score = p.votes_up - p.votes_down in
   let hearth_str =
@@ -159,7 +159,7 @@ let format_post_compact (p : Board.post) =
     (Board.Agent_id.to_string p.author)
     time_str
     score
-    p.reply_count
+    replies
 ;;
 
 let format_comment ?(indent = 0) ?viewer_vote (c : Board.comment) =
@@ -190,52 +190,67 @@ let format_comment ?(indent = 0) ?viewer_vote (c : Board.comment) =
     vote_str
 ;;
 
-(** Format comments as a tree, grouping replies under parents.
-    [max_depth] limits nesting (default 5); beyond that, comments
-    render flat. *)
+(* Indentation per nesting level, and the deepest level that still indents
+   further. Only the indentation stops there: a deeper reply is drawn at the
+   cap, because the page counts every comment it holds and a reader who sees
+   fewer lines than that count reads it as comments gone missing. Replies run
+   deeper than the cap in live threads (one post, measured 2026-09-15, has six
+   comments at depth 6 to 8). *)
+let comment_indent_width = 4
+let max_comment_indent_depth = 5
+
 let format_comment_tree
-      ?(max_depth = 5)
       ?(viewer_vote_of = fun (_ : Board.Comment_id.t) -> None)
       (comments : Board.comment list)
   =
-  let visible_comment_ids = Hashtbl.create (List.length comments) in
+  let comment_key (comment : Board.comment) = Board.Comment_id.to_string comment.id in
+  let listed = Hashtbl.create (List.length comments) in
+  List.iter (fun comment -> Hashtbl.replace listed (comment_key comment) ()) comments;
   let children_map = Hashtbl.create (List.length comments) in
-  let comment_id = Board.Comment_id.to_string in
-  List.iter
-    (fun (comment : Board.comment) ->
-       Hashtbl.replace visible_comment_ids (comment_id comment.id) true)
-    comments;
   List.iter
     (fun (comment : Board.comment) ->
        match comment.parent_id with
-       | Some parent_id ->
-         let key = comment_id parent_id in
-         let existing = Hashtbl.find_opt children_map key |> Option.value ~default:[] in
-         Hashtbl.replace children_map key (comment :: existing)
-       | None -> ())
+       | Some parent_id when Hashtbl.mem listed (Board.Comment_id.to_string parent_id) ->
+         let parent_key = Board.Comment_id.to_string parent_id in
+         let siblings =
+           match Hashtbl.find_opt children_map parent_key with
+           | Some siblings -> siblings
+           | None -> []
+         in
+         Hashtbl.replace children_map parent_key (comment :: siblings)
+       | Some _ | None -> ())
     comments;
-  let roots =
-    List.filter
-      (fun (comment : Board.comment) ->
-         match comment.parent_id with
-         | None -> true
-         | Some parent_id -> not (Hashtbl.mem visible_comment_ids (comment_id parent_id)))
+  let children_of comment =
+    match Hashtbl.find_opt children_map (comment_key comment) with
+    | Some children -> List.rev children
+    | None -> []
+  in
+  let drawn = Hashtbl.create (List.length comments) in
+  let rec render depth (comment : Board.comment) =
+    if Hashtbl.mem drawn (comment_key comment)
+    then []
+    else (
+      Hashtbl.replace drawn (comment_key comment) ();
+      let indent = comment_indent_width * min depth max_comment_indent_depth in
+      let self =
+        format_comment ~indent ?viewer_vote:(viewer_vote_of comment.id) comment
+      in
+      self :: List.concat_map (render (depth + 1)) (children_of comment))
+  in
+  let is_root (comment : Board.comment) =
+    match comment.parent_id with
+    | None -> true
+    | Some parent_id -> not (Hashtbl.mem listed (Board.Comment_id.to_string parent_id))
+  in
+  let from_roots =
+    List.concat_map
+      (fun comment -> if is_root comment then render 0 comment else [])
       comments
   in
-  let children_of parent_id =
-    Hashtbl.find_opt children_map (comment_id parent_id)
-    |> Option.value ~default:[]
-    |> List.rev
-  in
-  let rec render depth indent (c : Board.comment) =
-    let self = format_comment ~indent ?viewer_vote:(viewer_vote_of c.id) c in
-    if depth >= max_depth
-    then [ self ] (* Stop recursing; children rendered flat at next level. *)
-    else (
-      let kids = children_of c.id in
-      self :: List.concat_map (render (depth + 1) (indent + 4)) kids)
-  in
-  List.concat_map (render 0 0) roots
+  (* Every listed comment is drawn exactly once. A comment reachable from no
+     root (a parent chain that loops back on itself) is drawn here instead of
+     disappearing; [render] skips everything the root walk already drew. *)
+  from_roots @ List.concat_map (render 0) comments
 ;;
 
 (** {1 Source-entry rendering} *)

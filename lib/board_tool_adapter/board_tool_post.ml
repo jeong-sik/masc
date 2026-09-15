@@ -275,10 +275,12 @@ let handle_post_list ~tool_name ~start_time args : Tool_result.result =
       in
       let format_post_with_indicator p =
         let indicator = if has_new_activity p then " 🔔" else "" in
-        let fmt =
+        (* A listing does not read threads; the stored count is its only
+           source for how many replies each post has. *)
+        let fmt (post : Board.post) =
           if compact
-          then Board_tool_format.format_post_compact
-          else fun post -> Board_tool_format.format_post post
+          then Board_tool_format.format_post_compact ~replies:post.reply_count post
+          else Board_tool_format.format_post ~replies:post.reply_count post
         in
         fmt p ^ indicator
       in
@@ -301,6 +303,51 @@ let handle_post_list ~tool_name ~start_time args : Tool_result.result =
         ~start_time
         ~data:(`String (header ^ "\n" ^ String.concat separator formatted))
         ())
+;;
+
+(* A thread read is cut into pages that each fit the ceiling that decides
+   whether a tool result reaches the model inline
+   ([Common.max_tool_result_wire_bytes], the same number the result boundary
+   stores blobs above). A count alone cannot promise that: a live comment
+   runs about 1.4KB (median of 6,847, measured 2026-09-15), so 50 of them are
+   several times the ceiling, and a result over it becomes a blob the Keeper
+   has to fetch back with keeper_artifact_read before it can read the thread.
+
+   [comment_limit] stays as an upper bound a caller can ask for; the byte
+   ceiling usually ends a page first, and the page says where the next one
+   starts. *)
+let comment_page_line ~offset ~shown ~total ~next_offset =
+  match next_offset with
+  | Some next ->
+    Printf.sprintf
+      "[comment page: offset=%d shown=%d total=%d next_offset=%d. Call again with \
+       comment_offset=%d for the rest.]"
+      offset
+      shown
+      total
+      next
+      next
+  | None ->
+    Printf.sprintf
+      "[comment page: offset=%d shown=%d total=%d next_offset=none. No comments \
+       after this page.]"
+      offset
+      shown
+      total
+;;
+
+let render_post_page ~post_block ~comment_lines ~offset ~total ~next_offset =
+  let page_line =
+    comment_page_line ~offset ~shown:(List.length comment_lines) ~total ~next_offset
+  in
+  match comment_lines with
+  | [] -> Printf.sprintf "%s\n\nNo comments.\n%s" post_block page_line
+  | _ :: _ ->
+    Printf.sprintf
+      "%s\n\n**Comments**:\n%s\n%s"
+      post_block
+      (String.concat "\n" comment_lines)
+      page_line
 ;;
 
 let handle_post_get ~tool_name ~start_time args : Tool_result.result =
@@ -332,75 +379,89 @@ let handle_post_get ~tool_name ~start_time args : Tool_result.result =
       | Ok vote -> vote
       | Error _ -> None)
   in
-  match Board_dispatch.get_post_and_comments ~post_id () with
-  | Error e ->
-    Board_tool_format.error_of_board_error ~tool_name ~start_time e
-  | Ok (post, comments) ->
-    let post_str =
-      Board_tool_format.format_post ?viewer_vote:(viewer_vote_of_post post.id) post
-    in
-    let total_comments = List.length comments in
-    let comment_offset = get_int args "comment_offset" 0 in
-    let comment_limit =
-      get_int args "comment_limit" Board.Limits.default_comment_page_limit
-      |> max 1
-      |> min Board.Limits.max_comment_page_limit
-    in
-    let clamped_offset = max 0 (min comment_offset total_comments) in
-    let sliced =
-      List.filteri
-        (fun i _ -> i >= clamped_offset && i < clamped_offset + comment_limit)
-        comments
-    in
-    let has_more = clamped_offset + comment_limit < total_comments in
-    let comments_str =
-      if total_comments = 0
-      then "\n\nNo comments."
-      else (
-        let shown_count = List.length sliced in
-        let formatted =
-          Board_tool_format.format_comment_tree
-            ~viewer_vote_of:viewer_vote_of_comment
-            sliced
-        in
-        let pagination =
-          if has_more
-          then
-            Printf.sprintf
-              "\n[Showing comments %d-%d of %d. Use comment_offset=%d to see more.]"
-              (clamped_offset + 1)
-              (clamped_offset + shown_count)
-              total_comments
-              (clamped_offset + comment_limit)
-          else if clamped_offset = 0 && shown_count = total_comments
-          then Printf.sprintf "\n[Showing all %d comments.]" total_comments
-          else if shown_count = 0
-          then
-            Printf.sprintf "\n[Showing comments 0 of %d. No more comments.]" total_comments
-          else
-            Printf.sprintf
-              "\n[Showing comments %d-%d of %d. No more comments.]"
-              (clamped_offset + 1)
-              (clamped_offset + shown_count)
-              total_comments
-        in
-        Printf.sprintf
-          "\n\n**Comments (%d of %d)**:\n%s%s"
-          shown_count
-          total_comments
-          (String.concat "\n" formatted)
-          pagination)
-    in
-    Tool_result.make_ok
+  match
+    Board.Comment_page.request
+      ~offset:(get_int args "comment_offset" 0)
+      ~limit:(get_int args "comment_limit" Board.Limits.default_comment_page_limit)
+  with
+  | Error error ->
+    Tool_result.make_err
       ~tool_name
+      ~class_:Tool_result.Workflow_rejection
       ~start_time
-      ~data:
-        (`String
-           (Printf.sprintf
-              "%s%s"
-              post_str
-              comments_str))
-      ()
+      (Board.Comment_page.request_error_to_string error)
+  | Ok request ->
+    (match Board_dispatch.get_post_and_comments ~post_id with
+     | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
+     | Ok (post, comments) ->
+       let total = List.length comments in
+       (* The reply count in the header is the length of the list this read
+          pages through, not the stored [reply_count], so the header and the
+          page's [total] cannot disagree. The body travels on the first page;
+          a continuation page names the post in one line. *)
+       let requested_offset = request.Board.Comment_page.offset in
+       let post_block =
+         match requested_offset with
+         | 0 ->
+           Board_tool_format.format_post
+             ?viewer_vote:(viewer_vote_of_post post.id)
+             ~replies:total
+             post
+         | _ -> Board_tool_format.format_post_compact ~replies:total post
+       in
+       (* Each vote is read once; the page is re-rendered while it grows. *)
+       let votes = Hashtbl.create (List.length comments) in
+       let viewer_vote_of comment_id =
+         let key = Board.Comment_id.to_string comment_id in
+         match Hashtbl.find_opt votes key with
+         | Some vote -> vote
+         | None ->
+           let vote = viewer_vote_of_comment comment_id in
+           Hashtbl.replace votes key vote;
+           vote
+       in
+       let render ~offset ~next_offset page_comments =
+         render_post_page
+           ~post_block
+           ~comment_lines:
+             (Board_tool_format.format_comment_tree ~viewer_vote_of page_comments)
+           ~offset
+           ~total
+           ~next_offset
+       in
+       let render_page (page : Board.comment Board.Comment_page.page) =
+         render
+           ~offset:page.Board.Comment_page.offset
+           ~next_offset:page.Board.Comment_page.next_offset
+           page.Board.Comment_page.items
+       in
+       let fits page =
+         String.length (render_page page) <= Common.max_tool_result_wire_bytes
+       in
+       (match Board.Comment_page.select ~fits request comments with
+        | Board.Comment_page.Offset_out_of_range { requested; total } ->
+          Tool_result.make_err
+            ~tool_name
+            ~class_:Tool_result.Workflow_rejection
+            ~start_time
+            (match total with
+             | 0 ->
+               Printf.sprintf
+                 "comment_offset %d names no comment of %s: the thread has no \
+                  comments. Read it with comment_offset=0."
+                 requested
+                 (Board.Post_id.to_string post.id)
+             | _ ->
+               Printf.sprintf
+                 "comment_offset %d names no comment of %s: the thread has %d \
+                  comments, at offsets 0-%d. Nothing was deleted; start again \
+                  from comment_offset=0."
+                 requested
+                 (Board.Post_id.to_string post.id)
+                 total
+                 (total - 1))
+        | Board.Comment_page.Page page ->
+          Tool_result.make_ok ~tool_name ~start_time ~data:(`String (render_page page)) ()))
 ;;
 
 let handle_comment_add ~tool_name ~start_time args : Tool_result.result =

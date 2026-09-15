@@ -64,28 +64,7 @@ let list_posts_by_run_origin store =
    repeated agent board-read traffic. Coalescing
    keeps the read atomic, removes one [maybe_sweep] dispatch, and
    eliminates the inter-call lock churn. *)
-let normalize_comment_page ?comment_offset ?comment_limit total_comments =
-  match comment_offset, comment_limit with
-  | None, None -> None
-  | Some _, _ | _, Some _ ->
-    let offset =
-      (match comment_offset with
-       | None -> 0
-       | Some value -> value)
-      |> max 0
-      |> fun value -> min value total_comments
-    in
-    let limit =
-      (match comment_limit with
-       | None -> Limits.default_comment_page_limit
-       | Some value -> value)
-      |> max 1
-      |> min Limits.max_comment_page_limit
-    in
-    Some (offset, limit)
-;;
-
-let get_post_and_comments store ~post_id ?comment_offset ?comment_limit () : (post * comment list, board_error) Result.t =
+let get_post_and_comments store ~post_id : (post * comment list, board_error) Result.t =
   maybe_sweep store;
   match Post_id.of_string post_id with
   | Error e -> Error e
@@ -107,18 +86,7 @@ let get_post_and_comments store ~post_id ?comment_offset ?comment_limit () : (po
                Stdlib.Float.compare a.created_at b.created_at)
             comments
         in
-        let sliced =
-          match
-            normalize_comment_page
-              ?comment_offset
-              ?comment_limit
-              (List.length sorted)
-          with
-          | None -> sorted
-          | Some (offset, limit) ->
-            List.filteri (fun i _ -> i >= offset && i < offset + limit) sorted
-        in
-        Ok (post, sliced))
+        Ok (post, sorted))
 ;;
 
 let list_posts store ?(visibility_filter = None) ?hearth ?(limit = 50) () : post list =

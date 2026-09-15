@@ -468,7 +468,7 @@ let test_a_lane_that_cannot_admit_says_why () =
 
    The elapsed stays -- a turn open two minutes is the fact. The motion does
    not: it means work is progressing, and for a keeper the health reading calls
-   offline or zombie, none is. *)
+   offline, none is. *)
 let test_a_turn_on_a_keeper_that_is_not_running_stops_moving () =
   (* Counted as an identifier: the reading reaches the match through
      [Option.map keeper_health_reading health], so it is passed rather than
@@ -479,17 +479,15 @@ let test_a_turn_on_a_keeper_that_is_not_running_stops_moving () =
        ~module_path:render ~binding_name:"keeper_row_content" ~callees:[]
        ~identifiers:[ "Tui_decode.keeper_health_reading" ]
      > 0);
-  (* Both halves, named: a match that reached only one of them would leave the
-     other drawing a live mark on a dead keeper. *)
-  List.iter
-    (fun reading ->
-      Alcotest.(check bool)
-        (Printf.sprintf "%s is one of the readings that stops the mark" reading)
-        true
-        (Ast_grep.count_constructors_in_value_binding ~module_path:render
-           ~binding_name:"keeper_row_content" ~constructors:[ reading ]
-         > 0))
-    [ "Tui_decode.Health_offline"; "Tui_decode.Health_zombie" ]
+  (* Named: a match that did not reach it would draw a live mark on a keeper
+     whose keepalive is gone. *)
+  Alcotest.(check bool)
+    "Tui_decode.Health_offline is the reading that stops the mark"
+    true
+    (Ast_grep.count_constructors_in_value_binding ~module_path:render
+       ~binding_name:"keeper_row_content"
+       ~constructors:[ "Tui_decode.Health_offline" ]
+     > 0)
 
 (* The preview's em dash once appeared as double-encoded UTF-8. Running
    marks belong to Masc_tui_answering and are exercised as rendered rows by

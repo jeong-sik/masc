@@ -18,6 +18,66 @@ let every_surface =
   ; Memory
   ]
 
+(* [Masc_tui_footer.never_dropped_keys] pins the Enter atom, and the comment
+   that justifies the pin rests on a claim about this table: that every
+   surface names exactly one key holding that atom, so the pin costs one item
+   per row and keeps the key the surface exists for. Nothing checked the
+   claim, and it is not true of five of the sheet's surfaces -- four name no
+   Enter key at all and Code names two.
+
+   Four of the five are the same answer in different words: a surface with no
+   row cursor has nothing for Enter to open. Clients is not. It moves a
+   cursor, jumps that cursor to a search match and draws the row it lands on
+   selected, and then no key acts on the selection -- [masc_tui.ml] gives it
+   cursor scrolling and [Clients -> None] for the row's link.
+
+   Named together the way the [ / ] table below is, so the next surface that
+   arrives with a cursor and nothing to open has to be a decision. *)
+let enter_atom_count_exceptions =
+  [ (* Charts, not a list: [j/k] scrolls. *)
+    "Metrics", 0
+  ; (* A detail screen. Its tabs carry their own keys. *)
+    "Keeper detail", 0
+  ; (* A roster with a cursor and nothing the cursor opens. *)
+    "Config / Runtime / Clients", 0
+  ; (* A scrolling reading, not a row list. *)
+    "Config / Tools", 0
+  ; (* The second is the history overlay's, which [footer_hints_code] drops
+       from the panes that have no commits. *)
+    "Workspace / Code", 2
+  ]
+
+let test_every_surface_names_one_key_that_acts_on_the_cursor () =
+  List.iter
+    (fun (label, surface) ->
+      let enter_keys =
+        List.filter_map
+          (fun (b : Masc_tui_keys.binding) ->
+            if List.exists (String.equal "Enter") (Masc_tui_keys.key_atoms b.Masc_tui_keys.key)
+            then Some b.Masc_tui_keys.key
+            else None)
+          (Masc_tui_keys.for_surface surface)
+      in
+      let want =
+        match List.assoc_opt label enter_atom_count_exceptions with
+        | Some n -> n
+        | None -> 1
+      in
+      Alcotest.(check int)
+        (Printf.sprintf "%s names %d key(s) holding the Enter atom (found: %s)"
+           label want (String.concat " | " enter_keys))
+        want (List.length enter_keys))
+    Masc_tui_keys.help_surfaces
+
+(* An exception that names a surface the sheet no longer lists stops being a
+   decision and becomes a line nobody reads. *)
+let test_every_enter_atom_exception_names_a_sheet_surface () =
+  List.iter
+    (fun (label, _) ->
+      Alcotest.(check bool) (Printf.sprintf "%s is still a surface the sheet lists" label) true
+        (List.mem_assoc label Masc_tui_keys.help_surfaces))
+    enter_atom_count_exceptions
+
 let test_every_surface_answers () =
   List.iter
     (fun surface ->
@@ -2201,6 +2261,10 @@ let () =
             test_detail_tab_hint_projects_the_table
         ; Alcotest.test_case "detail tab keys reach the help sheet" `Quick
             test_detail_tab_keys_reach_the_help_sheet
+        ; Alcotest.test_case "every surface names one key that acts on the cursor"
+            `Quick test_every_surface_names_one_key_that_acts_on_the_cursor
+        ; Alcotest.test_case "every Enter exception names a sheet surface"
+            `Quick test_every_enter_atom_exception_names_a_sheet_surface
         ; Alcotest.test_case "every surface answers" `Quick
             test_every_surface_answers
         ; Alcotest.test_case "no surface repeats a key" `Quick

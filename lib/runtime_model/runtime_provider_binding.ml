@@ -77,41 +77,6 @@ let local_runtime_label runtime_id =
   | None -> runtime_id
 ;;
 
-let runtime_id_of_label label =
-  match Provider_kind_resolver.resolve label with
-  | Provider_kind_resolver.Registered { model_id; _ }
-  | Provider_kind_resolver.Custom_url { model_id; _ } ->
-    let runtime_id = String.trim model_id in
-    if String.equal runtime_id "" then None else Some runtime_id
-  | Provider_kind_resolver.Unknown _ -> None
-;;
-
-let runtime_id_of_label_or_raw label =
-  match runtime_id_of_label label with
-  | Some runtime_id -> runtime_id
-  | None -> String.trim label
-;;
-
-let strip_latest_suffix runtime_id =
-  let suffix = ":latest" in
-  let suffix_len = String.length suffix in
-  let len = String.length runtime_id in
-  if len > suffix_len
-     && String.equal (String.sub runtime_id (len - suffix_len) suffix_len) suffix
-  then String.sub runtime_id 0 (len - suffix_len)
-  else runtime_id
-;;
-
-let normalize_runtime_name_for_bucket label =
-  runtime_id_of_label_or_raw label |> strip_latest_suffix
-;;
-
-let label_matches_runtime_id ~label ~runtime_id =
-  let label_id = normalize_runtime_name_for_bucket label in
-  let runtime_id = String.trim runtime_id |> strip_latest_suffix in
-  (not (String.equal runtime_id "")) && String.equal label_id runtime_id
-;;
-
 let provider_name_matches_default_local_openai_runtime provider_name =
   match default_local_openai_runtime_provider_id () with
   | Some id -> String.equal (normalize_provider_id provider_name) (normalize_provider_id id)

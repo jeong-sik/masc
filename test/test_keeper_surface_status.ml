@@ -38,7 +38,7 @@ let test_of_string_outside_domain () =
         (Printf.sprintf "%S -> None" s)
         true
         (K.surface_status_of_string_opt s = None))
-    [ "paused"; "error"; "stale"; "zombie"; "unknown"; "" ]
+    [ "paused"; "error"; "unknown"; "" ]
 
 let test_to_string_inverse () =
   List.iter
@@ -58,33 +58,19 @@ let test_producer_behavior () =
   check string "healthy -> active" "active" (surface "healthy");
   check string "idle health -> idle" "idle"
     (surface "idle");
-  check string "stale health -> inactive" "inactive"
-    (surface "stale");
   check string "offline health -> offline" "offline"
     (surface "offline")
 
-(* One keeper is described by four separate readings, and [status] answers only
-   one of them - with three of its values folded into "inactive". A row now
-   publishes [health] beside it. These pin that the two fields answer from
-   different vocabularies, which a row built from a fresh workspace cannot
-   show: an offline keeper spells both fields the same way, legitimately. *)
-let test_health_reader_keeps_what_the_surface_folds () =
-  let one health_word =
-    let d = diag health_word in
-    check string
-      (Printf.sprintf "health reader returns %S unchanged" health_word)
-      health_word
-      (K.keeper_health_to_string
-         (K.keeper_diagnostic_health ~diagnostic:d ~source:"test"));
-    check string
-      (Printf.sprintf "surface folds %S into inactive" health_word)
-      "inactive"
-      (K.keeper_surface_status ~diagnostic:d)
-  in
-  one "stale";
-  one "degraded";
-  one "zombie"
-;;
+(* [health] and [status] answer from different vocabularies. Feeding one
+   diagnostic to both readers is the only way to see that: a row built from
+   a fresh workspace spells both fields "offline", legitimately. *)
+let test_two_readers_of_one_diagnostic_differ_on_healthy () =
+  let d = diag "healthy" in
+  check string "health reader returns healthy unchanged" "healthy"
+    (K.keeper_health_to_string
+       (K.keeper_diagnostic_health ~diagnostic:d ~source:"test"));
+  check string "surface spells the same reading active" "active"
+    (K.keeper_surface_status ~diagnostic:d)
 
 let test_unreadable_health_is_offline_not_healthy () =
   (* A diagnostic this build cannot read must not resolve to a word that looks
@@ -112,12 +98,13 @@ let () =
           test_case "to_string inverse" `Quick test_to_string_inverse;
         ] );
       ( "keeper_surface_status",
-        [ test_case "producer behavior preserved" `Quick test_producer_behavior ]
-      );
+        [
+          test_case "producer behavior preserved" `Quick test_producer_behavior;
+          test_case "two readers of one diagnostic differ on healthy" `Quick
+            test_two_readers_of_one_diagnostic_differ_on_healthy;
+        ] );
       ( "keeper_diagnostic_health",
         [
-          test_case "keeps what the surface folds" `Quick
-            test_health_reader_keeps_what_the_surface_folds;
           test_case "unreadable resolves to offline" `Quick
             test_unreadable_health_is_offline_not_healthy;
         ] );

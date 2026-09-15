@@ -1452,27 +1452,29 @@ let test_rerank_resolver_rejects_missing_declared_env_credential () =
             (string_contains detail env_key)))
 ;;
 
+let resolve_budget ~requested_override runtime_id =
+  match
+    Keeper_context_runtime.resolve_max_context_resolution_for_runtime_id
+      ~requested_override
+      ~runtime_id
+  with
+  | Ok resolution -> resolution
+  | Error error ->
+    Alcotest.failf
+      "%s must resolve a context budget: %s"
+      runtime_id
+      (Keeper_context_runtime.max_context_resolution_error_to_string error)
+;;
+
 let test_context_budget_uses_selected_runtime () =
   with_runtime_initialized (fun () ->
     let default_budget =
-      Keeper_context_runtime.resolve_max_context_resolution
-        ~requested_override:None
-        [ "runpod_mtp.qwen" ]
+      resolve_budget ~requested_override:None "runpod_mtp.qwen"
     in
-    let selected_budget =
-      Keeper_context_runtime.resolve_max_context_resolution
-        ~requested_override:None
-        [ "openai.gpt" ]
-    in
-    let small_budget =
-      Keeper_context_runtime.resolve_max_context_resolution
-        ~requested_override:None
-        [ "openai.small" ]
-    in
+    let selected_budget = resolve_budget ~requested_override:None "openai.gpt" in
+    let small_budget = resolve_budget ~requested_override:None "openai.small" in
     let oversized_override =
-      Keeper_context_runtime.resolve_max_context_resolution
-        ~requested_override:(Some 128_001)
-        [ "openai.small" ]
+      resolve_budget ~requested_override:(Some 128_001) "openai.small"
     in
     Alcotest.(check int)
       "default runtime budget"
@@ -1521,9 +1523,7 @@ let test_strict_context_budget_rejects_unavailable_and_invalid_override () =
 let test_context_budget_source_is_shared_ssot () =
   with_runtime_initialized (fun () ->
     let source requested_override =
-      Keeper_context_runtime.resolve_max_context_resolution
-        ~requested_override
-        [ "openai.gpt" ]
+      resolve_budget ~requested_override "openai.gpt"
       |> Keeper_context_runtime.context_budget_source_of_resolution
       |> Keeper_context_runtime.context_budget_source_to_string
     in
@@ -1560,12 +1560,11 @@ let test_runtime_budget_source_survives_to_status_json () =
         (Keeper_context_runtime.max_context_resolution_error_to_string error)
     | Ok resolution ->
       (match resolution.Keeper_context_runtime.runtime_budget_source with
-       | Some Runtime.Override -> ()
-       | Some other ->
+       | Runtime.Override -> ()
+       | (Runtime.Capability | Runtime.Override_clamped_by_capability) as other ->
          Alcotest.failf
            "expected the runtime.toml override source, got %s"
-           (Runtime.max_context_source_to_string other)
-       | None -> Alcotest.fail "runtime budget source dropped on the strict path");
+           (Runtime.max_context_source_to_string other));
       let json =
         Keeper_context_runtime.context_budget_json_of_resolution
           ~runtime_id:"openai.gpt"
@@ -2167,9 +2166,7 @@ let test_max_context_accessor_clamps_to_provider_cap () =
       (Some 131072)
       (Runtime.max_context_of_runtime_id "ollama_cloud.stalecontext");
     let resolution =
-      Keeper_context_runtime.resolve_max_context_resolution
-        ~requested_override:None
-        [ "ollama_cloud.stalecontext" ]
+      resolve_budget ~requested_override:None "ollama_cloud.stalecontext"
     in
     Alcotest.(check int)
       "keeper context budget uses provider-effective cap"
@@ -2251,11 +2248,7 @@ let test_historical_qwen36_context_overflow_fixture_replays_provider_cap () =
       "current runtime accessor replays fixture through provider cap"
       (Some agent_core_provider_limit)
       (Runtime.max_context_of_runtime_id runtime_id);
-    let resolution =
-      Keeper_context_runtime.resolve_max_context_resolution
-        ~requested_override:None
-        [ runtime_id ]
-    in
+    let resolution = resolve_budget ~requested_override:None runtime_id in
     Alcotest.(check int)
       "current keeper budget no longer reproduces historical oversized value"
       agent_core_provider_limit

@@ -4,7 +4,9 @@ Atomically replace an active Keeper wake definition. The stable schedule_id
 is preserved and a fresh schedule_instance_id separates future wake evidence
 from the previous definition. Only scheduled or due requests can be updated;
 running and terminal requests are immutable. The editable fields and
-recurrence rules are the same as masc_schedule_create."""
+due and recurrence rules are the same as masc_schedule_create. A due time
+that changes and lands before the current second is refused with error_kind
+due_already_past; the stored due time sent back unchanged is accepted."""
 additional_properties = false
 defer_loading = true
 
@@ -15,11 +17,15 @@ required = true
 description = "Stable id of the scheduled or due request to replace."
 
 [[params]]
+name = "due_in_sec"
+type = "integer"
+minimum = 1
+description = "Seconds after the server runs this call."
+
+[[params]]
 name = "due_at_unix"
 type = "number"
-description = """
-Unix timestamp in seconds. Provide this, due_at_iso, or a calendar
-recurrence (daily/cron) that can derive the first due time."""
+description = "Unix timestamp in seconds."
 
 [[params]]
 name = "due_at_iso"
@@ -56,7 +62,9 @@ description = "Where the wake sits in the Keeper queue. Defaults to normal."
 [[params]]
 name = "requested_at_unix"
 type = "number"
-description = "Optional replacement request timestamp for replay/tests."
+description = """
+Optional replacement request timestamp for replay/tests. Recorded only; no
+due time counts from it."""
 
 [[params]]
 name = "expires_at_unix"
@@ -126,7 +134,9 @@ description = "Requester display name."
 [[params]]
 name = "scheduled_by_id"
 type = "string"
-description = "Scheduler actor id. Defaults to caller agent name."
+description = """
+Scheduler actor id. Defaults to the caller's name; required when the
+endpoint cannot name the caller."""
 
 [[params]]
 name = "scheduled_by_kind"

@@ -266,7 +266,7 @@ let plan_execution_error_to_json = function
       [ "kind", `String "input_validation_failed"
       ; "node_id", `String (Keeper_tool_plan.Node_id.to_string node_id)
       ; "tool_name", `String tool_name
-      ; "rejection", Tool_result.to_json rejection
+      ; "rejection", Tool_result.to_json (Tool_input_validation.rejection_result rejection)
       ]
   | Keeper_tool_plan.Output_validation_failed { node_id; tool_name; error } ->
     `Assoc

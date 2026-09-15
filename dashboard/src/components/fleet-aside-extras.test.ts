@@ -176,18 +176,16 @@ describe('FleetQueueSection (fl-q-*)', () => {
       .toBe('드레인 대기')
   })
 
-  it('renders the live keepalive cadence and last heartbeat', async () => {
+  it('renders the live keepalive cadence', async () => {
     await act(async () => {
       render(html`<${FleetQueueSection} keeper=${makeKeeper({
         keeper_keepalive_interval_s: 15,
-        last_heartbeat: '2026-08-23T05:00:00Z',
       })} />`, container)
     })
     await flushUi()
 
     const hb = container.querySelector('.fl-q-hb')
     expect(hb?.textContent).toContain('15초마다 깨어남')
-    expect(hb?.textContent).toContain('마지막')
     expect(hb?.querySelector('.fl-q-hb-dot')).not.toBeNull()
   })
 
@@ -204,17 +202,6 @@ describe('FleetQueueSection (fl-q-*)', () => {
     expect(hb?.textContent).toContain('깨어나지 않음')
   })
 
-  it('surfaces a heartbeat ledger read error instead of a stale timestamp', async () => {
-    await act(async () => {
-      render(html`<${FleetQueueSection} keeper=${makeKeeper({
-        heartbeat_observation_error: 'ledger read failed',
-      })} />`, container)
-    })
-    await flushUi()
-
-    expect(container.querySelector('.fl-q-hb.off')?.textContent)
-      .toContain('하트비트 기록 읽기 실패 · ledger read failed')
-  })
 })
 
 describe('FleetRotationSection (fl-rot-*)', () => {

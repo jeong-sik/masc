@@ -318,6 +318,14 @@ let builtin_skill_log_level = function
       }
   | Builtin_skill_package.Retired
       { result = Ok (Builtin_skill_package.Retire_recorded _); _ }
+  | Builtin_skill_package.Interrupted
+      { result =
+          Ok
+            ( Builtin_skill_package.Move_never_started
+            | Builtin_skill_package.Move_completed
+            | Builtin_skill_package.Move_finished _ )
+      ; _
+      }
   | Builtin_skill_package.Unfinished { result = Ok (); _ } -> Changed
   | Builtin_skill_package.Bundled
       { result =
@@ -339,11 +347,14 @@ let builtin_skill_log_level = function
       }
   | Builtin_skill_package.Bundled { result = Error _; _ }
   | Builtin_skill_package.Retired { result = Error _; _ }
+  | Builtin_skill_package.Interrupted { result = Error _; _ }
   | Builtin_skill_package.Unfinished { result = Error _; _ } -> Needs_operator
 ;;
 
 let builtin_skill_report_name = function
-  | Builtin_skill_package.Bundled { name; _ } | Builtin_skill_package.Retired { name; _ } -> name
+  | Builtin_skill_package.Bundled { name; _ }
+  | Builtin_skill_package.Retired { name; _ }
+  | Builtin_skill_package.Interrupted { name; _ } -> name
   | Builtin_skill_package.Unfinished { path; _ } -> path
 ;;
 

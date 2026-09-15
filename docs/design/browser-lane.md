@@ -11,7 +11,10 @@ native messaging. Its host polls `/browser-lane/poll` and returns results to
 `/browser-lane/ping` answers `{ok:true}` to the same token without registering
 a client. After a failed request, a host that takes its port from the workspace
 connection moves to a newly named port only when its current server no longer
-answers the ping and the new address does.
+answers the ping and the new address does. A result is sent again only when
+its request may not have reached the server (no connection, a broken exchange
+or no answer in time); a result the server answered with any status is logged
+as undelivered and the host returns to polling.
 They accept only `live`. Automation requires the configured in-process
 WebDriver executor and reports `Lane_absent` when it is not installed.
 Session management and direct URL navigation are automation-only. The live lane
@@ -145,13 +148,18 @@ requests omit `clientId` and return it as null.
 
 When a Keeper browser tool meets `no_live_client` or
 `selected_client_disconnected`, before or after its target was resolved, its
-result also carries `host`: the installed launcher (`follows_workspace` from
-the `launch.json` the installer writes, `undeclared`, `unreadable` or
+result also carries `host`: the installed launcher (`follows_workspace` when
+the installer's `launch.json` carries the SHA-256 of the `launch` beside it,
+`describes_another_launcher` when it does not, `undeclared`, `unreadable` or
 `not_installed`), the `workspace_port` connection.toml names, the
-`serving_port` this server listens on, and the same verdict and message
-`masc doctor` reports for the browser lane. The verdict is `aligned` only when
-the workspace port is the serving port. The Keeper cannot change either side,
-so the retry text names what the operator does.
+`serving_port` this server's listener actually bound with `polling_hosts`, the
+browser hosts whose poll lease is current (both null where no bound listener
+is known), and the same verdict and message the onboarding check reports.
+The verdict is `connected` while a host polls this server, whatever the
+launcher or file says; otherwise `aligned` only when a declared launcher's
+workspace port is the bound port, `unverified` where no bound port is known,
+such as `masc doctor`, and `misconfigured` for the rest. The Keeper cannot
+change either side, so the retry text names what the operator does.
 
 Tab IDs belong to their selected client. The operator read resolves that client
 once before listing tabs and keeps it for the subsequent page request. Successful

@@ -1,7 +1,10 @@
 (test
  (name test_keeper_tool_dispatch_runtime)
  (modules test_keeper_tool_dispatch_runtime)
- (deps fixtures/browser-webdriver-script.cjs)
+ (deps
+  fixtures/browser-webdriver-script.cjs
+  ../skills/browser-live-follow-read/SKILL.md
+  ../skills/browser-navigate-read/SKILL.md)
  (libraries
   masc_test_deps
   masc.keeper_chat_operations

@@ -326,9 +326,49 @@ let test_translate_unparseable_last_seen_does_not_read_working () =
 let test_attention_empty () =
   let now = Unix.gettimeofday () in
   let items =
-    Dashboard_attention.collect ~now []
+    Dashboard_attention.collect ~now ~operator_tasks:[] []
   in
   Alcotest.(check int) "no items" 0 (List.length items)
+
+(* A stop and an abandoned task are the operator's to end; a Keeper record that
+   does not decode is a repair, and the task moves again once it is fixed. *)
+let test_attention_grades_the_operators_tasks () =
+  let items =
+    Dashboard_attention.detect_operator_tasks
+      [ Masc.Operator_task_attention.Cancel_claim
+          { task_id = "task-348"
+          ; assignee = "goo-yang-bong"
+          ; submitted_at = "2026-09-08T23:28:19Z"
+          ; reason =
+              Workspace_verification_store.Cancellation_reason_stated
+                "the issue this answers was closed upstream"
+          }
+      ; Masc.Operator_task_attention.Held_without_actor
+          { task_id = "task-1486"
+          ; assignee = "codex-mcp-client"
+          ; since = "2026-09-04T00:00:00Z"
+          }
+      ; Masc.Operator_task_attention.Producer_record_unreadable
+          { task_id = "task-900"
+          ; producer = "half-written-keeper"
+          ; since = "2026-09-05T00:00:00Z"
+          ; detail = "this binary does not decode it"
+          }
+      ]
+  in
+  Alcotest.(check (list string)) "graded by who is blocked and on what"
+    [ "cancel_claim"; "held_without_actor"; "producer_record_unreadable" ]
+    (List.map (fun (item : Dashboard_attention.attention_item) -> item.category) items);
+  Alcotest.(check (list bool)) "a repair is not an operator decision"
+    [ true; true; false ]
+    (List.map
+       (fun (item : Dashboard_attention.attention_item) ->
+          item.severity = Dashboard_attention.Critical)
+       items);
+  Alcotest.(check bool) "the producer's own sentence reaches the operator" true
+    (match items with
+     | first :: _ -> Astring.String.is_infix ~affix:"closed upstream" first.summary
+     | [] -> false)
 
 let test_attention_compact_empty () =
   let result = Dashboard_attention.compact_summary [] in
@@ -378,6 +418,8 @@ let () =
       ( "Attention",
         [
           ("empty attention", `Quick, test_attention_empty);
+          ("attention grades the operator's tasks", `Quick,
+           test_attention_grades_the_operators_tasks);
           ("compact empty", `Quick, test_attention_compact_empty);
         ] );
     ]

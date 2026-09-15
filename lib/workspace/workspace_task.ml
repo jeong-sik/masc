@@ -375,6 +375,10 @@ type unroutable_rejection_release =
       (** The Task moved on between the verdict and this delivery — a new
           submission, an operator recovery, a cancellation. Whatever is there
           now answers for it, so nothing is released. *)
+  | Producer_became_routable
+      (** A Keeper queue appeared at the producer's name between the routing
+          decision and this lock. The verdict can be delivered after all, so
+          the task stays where the delivery expects to find it. *)
   | Task_absent
 
 let release_unroutable_rejected_task_r
@@ -384,6 +388,7 @@ let release_unroutable_rejected_task_r
       ~producer
       ~verification_id
       ~reason
+      ~still_unroutable
       ()
   : unroutable_rejection_release Masc_domain.masc_result
   =
@@ -428,6 +433,19 @@ let release_unroutable_rejected_task_r
       (match task.task_status with
        | Masc_domain.Claimed { assignee; _ } | Masc_domain.InProgress { assignee; _ }
          when Workspace_task_classify.same_task_actor config assignee producer ->
+         (* The route was read before this lock was taken. A Keeper meta
+            landing at the producer's name in between means a queue now exists
+            and the verdict can be delivered after all, so the task is left
+            where the delivery expects to find it. Asked again here, under the
+            lock that decides, rather than trusting the earlier answer. *)
+         let* still_unroutable =
+           still_unroutable ()
+           |> Result.map_error (fun detail ->
+             Masc_domain.System (Masc_domain.System_error.IoError detail))
+         in
+         if not still_unroutable
+         then Ok Producer_became_routable
+         else
          let handoff_context : Masc_domain.task_handoff_context =
            { summary =
                "rejected work had no producer Keeper to return it to; released to \

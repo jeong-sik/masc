@@ -143,12 +143,13 @@ let browser_lane_fixture ?(declared=true) ?(connection_port="") () f =
   if connection_port <> "" then
     write (Filename.concat root "config/connection.toml")
       ("[server]\nhttp_port = " ^ connection_port ^ "\n");
-  write (Filename.concat (Filename.concat root "browser-lane") "host/launch")
-    ("#!/bin/sh\nexec /unused/masc-browser-host --base-path " ^ base
-     ^ " --token-file /unused/token --server http://127.0.0.1:8935 \"$@\"\n");
+  let script = "#!/bin/sh\nexec /unused/masc-browser-host --base-path " ^ base
+               ^ " --token-file /unused/token \"$@\"\n" in
+  write (Filename.concat (Filename.concat root "browser-lane") "host/launch") script;
   if declared then
     write (Filename.concat (Filename.concat root "browser-lane") "host/launch.json")
-      "{\"destination\":\"workspace_connection\"}\n";
+      (Yojson.Safe.to_string (`Assoc ["destination", `String "workspace_connection";
+         "launcher_sha256", `String Digestif.SHA256.(to_hex (digest_string script))]));
   f base
 
 let browser_lane_absent_launcher_is_unobserved () = with_workspace @@ fun base ->
@@ -158,9 +159,9 @@ let browser_lane_absent_launcher_is_unobserved () = with_workspace @@ fun base -
     (List.find_opt (fun (c : Onboarding_status.check) -> c.id = Onboarding_status.Browser_lane)
        observed.Onboarding_status.checks = None)
 
-(* The fixture launcher's shell text names a port; only the declaration beside
-   it says where the host takes its address from, so without one the doctor
-   cannot vouch for that host and says to install it again. *)
+(* Only the declaration beside the launcher says where the host takes its
+   address from, so without one the doctor cannot vouch for that host and says
+   to install it again. *)
 let browser_lane_undeclared_launcher_is_invalid_and_says_reinstall () =
   browser_lane_fixture ~declared:false ~connection_port:"64850" () @@ fun base ->
   let observed = Onboarding_status.inspect ~base_path:(Some base) in
@@ -172,11 +173,13 @@ let browser_lane_undeclared_launcher_is_invalid_and_says_reinstall () =
     (String_util.contains_substring (message Onboarding_status.Browser_lane observed)
        "install-host.sh")
 
+(* masc doctor serves no lane, so it cannot see whether a host reaches the
+   port the file names: a declared launcher is unverified here, not aligned. *)
 let browser_lane_declared_launcher_follows_the_workspace () =
   browser_lane_fixture ~connection_port:"64850" () @@ fun base ->
   let observed = Onboarding_status.inspect ~base_path:(Some base) in
-  check bool "a declared launcher follows the workspace" true
-    (condition Onboarding_status.Browser_lane observed = Onboarding_status.Satisfied);
+  check bool "a declared launcher outside a server needs verification" true
+    (condition Onboarding_status.Browser_lane observed = Onboarding_status.Needs_verification);
   check bool "the workspace port is named" true
     (String_util.contains_substring (message Onboarding_status.Browser_lane observed) "64850")
 
@@ -253,7 +256,7 @@ let () = run "Onboarding observations"
                    browser_lane_absent_launcher_is_unobserved;
                  test_case "an undeclared browser lane launcher is invalid and says reinstall" `Quick
                    browser_lane_undeclared_launcher_is_invalid_and_says_reinstall;
-                 test_case "a declared browser lane launcher follows the workspace" `Quick
+                 test_case "a declared browser lane launcher outside a server needs verification" `Quick
                    browser_lane_declared_launcher_follows_the_workspace;
                  test_case "a stale browser lane does not hold imp's history closed" `Quick
                    a_stale_browser_lane_does_not_hold_imp_history_closed;

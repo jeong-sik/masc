@@ -41,7 +41,9 @@ val format_comment_tree
   -> string list
 (** One line per comment, every comment exactly once, replies under their
     parent. Indentation stops growing past a fixed depth; deeper replies are
-    still drawn. [viewer_vote_of] answers, per comment, the reading agent's own
+    still drawn. A reply the indentation cannot place — deeper than that
+    depth, or whose parent is not in [comments] — names its parent's id.
+    [viewer_vote_of] answers, per comment, the reading agent's own
     vote; the default answers [None] for every comment and renders no
     marker. *)
 val sources_footer : Yojson.Safe.t list -> string

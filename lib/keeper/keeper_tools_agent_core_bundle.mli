@@ -34,7 +34,8 @@ val make_tool_bundle_for_capability_surface
     the loop and would spill anything larger to a file the Keeper cannot open,
     {!Common.max_agent_core_inline_result_bytes} when MASC owns the wire and
     nothing spills. Omitted, or before an attempt has been observed, the
-    descriptor's own projection stands, which is the narrower answer. *)
+    descriptor's own projection stands, which is the narrower answer. The
+    handler receives the same answer, so a thread read sizes its page by it. *)
 
 module For_testing : sig
   val make_tool_bundle
@@ -77,6 +78,17 @@ module For_testing : sig
     -> Agent_core.Tool.t list
   (** Test seam for a closed per-turn descriptor set. Production obtains the
 *)
+
+  val ordinary_on_failed
+    :  mark_terminal_effect_failed:
+         (Keeper_tools_agent_core.terminal_effect_failure -> unit)
+    -> Keeper_tool_descriptor.runtime_handler
+    -> Keeper_tools_agent_core.terminal_effect_failure
+    -> unit
+  (** The failure callback the bundle hands every ordinary descriptor's
+      handler, applied to that descriptor's runtime handler. It calls
+      [mark_terminal_effect_failed], which fails the provider turn, only when
+      that handler's failure with this effect disposition ends the turn. *)
 
   val initial_terminal_effect_state :
     Keeper_tools_agent_core.gate_replay_delivery option ->

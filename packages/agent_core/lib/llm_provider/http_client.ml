@@ -1842,12 +1842,6 @@ let make_connection ~sw ~net ~origin : (connection, http_error) result =
 (** Client wrapper that tracks the socket for explicit close.
     The caller provides the concrete URI so host resolution and TLS
     availability can be checked up front and reported as typed errors. *)
-let make_closing_client ~sw ~net ~origin =
-  let+ client, close = make_client ~net ~origin in
-  Eio.Switch.on_release sw close;
-  client
-;;
-
 (** Run [f client] with a client obtained either from [cache] or created
     for one request. When [cache] is supplied, a hit reuses a parked
     connection, a miss creates one and parks it on success, and any error
@@ -2416,59 +2410,6 @@ let post_sync_once
   with
   | Ok receipt -> Ok receipt.response
   | Error error -> Error error
-;;
-
-let post_stream ?cache ?clock ?connect_timeout_s ~sw ~net ~url ~headers ~body () =
-  let* deadline =
-    resolve_explicit_deadline
-      ~operation:"post_stream"
-      ~parameter:"connect_timeout_s"
-      ~clock
-      ~timeout_s:connect_timeout_s
-  in
-  (* Cache is intentionally ignored for the streaming reader variant: the
-     returned [Buf_read.t] outlives this function, so we cannot safely park
-     the client until consumption finishes. Use [with_post_stream] for
-     cache-aware streaming. *)
-  ignore cache;
-  catch_network (fun () ->
-    let* origin = parse_uri url in
-    let* client = make_closing_client ~sw ~net ~origin in
-    let headers_with_length =
-      ("content-length", string_of_int (String.length body))
-      :: add_connection_close headers
-    in
-    let hdr = Http.Header.of_list headers_with_length in
-    (* Only the connect + initial response headers are bounded; body
-       consumption happens in the returned reader and is the caller's
-       responsibility to timebox. *)
-    let* resp, resp_body =
-      with_explicit_deadline deadline (fun () ->
-        Ok
-          (Cohttp_eio.Client.post
-             ~sw
-             client
-             ~headers:hdr
-             ~body:(Cohttp_eio.Body.of_string body)
-             origin.uri))
-    in
-    match Cohttp.Response.status resp with
-    | `OK ->
-      let safe_body = safe_cohttp_response_flow resp_body in
-      Ok (Eio.Buf_read.of_flow ~max_size:Api_common.max_response_body safe_body)
-    | status ->
-      let code = Cohttp.Code.code_of_status status in
-      let resp_headers = Cohttp.Response.headers resp in
-      let retry_after_header = retry_after_header_of_response_headers resp_headers in
-      let* body_str = read_response_body resp_body in
-      profile_opaque_client_error
-        ~url
-        ~code
-        ~resp_headers
-        ~request_headers:headers_with_length
-        ~request_body:body
-        ~response_body:body_str;
-      Error (HttpError { code; body = Received body_str; retry_after_header }))
 ;;
 
 let track_connection_eof connection =

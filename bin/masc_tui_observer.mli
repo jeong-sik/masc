@@ -82,7 +82,6 @@ type keeper_heartbeat = {
   hb_phase : string option;  (** absent on the bare liveness beat *)
   hb_in_turn : bool option;
   hb_in_flight_ms : float option;
-  hb_since_progress_ms : float option;
   hb_at : float;
 }
 

@@ -13,7 +13,12 @@
     INTERNAL tool name (telemetry SSOT). [~input_schema] is the
     internal tool schema used for pre-execution validation. Descriptor-backed
     callers pass [?prepare_input] so validation and translation follow the
-    descriptor's typed policy before dispatch. *)
+    descriptor's typed policy before dispatch.
+
+    The closure's [result_projection] is the projection this call's result
+    crosses on its way to the model, resolved for the lane running it. A
+    caller that has no lane leaves it out, and a handler that sizes its
+    output falls back to the descriptor's own projection. *)
 val make_keeper_tool_handler
   :  capability_surface:Keeper_capability_surface.t
   -> name:string
@@ -45,6 +50,7 @@ val make_keeper_tool_handler
        (Yojson.Safe.t -> (Yojson.Safe.t, Tool_result.result) result)
   -> unit
   -> ?agent_core_invocation:Agent_core.Tool_contract.Invocation.t
+  -> ?result_projection:Tool_output.model_projection
   -> Yojson.Safe.t
   -> Tool_result.result
 
@@ -78,6 +84,7 @@ val make_keeper_tool_handler_from_meta
        (Yojson.Safe.t -> (Yojson.Safe.t, Tool_result.result) result)
   -> unit
   -> ?agent_core_invocation:Agent_core.Tool_contract.Invocation.t
+  -> ?result_projection:Tool_output.model_projection
   -> Yojson.Safe.t
   -> Tool_result.result
 (** Explicit compatibility path for tests and callers without an enclosing

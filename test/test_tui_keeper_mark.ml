@@ -1,14 +1,8 @@
-(** Six health readings, six marks.
+(** Three health readings, three marks.
 
-    The mark used to come from a string match on the health label with a
-    catch-all: [offline] got its own character and everything else fell to the
-    healthy dot. Stale, degraded, and zombie -- three keepers that are not
-    working -- drew what a working keeper draws, and a renamed label would
-    have joined them without a word from the compiler.
-
-    These tests pin that the readings stay distinguishable. Exhaustiveness is
-    the compiler's job; what it cannot check is that two readings did not
-    quietly settle on the same character. *)
+    Exhaustiveness is the compiler's job; what it cannot check is that two
+    readings did not quietly settle on the same character, or that a keeper
+    that is not turning drew what a working keeper draws. *)
 
 module Mark = Masc_tui_keeper_mark
 module Reading = Masc.Tui_decode
@@ -21,28 +15,21 @@ let readings =
   [ "running", Reading.Health_running
   ; "idle", Reading.Health_idle
   ; "offline", Reading.Health_offline
-  ; "stale", Reading.Health_stale
-  ; "degraded", Reading.Health_degraded
-  ; "zombie", Reading.Health_zombie
   ]
 
 let test_every_reading_gets_its_own_mark () =
   let marks = List.map (fun (_, r) -> Mark.glyph ~paused:false (Some r)) readings in
   let distinct = List.sort_uniq String.compare marks in
-  check_int "six readings, six marks" (List.length readings) (List.length distinct)
+  check_int "three readings, three marks" (List.length readings) (List.length distinct)
 
-let test_a_broken_keeper_does_not_draw_the_working_mark () =
+let test_a_keeper_that_is_not_turning_does_not_draw_the_working_mark () =
   let working = Mark.glyph ~paused:false (Some Reading.Health_running) in
   List.iter
     (fun name_reading ->
       let name, reading = name_reading in
       check_bool (name ^ " reads differently from a working keeper") true
         (Mark.glyph ~paused:false (Some reading) <> working))
-    [ "stale", Reading.Health_stale
-    ; "degraded", Reading.Health_degraded
-    ; "zombie", Reading.Health_zombie
-    ; "offline", Reading.Health_offline
-    ]
+    [ "idle", Reading.Health_idle; "offline", Reading.Health_offline ]
 
 let test_pause_outranks_the_reading () =
   let paused_marks =
@@ -114,8 +101,8 @@ let () =
     [ ( "marks"
       , [ Alcotest.test_case "every reading gets its own mark" `Quick
             test_every_reading_gets_its_own_mark
-        ; Alcotest.test_case "a broken keeper does not draw the working mark"
-            `Quick test_a_broken_keeper_does_not_draw_the_working_mark
+        ; Alcotest.test_case "a keeper that is not turning does not draw the working mark"
+            `Quick test_a_keeper_that_is_not_turning_does_not_draw_the_working_mark
         ; Alcotest.test_case "pause outranks the reading" `Quick
             test_pause_outranks_the_reading
         ; Alcotest.test_case "an unread roster is not a health" `Quick

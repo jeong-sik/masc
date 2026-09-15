@@ -57,7 +57,7 @@ Supervisor Mode is for:
 | `namespace_resume` | Recovery after an operator pause | Immediate |
 | `keeper_message` | One keeper needs direct corrective input | Immediate |
 | `keeper_probe` | A keeper needs a fresh diagnostic snapshot | Immediate |
-| `keeper_recover` | A stale or degraded keeper needs a controlled restart | Preview + confirm |
+| `keeper_recover` | A keeper whose keepalive has stopped needs a controlled restart | Preview + confirm |
 
 ## Notes
 

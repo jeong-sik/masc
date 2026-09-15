@@ -39,6 +39,122 @@ let initial_terminal_effect_state = function
   | Some _ | None -> Keeper_tools_agent_core.Terminal_effect_open
 ;;
 
+(* What a failed ordinary (non-terminal) tool call does to the provider turn.
+   Terminal tools keep their own boundary. *)
+type ordinary_failure_boundary =
+  | Any_effect_ends_turn
+      (** A failure that may have left an effect ends the turn. *)
+  | Applied_effect_ends_turn
+      (** Only a failure proven to have applied its effect ends the turn. *)
+  | Failure_returns_to_model
+
+let ordinary_failure_boundary (handler : Keeper_tool_descriptor.runtime_handler) =
+  match handler with
+  (* A spawn that started leaves a process running with no
+     handle in the caller's hands if the call then fails, which
+     is the same shape of loss Execute has. *)
+  | Keeper_tool_descriptor.Tool_execute
+  | Keeper_tool_descriptor.Tool_browser_act
+  | Keeper_tool_descriptor.Tool_keeper_spawn_dispatch
+  (* A failed webmcp call may have already executed the page's
+     tool — the bridge cannot prove otherwise — which is the
+     same effect-outcome-unknown shape Execute has. *)
+  | Keeper_tool_descriptor.Tool_keeper_webmcp_dispatch ->
+    Any_effect_ends_turn
+  | Keeper_tool_descriptor.Tool_peer_artifact
+  | Keeper_tool_descriptor.Tool_edit_file
+  | Keeper_tool_descriptor.Tool_write_file ->
+    Applied_effect_ends_turn
+  (* A failed memory write or retract goes back to the model whatever it
+     committed, because doing it again adds no second fact row: an ordinary
+     fact is keyed by the SHA-256 of its title and content, a source-bound one
+     by its path (a new claim for that path replaces the old one), and
+     retracting a fact that is gone commits nothing. A repeat write still
+     commits another revision. The result names what committed, so the Keeper
+     can read memory before it tries again. *)
+  | Keeper_tool_descriptor.Tool_memory_retract
+  | Keeper_tool_descriptor.Tool_memory_write ->
+    Failure_returns_to_model
+  (* A code query starts a language server, but the pool owns it
+     and the turn ends it either way, so a failed call leaves the
+     caller holding nothing. It answers with the readers. *)
+  | ( Keeper_tool_descriptor.Tool_keeper_code_query_dispatch
+    | Keeper_tool_descriptor.Tool_search_files
+    | Keeper_tool_descriptor.Tool_read_file
+    | Keeper_tool_descriptor.Tool_lane_status
+    | Keeper_tool_descriptor.Tool_tools_list
+    | Keeper_tool_descriptor.Tool_capability_search
+    | Keeper_tool_descriptor.Tool_context_status
+    | Keeper_tool_descriptor.Tool_artifact_read
+    | Keeper_tool_descriptor.Tool_workspace_memory_read
+    | Keeper_tool_descriptor.Tool_memory_search
+    | Keeper_tool_descriptor.Tool_constitution_write
+    | Keeper_tool_descriptor.Tool_constitution_remove
+    | Keeper_tool_descriptor.Tool_library_search
+    | Keeper_tool_descriptor.Tool_library_read
+    | Keeper_tool_descriptor.Tool_surface_read
+    | Keeper_tool_descriptor.Tool_surface_post
+    | Keeper_tool_descriptor.Tool_person_note_set
+    | Keeper_tool_descriptor.Tool_ide_annotate
+    | Keeper_tool_descriptor.Tool_voice_dispatch
+    | Keeper_tool_descriptor.Tool_task_dispatch
+    | Keeper_tool_descriptor.Tool_board_dispatch
+    | Keeper_tool_descriptor.Tool_masc_task_dispatch
+    | Keeper_tool_descriptor.Tool_masc_plan_dispatch
+    | Keeper_tool_descriptor.Tool_masc_run_dispatch
+    | Keeper_tool_descriptor.Tool_masc_agent_dispatch
+    | Keeper_tool_descriptor.Tool_masc_workspace_dispatch
+    | Keeper_tool_descriptor.Tool_masc_misc_dispatch
+    | Keeper_tool_descriptor.Tool_web_search
+    | Keeper_tool_descriptor.Tool_web_fetch
+    | Keeper_tool_descriptor.Tool_browser_tabs
+    | Keeper_tool_descriptor.Tool_browser_read
+    | Keeper_tool_descriptor.Tool_browser_session
+    | Keeper_tool_descriptor.Tool_browser_goto
+    | Keeper_tool_descriptor.Tool_browser_interact
+    | Keeper_tool_descriptor.Tool_masc_control_dispatch
+    | Keeper_tool_descriptor.Tool_masc_agent_timeline_dispatch
+    | Keeper_tool_descriptor.Tool_masc_schedule_dispatch
+    | Keeper_tool_descriptor.Tool_masc_keeper_dispatch
+    | Keeper_tool_descriptor.Tool_masc_fusion_dispatch
+    | Keeper_tool_descriptor.Tool_masc_fusion_status
+    | Keeper_tool_descriptor.Tool_masc_fusion_decision
+    | Keeper_tool_descriptor.Tool_masc_file_dispatch
+    | Keeper_tool_descriptor.Tool_masc_library_dispatch
+    | Keeper_tool_descriptor.Tool_masc_local_runtime_dispatch
+    | Keeper_tool_descriptor.Tool_analyze_image ) ->
+    Failure_returns_to_model
+;;
+
+let ordinary_failure_ends_turn
+      handler
+      (disposition : Tool_result.failure_effect_disposition)
+  =
+  match ordinary_failure_boundary handler, disposition with
+  | ( (Any_effect_ends_turn | Applied_effect_ends_turn | Failure_returns_to_model)
+    , Tool_result.Proven_pre_effect ) ->
+    false
+  | (Any_effect_ends_turn | Applied_effect_ends_turn), Tool_result.Proven_post_effect ->
+    true
+  | Any_effect_ends_turn, Tool_result.Effect_outcome_unknown -> true
+  | Applied_effect_ends_turn, Tool_result.Effect_outcome_unknown -> false
+  | ( Failure_returns_to_model
+    , (Tool_result.Proven_post_effect | Tool_result.Effect_outcome_unknown) ) ->
+    false
+;;
+
+(* The failure callback every ordinary descriptor's handler receives. The
+   handler calls it only for a post-effect or unknown failure; whether that
+   ends the turn is decided here and nowhere else. *)
+let ordinary_on_failed
+      ~mark_terminal_effect_failed
+      handler
+      (failure : Keeper_tools_agent_core.terminal_effect_failure)
+  =
+  if ordinary_failure_ends_turn handler failure.effect_disposition
+  then mark_terminal_effect_failed failure
+;;
+
 let make_tool_bundle_for_descriptors_with_policy
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
@@ -327,87 +443,12 @@ let make_tool_bundle_for_descriptors_with_policy
              , Some mark_completed_terminal_externalization_failed )
            | Keeper_tool_descriptor.Ordinary
                (Keeper_tool_descriptor.Serial | Keeper_tool_descriptor.Concurrent) ->
-             let on_failed =
-               match descriptor.runtime_handler with
-               (* A spawn that started leaves a process running with no
-                  handle in the caller's hands if the call then fails, which
-                  is the same shape of loss Execute has. *)
-               | Keeper_tool_descriptor.Tool_execute
-               | Keeper_tool_descriptor.Tool_browser_act
-               | Keeper_tool_descriptor.Tool_keeper_spawn_dispatch
-               (* A failed webmcp call may have already executed the page's
-                  tool — the bridge cannot prove otherwise — which is the
-                  same effect-outcome-unknown shape Execute has. *)
-               | Keeper_tool_descriptor.Tool_keeper_webmcp_dispatch ->
-                 Some mark_terminal_effect_failed
-               | Keeper_tool_descriptor.Tool_peer_artifact
-               | Keeper_tool_descriptor.Tool_edit_file
-               | Keeper_tool_descriptor.Tool_write_file ->
-                 Some (fun failure ->
-                   match failure.Keeper_tools_agent_core.effect_disposition with
-                   | Tool_result.Proven_post_effect -> mark_terminal_effect_failed failure
-                   | Tool_result.Proven_pre_effect | Tool_result.Effect_outcome_unknown -> ())
-               (* A failed memory write or retract goes back to the model
-                  whatever it committed, because doing it again adds no
-                  second copy: the same claim is the same fact (an ordinary
-                  fact is keyed by its claim's SHA-256, a source-bound one by
-                  its path), and retracting a fact that is gone commits
-                  nothing. The result names what committed, so the Keeper can
-                  read memory before it tries again. *)
-               | Keeper_tool_descriptor.Tool_memory_retract
-               | Keeper_tool_descriptor.Tool_memory_write ->
-                 None
-               (* A code query starts a language server, but the pool owns it
-                  and the turn ends it either way, so a failed call leaves the
-                  caller holding nothing. It answers with the readers. *)
-               | ( Keeper_tool_descriptor.Tool_keeper_code_query_dispatch
-                 | Keeper_tool_descriptor.Tool_search_files
-                 | Keeper_tool_descriptor.Tool_read_file
-                 | Keeper_tool_descriptor.Tool_lane_status
-                 | Keeper_tool_descriptor.Tool_tools_list
-                 | Keeper_tool_descriptor.Tool_capability_search
-                 | Keeper_tool_descriptor.Tool_context_status
-                 | Keeper_tool_descriptor.Tool_artifact_read
-                 | Keeper_tool_descriptor.Tool_workspace_memory_read
-                 | Keeper_tool_descriptor.Tool_memory_search
-                 | Keeper_tool_descriptor.Tool_constitution_write
-                 | Keeper_tool_descriptor.Tool_constitution_remove
-                 | Keeper_tool_descriptor.Tool_library_search
-                 | Keeper_tool_descriptor.Tool_library_read
-                 | Keeper_tool_descriptor.Tool_surface_read
-                 | Keeper_tool_descriptor.Tool_surface_post
-                 | Keeper_tool_descriptor.Tool_person_note_set
-                 | Keeper_tool_descriptor.Tool_ide_annotate
-                 | Keeper_tool_descriptor.Tool_voice_dispatch
-                 | Keeper_tool_descriptor.Tool_task_dispatch
-                 | Keeper_tool_descriptor.Tool_board_dispatch
-                 | Keeper_tool_descriptor.Tool_masc_task_dispatch
-                 | Keeper_tool_descriptor.Tool_masc_plan_dispatch
-                 | Keeper_tool_descriptor.Tool_masc_run_dispatch
-                 | Keeper_tool_descriptor.Tool_masc_agent_dispatch
-                 | Keeper_tool_descriptor.Tool_masc_workspace_dispatch
-                 | Keeper_tool_descriptor.Tool_masc_misc_dispatch
-                 | Keeper_tool_descriptor.Tool_web_search
-                 | Keeper_tool_descriptor.Tool_web_fetch
-                 | Keeper_tool_descriptor.Tool_browser_tabs
-                 | Keeper_tool_descriptor.Tool_browser_read
-                 | Keeper_tool_descriptor.Tool_browser_session
-                 | Keeper_tool_descriptor.Tool_browser_goto
-                 | Keeper_tool_descriptor.Tool_browser_interact
-                 | Keeper_tool_descriptor.Tool_masc_control_dispatch
-                 | Keeper_tool_descriptor.Tool_masc_agent_timeline_dispatch
-                 | Keeper_tool_descriptor.Tool_masc_schedule_dispatch
-                 | Keeper_tool_descriptor.Tool_masc_keeper_dispatch
-                 | Keeper_tool_descriptor.Tool_masc_fusion_dispatch
-                 | Keeper_tool_descriptor.Tool_masc_fusion_status
-                 | Keeper_tool_descriptor.Tool_masc_fusion_decision
-                 | Keeper_tool_descriptor.Tool_masc_file_dispatch
-                 | Keeper_tool_descriptor.Tool_masc_library_dispatch
-                 | Keeper_tool_descriptor.Tool_masc_local_runtime_dispatch
-                 | Keeper_tool_descriptor.Tool_analyze_image ) ->
-                 None
-             in
-             None, on_failed, None
+             ( None
+             , Some
+                 (ordinary_on_failed
+                    ~mark_terminal_effect_failed
+                    descriptor.runtime_handler)
+             , None )
          in
          Keeper_tool_descriptor.keeper_model_names descriptor
          |> List.map (fun model_name ->
@@ -469,9 +510,13 @@ let make_tool_bundle_for_descriptors_with_policy
                ~description:descriptor.description
                ~input_schema:descriptor.input_schema
                (fun execution_env input ->
+                 (* The handler is told the projection its result will cross,
+                    asked the same way the bridge asks, so a handler that
+                    pages its output fills what this lane carries inline. *)
                  h
                    ?agent_core_invocation:
                      (Agent_core.Tool.Execution_env.invocation execution_env)
+                   ~result_projection:(model_projection_for_call descriptor ())
                    input)))
       descriptors
   in
@@ -872,6 +917,7 @@ module For_testing = struct
   ;;
 
   let initial_terminal_effect_state = initial_terminal_effect_state
+  let ordinary_on_failed = ordinary_on_failed
 
   let terminal_externalization_failure =
     terminal_externalization_failure

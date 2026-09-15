@@ -28,7 +28,6 @@ let heartbeat keeper : Observer.event =
     ; hb_phase = Some "turn_running"
     ; hb_in_turn = Some true
     ; hb_in_flight_ms = Some 2_189_925.4
-    ; hb_since_progress_ms = None
     ; hb_at = 100.
     }
 

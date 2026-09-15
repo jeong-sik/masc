@@ -1804,8 +1804,11 @@ BUNDLE_TRANSACTION_ACTIVE=0
 # --- committed builtin Skill refresh ----------------------------------------
 # A later package error must not restore an older executable underneath newer
 # instructions. The complete previous package remains in its own backup.
+# Only standard output is captured: init waits for another Skill installation
+# that holds its lock and says so on standard error, which has to reach the
+# terminal while it waits rather than after it ends.
 if [ "$SEED_CONFIG" -eq 1 ]; then
-  if ! init_output="$("$DEST" init --skills-only --base-path "$BASE_PATH" 2>&1)"; then
+  if ! init_output="$("$DEST" init --skills-only --base-path "$BASE_PATH")"; then
     die "binary/dashboard committed; builtin Skill refresh failed: $init_output"
   fi
   log "$init_output"

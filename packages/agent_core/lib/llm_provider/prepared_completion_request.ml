@@ -327,15 +327,7 @@ let attach_measurement
    limit failure is decidable before any measurement round-trip. *)
 let resolve_context_limit prepared =
   let config = prepared.request.config in
-  let max_context =
-    match config.max_context with
-    | Some _ as explicit -> explicit
-    | None ->
-      Option.bind
-        (Provider_config.capabilities_for_config_model config)
-        (fun capabilities -> capabilities.Capabilities.max_context_tokens)
-  in
-  match max_context with
+  match Provider_config.context_window config with
   | None -> Error (Context_limit_unknown { model_id = config.model_id })
   | Some max_context_tokens when max_context_tokens <= 0 ->
     Error (Invalid_context_limit { model_id = config.model_id; max_context_tokens })

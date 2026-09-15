@@ -32,7 +32,10 @@ let make_keeper_tool_handler_with_authority
       ?on_failed
       ?prepare_input
       ()
-  : ?agent_core_invocation:Agent_core.Tool_contract.Invocation.t -> Yojson.Safe.t -> Tool_result.result
+  : ?agent_core_invocation:Agent_core.Tool_contract.Invocation.t
+    -> ?result_projection:Tool_output.model_projection
+    -> Yojson.Safe.t
+    -> Tool_result.result
   =
   let input_schema =
     match descriptor with
@@ -115,7 +118,7 @@ let make_keeper_tool_handler_with_authority
     );
     result
   in
-  fun ?agent_core_invocation raw_input ->
+  fun ?agent_core_invocation ?result_projection raw_input ->
     let invocation_fields = agent_core_invocation_fields agent_core_invocation in
     let handle_validation_error ~input validation_result =
       let validation_result =
@@ -236,6 +239,7 @@ let make_keeper_tool_handler_with_authority
                 ?gate_context
                 ?gate_grant
                 ?agent_core_invocation
+                ?result_projection
                 ~input
                 ()
             in

@@ -240,6 +240,10 @@ type cancellation_reason_read =
           record kept a copy, or a request that is not a stop. *)
   | Cancellation_reason_unreadable of string
 
+val cancellation_reason_of_output : Yojson.Safe.t -> string option
+(** The same answer read from a request's [output] object alone, for a reader
+    that already holds one. *)
+
 val cancellation_reason_of_request_json : Yojson.Safe.t -> string option
 
 val read_cancellation_reason :

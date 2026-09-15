@@ -97,7 +97,7 @@ describe('isKeeperOffline', () => {
   it('health=offline ⇒ offline', () => {
     expect(isKeeperOffline({ diagnostic: { health_state: 'offline' } })).toBe(true)
   })
-  it.each(['stale', 'degraded', 'zombie', 'idle', 'healthy'])(
+  it.each(['idle', 'healthy'])(
     'health=%s 는 조용해진 것이지 멈춘 것이 아니다',
     (health_state) => {
       expect(isKeeperOffline({ diagnostic: { health_state } })).toBe(false)
@@ -147,15 +147,14 @@ describe('running 판정은 phase 와 health 로만 한다', () => {
     },
   )
 
-  // phase 가 없는 스냅샷에서는 health 가 답한다. 하트비트가 늦은(stale) 키퍼도
-  // 아직 돌고 있으므로 종료를 걸 수 있어야 한다.
-  it.each(['healthy', 'idle', 'stale', 'degraded'])('phase 없이 health=%s 면 running', (health_state) => {
+  // phase 가 없는 스냅샷에서는 health 가 답한다.
+  it.each(['healthy', 'idle'])('phase 없이 health=%s 면 running', (health_state) => {
     expect(isKeeperRunningExcludingRestarting(
       k({ phase: null, diagnostic: { health_state } } as Partial<Keeper>),
     )).toBe(true)
   })
 
-  it.each(['offline', 'zombie'])('phase 없이 health=%s 면 running 이 아니다', (health_state) => {
+  it.each(['offline'])('phase 없이 health=%s 면 running 이 아니다', (health_state) => {
     expect(isKeeperRunningExcludingRestarting(
       k({ phase: null, diagnostic: { health_state } } as Partial<Keeper>),
     )).toBe(false)

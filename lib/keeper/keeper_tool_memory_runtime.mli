@@ -60,6 +60,12 @@ val keeper_memory_write_with_outcome
     Memory OS snapshot. The write stays inside MASC and never enters the
     external-effect Gate or approval replay path. *)
 
+(** The two stores an explicit memory write reaches: the ordinary current
+    Memory OS snapshot, or the source-bound store a [source_path] selects. *)
+type fact_store =
+  | Ordinary_current
+  | Source_bound_current
+
 (** Result of validating a [keeper_memory_write] call's args. Exposed
     so tests can pin the error_kind taxonomy without constructing a
     [Workspace.config]. *)
@@ -82,7 +88,9 @@ type memory_write_error_kind =
       (** A source-bound claim already names its file; it cannot also name a
           Board post. *)
   | Unsupported_derivation
-  | Persistence_failed
+  | Persistence_failed of fact_store
+      (** The store did not answer; which store decides what a repeat write
+          does. *)
   | Commit_receipt_inconsistent
   | No_memory_write_error
 
@@ -91,9 +99,9 @@ val memory_write_error_kind_to_string : memory_write_error_kind -> string
 val memory_write_error_effect_disposition
   :  memory_write_error_kind
   -> Tool_result.failure_effect_disposition
-(** What a failed write with this kind committed. A failure's typed
-    disposition and the [effect_disposition] and [what_committed] fields of its
-    payload all come from this, so no failure site states its own. *)
+(** What a failed write with this kind committed. The same match on the kind
+    also picks the payload's [what_committed] sentence, so no failure site
+    states either. *)
 
 type memory_write_validation =
   | Memory_write_ok of

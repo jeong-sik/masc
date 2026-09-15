@@ -106,14 +106,51 @@ let detect_idle_with_pending ~(now : float)
     ]
   else []
 
+(** Tasks whose only exit belongs to the operator, as
+    {!Operator_task_attention} projected them. Not detected here: answering
+    "can anyone still move this" needs the Keeper registry and the meta store,
+    which this module cannot read and which the projection resolves the same
+    way the rejection delivery does. Asking a second way here would let the
+    dashboard and the delivery disagree about the same agent.
+
+    Severity by who is blocked and on what. A stop waiting for a signature and
+    work held by nobody are both the operator's to end, so both are [Critical];
+    a Keeper record that does not decode is a repair, and the task moves again
+    once it does, so it is [Warning]. *)
+let detect_operator_tasks (items : Operator_task_attention.item list)
+    : attention_item list =
+  List.map
+    (fun item ->
+       let severity =
+         match item with
+         | Operator_task_attention.Cancel_claim _
+         | Operator_task_attention.Held_without_actor _ -> Critical
+         | Operator_task_attention.Producer_record_unreadable _ -> Warning
+       in
+       let category =
+         match item with
+         | Operator_task_attention.Cancel_claim _ -> "cancel_claim"
+         | Operator_task_attention.Held_without_actor _ -> "held_without_actor"
+         | Operator_task_attention.Producer_record_unreadable _ ->
+           "producer_record_unreadable"
+       in
+       { severity
+       ; category
+       ; summary = Operator_task_attention.summary item
+       ; suggested_tool = Operator_task_attention.next_step item
+       })
+    items
+
 (* ===== Main Collection ===== *)
 
 (** Collect all attention items, sorted by severity (critical first). *)
-let collect ~(now : float) (snapshots : Dashboard_labels.workspace_snapshot list)
+let collect ~(now : float) ~(operator_tasks : Operator_task_attention.item list)
+    (snapshots : Dashboard_labels.workspace_snapshot list)
     : attention_item list =
   let items =
     detect_stuck_agents ~now snapshots
     @ detect_idle_with_pending ~now snapshots
+    @ detect_operator_tasks operator_tasks
   in
   List.sort
     (fun a b -> compare (severity_order a.severity) (severity_order b.severity))

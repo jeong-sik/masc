@@ -490,18 +490,14 @@ let save_bytes_durable_atomic_with
   |> check_durable_write_completion
 ;;
 
-let save_json_durable_atomic_from_with
+let save_encoded_durable_atomic_from_with
       ~before_stage
       ?before_directory_fsync
       ?ownership_root
       ?temp_dir
-      ?(pretty = true)
       path
-      json_source
+      encoded_source
   =
-  let encode json =
-    if pretty then Yojson.Safe.pretty_to_string json else Yojson.Safe.to_string json
-  in
   protect_durable_write (fun () ->
     let bytes =
       run_durable_write_stage
@@ -514,8 +510,7 @@ let save_json_durable_atomic_from_with
               exception re-raises here instead of being conflated with a
               pool failure and re-run inline; [run_durable_write_stage]
               turns it into a typed [Payload_encode] failure. *)
-           Domain_pool_ref.submit_cpu_or_inline (fun () ->
-             encode (json_source ())))
+           Domain_pool_ref.submit_cpu_or_inline encoded_source)
     in
     save_bytes_durable_atomic_core
       ~before_stage
@@ -532,18 +527,18 @@ let save_json_durable_atomic_with
       ?before_directory_fsync
       ?ownership_root
       ?temp_dir
-      ?pretty
+      ?(pretty = true)
       path
       json
   =
-  save_json_durable_atomic_from_with
+  save_encoded_durable_atomic_from_with
     ~before_stage
     ?before_directory_fsync
     ?ownership_root
     ?temp_dir
-    ?pretty
     path
-    (fun () -> json)
+    (fun () ->
+       if pretty then Yojson.Safe.pretty_to_string json else Yojson.Safe.to_string json)
 ;;
 
 let save_bytes_durable_atomic ?ownership_root ?temp_dir path bytes =
@@ -581,14 +576,13 @@ let save_json_durable_atomic ?ownership_root ?temp_dir ?pretty path json =
     json
 ;;
 
-let save_json_durable_atomic_from ?ownership_root ?temp_dir ?pretty path json_source =
-  save_json_durable_atomic_from_with
+let save_encoded_durable_atomic_from ?ownership_root ?temp_dir path encoded_source =
+  save_encoded_durable_atomic_from_with
     ~before_stage:(fun _ -> ())
     ?ownership_root
     ?temp_dir
-    ?pretty
     path
-    json_source
+    encoded_source
 ;;
 
 type durable_remove_stage =
@@ -721,25 +715,6 @@ module For_testing = struct
       ?pretty
       path
       json
-  ;;
-
-  let save_json_durable_atomic_from
-        ~before_stage
-        ?before_directory_fsync
-        ?ownership_root
-        ?temp_dir
-        ?pretty
-        path
-        json_source
-    =
-    save_json_durable_atomic_from_with
-      ~before_stage
-      ?before_directory_fsync
-      ?ownership_root
-      ?temp_dir
-      ?pretty
-      path
-      json_source
   ;;
 
   let remove_file_durable ~before_stage ?ownership_root path =

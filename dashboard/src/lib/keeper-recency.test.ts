@@ -14,16 +14,13 @@ describe('keeperRecencyMs', () => {
     const keeper = k('a', {
       last_activity_at: '2026-07-01T11:00:00.000Z',
       updated_at: '2026-06-01T00:00:00.000Z',
-      last_heartbeat: '2026-05-01T00:00:00.000Z',
     })
     expect(keeperRecencyMs(keeper, NOW)).toBe(Date.parse('2026-07-01T11:00:00.000Z'))
   })
 
-  it('falls back through updated_at → last_heartbeat → created_at', () => {
+  it('falls back through updated_at → created_at', () => {
     expect(keeperRecencyMs(k('a', { updated_at: '2026-06-01T00:00:00.000Z' }), NOW))
       .toBe(Date.parse('2026-06-01T00:00:00.000Z'))
-    expect(keeperRecencyMs(k('a', { last_heartbeat: '2026-05-01T00:00:00.000Z' }), NOW))
-      .toBe(Date.parse('2026-05-01T00:00:00.000Z'))
     expect(keeperRecencyMs(k('a', { created_at: '2026-04-01T00:00:00.000Z' }), NOW))
       .toBe(Date.parse('2026-04-01T00:00:00.000Z'))
   })

@@ -93,13 +93,6 @@ val keeper_diagnostic_json :
   now_ts:float ->
   Yojson.Safe.t
 
-val augment_keeper_diagnostic_json :
-  keepalive_running:bool ->
-  keepalive_started_at:float option ->
-  now_ts:float ->
-  Yojson.Safe.t ->
-  Yojson.Safe.t
-
 (** Keeper display status derived from keeper health. Closed so consumers that
     classify it match exhaustively. "paused" is an operator override applied
     above this layer, not a member of this domain. *)

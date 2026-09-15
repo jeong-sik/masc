@@ -794,11 +794,6 @@ let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock
                  schema.Masc_domain.name)
           | Some tool ->
             let outcome = Tool.execute tool args in
-            if String.equal schema.Masc_domain.name "masc_heartbeat_start"
-            then
-              Heartbeat.list ()
-              |> List.iter (fun (hb : Heartbeat.t) ->
-                   ignore (Heartbeat.stop hb.id));
             evaluate_expectation
               ~name:schema.Masc_domain.name
               case.expectation

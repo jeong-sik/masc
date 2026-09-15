@@ -45,7 +45,6 @@
   mention
   workspace_resilience
   workspace_goal_index
-  heartbeat
   nickname)
  (libraries
   masc_types

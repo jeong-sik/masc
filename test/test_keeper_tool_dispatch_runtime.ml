@@ -4377,7 +4377,7 @@ let test_invalid_surface_post_input_stays_correction_capable () =
    snapshot does not hold is refused before the store, and a store that cannot
    take the next write and retraction leaves their commit unknown. Every
    failure comes back to the model naming what committed, and none of them
-   ends the turn: doing the call again adds no second copy. *)
+   ends the turn. *)
 let test_memory_calls_in_a_mixed_batch_answer_the_model_whatever_they_committed () =
   with_exec_fixture
     "memory_calls_mixed_batch"
@@ -4454,10 +4454,12 @@ let test_memory_calls_in_a_mixed_batch_answer_the_model_whatever_they_committed 
              (result : Agent_core.Agent_tools.tool_execution_result) =
          check bool (label ^ " is an error result") true
            (Agent_core.Types.tool_result_outcome_is_error result.outcome);
-         check bool (label ^ " names what committed") true
-           (String_util.contains_substring
-              result.content
-              (Tool_result.failure_effect_disposition_to_string disposition))
+         let payload = parse_json result.content in
+         check string (label ^ " names what committed")
+           (Tool_result.failure_effect_disposition_to_string disposition)
+           Yojson.Safe.Util.(member "effect_disposition" payload |> to_string);
+         check bool (label ^ " says what committed") false
+           (String.equal "" Yojson.Safe.Util.(member "what_committed" payload |> to_string))
        in
        let lane_status id = id, "keeper_lane_status", `Assoc [] in
        let keepers_dir =
@@ -4521,6 +4523,34 @@ let test_memory_calls_in_a_mixed_batch_answer_the_model_whatever_they_committed 
        failed_naming Tool_result.Effect_outcome_unknown "the retraction the store failed"
          (second "retract-unknown");
        succeeded "lane status beside failed memory calls" (second "lane-second"))
+;;
+
+(* The one failure a memory call used to end the turn on was a proven
+   post-effect one. No store here produces it, so the bundle's own rule is
+   checked for every disposition, beside a file write that still ends the
+   turn once its change is applied. *)
+let test_a_failed_memory_call_never_ends_the_turn () =
+  let ends_turn = Masc.Keeper_tools_agent_core_bundle.For_testing.ordinary_failure_ends_turn in
+  List.iter
+    (fun (label, handler) ->
+       List.iter
+         (fun disposition ->
+            check bool
+              (Printf.sprintf
+                 "a %s failure with %s keeps the turn"
+                 label
+                 (Tool_result.failure_effect_disposition_to_string disposition))
+              false
+              (ends_turn handler disposition))
+         [ Tool_result.Proven_pre_effect
+         ; Tool_result.Proven_post_effect
+         ; Tool_result.Effect_outcome_unknown
+         ])
+    [ "memory write", KTD.Tool_memory_write; "memory retract", KTD.Tool_memory_retract ];
+  check bool
+    "an applied file write ends the turn"
+    true
+    (ends_turn KTD.Tool_write_file Tool_result.Proven_post_effect)
 ;;
 
 let with_openai_tool_call_server ?second_response ~tool_name ~tool_input f =
@@ -9186,6 +9216,8 @@ let () =
         test_invalid_surface_post_input_stays_correction_capable;
       test_case "memory calls in a mixed batch answer the model whatever they committed" `Quick
         test_memory_calls_in_a_mixed_batch_answer_the_model_whatever_they_committed;
+      test_case "a failed memory call never ends the turn" `Quick
+        test_a_failed_memory_call_never_ends_the_turn;
       test_case "surface append failure is not terminal completion" `Quick
         test_surface_post_append_failure_does_not_complete_terminal_effect;
       test_case "frozen surface rejects a registered-only tool" `Quick

@@ -1201,10 +1201,10 @@ let test_unwritable_store_is_a_dependency_failure () =
     (string_field "effect_disposition" response)
 ;;
 
-(* No store produces a commit it then does not show, so the kind's own
-   disposition is what keeps that failure from being reported as unknown:
-   it happened after the claim was committed. *)
-let test_an_unconfirmed_commit_is_reported_as_committed () =
+(* A store that commits a revision without the claim in it is past the
+   effect: a revision was written. No store here produces it, so the kind's
+   own disposition is what keeps it from being reported as unknown. *)
+let test_a_commit_that_omits_the_claim_is_after_the_effect () =
   Alcotest.(check bool)
     "commit_receipt_inconsistent is after the effect"
     true
@@ -1573,9 +1573,9 @@ let () =
             `Quick
             test_unwritable_store_is_a_dependency_failure
         ; Alcotest.test_case
-            "an unconfirmed commit is reported as committed"
+            "a commit that omits the claim is after the effect"
             `Quick
-            test_an_unconfirmed_commit_is_reported_as_committed
+            test_a_commit_that_omits_the_claim_is_after_the_effect
         ; Alcotest.test_case
             "input and state failures keep their own classes"
             `Quick

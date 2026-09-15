@@ -335,6 +335,13 @@ let file_identity path =
   | exception Unix.Unix_error _ -> None
 ;;
 
+let file_identity_equal left right =
+  Int.equal left.device right.device
+  && Int.equal left.inode right.inode
+  && Int.equal left.size right.size
+  && Float.equal left.mtime right.mtime
+;;
+
 let run_key (run_ref : Turn_record.raw_trace_run_ref) =
   String.concat
     "\000"
@@ -397,7 +404,8 @@ let turn_of_record ~config ~keeper_name ~execution_rows ~previous ~used
             match before, previous with
             | Some identity, Some table ->
               (match Hashtbl.find_opt table key with
-               | Some remembered when remembered.identity = identity -> Some remembered
+               | Some remembered when file_identity_equal remembered.identity identity ->
+                 Some remembered
                | Some _ | None -> None)
             | Some _, None | None, (Some _ | None) -> None
           in
@@ -429,7 +437,8 @@ let turn_of_record ~config ~keeper_name ~execution_rows ~previous ~used
                     the one still there after it: a rewrite in between would
                     pair the new identity with the old records. *)
                  (match before, file_identity run_ref.path with
-                  | Some identity, Some identity_after when identity = identity_after ->
+                  | Some identity, Some identity_after
+                    when file_identity_equal identity identity_after ->
                     Hashtbl.replace used key { identity; reading }
                   | Some _, Some _ | Some _, None | None, (Some _ | None) -> ());
                  Some reading)

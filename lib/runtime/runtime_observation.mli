@@ -72,13 +72,13 @@ val record_attempt_terminal :
 val runtime_metrics_for_candidates :
   unit ->
   runtime_metrics_capture * Llm_provider.Metrics.t
-(** Builds the [(capture, metrics)] pair the per-call
-    metrics path consumes.  Wires
-    [Llm_metric_bridge.emit_request_latency] and
-    [emit_http_status] into the metrics callbacks so the
-    Otel_metric_store dashboard does not blackhole captured
-    turns (the per-call sink takes precedence over the
-    global [Llm_metric_bridge] when both are wired). *)
+(** Builds the [(capture, metrics)] pair the per-call metrics path consumes.
+    Three callbacks write to [capture]: a request start opens an attempt, a
+    request end closes it with its latency, an error closes it with the
+    message. Two more record the stream's first-chunk and inter-chunk
+    timings. The rest are no-ops, and nothing here reaches a metric store --
+    the capture is read back by {!runtime_observation_with_metrics} and
+    travels as part of the observation. *)
 
 val runtime_observation_with_metrics :
   runtime_id:string ->

@@ -105,7 +105,7 @@ rate-limited failure route; backing off next cycle by 600s (cadence 600s, cap 90
 | route 가 `Capacity_backpressure` (suffix 와 무관) | — | 실패한 경로의 쉼만큼 기다리되 wake 는 잠을 끊는다 (지금과 같음) |
 | deferred suffix 있음 | 걷는 순서의 첫 경로가 쉬지 않음 | 기다리지 않는다. 남은 입력이 있으면 곧바로 그 suffix 로 턴을 잇는다 |
 | deferred suffix 있음 | 첫 경로가 쉼 | 다음 턴의 첫 경로가 쉬지 않게 되는 가장 이른 시각까지 기다린다 (3.3 끝) |
-| suffix 없음, route 가 `Rate_limited`·`Hard_quota` | 실패한 경로가 쉼 | 그 경로가 풀리는 시각까지 기다린다 |
+| suffix 없음, route 가 `Rate_limited`·`Hard_quota` | 실패한 경로가 쉼 | 실패한 경로가 풀리는 시각과, assignment 를 새로 걸을 때 첫 경로가 쉬지 않게 되는 시각 중 늦은 쪽까지 기다린다 |
 | 그 밖 | — | 지금처럼 cadence |
 
 `Capacity_backpressure` 를 맨 위에 둔 이유: 이 신호는 MASC 자신의 slot·client 용량에서도
@@ -114,6 +114,12 @@ rate-limited failure route; backing off next cycle by 600s (cadence 600s, cap 90
 suffix 가 없다는 것은 이 입력에 쓸 수 있는 경로를 이 턴이 이미 다 썼다는 뜻이다
 (마지막 후보였거나, 반복 생성으로 거부된 모델만 남았다). 그래서 이 경우는 실패한
 경로의 쉼을 기다린다. 같은 입력을 방금 실패한 경로들에 곧바로 다시 보내지 않는다.
+대기가 끝나면 다음 턴은 assignment 를 머리부터 새로 걷는다. 그 머리가 아직 쉬면 대기를
+그 머리가 풀릴 때까지 늘린다. 예: lane [A; B] 에서 A 가 600초 힌트로 쉬고 B 가 힌트 없는
+429 로 끝나면, B 의 60초 뒤 새 walk 는 여전히 A 부터 부르므로 A 가 풀릴 때까지 기다린다.
+
+heartbeat 와 채팅 lane 은 이 표 하나(`Keeper_turn_driver.next_dispatch_after_failure`)를
+같이 읽는다. 같은 실패에 두 lane 이 다르게 답하지 않는다.
 
 ### 3.2 상태 모양
 
@@ -132,8 +138,15 @@ type after_failure =
   | Wait_for_path_release of
       { release_at : float
       ; wake_policy : Keeper_keepalive_signal.wake_policy
-      ; resting_runtime_id : string
+      ; waiting_on : string  (* 풀리기를 기다리는 runtime 또는 assignment id *)
       }
+
+(* 두 lane 이 같이 읽는 결정 — Keeper_turn_driver *)
+type failure_wait = Capacity_release | Path_release
+
+type next_dispatch =
+  | Dispatch_now of { runtime_id : string }
+  | Wait_until of { release_at : float; waiting_on : string; wait : failure_wait }
 ```
 
 `keepalive_turn_outcome.provider_backoff : provider_backoff option` 을
@@ -176,21 +189,22 @@ client 용량에서도 오고 경로별 저장소가 없으므로 route 로만 �
 - 뒤의 경로가 일찍 풀려도 순서가 안 풀리면 대기를 줄이지 않는다. 줄이면 다음 턴이 아직
   쉬는 첫 경로를 부른다.
 
-suffix 가 없으면 실패한 경로의 쉼만 본다. 이 경우 다음 턴은 lane 머리부터 새로 걷는데,
-그 순서 전체를 따지는 일은 6절(Phase 2)로 넘긴다.
+suffix 가 없으면 같은 규칙을 assignment 의 새 walk 순서(sticky 선호 → quota·backpressure
+강등)에 적용하고, 실패한 경로의 쉼과 비교해 늦은 쪽을 쓴다.
 
 ### 3.4 chat lane
 
-`Keeper_direct_runtime_continuation.retry_not_before` 는 같은 규칙을 쓴다. deferred lane
-의 다음 경로가 쉬지 않으면 곧바로, 쉬면 그 경로가 풀리는 시각까지 미룬다. 지금은 실패한
-경로의 쉼을 기다린다.
+`Keeper_direct_runtime_continuation.retry_not_before` 는 3.1 의 같은 결정을 읽는다.
+suffix 의 walk 머리가 쉬지 않으면 곧바로 claim 할 수 있고, 머리가 쉬거나 capacity
+backpressure 면 그 시각까지 미룬다. 지금은 실패한 경로의 쉼을 기다린다.
 
 ### 3.5 구현 범위
 
 - `lib/keeper_runtime/keeper_runtime_failure_route.{ml,mli}`: `retry_backoff_sec` 를
   `path_rest_sec ~cap_sec ~retry_class ~retry_after_hint` 로 바꾼다. cadence 인자는 없앤다.
-- `lib/keeper/keeper_turn_driver.{ml,mli}`: 3.3 표를 계산하는 `path_rest` 와
-  deferred suffix 의 첫 쉬지 않는 경로 또는 가장 이른 풀림 시각을 주는 함수.
+- `lib/keeper/keeper_turn_driver.{ml,mli}`: 3.3 표를 계산하는 `path_rest`, walk 머리 판단
+  (`deferred_lane_rest`, `assignment_walk_rest`), 두 lane 이 같이 읽는
+  `next_dispatch_after_failure`.
 - `lib/keeper/keeper_heartbeat_loop.{ml,mli}`: `after_failure` 와 결정 함수, sleep 분기.
   `provider_backoff` 와 `failure_route_rate_limited_backoff_hint` 는 지운다. lib 안에서
   아무도 부르지 않고 테스트만 부르던 `next_keepalive_sleep_duration_sec` 도 지운다.
@@ -235,13 +249,14 @@ provider 가 주간 한도를 429 로 보내면(#34653 의 ollama cloud 108건) 
 
 ## 6. Phase 2 (이번 범위 밖)
 
-Phase 1 뒤에도 P 가 안 닿는 곳이 둘 있다. 둘 다 지금도 있는 동작이다.
+Phase 1 뒤에도 P 가 안 닿는 곳이 셋 있다. 모두 지금도 있는 동작이다.
 
 - lane walk 는 쉬는 후보를 **뒤로 밀 뿐 부른다**(RFC-0433 의 ordering-only 결정).
   이어간 턴의 첫 경로가 실패하면 walk 가 쉬는 후보까지 갈 수 있다.
 - Keeper 가 쉬지 않을 때 wake 로 시작한 턴도 첫 경로가 쉬면 그 경로를 부른다.
-- suffix 가 없는 실패 뒤의 대기는 실패한 경로의 쉼만 본다. lane 의 다른 경로가 더 오래 쉬면
-  대기가 끝난 뒤 새 walk 가 그 경로를 부를 수 있다.
+- 대기가 끝난 순간과 턴이 실제로 뜨는 순간 사이에 다른 keeper 가 같은 후보에 새 쉼을 적으면
+  (후보 관측은 프로세스 전역이다), 다음 턴은 다시 판단하지 않고 그 후보를 부른다. 남은 입력
+  없이 `Continue_on_deferred_lane` 이 나와 cadence 를 잔 뒤도 같다.
 
 Phase 2 는 walk 가 쉬는 후보를 건너뛰고, 모두 쉬면 호출 없이 "모든 경로가 쉼" 을 typed
 terminal 로 끝내게 한다. RFC-0433 의 "새 fail-closed 경로를 만들지 않는다" 와 부딪히므로
@@ -258,11 +273,12 @@ terminal 로 끝내게 한다. RFC-0433 의 "새 fail-closed 경로를 만들지
 
 - 결정 함수 테스트: 첫 경로가 쉬지 않는 suffix → 이어가기, 모두 쉬는 suffix → 순서가
   풀리는 가장 이른 시각, 순서가 안 풀리는 뒤 경로는 대기를 줄이지 않음, quota 리셋 시각,
-  suffix 없는 rate limit → 실패 경로의 쉼, 힌트 5초 → 5초(cadence 무관), capacity →
-  wake 가 끊는 대기, 그 밖 → cadence.
+  suffix 없는 rate limit → 실패 경로의 쉼, 새 walk 머리가 쉬면 그 머리까지, 힌트 5초 →
+  5초(cadence 무관), capacity → wake 가 끊는 대기, 그 밖 → cadence.
+- 채팅 lane: 쉬지 않는 머리 → 곧바로 claim, 쉬는 머리 → 풀릴 때까지, capacity → 그 쉼.
 - #34653 회귀: 유일한 경로가 쉬는 동안 결정은 `Serve_wakeup_after_duration` 대기이고,
   `interruptible_sleep` 은 그 대기 중 wakeup 을 끝까지 미룬다(기존 테스트 유지).
-- 배포 뒤 실측: `rate-limited failure route` 대신 새 로그 줄의 `resting_runtime_id` 와
+- 배포 뒤 실측: `rate-limited failure route` 대신 새 로그 줄의 `waiting_on` 과
   다음 턴의 runtime 을 짝지어, 다른 경로가 있었는데 기다린 건수가 0 인지 본다.
 
 ## 9. 확인 못 한 것

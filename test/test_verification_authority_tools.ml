@@ -101,6 +101,7 @@ exit 0
        ; signal = None
        ; timed_out = false
        ; shim_error = None
+       ; observed_syscalls = []
        })
 ;;
 
@@ -834,7 +835,8 @@ let test_keeper_endpoint_read_preserves_png_bytes () =
       "test/fixtures/verifier-image-lookup.png" in
   let bytes = In_channel.with_open_bin fixture In_channel.input_all in
   let trailer = Exec_ssh_protocol.render_trailer
-      { v=Exec_ssh_protocol.newest; exit=Some 0; signal=None; timed_out=false; shim_error=None } in
+      { v=Exec_ssh_protocol.newest; exit=Some 0; signal=None; timed_out=false; shim_error=None
+      ; observed_syscalls = [] } in
   let ssh_script = Printf.sprintf
       "#!/bin/sh\ncat >/dev/null 2>/dev/null &\ncat %s\nprintf '%%s' %s >&2\nexit 0\n"
       (Filename.quote fixture) (Filename.quote trailer) in

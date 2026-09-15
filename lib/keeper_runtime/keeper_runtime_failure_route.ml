@@ -17,6 +17,7 @@ type rotate_class =
   | No_progress_empty
   | No_progress_thinking_only
   | No_progress_truncated
+  | Generation_repeated
   | Attempt_rejected
   | Refusal_body_not_received
 
@@ -234,6 +235,12 @@ let route_of_provider_error ~err (p : Llm_provider.Error.provider_error) =
   | Llm_provider.Error.AuthorizationError _ ->
     rotate Auth_failed
   | Llm_provider.Error.NotFound _ -> rotate Model_unavailable
+  (* The model repeated itself and the stream was ended for it. The bytes
+     were intact, so this is not a provider integration defect: the lane
+     rotates to a different model. Crash accounting is class-blind (#32105)
+     and unchanged by this route; what changes is the class label and that
+     the model is known to have answered ([response_observed]). *)
+  | Llm_provider.Error.RepeatingGeneration _ -> rotate Generation_repeated
   | Llm_provider.Error.MissingApiKey _ -> exhaust_failure Config_mismatch
   | Llm_provider.Error.InvalidConfig _ -> exhaust_failure Config_mismatch
   | Llm_provider.Error.InvalidRequest _ -> exhaust_failure Deterministic_request
@@ -344,6 +351,7 @@ let rotate_class_label = function
   | No_progress_truncated -> "no_progress_truncated"
   | Attempt_rejected -> "attempt_rejected"
   | Refusal_body_not_received -> "refusal_body_not_received"
+  | Generation_repeated -> "generation_repeated"
 
 let terminal_class_label = function
   | Deterministic_request -> "deterministic_request"
@@ -407,6 +415,9 @@ let response_observed = function
      | Attempt_rejected
      (* the candidate's own policy refused the request before the wire
         (#34475): no generation. *)
+     | Refusal_body_not_received
+     (* the provider refused the request; the body naming why never
+        arrived, and a refusal is not an answer. *)
      | Runtime_exhausted ->
        (* a whole-runtime exhaustion wrapper: it carries no answer. *)
        false
@@ -416,9 +427,12 @@ let response_observed = function
      | No_progress_thinking_only
      (* the provider answered with thinking only; rejected by the accept
         gate. *)
-     | No_progress_truncated ->
-       (* the provider answered and stopped at MaxTokens; rejected by the
-          accept gate. *)
+     | No_progress_truncated
+     (* the provider answered and stopped at MaxTokens; rejected by the
+        accept gate. *)
+     | Generation_repeated ->
+       (* the model answered and kept repeating one unit; the client ended
+          the stream, so the input was seen. *)
        true)
   | Exhausted_visible_alive { terminal; provenance = _; detail = _ } ->
     (match terminal with

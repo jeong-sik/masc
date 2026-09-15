@@ -466,6 +466,10 @@ type reasoning_effort_request_rejection =
       ; model_id : string
       ; accepted : reasoning_effort list option
       }
+  | Reasoning_undeclared_on_auto_enabling_wire of
+      { provider_kind : provider_kind
+      ; model_id : string
+      }
 
 val reasoning_effort_request_rejection_to_message
   :  reasoning_effort_request_rejection

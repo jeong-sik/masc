@@ -60,6 +60,12 @@ type rotate_class =
           ({!Llm_provider.Retry.Refusal_body_not_received}); the lane moves
           to its next candidate, the refusal's reason being unread rather
           than determinate *)
+  | Generation_repeated
+      (** the model's generation repeated one unit past the threshold and the
+          client ended the stream ([Llm_provider.Error.RepeatingGeneration]).
+          The connection delivered every byte, so this is neither a wire
+          fault nor a provider integration defect: the lane rotates, and the
+          driver leaves the model, not only the provider, behind *)
   | Attempt_rejected
       (** the request was refused before the wire by this candidate's own
           policy (a reasoning-effort ladder, an explicit disable) rather than

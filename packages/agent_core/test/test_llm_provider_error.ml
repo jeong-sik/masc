@@ -537,6 +537,33 @@ let test_provider_failure_remaining_variants_mapping () =
      check string "reported provider" "glm" provider;
      check string "reported detail" "slow down" detail
    | _ -> fail "expected typed ProviderReportedError");
+  (* The model repeating itself is not a wire fault: it crosses the boundary
+     as its own variant, names the model's failure in prose, and is never
+     retried on the same model. *)
+  let repeated =
+    provider_failure
+      ~provider:"ollama_cloud"
+      (Http_client.Repeating_generation
+         { shape = Types.Repeated_reasoning_cycle; occurrences = 3; unit_bytes = 749 })
+      "reasoning repeated one 749-byte unit 3 times verbatim"
+  in
+  (match repeated with
+   | Error.RepeatingGeneration { provider; shape; occurrences; unit_bytes; detail } ->
+     check string "repeat provider" "ollama_cloud" provider;
+     check string "repeat shape" "repeated_reasoning_cycle" (Types.repeating_shape_to_string shape);
+     check int "repeat occurrences" 3 occurrences;
+     check int "repeat unit bytes" 749 unit_bytes;
+     check string "repeat detail" "reasoning repeated one 749-byte unit 3 times verbatim" detail;
+     let rendered = Error.to_string repeated in
+     check bool "the rendering says the model repeated and asks for a different model" true
+       (String.length rendered > 0
+        && (let has needle =
+              let n = String.length needle and h = String.length rendered in
+              let rec go i = i + n <= h && (String.sub rendered i n = needle || go (i + 1)) in
+              go 0 in
+            has "model repeated itself" && has "different model"));
+     check bool "a repeat is not retried on the same model" false (Error.is_retryable repeated)
+   | _ -> fail "expected typed RepeatingGeneration");
   let request_body_limit_message =
     "serialized request body is 2048 bytes, target limit is 1024 bytes"
   in

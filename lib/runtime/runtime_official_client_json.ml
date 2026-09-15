@@ -9,13 +9,22 @@ module Make (E : Error) = struct
   let ( let* ) result f = Result.bind result f
   exception Idle_timeout of float
 
+  (* A wire line that arrived as the idle window passed is the line, not an
+     idle timeout: [Eio.Time.with_timeout] keeps whichever arm finished
+     first and would have ended the turn on a line already in hand. *)
   let with_optional_timeout clock timeout_s f =
     match timeout_s with
     | None -> f ()
     | Some seconds ->
-      (match Eio.Time.with_timeout clock seconds (fun () -> Ok (f ())) with
-       | Ok value -> value
-       | Error `Timeout -> raise (Idle_timeout seconds))
+      (match
+         Watched_work.run
+           (fun () -> `Finished (f ()))
+           ~watcher:(fun () ->
+             Eio.Time.sleep clock seconds;
+             `Expired)
+       with
+       | `Finished value -> value
+       | `Expired -> raise (Idle_timeout seconds))
   ;;
 
   let rec validate_unique_object_keys ~stage ~path = function

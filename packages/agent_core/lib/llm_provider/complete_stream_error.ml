@@ -203,8 +203,8 @@ let http_error_of_stream_error
   | Types.Stream_repeating { repeated; occurrences; bytes_seen; shape } ->
     Http_client.ProviderFailure
       { kind =
-          Http_client.Provider_wire_error
-            { format = wire_format; kind = Http_client.Repeating_generation }
+          Http_client.Repeating_generation
+            { shape; occurrences; unit_bytes = String.length repeated }
       ; message = Types.repeating_generation_message ~repeated ~occurrences ~bytes_seen shape
       }
   | Types.Stream_unknown_event { event_type; _ } ->

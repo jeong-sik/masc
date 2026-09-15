@@ -20,6 +20,7 @@ type hook_accumulator = Keeper_run_tools_hook_accumulator.hook_accumulator =
   { mutable meta : Keeper_meta_contract.keeper_meta
   ; mutable tool_calls : tool_call_detail list
   ; historical_tool_calls : tool_call_detail list
+  ; history_pairs_at_setup : int option
   ; mutable current_turn : int
   ; mutable tool_surface : tool_surface_metrics
   ; mutable requested_tool_names : string list

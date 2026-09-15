@@ -1,16 +1,15 @@
 (** The phase before the first body read is bounded.
 
-    A server that accepts the request and never answers held
-    [Http_client.with_post_stream] for as long as the socket stayed open
-    unless the provider declared a connect budget: the first-event budget is
-    armed on the reader, and such a server never lets the caller reach the
-    reader. A server that answers with a refusing status line and no body
-    held it the same way, past the headers. These cases run the real client
-    against loopback listeners that stall at one of those points, and read
-    the elapsed time off the clock, so a hang is a failure at
+    [Http_client.with_post_stream] bounds the connection, the request and the
+    wait for the status line by the narrower of the connect and first-event
+    budgets, and reads a refusal's body under what that window has left: a
+    server that accepts the request and never answers, or answers with a
+    refusing status line and no body, is ended by the window. These cases run
+    the real client against loopback listeners that stall at one of those
+    points, and read the elapsed time off the clock, so a hang is a failure at
     [outer_budget_s] and not a wait. The last group crosses the headers: the
-    reader arms what the pre-header phase left of the first-event budget,
-    not a second full one. *)
+    reader arms what the pre-header phase left of the first-event budget, not
+    a second full one. *)
 
 module Http_client = Llm_provider.Http_client
 

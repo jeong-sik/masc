@@ -500,6 +500,10 @@ type reasoning_effort_request_rejection =
       ; model_id : string
       ; accepted : reasoning_effort list option
       }
+  | Reasoning_undeclared_on_auto_enabling_wire of
+      { provider_kind : provider_kind
+      ; model_id : string
+      }
 
 let reasoning_effort_list_to_message values =
   values |> List.map reasoning_effort_to_string |> String.concat "/"
@@ -542,6 +546,16 @@ let reasoning_effort_request_rejection_to_message = function
            (reasoning_effort_list_to_message accepted)
        | None -> "not declared in any accepted set")
       (reasoning_effort_to_string Reasoning_effort.None_)
+  | Reasoning_undeclared_on_auto_enabling_wire { provider_kind; model_id } ->
+    Printf.sprintf
+      "%s model %S declares no reasoning effort, and this wire turns reasoning \
+       on when the request carries none: the model would reason on every turn \
+       while nothing in the configuration says so. Declare a reasoning effort \
+       for this model (%S to keep it off), or bind it to a wire whose default \
+       is the provider's own"
+      (string_of_provider_kind provider_kind)
+      model_id
+      (reasoning_effort_to_string Reasoning_effort.None_)
 ;;
 
 (* The effort the request will carry, once the thinking toggle is applied.
@@ -566,7 +580,21 @@ let wire_reasoning_effort (config : t) ~(caps : Capabilities.capabilities) =
 let validate_reasoning_effort_request_typed (config : t) =
   let caps = request_capabilities_for_config config in
   match wire_reasoning_effort config ~caps with
-  | None -> Ok ()
+  | None ->
+    (* A request with no effort at all is admitted without a question wherever
+       absence leaves the decision to the provider. On a wire that enables
+       reasoning by itself it cannot be: the turn reasons, the configuration
+       says nothing about it, and the operator reading that configuration has
+       no way to tell reasoning-on from undeclared. Found 2026-09-15 while
+       reading why one ollama /v1 lane reasoned on every turn; eight model rows
+       on that wire carried no effort at the time. *)
+    (match caps.Capabilities.uncontrolled_reasoning, caps.Capabilities.supports_reasoning with
+     | Capabilities.Provider_enables_reasoning, true ->
+       Error
+         (Reasoning_undeclared_on_auto_enabling_wire
+            { provider_kind = config.kind; model_id = config.model_id })
+     | Capabilities.Provider_enables_reasoning, false
+     | Capabilities.Provider_default_reasoning, (true | false) -> Ok ())
   | Some effort ->
     let explicit_disable_on_categorical_wire =
       match caps.Capabilities.thinking_control_format, config.enable_thinking with

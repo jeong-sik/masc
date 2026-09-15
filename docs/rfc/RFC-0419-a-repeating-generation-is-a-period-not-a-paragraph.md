@@ -149,6 +149,39 @@ times" 로 바뀐다. 보이는 곳은 keeper 로그와 TUI 의 turn terminal �
 - 샘플러 파라미터. 보내지 않던 것을 이 RFC 로 보내기 시작하지 않는다.
 - 40바이트, 3회. 두 수를 바꾸는 근거는 이 실측에 없다.
 
+## 9. 감지 뒤 — 반복은 모델의 실패다 (2026-09-15 추가)
+
+감지까지는 이 RFC 대로였는데, 끊긴 뒤가 틀렸다. 반복은 `ProviderWireError
+{ kind = Repeating_generation }` 로 전송선 오류 봉투에 실렸고, 그 결과 둘이 났다.
+
+- 레인 회전이 `ProviderFailure _ -> 다음 후보` 로 종류를 안 보아서, 같은 모델을
+  다른 공급자로 다시 불렀다 (2026-09-14, `ollama_cloud.glm-5.3-flash` →
+  `glm-coding.glm-5.3-flash`). 반복은 모델 습성이라 같은 주사위다.
+- 레인이 소진되면 `Provider_integration`(공급자 통합 결함) 으로 적혔다. 모델의 실패가
+  공급자의 결함으로 기록된 것이다. (크래시 임계치 자체는 #32105 이후 분류를 안 보고
+  모든 턴 실패에 1씩 쌓이므로, 이 분류로 가산 여부가 바뀐 적은 없다.)
+
+지금은 이렇게 간다.
+
+| 층 | 전 | 후 |
+|---|---|---|
+| `Http_client` | `Provider_wire_error { kind = Repeating_generation }` | `provider_failure_kind` 의 자기 생성자 `Repeating_generation { shape; occurrences; unit_bytes }`. wire kind 목록에서 빠진다 |
+| `Llm_provider.Error` | `ProviderWireError` | `RepeatingGeneration { provider; shape; occurrences; unit_bytes; detail }`. `is_retryable = false` |
+| `Keeper_runtime_failure_route` | `Exhausted_visible_alive Provider_integration` | `Rotate_now Generation_repeated`. `response_observed = true` — 모델은 입력을 보고 답했으므로, 이 턴이 들고 있던 HITL 승인 근거는 다음 턴에 다시 배달하지 않는다(#32956 의 MaxTokens 24회 재배달과 같은 이유). 크래시 임계치 가산은 분류를 안 보므로(#32105) 변하지 않는다 |
+| `Keeper_turn_driver` | 다음 후보 | 반복한 후보의 **served name**(`model.api_name`, 프로덕션은 frozen snapshot 에서 읽음)을 기억하고, 같은 이름의 뒤 후보는 dispatch 전에 `Attempt_rejected` 로 거절. 다음 사이클로 넘기는 힌트(`deferred_runtime_lane`)에서도 같은 모델을 뺀다. 마지막까지 같은 모델이면 레인 오류는 거절이 아니라 관측된 반복이고, 회전 중에 본 overflow 가 있으면 그것이 우선한다(#26530 규칙 유지) |
+| 소유권 (`Provider_failure_attribution`) | `Attempt_local` | `Runtime_binding` — 모델 범위 capacity 실패와 같은 자리 |
+
+모델 정체성을 `model.id` 가 아니라 `api_name` 으로 잡는 이유: 라이브 runtime.toml 은
+같은 모델을 공급자마다 다른 `[models.*]` 행으로 선언한다
+(`models.ollama-cloud-glm-5-3-flash` 와 `models."glm-5.3-flash"` 가 둘 다
+`api-name = "glm-5.3-flash"`). id 로 잡으면 어디서도 안 맞는다. 남는 구멍 하나:
+`openrouter` 는 `z-ai/glm-5.3-flash` 로 접두어를 붙여서 이 규칙이 같은 모델로 보지
+못한다. 문자열을 잘라 맞추지 않고 구멍으로 남긴다 — 제대로 닫는 자리는 capability
+catalog 의 canonical id 다.
+
+thinking/reasoning 블록 감지(§8 의 비채택)는 #36193·#36231 이 별도로 들였고, 이 절은
+그 감지 결과의 분류만 다룬다. 임계값(1,024B·3회·64 KiB 창)은 건드리지 않는다.
+
 ## 출처
 
 - #32997 `feat(stream): stop a generation that has started repeating itself` (d98e10170b, 2026-09-04) — 지금 규칙과 그 실측(29,788바이트, 문단 234개 중 11개 고유, 3번째 반복이 1,691바이트).

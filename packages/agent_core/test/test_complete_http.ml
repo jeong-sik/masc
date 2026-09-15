@@ -2596,11 +2596,7 @@ let test_complete_stream_stops_reading_a_repeating_generation () =
     (match result with
      | Error
          (Http_client.ProviderFailure
-            { kind =
-                Http_client.Provider_wire_error
-                  { kind = Http_client.Repeating_generation; _ }
-            ; _
-            }) -> ()
+            { kind = Http_client.Repeating_generation _; _ }) -> ()
      | Error _ ->
        fail "a repeating generation must be reported as one, not as a timeout"
      | Ok _ -> fail "three identical paragraphs must not finalize as an answer");
@@ -2654,11 +2650,7 @@ let test_complete_stream_stops_reading_a_chanting_reasoning_block () =
     (match result with
      | Error
          (Http_client.ProviderFailure
-            { kind =
-                Http_client.Provider_wire_error
-                  { kind = Http_client.Repeating_generation; _ }
-            ; _
-            }) -> ()
+            { kind = Http_client.Repeating_generation _; _ }) -> ()
      | Error _ ->
        fail "a chanting reasoning block must be reported as a repeat, not as a timeout"
      | Ok _ -> fail "a reasoning block chanting one unit must not finalize as an answer");

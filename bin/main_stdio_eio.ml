@@ -4,7 +4,10 @@ module Mcp_eio = Masc.Mcp_server_eio
 module Server_startup_state = Masc.Server_startup_state
 module Shutdown_hooks = Masc.Shutdown_hooks
 module Board_dispatch = Masc.Board_dispatch
-module Server_session_switch = Masc.Server_session_switch
+
+(* Server_session_switch lives in masc.server, which is (wrapped false), so it
+   is named directly -- there is no Masc.Server_session_switch to alias. The
+   lifecycle suite already names it this way. *)
 
 open Cmdliner
 

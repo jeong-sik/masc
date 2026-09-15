@@ -8,11 +8,21 @@ type state =
   ; notes : Schedule_domain.schedule_note list
   }
 
+type attempted_transition =
+  | Modify_schedule
+  | Cancel_schedule
+
 type store_error =
   | Schedule_already_exists
   | Schedule_not_found
   | Invalid_initial_status of string
-  | Invalid_status_transition of string
+  | Transition_refused of
+      { schedule_id : string
+      ; current : Schedule_domain.schedule_status
+      ; attempted : attempted_transition
+      ; last_wake : Schedule_domain.wake_record option
+      }
+  | Running_wake_missing of { schedule_id : string }
   | Schedule_not_due_candidate
   | Schedule_not_running
   | Persistence_failed of string
@@ -83,11 +93,25 @@ let corrupt_message ~primary_err ~recovery_err =
       primary_err recovery_err
 ;;
 
+let attempted_transition_to_string = function
+  | Modify_schedule -> "modify"
+  | Cancel_schedule -> "cancel"
+;;
+
 let store_error_to_string = function
   | Schedule_already_exists -> "schedule already exists"
   | Schedule_not_found -> "schedule not found"
   | Invalid_initial_status reason -> "invalid initial schedule status: " ^ reason
-  | Invalid_status_transition reason -> "invalid schedule status transition: " ^ reason
+  | Transition_refused { schedule_id; current; attempted; last_wake = _ } ->
+    Printf.sprintf
+      "schedule %s is %s; only scheduled or due requests can be %s"
+      schedule_id
+      (Schedule_domain.schedule_status_to_string current)
+      (match attempted with
+       | Modify_schedule -> "modified"
+       | Cancel_schedule -> "cancelled")
+  | Running_wake_missing { schedule_id } ->
+    Printf.sprintf "running schedule %s has no running wake record" schedule_id
   | Schedule_not_due_candidate -> "schedule is not due"
   | Schedule_not_running -> "schedule is not running"
   | Persistence_failed msg -> "schedule persistence failed: " ^ msg
@@ -611,12 +635,25 @@ let last_wake_for_schedule_instance state ~schedule_instance_id ~schedule_id =
   | [] -> None
 ;;
 
+let last_wake_of_request state (request : schedule_request) =
+  last_wake_for_schedule_instance
+    state
+    ~schedule_instance_id:request.schedule_instance_id
+    ~schedule_id:request.schedule_id
+;;
+
+let transition_refused state (request : schedule_request) ~attempted =
+  Transition_refused
+    { schedule_id = request.schedule_id
+    ; current = request.status
+    ; attempted
+    ; last_wake = last_wake_of_request state request
+    }
+;;
+
 let update_latest_running_wake wakes ~schedule_id update =
   let rec loop acc = function
-    | [] ->
-      Error
-        (Invalid_status_transition
-           "running schedule has no matching running wake record")
+    | [] -> Error (Running_wake_missing { schedule_id })
     | (wake : wake_record) :: rest
       when String.equal wake.schedule_id schedule_id
            && wake.status = Wake_running ->
@@ -676,9 +713,7 @@ let update_request config (request : Schedule_domain.schedule_request) =
          let* () = write_state config next_state in
          Ok request
        | Running | Succeeded | Failed | Cancelled | Expired ->
-         Error
-           (Invalid_status_transition
-              "only scheduled or due requests can be modified")))
+         Error (transition_refused state current ~attempted:Modify_schedule)))
 ;;
 
 let cancel_request config ~schedule_id =
@@ -687,29 +722,27 @@ let cancel_request config ~schedule_id =
     match find_schedule state schedule_id with
     | None -> Error Schedule_not_found
     | Some request ->
-      if Schedule_domain.is_terminal request.status || request.status = Running
-      then
-        Error
-          (Invalid_status_transition
-             "only scheduled or due requests can be cancelled")
-      else
-        let updated_request =
-          { request with Schedule_domain.status = Schedule_domain.Cancelled }
-        in
-        let schedules = replace_schedule state.schedules updated_request in
-        (* Disposition at the cancel boundary: settle this schedule's
-           in-flight wake rows here rather than sweeping them later, so the
-           awaiting_ack retain cannot outlive the cancel (22.8-day live
-           evidence). [bump_state] then sees finished rows, not orphaned
-           running ones. *)
-        let wakes =
-          settle_wakes_for_cancelled_schedule ~now:(now ()) state.wakes ~schedule_id
-        in
-        let next_state =
-          bump_state state ~schedules ~wakes ~notes:state.notes
-        in
-        let* () = write_state config next_state in
-        Ok updated_request)
+      (match request.status with
+       | Running | Succeeded | Failed | Cancelled | Expired ->
+         Error (transition_refused state request ~attempted:Cancel_schedule)
+       | Scheduled | Due ->
+         let updated_request =
+           { request with Schedule_domain.status = Schedule_domain.Cancelled }
+         in
+         let schedules = replace_schedule state.schedules updated_request in
+         (* Disposition at the cancel boundary: settle this schedule's
+            in-flight wake rows here rather than sweeping them later, so the
+            awaiting_ack retain cannot outlive the cancel (22.8-day live
+            evidence). [bump_state] then sees finished rows, not orphaned
+            running ones. *)
+         let wakes =
+           settle_wakes_for_cancelled_schedule ~now:(now ()) state.wakes ~schedule_id
+         in
+         let next_state =
+           bump_state state ~schedules ~wakes ~notes:state.notes
+         in
+         let* () = write_state config next_state in
+         Ok updated_request))
 ;;
 
 let refresh_due config ~now =
@@ -843,11 +876,7 @@ let cancel_matching config ~should_cancel =
       | ({ status = (Scheduled | Due); _ } as request) :: rest ->
         cancel ({ request with status = Cancelled } :: schedules) true rest
       | ({ status = Running; _ } as request) :: _ ->
-        Error
-          (Invalid_status_transition
-             (Printf.sprintf
-                "cannot cancel running schedule %s while retiring its consumer"
-                request.schedule_id))
+        Error (transition_refused state request ~attempted:Cancel_schedule)
       (* Already terminal: nothing to cancel, and no error to raise. *)
       | ({ status = Succeeded | Failed | Cancelled | Expired; _ } as request) :: rest ->
         cancel (request :: schedules) changed rest
@@ -957,9 +986,7 @@ let recover_running_on_startup config ~now =
                 rest
             | Some { status = (Wake_succeeded | Wake_failed); _ }
             | None ->
-              Error
-                (Invalid_status_transition
-                   "running schedule has no active wake record"))
+              Error (Running_wake_missing { schedule_id = request.schedule_id }))
          | Scheduled | Due | Succeeded | Failed | Cancelled | Expired ->
            recover (request :: schedules_rev) wakes recovered rest)
     in

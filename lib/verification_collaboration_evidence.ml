@@ -113,7 +113,7 @@ let board_error = function
 let capture_board ~config ~authority ~post_id =
   let* () = require_workspace config in
   let* () = Board_dispatch.require_persisted_sources_readable () |> Result.map_error board_error in
-  let* post, comments = Board_dispatch.get_post_and_comments ~post_id ()
+  let* post, comments = Board_dispatch.get_post_and_comments ~post_id
     |> Result.map_error board_error in
   let* () = require_visible authority post in
   Ok (`Assoc ["source", `String "board"; "post", Board.post_to_yojson post;
@@ -178,22 +178,25 @@ let read_board ~submitted_evidence ~args = protect (fun () ->
   let* post_id = required_id args "post_id" in
   let* offset = optional_integer args "comment_offset" ~default:0 in
   let* limit = optional_integer args "comment_limit" ~default:Board.Limits.default_comment_page_limit in
-  let* () = if offset < 0 || limit < 1 || limit > Board.Limits.max_comment_page_limit then
-    Error (Invalid_request "comment pagination is outside the Board descriptor contract") else Ok () in
+  let* request = Board.Comment_page.request ~offset ~limit
+    |> Result.map_error (fun error ->
+      Invalid_request (Board.Comment_page.request_error_to_string error)) in
   let* source = submitted_source ~submitted_evidence ("board:" ^ post_id) in
   match source with
   | `Assoc ["source", `String "board"; "post", post; "comments", `List comments] ->
       let* () = match Board.post_of_yojson post with
         | Some decoded when Board.Post_id.to_string decoded.id = post_id -> Ok ()
         | _ -> Error (Storage_failed "submitted Board identity does not match reference") in
-      let total = List.length comments in
-      let offset = min offset total in
-      let selected = List.filteri (fun index _ -> index >= offset && index - offset < limit) comments in
-      let next = offset + List.length selected in
-      page_source ~args (`Assoc ["source", `String "board"; "post", post;
-        "comments", `List selected; "pagination", `Assoc ["offset", `Int offset;
-          "returned", `Int (List.length selected); "total", `Int total;
-          "has_more", `Bool (next < total); "next_offset", (if next < total then `Int next else `Null)]])
+      (match Board.Comment_page.select request comments with
+       | Board.Comment_page.Offset_out_of_range { requested; total } ->
+         Error (Invalid_request (Printf.sprintf
+           "comment_offset %d names no comment: the submitted thread has %d" requested total))
+       | Board.Comment_page.Page { Board.Comment_page.offset; items; total; next_offset } ->
+         page_source ~args (`Assoc ["source", `String "board"; "post", post;
+           "comments", `List items; "pagination", `Assoc ["offset", `Int offset;
+             "returned", `Int (List.length items); "total", `Int total;
+             "has_more", `Bool (Option.is_some next_offset);
+             "next_offset", (match next_offset with Some next -> `Int next | None -> `Null)]]))
   | _ -> Error (Storage_failed "invalid submitted Board snapshot"))
 
 let read_fusion ~submitted_evidence ~args = protect (fun () ->

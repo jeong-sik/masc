@@ -20,5 +20,5 @@ val capture : request -> (Yojson.Safe.t, string) result
 (** Viewport PNG as bare base64, source/tab identity, URL/title and elapsed time. *)
 
 val parse_client_id : Yojson.Safe.t -> (Browser_lane.client_id option, string) result
-val resolved_target : request -> (Browser_lane.target, string) result
+val resolved_target : request -> (Browser_lane.target, Browser_lane.selection_error) result
 val client_id_json : Browser_lane.target -> Yojson.Safe.t

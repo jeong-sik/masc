@@ -2,6 +2,10 @@ type service_error =
   | Invalid_request of string
   | Store_error of Schedule_store.store_error
   | Creation_rejected of string
+  | Due_already_past of
+      { due_at : float
+      ; now : float
+      }
 
 let ( let* ) = Result.bind
 
@@ -9,6 +13,11 @@ let service_error_to_string = function
   | Invalid_request msg -> "invalid request: " ^ msg
   | Store_error err -> Schedule_store.store_error_to_string err
   | Creation_rejected detail -> detail
+  | Due_already_past { due_at; now } ->
+    Printf.sprintf
+      "due time %s is before now (%s); a wake is due at or after the current second"
+      (Time_codec.rfc3339_of_unix due_at)
+      (Time_codec.rfc3339_of_unix now)
 ;;
 
 let map_store = function
@@ -45,8 +54,20 @@ let make_request
   | Error msg -> Error (Invalid_request msg)
 ;;
 
+(* The first due is checked here and nowhere later: a Scheduled row whose
+   due has passed is not wrong in the store -- the runner's refresh exists to
+   find exactly that -- so the only place a past due is a caller's mistake
+   is the call that proposes it. *)
+let due_not_before_now ~now ~due_at =
+  let current_second = Float.floor now in
+  if Float.compare due_at current_second < 0
+  then Error (Due_already_past { due_at; now = current_second })
+  else Ok ()
+;;
+
 let create
   config
+  ~now
   ?schedule_id:provided_schedule_id
   ?requested_at
   ?expires_at
@@ -58,6 +79,7 @@ let create
   ?recurrence
   ()
   =
+  let* () = due_not_before_now ~now ~due_at in
   let schedule_id = schedule_id provided_schedule_id in
   let* request =
     make_request ~schedule_id ?requested_at ?expires_at ~requested_by

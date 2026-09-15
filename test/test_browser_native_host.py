@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import queue
 import select
+import socket
 import struct
 import subprocess
 import sys
@@ -17,6 +18,16 @@ import uuid
 
 HOST = Path(sys.argv.pop(1)).resolve()
 TOKEN = "browser-host-test-token-no-secret"
+# The host waits reconnect_delay_sec (5 s, browser_host.ml) after a failed poll
+# before reading the workspace connection again; this leaves room for that wait
+# and the poll that follows.
+POLL_RETRY_WAIT_SEC = 15
+
+
+def closed_port():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
 
 
 def encode_frame(value):
@@ -116,19 +127,24 @@ class NativeHost(unittest.TestCase):
         self.server.reject_client = self._testMethodName == "test_retired_client_exits_for_fresh_identity"
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
-        # One test omits --server so the workspace connection.toml decides the
-        # destination, the resolution this file pins for every other client.
+        # Two tests omit --server so the workspace connection.toml decides the
+        # destination; every other client is fixed to this server with --server.
+        # The second starts on a port nothing listens on, so only reading the
+        # file again after its failed poll can reach this server.
         workspace_connection_port = {
             "test_workspace_connection_port_is_followed": self.server.server_port,
+            "test_failed_poll_reads_the_workspace_port_again": closed_port(),
         }.get(self._testMethodName)
         argv = [str(HOST), "--base-path", str(base)]
+        self.connection = base / ".masc/config/connection.toml"
         if workspace_connection_port is None:
             argv += ["--server", f"http://127.0.0.1:{self.server.server_port}"]
         else:
-            connection = base / ".masc/config/connection.toml"
-            connection.parent.mkdir(parents=True)
-            connection.write_text(f"[server]\nhttp_port = {workspace_connection_port}\n")
-        self.process = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.connection.parent.mkdir(parents=True)
+            self.connection.write_text(f"[server]\nhttp_port = {workspace_connection_port}\n")
+        # An exported MASC_HTTP_BASE_URL or MASC_HTTP_PORT outranks the file.
+        env = {key: value for key, value in os.environ.items() if not key.startswith("MASC_")}
+        self.process = subprocess.Popen(argv, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         metadata = read_frame(self.process.stdout)
         self.assertEqual(metadata["verb"], "browser.info")
         self.assertFalse(self.server.poll_seen.is_set(), "must discover actual browser before polling")
@@ -172,6 +188,13 @@ class NativeHost(unittest.TestCase):
     def test_workspace_connection_port_is_followed(self):
         self.assertTrue(self.server.poll_seen.wait(timeout=5))
         self.assertTrue(self.server.identities)
+
+    def test_failed_poll_reads_the_workspace_port_again(self):
+        # The server restarted on another port and rewrote connection.toml.
+        # The host's first poll went to the port it read at launch and failed.
+        self.connection.write_text(f"[server]\nhttp_port = {self.server.server_port}\n")
+        self.assertTrue(self.server.poll_seen.wait(timeout=POLL_RETRY_WAIT_SEC))
+        self.assertEqual(len({identity[0] for identity in self.server.identities}), 1)
 
     def test_retired_client_exits_for_fresh_identity(self):
         self.assertTrue(self.server.poll_seen.wait(timeout=5))

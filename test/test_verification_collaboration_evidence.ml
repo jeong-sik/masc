@@ -149,7 +149,10 @@ let test_capture_failures_and_corruption () = with_fixture (fun config ->
   Store.submitted_evidence_item_of_yojson corrupt |> require_error "changed snapshot digest accepted";
   List.iter (fun input -> invalid_input task "masc_board_post_get" input)
     [`Assoc ["post_id", `String (Board.Post_id.to_string p.id); "comment_limit", `Null];
-     `Assoc ["post_id", `String (Board.Post_id.to_string p.id); "comment_offset", `Int (-1)]];
+     `Assoc ["post_id", `String (Board.Post_id.to_string p.id); "comment_offset", `Int (-1)];
+     (* The snapshot has no comments, so offset 1 names nothing; it is refused
+        rather than answered with an empty page that reads like lost comments. *)
+     `Assoc ["post_id", `String (Board.Post_id.to_string p.id); "comment_offset", `Int 1]];
   let Board_dispatch.Jsonl store = Board_dispatch.backend () in
   store.Board.posts_load_result <- Error "unreadable persisted source";
   Evidence.capture ~config ~authority:(Evidence.Task_producer "producer") ~references:[board_ref p]

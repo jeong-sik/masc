@@ -20,13 +20,13 @@ let canonical_descriptor name =
 ;;
 
 let fixture () =
-  let producer = canonical_descriptor "keeper_time_now" in
+  let producer = canonical_descriptor "keeper_lane_status" in
   let parallel = canonical_descriptor "masc_board_stats" in
   let final = canonical_descriptor "keeper_tools_list" in
   let producer_node =
     Plan.node
       ~id:(node_id "producer")
-      ~tool_name:"keeper_time_now"
+      ~tool_name:"keeper_lane_status"
       ~input:(Plan.Json_template.literal (`Assoc []))
       ()
   in
@@ -71,7 +71,15 @@ let node_name node = Plan.Node_id.to_string node.Plan.id
 
 let valid_data_for_node node =
   match node_name node with
-  | "producer" -> `Assoc [ "now_iso", `String "2026-08-14T00:00:00Z"; "now_unix", `Float 0.0 ]
+  | "producer" ->
+    `Assoc
+      [ "profile", `String "docker"
+      ; "lane", `Null
+      ; "endpoint", `Null
+      ; "probe", `Null
+      ; "last_dispatch", `Null
+      ; "operator_action", `Null
+      ]
   | "left" | "right" ->
     `Assoc
       [ "post_count", `Int 0
@@ -402,7 +410,15 @@ let test_malformed_declared_output_stops_before_consumer () =
   let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
     called := node_name node :: !called;
     Executor.dispatch_result
-      (completed ~tool_name:node.tool_name ~data:(`Assoc [ "now_iso", `Int 7 ]))
+      (completed
+         ~tool_name:node.tool_name
+         ~data:
+           (`Assoc
+              [ "profile", `Int 7
+              ; "lane", `Null
+              ; "endpoint", `Null
+              ; "operator_action", `Null
+              ]))
   in
   match Executor.execute ~plan ~run_id:(Plan.Run_id.fresh ()) ~dispatch () with
   | Ok _ -> fail "malformed producer output was accepted"

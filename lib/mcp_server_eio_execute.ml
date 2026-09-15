@@ -437,7 +437,7 @@ let execute_tool_eio
                       (* This composition root binds [Mod_external] to the
                          keeper subsystem, so a [Mod_external] name the keeper
                          boundary declines is a keeper-internal runtime tool
-                         (descriptor-owned executor, e.g. keeper_time_now,
+                         (descriptor-owned executor, e.g. keeper_lane_status,
                          keeper_voice_*, tool_read_file). This endpoint has no
                          executor for it; reporting "Unknown tool (registry
                          inconsistency)" was a lie — the name is registered,

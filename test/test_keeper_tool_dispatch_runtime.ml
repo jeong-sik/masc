@@ -951,11 +951,11 @@ let test_initializing_recovery_isolates_only_publication_writes () =
            ~input
            ()
        in
-       let time_result = execute ~name:"keeper_time_now" ~input:(`Assoc []) in
+       let lane_result = execute ~name:"keeper_lane_status" ~input:(`Assoc []) in
        check string
          "non-file tool continues"
          "success"
-         (outcome_label time_result.disposition);
+         (outcome_label lane_result.disposition);
        let read_result =
          execute
            ~name:"Read"
@@ -4371,6 +4371,66 @@ let test_invalid_surface_post_input_stays_correction_capable () =
          fail "later failure was hidden by the completed terminal effect")
 ;;
 
+(* A memory write is an ordinary serial write: two claims in one turn each
+   commit, and neither closes the turn. *)
+let test_memory_writes_through_the_bundle_leave_the_turn_open () =
+  with_exec_fixture
+    "memory_write_bundle_turn_open"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let bundle =
+         Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ()
+       in
+       let memory_write =
+         match find_tool_by_name bundle.tools "keeper_memory_write" with
+         | Some tool -> tool
+         | None -> fail "keeper_memory_write missing from Keeper tool bundle"
+       in
+       (match Agent_core.Tool.completion memory_write with
+        | Agent_core.Tool_contract.Continue_after_success -> ()
+        | Agent_core.Tool_contract.Terminal_after_success _ ->
+          fail "keeper_memory_write was materialized as a terminal tool");
+       let write ~title ~content =
+         match
+           Agent_core.Tool.execute
+             memory_write
+             (`Assoc [ "title", `String title; "content", `String content ])
+         with
+         | Ok _ -> ()
+         | Error error ->
+           failf "memory write failed: %s" error.Agent_core.Types.message
+       in
+       write ~title:"first" ~content:"the first claim of this turn";
+       write ~title:"second" ~content:"the second claim of this turn";
+       let keepers_dir =
+         Config_dir_resolver.keepers_dir_for_base_path
+           ~base_path:config.base_path
+       in
+       (match
+          Masc.Keeper_memory_os_current.read_for_keepers_dir
+            ~keepers_dir
+            ~keeper_id:meta.name
+        with
+        | Ok (Some snapshot) ->
+          check int "both claims committed" 2 (List.length snapshot.facts)
+        | Ok None -> fail "memory writes persisted no snapshot"
+        | Error detail -> fail detail);
+       match bundle.terminal_effect_state () with
+       | Masc.Keeper_tools_agent_core.Terminal_effect_open -> ()
+       | Masc.Keeper_tools_agent_core.Deferred_tool_result ->
+         fail "memory writes deferred a tool result"
+       | Masc.Keeper_tools_agent_core.External_effect_deferred ->
+         fail "memory writes deferred an external effect"
+       | Masc.Keeper_tools_agent_core.Terminal_effect_completed _ ->
+         fail "a memory write closed the turn"
+       | Masc.Keeper_tools_agent_core.Terminal_effect_failed _ ->
+         fail "a successful memory write failed the turn")
+;;
+
 let with_openai_tool_call_server ?second_response ~tool_name ~tool_input f =
   let sw =
     match Eio_context.get_switch_opt () with
@@ -5089,7 +5149,7 @@ let test_frozen_surface_direct_dispatch_accepts_included_exact_descriptor () =
   with_exec_fixture "frozen-surface-direct-included"
   @@ fun ~config ~meta ~publication_recovery ~ctx_work ->
   let capability_surface = frozen_capability_surface () in
-  let descriptor = composition_descriptor "keeper_time_now" in
+  let descriptor = composition_descriptor "keeper_lane_status" in
   let result =
     KET.execute_keeper_tool_descriptor_for_capability_surface_with_outcome
       ~capability_surface
@@ -5110,7 +5170,7 @@ let test_frozen_surface_direct_dispatch_accepts_included_exact_descriptor () =
       ~meta
       ~publication_recovery
       ~ctx_work
-      ~name:"keeper_time_now"
+      ~name:"keeper_lane_status"
       ~input:(`Assoc [])
       ()
   in
@@ -5127,7 +5187,7 @@ let test_frozen_surface_rejects_same_id_counterfeit_descriptor () =
   with_exec_fixture "frozen-surface-counterfeit-descriptor"
   @@ fun ~config ~meta ~publication_recovery ~ctx_work ->
   let capability_surface = frozen_capability_surface () in
-  let canonical = composition_descriptor "keeper_time_now" in
+  let canonical = composition_descriptor "keeper_lane_status" in
   let counterfeit =
     { canonical with description = canonical.description ^ " (counterfeit)" }
   in
@@ -5265,15 +5325,15 @@ let test_tools_search_error_reaches_agent_core_as_typed_payload () =
          Yojson.Safe.Util.(wrong_type |> member "reason" |> to_string))
 ;;
 
-let one_node_clock_composition =
+let one_node_lane_composition =
   {|[[compositions]]
-name = "clock"
-description = "Read the exact Keeper clock."
+name = "lane"
+description = "Read the exact Keeper lane status."
 execution = "inline"
 
 [[compositions.nodes]]
-id = "time"
-tool = "keeper_time_now"
+id = "lane"
+tool = "keeper_lane_status"
 [compositions.nodes.input]
 kind = "literal"
 value = {}
@@ -5387,14 +5447,14 @@ value = { surface = "dashboard", content = "composition terminal" }
 |}
 ;;
 
-let invalid_clock_input_composition =
+let invalid_lane_input_composition =
   {|[[compositions]]
-name = "invalid-clock-input"
+name = "invalid-lane-input"
 execution = "inline"
 
 [[compositions.nodes]]
-id = "time"
-tool = "keeper_time_now"
+id = "lane"
+tool = "keeper_lane_status"
 [compositions.nodes.input]
 kind = "literal"
 value = { unsupported = true }
@@ -5557,7 +5617,7 @@ let test_composition_catalog_materializes_and_executes_first_class_tool () =
   with_exec_fixture ~require_sandbox:true "composition-first-class-tool"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
        let skill_catalog =
-         skill_catalog_of_composition ~name:"clock" one_node_clock_composition
+         skill_catalog_of_composition ~name:"lane" one_node_lane_composition
        in
        let tools =
          Masc.Keeper_tools_agent_core_bundle.For_testing.make_tools
@@ -5569,13 +5629,13 @@ let test_composition_catalog_materializes_and_executes_first_class_tool () =
            ()
        in
        let tool =
-         match find_tool_by_name tools "keeper_compose_clock" with
+         match find_tool_by_name tools "keeper_compose_lane" with
          | Some tool -> tool
          | None -> fail "catalog entry was not materialized as an Agent-Core tool"
        in
        check string
          "catalog description reaches model-visible schema"
-         "Read the exact Keeper clock."
+         "Read the exact Keeper lane status."
          tool.Agent_core.Tool.schema.description;
        (match Agent_core.Tool.completion tool with
         | Agent_core.Tool_contract.Continue_after_success -> ()
@@ -5595,17 +5655,17 @@ let test_composition_catalog_materializes_and_executes_first_class_tool () =
          let payload = parse_json output.Agent_core.Types.content in
          check string
            "outer composition identity"
-           "keeper_compose_clock"
+           "keeper_compose_lane"
            Yojson.Safe.Util.(member "composition_tool" payload |> to_string);
          (match Yojson.Safe.Util.member "actions" payload with
           | `List [ action ] ->
             check string
               "nested node identity"
-              "time"
+              "lane"
               Yojson.Safe.Util.(member "node_id" action |> to_string);
             check string
               "nested tool identity"
-              "keeper_time_now"
+              "keeper_lane_status"
               Yojson.Safe.Util.(member "tool_name" action |> to_string);
             check int
               "nested planned index"
@@ -5624,9 +5684,9 @@ let test_composition_catalog_materializes_and_executes_first_class_tool () =
 let test_compositions_share_closed_turn_descriptor_set () =
   with_exec_fixture "composition-closed-turn-descriptors"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
-       let clock_descriptor = composition_descriptor "keeper_time_now" in
+       let lane_descriptor = composition_descriptor "keeper_lane_status" in
        let descriptors =
-         [ { clock_descriptor with description = "forged descriptor description" } ]
+         [ { lane_descriptor with description = "forged descriptor description" } ]
        in
        let tools_for ~name composition =
          let skill_catalog = skill_catalog_of_composition ~name composition in
@@ -5649,15 +5709,15 @@ let test_compositions_share_closed_turn_descriptor_set () =
            ~name:"off-surface-memory-async"
            off_surface_memory_async_composition
        in
-       let clock =
-         match find_tool_by_name inline_tools "keeper_time_now" with
+       let lane_tool =
+         match find_tool_by_name inline_tools "keeper_lane_status" with
          | Some tool -> tool
-         | None -> fail "closed descriptor set lost keeper_time_now"
+         | None -> fail "closed descriptor set lost keeper_lane_status"
        in
        check string
          "bundle resolves supplied descriptor to canonical authority"
-         clock_descriptor.description
-         clock.schema.description;
+         lane_descriptor.description
+         lane_tool.schema.description;
        let assert_deterministic_refusal
              ~expected_error_kind
              tools
@@ -6304,7 +6364,7 @@ let test_composition_action_commit_advances_revision_before_refresh_event () =
            Masc.Keeper_tool_call_log.reset_for_testing ())
          (fun () ->
             let skill_catalog =
-              skill_catalog_of_composition ~name:"clock" one_node_clock_composition
+              skill_catalog_of_composition ~name:"lane" one_node_lane_composition
             in
             let turn_ctx_cell = Masc.Keeper_tool_call_log.create_turn_ctx_cell () in
             let tool =
@@ -6317,7 +6377,7 @@ let test_composition_action_commit_advances_revision_before_refresh_event () =
                 ~turn_ctx_cell
                 ()
               |> List.find_opt (fun tool ->
-                String.equal tool.Agent_core.Tool.schema.name "keeper_compose_clock")
+                String.equal tool.Agent_core.Tool.schema.name "keeper_compose_lane")
               |> Option.get
             in
             (match
@@ -6338,14 +6398,14 @@ let test_composition_action_commit_advances_revision_before_refresh_event () =
               match
                 List.find_opt
                   (fun row ->
-                     Safe_ops.json_string_opt "composition_node_id" row = Some "time")
+                     Safe_ops.json_string_opt "composition_node_id" row = Some "lane")
                   rows
               with
               | Some row ->
                check
                  (option string)
                  "committed nested row is immediately readable"
-                 (Some "time")
+                 (Some "lane")
                  (Safe_ops.json_string_opt "composition_node_id" row);
                check
                  (option string)
@@ -6408,7 +6468,7 @@ let test_composition_action_commit_advances_revision_before_refresh_event () =
                    | Error Masc.Sse.Missing_data_payload -> None
                    | Ok payload ->
                      let json = Yojson.Safe.from_string payload in
-                     if Safe_ops.json_string_opt "composition_node_id" json = Some "time"
+                     if Safe_ops.json_string_opt "composition_node_id" json = Some "lane"
                      then Some json
                      else None)
                 !frames
@@ -6476,7 +6536,7 @@ let test_composition_telemetry_failure_does_not_change_execution () =
            Masc.Keeper_tool_call_log.reset_for_testing ())
          (fun () ->
             let skill_catalog =
-              skill_catalog_of_composition ~name:"clock" one_node_clock_composition
+              skill_catalog_of_composition ~name:"lane" one_node_lane_composition
             in
             let turn_ctx_cell = Masc.Keeper_tool_call_log.create_turn_ctx_cell () in
             let tool =
@@ -6489,7 +6549,7 @@ let test_composition_telemetry_failure_does_not_change_execution () =
                 ~turn_ctx_cell
                 ()
               |> List.find_opt (fun tool ->
-                String.equal tool.Agent_core.Tool.schema.name "keeper_compose_clock")
+                String.equal tool.Agent_core.Tool.schema.name "keeper_compose_lane")
               |> Option.get
             in
             (match
@@ -6563,8 +6623,8 @@ let test_composition_plan_failure_exposes_typed_cause () =
   with_exec_fixture "composition-typed-plan-failure"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
        let skill_catalog =
-         skill_catalog_of_composition ~name:"invalid-clock-input"
-           invalid_clock_input_composition
+         skill_catalog_of_composition ~name:"invalid-lane-input"
+           invalid_lane_input_composition
        in
        let tool =
          Masc.Keeper_tools_agent_core_bundle.For_testing.make_tools
@@ -6575,7 +6635,7 @@ let test_composition_plan_failure_exposes_typed_cause () =
            ~skill_catalog
            ()
          |> List.find_opt (fun (tool : Agent_core.Tool.t) ->
-           String.equal tool.schema.name "keeper_compose_invalid-clock-input")
+           String.equal tool.schema.name "keeper_compose_invalid-lane-input")
          |> function
          | Some tool -> tool
          | None -> fail "invalid-input composition was not materialized"
@@ -6593,7 +6653,7 @@ let test_composition_plan_failure_exposes_typed_cause () =
          let payload = parse_json error.Agent_core.Types.message in
          check string
            "failed outer composition identity"
-           "keeper_compose_invalid-clock-input"
+           "keeper_compose_invalid-lane-input"
            Yojson.Safe.Util.(member "composition_tool" payload |> to_string);
          let cause = Yojson.Safe.Util.member "cause" payload in
          check string
@@ -7281,7 +7341,7 @@ let test_async_composition_status_preserves_artifact_manifest () =
 let test_composition_runtime_uses_canonical_descriptor () =
   with_exec_fixture "composition-canonical-descriptor"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
-       let canonical = composition_descriptor "keeper_time_now" in
+       let canonical = composition_descriptor "keeper_lane_status" in
        let supplied =
          { canonical with
            Masc.Keeper_tool_descriptor.execution =
@@ -7292,8 +7352,8 @@ let test_composition_runtime_uses_canonical_descriptor () =
        in
        let node =
          Masc.Keeper_tool_plan.node
-           ~id:(composition_node_id "time")
-           ~tool_name:"keeper_time_now"
+           ~id:(composition_node_id "lane")
+           ~tool_name:"keeper_lane_status"
            ~input:(Masc.Keeper_tool_plan.Json_template.literal (`Assoc []))
            ()
        in
@@ -7321,7 +7381,7 @@ let test_composition_runtime_uses_canonical_descriptor () =
          (match result.Masc.Keeper_tool_plan_executor.result with
           | Tool_result.Completed _ -> ()
           | Tool_result.Deferred _ | Tool_result.Failed _ ->
-            fail "canonical time descriptor did not complete");
+            fail "canonical lane descriptor did not complete");
          check bool
            "canonical concurrent schedule"
            true
@@ -7462,7 +7522,6 @@ let composable_output_probes =
          | Error error -> fail (Msx_lane.error_to_string error));
         `Assoc [])
     }
-  ; probe "keeper_time_now" (`Assoc [])
   ; probe "keeper_lane_status" (`Assoc [])
   ; { tool_name = "keeper_tasks_list"
     ; needs_sandbox = false
@@ -8909,6 +8968,8 @@ let () =
         test_deferred_web_search_keeps_the_turn_going;
       test_case "invalid surface input stays correction-capable" `Quick
         test_invalid_surface_post_input_stays_correction_capable;
+      test_case "memory writes through the bundle leave the turn open" `Quick
+        test_memory_writes_through_the_bundle_leave_the_turn_open;
       test_case "surface append failure is not terminal completion" `Quick
         test_surface_post_append_failure_does_not_complete_terminal_effect;
       test_case "frozen surface rejects a registered-only tool" `Quick

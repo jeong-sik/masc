@@ -183,8 +183,14 @@ let with_connection ~env ~timeout ~url use =
         ~on_close:(fun ~code:_ ~reason:_->disconnect "BiDi peer closed")
         ~on_error:disconnect ~on_eof:(fun ()->disconnect "BiDi EOF") () in
       let authority=(if host="::1" then "[::1]" else host)^":"^string_of_int port in
-      let wsd=Ws_direct_eio.Client.connect ~sw ~clock ~host:authority ~resource
-        ~max_message:(8*1024*1024) flow builder in
+      (* ws-direct reports an upgrade the peer refused, or a head that did not
+         arrive in its own window, as [Failure]. That is this connection's
+         error, not an exception for the native host, which catches [Eio.Io]
+         alone and would exit without a log line. *)
+      let* wsd=match Ws_direct_eio.Client.connect ~sw ~clock ~host:authority ~resource
+          ~max_message:(8*1024*1024) flow builder with
+        | wsd->Ok wsd
+        | exception Failure detail->Error ("BiDi connection: " ^ detail) in
       let command method_ params =
         match !broken with Some e->Error e|None->
           incr sequence;let id= !sequence in
@@ -222,7 +228,6 @@ let with_connection ~env ~timeout ~url use =
       let result=use peer in
       raise (Peer_finished result)
     with
-    | Eio.Time.Timeout->raise (Peer_finished (Error "BiDi connection or command deadline exceeded"))
     | Eio.Cancel.Cancelled _ as exn->raise exn
     | Eio.Io _->raise (Peer_finished (Error "BiDi connection failed"))
     | End_of_file->raise (Peer_finished (Error "BiDi connection EOF")))

@@ -108,7 +108,7 @@ let test_base_tools () =
   List.iter
     (fun name ->
        Alcotest.(check bool) (name ^ " present") true (List.mem name names))
-    [ "keeper_time_now"; "keeper_context_status"; "keeper_memory_search" ]
+    [ "keeper_lane_status"; "keeper_context_status"; "keeper_memory_search" ]
 ;;
 
 let test_context_status_description_matches_current_output () =

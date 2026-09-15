@@ -9,12 +9,6 @@ open Keeper_types_profile
 
 module String_set = Set.Make (String)
 
-let handle_time_now ~args:_ =
-  let now_unix = Time_compat.now () in
-  let now_iso = Masc_domain.now_iso () in
-  `Assoc [ "now_iso", `String now_iso; "now_unix", `Float now_unix ]
-;;
-
 let unexpected_tools_list_arguments args =
   match args with
   | `Assoc [] -> None
@@ -465,9 +459,10 @@ let handle_memory_retract_with_outcome
 (* Browser lane tools preserve selected native-client identity. The closed
    state-layer verb set distinguishes reads from explicit-tab interactions;
    session ownership and direct navigation remain automation-only. *)
-let handle_browser_tabs_with_outcome ~args =
+let handle_browser_tabs_with_outcome ~(config : Workspace.config) ~args =
   Keeper_tool_execution.of_tool_result
-    (Tool_misc_browser_lane.handle_tabs ~tool_name:"masc_browser_tabs" ~start_time:0.0 args)
+    (Tool_misc_browser_lane.handle_tabs ~base_path:config.base_path
+       ~tool_name:"masc_browser_tabs" ~start_time:0.0 args)
 ;;
 
 let handle_browser_read_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args =
@@ -493,9 +488,10 @@ let handle_browser_session_with_outcome ~args =
     (Tool_misc_browser_lane.handle_session ~tool_name:"masc_browser_session" ~start_time:0.0 args)
 ;;
 
-let handle_browser_interact_with_outcome ~args =
+let handle_browser_interact_with_outcome ~(config : Workspace.config) ~args =
   let result, failure_effect_disposition =
-    Tool_misc_browser_lane.handle_interact_with_phase ~tool_name:"masc_browser_interact" ~start_time:0.0 args in
+    Tool_misc_browser_lane.handle_interact_with_phase ~base_path:config.base_path
+      ~tool_name:"masc_browser_interact" ~start_time:0.0 args in
   Keeper_tool_execution.of_tool_result ~failure_effect_disposition result
 ;;
 

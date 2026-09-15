@@ -263,7 +263,7 @@ function keeperReceiptFixture(
                 conversation_id: 'conversation-antigravity',
                 step_index: 7,
               },
-              tool_name: 'keeper_time_now',
+              tool_name: 'keeper_lane_status',
               runtime_id: 'anthropic.claude',
               agent_core_turn: 1,
               observed_at: '2026-08-26T00:00:02Z',
@@ -583,7 +583,7 @@ describe('Tools', () => {
     expect(container.textContent).toContain('actions 1')
     expect(container.textContent).toContain('invalid 0')
     expect(container.textContent).toContain('call-skill-1')
-    expect(container.textContent).toContain('keeper_time_now')
+    expect(container.textContent).toContain('keeper_lane_status')
     expect(container.textContent).toContain('invocation runtime openai.codex')
     expect(container.textContent).toContain('provider delivery runtimes anthropic.claude:1')
     expect(container.textContent).toContain('official handoff runtimes none')

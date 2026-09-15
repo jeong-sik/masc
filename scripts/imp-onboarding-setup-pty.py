@@ -19,6 +19,7 @@ import struct
 import subprocess
 import termios
 import time
+import tomllib
 import urllib.request
 
 
@@ -46,11 +47,30 @@ def listening(port):
         return False
 
 
+def configured_sandbox_arguments(manifest_bytes):
+    # `masc setup` on a terminal with no sandbox choice walks the interactive
+    # journey from "1 · Your workspace". Naming the sandbox imp already declares
+    # runs native setup instead -- server, login, imp boot, TUI -- and keeps the
+    # manifest as it is, which this check asserts below.
+    keeper = tomllib.loads(manifest_bytes.decode()).get('keeper', {})
+    profile = keeper.get('sandbox_profile')
+    if not isinstance(profile, str) or not profile:
+        raise RuntimeError('imp.toml declares no sandbox_profile; prepare the workspace with masc setup first')
+    arguments = ['--sandbox-profile', profile]
+    backend = keeper.get('microvm_backend')
+    if profile == 'microvm':
+        if not isinstance(backend, str) or not backend:
+            raise RuntimeError('imp.toml declares microvm without microvm_backend')
+        arguments += ['--microvm-backend', backend]
+    return arguments
+
+
 def measure(args):
     binary = str(Path(args.binary).absolute())
     base = Path(args.base_path).resolve(strict=True)
     manifest = base / '.masc/config/keepers/imp.toml'
     original = manifest.read_bytes()
+    sandbox_arguments = configured_sandbox_arguments(original)
     output = Path(args.output).absolute()
     output.mkdir(parents=True, exist_ok=False)
     with socket.socket() as reservation:
@@ -114,7 +134,7 @@ def measure(args):
 
     try:
         process = subprocess.Popen(
-            [binary, 'setup', '--base-path', str(base), '--port', str(port)],
+            [binary, 'setup', '--base-path', str(base), '--port', str(port)] + sandbox_arguments,
             stdin=slave, stdout=slave, stderr=slave, cwd=base, env=environment,
             preexec_fn=configure_terminal, close_fds=True)
         wait_until(ready, 360, 'setup-owned server readiness')

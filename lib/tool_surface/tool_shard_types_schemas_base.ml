@@ -1,13 +1,11 @@
 (** Tool_shard_types_schemas_base — [base_tools] always-on schemas
-    every keeper sees (time, context status, memory r/w,
+    every keeper sees (context status, memory r/w,
     tool self-introspection). *)
 
 open Tool_shard_types_enum_mirrors
 
 let base_tools : Masc_domain.tool_schema list =
-  [ (* Time *)
-    Tool_shard_types_schemas_base_toml.time_now
-  ; (* Context status *)
+  [ (* Context status *)
     Tool_shard_types_schemas_base_toml.context_status
   ; (* The execution lane's own account of itself (RFC-0427 D-1) *)
     Tool_shard_types_schemas_base_toml.lane_status

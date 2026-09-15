@@ -100,9 +100,9 @@ unspecified. A visible count is not proof that all replies or history were
 loaded.
 
 Choose the callable composition from browser-lanes after inspecting the
-observed link and destination need: use the live content composition when the
-body already answers the request, and the live regions composition when a post
-or comment region must be selected. Preserve the composition's
+observed link and destination need: use the live follow-read composition with
+`mode=scene` when the body already answers the request, and with `mode=regions`
+when a post or comment region must be selected. Preserve the composition's
 navigationSource, expectedUrl, and follow receipt. Never infer a next URL, post
 ID, or node ID from a display name; obtain each one from the new document's
 scene. If the follow succeeds but its read fails, retry only the read.

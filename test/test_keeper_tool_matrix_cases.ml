@@ -331,7 +331,6 @@ let prepare_keeper_name fixture name =
 let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
   let name = schema.name in
   match name with
-  | "keeper_time_now"
   | "keeper_lane_status"
   | "keeper_workspace_memory_read"
   | "keeper_context_status"
@@ -343,7 +342,7 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
   | "keeper_voice_session_end" ->
       `Assoc []
   | "keeper_capability_search" ->
-      `Assoc [ "query", `String "keeper_time_now" ]
+      `Assoc [ "query", `String "keeper_lane_status" ]
   | "keeper_memory_search" ->
       `Assoc [ ("query", `String "memory needle"); ("limit", `Int 2) ]
   | "keeper_memory_retract" ->

@@ -30,14 +30,65 @@ let test_follow_output_contract () =
 type navigation_case = Navigated | Navigation_failed | Read_failed | Invalid_receipt
 type observation = Regions | Content
 
+let follow_skill = "browser-live-follow-read"
+let navigate_skill = "browser-navigate-read"
+
+let read_mode = function
+  | Regions -> "regions"
+  | Content -> "scene"
+
+(* Both shipped compositions offer the same two reads and nothing else. The
+   node tool, BrowserRead, also takes "text", so a value outside the declared
+   members has to be refused while binding rather than run as another read. *)
+let test_mode_is_a_closed_choice skill_name () =
+  let entry = skill_entry skill_name in
+  let open Yojson.Safe.Util in
+  let mode =
+    Catalog.input_schema_of_params entry.Catalog.params
+    |> member "properties" |> member "mode"
+  in
+  check (list string) "the model is offered exactly scene and regions"
+    [ "scene"; "regions" ]
+    (mode |> member "enum" |> to_list |> List.map to_string);
+  check bool "mode is required" true
+    (Catalog.input_schema_of_params entry.Catalog.params
+     |> member "required" |> to_list |> List.mem (`String "mode"));
+  (* Every other argument is valid for whichever composition declares it, so
+     the only thing binding can refuse is the mode. *)
+  let valid_arguments =
+    [ "clientId", `String "11111111-1111-4111-8111-111111111111"
+    ; "tabId", `Int 7
+    ; "documentId", `String "observed"
+    ; "nodeId", `String "link"
+    ; "expectedUrl", `String "https://example.org/before"
+    ; "url", `String "https://example.org/start"
+    ]
+  in
+  let declared name =
+    List.exists
+      (fun param -> String.equal param.Catalog.param_name name)
+      entry.Catalog.params
+  in
+  let args =
+    `Assoc
+      (List.filter (fun (name, _) -> declared name) valid_arguments
+       @ [ "mode", `String "text" ])
+  in
+  match
+    Catalog.instantiate ~descriptors:(Masc.Keeper_tool_descriptor.all_descriptors ())
+      ~args entry
+  with
+  | Error (Catalog.Argument_outside_enum { param = "mode"; actual = `String "text"; _ }) -> ()
+  | Ok _ -> fail "a read mode outside scene and regions was bound"
+  | Error error -> fail (Catalog.instantiation_error_to_string error)
+
 let test_follow_then_read observation case () =
   Eio_main.run (fun _ ->
-    let skill_name, read_mode = match observation with
-      | Regions -> "browser-live-click-regions", "regions"
-      | Content -> "browser-live-click-content", "scene" in
+    let skill_name = follow_skill in
+    let read_mode = read_mode observation in
     let args = `Assoc ["clientId",`String "11111111-1111-4111-8111-111111111111";
       "tabId",`Int 7;"documentId",`String "observed";"nodeId",`String "link";
-      "expectedUrl",`String "https://example.org/before"] in
+      "expectedUrl",`String "https://example.org/before";"mode",`String read_mode] in
     let entry = skill_entry skill_name in
     check string "native callable skill name"
       ("keeper_compose_" ^ skill_name) (Catalog.tool_name entry);
@@ -95,7 +146,7 @@ let test_follow_then_read observation case () =
           check bool "completed follow remains a recorded effect after read failure" true
             (failure.effect_disposition = Tool_result.Proven_post_effect);
           check bool "settled click receipt remains available" true
-          (List.exists (fun node -> Plan.Node_id.to_string node.Executor.node_id = "click"
+          (List.exists (fun node -> Plan.Node_id.to_string node.Executor.node_id = "follow"
             && (match node.result with Tool_result.Completed _ -> true | _ -> false)) failure.settled))
     | Navigated -> (
       check bool "composition completes" true (Result.is_ok result);
@@ -103,12 +154,14 @@ let test_follow_then_read observation case () =
 
 let test_navigate_then_read observation case () =
   Eio_main.run (fun _ ->
-    let skill_name, read_mode = match observation with
-      | Regions -> "browser-navigate-regions", "regions"
-      | Content -> "browser-navigate-content", "scene" in
+    let skill_name = navigate_skill in
+    let read_mode = read_mode observation in
     let requested_url = "https://example.org/start" in
     let landing_url = "https://example.org/redirected" in
-    let args = `Assoc [ "tabId", `Int 7; "url", `String requested_url ] in
+    let navigation = `Assoc [ "tabId", `Int 7; "url", `String requested_url ] in
+    let args =
+      `Assoc [ "tabId", `Int 7; "url", `String requested_url; "mode", `String read_mode ]
+    in
     let entry = skill_entry skill_name in
     check string "native callable skill name"
       ("keeper_compose_" ^ skill_name) (Catalog.tool_name entry);
@@ -128,7 +181,7 @@ let test_navigate_then_read observation case () =
         match node.tool_name with
         | "BrowserGoto" ->
           check bool "navigation pins the observed tab and requested URL" true
-            (input = args);
+            (input = navigation);
           (match case with
            | Navigation_failed -> rejected "navigation unavailable"
            | Invalid_receipt -> ok (`Assoc [ "title", `String "Landing page" ])
@@ -176,11 +229,13 @@ let test_navigate_then_read observation case () =
 
 let () = run "browser composition" ["native skill",[
   test_case "runtime destination output contract" `Quick test_follow_output_contract;
-  test_case "observed click then region read" `Quick (test_follow_then_read Regions Navigated);
-  test_case "failed click stops without replay" `Quick (test_follow_then_read Regions Navigation_failed);
-  test_case "read failure retains successful click without replay" `Quick (test_follow_then_read Regions Read_failed);
+  test_case "live follow offers only scene and regions" `Quick (test_mode_is_a_closed_choice follow_skill);
+  test_case "navigation offers only scene and regions" `Quick (test_mode_is_a_closed_choice navigate_skill);
+  test_case "observed follow then region read" `Quick (test_follow_then_read Regions Navigated);
+  test_case "failed follow stops without replay" `Quick (test_follow_then_read Regions Navigation_failed);
+  test_case "read failure retains successful follow without replay" `Quick (test_follow_then_read Regions Read_failed);
   test_case "region read rejects malformed follow receipt" `Quick (test_follow_then_read Regions Invalid_receipt);
-  test_case "observed click then visible content" `Quick (test_follow_then_read Content Navigated);
+  test_case "observed follow then visible content" `Quick (test_follow_then_read Content Navigated);
   test_case "content follow failure stops without replay" `Quick (test_follow_then_read Content Navigation_failed);
   test_case "content read failure retains follow receipt" `Quick (test_follow_then_read Content Read_failed);
   test_case "content read rejects malformed follow receipt" `Quick (test_follow_then_read Content Invalid_receipt);

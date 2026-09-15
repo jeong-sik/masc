@@ -8,7 +8,8 @@ recurrence_kind=cron with a 5-field recurrence_cron such as '0 9 * * 1-5'. \
 The due request wakes its Keeper; it does not authorize later effects. When \
 the creating turn has a routable continuation, the runtime records that \
 exact route as the result destination; otherwise it records an explicit \
-no-delivery policy."""
+no-delivery policy. A due time before the current second is refused with \
+error_kind due_already_past."""
 additional_properties = false
 
 # Held back from the request until the model asks for it by name.

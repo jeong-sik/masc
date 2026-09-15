@@ -389,18 +389,14 @@ let test_write_comes_back_through_recall () =
     true
     (String.length recorded_at = 20 && String.ends_with ~suffix:"Z" recorded_at);
   let response_revision = int_field "revision" response in
-  (match execution.Masc.Keeper_tool_execution.terminal_effect_receipt with
-   | Some
-       (Masc.Keeper_tool_execution.Memory_write_completed { revision }) ->
+  (match Current.read_for_keepers_dir ~keepers_dir ~keeper_id:meta.name with
+   | Ok (Some snapshot) ->
      Alcotest.(check int)
-       "terminal receipt names the committed revision"
+       "receipt revision names the committed snapshot"
+       snapshot.Current.revision
        response_revision
-       revision
-   | Some (Masc.Keeper_tool_execution.Surface_post_completed _) ->
-     Alcotest.fail "memory write returned a surface-post receipt"
-   | Some (Masc.Keeper_tool_execution.Memory_retract_completed _) ->
-     Alcotest.fail "memory write returned a memory-retract receipt"
-   | None -> Alcotest.fail "successful memory write has no terminal receipt");
+   | Ok None -> Alcotest.fail "successful memory write left no current snapshot"
+   | Error detail -> Alcotest.fail detail);
   let facts = current_facts ~keepers_dir ~keeper_id:meta.name in
   Alcotest.(check int) "one durable claim" 1 (List.length facts);
   let fact = List.hd facts in
@@ -488,14 +484,14 @@ let test_retract_cascades_through_public_tool_and_journals_reason () =
     "second conclusion names its now-missing conclusion premise"
     [ conclusion_id ]
     (string_list_field "missing_premise_ids" (List.nth invalidations 1));
-  (match execution.Masc.Keeper_tool_execution.terminal_effect_receipt with
-   | Some (Masc.Keeper_tool_execution.Memory_retract_completed { revision }) ->
-     Alcotest.(check int) "receipt revision" (int_field "revision" response) revision
-   | Some (Masc.Keeper_tool_execution.Memory_write_completed _) ->
-     Alcotest.fail "memory retract returned a memory-write receipt"
-   | Some (Masc.Keeper_tool_execution.Surface_post_completed _) ->
-     Alcotest.fail "memory retract returned a surface-post receipt"
-   | None -> Alcotest.fail "successful memory retract has no terminal receipt");
+  (match Current.read_for_keepers_dir ~keepers_dir ~keeper_id:meta.name with
+   | Ok (Some snapshot) ->
+     Alcotest.(check int)
+       "receipt revision names the committed snapshot"
+       snapshot.Current.revision
+       (int_field "revision" response)
+   | Ok None -> Alcotest.fail "successful memory retract left no current snapshot"
+   | Error detail -> Alcotest.fail detail);
   Alcotest.(check (list string))
     "recall authority retains only the independent observation"
     [ second_id ]
@@ -928,11 +924,7 @@ let test_invalid_write_is_proven_pre_effect () =
     "validation failure is known to precede persistence"
     true
     (result.Masc.Keeper_tool_execution.failure_effect_disposition
-     = Tool_result.Proven_pre_effect);
-  Alcotest.(check bool)
-    "validation failure has no terminal receipt"
-    true
-    (Option.is_none result.Masc.Keeper_tool_execution.terminal_effect_receipt)
+     = Tool_result.Proven_pre_effect)
 ;;
 
 let test_search_filters_exact_substring_without_ranking () =

@@ -300,6 +300,82 @@ module Limits = struct
   let sweeper_batch_size = env_int "MASC_BOARD_SWEEPER_BATCH_SIZE" 100
 end
 
+module Comment_page = struct
+  type request =
+    { offset : int
+    ; limit : int
+    }
+
+  type request_error =
+    | Negative_offset of int
+    | Limit_out_of_bounds of int
+
+  let request ~offset ~limit =
+    if offset < 0
+    then Error (Negative_offset offset)
+    else if limit < 1 || limit > Limits.max_comment_page_limit
+    then Error (Limit_out_of_bounds limit)
+    else Ok { offset; limit }
+  ;;
+
+  let request_error_to_string = function
+    | Negative_offset offset ->
+      Printf.sprintf "comment_offset must be 0 or greater (got %d)" offset
+    | Limit_out_of_bounds limit ->
+      Printf.sprintf
+        "comment_limit must be between 1 and %d (got %d)"
+        Limits.max_comment_page_limit
+        limit
+  ;;
+
+  type 'a page =
+    { offset : int
+    ; items : 'a list
+    ; total : int
+    ; next_offset : int option
+    }
+
+  type 'a t =
+    | Page of 'a page
+    | Offset_out_of_range of
+        { requested : int
+        ; total : int
+        }
+
+  let accept_every_page (_ : 'a page) = true
+
+  let select ?(fits = accept_every_page) (request : request) items =
+    let total = List.length items in
+    let page_of taken =
+      let reached = request.offset + List.length taken in
+      { offset = request.offset
+      ; items = taken
+      ; total
+      ; next_offset = (if reached < total then Some reached else None)
+      }
+    in
+    if request.offset > 0 && request.offset >= total
+    then Offset_out_of_range { requested = request.offset; total }
+    else (
+      let rec extend taken count remaining =
+        match remaining with
+        | [] -> taken
+        | next :: rest when count < request.limit ->
+          let candidate = taken @ [ next ] in
+          (match taken with
+           | [] -> extend candidate (count + 1) rest
+           | _ :: _ ->
+             if fits (page_of candidate)
+             then extend candidate (count + 1) rest
+             else taken)
+        | _ :: _ -> taken
+      in
+      Page
+        (page_of
+           (extend [] 0 (List.filteri (fun index _ -> index >= request.offset) items))))
+  ;;
+end
+
 (** {1 Vote Direction} *)
 
 type vote_direction = Up | Down

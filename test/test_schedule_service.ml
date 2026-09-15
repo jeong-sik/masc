@@ -55,7 +55,7 @@ let create_ok
   config
   =
   match
-    create config ?schedule_id ~requested_at:100.0
+    create config ~now:100.0 ?schedule_id ~requested_at:100.0
       ~requested_by:(human "requester") ~scheduled_by:(human "scheduler")
       ~due_at:200.0 ~payload:(payload_json ()) ~source:Operator_request ()
   with

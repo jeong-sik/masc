@@ -2522,8 +2522,8 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
                       [ ( "nodes"
                         , `List
                             [ `Assoc
-                                [ "id", `String "clock"
-                                ; "tool_name", `String "keeper_time_now"
+                                [ "id", `String "lane"
+                                ; "tool_name", `String "keeper_lane_status"
                                 ; "dependencies", `List []
                                 ; "batch_index", `Int 0
                                 ; "batch_size", `Int 1
@@ -2535,7 +2535,7 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
                             [ `Assoc
                                 [ "index", `Int 0
                                 ; "execution_mode", `String "concurrent"
-                                ; "node_ids", `List [ `String "clock" ]
+                                ; "node_ids", `List [ `String "lane" ]
                                 ] ] )
                       ] )
                 ] ] )
@@ -2607,7 +2607,7 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
          | _ -> false);
       (match profile.esp_flow with
        | Some { sf_nodes = [ node ]; sf_batches = [ batch ] } ->
-         Alcotest.(check string) "flow node tool" "keeper_time_now" node.sfn_tool_name;
+         Alcotest.(check string) "flow node tool" "keeper_lane_status" node.sfn_tool_name;
          Alcotest.(check string) "flow batch mode" "concurrent" batch.sfb_execution_mode
        | _ -> Alcotest.fail "expected one decoded flow node and batch");
       Alcotest.(check int) "whole surface bytes" 79984 ets_tool_surface_bytes;
@@ -2815,7 +2815,7 @@ let test_decode_skill_activations_keeps_exact_receipt_and_origin () =
                          ; "conversation_id", `String "conversation-antigravity"
                          ; "step_index", `Int 7
                          ] )
-                   ; "tool_name", `String "keeper_time_now"
+                   ; "tool_name", `String "keeper_lane_status"
                    ; "runtime_id", `String "claude.runtime"
                    ; "agent_core_turn", `Int 0
                    ; "observed_at", `String "2026-08-26T10:30:02Z"

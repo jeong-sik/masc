@@ -53,8 +53,10 @@ val settle : pending -> Yojson.Safe.t -> (unit, string) result
 
 type config
 
-(** Resolves the server origin, the lane token file and a fresh client id
-    from the command line and the workspace's connection file. *)
+(** Resolves the server origin, the lane token file and a fresh client id.
+    [--server], then an exported [MASC_HTTP_BASE_URL], fixes the origin;
+    without either, the workspace connection file names the port and stays
+    the source {!run} reads again after a failed request. *)
 val resolve_config
   :  base_path:string option
   -> server:string option
@@ -63,7 +65,13 @@ val resolve_config
 
 (** The native-messaging host: polls the server, forwards commands to the
     extension over stdout, reads replies from stdin. Returns when stdin
-    reaches EOF or the poll loop stops; the string is why. *)
+    reaches EOF or the poll loop stops; the string is why.
+
+    When a poll or result request to the server fails and the origin came
+    from the workspace connection file, the host reads that file again
+    before its next request and sends it to the port the file names then.
+    A result whose server moved is not retried there: its request belonged
+    to the server that issued it, so the host returns to polling. *)
 val run : Eio_unix.Stdenv.base -> config -> (unit, string) result
 
 (** The BiDi host: the same poll loop with commands dispatched to a loopback

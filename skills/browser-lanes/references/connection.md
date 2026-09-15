@@ -3,8 +3,15 @@
 ## 레인 오류
 
 - live의 연결 부재는 브라우저 프로세스, 확장, native host, 서버 연결 중 어디서나
-  발생할 수 있다. “브라우저가 꺼졌다”로 단정하지 않는다. 반환된 연결 목록을
-  확인하고 운영자에게 해당 연결 복구에 필요한 정보를 전달한다.
+  발생할 수 있다. “브라우저가 꺼졌다”로 단정하지 않는다. 결과의 `error`가 경우를
+  나눈다.
+  - `ambiguous_browser_clients`: `clients`에서 하나를 골라 그 clientId로 다시 부른다.
+  - `selected_client_disconnected`: `clients`에 남은 연결이 있으면 고른다. 없으면
+    `no_live_client`와 같이 한다.
+  - `no_live_client`: `host`에 설치된 host가 보는 포트(`launcher_port`)와
+    워크스페이스 포트(`workspace_port`), 판정(`verdict`)과 `message`가 있다. 이
+    `message`와 `retry`를 운영자에게 그대로 전한다. 고칠 수 있는 사람은 운영자뿐이라
+    같은 호출을 되풀이해도 답은 같다.
 - 닫힌 automation 세션에서 작업해야 한다면 자신의 새 세션을 연다.
   `BrowserSession`에는 현재 `open`/`close`가 있고 `status`는 없다.
 - 이미 시작된 세션이라는 응답은 소유권 증명이 아니다. 그 세션이 자신의 진행 중인

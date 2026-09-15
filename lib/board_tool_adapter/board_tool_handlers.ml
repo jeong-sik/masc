@@ -211,10 +211,12 @@ let handle_search ~tool_name ~start_time args : Tool_result.result =
         ~data:(`String (Printf.sprintf "'%s' 검색 결과 없음" query))
         ()
     else (
-      let fmt =
+      (* A listing does not read threads; the stored count is its only
+         source for how many replies each post has. *)
+      let fmt (post : Board.post) =
         if compact
-        then Board_tool_format.format_post_compact
-        else fun post -> Board_tool_format.format_post post
+        then Board_tool_format.format_post_compact ~replies:post.reply_count post
+        else Board_tool_format.format_post ~replies:post.reply_count post
       in
       let formatted = List.map fmt results in
       let separator = if compact then "\n" else "\n---\n" in

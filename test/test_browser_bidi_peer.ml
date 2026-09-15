@@ -65,7 +65,32 @@ let test_held_open_completion outcome () =
           ~url:(Printf.sprintf "ws://127.0.0.1:%d/session" port) (fun _->outcome) in
         check (result unit string) "callback result preserved" outcome actual;
         check bool "socket EOF without any extra protocol write" true (Eio.Promise.await eof))))
+(* A peer that refuses the WebSocket upgrade. ws-direct raises [Failure] for
+   the refused handshake; the connection returns it as its error rather than
+   letting it out of [with_connection], where the native host would end on an
+   uncaught exception. *)
+let test_refused_upgrade_is_the_connections_error () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      let clock=Eio.Stdenv.clock env in
+      let listener=Eio.Net.listen (Eio.Stdenv.net env) ~sw ~reuse_addr:true ~backlog:1
+        (`Tcp (Eio.Net.Ipaddr.V4.loopback,0)) in
+      let port=match Eio.Net.listening_addr listener with `Tcp (_,port)->port|_->fail "TCP expected" in
+      Eio.Fiber.fork ~sw (fun ()->Eio.Switch.run (fun peer_sw ->
+        let flow,_=Eio.Net.accept ~sw:peer_sw listener in
+        ignore (Ws_direct_eio.Driver.read_head ~clock flow : string);
+        Eio.Flow.copy_string "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n" flow));
+      let used=ref false in
+      match
+        Peer.with_connection ~env ~timeout:1.
+          ~url:(Printf.sprintf "ws://127.0.0.1:%d/session" port)
+          (fun _->used:=true;Ok ())
+      with
+      | Error _->check bool "no peer was handed to the callback" false !used
+      | Ok ()->fail "a refused upgrade produced a connection"
+      | exception Failure detail->failf "the refused upgrade escaped as an exception: %s" detail))
 let () = run "BiDi live peer" ["identity",[test_case "opaque contexts" `Quick test_context_identity];
   "lifetime",[test_case "normal callback closes held socket" `Quick (test_held_open_completion (Ok ()) );
-    test_case "error callback closes held socket" `Quick (test_held_open_completion (Error "owned failure"))];
+    test_case "error callback closes held socket" `Quick (test_held_open_completion (Error "owned failure"));
+    test_case "a refused upgrade is the connection's error" `Quick test_refused_upgrade_is_the_connections_error];
   "effect",[test_case "closed verbs" `Quick test_unsupported; test_case "parsed pointer boundary" `Quick test_pointer_validation]]

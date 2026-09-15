@@ -5536,7 +5536,7 @@ let test_tool_calls_select_keeper_before_limiting () =
       Masc.Keeper_tool_call_log.init ~base_path ();
       let append keeper index =
         Masc.Keeper_tool_call_log.log_call ~keeper_name:keeper
-          ~tool_name:"keeper_time_now" ~input:(`Assoc ["index", `Int index])
+          ~tool_name:"keeper_lane_status" ~input:(`Assoc ["index", `Int index])
           ~output_text:(string_of_int index) ~success:true ~duration_ms:1. () in
       for index = 1 to 100 do append "target" index done;
       for index = 1 to 1001 do append "busy-neighbor" index done;
@@ -5612,7 +5612,7 @@ let test_skill_evidence_joins_activation_and_composition () =
     `Assoc
       [ "record_kind", `String "tool_call"
       ; "composition_run_id", `String run_id
-      ; "tool_name", `String "keeper_time_now"
+      ; "tool_name", `String "keeper_lane_status"
       ]
   in
   let json =

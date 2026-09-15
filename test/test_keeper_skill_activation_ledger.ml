@@ -305,7 +305,7 @@ let test_delivery_and_later_action_form_one_exact_chain () =
         ~turn_ref
         ~active_skill_tool_use_ids:[ "call-skill" ]
         ~action_identity:(Ledger.Call_id "call-action")
-        ~tool_name:"keeper_time_now"
+        ~tool_name:"keeper_lane_status"
         ~runtime_id:"runtime-action"
         ~agent_core_turn:1
         ~observed_at:"2026-08-26T00:00:02Z"
@@ -318,7 +318,7 @@ let test_delivery_and_later_action_form_one_exact_chain () =
    | [ { actions = [ action ]; _ } ] ->
      check bool "later action id" true
        (action.identity = Ledger.Call_id "call-action");
-     check string "later action tool" "keeper_time_now" action.tool_name
+     check string "later action tool" "keeper_lane_status" action.tool_name
      ; check string "later action runtime" "runtime-action" action.runtime_id
    | _ -> fail "later action was not attached to the exact Skill invocation");
   let summary = Ledger.summarize with_action in
@@ -360,7 +360,7 @@ let test_delivery_and_later_action_form_one_exact_chain () =
         ~turn_ref
         ~active_skill_tool_use_ids:[ "call-skill" ]
         ~action_identity:(Ledger.Call_id "call-action")
-        ~tool_name:"keeper_time_now"
+        ~tool_name:"keeper_lane_status"
         ~runtime_id:"runtime-action"
         ~agent_core_turn:1
         ~observed_at:"2026-08-26T00:00:03Z"
@@ -458,7 +458,7 @@ let test_official_client_handoff_delivers_in_invocation_turn () =
           ~action_identity:
             (Ledger.Provider_step
                { conversation_id = "conversation-antigravity"; step_index = 7 })
-          ~tool_name:"keeper_time_now"
+          ~tool_name:"keeper_lane_status"
           ~runtime_id:"codex-runtime"
           ~agent_core_turn:0
           ~observed_at:"2026-08-26T00:00:02Z"
@@ -568,7 +568,7 @@ let test_action_before_delivery_is_durable_transition_evidence () =
        ~turn_ref
        ~active_skill_tool_use_ids:[ "call-undelivered" ]
        ~action_identity:(Ledger.Call_id "call-too-early")
-       ~tool_name:"keeper_time_now"
+       ~tool_name:"keeper_lane_status"
        ~runtime_id:"runtime-action"
        ~agent_core_turn:1
        ~observed_at:"2026-08-26T00:00:01Z"

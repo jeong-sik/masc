@@ -69,9 +69,10 @@ let queue config =
 let check_pending config expected =
   Alcotest.(check int) "durable obligations" expected (List.length (pending config))
 
-let reconcile config ~delivered ~retained =
+let reconcile ?(unroutable = 0) config ~delivered ~retained =
   let report = ok (Wake.reconcile_pending ~config) in
   Alcotest.(check int) "delivered" delivered report.Wake.delivered;
+  Alcotest.(check int) "unroutable" unroutable report.Wake.unroutable;
   Alcotest.(check int) "retained" retained report.Wake.retained
 
 let check_rejections config ~verification_ids ~authority =
@@ -139,6 +140,48 @@ let test_queue_failure_retains_obligation () =
       "{corrupt queue" (In_channel.with_open_text path In_channel.input_all);
     (* Remove only our injected corrupt fixture, then retry the same obligation. *)
     Sys.remove path;
+    reconcile config ~delivered:1 ~retained:0;
+    check_pending config 0;
+    check_rejection config ~verification_id ~authority:system)
+
+(* An MCP client that claimed and submitted the Task (codex-mcp-client in
+   the 2026-09-12 fleet) has no registry entry and no Keeper meta, so no queue
+   under its name is ever read. The obligation used to be retained and retried
+   every interval for good: nine of them logged 12,960 errors a day. *)
+let test_rejection_with_no_keeper_is_discharged_once () =
+  with_workspace (fun config ->
+    let verification_id = "vrf-no-keeper-producer" in
+    prepare_submission config verification_id;
+    commit config ~authority:system ~verification_id (D.Verdict_rejected { reason });
+    check_pending config 1;
+    reconcile config ~delivered:0 ~unroutable:1 ~retained:0;
+    check_pending config 0;
+    Alcotest.(check int) "no queue is written under a name no Keeper reads" 0
+      (List.length (queue config));
+    (match (ok (Workspace_backlog.read_backlog_r config)).tasks with
+     | [ { task_status = D.InProgress { assignee; _ }; handoff_context; _ } ] ->
+       Alcotest.(check string) "the Task stays with its producer" producer assignee;
+       Alcotest.(check (option string)) "the verdict's reason stays on the Task"
+         (Some reason)
+         (Option.bind handoff_context (fun (h : D.task_handoff_context) -> h.reason))
+     | _ -> Alcotest.fail "rejection must return work to InProgress");
+    reconcile config ~delivered:0 ~retained:0)
+
+(* A file at the Keeper meta path that this binary does not decode is a Keeper
+   whose meta the boot path re-materialises, not an absent one. It must not be
+   discharged as unroutable: the obligation waits and reaches the queue once
+   the meta reads again. *)
+let test_undecodable_producer_meta_retains_obligation () =
+  with_workspace (fun config ->
+    let verification_id = "vrf-undecodable-producer-meta" in
+    prepare_submission config verification_id;
+    commit config ~authority:system ~verification_id (D.Verdict_rejected { reason });
+    let meta_path = Masc.Keeper_types_profile.keeper_meta_path config producer in
+    Fs_compat.mkdir_p (Filename.dirname meta_path);
+    Out_channel.with_open_text meta_path (fun out -> output_string out "[]");
+    reconcile config ~delivered:0 ~unroutable:0 ~retained:1;
+    check_pending config 1;
+    persist_producer config;
     reconcile config ~delivered:1 ~retained:0;
     check_pending config 0;
     check_rejection config ~verification_id ~authority:system)
@@ -297,6 +340,10 @@ let () =
     [ "durable verdict delivery",
       [ Alcotest.test_case "system commit survives missing consumer" `Quick (test_commit_gap system)
       ; Alcotest.test_case "human commit survives missing consumer" `Quick (test_commit_gap human)
+      ; Alcotest.test_case "a rejection with no Keeper to deliver to is discharged once"
+          `Quick test_rejection_with_no_keeper_is_discharged_once
+      ; Alcotest.test_case "an undecodable producer meta retains the obligation"
+          `Quick test_undecodable_producer_meta_retains_obligation
       ; Alcotest.test_case "daemon startup recovers committed repair" `Quick
           (test_daemon_delivery ~start_before_commit:false)
       ; Alcotest.test_case "running daemon receives commit hook" `Quick

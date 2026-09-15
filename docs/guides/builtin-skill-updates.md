@@ -1,22 +1,48 @@
 # Updating builtin Skill packages
 
-`masc init --skills-only --base-path BASE` installs missing builtin packages
-and updates packages whose complete directory still matches the installation
-receipt. The installer runs this command after committing the binary/dashboard
-transaction. Before commit, `init --config-only` prepares config for the wizard
-without publishing packages. A subsequent package error keeps the committed
-binary and reports the failure; it does not restore an older executable. Body edits,
-resource edits, additions, deletions, empty directories and permission changes
-preserve the operator's complete active package. Multiply linked resources are
-uninspectable: automatic refresh preserves them, and explicit replacement
-refuses them until the operator resolves the shared-file relationship. Server startup only seeds
-missing packages; it does not update an existing package.
+Server startup and `masc init --skills-only --base-path BASE` reconcile
+`.masc/skills` with the packages the binary ships. Startup does this on every
+config root, fresh or existing, so a new binary's packages reach the runtime on
+restart. The installer runs the same command after committing the
+binary/dashboard transaction. Before commit, `init --config-only` prepares
+config for the wizard without publishing packages.
 
 An installation receipt is a digest of the whole package, kept outside the
-Skill source at `.masc/skill-packages/PACKAGE.sha256`. An existing package
-without a receipt is untracked. MASC cannot infer whether it is an untouched
-distribution package or an operator's own version, so it preserves it and
-prints the revision and the inspection command.
+Skill source at `.masc/skill-packages/PACKAGE.sha256`. The digest covers every
+file's bytes, every directory, and permissions. Each package gets one result:
+
+| Installed state | Result |
+|---|---|
+| No package directory | installed, receipt written |
+| Receipt matches the tree, tree equals this release | up to date |
+| Tree equals this release, receipt absent or describing another tree | receipt written; no Skill file changes |
+| Receipt matches the tree, this release differs | replaced; the previous tree is kept under `.masc/skill-packages/` |
+| Receipt does not match the tree (an edit since installation) | kept |
+| No receipt, tree differs from this release | kept |
+| Links, special files or unreadable directories | kept |
+| Receipt for a package this release no longer ships, matching its tree | tree moved under `.masc/skill-packages/`, receipt removed |
+| Receipt for a package this release no longer ships, tree edited | kept |
+
+A package without a receipt is never removed. MASC cannot tell whether it is
+an untouched former builtin or the operator's own Skill. A tree that differs
+only in permissions is still a different tree.
+
+`masc init` prints one line per package and exits non-zero when any package
+could not be reconciled. Startup logs the same lines and keeps starting; kept
+and failed packages are warnings. A later package error during installation
+keeps the committed binary and reports the failure; it does not restore an older
+executable. Multiply linked resources are uninspectable: reconciliation keeps
+them, and explicit replacement refuses them until the operator resolves the
+shared-file relationship.
+
+A kept package that this release no longer ships stays active. Delete its
+receipt to keep it as your own Skill, or delete the Skill directory as well to
+drop it.
+
+Every replacement and retirement leaves one complete previous tree under
+`.masc/skill-packages/`. Nothing removes these directories automatically.
+Because an unchanged release reports every package as up to date, a backup only
+appears when the shipped packages change.
 
 For an untracked or modified package, review the actual bundled files before
 choosing replacement. Use a fresh destination directory for the export:
@@ -45,8 +71,10 @@ directory or symlink is not overwritten.
 
 The receipt is saved after publication and parent-directory sync. A failure
 after exchange is reported as **published but unrecorded**, with the previous
-package's location. Inspect both trees before recovery. A stale receipt leaves
-the new package preserved on subsequent automatic updates. An export whose
+package's location. Inspect both trees before recovery. If the published tree
+equals the release, the next reconciliation writes its receipt. A retirement
+whose tree was moved but whose receipt could not be removed is reported as
+**retired but unrecorded**, with the backup's location. An export whose
 no-replace publication succeeded but parent sync failed reports **exported but
 unsynced** with the existing destination; inspect that directory before retrying.
 

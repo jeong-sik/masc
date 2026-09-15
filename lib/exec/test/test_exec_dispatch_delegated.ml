@@ -51,10 +51,10 @@ let test_delegated_round_trip () =
 let test_delegated_failure_is_a_status () =
   let caller, _calls = recording_caller ~status:(Unix.WEXITED 3) ~prefix:"out:" () in
   let result =
-    Exec_dispatch.dispatch_simple (delegated_simple ~caller ~argv:[ "time"; "now" ])
+    Exec_dispatch.dispatch_simple (delegated_simple ~caller ~argv:[ "lane"; "status" ])
   in
   assert (result.status = Unix.WEXITED 3);
-  assert (String.trim result.stdout = "out:time now")
+  assert (String.trim result.stdout = "out:lane status")
 
 let test_delegated_redirect_refused () =
   (* The caller answers with text, not descriptors, so a file redirect on

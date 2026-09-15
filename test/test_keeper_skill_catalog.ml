@@ -104,21 +104,21 @@ description: Walk the release checklist before shipping.
 
 let composition_document =
   {|---
-name: time-memory-query
-description: Feed the exact clock result into memory search.
+name: status-memory-query
+description: Feed the lane profile into memory search.
 ---
 
-Use when durable memory should be searched at the current instant.
+Use when durable memory should be searched for the current lane.
 
 ```toml composition
 [[compositions]]
-name = "time-memory-query"
-description = "Feed the exact clock result into memory search."
+name = "status-memory-query"
+description = "Feed the lane profile into memory search."
 execution = "inline"
 
 [[compositions.nodes]]
-id = "time"
-tool = "keeper_time_now"
+id = "lane"
+tool = "keeper_lane_status"
 [compositions.nodes.input]
 kind = "literal"
 value = {}
@@ -126,120 +126,34 @@ value = {}
 [[compositions.nodes]]
 id = "search"
 tool = "keeper_memory_search"
-after = ["time"]
+after = ["lane"]
 [compositions.nodes.input]
 kind = "object"
 [[compositions.nodes.input.fields]]
 name = "query"
 [compositions.nodes.input.fields.value]
 kind = "output"
-node = "time"
-pointer = "/now_iso"
-```
-|}
-;;
-
-(* The builtin run-and-read skill as it ships: start, wait and read as one
-   plan, the handle handed from start to the two that follow. Its projection
-   was refused on every keeper turn while keeper_spawn's output was opaque
-   (live log 2026-09-08); this pins that the handle is now named. *)
-let run_and_read_document =
-  {|---
-name: run-and-read
-description: Run a command, wait for it to exit, and read its output in one call.
----
-
-One plan instead of three turns.
-
-```toml composition
-[[compositions]]
-name = "run-and-read"
-description = "Run a command, wait for it to exit, and read its output in one call."
-execution = "inline"
-
-[[compositions.params]]
-name = "command"
-type = "string"
-description = "One shell command line, passed to sh -c."
-
-[[compositions.params]]
-name = "timeout_sec"
-type = "number"
-description = "Seconds to wait for the command to exit before giving up on it."
-
-[[compositions.nodes]]
-id = "start"
-tool = "keeper_spawn"
-[compositions.nodes.input]
-kind = "object"
-[[compositions.nodes.input.fields]]
-name = "argv"
-[compositions.nodes.input.fields.value]
-kind = "array"
-[[compositions.nodes.input.fields.value.items]]
-kind = "literal"
-value = "sh"
-[[compositions.nodes.input.fields.value.items]]
-kind = "literal"
-value = "-c"
-[[compositions.nodes.input.fields.value.items]]
-kind = "param"
-name = "command"
-
-[[compositions.nodes]]
-id = "settle"
-tool = "keeper_spawn_wait"
-after = ["start"]
-[compositions.nodes.input]
-kind = "object"
-[[compositions.nodes.input.fields]]
-name = "handle"
-[compositions.nodes.input.fields.value]
-kind = "output"
-node = "start"
-pointer = "/handle"
-[[compositions.nodes.input.fields]]
-name = "until"
-[compositions.nodes.input.fields.value]
-kind = "literal"
-value = "exit"
-[[compositions.nodes.input.fields]]
-name = "timeout_sec"
-[compositions.nodes.input.fields.value]
-kind = "param"
-name = "timeout_sec"
-
-[[compositions.nodes]]
-id = "output"
-tool = "keeper_spawn_read"
-after = ["settle"]
-[compositions.nodes.input]
-kind = "object"
-[[compositions.nodes.input.fields]]
-name = "handle"
-[compositions.nodes.input.fields.value]
-kind = "output"
-node = "start"
-pointer = "/handle"
+node = "lane"
+pointer = "/profile"
 ```
 |}
 ;;
 
 let async_composition_document =
   {|---
-name: quiet-clock
-description: Read the clock through the durable async broker.
+name: quiet-lane
+description: Read the lane status through the durable async broker.
 ---
 
 ```toml composition
 [[compositions]]
-name = "quiet-clock"
-description = "Read the clock through the durable async broker."
+name = "quiet-lane"
+description = "Read the lane status through the durable async broker."
 execution = "async"
 
 [[compositions.nodes]]
-id = "clock"
-tool = "keeper_time_now"
+id = "lane"
+tool = "keeper_lane_status"
 [compositions.nodes.input]
 kind = "literal"
 value = {}
@@ -250,20 +164,20 @@ value = {}
 let composition_document_with_invocation_policy ~key value =
   Printf.sprintf
     {|---
-name: manual-clock
-description: Read the clock only when a task explicitly names this skill.
+name: manual-lane
+description: Read the lane status only when a task explicitly names this skill.
 %s: %s
 ---
 
 ```toml composition
 [[compositions]]
-name = "manual-clock"
-description = "Read the clock only when a task explicitly names this skill."
+name = "manual-lane"
+description = "Read the lane status only when a task explicitly names this skill."
 execution = "inline"
 
 [[compositions.nodes]]
-id = "clock"
-tool = "keeper_time_now"
+id = "lane"
+tool = "keeper_lane_status"
 [compositions.nodes.input]
 kind = "literal"
 value = {}
@@ -318,8 +232,8 @@ description = "An example, not a declaration."
 execution = "inline"
 
 [[compositions.nodes]]
-id = "clock"
-tool = "keeper_time_now"
+id = "lane"
+tool = "keeper_lane_status"
 [compositions.nodes.input]
 kind = "literal"
 value = {}
@@ -349,8 +263,8 @@ execution = "inline"
 
 let fenced_prose_then_composition_document =
   {|---
-name: time-memory-query
-description: Feed the exact clock result into memory search.
+name: status-memory-query
+description: Feed the lane profile into memory search.
 ---
 
 Check the runtime first:
@@ -361,13 +275,13 @@ masc keeper status
 
 ```toml composition
 [[compositions]]
-name = "time-memory-query"
-description = "Feed the exact clock result into memory search."
+name = "status-memory-query"
+description = "Feed the lane profile into memory search."
 execution = "inline"
 
 [[compositions.nodes]]
-id = "time"
-tool = "keeper_time_now"
+id = "lane"
+tool = "keeper_lane_status"
 [compositions.nodes.input]
 kind = "literal"
 value = {}
@@ -395,26 +309,8 @@ let test_instruction_skill_parses () =
     (contains ~needle:"# Release checklist" skill.Skill_catalog.body)
 ;;
 
-let test_run_and_read_hands_the_spawn_handle_on () =
-  let snapshot = snapshot_of_document ~directory:"run-and-read" run_and_read_document in
-  let catalog, diagnostics = Skill_catalog.of_snapshot snapshot in
-  (match diagnostics with
-   | [] -> ()
-   | diagnostic :: _ ->
-     fail
-       ("run-and-read was refused: "
-        ^ Skill_catalog.error_to_string diagnostic.Skill_catalog.error));
-  match Skill_catalog.skills catalog with
-  | [ skill ] ->
-    (match skill.Skill_catalog.surface with
-     | Skill_catalog.Composition entry ->
-       check string "tool name" "keeper_compose_run-and-read" (Catalog.tool_name entry)
-     | Skill_catalog.Instruction -> fail "run-and-read projected as an instruction")
-  | skills -> failf "expected one skill, got %d" (List.length skills)
-;;
-
 let test_composition_skill_materializes_entry () =
-  let skill = parsed ~directory:"time-memory-query" composition_document in
+  let skill = parsed ~directory:"status-memory-query" composition_document in
   match skill.Skill_catalog.surface with
   | Skill_catalog.Instruction ->
     fail "composition document parsed as an instruction skill"
@@ -422,7 +318,7 @@ let test_composition_skill_materializes_entry () =
     check
       string
       "tool name"
-      "keeper_compose_time-memory-query"
+      "keeper_compose_status-memory-query"
       (Catalog.tool_name entry);
     check
       string
@@ -503,7 +399,7 @@ let test_tilde_fence_also_escapes_an_example () =
    closing run. *)
 let test_ordinary_fence_does_not_hide_a_declaration () =
   let skill =
-    parsed ~directory:"time-memory-query" fenced_prose_then_composition_document
+    parsed ~directory:"status-memory-query" fenced_prose_then_composition_document
   in
   match skill.Skill_catalog.surface with
   | Skill_catalog.Instruction -> fail "the declaration after a shell fence was lost"
@@ -511,7 +407,7 @@ let test_ordinary_fence_does_not_hide_a_declaration () =
     check
       string
       "tool name"
-      "keeper_compose_time-memory-query"
+      "keeper_compose_status-memory-query"
       (Catalog.tool_name entry)
 ;;
 
@@ -520,24 +416,24 @@ let test_composition_ast_keeps_source_span_and_long_close () =
     String.concat
       "\n"
       [ "---"
-      ; "name: located-clock"
+      ; "name: located-lane"
       ; "description: Keep the declaration location."
       ; "---"
       ; ""
       ; "```toml composition"
       ; "[[compositions]]"
-      ; "name = \"located-clock\""
+      ; "name = \"located-lane\""
       ; "execution = \"inline\""
       ; "[[compositions.nodes]]"
-      ; "id = \"clock\""
-      ; "tool = \"keeper_time_now\""
+      ; "id = \"lane\""
+      ; "tool = \"keeper_lane_status\""
       ; "[compositions.nodes.input]"
       ; "kind = \"literal\""
       ; "value = {}"
       ; "````"
       ]
   in
-  let skill = parsed ~directory:"located-clock" document in
+  let skill = parsed ~directory:"located-lane" document in
   match skill.composition_span with
   | None -> fail "composition AST lost its source span"
   | Some span ->
@@ -668,8 +564,8 @@ let test_composition_name_must_match_skill () =
       ; "execution = \"inline\""
       ; ""
       ; "[[compositions.nodes]]"
-      ; "id = \"time\""
-      ; "tool = \"keeper_time_now\""
+      ; "id = \"lane\""
+      ; "tool = \"keeper_lane_status\""
       ; "[compositions.nodes.input]"
       ; "kind = \"literal\""
       ; "value = {}"
@@ -687,7 +583,7 @@ let test_composition_name_must_match_skill () =
 let test_partition_documents_sorts_and_reports_duplicates () =
   let catalog, rejected =
     Skill_catalog.partition_documents
-      [ "time-memory-query", composition_document
+      [ "status-memory-query", composition_document
       ; "release-checklist", instruction_document
       ]
   in
@@ -695,9 +591,9 @@ let test_partition_documents_sorts_and_reports_duplicates () =
   (match Skill_catalog.skills catalog with
    | [ first; second ] ->
      check string "sorted first" "release-checklist" first.Skill_catalog.name;
-     check string "sorted second" "time-memory-query" second.Skill_catalog.name
+     check string "sorted second" "status-memory-query" second.Skill_catalog.name
    | skills -> fail (Printf.sprintf "expected 2 skills, got %d" (List.length skills)));
-  (match Skill_catalog.find catalog "time-memory-query" with
+  (match Skill_catalog.find catalog "status-memory-query" with
    | Some skill ->
      check
        string
@@ -710,7 +606,7 @@ let test_partition_documents_sorts_and_reports_duplicates () =
      check
        string
        "composition entries surface the validated tool"
-       "keeper_compose_time-memory-query"
+       "keeper_compose_status-memory-query"
        (Catalog.tool_name entry)
    | entries ->
      fail
@@ -764,7 +660,7 @@ let test_unknown_policy_fields_are_document_rejections () =
     (fun (key, value) ->
        match
          Skill_catalog.parse_skill
-           ~directory:"manual-clock"
+           ~directory:"manual-lane"
            (composition_document_with_invocation_policy ~key value)
        with
        | Error (Skill_catalog.Definition_rejected { diagnostics; _ }) ->
@@ -828,7 +724,7 @@ let test_composition_skill_joins_projection () =
     Masc.Keeper_run_tools_setup.expected_model_tool_names
         ~identity_names:[]
       ~skill_catalog:
-        (skill_catalog_of [ "time-memory-query", composition_document ])
+        (skill_catalog_of [ "status-memory-query", composition_document ])
       ~model_visible_descriptors:descriptors
       ()
   in
@@ -836,7 +732,7 @@ let test_composition_skill_joins_projection () =
     bool
     "composition skill joins the descriptor projection"
     true
-    (List.mem "keeper_compose_time-memory-query" expected);
+    (List.mem "keeper_compose_status-memory-query" expected);
   check
     bool
     "proposal async controls do not depend on Skill execution mode"
@@ -846,7 +742,7 @@ let test_composition_skill_joins_projection () =
   let expected_async =
     Masc.Keeper_run_tools_setup.expected_model_tool_names
         ~identity_names:[]
-      ~skill_catalog:(skill_catalog_of [ "quiet-clock", async_composition_document ])
+      ~skill_catalog:(skill_catalog_of [ "quiet-lane", async_composition_document ])
       ~model_visible_descriptors:descriptors
       ()
   in
@@ -867,10 +763,6 @@ let () =
             "composition skill materializes a catalog entry"
             `Quick
             test_composition_skill_materializes_entry
-        ; test_case
-            "run-and-read hands the spawn handle on"
-            `Quick
-            test_run_and_read_hands_the_spawn_handle_on
         ; test_case
             "directory name mismatch is rejected"
             `Quick

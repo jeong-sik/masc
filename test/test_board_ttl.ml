@@ -146,6 +146,40 @@ let test_sweep_reclaims_orphaned_reactions_and_votes () =
   Alcotest.(check int) "orphaned votes reclaimed" 0
     (Hashtbl.length store.vote_log)
 
+(* A reply the sweeper removes leaves the post's reply count with it, so a
+   listing never announces a reply no read can return. *)
+let test_sweep_takes_an_expired_reply_out_of_the_post_count () =
+  let store = create_store () in
+  let post_id =
+    match
+      create_post store ~author:"test-agent"
+        ~content:"Post with a permanent and an expiring reply"
+        ~post_kind:Human_post ()
+    with
+    | Ok post -> Post_id.to_string post.id
+    | Error e -> Alcotest.fail (show_board_error e)
+  in
+  let add_reply ~ttl_hours =
+    match
+      add_comment store ~post_id ~author:"commenter" ~content:"reply" ~ttl_hours ()
+    with
+    | Ok comment -> Comment_id.to_string comment.id
+    | Error e -> Alcotest.fail (show_board_error e)
+  in
+  let (_ : string) = add_reply ~ttl_hours:0 in
+  let expiring_id = add_reply ~ttl_hours:1 in
+  let reply_count () = (Hashtbl.find store.posts post_id).reply_count in
+  Alcotest.(check int) "both replies counted" 2 (reply_count ());
+  let expiring = Hashtbl.find store.comments expiring_id in
+  Hashtbl.replace store.comments expiring_id { expiring with expires_at = 1.0 };
+  let (_, removed_comments) = sweep store in
+  Alcotest.(check int) "the expired reply was swept" 1 removed_comments;
+  Alcotest.(check int) "the count follows the swept reply" 1 (reply_count ());
+  Alcotest.(check int) "the count matches the replies a read returns" 1
+    (match get_post_and_comments store ~post_id with
+     | Ok (_, comments) -> List.length comments
+     | Error e -> Alcotest.fail (show_board_error e))
+
 let schedule_reset_timestamp_for_test = 0.0
 
 let reset_sweep_schedule_for_test =
@@ -285,6 +319,9 @@ let () =
           Alcotest.test_case "sweep reclaims orphaned reactions and votes"
             `Quick
             (with_eio test_sweep_reclaims_orphaned_reactions_and_votes);
+          Alcotest.test_case "sweep takes an expired reply out of the post count"
+            `Quick
+            (with_eio test_sweep_takes_an_expired_reply_out_of_the_post_count);
           Alcotest.test_case "maybe_sweep schedules once" `Quick
             (with_eio test_maybe_sweep_updates_schedule_once);
           Alcotest.test_case "maybe_sweep concurrent schedules once" `Quick

@@ -7,3 +7,11 @@ val verify_file : root:string -> string -> (string * int, string) result
 
 (** Validate a loopback WebSocket endpoint without connecting. *)
 val endpoint : string -> (string * int * string, string) result
+
+module For_testing : sig
+  (** The window a BiDi command's reply is awaited under: the reply whenever
+      it arrived, even in the scheduler pass the window closed; [`Timeout]
+      only when none had. *)
+  val reply_within :
+    clock:_ Eio.Time.clock -> timeout_s:float -> 'a Eio.Promise.t -> ('a, [ `Timeout ]) result
+end

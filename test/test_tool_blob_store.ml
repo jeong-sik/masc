@@ -480,6 +480,21 @@ let test_a_read_error_at_the_blob_path_lets_the_next_put_replace_it () =
       Alcotest.(check (option string)) "the next put replaces what was at the path"
         (Some payload) (fetch_ok store ~sha256))
 
+(* Only [put] reads the set of written addresses, so a [put_durable] write does
+   not enter it: a put of the same bytes afterwards still writes the file. *)
+let test_a_durable_put_does_not_let_a_later_put_skip_its_write () =
+  with_temp_dir (fun dir ->
+      let store = B.create ~base_path:dir in
+      let payload = "written durably first" in
+      let reference = B.put_durable store ~bytes:payload ~mime:"text/plain" in
+      let path = blob_path store reference.O.sha256 in
+      let durable_inode = (Unix.stat path).Unix.st_ino in
+      ignore (B.put store ~bytes:payload ~mime:"text/plain" : O.t);
+      Alcotest.(check bool) "the put after a durable put writes the file again" true
+        (durable_inode <> (Unix.stat path).Unix.st_ino);
+      Alcotest.(check (option string)) "and the bytes are the same" (Some payload)
+        (fetch_ok store ~sha256:reference.O.sha256))
+
 let test_sharding_layout () =
   with_temp_dir (fun dir ->
       let store = B.create ~base_path:dir in
@@ -1445,6 +1460,8 @@ let () =
             test_a_range_read_that_finds_the_blob_gone_lets_the_next_put_write_it;
           Alcotest.test_case "a read error at the blob path lets the next put replace it" `Quick
             test_a_read_error_at_the_blob_path_lets_the_next_put_replace_it;
+          Alcotest.test_case "a durable put does not let a later put skip its write" `Quick
+            test_a_durable_put_does_not_let_a_later_put_skip_its_write;
           Alcotest.test_case "sharding layout" `Quick test_sharding_layout;
         ] );
       ( "gc",

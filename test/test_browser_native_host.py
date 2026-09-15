@@ -33,7 +33,18 @@ FOLLOWS_WORKSPACE = {
     "test_failed_poll_reads_the_workspace_port_again",
     "test_a_failed_poll_stays_while_the_server_still_answers",
     "test_the_host_moves_once_the_named_server_answers",
+    "test_a_server_that_refuses_the_token_is_not_followed",
 }
+SHORT_POLL_TESTS = {
+    "test_a_failed_poll_stays_while_the_server_still_answers",
+    "test_the_host_moves_once_the_named_server_answers",
+    "test_an_exported_port_is_never_followed",
+    "test_a_server_that_refuses_the_token_is_not_followed",
+    "test_a_refused_result_is_not_sent_again",
+}
+# A host that moved would poll right after the ping it was answered on; this
+# is ample room for that poll to arrive if it were coming.
+MOVE_WOULD_POLL_WITHIN_SEC = 2
 
 
 def closed_port():
@@ -42,10 +53,17 @@ def closed_port():
         return probe.getsockname()[1]
 
 
-def start_peer(test_name):
+def start_peer(test_name, token=TOKEN):
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Peer)
+    server.token = token
+    server.token_refused = threading.Event()
+    server.paths = []
     server.commands = queue.Queue()
     server.results = queue.Queue()
+    server.result_posts = []
+    server.refuse_results = test_name == "test_a_refused_result_is_not_sent_again"
+    server.result_refused = threading.Event()
+    server.polls_after_result_refused = threading.Event()
     server.poll_seen = threading.Event()
     server.ping_seen = threading.Event()
     server.fail_next_poll = threading.Event()
@@ -53,11 +71,7 @@ def start_peer(test_name):
     server.polls_after_failure = threading.Event()
     server.disconnected = threading.Event()
     server.identities = []
-    server.poll_wait_sec = SHORT_POLL_SEC if test_name in {
-        "test_a_failed_poll_stays_while_the_server_still_answers",
-        "test_the_host_moves_once_the_named_server_answers",
-        "test_an_exported_port_is_never_followed",
-    } else LONG_POLL_SEC
+    server.poll_wait_sec = SHORT_POLL_SEC if test_name in SHORT_POLL_TESTS else LONG_POLL_SEC
     server.reject_client = test_name == "test_retired_client_exits_for_fresh_identity"
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -112,7 +126,9 @@ class Peer(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         body = self.body()
-        if self.headers.get("x-lane-token") != TOKEN or self.headers.get("x-lane") != "live":
+        self.server.paths.append(self.path)
+        if self.headers.get("x-lane-token") != self.server.token or self.headers.get("x-lane") != "live":
+            self.server.token_refused.set()
             self.send_error(403)
             return
         client_id = self.headers.get("x-browser-client-id")
@@ -131,6 +147,8 @@ class Peer(http.server.BaseHTTPRequestHandler):
             self.server.poll_seen.set()
             if self.server.failed_poll_answered.is_set():
                 self.server.polls_after_failure.set()
+            if self.server.result_refused.is_set():
+                self.server.polls_after_result_refused.set()
             if self.server.reject_client:
                 self.send_error(400)
                 return
@@ -144,6 +162,11 @@ class Peer(http.server.BaseHTTPRequestHandler):
             except queue.Empty:
                 response = {"ok": True, "empty": True}
         elif self.path == "/browser-lane/result":
+            self.server.result_posts.append(body)
+            if self.server.refuse_results:
+                self.server.result_refused.set()
+                self.send_error(500)
+                return
             self.server.results.put(body)
             response = {"ok": True}
         elif self.path == "/browser-lane/disconnect":
@@ -269,6 +292,33 @@ class NativeHost(unittest.TestCase):
         self.assertTrue(other.poll_seen.wait(timeout=POLL_RETRY_WAIT_SEC))
         self.assertTrue(other.ping_seen.is_set(), "the host moves only after the new server answers")
         self.assertEqual(len({identity[0] for identity in self.server.identities + other.identities}), 1)
+
+    def test_a_server_that_refuses_the_token_is_not_followed(self):
+        # A server of another workspace on the named port answers the ping
+        # with 403: it does not serve this lane, so the host stays put.
+        self.assertTrue(self.server.poll_seen.wait(timeout=5))
+        other, other_thread = start_peer(self._testMethodName, token="another-workspace-lane-token")
+        self.peers.append((other, other_thread))
+        self.connection.write_text(f"[server]\nhttp_port = {other.server_port}\n")
+        stop_peer(self.server, self.thread)
+        self.assertTrue(other.token_refused.wait(timeout=POLL_RETRY_WAIT_SEC))
+        time.sleep(MOVE_WOULD_POLL_WITHIN_SEC)
+        self.assertEqual(set(other.paths), {"/browser-lane/ping"},
+                         "a server that refuses the lane token is only asked, never polled")
+
+    def test_a_refused_result_is_not_sent_again(self):
+        # The server received the result and answered 500. Sending the same
+        # bytes again asks the same question, so the host goes back to polling.
+        command = {"id": "refused-result", "verb": "tabs.list", "args": {}}
+        self.server.commands.put(command)
+        self.assert_command(command)
+        self.process.stdin.write(encode_frame({"id": "refused-result", "ok": True, "data": []}))
+        self.process.stdin.flush()
+        # Sending it again would keep the host out of its poll loop, so the next
+        # poll is the proof; the result was posted once before it.
+        self.assertTrue(self.server.polls_after_result_refused.wait(timeout=POLL_RETRY_WAIT_SEC))
+        self.assertEqual(len(self.server.result_posts), 1)
+        self.assertFalse(self.server.ping_seen.is_set(), "an answered result is not a reason to look elsewhere")
 
     def test_an_exported_port_is_never_followed(self):
         self.assertTrue(self.server.poll_seen.wait(timeout=5))

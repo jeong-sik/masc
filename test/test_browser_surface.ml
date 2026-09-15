@@ -256,8 +256,8 @@ let test_keeper_discovers_clients_without_dispatch () =
 (* Measured 2026-09-15: a Keeper's BrowserTabs answered only
    {"error":"client_not_connected","clients":[]} for days while the installed
    host polled port 64850 and the workspace connection named 61372. The
-   rejection carries the host configuration beside the port this server
-   listens on, from every path a browser can be found missing on. *)
+   rejection carries the host configuration beside what this server observes
+   of its own lane, from every path a browser can be found missing on. *)
 let test_keeper_hears_why_no_browser_is_connected () =
   let base = Filename.temp_dir "masc-browser-host-endpoint-" "" in
   let masc = Filename.concat base ".masc" in
@@ -269,10 +269,15 @@ let test_keeper_hears_why_no_browser_is_connected () =
   let launcher = Filename.concat host "launch" in
   let declaration = Filename.concat host "launch.json" in
   let connection = Filename.concat config "connection.toml" in
+  let script = "#!/bin/sh\nexec /unused/masc-browser-host --base-path " ^ base
+               ^ " --token-file /unused/token \"$@\"\n" in
+  let digest text = Digestif.SHA256.(to_hex (digest_string text)) in
+  let declare fields = write declaration (Yojson.Safe.to_string (`Assoc fields)) in
   write connection "[server]\nhttp_port = 61372\n";
-  write launcher ("#!/bin/sh\nexec /unused/masc-browser-host --base-path " ^ base
-                  ^ " --token-file /unused/token --server http://127.0.0.1:64850 \"$@\"\n");
+  write launcher script;
+  (* The serving port is process state; leave it unknown for the next test. *)
   Fun.protect ~finally:(fun () ->
+      Browser_lane.withdraw_serving_port ();
       List.iter (fun path -> if Sys.file_exists path then Sys.remove path)
         [launcher; declaration; connection];
       List.iter Sys.rmdir [host; lane; config; masc; base]) @@ fun () ->
@@ -288,31 +293,59 @@ let test_keeper_hears_why_no_browser_is_connected () =
         (Yojson.Safe.from_string (Tool_result.message result) = failure.data);
       failure.data
     | _ -> fail "a browser tool succeeded with no browser connected" in
-  let data = rejected (Masc.Tool_misc_browser_lane.handle_tabs ~base_path:base
+  let tabs () = rejected (Masc.Tool_misc_browser_lane.handle_tabs ~base_path:base
     ~tool_name:"BrowserTabs" ~start_time:0. (`Assoc [])) in
+  let host_field data key = U.(data |> member "host" |> member key) in
+  let data = tabs () in
   check string "the case is named" "no_live_client" U.(data |> member "error" |> to_string);
   check string "a launcher without a declaration cannot be vouched for" "undeclared"
-    U.(data |> member "host" |> member "launcher" |> to_string);
+    U.(host_field data "launcher" |> to_string);
+  check bool "no bound listener is known, so no serving port is claimed" true
+    (host_field data "serving_port" = `Null);
   check string "so the configuration is not aligned" "misconfigured"
-    U.(data |> member "host" |> member "verdict" |> to_string);
-  write declaration "{\"destination\":\"workspace_connection\"}\n";
+    U.(host_field data "verdict" |> to_string);
+  declare ["destination",`String "workspace_connection";
+           "launcher_sha256",`String (digest (script ^ "# edited\n"))];
+  check string "a declaration written for other launcher contents is refused"
+    "describes_another_launcher" U.(host_field (tabs ()) "launcher" |> to_string);
+  declare ["destination",`String "workspace_connection";
+           "launcher_sha256",`String (digest script); "server",`String "http://127.0.0.1:64850"];
+  check string "a field the reader does not know makes the declaration unreadable"
+    "unreadable" U.(host_field (tabs ()) "launcher" |> to_string);
+  declare ["launcher_sha256",`String (digest script); "destination",`String "workspace_connection"];
   Browser_lane.install_serving_port 64850;
   let absent = "40000000-0000-4000-8000-000000000001" in
-  let result, phase = Masc.Tool_misc_browser_lane.handle_interact_with_phase ~base_path:base
+  let interact () = Masc.Tool_misc_browser_lane.handle_interact_with_phase ~base_path:base
     ~tool_name:"BrowserInteract" ~start_time:0.
     (`Assoc ["lane",`String "live";"clientId",`String absent;"tabId",`Int 1;
       "action",`String "click";"selector",`String "a";"expectedUrl",`String "https://example.org/"]) in
+  let result, phase = interact () in
   check bool "a vanished browser rejects before any effect" true (phase = Tool_result.Proven_pre_effect);
   let data = rejected result in
   check string "the selected browser is named as gone" "selected_client_disconnected"
     U.(data |> member "error" |> to_string);
   check string "the gone browser is echoed" absent U.(data |> member "clientId" |> to_string);
-  check string "the declared launcher follows the workspace" "follows_workspace"
-    U.(data |> member "host" |> member "launcher" |> to_string);
-  check int "the port the workspace names" 61372 U.(data |> member "host" |> member "workspace_port" |> to_int);
-  check int "the port this server listens on" 64850 U.(data |> member "host" |> member "serving_port" |> to_int);
-  check string "a workspace port other than the serving port is not aligned" "misconfigured"
-    U.(data |> member "host" |> member "verdict" |> to_string);
+  check string "the declared launcher follows the workspace, in any field order" "follows_workspace"
+    U.(host_field data "launcher" |> to_string);
+  check int "the port the workspace names" 61372 U.(host_field data "workspace_port" |> to_int);
+  check int "the port this server bound" 64850 U.(host_field data "serving_port" |> to_int);
+  check int "no host polls this server" 0 U.(host_field data "polling_hosts" |> to_int);
+  check string "a workspace port other than the bound port is not aligned" "misconfigured"
+    U.(host_field data "verdict" |> to_string);
+  check bool "the remedy saves this server's port and restarts the host" true
+    (String_util.contains_substring U.(host_field data "message" |> to_string) "--port 64850 --save");
+  (* A host already polling this server is the fact that matters: the file
+     naming another port does not make the lane misconfigured. *)
+  let polling_id = match Browser_lane.client_id_of_string "40000000-0000-4000-8000-000000000002" with
+    | Ok id -> id | Error error -> fail error in
+  let polling : Browser_lane.client_info =
+    {client_id=polling_id; browser=Browser_lane.Firefox; version="fixture"; engine_version="fixture"} in
+  ignore (Browser_lane.take_command ~client_info:polling ~window_sec:0.001);
+  let data = rejected (fst (interact ())) in
+  ignore (Browser_lane.disconnect_client ~client_id:polling_id);
+  check int "the polling host is counted" 1 U.(host_field data "polling_hosts" |> to_int);
+  check string "a host polling this server is connected whatever the file names" "connected"
+    U.(host_field data "verdict" |> to_string);
   Browser_lane.install_serving_port 61372;
   (* The scene read resolves its browser inside the scene module; a browser
      missing there is the same selection failure with the same host facts. *)
@@ -323,7 +356,7 @@ let test_keeper_hears_why_no_browser_is_connected () =
   check string "the scene path names the gone browser" "selected_client_disconnected"
     U.(data |> member "error" |> to_string);
   check string "configuration and server agree, so the browser itself is absent" "aligned"
-    U.(data |> member "host" |> member "verdict" |> to_string)
+    U.(host_field data "verdict" |> to_string)
 
 let test_scoped_scene_acknowledgement () =
   Eio_main.run (fun env ->

@@ -2131,8 +2131,15 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ?on_ready ~accept_store
   let run_serving ~sw ~socket ~routes:_ ~request_handler ~h2_request_handler
       ~h2_error_handler =
     Eio.Promise.resolve publish_listener_bound ();
-    (* The browser tools compare an installed host's port with this one. *)
-    Browser_lane.install_serving_port config.port;
+    (* The browser tools compare an installed host's port with the port this
+       listener actually bound, which differs from [config.port] when that
+       asks for any free port. A Unix-domain listener has no port to compare,
+       so the port stays unknown. *)
+    (match Eio.Net.listening_addr socket with
+     | `Tcp (_, port) ->
+       Browser_lane.install_serving_port port;
+       Eio.Switch.on_release sw Browser_lane.withdraw_serving_port
+     | `Unix _ -> ());
     (* The listener is bound. Persist only the desired connection, not readiness. *)
     (match Workspace_connection.port config.port with
      | Error error -> Log.Server.warn "%s" (Workspace_connection.error_message error)

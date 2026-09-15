@@ -249,17 +249,18 @@ let test_driver_ownership_record () =
     (P.argv ~driver:owner.driver ~port:50931 ~profile_root);
   (* Process table shape measured 2026-09-15: the driver, the browser it
      launched, the same browser after it relaunched itself with no parent, a
-     content process, and a browser of another workspace. *)
+     content process of that browser (Zen passes it the same -profile), and
+     browsers of other roots. *)
   let process_table = String.concat "\n"
     [ "  68072 " ^ owner.driver ^ " --host 127.0.0.1 --port 64009 --websocket-port 0 --profile-root " ^ profile_root;
       "  73227 /Applications/Zen.app/Contents/MacOS/zen --marionette -headless --remote-debugging-port 52416 -no-remote -profile " ^ profile_root ^ "/rust_mozprofileGLlAmp";
       "  74640 /Applications/Zen.app/Contents/MacOS/zen --marionette --remote-debugging-port 9222 -no-remote -profile " ^ profile_root ^ "/rust_mozprofileGLlAmp";
-      "  74809 /Applications/Zen.app/Contents/MacOS/plugin-container.app/Contents/MacOS/plugin-container -isForBrowser -prefsHandle 0:53546";
+      "  74809 /Applications/Zen.app/Contents/MacOS/plugin-container.app/Contents/MacOS/plugin-container -parentBuildID 20260904060728 -isForBrowser -prefsHandle 0:53546 -profile " ^ profile_root ^ "/rust_mozprofileGLlAmp org.mozilla.machname.1 tab";
       "  81000 /Applications/Zen.app/Contents/MacOS/zen --marionette -profile /other/.masc/browser-lane/profiles/rust_mozprofileX";
       "  81001 /Applications/Zen.app/Contents/MacOS/zen --marionette -profile " ^ profile_root ^ "-old/rust_mozprofileY";
       "" ] in
-  check (list int) "the launched browser and its relaunch are ours; the driver, content process and other roots are not"
-    [ 73227; 74640 ] (P.browsers_using_profile_root ~profile_root ~process_table);
+  check (list int) "the launched browser, its relaunch and their content process are ours; the driver and other roots are not"
+    [ 73227; 74640; 74809 ] (P.browsers_using_profile_root ~profile_root ~process_table);
   check string "record lives beside the lane host"
     "/ws/.masc/browser-lane/geckodriver-owner.json" (P.owner_record_path ~masc_root:"/ws/.masc")
 
@@ -270,9 +271,12 @@ let test_driver_ownership_record () =
 let test_session_status_answers_while_closed () =
   Eio_main.run (fun _ ->
     let calls = ref [] in
+    let driver_answer : (Yojson.Safe.t, Driver.error) result ref =
+      ref (Ok (`Assoc ["ready", `Bool true; "message", `String ""])) in
     let request ~method_ ~path ~body:_ =
       calls := (method_, path) :: !calls;
       match method_, path with
+      | `GET, "/status" -> !driver_answer
       | `POST, "/session" ->
         Ok (`Assoc ["sessionId", `String "owned";
                     "capabilities", `Assoc ["webSocketUrl", `String "ws://localhost:1234/session/owned"]])
@@ -286,9 +290,25 @@ let test_session_status_answers_while_closed () =
          | _ -> fail "status answer carries no data")
       | _ -> fail "status must answer whether or not a session exists"
     in
+    let closed = status () in
     check bool "closed session reports open=false" true
-      (List.assoc_opt "open" (status ()) = Some (`Bool false));
-    check int "status on a closed session contacts no backend" 0 (List.length !calls);
+      (List.assoc_opt "open" closed = Some (`Bool false));
+    (* {"open":false} alone read as a broken lane (2026-09-15). The driver's
+       own readiness says whether open can start a session now. *)
+    check bool "closed session carries the driver's readiness" true
+      (List.assoc_opt "driver" closed
+       = Some (`Assoc ["ready", `Bool true; "message", `String ""]));
+    check bool "status on a closed session asks only the driver's /status" true
+      (!calls = [ (`GET, "/status") ]);
+    driver_answer := Ok (`Assoc ["ready", `Bool false; "message", `String "Session already started"]);
+    check bool "a driver holding a session this record does not own says so" true
+      (List.assoc_opt "driver" (status ())
+       = Some (`Assoc ["ready", `Bool false; "message", `String "Session already started"]));
+    driver_answer := Error (Driver.Transport "connection refused");
+    check bool "a driver that does not answer is reported, and status still answers" true
+      (List.assoc_opt "driver" (status ()) = Some (`Assoc ["error", `String "connection refused"]));
+    driver_answer := Ok (`Assoc ["ready", `Bool true; "message", `String ""]);
+    calls := [];
     ignore (Driver.execute driver (Lane.Session_open {headless = Some true}));
     let opened = status () in
     check bool "open session reports open=true" true
@@ -298,6 +318,8 @@ let test_session_status_answers_while_closed () =
     check bool "open session reports its tab count" true
       (List.assoc_opt "tabs" opened = Some (`Int 0));
     check int "status on an open session adds no backend request" 1 (List.length !calls);
+    check bool "open session status carries no driver probe" true
+      (List.assoc_opt "driver" opened = None);
     check bool "status is a read" true (Lane.verb_is_read Lane.Session_status);
     check bool "status is not offered on the live lane" false
       (Lane.verb_allowed_on_live Lane.Session_status))
@@ -445,6 +467,7 @@ let test_remote_error_is_a_closed_sum () =
           "capabilities", `Assoc ["webSocketUrl", `String "ws://localhost:1234/session/owned"]])
       | `POST, "/session/owned/frame" -> Ok `Null
       | `POST, "/session/owned/url" -> decode "invalid session id"
+      | `GET, "/status" -> Ok (`Assoc ["ready", `Bool true; "message", `String ""])
       | _ -> fail ("unexpected request: " ^ path) in
     let driver = Driver.create ~start_downloads ~request () in
     ignore (Driver.execute driver (Lane.Session_open {headless = Some true}));

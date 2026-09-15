@@ -103,8 +103,21 @@ let test_calculate_kpis_empty () =
   check bool "unobserved tasks stay unknown" true (Option.is_none kpis.tasks);
   check bool "unobserved turns stay unknown" true (Option.is_none kpis.turns);
   let output = String.concat "\n" (Render_metrics.render_section_fleet ~cols:160 state) in
-  check bool "missing GC is visible" true (contains output "GC telemetry not observed");
-  check bool "missing scheduler is visible" true (contains output "Scheduler telemetry not observed");
+  (* Under "Engine memory" and "Scheduler lag", which the section draws above
+     each block, so the state is named and the subject is not said twice. *)
+  check bool "missing GC is visible" true
+    (contains output "Engine memory");
+  check bool "missing scheduler is visible" true
+    (contains output "Scheduler lag");
+  (* Three blocks -- the GC, the scheduler and the transport -- each saying
+     the state under its own heading, in the one word. [clip] puts a reset on
+     the end of every line, so the block is matched by its indent and phrase
+     rather than by a whole-line compare. *)
+  check int "each unread block says so, and says it the one way" 3
+    (List.length
+       (List.filter
+          (fun line -> contains line "    not observed")
+          (String.split_on_char '\n' output)));
   check bool "no fabricated heap" false (contains output "42.5");
   check bool "no fabricated latency" false (contains output "0.82")
 ;;
@@ -601,6 +614,32 @@ let test_compact_metrics_preserve_source_labels () =
     [ 85; 100; 120; 150; 170 ]
 ;;
 
+(* The pulse card at the top and the section under it read the same two
+   options -- [sid_gc] and [sid_scheduler] -- and named each [None] two ways:
+   "GC not observed" against "GC telemetry not observed", "Lag not observed"
+   against "Scheduler telemetry not observed". Both pairs sat on one screen,
+   so the reader had to match a state up by position to see it was one state.
+   The card keeps its subject because it has no heading; the section takes its
+   subject from the heading above the block. *)
+let test_one_word_for_a_source_nothing_came_back_from () =
+  let state = make_state () in
+  state.metrics_section <- Types.Section_fleet;
+  let lines = ref [] in
+  let push line = lines := line :: !lines in
+  Render_metrics.render_metrics_body ~cols:200 ~budget:60 state
+    ~report_scroll:(fun _ -> ())
+    ~push ~push_styled:(fun ~style:_ line -> push line)
+    ~push_selected:push ~push_divider:(fun () -> ())
+    ~push_empty:(fun () -> ());
+  let output = String.concat "\n" !lines in
+  check bool "the card names the source and the state" true
+    (contains output "GC not observed");
+  check bool "and the scheduler card does too" true
+    (contains output "Lag not observed");
+  check bool "no second spelling of the same state" false
+    (contains output "telemetry not observed")
+;;
+
 let test_render_metrics_body_all_sections () =
   let state = make_state () in
   let sections = [ Types.Section_fleet; Types.Section_resources; Types.Section_tools ] in
@@ -659,6 +698,8 @@ let () =
         ; test_case "reports the row it could draw" `Quick
             test_metrics_reports_the_row_it_could_draw
         ; test_case "compact metrics preserve source labels" `Quick test_compact_metrics_preserve_source_labels
+        ; test_case "one word for a source nothing came back from" `Quick
+            test_one_word_for_a_source_nothing_came_back_from
         ; test_case "all_sections" `Quick test_render_metrics_body_all_sections
         ] )
     ]

@@ -422,13 +422,17 @@ let test_mailbox_backpressures_without_drop () =
   check int "mailbox drained" 0 (Owner.For_testing.mailbox_depth owner)
 ;;
 
-let test_enqueued_request_settles_before_cancellation_unwinds () =
+(* [request] enqueues the command and then waits for the answer, and only the
+   wait belongs to the caller. It used to run under [Eio.Cancel.protect], so a
+   child parked there could not unwind on an operator interrupt and the turn
+   slot it held was never released. What the owner already took, it still
+   runs: a caller that leaves does not take the command back. *)
+let test_cancelled_caller_unwinds_while_its_command_commits () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
   let replace_entered, resolve_replace_entered = Eio.Promise.create () in
   let release_replace, resolve_release_replace = Eio.Promise.create () in
   let cancel_context, resolve_cancel_context = Eio.Promise.create () in
-  let caller_done, resolve_caller_done = Eio.Promise.create () in
   let caller_unwound = Atomic.make false in
   let owner =
     owner_ok
@@ -446,31 +450,55 @@ let test_enqueued_request_settles_before_cancellation_unwinds () =
          ~initial_meta:(Some (make_meta "cancel-after-enqueue")))
   in
   Eio.Fiber.fork ~sw (fun () ->
-    (try
-       Eio.Cancel.sub (fun context ->
-         Eio.Promise.resolve resolve_cancel_context context;
-         ignore
-           (Owner.apply_meta
-              owner
-              (Set_activation_mode { mode = Masc.Keeper_activation_mode.Autonomous; updated_at = "committed" })))
-     with
-     | Eio.Cancel.Cancelled _ -> Atomic.set caller_unwound true);
-    Eio.Promise.resolve resolve_caller_done ());
+    try
+      Eio.Cancel.sub (fun context ->
+        Eio.Promise.resolve resolve_cancel_context context;
+        ignore
+          (Owner.apply_meta
+             owner
+             (Set_activation_mode
+                { mode = Masc.Keeper_activation_mode.Autonomous
+                ; updated_at = "committed"
+                })))
+    with
+    | Eio.Cancel.Cancelled _ -> Atomic.set caller_unwound true);
   let context = Eio.Promise.await cancel_context in
+  (* The owner has taken the command off the mailbox and is inside the store
+     write, so the caller is parked on the answer and nothing else. *)
   Eio.Promise.await replace_entered;
   Eio.Cancel.cancel context (Failure "cancel after owner enqueue");
-  for _ = 1 to 10 do
-    Eio.Fiber.yield ()
-  done;
-  check bool "caller remains inside committed request" false (Atomic.get caller_unwound);
-  Eio.Promise.resolve resolve_release_replace ();
-  Eio.Promise.await caller_done;
-  check bool "protected request returns after settlement" false (Atomic.get caller_unwound);
+  (* Hand the scheduler back until the caller has left. The cap is not a
+     deadline and the loop does not spend it when the contract holds: it turns
+     a regression into a failed check instead of a suite that never returns. *)
+  let rec yield_until_the_caller_leaves passes_left =
+    if passes_left > 0 && not (Atomic.get caller_unwound)
+    then (
+      Eio.Fiber.yield ();
+      yield_until_the_caller_leaves (passes_left - 1))
+  in
+  yield_until_the_caller_leaves 100;
   check
     bool
-    "enqueued mutation committed before authority scope unwound"
+    "cancelled caller leaves the wait while the owner is still writing"
     true
-    (Masc.Keeper_activation_mode.restore_owner (Option.get (Owner.projection owner).meta).activation_mode)
+    (Atomic.get caller_unwound);
+  (* [apply_transition] writes the snapshot before it publishes the
+     projection, so the owner had committed nothing when the caller left. *)
+  check
+    bool
+    "the owner had not committed when the caller left"
+    false
+    (Masc.Keeper_activation_mode.restore_owner
+       (Option.get (Owner.projection owner).meta).activation_mode);
+  Eio.Promise.resolve resolve_release_replace ();
+  (* [exact_projection] is answered from the same mailbox, so its answer can
+     only arrive after the owner drained the command the caller left behind. *)
+  check
+    bool
+    "the command the cancelled caller enqueued still committed"
+    true
+    (Masc.Keeper_activation_mode.restore_owner
+       (Option.get (owner_ok (Owner.exact_projection owner)).meta).activation_mode)
 ;;
 
 let test_store_failure_fences_mutations () =
@@ -1364,6 +1392,66 @@ let test_an_interrupt_ends_a_turn_waiting_on_its_own_owner () =
    | Some (Ok (`Busy _)) -> fail "the owner never admitted the turn"
    | Some (Error _) -> fail "the owner refused the turn"
    | None -> fail "the turn produced no outcome");
+  check bool "the slot is free again" true (Option.is_none (Owner.turn_in_flight owner))
+;;
+
+(* A cancelled caller leaves an answer that waits for the child, and not only
+   for the command above. [begin_stopping] commits the stop, stops the running
+   child and answers when that child ends. The child below ends only when the
+   case releases it, so a caller held until the answer cannot leave first. The
+   child is released before any verdict, so a held caller fails the case instead
+   of hanging it. *)
+let test_a_cancelled_caller_leaves_a_stop_that_waits_for_the_child () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let clock = Eio.Stdenv.clock env in
+  let owner =
+    owner_ok
+      (start_owner
+         ~sw
+         ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+         ~keeper_name:"cancel-while-stopping"
+         ~initial_meta:(Some (make_meta "cancel-while-stopping")))
+  in
+  let child_started, resolve_child_started = Eio.Promise.create () in
+  let release_child, resolve_release_child = Eio.Promise.create () in
+  let turn_done, resolve_turn_done = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    ignore
+      (Owner.run_autonomous_if_idle owner (fun () ->
+         Eio.Promise.resolve resolve_child_started ();
+         (* The stop fails the child switch; only the case ends this child. *)
+         Eio.Cancel.protect (fun () -> Eio.Promise.await release_child)));
+    Eio.Promise.resolve resolve_turn_done ());
+  Eio.Promise.await child_started;
+  let cancel_context, resolve_cancel_context = Eio.Promise.create () in
+  let caller_left, resolve_caller_left = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    (try
+       Eio.Cancel.sub (fun context ->
+         Eio.Promise.resolve resolve_cancel_context context;
+         ignore (Owner.begin_stopping owner))
+     with
+     | Eio.Cancel.Cancelled _ -> ());
+    Eio.Promise.resolve resolve_caller_left ());
+  let context = Eio.Promise.await cancel_context in
+  let left =
+    Eio.Time.with_timeout clock turn_unwind_budget_s (fun () ->
+      (* The owner commits the stop in the step that parks the answer. *)
+      while not (Owner.projection owner).stopping do
+        Eio.Time.sleep clock 0.001
+      done;
+      Eio.Cancel.cancel context (Failure "cancel while the stop waits for the child");
+      Eio.Promise.await caller_left;
+      Ok ())
+  in
+  Eio.Promise.resolve resolve_release_child ();
+  (match left with
+   | Ok () -> ()
+   | Error `Timeout -> fail "a caller of a stop waiting for the child could not leave");
+  Eio.Promise.await turn_done;
   check bool "the slot is free again" true (Option.is_none (Owner.turn_in_flight owner))
 ;;
 
@@ -4544,9 +4632,9 @@ let () =
             `Quick
             test_mailbox_backpressures_without_drop
         ; test_case
-            "enqueued request settles before cancellation"
+            "a cancelled caller unwinds while its command still commits"
             `Quick
-            test_enqueued_request_settles_before_cancellation_unwinds
+            test_cancelled_caller_unwinds_while_its_command_commits
         ; test_case
             "a command the mailbox took as the owner closed is enqueued"
             `Quick
@@ -4682,6 +4770,10 @@ let () =
             "an interrupt ends a turn waiting on its own owner"
             `Quick
             test_an_interrupt_ends_a_turn_waiting_on_its_own_owner
+        ; test_case
+            "a cancelled caller leaves a stop that waits for the child"
+            `Quick
+            test_a_cancelled_caller_leaves_a_stop_that_waits_for_the_child
         ; test_case "retry deadline crossing automatically wakes" `Quick
             test_retry_deadline_crossing_automatically_wakes
         ; test_case "runtime-deferred child drains the same original operation" `Quick

@@ -107,31 +107,33 @@ let turn_settled ~keeper ~turn ~input ~output ~cost : Observer.event =
     ; tc_at = 100.
     }
 
-(* The interleaving a live screen showed: the keeper ledger (completed /
-   settled) lands BEFORE the agent-core wire replays the same turn (call /
-   returned / end), the hook's per-call observation names the keeper turn
-   each call belongs to, and the next turn's ready follows. Seventeen
-   entries: fourteen rows on the flat actions view, which hides the three
-   observations, and seventeen under [Everything]; the fold owes three rows.
+(* How the two planes interleave on the feed. The observation, the ledger's
+   tool row and the settle are broadcast as they happen; the agent-core wire
+   reaches the feed through a polling relay, so a turn's wire frames (end /
+   call / returned) replay after its settle, while the next call's turn
+   markers, published before that call, land ahead of its observation.
+   Seventeen entries: fourteen rows on the flat actions view, which hides
+   the three observations, and seventeen under [Everything]; the fold owes
+   three rows.
    The session ordinals (149-151) differ from the keeper turns (49-51), so a
    row that printed the ordinal as its turn would not pass. *)
 let test_turns_fold_the_two_planes_into_one_row_per_turn () =
   let k = "kpr-07" in
   let events_oldest_first =
-    [ turn_settled ~keeper:k ~turn:49 ~input:39050 ~output:70 ~cost:0.0100
+    [ observation ~keeper:k ~session:149 ~completed:48
     ; ledger_tool ~duration_ms:63. ~keeper:k "masc_schedule_list"
+    ; turn_settled ~keeper:k ~turn:49 ~input:39050 ~output:70 ~cost:0.0100
     ; agent_core ~kind:Observer.Turn_completed ~turn:149 k
-    ; observation ~keeper:k ~session:149 ~completed:48
     ; agent_core ~kind:Observer.Tool_called ~tool:"masc_schedule_list"
         ~turn:149 ~tool_use_id:"c49" k
     ; agent_core ~kind:Observer.Tool_completed ~tool:"masc_schedule_list"
         ~turn:149 ~tool_use_id:"c49" k
     ; agent_core ~kind:Observer.Turn_started ~turn:150 k
     ; agent_core ~kind:Observer.Turn_ready ~turn:150 k
-    ; turn_settled ~keeper:k ~turn:50 ~input:39237 ~output:76 ~cost:0.0102
-    ; ledger_tool ~duration_ms:6. ~keeper:k "keeper_artifact_read"
-    ; agent_core ~kind:Observer.Turn_completed ~turn:150 k
     ; observation ~keeper:k ~session:150 ~completed:49
+    ; ledger_tool ~duration_ms:6. ~keeper:k "keeper_artifact_read"
+    ; turn_settled ~keeper:k ~turn:50 ~input:39237 ~output:76 ~cost:0.0102
+    ; agent_core ~kind:Observer.Turn_completed ~turn:150 k
     ; agent_core ~kind:Observer.Tool_called ~tool:"keeper_artifact_read"
         ~turn:150 ~tool_use_id:"c50" k
     ; agent_core ~kind:Observer.Tool_completed ~tool:"keeper_artifact_read"
@@ -444,15 +446,106 @@ let test_a_reply_does_not_trim_the_observation_a_call_needs () =
       check (option int) "the call keeps its keeper turn" (Some 49) chunk.Acting.ck_turn
   | chunks -> failf "expected one chunk, got %d" (List.length chunks)
 
-(* The observation budget is its own: an observation spends no action slot,
-   and an action spends none of its slots. *)
-let test_observations_and_actions_keep_separate_slots () =
-  let ring =
-    [ observation ~keeper:"a" ~session:1 ~completed:0; settled "b"; heartbeat "c" ]
+(* An observation spends an action slot: it competes with the calls it
+   numbers for the same newest-first window, and never spills into the quiet
+   slots, so the ring stays within [actions] + [quiet]. *)
+let test_an_observation_spends_an_action_slot () =
+  let kept, dropped =
+    Acting.retain ~actions:1 ~quiet:0 ~event_of:Fun.id
+      [ observation ~keeper:"a" ~session:2 ~completed:1; settled "b" ]
   in
-  let kept, dropped = Acting.retain ~actions:1 ~quiet:0 ~event_of:Fun.id ring in
-  check int "the observation and the settle each keep a slot" 2 (List.length kept);
-  check int "the heartbeat has no quiet slot" 1 dropped
+  (match kept with
+   | [ Observer.Keeper_turn_observation _ ] -> ()
+   | _ -> failf "expected the newer observation alone, kept %d" (List.length kept));
+  check int "the older action is counted" 1 dropped;
+  let kept, dropped =
+    Acting.retain ~actions:1 ~quiet:5 ~event_of:Fun.id
+      [ observation ~keeper:"a" ~session:2 ~completed:1
+      ; observation ~keeper:"a" ~session:1 ~completed:1
+      ]
+  in
+  check int "a second observation finds no action slot" 1 (List.length kept);
+  check int "and is not kept in a quiet one" 1 dropped
+
+(* A session created without a checkpoint numbers its calls from zero again.
+   An observation held past the calls it numbered would still answer for its
+   ordinal when the new session reaches it, and file the new call in flight
+   under a keeper turn that settled long ago. Trimmed in arrival order with
+   its calls, it leaves the ring with them. *)
+let test_an_observation_leaves_the_ring_with_its_calls () =
+  let beta_call index =
+    let turn = 1_000 + index in
+    let id = Printf.sprintf "b%d" index in
+    [ agent_core ~kind:Observer.Turn_started ~turn "beta"
+    ; agent_core ~kind:Observer.Turn_ready ~turn "beta"
+    ; observation ~keeper:"beta" ~session:turn ~completed:500
+    ; agent_core ~kind:Observer.Tool_called ~tool:"Read" ~turn ~tool_use_id:id "beta"
+    ; agent_core ~kind:Observer.Tool_completed ~tool:"Read" ~turn ~tool_use_id:id "beta"
+    ; agent_core ~kind:Observer.Turn_completed ~turn "beta"
+    ]
+  in
+  let oldest_first =
+    [ agent_core ~kind:Observer.Turn_started ~turn:1 "alpha"
+    ; observation ~keeper:"alpha" ~session:1 ~completed:11
+    ; agent_core ~kind:Observer.Tool_called ~tool:"Read" ~turn:1 ~tool_use_id:"a1" "alpha"
+    ; agent_core ~kind:Observer.Tool_completed ~tool:"Read" ~turn:1 ~tool_use_id:"a1" "alpha"
+    ; turn_settled ~keeper:"alpha" ~turn:12 ~input:10 ~output:2 ~cost:0.001
+    ]
+    @ List.concat (List.init 220 beta_call)
+    @ [ agent_core ~kind:Observer.Turn_started ~turn:0 "alpha"
+      ; observation ~keeper:"alpha" ~session:0 ~completed:12
+      ; agent_core ~kind:Observer.Tool_called ~tool:"Grep" ~turn:0 ~tool_use_id:"a2" "alpha"
+      ; agent_core ~kind:Observer.Tool_completed ~tool:"Grep" ~turn:0 ~tool_use_id:"a2" "alpha"
+      ; agent_core ~kind:Observer.Turn_started ~turn:1 "alpha"
+      ; agent_core ~kind:Observer.Turn_ready ~turn:1 "alpha"
+      ]
+  in
+  let kept, _ =
+    Acting.retain ~actions:1_000 ~quiet:200
+      ~event_of:(fun entry -> entry.Acting.ae_event)
+      (entries_of oldest_first)
+  in
+  match
+    Acting.chunks ~traces:[] kept
+    |> List.filter (fun chunk -> String.equal chunk.Acting.ck_keeper "alpha")
+  with
+  | [ chunk ] ->
+      check (option int) "the call in flight joins the open keeper turn" (Some 13)
+        chunk.Acting.ck_turn;
+      check bool "which is still running" false chunk.Acting.ck_settled
+  | chunks ->
+      failf "alpha drew %d turns: %s" (List.length chunks)
+        (String.concat ", "
+           (List.map (fun chunk -> Acting.turn_text chunk.Acting.ck_turn) chunks))
+
+(* [turn] on an agent-core frame or a ledger call is the agent session's
+   ordinal for the provider call, and [turn N] on this surface names a keeper
+   turn. The flat turn boundary rows carry no number, and the evidence names
+   the ordinal for what it is. *)
+let test_the_session_ordinal_is_named_only_in_the_evidence () =
+  List.iter
+    (fun (kind, label) ->
+      let row =
+        Acting.row_of_event ~at:100. ~duration_ms:None
+          (agent_core ~kind ~turn:2086 "analyst")
+      in
+      check string "the boundary label" label row.Acting.label;
+      check string (label ^ " carries no ordinal") "" row.Acting.detail)
+    [ (Observer.Turn_started, "turn start")
+    ; (Observer.Turn_ready, "turn ready")
+    ; (Observer.Turn_completed, "turn end")
+    ];
+  let evidence event = Acting.evidence_fields { Acting.ae_at = 100.; ae_event = event } in
+  List.iter
+    (fun (what, event) ->
+      let fields = evidence event in
+      check (option (option string)) (what ^ " names the ordinal")
+        (Some (Some "2086"))
+        (List.assoc_opt "Agent session turn" fields);
+      check bool (what ^ " does not call it a turn") false (List.mem_assoc "Turn" fields))
+    [ ("a wire call", agent_core ~kind:Observer.Tool_called ~tool:"Read" ~turn:2086 "analyst")
+    ; ("a ledger call", ledger_tool ~turn:2086 ~keeper:"analyst" "Read")
+    ]
 
 (* Order is what the screen scrolls through, so trimming must not reorder. *)
 let test_trimming_keeps_the_order_it_was_given () =
@@ -800,11 +893,11 @@ let test_one_keeper_turn_of_three_calls_is_one_row () =
         (tools chunk)
   | chunks -> failf "three calls and a settle drew %d rows" (List.length chunks)
 
-(* The hook sends a call's observation when the response is collected:
-   after the call's turn markers, before its tools run. On a live feed every
-   tool frame of 37 observed calls arrived after the observation. The wire
-   relays agent-core frames on a fiber of its own, though, so a frame can
-   still arrive before the observation that numbers it. The fold reads every
+(* The hook sends a call's observation when the call's response is
+   collected. A call the agent-core loop makes runs its tools after that, so
+   its tool frames follow the observation. A CLI lane runs a whole keeper
+   turn as one call with its tools inside it, so the turn's frames arrive
+   first and the observation comes at the end. The fold reads every
    observation in the ring first, so frames that arrived unnumbered are
    filed once the observation lands. *)
 let test_an_observation_after_its_frames_still_files_them () =
@@ -819,6 +912,58 @@ let test_an_observation_after_its_frames_still_files_them () =
   | [ chunk ] ->
       check (option int) "filed under keeper turn 12" (Some 12) chunk.Acting.ck_turn
   | chunks -> failf "expected one chunk, got %d" (List.length chunks)
+
+(* The shape a live claude_code keeper's turns took (critic, 2026-09-15):
+   every ledger call of the turn arrived first, then the observation, then
+   the settle. No observation names a lane turn while it runs, so its row
+   has no number until the end; the turn settled before it keeps its own
+   call. *)
+let test_a_cli_lane_turn_is_numbered_when_its_observation_lands () =
+  let k = "critic" in
+  let before =
+    [ ledger_tool ~duration_ms:75. ~turn:6 ~keeper:k "masc_board_comment"
+    ; observation ~keeper:k ~session:6 ~completed:2273
+    ; turn_settled ~keeper:k ~turn:2274 ~input:853484 ~output:1662 ~cost:0.0100
+    ]
+  in
+  let running =
+    before
+    @ [ ledger_tool ~duration_ms:1. ~turn:7 ~keeper:k "masc_board_list"
+      ; ledger_tool ~duration_ms:1. ~turn:7 ~keeper:k "masc_ask_status"
+      ]
+  in
+  let tools chunk =
+    List.map (fun t -> t.Acting.ct_tool) (Acting.chunk_tools chunk)
+  in
+  (match Acting.chunks ~traces:[] (entries_of running) with
+   | [ current; previous ] ->
+       check (option int) "the running lane turn has no number yet" None
+         current.Acting.ck_turn;
+       check bool "and is not settled" false current.Acting.ck_settled;
+       check (list string) "its calls so far" [ "masc_board_list"; "masc_ask_status" ]
+         (tools current);
+       check (option int) "the turn before keeps its number" (Some 2274)
+         previous.Acting.ck_turn;
+       check (list string) "and its own call" [ "masc_board_comment" ] (tools previous)
+   | chunks -> failf "a running lane turn drew %d rows" (List.length chunks));
+  let ended =
+    running
+    @ [ ledger_tool ~duration_ms:1. ~turn:7 ~keeper:k "masc_board_post_get"
+      ; observation ~keeper:k ~session:7 ~completed:2274
+      ; turn_settled ~keeper:k ~turn:2275 ~input:1288966 ~output:1779 ~cost:0.0100
+      ]
+  in
+  match Acting.chunks ~traces:[] (entries_of ended) with
+  | [ current; previous ] ->
+      check (option int) "the observation and the settle number the turn" (Some 2275)
+        current.Acting.ck_turn;
+      check bool "and close it" true current.Acting.ck_settled;
+      check (list string) "with every call of the turn"
+        [ "masc_board_list"; "masc_ask_status"; "masc_board_post_get" ]
+        (tools current);
+      check (list string) "the turn before is unchanged" [ "masc_board_comment" ]
+        (tools previous)
+  | chunks -> failf "an ended lane turn drew %d rows" (List.length chunks)
 
 (* The call in flight has no observation yet -- its response has not come
    back -- but a keeper runs one turn at a time, so its frames join the
@@ -1056,8 +1201,12 @@ let () =
             test_the_old_arrival_trim_would_have_lost_them
         ; test_case "a reply does not trim the observation a call needs" `Quick
             test_a_reply_does_not_trim_the_observation_a_call_needs
-        ; test_case "observations and actions keep separate slots" `Quick
-            test_observations_and_actions_keep_separate_slots
+        ; test_case "an observation spends an action slot" `Quick
+            test_an_observation_spends_an_action_slot
+        ; test_case "an observation leaves the ring with its calls" `Quick
+            test_an_observation_leaves_the_ring_with_its_calls
+        ; test_case "the session ordinal is named only in the evidence" `Quick
+            test_the_session_ordinal_is_named_only_in_the_evidence
         ; test_case "trimming keeps the order it was given" `Quick
             test_trimming_keeps_the_order_it_was_given
         ; test_case "every row wears the clock the feed ordered it by" `Quick
@@ -1101,6 +1250,8 @@ let () =
             test_one_keeper_turn_of_three_calls_is_one_row
         ; test_case "an observation after its frames still files them" `Quick
             test_an_observation_after_its_frames_still_files_them
+        ; test_case "a cli lane turn is numbered when its observation lands" `Quick
+            test_a_cli_lane_turn_is_numbered_when_its_observation_lands
         ; test_case "a call in flight joins the open keeper turn" `Quick
             test_a_call_in_flight_joins_the_open_keeper_turn
         ; test_case "a new keeper turn after a settle opens its own row" `Quick

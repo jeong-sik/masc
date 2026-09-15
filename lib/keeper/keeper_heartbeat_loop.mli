@@ -133,15 +133,22 @@ val owner_turn_rejection_cycle_status :
     [Turn_failed]. [Turn_cycle_busy] preserves its typed admission reason and
     must not dispatch either turn status or refresh the work-as-heartbeat
     lease. *)
-(** What a provider retry route asks of the next sleep. A rate limit or
-    exhausted quota is the provider's state, so the sleep runs to its end
-    ([Serve_wakeup_after_duration], #34653); capacity backpressure also comes
-    from MASC's own slot and client capacity envelopes, which clear on their
-    own, so that sleep stays [Interrupt_on_wakeup]. *)
-type provider_backoff =
-  { retry_after_hint : float option
-  ; wake_policy : Keeper_keepalive_signal.wake_policy
-  }
+(** What a failed cycle leaves the next one (RFC-provider-path-rest). A rest
+    belongs to the path that received the rate limit or quota answer; the
+    keeper waits only while the path it would send next rests.
+    [Continue_on_deferred_lane] names the walk head of the deferred suffix,
+    which is not resting; a pending input runs on it without a sleep.
+    [Wait_for_path_release] sleeps until [release_at]; [waiting_on] names the
+    runtime or assignment whose release that is. A rate limit or quota wait is
+    [Serve_wakeup_after_duration] (#34653), a capacity wait
+    [Interrupt_on_wakeup]. *)
+type after_failure =
+  | Continue_on_deferred_lane of { next_runtime_id : string }
+  | Wait_for_path_release of
+      { release_at : float
+      ; wake_policy : Keeper_keepalive_signal.wake_policy
+      ; waiting_on : string
+      }
 
 type keepalive_turn_outcome = {
   meta : keeper_meta;
@@ -150,14 +157,9 @@ type keepalive_turn_outcome = {
       (** The cycle admitted at least one event-queue stimulus and acked
           every entry of that batch on completion. The loop reads it to
           skip the cadence sleep while more entries are pending. *)
-  provider_backoff : provider_backoff option;
-      (** [Some backoff] when the cycle's turn failure routed as a provider
-          retry ([Retry_after_observed] with a [Rate_limited] / [Hard_quota] /
-          [Capacity_backpressure] class), carrying the route's own
-          [Retry-After] hint as the provider sent it ([None] when it sent
-          none) and the wake policy the class implies. The loop replaces the
-          plain cadence with a capped backoff for such a cycle (#26068);
-          [None] keeps the cadence. *)
+  after_failure : after_failure option;
+      (** What the cycle's turn failure leaves the next cycle; [None] keeps
+          the plain cadence. *)
 }
 
 (** Record a swallowed keepalive-cycle exception as a turn failure:
@@ -302,26 +304,14 @@ module For_testing : sig
       queue source is acknowledged. *)
   val batch_disposition_records_continuation : batch_disposition -> bool
 
-  (** During autoboot warmup, the next cycle runs at the warmup boundary rather
-      than one full heartbeat cadence later. [rate_limited_backoff_sec] is the
-      already-capped backoff to sleep instead of the plain cadence after a
-      rate-limited failure cycle; pass [cadence_sec] to preserve the plain
-      cadence behavior. *)
-  val next_keepalive_sleep_duration_sec :
-    proactive_warmup_sec:int ->
-    proactive_warmup_elapsed:bool ->
-    keepalive_started_ts:float ->
-    now_ts:float ->
-    cadence_sec:float ->
-    rate_limited_backoff_sec:float ->
-    float
-
-  (** Capped backoff for a rate-limited failure route (#26068). Prefers the
-      provider's [Retry-After] hint when above the cadence, falls back to a
-      bounded default, and clamps the result to [cap_sec] so a misread header
-      can never park the lane. *)
-  val failure_route_rate_limited_backoff_hint :
-    Keeper_unified_turn.turn_failure -> provider_backoff option
+  (** {!Keeper_turn_driver.next_dispatch_after_failure} mapped onto the
+      heartbeat sleep. [assignment_id] is what a turn without a deferred suffix
+      walks. *)
+  val after_failure :
+    now:float ->
+    assignment_id:string ->
+    Keeper_unified_turn.turn_failure ->
+    after_failure option
 
   (** Deferred runtime lane hints have nothing to do with continuation
       delivery; they only shared this module with it. The implementation and

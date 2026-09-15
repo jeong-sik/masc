@@ -7188,13 +7188,18 @@ let render_system_logs (state : state) =
       now.Unix.tm_sec
   in
   (* The active filters ride in the header, so a page trimmed to twelve rows
-     says why it is twelve rather than reading as a quiet ring. *)
+     says why it is twelve rather than reading as a quiet ring.
+
+     [verbose] is not a second field: [v] and [l] write the one floor, and
+     verbose is the floor being DEBUG. The header spent thirteen cells saying
+     that a second time, on a row that drops the tab strip at a hundred
+     columns and the connection badge below eighty. *)
   let filter_note =
     let level =
       match state.system_logs_min_level with
-      | None -> "  level\xe2\x89\xa5DEBUG  verbose:on"
+      | None -> "  level\xe2\x89\xa5DEBUG"
       | Some floor ->
-          Printf.sprintf "  level\xe2\x89\xa5%s  verbose:off"
+          Printf.sprintf "  level\xe2\x89\xa5%s"
             (String.trim (Masc.Tui_decode.system_log_level_label floor))
     in
     let category =
@@ -7205,13 +7210,26 @@ let render_system_logs (state : state) =
     in
     level ^ category
   in
+  (* What the reader set, on a read that brought back nothing. [l] and [v]
+     write the floor and refetch; with the fetch failing the rows are the only
+     other thing that moves, so pressing either redrew a frame identical to
+     the one before it. The default floor is not something anyone pressed, and
+     the note's other job -- saying why a short page is short -- needs a page,
+     so at the default this stays off the row rather than spending its width
+     on the surface that has least to spare. *)
+  let set_filter_note =
+    match state.system_logs_min_level, state.system_logs_category with
+    | None, None -> ""
+    | _ -> filter_note
+  in
   let header =
     match state.system_logs with
     | None ->
         Printf.sprintf "%s  %s  %s"
           (activity_title ~cols ~on_logs:true
              ~after:(Printf.sprintf "  %s  %s" timestamp (connection_badge state))
-             (title_missing_reading ~error:state.system_logs_error))
+             (title_missing_reading ~error:state.system_logs_error
+              ^ set_filter_note))
           timestamp (connection_badge state)
     | Some snapshot ->
         (* [total] counts what the ring has seen, not what this page holds.
@@ -12621,10 +12639,23 @@ let render_runtime_params (state : state) =
   let before = screen_title " MASC Config" ^ tab_strip_gap in
   box_line buf cols
     (config_pane_title ~cols ~before state);
+  (* Where the overrides live leads, because it is the only thing on this row
+     the reader cannot get anywhere else, and it was what the row cut first:
+     at eighty columns it read "overrides persist in .masc/run\xe2\x80\xa6" and at
+     sixty-four "overrides pers\xe2\x80\xa6", while the two key phrases in front of it
+     survived whole.
+
+     [Enter] is gone from the row. The footer is pinned to keep it at every
+     width ([Masc_tui_footer.never_dropped_keys]), so "Enter edits by type"
+     was the footer's own hint said a second time on a row that had no space
+     for it -- and [e] opens the same editor, which the row never said.
+
+     [E] stays. The footer drops it at eighty columns, so below that this row
+     is the only place the advanced editor is named. *)
   (match state.runtime_params_notice with
    | None ->
      box_line_styled buf cols ~style:(Theme.recede ())
-       "  Enter edits by type · E is advanced JSON · overrides persist in .masc/runtime_params.json"
+       "  overrides persist in .masc/runtime_params.json · E is advanced JSON"
    | Some (ok, detail) ->
      box_line_styled buf cols ~style:(if ok then Theme.ok () else Theme.bad ())
        ("  " ^ Terminal_text.single_line detail));

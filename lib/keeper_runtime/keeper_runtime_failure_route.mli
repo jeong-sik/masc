@@ -159,15 +159,14 @@ val route_of_error : boundary:error_boundary -> Agent_core.Error.t -> route
 val retry_after_of_route : route -> float option
 (** [Some hint] only for [Retry_after_observed] carrying a provider hint. *)
 
-val retry_backoff_sec :
-  cap_sec:float -> retry_after_hint:float option -> cadence_sec:float -> float
-(** Capped backoff for a retryable provider failure route (#26068). Prefers
-    the provider's [Retry-After] hint when above the cadence, falls back to
-    {!Env_config_keeper.KeeperKeepalive.rate_limit_backoff_floor_sec} when
-    the hint is [None] or unusable (zero, negative, NaN, infinite), and
-    clamps the result to [cap_sec] so a misread header can never park the
-    lane. Shared by the heartbeat cycle sleep and the chat
-    lane's deferred-retry [not_before] so both back off by the same rule. *)
+val path_rest_sec :
+  cap_sec:float -> retry_class:retry_class -> retry_after_hint:float option -> float
+(** How long a path rests after it answered [retry_class]
+    (RFC-provider-path-rest). A usable provider hint rests that long, at
+    least one second. Without one (absent, zero, negative, NaN), [Hard_quota]
+    rests [cap_sec] and every other class rests
+    {!Env_config_keeper.KeeperKeepalive.rate_limit_backoff_floor_sec}. The
+    result is clamped to [cap_sec]. The keeper cadence is not an input. *)
 
 val route_kind_label : route -> string
 (** Stable telemetry label: ["retry_after_observed" | "rotate_now" |

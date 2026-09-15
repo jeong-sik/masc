@@ -312,6 +312,55 @@ let test_the_schedule_subject_is_measured_not_given_the_line () =
    halves of the seam: the route publishes the resolved value, and the table
    plus selected-row context read it while Keeper assignment moves out of the
    space-constrained table column. *)
+(* The Logs header carries the floor the reader set with [l] and [v]. Both
+   keys write the one field and refetch, so on a read that brought nothing
+   back the rows -- the only other thing that moves -- are not there: pressing
+   either redrew a frame identical to the one before it. The note was computed
+   for both arms and reached only the arm that had a snapshot.
+
+   Two halves. The failed-read arm names the note, and the note says the floor
+   once: [verbose] was the floor being DEBUG, spelled a second time on the row
+   that drops the connection badge below eighty columns. *)
+let test_the_logs_header_says_the_floor_the_reader_set () =
+  Alcotest.(check bool) "the read that failed still carries what was set" true
+    (Ast_grep.count_identifiers_outside_calls_in_value_binding
+       ~module_path:render ~binding_name:"render_system_logs" ~callees:[]
+       ~identifiers:[ "set_filter_note" ]
+     > 0);
+  (* Twice, one per arm: the loaded header names it directly and the failed
+     one through [set_filter_note]. A count of one is the state this replaced
+     -- computed for both, reaching the arm that had a snapshot. *)
+  Alcotest.(check int) "both arms reach the note" 2
+    (Ast_grep.count_identifiers_outside_calls_in_value_binding
+       ~module_path:render ~binding_name:"render_system_logs" ~callees:[]
+       ~identifiers:[ "filter_note" ])
+
+(* Config / params draws one row of prose above its list, and it used to
+   spend its first forty cells on two key phrases the footer already carried:
+   "Enter edits by type \xc2\xb7 E is advanced JSON \xc2\xb7 overrides persist in
+   .masc/runtime_params.json". The row is cut to the frame, so what went
+   first was the part with no other home -- at eighty columns ".masc/run\xe2\x80\xa6",
+   at sixty-four "overrides pers\xe2\x80\xa6".
+
+   [Enter] is pinned into the footer at every width, so naming it here was the
+   footer's hint a second time; [E] is dropped from the footer at eighty, so
+   this row is where it lives below that. The store leads. *)
+let test_the_params_row_leads_with_what_only_it_says () =
+  Alcotest.(check int) "the row the pane draws, in this order" 1
+    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render
+       ~binding_name:"render_runtime_params"
+       ~needle:
+         "  overrides persist in .masc/runtime_params.json \xc2\xb7 E is advanced JSON");
+  (* And the phrase it stopped saying is gone rather than moved. The footer
+     is pinned to keep [Enter] at every width, which is what made the row's
+     copy of it dead weight; [Masc_tui_footer.never_dropped_keys] is where
+     that pin lives and test_tui_keys is what holds it. *)
+  Alcotest.(check int) "the footer's own hint is not said here twice" 0
+    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render
+       ~binding_name:"render_runtime_params"
+       ~needle:
+         "  Enter edits by type \xc2\xb7 E is advanced JSON \xc2\xb7 overrides persist in .masc/runtime_params.json")
+
 let test_repositories_show_the_server_resolved_checkout_path () =
   let producer = "lib/server/server_routes_http_routes_repositories.ml" in
   Alcotest.(check int) "the route names one resolved path field" 1
@@ -689,6 +738,10 @@ let () =
             test_a_lane_mark_says_what_its_colour_says
         ; Alcotest.test_case "the schedule subject is measured" `Quick
             test_the_schedule_subject_is_measured_not_given_the_line
+        ; Alcotest.test_case "the params row leads with what only it says" `Quick
+            test_the_params_row_leads_with_what_only_it_says
+        ; Alcotest.test_case "the Logs header says the floor that was set" `Quick
+            test_the_logs_header_says_the_floor_the_reader_set
         ; Alcotest.test_case "a labelled field does not bracket its reading" `Quick
             test_a_labelled_field_does_not_bracket_its_missing_reading
         ; Alcotest.test_case "the roster title says whether it is live" `Quick

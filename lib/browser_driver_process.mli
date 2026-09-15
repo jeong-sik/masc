@@ -31,7 +31,8 @@ val argv : driver:string -> port:int -> profile_root:string -> string list
 
 val browsers_using_profile_root : profile_root:string -> process_table:string -> int list
 (** [process_table] is [ps -axo pid=,command=] output. Returns every pid whose
-    command carries [-profile <profile_root>/...].
+    command carries [-profile <profile_root>/...]: the browser and, because
+    Zen passes them the same argument, its content processes.
 
     On 2026-09-15 a Zen the driver launched crashed and relaunched itself with
     [MOZ_LAUNCHED_CHILD=1]: no parent, its own process group, the same

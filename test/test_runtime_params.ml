@@ -615,6 +615,27 @@ let () =
     rm_rf tmp_dir
   in
 
+  let test_crash_tail_is_written_when_the_switch_closes () =
+    let tmp_dir = Filename.temp_dir "masc_crash_tail_" "" in
+    let clock = Eio.Stdenv.clock env in
+    let keepers_dir = Filename.concat tmp_dir "keepers" in
+    (* No sleep. The record is enqueued inside the drain interval and the
+       switch closes before the fiber's next wake -- which is what a server
+       shutdown looks like from here, and when a crash record is most likely
+       to be waiting. *)
+    Eio.Switch.run (fun sw ->
+      Keeper_crash_persistence.start_drain_fiber ~sw ~clock;
+      Keeper_crash_persistence.enqueue_record
+        ~keepers_dir ~name:"tail-keeper"
+        ~ts:2000.0 ~reason:"shutdown" ~restart_count:7);
+    let crashes =
+      Keeper_crash_persistence.recent_crashes
+        ~keepers_dir ~name:"tail-keeper" ~max_entries:10
+    in
+    Alcotest.(check int) "the queued tail reached the store" 1 (List.length crashes);
+    rm_rf tmp_dir
+  in
+
   Alcotest.run "runtime_params"
     [
       ( "core",
@@ -668,5 +689,7 @@ let () =
         [
           Alcotest.test_case "enqueue and read" `Slow
             test_crash_persistence_enqueue_read;
+          Alcotest.test_case "crash tail is written when the switch closes" `Quick
+            test_crash_tail_is_written_when_the_switch_closes;
         ] );
     ]

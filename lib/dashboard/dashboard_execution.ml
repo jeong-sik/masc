@@ -894,6 +894,16 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
          @ [ "messages", `List (List.map message_json messages) ]))
 ;;
 
+(* A render that finished as the window closed is the render;
+   [Eio.Time.with_timeout] would have replaced it with the error page. *)
+let render_under_timeout ~clock ~timeout_s render =
+  Watched_work.run
+    ~watcher:(fun () ->
+      Eio.Time.sleep clock timeout_s;
+      Error `Timeout)
+    (fun () -> Ok (render ()))
+;;
+
 let json ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
   let effective_actor = Dashboard_projection_cache.normalize_actor_name actor in
   match dashboard_fixture_name ?fixture () with
@@ -902,14 +912,9 @@ let json ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
     (* Guard: abort render if it exceeds render_timeout_s.
        PG connection failures during render can block fibers for hours
        (observed: 11,018s render on 2026-03-21). *)
-    (* A render that finished as the window closed is the render;
-       [Eio.Time.with_timeout] would have replaced it with the error page. *)
     (match
-       Watched_work.run
-         ~watcher:(fun () ->
-           Eio.Time.sleep clock render_timeout_s;
-           Error `Timeout)
-         (fun () -> Ok (json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr ()))
+       render_under_timeout ~clock ~timeout_s:render_timeout_s (fun () ->
+         json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr ())
      with
      | Ok result -> result
      | Error `Timeout ->
@@ -926,4 +931,5 @@ let json ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
 
 module For_test = struct
   let agents_json = agents_json
+  let render_under_timeout = render_under_timeout
 end

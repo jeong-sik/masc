@@ -38,6 +38,13 @@ let endpoint url =
    lifetime. A pending download survives caller polling and becomes interrupted
    only when its evidence stream closes. *)
 let command_timeout = 20.
+
+(* A reply that arrived as the deadline passed is the reply: the session is
+   interrupted only for a command that got none. *)
+let reply_within ~clock ~timeout_s reply =
+  Watched_work.run
+    ~watcher:(fun () -> Eio.Time.sleep clock timeout_s; Error `Timeout)
+    (fun () -> Ok (Eio.Promise.await reply))
 let start ~sw ~env ~root ~publish:publish_artifact ~session_id ~websocket_url =
   let* host, port, resource = endpoint websocket_url in
   let ready, ready_u = Eio.Promise.create () in
@@ -120,13 +127,7 @@ let start ~sw ~env ~root ~publish:publish_artifact ~session_id ~websocket_url =
             Hashtbl.add pending id resolver;
             Endpoint.Wsd.send_text wsd (Yojson.Safe.to_string
               (`Assoc ["id",`Int id;"method",`String method_;"params",params]));
-            (* A reply that arrived as the deadline passed is the reply: the
-               session is interrupted only for a command that got none. *)
-            (match
-               Watched_work.run
-                 ~watcher:(fun () -> Eio.Time.sleep clock command_timeout; Error `Timeout)
-                 (fun () -> Ok (Eio.Promise.await reply))
-             with
+            (match reply_within ~clock ~timeout_s:command_timeout reply with
              | Ok reply -> reply
              | Error `Timeout ->
                disconnect ("BiDi command timed out: " ^ method_); Error ("BiDi command timed out: " ^ method_)) in
@@ -182,3 +183,7 @@ let start ~sw ~env ~root ~publish:publish_artifact ~session_id ~websocket_url =
     with Stop -> ());
   try Eio.Promise.await ready with
   | Eio.Cancel.Cancelled _ as exn -> disconnect "BiDi setup caller canceled"; raise exn
+
+module For_testing = struct
+  let reply_within = reply_within
+end

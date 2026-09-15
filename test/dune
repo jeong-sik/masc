@@ -5578,6 +5578,13 @@
 
 (include stanzas/test_browser_downloads.inc)
 (include stanzas/test_browser_bidi_lifecycle.inc)
+
+; Mock clock as the BiDi command window's clock: a reply that arrived as the
+; window closed is the reply, not a timeout that interrupts the session.
+(test
+ (name test_browser_bidi_downloads_reply_window)
+ (modules test_browser_bidi_downloads_reply_window)
+ (libraries masc alcotest eio eio.mock))
 (include stanzas/test_browser_webdriver.inc)
 (include stanzas/test_browser_controls.inc)
 
@@ -6192,6 +6199,13 @@
  (name test_dashboard_compute_window)
  (modules test_dashboard_compute_window)
  (libraries alcotest eio eio.mock masc.dashboard))
+
+; Mock clock as the execution dashboard render's clock: a render that finished
+; as its window closed is the render, not the timeout page.
+(test
+ (name test_dashboard_execution_render_window)
+ (modules test_dashboard_execution_render_window)
+ (libraries alcotest eio eio.mock yojson masc.dashboard))
 
 ; Mock clock orders the timer's wake-up ahead of the read's: the official
 ; client lanes' idle window keeps a line that arrived as it passed.

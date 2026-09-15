@@ -60,7 +60,7 @@ let test_context_window_is_declared_or_none () =
     None
     (Rr.context_window_tokens ());
   Config_boot_overrides.set
-    Masc.Env_config_keeper.KeeperContext.window_tokens_env_key
+    Env_config_keeper.KeeperContext.window_tokens_env_key
     "65536";
   Rr.reset_for_tests ();
   Alcotest.(check (option int))

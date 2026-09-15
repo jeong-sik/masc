@@ -27,7 +27,8 @@
   masc_network_defaults
   masc_time_constants
   nickname_words
-  playground_paths)
+  playground_paths
+  workspace_root)
  (wrapped false)
  (preprocess
   (pps ppx_enumerate))

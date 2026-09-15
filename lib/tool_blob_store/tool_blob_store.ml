@@ -67,6 +67,45 @@ let remove_validated_snapshot path =
   loop ()
 ;;
 
+module Written_address_set = Set.Make (String)
+
+(* Blob paths this process wrote with [put] and has not since found missing or
+   corrupt. Maintenance deletes blobs only from the offline deployment helper
+   while it holds the BasePath process lease, which a running server holds, so
+   a path written here stays on disk for the life of the process unless
+   something outside the store removes or damages it. [fetch] forgets a path
+   when it reads either, [delete] forgets the path it removes, and the next
+   [put] of those bytes writes it again. *)
+let written_addresses : Written_address_set.t Atomic.t =
+  Atomic.make Written_address_set.empty
+;;
+
+let was_written path = Written_address_set.mem path (Atomic.get written_addresses)
+
+let record_written path =
+  let rec loop () =
+    let current = Atomic.get written_addresses in
+    let updated = Written_address_set.add path current in
+    if updated == current
+    then ()
+    else if not (Atomic.compare_and_set written_addresses current updated)
+    then loop ()
+  in
+  loop ()
+;;
+
+let forget_written path =
+  let rec loop () =
+    let current = Atomic.get written_addresses in
+    let updated = Written_address_set.remove path current in
+    if updated == current
+    then ()
+    else if not (Atomic.compare_and_set written_addresses current updated)
+    then loop ()
+  in
+  loop ()
+;;
+
 (* sha256 validation SSOT lives in {!Tool_output} (the artifact-ref owner);
    re-exported here so the store boundary keeps its historical surface. *)
 type invalid_sha256 = Tool_output.invalid_sha256 =
@@ -160,6 +199,7 @@ let fetch t ~sha256 =
        | Error error -> Error (Owned_read_failed error)
        | Ok None ->
          remove_validated_snapshot path;
+         forget_written path;
          Ok None
        | Ok (Some { content = bytes; snapshot }) ->
          let actual = Digestif.SHA256.(digest_string bytes |> to_hex) in
@@ -169,6 +209,7 @@ let fetch t ~sha256 =
            Ok (Some bytes))
          else (
            remove_validated_snapshot path;
+           forget_written path;
            Error (Integrity_mismatch { path; expected = sha256; actual })))
 
 type range =
@@ -238,18 +279,31 @@ let fetch_range t ~sha256 ~offset ~max_bytes =
         | Ok (Some _) -> validate_whole_snapshot ()))
 ;;
 
-let put_with_atomic_replace ~atomic_replace ~operation t ~bytes ~mime =
+(* Whether a put writes an address this process already wrote. The model
+   input demotion puts every aged tool result on every provider request, so a
+   long-lived keeper rewrote the same thousands of files each request: about
+   2,776 blob files in one to two and a half minutes on 2026-09-15, each a temp
+   write, an fsync, a rename and a parent fsync. *)
+type rewrite =
+  | Rewrite_every_put
+  | Skip_address_this_process_wrote
+
+let put_with_atomic_replace ~rewrite ~atomic_replace ~operation t ~bytes ~mime =
   let sha256 = Digestif.SHA256.(digest_string bytes |> to_hex) in
   let path = shard_path t sha256 in
-  ensure_parent_dir path;
-  (* An authoritative atomic rewrite avoids reading and hashing a second full
-     copy on idempotent puts, and repairs any corrupt prior bytes at this
-     content address. Concurrent writers have byte-identical payloads. *)
-  (match atomic_replace path bytes with
-   | Ok () -> ()
-   | Error msg ->
-       raise (Sys_error (Printf.sprintf "tool_blob_store.%s: %s" operation msg)));
-  remove_validated_snapshot path;
+  (match rewrite with
+   | Skip_address_this_process_wrote when was_written path -> ()
+   | Skip_address_this_process_wrote | Rewrite_every_put ->
+     ensure_parent_dir path;
+     (* An authoritative atomic rewrite avoids reading and hashing a second
+        full copy, and repairs any corrupt prior bytes at this content
+        address. Concurrent writers have byte-identical payloads. *)
+     (match atomic_replace path bytes with
+      | Ok () -> ()
+      | Error msg ->
+          raise (Sys_error (Printf.sprintf "tool_blob_store.%s: %s" operation msg)));
+     remove_validated_snapshot path;
+     record_written path);
   (* A digestif-produced sha256 and a byte length are always valid; an empty
      [mime] is the only reachable rejection and is a caller bug, raised
      visibly rather than stored. *)
@@ -266,6 +320,7 @@ let put_with_atomic_replace ~atomic_replace ~operation t ~bytes ~mime =
 let put t ~bytes ~mime =
   Tool_output.Stored
     (put_with_atomic_replace
+       ~rewrite:Skip_address_this_process_wrote
        ~atomic_replace:Fs_compat.save_file_atomic
        ~operation:"put"
        t
@@ -275,6 +330,7 @@ let put t ~bytes ~mime =
 
 let put_durable =
   put_with_atomic_replace
+    ~rewrite:Rewrite_every_put
     ~atomic_replace:Fs_compat.save_file_atomic_strict
     ~operation:"put_durable"
 ;;
@@ -513,6 +569,7 @@ let delete t ~sha256 =
   | Ok () ->
     let path = shard_path t sha256 in
     remove_validated_snapshot path;
+    forget_written path;
     let parent = Filename.dirname path in
     (match
        Fs_compat.inspect_owned_directory_chain

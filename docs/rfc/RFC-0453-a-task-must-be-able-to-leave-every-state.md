@@ -1,6 +1,6 @@
 ---
 rfc: "0453"
-title: "Task 는 모든 상태에서 나갈 수 있어야 한다 — 남은 상태마다 움직일 행위자가 있고, 증거는 일이 실제로 있는 곳에서 읽힌다"
+title: "Task 는 모든 상태에서 나갈 수 있어야 한다 — 남은 상태마다 그 상태를 벗어나게 할 행위자가 있다"
 status: Draft
 created: 2026-09-15
 updated: 2026-09-15
@@ -8,7 +8,7 @@ author: claude
 supersedes: []
 superseded_by: null
 related: ["0445", "0417", "0416", "0221", "0446", "0361"]
-implementation_prs: ["36461", "36500", "36513", "36529", "36552", "36555", "36560", "36567", "36575"]
+implementation_prs: ["36461", "36500", "36513", "36529", "36552", "36555", "36560", "36567"]
 ---
 
 # RFC-0453 — Task 는 모든 상태에서 나갈 수 있어야 한다
@@ -24,13 +24,11 @@ Task 상태 기계는 "이 상태에서 나가게 할 수 있는 사람은 X 뿐
 > 끝나지 않은 Task 상태마다, 그 상태를 벗어나게 할 행위자가 **그 자리에서 확인되는 값**이거나,
 > 그 Task 가 **운영자 작업 목록에 투영**된다. 시간으로 닫는 장치(타이머·자동 확정·재시도 상한)는 두지 않는다.
 
-여기서 나오는 변경은 네 가지다. 새 Task 상태를 만들지 않는다.
+여기서 나오는 변경은 세 가지다. 새 Task 상태를 만들지 않는다.
 
 1. 제출자가 Keeper 인지 여부는 저장하지 않고 **쓰는 자리에서 Keeper 저장소에 물어본다** (RFC-0445 §2.2 U1 수정).
 2. 받을 Keeper 가 없다고 전달 단계가 확정하면, 사유를 남기고 Task 를 `Todo` 로 되돌린다.
 3. 운영자만 풀 수 있는 Task(포기 청구·주인 없는 점유)는 운영자가 보는 화면에 목록으로 나온다.
-4. 병합된 변경(pull request)을 증거 형식으로 받고, 조회는 백로그 락 밖 — 판정자가 증거를 읽는 자리에서
-   한다. 지금은 증거가 작업자 playground 의 파일뿐이다.
 
 어휘는 RFC-0445 의 `next_actor` 합을 그대로 쓴다. 두 번째 어휘를 만들지 않는다.
 
@@ -66,7 +64,7 @@ polisher 3, code-reviewer 2, analyst 1, lane-smith 1, pr-updater 1, codex-mcp-cl
 #36461 (병합됨) 이 이 재시도를 끝냈다. 다만 거기서 Task 는 `InProgress` 로 남는다 — 아래 §3.2 가
 그 자리를 마저 고친다.
 
-### 1.3 증거는 대부분 읽히지 않는다
+### 1.3 증거는 대부분 안 읽히지만, Task 를 막는 것은 그게 아니다
 
 검증 기록 1,368건에서:
 
@@ -79,13 +77,20 @@ polisher 3, code-reviewer 2, analyst 1, lane-smith 1, pr-updater 1, codex-mcp-cl
 읽지 못한 참조 2,150건의 이유: `missing` 1,477, `invalid_reference` 583, `read_error` 84,
 `invalid_utf8` 4, `not_regular_file` 2. **참조 2,150건 전부 상대 경로다.**
 
-증거로 받을 수 있는 형식은 `note`, `collaboration`(`board:` / `fusion:`), `artifact` 세 가지고,
-`artifact` 는 작업자 playground 안의 파일만 받는다 (`workspace_verification_store.ml`,
-`Evidence_outside_worker_playground`). 일은 git worktree 와 PR 에서 끝나는데, 증거는 거기서
-읽을 수 없다.
+**그런데 이것이 Task 를 막는 원인은 아니다.** `verification-runs.jsonl` 의 완료된 판정 129건 중
+**128건이 `operator_routed`** — 포기 청구라 리뷰 없이 운영자에게 넘어간 것이고, 실제로 리뷰가 돈 건
+1건이다. 그 1건은 lookup 도구를 11번 불렀다: sandbox 검색 2회가 빈손으로 끝나자 Board 글로,
+다시 `web_fetch` 로 PR 페이지 · `.diff` · 브랜치의 raw 파일 · 커밋 status · check-runs 까지 읽고
+거절했다.
 
-그 결과가 포기 청구의 내용이다. 63건 중 **46건이 "PR 로 main 에 이미 병합됐지만 계약이 요구하는
-증거를 sandbox 에서 보여 줄 수 없다"** 는 취지다 (예: task-361 → PR #30715, task-366 → PR #30633).
+판정자는 sandbox 밖을 읽는다. 참조가 안 열리면 다른 경로로 옮겨 간다. 그러니 위 757건은 판정이
+막힌 이유가 아니라, **생산자가 뿌리를 몰라 같은 파일을 여러 경로에 뿌린 낭비**다 — `artifact:`
+3,239건 중 적어 낸 경로에서 열리는 것은 1,440건이고, 생산자가 찍어 보는 뿌리는 12가지가 넘는다
+(`repos/` 707, `artifacts/` 693, 뿌리 없음 572, `evidence/` 208 …).
+
+Task 가 막히는 이유는 증거가 안 읽혀서가 아니라 **리뷰까지 가지를 못해서다.** 포기 청구 63건 중
+46건이 "PR 로 main 에 이미 병합됐다" 는 취지인데 (예: task-361 → PR #30715, task-366 → PR #30633),
+그 청구를 판정할 운영자가 움직이지 않는다. §3.3 이 여기를 겨눈다.
 
 사유 자체는 63건 모두 남아 있다. 짧은 것이 131자, 중앙값 442자다. 다만 그 문장이 있는 곳이
 Board 글 하나뿐이다 — 검증 기록은 사유 사본을 일부러 두지 않는다
@@ -205,53 +210,6 @@ task_awaiting_operator =
 기존 63건은 기록에 사유가 없다. 마이그레이션하지 않는다. 투영은 사유 없는 항목을 `None` 으로
 그리고, 운영자는 Board 글을 본다. 새로 들어오는 청구부터 목록에서 읽힌다.
 
-### 3.5 병합된 변경을 증거 형식으로 받는다 — 조회는 판정자 쪽에서
-
-증거 항목에 생성자를 하나, 조회 결과에 타입을 하나 더한다.
-
-```
-type change_lookup =
-  | Change_not_looked_up
-  | Change_seen of { merged; merge_commit; title; changed_files }
-  | Change_lookup_failed of string
-
-Evidence_change of { repository : string; pull_request : int; lookup : change_lookup }
-```
-
-세 갈래인 이유는 "아무도 안 봤다" 와 "봤는데 실패했다" 가 서로 다른 사실이기 때문이다. 둘을 `option`
-하나로 누르면 판정자는 자기 앞의 공백이 어느 쪽인지 모른 채 판정한다.
-
-**조회를 제출 시점에 두면 안 된다.** 첫 구현(#36546)이 그렇게 했고 닫았다. 제출 경계는 백로그 락
-**안**에서 돈다 — `workspace_task_transitions.ml:162` 가 락을 잡고, 검증 요청 훅 호출은 `:378` 이다.
-그 락은 벽시계 만료가 걸린 lease 다. 거기서 네트워크를 부르면 저장소가 느리게 답하는 동안 그
-워크스페이스의 모든 claim·release·판정이 뒤에 선다. 참조가 셋이면 셋을 곱한다. 같은 자리에 meta 수리
-쓰기를 넣었다가 뺀 것과 같은 계열이다 (#36552 → #36560): 공유 락 안에서 느리거나 쓰는 일을 하지 않는다.
-
-그래서 **조회는 판정자가 증거를 읽는 자리**에서 한다. 판정 레인(`completion_authority_agent.ml`)은 락을
-하나도 잡지 않고, 이미 모델을 부르는 파이버다. 저장되는 항목은 언제나 `Change_not_looked_up` 이고,
-판정에 보내는 스냅샷에서만 답이 채워진다. 기록은 다시 쓰지 않는다 — 다음에 읽는 쪽은 다시 묻는다.
-
-부수 효과로 답이 더 맞다. 판정이 형성되는 그 시점의 저장소를 보게 되므로, 제출 시점 스냅샷이
-"판정 대상과 다른 주장" 이 되는 경우가 없다.
-
-**읽는 쪽이 있어야 생성자를 넣는다.** 조회 없는 형태를 한 번 만들었을 때는 이 타입을 `Evidence_note`
-와 다르게 읽는 코드가 하나도 없었다. 조회가 같이 들어오면서 읽는 쪽이 셋 생겼다.
-
-| 읽는 쪽 | `Evidence_note` 와 다른 점 |
-|---|---|
-| 판정자의 증거 개수 (`evidence_posture_of_snapshot`) | `Change_seen` 은 쓸 만한 증거로 센다. `Change_not_looked_up` / `Change_lookup_failed` 는 안 센다 — 아무도 못 읽은 참조는 주장이지 증거가 아니다 |
-| 판정자에게 가는 본문 (transport 투영) | 병합 여부, 병합 커밋, 제목, 바뀐 파일 수가 붙는다 |
-| 운영자가 읽는 줄 (`submitted_evidence_identity_lines`) | `(merged as <sha>)` / `(not merged)` / `(unreadable: <사유>)` / `(not looked up)` 네 가지로 갈린다 |
-
-#33218 이 "읽는 쪽이 없다" 며 `cancel_reason` 을 지운 기준을 그대로 대면, 이제는 통과한다.
-
-새 자격 증명은 만들지 않는다. 생산자 본인의 `gh` CLI 가 이미 들고 있는 토큰을 그 순간에 읽는다
-(`Keeper_github_identity.stored_token`). 토큰이 없는 생산자는 typed 실패를 받는다 — 조용한 공백도 아니고,
-런타임 자기 신원으로 대신 묻지도 않는다.
-
-커밋 참조(`<owner>/<repo>@<sha>`)는 넣지 않는다. 쌓인 46건이 전부 PR 을 말하고, 커밋에는 "병합됐다" 에
-해당하는 사실이 없어 스냅샷 모양이 다르다.
-
 ## 3.6 이 설계가 새로 만들 수 있는 막힘
 
 새 규칙은 새 막힘을 만들 수 있다. 확인한 것과 답이다.
@@ -316,12 +274,11 @@ RFC-0445 의 `Operator_must_act (Fix_keeper_record)` 와 같은 값이다. 재�
 | PR-1 (#36500) | §3.2. `reconcile_pending` 의 `No_keeper` 분기가 의무를 끝내고 Task 를 `Todo` 로 되돌린다 + 판정 레인 행위자의 typed 되돌림 | fixture: No_keeper 거절 1건 → Task `todo`, outbox 0, `handoff_context.reason` 유지 |
 | PR-2 (#36513) | §3.3 투영 + §3.4 기록의 사유 사본 + 첫 표면(TUI agenda) | fixture: 포기 청구 1 + 주인 없는 점유 1 + 안 읽히는 기록 1 → 세 생성자 exhaustive, 사유가 기록에서 읽힘 |
 | PR-3 (#36529) | §3.3 나머지 두 표면 — 웹 verify-queue, `Dashboard_attention` | fixture: 같은 투영을 읽고 두 화면이 같은 개수를 그린다 |
-| PR-4 (#36575, #36546 닫음) | §3.5 변경 증거 — 생성자와 조회를 같이 넣고, 조회는 판정자가 증거를 읽는 자리에서 한다 | 스텁 transport 로 200 / 열린 PR / 전송 실패 / 404 / 503 / 깨진 JSON / 필드 누락 / 토큰 없음. 저장된 항목은 언제나 `Change_not_looked_up` — 제출 경계에서 나가는 네트워크 0. 판정 자리에서는 안 읽힌 항목만 채워지고 순서가 유지된다 |
 | 운영 | 지금 쌓인 63 + 9건 처리 | 운영자 결정. 코드 없음 |
 
 PR-1 은 PR-0 위에서만 의미가 있다. §3.4 는 §3.3 과 한 PR 로 묶었다 — 기록에 사유를 쓰는 변경은
 그걸 읽는 목록과 같이 들어가야 한다. 따로 넣으면 #33218 이 "읽는 쪽이 없다" 며 지웠던 필드를
-읽는 쪽 없이 되살리는 셈이 된다. PR-3 과 PR-4 는 서로 독립이다.
+읽는 쪽 없이 되살리는 셈이 된다.
 
 ## 6. 판정 기준
 
@@ -332,8 +289,7 @@ PR-1 은 PR-0 위에서만 의미가 있다. §3.4 는 §3.3 과 한 PR 로 묶�
   이 거절 사유, `pending_completion_rejections` 에 항목 0.
 - `rg 'Cancel_task' bin/` > 0 (PR-2 뒤). 지금 0.
 - 포기 청구의 사유가 검증 기록에서 읽힌다 (PR-3). 지금은 Board 글 본문에만 있다.
-- 09-15 기준 757 / 1,368 이던 "읽지 못한 참조를 가진 검증 기록" 비율이 PR-4 배포 30일 뒤 다시 측정된다.
-  같은 스크립트로 센다 (§8). 제출 경계에서 나가는 네트워크 호출은 그 뒤에도 0 이어야 한다 — 조회는 판정자 쪽에 있다.
+- 완료된 판정 중 `operator_routed` 비율이 내려간다. 지금 129건 중 128건이다 (§1.3). 같은 파일로 센다 (§8).
 - 어느 단계에서도 새 Task 상태가 늘지 않는다: `task_status` 생성자 6개 유지.
 
 ## 7. 반론과 답
@@ -368,7 +324,9 @@ PR-1 은 PR-0 위에서만 의미가 있다. §3.4 는 §3.3 과 한 PR 로 묶�
   센다. 검증 기록의 `submitted_evidence` 를 세면 안 된다 — 포기 경로는 거기 쓰지 않는다. 이 초안의
   첫 판이 그렇게 세어 "26건 무사유" 라는 틀린 값을 실었다.
 - 실측: `~/me/.masc/tasks/backlog.json` (2026-09-15 05:30 UTC), `~/me/.masc/verifications/vrf-*.json`
-  1,368건, `~/me/.masc/logs/system_log_2026-09-1{2,3,4,5}.jsonl`.
+  1,368건, `~/me/.masc/logs/system_log_2026-09-1{2,3,4,5}.jsonl`,
+  `~/me/.masc/verification-runs.jsonl` (판정 129건 — 도구 호출은 `complete` 이벤트의
+  `completion.tools` 에 있다. `register` 이벤트만 보면 기록이 없는 줄 안다).
 - 관련 RFC: RFC-0445(next-actor 합, §2.2 U1 수정 대상), RFC-0417(취소 판정은 운영자),
   RFC-0416(새 상태 없이 보이게 한다), RFC-0221(원자적 검증 제출), RFC-0446(계약 없는 제출 거절),
   RFC-0361(검증 권한 관측).

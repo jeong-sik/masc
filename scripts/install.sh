@@ -857,8 +857,9 @@ choose_install_base_path() {
   [ -z "$BASE_PATH" ] || return 0
   local suggested="$PWD" answer
   if [ "$WIZARD" != "0" ] && is_tty; then
-    # The same new-workspace suggestion the setup journey makes. $HOME itself
-    # would put the workspace in ~/.masc, which is also the user skill source.
+    # The same new-workspace suggestion the setup journey makes. The home
+    # directory itself would put the workspace in the .masc directory that
+    # also holds user skills.
     [ -d "$PWD/.masc/config" ] || suggested="$HOME/MASC"
     printf '\nMASC stores configuration, Keepers and workspace data in <workspace>/.masc.\n' >&2
     printf '? Workspace directory [%s]: ' "$suggested" >&2

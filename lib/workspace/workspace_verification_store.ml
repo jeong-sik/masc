@@ -649,17 +649,22 @@ let cancellation_reason_field = "cancellation_reason"
    completion request and on every stop submitted before the field existed,
    which is the same answer to the reader: this record does not carry one. A
    blank string is not a reason either. *)
+let cancellation_reason_of_output = function
+  | `Assoc output_fields ->
+    (match List.assoc_opt cancellation_reason_field output_fields with
+     | Some (`String reason) ->
+       (match String.trim reason with
+        | "" -> None
+        | trimmed -> Some trimmed)
+     | Some _ | None -> None)
+  | _ -> None
+;;
+
 let cancellation_reason_of_request_json = function
   | `Assoc fields ->
     (match List.assoc_opt "output" fields with
-     | Some (`Assoc output_fields) ->
-       (match List.assoc_opt cancellation_reason_field output_fields with
-        | Some (`String reason) ->
-          (match String.trim reason with
-           | "" -> None
-           | trimmed -> Some trimmed)
-        | Some _ | None -> None)
-     | Some _ | None -> None)
+     | Some output -> cancellation_reason_of_output output
+     | None -> None)
   | _ -> None
 ;;
 

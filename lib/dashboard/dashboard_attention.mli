@@ -3,7 +3,14 @@
 
     Pure functions. Scans {!Dashboard_labels.workspace_snapshot} values
     to produce a sorted list of items the operator should act on.
-    Each item includes a suggested MCP tool name. *)
+    Each item carries what ends the wait — usually an MCP tool name, and for a
+    stop the operator signs, the surface that takes the signature.
+
+    Tasks that only an operator can move arrive already projected, in
+    [operator_tasks]. Deciding whether an agent can still act needs the Keeper
+    registry and the meta store, which a pure module cannot read; the
+    projection answers it the same way the rejection delivery does, so the
+    dashboard and the delivery cannot disagree about the same agent. *)
 
 (** {1 Types} *)
 
@@ -20,13 +27,20 @@ type attention_item = {
 
 (** {1 Collection} *)
 
-(** [collect ~now snapshots] scans for stuck agents and idle-with-
-    pending-work situations, returning the items sorted by severity
-    (Critical first). *)
+(** [collect ~now ~operator_tasks snapshots] scans for stuck agents and
+    idle-with-pending-work situations, folds in the tasks only the operator can
+    move, and returns the items sorted by severity (Critical first). *)
 val collect :
   now:float ->
+  operator_tasks:Operator_task_attention.item list ->
   Dashboard_labels.workspace_snapshot list ->
   attention_item list
+
+val detect_operator_tasks :
+  Operator_task_attention.item list -> attention_item list
+(** A stop waiting for a signature and work held by nobody are the operator's
+    to end and are [Critical]; a Keeper record that does not decode is a
+    repair, and the task moves again once it is fixed, so it is [Warning]. *)
 
 (** {1 Presentation} *)
 

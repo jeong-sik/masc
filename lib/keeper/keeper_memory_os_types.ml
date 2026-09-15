@@ -219,6 +219,10 @@ let wire_at_element field index result =
 
 let memory_id_prefix = "sha256:"
 
+(* A memory identity is the hex SHA-256 of the claim bytes, so the digit count
+   is the digest's, not a chosen width. *)
+let memory_id_digits = 64
+
 let is_lowercase_hex = function
   | '0' .. '9' | 'a' .. 'f' -> true
   | _ -> false
@@ -226,9 +230,18 @@ let is_lowercase_hex = function
 
 let is_memory_id value =
   let prefix_length = String.length memory_id_prefix in
-  String.length value = prefix_length + 64
+  String.length value = prefix_length + memory_id_digits
   && String.starts_with ~prefix:memory_id_prefix value
-  && String.for_all is_lowercase_hex (String.sub value prefix_length 64)
+  && String.for_all
+       is_lowercase_hex
+       (String.sub value prefix_length memory_id_digits)
+;;
+
+(* {!is_memory_id} answers a bool. A surface that refuses a value the model
+   supplied has to say what it wanted instead, and spelling the grammar again
+   there lets the two drift, so the predicate states its own shape. *)
+let memory_id_shape =
+  Printf.sprintf "%S followed by %d lowercase hex digits" memory_id_prefix memory_id_digits
 ;;
 
 let non_empty_string value = not (String.equal (String.trim value) "")

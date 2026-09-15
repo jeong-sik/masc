@@ -58,7 +58,9 @@ type payload_read_error =
   | Source_unavailable of string
   | Missing_registration
   | Missing_completion
-  | Invalid_record of { line : int; detail : string }
+  | Invalid_payload of string
+      (** The run's payload file is not the size or SHA-256 its row recorded,
+          or is not JSON. *)
   | Snapshot_changed
 
 type payload_availability =
@@ -94,8 +96,13 @@ type completion_error =
 
 val completion_error_to_string : completion_error -> string
 
-(** Current-only durable registry with the closed [run_input] contract. *)
+(** Current-only durable registry with the closed [run_input] contract. The log
+    row records a run's identity and outcome and the size and SHA-256 of its
+    input and output; the values are in [<log dir>/<payload_dirname>/<run_id>/]
+    [input.json] and [output.json]. *)
 val storage_filename : string
+
+val payload_dirname : string
 
 val max_completed_retained : int
 (** How many completed runs survive a replay, PER LANE. Running entries are

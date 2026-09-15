@@ -711,7 +711,6 @@ let field_value fixture ~tool_name field_name schema =
   | "verdict" -> `String "pass"
   | "score" -> `Float 0.9
   | "timeout" when tool_name = "masc_listen" -> `Int 1
-  | "interval" when tool_name = "masc_heartbeat_start" -> `Int 5
   | "ice_candidates" -> `List [ `String "candidate:tool-matrix" ]
   | "tool_name" -> `String "masc_status"
   | "subscription_id" -> `String "subscription-001"
@@ -792,7 +791,6 @@ let tool_arguments fixture (schema : Masc_domain.tool_schema) =
     let optional =
       match name with
       | "masc_start" -> [ "path"; "task_title" ]
-      | "masc_heartbeat_start" -> [ "interval" ]
       | "masc_board_post" ->
           (* The schema declares [content] as the field the handler layer
              validates; the strict field gate (#33565) rejects anything else,
@@ -1022,9 +1020,6 @@ let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock
           case.prepare fixture;
           let arguments = case.arguments fixture schema in
           let response = call_tool_json fixture schema arguments in
-          if String.equal schema.Masc_domain.name "masc_heartbeat_start" then
-            Heartbeat.list ()
-            |> List.iter (fun hb -> ignore (Heartbeat.stop hb.Heartbeat.id));
           evaluate_expectation ~name:schema.Masc_domain.name case.expectation response
         with exn ->
           Error

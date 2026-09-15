@@ -10,7 +10,7 @@ related: ["0380", "0089"]
 
 # RFC-0453 — keeper health 는 phase 의 투영이지 heartbeat 나이가 아니다
 
-- Status: **Accepted (2026-09-15).** 결정은 §0 과 §3. 구현은 PR 다섯 개로 나눠 §6 체크리스트로 따라간다.
+- Status: **Accepted (2026-09-15).** 결정은 §0 과 §3. 구현 PR 과 결과는 §6.
 - 한 줄: metrics 원장(ledger)의 `record_kind=heartbeat` 줄 나이를 읽어 keeper 를 `stale` 로 판정하던 코드를 서버·TUI·대시보드에서 전부 지운다. keeper health 는 `healthy | idle | offline` 세 값이 되고, phase 와 턴 이력만으로 정해진다.
 
 ## 0. 결정 요약
@@ -109,18 +109,20 @@ heartbeat 나이 판정이 없어도 아래가 이미 답한다. 나이 판정�
 
 두 PR 은 연달아 병합한다. 사이 구간에서는 서버가 아직 내는 `health_state=stale` 을 대시보드 파서(`normalizeKeeperDiagnostic`)가 어휘 밖 값으로 버려, 그 keeper 의 diagnostic 칩(summary·quiet_reason·keepalive_running)이 비어 보인다. 틀린 권고를 그리는 것보다 빈 칸이 낫다고 보고 호환 코드는 두지 않는다. 릴리즈는 같은 커밋의 서버와 대시보드 자산을 함께 빌드하므로(`release.yml`), 이 구간은 두 병합 사이의 main 을 직접 빌드해 띄우는 경우에만 보인다.
 
-- [ ] **PR-B** 대시보드: heartbeat 판정 3벌 제거, `KeeperHealthState` 세 값, `keeperDisplayStatus` phase 우선. 검증: `pnpm typecheck`, `pnpm lint`, `pnpm test`(CI 는 대시보드 테스트를 돌리지 않는다).
-- [ ] **PR-A1** 서버 + TUI: `keeper_health` 세 값, persisted snapshot 모듈·wire 키 삭제, TUI 마크, 테스트, 이 RFC.
-- [ ] **PR-A2** (A1 위): `Surface_inactive`, `klc_inactive` 삭제 (`keeper_surface_status` 가 더는 만들지 않는다).
-- [ ] **PR-B2** (A2 병합 뒤, 대시보드): keeper `status` 를 읽는 자리의 `'inactive'` 토큰 삭제 — `keeper-store-normalize.ts`, `lib/unified-status.ts`, `runtime-counts.ts`, `lib/keeper-operational-state.ts`, `lib/monitoring-runtime.ts`, `lib/keeper-classifiers.ts`. agent status 의 `inactive`(`lib/agent-status.ts`, `types/core.ts` Agent) 는 다른 어휘라 그대로 둔다.
-- [ ] **PR-C** (A1 위): continuity 축 정리. `keepalive_recovery_window_s` 는 "heartbeat 증거가 아직 안 쓰였을 60초 동안 판정 보류" 용이었다. 증거 판정이 사라지면 `Continuity_recovering` 은 근거가 없고 `keeper_continuity` 는 `keepalive_running` 하나와 같다. 함께: `lib/workspace/heartbeat.ml`(MCP 시절 타이머 표, `start` 호출자 0, `stop_by_agent` 는 항상 0 반환)과 `heartbeats_stopped` 필드.
-- [ ] **PR-D** TUI Activity pane: chunk 를 keeper 턴으로 묶는다. agent-core `turn` 은 provider 호출 순번이라 keeper 턴 하나가 호출 수만큼 `unsettled` 줄로 쪼개졌다. `run_id` 는 키로 못 쓴다 — `Sink_degraded` 면 이벤트마다 새 `evt-…` 가 찍히고, provider 로테이션마다 갈린다. 서버 브리지가 프레임에 keeper 턴을 찍는 안도 버렸다 — `Keeper_event_bridge` 는 서버 부트에서 bus 를 비동기로 비우므로 relay 시점의 registry `current_turn_observation` 이 이미 다음 턴이거나 비어 있을 수 있다. 대신 서버가 LLM 호출마다 이미 내는 `keeper_turn_observation`(`name`, 세션 `turn`, `total_turns`)을 TUI 가 디코드해 keeper 별 (세션 순번 → keeper 턴 = `total_turns + 1`) 표를 만들고, agent-core 프레임과 `keeper_tool_call` 의 세션 `turn` 을 그 표로 keeper 턴에 붙인다. `total_turns + 1` 은 registry 의 `turn_id` 정의이자 settle 의 번호다(둘 다 settle 이 올리기 전의 `meta.runtime.usage.total_turns` 를 읽는다). observation 이 아직 없는 호출(응답 전)은 keeper 가 턴을 하나씩만 돌리므로 열린 keeper 턴에 붙고, observation 이 전혀 없는 피드는 세션 순번으로만 묶인다. 줄에는 keeper 번호 또는 `turn ?` 만 그린다. 서버 코드는 바꾸지 않는다.
+- [x] **PR-B** #36548 대시보드: heartbeat 판정 3벌 제거, `KeeperHealthState` 세 값, `keeperDisplayStatus` phase 우선. 검증: `pnpm typecheck`, `pnpm lint`, `pnpm test`(CI 는 대시보드 테스트를 돌리지 않는다).
+- [x] **PR-A1** #36549 (컴파일 복구 #36561, 테스트 수정 #36574) 서버 + TUI: `keeper_health` 세 값, persisted snapshot 모듈·wire 키 삭제, TUI 마크, 테스트, 이 RFC.
+- [x] **PR-A2** #36550 (A1 위): `Surface_inactive`, `klc_inactive` 삭제 (`keeper_surface_status` 가 더는 만들지 않는다).
+- [ ] **PR-B2** 하지 않는다. 대시보드에서 `'inactive'` 를 읽는 자리(`keeper-store-normalize.ts`, `lib/unified-status.ts`, `runtime-counts.ts`, `lib/keeper-operational-state.ts`, `lib/keeper-classifiers.ts`)는 agent 상태 어휘(`AgentStatus` 의 `inactive`, `resolveUnifiedStatus(keeperStatus ?? agentStatus)`)와 같이 쓰인다. keeper 전용 죽은 분기가 따로 없어서, 지우면 agent 표시만 흔들린다.
+- [x] **PR-C1** #36590: continuity 축 정리. 세 값 위에서 `continuity_state` 는 `keepalive_running` 과 "기동 뒤 60초 안인가"(`keepalive_recovery_window_s`) 만 말했다. `health_state=offline` 은 keepalive 가 안 도는 경우와 같아서 `recovering` 으로 가는 다른 길은 없었다. 그 60초 판정과 `recovering`/`not_running` 요약 문구 덮어쓰기, wire `continuity_state`, 대시보드 칩·라벨을 지운다. 요약은 `keeper_diagnostic_summary` 하나만 남는다. `keepalive_started_at` 사실 필드(`masc_keeper_audit`)는 남긴다.
+- [x] **PR-C2** #36584: `lib/workspace/heartbeat.ml`(MCP 시절 타이머 표, `start` 를 부르는 프로덕션 코드 0, `stop_by_agent` 는 늘 0 반환)과 `heartbeats_stopped` 필드. 이 모듈을 부르는 테스트가 5개 파일이라 따로 낸다.
+- [x] **PR-D** #36577 (컴파일 복구 #36589) TUI Activity pane: chunk 를 keeper 턴으로 묶는다. agent-core `turn` 은 provider 호출 순번이라 keeper 턴 하나가 호출 수만큼 `unsettled` 줄로 쪼개졌다. `run_id` 는 키로 못 쓴다 — `Sink_degraded` 면 이벤트마다 새 `evt-…` 가 찍히고, provider 로테이션마다 갈린다. 서버 브리지가 프레임에 keeper 턴을 찍는 안도 버렸다 — `Keeper_event_bridge` 는 서버 부트에서 bus 를 비동기로 비우므로 relay 시점의 registry `current_turn_observation` 이 이미 다음 턴이거나 비어 있을 수 있다. 대신 서버가 LLM 호출마다 이미 내는 `keeper_turn_observation`(`name`, 세션 `turn`, `total_turns`)을 TUI 가 디코드해 keeper 별 (세션 순번 → keeper 턴 = `total_turns + 1`) 표를 만들고, agent-core 프레임과 `keeper_tool_call` 의 세션 `turn` 을 그 표로 keeper 턴에 붙인다. `total_turns + 1` 은 registry 의 `turn_id` 정의이자 settle 의 번호다(둘 다 settle 이 올리기 전의 `meta.runtime.usage.total_turns` 를 읽는다). observation 이 아직 없는 호출(응답 전)은 keeper 가 턴을 하나씩만 돌리므로 열린 keeper 턴에 붙고, observation 이 전혀 없는 피드는 세션 순번으로만 묶인다. 세션이 체크포인트 없이 새로 만들어지면 순번이 0 부터 다시 시작해 같은 순번이 두 번 관찰되므로, 멤버는 피드 위치가 가장 가까운 observation 을 쓴다. relay 지연이 세션 재시작 간격보다 짧다는 가정이라, 옛 세션 프레임이 새 세션의 같은 순번 observation 뒤에 도착하면 새 턴에 붙는다. observation 은 Everything 에서만 보이지만 fold 가 읽으므로, ring 을 자를 때 action 과 같은 크기의 따로 된 예산을 쓴다. quiet 예산(stream 프레임·heartbeat 와 함께 200칸)에 두면 번호를 붙일 호출보다 먼저 잘려 한 턴이 다시 `turn ?` 줄로 갈라진다. Activity 의 어느 scope 에서도 `turn N` 은 keeper 턴 번호다. 세션 순번은 줄에 그리지 않고 이벤트 증거 화면에 `Agent session turn` 으로만 보인다. 서버 코드는 바꾸지 않는다.
 
 ## 7. 후속 (이번 범위 밖)
 
 - `keeper_turn_record_source_health` 의 "stale"/`freshness_slo_exceeded`: turn-record 저장소 freshness 라벨(대시보드 telemetry 패널). 판정이 아니라 라벨이지만 같은 계산이라 함께 검토.
 - `classify_keeper_quiet_reason` 의 `Starting_up`(keeper 나이 ≤ 120s): wall-clock 분류. 결과가 표시(`Probe` 제안)뿐이라 보류.
 - metrics 원장 `record_kind: heartbeat` → `cycle` 로 이름 변경(데이터 스키마 hard cut). 이름이 오해의 뿌리지만 이번 PR 에는 넣지 않는다.
+- 서버가 `keeper_tool_call` 과 `keeper_turn_observation` 에 keeper 턴 번호를 싣는다. 두 이벤트 모두 턴 안에서 동기로 나가 `keeper_turn_id` 를 이미 쥐고 있다. PR-D 는 세션 순번과 `keeper_turn_observation` 으로 keeper 턴을 찾는데, 세션이 새로 만들어져 순번이 0부터 다시 시작하면 새 턴의 첫 observation 이 오기 전까지 진행 중인 호출이 옛 턴 줄에 잠깐 붙을 수 있다. observation hook 은 `keeper_turn_id` 대신 도구마다 registry 사본으로 바뀌는 `meta_ref` 의 `total_turns` 를 보낸다. 턴 도중 그 값을 바꾸는 writer 는 없지만 타입이 막는 약속은 아니다.
 
 ## 8. 건드리지 않는 것
 

@@ -67,30 +67,6 @@ let test_aggregating_on_tool_calls () =
   check int "tool_call_total" 5 entry.M.tool_call_total
 ;;
 
-let test_aggregating_on_circuit_state () =
-  let observed = ref None in
-  let inner : M.t =
-    { M.noop with
-      on_circuit_state =
-        (fun ~provider ~model_id ~provider_key ~state ->
-          observed := Some (provider, model_id, provider_key, state))
-    }
-  in
-  let agg = Agg.create ~inner () in
-  let hooks = Agg.to_hooks agg in
-  hooks.on_circuit_state
-    ~provider:"openai"
-    ~model_id:"gpt-4"
-    ~provider_key:"gpt-4@https://api.openai.com"
-    ~state:M.Circuit_open;
-  (match !observed with
-   | Some ("openai", "gpt-4", "gpt-4@https://api.openai.com", M.Circuit_open) -> ()
-   | Some _ -> fail "unexpected circuit state callback"
-   | None -> fail "missing circuit state callback");
-  check int "state value" 1 (M.circuit_state_to_int M.Circuit_open);
-  check string "state label" "open" (M.circuit_state_to_string M.Circuit_open)
-;;
-
 let test_aggregating_on_error () =
   let agg = Agg.create () in
   let hooks = Agg.to_hooks agg in
@@ -359,7 +335,6 @@ let () =
         ; test_case "on_retry" `Quick test_aggregating_on_retry
         ; test_case "on_token_usage" `Quick test_aggregating_on_token_usage
         ; test_case "on_tool_calls" `Quick test_aggregating_on_tool_calls
-        ; test_case "on_circuit_state" `Quick test_aggregating_on_circuit_state
         ; test_case "on_error" `Quick test_aggregating_on_error
         ; test_case
             "on_request_end latency"

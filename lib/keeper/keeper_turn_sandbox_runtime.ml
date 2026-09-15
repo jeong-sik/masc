@@ -277,22 +277,14 @@ let resolve_image (t : t) =
    image. This distinguishes references, not mutations behind the same tag.
    Existing turn runtimes keep their cached container until that turn ends. *)
 let docker_container_name_for_image (t : t) ~image =
-  let net_suffix =
-    match t.network_mode with
-    | Network_none -> "none"
-    | Network_inherit -> "inherit"
-    (* The suffix keeps a container from being reused across a network
-       change, so this mode needs its own even though a Docker keeper cannot
-       reach it today: a name that collides is how a policy guest would
-       silently adopt an inherit container. *)
-    | Network_policy -> "policy"
-  in
-  Printf.sprintf
-    "masc-keeper-docker-%s-%s-%s-%s"
-    (Workspace_utils.safe_filename t.meta.name)
-    net_suffix
-    (String.sub (Keeper_sandbox_runtime.base_path_hash t.config.base_path) 0 8)
-    (Digestif.SHA256.(digest_string image |> to_hex))
+  Keeper_sandbox_container_name.make
+    (Keeper_sandbox_container_name.Docker_persistent
+       { keeper_name = t.meta.name
+       ; network_mode = t.network_mode
+       ; base_path = t.config.base_path
+       ; image
+       })
+  |> Keeper_sandbox_container_name.to_string
 ;;
 
 let keeper_docker_container_name t =
@@ -767,11 +759,10 @@ let failed_exec_state_probe_error ~status ~output detail =
    idle rather than cut off. A distinct name makes that guest a different
    guest, so it is replaced instead of adopted. *)
 let microvm_container_name ~(config : Workspace.config) ~keeper_name ~network_mode =
-  Printf.sprintf
-    "masc-keeper-vm-%s-%s-%s"
-    (Workspace_utils.safe_filename keeper_name)
-    (Keeper_types_profile_sandbox.network_mode_to_string network_mode)
-    (String.sub (Keeper_sandbox_runtime.base_path_hash config.base_path) 0 8)
+  Keeper_sandbox_container_name.make
+    (Keeper_sandbox_container_name.Micro_vm_persistent
+       { keeper_name; network_mode; base_path = config.base_path })
+  |> Keeper_sandbox_container_name.to_string
 ;;
 
 (* The port is read from the keeper's registry entry rather than carried in
@@ -1034,16 +1025,89 @@ let ensure_microvm_keeper_work_root ?timeout_sec (t : t) ~backend ~container_nam
          (Keeper_sandbox_runtime.docker_failure_output_for_log out))
 ;;
 
+(* Why a guest did not come up. A name the runtime refuses is not one of
+   them: [Keeper_sandbox_container_name] builds only names every microVM
+   runtime accepts. An arm that wraps what another step or the runtime's CLI
+   said keeps that text whole in a field; the sentence an operator reads is
+   written once, in [microvm_start_failure_message]. *)
+type microvm_post_boot_check =
+  | Inspect_cannot_see
+  | Work_root_unusable
+
+type microvm_start_failure =
+  | Backend_unresolved of string
+  | Image_not_configured
+  | Guest_state_unreadable of string
+  | Unadoptable_guest_not_removed of string
+      (** A running guest that may not be adopted -- its snapshot died with
+          an older server, or its proxy port moved -- and would not go. *)
+  | Adopted_guest_volume_unverified of string
+  | Guest_provisions_unavailable of string
+  | Github_identity_invalid of string
+  | Policy_network_unavailable of string
+  | Network_unexpressible of string
+  | Constraints_unexpressible of
+      { backend : Keeper_microvm_backend.t
+      ; refusals : Keeper_sandbox_microvm.constraint_refusal list
+      }
+  | Booted_guest_unusable of
+      { check : microvm_post_boot_check
+      ; container_name : string
+      ; detail : string
+      }
+  | Boot_command_failed of
+      { status : Unix.process_status
+      ; output : string
+      }
+      (** The boot argv exited non-zero and no guest is running under the
+          name, or its state could not be read. *)
+
+let microvm_post_boot_check_label = function
+  | Inspect_cannot_see -> "container ran but inspect cannot see"
+  | Work_root_unusable ->
+    "guest cannot prove its work volume is mounted and its keeper root usable"
+;;
+
+let microvm_start_failure_message failure =
+  let failed detail = "microvm_start_failed: " ^ detail in
+  match failure with
+  | Backend_unresolved detail
+  | Guest_state_unreadable detail
+  | Adopted_guest_volume_unverified detail
+  | Guest_provisions_unavailable detail
+  | Policy_network_unavailable detail
+  | Network_unexpressible detail -> failed detail
+  | Image_not_configured -> failed "keeper sandbox docker image is not configured"
+  | Unadoptable_guest_not_removed detail ->
+    failed ("a running guest that cannot be adopted was not removed: " ^ detail)
+  | Github_identity_invalid detail -> failed ("github_identity_invalid: " ^ detail)
+  | Constraints_unexpressible { backend; refusals } ->
+    failed (Keeper_sandbox_microvm.constraint_refusals_message backend refusals)
+  | Booted_guest_unusable { check; container_name; detail } ->
+    failed
+      (Printf.sprintf
+         "%s %s: %s"
+         (microvm_post_boot_check_label check)
+         container_name
+         detail)
+  | Boot_command_failed { status; output } ->
+    failed
+      (Printf.sprintf
+         "boot %s: %s"
+         (Keeper_sandbox_exec_failure.status_label status)
+         (Keeper_sandbox_runtime.docker_failure_output_for_log output))
+;;
+
 let start_microvm_container_unlocked ?timeout_sec (t : t) =
   (* The runtime is read once, before anything is spawned. A keeper whose
      TOML names none is refused here rather than booted on an assumed one,
      which is what pointed a boot and its cleanup at two CLIs (#32837). *)
   match microvm_backend_of t with
-  | Error detail -> Error ("microvm_start_failed: " ^ detail)
+  | Error detail -> Error (Backend_unresolved detail)
   | Ok backend ->
   let image = resolve_image t in
   if String.trim image = ""
-  then Error "keeper sandbox docker image is not configured"
+  then Error Image_not_configured
   else (
     let container_name = keeper_vm_name t in
     let adopt snapshot =
@@ -1098,7 +1162,7 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
               stop_and_delete_microvm_container ?timeout_sec ~backend container_name
             with
             | Ok () -> `Boot
-            | Error error -> `Error error)
+            | Error detail -> `Error (Unadoptable_guest_not_removed detail))
          | None ->
            (* A guest from an older server process can still be running, but
               its temp snapshot capability died with that process. It is not
@@ -1111,9 +1175,9 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
                 container_name
             with
             | Ok () -> `Boot
-            | Error error -> `Error error))
+            | Error detail -> `Error (Unadoptable_guest_not_removed detail)))
       | Error probe_error ->
-        `Error (Printf.sprintf "microvm_start_failed: %s" probe_error)
+        `Error (Guest_state_unreadable probe_error)
       | Ok Keeper_sandbox_runtime.Docker_container_stopped
       | Ok Keeper_sandbox_runtime.Docker_container_absent -> `Boot
     in
@@ -1132,7 +1196,7 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
          ensure_microvm_work_volume_mounted ?timeout_sec t ~backend ~container_name
        with
        | Ok () -> adopt snapshot
-       | Error _ as err -> err)
+       | Error detail -> Error (Adopted_guest_volume_unverified detail))
     | `Error error -> Error error
     | `Boot ->
       (* A stopped guest survived [--rm] (host reboot mid-life); clear the
@@ -1155,7 +1219,7 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
               ~timeout_sec:image_timeout)
            (fun () -> microvm_guest_provisions t ~backend ~timeout_sec:image_timeout)
        with
-       | Error _ as err -> err
+       | Error detail -> Error (Guest_provisions_unavailable detail)
        | Ok provisions ->
          let dns =
            match Env_config_sandbox.Runtime.microvm_dns () with
@@ -1197,7 +1261,7 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
          in
          (match github_identity_result with
           | Error err ->
-            Error ("microvm_start_failed: github_identity_invalid: " ^ err)
+            Error (Github_identity_invalid err)
           | Ok (github_identity, github_identity_is_new) ->
          (* The network policy is spelled by the runtime, and one of the three
             cannot say every mode. Resolved before the argv so a boot refuses
@@ -1205,7 +1269,7 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
             argument parsing with no statement of what the guest's network
             would have been. *)
          (match ensure_policy_network backend ~keeper_name:t.meta.name t.network_mode with
-          | Error detail -> Error ("microvm_start_failed: " ^ detail)
+          | Error detail -> Error (Policy_network_unavailable detail)
           | Ok policy_gateway ->
          let policy_proxy =
            (* The port is read from the keeper's registry entry rather than
@@ -1223,7 +1287,7 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
             Keeper_sandbox_microvm.network_args_for backend ~dns ~keeper_name:t.meta.name ~policy_proxy
               t.network_mode
           with
-          | Error detail -> Error ("microvm_start_failed: " ^ detail)
+          | Error detail -> Error (Network_unexpressible detail)
           | Ok network_args ->
          let argv_result =
            Keeper_sandbox_microvm.turn_start_argv_for
@@ -1281,17 +1345,14 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
              ~constraints:Keeper_microvm_backend.all_guest_constraints
          in
          (match argv_result with
-          | Error refusals ->
-            Error
-              ("microvm_start_failed: "
-               ^ Keeper_sandbox_microvm.constraint_refusals_message backend refusals)
+          | Error refusals -> Error (Constraints_unexpressible { backend; refusals })
           | Ok argv ->
          let st, out = run_argv_with_status ?timeout_sec argv in
          (* A guest that came up but cannot be seen, or cannot hold the
             keeper's root on its volume, is taken down again: the remote
             lane has nowhere to run in it, and leaving it would hand the
             next turn a guest that adopts cleanly and fails on every call. *)
-         let take_down_after_boot ~what ~detail =
+         let take_down_after_boot ~check ~detail =
            let removed =
              match
                stop_and_delete_microvm_container
@@ -1307,7 +1368,7 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
              release_registered_microvm_identity
                ~expected:github_identity
                container_name;
-           Error (Printf.sprintf "microvm_start_failed: %s %s: %s" what container_name detail)
+           Error (Booted_guest_unusable { check; container_name; detail })
          in
          (match st with
           | Unix.WEXITED 0 ->
@@ -1339,11 +1400,11 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
                   adopt github_identity
                 | Error detail ->
                   take_down_after_boot
-                    ~what:"guest cannot prove its work volume is mounted and its keeper root usable"
+                    ~check:Work_root_unusable
                     ~detail)
              | Error inspect_out ->
                take_down_after_boot
-                 ~what:"container ran but inspect cannot see"
+                 ~check:Inspect_cannot_see
                  ~detail:inspect_out)
           | _ ->
             (* Two turns of one keeper can race to boot the shared name;
@@ -1376,7 +1437,7 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
                     ~container_name
                 with
                 | Ok () -> adopt github_identity
-                | Error _ as err -> err)
+                | Error detail -> Error (Adopted_guest_volume_unverified detail))
              | Ok Keeper_sandbox_runtime.Docker_container_stopped
              | Ok Keeper_sandbox_runtime.Docker_container_absent ->
                let removed =
@@ -1394,23 +1455,18 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
                  release_registered_microvm_identity
                    ~expected:github_identity
                    container_name;
-               Error
-                 (Printf.sprintf
-                    "microvm_start_failed: %s"
-                    (Keeper_sandbox_runtime.docker_failure_output_for_log out))
+               Error (Boot_command_failed { status = st; output = out })
              | Error _ ->
                (* The guest state is unknown. Keep the registered snapshot:
                   deleting it could invalidate a mount on a guest that did
                   start even though the probe failed. Teardown owns recovery. *)
-               Error
-                 (Printf.sprintf
-                    "microvm_start_failed: %s"
-                    (Keeper_sandbox_runtime.docker_failure_output_for_log out))))))))))
+               Error (Boot_command_failed { status = st; output = out })))))))))
 ;;
 
 let start_microvm_container ?timeout_sec t =
   with_microvm_lifecycle_lock (fun () ->
-    start_microvm_container_unlocked ?timeout_sec t)
+    start_microvm_container_unlocked ?timeout_sec t
+    |> Result.map_error microvm_start_failure_message)
 ;;
 
 (* Shutdown finalization retains the typed backend through registry removal.

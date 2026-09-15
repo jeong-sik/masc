@@ -4,7 +4,6 @@ import { normalizeKeeperDiagnostic } from './keeper-state'
 const base = {
   health_state: 'healthy',
   last_reply_status: 'delivered',
-  continuity_state: 'healthy',
 }
 
 describe('keeper diagnostic wire contract', () => {

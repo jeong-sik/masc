@@ -15,7 +15,6 @@ let with_config_home run =
   let previous = Sys.getenv_opt "XDG_CONFIG_HOME" in
   Unix.putenv "XDG_CONFIG_HOME" dir;
   Unix.putenv "MASC_BASE_PATH" "";
-  Unix.putenv "MASC_BASE_PATH_INPUT" "";
   Fun.protect
     ~finally:(fun () ->
       Unix.putenv "XDG_CONFIG_HOME" (Option.value ~default:"" previous))

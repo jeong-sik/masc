@@ -336,7 +336,6 @@ let test_prompt_keeps_caller_owned_workspace_generation () =
       cleanup_dir divergent_base)
     (fun () ->
       with_env "MASC_BASE_PATH" None @@ fun () ->
-      with_env "MASC_BASE_PATH_INPUT" None @@ fun () ->
       Workspace.reset_default_config_cache ();
       let config = Workspace.default_config admitted_base in
       let meta =
@@ -351,7 +350,6 @@ let test_prompt_keeps_caller_owned_workspace_generation () =
         Filename.concat divergent_base (Keeper_sandbox.host_root_rel_of_meta ~meta)
       in
       with_env "MASC_BASE_PATH" (Some divergent_base) @@ fun () ->
-      with_env "MASC_BASE_PATH_INPUT" (Some divergent_base) @@ fun () ->
       Workspace.reset_default_config_cache ();
       let prompt =
         Keeper_run_context.build_base_system_prompt

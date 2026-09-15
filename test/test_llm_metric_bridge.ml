@@ -58,10 +58,6 @@ let test_metric_names_stable () =
     "masc_llm_provider_tool_calls_total"
     Metrics.metric_llm_provider_tool_calls;
   Alcotest.(check string)
-    "circuit state metric"
-    "masc_llm_provider_circuit_state"
-    Metrics.metric_llm_provider_circuit_state;
-  Alcotest.(check string)
     "request latency clamped metric"
     "masc_llm_provider_request_latency_clamped_total"
     Metrics.metric_llm_provider_request_latency_clamped;
@@ -115,10 +111,6 @@ let test_sink_records_agent_core_callbacks () =
   let retry_labels =
     [ ("provider", provider); ("model", model_id); ("attempt", "2") ]
   in
-  let provider_key = "bridge-test-provider-key" in
-  let circuit_labels =
-    [ ("provider", provider); ("model", model_id); ("provider_key", provider_key) ]
-  in
   let before_hit = metric Metrics.metric_llm_provider_cache_hits ~labels:model_labels in
   let before_miss = metric Metrics.metric_llm_provider_cache_misses ~labels:model_labels in
   let before_start =
@@ -141,9 +133,6 @@ let test_sink_records_agent_core_callbacks () =
   let before_tool_calls =
     metric Metrics.metric_llm_provider_tool_calls ~labels:provider_model_labels
   in
-  let before_circuit_state =
-    metric Metrics.metric_llm_provider_circuit_state ~labels:circuit_labels
-  in
   let before_stream_first =
     metric
       (Metrics.metric_llm_provider_streaming_first_chunk ^ "_count")
@@ -162,8 +151,6 @@ let test_sink_records_agent_core_callbacks () =
     ~message:"ignored-freeform-error"
     ~reason:Llm_provider.Metrics.Unknown;
   sink.on_retry ~provider ~model_id ~attempt:2;
-  sink.on_circuit_state ~provider ~model_id ~provider_key
-    ~state:Llm_provider.Metrics.Circuit_open;
   sink.on_token_usage
     ~provider ~model_id ~input_tokens:17 ~output_tokens:23;
   sink.on_tool_calls ~provider ~model_id ~count:3;
@@ -196,9 +183,6 @@ let test_sink_records_agent_core_callbacks () =
   check_metric_delta "tool calls +3"
     Metrics.metric_llm_provider_tool_calls
     ~labels:provider_model_labels ~before:before_tool_calls ~delta:3.0;
-  check_metric_delta "circuit state open"
-    Metrics.metric_llm_provider_circuit_state
-    ~labels:circuit_labels ~before:before_circuit_state ~delta:1.0;
   check_metric_delta "streaming first chunk count +1"
     (Metrics.metric_llm_provider_streaming_first_chunk ^ "_count")
     ~labels:provider_model_labels ~before:before_stream_first ~delta:1.0;

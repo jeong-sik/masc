@@ -111,31 +111,34 @@ let turn_settled ~keeper ~turn ~input ~output ~cost : Observer.event =
    settled) lands BEFORE the agent-core wire replays the same turn (call /
    returned / end), the hook's per-call observation names the keeper turn
    each call belongs to, and the next turn's ready follows. Seventeen
-   entries on the flat view; the fold owes three rows. *)
+   entries: fourteen rows on the flat actions view, which hides the three
+   observations, and seventeen under [Everything]; the fold owes three rows.
+   The session ordinals (149-151) differ from the keeper turns (49-51), so a
+   row that printed the ordinal as its turn would not pass. *)
 let test_turns_fold_the_two_planes_into_one_row_per_turn () =
   let k = "kpr-07" in
   let events_oldest_first =
     [ turn_settled ~keeper:k ~turn:49 ~input:39050 ~output:70 ~cost:0.0100
     ; ledger_tool ~duration_ms:63. ~keeper:k "masc_schedule_list"
-    ; agent_core ~kind:Observer.Turn_completed ~turn:49 k
-    ; observation ~keeper:k ~session:49 ~completed:48
+    ; agent_core ~kind:Observer.Turn_completed ~turn:149 k
+    ; observation ~keeper:k ~session:149 ~completed:48
     ; agent_core ~kind:Observer.Tool_called ~tool:"masc_schedule_list"
-        ~turn:49 ~tool_use_id:"c49" k
+        ~turn:149 ~tool_use_id:"c49" k
     ; agent_core ~kind:Observer.Tool_completed ~tool:"masc_schedule_list"
-        ~turn:49 ~tool_use_id:"c49" k
-    ; agent_core ~kind:Observer.Turn_started ~turn:50 k
-    ; agent_core ~kind:Observer.Turn_ready ~turn:50 k
+        ~turn:149 ~tool_use_id:"c49" k
+    ; agent_core ~kind:Observer.Turn_started ~turn:150 k
+    ; agent_core ~kind:Observer.Turn_ready ~turn:150 k
     ; turn_settled ~keeper:k ~turn:50 ~input:39237 ~output:76 ~cost:0.0102
     ; ledger_tool ~duration_ms:6. ~keeper:k "keeper_artifact_read"
-    ; agent_core ~kind:Observer.Turn_completed ~turn:50 k
-    ; observation ~keeper:k ~session:50 ~completed:49
+    ; agent_core ~kind:Observer.Turn_completed ~turn:150 k
+    ; observation ~keeper:k ~session:150 ~completed:49
     ; agent_core ~kind:Observer.Tool_called ~tool:"keeper_artifact_read"
-        ~turn:50 ~tool_use_id:"c50" k
+        ~turn:150 ~tool_use_id:"c50" k
     ; agent_core ~kind:Observer.Tool_completed ~tool:"keeper_artifact_read"
-        ~turn:50 ~tool_use_id:"c50" k
-    ; agent_core ~kind:Observer.Turn_started ~turn:51 k
-    ; agent_core ~kind:Observer.Turn_ready ~turn:51 k
-    ; observation ~keeper:k ~session:51 ~completed:50
+        ~turn:150 ~tool_use_id:"c50" k
+    ; agent_core ~kind:Observer.Turn_started ~turn:151 k
+    ; agent_core ~kind:Observer.Turn_ready ~turn:151 k
+    ; observation ~keeper:k ~session:151 ~completed:50
     ]
   in
   let rows = Acting.chunk_rows ~traces:[] (entries_of events_oldest_first) in
@@ -416,6 +419,41 @@ let test_the_old_arrival_trim_would_have_lost_them () =
   check int "the class budget keeps it" 1
     (List.filter (Acting.visible Acting.Actions) kept |> List.length)
 
+(* A turn observation draws under no scope but [Everything], yet the Turns
+   fold reads it to number the calls. Counted with the quiet class, a reply
+   long enough to spend the quiet budget trimmed the observation before the
+   call it numbers, and the call fell back to a turn with no number. *)
+let test_a_reply_does_not_trim_the_observation_a_call_needs () =
+  let stream index =
+    Observer.Keeper_chat_stream_frame
+      { keeper = "alpha"; frame = Some "TEXT_MESSAGE_CONTENT"; at = 200. +. float_of_int index }
+  in
+  (* Newest first, the order the ring holds: the reply streamed after the
+     call and the observation that numbers it. *)
+  let ring =
+    List.init 1_200 stream
+    @ [ agent_core ~kind:Observer.Tool_called ~tool:"Read" ~turn:149
+          ~tool_use_id:"w1" "alpha"
+      ; observation ~keeper:"alpha" ~session:149 ~completed:48
+      ]
+  in
+  let kept, dropped = Acting.retain ~actions:1_000 ~quiet:200 ~event_of:Fun.id ring in
+  check int "only the stream past the quiet budget is dropped" 1_000 dropped;
+  match Acting.chunks ~traces:[] (entries_of (List.rev kept)) with
+  | [ chunk ] ->
+      check (option int) "the call keeps its keeper turn" (Some 49) chunk.Acting.ck_turn
+  | chunks -> failf "expected one chunk, got %d" (List.length chunks)
+
+(* The observation budget is its own: an observation spends no action slot,
+   and an action spends none of its slots. *)
+let test_observations_and_actions_keep_separate_slots () =
+  let ring =
+    [ observation ~keeper:"a" ~session:1 ~completed:0; settled "b"; heartbeat "c" ]
+  in
+  let kept, dropped = Acting.retain ~actions:1 ~quiet:0 ~event_of:Fun.id ring in
+  check int "the observation and the settle each keep a slot" 2 (List.length kept);
+  check int "the heartbeat has no quiet slot" 1 dropped
+
 (* Order is what the screen scrolls through, so trimming must not reorder. *)
 let test_trimming_keeps_the_order_it_was_given () =
   let ring = [ settled "a"; heartbeat "b"; settled "c"; heartbeat "d"; settled "e" ] in
@@ -467,8 +505,11 @@ let test_a_call_and_its_return_read_as_one_pair () =
     ; execution_id = None
     }
   in
-  check string "the call names its tool, batch slot, turn, and task"
-    "\xe2\x96\xb6 analyst call | read_file [1/2] \xc2\xb7 turn 2086 \xc2\xb7 task-494"
+  (* [turn] on the wire is the agent session's ordinal for the provider
+     call; [turn N] on this surface is a keeper turn, so the row leaves the
+     ordinal to the event evidence. *)
+  check string "the call names its tool, batch slot, and task"
+    "\xe2\x96\xb6 analyst call | read_file [1/2] \xc2\xb7 task-494"
     (text (Acting.row_of_event ~at:100. ~duration_ms:None started));
   let duration =
     Acting.duration_of_completion ~before:[ heartbeat "x"; started ] completed
@@ -759,9 +800,13 @@ let test_one_keeper_turn_of_three_calls_is_one_row () =
         (tools chunk)
   | chunks -> failf "three calls and a settle drew %d rows" (List.length chunks)
 
-(* The observation for a call arrives with its response, after the call's
-   own frames. The fold reads every observation in the ring first, so frames
-   that arrived unnumbered are filed once the observation lands. *)
+(* The hook sends a call's observation when the response is collected:
+   after the call's turn markers, before its tools run. On a live feed every
+   tool frame of 37 observed calls arrived after the observation. The wire
+   relays agent-core frames on a fiber of its own, though, so a frame can
+   still arrive before the observation that numbers it. The fold reads every
+   observation in the ring first, so frames that arrived unnumbered are
+   filed once the observation lands. *)
 let test_an_observation_after_its_frames_still_files_them () =
   let events_oldest_first =
     [ agent_core ~kind:Observer.Turn_started ~turn:5 "alpha"
@@ -1009,6 +1054,10 @@ let () =
             test_a_long_reply_does_not_evict_the_log_it_streams_into
         ; test_case "the old arrival trim would have lost them" `Quick
             test_the_old_arrival_trim_would_have_lost_them
+        ; test_case "a reply does not trim the observation a call needs" `Quick
+            test_a_reply_does_not_trim_the_observation_a_call_needs
+        ; test_case "observations and actions keep separate slots" `Quick
+            test_observations_and_actions_keep_separate_slots
         ; test_case "trimming keeps the order it was given" `Quick
             test_trimming_keeps_the_order_it_was_given
         ; test_case "every row wears the clock the feed ordered it by" `Quick

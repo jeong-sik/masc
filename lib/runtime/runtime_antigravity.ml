@@ -823,8 +823,22 @@ let run_spawned ?home_dir ?on_spawned ?on_prompt_sent ~mgr ~clock ~cwd config ~c
     Eio.Flow.close stdin_r;
     Eio.Flow.close stdout_w;
     Eio.Flow.close stderr_w;
+    let wall_clock =
+      Runtime_wall_clock.make ?ceiling_s:config.wall_clock_ceiling_s ~now:(fun () -> Eio.Time.now clock) ()
+    in
+    (* A prompt longer than the pipe buffer stops until the CLI reads it, and
+       a CLI that answers without draining stdin never does. [Switch.run]
+       joins an ordinary fiber on the way out of a body that returned a
+       value, so an unwindowed write there turns a served turn into a wait
+       with nothing left to end it. The window is the one the first read
+       uses. *)
     Eio.Fiber.fork ~sw (fun () ->
-      Eio.Flow.copy_string prompt stdin_w;
+      with_idle_timeout
+        clock
+        (Runtime_wall_clock.cap_window
+           wall_clock
+           (timeout_s_for_phase config Awaiting_admission))
+        (fun () -> Eio.Flow.copy_string prompt stdin_w);
       (* A successful prompt write must deliver EOF to the CLI. If the copy
          raises, the failed fiber cancels [sw] and the pipe's switch-owned
          release handler closes [stdin_w]. *)
@@ -857,9 +871,6 @@ let run_spawned ?home_dir ?on_spawned ?on_prompt_sent ~mgr ~clock ~cwd config ~c
     Eio.Switch.on_release sw (fun () ->
       if not !process_settled then signal_spawned_process proc stdin_w);
     let state = ref initial_protocol_state in
-    let wall_clock =
-      Runtime_wall_clock.make ?ceiling_s:config.wall_clock_ceiling_s ~now:(fun () -> Eio.Time.now clock) ()
-    in
     (try
        (* The result event completes the protocol — nothing after it is
           attribution or content (apply_event rejects post-result events).

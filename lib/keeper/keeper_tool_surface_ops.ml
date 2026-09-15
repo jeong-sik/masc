@@ -230,11 +230,6 @@ let keeper_list_row_json ~runtime_class config name =
         Keeper_status_runtime.keeper_diagnostic_json
           ~meta
           ~keepalive_running ~history_items:[] ~now_ts
-        |> Keeper_status_runtime.augment_keeper_diagnostic_json
-             ~keepalive_running
-             ~keepalive_started_at:
-               (Keeper_status_bridge.runtime_keepalive_started_at config meta)
-             ~now_ts
       in
       (* One keeper is described by four separate readings, and each row
          carries its own field for one of them rather than a single word that

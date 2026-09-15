@@ -1,5 +1,6 @@
 type t =
   { patterns : Re.re list
+  ; any_exact_value : Re.re option
   ; exact_values : string list
   ; max_exact_value_len : int
   }
@@ -10,7 +11,8 @@ type stream_state =
   ; mutable next_bounded_flush_at : int
   }
 
-let empty = { patterns = []; exact_values = []; max_exact_value_len = 0 }
+let empty =
+  { patterns = []; any_exact_value = None; exact_values = []; max_exact_value_len = 0 }
 
 let min_secret_len = 8
 let max_secret_file_bytes = 64 * 1024
@@ -226,10 +228,15 @@ let build ~redact_identity_scalars sources =
     |> dedupe
   in
   let patterns = List.map (fun value -> Re.compile (Re.str value)) values in
+  let any_exact_value =
+    match values with
+    | [] -> None
+    | values -> Some (Re.compile (Re.alt (List.map Re.str values)))
+  in
   let max_exact_value_len =
     List.fold_left (fun longest value -> max longest (String.length value)) 0 values
   in
-  { patterns; exact_values = values; max_exact_value_len }
+  { patterns; any_exact_value; exact_values = values; max_exact_value_len }
 
 (* The memo is per domain: a compiled [Re.re] fills its DFA tables lazily
    while matching, so one must not be shared between domains. Fibers of one
@@ -311,12 +318,20 @@ let snapshot ~base_path ~keeper_name =
     ~keeper_name
 ;;
 
+(* A text contains one of the exact values when [any_exact_value] matches it,
+   and a replacement pass that finds nothing returns its input, so a text
+   [any_exact_value] does not match leaves the passes with nothing to do. The
+   passes keep their longest-value-first order when something matches: a value
+   that contains another must be replaced before the shorter one splits it. *)
 let redact_text t text =
   let text =
-    List.fold_left
-      (fun acc pattern -> Re.replace_string pattern ~by:"[REDACTED]" acc)
-      text
-      t.patterns
+    match t.any_exact_value with
+    | Some any_exact_value when Re.execp any_exact_value text ->
+      List.fold_left
+        (fun acc pattern -> Re.replace_string pattern ~by:"[REDACTED]" acc)
+        text
+        t.patterns
+    | Some _ | None -> text
   in
   Observability_redact.redact_text text
 

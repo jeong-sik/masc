@@ -1045,25 +1045,29 @@ let test_window_drops_old_tool_lines_before_the_conversation () =
       | first :: _ -> Alcotest.(check string) "the window still opens on the oldest user line" "u1" first.content
       | [] -> Alcotest.fail "expected non-empty window")
 
-(* Both bounds at once. Conversation rows overflow first at the front of the
-   window, and the rows ahead of the oldest conversation row leave with it,
-   tool rows included; tool rows past their own bound then leave oldest
-   first. With four tool rows a turn, the window ends up holding the newest
-   fifty turns whole. *)
+(* Both bounds at once, and each queue meeting a row the other bound already
+   took out. A hundred light turns (two tool rows each) fill the conversation
+   bound; thirty heavy turns (ten tool rows each) then push the oldest light
+   turns out from the front, their tool rows with them, and push the tool
+   bound past 300, which takes the remaining light tool rows. The window
+   ends up with the newest fifty turns' conversation and exactly the heavy
+   turns' 300 tool rows. *)
 let test_window_keeps_whole_newest_turns_when_both_bounds_overflow () =
   let base_dir = temp_base_path "keeper-chat-store-both-bounds" in
   Fun.protect
     ~finally:(fun () -> try remove_tree base_dir with _ -> ())
     (fun () ->
       let keeper_name = "keeper-chat-both-bounds" in
-      let turns = 120 in
-      let tools_per_turn = 4 in
+      let light_turns = 100 in
+      let heavy_turns = 30 in
+      let tools_in turn = if turn <= light_turns then 2 else 10 in
+      let turns = light_turns + heavy_turns in
       for turn = 1 to turns do
         K.append_turn ~base_dir ~keeper_name
           ~user_content:(Printf.sprintf "u%d" turn)
           ~user_attachments:[]
           ~tool_calls:
-            (List.init tools_per_turn (fun i ->
+            (List.init (tools_in turn) (fun i ->
                { K.call_id = Printf.sprintf "t%d-%d" turn i
                ; execution_id = None
                ; call_name = "masc_msx_step"
@@ -1076,9 +1080,12 @@ let test_window_keeps_whole_newest_turns_when_both_bounds_overflow () =
       let expected =
         List.concat_map
           (fun turn ->
-            (Printf.sprintf "user u%d" turn
-             :: List.init tools_per_turn (fun i -> Printf.sprintf "tool t%d-%d" turn i))
-            @ [ Printf.sprintf "assistant a%d" turn ])
+            let tools =
+              if turn <= light_turns
+              then []
+              else List.init (tools_in turn) (fun i -> Printf.sprintf "tool t%d-%d" turn i)
+            in
+            (Printf.sprintf "user u%d" turn :: tools) @ [ Printf.sprintf "assistant a%d" turn ])
           (List.init 50 (fun index -> turns - 49 + index))
       in
       let describe (m : K.chat_message) =
@@ -1086,7 +1093,8 @@ let test_window_keeps_whole_newest_turns_when_both_bounds_overflow () =
         | Some id -> K.Role.to_label m.role ^ " " ^ id
         | None -> K.Role.to_label m.role ^ " " ^ m.content
       in
-      Alcotest.(check (list string)) "the newest fifty turns, whole and in order"
+      Alcotest.(check (list string))
+        "the newest fifty turns' conversation and the heavy turns' tool rows"
         expected (List.map describe page.K.messages);
       Alcotest.(check bool) "older rows were left out" true page.K.has_more)
 

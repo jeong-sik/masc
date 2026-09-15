@@ -149,7 +149,11 @@ let compact_transition_wals_unlocked owner =
     owner
 ;;
 
-let save_json_atomic_with ~strict_parent_sync path json =
+(* The snapshot is rewritten whole on every transition, and live snapshots
+   print to 2.5-3.3 MB. Building the JSON, sanitizing it and printing it ran on
+   the fiber committing the transition, under the owner's lock. The value is
+   immutable, so all three run in one pool job. *)
+let save_snapshot_atomic_with ~strict_parent_sync path json_of =
   match
     try Ok (Fs_compat.mkdir_p (Filename.dirname path)) with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -158,15 +162,17 @@ let save_json_atomic_with ~strict_parent_sync path json =
   | Error _ as error -> error
   | Ok () ->
     let content =
-      json |> Safe_ops.sanitize_json_utf8 |> Yojson.Safe.pretty_to_string
+      Domain_pool_ref.submit_cpu_or_inline (fun () ->
+        json_of () |> Safe_ops.sanitize_json_utf8 |> Yojson.Safe.pretty_to_string)
     in
     if strict_parent_sync
     then Fs_compat.save_file_atomic_strict path content
     else Fs_compat.save_file_atomic path content
 ;;
 
-let save_json_atomic = save_json_atomic_with ~strict_parent_sync:false
-let save_json_atomic_strict = save_json_atomic_with ~strict_parent_sync:true
+let save_json_atomic_strict path json =
+  save_snapshot_atomic_with ~strict_parent_sync:true path (fun () -> json)
+;;
 
 (* The decoded snapshot, against the file it was decoded from.
 
@@ -226,8 +232,9 @@ let forget_snapshot path =
 let save_state_unlocked_with ~strict_parent_sync owner state =
   let keeper_name = keeper_name_of_owner owner in
   let path = snapshot_path_of_owner owner in
-  let save = if strict_parent_sync then save_json_atomic_strict else save_json_atomic in
-  match save path (State.to_yojson state) with
+  match
+    save_snapshot_atomic_with ~strict_parent_sync path (fun () -> State.to_yojson state)
+  with
   | Ok () ->
     (* The atomic writer does not return the written descriptor identity.
        Re-read once before caching; a post-write stat could name a replacement. *)

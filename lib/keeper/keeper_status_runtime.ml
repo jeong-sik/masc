@@ -286,13 +286,15 @@ let keeper_health_state ~meta ~(phase : Keeper_state_machine.phase option)
 let keeper_next_action_path ~(health_state : keeper_health) ~quiet_reason =
   match health_state with
   | KH_offline -> Recover
-  (* Recover, not the quiet-reason ladder below. A failing keeper's keepalive
-     is running, so the ladder would answer Direct_message, and a message only
-     queues one more turn behind the ones that are failing. Recovery (down, then
-     up) is what an operator does after reading the latest error, and
-     [keeper_recover] skips every keeper whose path is not Recover: any other
-     answer here refuses recovery to the keeper that needs it. *)
-  | KH_failing -> Recover
+  (* Probe: read the latest runtime error first. The Failing phase says turns
+     are failing, not that a restart fixes them; a provider that refuses the
+     request refuses the restarted keeper too. The phase keeps probing on its
+     own: a clean turn returns it to Running, and past its failure threshold it
+     becomes Crashed, which the supervisor restarts. The ladder below would
+     answer Direct_message, and a message only queues one more turn behind the
+     failing ones. A restart stays the operator's call: see
+     [keeper_recoverable]. *)
+  | KH_failing -> Probe
   | KH_healthy | KH_idle -> (
       match quiet_reason with
       | Some Keepalive_not_running -> Recover
@@ -305,7 +307,7 @@ let keeper_diagnostic_summary ~meta ~(health_state : keeper_health) ~quiet_reaso
   | KH_offline ->
       "Keeper is not in a healthy reply state. Probe or recover before relying on automation."
   | KH_failing ->
-      "Keeper turns are failing. Read the latest runtime error, then recover before relying on automation."
+      "Keeper turns are failing. Read the latest runtime error before recovering or relying on automation."
   | KH_healthy | KH_idle -> (
       match quiet_reason with
       | Some Proactive_disabled ->
@@ -376,6 +378,18 @@ let keeper_surface_status ~(diagnostic : Yojson.Safe.t) =
   in
   surface_status_to_string surface
 
+(* [recoverable] says whether [keeper_recover] may restart the keeper;
+   [next_action_path] says what to do first. They agree except for a failing
+   keeper: its first step is reading the error, and its restart is still
+   available to an operator who has read it. *)
+let keeper_recoverable ~(health_state : keeper_health) ~next_action_path =
+  match health_state with
+  | KH_failing -> true
+  | KH_offline | KH_healthy | KH_idle -> (
+      match next_action_path with
+      | Recover -> true
+      | Probe | Direct_message -> false)
+
 let keeper_diagnostic_json
     ~(meta : keeper_meta)
     ~(phase : Keeper_state_machine.phase option)
@@ -400,7 +414,7 @@ let keeper_diagnostic_json
           (Option.map keeper_quiet_reason_to_string quiet_reason) );
       ("next_action_path",
        `String (keeper_next_action_path_to_string next_action_path));
-      ("recoverable", `Bool (next_action_path = Recover));
+      ("recoverable", `Bool (keeper_recoverable ~health_state ~next_action_path));
       ("summary", `String (keeper_diagnostic_summary ~meta ~health_state ~quiet_reason));
       ("last_reply_status", last_reply_status);
       ("last_reply_at", last_reply_at);

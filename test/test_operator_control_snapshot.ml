@@ -608,12 +608,12 @@ let test_diagnostic_health_is_a_projection_of_phase_and_turns () =
         (diagnostic |> member "keepalive_running" |> to_bool))
     Keeper_state_machine.all_phases
 
-(* The operator's keeper_recover action skips every keeper whose diagnostic
-   is not [recoverable]. A failing keeper's keepalive is running, so the
-   quiet-reason ladder alone would answer direct_message and the recover
-   action would refuse the keeper that needs it. The same keeper in Running
-   is the contrast: nothing about its history makes it recoverable. *)
-let test_failing_keeper_is_recoverable () =
+(* A failing keeper is told to read its error first: the Failing phase says its
+   turns fail, not that a restart fixes them. Its restart stays available,
+   because the operator's keeper_recover action skips only keepers whose
+   diagnostic is not [recoverable]. The same keeper in Running is the contrast:
+   it is sent a message and nothing about its history makes it recoverable. *)
+let test_failing_keeper_is_probed_and_stays_recoverable () =
   let open Yojson.Safe.Util in
   let failing =
     health_projection_diagnostic ~total_turns:4
@@ -623,10 +623,10 @@ let test_failing_keeper_is_recoverable () =
     health_projection_diagnostic ~total_turns:4
       ~phase:(Some Keeper_state_machine.Running)
   in
-  Alcotest.(check string) "a failing keeper's next action is recover"
-    "recover"
+  Alcotest.(check string) "a failing keeper's next action is probe"
+    "probe"
     (failing |> member "next_action_path" |> to_string);
-  Alcotest.(check bool) "a failing keeper is recoverable" true
+  Alcotest.(check bool) "a failing keeper is still recoverable" true
     (failing |> member "recoverable" |> to_bool);
   Alcotest.(check bool) "its keepalive is still running" true
     (failing |> member "keepalive_running" |> to_bool);
@@ -1544,9 +1544,9 @@ let () =
             `Quick
             test_diagnostic_health_is_a_projection_of_phase_and_turns;
           Alcotest.test_case
-            "a failing keeper is recoverable"
+            "a failing keeper is probed and stays recoverable"
             `Quick
-            test_failing_keeper_is_recoverable;
+            test_failing_keeper_is_probed_and_stays_recoverable;
         ] );
       ( "context metrics ledger"
       , [ Alcotest.test_case

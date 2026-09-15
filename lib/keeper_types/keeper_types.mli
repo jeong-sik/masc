@@ -20,11 +20,6 @@ type keeper_health =
   | KH_idle
   | KH_offline
 
-type keeper_continuity =
-  | Continuity_healthy
-  | Continuity_recovering
-  | Continuity_not_running
-
 (** {1 Per-tool usage tracking} *)
 
 type tool_call_entry = {

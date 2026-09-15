@@ -231,9 +231,6 @@ let keepers_json
                     let keepalive_running =
                       Keeper_status_bridge.runtime_keepalive_running config meta
                     in
-                    let keepalive_started_at =
-                      Keeper_status_bridge.runtime_keepalive_started_at config meta
-                    in
                     dt_ka := Time_compat.now () -. t_ka;
                     let now_ts = Time_compat.now () in
                     let created_ts =
@@ -271,10 +268,6 @@ let keepers_json
                         ~keepalive_running
                         ~history_items:[]
                         ~now_ts
-                      |> Keeper_status_runtime.augment_keeper_diagnostic_json
-                           ~keepalive_running
-                           ~keepalive_started_at
-                           ~now_ts
                     in
                     let t_audit = Time_compat.now () in
                     let audit_json =

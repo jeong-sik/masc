@@ -35,12 +35,7 @@ let keeper_diagnostic_for_name (ctx : 'a context) ~(name : string) =
            ~meta
            ~keepalive_running
            ~history_items:[]
-           ~now_ts
-        |> Keeper_status_runtime.augment_keeper_diagnostic_json
-             ~keepalive_running
-             ~keepalive_started_at:
-               (Keeper_status_bridge.runtime_keepalive_started_at ctx.config meta)
-             ~now_ts)
+           ~now_ts)
 
 let keeper_diagnostic_health_state json =
   Json_util.get_string json "health_state" |> Option.map String.lowercase_ascii

@@ -364,6 +364,7 @@
   test_keeper_unified_context_overflow
   test_keeper_context_overflow_shrink
   test_keeper_context_window
+  test_keeper_next_request_forecast
   test_keeper_provider_call_deadline
   test_keeper_failed_selection_disposition
   test_keeper_cycle_failed_runtime_attribution
@@ -720,6 +721,7 @@
   test_keeper_unified_context_overflow
   test_keeper_context_overflow_shrink
   test_keeper_context_window
+  test_keeper_next_request_forecast
   test_keeper_provider_call_deadline
   test_keeper_failed_selection_disposition
   test_keeper_cycle_failed_runtime_attribution

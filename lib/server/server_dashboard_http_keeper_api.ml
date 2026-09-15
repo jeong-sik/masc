@@ -1536,6 +1536,28 @@ let handle_keeper_get_subroutes state req request reqd =
          (`Assoc
             [ "error", `String (Keeper_operator_note.read_error_to_string error) ])
          reqd)
+  else if ends_with "/next-request" then
+    (* What the next Agent Core request would carry, computed from the values
+       a turn uses and nothing a turn owns: no dispatch, no cursor, no note. *)
+    let name = extract_name "/next-request" in
+    (match
+       Keeper_next_request_forecast.forecast
+         ~config:(Mcp_server.workspace_config state)
+         ~keeper_name:name
+     with
+     | Ok forecast ->
+       Http.Response.json_value ~compress:true ~request:req
+         (match Keeper_next_request_forecast.to_json forecast with
+          | `Assoc fields ->
+            `Assoc
+              (("dashboard_surface", `String "/api/v1/keepers/:name/next-request")
+               :: fields)
+          | json -> json)
+         reqd
+     | Error detail ->
+       Http.Response.json_value ~status:`Not_found
+         (`Assoc [ "error", `String detail ])
+         reqd)
   else if ends_with "/last-prompt" then
     (* What this keeper was actually told, as text. The turn record keeps each
        block's bytes and digest — how much, never what. The blocks are stable

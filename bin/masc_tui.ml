@@ -12408,6 +12408,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                | Masc_tui_observer.Keeper_heartbeat _
                | Masc_tui_observer.Keeper_tool_call _
                | Masc_tui_observer.Keeper_turn_complete _
+               | Masc_tui_observer.Keeper_turn_observation _
                | Masc_tui_observer.Keeper_composite_changed _
                | Masc_tui_observer.Keeper_chat_appended _
                | Masc_tui_observer.Keeper_chat_stream_frame _

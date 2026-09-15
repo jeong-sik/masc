@@ -731,19 +731,16 @@ let call_detail_line ~cols ~now (tool : Acting.chunk_tool) part =
   | Detail_input -> preview_row ~label:"in" tool.Acting.ct_input
   | Detail_output -> preview_row ~label:"out" tool.Acting.ct_output
 
-(* The turn number a settle confirmed is the keeper's own count. An
-   unsettled chunk still carries the agent session's numbering, which the
-   viewer does not trust: a session restart renumbers from zero, so the
-   same turn once drew as 1740 on the header and 3084 on the summary
-   (live capture 2026-09-06). A settle that carried no number settles the
-   chunk without naming it, and [turn_text] would draw that as [turn ?] --
-   a question the row cannot answer and the reader cannot act on (live
-   capture 2026-09-06). Only a number the settle confirmed becomes a
-   name. *)
+(* The pane names a turn by the number its settle confirmed; the header
+   then shows that number in place of the state word. An open turn spells
+   its state instead, whatever number an observation gave it. A settle that
+   carried no number settles the chunk without naming it: [turn_text] would
+   draw that as [turn ?], a question the row cannot answer and the reader
+   cannot act on. *)
 let turn_name (chunk : Acting.chunk) =
-  match chunk.Acting.ck_turn with
-  | Some _ when chunk.Acting.ck_settled -> Some (Acting.turn_text chunk.Acting.ck_turn)
-  | _ -> None
+  match (chunk.Acting.ck_turn, chunk.Acting.ck_settled) with
+  | (Some _ as turn), true -> Some (Acting.turn_text turn)
+  | Some _, false | None, (true | false) -> None
 
 let turn_summary_line ~cols ~health (chunk : Acting.chunk) =
   let state = record_state ~health chunk in

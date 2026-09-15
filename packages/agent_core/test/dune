@@ -458,7 +458,17 @@
 (test
  (name test_anthropic_input_token_count)
  (modules test_anthropic_input_token_count)
- (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main eio.mock))
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main))
+
+(test
+ (name test_prepared_completion_request_window)
+ (modules test_prepared_completion_request_window)
+ (libraries agent_core_test_deps llm_provider alcotest eio_main eio.mock))
+
+(test
+ (name test_complete_admitted_window)
+ (modules test_complete_admitted_window)
+ (libraries agent_core_test_deps llm_provider alcotest eio_main eio.mock))
 
 (test
  (name test_exact_fit_call_window)

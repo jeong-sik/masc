@@ -24,7 +24,7 @@ let node ~node_id ~(schedule : Agent_core.Tool_contract.schedule) () =
   `Assoc
     [ "node_id", `String node_id
     ; "execution_id", Ids.Execution_id.(generate () |> to_yojson)
-    ; "tool_name", `String "keeper_time_now"
+    ; "tool_name", `String "keeper_lane_status"
     ; "input", `Assoc []
     ; ( "schedule"
       , `Assoc
@@ -41,7 +41,7 @@ let node ~node_id ~(schedule : Agent_core.Tool_contract.schedule) () =
       , `Assoc
           [ "disposition", `String "completed"
           ; "data", `Assoc []
-          ; "tool_name", `String "keeper_time_now"
+          ; "tool_name", `String "keeper_lane_status"
           ; "duration_ms", `Float 1.0
           ] )
     ; "tool_use_id", `String ""

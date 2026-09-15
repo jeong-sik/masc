@@ -30,23 +30,6 @@ type delivery =
     }
   | Durable_queue_failed of { keeper_name : string; detail : string }
 
-let producer_keeper_name
-      ~(config : Workspace_utils_backend_setup.config)
-      producer
-  =
-  match
-    Keeper_registry_lookup.find_by_name_in_base_path
-      ~base_path:config.Workspace.base_path
-      producer
-  with
-  | Some entry -> Ok (Some entry.name)
-  | None ->
-    (match Keeper_meta_store.read_meta config producer with
-     | Ok (Some _) -> Ok (Some producer)
-     | Ok None -> Ok None
-     | Error detail -> Error detail)
-;;
-
 let wake_approved_producer
       ~(config : Workspace_utils_backend_setup.config)
       ~producer
@@ -54,12 +37,12 @@ let wake_approved_producer
       ~verification_id
       ~authority
   =
-  match producer_keeper_name ~config producer with
+  match Keeper_producer_route.resolve ~config producer with
   | Error detail ->
     Producer_identity_lookup_failed { producer; task_id; detail }
-  | Ok None ->
+  | Ok Keeper_producer_route.No_keeper ->
     Unroutable_producer { producer; task_id }
-  | Ok (Some keeper_name) ->
+  | Ok (Keeper_producer_route.Keeper keeper_name) ->
     let outcome : Keeper_event_queue.task_outcome =
       { to_task_id = task_id
       ; to_verification_id = verification_id

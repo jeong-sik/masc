@@ -5,13 +5,13 @@ module Plan = Masc.Keeper_tool_plan
 
 let valid_catalog =
   {|[[compositions]]
-name = "time-memory-query"
-description = "Feed the exact clock result into memory search."
+name = "status-memory-query"
+description = "Feed the lane profile into memory search."
 execution = "inline"
 
 [[compositions.nodes]]
-id = "time"
-tool = "keeper_time_now"
+id = "lane"
+tool = "keeper_lane_status"
 [compositions.nodes.input]
 kind = "literal"
 value = {}
@@ -19,15 +19,15 @@ value = {}
 [[compositions.nodes]]
 id = "search"
 tool = "keeper_memory_search"
-after = ["time"]
+after = ["lane"]
 [compositions.nodes.input]
 kind = "object"
 [[compositions.nodes.input.fields]]
 name = "query"
 [compositions.nodes.input.fields.value]
 kind = "output"
-node = "time"
-pointer = "/now_iso"
+node = "lane"
+pointer = "/profile"
 |}
 ;;
 
@@ -45,37 +45,39 @@ let test_catalog_builds_executable_typed_plan () =
   in
   check int "one catalog entry" 1 (List.length (Catalog.entries catalog));
   let entry =
-    match Catalog.find catalog "time-memory-query" with
+    match Catalog.find catalog "status-memory-query" with
     | Some entry -> entry
     | None -> fail "composition lookup missed exact name"
   in
   check
     (option string)
     "description"
-    (Some "Feed the exact clock result into memory search.")
+    (Some "Feed the lane profile into memory search.")
     entry.description;
   let layers = Plan.dependency_layers entry.plan in
   check
     (list (list string))
     "typed dependency layers"
-    [ [ "time" ]; [ "search" ] ]
+    [ [ "lane" ]; [ "search" ] ]
     (List.map
        (List.map (fun node -> Plan.Node_id.to_string node.Plan.id))
        layers);
   let run_id = Plan.Run_id.fresh () in
-  let time_output =
+  let lane_output =
     match
       Plan.validate_output
         entry.plan
         ~run_id
-        ~node_id:(node_id "time")
+        ~node_id:(node_id "lane")
         (`Assoc
-            [ "now_iso", `String "2026-08-14T00:00:00Z"
-            ; "now_unix", `Float 0.0
+            [ "profile", `String "docker"
+            ; "lane", `Null
+            ; "endpoint", `Null
+            ; "operator_action", `Null
             ])
     with
     | Ok output -> output
-    | Error _ -> fail "valid clock output was rejected"
+    | Error _ -> fail "valid lane output was rejected"
   in
   match
     Plan.resolve_input
@@ -83,9 +85,9 @@ let test_catalog_builds_executable_typed_plan () =
       ~run_id
       ~node_id:(node_id "search")
       ~lookup:(fun id ->
-        if Plan.Node_id.equal id (node_id "time") then Some time_output else None)
+        if Plan.Node_id.equal id (node_id "lane") then Some lane_output else None)
   with
-  | Ok (`Assoc [ ("query", `String "2026-08-14T00:00:00Z") ]) -> ()
+  | Ok (`Assoc [ ("query", `String "docker") ]) -> ()
   | Ok value ->
     failf "resolved catalog input changed shape: %s" (Yojson.Safe.to_string value)
   | Error _ -> fail "catalog output reference did not resolve"
@@ -98,8 +100,8 @@ name = "bad"
 execution = "inline"
 guess = true
 [[compositions.nodes]]
-id = "time"
-tool = "keeper_time_now"
+id = "lane"
+tool = "keeper_lane_status"
 input = { kind = "literal", value = {} }
 |}
   in
@@ -116,8 +118,8 @@ let test_catalog_rejects_malformed_output_pointer () =
 name = "bad-pointer"
 execution = "inline"
 [[compositions.nodes]]
-id = "time"
-tool = "keeper_time_now"
+id = "lane"
+tool = "keeper_lane_status"
 [compositions.nodes.input]
 kind = "literal"
 value = {}
@@ -130,8 +132,8 @@ kind = "object"
 name = "query"
 [compositions.nodes.input.fields.value]
 kind = "output"
-node = "time"
-pointer = "now_iso"
+node = "lane"
+pointer = "profile"
 |}
   in
   match Catalog.parse document with
@@ -147,8 +149,8 @@ let one_node_composition name =
 name = %S
 execution = "inline"
 [[compositions.nodes]]
-id = "time"
-tool = "keeper_time_now"
+id = "lane"
+tool = "keeper_lane_status"
 [compositions.nodes.input]
 kind = "literal"
 value = {}
@@ -162,8 +164,8 @@ let one_node_async_composition name =
 name = %S
 execution = "async"
 [[compositions.nodes]]
-id = "time"
-tool = "keeper_time_now"
+id = "lane"
+tool = "keeper_lane_status"
 [compositions.nodes.input]
 kind = "literal"
 value = {}
@@ -176,8 +178,8 @@ let test_catalog_requires_explicit_execution_mode () =
     {|[[compositions]]
 name = "missing-execution"
 [[compositions.nodes]]
-id = "time"
-tool = "keeper_time_now"
+id = "lane"
+tool = "keeper_lane_status"
 [compositions.nodes.input]
 kind = "literal"
 value = {}
@@ -193,19 +195,19 @@ value = {}
 
 let test_catalog_accepts_async_only_for_statically_read_only_tools () =
   let catalog =
-    match Catalog.parse (one_node_async_composition "clock-background") with
+    match Catalog.parse (one_node_async_composition "lane-background") with
     | Ok catalog -> catalog
     | Error error -> fail (Catalog.error_to_string error)
   in
   let entry =
-    match Catalog.find catalog "clock-background" with
+    match Catalog.find catalog "lane-background" with
     | Some entry -> entry
     | None -> fail "async composition lookup failed"
   in
   (match entry.execution with
    | Catalog.Async -> ()
    | Catalog.Inline -> fail "async execution mode was rewritten");
-  check string "async tool name" "keeper_compose_clock-background" (Catalog.tool_name entry);
+  check string "async tool name" "keeper_compose_lane-background" (Catalog.tool_name entry);
   check string "status control name" "keeper_composition_status" Catalog.status_tool_name;
   check string "cancel control name" "keeper_composition_cancel" Catalog.cancel_tool_name
 ;;
@@ -233,24 +235,24 @@ value = { title = "not admitted", content = "effectful async" }
 
 let test_catalog_projects_stable_tool_name_and_path () =
   let catalog =
-    match Catalog.parse (one_node_composition "clock-check") with
+    match Catalog.parse (one_node_composition "lane-check") with
     | Ok catalog -> catalog
     | Error _ -> fail "valid named composition was rejected"
   in
   let entry =
-    match Catalog.find catalog "clock-check" with
+    match Catalog.find catalog "lane-check" with
     | Some entry -> entry
     | None -> fail "named composition lookup failed"
   in
-  check string "model-visible tool name" "keeper_compose_clock-check"
+  check string "model-visible tool name" "keeper_compose_lane-check"
     (Catalog.tool_name entry)
 ;;
 
 let test_catalog_rejects_name_outside_tool_alphabet () =
-  match Catalog.parse (one_node_composition "clock check") with
+  match Catalog.parse (one_node_composition "lane check") with
   | Error
       (Catalog.Invalid_composition_name_character
-        { name = "clock check"; character = ' ' }) -> ()
+        { name = "lane check"; character = ' ' }) -> ()
   | Error _ | Ok _ -> fail "composition name outside the tool alphabet was accepted"
 ;;
 
@@ -384,7 +386,7 @@ let test_catalog_params_generate_schema_and_bind () =
 let test_zero_param_instantiation_revalidates_turn_surface () =
   let entry =
     let catalog = parse_ok valid_catalog in
-    match Catalog.find catalog "time-memory-query" with
+    match Catalog.find catalog "status-memory-query" with
     | Some entry -> entry
     | None -> fail "zero-param composition lookup missed exact name"
   in
@@ -392,7 +394,7 @@ let test_zero_param_instantiation_revalidates_turn_surface () =
     Masc.Keeper_tool_descriptor.all_descriptors ()
     |> List.filter (fun descriptor ->
       Masc.Keeper_tool_descriptor.keeper_model_names descriptor
-      |> List.exists (String.equal "keeper_time_now"))
+      |> List.exists (String.equal "keeper_lane_status"))
   in
   match Catalog.instantiate ~descriptors ~args:(`Assoc []) entry with
   | Error
@@ -455,8 +457,8 @@ type = "string"
 description = "unused"
 
 [[compositions.nodes]]
-id = "time"
-tool = "keeper_time_now"
+id = "lane"
+tool = "keeper_lane_status"
 [compositions.nodes.input]
 kind = "literal"
 value = {}
@@ -478,8 +480,8 @@ type = "object"
 description = "wrong"
 
 [[compositions.nodes]]
-id = "time"
-tool = "keeper_time_now"
+id = "lane"
+tool = "keeper_lane_status"
 [compositions.nodes.input]
 kind = "literal"
 value = {}

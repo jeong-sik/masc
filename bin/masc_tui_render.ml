@@ -3813,7 +3813,12 @@ let schedule_detail_lines ~width (row : schedule_row)
   ]
   @ target_link
   @ [ field "Digest" row.sch_payload_digest
-  ; Ansi.bold, "  Summary"
+  (* The four headings around this one -- SCHEDULE, PAYLOAD, PAYLOAD JSON and
+     DELIVERY EVIDENCE -- are drawn bold at this indent, and so are the field
+     labels. Caps are what tells the two apart: "Summary" sat directly under
+     "Digest  digest-..." with nothing beside it, which reads as a field whose
+     value is missing rather than as the section that follows. *)
+  ; Ansi.bold, "  SUMMARY"
   ]
   @ (Message_layout.wrap_body ~markdown:document_markdown
        ~max_cells:(max 1 (width - 4)) ~sanitize:Terminal_text.single_line summary
@@ -7091,13 +7096,18 @@ let system_log_detail_lines (state : state) ~seq ~width =
             entry.sl_message
       in
       let details =
+        (* One name for the section, whichever branch draws it: the empty
+           branch called it "Details" and the other "Structured details", so
+           the same part of the pane answered to two names depending on
+           whether it had anything in it. Caps for the heading, the way every
+           other detail pane spells one. *)
         match entry.sl_details with
-        | `Null -> [ Ansi.dim, "  Details: none" ]
+        | `Null -> [ Ansi.dim, "  STRUCTURED DETAILS  none" ]
         | json ->
             let source =
               "```json\n" ^ Yojson.Safe.pretty_to_string json ^ "\n```"
             in
-            (Ansi.bold, "  Structured details")
+            (Ansi.bold, "  STRUCTURED DETAILS")
             :: (document_markdown ~width source
                 |> List.map (fun line -> Ansi.reset, "  " ^ line))
       in

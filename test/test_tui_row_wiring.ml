@@ -361,6 +361,41 @@ let test_the_params_row_leads_with_what_only_it_says () =
        ~needle:
          "  Enter edits by type \xc2\xb7 E is advanced JSON \xc2\xb7 overrides persist in .masc/runtime_params.json")
 
+(* Detail panes draw section headings and field labels bold at the same
+   indent, so caps are the only thing that tells a heading from a label. Two
+   panes broke that: the schedule detail put "Summary" straight under "Digest
+   digest-..." with nothing beside it, which reads as a field whose value is
+   missing, and the log detail called one section "Details" when it was empty
+   and "Structured details" when it was not.
+
+   Fifteen other headings in this file are caps -- SCHEDULE, PAYLOAD, TURN,
+   WAKES, VERIFICATION REQUEST, DECISION, RUN and the rest -- so the rule is
+   the file's own, and these two are what did not follow it. *)
+let test_a_detail_heading_is_spelled_the_way_a_heading_is () =
+  List.iter
+    (fun (binding_name, needle) ->
+      Alcotest.(check int)
+        (Printf.sprintf "%s draws %S" binding_name needle)
+        1
+        (Ast_grep.count_exact_string_literals_in_value_binding
+           ~module_path:render ~binding_name ~needle))
+    [ "schedule_detail_lines", "  SUMMARY"
+    ; "system_log_detail_lines", "  STRUCTURED DETAILS"
+    ; "system_log_detail_lines", "  STRUCTURED DETAILS  none"
+    ];
+  (* And the spellings they replaced are gone rather than joined. *)
+  List.iter
+    (fun (binding_name, needle) ->
+      Alcotest.(check int)
+        (Printf.sprintf "%s no longer draws %S" binding_name needle)
+        0
+        (Ast_grep.count_exact_string_literals_in_value_binding
+           ~module_path:render ~binding_name ~needle))
+    [ "schedule_detail_lines", "  Summary"
+    ; "system_log_detail_lines", "  Structured details"
+    ; "system_log_detail_lines", "  Details: none"
+    ]
+
 let test_repositories_show_the_server_resolved_checkout_path () =
   let producer = "lib/server/server_routes_http_routes_repositories.ml" in
   Alcotest.(check int) "the route names one resolved path field" 1
@@ -740,6 +775,8 @@ let () =
             test_the_schedule_subject_is_measured_not_given_the_line
         ; Alcotest.test_case "the params row leads with what only it says" `Quick
             test_the_params_row_leads_with_what_only_it_says
+        ; Alcotest.test_case "a detail heading is spelled like a heading" `Quick
+            test_a_detail_heading_is_spelled_the_way_a_heading_is
         ; Alcotest.test_case "the Logs header says the floor that was set" `Quick
             test_the_logs_header_says_the_floor_the_reader_set
         ; Alcotest.test_case "a labelled field does not bracket its reading" `Quick

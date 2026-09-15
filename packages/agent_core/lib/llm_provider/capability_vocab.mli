@@ -17,6 +17,20 @@ type preserve_thinking_control_format =
   | Always_preserved_thinking
   | Thinking_object_clear_thinking
 
+(** What the request wire does about reasoning when the request carries no
+    thinking control at all. [Provider_default_reasoning] is the ordinary case:
+    absence leaves the decision to the provider's own default and masc claims
+    nothing about it. [Provider_enables_reasoning] is the endpoint that turns
+    reasoning on by itself when no control is present, so on that wire an
+    absent control is not "reasoning off" -- it is "reasoning on, undeclared".
+
+    No catalog string maps to this: which wire enables reasoning on its own is
+    a property of the endpoint, measured once and declared on the provider
+    preset, not something an individual model row restates. *)
+type uncontrolled_reasoning =
+  | Provider_default_reasoning
+  | Provider_enables_reasoning
+
 type reasoning_replay_override =
   | Default_reasoning_replay
   | Force_no_replay

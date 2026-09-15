@@ -7,7 +7,7 @@ updated: 2026-09-15
 author: claude
 supersedes: []
 superseded_by: null
-related: []
+related: ["0274"]
 ---
 
 # RFC: 한 번 정하는 workspace (workspace-root-resolution)
@@ -166,8 +166,8 @@ val source_label : source -> string
 |---|---|---|
 | 1 | `Workspace_root` 모듈과 표 테스트. `masc`, `start`, `init`, 그리고 `base_path` term 을 쓰는 CLI 가 이것을 부른다. guard 의 `Implicit_default`·`format_violation`, `default_base_path ()` 의 cwd 계산과 `exit 1` 을 지운다 | workspace 안에서 `masc start` 가 부팅한다. 없으면 `No_workspace` 메시지 하나로 끝난다 |
 | 2 | `doctor`, `setup`, `masc-tui` 가 `Workspace_root` 를 부른다(stdio 서버는 1단계에 포함) | 모든 진입점이 같은 workspace 를 고른다(#30904) |
-| 3 | `MASC_BASE_PATH_INPUT` 을 lib·bin·scripts·harness 에서 지운다 | env 이름이 하나 |
-| 4 | lib 의 env 직접 읽기와 `Host_config.base_path` 읽기를 인자로 바꾼다. 파일 5개 단위로 나눈다. `Config_dir_resolver.base_path_or_cwd`, 테스트 전용 git root 탐색, `resolved_base_path_cache`, `publish_workspace_root` 를 지운다 | base path 를 env 에서 읽는 곳이 `observe` 하나 |
+| 3 | `MASC_BASE_PATH_INPUT` 을 lib·bin·scripts·harness 에서 지운다. 운영자가 적은 원래 경로는 부팅 path diagnostics 가 명시 인자(`~input_base_path`)로 보관한다. 같은 값만 넣던 테스트 줄은 별도로 정리한다 | env 이름이 하나 |
+| 4 | 부팅 뒤의 읽기는 RFC-0274(wave A–E)가 맡는다. 이 RFC 는 진입점에서 정하는 순서만 소유한다. RFC-0274 가 끝나면 `Config_dir_resolver.base_path_or_cwd`, 테스트 전용 git root 탐색, `resolved_base_path_cache`, `publish_workspace_root` 를 지운다 | base path 를 env 에서 읽는 곳이 `observe` 와 부팅 입력뿐 |
 | 5 | 기본값 기록: 사람이 터미널에서 고를 때만 쓴다(installer 대화형, 설정 화면의 workspace 선택). 비대화형 installer 와 `setup --no-tui` 는 `--record-default` 가 있을 때만. 기록 판정도 `.masc/config` 로 맞춘다. installer 제안도 설정 화면과 같은 `~/MASC` 로 맞춘다 | 검증용 설치가 기계 기본값을 바꾸지 않는다 |
 | 6 | README·INSTALL(영/한)·`--help` 문구를 3.1 순서로 고친다. 아무 데서도 안 도는 `scripts/imp-onboarding-setup-pty.py` 를 지운다 | 문서와 코드가 같은 순서를 말한다 |
 

@@ -38,8 +38,8 @@ if [[ ! -f "$committed_opam" ]]; then
 fi
 
 if ! grep -Fq '(generate_opam_files true)' dune-project; then
-  printf 'FAIL: dune-project no longer declares (generate_opam_files true); '\
-         'this guard assumes the generated-file workflow\n' >&2
+  printf 'FAIL: dune-project no longer declares (generate_opam_files true)\n' >&2
+  printf '  This guard assumes the generated-file workflow.\n' >&2
   exit 1
 fi
 
@@ -47,16 +47,22 @@ fi
 # regenerated file over the checked-in one, so this copy is the only
 # record of what the PR actually ships.
 snapshot="$(mktemp)"
-trap 'rm -f "$snapshot"' EXIT
+regeneration_log="$(mktemp)"
+trap 'rm -f "$snapshot" "$regeneration_log"' EXIT
 cp "$committed_opam" "$snapshot"
 
 # Regenerate. The local wrapper serializes concurrent dune runs and injects
 # --root; the two skips keep the check independent of the local switch's
 # exact compiler and of optional pins, which is what CI needs.
 if ! MASC_SKIP_OCAML_VERSION_CHECK=1 MASC_SKIP_DEPS_CHECK=1 \
-       scripts/dune-local.sh build masc.opam >/dev/null 2>&1; then
+       scripts/dune-local.sh build masc.opam >"$regeneration_log" 2>&1; then
   printf 'FAIL: regenerating masc.opam failed\n' >&2
   printf '  ran: MASC_SKIP_OCAML_VERSION_CHECK=1 MASC_SKIP_DEPS_CHECK=1 scripts/dune-local.sh build masc.opam\n' >&2
+  printf '\n' >&2
+  # Without this the only thing a red CI run says is that regeneration
+  # failed, and the dune error that says why is gone.
+  printf '  What it printed (last 40 lines):\n' >&2
+  sed 's/^/  /' "$regeneration_log" | tail -40 >&2
   exit 1
 fi
 

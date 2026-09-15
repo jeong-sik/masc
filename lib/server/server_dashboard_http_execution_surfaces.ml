@@ -285,9 +285,18 @@ let publish_execution_error_if_current ~generation exn =
    under, and whether it got its answer published. What an attempt does after
    that -- refreshing the light body from what it published -- can fail on its
    own or be cut by the window around the attempt, and neither unmakes the
-   answer already published for this generation. So an attempt publishes a
-   failure only while it has published nothing. A later attempt, or any other
-   publisher of this generation, is unaffected. *)
+   answer this attempt already published. So an attempt publishes a failure
+   only while it has published nothing.
+
+   The guard is per attempt, not per generation. [begin_execution_publication_attempt]
+   reads the generation without advancing it -- only invalidation advances it --
+   so two forced refreshes running at once share one generation, each with its
+   own [answered]. The second one's failure still reaches
+   [publish_execution_error_if_current] and lands on the first one's answer.
+   Nothing on the route serialises forced refreshes, so that race is open; it
+   is open on the publication layer, which has no notion of which answer is
+   newer, and closing it means giving publications an order rather than giving
+   attempts a flag. *)
 type execution_attempt =
   { generation : int
   ; answered : bool Atomic.t
@@ -1215,9 +1224,7 @@ module For_testing = struct
     let parameters = execution_parameters ~config request in
     execution_cached_http_representation ~config ~parameters request
   let execution_publication_generation = current_execution_publication_generation
-  let begin_execution_publication_attempt = begin_execution_publication_attempt
   let publish_execution_success_if_current = publish_execution_success_if_current
-  let publish_execution_error_if_current = publish_execution_error_if_current
   let begin_execution_attempt = begin_execution_attempt
   let publish_execution_attempt_success = publish_execution_attempt_success
   let publish_execution_attempt_failure = publish_execution_attempt_failure

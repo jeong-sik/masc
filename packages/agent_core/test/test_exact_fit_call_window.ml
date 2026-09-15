@@ -42,6 +42,11 @@ let late_grant_s = admission_budget_s -. admission_left_after_late_grant_s
    delay: connecting, the request, the answer. A budget handed on below
    [left - this] was over-charged. *)
 let round_trip_overhead_s = 0.3
+
+(* A context below the binding's own output reservation: [max_tokens] is 64,
+   so the request cannot fit whatever the measurement counts, and the refusal
+   does not depend on the listener's answer. *)
+let context_below_the_output_reservation = 32
 let provider_takes_s = 5.0
 let outer_budget_s = 10.0
 
@@ -191,7 +196,7 @@ let describe = function
   | Ended (Error error) -> Agent_core.Error.to_string error
 ;;
 
-let run_case ?(bounds = Call_deadline) ~behaviour ~holder f =
+let run_case ?(bounds = Call_deadline) ?(config = config) ~behaviour ~holder f =
   Eio_main.run
   @@ fun env ->
   let clock = Eio.Stdenv.clock env in
@@ -407,7 +412,9 @@ let test_a_late_permit_leaves_the_round_trip_what_the_admission_budget_has_left 
     outcome
     elapsed;
   check_one_window ~window_s:admission_budget_s elapsed;
-  if elapsed >= late_grant_s +. count_tokens_delay_s
+  (* A round trip given a fresh window would end a full listener delay after
+     the grant; the budget it was actually given ends it at the budget. *)
+  if elapsed >= admission_budget_s +. admission_left_after_late_grant_s
   then failf "ended at %.2fs: the round trip ran past the admission budget" elapsed;
   check int "the measurement was sent" 1 count_posts;
   check bool "the stream was never dispatched" false dispatched
@@ -426,6 +433,40 @@ let test_the_streams_permit_wait_runs_under_what_the_admission_budget_has_left (
   check_one_window ~window_s:admission_budget_s elapsed;
   if elapsed >= count_tokens_delay_s +. admission_budget_s
   then failf "ended at %.2fs: the stream was given a second admission budget" elapsed;
+  check int "the request was measured once" 1 count_posts;
+  check bool "the stream was never dispatched" false dispatched
+;;
+
+(* A request that does not fit is refused as one, not as a timeout. The
+   measurement spends most of the window and answers, and the binding's
+   context is below its output reservation, so the route names the fit: a
+   refusal the caller acts on by sending less, where a timeout would send
+   the same request again. [dispatch_sync] has always read the fit first,
+   and the stream arm now reads it in the same place. *)
+let test_a_request_that_does_not_fit_is_refused_as_one_however_the_windows_stand () =
+  let too_small_for_the_measured_request base_url =
+    { (config base_url) with
+      Provider_config.max_context = Some context_below_the_output_reservation
+    }
+  in
+  run_case
+    ~bounds:Stream_budgets
+    ~config:too_small_for_the_measured_request
+    ~behaviour:(Answers_after count_tokens_delay_s)
+    ~holder:Nobody
+  @@ fun ~outcome ~elapsed ~dispatched ~count_posts ~stream_first_event_s:_ ->
+  (match outcome with
+   | Ended (Error (Agent_core.Error.Api (Retry.ContextOverflow { limit; _ }))) ->
+     check
+       (option int)
+       "the refusal carries the limit it measured against"
+       (Some context_below_the_output_reservation)
+       limit
+   | other ->
+     failf
+       "a request that does not fit ended as %s after %.2fs"
+       (describe other)
+       elapsed);
   check int "the request was measured once" 1 count_posts;
   check bool "the stream was never dispatched" false dispatched
 ;;
@@ -454,6 +495,10 @@ let () =
             "a late permit leaves the round trip what the admission budget has left"
             `Quick
             test_a_late_permit_leaves_the_round_trip_what_the_admission_budget_has_left
+        ; test_case
+            "a request that does not fit is refused as one however the windows stand"
+            `Quick
+            test_a_request_that_does_not_fit_is_refused_as_one_however_the_windows_stand
         ] )
     ; ( "one window from the call"
       , [ test_case

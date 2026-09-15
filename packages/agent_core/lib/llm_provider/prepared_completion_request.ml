@@ -246,8 +246,8 @@ let measure_prepared ?connection_cache ?clock ?timeout_s ~next_stage ~sw ~net pr
                | Ok result -> result
                | Error `Timeout -> expired
              in
-             (* The round trip, under what is left of the admission budget
-                at [admission_deadline_at] when there is one. *)
+             (* The round trip, under what the admission budget has left
+                when there is one. *)
              let round_trip admission_left () =
                match first_event_deadline, admission_left with
                | Http_client.Unbounded, None -> measured ()

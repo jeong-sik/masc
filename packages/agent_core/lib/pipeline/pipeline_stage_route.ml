@@ -460,8 +460,8 @@ let dispatch_stream
              | Ok admission_deadline ->
                (* Two of the stream's budgets are one window from here. The
                   admission budget spans both permit waits, the measurement's
-                  and the stream's, with the count round trip between them
-                  not paused. The first-event budget is provider silence
+                  and the stream's, and the count round trip between them,
+                  which runs under what the budget has left. The first-event budget is provider silence
                   before the first token: the count round trip spends from
                   it, and the stream arms what that left; permit waits are
                   queueing and spend none of it. *)

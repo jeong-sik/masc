@@ -87,10 +87,14 @@ type options =
         guards once the stream produces, and [connect_timeout_s] still guards
         connection setup. On the exact-fit path, when this is declared, the
         count-tokens round trip is provider silence before the first token
-        too: it spends from this window first (ending as
-        [TimeoutError { phase = First_token }]) and the stream arms what it
-        left; the fallbacks above do not reach the round trip, whose only
-        other bound is [body_timeout_s]. @since 0.218.0 *)
+        too: it spends from this window first and the stream arms what it
+        left. The round trip runs under one window, the shorter of this
+        budget and what [admission_timeout_s] has left after the permit
+        wait, and ends as the phase of the budget that ended it
+        ([TimeoutError { phase = First_token }], or [Queue] after a late
+        permit); when the two end together it is [First_token]. The
+        fallbacks above do not reach the round trip, whose only other bound
+        is [body_timeout_s]. @since 0.218.0 *)
   ; body_timeout_s : float option
     (** Per-call total deadline applied to non-streaming HTTP response body
         consumption. Threaded through {!Pipeline.stage_route} into both the

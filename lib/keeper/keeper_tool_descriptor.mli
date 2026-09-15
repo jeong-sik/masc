@@ -106,7 +106,6 @@ type runtime_handler =
   | Tool_read_file
   | Tool_edit_file
   | Tool_write_file
-  | Tool_time_now
   | Tool_lane_status
   | Tool_tools_list
   | Tool_capability_search

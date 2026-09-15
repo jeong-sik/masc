@@ -500,7 +500,6 @@ let explicit_metadata : (string * metadata) list =
        not through [Tool_spec].  Their callable names still need an explicit
        permission authority here; descriptor policy remains the SSOT for
        execution axes such as readonly/idempotent. *)
-    ("keeper_time_now", keeper_shard_read);
     ("keeper_lane_status", keeper_shard_read);
     ("keeper_context_status", keeper_shard_read);
     ("keeper_artifact_read", keeper_shard_read);

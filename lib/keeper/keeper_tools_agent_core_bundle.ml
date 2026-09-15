@@ -355,7 +355,6 @@ let make_tool_bundle_for_descriptors_with_policy
                | ( Keeper_tool_descriptor.Tool_keeper_code_query_dispatch
                  | Keeper_tool_descriptor.Tool_search_files
                  | Keeper_tool_descriptor.Tool_read_file
-                 | Keeper_tool_descriptor.Tool_time_now
                  | Keeper_tool_descriptor.Tool_lane_status
                  | Keeper_tool_descriptor.Tool_tools_list
                  | Keeper_tool_descriptor.Tool_capability_search

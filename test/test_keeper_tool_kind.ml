@@ -144,21 +144,21 @@ let test_discovery_fields_carry_tool_kind () =
 
 let inline_and_async_catalog =
   {|[[compositions]]
-name = "clock-inline"
+name = "lane-inline"
 execution = "inline"
 [[compositions.nodes]]
-id = "time"
-tool = "keeper_time_now"
+id = "lane"
+tool = "keeper_lane_status"
 [compositions.nodes.input]
 kind = "literal"
 value = {}
 
 [[compositions]]
-name = "clock-background"
+name = "lane-background"
 execution = "async"
 [[compositions.nodes]]
-id = "time"
-tool = "keeper_time_now"
+id = "lane"
+tool = "keeper_lane_status"
 [compositions.nodes.input]
 kind = "literal"
 value = {}
@@ -180,12 +180,12 @@ let test_catalog_entries_declare_tool_kind () =
     tool_kind_testable
     "inline composition is a composition tool"
     Descriptor.Composition_tool
-    (Catalog.tool_kind (entry "clock-inline"));
+    (Catalog.tool_kind (entry "lane-inline"));
   check
     tool_kind_testable
     "async composition is an async composition tool"
     Descriptor.Async_composition_tool
-    (Catalog.tool_kind (entry "clock-background"))
+    (Catalog.tool_kind (entry "lane-background"))
 ;;
 
 let test_async_controls_declare_kinds () =
@@ -236,7 +236,7 @@ let test_cancel_result_payload_carries_tool_kind () =
 let test_route_evidence_picks_composition_tool_kind () =
   let output_text =
     `Assoc
-      [ "composition_tool", `String "keeper_compose_clock-inline"
+      [ "composition_tool", `String "keeper_compose_lane-inline"
       ; "tool_kind", `String "composition"
       ; "actions", `List []
       ]
@@ -244,7 +244,7 @@ let test_route_evidence_picks_composition_tool_kind () =
   in
   match
     Call_log.route_evidence_json_of_tool_io
-      ~tool_name:"keeper_compose_clock-inline"
+      ~tool_name:"keeper_compose_lane-inline"
       ~input:(`Assoc [])
       ~output_text
   with

@@ -39,7 +39,7 @@ let composition_document ~name ~node_id =
     ~name
     ~description:"exact composition"
     (Printf.sprintf
-       "```toml composition\n[[compositions]]\nname = %S\ndescription = \"exact composition\"\nexecution = \"inline\"\n[[compositions.nodes]]\nid = %S\ntool = \"keeper_time_now\"\n[compositions.nodes.input]\nkind = \"literal\"\nvalue = {}\n```"
+       "```toml composition\n[[compositions]]\nname = %S\ndescription = \"exact composition\"\nexecution = \"inline\"\n[[compositions.nodes]]\nid = %S\ntool = \"keeper_lane_status\"\n[compositions.nodes.input]\nkind = \"literal\"\nvalue = {}\n```"
        name
        node_id)
 ;;

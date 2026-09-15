@@ -120,10 +120,10 @@ let test_alternatives_never_dangling () =
       (String.concat ", " (List.map render dangling))
 
 let test_entry_json_omits_empty_fields () =
-  (* keeper_time_now has no curated examples/alternatives; the JSON wire shape
+  (* keeper_lane_status has no curated examples/alternatives; the JSON wire shape
      must omit both keys so existing consumers see no field they did not see
      before. *)
-  let entry = lookup "keeper_time_now" in
+  let entry = lookup "keeper_lane_status" in
   let json = Registry.entry_json entry in
   match json with
   | `Assoc kvs ->
@@ -135,7 +135,7 @@ let test_entry_json_omits_empty_fields () =
   | _ -> Alcotest.fail "entry_json must return an Assoc"
 
 (* The omitted-when-empty half is covered by [test_entry_json_omits_empty_fields]
-   on keeper_time_now. This fixture exists for the opposite property, so it
+   on keeper_lane_status. This fixture exists for the opposite property, so it
    asserts inclusion on both list fields rather than reusing one entry to prove
    emission and omission at once. *)
 let test_entry_json_includes_populated_fields () =

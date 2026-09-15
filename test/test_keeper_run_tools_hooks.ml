@@ -873,8 +873,8 @@ let test_an_unreadable_index_is_an_error_not_an_empty_read () =
        Fs_compat.set_fs (Eio.Stdenv.fs env);
        Masc.Keeper_tool_call_log.init ~base_path ();
        Masc.Keeper_tool_call_log.log_call
-         ~keeper_name:"blind-keeper" ~tool_name:"keeper_time_now"
-         ~input:(`Assoc []) ~output_text:"now" ~success:true ~duration_ms:1.0 ();
+         ~keeper_name:"blind-keeper" ~tool_name:"keeper_lane_status"
+         ~input:(`Assoc []) ~output_text:"docker" ~success:true ~duration_ms:1.0 ();
        Masc.Keeper_tool_call_log.flush_now ();
        let ledger_dir =
          match Masc.Keeper_tool_call_log.store_dir () with
@@ -1034,7 +1034,7 @@ let test_production_post_tool_hook_cancellation_releases_next_completion () =
          in
          Agent_core.Hooks.PostToolUse
            { invocation
-           ; tool_name = "keeper_time_now"
+           ; tool_name = "keeper_lane_status"
            ; input = `Assoc []
            ; output = Ok { Agent_core.Types.content = "ok"; content_blocks = None; _meta = None }
            ; result_bytes = 2

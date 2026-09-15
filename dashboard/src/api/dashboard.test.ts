@@ -458,9 +458,9 @@ describe('keeper tool telemetry fetchers', () => {
             // anonymized. Nested nullable fields arrive as explicit nulls.
             ts: 1787024860.1,
             keeper: 'keeper-alpha',
-            tool: 'keeper_time_now',
+            tool: 'keeper_lane_status',
             input: {},
-            output: '{"now_iso":"2026-08-18T05:00:00Z"}',
+            output: '{"profile":"docker","lane":null,"endpoint":null,"operator_action":null}',
             success: true,
             duration_ms: 0.5,
             thinking_enabled: true,
@@ -488,8 +488,8 @@ describe('keeper tool telemetry fetchers', () => {
               runtime_profile: 'ollama_cloud.example-model',
             },
             action_radius: {
-              tool_name: 'keeper_time_now',
-              action_key: 'keeper_time_now',
+              tool_name: 'keeper_lane_status',
+              action_key: 'keeper_lane_status',
               target_kind: 'tool',
               target_path: null,
               sandbox_target: 'local',
@@ -499,19 +499,19 @@ describe('keeper tool telemetry fetchers', () => {
               error: null,
             },
             route_evidence: {
-              descriptor_id: 'keeper.time.now',
-              capability_id: 'keeper_time_now',
+              descriptor_id: 'keeper.lane.status',
+              capability_id: 'keeper_lane_status',
               keeper_model_projection: 'internal_name',
-              public_name: 'keeper_time_now',
-              canonical_name: 'keeper_time_now',
+              public_name: 'keeper_lane_status',
+              canonical_name: 'keeper_lane_status',
               executor: 'in_process',
               backend: 'ocaml_runtime',
               sandbox: 'none',
-              runtime_handler: 'tool_time_now',
+              runtime_handler: 'tool_lane_status',
               execution: 'concurrent',
               composable_output: { kind: 'json' },
               receipt_labels: {
-                descriptor_id: 'keeper.time.now',
+                descriptor_id: 'keeper.lane.status',
                 executor: 'in_process',
                 input_schema_source: 'descriptor_owned',
               },
@@ -519,7 +519,7 @@ describe('keeper tool telemetry fetchers', () => {
               readonly: true,
               cwd_scope: null,
               polling_read: false,
-              tool_name: 'keeper_time_now',
+              tool_name: 'keeper_lane_status',
             },
           },
         ],
@@ -545,7 +545,7 @@ describe('keeper tool telemetry fetchers', () => {
       read_explicit_cwd_supported: true,
     })
     expect(entry?.action_radius).toMatchObject({
-      action_key: 'keeper_time_now',
+      action_key: 'keeper_lane_status',
       target_kind: 'tool',
       observed_paths: [],
     })
@@ -553,15 +553,15 @@ describe('keeper tool telemetry fetchers', () => {
     expect(entry?.action_radius?.target_path).toBeUndefined()
     expect(entry?.action_radius?.error).toBeUndefined()
     expect(entry?.route_evidence).toMatchObject({
-      descriptor_id: 'keeper.time.now',
-      capability_id: 'keeper_time_now',
+      descriptor_id: 'keeper.lane.status',
+      capability_id: 'keeper_lane_status',
       executor: 'in_process',
       backend: 'ocaml_runtime',
-      runtime_handler: 'tool_time_now',
+      runtime_handler: 'tool_lane_status',
       readonly: true,
     })
     expect(entry?.route_evidence?.receipt_labels).toEqual({
-      descriptor_id: 'keeper.time.now',
+      descriptor_id: 'keeper.lane.status',
       executor: 'in_process',
       input_schema_source: 'descriptor_owned',
     })
@@ -1217,7 +1217,7 @@ function validSkillActivationProjectionFixture() {
         },
         actions: [{
           identity: { kind: 'call_id', call_id: 'call-action-1' },
-          tool_name: 'keeper_time_now',
+          tool_name: 'keeper_lane_status',
           runtime_id: 'anthropic.claude',
           agent_core_turn: 1,
           observed_at: '2026-08-27T00:00:02Z',

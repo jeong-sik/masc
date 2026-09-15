@@ -580,46 +580,57 @@ let answer : type response. response command -> answer = function
 ;;
 
 let request t command =
-  if Atomic.get t.closed
-  then Error Owner_closed
-  else (
-    let response, resolve = Eio.Promise.create () in
-    match
-      enqueue_unless_closed t.mailbox (Command (command, resolve)) ~closed:t.closed_p
-    with
-    | `Closed -> Error Owner_closed
-    | `Enqueued ->
-      (* A response that arrived as the owner closed is the answer: the
-         command ran, and its caller must not be told the owner was closed
-         to it. [Fiber.first] kept whichever wake-up was queued first, and a
-         closing owner queues its close ahead of the response it settled in
-         the same pass. *)
-      let await_answer () =
+  let ask () =
+    if Atomic.get t.closed
+    then Error Owner_closed
+    else (
+      let response, resolve = Eio.Promise.create () in
+      match
+        enqueue_unless_closed t.mailbox (Command (command, resolve)) ~closed:t.closed_p
+      with
+      | `Closed -> Error Owner_closed
+      | `Enqueued ->
+        (* A response that arrived as the owner closed is the answer: the
+           command ran, and its caller must not be told the owner was closed
+           to it. [Fiber.first] kept whichever wake-up was queued first, and a
+           closing owner queues its close ahead of the response it settled in
+           the same pass. *)
         Watched_work.run
           (fun () -> Eio.Promise.await response)
           ~watcher:(fun () ->
              Eio.Promise.await t.closed_p;
-             Error Owner_closed)
-      in
-      (match answer command with
-       | In_its_drain_step ->
-         (* A cancelled caller stays until the owner has answered. Callers
-            change the owner inside an authority they release on return:
-            [Keeper_owner_registry.apply_meta] holds the keeper's lifecycle key
-            lock and reservation across its write. Leaving early would release
-            them while the write is still queued, and it would commit after
-            another holder took them. A claim's answer is also the only record
-            of which row the child took. The wait is bounded by one drain step,
-            which never waits on a child. *)
-         Eio.Cancel.protect await_answer
-       | Possibly_when_the_child_finishes ->
-         (* A cancelled caller leaves. The answer may wait for the child, and
-            the caller can be that child: a turn asking
-            [Await_idle_after_shutdown] waits for its own end. Under a protected
-            wait an operator interrupt could not unwind it, so the slot was
-            never released. None of these callers holds an authority across
-            the wait. *)
-         await_answer ()))
+             Error Owner_closed))
+  in
+  match answer command with
+  | In_its_drain_step ->
+    (* A cancelled caller stays until the owner has answered. Callers change
+       the owner inside an authority they release on return:
+       [Keeper_owner_registry.apply_meta] holds the keeper's lifecycle key lock
+       and reservation across its write. Leaving early would release them while
+       the write is still queued, and it would commit after another holder took
+       them. A claim's answer is also the only record of which row the child
+       took.
+
+       The handover is inside the protected region too. [enqueue_unless_closed]
+       races the add against the owner's close with [Fiber.first], and
+       [Fiber.first] raises its caller's cancellation even when the add has
+       already returned (eio 1.3 fiber.ml [any_gen]: [(OK _ | New), Some ex]).
+       Protecting only the wait left that return as a window: the owner took
+       the command and ran it while its caller left. Every release build for
+       0.35.18 hit it.
+
+       Both waits end when the owner drains or closes, and a drain step never
+       waits on a child. A cancelled caller blocked on a full mailbox therefore
+       waits for room, and its command then runs. *)
+    Eio.Cancel.protect ask
+  | Possibly_when_the_child_finishes ->
+    (* A cancelled caller leaves. The answer may wait for the child, and the
+       caller can be that child: a turn asking [Await_idle_after_shutdown]
+       waits for its own end. Under a protected wait an operator interrupt
+       could not unwind it, so the slot was never released. None of these
+       callers holds an authority across the wait. A command already handed
+       over still runs after its caller left. *)
+    ask ()
 ;;
 
 (* Hand a command over without reading the answer.

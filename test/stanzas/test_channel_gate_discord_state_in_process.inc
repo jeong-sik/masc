@@ -9,6 +9,5 @@
  (modules test_channel_gate_discord_state_in_process)
  (action
   (setenv MASC_BASE_PATH /tmp/test-channel-gate-discord-in-process
-   (setenv MASC_BASE_PATH_INPUT /tmp/test-channel-gate-discord-in-process
-    (run %{test}))))
+   (run %{test})))
  (libraries masc_test_deps))

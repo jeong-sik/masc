@@ -108,8 +108,9 @@ The generic [browser-lanes instruction](../../skills/browser-lanes/SKILL.md)
 combines with a site instruction selected from the Keeper's available Skills.
 Site instructions describe how to recognize the requested content; execution
 compositions are separately advertised `keeper_compose_<name>` tools.
-For an observed same-tab link, `browser-live-click-content` orders follow then
-destination scene read and passes the navigation receipt between them. If the
+For an observed same-tab link, `browser-live-follow-read` with `mode=scene`
+orders follow then destination scene read and passes the navigation receipt
+between them. If the
 follow succeeded and only its read failed, recovery reads the same tab without
 replaying the follow. Site identity, heading, visible coverage and requested
 facts still need to be checked against the returned content.

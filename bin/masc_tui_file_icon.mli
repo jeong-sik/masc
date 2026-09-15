@@ -21,6 +21,11 @@ val glyph : kind -> string
 (* Every kind, in the order the sheet lists them. *)
 val kinds : kind list
 
+(* The mark the Code tree draws for a row that opens rather than reads. Not a
+   [kind]: a folder is not a kind of file. Here so the tree and the sheet
+   cannot come to draw two arrows for one thing. *)
+val folder_glyph : string
+
 (* Each mark and what the file behind it is. The tree draws the mark with no
    word beside it, so this is what the help sheet prints. *)
 val legend : (string * string) list

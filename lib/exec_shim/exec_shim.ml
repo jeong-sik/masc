@@ -468,7 +468,7 @@ let refusal_of_rule_bytes (rule : bytes) =
   | padded -> failwith ("box setup refused by unknown rule: " ^ padded)
 ;;
 
-let spawn ?(before_exec = fun () -> ()) ?(observe_sock = Unix.stdin)
+let spawn ?(before_exec = fun () -> ()) ?observe_sock
     ~argv ~env ~cwd ()
   =
   let opened = ref [] in
@@ -513,16 +513,23 @@ let spawn ?(before_exec = fun () -> ()) ?(observe_sock = Unix.stdin)
           resolved, and before the payload has run one instruction. *)
        before_exec ();
        (* task-1575 phase 3: install the observe filter and hand the
-          listener fd to the parent over [observe_sock]. The filter must be
-          installed here (after prctl, before execvpe), so the listener fd
-          is valid for the whole lifetime of the payload. The parent holds
-          a *write* end that we close now: it never sees payload bytes and
-          the next read on it is ours. *)
-       (if observe_sock <> Unix.stdin
-        then
-          let installed = observe_install observe_sock in
-          Unix.close observe_sock;
-          if not installed then exit 127);
+          listener fd to the parent over the socketpair's child end. The
+          filter must be installed here (after prctl, before execvpe), so
+          the listener fd is valid for the whole lifetime of the payload.
+          The child's copy of the parent's end is closed first: a
+          socketpair has two ends, one per side, and a child that kept
+          both would be sending itself a message nobody reads (verified:
+          this was exactly the earlier bug -- both sides using the same
+          fd meant the parent's [recv_fd] blocked forever on a message
+          the child never actually delivered to it). *)
+       (match observe_sock with
+        | Some (child_end, parent_end) ->
+          (try Unix.close parent_end with
+           | Unix.Unix_error _ -> ());
+          let installed = observe_install child_end in
+          Unix.close child_end;
+          if not installed then exit 127
+        | None -> ());
        (* This private pipe carries at most two bytes and never payload text.
           Only the child can acknowledge applied restrictions. The write end
           closes on exec; no acknowledgement is not evidence of success. *)
@@ -585,17 +592,24 @@ let spawn ?(before_exec = fun () -> ()) ?(observe_sock = Unix.stdin)
         Unix.set_nonblock stdin_w;
         Unix.set_nonblock boundary_r;
         (* task-1575: receive the listener fd the child just sent over the
-           observe socket. Unix.stdin (== 0) is the sentinel for "observe
-           mode was not requested". The fd is non-blocking so the supervise
-           select loop can treat readable == one available notification. *)
+           socketpair's parent end. [None] is "observe mode was not
+           requested". The parent's own copy of the child's end is closed
+           first -- keeping it open would not corrupt this single
+           exchange, but it would leave an extra live reference on the
+           end the child uses, and a fd this process has no business
+           holding once the handoff is done. The fd is non-blocking so
+           the supervise select loop can treat readable == one available
+           notification. *)
         let listener_fd =
-          if observe_sock = Unix.stdin
-          then Unix.stdin
-          else (
-            let fd = Shim_fdpass.recv_fd observe_sock in
-            Unix.close observe_sock;
+          match observe_sock with
+          | None -> Unix.stdin
+          | Some (child_end, parent_end) ->
+            (try Unix.close child_end with
+             | Unix.Unix_error _ -> ());
+            let fd = Shim_fdpass.recv_fd parent_end in
+            Unix.close parent_end;
             Unix.set_nonblock fd;
-            fd)
+            fd
         in
         let handles =
           (pid, stdin_w, stdout_r, stderr_r, boundary_r, listener_fd)
@@ -931,6 +945,22 @@ let run () =
                  ~base_env:(env_of_process ())
                  ~allowlist:config.env_allowlist
                  ~request_env:req.Exec_ssh_protocol.env in
+             (* task-1575: whether this run's socket(2) will be observed via
+                the SECCOMP_FILTER_FLAG_NEW_LISTENER filter installed below.
+                Two seccomp filters on the same syscall do not layer: the
+                kernel takes the highest-priority action among all matching
+                filters, and SECCOMP_RET_ERRNO outranks SECCOMP_RET_USER_NOTIF
+                (verified empirically -- installing both, the static ERRNO
+                filter's EPERM always wins and the listener never sees a
+                notification). So when the observe filter is going to own
+                socket(2), the static deny_sockets() filter below must not
+                also claim it -- deny_net here would silently make the
+                observe path permanently inert. *)
+             let observe_notif_active =
+               match req.Exec_ssh_protocol.mode with
+               | Exec_ssh_protocol.Observe -> user_notif_supported ()
+               | Exec_ssh_protocol.Effect | Exec_ssh_protocol.Guest_local -> false
+             in
              let box =
                match
                  plan_for_mode ~supported:(observe_supported ())
@@ -956,6 +986,7 @@ let run () =
                    match make_scratch ~root:config.scratch_root with
                    | Ok path -> path
                    | Error message -> shim_fail message in
+                 let deny_net = deny_net && not observe_notif_active in
                  Some (deny_fs, deny_net, scratch) in
              let env, before_exec, cleanup =
                match box with
@@ -977,22 +1008,29 @@ let run () =
                        else raise (refusal_of_rule_bytes refusing_rule))
                  , (fun () -> remove_tree scratch) ) in
              let (pid, stdin_w, stdout_r, stderr_r, boundary_r, listener_fd) =
+               (* A socketpair has two ends; [spawn] uses one in the child
+                  (to hand the listener fd over) and the other in the
+                  parent (to receive it) -- passing the same end to both
+                  would have the parent waiting on a message the child
+                  never actually delivers to that end (verified: this was
+                  the shape of the earlier bug, and it hung every Observe
+                  request, not only ones that reached the drain loop). *)
                let observe_sock =
-                 match req.Exec_ssh_protocol.mode with
-                 | Observe when user_notif_supported () ->
-                   (try
-                      let a, _b = Unix.socketpair Unix.PF_UNIX Unix.SOCK_STREAM 0 in
-                      Unix.set_close_on_exec a;
-                      a
-                    with Unix.Unix_error _ -> Unix.stdin)
-                 | _ -> Unix.stdin
+                 if observe_notif_active
+                 then (
+                   try Some (Unix.socketpair Unix.PF_UNIX Unix.SOCK_STREAM 0)
+                   with Unix.Unix_error _ -> None)
+                 else None
                in
-               try spawn ~before_exec ~observe_sock ~argv ~env ~cwd () with
+               try spawn ~before_exec ?observe_sock ~argv ~env ~cwd () with
                | exn ->
-                 (if observe_sock <> Unix.stdin
-                  then
-                    try Unix.close observe_sock with
-                    | Unix.Unix_error _ -> ());
+                 (match observe_sock with
+                  | Some (child_end, parent_end) ->
+                    (try Unix.close child_end with
+                     | Unix.Unix_error _ -> ());
+                    (try Unix.close parent_end with
+                     | Unix.Unix_error _ -> ())
+                  | None -> ());
                  cleanup ();
                  shim_fail ~boundary:Child_ack_unavailable
                    (Printf.sprintf "%s: spawn failed: %s" shim_error_code

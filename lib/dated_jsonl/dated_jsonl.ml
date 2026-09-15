@@ -672,25 +672,33 @@ let tail_lines rows = List.map (fun row -> row.line) rows
    section 8.8). *)
 let off_fiber f = Domain_pool_ref.submit_io_or_inline f
 
+(* A file removed between the existence check and the open is a missing file,
+   which reads as an empty tail. *)
 let load_tail_rows_inline path ~max_lines =
   if max_lines <= 0 || not (Fs_compat.file_exists path)
   then []
   else
-    let input = open_in_bin path in
-    Fun.protect
-      ~finally:(fun () -> close_in_noerr input)
-      (fun () -> load_tail_rows_from_channel input ~max_lines)
+    match open_in_bin path with
+    | exception Sys_error _ when not (Fs_compat.file_exists path) -> []
+    | input ->
+      Fun.protect
+        ~finally:(fun () -> close_in_noerr input)
+        (fun () -> load_tail_rows_from_channel input ~max_lines)
 ;;
 
 let load_tail_lines_inline path ~max_lines =
   tail_lines (load_tail_rows_inline path ~max_lines)
 ;;
 
-let load_tail_rows path ~max_lines =
-  off_fiber (fun () -> load_tail_rows_inline path ~max_lines)
+let map_tail_rows path ~max_lines ~f =
+  off_fiber (fun () -> List.map f (load_tail_rows_inline path ~max_lines))
 ;;
 
-let load_tail_lines path ~max_lines = tail_lines (load_tail_rows path ~max_lines)
+let load_tail_rows path ~max_lines = map_tail_rows path ~max_lines ~f:Fun.id
+
+let load_tail_lines path ~max_lines =
+  map_tail_rows path ~max_lines ~f:(fun row -> row.line)
+;;
 
 let load_tail_lines_result_inline path ~max_lines =
   if max_lines <= 0

@@ -1070,24 +1070,19 @@ let journal_entry_of_json = function
 (* The journal only grows (10-13 MB on live keepers) and a reader asks for its
    last 20-500 lines. Reading the whole file and splitting every line on each
    dashboard or TUI request put that copy and split on the scheduler domain;
-   the tail is read backwards on the pool and only the returned lines are
-   parsed, also on the pool. Each line is named by the byte offset it starts
-   at, which does not depend on the window it was read in. *)
+   the tail is read backwards and only the returned lines are parsed, both in
+   one pool job. Each line is named by the byte offset it starts at, which
+   does not depend on the window it was read in. *)
 let read_journal_tail_indexed ~keepers_dir ~keeper_id ~limit =
   if limit <= 0
   then []
   else (
     let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
-    let rows = Dated_jsonl.load_tail_rows path ~max_lines:limit in
-    Domain_pool_ref.submit_cpu_or_inline (fun () ->
-      List.map
-        (fun { Dated_jsonl.offset; line } ->
-           match Yojson.Safe.from_string line with
-           | json -> offset, journal_entry_of_json json
-           | exception Yojson.Json_error message ->
-             ( offset
-             , Error (Printf.sprintf "journal line is not valid JSON: %s" message) ))
-        rows))
+    Dated_jsonl.map_tail_rows path ~max_lines:limit ~f:(fun { Dated_jsonl.offset; line } ->
+      match Yojson.Safe.from_string line with
+      | json -> offset, journal_entry_of_json json
+      | exception Yojson.Json_error message ->
+        offset, Error (Printf.sprintf "journal line is not valid JSON: %s" message)))
 ;;
 
 let read_journal_tail ~keepers_dir ~keeper_id ~limit =

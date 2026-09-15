@@ -445,6 +445,60 @@ let test_unknown_language_is_typed () =
   | Lsp.Known_lang lang -> Alcotest.fail ("unexpected known lang: " ^ lang)
 ;;
 
+(* #36432: an initialize answer whose last byte and the timeout arrive in the
+   same scheduler pass. The mock clock queues the watcher's wake ahead of the
+   work's on purpose -- [set_time] past the deadline, then resolve -- so an
+   answer that had arrived must not be reported as a timeout.
+   [ensure_lsp_process] cannot be driven without spawning a server, so this
+   exercises the extracted [await_initialize_under_deadline] seam it calls. *)
+let test_initialize_answer_that_arrived_as_window_closed_stands () =
+  Eio_mock.Backend.run
+  @@ fun () ->
+  let clock = Eio_mock.Clock.make () in
+  Eio_mock.Clock.set_time clock 0.0;
+  Eio.Switch.run
+  @@ fun sw ->
+  let answer, arrive = Eio.Promise.create () in
+  let work =
+    Eio.Fiber.fork_promise ~sw (fun () ->
+      Lsp.await_initialize_under_deadline
+        ~clock:(clock :> float Eio.Time.clock_ty Eio.Resource.t)
+        ~timeout_sec:1.0
+        ~lang_id:"ocaml"
+        answer)
+  in
+  Eio_mock.Clock.set_time clock 1.0;
+  Eio.Promise.resolve arrive "initialized";
+  match Eio.Promise.await_exn work with
+  | Ok answer ->
+    check string "the initialize answer that arrived stands" "initialized" answer
+  | Error _ ->
+    fail "an initialize answer that arrived as the window closed was dropped as a timeout"
+;;
+
+(* The ordinary expiry: nothing answers, and the deadline ends the wait. *)
+let test_initialize_that_never_answers_is_a_timeout () =
+  Eio_mock.Backend.run
+  @@ fun () ->
+  let clock = Eio_mock.Clock.make () in
+  Eio_mock.Clock.set_time clock 0.0;
+  Eio.Switch.run
+  @@ fun sw ->
+  let never : string Eio.Promise.t = fst (Eio.Promise.create ()) in
+  let work =
+    Eio.Fiber.fork_promise ~sw (fun () ->
+      Lsp.await_initialize_under_deadline
+        ~clock:(clock :> float Eio.Time.clock_ty Eio.Resource.t)
+        ~timeout_sec:1.0
+        ~lang_id:"ocaml"
+        never)
+  in
+  Eio_mock.Clock.set_time clock 1.0;
+  match Eio.Promise.await_exn work with
+  | Error _ -> ()
+  | Ok _ -> fail "nothing answered, yet the wait did not end as a timeout"
+;;
+
 let () =
   run
     "server_ide_lsp_proxy"
@@ -489,6 +543,16 @@ let () =
         ; test_case "relayed table drives the decision" `Quick
             test_relayed_table_drives_the_decision
         ; test_case "unknown language is typed" `Quick test_unknown_language_is_typed
+        ] )
+    ; ( "lsp_initialize_deadline"
+      , [ test_case
+            "an initialize answer that arrived as the window closed stands"
+            `Quick
+            test_initialize_answer_that_arrived_as_window_closed_stands
+        ; test_case
+            "an initialize that never answers is a timeout"
+            `Quick
+            test_initialize_that_never_answers_is_a_timeout
         ] )
     ]
 ;;

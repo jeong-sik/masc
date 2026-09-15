@@ -27,10 +27,9 @@ val tool_info_to_json : tool_info -> Yojson.Safe.t
 
 (** {1 Dashboard summary} *)
 
-(** [summary_report ?runtime_metrics ()] aggregates call counts and latency
+(** [summary_report ()] aggregates call counts and latency
     from {!Tool_metrics}, plus never-called tools, visibility distribution,
-    dispatch registration counts, and optional runtime metrics for the
-    dashboard. [catalog_usage] partitions called names by current visible,
+    and dispatch registration counts for the dashboard. [catalog_usage] partitions called names by current visible,
     hidden and outside-catalog membership. Only the visible partition shares
     a denominator with [never_called]. [metrics_source] identifies the
     retained metrics plus current process snapshot, without claiming log health.
@@ -49,14 +48,13 @@ val tool_info_to_json : tool_info -> Yojson.Safe.t
     names the visible tools absent from the observed metrics snapshot, which [never_called_count]
     previously only counted. *)
 val summary_report :
-  ?runtime_metrics:(unit -> Yojson.Safe.t) ->
   ?public_names:(string -> string list) ->
   unit ->
   Yojson.Safe.t
 (** [public_names internal] is the public names one internal tool is offered
-    under, and it arrives as an argument for the reason [runtime_metrics]
-    does: which names a Keeper's descriptor set projects is the Keeper
-    domain's fact, and a tool surface module may not reach for it (RFC-0194).
+    under, and it arrives as an argument: which names a Keeper's descriptor
+    set projects is the Keeper domain's fact, and a tool surface module may
+    not reach for it (RFC-0194).
     The server is above both and passes it.
 
     A list rather than one name, because a descriptor set can project one

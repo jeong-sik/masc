@@ -31,6 +31,13 @@ stops the recorded driver before starting its own; a pid that now runs another
 program is left alone. The driver's output is in
 `.masc/browser-lane/geckodriver.log`.
 
+The driver creates every browser profile under `.masc/browser-lane/profiles`.
+A browser that crashes can relaunch itself with no parent and in its own
+process group, out of reach of the driver's group stop, but it keeps its
+`-profile` argument. So on release, and again before a new driver starts, the
+server stops every process whose command uses a profile under that directory,
+then clears the directory at start once none remains.
+
 The driver is started with `--websocket-port 0`, so the OS allocates the BiDi
 port and the drivers of two workspaces never meet on the default 9222. See
 Mozilla's [geckodriver flags](https://firefox-source-docs.mozilla.org/testing/geckodriver/Flags.html).

@@ -1,6 +1,6 @@
 (* The official-client idle window keeps a line that arrived as it passed.
 
-   [Runtime_official_client_json.Make(E).with_optional_timeout] bounds every
+   [Runtime_official_client_json.Make(E).with_idle_timeout] bounds every
    read of the claude code, codex app-server and antigravity lanes. It raced
    the read against a timer with [Eio.Time.with_timeout], which keeps
    whichever arm finished first: a line that arrived as the window passed
@@ -26,7 +26,7 @@ let test_a_line_that_arrived_as_the_window_passed_is_the_line () =
   let line, arrive = Eio.Promise.create () in
   let read =
     Eio.Fiber.fork_promise ~sw (fun () ->
-      Shared_json.with_optional_timeout clock (Some window_s) (fun () -> Eio.Promise.await line))
+      Shared_json.with_idle_timeout clock window_s (fun () -> Eio.Promise.await line))
   in
   Eio_mock.Clock.set_time clock window_s;
   Eio.Promise.resolve arrive {|{"type":"result"}|};
@@ -47,20 +47,13 @@ let test_a_read_nothing_answers_is_an_idle_timeout () =
   let never, _ = Eio.Promise.create () in
   let read =
     Eio.Fiber.fork_promise ~sw (fun () ->
-      Shared_json.with_optional_timeout clock (Some window_s) (fun () -> Eio.Promise.await never))
+      Shared_json.with_idle_timeout clock window_s (fun () -> Eio.Promise.await never))
   in
   Eio_mock.Clock.set_time clock window_s;
   match Eio.Promise.await read with
   | Error (Shared_json.Idle_timeout seconds) -> check (float 0.0) "the window it names" window_s seconds
   | Ok () -> fail "nothing arrived, yet the read did not end as an idle timeout"
   | Error exn -> raise exn
-;;
-
-let test_no_window_is_no_wait () =
-  Eio_mock.Backend.run
-  @@ fun () ->
-  let clock = Eio_mock.Clock.make () in
-  check string "the read runs as it is" "line" (Shared_json.with_optional_timeout clock None (fun () -> "line"))
 ;;
 
 let () =
@@ -75,7 +68,6 @@ let () =
             "a read nothing answers is an idle timeout"
             `Quick
             test_a_read_nothing_answers_is_an_idle_timeout
-        ; test_case "no window is no wait" `Quick test_no_window_is_no_wait
         ] )
     ]
 ;;

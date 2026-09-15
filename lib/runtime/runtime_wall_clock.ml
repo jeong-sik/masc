@@ -30,10 +30,10 @@ let expired t = remaining t <= 0.0
 
 (** Cap a per-operation idle window so an in-flight read or write cannot
     outlive the ceiling by up to one idle window. [None] (no idle deadline
-    requested) still yields the remaining budget: the ceiling is always a
-    deadline, never a request. *)
-let cap_window t (window_s : float option) : float option =
+    requested) is the remaining budget: the ceiling is always a deadline,
+    never a request, so the window handed on is always a number. *)
+let cap_window t (window_s : float option) : float =
   match window_s with
-  | Some window_s -> Some (Float.min window_s (remaining t))
-  | None -> Some (remaining t)
+  | Some window_s -> Float.min window_s (remaining t)
+  | None -> remaining t
 ;;

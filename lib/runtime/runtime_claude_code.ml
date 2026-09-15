@@ -1536,7 +1536,7 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
       |> Runtime_wall_clock.cap_window wall_clock
     in
     let send json =
-      with_optional_timeout clock (current_timeout_s ()) (fun () ->
+      with_idle_timeout clock (current_timeout_s ()) (fun () ->
         Eio.Flow.copy_string (Yojson.Safe.to_string json) stdin_w;
         Eio.Flow.copy_string "\n" stdin_w)
     in
@@ -1550,7 +1550,7 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
       else
       let timeout_s = current_timeout_s () in
       try
-        with_optional_timeout clock timeout_s (fun () ->
+        with_idle_timeout clock timeout_s (fun () ->
           Eio.Buf_read.line reader)
         |> parse_wire_line
       with
@@ -1573,7 +1573,7 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
       ~finally:(fun () -> terminate_spawned_process ~clock proc stdin_w)
       (fun () ->
         let with_admission_timeout callback =
-          with_optional_timeout clock (Some config.admission_timeout_s) callback
+          with_idle_timeout clock config.admission_timeout_s callback
         in
         run_protocol
           { send; receive }
@@ -1700,9 +1700,8 @@ let bounded_subscription_probe_config
 
 let probe_subscription ~mgr ~clock ~cwd config =
   let* () = validate_process_config config in
-  let timeout_s = Some config.admission_timeout_s in
   try
-    with_optional_timeout clock timeout_s (fun () ->
+    with_idle_timeout clock config.admission_timeout_s (fun () ->
       read_subscription ~mgr ~cwd config)
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn

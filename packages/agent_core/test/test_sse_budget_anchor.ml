@@ -7,8 +7,9 @@
     fields, unknown field names, and bare blank dispatch delimiters, any of
     which a provider could otherwise emit just under each budget to hold a
     stream open without ever producing an event. Where the budget ends, a line
-    that landed as it closed is read, and one the flow hands over after it
-    closed is not.
+    that landed as it closed is read, so is one whose bytes were already in
+    hand when it closed, and one the read had to wait for after it closed is
+    not.
 
     These tests drive a mock clock from inside the mock flow's read, so they
     assert the deadline arithmetic itself with no wall-clock sleeping. *)
@@ -252,7 +253,14 @@ type arrival =
         lands in that same pass: the budget's wake-up is queued first and the
         read's behind it *)
   | At_once of string
-    (** the flow hands the chunk over the moment the read asks *)
+    (** the flow hands the chunk over the moment the read asks, with no
+        waiting: in production those are bytes that had already arrived and
+        were sitting in one of the buffers between the socket and this
+        reader *)
+  | Once_the_read_waited_past_the_budget of string
+    (** the read waits, the budget closes and cancels it, and the flow
+        completes the read anyway: what an io_uring read does when the kernel
+        had already been asked for the bytes *)
 
 let output_is_out data =
   if String.equal data "out" then Http_client.Output else Http_client.Prelude
@@ -284,6 +292,13 @@ let read_sse_arriving arrivals =
     | After_a_gap chunk -> `Run (emit_after_gap ~clock ~now chunk)
     | As_the_first_event_budget_closes chunk -> `Run (lands_as_the_budget_closes chunk)
     | At_once chunk -> `Return chunk
+    | Once_the_read_waited_past_the_budget chunk ->
+      `Run
+        (fun () ->
+          (* The yield lets the closed budget cancel this read; the read
+             completes regardless, as a submitted one does. *)
+          Eio.Cancel.protect Eio.Fiber.yield;
+          chunk)
   in
   let flow = Eio_mock.Flow.make "sse-arrival" in
   Eio_mock.Flow.on_read flow (List.map action arrivals @ [ `Raise End_of_file ]);
@@ -327,13 +342,41 @@ let test_a_first_token_that_lands_as_the_budget_closes_is_delivered () =
       (List.length delivered)
 ;;
 
-let test_a_line_handed_over_after_the_budget_closed_is_not_read () =
+let test_a_line_the_read_waited_for_past_the_budget_is_not_read () =
   (* A [Prelude] "ping" lands as the budget closes and stands, delimiter and
-     all. The flow hands over the next chunk at once, but the budget had
-     closed before the read asked for it: the budget ends the stream there
-     and "out" is never delivered. A reader that took whatever the flow gave
-     after the budget closed would read on for as long as a provider kept
-     sending. *)
+     all. The next read starts past the close and has to wait for the flow;
+     the chunk completes anyway, as a submitted read does. The budget ends
+     the stream there and "out" is never delivered. A reader that took
+     whatever the flow completed after the budget closed would read on for as
+     long as a provider kept sending. *)
+  match
+    read_sse_arriving
+      [ After_a_gap "data: created\n\n"
+      ; As_the_first_event_budget_closes "data: ping\n\n"
+      ; Once_the_read_waited_past_the_budget "data: out\n\n"
+      ]
+  with
+  | Error (`Timed_out delivered) ->
+    check
+      (list (pair (option string) string))
+      "what landed by the close is delivered, and nothing the read waited for"
+      [ None, "created"; None, "ping" ]
+      delivered
+  | Ok events ->
+    failf
+      "a line the read waited for past the first-event budget was read: ran to EOF with \
+       %d events"
+      (List.length events)
+;;
+
+let test_a_line_already_in_hand_when_the_budget_closed_is_read () =
+  (* The same stream, except the last chunk needs no waiting: the flow hands
+     it over the moment the read asks, which in production is a buffer
+     between the socket and this reader holding bytes that had already
+     arrived -- the response's opening chunk carrying the headers and the
+     first event together. Judging by bytes read rather than by waiting
+     dropped exactly this token, since this reader's own buffer is the last
+     of four and had not seen them yet. *)
   match
     read_sse_arriving
       [ After_a_gap "data: created\n\n"
@@ -341,17 +384,17 @@ let test_a_line_handed_over_after_the_budget_closed_is_not_read () =
       ; At_once "data: out\n\n"
       ]
   with
-  | Error (`Timed_out delivered) ->
+  | Ok events ->
     check
       (list (pair (option string) string))
-      "what landed by the close is delivered, and nothing after it"
-      [ None, "created"; None, "ping" ]
-      delivered
-  | Ok events ->
+      "the event already in hand is delivered"
+      [ None, "created"; None, "ping"; None, "out" ]
+      events
+  | Error (`Timed_out delivered) ->
     failf
-      "a line handed over after the first-event budget closed was read: ran to EOF with \
-       %d events"
-      (List.length events)
+      "an event already in the buffers when the budget closed was dropped after %d \
+       events"
+      (List.length delivered)
 ;;
 
 let () =
@@ -395,9 +438,13 @@ let () =
             `Quick
             test_a_first_token_that_lands_as_the_budget_closes_is_delivered
         ; test_case
-            "a line handed over after the budget closed is not read"
+            "a line the read waited for past the budget is not read"
             `Quick
-            test_a_line_handed_over_after_the_budget_closed_is_not_read
+            test_a_line_the_read_waited_for_past_the_budget_is_not_read
+        ; test_case
+            "a line already in hand when the budget closed is read"
+            `Quick
+            test_a_line_already_in_hand_when_the_budget_closed_is_read
         ] )
     ; ( "idle"
       , [ test_case

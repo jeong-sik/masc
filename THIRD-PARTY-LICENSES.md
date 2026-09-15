@@ -1,4 +1,4 @@
-# Third-party font notices
+# Third-party notices
 
 MASC source code is MIT-licensed. The bundled fonts retain their SIL Open Font
 License 1.1 and copyright notices. Complete upstream notice wording ships
@@ -16,3 +16,12 @@ The notices come from Google Fonts `ofl/<family>/OFL.txt`, checked against
 copyright metadata in the bundled fonts on 2026-09-08, with trailing whitespace
 normalized. Font subset filenames
 and CSS weights do not change their license.
+
+## Bundled Skill files
+
+Built-in Skills ship inside the binary and are installed into a workspace's Skill
+source. A file adapted from another project carries its notice in the same package.
+
+| File | Notice | Upstream |
+|---|---|---|
+| `skills/root-cause-first/references/root-cause-tracing.md` | [MIT](skills/root-cause-first/references/superpowers-LICENSE.txt), Copyright (c) 2025 Jesse Vincent | [obra/superpowers](https://github.com/obra/superpowers) `skills/systematic-debugging/root-cause-tracing.md` |

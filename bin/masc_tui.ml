@@ -841,7 +841,7 @@ let parse_args () =
     ("--refresh", Arg.Set_float refresh, "Refresh interval in seconds (default: 2)");
     ( "--base-path",
       Arg.Set_string base_path,
-      "Workspace/base path; .masc lives below it (default: MASC_BASE_PATH or cwd)" );
+      "Workspace/base path; .masc lives below it (default: MASC_BASE_PATH, then a cwd holding .masc/config, then the recorded default)" );
     ( "--base",
       Arg.Set_string base_path,
       "Alias for --base-path" );
@@ -855,13 +855,15 @@ let parse_args () =
 
   Arg.parse specs (fun _ -> ()) "masc-tui [OPTIONS]";
 
-  (* Resolve base path *)
+  (* The same order `masc start` boots in (RFC workspace-root-resolution), so
+     the screen and the server it starts or joins read one workspace. A cwd is
+     used only when it holds .masc/config; with none the TUI names the choices
+     instead of observing an empty directory. *)
   let base =
-    if !base_path <> "" then (
-      match Env_config_core.normalize_masc_base_path_input !base_path with
-      | "" -> Config_dir_resolver.base_path_or_cwd ()
-      | p -> p)
-    else Config_dir_resolver.base_path_or_cwd ()
+    let flag = if String.trim !base_path = "" then None else Some !base_path in
+    match Workspace_root.resolve_current ~flag with
+    | Ok workspace -> workspace.Workspace_root.root
+    | Error error -> prerr_endline (Workspace_root.error_message error); exit 1
   in
 
   let resolved_port = match Workspace_connection.resolve ~base_path:(Some base) ~cli:!port
@@ -16047,8 +16049,8 @@ description = "Describe the repeatable job this Skill performs."
 execution = "inline"
 
 [[compositions.nodes]]
-id = "clock"
-tool = "keeper_time_now"
+id = "lane"
+tool = "keeper_lane_status"
 [compositions.nodes.input]
 kind = "literal"
 value = {}

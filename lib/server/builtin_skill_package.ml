@@ -23,10 +23,22 @@ type ownership = Recorded | Untracked | Modified
 type inspection =
   | Missing
   | Present of { revision : string; bundled_revision : string; ownership : ownership }
-type request = Seed_missing | Automatic
-  | Replace_if_revisions of { installed_revision : string; bundled_revision : string }
-type outcome = Installed | Already_present | Current | Preserved of inspection
-  | Preserved_uninspectable of { reason : string } | Updated of { backup : string }
+type bundled_verdict =
+  | Install_missing
+  | Up_to_date
+  | Adopt_identical
+  | Adopt_with_release_permissions
+  | Permissions_pending of { revision : string }
+  | Replace_recorded of { backup : string }
+  | Replace_pending of { revision : string }
+  | Keep_modified of { revision : string }
+  | Keep_untracked_different of { revision : string }
+  | Keep_uninspectable of { reason : string }
+type retired_verdict =
+  | Retire_recorded of { backup : string option }
+  | Retire_pending of { revision : string option }
+  | Keep_retired_modified of { revision : string }
+  | Keep_retired_uninspectable of { reason : string }
 type error =
   | Invalid_path of string
   | Revision_conflict of inspection
@@ -34,6 +46,37 @@ type error =
   | Io_error of string
   | Published_but_unrecorded of { backup : string option; reason : string }
   | Exported_but_unsynced of { destination : string; reason : string }
+  | Retired_but_unrecorded of { backup : string; reason : string }
+type report =
+  | Bundled of { name : string; result : (bundled_verdict, error) result }
+  | Retired of { name : string; result : (retired_verdict, error) result }
+  | Unfinished of { path : string; result : (unit, error) result }
+type startup_reconciliation =
+  | Reconciled of report list
+  | Busy of { lock : string }
+type replacement = Replaced of { backup : string } | Already_current
+
+let skills_dirname = "skills"
+let state_dirname = "skill-packages"
+(* Two directories beside the receipts. The staging directory only ever holds
+   a tree that is being built or is about to be deleted, so whatever is in it
+   when an installation starts was left by an interrupted one. The backups
+   directory has one entry per package and receives a tree only through a
+   single rename or exchange of a complete, synced tree, so an entry there is
+   never partial. *)
+let staging_dirname = "staging"
+let backups_dirname = "previous"
+let lock_filename = "install.lock"
+(* A receipt's file name is the package name plus this suffix, and nothing
+   else in the receipt directory carries it: the staging and backups entries
+   are directories and atomic-write temporaries use their own shape. *)
+let receipt_suffix = ".sha256"
+(* The modes every published package has. They are part of the revision, so a
+   tree whose modes differ is a different tree. *)
+let release_directory_mode = 0o700
+let release_file_mode = 0o644
+let owner_only_file_mode = 0o600
+let installer_command = "masc init --skills-only --base-path BASE"
 
 let error_message = function
   | Invalid_path path -> "Skill package path is not an owned regular tree: " ^ path
@@ -50,6 +93,71 @@ let error_message = function
     "Skill package was exported to " ^ destination
     ^ " but its parent directory was not synced: " ^ reason
     ^ "; inspect the existing export before choosing a new destination"
+  | Retired_but_unrecorded { backup; reason } ->
+    "Retired Skill package was moved to " ^ backup
+    ^ " but its installation receipt was not removed: " ^ reason
+    ^ "; inspect that directory before restoring it"
+
+let review_hint name =
+  "review with masc skills-refresh " ^ name ^ " --base-path BASE"
+
+let report_to_string = function
+  | Bundled { name; result = Ok Install_missing } -> "installed builtin Skill " ^ name
+  | Bundled { name; result = Ok Up_to_date } -> "builtin Skill " ^ name ^ " is up to date"
+  | Bundled { name; result = Ok Adopt_identical } ->
+    "recorded builtin Skill " ^ name ^ " (installed files already match this release)"
+  | Bundled { name; result = Ok Adopt_with_release_permissions } ->
+    "recorded builtin Skill " ^ name
+    ^ " (installed files already matched this release; their permissions were set to the release's)"
+  | Bundled { name; result = Ok (Permissions_pending { revision }) } ->
+    "builtin Skill " ^ name
+    ^ " has this release's files with other permissions and no installation receipt (revision="
+    ^ revision ^ "); server start does not change installed Skills, " ^ installer_command
+    ^ " sets the release permissions and records it"
+  | Bundled { name; result = Ok (Replace_recorded { backup }) } ->
+    "updated builtin Skill " ^ name ^ " (previous package: " ^ backup ^ ")"
+  | Bundled { name; result = Ok (Replace_pending { revision }) } ->
+    "builtin Skill " ^ name
+    ^ " is unchanged since installation and differs from this release (revision=" ^ revision
+    ^ "); server start does not replace installed Skills, " ^ installer_command ^ " does"
+  | Bundled { name; result = Ok (Keep_modified { revision }) } ->
+    "kept Skill " ^ name ^ " (edited since installation, revision=" ^ revision ^ "; "
+    ^ review_hint name ^ ")"
+  | Bundled { name; result = Ok (Keep_untracked_different { revision }) } ->
+    "kept Skill " ^ name
+    ^ " (no installation receipt and its files differ from this release, revision="
+    ^ revision ^ "; " ^ review_hint name ^ ")"
+  | Bundled { name; result = Ok (Keep_uninspectable { reason }) } ->
+    "kept Skill " ^ name ^ " (cannot inspect package: " ^ reason ^ ")"
+  | Retired { name; result = Ok (Retire_recorded { backup = Some backup }) } ->
+    "removed builtin Skill " ^ name ^ " that this release no longer ships (previous package: "
+    ^ backup ^ ")"
+  | Retired { name; result = Ok (Retire_recorded { backup = None }) } ->
+    "removed the installation receipt of builtin Skill " ^ name
+    ^ " that this release no longer ships (its directory was already gone)"
+  | Retired { name; result = Ok (Retire_pending { revision = Some revision }) } ->
+    "builtin Skill " ^ name
+    ^ " is no longer shipped by this release and unchanged since installation (revision="
+    ^ revision ^ "); server start does not remove installed Skills, " ^ installer_command
+    ^ " moves it aside"
+  | Retired { name; result = Ok (Retire_pending { revision = None }) } ->
+    "builtin Skill " ^ name
+    ^ " is no longer shipped by this release and its directory is already gone; "
+    ^ installer_command ^ " removes its installation receipt"
+  | Retired { name; result = Ok (Keep_retired_modified { revision }) } ->
+    "kept Skill " ^ name ^ " that this release no longer ships (edited since installation, revision="
+    ^ revision ^ "; delete " ^ state_dirname ^ "/" ^ name ^ receipt_suffix
+    ^ " to keep it as your own Skill, or delete the Skill directory too)"
+  | Retired { name; result = Ok (Keep_retired_uninspectable { reason }) } ->
+    "kept Skill " ^ name ^ " that this release no longer ships (cannot inspect package: "
+    ^ reason ^ ")"
+  | Unfinished { path; result = Ok () } ->
+    "removed " ^ path ^ ", left by an interrupted Skill installation"
+  | Unfinished { path; result = Error error } ->
+    "could not remove " ^ path ^ ", left by an interrupted Skill installation: "
+    ^ error_message error ^ "; the next installation tries again"
+  | Bundled { name; result = Error error } | Retired { name; result = Error error } ->
+    "Skill " ^ name ^ " was not reconciled: " ^ error_message error
 
 exception Rejected of error
 
@@ -58,17 +166,32 @@ let protect action =
   | Rejected error -> Error error
   | (Unix.Unix_error _ | Sys_error _) as exn -> Error (Io_error (Printexc.to_string exn))
 
+(* A descriptor opened only to sync a directory or to hold the installer lock
+   carries no data, and the kernel releases the lock when the process exits.
+   Its close must not replace the outcome of the work it guarded: a raising
+   [Fun.protect] finalizer turns into [Fun.Finally_raised] and discards that
+   outcome, including changes already on disk. *)
+let close_quietly fd = try Unix.close fd with Unix.Unix_error _ -> ()
+
+(* Cleanup after a failure. The failure being raised is what the caller has
+   to see. A directory that stays behind in the staging directory is removed
+   and reported by the next installation; one staged beside an export
+   destination stays until the operator removes it. *)
+let remove_quietly directory =
+  match protect (fun () -> Fs_compat.remove_tree directory) with
+  | Ok () | Error _ -> ()
+
 let stat path =
   try Some (Unix.lstat path) with Unix.Unix_error (Unix.ENOENT, _, _) -> None
 
 let sync_dir path =
   let fd = Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 in
-  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd)
+  Fun.protect ~finally:(fun () -> close_quietly fd) (fun () -> Unix.fsync fd)
 
 let ensure_dir_with_sync ~sync_parent path =
   (match stat path with
    | None ->
-     (try Unix.mkdir path 0o700 with Unix.Unix_error (Unix.EEXIST, _, _) ->
+     (try Unix.mkdir path release_directory_mode with Unix.Unix_error (Unix.EEXIST, _, _) ->
        match stat path with
        | Some info when info.Unix.st_kind = Unix.S_DIR -> ()
        | None | Some _ -> raise (Rejected (Invalid_path path)))
@@ -96,12 +219,21 @@ let load_receipt ~root path =
 
 let hash content = Digestif.SHA256.(to_hex (digest_string content))
 
+type entry_kind = Directory | File
+type entry = { kind : entry_kind; path : string; mode : int; digest : string }
+
+let entry_kind_tag = function Directory -> "directory" | File -> "file"
+let release_mode = function Directory -> release_directory_mode | File -> release_file_mode
+
 (* Include directory entries and permissions: empty operator directories and
    chmod edits must not disappear merely because all file bytes still match. *)
 let revision entries =
-  entries |> List.sort compare |> fun entries ->
-  `List (List.map (fun (kind, path, mode, digest) ->
-    `List [ `String kind; `String path; `Int mode; `String digest ]) entries)
+  entries
+  |> List.map (fun { kind; path; mode; digest } -> entry_kind_tag kind, path, mode, digest)
+  |> List.sort compare
+  |> List.map (fun (kind, path, mode, digest) ->
+    `List [ `String kind; `String path; `Int mode; `String digest ])
+  |> (fun items -> `List items)
   |> Yojson.Safe.to_string |> hash
 
 let directory_entries files =
@@ -111,13 +243,14 @@ let directory_entries files =
   in
   List.fold_left (fun acc (path, _) -> parents path acc) [ "" ] files
   |> List.sort_uniq String.compare
-  |> List.map (fun path -> "directory", path, 0o700, "")
+  |> List.map (fun path ->
+    { kind = Directory; path; mode = release_mode Directory; digest = "" })
 
 let bundled_revision package =
   revision (directory_entries package.files @ List.map (fun (path, content) ->
-    "file", path, 0o644, hash content) package.files)
+    { kind = File; path; mode = release_mode File; digest = hash content }) package.files)
 
-let tree_revision ~root directory =
+let tree_entries ~root directory =
   match require_chain ~root directory with
   | Fs_compat.Owned_directory_missing -> None
   | Fs_compat.Owned_directory _ ->
@@ -130,23 +263,41 @@ let tree_revision ~root directory =
          | Fs_compat.Owned_directory _ -> ()
          | Fs_compat.Owned_directory_missing -> raise (Rejected (Invalid_path path)));
         let children = Sys.readdir path |> Array.to_list |> List.sort String.compare in
-        ("directory", rel, info.st_perm, "") :: List.concat_map (fun child ->
+        { kind = Directory; path = rel; mode = info.st_perm; digest = "" }
+        :: List.concat_map (fun child ->
           visit (if rel = "" then child else rel ^ "/" ^ child)) children
       | Unix.S_REG ->
         (* A byte-identical hard link still carries operator-owned sharing
            semantics that a distribution replacement cannot preserve. *)
         if info.st_nlink <> 1 then raise (Rejected (Invalid_path path));
         (match Fs_compat.sha256_owned_regular_file ~ownership_root:root path with
-         | Ok (Some digest) -> [ "file", rel, info.st_perm, digest ]
+         | Ok (Some digest) -> [ { kind = File; path = rel; mode = info.st_perm; digest } ]
          | Ok None | Error _ -> raise (Rejected (Invalid_path path)))
       | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK ->
         raise (Rejected (Invalid_path path))
     in
-    Some (revision (visit ""))
+    Some (visit "")
 
-type locations = { root : string; skills : string; state : string; target : string; receipt : string }
+let tree_revision ~root directory = Option.map revision (tree_entries ~root directory)
 
-let locations ~base_path package =
+type files_match = Same_tree | Same_files_other_permissions | Different_files
+
+(* Compare with the release twice: as installed, and with every mode set to
+   the release's. The second tells a tree whose files and bytes are this
+   release's apart from one whose files differ. *)
+let files_match package ~revision:installed entries =
+  let bundled = bundled_revision package in
+  let with_release_modes =
+    List.map (fun entry -> { entry with mode = release_mode entry.kind }) entries in
+  match String.equal installed bundled, String.equal (revision with_release_modes) bundled with
+  | true, (true | false) -> Same_tree
+  | false, true -> Same_files_other_permissions
+  | false, false -> Different_files
+
+type locations =
+  { root : string; skills : string; state : string; staging : string; backups : string }
+
+let locations ~base_path =
   let base_path = Unix.realpath base_path in
   let deployment_root = Common.masc_dir_from_base_path ~base_path in
   (* The deployment root may intentionally point at a mounted volume.
@@ -162,40 +313,57 @@ let locations ~base_path package =
       (match stat physical with
        | Some info when info.Unix.st_kind = Unix.S_DIR -> physical
        | None | Some _ -> raise (Rejected (Invalid_path deployment_root))) in
-  let skills = Filename.concat root "skills" in
-  let state = Filename.concat root "skill-packages" in
-  { root; skills; state; target = Filename.concat skills package.name
-  ; receipt = Filename.concat state (package.name ^ ".sha256") }
+  let state = Filename.concat root state_dirname in
+  { root
+  ; skills = Filename.concat root skills_dirname
+  ; state
+  ; staging = Filename.concat state staging_dirname
+  ; backups = Filename.concat state backups_dirname }
+
+let package_target paths name = Filename.concat paths.skills name
+let backup_target paths name = Filename.concat paths.backups name
+let receipt_path paths name = Filename.concat paths.state (name ^ receipt_suffix)
+let receipt_content revision = revision ^ "\n"
+let lock_path paths = Filename.concat paths.state lock_filename
+
+(* The receipt is read first: an absent package still needs a valid receipt
+   slot, so an occupied non-regular receipt path is rejected before anything
+   is published. *)
+let observe_installed paths name =
+  let receipt = load_receipt ~root:paths.root (receipt_path paths name) in
+  let tree = tree_entries ~root:paths.root (package_target paths name) in
+  receipt, tree
+
+let ownership_of receipt revision =
+  match receipt with
+  | None -> Untracked
+  | Some recorded when String.equal recorded (receipt_content revision) -> Recorded
+  | Some _ -> Modified
 
 let observe paths package =
-  (* An absent package still needs a valid receipt slot. Reject occupied
-     non-regular receipt paths before publishing any active package. *)
-  let receipt = load_receipt ~root:paths.root paths.receipt in
-  match tree_revision ~root:paths.root paths.target with
-  | None -> Missing
-  | Some revision ->
-    let ownership = match receipt with
-      | None -> Untracked
-      | Some recorded when recorded = revision ^ "\n" -> Recorded
-      | Some _ -> Modified
-    in
-    Present { revision; bundled_revision = bundled_revision package; ownership }
+  match observe_installed paths package.name with
+  | _, None -> Missing
+  | receipt, Some entries ->
+    let revision = revision entries in
+    Present { revision; bundled_revision = bundled_revision package
+            ; ownership = ownership_of receipt revision }
 
 let inspect ~base_path package =
-  protect (fun () -> observe (locations ~base_path package) package)
+  protect (fun () -> observe (locations ~base_path) package)
 
 let write_file path content =
-  let fd = Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL; Unix.O_CLOEXEC ] 0o600 in
+  let fd = Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL; Unix.O_CLOEXEC ]
+      owner_only_file_mode in
   let channel = Unix.out_channel_of_descr fd in
   Fun.protect ~finally:(fun () -> close_out_noerr channel) (fun () ->
     output_string channel content;
     flush channel;
-    Unix.fchmod fd 0o644;
+    Unix.fchmod fd (release_mode File);
     Unix.fsync fd)
 
 let stage ~parent package =
   let directory = Filename.temp_dir ~temp_dir:parent (package.name ^ "-") "" in
-  try
+  let staged = protect (fun () ->
     List.iter (fun (rel, content) ->
       let rec create_parents path =
         if path <> directory then (create_parents (Filename.dirname path); ensure_dir path)
@@ -203,11 +371,12 @@ let stage ~parent package =
       let destination = Filename.concat directory rel in
       create_parents (Filename.dirname destination);
       write_file destination content) package.files;
-    directory_entries package.files |> List.rev |> List.iter (fun (_, rel, _, _) ->
-      sync_dir (if rel = "" then directory else Filename.concat directory rel));
-    sync_dir parent;
-    directory
-  with exn -> Fs_compat.remove_tree directory; raise exn
+    directory_entries package.files |> List.rev |> List.iter (fun { path; _ } ->
+      sync_dir (if path = "" then directory else Filename.concat directory path));
+    sync_dir parent) in
+  match staged with
+  | Ok () -> directory
+  | Error error -> remove_quietly directory; raise (Rejected error)
 
 let export_with_sync ~sync_parent ~destination package =
   protect (fun () ->
@@ -216,12 +385,13 @@ let export_with_sync ~sync_parent ~destination package =
     if not (valid_component leaf) then raise (Rejected (Invalid_path destination));
     let destination = Filename.concat parent leaf in
     let directory = stage ~parent package in
-    Fun.protect ~finally:(fun () -> Fs_compat.remove_tree directory) (fun () ->
-      Fs_compat.rename_noreplace directory destination;
-      match protect (fun () -> sync_parent parent) with
-      | Ok () -> ()
-      | Error error -> raise (Rejected (Exported_but_unsynced {
-          destination; reason = error_message error }))))
+    (match protect (fun () -> Fs_compat.rename_noreplace directory destination) with
+     | Ok () -> ()
+     | Error error -> remove_quietly directory; raise (Rejected error));
+    match protect (fun () -> sync_parent parent) with
+    | Ok () -> ()
+    | Error error -> raise (Rejected (Exported_but_unsynced {
+        destination; reason = error_message error })))
 
 let export = export_with_sync ~sync_parent:sync_dir
 
@@ -235,87 +405,396 @@ end
    installer on a different systhread in this process. No Eio effects inside. *)
 let installer_mutex = Mutex.create ()
 
-let with_lock paths action =
-  Mutex.lock installer_mutex;
-  Fun.protect ~finally:(fun () -> Mutex.unlock installer_mutex) (fun () ->
+let open_lock paths =
   ensure_dir paths.root;
-  ensure_dir paths.skills;
   ensure_dir paths.state;
-  let path = Filename.concat paths.state "install.lock" in
+  let path = lock_path paths in
   (match stat path with
    | None -> ()
    | Some info when info.Unix.st_kind = Unix.S_REG -> ()
    | Some _ -> raise (Rejected (Invalid_path path)));
-  let fd = Unix.openfile path [ Unix.O_RDWR; Unix.O_CREAT; Unix.O_CLOEXEC ] 0o600 in
-  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
+  let fd = Unix.openfile path [ Unix.O_RDWR; Unix.O_CREAT; Unix.O_CLOEXEC ] owner_only_file_mode in
+  let same_file = protect (fun () ->
     let descriptor = Unix.fstat fd in
     let named = Unix.lstat path in
     if named.st_kind <> Unix.S_REG || named.st_dev <> descriptor.st_dev
-       || named.st_ino <> descriptor.st_ino then raise (Rejected (Invalid_path path));
-    Unix.lockf fd Unix.F_LOCK 0;
-    action ()))
+       || named.st_ino <> descriptor.st_ino then raise (Rejected (Invalid_path path))) in
+  match same_file with
+  | Ok () -> fd
+  | Error error -> close_quietly fd; raise (Rejected error)
 
-let publish paths package before =
-  let directory = stage ~parent:paths.state package in
-  let published = ref false in
-  let backup = match before with Missing -> None | Present _ -> Some directory in
-  Fun.protect
-    ~finally:(fun () -> if not !published then Fs_compat.remove_tree directory)
-    (fun () ->
-      let current = observe paths package in
-      if current <> before then raise (Rejected (Revision_conflict current));
-      (match before with
-       | Missing -> Fs_compat.rename_noreplace directory paths.target
-       | Present _ -> Fs_compat.exchange_paths directory paths.target);
-      published := true;
-      let finish = protect (fun () ->
-        sync_dir paths.skills;
-        sync_dir paths.state;
-        let expected = bundled_revision package in
-        if tree_revision ~root:paths.root paths.target <> Some expected then
-          raise (Rejected (Invalid_path paths.target));
-        (match before with
-         | Missing -> ()
-         | Present { revision; _ } ->
-           if tree_revision ~root:paths.root directory <> Some revision then
-             raise (Rejected (Invalid_path directory)));
-        (* Receipt follows publication. A crash before this write preserves
-           the new tree as Modified on the next run, never authorizes a guess. *)
-        match Fs_compat.save_file_atomic_strict paths.receipt (expected ^ "\n") with
-        | Ok () -> ()
-        | Error reason -> raise (Rejected (Io_error reason))) in
-      match finish with
-      | Error error -> raise (Rejected (Published_but_unrecorded { backup; reason = error_message error }))
-      | Ok () -> match backup with None -> Installed | Some backup -> Updated { backup })
+let lock_is_free fd =
+  match Unix.lockf fd Unix.F_TLOCK 0 with
+  | () -> true
+  | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EACCES), _, _) -> false
 
-let install ~base_path ~request package =
+(* A person runs the installer, and what usually holds the lock is a server
+   start publishing a missing package, which ends on its own. So the installer
+   waits, and says once which lock it waits for. *)
+let with_installer_lock ~on_wait paths action =
+  let waited = not (Mutex.try_lock installer_mutex) in
+  if waited then (on_wait (lock_path paths); Mutex.lock installer_mutex);
+  Fun.protect ~finally:(fun () -> Mutex.unlock installer_mutex) (fun () ->
+    let fd = open_lock paths in
+    Fun.protect ~finally:(fun () -> close_quietly fd) (fun () ->
+      if not (lock_is_free fd) then begin
+        if not waited then on_wait (lock_path paths);
+        Unix.lockf fd Unix.F_LOCK 0
+      end;
+      action ()))
+
+(* Server start never waits: a stopped installer holding the lock must not
+   stop the server with it. [None] when either lock is held. *)
+let with_lock_if_free paths action =
+  match Mutex.try_lock installer_mutex with
+  | false -> None
+  | true ->
+    Fun.protect ~finally:(fun () -> Mutex.unlock installer_mutex) (fun () ->
+      let fd = open_lock paths in
+      Fun.protect ~finally:(fun () -> close_quietly fd) (fun () ->
+        match lock_is_free fd with
+        | false -> None
+        | true -> Some (action ())))
+
+let write_receipt paths name ~revision =
+  match Fs_compat.save_file_atomic_strict (receipt_path paths name) (receipt_content revision) with
+  | Ok () -> ()
+  | Error reason -> raise (Rejected (Io_error reason))
+
+type previous_tree = { backup : string; revision : string }
+
+(* Receipt follows publication and verification. A crash before this write
+   leaves the new tree with an absent or stale receipt; the next reconcile
+   compares that tree with the bundle byte for byte and never guesses. *)
+let record_publication paths package ~previous =
+  let target = package_target paths package.name in
+  let recorded = protect (fun () ->
+    sync_dir paths.skills;
+    let expected = bundled_revision package in
+    if tree_revision ~root:paths.root target <> Some expected then
+      raise (Rejected (Invalid_path target));
+    (match previous with
+     | None -> ()
+     | Some { backup; revision } ->
+       sync_dir paths.backups;
+       if tree_revision ~root:paths.root backup <> Some revision then
+         raise (Rejected (Invalid_path backup)));
+    write_receipt paths package.name ~revision:expected) in
+  match recorded with
+  | Ok () -> ()
+  | Error error ->
+    let backup = match previous with None -> None | Some { backup; _ } -> Some backup in
+    raise (Rejected (Published_but_unrecorded { backup; reason = error_message error }))
+
+let require_unchanged paths package before =
+  let current = observe paths package in
+  if current <> before then raise (Rejected (Revision_conflict current))
+
+let publish_missing paths package =
+  ensure_dir paths.skills;
+  ensure_dir paths.staging;
+  let directory = stage ~parent:paths.staging package in
+  (match protect (fun () ->
+     require_unchanged paths package Missing;
+     Fs_compat.rename_noreplace directory (package_target paths package.name)) with
+   | Ok () -> ()
+   | Error error -> remove_quietly directory; raise (Rejected error));
+  record_publication paths package ~previous:None
+
+type earlier_backup = No_earlier_backup | Earlier_backup_in_staging
+
+(* The staged release first takes the package's backup entry, then trades
+   places with the installed tree in one exchange. The installed tree is never
+   in the staging directory, which the next installation empties: interrupted
+   before the exchange, the Skill source is unchanged and the backup entry
+   holds a copy of the release being installed; after it, both trees are where
+   they belong. The tree an earlier replacement kept there comes back into
+   staging and is deleted. Returns the backup entry. *)
+let publish_over paths package ~revision ~ownership =
+  ensure_dir paths.staging;
+  ensure_dir paths.backups;
+  let target = package_target paths package.name in
+  let backup = backup_target paths package.name in
+  let directory = stage ~parent:paths.staging package in
+  let earlier =
+    match protect (fun () ->
+      require_unchanged paths package
+        (Present { revision; bundled_revision = bundled_revision package; ownership });
+      match stat backup with
+      | None -> Fs_compat.rename_noreplace directory backup; No_earlier_backup
+      | Some _ -> Fs_compat.exchange_paths directory backup; Earlier_backup_in_staging) with
+    | Ok earlier -> earlier
+    | Error error -> remove_quietly directory; raise (Rejected error)
+  in
+  (match protect (fun () -> Fs_compat.exchange_paths backup target) with
+   | Ok () -> ()
+   | Error error ->
+     (* The Skill source is as it was. Put the earlier backup back; if that
+        fails too, it stays in staging until the next installation. *)
+     let restored = protect (fun () ->
+       match earlier with
+       | No_earlier_backup -> Fs_compat.rename_noreplace backup directory
+       | Earlier_backup_in_staging -> Fs_compat.exchange_paths directory backup) in
+     (match restored with
+      | Ok () -> remove_quietly directory
+      | Error _ -> ());
+     raise (Rejected error));
+  (match earlier with
+   | No_earlier_backup -> ()
+   | Earlier_backup_in_staging -> remove_quietly directory);
+  record_publication paths package ~previous:(Some { backup; revision });
+  backup
+
+(* Files and bytes already equal this release; only modes differ. Each entry
+   is checked to still be the kind it was observed as right before its mode
+   changes, and the whole tree is compared with the release before the receipt
+   is written. *)
+let set_release_permissions paths package ~revision ~entries =
+  require_unchanged paths package
+    (Present { revision; bundled_revision = bundled_revision package; ownership = Untracked });
+  let target = package_target paths package.name in
+  List.iter (fun { kind; path; mode = _; digest = _ } ->
+    let absolute = if path = "" then target else Filename.concat target path in
+    match kind, (Unix.lstat absolute).Unix.st_kind with
+    | Directory, Unix.S_DIR | File, Unix.S_REG -> Unix.chmod absolute (release_mode kind)
+    | Directory, (Unix.S_REG | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK)
+    | File, (Unix.S_DIR | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK) ->
+      raise (Rejected (Invalid_path absolute))) entries;
+  let expected = bundled_revision package in
+  if tree_revision ~root:paths.root target <> Some expected then
+    raise (Rejected (Revision_conflict (observe paths package)));
+  write_receipt paths package.name ~revision:expected
+
+(* Move a recorded tree out of the Skill source into the package's backup
+   entry. An earlier backup first moves into staging, so the entry is free for
+   a no-replace rename; if the move out of the Skill source fails, it is put
+   back. The receipt goes last, so a crash leaves a receipt without a tree,
+   which the next installation removes. *)
+let retire paths name ~revision =
+  ensure_dir paths.staging;
+  ensure_dir paths.backups;
+  let target = package_target paths name in
+  let backup = backup_target paths name in
+  let holder = Filename.temp_dir ~temp_dir:paths.staging (name ^ "-") "" in
+  let earlier_path = Filename.concat holder name in
+  let earlier =
+    match protect (fun () ->
+      match stat backup with
+      | None -> No_earlier_backup
+      | Some _ -> Fs_compat.rename_noreplace backup earlier_path; Earlier_backup_in_staging) with
+    | Ok earlier -> earlier
+    | Error error -> remove_quietly holder; raise (Rejected error)
+  in
+  (match protect (fun () -> Fs_compat.rename_noreplace target backup) with
+   | Ok () -> ()
+   | Error error ->
+     let restored = protect (fun () ->
+       match earlier with
+       | No_earlier_backup -> ()
+       | Earlier_backup_in_staging -> Fs_compat.rename_noreplace earlier_path backup) in
+     (match restored with
+      | Ok () -> remove_quietly holder
+      | Error _ -> ());
+     raise (Rejected error));
+  remove_quietly holder;
+  let recorded = protect (fun () ->
+    sync_dir paths.skills;
+    sync_dir paths.backups;
+    if tree_revision ~root:paths.root backup <> Some revision then
+      raise (Rejected (Invalid_path backup));
+    Unix.unlink (receipt_path paths name);
+    sync_dir paths.state) in
+  match recorded with
+  | Ok () -> Retire_recorded { backup = Some backup }
+  | Error error ->
+    raise (Rejected (Retired_but_unrecorded { backup; reason = error_message error }))
+
+let remove_receipt paths name =
+  Unix.unlink (receipt_path paths name);
+  sync_dir paths.state;
+  Retire_recorded { backup = None }
+
+type authority = Startup | Installer
+
+type bundled_step =
+  | Settled of bundled_verdict
+  | Publish
+  | Record of { revision : string }
+  | Record_with_release_permissions of { revision : string; entries : entry list }
+  | Exchange of { revision : string }
+
+type retired_step =
+  | Settled_retired of retired_verdict
+  | Remove_receipt
+  | Move_aside of { revision : string }
+
+(* The one judgement of an installed package. [authority] decides only whether
+   a change to an installed tree runs now or is reported as pending. Server
+   start publishes missing packages and writes receipts for trees that already
+   equal its release, and nothing else: binaries with different packages start
+   against the same base path, and each would undo the other on every start. *)
+let bundled_step ~authority paths package =
+  match protect (fun () -> observe_installed paths package.name) with
+  | Error ((Invalid_path _ | Io_error _) as error) ->
+    Settled (Keep_uninspectable { reason = error_message error })
+  | Error ((Revision_conflict _ | Bundled_revision_conflict _ | Published_but_unrecorded _
+           | Exported_but_unsynced _ | Retired_but_unrecorded _) as error) ->
+    raise (Rejected error)
+  | Ok (_, None) -> Publish
+  | Ok (receipt, Some entries) ->
+    let revision = revision entries in
+    match ownership_of receipt revision, files_match package ~revision entries, authority with
+    | Recorded, Same_tree, (Startup | Installer) -> Settled Up_to_date
+    | (Untracked | Modified), Same_tree, (Startup | Installer) -> Record { revision }
+    | Untracked, Same_files_other_permissions, Installer ->
+      Record_with_release_permissions { revision; entries }
+    | Untracked, Same_files_other_permissions, Startup ->
+      Settled (Permissions_pending { revision })
+    | Recorded, (Same_files_other_permissions | Different_files), Installer -> Exchange { revision }
+    | Recorded, (Same_files_other_permissions | Different_files), Startup ->
+      Settled (Replace_pending { revision })
+    | Modified, (Same_files_other_permissions | Different_files), (Startup | Installer) ->
+      Settled (Keep_modified { revision })
+    | Untracked, Different_files, (Startup | Installer) ->
+      Settled (Keep_untracked_different { revision })
+
+(* [None] when the receipt is gone by the time it is read: the name then has
+   no installation record left to reconcile. *)
+let retired_step ~authority paths name =
+  match protect (fun () -> observe_installed paths name) with
+  | Error ((Invalid_path _ | Io_error _) as error) ->
+    Some (Ok (Settled_retired (Keep_retired_uninspectable { reason = error_message error })))
+  | Error ((Revision_conflict _ | Bundled_revision_conflict _ | Published_but_unrecorded _
+           | Exported_but_unsynced _ | Retired_but_unrecorded _) as error) ->
+    Some (Error error)
+  | Ok (None, _) -> None
+  | Ok (Some _, None) ->
+    Some (Ok (match authority with
+      | Installer -> Remove_receipt
+      | Startup -> Settled_retired (Retire_pending { revision = None })))
+  | Ok (Some recorded, Some entries) ->
+    let revision = revision entries in
+    Some (Ok (match String.equal recorded (receipt_content revision), authority with
+      | true, Installer -> Move_aside { revision }
+      | true, Startup -> Settled_retired (Retire_pending { revision = Some revision })
+      | false, (Startup | Installer) -> Settled_retired (Keep_retired_modified { revision })))
+
+(* Receipts are the only evidence that a Skill directory came from this
+   installer, so they are the only names retirement considers. *)
+let recorded_names paths =
+  match stat paths.state with
+  | None -> []
+  | Some info when info.Unix.st_kind = Unix.S_DIR ->
+    Sys.readdir paths.state
+    |> Array.to_list
+    |> List.sort String.compare
+    |> List.filter_map (fun entry ->
+      match Filename.chop_suffix_opt ~suffix:receipt_suffix entry with
+      | Some name when valid_component name -> Some name
+      | Some _ | None -> None)
+  | Some _ -> raise (Rejected (Invalid_path paths.state))
+
+type plan =
+  { bundled : (package * (bundled_step, error) result) list
+  ; retired : (string * (retired_step, error) result) list }
+
+(* Every package is judged before anything is changed. *)
+let plan ~authority paths ~recorded packages =
+  let shipped = List.map name packages in
+  { bundled = List.map (fun package ->
+      package, protect (fun () -> bundled_step ~authority paths package)) packages
+  ; retired = recorded
+      |> List.filter (fun recorded -> not (List.mem recorded shipped))
+      |> List.filter_map (fun name ->
+        Option.map (fun step -> name, step) (retired_step ~authority paths name)) }
+
+let changes_anything plan =
+  List.exists (fun (_, step) -> match step with
+    | Ok (Settled _) | Error _ -> false
+    | Ok (Publish | Record _ | Record_with_release_permissions _ | Exchange _) -> true) plan.bundled
+  || List.exists (fun (_, step) -> match step with
+    | Ok (Settled_retired _) | Error _ -> false
+    | Ok (Remove_receipt | Move_aside _) -> true) plan.retired
+
+let apply_bundled paths package = function
+  | Settled verdict -> verdict
+  | Publish -> publish_missing paths package; Install_missing
+  | Record { revision } -> write_receipt paths package.name ~revision; Adopt_identical
+  | Record_with_release_permissions { revision; entries } ->
+    set_release_permissions paths package ~revision ~entries; Adopt_with_release_permissions
+  | Exchange { revision } ->
+    Replace_recorded { backup = publish_over paths package ~revision ~ownership:Recorded }
+
+let apply_retired paths name = function
+  | Settled_retired verdict -> verdict
+  | Remove_receipt -> remove_receipt paths name
+  | Move_aside { revision } -> retire paths name ~revision
+
+let execute paths plan =
+  List.map (fun (package, step) ->
+    Bundled { name = package.name
+            ; result = Result.bind step (fun step ->
+                protect (fun () -> apply_bundled paths package step)) }) plan.bundled
+  @ List.map (fun (name, step) ->
+    Retired { name
+            ; result = Result.bind step (fun step ->
+                protect (fun () -> apply_retired paths name step)) }) plan.retired
+
+(* Only an installation that holds the lock gets here, so every entry is left
+   over from an interrupted one. *)
+let clear_staging paths =
+  match stat paths.staging with
+  | None -> []
+  | Some info when info.Unix.st_kind = Unix.S_DIR ->
+    Sys.readdir paths.staging
+    |> Array.to_list
+    |> List.sort String.compare
+    |> List.map (fun entry ->
+      let path = Filename.concat paths.staging entry in
+      Unfinished { path; result = protect (fun () -> Fs_compat.remove_tree path) })
+  | Some _ -> raise (Rejected (Invalid_path paths.staging))
+
+(* Judged without the lock first. A start whose packages are all settled
+   takes no lock and writes nothing, however long another installation holds
+   the lock. Otherwise the judgement is repeated under the lock, because the
+   first one may have been read while an installation was moving trees. *)
+let reconcile_at_startup ~base_path packages =
   protect (fun () ->
-    (match request with
-     | Seed_missing | Automatic -> Fs_compat.mkdir_p base_path
-     | Replace_if_revisions { bundled_revision = expected; _ } ->
-       let actual_revision = bundled_revision package in
-       if expected <> actual_revision then
-         raise (Rejected (Bundled_revision_conflict { actual_revision })));
-    let paths = locations ~base_path package in
-    match request, stat paths.target with
-    | Seed_missing, Some _ -> Already_present
-    | (Seed_missing, None) | ((Automatic | Replace_if_revisions _), _) ->
-    with_lock paths (fun () ->
-      match request, stat paths.target with
-      | Seed_missing, Some _ -> Already_present
-      | (Seed_missing, None) | ((Automatic | Replace_if_revisions _), _) ->
-      match request, protect (fun () -> observe paths package) with
-      | Automatic, Error ((Invalid_path _ | Io_error _) as error) ->
-        Preserved_uninspectable { reason = error_message error }
-      | _, Error error -> raise (Rejected error)
-      | _, Ok before ->
-      match request, before with
-      | Replace_if_revisions _, Missing -> raise (Rejected (Revision_conflict Missing))
-      | Replace_if_revisions { installed_revision = expected; _ }, Present { revision; _ } when expected <> revision ->
-        raise (Rejected (Revision_conflict before))
-      | (Seed_missing | Automatic), Missing -> publish paths package before
-      | Seed_missing, Present _ -> Already_present
-      | Automatic, Present { ownership = (Untracked | Modified); _ } -> Preserved before
-      | (Automatic | Replace_if_revisions _), Present { revision; bundled_revision; ownership = Recorded }
-        when revision = bundled_revision -> Current
-      | (Automatic | Replace_if_revisions _), Present _ -> publish paths package before))
+    Fs_compat.mkdir_p base_path;
+    let paths = locations ~base_path in
+    let unlocked = plan ~authority:Startup paths ~recorded:(recorded_names paths) packages in
+    match changes_anything unlocked with
+    | false -> Reconciled (execute paths unlocked)
+    | true ->
+      match with_lock_if_free paths (fun () ->
+        execute paths (plan ~authority:Startup paths ~recorded:(recorded_names paths) packages)) with
+      | Some reports -> Reconciled reports
+      | None -> Busy { lock = lock_path paths })
+
+let install ~on_wait ~base_path packages =
+  protect (fun () ->
+    Fs_compat.mkdir_p base_path;
+    let paths = locations ~base_path in
+    with_installer_lock ~on_wait paths (fun () ->
+      let recorded = recorded_names paths in
+      let unfinished = clear_staging paths in
+      unfinished @ execute paths (plan ~authority:Installer paths ~recorded packages)))
+
+let replace_reviewed ~on_wait ~base_path ~installed_revision ~bundled_revision:reviewed_bundle
+    package =
+  protect (fun () ->
+    let actual_revision = bundled_revision package in
+    if not (String.equal reviewed_bundle actual_revision) then
+      raise (Rejected (Bundled_revision_conflict { actual_revision }));
+    let paths = locations ~base_path in
+    with_installer_lock ~on_wait paths (fun () ->
+      match observe paths package with
+      | Missing -> raise (Rejected (Revision_conflict Missing))
+      | Present { revision; bundled_revision; ownership } as before ->
+        match String.equal installed_revision revision, ownership,
+              String.equal revision bundled_revision with
+        | false, (Recorded | Untracked | Modified), (true | false) ->
+          raise (Rejected (Revision_conflict before))
+        | true, Recorded, true -> Already_current
+        | true, (Untracked | Modified), true | true, (Recorded | Untracked | Modified), false ->
+          Replaced { backup = publish_over paths package ~revision ~ownership }))

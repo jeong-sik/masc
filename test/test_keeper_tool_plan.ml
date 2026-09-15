@@ -34,10 +34,10 @@ let descriptor name =
 
 let descriptors () = Descriptor.all_descriptors ()
 
-let time_descriptor_contract () =
+let lane_descriptor_contract () =
   Descriptor_contract.create
-    ~accepted_tool_name:"keeper_time_now"
-    (descriptor "keeper_time_now")
+    ~accepted_tool_name:"keeper_lane_status"
+    (descriptor "keeper_lane_status")
   |> Result.get_ok
 ;;
 
@@ -50,7 +50,7 @@ let replace_descriptor replacement =
 ;;
 
 let test_descriptor_contract_revalidates_unchanged_descriptor () =
-  let contract = time_descriptor_contract () in
+  let contract = lane_descriptor_contract () in
   match Descriptor_contract.revalidate ~descriptors:(descriptors ()) contract with
   | Ok current ->
     check string
@@ -61,7 +61,7 @@ let test_descriptor_contract_revalidates_unchanged_descriptor () =
 ;;
 
 let test_descriptor_contract_rejects_removed_descriptor () =
-  let contract = time_descriptor_contract () in
+  let contract = lane_descriptor_contract () in
   let descriptors =
     descriptors ()
     |> List.filter (fun descriptor ->
@@ -77,9 +77,9 @@ let test_descriptor_contract_rejects_removed_descriptor () =
 ;;
 
 let test_descriptor_contract_rejects_name_drift () =
-  let contract = time_descriptor_contract () in
-  let current = descriptor "keeper_time_now" in
-  let changed = { current with Descriptor.internal_name = "keeper_time_now_v2" } in
+  let contract = lane_descriptor_contract () in
+  let current = descriptor "keeper_lane_status" in
+  let changed = { current with Descriptor.internal_name = "keeper_lane_status_v2" } in
   match
     Descriptor_contract.revalidate ~descriptors:(replace_descriptor changed) contract
   with
@@ -89,8 +89,8 @@ let test_descriptor_contract_rejects_name_drift () =
 ;;
 
 let test_descriptor_contract_rejects_input_schema_drift () =
-  let contract = time_descriptor_contract () in
-  let current = descriptor "keeper_time_now" in
+  let contract = lane_descriptor_contract () in
+  let current = descriptor "keeper_lane_status" in
   let input_schema =
     `Assoc
       [ "type", `String "object"
@@ -109,8 +109,8 @@ let test_descriptor_contract_rejects_input_schema_drift () =
 ;;
 
 let test_descriptor_contract_rejects_output_drift () =
-  let contract = time_descriptor_contract () in
-  let current = descriptor "keeper_time_now" in
+  let contract = lane_descriptor_contract () in
+  let current = descriptor "keeper_lane_status" in
   let changed =
     { current with Descriptor.composable_output = Descriptor.Opaque_output }
   in
@@ -123,8 +123,8 @@ let test_descriptor_contract_rejects_output_drift () =
 ;;
 
 let test_descriptor_contract_rejects_execution_drift () =
-  let contract = time_descriptor_contract () in
-  let current = descriptor "keeper_time_now" in
+  let contract = lane_descriptor_contract () in
+  let current = descriptor "keeper_lane_status" in
   let changed =
     { current with Descriptor.execution = Descriptor.Ordinary Descriptor.Serial }
   in
@@ -157,29 +157,29 @@ let check_contract_round_trip label contract =
 ;;
 
 let test_descriptor_contract_round_trips () =
-  let current = descriptor "keeper_time_now" in
+  let current = descriptor "keeper_lane_status" in
   let preferred =
     { current with
       Descriptor.keeper_model_projection = Descriptor.Preferred_public_name
-    ; public_name = "Clock"
+    ; public_name = "LaneStatus"
     }
   in
   let internal =
     { current with
       Descriptor.keeper_model_projection = Descriptor.Internal_name
-    ; internal_name = "clock_internal"
+    ; internal_name = "lane_status_internal"
     }
   in
-  Descriptor_contract.create ~accepted_tool_name:"Clock" preferred
+  Descriptor_contract.create ~accepted_tool_name:"LaneStatus" preferred
   |> Result.get_ok
   |> check_contract_round_trip "preferred-name round-trip";
-  Descriptor_contract.create ~accepted_tool_name:"clock_internal" internal
+  Descriptor_contract.create ~accepted_tool_name:"lane_status_internal" internal
   |> Result.get_ok
   |> check_contract_round_trip "internal-name round-trip"
 ;;
 
 let test_descriptor_contract_rejects_impossible_projection_and_name () =
-  let encoded = Descriptor_contract.to_yojson (time_descriptor_contract ()) in
+  let encoded = Descriptor_contract.to_yojson (lane_descriptor_contract ()) in
   let projection name projected_by =
     encoded
     |> replace_contract_field "model_projection" (`String name)
@@ -194,13 +194,13 @@ let test_descriptor_contract_rejects_impossible_projection_and_name () =
        | Error _ -> fail "uncallable projection returned the wrong error"
        | Ok _ -> fail "uncallable projection decoded")
     [ projection "operator_only" `Null
-    ; projection "transport_alias" (`String "keeper_time_now")
+    ; projection "transport_alias" (`String "keeper_lane_status")
     ];
-  let current = descriptor "keeper_time_now" in
+  let current = descriptor "keeper_lane_status" in
   let operator_only =
     { current with Descriptor.keeper_model_projection = Descriptor.Operator_only }
   in
-  (match Descriptor_contract.create ~accepted_tool_name:"keeper_time_now" operator_only with
+  (match Descriptor_contract.create ~accepted_tool_name:"keeper_lane_status" operator_only with
    | Error
        (Descriptor_contract.Create_invariant_violation
           (Descriptor_contract.Uncallable_model_projection Descriptor.Operator_only)) -> ()
@@ -216,8 +216,8 @@ let test_descriptor_contract_rejects_impossible_projection_and_name () =
 ;;
 
 let test_descriptor_contract_rejects_invalid_input_schema () =
-  let current = descriptor "keeper_time_now" in
-  let encoded = Descriptor_contract.to_yojson (time_descriptor_contract ()) in
+  let current = descriptor "keeper_lane_status" in
+  let encoded = Descriptor_contract.to_yojson (lane_descriptor_contract ()) in
   let invalid_schemas =
     [ `Null
     ; `Assoc
@@ -237,7 +237,7 @@ let test_descriptor_contract_rejects_invalid_input_schema () =
         | Error _ -> fail "invalid decoded input schema returned the wrong error"
         | Ok _ -> fail "invalid input schema decoded");
        let changed = { current with Descriptor.input_schema } in
-       match Descriptor_contract.create ~accepted_tool_name:"keeper_time_now" changed with
+       match Descriptor_contract.create ~accepted_tool_name:"keeper_lane_status" changed with
        | Error
            (Descriptor_contract.Create_invariant_violation
               (Descriptor_contract.Invalid_model_input_schema (_ :: _))) -> ()
@@ -247,7 +247,7 @@ let test_descriptor_contract_rejects_invalid_input_schema () =
 ;;
 
 let test_descriptor_contract_rejects_noncanonical_output_schema () =
-  let current = descriptor "keeper_time_now" in
+  let current = descriptor "keeper_lane_status" in
   let duplicate_schema =
     `Assoc [ "type", `String "object"; "type", `String "object" ]
   in
@@ -257,7 +257,7 @@ let test_descriptor_contract_rejects_noncanonical_output_schema () =
         Descriptor.Json_output { schema = duplicate_schema }
     }
   in
-  match Descriptor_contract.create ~accepted_tool_name:"keeper_time_now" changed with
+  match Descriptor_contract.create ~accepted_tool_name:"keeper_lane_status" changed with
   | Error
       (Descriptor_contract.Non_canonical_schema
          { location = Descriptor_contract.Composable_output_schema
@@ -268,7 +268,7 @@ let test_descriptor_contract_rejects_noncanonical_output_schema () =
 ;;
 
 let test_descriptor_contract_codec_is_closed () =
-  let encoded = Descriptor_contract.to_yojson (time_descriptor_contract ()) in
+  let encoded = Descriptor_contract.to_yojson (lane_descriptor_contract ()) in
   let duplicate =
     match encoded with
     | `Assoc fields -> `Assoc (fields @ [ "execution", `String "serial" ])
@@ -379,7 +379,7 @@ let test_json_template_preserves_declared_structure () =
 
 let test_fanout_fanin_layers_are_dependency_owned () =
   let seed_id = node_id "seed" in
-  let seed = node ~id:"seed" ~tool_name:"keeper_time_now" literal_object in
+  let seed = node ~id:"seed" ~tool_name:"keeper_lane_status" literal_object in
   let left =
     node
       ~id:"left"
@@ -485,26 +485,38 @@ let test_tasks_list_output_schema_admits_the_page_cursor () =
 ;;
 
 let test_output_schema_and_consumer_input_are_enforced () =
-  let time_id = node_id "time" in
-  let time = node ~id:"time" ~tool_name:"keeper_time_now" literal_object in
+  let lane_id = node_id "lane" in
+  let lane = node ~id:"lane" ~tool_name:"keeper_lane_status" literal_object in
   let grep_input =
     object_template
       [ ( "pattern"
-        , Plan.Json_template.output ~node_id:time_id ~pointer:(pointer "/now_iso") )
+        , Plan.Json_template.output ~node_id:lane_id ~pointer:(pointer "/profile") )
       ]
   in
   let grep = node ~id:"grep" ~tool_name:"Grep" grep_input in
   let plan =
-    match Plan.create ~descriptors:(descriptors ()) [ time; grep ] with
+    match Plan.create ~descriptors:(descriptors ()) [ lane; grep ] with
     | Ok plan -> plan
     | Error _ -> fail "valid typed output reference was rejected"
   in
-  let time_value = Masc.Keeper_tool_in_process_runtime.handle_time_now ~args:(`Assoc []) in
+  (* The docker keeper's answer from Keeper_tool_lane_status.handle. The
+     dispatch runtime's composable output probe runs that producer itself. *)
+  let lane_value =
+    `Assoc
+      [ "profile", `String "docker"
+      ; "lane", `Null
+      ; "endpoint", `Null
+      ; "probe", `Null
+      ; "last_dispatch", `Null
+      ; "operator_action", `Null
+      ; "note", `String "no remote lane"
+      ]
+  in
   let run_id = Plan.Run_id.fresh () in
-  let time_output =
-    match Plan.validate_output plan ~run_id ~node_id:time_id time_value with
+  let lane_output =
+    match Plan.validate_output plan ~run_id ~node_id:lane_id lane_value with
     | Ok output -> output
-    | Error _ -> fail "keeper_time_now carrier violated its descriptor schema"
+    | Error _ -> fail "keeper_lane_status carrier violated its descriptor schema"
   in
   let board_id = node_id "board" in
   let board_node = node ~id:"board" ~tool_name:"masc_board_stats" literal_object in
@@ -518,7 +530,7 @@ let test_output_schema_and_consumer_input_are_enforced () =
   (match Plan.validate_output board_plan ~run_id:board_run_id ~node_id:board_id board_value with
    | Ok _ -> ()
    | Error _ -> fail "masc_board_stats carrier violated its descriptor schema");
-  let lookup id = if Plan.Node_id.equal id time_id then Some time_output else None in
+  let lookup id = if Plan.Node_id.equal id lane_id then Some lane_output else None in
   (match Plan.resolve_input plan ~run_id ~node_id:(node_id "grep") ~lookup with
    | Ok (`Assoc [ ("pattern", `String _) ]) -> ()
    | Ok value -> failf "resolved input changed shape: %s" (Yojson.Safe.to_string value)
@@ -527,20 +539,27 @@ let test_output_schema_and_consumer_input_are_enforced () =
      Plan.validate_output
        plan
        ~run_id
-       ~node_id:time_id
-       (`Assoc [ "now_iso", `Int 1; "now_unix", `String "bad" ])
+       ~node_id:lane_id
+       (`Assoc
+          [ "profile", `Int 1
+          ; "lane", `Int 2
+          ; "endpoint", `Null
+          ; "operator_action", `Null
+          ])
    with
    | Error (Plan.Output_validation_failed { node_id; _ })
-     when Plan.Node_id.equal node_id time_id -> ()
+     when Plan.Node_id.equal node_id lane_id -> ()
    | Error _ | Ok _ -> fail "invalid producer output was accepted");
   (match
      Plan.validate_output
        plan
        ~run_id
-       ~node_id:time_id
+       ~node_id:lane_id
        (`Assoc
-          [ "now_iso", `String "2026-08-14T00:00:00Z"
-          ; "now_unix", `Float 0.0
+          [ "profile", `String "docker"
+          ; "lane", `Null
+          ; "endpoint", `Null
+          ; "operator_action", `Null
           ; "_unexpected", `Bool true
           ])
    with
@@ -550,11 +569,11 @@ let test_output_schema_and_consumer_input_are_enforced () =
     node
       ~id:"malformed"
       ~tool_name:"Grep"
-      ~after:[ time_id ]
+      ~after:[ lane_id ]
       (Plan.Json_template.literal (`Assoc []))
   in
   let malformed_plan =
-    match Plan.create ~descriptors:(descriptors ()) [ time; malformed_consumer ] with
+    match Plan.create ~descriptors:(descriptors ()) [ lane; malformed_consumer ] with
     | Ok plan -> plan
     | Error _ -> fail "value-dependent consumer plan was rejected before resolution"
   in
@@ -571,10 +590,10 @@ let test_output_schema_and_consumer_input_are_enforced () =
    | Error
        (Plan.Input_template_resolution_failed
          { error = Plan.Json_template.Missing_output missing; _ })
-     when Plan.Node_id.equal missing time_id -> ()
+     when Plan.Node_id.equal missing lane_id -> ()
    | Error _ | Ok _ -> fail "validated output crossed an execution run boundary");
   let other_plan =
-    match Plan.create ~descriptors:(descriptors ()) [ time; grep ] with
+    match Plan.create ~descriptors:(descriptors ()) [ lane; grep ] with
     | Ok plan -> plan
     | Error _ -> fail "equivalent second plan was rejected"
   in
@@ -582,7 +601,7 @@ let test_output_schema_and_consumer_input_are_enforced () =
    | Error
        (Plan.Input_template_resolution_failed
          { error = Plan.Json_template.Missing_output missing; _ })
-     when Plan.Node_id.equal missing time_id -> ()
+     when Plan.Node_id.equal missing lane_id -> ()
    | Error _ | Ok _ -> fail "validated output crossed a plan boundary")
 ;;
 
@@ -640,7 +659,7 @@ let test_plan_rejects_invalid_graphs_and_output_edges () =
   let with_missing =
     node
       ~id:"only"
-      ~tool_name:"keeper_time_now"
+      ~tool_name:"keeper_lane_status"
       ~after:[ missing ]
       literal_object
   in
@@ -648,7 +667,7 @@ let test_plan_rejects_invalid_graphs_and_output_edges () =
    | Error (Plan.Missing_dependency { dependency; _ })
      when Plan.Node_id.equal dependency missing -> ()
    | Error _ | Ok _ -> fail "missing dependency was not rejected");
-  let duplicate_a = node ~id:"same" ~tool_name:"keeper_time_now" literal_object in
+  let duplicate_a = node ~id:"same" ~tool_name:"keeper_lane_status" literal_object in
   let duplicate_b = node ~id:"same" ~tool_name:"masc_board_stats" literal_object in
   (match Plan.create ~descriptors:(descriptors ()) [ duplicate_a; duplicate_b ] with
    | Error (Plan.Duplicate_node_id id)
@@ -684,7 +703,7 @@ let test_plan_rejects_invalid_graphs_and_output_edges () =
          ])
   in
   let typed_source =
-    node ~id:"typed-source" ~tool_name:"keeper_time_now" literal_object
+    node ~id:"typed-source" ~tool_name:"keeper_lane_status" literal_object
   in
   (match
      Plan.create ~descriptors:(descriptors ()) [ typed_source; invalid_pointer_consumer ]
@@ -695,7 +714,7 @@ let test_plan_rejects_invalid_graphs_and_output_edges () =
   let a_id = node_id "a" in
   let b_id = node_id "b" in
   let a =
-    node ~id:"a" ~tool_name:"keeper_time_now" ~after:[ b_id ] literal_object
+    node ~id:"a" ~tool_name:"keeper_lane_status" ~after:[ b_id ] literal_object
   in
   let b =
     node ~id:"b" ~tool_name:"masc_board_stats" ~after:[ a_id ] literal_object
@@ -708,9 +727,9 @@ let test_plan_rejects_invalid_graphs_and_output_edges () =
        [ "a"; "b" ]
        (List.map Plan.Node_id.to_string ids)
    | Error _ | Ok _ -> fail "dependency cycle was not rejected");
-  let time = descriptor "keeper_time_now" in
-  (match Plan.create ~descriptors:[ time; time ] [ duplicate_a ] with
-   | Error (Plan.Duplicate_tool_name "keeper_time_now") -> ()
+  let lane = descriptor "keeper_lane_status" in
+  (match Plan.create ~descriptors:[ lane; lane ] [ duplicate_a ] with
+   | Error (Plan.Duplicate_tool_name "keeper_lane_status") -> ()
    | Error _ | Ok _ -> fail "ambiguous descriptor name was not rejected");
   (match Plan.create ~descriptors:(descriptors ()) [] with
    | Error Plan.Empty_plan -> ()
@@ -941,7 +960,7 @@ let test_terminal_node_is_unique_and_depends_on_every_prior_node () =
 ;;
 
 let test_plan_uses_process_owned_descriptor_authority () =
-  let canonical = descriptor "keeper_time_now" in
+  let canonical = descriptor "keeper_lane_status" in
   let supplied =
     { canonical with
       Descriptor.execution = Descriptor.Ordinary Descriptor.Serial
@@ -949,11 +968,11 @@ let test_plan_uses_process_owned_descriptor_authority () =
     ; composable_output = Descriptor.Opaque_output
     }
   in
-  let time_node = node ~id:"time" ~tool_name:"keeper_time_now" literal_object in
-  match Plan.create ~descriptors:[ supplied ] [ time_node ] with
+  let lane_node = node ~id:"lane" ~tool_name:"keeper_lane_status" literal_object in
+  match Plan.create ~descriptors:[ supplied ] [ lane_node ] with
   | Error _ -> fail "canonical descriptor id was not resolved"
   | Ok plan ->
-    (match Plan.descriptor plan (node_id "time") with
+    (match Plan.descriptor plan (node_id "lane") with
      | Some descriptor when descriptor == canonical ->
        (match descriptor.Descriptor.execution, descriptor.composable_output with
         | Descriptor.Ordinary Descriptor.Concurrent, Descriptor.Json_output _ -> ()
@@ -995,7 +1014,6 @@ let test_composable_output_registry_is_closed () =
          names; declared so run-and-read can hand it from start to wait. *)
     ; "keeper_spawn"
     ; "keeper_tasks_list"
-    ; "keeper_time_now"
       (* masc_agent_card and masc_agent_timeline left this list with #29681:
          off the model surface, so no plan can name them and a composable
          output schema had nothing to describe. *)
@@ -1377,25 +1395,25 @@ let test_request_parses_reference_chain () =
   let json =
     request_of_string
       {|{"nodes":[
-          {"id":"clock","tool":"keeper_time_now"},
-          {"id":"memory","tool":"keeper_memory_search","after":["clock"],
+          {"id":"lane","tool":"keeper_lane_status"},
+          {"id":"memory","tool":"keeper_memory_search","after":["lane"],
            "input":{"kind":"object","fields":[
              {"name":"query",
-              "value":{"kind":"output","node":"clock","pointer":"/now_iso"}}]}}]}|}
+              "value":{"kind":"output","node":"lane","pointer":"/profile"}}]}}]}|}
   in
   match parse_request json with
   | Ok plan ->
     let names =
       Plan.nodes plan |> List.map (fun node -> Plan.Node_id.to_string node.Plan.id)
     in
-    check (list string) "node order preserved" [ "clock"; "memory" ] names;
+    check (list string) "node order preserved" [ "lane"; "memory" ] names;
     (match Plan.nodes plan with
-     | [ clock; _memory ] ->
+     | [ lane; _memory ] ->
        check
          (list string)
-         "clock has no dependencies"
+         "lane has no dependencies"
          []
-         (Plan.dependencies clock |> List.map Plan.Node_id.to_string)
+         (Plan.dependencies lane |> List.map Plan.Node_id.to_string)
      | _ -> fail "expected exactly two nodes")
   | Error error -> failf "reference chain rejected: %s" (Request.error_message error)
 ;;
@@ -1420,8 +1438,8 @@ name = "request-parity"
 execution = "inline"
 
 [[compositions.nodes]]
-id = "clock"
-tool = "keeper_time_now"
+id = "lane"
+tool = "keeper_lane_status"
 [compositions.nodes.input]
 kind = "literal"
 value = {}
@@ -1429,15 +1447,15 @@ value = {}
 [[compositions.nodes]]
 id = "memory"
 tool = "keeper_memory_search"
-after = ["clock"]
+after = ["lane"]
 [compositions.nodes.input]
 kind = "object"
 [[compositions.nodes.input.fields]]
 name = "query"
 [compositions.nodes.input.fields.value]
 kind = "output"
-node = "clock"
-pointer = "/now_iso"
+node = "lane"
+pointer = "/profile"
 |}
 ;;
 
@@ -1447,11 +1465,11 @@ let test_request_and_toml_share_plan_grammar () =
       parse_request
         (request_of_string
            {|{"nodes":[
-               {"id":"clock","tool":"keeper_time_now"},
-               {"id":"memory","tool":"keeper_memory_search","after":["clock"],
+               {"id":"lane","tool":"keeper_lane_status"},
+               {"id":"memory","tool":"keeper_memory_search","after":["lane"],
                 "input":{"kind":"object","fields":[
-                  {"name":"query","value":{"kind":"output","node":"clock",
-                                                "pointer":"/now_iso"}}]}}]}|})
+                  {"name":"query","value":{"kind":"output","node":"lane",
+                                                "pointer":"/profile"}}]}}]}|})
     with
     | Ok plan -> plan
     | Error error -> failf "JSON request rejected: %s" (Request.error_message error)
@@ -1477,9 +1495,9 @@ let test_request_and_toml_reject_the_same_invalid_pointer () =
       parse_request
         (request_of_string
            {|{"nodes":[
-               {"id":"clock","tool":"keeper_time_now"},
+               {"id":"lane","tool":"keeper_lane_status"},
                {"id":"memory","tool":"keeper_memory_search",
-                "input":{"kind":"output","node":"clock","pointer":"now_iso"}}]}|})
+                "input":{"kind":"output","node":"lane","pointer":"profile"}}]}|})
     with
     | Error (Request.Node_template_error { error = Request.Template_invalid_pointer _; _ }) ->
       true
@@ -1492,8 +1510,8 @@ let test_request_and_toml_reject_the_same_invalid_pointer () =
 name = "invalid-pointer"
 execution = "inline"
 [[compositions.nodes]]
-id = "clock"
-tool = "keeper_time_now"
+id = "lane"
+tool = "keeper_lane_status"
 [compositions.nodes.input]
 kind = "literal"
 value = {}
@@ -1502,8 +1520,8 @@ id = "memory"
 tool = "keeper_memory_search"
 [compositions.nodes.input]
 kind = "output"
-node = "clock"
-pointer = "now_iso"
+node = "lane"
+pointer = "profile"
 |}
     with
     | Error (Catalog.Invalid_json_pointer _) -> true
@@ -1517,12 +1535,12 @@ let test_validated_plan_has_a_closed_durable_request_encoding () =
   let original =
     request_of_string
       {|{"nodes":[
-          {"id":"clock","tool":"keeper_time_now",
+          {"id":"lane","tool":"keeper_lane_status",
            "input":{"kind":"literal","value":{}}},
-          {"id":"memory","tool":"keeper_memory_search","after":["clock"],
+          {"id":"memory","tool":"keeper_memory_search","after":["lane"],
            "input":{"kind":"object","fields":[
-             {"name":"query","value":{"kind":"output","node":"clock",
-                                            "pointer":"/now_iso"}},
+             {"name":"query","value":{"kind":"output","node":"lane",
+                                            "pointer":"/profile"}},
              {"name":"filters","value":{"kind":"array","items":[
                {"kind":"literal","value":"recent"}]}}]}}]}|}
   in
@@ -1657,7 +1675,7 @@ let recipe_plan () =
   match
     parse_request
       (request_of_string
-         {|{"nodes":[{"id":"clock","tool":"keeper_time_now",
+         {|{"nodes":[{"id":"lane","tool":"keeper_lane_status",
               "input":{"kind":"literal","value":{}}}]}|})
   with
   | Ok plan -> plan
@@ -1920,8 +1938,8 @@ let recipe_plan_with_literal value =
   Plan.create
     ~descriptors:(descriptors ())
     [ Plan.node
-        ~id:(node_id "clock")
-        ~tool_name:"keeper_time_now"
+        ~id:(node_id "lane")
+        ~tool_name:"keeper_lane_status"
         ~input:(Plan.Json_template.literal value)
         ()
     ]
@@ -2123,12 +2141,12 @@ let test_async_recipe_delegates_nested_strict_decoders () =
 ;;
 
 let test_request_defaults_missing_input_to_empty_object () =
-  let json = request_of_string {|{"nodes":[{"id":"clock","tool":"keeper_time_now"}]}|} in
+  let json = request_of_string {|{"nodes":[{"id":"lane","tool":"keeper_lane_status"}]}|} in
   match parse_request json with
   | Ok plan ->
     (match Plan.nodes plan with
-     | [ clock ] ->
-       (match clock.Plan.input with
+     | [ lane ] ->
+       (match lane.Plan.input with
         | Plan.Json_template.Literal (`Assoc []) -> ()
         | _ -> fail "missing input did not default to the empty literal object")
      | _ -> fail "expected exactly one node")
@@ -2215,8 +2233,8 @@ let test_request_rejects_dependency_cycle () =
   let json =
     request_of_string
       {|{"nodes":[
-          {"id":"a","tool":"keeper_time_now","after":["b"]},
-          {"id":"b","tool":"keeper_time_now","after":["a"]}]}|}
+          {"id":"a","tool":"keeper_lane_status","after":["b"]},
+          {"id":"b","tool":"keeper_lane_status","after":["a"]}]}|}
   in
   match parse_request json with
   | Error (Request.Plan_rejected (Plan.Dependency_cycle _)) -> ()
@@ -2227,7 +2245,7 @@ let test_request_rejects_dependency_cycle () =
 let test_request_rejects_missing_dependency () =
   let json =
     request_of_string
-      {|{"nodes":[{"id":"a","tool":"keeper_time_now","after":["ghost"]}]}|}
+      {|{"nodes":[{"id":"a","tool":"keeper_lane_status","after":["ghost"]}]}|}
   in
   match parse_request json with
   | Error (Request.Plan_rejected (Plan.Missing_dependency _)) -> ()
@@ -2238,7 +2256,7 @@ let test_request_rejects_missing_dependency () =
 let test_request_rejects_malformed_template () =
   let json =
     request_of_string
-      {|{"nodes":[{"id":"a","tool":"keeper_time_now",
+      {|{"nodes":[{"id":"a","tool":"keeper_lane_status",
                    "input":{"kind":"teleport"}}]}|}
   in
   match parse_request json with
@@ -2268,7 +2286,7 @@ let test_request_composable_names_match_registry () =
   let names =
     Request.composable_tool_names ~descriptors:(Descriptor.all_descriptors ())
   in
-  check bool "keeper_time_now is composable" true (List.mem "keeper_time_now" names);
+  check bool "keeper_lane_status is composable" true (List.mem "keeper_lane_status" names);
   (* #29681 took masc_tool_help off the model surface, so it is now absent for
      a second reason and no longer tells opaque from unreachable.
      keeper_context_status is on the surface and its output is opaque. *)

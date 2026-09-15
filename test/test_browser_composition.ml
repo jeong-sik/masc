@@ -4,12 +4,35 @@ module Catalog = Masc.Keeper_tool_composition_catalog
 module Plan = Masc.Keeper_tool_plan
 module Executor = Masc.Keeper_tool_plan_executor
 
-let skill_entry name =
+let shipped_skill name =
   let path = Filename.concat (Filename.concat "../skills" name) "SKILL.md" in
   let body = In_channel.with_open_bin path In_channel.input_all in
   match Skills.parse_skill ~directory:name body with
-  | Ok {surface=Skills.Composition entry;_} -> entry
-  | _ -> fail "shipped browser composition is not a valid native MASC Skill"
+  | Ok skill -> skill
+  | Error _ -> fail "shipped browser composition is not a valid native MASC Skill"
+
+let skill_entry name =
+  match (shipped_skill name).Skills.surface with
+  | Skills.Composition entry -> entry
+  | Skills.Instruction -> fail "shipped browser composition is not a valid native MASC Skill"
+
+(* A Keeper meets this text in two places: as the keeper_compose_<name> tool
+   description (the TOML copy) and as the capability search hit (the
+   frontmatter copy). They are one text. Only the frontmatter parser bounds its
+   length, so keeping the copies equal also keeps the tool description inside
+   that bound. *)
+let test_description_is_one_text skill_name () =
+  let skill = shipped_skill skill_name in
+  match skill.Skills.surface with
+  | Skills.Instruction -> fail "shipped browser composition declares no composition"
+  | Skills.Composition entry ->
+    (match entry.Catalog.description with
+     | None -> fail "the tool would show only the generic composition sentence"
+     | Some description ->
+       check bool "the tool description says something" false
+         (String.equal description "");
+       check string "capability search shows the tool description"
+         description skill.Skills.description)
 
 let test_follow_output_contract () =
   let descriptor = List.find (fun (d : Masc.Keeper_tool_descriptor.t) ->
@@ -30,14 +53,104 @@ let test_follow_output_contract () =
 type navigation_case = Navigated | Navigation_failed | Read_failed | Invalid_receipt
 type observation = Regions | Content
 
+let follow_skill = "browser-live-follow-read"
+let navigate_skill = "browser-navigate-read"
+
+let read_mode = function
+  | Regions -> "regions"
+  | Content -> "scene"
+
+(* One call through Agent-Core's own tool execution, on a tool built the way
+   the composition surface builds a composition tool: the same bridge
+   constructor, name and generated input schema. The handler stands in for the
+   composition handler and only records that it ran. *)
+let call_through_agent_core entry args =
+  let tool_name = Catalog.tool_name entry in
+  let handler_ran = ref false in
+  let tool =
+    Masc.Tool_bridge.agent_core_tool_of_masc_with_execution_env
+      ~name:tool_name ~description:"shipped composition input schema probe"
+      ~input_schema:(Catalog.input_schema_of_params entry.Catalog.params)
+      (fun _execution_env _input ->
+         handler_ran := true;
+         Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String "ran") ())
+  in
+  let invocation =
+    Agent_core.Tool_contract.Invocation.create ~tool_use_id:"browser-composition-probe"
+      ~turn:1 ~completion:Agent_core.Tool_contract.Continue_after_success
+      ~schedule:{ Agent_core.Tool_contract.planned_index = 0; batch_index = 0; batch_size = 1;
+                  execution_mode = Agent_core.Tool_contract.Serial }
+  in
+  match
+    Agent_core.Agent_tools.find_and_execute_tool
+      ~context:(Agent_core.Context.create_sync ()) ~tools:[ tool ]
+      ~hooks:Agent_core.Hooks.empty ~event_bus:None ~tracer:Agent_core.Tracing.null
+      ~agent_name:"browser-composition-probe" ~invocation tool_name args
+  with
+  | Ok result -> result.Agent_core.Agent_tools.outcome, !handler_ran
+  | Error (Agent_core.Agent_tools.Hook_execution_failed { detail; _ }) ->
+    fail ("a tool call with no hooks failed in a hook: " ^ detail)
+
+(* Both shipped compositions offer the same two reads and nothing else. The
+   node tool, BrowserRead, also takes "text", so a value outside the declared
+   members has to be refused before the composition runs rather than run as
+   another read. Agent-Core refuses it while checking the call against the
+   composition's input schema, before the composition handler. *)
+let test_mode_is_a_closed_choice skill_name () =
+  let entry = skill_entry skill_name in
+  let open Yojson.Safe.Util in
+  let mode =
+    Catalog.input_schema_of_params entry.Catalog.params
+    |> member "properties" |> member "mode"
+  in
+  check (list string) "the model is offered exactly scene and regions"
+    [ "scene"; "regions" ]
+    (mode |> member "enum" |> to_list |> List.map to_string);
+  check bool "mode is required" true
+    (Catalog.input_schema_of_params entry.Catalog.params
+     |> member "required" |> to_list |> List.mem (`String "mode"));
+  (* Every other argument is valid for whichever composition declares it, so
+     the only thing Agent-Core can refuse is the mode. *)
+  let valid_arguments =
+    [ "clientId", `String "11111111-1111-4111-8111-111111111111"
+    ; "tabId", `Int 7
+    ; "documentId", `String "observed"
+    ; "nodeId", `String "link"
+    ; "expectedUrl", `String "https://example.org/before"
+    ; "url", `String "https://example.org/start"
+    ]
+  in
+  let declared name =
+    List.exists
+      (fun param -> String.equal param.Catalog.param_name name)
+      entry.Catalog.params
+  in
+  let args mode =
+    `Assoc
+      (List.filter (fun (name, _) -> declared name) valid_arguments
+       @ [ "mode", `String mode ])
+  in
+  Eio_main.run (fun _ ->
+    List.iter
+      (fun mode ->
+         match call_through_agent_core entry (args mode) with
+         | Agent_core.Types.Tool_succeeded, true -> ()
+         | (Agent_core.Types.Tool_succeeded | Agent_core.Types.Tool_failed _), _ ->
+           fail ("declared mode " ^ mode ^ " did not reach the composition handler"))
+      [ "scene"; "regions" ];
+    match call_through_agent_core entry (args "text") with
+    | Agent_core.Types.Tool_failed { failure_kind = Agent_core.Types.Validation_error; _ }, false ->
+      ()
+    | (Agent_core.Types.Tool_succeeded | Agent_core.Types.Tool_failed _), _ ->
+      fail "a read mode outside scene and regions was not refused before the handler")
+
 let test_follow_then_read observation case () =
   Eio_main.run (fun _ ->
-    let skill_name, read_mode = match observation with
-      | Regions -> "browser-live-click-regions", "regions"
-      | Content -> "browser-live-click-content", "scene" in
+    let skill_name = follow_skill in
+    let read_mode = read_mode observation in
     let args = `Assoc ["clientId",`String "11111111-1111-4111-8111-111111111111";
       "tabId",`Int 7;"documentId",`String "observed";"nodeId",`String "link";
-      "expectedUrl",`String "https://example.org/before"] in
+      "expectedUrl",`String "https://example.org/before";"mode",`String read_mode] in
     let entry = skill_entry skill_name in
     check string "native callable skill name"
       ("keeper_compose_" ^ skill_name) (Catalog.tool_name entry);
@@ -95,7 +208,7 @@ let test_follow_then_read observation case () =
           check bool "completed follow remains a recorded effect after read failure" true
             (failure.effect_disposition = Tool_result.Proven_post_effect);
           check bool "settled click receipt remains available" true
-          (List.exists (fun node -> Plan.Node_id.to_string node.Executor.node_id = "click"
+          (List.exists (fun node -> Plan.Node_id.to_string node.Executor.node_id = "follow"
             && (match node.result with Tool_result.Completed _ -> true | _ -> false)) failure.settled))
     | Navigated -> (
       check bool "composition completes" true (Result.is_ok result);
@@ -103,12 +216,14 @@ let test_follow_then_read observation case () =
 
 let test_navigate_then_read observation case () =
   Eio_main.run (fun _ ->
-    let skill_name, read_mode = match observation with
-      | Regions -> "browser-navigate-regions", "regions"
-      | Content -> "browser-navigate-content", "scene" in
+    let skill_name = navigate_skill in
+    let read_mode = read_mode observation in
     let requested_url = "https://example.org/start" in
     let landing_url = "https://example.org/redirected" in
-    let args = `Assoc [ "tabId", `Int 7; "url", `String requested_url ] in
+    let navigation = `Assoc [ "tabId", `Int 7; "url", `String requested_url ] in
+    let args =
+      `Assoc [ "tabId", `Int 7; "url", `String requested_url; "mode", `String read_mode ]
+    in
     let entry = skill_entry skill_name in
     check string "native callable skill name"
       ("keeper_compose_" ^ skill_name) (Catalog.tool_name entry);
@@ -128,7 +243,7 @@ let test_navigate_then_read observation case () =
         match node.tool_name with
         | "BrowserGoto" ->
           check bool "navigation pins the observed tab and requested URL" true
-            (input = args);
+            (input = navigation);
           (match case with
            | Navigation_failed -> rejected "navigation unavailable"
            | Invalid_receipt -> ok (`Assoc [ "title", `String "Landing page" ])
@@ -176,11 +291,15 @@ let test_navigate_then_read observation case () =
 
 let () = run "browser composition" ["native skill",[
   test_case "runtime destination output contract" `Quick test_follow_output_contract;
-  test_case "observed click then region read" `Quick (test_follow_then_read Regions Navigated);
-  test_case "failed click stops without replay" `Quick (test_follow_then_read Regions Navigation_failed);
-  test_case "read failure retains successful click without replay" `Quick (test_follow_then_read Regions Read_failed);
+  test_case "live follow description is one text" `Quick (test_description_is_one_text follow_skill);
+  test_case "navigation description is one text" `Quick (test_description_is_one_text navigate_skill);
+  test_case "live follow offers only scene and regions" `Quick (test_mode_is_a_closed_choice follow_skill);
+  test_case "navigation offers only scene and regions" `Quick (test_mode_is_a_closed_choice navigate_skill);
+  test_case "observed follow then region read" `Quick (test_follow_then_read Regions Navigated);
+  test_case "failed follow stops without replay" `Quick (test_follow_then_read Regions Navigation_failed);
+  test_case "read failure retains successful follow without replay" `Quick (test_follow_then_read Regions Read_failed);
   test_case "region read rejects malformed follow receipt" `Quick (test_follow_then_read Regions Invalid_receipt);
-  test_case "observed click then visible content" `Quick (test_follow_then_read Content Navigated);
+  test_case "observed follow then visible content" `Quick (test_follow_then_read Content Navigated);
   test_case "content follow failure stops without replay" `Quick (test_follow_then_read Content Navigation_failed);
   test_case "content read failure retains follow receipt" `Quick (test_follow_then_read Content Read_failed);
   test_case "content read rejects malformed follow receipt" `Quick (test_follow_then_read Content Invalid_receipt);

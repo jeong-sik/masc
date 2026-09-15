@@ -583,6 +583,42 @@ let class_of_memory_write_error_kind = function
   | Commit_receipt_inconsistent | No_memory_write_error -> Tool_result.Runtime_failure
 ;;
 
+(* What a failed write committed follows from why it failed, so the kind
+   decides it and no failure site states it separately. Every refusal is made
+   before the store is touched. A store that committed and then did not show
+   the claim did commit. A store that returned an error or raised may have
+   moved the new snapshot into place before it failed. *)
+let memory_write_error_effect_disposition = function
+  | Content_empty
+  | Source_path_invalid
+  | Source_read_failed _
+  | Derivation_incomplete
+  | Derivation_invalid
+  | Derived_source_path_unsupported
+  | Board_ref_invalid
+  | Board_comment_without_post
+  | Board_ref_with_derivation_unsupported
+  | Board_ref_with_source_path_unsupported
+  | Unsupported_derivation ->
+    Tool_result.Proven_pre_effect
+  | Commit_receipt_inconsistent -> Tool_result.Proven_post_effect
+  (* The "no error" kind reaching a failure is a producer bug; it proves
+     nothing about the store. *)
+  | Persistence_failed | No_memory_write_error -> Tool_result.Effect_outcome_unknown
+;;
+
+(* The same fact for the model, beside the typed disposition. Writing the same
+   claim again cannot add a second copy: an ordinary fact is keyed by its
+   claim's SHA-256 and a source-bound one by its path. *)
+let memory_write_what_committed = function
+  | Tool_result.Proven_pre_effect -> "Nothing was committed."
+  | Tool_result.Proven_post_effect ->
+    "The claim was committed. Writing the same claim again does not add a second copy."
+  | Tool_result.Effect_outcome_unknown ->
+    "The claim may or may not have been committed. Writing the same claim again \
+     does not add a second copy."
+;;
+
 type memory_write_validation =
   | Memory_write_ok of
       { body : string
@@ -764,37 +800,33 @@ let keeper_memory_write_with_outcome
       ~(args : Yojson.Safe.t)
   : Keeper_tool_execution.t
   =
-  let respond
-        ?memory_revision
-        ?(effect_disposition = Tool_result.Effect_outcome_unknown)
-        ~ok
-        ~error_kind
-        extras
-    =
-    let class_ = class_of_memory_write_error_kind error_kind in
-    let error_kind = memory_write_error_kind_to_string error_kind in
-    let payload =
-      Yojson.Safe.to_string
-        (`Assoc ([ "ok", `Bool ok; "error_kind", `String error_kind ] @ extras))
+  let respond ~ok ~error_kind extras =
+    let head =
+      [ "ok", `Bool ok
+      ; "error_kind", `String (memory_write_error_kind_to_string error_kind)
+      ]
     in
     if ok
-    then
-      let completed = Keeper_tool_execution.success payload in
-      Option.fold
-        ~none:completed
-        ~some:(fun revision ->
-          Keeper_tool_execution.with_memory_write_receipt ~revision completed)
-        memory_revision
-    else
-      Keeper_tool_execution.failure ~class_ ~effect_disposition payload
+    then Keeper_tool_execution.success (Yojson.Safe.to_string (`Assoc (head @ extras)))
+    else (
+      let effect_disposition = memory_write_error_effect_disposition error_kind in
+      let payload =
+        `Assoc
+          (head
+           @ [ ( "effect_disposition"
+               , `String (Tool_result.failure_effect_disposition_to_string effect_disposition) )
+             ; "what_committed", `String (memory_write_what_committed effect_disposition)
+             ]
+           @ extras)
+      in
+      Keeper_tool_execution.failure
+        ~class_:(class_of_memory_write_error_kind error_kind)
+        ~effect_disposition
+        (Yojson.Safe.to_string payload))
   in
   match validate_memory_write_args args with
   | Memory_write_invalid { error_kind; extras } ->
-    respond
-      ~effect_disposition:Tool_result.Proven_pre_effect
-      ~ok:false
-      ~error_kind
-      extras
+    respond ~ok:false ~error_kind extras
   | Memory_write_ok { body; source_path; basis } ->
     let keepers_dir =
       Config_dir_resolver.keepers_dir_for_base_path
@@ -823,7 +855,6 @@ let keeper_memory_write_with_outcome
            with
            | Some source_sha256 ->
              respond
-               ~memory_revision:snapshot.revision
                ~ok:true
                ~error_kind:No_memory_write_error
                [ "rows_written", `Int 1
@@ -850,10 +881,9 @@ let keeper_memory_write_with_outcome
              respond
                ~ok:false
                ~error_kind:Commit_receipt_inconsistent
-               [ "detail", `String detail ])
+               [ "revision", `Int snapshot.revision; "detail", `String detail ])
         | Error (Keeper_memory_source_current.Source_read_failed failure) ->
           respond
-            ~effect_disposition:Tool_result.Proven_pre_effect
             ~ok:false
             ~error_kind:(Source_read_failed failure)
             [ "detail"
@@ -884,7 +914,6 @@ let keeper_memory_write_with_outcome
        (match written_fact with
         | Some written_fact ->
           respond
-            ~memory_revision:snapshot.revision
             ~ok:true
             ~error_kind:No_memory_write_error
             [ "rows_written", `Int 1
@@ -905,18 +934,18 @@ let keeper_memory_write_with_outcome
             ; "basis", memory_write_basis_receipt written_fact.basis
             ]
         | None ->
+          let detail = "committed current Memory snapshot omitted the written fact" in
+          Log.Keeper.warn
+            "explicit current Memory write invariant failed keeper=%s revision=%d: %s"
+            meta.name
+            snapshot.revision
+            detail;
           respond
-            ~effect_disposition:Tool_result.Proven_post_effect
             ~ok:false
             ~error_kind:Commit_receipt_inconsistent
-            [ "revision", `Int snapshot.revision
-            ; ( "detail"
-              , `String
-                  "committed current Memory snapshot omitted the written fact" )
-            ])
+            [ "revision", `Int snapshot.revision; "detail", `String detail ])
      | Error (Keeper_memory_os_current.Unsupported_derivation invalidation) ->
        respond
-         ~effect_disposition:Tool_result.Proven_pre_effect
          ~ok:false
          ~error_kind:Unsupported_derivation
          [ ( "missing_premise_ids"
@@ -968,6 +997,39 @@ let class_of_memory_retract_error_kind = function
   | No_memory_retract_error -> Tool_result.Runtime_failure
 ;;
 
+(* As for a write: the kind decides what committed. Invalid input and a fact
+   the snapshot does not hold are refused before any snapshot or journal
+   write. *)
+let memory_retract_error_effect_disposition = function
+  | Memory_id_invalid | Reason_empty | Fact_not_found -> Tool_result.Proven_pre_effect
+  | Retract_persistence_failed | No_memory_retract_error ->
+    Tool_result.Effect_outcome_unknown
+;;
+
+(* A fact the snapshot does not hold is the answer both for an id that was
+   never current and for one an earlier retraction already removed, including
+   a retraction whose effect was unknown. The model is told so, so a retry's
+   refusal is not read as proof that the first attempt did nothing. *)
+let memory_retract_what_committed error_kind =
+  let committed =
+    match memory_retract_error_effect_disposition error_kind with
+    | Tool_result.Proven_pre_effect -> "Nothing was committed."
+    | Tool_result.Proven_post_effect -> "The retraction was committed."
+    | Tool_result.Effect_outcome_unknown ->
+      "The retraction may or may not have been committed. Search memory for this \
+       fact before retracting it again: if it is gone, this attempt committed and \
+       a second retraction answers fact_not_found."
+  in
+  match error_kind with
+  | Fact_not_found ->
+    committed
+    ^ " This memory_id is not in the current snapshot: it was never current, or \
+       an earlier retraction already removed it, even one reported as possibly \
+       not committed."
+  | Memory_id_invalid | Reason_empty | Retract_persistence_failed | No_memory_retract_error ->
+    committed
+;;
+
 type memory_retract_validation =
   | Memory_retract_ok of
       { memory_id : string
@@ -1005,43 +1067,32 @@ let keeper_memory_retract_with_outcome
       ~(args : Yojson.Safe.t)
   : Keeper_tool_execution.t
   =
-  let respond
-        ?revision
-        ?(effect_disposition = Tool_result.Effect_outcome_unknown)
-        ~ok
-        ~error_kind
-        extras
-    =
-    let payload =
-      Yojson.Safe.to_string
-        (`Assoc
-            ([ "ok", `Bool ok
-             ; ( "error_kind"
-               , `String (memory_retract_error_kind_to_string error_kind) )
-             ]
-             @ extras))
+  let respond ~ok ~error_kind extras =
+    let head =
+      [ "ok", `Bool ok
+      ; "error_kind", `String (memory_retract_error_kind_to_string error_kind)
+      ]
     in
     if ok
-    then
-      let completed = Keeper_tool_execution.success payload in
-      Option.fold
-        ~none:completed
-        ~some:(fun revision ->
-          Keeper_tool_execution.with_memory_retract_receipt ~revision completed)
-        revision
-    else
+    then Keeper_tool_execution.success (Yojson.Safe.to_string (`Assoc (head @ extras)))
+    else (
+      let effect_disposition = memory_retract_error_effect_disposition error_kind in
+      let payload =
+        `Assoc
+          (head
+           @ [ ( "effect_disposition"
+               , `String (Tool_result.failure_effect_disposition_to_string effect_disposition) )
+             ; "what_committed", `String (memory_retract_what_committed error_kind)
+             ]
+           @ extras)
+      in
       Keeper_tool_execution.failure
         ~class_:(class_of_memory_retract_error_kind error_kind)
         ~effect_disposition
-        payload
+        (Yojson.Safe.to_string payload))
   in
   match validate_memory_retract_args args with
-  | Memory_retract_invalid error_kind ->
-    respond
-      ~effect_disposition:Tool_result.Proven_pre_effect
-      ~ok:false
-      ~error_kind
-      []
+  | Memory_retract_invalid error_kind -> respond ~ok:false ~error_kind []
   | Memory_retract_ok { memory_id; reason } ->
     let keepers_dir =
       Config_dir_resolver.keepers_dir_for_base_path
@@ -1079,7 +1130,6 @@ let keeper_memory_retract_with_outcome
          memory_id
          (List.length snapshot.change.invalidated);
        respond
-         ~revision:snapshot.revision
          ~ok:true
          ~error_kind:No_memory_retract_error
          [ "revision", `Int snapshot.revision
@@ -1103,19 +1153,16 @@ let keeper_memory_retract_with_outcome
          ]
      | Error Keeper_memory_os_current.Retract_memory_id_invalid ->
        respond
-         ~effect_disposition:Tool_result.Proven_pre_effect
          ~ok:false
          ~error_kind:Memory_id_invalid
          []
      | Error Keeper_memory_os_current.Retract_reason_empty ->
        respond
-         ~effect_disposition:Tool_result.Proven_pre_effect
          ~ok:false
          ~error_kind:Reason_empty
          []
      | Error (Keeper_memory_os_current.Retract_fact_not_found _) ->
        respond
-         ~effect_disposition:Tool_result.Proven_pre_effect
          ~ok:false
          ~error_kind:Fact_not_found
          [ "memory_id", `String memory_id ]

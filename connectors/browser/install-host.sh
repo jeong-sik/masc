@@ -17,7 +17,6 @@ import tempfile
 parser = argparse.ArgumentParser(description="Install the Firefox OCaml browser lane host")
 parser.add_argument("--base-path", default=os.environ.get("MASC_BASE_PATH"))
 parser.add_argument("--binary", default=shutil.which("masc-browser-host"))
-parser.add_argument("--server", default=os.environ.get("MASC_HTTP_BASE_URL"))
 parser.add_argument("--token-file")
 parser.add_argument("--manifest-dir", help="Override Firefox's native messaging manifest directory")
 parser.add_argument("--host-name", default="masc_browser_host",
@@ -83,12 +82,17 @@ def atomic_file(path, data, mode):
 binary = host_dir / "masc-browser-host"
 atomic_file(binary, source.read_bytes(), 0o755)
 launcher = host_dir / "launch"
+# The launcher names no server. The host reads the port from the workspace
+# connection.toml and, after a failed request, moves only to an address that
+# answers the lane; a port written here would outlive a restart.
 command = [str(binary), "--base-path", str(base), "--token-file", str(token_file)]
-if args.server:
-    command.extend(["--server", args.server])
 # Firefox supplies its manifest path and extension id. Forward these after
 # the explicit configuration; no token value is written into this launcher.
 atomic_file(launcher, ("#!/bin/sh\nexec " + shlex.join(command) + ' "$@"\n').encode(), 0o755)
+# masc doctor and the browser tools read where this host takes its server
+# address from here rather than from the shell text above
+# (lib/browser_lane_launcher.ml).
+atomic_file(host_dir / "launch.json", (json.dumps({"destination": "workspace_connection"}) + "\n").encode(), 0o644)
 manifest = manifest_dir / (args.host_name + ".json")
 atomic_file(manifest, (json.dumps({
     "name": args.host_name,

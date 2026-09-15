@@ -56,6 +56,17 @@ type awaiting =
 (** A keeper blocked until the operator answers. No time on purpose: the
     answer is due now, and a countdown would read as permission to wait. *)
 
+type stalled =
+  { what : string
+        (** The one line {!Operator_task_attention.summary} wrote. The sentence
+            is made there rather than here so the three surfaces that draw this
+            row cannot describe it three ways. *)
+  ; since_iso : string  (** when it started waiting on the operator *)
+  }
+(** A task whose only exit belongs to the operator: a stop waiting to be
+    granted, work held by an agent with no Keeper queue, a Keeper record that
+    does not decode. Nothing on the screen said this before. *)
+
 (** A list as the state holds it. An empty list is an answer only once it was
     read: before the first answer, and after a read that failed with nothing
     earlier to show, the overlay said "nothing is scheduled" about a list no
@@ -69,19 +80,28 @@ type 'row reading =
 
 type t
 
-val project : scheduled:scheduled reading -> awaiting:awaiting reading -> t
+val project :
+  scheduled:scheduled reading ->
+  awaiting:awaiting reading ->
+  stalled:stalled reading ->
+  t
 (** Keeps the earliest {!Coming} row and counts the rest. Rows that are
-    settled or unrecognised are not on the strip. *)
+    settled or unrecognised are not on the strip. [stalled] arrives in the
+    order the projection sorted it, longest wait first. *)
 
 val rows_taken : t -> int
 (** [1] while the strip has something to say, [0] otherwise. The surface gets
-    the row back when it is [0]. *)
+    the row back when it is [0]. A stuck task counts as something to say. *)
 
 (** The strip's two halves, as plain text. Styling belongs to the renderer;
     what goes in each half belongs here. *)
 type strip =
   { clock : string  (** the next wake, or [""] when nothing is scheduled *)
-  ; waiting : string  (** the badge, or [""] when nobody is blocked *)
+  ; waiting : string
+        (** the badge, or [""] when nothing waits on the operator. One count
+            over blocked keepers and stuck tasks together: both answer "is
+            anything waiting on me", and two badges would be an addition the
+            operator has to do. *)
   }
 
 val strip :
@@ -114,8 +134,12 @@ type line =
 val overlay :
   now:float -> localtime:(float -> Unix.tm) -> cols:int -> t -> line list
 (** Every wake still coming, earliest first, then everyone blocked on the
-    operator. Not just the one the strip names. A section whose list was not
-    read says that instead of saying it is empty. *)
+    operator, then the tasks stuck on them. Not just the one the strip names.
+    A section whose list was not read says that instead of saying it is empty.
+
+    The stuck section is the exception to "every": it draws the oldest few and
+    then says how many it did not. Sixty-two rows is a wall, and the list
+    itself belongs to a tool. *)
 
 val short_who : string -> string
 (** A wake target with its kind prefix removed: ["keeper:edgar.a.poe"] reads

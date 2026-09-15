@@ -111,13 +111,32 @@ let embedded_packages () =
        | [] | [ _ ] | [ _; _ ] | _ :: _ :: _ :: _ -> None)
   |> List.sort_uniq String.compare
 
+let reconciled base_path =
+  match Seed.install_builtin_skills ~on_wait:(fun (_ : string) -> ()) ~base_path with
+  | Ok reports -> reports
+  | Error error -> fail (Builtin_skill_package.error_message error)
+
+let bundled_verdicts reports =
+  List.filter_map
+    (function
+      | Builtin_skill_package.Bundled { name; result = Ok verdict } -> Some (name, verdict)
+      | Builtin_skill_package.Bundled { name; result = Error error } ->
+        fail (name ^ ": " ^ Builtin_skill_package.error_message error)
+      | Builtin_skill_package.Retired _ | Builtin_skill_package.Unfinished _ -> None)
+    reports
+
 let test_builtin_skill_package () =
   let base_path = fresh_dst () in
   let packages = embedded_packages () in
   check bool "the embedded listing names at least one package" true (packages <> []);
-  check int "every embedded package is a complete first-party package"
-    (List.length packages)
-    (Seed.seed_missing_builtin_skills ~base_path);
+  let first = bundled_verdicts (reconciled base_path) in
+  check (list string) "every embedded package is reported in order" packages (List.map fst first);
+  List.iter
+    (fun (name, verdict) ->
+       match verdict with
+       | Builtin_skill_package.Install_missing -> ()
+       | _ -> fail (name ^ " must be installed into an empty root"))
+    first;
   let root = Filename.concat base_path ".masc/skills" in
   List.iter
     (fun rel ->
@@ -126,22 +145,94 @@ let test_builtin_skill_package () =
        | Some expected ->
          check string rel expected (read_file (Filename.concat root rel)))
     Embedded_skills.file_list;
-  let body = Filename.concat root "browser-lanes/SKILL.md" in
+  let edited = List.hd packages in
+  let body = Filename.concat root (edited ^ "/SKILL.md") in
   Fs_compat.save_file body "operator's own skill";
-  let resource = Filename.concat root "browser-lanes/references/advanced.md" in
-  Sys.remove resource;
-  check int "existing package is not refilled" 0
-    (Seed.seed_missing_builtin_skills ~base_path);
+  let second = bundled_verdicts (reconciled base_path) in
+  List.iter
+    (fun (name, verdict) ->
+       match String.equal name edited, verdict with
+       | true, Builtin_skill_package.Keep_modified _ -> ()
+       | false, Builtin_skill_package.Up_to_date -> ()
+       | _ -> fail (name ^ ": an unchanged release keeps edits and touches nothing else"))
+    second;
   check string "operator body survives" "operator's own skill" (read_file body);
-  check bool "operator resource deletion survives" false (Sys.file_exists resource);
   check (list string) "all packages present without staging residue"
     packages
     (List.sort String.compare (entries_of root))
 
+(* Server startup on a root that already exists. It only adds: a package
+   whose directory is gone is published again and an untracked tree equal to
+   this release is recorded, but a recorded package this release does not ship
+   stays where it is until [masc init] moves it aside. *)
+let test_existing_root_startup_only_adds () =
+  let base_path = fresh_dst () in
+  let config_root = Filename.concat base_path ".masc/config" in
+  Fs_compat.mkdir_p config_root;
+  let runtime_toml = Filename.concat config_root "runtime.toml" in
+  let operator_runtime = "# operator runtime\n" in
+  Fs_compat.save_file runtime_toml operator_runtime;
+  let retired =
+    match
+      Builtin_skill_package.make ~name:"retired-fixture"
+        ~files:[ "SKILL.md", "a package an earlier release shipped" ]
+    with
+    | Ok package -> package
+    | Error reason -> fail reason
+  in
+  (match
+     Builtin_skill_package.install ~on_wait:(fun (_ : string) -> ()) ~base_path
+       (Seed.builtin_skills () @ [ retired ])
+   with
+   | Ok _ -> ()
+   | Error error -> fail (Builtin_skill_package.error_message error));
+  let packages = embedded_packages () in
+  let untracked = List.hd packages in
+  let removed = List.nth packages (List.length packages - 1) in
+  check bool "the fixture needs two different packages" false (String.equal untracked removed);
+  let state = Filename.concat base_path ".masc/skill-packages" in
+  let skills = Filename.concat base_path ".masc/skills" in
+  let untracked_receipt = Filename.concat state (untracked ^ ".sha256") in
+  let recorded = read_file untracked_receipt in
+  Sys.remove untracked_receipt;
+  Fs_compat.remove_tree (Filename.concat skills removed);
+  Seed.bootstrap_base_path_config_root ~base_path;
+  check string "operator runtime.toml untouched" operator_runtime (read_file runtime_toml);
+  check string "identical untracked package recorded again" recorded
+    (read_file untracked_receipt);
+  check bool "a package whose directory was gone is published again" true
+    (Sys.file_exists (Filename.concat skills (removed ^ "/SKILL.md")));
+  check string "the package this release does not ship stays in the Skill source"
+    "a package an earlier release shipped"
+    (read_file (Filename.concat skills "retired-fixture/SKILL.md"));
+  check bool "its receipt stays" true
+    (Sys.file_exists (Filename.concat state "retired-fixture.sha256"));
+  check bool "startup made no backup" false
+    (Sys.file_exists (Filename.concat state "previous"));
+  let retirements =
+    List.filter_map
+      (function
+        | Builtin_skill_package.Retired { name; result } -> Some (name, result)
+        | Builtin_skill_package.Bundled _ | Builtin_skill_package.Unfinished _ -> None)
+      (reconciled base_path)
+  in
+  (match retirements with
+   | [ "retired-fixture", Ok (Builtin_skill_package.Retire_recorded { backup = Some backup }) ] ->
+     check string "masc init keeps the retired package in its backup entry"
+       "a package an earlier release shipped"
+       (read_file (Filename.concat backup "SKILL.md"))
+   | _ -> fail "masc init must retire the package startup left in place");
+  check (list string) "every shipped package is in place and nothing else"
+    packages
+    (List.sort String.compare (entries_of skills))
+
 let () =
   run "Config root embedded seed"
     [ ( "builtin_skills"
-      , [ test_case "complete package and operator ownership" `Quick test_builtin_skill_package ] )
+      , [ test_case "complete package and operator ownership" `Quick test_builtin_skill_package
+        ; test_case "startup on an existing root only adds packages" `Quick
+            test_existing_root_startup_only_adds
+        ] )
     ; ( "seed_missing_from_embedded"
       , [ test_case "writes runtime.toml and prompts" `Quick
             test_writes_runtime_toml

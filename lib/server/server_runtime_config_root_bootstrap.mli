@@ -30,14 +30,14 @@ val bootstrap_initial_config_root : base_path:string -> created:bool -> unit
 
 val startup_config_resolution : base_path:string -> Config_dir_resolver.resolution
 
-val seed_missing_builtin_skills : base_path:string -> int
-(** Seed complete first-party packages from the binary into [.masc/skills].
-    Existing package directories are preserved as a whole, including operator
-    resource deletions. Returns the number of newly installed packages. *)
-
 val builtin_skills : unit -> Builtin_skill_package.package list
 
-val refresh_builtin_skills : base_path:string -> int
-(** Installer update: seed missing packages and update recorded, unmodified
-    packages. Print preserved package revisions for explicit operator review.
-    Existing packages without receipts are preserved. *)
+val install_builtin_skills :
+  on_wait:(string -> unit) ->
+  base_path:string ->
+  (Builtin_skill_package.report list, Builtin_skill_package.error) result
+(** {!Builtin_skill_package.install} with every package this binary embeds.
+    [masc init] calls it. Server startup instead runs
+    {!Builtin_skill_package.reconcile_at_startup} from
+    {!bootstrap_initial_config_root}, which never changes an installed tree,
+    and logs every report instead of failing. *)

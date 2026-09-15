@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import queue
 import select
+import socket
 import struct
 import subprocess
 import sys
@@ -17,6 +18,56 @@ import uuid
 
 HOST = Path(sys.argv.pop(1)).resolve()
 TOKEN = "browser-host-test-token-no-secret"
+# The host waits reconnect_delay_sec (5 s, browser_host.ml) after a failed poll
+# before reading the workspace connection again; this leaves room for that wait
+# and the poll that follows.
+POLL_RETRY_WAIT_SEC = 15
+# How long the fake server holds an empty poll. The scenarios that fail a poll
+# on purpose answer quickly so the failure is not queued behind a long wait.
+LONG_POLL_SEC = 10
+SHORT_POLL_SEC = 0.2
+# Tests whose host takes its port from the workspace connection or the
+# environment rather than --server.
+FOLLOWS_WORKSPACE = {
+    "test_workspace_connection_port_is_followed",
+    "test_failed_poll_reads_the_workspace_port_again",
+    "test_a_failed_poll_stays_while_the_server_still_answers",
+    "test_the_host_moves_once_the_named_server_answers",
+}
+
+
+def closed_port():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+def start_peer(test_name):
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Peer)
+    server.commands = queue.Queue()
+    server.results = queue.Queue()
+    server.poll_seen = threading.Event()
+    server.ping_seen = threading.Event()
+    server.fail_next_poll = threading.Event()
+    server.failed_poll_answered = threading.Event()
+    server.polls_after_failure = threading.Event()
+    server.disconnected = threading.Event()
+    server.identities = []
+    server.poll_wait_sec = SHORT_POLL_SEC if test_name in {
+        "test_a_failed_poll_stays_while_the_server_still_answers",
+        "test_the_host_moves_once_the_named_server_answers",
+        "test_an_exported_port_is_never_followed",
+    } else LONG_POLL_SEC
+    server.reject_client = test_name == "test_retired_client_exits_for_fresh_identity"
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, thread
+
+
+def stop_peer(server, thread):
+    server.shutdown()
+    server.server_close()
+    thread.join()
 
 
 def encode_frame(value):
@@ -72,13 +123,24 @@ class Peer(http.server.BaseHTTPRequestHandler):
             return
         self.server.identities.append((client_id, self.headers.get("x-browser-name"),
             self.headers.get("x-browser-version"), self.headers.get("x-browser-engine-version")))
-        if self.path == "/browser-lane/poll":
+        if self.path == "/browser-lane/ping":
+            # The lane answers without registering a client.
+            self.server.ping_seen.set()
+            response = {"ok": True}
+        elif self.path == "/browser-lane/poll":
             self.server.poll_seen.set()
+            if self.server.failed_poll_answered.is_set():
+                self.server.polls_after_failure.set()
             if self.server.reject_client:
                 self.send_error(400)
                 return
+            if self.server.fail_next_poll.is_set():
+                self.server.fail_next_poll.clear()
+                self.server.failed_poll_answered.set()
+                self.send_error(500)
+                return
             try:
-                response = self.server.commands.get(timeout=10)
+                response = self.server.commands.get(timeout=self.server.poll_wait_sec)
             except queue.Empty:
                 response = {"ok": True, "empty": True}
         elif self.path == "/browser-lane/result":
@@ -107,28 +169,32 @@ class NativeHost(unittest.TestCase):
         token = base / ".masc/browser-lane/token"
         token.parent.mkdir(parents=True)
         token.write_text(TOKEN)
-        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Peer)
-        self.server.commands = queue.Queue()
-        self.server.results = queue.Queue()
-        self.server.poll_seen = threading.Event()
-        self.server.disconnected = threading.Event()
-        self.server.identities = []
-        self.server.reject_client = self._testMethodName == "test_retired_client_exits_for_fresh_identity"
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
-        self.thread.start()
-        # One test omits --server so the workspace connection.toml decides the
-        # destination, the resolution this file pins for every other client.
-        workspace_connection_port = {
-            "test_workspace_connection_port_is_followed": self.server.server_port,
-        }.get(self._testMethodName)
+        self.server, self.thread = start_peer(self._testMethodName)
+        self.peers = []
+        # The FOLLOWS_WORKSPACE tests omit --server so the workspace
+        # connection.toml decides the destination; every other client is
+        # fixed to this server with --server. The one that starts on a port
+        # nothing listens on reaches this server only by reading the file
+        # again after its failed poll.
+        workspace_connection_port = closed_port() \
+            if self._testMethodName == "test_failed_poll_reads_the_workspace_port_again" \
+            else self.server.server_port
         argv = [str(HOST), "--base-path", str(base)]
-        if workspace_connection_port is None:
-            argv += ["--server", f"http://127.0.0.1:{self.server.server_port}"]
+        self.connection = base / ".masc/config/connection.toml"
+        # An exported MASC_HTTP_BASE_URL or MASC_HTTP_PORT outranks the file.
+        env = {key: value for key, value in os.environ.items() if not key.startswith("MASC_")}
+        if self._testMethodName == "test_an_exported_port_is_never_followed":
+            # The file names a port nothing listens on; the environment names
+            # this server, and a fixed address is never pinged or moved.
+            self.connection.parent.mkdir(parents=True)
+            self.connection.write_text(f"[server]\nhttp_port = {closed_port()}\n")
+            env["MASC_HTTP_PORT"] = str(self.server.server_port)
+        elif self._testMethodName in FOLLOWS_WORKSPACE:
+            self.connection.parent.mkdir(parents=True)
+            self.connection.write_text(f"[server]\nhttp_port = {workspace_connection_port}\n")
         else:
-            connection = base / ".masc/config/connection.toml"
-            connection.parent.mkdir(parents=True)
-            connection.write_text(f"[server]\nhttp_port = {workspace_connection_port}\n")
-        self.process = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            argv += ["--server", f"http://127.0.0.1:{self.server.server_port}"]
+        self.process = subprocess.Popen(argv, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         metadata = read_frame(self.process.stdout)
         self.assertEqual(metadata["verb"], "browser.info")
         self.assertFalse(self.server.poll_seen.is_set(), "must discover actual browser before polling")
@@ -153,9 +219,9 @@ class NativeHost(unittest.TestCase):
         self.process.stderr.close()
         if not self.process.stdin.closed:
             self.process.stdin.close()
-        self.server.shutdown()
-        self.server.server_close()
-        self.thread.join()
+        stop_peer(self.server, self.thread)
+        for server, thread in self.peers:
+            stop_peer(server, thread)
         self.temporary.cleanup()
 
     def assert_command(self, command):
@@ -172,6 +238,43 @@ class NativeHost(unittest.TestCase):
     def test_workspace_connection_port_is_followed(self):
         self.assertTrue(self.server.poll_seen.wait(timeout=5))
         self.assertTrue(self.server.identities)
+
+    def test_failed_poll_reads_the_workspace_port_again(self):
+        # The server restarted on another port and rewrote connection.toml.
+        # The host's first poll went to the port it read at launch and failed.
+        self.connection.write_text(f"[server]\nhttp_port = {self.server.server_port}\n")
+        self.assertTrue(self.server.poll_seen.wait(timeout=POLL_RETRY_WAIT_SEC))
+        self.assertEqual(len({identity[0] for identity in self.server.identities}), 1)
+
+    def test_a_failed_poll_stays_while_the_server_still_answers(self):
+        # connection.toml is only the desired port: another command may name
+        # a port while this server keeps serving. A failed poll alone moves
+        # nothing, even when a server also answers at the named port.
+        self.assertTrue(self.server.poll_seen.wait(timeout=5))
+        other, other_thread = start_peer(self._testMethodName)
+        self.peers.append((other, other_thread))
+        self.connection.write_text(f"[server]\nhttp_port = {other.server_port}\n")
+        self.server.fail_next_poll.set()
+        self.assertTrue(self.server.polls_after_failure.wait(timeout=POLL_RETRY_WAIT_SEC))
+        self.assertTrue(self.server.ping_seen.is_set(), "the host asks its server before staying")
+        self.assertFalse(other.ping_seen.is_set(), "a server that still answers is not left")
+        self.assertEqual(other.identities, [])
+
+    def test_the_host_moves_once_the_named_server_answers(self):
+        self.assertTrue(self.server.poll_seen.wait(timeout=5))
+        other, other_thread = start_peer(self._testMethodName)
+        self.peers.append((other, other_thread))
+        self.connection.write_text(f"[server]\nhttp_port = {other.server_port}\n")
+        stop_peer(self.server, self.thread)
+        self.assertTrue(other.poll_seen.wait(timeout=POLL_RETRY_WAIT_SEC))
+        self.assertTrue(other.ping_seen.is_set(), "the host moves only after the new server answers")
+        self.assertEqual(len({identity[0] for identity in self.server.identities + other.identities}), 1)
+
+    def test_an_exported_port_is_never_followed(self):
+        self.assertTrue(self.server.poll_seen.wait(timeout=5))
+        self.server.fail_next_poll.set()
+        self.assertTrue(self.server.polls_after_failure.wait(timeout=POLL_RETRY_WAIT_SEC))
+        self.assertFalse(self.server.ping_seen.is_set(), "a fixed address has nothing to compare")
 
     def test_retired_client_exits_for_fresh_identity(self):
         self.assertTrue(self.server.poll_seen.wait(timeout=5))

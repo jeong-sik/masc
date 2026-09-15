@@ -305,7 +305,6 @@ let make_tool_bundle_for_descriptors_with_policy
              Some
                (Agent_core.Tool.ordinary_descriptor
                   Agent_core.Tool_contract.Concurrent)
-           | Keeper_tool_descriptor.Direct_terminal
            | Keeper_tool_descriptor.Terminal ->
              Some
                (Agent_core.Tool.terminal_descriptor
@@ -313,7 +312,6 @@ let make_tool_bundle_for_descriptors_with_policy
          in
          let on_completed, on_failed, on_externalization_error =
            match descriptor.execution with
-           | Keeper_tool_descriptor.Direct_terminal
            | Keeper_tool_descriptor.Terminal ->
              ( Some
                  (function
@@ -349,13 +347,22 @@ let make_tool_bundle_for_descriptors_with_policy
                    match failure.Keeper_tools_agent_core.effect_disposition with
                    | Tool_result.Proven_post_effect -> mark_terminal_effect_failed failure
                    | Tool_result.Proven_pre_effect | Tool_result.Effect_outcome_unknown -> ())
+               (* A failed memory write or retract goes back to the model
+                  whatever it committed, because doing it again adds no
+                  second copy: the same claim is the same fact (an ordinary
+                  fact is keyed by its claim's SHA-256, a source-bound one by
+                  its path), and retracting a fact that is gone commits
+                  nothing. The result names what committed, so the Keeper can
+                  read memory before it tries again. *)
+               | Keeper_tool_descriptor.Tool_memory_retract
+               | Keeper_tool_descriptor.Tool_memory_write ->
+                 None
                (* A code query starts a language server, but the pool owns it
                   and the turn ends it either way, so a failed call leaves the
                   caller holding nothing. It answers with the readers. *)
                | ( Keeper_tool_descriptor.Tool_keeper_code_query_dispatch
                  | Keeper_tool_descriptor.Tool_search_files
                  | Keeper_tool_descriptor.Tool_read_file
-                 | Keeper_tool_descriptor.Tool_time_now
                  | Keeper_tool_descriptor.Tool_lane_status
                  | Keeper_tool_descriptor.Tool_tools_list
                  | Keeper_tool_descriptor.Tool_capability_search
@@ -363,8 +370,6 @@ let make_tool_bundle_for_descriptors_with_policy
                  | Keeper_tool_descriptor.Tool_artifact_read
                  | Keeper_tool_descriptor.Tool_workspace_memory_read
                  | Keeper_tool_descriptor.Tool_memory_search
-                 | Keeper_tool_descriptor.Tool_memory_retract
-                 | Keeper_tool_descriptor.Tool_memory_write
                  | Keeper_tool_descriptor.Tool_constitution_write
                  | Keeper_tool_descriptor.Tool_constitution_remove
                  | Keeper_tool_descriptor.Tool_library_search

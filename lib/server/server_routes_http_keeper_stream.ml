@@ -1365,13 +1365,12 @@ let canonical_reply_payload_of_body ~redact_text body =
   in
   let* external_effect_target =
     (* The outcome and the terminal-effect receipt are decided from the same
-       [terminal_effect_state] (keeper_agent_run.ml), so an
-       External_effect_completed payload carries exactly one receipt proof:
-       the surface-post delivery target, or a memory-write revision
-       (keeper_turn.ml terminal_effect_fields). The decoder holds both
-       directions for each key - present iff that outcome - so [Some] here
-       is the proof the External_effect_completed event needs, and [None] on
-       that outcome means the completed effect was a memory write. *)
+       [terminal_effect_state] (keeper_agent_run.ml), and the only terminal
+       effect receipt is a surface post (keeper_turn.ml
+       terminal_effect_fields). The decoder holds both directions - the
+       delivery target is present iff the outcome is Terminal_effect_settled -
+       so [Some] here is the proof the External_effect_completed event
+       needs. *)
     let completed_external_effect =
       Keeper_turn_outcome.equal turn_outcome
         Keeper_turn_outcome.Terminal_effect_settled
@@ -1382,38 +1381,13 @@ let canonical_reply_payload_of_body ~redact_text body =
            if String.equal field key then Some value else None)
         fields
     in
-    let* memory_revision =
-      match values_of Keeper_tool_execution.memory_revision_wire_key with
-      | [] -> Ok None
-      | [ value ] ->
-        if not completed_external_effect
-        then
-          Error
-            (Invalid_external_effect_target
-               (Printf.sprintf
-                  "%s present on turn_outcome %s"
-                  Keeper_tool_execution.memory_revision_wire_key
-                  (Keeper_turn_outcome.to_label turn_outcome)))
-        else (
-          match value with
-          | `Int revision -> Ok (Some revision)
-          | _ ->
-            Error
-              (Invalid_payload_field_type
-                 Keeper_tool_execution.memory_revision_wire_key))
-      | _ ->
-        Error
-          (Duplicate_payload_field
-             Keeper_tool_execution.memory_revision_wire_key)
-    in
     match values_of Keeper_surface_post.delivery_target_wire_key with
     | [] ->
-      (match completed_external_effect, memory_revision with
-       | false, _ -> Ok None
-       | true, Some _ -> Ok None
-       | true, None ->
-         Error
-           (Missing_payload_field Keeper_surface_post.delivery_target_wire_key))
+      if completed_external_effect
+      then
+        Error
+          (Missing_payload_field Keeper_surface_post.delivery_target_wire_key)
+      else Ok None
     | [ value ] ->
       if not completed_external_effect
       then
@@ -1422,14 +1396,6 @@ let canonical_reply_payload_of_body ~redact_text body =
              (Printf.sprintf
                 "present on turn_outcome %s"
                 (Keeper_turn_outcome.to_label turn_outcome)))
-      else if Option.is_some memory_revision
-      then
-        Error
-          (Invalid_external_effect_target
-             (Printf.sprintf
-                "carries both %s and %s"
-                Keeper_surface_post.delivery_target_wire_key
-                Keeper_tool_execution.memory_revision_wire_key))
       else (
         match Keeper_surface_post.delivery_target_of_yojson value with
         | Ok target -> Ok (Some target)

@@ -1,10 +1,10 @@
 (** Durable delivery after a completion authority (system LLM or HITL) rejects
     submitted evidence. A live wake is only an acceleration hint; the typed
-    rejection is committed to the producer Keeper's queue first. When a live
-    registry entry exists, its exact [agent_name] binding is authoritative. A
-    stopped producer is resolved from the same [agent_name] field in persisted
-    Keeper metadata; an absent or ambiguous binding remains an explicit typed
-    delivery failure. *)
+    rejection is committed to the producer Keeper's queue first. The producer
+    is resolved by {!Keeper_producer_route}: a live registry entry, then a
+    Keeper meta file at the producer's name. A producer with neither is
+    {!Unroutable_producer} — no Keeper queue exists for it — while a meta file
+    this binary cannot decode is {!Producer_identity_lookup_failed}. *)
 
 type delivery =
   | Signaled of { keeper_name : string }
@@ -31,12 +31,17 @@ val wake_rejected_producer :
   delivery
 
 
-type recovery_report = { delivered : int; retained : int }
+type recovery_report = { delivered : int; unroutable : int; retained : int }
 
 val reconcile_pending :
   config:Workspace_utils_backend_setup.config -> (recovery_report, string) result
 (** Deliver verdict-committed repair obligations from the authoritative backlog.
     A durable Keeper queue write precedes exact-key source acknowledgment.
-    Identity/queue/ack failures retain the obligation for the next recovery.
-    Delivery is at least once across the queue-write/source-ack crash window;
-    the verification-keyed stimulus is information, not permission to mutate. *)
+    Identity lookup, queue and acknowledgement failures retain the obligation
+    for the next recovery. An {!Unroutable_producer} returns the Task to the
+    backlog and is then acknowledged and counted in [unroutable]: retrying
+    cannot create a Keeper queue, and a Task whose producer will never act
+    again has to be claimable by someone else. The verdict's reason and
+    verification id travel with it on the handoff context. Delivery is at
+    least once across the queue-write/source-ack crash window; the
+    verification-keyed stimulus is information, not permission to mutate. *)

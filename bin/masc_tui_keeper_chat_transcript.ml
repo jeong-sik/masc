@@ -637,7 +637,6 @@ let handler_activity_kind handler =
   | Tool_read_file
   | Tool_edit_file
   | Tool_write_file
-  | Tool_time_now
   | Tool_lane_status
   | Tool_tools_list
   | Tool_capability_search
@@ -1208,7 +1207,15 @@ let phase_text ~now t =
          and stuck. The queue length is the server's count of the whole queue,
          so it is drawn as that and not as "how many are ahead of you". *)
       match t.admission with
-      | None -> "waiting for the run to start"
+      (* Nothing has come back, so nothing is known about a run. The arm read
+         "waiting for the run to start", which the heading beside it already
+         says (WAITING TO START) and which the Running arm below means once
+         the server has accepted -- the one state that knows nothing read as
+         the state that is about to begin. Admission in
+         masc_tui_keeper_chat_live.mli names that wording as what left a wait
+         of minutes with no way to tell a busy keeper from a stuck one, and
+         says a pane may report that the request went out and nothing more. *)
+      | None -> "sent; not accepted yet"
       | Some (Live.Queued, queue_length) ->
           Printf.sprintf "queued \xc2\xb7 %s in the keeper's queue"
             (Masc_tui_message_layout.count_noun queue_length "message")

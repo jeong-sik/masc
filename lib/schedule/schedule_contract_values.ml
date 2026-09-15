@@ -136,3 +136,30 @@ let wake_status_of_string =
 ;;
 
 let wake_status_strings = List.map wake_status_to_string wake_statuses
+
+(* Whose schedules [masc_schedule_list] reads. A schedule names two actors: the
+   one that created it ([scheduled_by.id]) and the Keeper it wakes (the wake
+   payload's [keeper_name]). They agree on most rows and are still different
+   facts, so each is its own selector. [Owner_self] is the caller on either
+   side; [Owner_all] is every row, asked for by name rather than by omission. *)
+type owner_kind =
+  | Owner_self
+  | Owner_wake_target
+  | Owner_scheduled_by
+  | Owner_all
+[@@deriving enumerate]
+
+let owner_kinds = all_of_owner_kind
+
+let owner_kind_to_string = function
+  | Owner_self -> "self"
+  | Owner_wake_target -> "wake_target"
+  | Owner_scheduled_by -> "scheduled_by"
+  | Owner_all -> "all"
+;;
+
+let owner_kind_of_string =
+  decode_wire_value ~field:"owner" ~to_string:owner_kind_to_string owner_kinds
+;;
+
+let owner_kind_strings = List.map owner_kind_to_string owner_kinds

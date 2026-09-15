@@ -760,7 +760,7 @@ let test_composition_action_context_persisted () =
    a per-run cell, read back as a record, passed explicitly to log_call. *)
 let test_composition_rows_separate_submitted_from_autonomous_turn () =
   with_tmp_log (fun () ->
-    let node_ids = [ "clock"; "board"; "board-peer"; "memory" ] in
+    let node_ids = [ "tasks"; "board"; "answers"; "scheduled" ] in
     let log_composition_run ~turn_kind ~keeper_turn_id ~run_id =
       let cell = Keeper_tool_call_log.create_turn_ctx_cell () in
       Keeper_tool_call_log.set_turn_context
@@ -790,7 +790,7 @@ let test_composition_rows_separate_submitted_from_autonomous_turn () =
              ?trace_id:context.trace_id
              ?session_id:context.session_id
              ?keeper_turn_id:context.keeper_turn_id
-             ~composition_tool:"keeper_compose_mission-snapshot"
+             ~composition_tool:"keeper_compose_work-intake"
              ~composition_run_id:run_id
              ~composition_node_id:node_id
              ~composition_execution:Keeper_tool_composition_catalog.Inline
@@ -1341,10 +1341,10 @@ let test_route_evidence_records_internal_descriptor () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
       ~keeper_name:"omega"
-      ~tool_name:"keeper_time_now"
+      ~tool_name:"keeper_lane_status"
       ~input:(`Assoc [])
       ~output_text:
-        {|{"ok":true,"iso":"2026-05-26T00:00:00Z","epoch":1780000000}|}
+        {|{"profile":"docker","lane":null,"endpoint":null,"operator_action":null}|}
       ~success:true
       ~duration_ms:1.0
       ();
@@ -1354,16 +1354,16 @@ let test_route_evidence_records_internal_descriptor () =
     | [ entry ] ->
       let evidence = Yojson.Safe.Util.member "route_evidence" entry in
       Alcotest.(check (option string)) "tool name"
-        (Some "keeper_time_now")
+        (Some "keeper_lane_status")
         (Safe_ops.json_string_opt "tool_name" evidence);
       Alcotest.(check (option string)) "descriptor id"
-        (Some "keeper.time.now")
+        (Some "keeper.lane.status")
         (Safe_ops.json_string_opt "descriptor_id" evidence);
       Alcotest.(check (option string)) "public name"
-        (Some "keeper_time_now")
+        (Some "keeper_lane_status")
         (Safe_ops.json_string_opt "public_name" evidence);
       Alcotest.(check (option string)) "canonical name"
-        (Some "keeper_time_now")
+        (Some "keeper_lane_status")
         (Safe_ops.json_string_opt "canonical_name" evidence);
       Alcotest.(check (option string)) "executor"
         (Some "in_process")
@@ -1375,7 +1375,7 @@ let test_route_evidence_records_internal_descriptor () =
         (Some "none")
         (Safe_ops.json_string_opt "sandbox" evidence);
       Alcotest.(check (option string)) "runtime handler"
-        (Some "tool_time_now")
+        (Some "tool_lane_status")
         (Safe_ops.json_string_opt "runtime_handler" evidence)
     | _ -> Alcotest.fail "expected exactly one entry")
 
@@ -1437,7 +1437,7 @@ let test_route_evidence_records_descriptor_eval_tags () =
   check_eval_tags "keeper_tools_list" [ "capability_introspection" ];
   check_eval_tags "keeper_surface_read" [ "surface_context_read" ];
   check_eval_tags "masc_agent_card" [ "agent_profile_lookup" ];
-  check_eval_tags "keeper_time_now" []
+  check_eval_tags "keeper_lane_status" []
 ;;
 
 let test_non_object_input_still_logs_action_radius () =

@@ -1244,9 +1244,9 @@ let test_stdio_entrypoint_uses_shared_base_path_guard () =
   in
   check bool "stdio resolves base path through shared guard" true
     (String_util.contains_substring source
-       "Server_base_path_guard.resolve_startup_base_path");
-  check bool "stdio enforces shared base path guard" true
-    (String_util.contains_substring source "Server_base_path_guard.enforce");
+       "Server_base_path_guard.startup_root");
+  check bool "stdio refuses to start without a workspace" true
+    (String_util.contains_substring source "Server_base_path_guard.exit_on_no_workspace");
   check bool "stdio uses common owner initialization" true
     (String_util.contains_substring source
        "Server_runtime_bootstrap.initialize_owner_state_blocking");

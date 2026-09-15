@@ -297,15 +297,11 @@ val list_posts_by_run_origin : store -> post list
     {!with_lock} block to avoid the two-call lock churn
     that previously surfaced as
     [Mutex.lock: Resource deadlock avoided] under contended
-    repeated agent polling.  Omitted pagination arguments preserve
-    the full-thread read; supplied pagination arguments are clamped
-    to the board comment page limits. *)
+    repeated agent polling.  Returns the whole thread in {!get_comments}
+    order; paging is {!Board_types.Comment_page}'s job. *)
 val get_post_and_comments
   :  store
   -> post_id:string
-  -> ?comment_offset:int
-  -> ?comment_limit:int
-  -> unit
   -> (post * comment list, board_error) Result.t
 
 (** Returns posts sorted by [(score desc, created_at desc)]
@@ -358,16 +354,17 @@ val add_comment_with_audience
 (** Validate and freeze comment routing before the Board mutation, returning
     the same audience with the committed comment. *)
 
-(** Returns the comments for [post_id] sorted by
-    [created_at] ascending. *)
+(** Returns the comments for [post_id] oldest first: by [created_at], and by
+    comment id among comments with the same [created_at], so every read of an
+    unchanged thread returns the same order. *)
 val get_comments : store -> post_id:string -> (comment list, board_error) Result.t
 
 (** Returns one comment by id. *)
 val get_comment : store -> comment_id:string -> (comment, board_error) Result.t
 
 (** Returns up to [limit] (default 1000) most recent
-    comments across every post.  Used by the profile
-    aggregator. *)
+    comments across every post, newest first in the reverse of
+    {!get_comments} order.  Used by the profile aggregator. *)
 val list_comments : store -> ?limit:int -> unit -> comment list
 
 (** {1 Reaction operations} *)

@@ -220,24 +220,43 @@ let client_json info = `Assoc ["clientId", `String (client_id_to_string info.cli
   "browser", `String (browser_name info.browser); "version", `String info.version;
   "engineVersion", `String info.engine_version]
 let target_client_id = function Automation -> None | Live_client client -> Some client.info.client_id
-let resolve_target ~lane_name ~client_id =
-  match lane_name, client_id with
-  | "automation", None -> Ok Automation
-  | "automation", Some _ -> Error "client_id_requires_live"
-  | "live", selected ->
+
+(* Which backend a request names. A browser client id belongs to the live
+   source, so a request for the automation backend has nowhere to carry one. *)
+type route = Automation_route | Live_route of client_id option
+
+(* Why a live request names no browser to send its command to. Each case has
+   a different next step: a browser has to connect, or the caller has to
+   choose one of several. No command is dispatched in any of them. *)
+type selection_error =
+  | No_live_client
+  | Selected_client_disconnected of client_id
+  | Ambiguous_clients of client_id list
+
+let selection_error_code = function
+  | No_live_client -> "no_live_client"
+  | Selected_client_disconnected _ -> "selected_client_disconnected"
+  | Ambiguous_clients _ -> "ambiguous_browser_clients"
+
+let resolve_target = function
+  | Automation_route -> Ok Automation
+  | Live_route selected ->
     Eio.Mutex.use_rw ~protect:true clients_mutex (fun () ->
       prune_unlocked ();
       match selected with
       | Some id ->
         (match Hashtbl.find_opt clients (client_id_to_string id) with
          | Some client when connected client -> Ok (Live_client client)
-         | Some _ | None -> Error "client_not_connected")
+         | Some _ | None -> Error (Selected_client_disconnected id))
       | None ->
         match Hashtbl.fold (fun _ client acc -> if connected client then client :: acc else acc) clients [] with
         | [client] -> Ok (Live_client client)
-        | [] -> Error "client_not_connected"
-        | _ :: _ -> Error "ambiguous_browser_clients")
-  | _ -> Error "unknown_lane"
+        | [] -> Error No_live_client
+        | _ :: _ as several ->
+          Error (Ambiguous_clients
+            (List.map (fun client -> client.info.client_id) several
+             |> List.sort (fun left right ->
+                  String.compare (client_id_to_string left) (client_id_to_string right)))))
 let register info =
   Eio.Mutex.use_rw ~protect:true clients_mutex (fun () ->
     prune_unlocked ();
@@ -287,12 +306,16 @@ let disconnect_client ~client_id =
     | None when Hashtbl.mem retired_clients key -> Ok ()
     | None -> Error "unknown_client"
     | Some client -> retire_unlocked key client; Ok ())
+(* A browser whose lease ended after its target was resolved is the same
+   selection failure as naming it when it had already gone, so the caller
+   answers both from one place. *)
 let issue_live ?(only_if_idle = false) client ~verb ~timeout_sec =
-  if not (connected client) then Rejected_before_effect "client_not_connected"
+  if not (connected client) then
+    Error (Selected_client_disconnected client.info.client_id)
   else if not (verb_allowed_on_live verb) then
-    Rejected_before_effect "session ownership and direct navigation belong to the automation lane"
+    Ok (Rejected_before_effect "session ownership and direct navigation belong to the automation lane")
   else
-    Eio.Switch.run (fun sw ->
+    Ok (Eio.Switch.run (fun sw ->
       let id = Uuidm.to_string (command_uuid ()) in
       let promise, resolver = Eio.Promise.create () in
       let accepted = Eio.Mutex.use_rw ~protect:true client.mutex (fun () ->
@@ -306,23 +329,25 @@ let issue_live ?(only_if_idle = false) client ~verb ~timeout_sec =
       else Watched_work.run
         (fun () -> Eio.Stream.add client.commands {id; verb_json=verb_json verb};
           Answered (Eio.Promise.await promise))
-        ~watcher:(fun () -> Time_compat.sleep timeout_sec; Timed_out))
+        ~watcher:(fun () -> Time_compat.sleep timeout_sec; Timed_out)))
+(* The port this process serves the browser-lane routes on, installed once
+   the HTTP listener is bound. A process that serves no routes has none. *)
+let serving_port_cell : int option Atomic.t = Atomic.make None
+let install_serving_port port = Atomic.set serving_port_cell (Some port)
+let serving_port () = Atomic.get serving_port_cell
 let automation_executor : (verb -> answer) option Atomic.t = Atomic.make None
 let install_automation_executor executor = Atomic.set automation_executor executor
 let automation_document_observer : (tab_id:int -> answer) option Atomic.t = Atomic.make None
 let install_automation_document_observer observer = Atomic.set automation_document_observer observer
+let issue_automation ~verb ~timeout_sec =
+  match Atomic.get automation_executor with
+  | None -> Lane_absent
+  | Some execute -> Watched_work.run (fun () -> execute verb)
+      ~watcher:(fun () -> Time_compat.sleep timeout_sec; Timed_out)
 let issue_for ~target ~verb ~timeout_sec =
   match target with
   | Live_client client -> issue_live client ~verb ~timeout_sec
-  | Automation ->
-    match Atomic.get automation_executor with
-    | None -> Lane_absent
-    | Some execute -> Watched_work.run (fun () -> execute verb)
-        ~watcher:(fun () -> Time_compat.sleep timeout_sec; Timed_out)
-let issue ~lane_name ~verb ~timeout_sec =
-  match resolve_target ~lane_name ~client_id:None with
-  | Error error -> Rejected_before_effect error
-  | Ok target -> issue_for ~target ~verb ~timeout_sec
+  | Automation -> Ok (issue_automation ~verb ~timeout_sec)
 
 (** Additional observations never queue behind an existing browser command.
     Busy or missing browsers leave this optional source unavailable. The caller
@@ -331,16 +356,16 @@ let issue_document_if_idle ~target ~tab_id ~timeout_sec =
   match target with
   | Live_client client ->
     (match issue_live ~only_if_idle:true client ~verb:(Page_document {tab_id}) ~timeout_sec with
-     | Answered (`Assoc fields) ->
+     | Ok (Answered (`Assoc fields)) ->
        (match List.assoc_opt "data" fields with
         | Some (`Assoc data) ->
           let data = `Assoc (("clientId", `String (client_id_to_string client.info.client_id))
                             :: List.remove_assoc "clientId" data) in
-          Answered (`Assoc (("data", data) :: List.remove_assoc "data" fields))
-        | Some _ | None -> Answered (`Assoc fields))
+          Ok (Answered (`Assoc (("data", data) :: List.remove_assoc "data" fields)))
+        | Some _ | None -> Ok (Answered (`Assoc fields)))
      | answer -> answer)
   | Automation ->
     match Atomic.get automation_document_observer with
-    | None -> Lane_absent
-    | Some observe -> Watched_work.run (fun () -> observe ~tab_id)
-        ~watcher:(fun () -> Time_compat.sleep timeout_sec; Timed_out)
+    | None -> Ok Lane_absent
+    | Some observe -> Ok (Watched_work.run (fun () -> observe ~tab_id)
+        ~watcher:(fun () -> Time_compat.sleep timeout_sec; Timed_out))

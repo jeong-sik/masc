@@ -10,7 +10,7 @@ let () =
   let options =
     [ "--bidi-url", Arg.String (set bidi_url), "URL Attach to an explicitly enabled loopback Firefox BiDi endpoint"
     ; "--base-path", Arg.String (set base_path), "PATH Workspace containing .masc (or MASC_BASE_PATH)"
-    ; "--server", Arg.String (set server), "URL MASC HTTP server (or existing MASC HTTP configuration)"
+    ; "--server", Arg.String (set server), "URL Fixed MASC HTTP server; without it the port comes from the workspace connection.toml, followed after a failed request only to an address that answers the lane"
     ; "--token-file", Arg.String (set token_file), "PATH Lane token (default: <base-path>/.masc/browser-lane/token)"
     ]
   in

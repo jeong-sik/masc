@@ -1392,59 +1392,228 @@ let create_post_with_comments ~count =
   done;
   post_id
 
-let check_get_footer ~label post_id args expected =
-  let ok, body =
-    dispatch "masc_board_post_get" (make_args (("post_id", `String post_id) :: args))
-  in
-  Alcotest.(check bool) (label ^ " get ok") true ok;
-  Alcotest.(check bool) label true (String_util.contains_substring body expected)
+let post_get_args post_id args = make_args (("post_id", `String post_id) :: args)
 
-let test_post_get_comment_pagination_clamps_and_advances () =
+let get_page ~label post_id args =
+  let ok, body = dispatch "masc_board_post_get" (post_get_args post_id args) in
+  Alcotest.(check bool) (label ^ " get ok") true ok;
+  body
+
+let check_get_page ~label post_id args expected =
+  Alcotest.(check bool)
+    (label ^ ": " ^ expected)
+    true
+    (String_util.contains_substring (get_page ~label post_id args) expected)
+
+let check_get_rejected ~label post_id args expected =
+  let result = dispatch_result "masc_board_post_get" (post_get_args post_id args) in
+  Alcotest.(check bool) (label ^ " is not a successful read") false
+    (Tool_result.is_success result);
+  check_failure_class (label ^ " needs a corrected call") (Some "workflow_rejection") result;
+  Alcotest.(check bool)
+    (label ^ ": " ^ expected)
+    true
+    (String_util.contains_substring (Tool_result.message result) expected)
+
+let add_comment_id ~post_id ?parent_id content =
+  let parent_arg =
+    match parent_id with
+    | Some parent -> [ "parent_id", `String parent ]
+    | None -> []
+  in
+  let ok, body =
+    dispatch
+      "masc_board_comment"
+      (make_args
+         ([ "post_id", `String post_id
+          ; "content", `String content
+          ; "author", `String "thread-reader"
+          ]
+          @ parent_arg))
+  in
+  Alcotest.(check bool) (content ^ " comment ok") true ok;
+  parse_create_response_json body |> Yojson.Safe.Util.member "id" |> Yojson.Safe.Util.to_string
+
+let next_offset_marker = "next_offset="
+
+(* Reads the page's own next_offset field, the way a caller continues. *)
+let next_offset_of_page body =
+  let marker_length = String.length next_offset_marker in
+  let rec find index =
+    if index + marker_length > String.length body
+    then Alcotest.failf "page names no next_offset: %s" body
+    else if String.equal (String.sub body index marker_length) next_offset_marker
+    then index + marker_length
+    else find (index + 1)
+  in
+  let start = find 0 in
+  let rec digits_end index =
+    if index < String.length body && body.[index] >= '0' && body.[index] <= '9'
+    then digits_end (index + 1)
+    else index
+  in
+  let stop = digits_end start in
+  if stop > start
+  then Some (int_of_string (String.sub body start (stop - start)))
+  else if String_util.contains_substring body (next_offset_marker ^ "none")
+  then None
+  else Alcotest.failf "unreadable next_offset: %s" body
+
+let test_post_get_comment_pages_name_their_range () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let post_id = create_post_with_comments ~count:105 in
-  check_get_footer
-    ~label:"default limit"
+  check_get_page
+    ~label:"default page"
     post_id
     []
-    "Showing comments 1-50 of 105. Use comment_offset=50 to see more.";
-  check_get_footer
-    ~label:"over max limit"
-    post_id
-    [ "comment_limit", `Int 999 ]
-    "Showing comments 1-100 of 105. Use comment_offset=100 to see more.";
-  check_get_footer
-    ~label:"zero limit clamps to one"
-    post_id
-    [ "comment_limit", `Int 0 ]
-    "Showing comments 1-1 of 105. Use comment_offset=1 to see more.";
-  check_get_footer
-    ~label:"negative limit clamps to one"
-    post_id
-    [ "comment_limit", `Int (-10) ]
-    "Showing comments 1-1 of 105. Use comment_offset=1 to see more.";
-  check_get_footer
+    "[comment page: offset=0 shown=50 total=105 next_offset=50.";
+  check_get_page ~label:"header counts the thread it pages" post_id [] "[105 replies]";
+  check_get_page
     ~label:"normal page advances"
     post_id
     [ "comment_offset", `Int 2; "comment_limit", `Int 2 ]
-    "Showing comments 3-4 of 105. Use comment_offset=4 to see more.";
-  check_get_footer
-    ~label:"final page names returned range"
+    "[comment page: offset=2 shown=2 total=105 next_offset=4.";
+  check_get_page
+    ~label:"final page"
     post_id
     [ "comment_offset", `Int 100; "comment_limit", `Int 100 ]
-    "Showing comments 101-105 of 105. No more comments.";
-  check_get_footer
-    ~label:"offset at end is empty final page"
+    "[comment page: offset=100 shown=5 total=105 next_offset=none.";
+  check_get_rejected
+    ~label:"offset at the end"
     post_id
-    [ "comment_offset", `Int 105; "comment_limit", `Int 100 ]
-    "Showing comments 0 of 105. No more comments.";
+    [ "comment_offset", `Int 105 ]
+    "the thread has 105 comments, at offsets 0-104";
+  check_get_rejected
+    ~label:"negative offset"
+    post_id
+    [ "comment_offset", `Int (-1) ]
+    "comment_offset must be 0 or greater";
+  check_get_rejected
+    ~label:"limit over max"
+    post_id
+    [ "comment_limit", `Int 999 ]
+    "comment_limit must be between 1 and 100";
+  check_get_rejected
+    ~label:"zero limit"
+    post_id
+    [ "comment_limit", `Int 0 ]
+    "comment_limit must be between 1 and 100";
   let small_post_id = create_post_with_comments ~count:2 in
-  check_get_footer
-    ~label:"all comments only when first page spans whole thread"
+  check_get_page
+    ~label:"small thread in one page"
     small_post_id
     []
-    "Showing all 2 comments."
+    "[comment page: offset=0 shown=2 total=2 next_offset=none.";
+  let empty_post_id = create_post_with_comments ~count:0 in
+  check_get_page
+    ~label:"empty thread"
+    empty_post_id
+    []
+    "No comments.\n[comment page: offset=0 shown=0 total=0 next_offset=none.";
+  check_get_rejected
+    ~label:"offset into an empty thread"
+    empty_post_id
+    [ "comment_offset", `Int 1 ]
+    "the thread has no comments"
+
+(* A thread whose comments do not fit one inline result arrives as pages that
+   each do, chained by next_offset, and every comment is read exactly once. *)
+let test_post_get_long_thread_pages_fit_inline_and_chain () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let post_id = create_post_with_comments ~count:0 in
+  let long_comment_bytes = 1_500 in
+  let comment_count = 40 in
+  let ids =
+    List.init comment_count (fun index ->
+      add_comment_id
+        ~post_id
+        (Printf.sprintf "long-%03d %s" index (String.make long_comment_bytes 'x')))
+  in
+  let rec walk offset seen pages =
+    let body =
+      get_page
+        ~label:(Printf.sprintf "page at %d" offset)
+        post_id
+        [ "comment_offset", `Int offset ]
+    in
+    Alcotest.(check bool)
+      (Printf.sprintf "page at %d fits the inline ceiling" offset)
+      true
+      (String.length body <= Common.max_tool_result_wire_bytes);
+    let on_page = List.filter (fun id -> String_util.contains_substring body id) ids in
+    Alcotest.(check bool)
+      (Printf.sprintf "page at %d makes progress" offset)
+      true
+      (on_page <> []);
+    match next_offset_of_page body with
+    | Some next ->
+      Alcotest.(check int)
+        "next_offset starts after this page"
+        (offset + List.length on_page)
+        next;
+      walk next (seen @ on_page) (pages + 1)
+    | None -> seen @ on_page, pages
+  in
+  let seen, pages = walk 0 [] 1 in
+  Alcotest.(check bool) "the thread took more than one page" true (pages > 1);
+  Alcotest.(check int) "no comment is read twice" comment_count (List.length seen);
+  Alcotest.(check (list string))
+    "every comment is read"
+    (List.sort String.compare ids)
+    (List.sort String.compare seen)
+
+(* A reply chain deeper than the indentation cap is still drawn, so the page's
+   count and its lines are the same set of comments. *)
+let test_post_get_draws_replies_below_the_indent_cap () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let post_id = create_post_with_comments ~count:0 in
+  let chain_depth = 8 in
+  let root = add_comment_id ~post_id "depth-0" in
+  let _, ids =
+    List.fold_left
+      (fun (parent, ids) depth ->
+         let id =
+           add_comment_id ~post_id ~parent_id:parent (Printf.sprintf "depth-%d" depth)
+         in
+         id, ids @ [ id ])
+      (root, [ root ])
+      (List.init chain_depth (fun index -> index + 1))
+  in
+  let body = get_page ~label:"deep thread" post_id [] in
+  List.iter
+    (fun id ->
+       Alcotest.(check bool) (id ^ " is drawn") true (String_util.contains_substring body id))
+    ids;
+  let total = chain_depth + 1 in
+  check_get_page
+    ~label:"deep thread page"
+    post_id
+    []
+    (Printf.sprintf "[comment page: offset=0 shown=%d total=%d next_offset=none." total total);
+  check_get_page ~label:"deep thread header" post_id [] (Printf.sprintf "[%d replies]" total)
+
+(* The header counts the comments the read returned, not the stored counter. *)
+let test_post_get_header_counts_the_comments_it_read () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let post_id = create_post_with_comments ~count:3 in
+  let (Board_dispatch.Jsonl store) = Board_dispatch.backend () in
+  let post = Hashtbl.find store.Board.posts post_id in
+  let drifted_count = 999 in
+  Hashtbl.replace store.Board.posts post_id { post with Board.reply_count = drifted_count };
+  check_get_page ~label:"header" post_id [] "[3 replies]";
+  check_get_page
+    ~label:"page"
+    post_id
+    []
+    "[comment page: offset=0 shown=3 total=3 next_offset=none."
 
 let test_post_get_not_found () =
   with_eio @@ fun env ->
@@ -1919,9 +2088,21 @@ let () =
             test_post_list_filter_combinations;
           Alcotest.test_case "get success" `Quick test_post_get_success;
           Alcotest.test_case
-            "get comment pagination clamps and advances"
+            "get comment pages name their range"
             `Quick
-            test_post_get_comment_pagination_clamps_and_advances;
+            test_post_get_comment_pages_name_their_range;
+          Alcotest.test_case
+            "get long thread pages fit inline and chain"
+            `Quick
+            test_post_get_long_thread_pages_fit_inline_and_chain;
+          Alcotest.test_case
+            "get draws replies below the indent cap"
+            `Quick
+            test_post_get_draws_replies_below_the_indent_cap;
+          Alcotest.test_case
+            "get header counts the comments it read"
+            `Quick
+            test_post_get_header_counts_the_comments_it_read;
           Alcotest.test_case "get not found" `Quick test_post_get_not_found;
         ] );
       ( "voting",

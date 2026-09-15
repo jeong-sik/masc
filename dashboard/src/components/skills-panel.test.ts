@@ -121,14 +121,14 @@ function instructionSurface(
   }
 }
 
-const mission = entry('mission-snapshot')
+const priorArt = entry('prior-art')
 const intake = entry('work-intake')
 const broken = entry('broken')
 const surfaces: SkillSurface[] = [
   {
-    reference: reference(mission),
+    reference: reference(priorArt),
     kind: 'composition',
-    profile: surfaceProfile('inline', 'keeper_compose_mission-snapshot'),
+    profile: surfaceProfile('inline', 'keeper_compose_prior-art'),
   },
   instructionSurface(intake),
   {
@@ -410,10 +410,10 @@ describe('labels', () => {
 
   it('renders execution, context and current-user evidence from a profile', () => {
     const profiled: SkillSurface = {
-      reference: reference(mission),
+      reference: reference(priorArt),
       kind: 'composition',
       profile: {
-        activation_tool: 'keeper_compose_mission-snapshot',
+        activation_tool: 'keeper_compose_prior-art',
         execution: 'async',
         capabilities: {
           as_skill: true,

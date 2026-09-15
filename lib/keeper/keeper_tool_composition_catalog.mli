@@ -72,6 +72,20 @@ type error =
       { path : string list
       ; type_name : string
       }
+  | Param_enum_requires_string_type of
+      { path : string list
+      ; type_name : string
+      }
+  | Empty_param_enum of { path : string list }
+  | Empty_param_enum_value of { path : string list }
+  | Padded_param_enum_value of
+      { path : string list
+      ; value : string
+      }
+  | Duplicate_param_enum_value of
+      { path : string list
+      ; value : string
+      }
   | Duplicate_param_name of
       { name : string
       ; param : string
@@ -93,14 +107,20 @@ type execution_mode =
   | Inline
   | Async
 
-(** Scalar parameter types a composition can declare. The generated input
-    schema mirrors them, so the provider-side validation the model already
-    gets for every tool applies to composition arguments unchanged. *)
+(** Parameter types a composition can declare. The generated input schema
+    mirrors them, and Agent-Core checks every call against that schema before
+    the composition tool's handler runs, as it does for any other tool.
+
+    [Enum_param members] is a closed set of strings, written in the document
+    as [type = "string"] with [enum = [...]]. The list is non-empty and free of
+    repeats, and no member is empty or has leading or trailing whitespace;
+    each of these is a load error. *)
 type param_type =
   | String_param
   | Integer_param
   | Number_param
   | Boolean_param
+  | Enum_param of string list
 
 type param = private
   { param_name : string
@@ -168,8 +188,9 @@ val error_to_string : error -> string
 
 val input_schema_of_params : param list -> Yojson.Safe.t
 (** The model-visible input schema for an entry: an object with one required,
-    described property per declared param, closed to extras. The empty list
-    yields the zero-param object schema. *)
+    described property per declared param, closed to extras. An
+    [Enum_param] property is a string with its members under [enum]. The
+    empty list yields the zero-param object schema. *)
 
 type instantiation_error =
   | Missing_argument of string
@@ -186,4 +207,9 @@ val instantiate
 (** Bind one invocation's validated arguments into the entry's plan: every
     [Param] leaf becomes the caller's value and the param-free copy is
     revalidated by {!Keeper_tool_plan.create}. A zero-param entry returns its
-    declared plan unchanged. *)
+    declared plan unchanged.
+
+    The arguments are the ones Agent-Core already checked against
+    {!input_schema_of_params} before the composition handler ran, so a value
+    outside an [Enum_param]'s members never reaches binding. Binding does not
+    check them again. *)

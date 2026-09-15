@@ -121,6 +121,12 @@ let dispatch_exn ?continuation_channel config action args =
   | None -> fail ("schedule dispatch returned None: " ^ name)
 ;;
 
+(* Creation reads the dispatch clock and refuses a due time behind it, so a
+   schedule created through the tool is due in 2100 (2100-01-01T00:00:00Z).
+   Tests that drive the runner create through the service, where [now] is an
+   argument. *)
+let future_due_at = 4_102_444_800.0
+
 let create_args
       ?schedule_id
       ?(allow_unregistered_keeper = false)
@@ -128,7 +134,7 @@ let create_args
       ()
   =
   `Assoc
-    ([ "due_at_unix", `Float 200.0
+    ([ "due_at_unix", `Float future_due_at
      ; "keeper_name", `String "schedule-keeper"
      ; "message", `String message
      ; "requested_by_id", `String "operator"
@@ -145,7 +151,7 @@ let create_args
 
 let create_service_exn config ~schedule_id ~due_at ~payload ?recurrence () =
   match
-    Schedule_service.create config ~schedule_id ~requested_at:100.0
+    Schedule_service.create config ~now:100.0 ~schedule_id ~requested_at:100.0
       ~requested_by:(human "operator")
       ~scheduled_by:(automated "scheduler-agent")
       ~due_at ~payload ~source:Schedule_domain.Operator_request ?recurrence ()
@@ -232,7 +238,15 @@ let test_flat_tool_surface () =
   in
   check (list string) "get requires the durable schedule pointer"
     [ "schedule_id" ]
-    (required_names get_schema.input_schema)
+    (required_names get_schema.input_schema);
+  let list_schema : Masc_domain.tool_schema =
+    (schedule_definition Tool_schemas_schedule.List_requests).schema
+  in
+  (* 521 of the listing calls in September sent no arguments and read every
+     row. Whose rows is now a choice the call has to make. *)
+  check (list string) "list requires the owner selector"
+    [ "owner" ]
+    (required_names list_schema.input_schema)
 ;;
 
 let test_create_list_get_cancel () =
@@ -257,7 +271,7 @@ let test_create_list_get_cancel () =
      |> to_string);
   let list_result =
     dispatch_exn config Tool_schemas_schedule.List_requests
-      (`Assoc [ "limit", `Int 10 ])
+      (`Assoc [ "owner", `String "all"; "limit", `Int 10 ])
   in
   check bool "list succeeds" true (Tool_result.is_success list_result);
   check int "one schedule listed" 1
@@ -356,7 +370,12 @@ let test_update_requires_id_and_active_row () =
   check bool "refusal explains the state rule" true
     (String_util.contains_substring
        (Tool_result.message refused)
-       "only scheduled or due requests can be modified")
+       "only scheduled or due requests can be modified");
+  let open Yojson.Safe.Util in
+  check string "refusal names the status the row is in" "cancelled"
+    (Tool_result.data refused |> member "current_status" |> to_string);
+  check string "refusal names the attempted transition" "modify"
+    (Tool_result.data refused |> member "attempted" |> to_string)
 ;;
 
 (* The checkpoint encoder rejects an object that binds the same key twice,
@@ -390,7 +409,7 @@ let test_results_survive_the_checkpoint_encoder () =
   check_no_duplicate_keys "update result" (Tool_result.data update);
   let list_result =
     dispatch_exn config Tool_schemas_schedule.List_requests
-      (`Assoc [ "limit", `Int 10 ])
+      (`Assoc [ "owner", `String "all"; "limit", `Int 10 ])
   in
   check_no_duplicate_keys "list result" (Tool_result.data list_result);
   let get_result =
@@ -428,7 +447,7 @@ let test_creation_boundary_owns_result_delivery_destination () =
       Tool_schemas_schedule.Create_request
       (`Assoc
         [ "schedule_id", `String "sched-owned-result-destination"
-        ; "due_at_unix", `Float 200.0
+        ; "due_at_unix", `Float future_due_at
         ; "keeper_name", `String "schedule-keeper"
         ; "message", `String "return the result to the invoking thread"
         ])
@@ -529,11 +548,11 @@ let test_create_accepts_explicit_iso8601_offset () =
   let result =
     create
       ~schedule_id:"sched-kst-offset"
-      ~due_at_iso:"2026-08-02T09:00:00+09:00"
+      ~due_at_iso:"2099-08-02T09:00:00+09:00"
   in
   check bool "explicit ISO-8601 offset accepted" true (Tool_result.is_success result);
   let open Yojson.Safe.Util in
-  check string "offset normalized to UTC" "2026-08-02T00:00:00Z"
+  check string "offset normalized to UTC" "2099-08-02T00:00:00Z"
     (Tool_result.data result |> member "due_at_iso" |> to_string);
   let west =
     create
@@ -585,7 +604,7 @@ let test_removed_convenience_input_does_not_synthesize_payload () =
     dispatch_exn config Tool_schemas_schedule.Create_request
       (`Assoc
         [ "schedule_id", `String "sched-removed-convenience"
-        ; "due_at_unix", `Float 200.0
+        ; "due_at_unix", `Float future_due_at
         ; "board_content", `String "must not become a scheduled product effect"
         ; "requested_by_id", `String "operator"
         ; "scheduled_by_id", `String "scheduler-agent"
@@ -606,7 +625,7 @@ let test_unregistered_wake_target_rejected () =
   let ghost_args allow =
     `Assoc
       ([ "schedule_id", `String "sched-ghost-target"
-       ; "due_at_unix", `Float 200.0
+       ; "due_at_unix", `Float future_due_at
        ; "keeper_name", `String "ghost-keeper"
        ; "message", `String "wake for a keeper that does not exist"
        ; "requested_by_id", `String "operator"
@@ -672,7 +691,7 @@ let test_unknown_field_is_rejected_before_persistence () =
       ~args:
         (`Assoc
           [ "schedule_id", `String "sched-unknown-body-field"
-          ; "due_at_unix", `Float 200.0
+          ; "due_at_unix", `Float future_due_at
           ; "keeper_name", `String "alpha"
           ; "message", `String "wake up"
           ; "channel_id", `String "C123"
@@ -717,7 +736,7 @@ let test_known_fields_still_create () =
     dispatch_exn config Tool_schemas_schedule.Create_request
       (`Assoc
         [ "schedule_id", `String "sched-known-body-fields"
-        ; "due_at_unix", `Float 200.0
+        ; "due_at_unix", `Float future_due_at
         ; "keeper_name", `String "alpha"
         ; "message", `String "wake up"
         ; "title", `String "a title"
@@ -758,7 +777,7 @@ let test_keeper_wake_schema_validation () =
     dispatch_exn config Tool_schemas_schedule.Create_request
       (`Assoc
         [ "schedule_id", `String "sched-wake"
-        ; "due_at_unix", `Float 200.0
+        ; "due_at_unix", `Float future_due_at
         ; "keeper_name", `String "schedule-keeper"
         ; "message", `String "run maintenance"
         ; "urgency", `String "normal"
@@ -769,7 +788,7 @@ let test_keeper_wake_schema_validation () =
     dispatch_exn config Tool_schemas_schedule.Create_request
       (`Assoc
         [ "schedule_id", `String "sched-wake-invalid"
-        ; "due_at_unix", `Float 200.0
+        ; "due_at_unix", `Float future_due_at
         ; "keeper_name", `String "schedule-keeper"
         ; "message", `String "run maintenance"
         ; "urgency", `String "urgent-ish"
@@ -848,7 +867,8 @@ let test_schedule_store_error_is_explicit () =
     (Filename.concat (Workspace_utils.masc_dir config) "schedules.json")
     "{not-json";
   let result =
-    dispatch_exn config Tool_schemas_schedule.List_requests (`Assoc [])
+    dispatch_exn config Tool_schemas_schedule.List_requests
+      (`Assoc [ "owner", `String "all" ])
   in
   check bool "list fails" false (Tool_result.is_success result);
   check bool "store failure visible" true
@@ -1001,7 +1021,8 @@ let test_tool_response_carries_structured_recurrence () =
   (* The dashboard projection and the tool response describe the same
      `schedule_request`. Sending only `recurrence_kind` here made the client
      rebuild the structure from flattened strings, with an unknown-shape
-     fallback at the end of that chain. *)
+     fallback at the end of that chain. The full request is
+     masc_schedule_get's; a listing row carries the summary sentence. *)
   let recurrence = Schedule_domain.Interval { interval_sec = 60 } in
   let _request =
     create_service_exn
@@ -1012,23 +1033,243 @@ let test_tool_response_carries_structured_recurrence () =
       ~recurrence
       ()
   in
-  let listed =
-    dispatch_exn config Tool_schemas_schedule.List_requests (`Assoc [])
+  let got =
+    dispatch_exn config Tool_schemas_schedule.Get_request
+      (`Assoc [ "schedule_id", `String "sched-structured-recurrence" ])
   in
   let open Yojson.Safe.Util in
-  let entry =
-    Tool_result.data listed
-    |> member "schedules"
-    |> to_list
-    |> List.find (fun item ->
-      match item |> member "schedule_id" with
-      | `String id -> String.equal id "sched-structured-recurrence"
-      | _ -> false)
-  in
+  let entry = Tool_result.data got in
   check bool "recurrence is present" true (entry |> member "recurrence" <> `Null);
   check string "recurrence matches the domain serialiser"
     (Yojson.Safe.to_string (Schedule_domain.recurrence_to_yojson recurrence))
-    (Yojson.Safe.to_string (entry |> member "recurrence"))
+    (Yojson.Safe.to_string (entry |> member "recurrence"));
+  let listed =
+    dispatch_exn config Tool_schemas_schedule.List_requests
+      (`Assoc [ "owner", `String "all" ])
+  in
+  let row =
+    match Tool_result.data listed |> member "schedules" |> to_list with
+    | [ row ] -> row
+    | rows -> failf "expected one listed row, got %d" (List.length rows)
+  in
+  check string "listing row carries the recurrence summary"
+    (Schedule_domain.recurrence_summary recurrence)
+    (row |> member "recurrence_summary" |> to_string)
+;;
+
+(* Jazz-developer created a wake at 03:37:42Z due at 03:36:00Z. It was stored
+   as scheduled, the next refresh marked it due, and it fired at 03:37:54Z --
+   a delay measurement that measured nothing, and nothing said so. *)
+let test_create_refuses_a_due_time_behind_the_clock () =
+  with_config
+  @@ fun config ->
+  let refused =
+    dispatch_exn config Tool_schemas_schedule.Create_request
+      (`Assoc
+        [ "schedule_id", `String "sched-already-past"
+        ; "due_at_iso", `String "2026-09-15T03:36:00Z"
+        ; "keeper_name", `String "schedule-keeper"
+        ; "message", `String "measure the wake delay"
+        ])
+  in
+  check bool "a past due time is refused" false (Tool_result.is_success refused);
+  let open Yojson.Safe.Util in
+  check string "the refusal is typed" "due_already_past"
+    (Tool_result.data refused |> member "error_kind" |> to_string);
+  check string "the refusal echoes the due time it read" "2026-09-15T03:36:00Z"
+    (Tool_result.data refused |> member "due_at_iso" |> to_string);
+  check bool "the refusal says what now was" true
+    (Tool_result.data refused |> member "now_iso" <> `Null);
+  check int "nothing is stored" 0
+    (List.length (Schedule_store.read_state config).schedules)
+;;
+
+(* The comparison is with the current whole second, because an RFC 3339 due
+   time arrives cut to whole seconds: "now" written as an ISO time is the
+   current second, and it must not be refused for the fraction it lost. *)
+let test_the_current_second_is_not_past () =
+  with_config
+  @@ fun config ->
+  let create ~schedule_id ~due_at =
+    Schedule_service.create config ~now:1_000.9 ~schedule_id
+      ~requested_by:(human "operator")
+      ~scheduled_by:(automated "scheduler-agent")
+      ~due_at ~payload:(keeper_wake_payload "now") ~source:Schedule_domain.Operator_request ()
+  in
+  (match create ~schedule_id:"sched-this-second" ~due_at:1_000.0 with
+   | Ok request ->
+     check string "the current second is accepted" "scheduled"
+       (Schedule_domain.schedule_status_to_string request.Schedule_domain.status)
+   | Error err -> fail (Schedule_service.service_error_to_string err));
+  match create ~schedule_id:"sched-last-second" ~due_at:999.0 with
+  | Ok _ -> fail "the previous second was accepted"
+  | Error (Schedule_service.Due_already_past { due_at; now }) ->
+    check (float 0.0) "the refused due time" 999.0 due_at;
+    check (float 0.0) "now is the whole second compared" 1_000.0 now
+  | Error err -> fail (Schedule_service.service_error_to_string err)
+;;
+
+(* The analyst's cancel of a wake that had already fired said only "only
+   scheduled or due requests can be cancelled", which left the question it
+   was asked -- what state is it in -- unanswered. *)
+let test_cancel_refusal_says_the_state_and_the_last_wake () =
+  with_config
+  @@ fun config ->
+  let schedule_id = "sched-already-fired" in
+  ignore
+    (create_service_exn config ~schedule_id ~due_at:200.0
+       ~payload:(keeper_wake_payload "fire once") ()
+     : Schedule_domain.schedule_request);
+  let store_ok label = function
+    | Ok value -> value
+    | Error err -> fail (label ^ ": " ^ Schedule_store.store_error_to_string err)
+  in
+  ignore (store_ok "refresh" (Schedule_store.refresh_due config ~now:200.0));
+  ignore (store_ok "start" (Schedule_store.start_due_candidate config ~now:201.0 ~schedule_id));
+  ignore (store_ok "accept" (Schedule_store.accept_running config ~now:202.0 ~schedule_id ()));
+  let refused =
+    dispatch_exn config Tool_schemas_schedule.Cancel_request
+      (`Assoc
+        [ "schedule_id", `String schedule_id
+        ; "cancelled_by_id", `String "analyst"
+        ; "reason", `String "no longer needed"
+        ])
+  in
+  check bool "a fired schedule is not cancelled" false (Tool_result.is_success refused);
+  let open Yojson.Safe.Util in
+  let data = Tool_result.data refused in
+  check string "typed refusal" "transition_refused" (data |> member "error_kind" |> to_string);
+  check string "current status" "succeeded" (data |> member "current_status" |> to_string);
+  check string "attempted transition" "cancel" (data |> member "attempted" |> to_string);
+  check string "last wake result" "succeeded"
+    (data |> member "last_wake" |> member "status" |> to_string);
+  check bool "the sentence names the status too" true
+    (String_util.contains_substring (Tool_result.message refused) "is succeeded")
+;;
+
+let keeper_wake_payload_for keeper_name message =
+  `Assoc
+    [ "kind", `String Schedule_supported_kinds.keeper_wake
+    ; ( "body"
+      , `Assoc [ "keeper_name", `String keeper_name; "message", `String message ] )
+    ]
+;;
+
+let listed_ids result =
+  let open Yojson.Safe.Util in
+  Tool_result.data result
+  |> member "schedules"
+  |> to_list
+  |> List.map (fun row -> row |> member "schedule_id" |> to_string)
+;;
+
+(* Three schedules, one per relation to the caller ([schedule_ctx] calls as
+   scheduler-agent): one it created, one that wakes it, one that is neither.
+   A caller that could not tell its own rows from 1,232 others read a 144 KB
+   listing and still did not find them. *)
+let test_list_reads_the_owner_it_is_asked_for () =
+  with_config
+  @@ fun config ->
+  let create schedule_id ~scheduled_by ~wakes =
+    match
+      Schedule_service.create config ~now:100.0 ~schedule_id
+        ~requested_by:(human "operator")
+        ~scheduled_by:(automated scheduled_by)
+        ~due_at:200.0
+        ~payload:(keeper_wake_payload_for wakes ("wake " ^ schedule_id))
+        ~source:Schedule_domain.Operator_request ()
+    with
+    | Ok _ -> ()
+    | Error err -> fail (Schedule_service.service_error_to_string err)
+  in
+  create "sched-a" ~scheduled_by:"scheduler-agent" ~wakes:"schedule-keeper";
+  create "sched-b" ~scheduled_by:"other-actor" ~wakes:"scheduler-agent";
+  create "sched-c" ~scheduled_by:"other-actor" ~wakes:"schedule-keeper";
+  let list_with args =
+    dispatch_exn config Tool_schemas_schedule.List_requests (`Assoc args)
+  in
+  check (list string) "self is either side of the caller" [ "sched-a"; "sched-b" ]
+    (listed_ids (list_with [ "owner", `String "self" ]));
+  check (list string) "wake_target reads the woken keeper" [ "sched-a"; "sched-c" ]
+    (listed_ids
+       (list_with
+          [ "owner", `String "wake_target"; "owner_name", `String "schedule-keeper" ]));
+  check (list string) "scheduled_by reads the creator" [ "sched-b"; "sched-c" ]
+    (listed_ids
+       (list_with
+          [ "owner", `String "scheduled_by"; "owner_name", `String "other-actor" ]));
+  check (list string) "all is every row" [ "sched-a"; "sched-b"; "sched-c" ]
+    (listed_ids (list_with [ "owner", `String "all" ]));
+  let open Yojson.Safe.Util in
+  check string "self echoes whom it resolved to" "scheduler-agent"
+    (Tool_result.data (list_with [ "owner", `String "self" ])
+     |> member "owner_name"
+     |> to_string);
+  List.iter
+    (fun (label, args, fragment) ->
+       let refused = list_with args in
+       check bool label false (Tool_result.is_success refused);
+       check bool (label ^ " says why") true
+         (String_util.contains_substring (Tool_result.message refused) fragment))
+    [ "owner is required", [], "owner is required"
+    ; ( "a name next to self is refused"
+      , [ "owner", `String "self"; "owner_name", `String "someone" ]
+      , "owner_name is not accepted with owner=self" )
+    ; ( "wake_target needs a name"
+      , [ "owner", `String "wake_target" ]
+      , "owner_name is required with owner=wake_target" )
+    ; "an unknown owner is refused", [ "owner", `String "mine" ], "unknown owner: mine"
+    ];
+  let row =
+    match
+      Tool_result.data (list_with [ "owner", `String "all"; "limit", `Int 1 ])
+      |> member "schedules"
+      |> to_list
+    with
+    | [ row ] -> row
+    | rows -> failf "expected one row, got %d" (List.length rows)
+  in
+  check (list string) "a row is a summary"
+    [ "schedule_id"
+    ; "status"
+    ; "due_at_iso"
+    ; "recurrence_summary"
+    ; "wake_target"
+    ; "scheduled_by"
+    ; "summary"
+    ; "last_wake_status"
+    ]
+    (row |> to_assoc |> List.map fst);
+  check string "wake target is the bare keeper name" "schedule-keeper"
+    (row |> member "wake_target" |> to_string)
+;;
+
+(* Pages follow schedule_id: a cursor is the last id a page showed, and the
+   next page is every matching row after it. The last page has no cursor. *)
+let test_list_pages_by_schedule_id () =
+  with_config
+  @@ fun config ->
+  List.iter
+    (fun schedule_id ->
+       ignore
+         (create_service_exn config ~schedule_id ~due_at:200.0
+            ~payload:(keeper_wake_payload schedule_id) ()
+          : Schedule_domain.schedule_request))
+    [ "sched-3"; "sched-1"; "sched-2" ];
+  let list_with args =
+    dispatch_exn config Tool_schemas_schedule.List_requests (`Assoc args)
+  in
+  let open Yojson.Safe.Util in
+  let first = list_with [ "owner", `String "all"; "limit", `Int 2 ] in
+  check (list string) "first page in id order" [ "sched-1"; "sched-2" ] (listed_ids first);
+  let cursor = Tool_result.data first |> member "next_cursor" |> to_string in
+  check string "the cursor is the last id shown" "sched-2" cursor;
+  let second =
+    list_with [ "owner", `String "all"; "limit", `Int 2; "cursor", `String cursor ]
+  in
+  check (list string) "second page continues after it" [ "sched-3" ] (listed_ids second);
+  check bool "the last page has no cursor" true
+    (Tool_result.data second |> member "next_cursor" = `Null)
 ;;
 
 let () =
@@ -1078,6 +1319,16 @@ let () =
             test_keeper_wake_creation_respects_shutdown_fence
         ; test_case "tool response carries structured recurrence" `Quick
             test_tool_response_carries_structured_recurrence
+        ; test_case "create refuses a due time behind the clock" `Quick
+            test_create_refuses_a_due_time_behind_the_clock
+        ; test_case "the current second is not past" `Quick
+            test_the_current_second_is_not_past
+        ; test_case "cancel refusal says the state and the last wake" `Quick
+            test_cancel_refusal_says_the_state_and_the_last_wake
+        ; test_case "list reads the owner it is asked for" `Quick
+            test_list_reads_the_owner_it_is_asked_for
+        ; test_case "list pages by schedule_id" `Quick
+            test_list_pages_by_schedule_id
         ] )
     ]
 ;;

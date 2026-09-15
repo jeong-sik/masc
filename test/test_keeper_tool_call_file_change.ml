@@ -453,7 +453,7 @@ let test_row_without_route_evidence_is_not_a_change () =
     `Assoc
       [ ("ts", `Float 1.)
       ; ("keeper", `String "fixture-keeper")
-      ; ("tool", `String "keeper_compose_mission-snapshot")
+      ; ("tool", `String "keeper_compose_work-intake")
       ; ("input", `Assoc [ ("content", `String "x") ])
       ]
   in

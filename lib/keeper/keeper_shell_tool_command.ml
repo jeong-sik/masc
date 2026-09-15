@@ -69,7 +69,7 @@ let rec literal_words = function
 (* Positional words land on the schema's required parameters, in the order
    the schema states them.  A schema with no [required] key states zero
    required parameters — a tool with only optional parameters takes the
-   path alone, which is how [board list] and [time now] answer. *)
+   path alone, which is how [board list] and [lane status] answer. *)
 let required_param_names ~(descriptor : Keeper_tool_descriptor.t) :
     string list =
   let rec lookup = function

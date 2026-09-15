@@ -105,7 +105,7 @@ let test_openai_capabilities () =
   check bool "has structured output" true c.supports_structured_output;
   check bool "has parallel tools" true c.supports_parallel_tool_calls;
   check bool "no reasoning" false c.supports_reasoning;
-  check bool "context 128K" true (c.max_context_tokens = Some 128_000)
+  check (option int) "context unknown" None c.max_context_tokens
 ;;
 
 let test_openai_extended () =
@@ -1043,7 +1043,15 @@ let test_ollama_cloud_v1_unknown_model_uses_the_provider_wire_base () =
     check_thinking_control
       "unknown model still uses the declared /v1 transport control"
       Capabilities.Reasoning_effort
-      capabilities.thinking_control_format
+      capabilities.thinking_control_format;
+    (* The provider base knows the wire, not the model's window. A guessed
+       window here would clamp a caller's declared context for every
+       catalog-silent model on this provider. *)
+    check
+      (option int)
+      "unknown model has no guessed context window"
+      None
+      capabilities.max_context_tokens
 ;;
 
 let test_ollama_cloud_v1_non_reasoning_row_drops_the_effort_ladder () =

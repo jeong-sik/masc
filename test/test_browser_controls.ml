@@ -135,7 +135,7 @@ let test_pre_effect_tool_outcome () = with_upload_context (fun config meta -> fi
     let denied = invoke upload in
     check bool "outside upload is pre-effect" true (denied.failure_effect_disposition = Tool_result.Proven_pre_effect);
     check int "denied upload sends no browser commands, including clear" 0 (List.length !calls);
-    let _,phase = Masc.Tool_misc_browser_lane.handle_act_with_phase
+    let _,phase = Masc.Tool_misc_browser_lane.handle_act_with_phase ~base_path:config.base_path
         ~tool_name:"masc_browser_act" ~start_time:0.0 (`Assoc upload) in
     check bool "generic upload requires owner" true (phase = Tool_result.Proven_pre_effect);
     check int "generic upload sends no browser commands" 0 (List.length !calls))))
@@ -267,10 +267,10 @@ let test_download_result_reaches_provider () =
       | Tool_output.Not_artifact_manifest | Tool_output.Invalid_artifact_manifest _ -> fail "invalid durable download manifest")))
 
 let test_interact_production_failure_phase () =
-  Eio_main.run (fun env ->
+  with_upload_context (fun config _meta -> Eio_main.run (fun env ->
     Time_compat.set_clock (Eio.Stdenv.clock env);
     Eio.Switch.run (fun sw ->
-    let invoke args = Masc.Keeper_tool_in_process_runtime.handle_browser_interact_with_outcome ~args in
+    let invoke args = Masc.Keeper_tool_in_process_runtime.handle_browser_interact_with_outcome ~config ~args in
     let args = `Assoc ["lane",`String "automation";"tabId",`Int 1;
       "action",`String "click";"selector",`String "a";"expectedUrl",`String "https://example.org"] in
     let phase result = result.Masc.Keeper_tool_execution.failure_effect_disposition in
@@ -294,7 +294,7 @@ let test_interact_production_failure_phase () =
       (phase (invoke args) = Tool_result.Effect_outcome_unknown);
     reply := Lane.Answered (`Assoc ["ok",`Bool false;"error",`String "observed node detached"]);
     check bool "error wording alone never establishes pre-effect" true
-      (phase (invoke args) = Tool_result.Effect_outcome_unknown)))
+      (phase (invoke args) = Tool_result.Effect_outcome_unknown))))
 
 let () = run "Firefox controls" ["behavior",[
   test_case "production interact preserves failure phase" `Quick test_interact_production_failure_phase;

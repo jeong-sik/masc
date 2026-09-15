@@ -23,7 +23,6 @@ type poll = Empty | Forward of command | Reject of string
 type exchange_phase = Writing_frame | Awaiting_reply
 type exchange = Replied of Yojson.Safe.t | Write_timed_out
 type cycle = Continue | Stop of string
-type poll_error = Invalid_client | Poll_failed of string
 
 let object_fields = function
   | `Assoc fields -> Ok fields
@@ -125,7 +124,13 @@ let write_frame stdout json =
     Eio.Flow.copy_string payload stdout;
     Ok ())
 
-type config = { server : Uri.t; token_file : string; client_id : string }
+(* Where polls go. An explicit --server, MASC_HTTP_BASE_URL or MASC_HTTP_PORT
+   is a fixed choice. Otherwise the workspace connection.toml names the port.
+   That file is the desired endpoint, which the server and other commands
+   write, not proof that a server answers there, so the host moves to the
+   port it names only once that address answers the lane. *)
+type destination = Fixed | Workspace of string
+type config = { destination : destination; server : Uri.t; token_file : string; client_id : string }
 type browser_info = { browser : string; version : string; engine_version : string }
 let browser_info json =
   let* envelope = object_fields json in
@@ -145,6 +150,34 @@ let browser_info json =
       Ok {browser="firefox"; version=engine_version; engine_version}
     | Some _ | None -> Error "unsupported browser metadata"
 
+let loopback_origin raw =
+  let server = Uri.of_string raw in
+  let loopback = Masc_network_defaults.is_loopback_host_opt (Uri.host server) in
+  let valid_port =
+    match Uri.port server with None -> true | Some port -> port > 0 && port <= 65535
+  in
+  if Uri.scheme server <> Some "http" || not loopback || not valid_port
+     || Uri.userinfo server <> None || Uri.query server <> []
+     || Uri.fragment server <> None
+     || (Uri.path server <> "" && Uri.path server <> "/") then
+    Error "--server must be a loopback http origin without credentials, path, query or fragment"
+  else Ok server
+
+(* A port that fails to resolve is reported, never silently replaced by a
+   default the server may not be listening on. *)
+let workspace_server ~environment base =
+  try
+    match Workspace_connection.resolve ~base_path:(Some base)
+            ~cli:None ~environment with
+    | Error error -> Error (Workspace_connection.error_message error)
+    | Ok port ->
+        Uri.make ~scheme:"http"
+          ~host:(Masc_network_defaults.normalize_advertised_host (Env_config_core.masc_host ()))
+          ~port:(Workspace_connection.to_int port) ()
+        |> Uri.to_string |> loopback_origin
+  with
+  | Env_config_core.Config_error message -> Error message
+  | Invalid_argument _ -> Error "invalid workspace server origin"
 
 let resolve_config ~base_path ~server ~token_file =
   try
@@ -164,44 +197,21 @@ let resolve_config ~base_path ~server ~token_file =
         | exception Sys_error _ -> base
       else base
     in
-    (* The workspace connection.toml owns the server port for the CLI and the
-       TUI; the lane host follows the same file instead of a port baked at
-       install time. A port that fails to resolve is reported, never silently
-       replaced by a default the server may not be listening on. *)
-    let* server =
-      match server with
-      | Some url -> Ok url
-      | None ->
-          (match Env_config_core.masc_http_base_url_opt () with
-           | Some url -> Ok url
-           | None ->
-               (match Workspace_connection.resolve ~base_path:(Some base)
-                       ~cli:None ~environment:(Env_config_core.masc_http_port_opt ()) with
-                | Error error -> Error (Workspace_connection.error_message error)
-                | Ok port ->
-                    Ok (Uri.make ~scheme:"http"
-                          ~host:(Masc_network_defaults.normalize_advertised_host (Env_config_core.masc_host ()))
-                          ~port:(Workspace_connection.to_int port) ()
-                        |> Uri.to_string)))
+    let* destination, server =
+      match server, Env_config_core.masc_http_base_url_opt (), Env_config_core.masc_http_port_opt () with
+      | Some url, _, _ | None, Some url, _ -> Result.map (fun server -> Fixed, server) (loopback_origin url)
+      | None, None, (Some _ as environment) ->
+          Result.map (fun server -> Fixed, server) (workspace_server ~environment base)
+      | None, None, None ->
+          Result.map (fun server -> Workspace base, server) (workspace_server ~environment:None base)
     in
-    let server = Uri.of_string server in
-    let loopback = Masc_network_defaults.is_loopback_host_opt (Uri.host server) in
-    let valid_port =
-      match Uri.port server with None -> true | Some port -> port > 0 && port <= 65535
+    let token_file =
+      match token_file with
+      | Some path ->
+          if Filename.is_relative path then Filename.concat base path else path
+      | None -> Filename.concat (Filename.concat base Common.masc_dirname) "browser-lane/token"
     in
-    if Uri.scheme server <> Some "http" || not loopback || not valid_port
-       || Uri.userinfo server <> None || Uri.query server <> []
-       || Uri.fragment server <> None
-       || (Uri.path server <> "" && Uri.path server <> "/") then
-      Error "--server must be a loopback http origin without credentials, path, query or fragment"
-    else
-      let token_file =
-        match token_file with
-        | Some path ->
-            if Filename.is_relative path then Filename.concat base path else path
-        | None -> Filename.concat (Filename.concat base Common.masc_dirname) "browser-lane/token"
-      in
-      Ok { server; token_file; client_id = Random_id.uuid_v7 () }
+    Ok { destination; server; token_file; client_id = Random_id.uuid_v7 () }
   with
   | Env_config_core.Config_error message -> Error message
   | Invalid_argument _ -> Error "invalid server origin or base path"
@@ -215,11 +225,16 @@ let read_token path =
     else Ok token
   with Sys_error _ -> Error "cannot read lane token file"
 
-let endpoint config path =
-  Uri.with_path config.server
-    (Env_config_core.strip_trailing_slashes (Uri.path config.server) ^ "/browser-lane/" ^ path)
+let endpoint server path =
+  Uri.with_path server
+    (Env_config_core.strip_trailing_slashes (Uri.path server) ^ "/browser-lane/" ^ path)
 
 type http_error = Http_status of int | Transport_failed | Response_invalid | Response_too_large | Request_timed_out
+type poll_error = Invalid_client | Poll_unanswered of http_error | Poll_failed of string
+type destination_change = Unchanged | Moved
+(* Whether an address answers this workspace's lane: a ping that holds the
+   lane token and registers no client. *)
+type lane_answer = Answers | Silent
 
 let http_error_message = function
   | Http_status status -> Printf.sprintf "HTTP %d" status
@@ -239,7 +254,7 @@ let within ~clock seconds step =
       None)
     (fun () -> Some (step ()))
 
-let post ~clock ~client ~config ~info ~token path json =
+let post ~clock ~client ~server ~config ~info ~token path json =
   match
     within ~clock http_timeout_sec (fun () ->
       try
@@ -251,7 +266,7 @@ let post ~clock ~client ~config ~info ~token path json =
                   "x-browser-client-id", config.client_id; "x-browser-name", info.browser;
                   "x-browser-version", info.version; "x-browser-engine-version", info.engine_version ])
               ~body:(Cohttp_eio.Body.of_string (Yojson.Safe.to_string json))
-              (endpoint config path)
+              (endpoint server path)
           in
           let status = Cohttp.Response.status response |> Cohttp.Code.code_of_status in
           if status <> 200 then Error (Http_status status)
@@ -321,9 +336,51 @@ let run env config =
         receive ()
   in
   let forward = forward ~clock ~stdout:(Eio.Stdenv.stdout env) pending in
+  (* Single Eio domain; no suspension point between reading and replacing it. *)
+  let server = ref config.server in
+  let ask_lane info origin =
+    match read_token config.token_file with
+    | Error _ -> Silent
+    | Ok token ->
+        (match post ~clock ~client ~server:origin ~config ~info ~token "ping" (`Assoc []) with
+         | Ok (`Assoc fields) when List.assoc_opt "ok" fields = Some (`Bool true) -> Answers
+         | Ok _ | Error _ -> Silent)
+  in
+  (* Called only after a request to [!server] failed: that failure is the
+     event that the server may have moved. A fixed destination never moves.
+     The connection file is only the desired port, so a failure alone moves
+     nothing: the host stays while its server still answers the lane, and
+     moves only to an address that answers it. *)
+  let follow_workspace info =
+    match config.destination with
+    | Fixed -> Unchanged
+    | Workspace base ->
+        (match workspace_server ~environment:None base with
+         | Error detail ->
+             Log.Transport.warn "browser-host: workspace connection unreadable after a failed request: %s" detail;
+             Unchanged
+         | Ok resolved when Uri.equal resolved !server -> Unchanged
+         | Ok resolved ->
+             (match ask_lane info !server with
+              | Answers ->
+                  Log.Transport.info "browser-host: %s still answers; staying while the connection names %s"
+                    (Uri.to_string !server) (Uri.to_string resolved);
+                  Unchanged
+              | Silent ->
+                  (match ask_lane info resolved with
+                   | Silent ->
+                       Log.Transport.info "browser-host: the connection names %s, which does not answer yet"
+                         (Uri.to_string resolved);
+                       Unchanged
+                   | Answers ->
+                       Log.Transport.info "browser-host: moving to %s, which answers the lane"
+                         (Uri.to_string resolved);
+                       server := resolved;
+                       Moved)))
+  in
   let rec publish info payload =
     let* token = read_token config.token_file in
-    match post ~clock ~client ~config ~info ~token "result" payload with
+    match post ~clock ~client ~server:!server ~config ~info ~token "result" payload with
     | Ok (`Assoc fields) when List.assoc_opt "ok" fields = Some (`Bool true) -> Ok ()
     | Ok _ -> Error "invalid result acknowledgement"
     | Error (Http_status 400) ->
@@ -335,15 +392,19 @@ let run env config =
         Log.Transport.warn "browser-host: result delivery failed: %s"
           (http_error_message error);
         Eio.Time.sleep clock reconnect_delay_sec;
-        publish info payload
+        (match follow_workspace info with
+         | Unchanged -> publish info payload
+         (* The server that issued the request no longer answers and another
+            does; polling there registers the lane again. *)
+         | Moved -> Error "workspace server moved; request ownership was lost")
   in
   let rec poll info () =
     let result =
       let* token = read_token config.token_file |> Result.map_error (fun detail -> Poll_failed detail) in
-      let* response = post ~clock ~client ~config ~info ~token "poll" (`Assoc [])
+      let* response = post ~clock ~client ~server:!server ~config ~info ~token "poll" (`Assoc [])
         |> Result.map_error (function
           | Http_status 400 -> Invalid_client
-          | error -> Poll_failed (http_error_message error)) in
+          | error -> Poll_unanswered error) in
       let dispatch () =
         let* next = decode_poll response in
         match next with
@@ -360,6 +421,10 @@ let run env config =
     | Ok (Stop detail) -> Error detail
     | Ok Continue -> poll info ()
     | Error Invalid_client -> Error "native client registration rejected"
+    | Error (Poll_unanswered error) ->
+        Log.Transport.warn "browser-host: poll failed: %s" (http_error_message error);
+        Eio.Time.sleep clock reconnect_delay_sec;
+        (match follow_workspace info with Unchanged | Moved -> poll info ())
     | Error (Poll_failed detail) ->
         Log.Transport.warn "browser-host: poll failed: %s" detail;
         Eio.Time.sleep clock reconnect_delay_sec;
@@ -385,7 +450,7 @@ let run env config =
    | Some info, Ok token ->
      Eio.Fiber.first
        (* See bounded EOF cleanup above: failed disconnect must not retain the native child. *)
-       (fun () -> ignore (post ~clock ~client ~config ~info ~token "disconnect" (`Assoc [])))
+       (fun () -> ignore (post ~clock ~client ~server:!server ~config ~info ~token "disconnect" (`Assoc [])))
        (fun () -> Eio.Time.sleep clock 0.25)
    | _ -> ());
   outcome
@@ -406,11 +471,11 @@ let run_bidi env config url =
         | Error _->()
         | Ok token->Eio.Fiber.first
             (* fire-and-forget: teardown has no caller to report a failed disconnect to; the sleep bounds it. *)
-            (fun ()->ignore (post ~clock ~client ~config ~info ~token "disconnect" (`Assoc [])))
+            (fun ()->ignore (post ~clock ~client ~server:config.server ~config ~info ~token "disconnect" (`Assoc [])))
             (fun ()->Eio.Time.sleep clock 0.25));
       let rec poll () =
         let* token=read_token config.token_file in
-        let* response=post ~clock ~client ~config ~info ~token "poll" (`Assoc [])
+        let* response=post ~clock ~client ~server:config.server ~config ~info ~token "poll" (`Assoc [])
           |> Result.map_error http_error_message in
         let* next=decode_poll response in
         let answer id result = match result with
@@ -420,14 +485,14 @@ let run_bidi env config url =
           | Error (Masc.Browser_bidi_peer.Outcome_unknown message)->failure id message in
         let* continue = match next with
           | Empty->Ok true
-          | Reject id->let* _=post ~clock ~client ~config ~info ~token "result" (failure id "unsupported BiDi verb")
+          | Reject id->let* _=post ~clock ~client ~server:config.server ~config ~info ~token "result" (failure id "unsupported BiDi verb")
               |> Result.map_error http_error_message in Ok true
           | Forward command->
             let result=match within ~clock extension_timeout_sec
                 (fun ()->Masc.Browser_bidi_peer.dispatch peer ~verb:command.verb command.args) with
               | Some result->result
               | None->Error (Masc.Browser_bidi_peer.Outcome_unknown "BiDi command deadline exceeded") in
-            let* _=post ~clock ~client ~config ~info ~token "result" (answer command.id result)
+            let* _=post ~clock ~client ~server:config.server ~config ~info ~token "result" (answer command.id result)
               |> Result.map_error http_error_message in
             (* Any unknown outcome ends this client, preventing pointer replay or
                a next gesture while a previous button may remain pressed. *)

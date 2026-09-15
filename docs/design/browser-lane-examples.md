@@ -16,8 +16,7 @@ Live 호스트를 설치하고 Firefox 또는 Zen의 `about:debugging`에서 확
 ```sh
 bash connectors/browser/install-host.sh \
   --binary /path/to/masc-browser-host \
-  --base-path /path/to/workspace \
-  --server http://127.0.0.1:8935
+  --base-path /path/to/workspace
 ```
 
 확장 manifest: `connectors/browser/extension/manifest.json`.

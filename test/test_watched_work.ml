@@ -70,6 +70,26 @@ let test_work_that_failed_as_the_watcher_fired_keeps_its_failure () =
   | Ok () -> fail "the work failed, yet something reported success"
 ;;
 
+(* The watcher is armed before the work starts, so its deadline counts from
+   the call. A work that spends the whole budget before it pauses for the
+   first time is already past the deadline at that pause; a watcher that only
+   armed there would hand the work the budget a second time. *)
+let test_the_budget_counts_from_the_call_not_from_the_works_first_pause () =
+  Eio_mock.Backend.run
+  @@ fun () ->
+  let clock = Eio_mock.Clock.make () in
+  Eio_mock.Clock.set_time clock 0.0;
+  match
+    Watched_work.run ~watcher:(watcher clock) (fun () ->
+      Eio_mock.Clock.set_time clock (deadline_s +. 1.0);
+      Eio.Fiber.yield ();
+      Ok "the answer")
+  with
+  | Error verdict -> check string "the watcher decided" "the watcher's verdict" verdict
+  | Ok answer ->
+    failf "the budget was gone before the work paused, yet it returned %s" answer
+;;
+
 let () =
   Alcotest.run
     "watched work"
@@ -86,6 +106,10 @@ let () =
             "work that failed as the watcher fired keeps its failure"
             `Quick
             test_work_that_failed_as_the_watcher_fired_keeps_its_failure
+        ; test_case
+            "the budget counts from the call, not from the work's first pause"
+            `Quick
+            test_the_budget_counts_from_the_call_not_from_the_works_first_pause
         ] )
     ]
 ;;

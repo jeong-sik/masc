@@ -1186,7 +1186,7 @@ let test_openai_compat_chat_capabilities () =
   Alcotest.(check bool) "named tool_choice" true c.supports_named_tool_choice;
   Alcotest.(check bool) "json format" true c.supports_response_format_json;
   Alcotest.(check bool) "structured" true c.supports_structured_output;
-  Alcotest.(check (option int)) "max_context" (Some 128_000) c.max_context_tokens
+  Alcotest.(check (option int)) "max_context unknown" None c.max_context_tokens
 ;;
 
 let test_openai_compat_chat_extended_capabilities () =

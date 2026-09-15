@@ -1,5 +1,5 @@
 (** Closed browser interactions. Caller strings are values, never script source. *)
-type request = { source : Browser_surface.source; tab_id : int; client_id : Browser_lane.client_id option;
+type request = { route : Browser_lane.route; tab_id : int;
   expected_url : string option; action : Browser_lane.interaction }
 let ( let* ) = Result.bind
 let parse = function
@@ -48,8 +48,8 @@ let parse = function
       | Some (`String "activate_tab") ->
         let* () = excludes ["selector";"text";"x";"y";"documentId";"nodeId";"point";"from";"to";"viewport"] in
         let* () = match expected_url with Some _ -> Ok () | None -> Error "activate_tab requires expectedUrl" in
-        let* () = match base.source with Browser_surface.Live -> Ok ()
-          | Automation -> Error "activate_tab requires live lane" in
+        let* () = match base.route with Browser_lane.Live_route _ -> Ok ()
+          | Browser_lane.Automation_route -> Error "activate_tab requires live lane" in
         Ok Browser_lane.Activate_tab
       | Some (`String "click") ->
         let* () = excludes ["text"; "x"; "y"; "point"; "from"; "to"; "viewport"] in
@@ -87,17 +87,18 @@ let parse = function
           let* to_ = geometry Browser_lane.Pointer.point_of_json "to" in
           Ok (Browser_lane.Drag {from;to_;viewport})
       | _ -> Error "action must be activate_tab, click, follow_link, fill, scroll, click_at, scroll_at or drag" in
-    Ok { source = base.source; tab_id; client_id=base.client_id; expected_url; action }
+    Ok { route = base.route; tab_id; expected_url; action }
   | _ -> Error "browser interaction arguments must be an object"
 
 let perform request =
-  let lane_name = match request.source with Browser_surface.Live -> "live" | Automation -> "automation" in
-  let* target = Browser_lane.resolve_target ~lane_name ~client_id:request.client_id in
-  Browser_lane.issue_for ~target
+  let* target = Browser_lane.resolve_target request.route
+    |> Result.map_error Browser_lane.selection_error_code in
+  let* answer = Browser_lane.issue_for ~target
     ~verb:(Browser_lane.Page_interact {tab_id=request.tab_id;
       expected_url=request.expected_url; action=request.action})
     ~timeout_sec:20.
-  |> Browser_surface.decode_answer
+    |> Result.map_error Browser_lane.selection_error_code in
+  Browser_surface.decode_answer answer
 
 let script = {js|function interactInPage(args) {
   let effectStarted = false;

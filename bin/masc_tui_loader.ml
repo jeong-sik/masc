@@ -120,13 +120,17 @@ let load_keepers (base_path : string) : keeper list * string option =
     tasks remain available in Planning rollups and the detail view but do not
     occupy the Overview list. *)
 let load_active_tasks (base_path : string) :
-    task list * Masc_domain.task list * string option * Masc_tui_task_flow.t option =
+    task list
+    * Masc_domain.task list
+    * string option
+    * Masc_tui_task_flow.t option
+    * Masc_tui_agenda.stalled list option =
   let config = Workspace_core.default_config base_path in
   let path = Workspace_backlog.backlog_path config in
   match Workspace_backlog.read_backlog_observation_with_source_r config with
   | Error err ->
       report path err;
-      [], [], Some ("task backlog unavailable: " ^ err), None
+      [], [], Some ("task backlog unavailable: " ^ err), None, None
   | Ok observation ->
       let recovery_error =
         match observation.recovered_from with
@@ -160,7 +164,18 @@ let load_active_tasks (base_path : string) :
          | Some recovery, _ -> Some recovery
          | None, other -> other)
       , Some (Masc_tui_task_flow.of_tasks ~now:(Unix.gettimeofday ())
-                observation.observed_backlog.tasks) )
+                observation.observed_backlog.tasks)
+      (* Projected here rather than on a render frame: resolving whether an
+         assignee has a Keeper queue reads the registry and the meta store, and
+         a frame that touches the filesystem per row is a frame that stutters.
+         Same rows, same load, same answer the rejection delivery computes. *)
+      , Some
+          (Operator_task_attention.project ~config
+             observation.observed_backlog.tasks
+           |> List.map (fun item ->
+                { Masc_tui_agenda.what = Operator_task_attention.summary item
+                ; since_iso = Operator_task_attention.waiting_since item
+                })) )
 
 (** Apply one strict bounded metrics snapshot to the mutable screen state. *)
 let apply_keeper_log_snapshot (state : state)
@@ -230,11 +245,14 @@ let load_from_masc_dir (state : state) (base_path : string) =
   (* Load tasks from their single durable source. The domain rows land first:
      a detail view open across this refresh keeps its row even when the task
      just turned terminal, because the projection below drops exactly those. *)
-  let tasks, tasks_domain, tasks_error, task_flow = load_active_tasks base_path in
+  let tasks, tasks_domain, tasks_error, task_flow, operator_stalled =
+    load_active_tasks base_path
+  in
   state.tasks_domain <- tasks_domain;
   state.tasks <- tasks;
   state.tasks_error <- tasks_error;
   state.task_flow <- task_flow;
+  state.operator_stalled <- operator_stalled;
 
   (* Capture navigation before replacing the roster. Detail and logs are bound
      to the selected row; message mode is bound to its explicit target. *)
@@ -363,6 +381,7 @@ let clear_local_workspace (state : state) =
   state.tasks <- [];
   state.tasks_domain <- [];
   state.task_flow <- None;
+  state.operator_stalled <- None;
   state.tasks_error <- None;
   state.keepers <- [];
   state.keepers_error <- None;

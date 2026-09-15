@@ -12,8 +12,7 @@
 open Alcotest
 
 let expected =
-  [ "keeper_time_now"
-  ; "keeper_context_status"
+  [ "keeper_context_status"
   ; "keeper_lane_status"
   ; "keeper_workspace_memory_read"
   ; "keeper_memory_search"

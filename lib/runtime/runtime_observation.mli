@@ -1,40 +1,11 @@
-(** Runtime_observation — runtime observation, metrics
-    capture, and a single-actor runtime-counter store.
+(** Runtime_observation — one runtime's per-turn observation: the attempts it
+    made, with their latency and errors, the model it selected, and its
+    streaming timings, captured through AGENT_CORE's per-call metrics sink.
 
-    The .ml splits into two concerns:
-    - {b Runtime observation}: the {!runtime_observation}
-      record + companion attempts,
-      built per-turn in {!Keeper_turn_driver} via the
-      {!runtime_metrics_for_candidates} +
-      {!runtime_observation_with_metrics} pair.
-    - {b Runtime audit actor}: a single-fiber consumer
-      ({!start_actor_if_needed}) that drains an
-      [Eio.Stream] of [record_runtime] requests so
-      concurrent callers do not contend on the in-memory
-      counter maps.
-
-    Dotted callers ({!Runtime_observation.X}) and the
-    runtime-include consumer rely on the surface pinned here.
-
-    Internal helpers stay private at this boundary
-    ([runtime_attempt] type body (exposed as part of
-    {!runtime_observation}'s [attempts] field with its full
-    record shape),
-    [runtime_counter] type, [StringMap],
-    [runtime_max_keys], [create_runtime_counter],
-    [runtime_eviction] type, [find_runtime_eviction_candidate],
-    [runtime_observation_of_candidates],
-    [runtime_attempt_to_json],
-    [update_first_attempt_if], [record_attempt_start],
-    [ensure_terminal_attempt],
-    [runtime_observation_to_json], [get_runtime_audit_store],
-    [runtime_outcome_to_string],
-    [keeper_name_to_json], [runtime_audit_json],
-    [record_runtime_audit], [increment_counter],
-    [distribution_json], [attempt_model_display],
-    [msg], [state] types, the [stream] queue,
-    [handle_record], [handle_get_metrics], [run_actor],
-    [runtime_metrics_json]). *)
+    Built per turn by the named-runtime runners through the
+    {!runtime_metrics_for_candidates} + {!runtime_observation_with_metrics}
+    pair. Dotted callers ({!Runtime_observation.X}) rely on the surface
+    pinned here. *)
 
 (** {1 Runtime observation types} *)
 
@@ -74,8 +45,6 @@ type runtime_observation = {
     (which candidate runtime won, and at what index) is tracked
     separately on {!Keeper_turn_driver.named_run_result}. *)
 
-(** {1 Provider config helpers} *)
-
 (** {1 Runtime metrics capture} *)
 
 type runtime_metrics_capture
@@ -103,13 +72,13 @@ val record_attempt_terminal :
 val runtime_metrics_for_candidates :
   unit ->
   runtime_metrics_capture * Llm_provider.Metrics.t
-(** Builds the [(capture, metrics)] pair the per-call
-    metrics path consumes.  Wires
-    [Llm_metric_bridge.emit_request_latency] and
-    [emit_http_status] into the metrics callbacks so the
-    Otel_metric_store dashboard does not blackhole captured
-    turns (the per-call sink takes precedence over the
-    global [Llm_metric_bridge] when both are wired). *)
+(** Builds the [(capture, metrics)] pair the per-call metrics path consumes.
+    Three callbacks write to [capture]: a request start opens an attempt, a
+    request end closes it with its latency, an error closes it with the
+    message. Two more record the stream's first-chunk and inter-chunk
+    timings. The rest are no-ops, and nothing here reaches a metric store --
+    the capture is read back by {!runtime_observation_with_metrics} and
+    travels as part of the observation. *)
 
 val runtime_observation_with_metrics :
   runtime_id:string ->
@@ -125,22 +94,3 @@ val runtime_observation_with_metrics :
     [attempt_details_source] is set to
     ["agent_core_metrics_callbacks"] to flag that the per-call
     metrics path was wired. *)
-
-(** {1 Runtime audit actor} *)
-
-val start_actor_if_needed : sw:Eio.Switch.t -> unit
-(** Spawns the single audit-actor fiber under [sw] if it
-    has not already been started in the current process.
-    Idempotent — a second call is a no-op so the bootstrap
-    paths can call it from multiple entry points. *)
-
-
-(** {1 JSON projections (runtime-include consumers)} *)
-
-val runtime_metrics_json : unit -> Yojson.Safe.t
-(** Posts a [Get_metrics_json] request to the actor and
-    waits on the resulting promise.  Returns the
-    aggregated runtime-counter JSON snapshot for the
-    operator dashboard.  Pinned because
-    [Runtime_agent] re-exposes it via the
-    [include Runtime_observation] module. *)

@@ -46,6 +46,7 @@ let create_schedule config schedule_id =
   match
     Schedule_service.create
       config
+      ~now:100.0
       ~schedule_id
       ~requested_at:100.0
       ~requested_by:(actor "requester")

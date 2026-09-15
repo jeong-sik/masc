@@ -69,9 +69,10 @@ let queue config =
 let check_pending config expected =
   Alcotest.(check int) "durable obligations" expected (List.length (pending config))
 
-let reconcile config ~delivered ~retained =
+let reconcile ?(unroutable = 0) config ~delivered ~retained =
   let report = ok (Wake.reconcile_pending ~config) in
   Alcotest.(check int) "delivered" delivered report.Wake.delivered;
+  Alcotest.(check int) "unroutable" unroutable report.Wake.unroutable;
   Alcotest.(check int) "retained" retained report.Wake.retained
 
 let check_rejections config ~verification_ids ~authority =
@@ -139,6 +140,112 @@ let test_queue_failure_retains_obligation () =
       "{corrupt queue" (In_channel.with_open_text path In_channel.input_all);
     (* Remove only our injected corrupt fixture, then retry the same obligation. *)
     Sys.remove path;
+    reconcile config ~delivered:1 ~retained:0;
+    check_pending config 0;
+    check_rejection config ~verification_id ~authority:system)
+
+let only_task config =
+  match (ok (Workspace_backlog.read_backlog_r config)).tasks with
+  | [ task ] -> task
+  | tasks ->
+    Alcotest.failf "the fixture holds exactly one task, found %d" (List.length tasks)
+
+let set_tasks config tasks =
+  let backlog = ok (Workspace_backlog.read_backlog_r config) in
+  W.write_backlog config { backlog with tasks }
+
+(* An MCP client that claimed and submitted the Task (codex-mcp-client in
+   the 2026-09-12 fleet) has no registry entry and no Keeper meta, so no queue
+   under its name is ever read. The obligation used to be retained and retried
+   every interval for good: nine of them logged 12,960 errors a day. Ending the
+   obligation alone still left the Task held by a name that will never act, so
+   the Task comes back to the backlog with the verdict on it. *)
+let test_rejection_with_no_keeper_returns_the_task_to_todo () =
+  with_workspace (fun config ->
+    let verification_id = "vrf-no-keeper-producer" in
+    prepare_submission config verification_id;
+    commit config ~authority:system ~verification_id (D.Verdict_rejected { reason });
+    check_pending config 1;
+    reconcile config ~delivered:0 ~unroutable:1 ~retained:0;
+    check_pending config 0;
+    Alcotest.(check int) "no queue is written under a name no Keeper reads" 0
+      (List.length (queue config));
+    (match only_task config with
+     | { task_status = D.Todo; handoff_context = Some handoff; _ } ->
+       Alcotest.(check (option string)) "the verdict's reason stays on the Task"
+         (Some reason) handoff.reason;
+       Alcotest.(check (list string)) "the verification id travels with it"
+         [ verification_id ] handoff.evidence_refs;
+       Alcotest.(check (option string)) "the deciding authority is the releaser"
+         (Some "repair-verifier-run") handoff.updated_by
+     | { task_status; _ } ->
+       Alcotest.failf "a rejection with no Keeper must release the Task, found %s"
+         (D.task_status_to_string task_status));
+    reconcile config ~delivered:0 ~retained:0)
+
+(* Between the verdict and this delivery the same producer name can submit
+   again. That submission is the current answer, so the obligation ends without
+   touching the Task: releasing it would throw away work nobody rejected. *)
+let test_release_leaves_a_task_that_moved_on () =
+  with_workspace (fun config ->
+    let verification_id = "vrf-no-keeper-resubmitted" in
+    prepare_submission config verification_id;
+    commit config ~authority:system ~verification_id (D.Verdict_rejected { reason });
+    prepare_submission config "vrf-no-keeper-resubmitted-again";
+    let before = only_task config in
+    reconcile config ~delivered:0 ~unroutable:1 ~retained:0;
+    check_pending config 0;
+    Alcotest.(check string) "the newer submission is left exactly as it stands"
+      (D.show_task before) (D.show_task (only_task config)))
+
+(* The Task can be gone by the time the obligation is worked: nothing to
+   release, and retrying can never find it again. *)
+let test_release_discharges_when_the_task_is_gone () =
+  with_workspace (fun config ->
+    let verification_id = "vrf-no-keeper-deleted-task" in
+    prepare_submission config verification_id;
+    commit config ~authority:system ~verification_id (D.Verdict_rejected { reason });
+    set_tasks config [];
+    reconcile config ~delivered:0 ~unroutable:1 ~retained:0;
+    check_pending config 0)
+
+(* Release precedes acknowledgement, so a crash between the two brings the
+   obligation back. The replay reads the status again, finds the Task no longer
+   held by the producer, and ends the obligation without a second mutation. *)
+let test_release_before_acknowledgement_replays_idempotently () =
+  with_workspace (fun config ->
+    let verification_id = "vrf-no-keeper-replay" in
+    prepare_submission config verification_id;
+    commit config ~authority:system ~verification_id (D.Verdict_rejected { reason });
+    let obligation =
+      match pending config with
+      | [ item ] -> item
+      | items -> Alcotest.failf "one obligation, found %d" (List.length items)
+    in
+    reconcile config ~delivered:0 ~unroutable:1 ~retained:0;
+    let released = only_task config in
+    let backlog = ok (Workspace_backlog.read_backlog_r config) in
+    W.write_backlog config { backlog with pending_completion_rejections = [ obligation ] };
+    reconcile config ~delivered:0 ~unroutable:1 ~retained:0;
+    check_pending config 0;
+    Alcotest.(check string) "the replay leaves the released Task untouched"
+      (D.show_task released) (D.show_task (only_task config)))
+
+(* A file at the Keeper meta path that this binary does not decode is a Keeper
+   whose meta the boot path re-materialises, not an absent one. It must not be
+   discharged as unroutable: the obligation waits and reaches the queue once
+   the meta reads again. *)
+let test_undecodable_producer_meta_retains_obligation () =
+  with_workspace (fun config ->
+    let verification_id = "vrf-undecodable-producer-meta" in
+    prepare_submission config verification_id;
+    commit config ~authority:system ~verification_id (D.Verdict_rejected { reason });
+    let meta_path = Masc.Keeper_types_profile.keeper_meta_path config producer in
+    Fs_compat.mkdir_p (Filename.dirname meta_path);
+    Out_channel.with_open_text meta_path (fun out -> output_string out "[]");
+    reconcile config ~delivered:0 ~unroutable:0 ~retained:1;
+    check_pending config 1;
+    persist_producer config;
     reconcile config ~delivered:1 ~retained:0;
     check_pending config 0;
     check_rejection config ~verification_id ~authority:system)
@@ -297,6 +404,16 @@ let () =
     [ "durable verdict delivery",
       [ Alcotest.test_case "system commit survives missing consumer" `Quick (test_commit_gap system)
       ; Alcotest.test_case "human commit survives missing consumer" `Quick (test_commit_gap human)
+      ; Alcotest.test_case "a rejection with no Keeper to deliver to returns the task to todo"
+          `Quick test_rejection_with_no_keeper_returns_the_task_to_todo
+      ; Alcotest.test_case "a task that moved on is left alone"
+          `Quick test_release_leaves_a_task_that_moved_on
+      ; Alcotest.test_case "a deleted task discharges the obligation"
+          `Quick test_release_discharges_when_the_task_is_gone
+      ; Alcotest.test_case "release before acknowledgement replays idempotently"
+          `Quick test_release_before_acknowledgement_replays_idempotently
+      ; Alcotest.test_case "an undecodable producer meta retains the obligation"
+          `Quick test_undecodable_producer_meta_retains_obligation
       ; Alcotest.test_case "daemon startup recovers committed repair" `Quick
           (test_daemon_delivery ~start_before_commit:false)
       ; Alcotest.test_case "running daemon receives commit hook" `Quick

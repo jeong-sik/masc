@@ -2334,7 +2334,7 @@ let test_handle_request_tools_call_blocks_keeper_internal_tool () =
     ("id", `Int 118);
     ("method", `String "tools/call");
     ("params", `Assoc [
-      ("name", `String "keeper_time_now");
+      ("name", `String "keeper_lane_status");
       ("arguments", `Assoc []);
     ]);
   ]) in
@@ -2352,10 +2352,10 @@ let test_handle_request_tools_call_blocks_keeper_internal_tool () =
         | _ -> Alcotest.fail "missing content text")
     | _ -> Alcotest.fail "missing content"
   in
-  (* keeper_time_now is registered but keeper-internal: the endpoint blocks
+  (* keeper_lane_status is registered but keeper-internal: the endpoint blocks
      it with the typed refusal, not the "Unknown tool" misreport. *)
-  Alcotest.(check bool) "names keeper_time_now" true
-    (String_util.contains_substring msg "keeper_time_now");
+  Alcotest.(check bool) "names keeper_lane_status" true
+    (String_util.contains_substring msg "keeper_lane_status");
   Alcotest.(check bool) "mentions keeper-internal refusal" true
     (String_util.contains_substring msg "keeper-internal");
   Alcotest.(check bool) "mentions endpoint unavailability" true

@@ -75,7 +75,7 @@ let test_keeper_task_claim_is_resolvable () =
 let test_representative_tools_across_categories () =
   let representatives =
     [
-      "keeper_time_now",      "base_tools";
+      "keeper_lane_status",   "base_tools";
       "masc_board_post",    "board_tools";
       "tool_read_file",       "filesystem_tools";
       "tool_search_files",         "search_files_tools";
@@ -98,7 +98,7 @@ let test_representative_tools_across_categories () =
    replacement). *)
 let test_9912_base_tools_still_covered () =
   let base_tools =
-    [ "keeper_time_now"
+    [ "keeper_lane_status"
     ; "keeper_context_status"
     ; "keeper_workspace_memory_read"
     ; "keeper_memory_search"

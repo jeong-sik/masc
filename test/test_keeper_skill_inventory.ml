@@ -74,19 +74,19 @@ Read the diff.
 
 let composition_document =
   {|---
-name: clock-plan
-description: Read the current time through a named plan.
+name: lane-plan
+description: Read the lane status through a named plan.
 ---
 
 ```toml composition
 [[compositions]]
-name = "clock-plan"
-description = "Read the current time through a named plan."
+name = "lane-plan"
+description = "Read the lane status through a named plan."
 execution = "inline"
 
 [[compositions.nodes]]
-id = "clock"
-tool = "keeper_time_now"
+id = "lane"
+tool = "keeper_lane_status"
 [compositions.nodes.input]
 kind = "literal"
 value = {}
@@ -213,17 +213,17 @@ let test_valid_instruction_and_exact_reference () =
 let test_valid_composition () =
   let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
   let inventory =
-    snapshot config [ [ candidate ~directory:"clock-plan" composition_document ] ]
+    snapshot config [ [ candidate ~directory:"lane-plan" composition_document ] ]
     |> Inventory.of_snapshot
   in
-  let valid = valid_named "clock-plan" inventory in
+  let valid = valid_named "lane-plan" inventory in
   match valid.kind with
   | Inventory.Instruction -> fail "composition Skill was classified as instruction"
   | Composition entry ->
     check
       string
       "named composition tool"
-      "keeper_compose_clock-plan"
+      "keeper_compose_lane-plan"
       (Masc.Keeper_tool_composition_catalog.tool_name entry)
 ;;
 

@@ -257,7 +257,8 @@ let test_native_terminal_evidence_precedes_scope_failure () =
   let decide = Masc.Keeper_agent_run.For_testing.tool_boundary_before_repetition
       ~repetition_execution:(Some execution) in
   let completed = Masc.Keeper_tools_agent_core.Terminal_effect_completed
-      (Masc.Keeper_tool_execution.Memory_write_completed { revision = 1 }) in
+      (Masc.Keeper_tool_execution.Surface_post_completed
+         Masc.Keeper_surface_post.To_dashboard) in
   (match decide completed with
    | Ok (Runtime_agent.Yield Runtime_agent.Terminal_tool_completed) -> ()
    | _ -> fail "scope failure hid an exact completed effect");

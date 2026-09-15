@@ -10,11 +10,11 @@
      [examples] (so the LLM has a concrete invocation template).
    - The four tools whose semantics name a sibling carry a
      non-empty [alternatives] list (so the LLM has a typed next
-     step on rejection). The remaining curated tools that are
-     genuinely terminal (keeper_memory_write, masc_plan_set_task)
-     are pinned as having an empty alternatives list — the
-     expectation is "no sibling exists", not "we forgot to fill
-     it in".
+     step on rejection). The remaining curated tools that have no
+     sibling (keeper_memory_retract, keeper_memory_write,
+     keeper_tasks_list) are pinned as having an empty alternatives
+     list — the expectation is "no sibling exists", not "we forgot
+     to fill it in".
    - Every name listed in any [alternatives] field resolves
      through [find_entry] against the authoritative schema list,
      so an alternatives entry can never become a dangling
@@ -64,7 +64,7 @@ let curated_with_examples =
 
 let curated_with_alternatives = []
 
-let curated_terminal =
+let curated_without_sibling =
   [ "keeper_memory_retract"; "keeper_memory_write"; "keeper_tasks_list" ]
 
 let test_examples_populated () =
@@ -85,14 +85,14 @@ let test_alternatives_typed_list () =
         expected entry.alternatives)
     curated_with_alternatives
 
-let test_terminal_tools_empty_alternatives () =
+let test_tools_without_sibling_have_empty_alternatives () =
   List.iter
     (fun name ->
       let entry = lookup name in
       Alcotest.(check (list string))
-        (Printf.sprintf "%s is terminal — empty alternatives by design" name)
+        (Printf.sprintf "%s has no sibling — empty alternatives by design" name)
         [] entry.alternatives)
-    curated_terminal
+    curated_without_sibling
 
 let test_alternatives_never_dangling () =
   let unresolved =
@@ -120,10 +120,10 @@ let test_alternatives_never_dangling () =
       (String.concat ", " (List.map render dangling))
 
 let test_entry_json_omits_empty_fields () =
-  (* keeper_time_now has no curated examples/alternatives; the JSON wire shape
+  (* keeper_lane_status has no curated examples/alternatives; the JSON wire shape
      must omit both keys so existing consumers see no field they did not see
      before. *)
-  let entry = lookup "keeper_time_now" in
+  let entry = lookup "keeper_lane_status" in
   let json = Registry.entry_json entry in
   match json with
   | `Assoc kvs ->
@@ -135,7 +135,7 @@ let test_entry_json_omits_empty_fields () =
   | _ -> Alcotest.fail "entry_json must return an Assoc"
 
 (* The omitted-when-empty half is covered by [test_entry_json_omits_empty_fields]
-   on keeper_time_now. This fixture exists for the opposite property, so it
+   on keeper_lane_status. This fixture exists for the opposite property, so it
    asserts inclusion on both list fields rather than reusing one entry to prove
    emission and omission at once. *)
 let test_entry_json_includes_populated_fields () =
@@ -222,8 +222,8 @@ let () =
             `Quick test_examples_populated;
           Alcotest.test_case "four target tools have typed alternatives"
             `Quick test_alternatives_typed_list;
-          Alcotest.test_case "two target tools are terminal — empty alternatives"
-            `Quick test_terminal_tools_empty_alternatives;
+          Alcotest.test_case "tools without a sibling have empty alternatives"
+            `Quick test_tools_without_sibling_have_empty_alternatives;
         ] );
       ( "registry_invariants",
         [

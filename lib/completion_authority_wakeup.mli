@@ -38,8 +38,10 @@ val reconcile_pending :
 (** Deliver verdict-committed repair obligations from the authoritative backlog.
     A durable Keeper queue write precedes exact-key source acknowledgment.
     Identity lookup, queue and acknowledgement failures retain the obligation
-    for the next recovery. An {!Unroutable_producer} is acknowledged and
-    counted in [unroutable]: retrying cannot create a Keeper queue, and the
-    verdict with its reason is already committed on the Task. Delivery is at
+    for the next recovery. An {!Unroutable_producer} returns the Task to the
+    backlog and is then acknowledged and counted in [unroutable]: retrying
+    cannot create a Keeper queue, and a Task whose producer will never act
+    again has to be claimable by someone else. The verdict's reason and
+    verification id travel with it on the handoff context. Delivery is at
     least once across the queue-write/source-ack crash window; the
     verification-keyed stimulus is information, not permission to mutate. *)

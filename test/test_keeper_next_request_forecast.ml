@@ -31,8 +31,10 @@ let test_the_fixed_parts_come_off_the_capacity_first () =
   let messages = history ~exchanges:100 ~text_bytes:100 in
   let per_atom = atom_bytes (history ~exchanges:1 ~text_bytes:100) / 2 in
   let total_atoms = 200 in
-  (* Room for 90 atoms after the prompt's fixed parts; the cut lands on a
-     60-atom boundary, so 60 travel. *)
+  (* Room for 90 atoms after the prompt's fixed parts. The cut drops atoms
+     in multiples of 60 so the transmitted prefix stays byte-identical while
+     the conversation grows: dropping 60 leaves 140, too many; dropping 120
+     leaves 80, which fits. So 80 travel. *)
   let capacity_bytes = (90 * per_atom) + 5_000 + 7_000 in
   match
     Keeper_next_request_forecast.cut_history
@@ -43,7 +45,7 @@ let test_the_fixed_parts_come_off_the_capacity_first () =
       messages
   with
   | Keeper_next_request_forecast.Cut { kept_atoms; fit; _ } ->
-    Alcotest.(check int) "sixty of two hundred atoms fit under the fixed parts" 60 kept_atoms;
+    Alcotest.(check int) "eighty of two hundred atoms fit under the fixed parts" 80 kept_atoms;
     Alcotest.(check bool) "and the request is within the window" true
       (match fit with
        | Runtime_model_input_tail_window.Within_target -> true

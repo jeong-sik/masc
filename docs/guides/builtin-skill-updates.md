@@ -34,7 +34,9 @@ file's bytes, every directory, and permissions. Each package gets one result:
 A package without a receipt is never removed. MASC cannot tell whether it is
 an untouched former builtin or the operator's own Skill. Setting permissions
 changes no bytes and no file list; it applies only when the files, directories
-and bytes are the release's. A recorded tree whose permissions were edited
+and bytes are the release's. Each mode is changed through a descriptor that is
+checked to be the entry that was inspected, so a symlink put in its place is
+not followed. A recorded tree whose permissions were edited
 after installation is an edit and is kept.
 
 `masc init` prints one line per package and exits non-zero when any package
@@ -52,24 +54,38 @@ drop it.
 
 Each package has one backup entry, `.masc/skill-packages/previous/PACKAGE`.
 Replacing or retiring the package puts the tree it moved out of the Skill
-source there, and the tree an earlier replacement kept there is deleted.
-Because an unchanged release reports every package as up to date, a backup only
-changes when the shipped packages change.
+source there, and the tree an earlier replacement kept there is deleted. That
+includes a tree `skills-refresh --apply` kept: operator changes that live only
+in the backup are gone after the next replacement or retirement of the package,
+so copy them elsewhere first. Because an unchanged release reports every
+package as up to date, a backup only changes when the shipped packages change.
 
-Trees being built, and backups about to be deleted, live in
-`.masc/skill-packages/staging/`. An interrupted installation can leave entries
-there; the next `masc init` deletes them and prints one line for each. An
-entry under `previous/` is always complete: it arrives by one rename or
-exchange of a synced tree. An installation interrupted during a replacement
-can leave `previous/PACKAGE` holding the release it was installing while the
-Skill source still holds the old tree; running `masc init` again replaces the
-package and puts the old tree there.
+Each replacement or retirement works in its own holder under
+`.masc/skill-packages/staging/`: the release is built there, the installed tree
+waits there between leaving the Skill source and reaching `previous/`, and the
+earlier backup lands there to be deleted. The backup entry is not touched until
+the installed tree has left the Skill source, so it never holds a release that
+was not installed. An entry under `previous/` is always complete: it arrives by
+one rename or exchange of a synced tree.
+
+Before the installed tree leaves the Skill source, a note with its revision is
+written to `.masc/skill-packages/moving/PACKAGE.sha256`, and it is removed once
+`previous/PACKAGE` is verified to hold that tree. When `masc init` starts and
+finds a note, it looks for a tree with that revision in `previous/`, the Skill
+source and staging, moves it into `previous/` if it is still in staging, and
+prints one line per note. Only when every note is resolved does it delete what
+is left in staging, printing one line per holder. A note whose tree is found
+nowhere is reported and stays, and staging is kept for inspection; the package
+is not replaced or retired while its note exists.
 
 Server start reads without the installer lock and takes it only when it has a
 package to publish or a receipt to write. It never waits for it: when another
 installation holds the lock, the start logs that nothing was reconciled and
 continues. `masc init` and `skills-refresh --apply` wait for the lock and print
-which lock they wait for.
+which lock they wait for on standard error; the installer script captures only
+standard output, so that line reaches the terminal while it waits. One process
+keeps a separate lock per receipt directory, so installations into different
+base paths do not wait for each other.
 
 For an untracked or modified package, review the actual bundled files before
 choosing replacement. Use a fresh destination directory for the export:
@@ -88,8 +104,9 @@ inspection and review, replacement is rejected.
 Use replacement only after incorporating any operator changes you want to keep;
 it installs the complete bundled package. Other packages are unaffected.
 
-The replacement directory is prepared and synced, takes the package's backup
-entry, and then trades places with the installed tree in one atomic exchange.
+The replacement directory is prepared and synced, then trades places with the
+installed tree in one atomic exchange, and the installed tree moves on into the
+package's backup entry.
 Linux uses `renameat2(RENAME_EXCHANGE)` and macOS uses
 `renamex_np(RENAME_SWAP)`; unsupported filesystems fail without a two-rename
 fallback. The previous directory is kept at

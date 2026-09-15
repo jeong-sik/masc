@@ -287,7 +287,7 @@ let other = match Package.make ~name:"other-fixture" ~files:[ "SKILL.md", "other
 let retired_reports base = install_all base [ other ]
   |> List.filter_map (function
     | Package.Retired { name; result } -> Some (name, result)
-    | Package.Bundled _ | Package.Unfinished _ -> None)
+    | Package.Bundled _ | Package.Interrupted _ | Package.Unfinished _ -> None)
 
 let test_retire_recorded () = with_base (fun base ->
   installed base first;
@@ -450,11 +450,12 @@ let verdicts reports = List.map (function
   | Package.Bundled { name; result = Ok verdict } -> name, Ok verdict
   | Package.Bundled { name; result = Error error } -> name, Error (Package.error_message error)
   | Package.Retired { name; _ } -> fail ("unexpected retirement report for " ^ name)
+  | Package.Interrupted { name; _ } -> fail ("unexpected interrupted-move report for " ^ name)
   | Package.Unfinished { path; _ } -> fail ("unexpected staging report for " ^ path)) reports
 
 let retirements reports = List.filter_map (function
   | Package.Retired { name; result } -> Some (name, result)
-  | Package.Bundled _ | Package.Unfinished _ -> None) reports
+  | Package.Bundled _ | Package.Interrupted _ | Package.Unfinished _ -> None) reports
 
 (* Two binaries share one base path: v1 ships browser-fixture=first and
    other-fixture; v2 ships browser-fixture=second and added-fixture and no
@@ -465,21 +466,21 @@ let test_alternating_binaries_change_nothing () = with_base (fun base ->
   let added = named "added-fixture" [ "SKILL.md", "added instruction" ] in
   let v1 = [ first; other ] and v2 = [ second; added ] in
   ignore (install_all base v1 : Package.report list);
-  (match verdicts (List.filter (function Package.Bundled _ -> true | Package.Retired _ | Package.Unfinished _ -> false) (startup_all base v2)) with
+  (match verdicts (List.filter (function Package.Bundled _ -> true | Package.Retired _ | Package.Interrupted _ | Package.Unfinished _ -> false) (startup_all base v2)) with
    | [ "browser-fixture", Ok (Package.Replace_pending _); "added-fixture", Ok Package.Install_missing ] -> ()
    | _ -> fail "v2 start: replacement is pending and only the missing package is published");
   ignore (startup_all base v1 : Package.report list);
   let settled = snapshot base in
   for _ = 1 to 3 do
     let v2_reports = startup_all base v2 in
-    (match List.filter (function Package.Bundled _ -> true | Package.Retired _ | Package.Unfinished _ -> false) v2_reports |> verdicts with
+    (match List.filter (function Package.Bundled _ -> true | Package.Retired _ | Package.Interrupted _ | Package.Unfinished _ -> false) v2_reports |> verdicts with
      | [ "browser-fixture", Ok (Package.Replace_pending _); "added-fixture", Ok Package.Up_to_date ] -> ()
      | _ -> fail "v2 start keeps reporting the pending replacement");
     (match retirements v2_reports with
      | [ "other-fixture", Ok (Package.Retire_pending { revision = Some _ }) ] -> ()
      | _ -> fail "v2 start reports the retirement as pending");
     let v1_reports = startup_all base v1 in
-    (match List.filter (function Package.Bundled _ -> true | Package.Retired _ | Package.Unfinished _ -> false) v1_reports |> verdicts with
+    (match List.filter (function Package.Bundled _ -> true | Package.Retired _ | Package.Interrupted _ | Package.Unfinished _ -> false) v1_reports |> verdicts with
      | [ "browser-fixture", Ok Package.Up_to_date; "other-fixture", Ok Package.Up_to_date ] -> ()
      | _ -> fail "v1 start finds its own packages up to date");
     (match retirements v1_reports with
@@ -491,7 +492,7 @@ let test_alternating_binaries_change_nothing () = with_base (fun base ->
   check (list string) "no start made a backup" [] (entries_of (Filename.concat (state base) "previous"));
   check string "v1's tree is still installed" "old instruction" (read (file base "SKILL.md"));
   let reports = install_all base v2 in
-  (match List.filter (function Package.Bundled _ -> true | Package.Retired _ | Package.Unfinished _ -> false) reports |> verdicts with
+  (match List.filter (function Package.Bundled _ -> true | Package.Retired _ | Package.Interrupted _ | Package.Unfinished _ -> false) reports |> verdicts with
    | [ "browser-fixture", Ok (Package.Replace_recorded _); "added-fixture", Ok Package.Up_to_date ] -> ()
    | _ -> fail "the installer replaces what a start left pending");
   (match retirements reports with
@@ -632,6 +633,145 @@ let test_unfinished_staging_is_cleared_by_the_installer () = with_base (fun base
    | _ -> fail "the installer reports the leftover before the packages");
   check bool "the installer removed it" false (Sys.file_exists partial))
 
+let third_release = package [ "SKILL.md", "third instruction"; "third.md", "third resource" ]
+let backup_entry base = Filename.concat (state base) "previous/browser-fixture"
+let staging_entries base = entries_of (Filename.concat (state base) "staging")
+let move_notes base = entries_of (Filename.concat (state base) "moving")
+
+let interrupted_reports reports = List.filter_map (function
+  | Package.Interrupted { name; result } -> Some (name, result)
+  | Package.Bundled _ | Package.Retired _ | Package.Unfinished _ -> None) reports
+
+(* Runs an installation in a child process that exits at [point], the way a
+   crash would stop it: nothing after that point runs, no cleanup included. *)
+let install_until base values point =
+  match Unix.fork () with
+  | 0 ->
+    (try
+       let interrupt reached = if reached = point then Unix._exit 0 in
+       ignore (Package.For_testing.install ~interrupt ~on_wait ~base_path:base values
+               : (Package.report list, Package.error) result);
+       Unix._exit 3
+     with _ -> Unix._exit 2)
+  | child ->
+    match Unix.waitpid [] child with
+    | _, Unix.WEXITED 0 -> ()
+    | _, (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) ->
+      fail "the installation did not reach the interruption point"
+
+let interruption_points =
+  [ Package.For_testing.After_move_note, "after the move note"
+  ; Package.For_testing.After_leaving_skill_source, "after the installed tree left the Skill source"
+  ; Package.For_testing.After_backup_placed, "after the backup entry was filled" ]
+
+(* The backup entry holds an operator-edited tree kept by a reviewed
+   replacement, the Skill source holds [second], and an installation of a
+   third release stops between two steps. The next installation comes from a
+   binary that still ships [second]. Neither tree may be lost, and the backup
+   entry never holds the release that was being installed. *)
+let test_interrupted_replacement_loses_no_tree () =
+  List.iter (fun (point, label) -> with_base (fun base ->
+    installed base first;
+    Fs_compat.save_file (file base "operator.txt") "operator change";
+    (match replace base (inspect base second) second with
+     | Ok (Package.Replaced _) -> ()
+     | Ok Package.Already_current | Error _ -> fail "setup: reviewed replacement");
+    install_until base [ third_release ] point;
+    let reports = install_all base [ second ] in
+    let backup = backup_entry base in
+    (match point, interrupted_reports reports with
+     | Package.For_testing.After_move_note, [ "browser-fixture", Ok Package.Move_never_started ] ->
+       check string (label ^ ": the Skill source keeps the installed tree") "short instruction"
+         (read (file base "SKILL.md"));
+       check string (label ^ ": the earlier backup keeps the operator change") "operator change"
+         (read (Filename.concat backup "operator.txt"))
+     | Package.For_testing.After_leaving_skill_source,
+       [ "browser-fixture", Ok (Package.Move_finished { backup = moved }) ] ->
+       check string (label ^ ": moved into the package's backup entry") "browser-fixture"
+         (Filename.basename moved);
+       check string (label ^ ": the backup is the tree that left the Skill source")
+         "short instruction" (read (Filename.concat backup "SKILL.md"));
+       check string (label ^ ": the release it was installing stays live") "third instruction"
+         (read (file base "SKILL.md"))
+     | Package.For_testing.After_backup_placed, [ "browser-fixture", Ok Package.Move_completed ] ->
+       check string (label ^ ": the backup is the tree that left the Skill source")
+         "short instruction" (read (Filename.concat backup "SKILL.md"));
+       check string (label ^ ": the release it was installing stays live") "third instruction"
+         (read (file base "SKILL.md"))
+     | _ -> fail (label ^ ": " ^ String.concat "; " (List.map Package.report_to_string reports)));
+    check bool (label ^ ": the backup never holds a release that was not installed") false
+      (Sys.file_exists (Filename.concat backup "third.md"));
+    check (list string) (label ^ ": staging emptied once the move is finished") [] (staging_entries base);
+    check (list string) (label ^ ": no move note left") [] (move_notes base))) interruption_points
+
+(* The same for a retirement, followed by a binary that still ships the package. *)
+let test_interrupted_retirement_loses_no_tree () =
+  List.iter (fun (point, label) -> with_base (fun base ->
+    installed base first;
+    install_until base [ other ] point;
+    let reports = install_all base [ first ] in
+    let installed_verdict = List.filter_map (function
+      | Package.Bundled { name = "browser-fixture"; result } -> Some result
+      | Package.Bundled _ | Package.Retired _ | Package.Interrupted _ | Package.Unfinished _ -> None) reports in
+    (match point, interrupted_reports reports, installed_verdict with
+     | Package.For_testing.After_move_note, [ "browser-fixture", Ok Package.Move_never_started ],
+       [ Ok Package.Up_to_date ] -> ()
+     | Package.For_testing.After_leaving_skill_source,
+       [ "browser-fixture", Ok (Package.Move_finished _) ], [ Ok Package.Install_missing ]
+     | Package.For_testing.After_backup_placed, [ "browser-fixture", Ok Package.Move_completed ],
+       [ Ok Package.Install_missing ] ->
+       check string (label ^ ": the retired tree is the backup") "old resource"
+         (read (Filename.concat (backup_entry base) "references/old.md"))
+     | _ -> fail (label ^ ": " ^ String.concat "; " (List.map Package.report_to_string reports)));
+    check string (label ^ ": the package is installed again") "old instruction" (read (file base "SKILL.md"));
+    check (list string) (label ^ ": staging emptied") [] (staging_entries base);
+    check (list string) (label ^ ": no move note left") [] (move_notes base))) interruption_points
+
+let test_unresolved_move_note_keeps_staging () = with_base (fun base ->
+  installed base first;
+  let moves = Filename.concat (state base) "moving" in
+  Fs_compat.mkdir_p moves;
+  Fs_compat.save_file (Filename.concat moves "browser-fixture.sha256")
+    (Package.bundled_revision third_release ^ "\n");
+  let holder = Filename.concat (state base) "staging/browser-fixture-kept" in
+  Fs_compat.mkdir_p holder;
+  Fs_compat.save_file (Filename.concat holder "evidence.txt") "kept for inspection";
+  (match install_all base [ second ] with
+   | [ Package.Interrupted { name = "browser-fixture"; result = Error (Package.Backup_move_unresolved _) }
+     ; Package.Bundled { result = Error (Package.Backup_move_pending _); _ } ] -> ()
+   | reports -> fail (String.concat "; " (List.map Package.report_to_string reports)));
+  check string "staging is kept while a note is unresolved" "kept for inspection"
+    (read (Filename.concat holder "evidence.txt"));
+  check string "the package is not replaced while its move is unfinished" "old instruction"
+    (read (file base "SKILL.md"));
+  match replace base (inspect base second) second with
+  | Error (Package.Backup_move_pending _) -> ()
+  | Ok _ | Error _ -> fail "a reviewed replacement waits for the unfinished move")
+
+(* An installer in this process waits for base path A's lock, held by another
+   process. A start in base path B needs its own lock only. *)
+let test_another_base_path_does_not_block_a_start () = with_base (fun held -> with_base (fun free ->
+  installed held first;
+  let signal = Mutex.create () and waiting = Condition.create () and is_waiting = ref false in
+  let on_wait (_ : string) =
+    Mutex.protect signal (fun () -> is_waiting := true; Condition.signal waiting) in
+  let result = ref None and installer = ref None in
+  with_lock_held_elsewhere held (fun _ ->
+    installer := Some (Thread.create (fun () ->
+      result := Some (Package.install ~on_wait ~base_path:held [ second ])) ());
+    Mutex.protect signal (fun () -> while not !is_waiting do Condition.wait waiting signal done);
+    match Package.reconcile_at_startup ~base_path:free [ first ] with
+    | Ok (Package.Reconciled [ Package.Bundled { result = Ok Package.Install_missing; _ } ]) -> ()
+    | Ok (Package.Busy { lock }) -> fail ("a start in another base path was reported busy on " ^ lock)
+    | Ok (Package.Reconciled reports) -> fail (String.concat "; " (List.map Package.report_to_string reports))
+    | Error error -> fail (Package.error_message error));
+  (match !installer with Some thread -> Thread.join thread | None -> fail "installer thread not started");
+  match !result with
+  | Some (Ok [ Package.Bundled { result = Ok (Package.Replace_recorded _); _ } ]) -> ()
+  | Some (Ok reports) -> fail (String.concat "; " (List.map Package.report_to_string reports))
+  | Some (Error error) -> fail (Package.error_message error)
+  | None -> fail "the waiting installer did not finish"))
+
 let () = run "Builtin Skill package updates"
   [ "server start", [ test_case "start does not wait for the installer lock" `Quick test_start_does_not_wait_for_the_lock
                     ; test_case "alternating binaries change nothing" `Quick test_alternating_binaries_change_nothing
@@ -657,4 +797,8 @@ let () = run "Builtin Skill package updates"
                   ; test_case "edited package survives retirement" `Quick test_retire_keeps_modified
                   ; test_case "packages without receipts are never retired" `Quick test_retire_never_touches_untracked
                   ; test_case "one backup entry per package" `Quick test_one_backup_per_package
-                  ; test_case "installer clears unfinished staging" `Quick test_unfinished_staging_is_cleared_by_the_installer ] ]
+                  ; test_case "installer clears unfinished staging" `Quick test_unfinished_staging_is_cleared_by_the_installer ]
+  ; "interrupted installation", [ test_case "replacement loses no tree" `Quick test_interrupted_replacement_loses_no_tree
+                                ; test_case "retirement loses no tree" `Quick test_interrupted_retirement_loses_no_tree
+                                ; test_case "unresolved move note keeps staging" `Quick test_unresolved_move_note_keeps_staging ]
+  ; "locks", [ test_case "another base path does not block a start" `Quick test_another_base_path_does_not_block_a_start ] ]

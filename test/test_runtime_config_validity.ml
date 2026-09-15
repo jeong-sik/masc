@@ -4380,8 +4380,10 @@ supports_tools = true
 context_window_tokens = 8192
 
 [runtime]
-default =s = Printf.sprintf {|[runtime]
-default = "fixture.alpha"
+default ="fixture.alpha"
+[runtime.lanes.primary]
+candidates = %s
+ "fixture.alpha"
 [runtime.lanes.primary]
 candidates = %s
 [providers.fixture]

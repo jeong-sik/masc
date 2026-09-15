@@ -77,44 +77,41 @@ let visible filter (event : Observer.event) =
    [quiet]. Every class keeps its newest and the rest is counted, not
    silently forgotten. Entries arrive newest-first and stay in that order.
 
-   A turn observation is the exception. No scope but [Everything] draws it,
-   yet the Turns fold reads it to number the calls it reports. Counted with
-   the quiet class, it would be trimmed by token-sized stream frames long
-   before those calls, and the turn it named would split back into
-   unnumbered rows. It gets a budget of its own the size of [actions], and
-   every observation comes with actions from its own call: the turn start
-   and ready of a call the agent-core loop makes, or the tool frames and the
-   settle of a CLI lane that runs a whole keeper turn as one call. So the
-   observations fill their budget more slowly than actions fill theirs. *)
-type retention_class = Retain_action | Retain_observation | Retain_quiet
-
-let retention_class (event : Observer.event) =
+   A turn observation spends an action slot although no scope but
+   [Everything] draws it. The Turns fold reads it to number the calls it
+   reports, so it has to leave the ring with those calls, neither before nor
+   after them. Among the quiet class, token-sized stream frames trim it
+   before its calls and the turn splits back into unnumbered rows. Held past
+   its calls, it still answers for its ordinal when a session created
+   without a checkpoint reaches that ordinal again, and the new call in
+   flight opens a row under the old keeper turn. In the action budget it
+   leaves in arrival order with the frames around it. *)
+let retained_as_action (event : Observer.event) =
   match event with
-  | Observer.Keeper_turn_observation _ -> Retain_observation
+  | Observer.Keeper_turn_observation _ -> true
   | Observer.Agent_core _ | Observer.Keeper_heartbeat _
   | Observer.Keeper_tool_call _ | Observer.Keeper_turn_complete _
   | Observer.Keeper_composite_changed _ | Observer.Keeper_chat_appended _
   | Observer.Keeper_chat_stream_frame _
   | Observer.Keeper_waiting_inventory_changed _
   | Observer.Fusion_run_status _ | Observer.Snapshot _ | Observer.Other _ ->
-      if visible Actions event then Retain_action else Retain_quiet
+      visible Actions event
 
 let retain ~actions ~quiet ~event_of entries =
-  let rec walk kept n_actions n_observations n_quiet dropped = function
+  let rec walk kept n_actions n_quiet dropped = function
     | [] -> (List.rev kept, dropped)
-    | entry :: older -> (
-        match retention_class (event_of entry) with
-        | Retain_action when n_actions < actions ->
-            walk (entry :: kept) (n_actions + 1) n_observations n_quiet dropped older
-        | Retain_observation when n_observations < actions ->
-            walk (entry :: kept) n_actions (n_observations + 1) n_quiet dropped
-              older
-        | Retain_quiet when n_quiet < quiet ->
-            walk (entry :: kept) n_actions n_observations (n_quiet + 1) dropped older
-        | Retain_action | Retain_observation | Retain_quiet ->
-            walk kept n_actions n_observations n_quiet (dropped + 1) older)
+    | entry :: older ->
+        let is_action = retained_as_action (event_of entry) in
+        let used = if is_action then n_actions else n_quiet in
+        let budget = if is_action then actions else quiet in
+        if used >= budget then walk kept n_actions n_quiet (dropped + 1) older
+        else
+          walk (entry :: kept)
+            (if is_action then n_actions + 1 else n_actions)
+            (if is_action then n_quiet else n_quiet + 1)
+            dropped older
   in
-  walk [] 0 0 0 0 entries
+  walk [] 0 0 0 entries
 
 type glyph =
   | Call_started
@@ -382,8 +379,10 @@ let row_of_entry ~duration_ms entry =
    keeper turn; a turn observation names both, and {!fold_chunks} files each
    member through them. A member whose call no retained observation names
    is filed by its ordinal and the keeper's open turn, which can misfile a
-   row across a session restart -- a display blemish, never a stored
-   fact. *)
+   row across a session restart. A member that states no ordinal at all (a
+   ledger row from the runtime MCP path) joins the keeper's newest chunk,
+   settled or not, so it lands on the turn before its own once that turn has
+   settled. Both are display blemishes, never stored facts. *)
 
 type chunk_tool = {
   ct_tool : string;
@@ -793,17 +792,18 @@ let file_member ~existing ~keeper ~at ~session ~keeper_turn member =
    zero again, so one keeper can observe the same ordinal twice in the ring.
    A member takes the observation nearest to it in feed position, which is
    the right one while a call's frames sit nearer their own observation than
-   an older session's. On the agent-core loop they sit right around it: the
-   call's turn markers just before, its tools just after. A CLI lane runs a
-   whole keeper turn as one call, so every frame of the turn comes before
-   the observation, and a frame from early in a long lane turn can sit
-   nearer an older session's observation of the same ordinal and be filed
-   under that older turn. A frame relayed late, after the new session's
-   observation of its ordinal, is filed under the new turn.
+   another session's observation of the same ordinal. On the agent-core loop
+   they sit right around it: the call's turn markers just before, its tools
+   just after. A CLI lane runs a whole keeper turn as one call, so every
+   frame of the turn comes before the observation, and a frame from early in
+   a long lane turn can sit nearer an older session's observation. A frame
+   that lands long after its observation -- a slow tool's return, or one the
+   relay held -- can sit nearer the next session's. Either way it is filed
+   under the other session's turn.
 
    [traces] resolves agent-core correlation ids to keeper names, exactly as
-   the flat view does. The ring holds up to [acting_retained_entries] rows
-   and this runs on every frame, so chunks live in a per-keeper table:
+   the flat view does. The ring holds up to [acting_retained_entries] +
+   [acting_retained_quiet] entries and this runs on every frame, so chunks live in a per-keeper table:
    attaching costs the keeper's own chunk count, not the whole screen. *)
 let fold_chunks ~traces entries =
   let oldest_first = List.rev entries in

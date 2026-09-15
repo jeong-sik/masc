@@ -44,9 +44,12 @@ val reconcile_pending :
     again has to be claimable by someone else. The route is read once more
     inside the backlog lock, so a Keeper queue that appears between the two
     keeps the obligation instead of losing it to a release. A release that
-    fails is kept only when another interval could succeed; one that cannot
-    (no workspace, an unusable task id or authority) ends there rather than
-    becoming the permanent retry this path was built to remove. The verdict's reason and
+    fails is kept unless it both cannot succeed on a later interval and can
+    still be acknowledged — acknowledging takes the same backlog write the
+    release just failed at, so a backlog that cannot be written leaves keeping
+    it as the only option. An obligation carrying an unusable task id or
+    authority ends there rather than becoming the permanent retry this path
+    was built to remove. The verdict's reason and
     verification id travel with it on the handoff context. Delivery is at
     least once across the queue-write/source-ack crash window; the
     verification-keyed stimulus is information, not permission to mutate. *)

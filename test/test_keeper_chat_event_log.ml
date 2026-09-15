@@ -667,17 +667,24 @@ let test_reader_gone_releases_every_parked_publisher () =
   let reader_context = ref None in
   let backpressure, _never_resolved = Eio.Promise.create () in
   Eio.Fiber.fork_daemon ~sw (fun () ->
-    Eio.Cancel.sub (fun context ->
-      reader_context := Some context;
-      Fun.protect
-        ~finally:(fun () -> Masc.Keeper_chat_events.reader_gone bus)
-        (fun () ->
-          match Masc.Keeper_chat_events.subscribe bus with
-          | Masc.Keeper_chat_events.Next _ ->
-            (* Never resolved: the reading fiber stays between takes until
-               the cancel below reaches it. *)
-            Eio.Promise.await backpressure
-          | Masc.Keeper_chat_events.Closed -> ()));
+    (match
+       Eio.Cancel.sub (fun context ->
+         reader_context := Some context;
+         Fun.protect
+           ~finally:(fun () -> Masc.Keeper_chat_events.reader_gone bus)
+           (fun () ->
+             match Masc.Keeper_chat_events.subscribe bus with
+             | Masc.Keeper_chat_events.Next _ ->
+               (* Never resolved: the reading fiber stays between takes
+                  until the cancel below reaches it. Swallowing the
+                  cancellation here is the same wrap eio's own Fiber.any
+               runs its child under: left alone it would fail the switch
+               the whole test runs in, before any assertion. *)
+               Eio.Promise.await backpressure
+             | Masc.Keeper_chat_events.Closed -> ()))
+     with
+     | () -> ()
+     | exception Eio.Cancel.Cancelled _ -> ());
     `Stop_daemon);
   let turn_finished = Array.make 2 false in
   List.iteri

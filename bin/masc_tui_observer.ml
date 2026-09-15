@@ -145,7 +145,8 @@ type delivery = {
 let chat_appended_keeper = function
   | Keeper_chat_appended { keeper; _ } -> Some keeper
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
-  | Keeper_turn_complete _ | Keeper_composite_changed _
+  | Keeper_turn_complete _ | Keeper_turn_observation _
+  | Keeper_composite_changed _
   | Keeper_chat_stream_frame _ | Keeper_waiting_inventory_changed _
   | Fusion_run_status _ | Snapshot _ | Other _ ->
       None

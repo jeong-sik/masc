@@ -1719,7 +1719,7 @@ let test_candidate_rows_join_parent_tool_call () =
           if !calls = 1 then
             Error
               (Llm_provider.Http_client.HttpError
-                 { code = 500; body = "down"; retry_after_header = None })
+                 { code = 500; body = Llm_provider.Http_client.Received "down"; retry_after_header = None })
           else Ok (ok_response "second runtime answered")
         in
         let outcome =

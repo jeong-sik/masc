@@ -1425,6 +1425,22 @@ let run_turn
                           "keeper cooperative-yield probe failed: %s"
                           (Printexc.to_string exn))))
          in
+         (* The same queue snapshot the tool-boundary probe reads, narrowed to a
+            person's own chat operation ([Operation_queued]). The turn driver
+            races this against the pre-first-token wait so a queued person is
+            not stuck behind a provider that has produced nothing (RFC-0441
+            pre-first-token gap). Autonomous-only: [autonomous_yield_requested]
+            is [None] off the autonomous lane, so the probe is too. *)
+         let person_queued_probe =
+           Option.map
+             (fun requested () ->
+                match requested () with
+                | Ok (Some { reason = Operation_queued }) -> true
+                | Ok (Some { reason = Durable_stimulus_waiting _ })
+                | Ok None
+                | Error _ -> false)
+             autonomous_yield_requested
+         in
          let checkpoint_sidecar =
                 ctx_work.checkpoint.Agent_core.Checkpoint.working_context
          in
@@ -1517,6 +1533,7 @@ let run_turn
                       ~terminal_effect_state:s.terminal_effect_state
                       ?enable_thinking:(Keeper_config.keeper_enable_thinking ())
                       ?cooperative_yield_probe
+                      ?person_queued_probe
                       ?official_client_continuation
                       ?official_client_original_turn
                       ?official_task_reference

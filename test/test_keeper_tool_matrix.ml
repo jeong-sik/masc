@@ -196,7 +196,6 @@ let run_capture_process ~env ~out_file ~err_file prog argv =
 
 let isolated_child_env_unset =
   [ "MASC_BASE_PATH"
-  ; "MASC_BASE_PATH_INPUT"
   ; "MASC_CONFIG_DIR"
   ; "MASC_TOKEN"
   ; "MASC_INTERNAL_MCP_TOKEN"

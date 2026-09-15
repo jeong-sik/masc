@@ -289,39 +289,84 @@ let builtin_skills () =
     | Error reason -> invalid_arg reason)
 ;;
 
-let install_builtin_skills ~base_path ~request =
-  let operation () =
-    List.fold_left (fun installed package ->
-      let name = Builtin_skill_package.name package in
-      match Builtin_skill_package.install ~base_path ~request package with
-      | Ok Builtin_skill_package.Installed -> installed + 1
-      | Ok (Builtin_skill_package.Updated { backup }) ->
-        Printf.printf "updated Skill %s (previous package: %s)\n" name backup;
-        installed + 1
-      | Ok (Builtin_skill_package.Current | Builtin_skill_package.Already_present) -> installed
-      | Ok (Builtin_skill_package.Preserved_uninspectable { reason }) ->
-        Printf.printf "preserved Skill %s (cannot inspect package: %s)\n" name reason;
-        installed
-      | Ok (Builtin_skill_package.Preserved inspection) ->
-        (match request, inspection with
-         | Builtin_skill_package.Automatic, Builtin_skill_package.Present { revision; _ } ->
-           Printf.printf "preserved Skill %s (revision=%s; inspect with masc skills-refresh %s --base-path BASE)\n"
-             name revision name
-         | (Builtin_skill_package.Seed_missing | Builtin_skill_package.Replace_if_revisions _), _
-         | Builtin_skill_package.Automatic, Builtin_skill_package.Missing -> ());
-        installed
-      | Error error -> raise (Sys_error (Builtin_skill_package.error_message error)))
-      0 (builtin_skills ())
-  in
-  Eio_guard.run_in_systhread ~label:"builtin-skill-install" operation
+let reconcile_builtin_skills ~base_path =
+  Eio_guard.run_in_systhread ~label:"builtin-skill-reconcile" (fun () ->
+    Builtin_skill_package.reconcile ~base_path (builtin_skills ()))
 ;;
 
-let seed_missing_builtin_skills ~base_path =
-  install_builtin_skills ~base_path ~request:Builtin_skill_package.Seed_missing
+type builtin_skill_log_level =
+  | Unchanged
+  | Changed
+  | Needs_operator
+
+let builtin_skill_log_level = function
+  | Builtin_skill_package.Bundled { result = Ok Builtin_skill_package.Up_to_date; _ } ->
+    Unchanged
+  | Builtin_skill_package.Bundled
+      { result =
+          Ok
+            ( Builtin_skill_package.Install_missing
+            | Builtin_skill_package.Adopt_identical
+            | Builtin_skill_package.Replace_recorded _ )
+      ; _
+      }
+  | Builtin_skill_package.Retired
+      { result = Ok (Builtin_skill_package.Retire_recorded _); _ } -> Changed
+  | Builtin_skill_package.Bundled
+      { result =
+          Ok
+            ( Builtin_skill_package.Keep_modified _
+            | Builtin_skill_package.Keep_untracked_different _
+            | Builtin_skill_package.Keep_uninspectable _ )
+      ; _
+      }
+  | Builtin_skill_package.Retired
+      { result =
+          Ok
+            ( Builtin_skill_package.Keep_retired_modified _
+            | Builtin_skill_package.Keep_retired_uninspectable _ )
+      ; _
+      }
+  | Builtin_skill_package.Bundled { result = Error _; _ }
+  | Builtin_skill_package.Retired { result = Error _; _ } -> Needs_operator
 ;;
 
-let refresh_builtin_skills ~base_path =
-  install_builtin_skills ~base_path ~request:Builtin_skill_package.Automatic
+let builtin_skill_report_name = function
+  | Builtin_skill_package.Bundled { name; _ } | Builtin_skill_package.Retired { name; _ } -> name
+;;
+
+(* Startup reconciles on every root, fresh or existing, so a binary that
+   changed its builtin packages reaches the runtime without an installer run.
+   A failure here never stops startup: each package that was not reconciled,
+   or that the operator has to look at, is its own warning line. *)
+let log_builtin_skill_reconciliation ~base_path =
+  match reconcile_builtin_skills ~base_path with
+  | Error error ->
+    Log.Server.warn
+      "builtin Skills were not reconciled: %s"
+      (Builtin_skill_package.error_message error)
+  | Ok reports ->
+    let unchanged =
+      List.filter_map
+        (fun report ->
+           match builtin_skill_log_level report with
+           | Unchanged -> Some (builtin_skill_report_name report)
+           | Changed | Needs_operator -> None)
+        reports
+    in
+    if unchanged <> []
+    then
+      Log.Server.info
+        "builtin Skills up to date: %s"
+        (String.concat ", " unchanged);
+    List.iter
+      (fun report ->
+         match builtin_skill_log_level report with
+         | Unchanged -> ()
+         | Changed -> Log.Server.info "%s" (Builtin_skill_package.report_to_string report)
+         | Needs_operator ->
+           Log.Server.warn "%s" (Builtin_skill_package.report_to_string report))
+      reports
 ;;
 
 let bootstrap_initial_config_root ~base_path ~created =
@@ -414,10 +459,7 @@ let bootstrap_initial_config_root ~base_path ~created =
             "bootstrapped minimal base-path config root without versioned source \
              and no embedded assets: %s"
             config_root);
-    if mode = `Auto then (
-      let installed = seed_missing_builtin_skills ~base_path in
-      if installed > 0 then
-        Log.Server.info "installed %d builtin Skill package(s)" installed);
+    if mode = `Auto then log_builtin_skill_reconciliation ~base_path;
     Config_dir_resolver.reset ())
 ;;
 

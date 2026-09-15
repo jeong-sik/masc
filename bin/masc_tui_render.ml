@@ -12735,7 +12735,8 @@ let render_runtime_params (state : state) =
            let open Tui_decode in
            let line =
              Printf.sprintf "    %s %-41s %-16s%s"
-               (if row.rpr_has_override then "\xe2\x97\x8f" else "\xe2\x97\x8b")
+               (Masc_tui_config_mark.param_glyph
+                  ~has_override:row.rpr_has_override)
                (Terminal_text.single_line row.rpr_key)
                (Terminal_text.single_line
                   (runtime_param_value_text ~value_type:row.rpr_value_type
@@ -12912,14 +12913,17 @@ let render_prompt_registry (state : state) =
       if index >= first && index < first + list_height then begin
         incr drawn;
         let mark =
-          (* Held back outranks the source, which reads [Prompt_file] for
-             exactly these rows: the file is what a turn gets, and saying so
-             is what hides the override the reader still has on disk. *)
-          match held_back_for row.Tui_decode.pr_key, row.Tui_decode.pr_source with
-          | Some _, _ -> (Theme.bad ()) ^ "\xe2\x8a\x98" ^ Ansi.reset
-          | None, Tui_decode.Prompt_override -> (Theme.warn ()) ^ "*" ^ Ansi.reset
-          | None, Tui_decode.Prompt_file -> " "
-          | None, Tui_decode.Prompt_missing -> (Theme.bad ()) ^ "!" ^ Ansi.reset
+          let held_back = Option.is_some (held_back_for row.Tui_decode.pr_key) in
+          let glyph =
+            Masc_tui_config_mark.prompt_glyph ~held_back row.Tui_decode.pr_source
+          in
+          (* Colour is this pane's, the glyph the mark module's, because the
+             help sheet draws the same glyph with no colour at all. *)
+          match held_back, row.Tui_decode.pr_source with
+          | true, _ -> (Theme.bad ()) ^ glyph ^ Ansi.reset
+          | false, Tui_decode.Prompt_override -> (Theme.warn ()) ^ glyph ^ Ansi.reset
+          | false, Tui_decode.Prompt_file -> glyph
+          | false, Tui_decode.Prompt_missing -> (Theme.bad ()) ^ glyph ^ Ansi.reset
         in
         let category =
           match row.Tui_decode.pr_category with

@@ -4,6 +4,7 @@ module Mcp_eio = Masc.Mcp_server_eio
 module Server_startup_state = Masc.Server_startup_state
 module Shutdown_hooks = Masc.Shutdown_hooks
 module Board_dispatch = Masc.Board_dispatch
+module Server_session_switch = Masc.Server_session_switch
 
 open Cmdliner
 
@@ -41,7 +42,7 @@ let run_cmd cli_base_path =
   Crypto_rng.ensure_default ();
   Eio_guard.enable ();
   Time_compat.set_clock (Eio.Stdenv.clock env);
-  Eio.Switch.run @@ fun sw ->
+  Server_session_switch.run @@ fun sw ->
   let clock, mono_clock, net, domain_mgr, proc_mgr, fs =
     Server_runtime_bootstrap.init_runtime_context env
   in

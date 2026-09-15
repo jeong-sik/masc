@@ -293,24 +293,24 @@ describe('pickActiveKeepers', () => {
     expect(pickActiveKeepers([])).toEqual([])
   })
 
-  it('sorts by latest heartbeat descending', () => {
+  it('sorts by latest activity descending', () => {
     const keepers: Keeper[] = [
-      makeKeeper({ name: 'old', last_heartbeat: '2026-04-18T08:00:00+09:00' }),
-      makeKeeper({ name: 'new', last_heartbeat: '2026-04-18T09:59:00+09:00' }),
-      makeKeeper({ name: 'middle', last_heartbeat: '2026-04-18T09:00:00+09:00' }),
+      makeKeeper({ name: 'old', last_activity_at: '2026-04-18T08:00:00+09:00' }),
+      makeKeeper({ name: 'new', last_activity_at: '2026-04-18T09:59:00+09:00' }),
+      makeKeeper({ name: 'middle', last_activity_at: '2026-04-18T09:00:00+09:00' }),
     ]
     const picked = pickActiveKeepers(keepers, 3)
     expect(picked.map(k => k.name)).toEqual(['new', 'middle', 'old'])
   })
 
-  it('deprioritizes paused keepers even with recent heartbeat', () => {
+  it('deprioritizes paused keepers even with recent activity', () => {
     const keepers: Keeper[] = [
       makeKeeper({
         name: 'paused-recent',
         paused: true,
-        last_heartbeat: '2026-04-18T09:59:00+09:00',
+        last_activity_at: '2026-04-18T09:59:00+09:00',
       }),
-      makeKeeper({ name: 'active-older', last_heartbeat: '2026-04-18T08:00:00+09:00' }),
+      makeKeeper({ name: 'active-older', last_activity_at: '2026-04-18T08:00:00+09:00' }),
     ]
     const picked = pickActiveKeepers(keepers, 2)
     expect(picked[0]?.name).toBe('active-older')
@@ -323,9 +323,9 @@ describe('pickActiveKeepers', () => {
         status: 'offline',
         phase: 'Paused',
         pipeline_stage: 'paused',
-        last_heartbeat: '2026-04-18T09:59:00+09:00',
+        last_activity_at: '2026-04-18T09:59:00+09:00',
       }),
-      makeKeeper({ name: 'active-older', status: 'busy', last_heartbeat: '2026-04-18T08:00:00+09:00' }),
+      makeKeeper({ name: 'active-older', status: 'busy', last_activity_at: '2026-04-18T08:00:00+09:00' }),
     ]
     const picked = pickActiveKeepers(keepers, 2)
     expect(picked[0]?.name).toBe('active-older')
@@ -333,7 +333,7 @@ describe('pickActiveKeepers', () => {
 
   it('respects max parameter', () => {
     const keepers: Keeper[] = Array.from({ length: 5 }, (_, i) =>
-      makeKeeper({ name: `k${i}`, last_heartbeat: `2026-04-18T0${i}:00:00+09:00` }),
+      makeKeeper({ name: `k${i}`, last_activity_at: `2026-04-18T0${i}:00:00+09:00` }),
     )
     expect(pickActiveKeepers(keepers, 2)).toHaveLength(2)
   })
@@ -345,7 +345,7 @@ describe('deriveFleetTickerEvents', () => {
       taskList: [makeTask({ id: 'task-old', title: 'Old task', updated_at: localIsoAt(1), status: 'in_progress' })],
       messageList: [makeMessage({ id: 'msg-new', from: 'sangsu', content: 'new message', timestamp: localIsoAt(4) })],
       boardPostList: [makeBoardPost({ id: 'post-mid', title: 'Board post', updated_at: localIsoAt(3), created_at: localIsoAt(2) })],
-      keeperList: [makeKeeper({ name: 'keeper-mid', last_heartbeat: localIsoAt(2), status: 'active' })],
+      keeperList: [makeKeeper({ name: 'keeper-mid', last_activity_at: localIsoAt(2), status: 'active' })],
     })
 
     expect(events.map(event => event.id)).toEqual([
@@ -361,7 +361,22 @@ describe('deriveFleetTickerEvents', () => {
       taskList: [makeTask({ id: 'bad-task', title: 'Bad', updated_at: 'not-a-date' })],
       messageList: [makeMessage({ id: 'blank-message', content: '   ', timestamp: localIsoAt(4) })],
       boardPostList: [makeBoardPost({ id: 'blank-post', title: '', body: '', updated_at: localIsoAt(3) })],
-      keeperList: [makeKeeper({ name: 'no-heartbeat' })],
+      keeperList: [makeKeeper({ name: 'no-activity' })],
+    })
+
+    expect(events).toEqual([])
+  })
+
+  it('does not turn a keeper that never acted into a ticker event', () => {
+    const events = deriveFleetTickerEvents({
+      taskList: [],
+      messageList: [],
+      boardPostList: [],
+      keeperList: [makeKeeper({
+        name: 'never-acted',
+        created_at: localIsoAt(2),
+        updated_at: localIsoAt(1),
+      })],
     })
 
     expect(events).toEqual([])
@@ -418,7 +433,7 @@ describe('deriveFleetTickerEvents', () => {
           status: 'offline',
           phase: 'Paused',
           pipeline_stage: 'paused',
-          last_heartbeat: localIsoAt(4),
+          last_activity_at: localIsoAt(4),
         }),
       ],
     })

@@ -23,7 +23,7 @@ const NO_RECENCY = Number.NEGATIVE_INFINITY
  *
  * Resolution order (first usable wins):
  *  1. absolute ISO timestamps — comparable across keepers directly:
- *     `last_activity_at` → `updated_at` → `last_heartbeat` → `created_at`
+ *     `last_activity_at` → `updated_at` → `created_at`
  *  2. relative "seconds ago" fields converted against `nowMs`:
  *     `last_activity_ago_s` → `last_turn_ago_s`
  *
@@ -38,7 +38,6 @@ export function keeperRecencyMs(keeper: Keeper, nowMs: number): number {
   const isoCandidates = [
     keeper.last_activity_at,
     keeper.updated_at,
-    keeper.last_heartbeat,
     keeper.created_at,
   ]
   for (const iso of isoCandidates) {

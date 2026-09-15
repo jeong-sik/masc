@@ -68,9 +68,9 @@ describe('keeperDisplayStatus stays inside the token union', () => {
   // that used to escape it at runtime and surface as `확인 필요`.
   const escapees: Array<[string, Keeper, KeeperPhaseToken]> = [
     [
-      'heartbeat alive with no lifecycle phase',
-      { name: 'k', status: 'offline', last_heartbeat: new Date().toISOString() } as Keeper,
-      'idle',
+      'registry phase Running with no lifecycle phase',
+      { name: 'k', status: 'offline', phase: 'Running' } as Keeper,
+      'running',
     ],
     ['backend status idle', { name: 'k', status: 'idle' } as Keeper, 'idle'],
     ['backend status listening', { name: 'k', status: 'listening' } as Keeper, 'listening'],

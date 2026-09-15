@@ -873,35 +873,18 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).not.toContain('샘플링')
   })
 
-  it('renders the heartbeat line from the keepalive interval and last heartbeat', () => {
-    const k = mkKeeper({
-      keeper_keepalive_interval_s: 60,
-      last_heartbeat: new Date(Date.now() - 15_000).toISOString(),
-    })
+  it('renders the heartbeat line from the keepalive interval', () => {
+    const k = mkKeeper({ keeper_keepalive_interval_s: 60 })
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
     const hb = container.querySelector('.rail-hb')
     expect(hb).not.toBeNull()
     expect(hb?.textContent).toContain('heartbeat 60s')
-    expect(hb?.textContent).toContain('다음 wake ~45s')
     expect(hb?.querySelector('.rail-hb-note')?.textContent).toBe('poll')
   })
 
   it('omits the heartbeat line when no keepalive interval is reported', () => {
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
     expect(container.querySelector('.rail-hb')).toBeNull()
-  })
-
-  it('marks heartbeat observation errors instead of substituting a stale ETA', () => {
-    const k = mkKeeper({
-      keeper_keepalive_interval_s: 60,
-      last_heartbeat: new Date(Date.now() - 15_000).toISOString(),
-      heartbeat_observation_error: 'ledger unreadable',
-    })
-    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
-    const hb = container.querySelector('.rail-hb')
-    expect(hb?.textContent).toContain('다음 wake ~—')
-    expect(hb?.querySelector('.rail-hb-note')?.textContent).toBe('관측 오류')
-    expect(hb?.getAttribute('title')).toBe('ledger unreadable')
   })
 
   it('renders the drain card with owned tasks while Draining', () => {

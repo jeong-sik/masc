@@ -23,7 +23,6 @@ import type {
 } from './types'
 import type * as TransportHealth from './components/transport-health'
 import {
-  keeperHeartbeats,
   invalidateDashboardCache,
   invalidateExecutionSnapshotGeneration,
   hydrateExecutionSnapshot,
@@ -455,16 +454,6 @@ function handleTransportHealth(payload: unknown): void {
     })
 }
 
-function handleKeeperHeartbeat(event: { name?: string; ts_unix?: number }): void {
-  if (!event.name) return
-  const newTs = event.ts_unix ? event.ts_unix * 1000 : Date.now()
-  const existingTs = keeperHeartbeats.value.get(event.name)
-  if (existingTs === newTs) return
-  const next = new Map(keeperHeartbeats.value)
-  next.set(event.name, newTs)
-  keeperHeartbeats.value = next
-}
-
 function handleKeeperLifecycle(event: { type: string; name?: string }): void {
   if (routeWantsRefreshTarget(route.value, 'operator')) {
     scheduleRefresh('operator', () => _refreshOperatorFn?.(), SSE_KEEPER_OPERATOR_DEBOUNCE_MS)
@@ -873,8 +862,9 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
     return false
   }
 
+  // A keeper_heartbeat push is presence telemetry. The journal (sse.ts) and
+  // the live timeline show it; the read model keeps no state from it.
   if (event.type === 'keeper_heartbeat') {
-    handleKeeperHeartbeat(event)
     return true
   }
 

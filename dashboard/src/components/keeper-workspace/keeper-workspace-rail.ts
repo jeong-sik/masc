@@ -98,22 +98,6 @@ function samplingSpec(entry: { temperature?: number | null, top_p?: number | nul
   return parts.length > 0 ? `샘플링 ${parts.join(' · ')}` : null
 }
 
-// Design heartbeat line (rails.jsx `.rail-hb`): `heartbeat {interval}s · 다음
-// wake ~{eta}s` + a `poll` note. The ETA derives from the keepalive interval
-// and the ledger's last heartbeat; when the ledger could not be read
-// (heartbeat_observation_error) the line marks the observation error instead
-// of substituting a stale ETA.
-function heartbeatEtaSeconds(keeper: Keeper): number | null {
-  const interval = keeper.keeper_keepalive_interval_s
-  if (typeof interval !== 'number' || !Number.isFinite(interval) || interval <= 0) return null
-  if (keeper.heartbeat_observation_error) return null
-  if (!keeper.last_heartbeat) return null
-  const lastMs = Date.parse(keeper.last_heartbeat)
-  if (!Number.isFinite(lastMs)) return null
-  const elapsed = (Date.now() - lastMs) / 1000
-  return Math.max(0, Math.round(interval - elapsed))
-}
-
 function ownedTasks(keeper: Keeper): Task[] {
   return tasks.value.filter(t => t.assignee === keeper.name)
 }
@@ -368,8 +352,6 @@ function RuntimeSection({
   const effectiveCapabilities = rawOpen && entry ? runtimeCatalogEffectiveCapabilities(entry) : null
   const sampling = samplingSpec(entry)
   const heartbeatInterval = keeper.keeper_keepalive_interval_s
-  const heartbeatError = keeper.heartbeat_observation_error ?? null
-  const heartbeatEta = heartbeatEtaSeconds(keeper)
 
   return html`
     <div class="ctx-sec">
@@ -480,8 +462,8 @@ function RuntimeSection({
           : null}
       </div>
       ${typeof heartbeatInterval === 'number' && Number.isFinite(heartbeatInterval) && heartbeatInterval > 0
-        ? html`<div class="rail-hb" title=${heartbeatError ?? null}>
-            <span class="rail-hb-dot" aria-hidden="true"></span>heartbeat ${heartbeatInterval}s <span class="rail-hb-sep">·</span> 다음 wake ~${heartbeatEta === null ? '—' : `${heartbeatEta}s`}<span class="rail-hb-note mono">${heartbeatError ? '관측 오류' : 'poll'}</span>
+        ? html`<div class="rail-hb" title="keepalive 주기 (keeper_keepalive_interval_s)">
+            <span class="rail-hb-dot" aria-hidden="true"></span>heartbeat ${heartbeatInterval}s<span class="rail-hb-note mono">poll</span>
           </div>`
         : null}
     </div>

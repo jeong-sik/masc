@@ -7,7 +7,7 @@
 import { html } from 'htm/preact'
 import { useState, useEffect } from 'preact/hooks'
 import { navigate, route } from '../../router'
-import { executionLoaded, keepers, serverStatus, shellCounts, shellRuntimeResolution, staleKeepers } from '../../store'
+import { executionLoaded, keepers, serverStatus, shellCounts, shellRuntimeResolution } from '../../store'
 import { activeKeeperName } from '../../keeper-state'
 import { gateData } from '../gate-signals'
 import { CopilotDockTopBarButton, type CopilotDockApi } from '../copilot-dock'
@@ -83,7 +83,6 @@ interface AttentionAgg {
   approvalQueueState: NonNullable<typeof gateData.value>['approval_queue_state'] | null
   keepers: number
   failures: number
-  stale: number
   health: DashboardCompositeHealthVerdict
   total: number
 }
@@ -97,16 +96,14 @@ function computeAttention(): AttentionAgg {
       : null
   const attKeepers = ks.filter((k) => k.needs_attention === true).length
   const failures = ks.filter((k) => !!k.lifecycle_phase && FAILURE_PHASES.has(k.lifecycle_phase)).length
-  const stale = staleKeepers.value.size
   const health = projectDashboardCompositeHealth(dashboardFullHealth.value)
   return {
     approvals,
     approvalQueueState,
     keepers: attKeepers,
     failures,
-    stale,
     health,
-    total: (approvals ?? 0) + attKeepers + failures + stale + health.issueCount,
+    total: (approvals ?? 0) + attKeepers + failures + health.issueCount,
   }
 }
 
@@ -179,7 +176,6 @@ export function AttentionIndicatorV2() {
   if (a.approvals !== null && a.approvals > 0) rows.push({ k: 'approvals', n: a.approvals, lbl: '승인 대기', sev: 'bad', nav: 'approvals' })
   if (a.keepers > 0) rows.push({ k: 'keepers', n: a.keepers, lbl: '주의 keeper', sev: 'warn', nav: 'monitoring' })
   if (a.failures > 0) rows.push({ k: 'failures', n: a.failures, lbl: '충돌·넘침', sev: 'bad', nav: 'monitoring' })
-  if (a.stale > 0) rows.push({ k: 'stale', n: a.stale, lbl: 'stale 게이트', sev: 'warn', nav: 'connectors' })
   if (a.health.state === 'attention') {
     rows.push(...a.health.issues.map(issue => ({
       k: issue.kind,

@@ -899,6 +899,132 @@ let tool_block_is_incomplete disposition stop_reason =
   | Natural -> stop_reason = Types.MaxTokens
 ;;
 
+(* An OpenAI-compatible stream sends a reasoning.text detail per token: one
+   object carrying a few characters of text and the same type, format and
+   index as its neighbours. Kept one per token, a block's details are about
+   twelve times its text (one live checkpoint: 772,693 details for 3,048
+   blocks, 64 MB beside 5.4 MB of reasoning_content). Adjacent fragments of
+   one detail are joined when the block closes. A detail with any other field
+   (signature, id, data) or another type, format or index starts a new run
+   and is kept as it arrived. *)
+let detail_type_key = "type"
+let detail_text_key = "text"
+let detail_format_key = "format"
+let detail_index_key = "index"
+let text_detail_type = "reasoning.text"
+
+type detail_field =
+  | Type_field
+  | Text_field
+  | Format_field
+  | Index_field
+  | Other_field
+
+let detail_field_of_key key =
+  if String.equal key detail_type_key
+  then Type_field
+  else if String.equal key detail_text_key
+  then Text_field
+  else if String.equal key detail_format_key
+  then Format_field
+  else if String.equal key detail_index_key
+  then Index_field
+  else Other_field
+;;
+
+type text_fragment =
+  { fields : (string * Yojson.Safe.t) list
+  ; attributes : (string * Yojson.Safe.t) list
+        (** Every field but the text, in the provider's order. *)
+  ; text : string
+  }
+
+let text_fragment_of_detail (detail : Types.reasoning_detail) =
+  match detail.raw with
+  | `Assoc fields ->
+    let rec classify ~typed ~text attributes = function
+      | [] ->
+        (match typed, text with
+         | true, Some text -> Some { fields; attributes = List.rev attributes; text }
+         | true, None | false, (Some _ | None) -> None)
+      | ((key, value) as field) :: rest ->
+        (match detail_field_of_key key with
+         | Type_field ->
+           (match value with
+            | `String kind when (not typed) && String.equal kind text_detail_type ->
+              classify ~typed:true ~text (field :: attributes) rest
+            | `String _ | `Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _
+            | `Null -> None)
+         | Text_field ->
+           (match value, text with
+            | `String piece, None -> classify ~typed ~text:(Some piece) attributes rest
+            | `String _, Some _
+            | (`Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null), _ ->
+              None)
+         | Format_field | Index_field -> classify ~typed ~text (field :: attributes) rest
+         | Other_field -> None)
+    in
+    classify ~typed:false ~text:None [] fields
+  | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None
+;;
+
+let same_attributes left right =
+  List.equal
+    (fun (left_key, left_value) (right_key, right_value) ->
+       String.equal left_key right_key && Yojson.Safe.equal left_value right_value)
+    left.attributes
+    right.attributes
+;;
+
+type text_run =
+  { first : Types.reasoning_detail
+  ; fragment : text_fragment
+  ; pieces_rev : string list
+  }
+
+let detail_of_run run =
+  match run.pieces_rev with
+  | [] | [ _ ] -> run.first
+  | _ :: _ :: _ ->
+    let text = String.concat "" (List.rev run.pieces_rev) in
+    let raw =
+      `Assoc
+        (List.map
+           (fun ((key, _) as field) ->
+              match detail_field_of_key key with
+              | Text_field -> key, `String text
+              | Type_field | Format_field | Index_field | Other_field -> field)
+           run.fragment.fields)
+    in
+    (* The same rule the stream parser applies to one fragment's text. *)
+    { Types.raw; text = (if String.trim text = "" then None else Some text) }
+;;
+
+let coalesce_text_details details =
+  let close run acc =
+    match run with
+    | Some run -> detail_of_run run :: acc
+    | None -> acc
+  in
+  let rec walk run acc = function
+    | [] -> List.rev (close run acc)
+    | detail :: rest ->
+      (match text_fragment_of_detail detail, run with
+       | Some fragment, Some open_run when same_attributes open_run.fragment fragment ->
+         walk
+           (Some { open_run with pieces_rev = fragment.text :: open_run.pieces_rev })
+           acc
+           rest
+       | Some fragment, (Some _ | None) ->
+         walk
+           (Some { first = detail; fragment; pieces_rev = [ fragment.text ] })
+           (close run acc)
+           rest
+       | None, (Some _ | None) -> walk None (detail :: close run acc) rest)
+  in
+  walk None [] details
+;;
+
 let content_of_block ~disposition ~stop_reason (index, block) =
   let text = text_of_block block in
   match block.header with
@@ -909,7 +1035,7 @@ let content_of_block ~disposition ~stop_reason (index, block) =
       (Some
          (Types.Thinking { content = text; signature = signature_of_block block }))
   | Announced { kind = Reasoning_details_block; _ } ->
-    let details = List.rev block.reasoning_details_rev in
+    let details = coalesce_text_details (List.rev block.reasoning_details_rev) in
     let reasoning_content = if String.trim text = "" then None else Some text in
     (match reasoning_content, details with
      | None, [] -> Ok None

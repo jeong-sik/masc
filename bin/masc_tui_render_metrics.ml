@@ -327,12 +327,14 @@ let timestamp_utc at =
   Printf.sprintf "%04d-%02d-%02d %02d:%02d UTC"
     (tm.Unix.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday tm.tm_hour tm.tm_min
 
-let age_text seconds =
-  let seconds = max 0. seconds in
-  if seconds >= 86400. then Printf.sprintf "%.1fd" (seconds /. 86400.)
-  else if seconds >= 3600. then Printf.sprintf "%.1fh" (seconds /. 3600.)
-  else if seconds >= 60. then Printf.sprintf "%.1fm" (seconds /. 60.)
-  else Printf.sprintf "%.1fs" seconds
+(* The one ladder every other surface reads a span on. This pane had its own
+   -- a single unit with a tenth after it -- so "how long since" read "7.6s"
+   and "1.5d" here while the Board, Fusion, Keepers and the chat rows read
+   "7s" and "1d12h" of the same question. The tenth was precision nobody acts
+   on, and the single unit loses the second figure at every step above
+   minutes. [Masc_tui_message_layout.span_text] says why it is shaped the way
+   it is; the two callers before this one were joined for the same reason. *)
+let age_text = Layout.span_text
 
 let render_section_resources ~cols (state : state) =
   let inner_width = max 20 (framed_inner_width cols) in

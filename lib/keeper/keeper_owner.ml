@@ -542,13 +542,26 @@ let request t command =
          parks its resolver until no child is active). An operator interrupt
          fails the child switch, but a child parked there could not unwind, so
          the slot was never released and no interrupt, deadline or operator
-         command could end it. What actually needed protecting is the handover
-         on the settle path, and that is [notify] below. *)
+         command could end it. Two calls do need to survive a cancelled
+         caller, and both say so at their own site: the handover on the settle
+         path ([notify]) and the claim, whose answer is the only record of
+         which row the child took ([request_keeping_the_answer]). *)
       Watched_work.run
         (fun () -> Eio.Promise.await response)
         ~watcher:(fun () ->
            Eio.Promise.await t.closed_p;
            Error Owner_closed))
+;;
+
+(* Ask, and keep the answer even if the caller is cancelled.
+
+   [Claim_next_operation] is the one ask whose answer is a fact the caller
+   alone holds: the owner commits the row as Running and then answers with
+   which row it was. A caller that leaves that wait leaves a Running row no
+   child in this process will settle, and only the next boot's
+   [settle_running_after_restart] clears it. The wait itself is owner-local --
+   one drain step, no network, no lock held across it. *)
+let request_keeping_the_answer t command = Eio.Cancel.protect (fun () -> request t command)
 ;;
 
 (* Hand a command over without reading the answer.
@@ -1128,7 +1141,7 @@ let start
           Eio.Fiber.fork ~sw (fun () ->
             let claimed_operation_id = ref None in
             let claim () =
-              match request t Claim_next_operation with
+              match request_keeping_the_answer t Claim_next_operation with
               | Ok (Some operation) as result ->
                 claimed_operation_id := Some operation.Chat_operation.operation_id;
                 result

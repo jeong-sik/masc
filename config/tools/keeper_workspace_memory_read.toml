@@ -9,6 +9,8 @@ when using them, and inspect the full sources before relying on a claim. This \
 read does not promote claims or modify any Keeper's memory."""
 additional_properties = false
 
+defer_loading = true
+
 [[params]]
 name = "id"
 type = "string"

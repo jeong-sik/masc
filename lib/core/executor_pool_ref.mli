@@ -13,8 +13,14 @@ val set : Eio.Executor_pool.t -> unit
 
 val in_worker_context : unit -> bool
 (** Whether the current domain is executing a closure submitted through this
-    shared pool reference. Nested shared-pool adapters use this to run inline
-    instead of waiting on the worker that is already executing them. *)
+    shared pool reference or through {!Domain_pool}. Nested shared-pool
+    adapters use this to run inline instead of waiting on the worker that is
+    already executing them. *)
+
+val with_worker_context : (unit -> 'a) -> 'a
+(** Run a closure marked as pool work, so {!in_worker_context} holds inside
+    it. For code that hands a closure to a pool worker without going through
+    this module. *)
 
 module For_testing : sig
   val with_pool_option :

@@ -39,6 +39,11 @@ type t = {
           [None] as no override on non-streaming body reads. *)
   provider_call_deadline_sec : float field;
       (** An explicit value or {!provider_call_deadline_failsafe_floor_sec}. *)
+  context_window_tokens : int field;
+      (** Tokens one AGENT_CORE-lane request carries, fixed prompt and recent
+          verbatim history together: an explicit env or runtime.toml value,
+          or the compiled default
+          {!Env_config_keeper.KeeperContext.window_tokens_default}. *)
 }
 
 val init : unit -> unit
@@ -138,3 +143,11 @@ val provider_call_deadline_failsafe_floor_sec : float
 
     SSOT: {!Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override}. *)
 val provider_call_deadline_sec : unit -> float
+
+val context_window_tokens : unit -> int
+(** Tokens one AGENT_CORE-lane request carries, fixed prompt and recent
+    verbatim history together (RFC keeper-context-window-in-tokens): an
+    explicit [MASC_KEEPER_CONTEXT_WINDOW_TOKENS] or runtime.toml
+    [turn.context_window_tokens], else
+    {!Env_config_keeper.KeeperContext.window_tokens_default}. Frozen at
+    bootstrap with the other turn settings. *)

@@ -285,10 +285,16 @@ let observe ~python_path ~cli_path ~timeout_s ~oauth_source ~model =
       match Eio_context.get_switch_opt () with
       | None -> Fun.protect ~finally:(fun () -> Fs_compat.remove_tree runtime_root) run
       | Some _ ->
-        Eio.Cancel.protect (fun () ->
-          Eio.Switch.run (fun sw ->
-            Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree runtime_root);
-            run ()))
+        (* The switch removes the private home when it closes, and Eio runs
+           release hooks cancellation-protected already -- [switch.ml]'s
+           await_idle wraps each one in [Cancel.protect]. Wrapping the switch
+           in a second one bought the cleanup nothing and cost the operator
+           the probe: [run] spawns the Antigravity CLI and waits for it, and
+           inside a protected context that wait ignores an interrupt until
+           [timeout_s] runs out on its own. *)
+        Eio.Switch.run (fun sw ->
+          Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree runtime_root);
+          run ())
     with
     | Sys_error _ | Unix.Unix_error _ -> Error Private_home_unavailable)
 ;;

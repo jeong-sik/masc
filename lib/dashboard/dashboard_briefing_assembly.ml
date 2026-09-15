@@ -148,10 +148,12 @@ let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t lis
            in
            let pressure_rank =
              match health with
-             (* Ranked by health rather than by the status word: a keeper
-                whose keepalive is gone outranks one that has not turned yet,
-                which outranks one that is working. *)
-             | Some Keeper_types.KH_offline -> 3
+             (* Ranked by health rather than by the status word: a keeper that
+                is not doing its work -- keepalive gone, or turns failing --
+                outranks one that has not turned yet, which outranks one that
+                is working. Offline and failing share the top rank, and the
+                more recently seen of the two sorts first. *)
+             | Some (Keeper_types.KH_offline | KH_failing) -> 3
              | Some (KH_healthy | KH_idle)
              | None ->
                if
@@ -162,7 +164,7 @@ let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t lis
                else (
                  match health with
                  | Some Keeper_types.KH_idle -> 1
-                 | Some (KH_healthy | KH_offline)
+                 | Some (KH_healthy | KH_failing | KH_offline)
                  | None -> 0)
            in
            Some

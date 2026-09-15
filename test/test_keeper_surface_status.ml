@@ -7,7 +7,9 @@
        outside the domain ("paused" override, drift, garbage),
    (2) to_string is the inverse on the closed domain,
    (3) keeper_surface_status produces the expected wire string for each
-       keeper-health state. *)
+       keeper-health state,
+   (4) every keeper-health word reads back as itself through the diagnostic
+       reader. *)
 
 module K = Masc.Keeper_status_runtime
 open Alcotest
@@ -56,8 +58,29 @@ let test_producer_behavior () =
   check string "healthy -> active" "active" (surface "healthy");
   check string "idle health -> idle" "idle"
     (surface "idle");
+  (* Still executing turns: the failure is carried by health, not by this
+     word. *)
+  check string "failing health -> active" "active" (surface "failing");
   check string "offline health -> offline" "offline"
     (surface "offline")
+
+(* Every health reading survives the wire both ways, and failing in
+   particular is read back as failing rather than falling to the offline
+   fallback that an unknown word gets. *)
+let test_health_round_trips () =
+  List.iter
+    (fun health ->
+      let word = K.keeper_health_to_string health in
+      check bool
+        (Printf.sprintf "%s parses back to itself" word)
+        true
+        (K.keeper_health_of_string_opt word = Some health);
+      check string
+        (Printf.sprintf "a diagnostic saying %s reads %s" word word)
+        word
+        (K.keeper_health_to_string
+           (K.keeper_diagnostic_health ~diagnostic:(diag word) ~source:"test")))
+    Keeper_types.[ KH_healthy; KH_idle; KH_failing; KH_offline ]
 
 (* [health] and [status] answer from different vocabularies. Feeding one
    diagnostic to both readers is the only way to see that: a row built from
@@ -103,6 +126,7 @@ let () =
         ] );
       ( "keeper_diagnostic_health",
         [
+          test_case "every health round-trips" `Quick test_health_round_trips;
           test_case "unreadable resolves to offline" `Quick
             test_unreadable_health_is_offline_not_healthy;
         ] );

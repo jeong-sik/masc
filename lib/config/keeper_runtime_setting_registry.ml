@@ -333,6 +333,18 @@ let all =
       ~category:"turn"
       "No-progress threshold for a provider call attempt and a tool's provider sub-call"
   ; setting
+      ~range:(int_range ~min:Env_config_keeper.KeeperContext.window_tokens_min ())
+      ~env_name:Env_config_keeper.KeeperContext.window_tokens_env_key
+      ~exposure:(Toml_and_env "turn.context_window_tokens")
+      ~value_kind:Integer
+      ~default:(string_of_int Env_config_keeper.KeeperContext.window_tokens_default)
+      ~consumers:
+        [ "Keeper_runtime_resolved"
+        ; "Keeper_turn_driver_try_provider model input window"
+        ]
+      ~category:"turn"
+      "Tokens one AGENT_CORE-lane request carries: fixed prompt plus recent verbatim history"
+  ; setting
       ~range:
         (float_range
            ~min:Env_config_keeper.KeeperKeepalive.body_timeout_min_sec

@@ -88,17 +88,12 @@ let runtime_registry_entry (config : Workspace_utils.config) name =
   Keeper_registry.get ~base_path:config.base_path name
 ;;
 
-(* "Is the keepalive running" is a liveness question, so it is answered by
-   the phases in which the keepalive fiber is alive and cycling: Running and
-   Failing. [Keeper_registry.is_running] is the operator-facing "is it in
-   the Running phase" and excludes Failing; read through it, a keeper with a
-   turn-failure streak that was still executing turns was projected as
-   KH_offline and the TUI header drew "offline" beside "failing"
-   (msx-retro-mania, 2026-09-14). The streak stays visible as the phase. *)
+let runtime_phase (config : Workspace_utils.config) (meta : keeper_meta) =
+  Keeper_registry.get_phase ~base_path:config.base_path meta.name
+;;
+
 let runtime_keepalive_running (config : Workspace_utils.config) (meta : keeper_meta) =
-  match Keeper_registry.get_phase ~base_path:config.base_path meta.name with
-  | Some phase -> Keeper_state_machine.can_execute_turn phase
-  | None -> false
+  Keeper_status_runtime.keepalive_running_of_phase (runtime_phase config meta)
 ;;
 
 let runtime_keepalive_started_at (config : Workspace_utils.config) (meta : keeper_meta) =

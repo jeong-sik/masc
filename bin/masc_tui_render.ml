@@ -3813,7 +3813,12 @@ let schedule_detail_lines ~width (row : schedule_row)
   ]
   @ target_link
   @ [ field "Digest" row.sch_payload_digest
-  ; Ansi.bold, "  Summary"
+  (* The four headings around this one -- SCHEDULE, PAYLOAD, PAYLOAD JSON and
+     DELIVERY EVIDENCE -- are drawn bold at this indent, and so are the field
+     labels. Caps are what tells the two apart: "Summary" sat directly under
+     "Digest  digest-..." with nothing beside it, which reads as a field whose
+     value is missing rather than as the section that follows. *)
+  ; Ansi.bold, "  SUMMARY"
   ]
   @ (Message_layout.wrap_body ~markdown:document_markdown
        ~max_cells:(max 1 (width - 4)) ~sanitize:Terminal_text.single_line summary
@@ -3948,7 +3953,7 @@ let keeper_health_deviation_word (health : Tui_decode.keeper_health option) =
   | Some value -> (
       match Tui_decode.keeper_health_reading value with
       | Tui_decode.Health_running -> ""
-      | Tui_decode.Health_idle | Tui_decode.Health_offline ->
+      | Tui_decode.Health_idle | Tui_decode.Health_failing | Tui_decode.Health_offline ->
           Tui_decode.keeper_health_to_string value)
 
 (* [runtime_id] is the producer-owned runtime identity. Keep it whole instead
@@ -4060,11 +4065,14 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
 
      The elapsed stays -- a turn open two minutes is the fact -- but the mark
      stops. Motion here means work is progressing, and for a keeper the health
-     reading calls offline, nothing is. *)
+     reading calls offline, nothing is. A failing keeper's keepalive still runs
+     its turns, so its open turn is being worked; whether it fails is known
+     only when it ends. *)
   let turn_is_being_worked =
     match Option.map Tui_decode.keeper_health_reading health with
     | Some Tui_decode.Health_offline -> false
-    | Some (Tui_decode.Health_running | Tui_decode.Health_idle) | None -> true
+    | Some (Tui_decode.Health_running | Tui_decode.Health_idle | Tui_decode.Health_failing)
+    | None -> true
   in
   let glyph, status_word, status_color =
     match (turn : Tui_decode.keeper_turn_state option) with
@@ -4137,12 +4145,19 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
 (* Counted from the same readings the rows are drawn from, so the heading
    cannot disagree with the list under it. *)
 (* Tally words come from [Keeper_control.health_label], so this paints the
-   health vocabulary. [unread] is the roster not answering, which is dim rather
-   than any health colour. *)
-let keeper_roster_status_color = function
-  | "healthy" -> (Theme.ok ())
-  | "offline" | "idle" -> (Theme.muted ())
-  | _ -> Ansi.dim
+   health vocabulary. A word is parsed back into a health reading rather than
+   compared as text, so a new reading is a compile error here instead of a word
+   that falls to dim. A word that is not a health -- [unread], [absent],
+   [config error] -- is the roster not answering, which is dim rather than any
+   health colour. *)
+let keeper_roster_status_color label =
+  match Tui_decode.keeper_health_of_string label with
+  | None -> Ansi.dim
+  | Some health -> (
+      match Tui_decode.keeper_health_reading health with
+      | Tui_decode.Health_running -> Theme.ok ()
+      | Tui_decode.Health_failing -> Theme.warn ()
+      | Tui_decode.Health_idle | Tui_decode.Health_offline -> Theme.muted ())
 
 (* The tally is [Keeper_control.status_tally], so every word here is a word the
    status column shows for the same keeper. This function only paints it. *)
@@ -4721,8 +4736,13 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
         float_of_int lane.sl_succeeded_count /. float_of_int total *. 100.0
       in
       let p50_str =
+        (* One decimal, the way the P50 column above draws the same
+           [sl_p50_elapsed_s]: the row read "8.0s" and this line "8.00s" of
+           one number on one screen, which leaves the reader deciding whether
+           they are the same figure. The column is the constrained one -- six
+           cells -- so the detail follows it rather than the other way. *)
         match lane.sl_p50_elapsed_s with
-        | Some s -> Printf.sprintf " · p50 latency %.2fs" s
+        | Some s -> Printf.sprintf " · p50 latency %.1fs" s
         | None -> ""
       in
       Printf.sprintf "Runs: %d retained (%d ok / %d fail / %d cancel) · %.1f%% success%s"
@@ -7091,13 +7111,18 @@ let system_log_detail_lines (state : state) ~seq ~width =
             entry.sl_message
       in
       let details =
+        (* One name for the section, whichever branch draws it: the empty
+           branch called it "Details" and the other "Structured details", so
+           the same part of the pane answered to two names depending on
+           whether it had anything in it. Caps for the heading, the way every
+           other detail pane spells one. *)
         match entry.sl_details with
-        | `Null -> [ Ansi.dim, "  Details: none" ]
+        | `Null -> [ Ansi.dim, "  STRUCTURED DETAILS  none" ]
         | json ->
             let source =
               "```json\n" ^ Yojson.Safe.pretty_to_string json ^ "\n```"
             in
-            (Ansi.bold, "  Structured details")
+            (Ansi.bold, "  STRUCTURED DETAILS")
             :: (document_markdown ~width source
                 |> List.map (fun line -> Ansi.reset, "  " ^ line))
       in
@@ -11779,11 +11804,16 @@ let render_code (state : state) =
              did not, leaving two cyans in one column. *)
           let marker =
             if node.Masc.Tui_decode.wt_has_children then
-              if selected then Masc_tui_theme.Glyph.current_entry ^ " "
+              if selected then File_icon.folder_glyph ^ " "
               (* The mark colour the files below it take. A folder is not a
                  kind of file, and the arrow already says which of the two
-                 this row is. *)
-              else (Theme.category Theme.Slot_1) ^ "\xe2\x96\xb8 " ^ Ansi.reset
+                 this row is. Both rows read the arrow from the module that
+                 also hands it to the help sheet: they were two literals a
+                 branch apart, one of them borrowed from the current-entry
+                 glyph, which is the same byte under another name. *)
+              else
+                (Theme.category Theme.Slot_1) ^ File_icon.folder_glyph ^ " "
+                ^ Ansi.reset
             else
               let kind =
                 File_icon.kind_of_name node.Masc.Tui_decode.wt_label

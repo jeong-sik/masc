@@ -102,6 +102,13 @@ val read_journal_path_result : string -> (journaled_event list, read_failure) re
 val read_journal : journal -> (journaled_event list, read_failure) result
 (** {!read_journal_path_result} over an open journal's path. *)
 
+val read_journal_rows_path : string -> (string, read_failure) result
+(** The complete rows of the journal at an already-resolved path, as bytes,
+    read under the same lock and framing as {!read_journal_path_result} (a
+    torn tail is logged and left out) but not decoded: every row ends in
+    ['\n']. {!page_of_rows} decodes the rows one page needs. Never raises
+    except [Eio.Cancel.Cancelled]. *)
+
 val next_sequence : ?require_existing:bool -> journal -> (int, read_failure) result
 (** Cursor for a new producer segment of the same operation. Missing journals
     start at zero unless [require_existing] is true for a retained continuation;
@@ -150,3 +157,71 @@ val replay_position_advance : replay_position -> int -> replay_position
 (** The position after an entry with this seq was received: [After_seq seq]
     when it lies past the position ({!seq_is_after}), the position unchanged
     otherwise. *)
+
+(** {1 Page} *)
+
+(** Where in the journal's bytes a page starts reading: the first row, or the
+    byte offset a previous page handed back ([next_since_offset] on the v2
+    events page). On the request the field ([since_offset]) is absent for the
+    first row and a non-negative integer otherwise; a negative integer is
+    rejected at the boundary. *)
+type page_start =
+  | From_first_row
+  | From_offset of int
+
+val page_start_of_wire : int option -> page_start option
+(** The request-side spelling: absent is [From_first_row], [n >= 0] is
+    [From_offset n], a negative integer is [None]. *)
+
+val page_start_to_wire : page_start -> int option
+(** Inverse of {!page_start_of_wire}: the field to write, or nothing. *)
+
+val page_start_offset : page_start -> int
+(** The byte offset a page starts at: [0] for [From_first_row]. *)
+
+(** One page of a journal. *)
+type page =
+  { events : journaled_event list
+        (** At most the page's limit, past [since_seq], in journal order. *)
+  ; has_more : bool  (** A row past [since_seq] follows the last event served. *)
+  ; next_offset : int
+        (** The offset just past the last event served, or the page's own
+            start offset when it served none. *)
+  }
+
+(** Why a page could not be served from the rows. *)
+type page_failure =
+  | Page_offset_past_rows of
+      { offset : int
+      ; rows_end : int
+      }  (** The start offset lies past the complete rows. *)
+  | Page_offset_inside_row of int  (** The start offset is not right after a ['\n']. *)
+  | Page_cursor_mismatch of
+      { offset : int
+      ; since_seq : int
+      ; row_seq : int
+      }
+      (** The first row at a held offset is not past the held seq: the two
+          cursors did not come from the same page. *)
+  | Page_corrupt of string  (** A row the page decoded failed the strict decode. *)
+
+val page_failure_to_string : page_failure -> string
+
+val empty_page : page_start -> page
+(** No events, no more, and the start offset handed back. *)
+
+val page_of_rows :
+  path:string ->
+  since_seq:replay_position ->
+  start:page_start ->
+  limit:int ->
+  string ->
+  (page, page_failure) result
+(** Serve one page from complete rows ({!read_journal_rows_path}; [path]
+    only names the journal in a corrupt row's message). Rows are decoded one
+    at a time from [start]: rows whose seq is not past [since_seq] are
+    skipped, at most [limit] ([>= 1]) are served, and one more row past
+    [since_seq] decides [has_more]. Rows after that are not decoded, so a
+    corrupt row fails the page that reaches it, not every page. Blank rows
+    are skipped. Pure: it touches no file, so a caller can run it on a pool
+    domain. *)

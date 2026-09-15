@@ -724,7 +724,7 @@ let log_settlement_failure ~path cleanup_failure =
    failure shapes stay apart: a missing journal is the normal state of a
    queued operation, an unreadable one is an operator problem, a corrupt one
    is a codec problem. *)
-let read_journal_path ~allow_torn_tail path =
+let read_complete_rows ~allow_torn_tail path =
   let of_rows = function
     | Fs_compat.Private_jsonl_rows.Rows_missing -> Error Journal_missing
     | Fs_compat.Private_jsonl_rows.Rows_present { rows_end; end_offset; _ }
@@ -738,7 +738,7 @@ let read_journal_path ~allow_torn_tail path =
           path
           rows_end
           end_offset;
-      decode_rows ~path rows
+      Ok rows
   in
   match Fs_compat.read_private_jsonl_rows_locked_result path with
   | Fs_compat.Private_file_succeeded rows -> of_rows rows
@@ -753,6 +753,11 @@ let read_journal_path ~allow_torn_tail path =
     Error (Journal_unreadable (Printexc.to_string exn))
 ;;
 
+let read_journal_path ~allow_torn_tail path =
+  Result.bind (read_complete_rows ~allow_torn_tail path) (decode_rows ~path)
+;;
+
+let read_journal_rows_path path = read_complete_rows ~allow_torn_tail:true path
 let read_journal_path_result path = read_journal_path ~allow_torn_tail:true path
 let read_journal journal = read_journal_path_result journal.path
 
@@ -830,4 +835,135 @@ let seq_is_after position seq =
 
 let replay_position_advance position seq =
   if seq_is_after position seq then After_seq seq else position
+;;
+
+(** {1 Page} *)
+
+type page_start =
+  | From_first_row
+  | From_offset of int
+
+let page_start_of_wire = function
+  | None -> Some From_first_row
+  | Some offset -> if offset >= 0 then Some (From_offset offset) else None
+;;
+
+let page_start_to_wire = function
+  | From_first_row -> None
+  | From_offset offset -> Some offset
+;;
+
+let page_start_offset = function
+  | From_first_row -> 0
+  | From_offset offset -> offset
+;;
+
+type page =
+  { events : journaled_event list
+  ; has_more : bool
+  ; next_offset : int
+  }
+
+type page_failure =
+  | Page_offset_past_rows of
+      { offset : int
+      ; rows_end : int
+      }
+  | Page_offset_inside_row of int
+  | Page_cursor_mismatch of
+      { offset : int
+      ; since_seq : int
+      ; row_seq : int
+      }
+  | Page_corrupt of string
+
+let page_failure_to_string = function
+  | Page_offset_past_rows { offset; rows_end } ->
+    Printf.sprintf
+      "since_offset %d lies past the journal's complete rows, which end at %d"
+      offset
+      rows_end
+  | Page_offset_inside_row offset ->
+    Printf.sprintf "since_offset %d does not start a row" offset
+  | Page_cursor_mismatch { offset; since_seq; row_seq } ->
+    Printf.sprintf
+      "the row at since_offset %d has seq %d, which is not after since_seq %d: \
+       the two cursors did not come from the same page"
+      offset
+      row_seq
+      since_seq
+  | Page_corrupt detail -> detail
+;;
+
+let empty_page start = { events = []; has_more = false; next_offset = page_start_offset start }
+
+(* The first decoded row after a held offset must lie past the held seq: the
+   page that handed out both cursors ended on the row before it, and seqs
+   increase down the journal. From the first row nothing is held to compare. *)
+let cursor_mismatch ~start ~since_seq (journaled : journaled_event) =
+  match start, since_seq with
+  | From_offset offset, After_seq held when journaled.seq <= held ->
+    Some (Page_cursor_mismatch { offset; since_seq = held; row_seq = journaled.seq })
+  | From_offset _, (After_seq _ | Whole_turn) | From_first_row, (After_seq _ | Whole_turn)
+    ->
+    None
+;;
+
+(* Rows are decoded one at a time from [start], and only until the page is
+   full and one more row past [since_seq] has shown whether another page
+   follows. A request used to decode every row of the journal to serve at most
+   [limit] of them, so reading a whole journal page by page decoded it once
+   per page. A corrupt row is found when a page reaches it. *)
+let page_of_rows ~path ~since_seq ~start ~limit rows =
+  let rows_end = String.length rows in
+  let offset = page_start_offset start in
+  if offset > rows_end
+  then Error (Page_offset_past_rows { offset; rows_end })
+  else if offset > 0 && not (Char.equal rows.[offset - 1] '\n')
+  then Error (Page_offset_inside_row offset)
+  else (
+    let finish ~served ~has_more ~next_offset =
+      Ok { events = List.rev served; has_more; next_offset }
+    in
+    let rec loop ~row_start ~first ~served ~count ~next_offset =
+      if row_start >= rows_end
+      then finish ~served ~has_more:false ~next_offset
+      else (
+        let line_end, row_end =
+          match String.index_from_opt rows row_start '\n' with
+          | Some newline -> newline, newline + 1
+          | None -> rows_end, rows_end
+        in
+        let line = String.sub rows row_start (line_end - row_start) in
+        if String.equal (String.trim line) ""
+        then loop ~row_start:row_end ~first ~served ~count ~next_offset
+        else (
+          match journaled_event_of_string line with
+          | Error detail ->
+            Error
+              (Page_corrupt
+                 (Printf.sprintf
+                    "keeper_chat_event_log: corrupt journal line path=%s offset=%d: %s"
+                    path
+                    row_start
+                    detail))
+          | Ok journaled ->
+            (match
+               if first then cursor_mismatch ~start ~since_seq journaled else None
+             with
+             | Some failure -> Error failure
+             | None ->
+               if not (seq_is_after since_seq journaled.seq)
+               then loop ~row_start:row_end ~first:false ~served ~count ~next_offset
+               else if count >= limit
+               then finish ~served ~has_more:true ~next_offset
+               else
+                 loop
+                   ~row_start:row_end
+                   ~first:false
+                   ~served:(journaled :: served)
+                   ~count:(count + 1)
+                   ~next_offset:row_end)))
+    in
+    loop ~row_start:offset ~first:true ~served:[] ~count:0 ~next_offset:offset)
 ;;

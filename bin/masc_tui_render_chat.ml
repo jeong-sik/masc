@@ -2565,8 +2565,16 @@ let render_keeper_message (state : state) =
      | Memory_hidden, _ -> ()
      | (Memory_summary | Memory_full), None -> ()
      | (Memory_summary | Memory_full), Some detail ->
+         (* No prefix, the way the history row two above draws its own: every
+            memory-journal failure names its subject already -- the refusal
+            opens "memory journal:", the decode "memory journal response ...",
+            and the transport carries the ...\x2fmemory-journal URL -- so the
+            row read "memory journal unavailable: memory journal: HTTP 503:
+            ...", which spends thirty cells saying the subject a second time
+            before the part that differs. Same rule the gate lanes row is
+            written to. *)
          box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
-           ("  memory journal unavailable: " ^ detail));
+           ("  " ^ detail));
     (if state.msg_memory_visibility <> Memory_hidden
         && state.msg_memory_dropped > 0 then
        box_line_styled chat_buf chat_cols ~style:(Theme.warn ())

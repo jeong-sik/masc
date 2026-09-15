@@ -3386,11 +3386,6 @@ module Browser_lane_view = struct
     | Automation, _ -> Some "browser"
     | Live, Some client -> Some (browser_name client.browser)
     | Live, None -> None
-  let context_label t =
-    match browser_label t with
-    | Some browser ->
-      Printf.sprintf "Browser Lane · %s · %s page reader" (source_name t.source) browser
-    | None -> Printf.sprintf "Browser Lane · %s · no browser" (source_name t.source)
   let create () =
     { clients = None; selected_client = None; client_picker = None;
       source = Live; selected_tab = None; scroll = 0;
@@ -4524,6 +4519,12 @@ type state = {
   mutable context_inspector_keeper: string option;
   mutable context_inspector_loading: bool;
   mutable context_inspector_generation: int;
+  (* Stepping through turns starts a read per step, and one read asks the
+     server to resolve a whole provider input (hundreds of blob artifacts,
+     seconds of work). The reads a step replaced were left running and their
+     answers thrown away, so holding a key queued that work several times
+     over. Each launch stops the one before it through this. *)
+  mutable context_inspector_cancel: (unit -> unit) option;
   mutable context_inspector_reading:
     (string * Masc_tui_context_inspector.reading) option;
   mutable context_inspector_tab: Masc_tui_context_inspector.tab;
@@ -6404,6 +6405,13 @@ let next_keeper_message_target (state : state) =
             (List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers)
 
 (** Create initial state *)
+(* The read a launch replaces is stopped here, and closing the pane stops the
+   one in flight. Passing [None] leaves nothing to stop behind. *)
+let supersede_context_inspector_load state stop =
+  Option.iter (fun previous -> previous ()) state.context_inspector_cancel;
+  state.context_inspector_cancel <- stop
+;;
+
 let create_state
     ?(reasoning_visibility = Reasoning_hidden)
     ?(tool_visibility = Tools_compact)
@@ -6450,6 +6458,7 @@ let create_state
   context_inspector_keeper = None;
   context_inspector_loading = false;
   context_inspector_generation = 0;
+  context_inspector_cancel = None;
   context_inspector_reading = None;
   context_inspector_tab = Masc_tui_context_inspector.Composition;
   context_inspector_cursor = 0;

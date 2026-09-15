@@ -277,19 +277,17 @@ let enrich_keeper_with_diagnostic ~(config : Workspace.config) (keeper_json : Yo
         | `String name ->
           (match Keeper_meta_store.read_meta_resolved config name with
            | Ok (Some (_resolved_name, meta)) ->
-             let keepalive_running =
-               match Option.value ~default:`Null (Json_util.assoc_member_opt "keepalive_running" keeper_json) with
-               | `Bool value -> value
-               | _ -> Keeper_status_bridge.runtime_keepalive_running config meta
-             in
              let now_ts = Time_compat.now () in
              let diagnostic =
                match existing_diagnostic with
                | Some diagnostic -> diagnostic
                | None ->
+                 (* Health needs the phase itself, which the row's
+                    [keepalive_running] boolean cannot give back: Running and
+                    Failing both publish [true]. *)
                  Keeper_status_runtime.keeper_diagnostic_json
                    ~meta
-                   ~keepalive_running
+                   ~phase:(Keeper_status_bridge.runtime_phase config meta)
                    ~history_items:[]
                    ~now_ts
              in

@@ -233,13 +233,16 @@ const RUNNING_PHASES_LOWERCASE: ReadonlySet<string> = new Set<string>(
 )
 
 // Health values that mean the keepalive is running, whether or not a turn
-// has been recorded yet. Typed against the health union so a value that
-// leaves the union leaves this set at compile time; the string view is what
-// the lowercased token is looked up in.
+// has been recorded yet. `failing` is one of them: the Failing phase still
+// executes turns, it is just that they fail, and a keeper whose turns fail
+// still needs the pause a running keeper is offered. Typed against the health
+// union so a value that leaves the union leaves this set at compile time; the
+// string view is what the lowercased token is looked up in.
 type KeeperHealthState = NonNullable<KeeperDiagnostic['health_state']>
 const RUNNING_HEALTH: ReadonlySet<KeeperHealthState> = new Set<KeeperHealthState>([
   'healthy',
   'idle',
+  'failing',
 ])
 const RUNNING_HEALTH_TOKENS: ReadonlySet<string> = RUNNING_HEALTH
 

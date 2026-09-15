@@ -11,8 +11,20 @@
 
 open Tool_args
 
+(* Every failure this module builds is a refusal before the machine is touched:
+   arguments that did not parse, or an [Msx_lane.error], which the lane only
+   answers before anything it keeps has changed (msx_lane.mli). Left
+   undeclared, a failure reads as effect-outcome-unknown, and a composition
+   that ran this tool ends the Keeper's turn over it instead of handing it
+   back: "no MSX machine is loaded" after a server restart failed the whole
+   request, when the Keeper only needed to restore and go on. *)
+let refuse ~class_ ~tool_name ~start_time message =
+  Tool_result.make_err ~tool_name ~class_ ~start_time
+    ~effect_disposition:Tool_result.Proven_pre_effect message
+;;
+
 let reject ~tool_name ~start_time message =
-  Tool_result.make_err ~tool_name ~class_:Tool_result.Workflow_rejection ~start_time message
+  refuse ~class_:Tool_result.Workflow_rejection ~tool_name ~start_time message
 ;;
 
 (* Sprites ride an observation only when asked for: keepers play by the
@@ -64,7 +76,7 @@ let of_lane ?(extra = []) ?sprites ?metadata ~tool_name ~start_time
   | Error ((Msx_lane.No_machine | Msx_lane.Invalid_request _) as e) ->
     reject ~tool_name ~start_time (Msx_lane.error_to_string e)
   | Error (Msx_lane.Unreadable _ as e) ->
-    Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time
+    refuse ~class_:Tool_result.Runtime_failure ~tool_name ~start_time
       (Msx_lane.error_to_string e)
 ;;
 

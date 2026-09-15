@@ -388,6 +388,113 @@ let test_idempotent_put () =
         "same content -> same sha" (sha_of r1) (sha_of r2);
       Alcotest.(check int) "single entry" 1 (List.length (B.list_all store)))
 
+(* The demotion puts every aged tool result on every provider request. A put
+   of an address this process already wrote leaves the file alone, so the file
+   keeps its inode. A file that disappears or is damaged behind the store is
+   noticed by fetch, and the next put writes it again. *)
+let test_put_writes_an_address_again_only_after_fetch_finds_it_gone () =
+  with_temp_dir (fun dir ->
+      let store = B.create ~base_path:dir in
+      let payload = String.make 4_096 'p' in
+      let put () = ignore (B.put store ~bytes:payload ~mime:"text/plain" : O.t) in
+      let reference =
+        stored_ref_exn (B.put store ~bytes:payload ~mime:"text/plain")
+      in
+      let sha256 = reference.O.sha256 in
+      let path =
+        Filename.concat
+          (Filename.concat (B.root_dir store) (String.sub sha256 0 2))
+          sha256
+      in
+      let inode () = (Unix.stat path).Unix.st_ino in
+      let written = inode () in
+      put ();
+      Alcotest.(check int) "a second put leaves the written file in place" written (inode ());
+      Unix.unlink path;
+      Alcotest.(check (option string)) "fetch reports the removed file" None
+        (fetch_ok store ~sha256);
+      put ();
+      Alcotest.(check (option string)) "and the next put writes it again" (Some payload)
+        (fetch_ok store ~sha256);
+      (match Fs_compat.save_file_atomic path (String.make 4_096 'q') with
+       | Ok () -> ()
+       | Error error -> Alcotest.failf "failed to damage fixture: %s" error);
+      (match B.fetch store ~sha256 with
+       | Error (B.Integrity_mismatch _) -> ()
+       | Error error ->
+         Alcotest.failf "damaged blob returned wrong error: %s"
+           (B.fetch_error_to_string error)
+       | Ok _ -> Alcotest.fail "damaged blob passed content-address validation");
+      put ();
+      Alcotest.(check (option string)) "a put after the mismatch repairs the bytes"
+        (Some payload) (fetch_ok store ~sha256))
+
+(* The model reads markers through [fetch_range], and a blob path can end up
+   holding something that is not the blob. Any read that does not return
+   validated bytes lets the next put write the address again. *)
+let blob_path store sha256 =
+  Filename.concat (Filename.concat (B.root_dir store) (String.sub sha256 0 2)) sha256
+
+let test_a_range_read_that_finds_the_blob_gone_lets_the_next_put_write_it () =
+  with_temp_dir (fun dir ->
+      let store = B.create ~base_path:dir in
+      let payload = String.make 8_192 'r' in
+      let sha256 =
+        (stored_ref_exn (B.put store ~bytes:payload ~mime:"text/plain")).O.sha256
+      in
+      (match B.fetch_range store ~sha256 ~offset:0 ~max_bytes:64 with
+       | Ok (Some _) -> ()
+       | Ok None -> Alcotest.fail "first page of a stored blob returned None"
+       | Error error ->
+         Alcotest.failf "first page failed: %s" (B.fetch_error_to_string error));
+      Unix.unlink (blob_path store sha256);
+      (match B.fetch_range store ~sha256 ~offset:64 ~max_bytes:64 with
+       | Ok None | Error (B.Owned_read_failed _) -> ()
+       | Ok (Some _) -> Alcotest.fail "a removed blob returned a page"
+       | Error error ->
+         Alcotest.failf "removed blob returned wrong error: %s"
+           (B.fetch_error_to_string error));
+      ignore (B.put store ~bytes:payload ~mime:"text/plain" : O.t);
+      Alcotest.(check (option string)) "the next put writes it again" (Some payload)
+        (fetch_ok store ~sha256))
+
+let test_a_read_error_at_the_blob_path_lets_the_next_put_replace_it () =
+  with_temp_dir (fun dir ->
+      let store = B.create ~base_path:dir in
+      let payload = "blob behind a symlink" in
+      let sha256 =
+        (stored_ref_exn (B.put store ~bytes:payload ~mime:"text/plain")).O.sha256
+      in
+      let path = blob_path store sha256 in
+      let elsewhere = Filename.concat dir "elsewhere" in
+      Fs_compat.save_file elsewhere "not the blob";
+      Unix.unlink path;
+      Unix.symlink elsewhere path;
+      (match B.fetch store ~sha256 with
+       | Error (B.Owned_read_failed _) -> ()
+       | Error error ->
+         Alcotest.failf "symlinked blob returned wrong error: %s"
+           (B.fetch_error_to_string error)
+       | Ok _ -> Alcotest.fail "a symlink at the blob path was read as the blob");
+      ignore (B.put store ~bytes:payload ~mime:"text/plain" : O.t);
+      Alcotest.(check (option string)) "the next put replaces what was at the path"
+        (Some payload) (fetch_ok store ~sha256))
+
+(* Only [put] reads the set of written addresses, so a [put_durable] write does
+   not enter it: a put of the same bytes afterwards still writes the file. *)
+let test_a_durable_put_does_not_let_a_later_put_skip_its_write () =
+  with_temp_dir (fun dir ->
+      let store = B.create ~base_path:dir in
+      let payload = "written durably first" in
+      let reference = B.put_durable store ~bytes:payload ~mime:"text/plain" in
+      let path = blob_path store reference.O.sha256 in
+      let durable_inode = (Unix.stat path).Unix.st_ino in
+      ignore (B.put store ~bytes:payload ~mime:"text/plain" : O.t);
+      Alcotest.(check bool) "the put after a durable put writes the file again" true
+        (durable_inode <> (Unix.stat path).Unix.st_ino);
+      Alcotest.(check (option string)) "and the bytes are the same" (Some payload)
+        (fetch_ok store ~sha256:reference.O.sha256))
+
 let test_sharding_layout () =
   with_temp_dir (fun dir ->
       let store = B.create ~base_path:dir in
@@ -1347,6 +1454,14 @@ let () =
             test_fetch_range_revalidates_changed_snapshot;
           Alcotest.test_case "fetch miss = None" `Quick test_fetch_miss;
           Alcotest.test_case "idempotent put" `Quick test_idempotent_put;
+          Alcotest.test_case "put writes an address again only after fetch finds it gone" `Quick
+            test_put_writes_an_address_again_only_after_fetch_finds_it_gone;
+          Alcotest.test_case "a range read that finds the blob gone lets the next put write it" `Quick
+            test_a_range_read_that_finds_the_blob_gone_lets_the_next_put_write_it;
+          Alcotest.test_case "a read error at the blob path lets the next put replace it" `Quick
+            test_a_read_error_at_the_blob_path_lets_the_next_put_replace_it;
+          Alcotest.test_case "a durable put does not let a later put skip its write" `Quick
+            test_a_durable_put_does_not_let_a_later_put_skip_its_write;
           Alcotest.test_case "sharding layout" `Quick test_sharding_layout;
         ] );
       ( "gc",

@@ -168,6 +168,55 @@ let test_undecodable_line_keeps_its_position_and_reason () =
     | lines -> Alcotest.failf "expected three lines, got %d" (List.length lines))
 ;;
 
+(* A live journal is thousands of lines and its tail is read backwards in
+   chunks. Each projected row is named by the byte offset its line starts at:
+   the name points at that line in the file, and two windows over the same
+   journal name the rows they share alike. *)
+let test_a_long_journal_names_each_tail_row_by_its_offset () =
+  with_keepers_dir (fun keepers_dir ->
+    let appended = 400 in
+    for index = 0 to appended - 1 do
+      Current.append_librarian_failure
+        ~keepers_dir ~keeper_id:keeper ~now:(float_of_int index)
+        ~trace_id:(Printf.sprintf "trace-%03d" index)
+        ~kind:Domain_output_invalid ~detail:"d" ~snapshot_present:true
+        ~cadence_deferred:false
+    done;
+    let contents =
+      In_channel.with_open_bin
+        (Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:keeper)
+        In_channel.input_all
+    in
+    let line_starts =
+      let rec collect from acc =
+        match String.index_from_opt contents from '\n' with
+        | Some newline when newline + 1 < String.length contents ->
+          collect (newline + 1) ((newline + 1) :: acc)
+        | Some _ | None -> List.rev acc
+      in
+      collect 0 [ 0 ]
+    in
+    let window limit =
+      Current.read_journal_tail_projection ~keepers_dir ~keeper_id:keeper ~limit
+    in
+    let identities rows = List.map (fun row -> U.to_string (field row "structural_id")) rows in
+    let narrow = window 3 in
+    let wide = window 50 in
+    Alcotest.(check int) "every appended line is in the journal" appended
+      (List.length line_starts);
+    Alcotest.(check (list string)) "the narrow window is the newest three"
+      [ "trace-397"; "trace-398"; "trace-399" ]
+      (List.map (fun row -> U.to_string (field row "trace_id")) narrow);
+    Alcotest.(check (list string)) "each name is the offset its line starts at"
+      (List.filteri (fun index _ -> index >= appended - 3) line_starts
+       |> List.map (fun start ->
+         Printf.sprintf "memory:journal:%d:%s:%d" (String.length keeper) keeper start))
+      (identities narrow);
+    Alcotest.(check (list string)) "both windows name the shared rows alike"
+      (identities narrow)
+      (List.filteri (fun index _ -> index >= 47) (identities wide)))
+;;
+
 (* Drop reasons are the librarian's own account of what it forgot. They ride
    the journal line and nothing else stores them, so losing them in the
    projection loses them entirely. *)
@@ -259,6 +308,8 @@ let () =
             test_undecodable_line_keeps_its_position_and_reason
         ; Alcotest.test_case "cancelled pass is recorded and named" `Quick
             test_cancelled_pass_is_recorded_and_named
+        ; Alcotest.test_case "a long journal names each tail row by its offset" `Quick
+            test_a_long_journal_names_each_tail_row_by_its_offset
         ] )
     ; ( "content"
       , [ Alcotest.test_case "drop reasons survive the projection" `Quick

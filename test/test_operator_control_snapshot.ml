@@ -538,41 +538,106 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
       Alcotest.(check string) "full paused pipeline" "paused"
         (full_keeper |> member "pipeline_stage" |> to_string))
 
-(* Health is a projection of the phase and the turn history: a keepalive
-   that is not running reads offline, one running without a turn yet reads
-   idle, one running with a turn behind it reads healthy. Nothing on disk is
-   read for it. *)
+let health_projection_meta ~total_turns =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+        [ "name", `String "health-projection"
+        ; "trace_id", `String "trace-health-projection"
+        ; "total_turns", `Int total_turns
+        ; "activation_mode", `String "autonomous"
+        ])
+  with
+  | Ok meta -> meta
+  | Error error -> Alcotest.fail error
+
+let health_projection_diagnostic ~total_turns ~phase =
+  Keeper_status_runtime.keeper_diagnostic_json
+    ~meta:(health_projection_meta ~total_turns)
+    ~phase
+    ~history_items:[]
+    ~now_ts:(Unix.gettimeofday ())
+
+(* Health is a projection of the phase and the turn history: a phase that
+   admits no turn reads offline, Running without a turn yet reads idle,
+   Running with a turn behind it reads healthy, and Failing reads failing
+   whatever its history. Nothing on disk is read for it. *)
 let test_diagnostic_health_is_a_projection_of_phase_and_turns () =
-  let now_ts = Unix.gettimeofday () in
-  let meta ~total_turns =
-    match
-      Masc_test_deps.meta_of_json_fixture
-        (`Assoc
-          [ "name", `String "health-projection"
-          ; "trace_id", `String "trace-health-projection"
-          ; "total_turns", `Int total_turns
-          ])
-    with
-    | Ok meta -> meta
-    | Error error -> Alcotest.fail error
-  in
-  let health ~meta ~keepalive_running =
-    let open Yojson.Safe.Util in
-    Keeper_status_runtime.keeper_diagnostic_json
-      ~meta
-      ~keepalive_running
-      ~history_items:[]
-      ~now_ts
+  let open Yojson.Safe.Util in
+  let health ~total_turns ~phase =
+    health_projection_diagnostic ~total_turns ~phase
     |> member "health_state"
     |> to_string
   in
-  Alcotest.(check string) "keepalive not running reads offline" "offline"
-    (health ~meta:(meta ~total_turns:1) ~keepalive_running:false);
+  Alcotest.(check string) "a keeper with no registry entry reads offline"
+    "offline"
+    (health ~total_turns:1 ~phase:None);
   Alcotest.(check string) "running without a turn yet reads idle" "idle"
-    (health ~meta:(meta ~total_turns:0) ~keepalive_running:true);
+    (health ~total_turns:0 ~phase:(Some Keeper_state_machine.Running));
   Alcotest.(check string) "running with a turn behind it reads healthy"
     "healthy"
-    (health ~meta:(meta ~total_turns:1) ~keepalive_running:true)
+    (health ~total_turns:1 ~phase:(Some Keeper_state_machine.Running));
+  List.iter
+    (fun total_turns ->
+      Alcotest.(check string)
+        (Printf.sprintf "failing with %d turns behind it reads failing"
+           total_turns)
+        "failing"
+        (health ~total_turns ~phase:(Some Keeper_state_machine.Failing)))
+    [ 0; 1 ];
+  (* Every phase, so the enumeration in the projection and the state
+     machine's own [can_execute_turn] cannot drift apart: offline is exactly
+     the phases that admit no turn, and the published [keepalive_running]
+     is that same answer. *)
+  List.iter
+    (fun phase ->
+      let label = Keeper_state_machine.phase_to_string phase in
+      let admits_turn = Keeper_state_machine.can_execute_turn phase in
+      let diagnostic =
+        health_projection_diagnostic ~total_turns:1 ~phase:(Some phase)
+      in
+      Alcotest.(check bool)
+        (label ^ " reads offline exactly when it admits no turn")
+        (not admits_turn)
+        (String.equal
+           (diagnostic |> member "health_state" |> to_string)
+           "offline");
+      Alcotest.(check bool)
+        (label ^ " publishes keepalive_running as the phase answers it")
+        admits_turn
+        (diagnostic |> member "keepalive_running" |> to_bool))
+    Keeper_state_machine.all_phases
+
+(* A failing keeper is told to read its error first: the Failing phase says its
+   turns fail, not that a restart fixes them. Its restart stays available,
+   because the operator's keeper_recover action skips only keepers whose
+   diagnostic is not [recoverable]. The same keeper in Running is the contrast:
+   it is sent a message and nothing about its history makes it recoverable. *)
+let test_failing_keeper_is_probed_and_stays_recoverable () =
+  let open Yojson.Safe.Util in
+  let failing =
+    health_projection_diagnostic ~total_turns:4
+      ~phase:(Some Keeper_state_machine.Failing)
+  in
+  let running =
+    health_projection_diagnostic ~total_turns:4
+      ~phase:(Some Keeper_state_machine.Running)
+  in
+  Alcotest.(check string) "a failing keeper's next action is probe"
+    "probe"
+    (failing |> member "next_action_path" |> to_string);
+  Alcotest.(check bool) "a failing keeper is still recoverable" true
+    (failing |> member "recoverable" |> to_bool);
+  Alcotest.(check bool) "its keepalive is still running" true
+    (failing |> member "keepalive_running" |> to_bool);
+  Alcotest.(check string) "its status word stays active: it is still turning"
+    "active"
+    (Keeper_status_runtime.keeper_surface_status ~diagnostic:failing);
+  Alcotest.(check string) "the same keeper in Running is sent a message"
+    "direct_message"
+    (running |> member "next_action_path" |> to_string);
+  Alcotest.(check bool) "and is not recoverable" false
+    (running |> member "recoverable" |> to_bool)
 
 let test_digest_workspace_includes_keeper_runtime_attention () =
   Eio_main.run @@ fun env ->
@@ -1478,6 +1543,10 @@ let () =
             "diagnostic health is a projection of phase and turns"
             `Quick
             test_diagnostic_health_is_a_projection_of_phase_and_turns;
+          Alcotest.test_case
+            "a failing keeper is probed and stays recoverable"
+            `Quick
+            test_failing_keeper_is_probed_and_stays_recoverable;
         ] );
       ( "context metrics ledger"
       , [ Alcotest.test_case

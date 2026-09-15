@@ -21,6 +21,7 @@ describe('statusLabel', () => {
     expect(statusLabel('warming')).toBe('예열 중')
     expect(statusLabel('snapshot_not_ready')).toBe('스냅샷 준비 안 됨')
     expect(statusLabel('zombie')).toBe('좀비')
+    expect(statusLabel('failing')).toBe('오류 발생')
     expect(statusLabel('timeout')).toBe('시간 초과')
     expect(statusLabel('settled')).toBe('정리됨')
   })

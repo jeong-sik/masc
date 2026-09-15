@@ -73,6 +73,32 @@ let () =
       let restored =
         Keeper_event_queue_persistence.load ~base_path ~keeper_name
       in
-      assert (Keeper_event_queue.is_empty restored));
+      assert (Keeper_event_queue.is_empty restored);
+
+      (* 4) With the process pool installed, the snapshot is rendered in a
+         pool job. The bytes on disk are still the printed, sanitized JSON of
+         the state the owner reads back. *)
+      let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+      Domain_pool_ref.set pool;
+      let revision_on_disk () =
+        match
+          Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name
+        with
+        | Error detail -> failwith detail
+        | Ok state -> state, Keeper_event_queue_state.revision state
+      in
+      Fun.protect ~finally:Domain_pool_ref.clear_for_tests (fun () ->
+        let _, before = revision_on_disk () in
+        Keeper_event_queue_persistence.persist ~base_path ~keeper_name queue;
+        match revision_on_disk () with
+        | _, after when Int64.compare after before <= 0 ->
+          failwith "the pooled persist did not write a new snapshot"
+        | state, _ ->
+          let expected =
+            Keeper_event_queue_state.to_yojson state
+            |> Safe_ops.sanitize_json_utf8
+            |> Yojson.Safe.pretty_to_string
+          in
+          assert (String.equal expected (In_channel.with_open_bin path In_channel.input_all))));
 
   print_endline "test_keeper_event_queue_persist_poison: OK"

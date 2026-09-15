@@ -86,12 +86,22 @@ val keeper_metric_producer_active : base_path:string -> bool
     turn's lane is in its legitimate inter-cycle cadence sleep. These are the
     two intervals in which the next metrics-ledger append is still owned by a
     live producer even when the prior row exceeds its age-only SLO. *)
+val keepalive_running_of_phase : Keeper_state_machine.phase option -> bool
+(** Whether a keeper's keepalive is running, read from its registry phase:
+    [true] exactly in the phases that may execute a turn (Running and
+    Failing), [false] for every other phase and for a keeper with no registry
+    entry. *)
+
 val keeper_diagnostic_json :
   meta:keeper_meta ->
-  keepalive_running:bool ->
+  phase:Keeper_state_machine.phase option ->
   history_items:Yojson.Safe.t list ->
   now_ts:float ->
   Yojson.Safe.t
+(** [phase] is the keeper's registry phase, [None] when it has no registry
+    entry. [health_state], [keepalive_running] and [recoverable] are all
+    derived from that one value; a caller that also publishes the phase or
+    the liveness should read the phase once and pass the same value here. *)
 
 (** Keeper display status derived from keeper health. Closed so consumers that
     classify it match exhaustively. "paused" is an operator override applied

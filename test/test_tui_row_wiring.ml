@@ -361,6 +361,102 @@ let test_the_params_row_leads_with_what_only_it_says () =
        ~needle:
          "  Enter edits by type \xc2\xb7 E is advanced JSON \xc2\xb7 overrides persist in .masc/runtime_params.json")
 
+(* Detail panes draw section headings and field labels bold at the same
+   indent, so caps are the only thing that tells a heading from a label. Two
+   panes broke that: the schedule detail put "Summary" straight under "Digest
+   digest-..." with nothing beside it, which reads as a field whose value is
+   missing, and the log detail called one section "Details" when it was empty
+   and "Structured details" when it was not.
+
+   Fifteen other headings in this file are caps -- SCHEDULE, PAYLOAD, TURN,
+   WAKES, VERIFICATION REQUEST, DECISION, RUN and the rest -- so the rule is
+   the file's own, and these two are what did not follow it. *)
+let test_a_detail_heading_is_spelled_the_way_a_heading_is () =
+  List.iter
+    (fun (binding_name, needle) ->
+      Alcotest.(check int)
+        (Printf.sprintf "%s draws %S" binding_name needle)
+        1
+        (Ast_grep.count_exact_string_literals_in_value_binding
+           ~module_path:render ~binding_name ~needle))
+    [ "schedule_detail_lines", "  SUMMARY"
+    ; "system_log_detail_lines", "  STRUCTURED DETAILS"
+    ; "system_log_detail_lines", "  STRUCTURED DETAILS  none"
+    ];
+  (* And the spellings they replaced are gone rather than joined. *)
+  List.iter
+    (fun (binding_name, needle) ->
+      Alcotest.(check int)
+        (Printf.sprintf "%s no longer draws %S" binding_name needle)
+        0
+        (Ast_grep.count_exact_string_literals_in_value_binding
+           ~module_path:render ~binding_name ~needle))
+    [ "schedule_detail_lines", "  Summary"
+    ; "system_log_detail_lines", "  Structured details"
+    ; "system_log_detail_lines", "  Details: none"
+    ]
+
+(* The Lanes list and the detail under it draw the same [sl_p50_elapsed_s] on
+   one screen, and they drew it to different precisions: the P50 column "8.0s"
+   and the detail "p50 latency 8.00s". A reader comparing the two is left
+   deciding whether they are the same figure. The column is the constrained
+   one -- [standalone_lane_p50_cells] is six -- so the detail follows it. *)
+let test_the_two_p50s_on_the_lanes_screen_agree () =
+  Alcotest.(check int) "the column draws one decimal" 1
+    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render
+       ~binding_name:"standalone_lane_row" ~needle:"%.1fs");
+  Alcotest.(check int) "and the detail draws the same" 1
+    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render
+       ~binding_name:"standalone_lane_detail_lines"
+       ~needle:" \xc2\xb7 p50 latency %.1fs");
+  Alcotest.(check int) "the two-decimal spelling is gone" 0
+    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render
+       ~binding_name:"standalone_lane_detail_lines"
+       ~needle:" \xc2\xb7 p50 latency %.2fs")
+
+(* The Code tree draws one arrow on a row that opens rather than reads, and
+   it drew it from two places a branch apart: the selected row reached for
+   [Masc_tui_theme.Glyph.current_entry] -- the same byte under another name --
+   and the row beside it spelled the bytes. Either moving would have left the
+   column showing two marks for one thing depending on where the cursor was.
+
+   Both now read [Masc_tui_file_icon.folder_glyph], which is also what the
+   help sheet prints; test_tui_keys holds the sheet half. *)
+let test_the_code_tree_draws_one_folder_arrow () =
+  Alcotest.(check int) "both rows read the arrow from the mark module" 2
+    (Ast_grep.count_identifiers_outside_calls_in_value_binding
+       ~module_path:render ~binding_name:"render_code" ~callees:[]
+       ~identifiers:[ "File_icon.folder_glyph" ]);
+  Alcotest.(check int) "and neither borrows the current-entry glyph" 0
+    (Ast_grep.count_identifiers_outside_calls_in_value_binding
+       ~module_path:render ~binding_name:"render_code" ~callees:[]
+       ~identifiers:[ "Masc_tui_theme.Glyph.current_entry" ])
+
+(* The keeper chat draws two failure rows a few lines apart. The history one
+   draws the loader's sentence and nothing else -- "Cause first", its comment
+   says. The memory one put "memory journal unavailable: " in front of a
+   sentence that already opened "memory journal:", so thirty cells went on the
+   subject a second time before the part that differs, which the box then cut.
+
+   The rule is written down at the gate lanes row: a prefix is for a detail
+   that does not name itself. Every failure of this read does. *)
+let chat = "bin/masc_tui_render_chat.ml"
+
+let test_the_chat_failure_rows_say_the_subject_once () =
+  Alcotest.(check int) "the memory row no longer names the subject twice" 0
+    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:chat
+       ~binding_name:"render_keeper_message"
+       ~needle:"  memory journal unavailable: ");
+  (* And the one failure path that did not name itself now does. The refusal,
+     the decode and the transport all open with the subject or the URL; the
+     exception catch-all handed the row a bare Printexc string, which without
+     the prefix would have reached the screen with nothing saying what it was
+     about. *)
+  Alcotest.(check int) "the exception path names the read it failed" 1
+    (Ast_grep.count_exact_string_literals_in_value_binding
+       ~module_path:"bin/masc_tui.ml"
+       ~binding_name:"launch_keeper_history_load" ~needle:"memory journal: ")
+
 let test_repositories_show_the_server_resolved_checkout_path () =
   let producer = "lib/server/server_routes_http_routes_repositories.ml" in
   Alcotest.(check int) "the route names one resolved path field" 1
@@ -740,6 +836,14 @@ let () =
             test_the_schedule_subject_is_measured_not_given_the_line
         ; Alcotest.test_case "the params row leads with what only it says" `Quick
             test_the_params_row_leads_with_what_only_it_says
+        ; Alcotest.test_case "a detail heading is spelled like a heading" `Quick
+            test_a_detail_heading_is_spelled_the_way_a_heading_is
+        ; Alcotest.test_case "the two p50s on the Lanes screen agree" `Quick
+            test_the_two_p50s_on_the_lanes_screen_agree
+        ; Alcotest.test_case "the Code tree draws one folder arrow" `Quick
+            test_the_code_tree_draws_one_folder_arrow
+        ; Alcotest.test_case "the chat failure rows say the subject once" `Quick
+            test_the_chat_failure_rows_say_the_subject_once
         ; Alcotest.test_case "the Logs header says the floor that was set" `Quick
             test_the_logs_header_says_the_floor_the_reader_set
         ; Alcotest.test_case "a labelled field does not bracket its reading" `Quick

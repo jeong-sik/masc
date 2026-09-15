@@ -66,9 +66,19 @@ let apportion ~width ~weights =
    the operator loses the caption either way. Dropping it deliberately at least
    leaves a clean rule, and the screen's closing lines still carry the same
    sentence. *)
+(* Cells of a title or caption: one per UTF-8 scalar. The rungs are box
+   drawing and "≈", each one cell wide, so counting bytes drew a band two
+   cells short of the edge as soon as a caption carried a token figure. *)
+let scalar_cells text =
+  let cells = ref 0 in
+  String.iter
+    (fun c -> if Char.code c land 0xC0 <> 0x80 then incr cells)
+    text;
+  !cells
+
 let band ~width ~title ~caption =
-  let title_cells = String.length title in
-  let caption_cells = String.length caption in
+  let title_cells = scalar_cells title in
+  let caption_cells = scalar_cells caption in
   if width >= 9 + title_cells + caption_cells then
     let fill = width - 8 - title_cells - caption_cells in
     Sgr.dim ^ repeat Box.h 2 ^ Sgr.reset ^ " " ^ Sgr.bold ^ title ^ Sgr.reset
@@ -136,9 +146,9 @@ let reach_bar ~width ~transmitted ~total ~sent_style =
   ^ repeat bar_light (max 0 (width - sent))
   ^ Sgr.reset ^ Sgr.bold ^ sent_style ^ repeat bar_full sent ^ Sgr.reset
 
-let pointer_label = "sent this turn"
+let sent_pointer_label = "sent this turn"
 
-let reach_pointer ~width ~transmitted ~total =
+let reach_pointer ~label:pointer_label ~width ~transmitted ~total =
   let sent = fill_cells ~width ~numerator:transmitted ~denominator:total in
   let cut = max 0 (width - sent) in
   (* The corner has to sit on the first sent cell, not on the last omitted one:

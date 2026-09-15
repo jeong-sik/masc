@@ -363,6 +363,7 @@
   test_keeper_unified_claim_progress
   test_keeper_unified_context_overflow
   test_keeper_context_overflow_shrink
+  test_keeper_context_window
   test_keeper_provider_call_deadline
   test_keeper_failed_selection_disposition
   test_keeper_cycle_failed_runtime_attribution
@@ -718,6 +719,7 @@
   test_keeper_unified_claim_progress
   test_keeper_unified_context_overflow
   test_keeper_context_overflow_shrink
+  test_keeper_context_window
   test_keeper_provider_call_deadline
   test_keeper_failed_selection_disposition
   test_keeper_cycle_failed_runtime_attribution
@@ -3353,6 +3355,11 @@
   masc_tui_types))
 
 (test
+ (name test_tui_context_inspector_supersede)
+ (modules test_tui_context_inspector_supersede)
+ (libraries masc_tui_image_preview alcotest masc_tui_types))
+
+(test
  (name test_tui_chat_timeline_assembly)
  (modules test_tui_chat_timeline_assembly)
  (libraries masc_tui_image_preview alcotest masc_tui_keeper_chat_transcript masc_tui_types))
@@ -5125,6 +5132,7 @@
 (include stanzas/test_tui_data_unreliable_row.inc)
 (include stanzas/test_tui_tab_strip.inc)
 (include stanzas/test_tui_burn_hud.inc)
+(include stanzas/test_tui_context_tokens.inc)
 (include stanzas/test_tui_coordinator_status_row.inc)
 (include stanzas/test_tui_board_list_reading.inc)
 (include stanzas/test_tui_planning_summary_rows.inc)

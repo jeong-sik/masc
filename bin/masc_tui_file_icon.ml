@@ -73,4 +73,20 @@ let word = function
 
 let kinds = [ Code; Data; Prose; Script; Web; Media; Plain ]
 
-let legend = List.map (fun kind -> (glyph kind, word kind)) kinds
+(* The eighth mark the tree draws. It is not a [kind] -- a folder is not a
+   kind of file, and the row it marks opens rather than reads -- so it sits
+   beside them rather than inside the closed set.
+
+   It was two literals a branch apart in the renderer: the selected row
+   reached for [Masc_tui_theme.Glyph.current_entry], which is the same arrow
+   by byte and a different thing by name, and the unselected row spelled the
+   bytes. Either one moving would have left the column drawing two marks for
+   one thing depending on where the cursor was. *)
+let folder_glyph = "\xe2\x96\xb8"
+
+let folder_word = "a folder; Enter opens it"
+
+(* The folder first, the way the tree draws it: folders sort above files. *)
+let legend =
+  (folder_glyph, folder_word)
+  :: List.map (fun kind -> (glyph kind, word kind)) kinds

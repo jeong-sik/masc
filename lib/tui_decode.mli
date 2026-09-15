@@ -1073,7 +1073,8 @@ val keeper_phase_is_running : keeper_phase -> bool
 
 type keeper_health
 (** A validated keeper health reading — whether the keeper's keepalive is
-    running and whether it has turned yet. Behind the decoder boundary for
+    running, whether it has turned yet, and whether its turns are failing.
+    Behind the decoder boundary for
     the same reason as {!keeper_phase}:
     a TUI executable should not need a second dependency on the Keeper runtime
     library to name one. *)
@@ -1082,8 +1083,9 @@ val keeper_health_of_string : string -> keeper_health option
 val keeper_health_to_string : keeper_health -> string
 
 type keeper_health_reading =
-  | Health_running  (** Keepalive running and at least one turn recorded *)
-  | Health_idle  (** Keepalive running, no turn recorded yet *)
+  | Health_running  (** Phase Running and at least one turn recorded *)
+  | Health_idle  (** Phase Running, no turn recorded yet *)
+  | Health_failing  (** Phase Failing: the keepalive still runs turns, and they fail *)
   | Health_offline  (** Keepalive not running: the phase admits no turn *)
 
 val keeper_health_reading : keeper_health -> keeper_health_reading

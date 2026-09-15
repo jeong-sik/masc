@@ -3,6 +3,8 @@ description = """
 Create a new task on the MASC backlog. The task appears for any keeper to \
 claim."""
 
+defer_loading = true
+
 [[params]]
 name = "title"
 type = "string"

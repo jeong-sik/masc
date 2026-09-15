@@ -294,6 +294,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0451 | CLI 레인은 턴이 시작될 때 집합을 고른다 — 매 요청 82KB 는 스스로 안 실려도 된다고 적은 도구들이다 | Draft | - |
 | 0452 | 소비는 lane 이 아니라 다룬 주체가 한다 — 채팅 턴도 자기가 처리한 자극을 ack 한다 | Rejected | - |
 | 0453 | keeper health 는 phase 의 투영이지 heartbeat 나이가 아니다 | Accepted | - |
+| 0454 | 실패한 keeper 요청은 문자열이 아니라 typed 값으로 남긴다 | Draft | - |
 | RFC-a-language-server-the-keeper-can-ask | A language server the Keeper can ask | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
 | RFC-attached-service-tool-scoping | 도구 스키마를 매 턴 전량 싣는 것을 그만둔다 | Accepted | - |
@@ -308,6 +309,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-context-overflow-semantic-recovery | ContextOverflow 이후 원본을 보존하는 의미 기반 전송 복구 | Draft | - |
 | RFC-conversation-holds-the-turn-slot | 대화는 턴 슬롯을 보유한다 | Draft | - |
 | RFC-dashboard-dev-token-configured-role | Loopback dashboard dev-token issues Admin | Draft | - |
+| RFC-durable-tool-result-markers | 지난 턴의 도구 결과는 체크포인트에도 blob 주소로 저장한다 | Draft | - |
 | RFC-event-queue-admit-all-ready | 이벤트 큐 — 준비된 자극은 한 턴이 전부 본다, 턴 실패는 자극을 버리지 않는다 | Draft | - |
 | RFC-event-spine-and-source-contract | 사건 척추와 이벤트 소스 계약 | Draft | - |
 | RFC-exact-lane-delivery-channel | exact 레인이 답을 받는 통로를 고른다 — 본문 JSON 이 후보를 절반 떨어뜨린다 | Draft | - |
@@ -315,6 +317,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-execute-boundary-is-the-sandbox | The subset judges; the sandbox contains | Draft | - |
 | RFC-execute-command-string | Execute 는 명령 하나를 받는다 — typed 파이프라인 객체는 걷어내고, 도구 표면은 캐시 접두사로 다룬다 | Draft | - |
 | RFC-execute-subset-dispositions | Execute subset dispositions: resolve it, spawn it, or name the replacement | Draft | - |
+| RFC-keeper-context-window-in-tokens | Size the Keeper transmission window in tokens; the request-body cap only judges | Active | - |
 | RFC-keeper-conversation-hitl-flow | Keeper conversation and non-blocking HITL | Implemented | - |
 | RFC-keeper-external-tools-and-produced-artifacts | Keeper 외부 도구와 생성 이미지 증거를 선언형 계약으로 연결한다 | Draft | - |
 | RFC-keeper-github-apps | keeper별 GitHub App 신원 — 공유 봇 계정을 App installation 토큰으로 교체 | Draft | - |

@@ -1221,6 +1221,7 @@
   masc
   masc_types
   masc_tui_ansi
+  masc_tui_token_scale
   masc_tui_context_inspector
   masc_keeper_registry
   masc_tui_json
@@ -1303,6 +1304,16 @@
 ; (wrapped false) matches every other module in this directory -- the names
 ; already carry the masc_tui_ prefix by hand, which is the case dune's manual
 ; names as the reason the option exists.
+; One unit for every context size the TUI shows. Its own library so the
+; inspector's interface stays what the types library and every surface were
+; compiled against, and so the two renderers that read sizes read them
+; through one conversion.
+(library
+ (name masc_tui_token_scale)
+ (wrapped false)
+ (modules masc_tui_token_scale)
+ (libraries masc_tui_context_inspector masc.masc_types))
+
 (library
  (name masc_tui_render_prim)
  (wrapped false)
@@ -1321,6 +1332,7 @@
   masc_tui_keys
   masc_tui_planning_proof_mark
   masc_tui_runtime_config_view
+  masc_tui_token_scale
   masc_tui_context_inspector
   masc_tui_command
   yojson

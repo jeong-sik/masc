@@ -108,9 +108,11 @@ val materialize
     On blob lifetime: these blobs have no durable referrer, because the copy
     that carries the marker is never persisted. That is safe rather than
     overlooked. Offline {!Tool_blob_maintenance} runs only under the exclusive
-    BasePath process lease and deletes only hashes that were already candidates
-    in a previous complete scan, while this function re-stores the same
-    content-addressed bytes on every turn the demotion is transmitted. The body
-    is still verbatim in the checkpoint, so the blob is derived data that the
-    next turn restores. Nothing needs adding to [durable_consumer_basenames]: no
-    reference is persisted. *)
+    BasePath process lease, which the running server holds, and it chooses
+    what to delete from candidate sets rather than file ages. The first put of
+    an address in a server process writes it; later puts of that address skip
+    the write (see {!Tool_blob_store.put}). A blob removed from outside the
+    store is written again after a read of it fails, and a new process starts
+    by writing every address it puts. The body is still verbatim in the
+    checkpoint, so the blob is derived data that a later put restores. Nothing
+    needs adding to [durable_consumer_basenames]: no reference is persisted. *)

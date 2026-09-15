@@ -555,6 +555,60 @@ let test_filesystem_root_initialization_requires_current_marker () =
       check bool "current root marker initializes root" true
         (Workspace_utils.root_is_initialized cfg))
 
+(* A JSON write sanitises and pretty-prints its value as a job on the domain
+   pool when one is installed. The file it leaves must be the one an inline
+   write leaves, byte for byte, including a string whose invalid UTF-8 the
+   sanitiser replaces. *)
+let test_pretty_json_write_through_the_pool_matches_inline () =
+  Eio_main.run @@ fun env ->
+  let scratch = Filename.temp_dir "workspace-utils-pool-write" "" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf scratch)
+    (fun () ->
+      let root = Filename.concat scratch Common.masc_dirname in
+      Unix.mkdir root 0o700;
+      let backend_config : Backend_types.config =
+        { base_path = root
+        ; node_id = "test-node"
+        ; cluster_name = "default"
+        ; pubsub_max_messages = 1000
+        }
+      in
+      let cfg : Workspace_utils.config =
+        { base_path = scratch
+        ; workspace_path = scratch
+        ; lock_expiry_minutes = 30
+        ; backend_config
+        ; backend =
+            Workspace_utils.FileSystem
+              (Backend.FileSystem.create ~fs:(Eio.Stdenv.fs env) backend_config)
+        }
+      in
+      let json =
+        `Assoc
+          [ ("name", `String "ledger")
+          ; ("invalid", `String "before\xff\xfeafter")
+          ; ("rows", `List (List.init 64 (fun index -> `Assoc [ ("n", `Int index) ])))
+          ]
+      in
+      let write name =
+        let path = Filename.concat (Workspace_utils.masc_root_dir cfg) name in
+        (match Workspace_utils.write_json_result cfg path json with
+         | Ok () -> ()
+         | Error message -> failf "write %s failed: %s" name message);
+        Workspace_utils.read_text cfg path
+      in
+      let inline = write "inline.json" in
+      let pooled =
+        Eio.Switch.run @@ fun sw ->
+        let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+        Domain_pool_ref.set pool;
+        Fun.protect ~finally:Domain_pool_ref.clear_for_tests (fun () -> write "pooled.json")
+      in
+      check string "the pooled write leaves the inline bytes" inline pooled;
+      check bool "the sanitiser replaced the invalid bytes" false
+        (String.exists (fun character -> Char.equal character '\xff') inline))
+
 let test_list_dir_prefers_backend_for_memory_keys () =
   let scratch = Filename.temp_dir "workspace-utils-list-dir-memory" "" in
   Fun.protect
@@ -814,6 +868,8 @@ let () =
         test_list_dir_prefers_backend_for_memory_keys;
       test_case "memory commit distinguishes local mirror failure" `Quick
         test_memory_commit_distinguishes_local_mirror_failure;
+      test_case "a pretty JSON write through the pool matches an inline one" `Quick
+        test_pretty_json_write_through_the_pool_matches_inline;
       test_case "memory fallback isolated by base path" `Quick
         test_default_config_memory_fallback_isolated_by_base_path;
       test_case "memory fallback keys by backend base path" `Quick

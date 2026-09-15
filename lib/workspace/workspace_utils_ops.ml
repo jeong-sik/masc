@@ -123,8 +123,14 @@ let read_json_local_result_exn path =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn -> Error (Json_read_exn exn)
 
+(* Pretty-printing goes through Format and is slow: the 4 MB schedule ledger
+   took 84 ms to print, and the schedule runner writes it and its last-good
+   mirror on its tick, which held the main domain 120-150 ms every 15 s
+   (2026-09-16 fiber trace). The sanitising walk and the print run as one job
+   on the domain pool when one is installed, and inline otherwise. *)
 let json_to_pretty_utf8 json =
-  json |> Safe_ops.sanitize_json_utf8 |> Yojson.Safe.pretty_to_string
+  Domain_pool_ref.submit_cpu_or_inline (fun () ->
+    json |> Safe_ops.sanitize_json_utf8 |> Yojson.Safe.pretty_to_string)
 
 let write_json_local path json =
   try

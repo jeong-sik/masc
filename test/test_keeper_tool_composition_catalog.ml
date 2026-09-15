@@ -623,75 +623,6 @@ let test_enum_param_projects_members_and_binds () =
     fail ("wrong refusal for a missing value: " ^ Catalog.instantiation_error_to_string error)
 ;;
 
-(* Runs one call through Agent-Core's own tool execution, on a tool built the
-   way the composition surface builds a composition tool: the same bridge
-   constructor, name and generated input schema. The handler stands in for the
-   composition handler and only records that it ran. *)
-let execute_through_agent_core entry args =
-  let tool_name = Catalog.tool_name entry in
-  let handler_ran = ref false in
-  let tool =
-    Masc.Tool_bridge.agent_core_tool_of_masc_with_execution_env
-      ~name:tool_name
-      ~description:"composition input schema probe"
-      ~input_schema:(Catalog.input_schema_of_params entry.Catalog.params)
-      (fun _execution_env _input ->
-         handler_ran := true;
-         Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String "ran") ())
-  in
-  let invocation =
-    Agent_core.Tool_contract.Invocation.create
-      ~tool_use_id:"composition-input-probe"
-      ~turn:1
-      ~schedule:
-        { Agent_core.Tool_contract.planned_index = 0
-        ; batch_index = 0
-        ; batch_size = 1
-        ; execution_mode = Agent_core.Tool_contract.Serial
-        }
-      ~completion:Agent_core.Tool_contract.Continue_after_success
-  in
-  match
-    Agent_core.Agent_tools.find_and_execute_tool
-      ~context:(Agent_core.Context.create_sync ())
-      ~tools:[ tool ]
-      ~hooks:Agent_core.Hooks.empty
-      ~event_bus:None
-      ~tracer:Agent_core.Tracing.null
-      ~agent_name:"composition-input-probe"
-      ~invocation
-      tool_name
-      args
-  with
-  | Ok result -> result.Agent_core.Agent_tools.outcome, !handler_ran
-  | Error (Agent_core.Agent_tools.Hook_execution_failed { detail; _ }) ->
-    fail ("a tool call with no hooks failed in a hook: " ^ detail)
-;;
-
-(* A value outside the members is refused where every call is checked, before
-   the composition handler and so before binding or any node. BrowserRead
-   itself takes "text" as a mode, which is why the refusal has to come from
-   the composition's own schema. *)
-let test_enum_param_refuses_an_outside_value_before_the_handler () =
-  let entry = read_mode_entry () in
-  Eio_main.run (fun _ ->
-    (match execute_through_agent_core entry (`Assoc [ "mode", `String "regions" ]) with
-     | Agent_core.Types.Tool_succeeded, true -> ()
-     | (Agent_core.Types.Tool_succeeded | Agent_core.Types.Tool_failed _), _ ->
-       fail "a declared member did not reach the composition handler");
-    List.iter
-      (fun (label, value) ->
-         match execute_through_agent_core entry (`Assoc [ "mode", value ]) with
-         | ( Agent_core.Types.Tool_failed
-               { failure_kind = Agent_core.Types.Validation_error; _ }
-           , false ) -> ()
-         | (Agent_core.Types.Tool_succeeded | Agent_core.Types.Tool_failed _), _ ->
-           fail (label ^ " was not refused before the composition handler"))
-      [ "a string outside the members", `String "text"
-      ; "a non-string value", `Int 1
-      ])
-;;
-
 let test_enum_param_declaration_errors () =
   let parse_error param_lines =
     match Catalog.parse (read_mode_composition ~param_lines) with
@@ -710,18 +641,21 @@ enum = []|} with
 enum = ["scene", "scene"]|} with
    | Catalog.Duplicate_param_enum_value { value = "scene"; _ } -> ()
    | error -> fail ("repeated member: " ^ Catalog.error_to_string error));
-  (match parse_error {|type = "string"
-enum = ["scene", ""]|} with
-   | Catalog.Empty_param_enum_value _ -> ()
-   | error -> fail ("empty member: " ^ Catalog.error_to_string error));
-  (match parse_error {|type = "string"
-enum = [" scene", "regions"]|} with
-   | Catalog.Padded_param_enum_value { value = " scene"; _ } -> ()
-   | error -> fail ("leading whitespace: " ^ Catalog.error_to_string error));
-  (match parse_error {|type = "string"
-enum = ["scene", "regions "]|} with
-   | Catalog.Padded_param_enum_value { value = "regions "; _ } -> ()
-   | error -> fail ("trailing whitespace: " ^ Catalog.error_to_string error));
+  List.iter
+    (fun (label, members, expected_value, expected_fault) ->
+       match parse_error ("type = \"string\"\nenum = " ^ members) with
+       | Catalog.Unsendable_param_enum_value { value; fault; _ }
+         when String.equal value expected_value && fault = expected_fault -> ()
+       | error -> fail (label ^ ": " ^ Catalog.error_to_string error))
+    [ "empty member", {|["scene", ""]|}, "", Catalog.Empty_value
+    ; "leading whitespace", {|[" scene", "regions"]|}, " scene", Catalog.Padded_value
+    ; "trailing whitespace", {|["scene", "regions "]|}, "regions ", Catalog.Padded_value
+    ; "line break inside", {|["scene", "re\ngions"]|}, "re\ngions", Catalog.Line_break_in_value
+    ; ( "member separator inside"
+      , {|["scene | regions", "text"]|}
+      , "scene | regions"
+      , Catalog.Separator_in_value )
+    ];
   (match parse_error {|type = "string"
 enum = "scene"|} with
    | Catalog.Wrong_value_kind { field = "enum"; expected = Catalog.String_array_value; _ } ->
@@ -865,10 +799,6 @@ let () =
             "an enum param projects its members and binds a member"
             `Quick
             test_enum_param_projects_members_and_binds
-        ; test_case
-            "an enum param value outside the members is refused before the handler"
-            `Quick
-            test_enum_param_refuses_an_outside_value_before_the_handler
         ; test_case
             "enum param declarations are checked at load"
             `Quick

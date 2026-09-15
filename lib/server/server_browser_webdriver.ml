@@ -159,7 +159,14 @@ let launch_driver ~sw ~env ~masc_root ~record_path ~driver =
            nobody to stop, which is the failure this ownership removes. The
            switch release still stops the driver. *)
         Error (Printf.sprintf "cannot record geckodriver pid %d in %s: %s" pid record_path detail)
-      | Ok () -> Ok (Printf.sprintf "http://127.0.0.1:%d" port, process, pid, log_path)
+      | Ok () -> Ok
+          ( Printf.sprintf
+              "http://%s:%d"
+              Masc_network_defaults.masc_http_loopback_peer
+              port
+          , process
+          , pid
+          , log_path )
 
 let start ~sw ~env =
   let base_path = Config_dir_resolver.base_path_or_cwd () in

@@ -79,6 +79,11 @@ type config =
         runs under its own budgets. On a binding measured before dispatch it
         is one window over both permit waits, the count-tokens request's and
         the stream's. The keeper passes its no-progress threshold. *)
+  ; permit_wait : Llm_provider.Provider_admission.permit_wait Atomic.t option
+    (** The cell a bounded wait for the provider's admission permit writes
+        as it begins and ends ({!Agent_core.Agent.options.permit_wait}). The
+        keeper stands its attempt watchdog down while the wait is on and
+        counts again from the instant it settled. *)
   ; max_tokens : int option
     (** Caller-level output-token override. [None] adds no override, so an
         explicit [provider_cfg.max_tokens] remains authoritative; when both are
@@ -172,6 +177,7 @@ let default_config
   ; body_timeout_s = None
   ; call_timeout_s = None
   ; admission_timeout_s = None
+  ; permit_wait = None
   ; max_tokens = None
   ; temperature = provider_cfg.temperature
   ; hooks = None
@@ -309,6 +315,11 @@ let builder
   let builder =
     match config.admission_timeout_s with
     | Some s -> Agent_core.Builder.with_admission_timeout s builder
+    | None -> builder
+  in
+  let builder =
+    match config.permit_wait with
+    | Some cell -> Agent_core.Builder.with_permit_wait cell builder
     | None -> builder
   in
   let builder =
@@ -457,6 +468,7 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_core.Checkpoint.t)
     ; body_timeout_s = config.body_timeout_s
     ; call_timeout_s = config.call_timeout_s
     ; admission_timeout_s = config.admission_timeout_s
+    ; permit_wait = config.permit_wait
     ; context_injector = config.context_injector
     ; tool_approval = config.tool_approval
     ; event_bus = config.event_bus

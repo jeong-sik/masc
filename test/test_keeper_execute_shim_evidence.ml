@@ -57,7 +57,7 @@ let stub_main () =
   save request_log (String.concat "\n" (previous @ [Yojson.Safe.to_string row]) ^ "\n");
   let trailer : Exec_ssh_protocol.trailer =
     { v = request.v; exit = Some exit_code; signal = None
-    ; timed_out = false; shim_error = None } in
+    ; timed_out = false; shim_error = None; observed_syscalls = [] } in
   let serialized = match response_kind with
     | "recorded" ->
         Exec_ssh_protocol.render_trailer

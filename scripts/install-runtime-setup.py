@@ -1571,6 +1571,11 @@ def workspace_check(binary, base_path):
         base = candidate
 
 
+# The document decides whether imp's persisted conversation opens directly;
+# the journey never re-derives that from check condition strings.
+ONBOARDING_OPENINGS = ('open_existing_history', 'needs_journey')
+
+
 def onboarding_status(binary, base_path=None):
     argv = [str(binary), 'doctor', '--json']
     if base_path is not None:
@@ -1583,6 +1588,7 @@ def onboarding_status(binary, base_path=None):
     if (response.returncode != 0 or not isinstance(state, dict)
             or state.get('schema') != 'masc.onboarding_status.v1'
             or state.get('scope') != 'configuration_observation'
+            or state.get('opening') not in ONBOARDING_OPENINGS
             or not isinstance(state.get('checks'), list)):
         raise SetupError('MASC returned an unsupported setup observation; reinstall the complete release.')
     return state
@@ -1912,7 +1918,6 @@ def ask_local_voice(binary, base):
 
 def journey(binary, base_path, port, timeout, resume=False):
     state = onboarding_status(binary, base_path)
-    conditions = {check['id']: check['condition'] for check in state['checks']}
     # `invalid` is not one condition. Saving a selection repairs some of them —
     # configure_locked stages the edit, lets runtime-default-set rewrite it,
     # and publishes that rewrite — while a declaration the parser cannot
@@ -1924,9 +1929,10 @@ def journey(binary, base_path, port, timeout, resume=False):
             print('\n' + check['id'] + ': ' + terminal_text(check['message']), file=sys.stderr)
     # Persistence permits opening existing history, never a readiness badge.
     # The TUI observes/reconnects the server and reports current execution.
-    if (resume and state.get('base_path') and conditions.get('workspace') == 'satisfied'
-            and conditions.get('keeper_persistence') == 'satisfied'
-            and 'invalid' not in conditions.values()):
+    # Which invalid checks hold that history closed is decided by the binary
+    # (Onboarding_status.opening); an advisory one such as a drifted browser
+    # lane is printed above and does not send the operator back into setup.
+    if resume and state.get('base_path') and state['opening'] == 'open_existing_history':
         base = state['base_path']
         try:
             saved_port = workspace_port(binary, base, port)

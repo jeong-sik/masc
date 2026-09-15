@@ -209,6 +209,15 @@ type trailer =
                           [timeout_sec] *)
   ; shim_error : string option  (** set iff the shim itself failed
                                     before/without running the payload *)
+  ; observed_syscalls : int list
+    (** syscall numbers the supervisor's user_notif drain recorded and
+        denied during an [Observe]-mode run, oldest first; [[]] outside
+        Observe mode or when nothing was attempted. This is evidence
+        about what the payload tried, kept as its own typed field
+        distinct from the exit/signal/shim_error acknowledgement of how
+        the run itself ended — not a hint folded into those fields or a
+        side-channel text line. Absent on the wire (older peers, or a
+        run with nothing observed) decodes to [[]]. *)
   }
 
 type execution_boundary =

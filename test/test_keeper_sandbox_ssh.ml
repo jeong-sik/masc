@@ -49,6 +49,7 @@ let stub_main () =
       ; signal
       ; timed_out
       ; shim_error
+      ; observed_syscalls = []
       }
   in
   match mode with

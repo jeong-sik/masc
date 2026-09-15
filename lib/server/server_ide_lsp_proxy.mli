@@ -16,6 +16,16 @@ module For_testing : sig
       init off the socket read path. *)
   val inbound_dispatch_worker_count : int
 
+  (** Await an LSP initialize answer under a deadline. An answer that arrived
+      as the window closed stands (see [Watched_work]); only a wait that never
+      answered is the timeout [Error]. *)
+  val await_initialize_under_deadline :
+    clock:float Eio.Time.clock_ty Eio.Resource.t ->
+    timeout_sec:float ->
+    lang_id:string ->
+    'a Eio.Promise.t ->
+    ('a, string) result
+
   type resolved_lang =
     | Known_lang of string
     | Unknown_lang

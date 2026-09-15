@@ -516,8 +516,8 @@ let releasing_on_raise st keys body =
   | result -> result
   | exception exn ->
     let backtrace = Printexc.get_raw_backtrace () in
-    (* See Msx.set_key: press_all placed every key, and releasing a key that is
-       already up changes nothing. *)
+    (* Releasing a key that is already up changes nothing. *)
+    (* See Msx.set_key: press_all placed every key, so no release can miss. *)
     List.iter (fun k -> ignore (Msx.set_key st.m k ~pressed:false : bool)) keys;
     Printexc.raise_with_backtrace exn backtrace
 ;;

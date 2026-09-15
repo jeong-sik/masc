@@ -648,27 +648,6 @@ module KeeperKeepalive = struct
       else Some seconds
   ;;
 
-  (* The declared range of the provider-call no-progress threshold, ahead of
-     the two stream budgets because their own ceiling is its upper bound: a
-     budget no threshold can cover is refused where it is read, instead of
-     at every boot by the freeze rule with advice the range then rejects. *)
-  let provider_call_deadline_min_sec = 30.0
-  let provider_call_deadline_max_sec = 3600.0
-
-  let declared_stream_budget_seconds env_key =
-    match declared_timeout_seconds env_key with
-    | Some seconds when Float.compare seconds provider_call_deadline_max_sec > 0 ->
-      raise
-        (Env_config_core.Config_error
-           (Printf.sprintf
-              "invalid %s=%g (expected at most %g seconds, the longest \
-               provider_call_deadline_sec can cover)"
-              env_key
-              seconds
-              provider_call_deadline_max_sec))
-    | declared -> declared
-  ;;
-
   let stream_idle_timeout_env_key = "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC"
   let stream_idle_failsafe_floor_sec = 600.0
 

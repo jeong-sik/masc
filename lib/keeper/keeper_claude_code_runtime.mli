@@ -11,6 +11,12 @@ type attempt_outcome =
     closed with [Observation_unavailable]. *)
 
 module For_testing : sig
+  (** Typed carriage of Claude Code client errors into agent-core errors, the
+      twin of [Keeper_codex_runtime.For_testing.codex_error_to_core_error].
+      Pinned by [test_keeper_claude_code_runtime]. *)
+  val claude_error_to_core_error :
+    Runtime_claude_code.error -> Agent_core.Error.t
+
   val observe_stream_native_action :
     turn_count:int ->
     observe:(official_turn:int -> identity:Runtime_native_tools.action_identity ->

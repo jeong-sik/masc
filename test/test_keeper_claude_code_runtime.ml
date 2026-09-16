@@ -1853,6 +1853,35 @@ let test_every_posture_names_the_schema_lookup () =
     (Runtime_native_tools.claude_code_tools_arg Runtime_native_tools.Native_full)
 ;;
 
+(* RFC-0454 P2. A Claude Code client that exited, or whose stdout reached EOF,
+   is the twin of the Codex runtime's closed connection. It shared one rendered
+   sentence with a failed spawn, which is what the chat pane had to read back;
+   now the two are separate values and the spawn keeps its old carriage. *)
+let test_a_closed_client_connection_is_typed () =
+  let core =
+    Keeper_claude_code_runtime.For_testing.claude_error_to_core_error
+      (Runtime_claude_code.Process_exited
+         { detail = "stdout closed"; turn_admitted = true })
+  in
+  (match Keeper_internal_error.classify_masc_internal_error core with
+   | Some
+       (Keeper_internal_error.Runtime_connection_closed
+          { runtime_id; detail; turn_accepted }) ->
+     check string "runtime" "claude_code" runtime_id;
+     check string "detail" "stdout closed" detail;
+     check bool "turn was admitted" true turn_accepted
+   | Some _ | None -> fail "a closed Claude Code connection did not decode");
+  match
+    Keeper_claude_code_runtime.For_testing.claude_error_to_core_error
+      (Runtime_claude_code.Spawn_failed "executable not found")
+  with
+  | Agent_core.Error.Provider (Llm_provider.Error.ProviderUnavailable _) -> ()
+  | other ->
+    failf
+      "a failed spawn must stay provider-unavailable, got %s"
+      (Agent_core.Error.to_string other)
+;;
+
 let () =
   run
     "keeper_claude_code_runtime"
@@ -1939,6 +1968,10 @@ let () =
             "every posture names the schema lookup"
             `Quick
             test_every_posture_names_the_schema_lookup
+        ; test_case
+            "a closed client connection is typed"
+            `Quick
+            test_a_closed_client_connection_is_typed
         ] )
     ]
 ;;

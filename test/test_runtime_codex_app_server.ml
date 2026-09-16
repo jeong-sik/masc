@@ -1015,7 +1015,7 @@ let test_dynamic_tools_are_declared_deferred_under_one_namespace () =
        (* Read every tool, not the first one. The namespace is a protocol
           requirement, not a grouping axis: splitting tools across namespaces
           was measured and changes nothing a caller can spend (see the
-          comment on [tool_namespace], and RFC-0451 §7). A second tool here
+          comment on [required_namespace], and RFC-0451 §7). A second tool here
           is what fails when someone starts grouping. *)
        check
          (list string)

@@ -464,7 +464,12 @@ let reject_server_request io id =
        ])
 ;;
 
-(* Every Keeper tool is declared once, under one namespace, deferred.
+(* Every Keeper tool is declared once, deferred.
+
+   masc has no namespaces. It does not group tools, does not name groups, and
+   does not read a group back off a call. The literal below is a word this
+   protocol demands in a field, nothing more, and the rest of this comment is
+   what was measured before settling for that.
 
    The app-server takes two encodings of [dynamicTools] and refuses a mix
    ("dynamic tools must use either canonical or legacy format consistently").
@@ -501,14 +506,14 @@ let reject_server_request io id =
    measured too and changes nothing (25,528 against 25,509), so there is no
    scoping to buy by splitting it. RFC-0451 §7 records that this door is
    closed. *)
-let tool_namespace = "masc"
+let required_namespace = "masc"
 
 let dynamic_tool_spec (tool : dynamic_tool) =
   `Assoc
     [ "name", `String tool.name
     ; "description", `String tool.description
     ; "inputSchema", tool.input_schema
-    ; "namespace", `String tool_namespace
+    ; "namespace", `String required_namespace
     ; "deferLoading", `Bool true
     ]
 ;;

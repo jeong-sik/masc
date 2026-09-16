@@ -4,6 +4,8 @@ type dependency = Sandbox of Sandbox_readiness.backend | Codex_cli | Claude_cli 
 type action_effect = Open_official_installer of { url : string; argv : string list }
   | Run_commands of string list list
   | Install_official_cli of Runtime_official_cli_install.client
+  | Build_without_rosetta of { user_config : string }
+type apple_builder = Builder_unchecked | Needs_missing_rosetta of { user_config : string option }
 type action = { id : string; label : string; detail : string;
   source_url : string; requires_admin : bool; action_effect : action_effect;
   writes : string option }
@@ -22,6 +24,12 @@ let distribution_of_os_release contents =
   | _ -> Other
 
 let apple_source = "https://github.com/apple/container/releases/latest"
+let apple_build_config_source = "https://github.com/apple/container/blob/main/docs/container-system-config.md"
+let rosetta_source = "https://support.apple.com/en-us/102527"
+(* The service reads the user file once, when it starts, and copies it; a
+   changed file is not what the next build uses until the service restarts
+   (apple/container SystemStart, 1.3.1 and 1.4.1). *)
+let container_restart = [["container";"system";"stop"];["container";"system";"start"]]
 let docker_mac_source = "https://docs.docker.com/desktop/setup/install/mac-install/"
 let docker_linux_source = "https://docs.docker.com/engine/install/"
 let codex_source = "https://developers.openai.com/codex/cli/"
@@ -61,7 +69,18 @@ let install_cli client =
    detail="Download and run the vendor's native installer for this account. It may manage its own client files and shell integration. No sudo or Homebrew is requested. Sign-in and model verification follow separately.";
    source_url=Runtime_official_cli_install.source_url client; requires_admin=false;
    action_effect=Install_official_cli client; writes=None}
-let rec catalog ?model_dir ~host ~distribution dependency =
+let rosetta_choices ~user_config =
+  let without = match user_config with
+    | None -> []
+    | Some user_config ->
+      [{id="apple_container_build_without_rosetta"; label="Build images without Rosetta";
+        detail="Writes rosetta = false under [build] in " ^ user_config ^ ", then restarts the Apple Container service. Containers running in Apple Container stop during the restart. Builds then make arm64 images only, which is what MASC's sandbox image is; remove the line to build amd64 images again.";
+        source_url=apple_build_config_source; requires_admin=false;
+        action_effect=Build_without_rosetta {user_config}; writes=Some user_config}] in
+  without @ [commands ~id:"rosetta_install" ~label:"Install Rosetta"
+    ~detail:"Runs Apple's Rosetta installer, which shows Apple's license and may ask for your password. Rosetta also lets this Mac run Intel apps and build amd64 images."
+    ~source_url:rosetta_source ~requires_admin:true [["softwareupdate";"--install-rosetta"]]]
+let rec catalog ?model_dir ?(apple_builder=Builder_unchecked) ~host ~distribution dependency =
   let open_ = open_action ~host in
   (* whisper-cli needs a model as well as a binary, on either host, and -m is
      a path the voice configuration then names. Written once because the hosts
@@ -203,12 +222,18 @@ let rec catalog ?model_dir ~host ~distribution dependency =
           [["sudo";"apt-get";"update"];["sudo";"apt-get";"install";"-y";"poppler-utils"]]]
      | Other -> [])
   | Sandbox Sandbox_readiness.Apple_container, Macos {architecture=Arm64; major} when major >= 26 ->
-    [open_ ~id:"apple_container_official_install" ~label:"Open Apple Container signed installer"
-       ~detail:"Choose the signed installer package on Apple's release page and complete the macOS installer. Opening this page does not install or verify the package."
-       ~source_url:apple_source apple_source;
-     commands ~id:"apple_container_start" ~label:"Start Apple Container service"
-       ~detail:"Start the installed service for this account, then recheck sandbox prerequisites."
-       ~source_url:apple_source ~requires_admin:false [["container";"system";"start"]]]
+    (match apple_builder with
+     (* A service that answered and a builder that cannot start is one missing
+        piece, not a missing install: offering the installer again here would
+        send the operator away from the choice that unblocks the build. *)
+     | Needs_missing_rosetta {user_config} -> rosetta_choices ~user_config
+     | Builder_unchecked ->
+       [open_ ~id:"apple_container_official_install" ~label:"Open Apple Container signed installer"
+          ~detail:"Choose the signed installer package on Apple's release page and complete the macOS installer. Opening this page does not install or verify the package."
+          ~source_url:apple_source apple_source;
+        commands ~id:"apple_container_start" ~label:"Start Apple Container service"
+          ~detail:"Start the installed service for this account, then recheck sandbox prerequisites."
+          ~source_url:apple_source ~requires_admin:false [["container";"system";"start"]]])
   | Sandbox Docker, Macos {architecture; _} ->
     let arch = match architecture with Arm64 -> "arm64" | X64 -> "amd64" in
     let url = "https://desktop.docker.com/mac/main/" ^ arch ^ "/Docker.dmg" in
@@ -251,6 +276,9 @@ let effect_json = function
       "url",`String url; "argv",`List (List.map (fun s -> `String s) argv)]
   | Run_commands steps -> `Assoc ["kind",`String "run_commands";
       "argv_steps",`List (List.map (fun argv -> `List (List.map (fun s -> `String s) argv)) steps)]
+  | Build_without_rosetta {user_config} -> `Assoc ["kind",`String "build_without_rosetta";
+      "user_config",`String user_config;
+      "argv_steps",`List (List.map (fun argv -> `List (List.map (fun s -> `String s) argv)) container_restart)]
 let to_json actions = `Assoc ["schema",`String "masc.prerequisite_actions.v1";
   "actions",`List (List.map (fun action -> `Assoc [
     "id",`String action.id; "label",`String action.label; "detail",`String action.detail;
@@ -277,6 +305,64 @@ let not_found_reason program =
       homebrew homebrew_source
   else Printf.sprintf "%s is not on PATH, so nothing ran. Install it, then retry." program
 
+(* Set [build] rosetta = false and leave every other line as it was. A file
+   that is not TOML is refused rather than edited: Apple Container would refuse
+   it as well, and a line edit cannot say what the operator meant. The edit
+   lands on a symlink's target so a dotfile manager's link keeps pointing at
+   the file it manages. *)
+(* Links followed before the write, including one whose target does not exist
+   yet: Unix.realpath refuses that link, and falling back to the link's own
+   path would rename a regular file over it. *)
+let max_config_links = 8
+let rec config_write_target path followed =
+  match (Unix.lstat path).Unix.st_kind with
+  | Unix.S_LNK when followed < max_config_links ->
+    let link = Unix.readlink path in
+    let next = if Filename.is_relative link then Filename.concat (Filename.dirname path) link else link in
+    config_write_target next (followed + 1)
+  | Unix.S_LNK | Unix.S_REG | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK -> path
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> path
+(* A file the operator created keeps its permissions; the atomic write would
+   otherwise leave the temporary file's 0600 in its place. *)
+let new_config_permissions = 0o644
+let write_build_without_rosetta user_config =
+  let target = config_write_target user_config 0 in
+  let permissions = match Unix.stat target with
+    | stats -> stats.Unix.st_perm
+    | exception Unix.Unix_error (_, _, _) -> new_config_permissions in
+  let original = if Sys.file_exists target then
+      (match In_channel.with_open_text target In_channel.input_all with
+       | contents -> Ok contents
+       | exception Sys_error reason -> Error ("Could not read " ^ target ^ ": " ^ reason))
+    else Ok "" in
+  match original with
+  | Error reason -> Error reason
+  | Ok original ->
+    match Otoml.Parser.from_string_result original with
+    | Error _ -> Error (target ^ " is not valid TOML, and Apple Container would refuse it too. Fix it, then retry.")
+    | Ok _ ->
+      let edited = Toml_line_editor.edit_table_bool original ~path:"build" ~key:"rosetta" ~value:false in
+      let recorded = match Otoml.Parser.from_string_result edited with
+        | Ok document -> Otoml.find_result document (fun value -> Otoml.get_boolean value) ["build"; "rosetta"]
+        | Error reason -> Error reason in
+      (match recorded with
+       | Ok false ->
+         (match Fs_compat.mkdir_p (Filename.dirname target) with
+          | () ->
+            (match Fs_compat.save_file_atomic_strict target edited with
+             | Error reason -> Error ("Could not write " ^ target ^ ": " ^ reason)
+             | Ok () ->
+               (match Unix.chmod target permissions with
+                | () -> Ok ()
+                | exception Unix.Unix_error (error, _, _) ->
+                  Error ("Wrote " ^ target ^ " but could not restore its permissions: " ^ Unix.error_message error)))
+          (* [mkdir_p] goes through Eio when a filesystem is installed and
+             through Unix otherwise, so either family can come back. *)
+          | exception ((Unix.Unix_error _ | Eio.Io _ | Sys_error _) as failure) ->
+            Error ("Could not create " ^ Filename.dirname target ^ ": " ^ Printexc.to_string failure))
+       | Ok true | Error _ ->
+         Error ("The edit did not leave [build] rosetta = false in " ^ target ^ "; nothing was written."))
+
 let execute ~run action =
   let rec commands completed index = function
     | [] -> completed
@@ -298,6 +384,10 @@ let execute ~run action =
      | Error reason -> Failed {step=1; reason})
   | Open_official_installer {argv; _} -> commands External_step_pending 1 [argv]
   | Run_commands steps -> commands Commands_completed_recheck_required 1 steps
+  | Build_without_rosetta {user_config} ->
+    (match write_build_without_rosetta user_config with
+     | Error reason -> Failed {step=1; reason}
+     | Ok () -> commands Commands_completed_recheck_required 2 container_restart)
 let outcome_to_json outcome =
   let status, fields = match outcome with
     | External_step_pending -> "external_step_pending", []

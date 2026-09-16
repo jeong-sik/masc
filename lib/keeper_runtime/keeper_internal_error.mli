@@ -141,7 +141,7 @@ type masc_internal_error =
   | Terminal_effect_failed of {
       failure_class : Tool_result.tool_failure_class;
       effect_disposition : Tool_result.failure_effect_disposition;
-      diagnostic : string;
+      detail : Keeper_terminal_effect_detail.t;
     }
   | Provider_attempt_effect_fenced of {
       runtime_id : string;

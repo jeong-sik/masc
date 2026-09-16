@@ -92,19 +92,19 @@ let object_fields expected = function
   | `Assoc fields
     when List.sort String.compare (List.map fst fields)
          = List.sort String.compare expected -> Ok fields
-  | _ -> Error (Invalid_submission "object fields do not match the proposal schema")
+  | _ -> Error "object fields do not match the proposal schema"
 ;;
 
 let string_field name fields =
   match List.assoc_opt name fields with
   | Some (`String s) -> Ok s
-  | _ -> Error (Invalid_submission (name ^ " must be a string"))
+  | _ -> Error (name ^ " must be a string")
 ;;
 
 let int_field name fields =
   match List.assoc_opt name fields with
   | Some (`Int n) -> Ok n
-  | _ -> Error (Invalid_submission (name ^ " must be an integer"))
+  | _ -> Error (name ^ " must be an integer")
 ;;
 
 let decode_step json =
@@ -115,11 +115,11 @@ let decode_step json =
   match kind, List.assoc_opt "text" fields with
   | "retain", Some `Null when first = last -> Ok (Projection.Retain first)
   | "retain", _ ->
-    Error (Invalid_submission "retain requires first_atom=last_atom and text=null")
+    Error "retain requires first_atom=last_atom and text=null"
   | "summarize", Some (`String text) ->
     Ok (Projection.Summarize { first_atom = first; last_atom = last; text })
-  | "summarize", _ -> Error (Invalid_submission "summarize requires text")
-  | _ -> Error (Invalid_submission "kind must be retain or summarize")
+  | "summarize", _ -> Error "summarize requires text"
+  | _ -> Error "kind must be retain or summarize"
 ;;
 
 let decode_proposal json =
@@ -136,12 +136,46 @@ let decode_proposal json =
         (Ok [])
         xs
       |> Result.map List.rev
-    | _ -> Error (Invalid_submission "steps must be an array")
+    | _ -> Error "steps must be an array"
   in
   Ok Projection.{ source_sha256; steps }
 ;;
 
 let proposal_tool_name = "keeper_recovery_propose"
+
+(* What the proposal tool refuses. Each one is also the run's [cause] when no
+   proposal is recorded; the rest of [cause] comes from the run itself. *)
+type proposal_rejection =
+  | Proposal_store_error of Work.error
+  | Proposal_source_unavailable of string
+  | Proposal_invalid of string
+  | Proposal_projection_rejected of Projection.error
+
+let cause_of_proposal_rejection = function
+  | Proposal_store_error e -> Store_error e
+  | Proposal_source_unavailable detail -> Source_observation_failed detail
+  | Proposal_invalid detail -> Invalid_submission detail
+  | Proposal_projection_rejected e -> Projection_rejected e
+;;
+
+(* The terminal detail keeps the rejection's kind typed; the message is the
+   rejection's own text without the kind prefix [cause_to_string] adds. *)
+let rejected_proposal_detail rejection =
+  let rejection, message =
+    match rejection with
+    | Proposal_store_error e ->
+      Keeper_terminal_effect_detail.Recovery_store_failed, Work.error_to_string e
+    | Proposal_source_unavailable detail ->
+      Keeper_terminal_effect_detail.Recovery_source_unavailable, detail
+    | Proposal_invalid detail ->
+      Keeper_terminal_effect_detail.Recovery_submission_invalid, detail
+    | Proposal_projection_rejected e ->
+      ( Keeper_terminal_effect_detail.Recovery_projection_rejected
+      , Projection.error_to_string e )
+  in
+  Keeper_terminal_effect_detail.Recovery_proposal_rejected
+    { model_tool_name = proposal_tool_name; rejection; message }
+;;
 
 let proposal_schema =
   let int = `Assoc [ "type", `String "integer"; "minimum", `Int 0 ] in
@@ -194,7 +228,7 @@ let require_positions work bindings =
 let invocation env =
   match Agent_core.Tool.Execution_env.invocation env with
   | Some i when String.trim (Invocation.tool_use_id i) <> "" -> Ok i
-  | _ -> Error (Invalid_submission "exact Tool invocation identity unavailable")
+  | _ -> Error "exact Tool invocation identity unavailable"
 ;;
 
 let rec append_atomic cell value =
@@ -370,7 +404,8 @@ let run
             (fun env args ->
                let start = Time_compat.now () in
                match invocation env with
-               | Error cause -> tool_failure artifact_schema.name start cause
+               | Error detail ->
+                 tool_failure artifact_schema.name start (Invalid_submission detail)
                | Ok i ->
                  let execution, page =
                    Keeper_artifact_read.handle_with_page ~base_path:config.base_path ~args
@@ -412,20 +447,24 @@ let run
             (fun env input ->
                let start = Time_compat.now () in
                let result =
-                 let* i = invocation env in
-                 let* proposal = decode_proposal input in
+                 let* i =
+                   invocation env |> Result.map_error (fun e -> Proposal_invalid e)
+                 in
+                 let* proposal =
+                   decode_proposal input |> Result.map_error (fun e -> Proposal_invalid e)
+                 in
                  let* validated =
                    Domain_pool_ref.submit_cpu_or_inline (fun () ->
                      Projection.validate ~source proposal)
-                   |> Result.map_error (fun e -> Projection_rejected e)
+                   |> Result.map_error (fun e -> Proposal_projection_rejected e)
                  in
                  let* current =
                    observe_source ()
-                   |> Result.map_error (fun e -> Source_observation_failed e)
+                   |> Result.map_error (fun e -> Proposal_source_unavailable e)
                  in
                  let* _ =
                    Projection.bind_exact ~current_source:current validated
-                   |> Result.map_error (fun e -> Projection_rejected e)
+                   |> Result.map_error (fun e -> Proposal_projection_rejected e)
                  in
                  let proposal_bytes =
                    Yojson.Safe.to_string
@@ -457,14 +496,13 @@ let run
                      ~claimed_required_refs:(Work.required_source_refs work)
                      ~claimed_stimulus_ids:(Work.pending_stimulus_ids work)
                      ~proposal_bytes
-                   |> Result.map_error (fun e -> Store_error e)
+                   |> Result.map_error (fun e -> Proposal_store_error e)
                  in
                  let stored = saved.Work.value in
                  let* artifact =
                    match Work.status stored with
                    | Work.Proposal_recorded p -> Ok (Work.projection_artifact_sha256 p)
-                   | _ ->
-                     Error (Invalid_submission "storage did not return a proposal record")
+                   | _ -> Error (Proposal_invalid "storage did not return a proposal record")
                  in
                  let receipt =
                    { work_id
@@ -488,9 +526,12 @@ let run
                    ~start_time:start
                    ~data:(proposal_receipt_to_yojson receipt)
                    ()
-               | Error cause ->
-                 last_rejection := Some cause;
-                 tool_failure proposal_tool_name start cause)
+               | Error rejection ->
+                 last_rejection := Some rejection;
+                 tool_failure
+                   proposal_tool_name
+                   start
+                   (cause_of_proposal_rejection rejection))
         in
         let manifest =
           `Assoc
@@ -544,7 +585,7 @@ let run
                   (Some
                      (Terminal_tool_boundary
                         { tool_name = proposal_tool_name; outcome = Terminal_completed }))
-              | None, Some cause ->
+              | None, Some rejection ->
                 Ok
                   (Some
                      (Terminal_tool_boundary
@@ -553,7 +594,7 @@ let run
                             Terminal_failed
                               { failure_class = Tool_result.Workflow_rejection
                               ; effect_disposition = Tool_result.Effect_outcome_unknown
-                              ; diagnostic = cause_to_string cause
+                              ; detail = rejected_proposal_detail rejection
                               }
                         }))
               | None, None -> Ok None)
@@ -577,7 +618,7 @@ let run
          | None ->
            let cause =
              match !last_rejection, execution with
-             | Some cause, _ -> cause
+             | Some rejection, _ -> cause_of_proposal_rejection rejection
              | None, Error e -> Runtime_error e
              | None, Ok _ -> No_proposal_submitted
            in

@@ -896,11 +896,8 @@ def show_presentation_readiness(readiness):
             print(terminal_text(detail), file=sys.stderr)
 
 
-def prerequisite_menu(binary, dependency, base_path=None, port=8945):
-    if dependency == 'presentation-tools' and base_path is None:
-        raise SetupError('Presentation setup requires the selected workspace')
-    workspace_args = ['--base-path', str(base_path)] if dependency == 'presentation-tools' else []
-    result = subprocess.run([str(binary), 'prerequisite-actions', dependency] + workspace_args,
+def prerequisite_catalog(binary, dependency, workspace_args=()):
+    result = subprocess.run([str(binary), 'prerequisite-actions', dependency] + list(workspace_args),
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
         catalog = json.loads(result.stdout)
@@ -908,6 +905,14 @@ def prerequisite_menu(binary, dependency, base_path=None, port=8945):
             raise ValueError('invalid actions')
     except (TypeError, ValueError):
         raise SetupError('MASC could not inspect installation actions for this computer')
+    return catalog
+
+
+def prerequisite_menu(binary, dependency, base_path=None, port=8945):
+    if dependency == 'presentation-tools' and base_path is None:
+        raise SetupError('Presentation setup requires the selected workspace')
+    workspace_args = ['--base-path', str(base_path)] if dependency == 'presentation-tools' else []
+    catalog = prerequisite_catalog(binary, dependency, workspace_args)
     actions = catalog['actions']
     if dependency == 'pdf-tools':
         pdf = decode_pdf_tools_readiness(catalog.get('dependency_readiness'))
@@ -944,9 +949,19 @@ def prerequisite_menu(binary, dependency, base_path=None, port=8945):
     print('Source: ' + terminal_text(selected['source_url']), file=sys.stderr)
     if selected.get('account_action'):
         return docker_account_action(binary, base_path, port, selected['id'])
+    execute_prerequisite(binary, dependency, selected['id'], workspace_args, base_path)
+    return True
+
+
+def execute_prerequisite(binary, dependency, action_id, workspace_args=(), base_path=None):
+    """Run one native prerequisite action and report its receipt on screen.
+
+    Returns the receipt status, with a non-zero exit read as `failed` whatever
+    the receipt said, because that is how the screen already reports it.
+    """
     # The selected native action owns commands and privilege boundaries. Child
     # password prompts and vendor output keep the terminal, not a hidden pipe.
-    result = subprocess.run([str(binary), 'prerequisite-actions', dependency, '--execute', selected['id']] + workspace_args,
+    result = subprocess.run([str(binary), 'prerequisite-actions', dependency, '--execute', action_id] + list(workspace_args),
                             stdout=subprocess.PIPE, text=True)
     try:
         receipt = json.loads(result.stdout)
@@ -980,6 +995,7 @@ def prerequisite_menu(binary, dependency, base_path=None, port=8945):
             print(terminal_text(reason), file=sys.stderr)
         else:
             print('The selected step did not finish. Check its terminal output and retry when ready.', file=sys.stderr)
+        return 'failed'
     elif dependency == 'presentation-tools' and state == 'commands_completed':
         print('Both presentation dependencies started successfully. This does not assert a document inspection.', file=sys.stderr)
     elif dependency == 'presentation-tools' and state == 'commands_completed_recheck_required':
@@ -992,7 +1008,7 @@ def prerequisite_menu(binary, dependency, base_path=None, port=8945):
         print('The installation step finished. Checking the service and account access next.', file=sys.stderr)
     else:
         raise SetupError('MASC returned an unknown installation state')
-    return True
+    return state
 
 
 def installed_client(command, choice):
@@ -1406,29 +1422,58 @@ def login_command(binary, runtime_id, specs, inventory):
     return [command] + arguments if command and arguments else None
 
 
-def wizard(binary, base_path, timeout):
+def wizard(binary, base_path, timeout, quick_model=None):
     with PendingCredentials(binary, base_path) as credentials:
-        return wizard_with_credentials(binary, base_path, timeout, credentials)
+        return wizard_with_credentials(binary, base_path, timeout, credentials, quick_model=quick_model)
 
 
-def wizard_with_credentials(binary, base_path, timeout, credentials):
+def quick_connection(binary, inventory, timeout, credentials, model_id):
+    """Claude Code with `model_id`, built the way the model screen builds it.
+
+    None hands the step back to the screens: this computer has no Claude Code,
+    or the installed catalog does not list the model. The reason is printed so
+    the screen that follows does not look like quick setup forgot itself.
+    """
+    source = next((item for item in connection_sources(inventory) if item.get('choice') == 'claude_code'), None)
+    if source is None:
+        print('Claude Code was not found. Choose a model connection.', file=sys.stderr)
+        return None
+    source = prepare_connection(source, credentials)
+    models, _ = source_models(binary, source, timeout)
+    model = next((item for item in models if item['id'] == model_id), None)
+    if model is None:
+        print('The installed model catalog does not list ' + model_id + '. Choose a model.', file=sys.stderr)
+        return None
+    runtime_id, spec = resolve_model_spec(source, model, timeout, binary=binary)
+    return [runtime_id], ([spec] if spec else []), {runtime_id: source['label'] + ' / ' + model['id']}
+
+
+def wizard_with_credentials(binary, base_path, timeout, credentials, quick_model=None):
     while True:
         try:
             inventory = configured_inventory(binary, base_path)
-            selected, specs, names = select_connections(binary, inventory, timeout, credentials)
-            if not selected:
-                return dict(configured=False, readiness='deferred', base_path=str(base_path))
-            primary = pick('Which connection should imp use first?', [names[value] for value in selected])[0]
-            ordered = [selected.pop(primary)]
-            if len(selected) > 1:
-                print('Fallback order:\n' + '\n'.join('  {}. {}'.format(index, terminal_text(names[value]))
-                                                       for index, value in enumerate(selected, 1)), file=sys.stderr)
-                customize = pick('Fallback order', ['Keep this order', 'Choose a different order'])[0]
-                if customize:
-                    while len(selected) > 1:
-                        index = pick('Choose the next fallback connection', [names[value] for value in selected])[0]
-                        ordered.append(selected.pop(index))
-            ordered += selected
+            quick = quick_connection(binary, inventory, timeout, credentials, quick_model) if quick_model else None
+            # Asked once. Choosing connections again after a failed check is the
+            # ordinary screen, not another silent pick of the same model.
+            quick_model = None
+            if quick is not None:
+                selected, specs, names = quick
+                ordered = list(selected)
+            else:
+                selected, specs, names = select_connections(binary, inventory, timeout, credentials)
+                if not selected:
+                    return dict(configured=False, readiness='deferred', base_path=str(base_path))
+                primary = pick('Which connection should imp use first?', [names[value] for value in selected])[0]
+                ordered = [selected.pop(primary)]
+                if len(selected) > 1:
+                    print('Fallback order:\n' + '\n'.join('  {}. {}'.format(index, terminal_text(names[value]))
+                                                           for index, value in enumerate(selected, 1)), file=sys.stderr)
+                    customize = pick('Fallback order', ['Keep this order', 'Choose a different order'])[0]
+                    if customize:
+                        while len(selected) > 1:
+                            index = pick('Choose the next fallback connection', [names[value] for value in selected])[0]
+                            ordered.append(selected.pop(index))
+                ordered += selected
             print('Checking a real response and a harmless tool call for each selected connection…', file=sys.stderr)
             while ordered:
                 try:
@@ -1688,19 +1733,27 @@ def select_setup_server(binary, base_path, port, require_new_owner=False, resume
         if pick('Choose this workspace’s port', ['Use available port ' + str(suggested), 'Finish later'])[0]:
             raise SetupError('setup paused; existing services were preserved')
         port = suggested
+SANDBOX_NAMES = {'docker': 'Docker', 'apple_container': 'Apple Container', 'nerdctl_kata': 'Kata (nerdctl)',
+                 'microsandbox': 'microsandbox', 'remote_ssh': 'Remote SSH'}
+
+
+def sandbox_catalog(binary, base_path):
+    response = subprocess.run([str(binary), 'sandbox-catalog', '--base-path', str(base_path)],
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        catalog = json.loads(response.stdout)
+    except (TypeError, ValueError):
+        raise SetupError('Sandbox inspection failed. Run masc sandbox-catalog for details.')
+    if response.returncode != 0 or not isinstance(catalog, dict) or catalog.get('schema') != 'masc.sandbox_readiness.v1':
+        raise SetupError('MASC could not inspect sandbox prerequisites.')
+    return catalog
+
+
 def select_sandbox(binary, base_path, port=8945):
     advanced = False
-    names = {'docker': 'Docker', 'apple_container': 'Apple Container', 'nerdctl_kata': 'Kata (nerdctl)',
-             'microsandbox': 'microsandbox', 'remote_ssh': 'Remote SSH'}
+    names = SANDBOX_NAMES
     while True:
-        response = subprocess.run([str(binary), 'sandbox-catalog', '--base-path', str(base_path)],
-                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        try:
-            catalog = json.loads(response.stdout)
-        except ValueError:
-            raise SetupError('Sandbox inspection failed. Run masc sandbox-catalog for details.')
-        if response.returncode != 0 or catalog.get('schema') != 'masc.sandbox_readiness.v1':
-            raise SetupError('MASC could not inspect sandbox prerequisites.')
+        catalog = sandbox_catalog(binary, base_path)
         error = catalog.get('configuration_error')
         if error is not None:
             # {kind, detail}: kind is the closed reason class, detail the OS or parse message.
@@ -1923,6 +1976,94 @@ def ask_local_voice(binary, base):
               file=sys.stderr)
 
 
+# Quick setup's model when Claude Code is on this computer. Chosen 2026-09-16:
+# a first conversation and its tool check answer quickly on it, and a
+# subscription spends less of its allowance than on the larger models.
+QUICK_MODEL = 'claude-sonnet-5'
+
+# The order quick setup takes Apple Container's own actions in. Each runs at
+# most once, so a service that never becomes ready ends in the step 4 screen
+# instead of a loop. An installed client is started before it is reinstalled.
+QUICK_APPLE_INSTALLED_ORDER = ('apple_container_build_without_rosetta', 'apple_container_start',
+                               'apple_container_verified_install')
+QUICK_APPLE_MISSING_ORDER = ('apple_container_build_without_rosetta', 'apple_container_verified_install',
+                             'apple_container_start')
+
+
+def quick_plan(binary, base_path):
+    """What quick setup would do here, or None when there is no plan to offer.
+
+    A plan needs a model to go straight to (Claude Code on PATH) and a sandbox
+    observation to choose from. Without either, the journey opens at step 1 as
+    it always did. This only reads: `sandbox-catalog` changes nothing, even for
+    a workspace that does not exist yet.
+    """
+    if not shutil.which('claude'):
+        return None
+    try:
+        catalog = sandbox_catalog(binary, base_path)
+    except (SetupError, OSError):
+        return None
+    rows = {row.get('id'): row for row in catalog.get('candidates', []) if isinstance(row, dict)}
+    apple, docker = rows.get('apple_container'), rows.get('docker')
+    if apple is not None and apple.get('state') != 'unsupported_host':
+        sandbox = 'apple_container'
+    elif docker is not None and docker.get('state') == 'service_ready':
+        sandbox = 'docker'
+    else:
+        sandbox = None
+    apple_ready = apple is not None and apple.get('state') == 'service_ready'
+    return dict(model=QUICK_MODEL, sandbox=sandbox, sandbox_ready=sandbox == 'docker' or apple_ready)
+
+
+def quick_plan_text(plan, base_path):
+    if plan['sandbox'] is None:
+        sandbox = 'chosen in step 4 (no ready sandbox was found)'
+    elif plan['sandbox_ready']:
+        sandbox = SANDBOX_NAMES[plan['sandbox']]
+    else:
+        sandbox = ('Apple Container: installs Apple’s signed package and starts it as needed, and builds\n'
+                   '              without Rosetta if this Mac has none. The installer may ask for your password.')
+    return ('\nQuick setup\n'
+            '  Workspace   ' + terminal_text(base_path) + '\n'
+            '  Model       Claude Code / ' + plan['model'] + ' (checked with a real reply before saving)\n'
+            '  Voice       text only\n'
+            '  Sandbox     ' + sandbox)
+
+
+def quick_sandbox(binary, base_path, backend):
+    """Arguments for `masc setup`, preparing Apple Container on the way.
+
+    None hands the choice back to the step 4 screen: the backend is not in the
+    catalog, a step failed, or the actions ran out before the service was ready.
+    """
+    ran = set()
+    while True:
+        catalog = sandbox_catalog(binary, base_path)
+        row = next((row for row in catalog['candidates'] if row['id'] == backend), None)
+        if row is None:
+            return None
+        if row['state'] == 'service_ready':
+            print('Sandbox: ' + SANDBOX_NAMES.get(backend, backend), file=sys.stderr)
+            configured = catalog.get('configured_selection')
+            if isinstance(configured, dict) and configured.get('backend') == backend:
+                return list(row['setup_args'])
+            if 'inherit' not in row['capabilities']['network_modes']:
+                return None
+            return list(row['setup_args']) + ['--network-mode', 'inherit']
+        if backend != 'apple_container':
+            return None
+        print(terminal_text(row['reason']), file=sys.stderr)
+        offered = [action['id'] for action in prerequisite_catalog(binary, backend)['actions']]
+        order = QUICK_APPLE_INSTALLED_ORDER if shutil.which('container') else QUICK_APPLE_MISSING_ORDER
+        step = next((action for action in order if action in offered and action not in ran), None)
+        if step is None:
+            return None
+        ran.add(step)
+        if execute_prerequisite(binary, backend, step) not in ('commands_completed', 'commands_completed_recheck_required'):
+            return None
+
+
 def journey(binary, base_path, port, timeout, resume=False):
     state = onboarding_status(binary, base_path)
     # `invalid` is not one condition. Saving a selection repairs some of them —
@@ -1951,10 +2092,21 @@ def journey(binary, base_path, port, timeout, resume=False):
     print('\nWelcome. Let’s make a home for you and imp.\n'
           'Choose with arrows and Enter; Space selects several connections.', file=sys.stderr)
     proposed = state.get('base_path') or str(Path.home() / 'MASC')
-    selection = pick('1 · Your workspace', ['Use ' + proposed, 'Choose another directory', 'Finish later'])[0]
-    if selection == 2:
-        return 0
-    base = proposed if selection == 0 else ask_text('Workspace directory')
+    plan = quick_plan(binary, proposed)
+    quick = False
+    if plan is not None:
+        print(quick_plan_text(plan, proposed), file=sys.stderr)
+        choice = pick('Quick setup', ['Start quick setup', 'Choose each step', 'Finish later'])[0]
+        if choice == 2:
+            return 0
+        quick = choice == 0
+    if quick:
+        base = proposed
+    else:
+        selection = pick('1 · Your workspace', ['Use ' + proposed, 'Choose another directory', 'Finish later'])[0]
+        if selection == 2:
+            return 0
+        base = proposed if selection == 0 else ask_text('Workspace directory')
     base = workspace_check(binary, base)['base_path']
     port = workspace_port(binary, base, port)
     port = select_setup_server(binary, base, port)
@@ -1967,7 +2119,7 @@ def journey(binary, base_path, port, timeout, resume=False):
         raise SetupError('Workspace initialization stopped. Existing files were preserved; run masc setup to resume.')
     workspace_port(binary, base, port, save=True)
     print('\n2 · Connect a model\nA subscription or API credit may be required by your provider.', file=sys.stderr)
-    configured = wizard(binary, base, timeout)
+    configured = wizard(binary, base, timeout, quick_model=plan['model'] if quick else None)
     if configured.get('readiness') == 'failed':
         # The reason is already on screen, printed where it was raised. Naming
         # a cause here would be a guess: this path is reached by an unreadable
@@ -1981,18 +2133,29 @@ def journey(binary, base_path, port, timeout, resume=False):
     # Before the sandbox rather than after it: voice needs no guest and no
     # service, so a reader who leaves at the sandbox step still leaves with a
     # keeper that can speak.
-    select_local_voice(binary, base)
-    return sandbox_journey(binary, base, port)
+    if quick:
+        print('imp stays text only. Run masc voice-local-setup to give it a voice later.', file=sys.stderr)
+    else:
+        select_local_voice(binary, base)
+    return sandbox_journey(binary, base, port, quick_backend=plan['sandbox'] if quick else None)
 
 
-def sandbox_journey(binary, base, port, refresh_owner=False):
+def sandbox_journey(binary, base, port, refresh_owner=False, quick_backend=None):
     if port is None:
         port = workspace_port(binary, base)
     if refresh_owner:
         port = select_setup_server(binary, base, port, require_new_owner=True)
         if port is None:
             return 1
-    sandbox_args = select_sandbox(binary, base, port=port)
+    sandbox_args = None
+    if quick_backend is not None:
+        print('\n4 · Prepare imp’s workspace', file=sys.stderr)
+        sandbox_args = quick_sandbox(binary, base, quick_backend)
+        if sandbox_args is None:
+            print('Quick setup could not prepare ' + SANDBOX_NAMES.get(quick_backend, quick_backend)
+                  + ' on its own. Choose how to continue.', file=sys.stderr)
+    if sandbox_args is None:
+        sandbox_args = select_sandbox(binary, base, port=port)
     if sandbox_args is None:
         print('Your model connection is saved. Run masc setup to prepare the sandbox later.', file=sys.stderr)
         return 0

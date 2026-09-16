@@ -1053,9 +1053,28 @@ type verification_request = {
           rather than "none readable". *)
 }
 
+(** Which list the server answered with: the queue of what a task is waiting
+    on, or the whole submission history. The store has no removal path, so the
+    two differ by an order of magnitude on a live workspace. *)
+type verification_view =
+  | Awaiting_queue
+  | Full_history
+
+val verification_view_to_wire : verification_view -> string
+(** The query-parameter spelling the server reads. *)
+
 type verification_snapshot = {
   vs_requests : verification_request list;
-  vs_total : int;  (** Requests the server holds, not the number returned. *)
+  vs_total : int;  (** Rows in the whole view, not the number returned. *)
+  vs_view : verification_view;
+  vs_offset : int;
+  vs_truncated : bool;  (** A further page exists. *)
+  vs_awaiting_unresolved : string list;
+      (** Request ids the backlog waits on that name no record. A task holding
+          one of these is waiting on something that is not there. *)
+  vs_backlog_error : string option;
+      (** Why the queue could not be resolved. An empty list carrying this is
+          not an empty queue. *)
 }
 
 type keeper_phase

@@ -9756,6 +9756,41 @@ def repositories_enter_interaction() -> Interaction:
 VERIFICATION_VERDICT_PATH = "/api/v1/verification/verdict"
 
 
+# The TUI asks for one view and one page, so the stub answers that exact
+# query. Spelled once here because three scenarios key their fixtures on it.
+VERIFICATION_QUEUE_PATH = (
+    "/api/v1/verification/requests?view=awaiting&limit=200&offset=0"
+)
+
+
+def verification_snapshot(
+    rows: list[dict[str, object]],
+    *,
+    total: int | None = None,
+    offset: int = 0,
+    truncated: bool = False,
+    view: str = "awaiting",
+) -> dict[str, object]:
+    """The projection the TUI decodes.
+
+    Every field is required on the reader's side: a snapshot that does not say
+    which list it holds cannot be drawn honestly, because the same row count
+    means "nothing is waiting" in the queue and "the newest page" in the
+    history.
+    """
+    return {
+        "requests": rows,
+        "total": len(rows) if total is None else total,
+        "view": view,
+        "offset": offset,
+        "returned": len(rows),
+        "truncated": truncated,
+        "awaiting_unresolved_total": 0,
+        "awaiting_unresolved": [],
+        "backlog_error": None,
+    }
+
+
 def verification_request_row(task_id: str) -> dict[str, object]:
     return {
         "request_id": f"vr-{task_id}",
@@ -9778,10 +9813,7 @@ def verification_verdict_fixtures() -> HttpFixtures:
         verification_request_row("task-902"),
     ]
     return {
-        "/api/v1/verification/requests?limit=200": (
-            200,
-            {"requests": rows, "total": 2},
-        ),
+        VERIFICATION_QUEUE_PATH: (200, verification_snapshot(rows)),
         VERIFICATION_VERDICT_PATH: (
             200,
             {"ok": True, "message": "verdict recorded for task-901", "noop": False},
@@ -13980,13 +14012,13 @@ def run_keyboard_regression(executable: str) -> None:
             "/api/v1/keepers/alpha/tool-calls?limit=100": keeper_calls_fixture(),
         },
     )
-    verification_gate = GatedHttpResponse((200, {"requests": [], "total": 0}))
+    verification_gate = GatedHttpResponse((200, verification_snapshot([])))
     run_terminal_scenario(
         executable,
         description="Verification unread before read",
         interact=verification_unread_interaction(verification_gate),
         http_fixtures={
-            "/api/v1/verification/requests?limit=200": verification_gate,
+            VERIFICATION_QUEUE_PATH: verification_gate,
         },
     )
     verdict_requests: HttpRequests = []
@@ -14339,13 +14371,13 @@ def run_planning_review_regression(executable: str) -> None:
         interact=planning_resize_budget_interaction,
         http_fixtures=planning_selection_http_fixtures(),
     )
-    verification_gate = GatedHttpResponse((200, {"requests": [], "total": 0}))
+    verification_gate = GatedHttpResponse((200, verification_snapshot([])))
     run_terminal_scenario(
         executable,
         description="Planning Task Review unread before read",
         interact=verification_unread_interaction(verification_gate),
         http_fixtures={
-            "/api/v1/verification/requests?limit=200": verification_gate,
+            VERIFICATION_QUEUE_PATH: verification_gate,
         },
     )
     run_terminal_scenario(

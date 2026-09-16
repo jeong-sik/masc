@@ -5412,6 +5412,16 @@ type state = {
   mutable verification_inflight: bool;
   mutable verification_scroll: int;
   mutable verification_cursor: int;
+  (* Which list this surface is reading. The store keeps every submission ever
+     made, so the history outgrows the queue by an order of magnitude on a
+     live workspace and the operator's default is the queue. The reader can
+     still walk the history; it is a different question, asked on purpose. *)
+  mutable verification_view: Tui_decode.verification_view;
+  (* Where in that list the current page starts. The server holds more rows
+     than one request returns, and before this the surface could only ever see
+     the newest page -- rows past it were unreachable rather than merely
+     unscrolled. *)
+  mutable verification_offset: int;
   (* The request being read, not merely the current cursor position. A refresh
      may reorder the queue; retaining the request id prevents the detail pane
      and verdict keys from silently moving to a different task. *)
@@ -6924,6 +6934,8 @@ let create_state
   verification_inflight = false;
   verification_scroll = 0;
   verification_cursor = 0;
+  verification_view = Tui_decode.Awaiting_queue;
+  verification_offset = 0;
   verification_detail_request_id = None;
   verification_detail_scroll = 0;
   verification_verdict_armed = None;

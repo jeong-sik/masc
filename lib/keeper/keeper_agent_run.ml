@@ -1258,9 +1258,9 @@ let run_turn
       s.Keeper_run_tools.model_input_projection
     in
     let model_input_projection messages =
-      (* [messages] carries the current provider attempt's transmission view.
-         An explicit request-body cap enables bounded_model_input_projection;
-         without that caller policy the full prepared history reaches here.
+      (* [messages] is the current provider attempt's transmission view: the
+         carried range [Keeper_turn_driver_try_provider.bounded_model_input_projection]
+         composed, as the wire's reasoning projection leaves it.
          The source projection appends only a bounded typed Gate replay
          reference; exact replay bytes remain in the artifact store. The
          provenance check below compares against the list as received, so its
@@ -1610,11 +1610,10 @@ let run_turn
                         (fun ~measurement observation ->
                            model_input_window_ref :=
                              Some (measurement, observation))
-                      ~carried_front_seed:(fun ~runtime_id ->
+                      ~carried_front_seed:(fun () ->
                         Keeper_carried_front.read_seed
                           ~config
                           ~keeper_name:meta.name
-                          ~runtime_id
                           ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id))
                       ~on_request_attribution:
                         (fun ~runtime_id ~tools ~transmitted ->

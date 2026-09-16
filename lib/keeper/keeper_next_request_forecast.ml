@@ -185,14 +185,10 @@ let assembly ~wake_bytes ~history_atoms (parts : measured_parts) (carried : carr
    An official-client runtime carries none: the spawned client owns its
    context. *)
 let lane_for ~runtime_id (runtime : Runtime.t option) =
-  match runtime with
-  | None -> Error (Not_materialized { runtime_id })
-  | Some runtime ->
-    (match runtime.Runtime.execution with
-     | Runtime_execution.Codex_app_server _
-     | Runtime_execution.Claude_code _
-     | Runtime_execution.Antigravity_cli _ -> Error (Not_agent_core { runtime_id })
-     | Runtime_execution.Agent_core _ -> Ok ())
+  match Keeper_carried_front.composer_of_runtime runtime with
+  | Keeper_carried_front.Not_materialized -> Error (Not_materialized { runtime_id })
+  | Keeper_carried_front.Hands_over_its_own_list -> Error (Not_agent_core { runtime_id })
+  | Keeper_carried_front.Composes_from_the_history -> Ok ()
 ;;
 
 type composition =
@@ -356,15 +352,15 @@ let candidate ~config ~keeper_name ~trace_id ~messages ~history_atoms ~wake_byte
     | Error _ -> None
     | Ok () ->
       (* The same front the turn driver composes from: the pair's ledger,
-         else the newest completed record on the runtime. *)
+         else the newest completed Agent Core record on the trace, whichever
+         runtime ran it. *)
       let front, counted_tokens =
         match
           Keeper_model_input_ledger.Table.lookup ~keeper_name ~runtime_id ~session_id:trace_id
         with
         | Some ledger ->
           Some (Keeper_carried_front.of_ledger ledger), ledger.Keeper_model_input_ledger.total_tokens
-        | None ->
-          Keeper_carried_front.read_seed ~config ~keeper_name ~runtime_id ~trace_id, None
+        | None -> Keeper_carried_front.read_seed ~config ~keeper_name ~trace_id, None
       in
       Some (carry ~measure ~front ~counted_tokens messages)
   in

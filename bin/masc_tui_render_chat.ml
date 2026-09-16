@@ -1929,8 +1929,8 @@ let render_keeper_message (state : state) =
         |> String.concat " · "
       in
       let title =
-        screen_title
-          (Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 chat" display_keeper_name)
+        Printf.sprintf "%s Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 chat%s"
+          (Theme.recede ()) display_keeper_name Ansi.reset
       in
       let mode_suffix =
         if String.equal modes "" then ""

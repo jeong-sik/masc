@@ -450,29 +450,6 @@ let rec await_person_queued_preemption ~clock ~first_event_seen ~person_queued =
     else await_person_queued_preemption ~clock ~first_event_seen ~person_queued
 ;;
 
-(* The canonical MASC message encoder, also used for checkpoint serialization.
-   It is not the provider's encoder, and nothing here converts its bytes to
-   tokens: the range is a position on the atom axis, the bytes it measures
-   are judged against the request-body cap alone, and the provider counts
-   the tokens (RFC keeper-context-window-in-tokens).
-
-   [Yojson.Safe.to_string] is [to_buffer] followed by [Buffer.contents], so
-   measuring through a buffer counts the same bytes and stops allocating a
-   copy of every message to read its length. Projection measures the whole
-   durable history per attempt, and a keeper turn makes 62 to 83 attempts.
-
-   One buffer per measurer. A measurer is driven by one fiber, and its pool
-   jobs run under [Eio.Executor_pool.submit_exn], which blocks until the job
-   finishes, so two domains are never inside the buffer at once. [clear] keeps
-   the capacity the largest message already paid for; the buffer dies with the
-   measurer. *)
-let message_measurer () =
-  let buffer = Buffer.create 65536 in
-  fun (message : Agent_core.Types.message) ->
-    Buffer.clear buffer;
-    Yojson.Safe.to_buffer buffer (Keeper_context_core.message_to_json message);
-    Buffer.length buffer
-;;
 
 (* The memo is keyed by message value ([Agent_core.Types.Message_value]). Each
    request passes its history through [Complete_common.transmitted_history],
@@ -714,7 +691,9 @@ let bounded_model_input_projection
      The memo is keyed by message value ([Agent_core.Types.Message_value]), so
      a record that projection rebuilt for this request still hits the entry an
      earlier request measured. *)
-  let measure_message_bytes = memoize_message_measurement (message_measurer ()) in
+  let measure_message_bytes =
+    memoize_message_measurement (Keeper_context_core.message_measurer ())
+  in
   (* Scoped to the attempt for the same reason and with the same safety: the
      demotion boundary is pinned to the turn's seed, so every request of this
      attempt demotes the same aged tool results, and addressing one is a
@@ -2030,7 +2009,6 @@ module For_testing = struct
   let truncation_recovery = truncation_recovery
   let persist_dropped_response = persist_dropped_response
   let candidate_without_reasoning_effort = candidate_without_reasoning_effort
-  let message_measurer = message_measurer
   let memoize_message_measurement = memoize_message_measurement
   let message_measurement_hash = Agent_core.Types.Message_value.hash
   let compose_carried_model_input = compose_carried_model_input

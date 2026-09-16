@@ -16,15 +16,19 @@ let history ~exchanges ~text_bytes =
       [ message Agent_core.Types.User text; message Agent_core.Types.Assistant text ])
     (List.init exchanges Fun.id)
 
+(* One measurer for the whole walk, as the projection uses one: a measurer
+   owns a buffer, so one per message would cost more than the strings the
+   measurer exists to avoid. *)
 let atom_bytes messages =
-  List.fold_left (fun sum m -> sum + Keeper_next_request_forecast.measure m) 0 messages
+  let measure = Keeper_context_core.message_measurer () in
+  List.fold_left (fun sum m -> sum + measure m) 0 messages
 
 let seed ~atom_count first_atom : Keeper_carried_front.seed =
   { first_atom; atom_count; source = Keeper_carried_front.Ledger }
 
 let carry ?front ?counted_tokens messages =
   Keeper_next_request_forecast.carry
-    ~measure:Keeper_next_request_forecast.measure
+    ~measure:(Keeper_context_core.message_measurer ())
     ~front
     ~counted_tokens
     messages
@@ -192,84 +196,68 @@ let test_no_composition_is_refused_with_the_count_read () =
   | Error (Keeper_next_request_forecast.No_first_round_composition _) | Ok _ ->
     Alcotest.fail "nothing to read is its own refusal"
 
-(* The measurer writes the message and reads how much was written; the count
-   has to stay the one [Yojson.Safe.to_string] would give. Only [to_file]
-   appends a newline by default, but the two writers are separate entry
-   points, so this pins them against each other: a suffix, a flag, or a
-   yojson change that moves one and not the other turns red here rather than
-   quietly restating every byte figure the forecast reports. *)
-let messages_whose_encoding_is_worth_pinning =
-  [ message Agent_core.Types.User ""
-  ; message Agent_core.Types.User "plain"
-  ; message Agent_core.Types.Assistant "quotes \" backslash \\ newline \n tab \t"
-  ; message Agent_core.Types.User "유니코드와 이모지 \xf0\x9f\x93\x8a"
-  ; message Agent_core.Types.User (String.make 70000 'x')
-  ; { (message Agent_core.Types.Tool "result") with
-      tool_call_id = Some "call-1"; name = Some "a_tool" }
-  ]
+(* The claim is that measuring does not build what it measures, so the check
+   is that the allocation does not grow with the bytes measured. A budget
+   stated per byte measured looked like the same thing and is not: it falls as
+   the fixture grows, so it says more about the fixture than the code. Measured
+   over the same histories at 1x and 4x the message size, per-message-distinct
+   content, each message measured twice as the projection measures it:
 
-let test_the_measurer_counts_what_to_string_would_write () =
-  let measure = Keeper_next_request_forecast.message_measurer () in
-  List.iteri
-    (fun index m ->
-       let written = measure m in
-       let built =
-         String.length
-           (Yojson.Safe.to_string (Keeper_context_core.message_to_json m))
-       in
-       Alcotest.(check int)
-         (Printf.sprintf "message %d is counted as the string would be" index)
-         built written)
-    messages_whose_encoding_is_worth_pinning
+     measurer writing into a reused buffer     512,176 -> 512,176   1.0x
+     memoizing the string builder            1,833,576 -> 5,721,432  3.1x
+     building the string                     3,465,776 -> 11,260,976 3.2x
 
-(* One measurer serves a whole walk, so its buffer must not carry bytes from
-   the message before into the next count. *)
-let test_a_measurer_does_not_carry_the_previous_message () =
-  let measure = Keeper_next_request_forecast.message_measurer () in
-  let long = message Agent_core.Types.User (String.make 50000 'y') in
-  let short = message Agent_core.Types.User "z" in
-  let short_first = Keeper_next_request_forecast.message_measurer () short in
-  let (_ : int) = measure long in
-  Alcotest.(check int) "the short message counts the same after a long one"
-    short_first (measure short)
+   Both rejected alternatives grow with the history; this one does not. The
+   fixture gives every message distinct content on purpose -- with shared
+   bodies a memo hits, and the memoized string builder comes in under any
+   ratio budget while still allocating the history again on real input. *)
+(* The larger size is past the measurer's initial buffer, so that walk grows
+   its buffer once. That growth belongs to neither measured window -- the
+   warm-up below takes it -- and a fixture that stayed under the initial size
+   would never exercise the path at all. *)
+let fixture_messages = 100
+let fixture_message_bytes = 20_000
+let fixture_growth = 4
+let measurer_initial_buffer_bytes = 65_536
+let allocation_allowed_to_grow_by = 2.0
 
-(* The projection measures every message twice, and this is what a dashboard
-   poll pays over the whole durable history. Building the string to take its
-   length allocated the history again, twice: the live code-reviewer
-   checkpoint is 15,212 messages and 73.7 MB, so a poll dropped 147 MB on the
-   main domain. Writing into a reused buffer allocates the JSON tree of one
-   message at a time and nothing that scales with the bytes measured.
-
-   The budget is stated against the bytes measured, not in megabytes, so the
-   fixture can grow without restating it. A measurer that builds each string
-   again lands above it; the check prints what it measured so a later reader
-   can see the margin rather than trust the constant. *)
-let fixture_messages = 400
-let fixture_message_bytes = 4800
-let allocation_allowed_per_byte_measured = 0.75
-
-let test_measuring_a_history_does_not_allocate_it_again () =
-  let messages = history ~exchanges:(fixture_messages / 2) ~text_bytes:fixture_message_bytes in
-  let measure = Keeper_next_request_forecast.message_measurer () in
-  (* Warm the buffer so its one growth is not charged to the measured pass. *)
-  let (_ : int) = measure (List.hd messages) in
+let measure_history_allocation ~text_bytes =
+  let messages =
+    List.init fixture_messages (fun index ->
+      message
+        (if index mod 2 = 0 then Agent_core.Types.User else Agent_core.Types.Assistant)
+        (Printf.sprintf "%d " index ^ String.make text_bytes (Char.chr (65 + (index mod 26)))))
+  in
+  let measure = Keeper_context_core.message_measurer () in
+  (* Warm the buffer: whatever growth this size needs is paid here. *)
+  List.iter (fun m -> ignore (measure m : int)) messages;
   let before = Gc.allocated_bytes () in
   let measured =
     List.fold_left (fun sum m -> sum + measure m) 0 messages
     + List.fold_left (fun sum m -> sum + measure m) 0 messages
   in
-  let allocated = Gc.allocated_bytes () -. before in
-  let budget = float_of_int measured *. allocation_allowed_per_byte_measured in
-  Printf.printf
-    "\n  measured %d bytes, allocated %.0f (%.2f per byte measured, budget %.2f)\n%!"
-    measured allocated
-    (allocated /. float_of_int measured)
-    allocation_allowed_per_byte_measured;
+  (measured, Gc.allocated_bytes () -. before)
+
+let test_measuring_does_not_allocate_what_it_measures () =
   Alcotest.(check bool)
-    (Printf.sprintf "measuring %d bytes allocated %.0f, over the %.0f budget"
-       measured allocated budget)
+    "the larger fixture crosses the measurer's initial buffer"
     true
-    (allocated <= budget)
+    (fixture_message_bytes * fixture_growth > measurer_initial_buffer_bytes);
+  let small_bytes, small_allocated = measure_history_allocation ~text_bytes:fixture_message_bytes in
+  let large_bytes, large_allocated =
+    measure_history_allocation ~text_bytes:(fixture_message_bytes * fixture_growth)
+  in
+  Printf.printf
+    "\n  %d bytes -> %.0f allocated; %d bytes -> %.0f allocated (%.2fx for %.2fx the bytes)\n%!"
+    small_bytes small_allocated large_bytes large_allocated
+    (large_allocated /. small_allocated)
+    (float_of_int large_bytes /. float_of_int small_bytes);
+  Alcotest.(check bool)
+    (Printf.sprintf "%.2fx more bytes measured allocated %.2fx more"
+       (float_of_int large_bytes /. float_of_int small_bytes)
+       (large_allocated /. small_allocated))
+    true
+    (large_allocated <= small_allocated *. allocation_allowed_to_grow_by)
 
 let () =
   Alcotest.run "keeper_next_request_forecast"
@@ -294,12 +282,8 @@ let () =
             test_no_composition_is_refused_with_the_count_read
         ] )
     ; ( "measure"
-      , [ Alcotest.test_case "the measurer counts what to_string would write" `Quick
-            test_the_measurer_counts_what_to_string_would_write
-        ; Alcotest.test_case "a measurer does not carry the previous message" `Quick
-            test_a_measurer_does_not_carry_the_previous_message
-        ; Alcotest.test_case "measuring a history does not allocate it again" `Quick
-            test_measuring_a_history_does_not_allocate_it_again
+      , [ Alcotest.test_case "measuring does not allocate what it measures" `Quick
+            test_measuring_does_not_allocate_what_it_measures
         ] )
     ; ( "carry"
       , [ Alcotest.test_case "a seeded front carries everything from it" `Quick

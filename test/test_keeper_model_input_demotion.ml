@@ -557,7 +557,7 @@ let plan_honours_a_monotonic_boundary () =
    멀티바이트에서 특히 그렇고, 버퍼를 비우지 않으면 두 번째 측정부터 커진다. *)
 let measurer_counts_the_same_bytes_as_to_string () =
   let measure =
-    Masc.Keeper_turn_driver_try_provider.For_testing.message_measurer ()
+    Masc.Keeper_context_core.message_measurer ()
   in
   let cases =
     [ "empty body", assistant ""

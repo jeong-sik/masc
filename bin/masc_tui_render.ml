@@ -4167,17 +4167,22 @@ let keeper_roster_summary readings =
          Printf.sprintf "%s%d %s%s" (keeper_roster_status_color label) count
            label Ansi.reset)
 
-(* The two subtractions over the fleet's name lists. They answer different
+(* The subtractions over the fleet's name lists. They answer different
    questions and only one of them is about being stopped: a keeper the fleet
-   wanted and never started is bootable minus running, while a keeper whose
-   fiber is alive but whose durable demand is not admissible is running minus
-   executable. Reporting the second as "not running" sent an operator to boot
-   ten keepers that were already up. *)
+   wants with no live turn-executing fiber is bootable minus executable,
+   while a keeper whose fiber is alive but whose durable demand is not
+   admissible is running minus executable. Reporting the second as "not
+   running" sent an operator to boot ten keepers that were already up, and
+   subtracting the Running-phase list instead of the executable list here put
+   every Failing keeper in "not running" too -- a failing keepalive still
+   runs its turns, so keepers that were visibly turning were listed as not
+   running (2026-09-16). Executable is the set with a live fiber (Running or
+   Failing), which is the fact the label names. *)
 let keeper_fleet_gap_lines (fleet : fleet_safety) =
   let subtract from_names remove_names =
     List.filter (fun name -> not (List.mem name remove_names)) from_names
   in
-  let never_started = subtract fleet.fs_bootable_names fleet.fs_running_names in
+  let not_running = subtract fleet.fs_bootable_names fleet.fs_executable_names in
   let running_without_turn =
     subtract fleet.fs_running_names fleet.fs_executable_names
   in
@@ -4186,8 +4191,16 @@ let keeper_fleet_gap_lines (fleet : fleet_safety) =
        match names with
        | [] -> None
        | _ -> Some (color, label, String.concat ", " names))
-    [ (never_started, "not running", (Theme.bad ()))
+    [ (not_running, "not running", (Theme.bad ()))
     ; (running_without_turn, "running, cannot take a turn", (Theme.warn ()))
+    ; (* The one failing subset an operator must act on: turn configuration
+         errors survive every retry, so the names are listed where the
+         failing counter only counts them. Unscoped on purpose -- the
+         configuration_blocked_* wire fields are autoboot-scoped and skip a
+         blocked keeper booted on request. *)
+      ( fleet.fs_turn_configuration_error_names
+      , "config-blocked"
+      , (Theme.bad ()) )
     ]
 
 
@@ -4356,16 +4369,31 @@ let render_keeper_list (state : state) =
             (fleet.fs_target_reaction_capacity
             - fleet.fs_reaction_capacity_shortfall)
             fleet.fs_target_reaction_capacity Ansi.dim blocker Ansi.reset);
+       (* Failing is not a mystery bucket. Every failing keeper is either
+          retrying on its own -- a clean turn returns it to Running -- or
+          blocked on turn configuration, which no retry fixes. Both parts
+          come from the same phase snapshot, which sorts each failing keeper
+          into exactly one of the two, so they sum to the failing count and
+          print beside the whole instead of as a separate "recovering"
+          counter whose relationship to failing was invisible. *)
+       let failing_entry =
+         if fleet.fs_failing_count = 0 then []
+         else
+           [ Printf.sprintf "failing %d (retrying %d · config-blocked %d)"
+               fleet.fs_failing_count
+               fleet.fs_recovering_count
+               fleet.fs_turn_configuration_error_count
+           ]
+       in
        let counts =
-         [ ("paused", fleet.fs_paused_count)
-         ; ("failing", fleet.fs_failing_count)
-         ; ("recovering", fleet.fs_recovering_count)
-         ; ( "task owner without fiber"
-           , fleet.fs_active_task_owner_without_fiber_count )
-         ; ("awaiting verdict", fleet.fs_completion_authority_pending_count)
-         ]
-         |> List.filter (fun (_, n) -> n > 0)
-         |> List.map (fun (label, n) -> Printf.sprintf "%s %d" label n)
+         failing_entry
+         @ (List.filter (fun (_, n) -> n > 0)
+              [ ("paused", fleet.fs_paused_count)
+              ; ( "task owner without fiber"
+                , fleet.fs_active_task_owner_without_fiber_count )
+              ; ("awaiting verdict", fleet.fs_completion_authority_pending_count)
+              ]
+            |> List.map (fun (label, n) -> Printf.sprintf "%s %d" label n))
        in
        if counts <> [] then
          box_line buf cols

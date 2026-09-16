@@ -53,8 +53,13 @@ let records_read = 200
 
 let read_seed ~config ~keeper_name ~runtime_id ~trace_id =
   let store = Keeper_types_support.keeper_turn_record_store config keeper_name in
+  (* A record that does not parse is treated as absent, the same boundary the
+     forecast reader draws; the erasing conversion is not used. *)
   Dated_jsonl.read_recent store records_read
-  |> List.filter_map (fun json -> Result.to_option (Turn_record.of_json json))
+  |> List.filter_map (fun json ->
+         match Turn_record.of_json json with
+         | Error _ -> None
+         | Ok record -> Some record)
   |> of_records ~runtime_id ~trace_id
 ;;
 

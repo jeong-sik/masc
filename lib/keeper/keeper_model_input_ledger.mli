@@ -105,6 +105,13 @@ val observe : t option -> request -> usage option -> observation
 (** Pure step. [None] starts a ledger from the request. *)
 
 val usage_of_counts : input_tokens:int -> cache_read_input_tokens:int -> usage option
+
+val move_front : t -> first_atom:int -> t
+(** Apply an eviction decided outside a request: blocks below [first_atom]
+    leave, their tokens come off the total when they were all measured, and
+    otherwise the total is unknown until the next usage. A front that does
+    not advance changes nothing; a front inside a block restarts the blocks
+    from it. The next request's [observe] then sees an unchanged front. *)
 (** [None] unless [input_tokens] is positive: a zero-filled usage is the
     shape of a response that reported nothing. *)
 

@@ -18,11 +18,24 @@ type step =
 (* Walk the blocks oldest first. [remaining] is the projected total while it
    is known. [stop] decides, on a known total, whether the walk has come down
    far enough; [at_least_one] forces the first eviction, as a provider
-   refusal does, even when [stop] would already hold. *)
+   refusal does, even when [stop] would already hold. The walk hands back the
+   block it stopped at, so the caller never looks the survivor up again: the
+   newest block is never consumed, and a list of two or more always stops at
+   one. *)
+type walked =
+  { evicted_blocks : int
+  ; evicted_atoms : int
+  ; evicted_tokens : int option
+  ; remaining : int option
+  ; stopped_at : Keeper_model_input_ledger.block option
+  }
+
 let walk ~stop ~at_least_one ~(total : int option) (blocks : Keeper_model_input_ledger.block list)
   =
   let rec go ~evicted_blocks ~evicted_atoms ~evicted_tokens ~remaining = function
-    | [] | [ _ ] -> evicted_blocks, evicted_atoms, evicted_tokens, remaining
+    | [] -> { evicted_blocks; evicted_atoms; evicted_tokens; remaining; stopped_at = None }
+    | [ (last : Keeper_model_input_ledger.block) ] ->
+      { evicted_blocks; evicted_atoms; evicted_tokens; remaining; stopped_at = Some last }
     | (b : Keeper_model_input_ledger.block) :: rest ->
       let forced = at_least_one && evicted_blocks = 0 in
       let done_ =
@@ -33,7 +46,7 @@ let walk ~stop ~at_least_one ~(total : int option) (blocks : Keeper_model_input_
           not forced
       in
       if done_
-      then evicted_blocks, evicted_atoms, evicted_tokens, remaining
+      then { evicted_blocks; evicted_atoms; evicted_tokens; remaining; stopped_at = Some b }
       else (
         let atoms = b.block_end_atom - b.block_first_atom in
         match b.tokens with
@@ -47,40 +60,31 @@ let walk ~stop ~at_least_one ~(total : int option) (blocks : Keeper_model_input_
         | None ->
           (* Unknown size: it leaves whole, and nothing below it can be
              projected until the provider counts the next request. *)
-          evicted_blocks + 1, evicted_atoms + atoms, None, None)
+          go
+            ~evicted_blocks:(evicted_blocks + 1)
+            ~evicted_atoms:(evicted_atoms + atoms)
+            ~evicted_tokens:None
+            ~remaining:None
+            rest)
   in
   go ~evicted_blocks:0 ~evicted_atoms:0 ~evicted_tokens:(Some 0) ~remaining:total blocks
-;;
-
-let first_atom_after (blocks : Keeper_model_input_ledger.block list) ~evicted_blocks =
-  match List.nth_opt blocks evicted_blocks with
-  | Some (b : Keeper_model_input_ledger.block) -> b.block_first_atom
-  | None ->
-    (* Unreachable by construction: the walk never evicts the newest block,
-       so a block always remains. Fall through to the newest block's start
-       rather than raise from a pure decision. *)
-    (match List.rev blocks with
-     | (b : Keeper_model_input_ledger.block) :: _ -> b.block_first_atom
-     | [] -> 0)
 ;;
 
 let evict ~stop ~at_least_one (ledger : Keeper_model_input_ledger.t) =
   match ledger.blocks with
   | [] | [ _ ] -> Unchanged Nothing_evictable
   | blocks ->
-    let evicted_blocks, evicted_atoms, evicted_tokens, projected_total =
-      walk ~stop ~at_least_one ~total:ledger.total_tokens blocks
-    in
-    if evicted_blocks = 0
-    then Unchanged Nothing_evictable
-    else
-      Evicted
-        { evicted_blocks
-        ; evicted_atoms
-        ; evicted_tokens
-        ; first_atom = first_atom_after blocks ~evicted_blocks
-        ; projected_total
-        }
+    let w = walk ~stop ~at_least_one ~total:ledger.total_tokens blocks in
+    (match w.stopped_at with
+     | Some stopped_at when w.evicted_blocks > 0 ->
+       Evicted
+         { evicted_blocks = w.evicted_blocks
+         ; evicted_atoms = w.evicted_atoms
+         ; evicted_tokens = w.evicted_tokens
+         ; first_atom = stopped_at.block_first_atom
+         ; projected_total = w.remaining
+         }
+     | Some _ | None -> Unchanged Nothing_evictable)
 ;;
 
 let after_response ~(marks : Runtime_schema.context_marks) (ledger : Keeper_model_input_ledger.t) =

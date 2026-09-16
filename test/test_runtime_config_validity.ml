@@ -3068,11 +3068,56 @@ let test_runtime_toml_rejects_half_declared_context_marks () =
         true
         (List.exists
            (fun (err : Runtime_toml.parse_error) ->
-             String.ends_with ~suffix:path_suffix err.path)
+             String.equal err.path ("local.sample" ^ path_suffix))
            errs)
   in
   expect_error_at ~high:(Some 900) ~low:None ".context-low-water-tokens";
   expect_error_at ~high:None ~low:(Some 300) ".context-high-water-tokens"
+;;
+
+let test_runtime_toml_reports_both_mistyped_context_marks () =
+  let content =
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     is-default = true\n\
+     context-high-water-tokens = \"nine hundred\"\n\
+     context-low-water-tokens = \"three hundred\"\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n"
+  in
+  match Runtime_toml.parse_string content with
+  | Ok _ -> fail "strings are not token counts"
+  | Error errs ->
+    let names path =
+      List.exists (fun (err : Runtime_toml.parse_error) -> String.equal err.path path) errs
+    in
+    check bool "high-water error kept" true (names "local.sample.context-high-water-tokens");
+    check bool "low-water error kept" true (names "local.sample.context-low-water-tokens")
+;;
+
+let test_runtime_context_marks_failure_renders_both_numbers () =
+  let text =
+    Runtime.to_diagnostic_text
+      ~config_path:"runtime.toml"
+      (Runtime.Context_marks_exceed_max_context
+         { runtime_id = "local.sample"; high_water_tokens = 2_048; max_context = 1_024 })
+  in
+  let mentions needle =
+    let n = String.length needle and l = String.length text in
+    let rec go i = i + n <= l && (String.equal (String.sub text i n) needle || go (i + 1)) in
+    go 0
+  in
+  check bool "names the runtime" true (mentions "local.sample");
+  check bool "states the mark" true (mentions "2048");
+  check bool "states the model context" true (mentions "1024")
 ;;
 
 let test_runtime_toml_rejects_context_marks_out_of_order () =
@@ -3083,7 +3128,7 @@ let test_runtime_toml_rejects_context_marks_out_of_order () =
       check bool "error names the low-water key" true
         (List.exists
            (fun (err : Runtime_toml.parse_error) ->
-             String.ends_with ~suffix:".context-low-water-tokens" err.path)
+             String.equal err.path "local.sample.context-low-water-tokens")
            errs)
   in
   expect_refused ~high:500 ~low:500;
@@ -5556,6 +5601,10 @@ let () =
             test_runtime_toml_rejects_context_marks_out_of_order;
           test_case "context high-water above max-context is refused at load" `Quick
             test_runtime_refuses_context_marks_above_max_context;
+          test_case "both context marks mistyped report both keys" `Quick
+            test_runtime_toml_reports_both_mistyped_context_marks;
+          test_case "context marks failure renders its numbers" `Quick
+            test_runtime_context_marks_failure_renders_both_numbers;
           test_case "non-positive max-concurrent is rejected" `Quick
             test_runtime_toml_rejects_non_positive_max_concurrent;
           test_case "max-concurrent flows from binding to provider config" `Quick

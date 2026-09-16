@@ -1849,7 +1849,8 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
            (path ^ ".context-high-water-tokens")
            "context-low-water-tokens is declared, so context-high-water-tokens must be \
             declared too: it is where an eviction starts")
-    | Error e, (Ok _ | Error _) | Ok _, Error e -> Error e
+    | Error high_errors, Error low_errors -> Error (high_errors @ low_errors)
+    | Error e, Ok _ | Ok _, Error e -> Error e
   in
   (* Request-side output budget. AGENT_CORE omits the wire field when this is
      absent, so the provider's own default decides -- 65536 on ollama.com/v1,

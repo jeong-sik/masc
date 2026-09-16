@@ -155,12 +155,55 @@ let test_overflow_with_marks_walks_even_below_the_high_water () =
 
 let test_overflow_with_marks_but_unknown_total_takes_one_block () =
   let t = ledger measured_four in
-  let blocks, _, _, first_atom, projected =
+  let blocks, _, tokens, first_atom, projected =
     evicted (Range.after_overflow ~marks:(Some (marks ~high:1_000 ~low:400)) t)
   in
   check int "one block" 1 blocks;
+  check (option int) "its tokens were known" (Some 300) tokens;
   check int "front" 10 first_atom;
   check (option int) "nothing to project" None projected
+;;
+
+(* The shape every fresh ledger has: the cold-start block of unknown size in
+   front of measured ones. The first walk takes only it. *)
+let test_cold_start_block_first_leaves_alone_with_the_total_unknown () =
+  let t =
+    ledger
+      ~total:(Some 1_000)
+      [ block ~first:0 ~end_:10 None
+      ; block ~first:10 ~end_:20 (Some 300)
+      ; block ~first:20 ~end_:30 (Some 200)
+      ]
+  in
+  let blocks, atoms, tokens, first_atom, projected =
+    evicted (Range.after_response ~marks:(marks ~high:900 ~low:100) t)
+  in
+  check int "just the cold block" 1 blocks;
+  check int "its atoms" 10 atoms;
+  check (option int) "size unknown" None tokens;
+  check int "front after it" 10 first_atom;
+  check (option int) "total unknown until the next usage" None projected
+;;
+
+let test_total_at_the_high_water_mark_is_within () =
+  let t = ledger ~total:(Some 1_000) measured_four in
+  check reason "equal is within" Range.Within_high_water
+    (unchanged_reason (Range.after_response ~marks:(marks ~high:1_000 ~low:500) t))
+;;
+
+let test_landing_exactly_on_the_low_water_mark_stops () =
+  let t = ledger ~total:(Some 1_000) measured_four in
+  let blocks, _, _, _, projected =
+    evicted (Range.after_response ~marks:(marks ~high:950 ~low:450) t)
+  in
+  check int "two blocks bring it to 450" 2 blocks;
+  check (option int) "exactly the mark" (Some 450) projected
+;;
+
+let test_no_blocks_is_not_evictable () =
+  let t = ledger ~total:(Some 1_000) [] in
+  check reason "empty" Range.Nothing_evictable
+    (unchanged_reason (Range.after_response ~marks:(marks ~high:100 ~low:50) t))
 ;;
 
 let test_overflow_always_takes_at_least_one_block () =
@@ -184,6 +227,11 @@ let () =
         ; test_case "unknown block ends the walk" `Quick
             test_unknown_block_leaves_whole_and_ends_the_walk
         ; test_case "single block" `Quick test_single_block_is_not_evictable
+        ; test_case "cold block first" `Quick
+            test_cold_start_block_first_leaves_alone_with_the_total_unknown
+        ; test_case "total equal to high water" `Quick test_total_at_the_high_water_mark_is_within
+        ; test_case "landing on low water" `Quick test_landing_exactly_on_the_low_water_mark_stops
+        ; test_case "no blocks" `Quick test_no_blocks_is_not_evictable
         ] )
     ; ( "after_overflow"
       , [ test_case "no marks: one block" `Quick test_overflow_without_marks_takes_one_block

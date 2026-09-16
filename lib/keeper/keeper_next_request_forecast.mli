@@ -98,10 +98,12 @@ type slot =
 
 (** Where a candidate stands in the walk the next fresh cycle takes: the
     lane as declared with the sticky last-good candidate moved first
-    ({!Runtime_lane_preference.prefer_order}), then quota and backpressure
-    demotion ({!Keeper_turn_driver.assignment_walk_order}). A turn that
-    failed and deferred its input walks its remaining candidates instead;
-    that hint lives in the heartbeat loop and is not read here. *)
+    ({!Runtime_lane_preference.prefer_order_with}), then quota and
+    backpressure demotion ({!Keeper_turn_driver.assignment_walk_order}). Two
+    things the walk does are not forecast: a head replaced for an input
+    modality it cannot take (RFC-0265), and a turn that failed and deferred
+    its input, whose next cycle walks the remaining candidates instead;
+    that hint lives in the heartbeat loop. *)
 type place =
   { walks_at : int  (** 0 walks first. *)
   ; declared_at : int option
@@ -122,8 +124,15 @@ type walk =
   ; declared : string list  (** The lane as declared, head first. *)
   ; preferred : preferred option
         (** The lane's sticky last-good candidate, shared by every keeper the
-            lane routes; it walks first while it lasts. *)
+            lane routes, read from the same observation the order was; it
+            is a member of the candidates and walks first while it lasts. *)
   }
+
+type walk_refusal = Keeper_turn_driver.assignment_refusal
+(** The driver would not dispatch the assignment at all: no lane or runtime
+    of that id, or no capability catalog entry for it. *)
+
+val walk_refusal_to_string : walk_refusal -> string
 
 type candidate =
   { runtime_id : string
@@ -147,12 +156,12 @@ type t =
   ; wake_line_bytes : int
         (** The wake line as the composition's encoder counts it, the
             figure the assembly subtracts from the transmitted bytes. *)
-  ; walk : walk
+  ; walk : (walk, walk_refusal) result
   ; candidates : candidate list
         (** Every candidate of the keeper's lane, in the order the next
             fresh cycle walks them; each with its own ledger front and marks,
             and the seed the trace gives them alike when the pair has no
-            ledger. *)
+            ledger. Empty when [walk] is refused. *)
   }
 
 val forecast : config:Workspace.config -> keeper_name:string -> (t, string) result

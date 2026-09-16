@@ -131,7 +131,7 @@ type forecast_candidate =
 type forecast =
   { checkpoint_messages : int
   ; wake_line_bytes : int
-  ; walk : forecast_walk
+  ; walk : (forecast_walk, string) result
   ; candidates : forecast_candidate list
   }
 
@@ -649,6 +649,10 @@ let decode_forecast_preferred = function
   | _ -> Error "preferred is not an object or null"
 
 let decode_forecast_walk = function
+  | `Assoc fields when List.mem_assoc "refusal" fields ->
+    let* refusal_json = field "refusal" fields in
+    let* refusal = nonempty_string "walk.refusal" refusal_json in
+    Ok (Error refusal)
   | `Assoc fields ->
     let* lane_json = field "lane_id" fields in
     let* lane_id = nonempty_string "walk.lane_id" lane_json in
@@ -667,7 +671,7 @@ let decode_forecast_walk = function
     in
     let* preferred_json = field "preferred" fields in
     let* preferred = decode_forecast_preferred preferred_json in
-    Ok { lane_id; declared; preferred }
+    Ok (Ok { lane_id; declared; preferred })
   | _ -> Error "walk is not an object"
 
 let decode_forecast_lane = function

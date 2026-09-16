@@ -292,19 +292,48 @@ let deferred_lane_rest ~now hint =
 (* A fresh walk of an assignment, ordered as [run_named] orders a turn without
    a deferred suffix: sticky preference, then quota and backpressure demotion.
    An id that names no lane or runtime is its own single candidate. *)
+type walk_order =
+  { lane_id : string
+  ; declared : string list
+  ; order : string list
+  ; preferred : (string * float) option
+  }
+
+type assignment_refusal =
+  | Assignment_missing
+  | Catalog_unavailable of Runtime.missing_catalog_model
+
+let assignment_refusal_to_string = function
+  | Assignment_missing -> "the assignment names no configured lane or runtime"
+  | Catalog_unavailable missing ->
+    "capability catalog entry unavailable: " ^ Runtime.missing_catalog_model_to_string missing
+;;
+
 let assignment_walk_order ~now assignment_id =
   match Runtime.resolve_assignment assignment_id with
   | `Lane lane ->
     let lane_id = Runtime_lane.id lane in
-    Runtime_lane_preference.prefer_order ~lane_id (Runtime_lane.ordered_candidates lane)
-    |> quota_ordered_runtime_ids ~now
-  | `Unavailable _ | `Missing -> [ assignment_id ]
+    let declared = Runtime_lane.ordered_candidates lane in
+    let preferred_first, preferred =
+      Runtime_lane_preference.prefer_order_with ~lane_id declared
+    in
+    Ok
+      { lane_id
+      ; declared
+      ; order = quota_ordered_runtime_ids ~now preferred_first
+      ; preferred
+      }
+  | `Unavailable missing -> Error (Catalog_unavailable missing)
+  | `Missing -> Error Assignment_missing
 ;;
 
+(* An assignment the walk would refuse still names a path whose rest the
+   failure wait reads; it rests as its own single candidate. *)
 let assignment_walk_rest ~now assignment_id =
   match assignment_walk_order ~now assignment_id with
-  | [] -> Walk_head_serving { runtime_id = assignment_id }
-  | head :: later -> walk_rest ~now ~head ~later
+  | Ok { order = head :: later; _ } -> walk_rest ~now ~head ~later
+  | Ok { order = []; _ } | Error (Assignment_missing | Catalog_unavailable _) ->
+    Walk_head_serving { runtime_id = assignment_id }
 ;;
 
 (* The next dispatch after a failed turn, shared by the heartbeat cycle and

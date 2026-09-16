@@ -74,10 +74,11 @@ let measured : Inspector.forecast =
         }
       ]
   ; walk =
-      { lane_id = "ollama_cloud.deepseek-v4-1-flash"
-      ; declared = [ "ollama_cloud.deepseek-v4-1-flash" ]
-      ; preferred = None
-      }
+      Ok
+        { lane_id = "ollama_cloud.deepseek-v4-1-flash"
+        ; declared = [ "ollama_cloud.deepseek-v4-1-flash" ]
+        ; preferred = None
+        }
   }
 
 (* lane-smith at turn 3660: six history atoms ride between the fixed parts
@@ -442,20 +443,21 @@ let walked : Inspector.forecast =
   { checkpoint_messages = 6358
   ; wake_line_bytes = 131
   ; walk =
-      { lane_id = "glm-coding.glm-5.3-flash"
-      ; declared =
-          [ "glm-coding.glm-5.3-flash"
-          ; "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"
-          ; "kimi_coding.kimi-k3"
-          ; "claude_code.claude-sonnet-5"
-          ]
-      ; preferred =
-          Some
-            { preferred_runtime_id = "claude_code.claude-sonnet-5"
-            ; noted_at = 56_267.
-            ; ttl_s = 3600.
-            }
-      }
+      Ok
+        { lane_id = "glm-coding.glm-5.3-flash"
+        ; declared =
+            [ "glm-coding.glm-5.3-flash"
+            ; "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"
+            ; "kimi_coding.kimi-k3"
+            ; "claude_code.claude-sonnet-5"
+            ]
+        ; preferred =
+            Some
+              { preferred_runtime_id = "claude_code.claude-sonnet-5"
+              ; noted_at = 56_267.
+              ; ttl_s = 3600.
+              }
+        }
   ; candidates =
       [ candidate "claude_code.claude-sonnet-5"
           { walks_at = 0; declared_at = Some 3; rest = Inspector.Rest_serving }
@@ -531,7 +533,7 @@ let test_the_walk_and_the_place_decode () =
   in
   match Inspector.decode_forecast json with
   | Error detail -> Alcotest.fail ("the walk decodes: " ^ detail)
-  | Ok { walk; candidates = [ first; second ]; _ } ->
+  | Ok { walk = Ok walk; candidates = [ first; second ]; _ } ->
     Alcotest.(check bool) "the preferred candidate and its stamp" true
       (walk.preferred
        = Some { preferred_runtime_id = "b"; noted_at = 56_267.5; ttl_s = 3600. }
@@ -545,6 +547,25 @@ let test_the_walk_and_the_place_decode () =
     Alcotest.(check bool) "an undeclared id has no declared place" true
       (second.place = { walks_at = 1; declared_at = None; rest = Inspector.Rest_serving })
   | Ok _ -> Alcotest.fail "two candidates decode"
+
+(* An assignment the driver would refuse: the server says why, the band
+   names it in place of any candidate. *)
+let test_a_refused_walk_is_named_not_walked () =
+  let json =
+    Yojson.Safe.from_string
+      {|{"schema":"masc.keeper.next-request-forecast.v4","checkpoint_messages":7,"wake_line_bytes":131,
+         "walk":{"refusal":"the assignment names no configured lane or runtime"},"candidates":[]}|}
+  in
+  match Inspector.decode_forecast json with
+  | Error detail -> Alcotest.fail ("a refused walk decodes: " ^ detail)
+  | Ok ({ walk = Error refusal; candidates = []; _ } as forecast) ->
+    Alcotest.(check string) "the reason is the server's"
+      "the assignment names no configured lane or runtime" refusal;
+    let rows = lines (Ok forecast) in
+    Alcotest.(check bool) "the band names it" true
+      (says "Next request not walked: the assignment names no configured lane or runtime" rows);
+    Alcotest.(check bool) "and walks nothing" false (says "Walks " rows || says "Lane " rows)
+  | Ok _ -> Alcotest.fail "a refused walk reads as a refusal with no candidates"
 
 let () =
   Alcotest.run "tui_next_request_band"
@@ -589,5 +610,7 @@ let () =
         ; Alcotest.test_case "the old schema is refused" `Quick test_the_old_schema_is_refused
         ; Alcotest.test_case "the walk and the place decode" `Quick
             test_the_walk_and_the_place_decode
+        ; Alcotest.test_case "a refused walk is named, not walked" `Quick
+            test_a_refused_walk_is_named_not_walked
         ] )
     ]

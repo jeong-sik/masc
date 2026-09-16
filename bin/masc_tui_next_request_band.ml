@@ -32,7 +32,13 @@ let ordinal = function
   | 0 -> "first"
   | 1 -> "second"
   | 2 -> "third"
-  | n -> Printf.sprintf "%dth" (n + 1)
+  | n ->
+      let n = n + 1 in
+      let suffix =
+        if n mod 100 >= 11 && n mod 100 <= 13 then "th"
+        else (match n mod 10 with 1 -> "st" | 2 -> "nd" | 3 -> "rd" | _ -> "th")
+      in
+      Printf.sprintf "%d%s" n suffix
 ;;
 
 (* Why the candidate walks where it does: the lane's sticky last-good
@@ -167,18 +173,27 @@ let lines ~prose ~fact ~safe ~scale
   | Error detail ->
       [ Theme.bad () ^ "  Next request not forecast: " ^ safe detail ^ Ansi.reset ]
   | Ok forecast ->
-      List.concat_map
-        (candidate_lines ~prose ~fact ~safe ~scale ~walk:forecast.Inspector.walk)
-        forecast.Inspector.candidates
-      @ prose
+      let checkpoint =
+        prose
           (Printf.sprintf
              "%d messages in the checkpoint; the wake line adds %d bytes as the \
               newest atom."
              forecast.Inspector.checkpoint_messages forecast.Inspector.wake_line_bytes)
-      @ prose
-          (Printf.sprintf
-             "Lane %s: %d candidates in the order the next cycle walks them; a turn \
-              that failed and deferred its input walks its remaining candidates instead."
-             (safe forecast.Inspector.walk.lane_id)
-             (List.length forecast.Inspector.candidates))
+      in
+      (match forecast.Inspector.walk with
+       | Error refusal ->
+           [ Theme.bad () ^ "  Next request not walked: " ^ safe refusal ^ Ansi.reset ]
+           @ checkpoint
+       | Ok walk ->
+           List.concat_map
+             (candidate_lines ~prose ~fact ~safe ~scale ~walk)
+             forecast.Inspector.candidates
+           @ checkpoint
+           @ prose
+               (Printf.sprintf
+                  "Lane %s: %d candidates in the order the next cycle walks them; a turn \
+                   that failed and deferred its input walks its remaining candidates \
+                   instead."
+                  (safe walk.lane_id)
+                  (List.length forecast.Inspector.candidates)))
 ;;

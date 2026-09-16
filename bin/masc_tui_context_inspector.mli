@@ -204,7 +204,9 @@ type forecast_candidate =
 type forecast =
   { checkpoint_messages : int
   ; wake_line_bytes : int
-  ; walk : forecast_walk
+  ; walk : (forecast_walk, string) result
+        (** [Error] is the server's reason the driver would not dispatch the
+            assignment at all; the candidates are then empty. *)
   ; candidates : forecast_candidate list
         (** Every candidate of the keeper's lane, in the order the next
             fresh cycle walks them. *)

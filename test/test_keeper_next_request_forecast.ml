@@ -380,11 +380,12 @@ let test_the_json_carries_the_walk_and_each_place () =
     ; checkpoint_messages = 1
     ; wake_line_bytes = 131
     ; walk =
-        { lane_id = "glm"
-        ; declared = [ "glm"; "claude_code" ]
-        ; preferred =
-            Some { preferred_runtime_id = "claude_code"; noted_at = 56_267.; ttl_s = 3600. }
-        }
+        Ok
+          { lane_id = "glm"
+          ; declared = [ "glm"; "claude_code" ]
+          ; preferred =
+              Some { preferred_runtime_id = "claude_code"; noted_at = 56_267.; ttl_s = 3600. }
+          }
     ; candidates =
         [ candidate "claude_code"
             { walks_at = 0; declared_at = Some 1; rest = Keeper_turn_driver.Path_serving }
@@ -412,7 +413,14 @@ let test_the_json_carries_the_walk_and_each_place () =
   Alcotest.(check (list string)) "and whether its path rests" [ "serving"; "resting" ]
     (List.map (fun place -> place |> member "rest" |> member "kind" |> to_string) places);
   Alcotest.(check (float 0.)) "with the release when it does" 60_000.
-    (List.nth places 1 |> member "rest" |> member "release_at" |> to_number)
+    (List.nth places 1 |> member "rest" |> member "release_at" |> to_number);
+  let refused =
+    Keeper_next_request_forecast.to_json
+      { forecast with walk = Error Keeper_turn_driver.Assignment_missing; candidates = [] }
+  in
+  Alcotest.(check string) "a refused walk says why"
+    "the assignment names no configured lane or runtime"
+    (refused |> member "walk" |> member "refusal" |> to_string)
 
 let () =
   Alcotest.run "keeper_next_request_forecast"

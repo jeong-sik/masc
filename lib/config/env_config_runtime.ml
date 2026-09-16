@@ -113,7 +113,7 @@ module Orchestrator = struct
     max 0 (min 10 (get_int ~default:2 "MASC_ORCHESTRATOR_MIN_PRIORITY"))
 
   let enabled =
-    Feature_flag_registry.get_bool Env_config_core.orchestrator_enabled_env_key
+    get_bool ~default:false Env_config_core.orchestrator_enabled_env_key
 end
 
 (** {1 Local MODEL Server Configuration} *)
@@ -215,9 +215,12 @@ module Transport = struct
   (** gRPC server port. Default: 8936. *)
   let grpc_port = get_port ~default:8936 "MASC_GRPC_PORT"
 
-  (** Whether gRPC transport is enabled. Default: true.
+  (** Whether gRPC transport is enabled. Default: false since 2026-08-25 —
+      the transport-health projection reported subscribers 0 and
+      events_delivered 0 for the whole time it has been listening, while
+      websocket carries primary_path and SSE carries the broadcasts.
       Accessor-shaped reader; listener lifecycle is still decided at boot. *)
-  let grpc_enabled () = Feature_flag_registry.get_bool "MASC_GRPC_ENABLED"
+  let grpc_enabled () = get_bool ~default:false "MASC_GRPC_ENABLED"
 
   (** gRPC client target address. Derived from grpc_port when unset. *)
   let grpc_target_opt () =
@@ -225,12 +228,12 @@ module Transport = struct
 
   (** Whether WebSocket transport is enabled. Default: true.
       Accessor-shaped reader; listener lifecycle is still decided at boot. *)
-  let ws_enabled () = Feature_flag_registry.get_bool "MASC_WS_ENABLED"
+  let ws_enabled () = get_bool ~default:true "MASC_WS_ENABLED"
 
   (** Whether HTTP serving is isolated to a dedicated OCaml domain (RFC-0204 Phase 3).
       Default: false. *)
   let serving_domain_enabled () =
-    Feature_flag_registry.get_bool "MASC_SERVING_DOMAIN_ENABLED"
+    get_bool ~default:false "MASC_SERVING_DOMAIN_ENABLED"
 
   type h2_resolution =
     { value : h2_mode
@@ -275,14 +278,14 @@ module Transport = struct
 
   (** Force strict auth for all HTTP endpoints. Default: false.
 
-      Read through the flag registry, which is what the operator-facing flag
-      listing reports. A second reader here used Sys.getenv_opt directly with
-      its own case-sensitive spelling set, so MASC_HTTP_AUTH_STRICT=TRUE and any
-      boot override made the listing and the enforcement disagree. A malformed
+      Single reader for both the operator-facing listing and the enforcement.
+      A second reader using Sys.getenv_opt directly with its own case-sensitive
+      spelling set once made MASC_HTTP_AUTH_STRICT=TRUE and any boot override
+      turn the listing on while the enforcement stayed off. A malformed
       explicit value is rejected because falling back to [false] would disable
       the requested security policy. *)
   let http_auth_strict_env_enabled () =
-    Feature_flag_registry.get_bool_strict "MASC_HTTP_AUTH_STRICT"
+    get_bool_strict ~default:false "MASC_HTTP_AUTH_STRICT"
 
   (** Startup watchdog timeout, clamped to [30, 600]. Default: 240.
       Re-readable within the process, but operationally a boot-time input. *)
@@ -366,7 +369,7 @@ end
 module Worker = struct
   (** Enable local runtime debug logging. Default: false. *)
   let local_runtime_debug =
-    Feature_flag_registry.get_bool "MASC_LOCAL_RUNTIME_DEBUG"
+    get_bool ~default:false "MASC_LOCAL_RUNTIME_DEBUG"
 
   (** Local runtime cooldown (seconds). *)
   let local_runtime_cooldown_sec_opt () =

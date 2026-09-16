@@ -29,6 +29,14 @@ let tool_correction_lost_kind = "tool_correction_lost"
 let accept_rejected_kind = "accept_rejected"
 let terminal_effect_failed_kind = "terminal_effect_failed"
 
+(* Not exported: the five above are, because [test_keeper_terminal_reason_typed]
+   names them in its wire corpus. These two are not in that corpus -- it is
+   checked against a frozen string-policy oracle that predates the typed
+   enumeration and would read a new wire as [Unknown] -- so exporting them
+   would be surface nothing reads. *)
+let host_stopped_turn_kind = "host_stopped_turn"
+let runtime_connection_closed_kind = "runtime_connection_closed"
+
 type provider_rejection = {
   provider_label : string;
   reason : string;
@@ -199,6 +207,22 @@ let transcript_quarantine_reason_of_string = function
   | _ -> None
 ;;
 
+(* RFC-0454 P2. Which host decision stopped a running turn. See the .mli. *)
+type host_turn_stop =
+  | Host_graceful_shutdown
+  | Runtime_reported_interrupt
+
+let host_turn_stop_to_string = function
+  | Host_graceful_shutdown -> "host_graceful_shutdown"
+  | Runtime_reported_interrupt -> "runtime_reported_interrupt"
+;;
+
+let host_turn_stop_of_string = function
+  | "host_graceful_shutdown" -> Some Host_graceful_shutdown
+  | "runtime_reported_interrupt" -> Some Runtime_reported_interrupt
+  | _ -> None
+;;
+
 type gate_replay_repair_stage =
   | Replay_resolution_lookup
   | Replay_request_decode
@@ -309,6 +333,15 @@ and masc_internal_error =
       effect_disposition : Keeper_provider_attempt_effect_core.t;
       reject_count : int;
       cause : fenced_cause;
+    }
+  | Host_stopped_turn of {
+      runtime_id : string;
+      stop : host_turn_stop;
+    }
+  | Runtime_connection_closed of {
+      runtime_id : string;
+      detail : string;
+      turn_accepted : bool;
     }
   | Receipt_persistence_failed of {
       detail : string;
@@ -527,6 +560,19 @@ and masc_internal_error_to_json = function
       ; "reject_count", `Int reject_count
       ; "cause", fenced_cause_to_json cause
       ]
+  | Host_stopped_turn { runtime_id; stop } ->
+    `Assoc
+      [ "kind", `String host_stopped_turn_kind
+      ; "runtime_id", `String (runtime_id_to_string runtime_id)
+      ; "stop", `String (host_turn_stop_to_string stop)
+      ]
+  | Runtime_connection_closed { runtime_id; detail; turn_accepted } ->
+    `Assoc
+      [ "kind", `String runtime_connection_closed_kind
+      ; "runtime_id", `String (runtime_id_to_string runtime_id)
+      ; "detail", `String detail
+      ; "turn_accepted", `Bool turn_accepted
+      ]
   | Receipt_persistence_failed { detail } ->
     `Assoc
       [
@@ -662,6 +708,15 @@ let summary_of_masc_internal_error = function
          "Terminal tool effect failed (effect_disposition=%s): %s"
          (Tool_result.failure_effect_disposition_to_string effect_disposition)
          (Keeper_terminal_effect_detail.summary detail))
+  (* [None] for the same reason the two fences below are [None], and it is the
+     same reason for all four: a chat row's only carrier for the cause is its
+     text, and [Keeper_agent_error.user_message_of_core_error] puts a summary
+     there in place of the envelope the pane reads. Answering here would hand
+     the pane a sentence and take the value away, which is the exchange
+     RFC-0454 exists to undo. The row gets a typed [failure] field in P3
+     (RFC-0454 D3); these arms answer then. *)
+  | Host_stopped_turn _
+  | Runtime_connection_closed _
   | Resumable_cli_session _
   | Internal_unhandled_exception _
   | Internal_bridge_exception _
@@ -684,6 +739,8 @@ type wire_kind =
   | Wire_terminal_effect_failed
   | Wire_provider_attempt_effect_fenced
   | Wire_tool_correction_lost
+  | Wire_host_stopped_turn
+  | Wire_runtime_connection_closed
   | Wire_receipt_persistence_failed
   | Wire_gate_replay_repair_required
 
@@ -699,6 +756,8 @@ let wire_kind_of_masc_internal_error = function
   | Terminal_effect_failed _ -> Wire_terminal_effect_failed
   | Provider_attempt_effect_fenced _ -> Wire_provider_attempt_effect_fenced
   | Tool_correction_lost _ -> Wire_tool_correction_lost
+  | Host_stopped_turn _ -> Wire_host_stopped_turn
+  | Runtime_connection_closed _ -> Wire_runtime_connection_closed
   | Receipt_persistence_failed _ -> Wire_receipt_persistence_failed
   | Gate_replay_repair_required _ -> Wire_gate_replay_repair_required
 
@@ -714,6 +773,8 @@ let wire_kind_to_string = function
   | Wire_terminal_effect_failed -> terminal_effect_failed_kind
   | Wire_provider_attempt_effect_fenced -> provider_attempt_effect_fenced_kind
   | Wire_tool_correction_lost -> tool_correction_lost_kind
+  | Wire_host_stopped_turn -> host_stopped_turn_kind
+  | Wire_runtime_connection_closed -> runtime_connection_closed_kind
   | Wire_receipt_persistence_failed -> "receipt_persistence_failed"
   | Wire_gate_replay_repair_required -> "gate_replay_repair_required"
 
@@ -732,6 +793,8 @@ let all_wire_kinds =
   ; Wire_terminal_effect_failed
   ; Wire_provider_attempt_effect_fenced
   ; Wire_tool_correction_lost
+  ; Wire_host_stopped_turn
+  ; Wire_runtime_connection_closed
   ; Wire_receipt_persistence_failed
   ; Wire_gate_replay_repair_required
   ]
@@ -760,7 +823,9 @@ let runtime_id_of_masc_internal_error = function
   | Capacity_backpressure { runtime_id; _ }
   | Resumable_cli_session { runtime_id; _ }
   | Provider_attempt_effect_fenced { runtime_id; _ }
-  | Tool_correction_lost { runtime_id; _ } ->
+  | Tool_correction_lost { runtime_id; _ }
+  | Host_stopped_turn { runtime_id; _ }
+  | Runtime_connection_closed { runtime_id; _ } ->
       let runtime_id = runtime_id_to_string runtime_id in
       if String.equal (String.trim runtime_id) "" then "unknown"
       else runtime_id
@@ -840,6 +905,8 @@ let accept_no_progress_retry_kind = function
   | Terminal_effect_failed _
   | Provider_attempt_effect_fenced _
   | Tool_correction_lost _
+  | Host_stopped_turn _
+  | Runtime_connection_closed _
   | Receipt_persistence_failed _
   | Gate_replay_repair_required _ ->
     None
@@ -1100,6 +1167,30 @@ and parse_masc_internal_error_json (json : Yojson.Safe.t) :
                 Tool_correction_lost
                   { runtime_id; effect_disposition; reject_count; cause })
              (Keeper_provider_attempt_effect_core.of_string effect_disposition)
+         | _ -> None)
+      | Some (`String kind)
+        when String.equal kind host_stopped_turn_kind
+             && exact_fields [ "kind"; "runtime_id"; "stop" ] fields ->
+        (match
+           string_opt_of_assoc "runtime_id" json, string_opt_of_assoc "stop" json
+         with
+         | Some runtime_id, Some stop ->
+           Option.map
+             (fun stop -> Host_stopped_turn { runtime_id; stop })
+             (host_turn_stop_of_string stop)
+         | _ -> None)
+      | Some (`String kind)
+        when String.equal kind runtime_connection_closed_kind
+             && exact_fields
+                  [ "kind"; "runtime_id"; "detail"; "turn_accepted" ]
+                  fields ->
+        (match
+           string_opt_of_assoc "runtime_id" json,
+           string_opt_of_assoc "detail" json,
+           List.assoc_opt "turn_accepted" fields
+         with
+         | Some runtime_id, Some detail, Some (`Bool turn_accepted) ->
+           Some (Runtime_connection_closed { runtime_id; detail; turn_accepted })
          | _ -> None)
       | Some (`String "receipt_persistence_failed") -> (
           match string_opt_of_assoc "detail" json with

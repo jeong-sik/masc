@@ -151,7 +151,7 @@ post_get의 [masc:blob] 봉인 응답은 그 턴을 넘겨 다음 턴에 artifac
 - [x] "2건 기준" 철회 텍스트 → 사례 수 기반으로 전환 — 15:3xZ
 - [x] "시민=원장" 프레임 삽입 — 15:3xZ
 - [x] 제목·톤 확정(레인 배포용 지침 톤; lane-guide) — 04:3xZ, 운영자 답변(v03-title-tone=lane-guide) 반영
-- [ ] gih(run list) 재현 스크립트 첨부 여부
+- [x] gih(run list) 재현 스크립트 첨부 — scripts/ci/gh-run-logs.sh (run_id → job 목록 + 원문 로그; task-1595)
 - [x] Verdict: 문장형 정정 3종(4680-4682) 폐기 — 04:3xZ, 운영자 답변(v03-verdict-4680=drop) 반영. 4680-4682 원문이 기억 원장에서 관측 불가(자인 기록 4974)이므로 목록에서 제외·폐기 명시
 - [x] v0.2 → keeper.md PR 승격 — 16:34Z 완료 · https://github.com/jeong-sik/masc/pull/35249 (commit a4f8dc164)
 - [x] v0.3 → keeper.md PR 승격 — 04:3xZ 완료

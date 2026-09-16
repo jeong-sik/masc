@@ -226,8 +226,8 @@ against the recipe file. Overall mean **0.965**; seven sit below 0.95.
 `WorkSection` is `work | board | sub-boards | planning | repositories |
 verification`; the design's Work surface has three views (트리, 칸반, 검증) and
 no sections. So **four live routes are unmeasurable by this harness** —
-workspace/board, sub-boards, planning, repositories — along with monitoring/transport-health and monitoring/feature-health, both hidden
-diagnostics. Nothing is drifting there; the design simply does not draw them.
+workspace/board, sub-boards, planning, repositories — along with monitoring/transport-health, a hidden
+diagnostic. Nothing is drifting there; the design simply does not draw them.
 `design-parity-components.mjs` is the only signal these surfaces have.
 
 ### Design views the dashboard has no route for

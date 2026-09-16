@@ -79,7 +79,6 @@ type candidate =
   { runtime_id : string
   ; lane : (unit, lane_refusal) result
   ; marks : Runtime_schema.context_marks option
-  ; request_cap_bytes : int option
   ; parts : (measured_parts, parts_refusal) result
   ; history_atoms : int
   ; carried : carried option
@@ -98,65 +97,30 @@ let measure (message : Agent_core.Types.message) =
     (Yojson.Safe.to_string (Keeper_context_core.message_to_json message))
 ;;
 
-let carry ~measure ~front ~counted_tokens ~request_cap_bytes ~reserved_bytes messages =
-  let of_projection
-        (projection : Runtime_model_input_tail_window.projection)
-        ~transmitted_bytes
-        ~origin
-        ~counted_tokens
-    =
-    Some
-      { first_atom = projection.Runtime_model_input_tail_window.dropped_atoms
-      ; kept_atoms =
-          projection.Runtime_model_input_tail_window.atom_count
-          - projection.Runtime_model_input_tail_window.dropped_atoms
-      ; transmitted_bytes
-      ; origin
-      ; counted_tokens
-      }
+let carry ~measure ~front ~counted_tokens messages =
+  let _labelled, atom_count = Runtime_model_input_tail_window.annotate messages in
+  let first_atom, origin, counted_tokens =
+    match Option.bind front (Keeper_carried_front.for_history ~atom_count) with
+    | Some (seed : Keeper_carried_front.seed) ->
+      ( Keeper_carried_front.clamp ~atom_count seed.first_atom
+      , Keeper_carried_front.Carried seed.source
+      , counted_tokens )
+    | None -> 0, Keeper_carried_front.Whole_history, None
   in
-  match front, request_cap_bytes, reserved_bytes with
-  | Some (seed : Keeper_carried_front.seed), (Some _ | None), (Some _ | None) ->
-    let _labelled, atom_count = Runtime_model_input_tail_window.annotate messages in
-    let projection, transmitted_bytes =
-      Runtime_model_input_tail_window.project_from_atom
-        ~measure_message_bytes:measure
-        ~first_atom:(Keeper_carried_front.clamp ~atom_count seed.first_atom)
-        messages
-    in
-    of_projection
-      projection
-      ~transmitted_bytes
-      ~origin:(Keeper_carried_front.Carried seed.source)
-      ~counted_tokens
-  | None, Some cap, Some reserved_bytes ->
-    let target =
-      Runtime_model_input_tail_window.project_target
-        ~measure_message_bytes:measure
-        ~target_bytes:cap
-        ~reserved_bytes
-        messages
-    in
-    of_projection
-      target.Runtime_model_input_tail_window.projection
-      ~transmitted_bytes:target.Runtime_model_input_tail_window.transmitted_bytes
-      ~origin:Keeper_carried_front.Fit_to_request_cap
-      ~counted_tokens:None
-  | None, Some _, None ->
-    (* The cap fit charges the fixed parts, and they are unknown. *)
-    None
-  | None, None, (Some _ | None) ->
-    let projection, transmitted_bytes =
-      Runtime_model_input_tail_window.project_from_atom
-        ~measure_message_bytes:measure
-        ~first_atom:0
-        messages
-    in
-    of_projection
-      projection
-      ~transmitted_bytes
-      ~origin:Keeper_carried_front.Whole_history
-      ~counted_tokens:None
+  let projection, transmitted_bytes =
+    Runtime_model_input_tail_window.project_from_atom
+      ~measure_message_bytes:measure
+      ~first_atom
+      messages
+  in
+  { first_atom = projection.Runtime_model_input_tail_window.dropped_atoms
+  ; kept_atoms =
+      projection.Runtime_model_input_tail_window.atom_count
+      - projection.Runtime_model_input_tail_window.dropped_atoms
+  ; transmitted_bytes
+  ; origin
+  ; counted_tokens
+  }
 ;;
 
 (* Whether the turn driver would compose a range for this runtime at all.
@@ -171,23 +135,6 @@ let lane_for ~runtime_id (runtime : Runtime.t option) =
      | Runtime_execution.Claude_code _
      | Runtime_execution.Antigravity_cli _ -> Error (Not_agent_core { runtime_id })
      | Runtime_execution.Agent_core _ -> Ok ())
-;;
-
-(* The cap the driver judges the body against, read from the materialized
-   runtime the way [Runtime.keeper_dispatch_readiness] reads it. Only an
-   Agent Core runtime builds the request this bounds. *)
-let request_cap_for ~runtime_id (runtime : Runtime.t option) =
-  match runtime with
-  | None -> None
-  | Some runtime ->
-    (match runtime.Runtime.execution with
-     | Runtime_execution.Agent_core provider_config ->
-       (match Runtime.validate_request_body_cap ~runtime_id provider_config with
-        | Ok cap -> cap
-        | Error _ -> None)
-     | Runtime_execution.Codex_app_server _
-     | Runtime_execution.Claude_code _
-     | Runtime_execution.Antigravity_cli _ -> None)
 ;;
 
 type composition =
@@ -267,8 +214,9 @@ let record_runtime (record : Turn_record.t) =
 
 (* A keeper that calls tools on most turns leaves mostly post-tool records
    (lane-smith: one first-round record in thirteen on 2026-09-16), so the
-   read reaches back far enough to meet one. *)
-let recent_records_read = 200
+   read reaches back as far as the carried front's seed does, for the same
+   reason: most records are another lane's. *)
+let recent_records_read = Keeper_carried_front.records_read
 
 (* Every record with an exact composition is read; [select_parts] decides
    which lane and which completion each figure may come from. [finish_reason]
@@ -310,11 +258,10 @@ let wake_line () =
   , String.length text )
 ;;
 
-let candidate ~config ~keeper_name ~messages ~history_atoms runtime_id =
+let candidate ~config ~keeper_name ~trace_id ~messages ~history_atoms runtime_id =
   let runtime = Runtime.get_runtime_by_id runtime_id in
   let lane = lane_for ~runtime_id runtime in
   let parts = newest_parts_for ~config ~keeper_name ~runtime_id in
-  let request_cap_bytes = request_cap_for ~runtime_id runtime in
   let carried =
     match lane with
     | Error _ -> None
@@ -322,26 +269,19 @@ let candidate ~config ~keeper_name ~messages ~history_atoms runtime_id =
       (* The same front the turn driver composes from: the pair's ledger,
          else the newest completed record on the runtime. *)
       let front, counted_tokens =
-        match Keeper_model_input_ledger.Table.lookup ~keeper_name ~runtime_id with
+        match
+          Keeper_model_input_ledger.Table.lookup ~keeper_name ~runtime_id ~session_id:trace_id
+        with
         | Some ledger ->
           Some (Keeper_carried_front.of_ledger ledger), ledger.Keeper_model_input_ledger.total_tokens
-        | None -> Keeper_carried_front.read_seed ~config ~keeper_name ~runtime_id, None
+        | None ->
+          Keeper_carried_front.read_seed ~config ~keeper_name ~runtime_id ~trace_id, None
       in
-      carry
-        ~measure
-        ~front
-        ~counted_tokens
-        ~request_cap_bytes
-        ~reserved_bytes:
-          (match parts with
-           | Ok parts -> Some parts.reserved_bytes
-           | Error _ -> None)
-        messages
+      Some (carry ~measure ~front ~counted_tokens messages)
   in
   { runtime_id
   ; lane
   ; marks = Runtime.context_marks_of_runtime_id runtime_id
-  ; request_cap_bytes
   ; parts
   ; history_atoms
   ; carried
@@ -374,7 +314,7 @@ let forecast ~config ~keeper_name =
          ; checkpoint_messages = List.length history
          ; wake_line_bytes
          ; candidates =
-             [ candidate ~config ~keeper_name ~messages ~history_atoms runtime_id ]
+             [ candidate ~config ~keeper_name ~trace_id ~messages ~history_atoms runtime_id ]
          })
 ;;
 
@@ -409,7 +349,6 @@ let candidate_to_json (candidate : candidate) =
                ; "low_water_tokens", `Int marks.low_water_tokens
                ])
           candidate.marks )
-    ; "request_cap_bytes", option_json (fun n -> `Int n) candidate.request_cap_bytes
     ; ( "parts"
       , match candidate.parts with
         | Ok parts ->

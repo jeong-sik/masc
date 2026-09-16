@@ -51,7 +51,6 @@ let measured : Inspector.forecast =
       [ { runtime_id = "ollama_cloud.deepseek-v4-1-flash"
         ; lane = Inspector.Lane_agent_core
         ; marks = Some { high_water_tokens = 120_000; low_water_tokens = 80_000 }
-        ; request_cap_bytes = Some 524_288
         ; parts =
             Ok
               { reserved_measured_on_turn = 3581
@@ -80,9 +79,6 @@ let test_the_band_names_the_marks_and_the_range () =
   let rows = lines (Ok measured) in
   Alcotest.(check bool) "the marks are named in tokens" true
     (says "ollama_cloud.deepseek-v4-1-flash  \xc2\xb7  marks 120.0k / 80.0k tok" rows);
-  (* 524,288 / 3.39 = 154,657: the fleet scale. *)
-  Alcotest.(check bool) "the provider's body cap reads at the tab's scale" true
-    (says ("provider accepts up to " ^ approx ^ "154.7k tok") rows);
   (* 87,000 / 3.39 = 25,664; 237,000 / 3.39 = 69,912. *)
   Alcotest.(check bool) "the fixed parts and the pinned blocks each carry the turn they were read from"
     true
@@ -159,7 +155,7 @@ let test_a_cold_front_names_its_record_and_nothing_counted () =
     (says "front from turn #3581's record; nothing counted since the server started" rows);
   Alcotest.(check bool) "no count line" false (says "last counted" rows)
 
-let test_a_cap_fit_and_the_whole_history_say_why () =
+let test_the_whole_history_and_a_halved_front_say_why () =
   let with_origin origin =
     lines
       (Ok
@@ -173,10 +169,8 @@ let test_a_cap_fit_and_the_whole_history_say_why () =
               })
             measured))
   in
-  Alcotest.(check bool) "the cap fit" true
-    (says "the newest suffix the request cap admits" (with_origin Inspector.Carried_fit_to_request_cap));
   Alcotest.(check bool) "the whole history" true
-    (says "no front to start from and no cap: the whole history" (with_origin Inspector.Carried_whole_history));
+    (says "no front to start from: the whole history" (with_origin Inspector.Carried_whole_history));
   Alcotest.(check bool) "a halved front" true
     (says "front halved after a refusal (retry 2)"
        (with_origin (Inspector.Carried_halved_after_refusal { retry = 2 })))
@@ -205,7 +199,6 @@ let test_an_official_client_runtime_carries_no_range_and_says_why () =
           runtime_id = "claude_code.claude-sonnet-5"
         ; lane = Inspector.Lane_not_applicable reason
         ; marks = None
-        ; request_cap_bytes = None
         ; carried = None
         })
       measured
@@ -228,7 +221,6 @@ let test_the_forecast_decodes_the_servers_shape () =
          "candidates":[{"runtime_id":"ollama_cloud.deepseek-v4-1-flash",
            "lane":{"agent_core":true},
            "marks":{"high_water_tokens":120000,"low_water_tokens":80000},
-           "request_cap_bytes":524288,
            "parts":{"reserved_measured_on_turn":3581,"reserved_bytes":87000,
                     "pinned_measured_on_turn":3579,"pinned_measured_on_runtime":"ollama_cloud.deepseek-v4-1-flash",
                     "pinned_bytes":237000},
@@ -246,7 +238,7 @@ let test_null_marks_count_and_a_record_origin_decode () =
   let json =
     Yojson.Safe.from_string
       {|{"schema":"masc.keeper.next-request-forecast.v2","checkpoint_messages":1,"wake_line_bytes":131,
-         "candidates":[{"runtime_id":"r","lane":{"agent_core":true},"marks":null,"request_cap_bytes":null,
+         "candidates":[{"runtime_id":"r","lane":{"agent_core":true},"marks":null,
            "parts":{"error":"no completed turn on this runtime carried a composition in the newest 200 records"},
            "history_atoms":1,
            "carried":{"first_atom":0,"kept_atoms":1,"transmitted_bytes":300,
@@ -265,7 +257,6 @@ let test_null_marks_count_and_a_record_origin_decode () =
                   ; _
                   }
             ; parts = Error "no completed turn on this runtime carried a composition in the newest 200 records"
-            ; request_cap_bytes = None
             ; _
             }
           ]
@@ -279,7 +270,7 @@ let test_a_not_applicable_lane_decodes_as_such () =
       {|{"schema":"masc.keeper.next-request-forecast.v2","checkpoint_messages":1,"wake_line_bytes":131,
          "candidates":[{"runtime_id":"claude_code.claude-sonnet-5",
            "lane":{"not_applicable":"claude_code.claude-sonnet-5 is an official-client runtime"},
-           "marks":null,"request_cap_bytes":null,
+           "marks":null,
            "parts":{"reserved_measured_on_turn":4700,"reserved_bytes":194651,"pinned_measured_on_turn":4700,"pinned_measured_on_runtime":"claude_code.claude-sonnet-5","pinned_bytes":182167},
            "history_atoms":4429,"carried":null}]}|}
   in
@@ -296,7 +287,7 @@ let test_a_malformed_forecast_fails_the_reading () =
   let json =
     Yojson.Safe.from_string
       {|{"schema":"masc.keeper.next-request-forecast.v2","checkpoint_messages":1,"wake_line_bytes":131,
-         "candidates":[{"runtime_id":"r","lane":{"agent_core":true},"marks":null,"request_cap_bytes":null,
+         "candidates":[{"runtime_id":"r","lane":{"agent_core":true},"marks":null,
            "parts":{"error":"x"},"history_atoms":1,
            "carried":{"first_atom":0,"kept_atoms":1,"transmitted_bytes":300,"origin":{"kind":"sideways"},"counted_tokens":null}}]}|}
   in
@@ -324,8 +315,8 @@ let () =
             test_no_marks_says_only_a_refusal_moves_the_front
         ; Alcotest.test_case "a cold front names its record and nothing counted" `Quick
             test_a_cold_front_names_its_record_and_nothing_counted
-        ; Alcotest.test_case "a cap fit and the whole history say why" `Quick
-            test_a_cap_fit_and_the_whole_history_say_why
+        ; Alcotest.test_case "the whole history and a halved front say why" `Quick
+            test_the_whole_history_and_a_halved_front_say_why
         ; Alcotest.test_case "no range without the fixed parts is said" `Quick
             test_no_range_without_the_fixed_parts_is_said
         ; Alcotest.test_case "an official-client runtime carries no range and says why" `Quick

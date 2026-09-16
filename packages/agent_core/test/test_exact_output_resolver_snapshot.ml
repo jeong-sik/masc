@@ -72,7 +72,6 @@ let target_catalog
       ?(model = "snapshot-model")
       ?(target = "snapshot-target")
       ?enable_thinking
-      ?max_request_body_bytes
       ?connect_timeout_s
       ?body_timeout_s
       ?(json = true)
@@ -102,7 +101,7 @@ let target_catalog
      id = %S\n\
      provider_ref = %S\n\
      model_id = %S\n\
-     %s%s%s%s"
+     %s%s%s"
     provider
     (aliases_line aliases)
     kind
@@ -121,7 +120,6 @@ let target_catalog
     provider
     model
     (option_line "enable_thinking" string_of_bool enable_thinking)
-    (option_line "max_request_body_bytes" string_of_int max_request_body_bytes)
     (option_line "connect_timeout_s" toml_float connect_timeout_s)
     (option_line "body_timeout_s" toml_float body_timeout_s)
 ;;
@@ -843,7 +841,6 @@ let test_every_functional_projection_field_changes_generation () =
   let variants =
     [ "base URL", target_catalog ~base_url:"https://other.example" ()
     ; "request path", target_catalog ~request_path:"/v1/other" ()
-    ; "request body limit", target_catalog ~max_request_body_bytes:4096 ()
     ; "connect timeout", target_catalog ~connect_timeout_s:3.5 ()
     ; "body timeout", target_catalog ~body_timeout_s:9.5 ()
     ; "capability", target_catalog ~structured:true ()

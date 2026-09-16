@@ -7,11 +7,11 @@
     dispatches, advances a cursor, consumes a note, or moves the front.
 
     Live at the time of the call: the pair's ledger (process-local, absent
-    after a restart until the first counted usage), the binding's marks and
-    request-body cap, and the checkpoint. Without a ledger the front is the
+    after a restart until the first counted usage), the binding's marks, and
+    the checkpoint. Without a ledger the front is the
     range the newest completed turn record on the runtime measured, exactly
-    as the turn driver seeds it; without that the request is the newest
-    suffix the cap admits, or the whole history. As last measured, from turn
+    as the turn driver seeds it; without that the request is the whole
+    history and the provider judges it. As last measured, from turn
     records: [R] (tool schemas + keeper instructions) from the newest
     composition of a completed turn on the same runtime, because the tool
     surface is the lane's and an errored turn's record names the requested
@@ -70,14 +70,9 @@ type candidate =
   ; marks : Runtime_schema.context_marks option
         (** As the binding declares them; [None] leaves eviction to a
             refusal. *)
-  ; request_cap_bytes : int option
-        (** What the provider accepts; [None] when the binding declares none
-            or the runtime is not an Agent Core one. Judges, never shapes. *)
   ; parts : (measured_parts, parts_refusal) result
   ; history_atoms : int  (** Atoms in the checkpoint plus the wake line. *)
-  ; carried : carried option
-        (** [None] when [lane] is refused, or when no front is seeded and
-            the cap fit would need the refused [parts]. *)
+  ; carried : carried option  (** [None] when [lane] is refused. *)
   }
 
 type t =
@@ -98,14 +93,11 @@ val carry
   :  measure:(Agent_core.Types.message -> int)
   -> front:Keeper_carried_front.seed option
   -> counted_tokens:int option
-  -> request_cap_bytes:int option
-  -> reserved_bytes:int option
   -> Agent_core.Types.message list
-  -> carried option
+  -> carried
 (** The pure arithmetic, for tests: {!Runtime_model_input_tail_window.project_from_atom}
-    from the seeded front; without one, {!Runtime_model_input_tail_window.project_target}
-    at the cap with [reserved_bytes] taken off, which is [None] when those
-    bytes are unknown; without a cap, the whole history. *)
+    from the seeded front, once {!Keeper_carried_front.for_history} admits it
+    against this history; without one, the whole history. *)
 
 val measure : Agent_core.Types.message -> int
 (** Bytes of one message as the composition's encoder counts them. *)

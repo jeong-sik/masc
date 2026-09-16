@@ -1,8 +1,7 @@
 (* The forecast runs the turn's own composition forward. These cases pin
    the arithmetic on a synthetic history so the numbers are checkable by
-   hand: a seeded front carries everything from it, a front past the newest
-   atom still carries that atom, and without a front the request-body cap or
-   the whole history says what goes. *)
+   hand: a seeded front carries everything from it, a front the history
+   shrank under is dropped, and without a front everything goes. *)
 
 open Masc
 
@@ -20,59 +19,49 @@ let history ~exchanges ~text_bytes =
 let atom_bytes messages =
   List.fold_left (fun sum m -> sum + Keeper_next_request_forecast.measure m) 0 messages
 
-let seed first_atom : Keeper_carried_front.seed = { first_atom; source = Keeper_carried_front.Ledger }
+let seed ~atom_count first_atom : Keeper_carried_front.seed =
+  { first_atom; atom_count; source = Keeper_carried_front.Ledger }
 
-let carry ?front ?counted_tokens ?request_cap_bytes ?reserved_bytes messages =
+let carry ?front ?counted_tokens messages =
   Keeper_next_request_forecast.carry
     ~measure:Keeper_next_request_forecast.measure
     ~front
     ~counted_tokens
-    ~request_cap_bytes
-    ~reserved_bytes
     messages
 
-let carried = function
-  | Some (c : Keeper_next_request_forecast.carried) -> c
-  | None -> Alcotest.fail "a range was expected"
+let carried (c : Keeper_next_request_forecast.carried) = c
 
-(* Ten exchanges are ten atoms (an assistant message joins the user message
-   before it). A front at atom 6 carries the last four. *)
+(* Ten exchanges are twenty atoms: each [User] and [Assistant] message opens
+   one, and only [Tool] joins the assistant that issued it — the counting
+   [Runtime_model_input_tail_window.annotate] pins. A front at atom 6 carries
+   the last fourteen. *)
 let test_a_seeded_front_carries_everything_from_it () =
   let messages = history ~exchanges:10 ~text_bytes:100 in
-  let c = carried (carry ~front:(seed 6) ~counted_tokens:9_000 messages) in
+  let c = carried (carry ~front:(seed ~atom_count:10 6) ~counted_tokens:9_000 messages) in
   Alcotest.(check int) "front" 6 c.first_atom;
-  Alcotest.(check int) "four atoms" 4 c.kept_atoms;
+  Alcotest.(check int) "fourteen atoms" 14 c.kept_atoms;
   Alcotest.(check bool) "its bytes are a proper part of the history" true
     (c.transmitted_bytes > 0 && c.transmitted_bytes < atom_bytes messages);
   Alcotest.(check bool) "the origin is the seed's" true
     (c.origin = Keeper_carried_front.Carried Keeper_carried_front.Ledger);
   Alcotest.(check (option int)) "the count rides along" (Some 9_000) c.counted_tokens
 
-let test_a_front_past_the_newest_atom_still_carries_it () =
+(* The front was measured against 3,395 atoms; a purge left ten. The position
+   names nothing here, so the request starts over without a front. *)
+let test_a_front_the_history_shrank_under_is_dropped () =
   let messages = history ~exchanges:5 ~text_bytes:100 in
-  let c = carried (carry ~front:(seed 40) messages) in
-  Alcotest.(check int) "clamped to the newest atom" 4 c.first_atom;
-  Alcotest.(check int) "one atom" 1 c.kept_atoms
+  let c = carried (carry ~front:(seed ~atom_count:3_395 3_100) ~counted_tokens:91_000 messages) in
+  Alcotest.(check int) "from the first atom" 0 c.first_atom;
+  Alcotest.(check int) "all ten" 10 c.kept_atoms;
+  Alcotest.(check bool) "the origin says no front" true
+    (c.origin = Keeper_carried_front.Whole_history);
+  Alcotest.(check (option int)) "and no count rides along" None c.counted_tokens
 
-let test_without_a_front_the_cap_says_what_goes () =
-  let messages = history ~exchanges:5 ~text_bytes:100 in
-  let c = carried (carry ~request_cap_bytes:(atom_bytes messages / 2) ~reserved_bytes:0 messages) in
-  Alcotest.(check bool) "the origin is the cap fit" true
-    (c.origin = Keeper_carried_front.Fit_to_request_cap);
-  Alcotest.(check bool) "fewer than all, at least the newest" true
-    (c.kept_atoms >= 1 && c.kept_atoms < 5);
-  Alcotest.(check (option int)) "nothing counted" None c.counted_tokens
-
-let test_the_cap_fit_needs_the_fixed_parts () =
-  let messages = history ~exchanges:5 ~text_bytes:100 in
-  Alcotest.(check bool) "no reserved bytes, no range" true
-    (Option.is_none (carry ~request_cap_bytes:10_000 messages))
-
-let test_without_a_front_or_a_cap_everything_goes () =
+let test_without_a_front_everything_goes () =
   let messages = history ~exchanges:5 ~text_bytes:100 in
   let c = carried (carry messages) in
   Alcotest.(check int) "from the first atom" 0 c.first_atom;
-  Alcotest.(check int) "all five" 5 c.kept_atoms;
+  Alcotest.(check int) "all ten" 10 c.kept_atoms;
   Alcotest.(check bool) "the origin says so" true
     (c.origin = Keeper_carried_front.Whole_history)
 
@@ -228,13 +217,9 @@ let () =
     ; ( "carry"
       , [ Alcotest.test_case "a seeded front carries everything from it" `Quick
             test_a_seeded_front_carries_everything_from_it
-        ; Alcotest.test_case "a front past the newest atom still carries it" `Quick
-            test_a_front_past_the_newest_atom_still_carries_it
-        ; Alcotest.test_case "without a front the cap says what goes" `Quick
-            test_without_a_front_the_cap_says_what_goes
-        ; Alcotest.test_case "the cap fit needs the fixed parts" `Quick
-            test_the_cap_fit_needs_the_fixed_parts
-        ; Alcotest.test_case "without a front or a cap everything goes" `Quick
-            test_without_a_front_or_a_cap_everything_goes
+        ; Alcotest.test_case "a front the history shrank under is dropped" `Quick
+            test_a_front_the_history_shrank_under_is_dropped
+        ; Alcotest.test_case "without a front everything goes" `Quick
+            test_without_a_front_everything_goes
         ] )
     ]

@@ -398,13 +398,7 @@ let complete_stream_http
                   { reason =
                       "sync admitted body cannot be dispatched through the streaming path"
                   }))
-        (fun (http_codec, body_str) ->
-           match admitted_body with
-           | Some _ -> Ok (http_codec, body_str)
-           | None ->
-             Result.map
-               (fun final_body -> http_codec, final_body)
-               (admit_final_serialized_body ~config body_str))
+        (fun (http_codec, body_str) -> Ok (http_codec, body_str))
   in
   match request with
   | Error err -> Error err

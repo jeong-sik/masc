@@ -66,7 +66,6 @@ let replace
 let apply_disposition
       ~keepers_dir
       ?dropped_statements
-      ?(retained_memory_ids = [])
       ?(new_claims = [])
       ()
   =
@@ -76,7 +75,6 @@ let apply_disposition
     ~keeper_id:"keeper"
     ~now:200.0
     ~source:(source Current.Librarian)
-    ~retained_memory_ids
     ~new_claims
     ()
 ;;
@@ -1604,15 +1602,9 @@ let test_a_keeper_write_during_a_librarian_pass_keeps_both () =
      | Error detail ->
        check bool "and it says why" true
          (String_util.contains_substring detail "revision conflict"));
-    (* The decision itself carries no such demand: keep the one fact it saw,
-       and say nothing about the one it never saw. *)
-    let committed =
-      apply_disposition
-        ~keepers_dir
-        ~retained_memory_ids:[ Types.memory_id curated ]
-        ()
-      |> require_ok
-    in
+    (* The decision itself carries no such demand: retire nothing, and say
+       nothing about the fact it never saw. *)
+    let committed = apply_disposition ~keepers_dir () |> require_ok in
     check (list string)
       "both the curated fact and the one written during the pass survive"
       (List.sort compare (fact_ids [ curated; authored ]))

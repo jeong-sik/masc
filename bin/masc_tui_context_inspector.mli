@@ -99,8 +99,8 @@ type response_turn =
 
 (** What the next Agent Core request would carry, as the server computes it
     from the turn's own values without a turn
-    ([/api/v1/keepers/:name/next-request]). Live: the pair's carried front,
-    the binding's marks and the request-body cap. As last measured, with the
+    ([/api/v1/keepers/:name/next-request]). Live: the pair's carried front
+    and the binding's marks. As last measured, with the
     turn they were read from: the fixed prompt parts and the pinned blocks. *)
 type forecast_lane =
   | Lane_agent_core
@@ -132,9 +132,7 @@ type forecast_carried_origin =
   | Carried_from_turn_record of { turn : int }
       (** No ledger since the server started: the range that turn's record measured. *)
   | Carried_halved_after_refusal of { retry : int }
-  | Carried_fit_to_request_cap
-      (** No front to start from: the newest suffix the request cap admits. *)
-  | Carried_whole_history  (** No front and no cap. *)
+  | Carried_whole_history  (** No front to start from: everything. *)
 
 type forecast_carried =
   { first_atom : int
@@ -150,14 +148,11 @@ type forecast_candidate =
   ; lane : forecast_lane
   ; marks : forecast_marks option
         (** As the binding declares them; [None] leaves eviction to a refusal. *)
-  ; request_cap_bytes : int option
   ; parts : (forecast_parts, string) result
         (** [Error] is the server's reason: no composition on this runtime,
             or only post-tool ones, which carry no pinned block. *)
   ; history_atoms : int
-  ; carried : forecast_carried option
-        (** [None] when the lane is refused, or when the cap fit would need
-            the refused parts. *)
+  ; carried : forecast_carried option  (** [None] when the lane is refused. *)
   }
 
 type forecast =

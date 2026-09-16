@@ -677,27 +677,31 @@ let projection_reuses_candidate_measurements () =
     !raw_measurements
 ;;
 
-(* --- 7. Last resort: the newest atom does not fit (#28845) ------------- *)
+(* --- 7. Last resort: the newest atom alone was refused (#28845) --------- *)
 
 (* The alpha incident shape: parallel WebSearch results joined the assistant
-   atom that called them, and that one atom (indivisible to the tail window)
-   outgrew the whole history budget. Ordinary demotion cannot help — its
-   boundary excludes the current turn (RFC-0351 §4) — so composition refused
-   the turn outright. The last-resort path retries the composition once with
-   the boundary moved past the newest atom, and the turn's own results leave
-   as externalized markers instead of the turn failing. *)
+   atom that called them, and that one atom (indivisible to the range) was
+   refused on its own. Ordinary demotion cannot help — its boundary excludes
+   the current turn (RFC-0351 §4) — so the turn was stuck. The last resort,
+   armed by the refusal path once nothing can be evicted or halved, composes
+   one more request with the boundary moved past the newest atom, and the
+   turn's own results leave as externalized markers. *)
 module Try_provider = Masc.Keeper_turn_driver_try_provider
 
 (* The composition carries a range (RFC keeper-context-window-in-tokens
-   §10.4) and never refuses; the one axis on which it still reshapes a
-   request is the request-body cap. [wire_cap_bytes] is that cap, and
-   [front] is the oldest atom the range starts at. *)
-let compose ~base_path ~front ~wire_cap_bytes ~demote_before messages =
+   §10.4), never refuses, and measures the request against nothing;
+   [front] is the oldest atom the range starts at and [last_resort] is the
+   refusal path's arm. *)
+let compose ~base_path ~front ~last_resort ~demote_before messages =
   Try_provider.For_testing.compose_carried_model_input
     ~measure_message_bytes
-    ~front:(Some { Masc.Keeper_carried_front.first_atom = front; source = Masc.Keeper_carried_front.Ledger })
-    ~reserved_bytes:0
-    ~wire_cap_bytes
+    ~front:
+      (Some
+         { Masc.Keeper_carried_front.first_atom = front
+         ; atom_count = front + 1
+         ; source = Masc.Keeper_carried_front.Ledger
+         })
+    ~last_resort
     ~base_path
     ~demote_before
     messages
@@ -726,38 +730,20 @@ let oversized_newest_history () =
   earlier, earlier @ newest, bytes_of newest
 ;;
 
-let is_overrun_by_newest_atom (windowed : Window.target_projection) =
-  match windowed.Window.fit with
-  | Window.Overrun { cause = Window.Newest_atom_exceeds_target; _ } -> true
-  | Window.Overrun { cause = Window.Fixed_parts_exceed_target; _ } | Window.Within_target -> false
-;;
-
 let oversized_newest_atom_is_demoted_as_last_resort () =
-  let earlier, messages, newest_bytes = oversized_newest_history () in
-  (* The target admits the newest atom only demoted: the raw history budget is
-     exactly the atom's own bytes, which the charged preamble pushes over. The
-     request-body cap is the same size, so the raw view cannot be sent. *)
+  let earlier, messages, _ = oversized_newest_history () in
   let demote_before =
     Window.first_atom_at_or_after
       messages
       ~message_index:(List.length earlier)
   in
-  let store = Tool_blob_store.create ~base_path:(Filename.temp_dir "demote" "") in
-  let raw = Window.project_target ~measure_message_bytes ~target_bytes:newest_bytes ~reserved_bytes:0 messages in
-  Alcotest.(check bool)
-    "fixture: the newest atom alone passes a cap of its own bytes"
-    true
-    (is_overrun_by_newest_atom raw);
+  let base_path = Filename.temp_dir "demote" "" in
+  let store = Tool_blob_store.create ~base_path in
+  Alcotest.(check bool) "the probe says the newest atom carries demotable results" true
+    (Try_provider.For_testing.last_resort_demotes ~measure_message_bytes ~base_path messages);
   (* The range is the newest atom alone, as a walk that evicted every older
-     block leaves it. *)
-  let composed =
-    compose
-      ~base_path:(Filename.temp_dir "demote" "")
-      ~front:2
-      ~wire_cap_bytes:(Some newest_bytes)
-      ~demote_before
-      messages
-  in
+     block and a halving that reached one atom leave it. *)
+  let composed = compose ~base_path ~front:2 ~last_resort:true ~demote_before messages in
   Alcotest.(check int)
     "each of the newest atom's results is demoted"
     (List.length newest_bodies)
@@ -789,97 +775,52 @@ let oversized_newest_atom_is_demoted_as_last_resort () =
     (List.length (List.filter Tool_output.is_marker transmitted))
 ;;
 
-(* The last resort is not a blank cheque: an oversized atom with nothing
-   demotable in it is transmitted as it is, with the overrun on record, and
-   the wire is what refuses it. *)
-let oversized_atom_without_demotable_body_is_transmitted_with_its_overrun () =
+(* Without the arm, the current turn's own results stay verbatim whatever
+   their size: the boundary excludes them (RFC-0351 §4). *)
+let an_ordinary_composition_keeps_the_current_turn_verbatim () =
+  let earlier, messages, newest_bytes = oversized_newest_history () in
+  let demote_before =
+    Window.first_atom_at_or_after
+      messages
+      ~message_index:(List.length earlier)
+  in
+  let composed =
+    compose ~base_path:(Filename.temp_dir "demote" "") ~front:2 ~last_resort:false ~demote_before messages
+  in
+  Alcotest.(check int) "nothing is demoted" 0
+    (List.length composed.Try_provider.planned.Demotion.pending);
+  Alcotest.(check int) "the newest atom goes whole" newest_bytes composed.Try_provider.transmitted_bytes
+;;
+
+(* The last resort is not a blank cheque: an atom with nothing demotable in it
+   has nothing to arm, and the probe says so before a request is spent. *)
+let an_atom_without_demotable_body_arms_nothing () =
   let newest = [ assistant (String.make 50_000 'x') ] in
   let messages = history_with_tool_bodies [ "tick" ] @ newest in
-  let cap = bytes_of newest in
-  let composed =
-    compose
-      ~base_path:(Filename.temp_dir "demote" "")
-      ~front:1
-      ~wire_cap_bytes:(Some cap)
-      ~demote_before:1
-      messages
-  in
-  Alcotest.(check int) "an atom with no tool results plans nothing" 0
+  let base_path = Filename.temp_dir "demote" "" in
+  Alcotest.(check bool) "the probe answers no" false
+    (Try_provider.For_testing.last_resort_demotes ~measure_message_bytes ~base_path messages);
+  let composed = compose ~base_path ~front:1 ~last_resort:true ~demote_before:1 messages in
+  Alcotest.(check int) "and an armed composition plans nothing" 0
     (List.length composed.Try_provider.planned.Demotion.pending);
-  Alcotest.(check bool) "the cap overrun is on record" true composed.Try_provider.over_request_cap;
   Alcotest.(check int)
     "the newest atom is what is transmitted"
     (List.length newest + 1 (* the preamble: the kept head is an assistant *))
     (List.length composed.Try_provider.projection.Window.messages)
 ;;
 
-(* Without a blob store there is nothing a marker could reference, so the raw
-   view stands and the cap overrun says why. *)
+(* Without a blob store there is nothing a marker could reference. *)
 let last_resort_requires_a_blob_store () =
-  let earlier, messages, newest_bytes = oversized_newest_history () in
-  let demote_before =
-    Window.first_atom_at_or_after
-      messages
-      ~message_index:(List.length earlier)
-  in
-  let composed =
-    compose ~base_path:"" ~front:2 ~wire_cap_bytes:(Some newest_bytes) ~demote_before messages
-  in
+  let _, messages, _ = oversized_newest_history () in
+  Alcotest.(check bool) "the probe answers no without a store" false
+    (Try_provider.For_testing.last_resort_demotes ~measure_message_bytes ~base_path:"" messages);
+  let composed = compose ~base_path:"" ~front:2 ~last_resort:true ~demote_before:2 messages in
   Alcotest.(check int) "nothing is planned without a store" 0
-    (List.length composed.Try_provider.planned.Demotion.pending);
-  Alcotest.(check bool) "the cap overrun is on record" true composed.Try_provider.over_request_cap
+    (List.length composed.Try_provider.planned.Demotion.pending)
 ;;
 
-(* The last resort answers the cap alone: a newest atom the cap carries is
-   transmitted whole, its results verbatim, whatever its size. *)
-let a_range_under_the_cap_demotes_nothing () =
-  let earlier, messages, newest_bytes = oversized_newest_history () in
-  let demote_before =
-    Window.first_atom_at_or_after
-      messages
-      ~message_index:(List.length earlier)
-  in
-  let composed =
-    compose
-      ~base_path:(Filename.temp_dir "demote" "")
-      ~front:2
-      ~wire_cap_bytes:(Some (newest_bytes * 4))
-      ~demote_before
-      messages
-  in
-  Alcotest.(check int) "the cap carries the view, so nothing is demoted" 0
-    (List.length composed.Try_provider.planned.Demotion.pending);
-  Alcotest.(check bool) "and nothing passes the cap" false composed.Try_provider.over_request_cap
-;;
-
-(* A range wider than the newest atom that passes the cap is not the last
-   resort's business: the wire refuses it and the refusal moves the front. *)
-let a_wider_range_over_the_cap_is_left_to_the_refusal () =
-  let earlier, messages, newest_bytes = oversized_newest_history () in
-  let demote_before =
-    Window.first_atom_at_or_after
-      messages
-      ~message_index:(List.length earlier)
-  in
-  let composed =
-    compose
-      ~base_path:(Filename.temp_dir "demote" "")
-      ~front:0
-      ~wire_cap_bytes:(Some newest_bytes)
-      ~demote_before
-      messages
-  in
-  Alcotest.(check int) "the older atoms carry nothing demotable, so nothing is planned" 0
-    (List.length composed.Try_provider.planned.Demotion.pending);
-  Alcotest.(check int) "the whole range goes" 3
-    (composed.Try_provider.history_atom_count
-     - composed.Try_provider.projection.Window.dropped_atoms);
-  Alcotest.(check bool) "over the cap, on record" true composed.Try_provider.over_request_cap
-;;
-
-(* Demotion can shrink an atom only down to its non-demotable residue. When
-   that residue alone exceeds the cap, the demoted view is transmitted and
-   the cap refusal is what stands. *)
+(* Demotion can shrink an atom only down to its non-demotable residue. The
+   demoted view goes out and the provider judges it. *)
 let still_oversized_after_demotion_is_transmitted_demoted () =
   let earlier = history_with_tool_bodies [ "tick" ] in
   let residue = assistant (String.make 50_000 'x') in
@@ -890,32 +831,38 @@ let still_oversized_after_demotion_is_transmitted_demoted () =
        ]
   in
   let messages = earlier @ newest in
-  let _, atom_count = Window.annotate messages in
-  (* [plan] is pure, so this probe is exactly the plan the last-resort arm
-     computes: it proves the composition took the demotion branch. *)
-  let probe =
-    Demotion.plan ~measure_message_bytes ~demote_before:atom_count messages
-  in
-  Alcotest.(check int)
-    "the atom carries demotable results, so the last resort planned demotions"
-    2
-    (List.length probe.Demotion.pending);
-  (* The cap admits neither the raw atom nor its demoted residue. *)
-  let cap = bytes_of [ residue ] in
   let composed =
-    compose
-      ~base_path:(Filename.temp_dir "demote" "")
-      ~front:1
-      ~wire_cap_bytes:(Some cap)
-      ~demote_before:1
-      messages
+    compose ~base_path:(Filename.temp_dir "demote" "") ~front:1 ~last_resort:true ~demote_before:1 messages
   in
   Alcotest.(check int) "both results were demoted" 2
     (List.length composed.Try_provider.planned.Demotion.pending);
-  Alcotest.(check bool) "the demoted view still passes the cap" true
-    composed.Try_provider.over_request_cap;
   Alcotest.(check bool) "the demoted view is smaller than the raw atom" true
     (composed.Try_provider.transmitted_bytes < bytes_of newest)
+;;
+
+(* A front measured against a longer history names no atom of this one: the
+   composition starts over without it and says which seed it dropped. *)
+let a_front_the_history_shrank_under_starts_over () =
+  let _, messages, _ = oversized_newest_history () in
+  let composed =
+    Try_provider.For_testing.compose_carried_model_input
+      ~measure_message_bytes
+      ~front:
+        (Some
+           { Masc.Keeper_carried_front.first_atom = 3_100
+           ; atom_count = 3_395
+           ; source = Masc.Keeper_carried_front.Ledger
+           })
+      ~last_resort:false
+      ~base_path:""
+      ~demote_before:0
+      messages
+  in
+  Alcotest.(check bool) "the whole history goes" true
+    (composed.Try_provider.origin = Masc.Keeper_carried_front.Whole_history);
+  Alcotest.(check int) "nothing dropped" 0 composed.Try_provider.projection.Window.dropped_atoms;
+  Alcotest.(check bool) "the dropped seed is on record" true
+    (Option.is_some composed.Try_provider.outlived_seed)
 ;;
 
 let () =
@@ -978,25 +925,25 @@ let () =
             `Quick
             oversized_newest_atom_is_demoted_as_last_resort
         ; Alcotest.test_case
-            "oversized atom without a demotable body is transmitted with its overrun"
+            "an ordinary composition keeps the current turn verbatim"
             `Quick
-            oversized_atom_without_demotable_body_is_transmitted_with_its_overrun
+            an_ordinary_composition_keeps_the_current_turn_verbatim
+        ; Alcotest.test_case
+            "an atom without a demotable body arms nothing"
+            `Quick
+            an_atom_without_demotable_body_arms_nothing
         ; Alcotest.test_case
             "last resort requires a blob store"
             `Quick
             last_resort_requires_a_blob_store
         ; Alcotest.test_case
-            "a range under the cap demotes nothing"
-            `Quick
-            a_range_under_the_cap_demotes_nothing
-        ; Alcotest.test_case
-            "a wider range over the cap is left to the refusal"
-            `Quick
-            a_wider_range_over_the_cap_is_left_to_the_refusal
-        ; Alcotest.test_case
             "still oversized after demotion is transmitted demoted"
             `Quick
             still_oversized_after_demotion_is_transmitted_demoted
+        ; Alcotest.test_case
+            "a front the history shrank under starts over"
+            `Quick
+            a_front_the_history_shrank_under_starts_over
         ] )
     ; ( "measurement"
       , [ Alcotest.test_case

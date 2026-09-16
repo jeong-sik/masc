@@ -379,21 +379,24 @@ let test_move_front_inside_a_block_restarts_the_blocks () =
 
 let test_table_move_front_moves_the_pairs_ledger () =
   Ledger.Table.For_testing.reset ();
-  let keeper_name = "alpha" and runtime_id = "r" in
+  let keeper_name = "alpha" and runtime_id = "r" and session_id = "trace-1" in
   (* No ledger yet: nothing to move, nothing written. *)
-  Ledger.Table.move_front ~keeper_name ~runtime_id ~first_atom:5;
+  Ledger.Table.move_front ~keeper_name ~runtime_id ~session_id ~first_atom:5;
   check bool "no ledger appears from a move" true
-    (Option.is_none (Ledger.Table.lookup ~keeper_name ~runtime_id));
+    (Option.is_none (Ledger.Table.lookup ~keeper_name ~runtime_id ~session_id));
   let _ =
-    Ledger.Table.observe ~keeper_name ~runtime_id
+    Ledger.Table.observe ~keeper_name ~runtime_id ~session_id
       ~request:(request ~first_atom:0 ~atom_count:10 ()) ~usage:(Some (usage 1_000))
   in
   let _ =
-    Ledger.Table.observe ~keeper_name ~runtime_id
+    Ledger.Table.observe ~keeper_name ~runtime_id ~session_id
       ~request:(request ~first_atom:0 ~atom_count:14 ()) ~usage:(Some (usage 1_400))
   in
-  Ledger.Table.move_front ~keeper_name ~runtime_id ~first_atom:10;
-  match Ledger.Table.lookup ~keeper_name ~runtime_id with
+  (* Another session of the same keeper and runtime is another history. *)
+  check bool "a recovery session reads no front from the keeper's turns" true
+    (Option.is_none (Ledger.Table.lookup ~keeper_name ~runtime_id ~session_id:"recovery-1"));
+  Ledger.Table.move_front ~keeper_name ~runtime_id ~session_id ~first_atom:10;
+  match Ledger.Table.lookup ~keeper_name ~runtime_id ~session_id with
   | None -> fail "the ledger stays"
   | Some t ->
     check int "the next request composes from the new front" 10 t.last.first_atom;
@@ -403,7 +406,10 @@ let test_table_move_front_moves_the_pairs_ledger () =
     Ledger.Table.For_testing.reset ()
 ;;
 
+(* The pair table sits behind an Eio mutex, so the table tests need a
+   running scheduler. *)
 let () =
+  Eio_main.run @@ fun _ ->
   run
     "keeper_model_input_ledger"
     [ ( "difference"

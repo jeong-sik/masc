@@ -518,7 +518,6 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx ?repeat_penalty
     ?max_tokens
     ?repeat_last_n ?return_progress
     ?max_concurrent_requests
-    ?max_request_body_bytes
     (provider : Runtime_schema.provider) (spec : Runtime_schema.model_spec)
   : (Llm_provider.Provider_config.t, string) result =
   let ( let* ) = Result.bind in
@@ -614,7 +613,6 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx ?repeat_penalty
             ?return_progress
             ?connect_timeout_s:provider.connect_timeout_s
             ?max_concurrent_requests
-            ?max_request_body_bytes
             ?max_tokens
             ())
      | Error reason -> Error reason)
@@ -664,7 +662,6 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx ?repeat_penalty
             ?return_progress
             ?connect_timeout_s:provider.connect_timeout_s
             ?max_concurrent_requests
-            ?max_request_body_bytes
             ?max_tokens
             ())
      | Error reason -> Error reason)
@@ -695,7 +692,6 @@ let binding_to_provider_config (cfg : Runtime_schema.config) (binding : Runtime_
          ?repeat_last_n:binding.repeat_last_n
          ?return_progress:binding.return_progress
          ?max_concurrent_requests:binding.max_concurrent
-         ?max_request_body_bytes:binding.max_request_body_bytes
          ?max_tokens:binding.max_tokens
          provider
          spec)

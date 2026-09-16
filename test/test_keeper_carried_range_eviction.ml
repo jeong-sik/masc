@@ -14,11 +14,11 @@ let overflow =
   Agent_core.Error.Api (Agent_core.Retry.ContextOverflow { message = "too long"; limit = None })
 ;;
 
-let body_too_large =
+let body_refused_by_provider =
   Agent_core.Error.Api
     (Agent_core.Retry.InvalidRequest
        { message = "too large"
-       ; reason = Agent_core.Retry.Request_body_too_large { actual_bytes = 10; limit_bytes = 5 }
+       ; reason = Agent_core.Retry.Request_body_refused_by_provider { status = 413 }
        })
 ;;
 
@@ -58,6 +58,7 @@ let run
       ?(gate = fun () -> true)
       ?marks
       ?(last_request = fun () -> None)
+      ?(last_resort = fun ~retry:_ -> false)
       ~ledger_of
       outcomes
   =
@@ -71,7 +72,9 @@ let run
       ~evict:(function
         | Range.Evicted { first_atom; _ } -> trace.evictions <- first_atom :: trace.evictions
         | Range.Unchanged _ -> ())
-      ~halve:(fun ~first_atom ~retry -> trace.halvings <- (first_atom, retry) :: trace.halvings)
+      ~halve:(fun ~first_atom ~atom_count:_ ~retry ->
+        trace.halvings <- (first_atom, retry) :: trace.halvings)
+      ~last_resort
       ~on_retry:(fun ~retry _ -> trace.retries <- retry)
       ~attempt:(fun () ->
         let index = min trace.attempts (List.length outcomes - 1) in
@@ -107,7 +110,10 @@ let test_an_overflow_evicts_the_oldest_block_and_asks_again () =
   let moved = ledger [ block ~first:10 ~end_:20 (Some 250); block ~first:20 ~end_:30 (Some 200); block ~first:30 ~end_:40 (Some 150) ] in
   let outcome, trace =
     run
-      ~ledger_of:(fun attempts -> if attempts = 0 then Some four_blocks else Some moved)
+      (* A refusal counts no usage, so the ledger it reads is still the one
+         the refused request was composed from. [moved] is what a later
+         refusal would see, after [evict] applied the walk. *)
+      ~ledger_of:(fun attempts -> if attempts <= 1 then Some four_blocks else Some moved)
       [ Error overflow; Ok "fits" ]
   in
   check (result string reject) "the retry answered" (Ok "fits") outcome;
@@ -127,7 +133,7 @@ let test_with_marks_the_refusal_walks_down_to_the_low_water_mark () =
 ;;
 
 let test_a_body_refusal_evicts_like_an_overflow () =
-  let _, trace = run ~ledger_of:(fun _ -> Some four_blocks) [ Error body_too_large; Ok "fits" ] in
+  let _, trace = run ~ledger_of:(fun _ -> Some four_blocks) [ Error body_refused_by_provider; Ok "fits" ] in
   check (list int) "the wire's refusal moved the front" [ 10 ] trace.evictions
 ;;
 
@@ -143,21 +149,55 @@ let test_a_single_block_halves_the_last_request () =
   check (list (pair int int)) "halfway to the newest atom, retry 1" [ 20, 1 ] trace.halvings
 ;;
 
+(* The caller composes the next request from the halved front, so the
+   request the policy reads back moves with each halving: 0 → 8 → 12 of 16. *)
 let test_without_a_ledger_the_range_halves_until_it_fits () =
   let front = ref 0 in
-  let _, trace =
-    run
-      ~ledger_of:(fun _ -> None)
+  let trace = { attempts = 0; evictions = []; halvings = []; retries = 0 } in
+  let outcomes = [ Error overflow; Error overflow; Ok "fits" ] in
+  let outcome =
+    Try_provider.carried_range_eviction_sequence
+      ~same_run_retry_authorized:(fun () -> true)
+      ~ledger:(fun () -> None)
       ~last_request:(fun () -> Some (request ~first_atom:!front ~atom_count:16))
-      [ Error overflow; Error overflow; Ok "fits" ]
+      ~marks:None
+      ~evict:(fun _ -> ())
+      ~halve:(fun ~first_atom ~atom_count:_ ~retry ->
+        front := first_atom;
+        trace.halvings <- (first_atom, retry) :: trace.halvings)
+      ~last_resort:(fun ~retry:_ -> false)
+      ~on_retry:(fun ~retry _ -> trace.retries <- retry)
+      ~attempt:(fun () ->
+        let index = min trace.attempts (List.length outcomes - 1) in
+        trace.attempts <- trace.attempts + 1;
+        List.nth outcomes index)
+      ()
   in
-  ignore front;
-  (* The policy reads the last request as the caller composed it; here the
-     caller does not move it, so each halving is computed from the same
-     range. The sequence still asks three times and records two halvings. *)
+  check (result string reject) "the third request fits" (Ok "fits") outcome;
   check int "three attempts" 3 trace.attempts;
-  check int "two retries" 2 trace.retries;
-  check (list (pair int int)) "both halvings, newest first" [ 8, 2; 8, 1 ] trace.halvings
+  check (list (pair int int)) "halfway, then halfway again, newest first" [ 12, 2; 8, 1 ] trace.halvings
+;;
+
+let test_halving_ends_at_one_atom_when_every_request_is_refused () =
+  let front = ref 0 in
+  let attempts = ref 0 in
+  let outcome =
+    Try_provider.carried_range_eviction_sequence
+      ~same_run_retry_authorized:(fun () -> true)
+      ~ledger:(fun () -> None)
+      ~last_request:(fun () -> Some (request ~first_atom:!front ~atom_count:16))
+      ~marks:None
+      ~evict:(fun _ -> ())
+      ~halve:(fun ~first_atom ~atom_count:_ ~retry:_ -> front := first_atom)
+      ~last_resort:(fun ~retry:_ -> false)
+      ~on_retry:(fun ~retry:_ _ -> ())
+      ~attempt:(fun () -> incr attempts; Error overflow)
+      ()
+  in
+  check bool "the refusal stands" true (Result.is_error outcome);
+  (* 0 → 8 → 12 → 14 → 15: four halvings, five requests, then one atom. *)
+  check int "five attempts" 5 !attempts;
+  check int "the front ends on the newest atom" 15 !front
 ;;
 
 let test_a_single_atom_ends_the_sequence_with_the_refusal () =
@@ -194,12 +234,57 @@ let test_a_refusal_that_survives_the_newest_block_is_returned () =
   let one = ledger [ block ~first:10 ~end_:20 (Some 250) ] in
   let outcome, trace =
     run
-      ~ledger_of:(fun attempts -> if attempts = 0 then Some two else Some one)
+      (* The first refusal reads [two] — a refusal moves nothing by itself —
+         and only after [evict] applied the walk does the second refusal see
+         [one]. *)
+      ~ledger_of:(fun attempts -> if attempts <= 1 then Some two else Some one)
       [ Error overflow; Error overflow; Ok "never" ]
   in
   check bool "the refusal stands" true (Result.is_error outcome);
   check int "two attempts" 2 trace.attempts;
   check (list int) "one eviction" [ 10 ] trace.evictions
+;;
+
+(* The newest atom alone was refused: the last resort arms one more request
+   and the sequence asks again. *)
+let test_a_refused_single_atom_arms_the_last_resort_once () =
+  let armed = ref 0 in
+  let outcome, trace =
+    run
+      ~ledger_of:(fun _ -> None)
+      ~last_request:(fun () -> Some (request ~first_atom:15 ~atom_count:16))
+      ~last_resort:(fun ~retry:_ -> incr armed; !armed = 1)
+      [ Error overflow; Ok "demoted and accepted" ]
+  in
+  check (result string reject) "the demoted request answered" (Ok "demoted and accepted") outcome;
+  check int "two attempts" 2 trace.attempts;
+  check int "armed once" 1 !armed
+;;
+
+let test_the_last_resort_is_used_once_then_the_refusal_stands () =
+  let asked = ref 0 in
+  let outcome, trace =
+    run
+      ~ledger_of:(fun _ -> None)
+      ~last_request:(fun () -> Some (request ~first_atom:15 ~atom_count:16))
+      ~last_resort:(fun ~retry:_ -> incr asked; !asked = 1)
+      [ Error overflow; Error overflow; Ok "never" ]
+  in
+  check bool "the refusal stands" true (Result.is_error outcome);
+  check int "two attempts" 2 trace.attempts;
+  check int "asked twice, armed once" 2 !asked
+;;
+
+let test_nothing_to_demote_ends_the_sequence () =
+  let outcome, trace =
+    run
+      ~ledger_of:(fun _ -> None)
+      ~last_request:(fun () -> Some (request ~first_atom:15 ~atom_count:16))
+      ~last_resort:(fun ~retry:_ -> false)
+      [ Error overflow; Ok "never" ]
+  in
+  check bool "the refusal stands" true (Result.is_error outcome);
+  check int "one attempt" 1 trace.attempts
 ;;
 
 let () =
@@ -215,7 +300,13 @@ let () =
         ; test_case "body refusal evicts" `Quick test_a_body_refusal_evicts_like_an_overflow
         ; test_case "single block halves" `Quick test_a_single_block_halves_the_last_request
         ; test_case "no ledger halves" `Quick test_without_a_ledger_the_range_halves_until_it_fits
+        ; test_case "halving ends at one atom" `Quick
+            test_halving_ends_at_one_atom_when_every_request_is_refused
         ; test_case "single atom ends" `Quick test_a_single_atom_ends_the_sequence_with_the_refusal
+        ; test_case "single atom arms the last resort" `Quick
+            test_a_refused_single_atom_arms_the_last_resort_once
+        ; test_case "last resort once" `Quick test_the_last_resort_is_used_once_then_the_refusal_stands
+        ; test_case "nothing to demote" `Quick test_nothing_to_demote_ends_the_sequence
         ; test_case "nothing to move ends" `Quick test_no_ledger_and_no_request_ends_the_sequence
         ; test_case "gate" `Quick test_the_gate_blocks_a_retry_after_a_durable_checkpoint
         ; test_case "refusal past the newest block" `Quick

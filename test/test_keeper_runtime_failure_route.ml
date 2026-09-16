@@ -118,7 +118,6 @@ let test_api_attempt_rejected_routes_as_rotation () =
         Alcotest.failf "%s should stay terminal, got %s:%s" label
           (KFR.route_kind_label other) (KFR.route_class_label other))
     [ "json parse error", Llm_provider.Retry.Json_parse_error
-    ; "body too large", Llm_provider.Retry.Request_body_too_large { actual_bytes = 1; limit_bytes = 0 }
     ; "unknown 400", Llm_provider.Retry.Unknown_invalid_request
     ]
 

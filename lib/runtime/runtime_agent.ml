@@ -776,15 +776,10 @@ let runtime_accepts_image_input ~(runtime : Runtime.t) =
 
    Every other declared runtime used to follow, and #34720 turned this set
    from "pick one" into "dispatch each in turn", which made that tail
-   reachable. [Runtime.keeper_dispatch_runtime_ids] deliberately validates
-   only routed roots, [media_failover] and verifier exact slots, so a
-   declared-but-unassigned runtime does not refuse boot -- and the walk was
-   dispatching exactly the runtimes that skipped that check. Its per-attempt
-   cap check then answers [Config], which is not rotatable, so one unchecked
-   runtime in the tail stopped the walk before the live candidates behind it.
-   The reach is now the list boot validates. [media_failover] is where an
-   operator says a runtime should take images for keepers that do not
-   otherwise route to it (#34823). *)
+   reachable: a declared-but-unassigned runtime nothing routes to was being
+   dispatched ahead of the live candidates behind it. The reach is the routed
+   list. [media_failover] is where an operator says a runtime should take
+   images for keepers that do not otherwise route to it (#34823). *)
 let media_candidates_of ~(lane : Runtime.t list) ~(runtimes : Runtime.t list)
     ~(media_failover : string list) : Runtime.t list =
   let by_id id =

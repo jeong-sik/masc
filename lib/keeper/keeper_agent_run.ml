@@ -1614,7 +1614,8 @@ let run_turn
                         Keeper_carried_front.read_seed
                           ~config
                           ~keeper_name:meta.name
-                          ~runtime_id)
+                          ~runtime_id
+                          ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id))
                       ~on_request_attribution:
                         (fun ~runtime_id ~tools ~transmitted ->
                            record_transmitted_model_input
@@ -1622,12 +1623,7 @@ let run_turn
                              ~tools
                              ~transmitted)
                       ~on_request_wire_observation:
-                        (fun
-                          ~runtime_id
-                          ~max_request_body_bytes
-                          ~body_bytes
-                          ~serialized
-                        ->
+                        (fun ~runtime_id ~body_bytes ~serialized ->
                            (match !current_request_provider_content_ref with
                             | Some (Ok provider_content) ->
                               s.Keeper_run_tools.stage_skill_delivery_on_wire
@@ -1635,16 +1631,9 @@ let run_turn
                                 ~agent_core_turn:acc.current_turn
                                 provider_content
                             | Some (Error _) | None -> ());
-                           (* A preceding bounded candidate may have reported a
-                              window before failover. This exact uncapped request
-                              has no byte window; do not attribute the old cut to it. *)
-                           (match max_request_body_bytes with
-                            | None -> model_input_window_ref := None
-                            | Some _ -> ());
                            Keeper_request_wire_observation.record
                              ~keeper_name:meta.name
                              ~runtime_id
-                             ~max_request_body_bytes
                              ~body_bytes;
                            let request_tools =
                              Keeper_agent_tool_surface.on_the_wire

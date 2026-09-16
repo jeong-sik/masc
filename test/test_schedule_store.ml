@@ -8,6 +8,14 @@ let schedules_path config =
 
 let json = testable Yojson.Safe.pp Yojson.Safe.equal
 
+(* Most cases here are about what becomes Due, not about what leaves the
+   ledger, so they pass the library's own window. The retention cases below
+   call [Schedule_store.refresh_due] with the window they mean. *)
+let refresh_due config ~now =
+  Schedule_store.refresh_due config ~now
+    ~retention_days:Schedule_store.terminal_schedule_retention_days
+;;
+
 let with_workspace f =
   Eio_main.run
   @@ fun env ->
@@ -1531,9 +1539,8 @@ let test_a_ledger_that_cannot_be_encoded_fails_the_write_as_persistence () =
 (* A schedule that ran and finished leaves the ledger a week after that wake,
    with its wakes. Its notes stay, and so does anything still being written
    about, still live, or never run. *)
-let retention_s =
-  float_of_int Schedule_store.terminal_schedule_retention_days *. 24.0 *. 60.0 *. 60.0
-;;
+let days_to_seconds days = float_of_int days *. 24.0 *. 60.0 *. 60.0
+let retention_s = days_to_seconds Schedule_store.terminal_schedule_retention_days
 
 let run_to_completion config ~schedule_id ~finished_at =
   ignore (store_ok "refresh" (refresh_due config ~now:201.0));
@@ -1610,6 +1617,55 @@ let test_a_clock_behind_the_ledger_forgets_nothing () =
     (schedule_ids (read_state config))
 ;;
 
+(* The window is the caller's to set, so one ledger read at one moment must
+   give different answers for different windows. Two schedules of different
+   ages make the pair of assertions discriminating: an implementation that
+   ignores [retention_days], or that clamps it to the library's seven from
+   either side, gets one of the two counts wrong.
+
+     window 14, waited 10  -> keep   (a cap at 7 would forget)
+     window  3, waited  5  -> forget (a floor at 7 would keep)
+
+   The times are real ones. [bump_state] stamps [updated_at] with
+   [Unix.gettimeofday ()] whatever the caller's clock says, and [refresh_due]
+   judges no ages when [now] is behind that stamp, so a test on a small
+   made-up timeline never reaches the retention pass at all. *)
+let wide_window_days = 14
+let narrow_window_days = 3
+let days_since_the_older_wake = 10
+let days_since_the_newer_wake = 5
+
+let test_the_retention_window_is_the_callers_to_set () =
+  with_workspace
+  @@ fun config ->
+  let anchor = Unix.gettimeofday () in
+  let finished_days_ago days = anchor -. days_to_seconds days in
+  let older = "wake-ten-days-back" and newer = "wake-five-days-back" in
+  List.iter
+    (fun schedule_id -> ignore (insert_ok config (make_request ~schedule_id ())))
+    [ older; newer ];
+  run_to_completion config ~schedule_id:older
+    ~finished_at:(finished_days_ago days_since_the_older_wake);
+  run_to_completion config ~schedule_id:newer
+    ~finished_at:(finished_days_ago days_since_the_newer_wake);
+  (* Past the ledger's own stamp, or the pass judges nothing. *)
+  let now = Float.max (read_state config).updated_at (Unix.gettimeofday ()) +. 1.0 in
+  let refresh_with retention_days =
+    ignore
+      (store_ok
+         (Printf.sprintf "refresh at %d days" retention_days)
+         (Schedule_store.refresh_due config ~now ~retention_days))
+  in
+  refresh_with wide_window_days;
+  check (list string) "a window wider than both waits keeps both"
+    [ newer; older ]
+    (schedule_ids (read_state config));
+  refresh_with narrow_window_days;
+  check (list string) "a window narrower than both forgets both"
+    []
+    (schedule_ids (read_state config))
+;;
+
 let () =
   run "Schedule_store"
     [
@@ -1635,6 +1691,8 @@ let () =
             test_recovers_from_last_good;
           test_case "a finished schedule leaves the ledger a week after its wake" `Quick
             test_a_finished_schedule_leaves_the_ledger_a_week_after_its_wake;
+          test_case "the retention window is the caller's to set" `Quick
+            test_the_retention_window_is_the_callers_to_set;
           test_case "a clock behind the ledger forgets nothing" `Quick
             test_a_clock_behind_the_ledger_forgets_nothing;
           test_case "a mutation encodes the ledger once on the pool" `Quick

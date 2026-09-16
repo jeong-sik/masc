@@ -478,11 +478,27 @@ let reject_server_request io id =
    sees it, rather than every schema riding in the model's context from the
    first token of every turn. The schemas still cross this wire once at
    thread/start; what changes is the context they are spent from. Measured
-   2026-08-30 against the live surface: 83 tools, 81,270 bytes of spec. The
-   saving itself is not measured here: thread/tokenUsage/updated reports the
-   turn's counts into [turn_result.usage], but nothing compares a deferred
-   turn against an undeferred one, so what is verified is that the model
-   still resolves and calls a deferred tool, not how much it costs. *)
+   2026-08-30 against the live surface: 83 tools, 81,270 bytes of spec.
+
+   What it saves, measured 2026-09-16 by driving this same protocol with 203
+   probe tools of about 2.7 KB each and reading the input count of a single
+   request (the [total] in thread/tokenUsage/updated sums a turn's requests,
+   so reading that instead inflates every figure by the request count):
+
+     deferLoading: false                     120,205 tokens
+     deferLoading: true, no tool used         24,829
+     one tool called      24,839 -> 25,464 -> 25,518
+     three tools called   24,858 -> 26,538 -> 26,592 -> 26,646 -> 26,700
+
+   A tool the model calls brings its own schema and nothing else: +625 for
+   one, +1,680 for three, and the rest is tool-result text.
+
+   The namespace is not a grouping axis and must not be read as one. It is
+   here because the server refuses a deferred tool without it -- verified by
+   sending one: "deferred dynamic tool must include a namespace: alpha_000".
+   Giving each tool its own namespace was measured too and changes nothing
+   (25,528 against 25,509), so there is no scoping to buy by splitting it.
+   RFC-0451 §7 records that this door is closed. *)
 let tool_namespace = "masc"
 
 let dynamic_tool_spec (tool : dynamic_tool) =

@@ -977,8 +977,8 @@ let test_dynamic_tools_are_declared_deferred_under_one_namespace () =
   Fun.protect
     ~finally:(fun () -> Sys.remove capture_path)
     (fun () ->
-       let tool : Runtime_codex_app_server.dynamic_tool =
-         { name = "masc_probe"
+       let declare name : Runtime_codex_app_server.dynamic_tool =
+         { name
          ; description = "Return a deterministic fixture marker"
          ; input_schema = `Assoc [ "type", `String "object" ]
          ; call =
@@ -986,6 +986,8 @@ let test_dynamic_tools_are_declared_deferred_under_one_namespace () =
                { success = true; content = "unused"; content_blocks = None; abort_turn = None })
          }
        in
+       let tool = declare "masc_probe" in
+       let sibling = declare "masc_probe_sibling" in
        with_fixture
          ~capture_path
          [ init_result
@@ -996,20 +998,32 @@ let test_dynamic_tools_are_declared_deferred_under_one_namespace () =
          ; turn_completed
          ]
          (fun path ->
-            match run_fixture ~dynamic_tools:[ tool ] path with
+            match run_fixture ~dynamic_tools:[ tool; sibling ] path with
             | Error error -> fail (Runtime_codex_app_server.error_to_string error)
             | Ok _ -> ());
        let requests =
          In_channel.with_open_bin capture_path (fun input ->
            In_channel.input_lines input |> List.map Yojson.Safe.from_string)
        in
-       let tool_json =
+       let tool_jsons =
          List.find (fun json -> Yojson.Safe.Util.member "id" json = `Int 3) requests
          |> Yojson.Safe.Util.member "params"
          |> Yojson.Safe.Util.member "dynamicTools"
          |> Yojson.Safe.Util.to_list
-         |> List.hd
        in
+       let tool_json = List.hd tool_jsons in
+       (* Read every tool, not the first one. The namespace is a protocol
+          requirement, not a grouping axis: splitting tools across namespaces
+          was measured and changes nothing a caller can spend (see the
+          comment on [tool_namespace], and RFC-0451 §7). A second tool here
+          is what fails when someone starts grouping. *)
+       check
+         (list string)
+         "every tool names the same namespace"
+         [ "masc"; "masc" ]
+         (List.map
+            (fun json -> Yojson.Safe.Util.member "namespace" json |> Yojson.Safe.Util.to_string)
+            tool_jsons);
        check
          bool
          "the legacy type tag is absent, so this is the canonical encoding"

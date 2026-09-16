@@ -24,9 +24,12 @@ let clamp_limit limit =
   else l
 
 (* An offset past the end yields an empty page rather than an error: a reader
-   paging forward while the store is being written to should land on "nothing
-   further", not on a failure. A negative offset is a caller mistake and is
-   refused where the query is parsed. *)
+   paging forward should land on "nothing further", not on a failure.
+
+   A negative offset lands on the first page. [List.drop] raises on a negative
+   count, so this clamp cannot be removed; the HTTP boundary refuses one
+   before it arrives, and an in-process caller that passes one gets the first
+   page rather than an exception. *)
 let clamp_offset offset = match offset with
   | Some n when n > 0 -> n
   | Some _ | None -> 0
@@ -74,6 +77,14 @@ let requested_view_of_string = function
     different answers, and only the first one means there is no work. *)
 type awaiting_join =
   | Backlog_read of { live_request_ids : string list }
+  | Backlog_recovered of
+      { live_request_ids : string list
+      ; detail : string
+      }
+      (** The primary backlog did not read and a [.last-good] snapshot did.
+          The queue is computed, and is as old as that snapshot: a task that
+          submitted after it is not in this answer. Folded into
+          [Backlog_read] this was a queue that looked current and was not. *)
   | Backlog_unreadable of string
 
 (** The view with everything it needs to be answered. [Ask_awaiting] cannot be
@@ -280,13 +291,31 @@ let id_set (requests : V.verification_request list) =
     alternative -- falling back to the unfiltered history -- would answer a
     request for "what is waiting on me" with every request ever submitted,
     which reads as work rather than as a failure to look. *)
-let filter_by_view (view : queue_view) (requests : V.verification_request list)
+let awaiting_fields ~limit ~backlog_error ~backlog_recovery ~unresolved =
+  (* One key set for every arm of this view. A reader of
+     [awaiting_unresolved_total] used to get a number on success and nothing
+     at all in the failure that field exists to describe. *)
+  [ ("backlog_error", Json_util.string_opt_to_json backlog_error)
+  ; ("backlog_recovery", Json_util.string_opt_to_json backlog_recovery)
+  ; ("awaiting_unresolved_total", `Int (List.length unresolved))
+    (* The count is exact; the list is one page of it. Unbounded, it rode
+       every page of every response -- which is the payload this projection
+       grew an offset to bound. *)
+  ; ( "awaiting_unresolved"
+    , `List (List.map (fun id -> `String id) (take limit unresolved)) )
+  ]
+
+(** Apply the view, and report what the join could not account for.
+
+    [store] is the whole readable scan, not [requests]: the difference is
+    "ids the backlog waits on that name no record anywhere", and taking it
+    against a task-filtered list reported every *other* task's live id as
+    missing. *)
+let filter_by_view ~limit (view : queue_view)
+    ~(store : V.verification_request list)
+    (requests : V.verification_request list)
   : V.verification_request list * (string * Yojson.Safe.t) list =
-  match view with
-  | All_requests -> requests, []
-  | Awaiting_operator (Backlog_unreadable detail) ->
-    [], [ ("backlog_error", `String detail) ]
-  | Awaiting_operator (Backlog_read { live_request_ids }) ->
+  let join ~recovery live_request_ids =
     let wanted = Hashtbl.create (List.length live_request_ids) in
     List.iter (fun id -> Hashtbl.replace wanted id ()) live_request_ids;
     let kept =
@@ -294,21 +323,31 @@ let filter_by_view (view : queue_view) (requests : V.verification_request list)
         (fun (r : V.verification_request) -> Hashtbl.mem wanted r.V.id)
         requests
     in
-    let present = id_set requests in
+    let present = id_set store in
     let unresolved =
       List.filter (fun id -> not (Hashtbl.mem present id)) live_request_ids
     in
     ( kept
-    , [ ("backlog_error", `Null)
-      ; ("awaiting_unresolved_total", `Int (List.length unresolved))
-      ; ( "awaiting_unresolved"
-        , `List (List.map (fun id -> `String id) unresolved) )
-      ] )
+    , awaiting_fields ~limit ~backlog_error:None ~backlog_recovery:recovery
+        ~unresolved )
+  in
+  match view with
+  | All_requests -> requests, []
+  | Awaiting_operator (Backlog_unreadable detail) ->
+    ( []
+    , awaiting_fields ~limit ~backlog_error:(Some detail)
+        ~backlog_recovery:None ~unresolved:[] )
+  | Awaiting_operator (Backlog_read { live_request_ids }) ->
+    join ~recovery:None live_request_ids
+  | Awaiting_operator (Backlog_recovered { live_request_ids; detail }) ->
+    join ~recovery:(Some detail) live_request_ids
 
 let requests_json_of_requests ?task_id ~limit ~offset ~view
     (scan : V.request_scan) : Yojson.Safe.t =
   let filtered = filter_by_task_id scan.V.readable task_id in
-  let in_view, view_fields = filter_by_view view filtered in
+  let in_view, view_fields =
+    filter_by_view ~limit view ~store:scan.V.readable filtered
+  in
   let sorted = sort_desc in_view in
   let total = List.length sorted in
   let page = sorted |> List.drop offset |> take limit in

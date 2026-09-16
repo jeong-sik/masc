@@ -1,0 +1,22 @@
+# task-1546 evidence 02 - repair commit coordinates (deepened history, corrected labels)
+HEAD=ea63549417db1608b05eb494d671461ea553ca2c
+UTC=2026-09-16T15:55:02Z
+## commits whose history changed the string "agent kimi-cli" (newest first):
+e3be314f 2026-09-14 exec_shim: probe seccomp user_notif capability (task-1568, #36032 phase 1) (#36229)
+## NEWEST -S commit:
+e3be314f6bb1d70952452a15f5c18b1d1b97322e 2026-09-14 19:56:33 +0900 exec_shim: probe seccomp user_notif capability (task-1568, #36032 phase 1) (#36229)
+## OLDEST -S commit (line introduction):
+e3be314f6bb1d70952452a15f5c18b1d1b97322e 2026-09-14 19:56:33 +0900 exec_shim: probe seccomp user_notif capability (task-1568, #36032 phase 1) (#36229)
+## deepened blame of the arm a branch (lines 24-33), per-line authorship:
+^e3be314f (2026-09-14 24)   if [[ "$arm" == "a" ]]; then
+^e3be314f (2026-09-14 25)     # Arm A baseline is harbor's kimi-cli agent (phase0-notes.md "arm A 성공
+^e3be314f (2026-09-14 26)     # 커맨드"): terminus-2 is retired — kimi-for-coding answers with a
+^e3be314f (2026-09-14 27)     # reasoning-only payload whose empty assistant message the coding endpoint
+^e3be314f (2026-09-14 28)     # rejects with 400, 3 recorded attempts. Reward 1.0, 44m35s.
+^e3be314f (2026-09-14): arm A must run kimi-cli. Pointing it
+^e3be314f (2026-09-14 30)     # back at terminus-2 silently drops the whole arm's data — the matrix
+^e3be314f (2026-09-14 31)     # completes with arm a missing from every summary row.
+^e3be314f (2026-09-14 32)     uv run harbor run -d terminal-bench@2.0 --agent kimi-cli \
+^e3be314f (2026-09-14 33)       --model "$MODEL" -k "$K" -n "${CONCURRENCY:-2}" \
+## recent commits touching the file:
+e3be314f exec_shim: probe seccomp user_notif capability (task-1568, #36032 phase 1) (#36229)

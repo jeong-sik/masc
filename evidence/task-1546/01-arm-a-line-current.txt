@@ -1,0 +1,15 @@
+# task-1546 evidence 01 - arm a branch line at main HEAD (contract item 1 already satisfied upstream)
+HEAD=ea63549417db1608b05eb494d671461ea553ca2c (origin/main)
+UTC=2026-09-16T15:54:10Z
+## grep anchor:
+32:    uv run harbor run -d terminal-bench@2.0 --agent kimi-cli \
+## byte-fixed arm a agent line (line 32):
+0000000                   u   v       r   u   n       h   a   r   b   o
+0000020   r       r   u   n       -   d       t   e   r   m   i   n   a
+0000040   l   -   b   e   n   c   h   @   2   .   0       -   -   a   g
+0000060   e   n   t       k   i   m   i   -   c   l   i       \  \n
+0000077
+## file sha256:
+c5109b40263b91d4e62cf11f1682a5c0ec4bcf33d63dd9380767e28691fc18c7  benchmarks/terminal_bench/run_matrix.sh
+## bash -n (syntax):
+bash_n_exit=0

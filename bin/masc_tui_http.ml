@@ -1186,7 +1186,15 @@ let fetch_keeper_context_inspector ~(host : string) ~(port : int)
                   ; outside_newest_page = parts = []
                   }))
   in
-  { Masc_tui_context_inspector.turn; provider_input; response }
+  (* Computed now from the turn's own values, without a turn; a server
+     that does not serve it yet says so in the band rather than hiding
+     the band. *)
+  let forecast =
+    fetch ~label:"next-request"
+      ~path:(Printf.sprintf "/api/v1/keepers/%s/next-request" encoded)
+      ~decode:Masc_tui_context_inspector.decode_forecast
+  in
+  { Masc_tui_context_inspector.turn; provider_input; response; forecast }
 
 (** What the server did with one answer to a held tool call.
 

@@ -5131,6 +5131,7 @@
 (include stanzas/test_tui_tab_strip.inc)
 (include stanzas/test_tui_burn_hud.inc)
 (include stanzas/test_tui_context_tokens.inc)
+(include stanzas/test_tui_next_request_band.inc)
 (include stanzas/test_tui_coordinator_status_row.inc)
 (include stanzas/test_tui_board_list_reading.inc)
 (include stanzas/test_tui_planning_summary_rows.inc)

@@ -11,6 +11,28 @@ type t =
 
 let declared ~window_tokens = { window_tokens; source = Declared }
 
+type for_runtime =
+  | Window of t
+  | Declared_window_exceeds_max_context of { window_tokens : int; max_context : int }
+
+(* A window larger than the model's context is two different situations, and
+   only one of them is the operator's. An operator who declared the window
+   named a contradiction, and it is named back rather than quietly changed. A
+   compiled default was named by nobody: refusing it would mean a fresh
+   install whose model carries less than the default could not run a turn at
+   all, which is what 0.35.19's install smoke found on a 32,768-token runtime.
+   So the default starts at what the model carries: [max_context] is the
+   runtime's declared input window, already clamped to the provider's own cap
+   ([Runtime.max_context_of_runtime_id]), and a provider that still reports an
+   overflow shrinks the window through [with_tokens] as before. *)
+let for_runtime ~window_tokens ~operator_declared ~max_context =
+  if window_tokens <= max_context
+  then Window (declared ~window_tokens)
+  else if operator_declared
+  then Declared_window_exceeds_max_context { window_tokens; max_context }
+  else Window (declared ~window_tokens:max_context)
+;;
+
 let declared_tokens t =
   match t.source with
   | Declared -> t.window_tokens

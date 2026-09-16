@@ -151,3 +151,8 @@ val context_window_tokens : unit -> int
     [turn.context_window_tokens], else
     {!Env_config_keeper.KeeperContext.window_tokens_default}. Frozen at
     bootstrap with the other turn settings. *)
+
+val context_window_is_declared : unit -> bool
+(** Whether the window above came from an operator ([Env] or [Toml]) rather
+    than from the compiled default. What the operator declared is checked
+    against the model's context; what nobody declared gives way to it. *)

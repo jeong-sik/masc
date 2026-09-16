@@ -78,20 +78,28 @@ let cut_history ~measure ~capacity ~reserved_bytes ~pinned_bytes messages =
       }
 ;;
 
-(* The window the turn driver would declare for this runtime, with the same
-   refusal: a window the model cannot carry is a configuration contradiction,
-   named rather than clamped. *)
+(* The window the turn driver would declare for this runtime, read through the
+   same rule ({!Keeper_context_window.for_runtime}): a declared window the
+   model cannot carry is a configuration contradiction, named rather than
+   clamped, and the compiled default gives way to the model. *)
 let window_for ~runtime_id =
   let window_tokens = Keeper_runtime_resolved.context_window_tokens () in
   match Runtime.max_context_of_runtime_id runtime_id with
-  | Some max_context when window_tokens > max_context ->
-    Error
-      (Printf.sprintf
-         "turn.context_window_tokens %d exceeds the %d-token max-context of %s"
-         window_tokens
-         max_context
-         runtime_id)
-  | Some _ -> Ok (Keeper_context_window.declared ~window_tokens)
+  | Some max_context ->
+    (match
+       Keeper_context_window.for_runtime
+         ~window_tokens
+         ~operator_declared:(Keeper_runtime_resolved.context_window_is_declared ())
+         ~max_context
+     with
+     | Keeper_context_window.Window window -> Ok window
+     | Keeper_context_window.Declared_window_exceeds_max_context { window_tokens; max_context } ->
+       Error
+         (Printf.sprintf
+            "turn.context_window_tokens %d exceeds the %d-token max-context of %s"
+            window_tokens
+            max_context
+            runtime_id))
   | None -> Error (Printf.sprintf "runtime %s resolves no context window" runtime_id)
 ;;
 

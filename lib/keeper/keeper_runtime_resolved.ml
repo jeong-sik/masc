@@ -244,3 +244,8 @@ let provider_call_deadline_sec () =
 
 let context_window_tokens () =
   (current ()).context_window_tokens.value
+
+let context_window_is_declared () =
+  match (current ()).context_window_tokens.source with
+  | Env | Toml -> true
+  | Default | Failsafe_floor -> false

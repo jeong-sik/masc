@@ -888,27 +888,36 @@ let validate_provider_request_cap ~runtime_id
   | Ok cap -> Ok cap
   | Error error -> Error (runtime_candidate_invalid_request_cap_error error)
 
-(* The declared transmission window, in tokens, checked against the model's
-   declared context (RFC keeper-context-window-in-tokens §7.9): a window the
-   model cannot carry is a configuration contradiction named here, before
-   dispatch, rather than a request the provider refuses every turn. Token
-   against token; the request-body cap is not consulted. *)
+(* The transmission window, in tokens, read against the model's declared
+   context (RFC keeper-context-window-in-tokens §7.9). A window the operator
+   declared and the model cannot carry is a configuration contradiction named
+   here, before dispatch, rather than a request the provider refuses every
+   turn; the compiled default gives way to the model instead
+   ({!Keeper_context_window.for_runtime}). Token against token; the
+   request-body cap is not consulted. *)
 let model_input_window_for_candidate ~runtime_id =
   let window_tokens = Keeper_runtime_resolved.context_window_tokens () in
   match Runtime.max_context_of_runtime_id runtime_id with
-  | Some max_context when window_tokens > max_context ->
-    Error
-      (Agent_core.Error.Config
-         (Agent_core.Error.InvalidConfig
-            { field = "turn.context_window_tokens"
-            ; detail =
-                Printf.sprintf
-                  "%d tokens exceed the %d-token max-context of runtime %s; declare a window the model can carry or route the keeper elsewhere"
-                  window_tokens
-                  max_context
-                  runtime_id
-            }))
-  | Some _ -> Ok (Keeper_context_window.declared ~window_tokens)
+  | Some max_context ->
+    (match
+       Keeper_context_window.for_runtime
+         ~window_tokens
+         ~operator_declared:(Keeper_runtime_resolved.context_window_is_declared ())
+         ~max_context
+     with
+     | Keeper_context_window.Window window -> Ok window
+     | Keeper_context_window.Declared_window_exceeds_max_context { window_tokens; max_context } ->
+       Error
+         (Agent_core.Error.Config
+            (Agent_core.Error.InvalidConfig
+               { field = "turn.context_window_tokens"
+               ; detail =
+                   Printf.sprintf
+                     "%d tokens exceed the %d-token max-context of runtime %s; declare a window the model can carry or route the keeper elsewhere"
+                     window_tokens
+                     max_context
+                     runtime_id
+               })))
   | None ->
     (* Every materialized runtime resolves a context window at load
        ([Runtime.validate_runtime_max_context]); an id that resolves none

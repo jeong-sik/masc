@@ -32,6 +32,23 @@ type t =
 
 val declared : window_tokens:int -> t
 
+type for_runtime =
+  | Window of t
+  | Declared_window_exceeds_max_context of { window_tokens : int; max_context : int }
+
+val for_runtime
+  :  window_tokens:int
+  -> operator_declared:bool
+  -> max_context:int
+  -> for_runtime
+(** The window a turn on this runtime starts from.
+
+    A window the model can carry is that window. A larger one is refused when
+    the operator declared it -- a contradiction between two settings they
+    wrote, named before dispatch rather than sent every turn -- and is the
+    model's own context when it is the compiled default, which nobody
+    declared and which must not stop a keeper whose model is smaller than it. *)
+
 val with_tokens : t -> window_tokens:int -> t
 (** The same declaration at another size. The declared size restores
     [Declared]; any other size is [Shrunk_after_overflow] of the declared

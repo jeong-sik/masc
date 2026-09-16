@@ -106,6 +106,39 @@ let test_density_ignores_a_non_measurement () =
   check bool "neither was recorded" true (Option.is_none (Window.Density.lookup ~runtime_id:"r"))
 ;;
 
+(* A window larger than the model's context is the operator's contradiction
+   only when the operator wrote it. 0.35.19's install smoke ran a fresh
+   workspace on a 32,768-token runtime against the compiled 85,000-token
+   default and could not start a turn at all: every attempt was refused
+   before dispatch with a setting nobody had declared. *)
+let test_a_declared_window_is_refused_and_a_default_gives_way () =
+  let carried =
+    Window.for_runtime ~window_tokens:40_000 ~operator_declared:true ~max_context:128_000
+  in
+  check bool "a window the model carries is that window" true
+    (match carried with Window.Window window -> window.Window.window_tokens = 40_000 | _ -> false);
+  let refused =
+    Window.for_runtime ~window_tokens:85_000 ~operator_declared:true ~max_context:32_768
+  in
+  check bool "a declared window the model cannot carry is named, with both numbers" true
+    (match refused with
+     | Window.Declared_window_exceeds_max_context { window_tokens; max_context } ->
+       window_tokens = 85_000 && max_context = 32_768
+     | Window.Window _ -> false);
+  let default =
+    Window.for_runtime ~window_tokens:85_000 ~operator_declared:false ~max_context:32_768
+  in
+  check bool "a compiled default starts at what the model carries" true
+    (match default with
+     | Window.Window window ->
+       window.Window.window_tokens = 32_768 && window.Window.source = Window.Declared
+     | Window.Declared_window_exceeds_max_context _ -> false);
+  check bool "an equal window is carried, not clamped or refused" true
+    (match Window.for_runtime ~window_tokens:32_768 ~operator_declared:false ~max_context:32_768 with
+     | Window.Window window -> window.Window.window_tokens = 32_768
+     | Window.Declared_window_exceeds_max_context _ -> false)
+;;
+
 let () =
   run
     "keeper_context_window"
@@ -118,7 +151,9 @@ let () =
             test_tokens_of_bytes_inverts_the_density
         ] )
     ; ( "source"
-      , [ test_case "with_tokens keeps the declaration visible" `Quick
+      , [ test_case "a declared window is refused where a default gives way" `Quick
+            test_a_declared_window_is_refused_and_a_default_gives_way
+        ; test_case "with_tokens keeps the declaration visible" `Quick
             test_with_tokens_keeps_the_declaration_visible
         ; test_case "to_json carries window, declared and source" `Quick
             test_to_json_carries_window_declared_and_source

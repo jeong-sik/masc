@@ -137,9 +137,9 @@ call_tool : (name:string -> call_id:string -> arguments:Yojson.Safe.t -> tool_re
 | 수치 | 만든 곳 | 남는 곳 |
 |---|---|---|
 | CLI 레인이 싣는 도구 이름 | masc 가 띄운 `claude` 프로세스의 `--allowedTools` | 프로세스 인자. 2026-09-16 01:55~02:05 KST 에 0.3초 간격으로 캡처 |
-| 도구 수와 표면 바이트 | `Claude Code turn composition: … tools=… tool_surface_bytes=…` | `~/me/.masc/logs/system_log_2026-09-{15,16}.jsonl` |
+| 도구 수와 표면 바이트 | `Claude Code turn composition: … tools=… tool_surface_bytes=…` | `<base-path>/.masc/logs/system_log_2026-09-{15,16}.jsonl` |
 | 도구별 스키마 바이트 | provider-input 스냅샷의 `tool_schemas[].artifact.bytes` | `keepers/<name>/provider-inputs/` |
-| 호출 | tool-call 기록의 `keeper`·`tool` | `~/me/.masc/tool_calls/<월>/<일>.jsonl`, 2026-09-02~09-16 파일 31개 |
+| 호출 | tool-call 기록의 `keeper`·`tool` | `<base-path>/.masc/tool_calls/<월>/<일>.jsonl`, 2026-09-02~09-16 파일 31개 |
 | 토큰 | 공급자 usage | Claude Code transcript. 서로 다른 두 Keeper 의 새 세션 첫 요청이 같은 **50,210 토큰**을 캐시에서 읽었고, 두 표면은 145개·128,968 바이트로 같았다 |
 
 ### 8.2 싣는 것과 쓰는 것

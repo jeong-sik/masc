@@ -174,14 +174,14 @@ Config 모듈에서 자주 발생하는 실수:
 ```ocaml
 let my_value = Sys.getenv_opt "MASC_MY_FLAG" |> Option.value ~default:"false"
 ```
-문제: Registry 미등록, type safety 없음, 테스트 isolation 불가
+문제: ENV-CONTRACT 미기재, type safety 없음, 테스트 isolation 불가
 
 **✅ DO: 중앙화된 getter 사용**
 ```ocaml
-(* 1. Feature_flag_registry.ml에 등록 *)
-{ env_name = "MASC_MY_FLAG"; default_value = false; ... }
+(* 1. docs/ENV-CONTRACT.md "Rules for New Environment Variables"에 따라 선언
+      (기본 reload_class는 boot_static, 선언부와 operator 문서에 reload_class 기록) *)
 
-(* 2. env_config_*.ml에 typed getter *)
+(* 2. env_config_*.ml에 typed getter — canonical default는 호출부에 inline *)
 let get_my_flag () = Env_config_core.get_bool "MASC_MY_FLAG" false
 ```
 

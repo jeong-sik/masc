@@ -115,9 +115,10 @@ val project_board_read_scroll :
     The operator asked for the comment thread not under the post but beside
     it, in a second column on the right (p-7784d032). A narrow terminal keeps
     the stacked layout, so the side arrangement is something the surface asks
-    for per frame and either gets or falls back from. When the thread is open
-    beside the post it opens showing its tail, because what the reader is
-    usually looking for is the latest reply, not the first one. *)
+    for per frame and either gets or falls back from. The scroll keeps the
+    same head-first meaning it already had stacked -- {!project_board_read_scroll}
+    windows the side columns too, body first then comments -- so opening a
+    post reads the same regardless of which layout draws it. *)
 
 val board_read_side_minimum_cols : int
 (** The pane width below which the comments stay under the post. The read
@@ -150,21 +151,9 @@ val allocate_board_read_side :
     keeps at least one row when it has content, and when the thread has
     content the heading row comes out of the comment column's own share, not
     the post's -- so a comment column never shows a heading with nothing
-    readable under it. *)
-
-val project_board_read_side_scroll :
-  body_line_count:int ->
-  body_rows:int ->
-  comment_count:int ->
-  comment_rows:int ->
-  int ->
-  board_read_scroll
-(** Scroll for the side-by-side layout. At scroll 0 the comment column shows
-    its tail -- the latest replies -- whenever the thread is taller than its
-    column, and the post shows its head. Scrolling first walks the post body
-    down; once the post is exhausted further scrolling walks the comment
-    column up toward its head. The normalized scroll therefore still runs
-    from 0 to [body_overflow + comment_overflow]. *)
+    readable under it. Windowing the two columns is {!project_board_read_scroll}
+    itself: pass the side allocation's [body_rows] and the comment column's
+    rows under its heading, and it behaves exactly as it does stacked. *)
 
 (** {1 Keeper roster columns} *)
 

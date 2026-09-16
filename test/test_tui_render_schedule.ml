@@ -539,49 +539,27 @@ let test_board_read_side_allocation_reserves_the_heading () =
   in
   check int "no thread spends no row on a heading" 0 no_comments.comment_rows
 
-(* The thread opens on its tail: a reader who lands on a post is usually
-   looking for the latest reply, not the first one, and the side column has
-   no scroll of its own to reach it with first. Scrolling still runs the post
-   down before it starts walking the thread toward its head. *)
-let test_board_read_side_scroll_opens_on_the_tail () =
+(* The side layout does not own a scroll of its own: it windows through
+   [project_board_read_scroll], the same function the stacked layout always
+   used, with the side allocation's rows in place of the stacked ones. So a
+   post beside its thread opens exactly like a post above its thread --
+   both columns at their head -- and a keyboard scenario that presses Enter
+   and expects the oldest comment waiting at the top, before anything has
+   scrolled, sees it either way. *)
+let test_board_read_side_layout_opens_head_first () =
+  let allocation =
+    Schedule.allocate_board_read_side ~terminal_rows:16 ~body_line_count:20
+      ~comment_count:20
+  in
+  check bool "this allocation has room for a heading and a line under it"
+    true (allocation.comment_rows >= 2);
+  let comment_rows = allocation.comment_rows - 1 (* the heading's own row *) in
   let opening =
-    Schedule.project_board_read_side_scroll ~body_line_count:20 ~body_rows:6
-      ~comment_count:20 ~comment_rows:5 0
+    Schedule.project_board_read_scroll ~body_line_count:20
+      ~body_rows:allocation.body_rows ~comment_count:20 ~comment_rows 0
   in
   check int "post opens at its head" 0 opening.body_offset;
-  check int "thread opens at its tail" 15 opening.comment_offset;
-  let after_body =
-    Schedule.project_board_read_side_scroll ~body_line_count:20 ~body_rows:6
-      ~comment_count:20 ~comment_rows:5 3
-  in
-  check int "scrolling first moves the post" 3 after_body.body_offset;
-  check int "the thread stays pinned to its tail" 15 after_body.comment_offset;
-  let past_body =
-    (* body_line_count - body_rows: the post's own last scrollable offset. *)
-    Schedule.project_board_read_side_scroll ~body_line_count:20 ~body_rows:6
-      ~comment_count:20 ~comment_rows:5 14
-  in
-  check int "post is fully scrolled" 14 past_body.body_offset;
-  check int "thread has not moved yet" 15 past_body.comment_offset;
-  let into_thread =
-    Schedule.project_board_read_side_scroll ~body_line_count:20 ~body_rows:6
-      ~comment_count:20 ~comment_rows:5 16
-  in
-  check int "post stays at its own last offset" 14 into_thread.body_offset;
-  check int "further scroll walks the thread toward its head" 13
-    into_thread.comment_offset;
-  let reaches_head =
-    Schedule.project_board_read_side_scroll ~body_line_count:20 ~body_rows:6
-      ~comment_count:20 ~comment_rows:5 max_int
-  in
-  check int "overscroll clamps to the combined maximum" 29
-    reaches_head.normalized_scroll;
-  check int "the thread reaches its own head" 0 reaches_head.comment_offset;
-  let no_thread =
-    Schedule.project_board_read_side_scroll ~body_line_count:6 ~body_rows:6
-      ~comment_count:0 ~comment_rows:0 0
-  in
-  check int "an empty thread has nowhere to open" 0 no_thread.comment_offset
+  check int "thread opens at its head, not its tail" 0 opening.comment_offset
 
 let test_keeper_detail_scroll_normalizes_across_bounds () =
   let normalize = Schedule.normalize_keeper_detail_scroll in
@@ -1915,8 +1893,8 @@ let () =
             test_board_read_side_layout_falls_back_when_narrow
         ; test_case "board read side allocation reserves the heading" `Quick
             test_board_read_side_allocation_reserves_the_heading
-        ; test_case "board read side scroll opens on the tail" `Quick
-            test_board_read_side_scroll_opens_on_the_tail
+        ; test_case "board read side layout opens head-first" `Quick
+            test_board_read_side_layout_opens_head_first
         ; test_case "keeper detail scroll follows current bounds" `Quick
             test_keeper_detail_scroll_normalizes_across_bounds
         ; test_case "overview events follow and preserve manual anchor" `Quick

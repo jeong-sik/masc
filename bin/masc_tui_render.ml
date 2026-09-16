@@ -2421,7 +2421,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
           max 0 (side_budget.comment_rows - comment_header_rows)
         in
         let scroll =
-          Render_schedule.project_board_read_side_scroll
+          Render_schedule.project_board_read_scroll
             ~body_line_count:total_lines
             ~body_rows:side_budget.body_rows
             ~comment_count:detail_line_count

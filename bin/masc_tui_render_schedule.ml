@@ -394,26 +394,15 @@ let allocate_board_read_side ~terminal_rows ~body_line_count ~comment_count =
   let body_rows = max 0 (available - comment_rows) in
   { body_rows; comment_rows }
 
-let project_board_read_side_scroll ~body_line_count ~body_rows ~comment_count
-    ~comment_rows scroll =
-  let body_line_count = max 0 body_line_count in
-  let body_rows = max 0 body_rows in
-  let comment_count = max 0 comment_count in
-  let comment_rows = max 0 comment_rows in
-  let maximum_body_offset = max 0 (body_line_count - body_rows) in
-  let maximum_comment_offset = max 0 (comment_count - comment_rows) in
-  let maximum_scroll = maximum_body_offset + maximum_comment_offset in
-  let normalized_scroll = max 0 (min scroll maximum_scroll) in
-  (* The tail is where the reader lands: with the thread beside the post, the
-     first frame shows the latest replies, not the first ones. Scrolling runs
-     the post body down first; a thread already at its tail stays there until
-     the post is exhausted, then walks up toward its head. *)
-  let body_offset = min normalized_scroll maximum_body_offset in
-  let comment_offset =
-    maximum_comment_offset
-    - min maximum_comment_offset (normalized_scroll - body_offset)
-  in
-  { normalized_scroll; body_offset; comment_offset }
+(* Windowing the side columns is the same problem [project_board_read_scroll]
+   already solves for the stacked layout -- one scalar, body consumed before
+   comments, both counted in rows. The heading is not part of [comment_rows]
+   here; the caller passes the comment column's rows under it. Opening a post
+   reads the same either way: this used to default to the thread's tail
+   instead, and the read of "Comment 000" waiting at the top the moment a
+   post opens -- something a keyboard scenario already depended on -- was
+   never true beside the post until this went back to reusing the one
+   function everything else here already relies on. *)
 
 (* Keeper roster columns.
 

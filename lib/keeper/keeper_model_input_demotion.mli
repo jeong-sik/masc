@@ -101,6 +101,12 @@ val materialize
     their placeholders for real markers. Demotions the cut removed are not
     stored.
 
+    The content addresses are computed through the process CPU pool
+    ({!Tool_blob_store.address}) and only the writes run on the calling fiber,
+    because the store skips writing an address this process already wrote: on a
+    long-lived keeper the hashing is the whole cost, and doing it here held the
+    main Eio domain for 0.7 to 1.6 seconds per provider request.
+
     A write failure restores that message's body instead of emitting a marker
     for bytes that were never persisted, and is counted in [reverted]; it never
     raises and never leaves a dangling reference.

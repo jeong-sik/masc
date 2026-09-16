@@ -356,6 +356,84 @@ let each_marker_stores_its_own_body () =
   Alcotest.(check (list string)) "each marker stores its own body" bodies stored
 ;;
 
+(* Addressing a body is a sha256 over the whole of it; the write is skipped for
+   an address this process already wrote, so on a long-lived keeper the hashing
+   is all [materialize] does, and doing it on the calling fiber held the main
+   Eio domain for 0.7 to 1.6 seconds per provider request (rtev, 2026-09-16).
+   With the pool's only worker busy, materialize waits for it. *)
+let busy_worker_polls = 50
+let busy_worker_poll_interval_s = 0.01
+
+let materialize_addresses_its_bodies_on_the_pool () =
+  let store = Tool_blob_store.create ~base_path:(Filename.temp_dir "demote" "") in
+  let bodies = List.init 8 (fun i -> Printf.sprintf "body %d:" i ^ String.make 4000 'a') in
+  let messages = history_with_tool_bodies bodies in
+  let planned =
+    Demotion.plan ~measure_message_bytes ~demote_before:(List.length bodies) messages
+  in
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let previous_pool = Domain_pool_ref.get () in
+  Fun.protect
+    ~finally:(fun () ->
+      match previous_pool with
+      | None -> Domain_pool_ref.clear_for_tests ()
+      | Some previous -> Domain_pool_ref.set previous)
+  @@ fun () ->
+  Domain_pool_ref.set (Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env));
+  let occupied, occupied_u = Eio.Promise.create () in
+  let release, release_u = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Domain_pool_ref.submit_cpu_or_inline (fun () ->
+      Eio.Promise.resolve occupied_u ();
+      Eio.Promise.await release));
+  Eio.Promise.await occupied;
+  let outcome = ref None in
+  let clock = Eio.Stdenv.clock env in
+  Eio.Fiber.both
+    (fun () ->
+      outcome
+      := Some
+           (Demotion.materialize
+              ~store
+              ~pending:planned.Demotion.pending
+              planned.Demotion.messages))
+    (fun () ->
+      let rec wait polls =
+        if polls > 0 && Option.is_none !outcome
+        then (
+          Eio.Time.sleep clock busy_worker_poll_interval_s;
+          wait (polls - 1))
+      in
+      wait busy_worker_polls;
+      Alcotest.(check bool)
+        "materialize waits for the busy worker"
+        true
+        (Option.is_none !outcome);
+      Eio.Promise.resolve release_u ());
+  match !outcome with
+  | None -> Alcotest.fail "materialize never finished"
+  | Some outcome ->
+    Alcotest.(check int) "no revert in a healthy store" 0 outcome.Demotion.reverted;
+    let stored =
+      List.map
+        (fun content ->
+           match Tool_output.decode_from_agent_core content with
+           | Tool_output.Decoded reference ->
+             (match Tool_blob_store.fetch store ~sha256:reference.Tool_output.sha256 with
+              | Ok (Some bytes) -> bytes
+              | Ok None -> Alcotest.fail "a marker names a blob the store does not hold"
+              | Error error ->
+                Alcotest.fail (Tool_blob_store.fetch_error_to_string error))
+           | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
+             Alcotest.fail "every planned body leaves as a marker")
+        (markers outcome.Demotion.messages)
+    in
+    Alcotest.(check (list string)) "and still stores each body" bodies stored
+;;
+
 (* --- 5. Atoms retained by the raw cut keep their bodies ---------------- *)
 
 let raw_cut_retained_atoms_are_verbatim () =
@@ -872,6 +950,12 @@ let () =
             "the measurement hash reads content"
             `Quick
             measurement_hash_reads_content
+        ] )
+    ; ( "materialize"
+      , [ Alcotest.test_case
+            "addressing runs on the pool"
+            `Quick
+            materialize_addresses_its_bodies_on_the_pool
         ] )
     ]
 ;;

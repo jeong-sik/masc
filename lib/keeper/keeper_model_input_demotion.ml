@@ -147,6 +147,61 @@ let materialize ~store ~pending messages =
          then Hashtbl.add bodies entry.tool_use_id entry.bytes)
       pending;
     let body_of id = Hashtbl.find_opt bodies id in
+    let demoted_marker (block : Agent_core.Types.content_block) =
+      match block with
+      | Agent_core.Types.ToolResult
+          { tool_use_id; content; content_blocks = None; _ }
+        when Tool_output.is_marker content -> Some tool_use_id
+      | Agent_core.Types.ToolResult _
+      | Agent_core.Types.Text _
+      | Agent_core.Types.Thinking _
+      | Agent_core.Types.RedactedThinking _
+      | Agent_core.Types.ReasoningDetails _
+      | Agent_core.Types.ToolUse _
+      | Agent_core.Types.Image _
+      | Agent_core.Types.Document _
+      | Agent_core.Types.Audio _ -> None
+    in
+    (* The bodies this cut still carries, named once so the pass below finds
+       each by its tool_use_id rather than by position. Addressing one is a
+       sha256 over the whole body and nothing else — the store skips writing an
+       address this process already wrote — and a long-lived keeper carries
+       thousands of them into every provider request, which held the main Eio
+       domain for 0.7 to 1.6 seconds per request (2026-09-16 fiber trace). The
+       hashing goes to the CPU pool; the rare write stays on this fiber, where
+       the blob store's filesystem contract belongs. *)
+    let wanted = Hashtbl.create 64 in
+    List.iter
+      (fun (message : Agent_core.Types.message) ->
+         List.iter
+           (fun block ->
+              match demoted_marker block with
+              | None -> ()
+              | Some tool_use_id ->
+                if not (Hashtbl.mem wanted tool_use_id)
+                then (
+                  match body_of tool_use_id with
+                  | None -> ()
+                  | Some body -> Hashtbl.add wanted tool_use_id body))
+           message.content)
+      messages;
+    let to_address =
+      Hashtbl.fold (fun tool_use_id body acc -> (tool_use_id, body) :: acc) wanted []
+    in
+    let addressed = Hashtbl.create (List.length to_address) in
+    (match to_address with
+     | [] -> ()
+     | _ :: _ ->
+       List.iter
+         (fun (tool_use_id, body, address) ->
+            Hashtbl.add addressed tool_use_id (body, address))
+         (Domain_pool_ref.submit_cpu_or_inline (fun () ->
+            List.map
+              (fun (tool_use_id, body) ->
+                 ( tool_use_id
+                 , body
+                 , Tool_blob_store.address store ~bytes:body ~mime:demoted_mime ))
+              to_address)));
     let reverted = ref 0 in
     let messages =
       List.map
@@ -154,16 +209,13 @@ let materialize ~store ~pending messages =
            let content =
              List.map
                (fun block ->
-                  match block with
-                  | Agent_core.Types.ToolResult
-                      { tool_use_id; content; content_blocks = None; _ }
-                    when Tool_output.is_marker content ->
-                    (match body_of tool_use_id with
+                  match demoted_marker block with
+                  | None -> block
+                  | Some tool_use_id ->
+                    (match Hashtbl.find_opt addressed tool_use_id with
                      | None -> block
-                     | Some body ->
-                       (match
-                          Tool_blob_store.put store ~bytes:body ~mime:demoted_mime
-                        with
+                     | Some (body, address) ->
+                       (match Tool_blob_store.put_addressed address with
                         | Tool_output.Stored _ as stored ->
                           with_content block (Tool_output.encode_for_agent_core stored)
                         | Tool_output.Inline _ ->
@@ -172,13 +224,13 @@ let materialize ~store ~pending messages =
                              so the body goes back. *)
                           incr reverted;
                           with_content block body
-                        (* [put] documents Sys_error as its failure mode
-                           (disk full, EACCES). Anything else is not a storage
-                           outcome and must not be turned into one here. *)
+                        (* [put_addressed] documents Sys_error as its failure
+                           mode (disk full, EACCES). Anything else is not a
+                           storage outcome and must not be turned into one
+                           here. *)
                         | exception Sys_error _ ->
                           incr reverted;
-                          with_content block body))
-                  | _ -> block)
+                          with_content block body)))
                message.content
            in
            { message with content })

@@ -887,9 +887,12 @@ let bounded_model_input_projection
           match planned.Keeper_model_input_demotion.pending with
           | [] -> windowed
           | pending ->
-            (* Blob materialization performs filesystem I/O and therefore
-               stays on the owning Eio fiber rather than in the CPU domain
-               pool. *)
+            (* Blob materialization writes files, so it stays on the owning
+               Eio fiber rather than in the CPU domain pool. It sends its own
+               hashing to the pool: the store skips writing an address this
+               process already wrote, so on a long-lived keeper the sha256 over
+               every aged body was all this call did here, and it held this
+               domain for 0.7 to 1.6 seconds per request (2026-09-16 trace). *)
             let outcome =
               Keeper_model_input_demotion.materialize
                 ~store:(Tool_blob_store.create ~base_path:ctx.base_path)

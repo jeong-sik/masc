@@ -393,7 +393,10 @@ streaming = true
 [models.claude-code-sonnet.capabilities]
 supports-image-input = true
 
+# Two claude_code bindings ship, so scripted `--provider claude_code` needs one
+# named as the wizard's pick; the interactive wizard still lists both.
 [claude_code.claude-code-sonnet]
+wizard-default = true
 
 # Thinking depth on an official client is a model-level `reasoning-effort`, not
 # a capability: the CLI owns the wire, so MASC selects a level rather than

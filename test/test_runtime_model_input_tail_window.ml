@@ -99,6 +99,12 @@ let first_text (messages : Types.message list) =
   | _ -> "<none>"
 ;;
 
+let has_text ~prefix messages =
+  List.exists
+    (fun (m : Types.message) -> String.starts_with ~prefix (first_text [ m ]))
+    messages
+;;
+
 (* A capacity no synthetic history in this file can reach, for the cases that
    exercise structure rather than the budget. *)
 let unbounded_capacity = 100_000_000
@@ -907,20 +913,30 @@ let test_target_newest_atom_overrun_is_reported_not_refused () =
 ;;
 
 (* The newest-atom view is the smallest transmission that still carries the
-   turn: pinned context, the newest atom, and the preamble when that atom's
-   head is not a user message. *)
-let test_newest_atom_view_keeps_pinned_and_prepends_the_preamble () =
+   turn: pinned context, the atom that opened the conversation, and the newest
+   atom. The opening atom is kept so that a resume on a runtime whose density
+   has not been observed yet does not lose the instruction the chat was opened
+   with. *)
+let test_newest_atom_view_keeps_pinned_and_the_opening_atom () =
   let history = extra_context :: atoms 4 in
   let projection, transmitted_bytes =
     Window.project_newest_atom ~measure_message_bytes history
   in
-  Alcotest.(check int) "one atom" 1 (count_atoms projection.Window.messages);
-  Alcotest.(check int) "three atoms dropped" 3 projection.Window.dropped_atoms;
+  Alcotest.(check int) "two atoms" 2 (count_atoms projection.Window.messages);
+  Alcotest.(check int) "two atoms dropped" 2 projection.Window.dropped_atoms;
   Alcotest.(check int) "four atoms counted" 4 projection.Window.atom_count;
   Alcotest.(check bool)
-    "the newest atom opened with an assistant, so the preamble leads"
+    "the opening atom survives"
     true
-    (is_preamble (List.nth projection.Window.messages 0));
+    (has_text ~prefix:"user-0|" projection.Window.messages);
+  Alcotest.(check bool)
+    "the newest atom survives"
+    true
+    (has_text ~prefix:"assistant-3|" projection.Window.messages);
+  Alcotest.(check bool)
+    "no preamble: the opening atom is a user message"
+    false
+    (List.exists is_preamble projection.Window.messages);
   Alcotest.(check bool)
     "pinned context survives"
     true
@@ -934,8 +950,20 @@ let test_newest_atom_view_keeps_pinned_and_prepends_the_preamble () =
 let test_newest_atom_view_of_a_user_head_needs_no_preamble () =
   let history = atoms 3 in
   let projection, _ = Window.project_newest_atom ~measure_message_bytes history in
-  Alcotest.(check int) "one atom" 1 (count_atoms projection.Window.messages);
+  Alcotest.(check int) "two atoms" 2 (count_atoms projection.Window.messages);
   Alcotest.(check bool) "no preamble" false (List.exists is_preamble projection.Window.messages)
+;;
+
+(* A history cut upstream of AGENT_CORE can open with an orphan tool run; that
+   run is atom 0, so the opening atom is not a user message and the preamble
+   still leads. *)
+let test_newest_atom_view_prepends_the_preamble_for_an_orphan_opening () =
+  let history = [ tool 0; user 1; assistant 2 ] in
+  let projection, _ = Window.project_newest_atom ~measure_message_bytes history in
+  Alcotest.(check bool)
+    "the preamble leads"
+    true
+    (is_preamble (List.nth projection.Window.messages 0))
 ;;
 
 let () =
@@ -1016,10 +1044,14 @@ let () =
             test_target_fixed_parts_overrun_keeps_the_newest_atom
         ; Alcotest.test_case "target newest-atom overrun is reported, not refused" `Quick
             test_target_newest_atom_overrun_is_reported_not_refused
-        ; Alcotest.test_case "newest-atom view keeps pinned and prepends the preamble" `Quick
-            test_newest_atom_view_keeps_pinned_and_prepends_the_preamble
+        ; Alcotest.test_case "newest-atom view keeps pinned and the opening atom" `Quick
+            test_newest_atom_view_keeps_pinned_and_the_opening_atom
         ; Alcotest.test_case "newest-atom view of a user head needs no preamble" `Quick
             test_newest_atom_view_of_a_user_head_needs_no_preamble
+        ; Alcotest.test_case
+            "newest-atom view prepends the preamble for an orphan opening"
+            `Quick
+            test_newest_atom_view_prepends_the_preamble_for_an_orphan_opening
         ; Alcotest.test_case "deterministic" `Quick test_deterministic
         ] )
     ]

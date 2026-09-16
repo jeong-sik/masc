@@ -292,7 +292,9 @@ val project_newest_atom
   -> Agent_core.Types.message list
   -> projection * int
 (** The smallest transmission that still carries the turn: pinned messages,
-    the newest atom, and the preamble when the cut lands on a non-[User]
-    head. The second component is that view's measured bytes, as
-    [target_projection.transmitted_bytes] counts them. For a runtime whose
-    token density has not been observed yet. *)
+    the newest atom, the atom that opened the conversation, and the preamble
+    when the head is a non-[User] message. The opening atom is kept because a
+    runtime whose token density has not been observed yet is exactly the one a
+    resume may land on, and dropping it would lose the instruction the chat
+    was opened with. The second component is that view's measured bytes, as
+    [target_projection.transmitted_bytes] counts them. *)

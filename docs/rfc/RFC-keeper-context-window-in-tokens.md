@@ -274,6 +274,7 @@ origin/main 기준이다. 설정 검증, 최종 전송 바이트 검사, 로그�
 ## 8. 열린 질문
 
 1. chat-completions 호환 공급자에서 실측이 없는 요청(첫 턴, 모델 교체 직후)은 무엇으로 자르나.
+   - 결정(2026-09-16, task-1589 Fusion 심의 `kmsg-97ac093dc84309f12224ee760cf10fa8`): 실측이 없는(Unmeasured) 부트스트랩 경로만 좁혀 답한다. 부트스트랩 뷰(`project_newest_atom`)는 pinning된 문맥에 더해 원본 chat-operation이 연 최초 User atom(atom 0)과 최신 atom을 함께 보낸다. 이전 동작은 최신 atom 하나만 남겨 원본 지시를 생략 프리앰블로 치환했고, resume이 처음 쓰는 런타임으로 넘어가는 순간 그 지시가 모델에 도달하지 않았다(test_keeper_direct_runtime_resume가 잡은 결함). 측정된 창 경로와 공급자 overflow shrink는 바꾸지 않는다.
 2. 토큰 예산으로 자르면서 앞부분 흔들림을 어떻게 지금 이하로 유지하나. 지금 흔들림은 얼마인가.
 3. 창을 바인딩별로 둘지, Keeper별로 둘지.
 4. 브리핑 예산을 토큰 창 안에서 어떻게 나누나. 폴백 뒤 다시 맞추나.

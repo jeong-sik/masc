@@ -504,21 +504,52 @@ let project_target ~measure_message_bytes ~target_bytes ~reserved_bytes messages
     })
 ;;
 
+(* The bootstrap view for a runtime whose density has not been observed yet.
+   It keeps the pinned context, the newest atom, and -- unlike the measured
+   cut -- the atom that opened the conversation. A runtime we have never
+   measured is exactly the one a resume may land on, and dropping atom 0 there
+   would lose the instruction the chat was opened with while the model has no
+   other grounding for it. The two kept atoms are not adjacent, so this is not
+   a [drop] count; [dropped_atoms] still reports how many atoms are left out. *)
 let project_newest_atom ~measure_message_bytes messages =
   let labelled, atom_count = annotate messages in
   let pinned_bytes = pinned_bytes_of ~measure_message_bytes labelled in
   if atom_count = 0
   then { messages; dropped_atoms = 0; atom_count }, pinned_bytes
   else (
-    let _, suffix = atom_suffix_bytes ~measure_message_bytes ~atom_count labelled in
-    let drop = atom_count - 1 in
-    let assembled, preamble_prepended =
-      assemble_with_preamble ~allow_empty_history:false ~atom_count ~drop ~messages labelled
+    let per_atom, _suffix = atom_suffix_bytes ~measure_message_bytes ~atom_count labelled in
+    let newest = atom_count - 1 in
+    let kept_labelled =
+      List.filter
+        (fun (_msg, label) ->
+           match label with
+           | Pinned -> true
+           | Atom index -> index = 0 || index = newest)
+        labelled
     in
+    let kept = List.map fst kept_labelled in
+    let first_kept_atom_role =
+      List.find_map
+        (fun ((msg : Agent_core.Types.message), label) ->
+           match label with
+           | Atom _ -> Some msg.role
+           | Pinned -> None)
+        kept_labelled
+    in
+    let preamble_prepended =
+      match first_kept_atom_role with
+      | Some Agent_core.Types.User | None -> false
+      | Some Agent_core.Types.Assistant
+      | Some Agent_core.Types.Tool
+      | Some Agent_core.Types.System -> true
+    in
+    let assembled = if preamble_prepended then preamble_message :: kept else kept in
+    let kept_atoms = if atom_count = 1 then 1 else 2 in
     let transmitted_bytes =
       pinned_bytes
-      + suffix.(drop)
+      + per_atom.(0)
+      + (if newest = 0 then 0 else per_atom.(newest))
       + if preamble_prepended then measure_message_bytes preamble_message else 0
     in
-    { messages = assembled; dropped_atoms = drop; atom_count }, transmitted_bytes)
+    { messages = assembled; dropped_atoms = atom_count - kept_atoms; atom_count }, transmitted_bytes)
 ;;

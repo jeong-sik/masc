@@ -884,10 +884,11 @@ let test_a_recovered_backlog_answers_with_its_provenance () =
     Alcotest.(check int) "the rows are still rows" 1 (int_field "total" queue);
     Alcotest.(check bool) "nothing failed to read" true
       (member "backlog_error" queue = `Null);
-    Alcotest.(check bool) "but the answer says where it came from" true
+    Alcotest.(check string) "but the answer says where it came from"
+      "read from backlog.json.last-good: primary is bad json"
       (match member "backlog_recovery" queue with
-       | `String _ -> true
-       | _ -> false))
+       | `String detail -> detail
+       | _ -> Alcotest.fail "backlog_recovery is not a string"))
 
 (* Every arm of the queue view emits the same keys. A reader of
    [awaiting_unresolved_total] used to get a number on success and nothing at
@@ -912,12 +913,36 @@ let test_every_queue_answer_carries_the_same_keys () =
     let of_join join =
       queue_keys (D.requests_json ~base_path ~view:(D.Awaiting_operator join) ())
     in
+    let expected =
+      (* Pinned, not merely compared between the arms: three arms that all
+         emitted nothing would agree with each other and answer nobody. *)
+      [ "awaiting_unresolved"
+      ; "awaiting_unresolved_total"
+      ; "backlog_error"
+      ; "backlog_recovery"
+      ]
+    in
     let read = of_join (D.Backlog_read { live_request_ids = [] }) in
-    Alcotest.(check (list string)) "an unreadable backlog agrees" read
+    Alcotest.(check (list string)) "the queue names all four" expected read;
+    Alcotest.(check (list string)) "an unreadable backlog agrees" expected
       (of_join (D.Backlog_unreadable "backlog.json: bad json"));
-    Alcotest.(check (list string)) "a recovered one agrees" read
+    Alcotest.(check (list string)) "a recovered one agrees" expected
       (of_join
          (D.Backlog_recovered { live_request_ids = []; detail = "stale" })))
+
+(* The count is exact and the list is one page of it. Unbounded, the list rode
+   every page of every response. *)
+let test_the_unresolved_list_is_bounded_by_the_page () =
+  with_temp_base_path (fun base_path ->
+    let missing = List.init 5 (Printf.sprintf "vrf-missing-%d") in
+    let view =
+      D.Awaiting_operator (D.Backlog_read { live_request_ids = missing })
+    in
+    let queue = D.requests_json ~base_path ~limit:2 ~view () in
+    Alcotest.(check int) "the count is all of them" 5
+      (int_field "awaiting_unresolved_total" queue);
+    Alcotest.(check int) "the list is one page" 2
+      (List.length (string_list_field "awaiting_unresolved" queue)))
 
 (* ── Registration ───────────────────────────────────── *)
 
@@ -964,6 +989,8 @@ let () =
         test_a_recovered_backlog_answers_with_its_provenance;
       Alcotest.test_case "every answer carries the same keys" `Quick
         test_every_queue_answer_carries_the_same_keys;
+      Alcotest.test_case "the unresolved list is bounded by the page" `Quick
+        test_the_unresolved_list_is_bounded_by_the_page;
     ];
     "summary_json", [
       Alcotest.test_case "immutable submission count" `Quick

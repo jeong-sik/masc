@@ -1075,6 +1075,10 @@ type verification_snapshot = {
   vs_backlog_error : string option;
       (** Why the queue could not be resolved. An empty list carrying this is
           not an empty queue. *)
+  vs_backlog_recovery : string option;
+      (** Set when the queue came from a recovery snapshot rather than the
+          live backlog: the rows are real and as old as that snapshot, so
+          anything submitted after it is absent. *)
 }
 
 type keeper_phase

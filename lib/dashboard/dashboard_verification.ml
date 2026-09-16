@@ -26,10 +26,13 @@ let clamp_limit limit =
 (* An offset past the end yields an empty page rather than an error: a reader
    paging forward should land on "nothing further", not on a failure.
 
-   A negative offset lands on the first page. [List.drop] raises on a negative
-   count, so this clamp cannot be removed; the HTTP boundary refuses one
-   before it arrives, and an in-process caller that passes one gets the first
-   page rather than an exception. *)
+   A negative offset lands on the first page. Not for safety -- [List.drop]
+   returns the whole list on a negative count in 5.5 (it raised in 5.3 only) --
+   but for the numbers beside the page: an unclamped [-5] would be echoed as
+   [offset] and would make [truncated = total > offset + returned] compare
+   against a place the list does not have. The HTTP boundary refuses a
+   negative offset before it arrives; an in-process caller that passes one
+   gets the first page, reported as the first page. *)
 let clamp_offset offset = match offset with
   | Some n when n > 0 -> n
   | Some _ | None -> 0

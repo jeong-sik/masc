@@ -496,10 +496,12 @@ let test_tool_schema_bytes_stay_under_the_ceiling () =
       "model-visible tool schemas grew to %d bytes across %d tools, over the %d ceiling \
        by %d.\n\
        This inventory includes deferred tools; this check is not a runtime budget. \
-       This is the CLI lane's bill: an official-client turn carries all of it, because \
-       that transport answers requests and never originates, so no tool can be supplied \
-       mid-turn (runtime_official_client_mcp.ml). An agent_core-lane Keeper carries \
-       less -- a deferrable tool leaves its request for one listing. Trim the schema or \
+       This is what the CLI lane declares, not what a turn carries: masc cannot widen \
+       an official-client tool set mid-turn (runtime_official_client_mcp.ml), so every \
+       tool here is named at spawn -- but the client defers the schemas, and a turn \
+       carries the names plus whatever the model reaches for (RFC-0451 SS8.6). An \
+       agent_core-lane Keeper declares less: a deferrable tool leaves its request for \
+       one listing. Trim the schema or \
        the description, or raise ceiling_bytes in this file with the PR that needs the \
        room and say what it bought. Choosing the set per Keeper before the turn starts \
        is the open question: RFC-0451."

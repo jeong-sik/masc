@@ -178,6 +178,19 @@ type model_spec =
 
 (** {1 Layer 3: Binding} *)
 
+(** Where the keeper starts evicting carried history and where it stops, in
+    the provider's tokens of the whole request: prefix, carried atoms and
+    tail together, as the provider's [input_tokens] reports it (RFC
+    keeper-context-window-in-tokens §10.2, §10.5). Parsed as a pair so the
+    invariant [0 < low_water_tokens < high_water_tokens] holds by
+    construction; [high_water_tokens <= max-context] is checked once the model
+    is resolved ({!Runtime.validate_runtime_context_marks}). *)
+type context_marks =
+  { high_water_tokens : int  (** Eviction starts when the last measured total passes this. *)
+  ; low_water_tokens : int  (** Eviction stops once the projected total is at or below this. *)
+  }
+[@@deriving show, eq]
+
 type binding =
   { provider_id : string
   ; model_id : string
@@ -199,6 +212,13 @@ type binding =
             Undeclared means the gate passes every size, and the ceiling is then
             discovered only as a gateway 400 after the bytes are already on the
             wire — post-dispatch, where neither retry nor failover applies. *)
+  ; context_marks : context_marks option
+        (** [context-high-water-tokens] and [context-low-water-tokens] on the
+            binding table, declared together or not at all. Absent means the
+            keeper evicts carried history only when the provider refuses a
+            request; with the marks it evicts before that, from the oldest
+            measured block, down to the low-water mark. Tokens are this
+            model's, which is why the marks live on the binding. *)
   ; max_tokens : int option
         (** Request-side output budget for this binding ([max_tokens] on Chat
             Completions, [max_output_tokens] on Responses, [num_predict] on

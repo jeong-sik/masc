@@ -22647,7 +22647,13 @@ and is loaded on demand through keeper_skill.
            (* Reject wants a reason, and $EDITOR is the form we already
               have; the editor itself is the confirmation step. *)
            handle_verification_reject ()
-       | Some "h" when state.view = Verification ->
+       (* Refused while a load is in flight rather than changing the state
+          without sending a request: [launch_verification_load] returns early
+          when one is already out, so the view and the page would move while
+          the answer on its way stayed the old one, and the next refresh would
+          read a state nothing had asked the server for. *)
+       | Some "h"
+         when state.view = Verification && not state.verification_inflight ->
            (* The other list. The store keeps every submission ever made, so
               the history holds rows whose task finished weeks ago; the queue
               holds what a task is still waiting on. Asking which one is a
@@ -22659,7 +22665,8 @@ and is loaded on demand through keeper_skill.
            state.verification_offset <- 0;
            reset_verification_rows state;
            launch_verification_load state ~mailbox:async_messages
-       | Some ">" when state.view = Verification ->
+       | Some ">"
+         when state.view = Verification && not state.verification_inflight ->
            (* Forward only while the server says a further page exists, so the
               last page does not silently reload itself. *)
            (match state.verification with
@@ -22670,7 +22677,8 @@ and is loaded on demand through keeper_skill.
                 reset_verification_rows state;
                 launch_verification_load state ~mailbox:async_messages
             | Some _ | None -> ())
-       | Some "<" when state.view = Verification ->
+       | Some "<"
+         when state.view = Verification && not state.verification_inflight ->
            (match state.verification with
             | Some snapshot when snapshot.Masc.Tui_decode.vs_offset > 0 ->
                 (* Step back by the page that is on screen. A page shorter

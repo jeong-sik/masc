@@ -102,6 +102,11 @@ fail-closed disabled   runner over OpenSSH         per-keeper Firecracker VM
 
 ### 4.1 Phase 0 — disable the local playground (fail-closed)
 
+> **2026-08-31 — Phase 0 shipped and was then removed.** #32078/#32103 removed
+> the `Local` profile, the `Gate` module, and `MASC_EXEC_ALLOW_LOCAL_PLAYGROUND`
+> (see RFC-0394's 2026-08-31 note); `lib/config/feature_flag_registry.ml` was
+> deleted 2026-09-16 (#36813). The touch points below are a historical record.
+
 Touch points (all verified):
 
 1. `keeper_types_profile_sandbox.ml:74` — `default_sandbox_profile = Local`

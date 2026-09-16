@@ -274,11 +274,34 @@ let add_routes router =
                    Falling back to the unfiltered store would answer "what is
                    waiting on me" with every request ever submitted. *)
                 Dashboard_verification.Awaiting_operator
-                  (match Workspace_backlog.read_backlog_observation_r config with
-                   | Ok backlog ->
+                  (match
+                     Workspace_backlog
+                     .read_backlog_observation_with_source_r config
+                   with
+                   | Ok { Workspace_backlog.observed_backlog
+                        ; recovered_from = None
+                        } ->
                      Dashboard_verification.Backlog_read
                        { live_request_ids =
-                           Dashboard_verification.awaiting_request_ids backlog
+                           Dashboard_verification.awaiting_request_ids
+                             observed_backlog
+                       }
+                   | Ok { Workspace_backlog.observed_backlog
+                        ; recovered_from = Some recovery
+                        } ->
+                     (* The reader that drops this provenance answers [Ok] for
+                        a queue computed from a snapshot, which is a queue
+                        that looks current and is not: anything submitted
+                        after the snapshot is missing from it. *)
+                     Dashboard_verification.Backlog_recovered
+                       { live_request_ids =
+                           Dashboard_verification.awaiting_request_ids
+                             observed_backlog
+                       ; detail =
+                           Printf.sprintf
+                             "read from %s after the primary backlog failed: %s"
+                             recovery.Workspace_backlog.recovery_path
+                             recovery.Workspace_backlog.primary_error
                        }
                    | Error detail ->
                      Dashboard_verification.Backlog_unreadable detail)

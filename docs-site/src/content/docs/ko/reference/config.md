@@ -44,9 +44,10 @@ description: .masc/config/*.toml 파일의 스키마와 예시입니다.
 `llama_server`·`vllm`·`mlx_server` 는 주석 상태로 들어 있습니다 —
 [로컬 AI 모델 연결](/ko/runbooks/llama-server/) 참고.
 
-**시드된 바인딩은 모두 keeper-dispatchable 합니다.** 카탈로그에는 예시를 겸해 provider·모델
-쌍 31개가 있고 모두 Keeper 턴을 받을 수 있습니다. `max-request-body-bytes`는
-선택적인 호출자 제한이며, 생략하면 별도의 바이트 제한을 만들지 않습니다. `[runtime].default` 는 31개 안에 있습니다.
+**시드된 바인딩은 모두 Keeper 턴을 받을 수 있습니다.** 카탈로그에는 예시를 겸해 provider·모델
+쌍 31개가 있습니다. `[runtime].default` 는 31개 안에 있습니다. 요청이 너무 큰지는
+공급자가 판정합니다. masc 는 구성한 요청을 그대로 보내고, 거절되면 오래된 대화부터
+비우고 다시 보냅니다.
 
 ## runtime.toml
 
@@ -83,7 +84,6 @@ api-name = "deepseek-v4-flash"
 
 [deepseek.deepseek-v4-flash]
 wizard-default = true
-max-request-body-bytes = 1048576
 ```
 
 verifier 같은 역할은 `[roles]` 테이블이 아니라, lane 에 `<provider>.<model>` 슬롯을

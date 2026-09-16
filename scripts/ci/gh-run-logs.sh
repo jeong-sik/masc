@@ -86,22 +86,39 @@ jq -r '.jobs[] | "  \(.id)  \(.name)  \(.conclusion // .status)"' <<<"$jobs_json
 # "success" (set -e alone is not the contract — observed task-1595: a 0-byte
 # file landed while the pipe died quietly).
 fetch_log() {
-  local jid="$1" dest="$2" err code
+  local jid="$1" dest="$2" err code out
   err="$(mktemp)"
   # The body must land in $dest via redirection ON the gh call itself: gh
   # prints the raw log to its stdout, and a bare `cat` afterwards would read
-  # the caller's stdin instead (observed: 88-byte file holding a herestring
-  # line + the real log leaking to script stdout).
+  # the caller's stdin instead (observed task-1595: an 88-byte file holding
+  # a herestring line while the real log leaked to script stdout).
+  #
+  # Fallback (observed by code-reviewer on run 35040252284, job
+  # 104618294154): gh api can return HTTP 200 with an EMPTY body for job
+  # logs — suspected redirect gh does not follow. curl -sL follows it and
+  # fetched the full 4340-line log, so we treat an empty gh body as a
+  # fallback trigger, not as success.
   if [ "$dest" = "-" ]; then
-    if ! gh api --allow-escape-sequences "repos/$(repo_path)/actions/jobs/$jid/logs" 2>"$err"; then
+    out="$(gh api --allow-escape-sequences "repos/$(repo_path)/actions/jobs/$jid/logs" 2>"$err")" || {
       code="$(status_of_err "$err")"; rm -f "$err"
       die_auth "${code:-0}"
-    fi
+    }
     rm -f "$err"
+    if [ -z "$out" ] && command -v curl >/dev/null; then
+      out="$(curl -sL --max-time 90 -H "Authorization: Bearer $(gh auth token)" \
+        -H 'Accept: application/vnd.github+json' \
+        "https://api.github.com/repos/$(repo_path)/actions/jobs/$jid/logs")"
+    fi
+    printf '%s' "$out"
   else
     if ! gh api --allow-escape-sequences "repos/$(repo_path)/actions/jobs/$jid/logs" >"$dest" 2>"$err"; then
       code="$(status_of_err "$err")"; rm -f "$err"
       die_auth "${code:-0}"
+    fi
+    if [ ! -s "$dest" ] && command -v curl >/dev/null; then
+      curl -sL --max-time 90 -H "Authorization: Bearer $(gh auth token)" \
+        -H 'Accept: application/vnd.github+json' \
+        "https://api.github.com/repos/$(repo_path)/actions/jobs/$jid/logs" >"$dest"
     fi
     rm -f "$err"
     if [ ! -s "$dest" ]; then

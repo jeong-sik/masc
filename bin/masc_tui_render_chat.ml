@@ -717,7 +717,11 @@ let tool_detail_palette () : Tool_detail.palette =
   ; number = Masc_tui_theme.Syntax.json_number
   ; literal = Masc_tui_theme.Syntax.json_literal
   ; punctuation = Masc_tui_theme.Syntax.json_punctuation
-  ; reset = Ansi.reset
+    (* The pane opens these rows dim; a bare reset after the first painted
+       span would drop every following byte back to full weight. Close the
+       way the markdown palette closes: reset, then reopen the rung the tree
+       sits in. *)
+  ; reset = Ansi.reset ^ Ansi.dim
   }
 
 

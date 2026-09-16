@@ -94,7 +94,7 @@ protocol = "openai-compatible-http"
 endpoint = %S
 [models.sample]
 api-name = "stall-model"
-max-context = 8192
+max-context = 200000
 streaming = true
 [stall.sample]
 [turn]

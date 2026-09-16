@@ -23,7 +23,19 @@ type participant = {
 
 val default_limit : int
 
-(** [respond ~surface ~limit ~has_more messages] filters [messages] to
+(** Binding knowledge the runtime can prove (task-1596): the keeper's
+    bound channel ids/names per connector lane. When [respond] receives
+    it, labels the runtime can prove wrong are refused with the same
+    error shape as [Keeper_surface_post] ([{"error": …}]) instead of a
+    silent zero-row page: "slack"/"discord" when the keeper has no
+    bound channels there (post's doctrine, mirrored on the read side),
+    and any other non-core label absent from the loaded page's lane
+    labels — the refusal names the labels the page does carry. Core
+    lanes (dashboard/agent/broadcast/webhook) always pass; absent
+    bindings keep the projection pure and unverified. *)
+type connector_bindings = { slack : string list; discord : string list }
+
+(** [respond] filters [messages] to
     rows whose [source] label equals [surface] (trimmed, exact),
     returning a JSON object string: [{surface, messages, participants,
     lane_row_count, returned, has_more, oldest_ts?}].
@@ -40,8 +52,11 @@ val default_limit : int
       page carries no stamped rows.
     - Rows without a [source] label (written before source labelling)
       never match; the description of the tool says so.
-    - Blank [surface] is an error JSON, not a default lane. *)
+    - Blank [surface] is an error JSON, not a default lane.
+    - With [~bindings] (task-1596) a provably wrong label is refused
+      with [{"error": …}] — see [connector_bindings]. *)
 val respond :
+  ?bindings:connector_bindings ->
   surface:string ->
   limit:int ->
   has_more:bool ->

@@ -4,6 +4,7 @@
 데이터: `costs`, `keepers/*/turn-records`, `keepers/*/provider-inputs`, `keepers/*/execution-receipts` 의 2026-09-15·16(UTC) 파일 83개. 파일별 바이트·SHA-256 은 [증거 JSON](../evidence/prefix-cache-first-round-20260917.json)에 있다. 프롬프트 본문은 보고서에 넣지 않았다. 스냅샷 비교는 blob 참조가 이미 들고 있는 SHA-256 으로만 했다.
 재현: `python3 scripts/analysis/prefix-cache-first-round.py --masc-root <base> --date 2026-09-15 --date 2026-09-16 --deploy-at 2026-09-16T13:21:56Z --output <json>`.
 서버: 1c5645873e, 2026-09-16 13:21:56Z 시작. "배포 전/후" 는 이 시각으로 가른다.
+토큰: 공급자가 센 `input_tokens` 는 그대로 적었다. 거절돼 세어지지 않은 요청은 그 런타임의 실측 밀도로 ≈ 환산했다(완료 요청의 request_body_bytes ÷ input_tokens 중앙값, 2026-09-16: deepseek 3.65, glm 3.39, kimi 4.15 B/tok — kimi 는 완료 2건뿐).
 
 ## 판단
 
@@ -12,7 +13,7 @@
 3. **배포 전 첫 라운드 미스의 원인은 툴 배열이 아니라 이력의 머리가 매 턴 움직인 것이다.** 연속 두 턴의 요청 스냅샷에서 메시지 SHA 가 같은 접두사 길이(LCP)는 lane-smith 144쌍 중앙값 0.02, analyst 66쌍 0.02, pr-updater 52쌍 0.03 이었다. 첫 번째 메시지부터 달랐다. 바이트 예산으로 정확히 자르는 컷이 1~2 atom 씩 앞뒤로 흔들렸기 때문이다. 60 atom 단위의 quantized cut 은 방이 60 atom 보다 작아(lane-smith 11 atom) 한 번도 적용되지 않았다.
 4. **#36823 의 carried front 가 그것을 고쳤다.** 배포 후 deepseek 레인: lane-smith LCP 0.99(18쌍), pr-updater 0.99(30쌍), kidsnote-slack-context-collector 0.99(16쌍). 첫 라운드 미스 중앙값 77.2% → 31.7%(n=131), 미스 토큰 69k → 42k.
 5. **배포 후 남는 첫 라운드 미스는 꼬리·툴 변화·공급자 TTL 세 가지다.** 15분 이내에 툴이 같았던 59건은 중앙값 21% 미스로, `[system context]`(memory recall 약 40k 토큰)와 직전 턴의 마지막 메시지 크기다. 툴 배열이 달라진 12건은 83% 미스. 15분 넘게 쉰 뒤의 첫 라운드는 공급자 캐시가 죽어 전량 미스다(deepseek 15~60분 53%, 1시간+ 80%; glm 은 5~15분에서 이미 47%).
-6. **캐시보다 급한 것이 있다.** 배포 후 3.5시간, glm 머리 레인 keeper 의 완료가 jazz-developer 0/25, goo-yang-bong 0/18, analyst 0/10, msx-retro-mania 0/9 다. 원인 셋은 이슈로 냈다: kimi 후보가 매 턴 이력 전체(5~13 MB)를 받고 거절된다(#36860), deepseek 턴 27% 가 반복 생성으로 끝난다(#36861), glm 턴 35% 가 429 로 끝난다(#36862). 실패한 턴도 요청을 다 보낸 뒤 끝나므로, 이 셋을 두고 캐시를 다듬는 것은 새는 통에 물 붓기다.
+6. **캐시보다 급한 것이 있다.** 배포 후 3.5시간, glm 머리 레인 keeper 의 완료가 jazz-developer 0/25, goo-yang-bong 0/18, analyst 0/10, msx-retro-mania 0/9 다. 원인 셋은 이슈로 냈다: kimi 후보가 매 턴 이력 전체(≈1.2M~3.1M 토큰)를 받고 거절된다(#36860 — #36857 이 고쳤다, 아래 eee8f6aee8 절), deepseek 턴 27% 가 반복 생성으로 끝난다(#36861), glm 턴 35% 가 429 로 끝난다(#36862). 실패한 턴도 요청을 다 보낸 뒤 끝나므로, 이 셋을 두고 캐시를 다듬는 것은 새는 통에 물 붓기다.
 
 ## 숫자
 
@@ -40,20 +41,20 @@ glm 배포 후 18건은 표본이 작고 그중 대부분이 429 로 끝난 턴�
 
 스냅샷은 턴의 마지막 요청이다. `prev is prefix` 는 앞 턴의 메시지 목록 전체가 뒤 턴 목록의 접두사였던 쌍의 수. LCP 는 같은 접두사 길이를 앞 턴 길이로 나눈 값.
 
-| keeper | lane | 시기 | 쌍 | LCP 중앙값 | 첫 차이 위치 중앙값 | 본문 중앙값 B |
+| keeper | lane | 시기 | 쌍 | LCP 중앙값 | 첫 차이 위치 중앙값 | 본문 중앙값 (≈토큰) |
 |---|---|---|---:|---:|---:|---:|
-| lane-smith | ollama_cloud | 배포 전 | 144 | 0.02 | 1 | 282,518 |
-| lane-smith | ollama_cloud | 배포 후 | 18 | 0.99 | 80 | 244,840 |
-| pr-updater | ollama_cloud | 배포 전 | 52 | 0.03 | 1 | 305,328 |
-| pr-updater | ollama_cloud | 배포 후 | 30 | 0.99 | 7,702 | 12,911,403 |
-| analyst | ollama_cloud | 배포 전 | 66 | 0.02 | 1 | 274,525 |
-| analyst | ollama_cloud | 배포 후 | 8 | 0.06 | 1 | 260,542 |
-| goo-yang-bong | glm-coding | 배포 전 | 27 | 0.69 | 73 | 265,609 |
-| goo-yang-bong | glm-coding | 배포 후 | 7 | 0.04 | 1 | 564,378 |
-| kidsnote-slack-context-collector | ollama_cloud | 배포 전 | 73 | 0.96 | 66 | 239,379 |
-| kidsnote-slack-context-collector | ollama_cloud | 배포 후 | 16 | 0.99 | 96 | 340,632 |
+| lane-smith | ollama_cloud | 배포 전 | 144 | 0.02 | 1 | ≈77.4k (282,518 B) |
+| lane-smith | ollama_cloud | 배포 후 | 18 | 0.99 | 80 | ≈67.1k (244,840 B) |
+| pr-updater | ollama_cloud | 배포 전 | 52 | 0.03 | 1 | ≈83.7k (305,328 B) |
+| pr-updater | ollama_cloud | 배포 후 | 30 | 0.99 | 7,702 | ≈3.54M (12,911,403 B) |
+| analyst | ollama_cloud | 배포 전 | 66 | 0.02 | 1 | ≈75.2k (274,525 B) |
+| analyst | ollama_cloud | 배포 후 | 8 | 0.06 | 1 | ≈71.4k (260,542 B) |
+| goo-yang-bong | glm-coding | 배포 전 | 27 | 0.69 | 73 | ≈78.4k (265,609 B) |
+| goo-yang-bong | glm-coding | 배포 후 | 7 | 0.04 | 1 | ≈166.5k (564,378 B) |
+| kidsnote-slack-context-collector | ollama_cloud | 배포 전 | 73 | 0.96 | 66 | ≈65.6k (239,379 B) |
+| kidsnote-slack-context-collector | ollama_cloud | 배포 후 | 16 | 0.99 | 96 | ≈93.3k (340,632 B) |
 
-읽는 법. 배포 전 LCP 0.02 인 keeper 는 이력이 방보다 커서 정확 컷을 받던 keeper 다. 이력이 방에 다 들어가던 keeper(kidsnote-slack, geek-scout, critic)는 배포 전에도 0.95 였다. 배포 후 pr-updater 의 "0.99" 는 이력 전체 12.9 MB 를 매 턴 그대로 보낸 결과라 의미가 없다(#36860). analyst·goo-yang-bong 의 배포 후 0.04~0.06 은 거절 뒤 절반 내기가 매 턴 다른 위치에서 시작하기 때문이다(같은 이슈).
+읽는 법. 배포 전 LCP 0.02 인 keeper 는 이력이 방보다 커서 정확 컷을 받던 keeper 다. 이력이 방에 다 들어가던 keeper(kidsnote-slack, geek-scout, critic)는 배포 전에도 0.95 였다. 배포 후 pr-updater 의 "0.99" 는 이력 전체(≈3.5M 토큰)를 매 턴 그대로 보낸 결과라 의미가 없다(#36860). analyst·goo-yang-bong 의 배포 후 0.04~0.06 은 거절 뒤 절반 내기가 매 턴 다른 위치에서 시작하기 때문이다(같은 이슈).
 
 턴 3636→3637 의 lane-smith 스냅샷 머리를 보면 무엇이 흔들렸는지 보인다. 앞 턴은 `user 191B(wake), assistant 1656, tool 1067, assistant 4002, tool 963, assistant 5084, …`, 뒤 턴은 `user 302B([context window]), assistant 5084, tool 1087, …`. 다음 턴은 다시 두 메시지 앞으로, 그 다음은 wake 까지 돌아갔다.
 
@@ -124,10 +125,28 @@ glm 배포 후 18건은 표본이 작고 그중 대부분이 429 로 끝난 턴�
 
 위 표는 1c5645873e 기준이다. 그 뒤 805a61bd0e(#36854 조립 순서, #36782 부트스트랩 뷰 보존 포함)가 떴다. 17:16Z 까지 21분치는 표본이 작아 표로 만들지 않고 그대로 적는다.
 
-- `/next-request` 가 v3 스키마로 `assembly` 를 낸다. pr-updater deepseek 은 ledger 에서 seed 를 읽어 22/7,929 atom·176 KB 를 실을 예정이고, lane-smith 도 ledger 에서 20/5,083 atom·252 KB 다.
-- glm 머리 keeper 는 아직 옛 완료 record 에서 seed 를 읽는다: jazz-developer 312/3,626 atom·2.66 MB, goo-yang-bong 118/7,353 atom·1.03 MB. marks 가 선언되기 전의 record 라 앞선이 넓다. 세어진 응답이 한 번 오면 low-water 로 비워지므로 재시작마다 pair 당 큰 요청 하나가 든다.
-- kimi 후보는 여전히 이력 전체를 받는다: pr-updater 1건, 12,945,859 B, 7,927/7,927 atom (#36860).
+- `/next-request` 가 v3 스키마로 `assembly` 를 낸다. pr-updater deepseek 은 ledger 에서 seed 를 읽어 22/7,929 atom·≈48k 토큰을 실을 예정이고, lane-smith 도 ledger 에서 20/5,083 atom·≈69k 토큰이다.
+- glm 머리 keeper 는 아직 옛 완료 record 에서 seed 를 읽는다: jazz-developer 312/3,626 atom·≈784k 토큰, goo-yang-bong 118/7,353 atom·≈303k 토큰. marks 가 선언되기 전의 record 라 앞선이 넓다. 세어진 응답이 한 번 오면 low-water 로 비워지므로 재시작마다 pair 당 큰 요청 하나가 든다.
+- kimi 후보는 여전히 이력 전체를 받는다: pr-updater 1건, 7,927/7,927 atom, ≈3.12M 토큰 (#36860).
 - receipts 74건: claude-sonnet-5 55(성공 54), deepseek 10(repeated_reasoning_cycle 6, 성공 2, #36861), glm 7(429 가 6, 성공 1, #36862), k3 1(invalid_request).
+
+### 새 빌드 eee8f6aee8 (2026-09-16 17:21:25Z 시작, #36857 포함) 이후 25분
+
+#36857 은 냉시동 seed 를 (keeper, 런타임) 쌍의 완료 record 가 아니라 이력(trace)의 마지막 Agent Core 완료 record 에서 읽는다. 그래서 레인이 다음 후보로 넘어가도 이력 전체를 보내지 않는다. 25분치(17:21~17:46Z):
+
+| keeper | 요청 레인 | atom | 입력 토큰 | 끝 |
+|---|---|---:|---:|---|
+| pr-updater | deepseek | 20/7,930 | ≈33k | 거절 |
+| pr-updater | glm | 22~28/7,93x | ≈34k~37k | 429 ×3 |
+| analyst | deepseek | 32/6,368 | 64,543 (센 값) | 완료 |
+| won-chik | deepseek | 5/5 | 27,548 (센 값) | 완료 |
+| lane-smith | glm | 184/5,084 | ≈109k | 429 |
+| polisher | glm | 65/7,214 | ≈118k | 거절 |
+| lane-smith | **kimi** | 8/5,093 | 110,546 → 27,757 (센 값) | 완료 |
+
+- kimi 걸음이 확인됐다. lane-smith 턴 3794 는 kimi 에게 8 atom 을 보냈고 아홉 라운드 뒤 완료했다. 고치기 전 pr-updater 의 마지막 kimi 요청은 7,927/7,927 atom·≈3.12M 토큰이었다. #36860 은 닫았다.
+- 그 턴 안에서 marks 가 처음 실제로 움직이는 것이 보였다: 라운드 입력이 110,546 → 96k~101k 로 이어지다 101,176(고수위 100k 초과) 다음 라운드에 27,757 로 떨어졌다. Kimi 도 캐시를 읽는다(첫 라운드 110,546 중 93,440).
+- glm 429 와 deepseek 반복 생성은 그대로다(receipts: glm 3/3 429, deepseek 2 완료·1 반복).
 
 ## 기전
 
@@ -149,7 +168,7 @@ glm 배포 후 18건은 표본이 작고 그중 대부분이 429 로 끝난 턴�
 
 ## 순서
 
-**P0 — fleet 이 턴을 끝내게 한다.** #36860(kimi 후보의 이력 전체·절반 내기 승계), #36861(deepseek 반복 생성), #36862(glm 429). 캐시 수치는 실패한 요청도 다 세므로, 이 셋이 있는 한 어떤 캐시 개선도 측정할 수 없다.
+**P0 — fleet 이 턴을 끝내게 한다.** #36860(kimi 후보의 이력 전체)은 #36857 이 고쳤고 eee8f6aee8 에서 확인했다. 남은 것은 #36861(deepseek 반복 생성)과 #36862(glm 429)다. 캐시 수치는 실패한 요청도 다 세므로, 이 셋이 있는 한 어떤 캐시 개선도 측정할 수 없다.
 
 **P1 — marks 값.** 지금 100k/70k. 비우기 간격 30k ÷ 턴당 6k = 다섯 턴마다 앞선 이동 = 첫 라운드 다섯 번 중 한 번 전량 미스. deepseek 는 1M 컨텍스트에 cached 입력이 싸므로 간격을 넓힐 여지가 있다(예: 200k/120k 면 열세 턴). glm 은 캐시가 분 단위로 죽어 큰 창이 매 턴 전액 과금이니 지금 값을 두거나 줄인다. 값은 사용자가 정한다. 검증: 배포 후 첫 라운드 전량 미스 비율(지금 deepseek 15.3%).
 

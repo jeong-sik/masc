@@ -28,7 +28,9 @@
 #      deleted) or a REMOVED wire string label (`- let field_x = "x"` /
 #      deleted `"x",` row in an encoder/decoder), the gate fires.
 #   2. It passes only if the same diff ALSO carries one of:
-#      a. a version bump in a protected module (e.g. event-queue-v19 → v20),
+#      a. a version bump in a protected module (e.g. event-queue-v19 → v20;
+#         the diff must show the move — old version on a `-` line, new on a
+#         `+` line — a prose mention of the old name is not a bump),
 #      b. a new migration/strip/maintenance script for the store
 #         (scripts/**strip*.sh|.py / migrate / fix),
 #      c. an explicit `schema-compat:` justification line in the diff message
@@ -110,8 +112,25 @@ removed_wire_label() {
 
 version_bump() {
   # The vNN sentinel moved: event-queue-v19.json → v20 etc.
-  git -C "${REPO_ROOT}" diff -U0 "${DIFF_RANGE}" -- $PROTECTED 2>/dev/null \
-    | grep -E '^\+.*-(v[0-9]+)\.(json|jsonl)' -o | grep -vq '^$'
+  # A bump is a MOVE: the diff must show one version leaving (a `-` line
+  # carrying -vN.json(l)) and a different version arriving (a `+` line
+  # carrying -vM.json(l), M ≠ N). A mere MENTION of a sentinel on an added
+  # line (prose comment, quoted history) does not prove the version changed —
+  # it used to count as a bump and let a removal ride through without a
+  # compat story (task-1545, F4).
+  local old_v new_v v
+  old_v="$(git -C "${REPO_ROOT}" diff -U0 "${DIFF_RANGE}" -- $PROTECTED 2>/dev/null \
+    | grep -E '^-' | grep -Eo -- '-v[0-9]+\.(json|jsonl)' | grep -Eo '[0-9]+' | sort -u || true)"
+  new_v="$(git -C "${REPO_ROOT}" diff -U0 "${DIFF_RANGE}" -- $PROTECTED 2>/dev/null \
+    | grep -E '^\+' | grep -Eo -- '-v[0-9]+\.(json|jsonl)' | grep -Eo '[0-9]+' | sort -u || true)"
+  [ -n "${old_v}" ] || return 1
+  [ -n "${new_v}" ] || return 1
+  for v in ${new_v}; do
+    if ! printf '%s\n' ${old_v} | grep -qx -- "${v}"; then
+      return 0
+    fi
+  done
+  return 1
 }
 
 strip_or_migrate_added() {

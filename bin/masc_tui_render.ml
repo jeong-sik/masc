@@ -14772,17 +14772,22 @@ let render_help (state : state) =
 (* Rows the agenda panel can show, and how many it has. The keypress bounds
    the scroll from the same pair the frame draws with -- the shape
    [Masc_tui_scroll] exists to keep in one place. *)
+(* The panel's rows. Built in one place because three readers ask for them:
+   the viewport that bounds the scroll, the frame that draws them, and the
+   keypress that walks the ones Enter can act on. Three builders would be
+   three chances for the cursor to name a row the frame is not drawing. *)
+let agenda_lines (state : state) =
+  let _terminal_rows, cols = get_terminal_size () in
+  Agenda.overlay
+    ~now:(Unix.gettimeofday ())
+    ~localtime:Unix.localtime
+    ~cols:(framed_inner_width cols)
+    (Masc_tui_types.agenda state)
+
 let agenda_viewport (state : state) =
-  let terminal_rows, cols = get_terminal_size () in
+  let terminal_rows, _cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let lines =
-    Agenda.overlay
-      ~now:(Unix.gettimeofday ())
-      ~localtime:Unix.localtime
-      ~cols:(framed_inner_width cols)
-      (Masc_tui_types.agenda state)
-  in
-  (List.length lines, framed_content_height ~rows)
+  (List.length (agenda_lines state), framed_content_height ~rows)
 
 let answering_viewport (state : state) =
   let terminal_rows, _cols = get_terminal_size () in
@@ -14891,25 +14896,31 @@ let render_answering (state : state) =
    waiting on the operator, and the other overlays open on MASC and their name. *)
 let render_agenda (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let lines =
-    Agenda.overlay
-      ~now:(Unix.gettimeofday ())
-      ~localtime:Unix.localtime
-      ~cols:(framed_inner_width cols)
-      (Masc_tui_types.agenda state)
+  let lines = agenda_lines state in
+  let paint ~selected (line : Agenda.line) =
+    let body =
+      match line.Agenda.tone with
+      | Agenda.Heading -> Ansi.bold ^ line.Agenda.text ^ Ansi.reset
+      | Agenda.Wake -> (Theme.recede ()) ^ line.Agenda.text ^ Ansi.reset
+      | Agenda.Question -> (Theme.bad ()) ^ line.Agenda.text ^ Ansi.reset
+      | Agenda.Quiet -> Ansi.dim ^ line.Agenda.text ^ Ansi.reset
+      | Agenda.Failed -> (Theme.bad ()) ^ line.Agenda.text ^ Ansi.reset
+    in
+    (* Reversed rather than marked with a glyph: the rows are already fitted
+       to the column and a leading mark would push the right half off. *)
+    if selected then Ansi.reverse ^ body ^ Ansi.reset else body
   in
-  let paint (line : Agenda.line) =
-    match line.Agenda.tone with
-    | Agenda.Heading -> Ansi.bold ^ line.Agenda.text ^ Ansi.reset
-    | Agenda.Wake -> (Theme.recede ()) ^ line.Agenda.text ^ Ansi.reset
-    | Agenda.Question -> (Theme.bad ()) ^ line.Agenda.text ^ Ansi.reset
-    | Agenda.Quiet -> Ansi.dim ^ line.Agenda.text ^ Ansi.reset
-    | Agenda.Failed -> (Theme.bad ()) ^ line.Agenda.text ^ Ansi.reset
+  (* A panel with nothing to open says so on its own footer rather than
+     naming a key that would do nothing. *)
+  let hints =
+    match Agenda.target_indexes lines with
+    | [] -> "j/k:scroll  Esc:close"
+    | _ -> "j/k:move  Enter:open  Esc:close"
   in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"agenda"
     ~frame:Chrome_overlay
     ~title:(screen_title " MASC Agenda")
-    ~hints:"j/k:scroll  Esc:close"
+    ~hints
     ~body:(fun ~budget c ->
       let scroll =
         Masc_tui_scroll.normalize
@@ -14917,7 +14928,8 @@ let render_agenda (state : state) =
       in
       List.iteri
         (fun index line ->
-          if index >= scroll && index < scroll + budget then c.push (paint line))
+          if index >= scroll && index < scroll + budget then
+            c.push (paint ~selected:(index = state.agenda_cursor) line))
         lines)
 ;;
 

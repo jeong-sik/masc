@@ -608,6 +608,12 @@ let () =
   let schedule_retention_longest_days = 365 in
 
   let test_schedule_retention_default_and_bounds () =
+    (* An assertion that fails inside this case would otherwise leave its
+       override standing for the rest of the executable. *)
+    Fun.protect
+      ~finally:(fun () ->
+        Runtime_params.clear Runtime_settings.schedule_terminal_retention_days)
+    @@ fun () ->
     Alcotest.(check int) "a process with no override keeps a finished schedule this long"
       schedule_retention_default_days
       (Runtime_params.get Runtime_settings.schedule_terminal_retention_days);

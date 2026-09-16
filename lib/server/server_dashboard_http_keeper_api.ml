@@ -935,8 +935,18 @@ let handle_keeper_get_subroutes state req request reqd =
         (error_json (Printf.sprintf "invalid keeper name: %s" name))
     else
       let config = Mcp_server.workspace_config state in
-      Server_auth.respond_json_value_with_cors ~status:`OK request reqd
+      (* The body is hundreds of KB for a tool-heavy keeper (845 KB measured)
+         and the TUI polls it. Serialising it, hashing it for its validator
+         and compressing it held the main domain on every poll, so that runs
+         on the CPU executor. Responses in general stay on the serving fiber:
+         the executor also runs dashboard computes, and a timeout or error
+         answer must not wait behind them. *)
+      Http.Response.json_value_on_cpu
+        ~status:`OK
+        ~request
+        ~extra_headers:(Server_auth.cors_headers (Server_auth.get_origin request))
         (cached_keeper_chat_history_json config name)
+        reqd
   else if ends_with "/person-notes" then
     (* RFC-0229 P2: keeper-authored person notes for the roster pane.
        Read-only fold over the notes store; same shape as the tool

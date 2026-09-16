@@ -3001,6 +3001,161 @@ let test_runtime_toml_separates_wizard_default_from_runtime_default_marker () =
     check bool "wizard-default parsed separately" true
       wizard_default.Runtime_schema.wizard_default
 
+let context_marks_config ~high ~low =
+  Printf.sprintf
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     is-default = true\n\
+     %s%s\n\
+     [runtime]\n\
+     default = \"local.sample\"\n"
+    (match high with
+     | Some n -> Printf.sprintf "context-high-water-tokens = %d\n" n
+     | None -> "")
+    (match low with
+     | Some n -> Printf.sprintf "context-low-water-tokens = %d\n" n
+     | None -> "")
+;;
+
+let render_parse_errors errs =
+  errs
+  |> List.map (fun (err : Runtime_toml.parse_error) ->
+    Printf.sprintf "%s: %s" err.path err.message)
+  |> String.concat "\n"
+;;
+
+let sample_binding (cfg : Runtime_schema.config) =
+  match
+    List.find_opt
+      (fun (binding : Runtime_schema.binding) ->
+        String.equal (Runtime_schema.binding_key binding) "local.sample")
+      cfg.Runtime_schema.bindings
+  with
+  | Some binding -> binding
+  | None -> fail "missing binding local.sample"
+;;
+
+let test_runtime_toml_parses_context_marks_as_a_pair () =
+  match Runtime_toml.parse_string (context_marks_config ~high:(Some 900) ~low:(Some 300)) with
+  | Error errs -> failf "both marks should parse:\n%s" (render_parse_errors errs)
+  | Ok cfg ->
+    (match (sample_binding cfg).Runtime_schema.context_marks with
+     | Some { Runtime_schema.high_water_tokens; low_water_tokens } ->
+       check int "high water" 900 high_water_tokens;
+       check int "low water" 300 low_water_tokens
+     | None -> fail "marks declared but not parsed");
+    (match Runtime_toml.parse_string (context_marks_config ~high:None ~low:None) with
+     | Error errs -> failf "no marks should parse:\n%s" (render_parse_errors errs)
+     | Ok cfg ->
+       check bool "absent marks stay absent" true
+         (Option.is_none (sample_binding cfg).Runtime_schema.context_marks))
+;;
+
+let test_runtime_toml_rejects_half_declared_context_marks () =
+  let expect_error_at ~high ~low path_suffix =
+    match Runtime_toml.parse_string (context_marks_config ~high ~low) with
+    | Ok _ -> fail "a half declaration must not parse"
+    | Error errs ->
+      check bool
+        (Printf.sprintf "error names %s" path_suffix)
+        true
+        (List.exists
+           (fun (err : Runtime_toml.parse_error) ->
+             String.equal err.path ("local.sample" ^ path_suffix))
+           errs)
+  in
+  expect_error_at ~high:(Some 900) ~low:None ".context-low-water-tokens";
+  expect_error_at ~high:None ~low:(Some 300) ".context-high-water-tokens"
+;;
+
+let test_runtime_toml_reports_both_mistyped_context_marks () =
+  let content =
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     is-default = true\n\
+     context-high-water-tokens = \"nine hundred\"\n\
+     context-low-water-tokens = \"three hundred\"\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n"
+  in
+  match Runtime_toml.parse_string content with
+  | Ok _ -> fail "strings are not token counts"
+  | Error errs ->
+    let names path =
+      List.exists (fun (err : Runtime_toml.parse_error) -> String.equal err.path path) errs
+    in
+    check bool "high-water error kept" true (names "local.sample.context-high-water-tokens");
+    check bool "low-water error kept" true (names "local.sample.context-low-water-tokens")
+;;
+
+let test_runtime_context_marks_failure_renders_both_numbers () =
+  let text =
+    Runtime.to_diagnostic_text
+      ~config_path:"runtime.toml"
+      (Runtime.Context_marks_exceed_max_context
+         { runtime_id = "local.sample"; high_water_tokens = 2_048; max_context = 1_024 })
+  in
+  let mentions needle =
+    let n = String.length needle and l = String.length text in
+    let rec go i = i + n <= l && (String.equal (String.sub text i n) needle || go (i + 1)) in
+    go 0
+  in
+  check bool "names the runtime" true (mentions "local.sample");
+  check bool "states the mark" true (mentions "2048");
+  check bool "states the model context" true (mentions "1024")
+;;
+
+let test_runtime_toml_rejects_context_marks_out_of_order () =
+  let expect_refused ~high ~low =
+    match Runtime_toml.parse_string (context_marks_config ~high:(Some high) ~low:(Some low)) with
+    | Ok _ -> failf "low=%d high=%d must not parse" low high
+    | Error errs ->
+      check bool "error names the low-water key" true
+        (List.exists
+           (fun (err : Runtime_toml.parse_error) ->
+             String.equal err.path "local.sample.context-low-water-tokens")
+           errs)
+  in
+  expect_refused ~high:500 ~low:500;
+  expect_refused ~high:500 ~low:600;
+  expect_refused ~high:500 ~low:0
+;;
+
+let test_runtime_refuses_context_marks_above_max_context () =
+  let materialize ~high ~low =
+    match Runtime_toml.parse_string (context_marks_config ~high:(Some high) ~low:(Some low)) with
+    | Error errs -> failf "marks should parse:\n%s" (render_parse_errors errs)
+    | Ok cfg ->
+      (match Runtime.of_binding cfg (sample_binding cfg) with
+       | Ok rt -> rt
+       | Error _ -> fail "local.sample should materialize")
+  in
+  (match Runtime.validate_runtime_context_marks [ materialize ~high:2_048 ~low:300 ] with
+   | Error (Runtime.Context_marks_exceed_max_context { high_water_tokens; max_context; _ }) ->
+     check int "the mark" 2_048 high_water_tokens;
+     check int "the model's context" 1_024 max_context
+   | Error _ -> fail "expected the marks failure"
+   | Ok () -> fail "a high-water mark above max-context must be refused");
+  match Runtime.validate_runtime_context_marks [ materialize ~high:900 ~low:300 ] with
+  | Ok () -> ()
+  | Error _ -> fail "marks within max-context must pass"
+;;
+
 let test_runtime_toml_rejects_non_positive_max_concurrent () =
   let template n =
     Printf.sprintf
@@ -3622,6 +3777,7 @@ let test_of_binding_reports_an_undeclared_provider () =
     ; wizard_default = false
     ; max_concurrent = None
     ; max_request_body_bytes = None
+    ; context_marks = None
     ; max_tokens = None
     ; price_input = None
     ; price_output = None
@@ -5437,6 +5593,18 @@ let () =
             test_runtime_toml_parses_optional_max_concurrent;
           test_case "wizard-default is separate from runtime default marker" `Quick
             test_runtime_toml_separates_wizard_default_from_runtime_default_marker;
+          test_case "context marks parse as a pair" `Quick
+            test_runtime_toml_parses_context_marks_as_a_pair;
+          test_case "context marks refuse a half declaration" `Quick
+            test_runtime_toml_rejects_half_declared_context_marks;
+          test_case "context marks refuse low at or above high" `Quick
+            test_runtime_toml_rejects_context_marks_out_of_order;
+          test_case "context high-water above max-context is refused at load" `Quick
+            test_runtime_refuses_context_marks_above_max_context;
+          test_case "both context marks mistyped report both keys" `Quick
+            test_runtime_toml_reports_both_mistyped_context_marks;
+          test_case "context marks failure renders its numbers" `Quick
+            test_runtime_context_marks_failure_renders_both_numbers;
           test_case "non-positive max-concurrent is rejected" `Quick
             test_runtime_toml_rejects_non_positive_max_concurrent;
           test_case "max-concurrent flows from binding to provider config" `Quick

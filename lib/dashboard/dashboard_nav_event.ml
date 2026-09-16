@@ -41,7 +41,6 @@ let valid_sections =
       ; "lanes"
       ; "lane-addons"
       ; "transport-health"
-      ; "feature-health"
       ; "journey"
       ; "skills"
       ] )

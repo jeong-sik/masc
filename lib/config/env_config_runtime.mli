@@ -6,8 +6,8 @@
 
     Most fields are module-level [let] bindings cached at process
     startup; the few [unit ->] thunks document re-readable values
-    that operators may flip at runtime (feature flags via
-    {!Feature_flag_registry}, optional env-vars). *)
+    that operators may flip at runtime (boolean env flags,
+    optional env-vars). *)
 
 (** {1 Session} *)
 

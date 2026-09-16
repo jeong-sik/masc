@@ -99,11 +99,6 @@ function HiddenDiagnosticsLinks() {
       detail: 'SSE/gRPC/WebSocket connection freshness.',
       section: 'transport-health',
     },
-    {
-      label: 'Feature cleanup',
-      detail: 'Feature flag rollout, inactive, and deprecated states.',
-      section: 'feature-health',
-    },
   ]
   return html`
     <section

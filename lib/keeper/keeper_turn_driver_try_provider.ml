@@ -894,7 +894,10 @@ let bounded_model_input_projection
                  the RFC-0363 demotion effect can be measured on and off in
                  one deployment. Default on preserves current behavior. *)
               ~base_path:
-                (if Feature_flag_registry.get_bool "MASC_KEEPER_MODEL_INPUT_DEMOTION_ENABLED"
+                (if
+                   Env_config_core.get_bool
+                     ~default:true
+                     "MASC_KEEPER_MODEL_INPUT_DEMOTION_ENABLED"
                  then ctx.base_path
                  else "")
               ~demote_before
@@ -1683,6 +1686,17 @@ let run_try_provider_with_context_overflow_shrink
     (* The validated semantic view owns retained source obligations. Retrying
        the same view with a smaller window cannot recover it. Final
        serialized request admission still enforces the request-body cap. *)
+    run_try_provider ?continuation_checkpoint ctx candidate
+  (* #34163's guard, restated in the token-window era (#36709): a runtime the
+     caller left uncapped never declared a wire envelope to shrink, so this
+     policy must not invent a token seed for it either. The declared window
+     stays the one view; a typed provider overflow on it keeps its typed
+     result for the declared-lane candidate walk, which is the only move the
+     caller actually budgeted for. Halving from the 85,000-token default
+     otherwise walks the whole chain to a zero-capacity attempt (18 refusals
+     measured on run 35046296737) with no density observation to stop it
+     early -- exactly the rediscovery this policy exists to prevent. *)
+  | None when ctx.max_request_body_bytes = None ->
     run_try_provider ?continuation_checkpoint ctx candidate
   | None ->
   let declared_window = ctx.model_input_window in

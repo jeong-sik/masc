@@ -769,13 +769,24 @@ let attempt_runtime_candidates
               pre_tool_use rejections gets its own terminal label — the
               model's correction round-trip was the visible casualty.
               Disposition is identical to the plain fence. *)
+           (* RFC-0454 D1: the fenced attempt's cause is the value that failed
+              it. A MASC error arrives on the carrier and is kept whole;
+              anything else is agent-core's typed projection. Rendering the
+              error here put its own prefixed JSON inside this envelope's
+              JSON, one layer of escaping per wrap. *)
+           let cause =
+             match classify_masc_internal_error error with
+             | Some masc -> Fenced_masc masc
+             | None ->
+               Fenced_core (Keeper_request_failure_core.of_core_error error)
+           in
            (match !pre_tool_rejects with
             | [] ->
               core_error_of_masc_internal_error
                 (Provider_attempt_effect_fenced
                    { runtime_id = attempt_runtime_id
                    ; effect_disposition
-                   ; diagnostic = Agent_core.Error.to_string error
+                   ; cause
                    })
             | rejects ->
               core_error_of_masc_internal_error
@@ -783,7 +794,7 @@ let attempt_runtime_candidates
                    { runtime_id = attempt_runtime_id
                    ; effect_disposition
                    ; reject_count = List.length rejects
-                   ; diagnostic = Agent_core.Error.to_string error
+                   ; cause
                    }))
        in
        let allow_accept_no_progress_retry =

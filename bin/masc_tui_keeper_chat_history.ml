@@ -167,7 +167,22 @@ let interruption_of_failure text =
         | exception Yojson.Json_error _ -> direct_cause ()
         | `Assoc fields
           when string_field fields "kind" = Some "provider_attempt_effect_fenced" ->
-          let diagnostic = Option.value ~default:"" (string_field fields "diagnostic") in
+          (* RFC-0454 P1b: the fence carries a typed cause. Its [Fenced_core]
+             arm holds agent-core's rendered message, which is where the two
+             runtime conditions below are still spelled out; a [Fenced_masc]
+             cause is a MASC error and is neither of them. Removing this
+             search is P3, once the runtime stops flattening
+             [Runtime_shutting_down] into a string. *)
+          let diagnostic =
+            match List.assoc_opt "cause" fields with
+            | Some (`Assoc cause_fields)
+              when string_field cause_fields "kind" = Some "fenced_core" ->
+              (match List.assoc_opt "core" cause_fields with
+               | Some (`Assoc core_fields) ->
+                 Option.value ~default:"" (string_field core_fields "message")
+               | Some _ | None -> "")
+            | Some _ | None -> ""
+          in
           let cause =
             if
               Option.is_some

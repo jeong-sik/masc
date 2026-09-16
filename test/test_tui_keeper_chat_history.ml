@@ -353,10 +353,28 @@ let test_a_failed_turn_names_the_request_it_came_from () =
     (List.map (fun r -> origin_request_id r.History.kind) decoded.History.rows)
 ;;
 
-let fenced_failure diagnostic =
+(* The shape [Keeper_internal_error] writes since RFC-0454 P1b: the fence
+   carries a typed cause, and its [fenced_core] arm holds agent-core's own
+   message. Built by hand here so the row is exactly what the server persists;
+   the producer lives in [Keeper_turn_driver]. *)
+let fenced_failure message =
   Printf.sprintf
-    "Keeper request failed: Internal error: [masc_agent_core_error] {\"kind\":\"provider_attempt_effect_fenced\",\"runtime_id\":\"codex_subscription.gpt-5.6-luna\",\"effect_disposition\":\"effect_attempted\",\"diagnostic\":%s}"
-    (Yojson.Safe.to_string (`String diagnostic))
+    "Keeper request failed: Internal error: [masc_agent_core_error] %s"
+    (Yojson.Safe.to_string
+       (`Assoc
+           [ "kind", `String "provider_attempt_effect_fenced"
+           ; "runtime_id", `String "codex_subscription.gpt-5.6-luna"
+           ; "effect_disposition", `String "effect_attempted"
+           ; ( "cause"
+             , `Assoc
+                 [ "kind", `String "fenced_core"
+                 ; ( "core"
+                   , `Assoc
+                       [ "category", `String "internal"
+                       ; "message", `String message
+                       ] )
+                 ] )
+           ]))
 ;;
 
 let test_runtime_interruption_becomes_a_recovered_lifecycle () =

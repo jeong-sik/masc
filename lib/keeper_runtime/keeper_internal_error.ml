@@ -229,7 +229,20 @@ let gate_replay_repair_stage_of_string = function
   | _ -> None
 ;;
 
-type masc_internal_error =
+(* RFC-0454 D1. The fence wraps whatever failed the provider attempt, and that
+   can be another MASC error. Written as a string, the inner error's own
+   prefixed JSON landed inside a JSON string and every wrap added a layer of
+   escaping. [fenced_cause] and [masc_internal_error] are declared together
+   because the recursion is real -- a fence may carry a terminal effect
+   failure, which may carry nothing else -- and OCaml has no module-level
+   recursion short of recursive modules. [Keeper_request_failure_core] stays a
+   separate module for the opposite reason: it carries no MASC error, so
+   [Keeper_terminal_effect_detail] can name it without a cycle. *)
+type fenced_cause =
+  | Fenced_masc of masc_internal_error
+  | Fenced_core of Keeper_request_failure_core.t
+
+and masc_internal_error =
   | Runtime_exhausted of {
       runtime_id : string;
       reason : runtime_exhaustion_reason;
@@ -289,13 +302,13 @@ type masc_internal_error =
   | Provider_attempt_effect_fenced of {
       runtime_id : string;
       effect_disposition : Keeper_provider_attempt_effect_core.t;
-      diagnostic : string;
+      cause : fenced_cause;
     }
   | Tool_correction_lost of {
       runtime_id : string;
       effect_disposition : Keeper_provider_attempt_effect_core.t;
       reject_count : int;
-      diagnostic : string;
+      cause : fenced_cause;
     }
   | Receipt_persistence_failed of {
       detail : string;
@@ -387,7 +400,16 @@ let transport_error_kind_json_fields = function
   | Some kind -> [ "transport_error_kind", `String (network_error_kind_to_string kind) ]
 ;;
 
-let masc_internal_error_to_json = function
+let rec fenced_cause_to_json = function
+  | Fenced_masc error ->
+    `Assoc [ "kind", `String "fenced_masc"; "error", masc_internal_error_to_json error ]
+  | Fenced_core core ->
+    `Assoc
+      [ "kind", `String "fenced_core"
+      ; "core", Keeper_request_failure_core.to_yojson core
+      ]
+
+and masc_internal_error_to_json = function
   | Runtime_exhausted { runtime_id; reason } ->
     let runtime_id = runtime_id_to_string runtime_id in
     `Assoc
@@ -484,24 +506,22 @@ let masc_internal_error_to_json = function
         );
         ("detail", Keeper_terminal_effect_detail.to_yojson detail);
       ]
-  | Provider_attempt_effect_fenced
-      { runtime_id; effect_disposition; diagnostic } ->
+  | Provider_attempt_effect_fenced { runtime_id; effect_disposition; cause } ->
     `Assoc
       [ "kind", `String provider_attempt_effect_fenced_kind
       ; "runtime_id", `String runtime_id
       ; ( "effect_disposition"
         , `String (Keeper_provider_attempt_effect_core.to_string effect_disposition) )
-      ; "diagnostic", `String diagnostic
+      ; "cause", fenced_cause_to_json cause
       ]
-  | Tool_correction_lost
-      { runtime_id; effect_disposition; reject_count; diagnostic } ->
+  | Tool_correction_lost { runtime_id; effect_disposition; reject_count; cause } ->
     `Assoc
       [ "kind", `String tool_correction_lost_kind
       ; "runtime_id", `String runtime_id
       ; ( "effect_disposition"
         , `String (Keeper_provider_attempt_effect_core.to_string effect_disposition) )
       ; "reject_count", `Int reject_count
-      ; "diagnostic", `String diagnostic
+      ; "cause", fenced_cause_to_json cause
       ]
   | Receipt_persistence_failed { detail } ->
     `Assoc
@@ -847,12 +867,34 @@ let core_error_of_masc_internal_error err =
 (* Reverse direction: agent-core envelope -> typed variant.                  *)
 (* ------------------------------------------------------------------ *)
 
-let parse_masc_internal_error_json (json : Yojson.Safe.t) :
+let exact_fields expected fields =
+  let sort = List.sort String.compare in
+  sort expected = sort (List.map fst fields)
+;;
+
+let rec parse_fenced_cause_json (json : Yojson.Safe.t) : fenced_cause option =
+  match json with
+  | `Assoc fields -> (
+      match List.assoc_opt "kind" fields with
+      | Some (`String "fenced_masc") when exact_fields [ "kind"; "error" ] fields ->
+        Option.bind
+          (List.assoc_opt "error" fields)
+          (fun error ->
+             Option.map
+               (fun error -> Fenced_masc error)
+               (parse_masc_internal_error_json error))
+      | Some (`String "fenced_core") when exact_fields [ "kind"; "core" ] fields ->
+        Option.bind
+          (List.assoc_opt "core" fields)
+          (fun core ->
+             match Keeper_request_failure_core.of_yojson core with
+             | Ok core -> Some (Fenced_core core)
+             | Error _ -> None)
+      | _ -> None)
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
+
+and parse_masc_internal_error_json (json : Yojson.Safe.t) :
     masc_internal_error option =
-  let exact_fields expected fields =
-    let sort = List.sort String.compare in
-    sort expected = sort (List.map fst fields)
-  in
   let int_opt_of_assoc key = function
     | `Assoc fields -> (
         match List.assoc_opt key fields with
@@ -1017,18 +1059,18 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
       | Some (`String kind)
         when String.equal kind provider_attempt_effect_fenced_kind
              && exact_fields
-                  [ "kind"; "runtime_id"; "effect_disposition"; "diagnostic" ]
+                  [ "kind"; "runtime_id"; "effect_disposition"; "cause" ]
                   fields ->
         (match
            string_opt_of_assoc "runtime_id" json,
            string_opt_of_assoc "effect_disposition" json,
-           string_opt_of_assoc "diagnostic" json
+           Option.bind (List.assoc_opt "cause" fields) parse_fenced_cause_json
          with
-         | Some runtime_id, Some effect_disposition, Some diagnostic ->
+         | Some runtime_id, Some effect_disposition, Some cause ->
            Option.map
              (fun effect_disposition ->
                 Provider_attempt_effect_fenced
-                  { runtime_id; effect_disposition; diagnostic })
+                  { runtime_id; effect_disposition; cause })
              (Keeper_provider_attempt_effect_core.of_string effect_disposition)
          | _ -> None)
       | Some (`String kind)
@@ -1038,21 +1080,21 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                   ; "runtime_id"
                   ; "effect_disposition"
                   ; "reject_count"
-                  ; "diagnostic"
+                  ; "cause"
                   ]
                   fields ->
         (match
            string_opt_of_assoc "runtime_id" json,
            string_opt_of_assoc "effect_disposition" json,
            List.assoc_opt "reject_count" fields,
-           string_opt_of_assoc "diagnostic" json
+           Option.bind (List.assoc_opt "cause" fields) parse_fenced_cause_json
          with
          | Some runtime_id, Some effect_disposition, Some (`Int reject_count),
-           Some diagnostic ->
+           Some cause ->
            Option.map
              (fun effect_disposition ->
                 Tool_correction_lost
-                  { runtime_id; effect_disposition; reject_count; diagnostic })
+                  { runtime_id; effect_disposition; reject_count; cause })
              (Keeper_provider_attempt_effect_core.of_string effect_disposition)
          | _ -> None)
       | Some (`String "receipt_persistence_failed") -> (

@@ -524,8 +524,9 @@ let test_scoped_boundary_error_stops_immediately () =
              effect_disposition = Tool_result.Effect_outcome_unknown;
              detail =
                Keeper_terminal_effect_detail.Boundary_observation_failed
-                 { model_tool_name = "effect"; message } as detail } } as stop) ->
-         check (option string) "exact failure retained" (Some message) !terminal_error;
+                 { model_tool_name = "effect"; cause } as detail } } as stop) ->
+         check (option string) "exact failure retained"
+           (Some cause.Keeper_request_failure_core.message) !terminal_error;
          (match Host.host_stop_result ~runtime_id:runtime_label ~model:"fixture"
              ~session_id:"session" ~turn_id:"turn" ~turns_used:1
              ~latency_ms:None ~usage:None stop with

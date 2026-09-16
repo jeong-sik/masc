@@ -1146,7 +1146,10 @@ let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_app
                        ; effect_disposition = Tool_result.Effect_outcome_unknown
                        ; detail =
                            Keeper_terminal_effect_detail.Boundary_observation_failed
-                             { model_tool_name = tool.schema.name; message = detail }
+                             { model_tool_name = tool.schema.name
+                             ; cause =
+                                 Keeper_request_failure_core.of_core_error error
+                             }
                        }
                    })
              in

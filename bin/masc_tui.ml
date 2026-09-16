@@ -14103,6 +14103,16 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             (Printf.sprintf "journal for %s not readable: %s"
                (Keeper_chat.compact_request_id operation_id)
                (Keeper_chat.terminal_safe_text detail))
+      | Error (Keeper_chat_log.Cursor_refused _ as refusal) ->
+          (* The positions this read held no longer place in the journal: it
+             was replaced or shortened while its pages were read. Not
+             remembered — the next load starts from the first row, which holds
+             no cursor to refuse. *)
+          add_event state "error"
+            (Printf.sprintf "journal for %s: %s"
+               (Keeper_chat.compact_request_id operation_id)
+               (Keeper_chat.terminal_safe_text
+                  (Keeper_chat_log.events_error_to_string refusal)))
       | Error (Keeper_chat_log.Events_refused detail) ->
           (* This client's credential, not this journal: said once, and no
              journal is asked for again this session. *)

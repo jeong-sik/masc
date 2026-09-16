@@ -165,19 +165,24 @@ val replay_position_advance : replay_position -> int -> replay_position
     events page). On the request the field ([since_offset]) is absent for the
     first row and a non-negative integer otherwise; a negative integer is
     rejected at the boundary. *)
-type page_start =
+type page_start = private
   | From_first_row
   | From_offset of int
+      (** Built only through {!page_start_of_wire} or {!first_row}: a negative
+          offset is not a cursor, and nothing else may invent one. *)
+
+val first_row : page_start
+(** Read from the journal's first row. *)
 
 val page_start_of_wire : int option -> page_start option
-(** The request-side spelling: absent is [From_first_row], [n >= 0] is
-    [From_offset n], a negative integer is [None]. *)
+(** The request-side spelling: absent is {!first_row}, [n >= 0] is the offset,
+    a negative integer is [None]. *)
 
 val page_start_to_wire : page_start -> int option
 (** Inverse of {!page_start_of_wire}: the field to write, or nothing. *)
 
 val page_start_offset : page_start -> int
-(** The byte offset a page starts at: [0] for [From_first_row]. *)
+(** The byte offset a page starts at: [0] for {!first_row}. *)
 
 (** One page of a journal. *)
 type page =
@@ -185,9 +190,41 @@ type page =
         (** At most the page's limit, past [since_seq], in journal order. *)
   ; has_more : bool  (** A row past [since_seq] follows the last event served. *)
   ; next_offset : int
-        (** The offset just past the last event served, or the page's own
-            start offset when it served none. *)
+        (** The offset just past the last row the page read as its own — the
+            last event served, or the last row skipped for lying at or before
+            [since_seq] — and the page's own start offset when it read none.
+            An empty page therefore still hands back a cursor pair this
+            reader accepts. *)
   }
+
+(** Why a cursor could not be placed in the journal's rows. The wire spelling
+    is the [error] code of the 400 the events endpoint answers with, so the
+    server and the TUI name these three the same way. *)
+type cursor_refusal =
+  | Offset_past_rows
+  | Offset_inside_row
+  | Cursor_pair_mismatch
+
+val cursor_refusal_to_wire : cursor_refusal -> string
+val cursor_refusal_of_wire : string -> cursor_refusal option
+
+(** How a held offset and a held seq failed to be the two halves of one page's
+    answer. Both ends are checked: an offset behind its seq would serve rows
+    the client holds, one ahead of it would skip rows nobody ever serves. *)
+type cursor_mismatch =
+  | Offset_without_held_seq of int
+      (** An offset with no [since_seq]: the whole journal starts at the first
+          row, so an offset places nothing. *)
+  | Row_before_offset_past_held_seq of
+      { offset : int
+      ; since_seq : int
+      ; row_seq : int
+      }  (** The row before the offset already lies past the held seq. *)
+  | Row_at_offset_not_past_held_seq of
+      { offset : int
+      ; since_seq : int
+      ; row_seq : int
+      }  (** The row at the offset does not lie past the held seq. *)
 
 (** Why a page could not be served from the rows. *)
 type page_failure =
@@ -196,13 +233,10 @@ type page_failure =
       ; rows_end : int
       }  (** The start offset lies past the complete rows. *)
   | Page_offset_inside_row of int  (** The start offset is not right after a ['\n']. *)
-  | Page_cursor_mismatch of
-      { offset : int
-      ; since_seq : int
-      ; row_seq : int
-      }
-      (** The first row at a held offset is not past the held seq: the two
-          cursors did not come from the same page. *)
+  | Page_cursor_mismatch of cursor_mismatch
+      (** The two cursors did not come from the same page. *)
+  | Page_limit_not_positive of int
+      (** A page of fewer than one row serves nothing and never advances. *)
   | Page_corrupt of string  (** A row the page decoded failed the strict decode. *)
 
 val page_failure_to_string : page_failure -> string
@@ -218,10 +252,12 @@ val page_of_rows :
   string ->
   (page, page_failure) result
 (** Serve one page from complete rows ({!read_journal_rows_path}; [path]
-    only names the journal in a corrupt row's message). Rows are decoded one
-    at a time from [start]: rows whose seq is not past [since_seq] are
-    skipped, at most [limit] ([>= 1]) are served, and one more row past
-    [since_seq] decides [has_more]. Rows after that are not decoded, so a
-    corrupt row fails the page that reaches it, not every page. Blank rows
-    are skipped. Pure: it touches no file, so a caller can run it on a pool
-    domain. *)
+    only names the journal in a corrupt row's message). A held offset is
+    checked against [since_seq] first (the row before it and the row at it),
+    then rows are decoded one at a time from [start]: rows whose seq is not
+    past [since_seq] are skipped and carry [next_offset] with them, at most
+    [limit] are served, and one more row past [since_seq] decides [has_more].
+    Rows after that are not decoded, so a corrupt row fails the page that
+    reaches it, not every page. Blank rows are skipped. A [limit] below one is
+    [Page_limit_not_positive]. Pure and total: it touches no file and raises
+    for no constructible argument, so a caller can run it on a pool domain. *)

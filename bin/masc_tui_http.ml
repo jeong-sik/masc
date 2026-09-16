@@ -1023,24 +1023,15 @@ let fetch_keeper_chat_events ~(host : string) ~(port : int)
     ( Masc_tui_keeper_chat_log.events_page
     , Masc_tui_keeper_chat_log.events_error )
     result =
-  (* The whole journal is the parameter's absence; a held seq is the seq. *)
-  let since_seq_query =
-    match Masc.Keeper_chat_event_log.replay_position_to_wire since_seq with
-    | None -> ""
-    | Some seq -> Printf.sprintf "&since_seq=%d" seq
-  in
-  (* The first row is the parameter's absence; a page's handed-back offset is
-     the offset. *)
-  let since_offset_query =
-    match Masc.Keeper_chat_event_log.page_start_to_wire since_offset with
-    | None -> ""
-    | Some offset -> Printf.sprintf "&since_offset=%d" offset
-  in
+  (* The query, including both cursors in their request spelling, is built by
+     the module that decodes the answer ([Masc_tui_keeper_chat_log]), where a
+     test can reach it. *)
   let path =
-    Printf.sprintf "/api/v1/keepers/%s/chat/events?operation_id=%s%s%s&limit=%d"
+    Printf.sprintf "/api/v1/keepers/%s/chat/events?%s"
       (percent_encode_path_segment keeper_name)
-      (percent_encode_query_value operation_id)
-      since_seq_query since_offset_query limit
+      (Masc_tui_keeper_chat_log.events_query
+         ~encode_value:percent_encode_query_value ~operation_id ~since_seq
+         ~since_offset ~limit)
   in
   match http_get ~host ~port ~path with
   | Error detail -> Error (Masc_tui_keeper_chat_log.Events_transport detail)

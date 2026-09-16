@@ -1528,7 +1528,7 @@ let test_history_retention_after_syscall_offload () =
   ensure_fs env;
   let session_dir = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
-  let retained = 12 in
+  let retained = 3 in
   let checkpoint turn_count =
     { (make_checkpoint ~session_id:"history-retention" ~turn_count ~marker:"history")
       with created_at = 1000. +. float_of_int turn_count }

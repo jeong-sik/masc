@@ -3,10 +3,6 @@
 type invalid_request_reason =
   | Json_parse_error
   | Attempt_rejected
-  | Request_body_too_large of
-      { actual_bytes : int
-      ; limit_bytes : int
-      }
   | Request_body_refused_by_provider of { status : int }
   | Refusal_body_not_received
   | Unknown_invalid_request
@@ -64,8 +60,6 @@ let network_error_kind_label = function
 let invalid_request_reason_to_string = function
   | Json_parse_error -> "json_parse_error"
   | Attempt_rejected -> "attempt_rejected"
-  | Request_body_too_large { actual_bytes; limit_bytes } ->
-    Printf.sprintf "request_body_too_large(actual=%d,limit=%d)" actual_bytes limit_bytes
   | Request_body_refused_by_provider { status } ->
     Printf.sprintf "request_body_refused_by_provider(status=%d)" status
   | Refusal_body_not_received -> "refusal_body_not_received"
@@ -341,10 +335,8 @@ let classify_error ~retry_after_header ~status ~body : api_error =
     (* HTTP 413 states the refusal cause in the status line: the payload was too
        large. Leaving it in the catch-all below reported that cause as
        [Unknown_invalid_request], which a consumer must treat as a defect in what it
-       built rather than a size it can reduce. The limit is not mapped into
-       [Request_body_too_large] because the response does not carry one; a
-       fabricated bound would make that variant's measured pair mean something it
-       does not. This repository already reads 413 as its own case when attributing
+       built rather than a size it can reduce. The response carries a status,
+       not a bound, and none is fabricated. This repository already reads 413 as its own case when attributing
        a failure (provider_failure_attribution.ml, 400 | 413 | 422 -> Attempt_local);
        classification was the asymmetric half. *)
     InvalidRequest { message; reason = Request_body_refused_by_provider { status } }
@@ -417,7 +409,7 @@ let%test "is_retryable: flat Ollama provider prose is not retryable" =
     not (is_retryable err)
   | InvalidRequest
       { reason =
-          Json_parse_error | Attempt_rejected | Request_body_too_large _
+          Json_parse_error | Attempt_rejected
           | Request_body_refused_by_provider _ | Refusal_body_not_received
       ; _
       } -> false
@@ -442,7 +434,7 @@ let%test "HTTP 400 prose does not synthesize ContextOverflow" =
   | InvalidRequest { reason = Unknown_invalid_request; _ } -> true
   | InvalidRequest
       { reason =
-          Json_parse_error | Attempt_rejected | Request_body_too_large _
+          Json_parse_error | Attempt_rejected
           | Request_body_refused_by_provider _ | Refusal_body_not_received
       ; _
       }
@@ -605,7 +597,7 @@ let%test "classify_error returns Unknown InvalidRequest for non-overflow 400" =
   | InvalidRequest { reason = Unknown_invalid_request; _ } -> true
   | InvalidRequest
       { reason =
-          Json_parse_error | Attempt_rejected | Request_body_too_large _
+          Json_parse_error | Attempt_rejected
           | Request_body_refused_by_provider _ | Refusal_body_not_received
       ; _
       } -> false

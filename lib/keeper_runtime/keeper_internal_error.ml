@@ -336,9 +336,13 @@ let runtime_runner_execute_site = "runtime_runner.execute"
    (keeper_unified_metrics_failure). *)
 let blocker_detail_narrative_max_chars = 200
 
-(* ~2000 chars fits a Yojson-encoded masc_internal_error record of any
-   current variant plus the wrapping prefix, with headroom. Past this the
-   payload is pathological and we cap rather than store unbounded blobs. *)
+(* ~2000 chars fit the small variants whole. Two no longer fit reliably: a
+   terminal effect failure carries a composition's failure object as JSON
+   (RFC-0454 P1a), and a fence carries a cause that can nest one (P1b), and
+   neither is bounded. Those are truncated here, which cuts the JSON mid-key
+   for a reader that parses this string back. Bounding the composition object
+   at its producer is RFC-0454 P2; this cap stays a blob ceiling, not a
+   promise that a payload survives it. *)
 let blocker_detail_structured_max_chars = 2000
 
 let masc_agent_core_error_bare_prefix = String.trim masc_internal_error_prefix

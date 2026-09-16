@@ -138,6 +138,34 @@ type interruption_cause =
   | Host_shutdown
   | Provider_connection_closed
 
+(* Every leaf string a typed failure keeps for people lives under one of these
+   keys ([Keeper_terminal_effect_detail]: "leaf strings only for human
+   messages"). Collecting them walks a nested cause -- a fence carrying a MASC
+   error carrying a terminal effect detail -- without this reader having to
+   know each envelope's shape. *)
+let leaf_message_keys = [ "message"; "detail" ]
+
+let leaf_messages json =
+  let buffer = Buffer.create 128 in
+  let rec walk json =
+    match json with
+    | `Assoc fields ->
+      List.iter
+        (fun (key, value) ->
+           (match value with
+            | `String text when List.mem key leaf_message_keys ->
+              Buffer.add_string buffer text;
+              Buffer.add_char buffer '\n'
+            | _ -> ());
+           walk value)
+        fields
+    | `List values -> List.iter walk values
+    | `Bool _ | `Float _ | `Int _ | `Intlit _ | `Null | `String _ -> ()
+  in
+  Option.iter walk json;
+  Buffer.contents buffer
+;;
+
 let interruption_of_failure text =
   let direct_cause () =
     if
@@ -167,22 +195,15 @@ let interruption_of_failure text =
         | exception Yojson.Json_error _ -> direct_cause ()
         | `Assoc fields
           when string_field fields "kind" = Some "provider_attempt_effect_fenced" ->
-          (* RFC-0454 P1b: the fence carries a typed cause. Its [Fenced_core]
-             arm holds agent-core's rendered message, which is where the two
-             runtime conditions below are still spelled out; a [Fenced_masc]
-             cause is a MASC error and is neither of them. Removing this
-             search is P3, once the runtime stops flattening
+          (* RFC-0454 P1b: the fence carries a typed cause instead of a
+             rendered error string. Both of its arms end in leaf messages for
+             people -- agent-core's sentence under [core], and, for a carried
+             MASC error, the [message]/[detail] leaves of the nested error and
+             its terminal detail. The two runtime conditions below are still
+             spelled out in those leaves, so collect them all and search that.
+             Removing this search is P3, once the runtime stops flattening
              [Runtime_shutting_down] into a string. *)
-          let diagnostic =
-            match List.assoc_opt "cause" fields with
-            | Some (`Assoc cause_fields)
-              when string_field cause_fields "kind" = Some "fenced_core" ->
-              (match List.assoc_opt "core" cause_fields with
-               | Some (`Assoc core_fields) ->
-                 Option.value ~default:"" (string_field core_fields "message")
-               | Some _ | None -> "")
-            | Some _ | None -> ""
-          in
+          let diagnostic = leaf_messages (List.assoc_opt "cause" fields) in
           let cause =
             if
               Option.is_some
@@ -196,11 +217,15 @@ let interruption_of_failure text =
             then Some Provider_connection_closed
             else None
           in
-          Option.map
-            (fun cause ->
+          (match cause with
+           | Some cause ->
+             Some
                ( cause
-               , string_field fields "effect_disposition" = Some "effect_attempted" ))
-            cause
+               , string_field fields "effect_disposition" = Some "effect_attempted" )
+           | None ->
+             (* A fence whose cause names neither condition still leaves the
+                row's own text to read, the same as a row with no envelope. *)
+             direct_cause ())
         | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _
         | `Null | `String _ -> direct_cause ()))
 ;;

@@ -649,10 +649,20 @@ let node_deferral = function
     Keeper_terminal_effect_detail.External_effect_deferral
 ;;
 
-(* [None] only for [Outer_completion_mismatch]: the executor settles that
-   before any node runs and stamps it [Proven_pre_effect], so it never reaches
-   the terminal-failure branch this projection feeds. The caller pins that by
-   naming the cause it handles. *)
+(* The executor's causes split in two, and the split is the disposition they
+   carry. [Pre_effect_only] is the completion mismatch: the executor refuses
+   the invocation before any node runs and stamps it [Proven_pre_effect]
+   (keeper_tool_plan_executor.ml 505-513), so it has no terminal effect to
+   name. Everything else can settle after a node acted. Naming both arms keeps
+   the projection total, so a new [Executor.cause] is a compile error here
+   rather than a failure the caller drops. *)
+type composition_projection =
+  | Terminal_cause of Keeper_terminal_effect_detail.composition_cause
+  | Pre_effect_only of
+      { expected : Agent_core.Tool_contract.completion
+      ; actual : Agent_core.Tool_contract.completion
+      }
+
 let composition_cause (failure : Executor.failure) =
   match failure.cause with
   | Executor.Tool_did_not_complete node ->
@@ -661,33 +671,34 @@ let composition_cause (failure : Executor.failure) =
      | Tool_result.Deferred _ ->
        (* A deferred node did not fail. Its payload is the deferral's own JSON
           data, so it stays in the failure object and out of a message. *)
-       Some
+       Terminal_cause
          (Keeper_terminal_effect_detail.Node_deferred
             { node_id
             ; model_tool_name = node.tool_name
             ; deferral = node_deferral node.deferred_kind
             })
      | Tool_result.Completed _ | Tool_result.Failed _ ->
-       Some
+       Terminal_cause
          (Keeper_terminal_effect_detail.Node_failed
             { node_id
             ; model_tool_name = node.tool_name
             ; message = Tool_result.message node.result
             }))
   | Executor.Node_observation_failed { node; detail } ->
-    Some
+    Terminal_cause
       (Keeper_terminal_effect_detail.Node_observation_failed
          { node_id = Keeper_tool_plan.Node_id.to_string node.node_id
          ; model_tool_name = node.tool_name
          ; detail
          })
   | Executor.Plan_execution_failed { node_id; schedule = _; error } ->
-    Some
+    Terminal_cause
       (Keeper_terminal_effect_detail.Plan_execution_failed
          { node_id = Keeper_tool_plan.Node_id.to_string node_id
          ; error = plan_execution_error_kind error
          })
-  | Executor.Outer_completion_mismatch _ -> None
+  | Executor.Outer_completion_mismatch { expected; actual } ->
+    Pre_effect_only { expected; actual }
 ;;
 
 let failure_class (failure : Executor.failure) =
@@ -1976,12 +1987,25 @@ let make_tools_with_authority
                    defer may remain resumable. *)
                 if not (failure_returns_to_model ~plan ~committed:!committed_receipts failure) then
                 (match composition_cause failure with
-                 | None ->
-                   (* Unreachable: the only [None] cause is settled
-                      [Proven_pre_effect] and this branch is post-effect or
-                      unknown. *)
-                   ()
-                 | Some cause ->
+                 | Pre_effect_only { expected; actual } ->
+                   (* This branch is post-effect or unknown, and a completion
+                      mismatch is settled [Proven_pre_effect] before any node
+                      runs, so the two cannot meet. If they ever do, an effect
+                      may have happened and there is no cause to terminalize
+                      it with; stop loudly rather than let the turn continue
+                      past an unfenced effect. *)
+                   invalid_arg
+                     (Printf.sprintf
+                        "composition %s settled a completion mismatch (plan %s, call \
+                         %s) with effect_disposition=%s"
+                        tool_name
+                        (Yojson.Safe.to_string
+                           (Agent_core.Tool_contract.completion_to_yojson expected))
+                        (Yojson.Safe.to_string
+                           (Agent_core.Tool_contract.completion_to_yojson actual))
+                        (Tool_result.failure_effect_disposition_to_string
+                           failure.effect_disposition))
+                 | Terminal_cause cause ->
                    Option.iter
                      (fun mark_failed ->
                         mark_failed

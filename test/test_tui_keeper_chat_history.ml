@@ -353,28 +353,51 @@ let test_a_failed_turn_names_the_request_it_came_from () =
     (List.map (fun r -> origin_request_id r.History.kind) decoded.History.rows)
 ;;
 
-(* The shape [Keeper_internal_error] writes since RFC-0454 P1b: the fence
-   carries a typed cause, and its [fenced_core] arm holds agent-core's own
-   message. Built by hand here so the row is exactly what the server persists;
-   the producer lives in [Keeper_turn_driver]. *)
+(* The row the server persists, built by the producer's own encoder rather
+   than by hand: [persisted_error_reply] prefixes "Keeper request failed: " to
+   the rendered carried error, and that rendering is where the fence's typed
+   cause becomes the text this reader sees. A hand-written copy would keep
+   passing after the encoder changed shape (RFC-0454 §5). *)
+let persisted_failure_row error =
+  "Keeper request failed: "
+  ^ Agent_core.Error.to_string
+      (Keeper_internal_error.core_error_of_masc_internal_error error)
+;;
+
+let fence_of cause =
+  Keeper_internal_error.Provider_attempt_effect_fenced
+    { runtime_id = "codex_subscription.gpt-5.6-luna"
+    ; effect_disposition = Keeper_provider_attempt_effect_core.Effect_attempted
+    ; cause
+    }
+;;
+
+(* A fence whose cause is agent-core's own error. *)
 let fenced_failure message =
-  Printf.sprintf
-    "Keeper request failed: Internal error: [masc_agent_core_error] %s"
-    (Yojson.Safe.to_string
-       (`Assoc
-           [ "kind", `String "provider_attempt_effect_fenced"
-           ; "runtime_id", `String "codex_subscription.gpt-5.6-luna"
-           ; "effect_disposition", `String "effect_attempted"
-           ; ( "cause"
-             , `Assoc
-                 [ "kind", `String "fenced_core"
-                 ; ( "core"
-                   , `Assoc
-                       [ "category", `String "internal"
-                       ; "message", `String message
-                       ] )
-                 ] )
-           ]))
+  persisted_failure_row
+    (fence_of
+       (Keeper_internal_error.Fenced_core
+          (Keeper_request_failure_core.of_core_error
+             (Agent_core.Error.Internal message))))
+;;
+
+(* A fence whose cause is a carried MASC error: the sentence sits two
+   envelopes down, on the terminal detail's own leaf. *)
+let fenced_masc_failure message =
+  persisted_failure_row
+    (fence_of
+       (Keeper_internal_error.Fenced_masc
+          (Keeper_internal_error.Terminal_effect_failed
+             { failure_class = Tool_result.Runtime_failure
+             ; effect_disposition = Tool_result.Effect_outcome_unknown
+             ; detail =
+                 Keeper_terminal_effect_detail.Boundary_observation_failed
+                   { model_tool_name = "masc_surface_post"
+                   ; cause =
+                       Keeper_request_failure_core.of_core_error
+                         (Agent_core.Error.Internal message)
+                   }
+             })))
 ;;
 
 let test_runtime_interruption_becomes_a_recovered_lifecycle () =
@@ -422,6 +445,32 @@ let test_stdout_close_stays_pending_without_a_later_reply () =
          "Provider connection closed during this turn · recovery pending · same-turn replay blocked to avoid duplicate tool calls · details in Logs"
          presented)
   | _ -> fail "expected one delivery failure"
+;;
+
+(* RFC-0454 P1b: a fence can carry the shutdown sentence inside a typed MASC
+   error instead of agent-core's own. Before the fence was typed, the rendered
+   inner error sat in [diagnostic] and this badge matched; reading only the
+   [fenced_core] arm would have dropped it. *)
+let test_a_carried_masc_cause_still_names_the_shutdown () =
+  let failure =
+    fenced_masc_failure "MASC runtime shutdown interrupted the active Codex turn"
+  in
+  match History.present_delivery_failure failure with
+  | None -> fail "a carried MASC cause lost the host-shutdown badge"
+  | Some (presented, recovered) ->
+    check bool "still pending" false recovered;
+    check string "the same lifecycle the fenced_core arm draws"
+      "Runtime shutdown interrupted this turn \194\183 recovery pending \194\183 same-turn \
+       replay blocked to avoid duplicate tool calls \194\183 details in Logs"
+      presented
+;;
+
+(* The other direction: a carried MASC cause that names neither condition must
+   not invent a lifecycle. *)
+let test_a_carried_masc_cause_without_the_sentence_draws_nothing () =
+  let failure = fenced_masc_failure "receipt append failed" in
+  check (option (pair string bool)) "no lifecycle was invented" None
+    (History.present_delivery_failure failure)
 ;;
 
 let test_unfenced_runtime_shutdown_is_still_typed () =
@@ -1886,6 +1935,10 @@ let () =
             test_stdout_close_stays_pending_without_a_later_reply
         ; test_case "unfenced runtime shutdown stays typed" `Quick
             test_unfenced_runtime_shutdown_is_still_typed
+        ; test_case "a carried MASC cause keeps the host-shutdown badge" `Quick
+            test_a_carried_masc_cause_still_names_the_shutdown
+        ; test_case "a carried MASC cause without the sentence draws nothing" `Quick
+            test_a_carried_masc_cause_without_the_sentence_draws_nothing
         ; test_case "unrelated failure is not marked recovered" `Quick
             test_unrelated_failure_is_not_marked_recovered
         ; test_case "rows carry the operation id only for direct turns" `Quick

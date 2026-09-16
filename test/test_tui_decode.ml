@@ -1006,7 +1006,7 @@ let fleet_safety_json ?(missing = true) () =
            ; "executable_keeper_fiber_count", `Int 9
            ; "failing_keeper_fiber_count", `Int 1
            ; "recovering_keeper_fiber_count", `Int 0
-           ; "configuration_blocked_keeper_count", `Int 1
+           ; "turn_configuration_error_keeper_count", `Int 1
            ; "paused_keeper_count", `Int 0
            ; "target_reaction_capacity_count", `Int 10
            ; "reaction_capacity_shortfall_count", `Int 1
@@ -1022,7 +1022,7 @@ let fleet_safety_json ?(missing = true) () =
                        else [ "analyst"; "bluebird" ])) )
              ; ( "executable_keeper_names"
                , `List [ `String "analyst"; `String "bluebird" ] )
-             ; ( "configuration_blocked_keeper_names"
+             ; ( "turn_configuration_error_keeper_names"
                , `List [ `String "bluebird" ] )
              ]) )
     ]
@@ -1046,9 +1046,10 @@ let test_decode_fleet_safety_carries_both_name_lists () =
          not precompute the display string. *)
       Alcotest.(check int) "failing" 1 fleet.fs_failing_count;
       Alcotest.(check int) "retrying" 0 fleet.fs_recovering_count;
-      Alcotest.(check int) "config-blocked" 1 fleet.fs_configuration_blocked_count;
+      Alcotest.(check int) "config-blocked" 1
+        fleet.fs_turn_configuration_error_count;
       Alcotest.(check (list string)) "config-blocked names" [ "bluebird" ]
-        fleet.fs_configuration_blocked_names;
+        fleet.fs_turn_configuration_error_names;
       (* The reader takes the difference; the server does not precompute it. *)
       Alcotest.(check (list string)) "keepers that should run"
         [ "analyst"; "bluebird"; "haneul" ] fleet.fs_bootable_names;

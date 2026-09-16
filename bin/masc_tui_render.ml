@@ -4195,8 +4195,12 @@ let keeper_fleet_gap_lines (fleet : fleet_safety) =
     ; (running_without_turn, "running, cannot take a turn", (Theme.warn ()))
     ; (* The one failing subset an operator must act on: turn configuration
          errors survive every retry, so the names are listed where the
-         failing counter only counts them. *)
-      (fleet.fs_configuration_blocked_names, "config-blocked", (Theme.bad ()))
+         failing counter only counts them. Unscoped on purpose -- the
+         configuration_blocked_* wire fields are autoboot-scoped and skip a
+         blocked keeper booted on request. *)
+      ( fleet.fs_turn_configuration_error_names
+      , "config-blocked"
+      , (Theme.bad ()) )
     ]
 
 
@@ -4367,18 +4371,18 @@ let render_keeper_list (state : state) =
             fleet.fs_target_reaction_capacity Ansi.dim blocker Ansi.reset);
        (* Failing is not a mystery bucket. Every failing keeper is either
           retrying on its own -- a clean turn returns it to Running -- or
-          blocked on turn configuration, which no retry fixes. The two parts
-          sum to the failing count (recovering is failing minus paused minus
-          configuration-blocked), so they print beside the whole instead of
-          as a separate "recovering" counter whose relationship to failing
-          was invisible. *)
+          blocked on turn configuration, which no retry fixes. Both parts
+          come from the same phase snapshot, which sorts each failing keeper
+          into exactly one of the two, so they sum to the failing count and
+          print beside the whole instead of as a separate "recovering"
+          counter whose relationship to failing was invisible. *)
        let failing_entry =
          if fleet.fs_failing_count = 0 then []
          else
            [ Printf.sprintf "failing %d (retrying %d · config-blocked %d)"
                fleet.fs_failing_count
                fleet.fs_recovering_count
-               fleet.fs_configuration_blocked_count
+               fleet.fs_turn_configuration_error_count
            ]
        in
        let counts =

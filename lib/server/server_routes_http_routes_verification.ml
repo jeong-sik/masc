@@ -240,11 +240,54 @@ let add_routes router =
            | Some s -> int_of_string_opt s
            | None -> None
          in
-         let base_path = (Mcp_server.workspace_config state).base_path in
-         let json =
-           Dashboard_verification.requests_json ~base_path ?task_id ?limit ()
+         (* A non-numeric or negative offset is refused rather than rounded to
+            the first page. A reader paging forward through the store would
+            otherwise re-read page one and conclude it had reached the end. *)
+         let offset =
+           match trimmed_query_param req "offset" with
+           | None -> Ok None
+           | Some s ->
+             (match int_of_string_opt s with
+              | Some n when n >= 0 -> Ok (Some n)
+              | Some _ | None ->
+                Error
+                  (Printf.sprintf "offset %S must be a non-negative integer" s))
          in
-         Http.Response.json_value ~compress:true ~request:req json reqd
+         let requested =
+           match trimmed_query_param req "view" with
+           | None -> Ok Dashboard_verification.Ask_all
+           | Some s -> Dashboard_verification.requested_view_of_string s
+         in
+         (match offset, requested with
+          | Error detail, _ | _, Error detail ->
+            respond_json_value_with_cors ~status:`Bad_request request reqd
+              (error_json detail)
+          | Ok offset, Ok requested ->
+            let config = Mcp_server.workspace_config state in
+            let view =
+              match requested with
+              | Dashboard_verification.Ask_all ->
+                Dashboard_verification.All_requests
+              | Dashboard_verification.Ask_awaiting ->
+                (* The queue is a join against the backlog, so a backlog this
+                   build cannot read yields an empty queue carrying the reason.
+                   Falling back to the unfiltered store would answer "what is
+                   waiting on me" with every request ever submitted. *)
+                Dashboard_verification.Awaiting_operator
+                  (match Workspace_backlog.read_backlog_observation_r config with
+                   | Ok backlog ->
+                     Dashboard_verification.Backlog_read
+                       { live_request_ids =
+                           Dashboard_verification.awaiting_request_ids backlog
+                       }
+                   | Error detail ->
+                     Dashboard_verification.Backlog_unreadable detail)
+            in
+            let json =
+              Dashboard_verification.requests_json ~base_path:config.base_path
+                ?task_id ?limit ?offset ~view ()
+            in
+            Http.Response.json_value ~compress:true ~request:req json reqd)
        ) request reqd)
   |> Http.Router.get "/api/v1/verification/summary" (fun request reqd ->
        with_public_read (fun state req reqd ->

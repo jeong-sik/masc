@@ -470,9 +470,13 @@ module Chat_theme = struct
        twenty lines of it in the colour reserved for a turn needing attention
        is what made [/help] read as an alarm. *)
     | Masc_tui_message_layout.Local -> Theme.quiet_origin ()
-    | Masc_tui_message_layout.Journal -> Theme.info ()
+    (* Background news keeps no badge colour of its own: the badge recedes
+       with the body it introduces, one rung below speech. *)
+    | Masc_tui_message_layout.Journal -> Theme.recede ()
     | Masc_tui_message_layout.Error -> Theme.bad ()
-    | Masc_tui_message_layout.Tool -> Theme.tool_origin ()
+    (* The tool trail recedes with its body; state colour is reserved for
+       state, and a tool badge is work, not state. *)
+    | Masc_tui_message_layout.Tool -> Theme.quiet_origin ()
     | Masc_tui_message_layout.Skill Masc_tui_message_layout.Skill_live ->
       Theme.info ()
     | Masc_tui_message_layout.Skill Masc_tui_message_layout.Skill_used ->
@@ -484,16 +488,18 @@ module Chat_theme = struct
     | Masc_tui_message_layout.Thinking -> Theme.quiet_origin ()
 
   let body : Masc_tui_message_layout.style -> string = function
+    (* Speech keeps the terminal foreground: it is the protagonist, and
+       everything below it in the hierarchy recedes instead. *)
     | Masc_tui_message_layout.User | Masc_tui_message_layout.Inbound
     | Masc_tui_message_layout.Keeper -> Ansi.reset
     | Masc_tui_message_layout.Status -> Theme.warn ()
     (* The badge is quiet; the body is not dimmed. A command list is read. *)
     | Masc_tui_message_layout.Local -> Ansi.reset
-    | Masc_tui_message_layout.Journal -> Ansi.reset
     | Masc_tui_message_layout.Error -> Theme.bad ()
-    | Masc_tui_message_layout.Tool -> Ansi.reset
-    | Masc_tui_message_layout.Skill skill ->
-      origin (Masc_tui_message_layout.Skill skill)
+    (* Work, background news and skill chatter sit one rung below speech. *)
+    | Masc_tui_message_layout.Journal -> Ansi.dim
+    | Masc_tui_message_layout.Tool -> Ansi.dim
+    | Masc_tui_message_layout.Skill _ -> Ansi.dim
     | Masc_tui_message_layout.Thinking -> Ansi.dim
 
   let link_foreground : Masc_tui_message_layout.style -> string = function
@@ -505,8 +511,21 @@ module Chat_theme = struct
     | Masc_tui_message_layout.Skill _ | Masc_tui_message_layout.Thinking ->
       Ansi.default_fg
 
+  (* A bare link closes only underline and foreground, so the restore must
+     reopen the body's own rung: inside a dim body, restoring the default
+     foreground would leak speech brightness for the rest of the line. *)
   let link_style_restore style =
-    Ansi.no_underline ^ link_foreground style
+    let foreground =
+      match style with
+      | Masc_tui_message_layout.Journal | Masc_tui_message_layout.Tool
+      | Masc_tui_message_layout.Skill _ | Masc_tui_message_layout.Thinking ->
+        Ansi.dim
+      | Masc_tui_message_layout.User | Masc_tui_message_layout.Inbound
+      | Masc_tui_message_layout.Keeper | Masc_tui_message_layout.Status
+      | Masc_tui_message_layout.Local | Masc_tui_message_layout.Error ->
+        link_foreground style
+    in
+    Ansi.no_underline ^ foreground
 
   let snapshot_cache : snapshot option Atomic.t = Atomic.make None
 
@@ -555,7 +574,12 @@ module Chat_theme = struct
       }
     (* The ambient background is the reader's own voice on the page, so it
        belongs to {!User} alone. An inbound line is prose like a Keeper's and
-       takes the plain ground; its mark and colour say where it came from. *)
+       takes the plain ground; its mark and colour say where it came from.
+
+       [markdown_close] reopens the body style after the reset: every chat
+       body is markdown-rendered, and the palette closes bold and code spans
+       with it. A plain reset would snap a dim body back to full foreground
+       after the first closed span. *)
     | ( Masc_tui_message_layout.Inbound
       | Masc_tui_message_layout.Keeper
       | Masc_tui_message_layout.Status
@@ -566,7 +590,7 @@ module Chat_theme = struct
       | Masc_tui_message_layout.Skill _
       | Masc_tui_message_layout.Thinking ), _ ->
       { opening
-      ; markdown_close = Ansi.reset
+      ; markdown_close = Ansi.reset ^ opening
       ; inline_restore = Ansi.reset ^ opening
       ; link_restore
       ; palette_generation = 0

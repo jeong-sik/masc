@@ -212,6 +212,131 @@ let test_json_reports_counts_not_the_block_list () =
   check int "known tokens" 300 (ledger |> member "known_tokens" |> to_int)
 ;;
 
+(* Four measured blocks on a known total, as the measured-eviction test
+   builds them: [10,12) 300, [12,14) 200, [14,16) 200, [16,18) 250, total
+   1150 measured up to 18. *)
+let four_measured_blocks () =
+  let o1 = step None (request ~first_atom:0 ~atom_count:10 ()) (Some (usage 1_000)) in
+  let o2 =
+    step (Some o1.ledger) (request ~first_atom:0 ~atom_count:12 ()) (Some (usage 1_300))
+  in
+  let o3 =
+    step (Some o2.ledger) (request ~first_atom:0 ~atom_count:14 ()) (Some (usage 1_500))
+  in
+  let o4 =
+    step (Some o3.ledger) (request ~first_atom:10 ~atom_count:14 ()) (Some (usage 700))
+  in
+  let o5 =
+    step (Some o4.ledger) (request ~first_atom:10 ~atom_count:16 ()) (Some (usage 900))
+  in
+  let o6 =
+    step (Some o5.ledger) (request ~first_atom:10 ~atom_count:18 ()) (Some (usage 1_150))
+  in
+  o6.ledger
+;;
+
+(* One large tool result can push the front past everything that was
+   carried. The new block then starts at the front, and the ledger keeps
+   attributing on the next request instead of restarting. *)
+let test_front_past_the_carried_range_starts_the_block_at_the_front () =
+  let t = four_measured_blocks () in
+  let o7 = step (Some t) (request ~first_atom:20 ~atom_count:24 ()) (Some (usage 700)) in
+  check (option int) "delta: 700 - (1150 - 950)" (Some 500) o7.delta_tokens;
+  check blocks_testable "the block covers the carried atoms only"
+    [ 20, 24, Some 500 ]
+    (block_tokens o7.ledger);
+  check int "nothing unmeasured" 0 (Ledger.unmeasured_atoms o7.ledger);
+  let o8 =
+    step (Some o7.ledger) (request ~first_atom:20 ~atom_count:26 ()) (Some (usage 800))
+  in
+  check string "no restart on the next request" "appended_measured"
+    (Ledger.event_to_string o8.event);
+  check blocks_testable "measurement continues"
+    [ 20, 24, Some 500; 24, 26, Some 100 ]
+    (block_tokens o8.ledger)
+;;
+
+let test_known_eviction_without_usage_then_usage () =
+  let t = four_measured_blocks () in
+  let o7 = step (Some t) (request ~first_atom:12 ~atom_count:20 ()) None in
+  (match o7.event with
+   | Ledger.Front_moved { evicted_atoms; evicted_tokens } ->
+     check int "two atoms left" 2 evicted_atoms;
+     check (option int) "their tokens were known" (Some 300) evicted_tokens
+   | other -> failf "expected front_moved_measured, got %s" (Ledger.event_to_string other));
+  check (option int) "total corrected without a new usage" (Some 850) o7.ledger.total_tokens;
+  check (option int) "measured end unchanged" (Some 18) o7.ledger.measured_end_atom;
+  let o8 =
+    step (Some o7.ledger) (request ~first_atom:12 ~atom_count:22 ()) (Some (usage 1_000))
+  in
+  check (option int) "delta against the corrected total" (Some 150) o8.delta_tokens;
+  check blocks_testable "the usage-less stretch and the new atoms measure as one block"
+    [ 12, 14, Some 200; 14, 16, Some 200; 16, 18, Some 250; 18, 22, Some 150 ]
+    (block_tokens o8.ledger)
+;;
+
+(* The request after a newest-atom-only one widens the front toward older
+   atoms. That is a restart, named for what it is. *)
+let test_front_widening_restarts () =
+  let o1 = step None (request ~first_atom:9 ~atom_count:10 ()) (Some (usage 100)) in
+  let o2 =
+    step (Some o1.ledger) (request ~first_atom:0 ~atom_count:12 ()) (Some (usage 1_300))
+  in
+  check string "event" "front_widened" (Ledger.event_to_string o2.event);
+  check blocks_testable "restarted" [ 0, 12, None ] (block_tokens o2.ledger);
+  check (option int) "total is the new usage" (Some 1_300) o2.ledger.total_tokens
+;;
+
+let test_repeated_range_without_usage_changes_nothing () =
+  let o1 = step None (request ~first_atom:0 ~atom_count:10 ()) (Some (usage 1_000)) in
+  let o2 = step (Some o1.ledger) (request ~first_atom:0 ~atom_count:10 ()) None in
+  check string "event" "repeated" (Ledger.event_to_string o2.event);
+  check (option int) "total kept" (Some 1_000) o2.ledger.total_tokens;
+  check (option int) "measured end kept" (Some 10) o2.ledger.measured_end_atom;
+  check blocks_testable "blocks kept" [ 0, 10, None ] (block_tokens o2.ledger)
+;;
+
+(* A tail that shrank by more than the new atoms added makes the difference
+   negative. It is reported; no block is written. *)
+let test_negative_difference_is_reported_not_written () =
+  let o1 =
+    step None (request ~first_atom:0 ~atom_count:10 ~tail_bytes:2_000 ()) (Some (usage 1_000))
+  in
+  let o2 =
+    step
+      (Some o1.ledger)
+      (request ~first_atom:0 ~atom_count:12 ~tail_bytes:100 ())
+      (Some (usage 900))
+  in
+  check string "event" "appended_unmeasured" (Ledger.event_to_string o2.event);
+  check (option int) "delta reported" (Some (-100)) o2.delta_tokens;
+  check int "tail shrank" (-1_900) o2.tail_delta_bytes;
+  check blocks_testable "the new block stays unmeasured"
+    [ 0, 10, None; 10, 12, None ]
+    (block_tokens o2.ledger);
+  check (option int) "total follows the usage" (Some 900) o2.ledger.total_tokens
+;;
+
+let test_zero_input_tokens_is_not_a_usage () =
+  check (option int) "zero is nothing" None
+    (Option.map
+       (fun (u : Ledger.usage) -> u.input_tokens)
+       (Ledger.usage_of_counts ~input_tokens:0 ~cache_read_input_tokens:0));
+  check (option int) "positive is a usage" (Some 5)
+    (Option.map
+       (fun (u : Ledger.usage) -> u.input_tokens)
+       (Ledger.usage_of_counts ~input_tokens:5 ~cache_read_input_tokens:0))
+;;
+
+let test_prefix_digest_is_stable_and_separates_prompts () =
+  let a = Ledger.prefix_digest ~system_prompt:"one" ~tools:[] in
+  let a' = Ledger.prefix_digest ~system_prompt:"one" ~tools:[] in
+  let b = Ledger.prefix_digest ~system_prompt:"two" ~tools:[] in
+  check string "same input, same digest" a a';
+  check bool "different prompt, different digest" true (a <> b);
+  check int "sha256 hex" 64 (String.length a)
+;;
+
 let () =
   run
     "keeper_model_input_ledger"
@@ -221,6 +346,10 @@ let () =
         ; test_case "tail change" `Quick test_tail_change_is_part_of_the_difference_and_reported
         ; test_case "usage gap" `Quick test_usage_gap_measures_the_stretch_as_one_block
         ; test_case "repeated range" `Quick test_repeated_range_records_only_the_tail_change
+        ; test_case "repeated without usage" `Quick
+            test_repeated_range_without_usage_changes_nothing
+        ; test_case "negative difference" `Quick
+            test_negative_difference_is_reported_not_written
         ] )
     ; ( "front"
       , [ test_case "unmeasured block leaves" `Quick
@@ -228,11 +357,20 @@ let () =
         ; test_case "measured blocks leave" `Quick
             test_front_move_over_measured_blocks_subtracts_them
         ; test_case "cut inside a block" `Quick test_front_inside_a_block_restarts
+        ; test_case "front past the carried range" `Quick
+            test_front_past_the_carried_range_starts_the_block_at_the_front
+        ; test_case "known eviction without usage" `Quick
+            test_known_eviction_without_usage_then_usage
+        ; test_case "front widening" `Quick test_front_widening_restarts
         ] )
     ; ( "restart"
       , [ test_case "prefix change" `Quick test_prefix_change_restarts
         ; test_case "shrunk history" `Quick test_shrunk_history_restarts
         ] )
     ; "json", [ test_case "counts only" `Quick test_json_reports_counts_not_the_block_list ]
+    ; ( "inputs"
+      , [ test_case "zero usage" `Quick test_zero_input_tokens_is_not_a_usage
+        ; test_case "prefix digest" `Quick test_prefix_digest_is_stable_and_separates_prompts
+        ] )
     ]
 ;;

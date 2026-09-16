@@ -13,8 +13,18 @@
 
     Anything that breaks the comparison restarts the ledger from the request
     at hand: a different prefix (system prompt or tool schemas), a history
-    that shrank (a new session), or a front move over atoms whose size was
-    never measured. A front move over measured blocks only subtracts them.
+    that shrank (a new session), a front that moved back, or a front that
+    fell inside a block. A front move over measured blocks only subtracts
+    them. A front move over a block of unknown size (the cold-start block)
+    keeps the measured blocks and leaves the total unknown until the next
+    usage; the block appended in that same request can then never be
+    measured, and when it is evicted in turn the same happens once more.
+    The chain ends at the first eviction whose request appends nothing.
+
+    A difference that comes out negative (the tail shrank by more than the
+    new atoms added) is reported and not written into any block. A usage
+    reporting zero input tokens is not a measurement; {!usage_of_counts}
+    turns it into [None].
 
     The table is process memory keyed by keeper and runtime. Token counts
     are the provider's, so the same atoms carried on another runtime are a
@@ -76,6 +86,9 @@ type event =
       }
   | Front_cut_through_block of { evicted_atoms : int }
       (** The front fell inside a block; restarted from this request. *)
+  | Front_widened
+      (** The front moved back toward older atoms, as it does on the request
+          after a newest-atom-only one; restarted from this request. *)
   | Prefix_changed  (** System prompt or tool schemas differ; restarted. *)
   | History_reset  (** The history shrank; restarted. *)
 
@@ -90,6 +103,10 @@ type observation =
 
 val observe : t option -> request -> usage option -> observation
 (** Pure step. [None] starts a ledger from the request. *)
+
+val usage_of_counts : input_tokens:int -> cache_read_input_tokens:int -> usage option
+(** [None] unless [input_tokens] is positive: a zero-filled usage is the
+    shape of a response that reported nothing. *)
 
 val known_tokens : t -> int
 (** Sum of the measured blocks' tokens. *)

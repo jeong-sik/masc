@@ -963,25 +963,50 @@ let bounded_model_input_projection
        bytes of the per-request tail (the pinned messages), so a difference
        between two requests can be attributed to the atoms appended between
        them. *)
-    (let projection = windowed.Runtime_model_input_tail_window.projection in
-     let tail_bytes =
-       let labelled, _ =
-         Runtime_model_input_tail_window.annotate
-           projection.Runtime_model_input_tail_window.messages
-       in
-       List.fold_left
-         (fun sum (message, label) ->
-            match label with
-            | Runtime_model_input_tail_window.Pinned -> sum + measure_message_bytes message
-            | Runtime_model_input_tail_window.Atom _ -> sum)
-         0
-         labelled
+    (* Read the carried range back from the transmitted list rather than
+       from the projection's counts: after a demotion re-cut those counts
+       are relative to the already-cut sublist (see the interface of
+       [project_target]), while the atoms in the final list and
+       [history_atom_count] are absolute on every path. The preamble is
+       tail, not an atom, as the cut itself treats it. *)
+    (let messages =
+       windowed.Runtime_model_input_tail_window.projection
+         .Runtime_model_input_tail_window.messages
+     in
+     let transmitted_atoms, tail_bytes =
+       offload_model_input_cpu (fun () ->
+         let history, preamble =
+           List.partition
+             (fun message ->
+                not (Runtime_model_input_tail_window.is_synthetic_preamble message))
+             messages
+         in
+         let labelled, transmitted_atoms =
+           Runtime_model_input_tail_window.annotate history
+         in
+         let pinned_bytes =
+           List.fold_left
+             (fun sum (message, label) ->
+                match label with
+                | Runtime_model_input_tail_window.Pinned ->
+                  sum + measure_message_bytes message
+                | Runtime_model_input_tail_window.Atom _ -> sum)
+             0
+             labelled
+         in
+         let preamble_bytes =
+           List.fold_left
+             (fun sum message -> sum + measure_message_bytes message)
+             0
+             preamble
+         in
+         transmitted_atoms, pinned_bytes + preamble_bytes)
      in
      last_request
      := Some
           { Keeper_model_input_ledger.prefix_digest
-          ; first_atom = projection.Runtime_model_input_tail_window.dropped_atoms
-          ; atom_count = projection.Runtime_model_input_tail_window.atom_count
+          ; first_atom = history_atom_count - transmitted_atoms
+          ; atom_count = history_atom_count
           ; tail_bytes
           });
     let windowed = windowed.Runtime_model_input_tail_window.projection.messages in
@@ -1070,12 +1095,11 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
                 (match !last_request with
                  | Some request ->
                    let usage =
-                     Option.map
+                     Option.bind response.Agent_core.Types.usage
                        (fun (u : Agent_core.Types.api_usage) ->
-                          { Keeper_model_input_ledger.input_tokens = u.input_tokens
-                          ; cache_read_input_tokens = u.cache_read_input_tokens
-                          })
-                       response.Agent_core.Types.usage
+                          Keeper_model_input_ledger.usage_of_counts
+                            ~input_tokens:u.input_tokens
+                            ~cache_read_input_tokens:u.cache_read_input_tokens)
                    in
                    let observation =
                      Keeper_model_input_ledger.Table.observe
@@ -1084,12 +1108,33 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
                        ~request
                        ~usage
                    in
-                   Log.Keeper.info
-                     ~keeper_name:ctx.keeper_name
-                     "model input ledger runtime=%s %s"
-                     ctx.runtime_id
-                     (Yojson.Safe.to_string
-                        (Keeper_model_input_ledger.observation_to_json observation))
+                   let line =
+                     Yojson.Safe.to_string
+                       (Keeper_model_input_ledger.observation_to_json observation)
+                   in
+                   (* The routine step is one line per provider call, so it
+                      goes out at debug like the rest of this projection's
+                      per-request narration; the events that change what the
+                      ledger can attribute are rare and go out at info. *)
+                   (match observation.Keeper_model_input_ledger.event with
+                    | Keeper_model_input_ledger.Appended _
+                    | Keeper_model_input_ledger.Repeated ->
+                      Log.Keeper.debug
+                        ~keeper_name:ctx.keeper_name
+                        "model input ledger runtime=%s %s"
+                        ctx.runtime_id
+                        line
+                    | Keeper_model_input_ledger.Started
+                    | Keeper_model_input_ledger.Front_moved _
+                    | Keeper_model_input_ledger.Front_cut_through_block _
+                    | Keeper_model_input_ledger.Front_widened
+                    | Keeper_model_input_ledger.Prefix_changed
+                    | Keeper_model_input_ledger.History_reset ->
+                      Log.Keeper.info
+                        ~keeper_name:ctx.keeper_name
+                        "model input ledger runtime=%s %s"
+                        ctx.runtime_id
+                        line)
                  | None -> ());
                 Agent_core.Hooks.Continue
               | Agent_core.Hooks.BeforeTurn _

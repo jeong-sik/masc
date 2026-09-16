@@ -39,6 +39,7 @@ type event =
       ; evicted_tokens : int option
       }
   | Front_cut_through_block of { evicted_atoms : int }
+  | Front_widened
   | Prefix_changed
   | History_reset
 
@@ -124,9 +125,8 @@ let rec observe (previous : t option) (request : request) (usage : usage option)
   match previous with
   | None -> restart Started
   | Some t when request.prefix_digest <> t.prefix_digest -> restart Prefix_changed
-  | Some t
-    when request.atom_count < t.last.atom_count || request.first_atom < t.last.first_atom
-    -> restart History_reset
+  | Some t when request.atom_count < t.last.atom_count -> restart History_reset
+  | Some t when request.first_atom < t.last.first_atom -> restart Front_widened
   | Some t ->
     let evicted_atoms = request.first_atom - t.last.first_atom in
     (match trim_front t.blocks ~first_atom:request.first_atom with
@@ -138,12 +138,16 @@ and observe_trimmed (t : t) (request : request) (usage : usage option)
       ~evicted_atoms ~kept ~evicted_tokens
   =
     let tail_delta_bytes = request.tail_bytes - t.last.tail_bytes in
-    let new_atoms = request.atom_count - t.last.atom_count in
+    (* Atoms carried for the first time. A front that moved past everything
+       previously carried starts the new block at the front, not at the old
+       end: the atoms in between were never on the wire. *)
+    let new_block_start = max t.last.atom_count request.first_atom in
+    let new_atoms = request.atom_count - new_block_start in
     let blocks =
       if new_atoms > 0
       then
         kept
-        @ [ { block_first_atom = t.last.atom_count
+        @ [ { block_first_atom = new_block_start
             ; block_end_atom = request.atom_count
             ; tokens = None
             }
@@ -162,9 +166,11 @@ and observe_trimmed (t : t) (request : request) (usage : usage option)
       | Some u, Some total -> Some (u.input_tokens - total)
       | Some _, None | None, (Some _ | None) -> None
     in
+    (* A negative difference is a tail that shrank by more than the new atoms
+       added; it is reported but not written into a block. *)
     let blocks, measured =
       match delta_tokens, t.measured_end_atom with
-      | Some delta, Some from_atom when new_atoms > 0 ->
+      | Some delta, Some from_atom when new_atoms > 0 && delta >= 0 ->
         assign_tail blocks ~from_atom ~delta, true
       | Some _, (Some _ | None) | None, (Some _ | None) -> blocks, false
     in
@@ -220,6 +226,7 @@ let event_to_string = function
   | Front_moved { evicted_tokens = Some _; _ } -> "front_moved_measured"
   | Front_moved { evicted_tokens = None; _ } -> "front_moved_unmeasured"
   | Front_cut_through_block _ -> "front_cut_through_block"
+  | Front_widened -> "front_widened"
   | Prefix_changed -> "prefix_changed"
   | History_reset -> "history_reset"
 ;;
@@ -266,11 +273,20 @@ let observation_to_json o =
     ]
 ;;
 
+let usage_of_counts ~input_tokens ~cache_read_input_tokens =
+  if input_tokens > 0 then Some { input_tokens; cache_read_input_tokens } else None
+;;
+
+(* Length-prefixed parts, so a prompt that happens to end in a schema's text
+   cannot digest like the prompt plus that schema. *)
 let prefix_digest ~system_prompt ~tools =
+  let part text = Printf.sprintf "%d:%s" (String.length text) text in
   let schemas =
-    List.map (fun tool -> Yojson.Safe.to_string (Agent_core.Tool.schema_to_json tool)) tools
+    List.map
+      (fun tool -> part (Yojson.Safe.to_string (Agent_core.Tool.schema_to_json tool)))
+      tools
   in
-  Digestif.SHA256.(digest_string (String.concat "\n" (system_prompt :: schemas)) |> to_hex)
+  Digestif.SHA256.(digest_string (String.concat "" (part system_prompt :: schemas)) |> to_hex)
 ;;
 
 module Table = struct

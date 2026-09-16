@@ -32,7 +32,7 @@ declarations = sorted(os.path.relpath(os.path.join(d, f), os.getcwd()) for d, _,
 system_prompt_file = next((sys.argv[i+1] for i, x in enumerate(sys.argv) if x == '--system-prompt-file'), None)
 system_prompt = open(system_prompt_file).read() if system_prompt_file else None
 record({'argv':sys.argv,'cwd':os.getcwd(),'declarations':declarations,'system_prompt':system_prompt})
-assert sys.argv[sys.argv.index('--tools')+1] == ''
+assert sys.argv[sys.argv.index('--tools')+1] == 'ToolSearch'
 assert '--setting-sources=' in sys.argv
 session = next(x.split('=',1)[1] for x in sys.argv if x.startswith('--session-id='))
 request = receive()

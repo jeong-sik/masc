@@ -24,6 +24,7 @@ afterEach(() => {
 })
 
 const committed = {
+  structural_id: 'memory:journal:10:exampleorg:0',
   ok: true,
   outcome: 'committed',
   recorded_at: 1786000000,
@@ -65,6 +66,7 @@ const committed = {
 }
 
 const failed = {
+  structural_id: 'memory:journal:10:exampleorg:1',
   ok: true,
   outcome: 'failed',
   recorded_at: 1786000100,
@@ -161,7 +163,7 @@ describe('memory journal', () => {
   })
 
   it('keeps a torn line in place with its reason', async () => {
-    stubFetch(payload([committed, { ok: false, error: 'not valid JSON' }], 1))
+    stubFetch(payload([committed, { structural_id: 'memory:journal:10:exampleorg:2', ok: false, error: 'not valid JSON' }], 1))
     const journal = await fetchKeeperMemoryJournal('exampleorg')
     expect(journal.undecodableLines).toBe(1)
     expect(journal.entries[1]).toEqual({ ok: false, error: 'not valid JSON' })
@@ -188,5 +190,32 @@ describe('memory journal', () => {
   it('rejects an unknown field instead of projecting past a wider journal contract', async () => {
     stubFetch(payload([{ ...committed, future_field: true }]))
     await expect(fetchKeeperMemoryJournal('exampleorg')).rejects.toThrow('memory journal')
+  })
+
+  // The server projection prepends structural_id to every entry since #32380;
+  // a line without it did not come through read_journal_tail_projection.
+  it('rejects an entry missing the server-projected structural_id', async () => {
+    const { structural_id: _structuralId, ...withoutStructuralId } = committed
+    stubFetch(payload([withoutStructuralId]))
+    await expect(fetchKeeperMemoryJournal('exampleorg')).rejects.toThrow('memory journal')
+  })
+
+  // A quarantine is neither a committed nor a failed pass — it decodes as its
+  // own outcome instead of throwing the whole journal away.
+  it('keeps a quarantined line as its own outcome', async () => {
+    const quarantined = {
+      structural_id: 'memory:journal:10:exampleorg:3',
+      ok: true,
+      outcome: 'quarantined',
+      recorded_at: 1786000200,
+      rejection: 'snapshot decode failed: bad revision',
+      rejected_path: '/keepers/exampleorg/memory_os.rejected.json',
+    }
+    stubFetch(payload([quarantined]))
+    const journal = await fetchKeeperMemoryJournal('exampleorg')
+    const entry = journal.entries[0]
+    if (!entry?.ok || entry.outcome !== 'quarantined') throw new Error('expected a quarantine')
+    expect(entry.rejection).toBe('snapshot decode failed: bad revision')
+    expect(entry.rejectedPath).toContain('rejected')
   })
 })

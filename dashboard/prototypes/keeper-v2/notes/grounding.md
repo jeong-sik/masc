@@ -54,7 +54,7 @@
 **Sectionless surfaces**: overview, logs, settings, keepers, registry, board, schedule, approvals(Gate), fusion (서브섹션 없음 — 단일 탭).
 
 **섹션 있는 surface**:
-- monitoring: `agents(Keeper Fleet)` · `fleet-health(Tool Monitor)` · `runtime(Runtime)` · `observatory`. (hidden: transport-health, feature-health, journey, cognition)
+- monitoring: `agents(Keeper Fleet)` · `fleet-health(Tool Monitor)` · `runtime(Runtime)` · `observatory`. (hidden: transport-health, journey, cognition — feature-health는 2026-09-16 #36813에서 제거됨)
 - command: `operations(Actions)` 단일.
 - connectors: `connector-status(All)` 단일 — 내부 picker로 discord/imessage/slack/telegram 전환(2026-04-30 병합).
 - workspace: `work · planning(Plans & Goals) · repositories · verification`. (hidden: board, sub-boards, moderation)

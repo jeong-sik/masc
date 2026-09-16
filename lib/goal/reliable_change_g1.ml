@@ -1170,10 +1170,14 @@ let run_observation_of_json (json0 : Yojson.Safe.t) : (run_observation, string) 
       | None -> None
     in
     let usage =
+      (* Guard (task-1540): a malformed "usage" value (string, list, number
+         or null) must not kill the whole row with a Type_error on
+         [member "reported"]; degrade to an empty usage object so the
+         flat-format top-level fallback below stays reachable. *)
       let u =
         match json |> member "usage" with
-        | `Null -> `Assoc []
-        | other -> other
+        | `Assoc _ as usage_obj -> usage_obj
+        | _ -> `Assoc []
       in
       let reported =
         match u |> member "reported" |> to_bool_option with

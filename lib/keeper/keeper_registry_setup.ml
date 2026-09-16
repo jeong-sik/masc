@@ -7,6 +7,12 @@ open Keeper_types_profile
 open Keeper_id
 open Keeper_registry_types
 
+(* #26323: this map holds no entry across a process restart -- it starts at
+   [StringMap.empty] on every process boot and nothing anywhere in this
+   codebase reads a keeper's FSM phase back from disk into it. A keeper's
+   phase at the moment a prior process exited (including [Crashed]) is
+   therefore never visible to the next process's bootstrap; every keeper it
+   sees starts from [Keeper_registry.get] answering [None]. *)
 let registry : registry_entry StringMap.t Atomic.t = Atomic.make StringMap.empty
 let running_count_atomic = Atomic.make 0
 module Orphan_drops = Keeper_registry_orphan_drops

@@ -284,7 +284,7 @@ type masc_internal_error =
   | Terminal_effect_failed of {
       failure_class : Tool_result.tool_failure_class;
       effect_disposition : Tool_result.failure_effect_disposition;
-      diagnostic : string;
+      detail : Keeper_terminal_effect_detail.t;
     }
   | Provider_attempt_effect_fenced of {
       runtime_id : string;
@@ -473,7 +473,7 @@ let masc_internal_error_to_json = function
         ("detail", `String detail);
         ("tool_use_ids", `List (List.map (fun id -> `String id) tool_use_ids));
       ]
-  | Terminal_effect_failed { failure_class; effect_disposition; diagnostic } ->
+  | Terminal_effect_failed { failure_class; effect_disposition; detail } ->
     `Assoc
       [
         ("kind", `String "terminal_effect_failed");
@@ -482,7 +482,7 @@ let masc_internal_error_to_json = function
         , `String
             (Tool_result.failure_effect_disposition_to_string effect_disposition)
         );
-        ("diagnostic", `String diagnostic);
+        ("detail", Keeper_terminal_effect_detail.to_yojson detail);
       ]
   | Provider_attempt_effect_fenced
       { runtime_id; effect_disposition; diagnostic } ->
@@ -632,12 +632,17 @@ let summary_of_masc_internal_error = function
          "Runtime %s exhausted all candidates; reason=%s"
          (nonempty_or_unknown runtime_id)
          (runtime_exhaustion_reason_to_label reason))
+  | Terminal_effect_failed { effect_disposition; detail; _ } ->
+    Some
+      (Printf.sprintf
+         "Terminal tool effect failed (effect_disposition=%s): %s"
+         (Tool_result.failure_effect_disposition_to_string effect_disposition)
+         (Keeper_terminal_effect_detail.summary detail))
   | Resumable_cli_session _
   | Internal_unhandled_exception _
   | Internal_bridge_exception _
   | Internal_contract_rejected _
   | Incomplete_tool_transcript _
-  | Terminal_effect_failed _
   | Provider_attempt_effect_fenced _
   | Tool_correction_lost _
   | Receipt_persistence_failed _
@@ -990,22 +995,23 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
           | _ -> None)
       | Some (`String "terminal_effect_failed")
         when exact_fields
-               [ "kind"; "failure_class"; "effect_disposition"; "diagnostic" ]
+               [ "kind"; "failure_class"; "effect_disposition"; "detail" ]
                fields -> (
           match
             string_opt_of_assoc "failure_class" json,
             string_opt_of_assoc "effect_disposition" json,
-            string_opt_of_assoc "diagnostic" json
+            List.assoc_opt "detail" fields
           with
-          | Some failure_class, Some effect_disposition, Some diagnostic ->
+          | Some failure_class, Some effect_disposition, Some detail ->
             (match
                Tool_result.tool_failure_class_of_string failure_class,
-               Tool_result.failure_effect_disposition_of_string effect_disposition
+               Tool_result.failure_effect_disposition_of_string effect_disposition,
+               Keeper_terminal_effect_detail.of_yojson detail
              with
-             | Some failure_class, Some effect_disposition ->
+             | Some failure_class, Some effect_disposition, Ok detail ->
                Some
                  (Terminal_effect_failed
-                    { failure_class; effect_disposition; diagnostic })
+                    { failure_class; effect_disposition; detail })
              | _ -> None)
           | _ -> None)
       | Some (`String kind)
@@ -1093,7 +1099,7 @@ let classify_masc_internal_error_of_string (raw : string) :
 
 let classify_masc_internal_error (err : Agent_core.Error.t) :
     masc_internal_error option =
-  let terminal_effect_failed ~effect_disposition ~diagnostic =
+  let terminal_effect_failed ~effect_disposition ~detail =
     let effect_disposition =
       match Agent_core.Error.terminal_effect_disposition effect_disposition with
       | Agent_core.Tool_contract.Proven_pre_effect ->
@@ -1107,7 +1113,7 @@ let classify_masc_internal_error (err : Agent_core.Error.t) :
       (Terminal_effect_failed
          { failure_class = Tool_result.Runtime_failure
          ; effect_disposition
-         ; diagnostic
+         ; detail = Keeper_terminal_effect_detail.Agent_core_terminal_effect { detail }
          })
   in
   match err with
@@ -1121,9 +1127,9 @@ let classify_masc_internal_error (err : Agent_core.Error.t) :
   | Agent_core.Error.Agent
       (Agent_core.Error.TerminalToolEffectFailed
         { effect_disposition; detail; _ }) ->
-    terminal_effect_failed ~effect_disposition ~diagnostic:detail
+    terminal_effect_failed ~effect_disposition ~detail
   | Agent_core.Error.Agent
       (Agent_core.Error.TerminalToolDurabilityFailed
         { effect_disposition; detail; _ }) ->
-    terminal_effect_failed ~effect_disposition ~diagnostic:detail
+    terminal_effect_failed ~effect_disposition ~detail
   | _ -> None

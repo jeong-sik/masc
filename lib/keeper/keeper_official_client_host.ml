@@ -12,7 +12,7 @@ type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_
   | Terminal_failed of
       { failure_class : Tool_result.tool_failure_class
       ; effect_disposition : Tool_result.failure_effect_disposition
-      ; diagnostic : string
+      ; detail : Keeper_terminal_effect_detail.t
       }
 
 type host_stop = Runtime_official_client_tool.host_stop =
@@ -264,13 +264,13 @@ let host_stop_result ~runtime_id ~model ~session_id ~turn_id ~turns_used ~latenc
     stop =
   match stop with
   | Terminal_tool_boundary
-      { outcome = Terminal_failed { failure_class; effect_disposition; diagnostic }
+      { outcome = Terminal_failed { failure_class; effect_disposition; detail }
       ; _
       } ->
     Error
       (Keeper_internal_error.core_error_of_masc_internal_error
          (Keeper_internal_error.Terminal_effect_failed
-            { failure_class; effect_disposition; diagnostic }))
+            { failure_class; effect_disposition; detail }))
   | ( Repeated_tool_call _
     | Terminal_tool_boundary
         { outcome =
@@ -1027,7 +1027,7 @@ let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_app
                        Terminal_failed
                          { failure_class = failure.failure_class
                          ; effect_disposition = failure.effect_disposition
-                         ; diagnostic = failure.diagnostic
+                         ; detail = failure.detail
                          }
                    })
             | ( Keeper_tools_agent_core.Terminal_effect_open
@@ -1073,14 +1073,16 @@ let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_app
           in
           let terminal_boundary =
             match delivery_error, terminal_boundary with
-            | Some diagnostic,
+            | Some message,
               Some (Terminal_tool_boundary {tool_name; outcome = Terminal_completed}) ->
               Some (Terminal_tool_boundary
                 { tool_name
                 ; outcome = Terminal_failed
                     { failure_class = Tool_result.Runtime_failure
                     ; effect_disposition = Tool_result.Proven_post_effect
-                    ; diagnostic
+                    ; detail =
+                        Keeper_terminal_effect_detail.Result_delivery_failed
+                          { model_tool_name = tool_name; message }
                     }
                 })
             | None, _ | Some _, _ -> terminal_boundary
@@ -1142,7 +1144,9 @@ let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_app
                    ; outcome = Terminal_failed
                        { failure_class = Tool_result.Runtime_failure
                        ; effect_disposition = Tool_result.Effect_outcome_unknown
-                       ; diagnostic = detail
+                       ; detail =
+                           Keeper_terminal_effect_detail.Boundary_observation_failed
+                             { model_tool_name = tool.schema.name; message = detail }
                        }
                    })
              in

@@ -28,6 +28,44 @@ let format_event_yojson ?id ?event_type json =
   Buffer.contents buf
 ;;
 
+type encoded_json =
+  { json : Yojson.Safe.t
+  ; text : string
+  }
+
+let encode_json json = { json; text = Yojson.Safe.to_string json }
+
+(* Yojson writes an object as [{"key":value,...}] with no spacing, so joining
+   the fields' texts that way writes the bytes encoding the whole object
+   would. *)
+let encoded_object fields =
+  let text_bytes =
+    List.fold_left (fun bytes (_, value) -> bytes + String.length value.text) 0 fields
+  in
+  let buf = Buffer.create (text_bytes + 64) in
+  Buffer.add_char buf '{';
+  List.iteri
+    (fun index (key, value) ->
+      if index > 0 then Buffer.add_char buf ',';
+      Yojson.Safe.to_buffer buf (`String key);
+      Buffer.add_char buf ':';
+      Buffer.add_string buf value.text)
+    fields;
+  Buffer.add_char buf '}';
+  { json = `Assoc (List.map (fun (key, value) -> key, value.json) fields)
+  ; text = Buffer.contents buf
+  }
+;;
+
+let format_event_encoded ?id ?event_type encoded =
+  let buf = Buffer.create (String.length encoded.text + 64) in
+  add_optional_headers buf ?id ?event_type ();
+  Buffer.add_string buf "data: ";
+  Buffer.add_string buf encoded.text;
+  Buffer.add_string buf "\n\n";
+  Buffer.contents buf
+;;
+
 type observer_cursor = { instance_id : string; event_id : int }
 type observer_reset = Instance_changed | Unscoped_cursor
 type observer_replay = Fresh | Resumed | Reset of observer_reset

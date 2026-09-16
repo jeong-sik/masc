@@ -170,6 +170,32 @@ let test_tick_emits_due_candidate_once () =
     (List.length (read_recent_signal_rows config 10))
 ;;
 
+(* The seen-key list changes only when a tick emits a signal, and it holds
+   every occurrence ever signalled (430 KB on a live root). A tick that emits
+   nothing must leave the file alone. The list is stored compact here, so a
+   rewrite, which pretty-prints, would change its bytes. *)
+let test_tick_without_a_new_signal_leaves_the_seen_keys_file_alone () =
+  with_workspace
+  @@ fun config ->
+  let _request = create_ok ~schedule_id:"quiet-1" config in
+  let due = tick_ok config ~now:201.0 in
+  check int "the due tick emits" 1 (List.length due.emitted);
+  let seen_path =
+    Filename.concat (Filename.dirname (signals_dir config)) "signal_keys.json"
+  in
+  if not (Sys.file_exists seen_path)
+  then failf "the emitting tick left no seen-key file at %s" seen_path;
+  let compact = Yojson.Safe.to_string (Yojson.Safe.from_file seen_path) in
+  Out_channel.with_open_bin seen_path (fun channel -> output_string channel compact);
+  let repeated = tick_ok config ~now:202.0 in
+  check int "the repeated tick emits nothing" 0 (List.length repeated.emitted);
+  check
+    string
+    "the seen-key file keeps the bytes it had"
+    compact
+    (In_channel.with_open_bin seen_path In_channel.input_all)
+;;
+
 let test_tick_dispatches_due_candidate_to_success () =
   with_workspace
   @@ fun config ->
@@ -846,6 +872,8 @@ let () =
     [ ( "tick",
         [ test_case "emits due candidate once" `Quick
             test_tick_emits_due_candidate_once
+        ; test_case "a tick without a new signal leaves the seen-key file alone" `Quick
+            test_tick_without_a_new_signal_leaves_the_seen_keys_file_alone
         ; test_case "dispatches due candidate to success" `Quick
             test_tick_dispatches_due_candidate_to_success
         ; test_case "completes wake on durable acceptance" `Quick

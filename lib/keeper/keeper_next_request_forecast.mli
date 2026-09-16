@@ -9,23 +9,26 @@
 
     Live at the time of the call: the declared window, the runtime's density
     (process-local, absent after a restart until the first response), the
-    request-body cap, and the checkpoint. As last measured, from the turn
-    records of completed turns on the same runtime: [R] (tool schemas +
-    keeper instructions) from the newest composition, and the pinned blocks
-    (memory recall, dynamic context, ...) from the newest composition that
-    is a first round's. A record describes the turn's latest request; a
-    post-tool round drops every block
-    {!Prompt_block_id.injected_on_post_tool_round} refuses, so only a record
-    carrying such a block says what the next first round pins, while the
-    schemas ride every round and the newest record has the current surface.
-    An errored turn's record names the requested runtime, not the one whose
-    composition it holds, so it is not read. {!measured_parts} carries the
-    turn each figure came from. *)
+    request-body cap, and the checkpoint. As last measured, from turn
+    records: [R] (tool schemas + keeper instructions) from the newest
+    composition of a completed turn on the same runtime, because the tool
+    surface is the lane's and an errored turn's record names the requested
+    runtime rather than the one whose composition it holds; the pinned
+    blocks (memory recall, dynamic context, ...) from the newest composition
+    on any lane that is a first round's, because those blocks are the
+    keeper's and a first round is recorded mostly by single-request turns:
+    official-client turns, and turns that errored on their first request. A
+    record describes the turn's latest request; a post-tool round drops
+    every block {!Prompt_block_id.injected_on_post_tool_round} refuses, so
+    only a record carrying such a block says what the next first round
+    pins. {!measured_parts} carries the turn, and for the pinned figure the
+    lane, each came from. *)
 
 type measured_parts =
   { reserved_turn : int  (** The completed turn [reserved_bytes] was read from. *)
   ; reserved_bytes : int  (** Tool schemas + keeper instructions. *)
-  ; pinned_turn : int  (** The completed first-round turn [pinned_bytes] was read from. *)
+  ; pinned_turn : int  (** The first-round turn [pinned_bytes] was read from. *)
+  ; pinned_runtime_id : string  (** The lane that turn ran on, as its record names it. *)
   ; pinned_bytes : int  (** Every other prompt block, never cut. *)
   }
 
@@ -33,8 +36,8 @@ type parts_refusal =
   | No_composition_on_runtime of { records_read : int }
       (** No completed turn on this runtime carried an exact composition. *)
   | No_first_round_composition of { records_read : int; newest_turn : int }
-      (** Completed turns on this runtime carried compositions, all of them
-          post-tool rounds; [newest_turn] is the newest of those. *)
+      (** Compositions were read, none of them a first round's on any lane;
+          [newest_turn] is the newest completed turn on this runtime. *)
 
 val parts_refusal_to_string : parts_refusal -> string
 
@@ -110,9 +113,18 @@ type composition =
 
 val read_composition : Turn_record.input_component list -> composition
 
+type record_reading =
+  { turn : int
+  ; runtime_id : string  (** As the record names it. *)
+  ; completed : bool  (** The record carries a stop reason. *)
+  ; composition : composition
+  }
+
 val select_parts
-  :  records_read:int
-  -> (int * composition) list
+  :  runtime_id:string
+  -> records_read:int
+  -> record_reading list
   -> (measured_parts, parts_refusal) result
-(** Over the completed turns on one runtime, oldest first: [reserved] from
-    the newest composition, [pinned] from the newest first-round one. *)
+(** Oldest first. [reserved] from the newest completed reading on
+    [runtime_id]; [pinned] from the newest first-round reading on any lane,
+    completed or not. *)

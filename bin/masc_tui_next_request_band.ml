@@ -57,6 +57,14 @@ let candidate_lines ~prose ~fact ~safe ~scale
                   Printf.sprintf "  ·  provider accepts up to %s tok" (approx cap)
               | None -> ""))
   in
+  (* The pinned figure names its lane only when it is not this one. *)
+  let pinned_provenance (parts : Inspector.forecast_parts) =
+    if String.equal parts.pinned_measured_on_runtime candidate.runtime_id
+    then Printf.sprintf "(turn #%d)" parts.pinned_measured_on_turn
+    else
+      Printf.sprintf "(turn #%d on %s)" parts.pinned_measured_on_turn
+        (safe parts.pinned_measured_on_runtime)
+  in
   let parts_line =
     match candidate.parts, candidate.capacity with
     | Error reason, _ ->
@@ -65,16 +73,16 @@ let candidate_lines ~prose ~fact ~safe ~scale
     | Ok parts, Some (Inspector.Capacity_measured { capacity_bytes; _ }) ->
         fact
           (Printf.sprintf
-             "fixed parts %s tok (turn #%d) + pinned %s tok (turn #%d)  \
+             "fixed parts %s tok (turn #%d) + pinned %s tok %s  \
               \xe2\x86\x92  history room %s tok"
              (approx parts.reserved_bytes) parts.reserved_measured_on_turn
-             (approx parts.pinned_bytes) parts.pinned_measured_on_turn
+             (approx parts.pinned_bytes) (pinned_provenance parts)
              (approx (capacity_bytes - parts.reserved_bytes - parts.pinned_bytes)))
     | Ok parts, (Some Inspector.Capacity_unmeasured | None) ->
         fact
-          (Printf.sprintf "fixed parts %s tok (turn #%d) + pinned %s tok (turn #%d)"
+          (Printf.sprintf "fixed parts %s tok (turn #%d) + pinned %s tok %s"
              (approx parts.reserved_bytes) parts.reserved_measured_on_turn
-             (approx parts.pinned_bytes) parts.pinned_measured_on_turn)
+             (approx parts.pinned_bytes) (pinned_provenance parts))
   in
   let cut_line =
     match candidate.cut with

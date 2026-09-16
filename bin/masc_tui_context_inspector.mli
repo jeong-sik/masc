@@ -127,8 +127,11 @@ type forecast_parts =
         (** Tool schemas + keeper instructions, from the newest completed
             turn on the runtime. *)
   ; pinned_measured_on_turn : int
+  ; pinned_measured_on_runtime : string
+        (** The lane that turn ran on; a first round is recorded mostly by
+            single-request turns, so it is often another lane's. *)
   ; pinned_bytes : int
-        (** Every other prompt block, from the newest completed turn whose
+        (** Every other prompt block, from the newest turn on any lane whose
             composition is a first round's. *)
   }
 

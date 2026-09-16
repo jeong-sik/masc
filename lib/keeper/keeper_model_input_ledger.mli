@@ -108,6 +108,13 @@ val usage_of_counts : input_tokens:int -> cache_read_input_tokens:int -> usage o
 (** [None] unless [input_tokens] is positive: a zero-filled usage is the
     shape of a response that reported nothing. *)
 
+val move_front : t -> first_atom:int -> t
+(** Apply an eviction decided outside a request: blocks below [first_atom]
+    leave, their tokens come off the total when they were all measured, and
+    otherwise the total is unknown until the next usage. A front that does
+    not advance changes nothing; a front inside a block restarts the blocks
+    from it. The next request's [observe] then sees an unchanged front. *)
+
 val known_tokens : t -> int
 (** Sum of the measured blocks' tokens. *)
 
@@ -128,14 +135,29 @@ val prefix_digest : system_prompt:string -> tools:Agent_core.Tool.t list -> stri
 
 (** Process-wide table, one ledger per keeper and runtime. *)
 module Table : sig
+  (** One ledger per (keeper, runtime, session). The session is the history
+      the atoms are positions in: a keeper's trace id, or the recovery
+      worker's own session, so neither reads the other's front. *)
+
   val observe
     :  keeper_name:string
     -> runtime_id:string
+    -> session_id:string
     -> request:request
     -> usage:usage option
     -> observation
 
-  val lookup : keeper_name:string -> runtime_id:string -> t option
+  val lookup : keeper_name:string -> runtime_id:string -> session_id:string -> t option
+
+  val move_front
+    :  keeper_name:string
+    -> runtime_id:string
+    -> session_id:string
+    -> first_atom:int
+    -> unit
+  (** {!move_front} on the pair's ledger, so the next request composes and
+      the next observation measures from the new front. A pair without a
+      ledger has no front to move, and nothing is written. *)
 
   module For_testing : sig
     val reset : unit -> unit

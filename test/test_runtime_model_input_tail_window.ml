@@ -906,36 +906,71 @@ let test_target_newest_atom_overrun_is_reported_not_refused () =
    | Ok _ -> Alcotest.fail "the refusing projection must refuse this budget")
 ;;
 
-(* The newest-atom view is the smallest transmission that still carries the
-   turn: pinned context, the newest atom, and the preamble when that atom's
-   head is not a user message. *)
-let test_newest_atom_view_keeps_pinned_and_prepends_the_preamble () =
-  let history = extra_context :: atoms 4 in
+(* The cap fit is exact: the longest suffix whose bytes fit, at any atom,
+   not at a 60-atom step. *)
+let test_within_bytes_cuts_at_the_exact_atom () =
+  let history = extra_context :: atoms 100 in
+  let _, newest_37_bytes = Window.project_from_atom ~measure_message_bytes ~first_atom:63 history in
   let projection, transmitted_bytes =
-    Window.project_newest_atom ~measure_message_bytes history
+    Window.project_within_bytes
+      ~measure_message_bytes
+      ~target_bytes:newest_37_bytes
+      ~reserved_bytes:0
+      history
   in
-  Alcotest.(check int) "one atom" 1 (count_atoms projection.Window.messages);
-  Alcotest.(check int) "three atoms dropped" 3 projection.Window.dropped_atoms;
-  Alcotest.(check int) "four atoms counted" 4 projection.Window.atom_count;
-  Alcotest.(check bool)
-    "the newest atom opened with an assistant, so the preamble leads"
-    true
-    (is_preamble (List.nth projection.Window.messages 0));
-  Alcotest.(check bool)
-    "pinned context survives"
-    true
-    (List.exists (fun (m : Types.message) -> m == extra_context) projection.Window.messages);
-  Alcotest.(check int)
-    "transmitted bytes are the kept messages' bytes"
-    (total_bytes projection.Window.messages)
-    transmitted_bytes
+  Alcotest.(check int) "sixty-three dropped, not sixty or ninety-nine" 63 projection.Window.dropped_atoms;
+  Alcotest.(check int) "the bytes are the kept messages'" (total_bytes projection.Window.messages) transmitted_bytes;
+  Alcotest.(check bool) "pinned context survives" true
+    (List.exists (fun (m : Types.message) -> m == extra_context) projection.Window.messages)
 ;;
 
-let test_newest_atom_view_of_a_user_head_needs_no_preamble () =
-  let history = atoms 3 in
-  let projection, _ = Window.project_newest_atom ~measure_message_bytes history in
+let test_within_bytes_keeps_the_newest_atom_when_nothing_fits () =
+  let history = atoms 4 in
+  let projection, _ =
+    Window.project_within_bytes ~measure_message_bytes ~target_bytes:1 ~reserved_bytes:0 history
+  in
   Alcotest.(check int) "one atom" 1 (count_atoms projection.Window.messages);
-  Alcotest.(check bool) "no preamble" false (List.exists is_preamble projection.Window.messages)
+  Alcotest.(check int) "three dropped" 3 projection.Window.dropped_atoms
+;;
+
+let test_within_bytes_that_fits_everything_is_the_input_list () =
+  let history = atoms 4 in
+  let projection, _ =
+    Window.project_within_bytes ~measure_message_bytes ~target_bytes:max_int ~reserved_bytes:0 history
+  in
+  Alcotest.(check bool) "the input list itself" true (projection.Window.messages == history)
+;;
+
+(* The carried range: the atoms at or after the front, pinned context in
+   place, the preamble when the kept head is not a user message. *)
+let test_from_atom_view_keeps_the_atoms_from_the_front () =
+  let history = extra_context :: atoms 5 in
+  let projection, transmitted_bytes =
+    Window.project_from_atom ~measure_message_bytes ~first_atom:3 history
+  in
+  Alcotest.(check int) "two atoms kept" 2 (count_atoms projection.Window.messages);
+  Alcotest.(check int) "three dropped" 3 projection.Window.dropped_atoms;
+  Alcotest.(check int) "five counted" 5 projection.Window.atom_count;
+  Alcotest.(check bool) "pinned context survives" true
+    (List.exists (fun (m : Types.message) -> m == extra_context) projection.Window.messages);
+  Alcotest.(check int) "transmitted bytes are the kept messages' bytes"
+    (total_bytes projection.Window.messages) transmitted_bytes
+;;
+
+let test_from_atom_view_at_zero_is_the_whole_history () =
+  let history = atoms 4 in
+  let projection, _ = Window.project_from_atom ~measure_message_bytes ~first_atom:0 history in
+  Alcotest.(check bool) "the input list itself" true (projection.Window.messages == history);
+  Alcotest.(check int) "nothing dropped" 0 projection.Window.dropped_atoms
+;;
+
+let test_from_atom_view_past_the_newest_atom_keeps_it () =
+  let history = atoms 4 in
+  let projection, _ = Window.project_from_atom ~measure_message_bytes ~first_atom:40 history in
+  Alcotest.(check int) "one atom" 1 (count_atoms projection.Window.messages);
+  Alcotest.(check int) "three dropped" 3 projection.Window.dropped_atoms;
+  let projection, _ = Window.project_from_atom ~measure_message_bytes ~first_atom:(-3) history in
+  Alcotest.(check int) "a negative front is the whole history" 0 projection.Window.dropped_atoms
 ;;
 
 let () =
@@ -1016,10 +1051,18 @@ let () =
             test_target_fixed_parts_overrun_keeps_the_newest_atom
         ; Alcotest.test_case "target newest-atom overrun is reported, not refused" `Quick
             test_target_newest_atom_overrun_is_reported_not_refused
-        ; Alcotest.test_case "newest-atom view keeps pinned and prepends the preamble" `Quick
-            test_newest_atom_view_keeps_pinned_and_prepends_the_preamble
-        ; Alcotest.test_case "newest-atom view of a user head needs no preamble" `Quick
-            test_newest_atom_view_of_a_user_head_needs_no_preamble
+        ; Alcotest.test_case "within-bytes cuts at the exact atom" `Quick
+            test_within_bytes_cuts_at_the_exact_atom
+        ; Alcotest.test_case "within-bytes keeps the newest atom when nothing fits" `Quick
+            test_within_bytes_keeps_the_newest_atom_when_nothing_fits
+        ; Alcotest.test_case "within-bytes that fits everything is the input list" `Quick
+            test_within_bytes_that_fits_everything_is_the_input_list
+        ; Alcotest.test_case "from-atom view keeps the atoms from the front" `Quick
+            test_from_atom_view_keeps_the_atoms_from_the_front
+        ; Alcotest.test_case "from-atom view at zero is the whole history" `Quick
+            test_from_atom_view_at_zero_is_the_whole_history
+        ; Alcotest.test_case "from-atom view past the newest atom keeps it" `Quick
+            test_from_atom_view_past_the_newest_atom_keeps_it
         ; Alcotest.test_case "deterministic" `Quick test_deterministic
         ] )
     ]

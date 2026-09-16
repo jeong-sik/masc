@@ -1237,6 +1237,19 @@ let keeper_fleet_safety_health_json
     | None -> []
   in
   let configuration_blocked_count = List.length configuration_blocked_names in
+  (* The unscoped reading of the same snapshot fact. [configuration_blocked_*]
+     above answers an autoboot question -- would the fleet the operator
+     auto-boots come up blocked -- and filters to the autoboot target set, so
+     a configuration-blocked keeper outside it (manual activation, booted on
+     request) is invisible there while still counting in failing. This pair
+     names every Failing keeper whose reason is Turn_configuration_error,
+     which with the recovering count partitions the failing count exactly. *)
+  let turn_configuration_error_names =
+    match phase_snapshot with
+    | Some snapshot -> snapshot.configuration_blocked_names
+    | None -> []
+  in
+  let turn_configuration_error_count = List.length turn_configuration_error_names in
   let all_target_keepers_configuration_blocked =
     target_count > 0 && configuration_blocked_count >= target_count
   in
@@ -1352,6 +1365,9 @@ let keeper_fleet_safety_health_json
     ; "configuration_blocked_keeper_count", `Int configuration_blocked_count
     ; ( "configuration_blocked_keeper_names"
       , `List (List.map (fun name -> `String name) configuration_blocked_names) )
+    ; "turn_configuration_error_keeper_count", `Int turn_configuration_error_count
+    ; ( "turn_configuration_error_keeper_names"
+      , `List (List.map (fun name -> `String name) turn_configuration_error_names) )
     ; ( "all_target_keepers_configuration_blocked"
       , `Bool all_target_keepers_configuration_blocked )
     ; "executable_keeper_fiber_count", `Int executable_count

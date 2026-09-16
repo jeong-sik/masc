@@ -201,6 +201,33 @@ and observe_trimmed (t : t) (request : request) (usage : usage option)
     { ledger; event; delta_tokens; tail_delta_bytes }
 ;;
 
+(* Apply an eviction the carried range decided: the same trimming a request
+   would report as [Front_moved], applied now so a decision taken before the
+   next usage (a refusal retry) sees the moved front. A front that does not
+   advance leaves the ledger as it is; a front inside a block restarts the
+   blocks from the new front with the total unknown, as [observe] would. *)
+let move_front (t : t) ~first_atom =
+  if first_atom <= t.last.first_atom
+  then t
+  else (
+    let last = { t.last with first_atom } in
+    match trim_front t.blocks ~first_atom with
+    | `Cut ->
+      { t with
+        total_tokens = None
+      ; measured_end_atom = None
+      ; blocks = [ base_block last ]
+      ; last
+      }
+    | `Trimmed (kept, evicted_tokens) ->
+      let total_tokens, measured_end_atom =
+        match t.total_tokens, evicted_tokens with
+        | Some total, Some evicted -> Some (total - evicted), t.measured_end_atom
+        | Some _, None | None, (Some _ | None) -> None, None
+      in
+      { t with total_tokens; measured_end_atom; blocks = kept; last })
+;;
+
 let known_tokens t =
   List.fold_left
     (fun sum b -> match b.tokens with Some n -> sum + n | None -> sum)
@@ -298,19 +325,34 @@ module Table = struct
     }
 
   let global = { ledgers = M.empty; mutex = Eio.Mutex.create () }
-  let key ~keeper_name ~runtime_id = keeper_name ^ "\000" ^ runtime_id
+  (* One ledger per history: the session names the checkpoint the atoms
+     are positions in, so a recovery worker's turn on the same keeper and
+     runtime, or a new session, never reads or writes another's front. *)
+  let key ~keeper_name ~runtime_id ~session_id =
+    keeper_name ^ "\000" ^ runtime_id ^ "\000" ^ session_id
+  ;;
 
-  let observe ~keeper_name ~runtime_id ~request ~usage =
-    let key = key ~keeper_name ~runtime_id in
+  let observe ~keeper_name ~runtime_id ~session_id ~request ~usage =
+    let key = key ~keeper_name ~runtime_id ~session_id in
     Eio.Mutex.use_rw ~protect:true global.mutex (fun () ->
       let observation = observe (M.find_opt key global.ledgers) request usage in
       global.ledgers <- M.add key observation.ledger global.ledgers;
       observation)
   ;;
 
-  let lookup ~keeper_name ~runtime_id =
+  let lookup ~keeper_name ~runtime_id ~session_id =
     Eio.Mutex.use_ro global.mutex (fun () ->
-      M.find_opt (key ~keeper_name ~runtime_id) global.ledgers)
+      M.find_opt (key ~keeper_name ~runtime_id ~session_id) global.ledgers)
+  ;;
+
+  (* [move_front] in the body is the ledger function above: this binding is
+     not recursive. *)
+  let move_front ~keeper_name ~runtime_id ~session_id ~first_atom =
+    let key = key ~keeper_name ~runtime_id ~session_id in
+    Eio.Mutex.use_rw ~protect:true global.mutex (fun () ->
+      match M.find_opt key global.ledgers with
+      | None -> ()
+      | Some t -> global.ledgers <- M.add key (move_front t ~first_atom) global.ledgers)
   ;;
 
   module For_testing = struct

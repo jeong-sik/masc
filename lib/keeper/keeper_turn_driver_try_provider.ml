@@ -8,7 +8,6 @@
 
     @since RFC-0051 PR-3a *)
 
-open Result.Syntax
 
 (** A reading of the keeper's live in-turn progress signal (#28417).
 
@@ -52,17 +51,18 @@ type try_provider_ctx =
     runtime_id : string
   ; error_runtime_id : string
   ; max_request_body_bytes : int option
-  ; (* The window [bounded_model_input_projection] cuts the history to, in
-       tokens (RFC keeper-context-window-in-tokens). Declared by the turn
-       driver from [turn.context_window_tokens];
-       [run_try_provider_with_context_overflow_shrink] halves it on a typed
-       provider context overflow and retries the SAME candidate, and the
-       window it runs at names its source. [max_request_body_bytes] is
-       independent of it: it judges the serialized request and reports the
-       real declared cap to wire-error diagnostics
-       ([observe_request_wire_error], [pre_dispatch_serialization_observer]),
-       and it never shapes the window. *)
-    model_input_window : Keeper_context_window.t
+  ; (* The marks the carried range is judged against after each response
+       (RFC keeper-context-window-in-tokens §10.5), declared on the binding.
+       [None] leaves eviction to a refusal alone. [max_request_body_bytes]
+       is independent of them: it judges the serialized request and reports
+       the real declared cap to wire-error diagnostics
+       ([observe_request_wire_error], [pre_dispatch_serialization_observer]);
+       a refusal on it evicts the same way a provider's does. *)
+    context_marks : Runtime_schema.context_marks option
+  ; (* Where the carried range starts when the process holds no ledger for
+       this (keeper, runtime) pair: the range the newest completed turn record
+       on the runtime measured. Read once per attempt, on that path only. *)
+    carried_front_seed : unit -> Keeper_carried_front.seed option
   ; base_path : string
   ; keeper_name : string
   ; name : string
@@ -220,26 +220,14 @@ let emit_runtime_manifest
     |> append
   | _ -> ()
 
-(* #27320: records a same-runtime context-overflow shrink retry on the
-   existing per-attempt manifest channel (the same [Provider_lane_resolved]
+(* Records a same-runtime retry after a refusal moved the carried front, on
+   the existing per-attempt manifest channel (the same [Provider_lane_resolved]
    event this module already emits for the ordinary "resolved" case) rather
-   than introducing a new [event_kind] for one narrow signal. *)
-let emit_context_overflow_shrink_manifest
-      (ctx : try_provider_ctx)
-      ~shrink_attempt
-      ~previous_window_tokens
-      ~window_tokens
-  =
+   than a new [event_kind] for one narrow signal. *)
+let emit_carried_range_retry_manifest (ctx : try_provider_ctx) ~retry decision =
   emit_runtime_manifest ctx
-    ~status:"context_overflow_shrink_retry"
-    ~decision:
-      (`Assoc
-        [ "shrink_attempt", `Int shrink_attempt
-        ; "previous_window_tokens", `Int previous_window_tokens
-        ; "window_tokens", `Int window_tokens
-        ; ( "declared_window_tokens"
-          , `Int (Keeper_context_window.declared_tokens ctx.model_input_window) )
-        ])
+    ~status:"context_overflow_eviction_retry"
+    ~decision:(`Assoc (("retry", `Int retry) :: decision))
     Keeper_runtime_manifest.Provider_lane_resolved
 ;;
 
@@ -529,10 +517,10 @@ let observe_request_wire_error
 ;;
 
 (* The canonical MASC message encoder, also used for checkpoint serialization.
-   It is not the provider's encoder, and the window reserves nothing for the
-   difference: the token density it cuts against is observed over the bytes
-   this encoder measured for a request, so whatever the wire adds on top is
-   already inside the ratio (RFC keeper-context-window-in-tokens).
+   It is not the provider's encoder, and nothing here converts its bytes to
+   tokens: the range is a position on the atom axis, the bytes it measures
+   are judged against the request-body cap alone, and the provider counts
+   the tokens (RFC keeper-context-window-in-tokens).
 
    [Yojson.Safe.to_string] is [to_buffer] followed by [Buffer.contents], so
    measuring through a buffer counts the same bytes and stops allocating a
@@ -557,8 +545,8 @@ let message_measurer () =
    which allocates a new record for every message
    ([Reasoning_history_projection.project]), so the key has to survive a rebuilt
    record. A float zero and its negative inside a raw JSON payload share one
-   entry while encoding one byte apart; a byte is far inside the density the
-   window is read through. *)
+   entry while encoding one byte apart; the bytes are judged against a cap
+   of hundreds of kilobytes, and never converted to tokens. *)
 module Message_measurement_cache = Hashtbl.Make (Agent_core.Types.Message_value)
 
 let memoize_message_measurement measure =
@@ -599,47 +587,74 @@ let declared_request_reserve_bytes ~system_prompt ~tools =
   tool_schema_bytes + system_prompt_bytes
 ;;
 
-(* RFC-0363: the unmodified history chooses the authoritative cut first.
-   Demotion then rewrites the atoms older than the current turn — the
-   [demote_before] boundary the caller computes from [ctx.initial_messages]
-   (RFC-0351 §4) — and the window cuts again against the smaller messages.
-   Because that boundary moves once per turn, appending a message mid-turn
-   cannot rewrite the transmitted prefix. The [history_atom_count] result is
-   the atom count of that first cut — the only one taken against the whole
-   history; every later cut sees a list that has already been shortened — so
-   the reported share keeps that denominator.
+(* The carried range as one request composes it (RFC
+   keeper-context-window-in-tokens §10.4). The front comes from the ledger
+   or its cold-start seed; without either there is no atom to start from,
+   and the request is the newest suffix the request-body cap admits, or the
+   whole history when no cap is declared. Both of those hold only until the
+   first usage on the pair is counted.
 
-   The window is a target, so no cut refuses (RFC
-   keeper-context-window-in-tokens): when the parts no cut can remove pass
-   the target, the newest atom is transmitted with the overrun reported and
-   the provider judges its own context. One thing the target cannot answer
-   is whether the provider will accept the bytes at all; that is the
-   request-body cap's verdict, and it is the one axis on which this stage
-   still reshapes a request. #28845, kept on that axis: when the smallest
-   view that carries the turn would pass the declared cap, the composition
-   is retried once with the demotion boundary moved past the newest atom
-   ([demote_before = atom_count]), lifting the RFC-0351 §4 current-turn
-   exclusion for that attempt only, so the turn's own tool results leave as
-   externalized markers instead of the request being refused at the wire.
-   If the atom carries nothing demotable, the view is transmitted as it is
-   and the wire says no — a typed refusal with the exact size, which the
-   lane already rotates on. A single last-resort attempt, not a retry
-   loop. *)
-let plan_and_window_model_input
+   RFC-0363 demotion runs first over the unmodified history: the atoms older
+   than the current turn — the [demote_before] boundary the caller computes
+   from [ctx.initial_messages] (RFC-0351 §4) — have their aged tool results
+   rewritten to readable addresses, and the range is then read off the
+   rewritten list. Demotion neither adds nor removes atoms, so the front is
+   the same position on both lists, and [history_atom_count] is the count
+   of the whole history, which the reported share keeps as denominator.
+
+   No cut refuses and nothing here estimates a size: the marks and the
+   provider judge the request once it is counted. The one axis on which this
+   stage still reshapes a request is the request-body cap, and only at the
+   floor. #28845, kept on that axis: when the smallest view that carries the
+   turn — the newest atom alone — would pass the declared cap, the
+   composition is retried once with the demotion boundary moved past the
+   newest atom ([demote_before = atom_count]), lifting the RFC-0351 §4
+   current-turn exclusion for that attempt only, so the turn's own tool
+   results leave as externalized markers instead of the request being
+   refused at the wire. If the atom carries nothing demotable, the view is
+   transmitted as it is and the wire says no — a typed refusal with the exact
+   size, which evicts and then rotates. A single last-resort attempt, not a
+   retry loop. *)
+type composed =
+  { planned : Keeper_model_input_demotion.plan_result
+  ; projection : Runtime_model_input_tail_window.projection
+  ; transmitted_bytes : int
+  ; history_atom_count : int
+  ; origin : Keeper_carried_front.origin
+  ; over_request_cap : bool
+  ; outlived_seed : Keeper_carried_front.seed option
+  }
+
+(* The ledger's session: the history the carried positions belong to. The
+   turn's trace id on the keeper's own turns; an attempt without one has no
+   durable history and shares nothing. *)
+let ledger_session (ctx : try_provider_ctx) =
+  match ctx.session_id with
+  | Some session -> session
+  | None -> "-"
+;;
+
+let compose_carried_model_input
       ~measure_message_bytes
-      ~target_bytes
+      ~(front : Keeper_carried_front.seed option)
       ~reserved_bytes
       ~wire_cap_bytes
       ~base_path
       ~demote_before
       messages
   =
-  let cut candidate =
-    Runtime_model_input_tail_window.project_target
-      ~measure_message_bytes
-      ~target_bytes
-      ~reserved_bytes
-      candidate
+  let _labelled, history_atom_count = Runtime_model_input_tail_window.annotate messages in
+  (* A front measured against a longer history names no atom of this one:
+     the history shrank under it (a checkpoint purge), so the request starts
+     over as with no front rather than carrying the newest atom alone from a
+     position that would never widen again. *)
+  let front, outlived_seed =
+    match front with
+    | Some seed ->
+      (match Keeper_carried_front.for_history ~atom_count:history_atom_count seed with
+       | Some seed -> Some seed, None
+       | None -> None, Some seed)
+    | None -> None, None
   in
   let plan ~demote_before =
     if String.equal base_path "" || demote_before = 0
@@ -650,33 +665,67 @@ let plan_and_window_model_input
         ~demote_before
         messages
   in
-  let raw = cut messages in
-  let history_atom_count =
-    raw.Runtime_model_input_tail_window.projection.atom_count
+  let view candidate =
+    match front, wire_cap_bytes with
+    | Some (seed : Keeper_carried_front.seed), (Some _ | None) ->
+      let first_atom =
+        Keeper_carried_front.clamp ~atom_count:history_atom_count seed.first_atom
+      in
+      let projection, transmitted_bytes =
+        Runtime_model_input_tail_window.project_from_atom
+          ~measure_message_bytes
+          ~first_atom
+          candidate
+      in
+      projection, transmitted_bytes, Keeper_carried_front.Carried seed.source
+    | None, Some cap ->
+      let projection, transmitted_bytes =
+        Runtime_model_input_tail_window.project_within_bytes
+          ~measure_message_bytes
+          ~target_bytes:cap
+          ~reserved_bytes
+          candidate
+      in
+      projection, transmitted_bytes, Keeper_carried_front.Fit_to_request_cap
+    | None, None ->
+      let projection, transmitted_bytes =
+        Runtime_model_input_tail_window.project_from_atom
+          ~measure_message_bytes
+          ~first_atom:0
+          candidate
+      in
+      projection, transmitted_bytes, Keeper_carried_front.Whole_history
   in
-  let cut_planned (planned : Keeper_model_input_demotion.plan_result) =
-    match planned.Keeper_model_input_demotion.pending with
-    | [] -> planned, raw, history_atom_count
-    | _ :: _ ->
-      planned, cut planned.Keeper_model_input_demotion.messages, history_atom_count
+  let over_request_cap transmitted_bytes =
+    match wire_cap_bytes with
+    | Some cap -> reserved_bytes + transmitted_bytes > cap
+    | None -> false
   in
-  (* An overrun view is the smallest one that carries the turn: pinned
-     context, the newest atom, the preamble. Above the cap, no window of any
-     size would have made it transmittable. *)
-  let smallest_view_passes_wire_cap =
-    match raw.Runtime_model_input_tail_window.fit, wire_cap_bytes with
-    | Runtime_model_input_tail_window.Overrun _, Some cap ->
-      reserved_bytes + raw.Runtime_model_input_tail_window.transmitted_bytes > cap
-    | Runtime_model_input_tail_window.Overrun _, None
-    | Runtime_model_input_tail_window.Within_target, (Some _ | None) -> false
+  let compose (planned : Keeper_model_input_demotion.plan_result) =
+    let projection, transmitted_bytes, origin =
+      view planned.Keeper_model_input_demotion.messages
+    in
+    { planned
+    ; projection
+    ; transmitted_bytes
+    ; history_atom_count
+    ; origin
+    ; over_request_cap = over_request_cap transmitted_bytes
+    ; outlived_seed
+    }
   in
-  if smallest_view_passes_wire_cap
+  let composed = compose (plan ~demote_before) in
+  let smallest_view =
+    composed.projection.Runtime_model_input_tail_window.dropped_atoms
+    >= history_atom_count - 1
+  in
+  if composed.over_request_cap && smallest_view
   then (
     let last_resort = plan ~demote_before:history_atom_count in
     match last_resort.Keeper_model_input_demotion.pending with
-    | [] -> cut_planned (plan ~demote_before)
-    | _ :: _ -> cut_planned last_resort)
-  else cut_planned (plan ~demote_before)
+    | [] -> composed
+    | _ :: _ -> compose last_resort)
+  else composed
 ;;
 
 let projected_initial_message_count ~provider_config initial_messages =
@@ -692,23 +741,19 @@ let projected_initial_message_count ~provider_config initial_messages =
      | Error _ -> List.length initial)
 ;;
 
-(* The bounded transmission view runs here rather than in the caller because
-   its capacity depends on the runtime: the window is declared in tokens
-   ([ctx.model_input_window]) and the byte capacity one request cuts to comes
-   from that runtime's observed token density, which the previous response on
-   this very attempt may have just refined. A caller that composed the window
-   ahead of runtime selection would have to guess which runtime's density
-   applies. The window stays ahead of [ctx.model_input_projection] so that
+(* The carried range runs here rather than in the caller because its front
+   belongs to the (keeper, runtime) pair: the ledger the previous response on
+   this very attempt may have just moved. A caller that composed the range
+   ahead of runtime selection would have to guess which runtime's ledger
+   applies. The range stays ahead of [ctx.model_input_projection] so that
    projection's projected-prefix precondition keeps holding against the list
    it receives.
 
-   [last_request_measured_bytes] receives, per request, the bytes this stage
-   measured for what it composed -- reservation and transmitted history --
-   so the response's usage can be paired with them as one density
-   observation. *)
+   [last_request] receives, per request, the range this stage composed, so
+   the response's usage can be written against it in the ledger, and so a
+   refusal can be answered with a move of that very front. *)
 let bounded_model_input_projection
       (ctx : try_provider_ctx)
-      ~last_request_measured_bytes
       ~last_request
       ~(provider_config : Llm_provider.Provider_config.t)
   : Agent_core.Agent.model_input_projection
@@ -762,13 +807,17 @@ let bounded_model_input_projection
      once: [Reasoning_history_projection.observe]'s comment records a WARN
      firing ~973x/day about routine normalisation before it was demoted. *)
   let fallback_reported = ref false in
-  (* Once per attempt, not per request, for the same reason: the window and
-     its capacity as resolved for the first request, a capacity the
-     request-body cap cannot carry, and an overrun. Each is a fact an
-     operator reads against the declaration; none changes what is sent. *)
-  let window_reported = ref false in
-  let contradiction_reported = ref false in
-  let overrun_reported = ref false in
+  (* Once per attempt, not per request, for the same reason: where the range
+     started for the first request, and a range that passes the request-body
+     cap. Each is a fact an operator reads against the declaration; neither
+     changes what is sent. *)
+  let front_reported = ref false in
+  let over_cap_reported = ref false in
+  let outlived_reported = ref false in
+  (* The cold-start seed is read once per attempt and only when no ledger
+     answers; a ledger appears with the first counted usage and is read live
+     on every request after it. *)
+  let cold_seed = lazy (ctx.carried_front_seed ()) in
   fun messages ->
     (* Measure the history the wire will carry, not the history the checkpoint
        holds. [Keeper_context_core.message_to_json] is the durable encoder — it
@@ -793,11 +842,11 @@ let bounded_model_input_projection
            validates reasoning provenance across the whole list it is given,
            and it is given the whole checkpoint — so one malformed tag anywhere
            in a keeper's lifetime would otherwise abort every later turn, with
-           no typed overflow for the shrink retry to catch. Before this budget
-           existed the same check ran only over the windowed tail, inside the
-           backend, and still does: falling back to the durable shape restores
-           exactly that scope. The cost is the narrower window this refinement
-           was added to widen, which is the previous behaviour, not a new
+           no typed refusal for the eviction retry to catch. Before this
+           composition existed the same check ran only over the transmitted
+           tail, inside the backend, and still does: falling back to the
+           durable shape restores exactly that scope. The cost is measuring
+           bytes the wire deletes, which is the previous behaviour, not a new
            failure. *)
         if not !fallback_reported
         then (
@@ -811,191 +860,142 @@ let bounded_model_input_projection
                error));
         messages, Turn_record.Durable_shape
     in
-    let capacity =
-      Keeper_context_window.capacity
-        ctx.model_input_window
-        (Keeper_context_window.Density.lookup ~runtime_id:ctx.runtime_id)
+    let front =
+      match
+        Keeper_model_input_ledger.Table.lookup
+          ~keeper_name:ctx.keeper_name
+          ~runtime_id:ctx.runtime_id
+          ~session_id:(ledger_session ctx)
+      with
+      | Some ledger -> Some (Keeper_carried_front.of_ledger ledger)
+      | None -> Lazy.force cold_seed
     in
-    if not !window_reported
+    let composed =
+      offload_model_input_cpu (fun () ->
+        (* RFC-0351 §4: a tool result is cycle-scoped. What the keeper is
+           reasoning over right now is what this turn produced, and
+           [ctx.initial_messages] is exactly the history the turn was seeded
+           with — so everything past it is this turn's own work and stays
+           verbatim, and everything before it was already reported through a
+           receipt or a board post and becomes a readable address. The
+           boundary moves once per turn, so appending a message cannot
+           rewrite the retained prefix. *)
+        let demote_before =
+          Runtime_model_input_tail_window.first_atom_at_or_after
+            messages
+            ~message_index:initial_message_index
+        in
+        compose_carried_model_input
+          ~measure_message_bytes
+          ~front
+          ~reserved_bytes
+          ~wire_cap_bytes:ctx.max_request_body_bytes
+          (* #27268 A/B kill-switch: an empty base path makes the composition
+             keep every atom verbatim, so the RFC-0363 demotion effect can be
+             measured on and off in one deployment. Default on preserves
+             current behavior. *)
+          ~base_path:
+            (if
+               Env_config_core.get_bool
+                 ~default:true
+                 "MASC_KEEPER_MODEL_INPUT_DEMOTION_ENABLED"
+             then ctx.base_path
+             else "")
+          ~demote_before
+          messages)
+    in
+    let history_atom_count = composed.history_atom_count in
+    if not !front_reported
     then (
-      window_reported := true;
+      front_reported := true;
       Log.Keeper.info
         ~keeper_name:ctx.keeper_name
-        "model input window runtime=%s window=%s capacity=%s reserved_bytes=%d"
+        "model input carried range runtime=%s origin=%s first_atom=%d atoms=%d/%d \
+         transmitted_bytes=%d reserved_bytes=%d marks=%s request_cap_bytes=%s"
         ctx.runtime_id
-        (Yojson.Safe.to_string (Keeper_context_window.to_json ctx.model_input_window))
-        (Yojson.Safe.to_string (Keeper_context_window.capacity_to_json capacity))
+        (Keeper_carried_front.origin_to_string composed.origin)
+        composed.projection.Runtime_model_input_tail_window.dropped_atoms
+        (history_atom_count - composed.projection.Runtime_model_input_tail_window.dropped_atoms)
+        history_atom_count
+        composed.transmitted_bytes
+        reserved_bytes
+        (match ctx.context_marks with
+         | Some marks ->
+           Printf.sprintf "%d/%d" marks.high_water_tokens marks.low_water_tokens
+         | None -> "none")
+        (match ctx.max_request_body_bytes with
+         | Some cap -> string_of_int cap
+         | None -> "none"));
+    (match composed.outlived_seed with
+     | Some seed when not !outlived_reported ->
+       outlived_reported := true;
+       Log.Keeper.warn
+         ~keeper_name:ctx.keeper_name
+         "model input carried range dropped its front runtime=%s seed=%s seed_atoms=%d \
+          history_atoms=%d: the history shrank under it and the request starts over"
+         ctx.runtime_id
+         (Yojson.Safe.to_string (Keeper_carried_front.seed_to_json seed))
+         seed.atom_count
+         history_atom_count
+     | Some _ | None -> ());
+    if composed.over_request_cap && not !over_cap_reported
+    then (
+      over_cap_reported := true;
+      Log.Keeper.info
+        ~keeper_name:ctx.keeper_name
+        "model input carried range passes the request-body cap runtime=%s \
+         transmitted_bytes=%d reserved_bytes=%d: the wire refuses it and the \
+         refusal moves the front"
+        ctx.runtime_id
+        composed.transmitted_bytes
         reserved_bytes);
-    (match capacity, ctx.max_request_body_bytes with
-     | ( Keeper_context_window.Measured { capacity_bytes; window_tokens; _ }
-       , Some cap )
-       when capacity_bytes > cap ->
-       if not !contradiction_reported
-       then (
-         contradiction_reported := true;
-         Log.Keeper.warn
-           ~keeper_name:ctx.keeper_name
-           "model input window contradicts the request-body cap runtime=%s: \
-            %d tokens read as %d bytes at the observed density, above \
-            max-request-body-bytes=%d; a request that fills the window is \
-            refused at the wire"
-           ctx.runtime_id
-           window_tokens
-           capacity_bytes
-           cap)
-     | Keeper_context_window.Measured _, (Some _ | None)
-     | Keeper_context_window.Unmeasured _, (Some _ | None) -> ());
-    let windowed, history_atom_count =
-      match capacity with
-      | Keeper_context_window.Unmeasured _ ->
-        (* No density for this runtime yet, so no byte capacity stands for
-           the window. The smallest request that still carries the turn is
-           sent; its response reports usage, and the next request on this
-           runtime cuts to the window. Nothing to demote: every older atom
-           is already out. *)
-        let projection, transmitted_bytes =
-          offload_model_input_cpu (fun () ->
-            Runtime_model_input_tail_window.project_newest_atom
-              ~measure_message_bytes
-              messages)
-        in
-        ( { Runtime_model_input_tail_window.projection
-          ; fit = Runtime_model_input_tail_window.Within_target
-          ; transmitted_bytes
-          }
-        , projection.Runtime_model_input_tail_window.atom_count )
-      | Keeper_context_window.Measured { capacity_bytes; _ } ->
-        let planned, windowed, history_atom_count =
-          offload_model_input_cpu (fun () ->
-            (* RFC-0351 §4: a tool result is cycle-scoped. What the keeper is
-               reasoning over right now is what this turn produced, and
-               [ctx.initial_messages] is exactly the history the turn was
-               seeded with — so everything past it is this turn's own work and
-               stays verbatim, and everything before it was already reported
-               through a receipt or a board post and becomes a readable
-               address.
+    let projection_messages =
+      match composed.planned.Keeper_model_input_demotion.pending with
+      | [] -> composed.projection.Runtime_model_input_tail_window.messages
+      | pending ->
+        (* Blob materialization writes files, so it stays on the owning Eio
+           fiber rather than in the CPU domain pool. The store skips writing
+           an address this process already wrote, so on a long-lived keeper
+           the sha256 over every aged body was all this call did, and it
+           held this domain for one uninterrupted run of 0.7 to 1.6 seconds
+           per request (2026-09-16 trace). The attempt's memo answers every
+           request after the first; whatever is left goes to the pool.
 
-               This is a boundary rather than a count of recent results. It
-               also keeps the property the previous boundary was chosen for:
-               appending a message cannot rewrite the retained prefix, because
-               it moves once per turn rather than once per message. *)
-            let demote_before =
-              Runtime_model_input_tail_window.first_atom_at_or_after
-                messages
-                ~message_index:initial_message_index
-            in
-            plan_and_window_model_input
-              ~measure_message_bytes
-              ~target_bytes:capacity_bytes
-              ~reserved_bytes
-              ~wire_cap_bytes:ctx.max_request_body_bytes
-              (* #27268 A/B kill-switch: an empty base path makes
-                 [plan_and_window_model_input] keep every atom verbatim, so
-                 the RFC-0363 demotion effect can be measured on and off in
-                 one deployment. Default on preserves current behavior. *)
-              ~base_path:
-                (if
-                   Env_config_core.get_bool
-                     ~default:true
-                     "MASC_KEEPER_MODEL_INPUT_DEMOTION_ENABLED"
-                 then ctx.base_path
-                 else "")
-              ~demote_before
-              messages)
+           A reverted body is larger than the marker it was measured as; the
+           range is a position, not a size, so the same atoms go out and the
+           provider counts them. *)
+        let outcome =
+          Keeper_model_input_demotion.materialize
+            ~store:(Tool_blob_store.create ~base_path:ctx.base_path)
+            ~addresses:demotion_addresses
+            ~pending
+            composed.projection.Runtime_model_input_tail_window.messages
         in
-        let windowed =
-          match planned.Keeper_model_input_demotion.pending with
-          | [] -> windowed
-          | pending ->
-            (* Blob materialization writes files, so it stays on the owning
-               Eio fiber rather than in the CPU domain pool. The store skips
-               writing an address this process already wrote, so on a
-               long-lived keeper the sha256 over every aged body was all this
-               call did, and it held this domain for one uninterrupted run of
-               0.7 to 1.6 seconds per request (2026-09-16 trace). The attempt's
-               memo answers every request after the first; whatever is left
-               goes to the pool. *)
-            let outcome =
-              Keeper_model_input_demotion.materialize
-                ~store:(Tool_blob_store.create ~base_path:ctx.base_path)
-                ~addresses:demotion_addresses
-                ~pending
-                windowed.Runtime_model_input_tail_window.projection.messages
-            in
-            if outcome.Keeper_model_input_demotion.reverted = 0
-            then
-              (* Materialization rewrites bodies inside the already-chosen
-                 cut; it neither adds nor removes atoms, so the counts still
-                 hold, and a marker is never larger than the placeholder it
-                 was measured as, so the measured bytes stand. *)
-              { windowed with
-                Runtime_model_input_tail_window.projection =
-                  { windowed.Runtime_model_input_tail_window.projection with
-                    Runtime_model_input_tail_window.messages =
-                      outcome.Keeper_model_input_demotion.messages
-                  }
-              }
-            else
-              (* A restored body is larger than the measured placeholder, so
-                 the final cut must be selected again against the actual
-                 payload. *)
-              offload_model_input_cpu (fun () ->
-                Runtime_model_input_tail_window.project_target
-                  ~measure_message_bytes:
-                    (memoize_message_measurement (message_measurer ()))
-                  ~target_bytes:capacity_bytes
-                  ~reserved_bytes
-                  outcome.Keeper_model_input_demotion.messages)
-        in
-        windowed, history_atom_count
+        outcome.Keeper_model_input_demotion.messages
     in
-    (match windowed.Runtime_model_input_tail_window.fit with
-     | Runtime_model_input_tail_window.Within_target -> ()
-     | Runtime_model_input_tail_window.Overrun _ as fit ->
-       if not !overrun_reported
-       then (
-         overrun_reported := true;
-         Log.Keeper.warn
-           ~keeper_name:ctx.keeper_name
-           "model input window overrun runtime=%s fit=%s transmitted_bytes=%d \
-            reserved_bytes=%d: the parts no cut can remove pass the window; \
-            the provider judges whether they fit its context"
-           ctx.runtime_id
-           (Runtime_model_input_tail_window.target_fit_to_string fit)
-           windowed.Runtime_model_input_tail_window.transmitted_bytes
-           reserved_bytes));
     Option.iter
       (fun observe ->
          observe
            ~measurement
            (Runtime_model_input_tail_window.observe
               ~history_atom_count
-              windowed.Runtime_model_input_tail_window.projection))
+              composed.projection))
       ctx.on_model_input_window_observation;
-    last_request_measured_bytes
-    := Some (reserved_bytes + windowed.Runtime_model_input_tail_window.transmitted_bytes);
     (* What this request carried, for the ledger the after-turn hook writes
-       once the provider reports its count: the carried atom range and the
-       bytes of the per-request tail (the pinned messages), so a difference
-       between two requests can be attributed to the atoms appended between
-       them. *)
-    (* Read the carried range back from the transmitted list rather than
-       from the projection's counts: after a demotion re-cut those counts
-       are relative to the already-cut sublist (see the interface of
-       [project_target]), while the atoms in the final list and
-       [history_atom_count] are absolute on every path. The preamble is
-       tail, not an atom, as the cut itself treats it. *)
-    (let messages =
-       windowed.Runtime_model_input_tail_window.projection
-         .Runtime_model_input_tail_window.messages
-     in
-     let transmitted_atoms, tail_bytes =
+       once the provider reports its count, and for the front a refusal
+       moves: the carried atom range and the bytes of the per-request tail
+       (the pinned messages), so a difference between two requests can be
+       attributed to the atoms appended between them. Read back from the
+       transmitted list: the atoms in the final list and [history_atom_count]
+       are absolute on every path, and the preamble is tail, not an atom, as
+       the range itself treats it. *)
+    (let transmitted_atoms, tail_bytes =
        offload_model_input_cpu (fun () ->
          let history, preamble =
            List.partition
              (fun message ->
                 not (Runtime_model_input_tail_window.is_synthetic_preamble message))
-             messages
+             projection_messages
          in
          let labelled, transmitted_atoms =
            Runtime_model_input_tail_window.annotate history
@@ -1025,13 +1025,18 @@ let bounded_model_input_projection
           ; atom_count = history_atom_count
           ; tail_bytes
           });
-    let windowed = windowed.Runtime_model_input_tail_window.projection.messages in
+    let windowed = projection_messages in
     match ctx.model_input_projection with
     | None -> Ok windowed
     | Some inner -> inner windowed
 ;;
 
-let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate =
+let run_try_provider_attempt
+      ?continuation_checkpoint
+      ~(last_request : Keeper_model_input_ledger.request option ref)
+      (ctx : try_provider_ctx)
+      candidate
+  =
   (* Named so the trace attributes runs during the provider attempt (request
      assembly, streaming, tool loop) to [turn:provider]. *)
   Eio_guard.with_named_switch "turn:provider" @@ fun () ->
@@ -1054,13 +1059,6 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
      Core writes it: on while the wait is on, then the instant it settled.
      The stall watchdog reads it on each poll. *)
   let permit_wait = Atomic.make Llm_provider.Provider_admission.Before_any_wait in
-  (* The bytes the window measured for the request most recently composed on
-     this attempt, paired below with the usage the provider reports for it:
-     one observation of this runtime's token density. AGENT_CORE drives one
-     request at a time inside an attempt, so the request the projection just
-     measured is the one [AfterTurn] answers. *)
-  let last_request_measured_bytes = ref None in
-  let last_request = ref None in
   let config_result =
     let base_config =
       Runtime_candidate.default_config
@@ -1086,28 +1084,19 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
              Agent_core.Hooks.compose ~outer:gate_hooks ~inner:hooks)
     in
     (* Usage observation (RFC keeper-context-window-in-tokens): the
-       provider's inclusive prompt total for the request the projection just
-       built. The density keeps the cut fed until the ledger replaces it;
-       the ledger records the request's carried range against the count, one
-       line per provider call, so block sizes, front moves and tail changes
-       are read from the provider's numbers. Composed outermost and always
+       provider's inclusive prompt total for the request the composition just
+       built. The ledger records the request's carried range against the
+       count, one line per provider call, so block sizes, front moves and
+       tail changes are read from the provider's numbers, and the marks are
+       judged against the total right after. Composed outermost and always
        [Continue], so it neither delays nor decides anything the turn's own
        hooks do. *)
-    let density_hooks =
+    let ledger_hooks =
       { Agent_core.Hooks.empty with
         after_turn =
           Some
             (function
               | Agent_core.Hooks.AfterTurn { response; _ } ->
-                (match
-                   response.Agent_core.Types.usage, !last_request_measured_bytes
-                 with
-                 | Some usage, Some measured_bytes ->
-                   Keeper_context_window.Density.observe
-                     ~runtime_id:ctx.runtime_id
-                     ~measured_bytes
-                     ~input_tokens:usage.Agent_core.Types.input_tokens
-                 | Some _, None | None, (Some _ | None) -> ());
                 (match !last_request with
                  | Some request ->
                    let usage =
@@ -1121,6 +1110,7 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
                      Keeper_model_input_ledger.Table.observe
                        ~keeper_name:ctx.keeper_name
                        ~runtime_id:ctx.runtime_id
+                       ~session_id:(ledger_session ctx)
                        ~request
                        ~usage
                    in
@@ -1150,7 +1140,32 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
                         ~keeper_name:ctx.keeper_name
                         "model input ledger runtime=%s %s"
                         ctx.runtime_id
-                        line)
+                        line);
+                   (* The marks, against the total the provider just counted
+                      (RFC §10.5): above the high-water mark the oldest blocks
+                      leave until the projected total is under the low-water
+                      mark, and the next request composes from the new front.
+                      Without marks, only a refusal moves the front. *)
+                   (match ctx.context_marks with
+                    | None -> ()
+                    | Some marks ->
+                      (match
+                         Keeper_carried_range.after_response
+                           ~marks
+                           observation.Keeper_model_input_ledger.ledger
+                       with
+                       | Keeper_carried_range.Unchanged _ -> ()
+                       | Keeper_carried_range.Evicted { first_atom; _ } as step ->
+                         Keeper_model_input_ledger.Table.move_front
+                           ~keeper_name:ctx.keeper_name
+                           ~runtime_id:ctx.runtime_id
+                           ~session_id:(ledger_session ctx)
+                           ~first_atom;
+                         Log.Keeper.info
+                           ~keeper_name:ctx.keeper_name
+                           "model input carried range evicted runtime=%s %s"
+                           ctx.runtime_id
+                           (Yojson.Safe.to_string (Keeper_carried_range.step_to_json step))))
                  | None -> ());
                 Agent_core.Hooks.Continue
               | Agent_core.Hooks.BeforeTurn _
@@ -1166,8 +1181,8 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
     let hooks_with_gate =
       Some
         (match hooks_with_gate with
-         | None -> density_hooks
-         | Some hooks -> Agent_core.Hooks.compose ~outer:density_hooks ~inner:hooks)
+         | None -> ledger_hooks
+         | Some hooks -> Agent_core.Hooks.compose ~outer:ledger_hooks ~inner:hooks)
     in
     (* Runtime/model configuration is authoritative; the run-level value only
        fills an omitted provider temperature. *)
@@ -1280,7 +1295,6 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
              Some
                (bounded_model_input_projection
                   ctx
-                  ~last_request_measured_bytes
                   ~last_request
                   ~provider_config:config.Runtime_agent.provider_cfg))
       }
@@ -1554,16 +1568,17 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
     result, checkpoint_after, None
 ;;
 
-(* #27320: same-runtime retry stage for a typed provider context overflow,
-   inserted before [Keeper_turn_driver.attempt_runtime_candidates]' declared-
-   lane candidate walk and its cascade rotation. A ContextOverflow on a
-   request cut to the declared token window means the runtime's declared
-   max-context, or the density the window was read through, over-states
-   what this model carries -- not that the request was malformed: a smaller
-   window of the SAME conversation can still answer the same turn, so this
-   retries the same candidate rather than rotating runtimes immediately. *)
+(* #27320: same-runtime retry stage for a typed provider context overflow on
+   the official-client lanes, whose seed history is cut against a declared
+   prompt byte cap ([Keeper_claude_code_runtime], [Keeper_codex_runtime]).
+   A ContextOverflow there means the cap over-states what the client
+   carries, not that the request was malformed: a smaller view of the SAME
+   conversation can still answer the same turn, so the lane retries the same
+   candidate rather than rotating runtimes immediately. The Agent Core lane
+   answers the same refusal by moving the carried front instead
+   ([run_try_provider_with_carried_range_eviction]). *)
 (* Halving needs no token/byte conversion constant: the provider is the
-   oracle for whether a window fits. Each retry is a content-free mechanical
+   oracle for whether a view fits. Each retry is a content-free mechanical
    convergence step consulted only after a typed overflow, not a size
    estimate. *)
 let context_overflow_shrink_divisor = 2
@@ -1573,9 +1588,8 @@ let default_context_overflow_shrink_capacity ~capacity =
 ;;
 
 (* The shrink-retry policy is expressed over an injected [attempt] callback
-   rather than calling [run_try_provider] directly, so it stays testable
-   without an Eio-backed provider: [run_try_provider_with_context_overflow_shrink]
-   below wires the real attempt for production; tests can inject a canned
+   so it stays testable without an Eio-backed provider: the official-client
+   lanes wire their real attempt for production; tests can inject a canned
    Ok/Error sequence to verify the halving sequence, the walk to the floor,
    and the same-run-retry-authority gate on their own.
 
@@ -1662,21 +1676,136 @@ let context_overflow_shrink_sequence
   go ~capacity:starting_capacity ~shrink_attempt:0
 ;;
 
-(** Same as [run_try_provider], except a typed provider context overflow
-    retries the SAME candidate with the window halved, in tokens, down to
-    the floor the reserve leaves, before returning to the caller, which
-    still owns declared-lane candidate rotation and cascade fallback for
-    every other error and for an overflow that survives every shrink
-    attempt.
+(* The refusals that say the request outgrew what carries it: the provider's
+   context overflow, and the two size refusals on the byte axis, masc's own
+   against the declared request-body cap and the provider's without a bound.
+   Each is answered by moving the carried front, never by rotating first: a
+   shorter range of the SAME conversation can still answer the same turn.
+   Enumerated so a new variant forces a decision here instead of a silent
+   [false]. *)
+let refusal_evicts = function
+  | Agent_core.Error.Api (ContextOverflow _)
+  | Agent_core.Error.Api
+      (InvalidRequest
+         { reason = Request_body_too_large _ | Request_body_refused_by_provider _; _ }) ->
+    true
+  | Agent_core.Error.Api
+      ( InvalidRequest
+          { reason =
+              ( Json_parse_error
+              | Attempt_rejected
+              | Refusal_body_not_received
+              | Unknown_invalid_request )
+          ; _
+          }
+      | InputCapacity _
+      | RateLimited _
+      | Overloaded _
+      | ServerError _
+      | AuthError _
+      | AuthorizationError _
+      | PaymentRequired _
+      | NotFound _
+      | NetworkError _
+      | Timeout _ )
+  | Agent_core.Error.Provider _
+  | Agent_core.Error.Agent _
+  | Agent_core.Error.Config _
+  | Agent_core.Error.Mcp _
+  | Agent_core.Error.Serialization _
+  | Agent_core.Error.Io _
+  | Agent_core.Error.Orchestration _
+  | Agent_core.Error.Internal _
+  | Agent_core.Error.Internal_carried _ -> false
+;;
 
-    The starting window for this (keeper, runtime) pair comes from
-    {!Keeper_context_overflow_shrink_state}: the window that last completed
-    a turn here, clamped to the declared window, so a keeper that has
-    already discovered a working window does not rediscover it every turn.
-    A successful attempt updates that memory. The window an attempt runs at
-    carries its source, so a remembered or halved window is visible next to
-    the declared one. *)
-let run_try_provider_with_context_overflow_shrink
+type eviction_retry =
+  | Evicted_blocks of Keeper_carried_range.step
+  | Halved_range of
+      { first_atom : int
+      ; atom_count : int
+      }
+
+let eviction_retry_to_json = function
+  | Evicted_blocks step ->
+    [ "kind", `String "evicted_blocks"; "step", Keeper_carried_range.step_to_json step ]
+  | Halved_range { first_atom; atom_count } ->
+    [ "kind", `String "halved_range"
+    ; "first_atom", `Int first_atom
+    ; "atom_count", `Int atom_count
+    ]
+;;
+
+(* The eviction-retry policy over an injected [attempt], testable without a
+   provider (RFC keeper-context-window-in-tokens §10.5). A refusal that
+   [refusal_evicts] is answered from the pair's ledger with
+   [Keeper_carried_range.after_overflow]: the oldest blocks leave and the
+   same candidate is asked again. When the ledger has no block structure to
+   walk — no usage counted yet on this pair, or a single block — the range
+   halves toward the newest atom instead, and stops at a single atom. Every
+   step is a position on the atom axis chosen against the provider's
+   verdict; nothing converts bytes to tokens. [same_run_retry_authorized]
+   is the same gate [Keeper_turn_driver]'s declared-lane walk applies before
+   rotating candidates: a retry here is a same-run retry too, so it must not
+   fire once AGENT_CORE has mutated agent state at a durable checkpoint
+   stage. *)
+let carried_range_eviction_sequence
+      ~same_run_retry_authorized
+      ~(ledger : unit -> Keeper_model_input_ledger.t option)
+      ~(last_request : unit -> Keeper_model_input_ledger.request option)
+      ~marks
+      ~(evict : Keeper_carried_range.step -> unit)
+      ~(halve : first_atom:int -> atom_count:int -> retry:int -> unit)
+      ~(on_retry : retry:int -> eviction_retry -> unit)
+      ~(attempt : unit -> ('ok, Agent_core.Error.t) result)
+      ()
+  : ('ok, Agent_core.Error.t) result
+  =
+  let halve_last_request ~retry ~failed ~continue_ =
+    match last_request () with
+    | None -> failed
+    | Some (request : Keeper_model_input_ledger.request) ->
+      (match
+         Keeper_carried_front.halve
+           ~first_atom:request.first_atom
+           ~atom_count:request.atom_count
+       with
+       | None -> failed
+       | Some first_atom ->
+         halve ~first_atom ~atom_count:request.atom_count ~retry;
+         on_retry ~retry (Halved_range { first_atom; atom_count = request.atom_count });
+         continue_ ())
+  in
+  let rec go ~retry =
+    match attempt () with
+    | Ok _ as ok -> ok
+    | Error error as failed ->
+      if not (refusal_evicts error && same_run_retry_authorized ())
+      then failed
+      else (
+        let retry = retry + 1 in
+        let continue_ () = go ~retry in
+        match ledger () with
+        | Some ledger ->
+          (match Keeper_carried_range.after_overflow ~marks ledger with
+           | Keeper_carried_range.Evicted _ as step ->
+             evict step;
+             on_retry ~retry (Evicted_blocks step);
+             continue_ ()
+           | Keeper_carried_range.Unchanged _ -> halve_last_request ~retry ~failed ~continue_)
+        | None -> halve_last_request ~retry ~failed ~continue_)
+  in
+  go ~retry:0
+;;
+
+(** Same as [run_try_provider], except a refusal that says the request
+    outgrew its carrier moves the carried front and retries the SAME
+    candidate, before returning to the caller, which still owns
+    declared-lane candidate rotation and cascade fallback for every other
+    error and for a refusal that survives every move. The front the retry
+    composes from is the ledger's after the eviction, or, before any usage
+    on this pair, the halved range held for the rest of this attempt. *)
+let run_try_provider_with_carried_range_eviction
       ?continuation_checkpoint
       (ctx : try_provider_ctx)
       candidate
@@ -1684,90 +1813,87 @@ let run_try_provider_with_context_overflow_shrink
   match ctx.recovery_view with
   | Some _ ->
     (* The validated semantic view owns retained source obligations. Retrying
-       the same view with a smaller window cannot recover it. Final
-       serialized request admission still enforces the request-body cap. *)
-    run_try_provider ?continuation_checkpoint ctx candidate
-  (* #34163's guard, restated in the token-window era (#36709): a runtime the
-     caller left uncapped never declared a wire envelope to shrink, so this
-     policy must not invent a token seed for it either. The declared window
-     stays the one view; a typed provider overflow on it keeps its typed
-     result for the declared-lane candidate walk, which is the only move the
-     caller actually budgeted for. Halving from the 85,000-token default
-     otherwise walks the whole chain to a zero-capacity attempt (18 refusals
-     measured on run 35046296737) with no density observation to stop it
-     early -- exactly the rediscovery this policy exists to prevent. *)
-  | None when ctx.max_request_body_bytes = None ->
-    run_try_provider ?continuation_checkpoint ctx candidate
+       the same view with a shorter range cannot recover it. Final serialized
+       request admission still enforces the request-body cap. *)
+    run_try_provider_attempt ?continuation_checkpoint ~last_request:(ref None) ctx candidate
   | None ->
-  let declared_window = ctx.model_input_window in
-  let starting_capacity =
-    Keeper_context_overflow_shrink_state.starting_capacity
-      ~keeper_name:ctx.keeper_name
-      ~runtime_id:ctx.runtime_id
-      ~max_capacity:(Keeper_context_window.declared_tokens declared_window)
-  in
-  let reserved_bytes =
-    offload_model_input_cpu (fun () ->
-      declared_request_reserve_bytes ~system_prompt:ctx.system_prompt ~tools:ctx.tools)
-  in
-  let checkpoint_after = ref None in
-  let success_sample = ref None in
-  let result =
-    context_overflow_shrink_sequence
-      ~starting_capacity
-      ~same_run_retry_authorized:(fun () ->
-        same_run_retry_allowed ctx.checkpoint_stage_observed)
-      ~shrink_admits_history:(fun ~capacity ->
-        (* The same reserve the window itself charges, read as tokens through
-           this runtime's observed density. Below it the window has nothing
-           left for history and a smaller one cannot succeed. With no density
-           observed there is no account that could rule a size out, so the
-           provider's verdict stands. *)
-        match Keeper_context_window.Density.lookup ~runtime_id:ctx.runtime_id with
-        | None -> true
-        | Some density ->
-          Keeper_context_window.tokens_of_bytes density reserved_bytes < capacity)
-      ~record_success:(fun ~capacity ->
-        Keeper_context_overflow_shrink_state.record_success
-          ~keeper_name:ctx.keeper_name
-          ~runtime_id:ctx.runtime_id
-          ~capacity)
-      ~on_shrink_retry:(fun ~shrink_attempt ~previous_capacity ~capacity ->
-        emit_context_overflow_shrink_manifest
-          ctx
-          ~shrink_attempt
-          ~previous_window_tokens:previous_capacity
-          ~window_tokens:capacity)
-      ~attempt:(fun ~capacity ->
-        let attempt_result, attempt_checkpoint_after, attempt_success_sample =
-          run_try_provider
-            ?continuation_checkpoint
-            { ctx with
-              model_input_window =
-                Keeper_context_window.with_tokens declared_window ~window_tokens:capacity
-            }
-            candidate
-        in
-        checkpoint_after := attempt_checkpoint_after;
-        success_sample := attempt_success_sample;
-        attempt_result)
-      ()
-  in
-  (* An overflow that survived every admissible shrink says the remembered
-     starting window no longer carries a turn here. Dropping it lets the
-     next turn start from the declared window and measure again, instead of
-     re-entering at a size this turn just disproved. Any other failure --
-     network, auth, a stall -- says nothing about capacity, so the memory
-     stands. *)
-  (match result with
-   | Ok _ -> ()
-   | Error error ->
-     if Keeper_turn_driver_try_runtime.context_overflow_should_try_next error
-     then
-       Keeper_context_overflow_shrink_state.forget
-         ~keeper_name:ctx.keeper_name
-         ~runtime_id:ctx.runtime_id);
-  result, !checkpoint_after, !success_sample
+    (* An uncapped runtime retries like any other. #36817 kept such a
+       runtime out of the token halving because that walk invented a seed
+       from a declared window and ran 18 refusals to zero; this walk moves a
+       position on the atom axis, stops at a single atom, and without it a
+       history that outgrew the provider would be refused every turn with
+       nothing declared to move the front. *)
+    let seed = ctx.carried_front_seed in
+    let halved_front = ref None in
+    let ctx =
+      { ctx with
+        carried_front_seed =
+          (fun () ->
+             match !halved_front with
+             | Some halved -> Some halved
+             | None -> seed ())
+      }
+    in
+    let last_request = ref None in
+    let checkpoint_after = ref None in
+    let success_sample = ref None in
+    let result =
+      carried_range_eviction_sequence
+        ~same_run_retry_authorized:(fun () ->
+          same_run_retry_allowed ctx.checkpoint_stage_observed)
+        ~ledger:(fun () ->
+          Keeper_model_input_ledger.Table.lookup
+            ~keeper_name:ctx.keeper_name
+            ~runtime_id:ctx.runtime_id
+            ~session_id:(ledger_session ctx))
+        ~last_request:(fun () -> !last_request)
+        ~marks:ctx.context_marks
+        ~evict:(function
+          | Keeper_carried_range.Evicted { first_atom; _ } ->
+            Keeper_model_input_ledger.Table.move_front
+              ~keeper_name:ctx.keeper_name
+              ~runtime_id:ctx.runtime_id
+              ~session_id:(ledger_session ctx)
+              ~first_atom
+          | Keeper_carried_range.Unchanged _ -> ())
+        ~halve:(fun ~first_atom ~atom_count ~retry ->
+          (* With a ledger, the move cuts through its one block and the
+             blocks restart from the new front; without one, the halved
+             seed is what the next composition on this attempt reads. *)
+          Keeper_model_input_ledger.Table.move_front
+            ~keeper_name:ctx.keeper_name
+            ~runtime_id:ctx.runtime_id
+            ~session_id:(ledger_session ctx)
+            ~first_atom;
+          halved_front
+          := Some
+               { Keeper_carried_front.first_atom
+               ; atom_count
+               ; source = Keeper_carried_front.Halved_after_refusal { retry }
+               })
+        ~on_retry:(fun ~retry decision ->
+          let decision = eviction_retry_to_json decision in
+          emit_carried_range_retry_manifest ctx ~retry decision;
+          Log.Keeper.info
+            ~keeper_name:ctx.keeper_name
+            "model input carried range retry runtime=%s retry=%d %s"
+            ctx.runtime_id
+            retry
+            (Yojson.Safe.to_string (`Assoc decision)))
+        ~attempt:(fun () ->
+          let attempt_result, attempt_checkpoint_after, attempt_success_sample =
+            run_try_provider_attempt ?continuation_checkpoint ~last_request ctx candidate
+          in
+          checkpoint_after := attempt_checkpoint_after;
+          success_sample := attempt_success_sample;
+          attempt_result)
+        ()
+    in
+    result, !checkpoint_after, !success_sample
+;;
+
+let run_try_provider ?continuation_checkpoint ctx candidate =
+  run_try_provider_attempt ?continuation_checkpoint ~last_request:(ref None) ctx candidate
 ;;
 
 let checkpoint_before_incomplete_response (checkpoint : Agent_core.Checkpoint.t) =
@@ -1904,7 +2030,7 @@ let run_try_provider_with_truncation_recovery
       candidate
   =
   let first_result, checkpoint_after, success_sample =
-    run_try_provider_with_context_overflow_shrink ?continuation_checkpoint ctx candidate
+    run_try_provider_with_carried_range_eviction ?continuation_checkpoint ctx candidate
   in
   match
     truncation_recovery
@@ -1979,6 +2105,6 @@ module For_testing = struct
   let message_measurer = message_measurer
   let memoize_message_measurement = memoize_message_measurement
   let message_measurement_hash = Agent_core.Types.Message_value.hash
-  let plan_and_window_model_input = plan_and_window_model_input
+  let compose_carried_model_input = compose_carried_model_input
   let offload_model_input_cpu = offload_model_input_cpu
 end

@@ -534,12 +534,14 @@ type fleet_safety = {
   fs_executable_count : int;
   fs_failing_count : int;
   fs_recovering_count : int;
+  fs_turn_configuration_error_count : int;
   fs_paused_count : int;
   fs_target_reaction_capacity : int;
   fs_reaction_capacity_shortfall : int;
   fs_bootable_names : string list;
   fs_running_names : string list;
   fs_executable_names : string list;
+  fs_turn_configuration_error_names : string list;
   fs_active_task_owner_without_fiber_count : int;
   fs_completion_authority_pending_count : int;
 }
@@ -8607,6 +8609,13 @@ let decode_fleet_safety json =
   let* fs_recovering_count =
     int_field_or section "recovering_keeper_fiber_count" ~default:0
   in
+  (* The unscoped count: every Failing keeper whose reason is a turn
+     configuration error, autoboot target or not. The configuration_blocked_*
+     fields answer an autoboot question instead and skip keepers outside the
+     autoboot set, so they cannot partition the failing count. *)
+  let* fs_turn_configuration_error_count =
+    int_field_or section "turn_configuration_error_keeper_count" ~default:0
+  in
   let* fs_paused_count = int_field_or section "paused_keeper_count" ~default:0 in
   let* fs_target_reaction_capacity =
     int_field_or section "target_reaction_capacity_count" ~default:0
@@ -8618,6 +8627,9 @@ let decode_fleet_safety json =
   let* fs_running_names = decode_string_name_list section "running_keeper_names" in
   let* fs_executable_names =
     decode_string_name_list section "executable_keeper_names"
+  in
+  let* fs_turn_configuration_error_names =
+    decode_string_name_list section "turn_configuration_error_keeper_names"
   in
   let* fs_active_task_owner_without_fiber_count =
     int_field_or section "active_task_owner_without_executable_fiber_count" ~default:0
@@ -8634,12 +8646,14 @@ let decode_fleet_safety json =
     ; fs_executable_count
     ; fs_failing_count
     ; fs_recovering_count
+    ; fs_turn_configuration_error_count
     ; fs_paused_count
     ; fs_target_reaction_capacity
     ; fs_reaction_capacity_shortfall
     ; fs_bootable_names
     ; fs_running_names
     ; fs_executable_names
+    ; fs_turn_configuration_error_names
     ; fs_active_task_owner_without_fiber_count
     ; fs_completion_authority_pending_count
     }

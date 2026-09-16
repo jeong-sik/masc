@@ -1002,10 +1002,11 @@ let fleet_safety_json ?(missing = true) () =
            ; "blocker", `String "reaction_capacity_below_target"
            ; "operator_action_required", `Bool true
            ; "bootable_keeper_count", `Int 10
-           ; "running_keeper_fiber_count", `Int 9
+           ; "running_keeper_fiber_count", `Int 8
            ; "executable_keeper_fiber_count", `Int 9
-           ; "failing_keeper_fiber_count", `Int 0
+           ; "failing_keeper_fiber_count", `Int 1
            ; "recovering_keeper_fiber_count", `Int 0
+           ; "turn_configuration_error_keeper_count", `Int 1
            ; "paused_keeper_count", `Int 0
            ; "target_reaction_capacity_count", `Int 10
            ; "reaction_capacity_shortfall_count", `Int 1
@@ -1021,6 +1022,8 @@ let fleet_safety_json ?(missing = true) () =
                        else [ "analyst"; "bluebird" ])) )
              ; ( "executable_keeper_names"
                , `List [ `String "analyst"; `String "bluebird" ] )
+             ; ( "turn_configuration_error_keeper_names"
+               , `List [ `String "bluebird" ] )
              ]) )
     ]
 
@@ -1034,14 +1037,26 @@ let test_decode_fleet_safety_carries_both_name_lists () =
       Alcotest.(check bool) "operator must act" true
         fleet.fs_operator_action_required;
       Alcotest.(check int) "bootable" 10 fleet.fs_bootable_count;
-      Alcotest.(check int) "running" 9 fleet.fs_running_count;
+      Alcotest.(check int) "running" 8 fleet.fs_running_count;
       Alcotest.(check int) "shortfall" 1 fleet.fs_reaction_capacity_shortfall;
       Alcotest.(check int) "task owner without fiber" 1
         fleet.fs_active_task_owner_without_fiber_count;
+      (* The failing partition the header prints beside the whole: retrying
+         plus configuration-blocked. The reader takes both; the server does
+         not precompute the display string. *)
+      Alcotest.(check int) "failing" 1 fleet.fs_failing_count;
+      Alcotest.(check int) "retrying" 0 fleet.fs_recovering_count;
+      Alcotest.(check int) "config-blocked" 1
+        fleet.fs_turn_configuration_error_count;
+      Alcotest.(check (list string)) "config-blocked names" [ "bluebird" ]
+        fleet.fs_turn_configuration_error_names;
       (* The reader takes the difference; the server does not precompute it. *)
       Alcotest.(check (list string)) "keepers that should run"
         [ "analyst"; "bluebird"; "haneul" ] fleet.fs_bootable_names;
-      Alcotest.(check (list string)) "keepers that do run"
+      (* Executable holds every keeper with a live fiber, failing ones
+         included -- bluebird is failing here and stays out of the
+         not-running difference the header draws from it. *)
+      Alcotest.(check (list string)) "keepers that can execute a turn"
         [ "analyst"; "bluebird" ] fleet.fs_executable_names;
       Alcotest.(check (list string)) "the difference names the missing keeper"
         [ "haneul" ]

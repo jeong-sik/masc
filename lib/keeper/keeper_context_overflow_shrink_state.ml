@@ -1,14 +1,13 @@
 (** Keeper_context_overflow_shrink_state — process-local memory of the last
-    model-input windowing capacity that completed a turn successfully for a
-    given (keeper, runtime) pair. The unit is the lane's windowing unit; see
-    the interface.
+    prompt byte capacity that completed a turn successfully for a given
+    (keeper, runtime) pair on an official-client lane; see the interface.
 
-    #27320: {!Keeper_turn_driver_try_provider.run_try_provider_with_context_overflow_shrink}
-    retries a provider-reported context overflow on the SAME runtime with a
-    halved windowing capacity. Remembering the capacity that last succeeded
-    lets the next turn on that (keeper, runtime) start from it instead of
-    re-discovering it by shrinking again from the full declared window every
-    time.
+    #27320: the official-client lanes retry a provider-reported context
+    overflow on the SAME runtime with a halved capacity
+    ({!Keeper_turn_driver_try_provider.context_overflow_shrink_sequence}).
+    Remembering the capacity that last succeeded lets the next turn on that
+    (keeper, runtime) start from it instead of re-discovering it by shrinking
+    again from the full declared cap every time.
 
     Deliberately not durable: this is a same-process optimization to avoid
     repeated rediscovery, not a state transition anything depends on for
@@ -64,13 +63,6 @@ let record_success ~keeper_name ~runtime_id ~capacity =
    against a 469638-byte reserve, every turn, until the process restarted.
    Forgetting returns the pair to [max_capacity] on the next turn, so the
    discovery runs again against the reserve that exists now. *)
-let forget ~keeper_name ~runtime_id =
-  let key = { Key.keeper_name; runtime_id } in
-  Eio.Mutex.use_rw ~protect:true global.mutex (fun () ->
-    global.last_successful_capacity <-
-      Capacity_map.remove key global.last_successful_capacity)
-;;
-
 module For_testing = struct
   let reset () =
     Eio.Mutex.use_rw ~protect:true global.mutex (fun () ->

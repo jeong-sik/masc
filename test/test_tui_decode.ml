@@ -1906,7 +1906,8 @@ let verification_request_json ?(evidence = [ "artifact:reports/proof.json" ])
     ]
 
 let verification_snapshot_json ?(total = 3) ?(view = "awaiting") ?(offset = 0)
-    ?(truncated = false) ?(unresolved = []) ?backlog_error requests =
+    ?(truncated = false) ?(unresolved = []) ?backlog_error ?backlog_recovery
+    requests =
   `Assoc
     ([ ("updated_at", `String "2026-08-23T09:00:01Z")
      ; ("total", `Int total)
@@ -1918,10 +1919,13 @@ let verification_snapshot_json ?(total = 3) ?(view = "awaiting") ?(offset = 0)
        , `List (List.map (fun id -> `String id) unresolved) )
      ; ("requests", `List requests)
      ]
+     @ (match backlog_error with
+        | None -> []
+        | Some detail -> [ ("backlog_error", `String detail) ])
      @
-     match backlog_error with
+     match backlog_recovery with
      | None -> []
-     | Some detail -> [ ("backlog_error", `String detail) ])
+     | Some detail -> [ ("backlog_recovery", `String detail) ])
 
 (* Tool inventory. The envelope is /dashboard/tools; the rows are
    [tool_inventory_json]. *)
@@ -5342,8 +5346,11 @@ let test_decode_verification_snapshot_reads_the_live_shape () =
        | requests ->
            Alcotest.failf "expected one request, got %d" (List.length requests))
 
-(* The wire spelling and its reader are one pair, held here because the two
-   sides of it are separate programs and nothing else makes them agree. *)
+(* The wire spelling and its reader are one pair. This checks the pair is
+   self-consistent, which is not the same as agreeing with the server: rename
+   both sides together and this still passes. What pins the literals to the
+   other program is the walk's query fixture and the server suite's own
+   refusal of an unknown name. *)
 let test_decode_verification_view_round_trips_its_wire_spelling () =
   List.iter
     (fun view ->
@@ -5413,6 +5420,23 @@ let test_decode_verification_separates_an_empty_queue_from_an_unreadable_one ()
         (Some "backlog.json: bad json") snapshot.Tui_decode.vs_backlog_error;
       Alcotest.(check (list string)) "and so does what it could not resolve"
         [ "vrf-missing" ] snapshot.Tui_decode.vs_awaiting_unresolved
+
+(* A queue built from a recovery snapshot holds real rows and is older than
+   the workspace. Read as an ordinary queue it would be acted on as current,
+   so it arrives on its own field rather than folded into the error. *)
+let test_decode_verification_separates_a_stale_queue_from_a_failed_one () =
+  match
+    Tui_decode.decode_verification_snapshot
+      (verification_snapshot_json ~total:1
+         ~backlog_recovery:"read from backlog.json.last-good" [])
+  with
+  | Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok snapshot ->
+      Alcotest.(check (option string)) "nothing failed to read" None
+        snapshot.Tui_decode.vs_backlog_error;
+      Alcotest.(check (option string)) "but the queue says where it came from"
+        (Some "read from backlog.json.last-good")
+        snapshot.Tui_decode.vs_backlog_recovery
 
 let test_decode_verification_keeps_no_evidence_apart_from_unreadable () =
   (* An empty list means nothing was submitted. Evidence that exists but could
@@ -9227,6 +9251,8 @@ let () =
           test_decode_verification_carries_the_page_and_what_it_could_not_resolve;
         Alcotest.test_case "an empty queue is not an unreadable one" `Quick
           test_decode_verification_separates_an_empty_queue_from_an_unreadable_one;
+        Alcotest.test_case "a stale queue is not a failed one" `Quick
+          test_decode_verification_separates_a_stale_queue_from_a_failed_one;
         Alcotest.test_case "no evidence is not unreadable evidence" `Quick
           test_decode_verification_keeps_no_evidence_apart_from_unreadable;
       ] );

@@ -7566,6 +7566,16 @@ let render_verification_list (state : state) =
               (Printf.sprintf "  the queue could not be read: %s"
                  (Terminal_text.single_line detail))
         | None -> ());
+       (* A queue built from a recovery snapshot is a queue of real rows that
+          is older than the workspace. Drawn, because the rows themselves look
+          exactly like a current queue and nothing else on this screen would
+          say otherwise. *)
+       (match snapshot.Masc.Tui_decode.vs_backlog_recovery with
+        | Some detail ->
+            box_line_styled buf cols ~style:(Theme.warn ())
+              (Printf.sprintf "  this queue is as old as the snapshot it came from: %s"
+                 (Terminal_text.single_line detail))
+        | None -> ());
        (* A task waiting on a record the store does not hold cannot be moved
           from this surface, and no other surface says so either. *)
        (match snapshot.Masc.Tui_decode.vs_awaiting_unresolved with

@@ -143,6 +143,20 @@ type forecast_carried =
         (** The ledger's measured total for its last request, when known. *)
   }
 
+(** One piece of the next request in the position it travels, as the
+    server lays them out: the system prompt and the tool array, then the
+    messages in wire order. *)
+type forecast_slot =
+  | Slot_system_prompt of { bytes : int }
+  | Slot_tools of { bytes : int }
+  | Slot_preamble of { bytes : int }
+  | Slot_history of { atoms : int; of_atoms : int; bytes : int }
+      (** [atoms] carried of [of_atoms] in the checkpoint, the wake line
+          on neither side. *)
+  | Slot_wake_line of { bytes : int }
+  | Slot_system_context of { bytes : int; blocks : (string * int) list }
+      (** [blocks] in the order the assembly concatenates them. *)
+
 type forecast_candidate =
   { runtime_id : string
   ; lane : forecast_lane
@@ -153,6 +167,9 @@ type forecast_candidate =
             or only post-tool ones, which carry no pinned block. *)
   ; history_atoms : int
   ; carried : forecast_carried option  (** [None] when the lane is refused. *)
+  ; assembly : forecast_slot list option
+        (** The request in travel order; [None] whenever [carried] or
+            [parts] is. *)
   }
 
 type forecast =

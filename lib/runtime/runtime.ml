@@ -396,10 +396,12 @@ let find_declared_lane (lanes : Runtime_lane.t list) (id : string) =
 ;;
 
 (* Each [runtime] reference is validated under its field's admission contract:
-   - [Runtime_only] requires a declared runtime id for keeper assignments and
-     media_failover entries. Assignment execution may still resolve a
-     same-named lane first.
-   - [Lane_then_runtime] admits a declared lane or runtime id for route ids.
+   - [Runtime_only] requires a declared runtime id. media_failover is the only
+     field on it: its entries name runtimes that can read an image, and the
+     order of that list is the whole walk. No lane expands underneath it.
+   - [Lane_then_runtime] admits a declared lane name or a runtime id. Keeper
+     assignments and route ids are on it, so validation judges the same target
+     [resolve_assignment] hands the consumer: lane first, runtime second.
    Unknown ids are rejected while loading the configuration. *)
 type reference_domain =
   | Runtime_only
@@ -641,7 +643,7 @@ let assignment_references (assignments : (string * string) list) =
       { site = Printf.sprintf "[runtime.assignments].%s" keeper_name
       ; shape = Scalar
       ; id = runtime_id
-      ; domain = Runtime_only
+      ; domain = Lane_then_runtime
       })
     assignments
 ;;

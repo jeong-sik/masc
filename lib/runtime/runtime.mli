@@ -369,11 +369,12 @@ val load_list :
     keeper_assignments, media_failover, lanes)].
     Fails ([Error]) if
     [\[runtime\].default] is missing / unresolved, if any
-    [\[runtime.assignments\]] target does not resolve to a configured runtime, if any
+    [\[runtime.assignments\]] target names neither a declared lane nor a
+    configured runtime, if any
     [\[runtime\].media_failover] entry does not resolve, or if any
     [\[runtime.lanes.<id>\]] candidate does not resolve (mirrors default
     validation — no silent fallback for a typo'd id). [keeper_assignments] is the
-    keeper→runtime-id list; [media_failover] is the RFC-0265 ordered reroute
+    keeper→lane-name-or-runtime-id list; [media_failover] is the RFC-0265 ordered reroute
     list; [lanes] is the ordered failover candidate lists. *)
 
 
@@ -559,9 +560,10 @@ val get_lane_by_id : string -> Runtime_lane.t option
 
 val resolve_assignment :
   string -> [ `Lane of Runtime_lane.t | `Unavailable of missing_catalog_model | `Missing ]
-(** Resolve a keeper assignment id to a lane. Declared lanes shadow runtimes;
-    an id naming a bare runtime gets a lane of its own, because the lane id is
-    what keys sticky candidate preference and quota demotion. Every lane ends
+(** Resolve a keeper assignment to a lane. The id names a declared lane or a
+    runtime, and a lane of that name is taken first; an id naming a bare runtime
+    gets a lane of its own, because the lane id is what keys sticky candidate
+    preference and quota demotion. Every lane ends
     at [\[runtime\].default], so a walk always has a next candidate.
     [Unavailable] preserves the configured identity when its capability catalog
     entry is absent. [Missing] means the id was not configured. Neither selects

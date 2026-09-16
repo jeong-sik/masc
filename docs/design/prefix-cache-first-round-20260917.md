@@ -120,6 +120,15 @@ glm 배포 후 18건은 표본이 작고 그중 대부분이 429 로 끝난 턴�
 | deepseek-v4.1-flash:cloud | 849 | 475 | repeated_reasoning_cycle 230, sse:repeating_generation 25 |
 | k3 | 150 | 0 | api_error_invalid_request 136 (토큰 한도 86, 온도 50) |
 
+### 새 빌드 805a61bd0e (2026-09-16 16:54:39Z 시작) 이후 21분
+
+위 표는 1c5645873e 기준이다. 그 뒤 805a61bd0e(#36854 조립 순서, #36782 부트스트랩 뷰 보존 포함)가 떴다. 17:16Z 까지 21분치는 표본이 작아 표로 만들지 않고 그대로 적는다.
+
+- `/next-request` 가 v3 스키마로 `assembly` 를 낸다. pr-updater deepseek 은 ledger 에서 seed 를 읽어 22/7,929 atom·176 KB 를 실을 예정이고, lane-smith 도 ledger 에서 20/5,083 atom·252 KB 다.
+- glm 머리 keeper 는 아직 옛 완료 record 에서 seed 를 읽는다: jazz-developer 312/3,626 atom·2.66 MB, goo-yang-bong 118/7,353 atom·1.03 MB. marks 가 선언되기 전의 record 라 앞선이 넓다. 세어진 응답이 한 번 오면 low-water 로 비워지므로 재시작마다 pair 당 큰 요청 하나가 든다.
+- kimi 후보는 여전히 이력 전체를 받는다: pr-updater 1건, 12,945,859 B, 7,927/7,927 atom (#36860).
+- receipts 74건: claude-sonnet-5 55(성공 54), deepseek 10(repeated_reasoning_cycle 6, 성공 2, #36861), glm 7(429 가 6, 성공 1, #36862), k3 1(invalid_request).
+
 ## 기전
 
 - 요청은 system prompt → tools → `[context window]` → 이력 → wake → `[system context]` 순으로 실린다(#36854 의 assembly). 공급자 캐시는 이 바이트열의 접두사에 붙는다. 앞에서 한 바이트가 달라지면 그 뒤는 전부 다시 계산된다.

@@ -163,7 +163,8 @@ let test_waiting_uses_the_badge_shape () =
   match strip_of t with
   | None -> fail "someone is blocked on the operator"
   | Some s ->
-    check string "the strip's own badge shape" "Awaiting you\xc2\xb71" s.waiting;
+    check string "the strip's own badge shape" "; Awaiting you\xc2\xb71"
+      s.waiting;
     check string "with no wake beside it" "" s.clock
 ;;
 

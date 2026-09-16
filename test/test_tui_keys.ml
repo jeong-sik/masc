@@ -533,7 +533,7 @@ let test_verification_footer_carries_the_verdict_keys () =
      the other list -- the store keeps every submission, so the history holds
      rows whose task finished weeks ago -- and [< / >] pages that history. *)
   check str "verification names detail, approve, and reject"
-    "j/k:move  v:next Planning tab  h:queue / history  [ / ]:previous / next  < / >:newer / older  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:details  Left / Esc:back  a:approve  x:reject  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  v:next Planning tab  h:queue / history  [ / ]:previous / next  < / >:newer / older  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:details  Left / Esc:back  a / x:approve / reject  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Verification)
 
 let test_fusion_footer_pins_the_shared_list_projection () =
@@ -1544,6 +1544,38 @@ let test_activity_footer_keeps_filter_before_evidence () =
     (List.length labels)
     (List.length (List.sort_uniq String.compare labels))
 
+(* The two keys this surface exists for. Spelled apart they were two items a
+   fitted footer could give up one at a time, and it did: [x] went first, then
+   [a], leaving a queue of work with no drawn way to act on it.
+
+   What is checked is that the pin can fire at all. [item_is_pinned] matches a
+   pair by its exact spelling, so the key table and the pin list have to agree
+   on the string; spelled apart in the table, the pin would name something the
+   row never draws and would never hold anything.
+
+   Not a width sweep. The pin makes the pair the last thing the row gives up,
+   which is not the same as surviving any width: at sixty columns the pinned
+   items alone are wider than the row, and the row is cut whatever is pinned.
+   The width below is one where the row must drop something and still has room
+   for what it keeps. *)
+let test_the_verdict_pair_is_pinned_by_the_spelling_the_table_uses () =
+  let keys =
+    List.map
+      (fun (binding : Masc_tui_keys.binding) -> binding.key)
+      (Masc_tui_keys.for_surface Verification)
+  in
+  Alcotest.(check bool) "the table spells the two as one key" true
+    (List.mem "a / x" keys);
+  Alcotest.(check bool) "and the pin names that spelling" true
+    (List.mem "a / x" Masc_tui_footer.never_dropped_keys);
+  let hints = Masc_tui_keys.footer_hints Verification in
+  let cut = fitted_footer ~cols:120 hints in
+  Alcotest.(check bool) "the row had to drop something" true
+    (String.length cut < String.length hints);
+  Alcotest.(check bool) "and what it kept includes the way to answer" true
+    (String.split_on_char ' ' cut
+     |> List.exists (String.starts_with ~prefix:"x:approve"))
+
 let section name =
   match List.assoc_opt name (Masc_tui_keys.help_sections ()) with
   | Some entries -> entries
@@ -2499,6 +2531,8 @@ let () =
             test_git_diff_footer_names_scroll_code_and_files
         ; Alcotest.test_case "Verification carries the verdict keys" `Quick
             test_verification_footer_carries_the_verdict_keys
+        ; Alcotest.test_case "Verification pins the way to answer" `Quick
+            test_the_verdict_pair_is_pinned_by_the_spelling_the_table_uses
         ; Alcotest.test_case "Fusion pins the shared list projection" `Quick
             test_fusion_footer_pins_the_shared_list_projection
         ; Alcotest.test_case "fusion detail footer names the caller and board keys" `Quick

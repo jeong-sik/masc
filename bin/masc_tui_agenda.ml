@@ -156,7 +156,13 @@ let clock_half ~now ~localtime ~cells row =
    it. This row is not windowed, so the count is on screen from wherever the
    operator is standing. *)
 let waiting_half waiting =
-  if waiting <= 0 then "" else Printf.sprintf "Awaiting you\xc2\xb7%d" waiting
+  if waiting <= 0 then ""
+  else
+    (* The key in front of the count. The panel behind [;] is the only screen
+       that lists this work, and the footer that names [;] is among the first
+       things a narrow terminal gives up -- so the one count that is never
+       windowed carries its own door. *)
+    Printf.sprintf "; Awaiting you\xc2\xb7%d" waiting
 ;;
 
 let strip ~now ~localtime ~cols t =

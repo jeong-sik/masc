@@ -260,6 +260,31 @@ end
 
 결과로 그 턴은 `needs_operator_broadcast` 가 참이 되고(`Disp_unknown`), 이어질 HITL continuation 을 다시 보내지 않고 정리한다(`keeper_heartbeat_loop.ml` 479). 닫는 도구가 바깥에 이미 뭔가 했을 수 있으니 자동으로 다시 돌리지 않고 사람이 판단하게 두는 쪽이 맞다.
 
+### P2 첫 조각이 한 일 — 런타임 정지 원인의 typed 화
+
+P2 는 표의 한 줄이지만 한 번에 들어가지 않는다. 첫 조각은 §1.3 의 두 문장을 없앴다.
+
+- `Keeper_internal_error.masc_internal_error` 에 `Host_stopped_turn { runtime_id; stop }`
+  와 `Runtime_connection_closed { runtime_id; detail; turn_accepted }` 를 넣었다.
+  `stop` 은 `Host_graceful_shutdown | Runtime_reported_interrupt` 닫힌 값이다.
+  `Spawn_failed` 는 `ProviderUnavailable` 로 남겨서 `Process_exited` 와 구분된다.
+  둘은 회수 경로(`Transient_spawn_failed` vs `Transport_interrupted`)가 다르다.
+- 생산자: `keeper_codex_runtime.ml` 의 `Runtime_shutting_down` · `Turn_interrupted` ·
+  `Process_exited`, `keeper_claude_code_runtime.ml` 의 `Process_exited`.
+- **회전은 그대로 둔다.** 닫힌 연결은 전에 `ProviderUnavailable` 로 회전했으므로
+  `Keeper_runtime_attempt.core_error_to_runtime_outcome` 이 같은 provider 에러를 다시
+  만들고, `Keeper_runtime_failure_route.route_of_error` 는 경계와 무관하게
+  `observe_retry Server_error` 를 주며, `Keeper_error_classify` 의 유예 런타임 레인도
+  `Server_error` 로 남는다. host 정지는 전에도 회전이 없었고(`Internal` 은 `None`)
+  지금도 없다.
+- TUI `bin/masc_tui_keeper_chat_history.ml` 의 두 문장 검색과 leaf 순회를 지웠다.
+  `[masc_agent_core_error]` 표식을 찾는 부분은 남고(P3 가 지운다), 찾은 JSON 은
+  `parse_masc_internal_error_json` 으로 읽어 생성자로 판단한다. fence 안에 들어간
+  원인도 `Fenced_masc` 를 따라 내려가며 찾는다.
+- `summary_of_masc_internal_error` 가 두 kind 에 한 줄을 돌려준다. 그래서 fence 없는
+  실패 row 의 `content` 는 봉투가 아니라 그 한 줄이 된다 — 그 모양에서는 lifecycle
+  배지가 P3 (row 가 `failure` 필드를 갖는 시점) 까지 없다.
+
 P1a 와 P1b 는 각각 혼자 들어갈 수 있다. 단 P1b 는 fenced `diagnostic` 을 읽는 TUI 두 곳을 같은 PR 에서 함께 고쳐야 한다. 안 그러면 host-shutdown 표시가 조용히 사라진다(`bin/masc_tui_keeper_chat_history.ml` 170, 테스트는 손으로 만든 옛 모양을 쓰므로 초록으로 남는다: `test/test_tui_keeper_chat_history.ml` 358).
 
 ## 6. 성공 기준

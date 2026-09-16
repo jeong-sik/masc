@@ -138,96 +138,96 @@ type interruption_cause =
   | Host_shutdown
   | Provider_connection_closed
 
-(* Every leaf string a typed failure keeps for people lives under one of these
-   keys ([Keeper_terminal_effect_detail]: "leaf strings only for human
-   messages"). Collecting them walks a nested cause -- a fence carrying a MASC
-   error carrying a terminal effect detail -- without this reader having to
-   know each envelope's shape. *)
-let leaf_message_keys = [ "message"; "detail" ]
+(* RFC-0454 P2. The runtime says which of the two stopped the turn, and the
+   keeper carries that value to the turn boundary, so this reader matches a
+   constructor. It used to search the row's words for two sentences the
+   runtime happened to print ("MASC runtime shutdown interrupted the active
+   Codex turn", "Provider 'codex_app_server' unavailable: stdout closed"); a
+   reworded sentence made the pane quietly wrong, and only Codex spelled the
+   second one, so the Claude Code runtime's identical failure drew nothing.
 
-let leaf_messages json =
-  let buffer = Buffer.create 128 in
-  let rec walk json =
-    match json with
-    | `Assoc fields ->
-      List.iter
-        (fun (key, value) ->
-           (match value with
-            | `String text when List.mem key leaf_message_keys ->
-              Buffer.add_string buffer text;
-              Buffer.add_char buffer '\n'
-            | _ -> ());
-           walk value)
-        fields
-    | `List values -> List.iter walk values
-    | `Bool _ | `Float _ | `Int _ | `Intlit _ | `Null | `String _ -> ()
-  in
-  Option.iter walk json;
-  Buffer.contents buffer
+   A fence closes over whatever failed the attempt, and that cause can be
+   another MASC error, so the walk follows [Fenced_masc] down. [Fenced_core]
+   is agent-core's projection and holds no MASC value to find. *)
+let rec interruption_cause_of_internal_error
+  : Keeper_internal_error.masc_internal_error -> interruption_cause option
+  = function
+  | Keeper_internal_error.Host_stopped_turn _ -> Some Host_shutdown
+  | Keeper_internal_error.Runtime_connection_closed _ ->
+    Some Provider_connection_closed
+  | Keeper_internal_error.Provider_attempt_effect_fenced { cause; _ }
+  | Keeper_internal_error.Tool_correction_lost { cause; _ } ->
+    (match cause with
+     | Keeper_internal_error.Fenced_masc error ->
+       interruption_cause_of_internal_error error
+     | Keeper_internal_error.Fenced_core _ -> None)
+  | Keeper_internal_error.Runtime_exhausted _
+  | Keeper_internal_error.Capacity_backpressure _
+  | Keeper_internal_error.Resumable_cli_session _
+  | Keeper_internal_error.Accept_rejected _
+  | Keeper_internal_error.Internal_unhandled_exception _
+  | Keeper_internal_error.Internal_bridge_exception _
+  | Keeper_internal_error.Internal_contract_rejected _
+  | Keeper_internal_error.Incomplete_tool_transcript _
+  | Keeper_internal_error.Terminal_effect_failed _
+  | Keeper_internal_error.Receipt_persistence_failed _
+  | Keeper_internal_error.Gate_replay_repair_required _ -> None
 ;;
 
-let interruption_of_failure text =
-  let direct_cause () =
-    if
-      Option.is_some
-        (find_substring
-           ~needle:"MASC runtime shutdown interrupted the active Codex turn"
-           text)
-    then Some (Host_shutdown, false)
-    else if
-      Option.is_some
-        (find_substring
-           ~needle:"Provider 'codex_app_server' unavailable: stdout closed"
-           text)
-    then Some (Provider_connection_closed, false)
-    else None
-  in
-  let marker = "[masc_agent_core_error]" in
-  match find_substring ~needle:marker text with
-  | None -> direct_cause ()
+(* A fence forbids replaying the turn in place when an effect was attempted,
+   and that is the part of the badge the operator acts on. It is a property of
+   the fence, not of what the fence closed over, so it is read at the outermost
+   fence and not carried up from the nested cause. *)
+let effect_attempted_of_internal_error
+  : Keeper_internal_error.masc_internal_error -> bool
+  = function
+  | Keeper_internal_error.Provider_attempt_effect_fenced
+      { effect_disposition; _ }
+  | Keeper_internal_error.Tool_correction_lost { effect_disposition; _ } ->
+    (match effect_disposition with
+     | Keeper_provider_attempt_effect_core.Effect_attempted -> true
+     | Keeper_provider_attempt_effect_core.No_effect_observed
+     | Keeper_provider_attempt_effect_core.Observation_unavailable -> false)
+  | Keeper_internal_error.Host_stopped_turn _
+  | Keeper_internal_error.Runtime_connection_closed _
+  | Keeper_internal_error.Runtime_exhausted _
+  | Keeper_internal_error.Capacity_backpressure _
+  | Keeper_internal_error.Resumable_cli_session _
+  | Keeper_internal_error.Accept_rejected _
+  | Keeper_internal_error.Internal_unhandled_exception _
+  | Keeper_internal_error.Internal_bridge_exception _
+  | Keeper_internal_error.Internal_contract_rejected _
+  | Keeper_internal_error.Incomplete_tool_transcript _
+  | Keeper_internal_error.Terminal_effect_failed _
+  | Keeper_internal_error.Receipt_persistence_failed _
+  | Keeper_internal_error.Gate_replay_repair_required _ -> false
+;;
+
+(* The row keeps the failure as the prefixed JSON the keeper logged. Finding
+   the marker is still a scan over the row's text -- RFC-0454 P3 gives the row
+   a failure field of its own and this goes with it -- but what the scan finds
+   is decoded by the producer's own parser, so nothing here spells a kind. *)
+let masc_error_marker = "[masc_agent_core_error]"
+
+let internal_error_of_failure text =
+  match find_substring ~needle:masc_error_marker text with
+  | None -> None
   | Some marker_at ->
-    let after_marker = marker_at + String.length marker in
+    let after_marker = marker_at + String.length masc_error_marker in
     (match String.index_from_opt text after_marker '{' with
-     | None -> direct_cause ()
+     | None -> None
      | Some json_at ->
        let json = String.sub text json_at (String.length text - json_at) in
        (match Yojson.Safe.from_string json with
-        | exception Yojson.Json_error _ -> direct_cause ()
-        | `Assoc fields
-          when string_field fields "kind" = Some "provider_attempt_effect_fenced" ->
-          (* RFC-0454 P1b: the fence carries a typed cause instead of a
-             rendered error string. Both of its arms end in leaf messages for
-             people -- agent-core's sentence under [core], and, for a carried
-             MASC error, the [message]/[detail] leaves of the nested error and
-             its terminal detail. The two runtime conditions below are still
-             spelled out in those leaves, so collect them all and search that.
-             Removing this search is P3, once the runtime stops flattening
-             [Runtime_shutting_down] into a string. *)
-          let diagnostic = leaf_messages (List.assoc_opt "cause" fields) in
-          let cause =
-            if
-              Option.is_some
-                (find_substring ~needle:"runtime shutdown interrupted" diagnostic)
-            then Some Host_shutdown
-            else if
-              Option.is_some
-                (find_substring
-                   ~needle:"Provider 'codex_app_server' unavailable: stdout closed"
-                   diagnostic)
-            then Some Provider_connection_closed
-            else None
-          in
-          (match cause with
-           | Some cause ->
-             Some
-               ( cause
-               , string_field fields "effect_disposition" = Some "effect_attempted" )
-           | None ->
-             (* A fence whose cause names neither condition still leaves the
-                row's own text to read, the same as a row with no envelope. *)
-             direct_cause ())
-        | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _
-        | `Null | `String _ -> direct_cause ()))
+        | exception Yojson.Json_error _ -> None
+        | json -> Keeper_internal_error.parse_masc_internal_error_json json))
+;;
+
+let interruption_of_failure text =
+  Option.bind (internal_error_of_failure text) (fun error ->
+    Option.map
+      (fun cause -> cause, effect_attempted_of_internal_error error)
+      (interruption_cause_of_internal_error error))
 ;;
 
 let present_delivery_failure ?recovered_at text =

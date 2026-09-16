@@ -25,6 +25,13 @@ val accept_rejected_kind : string
     returned no typed receipt for what it did. *)
 val terminal_effect_failed_kind : string
 
+(** Canonical wire kind for a turn the host itself stopped. *)
+val host_stopped_turn_kind : string
+
+(** Canonical wire kind for a runtime whose transport closed before the turn
+    finished. *)
+val runtime_connection_closed_kind : string
+
 type provider_rejection = {
   provider_label : string;
   reason : string;
@@ -85,6 +92,24 @@ val accept_response_shape_of_agent_core :
 type transcript_quarantine_reason =
   | Structurally_invalid
   | Unresolved_tool_results
+
+(** Which host decision stopped a turn that was already running (RFC-0454 P2).
+
+    Both arms mean the same thing to rotation — nobody else is going to run
+    this turn better, because nothing about the provider failed — and they are
+    kept apart because an operator reading the row wants to know whether MASC
+    was shutting down or whether the runtime called the turn off. *)
+type host_turn_stop =
+  | Host_graceful_shutdown
+      (** MASC entered graceful shutdown while this turn was live. *)
+  | Runtime_reported_interrupt
+      (** The runtime reported the turn's own status as interrupted. *)
+
+val host_turn_stop_to_string : host_turn_stop -> string
+(** MASC's wire spelling. A new arm is a compile error here. *)
+
+val host_turn_stop_of_string : string -> host_turn_stop option
+(** [None] for any spelling {!host_turn_stop_to_string} does not emit. *)
 
 type gate_replay_repair_stage =
   | Replay_resolution_lookup
@@ -176,6 +201,26 @@ and masc_internal_error =
           {!Provider_attempt_effect_fenced} — never replayed in-turn — the
           label exists so operators can tell a lost correction from an
           ordinary fenced provider failure. *)
+  | Host_stopped_turn of {
+      runtime_id : string;
+      stop : host_turn_stop;
+    }
+      (** The turn ended because the host stopped it, not because the provider
+          failed. The runtime flattened this into a sentence and the chat pane
+          read the sentence back to decide what to draw (RFC-0454 §1.3); it is
+          the value now, so the screen matches a constructor. *)
+  | Runtime_connection_closed of {
+      runtime_id : string;
+      detail : string;
+      turn_accepted : bool;
+    }
+      (** The runtime's transport closed before the turn finished — the client
+          process exited, or its stdout reached EOF. [turn_accepted] is false
+          when nothing was submitted upstream, which is what tells a lost
+          connection from an ambiguous one. Kept apart from a failed spawn:
+          a spawn that never started the client is a different recovery
+          ([Transient_spawn_failed] rather than [Transport_interrupted]) and
+          the two shared one rendered sentence before this. *)
   | Receipt_persistence_failed of { detail : string }
   | Gate_replay_repair_required of {
       approval_id : string;
@@ -225,6 +270,8 @@ type wire_kind =
   | Wire_terminal_effect_failed
   | Wire_provider_attempt_effect_fenced
   | Wire_tool_correction_lost
+  | Wire_host_stopped_turn
+  | Wire_runtime_connection_closed
   | Wire_receipt_persistence_failed
   | Wire_gate_replay_repair_required
 

@@ -353,14 +353,14 @@ let test_a_failed_turn_names_the_request_it_came_from () =
     (List.map (fun r -> origin_request_id r.History.kind) decoded.History.rows)
 ;;
 
-(* The row the server persists, built by the producer's own encoder rather
-   than by hand: [persisted_error_reply] prefixes "Keeper request failed: " to
-   the rendered carried error, and that rendering is where the fence's typed
-   cause becomes the text this reader sees. A hand-written copy would keep
-   passing after the encoder changed shape (RFC-0454 §5). *)
+(* The row the server persists, built by the producers' own functions rather
+   than by hand: [keeper_turn] puts [user_message_of_core_error] of the failed
+   turn's error into the tool result, and the stream prefixes "Keeper request
+   failed: " to it. A hand-written copy would keep passing after either side
+   changed shape (RFC-0454 §5). *)
 let persisted_failure_row error =
   "Keeper request failed: "
-  ^ Agent_core.Error.to_string
+  ^ Masc.Keeper_agent_error.user_message_of_core_error
       (Keeper_internal_error.core_error_of_masc_internal_error error)
 ;;
 
@@ -372,8 +372,31 @@ let fence_of cause =
     }
 ;;
 
-(* A fence whose cause is agent-core's own error. *)
-let fenced_failure message =
+(* The two runtime stops the pane draws a lifecycle for, as the runtime
+   reports them (RFC-0454 P2). Before the value existed, the pane searched the
+   row for the sentences these used to be rendered into. *)
+let host_shutdown =
+  Keeper_internal_error.Host_stopped_turn
+    { runtime_id = "codex_app_server"
+    ; stop = Keeper_internal_error.Host_graceful_shutdown
+    }
+;;
+
+let connection_closed =
+  Keeper_internal_error.Runtime_connection_closed
+    { runtime_id = "codex_app_server"
+    ; detail = "stdout closed"
+    ; turn_accepted = true
+    }
+;;
+
+(* A fence whose cause is a carried MASC error. *)
+let fenced_masc_failure error =
+  persisted_failure_row (fence_of (Keeper_internal_error.Fenced_masc error))
+;;
+
+(* A fence whose cause is agent-core's own error: nothing typed to find. *)
+let fenced_core_failure message =
   persisted_failure_row
     (fence_of
        (Keeper_internal_error.Fenced_core
@@ -381,29 +404,8 @@ let fenced_failure message =
              (Agent_core.Error.Internal message))))
 ;;
 
-(* A fence whose cause is a carried MASC error: the sentence sits two
-   envelopes down, on the terminal detail's own leaf. *)
-let fenced_masc_failure message =
-  persisted_failure_row
-    (fence_of
-       (Keeper_internal_error.Fenced_masc
-          (Keeper_internal_error.Terminal_effect_failed
-             { failure_class = Tool_result.Runtime_failure
-             ; effect_disposition = Tool_result.Effect_outcome_unknown
-             ; detail =
-                 Keeper_terminal_effect_detail.Boundary_observation_failed
-                   { model_tool_name = "masc_surface_post"
-                   ; cause =
-                       Keeper_request_failure_core.of_core_error
-                         (Agent_core.Error.Internal message)
-                   }
-             })))
-;;
-
 let test_runtime_interruption_becomes_a_recovered_lifecycle () =
-  let failure =
-    fenced_failure "MASC runtime shutdown interrupted the active Codex turn"
-  in
+  let failure = fenced_masc_failure host_shutdown in
   let decoded =
     decode
       (`List
@@ -428,9 +430,7 @@ let test_runtime_interruption_becomes_a_recovered_lifecycle () =
 ;;
 
 let test_stdout_close_stays_pending_without_a_later_reply () =
-  let failure =
-    fenced_failure "Provider 'codex_app_server' unavailable: stdout closed"
-  in
+  let failure = fenced_masc_failure connection_closed in
   let decoded =
     decode (`List [ row ~ts:2.0 ~role:"assistant" ~kind:"transport_failure" failure ])
   in
@@ -447,43 +447,74 @@ let test_stdout_close_stays_pending_without_a_later_reply () =
   | _ -> fail "expected one delivery failure"
 ;;
 
-(* RFC-0454 P1b: a fence can carry the shutdown sentence inside a typed MASC
-   error instead of agent-core's own. Before the fence was typed, the rendered
-   inner error sat in [diagnostic] and this badge matched; reading only the
-   [fenced_core] arm would have dropped it. *)
-let test_a_carried_masc_cause_still_names_the_shutdown () =
+(* A fence can close over another fence, and the runtime stop sits at the
+   bottom of that chain. Reading only the outermost cause would drop the
+   badge. *)
+let test_a_cause_two_fences_down_still_names_the_shutdown () =
   let failure =
-    fenced_masc_failure "MASC runtime shutdown interrupted the active Codex turn"
+    fenced_masc_failure
+      (Keeper_internal_error.Tool_correction_lost
+         { runtime_id = "codex_subscription.gpt-5.6-luna"
+         ; effect_disposition =
+             Keeper_provider_attempt_effect_core.No_effect_observed
+         ; reject_count = 2
+         ; cause = Keeper_internal_error.Fenced_masc host_shutdown
+         })
   in
   match History.present_delivery_failure failure with
-  | None -> fail "a carried MASC cause lost the host-shutdown badge"
+  | None -> fail "a cause two fences down lost the host-shutdown badge"
   | Some (presented, recovered) ->
     check bool "still pending" false recovered;
-    check string "the same lifecycle the fenced_core arm draws"
-      "Runtime shutdown interrupted this turn \194\183 recovery pending \194\183 same-turn \
-       replay blocked to avoid duplicate tool calls \194\183 details in Logs"
+    check string "the outer fence still owns the replay claim"
+      "Runtime shutdown interrupted this turn · recovery pending · same-turn \
+       replay blocked to avoid duplicate tool calls · details in Logs"
       presented
 ;;
 
-(* The other direction: a carried MASC cause that names neither condition must
-   not invent a lifecycle. *)
-let test_a_carried_masc_cause_without_the_sentence_draws_nothing () =
-  let failure = fenced_masc_failure "receipt append failed" in
+(* The other direction: a carried MASC cause that is neither stop must not
+   invent a lifecycle. *)
+let test_a_carried_masc_cause_of_another_kind_draws_nothing () =
+  let failure =
+    fenced_masc_failure
+      (Keeper_internal_error.Terminal_effect_failed
+         { failure_class = Tool_result.Runtime_failure
+         ; effect_disposition = Tool_result.Effect_outcome_unknown
+         ; detail =
+             Keeper_terminal_effect_detail.Boundary_observation_failed
+               { model_tool_name = "masc_surface_post"
+               ; cause =
+                   Keeper_request_failure_core.of_core_error
+                     (Agent_core.Error.Internal "receipt append failed")
+               }
+         })
+  in
   check (option (pair string bool)) "no lifecycle was invented" None
     (History.present_delivery_failure failure)
 ;;
 
-let test_unfenced_runtime_shutdown_is_still_typed () =
-  match
-    History.present_delivery_failure
-      "Keeper request failed: MASC runtime shutdown interrupted the active Codex turn"
-  with
-  | None -> fail "direct shutdown cause was not presented"
-  | Some (presented, recovered) ->
-    check bool "still pending" false recovered;
-    check string "no duplicate-call claim without effect evidence"
-      "Runtime shutdown interrupted this turn · recovery pending · details in Logs"
-      presented
+(* A fence over agent-core's own error carries no MASC value, and the sentence
+   inside it is not evidence of anything the pane may claim. *)
+let test_a_fenced_core_cause_draws_nothing () =
+  let failure =
+    fenced_core_failure "MASC runtime shutdown interrupted the active Codex turn"
+  in
+  check (option (pair string bool)) "a sentence is not a cause" None
+    (History.present_delivery_failure failure)
+;;
+
+(* An unfenced host stop no longer reaches the pane as an envelope: the keeper
+   now has a one-line summary for it, and that summary is what the row holds.
+   The pane draws it as the error it is and invents no lifecycle around it.
+   RFC-0454 P3 gives the row its own failure field and the badge comes back
+   for this shape. *)
+let test_an_unfenced_host_stop_reads_as_its_summary () =
+  let failure = persisted_failure_row host_shutdown in
+  check string "the row says what happened"
+    "Keeper request failed: MASC shut down while runtime codex_app_server was \
+     running this turn; the turn was stopped, not failed."
+    failure;
+  check (option (pair string bool)) "no lifecycle was invented" None
+    (History.present_delivery_failure failure)
 ;;
 
 let test_unrelated_failure_is_not_marked_recovered () =
@@ -1933,12 +1964,14 @@ let () =
             test_runtime_interruption_becomes_a_recovered_lifecycle
         ; test_case "stdout close stays pending without a later reply" `Quick
             test_stdout_close_stays_pending_without_a_later_reply
-        ; test_case "unfenced runtime shutdown stays typed" `Quick
-            test_unfenced_runtime_shutdown_is_still_typed
-        ; test_case "a carried MASC cause keeps the host-shutdown badge" `Quick
-            test_a_carried_masc_cause_still_names_the_shutdown
-        ; test_case "a carried MASC cause without the sentence draws nothing" `Quick
-            test_a_carried_masc_cause_without_the_sentence_draws_nothing
+        ; test_case "an unfenced host stop reads as its summary" `Quick
+            test_an_unfenced_host_stop_reads_as_its_summary
+        ; test_case "a cause two fences down keeps the host-shutdown badge" `Quick
+            test_a_cause_two_fences_down_still_names_the_shutdown
+        ; test_case "a carried MASC cause of another kind draws nothing" `Quick
+            test_a_carried_masc_cause_of_another_kind_draws_nothing
+        ; test_case "a fenced agent-core cause draws nothing" `Quick
+            test_a_fenced_core_cause_draws_nothing
         ; test_case "unrelated failure is not marked recovered" `Quick
             test_unrelated_failure_is_not_marked_recovered
         ; test_case "rows carry the operation id only for direct turns" `Quick

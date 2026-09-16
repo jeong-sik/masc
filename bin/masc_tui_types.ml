@@ -8108,11 +8108,17 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
            list is not cut, and this row is drawn either way. It carries the
            window text a cut page used to draw on its own line, so the two
            are one row, not two. *)
+        (* Nothing is drawn under the list before a read answers, so the
+           count is zero there rather than reserving a row the frame leaves
+           blank. The view row is inside this match for the same reason. *)
         let under_list =
           match state.verification with
           | None -> 0
           | Some s ->
-              (if Option.is_some s.Tui_decode.vs_backlog_error then 1 else 0)
+              1
+              + (if Option.is_some s.Tui_decode.vs_backlog_error then 1 else 0)
+              + (if Option.is_some s.Tui_decode.vs_backlog_recovery then 1
+                 else 0)
               + (match s.Tui_decode.vs_awaiting_unresolved with
                  | [] -> 0
                  | _ -> 1)
@@ -8124,7 +8130,6 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
                | Some s -> List.length s.Tui_decode.vs_requests)
           ; sc_chrome =
               listing_chrome ~error:state.verification_error
-              + 1
               + under_list
               + (if Option.is_some state.verification_verdict_armed then 1 else 0)
               + (if Option.is_some state.verification_verdict_error then 1 else 0)

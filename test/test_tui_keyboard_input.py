@@ -9788,6 +9788,7 @@ def verification_snapshot(
         "awaiting_unresolved_total": 0,
         "awaiting_unresolved": [],
         "backlog_error": None,
+        "backlog_recovery": None,
     }
 
 

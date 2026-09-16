@@ -52,7 +52,14 @@ val requests_json :
   Yojson.Safe.t
 (** Defaults to [All_requests] at [offset] 0, which is what callers predating
     the view parameter asked for. Carries [total], [offset], [returned] and
-    [truncated] so a reader can page without deriving the boundary. *)
+    [truncated] so a reader can page without deriving the boundary.
+
+    Paging is by offset into a newest-first list, so a submission that lands
+    between two page reads shifts every later row down by one and the reader
+    steps over exactly as many rows as arrived. Acceptable for someone
+    pressing a key through history; not acceptable for a consumer that walks
+    every page to build a record from it. Such a consumer needs a cursor, not
+    this. *)
 
 (** Summary of immutable submissions: update time and total count only. *)
 val summary_json : base_path:string -> unit -> Yojson.Safe.t

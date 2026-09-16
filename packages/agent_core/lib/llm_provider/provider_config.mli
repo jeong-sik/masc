@@ -59,12 +59,6 @@ type t =
     (** [None] = resolve from model capabilities at request time. @since 0.123.0 *)
   ; max_context : int option
     (** Provider's context window limit in tokens. When set, downstream callers may truncate messages to fit before dispatch. @since 0.120.0 *)
-  ; max_request_body_bytes : int option
-    (** Exact serialized HTTP request-body limit for this resolved target.
-        [None] means the target declares no byte limit; AGENT_CORE never invents one
-        from provider kind, endpoint URL, or model id.  The final provider wire
-        body is measured after serialization and rejected before dispatch when
-        it exceeds this value. @since 0.223.0 *)
   ; temperature : float option
   ; top_p : float option
   ; top_k : int option
@@ -238,7 +232,6 @@ val make
   -> ?request_path:string
   -> ?max_tokens:int
   -> ?max_context:int
-  -> ?max_request_body_bytes:int
   -> ?temperature:float
   -> ?top_p:float
   -> ?top_k:int

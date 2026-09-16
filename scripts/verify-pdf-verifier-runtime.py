@@ -180,7 +180,7 @@ def main():
     runtime += '\n[runtime.exact_output_lanes.verifier_exact]\nslots = ["kimi_coding.kimi-for-coding"]\n'
     runtime += f'\n[providers.image_fixture]\nprotocol = "openai-compatible-http"\nendpoint = "http://127.0.0.1:{provider.server_port}/v1"\n'
     runtime += f'\n[providers.kimi_coding]\nprotocol = "openai-compatible-http"\nendpoint = "http://127.0.0.1:{provider.server_port}/v1"\n'
-    runtime += '\n[models.producer]\napi-name = "image-producer"\nmax-context = 131072\ntools-support = true\nstreaming = true\n[image_fixture.producer]\nmax-request-body-bytes = 2097152\n'
+    runtime += '\n[models.producer]\napi-name = "image-producer"\nmax-context = 131072\ntools-support = true\nstreaming = true\n[image_fixture.producer]\n'
     runtime += '\n[models.kimi-for-coding]\n'
     for key, value in model_config.items():
         if key != 'capabilities':

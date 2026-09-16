@@ -1027,7 +1027,29 @@ let handle_surface_read ~config ~(meta : keeper_meta) ~args =
            ~base_dir:config.Workspace.base_path
            ~keeper_name:meta.name
        in
-       Keeper_surface_read.respond ~surface ~limit
+       (* Task-1596: hand the read the same binding knowledge post gets,
+          so an unbound connector label or a label matching no lane is
+          refused with an error instead of a silent zero-row page. A
+          binding-store lookup failure degrades to the unverified
+          projection — reads stay available, and only *provable* wrong
+          labels are refused (writes still fail hard on lookup errors). *)
+       let bindings =
+         match
+           Channel_gate_discord_state.bound_channels_result
+             ~keeper_name:meta.name
+         with
+         | Error _ -> None
+         | Ok bound_discord_channels ->
+           (match
+              Channel_gate_slack_state.bound_channels ~keeper_name:meta.name
+            with
+            | Error _ -> None
+            | Ok bound_slack_channels ->
+              Some
+                { Keeper_surface_read.slack = bound_slack_channels;
+                  discord = bound_discord_channels })
+       in
+       Keeper_surface_read.respond ?bindings ~surface ~limit
          ~has_more:page.Keeper_chat_store.has_more
          ~notes
          page.Keeper_chat_store.messages)

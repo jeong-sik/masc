@@ -175,13 +175,6 @@ type provider_failure_kind =
   (** The provider sent a structurally valid error envelope inside an
       otherwise accepted response.  [error_type] is provider-owned diagnostic
       data; AGENT_CORE does not infer rate-limit or retry semantics from it. *)
-  | Request_body_too_large of
-      { actual_bytes : int
-      ; limit_bytes : int
-      }
-  (** The exact serialized provider request exceeded the resolved target's
-      declared transport boundary.  This is produced before dispatch and is
-      independent from the model context-token window. *)
   | Response_body_too_large of { limit_bytes : int }
   (** The provider response exceeded the explicit in-memory parser boundary.
       The connection is closed immediately; AGENT_CORE never drains an unbounded
@@ -193,8 +186,7 @@ type provider_failure_kind =
   | Context_overflow of { limit : int option }
   (** agent-core boundary: the provider reported in its error envelope that the request
       exceeded the model context window (e.g. glm code 1261 "Prompt exceeds
-      max length"). Distinct from [Request_body_too_large] (a pre-dispatch
-      transport byte boundary) and from an empty completion whose
+      max length"). Distinct from an empty completion whose
       [stop_reason] is [ContextWindowExceeded] (the same condition reported
       through a 200). Retrying or rotating replays the same oversized prompt;
       only the consumer's context recovery (compaction/shrink) can make
@@ -292,10 +284,6 @@ val provider_failure_to_string : kind:provider_failure_kind -> message:string ->
     with no thinking, text, or tool calls. Sync and streaming completion paths
     must use this helper so the typed stop reason and diagnostic stay aligned. *)
 val empty_completion_error : stop_reason:Types.stop_reason -> http_error
-
-(** Construct the canonical typed pre-dispatch rejection for an exact
-    serialized request body that exceeds its resolved target limit. *)
-val request_body_too_large_error : actual_bytes:int -> limit_bytes:int -> http_error
 
 val stream_production_to_label : stream_production -> string
 val stream_idle_state_to_label : stream_idle_state -> string

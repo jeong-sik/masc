@@ -322,7 +322,6 @@ let storable_runtime =
    max-output-tokens = 1024\n\
    \n\
    [local.sample]\n\
-   max-request-body-bytes = 65536\n\
    \n\
    [runtime]\n\
    default = \"local.sample\"\n"

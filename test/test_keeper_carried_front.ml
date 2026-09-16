@@ -163,7 +163,6 @@ let test_origin_json_names_its_kind () =
   check string "turn record" "turn_record" (kind (Front.Carried (Front.Turn_record { turn = 3 })));
   check string "halved" "halved_after_refusal"
     (kind (Front.Carried (Front.Halved_after_refusal { retry = 1 })));
-  check string "cap" "fit_to_request_cap" (kind Front.Fit_to_request_cap);
   check string "whole" "whole_history" (kind Front.Whole_history)
 ;;
 

@@ -95,6 +95,7 @@ val tick :
   ?clock:(unit -> float) ->
   Workspace_utils.config ->
   now:float ->
+  retention_days:int ->
   (tick_result, runner_error) result
 (** Refresh due state and append at-most-once generic wake signals for newly
     observable due work. A durable consumer acceptance completes that wake
@@ -105,4 +106,7 @@ val tick :
     [now] decides what is due and anchors recurrence; [clock] stamps each
     wake's [started_at] and [finished_at] as the attempt actually begins and
     ends. Without [clock] both stamps copy [now], so a wake reads as
-    instantaneous whatever the dispatch cost. *)
+    instantaneous whatever the dispatch cost.
+
+    [retention_days] goes straight to {!Schedule_store.refresh_due}: how long a
+    finished schedule stays in the ledger. *)

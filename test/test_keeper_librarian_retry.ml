@@ -90,20 +90,17 @@ let dropped_json ?(reason = "superseded by newer state") id =
     ]
 ;;
 
-(* Defaults keep the totality contract satisfied for the default input:
-   current = [A; B], retained = [A], so B must carry a drop statement.
-   Model output speaks in surrogate identities: [m1] is current_a,
-   [m2] is current_b; the parser maps them back to real identities. *)
+(* Defaults retire B and leave A unmentioned, which is the shape the contract
+   now asks for: name what changes. Model output speaks in surrogate
+   identities: [m1] is current_a, [m2] is current_b; the parser maps them back
+   to real identities. *)
 let selection_json
-      ?(retained = [ "m1" ])
       ?(new_claims = [])
       ?(dropped = [ dropped_json "m2" ])
       ()
   =
   `Assoc
     [ "working_contexts", `List []
-    ; Librarian.wire_field_retained_memory_ids
-    , `List (List.map (fun id -> `String id) retained)
     ; Librarian.wire_field_new_claims, `List new_claims
     ; Librarian.wire_field_dropped, `List dropped
     ]
@@ -113,12 +110,11 @@ let parse json =
   Librarian.selection_of_json_result ~now:2_000_000. (input ()) json
 ;;
 
-let test_omission_deletes_and_retention_preserves_exact_fact () =
+let test_a_stated_drop_removes_and_an_unnamed_fact_survives_exactly () =
   match parse (selection_json ()) with
   | Error error ->
     failf "selection rejected: %s" (Librarian.parse_error_to_string error)
   | Ok selection ->
-    check (list string) "retained ids" [ current_a_id ] selection.retained_memory_ids;
     check int "one fact remains" 1 (List.length selection.facts);
     check string "exact retained claim" current_a.claim (List.hd selection.facts).claim;
     check (list string) "drop statement names B"
@@ -299,7 +295,6 @@ let test_new_claim_with_bad_board_id_is_rejected () =
 let test_large_selection_is_accepted_without_budget_control () =
   let json =
     selection_json
-      ~retained:[]
       ~new_claims:[ new_claim ~claim:(String.make 512 'x') () ]
       ~dropped:[ dropped_json "m1"; dropped_json "m2" ]
       ()
@@ -338,36 +333,37 @@ let test_rendered_fact_states_when_it_was_recorded () =
     (contains (Masc_domain.iso8601_of_unix_seconds 1_000_000.))
 ;;
 
-let test_unknown_and_duplicate_retained_ids_reject () =
-  (match parse (selection_json ~retained:[ "missing" ] ()) with
-   | Error (Librarian.Unknown_retained_memory_id "missing") -> ()
+(* RFC-0456. The librarian used to have to restate every current identity, and
+   a single slip threw the pass away. It now names only what changes, and a
+   memory it never mentions is kept -- which is what the apply step always did
+   with the list it was handed. *)
+let test_an_answer_naming_only_changes_keeps_the_rest () =
+  (match parse (selection_json ~dropped:[] ()) with
    | Error error ->
-     failf "wrong unknown-id error: %s" (Librarian.parse_error_to_string error)
-   | Ok _ -> fail "unknown retained id accepted");
-  (match parse (selection_json ~retained:[ "m1"; "m1" ] ()) with
-   | Error (Librarian.Duplicate_retained_memory_id identity)
-     when String.equal identity current_a_id -> ()
-   | Error error ->
-     failf "wrong duplicate-id error: %s" (Librarian.parse_error_to_string error)
-   | Ok _ -> fail "duplicate retained id accepted");
-  (* The wire contract moved to surrogate identities: the real digest is no
-     longer valid input, so a stale digest recopied from conversation history
-     rejects instead of silently matching nothing. *)
-  match parse (selection_json ~retained:[ current_a_id ] ()) with
-  | Error (Librarian.Unknown_retained_memory_id identity)
-    when String.equal identity current_a_id -> ()
+     failf
+       "answer that changes nothing rejected: %s"
+       (Librarian.parse_error_to_string error)
+   | Ok selection ->
+     check
+       (list string)
+       "both current facts survive an answer that names neither"
+       (List.sort compare [ current_a_id; current_b_id ])
+       (List.sort compare (List.map Memory.memory_id selection.facts)));
+  match parse (selection_json ~dropped:[ dropped_json "m2" ] ()) with
   | Error error ->
-    failf "wrong stale-digest error: %s" (Librarian.parse_error_to_string error)
-  | Ok _ -> fail "real digest accepted as retained id"
+    failf "single drop rejected: %s" (Librarian.parse_error_to_string error)
+  | Ok selection ->
+    check
+      (list string)
+      "the unnamed fact is kept and the named one is gone"
+      [ current_a_id ]
+      (List.map Memory.memory_id selection.facts)
 ;;
 
 let test_new_claim_cannot_collide_with_retained_identity () =
   match
     parse
-      (selection_json
-         ~retained:[ "m1" ]
-         ~new_claims:[ new_claim ~claim:"keep A" () ]
-         ())
+      (selection_json ~new_claims:[ new_claim ~claim:"keep A" () ] ())
   with
   | Error (Librarian.Duplicate_selected_memory_id identity)
     when String.equal identity current_a_id -> ()
@@ -380,7 +376,6 @@ let test_new_claim_cannot_recreate_dropped_current_identity () =
   match
     parse
       (selection_json
-         ~retained:[]
          ~dropped:[ dropped_json "m1"; dropped_json "m2" ]
          ~new_claims:[ new_claim ~claim:"keep A" () ]
          ())
@@ -394,19 +389,13 @@ let test_new_claim_cannot_recreate_dropped_current_identity () =
   | Ok _ -> fail "dropped current identity was recreated as a new claim"
 ;;
 
-let test_totality_rejects_unaccounted_current_id () =
-  (match parse (selection_json ~dropped:[] ()) with
-   | Error (Librarian.Missing_disposition identity)
-     when String.equal identity current_b_id -> ()
-   | Error error ->
-     failf "wrong totality error: %s" (Librarian.parse_error_to_string error)
-   | Ok _ -> fail "unaccounted current id accepted");
+(* The two arrays stay required even when both are empty: an answer missing a
+   field is a malformed answer, not a decision to change nothing. *)
+let test_a_selection_without_the_dropped_field_rejects () =
   match
     parse
       (`Assoc
          [ "working_contexts", `List []
-    ; Librarian.wire_field_retained_memory_ids
-         , `List [ `String "m1" ]
          ; Librarian.wire_field_new_claims, `List []
          ])
   with
@@ -443,12 +432,16 @@ let test_dropped_statements_validate () =
           ~dropped:[ dropped_json "m1"; dropped_json "m2" ]
           ())
    with
-   | Error (Librarian.Dropped_memory_id_also_retained identity)
-     when String.equal identity current_a_id -> ()
+   | Ok selection ->
+     check
+       (list string)
+       "retiring every current memory is a decision the contract allows"
+       []
+       (List.map Memory.memory_id selection.facts)
    | Error error ->
-     failf "wrong dropped-retained overlap error: %s"
-       (Librarian.parse_error_to_string error)
-   | Ok _ -> fail "dropped id overlapping retained accepted");
+     failf
+       "retiring both current memories rejected: %s"
+       (Librarian.parse_error_to_string error));
   match
     parse
       (selection_json ~dropped:[ dropped_json ~reason:"  " "m2" ] ())
@@ -476,14 +469,12 @@ let test_duplicate_object_fields_reject () =
     match selection_json () with
     | `Assoc fields ->
       `Assoc
-        (( Librarian.wire_field_retained_memory_ids
-         , `List [ `String "m1" ] )
-         :: fields)
+        ((Librarian.wire_field_new_claims, `List []) :: fields)
     | _ -> assert false
   in
   (match parse duplicate_top with
    | Error (Librarian.Duplicate_field field)
-     when String.equal field Librarian.wire_field_retained_memory_ids -> ()
+     when String.equal field Librarian.wire_field_new_claims -> ()
    | Error error ->
      failf "wrong duplicate top-level error: %s" (Librarian.parse_error_to_string error)
    | Ok _ -> fail "duplicate top-level field accepted");
@@ -1177,7 +1168,6 @@ let test_keeper_memory_io_offload_fallback_and_domain_safety env () =
             ~keeper_id
             ~now:1_000_000.
             ~source:{ kind = Current.Librarian; trace_id = "trace-init" }
-            ~retained_memory_ids:[]
             ~new_claims:[ fact_initial ]
             ()
         in
@@ -1237,9 +1227,9 @@ let () =
     "keeper_librarian_current_selection"
     [ ( "selection"
       , [ test_case
-            "omission deletes and retain preserves"
+            "a stated drop removes and an unnamed fact survives"
             `Quick
-            test_omission_deletes_and_retention_preserves_exact_fact
+            test_a_stated_drop_removes_and_an_unnamed_fact_survives_exactly
         ; test_case "new claim materialized" `Quick
             test_new_claim_is_materialized_after_retained_facts
         ; test_case "supersedes links a new claim to the memory it drops" `Quick
@@ -1264,14 +1254,14 @@ let () =
             "rendered fact states when it was recorded"
             `Quick
             test_rendered_fact_states_when_it_was_recorded
-        ; test_case "unknown and duplicate retained reject" `Quick
-            test_unknown_and_duplicate_retained_ids_reject
-        ; test_case "retained/new collision rejects" `Quick
+        ; test_case "an answer naming only changes keeps the rest" `Quick
+            test_an_answer_naming_only_changes_keeps_the_rest
+        ; test_case "current/new collision rejects" `Quick
             test_new_claim_cannot_collide_with_retained_identity
         ; test_case "dropped/new recreation rejects" `Quick
             test_new_claim_cannot_recreate_dropped_current_identity
-        ; test_case "totality rejects unaccounted id" `Quick
-            test_totality_rejects_unaccounted_current_id
+        ; test_case "selection without dropped field rejects" `Quick
+            test_a_selection_without_the_dropped_field_rejects
         ; test_case "dropped statements validate" `Quick
             test_dropped_statements_validate
         ; test_case "strict JSON boundary" `Quick test_strict_json_boundary

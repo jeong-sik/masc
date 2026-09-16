@@ -33,7 +33,6 @@ let declared_lane_failure_of_error err =
   match capacity_refusal_of_error err with
   | Some (Provider_context_window { limit_tokens }) ->
     Provider_context_overflow { limit_tokens }
-  | Some (Serialized_request_body _)
   | Some (Provider_request_body_refusal _)
   | None -> Declared_runtime_lane_exhausted
 

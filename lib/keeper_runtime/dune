@@ -16,6 +16,7 @@
   keeper_fd_pressure
   keeper_recording_error_state
   keeper_provider_attempt_effect_core
+  keeper_request_failure_core
   keeper_terminal_effect_detail
   keeper_internal_error
   keeper_runtime_failure_route

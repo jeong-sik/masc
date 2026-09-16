@@ -845,6 +845,25 @@ let apply_context_injection ~runtime_label ~terminal_error ~context
           ^ Printexc.to_string exn))
 ;;
 
+(* [Keeper_request_failure_core.message] is a sentence for people, and the
+   module's contract is that a carried MASC error stays typed instead. The
+   boundary observation hands back an [Agent_core.Error.t] and today that is
+   always an [Internal] string, but [classify_masc_internal_error] also reads
+   the [masc_agent_core_error] prefix out of one, so a MASC error could arrive
+   here as prefixed JSON. Keep its one-line summary -- or its kind, for the
+   kinds that have no summary written yet -- and never the JSON. *)
+let boundary_observation_cause error =
+  match Keeper_internal_error.classify_masc_internal_error error with
+  | None -> Keeper_request_failure_core.of_core_error error
+  | Some masc ->
+    { Keeper_request_failure_core.category = Agent_core.Error.category error
+    ; message =
+        (match Keeper_internal_error.summary_of_masc_internal_error masc with
+         | Some summary -> summary
+         | None -> Keeper_internal_error.kind_of_masc_internal_error masc)
+    }
+;;
+
 let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_approval
     ~runtime_label ~keeper_name
     ~turn_count ~context ~tools
@@ -1146,7 +1165,9 @@ let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_app
                        ; effect_disposition = Tool_result.Effect_outcome_unknown
                        ; detail =
                            Keeper_terminal_effect_detail.Boundary_observation_failed
-                             { model_tool_name = tool.schema.name; message = detail }
+                             { model_tool_name = tool.schema.name
+                             ; cause = boundary_observation_cause error
+                             }
                        }
                    })
              in

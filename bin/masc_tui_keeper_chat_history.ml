@@ -136,6 +136,7 @@ let find_substring ~needle text =
 
 type interruption_cause =
   | Host_shutdown
+  | Runtime_turn_interrupted
   | Provider_connection_closed
 
 (* RFC-0454 P2. The runtime says which of the two stopped the turn, and the
@@ -152,7 +153,15 @@ type interruption_cause =
 let rec interruption_cause_of_internal_error
   : Keeper_internal_error.masc_internal_error -> interruption_cause option
   = function
-  | Keeper_internal_error.Host_stopped_turn _ -> Some Host_shutdown
+  (* Which of the two host stops it was. They are separate arms on the value
+     for exactly this reason: MASC shutting down and the runtime calling its
+     own turn off are different facts, and folding them told the operator the
+     host had gone down when it had not. *)
+  | Keeper_internal_error.Host_stopped_turn { stop; _ } ->
+    (match stop with
+     | Keeper_internal_error.Host_graceful_shutdown -> Some Host_shutdown
+     | Keeper_internal_error.Runtime_reported_interrupt ->
+       Some Runtime_turn_interrupted)
   | Keeper_internal_error.Runtime_connection_closed _ ->
     Some Provider_connection_closed
   | Keeper_internal_error.Provider_attempt_effect_fenced { cause; _ }
@@ -217,9 +226,19 @@ let internal_error_of_failure text =
     (match String.index_from_opt text after_marker '{' with
      | None -> None
      | Some json_at ->
-       let json = String.sub text json_at (String.length text - json_at) in
-       (match Yojson.Safe.from_string json with
+       (* Read one value and let the rest of the line be. [from_string] wants
+          the envelope to run to the end of the text, so a producer that
+          appends anything after it -- and several rows already carry a
+          trailing sentence -- turned the whole row back into an unreadable
+          failure. There is no substring fallback left to catch that. *)
+       let lexbuf =
+         Lexing.from_string (String.sub text json_at (String.length text - json_at))
+       in
+       (match
+          Yojson.Safe.from_lexbuf (Yojson.Safe.init_lexer ()) ~stream:true lexbuf
+        with
         | exception Yojson.Json_error _ -> None
+        | exception End_of_file -> None
         | json -> Keeper_internal_error.parse_masc_internal_error_json json))
 ;;
 
@@ -237,6 +256,7 @@ let present_delivery_failure ?recovered_at text =
     let subject =
       match cause with
       | Host_shutdown -> "Runtime shutdown interrupted this turn"
+      | Runtime_turn_interrupted -> "The runtime reported this turn as interrupted"
       | Provider_connection_closed ->
         "Provider connection closed during this turn"
     in

@@ -549,6 +549,44 @@ let test_an_unfenced_stop_is_marked_recovered_by_a_later_reply () =
   | _ -> fail "expected a delivery failure"
 ;;
 
+(* MASC going down and the runtime calling its own turn off are different
+   facts, which is why [host_turn_stop] has two arms. Drawing both as the
+   shutdown line told the operator the host had stopped when it had not:
+   the Codex app-server reports [Turn_interrupted] from its own turn status. *)
+let test_a_runtime_reported_interrupt_is_not_a_host_shutdown () =
+  let line error =
+    match History.present_delivery_failure (persisted_failure_row error) with
+    | None -> fail "a host stop lost its lifecycle"
+    | Some (presented, _) -> presented
+  in
+  let interrupted =
+    line
+      (Keeper_internal_error.Host_stopped_turn
+         { runtime_id = "codex_app_server"
+         ; stop = Keeper_internal_error.Runtime_reported_interrupt
+         })
+  in
+  check string "the runtime is named as the one that stopped the turn"
+    "The runtime reported this turn as interrupted · recovery pending · details in Logs"
+    interrupted;
+  check bool "and it is not the shutdown line" false
+    (String.equal interrupted (line host_shutdown))
+;;
+
+(* The envelope does not have to end the row. A producer that appends anything
+   after it used to make the whole row unreadable, and there is no substring
+   fallback left to catch that. *)
+let test_text_after_the_envelope_does_not_hide_the_cause () =
+  let failure = persisted_failure_row host_shutdown ^ " (lane rotated)" in
+  match History.present_delivery_failure failure with
+  | None -> fail "trailing text hid the cause"
+  | Some (presented, recovered) ->
+    check bool "still pending" false recovered;
+    check string "the same lifecycle the untrailed row draws"
+      "Runtime shutdown interrupted this turn · recovery pending · details in Logs"
+      presented
+;;
+
 let test_unrelated_failure_is_not_marked_recovered () =
   let decoded =
     decode
@@ -2002,6 +2040,10 @@ let () =
             test_an_unfenced_closed_connection_still_presents_the_lifecycle
         ; test_case "an unfenced stop is marked recovered by a later reply" `Quick
             test_an_unfenced_stop_is_marked_recovered_by_a_later_reply
+        ; test_case "a runtime-reported interrupt is not a host shutdown" `Quick
+            test_a_runtime_reported_interrupt_is_not_a_host_shutdown
+        ; test_case "text after the envelope does not hide the cause" `Quick
+            test_text_after_the_envelope_does_not_hide_the_cause
         ; test_case "a cause two fences down keeps the host-shutdown badge" `Quick
             test_a_cause_two_fences_down_still_names_the_shutdown
         ; test_case "a carried MASC cause of another kind draws nothing" `Quick

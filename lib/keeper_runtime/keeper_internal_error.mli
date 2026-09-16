@@ -25,13 +25,6 @@ val accept_rejected_kind : string
     returned no typed receipt for what it did. *)
 val terminal_effect_failed_kind : string
 
-(** Canonical wire kind for a turn the host itself stopped. *)
-val host_stopped_turn_kind : string
-
-(** Canonical wire kind for a runtime whose transport closed before the turn
-    finished. *)
-val runtime_connection_closed_kind : string
-
 type provider_rejection = {
   provider_label : string;
   reason : string;

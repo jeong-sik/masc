@@ -125,8 +125,9 @@ val materialize
     domain for one uninterrupted run of 0.7 to 1.6 seconds (rtev, 2026-09-16).
 
     A write failure restores that message's body instead of emitting a marker
-    for bytes that were never persisted, and is counted in [reverted]; it never
-    raises and never leaves a dangling reference.
+    for bytes that were never persisted, and is counted in [reverted]; no write
+    failure raises and none leaves a dangling reference. A cancelled fiber still
+    propagates [Eio.Cancel.Cancelled], as the addressing awaits the pool.
 
     On blob lifetime: these blobs have no durable referrer, because the copy
     that carries the marker is never persisted. That is safe rather than

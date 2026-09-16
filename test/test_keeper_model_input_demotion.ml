@@ -369,6 +369,10 @@ let each_marker_stores_its_own_body () =
 let busy_worker_polls = 50
 let busy_worker_poll_interval_s = 0.01
 
+(* A request the memo answers does no pool work at all, so any wait here is the
+   regression, not slowness. *)
+let memo_hit_budget_s = 5.0
+
 let materialize_addresses_each_body_once_per_attempt () =
   let store = Tool_blob_store.create ~base_path:(Filename.temp_dir "demote" "") in
   let bodies = List.init 8 (fun i -> Printf.sprintf "body %d:" i ^ String.make 4000 'a') in
@@ -435,7 +439,19 @@ let materialize_addresses_each_body_once_per_attempt () =
       Eio.Promise.resolve occupied_u ();
       Eio.Promise.await release));
   Eio.Promise.await occupied;
-  let second = materialize () in
+  (* A bounded wait, not an unbounded one: if the memo ever stops answering,
+     this call submits a job the occupied worker can never run, and without the
+     timeout the suite would hang until CI kills it rather than name the
+     regression. *)
+  let second =
+    match
+      Eio.Time.with_timeout clock memo_hit_budget_s (fun () -> Ok (materialize ()))
+    with
+    | Ok outcome -> outcome
+    | Error `Timeout ->
+      Eio.Promise.resolve release_u ();
+      Alcotest.fail "a second request through the memo waited for the pool"
+  in
   Eio.Promise.resolve release_u ();
   let stored outcome =
     List.map

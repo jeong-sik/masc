@@ -47,7 +47,9 @@ val preview_max : int
     {!Tool_output.artifact_ref}. *)
 
 val put : t -> bytes:string -> mime:string -> Tool_output.t
-(** Store [bytes] under its sha256 digest.
+(** Store [bytes] under its sha256 digest. {!address} then {!put_addressed},
+    which is what a caller storing one body wants; the halves are separate for
+    a caller holding many, not because this one is going away.
 
     Returns [Tool_output.Stored {sha256; bytes; preview; mime}] where
     [preview] is the leading sanitized run of [bytes], at most
@@ -87,7 +89,13 @@ val address : t -> bytes:string -> mime:string -> addressed
     them held the main Eio domain for 0.7 to 1.6 seconds per request
     (2026-09-16 fiber trace).
 
-    @raises Invalid_argument if [mime] is empty, as {!put} does. *)
+    @raises Invalid_argument if [mime] is empty, as {!put} does, naming
+    [address] rather than [put]. *)
+
+val addressed_bytes : addressed -> string
+(** The body {!put_addressed} writes. A caller that must put back what it did
+    not manage to store reads it here rather than keeping its own copy, so the
+    bytes written and the bytes restored cannot disagree. *)
 
 val put_addressed : addressed -> Tool_output.t
 (** Store an {!address}ed body. Same contract as {!put}, of which this is the

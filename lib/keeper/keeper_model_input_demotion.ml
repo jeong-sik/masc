@@ -197,23 +197,21 @@ let materialize ~store ~addresses ~pending messages =
                   | None -> ()
                   | Some body ->
                     (match Hashtbl.find_opt addresses tool_use_id with
-                     | Some address -> Hashtbl.add addressed tool_use_id (body, address)
+                     | Some address -> Hashtbl.add addressed tool_use_id address
                      | None -> Hashtbl.add queued tool_use_id body)))
            message.content)
       messages;
     List.iter
-      (fun (tool_use_id, body, address) ->
+      (fun (tool_use_id, address) ->
          Hashtbl.add addresses tool_use_id address;
-         Hashtbl.add addressed tool_use_id (body, address))
+         Hashtbl.add addressed tool_use_id address)
       (match Hashtbl.fold (fun id body acc -> (id, body) :: acc) queued [] with
        | [] -> []
        | _ :: _ as to_address ->
          Domain_pool_ref.submit_cpu_or_inline (fun () ->
            List.map
              (fun (tool_use_id, body) ->
-                ( tool_use_id
-                , body
-                , Tool_blob_store.address store ~bytes:body ~mime:demoted_mime ))
+                tool_use_id, Tool_blob_store.address store ~bytes:body ~mime:demoted_mime)
              to_address));
     let reverted = ref 0 in
     let messages =
@@ -227,7 +225,13 @@ let materialize ~store ~addresses ~pending messages =
                   | Some tool_use_id ->
                     (match Hashtbl.find_opt addressed tool_use_id with
                      | None -> block
-                     | Some (body, address) ->
+                     | Some address ->
+                       (* The body put back is the one [put_addressed] would
+                          have written, read from the address itself: on a memo
+                          hit those bytes were captured by an earlier request,
+                          and a copy carried alongside could disagree with
+                          them. *)
+                       let body () = Tool_blob_store.addressed_bytes address in
                        (match Tool_blob_store.put_addressed address with
                         | Tool_output.Stored _ as stored ->
                           with_content block (Tool_output.encode_for_agent_core stored)
@@ -236,14 +240,14 @@ let materialize ~store ~addresses ~pending messages =
                              marker for bytes it did not persist would dangle,
                              so the body goes back. *)
                           incr reverted;
-                          with_content block body
+                          with_content block (body ())
                         (* [put_addressed] documents Sys_error as its failure
                            mode (disk full, EACCES). Anything else is not a
                            storage outcome and must not be turned into one
                            here. *)
                         | exception Sys_error _ ->
                           incr reverted;
-                          with_content block body)))
+                          with_content block (body ()))))
                message.content
            in
            { message with content })

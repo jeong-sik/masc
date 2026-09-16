@@ -359,6 +359,7 @@ let put_with_atomic_replace ~rewrite ~atomic_replace ~operation t ~bytes ~mime =
     (address_with ~operation t ~bytes ~mime)
 
 let address t ~bytes ~mime = address_with ~operation:"address" t ~bytes ~mime
+let addressed_bytes addressed = addressed.addressed_bytes
 
 let put_addressed addressed =
   Tool_output.Stored
@@ -369,7 +370,11 @@ let put_addressed addressed =
        addressed)
 ;;
 
-let put t ~bytes ~mime = put_addressed (address t ~bytes ~mime)
+(* [address_with ~operation:"put"] rather than [address], so a caller that
+   passes an empty mime still reads [put] in the failure. It now raises before
+   writing instead of after: a call that cannot return a reference no longer
+   leaves the bytes at their address. *)
+let put t ~bytes ~mime = put_addressed (address_with ~operation:"put" t ~bytes ~mime)
 
 let put_durable =
   put_with_atomic_replace

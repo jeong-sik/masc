@@ -1140,9 +1140,13 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
     | Message_status -> "STATUS"
     | Message_local -> "LOCAL"
     | Message_error -> "ERROR"
-    | Message_tool -> "TOOLS"
-    | Message_skill _ -> "SKILL"
-    | Message_thinking -> "THINKING"
+    (* No lane word on the work lanes: the mark already says which lane the
+       row is, so the badge holds the glyph and its padding and nothing
+       else. The column itself stays — [align_role_label] pads the empty
+       label to the same cells the words occupied. *)
+    | Message_tool -> ""
+    | Message_skill _ -> ""
+    | Message_thinking -> ""
     | Message_memory -> "JOURNAL"
   in
   (* Turn identity stays in the typed request id. The speaker glyph already
@@ -2187,18 +2191,18 @@ let render_keeper_message (state : state) =
                       then folded_thinking_summary (String.concat "\n" lines)
                       else String.concat "\n" lines
                     in
-                    entry Message_layout.Thinking (label "THINKING") (annotate_body body)
+                    entry Message_layout.Thinking (label "") (annotate_body body)
                 | Keeper_chat_transcript.Drawn_tools block ->
                     let projection =
                       Keeper_chat_transcript.project_tool_block
                         (tool_projection_mode state) block
                     in
                     let body = String.concat "\n" (projected_tool_rows projection) in
-                    entry (tool_block_style projection) (label "TOOLS") (annotate_body body)
+                    entry (tool_block_style projection) (label "") (annotate_body body)
                 | Keeper_chat_transcript.Drawn_skill skill ->
                     entry
                       (Message_layout.Skill (skill_tone_of_state skill.state))
-                      (label "SKILL")
+                      (label "")
                       (String.concat "\n"
                          (* Same fold as the committed rows: the summary line
                             stays, the action list, proof line and detail ride

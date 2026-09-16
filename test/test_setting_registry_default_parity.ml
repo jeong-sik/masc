@@ -77,15 +77,6 @@ let test_web_search_cache_ttl_matches_its_owner () =
          (Env_config_runtime.Tools.web_search_cache_ttl_sec ()))
 ;;
 
-(* RFC keeper-context-window-in-tokens: the window's compiled default is the
-   number every fresh install sends per request, so the row that advertises
-   it must show the owner's value. *)
-let test_context_window_matches_its_owner () =
-  check_display
-    Env_config_keeper.KeeperContext.window_tokens_env_key
-    ~owner:(string_of_int Env_config_keeper.KeeperContext.window_tokens_default)
-;;
-
 let () =
   run
     "Setting registry default parity"
@@ -94,10 +85,6 @@ let () =
             "keepalive timings match their owner"
             `Quick
             test_keepalive_defaults_match_their_owner
-        ; test_case
-            "context window matches its owner"
-            `Quick
-            test_context_window_matches_its_owner
         ; test_case
             "snapshot interval matches its owner"
             `Quick

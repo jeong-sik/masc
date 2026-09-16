@@ -464,37 +464,39 @@ let reject_server_request io id =
        ])
 ;;
 
-(* Every Keeper tool is declared once, under one namespace, deferred.
+(* Every Keeper tool is declared once, deferred.
 
    The app-server takes two encodings of [dynamicTools] and refuses a mix
    ("dynamic tools must use either canonical or legacy format consistently").
-   The legacy one is tagged ["type": "function"] and cannot defer: it answers
-   [deferLoading: true] with "deferred dynamic tool must include a namespace",
-   and it has nowhere to put one. The canonical one carries no type tag and
-   takes [namespace] as a string, which is what a deferred tool needs, so that
-   is the one written here.
+   The legacy one is tagged ["type": "function"] and cannot defer, so the
+   canonical one -- no type tag -- is written here.
 
-   Deferring means the app-server holds the schema and decides when the model
-   sees it, rather than every schema riding in the model's context from the
-   first token of every turn. The schemas still cross this wire once at
-   thread/start; what changes is the context they are spent from. Measured
-   2026-08-30 against the live surface: 83 tools, 81,270 bytes of spec. The
-   saving itself is not measured here: thread/tokenUsage/updated reports the
-   turn's counts into [turn_result.usage], but nothing compares a deferred
-   turn against an undeferred one, so what is verified is that the model
-   still resolves and calls a deferred tool, not how much it costs. *)
-let tool_namespace = "masc"
+   Deferring means the app-server holds the schema until the model reaches
+   for that tool, instead of every schema riding in the model's context from
+   the first token of every turn. Measured 2026-09-16 by driving this
+   protocol with 203 probe tools of about 2.7 KB each, reading one request's
+   input count (the [total] in thread/tokenUsage/updated sums a turn's
+   requests, so reading that inflates every figure by the request count):
+   120,205 tokens undeferred against 24,829 deferred, and a tool the model
+   calls brings its own schema and nothing else -- +625 for one, +1,680 for
+   three.
 
+   The server will not defer a tool whose [namespace] is missing or empty
+   ("deferred dynamic tool must include a namespace", "dynamic tool namespace
+   must not be empty"), so the word below is written to satisfy that and for
+   no other reason. Nothing reads it: dispatch is the tool table in
+   [handle_dynamic_tool_call], and giving every tool its own word was
+   measured to change nothing. It is not a grouping axis, and masc keeps no
+   concept behind it -- RFC-0451 §7. *)
 let dynamic_tool_spec (tool : dynamic_tool) =
   `Assoc
     [ "name", `String tool.name
     ; "description", `String tool.description
     ; "inputSchema", tool.input_schema
-    ; "namespace", `String tool_namespace
+    ; "namespace", `String "masc"
     ; "deferLoading", `Bool true
     ]
 ;;
-
 let find_dynamic_tool tools name =
   List.find_opt (fun (tool : dynamic_tool) -> String.equal tool.name name) tools
 ;;
@@ -525,25 +527,14 @@ let handle_dynamic_tool_call io ~tools ~thread_id ~turn_id ~tool_call_count
   let* request_turn_id = required_string stage "turnId" fields in
   let* call_id = required_string stage "callId" fields in
   let* tool_name = required_string stage "tool" fields in
-  let* namespace = optional_string stage "namespace" fields in
   let* arguments = required_member stage "arguments" fields in
+  (* The call's [namespace] field is read by nothing here. What decides
+     whether this host answers is the tool table below: a name it does not
+     hold is refused, and a name it holds is one it declared itself. The
+     namespace could only ever repeat that answer, because this host declares
+     one namespace and every call names it back. *)
   if request_thread_id <> thread_id || request_turn_id <> turn_id
   then protocol_error stage "tool call identity does not match the active turn"
-  else if
-    (* Every tool is declared under [tool_namespace], so a call names it back.
-       A call naming any other namespace belongs to tools this host did not
-       declare and must not be answered from this table. *)
-    not
-      (match namespace with
-       | None -> true
-       | Some declared -> String.equal declared tool_namespace)
-  then
-    protocol_error
-      stage
-      (Printf.sprintf
-         "tool call declared namespace %s, not %s"
-         (Option.value namespace ~default:"<none>")
-         tool_namespace)
   else
     match find_dynamic_tool tools tool_name with
     | None -> protocol_error stage (Printf.sprintf "unknown dynamic tool %S" tool_name)

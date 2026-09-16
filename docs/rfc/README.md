@@ -291,7 +291,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0448 | manual keeper 는 부팅 없인 돌지 않고, 대기 작업은 보인다 | Draft | - |
 | 0449 | 402 는 429 가 아니다 — Hard_quota 는 운영자 행동과 즉시 회전 | Draft | - |
 | 0450 | witness 원장은 먼저 재고, 그 다음 WAL 이다 | Draft | - |
-| 0451 | CLI 레인은 턴이 시작될 때 집합을 고른다 — 매 요청 82KB 는 스스로 안 실려도 된다고 적은 도구들이다 | Draft | - |
+| 0451 | CLI 레인의 도구 목록은 프로필이 이름으로 정한다 — 비용이 아니라 고르는 정확도 때문이다 | Draft | - |
 | 0452 | 소비는 lane 이 아니라 다룬 주체가 한다 — 채팅 턴도 자기가 처리한 자극을 ack 한다 | Rejected | - |
 | 0453 | keeper health 는 phase 의 투영이지 heartbeat 나이가 아니다 | Accepted | - |
 | 0454 | 실패한 keeper 요청은 문자열이 아니라 typed 값으로 남긴다 | Draft | - |

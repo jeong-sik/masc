@@ -4474,6 +4474,10 @@ type state = {
      the scroll survives only while it is open. *)
   mutable agenda_open: bool;
   mutable agenda_scroll: int;
+  (* The row Enter acts on. Held apart from the scroll because the two move
+     for different reasons: the scroll follows the cursor, and a panel whose
+     rows are mostly prose has a cursor that skips most of them. *)
+  mutable agenda_cursor: int;
   (* The [@] answering overlay: the footer badge says that keepers are
      mid-turn, and this says which ones, on which lane, for how long. Modal
      like the agenda sheet, and like it the scroll survives only while it
@@ -6467,6 +6471,7 @@ let create_state
   keeper_deletions = None;
   agenda_open = false;
   agenda_scroll = 0;
+  agenda_cursor = 0;
   hints_visible = true;
   coalesce_queued_input = true;
   user_input_priority_next = true;

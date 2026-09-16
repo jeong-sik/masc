@@ -135,16 +135,26 @@ val prefix_digest : system_prompt:string -> tools:Agent_core.Tool.t list -> stri
 
 (** Process-wide table, one ledger per keeper and runtime. *)
 module Table : sig
+  (** One ledger per (keeper, runtime, session). The session is the history
+      the atoms are positions in: a keeper's trace id, or the recovery
+      worker's own session, so neither reads the other's front. *)
+
   val observe
     :  keeper_name:string
     -> runtime_id:string
+    -> session_id:string
     -> request:request
     -> usage:usage option
     -> observation
 
-  val lookup : keeper_name:string -> runtime_id:string -> t option
+  val lookup : keeper_name:string -> runtime_id:string -> session_id:string -> t option
 
-  val move_front : keeper_name:string -> runtime_id:string -> first_atom:int -> unit
+  val move_front
+    :  keeper_name:string
+    -> runtime_id:string
+    -> session_id:string
+    -> first_atom:int
+    -> unit
   (** {!move_front} on the pair's ledger, so the next request composes and
       the next observation measures from the new front. A pair without a
       ledger has no front to move, and nothing is written. *)

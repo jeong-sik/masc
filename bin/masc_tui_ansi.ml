@@ -454,8 +454,10 @@ module Chat_theme = struct
     (* Full reset and reopen for the folded-origin gutter, whose own spans can
        change weight, foreground, and background. *)
     ; inline_restore : string
-    (* A bare link changes only underline and foreground. Closing only those
-       two attributes preserves an enclosing diff background and any weight. *)
+    (* A bare link changes only underline and foreground. Closing exactly
+       those two attributes preserves an enclosing diff background and any
+       weight; a dim body then re-asserts its dim, which the foreground
+       restore deliberately leaves alone. *)
     ; link_restore : string
     ; palette_generation : int
     ; ambient_background : bool
@@ -511,15 +513,17 @@ module Chat_theme = struct
     | Masc_tui_message_layout.Skill _ | Masc_tui_message_layout.Thinking ->
       Ansi.default_fg
 
-  (* A bare link closes only underline and foreground, so the restore must
-     reopen the body's own rung: inside a dim body, restoring the default
-     foreground would leak speech brightness for the rest of the line. *)
+  (* A bare link opens underline and a bright foreground, and the restore
+     must close both. [Ansi.default_fg] clears the link colour without
+     touching intensity -- SGR 39 is not a reset -- so a dim body re-asserts
+     [Ansi.dim] after it, while a full-brightness body stops at the
+     foreground. *)
   let link_style_restore style =
     let foreground =
       match style with
       | Masc_tui_message_layout.Journal | Masc_tui_message_layout.Tool
       | Masc_tui_message_layout.Skill _ | Masc_tui_message_layout.Thinking ->
-        Ansi.dim
+        Ansi.default_fg ^ Ansi.dim
       | Masc_tui_message_layout.User | Masc_tui_message_layout.Inbound
       | Masc_tui_message_layout.Keeper | Masc_tui_message_layout.Status
       | Masc_tui_message_layout.Local | Masc_tui_message_layout.Error ->

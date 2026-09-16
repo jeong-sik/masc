@@ -195,26 +195,95 @@ let make_signal ~now kind (request : Schedule_domain.schedule_request) =
   }
 ;;
 
-let read_seen config =
-  let path = signal_seen_path config in
-  if not (Workspace_utils.path_exists config path) then Ok []
-  else
-    match Workspace_utils.read_json_result config path with
-    | Error msg -> Error msg
-    | Ok (`List rows) ->
-      let rec loop acc = function
-        | [] -> Ok (List.rev acc)
-        | `String key :: rest -> loop (key :: acc) rest
-        | _ :: _ -> Error "signal_keys.json must be a string list"
-      in
-      loop [] rows
-    | Ok _ -> Error "signal_keys.json must be a JSON list"
+let signal_seen_recovery_path config = signal_seen_path config ^ ".last-good"
+
+let parse_seen_json = function
+  | `List rows ->
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | `String key :: rest -> loop (key :: acc) rest
+      | _ :: _ -> Error "signal_keys.json must be a string list"
+    in
+    loop [] rows
+  | _ -> Error "signal_keys.json must be a JSON list"
 ;;
 
+(* [Seen_absent]: no primary file exists — nothing has ever been observed,
+   and the empty list is correct with no data loss. [Seen_unparseable]: the
+   primary exists but its bytes (or the read itself) do not yield a key
+   list; the caller must not treat this as "nothing seen", because that
+   would re-fire every occurrence this store has ever signalled. *)
+type seen_primary_failure =
+  | Seen_absent
+  | Seen_unparseable of string
+
+let load_seen_primary config =
+  let path = signal_seen_path config in
+  if not (Workspace_utils.path_exists config path)
+  then Error Seen_absent
+  else (
+    match Workspace_utils.read_json_result config path with
+    | Error msg -> Error (Seen_unparseable msg)
+    | Ok json ->
+      (match parse_seen_json json with
+       | Ok keys -> Ok keys
+       | Error msg -> Error (Seen_unparseable msg)))
+;;
+
+let load_seen_recovery config =
+  let path = signal_seen_recovery_path config in
+  if not (Workspace_utils.path_exists config path)
+  then None
+  else (
+    match Workspace_utils.read_json_result config path with
+    | Error _ -> None
+    | Ok json ->
+      (match parse_seen_json json with
+       | Ok keys -> Some keys
+       | Error _ -> None))
+;;
+
+(* Self-recovering read (#26686 item 1). An absent primary is a fresh store:
+   the empty list loses nothing. A primary that exists but will not parse is
+   corruption; the previous version of this function returned [Error]
+   straight from here, and [append_new_signals] binds that with [let*], so
+   every future tick failed the same way with no writer able to replace the
+   broken file — the whole scheduler stopped dispatching until an operator
+   edited it by hand.
+   RFC-0234 already solved this for [schedules.json] with a [.last-good]
+   mirror (schedule_store.ml); this store gets the same recovery source. A
+   corrupt primary with no usable mirror still reports [Error] rather than
+   silently discarding whatever the bytes may hold, and this function does
+   not retry — retrying an unchanged file cannot change the outcome. The
+   primary heals itself on the next tick that emits a signal, because
+   [write_seen] below always writes both files together. *)
+let read_seen config =
+  match load_seen_primary config with
+  | Ok keys -> Ok keys
+  | Error Seen_absent -> Ok []
+  | Error (Seen_unparseable primary_err) ->
+    (match load_seen_recovery config with
+     | Some keys -> Ok keys
+     | None -> Error primary_err)
+;;
+
+(* Commits the primary, then mirrors to [.last-good] so a later corrupt-primary
+   read (above) has a recovery source. Returning a result (#26686 item 2) lets
+   the caller refuse to report a tick that lost this write as successful,
+   instead of the failure only reaching [Log.Misc.warn] the way [write_json]
+   reports it — this module's own header keeps it telemetry-free, the caller
+   installs the concrete consumer. A mirror write that fails after the
+   primary succeeds does not fail the commit: the primary write stands, and
+   only the recovery copy is stale until the next write. *)
 let write_seen config keys =
   Workspace_utils.mkdir_p (schedules_dir config);
-  Workspace_utils.write_json config (signal_seen_path config)
-    (`List (List.map (fun key -> `String key) keys))
+  let json = `List (List.map (fun key -> `String key) keys) in
+  let* () = Workspace_utils.write_json_result config (signal_seen_path config) json in
+  (* The primary already committed above; a failed mirror write only means
+     the next corrupt-primary read has no recovery source. *)
+  (* fire-and-forget: a mirror write failure does not fail this commit. *)
+  ignore (Workspace_utils.write_json_result config (signal_seen_recovery_path config) json);
+  Ok ()
 ;;
 
 let append_signal config signal =
@@ -240,25 +309,43 @@ let append_new_signals config candidates =
     List.iter (fun key -> Hashtbl.replace seen_tbl key ()) seen;
     let emitted_rev = ref [] in
     let seen_rev = ref (List.rev seen) in
+    (* The key list only grows when a signal is emitted, and it holds every
+       occurrence the store has ever signalled (6,242 keys, 430 KB on a live
+       root). A tick that emits nothing would rewrite the same list, so it
+       writes nothing.
+       This same write also closes #26686 item 3: [loop]'s [Error] arm below
+       calls it before returning, so a signal whose JSONL row already landed
+       (its [append_signal] succeeded) is recorded seen even when a later
+       signal in the same tick fails. The previous version only reached this
+       write from the clean end of the candidate list, so a mid-list failure
+       discarded [seen_rev] entirely and the next tick re-appended every
+       signal this one had already committed to the JSONL store. *)
+    let persist_progress () =
+      match !emitted_rev with
+      | [] -> Ok ()
+      | _ :: _ -> write_seen config (List.rev !seen_rev)
+    in
     let rec loop = function
       | [] ->
-        (* The key list only grows when a signal is emitted, and it holds
-           every occurrence the store has ever signalled (6,242 keys, 430 KB
-           on a live root). A tick that emits nothing would rewrite the same
-           list, so it writes nothing. *)
-        (match !emitted_rev with
-         | [] -> ()
-         | _ :: _ -> write_seen config (List.rev !seen_rev));
+        let* () = persist_progress () in
         Ok (List.rev !emitted_rev)
       | (signal : wake_signal) :: rest ->
         let occurrence_id = Schedule_occurrence_id.to_string signal.occurrence_id in
         if Hashtbl.mem seen_tbl occurrence_id then loop rest
         else (
-          let* () = append_signal config signal in
-          Hashtbl.replace seen_tbl occurrence_id ();
-          seen_rev := occurrence_id :: !seen_rev;
-          emitted_rev := signal :: !emitted_rev;
-          loop rest)
+          match append_signal config signal with
+          | Error msg ->
+            (* Best-effort persistence of the progress made before this
+               failure; this module stays telemetry-free (see the header),
+               so a secondary failure here has nowhere to go. *)
+            (* fire-and-forget: does not change which error is returned. *)
+            ignore (persist_progress ());
+            Error msg
+          | Ok () ->
+            Hashtbl.replace seen_tbl occurrence_id ();
+            seen_rev := occurrence_id :: !seen_rev;
+            emitted_rev := signal :: !emitted_rev;
+            loop rest)
     in
     loop candidates)
   |> function

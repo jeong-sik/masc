@@ -1,0 +1,28 @@
+# task-1539 evidence 01 - named tests at main HEAD (no code change needed)
+HEAD=7dcc9f72c6e2331f8fd4cbc27bba27dee42a2110 (origin/main)
+UTC=2026-09-16T15:17:01Z
+cmd: dune build test/test_reliable_change_g1.exe && (cd test && ../_build/default/test/test_reliable_change_g1.exe)
+build_exit=0
+Testing `Reliable_change_g1'.
+This run has ID `IGZH8613'.
+
+  [OK]          contract_parity             0   manifest contract parity.
+  [OK]          usage_aggregation           0   exact fixture reconstruction.
+  [OK]          compliance_checker          0   accepts compliant records.
+  [OK]          compliance_checker          1   rejects verification failure ...
+  [OK]          compliance_checker          2   rejects duplicated usage.
+  [OK]          compliance_checker          3   rejects missing matrix mode.
+  [OK]          compliance_checker          4   deep manifest validation.
+  [OK]          compliance_checker          5   manifest and observations fil...
+  [OK]          strict_parsing              0   rejects unknown usage scope.
+  [OK]          strict_parsing              1   rejects unknown scenario.
+  [OK]          strict_parsing              2   type error caught gracefully.
+  [OK]          strict_parsing              3   harness output decoding.
+  [OK]          strict_parsing              4   roadmap fixture string cost d...
+  [OK]          strict_parsing              5   observation roundtrip.
+
+Full test results in `/masc-work/polisher/masc-1591/test/_build/_tests/Reliable_change_g1'.
+Test Successful in 0.003s. 14 tests run.
+suite_exit=0
+OK_count=14
+FAIL_count=0

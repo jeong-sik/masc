@@ -1,0 +1,36 @@
+# task-1539 evidence 02 - repair commit coordinates (upstream landed the fix)
+HEAD=7dcc9f72c6e2331f8fd4cbc27bba27dee42a2110
+UTC=2026-09-16T15:17:01Z
+## last-touch commit of the fixture snap2 identity (git log -S):
+8c21777b fix(keeper): read_seed skips an unparseable record by name, not by erasure (#36825)
+## blame: fixture r3 lines (distinct snapshot identity):
+^8c21777b (2026-09-16 258)       (* Second progressive snapshot of the same attempt: distinct snapshot
+^8c21777b (2026-09-16 259)          identity (mirroring the canonical fixture's attempt-2-snap-1/-snap-2),
+^8c21777b (2026-09-16 260)          same request identity and attempt_sequence. *)
+^8c21777b (2026-09-16 261)       { (make_dummy_observation ~case_id:"retry-success" ~repeat_index:rep ~run_id:(retry_run_id_prefix ^ "-3")
+^8c21777b (2026-09-16 262)            ~mode:"matrix" ~verified:true ~exit_code:(Some 0)
+^8c21777b (2026-09-16 263)            ~usage:(Usage_reported { input_tokens = 25; output_tokens = 5; cache_read_input_tokens = 4; cost_usd = Some 0.05; cost_usd_exact = Some "0.05" })
+^8c21777b (2026-09-16 264)            ~attempt_seq:2)
+^8c21777b (2026-09-16 265)         with request_or_task_identity = Some "successful-attempt"; usage_scope = Some Cumulative_request_snapshot; run_turn_attempt_identity = Some snap2_identity }
+## blame: checker identity key (same-snapshot-only fatal, lib 515-524):
+^8c21777b (2026-09-16 515)           the same snapshot recorded twice, not a later snapshot of the same
+^8c21777b (2026-09-16 516)           attempt. *)
+^8c21777b (2026-09-16 517)        let cumulative_keys =
+^8c21777b (2026-09-16 518)          List.map
+^8c21777b (2026-09-16 519)            (fun (o : run_observation) ->
+^8c21777b (2026-09-16 520)               ( match o.run_turn_attempt_identity with
+^8c21777b (2026-09-16 521)                 | Some id -> id
+^8c21777b (2026-09-16 522)                 | None -> o.run_id )
+^8c21777b (2026-09-16 523)               , o.attempt_sequence )
+^8c21777b (2026-09-16 524)            cumulative_attempts
+## commit message of 8c21777b:
+8c21777be343744f2fdb2cbf11927660d9f79eb4
+2026-09-16 19:45:33 +0900
+fix(keeper): read_seed skips an unparseable record by name, not by erasure (#36825)
+The boundary ratchet rejects Stdlib.Result.to_option as failure erasure
+(INCREASE failure_erasure ... 0 -> 1, caught on release/v0.35.19). The
+forecast reader already draws this boundary with an explicit match;
+read_seed now does the same, returning the count to zero without
+touching the baseline.
+
+Co-authored-by: Claude Code <noreply@anthropic.com>

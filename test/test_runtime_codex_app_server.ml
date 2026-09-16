@@ -922,8 +922,8 @@ let test_thread_resume_sends_dynamic_tools () =
   Fun.protect
     ~finally:(fun () -> Sys.remove capture_path)
     (fun () ->
-       let declare name : Runtime_codex_app_server.dynamic_tool =
-         { name
+       let tool : Runtime_codex_app_server.dynamic_tool =
+         { name = "masc_probe"
          ; description = "Return a deterministic fixture marker"
          ; input_schema = `Assoc [ "type", `String "object" ]
          ; call =
@@ -931,8 +931,6 @@ let test_thread_resume_sends_dynamic_tools () =
                { success = true; content = "unused"; content_blocks = None; abort_turn = None })
          }
        in
-       let tool = declare "masc_probe" in
-       let sibling = declare "masc_probe_sibling" in
        with_fixture
          ~capture_path
          [ init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed ]

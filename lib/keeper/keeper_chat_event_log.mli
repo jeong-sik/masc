@@ -255,7 +255,9 @@ val page_of_rows :
     only names the journal in a corrupt row's message). A held offset is
     checked against [since_seq] first (the row before it and the row at it),
     then rows are decoded one at a time from [start]: rows whose seq is not
-    past [since_seq] are skipped and carry [next_offset] with them, at most
+    past [since_seq] are skipped and carry [next_offset] with them (from the
+    first row with a held seq, the skipped rows are found by bisecting the
+    rows, since seqs increase down the journal, and are not all decoded), at most
     [limit] are served, and one more row past [since_seq] decides [has_more].
     Rows after that are not decoded, so a corrupt row fails the page that
     reaches it, not every page. Blank rows are skipped. A [limit] below one is

@@ -153,6 +153,103 @@ let bool_field name body =
   | _ -> fail (name ^ " is not a bool")
 ;;
 
+(* A page asked for from the first row with a held seq finds where to start
+   by bisecting the rows rather than decoding each one it skips. It must
+   serve exactly what a row-by-row skip serves, for every held seq and
+   limit, blank rows included: rows past the seq up to the limit, whether
+   more follow, and the offset of the last row served or, on an empty page,
+   of the last row skipped. *)
+let test_a_held_seq_without_an_offset_serves_what_a_row_by_row_skip_serves () =
+  let pieces =
+    List.mapi
+      (fun index entry ->
+         let blanks = if index mod 3 = 1 then "\n   \n" else "" in
+         blanks, L.journaled_event_to_string entry ^ "\n")
+      journal
+  in
+  let rows = String.concat "" (List.map (fun (blanks, row) -> blanks ^ row) pieces) in
+  let row_ends =
+    List.fold_left
+      (fun (offset, ends) (blanks, row) ->
+         let row_end = offset + String.length blanks + String.length row in
+         row_end, row_end :: ends)
+      (0, [])
+      pieces
+    |> snd
+    |> List.rev
+    |> Array.of_list
+  in
+  let journal_length = List.length journal in
+  List.iter
+    (fun held ->
+       List.iter
+         (fun limit ->
+            let page = served_page ~since_seq:(L.After_seq held) ~limit rows in
+            let past = List.filter (fun seq -> seq > held) (List.init journal_length Fun.id) in
+            let served = List.filteri (fun index _ -> index < limit) past in
+            let expected_offset =
+              match List.rev served with
+              | last :: _ -> row_ends.(last)
+              | [] -> if held >= 0 then row_ends.(min held (journal_length - 1)) else 0
+            in
+            let label what = Printf.sprintf "held %d, limit %d: %s" held limit what in
+            check (list int) (label "seqs")
+              served
+              (List.map (fun (entry : L.journaled_event) -> entry.seq) page.L.events);
+            check bool (label "has more") (List.length past > limit) page.L.has_more;
+            check int (label "next offset") expected_offset page.L.next_offset)
+         (List.init (journal_length + 1) (fun index -> index + 1)))
+    (List.init (journal_length + 2) (fun index -> index - 1))
+;;
+
+(* A corrupt row fails only a page that reads it. A probe that lands on it
+   cannot say which side of the held seq it is on, so the page reads on row by
+   row from what the bisection had settled: a page whose last row, and the
+   row after it that decides [has_more], come before the corrupt row is
+   served, and a page that reaches it fails. *)
+let test_a_corrupt_row_fails_only_a_first_row_page_that_reads_it () =
+  let upto_four, past_four =
+    List.partition (fun (entry : L.journaled_event) -> entry.seq <= 4) journal
+  in
+  let rows = rows_of upto_four ^ "this complete row is not an envelope\n" ^ rows_of past_four in
+  List.iter
+    (fun held ->
+       let page = served_page ~since_seq:(L.After_seq held) ~limit:(3 - held) rows in
+       check (list int)
+         (Printf.sprintf "held %d: the rows up to seq 3" held)
+         (List.init (3 - held) (fun index -> held + 1 + index))
+         (List.map (fun (entry : L.journaled_event) -> entry.seq) page.L.events);
+       check bool (Printf.sprintf "held %d: seq 4 says more follow" held) true page.L.has_more)
+    [ 0; 1; 2 ];
+  match L.page_of_rows ~path:journal_file ~since_seq:(L.After_seq 3) ~start:L.first_row ~limit:1 rows with
+  | Error (L.Page_corrupt _) -> ()
+  | Error failure -> fail ("wrong refusal: " ^ L.page_failure_to_string failure)
+  | Ok _ -> fail "a page that reads the corrupt row was served"
+;;
+
+(* The skip is bisected, so a page near the end of a long journal decodes a
+   handful of rows, not the journal. Decoding every row allocates many times
+   the journal's length; the budget is its length once. *)
+let test_a_held_seq_near_the_end_of_a_long_journal_decodes_a_handful_of_rows () =
+  let length = 20_000 in
+  let rows =
+    rows_of
+      (List.init length (fun seq ->
+         { L.seq; ts = 1_762_300_000.0 +. float_of_int seq; event = E.Text_delta "x" }))
+  in
+  let held = length - 5 in
+  let before = Gc.allocated_bytes () in
+  let page = served_page ~since_seq:(L.After_seq held) ~limit:L.page_max_limit rows in
+  let allocated = Gc.allocated_bytes () -. before in
+  check (list int) "the rows past the held seq" [ held + 1; held + 2; held + 3; held + 4 ]
+    (List.map (fun (entry : L.journaled_event) -> entry.seq) page.L.events);
+  let budget = float_of_int (String.length rows) in
+  if allocated > budget
+  then
+    failf "a page past seq %d allocated %.0f bytes, over the %.0f byte budget" held
+      allocated budget
+;;
+
 let test_chat_events_page_walks_by_seq () =
   let first = page ~since_seq:L.Whole_turn ~limit:3 () in
   check string
@@ -721,6 +818,18 @@ let () =
     ; ( "chat events"
       , [ test_case "page walks by seq" `Quick test_chat_events_page_walks_by_seq
         ; test_case "page walks by offset" `Quick test_chat_events_page_walks_by_offset
+        ; test_case
+            "a held seq without an offset serves what a row-by-row skip serves"
+            `Quick
+            test_a_held_seq_without_an_offset_serves_what_a_row_by_row_skip_serves
+        ; test_case
+            "a held seq near the end of a long journal decodes a handful of rows"
+            `Quick
+            test_a_held_seq_near_the_end_of_a_long_journal_decodes_a_handful_of_rows
+        ; test_case
+            "a corrupt row fails only a first-row page that reads it"
+            `Quick
+            test_a_corrupt_row_fails_only_a_first_row_page_that_reads_it
         ; test_case
             "page refuses what it cannot place"
             `Quick

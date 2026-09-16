@@ -363,7 +363,10 @@
   test_keeper_unified_claim_progress
   test_keeper_unified_context_overflow
   test_keeper_context_overflow_shrink
-  test_keeper_context_window
+  test_keeper_model_input_ledger
+  test_keeper_carried_range
+  test_keeper_carried_front
+  test_keeper_carried_range_eviction
   test_keeper_next_request_forecast
   test_keeper_provider_call_deadline
   test_keeper_failed_selection_disposition
@@ -720,7 +723,10 @@
   test_keeper_unified_claim_progress
   test_keeper_unified_context_overflow
   test_keeper_context_overflow_shrink
-  test_keeper_context_window
+  test_keeper_model_input_ledger
+  test_keeper_carried_range
+  test_keeper_carried_front
+  test_keeper_carried_range_eviction
   test_keeper_next_request_forecast
   test_keeper_provider_call_deadline
   test_keeper_failed_selection_disposition
@@ -871,6 +877,9 @@
   test_operator_surface_toml_parity)
  (libraries
  masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
+  ;; test_keeper_model_input_demotion installs a one-worker Domain_pool to
+  ;; prove materialize addresses its bodies there.
+  masc.masc_core eio_main
   masc.cost_ledger
   masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
   masc.skill_config masc.skill_reference masc.skill_snapshot masc.config
@@ -2433,8 +2442,6 @@
 
 (include stanzas/test_workspace_base_path_cache.inc)
 
-(include stanzas/test_dashboard_feature_health.inc)
-
 (include stanzas/test_dashboard_gate_cli_lane.inc)
 
 (include stanzas/test_dashboard_gate_metrics.inc)
@@ -2489,8 +2496,6 @@
 (include stanzas/test_event_kind.inc)
 
 (include stanzas/test_export_symbol_graph.inc)
-
-(include stanzas/test_feature_flag_registry.inc)
 
 (include stanzas/test_fs_atomic_orphan_sweep_10130.inc)
 
@@ -3439,6 +3444,13 @@
   masc_tui_image_preview
   alcotest
   masc
+  ; The fenced-row fixtures are built by the producer's own encoder, so the
+  ; suite names Keeper_internal_error, Tool_result and Agent_core.Error
+  ; directly; dune hands a transitive library with -H and naming its modules
+  ; would be unbound.
+  masc.agent_core
+  masc.keeper_runtime
+  masc.tool_types
   masc_tui_keeper_chat_history
   masc_tui_keeper_chat_transcript
   yojson))

@@ -978,41 +978,6 @@ let test_wake_prompt_is_readable_in_the_settings_projection () =
        |> List.exists (fun c -> to_string c = "Keeper_unified_prompt"))
 ;;
 
-(* The transmission window is the setting an operator changes to send more or
-   less history, so a panel that cannot read it is the one row they would look
-   for. Registered by #36709 without an arm in the projector, it reached the
-   panel with a null value and an error string; the coverage case above names
-   it, and this one states what the row must say. *)
-let test_context_window_is_readable_in_the_settings_projection () =
-  let open Yojson.Safe.Util in
-  let rows =
-    Keeper_runtime_config.settings_projection_to_yojson
-      (parse_or_fail "[turn]\ncontext_window_tokens = 40000\n")
-    |> to_list
-  in
-  match
-    List.find_opt
-      (fun row ->
-         String.equal
-           (row |> member "env" |> to_string)
-           Env_config_keeper.KeeperContext.window_tokens_env_key)
-      rows
-  with
-  | None -> fail "the context window is absent from the operator settings projection"
-  | Some row ->
-    check string "the panel exposes the TOML key operators edit"
-      "turn.context_window_tokens"
-      (row |> member "key" |> to_string);
-    check bool "the projection carries no error" true
-      (row |> member "effective_error" = `Null);
-    check string "the configured value is echoed back"
-      "40000"
-      (row |> member "configured_value" |> to_string);
-    check string "the effective value is the window the turn driver resolves"
-      (string_of_int (Env_config_keeper.KeeperContext.window_tokens ()))
-      (row |> member "effective_value" |> to_string)
-;;
-
 (* PR #28225 review (comment 3761300276): the raw-config preview computed
    can_save from the keeper schema alone, but the raw-save path also runs the
    runtime parser (Runtime.save_config_text). A config that parses and passes
@@ -1085,8 +1050,6 @@ let () =
             test_settings_projection_uses_typed_effective_values
         ; test_case "every registered setting reads in the projection" `Quick
             test_every_registered_setting_reads_in_the_projection
-        ; test_case "the context window reads in the projection" `Quick
-            test_context_window_is_readable_in_the_settings_projection
         ; test_case "a malformed provider call deadline is a configuration error" `Quick
             test_a_malformed_provider_call_deadline_is_a_configuration_error
         ; test_case "an out-of-range provider call deadline is a configuration error" `Quick

@@ -56,45 +56,46 @@ type response_turn =
 
 (* ── Next request forecast ───────────────────────────── *)
 
-type forecast_window =
-  | Window_declared of { window_tokens : int; source : string }
-  | Window_refused of string
+type forecast_lane =
+  | Lane_agent_core
+  | Lane_not_applicable of string
 
-type forecast_density =
-  { input_tokens : int
-  ; measured_bytes : int
+type forecast_marks =
+  { high_water_tokens : int
+  ; low_water_tokens : int
   }
 
-type forecast_capacity =
-  | Capacity_measured of { capacity_bytes : int; density : forecast_density }
-  | Capacity_unmeasured
-
 type forecast_parts =
-  { measured_on_turn : int
+  { reserved_measured_on_turn : int
   ; reserved_bytes : int
+  ; pinned_measured_on_turn : int
+  ; pinned_measured_on_runtime : string
   ; pinned_bytes : int
   }
 
-type forecast_overrun_cause =
-  | Fixed_parts_exceed_target
-  | Newest_atom_exceeds_target
+type forecast_carried_origin =
+  | Carried_from_ledger
+  | Carried_from_turn_record of { turn : int }
+  | Carried_halved_after_refusal of { retry : int }
+  | Carried_fit_to_request_cap
+  | Carried_whole_history
 
-type forecast_fit =
-  | Within_target
-  | Overrun of { by_bytes : int; cause : forecast_overrun_cause }
-
-type forecast_cut =
-  | Forecast_cut of { kept_atoms : int; transmitted_bytes : int; fit : forecast_fit }
-  | Forecast_newest_atom_only of { transmitted_bytes : int }
+type forecast_carried =
+  { first_atom : int
+  ; kept_atoms : int
+  ; transmitted_bytes : int
+  ; origin : forecast_carried_origin
+  ; counted_tokens : int option
+  }
 
 type forecast_candidate =
   { runtime_id : string
-  ; window : forecast_window
-  ; capacity : forecast_capacity option
+  ; lane : forecast_lane
+  ; marks : forecast_marks option
   ; request_cap_bytes : int option
-  ; parts : forecast_parts option
+  ; parts : (forecast_parts, string) result
   ; history_atoms : int
-  ; cut : forecast_cut option
+  ; carried : forecast_carried option
   }
 
 type forecast =
@@ -563,93 +564,109 @@ let format_tokens tokens =
   else if tokens >= 1_000 then Printf.sprintf "%.1fk" (float tokens /. 1_000.)
   else string_of_int tokens
 
-let forecast_schema = "masc.keeper.next-request-forecast.v1"
+let forecast_schema = "masc.keeper.next-request-forecast.v2"
 
-let decode_forecast_window = function
-  | `Assoc fields when List.mem_assoc "error" fields ->
-    let* error_json = field "error" fields in
-    let* error = nonempty_string "window.error" error_json in
-    Ok (Window_refused error)
+let decode_forecast_lane = function
+  | `Assoc fields when List.mem_assoc "not_applicable" fields ->
+    let* reason_json = field "not_applicable" fields in
+    let* reason = nonempty_string "lane.not_applicable" reason_json in
+    Ok (Lane_not_applicable reason)
   | `Assoc fields ->
-    let* tokens_json = field "window_tokens" fields in
-    let* window_tokens = nonnegative_int "window.window_tokens" tokens_json in
-    let* source_json = field "source" fields in
-    let* source = nonempty_string "window.source" source_json in
-    Ok (Window_declared { window_tokens; source })
-  | _ -> Error "window is not an object"
+    (match List.assoc_opt "agent_core" fields with
+     | Some (`Bool true) -> Ok Lane_agent_core
+     | Some _ | None -> Error "lane is neither agent_core nor not_applicable")
+  | _ -> Error "lane is not an object"
 
-let decode_forecast_capacity = function
+let decode_forecast_marks = function
   | `Null -> Ok None
   | `Assoc fields ->
-    (match List.assoc_opt "capacity_bytes" fields with
-     | Some `Null | None -> Ok (Some Capacity_unmeasured)
-     | Some bytes_json ->
-       let* capacity_bytes = nonnegative_int "capacity.capacity_bytes" bytes_json in
-       let* tokens_json = field "density_input_tokens" fields in
-       let* input_tokens = nonnegative_int "capacity.density_input_tokens" tokens_json in
-       let* measured_json = field "density_measured_bytes" fields in
-       let* measured_bytes =
-         nonnegative_int "capacity.density_measured_bytes" measured_json
-       in
-       Ok (Some (Capacity_measured { capacity_bytes; density = { input_tokens; measured_bytes } })))
-  | _ -> Error "capacity is not an object or null"
+    let* high_json = field "high_water_tokens" fields in
+    let* high_water_tokens = nonnegative_int "marks.high_water_tokens" high_json in
+    let* low_json = field "low_water_tokens" fields in
+    let* low_water_tokens = nonnegative_int "marks.low_water_tokens" low_json in
+    Ok (Some { high_water_tokens; low_water_tokens })
+  | _ -> Error "marks is not an object or null"
 
 let decode_forecast_parts = function
-  | `Null -> Ok None
+  | `Assoc fields when List.mem_assoc "error" fields ->
+    let* error_json = field "error" fields in
+    let* error = nonempty_string "parts.error" error_json in
+    Ok (Error error)
   | `Assoc fields ->
-    let* turn_json = field "measured_on_turn" fields in
-    let* measured_on_turn = nonnegative_int "parts.measured_on_turn" turn_json in
+    let* reserved_turn_json = field "reserved_measured_on_turn" fields in
+    let* reserved_measured_on_turn =
+      nonnegative_int "parts.reserved_measured_on_turn" reserved_turn_json
+    in
     let* reserved_json = field "reserved_bytes" fields in
     let* reserved_bytes = nonnegative_int "parts.reserved_bytes" reserved_json in
+    let* pinned_turn_json = field "pinned_measured_on_turn" fields in
+    let* pinned_measured_on_turn =
+      nonnegative_int "parts.pinned_measured_on_turn" pinned_turn_json
+    in
+    let* pinned_runtime_json = field "pinned_measured_on_runtime" fields in
+    let* pinned_measured_on_runtime =
+      nonempty_string "parts.pinned_measured_on_runtime" pinned_runtime_json
+    in
     let* pinned_json = field "pinned_bytes" fields in
     let* pinned_bytes = nonnegative_int "parts.pinned_bytes" pinned_json in
-    Ok (Some { measured_on_turn; reserved_bytes; pinned_bytes })
-  | _ -> Error "parts is not an object or null"
+    Ok
+      (Ok
+         { reserved_measured_on_turn
+         ; reserved_bytes
+         ; pinned_measured_on_turn
+         ; pinned_measured_on_runtime
+         ; pinned_bytes
+         })
+  | _ -> Error "parts is not an object"
 
-let decode_forecast_fit = function
+let decode_forecast_origin = function
   | `Assoc fields ->
     let* kind_json = field "kind" fields in
-    let* kind = nonempty_string "fit.kind" kind_json in
-    if String.equal kind "within_target" then Ok Within_target
-    else if String.equal kind "overrun" then
-      let* by_json = field "by_bytes" fields in
-      let* by_bytes = nonnegative_int "fit.by_bytes" by_json in
-      let* cause_json = field "cause" fields in
-      let* cause = nonempty_string "fit.cause" cause_json in
-      if String.equal cause "fixed_parts_exceed_target" then
-        Ok (Overrun { by_bytes; cause = Fixed_parts_exceed_target })
-      else if String.equal cause "newest_atom_exceeds_target" then
-        Ok (Overrun { by_bytes; cause = Newest_atom_exceeds_target })
-      else Error ("fit.cause is not a known cause: " ^ cause)
-    else Error ("fit.kind is not a known kind: " ^ kind)
-  | _ -> Error "fit is not an object"
+    let* kind = nonempty_string "origin.kind" kind_json in
+    if String.equal kind "ledger" then Ok Carried_from_ledger
+    else if String.equal kind "turn_record" then
+      let* turn_json = field "turn" fields in
+      let* turn = nonnegative_int "origin.turn" turn_json in
+      Ok (Carried_from_turn_record { turn })
+    else if String.equal kind "halved_after_refusal" then
+      let* retry_json = field "retry" fields in
+      let* retry = nonnegative_int "origin.retry" retry_json in
+      Ok (Carried_halved_after_refusal { retry })
+    else if String.equal kind "fit_to_request_cap" then Ok Carried_fit_to_request_cap
+    else if String.equal kind "whole_history" then Ok Carried_whole_history
+    else Error ("origin.kind is not a known kind: " ^ kind)
+  | _ -> Error "origin is not an object"
 
-let decode_forecast_cut = function
+let decode_forecast_carried = function
   | `Null -> Ok None
   | `Assoc fields ->
-    let* kind_json = field "kind" fields in
-    let* kind = nonempty_string "cut.kind" kind_json in
+    let* first_json = field "first_atom" fields in
+    let* first_atom = nonnegative_int "carried.first_atom" first_json in
+    let* kept_json = field "kept_atoms" fields in
+    let* kept_atoms = nonnegative_int "carried.kept_atoms" kept_json in
     let* transmitted_json = field "transmitted_bytes" fields in
-    let* transmitted_bytes = nonnegative_int "cut.transmitted_bytes" transmitted_json in
-    if String.equal kind "cut" then
-      let* kept_json = field "kept_atoms" fields in
-      let* kept_atoms = nonnegative_int "cut.kept_atoms" kept_json in
-      let* fit_json = field "fit" fields in
-      let* fit = decode_forecast_fit fit_json in
-      Ok (Some (Forecast_cut { kept_atoms; transmitted_bytes; fit }))
-    else if String.equal kind "newest_atom_only" then
-      Ok (Some (Forecast_newest_atom_only { transmitted_bytes }))
-    else Error ("cut.kind is not a known kind: " ^ kind)
-  | _ -> Error "cut is not an object or null"
+    let* transmitted_bytes = nonnegative_int "carried.transmitted_bytes" transmitted_json in
+    let* origin_json = field "origin" fields in
+    let* origin = decode_forecast_origin origin_json in
+    let* counted_json = field "counted_tokens" fields in
+    let* counted_tokens =
+      match counted_json with
+      | `Null -> Ok None
+      | json ->
+        let* counted = nonnegative_int "carried.counted_tokens" json in
+        Ok (Some counted)
+    in
+    Ok (Some { first_atom; kept_atoms; transmitted_bytes; origin; counted_tokens })
+  | _ -> Error "carried is not an object or null"
 
 let decode_forecast_candidate = function
   | `Assoc fields ->
     let* id_json = field "runtime_id" fields in
     let* runtime_id = nonempty_string "candidate.runtime_id" id_json in
-    let* window_json = field "window" fields in
-    let* window = decode_forecast_window window_json in
-    let* capacity_json = field "capacity" fields in
-    let* capacity = decode_forecast_capacity capacity_json in
+    let* lane_json = field "lane" fields in
+    let* lane = decode_forecast_lane lane_json in
+    let* marks_json = field "marks" fields in
+    let* marks = decode_forecast_marks marks_json in
     let* cap_json = field "request_cap_bytes" fields in
     let* request_cap_bytes =
       match cap_json with
@@ -662,9 +679,9 @@ let decode_forecast_candidate = function
     let* parts = decode_forecast_parts parts_json in
     let* atoms_json = field "history_atoms" fields in
     let* history_atoms = nonnegative_int "candidate.history_atoms" atoms_json in
-    let* cut_json = field "cut" fields in
-    let* cut = decode_forecast_cut cut_json in
-    Ok { runtime_id; window; capacity; request_cap_bytes; parts; history_atoms; cut }
+    let* carried_json = field "carried" fields in
+    let* carried = decode_forecast_carried carried_json in
+    Ok { runtime_id; lane; marks; request_cap_bytes; parts; history_atoms; carried }
   | _ -> Error "candidate is not an object"
 
 let decode_forecast = function

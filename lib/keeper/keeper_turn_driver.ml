@@ -769,13 +769,24 @@ let attempt_runtime_candidates
               pre_tool_use rejections gets its own terminal label — the
               model's correction round-trip was the visible casualty.
               Disposition is identical to the plain fence. *)
+           (* RFC-0454 D1: the fenced attempt's cause is the value that failed
+              it. A MASC error arrives on the carrier and is kept whole;
+              anything else is agent-core's typed projection. Rendering the
+              error here put its own prefixed JSON inside this envelope's
+              JSON, one layer of escaping per wrap. *)
+           let cause =
+             match classify_masc_internal_error error with
+             | Some masc -> Fenced_masc masc
+             | None ->
+               Fenced_core (Keeper_request_failure_core.of_core_error error)
+           in
            (match !pre_tool_rejects with
             | [] ->
               core_error_of_masc_internal_error
                 (Provider_attempt_effect_fenced
                    { runtime_id = attempt_runtime_id
                    ; effect_disposition
-                   ; diagnostic = Agent_core.Error.to_string error
+                   ; cause
                    })
             | rejects ->
               core_error_of_masc_internal_error
@@ -783,7 +794,7 @@ let attempt_runtime_candidates
                    { runtime_id = attempt_runtime_id
                    ; effect_disposition
                    ; reject_count = List.length rejects
-                   ; diagnostic = Agent_core.Error.to_string error
+                   ; cause
                    }))
        in
        let allow_accept_no_progress_retry =
@@ -888,45 +899,16 @@ let validate_provider_request_cap ~runtime_id
   | Ok cap -> Ok cap
   | Error error -> Error (runtime_candidate_invalid_request_cap_error error)
 
-(* The declared transmission window, in tokens, checked against the model's
-   declared context (RFC keeper-context-window-in-tokens §7.9): a window the
-   model cannot carry is a configuration contradiction named here, before
-   dispatch, rather than a request the provider refuses every turn. Token
-   against token; the request-body cap is not consulted. *)
-let model_input_window_for_candidate ~runtime_id =
-  let window_tokens = Keeper_runtime_resolved.context_window_tokens () in
-  match Runtime.max_context_of_runtime_id runtime_id with
-  | Some max_context when window_tokens > max_context ->
-    Error
-      (Agent_core.Error.Config
-         (Agent_core.Error.InvalidConfig
-            { field = "turn.context_window_tokens"
-            ; detail =
-                Printf.sprintf
-                  "%d tokens exceed the %d-token max-context of runtime %s; declare a window the model can carry or route the keeper elsewhere"
-                  window_tokens
-                  max_context
-                  runtime_id
-            }))
-  | Some _ -> Ok (Keeper_context_window.declared ~window_tokens)
-  | None ->
-    (* Every materialized runtime resolves a context window at load
-       ([Runtime.validate_runtime_max_context]); an id that resolves none
-       here names no runtime this attempt can dispatch to. *)
-    Error
-      (Agent_core.Error.Config
-         (Agent_core.Error.InvalidConfig
-            { field = "max-context"
-            ; detail = Printf.sprintf "runtime %s resolves no context window" runtime_id
-            }))
-;;
-
-let request_cap_and_window ~runtime_id provider_config =
+(* The marks the carried range is judged against, as the binding declares
+   them (RFC keeper-context-window-in-tokens §10.2); a binding that declares
+   none leaves eviction to a refusal. Their agreement with the model's
+   max-context was checked at load ([Runtime.validate_runtime_context_marks]),
+   so nothing is refused here. *)
+let request_cap_and_marks ~runtime_id provider_config =
   let* max_request_body_bytes =
     validate_provider_request_cap ~runtime_id provider_config
   in
-  let* model_input_window = model_input_window_for_candidate ~runtime_id in
-  Ok (max_request_body_bytes, model_input_window)
+  Ok (max_request_body_bytes, Runtime.context_marks_of_runtime_id runtime_id)
 ;;
 
 let resolve_runtime_candidate id =
@@ -1354,6 +1336,7 @@ let run_named
     ?on_official_client_result_handoff
     ?on_official_client_native_action
     ?on_model_input_window_observation
+    ?carried_front_seed
     ?runtime_manifest_context
     ?runtime_manifest_append
     ?deferred_runtime_lane
@@ -2184,7 +2167,7 @@ let run_named
            , Keeper_attempt_dispatch.Rejected_before_dispatch )
          | Ok () ->
           (match
-             request_cap_and_window
+             request_cap_and_marks
                ~runtime_id:attempt_runtime_id
                provider_config
            with
@@ -2192,7 +2175,7 @@ let run_named
              Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
              Error err, None, Keeper_provider_attempt_effect.No_effect_observed,
              Keeper_attempt_dispatch.Rejected_before_dispatch
-           | Ok (max_request_body_bytes, model_input_window) ->
+           | Ok (max_request_body_bytes, context_marks) ->
             let candidate = Runtime_candidate.of_provider_config provider_config in
             (* Cached provider health is observation only. Every eligible runtime
                reaches the real provider boundary; only the resulting typed error
@@ -2202,11 +2185,18 @@ let run_named
             { runtime_id = attempt_runtime_id
             ; error_runtime_id
             ; max_request_body_bytes
-            ; (* The declared window. [run_try_provider_with_context_overflow_shrink]
-                 consults #27320's remembered starting point below it and
-                 shrinks on a typed overflow; a direct (non-shrink) caller of
-                 [run_try_provider] runs at the declared window. *)
-              model_input_window
+            ; context_marks
+            ; (* Read only when the process holds no ledger for this pair:
+                 the range the newest completed turn record on this runtime
+                 measured, so a restart resumes the range the last turn
+                 carried rather than the whole history. A caller that reads
+                 no records leaves the first request to the cap or the whole
+                 history. *)
+              carried_front_seed =
+                (fun () ->
+                   match carried_front_seed with
+                   | Some read -> read ~runtime_id:attempt_runtime_id
+                   | None -> None)
             ; base_path
             ; keeper_name
             ; name

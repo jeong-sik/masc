@@ -1,22 +1,16 @@
-(** The flag the operator sees and the flag the server enforces.
+(** MASC_HTTP_AUTH_STRICT — the single reader the server enforces with.
 
-    MASC_HTTP_AUTH_STRICT is registered in {!Feature_flag_registry}, which is
-    what the flag listing reports, and it decides whether
+    [Env_config.Transport.http_auth_strict_env_enabled] decides whether
     [Server_auth.ensure_strict_http_token_auth] demands workspace auth with
-    require_token on every HTTP endpoint.
+    require_token on every HTTP endpoint. Before the readers were unified it
+    matched a case-sensitive spelling set of its own, so TRUE left auth
+    non-strict, and a value supplied through the boot overrides was invisible
+    to it entirely.
 
-    Those were two different readers. The enforcement side called
-    [Sys.getenv_opt] and matched a case-sensitive spelling set of its own, so
-    the listing could say the flag was on while the server let unauthenticated
-    requests through -- and a value supplied through the boot overrides the
-    registry consults was invisible to it entirely.
-
-    These cases pin the two together on the spellings where they used to
-    disagree. *)
+    These cases pin the reader on the spellings where it used to
+    disagree with the rest of the system. *)
 
 open Alcotest
-
-module Flag = Feature_flag_registry
 
 let key = "MASC_HTTP_AUTH_STRICT"
 
@@ -31,8 +25,7 @@ let with_env value f =
     f
 ;;
 
-let enforced () = Env_config.Transport.http_auth_strict_env_enabled ()
-let listed () = Flag.get_bool key
+let enabled () = Env_config.Transport.http_auth_strict_env_enabled ()
 
 let with_boot_override value f =
   let saved_env = Sys.getenv_opt key in
@@ -62,30 +55,24 @@ let expect_malformed_value_rejected ~source f =
 
 let test_malformed_boot_override_is_rejected () =
   with_boot_override "y" (fun () ->
-    expect_malformed_value_rejected ~source:"boot override" enforced)
+    expect_malformed_value_rejected ~source:"boot override" enabled)
 ;;
 
-let test_listing_and_enforcement_agree () =
-  List.iter
-    (fun spelling ->
-      with_env spelling (fun () ->
-        check bool
-          (Printf.sprintf "%s=%S: listing and enforcement agree" key spelling)
-          (listed ())
-          (enforced ())))
-    [ "true"; "TRUE"; "True"; "1"; "yes"; "on"; "ON"; "false"; "0"; "off"; "" ]
+let test_boot_override_enables_strict_auth () =
+  with_boot_override "true" (fun () ->
+    check bool "boot override true enforces strict auth" true (enabled ()))
 ;;
 
 (* The enforcement reader was case-sensitive: TRUE left auth non-strict while
-   the listing reported it on. *)
+   the rest of the system reported it on. *)
 let test_uppercase_true_enables_strict_auth () =
   with_env "TRUE" (fun () ->
-    check bool "MASC_HTTP_AUTH_STRICT=TRUE enforces strict auth" true (enforced ()))
+    check bool "MASC_HTTP_AUTH_STRICT=TRUE enforces strict auth" true (enabled ()))
 ;;
 
 let test_malformed_env_is_rejected () =
   with_env "y" (fun () ->
-    expect_malformed_value_rejected ~source:"process env" enforced)
+    expect_malformed_value_rejected ~source:"process env" enabled)
 ;;
 
 let test_canonical_spellings_enable_strict_auth () =
@@ -93,7 +80,7 @@ let test_canonical_spellings_enable_strict_auth () =
     (fun spelling ->
       with_env spelling (fun () ->
         check bool (Printf.sprintf "%S enforces strict auth" spelling) true
-          (enforced ())))
+          (enabled ())))
     [ "true"; "1"; "yes"; "on" ]
 ;;
 
@@ -102,29 +89,28 @@ let test_falsey_spellings_leave_auth_unchanged () =
     (fun spelling ->
       with_env spelling (fun () ->
         check bool (Printf.sprintf "%S leaves auth non-strict" spelling) false
-          (enforced ())))
+          (enabled ())))
     [ "false"; "0"; "no"; "off" ]
 ;;
 
-(* An absent variable falls to the registry's declared default, which is the
-   value the listing shows when nothing is set. *)
-let test_absent_uses_the_registry_default () =
+(* An empty value counts as unset and falls to the reader's default, false. *)
+let test_absent_defaults_to_false () =
   with_env "" (fun () ->
-    check bool "absent matches the listing" (listed ()) (enforced ()))
+    check bool "absent leaves auth non-strict" false (enabled ()))
 ;;
 
 let () =
   Alcotest.run
     "HTTP auth strict flag"
-    [ ( "listing vs enforcement"
+    [ ( "reader behavior"
       , [ test_case "malformed boot override rejected" `Quick
             test_malformed_boot_override_is_rejected
-        ; test_case "agree on every spelling" `Quick
-            test_listing_and_enforcement_agree
+        ; test_case "boot override enables" `Quick
+            test_boot_override_enables_strict_auth
         ; test_case "uppercase TRUE enforces" `Quick
             test_uppercase_true_enables_strict_auth
-        ; test_case "absent uses the registry default" `Quick
-            test_absent_uses_the_registry_default
+        ; test_case "absent defaults to false" `Quick
+            test_absent_defaults_to_false
         ] )
     ; ( "spellings"
       , [ test_case "canonical true spellings enforce" `Quick

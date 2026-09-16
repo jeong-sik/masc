@@ -132,6 +132,17 @@ let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_
   | Keeper_internal_error.Receipt_persistence_failed _
   | Keeper_internal_error.Gate_replay_repair_required _ ->
     exhaust_failure Internal_opaque
+  (* The host stopped this turn on purpose. Nothing about the provider failed,
+     so there is no other candidate that would do better; before RFC-0454 P2
+     this arrived as an untyped [Internal] string and landed on exactly this
+     route. *)
+  | Keeper_internal_error.Host_stopped_turn _ -> exhaust_failure Internal_opaque
+  (* The runtime's transport closed. This used to reach agent-core as
+     [ProviderUnavailable], and [route_of_provider_error] answers
+     [observe_retry Server_error] for that; the typed value must not change
+     which runtime is tried next, so it answers the same. *)
+  | Keeper_internal_error.Runtime_connection_closed _ ->
+    observe_retry Server_error
   | Keeper_internal_error.Incomplete_tool_transcript _ ->
     exhaust_failure Contract_violation
   | Keeper_internal_error.Terminal_effect_failed
@@ -282,7 +293,14 @@ let route_of_error_family ~boundary (err : Agent_core.Error.t) : route =
 
 let route_of_error ~boundary (err : Agent_core.Error.t) : route =
   match Keeper_internal_error.classify_masc_internal_error err with
-  | Some (Keeper_internal_error.Terminal_effect_failed _ as internal) ->
+  (* Both of these decide their own route whichever boundary reported them.
+     [Terminal_effect_failed] because the effect is the fact, and
+     [Runtime_connection_closed] because the agent-core family arm would read
+     its carrier as a bare internal error and drop the retry the untyped
+     [ProviderUnavailable] used to earn (RFC-0454 P2). *)
+  | Some
+      (( Keeper_internal_error.Terminal_effect_failed _
+       | Keeper_internal_error.Runtime_connection_closed _ ) as internal) ->
     route_of_masc_internal ~err internal
   | Some internal ->
     (match boundary with

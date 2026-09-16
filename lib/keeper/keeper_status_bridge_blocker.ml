@@ -54,6 +54,13 @@ let blocker_class_of_core_error (err : Agent_core.Error.t) : blocker_class optio
     Some Provider_attempt_effect_fenced
   | Some (Keeper_turn_driver.Tool_correction_lost _) ->
     Some Tool_correction_lost
+  (* Neither blocks the keeper: the host stopped one turn, and a closed
+     runtime connection is retried on the next candidate. Both answered
+     [None] here before RFC-0454 P2 typed them — an [Internal] string and a
+     [ProviderUnavailable] respectively — and a new blocker_class would put
+     a keeper on the supervisor's blocked list that was never blocked. *)
+  | Some (Keeper_turn_driver.Host_stopped_turn _)
+  | Some (Keeper_turn_driver.Runtime_connection_closed _) -> None
   | Some (Keeper_turn_driver.Receipt_persistence_failed _) ->
     Some Receipt_persistence_failed
   | Some (Keeper_turn_driver.Gate_replay_repair_required _) ->

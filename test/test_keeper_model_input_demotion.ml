@@ -193,7 +193,11 @@ let bound_holds_for body_label body =
         planned.Demotion.messages
     in
     let outcome =
-      Demotion.materialize ~store ~pending planned.Demotion.messages
+      Demotion.materialize
+        ~store
+        ~addresses:(Demotion.create_address_memo ())
+        ~pending
+        planned.Demotion.messages
     in
     Alcotest.(check int)
       (body_label ^ ": no revert in a healthy store")
@@ -335,6 +339,7 @@ let each_marker_stores_its_own_body () =
   let outcome =
     Demotion.materialize
       ~store
+      ~addresses:(Demotion.create_address_memo ())
       ~pending:planned.Demotion.pending
       planned.Demotion.messages
   in
@@ -354,6 +359,118 @@ let each_marker_stores_its_own_body () =
       (markers outcome.Demotion.messages)
   in
   Alcotest.(check (list string)) "each marker stores its own body" bodies stored
+;;
+
+(* Addressing a body is a sha256 over the whole of it; the write is skipped for
+   an address this process already wrote, so on a long-lived keeper the hashing
+   is all [materialize] does, and doing it on the calling fiber held the main
+   Eio domain for 0.7 to 1.6 seconds per provider request (rtev, 2026-09-16).
+   With the pool's only worker busy, materialize waits for it. *)
+let busy_worker_polls = 50
+let busy_worker_poll_interval_s = 0.01
+
+(* A request the memo answers does no pool work at all, so any wait here is the
+   regression, not slowness. *)
+let memo_hit_budget_s = 5.0
+
+let materialize_addresses_each_body_once_per_attempt () =
+  let store = Tool_blob_store.create ~base_path:(Filename.temp_dir "demote" "") in
+  let bodies = List.init 8 (fun i -> Printf.sprintf "body %d:" i ^ String.make 4000 'a') in
+  let messages = history_with_tool_bodies bodies in
+  let planned =
+    Demotion.plan ~measure_message_bytes ~demote_before:(List.length bodies) messages
+  in
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let previous_pool = Domain_pool_ref.get () in
+  Fun.protect
+    ~finally:(fun () ->
+      match previous_pool with
+      | None -> Domain_pool_ref.clear_for_tests ()
+      | Some previous -> Domain_pool_ref.set previous)
+  @@ fun () ->
+  Domain_pool_ref.set (Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env));
+  let occupied, occupied_u = Eio.Promise.create () in
+  let release, release_u = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Domain_pool_ref.submit_cpu_or_inline (fun () ->
+      Eio.Promise.resolve occupied_u ();
+      Eio.Promise.await release));
+  Eio.Promise.await occupied;
+  let addresses = Demotion.create_address_memo () in
+  let materialize () =
+    Demotion.materialize
+      ~store
+      ~addresses
+      ~pending:planned.Demotion.pending
+      planned.Demotion.messages
+  in
+  let first = ref None in
+  let clock = Eio.Stdenv.clock env in
+  Eio.Fiber.both
+    (fun () -> first := Some (materialize ()))
+    (fun () ->
+      let rec wait polls =
+        if polls > 0 && Option.is_none !first
+        then (
+          Eio.Time.sleep clock busy_worker_poll_interval_s;
+          wait (polls - 1))
+      in
+      wait busy_worker_polls;
+      Alcotest.(check bool)
+        "the first request waits for the busy worker"
+        true
+        (Option.is_none !first);
+      Eio.Promise.resolve release_u ());
+  let first =
+    match !first with
+    | None -> Alcotest.fail "materialize never finished"
+    | Some outcome -> outcome
+  in
+  (* The attempt's later requests demote the same aged results. With the
+     worker occupied again, a second materialize through the same memo
+     finishes anyway: it addressed nothing. *)
+  let occupied, occupied_u = Eio.Promise.create () in
+  let release, release_u = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Domain_pool_ref.submit_cpu_or_inline (fun () ->
+      Eio.Promise.resolve occupied_u ();
+      Eio.Promise.await release));
+  Eio.Promise.await occupied;
+  (* A bounded wait, not an unbounded one: if the memo ever stops answering,
+     this call submits a job the occupied worker can never run, and without the
+     timeout the suite would hang until CI kills it rather than name the
+     regression. *)
+  let second =
+    match
+      Eio.Time.with_timeout clock memo_hit_budget_s (fun () -> Ok (materialize ()))
+    with
+    | Ok outcome -> outcome
+    | Error `Timeout ->
+      Eio.Promise.resolve release_u ();
+      Alcotest.fail "a second request through the memo waited for the pool"
+  in
+  Eio.Promise.resolve release_u ();
+  let stored outcome =
+    List.map
+      (fun content ->
+         match Tool_output.decode_from_agent_core content with
+         | Tool_output.Decoded reference ->
+           (match Tool_blob_store.fetch store ~sha256:reference.Tool_output.sha256 with
+            | Ok (Some bytes) -> bytes
+            | Ok None -> Alcotest.fail "a marker names a blob the store does not hold"
+            | Error error ->
+              Alcotest.fail (Tool_blob_store.fetch_error_to_string error))
+         | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
+           Alcotest.fail "every planned body leaves as a marker")
+      (markers outcome.Demotion.messages)
+  in
+  Alcotest.(check int) "no revert in a healthy store" 0 first.Demotion.reverted;
+  Alcotest.(check int) "nor on the second request" 0 second.Demotion.reverted;
+  Alcotest.(check (list string)) "each marker stores its own body" bodies (stored first);
+  Alcotest.(check (list string)) "and the memo names the same ones" bodies (stored second)
 ;;
 
 (* --- 5. Atoms retained by the raw cut keep their bodies ---------------- *)
@@ -571,13 +688,14 @@ let projection_reuses_candidate_measurements () =
    as externalized markers instead of the turn failing. *)
 module Try_provider = Masc.Keeper_turn_driver_try_provider
 
-(* The window is a target (RFC keeper-context-window-in-tokens): the
-   composition never refuses, and the one axis on which it still reshapes a
-   request is the request-body cap. [wire_cap_bytes] is that cap. *)
-let compose ~base_path ~target_bytes ~wire_cap_bytes ~demote_before messages =
-  Try_provider.For_testing.plan_and_window_model_input
+(* The composition carries a range (RFC keeper-context-window-in-tokens
+   §10.4) and never refuses; the one axis on which it still reshapes a
+   request is the request-body cap. [wire_cap_bytes] is that cap, and
+   [front] is the oldest atom the range starts at. *)
+let compose ~base_path ~front ~wire_cap_bytes ~demote_before messages =
+  Try_provider.For_testing.compose_carried_model_input
     ~measure_message_bytes
-    ~target_bytes
+    ~front:(Some { Masc.Keeper_carried_front.first_atom = front; source = Masc.Keeper_carried_front.Ledger })
     ~reserved_bytes:0
     ~wire_cap_bytes
     ~base_path
@@ -619,22 +737,23 @@ let oversized_newest_atom_is_demoted_as_last_resort () =
   (* The target admits the newest atom only demoted: the raw history budget is
      exactly the atom's own bytes, which the charged preamble pushes over. The
      request-body cap is the same size, so the raw view cannot be sent. *)
-  let target_bytes = newest_bytes in
   let demote_before =
     Window.first_atom_at_or_after
       messages
       ~message_index:(List.length earlier)
   in
   let store = Tool_blob_store.create ~base_path:(Filename.temp_dir "demote" "") in
-  let raw = Window.project_target ~measure_message_bytes ~target_bytes ~reserved_bytes:0 messages in
+  let raw = Window.project_target ~measure_message_bytes ~target_bytes:newest_bytes ~reserved_bytes:0 messages in
   Alcotest.(check bool)
-    "fixture: the raw view is the newest atom and it passes the target"
+    "fixture: the newest atom alone passes a cap of its own bytes"
     true
     (is_overrun_by_newest_atom raw);
-  let planned, windowed, history_atom_count =
+  (* The range is the newest atom alone, as a walk that evicted every older
+     block leaves it. *)
+  let composed =
     compose
       ~base_path:(Filename.temp_dir "demote" "")
-      ~target_bytes
+      ~front:2
       ~wire_cap_bytes:(Some newest_bytes)
       ~demote_before
       messages
@@ -642,16 +761,17 @@ let oversized_newest_atom_is_demoted_as_last_resort () =
   Alcotest.(check int)
     "each of the newest atom's results is demoted"
     (List.length newest_bodies)
-    (List.length planned.Demotion.pending);
+    (List.length composed.Try_provider.planned.Demotion.pending);
   Alcotest.(check int)
     "the denominator is still the whole history"
     3
-    history_atom_count;
+    composed.Try_provider.history_atom_count;
   let outcome =
     Demotion.materialize
       ~store
-      ~pending:planned.Demotion.pending
-      windowed.Window.projection.Window.messages
+      ~addresses:(Demotion.create_address_memo ())
+      ~pending:composed.Try_provider.planned.Demotion.pending
+      composed.Try_provider.projection.Window.messages
   in
   Alcotest.(check int) "a healthy store reverts nothing" 0 outcome.Demotion.reverted;
   let transmitted = markers outcome.Demotion.messages in
@@ -675,26 +795,26 @@ let oversized_newest_atom_is_demoted_as_last_resort () =
 let oversized_atom_without_demotable_body_is_transmitted_with_its_overrun () =
   let newest = [ assistant (String.make 50_000 'x') ] in
   let messages = history_with_tool_bodies [ "tick" ] @ newest in
-  let target_bytes = bytes_of newest in
-  let planned, windowed, _ =
+  let cap = bytes_of newest in
+  let composed =
     compose
       ~base_path:(Filename.temp_dir "demote" "")
-      ~target_bytes
-      ~wire_cap_bytes:(Some target_bytes)
+      ~front:1
+      ~wire_cap_bytes:(Some cap)
       ~demote_before:1
       messages
   in
   Alcotest.(check int) "an atom with no tool results plans nothing" 0
-    (List.length planned.Demotion.pending);
-  Alcotest.(check bool) "the overrun is on record" true (is_overrun_by_newest_atom windowed);
+    (List.length composed.Try_provider.planned.Demotion.pending);
+  Alcotest.(check bool) "the cap overrun is on record" true composed.Try_provider.over_request_cap;
   Alcotest.(check int)
     "the newest atom is what is transmitted"
     (List.length newest + 1 (* the preamble: the kept head is an assistant *))
-    (List.length windowed.Window.projection.Window.messages)
+    (List.length composed.Try_provider.projection.Window.messages)
 ;;
 
 (* Without a blob store there is nothing a marker could reference, so the raw
-   view stands and the overrun says why. *)
+   view stands and the cap overrun says why. *)
 let last_resort_requires_a_blob_store () =
   let earlier, messages, newest_bytes = oversized_newest_history () in
   let demote_before =
@@ -702,46 +822,65 @@ let last_resort_requires_a_blob_store () =
       messages
       ~message_index:(List.length earlier)
   in
-  let planned, windowed, _ =
-    compose
-      ~base_path:""
-      ~target_bytes:newest_bytes
-      ~wire_cap_bytes:(Some newest_bytes)
-      ~demote_before
-      messages
+  let composed =
+    compose ~base_path:"" ~front:2 ~wire_cap_bytes:(Some newest_bytes) ~demote_before messages
   in
-  Alcotest.(check int) "no store, no demotion" 0 (List.length planned.Demotion.pending);
-  Alcotest.(check bool) "the overrun is on record" true (is_overrun_by_newest_atom windowed)
+  Alcotest.(check int) "nothing is planned without a store" 0
+    (List.length composed.Try_provider.planned.Demotion.pending);
+  Alcotest.(check bool) "the cap overrun is on record" true composed.Try_provider.over_request_cap
 ;;
 
-(* Only the request-body cap reshapes a request: a newest atom that passes
-   the target but not the cap is transmitted whole, overrun on record, and
-   the provider judges it. *)
-let target_overrun_under_the_cap_demotes_nothing () =
+(* The last resort answers the cap alone: a newest atom the cap carries is
+   transmitted whole, its results verbatim, whatever its size. *)
+let a_range_under_the_cap_demotes_nothing () =
   let earlier, messages, newest_bytes = oversized_newest_history () in
   let demote_before =
     Window.first_atom_at_or_after
       messages
       ~message_index:(List.length earlier)
   in
-  let planned, windowed, _ =
+  let composed =
     compose
       ~base_path:(Filename.temp_dir "demote" "")
-      ~target_bytes:newest_bytes
+      ~front:2
       ~wire_cap_bytes:(Some (newest_bytes * 4))
       ~demote_before
       messages
   in
   Alcotest.(check int) "the cap carries the view, so nothing is demoted" 0
-    (List.length planned.Demotion.pending);
-  Alcotest.(check bool) "the target overrun is still on record" true
-    (is_overrun_by_newest_atom windowed)
+    (List.length composed.Try_provider.planned.Demotion.pending);
+  Alcotest.(check bool) "and nothing passes the cap" false composed.Try_provider.over_request_cap
+;;
+
+(* A range wider than the newest atom that passes the cap is not the last
+   resort's business: the wire refuses it and the refusal moves the front. *)
+let a_wider_range_over_the_cap_is_left_to_the_refusal () =
+  let earlier, messages, newest_bytes = oversized_newest_history () in
+  let demote_before =
+    Window.first_atom_at_or_after
+      messages
+      ~message_index:(List.length earlier)
+  in
+  let composed =
+    compose
+      ~base_path:(Filename.temp_dir "demote" "")
+      ~front:0
+      ~wire_cap_bytes:(Some newest_bytes)
+      ~demote_before
+      messages
+  in
+  Alcotest.(check int) "the older atoms carry nothing demotable, so nothing is planned" 0
+    (List.length composed.Try_provider.planned.Demotion.pending);
+  Alcotest.(check int) "the whole range goes" 3
+    (composed.Try_provider.history_atom_count
+     - composed.Try_provider.projection.Window.dropped_atoms);
+  Alcotest.(check bool) "over the cap, on record" true composed.Try_provider.over_request_cap
 ;;
 
 (* Demotion can shrink an atom only down to its non-demotable residue. When
-   that residue alone exceeds the target, the demoted view is transmitted and
-   the overrun measured on it, not on the raw atom, is what is reported. *)
-let still_oversized_after_demotion_reports_the_demoted_overrun () =
+   that residue alone exceeds the cap, the demoted view is transmitted and
+   the cap refusal is what stands. *)
+let still_oversized_after_demotion_is_transmitted_demoted () =
   let earlier = history_with_tool_bodies [ "tick" ] in
   let residue = assistant (String.make 50_000 'x') in
   let newest =
@@ -761,26 +900,22 @@ let still_oversized_after_demotion_reports_the_demoted_overrun () =
     "the atom carries demotable results, so the last resort planned demotions"
     2
     (List.length probe.Demotion.pending);
-  (* The target admits neither the raw atom nor its demoted residue: even the
-     assistant text alone overruns once the preamble is charged. *)
-  let target_bytes = bytes_of [ residue ] in
-  let planned, windowed, _ =
+  (* The cap admits neither the raw atom nor its demoted residue. *)
+  let cap = bytes_of [ residue ] in
+  let composed =
     compose
       ~base_path:(Filename.temp_dir "demote" "")
-      ~target_bytes
-      ~wire_cap_bytes:(Some target_bytes)
+      ~front:1
+      ~wire_cap_bytes:(Some cap)
       ~demote_before:1
       messages
   in
-  Alcotest.(check int) "both results were demoted" 2 (List.length planned.Demotion.pending);
-  match windowed.Window.fit with
-  | Window.Overrun { by_bytes; cause = Window.Newest_atom_exceeds_target } ->
-    Alcotest.(check bool)
-      "the overrun is the demoted view's, smaller than the raw atom's excess"
-      true
-      (by_bytes > 0 && by_bytes < bytes_of newest - target_bytes)
-  | Window.Overrun { cause = Window.Fixed_parts_exceed_target; _ } | Window.Within_target ->
-    Alcotest.fail "the residue alone exceeds the target"
+  Alcotest.(check int) "both results were demoted" 2
+    (List.length composed.Try_provider.planned.Demotion.pending);
+  Alcotest.(check bool) "the demoted view still passes the cap" true
+    composed.Try_provider.over_request_cap;
+  Alcotest.(check bool) "the demoted view is smaller than the raw atom" true
+    (composed.Try_provider.transmitted_bytes < bytes_of newest)
 ;;
 
 let () =
@@ -851,13 +986,17 @@ let () =
             `Quick
             last_resort_requires_a_blob_store
         ; Alcotest.test_case
-            "a target overrun under the cap demotes nothing"
+            "a range under the cap demotes nothing"
             `Quick
-            target_overrun_under_the_cap_demotes_nothing
+            a_range_under_the_cap_demotes_nothing
         ; Alcotest.test_case
-            "still oversized after demotion reports the demoted overrun"
+            "a wider range over the cap is left to the refusal"
             `Quick
-            still_oversized_after_demotion_reports_the_demoted_overrun
+            a_wider_range_over_the_cap_is_left_to_the_refusal
+        ; Alcotest.test_case
+            "still oversized after demotion is transmitted demoted"
+            `Quick
+            still_oversized_after_demotion_is_transmitted_demoted
         ] )
     ; ( "measurement"
       , [ Alcotest.test_case
@@ -872,6 +1011,12 @@ let () =
             "the measurement hash reads content"
             `Quick
             measurement_hash_reads_content
+        ] )
+    ; ( "materialize"
+      , [ Alcotest.test_case
+            "each body is addressed once per attempt, off this domain"
+            `Quick
+            materialize_addresses_each_body_once_per_attempt
         ] )
     ]
 ;;

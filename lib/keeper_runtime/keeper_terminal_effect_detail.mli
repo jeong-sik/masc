@@ -30,10 +30,27 @@ type plan_execution_error =
   | Output_validation_failed
   | Output_not_composable
 
+(** How a node deferred, by kind. [Deferral_unrecorded] is a producer that
+    settled [Deferred] without stating which kind, not a default for a kind
+    this decoder does not know. *)
+type node_deferral =
+  | Deferral_unrecorded
+  | Generic_deferral
+  | External_effect_deferral
+
 (** The composition executor's failure cause, projected without its JSON. *)
 type composition_cause =
   | Node_failed of failed_node
-      (** A node did not complete. *)
+      (** A node failed. *)
+  | Node_deferred of
+      { node_id : string
+      ; model_tool_name : string
+      ; deferral : node_deferral
+      }
+      (** A node deferred. It produces no composable output, so the plan stops
+          there; that is not the same event as a node failing, and the node's
+          deferred data is a JSON document, so it stays in [payload] instead
+          of being stringified into a message. *)
   | Node_observation_failed of
       { node_id : string
       ; model_tool_name : string
@@ -43,12 +60,6 @@ type composition_cause =
   | Plan_execution_failed of
       { node_id : string
       ; error : plan_execution_error
-      }
-  | Outer_completion_mismatch of
-      { expected : Agent_core.Tool_contract.completion
-            (** The completion the plan's nodes require. *)
-      ; actual : Agent_core.Tool_contract.completion
-            (** The completion the invocation declared. *)
       }
 
 (** Why the recovery proposal tool refused a proposal. *)
@@ -90,7 +101,9 @@ type t =
       }
   | Boundary_observation_failed of
       { model_tool_name : string
-      ; message : string
+      ; cause : Keeper_request_failure_core.t
+            (** The observation returned an agent-core error; it is kept as the
+                typed projection, not as its rendered text. *)
       }
   | Recovery_proposal_rejected of
       { model_tool_name : string

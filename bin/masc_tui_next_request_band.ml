@@ -1,8 +1,7 @@
-(* The NEXT REQUEST band of the context inspector: the turn's own arithmetic
-   run forward by the server (window × density, less the fixed parts and the
-   pinned blocks, cut on the durable history), drawn in tokens. A candidate
-   with a measured density reads at that density, the exact ratio for its
-   runtime; one without reads at the tab's scale. *)
+(* The NEXT REQUEST band of the context inspector: the turn's own composition
+   run forward by the server (the carried range from the pair's front over
+   the durable history), drawn in tokens at the tab's scale. What the marks
+   are read against is the provider's count, so it is shown as counted. *)
 
 module Inspector = Masc_tui_context_inspector
 open Masc_tui_ansi
@@ -12,94 +11,84 @@ let signed_tokens n =
   else Inspector.format_tokens n
 ;;
 
+let origin_sentence = function
+  | Inspector.Carried_from_ledger -> "front from this runtime's ledger"
+  | Inspector.Carried_from_turn_record { turn } ->
+      Printf.sprintf "front from turn #%d's record; nothing counted since the server started" turn
+  | Inspector.Carried_halved_after_refusal { retry } ->
+      Printf.sprintf "front halved after a refusal (retry %d)" retry
+  | Inspector.Carried_fit_to_request_cap ->
+      "no front to start from: the newest suffix the request cap admits"
+  | Inspector.Carried_whole_history -> "no front to start from and no cap: the whole history"
+;;
+
 let candidate_lines ~prose ~fact ~safe ~scale
     (candidate : Inspector.forecast_candidate) =
-  let tokens_of_bytes =
-    match candidate.capacity with
-    | Some (Inspector.Capacity_measured { density; _ }) ->
-        fun bytes ->
-          int_of_float
-            (Float.round
-               (float bytes *. float density.input_tokens
-                /. float density.measured_bytes))
-    | Some Inspector.Capacity_unmeasured | None ->
-        Masc_tui_token_scale.estimate scale
-  in
+  let tokens_of_bytes = Masc_tui_token_scale.estimate scale in
   let approx bytes = "\xe2\x89\x88" ^ signed_tokens (tokens_of_bytes bytes) in
-  let head =
-    match candidate.window with
-    | Inspector.Window_refused reason ->
-        [ Theme.bad () ^ "  " ^ safe candidate.runtime_id ^ "  ·  " ^ safe reason
-          ^ Ansi.reset
-        ]
-    | Inspector.Window_declared { window_tokens; source } ->
-        fact
-          (Printf.sprintf "%s  ·  window %s tok %s" (safe candidate.runtime_id)
-             (Inspector.format_tokens window_tokens) (safe source))
+  let cap_suffix =
+    match candidate.request_cap_bytes with
+    | Some cap -> Printf.sprintf "  \xc2\xb7  provider accepts up to %s tok" (approx cap)
+    | None -> ""
   in
-  let capacity_line =
-    match candidate.capacity with
-    | None -> []
-    | Some Inspector.Capacity_unmeasured ->
-        prose
-          "No response on this runtime since the server started, so no \
-           density: the next request sends the newest atom only, and its \
-           usage sets the density."
-    | Some (Inspector.Capacity_measured { capacity_bytes; density }) ->
-        fact
-          (Printf.sprintf "capacity %s tok at this runtime's %.2f bytes per token%s"
-             (approx capacity_bytes)
-             (float density.measured_bytes /. float density.input_tokens)
-             (match candidate.request_cap_bytes with
-              | Some cap ->
-                  Printf.sprintf "  ·  provider accepts up to %s tok" (approx cap)
-              | None -> ""))
+  let head =
+    match candidate.lane with
+    | Inspector.Lane_not_applicable reason ->
+        fact (safe candidate.runtime_id) @ prose (safe reason ^ ".")
+    | Inspector.Lane_agent_core ->
+        (match candidate.marks with
+         | Some marks ->
+             fact
+               (Printf.sprintf "%s  \xc2\xb7  marks %s / %s tok%s" (safe candidate.runtime_id)
+                  (Inspector.format_tokens marks.high_water_tokens)
+                  (Inspector.format_tokens marks.low_water_tokens)
+                  cap_suffix)
+         | None ->
+             fact
+               (Printf.sprintf "%s  \xc2\xb7  no marks declared: only a refusal moves the front%s"
+                  (safe candidate.runtime_id) cap_suffix))
+  in
+  (* The pinned figure names its lane only when it is not this one. *)
+  let pinned_provenance (parts : Inspector.forecast_parts) =
+    if String.equal parts.pinned_measured_on_runtime candidate.runtime_id
+    then Printf.sprintf "(turn #%d)" parts.pinned_measured_on_turn
+    else
+      Printf.sprintf "(turn #%d on %s)" parts.pinned_measured_on_turn
+        (safe parts.pinned_measured_on_runtime)
   in
   let parts_line =
-    match candidate.parts, candidate.capacity with
-    | None, _ ->
+    match candidate.parts with
+    | Error reason -> prose ("Fixed parts unknown: " ^ safe reason ^ ".")
+    | Ok parts ->
+        fact
+          (Printf.sprintf "fixed parts %s tok (turn #%d) + pinned %s tok %s"
+             (approx parts.reserved_bytes) parts.reserved_measured_on_turn
+             (approx parts.pinned_bytes) (pinned_provenance parts))
+  in
+  let carried_lines =
+    match candidate.lane, candidate.carried with
+    | Inspector.Lane_not_applicable _, (Some _ | None) -> []
+    | Inspector.Lane_agent_core, None ->
         prose
-          "No turn record on this runtime carried a composition, so the fixed \
-           parts are unknown and no cut was computed."
-    | Some parts, Some (Inspector.Capacity_measured { capacity_bytes; _ }) ->
+          "No front to start from, and the cap fit charges the fixed parts, which are \
+           unknown: no range was computed."
+    | Inspector.Lane_agent_core, Some carried ->
         fact
-          (Printf.sprintf
-             "fixed parts %s tok + pinned %s tok, as measured on turn #%d  \
-              \xe2\x86\x92  history room %s tok"
-             (approx parts.reserved_bytes) (approx parts.pinned_bytes)
-             parts.measured_on_turn
-             (approx (capacity_bytes - parts.reserved_bytes - parts.pinned_bytes)))
-    | Some parts, (Some Inspector.Capacity_unmeasured | None) ->
-        fact
-          (Printf.sprintf "fixed parts %s tok + pinned %s tok, as measured on turn #%d"
-             (approx parts.reserved_bytes) (approx parts.pinned_bytes)
-             parts.measured_on_turn)
+          (Printf.sprintf "%d of %d atoms would go, from atom %d (%s tok)  \xc2\xb7  %s"
+             carried.kept_atoms candidate.history_atoms carried.first_atom
+             (approx carried.transmitted_bytes) (origin_sentence carried.origin))
+        @ (match carried.counted_tokens, candidate.marks with
+           | Some counted, Some marks ->
+               fact
+                 (Printf.sprintf "last counted %s tok against marks %s / %s"
+                    (Inspector.format_tokens counted)
+                    (Inspector.format_tokens marks.high_water_tokens)
+                    (Inspector.format_tokens marks.low_water_tokens))
+           | Some counted, None ->
+               fact (Printf.sprintf "last counted %s tok" (Inspector.format_tokens counted))
+           | None, (Some _ | None) -> [])
   in
-  let cut_line =
-    match candidate.cut with
-    | None -> []
-    | Some (Inspector.Forecast_newest_atom_only { transmitted_bytes }) ->
-        fact
-          (Printf.sprintf "1 of %d kept atoms would go (%s tok)" candidate.history_atoms
-             (approx transmitted_bytes))
-    | Some (Inspector.Forecast_cut { kept_atoms; transmitted_bytes; fit }) ->
-        fact
-          (Printf.sprintf "%d of %d kept atoms would go (%s tok)  ·  %s" kept_atoms
-             candidate.history_atoms (approx transmitted_bytes)
-             (match fit with
-              | Inspector.Within_target -> "within the window"
-              | Inspector.Overrun { by_bytes; cause = Inspector.Fixed_parts_exceed_target }
-                ->
-                  Printf.sprintf
-                    "over the window by %s tok: the fixed parts alone exceed it"
-                    (approx by_bytes)
-              | Inspector.Overrun { by_bytes; cause = Inspector.Newest_atom_exceeds_target }
-                ->
-                  Printf.sprintf
-                    "over the window by %s tok: the newest atom alone exceeds it"
-                    (approx by_bytes)))
-  in
-  head @ capacity_line @ parts_line @ cut_line
+  head @ parts_line @ carried_lines
 ;;
 
 let lines ~prose ~fact ~safe ~scale

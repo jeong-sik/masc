@@ -361,7 +361,7 @@ let test_journal_torn_tail_reads_complete_rows () =
         | Error _ -> Alcotest.fail "the rows of a torn journal did not read"
         | Ok rows ->
           (match
-             L.page_of_rows ~path ~since_seq:L.Whole_turn ~start:L.From_first_row
+             L.page_of_rows ~path ~since_seq:L.Whole_turn ~start:L.first_row
                ~limit:L.page_max_limit rows
            with
            | Error failure ->

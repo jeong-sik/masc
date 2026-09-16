@@ -97,10 +97,66 @@ type response_turn =
             showing another turn's answer. *)
   }
 
+(** What the next Agent Core request would carry, as the server computes it
+    from the turn's own values without a turn
+    ([/api/v1/keepers/:name/next-request]). Live: the window, the runtime's
+    density and the request-body cap. As last measured, with the turn they
+    were read from: the fixed prompt parts and the pinned blocks. *)
+type forecast_window =
+  | Window_declared of { window_tokens : int; source : string }
+  | Window_refused of string
+      (** The same contradiction the turn driver refuses on. *)
+
+type forecast_density =
+  { input_tokens : int
+  ; measured_bytes : int
+  }
+
+type forecast_capacity =
+  | Capacity_measured of { capacity_bytes : int; density : forecast_density }
+  | Capacity_unmeasured
+      (** No response on this runtime since the server started; the turn
+          would send the newest atom only. *)
+
+type forecast_parts =
+  { measured_on_turn : int
+  ; reserved_bytes : int  (** Tool schemas + keeper instructions. *)
+  ; pinned_bytes : int  (** Every other prompt block. *)
+  }
+
+type forecast_overrun_cause =
+  | Fixed_parts_exceed_target
+  | Newest_atom_exceeds_target
+
+type forecast_fit =
+  | Within_target
+  | Overrun of { by_bytes : int; cause : forecast_overrun_cause }
+
+type forecast_cut =
+  | Forecast_cut of { kept_atoms : int; transmitted_bytes : int; fit : forecast_fit }
+  | Forecast_newest_atom_only of { transmitted_bytes : int }
+
+type forecast_candidate =
+  { runtime_id : string
+  ; window : forecast_window
+  ; capacity : forecast_capacity option
+  ; request_cap_bytes : int option
+  ; parts : forecast_parts option
+  ; history_atoms : int
+  ; cut : forecast_cut option
+  }
+
+type forecast =
+  { checkpoint_messages : int
+  ; wake_line_bytes : int
+  ; candidates : forecast_candidate list
+  }
+
 type reading =
   { turn : (selection, string) result
   ; provider_input : (provider_input, string) result
   ; response : (response_turn, string) result
+  ; forecast : (forecast, string) result
   }
 
 type tab =
@@ -136,6 +192,10 @@ val decode_turn_records : Yojson.Safe.t -> (selection, string) result
     An empty page is an error, but a page whose rows are all unattributed is
     not: that is a fact about the keeper worth showing rather than an absent
     reading. *)
+
+val decode_forecast : Yojson.Safe.t -> (forecast, string) result
+(** Strict decode of the next-request forecast; a malformed field fails the
+    reading rather than reading as an absent forecast. *)
 
 val decode_provider_input :
   expected_keeper:string ->

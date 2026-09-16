@@ -1369,11 +1369,22 @@ let test_the_reload_rebuilds_loaded_turns_from_their_journals () =
   in
   let folds = in_binding ~binding_name:"apply_async_message" ~callee:"turn_log_add_journaled" in
   let holds = in_binding ~binding_name:"apply_async_message" ~callee:"hold_settled_log" in
-  if targets < 1 || launches < 1 || fetches < 1 || folds < 1 || holds < 1 then
+  (* What a load does not read again is the one held set, so a batch's other
+     requests are not asked for on every load. *)
+  let held = in_binding ~binding_name:"apply_async_message" ~callee:"journal_held_request_ids" in
+  (* Held logs take durable outcomes where loaded rows arrive -- a refreshed
+     page and an older page -- and where a journal log is held. *)
+  let enrichments =
+    in_binding ~binding_name:"apply_async_message" ~callee:"enrich_held_logs_from_rows"
+  in
+  let enrichment_sites = 3 in
+  if targets < 1 || launches < 1 || fetches < 1 || folds < 1 || holds < 1 || held < 1
+     || enrichments < enrichment_sites
+  then
     failf
       "the journal reload must be wired end to end: targets=%d launches=%d \
-       fetches=%d folds=%d holds=%d"
-      targets launches fetches folds holds
+       fetches=%d folds=%d holds=%d held=%d enrichments=%d"
+      targets launches fetches folds holds held enrichments
 ;;
 
 
@@ -2634,6 +2645,38 @@ let test_batch_watchers_render_one_shared_settled_turn () =
     "unrelated-request" (Tui_types.turn_log_execution_id invalid)
 ;;
 
+(* Every request of a batch the session holds is held for journal reads, not
+   only the one that draws the batch. The follower used to be asked for again
+   on every history load. *)
+let test_every_request_of_a_held_batch_is_held_for_journal_reads () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let make request_id execution_id =
+    let log = Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id ~started_at:1. in
+    List.iter (fun delta -> Tui_types.turn_log_add ~now:2. log ~seq:None delta)
+      [Live.Run_started; Live.Batch_bound {operation_id=request_id; execution_id};
+       Live.Text "shared answer";
+       Live.Reply_details {reply="shared answer"; turn_outcome=Masc.Keeper_turn_outcome.Visible_reply; turn_ref="batch#1"};
+       Live.Run_finished];
+    Log.commit log.Tui_types.tl_log;
+    log in
+  state.msg_settled_logs <-
+    [ make "batch-follower" "batch-owner"; make "batch-owner" "batch-owner" ];
+  check (list string) "the batch draws once"
+    [ "batch-owner" ]
+    (List.map Tui_types.turn_log_request_id (Tui_types.settled_logs_for_keeper state "alpha"));
+  let held = Tui_types.journal_held_request_ids state "alpha" in
+  check (list string) "both requests are held"
+    [ "batch-follower"; "batch-owner" ] (List.sort String.compare held);
+  check (list (pair string (float 0.001))) "neither journal is asked for again" []
+    (Tui_types.journal_fetch_targets ~held ~unavailable:[]
+       [ ("batch-owner", 1.); ("batch-follower", 1.) ]);
+  check (list string) "another keeper holds nothing" []
+    (Tui_types.journal_held_request_ids state "beta");
+  Tui_types.journal_read_started state "being-read";
+  check bool "a journal being read is held" true
+    (List.mem "being-read" (Tui_types.journal_held_request_ids state "alpha"))
+;;
+
 let () =
   run
     "tui_chat_queue_wiring"
@@ -2642,6 +2685,8 @@ let () =
         ; test_case "older queued watcher cannot rearm acknowledged stop" `Quick
             test_old_queued_watcher_does_not_rearm_esc
         ; test_case "batch watchers render one shared turn" `Quick test_batch_watchers_render_one_shared_settled_turn
+        ; test_case "every request of a held batch is held for journal reads" `Quick
+            test_every_request_of_a_held_batch_is_held_for_journal_reads
         ; test_case "image headers sanitize attachment names" `Quick
             test_image_headers_sanitize_untrusted_attachment_names
         ; test_case "observed interrupt response identity" `Quick test_observed_interrupt_response_identity

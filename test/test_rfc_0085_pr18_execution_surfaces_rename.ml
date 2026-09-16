@@ -10,12 +10,6 @@ open Alcotest
 
 let renames =
   [ ( "lib/server/server_dashboard_http_execution_surfaces.ml"
-    , "_last_broadcast_hash"
-    , "last_broadcast_hash" )
-  ; ( "lib/server/server_dashboard_http_execution_surfaces.ml"
-    , "_broadcast_hash_mu"
-    , "broadcast_hash_mu" )
-  ; ( "lib/server/server_dashboard_http_execution_surfaces.ml"
     , "_execution_cache"
     , "execution_cache" )
   ; ( "lib/server/server_dashboard_http_execution_surfaces.ml"
@@ -36,7 +30,8 @@ let renames =
 (* last_good_pending_confirm_summary was the eighth. The binding is gone from
    lib/ entirely, so the half of this guard that asks for the new name was
    asking a deleted line to still be there. A rename guard covers renames; a
-   removal is not one. *)
+   removal is not one. last_broadcast_hash and broadcast_hash_mu left the same
+   way: the delta check now compares the last payload text, not its hash. *)
 
 let test_old_underscore_names_gone () =
   List.iter

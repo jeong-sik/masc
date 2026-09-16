@@ -39,14 +39,7 @@ let test_resolved_config_exposes_timeout_knobs () =
   Alcotest.(check bool)
     "resolved config exposes provider_call_deadline_sec"
     true
-    (List.mem "provider_call_deadline_sec" names);
-  (* RFC keeper-context-window-in-tokens: the one number that says how much
-     a request carries must be readable with its source, so an operator can
-     tell the compiled default from a declared window. *)
-  Alcotest.(check bool)
-    "resolved config exposes context_window_tokens"
-    true
-    (List.mem "context_window_tokens" names)
+    (List.mem "provider_call_deadline_sec" names)
 
 let test_to_yojson_is_a_json_object () =
   Rr.reset_for_tests ();

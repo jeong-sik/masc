@@ -1,12 +1,9 @@
-(** Process-local memory of the last model-input windowing capacity that
-    completed a turn successfully for a given (keeper, runtime) pair.
-    See the [.ml] for the #27320 rationale. Not durable.
-
-    The unit is the lane's windowing unit: tokens on the AGENT_CORE lane,
-    whose window is declared in tokens ([Keeper_context_window]), and bytes
-    on the official-client lanes, which cut their seed history against a
-    declared prompt byte cap. A runtime id belongs to exactly one lane kind,
-    so the two never read each other's entries. *)
+(** Process-local memory of the last prompt byte capacity that completed a
+    turn successfully for a given (keeper, runtime) pair on an
+    official-client lane, which cuts its seed history against a declared
+    prompt byte cap. See the [.ml] for the #27320 rationale. Not durable.
+    The Agent Core lane keeps no such memory: its carried range lives in
+    {!Keeper_model_input_ledger}. *)
 
 val starting_capacity :
   keeper_name:string -> runtime_id:string -> max_capacity:int -> int

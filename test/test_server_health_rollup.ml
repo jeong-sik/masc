@@ -151,7 +151,7 @@ let test_an_uncached_section_is_not_reached () =
    subsystem. The parse is what keeps them apart. *)
 let test_a_state_name_is_not_a_grade () =
   let status, _, reasons =
-    summary ~sections:[ section "feature_flags" "active" ] ()
+    summary ~sections:[ section "keeper_owner" "active" ] ()
   in
   check string "a state name does not move the status" "ok" status;
   check (list string) "a state name raises no reason" [] reasons

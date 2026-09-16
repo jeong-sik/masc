@@ -133,7 +133,7 @@ module Operator = struct
       Default: true. Disabling makes stale entries behave like the old
       blocking TTL cache, which is useful for tests or strict-freshness mode. *)
   let cache_background_revalidate =
-    Feature_flag_registry.get_bool "MASC_OPERATOR_CACHE_BACKGROUND_REVALIDATE"
+    get_bool ~default:true "MASC_OPERATOR_CACHE_BACKGROUND_REVALIDATE"
 end
 
 (** {1 Dashboard Configuration} *)
@@ -142,7 +142,7 @@ module Dashboard_config = struct
   (** Whether dashboard fixtures are enabled. Default: false.
       Re-readable within the process; this does not imply shell-level
       hot reload as an operator contract. *)
-  let fixtures_enabled () = Feature_flag_registry.get_bool "MASC_DASHBOARD_FIXTURES_ENABLED"
+  let fixtures_enabled () = get_bool ~default:false "MASC_DASHBOARD_FIXTURES_ENABLED"
 
   (** Dashboard fixture name override. *)
   let fixture_opt () =

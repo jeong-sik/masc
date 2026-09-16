@@ -407,12 +407,22 @@ let load_for_mutation config : (state, store_error) result =
    we never round-trip corruption through here either. *)
 let write_state config state =
   ensure_dirs config;
-  let json = state_to_yojson state in
+  (* One encoding serves both files, compact and on the pool. The ledger keeps
+     every terminal schedule (4.3 MB, 1,250 of 1,272 rows, 2026-09-16), and
+     encoding it pretty once per file was a 135-151 ms run on the scheduler
+     domain each time: four of them within a second when a schedule fired.
+     Yojson prints that document compact in 15 ms where the pretty printer
+     takes 107 ms. *)
+  let* content =
+    Domain_pool_ref.submit_cpu_or_inline (fun () ->
+      Workspace_utils.encode_json_compact (state_to_yojson state))
+    |> Result.map_error (fun msg -> Persistence_failed ("ledger encoding failed: " ^ msg))
+  in
   let* () =
-    Workspace_utils.write_json_result config (schedules_path config) json
+    Workspace_utils.write_encoded_json_result config (schedules_path config) content
     |> Result.map_error (fun msg -> Persistence_failed msg)
   in
-  (match Workspace_utils.write_json_result config (recovery_path config) json with
+  (match Workspace_utils.write_encoded_json_result config (recovery_path config) content with
    | Ok () -> ()
    | Error msg ->
      Log.Misc.warn

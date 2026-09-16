@@ -1415,6 +1415,119 @@ let test_contract_vocabularies_own_strings_and_errors () =
     cases
 ;;
 
+(* A mutation encodes the ledger on the domain pool, once for both files: with
+   the pool's one worker busy the write waits for it, and afterwards the primary
+   and the mirror hold the same compact bytes. Encoding the whole ledger on the
+   calling fiber, once per file, held the scheduler domain for 135-151 ms per
+   file on a live root. *)
+let busy_worker_polls = 50
+let busy_worker_poll_interval_s = 0.01
+
+let test_a_mutation_encodes_the_ledger_once_on_the_pool () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = Filename.temp_dir "schedule_store_test" "" in
+  Eio.Switch.run
+  @@ fun sw ->
+  Eio.Switch.on_release sw (fun () -> Masc_test_deps.cleanup_test_workspace dir);
+  let config = Workspace_core.default_config dir in
+  ignore (Workspace_core.init config ~agent_name:(Some "test"));
+  let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+  let previous_pool = Domain_pool_ref.get () in
+  Fun.protect
+    ~finally:(fun () ->
+      match previous_pool with
+      | None -> Domain_pool_ref.clear_for_tests ()
+      | Some previous -> Domain_pool_ref.set previous)
+  @@ fun () ->
+  Domain_pool_ref.set pool;
+  let occupied, occupied_u = Eio.Promise.create () in
+  let release, release_u = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Domain_pool_ref.submit_cpu_or_inline (fun () ->
+      Eio.Promise.resolve occupied_u ();
+      Eio.Promise.await release));
+  Eio.Promise.await occupied;
+  let inserted = ref None in
+  let clock = Eio.Stdenv.clock env in
+  Eio.Fiber.both
+    (fun () -> inserted := Some (insert_request config (make_request ())))
+    (fun () ->
+      let rec wait polls =
+        if polls > 0 && Option.is_none !inserted
+        then (
+          Eio.Time.sleep clock busy_worker_poll_interval_s;
+          wait (polls - 1))
+      in
+      wait busy_worker_polls;
+      check bool "the write waits for the busy worker" true (Option.is_none !inserted);
+      Eio.Promise.resolve release_u ());
+  (match !inserted with
+   | Some (Ok _) -> ()
+   | Some (Error err) -> fail (store_error_to_string err)
+   | None -> fail "the insert never finished");
+  let primary = Workspace_core.read_text config (schedules_path config) in
+  let mirror = Workspace_core.read_text config (schedules_recovery_path config) in
+  check string "the mirror holds the primary's bytes" primary mirror;
+  check string "the ledger is compact JSON"
+    (Yojson.Safe.to_string (Yojson.Safe.from_string primary))
+    primary;
+  check int "and it holds the schedule" 1 (List.length (read_state config).schedules)
+;;
+
+(* Compact JSON has no spelling for NaN or an infinity, so a schedule time that
+   is not finite is refused where the request is made, not by a later write of
+   the whole ledger. *)
+let test_a_schedule_time_that_is_not_finite_is_refused () =
+  let request ?expires_at ~requested_at ~due_at () =
+    create_request ~schedule_id:"not-finite" ~requested_by:(human "requester")
+      ~scheduled_by:(human "scheduler") ~requested_at ~due_at ?expires_at
+      ~payload:(payload_json ()) ~source:Operator_request ()
+  in
+  let refused label = function
+    | Ok _ -> fail (label ^ " was accepted")
+    | Error (_ : string) -> ()
+  in
+  refused "an infinite due time" (request ~requested_at:100.0 ~due_at:Float.infinity ());
+  refused "a NaN request time" (request ~requested_at:Float.nan ~due_at:200.0 ());
+  refused "an infinite expiry"
+    (request ~requested_at:100.0 ~due_at:200.0 ~expires_at:Float.neg_infinity ())
+;;
+
+let rec with_due_at value = function
+  | `Assoc fields ->
+    `Assoc
+      (List.map
+         (fun (key, field) ->
+           if String.equal key "due_at" then key, value else key, with_due_at value field)
+         fields)
+  | `List items -> `List (List.map (with_due_at value) items)
+  | json -> json
+;;
+
+(* A ledger an older build wrote with an infinite time still loads, but it has
+   no compact encoding: the write fails as [Persistence_failed] and leaves both
+   files as they were, instead of raising out of the store. *)
+let test_a_ledger_that_cannot_be_encoded_fails_the_write_as_persistence () =
+  with_workspace
+  @@ fun config ->
+  ignore (insert_ok config (make_request ~schedule_id:"written-before" ()));
+  let ledger = Workspace_core.read_json config (schedules_path config) in
+  Workspace_core.write_text config (schedules_path config)
+    (Yojson.Safe.pretty_to_string (with_due_at (`Float Float.infinity) ledger));
+  let primary_before = Workspace_core.read_text config (schedules_path config) in
+  let mirror_before = Workspace_core.read_text config (schedules_recovery_path config) in
+  (match insert_request config (make_request ~schedule_id:"written-after" ()) with
+   | Error (Persistence_failed _) -> ()
+   | Error err -> fail ("expected Persistence_failed, got: " ^ store_error_to_string err)
+   | Ok _ -> fail "a ledger with an infinite time was written");
+  check string "the primary is untouched" primary_before
+    (Workspace_core.read_text config (schedules_path config));
+  check string "the mirror is untouched" mirror_before
+    (Workspace_core.read_text config (schedules_recovery_path config))
+;;
+
 let () =
   run "Schedule_store"
     [
@@ -1438,6 +1551,12 @@ let () =
             test_a_recurring_occurrence_is_not_settled_by_an_earlier_wake;
           test_case "corrupt primary recovers from last-good" `Quick
             test_recovers_from_last_good;
+          test_case "a mutation encodes the ledger once on the pool" `Quick
+            test_a_mutation_encodes_the_ledger_once_on_the_pool;
+          test_case "a schedule time that is not finite is refused" `Quick
+            test_a_schedule_time_that_is_not_finite_is_refused;
+          test_case "a ledger that cannot be encoded fails the write" `Quick
+            test_a_ledger_that_cannot_be_encoded_fails_the_write_as_persistence;
         ] );
       ( "corruption",
         [

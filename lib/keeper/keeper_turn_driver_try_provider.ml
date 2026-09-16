@@ -747,6 +747,13 @@ let bounded_model_input_projection
      a record that projection rebuilt for this request still hits the entry an
      earlier request measured. *)
   let measure_message_bytes = memoize_message_measurement (message_measurer ()) in
+  (* Scoped to the attempt for the same reason and with the same safety: the
+     demotion boundary is pinned to the turn's seed, so every request of this
+     attempt demotes the same aged tool results, and addressing one is a
+     sha256 over its whole body. Built inside the per-request closure it would
+     be thrown away between the attempt's 62 to 83 requests, which is what it
+     was before. *)
+  let demotion_addresses = Keeper_model_input_demotion.create_address_memo () in
   (* Scoped to the attempt, written by the one fiber that drives it. The
      closure below runs per provider request — 62 to 83 of them in one keeper
      turn on the traces this window's own comment cites — and a keeper whose
@@ -897,12 +904,18 @@ let bounded_model_input_projection
           match planned.Keeper_model_input_demotion.pending with
           | [] -> windowed
           | pending ->
-            (* Blob materialization performs filesystem I/O and therefore
-               stays on the owning Eio fiber rather than in the CPU domain
-               pool. *)
+            (* Blob materialization writes files, so it stays on the owning
+               Eio fiber rather than in the CPU domain pool. The store skips
+               writing an address this process already wrote, so on a
+               long-lived keeper the sha256 over every aged body was all this
+               call did, and it held this domain for one uninterrupted run of
+               0.7 to 1.6 seconds per request (2026-09-16 trace). The attempt's
+               memo answers every request after the first; whatever is left
+               goes to the pool. *)
             let outcome =
               Keeper_model_input_demotion.materialize
                 ~store:(Tool_blob_store.create ~base_path:ctx.base_path)
+                ~addresses:demotion_addresses
                 ~pending
                 windowed.Runtime_model_input_tail_window.projection.messages
             in

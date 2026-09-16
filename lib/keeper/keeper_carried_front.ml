@@ -13,7 +13,6 @@ type seed =
 
 type origin =
   | Carried of source
-  | Fit_to_request_cap
   | Whole_history
 
 let of_ledger (ledger : Keeper_model_input_ledger.t) =
@@ -86,7 +85,6 @@ let seed_to_json seed =
 
 let origin_to_string = function
   | Carried source -> source_to_string source
-  | Fit_to_request_cap -> "fit_to_request_cap"
   | Whole_history -> "whole_history"
 ;;
 
@@ -96,6 +94,5 @@ let origin_to_json = function
     `Assoc [ "kind", `String "turn_record"; "turn", `Int turn ]
   | Carried (Halved_after_refusal { retry }) ->
     `Assoc [ "kind", `String "halved_after_refusal"; "retry", `Int retry ]
-  | Fit_to_request_cap -> `Assoc [ "kind", `String "fit_to_request_cap" ]
   | Whole_history -> `Assoc [ "kind", `String "whole_history" ]
 ;;

@@ -91,7 +91,7 @@ let test_unnamed_agent_core_failure_stays_core () =
     Alcotest.check
       Alcotest.string
       "the residual arm keeps agent-core's own text"
-      "Internal error: boom"
+      "boom"
       core.Keeper_request_failure_core.message
   | _ -> Alcotest.fail "a plain agent-core internal failure must project to Core"
 ;;

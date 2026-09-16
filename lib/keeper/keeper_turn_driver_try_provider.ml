@@ -709,12 +709,22 @@ let projected_initial_message_count ~provider_config initial_messages =
 let bounded_model_input_projection
       (ctx : try_provider_ctx)
       ~last_request_measured_bytes
+      ~last_request
       ~(provider_config : Llm_provider.Provider_config.t)
   : Agent_core.Agent.model_input_projection
   =
   let reserved_bytes =
     offload_model_input_cpu (fun () ->
       declared_request_reserve_bytes ~system_prompt:ctx.system_prompt ~tools:ctx.tools)
+  in
+  (* The fixed prefix the ledger compares consecutive requests under: one
+     digest per attempt, since the system prompt and tool list are fixed for
+     the attempt's lifetime. *)
+  let prefix_digest =
+    offload_model_input_cpu (fun () ->
+      Keeper_model_input_ledger.prefix_digest
+        ~system_prompt:ctx.system_prompt
+        ~tools:ctx.tools)
   in
   let initial_message_index =
     projected_initial_message_count ~provider_config ctx.initial_messages
@@ -948,6 +958,57 @@ let bounded_model_input_projection
       ctx.on_model_input_window_observation;
     last_request_measured_bytes
     := Some (reserved_bytes + windowed.Runtime_model_input_tail_window.transmitted_bytes);
+    (* What this request carried, for the ledger the after-turn hook writes
+       once the provider reports its count: the carried atom range and the
+       bytes of the per-request tail (the pinned messages), so a difference
+       between two requests can be attributed to the atoms appended between
+       them. *)
+    (* Read the carried range back from the transmitted list rather than
+       from the projection's counts: after a demotion re-cut those counts
+       are relative to the already-cut sublist (see the interface of
+       [project_target]), while the atoms in the final list and
+       [history_atom_count] are absolute on every path. The preamble is
+       tail, not an atom, as the cut itself treats it. *)
+    (let messages =
+       windowed.Runtime_model_input_tail_window.projection
+         .Runtime_model_input_tail_window.messages
+     in
+     let transmitted_atoms, tail_bytes =
+       offload_model_input_cpu (fun () ->
+         let history, preamble =
+           List.partition
+             (fun message ->
+                not (Runtime_model_input_tail_window.is_synthetic_preamble message))
+             messages
+         in
+         let labelled, transmitted_atoms =
+           Runtime_model_input_tail_window.annotate history
+         in
+         let pinned_bytes =
+           List.fold_left
+             (fun sum (message, label) ->
+                match label with
+                | Runtime_model_input_tail_window.Pinned ->
+                  sum + measure_message_bytes message
+                | Runtime_model_input_tail_window.Atom _ -> sum)
+             0
+             labelled
+         in
+         let preamble_bytes =
+           List.fold_left
+             (fun sum message -> sum + measure_message_bytes message)
+             0
+             preamble
+         in
+         transmitted_atoms, pinned_bytes + preamble_bytes)
+     in
+     last_request
+     := Some
+          { Keeper_model_input_ledger.prefix_digest
+          ; first_atom = history_atom_count - transmitted_atoms
+          ; atom_count = history_atom_count
+          ; tail_bytes
+          });
     let windowed = windowed.Runtime_model_input_tail_window.projection.messages in
     match ctx.model_input_projection with
     | None -> Ok windowed
@@ -983,6 +1044,7 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
      request at a time inside an attempt, so the request the projection just
      measured is the one [AfterTurn] answers. *)
   let last_request_measured_bytes = ref None in
+  let last_request = ref None in
   let config_result =
     let base_config =
       Runtime_candidate.default_config
@@ -1007,10 +1069,14 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
            | Some hooks ->
              Agent_core.Hooks.compose ~outer:gate_hooks ~inner:hooks)
     in
-    (* Token density observation (RFC keeper-context-window-in-tokens): the
-       provider's inclusive prompt total for the request the window just
-       measured. Composed outermost and always [Continue], so it neither
-       delays nor decides anything the turn's own hooks do. *)
+    (* Usage observation (RFC keeper-context-window-in-tokens): the
+       provider's inclusive prompt total for the request the projection just
+       built. The density keeps the cut fed until the ledger replaces it;
+       the ledger records the request's carried range against the count, one
+       line per provider call, so block sizes, front moves and tail changes
+       are read from the provider's numbers. Composed outermost and always
+       [Continue], so it neither delays nor decides anything the turn's own
+       hooks do. *)
     let density_hooks =
       { Agent_core.Hooks.empty with
         after_turn =
@@ -1026,6 +1092,50 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
                      ~measured_bytes
                      ~input_tokens:usage.Agent_core.Types.input_tokens
                  | Some _, None | None, (Some _ | None) -> ());
+                (match !last_request with
+                 | Some request ->
+                   let usage =
+                     Option.bind response.Agent_core.Types.usage
+                       (fun (u : Agent_core.Types.api_usage) ->
+                          Keeper_model_input_ledger.usage_of_counts
+                            ~input_tokens:u.input_tokens
+                            ~cache_read_input_tokens:u.cache_read_input_tokens)
+                   in
+                   let observation =
+                     Keeper_model_input_ledger.Table.observe
+                       ~keeper_name:ctx.keeper_name
+                       ~runtime_id:ctx.runtime_id
+                       ~request
+                       ~usage
+                   in
+                   let line =
+                     Yojson.Safe.to_string
+                       (Keeper_model_input_ledger.observation_to_json observation)
+                   in
+                   (* The routine step is one line per provider call, so it
+                      goes out at debug like the rest of this projection's
+                      per-request narration; the events that change what the
+                      ledger can attribute are rare and go out at info. *)
+                   (match observation.Keeper_model_input_ledger.event with
+                    | Keeper_model_input_ledger.Appended _
+                    | Keeper_model_input_ledger.Repeated ->
+                      Log.Keeper.debug
+                        ~keeper_name:ctx.keeper_name
+                        "model input ledger runtime=%s %s"
+                        ctx.runtime_id
+                        line
+                    | Keeper_model_input_ledger.Started
+                    | Keeper_model_input_ledger.Front_moved _
+                    | Keeper_model_input_ledger.Front_cut_through_block _
+                    | Keeper_model_input_ledger.Front_widened
+                    | Keeper_model_input_ledger.Prefix_changed
+                    | Keeper_model_input_ledger.History_reset ->
+                      Log.Keeper.info
+                        ~keeper_name:ctx.keeper_name
+                        "model input ledger runtime=%s %s"
+                        ctx.runtime_id
+                        line)
+                 | None -> ());
                 Agent_core.Hooks.Continue
               | Agent_core.Hooks.BeforeTurn _
               | Agent_core.Hooks.BeforeTurnParams _
@@ -1155,6 +1265,7 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
                (bounded_model_input_projection
                   ctx
                   ~last_request_measured_bytes
+                  ~last_request
                   ~provider_config:config.Runtime_agent.provider_cfg))
       }
     in

@@ -24,7 +24,7 @@
 type phase =
   | Offline       (** Registered but no heartbeat fiber started *)
   | Running       (** Healthy heartbeat loop executing *)
-  | Failing       (** Consecutive failures detected, probing recovery *)
+  | Failing       (** Any heartbeat/turn failure or archived credential, probing recovery *)
   | Draining      (** Graceful shutdown: completing current turn *)
   | Paused        (** Explicitly operator-paused; fiber sleeping *)
   | Stopped       (** Clean exit, terminal *)

@@ -88,11 +88,9 @@ describe('RuntimePanel', () => {
       .map(link => link.getAttribute('data-section'))
     expect(routeLinks).toEqual([
       'transport-health',
-      'feature-health',
     ])
     expect(container.textContent).toContain('Diagnostics')
     expect(container.textContent).toContain('Transport diagnostics')
-    expect(container.textContent).toContain('Feature cleanup')
     expect(container.textContent).toContain('RuntimeMonitor')
     expect(container.textContent).toContain('VerificationSpecsPanel')
     expect(container.querySelector('section[aria-label="Hidden diagnostics"].v2-monitoring-panel')).not.toBeNull()

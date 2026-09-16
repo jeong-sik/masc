@@ -548,7 +548,7 @@ pool 도메인의 긴 작업은 이 창에서 최대 475 ms 다. 무거운 창�
 
 #### `openat -> switch` 의 정체 — 턴마다 읽는 35 MB 체크포인트 (P4h-5, #33453)
 
-`Fs_compat.load_file` 의 Eio 경로는 `Eio.Path.load` 다. `with_open_in`(worker 스레드의 `openat`, 그래서 재개 사유가 `openat`) 안에서 파일을 fiber 위에서 끝까지 복사하고 `Switch.run` 이 닫히며 끝난다(종료 사유 `switch`). keeper 의 정본 체크포인트 `traces/<trace>/<trace>.json` 은 13~35 MB 이고 턴마다 이 경로로 읽혔다. 디코드는 이미 pool 에 있었지만 바이트 복사는 아니었다. 같은 디렉터리의 history 스냅샷 `agent-core-snapshot-*.json` 은 한 시간에 117개·1,350 MB 가 쓰였다. 쓰기는 `Keeper_fs.save_bytes_durable_atomic_core` 가 이미 `Eio_guard.run_in_systhread` 안에서 한다.
+`Fs_compat.load_file` 의 Eio 경로는 `Eio.Path.load` 다. `with_open_in`(worker 스레드의 `openat`, 그래서 재개 사유가 `openat`) 안에서 파일을 fiber 위에서 끝까지 복사하고 `Switch.run` 이 닫히며 끝난다(종료 사유 `switch`). keeper 의 정본 체크포인트 `traces/<trace>/<trace>.json` 은 13~35 MB 이고 턴마다 이 경로로 읽혔다. 디코드는 이미 pool 에 있었지만 바이트 복사는 아니었다. 같은 디렉터리의 history 스냅샷 `agent-core-snapshot-*.json` 은 한 시간에 117개·1,350 MB 가 쓰였다. 쓰기는 `Keeper_fs.save_pieces_durable_atomic_core` 가 이미 `Eio_guard.run_in_systhread` 안에서 한다.
 
 P4h-5 는 두 읽기(정본·history)를 `Fs_compat.load_owned_regular_file ~ownership_root:(dirname session_dir)` 로 바꾼다. 쓰는 쪽과 같은 소유 경계이고, Eio 파일시스템이 있으면 systhread 에서 읽는다. 심볼릭 링크와 바뀐 부모 체인은 `Io_error` 로 거절한다(전에는 따라갔다). 더 깊은 고침은 체크포인트 크기 자체다 — 35 MB 를 턴마다 읽고 쓰는 구조(§8.6 의 P4c, exact-lane 본문을 blob 참조로).
 

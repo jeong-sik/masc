@@ -125,13 +125,17 @@ type encoding_memo
 
 val create_encoding_memo : unit -> encoding_memo
 
-(** [to_string_with_encoding_memo memo cp] returns the bytes of [to_string cp]
-    and raises [Invalid_argument] where {!to_json} does. A message that is the
-    same record as one in the previous successful call reuses that call's
-    validated encoding; every other message is encoded, validated against the
-    v11 contract, and decoded once. After a success, [memo] holds exactly the
-    messages of [cp]. *)
-val to_string_with_encoding_memo : encoding_memo -> t -> string
+(** [to_pieces_with_encoding_memo memo cp] returns the bytes of [to_string cp]
+    split into consecutive pieces, and raises [Invalid_argument] where {!to_json}
+    does. A message that is the same record as one in the previous successful
+    call reuses that call's validated encoding; every other message is encoded,
+    validated against the v11 contract, and decoded once. After a success,
+    [memo] holds exactly the messages of [cp].
+
+    The caller appends the pieces in order. The live canonical checkpoints
+    measured 2026-09-16 were 111MB and 107MB, so joining the pieces into one
+    string would allocate that whole document again on every save. *)
+val to_pieces_with_encoding_memo : encoding_memo -> t -> string list
 
 (** Deserialize checkpoint from a JSON string under the same current-only
     contract as {!of_json}. *)

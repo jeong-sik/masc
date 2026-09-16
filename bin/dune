@@ -492,6 +492,11 @@
   masc_tui_image_preview
   ;; The Gate phase is Keeper_chat_store's closed sum, parsed once at decode.
   masc
+  ;; An interrupted turn's cause is Keeper_internal_error's closed sum, read
+  ;; through its own decoder instead of by searching the row's words
+  ;; (RFC-0454 P2). implicit_transitive_deps is false, so naming masc alone
+  ;; does not reach it.
+  masc.keeper_runtime
   masc.keeper_chat_delivery_identity
   ; turn_sequence_of_fields reads Ids.Turn_ref, and implicit_transitive_deps
   ; is false, so the module is not reachable through the others.

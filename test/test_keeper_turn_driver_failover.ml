@@ -2229,16 +2229,19 @@ let check_effect_disposition_blocks_same_turn_retry label effect_disposition =
           (Driver.Provider_attempt_effect_fenced
              { runtime_id = "primary.test_model"
              ; effect_disposition = observed
-             ; diagnostic
+             ; cause
              }) ->
         Alcotest.(check bool)
           (label ^ " keeps the exact effect disposition")
           true
           (observed = effect_disposition);
         Alcotest.(check bool)
-          (label ^ " keeps a diagnostic")
+          (label ^ " keeps what failed the attempt")
           true
-          (String.length diagnostic > 0)
+          (match cause with
+           | Keeper_internal_error.Fenced_core core ->
+             String.length core.Keeper_request_failure_core.message > 0
+           | Keeper_internal_error.Fenced_masc _ -> true)
       | Some other ->
         Alcotest.failf
           "%s returned wrong typed failure %s"

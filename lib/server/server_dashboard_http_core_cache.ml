@@ -35,10 +35,6 @@ let live_cache_ttl_s = 30.0
     staleness is immediately visible. *)
 let realtime_cache_ttl_s = 15.0
 
-(** Feature health cache TTL — 60 seconds. Minute-scale flags with
-    ~3.5s compute cost. *)
-let feature_health_cache_ttl_s = 60.0
-
 (** Shared dashboard projection cache TTL — 120 seconds. *)
 let dashboard_projection_cache_ttl_s = 120.0
 

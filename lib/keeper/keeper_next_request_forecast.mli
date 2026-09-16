@@ -24,14 +24,22 @@
     every block {!Prompt_block_id.injected_on_post_tool_round} refuses, so
     only a record carrying such a block says what the next first round
     pins. {!measured_parts} carries the turn, and for the pinned figure the
-    lane, each came from. *)
+    lane, each came from.
+
+    Beside the figures, {!candidate.assembly} lays the same parts out in
+    the order the request carries them. *)
 
 type measured_parts =
   { reserved_turn : int  (** The completed turn [reserved_bytes] was read from. *)
   ; reserved_bytes : int  (** Tool schemas + keeper instructions. *)
+  ; instructions_bytes : int  (** The system prompt's share of [reserved_bytes]. *)
+  ; schemas_bytes : int  (** The tool array's share of [reserved_bytes]. *)
   ; pinned_turn : int  (** The first-round turn [pinned_bytes] was read from. *)
   ; pinned_runtime_id : string  (** The lane that turn ran on, as its record names it. *)
   ; pinned_bytes : int  (** Every other prompt block, never cut. *)
+  ; pinned_blocks : (Prompt_block_id.t * int) list
+        (** The blocks behind [pinned_bytes], in the order the assembly
+            concatenates them ({!Prompt_block_id.cache_rank}). *)
   }
 
 type parts_refusal =
@@ -58,11 +66,34 @@ type carried =
         (** Pinned messages, the carried atoms and the preamble, as the
             composition's encoder counts them; excludes [reserved_bytes] and
             [pinned_bytes] of the prompt. *)
+  ; preamble_bytes : int option
+        (** The synthetic ["[context window]"] message the range prepends
+            when the oldest carried atom is not a user message, as the same
+            encoder counts it; [None] when none rides. Part of
+            [transmitted_bytes]. *)
   ; origin : Keeper_carried_front.origin
   ; counted_tokens : int option
         (** The ledger's measured total for its last request, when known;
             what the marks are read against. *)
   }
+
+(** One piece of the request in the position it travels. The order is the
+    turn's: the system prompt and the tool array ride beside the messages;
+    the messages are the preamble when the range prepended one, the carried
+    history oldest first, the wake line, and last the ["[system context]"]
+    message that {!Agent_core.Agent_turn.prepare_messages} appends so the
+    conversation prefix stays byte-identical for provider caches. *)
+type slot =
+  | System_prompt of { bytes : int }
+  | Tools of { bytes : int }
+  | Preamble of { bytes : int }
+  | History of { atoms : int; of_atoms : int; bytes : int }
+      (** [atoms] carried of [of_atoms] in the checkpoint, the wake line
+          not counted on either side; [bytes] is what the range transmits
+          less the preamble and the wake line. *)
+  | Wake_line of { bytes : int }
+  | System_context of { bytes : int; blocks : (Prompt_block_id.t * int) list }
+      (** [blocks] in the order the assembly concatenates them. *)
 
 type candidate =
   { runtime_id : string
@@ -73,6 +104,9 @@ type candidate =
   ; parts : (measured_parts, parts_refusal) result
   ; history_atoms : int  (** Atoms in the checkpoint plus the wake line. *)
   ; carried : carried option  (** [None] when [lane] is refused. *)
+  ; assembly : slot list option
+        (** The request in travel order; [None] whenever [carried] or
+            [parts] is. *)
   }
 
 type t =
@@ -80,6 +114,8 @@ type t =
   ; trace_id : string
   ; checkpoint_messages : int
   ; wake_line_bytes : int
+        (** The wake line as the composition's encoder counts it, the
+            figure the assembly subtracts from the transmitted bytes. *)
   ; candidates : candidate list
         (** The keeper's bound runtime. Failover candidates are not listed. *)
   }
@@ -104,9 +140,13 @@ val measure : Agent_core.Types.message -> int
 
 type composition =
   { fixed_bytes : int  (** Tool schemas + keeper instructions. *)
+  ; instructions_bytes : int
+  ; schemas_bytes : int
   ; first_round_pinned_bytes : int option
         (** Every other prompt block, or [None] when the composition carries
             no block that only a first round injects: the post-tool shape. *)
+  ; pinned_blocks : (Prompt_block_id.t * int) list
+        (** Those blocks in assembly order; empty for the post-tool shape. *)
   }
 
 val read_composition : Turn_record.input_component list -> composition
@@ -126,3 +166,8 @@ val select_parts
 (** Oldest first. [reserved] from the newest completed reading on
     [runtime_id]; [pinned] from the newest first-round reading on any lane,
     completed or not. *)
+
+val assembly : wake_bytes:int -> history_atoms:int -> measured_parts -> carried -> slot list
+(** The pure layout, for tests: the slots in travel order for one carried
+    range. [history_atoms] counts the wake line, as {!candidate.history_atoms}
+    does, and the range always carries it as its newest atom. *)

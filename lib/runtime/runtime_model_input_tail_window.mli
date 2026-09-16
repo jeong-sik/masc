@@ -299,6 +299,20 @@ val project_newest_atom
     was opened with. The second component is that view's measured bytes, as
     [target_projection.transmitted_bytes] counts them. *)
 
+val project_from_atom
+  :  measure_message_bytes:(Agent_core.Types.message -> int)
+  -> first_atom:int
+  -> Agent_core.Types.message list
+  -> projection * int
+(** The carried range (RFC keeper-context-window-in-tokens §10.4): the atoms
+    at or after [first_atom], the pinned messages in place, and the preamble
+    when the cut lands on a non-[User] head. The second component is that
+    view's measured bytes, as [target_projection.transmitted_bytes] counts
+    them. [first_atom] is a position {!annotate} assigns, oldest first from
+    0; below 0 it is the whole history, and at or past the newest atom it is
+    the newest atom alone, so the view always carries the turn. Never
+    raises. *)
+
 val is_synthetic_preamble : Agent_core.Types.message -> bool
 (** Whether a message is the constant preamble the cut prepends when the
     first kept atom cannot open a conversation. Exported so a stage that

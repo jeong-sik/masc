@@ -966,6 +966,38 @@ let test_newest_atom_view_prepends_the_preamble_for_an_orphan_opening () =
     (is_preamble (List.nth projection.Window.messages 0))
 ;;
 
+(* The carried range: the atoms at or after the front, pinned context in
+   place, the preamble when the kept head is not a user message. *)
+let test_from_atom_view_keeps_the_atoms_from_the_front () =
+  let history = extra_context :: atoms 5 in
+  let projection, transmitted_bytes =
+    Window.project_from_atom ~measure_message_bytes ~first_atom:3 history
+  in
+  Alcotest.(check int) "two atoms kept" 2 (count_atoms projection.Window.messages);
+  Alcotest.(check int) "three dropped" 3 projection.Window.dropped_atoms;
+  Alcotest.(check int) "five counted" 5 projection.Window.atom_count;
+  Alcotest.(check bool) "pinned context survives" true
+    (List.exists (fun (m : Types.message) -> m == extra_context) projection.Window.messages);
+  Alcotest.(check int) "transmitted bytes are the kept messages' bytes"
+    (total_bytes projection.Window.messages) transmitted_bytes
+;;
+
+let test_from_atom_view_at_zero_is_the_whole_history () =
+  let history = atoms 4 in
+  let projection, _ = Window.project_from_atom ~measure_message_bytes ~first_atom:0 history in
+  Alcotest.(check bool) "the input list itself" true (projection.Window.messages == history);
+  Alcotest.(check int) "nothing dropped" 0 projection.Window.dropped_atoms
+;;
+
+let test_from_atom_view_past_the_newest_atom_keeps_it () =
+  let history = atoms 4 in
+  let projection, _ = Window.project_from_atom ~measure_message_bytes ~first_atom:40 history in
+  Alcotest.(check int) "one atom" 1 (count_atoms projection.Window.messages);
+  Alcotest.(check int) "three dropped" 3 projection.Window.dropped_atoms;
+  let projection, _ = Window.project_from_atom ~measure_message_bytes ~first_atom:(-3) history in
+  Alcotest.(check int) "a negative front is the whole history" 0 projection.Window.dropped_atoms
+;;
+
 let () =
   Alcotest.run
     "runtime_model_input_tail_window"
@@ -1052,6 +1084,12 @@ let () =
             "newest-atom view prepends the preamble for an orphan opening"
             `Quick
             test_newest_atom_view_prepends_the_preamble_for_an_orphan_opening
+        ; Alcotest.test_case "from-atom view keeps the atoms from the front" `Quick
+            test_from_atom_view_keeps_the_atoms_from_the_front
+        ; Alcotest.test_case "from-atom view at zero is the whole history" `Quick
+            test_from_atom_view_at_zero_is_the_whole_history
+        ; Alcotest.test_case "from-atom view past the newest atom keeps it" `Quick
+            test_from_atom_view_past_the_newest_atom_keeps_it
         ; Alcotest.test_case "deterministic" `Quick test_deterministic
         ] )
     ]

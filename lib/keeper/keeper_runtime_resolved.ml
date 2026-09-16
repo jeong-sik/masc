@@ -17,7 +17,6 @@ type t = {
   first_event_timeout_sec : float field;
   body_timeout_override_sec : float option field;
   provider_call_deadline_sec : float field;
-  context_window_tokens : int field;
 }
 
 (* The layer {!Config_boot_overrides.source} names, as this module's
@@ -144,15 +143,6 @@ let freeze_from_current () =
         source = Failsafe_floor;
       }
   in
-  (* The transmission window is a compiled default or the operator's value,
-     never a floor: [Env_config_keeper.KeeperContext.window_tokens] always
-     answers, and the source says which layer answered. *)
-  let context_window_tokens =
-    {
-      value = Env_config_keeper.KeeperContext.window_tokens ();
-      source = source_of_env_name Env_config_keeper.KeeperContext.window_tokens_env_key;
-    }
-  in
   (* The no-progress threshold ends an attempt that has been silent for
      that long. A stream budget the operator declared longer than it can
      never be reached: the watchdog cuts the silent prefill (or the silent
@@ -189,7 +179,6 @@ let freeze_from_current () =
     first_event_timeout_sec;
     body_timeout_override_sec;
     provider_call_deadline_sec;
-    context_window_tokens;
   }
 
 let frozen : t option Atomic.t = Atomic.make None
@@ -227,7 +216,6 @@ let to_yojson (runtime : t) =
       ("first_event_timeout_sec", field_to_yojson float_to_yojson runtime.first_event_timeout_sec);
       ("body_timeout_override_sec", field_to_yojson option_float_to_yojson runtime.body_timeout_override_sec);
       ("provider_call_deadline_sec", field_to_yojson float_to_yojson runtime.provider_call_deadline_sec);
-      ("context_window_tokens", field_to_yojson (fun tokens -> `Int tokens) runtime.context_window_tokens);
     ]
 
 let stream_idle_timeout_sec () =
@@ -242,5 +230,3 @@ let body_timeout_override_sec () =
 let provider_call_deadline_sec () =
   (current ()).provider_call_deadline_sec.value
 
-let context_window_tokens () =
-  (current ()).context_window_tokens.value

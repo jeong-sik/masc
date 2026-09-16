@@ -99,27 +99,19 @@ type response_turn =
 
 (** What the next Agent Core request would carry, as the server computes it
     from the turn's own values without a turn
-    ([/api/v1/keepers/:name/next-request]). Live: the window, the runtime's
-    density and the request-body cap. As last measured, with the turn they
-    were read from: the fixed prompt parts and the pinned blocks. *)
-type forecast_window =
-  | Window_declared of { window_tokens : int; source : string }
-  | Window_refused of string
-      (** The same contradiction the turn driver refuses on. *)
-  | Window_not_applicable of string
-      (** An official-client runtime: the spawned client owns its window and
-          no Agent Core cut applies. *)
+    ([/api/v1/keepers/:name/next-request]). Live: the pair's carried front,
+    the binding's marks and the request-body cap. As last measured, with the
+    turn they were read from: the fixed prompt parts and the pinned blocks. *)
+type forecast_lane =
+  | Lane_agent_core
+  | Lane_not_applicable of string
+      (** An official-client runtime: the spawned client owns its context
+          and masc carries no range for it. *)
 
-type forecast_density =
-  { input_tokens : int
-  ; measured_bytes : int
+type forecast_marks =
+  { high_water_tokens : int
+  ; low_water_tokens : int
   }
-
-type forecast_capacity =
-  | Capacity_measured of { capacity_bytes : int; density : forecast_density }
-  | Capacity_unmeasured
-      (** No response on this runtime since the server started; the turn
-          would send the newest atom only. *)
 
 type forecast_parts =
   { reserved_measured_on_turn : int
@@ -135,28 +127,37 @@ type forecast_parts =
             composition is a first round's. *)
   }
 
-type forecast_overrun_cause =
-  | Fixed_parts_exceed_target
-  | Newest_atom_exceeds_target
+type forecast_carried_origin =
+  | Carried_from_ledger  (** The pair's ledger, moved by every eviction since its last request. *)
+  | Carried_from_turn_record of { turn : int }
+      (** No ledger since the server started: the range that turn's record measured. *)
+  | Carried_halved_after_refusal of { retry : int }
+  | Carried_fit_to_request_cap
+      (** No front to start from: the newest suffix the request cap admits. *)
+  | Carried_whole_history  (** No front and no cap. *)
 
-type forecast_fit =
-  | Within_target
-  | Overrun of { by_bytes : int; cause : forecast_overrun_cause }
-
-type forecast_cut =
-  | Forecast_cut of { kept_atoms : int; transmitted_bytes : int; fit : forecast_fit }
-  | Forecast_newest_atom_only of { transmitted_bytes : int }
+type forecast_carried =
+  { first_atom : int
+  ; kept_atoms : int
+  ; transmitted_bytes : int
+  ; origin : forecast_carried_origin
+  ; counted_tokens : int option
+        (** The ledger's measured total for its last request, when known. *)
+  }
 
 type forecast_candidate =
   { runtime_id : string
-  ; window : forecast_window
-  ; capacity : forecast_capacity option
+  ; lane : forecast_lane
+  ; marks : forecast_marks option
+        (** As the binding declares them; [None] leaves eviction to a refusal. *)
   ; request_cap_bytes : int option
   ; parts : (forecast_parts, string) result
         (** [Error] is the server's reason: no composition on this runtime,
             or only post-tool ones, which carry no pinned block. *)
   ; history_atoms : int
-  ; cut : forecast_cut option
+  ; carried : forecast_carried option
+        (** [None] when the lane is refused, or when the cap fit would need
+            the refused parts. *)
   }
 
 type forecast =

@@ -1,0 +1,225 @@
+(** Tests for {!Keeper_turn_driver_try_provider.carried_range_eviction_sequence}
+    (RFC keeper-context-window-in-tokens §10.5): the Agent Core lane's
+    same-candidate retry after a refusal that says the request outgrew its
+    carrier. The policy is driven through an injected [attempt], so the
+    walk, the halving fallback and the gate are checked without a provider. *)
+
+module Try_provider = Masc.Keeper_turn_driver_try_provider
+module Range = Masc.Keeper_carried_range
+module Ledger = Masc.Keeper_model_input_ledger
+
+open Alcotest
+
+let overflow =
+  Agent_core.Error.Api (Agent_core.Retry.ContextOverflow { message = "too long"; limit = None })
+;;
+
+let body_too_large =
+  Agent_core.Error.Api
+    (Agent_core.Retry.InvalidRequest
+       { message = "too large"
+       ; reason = Agent_core.Retry.Request_body_too_large { actual_bytes = 10; limit_bytes = 5 }
+       })
+;;
+
+let unrelated = Agent_core.Error.Api (Agent_core.Retry.Timeout { message = "slow"; phase = None })
+
+let block ~first ~end_ tokens : Ledger.block =
+  { block_first_atom = first; block_end_atom = end_; tokens }
+;;
+
+let ledger ?(total = Some 1_000) (blocks : Ledger.block list) : Ledger.t =
+  let first_atom = match blocks with b :: _ -> b.block_first_atom | [] -> 0 in
+  let atom_count = match List.rev blocks with b :: _ -> b.block_end_atom | [] -> 0 in
+  { prefix_digest = "f"
+  ; total_tokens = total
+  ; measured_end_atom = Option.map (fun _ -> atom_count) total
+  ; blocks
+  ; last = { prefix_digest = "f"; first_atom; atom_count; tail_bytes = 0 }
+  ; last_usage = None
+  }
+;;
+
+let request ~first_atom ~atom_count : Ledger.request =
+  { prefix_digest = "f"; first_atom; atom_count; tail_bytes = 0 }
+;;
+
+type trace =
+  { mutable attempts : int
+  ; mutable evictions : int list  (** the fronts [evict] moved to *)
+  ; mutable halvings : (int * int) list  (** (first_atom, retry) *)
+  ; mutable retries : int
+  }
+
+(* [outcomes] is what the provider answers, attempt by attempt; the last one
+   repeats. The ledger the policy reads is [ledger_of], indexed by attempt, so
+   a test can hand back a moved ledger after an eviction. *)
+let run
+      ?(gate = fun () -> true)
+      ?marks
+      ?(last_request = fun () -> None)
+      ~ledger_of
+      outcomes
+  =
+  let trace = { attempts = 0; evictions = []; halvings = []; retries = 0 } in
+  let outcome =
+    Try_provider.carried_range_eviction_sequence
+      ~same_run_retry_authorized:gate
+      ~ledger:(fun () -> ledger_of trace.attempts)
+      ~last_request
+      ~marks
+      ~evict:(function
+        | Range.Evicted { first_atom; _ } -> trace.evictions <- first_atom :: trace.evictions
+        | Range.Unchanged _ -> ())
+      ~halve:(fun ~first_atom ~retry -> trace.halvings <- (first_atom, retry) :: trace.halvings)
+      ~on_retry:(fun ~retry _ -> trace.retries <- retry)
+      ~attempt:(fun () ->
+        let index = min trace.attempts (List.length outcomes - 1) in
+        trace.attempts <- trace.attempts + 1;
+        List.nth outcomes index)
+      ()
+  in
+  outcome, trace
+;;
+
+let four_blocks =
+  ledger
+    [ block ~first:0 ~end_:10 (Some 300)
+    ; block ~first:10 ~end_:20 (Some 250)
+    ; block ~first:20 ~end_:30 (Some 200)
+    ; block ~first:30 ~end_:40 (Some 150)
+    ]
+;;
+
+let test_success_asks_once () =
+  let outcome, trace = run ~ledger_of:(fun _ -> Some four_blocks) [ Ok "answer" ] in
+  check (result string reject) "the answer" (Ok "answer") outcome;
+  check int "one attempt" 1 trace.attempts
+;;
+
+let test_an_unrelated_error_never_retries () =
+  let outcome, trace = run ~ledger_of:(fun _ -> Some four_blocks) [ Error unrelated; Ok "late" ] in
+  check bool "the error stands" true (Result.is_error outcome);
+  check int "one attempt" 1 trace.attempts
+;;
+
+let test_an_overflow_evicts_the_oldest_block_and_asks_again () =
+  let moved = ledger [ block ~first:10 ~end_:20 (Some 250); block ~first:20 ~end_:30 (Some 200); block ~first:30 ~end_:40 (Some 150) ] in
+  let outcome, trace =
+    run
+      ~ledger_of:(fun attempts -> if attempts = 0 then Some four_blocks else Some moved)
+      [ Error overflow; Ok "fits" ]
+  in
+  check (result string reject) "the retry answered" (Ok "fits") outcome;
+  check (list int) "the front moved past the oldest block" [ 10 ] trace.evictions;
+  check int "one retry" 1 trace.retries;
+  check (list (pair int int)) "nothing halved" [] trace.halvings
+;;
+
+let test_with_marks_the_refusal_walks_down_to_the_low_water_mark () =
+  let marks : Runtime_schema.context_marks = { high_water_tokens = 1_500; low_water_tokens = 400 } in
+  let outcome, trace =
+    run ~marks ~ledger_of:(fun _ -> Some four_blocks) [ Error overflow; Ok "fits" ]
+  in
+  check bool "answered" true (Result.is_ok outcome);
+  (* 1,000 - 300 - 250 = 450, still above 400; the third block brings it to 250. *)
+  check (list int) "three blocks left" [ 30 ] trace.evictions
+;;
+
+let test_a_body_refusal_evicts_like_an_overflow () =
+  let _, trace = run ~ledger_of:(fun _ -> Some four_blocks) [ Error body_too_large; Ok "fits" ] in
+  check (list int) "the wire's refusal moved the front" [ 10 ] trace.evictions
+;;
+
+let test_a_single_block_halves_the_last_request () =
+  let one = ledger [ block ~first:0 ~end_:40 None ] in
+  let _, trace =
+    run
+      ~ledger_of:(fun _ -> Some one)
+      ~last_request:(fun () -> Some (request ~first_atom:0 ~atom_count:40))
+      [ Error overflow; Ok "fits" ]
+  in
+  check (list int) "no block left" [] trace.evictions;
+  check (list (pair int int)) "halfway to the newest atom, retry 1" [ 20, 1 ] trace.halvings
+;;
+
+let test_without_a_ledger_the_range_halves_until_it_fits () =
+  let front = ref 0 in
+  let _, trace =
+    run
+      ~ledger_of:(fun _ -> None)
+      ~last_request:(fun () -> Some (request ~first_atom:!front ~atom_count:16))
+      [ Error overflow; Error overflow; Ok "fits" ]
+  in
+  ignore front;
+  (* The policy reads the last request as the caller composed it; here the
+     caller does not move it, so each halving is computed from the same
+     range. The sequence still asks three times and records two halvings. *)
+  check int "three attempts" 3 trace.attempts;
+  check int "two retries" 2 trace.retries;
+  check (list (pair int int)) "both halvings, newest first" [ 8, 2; 8, 1 ] trace.halvings
+;;
+
+let test_a_single_atom_ends_the_sequence_with_the_refusal () =
+  let outcome, trace =
+    run
+      ~ledger_of:(fun _ -> None)
+      ~last_request:(fun () -> Some (request ~first_atom:15 ~atom_count:16))
+      [ Error overflow; Ok "never" ]
+  in
+  check bool "the refusal stands" true (Result.is_error outcome);
+  check int "one attempt" 1 trace.attempts;
+  check (list (pair int int)) "nothing to halve" [] trace.halvings
+;;
+
+let test_no_ledger_and_no_request_ends_the_sequence () =
+  let outcome, trace = run ~ledger_of:(fun _ -> None) [ Error overflow; Ok "never" ] in
+  check bool "the refusal stands" true (Result.is_error outcome);
+  check int "one attempt" 1 trace.attempts
+;;
+
+let test_the_gate_blocks_a_retry_after_a_durable_checkpoint () =
+  let outcome, trace =
+    run ~gate:(fun () -> false) ~ledger_of:(fun _ -> Some four_blocks) [ Error overflow; Ok "never" ]
+  in
+  check bool "the refusal stands" true (Result.is_error outcome);
+  check int "one attempt" 1 trace.attempts;
+  check (list int) "nothing evicted" [] trace.evictions
+;;
+
+let test_a_refusal_that_survives_the_newest_block_is_returned () =
+  (* Two blocks: the first refusal evicts the older; the second finds one
+     block and, with no last request to halve, returns. *)
+  let two = ledger [ block ~first:0 ~end_:10 (Some 300); block ~first:10 ~end_:20 (Some 250) ] in
+  let one = ledger [ block ~first:10 ~end_:20 (Some 250) ] in
+  let outcome, trace =
+    run
+      ~ledger_of:(fun attempts -> if attempts = 0 then Some two else Some one)
+      [ Error overflow; Error overflow; Ok "never" ]
+  in
+  check bool "the refusal stands" true (Result.is_error outcome);
+  check int "two attempts" 2 trace.attempts;
+  check (list int) "one eviction" [ 10 ] trace.evictions
+;;
+
+let () =
+  Alcotest.run
+    "keeper_carried_range_eviction"
+    [ ( "sequence"
+      , [ test_case "success asks once" `Quick test_success_asks_once
+        ; test_case "unrelated error" `Quick test_an_unrelated_error_never_retries
+        ; test_case "overflow evicts and asks again" `Quick
+            test_an_overflow_evicts_the_oldest_block_and_asks_again
+        ; test_case "marks walk to the low-water mark" `Quick
+            test_with_marks_the_refusal_walks_down_to_the_low_water_mark
+        ; test_case "body refusal evicts" `Quick test_a_body_refusal_evicts_like_an_overflow
+        ; test_case "single block halves" `Quick test_a_single_block_halves_the_last_request
+        ; test_case "no ledger halves" `Quick test_without_a_ledger_the_range_halves_until_it_fits
+        ; test_case "single atom ends" `Quick test_a_single_atom_ends_the_sequence_with_the_refusal
+        ; test_case "nothing to move ends" `Quick test_no_ledger_and_no_request_ends_the_sequence
+        ; test_case "gate" `Quick test_the_gate_blocks_a_retry_after_a_durable_checkpoint
+        ; test_case "refusal past the newest block" `Quick
+            test_a_refusal_that_survives_the_newest_block_is_returned
+        ] )
+    ]
+;;

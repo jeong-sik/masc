@@ -59,14 +59,15 @@ let seed = function
   | None -> fail "a seed was expected"
 ;;
 
-(* The catalog's answer, as [read_seed] gives it: an official client hands
-   over a list of its own, every other runtime composes from this history. *)
-let shares_history = function
-  | "claude_code" -> false
-  | _ -> true
+(* A stand-in for the catalog: [read_seed] puts the question to
+   {!Front.composer_of_runtime}, pinned below on its own. *)
+let composer = function
+  | "claude_code" -> Front.Hands_over_its_own_list
+  | "gone" -> Front.Not_materialized
+  | _ -> Front.Composes_from_the_history
 ;;
 
-let of_records = Front.of_records ~trace_id:"trace-1" ~shares_history
+let of_records = Front.of_records ~trace_id:"trace-1" ~composer
 
 let source =
   testable
@@ -98,17 +99,20 @@ let test_another_sessions_record_is_another_history () =
   check int "the newer record belongs to another session" 70
     (fst (seed (of_records records)));
   check int "and is the one that session reads" 495
-    (fst (seed (Front.of_records ~trace_id:"trace-2" ~shares_history records)))
+    (fst (seed (Front.of_records ~trace_id:"trace-2" ~composer records)))
 ;;
 
 (* An errored turn's record has no stop reason; an official client's window
-   counts a list of its own, so its newer record is not this history's. *)
+   counts a list of its own, so its newer record is not this history's; a
+   runtime the catalog no longer has could be either, so its record is not
+   read. *)
 let test_an_errored_or_official_client_record_is_skipped () =
   let records =
     [ record ~turn:10 (Some (30, 100))
     ; record ~turn:12 ~finish:None (Some (5, 110))
     ; record ~turn:13 ~runtime:"claude_code" (Some (5, 120))
     ; record ~turn:14 (None)
+    ; record ~turn:15 ~runtime:"gone" (Some (5, 130))
     ]
   in
   let first_atom, src = seed (of_records records) in
@@ -133,6 +137,43 @@ let test_the_wire_observation_names_the_runtime_when_present () =
 
 let test_no_record_means_no_seed () =
   check bool "empty" true (Option.is_none (of_records []))
+;;
+
+let composer_t =
+  testable (fun fmt c -> Format.pp_print_string fmt (Front.composer_to_string c)) ( = )
+;;
+
+(* Every execution kind answers, and a runtime the catalog does not
+   materialize answers that it is unknown rather than either. *)
+let test_the_composer_is_read_from_the_execution_kind () =
+  let agent_core =
+    Runtime_execution.Agent_core
+      (Agent_core.Llm_provider.Provider_config.make
+         ~kind:Agent_core.Llm_provider.Provider_config.OpenAI_compat
+         ~model_id:"model-a"
+         ~base_url:"https://provider.example"
+         ())
+  in
+  check composer_t "agent core composes from the history" Front.Composes_from_the_history
+    (Front.composer_of_execution agent_core);
+  check composer_t "claude code hands over its own list" Front.Hands_over_its_own_list
+    (Front.composer_of_execution
+       (Runtime_execution.Claude_code { cli_path = "claude"; model = None; timeout_s = 1. }));
+  check composer_t "codex hands over its own list" Front.Hands_over_its_own_list
+    (Front.composer_of_execution
+       (Runtime_execution.Codex_app_server { cli_path = "codex"; model = None; timeout_s = 1. }));
+  check composer_t "antigravity hands over its own list" Front.Hands_over_its_own_list
+    (Front.composer_of_execution
+       (Runtime_execution.Antigravity_cli
+          { cli_path = "antigravity"
+          ; model = "m"
+          ; agent = None
+          ; effort = None
+          ; oauth_source = "env"
+          ; timeout_s = 1.
+          ; add_dirs = []
+          }));
+  check composer_t "not in the catalog" Front.Not_materialized (Front.composer_of_runtime None)
 ;;
 
 let test_of_ledger_reads_the_last_request_front () =
@@ -196,6 +237,8 @@ let () =
             test_the_wire_observation_names_the_runtime_when_present
         ; test_case "no record" `Quick test_no_record_means_no_seed
         ; test_case "another session" `Quick test_another_sessions_record_is_another_history
+        ; test_case "composer from the execution kind" `Quick
+            test_the_composer_is_read_from_the_execution_kind
         ] )
     ; ( "front"
       , [ test_case "of_ledger" `Quick test_of_ledger_reads_the_last_request_front

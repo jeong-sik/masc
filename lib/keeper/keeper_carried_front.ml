@@ -25,13 +25,39 @@ let record_runtime (record : Turn_record.t) =
   | None -> record.Turn_record.runtime_profile
 ;;
 
-let of_records ~shares_history ~trace_id (records : Turn_record.t list) =
+type composer =
+  | Composes_from_the_history
+  | Hands_over_its_own_list
+  | Not_materialized
+
+let composer_of_execution = function
+  | Runtime_execution.Agent_core _ -> Composes_from_the_history
+  | Runtime_execution.Codex_app_server _
+  | Runtime_execution.Claude_code _
+  | Runtime_execution.Antigravity_cli _ -> Hands_over_its_own_list
+;;
+
+let composer_of_runtime = function
+  | Some (runtime : Runtime.t) -> composer_of_execution runtime.Runtime.execution
+  | None -> Not_materialized
+;;
+
+let composer_to_string = function
+  | Composes_from_the_history -> "composes_from_the_history"
+  | Hands_over_its_own_list -> "hands_over_its_own_list"
+  | Not_materialized -> "not_materialized"
+;;
+
+let of_records ~composer ~trace_id (records : Turn_record.t list) =
   List.fold_left
     (fun newest (record : Turn_record.t) ->
-       match record.Turn_record.model_input_window, record.Turn_record.finish_reason with
-       | Some window, Some _
-         when String.equal record.Turn_record.trace_id trace_id
-              && shares_history (record_runtime record) ->
+       match
+         ( record.Turn_record.model_input_window
+         , record.Turn_record.finish_reason
+         , composer (record_runtime record) )
+       with
+       | Some window, Some _, Composes_from_the_history
+         when String.equal record.Turn_record.trace_id trace_id ->
          let turn = record.Turn_record.absolute_turn in
          (match newest with
           | Some (newest_turn, _) when newest_turn >= turn -> newest
@@ -43,30 +69,17 @@ let of_records ~shares_history ~trace_id (records : Turn_record.t list) =
                 ; atom_count = window.Turn_record.total_atoms
                 ; source = Turn_record { turn }
                 } ))
-       | Some _, Some _ | Some _, None | None, (Some _ | None) -> newest)
+       | ( Some _
+         , Some _
+         , (Composes_from_the_history | Hands_over_its_own_list | Not_materialized) )
+       | Some _, None, _
+       | None, _, _ -> newest)
     None
     records
   |> Option.map snd
 ;;
 
 let records_read = 200
-
-(* Whether a runtime's requests are composed from the checkpoint history, so
-   that a window it recorded is a range of atoms of this history. Only an
-   Agent Core binding composes here; an official client assembles its own
-   list and hands it over, so its counts are positions in that list. A
-   runtime the catalog no longer materializes is not read: nothing says
-   which kind it was. *)
-let shares_history runtime_id =
-  match Runtime.get_runtime_by_id runtime_id with
-  | Some runtime ->
-    (match runtime.Runtime.execution with
-     | Runtime_execution.Agent_core _ -> true
-     | Runtime_execution.Codex_app_server _
-     | Runtime_execution.Claude_code _
-     | Runtime_execution.Antigravity_cli _ -> false)
-  | None -> false
-;;
 
 let read_seed ~config ~keeper_name ~trace_id =
   let store = Keeper_types_support.keeper_turn_record_store config keeper_name in
@@ -77,7 +90,9 @@ let read_seed ~config ~keeper_name ~trace_id =
          match Turn_record.of_json json with
          | Error _ -> None
          | Ok record -> Some record)
-  |> of_records ~shares_history ~trace_id
+  |> of_records
+       ~composer:(fun runtime_id -> composer_of_runtime (Runtime.get_runtime_by_id runtime_id))
+       ~trace_id
 ;;
 
 let for_history ~atom_count seed = if seed.atom_count > atom_count then None else Some seed

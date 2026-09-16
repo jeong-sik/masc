@@ -343,8 +343,9 @@ type request_view =
         , Agent_core.Llm_provider.Reasoning_history_projection.error )
         result
         (** The dialect's reasoning projection over [carried] alone, or why
-            it declined; [carried] itself then goes out and the backend
-            judges it. *)
+            it declined; [carried] itself is then handed over, and the
+            backend, running the same projection, refuses the request with
+            its typed error. *)
   }
 (** One request as {!For_testing.request_view} views it: composed in the
     durable vocabulary first, projected for the wire afterwards. The order

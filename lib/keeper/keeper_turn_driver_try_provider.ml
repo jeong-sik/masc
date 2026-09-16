@@ -55,8 +55,9 @@ type try_provider_ctx =
        [None] leaves eviction to a refusal alone. *)
     context_marks : Runtime_schema.context_marks option
   ; (* Where the carried range starts when the process holds no ledger for
-       this (keeper, runtime) pair: the range the newest completed turn record
-       on the runtime measured. Read once per attempt, on that path only. *)
+       this (keeper, runtime) pair: the range the newest completed Agent Core
+       turn record on the trace measured, whichever runtime ran it. Read once
+       per attempt, on that path only. *)
     carried_front_seed : unit -> Keeper_carried_front.seed option
   ; base_path : string
   ; keeper_name : string
@@ -768,11 +769,12 @@ let bounded_model_input_projection
   (* Scoped to the attempt, written by the one fiber that drives it. The
      closure below runs per provider request — 62 to 83 of them in one keeper
      turn on the traces this window's own comment cites — and a keeper whose
-     history carries a malformed tag falls back on every one of them, forever.
-     Narrating that per request is the shape this codebase already had to undo
-     once: [Reasoning_history_projection.observe]'s comment records a WARN
-     firing ~973x/day about routine normalisation before it was demoted. *)
-  let fallback_reported = ref false in
+     carried range holds a malformed tag declines on every one of them until
+     the range moves past it. Narrating that per request is the shape this
+     codebase already had to undo once: [Reasoning_history_projection.observe]'s
+     comment records a WARN firing ~973x/day about routine normalisation
+     before it was demoted. *)
+  let decline_reported = ref false in
   (* Once per attempt, not per request, for the same reason: where the range
      started for the first request, and a range that passes the request-body
      cap. Each is a fact an operator reads against the declaration; neither
@@ -866,29 +868,29 @@ let bounded_model_input_projection
     in
     let composed = view.composed in
     let history_atom_count = composed.history_atom_count in
-    let transmitted, measurement =
+    let transmitted =
       match view.wire with
-      | Ok transmitted -> transmitted, Turn_record.Wire_shape
+      | Ok transmitted -> Some transmitted
       | Error error ->
-        (* A refusal here must not become the turn's refusal: the projection
-           validates reasoning provenance across the list it is given, and
-           the backend runs the same check over the transmitted list and
-           refuses there with a typed error the eviction retry can catch.
-           Handing over the carried range as the checkpoint holds it leaves
-           that judgement to the backend; the cost is reporting bytes the
-           wire deletes. *)
-        if not !fallback_reported
+        (* The backend runs this same projection over this same list and
+           refuses the request with its typed error, which the turn's failure
+           route reads; the carried range is handed over for that refusal,
+           and nothing is observed for a body that does not go out. A
+           malformed tag outside the carried range no longer reaches the
+           projection at all. *)
+        if not !decline_reported
         then (
-          fallback_reported := true;
+          decline_reported := true;
           Log.Keeper.warn
-            "%s: model input measured against durable shape; reasoning \
-             projection declined: %s"
+            "%s: reasoning projection declined over the carried range; the \
+             backend refuses the request: %s"
             ctx.keeper_name
             (Agent_core.Llm_provider.Reasoning_history_projection
              .error_to_string
                error));
-        view.carried, Turn_record.Durable_shape
+        None
     in
+    let windowed = Option.value transmitted ~default:view.carried in
     if not !front_reported
     then (
       front_reported := true;
@@ -897,7 +899,7 @@ let bounded_model_input_projection
           List.fold_left
             (fun sum message -> sum + measure_message_bytes message)
             0
-            transmitted)
+            windowed)
       in
       Log.Keeper.info
         ~keeper_name:ctx.keeper_name
@@ -927,14 +929,17 @@ let bounded_model_input_projection
          seed.atom_count
          history_atom_count
      | Some _ | None -> ());
-    Option.iter
-      (fun observe ->
-         observe
-           ~measurement
-           (Runtime_model_input_tail_window.observe
-              ~history_atom_count
-              composed.projection))
-      ctx.on_model_input_window_observation;
+    (match transmitted with
+     | Some _ ->
+       Option.iter
+         (fun observe ->
+            observe
+              ~measurement:Turn_record.Wire_shape
+              (Runtime_model_input_tail_window.observe
+                 ~history_atom_count
+                 composed.projection))
+         ctx.on_model_input_window_observation
+     | None -> ());
     (* What this request carried, for the ledger the after-turn hook writes
        once the provider reports its count, and for the front a refusal
        moves: the carried atom range and the bytes of the per-request tail
@@ -980,8 +985,8 @@ let bounded_model_input_projection
           ; tail_bytes
           });
     match ctx.model_input_projection with
-    | None -> Ok transmitted
-    | Some inner -> inner transmitted
+    | None -> Ok windowed
+    | Some inner -> inner windowed
 ;;
 
 let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (ctx : try_provider_ctx) candidate =

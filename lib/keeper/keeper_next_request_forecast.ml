@@ -127,14 +127,10 @@ let carry ~measure ~front ~counted_tokens messages =
    An official-client runtime carries none: the spawned client owns its
    context. *)
 let lane_for ~runtime_id (runtime : Runtime.t option) =
-  match runtime with
-  | None -> Error (Not_materialized { runtime_id })
-  | Some runtime ->
-    (match runtime.Runtime.execution with
-     | Runtime_execution.Codex_app_server _
-     | Runtime_execution.Claude_code _
-     | Runtime_execution.Antigravity_cli _ -> Error (Not_agent_core { runtime_id })
-     | Runtime_execution.Agent_core _ -> Ok ())
+  match Keeper_carried_front.composer_of_runtime runtime with
+  | Keeper_carried_front.Not_materialized -> Error (Not_materialized { runtime_id })
+  | Keeper_carried_front.Hands_over_its_own_list -> Error (Not_agent_core { runtime_id })
+  | Keeper_carried_front.Composes_from_the_history -> Ok ()
 ;;
 
 type composition =

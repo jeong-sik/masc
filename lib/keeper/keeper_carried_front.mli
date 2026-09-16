@@ -12,7 +12,8 @@
     runtime, the seed is the range the newest completed Agent Core turn
     record on the trace measured, whichever runtime measured it, read as
     [total_atoms - transmitted_atoms]; a lane walking to its next candidate
-    starts where the last one left off rather than from the whole history.
+    starts from the range the last completed turn carried rather than from
+    the whole history.
     With neither, the caller has no atom to start from and carries the whole
     history; the provider judges it, and the turn driver owns the one move a
     refusal forces before any usage has been counted, which
@@ -43,31 +44,52 @@ type origin =
 
 val of_ledger : Keeper_model_input_ledger.t -> seed
 
+(** Who composes a runtime's request, which says whose atoms a window it
+    recorded counts. *)
+type composer =
+  | Composes_from_the_history
+      (** An Agent Core binding: the request is cut from the keeper's
+          checkpoint history, so its window is a range of atoms of that
+          history. *)
+  | Hands_over_its_own_list
+      (** An official client: masc hands over a list and the client
+          assembles the request, so the window's counts are positions in
+          that list, not in the checkpoint history. *)
+  | Not_materialized
+      (** The catalog has no such runtime; which kind it was is unknown. *)
+
+val composer_of_execution : Runtime_execution.t -> composer
+
+val composer_of_runtime : Runtime.t option -> composer
+(** {!composer_of_execution} of a materialized runtime, {!Not_materialized}
+    of [None]. The one reader of this question: the seed and the forecast's
+    lane check both put it. *)
+
+val composer_to_string : composer -> string
+
 val of_records
-  :  shares_history:(string -> bool)
+  :  composer:(string -> composer)
   -> trace_id:string
   -> Turn_record.t list
   -> seed option
 (** The newest completed record of session [trace_id] carrying a
-    [model_input_window] whose runtime [shares_history], in any order. An
-    errored turn's record names the runtime that was asked, not the lane
-    whose request it measured, so only a record with a stop reason is read;
-    a record of another session measured another history; and
-    [shares_history runtime_id] says whether that runtime composes its
-    request from the checkpoint history the window's atoms are positions
-    in — an Agent Core binding does, an official client hands over a list of
-    its own, whose counts are not positions here. *)
+    [model_input_window] whose runtime {!Composes_from_the_history}, in any
+    order. An errored turn's record names the runtime that was asked, not
+    the lane whose request it measured, so only a record with a stop reason
+    is read; a record of another session measured another history; a record
+    whose runtime {!Hands_over_its_own_list} counted another list; and one
+    whose runtime is {!Not_materialized} is not read, since nothing says
+    which it was. *)
 
 val read_seed
   :  config:Workspace.config
   -> keeper_name:string
   -> trace_id:string
   -> seed option
-(** {!of_records} over the keeper's newest {!records_read} turn records; a
-    runtime shares the history when the catalog materializes it as an Agent
-    Core binding, and a runtime the catalog no longer has is not read. Reads
-    the record file on the calling fiber; a turn calls it once, and only
-    while the pair has no ledger. *)
+(** {!of_records} over the keeper's newest {!records_read} turn records,
+    each record's runtime answered by {!composer_of_runtime} from the live
+    catalog. Reads the record file on the calling fiber; a turn calls it
+    once, and only while the pair has no ledger. *)
 
 val for_history : atom_count:int -> seed -> seed option
 (** The seed when the history still has at least the atoms it was measured

@@ -104,8 +104,8 @@ let test_projected_first_the_atom_count_would_be_the_dialects () =
 ;;
 
 (* Reasoning provenance on a [User] message is a malformed history: the
-   projection declines, and the carried range goes out as the checkpoint
-   holds it for the backend to judge. *)
+   projection declines, and the carried range is handed over as the
+   checkpoint holds it for the backend to refuse with its typed error. *)
 let test_a_declined_projection_hands_over_the_carried_range () =
   let source =
     match

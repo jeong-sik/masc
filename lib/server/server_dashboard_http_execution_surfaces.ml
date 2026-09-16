@@ -82,41 +82,71 @@ let warm_shell_cache (state : Mcp_server.server_state) =
          Log.Dashboard.warn "shell cache pre-warm failed: %s" (Printexc.to_string exn))
 ;;
 
-(* Delta-push: track last broadcast hash per event_type to skip unchanged payloads. *)
-let last_broadcast_hash : (string, Digestif.SHA256.t) Hashtbl.t = Hashtbl.create 8
-let broadcast_hash_mu = Stdlib.Mutex.create ()
+(* Delta push: the last payload text broadcast per event_type, to skip an
+   unchanged payload. *)
+let last_broadcast_payload : (string, string) Hashtbl.t = Hashtbl.create 8
+let broadcast_payload_mu = Stdlib.Mutex.create ()
+
+(* Where a surface payload is encoded. Either way it is encoded once, and the
+   SSE frame is written around those bytes.
+
+   An operator snapshot is 2.8 MB: encoding it, hashing it for the delta check
+   and encoding it again for the frame took 27 ms standalone, and the snapshot
+   refresh fiber's runs on the scheduler domain were 35-63 ms (2026-09-16).
+
+   The pool hands the fiber back to the scheduler while it encodes, so only a
+   caller that may yield takes it. [still_current] is asked after the encoding
+   returns, and nothing between that answer and the broadcast yields, so a
+   payload another publication replaced meanwhile is not broadcast after the
+   newer one; [on_superseded] runs instead. *)
+type surface_encoding =
+  | Encode_inline
+  | Encode_on_pool of
+      { still_current : unit -> bool
+      ; on_superseded : unit -> unit
+      }
 
 (** Broadcast a single cached surface to all Observer SSE sessions.
-    [event_type] becomes the SSE event "type" field.
-    Skips broadcast when payload hash matches the previous one (delta push).
-    Mutex-protected: safe to call from concurrent fibers. *)
-let broadcast_cached_surface ~event_type (json : Yojson.Safe.t) : unit =
-  let serialized = Yojson.Safe.to_string json in
-  let hash = Digestif.SHA256.digest_string serialized in
-  let should_broadcast =
-    Stdlib.Mutex.protect broadcast_hash_mu (fun () ->
-      let changed =
-        match Hashtbl.find_opt last_broadcast_hash event_type with
-        | Some prev -> not (Digestif.SHA256.equal prev hash)
-        | None -> true
+    [event_type] becomes the SSE event "type" field. Skips the broadcast when
+    the payload text equals the previous one for [event_type] (delta push). *)
+let broadcast_cached_surface ~encoding ~event_type (json : Yojson.Safe.t) : unit =
+  let payload =
+    match encoding with
+    | Encode_inline -> Some (Sse_wire.encode_json json)
+    | Encode_on_pool { still_current; on_superseded } ->
+      let payload =
+        Domain_pool_ref.submit_cpu_or_inline (fun () -> Sse_wire.encode_json json)
       in
-      if changed
-      then (
-        Hashtbl.replace last_broadcast_hash event_type hash;
-        true)
-      else false)
+      if still_current ()
+      then Some payload
+      else (
+        Log.Dashboard.routine
+          "%s: payload superseded while encoding, skipping broadcast"
+          event_type;
+        on_superseded ();
+        None)
   in
-  if should_broadcast
-  then (
-    let sse_json =
-      `Assoc
-        [ "type", `String event_type
-        ; "payload", json
-        ; "ts_unix", `Float (Time_compat.now ())
-        ]
+  match payload with
+  | None -> ()
+  | Some payload ->
+    let should_broadcast =
+      Stdlib.Mutex.protect broadcast_payload_mu (fun () ->
+        match Hashtbl.find_opt last_broadcast_payload event_type with
+        | Some previous when String.equal previous payload.Sse_wire.text -> false
+        | Some _ | None ->
+          Hashtbl.replace last_broadcast_payload event_type payload.Sse_wire.text;
+          true)
     in
-    Sse.broadcast_to Observers sse_json)
-  else Log.Dashboard.routine "%s: payload unchanged, skipping broadcast" event_type
+    if should_broadcast
+    then
+      Sse.broadcast_encoded_to
+        Observers
+        (Sse_wire.encoded_object
+           [ "type", Sse_wire.encode_json (`String event_type)
+           ; "payload", payload
+           ; "ts_unix", Sse_wire.encode_json (`Float (Time_compat.now ()))
+           ])
+    else Log.Dashboard.routine "%s: payload unchanged, skipping broadcast" event_type
 ;;
 
 let execution_actor_for_request ~base_path request =
@@ -127,26 +157,59 @@ let execution_actor_for_request ~base_path request =
    initializers, because Server_dashboard_http_core_operator is compiled before
    Sse is in scope here and so cannot name these bodies. They are ordinary
    functions now; the refresh loops take them as arguments (#25927). *)
+let operator_snapshot_publication_is_current
+      (publication :
+        Server_dashboard_http_core_operator.operator_snapshot_publication)
+  =
+  let current =
+    Server_dashboard_http_core_operator.operator_snapshot_publication ()
+  in
+  String.equal current.epoch publication.epoch
+  && Int.equal current.generation publication.generation
+  && Int.equal current.compute_sequence publication.compute_sequence
+  && Int.equal current.terminal_sequence publication.terminal_sequence
+;;
+
+let operator_snapshot_json =
+  Server_dashboard_http_core_operator.operator_snapshot_publication_json
+;;
+
 let broadcast_operator_snapshot
       (publication :
         Server_dashboard_http_core_operator.operator_snapshot_publication)
   =
-    let current =
-      Server_dashboard_http_core_operator.operator_snapshot_publication ()
-    in
-    if String.equal current.epoch publication.epoch
-       && Int.equal current.generation publication.generation
-       && Int.equal
-            current.compute_sequence
-            publication.compute_sequence
-       && Int.equal
-            current.terminal_sequence
-            publication.terminal_sequence
+    if operator_snapshot_publication_is_current publication
     then
       broadcast_cached_surface
+        ~encoding:Encode_inline
         ~event_type:"operator_snapshot"
-        (Server_dashboard_http_core_operator.operator_snapshot_publication_json
-           publication)
+        (operator_snapshot_json publication)
+;;
+
+(* A publication that replaced this one while it was encoding is handed on.
+   An invalidation or a failure was broadcast by whoever published it; a
+   success the /api/v1/operator route published is broadcast by nobody else,
+   so the current success is broadcast in this one's place. When its publisher
+   has already sent it, the delta check drops it. *)
+let rec broadcast_refreshed_operator_snapshot
+      (publication :
+        Server_dashboard_http_core_operator.operator_snapshot_publication)
+  =
+    if operator_snapshot_publication_is_current publication
+    then
+      broadcast_cached_surface
+        ~encoding:
+          (Encode_on_pool
+             { still_current =
+                 (fun () -> operator_snapshot_publication_is_current publication)
+             ; on_superseded = broadcast_current_successful_operator_snapshot
+             })
+        ~event_type:"operator_snapshot"
+        (operator_snapshot_json publication)
+
+and broadcast_current_successful_operator_snapshot () =
+  let current = Server_dashboard_http_core_operator.operator_snapshot_publication () in
+  if current.has_success then broadcast_refreshed_operator_snapshot current
 ;;
 
 let () =
@@ -161,7 +224,8 @@ let () =
        | Some publication -> broadcast_operator_snapshot publication)
 ;;
 
-let broadcast_operator_digest = broadcast_cached_surface ~event_type:"operator_digest"
+let broadcast_operator_digest =
+  broadcast_cached_surface ~encoding:Encode_inline ~event_type:"operator_digest"
 
 let execution_cache : cached_surface =
   Server_dashboard_http_cache.create_cached_surface
@@ -408,6 +472,7 @@ let invalidate_execution_cache () =
     (fun generation ->
        try
          broadcast_cached_surface
+           ~encoding:Encode_inline
            ~event_type:"execution_snapshot"
            (`Assoc
                [ execution_publication_epoch_field, `String execution_publication_epoch
@@ -1162,6 +1227,7 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
       if publish_execution_success_if_current ~generation json
       then (
         broadcast_cached_surface
+          ~encoding:Encode_inline
           ~event_type:"execution_snapshot"
           (refresh_execution_default_light_http_body ~config:workspace_config);
         !broadcast_namespace_truth_ref state))
@@ -1248,6 +1314,7 @@ let start_transport_health_refresh_loop ~state ~sw ~clock =
   in
   let broadcast_snapshot () =
     broadcast_cached_surface
+      ~encoding:Encode_inline
       ~event_type:"transport_health_snapshot"
       (Server_dashboard_http_cache.cached_surface_json transport_health_cache
        |> with_transport_health_metadata)

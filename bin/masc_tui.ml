@@ -6716,6 +6716,7 @@ let launch_context_inspector_load state ~mailbox ~keeper_name =
           { Masc_tui_context_inspector.turn = error
           ; provider_input = error
           ; response = error
+          ; forecast = error
           }
     in
     enqueue_async mailbox
@@ -6728,6 +6729,7 @@ let launch_context_inspector_load state ~mailbox ~keeper_name =
          server stops writing a body nobody reads. *)
       let superseded, supersede = Eio.Promise.create () in
       supersede_context_inspector_load state
+        (* fire-and-forget: the bool try_resolve returns (already resolved?) is not needed. *)
         (Some (fun () -> ignore (Eio.Promise.try_resolve supersede ())));
       Eio.Fiber.fork_daemon ~sw (fun () ->
           Eio.Fiber.first
@@ -6743,6 +6745,7 @@ let launch_context_inspector_load state ~mailbox ~keeper_name =
            , { Masc_tui_context_inspector.turn = error
              ; provider_input = error
              ; response = error
+             ; forecast = error
              } ))
 
 let open_context_inspector state ~mailbox ~keeper_name =
@@ -13989,14 +13992,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              if not state.msg_journal_reads_refused then
                journal_targets :=
                  journal_fetch_targets
-                   ~held:
-                     (List.map turn_log_request_id
-                        (List.filter turn_log_holds_the_turn
-                           (settled_logs_for_keeper state keeper_name))
-                     @ List.map
-                         (fun entry -> entry.sent_request.Keeper_chat.request_id)
-                         state.msg_inflight
-                     @ state.msg_journal_inflight)
+                   ~held:(journal_held_request_ids state keeper_name)
                    ~unavailable:state.msg_journal_unavailable
                    (List.filter_map
                       (fun (row : Keeper_chat_history.row) ->
@@ -14103,6 +14099,16 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             (Printf.sprintf "journal for %s not readable: %s"
                (Keeper_chat.compact_request_id operation_id)
                (Keeper_chat.terminal_safe_text detail))
+      | Error (Keeper_chat_log.Cursor_refused _ as refusal) ->
+          (* The positions this read held no longer place in the journal: it
+             was replaced or shortened while its pages were read. Not
+             remembered — the next load starts from the first row, which holds
+             no cursor to refuse. *)
+          add_event state "error"
+            (Printf.sprintf "journal for %s: %s"
+               (Keeper_chat.compact_request_id operation_id)
+               (Keeper_chat.terminal_safe_text
+                  (Keeper_chat_log.events_error_to_string refusal)))
       | Error (Keeper_chat_log.Events_refused detail) ->
           (* This client's credential, not this journal: said once, and no
              journal is asked for again this session. *)
@@ -14682,6 +14688,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                displayed-time projection across that complete window; scroll
                pins retain row identity rather than this cache position. *)
             state.msg_loaded <- rows @ state.msg_loaded;
+            (* Loaded rows arrive here too: a held turn whose rows only an
+               older page carries gets its calls' outcome and duration the
+               same way a refreshed page gives them. *)
+            enrich_held_logs_from_rows state ~keeper_name rows;
             state.msg_loaded_dropped <-
               state.msg_loaded_dropped
               + page.Keeper_chat_history.decoded.Keeper_chat_history.dropped;

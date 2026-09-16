@@ -8,6 +8,25 @@ val format_event_yojson :
   ?id:int -> ?event_type:string -> Yojson.Safe.t -> string
 (** Frame JSON without allocating an intermediate serialized JSON string. *)
 
+(** A JSON value with its compact encoding. Encoding a large value is most of
+    the cost of broadcasting it, so a caller can encode once, off its fiber,
+    and hand the result on. Only {!encode_json} and {!encoded_object} make one,
+    so [text] is always the encoding of [json]. *)
+type encoded_json = private
+  { json : Yojson.Safe.t
+  ; text : string  (** Compact JSON; it holds no line break. *)
+  }
+
+val encode_json : Yojson.Safe.t -> encoded_json
+
+val encoded_object : (string * encoded_json) list -> encoded_json
+(** The object of these fields. Its text joins the fields' texts without
+    encoding them again, and is the same bytes {!encode_json} writes for the
+    whole object. *)
+
+val format_event_encoded : ?id:int -> ?event_type:string -> encoded_json -> string
+(** {!format_event_yojson} of [encoded.json], written from [encoded.text]. *)
+
 type observer_cursor = { instance_id : string; event_id : int }
 type observer_reset = Instance_changed | Unscoped_cursor
 type observer_replay = Fresh | Resumed | Reset of observer_reset

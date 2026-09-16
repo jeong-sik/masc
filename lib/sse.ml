@@ -1009,8 +1009,19 @@ let broadcast_is_unobservable target ~buffer ~notify_external =
      this path. *)
   | All | Observers | Agent_streams -> false
 
-let broadcast_deliver ~buffer ~notify_external ~event_type target json =
+(* What a broadcast carries: a value to encode in the frame, or a value encoded
+   already, whose text the frame is written from. *)
+type broadcast_payload =
+  | Value of Yojson.Safe.t
+  | Encoded of Sse_wire.encoded_json
+
+let broadcast_deliver ~buffer ~notify_external ~event_type target payload =
   let t0 = Time_compat.now () in
+  let json =
+    match payload with
+    | Value json -> json
+    | Encoded encoded -> encoded.Sse_wire.json
+  in
   let jsonrpc_payload =
     Sse_jsonrpc_filter.jsonrpc_message_for_agent_stream json
   in
@@ -1028,9 +1039,15 @@ let broadcast_deliver ~buffer ~notify_external ~event_type target json =
   (* Write JSON directly into the SSE event buffer, avoiding the
      intermediate [Yojson.Safe.to_string] allocation.  The output
      is byte-for-byte identical to the previous two-step approach. *)
+  let frame =
+    match payload with
+    | Value json -> format_event_yojson ~id:current_event_id ~event_type json
+    | Encoded encoded ->
+      Sse_wire.format_event_encoded ~id:current_event_id ~event_type encoded
+  in
   let delivery =
     { event_id = current_event_id
-    ; frame = format_event_yojson ~id:current_event_id ~event_type json
+    ; frame
     ; payload = json
     ; emitted_at = t0
     ; audience = Broadcast_audience target
@@ -1112,19 +1129,21 @@ let broadcast_deliver ~buffer ~notify_external ~event_type target json =
       }
 
 let broadcast_impl ?(buffer = true) ?(notify_external = true)
-    ?(event_type = "message") target json =
+    ?(event_type = "message") target payload =
   if broadcast_is_unobservable target ~buffer ~notify_external
   then Transport_metrics.inc_sse_broadcast_skipped_no_observer ()
-  else broadcast_deliver ~buffer ~notify_external ~event_type target json
+  else broadcast_deliver ~buffer ~notify_external ~event_type target payload
 
 (** Broadcast event to all connected clients (backward-compatible). *)
-let broadcast json = broadcast_impl All json
+let broadcast json = broadcast_impl All (Value json)
 
 (** Broadcast event to sessions matching [target].
     - [All]: every session (same as [broadcast])
     - [Observers]: dashboard / read-only viewers only
     - [Agent_streams]: MCP agent sessions only *)
-let broadcast_to target json = broadcast_impl target json
+let broadcast_to target json = broadcast_impl target (Value json)
+
+let broadcast_encoded_to target encoded = broadcast_impl target (Encoded encoded)
 
 (** Broadcast an ephemeral presence/awareness event. Presence events are live
     only: they are not replay-buffered and do not fan out through generic
@@ -1132,7 +1151,7 @@ let broadcast_to target json = broadcast_impl target json
     normal [broadcast] / [broadcast_to] emission. *)
 let broadcast_presence json =
   broadcast_impl ~buffer:false ~notify_external:false ~event_type:"presence"
-    Presence_only json
+    Presence_only (Value json)
 
 (** Send a JSON-RPC message to a specific session.
     Enqueues the event in the session's stream for asynchronous delivery. *)

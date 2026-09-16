@@ -843,6 +843,8 @@ type page_start =
   | From_first_row
   | From_offset of int
 
+let first_row = From_first_row
+
 let page_start_of_wire = function
   | None -> Some From_first_row
   | Some offset -> if offset >= 0 then Some (From_offset offset) else None
@@ -864,18 +866,69 @@ type page =
   ; next_offset : int
   }
 
+type cursor_refusal =
+  | Offset_past_rows
+  | Offset_inside_row
+  | Cursor_pair_mismatch
+
+let cursor_refusal_to_wire = function
+  | Offset_past_rows -> "since_offset_past_rows"
+  | Offset_inside_row -> "since_offset_inside_row"
+  | Cursor_pair_mismatch -> "cursor_mismatch"
+;;
+
+let cursor_refusal_of_wire = function
+  | "since_offset_past_rows" -> Some Offset_past_rows
+  | "since_offset_inside_row" -> Some Offset_inside_row
+  | "cursor_mismatch" -> Some Cursor_pair_mismatch
+  | _ -> None
+;;
+
+type cursor_mismatch =
+  | Offset_without_held_seq of int
+  | Row_before_offset_past_held_seq of
+      { offset : int
+      ; since_seq : int
+      ; row_seq : int
+      }
+  | Row_at_offset_not_past_held_seq of
+      { offset : int
+      ; since_seq : int
+      ; row_seq : int
+      }
+
 type page_failure =
   | Page_offset_past_rows of
       { offset : int
       ; rows_end : int
       }
   | Page_offset_inside_row of int
-  | Page_cursor_mismatch of
-      { offset : int
-      ; since_seq : int
-      ; row_seq : int
-      }
+  | Page_cursor_mismatch of cursor_mismatch
+  | Page_limit_not_positive of int
   | Page_corrupt of string
+
+let cursor_mismatch_to_string = function
+  | Offset_without_held_seq offset ->
+    Printf.sprintf
+      "since_offset %d was sent without a since_seq: an offset only places a page \
+       beside the seq the page before handed back"
+      offset
+  | Row_before_offset_past_held_seq { offset; since_seq; row_seq } ->
+    Printf.sprintf
+      "the row before since_offset %d has seq %d, which is already past since_seq \
+       %d: the two cursors did not come from the same page, and the rows between \
+       them would never be served"
+      offset
+      row_seq
+      since_seq
+  | Row_at_offset_not_past_held_seq { offset; since_seq; row_seq } ->
+    Printf.sprintf
+      "the row at since_offset %d has seq %d, which is not after since_seq %d: the \
+       two cursors did not come from the same page"
+      offset
+      row_seq
+      since_seq
+;;
 
 let page_failure_to_string = function
   | Page_offset_past_rows { offset; rows_end } ->
@@ -885,85 +938,217 @@ let page_failure_to_string = function
       rows_end
   | Page_offset_inside_row offset ->
     Printf.sprintf "since_offset %d does not start a row" offset
-  | Page_cursor_mismatch { offset; since_seq; row_seq } ->
-    Printf.sprintf
-      "the row at since_offset %d has seq %d, which is not after since_seq %d: \
-       the two cursors did not come from the same page"
-      offset
-      row_seq
-      since_seq
+  | Page_cursor_mismatch mismatch -> cursor_mismatch_to_string mismatch
+  | Page_limit_not_positive limit ->
+    Printf.sprintf "a page of %d rows serves nothing and never advances" limit
   | Page_corrupt detail -> detail
 ;;
 
 let empty_page start = { events = []; has_more = false; next_offset = page_start_offset start }
 
-(* The first decoded row after a held offset must lie past the held seq: the
-   page that handed out both cursors ended on the row before it, and seqs
-   increase down the journal. From the first row nothing is held to compare. *)
-let cursor_mismatch ~start ~since_seq (journaled : journaled_event) =
+(* The row that ends at [row_end], skipping blank ones backwards. [row_end] is
+   always just past a ['\n'], so the row before it starts after the previous
+   one. *)
+let rec row_ending_at rows ~row_end =
+  if row_end <= 0
+  then None
+  else (
+    let line_end = row_end - 1 in
+    let row_start =
+      match String.rindex_from_opt rows (line_end - 1) '\n' with
+      | Some newline -> newline + 1
+      | None -> 0
+    in
+    let line = String.sub rows row_start (line_end - row_start) in
+    if String.equal (String.trim line) ""
+    then row_ending_at rows ~row_end:row_start
+    else Some (row_start, line))
+;;
+
+let corrupt_row ~path ~offset detail =
+  Page_corrupt
+    (Printf.sprintf
+       "keeper_chat_event_log: corrupt journal line path=%s offset=%d: %s"
+       path
+       offset
+       detail)
+;;
+
+(* A held offset and a held seq have to be the two halves of one page's answer.
+   The page that handed them out ended on the row before the offset, and seqs
+   increase down the journal, so the row before the offset is at or before the
+   held seq and the row at the offset is past it. An offset ahead of its seq
+   would silently skip the rows between them, which is why both ends are
+   checked. Offset zero is the first row, which places no pair. *)
+let cursor_pair_failure ~path ~since_seq ~start rows =
+  match start with
+  | From_first_row -> None
+  | From_offset offset when offset <= 0 -> None
+  | From_offset offset ->
+    (match since_seq with
+     | Whole_turn -> Some (Page_cursor_mismatch (Offset_without_held_seq offset))
+     | After_seq held ->
+       (match row_ending_at rows ~row_end:offset with
+        | None -> None
+        | Some (row_start, line) ->
+          (match journaled_event_of_string line with
+           | Error detail -> Some (corrupt_row ~path ~offset:row_start detail)
+           | Ok (journaled : journaled_event) ->
+             if journaled.seq > held
+             then
+               Some
+                 (Page_cursor_mismatch
+                    (Row_before_offset_past_held_seq
+                       { offset; since_seq = held; row_seq = journaled.seq }))
+             else None)))
+;;
+
+(* The first row served from a held offset lies past the held seq; from the
+   first row nothing is held to compare. *)
+let first_row_failure ~since_seq ~start (journaled : journaled_event) =
   match start, since_seq with
-  | From_offset offset, After_seq held when journaled.seq <= held ->
-    Some (Page_cursor_mismatch { offset; since_seq = held; row_seq = journaled.seq })
+  | From_offset offset, After_seq held when offset > 0 && journaled.seq <= held ->
+    Some
+      (Page_cursor_mismatch
+         (Row_at_offset_not_past_held_seq
+            { offset; since_seq = held; row_seq = journaled.seq }))
   | From_offset _, (After_seq _ | Whole_turn) | From_first_row, (After_seq _ | Whole_turn)
     ->
     None
 ;;
 
-(* Rows are decoded one at a time from [start], and only until the page is
+(* The first non-blank row that starts at or after [position], which need not
+   be a row boundary, as (row start, line end, row end). *)
+let non_blank_row_from rows ~position =
+  let rows_end = String.length rows in
+  let first_start =
+    if position <= 0 || Char.equal rows.[position - 1] '\n'
+    then position
+    else (
+      match String.index_from_opt rows position '\n' with
+      | Some newline -> newline + 1
+      | None -> rows_end)
+  in
+  let rec from row_start =
+    if row_start >= rows_end
+    then None
+    else (
+      let line_end, row_end =
+        match String.index_from_opt rows row_start '\n' with
+        | Some newline -> newline, newline + 1
+        | None -> rows_end, rows_end
+      in
+      let line = String.sub rows row_start (line_end - row_start) in
+      if String.equal (String.trim line) ""
+      then from row_end
+      else Some (row_start, line, row_end))
+  in
+  from first_start
+;;
+
+(* Where a page from the first row starts reading when a seq is held. Skipping
+   to it one row at a time decoded every row at or before the held seq: the
+   TUI resumes a turn it partly holds that way, with no offset, so resuming
+   near the end of a 43,000-row journal decoded nearly all of it to serve a
+   few rows. Seqs increase down the journal, so the byte range is bisected
+   instead, decoding one row per step.
+
+   Rows starting before [low] are at or before the held seq, and rows
+   starting at or after [high] are past it. When the two meet, [low] is the
+   end of the last row at or before the seq, or 0, which is the offset such a
+   page hands back. A probed row that does not decode cannot say which side
+   of the seq it is on, so the bisection stops there and the page reads on
+   from [low] one row at a time: the corrupt row fails the page only if the
+   page reaches it. The rows skipped below [low] are not decoded, as rows
+   before a held offset are not. *)
+let offset_past_held_seq ~held rows =
+  let rec bisect ~low ~high =
+    if low >= high
+    then low
+    else (
+      let middle = low + ((high - low) / 2) in
+      match non_blank_row_from rows ~position:middle with
+      | None -> bisect ~low ~high:middle
+      | Some (row_start, _, _) when row_start >= high -> bisect ~low ~high:middle
+      | Some (row_start, line, row_end) ->
+        (match journaled_event_of_string line with
+         | Error _ -> low
+         | Ok (journaled : journaled_event) ->
+           if journaled.seq > held
+           then bisect ~low ~high:row_start
+           else bisect ~low:row_end ~high))
+  in
+  bisect ~low:0 ~high:(String.length rows)
+;;
+
+(* Rows are decoded one at a time from [start] (from the first row with a held
+   seq, from where [offset_past_held_seq] puts it), and only until the page is
    full and one more row past [since_seq] has shown whether another page
    follows. A request used to decode every row of the journal to serve at most
    [limit] of them, so reading a whole journal page by page decoded it once
-   per page. A corrupt row is found when a page reaches it. *)
+   per page. A corrupt row is found when a page reaches it. A row skipped for
+   lying at or before [since_seq] moves the offset handed back with it: an
+   empty page's two cursors have to be a pair this same reader accepts once
+   the journal grows. *)
 let page_of_rows ~path ~since_seq ~start ~limit rows =
   let rows_end = String.length rows in
   let offset = page_start_offset start in
-  if offset > rows_end
+  if limit < 1
+  then Error (Page_limit_not_positive limit)
+  else if offset > rows_end
   then Error (Page_offset_past_rows { offset; rows_end })
   else if offset > 0 && not (Char.equal rows.[offset - 1] '\n')
   then Error (Page_offset_inside_row offset)
   else (
-    let finish ~served ~has_more ~next_offset =
-      Ok { events = List.rev served; has_more; next_offset }
-    in
-    let rec loop ~row_start ~first ~served ~count ~next_offset =
-      if row_start >= rows_end
-      then finish ~served ~has_more:false ~next_offset
-      else (
-        let line_end, row_end =
-          match String.index_from_opt rows row_start '\n' with
-          | Some newline -> newline, newline + 1
-          | None -> rows_end, rows_end
-        in
-        let line = String.sub rows row_start (line_end - row_start) in
-        if String.equal (String.trim line) ""
-        then loop ~row_start:row_end ~first ~served ~count ~next_offset
+    match cursor_pair_failure ~path ~since_seq ~start rows with
+    | Some failure -> Error failure
+    | None ->
+      let finish ~served ~has_more ~next_offset =
+        Ok { events = List.rev served; has_more; next_offset }
+      in
+      let rec loop ~row_start ~first ~served ~count ~next_offset =
+        if row_start >= rows_end
+        then finish ~served ~has_more:false ~next_offset
         else (
-          match journaled_event_of_string line with
-          | Error detail ->
-            Error
-              (Page_corrupt
-                 (Printf.sprintf
-                    "keeper_chat_event_log: corrupt journal line path=%s offset=%d: %s"
-                    path
-                    row_start
-                    detail))
-          | Ok journaled ->
-            (match
-               if first then cursor_mismatch ~start ~since_seq journaled else None
-             with
-             | Some failure -> Error failure
-             | None ->
-               if not (seq_is_after since_seq journaled.seq)
-               then loop ~row_start:row_end ~first:false ~served ~count ~next_offset
-               else if count >= limit
-               then finish ~served ~has_more:true ~next_offset
-               else
-                 loop
-                   ~row_start:row_end
-                   ~first:false
-                   ~served:(journaled :: served)
-                   ~count:(count + 1)
-                   ~next_offset:row_end)))
-    in
-    loop ~row_start:offset ~first:true ~served:[] ~count:0 ~next_offset:offset)
+          let line_end, row_end =
+            match String.index_from_opt rows row_start '\n' with
+            | Some newline -> newline, newline + 1
+            | None -> rows_end, rows_end
+          in
+          let line = String.sub rows row_start (line_end - row_start) in
+          if String.equal (String.trim line) ""
+          then loop ~row_start:row_end ~first ~served ~count ~next_offset
+          else (
+            match journaled_event_of_string line with
+            | Error detail -> Error (corrupt_row ~path ~offset:row_start detail)
+            | Ok journaled ->
+              (match
+                 if first then first_row_failure ~since_seq ~start journaled else None
+               with
+               | Some failure -> Error failure
+               | None ->
+                 if not (seq_is_after since_seq journaled.seq)
+                 then
+                   loop
+                     ~row_start:row_end
+                     ~first:false
+                     ~served
+                     ~count
+                     ~next_offset:row_end
+                 else if count >= limit
+                 then finish ~served ~has_more:true ~next_offset
+                 else
+                   loop
+                     ~row_start:row_end
+                     ~first:false
+                     ~served:(journaled :: served)
+                     ~count:(count + 1)
+                     ~next_offset:row_end)))
+      in
+      (match since_seq, offset with
+       | After_seq held, 0 ->
+         let row_start = offset_past_held_seq ~held rows in
+         loop ~row_start ~first:false ~served:[] ~count:0 ~next_offset:row_start
+       | (After_seq _ | Whole_turn), _ ->
+         loop ~row_start:offset ~first:true ~served:[] ~count:0 ~next_offset:offset))
 ;;

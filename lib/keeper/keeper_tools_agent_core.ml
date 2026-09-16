@@ -12,7 +12,7 @@
 type terminal_effect_failure =
   { failure_class : Tool_result.tool_failure_class
   ; effect_disposition : Tool_result.failure_effect_disposition
-  ; diagnostic : string
+  ; detail : Keeper_terminal_effect_detail.t
   }
 
 type terminal_effect_state =

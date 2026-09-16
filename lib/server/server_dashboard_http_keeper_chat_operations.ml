@@ -205,16 +205,25 @@ let parse_since_offset request =
      | None -> rejected)
 ;;
 
-(* A cursor the journal cannot place is the client's request, 400; a corrupt
-   row is the journal, the same 503 a whole read reports. *)
+(* A cursor the journal cannot place is the client's request, 400 under the
+   refusal's own name; a corrupt row is the journal, the same 503 a whole read
+   reports. The three cursor codes are spelled once, in the journal
+   ([Keeper_chat_event_log.cursor_refusal_to_wire]), so this and the TUI's
+   decoder cannot drift. *)
 let page_failure_error failure =
   let message = Keeper_chat_event_log.page_failure_to_string failure in
+  let cursor refusal =
+    { status = `Bad_request
+    ; code = Keeper_chat_event_log.cursor_refusal_to_wire refusal
+    ; message
+    }
+  in
   match failure with
   | Keeper_chat_event_log.Page_offset_past_rows _ ->
-    { status = `Bad_request; code = "since_offset_past_rows"; message }
-  | Page_offset_inside_row _ ->
-    { status = `Bad_request; code = "since_offset_inside_row"; message }
-  | Page_cursor_mismatch _ -> { status = `Bad_request; code = "cursor_mismatch"; message }
+    cursor Keeper_chat_event_log.Offset_past_rows
+  | Page_offset_inside_row _ -> cursor Keeper_chat_event_log.Offset_inside_row
+  | Page_cursor_mismatch _ -> cursor Keeper_chat_event_log.Cursor_pair_mismatch
+  | Page_limit_not_positive _ -> invalid_input message
   | Page_corrupt _ -> unavailable "journal_corrupt" message
 ;;
 
@@ -290,20 +299,52 @@ let chat_events_page ~operation_id ~since_seq ~redact_json (page : Keeper_chat_e
     ]
 ;;
 
+(* Everything the events route reads off the query, parsed once. The handler
+   passes the whole record to {!events_page_of_rows}, so a cursor cannot be
+   read and then dropped on the way to the page. *)
+type events_request =
+  { er_operation_id : Operation_id.t
+  ; er_since_seq : Keeper_chat_event_log.replay_position
+  ; er_start : Keeper_chat_event_log.page_start
+  ; er_limit : int
+  }
+
+let parse_events_request request =
+  let ( let* ) = Result.bind in
+  let* er_operation_id = parse_operation_id_query request in
+  let* er_since_seq = parse_since_seq request in
+  let* er_start = parse_since_offset request in
+  let* er_limit = parse_limit request in
+  Ok { er_operation_id; er_since_seq; er_start; er_limit }
+;;
+
+(* The page the request asks for, as the body to send and how many events it
+   served, or the error the request earns. Pure over the rows: the caller runs
+   it in a pool job. *)
+let events_page_of_rows ~path ~redact_json query rows =
+  Keeper_chat_event_log.page_of_rows
+    ~path
+    ~since_seq:query.er_since_seq
+    ~start:query.er_start
+    ~limit:query.er_limit
+    rows
+  |> Result.map (fun (page : Keeper_chat_event_log.page) ->
+    ( List.length page.events
+    , chat_events_page
+        ~operation_id:(Operation_id.to_string query.er_operation_id)
+        ~since_seq:query.er_since_seq
+        ~redact_json
+        page ))
+  |> Result.map_error page_failure_error
+;;
+
 let handle_get state request reqd = function
   | Chat_events { keeper_name } ->
-    let ( let* ) = Result.bind in
-    (match
-       let* operation_id = parse_operation_id_query request in
-       let* since_seq = parse_since_seq request in
-       let* start = parse_since_offset request in
-       let* limit = parse_limit request in
-       Ok (operation_id, since_seq, start, limit)
-     with
+    (match parse_events_request request with
      | Error error -> respond_error request reqd error
-     | Ok (operation_id, since_seq, start, limit) ->
+     | Ok query ->
        let base_path = base_path state in
-       let operation_id_text = Operation_id.to_string operation_id in
+       let operation_id_text = Operation_id.to_string query.er_operation_id in
        let path =
          Keeper_chat_event_log.journal_path
            ~base_dir:base_path
@@ -315,11 +356,16 @@ let handle_get state request reqd = function
            "keeper_chat_events keeper=%s operation_id=%s since_seq=%s since_offset=%d limit=%d served=%d"
            keeper_name
            operation_id_text
-           (Keeper_chat_event_log.replay_position_to_string since_seq)
-           (Keeper_chat_event_log.page_start_offset start)
-           limit
+           (Keeper_chat_event_log.replay_position_to_string query.er_since_seq)
+           (Keeper_chat_event_log.page_start_offset query.er_start)
+           query.er_limit
            served;
          Server_auth.respond_json_value_with_cors request reqd body
+       in
+       let respond_rows ~redact_json rows =
+         match events_page_of_rows ~path ~redact_json query rows with
+         | Ok (served, body) -> respond_page ~served body
+         | Error error -> respond_error request reqd error
        in
        (match Keeper_chat_event_log.read_journal_rows_path path with
         | Ok rows ->
@@ -334,32 +380,28 @@ let handle_get state request reqd = function
           let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
           (match
              Domain_pool_ref.submit_cpu_or_inline (fun () ->
-               Keeper_chat_event_log.page_of_rows ~path ~since_seq ~start ~limit rows
-               |> Result.map (fun (page : Keeper_chat_event_log.page) ->
-                 ( List.length page.events
-                 , chat_events_page
-                     ~operation_id:operation_id_text
-                     ~since_seq
-                     ~redact_json:(Keeper_secret_redaction.redact_json redaction)
-                     page )))
+               events_page_of_rows
+                 ~path
+                 ~redact_json:(Keeper_secret_redaction.redact_json redaction)
+                 query
+                 rows)
            with
            | Ok (served, body) -> respond_page ~served body
-           | Error failure -> respond_error request reqd (page_failure_error failure))
+           | Error error -> respond_error request reqd error)
         | Error Keeper_chat_event_log.Journal_missing ->
-          (match Registry.exact_operation ~base_path ~keeper_name operation_id with
+          (match
+             Registry.exact_operation ~base_path ~keeper_name query.er_operation_id
+           with
            | Ok operation ->
              (match
                 classify_missing_journal
                   (Option.map (fun (operation : Operation.t) -> operation.state) operation)
               with
-              | Nothing_journaled_yet ->
-                respond_page
-                  ~served:0
-                  (chat_events_page
-                     ~operation_id:operation_id_text
-                     ~since_seq
-                     ~redact_json:Fun.id
-                     (Keeper_chat_event_log.empty_page start))
+              (* Nothing journaled yet is an empty page, served from empty
+                 rows: a client holding an offset into a journal that does not
+                 exist is told so by the same cursor check every page uses,
+                 not handed its own offset back. *)
+              | Nothing_journaled_yet -> respond_rows ~redact_json:Fun.id ""
               | No_journal_for_settled_operation ->
                 (* The [journal_pruned] code is the client's contract for
                    "nothing to reload, now or later"; the message states only
@@ -525,6 +567,15 @@ let handle_mutation state request reqd route body =
 ;;
 
 module For_testing = struct
+  let events_page_of_request ~path request rows =
+    match parse_events_request request with
+    | Error error -> Error (error.status, error.code)
+    | Ok query ->
+      (match events_page_of_rows ~path ~redact_json:Fun.id query rows with
+       | Ok (_served, body) -> Ok body
+       | Error error -> Error (error.status, error.code))
+  ;;
+
   let no_journal_for_settled_operation_message = no_journal_for_settled_operation_message
 
   let parse_mutation_body mutation body =

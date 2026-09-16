@@ -265,7 +265,9 @@ let test_native_terminal_evidence_precedes_scope_failure () =
   let failed = Masc.Keeper_tools_agent_core.Terminal_effect_failed
       { failure_class = Tool_result.Runtime_failure
       ; effect_disposition = Tool_result.Proven_post_effect
-      ; diagnostic = "exact committed failure" } in
+      ; detail =
+          Keeper_terminal_effect_detail.Tool_failed
+            { internal_tool_name = "fixture"; message = "exact committed failure" } } in
   check bool "structured terminal failure stays exact" true
     (decide failed = Masc.Keeper_agent_run.terminal_effect_boundary_decision failed);
   (match decide Masc.Keeper_tools_agent_core.Terminal_effect_open with

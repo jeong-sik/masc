@@ -353,7 +353,11 @@ let () =
     Keeper_internal_error.Provider_attempt_effect_fenced
       { runtime_id = "antigravity_subscription.gemini-3-6-flash-high"
       ; effect_disposition = Keeper_provider_attempt_effect_core.Effect_attempted
-      ; diagnostic = "provider response did not prove whether the tool effect settled"
+      ; cause =
+          Keeper_internal_error.Fenced_core
+            (Keeper_request_failure_core.of_core_error
+               (Agent_core.Error.Internal
+                  "provider response did not prove whether the tool effect settled"))
       }
   in
   let fenced_json = Keeper_internal_error.masc_internal_error_to_json fenced_error in
@@ -387,7 +391,11 @@ let () =
       { runtime_id = "antigravity_subscription.gemini-3-6-flash-high"
       ; effect_disposition = Keeper_provider_attempt_effect_core.Effect_attempted
       ; reject_count = 2
-      ; diagnostic = "turn died after two corrective tool rejections"
+      ; cause =
+          Keeper_internal_error.Fenced_core
+            (Keeper_request_failure_core.of_core_error
+               (Agent_core.Error.Internal
+                  "turn died after two corrective tool rejections"))
       }
   in
   let lost_json = Keeper_internal_error.masc_internal_error_to_json lost_error in
@@ -1720,17 +1728,6 @@ let () =
               { node_id = "post"; error = D.Input_validation_failed }
         ; payload = `Null
         }
-    ; D.Composition_failed
-        { composition_tool = "keeper_compose_plan"
-        ; cause =
-            D.Outer_completion_mismatch
-              { expected =
-                  Agent_core.Tool_contract.Terminal_after_success
-                    Agent_core.Tool_contract.Effect_outcome_unknown
-              ; actual = Agent_core.Tool_contract.Continue_after_success
-              }
-        ; payload = `Assoc []
-        }
     ; D.Composition_result_manifest_unpersisted
         { composition_tool = "keeper_compose_plan"; detail = "disk full" }
     ; D.Composition_evidence_unpublished
@@ -1742,7 +1739,11 @@ let () =
         { message = "inline tool output exceeds descriptor budget (9 > 8 bytes)" }
     ; D.Result_delivery_failed { model_tool_name = "keeper_surface_post"; message = "image refused" }
     ; D.Boundary_observation_failed
-        { model_tool_name = "keeper_surface_post"; message = "repetition snapshot invalid" }
+        { model_tool_name = "keeper_surface_post"
+        ; cause =
+            Keeper_request_failure_core.of_core_error
+              (Agent_core.Error.Internal "repetition snapshot invalid")
+        }
     ; D.Agent_core_terminal_effect { detail = "terminal tool effect failed" }
     ]
     @ List.map
@@ -1770,14 +1771,32 @@ let () =
         ; D.Output_validation_failed
         ; D.Output_not_composable
         ]
+    @ List.map
+        (fun deferral ->
+           D.Composition_failed
+             { composition_tool = "keeper_compose_sangokushi-2-end-command"
+             ; cause =
+                 D.Node_deferred
+                   { node_id = "press"
+                   ; model_tool_name = "masc_msx_press"
+                   ; deferral
+                   }
+             ; payload = `Assoc [ "deferred", `Assoc [ "awaiting", `String "approval" ] ]
+             })
+        [ D.Deferral_unrecorded; D.Generic_deferral; D.External_effect_deferral ]
   in
   (* No wildcard: a new cause, plan error or rejection is a compile error here
      until it has a sample above. *)
   let composition_cause = function
     | D.Node_failed _ -> 0
-    | D.Node_observation_failed _ -> 1
-    | D.Plan_execution_failed _ -> 2
-    | D.Outer_completion_mismatch _ -> 3
+    | D.Node_deferred _ -> 1
+    | D.Node_observation_failed _ -> 2
+    | D.Plan_execution_failed _ -> 3
+  in
+  let node_deferral = function
+    | D.Deferral_unrecorded -> 0
+    | D.Generic_deferral -> 1
+    | D.External_effect_deferral -> 2
   in
   let plan_execution_error = function
     | D.Unknown_node_id -> 0
@@ -1802,6 +1821,17 @@ let () =
             | _ -> None)
           samples)
      = List.init 4 Fun.id);
+  check
+    "terminal effect detail samples cover every node deferral"
+    (List.sort_uniq
+       Int.compare
+       (List.filter_map
+          (function
+            | D.Composition_failed { cause = D.Node_deferred { deferral; _ }; _ } ->
+              Some (node_deferral deferral)
+            | _ -> None)
+          samples)
+     = List.init 3 Fun.id);
   check
     "terminal effect detail samples cover every plan execution error"
     (List.sort_uniq
@@ -1955,6 +1985,228 @@ let () =
            ; "detail", `String "tool output artifact storage failed"
            ])
      = None)
+;;
+
+(* RFC-0454 D1 (P1b): a fenced provider attempt names what failed it as a
+   value. The 2026-09-15 incident nested a MASC error inside a MASC error;
+   written as a string that put a JSON document inside a JSON string, and
+   every wrap added a layer of backslashes. *)
+let () =
+  let module D = Keeper_terminal_effect_detail in
+  let core_of message =
+    Keeper_request_failure_core.of_core_error (Agent_core.Error.Internal message)
+  in
+  let incident_detail =
+    D.Composition_failed
+      { composition_tool = "keeper_compose_sangokushi-2-end-command"
+      ; cause =
+          D.Node_failed
+            { node_id = "press"
+            ; model_tool_name = "masc_msx_press"
+            ; message = "no MSX machine is loaded: call masc_msx_load first"
+            }
+      ; payload =
+          `Assoc
+            [ "composition_tool"
+            , `String "keeper_compose_sangokushi-2-end-command"
+            ; "cause", `Assoc [ "kind", `String "tool_did_not_complete" ]
+            ]
+      }
+  in
+  let nested_masc =
+    Keeper_internal_error.Terminal_effect_failed
+      { failure_class = Tool_result.Runtime_failure
+      ; effect_disposition = Tool_result.Effect_outcome_unknown
+      ; detail = incident_detail
+      }
+  in
+  let causes =
+    [ Keeper_internal_error.Fenced_masc nested_masc
+    ; Keeper_internal_error.Fenced_core
+        (core_of "Provider 'codex_app_server' unavailable: stdout closed")
+    ; Keeper_internal_error.Fenced_core
+        (Keeper_request_failure_core.of_core_error
+           (Agent_core.Error.Api (Llm_provider.Retry.PaymentRequired
+                                    { message = "Insufficient Balance" })))
+    ]
+  in
+  (* No wildcard: a new cause arm is a compile error here until it has a
+     sample above. *)
+  let cause_index = function
+    | Keeper_internal_error.Fenced_masc _ -> 0
+    | Keeper_internal_error.Fenced_core _ -> 1
+  in
+  check
+    "fence cause samples cover every arm"
+    (List.sort_uniq Int.compare (List.map cause_index causes) = List.init 2 Fun.id);
+  let envelopes =
+    List.concat_map
+      (fun cause ->
+         [ Keeper_internal_error.Provider_attempt_effect_fenced
+             { runtime_id = "claude_code.claude-sonnet-5"
+             ; effect_disposition = Keeper_provider_attempt_effect_core.Effect_attempted
+             ; cause
+             }
+         ; Keeper_internal_error.Tool_correction_lost
+             { runtime_id = "claude_code.claude-sonnet-5"
+             ; effect_disposition =
+                 Keeper_provider_attempt_effect_core.Observation_unavailable
+             ; reject_count = 2
+             ; cause
+             }
+         ])
+      causes
+  in
+  List.iter
+    (fun envelope ->
+       let json = Keeper_internal_error.masc_internal_error_to_json envelope in
+       check
+         "a fence writes its cause as an object, never a string"
+         (match json with
+          | `Assoc fields ->
+            (match List.assoc_opt "cause" fields with
+             | Some (`Assoc _) -> true
+             | Some _ | None -> false)
+          | _ -> false);
+       check
+         "a fence round-trips through the internal error codec"
+         (Keeper_internal_error.parse_masc_internal_error_json json = Some envelope);
+       check
+         "a fence survives the carried-error string boundary"
+         (Keeper_internal_error.classify_masc_internal_error
+            (Keeper_internal_error.core_error_of_masc_internal_error envelope)
+          = Some envelope))
+    envelopes;
+  (* The incident: a fence whose cause is a MASC terminal effect failure with a
+     composition payload. Serialized, it must contain no escaped quote --
+     that byte pair is what buried the one sentence a person needed. *)
+  let incident =
+    Keeper_internal_error.Provider_attempt_effect_fenced
+      { runtime_id = "claude_code.claude-sonnet-5"
+      ; effect_disposition = Keeper_provider_attempt_effect_core.Effect_attempted
+      ; cause = Keeper_internal_error.Fenced_masc nested_masc
+      }
+  in
+  let serialized =
+    Yojson.Safe.to_string (Keeper_internal_error.masc_internal_error_to_json incident)
+  in
+  let contains_escaped_quote text =
+    let rec loop i =
+      if i + 1 >= String.length text then false
+      else if text.[i] = '\\' && text.[i + 1] = '"' then true
+      else loop (i + 1)
+    in
+    loop 0
+  in
+  check
+    "the incident fence serializes with no escaped JSON document inside it"
+    (not (contains_escaped_quote serialized));
+  let contains ~needle text =
+    let n = String.length needle and t = String.length text in
+    let rec loop i = i + n <= t && (String.sub text i n = needle || loop (i + 1)) in
+    n = 0 || loop 0
+  in
+  check
+    "the incident sentence survives as its own leaf"
+    (contains ~needle:"no MSX machine is loaded: call masc_msx_load first" serialized);
+  check
+    "the incident fence round-trips whole"
+    (Keeper_internal_error.parse_masc_internal_error_json
+       (Yojson.Safe.from_string serialized)
+     = Some incident);
+  let fence_rejects label cause =
+    check
+      label
+      (Keeper_internal_error.parse_masc_internal_error_json
+         (`Assoc
+             [ "kind", `String Keeper_internal_error.provider_attempt_effect_fenced_kind
+             ; "runtime_id", `String "claude_code.claude-sonnet-5"
+             ; "effect_disposition", `String "effect_attempted"
+             ; "cause", cause
+             ])
+       = None)
+  in
+  fence_rejects
+    "a fence refuses a cause written as a string"
+    (`String "Provider 'codex_app_server' unavailable: stdout closed");
+  fence_rejects
+    "a fence refuses a cause of an unknown kind"
+    (`Assoc [ "kind", `String "fenced_prose"; "core", `Assoc [] ]);
+  fence_rejects
+    "a fence refuses a cause with a field it does not know"
+    (`Assoc
+        [ "kind", `String "fenced_core"
+        ; "core", `Assoc [ "category", `String "io"; "message", `String "boom" ]
+        ; "severity", `String "high"
+        ]);
+  fence_rejects
+    "a fence refuses a core cause with an unknown category"
+    (`Assoc
+        [ "kind", `String "fenced_core"
+        ; "core"
+        , `Assoc [ "category", `String "vibes"; "message", `String "boom" ]
+        ]);
+  fence_rejects
+    "a fence refuses a core cause missing its message"
+    (`Assoc [ "kind", `String "fenced_core"; "core", `Assoc [ "category", `String "io" ] ]);
+  check
+    "a fence refuses a missing cause"
+    (Keeper_internal_error.parse_masc_internal_error_json
+       (`Assoc
+           [ "kind", `String Keeper_internal_error.provider_attempt_effect_fenced_kind
+           ; "runtime_id", `String "claude_code.claude-sonnet-5"
+           ; "effect_disposition", `String "effect_attempted"
+           ])
+     = None);
+  (* Every agent-core category has a wire spelling this module parses back. *)
+  let category_index : Agent_core.Error.category -> int = function
+    | Agent_core.Error.Api_category -> 0
+    | Agent_core.Error.Provider_category -> 1
+    | Agent_core.Error.Agent_category -> 2
+    | Agent_core.Error.Mcp_category -> 3
+    | Agent_core.Error.Config_category -> 4
+    | Agent_core.Error.Serialization_category -> 5
+    | Agent_core.Error.Io_category -> 6
+    | Agent_core.Error.Orchestration_category -> 7
+    | Agent_core.Error.Internal_category -> 8
+  in
+  let categories =
+    [ Agent_core.Error.Api_category
+    ; Agent_core.Error.Provider_category
+    ; Agent_core.Error.Agent_category
+    ; Agent_core.Error.Mcp_category
+    ; Agent_core.Error.Config_category
+    ; Agent_core.Error.Serialization_category
+    ; Agent_core.Error.Io_category
+    ; Agent_core.Error.Orchestration_category
+    ; Agent_core.Error.Internal_category
+    ]
+  in
+  check
+    "the category samples cover every agent-core category"
+    (List.sort_uniq Int.compare (List.map category_index categories)
+     = List.init 9 Fun.id);
+  List.iter
+    (fun category ->
+       let core = { Keeper_request_failure_core.category; message = "boom" } in
+       check
+         "a core failure round-trips through its codec"
+         (Keeper_request_failure_core.of_yojson
+            (Keeper_request_failure_core.to_yojson core)
+          = Ok core))
+    categories;
+  check
+    "a core failure summary stays on one line"
+    (* [message] is [Agent_core.Error.to_string], not the text handed to the
+       constructor, so this pins the two things the module promises -- the
+       category label leads, and line breaks in the leaf become spaces --
+       rather than agent-core's own wording for an [Internal] error. *)
+    (let summary =
+       Keeper_request_failure_core.summary (core_of "first\nsecond\rthird")
+     in
+     String.starts_with ~prefix:"internal: " summary
+     && (not (String.contains summary '\n' || String.contains summary '\r'))
+     && contains ~needle:"first second third" summary)
 ;;
 
 let () =

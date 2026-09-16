@@ -166,42 +166,7 @@ Keeper system prompts are cached in checkpoints. After changing prompts:
 - If testing prompt changes, verify the running keeper's actual system prompt
 - Core prompt text now lives in `config/prompts/*.md`; Dashboard overrides in `Lab > Tools > Prompt Registry` only change runtime effective text and are persisted to `.masc/prompt_overrides.json`
 
-## 8. Feature Flag Registry Duplicates (ADR-003)
-
-Feature flags는 `lib/config/feature_flag_registry.ml`에 중앙 등록되어야 한다.
-
-**Common Pattern: Concurrent Merge로 인한 중복 등록**
-```bash
-# 두 feature branch가 독립적으로 같은 플래그를 추가 → merge conflict 없이 통과
-```
-
-**Before adding any new feature flag:**
-```bash
-# 1. Check if env_name already exists in registry
-rg "env_name = \"MASC_YOUR_FLAG\"" lib/config/feature_flag_registry.ml
-
-# 2. Check if similar flags exist (naming convention)
-rg "MASC_KEEPER_.*HEARTBEAT" lib/config/feature_flag_registry.ml
-
-# 3. Verify default matches between registry and config module
-grep -A 5 "MASC_YOUR_FLAG" lib/config/feature_flag_registry.ml
-rg "get_bool.*MASC_YOUR_FLAG" lib/config/
-```
-
-**Rules:**
-- `env_name` 필드는 전역 고유해야 함 (no duplicates)
-- Registry default와 config module default가 일치해야 함
-- 새 flag는 `Experimental` lifecycle로 시작
-- CI는 `check-feature-flag-consistency.sh`로 일관성 검증
-
-**Checklist for Registry Changes:**
-- [ ] env_name이 unique한가?
-- [ ] config module의 default가 registry와 일치하는가?
-- [ ] lifecycle 상태가 올바른가?
-
-상세: `docs/ADR-003-FEATURE-FLAG-REGISTRY-MANAGEMENT.md`
-
-## 9. Config Module Anti-Patterns
+## 8. Config Module Anti-Patterns
 
 Config 모듈에서 자주 발생하는 실수:
 
@@ -248,7 +213,7 @@ let get_required_path () =
   | Error msg -> raise (Config_error msg)
 ```
 
-## 10. Test Environment Isolation
+## 9. Test Environment Isolation
 
 Test는 production config와 격리되어야 한다.
 
@@ -286,7 +251,7 @@ let test_with_eio () =
 
 문제: `Eio_main.run` 없이 Eio 함수 호출 → runtime panic
 
-## 11. Dashboard Build Dependency
+## 10. Dashboard Build Dependency
 
 Dashboard는 OCaml build와 독립적으로 빌드되어야 한다.
 
@@ -335,7 +300,7 @@ MASC_HTTP_DEV_MUTATION_ORIGINS="http://localhost:4173" ./start-masc.sh
 scripts/build-dashboard-if-needed.sh
 ```
 
-## 12. Health Snapshot Ratcheting
+## 11. Health Snapshot Ratcheting
 
 Codebase health는 특정 anti-pattern 사용 횟수로 추적된다.
 
@@ -381,22 +346,19 @@ let value = Option.value ~default:fallback my_option
 # 2. 정당한 사유가 있다면 baseline 업데이트 (reviewer 승인 필요)
 ```
 
-## 13. Concurrent Merge Semantic Validation
+## 12. Concurrent Merge Semantic Validation
 
 Git merge는 textual conflict만 감지한다. Semantic duplication은 CI가 잡아야 한다.
 
-**예시: Feature Flag Duplication (PR #3793)**
+**예시: 같은 이름의 서로 다른 정의가 다른 줄에 들어오면 merge는 통과한다**
 ```
-Branch A: adds WORK_AS_HEARTBEAT at line 95
-Branch B: adds WORK_AS_HEARTBEAT at line 130
+Branch A: adds the same binding at line 95
+Branch B: adds the same binding at line 130
 Merge: both exist (no textual conflict) ← Git OK, CI should fail
 ```
 
 **After editing registry-like files:**
 ```bash
-# Feature flag registry
-scripts/check-feature-flag-consistency.sh
-
 # Dune files (module list in libraries)
 dune build --root .  # fails on missing modules
 
@@ -405,7 +367,6 @@ cd dashboard && pnpm run typecheck  # TypeScript type check
 ```
 
 **Files requiring semantic validation:**
-- `lib/config/feature_flag_registry.ml` - env_name uniqueness
 - `lib/tool/tool_catalog.ml` - public tool list
 - `dune` files - module list completeness
 - Dashboard TypeScript - type consistency
@@ -417,7 +378,7 @@ cd dashboard && pnpm run typecheck  # TypeScript type check
 
 ---
 
-## 14. Cross-FSM Coupling Discipline (PR #11120/#11127/#11134)
+## 13. Cross-FSM Coupling Discipline (PR #11120/#11127/#11134)
 
 4 sub-FSM(KSM/KTC/KDP/KCL)이 직접 호출로 결합된 구조 — silent failure가 cross-FSM boundary에서 가장 쉽게 발생함. PR-H/I/J에서 도입된 invariants와 reviewer rule.
 
@@ -490,7 +451,6 @@ bash scripts/validate-keeper-fsm-graph.sh
 
 | Pitfall Section | Related ADR | Key Takeaway |
 |----------------|-------------|--------------|
-| #8 Feature Flag Registry Duplicates | [ADR-003: Feature Flag Registry Management](ADR-003-FEATURE-FLAG-REGISTRY-MANAGEMENT.md) | Registry는 SSOT, env_name은 전역 고유, concurrent merge는 semantic validation 필요 |
 | Context handoff pattern | Keeper/agent core checkpoint and handoff docs | Historical mitosis runtime and ADR were removed. Context transfer now uses Relay/Handoff plus keeper/agent core checkpoint paths |
 | Dashboard Control Surface | `masc_operator_*` tool 이름이 SSOT (현재 9개) | `masc_operator_*` 가 canonical, generic tool executor는 admin-only |
 

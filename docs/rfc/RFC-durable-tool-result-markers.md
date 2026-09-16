@@ -62,7 +62,7 @@ blob 은 내용 주소라서 2번이 쓰는 파일은 매번 같은 내용이다
 | 단계 | 위치 | 도구 결과 본문을 어떻게 다루나 |
 |---|---|---|
 | 만든다 | 도구 실행 → `Agent_core.Types.ToolResult { content; content_blocks; _ }` | `Tool_bridge.default_externalize_threshold_bytes` 를 넘으면 생성 때 blob 으로 나간다(`tool_bridge.ml`, `keeper_tool_execute_runtime.ml`). 나머지는 본문 그대로다 |
-| 저장한다 | `Keeper_checkpoint_store.save_agent_core_classified_with_encoding_memo` → `Checkpoint.to_string_with_encoding_memo` → `Keeper_fs.save_encoded_durable_atomic_from` | `content` 문자열을 그대로 인코딩한다(`checkpoint_codec.ml` `checkpoint_tool_result_to_json`). 저장 뒤 이전 canonical 파일은 history 스냅샷으로 hard link 된다(최대 12벌) |
+| 저장한다 | `Keeper_checkpoint_store.save_agent_core_classified_with_encoding_memo` → `Checkpoint.to_pieces_with_encoding_memo` → `Keeper_fs.save_encoded_durable_atomic_from` | `content` 문자열을 그대로 인코딩한다(`checkpoint_codec.ml` `checkpoint_tool_result_to_json`). 저장 뒤 이전 canonical 파일은 history 스냅샷으로 hard link 된다(최대 12벌) |
 | 읽는다 | `Keeper_checkpoint_store.load_agent_core` (턴 시작, 상태 상세, 대시보드 체크포인트 API, 거절 round-trip 기록) | `content` 를 문자열로 되살린다. 디코드 때 `json` 은 항상 `None` 이다(`checkpoint_codec.ml:424`) |
 | 모델에 보낸다 | `Keeper_turn_driver_try_provider` → `Keeper_model_input_demotion.plan`/`materialize` | 현재 턴 이전 결과를 marker 로 바꿔 보낸다. blob 은 요청마다 다시 쓴다 |
 | 모델이 본문을 다시 읽는다 | `keeper_artifact_read` (sha256 · offset · max_bytes) | blob 에서 페이지로 읽는다 |

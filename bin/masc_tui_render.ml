@@ -7526,9 +7526,67 @@ let render_verification_list (state : state) =
           if idx = state.verification_cursor then box_line_selected buf cols line
           else box_line_styled buf cols ~style line
     done;
-  if shown > content_height then
-    box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "[requests %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height shown));
+  (* Which list this is, and where in it -- drawn on every read rather than
+     only on a cut page. The same row count means "nothing else is waiting" in
+     the queue and "the newest page of what was ever submitted" in the
+     history, and the rows themselves do not say which. *)
+  (match state.verification with
+   | None -> ()
+   | Some snapshot ->
+       let total = snapshot.Masc.Tui_decode.vs_total in
+       let offset = snapshot.Masc.Tui_decode.vs_offset in
+       let place =
+         match snapshot.Masc.Tui_decode.vs_view with
+         | Masc.Tui_decode.Awaiting_queue -> Printf.sprintf "awaiting %d" total
+         | Masc.Tui_decode.Full_history ->
+             if shown = 0 then Printf.sprintf "history 0 of %d" total
+             else
+               Printf.sprintf "history %d-%d of %d" (offset + 1)
+                 (offset + shown) total
+       in
+       let rows_window =
+         if shown > content_height then
+           Printf.sprintf " \xc2\xb7 rows %s"
+             (Masc_tui_scroll.window_text ~scroll ~height:content_height shown)
+         else ""
+       in
+       (* Named because the key is not on the footer of a narrow terminal, and
+          a page with more behind it that says so is the difference between
+          "that is all" and "there is more". *)
+       let more =
+         if snapshot.Masc.Tui_decode.vs_truncated then " \xc2\xb7 > next page"
+         else ""
+       in
+       box_line_styled buf cols ~style:(Theme.recede ())
+         (Printf.sprintf "[%s%s%s]" place rows_window more);
+       (* An empty queue carrying a reason is not an empty queue. *)
+       (match snapshot.Masc.Tui_decode.vs_backlog_error with
+        | Some detail ->
+            box_line_styled buf cols ~style:(Theme.bad ())
+              (Printf.sprintf "  the queue could not be read: %s"
+                 (Terminal_text.single_line detail))
+        | None -> ());
+       (* A queue built from a recovery snapshot is a queue of real rows that
+          is older than the workspace. Drawn, because the rows themselves look
+          exactly like a current queue and nothing else on this screen would
+          say otherwise. *)
+       (match snapshot.Masc.Tui_decode.vs_backlog_recovery with
+        | Some detail ->
+            box_line_styled buf cols ~style:(Theme.warn ())
+              (Printf.sprintf "  this queue is as old as the snapshot it came from: %s"
+                 (Terminal_text.single_line detail))
+        | None -> ());
+       (* A task waiting on a record the store does not hold cannot be moved
+          from this surface, and no other surface says so either. *)
+       (match snapshot.Masc.Tui_decode.vs_awaiting_unresolved with
+        | [] -> ()
+        | ids ->
+            let named = List.filteri (fun i _ -> i < 3) ids in
+            let rest = List.length ids - List.length named in
+            box_line_styled buf cols ~style:(Theme.warn ())
+              (Printf.sprintf "  waiting on a record this store does not hold: %s%s"
+                 (String.concat ", " named)
+                 (if rest > 0 then Printf.sprintf " (+%d)" rest else ""))));
   (* The arm and the server's last refusal sit under the list, the same rows
      the schedule cancel carries them on. *)
   (match state.verification_verdict_armed with
@@ -14714,17 +14772,22 @@ let render_help (state : state) =
 (* Rows the agenda panel can show, and how many it has. The keypress bounds
    the scroll from the same pair the frame draws with -- the shape
    [Masc_tui_scroll] exists to keep in one place. *)
+(* The panel's rows. Built in one place because three readers ask for them:
+   the viewport that bounds the scroll, the frame that draws them, and the
+   keypress that walks the ones Enter can act on. Three builders would be
+   three chances for the cursor to name a row the frame is not drawing. *)
+let agenda_lines (state : state) =
+  let _terminal_rows, cols = get_terminal_size () in
+  Agenda.overlay
+    ~now:(Unix.gettimeofday ())
+    ~localtime:Unix.localtime
+    ~cols:(framed_inner_width cols)
+    (Masc_tui_types.agenda state)
+
 let agenda_viewport (state : state) =
-  let terminal_rows, cols = get_terminal_size () in
+  let terminal_rows, _cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let lines =
-    Agenda.overlay
-      ~now:(Unix.gettimeofday ())
-      ~localtime:Unix.localtime
-      ~cols:(framed_inner_width cols)
-      (Masc_tui_types.agenda state)
-  in
-  (List.length lines, framed_content_height ~rows)
+  (List.length (agenda_lines state), framed_content_height ~rows)
 
 let answering_viewport (state : state) =
   let terminal_rows, _cols = get_terminal_size () in
@@ -14833,25 +14896,31 @@ let render_answering (state : state) =
    waiting on the operator, and the other overlays open on MASC and their name. *)
 let render_agenda (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let lines =
-    Agenda.overlay
-      ~now:(Unix.gettimeofday ())
-      ~localtime:Unix.localtime
-      ~cols:(framed_inner_width cols)
-      (Masc_tui_types.agenda state)
+  let lines = agenda_lines state in
+  let paint ~selected (line : Agenda.line) =
+    let body =
+      match line.Agenda.tone with
+      | Agenda.Heading -> Ansi.bold ^ line.Agenda.text ^ Ansi.reset
+      | Agenda.Wake -> (Theme.recede ()) ^ line.Agenda.text ^ Ansi.reset
+      | Agenda.Question -> (Theme.bad ()) ^ line.Agenda.text ^ Ansi.reset
+      | Agenda.Quiet -> Ansi.dim ^ line.Agenda.text ^ Ansi.reset
+      | Agenda.Failed -> (Theme.bad ()) ^ line.Agenda.text ^ Ansi.reset
+    in
+    (* Reversed rather than marked with a glyph: the rows are already fitted
+       to the column and a leading mark would push the right half off. *)
+    if selected then Ansi.reverse ^ body ^ Ansi.reset else body
   in
-  let paint (line : Agenda.line) =
-    match line.Agenda.tone with
-    | Agenda.Heading -> Ansi.bold ^ line.Agenda.text ^ Ansi.reset
-    | Agenda.Wake -> (Theme.recede ()) ^ line.Agenda.text ^ Ansi.reset
-    | Agenda.Question -> (Theme.bad ()) ^ line.Agenda.text ^ Ansi.reset
-    | Agenda.Quiet -> Ansi.dim ^ line.Agenda.text ^ Ansi.reset
-    | Agenda.Failed -> (Theme.bad ()) ^ line.Agenda.text ^ Ansi.reset
+  (* A panel with nothing to open says so on its own footer rather than
+     naming a key that would do nothing. *)
+  let hints =
+    match Agenda.target_indexes lines with
+    | [] -> "j/k:scroll  Esc:close"
+    | _ -> "j/k:move  Enter:open  Esc:close"
   in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"agenda"
     ~frame:Chrome_overlay
     ~title:(screen_title " MASC Agenda")
-    ~hints:"j/k:scroll  Esc:close"
+    ~hints
     ~body:(fun ~budget c ->
       let scroll =
         Masc_tui_scroll.normalize
@@ -14859,7 +14928,8 @@ let render_agenda (state : state) =
       in
       List.iteri
         (fun index line ->
-          if index >= scroll && index < scroll + budget then c.push (paint line))
+          if index >= scroll && index < scroll + budget then
+            c.push (paint ~selected:(index = state.agenda_cursor) line))
         lines)
 ;;
 

@@ -163,7 +163,8 @@ let test_waiting_uses_the_badge_shape () =
   match strip_of t with
   | None -> fail "someone is blocked on the operator"
   | Some s ->
-    check string "the strip's own badge shape" "Awaiting you\xc2\xb71" s.waiting;
+    check string "the strip's own badge shape" "; Awaiting you\xc2\xb71"
+      s.waiting;
     check string "with no wake beside it" "" s.clock
 ;;
 
@@ -544,8 +545,9 @@ let test_the_kind_prefix_comes_off_a_target () =
 
 (* A task that only the operator can move is a reason to draw the strip. The
    whole point of the row is that nothing else was saying so. *)
-let stuck ?(since_iso = "2026-08-20T00:00:00Z") what : Agenda.stalled =
-  { what; since_iso }
+let stuck ?(since_iso = "2026-08-20T00:00:00Z") ?(task_id = "task-348")
+    ?(ends_at = Agenda.Verify_queue) what : Agenda.stalled =
+  { task_id; what; since_iso; ends_at }
 ;;
 
 let with_stuck rows =
@@ -628,6 +630,52 @@ let test_a_stuck_row_says_how_long_it_has_waited () =
     (contains ~needle:"11d waiting" text)
 ;;
 
+(* The panel counted the work waiting on the operator and then had no way to
+   reach any of it, which is a count rather than an answer. The cursor stops
+   on the rows that lead somewhere and steps over the prose between them. *)
+let test_only_rows_that_lead_somewhere_take_the_cursor () =
+  let t = with_stuck [ stuck ~task_id:"task-348" "a stop nobody granted" ] in
+  let lines = overlay_of t in
+  match Agenda.target_indexes lines with
+  | [ index ] -> (
+      match List.nth_opt lines index with
+      | Some { Agenda.goes_to = Agenda.Stuck_task { task_id; _ }; _ } ->
+          check string "the row names its task" "task-348" task_id
+      | Some _ | None -> fail "the row the cursor stops on leads nowhere")
+  | targets ->
+      failf "expected one row to lead somewhere, got %d" (List.length targets)
+
+(* Headings, spacers and the note an empty section draws are prose. A cursor
+   that stopped on them would have Enter do nothing on most presses. *)
+let test_prose_rows_take_no_cursor () =
+  check (list int) "an empty agenda opens nothing" []
+    (Agenda.target_indexes (overlay_of (with_stuck [])))
+
+(* Two shapes of stuck work, two doors. A stop is granted as a verdict in the
+   verify queue; work nobody holds is read on the task itself. Collapsing them
+   would send half the rows to a screen that cannot answer them. *)
+let test_a_stop_and_held_work_lead_to_different_places () =
+  let t =
+    with_stuck
+      [ stuck ~task_id:"task-1" ~ends_at:Agenda.Verify_queue "a stop to grant"
+      ; stuck ~task_id:"task-2" ~ends_at:Agenda.The_task "work nobody holds"
+      ]
+  in
+  let lines = overlay_of t in
+  let doors =
+    List.filter_map
+      (fun index ->
+        match List.nth_opt lines index with
+        | Some { Agenda.goes_to = Agenda.Stuck_task { task_id; ends_at }; _ } ->
+            Some (task_id, ends_at)
+        | Some _ | None -> None)
+      (Agenda.target_indexes lines)
+  in
+  check bool "the stop is answered in the verify queue" true
+    (List.mem ("task-1", Agenda.Verify_queue) doors);
+  check bool "held work is answered on the task" true
+    (List.mem ("task-2", Agenda.The_task) doors)
+
 let () =
   run
     "tui agenda"
@@ -696,6 +744,12 @@ let () =
             test_the_stuck_section_answers_in_words
         ; test_case "a stuck row says how long it has waited" `Quick
             test_a_stuck_row_says_how_long_it_has_waited
+        ; test_case "only rows that lead somewhere take the cursor" `Quick
+            test_only_rows_that_lead_somewhere_take_the_cursor
+        ; test_case "prose rows take no cursor" `Quick
+            test_prose_rows_take_no_cursor
+        ; test_case "a stop and held work lead to different places" `Quick
+            test_a_stop_and_held_work_lead_to_different_places
         ] )
     ]
 ;;

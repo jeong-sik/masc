@@ -766,6 +766,109 @@ let test_backlog_of_yojson_rejects_corrupt_task_entries () =
   expect_backlog_decode_error "corrupt task entry" json
 
 (* ============================================================
+   #27499 — dropped nested-field diagnostics
+   ============================================================ *)
+
+let task_json_for ?(extra = []) id =
+  `Assoc
+    ([ ("id", `String id)
+     ; ("title", `String "T")
+     ; ("description", `String "")
+     ; ("status", `String "todo")
+     ; ("priority", `Int 1)
+     ; ("files", `List [])
+     ; ("created_at", `String "2024-01-15T12:00:00Z")
+     ]
+     @ extra)
+
+let test_task_of_yojson_with_diagnostics_absent () =
+  match Masc_domain.task_of_yojson_with_diagnostics (task_json_for "task-590") with
+  | Ok (_, d) ->
+    check bool "handoff absent" true
+      (d.handoff_context_outcome = Masc_domain.Field_absent);
+    check bool "reclaim absent" true
+      (d.reclaim_policy_outcome = Masc_domain.Field_absent)
+  | Error e -> fail ("expected Ok, got: " ^ e)
+
+let test_task_of_yojson_with_diagnostics_decoded () =
+  let json = task_json_for ~extra:[ ("reclaim_policy", `String "block_reclaim") ] "task-590" in
+  match Masc_domain.task_of_yojson_with_diagnostics json with
+  | Ok (task, d) ->
+    check bool "reclaim decoded" true
+      (d.reclaim_policy_outcome = Masc_domain.Field_decoded);
+    check bool "reclaim Some" true (task.reclaim_policy <> None)
+  | Error e -> fail ("expected Ok, got: " ^ e)
+
+let test_task_of_yojson_with_diagnostics_unreadable () =
+  let json =
+    task_json_for
+      ~extra:[ ("handoff_context", `Assoc [ ("summary", `Int 7) ]) ]
+      "task-590"
+  in
+  match Masc_domain.task_of_yojson_with_diagnostics json with
+  | Ok (task, d) ->
+    check bool "handoff unreadable" true
+      (Masc_domain.nested_field_outcome_is_unreadable d.handoff_context_outcome);
+    check bool "handoff still None" true (task.handoff_context = None)
+  | Error e -> fail ("expected Ok, got: " ^ e)
+
+let test_backlog_of_yojson_with_diagnostics_reports_drop () =
+  let clean = task_json_for "task-good" in
+  let corrupt =
+    task_json_for
+      ~extra:[ ("handoff_context", `Assoc [ ("summary", `Int 7) ]) ]
+      "task-bad"
+  in
+  let json =
+    `Assoc
+      [ ("tasks", `List [ clean; corrupt ])
+      ; ("last_updated", `String "2024-01-15T12:00:00Z")
+      ; ("version", `Int 1)
+      ]
+  in
+  match Masc_domain.backlog_of_yojson_with_diagnostics json with
+  | Ok (backlog, diags) ->
+    check int "backlog still opens with 2 tasks" 2 (List.length backlog.tasks);
+    check int "exactly one dropped task" 1 (List.length diags);
+    let d = List.hd diags in
+    check int "dropped index" 1 d.dropped_task_index;
+    check string "dropped id" "task-bad" d.dropped_task_id;
+    check bool "handoff unreadable" true
+      (Masc_domain.nested_field_outcome_is_unreadable
+         d.dropped_outcomes.handoff_context_outcome)
+  | Error e -> fail ("expected Ok, got: " ^ e)
+
+let test_backlog_of_yojson_still_drops_diagnostics () =
+  let corrupt =
+    task_json_for
+      ~extra:[ ("reclaim_policy", `Int 7) ]
+      "task-bad"
+  in
+  let json =
+    `Assoc
+      [ ("tasks", `List [ corrupt ])
+      ; ("last_updated", `String "2024-01-15T12:00:00Z")
+      ; ("version", `Int 1)
+      ]
+  in
+  match Masc_domain.backlog_of_yojson json with
+  | Ok backlog -> check int "backward-compatible decode keeps the task" 1 (List.length backlog.tasks)
+  | Error e -> fail ("expected Ok, got: " ^ e)
+
+let test_backlog_of_yojson_with_diagnostics_still_propagates_contract () =
+  let bad = task_json_for ~extra:[ ("contract", `Int 7) ] "task-bad" in
+  let json =
+    `Assoc
+      [ ("tasks", `List [ bad ])
+      ; ("last_updated", `String "2024-01-15T12:00:00Z")
+      ; ("version", `Int 1)
+      ]
+  in
+  match Masc_domain.backlog_of_yojson_with_diagnostics json with
+  | Error _ -> ()
+  | Ok _ -> fail "expected contract corruption to keep propagating"
+
+(* ============================================================
    masc_error_to_string Tests
    ============================================================ *)
 
@@ -1752,6 +1855,20 @@ let () =
       test_case "rejects non-list tasks" `Quick test_backlog_of_yojson_rejects_non_list_tasks;
       test_case "rejects corrupt task entries" `Quick
         test_backlog_of_yojson_rejects_corrupt_task_entries;
+    ];
+    "task_decode_diagnostics", [
+      test_case "absent field is Field_absent" `Quick
+        test_task_of_yojson_with_diagnostics_absent;
+      test_case "decoded field is Field_decoded" `Quick
+        test_task_of_yojson_with_diagnostics_decoded;
+      test_case "corrupt field is Field_unreadable" `Quick
+        test_task_of_yojson_with_diagnostics_unreadable;
+      test_case "backlog reports a dropped task" `Quick
+        test_backlog_of_yojson_with_diagnostics_reports_drop;
+      test_case "backlog_of_yojson stays backward compatible" `Quick
+        test_backlog_of_yojson_still_drops_diagnostics;
+      test_case "contract corruption still propagates" `Quick
+        test_backlog_of_yojson_with_diagnostics_still_propagates_contract;
     ];
     "masc_error_to_string", [
       test_case "not initialized" `Quick test_masc_error_not_initialized;

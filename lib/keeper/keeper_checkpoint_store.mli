@@ -72,7 +72,7 @@ val save_agent_core_classified :
 (** [save_agent_core_classified] for a sequence of saves of one checkpoint
     lineage, such as the stages of one keeper turn. [encoding_memo] carries the
     encoded messages of the previous successful save, so a save encodes only the
-    messages that save did not write ({!Agent_core.Checkpoint.to_string_with_encoding_memo}).
+    messages that save did not write ({!Agent_core.Checkpoint.to_pieces_with_encoding_memo}).
     The written bytes are the same as without the memo. *)
 val save_agent_core_classified_with_encoding_memo :
   session_dir:string ->

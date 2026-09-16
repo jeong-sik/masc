@@ -1167,9 +1167,10 @@ let separated separator = function
 
 (* [Yojson.Safe.to_string] writes an object as [{"k":v,...}] and an array as
    [[v,...]] with no whitespace, so these pieces concatenate to [to_string cp].
-   They stay a list: a live checkpoint runs to hundreds of megabytes, and the
-   writer appends the pieces to the file in order, so joining them here would
-   allocate the whole document a second time on every save. *)
+   They stay a list: the live canonical checkpoints measured 2026-09-16 were
+   111MB and 107MB, and the writer appends the pieces to the file in order, so
+   joining them here would allocate that whole document a second time on every
+   save. *)
 let encoded_checkpoint_pieces ~before_messages ~after_messages messages =
   let key name = Yojson.Safe.to_string (`String name) in
   let field (name, value) = [ key name; ":"; Yojson.Safe.to_string value ] in

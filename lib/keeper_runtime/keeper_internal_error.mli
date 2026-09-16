@@ -95,7 +95,20 @@ type gate_replay_repair_stage =
   | Replay_stale_grant_retirement
   | Replay_invalid_resolution_state
 
-type masc_internal_error =
+(** What failed the provider attempt a fence closed over (RFC-0454 D1).
+
+    A MASC error that arrives on the carrier is kept as the value it is;
+    anything else is agent-core's typed projection. Neither arm holds a
+    rendered error string, so serializing a fence never puts a JSON document
+    inside a JSON string.
+
+    Declared with {!masc_internal_error} because the recursion is real: a
+    fence can carry a terminal effect failure. *)
+type fenced_cause =
+  | Fenced_masc of masc_internal_error
+  | Fenced_core of Keeper_request_failure_core.t
+
+and masc_internal_error =
   | Runtime_exhausted of {
       runtime_id : string;
       reason : runtime_exhaustion_reason;
@@ -146,7 +159,7 @@ type masc_internal_error =
   | Provider_attempt_effect_fenced of {
       runtime_id : string;
       effect_disposition : Keeper_provider_attempt_effect_core.t;
-      diagnostic : string;
+      cause : fenced_cause;
     }
       (** A provider attempt failed after an effect was attempted or after the
           runtime lost complete effect observation. The exact source must be
@@ -155,7 +168,7 @@ type masc_internal_error =
       runtime_id : string;
       effect_disposition : Keeper_provider_attempt_effect_core.t;
       reject_count : int;
-      diagnostic : string;
+      cause : fenced_cause;
     }
       (** The same fence, on a turn that also recorded typed pre_tool_use
           rejections: the runtime escalated a corrective tool error into the
@@ -184,6 +197,9 @@ val cap_blocker_detail : string -> string
     text is truncated to the narrative budget (~200). Idempotent. *)
 
 val masc_internal_error_to_json : masc_internal_error -> Yojson.Safe.t
+(** A JSON object tagged by ["kind"]. A fence writes its [cause] as a nested
+    object, and a terminal effect failure its [detail], so no arm of this
+    codec puts a JSON document inside a JSON string. *)
 
 val summary_of_masc_internal_error : masc_internal_error -> string option
 
@@ -233,6 +249,9 @@ val core_error_of_masc_internal_error :
 
 val parse_masc_internal_error_json :
   Yojson.Safe.t -> masc_internal_error option
+(** Strict: an unknown kind, a missing or extra field, or a field of the wrong
+    shape is [None]. A fence [cause] must be the nested object
+    {!masc_internal_error_to_json} writes; a string is refused. *)
 
 val classify_masc_internal_error_of_string :
   string -> masc_internal_error option

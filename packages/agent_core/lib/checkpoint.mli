@@ -132,9 +132,9 @@ val create_encoding_memo : unit -> encoding_memo
     validated against the v11 contract, and decoded once. After a success,
     [memo] holds exactly the messages of [cp].
 
-    The caller appends the pieces in order. A live checkpoint runs to hundreds
-    of megabytes, so joining them into one string would allocate the whole
-    document again on every save. *)
+    The caller appends the pieces in order. The live canonical checkpoints
+    measured 2026-09-16 were 111MB and 107MB, so joining the pieces into one
+    string would allocate that whole document again on every save. *)
 val to_pieces_with_encoding_memo : encoding_memo -> t -> string list
 
 (** Deserialize checkpoint from a JSON string under the same current-only

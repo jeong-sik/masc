@@ -16,23 +16,14 @@
     facade's public types identical to the internal-error SSOT instead of
     copying fresh nominal types into this interface. *)
 
-include
-  module type of Keeper_internal_error
-    with type provider_rejection = Keeper_internal_error.provider_rejection
-     and type capacity_backpressure_source =
-      Keeper_internal_error.capacity_backpressure_source
-     and type capacity_retry_after = Keeper_internal_error.capacity_retry_after
-     and type runtime_exhaustion_reason =
-      Keeper_internal_error.runtime_exhaustion_reason
-     and type accept_rejection_kind =
-      Keeper_internal_error.accept_rejection_kind
-     and type accept_response_shape =
-      Keeper_internal_error.accept_response_shape
-     and type transcript_quarantine_reason =
-      Keeper_internal_error.transcript_quarantine_reason
-     and type gate_replay_repair_stage =
-      Keeper_internal_error.gate_replay_repair_stage
-     and type masc_internal_error = Keeper_internal_error.masc_internal_error
+(* [struct include ... end] strengthens every type to an alias of the SSOT's,
+   which is what the hand-written [with type] list did one type at a time. It
+   is written this way because [fenced_cause] and [masc_internal_error] are
+   one recursive group (RFC-0454 D1): a [with type] on either member sees the
+   other as the copy this include made, so the manifest is refused. *)
+include module type of struct
+  include Keeper_internal_error
+end
 
 (** {1 Turn pipeline records} *)
 

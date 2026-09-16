@@ -299,15 +299,44 @@ type rewrite =
   | Rewrite_every_put
   | Skip_address_this_process_wrote
 
-let put_with_atomic_replace ~rewrite ~atomic_replace ~operation t ~bytes ~mime =
+(* The half of a put that reads no filesystem and writes none: the sha256 over
+   the whole body, the preview cut from it, and the path that address occupies.
+   A put whose address this process already wrote does nothing else, so for a
+   caller holding many bodies this is the whole cost, and it is the half that
+   can be computed away from the domain the caller runs on. *)
+type addressed =
+  { addressed_bytes : string
+  ; addressed_path : string
+  ; addressed_ref : Tool_output.artifact_ref
+  }
+
+let address_with ~operation t ~bytes ~mime =
   let sha256 = Digestif.SHA256.(digest_string bytes |> to_hex) in
-  let path = shard_path t sha256 in
+  (* A digestif-produced sha256 and a byte length are always valid; an empty
+     [mime] is the only reachable rejection and is a caller bug, raised
+     visibly rather than stored. *)
+  match
+    Tool_output.make_artifact_ref ~sha256 ~bytes:(String.length bytes)
+      ~preview:(make_preview bytes) ~mime
+  with
+  | Ok artifact_ref ->
+    { addressed_bytes = bytes
+    ; addressed_path = shard_path t sha256
+    ; addressed_ref = artifact_ref
+    }
+  | Error err ->
+    invalid_arg
+      (Printf.sprintf "tool_blob_store.%s: %s" operation
+         (Tool_output.make_error_to_string err))
+
+let store_addressed ~rewrite ~atomic_replace ~operation addressed =
+  let path = addressed.addressed_path in
   let write () =
     ensure_parent_dir path;
     (* An authoritative atomic rewrite avoids reading and hashing a second
        full copy, and repairs any corrupt prior bytes at this content
        address. Concurrent writers have byte-identical payloads. *)
-    (match atomic_replace path bytes with
+    (match atomic_replace path addressed.addressed_bytes with
      | Ok () -> ()
      | Error msg ->
          raise (Sys_error (Printf.sprintf "tool_blob_store.%s: %s" operation msg)));
@@ -320,29 +349,32 @@ let put_with_atomic_replace ~rewrite ~atomic_replace ~operation t ~bytes ~mime =
      write ();
      record_written path
    | Rewrite_every_put -> write ());
-  (* A digestif-produced sha256 and a byte length are always valid; an empty
-     [mime] is the only reachable rejection and is a caller bug, raised
-     visibly rather than stored. *)
-  match
-    Tool_output.make_artifact_ref ~sha256 ~bytes:(String.length bytes)
-      ~preview:(make_preview bytes) ~mime
-  with
-  | Ok artifact_ref -> artifact_ref
-  | Error err ->
-    invalid_arg
-      (Printf.sprintf "tool_blob_store.%s: %s" operation
-         (Tool_output.make_error_to_string err))
+  addressed.addressed_ref
 
-let put t ~bytes ~mime =
+let put_with_atomic_replace ~rewrite ~atomic_replace ~operation t ~bytes ~mime =
+  store_addressed
+    ~rewrite
+    ~atomic_replace
+    ~operation
+    (address_with ~operation t ~bytes ~mime)
+
+let address t ~bytes ~mime = address_with ~operation:"address" t ~bytes ~mime
+let addressed_bytes addressed = addressed.addressed_bytes
+
+let put_addressed addressed =
   Tool_output.Stored
-    (put_with_atomic_replace
+    (store_addressed
        ~rewrite:Skip_address_this_process_wrote
        ~atomic_replace:Fs_compat.save_file_atomic
        ~operation:"put"
-       t
-       ~bytes
-       ~mime)
+       addressed)
 ;;
+
+(* [address_with ~operation:"put"] rather than [address], so a caller that
+   passes an empty mime still reads [put] in the failure. It now raises before
+   writing instead of after: a call that cannot return a reference no longer
+   leaves the bytes at their address. *)
+let put t ~bytes ~mime = put_addressed (address_with ~operation:"put" t ~bytes ~mime)
 
 let put_durable =
   put_with_atomic_replace

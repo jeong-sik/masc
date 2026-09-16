@@ -182,6 +182,45 @@ let test_durable_raw_bytes_contract () =
         | Ok () -> fail "post-rename fault succeeded");
        check string "renamed bytes visible" published (read_file path))
 
+(* 인코딩된 payload 는 조각 목록으로 온다. 체크포인트 저장이 111MB 문서를 한
+   문자열로 합치지 않으려고 그렇게 하므로, 조각을 이어 쓴 파일이 조각을 이어붙인
+   바이트와 같은지, 그리고 여러 조각이어도 인코딩 실패가 여전히 아무것도 남기지
+   않는지를 여기서 못박는다. *)
+let test_durable_encoded_pieces_write_the_joined_bytes () =
+  Eio_main.run
+  @@ fun _env ->
+  let base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       let path = Filename.concat base "encoded.json" in
+       let pieces = [ "{\"a\":"; "1"; ",\"b\":\""; "\000\r\n\255 \xed\x95\x9c"; "\"}" ] in
+       (match KF.save_encoded_durable_atomic_from path (fun () -> pieces) with
+        | Ok () -> ()
+        | Error error -> fail (KF.durable_write_error_to_string error));
+       check string "the file is the pieces joined" (String.concat "" pieces)
+         (read_file path);
+       check int "private mode" 0o600 ((Unix.stat path).st_perm land 0o777);
+       check bool "no temp left behind" false (has_tmp_files base);
+       let absent = Filename.concat base "refused.json" in
+       (match
+          KF.save_encoded_durable_atomic_from absent (fun () ->
+            invalid_arg "cannot encode")
+        with
+        | Error { renamed = false; stage = KF.Payload_encode; _ } -> ()
+        | Error error -> fail (KF.durable_write_error_to_string error)
+        | Ok () -> fail "an encode refusal was published");
+       check bool "a refused encode writes nothing" false (Sys.file_exists absent);
+       (* An empty piece carries no bytes and does not end the payload early. *)
+       let with_empty = Filename.concat base "empty-piece.txt" in
+       (match
+          KF.save_encoded_durable_atomic_from with_empty (fun () ->
+            [ "head"; ""; "tail" ])
+        with
+        | Ok () -> ()
+        | Error error -> fail (KF.durable_write_error_to_string error));
+       check string "an empty piece is skipped" "headtail" (read_file with_empty))
+
 let test_durable_write_pre_publish_failure_preserves_target () =
   Eio_main.run
   @@ fun _env ->
@@ -590,6 +629,8 @@ let () =
           test_case "creates parent dir" `Quick test_save_atomic_creates_parent_dir;
           test_case "json atomic" `Quick test_save_json_atomic;
           test_case "durable raw bytes" `Quick test_durable_raw_bytes_contract;
+          test_case "durable encoded pieces" `Quick
+            test_durable_encoded_pieces_write_the_joined_bytes;
         ] );
       ( "durability",
         [ test_case

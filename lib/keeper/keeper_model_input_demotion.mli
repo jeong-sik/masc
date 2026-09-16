@@ -92,8 +92,20 @@ type materialize_outcome =
             was chosen against, so the caller must run the cut again. *)
   }
 
+type address_memo
+(** The content addresses {!materialize} has already computed in one provider
+    attempt, keyed by tool_use_id. *)
+
+val create_address_memo : unit -> address_memo
+(** One memo per provider attempt. The demotion boundary is pinned to the
+    turn's seed, so every request of an attempt demotes the same aged results,
+    and a durable tool result's body never changes under its id — the address
+    is therefore the same every time. It is not safe to share across attempts
+    of different keepers. *)
+
 val materialize
   :  store:Tool_blob_store.t
+  -> addresses:address_memo
   -> pending:pending list
   -> Agent_core.Types.message list
   -> materialize_outcome
@@ -101,9 +113,21 @@ val materialize
     their placeholders for real markers. Demotions the cut removed are not
     stored.
 
+    A body's address is computed once per attempt and reused by every later
+    request in it ([addresses]); an address this call has not seen is computed
+    through the process CPU pool ({!Tool_blob_store.address}). Only the writes
+    run on the calling fiber.
+
+    Both matter because the store skips writing an address this process already
+    wrote, so on a long-lived keeper the sha256 over every aged body is the
+    whole cost of this call. The attempt runs 62 to 83 provider requests and
+    each one repeated it, and doing it on the calling fiber held the main Eio
+    domain for one uninterrupted run of 0.7 to 1.6 seconds (rtev, 2026-09-16).
+
     A write failure restores that message's body instead of emitting a marker
-    for bytes that were never persisted, and is counted in [reverted]; it never
-    raises and never leaves a dangling reference.
+    for bytes that were never persisted, and is counted in [reverted]; no write
+    failure raises and none leaves a dangling reference. A cancelled fiber still
+    propagates [Eio.Cancel.Cancelled], as the addressing awaits the pool.
 
     On blob lifetime: these blobs have no durable referrer, because the copy
     that carries the marker is never persisted. That is safe rather than

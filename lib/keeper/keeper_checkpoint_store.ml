@@ -846,6 +846,59 @@ let load_ref_locked ~session_dir ~expected_session_id =
          checkpoint;
        snapshot)
 
+(* What the canonical file holds, against the reference a candidate claims to
+   advance. *)
+type canonical_source =
+  | Source_absent
+  | Source_is_expected
+  | Source_is_other of Keeper_checkpoint_ref.t
+
+(* RFC-0225 §3.2 admission: the reference is a SHA-256 over exactly the
+   canonical bytes, so hashing the file answers what the source check asks --
+   whether the file is still the bytes [expected_source_ref] names -- and the
+   decode it used to do answered nothing more. That decode, with its v11
+   validation, allocated 26 GB in a fifty-minute window on a live server
+   (2026-09-15) for files of 13-109 MB.
+
+   A file that does not match is decoded, because the conflict names the
+   reference the file now carries. Bytes this build cannot decode therefore
+   still refuse the write: their hash cannot be the hash of bytes that once
+   decoded into the expected reference. *)
+let canonical_source_locked
+      ~session_dir
+      ~(expected_source_ref : Keeper_checkpoint_ref.t)
+  =
+  let expected_session_id = expected_source_ref.trace_id in
+  let canonical_path =
+    agent_core_checkpoint_path
+      ~session_dir
+      ~session_id:(Keeper_id.Trace_id.to_string expected_session_id)
+  in
+  match load_canonical_bytes_strict canonical_path with
+  | Error error -> Error (Ref_read_failed error)
+  | Ok None -> Ok Source_absent
+  | Ok (Some (identity_before, canonical_bytes)) ->
+    let sha256 =
+      offload_checkpoint_cpu (fun () ->
+        Keeper_checkpoint_ref.sha256_of_canonical_bytes canonical_bytes)
+    in
+    if String.equal sha256 expected_source_ref.sha256
+    then Ok Source_is_expected
+    else (
+      match
+        decode_exact_snapshot_off_scheduler ~expected_session_id canonical_bytes
+      with
+      | Error error -> Error (Ref_read_failed (classify_core_error error))
+      | Ok (checkpoint, snapshot) ->
+        publish_summary_after_parse
+          ~canonical_path
+          ~identity_before:(Some identity_before)
+          checkpoint;
+        Result.map
+          (fun snapshot -> Source_is_other (exact_snapshot_reference snapshot))
+          snapshot)
+;;
+
 let load_agent_core_exact_snapshot ~session_dir ~session_id =
   match Keeper_id.Trace_id.of_string session_id with
   | Error reason -> Error (Ref_identity_invalid (Session_id_invalid reason))
@@ -938,15 +991,15 @@ let save_agent_core_if_source_with
         `Returned
           (with_checkpoint_cas_lock ~session_dir (fun session_dir ->
          let source =
-           match load_ref_locked ~session_dir ~expected_session_id with
-           | Error Ref_not_found when require_absent -> Ok ()
+           match canonical_source_locked ~session_dir ~expected_source_ref with
            | Error error -> Error (Source_unavailable error)
-           | Ok snapshot
-             when require_absent
-                  || not (Keeper_checkpoint_ref.equal expected_source_ref
-                            (exact_snapshot_reference snapshot)) ->
-             Error (Source_changed (exact_snapshot_reference snapshot))
-           | Ok _ -> Ok ()
+           | Ok Source_absent ->
+             if require_absent then Ok () else Error (Source_unavailable Ref_not_found)
+           | Ok Source_is_expected ->
+             if require_absent
+             then Error (Source_changed expected_source_ref)
+             else Ok ()
+           | Ok (Source_is_other reference) -> Error (Source_changed reference)
          in
          match source with
          | Error error -> not_installed error
@@ -972,6 +1025,12 @@ let save_agent_core_if_source_with
                  exact bytes [candidate_ref] was derived from - so the
                  published file and the returned ref agree by construction.
                  The hint is auxiliary and cannot downgrade that fact. *)
+              (* The summary of the file just installed, from the value that
+                 was installed. The source check above no longer parses a
+                 matching file, and without this the next reader of the save
+                 watermark or the heartbeat message count would parse the whole
+                 checkpoint to fill it. *)
+              publish_summary_after_write ~canonical_path candidate;
               publish []
             | Ok (Keeper_fs.Committed_but_observer_failed failure) ->
               publish [ Commit_observer_failed failure ])))

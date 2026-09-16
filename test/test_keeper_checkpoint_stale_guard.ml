@@ -7,10 +7,12 @@
     than the canonical checkpoint observed inside the save transaction, without
     turning that watermark hit into keeper lifecycle failure.
 
-    The canonical file is parsed under the stable session lock for every
-    admission decision. No process-local cache, fingerprint, or sidecar may
-    substitute for the checkpoint bytes. The canonical file is written in
-    compact JSON. *)
+    The canonical file is read whole under the stable session lock for every
+    admission decision and hashed against the reference the candidate claims to
+    advance; a file whose hash differs is then parsed, because the refusal
+    names the reference that file now carries. No process-local cache,
+    fingerprint, or sidecar may substitute for reading those bytes. The
+    canonical file is written in compact JSON. *)
 
 open Alcotest
 open Masc
@@ -746,6 +748,72 @@ let with_exact_source_fixture ~session_id f =
       | Error _ -> fail "exact source load failed"
     in
     f ~session_dir ~source_ref)
+;;
+
+(* The source check reads the canonical file and hashes it. A matching file is
+   not parsed: the decode it used to do answered nothing the hash does not, and
+   on a live server it allocated 26 GB in fifty minutes over files of 13-109 MB.
+
+   Reading the bytes and hashing them allocates about 0.00 minor words per byte
+   (the bytes themselves land in the major heap), while Yojson's parse alone
+   allocates about 0.35 before the typed decode and the v11 validation
+   (measured on this machine, 2026-09-16). The budget sits between. *)
+let words_per_source_byte_budget = 0.1
+
+let chatty_checkpoint ~session_id ~turn_count ~marker ~messages_of_marker =
+  let base = make_checkpoint ~session_id ~turn_count ~marker in
+  { base with Agent_core.Checkpoint.messages = messages_of_marker }
+;;
+
+let test_a_matching_source_is_hashed_and_not_parsed () =
+  let session_id = "sess-cas-hash-only" in
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
+    let paragraph = String.make 4096 'x' in
+    let messages =
+      List.init 256 (fun index ->
+        Agent_core.Types.
+          { role = Assistant
+          ; content = [ Text (Printf.sprintf "%d %s" index paragraph) ]
+          ; name = None
+          ; tool_call_id = None
+          ; metadata = []
+          })
+    in
+    save_ok ~session_dir
+      (chatty_checkpoint ~session_id ~turn_count:8 ~marker:"source"
+         ~messages_of_marker:messages)
+      "hash-only seed save";
+    let source_ref =
+      match
+        Keeper_checkpoint_store.load_agent_core_with_ref ~session_dir ~session_id
+      with
+      | Ok (_, reference) -> reference
+      | Error _ -> fail "hash-only source load failed"
+    in
+    let source_bytes =
+      (Unix.stat (Filename.concat session_dir (session_id ^ ".json"))).Unix.st_size
+    in
+    check bool "the source is big enough to tell a hash from a parse" true
+      (source_bytes > 1_000_000);
+    let candidate = make_checkpoint ~session_id ~turn_count:9 ~marker:"candidate" in
+    let before = Gc.minor_words () in
+    let installation =
+      Keeper_checkpoint_store.save_agent_core_if_source
+        ~session_dir
+        ~expected_source_ref:source_ref
+        candidate
+    in
+    let words = Gc.minor_words () -. before in
+    (match installation with
+     | Keeper_checkpoint_store.Installed _ -> ()
+     | Keeper_checkpoint_store.Not_installed _ ->
+       fail "the candidate was refused against its own source");
+    check bool
+      (Printf.sprintf "the source check allocated %.0f words for %d bytes" words
+         source_bytes)
+      true
+      (words < Float.of_int source_bytes *. words_per_source_byte_budget))
 ;;
 
 let test_exact_source_cas_allows_one_equal_turn_writer () =
@@ -1579,6 +1647,8 @@ let () =
             test_canonical_checkpoint_is_written_compact;
           test_case "exact source CAS permits one equal-turn writer" `Quick
             test_exact_source_cas_allows_one_equal_turn_writer;
+          test_case "a matching source is hashed and not parsed" `Quick
+            test_a_matching_source_is_hashed_and_not_parsed;
           test_case "exact source CAS updates the canonical watermark" `Quick
             test_exact_source_cas_updates_canonical_watermark;
           test_case "release failure preserves Not_installed cause" `Quick

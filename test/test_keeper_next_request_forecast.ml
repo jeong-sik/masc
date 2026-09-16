@@ -76,6 +76,52 @@ let test_fixed_parts_above_the_capacity_keep_the_newest_atom () =
   | Keeper_next_request_forecast.Newest_atom_only _ ->
     Alcotest.fail "a measured capacity reports an overrun, not an unmeasured floor"
 
+let component component bytes : Turn_record.input_component = { component; bytes }
+
+(* lane-smith turn 3646 on 2026-09-16: memory recall and dynamic context
+   pinned beside the schemas and instructions, tool results in the history. *)
+let first_round_composition =
+  [ component Turn_record.Tool_schemas 71_578
+  ; component (Turn_record.Prompt_block Prompt_block_id.Keeper_instructions) 10_832
+  ; component (Turn_record.Prompt_block Prompt_block_id.Memory_os_recall) 150_000
+  ; component (Turn_record.Prompt_block Prompt_block_id.Dynamic_context) 9_710
+  ; component Turn_record.Message_user 583
+  ; component Turn_record.Message_tool_result 16_090
+  ]
+
+(* Turn 3648, the same keeper: a post-tool round keeps only the instructions
+   and the schemas of the prompt, so the record shows no pinned block. *)
+let post_tool_composition =
+  [ component Turn_record.Tool_schemas 71_578
+  ; component (Turn_record.Prompt_block Prompt_block_id.Keeper_instructions) 10_832
+  ; component Turn_record.Message_user 583
+  ; component Turn_record.Message_tool_result 16_090
+  ]
+
+let test_a_first_round_composition_yields_the_fixed_and_pinned_parts () =
+  match Keeper_next_request_forecast.first_round_parts ~turn:3646 first_round_composition with
+  | None -> Alcotest.fail "a composition with a recall block is a first round's"
+  | Some parts ->
+    Alcotest.(check int) "the turn it was read from" 3646 parts.Keeper_next_request_forecast.turn;
+    Alcotest.(check int) "schemas + instructions are the fixed parts" 82_410
+      parts.Keeper_next_request_forecast.reserved_bytes;
+    Alcotest.(check int) "recall + dynamic context are pinned; messages are neither" 159_710
+      parts.Keeper_next_request_forecast.pinned_bytes
+
+let test_a_post_tool_composition_says_nothing_about_the_pinned_blocks () =
+  Alcotest.(check bool) "no first-round block, no parts" true
+    (Option.is_none
+       (Keeper_next_request_forecast.first_round_parts ~turn:3648 post_tool_composition))
+
+let test_an_operator_note_alone_is_not_a_first_round () =
+  (* The note rides post-tool rounds too, so it cannot mark a first round. *)
+  let composition =
+    component (Turn_record.Prompt_block Prompt_block_id.Operator_note) 200
+    :: post_tool_composition
+  in
+  Alcotest.(check bool) "still the post-tool shape" true
+    (Option.is_none (Keeper_next_request_forecast.first_round_parts ~turn:1 composition))
+
 let test_no_density_sends_the_newest_atom_only () =
   let messages = history ~exchanges:5 ~text_bytes:100 in
   match
@@ -94,7 +140,15 @@ let test_no_density_sends_the_newest_atom_only () =
 
 let () =
   Alcotest.run "keeper_next_request_forecast"
-    [ ( "cut"
+    [ ( "parts"
+      , [ Alcotest.test_case "a first-round composition yields the fixed and pinned parts"
+            `Quick test_a_first_round_composition_yields_the_fixed_and_pinned_parts
+        ; Alcotest.test_case "a post-tool composition says nothing about the pinned blocks"
+            `Quick test_a_post_tool_composition_says_nothing_about_the_pinned_blocks
+        ; Alcotest.test_case "an operator note alone is not a first round" `Quick
+            test_an_operator_note_alone_is_not_a_first_round
+        ] )
+    ; ( "cut"
       , [ Alcotest.test_case "the fixed parts come off the capacity first" `Quick
             test_the_fixed_parts_come_off_the_capacity_first
         ; Alcotest.test_case "fixed parts above the capacity keep the newest atom" `Quick

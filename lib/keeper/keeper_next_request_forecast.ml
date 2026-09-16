@@ -7,18 +7,38 @@
    history with the wake line appended as the newest atom. W, the density
    and the request-body cap are read live; R (tool schemas + keeper
    instructions) and the pinned blocks (memory recall, dynamic context, ...)
-   are taken from the newest turn record that carried an exact composition
-   on the same runtime, because a turn measures them with the encoder the
-   cut uses and nothing outside a turn assembles them without side effects
-   (a preview would consume the operator note and advance nothing else it
-   should). The record's turn number rides along so a reader knows how old
-   those two figures are. *)
+   are taken from the newest turn record on the same runtime whose
+   composition is a first round's, because a turn measures them with the
+   encoder the cut uses and nothing outside a turn assembles them without
+   side effects (a preview would consume the operator note and advance
+   nothing else it should). A record describes the turn's latest request; a
+   post-tool round drops every block [Prompt_block_id.injected_on_post_tool_round]
+   refuses, so such a record shows the pinned blocks as absent when the next
+   first round will carry them. The record's turn number rides along so a
+   reader knows how old those two figures are. *)
 
 type measured_parts =
   { turn : int
   ; reserved_bytes : int
   ; pinned_bytes : int
   }
+
+type parts_refusal =
+  | No_composition_on_runtime of { records_read : int }
+  | No_first_round_composition of { records_read : int; newest_turn : int }
+
+let parts_refusal_to_string = function
+  | No_composition_on_runtime { records_read } ->
+    Printf.sprintf
+      "no turn record on this runtime carried a composition in the newest %d records"
+      records_read
+  | No_first_round_composition { records_read; newest_turn } ->
+    Printf.sprintf
+      "the newest %d turn records on this runtime carry only post-tool compositions \
+       (newest turn #%d); the pinned blocks ride the first round only"
+      records_read
+      newest_turn
+;;
 
 type history_cut =
   | Cut of
@@ -33,7 +53,7 @@ type candidate =
   ; window : (Keeper_context_window.t, string) result
   ; capacity : Keeper_context_window.capacity option
   ; request_cap_bytes : int option
-  ; parts : measured_parts option
+  ; parts : (measured_parts, parts_refusal) result
   ; history_atoms : int
   ; cut : history_cut option
   }
@@ -95,23 +115,52 @@ let window_for ~runtime_id =
   | None -> Error (Printf.sprintf "runtime %s resolves no context window" runtime_id)
 ;;
 
+(* The cap the driver judges the body against, read from the materialized
+   runtime the way [Runtime.keeper_dispatch_readiness] reads it. Only an
+   Agent Core runtime builds the request this bounds. *)
 let request_cap_for ~runtime_id =
-  match Runtime_agent.resolve_provider_config_of_label runtime_id with
-  | Error _ -> None
-  | Ok provider_config ->
-    (match Runtime.validate_request_body_cap ~runtime_id provider_config with
-     | Ok cap -> cap
-     | Error _ -> None)
+  match Runtime.get_runtime_by_id runtime_id with
+  | None -> None
+  | Some runtime ->
+    (match runtime.Runtime.execution with
+     | Runtime_execution.Agent_core provider_config ->
+       (match Runtime.validate_request_body_cap ~runtime_id provider_config with
+        | Ok cap -> cap
+        | Error _ -> None)
+     | Runtime_execution.Codex_app_server _
+     | Runtime_execution.Claude_code _
+     | Runtime_execution.Antigravity_cli _ -> None)
 ;;
 
-(* R and the pinned blocks as the newest composition on this runtime measured
-   them. Keeper instructions ride in the system prompt and every other prompt
+(* A composition is a first round's when it carries a block the post-tool
+   assembly drops; the predicate is the assembly's own. *)
+let is_first_round (components : Turn_record.input_component list) =
+  List.exists
+    (fun (component : Turn_record.input_component) ->
+      match component.Turn_record.component with
+      | Turn_record.Prompt_block id -> not (Prompt_block_id.injected_on_post_tool_round id)
+      | Turn_record.Tool_schemas
+      | Turn_record.Message_user
+      | Turn_record.Message_system
+      | Turn_record.Message_assistant_text
+      | Turn_record.Message_thinking
+      | Turn_record.Message_redacted_thinking
+      | Turn_record.Message_tool_use
+      | Turn_record.Message_tool_result
+      | Turn_record.Message_image
+      | Turn_record.Message_document
+      | Turn_record.Message_audio -> false)
+    components
+;;
+
+(* R and the pinned blocks as one first-round composition measured them.
+   Keeper instructions ride in the system prompt and every other prompt
    block rides as pinned extra system context; the message kinds are the
    history the cut decides about and belong to neither. *)
-let parts_of_record (record : Turn_record.t) =
-  match record.Turn_record.input_components with
-  | None -> None
-  | Some components ->
+let first_round_parts ~turn (components : Turn_record.input_component list) =
+  if not (is_first_round components)
+  then None
+  else (
     let reserved, pinned =
       List.fold_left
         (fun (reserved, pinned) (component : Turn_record.input_component) ->
@@ -133,11 +182,7 @@ let parts_of_record (record : Turn_record.t) =
         (0, 0)
         components
     in
-    Some
-      { turn = record.Turn_record.absolute_turn
-      ; reserved_bytes = reserved
-      ; pinned_bytes = pinned
-      }
+    Some { turn; reserved_bytes = reserved; pinned_bytes = pinned })
 ;;
 
 let record_runtime (record : Turn_record.t) =
@@ -146,24 +191,40 @@ let record_runtime (record : Turn_record.t) =
   | None -> record.Turn_record.runtime_profile
 ;;
 
-let recent_records_read = 50
+(* A keeper that calls tools on most turns leaves mostly post-tool records
+   (lane-smith: one first-round record in thirteen on 2026-09-16), so the
+   read reaches back far enough to meet one. *)
+let recent_records_read = 200
 
 let newest_parts_for ~config ~keeper_name ~runtime_id =
   let store = Keeper_types_support.keeper_turn_record_store config keeper_name in
-  (* Oldest first; the fold keeps the last match, which is the newest. *)
-  List.fold_left
-    (fun found json ->
-      match Turn_record.of_json json with
-      | Error _ -> found
-      | Ok record ->
-        if String.equal (record_runtime record) runtime_id
-        then (
-          match parts_of_record record with
-          | Some parts -> Some parts
-          | None -> found)
-        else found)
-    None
-    (Dated_jsonl.read_recent store recent_records_read)
+  let records = Dated_jsonl.read_recent store recent_records_read in
+  let records_read = List.length records in
+  (* Oldest first; each fold step keeps the newer answer. *)
+  let found, newest_composed_turn =
+    List.fold_left
+      (fun (found, newest_composed_turn) json ->
+        match Turn_record.of_json json with
+        | Error _ -> found, newest_composed_turn
+        | Ok record ->
+          if not (String.equal (record_runtime record) runtime_id)
+          then found, newest_composed_turn
+          else (
+            match record.Turn_record.input_components with
+            | None -> found, newest_composed_turn
+            | Some components ->
+              let turn = record.Turn_record.absolute_turn in
+              ( (match first_round_parts ~turn components with
+                 | Some parts -> Some parts
+                 | None -> found)
+              , Some turn )))
+      (None, None)
+      records
+  in
+  match found, newest_composed_turn with
+  | Some parts, _ -> Ok parts
+  | None, Some newest_turn -> Error (No_first_round_composition { records_read; newest_turn })
+  | None, None -> Error (No_composition_on_runtime { records_read })
 ;;
 
 let wake_line () =
@@ -191,7 +252,7 @@ let candidate ~config ~keeper_name ~messages ~history_atoms runtime_id =
   let parts = newest_parts_for ~config ~keeper_name ~runtime_id in
   let cut =
     match capacity, parts with
-    | Some capacity, Some parts ->
+    | Some capacity, Ok parts ->
       Some
         (cut_history
            ~measure
@@ -199,7 +260,7 @@ let candidate ~config ~keeper_name ~messages ~history_atoms runtime_id =
            ~reserved_bytes:parts.reserved_bytes
            ~pinned_bytes:parts.pinned_bytes
            messages)
-    | Some _, None | None, Some _ | None, None -> None
+    | Some _, Error _ | None, Ok _ | None, Error _ -> None
   in
   { runtime_id
   ; window
@@ -287,14 +348,14 @@ let candidate_to_json candidate =
     ; "capacity", option_json Keeper_context_window.capacity_to_json candidate.capacity
     ; "request_cap_bytes", option_json (fun n -> `Int n) candidate.request_cap_bytes
     ; ( "parts"
-      , option_json
-          (fun parts ->
-            `Assoc
-              [ "measured_on_turn", `Int parts.turn
-              ; "reserved_bytes", `Int parts.reserved_bytes
-              ; "pinned_bytes", `Int parts.pinned_bytes
-              ])
-          candidate.parts )
+      , match candidate.parts with
+        | Ok parts ->
+          `Assoc
+            [ "measured_on_turn", `Int parts.turn
+            ; "reserved_bytes", `Int parts.reserved_bytes
+            ; "pinned_bytes", `Int parts.pinned_bytes
+            ]
+        | Error refusal -> `Assoc [ "error", `String (parts_refusal_to_string refusal) ] )
     ; "history_atoms", `Int candidate.history_atoms
     ; "cut", option_json history_cut_to_json candidate.cut
     ]

@@ -92,7 +92,7 @@ type forecast_candidate =
   ; window : forecast_window
   ; capacity : forecast_capacity option
   ; request_cap_bytes : int option
-  ; parts : forecast_parts option
+  ; parts : (forecast_parts, string) result
   ; history_atoms : int
   ; cut : forecast_cut option
   }
@@ -595,7 +595,10 @@ let decode_forecast_capacity = function
   | _ -> Error "capacity is not an object or null"
 
 let decode_forecast_parts = function
-  | `Null -> Ok None
+  | `Assoc fields when List.mem_assoc "error" fields ->
+    let* error_json = field "error" fields in
+    let* error = nonempty_string "parts.error" error_json in
+    Ok (Error error)
   | `Assoc fields ->
     let* turn_json = field "measured_on_turn" fields in
     let* measured_on_turn = nonnegative_int "parts.measured_on_turn" turn_json in
@@ -603,8 +606,8 @@ let decode_forecast_parts = function
     let* reserved_bytes = nonnegative_int "parts.reserved_bytes" reserved_json in
     let* pinned_json = field "pinned_bytes" fields in
     let* pinned_bytes = nonnegative_int "parts.pinned_bytes" pinned_json in
-    Ok (Some { measured_on_turn; reserved_bytes; pinned_bytes })
-  | _ -> Error "parts is not an object or null"
+    Ok (Ok { measured_on_turn; reserved_bytes; pinned_bytes })
+  | _ -> Error "parts is not an object"
 
 let decode_forecast_fit = function
   | `Assoc fields ->

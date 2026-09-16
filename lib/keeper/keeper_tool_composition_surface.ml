@@ -641,27 +641,64 @@ let plan_execution_error_kind = function
     Keeper_terminal_effect_detail.Output_not_composable
 ;;
 
+let node_deferral = function
+  | None -> Keeper_terminal_effect_detail.Deferral_unrecorded
+  | Some Keeper_tool_execution.Generic_deferred ->
+    Keeper_terminal_effect_detail.Generic_deferral
+  | Some (Keeper_tool_execution.External_effect_deferred _) ->
+    Keeper_terminal_effect_detail.External_effect_deferral
+;;
+
+(* The executor's causes split in two, and the split is the disposition they
+   carry. [Pre_effect_only] is the completion mismatch: the executor refuses
+   the invocation before any node runs and stamps it [Proven_pre_effect]
+   (keeper_tool_plan_executor.ml 505-513), so it has no terminal effect to
+   name. Everything else can settle after a node acted. Naming both arms keeps
+   the projection total, so a new [Executor.cause] is a compile error here
+   rather than a failure the caller drops. *)
+type composition_projection =
+  | Terminal_cause of Keeper_terminal_effect_detail.composition_cause
+  | Pre_effect_only of
+      { expected : Agent_core.Tool_contract.completion
+      ; actual : Agent_core.Tool_contract.completion
+      }
+
 let composition_cause (failure : Executor.failure) =
   match failure.cause with
   | Executor.Tool_did_not_complete node ->
-    Keeper_terminal_effect_detail.Node_failed
-      { node_id = Keeper_tool_plan.Node_id.to_string node.node_id
-      ; model_tool_name = node.tool_name
-      ; message = Tool_result.message node.result
-      }
+    let node_id = Keeper_tool_plan.Node_id.to_string node.node_id in
+    (match node.result with
+     | Tool_result.Deferred _ ->
+       (* A deferred node did not fail. Its payload is the deferral's own JSON
+          data, so it stays in the failure object and out of a message. *)
+       Terminal_cause
+         (Keeper_terminal_effect_detail.Node_deferred
+            { node_id
+            ; model_tool_name = node.tool_name
+            ; deferral = node_deferral node.deferred_kind
+            })
+     | Tool_result.Completed _ | Tool_result.Failed _ ->
+       Terminal_cause
+         (Keeper_terminal_effect_detail.Node_failed
+            { node_id
+            ; model_tool_name = node.tool_name
+            ; message = Tool_result.message node.result
+            }))
   | Executor.Node_observation_failed { node; detail } ->
-    Keeper_terminal_effect_detail.Node_observation_failed
-      { node_id = Keeper_tool_plan.Node_id.to_string node.node_id
-      ; model_tool_name = node.tool_name
-      ; detail
-      }
+    Terminal_cause
+      (Keeper_terminal_effect_detail.Node_observation_failed
+         { node_id = Keeper_tool_plan.Node_id.to_string node.node_id
+         ; model_tool_name = node.tool_name
+         ; detail
+         })
   | Executor.Plan_execution_failed { node_id; schedule = _; error } ->
-    Keeper_terminal_effect_detail.Plan_execution_failed
-      { node_id = Keeper_tool_plan.Node_id.to_string node_id
-      ; error = plan_execution_error_kind error
-      }
+    Terminal_cause
+      (Keeper_terminal_effect_detail.Plan_execution_failed
+         { node_id = Keeper_tool_plan.Node_id.to_string node_id
+         ; error = plan_execution_error_kind error
+         })
   | Executor.Outer_completion_mismatch { expected; actual } ->
-    Keeper_terminal_effect_detail.Outer_completion_mismatch { expected; actual }
+    Pre_effect_only { expected; actual }
 ;;
 
 let failure_class (failure : Executor.failure) =
@@ -1949,24 +1986,44 @@ let make_tools_with_authority
                    persisted cursor, so only an entirely proven-pre-effect
                    defer may remain resumable. *)
                 if not (failure_returns_to_model ~plan ~committed:!committed_receipts failure) then
-                Option.iter
-                  (fun mark_failed ->
-                     mark_failed
-                       { Keeper_tools_agent_core.failure_class =
-                           failure_class failure
-                       ; effect_disposition = failure.effect_disposition
-                       ; detail =
-                           Keeper_terminal_effect_detail.Composition_failed
-                             { composition_tool = tool_name
-                             ; cause = composition_cause failure
-                             ; payload =
-                                 failure_data
-                                   ~tool_name
-                                   ~tool_kind:(Catalog.tool_kind entry)
-                                   failure
-                             }
-                       })
-                  on_failed
+                (match composition_cause failure with
+                 | Pre_effect_only { expected; actual } ->
+                   (* This branch is post-effect or unknown, and a completion
+                      mismatch is settled [Proven_pre_effect] before any node
+                      runs, so the two cannot meet. If they ever do, an effect
+                      may have happened and there is no cause to terminalize
+                      it with; stop loudly rather than let the turn continue
+                      past an unfenced effect. *)
+                   invalid_arg
+                     (Printf.sprintf
+                        "composition %s settled a completion mismatch (plan %s, call \
+                         %s) with effect_disposition=%s"
+                        tool_name
+                        (Yojson.Safe.to_string
+                           (Agent_core.Tool_contract.completion_to_yojson expected))
+                        (Yojson.Safe.to_string
+                           (Agent_core.Tool_contract.completion_to_yojson actual))
+                        (Tool_result.failure_effect_disposition_to_string
+                           failure.effect_disposition))
+                 | Terminal_cause cause ->
+                   Option.iter
+                     (fun mark_failed ->
+                        mark_failed
+                          { Keeper_tools_agent_core.failure_class =
+                              failure_class failure
+                          ; effect_disposition = failure.effect_disposition
+                          ; detail =
+                              Keeper_terminal_effect_detail.Composition_failed
+                                { composition_tool = tool_name
+                                ; cause
+                                ; payload =
+                                    failure_data
+                                      ~tool_name
+                                      ~tool_kind:(Catalog.tool_kind entry)
+                                      failure
+                                }
+                          })
+                     on_failed)
               | Ok _
               | Error
                   { Executor.effect_disposition = Tool_result.Proven_pre_effect

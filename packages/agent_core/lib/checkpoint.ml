@@ -98,7 +98,7 @@ let to_string = Checkpoint_codec.to_string
 type encoding_memo = Checkpoint_codec.encoding_memo
 
 let create_encoding_memo = Checkpoint_codec.create_encoding_memo
-let to_string_with_encoding_memo = Checkpoint_codec.to_string_with_encoding_memo
+let to_pieces_with_encoding_memo = Checkpoint_codec.to_pieces_with_encoding_memo
 let of_string = Checkpoint_codec.of_string
 let delta_to_json = Checkpoint_codec.delta_to_json
 let delta_of_json = Checkpoint_codec.delta_of_json

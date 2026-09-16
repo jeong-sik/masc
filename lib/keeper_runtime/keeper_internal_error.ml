@@ -29,6 +29,14 @@ let tool_correction_lost_kind = "tool_correction_lost"
 let accept_rejected_kind = "accept_rejected"
 let terminal_effect_failed_kind = "terminal_effect_failed"
 
+(* Not exported: the five above are, because [test_keeper_terminal_reason_typed]
+   names them in its wire corpus. These two are not in that corpus -- it is
+   checked against a frozen string-policy oracle that predates the typed
+   enumeration and would read a new wire as [Unknown] -- so exporting them
+   would be surface nothing reads. *)
+let host_stopped_turn_kind = "host_stopped_turn"
+let runtime_connection_closed_kind = "runtime_connection_closed"
+
 type provider_rejection = {
   provider_label : string;
   reason : string;
@@ -199,6 +207,22 @@ let transcript_quarantine_reason_of_string = function
   | _ -> None
 ;;
 
+(* RFC-0454 P2. Which host decision stopped a running turn. See the .mli. *)
+type host_turn_stop =
+  | Host_graceful_shutdown
+  | Runtime_reported_interrupt
+
+let host_turn_stop_to_string = function
+  | Host_graceful_shutdown -> "host_graceful_shutdown"
+  | Runtime_reported_interrupt -> "runtime_reported_interrupt"
+;;
+
+let host_turn_stop_of_string = function
+  | "host_graceful_shutdown" -> Some Host_graceful_shutdown
+  | "runtime_reported_interrupt" -> Some Runtime_reported_interrupt
+  | _ -> None
+;;
+
 type gate_replay_repair_stage =
   | Replay_resolution_lookup
   | Replay_request_decode
@@ -229,7 +253,20 @@ let gate_replay_repair_stage_of_string = function
   | _ -> None
 ;;
 
-type masc_internal_error =
+(* RFC-0454 D1. The fence wraps whatever failed the provider attempt, and that
+   can be another MASC error. Written as a string, the inner error's own
+   prefixed JSON landed inside a JSON string and every wrap added a layer of
+   escaping. [fenced_cause] and [masc_internal_error] are declared together
+   because the recursion is real -- a fence may carry a terminal effect
+   failure, which may carry nothing else -- and OCaml has no module-level
+   recursion short of recursive modules. [Keeper_request_failure_core] stays a
+   separate module for the opposite reason: it carries no MASC error, so
+   [Keeper_terminal_effect_detail] can name it without a cycle. *)
+type fenced_cause =
+  | Fenced_masc of masc_internal_error
+  | Fenced_core of Keeper_request_failure_core.t
+
+and masc_internal_error =
   | Runtime_exhausted of {
       runtime_id : string;
       reason : runtime_exhaustion_reason;
@@ -289,13 +326,22 @@ type masc_internal_error =
   | Provider_attempt_effect_fenced of {
       runtime_id : string;
       effect_disposition : Keeper_provider_attempt_effect_core.t;
-      diagnostic : string;
+      cause : fenced_cause;
     }
   | Tool_correction_lost of {
       runtime_id : string;
       effect_disposition : Keeper_provider_attempt_effect_core.t;
       reject_count : int;
-      diagnostic : string;
+      cause : fenced_cause;
+    }
+  | Host_stopped_turn of {
+      runtime_id : string;
+      stop : host_turn_stop;
+    }
+  | Runtime_connection_closed of {
+      runtime_id : string;
+      detail : string;
+      turn_accepted : bool;
     }
   | Receipt_persistence_failed of {
       detail : string;
@@ -323,9 +369,13 @@ let runtime_runner_execute_site = "runtime_runner.execute"
    (keeper_unified_metrics_failure). *)
 let blocker_detail_narrative_max_chars = 200
 
-(* ~2000 chars fits a Yojson-encoded masc_internal_error record of any
-   current variant plus the wrapping prefix, with headroom. Past this the
-   payload is pathological and we cap rather than store unbounded blobs. *)
+(* ~2000 chars fit the small variants whole. Two no longer fit reliably: a
+   terminal effect failure carries a composition's failure object as JSON
+   (RFC-0454 P1a), and a fence carries a cause that can nest one (P1b), and
+   neither is bounded. Those are truncated here, which cuts the JSON mid-key
+   for a reader that parses this string back. Bounding the composition object
+   at its producer is RFC-0454 P2; this cap stays a blob ceiling, not a
+   promise that a payload survives it. *)
 let blocker_detail_structured_max_chars = 2000
 
 let masc_agent_core_error_bare_prefix = String.trim masc_internal_error_prefix
@@ -387,7 +437,16 @@ let transport_error_kind_json_fields = function
   | Some kind -> [ "transport_error_kind", `String (network_error_kind_to_string kind) ]
 ;;
 
-let masc_internal_error_to_json = function
+let rec fenced_cause_to_json = function
+  | Fenced_masc error ->
+    `Assoc [ "kind", `String "fenced_masc"; "error", masc_internal_error_to_json error ]
+  | Fenced_core core ->
+    `Assoc
+      [ "kind", `String "fenced_core"
+      ; "core", Keeper_request_failure_core.to_yojson core
+      ]
+
+and masc_internal_error_to_json = function
   | Runtime_exhausted { runtime_id; reason } ->
     let runtime_id = runtime_id_to_string runtime_id in
     `Assoc
@@ -484,24 +543,35 @@ let masc_internal_error_to_json = function
         );
         ("detail", Keeper_terminal_effect_detail.to_yojson detail);
       ]
-  | Provider_attempt_effect_fenced
-      { runtime_id; effect_disposition; diagnostic } ->
+  | Provider_attempt_effect_fenced { runtime_id; effect_disposition; cause } ->
     `Assoc
       [ "kind", `String provider_attempt_effect_fenced_kind
       ; "runtime_id", `String runtime_id
       ; ( "effect_disposition"
         , `String (Keeper_provider_attempt_effect_core.to_string effect_disposition) )
-      ; "diagnostic", `String diagnostic
+      ; "cause", fenced_cause_to_json cause
       ]
-  | Tool_correction_lost
-      { runtime_id; effect_disposition; reject_count; diagnostic } ->
+  | Tool_correction_lost { runtime_id; effect_disposition; reject_count; cause } ->
     `Assoc
       [ "kind", `String tool_correction_lost_kind
       ; "runtime_id", `String runtime_id
       ; ( "effect_disposition"
         , `String (Keeper_provider_attempt_effect_core.to_string effect_disposition) )
       ; "reject_count", `Int reject_count
-      ; "diagnostic", `String diagnostic
+      ; "cause", fenced_cause_to_json cause
+      ]
+  | Host_stopped_turn { runtime_id; stop } ->
+    `Assoc
+      [ "kind", `String host_stopped_turn_kind
+      ; "runtime_id", `String (runtime_id_to_string runtime_id)
+      ; "stop", `String (host_turn_stop_to_string stop)
+      ]
+  | Runtime_connection_closed { runtime_id; detail; turn_accepted } ->
+    `Assoc
+      [ "kind", `String runtime_connection_closed_kind
+      ; "runtime_id", `String (runtime_id_to_string runtime_id)
+      ; "detail", `String detail
+      ; "turn_accepted", `Bool turn_accepted
       ]
   | Receipt_persistence_failed { detail } ->
     `Assoc
@@ -638,6 +708,15 @@ let summary_of_masc_internal_error = function
          "Terminal tool effect failed (effect_disposition=%s): %s"
          (Tool_result.failure_effect_disposition_to_string effect_disposition)
          (Keeper_terminal_effect_detail.summary detail))
+  (* [None] for the same reason the two fences below are [None], and it is the
+     same reason for all four: a chat row's only carrier for the cause is its
+     text, and [Keeper_agent_error.user_message_of_core_error] puts a summary
+     there in place of the envelope the pane reads. Answering here would hand
+     the pane a sentence and take the value away, which is the exchange
+     RFC-0454 exists to undo. The row gets a typed [failure] field in P3
+     (RFC-0454 D3); these arms answer then. *)
+  | Host_stopped_turn _
+  | Runtime_connection_closed _
   | Resumable_cli_session _
   | Internal_unhandled_exception _
   | Internal_bridge_exception _
@@ -660,6 +739,8 @@ type wire_kind =
   | Wire_terminal_effect_failed
   | Wire_provider_attempt_effect_fenced
   | Wire_tool_correction_lost
+  | Wire_host_stopped_turn
+  | Wire_runtime_connection_closed
   | Wire_receipt_persistence_failed
   | Wire_gate_replay_repair_required
 
@@ -675,6 +756,8 @@ let wire_kind_of_masc_internal_error = function
   | Terminal_effect_failed _ -> Wire_terminal_effect_failed
   | Provider_attempt_effect_fenced _ -> Wire_provider_attempt_effect_fenced
   | Tool_correction_lost _ -> Wire_tool_correction_lost
+  | Host_stopped_turn _ -> Wire_host_stopped_turn
+  | Runtime_connection_closed _ -> Wire_runtime_connection_closed
   | Receipt_persistence_failed _ -> Wire_receipt_persistence_failed
   | Gate_replay_repair_required _ -> Wire_gate_replay_repair_required
 
@@ -690,6 +773,8 @@ let wire_kind_to_string = function
   | Wire_terminal_effect_failed -> terminal_effect_failed_kind
   | Wire_provider_attempt_effect_fenced -> provider_attempt_effect_fenced_kind
   | Wire_tool_correction_lost -> tool_correction_lost_kind
+  | Wire_host_stopped_turn -> host_stopped_turn_kind
+  | Wire_runtime_connection_closed -> runtime_connection_closed_kind
   | Wire_receipt_persistence_failed -> "receipt_persistence_failed"
   | Wire_gate_replay_repair_required -> "gate_replay_repair_required"
 
@@ -708,6 +793,8 @@ let all_wire_kinds =
   ; Wire_terminal_effect_failed
   ; Wire_provider_attempt_effect_fenced
   ; Wire_tool_correction_lost
+  ; Wire_host_stopped_turn
+  ; Wire_runtime_connection_closed
   ; Wire_receipt_persistence_failed
   ; Wire_gate_replay_repair_required
   ]
@@ -736,7 +823,9 @@ let runtime_id_of_masc_internal_error = function
   | Capacity_backpressure { runtime_id; _ }
   | Resumable_cli_session { runtime_id; _ }
   | Provider_attempt_effect_fenced { runtime_id; _ }
-  | Tool_correction_lost { runtime_id; _ } ->
+  | Tool_correction_lost { runtime_id; _ }
+  | Host_stopped_turn { runtime_id; _ }
+  | Runtime_connection_closed { runtime_id; _ } ->
       let runtime_id = runtime_id_to_string runtime_id in
       if String.equal (String.trim runtime_id) "" then "unknown"
       else runtime_id
@@ -816,6 +905,8 @@ let accept_no_progress_retry_kind = function
   | Terminal_effect_failed _
   | Provider_attempt_effect_fenced _
   | Tool_correction_lost _
+  | Host_stopped_turn _
+  | Runtime_connection_closed _
   | Receipt_persistence_failed _
   | Gate_replay_repair_required _ ->
     None
@@ -847,12 +938,34 @@ let core_error_of_masc_internal_error err =
 (* Reverse direction: agent-core envelope -> typed variant.                  *)
 (* ------------------------------------------------------------------ *)
 
-let parse_masc_internal_error_json (json : Yojson.Safe.t) :
+let exact_fields expected fields =
+  let sort = List.sort String.compare in
+  sort expected = sort (List.map fst fields)
+;;
+
+let rec parse_fenced_cause_json (json : Yojson.Safe.t) : fenced_cause option =
+  match json with
+  | `Assoc fields -> (
+      match List.assoc_opt "kind" fields with
+      | Some (`String "fenced_masc") when exact_fields [ "kind"; "error" ] fields ->
+        Option.bind
+          (List.assoc_opt "error" fields)
+          (fun error ->
+             Option.map
+               (fun error -> Fenced_masc error)
+               (parse_masc_internal_error_json error))
+      | Some (`String "fenced_core") when exact_fields [ "kind"; "core" ] fields ->
+        Option.bind
+          (List.assoc_opt "core" fields)
+          (fun core ->
+             match Keeper_request_failure_core.of_yojson core with
+             | Ok core -> Some (Fenced_core core)
+             | Error _ -> None)
+      | _ -> None)
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
+
+and parse_masc_internal_error_json (json : Yojson.Safe.t) :
     masc_internal_error option =
-  let exact_fields expected fields =
-    let sort = List.sort String.compare in
-    sort expected = sort (List.map fst fields)
-  in
   let int_opt_of_assoc key = function
     | `Assoc fields -> (
         match List.assoc_opt key fields with
@@ -1017,18 +1130,18 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
       | Some (`String kind)
         when String.equal kind provider_attempt_effect_fenced_kind
              && exact_fields
-                  [ "kind"; "runtime_id"; "effect_disposition"; "diagnostic" ]
+                  [ "kind"; "runtime_id"; "effect_disposition"; "cause" ]
                   fields ->
         (match
            string_opt_of_assoc "runtime_id" json,
            string_opt_of_assoc "effect_disposition" json,
-           string_opt_of_assoc "diagnostic" json
+           Option.bind (List.assoc_opt "cause" fields) parse_fenced_cause_json
          with
-         | Some runtime_id, Some effect_disposition, Some diagnostic ->
+         | Some runtime_id, Some effect_disposition, Some cause ->
            Option.map
              (fun effect_disposition ->
                 Provider_attempt_effect_fenced
-                  { runtime_id; effect_disposition; diagnostic })
+                  { runtime_id; effect_disposition; cause })
              (Keeper_provider_attempt_effect_core.of_string effect_disposition)
          | _ -> None)
       | Some (`String kind)
@@ -1038,22 +1151,46 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                   ; "runtime_id"
                   ; "effect_disposition"
                   ; "reject_count"
-                  ; "diagnostic"
+                  ; "cause"
                   ]
                   fields ->
         (match
            string_opt_of_assoc "runtime_id" json,
            string_opt_of_assoc "effect_disposition" json,
            List.assoc_opt "reject_count" fields,
-           string_opt_of_assoc "diagnostic" json
+           Option.bind (List.assoc_opt "cause" fields) parse_fenced_cause_json
          with
          | Some runtime_id, Some effect_disposition, Some (`Int reject_count),
-           Some diagnostic ->
+           Some cause ->
            Option.map
              (fun effect_disposition ->
                 Tool_correction_lost
-                  { runtime_id; effect_disposition; reject_count; diagnostic })
+                  { runtime_id; effect_disposition; reject_count; cause })
              (Keeper_provider_attempt_effect_core.of_string effect_disposition)
+         | _ -> None)
+      | Some (`String kind)
+        when String.equal kind host_stopped_turn_kind
+             && exact_fields [ "kind"; "runtime_id"; "stop" ] fields ->
+        (match
+           string_opt_of_assoc "runtime_id" json, string_opt_of_assoc "stop" json
+         with
+         | Some runtime_id, Some stop ->
+           Option.map
+             (fun stop -> Host_stopped_turn { runtime_id; stop })
+             (host_turn_stop_of_string stop)
+         | _ -> None)
+      | Some (`String kind)
+        when String.equal kind runtime_connection_closed_kind
+             && exact_fields
+                  [ "kind"; "runtime_id"; "detail"; "turn_accepted" ]
+                  fields ->
+        (match
+           string_opt_of_assoc "runtime_id" json,
+           string_opt_of_assoc "detail" json,
+           List.assoc_opt "turn_accepted" fields
+         with
+         | Some runtime_id, Some detail, Some (`Bool turn_accepted) ->
+           Some (Runtime_connection_closed { runtime_id; detail; turn_accepted })
          | _ -> None)
       | Some (`String "receipt_persistence_failed") -> (
           match string_opt_of_assoc "detail" json with

@@ -1,5 +1,8 @@
 name = "keeper_spawn"
-description = "Start a program and return while it runs, so a long-lived process (a server, a watcher, a TUI) can be read from and waited on without blocking this call. The process ends when the turn does; nothing here survives into the next one. Use Execute for a command that finishes on its own."
+description = """
+Start a program and return while it runs, so a long-lived process can be read.
+
+A server, a watcher, a TUI: read from it and wait on it without blocking this call. The process ends when the turn does; nothing here survives into the next one. Use Execute for a command that finishes on its own."""
 additional_properties = false
 
 defer_loading = true

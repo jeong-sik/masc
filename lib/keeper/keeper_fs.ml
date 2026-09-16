@@ -286,13 +286,13 @@ let protect_durable_write f =
       }
 ;;
 
-let save_bytes_durable_atomic_core
+let save_pieces_durable_atomic_core
       ~before_stage
       ?before_directory_fsync
       ?ownership_root
       ?temp_dir
       path
-      bytes
+      pieces
   =
   let dir = Filename.dirname path in
   (* DET-OK: an omitted staging directory means the destination directory;
@@ -348,7 +348,9 @@ let save_bytes_durable_atomic_core
            ~renamed:false
            ~before_stage
            Payload_write
-           (fun () -> output_string oc bytes; flush oc);
+           (fun () ->
+              List.iter (output_string oc) pieces;
+              flush oc);
          run_durable_write_stage
            ~renamed:false
            ~before_stage
@@ -461,13 +463,13 @@ let save_bytes_durable_atomic_observed_with
       bytes
   =
   protect_durable_write (fun () ->
-    save_bytes_durable_atomic_core
+    save_pieces_durable_atomic_core
       ~before_stage
       ?before_directory_fsync
       ?ownership_root
       ?temp_dir
       path
-      bytes)
+      [ bytes ])
   |> observe_durable_write_success ~on_durable_commit
 ;;
 
@@ -480,13 +482,13 @@ let save_bytes_durable_atomic_with
       bytes
   =
   protect_durable_write (fun () ->
-    save_bytes_durable_atomic_core
+    save_pieces_durable_atomic_core
       ~before_stage
       ?before_directory_fsync
       ?ownership_root
       ?temp_dir
       path
-      bytes)
+      [ bytes ])
   |> check_durable_write_completion
 ;;
 
@@ -499,7 +501,7 @@ let save_encoded_durable_atomic_from_with
       encoded_source
   =
   protect_durable_write (fun () ->
-    let bytes =
+    let pieces =
       run_durable_write_stage
         ~renamed:false
         ~before_stage
@@ -512,13 +514,13 @@ let save_encoded_durable_atomic_from_with
               turns it into a typed [Payload_encode] failure. *)
            Domain_pool_ref.submit_cpu_or_inline encoded_source)
     in
-    save_bytes_durable_atomic_core
+    save_pieces_durable_atomic_core
       ~before_stage
       ?before_directory_fsync
       ?ownership_root
       ?temp_dir
       path
-      bytes)
+      pieces)
   |> check_durable_write_completion
 ;;
 
@@ -538,7 +540,10 @@ let save_json_durable_atomic_with
     ?temp_dir
     path
     (fun () ->
-       if pretty then Yojson.Safe.pretty_to_string json else Yojson.Safe.to_string json)
+       [ (if pretty
+          then Yojson.Safe.pretty_to_string json
+          else Yojson.Safe.to_string json)
+       ])
 ;;
 
 let save_bytes_durable_atomic ?ownership_root ?temp_dir path bytes =

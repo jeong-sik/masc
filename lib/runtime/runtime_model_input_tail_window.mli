@@ -296,3 +296,10 @@ val project_newest_atom
     head. The second component is that view's measured bytes, as
     [target_projection.transmitted_bytes] counts them. For a runtime whose
     token density has not been observed yet. *)
+
+val is_synthetic_preamble : Agent_core.Types.message -> bool
+(** Whether a message is the constant preamble the cut prepends when the
+    first kept atom cannot open a conversation. Exported so a stage that
+    reads the transmitted list back (the model-input ledger measuring the
+    per-request tail) counts it as tail, not as an atom, the same way
+    {!project_target} and {!project} exclude it before annotating. *)

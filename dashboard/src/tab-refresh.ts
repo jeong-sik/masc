@@ -19,11 +19,6 @@ async function refreshToolQualityLabSurface(): Promise<void> {
   await refreshToolQuality()
 }
 
-async function refreshFeatureHealthSurface(): Promise<void> {
-  const { refreshFeatureHealth } = await import('./components/feature-health')
-  await refreshFeatureHealth()
-}
-
 async function refreshServerConfigSurface(): Promise<void> {
   const { refreshServerConfig } = await import('./components/server-config')
   await refreshServerConfig()
@@ -58,7 +53,7 @@ type RefreshTask =
 //   Tier 1 — visible lanes (agents / fleet-health / runtime / observatory)
 //            each declare their own view-aware or static refresh plan.
 //   Tier 2 — hidden diagnostic sections (
-//            transport-health / feature-health) share an identical light
+//            transport-health) share an identical light
 //            fallback plan. Their mounted panels own telemetry polling, so
 //            route visits only need to refresh namespace/mission context.
 //   Outliers — `journey` (execution only) keeps a dedicated branch above.
@@ -172,7 +167,6 @@ const REFRESHERS: Record<RefreshTask, (routeState: Pick<RouteState, 'tab' | 'par
   harness: () => { void refreshHarnessLabSurface() },
   toolQuality: () => { void refreshToolQualityLabSurface() },
   inspector: () => {
-    void refreshFeatureHealthSurface()
     void refreshServerConfigSurface()
   },
   operatorSnapshot: () => { void refreshOperatorSnapshot({ force: true }) },

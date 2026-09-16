@@ -173,8 +173,22 @@ let load_active_tasks (base_path : string) :
           (Masc.Operator_task_attention.project ~config
              observation.observed_backlog.tasks
            |> List.map (fun item ->
-                { Masc_tui_agenda.what = Masc.Operator_task_attention.summary item
+                { Masc_tui_agenda.task_id =
+                    Masc.Operator_task_attention.task_id item
+                ; what = Masc.Operator_task_attention.summary item
                 ; since_iso = Masc.Operator_task_attention.waiting_since item
+                ; ends_at =
+                    (* Where the wait ends, which is not the same door for all
+                       three shapes: a stop is granted as a verdict, and the
+                       other two are read on the task. Every shape is named so
+                       a fourth has to be given a door here rather than
+                       inheriting one. *)
+                    (match item with
+                     | Masc.Operator_task_attention.Cancel_claim _ ->
+                       Masc_tui_agenda.Verify_queue
+                     | Masc.Operator_task_attention.Held_without_actor _
+                     | Masc.Operator_task_attention.Producer_record_unreadable _
+                       -> Masc_tui_agenda.The_task)
                 })) )
 
 (** Apply one strict bounded metrics snapshot to the mutable screen state. *)
@@ -1414,10 +1428,11 @@ let load_fusion_detail ~(host : string) ~(port : int) ~(run_id : string) :
   | Error err -> Error ("fusion detail load failed: " ^ err)
   | Ok json -> Tui_decode.decode_fusion_detail json
 
-(** Load the verification queue from /api/v1/verification/requests *)
-let load_verification ~(host : string) ~(port : int) ~(limit : int) :
+(** Load one page of one view from /api/v1/verification/requests *)
+let load_verification ~(host : string) ~(port : int) ~(limit : int)
+    ~(view : Tui_decode.verification_view) ~(offset : int) :
     (Tui_decode.verification_snapshot, string) result =
-  match fetch_verification_requests ~host ~port ~limit with
+  match fetch_verification_requests ~host ~port ~limit ~view ~offset with
   | Error err -> Error ("verification load failed: " ^ err)
   | Ok json -> Tui_decode.decode_verification_snapshot json
 

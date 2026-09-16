@@ -534,12 +534,14 @@ type fleet_safety = {
   fs_executable_count : int;
   fs_failing_count : int;
   fs_recovering_count : int;
+  fs_turn_configuration_error_count : int;
   fs_paused_count : int;
   fs_target_reaction_capacity : int;
   fs_reaction_capacity_shortfall : int;
   fs_bootable_names : string list;
   fs_running_names : string list;
   fs_executable_names : string list;
+  fs_turn_configuration_error_names : string list;
   fs_active_task_owner_without_fiber_count : int;
   fs_completion_authority_pending_count : int;
 }
@@ -2605,9 +2607,34 @@ type verification_request = {
   vr_evidence_error : string option;
 }
 
+(** Which list the server answered with.
+
+    The queue and the submission history are different questions asked of the
+    same directory, and a snapshot that does not say which one it holds cannot
+    be drawn honestly: an empty list means "nothing is waiting on you" in one
+    and "nothing was ever submitted" in the other. *)
+type verification_view =
+  | Awaiting_queue
+  | Full_history
+
 type verification_snapshot = {
   vs_requests : verification_request list;
-  vs_total : int;
+  vs_total : int;  (** rows in the whole view, not on this page *)
+  vs_view : verification_view;
+  vs_offset : int;
+  vs_truncated : bool;  (** a further page exists *)
+  vs_awaiting_unresolved : string list;
+      (** Request ids the backlog waits on that name no record. A task holding
+          one of these is waiting on something that is not there. *)
+  vs_backlog_error : string option;
+      (** Why the queue could not be resolved. An empty list carrying this is
+          not an empty queue. *)
+  vs_backlog_recovery : string option;
+      (** Set when the queue was computed from a recovery snapshot rather than
+          the live backlog. The rows are real and as old as that snapshot, so
+          anything submitted after it is absent. Kept apart from
+          [vs_backlog_error]: one says the queue could not be built, the other
+          says it was built from something older. *)
 }
 
 let decode_string_name_list json key =
@@ -5289,13 +5316,48 @@ let decode_verification_request json =
     ; vr_evidence_error
     }
 
+(* The wire spelling, beside the reader of the same pair so a rename has one
+   site here. The server names these in [Dashboard_verification]; the pairing
+   across the wire is held by a round-trip test rather than by a shared
+   constant, because the two sides are separate programs. *)
+let verification_view_to_wire = function
+  | Awaiting_queue -> "awaiting"
+  | Full_history -> "all"
+
+(* A view name outside the pair is an error rather than a default. The two
+   lists differ by an order of magnitude on a live workspace, so guessing
+   which one arrived would draw a number the reader cannot act on. *)
+let decode_verification_view json =
+  let* raw = required_string_field json "view" in
+  match raw with
+  | "awaiting" -> Ok Awaiting_queue
+  | "all" -> Ok Full_history
+  | other -> field_type_error "view" "\"awaiting\" or \"all\"" (`String other)
+
 let decode_verification_snapshot json =
   let* requests_json = required_list_field json "requests" in
   let* vs_requests =
     decode_list "requests" decode_verification_request requests_json
   in
   let* vs_total = required_int_field json "total" in
-  Ok { vs_requests; vs_total }
+  let* vs_view = decode_verification_view json in
+  let* vs_offset = required_int_field json "offset" in
+  let* vs_truncated = required_bool_field json "truncated" in
+  let* vs_awaiting_unresolved =
+    decode_string_name_list json "awaiting_unresolved"
+  in
+  let* vs_backlog_error = optional_string_field json "backlog_error" in
+  let* vs_backlog_recovery = optional_string_field json "backlog_recovery" in
+  Ok
+    { vs_requests
+    ; vs_total
+    ; vs_view
+    ; vs_offset
+    ; vs_truncated
+    ; vs_awaiting_unresolved
+    ; vs_backlog_error
+    ; vs_backlog_recovery
+    }
 
 let decode_keeper_call json =
   let* kc_artifact_refs = match member "artifact_refs" json with
@@ -8547,6 +8609,13 @@ let decode_fleet_safety json =
   let* fs_recovering_count =
     int_field_or section "recovering_keeper_fiber_count" ~default:0
   in
+  (* The unscoped count: every Failing keeper whose reason is a turn
+     configuration error, autoboot target or not. The configuration_blocked_*
+     fields answer an autoboot question instead and skip keepers outside the
+     autoboot set, so they cannot partition the failing count. *)
+  let* fs_turn_configuration_error_count =
+    int_field_or section "turn_configuration_error_keeper_count" ~default:0
+  in
   let* fs_paused_count = int_field_or section "paused_keeper_count" ~default:0 in
   let* fs_target_reaction_capacity =
     int_field_or section "target_reaction_capacity_count" ~default:0
@@ -8558,6 +8627,9 @@ let decode_fleet_safety json =
   let* fs_running_names = decode_string_name_list section "running_keeper_names" in
   let* fs_executable_names =
     decode_string_name_list section "executable_keeper_names"
+  in
+  let* fs_turn_configuration_error_names =
+    decode_string_name_list section "turn_configuration_error_keeper_names"
   in
   let* fs_active_task_owner_without_fiber_count =
     int_field_or section "active_task_owner_without_executable_fiber_count" ~default:0
@@ -8574,12 +8646,14 @@ let decode_fleet_safety json =
     ; fs_executable_count
     ; fs_failing_count
     ; fs_recovering_count
+    ; fs_turn_configuration_error_count
     ; fs_paused_count
     ; fs_target_reaction_capacity
     ; fs_reaction_capacity_shortfall
     ; fs_bootable_names
     ; fs_running_names
     ; fs_executable_names
+    ; fs_turn_configuration_error_names
     ; fs_active_task_owner_without_fiber_count
     ; fs_completion_authority_pending_count
     }

@@ -1322,8 +1322,8 @@ let test_dynamic_tool_abort_stops_the_provider_loop () =
 
 (* A live keeper, 2026-09-02: every host-stopped turn recorded output_tokens = 0
    because the stop was built with usage = None. The result frame never
-   arrives after a host stop, so the sum of the assistant frames seen so far
-   is the turn's measurement, deduplicated by message id. *)
+   arrives after a host stop, so the turn's measurement is the newest counted
+   assistant usage, deduplicated by message id. *)
 (* The newest counted frame is the id-less one; the sibling that repeats
    msg-usage-a is dropped, so it can never become "newest". *)
 let test_host_stop_carries_the_newest_assistant_usage () =

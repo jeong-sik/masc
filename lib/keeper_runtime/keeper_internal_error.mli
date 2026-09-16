@@ -86,6 +86,24 @@ type transcript_quarantine_reason =
   | Structurally_invalid
   | Unresolved_tool_results
 
+(** Which host decision stopped a turn that was already running (RFC-0454 P2).
+
+    Both arms mean the same thing to rotation — nobody else is going to run
+    this turn better, because nothing about the provider failed — and they are
+    kept apart because an operator reading the row wants to know whether MASC
+    was shutting down or whether the runtime called the turn off. *)
+type host_turn_stop =
+  | Host_graceful_shutdown
+      (** MASC entered graceful shutdown while this turn was live. *)
+  | Runtime_reported_interrupt
+      (** The runtime reported the turn's own status as interrupted. *)
+
+val host_turn_stop_to_string : host_turn_stop -> string
+(** MASC's wire spelling. A new arm is a compile error here. *)
+
+val host_turn_stop_of_string : string -> host_turn_stop option
+(** [None] for any spelling {!host_turn_stop_to_string} does not emit. *)
+
 type gate_replay_repair_stage =
   | Replay_resolution_lookup
   | Replay_request_decode
@@ -95,7 +113,20 @@ type gate_replay_repair_stage =
   | Replay_stale_grant_retirement
   | Replay_invalid_resolution_state
 
-type masc_internal_error =
+(** What failed the provider attempt a fence closed over (RFC-0454 D1).
+
+    A MASC error that arrives on the carrier is kept as the value it is;
+    anything else is agent-core's typed projection. Neither arm holds a
+    rendered error string, so serializing a fence never puts a JSON document
+    inside a JSON string.
+
+    Declared with {!masc_internal_error} because the recursion is real: a
+    fence can carry a terminal effect failure. *)
+type fenced_cause =
+  | Fenced_masc of masc_internal_error
+  | Fenced_core of Keeper_request_failure_core.t
+
+and masc_internal_error =
   | Runtime_exhausted of {
       runtime_id : string;
       reason : runtime_exhaustion_reason;
@@ -146,7 +177,7 @@ type masc_internal_error =
   | Provider_attempt_effect_fenced of {
       runtime_id : string;
       effect_disposition : Keeper_provider_attempt_effect_core.t;
-      diagnostic : string;
+      cause : fenced_cause;
     }
       (** A provider attempt failed after an effect was attempted or after the
           runtime lost complete effect observation. The exact source must be
@@ -155,7 +186,7 @@ type masc_internal_error =
       runtime_id : string;
       effect_disposition : Keeper_provider_attempt_effect_core.t;
       reject_count : int;
-      diagnostic : string;
+      cause : fenced_cause;
     }
       (** The same fence, on a turn that also recorded typed pre_tool_use
           rejections: the runtime escalated a corrective tool error into the
@@ -163,6 +194,26 @@ type masc_internal_error =
           {!Provider_attempt_effect_fenced} — never replayed in-turn — the
           label exists so operators can tell a lost correction from an
           ordinary fenced provider failure. *)
+  | Host_stopped_turn of {
+      runtime_id : string;
+      stop : host_turn_stop;
+    }
+      (** The turn ended because the host stopped it, not because the provider
+          failed. The runtime flattened this into a sentence and the chat pane
+          read the sentence back to decide what to draw (RFC-0454 §1.3); it is
+          the value now, so the screen matches a constructor. *)
+  | Runtime_connection_closed of {
+      runtime_id : string;
+      detail : string;
+      turn_accepted : bool;
+    }
+      (** The runtime's transport closed before the turn finished — the client
+          process exited, or its stdout reached EOF. [turn_accepted] is false
+          when nothing was submitted upstream, which is what tells a lost
+          connection from an ambiguous one. Kept apart from a failed spawn:
+          a spawn that never started the client is a different recovery
+          ([Transient_spawn_failed] rather than [Transport_interrupted]) and
+          the two shared one rendered sentence before this. *)
   | Receipt_persistence_failed of { detail : string }
   | Gate_replay_repair_required of {
       approval_id : string;
@@ -184,6 +235,9 @@ val cap_blocker_detail : string -> string
     text is truncated to the narrative budget (~200). Idempotent. *)
 
 val masc_internal_error_to_json : masc_internal_error -> Yojson.Safe.t
+(** A JSON object tagged by ["kind"]. A fence writes its [cause] as a nested
+    object, and a terminal effect failure its [detail], so no arm of this
+    codec puts a JSON document inside a JSON string. *)
 
 val summary_of_masc_internal_error : masc_internal_error -> string option
 
@@ -209,6 +263,8 @@ type wire_kind =
   | Wire_terminal_effect_failed
   | Wire_provider_attempt_effect_fenced
   | Wire_tool_correction_lost
+  | Wire_host_stopped_turn
+  | Wire_runtime_connection_closed
   | Wire_receipt_persistence_failed
   | Wire_gate_replay_repair_required
 
@@ -233,6 +289,9 @@ val core_error_of_masc_internal_error :
 
 val parse_masc_internal_error_json :
   Yojson.Safe.t -> masc_internal_error option
+(** Strict: an unknown kind, a missing or extra field, or a field of the wrong
+    shape is [None]. A fence [cause] must be the nested object
+    {!masc_internal_error_to_json} writes; a string is refused. *)
 
 val classify_masc_internal_error_of_string :
   string -> masc_internal_error option

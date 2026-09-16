@@ -31,7 +31,6 @@ let prompt_root () =
 let selection_output =
   `Assoc
     [ "working_contexts", `List []
-    ; Librarian.wire_field_retained_memory_ids, `List []
     ; ( Librarian.wire_field_new_claims
       , `List
           [ `Assoc

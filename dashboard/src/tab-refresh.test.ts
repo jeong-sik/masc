@@ -26,10 +26,6 @@ vi.mock('./components/tool-quality-panel', () => ({
   refreshToolQuality: vi.fn(),
 }))
 
-vi.mock('./components/feature-health', () => ({
-  refreshFeatureHealth: vi.fn(),
-}))
-
 vi.mock('./components/server-config', () => ({
   refreshServerConfig: vi.fn(),
 }))
@@ -42,7 +38,6 @@ vi.mock('./keeper-runtime', () => ({
   refreshActiveKeeperChatHistory: vi.fn(),
 }))
 
-import { refreshFeatureHealth } from './components/feature-health'
 import { refreshObservatorySurface } from './components/observatory/observatory'
 import { refreshActiveKeeperChatHistory } from './keeper-runtime'
 import { refreshServerConfig } from './components/server-config'
@@ -193,7 +188,6 @@ describe('refreshPlanForRoute', () => {
     })
 
     await waitFor(() => {
-      expect(refreshFeatureHealth).toHaveBeenCalledTimes(1)
       expect(refreshServerConfig).toHaveBeenCalledTimes(1)
     })
   })

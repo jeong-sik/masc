@@ -9,9 +9,6 @@ async function flushUi(): Promise<void> {
 
 async function loadInspector() {
   vi.resetModules()
-  vi.doMock('./feature-health', () => ({
-    FeatureHealth: () => html`<div data-testid="feature-health">FeatureHealth</div>`,
-  }))
   vi.doMock('./server-config', () => ({
     ServerConfig: () => html`<div data-testid="server-config">ServerConfig</div>`,
   }))
@@ -31,7 +28,6 @@ describe('LabInspector', () => {
     container.remove()
     vi.clearAllMocks()
     vi.resetModules()
-    vi.doUnmock('./feature-health')
     vi.doUnmock('./server-config')
   })
 

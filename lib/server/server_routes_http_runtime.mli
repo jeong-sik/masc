@@ -140,7 +140,7 @@ val make_health_json :
     [status] / [server] / [version] / [release_version] /
     [build] / [protocol] (default + listener + supported list) /
     [transport] / [paths] / [internal_mcp_auth] / [uptime] /
-    [sse_clients] / [startup] / [subsystems] / [feature_flags] / [gc] /
+    [sse_clients] / [startup] / [subsystems] / [gc] /
     [overall_status] / [operator_action_required] /
     [operator_action_reasons] /
     [keeper_fibers] / [fd_observation] / [fd_accountant] / [disk_observation] /

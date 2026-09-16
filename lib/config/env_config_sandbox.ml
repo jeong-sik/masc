@@ -173,7 +173,7 @@ module Runtime = struct
   ;;
 
   let docker_playground_enabled () =
-    Feature_flag_registry.get_bool "MASC_KEEPER_DOCKER_PLAYGROUND"
+    get_bool ~default:false "MASC_KEEPER_DOCKER_PLAYGROUND"
 
   (** @category Sandbox
       @ops_class operator *)

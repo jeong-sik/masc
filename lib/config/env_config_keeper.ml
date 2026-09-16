@@ -17,7 +17,7 @@ open Env_config_core
 
 module KeeperBootstrap = struct
   (** Enable startup keeper bootstrap scan *)
-  let enabled () = Feature_flag_registry.get_bool "MASC_KEEPER_AUTONOMOUS_ENABLED"
+  let enabled () = get_bool ~default:true "MASC_KEEPER_AUTONOMOUS_ENABLED"
 
   (** Polling interval (seconds) for the lazy-startup wait loop in
       [server_bootstrap_loops.ml]. The autoboot fiber wakes up every
@@ -99,7 +99,7 @@ module KeeperWireCapture = struct
 
   (** Master switch for diagnostic MASC->AGENT_CORE wire capture. Default off.
       @category Policies @ops_class operator *)
-  let enabled () = Feature_flag_registry.get_bool "MASC_KEEPER_WIRE_CAPTURE"
+  let enabled () = get_bool ~default:false "MASC_KEEPER_WIRE_CAPTURE"
 
   let retention_days_default = 3
   let retention_days_ceiling = 30
@@ -248,7 +248,7 @@ end
 
 module KeeperRuntime = struct
   (** Enable keeper debug logging. Default: false. *)
-  let debug = Feature_flag_registry.get_bool "MASC_KEEPER_DEBUG"
+  let debug = get_bool ~default:false "MASC_KEEPER_DEBUG"
 
   (** Keeper keepalive snapshot interval, clamped to [15, 3600]. Default: 300. *)
   let snapshot_sec = max 15 (min 3600 (get_int ~default:300 "MASC_KEEPER_SNAPSHOT_SEC"))
@@ -523,7 +523,7 @@ module WorkAsHeartbeat = struct
   (** Master switch. When true, successful Workspace.heartbeat after a
       unified turn counts as presence proof, allowing the next cycle to skip
       the full ensure_keeper_workspace_presence call. *)
-  let enabled = Feature_flag_registry.get_bool "MASC_KEEPER_WORK_AS_HEARTBEAT"
+  let enabled = get_bool ~default:true "MASC_KEEPER_WORK_AS_HEARTBEAT"
 end
 
 (** {1 Keeper Keepalive Loop Constants} *)

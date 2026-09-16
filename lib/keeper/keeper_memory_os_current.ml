@@ -1130,7 +1130,10 @@ let update_locked_with_error
            match Fs_compat.load_file_opt snapshot_path with
            | None -> Ok None
            | Some content ->
-             (match parse snapshot_path content with
+             (match
+                Domain_pool_ref.submit_cpu_or_inline (fun () ->
+                  parse snapshot_path content)
+              with
               | Ok snapshot -> Ok (Some snapshot)
               | Error rejection ->
                 (* Every writer reads before it writes, so a snapshot this
@@ -1171,7 +1174,17 @@ let update_locked_with_error
                            rejection))))
          in
          let* next = build previous in
-         let content = Yojson.Safe.pretty_to_string (to_json next) ^ "\n" in
+         (* The file is 150-330 KB per keeper and every commit reads it, parses
+            it, prints it and replaces it. On the scheduler domain that was one
+            11-24 ms run per commit (rtev, 2026-09-16), about 80 commits an
+            hour across the fleet; for the 330 KB file the parse is 2.6 ms and
+            the print 5.4 ms. Both are pure over immutable values, so they run
+            in pool jobs. The locks are held across the wait, which delays
+            another writer of this same keeper's memory and nothing else. *)
+         let content =
+           Domain_pool_ref.submit_cpu_or_inline (fun () ->
+             Yojson.Safe.pretty_to_string (to_json next) ^ "\n")
+         in
          match Fs_compat.save_file_atomic snapshot_path content with
          | Ok () ->
            committed := Some

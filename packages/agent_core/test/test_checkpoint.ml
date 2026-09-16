@@ -268,11 +268,17 @@ let test_encoding_memo_writes_to_string_bytes () =
 ;;
 
 (* 저장은 문서를 한 문자열로 합치지 않는다. memo 가 찬 다음 저장은 앞 저장이
-   인코딩한 조각을 그대로 돌려주므로, 그 저장이 새로 할당하는 양은 문서 크기에
-   비하면 없는 것과 같아야 한다. 조각을 [String.concat] 으로 합쳐 넘기던 판에서는
-   저장마다 문서 한 벌이 통째로 더 할당됐고, 라이브 체크포인트는 111MB 다. *)
+   인코딩한 메시지 조각을 그대로 돌려주므로, 그 저장이 새로 할당하는 양은 문서
+   크기에 비하면 없는 것과 같아야 한다. 조각을 [String.concat] 으로 합쳐 넘기던
+   판에서는 저장마다 문서 한 벌이 통째로 더 할당됐다 — 라이브 정본 체크포인트는
+   111MB 이고 5.6초마다 다시 쓰인다(2026-09-16 측정).
+
+   픽스처는 메시지 배열뿐 아니라 system prompt 와 tool 스키마도 싣는다. 머리
+   부분은 memo 가 덮지 않아 저장마다 다시 인코딩되므로, 예산이 그 몫까지 같이
+   센다. *)
 let history_messages_in_the_fixture = 200
 let bytes_per_fixture_message = 40_000
+let bytes_of_fixture_system_prompt = 20_000
 let least_fixture_document_bytes = 4_000_000
 let document_bytes_per_byte_a_second_save_may_allocate = 8.0
 
@@ -288,7 +294,14 @@ let test_a_second_save_does_not_allocate_the_document_again () =
         User
         (Text (String.make bytes_per_fixture_message 'x' ^ string_of_int index)))
   in
-  let cp = make_checkpoint ~messages:history ~turn_count:1 () in
+  let cp =
+    make_checkpoint
+      ~messages:history
+      ~system_prompt:(Some (String.make bytes_of_fixture_system_prompt 's'))
+      ~tools:[ sample_tool_schema ]
+      ~turn_count:1
+      ()
+  in
   let memo = Checkpoint.create_encoding_memo () in
   let written = document_bytes (Checkpoint.to_pieces_with_encoding_memo memo cp) in
   Alcotest.(check bool)

@@ -652,6 +652,12 @@ let () =
   let checkpoint_history_largest = 12 in
 
   let test_checkpoint_history_default_and_bounds () =
+    (* An assertion that fails inside this case would otherwise leave its
+       override standing for the rest of the executable. *)
+    Fun.protect
+      ~finally:(fun () ->
+        Runtime_params.clear Runtime_settings.keeper_checkpoint_history_retained)
+    @@ fun () ->
     Alcotest.(check int) "a process with no override keeps this many past checkpoints"
       checkpoint_history_default
       (Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained);

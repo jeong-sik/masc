@@ -135,14 +135,6 @@ let test_context_overflow_is_not_auto_recoverable () =
 
 module Budget = Masc.Keeper_turn_runtime_budget
 
-let request_body_too_large ~actual_bytes ~limit_bytes =
-  Agent_core.Error.Api
-    (InvalidRequest
-       { message = "serialized request body exceeds the declared limit"
-       ; reason = Agent_core.Retry.Request_body_too_large { actual_bytes; limit_bytes }
-       })
-;;
-
 let request_body_refused_by_provider ~status =
   Agent_core.Error.Api
     (InvalidRequest
@@ -152,22 +144,9 @@ let request_body_refused_by_provider ~status =
 ;;
 
 (* The byte axis used to fall through [| _ -> None] and produce no capacity
-   refusal at all, so these two assertions are the ones that failed before. *)
-let test_byte_axis_is_a_capacity_refusal () =
-  (match
-     Budget.capacity_refusal_of_error
-       (request_body_too_large ~actual_bytes:2_000_000 ~limit_bytes:1_048_576)
-   with
-   | Some
-       (Budget.Serialized_request_body
-          { actual_bytes = 2_000_000; limit_bytes = 1_048_576 }) -> ()
-   | Some (Budget.Serialized_request_body _) ->
-     fail "the measured byte pair was not carried through"
-   | Some (Budget.Provider_context_window _) ->
-     fail "a byte refusal was classified on the token axis"
-   | Some (Budget.Provider_request_body_refusal _) ->
-     fail "a locally measured refusal was classified as a provider refusal"
-   | None -> fail "a declared-byte refusal was not classified as a capacity refusal");
+   refusal at all. The provider's refusal of the body is the only byte
+   verdict; nothing measures the body against a limit before dispatch. *)
+let test_provider_byte_refusal_is_a_capacity_refusal () =
   (match
      Budget.capacity_refusal_of_error
        (request_body_refused_by_provider ~status:413)
@@ -180,44 +159,6 @@ let test_byte_axis_is_a_capacity_refusal () =
   with
   | Some (Budget.Provider_context_window { limit_tokens = Some 32768 }) -> ()
   | Some _ | None -> fail "the context window axis regressed"
-;;
-
-let test_byte_axis_forwards_exact_request_wire_observation () =
-  let observed = ref None in
-  Masc.Keeper_turn_driver_try_provider.For_testing.observe_request_wire_error
-    ~runtime_id:"anthropic.fallback"
-    ~max_request_body_bytes:(Some 1_048_576)
-    ~on_request_wire_observation:
-      (Some
-         (fun ~runtime_id ~max_request_body_bytes ~body_bytes ~serialized ->
-           check bool "serialized request absent on refusal" true
-             (Option.is_none serialized);
-           observed := Some (runtime_id, max_request_body_bytes, body_bytes)))
-    (request_body_too_large
-       ~actual_bytes:1_671_330
-       ~limit_bytes:1_048_576);
-  check
-    (option (triple string (option int) int))
-    "typed byte refusal preserves runtime, cap and exact body bytes"
-    (Some ("anthropic.fallback", Some 1_048_576, 1_671_330))
-    !observed;
-  observed := None;
-  Masc.Keeper_turn_driver_try_provider.For_testing.observe_request_wire_error
-    ~runtime_id:"anthropic.fallback"
-    ~max_request_body_bytes:(Some 1_048_576)
-    ~on_request_wire_observation:
-      (Some
-         (fun ~runtime_id ~max_request_body_bytes ~body_bytes ~serialized ->
-           check bool "serialized request absent on refusal" true
-             (Option.is_none serialized);
-           observed := Some (runtime_id, max_request_body_bytes, body_bytes)))
-    (Agent_core.Error.Api
-       (ContextOverflow { message = "exceeded"; limit = Some 32768 }));
-  check
-    (option (triple string (option int) int))
-    "token-axis refusal does not fabricate request wire bytes"
-    None
-    !observed
 ;;
 
 let test_typed_capacity_transition_preserves_axes () =
@@ -237,16 +178,6 @@ let test_typed_capacity_transition_preserves_axes () =
   (match Budget.capacity_refusal_of_error boundary with
    | None -> ()
    | Some _ -> fail "a serving boundary was folded into a capacity refusal");
-  (match
-     Budget.capacity_refusal_of_error
-       (request_body_too_large
-          ~actual_bytes:2_000_000
-          ~limit_bytes:1_048_576)
-   with
-   | Some (Budget.Serialized_request_body
-             { actual_bytes = 2_000_000; limit_bytes = 1_048_576 }) ->
-     ()
-   | _ -> fail "serialized byte provenance was not preserved");
   match
     Budget.capacity_refusal_of_error
       (request_body_refused_by_provider ~status:413)
@@ -278,13 +209,6 @@ let test_unusable_capacity_evidence_is_ignored () =
    class, so admitting a byte refusal there would label it as a window exceedance. *)
 let test_lane_classifier_admits_only_the_token_axis () =
   let module E = Masc.Keeper_unified_turn_execution.For_testing in
-  (match
-     E.declared_lane_failure_of_error
-       (request_body_too_large ~actual_bytes:2_000_000 ~limit_bytes:1_048_576)
-   with
-   | E.Declared_runtime_lane_exhausted -> ()
-   | E.Provider_context_overflow _ ->
-     fail "a byte refusal was classified as a context overflow");
   (match
      E.declared_lane_failure_of_error
        (request_body_refused_by_provider ~status:413)
@@ -319,13 +243,9 @@ let () =
             `Quick
             test_input_capacity_is_not_context_overflow
         ; test_case
-            "declared-byte refusal is a capacity refusal"
+            "provider byte refusal is a capacity refusal"
             `Quick
-            test_byte_axis_is_a_capacity_refusal
-        ; test_case
-            "declared-byte refusal forwards exact request wire observation"
-            `Quick
-            test_byte_axis_forwards_exact_request_wire_observation
+            test_provider_byte_refusal_is_a_capacity_refusal
         ; test_case
             "typed capacity transition preserves axes"
             `Quick

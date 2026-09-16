@@ -159,11 +159,9 @@ streaming = true
 [primary.test_model]
 is-default = true
 max-concurrent = 1
-max-request-body-bytes = 65536
 
 [fallback.test_model]
 max-concurrent = 1
-max-request-body-bytes = 65536
 |}
 
 let runtime_toml_quota_lane_with_shared_credential shared_credential =
@@ -210,13 +208,10 @@ streaming = true
 
 [shared_a.test_model]
 is-default = true
-max-request-body-bytes = 65536
 
 [shared_b.test_model]
-max-request-body-bytes = 65536
 
 [other.test_model]
-max-request-body-bytes = 65536
 |}
     shared_credential
     shared_credential
@@ -276,7 +271,6 @@ streaming = true
 [primary.test_model]
 is-default = true
 max-concurrent = 1
-max-request-body-bytes = 65536
 |}
 
 let runtime_toml_thinking_lane =
@@ -317,11 +311,9 @@ streaming = true
 [thinking.reasoning_big]
 is-default = true
 max-concurrent = 1
-max-request-body-bytes = 65536
 
 [plain.non_reasoning]
 max-concurrent = 1
-max-request-body-bytes = 65536
 |}
 
 let runtime_thinking_lane_model_catalog =
@@ -377,15 +369,12 @@ supports-image-input = true
 [primary.text_model]
 is-default = true
 max-concurrent = 1
-max-request-body-bytes = 65536
 
 [lanevision.vision_model]
 max-concurrent = 1
-max-request-body-bytes = 65536
 
 [outsidevision.vision_model]
 max-concurrent = 1
-max-request-body-bytes = 65536
 |}
 
 let runtime_toml_unknown_lane_candidate =
@@ -439,11 +428,9 @@ streaming = true
 [primary.test_model]
 is-default = true
 max-concurrent = 1
-max-request-body-bytes = 65536
 
 [fallback.test_model]
 max-concurrent = 1
-max-request-body-bytes = 65536
 |}
 
 let with_runtime_config toml f =
@@ -619,11 +606,9 @@ streaming = true
 [primary.test_model]
 is-default = true
 max-concurrent = 1
-max-request-body-bytes = 65536
 
 [fallback.test_model]
 max-concurrent = 1
-max-request-body-bytes = 65536
 |}
 
 (* Pins the current assignment contract: [runtime.assignments] targets must be
@@ -743,61 +728,6 @@ let test_prior_checkpoint_appends_current_goal_once () =
       "current goal appended exactly once"
       1
       current_goal_count)
-
-let test_deferred_tail_rejects_transformed_invalid_request_cap () =
-  with_runtime_config runtime_toml_with_lane (fun () ->
-    Eio_main.run
-    @@ fun env ->
-    Eio.Switch.run
-    @@ fun sw ->
-    Masc_test_deps.init_eio_clock ~sw env;
-    let transformed_urls = ref [] in
-    let deferred_runtime_lane =
-      Driver.For_testing.make_deferred_runtime_lane
-        ~assignment_id:"resilient"
-        ~failed_runtime_id:"previous.test_model"
-        ~next_runtime_id:"primary.test_model"
-        ~later_runtime_ids:[ "fallback.test_model" ]
-        ~failure:(retryable_network_error "previous cycle failed")
-    in
-    let result =
-      Driver.run_named
-        ~system_prompt:"You are the runtime failover test Keeper."
-        ~runtime_id:"resilient"
-        ~keeper_name:"deferred-request-cap"
-        ~base_path:(Filename.get_temp_dir_name ())
-        ~agent_core_tools:[]
-        ~goal:"prove final provider request admission"
-        ~deferred_runtime_lane
-        ~provider_config_transform:(fun provider_config ->
-          transformed_urls := provider_config.base_url :: !transformed_urls;
-          if String.equal provider_config.base_url "http://127.0.0.1:2"
-          then Ok { provider_config with max_request_body_bytes = Some 0 }
-          else Ok provider_config)
-        ~sw
-        ~net:env#net
-        ()
-    in
-    (match result with
-     | Error
-         (Agent_core.Error.Config
-           (Agent_core.Error.InvalidConfig
-             { field = "max-request-body-bytes"; detail })) ->
-       Alcotest.(check bool)
-         "typed rejection names the deferred tail runtime"
-         true
-         (contains ~needle:"fallback.test_model" detail)
-     | Error error ->
-       Alcotest.failf
-         "expected final request-cap rejection, got %s"
-         (Agent_core.Error.to_string error)
-     | Ok _ ->
-       Alcotest.fail
-         "transformed invalid-cap deferred runtime reached provider execution");
-    Alcotest.(check (list string))
-      "capped next candidate runs, then transformed tail is checked"
-      [ "http://127.0.0.1:1"; "http://127.0.0.1:2" ]
-      (List.rev !transformed_urls))
 
 let test_lane_media_degrade_uses_first_candidate_runtime_id () =
   with_runtime_config runtime_toml_with_lane (fun () ->
@@ -3553,15 +3483,12 @@ streaming = true
 [ollama_cloud.ollama-cloud-flash]
 is-default = true
 max-concurrent = 1
-max-request-body-bytes = 65536
 
 [glm_coding.flash]
 max-concurrent = 1
-max-request-body-bytes = 65536
 
 [glm_coding.plus]
 max-concurrent = 1
-max-request-body-bytes = 65536
 |}
 
 let test_registry_identity_is_the_served_name_not_the_model_id () =
@@ -4151,10 +4078,6 @@ let () =
             "prior checkpoint appends current goal once"
             `Quick
             test_prior_checkpoint_appends_current_goal_once;
-          Alcotest.test_case
-            "deferred tail rejects transformed invalid request cap"
-            `Quick
-            test_deferred_tail_rejects_transformed_invalid_request_cap;
           Alcotest.test_case
             "attempt loop stops on nonretryable failure"
             `Quick

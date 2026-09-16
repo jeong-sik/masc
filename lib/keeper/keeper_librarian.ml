@@ -50,15 +50,13 @@ type revision =
   }
 
 type selection =
-  { retained_memory_ids : string list
-  ; new_claims : fact list
+  { new_claims : fact list
   ; dropped : dropped_statement list
   ; facts : fact list
   ; revisions : revision list
   ; working_contexts : Keeper_librarian_context.pocket list
   }
 
-let wire_field_retained_memory_ids = "retained_memory_ids"
 let wire_field_new_claims = "new_claims"
 let wire_field_dropped = "dropped"
 let wire_field_claim = Keeper_memory_os_types.wire_field_claim
@@ -69,7 +67,7 @@ let wire_field_supersedes = Keeper_memory_os_types.wire_field_supersedes
 let wire_claim_fields = Keeper_memory_os_types.wire_librarian_claim_fields
 let wire_dropped_fields = Keeper_memory_os_types.wire_librarian_dropped_fields
 let wire_current_fields =
-  [ wire_field_retained_memory_ids; wire_field_new_claims; wire_field_dropped; "working_contexts" ]
+  [ wire_field_new_claims; wire_field_dropped; "working_contexts" ]
 
 let trim_nonempty s =
   let s = String.trim s in
@@ -237,13 +235,6 @@ let rec traverse f = function
      | (Some _, None) | (None, _) -> None)
 ;;
 
-let string_list_field key fields =
-  match List.assoc_opt key fields with
-  | Some (`List items) -> traverse (function `String s -> trim_nonempty s | _ -> None) items
-  | Some (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `Null | `String _)
-  | None -> None
-;;
-
 let field_allowed ~allowed field =
   List.exists (String.equal field) allowed
 ;;
@@ -269,13 +260,9 @@ type parse_error =
   | Missing_required_fields
   | Claim_schema_mismatch
   | Dropped_schema_mismatch
-  | Unknown_retained_memory_id of string
-  | Duplicate_retained_memory_id of string
   | Duplicate_selected_memory_id of string
   | Unknown_dropped_memory_id of string
   | Duplicate_dropped_memory_id of string
-  | Dropped_memory_id_also_retained of string
-  | Missing_disposition of string
   | Supersedes_unknown_memory_id of string
   | Supersedes_not_dropped of string
 
@@ -287,19 +274,12 @@ let parse_error_to_string = function
   | Missing_required_fields -> "missing_required_fields"
   | Claim_schema_mismatch -> "claim_schema_mismatch"
   | Dropped_schema_mismatch -> "dropped_schema_mismatch"
-  | Unknown_retained_memory_id identity ->
-    "unknown_retained_memory_id: " ^ identity
-  | Duplicate_retained_memory_id identity ->
-    "duplicate_retained_memory_id: " ^ identity
   | Duplicate_selected_memory_id identity ->
     "duplicate_selected_memory_id: " ^ identity
   | Unknown_dropped_memory_id identity ->
     "unknown_dropped_memory_id: " ^ identity
   | Duplicate_dropped_memory_id identity ->
     "duplicate_dropped_memory_id: " ^ identity
-  | Dropped_memory_id_also_retained identity ->
-    "dropped_memory_id_also_retained: " ^ identity
-  | Missing_disposition identity -> "missing_disposition: " ^ identity
   | Supersedes_unknown_memory_id token -> "supersedes_unknown_memory_id: " ^ token
   | Supersedes_not_dropped identity -> "supersedes_not_dropped: " ^ identity
 ;;
@@ -418,17 +398,6 @@ let surrogate_identity_map facts =
   |> String_map.of_seq
 ;;
 
-let translate_retained_ids ~by_surrogate retained_memory_ids =
-  let rec loop acc = function
-    | [] -> Ok (List.rev acc)
-    | token :: rest ->
-      (match String_map.find_opt token by_surrogate with
-       | Some identity -> loop (identity :: acc) rest
-       | None -> Error (Unknown_retained_memory_id token))
-  in
-  loop [] retained_memory_ids
-;;
-
 let translate_dropped_ids ~by_surrogate dropped =
   let rec loop acc = function
     | [] -> Ok (List.rev acc)
@@ -472,53 +441,42 @@ let current_facts inp =
   | Some current -> current.facts
 ;;
 
-let materialize_facts ~current_facts ~retained_memory_ids ~new_claims ~dropped =
+(* The librarian states only what changes: which memories to retire, and what
+   to claim. A memory it does not name stays. That is what the apply step has
+   always done -- [Keeper_memory_os_current] keeps every fact no dropped
+   statement names -- so the whole-set roll call the answer used to carry was
+   validated here and then discarded at apply time, while costing the librarian
+   a correct restatement of every current identity on every pass. A single slip
+   in that restatement threw the whole pass away, which made "retain everything,
+   drop nothing, claim nothing" the one answer that always passed (RFC-0456).
+
+   What is checked here is not what deserves to be remembered -- that is the
+   librarian's judgment and no rule here narrows it. It is whether the answer
+   refers to memories the librarian was actually shown: a retired id has to name
+   one of them, exactly once, and a new claim must not already be on file. *)
+let materialize_facts ~current_facts ~new_claims ~dropped =
   let open Result.Syntax in
   let current_by_id = current_facts_by_id current_facts in
-  let rec retain seen retained_rev = function
-    | [] -> Ok (List.rev retained_rev, seen)
-    | identity :: rest ->
-      if String_set.mem identity seen
-      then Error (Duplicate_retained_memory_id identity)
-      else
-        (match String_map.find_opt identity current_by_id with
-         | None -> Error (Unknown_retained_memory_id identity)
-         | Some fact ->
-           retain
-             (String_set.add identity seen)
-             (fact :: retained_rev)
-             rest)
-  in
-  let* retained, selected_ids =
-    retain String_set.empty [] retained_memory_ids
-  in
-  (* Totality: every current identity must be dispositioned exactly once —
-     retained or dropped with a stated reason. Silent omission is no longer
-     the deletion operation; it is a contract violation. *)
   let rec validate_dropped seen = function
     | [] -> Ok seen
     | (statement : dropped_statement) :: rest ->
       if String_set.mem statement.memory_id seen
       then Error (Duplicate_dropped_memory_id statement.memory_id)
-      else if String_set.mem statement.memory_id selected_ids
-      then Error (Dropped_memory_id_also_retained statement.memory_id)
       else if not (String_map.mem statement.memory_id current_by_id)
       then Error (Unknown_dropped_memory_id statement.memory_id)
       else validate_dropped (String_set.add statement.memory_id seen) rest
   in
   let* dropped_ids = validate_dropped String_set.empty dropped in
-  let* () =
-    match
-      List.find_opt
-        (fun fact ->
-           let identity = memory_id fact in
-           not
-             (String_set.mem identity selected_ids
-              || String_set.mem identity dropped_ids))
-        current_facts
-    with
-    | Some fact -> Error (Missing_disposition (memory_id fact))
-    | None -> Ok ()
+  let retained =
+    List.filter
+      (fun fact -> not (String_set.mem (memory_id fact) dropped_ids))
+      current_facts
+  in
+  let retained_ids =
+    List.fold_left
+      (fun ids fact -> String_set.add (memory_id fact) ids)
+      String_set.empty
+      retained
   in
   let rec append_new selected_ids new_rev = function
     | [] -> Ok (retained @ List.rev new_rev)
@@ -534,7 +492,7 @@ let materialize_facts ~current_facts ~retained_memory_ids ~new_claims ~dropped =
           (fact :: new_rev)
           rest
   in
-  append_new selected_ids [] new_claims
+  append_new retained_ids [] new_claims
 ;;
 
 let selection_of_json_result ?now (inp : input) (json : Yojson.Safe.t) :
@@ -561,13 +519,10 @@ let selection_of_json_result ?now (inp : input) (json : Yojson.Safe.t) :
              |> Result.map_error (fun detail -> Working_context_invalid detail)
        in
        (match
-          string_list_field wire_field_retained_memory_ids fields
-          , List.assoc_opt wire_field_new_claims fields
+          List.assoc_opt wire_field_new_claims fields
           , List.assoc_opt wire_field_dropped fields
         with
-        | ( Some retained_memory_ids
-          , Some (`List claim_items)
-          , Some (`List dropped_items) ) ->
+        | Some (`List claim_items), Some (`List dropped_items) ->
           (match List.find_map claim_field_error claim_items with
            | Some (Unexpected_object_field field) -> Error (Unexpected_field field)
            | Some (Duplicate_object_field field) -> Error (Duplicate_field field)
@@ -587,17 +542,11 @@ let selection_of_json_result ?now (inp : input) (json : Yojson.Safe.t) :
                    let by_surrogate =
                      surrogate_identity_map (current_facts inp)
                    in
-                   (match
-                      ( translate_retained_ids
-                          ~by_surrogate
-                          retained_memory_ids
-                      , translate_dropped_ids ~by_surrogate dropped )
-                    with
-                   | Ok retained_memory_ids, Ok dropped ->
+                   (match translate_dropped_ids ~by_surrogate dropped with
+                   | Ok dropped ->
                      (match
                         materialize_facts
                           ~current_facts:(current_facts inp)
-                          ~retained_memory_ids
                           ~new_claims
                           ~dropped
                       with
@@ -607,8 +556,7 @@ let selection_of_json_result ?now (inp : input) (json : Yojson.Safe.t) :
                          with
                          | Ok revisions ->
                            Ok
-                             { retained_memory_ids
-                             ; new_claims
+                             { new_claims
                              ; dropped
                              ; facts
                              ; revisions
@@ -616,7 +564,7 @@ let selection_of_json_result ?now (inp : input) (json : Yojson.Safe.t) :
                              }
                          | Error _ as error -> error)
                     | Error _ as error -> error)
-                   | (Error _ as error), _ | _, (Error _ as error) -> error)
+                   | Error _ as error -> error)
                  | Some _, None -> Error Dropped_schema_mismatch
                  | None, _ -> Error Claim_schema_mismatch)))
         | _ -> Error Missing_required_fields))

@@ -1,7 +1,8 @@
 (* The NEXT REQUEST band of the context inspector: the turn's own composition
    run forward by the server (the carried range from the pair's front over
    the durable history), drawn in tokens at the tab's scale. What the marks
-   are read against is the provider's count, so it is shown as counted. *)
+   are read against is the provider's count, so it is shown as counted.
+   Under the figures, the same parts in the order the request carries them. *)
 
 module Inspector = Masc_tui_context_inspector
 open Masc_tui_ansi
@@ -17,20 +18,13 @@ let origin_sentence = function
       Printf.sprintf "front from turn #%d's record; nothing counted since the server started" turn
   | Inspector.Carried_halved_after_refusal { retry } ->
       Printf.sprintf "front halved after a refusal (retry %d)" retry
-  | Inspector.Carried_fit_to_request_cap ->
-      "no front to start from: the newest suffix the request cap admits"
-  | Inspector.Carried_whole_history -> "no front to start from and no cap: the whole history"
+  | Inspector.Carried_whole_history -> "no front to start from: the whole history"
 ;;
 
 let candidate_lines ~prose ~fact ~safe ~scale
     (candidate : Inspector.forecast_candidate) =
   let tokens_of_bytes = Masc_tui_token_scale.estimate scale in
   let approx bytes = "\xe2\x89\x88" ^ signed_tokens (tokens_of_bytes bytes) in
-  let cap_suffix =
-    match candidate.request_cap_bytes with
-    | Some cap -> Printf.sprintf "  \xc2\xb7  provider accepts up to %s tok" (approx cap)
-    | None -> ""
-  in
   let head =
     match candidate.lane with
     | Inspector.Lane_not_applicable reason ->
@@ -39,14 +33,13 @@ let candidate_lines ~prose ~fact ~safe ~scale
         (match candidate.marks with
          | Some marks ->
              fact
-               (Printf.sprintf "%s  \xc2\xb7  marks %s / %s tok%s" (safe candidate.runtime_id)
+               (Printf.sprintf "%s  \xc2\xb7  marks %s / %s tok" (safe candidate.runtime_id)
                   (Inspector.format_tokens marks.high_water_tokens)
-                  (Inspector.format_tokens marks.low_water_tokens)
-                  cap_suffix)
+                  (Inspector.format_tokens marks.low_water_tokens))
          | None ->
              fact
-               (Printf.sprintf "%s  \xc2\xb7  no marks declared: only a refusal moves the front%s"
-                  (safe candidate.runtime_id) cap_suffix))
+               (Printf.sprintf "%s  \xc2\xb7  no marks declared: only a refusal moves the front"
+                  (safe candidate.runtime_id)))
   in
   (* The pinned figure names its lane only when it is not this one. *)
   let pinned_provenance (parts : Inspector.forecast_parts) =
@@ -88,7 +81,42 @@ let candidate_lines ~prose ~fact ~safe ~scale
                fact (Printf.sprintf "last counted %s tok" (Inspector.format_tokens counted))
            | None, (Some _ | None) -> [])
   in
-  head @ parts_line @ carried_lines
+  (* The request in the order it travels, one numbered row per slot, the
+     [system context] blocks named in the order the assembly concatenates
+     them. Only drawn when the server laid it out, which is when both the
+     range and the fixed parts were known. *)
+  let assembly_lines =
+    match candidate.assembly with
+    | None -> []
+    | Some slots ->
+        let row index label bytes detail =
+          fact
+            (Printf.sprintf "%d  %-16s %8s tok%s" (index + 1) label (approx bytes)
+               (if String.equal detail "" then "" else "  \xc2\xb7  " ^ detail))
+        in
+        prose "In the order the request carries them:"
+        @ List.concat
+            (List.mapi
+               (fun index slot ->
+                 match slot with
+                 | Inspector.Slot_system_prompt { bytes } ->
+                     row index "system prompt" bytes "keeper instructions"
+                 | Inspector.Slot_tools { bytes } -> row index "tools" bytes "schema surface"
+                 | Inspector.Slot_preamble { bytes } ->
+                     row index "[context window]" bytes "says older turns are omitted"
+                 | Inspector.Slot_history { atoms; of_atoms; bytes } ->
+                     row index "history" bytes
+                       (Printf.sprintf "%d of %d atoms, oldest first" atoms of_atoms)
+                 | Inspector.Slot_wake_line { bytes } -> row index "wake line" bytes "newest atom"
+                 | Inspector.Slot_system_context { bytes; blocks } ->
+                     row index "[system context]" bytes
+                       (String.concat "  \xc2\xb7  "
+                          (List.map
+                             (fun (name, block_bytes) -> safe name ^ " " ^ approx block_bytes)
+                             blocks)))
+               slots)
+  in
+  head @ parts_line @ carried_lines @ assembly_lines
 ;;
 
 let lines ~prose ~fact ~safe ~scale

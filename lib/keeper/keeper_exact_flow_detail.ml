@@ -100,8 +100,6 @@ let rec capacity_disposition_detail : Exact_output.input_capacity_disposition ->
       reserved_output_tokens
       max_context_tokens
   | Token_capacity_rejected rejection -> token_capacity_detail rejection
-  | Serialized_request_body_too_large _ ->
-    "serialized request body too large"
 
 and token_capacity_detail : Exact_output.token_capacity_rejection -> string = function
   | Capacity_evidence_not_yet_valid { now_unix_s; checked_at_unix_s } ->

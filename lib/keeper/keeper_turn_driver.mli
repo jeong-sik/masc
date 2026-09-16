@@ -230,7 +230,6 @@ val run_named :
   ?on_runtime_observation:(Runtime_observation.runtime_observation -> unit) ->
   ?on_request_wire_observation:
     (runtime_id:string ->
-     max_request_body_bytes:int option ->
      body_bytes:int ->
      serialized:Llm_provider.Request_wire_observer.observation option ->
      unit) ->
@@ -256,7 +255,7 @@ val run_named :
     (measurement:Turn_record.model_input_measurement
      -> Runtime_model_input_tail_window.window_observation
      -> unit) ->
-  ?carried_front_seed:(runtime_id:string -> Keeper_carried_front.seed option) ->
+  ?carried_front_seed:(unit -> Keeper_carried_front.seed option) ->
   ?runtime_manifest_context:Keeper_runtime_manifest.turn_context ->
   ?runtime_manifest_append:(Keeper_runtime_manifest.t -> unit) ->
   ?deferred_runtime_lane:deferred_runtime_lane ->

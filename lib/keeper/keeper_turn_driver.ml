@@ -886,45 +886,9 @@ let runtime_candidate_missing_error id =
        "keeper_turn_driver: lane candidate %S disappeared from runtimes"
        id)
 
-let runtime_candidate_invalid_request_cap_error error =
-  Agent_core.Error.Config
-    (Agent_core.Error.InvalidConfig
-       { field = "max-request-body-bytes"
-       ; detail = Runtime.request_body_cap_error_to_string error
-       })
-
-let validate_provider_request_cap ~runtime_id
-    (provider_config : Llm_provider.Provider_config.t) =
-  match Runtime.validate_request_body_cap ~runtime_id provider_config with
-  | Ok cap -> Ok cap
-  | Error error -> Error (runtime_candidate_invalid_request_cap_error error)
-
-(* The marks the carried range is judged against, as the binding declares
-   them (RFC keeper-context-window-in-tokens §10.2); a binding that declares
-   none leaves eviction to a refusal. Their agreement with the model's
-   max-context was checked at load ([Runtime.validate_runtime_context_marks]),
-   so nothing is refused here. *)
-let request_cap_and_marks ~runtime_id provider_config =
-  let* max_request_body_bytes =
-    validate_provider_request_cap ~runtime_id provider_config
-  in
-  Ok (max_request_body_bytes, Runtime.context_marks_of_runtime_id runtime_id)
-;;
-
 let resolve_runtime_candidate id =
   match Runtime.get_runtime_by_id id with
-  | Some runtime ->
-    (match runtime.Runtime.execution with
-     | Runtime_execution.Codex_app_server _
-     | Runtime_execution.Claude_code _
-     | Runtime_execution.Antigravity_cli _ -> Ok runtime
-     | Runtime_execution.Agent_core provider_config ->
-       let* _request_body_cap =
-         validate_provider_request_cap
-           ~runtime_id:runtime.id
-           provider_config
-       in
-       Ok runtime)
+  | Some runtime -> Ok runtime
   | None ->
     (match Runtime.resolve_assignment id with
      | `Unavailable missing ->
@@ -2166,16 +2130,14 @@ let run_named
            , Keeper_provider_attempt_effect.No_effect_observed
            , Keeper_attempt_dispatch.Rejected_before_dispatch )
          | Ok () ->
-          (match
-             request_cap_and_marks
-               ~runtime_id:attempt_runtime_id
-               provider_config
-           with
-           | Error err ->
-             Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
-             Error err, None, Keeper_provider_attempt_effect.No_effect_observed,
-             Keeper_attempt_dispatch.Rejected_before_dispatch
-           | Ok (max_request_body_bytes, context_marks) ->
+          (* The marks the carried range is judged against, as the binding
+             declares them (RFC keeper-context-window-in-tokens §10.2); a binding
+             that declares none leaves eviction to a refusal. Their agreement
+             with the model's max-context was checked at load
+             ([Runtime.validate_runtime_context_marks]). *)
+          (let context_marks =
+             Runtime.context_marks_of_runtime_id attempt_runtime_id
+           in
             let candidate = Runtime_candidate.of_provider_config provider_config in
             (* Cached provider health is observation only. Every eligible runtime
                reaches the real provider boundary; only the resulting typed error
@@ -2184,18 +2146,18 @@ let run_named
           let try_provider_ctx : Keeper_turn_driver_try_provider.try_provider_ctx =
             { runtime_id = attempt_runtime_id
             ; error_runtime_id
-            ; max_request_body_bytes
             ; context_marks
             ; (* Read only when the process holds no ledger for this pair:
-                 the range the newest completed turn record on this runtime
-                 measured, so a restart resumes the range the last turn
-                 carried rather than the whole history. A caller that reads
-                 no records leaves the first request to the cap or the whole
+                 the range the newest completed Agent Core turn record on
+                 this history measured, whichever runtime ran it, so a
+                 restart or a lane's next candidate resumes the range the
+                 last turn carried rather than the whole history. A caller
+                 that reads no records leaves the first request to the whole
                  history. *)
               carried_front_seed =
                 (fun () ->
                    match carried_front_seed with
-                   | Some read -> read ~runtime_id:attempt_runtime_id
+                   | Some read -> read ()
                    | None -> None)
             ; base_path
             ; keeper_name

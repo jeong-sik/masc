@@ -11,17 +11,9 @@ type invalid_request_reason =
       (** The selected provider binding rejected the prepared request before
           dispatch. A caller with an ordered runtime lane may try a different
           binding, while retrying the same binding cannot change the result. *)
-  | Request_body_too_large of
-      { actual_bytes : int
-      ; limit_bytes : int
-      }
-  (** Refused locally, before dispatch, against a declared byte limit. Both
-          integers are measured: the serialized body and the limit it exceeded. *)
   | Request_body_refused_by_provider of { status : int }
-  (** The provider refused the request for its size. Distinct from
-          {!Request_body_too_large} because the limit is unknown here — the response
-          carries a status, not a bound — and putting an estimate in those fields
-          would make a measured pair mean something it does not.
+  (** The provider refused the request for its size. The response carries a
+          status, not a bound, and no bound is estimated here.
 
           Separate from {!Unknown_invalid_request} because the cause is known: a
           smaller request may succeed, where a malformed one will not. A consumer

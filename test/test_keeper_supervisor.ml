@@ -935,6 +935,12 @@ let test_reconcile_supervise_exception_continues () =
   check (float 0.001) "reconcile failure metric increments" (before +. 1.)
     (Masc.Otel_metric_store.metric_total metric)
 
+(* Regression guard for #26323 ("[P0] Keeper bootstrap rejects persisted
+   crashed phase with crashed -> running invalid transition"): a keeper whose
+   registry entry is already [Crashed] when the real [supervise_keepalive]
+   runs on it must never reach [launch_supervised_fiber], so no
+   [Fiber_started] dispatch -- and no [fiber_start_rejected:
+   invalid_transition: crashed -> running] -- is attempted against it. *)
 let test_supervise_keepalive_retains_sweep_owned_entries () =
   with_config_dir @@ fun config_dir ->
   Eio_main.run @@ fun env ->

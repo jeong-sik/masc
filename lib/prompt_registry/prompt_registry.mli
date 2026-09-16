@@ -57,14 +57,6 @@
 
 (** {1 Type re-exports} *)
 
-type prompt_entry = Prompt_registry_types.prompt_entry = {
-  id : string;
-  template : string;
-  version : string;
-  variables : string list;
-  created_at : float;
-}
-
 type prompt_meta = Prompt_registry_types.prompt_meta = {
   description : string;
   category : string;

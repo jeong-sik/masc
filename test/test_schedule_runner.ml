@@ -60,8 +60,13 @@ let create_ok
   | Error err -> fail (service_error_to_string err)
 ;;
 
+(* These cases are about what a tick emits and dispatches, not about how long
+   a finished schedule is kept, so they pass the library's own window. *)
 let tick_ok ?consumer ?clock config ~now =
-  match tick ?consumer ?clock config ~now with
+  match
+    tick ?consumer ?clock config ~now
+      ~retention_days:Schedule_store.terminal_schedule_retention_days
+  with
   | Ok result -> result
   | Error err -> fail (runner_error_to_string err)
 ;;
@@ -194,6 +199,81 @@ let test_tick_without_a_new_signal_leaves_the_seen_keys_file_alone () =
     "the seen-key file keeps the bytes it had"
     compact
     (In_channel.with_open_bin seen_path In_channel.input_all)
+;;
+
+(* #26686 item 1: a primary that exists but will not parse must not
+   permanently block dispatch. [write_seen] always commits a [.last-good]
+   mirror alongside the primary, so corrupting only the primary recovers
+   from that mirror instead of failing every future tick — the previous
+   version returned [Error] straight from [read_seen] and stayed there
+   forever, because nothing could write a fresh file over the broken one. *)
+let test_tick_recovers_seen_keys_from_last_good_mirror_when_primary_is_corrupt () =
+  with_workspace
+  @@ fun config ->
+  let _first = create_ok ~schedule_id:"corrupt-1" config in
+  let first_due = tick_ok config ~now:201.0 in
+  check int "first tick emits" 1 (List.length first_due.emitted);
+  let seen_path =
+    Filename.concat (Filename.dirname (signals_dir config)) "signal_keys.json"
+  in
+  let recovery_path = seen_path ^ ".last-good" in
+  if not (Sys.file_exists recovery_path)
+  then failf "expected a .last-good mirror at %s after the first tick" recovery_path;
+  (* Corrupt only the primary; the mirror stays intact. *)
+  Out_channel.with_open_bin seen_path (fun channel -> output_string channel "{not json");
+  let _second = create_ok ~schedule_id:"corrupt-2" config in
+  let second_due =
+    tick config ~now:301.0
+      ~retention_days:Schedule_store.terminal_schedule_retention_days
+  in
+  (match second_due with
+   | Error err ->
+     failf "tick did not recover from the corrupt primary: %s"
+       (runner_error_to_string err)
+   | Ok result ->
+     check int "recovered tick emits only the new occurrence" 1
+       (List.length result.emitted);
+     let signal = List.hd result.emitted in
+     check string
+       "recovered tick emits the new schedule, not a re-fire of the first"
+       "corrupt-2" signal.schedule_id);
+  (* The primary heals itself because this tick emitted a signal, so
+     [write_seen] ran and rewrote it with valid bytes. *)
+  match Yojson.Safe.from_file seen_path with
+  | `List _ -> ()
+  | _ -> fail "primary did not heal into a parseable JSON list after recovery"
+;;
+
+(* #26686 item 2: a write that cannot commit must not be reported as a
+   successful, empty tick. [write_json] (used before this fix) folds a write
+   failure into [Log.Misc.warn] and returns [unit], so the caller had no way
+   to know the seen-key commit was lost; [write_seen] now returns that
+   result and [append_new_signals] binds it, so the tick itself fails
+   instead of silently telling the scheduler this occurrence is durably
+   recorded when it is not. *)
+let test_tick_reports_failure_when_the_seen_keys_write_cannot_commit () =
+  with_workspace
+  @@ fun config ->
+  let _first = create_ok ~schedule_id:"readonly-1" config in
+  let first_due = tick_ok config ~now:201.0 in
+  check int "first tick emits" 1 (List.length first_due.emitted);
+  let seen_dir = Filename.dirname (signals_dir config) in
+  Unix.chmod seen_dir 0o555;
+  Fun.protect
+    ~finally:(fun () -> Unix.chmod seen_dir 0o755)
+    (fun () ->
+       let _second = create_ok ~schedule_id:"readonly-2" config in
+       let result =
+         tick config ~now:301.0
+           ~retention_days:Schedule_store.terminal_schedule_retention_days
+       in
+       match result with
+       | Error _ -> ()
+       | Ok tick_result ->
+         failf
+           "expected the tick to report the seen-key write failure instead \
+            of succeeding with %d emitted signal(s)"
+           (List.length tick_result.emitted))
 ;;
 
 let test_tick_dispatches_due_candidate_to_success () =
@@ -874,6 +954,10 @@ let () =
             test_tick_emits_due_candidate_once
         ; test_case "a tick without a new signal leaves the seen-key file alone" `Quick
             test_tick_without_a_new_signal_leaves_the_seen_keys_file_alone
+        ; test_case "recovers seen keys from the .last-good mirror when the primary is corrupt" `Quick
+            test_tick_recovers_seen_keys_from_last_good_mirror_when_primary_is_corrupt
+        ; test_case "reports failure when the seen-keys write cannot commit" `Quick
+            test_tick_reports_failure_when_the_seen_keys_write_cannot_commit
         ; test_case "dispatches due candidate to success" `Quick
             test_tick_dispatches_due_candidate_to_success
         ; test_case "completes wake on durable acceptance" `Quick

@@ -11714,8 +11714,6 @@ def runtime_resolved_runtime(
         "is_local": False,
         # This binding flag is independent of the fleet's top-level default.
         "is_default": False,
-        "keeper_dispatchable": True,
-        "keeper_dispatch_blocked_reason": None,
     }
 
 

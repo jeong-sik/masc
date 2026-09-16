@@ -579,25 +579,15 @@ let validate_thinking_control_request
    dispatch" — a config authoring error, not a throttle. Reject it before
    dispatch instead of letting Slot_scheduler.create raise mid-request. *)
 let validate_admission_declaration (config : Provider_config.t) =
-  match config.max_request_body_bytes with
-  | Some n when n < 1 ->
+  match config.max_concurrent_requests with
+  | None -> Ok ()
+  | Some n when n >= 1 -> Ok ()
+  | Some n ->
     Error
       (Http_client.AcceptRejected
          { reason =
-             Printf.sprintf "max_request_body_bytes must be >= 1 when declared, got %d" n
+             Printf.sprintf "max_concurrent_requests must be >= 1 when declared, got %d" n
          })
-  | None | Some _ ->
-    (match config.max_concurrent_requests with
-     | None -> Ok ()
-     | Some n when n >= 1 -> Ok ()
-     | Some n ->
-       Error
-         (Http_client.AcceptRejected
-            { reason =
-                Printf.sprintf
-                  "max_concurrent_requests must be >= 1 when declared, got %d"
-                  n
-            }))
 ;;
 
 let validate_common (config : Provider_config.t) =
@@ -715,12 +705,7 @@ let serialize_http_request_with_policy
     with
     | Invalid_argument reason -> Error (Http_client.AcceptRejected { reason })
   in
-  Result.bind body_result (fun body ->
-    let actual_bytes = String.length body in
-    match config.max_request_body_bytes with
-    | Some limit_bytes when actual_bytes > limit_bytes ->
-      Error (Http_client.request_body_too_large_error ~actual_bytes ~limit_bytes)
-    | None | Some _ -> Ok (http_codec, body))
+  Result.map (fun body -> http_codec, body) body_result
 ;;
 
 let serialize_http_request_with_thinking_control
@@ -761,36 +746,20 @@ let finalize_stream_body ~http_codec body =
     Http_client.inject_stream_and_options body
 ;;
 
-(* Serialize the exact body shape used by the built-in HTTP transport without
-   applying the declared byte ceiling. Callers either inspect the resulting
-   metadata or pass the body through [admit_final_serialized_body] before I/O.
-   Clearing the ceiling cannot change provider wire JSON because the field is
-   local admission configuration, not a serialized provider parameter. *)
+(* Serialize the exact body shape used by the built-in HTTP transport. The
+   body is the provider's to accept or refuse; nothing here measures it
+   against a limit of its own. *)
 let serialize_final_http_request_unadmitted
       ~stream
       ~(config : Provider_config.t)
       ~messages
       ~tools
   =
-  let serialization_config = { config with max_request_body_bytes = None } in
   Result.map
     (fun (http_codec, body) ->
        let body = if stream then finalize_stream_body ~http_codec body else body in
        http_codec, body)
-    (serialize_http_request ~stream ~config:serialization_config ~messages ~tools)
-;;
-
-(* Streaming serializers may add transport fields after the provider body
-   builder returns (for example [stream_options.include_usage]). Recheck the
-   caller-declared byte boundary against the exact final body instead of
-   assuming the pre-injection measurement is still authoritative. Sync callers
-   use the same helper so there is one final-wire admission contract. *)
-let admit_final_serialized_body ~(config : Provider_config.t) body =
-  let actual_bytes = String.length body in
-  match config.max_request_body_bytes with
-  | Some limit_bytes when actual_bytes > limit_bytes ->
-    Error (Http_client.request_body_too_large_error ~actual_bytes ~limit_bytes)
-  | None | Some _ -> Ok body
+    (serialize_http_request ~stream ~config ~messages ~tools)
 ;;
 
 let observe_pre_dispatch_serialization ?request_wire_observer observation =

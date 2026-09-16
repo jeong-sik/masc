@@ -377,65 +377,6 @@ let test_complete_http_error () =
   | Exit -> ()
 ;;
 
-let check_request_body_too_large ~label = function
-  | Error
-      (Http_client.ProviderFailure
-         { kind = Http_client.Request_body_too_large { actual_bytes; limit_bytes }; _ })
-    ->
-    check int (label ^ " limit") 1 limit_bytes;
-    check bool (label ^ " measured serialized bytes") true (actual_bytes > limit_bytes)
-  | Ok _ -> failf "%s unexpectedly succeeded" label
-  | Error _ -> failf "%s returned the wrong typed error" label
-;;
-
-let test_complete_request_body_limit_rejects_before_io () =
-  Eio_main.run
-  @@ fun env ->
-  try
-    Eio.Switch.run
-    @@ fun sw ->
-    let request_count = ref 0 in
-    let observed_request_count = ref 0 in
-    let base_url =
-      start_mock_server
-        ~sw
-        ~net:env#net
-        ~on_request:(fun () -> incr request_count)
-        (anthropic_response "must not arrive")
-    in
-    let config =
-      Provider_config.make
-        ~kind:Provider_config.Anthropic
-        ~model_id:"request-body-limit"
-        ~base_url
-        ~max_tokens:100
-        ~max_request_body_bytes:1
-        ()
-    in
-    let request_wire_observer _observation =
-      incr observed_request_count;
-      Ok ()
-    in
-    check_request_body_too_large
-      ~label:"sync request-body admission"
-      (Complete.complete ~sw ~net:env#net ~request_wire_observer ~config ~messages ());
-    check_request_body_too_large
-      ~label:"stream request-body admission"
-      (Complete.complete_stream
-         ~sw
-         ~net:env#net
-         ~request_wire_observer
-         ~config
-         ~messages
-         ~on_event:(fun _ -> ())
-         ());
-    check int "request-body admission performs no HTTP request" 0 !request_count;
-    check int "rejected body produces no serialization evidence" 0 !observed_request_count;
-    Eio.Switch.fail sw Exit
-  with
-  | Exit -> ()
-;;
-
 let test_complete_request_wire_observer_sees_exact_sync_body () =
   Eio_main.run
   @@ fun env ->
@@ -516,7 +457,7 @@ let test_complete_invalid_uri_rejects_before_wire_observation () =
   | Error _ -> fail "invalid URI returned the wrong typed error"
 ;;
 
-let test_complete_stream_rechecks_limit_after_final_wire_injection () =
+let test_complete_stream_final_wire_injection_grows_the_body () =
   Eio_main.run
   @@ fun env ->
   try
@@ -554,38 +495,6 @@ let test_complete_stream_rechecks_limit_after_final_wire_injection () =
       "stream injection grows the final body"
       true
       (final_bytes > pre_injection_bytes);
-    let config =
-      Provider_config.make
-        ~kind:Provider_config.OpenAI_compat
-        ~model_id:"gpt-4"
-        ~base_url
-        ~request_path:"/v1/chat/completions"
-        ~temperature:0.0
-        ~max_tokens:100
-        ~max_request_body_bytes:(final_bytes - 1)
-        ()
-    in
-    (match Complete.inspect_serialized_request ~stream:true ~config ~messages () with
-     | Error _ -> fail "inspection incorrectly applied the dispatch byte ceiling"
-     | Ok observation ->
-       check int "inspection exact final bytes" final_bytes observation.body_bytes);
-    (match
-       Complete.complete_stream
-         ~sw
-         ~net:env#net
-         ~config
-         ~messages
-         ~on_event:(fun _ -> ())
-         ()
-     with
-     | Error
-         (Http_client.ProviderFailure
-            { kind = Http_client.Request_body_too_large { actual_bytes; limit_bytes }; _ })
-       ->
-       check int "declared final limit" (final_bytes - 1) limit_bytes;
-       check int "admission exact final bytes" final_bytes actual_bytes
-     | Ok _ -> fail "final stream body bypassed the serialized byte limit"
-     | Error _ -> fail "final stream body returned the wrong typed rejection");
     check int "no HTTP dispatch" 0 !request_count;
     Eio.Switch.fail sw Exit
   with
@@ -4313,10 +4222,6 @@ let () =
             test_complete_http_rejects_typed_empty_completion
         ; test_case "http error" `Quick test_complete_http_error
         ; test_case
-            "request body limit rejects before I/O"
-            `Quick
-            test_complete_request_body_limit_rejects_before_io
-        ; test_case
             "wire observer sees exact sync body"
             `Quick
             test_complete_request_wire_observer_sees_exact_sync_body
@@ -4327,7 +4232,7 @@ let () =
         ; test_case
             "stream body limit includes final wire injection"
             `Quick
-            test_complete_stream_rechecks_limit_after_final_wire_injection
+            test_complete_stream_final_wire_injection_grows_the_body
         ; test_case
             "empty http error body has context"
             `Quick

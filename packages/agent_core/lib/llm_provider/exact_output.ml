@@ -61,10 +61,6 @@ type input_capacity_disposition =
       ; max_context_tokens : int
       }
   | Token_capacity_rejected of token_capacity_rejection
-  | Serialized_request_body_too_large of
-      { actual_bytes : int
-      ; limit_bytes : int
-      }
 
 type candidate_rejection_disposition =
   | Runtime_slot_unavailable
@@ -673,8 +669,6 @@ let wire_admission_error_disposition = function
          { input_tokens; reserved_output_tokens; max_context_tokens })
   | Measured_serving_constraint_rejected reason ->
     Input_capacity (Token_capacity_rejected reason)
-  | Request_body_too_large { actual_bytes; limit_bytes } ->
-    Input_capacity (Serialized_request_body_too_large { actual_bytes; limit_bytes })
   | Output_reservation_unavailable
   | Token_measurement_failed
   | Target_request_rejected
@@ -830,12 +824,6 @@ let input_capacity_evidence_json = function
       ; "accepted_through_tokens", `Int accepted_through_tokens
       ; "rejected_from_tokens", `Int rejected_from_tokens
       ]
-  | Serialized_request_body_too_large { actual_bytes; limit_bytes } ->
-    `Assoc
-      [ "kind", `String "serialized_request_body_too_large"
-      ; "actual_bytes", `Int actual_bytes
-      ; "limit_bytes", `Int limit_bytes
-      ]
 ;;
 
 let wire_admission_error_evidence_json = function
@@ -884,12 +872,6 @@ let wire_admission_error_evidence_json = function
   | Unsupported_target_model { model_id } ->
     `Assoc [ "kind", `String "unsupported_target_model"; "model_id", `String model_id ]
   | Target_request_rejected -> `Assoc [ "kind", `String "target_request_rejected" ]
-  | Request_body_too_large { actual_bytes; limit_bytes } ->
-    `Assoc
-      [ "kind", `String "request_body_too_large"
-      ; "actual_bytes", `Int actual_bytes
-      ; "limit_bytes", `Int limit_bytes
-      ]
   | Request_serialization_rejected ->
     `Assoc [ "kind", `String "request_serialization_rejected" ]
 ;;
@@ -940,8 +922,6 @@ let wire_admission_error_reason = function
   | Unsupported_target_model { model_id } ->
     Printf.sprintf "unsupported_target_model(%s)" model_id
   | Target_request_rejected -> "target_request_rejected"
-  | Request_body_too_large { actual_bytes; limit_bytes } ->
-    Printf.sprintf "request_body_too_large(%d/%d)" actual_bytes limit_bytes
   | Request_serialization_rejected -> "request_serialization_rejected"
 ;;
 

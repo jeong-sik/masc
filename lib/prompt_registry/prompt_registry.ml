@@ -36,14 +36,6 @@
 
 module Types = Prompt_registry_types
 
-type prompt_entry = Types.prompt_entry = {
-  id: string;                     (** Unique identifier *)
-  template: string;               (** Prompt template with {{var}} placeholders *)
-  version: string;                (** Semantic version string *)
-  variables: string list;         (** Extracted variable names from template *)
-  created_at: float;              (** Unix timestamp of creation *)
-}
-
 type prompt_meta = Types.prompt_meta = {
   description: string;
   category: string;
@@ -112,7 +104,6 @@ let extract_variables template =
 (** {1 In-memory Registry Storage} *)
 
 let store = Prompt_registry_store.default ()
-let registry = store.registry
 let version_index = store.version_index
 let override_tbl = store.override_tbl
 let meta_tbl = store.meta_tbl
@@ -602,7 +593,6 @@ let clear () : unit =
   with_override_mutation_lock (fun () ->
    with_mutex (fun () ->
     let persisted_dir = !prompts_dir in
-    Hashtbl.clear registry;
     Hashtbl.clear version_index;
     Hashtbl.clear override_tbl;
     Hashtbl.clear quarantine_tbl;

@@ -176,7 +176,6 @@ streaming = true
 is-default = true
 max-concurrent = 1
 # This fixture explicitly opts into a one-MiB request body limit.
-max-request-body-bytes = 1048576
 |}
   in
   let path = Filename.temp_file "heartbeat_integ_runtime_" ".toml" in

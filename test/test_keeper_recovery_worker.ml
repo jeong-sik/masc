@@ -393,11 +393,8 @@ let test_one_worker_reads_pages_and_submits () =
            current
            ~on_observation:(fun value -> observed := value :: !observed)
            ~on_request_wire_observation:
-             (fun
-               ~runtime_id ~max_request_body_bytes ~body_bytes ~serialized ->
-             wire
-             := (runtime_id, max_request_body_bytes, body_bytes, Option.is_some serialized)
-                :: !wire)
+             (fun ~runtime_id ~body_bytes ~serialized ->
+             wire := (runtime_id, body_bytes, Option.is_some serialized) :: !wire)
            ()
        in
        let submitted =
@@ -425,9 +422,8 @@ let test_one_worker_reads_pages_and_submits () =
          (List.length !requests)
          (List.length !wire);
        List.iter
-         (fun (id, cap, bytes, serialized) ->
+         (fun (id, bytes, serialized) ->
             check string "actual configured runtime" "fixture.sample" id;
-            check (option int) "no invented cap" None cap;
             check bool "exact serialized wire observed" true (bytes > 0 && serialized))
          !wire;
        List.iter

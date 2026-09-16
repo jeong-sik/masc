@@ -22,13 +22,18 @@ template_variables: [working_context, current_memory, conversation_history, coun
 
 ## 유지·삭제·교정
 
-- 정확한 현재 기억에 인쇄된 짧은 ID `m1`, `m2`, …를 그대로 복사하세요.
-  **모든 기존 ID를 `retained_memory_ids`와 `dropped` 중 정확히 한 곳에 한 번씩**
-  넣어야 합니다. 누락, 중복, 양쪽 포함은 답 전체가 거부되는 오류입니다.
-  대화 속 옛 digest ID를 사용하거나 새 ID를 만들지 마세요.
+- **바뀌는 것만 적습니다.** 삭제할 기억과 새로 쓸 claim만 출력하세요.
+  적지 않은 기억은 그대로 남습니다. 남길 목록을 따로 나열하지 않습니다.
+- 삭제할 기억은 현재 기억에 인쇄된 짧은 ID `m1`, `m2`, …를 그대로 복사하고
+  한 번씩만 적습니다. 대화 속 옛 digest ID를 쓰거나 새 ID를 만들지 마세요.
 - 지금도 참이고, 중복되지 않으며, 앞으로 기억할 가치가 있는 사실은 유지합니다.
   낡은 상태, 일시적 관측, 중복, 쉽게 유도하거나 권위 있는 원천에서 복구할 수
   있는 세부는 삭제하고 이유를 한 문장으로 적습니다.
+- 반복되는 개념이나 주제에 대한 정보면, 그 주제를 중심으로 묶어서 하나로
+  다시 쓰세요. 같은 대상을 다룬 기억이 여러 개 모이면 중심이 되는 말을 정하고,
+  그 대상에 대해 무엇이 중요한지를 정리합니다. 묶어서 쓴 기억을 `new_claims`에
+  넣고, 재료가 된 기억의 ID는 모두 `dropped`에 넣습니다. 묶을 거리가 없으면
+  묶지 않습니다.
 - 교정할 때는 옛 ID를 `dropped`에 넣고 새 claim의 `supersedes`에 같은 ID를
   적습니다. `STALE`·`RESOLVED` 같은 표식을 붙여 낡은 사실을 남기지 마세요.
   복합 사실 중 일부만 여전히 유용하면 그 부분만 새 claim으로 남깁니다.
@@ -116,7 +121,6 @@ template_variables: [working_context, current_memory, conversation_history, coun
 
 {
   "working_contexts": [],
-  "retained_memory_ids": ["m1"],
   "new_claims": [
     {
       "claim": "근거 있는 지식을 담은 한 문장.",
@@ -137,7 +141,8 @@ template_variables: [working_context, current_memory, conversation_history, coun
 위 값은 필드 설명입니다. 근거 없는 Board ID를 만들지 말고, 해당하지 않으면
 문자열 "null"이 아닌 JSON `null`을 씁니다. `board_post_id`가 null이면
 `board_comment_id`도 null입니다. `supersedes`의 ID는 반드시 `dropped`에도
-있어야 합니다. 유지·추가·삭제할 항목이 없으면 해당 배열을 비워 두세요.
+있어야 합니다. 추가·삭제할 항목이 없으면 해당 배열을 비워 두세요 — 그 답은
+"이번에 바꿀 것이 없다"는 뜻이며, 기존 기억은 전부 그대로 남습니다.
 
 ## 진행 중인 맥락과 다음 행동 제안
 

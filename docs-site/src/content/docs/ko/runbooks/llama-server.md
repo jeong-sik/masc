@@ -63,11 +63,10 @@ max-context = 16384
 tools-support = true
 
 [llama_server.qwen-2-5-coder-32b]
-max-request-body-bytes = 1048576
 ```
 
-`max-request-body-bytes` 를 빼먹으면 **Keeper 턴이 그 런타임에 안 갑니다.** 부팅
-로그가 이름을 찍어 주긴 하지만, 조용히 안 도는 것처럼 보이는 흔한 자리입니다.
+바인딩 테이블은 비워 둬도 됩니다. 요청이 서버에 너무 큰지는 서버가 판정합니다.
+masc 는 구성한 요청을 그대로 보내고, 거절되면 오래된 대화부터 비우고 다시 보냅니다.
 
 ## 역할에 연결
 

@@ -126,10 +126,6 @@ module KeeperVision : sig
   (** Maximum image dimension (longest edge) before downscaling, clamped to [256, 8192].
       Default: 1568. *)
   val max_dimension : unit -> int
-
-  (** The floor of {!max_dimension}; also the smallest edge the vision walk
-      will shrink an image to when fitting it under a candidate's cap. *)
-  val max_dimension_floor : int
 end
 
 (** {1 Keeper lane gate} *)
@@ -140,6 +136,15 @@ module KeeperLaneGate : sig
       60.0. On expiry submit fails with [Submit_lane_unavailable] instead of
       hanging behind a stuck durable write (#25398). *)
   val admission_wait_budget_sec : unit -> float
+end
+
+(** {1 Keeper turn admission bounds} *)
+
+module KeeperAdmissionBounds : sig
+  (** Maximum durable queue selections admitted into one turn, clamped to
+      [1, 256]. Default 32. Selections past this bound stay pending for a later
+      turn (#29365). *)
+  val max_events : unit -> int
 end
 
 (** {1 Keeper generated media} *)

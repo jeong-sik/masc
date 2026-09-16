@@ -1,0 +1,5 @@
+# task-1540 evidence 01 - dune build @check
+HEAD=e9889bab657eb13447e4d2ca055dedb9256df2bd
+UTC=2026-09-16T14:52:30Z
+cmd: dune build @check
+check_exit=0

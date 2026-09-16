@@ -681,6 +681,46 @@ let test_roadmap_fixture_string_cost_decoding () =
   | Error err -> fail ("roadmap fixture decode failed: " ^ err)
 ;;
 
+let test_usage_non_object_guard () =
+  (* Regression (task-1540): a malformed "usage" value (string) must not
+     kill the whole row with Type_error; decode degrades to the flat
+     top-level fallback instead. *)
+  let json_str =
+    {|{
+      "case_id": "success",
+      "run_index": 2,
+      "usage": "n/a",
+      "input_tokens": 77,
+      "output_tokens": 12,
+      "cost_usd": 0.02,
+      "execution_mode": "matrix"
+    }|}
+  in
+  let json = Yojson.Safe.from_string json_str in
+  (match run_observation_of_json json with
+   | Ok obs ->
+     check string "case_id" "success" obs.case_id;
+     (match obs.usage with
+      | Usage_reported r ->
+        check int "input tokens" 77 r.input_tokens;
+        check int "output tokens" 12 r.output_tokens;
+        (match r.cost_usd with
+         | Some c -> check (float 1e-6) "cost" 0.02 c
+         | None -> fail "cost missing")
+      | Usage_missing reason ->
+        fail ("expected flat fallback usage, got missing: " ^ reason))
+   | Error err -> fail ("non-object usage row decode failed: " ^ err));
+  (* A row with no usage object and no top-level tokens still decodes as
+     Usage_missing instead of raising. *)
+  let json2 = Yojson.Safe.from_string {|{"case_id": "success", "run_index": 3, "usage": []}|} in
+  match run_observation_of_json json2 with
+  | Ok obs ->
+    (match obs.usage with
+     | Usage_missing _ -> ()
+     | Usage_reported _ -> fail "expected missing usage for token-less row")
+  | Error err -> fail ("usage-less row decode failed: " ^ err)
+;;
+
 let test_roundtrip_observation () =
   let obs =
     make_dummy_observation
@@ -727,6 +767,7 @@ let () =
         ; test_case "type error caught gracefully" `Quick test_type_error_caught_gracefully
         ; test_case "harness output decoding" `Quick test_harness_output_decoding
         ; test_case "roadmap fixture string cost decoding" `Quick test_roadmap_fixture_string_cost_decoding
+        ; test_case "usage non-object guard" `Quick test_usage_non_object_guard
         ; test_case "observation roundtrip" `Quick test_roundtrip_observation
         ]
       )

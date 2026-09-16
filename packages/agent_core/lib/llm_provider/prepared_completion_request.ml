@@ -95,7 +95,6 @@ let admit_serialized_body ~stream prepared =
       ~messages:request.messages
       ~tools:request.tools
   in
-  let* body = Complete_common.admit_final_serialized_body ~config body in
   let evidence =
     Request_wire_observer.observation
       ~capture_id:request.capture_id

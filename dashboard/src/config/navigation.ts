@@ -56,7 +56,6 @@ type SurfaceSectionId =
   | 'runtime'
   | 'fleet-health'   // Phase 1: absorbs telemetry + fleet + tool-quality + Gate monitoring
   | 'transport-health' // Hidden support route for transport diagnostics; linked from Runtime.
-  | 'feature-health' // Hidden support route for feature flag diagnostics; linked from Runtime.
   | 'journey' // Hidden execution-flow drill-down.
   | 'lane-addons'
   | 'lanes' // Lane · Queue — 실행 타임라인 + 대기 큐 (keeper-v2 lanes.jsx).
@@ -382,13 +381,6 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: 'Transport Health',
       description: 'Transport diagnostics.',
       params: { section: 'transport-health' },
-      hidden: true,
-    },
-    {
-      id: 'feature-health',
-      label: 'Feature Flags',
-      description: 'Feature diagnostics.',
-      params: { section: 'feature-health' },
       hidden: true,
     },
     {

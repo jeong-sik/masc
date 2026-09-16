@@ -8,7 +8,6 @@ val freshness_slo_s : float
 val config_cache_ttl_s : float
 val live_cache_ttl_s : float
 val realtime_cache_ttl_s : float
-val feature_health_cache_ttl_s : float
 val dashboard_projection_cache_ttl_s : float
 
 val invalidate_board_projections : unit -> unit

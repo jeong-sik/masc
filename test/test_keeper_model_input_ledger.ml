@@ -406,7 +406,10 @@ let test_table_move_front_moves_the_pairs_ledger () =
     Ledger.Table.For_testing.reset ()
 ;;
 
+(* The pair table sits behind an Eio mutex, so the table tests need a
+   running scheduler. *)
 let () =
+  Eio_main.run @@ fun _ ->
   run
     "keeper_model_input_ledger"
     [ ( "difference"

@@ -218,7 +218,6 @@ let route_of_api_error ~err (api : Llm_provider.Retry.api_error) =
   | Llm_provider.Retry.InvalidRequest
       { reason =
           ( Llm_provider.Retry.Json_parse_error
-          | Llm_provider.Retry.Request_body_too_large _
           | Llm_provider.Retry.Request_body_refused_by_provider _
           | Llm_provider.Retry.Unknown_invalid_request )
       ; _

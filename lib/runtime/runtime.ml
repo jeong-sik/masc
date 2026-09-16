@@ -981,80 +981,6 @@ let validate_runtime_context_marks (runtimes : t list) : (unit, load_failure) re
   | Some failure -> Error failure
 ;;
 
-type request_body_cap_error = Non_positive_request_body_cap of
-  { runtime_id : string
-  }
-
-let request_body_cap_error_to_string = function
-  | Non_positive_request_body_cap { runtime_id } ->
-    Printf.sprintf
-      "Keeper runtime %S has a non-positive explicit serialized-request ceiling"
-      runtime_id
-;;
-
-(* The capability is checked at configuration admission and again immediately
-   before each concrete provider call. The latter is required because feature
-   owners may transform a materialized provider config after runtime.toml has
-   been accepted. *)
-let validate_request_body_cap ~runtime_id
-    (provider_config : Llm_provider.Provider_config.t) =
-  match provider_config.max_request_body_bytes with
-  | None -> Ok None
-  | Some cap when cap > 0 -> Ok (Some cap)
-  | Some _ ->
-    Error (Non_positive_request_body_cap { runtime_id })
-;;
-
-(* Explicit caller caps are validated for every materialized HTTP runtime.
-   Absence is dispatchable; it is not a missing provider capability. *)
-type keeper_dispatch_readiness =
-  | Dispatchable
-  | Invalid_request_body_cap of { table_path : string }
-
-(* TEL-OK: pure predicate over an already-materialized runtime; the boot logger
-   and the resolved projection own its observability. *)
-let keeper_dispatch_readiness (runtime : t) : keeper_dispatch_readiness =
-  (* Only Agent_core is judged, because only Agent_core builds the request whose
-     size this bounds. An official-client turn hands its conversation to a
-     spawned vendor client that owns its own context window and refuses an
-     oversized one in a typed terminal. *)
-  match runtime.execution with
-  | Runtime_execution.Agent_core provider_config ->
-    (match validate_request_body_cap ~runtime_id:runtime.id provider_config with
-     | Ok _ -> Dispatchable
-     | Error _ ->
-       Invalid_request_body_cap
-         { table_path =
-             Otoml.string_of_path
-               [ runtime.binding.provider_id; runtime.binding.model_id ]
-         })
-  | Runtime_execution.Codex_app_server _
-  | Runtime_execution.Claude_code _
-  | Runtime_execution.Antigravity_cli _ -> Dispatchable
-;;
-
-(* TEL-OK: pure rendering of the variant above; callers decide where it lands. *)
-let keeper_dispatch_blocker = function
-  | Dispatchable -> None
-  | Invalid_request_body_cap { table_path } ->
-    Some
-      (Printf.sprintf
-         "non-positive [%s].max-request-body-bytes; use a positive value or omit it"
-         table_path)
-;;
-
-(* Every materialized runtime a keeper could not be assigned to, in declaration
-   order, paired with the reason. Empty is the healthy state.
-   TEL-OK: pure filter; the boot path logs one line per entry it returns. *)
-let keeper_dispatch_blocked (runtimes : t list) : (t * string) list =
-  List.filter_map
-    (fun runtime ->
-      Option.map
-        (fun reason -> runtime, reason)
-        (keeper_dispatch_blocker (keeper_dispatch_readiness runtime)))
-    runtimes
-;;
-
 (* [runtime.exact_output_lanes.verifier_exact] (RFC-0361 D7(a)) is the single
    selector for completion-authority judgement calls: admitted slots in frozen
    declaration order, fail over in that order. *)
@@ -1130,96 +1056,6 @@ let verifier_exact_slot_references
        ; domain = Lane_then_runtime
        })
     (verifier_exact_slot_ids_of_lane_decls decls)
-;;
-
-(* Keeper provider attempts originate at the configured default, an explicit
-   keeper assignment, an explicit media-failover runtime, the verifier_exact
-   exact-output lane's slots, or cross verifier. A lane is
-   reachable only when its id shadows one of the configured routes; a merely
-   declared lane is dormant until a routed root names it.
-   Expand each lane-capable route with the same lane-over-runtime precedence as
-   [resolve_assignment], keep media_failover runtime-only, then preserve first
-   occurrence order. Every attempt is checked again after its final provider
-   config transform in Keeper_turn_driver. No provider/model names live in
-   this policy. *)
-(* TEL-OK: pure reachability projection; callers own config-load diagnostics. *)
-let keeper_dispatch_runtime_ids
-    ~(default_runtime_id : string)
-    ~(assignments : (string * string) list)
-    ~(verifier_exact_slot_ids : string list)
-    ~(media_failover : string list)
-    ~(lanes : Runtime_lane.t list)
-  =
-  let expand id =
-    match find_declared_lane lanes id with
-    | Some lane -> Runtime_lane.ordered_candidates lane
-    | None -> [ id ]
-  in
-  let routed_roots =
-    default_runtime_id :: List.map snd assignments
-    |> List.concat_map expand
-  in
-  let rec dedupe seen acc = function
-    | [] -> List.rev acc
-    | id :: rest when List.mem id seen -> dedupe seen acc rest
-    | id :: rest -> dedupe (id :: seen) (id :: acc) rest
-  in
-  (* These special routes reach providers outside the ordinary keeper default
-     and assignment dispatch, so startup must admit every configured lane
-     candidate's request cap here as well. *)
-  dedupe
-    []
-    []
-    ( routed_roots
-      @ media_failover
-      @ List.concat_map expand verifier_exact_slot_ids )
-;;
-
-(* TEL-OK: pure fail-closed validation; the load boundary surfaces its error. *)
-let validate_keeper_dispatch_request_caps
-    ~(config_path : string)
-    ~(verifier_exact_slot_ids : string list)
-    ( runtimes
-    , (default_runtime : t)
-    , assignments
-    , media_failover
-    , lanes
-    , _lsp_servers )
-  =
-  let ids =
-    keeper_dispatch_runtime_ids
-      ~default_runtime_id:default_runtime.id
-      ~assignments
-      ~verifier_exact_slot_ids
-      ~media_failover
-      ~lanes
-  in
-  let runtime_by_id id =
-    List.find_opt (fun (runtime : t) -> String.equal runtime.id id) runtimes
-  in
-  (* Same predicate {!keeper_dispatch_readiness} reports to operators. Only
-     reachable ids are judged here — a declared-but-unassigned runtime must not
-     refuse boot — but the two must never disagree about what "blocked" means,
-     which is why the decision has one definition and this is a projection of
-     it. The official-client arms are Dispatchable there: requiring a declared
-     max-prompt-bytes for them added a second authority over the same window,
-     measured in wire bytes rather than tokens, and made its absence a boot
-     refusal, so a deployment could not choose to let the provider decide. *)
-  let invalid_ceiling runtime =
-    match keeper_dispatch_readiness runtime with
-    | Dispatchable -> None
-    | Invalid_request_body_cap { table_path } -> Some (runtime, table_path)
-  in
-  match List.find_map (fun id -> Option.bind (runtime_by_id id) invalid_ceiling) ids with
-  | None -> Ok ()
-  | Some (runtime, table_path) ->
-    Error
-      (Printf.sprintf
-         "%s: Keeper-dispatch runtime %S has a non-positive \
-          [%s].max-request-body-bytes; use a positive value or omit it"
-         config_path
-         runtime.id
-         table_path)
 ;;
 
 (* Every runtime binding's provider/model pair must be known to the AGENT_CORE
@@ -1683,21 +1519,12 @@ let publish_exact_output_registry ?required_lane_ids ~lanes resolver_snapshot =
 let init_default_strict_report ~config_path =
   match load_list_internal ~config_path ~validate_max_context:true with
   | Error failure -> Error (Runtime_config_error (to_diagnostic_text ~config_path failure))
-  | Ok (((runtimes, _, _, _, _, _) as loaded), exact_output_lane_decls) ->
+  | Ok (((runtimes, _, _, _, _, _) as loaded), _exact_output_lane_decls) ->
     (match missing_runtime_model_capabilities ~config_path runtimes with
      | Some report -> Error (Missing_catalog_models report)
      | None ->
-       (match
-          validate_keeper_dispatch_request_caps
-            ~config_path
-            ~verifier_exact_slot_ids:
-              (verifier_exact_slot_ids_of_lane_decls exact_output_lane_decls)
-            loaded
-        with
-        | Error msg -> Error (Runtime_config_error msg)
-        | Ok () ->
-          set_loaded ~config_path loaded;
-          Ok ()))
+       set_loaded ~config_path loaded;
+       Ok ())
 
 let init_default_strict ~config_path =
   init_default_strict_report ~config_path
@@ -1719,10 +1546,6 @@ let prepare_degraded_loaded ~config_path
     validate_runtime_max_context active_runtimes
     |> Result.map_error (to_diagnostic_text ~config_path)
   in
-
-  let* () = validate_keeper_dispatch_request_caps ~config_path
-      ~verifier_exact_slot_ids:(verifier_exact_slot_ids_of_lane_decls exact_output_lane_decls)
-      loaded in
   Ok (loaded, exact_output_lane_decls, startup_degradation)
 ;;
 
@@ -2114,25 +1937,6 @@ let max_prompt_bytes_of_runtime_id (id : string) : int option =
   match get_runtime_by_id id with
   | Some rt -> rt.model.max_prompt_bytes
   | None -> None
-;;
-
-(* Two declarations bound a model input, and which one applies depends on the
-   path: [Keeper_antigravity_runtime] projects against the model's
-   [max-prompt-bytes], while the generic driver takes the binding's
-   [max-request-body-bytes] through [validate_request_body_cap]. A caller that
-   has to fit inside whatever this runtime will enforce has to satisfy both,
-   so the smaller declared value is the answer. They count different things —
-   prompt bytes against whole-request bytes — which is why this is the ceiling
-   for something known to be a part of the input, not a budget for the input
-   itself. *)
-let declared_input_byte_ceiling_of_runtime_id (id : string) : int option =
-  match get_runtime_by_id id with
-  | None -> None
-  | Some rt ->
-    (match rt.model.max_prompt_bytes, rt.binding.max_request_body_bytes with
-     | None, None -> None
-     | Some only, None | None, Some only -> Some only
-     | Some prompt_bytes, Some body_bytes -> Some (min prompt_bytes body_bytes))
 ;;
 
 let context_marks_of_runtime_id (id : string) : Runtime_schema.context_marks option =
@@ -2814,8 +2618,6 @@ module For_testing = struct
       File_lock_eio.with_durable_lock_observed runtime_config_path action
     |> Result.map (fun receipt -> receipt.value)
   ;;
-  (* TEL-OK: test-only alias of the pure reachability projection above. *)
-  let keeper_dispatch_runtime_ids = keeper_dispatch_runtime_ids
   let save_config_text_with_sync_parent
       ?runtime_config_path
       ~sync_parent

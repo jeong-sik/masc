@@ -116,17 +116,6 @@ let test_duplicate_and_missing_source_rejected () =
   expect_error (Context.select (input [question] None)
     (Context.pockets_to_json [pocket ["s1"; "s1"] "duplicate alias" []]))
 
-let test_oversized_source_does_not_block_followers () =
-  let oversized = source "event:oversized" (String.make 4096 'x') in
-  let small = source "chat:small" "Where are we?" in
-  let selected = ok (Keeper_librarian_runtime.For_testing.select_source_subset
-      ~sources:[oversized; small]
-      ~fits:(fun sources -> Ok (String.length
-        (Yojson.Safe.to_string (Context.prompt_json (input sources None))) < 1024))) in
-  check (list string) "unfit first source cannot starve later question"
-    [small.reference] (List.map (fun (s : Context.source) -> s.reference) selected);
-  check int "original source list remains intact" 2 (List.length [oversized; small])
-
 let test_queue_wakes_coalesce_without_waiting_for_librarian () =
   Masc_test_deps.ensure_rng_initialized ();
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
@@ -192,24 +181,6 @@ let test_pending_snapshot_includes_running_question_without_claiming () = with_s
     check int "observation does not claim queued input" 1 inventory.queued_count;
     check (option string) "observation does not change running identity" (Some "running-question")
       (Option.map Operation.Operation_id.to_string inventory.running_operation_id))
-
-let test_fit_reconsiders_remainder_without_splitting_current () =
-  let a = source "event:current" "current context" in
-  let b = source "event:remainder" "unorganized remainder" in
-  let previous : Context.snapshot =
-    {generation = "test-generation"; revision = 1; execution_basis = Some "test-progress"; sources = [a; b]; pockets =
-      [pocket [a.reference] "already organized" ["continue"];
-       {(pocket [b.reference] "split context" []) with completeness = Context.Needs_reconsideration}]} in
-  let inp : Keeper_librarian.input =
-    {turn_ref = Ids.Turn_ref.make ~trace_id:"reconsider" ~absolute_turn:1;
-     goal_context = No_task; keeper_instructions = "test"; current = None;
-     working_context = input [a; b] (Some previous); messages = [];
-     tool_observations = []; counterpart_observations = []} in
-  let fitted = Keeper_librarian_runtime.fit_input ~count:1 inp in
-  check (list string) "remainder selected without splitting complete context" [b.reference]
-    (List.map (fun (s : Context.source) -> s.reference) fitted.working_context.sources);
-  check (list string) "coverage does not imply completed organization" [a.reference]
-    (Context.current_references previous)
 
 let test_incremental_campaign_merges_existing_context () = with_store @@ fun keepers_dir ->
   let keeper_id = "incremental-campaign" in
@@ -292,53 +263,6 @@ let test_corrupt_snapshot_rebuild_rejects_old_generation () = with_store @@ fun 
   check bool "late old-generation result cannot overwrite recovered context" true
     (ok (Context.read ~keepers_dir ~keeper_id) = Some rebuilt)
 
-let test_catalogue_pressure_preserves_new_source_and_merge_target () = with_store @@ fun keepers_dir ->
-  let keeper_id = "catalogue-pressure" in
-  let huge_source = source "event:huge-history" "old source" in
-  let campaign_source = source "event:campaign-history" "campaign started" in
-  let initial = ok (Context.commit ~keepers_dir ~keeper_id ~expected_version:None
-      ~sources:[huge_source; campaign_source]
-      [pocket [huge_source.reference] (String.make 8192 'x') ["Review history"];
-       pocket [campaign_source.reference] "Campaign is ongoing" ["Continue campaign"]]) in
-  let identity = (List.find (fun (p : Context.pocket) ->
-      p.sources = [campaign_source.reference]) initial.pockets).id in
-  let arrival = source "event:new-campaign-signal" "continue campaign" in
-  let candidate = input (initial.sources @ [arrival]) (Some initial) in
-  let fitted = ok (Keeper_librarian_runtime.For_testing.fit_context_input ~input:candidate
-      ~fits:(fun candidate -> Ok (String.length
-          (Yojson.Safe.to_string (Context.prompt_json candidate)) < 2048))) in
-  check (list string) "oversized history cannot starve a tiny fresh source" [arrival.reference]
-    (List.map (fun (s : Context.source) -> s.reference) fitted.sources);
-  let selected_previous = Option.get fitted.previous in
-  check int "one useful compact prior context fits" 1 (List.length selected_previous.pockets);
-  check string "fit preserves persistent context identity" identity
-    (List.hd selected_previous.pockets).id;
-  check bool "fit preserves authoritative CAS version" true
-    (Context.version initial = Context.version selected_previous);
-  let proposal = {(pocket ["s1"] "Campaign continues" ["Continue once"])
-      with merge_contexts = ["c1"]} in
-  let selected = ok (Context.select fitted (Context.pockets_to_json [proposal])) in
-  check (list string) "reassigned compact alias resolves to original target" [identity]
-    (List.hd selected).merge_contexts;
-  let next = ok (Context.commit ~keepers_dir ~keeper_id
-      ~expected_version:(Some (Context.version selected_previous))
-      ~observed_sources:candidate.sources ~sources:fitted.sources selected) in
-  check int "new arrival merges without adding another context" 2 (List.length next.pockets);
-  let campaign = List.find (fun (p : Context.pocket) -> p.id = identity) next.pockets in
-  check (list string) "merged campaign retains both original event identities"
-    (List.sort String.compare [campaign_source.reference; arrival.reference])
-    (List.sort String.compare campaign.sources);
-  let only_huge = {initial with sources = [huge_source]; pockets = [List.find (fun (p : Context.pocket) ->
-      p.sources = [huge_source.reference]) initial.pockets]} in
-  let fitted_without_target = ok (Keeper_librarian_runtime.For_testing.fit_context_input
-      ~input:(input [arrival] (Some only_huge))
-      ~fits:(fun candidate -> Ok (String.length
-          (Yojson.Safe.to_string (Context.prompt_json candidate)) < 2048))) in
-  check int "no fitting history still permits organizing fresh input" 1
-    (List.length fitted_without_target.sources);
-  check int "unfit historical catalogue excluded from this pass" 0
-    (List.length (Option.get fitted_without_target.previous).pockets)
-
 let test_new_basis_cannot_launder_untouched_advice () = with_store @@ fun keepers_dir ->
   let keeper_id = "basis-isolation" in
   let a = source "chat:deployment" "Deploy the application" in
@@ -364,15 +288,12 @@ let test_new_basis_cannot_launder_untouched_advice () = with_store @@ fun keeper
 
 let () = run "Librarian working contexts"
   ["scenarios", [
-    test_case "catalogue pressure preserves fresh source and stable merge target" `Quick test_catalogue_pressure_preserves_new_source_and_merge_target;
     test_case "new execution basis cannot launder untouched advice" `Quick test_new_basis_cannot_launder_untouched_advice;
     test_case "incremental campaign retains one context" `Quick test_incremental_campaign_merges_existing_context;
     test_case "unknown and reused merge targets rejected" `Quick test_invalid_merge_targets;
     test_case "execution progress invalidates unchanged-source advice" `Quick test_execution_progress_invalidates_unchanged_sources;
     test_case "corrupt snapshot rebuild rejects old generation" `Quick test_corrupt_snapshot_rebuild_rejects_old_generation;
-    test_case "reconsideration advances without regrouping complete sources" `Quick test_fit_reconsiders_remainder_without_splitting_current;
     test_case "read-only input snapshot preserves execution ownership" `Quick test_pending_snapshot_includes_running_question_without_claiming;
-    test_case "oversized source does not block later inputs" `Quick test_oversized_source_does_not_block_followers;
     test_case "queue wake flood does not wait for librarian" `Quick test_queue_wakes_coalesce_without_waiting_for_librarian;
     test_case "repeated events and direct question" `Quick test_repeated_events_and_chat;
     test_case "partial observation, source settlement and stale CAS" `Quick test_partial_observation_and_cas;

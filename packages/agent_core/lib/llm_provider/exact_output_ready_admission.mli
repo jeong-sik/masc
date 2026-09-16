@@ -92,10 +92,6 @@ type wire_admission_error =
   | Token_measurement_failed
   | Unsupported_target_model of { model_id : string }
   | Target_request_rejected
-  | Request_body_too_large of
-      { actual_bytes : int
-      ; limit_bytes : int
-      }
   | Request_serialization_rejected
 
 type admission_error =
@@ -105,11 +101,7 @@ type admission_error =
   | Invalid_schema
   | Wire_admission_rejected of wire_admission_error
 
-type request_body_projection = private
-  { actual_bytes : int
-  ; limit_bytes : int option
-  ; within_limit : bool
-  }
+type request_body_projection = private { actual_bytes : int }
 
 type 'callback_error flow_request_error =
   | Flow_request_admission_failed of

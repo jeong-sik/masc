@@ -354,6 +354,28 @@ let slack_trigger_policy =
     ~description:trigger_policy_description
     ()
 
+(* ── schedule retention surface ──────────────────────────────── *)
+
+(* How long a finished schedule stays in the ledger after the wake that ended
+   it. Every mutation rewrites the ledger whole, so this is what a tick's write
+   costs: a live ledger held 1,250 finished schedules against 22 live ones,
+   4.3 MB (2026-09-16). Keeping less writes less and looks back less far, and
+   which side matters is the operator's call, so the pass reads this rather
+   than a number the binary carried. *)
+let schedule_terminal_retention_days =
+  register_int
+    ~key:"schedule.terminal_retention_days"
+    ~default:(fun () -> Schedule_store.terminal_schedule_retention_days)
+    ~min:1 ~max:365
+    ~meta:{ description =
+              "끝난 스케줄을 원장에 며칠 더 두는지. 그동안 아무 것도 더 \
+               쓰이지 않으면 그 스케줄과 깨움 기록이 사라지고, 남긴 메모는 \
+               그대로 있는다. 한 번도 실행되지 않은 스케줄은 여기서 지워지지 \
+               않는다";
+            value_type = "int";
+            min_value = Some (`Int 1); max_value = Some (`Int 365); choices = [] }
+    ()
+
 (* ── surface catalog ─────────────────────────────────────────── *)
 
 type surface = {
@@ -438,6 +460,13 @@ let surfaces =
       param_keys = [
         "discord.trigger_policy";
         "slack.trigger_policy";
+      ];
+    };
+    {
+      id = "schedule_retention";
+      description = "How long a finished schedule stays in the ledger";
+      param_keys = [
+        "schedule.terminal_retention_days";
       ];
     };
     {

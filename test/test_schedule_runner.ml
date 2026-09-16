@@ -60,8 +60,13 @@ let create_ok
   | Error err -> fail (service_error_to_string err)
 ;;
 
+(* These cases are about what a tick emits and dispatches, not about how long
+   a finished schedule is kept, so they pass the library's own window. *)
 let tick_ok ?consumer ?clock config ~now =
-  match tick ?consumer ?clock config ~now with
+  match
+    tick ?consumer ?clock config ~now
+      ~retention_days:Schedule_store.terminal_schedule_retention_days
+  with
   | Ok result -> result
   | Error err -> fail (runner_error_to_string err)
 ;;

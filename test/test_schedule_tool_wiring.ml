@@ -537,7 +537,8 @@ let test_get_recurring_schedule_after_accept_advance () =
       ~recurrence:(Schedule_domain.Interval { interval_sec = 60 })
       ()
   in
-  (match Schedule_store.refresh_due config ~now:200.0 with
+  (match Schedule_store.refresh_due config ~now:200.0
+    ~retention_days:Schedule_store.terminal_schedule_retention_days with
    | Ok _ -> ()
    | Error err -> fail (Schedule_store.store_error_to_string err));
   (match Schedule_store.start_due_candidate config ~now:201.0 ~schedule_id with
@@ -837,7 +838,8 @@ let test_due_signal_and_dashboard_projection () =
       ~payload:(keeper_wake_payload "signal me") ()
   in
   let tick =
-    match Schedule_runner.tick config ~now:201.0 with
+    match Schedule_runner.tick config ~now:201.0
+      ~retention_days:Schedule_store.terminal_schedule_retention_days with
     | Ok result -> result
     | Error err -> fail (Schedule_runner.runner_error_to_string err)
   in
@@ -1151,7 +1153,8 @@ let test_cancel_refusal_says_the_state_and_the_last_wake () =
     | Ok value -> value
     | Error err -> fail (label ^ ": " ^ Schedule_store.store_error_to_string err)
   in
-  ignore (store_ok "refresh" (Schedule_store.refresh_due config ~now:200.0));
+  ignore (store_ok "refresh" (Schedule_store.refresh_due config ~now:200.0
+    ~retention_days:Schedule_store.terminal_schedule_retention_days));
   ignore (store_ok "start" (Schedule_store.start_due_candidate config ~now:201.0 ~schedule_id));
   ignore (store_ok "accept" (Schedule_store.accept_running config ~now:202.0 ~schedule_id ()));
   let refused =
@@ -1549,7 +1552,8 @@ let test_status_active_lists_every_status_that_is_not_terminal () =
   create "sched-live" ~due_at:future_due_at;
   create "sched-due" ~due_at:200.0;
   create "sched-gone" ~due_at:future_due_at;
-  (match Schedule_store.refresh_due config ~now:201.0 with
+  (match Schedule_store.refresh_due config ~now:201.0
+    ~retention_days:Schedule_store.terminal_schedule_retention_days with
    | Ok _ -> ()
    | Error err -> fail (Schedule_store.store_error_to_string err));
   (match Schedule_service.cancel config ~schedule_id:"sched-gone" with

@@ -24,12 +24,10 @@ type provider_progress_sample =
 type try_provider_ctx =
   { runtime_id : string
   ; error_runtime_id : string
-  ; max_request_body_bytes : int option
   ; context_marks : Runtime_schema.context_marks option
         (** The marks the carried range is judged against after each
             response (RFC keeper-context-window-in-tokens §10.5), as the
-            binding declares them; [None] leaves eviction to a refusal.
-            [max_request_body_bytes] judges the serialized request only. *)
+            binding declares them; [None] leaves eviction to a refusal. *)
   ; carried_front_seed : unit -> Keeper_carried_front.seed option
         (** Where the carried range starts when no ledger holds this
             (keeper, runtime) pair yet: the range the newest completed turn
@@ -93,7 +91,6 @@ type try_provider_ctx =
       (Runtime_observation.runtime_observation -> unit) option
   ; on_request_wire_observation :
       (runtime_id:string ->
-       max_request_body_bytes:int option ->
        body_bytes:int ->
        serialized:Llm_provider.Request_wire_observer.observation option ->
        unit)
@@ -258,6 +255,9 @@ type eviction_retry =
       }
       (** No block structure to walk: the range halved toward the newest
           atom. *)
+  | Demoted_newest_atom
+      (** The newest atom alone was refused: #28845's demotion of the turn's
+          own tool results was armed for one more request. *)
 
 val carried_range_eviction_sequence :
   same_run_retry_authorized:(unit -> bool) ->
@@ -266,6 +266,7 @@ val carried_range_eviction_sequence :
   marks:Runtime_schema.context_marks option ->
   evict:(Keeper_carried_range.step -> unit) ->
   halve:(first_atom:int -> atom_count:int -> retry:int -> unit) ->
+  last_resort:(retry:int -> bool) ->
   on_retry:(retry:int -> eviction_retry -> unit) ->
   attempt:(unit -> ('ok, Agent_core.Error.t) result) ->
   unit ->
@@ -276,9 +277,11 @@ val carried_range_eviction_sequence :
     {!Keeper_carried_range.after_overflow}; [evict] applies the step before
     the next attempt. When the ledger has no block structure to walk, no
     usage counted yet or a single block, [last_request]'s range halves
-    toward the newest atom through [halve], and a single atom ends the
-    sequence with the refusal in hand. Every other error ends it at once, as
-    does a refusal once [same_run_retry_authorized] is [false]. *)
+    toward the newest atom through [halve]; at a single atom [last_resort]
+    may arm one more request with the turn's own tool results demoted
+    (#28845), and answers [false] once used or with nothing to demote, which
+    ends the sequence with the refusal in hand. Every other error ends it at
+    once, as does a refusal once [same_run_retry_authorized] is [false]. *)
 
 val run_try_provider_with_carried_range_eviction :
   ?continuation_checkpoint:Agent_core.Checkpoint.t ->
@@ -318,18 +321,15 @@ type composed =
             composition's encoder counts them; excludes the reservation. *)
   ; history_atom_count : int  (** Atoms in the whole history. *)
   ; origin : Keeper_carried_front.origin
-  ; over_request_cap : bool
-        (** The reservation plus [transmitted_bytes] passes the declared
-            request-body cap: the wire refuses this request. *)
   ; outlived_seed : Keeper_carried_front.seed option
         (** A front the history shrank under, dropped by
             {!Keeper_carried_front.for_history}; the request started over. *)
   }
 (** One request as {!For_testing.compose_carried_model_input} composes it
     (RFC keeper-context-window-in-tokens §10.4): RFC-0363 demotion over the
-    atoms older than [demote_before], then the carried range from [front],
-    and #28845's single last resort when the newest atom alone passes the
-    cap. *)
+    atoms older than [demote_before], or over every atom when the last
+    resort is armed, then the carried range from [front]; the whole history
+    without one. Nothing here measures the request against a limit. *)
 
 module For_testing : sig
   val observe_provider_lease :
@@ -377,19 +377,6 @@ module For_testing : sig
     Runtime_agent.run_result ->
     (Runtime_agent.run_result, Agent_core.Error.t) result
 
-  val observe_request_wire_error :
-    runtime_id:string ->
-    max_request_body_bytes:int option ->
-    on_request_wire_observation:
-      (runtime_id:string ->
-       max_request_body_bytes:int option ->
-       body_bytes:int ->
-       serialized:Llm_provider.Request_wire_observer.observation option ->
-       unit)
-        option ->
-    Agent_core.Error.t ->
-    unit
-
   val message_measurer : unit -> Agent_core.Types.message -> int
   (** Counts the bytes [Yojson.Safe.to_string] would produce, without building
       the string. Each call returns a measurer with its own buffer. *)
@@ -402,12 +389,19 @@ module For_testing : sig
   val compose_carried_model_input :
     measure_message_bytes:(Agent_core.Types.message -> int) ->
     front:Keeper_carried_front.seed option ->
-    reserved_bytes:int ->
-    wire_cap_bytes:int option ->
+    last_resort:bool ->
     base_path:string ->
     demote_before:int ->
     Agent_core.Types.message list ->
     composed
+
+  val last_resort_demotes :
+    measure_message_bytes:(Agent_core.Types.message -> int) ->
+    base_path:string ->
+    Agent_core.Types.message list ->
+    bool
+  (** Whether the current turn's own atoms carry a tool result the store
+      could hold: what arming the last resort would change. *)
 
   val offload_model_input_cpu : (unit -> 'a) -> 'a
 

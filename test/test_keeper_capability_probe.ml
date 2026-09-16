@@ -490,7 +490,6 @@ let test_official_client_probe_refuses_an_agent_core_runtime () =
      max-context = 1024\n\
      \n\
      [local.sample]\n\
-     max-request-body-bytes = 65536\n\
      \n\
      [runtime]\n\
      default = \"local.sample\"\n";
@@ -541,7 +540,6 @@ let test_antigravity_probe_refuses_a_direct_tool_lane () =
      max-context = 1024\n\
      \n\
      [local.sample]\n\
-     max-request-body-bytes = 65536\n\
      \n\
      [runtime]\n\
      default = \"local.sample\"\n";

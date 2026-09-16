@@ -96,7 +96,6 @@ type target_declaration =
   ; provider_ref : string
   ; model_id : string
   ; enable_thinking : bool option
-  ; max_request_body_bytes : int option
   ; connect_timeout_s : float option
   ; body_timeout_s : float option
   }
@@ -233,7 +232,6 @@ let parse_target_declaration ~source toml =
     ; "provider_ref"
     ; "model_id"
     ; "enable_thinking"
-    ; "max_request_body_bytes"
     ; "connect_timeout_s"
     ; "body_timeout_s"
     ]
@@ -259,13 +257,6 @@ let parse_target_declaration ~source toml =
     Binding.target_bool_field ~target_label:id ~field:"enable_thinking" toml
     |> target_result source
   in
-  let* max_request_body_bytes =
-    Binding.target_positive_int_field
-      ~target_label:id
-      ~field:"max_request_body_bytes"
-      toml
-    |> target_result source
-  in
   let* connect_timeout_s =
     Binding.target_float_field ~target_label:id ~field:"connect_timeout_s" toml
     |> target_result source
@@ -287,7 +278,6 @@ let parse_target_declaration ~source toml =
     ; provider_ref
     ; model_id
     ; enable_thinking
-    ; max_request_body_bytes
     ; connect_timeout_s
     ; body_timeout_s
     }
@@ -647,7 +637,6 @@ let canonical_catalog_evidence catalog model_entries target_declarations =
       ; target.provider_ref
       ; target.model_id
       ; option_bool target.enable_thinking
-      ; Binding.option_int target.max_request_body_bytes
       ; option_float target.connect_timeout_s
       ; option_float target.body_timeout_s
       ])
@@ -836,7 +825,6 @@ let load_resolver_snapshot
              ?max_tokens:capabilities.max_output_tokens
              ?max_context:capabilities.max_context_tokens
              ?enable_thinking:target.enable_thinking
-             ?max_request_body_bytes:target.max_request_body_bytes
              ~supports_structured_output_override:capabilities.supports_structured_output
              ~model_capabilities_override:capabilities
              ?connect_timeout_s:target.connect_timeout_s
@@ -857,7 +845,6 @@ let load_resolver_snapshot
               ; provider.request_path
               ; provider.api_key_env
               ; option_bool target.enable_thinking
-              ; Binding.option_int target.max_request_body_bytes
               ; option_float target.connect_timeout_s
               ; option_float target.body_timeout_s
               ; codec

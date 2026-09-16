@@ -132,7 +132,6 @@ let start_server ?on_request_before_reply ~sw ~net ~clock behavior =
 
 let target_fixture_toml
       ~connect_timeout_s
-      ?max_request_body_bytes
       ?enable_thinking
       ~supports_response_format_json
       ~supports_structured_output
@@ -143,12 +142,6 @@ let target_fixture_toml
   let provider_id = Printf.sprintf "masc-exact-fixture-provider-%d" index in
   let model_id = Printf.sprintf "masc-exact-fixture-model-%d" index in
   let timeout = Printf.sprintf "connect_timeout_s = %.6g\n" connect_timeout_s in
-  let request_body_limit =
-    Option.fold
-      ~none:""
-      ~some:(fun value -> Printf.sprintf "max_request_body_bytes = %d\n" value)
-      max_request_body_bytes
-  in
   let enable_thinking_line =
     Option.fold
       ~none:""
@@ -174,7 +167,6 @@ let target_fixture_toml
      provider_ref = %S\n\
      model_id = %S\n\
      %s\
-     %s\
      %s"
     provider_id
     fixture.base_url
@@ -187,13 +179,11 @@ let target_fixture_toml
     provider_id
     model_id
     timeout
-    request_body_limit
     enable_thinking_line
 ;;
 
 let resolver_snapshot
       ?(connect_timeouts = [])
-      ?(request_body_limits = [])
       ?(enable_thinkings = [])
       ?(api_key_env = "")
       ?(api_key_envs = [])
@@ -206,7 +196,6 @@ let resolver_snapshot
     List.assoc_opt id connect_timeouts
     |> Option.value ~default:fixture_post_connect_timeout_seconds
   in
-  let request_body_limit_for id = List.assoc_opt id request_body_limits in
   let enable_thinking_for id = List.assoc_opt id enable_thinkings in
   let api_key_env_for id =
     List.assoc_opt id api_key_envs |> Option.value ~default:api_key_env
@@ -218,7 +207,6 @@ let resolver_snapshot
         |> List.mapi (fun index fixture ->
             target_fixture_toml
               ~connect_timeout_s:(timeout_for fixture.id)
-              ?max_request_body_bytes:(request_body_limit_for fixture.id)
               ?enable_thinking:(enable_thinking_for fixture.id)
               ~supports_response_format_json
               ~supports_structured_output

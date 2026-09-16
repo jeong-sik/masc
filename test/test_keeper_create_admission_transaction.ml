@@ -385,7 +385,6 @@ activation_mode = "manual"
      the non-runtime recovery provider and manual activation make no model call. *)
   let configured =
     runtime_toml ^ {|
-max-request-body-bytes = 65536
 
 [models.other_model]
 api-name = "other-model"
@@ -394,7 +393,6 @@ tools-support = true
 streaming = true
 
 [test_provider.other_model]
-max-request-body-bytes = 65536
 
 [runtime.assignments]
 imp = "test_provider.test_model"

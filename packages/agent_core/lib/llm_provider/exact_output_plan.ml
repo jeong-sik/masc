@@ -21,10 +21,6 @@ type output_admission_error =
   | Unsupported_audio_input
   | Unsupported_system_prompt
   | Provider_request_rejected of Http_client.http_error
-  | Request_body_too_large of
-      { actual_bytes : int
-      ; limit_bytes : int
-      }
   | Request_serialization_rejected of Http_client.http_error
 
 type json_validation_provenance =
@@ -52,7 +48,6 @@ type frozen_wire_request =
   ; headers : (string * string) list
   ; body : string
   ; body_sha256 : string
-  ; max_request_body_bytes : int option
   ; connect_timeout_s : float option
   ; body_timeout_s : float option
   }
@@ -145,7 +140,6 @@ let[@warning "-32"] rejection_name = function
   | Unsupported_audio_input -> "unsupported_audio_input"
   | Unsupported_system_prompt -> "unsupported_system_prompt"
   | Provider_request_rejected _ -> "provider_request_rejected"
-  | Request_body_too_large _ -> "request_body_too_large"
   | Request_serialization_rejected _ -> "request_serialization_rejected"
 ;;
 
@@ -334,9 +328,6 @@ let plan_fingerprint
      ; (if capabilities.supports_structured_output then "1" else "0")
      ]
      @ admission_material
-     @ (match wire.max_request_body_bytes with
-        | None -> []
-        | Some limit -> [ "max_request_body_bytes"; string_of_int limit ])
      @ [ option_float wire.connect_timeout_s
        ; option_float wire.body_timeout_s
        ; string_of_int (List.length wire.headers)
@@ -400,16 +391,11 @@ let freeze_serialization
         Exact_output_count_tokens.exact_completion_generation_body
           exact_completion_artifact
       in
-      let actual_bytes = String.length body in
-      (match config.max_request_body_bytes with
-       | Some limit_bytes when actual_bytes > limit_bytes ->
-         Error (Request_body_too_large { actual_bytes; limit_bytes })
-       | None | Some _ ->
-         Ok
-           { response_codec = Provider_http_codec.of_config config
-           ; body
-           ; exact_completion_artifact = Some exact_completion_artifact
-           }))
+      Ok
+        { response_codec = Provider_http_codec.of_config config
+        ; body
+        ; exact_completion_artifact = Some exact_completion_artifact
+        })
   else (
     match
       Complete_common.serialize_http_request_with_thinking_control
@@ -419,10 +405,6 @@ let freeze_serialization
         ~messages:request.messages
         ~tools:request.tools
     with
-    | Error
-        (Http_client.ProviderFailure
-           { kind = Http_client.Request_body_too_large { actual_bytes; limit_bytes }; _ })
-      -> Error (Request_body_too_large { actual_bytes; limit_bytes })
     | Error error -> Error (Request_serialization_rejected error)
     | Ok (response_codec, body) ->
       Ok { response_codec; body; exact_completion_artifact = None })
@@ -496,7 +478,6 @@ let preflight
                    ; headers
                    ; body
                    ; body_sha256
-                   ; max_request_body_bytes = config.max_request_body_bytes
                    ; connect_timeout_s = config.connect_timeout_s
                    ; body_timeout_s = request.body_timeout_s
                    }
@@ -694,7 +675,6 @@ let%test "canonical fingerprint is sensitive to the frozen response codec" =
     ; headers = [ "Content-Length", "2" ]
     ; body = "{}"
     ; body_sha256 = sha256 "{}"
-    ; max_request_body_bytes = None
     ; connect_timeout_s = None
     ; body_timeout_s = None
     }

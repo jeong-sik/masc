@@ -64,12 +64,11 @@ max-context = 16384
 tools-support = true
 
 [llama_server.qwen-2-5-coder-32b]
-max-request-body-bytes = 1048576
 ```
 
-Leave `max-request-body-bytes` out and **no Keeper turn reaches that runtime.**
-Startup names it in a warning, but it is a common place to look like nothing is
-running for no visible reason.
+The binding table can stay empty. Whether a request is too large for the
+server is the server's verdict; masc sends the composed request and, on a
+refusal, evicts the oldest carried history and asks again.
 
 ## Point a role at it
 

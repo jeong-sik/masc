@@ -351,6 +351,77 @@ let test_the_newest_atom_alone_leaves_an_empty_history_slot () =
     Alcotest.(check int) "of the checkpoint's" 99 of_atoms
   | _ -> Alcotest.fail "the third slot is the history when no preamble rides"
 
+(* The walk: where each candidate stands in the lane's declaration, and the
+   JSON the band reads it from. *)
+let test_a_declared_place_is_the_index_in_the_lane () =
+  let declared = [ "glm"; "deepseek"; "kimi"; "claude_code" ] in
+  Alcotest.(check (option int)) "the head" (Some 0)
+    (Keeper_next_request_forecast.declared_at ~declared "glm");
+  Alcotest.(check (option int)) "a later candidate" (Some 3)
+    (Keeper_next_request_forecast.declared_at ~declared "claude_code");
+  Alcotest.(check (option int)) "an id the lane does not declare" None
+    (Keeper_next_request_forecast.declared_at ~declared "granite")
+
+let test_the_json_carries_the_walk_and_each_place () =
+  let candidate runtime_id place : Keeper_next_request_forecast.candidate =
+    { runtime_id
+    ; lane = Ok ()
+    ; marks = None
+    ; parts = Error (Keeper_next_request_forecast.No_composition_on_runtime { records_read = 0 })
+    ; history_atoms = 1
+    ; carried = None
+    ; assembly = None
+    ; place
+    }
+  in
+  let forecast : Keeper_next_request_forecast.t =
+    { keeper = "analyst"
+    ; trace_id = "trace-1"
+    ; checkpoint_messages = 1
+    ; wake_line_bytes = 131
+    ; walk =
+        Ok
+          { lane_id = "glm"
+          ; declared = [ "glm"; "claude_code" ]
+          ; preferred =
+              Some { preferred_runtime_id = "claude_code"; noted_at = 56_267.; ttl_s = 3600. }
+          }
+    ; candidates =
+        [ candidate "claude_code"
+            { walks_at = 0; declared_at = Some 1; rest = Keeper_turn_driver.Path_serving }
+        ; candidate "glm"
+            { walks_at = 1
+            ; declared_at = Some 0
+            ; rest =
+                Keeper_turn_driver.Path_resting
+                  { release_at = 60_000.; walk_promotes_at_release = true }
+            }
+        ]
+    }
+  in
+  let json = Keeper_next_request_forecast.to_json forecast in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string) "the schema names the shape" "masc.keeper.next-request-forecast.v4"
+    (json |> member "schema" |> to_string);
+  Alcotest.(check string) "the preferred candidate rides with the walk" "claude_code"
+    (json |> member "walk" |> member "preferred" |> member "runtime_id" |> to_string);
+  Alcotest.(check (list string)) "the declaration rides in order" [ "glm"; "claude_code" ]
+    (json |> member "walk" |> member "declared" |> to_list |> List.map to_string);
+  let places = json |> member "candidates" |> to_list |> List.map (member "place") in
+  Alcotest.(check (list int)) "each candidate says where it walks" [ 0; 1 ]
+    (List.map (fun place -> place |> member "walks_at" |> to_int) places);
+  Alcotest.(check (list string)) "and whether its path rests" [ "serving"; "resting" ]
+    (List.map (fun place -> place |> member "rest" |> member "kind" |> to_string) places);
+  Alcotest.(check (float 0.)) "with the release when it does" 60_000.
+    (List.nth places 1 |> member "rest" |> member "release_at" |> to_number);
+  let refused =
+    Keeper_next_request_forecast.to_json
+      { forecast with walk = Error Keeper_turn_driver.Assignment_missing; candidates = [] }
+  in
+  Alcotest.(check string) "a refused walk says why"
+    "the assignment names no configured lane or runtime"
+    (refused |> member "walk" |> member "refusal" |> to_string)
+
 let () =
   Alcotest.run "keeper_next_request_forecast"
     [ ( "parts"
@@ -392,5 +463,11 @@ let () =
             test_a_prepended_preamble_takes_its_slot_before_the_history
         ; Alcotest.test_case "the newest atom alone leaves an empty history slot" `Quick
             test_the_newest_atom_alone_leaves_an_empty_history_slot
+        ] )
+    ; ( "walk"
+      , [ Alcotest.test_case "a declared place is the index in the lane" `Quick
+            test_a_declared_place_is_the_index_in_the_lane
+        ; Alcotest.test_case "the JSON carries the walk and each place" `Quick
+            test_the_json_carries_the_walk_and_each_place
         ] )
     ]

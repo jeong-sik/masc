@@ -97,8 +97,33 @@ type walk_rest =
 (** A deferred suffix in the order the next turn walks it. *)
 val deferred_lane_rest : now:float -> deferred_runtime_lane -> walk_rest
 
+(** The candidates a fresh walk of an assignment dispatches, in [order]: the
+    lane [declared] with the sticky last-good candidate moved first
+    ({!Runtime_lane_preference.prefer_order_with}), then quota and
+    backpressure demotion. [preferred] is that candidate with the time it was
+    noted, from the same observation the order was taken from, so it is
+    always a member of [order]. The walk may still replace the head for an
+    input modality it cannot take (RFC-0265); a turn that failed and deferred
+    its input walks its remaining candidates instead. *)
+type walk_order =
+  { lane_id : string
+  ; declared : string list
+  ; order : string list
+  ; preferred : (string * float) option
+  }
+
+(** Why a fresh walk would not dispatch the assignment at all, as
+    [run_named] refuses it. *)
+type assignment_refusal =
+  | Assignment_missing  (** The id names no configured lane or runtime. *)
+  | Catalog_unavailable of Runtime.missing_catalog_model
+      (** The configured identity has no capability catalog entry. *)
+
+val assignment_refusal_to_string : assignment_refusal -> string
+val assignment_walk_order : now:float -> string -> (walk_order, assignment_refusal) result
+
 (** A fresh walk of an assignment, ordered as a turn without a deferred suffix
-    orders it. *)
+    orders it: {!assignment_walk_order}'s head and its rest. *)
 val assignment_walk_rest : now:float -> string -> walk_rest
 
 (** Whether a wakeup may end a failure wait: a capacity release is MASC's own

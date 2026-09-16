@@ -96,6 +96,44 @@ type slot =
   | System_context of { bytes : int; blocks : (Prompt_block_id.t * int) list }
       (** [blocks] in the order the assembly concatenates them. *)
 
+(** Where a candidate stands in the walk the next fresh cycle takes: the
+    lane as declared with the sticky last-good candidate moved first
+    ({!Runtime_lane_preference.prefer_order_with}), then quota and
+    backpressure demotion ({!Keeper_turn_driver.assignment_walk_order}). Two
+    things the walk does are not forecast: a head replaced for an input
+    modality it cannot take (RFC-0265), and a turn that failed and deferred
+    its input, whose next cycle walks the remaining candidates instead;
+    that hint lives in the heartbeat loop. *)
+type place =
+  { walks_at : int  (** 0 walks first. *)
+  ; declared_at : int option
+        (** The candidate's index in the lane's declaration; [None] when the
+            walk carries an id the lane does not declare. *)
+  ; rest : Keeper_turn_driver.path_rest
+        (** Whether the path rests now (RFC-provider-path-rest §3.3). *)
+  }
+
+type preferred =
+  { preferred_runtime_id : string
+  ; noted_at : float  (** Unix epoch of the success that set it. *)
+  ; ttl_s : float  (** How long a success keeps it; every success renews it. *)
+  }
+
+type walk =
+  { lane_id : string
+  ; declared : string list  (** The lane as declared, head first. *)
+  ; preferred : preferred option
+        (** The lane's sticky last-good candidate, shared by every keeper the
+            lane routes, read from the same observation the order was; it
+            is a member of the candidates and walks first while it lasts. *)
+  }
+
+type walk_refusal = Keeper_turn_driver.assignment_refusal
+(** The driver would not dispatch the assignment at all: no lane or runtime
+    of that id, or no capability catalog entry for it. *)
+
+val walk_refusal_to_string : walk_refusal -> string
+
 type candidate =
   { runtime_id : string
   ; lane : (unit, lane_refusal) result
@@ -108,6 +146,7 @@ type candidate =
   ; assembly : slot list option
         (** The request in travel order; [None] whenever [carried] or
             [parts] is. *)
+  ; place : place
   }
 
 type t =
@@ -117,14 +156,21 @@ type t =
   ; wake_line_bytes : int
         (** The wake line as the composition's encoder counts it, the
             figure the assembly subtracts from the transmitted bytes. *)
+  ; walk : (walk, walk_refusal) result
   ; candidates : candidate list
-        (** The keeper's bound runtime. Failover candidates are not listed. *)
+        (** Every candidate of the keeper's lane, in the order the next
+            fresh cycle walks them; each with its own ledger front and marks,
+            and the seed the trace gives them alike when the pair has no
+            ledger. Empty when [walk] is refused. *)
   }
 
 val forecast : config:Workspace.config -> keeper_name:string -> (t, string) result
 (** [Error] when the keeper is unknown or its checkpoint cannot be read. *)
 
 val to_json : t -> Yojson.Safe.t
+
+val declared_at : declared:string list -> string -> int option
+(** The index of a runtime id in a lane's declaration, [None] when absent. *)
 
 val carry
   :  measure:(Agent_core.Types.message -> int)

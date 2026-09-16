@@ -91,6 +91,28 @@ type slot =
   | Wake_line of { bytes : int }
   | System_context of { bytes : int; blocks : (Prompt_block_id.t * int) list }
 
+type place =
+  { walks_at : int
+  ; declared_at : int option
+  ; rest : Keeper_turn_driver.path_rest
+  }
+
+type preferred =
+  { preferred_runtime_id : string
+  ; noted_at : float
+  ; ttl_s : float
+  }
+
+type walk =
+  { lane_id : string
+  ; declared : string list
+  ; preferred : preferred option
+  }
+
+type walk_refusal = Keeper_turn_driver.assignment_refusal
+
+let walk_refusal_to_string = Keeper_turn_driver.assignment_refusal_to_string
+
 type candidate =
   { runtime_id : string
   ; lane : (unit, lane_refusal) result
@@ -99,13 +121,23 @@ type candidate =
   ; history_atoms : int
   ; carried : carried option
   ; assembly : slot list option
+  ; place : place
   }
+
+let declared_at ~declared runtime_id =
+  let rec go index = function
+    | [] -> None
+    | id :: rest -> if String.equal id runtime_id then Some index else go (index + 1) rest
+  in
+  go 0 declared
+;;
 
 type t =
   { keeper : string
   ; trace_id : string
   ; checkpoint_messages : int
   ; wake_line_bytes : int
+  ; walk : (walk, walk_refusal) result
   ; candidates : candidate list
   }
 
@@ -306,27 +338,33 @@ let recent_records_read = Keeper_carried_front.records_read
    the path on which the record's runtime is the requested one rather than
    the one whose composition it holds (analyst turn #4031: named glm-coding,
    held claude_code's schemas). *)
-let newest_parts_for ~config ~keeper_name ~runtime_id =
+(* The records that parse, and how many lines were read for them: a
+   refusal names the count read, a line that does not parse included. *)
+let records_of_store ~config ~keeper_name =
   let store = Keeper_types_support.keeper_turn_record_store config keeper_name in
-  let records = Dated_jsonl.read_recent store recent_records_read in
-  let readings =
-    List.filter_map
+  let lines = Dated_jsonl.read_recent store recent_records_read in
+  ( List.filter_map
       (fun json ->
         match Turn_record.of_json json with
         | Error _ -> None
-        | Ok record ->
-          (match record.Turn_record.input_components with
-           | None -> None
-           | Some components ->
-             Some
-               { turn = record.Turn_record.absolute_turn
-               ; runtime_id = record_runtime record
-               ; completed = Option.is_some record.Turn_record.finish_reason
-               ; composition = read_composition components
-               }))
-      records
-  in
-  select_parts ~runtime_id ~records_read:(List.length records) readings
+        | Ok record -> Some record)
+      lines
+  , List.length lines )
+;;
+
+let readings_of_records (records : Turn_record.t list) =
+  List.filter_map
+    (fun (record : Turn_record.t) ->
+      match record.Turn_record.input_components with
+      | None -> None
+      | Some components ->
+        Some
+          { turn = record.Turn_record.absolute_turn
+          ; runtime_id = record_runtime record
+          ; completed = Option.is_some record.Turn_record.finish_reason
+          ; composition = read_composition components
+          })
+    records
 ;;
 
 (* The wake line as the range's encoder counts it, the same figure the
@@ -343,24 +381,35 @@ let wake_line () =
   message, measure message
 ;;
 
-let candidate ~config ~keeper_name ~trace_id ~messages ~history_atoms ~wake_bytes runtime_id =
+let candidate
+      ~keeper_name
+      ~trace_id
+      ~messages
+      ~history_atoms
+      ~wake_bytes
+      ~readings
+      ~records_read
+      ~seed
+      ~place
+      runtime_id
+  =
   let runtime = Runtime.get_runtime_by_id runtime_id in
   let lane = lane_for ~runtime_id runtime in
-  let parts = newest_parts_for ~config ~keeper_name ~runtime_id in
+  let parts = select_parts ~runtime_id ~records_read readings in
   let carried =
     match lane with
     | Error _ -> None
     | Ok () ->
       (* The same front the turn driver composes from: the pair's ledger,
-         else the newest completed Agent Core record on the trace, whichever
-         runtime ran it. *)
+         else the seed the newest completed Agent Core record on the trace
+         gives every candidate alike. *)
       let front, counted_tokens =
         match
           Keeper_model_input_ledger.Table.lookup ~keeper_name ~runtime_id ~session_id:trace_id
         with
         | Some ledger ->
           Some (Keeper_carried_front.of_ledger ledger), ledger.Keeper_model_input_ledger.total_tokens
-        | None -> Keeper_carried_front.read_seed ~config ~keeper_name ~trace_id, None
+        | None -> seed, None
       in
       Some (carry ~measure ~front ~counted_tokens messages)
   in
@@ -376,6 +425,7 @@ let candidate ~config ~keeper_name ~trace_id ~messages ~history_atoms ~wake_byte
   ; history_atoms
   ; carried
   ; assembly
+  ; place
   }
 ;;
 
@@ -398,22 +448,63 @@ let forecast ~config ~keeper_name =
        let _labelled, history_atoms =
          Runtime_model_input_tail_window.annotate messages
        in
-       let runtime_id = Keeper_meta_contract.runtime_id_of_meta meta in
+       let assignment_id = Keeper_meta_contract.runtime_id_of_meta meta in
+       (* The lane preference observes its own clock inside
+          [assignment_walk_order]; this read serves the quota order and the
+          rests, as the driver's own walk takes it. *)
+       (* NDT-OK: one wall-clock read at the boundary, compared with stored expiries. *)
+       let now = Unix.gettimeofday () in
+       let records, records_read = records_of_store ~config ~keeper_name in
+       let readings = readings_of_records records in
+       let seed =
+         Keeper_carried_front.of_records
+           ~composer:(fun runtime_id ->
+             Keeper_carried_front.composer_of_runtime (Runtime.get_runtime_by_id runtime_id))
+           ~trace_id
+           records
+       in
+       let walk, candidates =
+         match Keeper_turn_driver.assignment_walk_order ~now assignment_id with
+         | Error refusal -> Error refusal, []
+         | Ok { Keeper_turn_driver.lane_id; declared; order; preferred } ->
+           ( Ok
+               { lane_id
+               ; declared
+               ; preferred =
+                   Option.map
+                     (fun (preferred_runtime_id, noted_at) ->
+                        { preferred_runtime_id
+                        ; noted_at
+                        ; ttl_s = Runtime_lane_preference.ttl_s ()
+                        })
+                     preferred
+               }
+           , List.mapi
+               (fun walks_at runtime_id ->
+                  candidate
+                    ~keeper_name
+                    ~trace_id
+                    ~messages
+                    ~history_atoms
+                    ~wake_bytes:wake_line_bytes
+                    ~readings
+                    ~records_read
+                    ~seed
+                    ~place:
+                      { walks_at
+                      ; declared_at = declared_at ~declared runtime_id
+                      ; rest = Keeper_turn_driver.path_rest ~now runtime_id
+                      }
+                    runtime_id)
+               order )
+       in
        Ok
          { keeper = keeper_name
          ; trace_id
          ; checkpoint_messages = List.length history
          ; wake_line_bytes
-         ; candidates =
-             [ candidate
-                 ~config
-                 ~keeper_name
-                 ~trace_id
-                 ~messages
-                 ~history_atoms
-                 ~wake_bytes:wake_line_bytes
-                 runtime_id
-             ]
+         ; walk
+         ; candidates
          })
 ;;
 
@@ -458,6 +549,22 @@ let carried_to_json (carried : carried) =
     ]
 ;;
 
+let place_to_json (place : place) =
+  `Assoc
+    [ "walks_at", `Int place.walks_at
+    ; "declared_at", option_json (fun n -> `Int n) place.declared_at
+    ; ( "rest"
+      , match place.rest with
+        | Keeper_turn_driver.Path_serving -> `Assoc [ "kind", `String "serving" ]
+        | Keeper_turn_driver.Path_resting { release_at; walk_promotes_at_release } ->
+          `Assoc
+            [ "kind", `String "resting"
+            ; "release_at", `Float release_at
+            ; "walk_promotes_at_release", `Bool walk_promotes_at_release
+            ] )
+    ]
+;;
+
 let candidate_to_json (candidate : candidate) =
   `Assoc
     [ "runtime_id", `String candidate.runtime_id
@@ -492,16 +599,37 @@ let candidate_to_json (candidate : candidate) =
     ; "carried", option_json carried_to_json candidate.carried
     ; ( "assembly"
       , option_json (fun slots -> `List (List.map slot_to_json slots)) candidate.assembly )
+    ; "place", place_to_json candidate.place
+    ]
+;;
+
+let walk_to_json (walk : walk) =
+  `Assoc
+    [ "lane_id", `String walk.lane_id
+    ; "declared", `List (List.map (fun id -> `String id) walk.declared)
+    ; ( "preferred"
+      , option_json
+          (fun (preferred : preferred) ->
+             `Assoc
+               [ "runtime_id", `String preferred.preferred_runtime_id
+               ; "noted_at", `Float preferred.noted_at
+               ; "ttl_s", `Float preferred.ttl_s
+               ])
+          walk.preferred )
     ]
 ;;
 
 let to_json forecast =
   `Assoc
-    [ "schema", `String "masc.keeper.next-request-forecast.v3"
+    [ "schema", `String "masc.keeper.next-request-forecast.v4"
     ; "keeper", `String forecast.keeper
     ; "trace_id", `String forecast.trace_id
     ; "checkpoint_messages", `Int forecast.checkpoint_messages
     ; "wake_line_bytes", `Int forecast.wake_line_bytes
+    ; ( "walk"
+      , match forecast.walk with
+        | Ok walk -> walk_to_json walk
+        | Error refusal -> `Assoc [ "refusal", `String (walk_refusal_to_string refusal) ] )
     ; "candidates", `List (List.map candidate_to_json forecast.candidates)
     ]
 ;;

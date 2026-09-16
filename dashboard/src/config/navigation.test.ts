@@ -262,7 +262,6 @@ describe('monitoring navigation labels', () => {
     expect(labelFor('runtime')).toBe('Runtime')
     expect(labelFor('observatory')).toBe('Observatory')
     expect(labelFor('transport-health')).toBeUndefined()
-    expect(labelFor('feature-health')).toBeUndefined()
     expect(labelFor('cognition')).toBeUndefined()
     expect(labelFor('journey')).toBeUndefined()
   })
@@ -307,9 +306,7 @@ describe('monitoring navigation labels', () => {
     expect(ids).toContain('runtime')
     expect(ids).toContain('observatory')
     expect(allIds).toContain('transport-health')
-    expect(allIds).toContain('feature-health')
     expect(ids).not.toContain('transport-health')
-    expect(ids).not.toContain('feature-health')
     // Legacy sections removed in Phase 1
     expect(ids).not.toContain('live')
     expect(ids).not.toContain('git-graph')
@@ -344,7 +341,6 @@ describe('monitoring navigation labels', () => {
 
     expect(hiddenIds).toEqual([
       'transport-health',
-      'feature-health',
       'journey',
     ])
   })

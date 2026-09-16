@@ -233,7 +233,7 @@ let test_encoding_memo_writes_to_string_bytes () =
     Alcotest.(check string)
       label
       (Checkpoint.to_string cp)
-      (Checkpoint.to_string_with_encoding_memo memo cp)
+      (String.concat "" (Checkpoint.to_pieces_with_encoding_memo memo cp))
   in
   let checkpoint ~turn_count messages =
     make_checkpoint ~messages ~tools:[ sample_tool_schema ] ~turn_count ()
@@ -261,10 +261,62 @@ let test_encoding_memo_writes_to_string_bytes () =
       ~turn_count:4
       (zero_flipped @ [ message Assistant (ToolUse { id = ""; name = "read"; input = `Assoc [] }) ])
   in
-  (match Checkpoint.to_string_with_encoding_memo memo refused with
-   | (_ : string) -> Alcotest.fail "a checkpoint with an empty tool id was written"
+  (match Checkpoint.to_pieces_with_encoding_memo memo refused with
+   | (_ : string list) -> Alcotest.fail "a checkpoint with an empty tool id was written"
    | exception Invalid_argument _ -> ());
   check_same "the save after a refusal" (checkpoint ~turn_count:5 zero_flipped)
+;;
+
+(* 저장은 문서를 한 문자열로 합치지 않는다. memo 가 찬 다음 저장은 앞 저장이
+   인코딩한 메시지 조각을 그대로 돌려주므로, 그 저장이 새로 할당하는 양은 문서
+   크기에 비하면 없는 것과 같아야 한다. 조각을 [String.concat] 으로 합쳐 넘기던
+   판에서는 저장마다 문서 한 벌이 통째로 더 할당됐다 — 라이브 정본 체크포인트는
+   111MB 이고 5.6초마다 다시 쓰인다(2026-09-16 측정).
+
+   픽스처는 메시지 배열뿐 아니라 system prompt 와 tool 스키마도 싣는다. 머리
+   부분은 memo 가 덮지 않아 저장마다 다시 인코딩되므로, 예산이 그 몫까지 같이
+   센다. *)
+let history_messages_in_the_fixture = 200
+let bytes_per_fixture_message = 40_000
+let bytes_of_fixture_system_prompt = 20_000
+let least_fixture_document_bytes = 4_000_000
+let document_bytes_per_byte_a_second_save_may_allocate = 8.0
+
+let document_bytes pieces =
+  List.fold_left (fun total piece -> total + String.length piece) 0 pieces
+;;
+
+let test_a_second_save_does_not_allocate_the_document_again () =
+  let open Types in
+  let history =
+    List.init history_messages_in_the_fixture (fun index ->
+      message
+        User
+        (Text (String.make bytes_per_fixture_message 'x' ^ string_of_int index)))
+  in
+  let cp =
+    make_checkpoint
+      ~messages:history
+      ~system_prompt:(Some (String.make bytes_of_fixture_system_prompt 's'))
+      ~tools:[ sample_tool_schema ]
+      ~turn_count:1
+      ()
+  in
+  let memo = Checkpoint.create_encoding_memo () in
+  let written = document_bytes (Checkpoint.to_pieces_with_encoding_memo memo cp) in
+  Alcotest.(check bool)
+    (Printf.sprintf "the fixture document is %d bytes" written)
+    true
+    (written > least_fixture_document_bytes);
+  let before = Gc.allocated_bytes () in
+  let pieces = Checkpoint.to_pieces_with_encoding_memo memo cp in
+  let allocated = Gc.allocated_bytes () -. before in
+  Alcotest.(check int) "the second save writes the same bytes" written (document_bytes pieces);
+  Alcotest.(check bool)
+    (Printf.sprintf "the second save allocated %.0f bytes for %d" allocated written)
+    true
+    (allocated *. document_bytes_per_byte_a_second_save_may_allocate
+     < float_of_int written)
 ;;
 
 let test_image_carriers_remain_canonical () =
@@ -503,6 +555,8 @@ let () =
             check_checkpoint_json_contract (make_checkpoint ()))
         ; test_case "the encoding memo writes the bytes of to_string" `Quick
             test_encoding_memo_writes_to_string_bytes
+        ; test_case "a second save does not allocate the document again" `Quick
+            test_a_second_save_does_not_allocate_the_document_again
         ; test_case "drop_unencodable_json is None for an encodable checkpoint" `Quick (fun () ->
             match Checkpoint.drop_unencodable_json (make_checkpoint ()) with
             | None -> ()

@@ -96,7 +96,7 @@ consumer is known to act on every request/turn.
 
 Examples:
 
-- Transport feature flags in
+- Transport boolean flags in
   [`env_config_runtime.ml`](../lib/config/env_config_runtime.ml)
   are accessor-shaped, but listener lifecycles remain boot-static.
 - `Config_dir_resolver` helpers read env accessors, but

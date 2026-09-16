@@ -86,6 +86,13 @@ let of_masc_internal_kind wire = function
   | Keeper_internal_error.Wire_provider_attempt_effect_fenced ->
     Provider_attempt_effect_fenced wire
   | Keeper_internal_error.Wire_tool_correction_lost -> Tool_correction_lost wire
+  (* RFC-0454 P2. Both wires are new spellings of failures that already
+     reached this classifier, and each keeps the bucket it had: a host stop
+     used to arrive as the bare ["internal_error"] wire, and a closed runtime
+     connection as a [provider_error_*] one. *)
+  | Keeper_internal_error.Wire_host_stopped_turn -> Internal_error wire
+  | Keeper_internal_error.Wire_runtime_connection_closed ->
+    Provider_runtime_failure wire
   | Keeper_internal_error.Wire_accept_rejected -> Accept_rejected wire
   | Keeper_internal_error.Wire_terminal_effect_failed -> Terminal_effect_failed wire
   | Keeper_internal_error.Wire_internal_unhandled_exception

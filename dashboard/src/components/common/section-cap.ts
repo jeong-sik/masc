@@ -13,7 +13,7 @@
 // Two axes because the existing usage already uses them:
 //  - `tone`   — muted (default, section heads next to body text)
 //             / dim (stronger hush, dense telemetry panels)
-//  - `weight` — normal (read-only narrative labels, feature-health)
+//  - `weight` — normal (read-only narrative labels, harness-health)
 //             / semibold (pressable subhead, keeper-tool-telemetry
 //                         column headers, tool-allowlist sections)
 //

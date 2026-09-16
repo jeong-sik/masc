@@ -337,11 +337,20 @@ let codex_error_to_core_error = function
      Mirrors [claude_error_to_core_error] / [runtime_error_to_core_error]
      (antigravity); RFC-0370 §3.1. No catch-all: a new client error variant
      must decide its rotation class at compile time. *)
-  | Runtime_codex_app_server.Spawn_failed detail
-  | Runtime_codex_app_server.Process_exited { detail; turn_accepted = _ } ->
+  | Runtime_codex_app_server.Spawn_failed detail ->
     Agent_core.Error.Provider
       (Llm_provider.Error.ProviderUnavailable
          { provider = "codex_app_server"; detail })
+  (* RFC-0454 P2. The client died or its stdout reached EOF. This shared the
+     [ProviderUnavailable] above until the chat pane had to tell the two
+     apart and could only do it by reading the rendered sentence back
+     ("Provider 'codex_app_server' unavailable: stdout closed"). The typed
+     value says it instead; [Keeper_runtime_attempt.core_error_to_runtime_outcome]
+     rebuilds the same provider error so rotation is unchanged. *)
+  | Runtime_codex_app_server.Process_exited { detail; turn_accepted } ->
+    Keeper_internal_error.core_error_of_masc_internal_error
+      (Keeper_internal_error.Runtime_connection_closed
+         { runtime_id = "codex_app_server"; detail; turn_accepted })
   | Runtime_codex_app_server.Turn_input_write_failed _ as error ->
     Agent_core.Error.Provider
       (Llm_provider.Error.ProviderUnavailable
@@ -396,16 +405,25 @@ let codex_error_to_core_error = function
          "Codex app-server stream was idle for %.3fs after turn/start was \
           accepted (not rotated: the upstream turn may still commit)"
          seconds)
-  (* Server-reported "interrupted" turn status (deliberate host-side stop, for
-     example shutdown): not a provider fault, so rotation to another runtime
-     would re-run a turn that was intentionally stopped. Stays [Internal]. *)
+  (* Server-reported "interrupted" turn status and host graceful shutdown:
+     not a provider fault, so rotation to another runtime would re-run a turn
+     that was intentionally stopped. Both stay off the rotation chain — the
+     carrier is still an agent-core internal error, which
+     [core_error_to_runtime_outcome] reads as [None] — and RFC-0454 P2 turned
+     the sentence into the value, because the chat pane was searching the
+     sentence to decide what to draw. *)
   | Runtime_codex_app_server.Turn_interrupted ->
-    Agent_core.Error.Internal
-      (Runtime_codex_app_server.error_to_string Runtime_codex_app_server.Turn_interrupted)
+    Keeper_internal_error.core_error_of_masc_internal_error
+      (Keeper_internal_error.Host_stopped_turn
+         { runtime_id = "codex_app_server"
+         ; stop = Keeper_internal_error.Runtime_reported_interrupt
+         })
   | Runtime_codex_app_server.Runtime_shutting_down ->
-    Agent_core.Error.Internal
-      (Runtime_codex_app_server.error_to_string
-         Runtime_codex_app_server.Runtime_shutting_down)
+    Keeper_internal_error.core_error_of_masc_internal_error
+      (Keeper_internal_error.Host_stopped_turn
+         { runtime_id = "codex_app_server"
+         ; stop = Keeper_internal_error.Host_graceful_shutdown
+         })
   | Runtime_codex_app_server.Stopped_by_host _ ->
     Agent_core.Error.Internal
       "Codex host stop escaped the typed checkpoint boundary"

@@ -108,7 +108,10 @@ val make_tools
   -> ?gate_grant:Keeper_gate.cycle_grant
   -> ?record_gate_result:
        (operation:string -> input:Yojson.Safe.t -> Tool_result.result -> unit)
-  -> ?on_completed:(Keeper_tool_execution.terminal_effect_receipt option -> unit)
+  -> ?on_completed:
+       (composition_tool:string ->
+        Keeper_tool_execution.terminal_effect_receipt option ->
+        unit)
   -> ?on_deferred:(unit -> unit)
   -> ?on_external_effect_deferred:(approval_id:string option -> unit)
   -> ?on_failed:(Keeper_tools_agent_core.terminal_effect_failure -> unit)
@@ -151,7 +154,10 @@ module Compatibility : sig
     -> ?gate_grant:Keeper_gate.cycle_grant
     -> ?record_gate_result:
          (operation:string -> input:Yojson.Safe.t -> Tool_result.result -> unit)
-    -> ?on_completed:(Keeper_tool_execution.terminal_effect_receipt option -> unit)
+    -> ?on_completed:
+         (composition_tool:string ->
+          Keeper_tool_execution.terminal_effect_receipt option ->
+          unit)
     -> ?on_deferred:(unit -> unit)
     -> ?on_external_effect_deferred:(approval_id:string option -> unit)
     -> ?on_failed:(Keeper_tools_agent_core.terminal_effect_failure -> unit)

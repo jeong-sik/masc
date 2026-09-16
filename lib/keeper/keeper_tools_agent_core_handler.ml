@@ -112,7 +112,9 @@ let make_keeper_tool_handler_with_authority
                failed
                  { Keeper_tools_agent_core.failure_class = class_
                  ; effect_disposition
-                 ; diagnostic = message
+                 ; detail =
+                     Keeper_terminal_effect_detail.Tool_failed
+                       { internal_tool_name = name; message }
                  })
             on_failed)
     );

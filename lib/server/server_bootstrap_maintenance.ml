@@ -511,6 +511,8 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                ~clock:Time_compat.now
                (Mcp_server.workspace_config state)
                ~now:started_at
+               ~retention_days:
+                 (Runtime_params.get Runtime_settings.schedule_terminal_retention_days)
            with
            | Ok result ->
              let finished_at = Time_compat.now () in

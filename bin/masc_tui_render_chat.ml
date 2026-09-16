@@ -1140,9 +1140,13 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
     | Message_status -> "STATUS"
     | Message_local -> "LOCAL"
     | Message_error -> "ERROR"
-    | Message_tool -> "TOOLS"
-    | Message_skill _ -> "SKILL"
-    | Message_thinking -> "THINKING"
+    (* No lane word on the work lanes: the mark already says which lane the
+       row is, so the badge holds the glyph and its padding and nothing
+       else. The column itself stays — [align_role_label] pads the empty
+       label to the same cells the words occupied. *)
+    | Message_tool -> ""
+    | Message_skill _ -> ""
+    | Message_thinking -> ""
     | Message_memory -> "JOURNAL"
   in
   (* Turn identity stays in the typed request id. The speaker glyph already
@@ -1227,17 +1231,14 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
           | Message_skill _ -> (
               match message.me_skill_activity with
               | None -> message.me_text
-              (* Always full, not tied to [msg_tool_visibility]: a skill row is
-                 one of ours, and whether a served skill was actually delivered
-                 and used is the fact the row exists to carry. Folding it behind
-                 the tool toggle made "SERVED ONLY vs DELIVERED · USED" the same
-                 keystroke away as a docker exec's schedule, so the operator saw
-                 only a name and a state and had to expand to learn if the skill
-                 did anything. A skill has few rows (the action list and one
-                 proof line), so showing them costs little and the toggle still
-                 governs the tool projections beside it. *)
+              (* The summary line carries the fact this row exists for —
+                 "delivered and used, N actions" — so it never folds. The
+                 action list, proof line and detail ride the tool toggle:
+                 Ctrl-D opens them, the resting pane stays one line. *)
               | Some activity ->
-                  Keeper_chat_transcript.skill_rows ~full:true activity
+                  Keeper_chat_transcript.skill_rows
+                    ~full:(state.msg_tool_visibility = Masc_tui_types.Tools_full)
+                    activity
                   |> String.concat "\n")
           (* The Memory journal's change arrives inside a ["```diff"]
              fence, so a leading [+] is fence content rather than a list
@@ -2190,24 +2191,25 @@ let render_keeper_message (state : state) =
                       then folded_thinking_summary (String.concat "\n" lines)
                       else String.concat "\n" lines
                     in
-                    entry Message_layout.Thinking (label "THINKING") (annotate_body body)
+                    entry Message_layout.Thinking (label "") (annotate_body body)
                 | Keeper_chat_transcript.Drawn_tools block ->
                     let projection =
                       Keeper_chat_transcript.project_tool_block
                         (tool_projection_mode state) block
                     in
                     let body = String.concat "\n" (projected_tool_rows projection) in
-                    entry (tool_block_style projection) (label "TOOLS") (annotate_body body)
+                    entry (tool_block_style projection) (label "") (annotate_body body)
                 | Keeper_chat_transcript.Drawn_skill skill ->
                     entry
                       (Message_layout.Skill (skill_tone_of_state skill.state))
-                      (label "SKILL")
+                      (label "")
                       (String.concat "\n"
-                         (* Full on the block too: the same reason the
-                            committed skill rows are always full — the skill's
-                            delivery and observed actions are the feature this
-                            row reports, not a detail behind the tool toggle. *)
-                         (Keeper_chat_transcript.skill_rows ~full:true skill))
+                         (* Same fold as the committed rows: the summary line
+                            stays, the action list, proof line and detail ride
+                            the tool toggle. *)
+                         (Keeper_chat_transcript.skill_rows
+                            ~full:(state.msg_tool_visibility = Masc_tui_types.Tools_full)
+                            skill))
                 | Keeper_chat_transcript.Drawn_text text
                 | Keeper_chat_transcript.Drawn_reply text ->
                     entry Message_layout.Keeper (label keeper_label) (annotate_body text)

@@ -800,14 +800,19 @@ let test_a_summarised_source_is_hashed_and_not_parsed () =
     let source_bytes =
       (Unix.stat (Filename.concat session_dir (session_id ^ ".json"))).Unix.st_size
     in
-    check bool "the source is big enough to tell a hash from a parse" true
-      (source_bytes > 1_000_000);
     let parse_words =
       allocated_minor_words (fun () ->
         match Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id with
         | Ok _ -> ()
         | Error _ -> fail "the source could not be loaded")
     in
+    (* A parse of this file has to cost enough for the comparison below to mean
+       something: the fixture is 8,000 short messages, whose parse allocates
+       about 0.75 minor words per byte. *)
+    check bool
+      (Printf.sprintf "a parse of %d bytes allocated %.0f words" source_bytes parse_words)
+      true
+      (parse_words > 100_000.0);
     let candidate = make_checkpoint ~session_id ~turn_count:9 ~marker:"candidate" in
     let installation = ref None in
     let save_words =
@@ -1610,7 +1615,7 @@ let test_history_retention_after_syscall_offload () =
   ensure_fs env;
   let session_dir = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
-  let retained = 12 in
+  let retained = Keeper_checkpoint_store.max_agent_core_history_retained in
   let checkpoint turn_count =
     { (make_checkpoint ~session_id:"history-retention" ~turn_count ~marker:"history")
       with created_at = 1000. +. float_of_int turn_count }

@@ -1615,7 +1615,7 @@ let test_history_retention_after_syscall_offload () =
   ensure_fs env;
   let session_dir = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
-  let retained = Keeper_checkpoint_store.max_agent_core_history_retained in
+  let retained = Keeper_checkpoint_store.max_agent_core_history_retained () in
   let checkpoint turn_count =
     { (make_checkpoint ~session_id:"history-retention" ~turn_count ~marker:"history")
       with created_at = 1000. +. float_of_int turn_count }
@@ -1629,6 +1629,57 @@ let test_history_retention_after_syscall_offload () =
   check bool "oldest retained snapshot survives" true (List.mem (snapshot 3) files);
   check bool "newest snapshot survives" true (List.mem (snapshot (retained + 2)) files)
 
+(* The window is a runtime parameter an operator sets, so the prune has to read
+   what it currently says rather than a number the binary carried. Both
+   directions are checked: a window wider than the default must keep more than
+   the default, and a narrower one must cut down to it on the next save. A
+   prune that ignored the parameter, or clamped it to the shipped default,
+   fails one of the two. *)
+let widened_history_window = 5
+let narrowed_history_window = 1
+
+let test_history_window_follows_the_runtime_parameter () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  let session_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime_params.clear Runtime_settings.keeper_checkpoint_history_retained;
+      cleanup_dir session_dir)
+  @@ fun () ->
+  let default_window = Keeper_checkpoint_store.max_agent_core_history_retained () in
+  let set_window window =
+    match
+      Runtime_params.set Runtime_settings.keeper_checkpoint_history_retained window
+    with
+    | Ok () -> ()
+    | Error detail -> fail ("setting the history window failed: " ^ detail)
+  in
+  let retained_files () =
+    List.length (Keeper_checkpoint_store.list_agent_core_history_files ~session_dir)
+  in
+  let checkpoint turn_count =
+    { (make_checkpoint ~session_id:"history-parameter" ~turn_count ~marker:"history")
+      with created_at = 2000. +. float_of_int turn_count }
+  in
+  set_window widened_history_window;
+  check int "the store reads what the operator set"
+    widened_history_window
+    (Keeper_checkpoint_store.max_agent_core_history_retained ());
+  for turn = 1 to widened_history_window + 2 do
+    save_ok ~session_dir (checkpoint turn) "widened history save"
+  done;
+  check int "a window wider than the default keeps that many"
+    widened_history_window (retained_files ());
+  set_window narrowed_history_window;
+  save_ok ~session_dir (checkpoint (widened_history_window + 3)) "narrowed history save";
+  check int "narrowing it cuts the history down on the next save"
+    narrowed_history_window (retained_files ());
+  Runtime_params.clear Runtime_settings.keeper_checkpoint_history_retained;
+  check int "clearing the override puts the default back"
+    default_window
+    (Keeper_checkpoint_store.max_agent_core_history_retained ())
+
 let () =
   run "Keeper_checkpoint_store checkpoint watermark (RFC-0225 §3.2)"
     [
@@ -1638,6 +1689,8 @@ let () =
             test_history_link_keeps_transaction_until_cancelled_job_finishes;
           test_case "history syscall retains exact rolling window" `Quick
             test_history_retention_after_syscall_offload;
+          test_case "history window follows the runtime parameter" `Quick
+            test_history_window_follows_the_runtime_parameter;
           test_case "run context binds generation before AGENT_CORE checkpoint" `Quick
             test_run_context_binds_generation_before_agent_core_checkpoint;
           test_case "forward and equal saves pass, stale save is no-op" `Quick

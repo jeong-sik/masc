@@ -41,9 +41,13 @@ let list_agent_core_history_files ~(session_dir : string) : string list =
    111 MB: twelve of them held 1.4 GB per trace directory and 8.4 GB across
    traces/ (2026-09-16). The only reader is the dashboard checkpoint list,
    which decodes every retained entry to describe it, so the count is also
-   what that request costs. Three keeps the last few turns to look at or
-   restore. *)
-let max_agent_core_history_retained = 3
+   what that request costs.
+
+   Disk and how far back an operator can look pull against each other, and
+   which way to lean is theirs to say, so this reads the runtime parameter on
+   every prune rather than carrying a number a deploy fixed. *)
+let max_agent_core_history_retained () =
+  Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained
 
 let agent_core_history_path ~(session_dir : string) ~(snapshot_id : string) =
   Filename.concat session_dir snapshot_id
@@ -95,9 +99,10 @@ let agent_core_history_snapshot_id_of_checkpoint (ckpt : Agent_core.Checkpoint.t
 
 let prune_agent_core_history ~(session_dir : string) : unit =
   let files = list_agent_core_history_files ~session_dir in
-  if List.length files > max_agent_core_history_retained then
+  let retained = max_agent_core_history_retained () in
+  if List.length files > retained then
     files
-    |> List.filteri (fun index _ -> index >= max_agent_core_history_retained)
+    |> List.filteri (fun index _ -> index >= retained)
     |> List.iter (fun filename ->
          let path = agent_core_history_path ~session_dir ~snapshot_id:filename in
          try

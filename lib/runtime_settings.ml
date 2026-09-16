@@ -267,6 +267,23 @@ let keeper_work_as_hb_enabled =
             min_value = None; max_value = None; choices = [] }
     ()
 
+(* Retention: how much of a keeper's past a store keeps. An operator reads the
+   disk it costs and the history it wants to be able to look at, and those pull
+   in opposite directions, so the value is theirs to set rather than a constant
+   a deploy carries. *)
+let keeper_checkpoint_history_retained =
+  register_int
+    ~key:"keeper.checkpoint_history_retained"
+    ~default:(fun () -> 3)
+    ~min:0 ~max:64
+    ~meta:{ description =
+              "정본 옆에 남기는 지난 체크포인트 수. 하나가 통째로 한 벌이라 \
+               라이브 키퍼에서는 111MB 이고, 대시보드 목록은 남은 것을 전부 \
+               디코드한다. 0 은 하나도 남기지 않는다";
+            value_type = "int";
+            min_value = Some (`Int 0); max_value = Some (`Int 64); choices = [] }
+    ()
+
 let keeper_stage_timing_ring_size =
   register_int
     ~key:"keeper.stage_timing_ring_size"
@@ -392,6 +409,13 @@ let surfaces =
       param_keys = [
         "keeper.supervisor_sweep_sec";
         "keeper.keepalive_interval_sec";
+      ];
+    };
+    {
+      id = "keeper_retention";
+      description = "How much of a keeper's past each store keeps";
+      param_keys = [
+        "keeper.checkpoint_history_retained";
       ];
     };
     {

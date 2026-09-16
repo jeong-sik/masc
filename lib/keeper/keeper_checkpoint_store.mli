@@ -11,10 +11,13 @@ val agent_core_checkpoint_path :
 (** [true] iff [filename] is an AGENT_CORE history archive file. *)
 (** Sorted-descending list of AGENT_CORE history archive filenames in
     [session_dir]. *)
-val max_agent_core_history_retained : int
-(** How many past checkpoints of a session are kept beside the canonical one.
-    Each is a whole checkpoint, 111 MB on a live keeper, and the dashboard
-    checkpoint list decodes every one it finds. *)
+val max_agent_core_history_retained : unit -> int
+(** How many past checkpoints of a session are kept beside the canonical one,
+    as the runtime parameter [keeper.checkpoint_history_retained] currently
+    reads. Each is a whole checkpoint, 111 MB on a live keeper, and the
+    dashboard checkpoint list decodes every one it finds. An operator changes
+    it through the runtime settings surface; the next prune uses the new
+    value. *)
 
 val list_agent_core_history_files : session_dir:string -> string list
 

@@ -122,7 +122,7 @@ type session_context = {
 }
 ```
  
-세션 디렉토리 내에 `Agent_core.Checkpoint.t` 스냅샷이 유지되며, 최대 12개가 보존된다 (`max_agent_core_history_retained = 12`). 초과 스냅샷은 `prune_agent_core_history`에 의해 정리된다.
+세션 디렉토리 내에 `Agent_core.Checkpoint.t` 스냅샷이 유지된다. 몇 개까지 남길지는 런타임 설정 `keeper.checkpoint_history_retained`(기본 3, 범위 0~64)가 정하고, 초과분은 `prune_agent_core_history`가 저장할 때마다 지운다.
 
 ### 3.4 Workspace Boundary
 
@@ -465,9 +465,9 @@ Keeper는 idle 상태에서 주기적으로 자발적 행동을 생성한다.
 
 `generate_trace_id`는 `trace-{ms_timestamp}-{5hex_hash}` 형식으로 생성된다. 동일 밀리초 내에서도 `gettimeofday` hash가 달라 충돌 가능성이 낮다.
 
-### INV-KEEPER-003: checkpoint history 보존 (최대 12개)
+### INV-KEEPER-003: checkpoint history 보존
 
-`max_agent_core_history_retained = 12`. `prune_agent_core_history`가 호출되어 세션 내 이전 스냅샷 초과분을 삭제한다.
+남기는 개수는 런타임 설정 `keeper.checkpoint_history_retained`가 정한다. 저장할 때마다 `prune_agent_core_history`가 그 값을 다시 읽어 초과분을 삭제하므로, 설정을 줄이면 다음 저장에서 바로 줄어든다.
 
 ### INV-KEEPER-006: proactive judgment boundary
 

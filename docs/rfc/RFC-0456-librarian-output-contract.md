@@ -236,12 +236,31 @@ let current_fact_json index fact =
 가 모두 있고 렌더 직전에 버려진다. **판정자는 378개 날짜 없는 맨 문장을 본다.**
 3주 전에 적고 한 번도 안 건드린 사실과 오늘 아침 사실이 화면에서 똑같이 생겼다.
 
+그리고 사실별 사용 기록도 이미 존재한다 (`keeper_memory_os_events.ml:180-186`):
+
+```ocaml
+type summary =
+  { retrieved_count : int
+  ; retrieved_distinct_days : int
+  ; last_retrieved_at : float option
+  ; cited_count : int
+  ; revised_from : string list }
+```
+
+몇 번 조회됐고, 언제 마지막으로 조회됐고, 몇 번 인용됐는지 **전부 세고 있다.**
+그리고 이 값은 TUI 로 간다 — `masc_tui_render_memory.ml:377,383` 이 `retrieved_count`
+와 `cited_count` 를 그리고, `masc_tui_types.ml:3164` 에 "Retrieved (Most)" 정렬이 있다.
+
+**운영자는 이 숫자를 본다. 무엇을 잊을지 정하는 판정자만 못 본다.**
+
 이미 기록된 값을 그대로 넣는다. 파생 수치·점수·나이 구간은 만들지 않는다.
 
-> m212 · lesson · 2026-08-30 기록 · 이후 같은 내용 재관측 없음 · 출처: board p-c627b3…
+> m212 · lesson · 2026-08-30 기록 · 이후 같은 내용 재관측 없음 · 조회 0회 · 인용 0회 ·
+> 출처: board p-c627b3…
 
 오래된 것이 버릴 이유가 되는 것이 아니라 **판단의 재료**가 된다. 3주 된 운영자 계약은
-남고, 3주 된 일회성 사건 메모는 나갈 수 있다. 그 구분은 판정자가 한다.
+조회가 0이어도 남고, 3주 된 일회성 사건 메모는 나갈 수 있다. 그 구분은 판정자가 한다.
+`retrieved_count` 에 임계값을 걸지 않는다 — 숫자를 보여주고 판단은 넘긴다.
 
 ### 4.4 접기는 압축이 아니라 구조화다
 
@@ -264,6 +283,11 @@ let current_fact_json index fact =
 - 사실 정체성 변경. `memory_id = SHA256(claim)` 은 그대로 둔다 (§3.2).
 - 저장 형식 변경. hard cut 이 필요 없다.
 
+20개 메모리 파일 전수 스윕 결과, **유사도 계수·가중치·관련도/중요도/신뢰도 점수·decay·
+랭킹 공식은 한 곳도 없다.** `List.sort` 는 전부 `String.compare`(id·이름) 나
+`Float.compare`(타임스탬프) 이고, 사실 내용을 읽어 순위를 매기는 비교 함수는 없다.
+발견된 수치 휴리스틱은 전부 정수 상한과 비율 하나, 접두사 길이 하나다 (§6).
+
 이 저장소는 같은 원칙을 이미 한 번 적용했다 — `keeper_memory_recall.ml:1-7`:
 
 > 키워드 분류기 recall eval 은 legacy memory bank 와 함께 제거됨: recall 은 substring
@@ -278,6 +302,12 @@ let current_fact_json index fact =
 | `keeper_librarian_runtime.ml:394-435` | `fitted_messages` — body 한도에 맞을 때까지 메시지를 이분 탐색으로 줄인다 | 한도 자체는 바깥이 강제하는 물리값이지만, **무엇을 버릴지**를 코드가 정한다 (오래된 것부터) |
 | `keeper_librarian_runtime.ml:458-494` | `fit_context_input` — source 를 탐욕적으로 채운다 | 같음. 무엇이 들어갈지를 코드가 정한다 |
 | `keeper_librarian_context.ml:193-197` | 진행 basis 가 같고 pocket 이 `Current` 이고 모든 source 가 현재 집합에 있을 때만 `next_steps` 를 보여준다 | 판정자가 과거 정리 결과를 볼지를 코드가 정한다 |
+| `keeper_tool_memory_runtime.ml:217-219` | `key_of s = String.sub s 0 (min 100 …)` — **앞 100자가 같으면 같은 메시지로 보고 하나를 버린다** | 접두사 동일성을 의미 동일성으로 쓴다. 긴 공통 머리말을 가진 서로 다른 메시지가 조용히 사라진다 |
+| `keeper_memory_recall.ml:204` | `~max_lines:(max_n * 3)` — "user 메시지 1개당 로그 3줄"이라는 비율 가정 | 실제 비율이 낮으면 요청한 개수를 못 채우고 **조용히 적게 돌려준다** |
+| `keeper_librarian_runtime.ml:71` | `prompt_max_messages = max_messages () * cadence_turns ()` (24 × 3 = 72) | 무관한 두 튜너블의 곱을 증거 창 크기로 삼는 공식 |
+| `keeper_librarian_runtime.ml:1132` | 실패 시 cadence 한 바퀴 후퇴. 주석이 `"A three-turn delay on recovery is the cheaper side of that trade"` 로 근거 없음을 자인 | §2.2 의 실패 비용 본체 |
+| `keeper_memory_source_current.ml:6` | `max_source_bytes = 1 MiB` 넘는 파일은 근거가 될 수 없다 | 바깥이 강제하는 값이 아니다. 파일시스템도 API 도 이 숫자를 모른다 |
+| `keeper_memory_lane.ml:146-171` | 큐 깊이 1 — 미처리 유닛을 새 유닛이 덮는다 (`Replace_latest`) | 밀린 턴의 재료가 판정자에게 아예 안 간다 |
 
 ## 7. 미해명 — 이 RFC 는 이것을 설명하지 못한다
 

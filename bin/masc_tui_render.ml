@@ -2183,6 +2183,68 @@ let render_board_list (state : state) =
 let board_read_layout = Board_read_layout.create ()
 ;;
 
+(* The thread beside the post, one screen row at a time (p-7784d032). Owns
+   its own allocation and scroll projection so [board_read_pane] only ever
+   touches the shared [board_read_allocation] the stacked layout uses -- the
+   shape test_tui_http_ast.ml's AST contract checks for: each layout
+   consumes its own row budget through the calls that produced it, not by
+   re-reading the record across two branches inside one binding. *)
+let draw_board_read_side buf (state : state) document ~rows ~body_cols
+    ~comment_cols ~total_lines ~detail_line_count =
+  let side_budget =
+    Render_schedule.allocate_board_read_side ~terminal_rows:rows
+      ~body_line_count:total_lines ~comment_count:detail_line_count
+  in
+  (* The heading spends the comment column's first row; only what is
+     left under it can hold thread lines. *)
+  let comment_header_rows = if side_budget.comment_rows > 0 then 1 else 0 in
+  let comment_content_rows =
+    max 0 (side_budget.comment_rows - comment_header_rows)
+  in
+  let scroll =
+    Render_schedule.project_board_read_scroll
+      ~body_line_count:total_lines
+      ~body_rows:side_budget.body_rows
+      ~comment_count:detail_line_count
+      ~comment_rows:comment_content_rows
+      state.board_scroll
+  in
+  (* box_top/box_bottom draw no border in the borderless geometry this
+     pane already uses (see their definitions) -- they would only add
+     two blank rows the row budget above never reserved. The two
+     columns are plain content, exactly [rows_drawn] lines each, so
+     [write_two_panes] zips them without falling back to its blank-pad
+     case. *)
+  let rows_drawn = max side_budget.body_rows side_budget.comment_rows in
+  let body_buf = Buffer.create (4 * 1024) in
+  let comment_buf = Buffer.create (4 * 1024) in
+  for i = 0 to rows_drawn - 1 do
+    if i < side_budget.body_rows then
+      let idx = i + scroll.body_offset in
+      if idx < total_lines then
+        box_line body_buf body_cols
+          ("  " ^ Board_read_layout.body_line document idx)
+      else box_empty body_buf body_cols
+    else box_empty body_buf body_cols
+  done;
+  for i = 0 to rows_drawn - 1 do
+    if i = 0 && comment_header_rows > 0 then
+      box_line comment_buf comment_cols
+        (Ansi.bold
+        ^ Printf.sprintf "  Comments (%d)" detail_line_count
+        ^ Ansi.reset)
+    else if i < side_budget.comment_rows then
+      let idx = i - comment_header_rows + scroll.comment_offset in
+      if idx >= 0 && idx < detail_line_count then
+        box_line comment_buf comment_cols
+          (Board_read_layout.comment_line document idx)
+      else box_empty comment_buf comment_cols
+    else box_empty comment_buf comment_cols
+  done;
+  write_two_panes buf ~left_cols:body_cols ~left:body_buf ~right:comment_buf;
+  (scroll, side_budget.body_rows, comment_content_rows)
+;;
+
 (** Render the Board surface (read view). *)
 (* The read post alone -- borders, header, body, comments -- at [cols]
    wide, footer excluded, so a caller can lay it beside the post list.
@@ -2249,6 +2311,34 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
        Ansi.reset);
   box_divider buf cols;
 
+  (* The thread sits beside the post, not under it, when the pane is wide
+     enough for both columns to stay readable (p-7784d032). A narrow pane
+     keeps the stacked layout below -- the same rows, drawn the way they were
+     before the side arrangement existed. Decided here, before the document
+     below wraps a single word of it, so the body and comment text get
+     wrapped to the column that will actually draw them -- not the full pane
+     width every layout used to assume, which is what let a wide-formatted
+     comment line get clipped down to its author chip in the narrow column
+     (p-7784d032 follow-up). *)
+  let has_detail_content =
+    match detail with
+    | Board_detail.Absent | Board_detail.Loading | Board_detail.Failed _ ->
+        true
+    | Board_detail.Ready (_, comments) -> comments <> []
+  in
+  let side_layout =
+    if has_detail_content then Render_schedule.board_read_side_layout ~cols
+    else None
+  in
+  let body_wrap_cols =
+    match side_layout with Some (body_cols, _) -> body_cols | None -> cols
+  in
+  let comment_wrap_cols =
+    match side_layout with
+    | Some (_, comment_cols) -> comment_cols
+    | None -> cols
+  in
+
   let source : Board_read_layout.source =
     { post; detail; related_posts = state.board_posts;
       keeper_names = List.map (fun (k : Tui_decode.keeper) -> k.k_name) state.keepers;
@@ -2260,7 +2350,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
   let document =
     Board_read_layout.get board_read_layout ~source ~render:(fun () ->
       (* Body lines *)
-      let text_width = cols - 8 in
+      let text_width = body_wrap_cols - 8 in
       (* Sanitised a line at a time. A newline is a control byte, so sanitising the
          body whole escaped every break and the post arrived as one unbroken run
          with "\x0A" printed through it. *)
@@ -2308,7 +2398,8 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                     the id is whatever the writer typed. *)
                  Printf.sprintf "  %s%-10s %s%s" Ansi.reset
                    (Link.kind_label kind)
-                   (fit_width (Terminal_text.single_line id) (max 8 (cols - 16)))
+                   (fit_width (Terminal_text.single_line id)
+                      (max 8 (body_wrap_cols - 16)))
                    Ansi.reset)
                referenced
       in
@@ -2327,7 +2418,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                      (fit_width (Terminal_text.single_line other.bp_id) 12)
                      Ansi.dim
                      (fit_width (Terminal_text.single_line other.bp_title)
-                        (max 8 (cols - 26)))
+                        (max 8 (body_wrap_cols - 26)))
                      Ansi.reset))
       in
       let body_lines = body_lines @ reference_lines @ related_lines in
@@ -2339,7 +2430,8 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
             [Ansi.dim ^ "  Loading Board detail..." ^ Ansi.reset]
         | Board_detail.Failed error ->
             [ (Theme.bad ()) ^ "  Board detail unavailable: "
-              ^ fit_width (Terminal_text.single_line error) (max 1 (cols - 32))
+              ^ fit_width (Terminal_text.single_line error)
+                  (max 1 (comment_wrap_cols - 32))
               ^ Ansi.reset
             ]
         | Board_detail.Ready (_, comments) ->
@@ -2381,7 +2473,8 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                    Message_layout.wrap_body ~markdown:board_document_markdown
                      ~max_cells:
                        (max 1
-                          (cols - 10 - Message_layout.display_width rail))
+                          (comment_wrap_cols - 10
+                          - Message_layout.display_width rail))
                      ~sanitize:Terminal_text.single_line c.bc_content
                  in
                  match body with
@@ -2396,73 +2489,14 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
   in
   let total_lines = Board_read_layout.body_count document in
   let detail_line_count = Board_read_layout.comment_count document in
-  (* The thread sits beside the post, not under it, when the pane is wide
-     enough for both columns to stay readable (p-7784d032). A narrow pane
-     keeps the stacked layout below -- the same rows, drawn the way they were
-     before the side arrangement existed. *)
-  let side_layout =
-    if detail_line_count > 0 then Render_schedule.board_read_side_layout ~cols
-    else None
-  in
   (* [board_read_allocation] and [board_read_side_allocation] share field
      names but are different record types, so this match cannot return one
      of them -- only the scroll and the two drawn-row counts survive it. *)
   let scroll, body_lines_drawn, comment_lines_drawn =
     match side_layout with
     | Some (body_cols, comment_cols) ->
-        let side_budget =
-          Render_schedule.allocate_board_read_side ~terminal_rows:rows
-            ~body_line_count:total_lines ~comment_count:detail_line_count
-        in
-        (* The heading spends the comment column's first row; only what is
-           left under it can hold thread lines. *)
-        let comment_header_rows = if side_budget.comment_rows > 0 then 1 else 0 in
-        let comment_content_rows =
-          max 0 (side_budget.comment_rows - comment_header_rows)
-        in
-        let scroll =
-          Render_schedule.project_board_read_scroll
-            ~body_line_count:total_lines
-            ~body_rows:side_budget.body_rows
-            ~comment_count:detail_line_count
-            ~comment_rows:comment_content_rows
-            state.board_scroll
-        in
-        (* box_top/box_bottom draw no border in the borderless geometry this
-           pane already uses (see their definitions) -- they would only add
-           two blank rows the row budget above never reserved. The two
-           columns are plain content, exactly [rows_drawn] lines each, so
-           [write_two_panes] zips them without falling back to its blank-pad
-           case. *)
-        let rows_drawn = max side_budget.body_rows side_budget.comment_rows in
-        let body_buf = Buffer.create (4 * 1024) in
-        let comment_buf = Buffer.create (4 * 1024) in
-        for i = 0 to rows_drawn - 1 do
-          if i < side_budget.body_rows then
-            let idx = i + scroll.body_offset in
-            if idx < total_lines then
-              box_line body_buf body_cols
-                ("  " ^ Board_read_layout.body_line document idx)
-            else box_empty body_buf body_cols
-          else box_empty body_buf body_cols
-        done;
-        for i = 0 to rows_drawn - 1 do
-          if i = 0 && comment_header_rows > 0 then
-            box_line comment_buf comment_cols
-              (Ansi.bold
-              ^ Printf.sprintf "  Comments (%d)" detail_line_count
-              ^ Ansi.reset)
-          else if i < side_budget.comment_rows then
-            let idx = i - comment_header_rows + scroll.comment_offset in
-            if idx >= 0 && idx < detail_line_count then
-              box_line comment_buf comment_cols
-                (Board_read_layout.comment_line document idx)
-            else box_empty comment_buf comment_cols
-          else box_empty comment_buf comment_cols
-        done;
-        write_two_panes buf ~left_cols:body_cols ~left:body_buf
-          ~right:comment_buf;
-        (scroll, side_budget.body_rows, comment_content_rows)
+        draw_board_read_side buf state document ~rows ~body_cols
+          ~comment_cols ~total_lines ~detail_line_count
     | None ->
         let row_budget =
           Render_schedule.allocate_board_read ~terminal_rows:rows

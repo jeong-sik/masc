@@ -37,7 +37,13 @@ let list_agent_core_history_files ~(session_dir : string) : string list =
     |> List.filter is_agent_core_history_file
     |> List.sort (fun a b -> compare b a))
 
-let max_agent_core_history_retained = 12
+(* Each entry is a whole checkpoint of the session, and a live keeper's runs
+   111 MB: twelve of them held 1.4 GB per trace directory and 8.4 GB across
+   traces/ (2026-09-16). The only reader is the dashboard checkpoint list,
+   which decodes every retained entry to describe it, so the count is also
+   what that request costs. Three keeps the last few turns to look at or
+   restore. *)
+let max_agent_core_history_retained = 3
 
 let agent_core_history_path ~(session_dir : string) ~(snapshot_id : string) =
   Filename.concat session_dir snapshot_id

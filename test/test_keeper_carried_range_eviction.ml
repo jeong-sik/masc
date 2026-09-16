@@ -108,7 +108,10 @@ let test_an_overflow_evicts_the_oldest_block_and_asks_again () =
   let moved = ledger [ block ~first:10 ~end_:20 (Some 250); block ~first:20 ~end_:30 (Some 200); block ~first:30 ~end_:40 (Some 150) ] in
   let outcome, trace =
     run
-      ~ledger_of:(fun attempts -> if attempts = 0 then Some four_blocks else Some moved)
+      (* A refusal counts no usage, so the ledger it reads is still the one
+         the refused request was composed from. [moved] is what a later
+         refusal would see, after [evict] applied the walk. *)
+      ~ledger_of:(fun attempts -> if attempts <= 1 then Some four_blocks else Some moved)
       [ Error overflow; Ok "fits" ]
   in
   check (result string reject) "the retry answered" (Ok "fits") outcome;
@@ -227,7 +230,10 @@ let test_a_refusal_that_survives_the_newest_block_is_returned () =
   let one = ledger [ block ~first:10 ~end_:20 (Some 250) ] in
   let outcome, trace =
     run
-      ~ledger_of:(fun attempts -> if attempts = 0 then Some two else Some one)
+      (* The first refusal reads [two] — a refusal moves nothing by itself —
+         and only after [evict] applied the walk does the second refusal see
+         [one]. *)
+      ~ledger_of:(fun attempts -> if attempts <= 1 then Some two else Some one)
       [ Error overflow; Error overflow; Ok "never" ]
   in
   check bool "the refusal stands" true (Result.is_error outcome);

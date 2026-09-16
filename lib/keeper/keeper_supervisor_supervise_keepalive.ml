@@ -340,6 +340,20 @@ let supervise_keepalive
               | Some current -> Error (`Occupied current)
               | None -> Error (`Occupied reg))
             ~rollback:Keeper_keepalive_launch_transaction.Retain_registered
+        (* #26323: a registered [Crashed] entry never reaches [launch_registered]
+           from here, so this call never dispatches [Fiber_started] against it
+           and cannot produce the reported [invalid_transition: crashed ->
+           running]. The registry (see [Keeper_registry_setup.registry]) holds
+           no entry across a process restart, so [Keeper_registry.get] answers
+           [None] for every keeper at boot and this call always takes the
+           fresh-registration branch above instead; a [Crashed] entry only
+           exists here for a keeper that crashed within this same live
+           process, and it is retained for the lifecycle sweep, which recovers
+           it through the typed [Crashed -> Restarting -> Running] path
+           ([Keeper_state_machine_mermaid], [keeper_supervisor.ml]'s
+           [queue_crashed_entry]/[Supervisor_restart_attempt]), never the
+           direct transition the matrix does not contain. Regression guard:
+           [test_supervise_keepalive_retains_sweep_owned_entries]. *)
         | Keeper_state_machine.Running
         | Keeper_state_machine.Failing
         | Keeper_state_machine.Draining

@@ -366,6 +366,7 @@
   test_keeper_model_input_ledger
   test_keeper_carried_range
   test_keeper_carried_front
+  test_keeper_request_wire_view
   test_keeper_carried_range_eviction
   test_keeper_next_request_forecast
   test_keeper_provider_call_deadline
@@ -725,6 +726,7 @@
   test_keeper_model_input_ledger
   test_keeper_carried_range
   test_keeper_carried_front
+  test_keeper_request_wire_view
   test_keeper_carried_range_eviction
   test_keeper_next_request_forecast
   test_keeper_provider_call_deadline
@@ -2483,6 +2485,10 @@
 (include stanzas/test_env_config_keeper_bootstrap_intervals.inc)
 
 (include stanzas/test_env_config_keeper_poll_intervals.inc)
+
+(include stanzas/test_env_config_keeper_admission_bounds.inc)
+
+(include stanzas/test_schedule_domain_admission_split.inc)
 
 (include stanzas/test_env_config_nonneg.inc)
 

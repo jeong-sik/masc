@@ -1,7 +1,8 @@
 (* The forecast runs the turn's own composition forward. These cases pin
    the arithmetic on a synthetic history so the numbers are checkable by
    hand: a seeded front carries everything from it, a front the history
-   shrank under is dropped, and without a front everything goes. *)
+   shrank under is dropped, and without a front everything goes. The
+   assembly cases pin the order the request carries its parts. *)
 
 open Masc
 
@@ -48,7 +49,23 @@ let test_a_seeded_front_carries_everything_from_it () =
     (c.transmitted_bytes > 0 && c.transmitted_bytes < atom_bytes messages);
   Alcotest.(check bool) "the origin is the seed's" true
     (c.origin = Keeper_carried_front.Carried Keeper_carried_front.Ledger);
-  Alcotest.(check (option int)) "the count rides along" (Some 9_000) c.counted_tokens
+  Alcotest.(check (option int)) "the count rides along" (Some 9_000) c.counted_tokens;
+  Alcotest.(check (option int)) "atom 6 is a user message, so no preamble rides" None
+    c.preamble_bytes
+
+(* Atom 7 is an assistant message. A conversation cannot open on one, so
+   the range prepends the constant preamble and counts it in the bytes. *)
+let test_a_range_opening_on_an_assistant_measures_its_preamble () =
+  let messages = history ~exchanges:10 ~text_bytes:100 in
+  let c = carried (carry ~front:(seed ~atom_count:20 7) messages) in
+  Alcotest.(check int) "thirteen atoms" 13 c.kept_atoms;
+  match c.preamble_bytes with
+  | None -> Alcotest.fail "a preamble rides when the oldest carried atom is an assistant's"
+  | Some preamble ->
+    Alcotest.(check bool) "measured, not counted as zero" true (preamble > 0);
+    Alcotest.(check int) "the transmitted bytes are the preamble and the carried atoms"
+      (preamble + atom_bytes (List.filteri (fun index _ -> index >= 7) messages))
+      c.transmitted_bytes
 
 (* The front was measured against 3,395 atoms; a purge left ten. The position
    names nothing here, so the request starts over without a front. *)
@@ -91,19 +108,50 @@ let post_tool_composition =
   ; component Turn_record.Message_tool_result 16_090
   ]
 
+let block_names blocks = List.map (fun (id, _) -> Prompt_block_id.to_string id) blocks
+
 let test_a_first_round_composition_yields_the_fixed_and_pinned_parts () =
   let composition = Keeper_next_request_forecast.read_composition first_round_composition in
   Alcotest.(check int) "schemas + instructions are the fixed parts" 82_410
     composition.Keeper_next_request_forecast.fixed_bytes;
+  Alcotest.(check int) "the system prompt's share" 10_832
+    composition.Keeper_next_request_forecast.instructions_bytes;
+  Alcotest.(check int) "the tool array's share" 71_578
+    composition.Keeper_next_request_forecast.schemas_bytes;
   Alcotest.(check (option int)) "recall + dynamic context are pinned; messages are neither"
-    (Some 159_710) composition.Keeper_next_request_forecast.first_round_pinned_bytes
+    (Some 159_710) composition.Keeper_next_request_forecast.first_round_pinned_bytes;
+  (* The record listed recall before dynamic context; the assembly's order
+     is by cache rank, which agrees here and is what decides. *)
+  Alcotest.(check (list (pair string int))) "the pinned blocks in assembly order"
+    [ "memory_os_recall", 150_000; "dynamic_context", 9_710 ]
+    (List.map
+       (fun (id, bytes) -> Prompt_block_id.to_string id, bytes)
+       composition.Keeper_next_request_forecast.pinned_blocks)
+
+let test_the_pinned_blocks_follow_the_assemblys_cache_order () =
+  (* Recorded in producer order (clock first, as producers ran); the
+     assembly puts the block that changes least in front. *)
+  let composition =
+    Keeper_next_request_forecast.read_composition
+      [ component (Turn_record.Prompt_block Prompt_block_id.Temporal_summary) 36
+      ; component (Turn_record.Prompt_block Prompt_block_id.Dynamic_context) 17_218
+      ; component (Turn_record.Prompt_block Prompt_block_id.Memory_os_recall) 139_966
+      ; component (Turn_record.Prompt_block Prompt_block_id.Skill_compositions) 321
+      ; component (Turn_record.Prompt_block Prompt_block_id.Keeper_instructions) 10_832
+      ]
+  in
+  Alcotest.(check (list string)) "skills, recall, dynamic context, clock"
+    [ "skill_compositions"; "memory_os_recall"; "dynamic_context"; "temporal_summary" ]
+    (block_names composition.Keeper_next_request_forecast.pinned_blocks)
 
 let test_a_post_tool_composition_says_nothing_about_the_pinned_blocks () =
   let composition = Keeper_next_request_forecast.read_composition post_tool_composition in
   Alcotest.(check int) "the fixed parts still read; the schemas ride every round" 82_410
     composition.Keeper_next_request_forecast.fixed_bytes;
   Alcotest.(check (option int)) "no first-round block, no pinned figure" None
-    composition.Keeper_next_request_forecast.first_round_pinned_bytes
+    composition.Keeper_next_request_forecast.first_round_pinned_bytes;
+  Alcotest.(check (list string)) "and no block list" []
+    (block_names composition.Keeper_next_request_forecast.pinned_blocks)
 
 let test_an_operator_note_alone_is_not_a_first_round () =
   (* The note rides post-tool rounds too, so it cannot mark a first round. *)
@@ -122,6 +170,17 @@ let reading ?(runtime_id = glm) ?(completed = true) turn composition
   : Keeper_next_request_forecast.record_reading =
   { turn; runtime_id; completed; composition }
 
+(* A composition by its totals: schemas only, so the fixed bytes are the
+   tool array's; the block list is empty, which the selection tests do not
+   read. *)
+let composition ?pinned fixed_bytes : Keeper_next_request_forecast.composition =
+  { fixed_bytes
+  ; instructions_bytes = 0
+  ; schemas_bytes = fixed_bytes
+  ; first_round_pinned_bytes = pinned
+  ; pinned_blocks = []
+  }
+
 let first = Keeper_next_request_forecast.read_composition first_round_composition
 let post = Keeper_next_request_forecast.read_composition post_tool_composition
 let select = Keeper_next_request_forecast.select_parts ~runtime_id:glm
@@ -131,7 +190,7 @@ let test_the_fixed_parts_come_from_the_newest_turn_and_the_pinned_from_the_newes
      the newest surface with the pinned blocks the last first round had. *)
   let readings =
     [ reading 3646 first
-    ; reading 3647 { Keeper_next_request_forecast.fixed_bytes = 94_928; first_round_pinned_bytes = None }
+    ; reading 3647 (composition 94_928)
     ; reading 3648 post
     ]
   in
@@ -141,10 +200,17 @@ let test_the_fixed_parts_come_from_the_newest_turn_and_the_pinned_from_the_newes
     Alcotest.(check int) "the fixed parts are the newest turn's" 3648
       parts.Keeper_next_request_forecast.reserved_turn;
     Alcotest.(check int) "at its bytes" 82_410 parts.Keeper_next_request_forecast.reserved_bytes;
+    Alcotest.(check int) "split into the system prompt" 10_832
+      parts.Keeper_next_request_forecast.instructions_bytes;
+    Alcotest.(check int) "and the tool array" 71_578
+      parts.Keeper_next_request_forecast.schemas_bytes;
     Alcotest.(check int) "the pinned blocks are the newest first round's" 3646
       parts.Keeper_next_request_forecast.pinned_turn;
     Alcotest.(check string) "on this lane" glm parts.Keeper_next_request_forecast.pinned_runtime_id;
-    Alcotest.(check int) "at its bytes" 159_710 parts.Keeper_next_request_forecast.pinned_bytes
+    Alcotest.(check int) "at its bytes" 159_710 parts.Keeper_next_request_forecast.pinned_bytes;
+    Alcotest.(check (list string)) "with that round's blocks"
+      [ "memory_os_recall"; "dynamic_context" ]
+      (block_names parts.Keeper_next_request_forecast.pinned_blocks)
 
 let test_the_pinned_blocks_may_come_from_another_lane_or_an_errored_turn () =
   (* analyst on 2026-09-16: every completed glm turn was post-tool; the
@@ -154,8 +220,8 @@ let test_the_pinned_blocks_may_come_from_another_lane_or_an_errored_turn () =
     [ reading 4030 ~runtime_id:claude first
     ; reading 4031 ~completed:false first
     ; reading 4032 post
-    ; reading 4033 ~runtime_id:claude { Keeper_next_request_forecast.fixed_bytes = 194_254; first_round_pinned_bytes = Some 140_706 }
-    ; reading 4034 ~completed:false { Keeper_next_request_forecast.fixed_bytes = 90_000; first_round_pinned_bytes = None }
+    ; reading 4033 ~runtime_id:claude (composition ~pinned:140_706 194_254)
+    ; reading 4034 ~completed:false (composition 90_000)
     ]
   in
   match select ~records_read:200 readings with
@@ -258,12 +324,106 @@ let test_measuring_does_not_allocate_what_it_measures () =
        (large_allocated /. small_allocated))
     true
     (large_allocated <= small_allocated *. allocation_allowed_to_grow_by)
+(* lane-smith at turn 3660: the fixed parts from that turn, the pinned
+   blocks from the last first round, in the assembly's order. *)
+let parts_for_assembly : Keeper_next_request_forecast.measured_parts =
+  { reserved_turn = 3660
+  ; reserved_bytes = 82_410
+  ; instructions_bytes = 10_832
+  ; schemas_bytes = 71_578
+  ; pinned_turn = 3651
+  ; pinned_runtime_id = glm
+  ; pinned_bytes = 157_541
+  ; pinned_blocks =
+      [ Prompt_block_id.Skill_compositions, 321
+      ; Prompt_block_id.Memory_os_recall, 139_966
+      ; Prompt_block_id.Dynamic_context, 17_218
+      ; Prompt_block_id.Temporal_summary, 36
+      ]
+  }
+
+(* A carried range by its totals; where it starts does not enter the layout. *)
+let range ?preamble_bytes ~kept_atoms transmitted_bytes : Keeper_next_request_forecast.carried =
+  { first_atom = 0
+  ; kept_atoms
+  ; transmitted_bytes
+  ; preamble_bytes
+  ; origin = Keeper_carried_front.Whole_history
+  ; counted_tokens = None
+  }
+
+let slot_names slots =
+  List.map
+    (function
+      | Keeper_next_request_forecast.System_prompt _ -> "system_prompt"
+      | Keeper_next_request_forecast.Tools _ -> "tools"
+      | Keeper_next_request_forecast.Preamble _ -> "preamble"
+      | Keeper_next_request_forecast.History _ -> "history"
+      | Keeper_next_request_forecast.Wake_line _ -> "wake_line"
+      | Keeper_next_request_forecast.System_context _ -> "system_context")
+    slots
+
+let test_the_assembly_travels_prompt_tools_history_wake_then_context () =
+  let slots =
+    Keeper_next_request_forecast.assembly ~wake_bytes:191 ~history_atoms:4319 parts_for_assembly
+      (range ~kept_atoms:7 57_100)
+  in
+  Alcotest.(check (list string)) "the order the request carries them"
+    [ "system_prompt"; "tools"; "history"; "wake_line"; "system_context" ]
+    (slot_names slots);
+  match slots with
+  | [ Keeper_next_request_forecast.System_prompt { bytes = prompt }
+    ; Keeper_next_request_forecast.Tools { bytes = tools }
+    ; Keeper_next_request_forecast.History { atoms; of_atoms; bytes = history }
+    ; Keeper_next_request_forecast.Wake_line { bytes = wake }
+    ; Keeper_next_request_forecast.System_context { bytes = context; blocks }
+    ] ->
+    Alcotest.(check int) "the system prompt is the instructions" 10_832 prompt;
+    Alcotest.(check int) "the tools are the schemas" 71_578 tools;
+    Alcotest.(check int) "the wake line is the newest carried atom, so six remain" 6 atoms;
+    Alcotest.(check int) "of the checkpoint's atoms without the wake line" 4318 of_atoms;
+    Alcotest.(check int) "history bytes are the transmitted bytes less the wake line" 56_909
+      history;
+    Alcotest.(check int) "the wake line as the encoder counts it" 191 wake;
+    Alcotest.(check int) "the context is the pinned total" 157_541 context;
+    Alcotest.(check (list string)) "with its blocks in assembly order"
+      [ "skill_compositions"; "memory_os_recall"; "dynamic_context"; "temporal_summary" ]
+      (block_names blocks)
+  | _ -> Alcotest.fail "five slots without a preamble"
+
+let test_a_prepended_preamble_takes_its_slot_before_the_history () =
+  let slots =
+    Keeper_next_request_forecast.assembly ~wake_bytes:191 ~history_atoms:100 parts_for_assembly
+      (range ~preamble_bytes:260 ~kept_atoms:3 10_000)
+  in
+  Alcotest.(check (list string)) "the preamble rides between the tools and the history"
+    [ "system_prompt"; "tools"; "preamble"; "history"; "wake_line"; "system_context" ]
+    (slot_names slots);
+  match List.nth slots 3 with
+  | Keeper_next_request_forecast.History { bytes; atoms; _ } ->
+    Alcotest.(check int) "history bytes exclude the preamble and the wake line" 9_549 bytes;
+    Alcotest.(check int) "two atoms beside the wake line" 2 atoms
+  | _ -> Alcotest.fail "the fourth slot is the history"
+
+let test_the_newest_atom_alone_leaves_an_empty_history_slot () =
+  let slots =
+    Keeper_next_request_forecast.assembly ~wake_bytes:191 ~history_atoms:100 parts_for_assembly
+      (range ~kept_atoms:1 191)
+  in
+  match List.nth slots 2 with
+  | Keeper_next_request_forecast.History { atoms; bytes; of_atoms } ->
+    Alcotest.(check int) "no history atoms travel" 0 atoms;
+    Alcotest.(check int) "no history bytes" 0 bytes;
+    Alcotest.(check int) "of the checkpoint's" 99 of_atoms
+  | _ -> Alcotest.fail "the third slot is the history when no preamble rides"
 
 let () =
   Alcotest.run "keeper_next_request_forecast"
     [ ( "parts"
       , [ Alcotest.test_case "a first-round composition yields the fixed and pinned parts"
             `Quick test_a_first_round_composition_yields_the_fixed_and_pinned_parts
+        ; Alcotest.test_case "the pinned blocks follow the assembly's cache order" `Quick
+            test_the_pinned_blocks_follow_the_assemblys_cache_order
         ; Alcotest.test_case "a post-tool composition says nothing about the pinned blocks"
             `Quick test_a_post_tool_composition_says_nothing_about_the_pinned_blocks
         ; Alcotest.test_case "an operator note alone is not a first round" `Quick
@@ -288,9 +448,19 @@ let () =
     ; ( "carry"
       , [ Alcotest.test_case "a seeded front carries everything from it" `Quick
             test_a_seeded_front_carries_everything_from_it
+        ; Alcotest.test_case "a range opening on an assistant measures its preamble" `Quick
+            test_a_range_opening_on_an_assistant_measures_its_preamble
         ; Alcotest.test_case "a front the history shrank under is dropped" `Quick
             test_a_front_the_history_shrank_under_is_dropped
         ; Alcotest.test_case "without a front everything goes" `Quick
             test_without_a_front_everything_goes
+        ] )
+    ; ( "assembly"
+      , [ Alcotest.test_case "the assembly travels prompt, tools, history, wake, then context"
+            `Quick test_the_assembly_travels_prompt_tools_history_wake_then_context
+        ; Alcotest.test_case "a prepended preamble takes its slot before the history" `Quick
+            test_a_prepended_preamble_takes_its_slot_before_the_history
+        ; Alcotest.test_case "the newest atom alone leaves an empty history slot" `Quick
+            test_the_newest_atom_alone_leaves_an_empty_history_slot
         ] )
     ]

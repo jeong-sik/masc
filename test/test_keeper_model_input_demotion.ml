@@ -789,7 +789,16 @@ let an_ordinary_composition_keeps_the_current_turn_verbatim () =
   in
   Alcotest.(check int) "nothing is demoted" 0
     (List.length composed.Try_provider.planned.Demotion.pending);
-  Alcotest.(check int) "the newest atom goes whole" newest_bytes composed.Try_provider.transmitted_bytes
+  (* A range that starts mid-history goes out with the window's synthetic
+     preamble in front of it, so the request is the newest atom verbatim plus
+     that one message — not the atom's bytes alone. *)
+  let projected = composed.Try_provider.projection.Window.messages in
+  let newest = List.filter (fun m -> not (List.mem m earlier)) messages in
+  let preamble = List.filter (fun m -> not (List.mem m newest)) projected in
+  Alcotest.(check int) "one preamble rides with the range"
+    (List.length newest + 1) (List.length projected);
+  Alcotest.(check int) "the newest atom goes whole beside the preamble"
+    (newest_bytes + bytes_of preamble) composed.Try_provider.transmitted_bytes
 ;;
 
 (* The last resort is not a blank cheque: an atom with nothing demotable in it

@@ -55,8 +55,9 @@ type try_provider_ctx =
        [None] leaves eviction to a refusal alone. *)
     context_marks : Runtime_schema.context_marks option
   ; (* Where the carried range starts when the process holds no ledger for
-       this (keeper, runtime) pair: the range the newest completed turn record
-       on the runtime measured. Read once per attempt, on that path only. *)
+       this (keeper, runtime) pair: the range the newest completed Agent Core
+       turn record on the trace measured, whichever runtime ran it. Read once
+       per attempt, on that path only. *)
     carried_front_seed : unit -> Keeper_carried_front.seed option
   ; base_path : string
   ; keeper_name : string
@@ -626,17 +627,60 @@ let compose_carried_model_input
   { planned; projection; transmitted_bytes; history_atom_count; origin; outlived_seed }
 ;;
 
-let projected_initial_message_count ~provider_config initial_messages =
-  match initial_messages with
-  | [] -> 0
-  | initial ->
-    (match
-       Agent_core.Llm_provider.Complete_common.transmitted_history
-         ~config:provider_config
-         initial
-     with
-     | Ok projected -> List.length projected
-     | Error _ -> List.length initial)
+(* One request: the range composed in the durable vocabulary, its demotions
+   materialized, then the wire's view of the carried range. [composed] and
+   [carried] count atoms of the checkpoint history — the vocabulary of the
+   ledger, the seed and the forecast — and [wire] is the dialect's reasoning
+   projection over [carried] alone, or why it declined. The order is the
+   point: a position measured on one runtime names the same atom on every
+   runtime whatever reasoning each dialect replays or deletes, a dialect that
+   deletes a whole reasoning-only assistant message shortens the wire list
+   and not the history the front is a position in, and the projection walks
+   the carried range rather than the whole checkpoint. Projecting first
+   would make the atom count a property of the dialect, so a front read from
+   another runtime's record could fall under
+   [Keeper_carried_front.for_history] and start the whole history over. *)
+type request_view =
+  { composed : composed
+  ; carried : Agent_core.Types.message list
+  ; wire :
+      ( Agent_core.Types.message list
+        , Agent_core.Llm_provider.Reasoning_history_projection.error )
+        result
+  }
+
+let request_view
+      ~provider_config
+      ~measure_message_bytes
+      ~front
+      ~last_resort
+      ~base_path
+      ~demote_before
+      ~materialize
+      messages
+  =
+  let composed =
+    offload_model_input_cpu (fun () ->
+      compose_carried_model_input
+        ~measure_message_bytes
+        ~front
+        ~last_resort
+        ~base_path
+        ~demote_before
+        messages)
+  in
+  let carried =
+    match composed.planned.Keeper_model_input_demotion.pending with
+    | [] -> composed.projection.Runtime_model_input_tail_window.messages
+    | pending -> materialize ~pending composed.projection.Runtime_model_input_tail_window.messages
+  in
+  let wire =
+    offload_model_input_cpu (fun () ->
+      Agent_core.Llm_provider.Complete_common.transmitted_history
+        ~config:provider_config
+        carried)
+  in
+  { composed; carried; wire }
 ;;
 
 (* The carried range runs here rather than in the caller because its front
@@ -671,9 +715,9 @@ let bounded_model_input_projection
         ~system_prompt:ctx.system_prompt
         ~tools:ctx.tools)
   in
-  let initial_message_index =
-    projected_initial_message_count ~provider_config ctx.initial_messages
-  in
+  (* A position in the durable history, which is what the composition
+     annotates: the messages the turn was seeded with come first. *)
+  let initial_message_index = List.length ctx.initial_messages in
   (* One memo per provider attempt, not per request.  A turn issues one
      projection per provider request — measured on the live wire capture:
      83 requests for turn 12263, 62 for 15638 — and every request re-measures
@@ -704,11 +748,12 @@ let bounded_model_input_projection
   (* Scoped to the attempt, written by the one fiber that drives it. The
      closure below runs per provider request — 62 to 83 of them in one keeper
      turn on the traces this window's own comment cites — and a keeper whose
-     history carries a malformed tag falls back on every one of them, forever.
-     Narrating that per request is the shape this codebase already had to undo
-     once: [Reasoning_history_projection.observe]'s comment records a WARN
-     firing ~973x/day about routine normalisation before it was demoted. *)
-  let fallback_reported = ref false in
+     carried range holds a malformed tag declines on every one of them until
+     the range moves past it. Narrating that per request is the shape this
+     codebase already had to undo once: [Reasoning_history_projection.observe]'s
+     comment records a WARN firing ~973x/day about routine normalisation
+     before it was demoted. *)
+  let decline_reported = ref false in
   (* Once per attempt, not per request, for the same reason: where the range
      started for the first request, and a range that passes the request-body
      cap. Each is a fact an operator reads against the declaration; neither
@@ -720,47 +765,10 @@ let bounded_model_input_projection
      on every request after it. *)
   let cold_seed = lazy (ctx.carried_front_seed ()) in
   fun messages ->
-    (* Measure the history the wire will carry, not the history the checkpoint
-       holds. [Keeper_context_core.message_to_json] is the durable encoder — it
-       must keep reasoning verbatim — but a dialect that replays none of it
-       deletes every such block before serialization. Budgeting against the
-       durable shape charges the window for bytes the provider never receives,
-       and the room they take comes out of transmitted conversation: 23.6% of
-       it on a live 2026-08-14 trace from a reasoning-heavy lane.
-
-       The projection is the same one the serializer runs, through the same
-       per-codec function, and it is idempotent — the backend applying it again
-       to this output finds nothing left to drop. *)
-    let messages, measurement =
-      match
-        Agent_core.Llm_provider.Complete_common.transmitted_history
-          ~config:provider_config
-          messages
-      with
-      | Ok transmitted -> transmitted, Turn_record.Wire_shape
-      | Error error ->
-        (* A refusal here must not become the turn's refusal. The projection
-           validates reasoning provenance across the whole list it is given,
-           and it is given the whole checkpoint — so one malformed tag anywhere
-           in a keeper's lifetime would otherwise abort every later turn, with
-           no typed refusal for the eviction retry to catch. Before this
-           composition existed the same check ran only over the transmitted
-           tail, inside the backend, and still does: falling back to the
-           durable shape restores exactly that scope. The cost is measuring
-           bytes the wire deletes, which is the previous behaviour, not a new
-           failure. *)
-        if not !fallback_reported
-        then (
-          fallback_reported := true;
-          Log.Keeper.warn
-            "%s: model input measured against durable shape; reasoning \
-             projection declined: %s"
-            ctx.keeper_name
-            (Agent_core.Llm_provider.Reasoning_history_projection
-             .error_to_string
-               error));
-        messages, Turn_record.Durable_shape
-    in
+    (* [messages] is the durable history, the checkpoint's messages, in which
+       the ledger, the seed and the forecast count atoms; the range is
+       composed in that vocabulary and the wire's projection runs afterwards
+       over the carried range alone ([request_view]). *)
     let front =
       match
         Keeper_model_input_ledger.Table.lookup
@@ -793,33 +801,84 @@ let bounded_model_input_projection
                 ~measure_message_bytes
                 ~base_path:demotion_base_path
                 messages));
-    let composed =
+    (* RFC-0351 §4: a tool result is cycle-scoped. What the keeper is
+       reasoning over right now is what this turn produced, and
+       [ctx.initial_messages] is exactly the history the turn was seeded
+       with — so everything past it is this turn's own work and stays
+       verbatim, and everything before it was already reported through a
+       receipt or a board post and becomes a readable address. The
+       boundary moves once per turn, so appending a message cannot
+       rewrite the retained prefix. *)
+    let demote_before =
       offload_model_input_cpu (fun () ->
-        (* RFC-0351 §4: a tool result is cycle-scoped. What the keeper is
-           reasoning over right now is what this turn produced, and
-           [ctx.initial_messages] is exactly the history the turn was seeded
-           with — so everything past it is this turn's own work and stays
-           verbatim, and everything before it was already reported through a
-           receipt or a board post and becomes a readable address. The
-           boundary moves once per turn, so appending a message cannot
-           rewrite the retained prefix. *)
-        let demote_before =
-          Runtime_model_input_tail_window.first_atom_at_or_after
-            messages
-            ~message_index:initial_message_index
-        in
-        compose_carried_model_input
-          ~measure_message_bytes
-          ~front
-          ~last_resort
-          ~base_path:demotion_base_path
-          ~demote_before
-          messages)
+        Runtime_model_input_tail_window.first_atom_at_or_after
+          messages
+          ~message_index:initial_message_index)
     in
+    let view =
+      request_view
+        ~provider_config
+        ~measure_message_bytes
+        ~front
+        ~last_resort
+        ~base_path:demotion_base_path
+        ~demote_before
+        ~materialize:(fun ~pending messages ->
+          (* Blob materialization writes files, so it stays on the owning Eio
+             fiber rather than in the CPU domain pool. The store skips writing
+             an address this process already wrote, so on a long-lived keeper
+             the sha256 over every aged body was all this call did, and it
+             held this domain for one uninterrupted run of 0.7 to 1.6 seconds
+             per request (2026-09-16 trace). The attempt's memo answers every
+             request after the first; whatever is left goes to the pool.
+
+             A reverted body is larger than the marker it was measured as; the
+             range is a position, not a size, so the same atoms go out and the
+             provider counts them. *)
+          let outcome =
+            Keeper_model_input_demotion.materialize
+              ~store:(Tool_blob_store.create ~base_path:ctx.base_path)
+              ~addresses:demotion_addresses
+              ~pending
+              messages
+          in
+          outcome.Keeper_model_input_demotion.messages)
+        messages
+    in
+    let composed = view.composed in
     let history_atom_count = composed.history_atom_count in
+    let windowed =
+      match view.wire with
+      | Ok transmitted -> transmitted
+      | Error error ->
+        (* The backend runs this same projection over this same list and
+           refuses the request with its typed error, which the turn's failure
+           route reads; the carried range is handed over for that refusal,
+           and nothing is observed for a body that does not go out. A
+           malformed tag outside the carried range no longer reaches the
+           projection at all. *)
+        if not !decline_reported
+        then (
+          decline_reported := true;
+          Log.Keeper.warn
+            "%s: reasoning projection declined over the carried range; the \
+             backend refuses the request: %s"
+            ctx.keeper_name
+            (Agent_core.Llm_provider.Reasoning_history_projection
+             .error_to_string
+               error));
+        view.carried
+    in
     if not !front_reported
     then (
       front_reported := true;
+      let transmitted_bytes =
+        offload_model_input_cpu (fun () ->
+          List.fold_left
+            (fun sum message -> sum + measure_message_bytes message)
+            0
+            windowed)
+      in
       Log.Keeper.info
         ~keeper_name:ctx.keeper_name
         "model input carried range runtime=%s origin=%s first_atom=%d atoms=%d/%d \
@@ -829,7 +888,7 @@ let bounded_model_input_projection
         composed.projection.Runtime_model_input_tail_window.dropped_atoms
         (history_atom_count - composed.projection.Runtime_model_input_tail_window.dropped_atoms)
         history_atom_count
-        composed.transmitted_bytes
+        transmitted_bytes
         reserved_bytes
         (match ctx.context_marks with
          | Some marks ->
@@ -848,53 +907,32 @@ let bounded_model_input_projection
          seed.atom_count
          history_atom_count
      | Some _ | None -> ());
-    let projection_messages =
-      match composed.planned.Keeper_model_input_demotion.pending with
-      | [] -> composed.projection.Runtime_model_input_tail_window.messages
-      | pending ->
-        (* Blob materialization writes files, so it stays on the owning Eio
-           fiber rather than in the CPU domain pool. The store skips writing
-           an address this process already wrote, so on a long-lived keeper
-           the sha256 over every aged body was all this call did, and it
-           held this domain for one uninterrupted run of 0.7 to 1.6 seconds
-           per request (2026-09-16 trace). The attempt's memo answers every
-           request after the first; whatever is left goes to the pool.
-
-           A reverted body is larger than the marker it was measured as; the
-           range is a position, not a size, so the same atoms go out and the
-           provider counts them. *)
-        let outcome =
-          Keeper_model_input_demotion.materialize
-            ~store:(Tool_blob_store.create ~base_path:ctx.base_path)
-            ~addresses:demotion_addresses
-            ~pending
-            composed.projection.Runtime_model_input_tail_window.messages
-        in
-        outcome.Keeper_model_input_demotion.messages
-    in
-    Option.iter
-      (fun observe ->
-         observe
-           ~measurement
-           (Runtime_model_input_tail_window.observe
-              ~history_atom_count
-              composed.projection))
-      ctx.on_model_input_window_observation;
+    (match view.wire with
+     | Ok _ ->
+       Option.iter
+         (fun observe ->
+            observe
+              ~measurement:Turn_record.Wire_shape
+              (Runtime_model_input_tail_window.observe
+                 ~history_atom_count
+                 composed.projection))
+         ctx.on_model_input_window_observation
+     | Error _ -> ());
     (* What this request carried, for the ledger the after-turn hook writes
        once the provider reports its count, and for the front a refusal
        moves: the carried atom range and the bytes of the per-request tail
        (the pinned messages), so a difference between two requests can be
        attributed to the atoms appended between them. Read back from the
-       transmitted list: the atoms in the final list and [history_atom_count]
-       are absolute on every path, and the preamble is tail, not an atom, as
-       the range itself treats it. *)
+       carried list, in the durable vocabulary: the atoms in it and
+       [history_atom_count] are absolute on every path, and the preamble is
+       tail, not an atom, as the range itself treats it. *)
     (let transmitted_atoms, tail_bytes =
        offload_model_input_cpu (fun () ->
          let history, preamble =
            List.partition
              (fun message ->
                 not (Runtime_model_input_tail_window.is_synthetic_preamble message))
-             projection_messages
+             view.carried
          in
          let labelled, transmitted_atoms =
            Runtime_model_input_tail_window.annotate history
@@ -924,7 +962,6 @@ let bounded_model_input_projection
           ; atom_count = history_atom_count
           ; tail_bytes
           });
-    let windowed = projection_messages in
     match ctx.model_input_projection with
     | None -> Ok windowed
     | Some inner -> inner windowed
@@ -2012,6 +2049,7 @@ module For_testing = struct
   let memoize_message_measurement = memoize_message_measurement
   let message_measurement_hash = Agent_core.Types.Message_value.hash
   let compose_carried_model_input = compose_carried_model_input
+  let request_view = request_view
   let last_resort_demotes = last_resort_demotes
   let offload_model_input_cpu = offload_model_input_cpu
 end

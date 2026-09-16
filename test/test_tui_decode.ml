@@ -1905,12 +1905,23 @@ let verification_request_json ?(evidence = [ "artifact:reports/proof.json" ])
     ; ("evidence_projection_error", evidence_error)
     ]
 
-let verification_snapshot_json ?(total = 3) requests =
+let verification_snapshot_json ?(total = 3) ?(view = "awaiting") ?(offset = 0)
+    ?(truncated = false) ?(unresolved = []) ?backlog_error requests =
   `Assoc
-    [ ("updated_at", `String "2026-08-23T09:00:01Z")
-    ; ("total", `Int total)
-    ; ("requests", `List requests)
-    ]
+    ([ ("updated_at", `String "2026-08-23T09:00:01Z")
+     ; ("total", `Int total)
+     ; ("view", `String view)
+     ; ("offset", `Int offset)
+     ; ("returned", `Int (List.length requests))
+     ; ("truncated", `Bool truncated)
+     ; ( "awaiting_unresolved"
+       , `List (List.map (fun id -> `String id) unresolved) )
+     ; ("requests", `List requests)
+     ]
+     @
+     match backlog_error with
+     | None -> []
+     | Some detail -> [ ("backlog_error", `String detail) ])
 
 (* Tool inventory. The envelope is /dashboard/tools; the rows are
    [tool_inventory_json]. *)
@@ -5330,6 +5341,78 @@ let test_decode_verification_snapshot_reads_the_live_shape () =
              "wire the approval gate" request.Tui_decode.vr_task_title
        | requests ->
            Alcotest.failf "expected one request, got %d" (List.length requests))
+
+(* The wire spelling and its reader are one pair, held here because the two
+   sides of it are separate programs and nothing else makes them agree. *)
+let test_decode_verification_view_round_trips_its_wire_spelling () =
+  List.iter
+    (fun view ->
+      let json =
+        verification_snapshot_json
+          ~view:(Tui_decode.verification_view_to_wire view)
+          []
+      in
+      match Tui_decode.decode_verification_snapshot json with
+      | Ok snapshot ->
+          Alcotest.(check bool)
+            (Tui_decode.verification_view_to_wire view)
+            true
+            (snapshot.Tui_decode.vs_view = view)
+      | Error err -> Alcotest.failf "decode failed: %s" err)
+    [ Tui_decode.Awaiting_queue; Tui_decode.Full_history ]
+
+(* The two lists differ by an order of magnitude on a live workspace, so a
+   name outside the pair cannot be folded into either one. *)
+let test_decode_verification_refuses_an_unknown_view () =
+  match
+    Tui_decode.decode_verification_snapshot
+      (verification_snapshot_json ~view:"pending" [])
+  with
+  | Ok _ -> Alcotest.fail "an unknown view must not decode to a default"
+  | Error _ -> ()
+
+let test_decode_verification_carries_the_page_and_what_it_could_not_resolve ()
+    =
+  match
+    Tui_decode.decode_verification_snapshot
+      (verification_snapshot_json ~total:1401 ~view:"all" ~offset:200
+         ~truncated:true [])
+  with
+  | Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok snapshot ->
+      Alcotest.(check int) "where the page starts" 200
+        snapshot.Tui_decode.vs_offset;
+      Alcotest.(check bool) "more behind it" true
+        snapshot.Tui_decode.vs_truncated;
+      Alcotest.(check bool) "the history, not the queue" true
+        (snapshot.Tui_decode.vs_view = Tui_decode.Full_history)
+
+(* An empty queue and an unresolvable one read the same in the rows. They must
+   not read the same on the screen. *)
+let test_decode_verification_separates_an_empty_queue_from_an_unreadable_one ()
+    =
+  (match
+     Tui_decode.decode_verification_snapshot
+       (verification_snapshot_json ~total:0 [])
+   with
+   | Error err -> Alcotest.failf "decode failed: %s" err
+   | Ok snapshot ->
+       Alcotest.(check (option string)) "nothing is waiting" None
+         snapshot.Tui_decode.vs_backlog_error;
+       Alcotest.(check (list string)) "and nothing is unaccounted for" []
+         snapshot.Tui_decode.vs_awaiting_unresolved);
+  match
+    Tui_decode.decode_verification_snapshot
+      (verification_snapshot_json ~total:0
+         ~backlog_error:"backlog.json: bad json"
+         ~unresolved:[ "vrf-missing" ] [])
+  with
+  | Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok snapshot ->
+      Alcotest.(check (option string)) "the reason survives the empty list"
+        (Some "backlog.json: bad json") snapshot.Tui_decode.vs_backlog_error;
+      Alcotest.(check (list string)) "and so does what it could not resolve"
+        [ "vrf-missing" ] snapshot.Tui_decode.vs_awaiting_unresolved
 
 let test_decode_verification_keeps_no_evidence_apart_from_unreadable () =
   (* An empty list means nothing was submitted. Evidence that exists but could
@@ -9136,6 +9219,14 @@ let () =
       [
         Alcotest.test_case "reads the live shape" `Quick
           test_decode_verification_snapshot_reads_the_live_shape;
+        Alcotest.test_case "the view round-trips its wire spelling" `Quick
+          test_decode_verification_view_round_trips_its_wire_spelling;
+        Alcotest.test_case "an unknown view is refused" `Quick
+          test_decode_verification_refuses_an_unknown_view;
+        Alcotest.test_case "the page and what it could not resolve" `Quick
+          test_decode_verification_carries_the_page_and_what_it_could_not_resolve;
+        Alcotest.test_case "an empty queue is not an unreadable one" `Quick
+          test_decode_verification_separates_an_empty_queue_from_an_unreadable_one;
         Alcotest.test_case "no evidence is not unreadable evidence" `Quick
           test_decode_verification_keeps_no_evidence_apart_from_unreadable;
       ] );

@@ -40,8 +40,9 @@ val keeper_work_as_hb_enabled : bool Runtime_params.param
 
 val keeper_checkpoint_history_retained : int Runtime_params.param
 (** How many past checkpoints of a session are kept beside the canonical one.
-    Each is a whole checkpoint, 111MB on a live keeper, and the dashboard
-    checkpoint list decodes every one it finds. Range \[0, 64\]. *)
+    Each is a whole checkpoint, 111MB on a live keeper, and one dashboard
+    checkpoint request decodes every one it finds beyond the newest, which is
+    what caps the range at \[0, 12\]. *)
 
 val keeper_stage_timing_ring_size : int Runtime_params.param
 (** Stage-timing ring buffer size.  Applied on fiber restart only —

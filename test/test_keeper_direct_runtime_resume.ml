@@ -6,6 +6,13 @@ module Continuation = Keeper_direct_runtime_continuation
 module Checkpoint = Keeper_checkpoint_store
 module Store = Keeper_chat_operation_store
 
+(* What the operator's window currently says. The store takes the window as an
+   argument -- it is reachable from a raw Domain, where reading a setting
+   raises -- so every caller names it. These cases are not about the window and
+   pass what production passes. *)
+let history_retained () =
+  Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained
+
 let require label = function Ok value -> value | Error _ -> fail (label ^ " failed")
 let write path value =
   let channel = open_out_bin path in
@@ -169,7 +176,8 @@ is-default = true
       Keeper_repetition_scope.save context frame;
       let checkpoint_sink (snapshot : Agent_core.Agent.checkpoint_snapshot) =
         let checkpoint = {snapshot.checkpoint with session_id} in
-        Checkpoint.save_agent_core_classified ~session_dir checkpoint |> Result.map (fun _ -> ()) in
+        Checkpoint.save_agent_core_classified
+          ~history_retained:(history_retained ()) ~session_dir checkpoint |> Result.map (fun _ -> ()) in
       let deferred = ref None in
       Option.iter (fun admission -> Continuation.consume ~base_path ~keeper_name ~operation_id admission
         |> require "consume same checkpoint") admission;
@@ -254,7 +262,8 @@ is-default = true
         Agent_core.Types.make_message ~role:Agent_core.Types.Assistant
           [Agent_core.Types.Text "Board receipt: newer shared work already posted once"]];
       turn_count=checkpoint.turn_count + 1} in
-    Checkpoint.save_agent_core_classified ~session_dir checkpoint |> require "advance shared canonical history" |> ignore;
+    Checkpoint.save_agent_core_classified
+      ~history_retained:(history_retained ()) ~session_dir checkpoint |> require "advance shared canonical history" |> ignore;
     if lose_retained then (
       (* Model the observed pre-fix store: the original reference exists in the
          journal, but no retained bytes authorize a replay after restart. *)

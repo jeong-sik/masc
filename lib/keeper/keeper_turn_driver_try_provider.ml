@@ -894,7 +894,10 @@ let bounded_model_input_projection
                  the RFC-0363 demotion effect can be measured on and off in
                  one deployment. Default on preserves current behavior. *)
               ~base_path:
-                (if Feature_flag_registry.get_bool "MASC_KEEPER_MODEL_INPUT_DEMOTION_ENABLED"
+                (if
+                   Env_config_core.get_bool
+                     ~default:true
+                     "MASC_KEEPER_MODEL_INPUT_DEMOTION_ENABLED"
                  then ctx.base_path
                  else "")
               ~demote_before
@@ -1801,6 +1804,8 @@ let max_tokens_truncation_error error =
       | Keeper_internal_error.Terminal_effect_failed _
       | Keeper_internal_error.Provider_attempt_effect_fenced _
       | Keeper_internal_error.Tool_correction_lost _
+      | Keeper_internal_error.Host_stopped_turn _
+      | Keeper_internal_error.Runtime_connection_closed _
       | Keeper_internal_error.Receipt_persistence_failed _
       | Keeper_internal_error.Gate_replay_repair_required _ )
   | None ->

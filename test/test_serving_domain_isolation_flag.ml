@@ -3,8 +3,6 @@
 
 open Alcotest
 
-module Flag = Feature_flag_registry
-
 let key = "MASC_SERVING_DOMAIN_ENABLED"
 
 let with_env value f =
@@ -19,7 +17,6 @@ let with_env value f =
 ;;
 
 let enabled () = Env_config.Transport.serving_domain_enabled ()
-let listed () = Flag.get_bool key
 
 let with_boot_override value f =
   let saved_env = Sys.getenv_opt key in
@@ -46,8 +43,7 @@ let test_default_is_disabled () =
       | Some previous -> Unix.putenv key previous
       | None -> Unix.unsetenv key)
     (fun () ->
-      check bool "default is disabled in Transport reader" false (enabled ());
-      check bool "default is disabled in registry listing" false (listed ()))
+      check bool "default is disabled in Transport reader" false (enabled ()))
 ;;
 
 let test_env_disables_serving_domain () =
@@ -57,11 +53,7 @@ let test_env_disables_serving_domain () =
         check bool
           (Printf.sprintf "env %s disables serving domain" spelling)
           false
-          (enabled ());
-        check bool
-          (Printf.sprintf "registry listing matches env %s" spelling)
-          false
-          (listed ())))
+          (enabled ())))
     [ "0"; "false"; "False"; "FALSE"; "no"; "off" ]
 ;;
 
@@ -72,21 +64,15 @@ let test_env_enables_serving_domain () =
         check bool
           (Printf.sprintf "env %s enables serving domain" spelling)
           true
-          (enabled ());
-        check bool
-          (Printf.sprintf "registry listing matches env %s" spelling)
-          true
-          (listed ())))
+          (enabled ())))
     [ "1"; "true"; "True"; "TRUE"; "yes"; "on" ]
 ;;
 
 let test_boot_override_controls_flag () =
   with_boot_override "0" (fun () ->
-    check bool "boot override 0 disables" false (enabled ());
-    check bool "boot override 0 listed as disabled" false (listed ()));
+    check bool "boot override 0 disables" false (enabled ()));
   with_boot_override "1" (fun () ->
-    check bool "boot override 1 enables" true (enabled ());
-    check bool "boot override 1 listed as enabled" true (listed ()))
+    check bool "boot override 1 enables" true (enabled ()))
 ;;
 
 let () =

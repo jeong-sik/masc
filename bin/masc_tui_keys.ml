@@ -176,7 +176,8 @@ let global =
   ; b Meta "r" "refresh the current surface"
   ; b Meta "i" "focus the composer (message the shown keeper)"
   ; b Meta ":" "command palette"
-  ; b Meta ";" "agenda: what is coming, and who is waiting on you"
+  ; b Meta ";"
+      "agenda: what is coming, and who is waiting on you; Enter opens a row"
   ; b Meta "@" "answering: who is mid-turn or just finished; Enter opens their chat"
   ; b Meta "?" "this help"
   ; b Meta "&"
@@ -541,12 +542,25 @@ let for_surface = function
       [ b Navigate "j/k" "move" ~help:"move; in details, scroll the evidence"
       ; b Navigate "v" "next Planning tab"
           ~help:"on to Task Verdicts, then back to Goals"
+      ; b Navigate "h" "queue / history"
+          ~help:"the queue is what a task is still waiting on; the history is \
+                 every request ever submitted, which nothing removes"
       ; b Act "Right / Enter" "details" ~help:"read the request and evidence"
-      ; b Act "Left / Esc" "back" ~help:"back to the verification queue"
+      ; b Act "Left / Esc" "back" ~help:"back to the list"
       ; b Navigate "[ / ]" "previous / next"
           ~help:"while a detail is open, step to the row before or after it"
-      ; b Act "a" "approve" ~help:"approve the row under the cursor (press twice)"
-      ; b Act "x" "reject" ~help:"reject with a reason ($EDITOR form)"
+      ; b Navigate "< / >" "newer / older"
+          ~help:"step either list a page at a time; one page holds two \
+                 hundred rows, so a shorter queue arrives whole"
+      (* One item, spelled the way Approvals spells its own pair. Apart, the
+         fitter gave up [x] and then [a], and what was left was a queue of
+         work with no visible way to act on it -- which is the one thing this
+         surface exists for. [Masc_tui_footer.never_dropped_keys] pins the
+         pair whole; pinning [a] or [x] alone would pin the [a] that creates
+         a keeper and the [x] that deletes one. *)
+      ; b Act "a / x" "approve / reject"
+          ~help:"a approves the row under the cursor (press twice); x rejects \
+                 with a reason ($EDITOR form)"
       ; b Search "/" "find"
           ~help:"jump the cursor to a matching task id, title, or submitter; \
                  the queue answers this, an open detail does not"

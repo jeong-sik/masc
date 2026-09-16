@@ -110,6 +110,11 @@ type t =
   }
 
 
+let measure (message : Agent_core.Types.message) =
+  String.length
+    (Yojson.Safe.to_string (Keeper_context_core.message_to_json message))
+;;
+
 let carry ~measure ~front ~counted_tokens messages =
   let _labelled, atom_count = Runtime_model_input_tail_window.annotate messages in
   let first_atom, origin, counted_tokens =

@@ -2627,6 +2627,12 @@ type verification_snapshot = {
   vs_backlog_error : string option;
       (** Why the queue could not be resolved. An empty list carrying this is
           not an empty queue. *)
+  vs_backlog_recovery : string option;
+      (** Set when the queue was computed from a recovery snapshot rather than
+          the live backlog. The rows are real and as old as that snapshot, so
+          anything submitted after it is absent. Kept apart from
+          [vs_backlog_error]: one says the queue could not be built, the other
+          says it was built from something older. *)
 }
 
 let decode_string_name_list json key =
@@ -5339,6 +5345,7 @@ let decode_verification_snapshot json =
     decode_string_name_list json "awaiting_unresolved"
   in
   let* vs_backlog_error = optional_string_field json "backlog_error" in
+  let* vs_backlog_recovery = optional_string_field json "backlog_recovery" in
   Ok
     { vs_requests
     ; vs_total
@@ -5347,6 +5354,7 @@ let decode_verification_snapshot json =
     ; vs_truncated
     ; vs_awaiting_unresolved
     ; vs_backlog_error
+    ; vs_backlog_recovery
     }
 
 let decode_keeper_call json =

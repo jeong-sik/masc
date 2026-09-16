@@ -28,9 +28,9 @@ let class_of (err : Agent_core.Error.t) =
   (* A MASC error rides the carrier, so the class is the constructor it
      carries, not the sentence the carrier's message renders (RFC-0454). *)
   | Agent_core.Error.Internal_carried _ as carried ->
-    (match Masc.Keeper_internal_error.classify_masc_internal_error carried with
+    (match Keeper_internal_error.classify_masc_internal_error carried with
      | Some internal ->
-       "masc:" ^ Masc.Keeper_internal_error.kind_of_masc_internal_error internal
+       "masc:" ^ Keeper_internal_error.kind_of_masc_internal_error internal
      | None -> "internal")
   | other -> "unexpected:" ^ Agent_core.Error.to_string other
 
@@ -102,29 +102,29 @@ let test_every_variant_lands_in_its_class () =
    is what the chat pane and the operator read. *)
 let test_host_stop_and_closed_connection_carry_their_fields () =
   let classify error =
-    Masc.Keeper_internal_error.classify_masc_internal_error
+    Keeper_internal_error.classify_masc_internal_error
       (Map.codex_error_to_core_error error)
   in
   (match classify Codex.Runtime_shutting_down with
-   | Some (Masc.Keeper_internal_error.Host_stopped_turn { runtime_id; stop }) ->
+   | Some (Keeper_internal_error.Host_stopped_turn { runtime_id; stop }) ->
      Alcotest.(check string) "runtime" "codex_app_server" runtime_id;
      Alcotest.(check bool)
        "graceful shutdown"
        true
-       (stop = Masc.Keeper_internal_error.Host_graceful_shutdown)
+       (stop = Keeper_internal_error.Host_graceful_shutdown)
    | Some _ | None -> Alcotest.fail "host shutdown did not decode");
   (match classify Codex.Turn_interrupted with
-   | Some (Masc.Keeper_internal_error.Host_stopped_turn { stop; _ }) ->
+   | Some (Keeper_internal_error.Host_stopped_turn { stop; _ }) ->
      Alcotest.(check bool)
        "runtime-reported interrupt"
        true
-       (stop = Masc.Keeper_internal_error.Runtime_reported_interrupt)
+       (stop = Keeper_internal_error.Runtime_reported_interrupt)
    | Some _ | None -> Alcotest.fail "turn interrupt did not decode");
   match
     classify (Codex.Process_exited { detail = "stdout closed"; turn_accepted = true })
   with
   | Some
-      (Masc.Keeper_internal_error.Runtime_connection_closed
+      (Keeper_internal_error.Runtime_connection_closed
          { runtime_id; detail; turn_accepted }) ->
     Alcotest.(check string) "runtime" "codex_app_server" runtime_id;
     Alcotest.(check string) "detail" "stdout closed" detail;

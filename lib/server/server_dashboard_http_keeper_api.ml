@@ -919,8 +919,13 @@ let handle_keeper_get_subroutes state req request reqd =
           Option.bind before_raw (fun raw -> float_of_string_opt (String.trim raw))
         in
         let config = Mcp_server.workspace_config state in
-        Server_auth.respond_json_value_with_cors ~status:`OK request reqd
-          (keeper_chat_history_page_json config name ~before))
+        (* The window read, its parse and the page's JSON are one job on the
+           domain pool, as the cached whole-history read below already is. *)
+        let page =
+          Domain_pool_ref.submit_io_or_inline (fun () ->
+            keeper_chat_history_page_json config name ~before)
+        in
+        Server_auth.respond_json_value_with_cors ~status:`OK request reqd page)
   else if ends_with "/chat/history" then
     let name = extract_name "/chat/history" in
     if name = "" then

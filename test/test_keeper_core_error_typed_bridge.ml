@@ -916,19 +916,27 @@ let test_the_codec_refuses_what_it_did_not_write () =
     ]
 ;;
 
-let test_runtime_stops_have_a_one_line_summary () =
-  Alcotest.(check (option string))
-    "a host stop says the host stopped it"
-    (Some
-       "MASC shut down while runtime codex_app_server was running this turn; \
-        the turn was stopped, not failed.")
-    (KTD.summary_of_masc_internal_error host_shutdown);
-  Alcotest.(check (option string))
-    "a closed connection says when it closed"
-    (Some
-       "Runtime codex_app_server closed its connection after the turn was \
-        submitted: stdout closed")
-    (KTD.summary_of_masc_internal_error connection_closed)
+(* The chat row's only carrier for the cause is its text until RFC-0454 P3
+   gives the row a typed [failure] field, and a summary would take that text.
+   So these two answer [None] here, exactly as the two fences do, and the
+   keeper's user-facing message keeps the envelope the pane reads. *)
+let test_runtime_stops_keep_their_envelope_in_the_row () =
+  List.iter
+    (fun error ->
+       Alcotest.(check (option string))
+         "no summary displaces the envelope"
+         None
+         (KTD.summary_of_masc_internal_error error);
+       let message =
+         AE.user_message_of_core_error
+           (KTD.core_error_of_masc_internal_error error)
+       in
+       Alcotest.(check bool)
+         "the row text still carries the typed failure"
+         true
+         (Option.is_some
+            (KTD.classify_masc_internal_error_of_string message)))
+    [ host_shutdown; connection_closed ]
 ;;
 
 (* The typed value must not move the lane. A closed connection reached the
@@ -1016,9 +1024,9 @@ let () =
             `Quick
             test_the_codec_refuses_what_it_did_not_write
         ; Alcotest.test_case
-            "both stops have a one-line summary"
+            "both stops keep their envelope in the row"
             `Quick
-            test_runtime_stops_have_a_one_line_summary
+            test_runtime_stops_keep_their_envelope_in_the_row
         ; Alcotest.test_case
             "a closed connection rotates exactly as before"
             `Quick

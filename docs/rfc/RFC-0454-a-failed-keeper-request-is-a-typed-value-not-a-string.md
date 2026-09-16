@@ -281,9 +281,12 @@ P2 는 표의 한 줄이지만 한 번에 들어가지 않는다. 첫 조각은 
   `[masc_agent_core_error]` 표식을 찾는 부분은 남고(P3 가 지운다), 찾은 JSON 은
   `parse_masc_internal_error_json` 으로 읽어 생성자로 판단한다. fence 안에 들어간
   원인도 `Fenced_masc` 를 따라 내려가며 찾는다.
-- `summary_of_masc_internal_error` 가 두 kind 에 한 줄을 돌려준다. 그래서 fence 없는
-  실패 row 의 `content` 는 봉투가 아니라 그 한 줄이 된다 — 그 모양에서는 lifecycle
-  배지가 P3 (row 가 `failure` 필드를 갖는 시점) 까지 없다.
+- `summary_of_masc_internal_error` 는 두 kind 에 `None` 을 돌려준다. fence 두 개가
+  `None` 인 이유와 같다. row 가 원인을 담는 곳은 아직 글자뿐이고
+  `user_message_of_core_error` 는 요약이 있으면 봉투 대신 그걸 넣는다. 요약을 주면
+  화면은 값 대신 문장을 받게 되는데, 그게 이 RFC 가 되돌리려는 거래다. P3 에서 row 가
+  `failure` 필드를 가지면 그때 한 줄을 돌려준다. 그래서 fence 없는 host 정지·연결
+  끊김 row 도 지금 그대로 lifecycle 배지를 그린다.
 
 P1a 와 P1b 는 각각 혼자 들어갈 수 있다. 단 P1b 는 fenced `diagnostic` 을 읽는 TUI 두 곳을 같은 PR 에서 함께 고쳐야 한다. 안 그러면 host-shutdown 표시가 조용히 사라진다(`bin/masc_tui_keeper_chat_history.ml` 170, 테스트는 손으로 만든 옛 모양을 쓰므로 초록으로 남는다: `test/test_tui_keeper_chat_history.ml` 358).
 

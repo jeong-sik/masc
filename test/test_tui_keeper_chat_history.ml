@@ -502,19 +502,51 @@ let test_a_fenced_core_cause_draws_nothing () =
     (History.present_delivery_failure failure)
 ;;
 
-(* An unfenced host stop no longer reaches the pane as an envelope: the keeper
-   now has a one-line summary for it, and that summary is what the row holds.
-   The pane draws it as the error it is and invents no lifecycle around it.
-   RFC-0454 P3 gives the row its own failure field and the badge comes back
-   for this shape. *)
-let test_an_unfenced_host_stop_reads_as_its_summary () =
+(* A runtime stop does not have to be fenced: a host shutdown observed with no
+   effect attempted reaches the row on its own. The row's text is the only
+   carrier the pane has until P3 gives the row a typed failure field, so the
+   keeper leaves the envelope there and the pane reads the value out of it.
+   Before RFC-0454 P2 this shape was recognised by searching the row for the
+   sentence the runtime printed. *)
+let test_an_unfenced_host_stop_still_presents_the_lifecycle () =
   let failure = persisted_failure_row host_shutdown in
-  check string "the row says what happened"
-    "Keeper request failed: MASC shut down while runtime codex_app_server was \
-     running this turn; the turn was stopped, not failed."
-    failure;
-  check (option (pair string bool)) "no lifecycle was invented" None
-    (History.present_delivery_failure failure)
+  match History.present_delivery_failure failure with
+  | None -> fail "an unfenced host stop lost its lifecycle"
+  | Some (presented, recovered) ->
+    check bool "still pending" false recovered;
+    check string "no duplicate-call claim without a fence"
+      "Runtime shutdown interrupted this turn · recovery pending · details in Logs"
+      presented
+;;
+
+let test_an_unfenced_closed_connection_still_presents_the_lifecycle () =
+  let failure = persisted_failure_row connection_closed in
+  match History.present_delivery_failure failure with
+  | None -> fail "an unfenced closed connection lost its lifecycle"
+  | Some (presented, recovered) ->
+    check bool "still pending" false recovered;
+    check string "the provider half of the same pair"
+      "Provider connection closed during this turn · recovery pending · details in Logs"
+      presented
+;;
+
+(* The lane recovering is what the operator asks first, and it is read off the
+   rows after the failure. An unfenced stop earns that answer too. *)
+let test_an_unfenced_stop_is_marked_recovered_by_a_later_reply () =
+  let decoded =
+    decode
+      (`List
+         [ row ~ts:1.0 ~role:"user" "brief me"
+         ; row ~ts:2.0 ~role:"assistant" ~kind:"transport_failure"
+             (persisted_failure_row connection_closed)
+         ; autonomous_turn ~ts:3.0 ~content:(`String "briefing complete") []
+         ])
+  in
+  match (List.nth decoded.History.rows 1).History.kind with
+  | History.Delivery_failed { recovered_at; _ } ->
+    check (option (float 0.0)) "later reply is recovery evidence" (Some 3.0)
+      recovered_at
+  | _ -> fail "expected a delivery failure"
 ;;
 
 let test_unrelated_failure_is_not_marked_recovered () =
@@ -1964,8 +1996,12 @@ let () =
             test_runtime_interruption_becomes_a_recovered_lifecycle
         ; test_case "stdout close stays pending without a later reply" `Quick
             test_stdout_close_stays_pending_without_a_later_reply
-        ; test_case "an unfenced host stop reads as its summary" `Quick
-            test_an_unfenced_host_stop_reads_as_its_summary
+        ; test_case "an unfenced host stop still presents the lifecycle" `Quick
+            test_an_unfenced_host_stop_still_presents_the_lifecycle
+        ; test_case "an unfenced closed connection still presents it" `Quick
+            test_an_unfenced_closed_connection_still_presents_the_lifecycle
+        ; test_case "an unfenced stop is marked recovered by a later reply" `Quick
+            test_an_unfenced_stop_is_marked_recovered_by_a_later_reply
         ; test_case "a cause two fences down keeps the host-shutdown badge" `Quick
             test_a_cause_two_fences_down_still_names_the_shutdown
         ; test_case "a carried MASC cause of another kind draws nothing" `Quick

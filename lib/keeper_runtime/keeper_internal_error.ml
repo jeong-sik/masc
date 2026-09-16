@@ -702,23 +702,15 @@ let summary_of_masc_internal_error = function
          "Terminal tool effect failed (effect_disposition=%s): %s"
          (Tool_result.failure_effect_disposition_to_string effect_disposition)
          (Keeper_terminal_effect_detail.summary detail))
-  | Host_stopped_turn { runtime_id; stop = Host_graceful_shutdown } ->
-    Some
-      (Printf.sprintf
-         "MASC shut down while runtime %s was running this turn; the turn was stopped, not failed."
-         (nonempty_or_unknown runtime_id))
-  | Host_stopped_turn { runtime_id; stop = Runtime_reported_interrupt } ->
-    Some
-      (Printf.sprintf
-         "Runtime %s reported this turn as interrupted; the turn was stopped, not failed."
-         (nonempty_or_unknown runtime_id))
-  | Runtime_connection_closed { runtime_id; detail; turn_accepted } ->
-    Some
-      (Printf.sprintf
-         "Runtime %s closed its connection %s the turn was submitted: %s"
-         (nonempty_or_unknown runtime_id)
-         (if turn_accepted then "after" else "before")
-         (nonempty_or_unknown detail))
+  (* [None] for the same reason the two fences below are [None], and it is the
+     same reason for all four: a chat row's only carrier for the cause is its
+     text, and [Keeper_agent_error.user_message_of_core_error] puts a summary
+     there in place of the envelope the pane reads. Answering here would hand
+     the pane a sentence and take the value away, which is the exchange
+     RFC-0454 exists to undo. The row gets a typed [failure] field in P3
+     (RFC-0454 D3); these arms answer then. *)
+  | Host_stopped_turn _
+  | Runtime_connection_closed _
   | Resumable_cli_session _
   | Internal_unhandled_exception _
   | Internal_bridge_exception _

@@ -233,21 +233,25 @@ let extract_tool_marker s =
 
 ;;
 
-let tool_marker_color = function
-  | "✓" | "√" -> Theme.ok ()
-  | "✗" | "×" | "!" -> Ansi.bold ^ Theme.bad ()
-  | "▶" | "?" -> Theme.warn ()
-  | "◌" -> Theme.info ()
-  | _ -> Ansi.reset
-
-;;
-
 (* The row this dressing sits in opens dim, and a coloured clause used to
    close with a bare [Ansi.reset], snapping the plain text after it -- args,
    counts, the dot between clauses -- back to full foreground. Every close
    reopens the rung the clause sits in, the way {!Chat_theme.body_context}
    closes markdown spans inside a dim body. *)
 let tool_reopen = Ansi.reset ^ Ansi.dim
+
+;;
+
+(* SGR 1 does not clear SGR 2: inside the dim row, bold alone would leave a
+   failure as faint as the work around it. The bad arms reset before they
+   shout -- here and in the [failed] words of [dress_tool_clause] -- and the
+   [tool_reopen] closing the clause re-contains the line to the dim rung. *)
+let tool_marker_color = function
+  | "✓" | "√" -> Theme.ok ()
+  | "✗" | "×" | "!" -> Ansi.reset ^ Ansi.bold ^ Theme.bad ()
+  | "▶" | "?" -> Theme.warn ()
+  | "◌" -> Theme.info ()
+  | _ -> tool_reopen
 
 ;;
 
@@ -286,7 +290,7 @@ let dress_tool_clause (clause : string) : string =
               if String.ends_with ~suffix:"returned" p then
                 Printf.sprintf "%s%s%s" (Theme.ok ()) p tool_reopen
               else if contains_sub p "failed" || contains_sub p "never returned" then
-                Printf.sprintf "%s%s%s" (Ansi.bold ^ Theme.bad ()) p tool_reopen
+                Printf.sprintf "%s%s%s" (Ansi.reset ^ Ansi.bold ^ Theme.bad ()) p tool_reopen
               else if contains_sub p "awaiting" then
                 Printf.sprintf "%s%s%s" (Theme.warn ()) p tool_reopen
               else if contains_sub p "running" then
@@ -298,7 +302,7 @@ let dress_tool_clause (clause : string) : string =
       else if String.ends_with ~suffix:"returned" c then
         Printf.sprintf "%s%s%s" (Theme.ok ()) c tool_reopen
       else if contains_sub c "failed" || contains_sub c "never returned" then
-        Printf.sprintf "%s%s%s" (Ansi.bold ^ Theme.bad ()) c tool_reopen
+        Printf.sprintf "%s%s%s" (Ansi.reset ^ Ansi.bold ^ Theme.bad ()) c tool_reopen
       else if contains_sub c "awaiting" then
         Printf.sprintf "%s%s%s" (Theme.warn ()) c tool_reopen
       else if contains_sub c "running" then
@@ -417,10 +421,7 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
           | _, Message_layout.Shade_quoted ->
               Printf.sprintf "%s\xe2\x94\x82%s " (Theme.recede ()) Ansi.reset
         in
-        let body_style =
-          if is_tool then context.opening
-          else Chat_theme.body row.style
-        in
+        let body_style = context.opening in
         if context.ambient_background && not is_tool then
           box_line_styled buf cols ~style:context.opening
             (Printf.sprintf "%s  %s" margin (dress rest))
@@ -429,6 +430,7 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
             (Printf.sprintf "%s%s%s%s%s" margin rail
                body_style (dress rest) Ansi.reset))
       else
+        (* [rows_of_entry] prefixes every body chunk with the two spaces the guard matches, so this arm stays as a safety net. *)
         box_line_styled buf cols ~style:context.opening (dress text)
   | Message_layout.Metadata (Message_layout.Timeline_break _) ->
       box_line_styled buf cols ~style:(Theme.info () ^ Ansi.bold) row.text

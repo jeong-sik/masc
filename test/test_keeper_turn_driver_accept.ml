@@ -116,7 +116,6 @@ streaming = true
 [test_provider.test_model]
 is-default = true
 max-concurrent = 1
-max-request-body-bytes = 65536
 |}
 
 let with_direct_retry_runtime f =

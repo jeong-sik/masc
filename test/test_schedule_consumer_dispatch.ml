@@ -473,6 +473,7 @@ let create_invalid_keeper_wake_schedule config =
 let tick_ok config ~now =
   match
     Schedule_runner.tick ~consumer:Server_schedule_consumers.consumer config ~now
+      ~retention_days:Schedule_store.terminal_schedule_retention_days
   with
   | Ok result -> result
   | Error err -> fail (Schedule_runner.runner_error_to_string err)
@@ -1574,7 +1575,8 @@ let test_shutdown_join_waits_for_inflight_schedule_intake () =
   ignore (persist_keeper_meta config keeper_name : Keeper_meta_contract.keeper_meta);
   let request = create_keeper_wake_schedule config in
   let signal =
-    match Schedule_runner.tick config ~now:201.0 with
+    match Schedule_runner.tick config ~now:201.0
+      ~retention_days:Schedule_store.terminal_schedule_retention_days with
     | Ok { emitted = [ signal ]; _ } -> signal
     | Ok _ -> fail "expected one durable schedule signal"
     | Error error -> fail (Schedule_runner.runner_error_to_string error)
@@ -1705,7 +1707,8 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
     (fun () ->
       let request = create_keeper_wake_schedule config in
       let signal =
-        match Schedule_runner.tick config ~now:201.0 with
+        match Schedule_runner.tick config ~now:201.0
+          ~retention_days:Schedule_store.terminal_schedule_retention_days with
         | Ok { emitted = [ signal ]; _ } -> signal
         | Ok _ -> fail "expected one durable schedule signal"
         | Error err -> fail (Schedule_runner.runner_error_to_string err)

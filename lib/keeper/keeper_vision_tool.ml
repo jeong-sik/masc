@@ -256,11 +256,7 @@ let wiring_rejected = function
 let candidate_capacity_http_error = function
   | Llm_provider.Http_client.HttpError { code = 413; _ }
   | Llm_provider.Http_client.ProviderFailure
-      { kind =
-          (Llm_provider.Http_client.Request_body_too_large _
-          | Llm_provider.Http_client.Context_overflow _)
-      ; _
-      } -> true
+      { kind = Llm_provider.Http_client.Context_overflow _; _ } -> true
   | _ -> false
 
 (* Every other 4xx is this binding's verdict on this request: a parameter
@@ -516,109 +512,6 @@ let official_failure_effect : Fusion_official_client.failure -> Tool_result.fail
   | Codex_failure _ | Claude_failure _ | Antigravity_failure _ -> Effect_outcome_unknown
 ;;
 
-(* One walk shrinks the image at most once per distinct edge it is asked
-   for. The live fleet declares three distinct caps, so a 4K screenshot costs
-   at most two extra scaler runs on top of the first downscale. *)
-let shrink_for_edge ~(req : Va.request) ~cache edge =
-  match Hashtbl.find_opt cache edge with
-  | Some cached -> cached
-  | None ->
-    let shrunk =
-      match
-        Keeper_vision_downscale.downscale_with_status
-          ~max_dimension:edge
-          ~media_type:req.Va.image_media_type
-          ~bytes:req.Va.image_bytes
-          ()
-      with
-      | (media_type, bytes), Keeper_vision_downscale.Downscaled _ -> Some (media_type, bytes)
-      | ( _
-        , ( Keeper_vision_downscale.Unchanged_within_bounds _
-          | Keeper_vision_downscale.Unchanged_unknown_dimensions
-          | Keeper_vision_downscale.Downscale_fallback_error _ ) ) -> None
-    in
-    Hashtbl.replace cache edge shrunk;
-    shrunk
-;;
-
-let longest_edge bytes =
-  match Keeper_vision_downscale.detect_dimensions bytes with
-  | None -> None
-  | Some { Keeper_vision_downscale.width; height } -> Some (max width height)
-;;
-
-(* The request this candidate gets: the image as it is when it fits under
-   the candidate's cap, a copy shrunk once to the edge the byte ratio
-   predicts when it does not, and no request at all when neither fits. The
-   client still measures the exact serialized body before dispatch. *)
-let fit_request_to_stated_cap ~(req : Va.request) ~cache ~cap_bytes =
-  let query_bytes = String.length req.Va.query in
-  let min_edge = Env_config_keeper.KeeperVision.max_dimension_floor in
-  let plan_for bytes =
-    Keeper_vision_cap_fit.plan
-      ~cap_bytes
-      ~image_bytes:(String.length bytes)
-      ~query_bytes
-      ~longest_edge:(longest_edge bytes)
-      ~min_edge
-  in
-  match plan_for req.Va.image_bytes with
-  | Keeper_vision_cap_fit.Sends_as_is -> Ok req
-  | Keeper_vision_cap_fit.Cannot_fit { needed_bytes; cap_bytes } ->
-    Error (needed_bytes, cap_bytes)
-  | Keeper_vision_cap_fit.Shrink_longest_edge_to edge ->
-    (match shrink_for_edge ~req ~cache edge with
-     | None ->
-       Error
-         ( Keeper_vision_cap_fit.needed_bytes
-             ~image_bytes:(String.length req.Va.image_bytes)
-             ~query_bytes
-         , cap_bytes )
-     | Some (image_media_type, image_bytes) ->
-       (match plan_for image_bytes with
-        | Keeper_vision_cap_fit.Sends_as_is ->
-          Ok { req with Va.image_media_type; image_bytes }
-        | Keeper_vision_cap_fit.Shrink_longest_edge_to _
-        | Keeper_vision_cap_fit.Cannot_fit _ ->
-          Error
-            ( Keeper_vision_cap_fit.needed_bytes
-                ~image_bytes:(String.length image_bytes)
-                ~query_bytes
-            , cap_bytes )))
-;;
-
-(* No cap means nothing to fit to. #34163 let a runtime dispatch without a
-   caller byte ceiling, which turned [validate_request_body_cap] into an
-   [int option] and left this call site reading it as an [int] -- main did not
-   compile. Absence is not a number to shrink towards: the request goes as it
-   is, and the client still measures the serialized body before dispatch.
-
-   Absence is also the common case, not an edge: 117 of the 155 runtime
-   bindings in this workspace state no max-request-body-bytes (2026-09-08). A
-   reading that treated [None] as a refusal would have stopped vision on all
-   of them. *)
-let fit_request_to_cap ~(req : Va.request) ~cache ~cap_bytes =
-  match cap_bytes with
-  | None -> Ok req
-  | Some cap_bytes -> fit_request_to_stated_cap ~req ~cache ~cap_bytes
-;;
-
-
-(* The same kind the client raises when it measures the serialized body,
-   so the walk's exhaustion classifies as capacity; the message says the
-   number is this walk's prediction, made before any body was serialized. *)
-let predicted_size_failure ~actual_bytes ~limit_bytes =
-  Llm_provider.Http_client.ProviderFailure
-    { kind = Llm_provider.Http_client.Request_body_too_large { actual_bytes; limit_bytes }
-    ; message =
-        Printf.sprintf
-          "predicted request body of %d bytes exceeds the candidate's %d-byte cap; \
-           skipped before dispatch"
-          actual_bytes
-          limit_bytes
-    }
-;;
-
 (* A 402 states the binding's account cannot pay. The keeper walk records the
    same fact for a typed [PaymentRequired]; the read walk meets it as HTTP and
    records it here so the next read starts elsewhere (RFC-0440 §3). Any answer
@@ -648,7 +541,6 @@ let run_candidates_outcome
     ~attempt_index
     candidates
   =
-  let cache = Hashtbl.create 4 in
   let candidate_count = List.length candidates in
   let rec loop ~last_error ~attempt_index = function
     | [] ->
@@ -737,35 +629,10 @@ let run_candidates_outcome
           rest
       in
       let config = provider_for_vision provider_config in
-      match Runtime.validate_request_body_cap ~runtime_id config with
-      | Error error ->
-        record_vision_candidate_attempt
-          ?tool_use_id ?trace_id ~runtime_id ~result:"error"
-          ~reason:"invalid_request_body_cap" ~duration_ms:0.0
-          ~success:false ();
-        Vo_provider
-          { failure_class = Tool_result.Runtime_failure
-          ; detail = Runtime.request_body_cap_error_to_string error
-          }
-      | Ok cap_bytes ->
-        (match fit_request_to_cap ~req ~cache ~cap_bytes with
-         | Error (actual_bytes, limit_bytes) ->
-           record_vision_candidate_attempt
-             ?tool_use_id ?trace_id ~runtime_id ~result:"skipped"
-             ~reason:"image_exceeds_cap" ~duration_ms:0.0 ~success:false ();
-           (* No call was made, so no backoff and no attempt counted. The
-              size failure is kept as the last error so an exhausted walk
-              reports why the image went unread. *)
-           loop
-             ~last_error:
-               (Some (Candidate_provider_error (predicted_size_failure ~actual_bytes ~limit_bytes)))
-             ~attempt_index
-             rest
-         | Ok fitted ->
         (match
            (try
               Keeper_provider_subcall.complete ?override:complete ~sw ~net ~clock
-                ~config ~messages:[ message_of_request fitted ] ()
+                ~config ~messages:[ message_of_request req ] ()
             with
             | Eio.Cancel.Cancelled _ as exn ->
               record_vision_candidate_cancelled
@@ -890,7 +757,7 @@ let run_candidates_outcome
                  ?tool_use_id ?trace_id ~runtime_id ~result:"ok"
                  ~reason:"provider_response" ~duration_ms:0.0
                  ~success:true ();
-               outcome)))
+               outcome))
   in
   loop ~last_error ~attempt_index candidates
 

@@ -1208,9 +1208,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
        524288, and one live keeper spent 29 minutes per attempt discovering it
        (2026-08-24). A runtime that declares nothing keeps the old behaviour.
 
-       The ceiling is the smaller of the model's max-prompt-bytes and the
-       binding's max-request-body-bytes, which is what
-       [declared_input_byte_ceiling_of_runtime_id] answers. keeper_unified_turn
+       The ceiling is the model's max-prompt-bytes. keeper_unified_turn
        already sizes the pinned briefing from the same number and says the
        projection cuts the conversation window; this is that cut. *)
     Keeper_context_overflow_shrink_state.starting_capacity
@@ -1218,7 +1216,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
       ~runtime_id
       ~max_capacity:
         (Option.value
-           (Runtime.declared_input_byte_ceiling_of_runtime_id runtime_id)
+           (Runtime.max_prompt_bytes_of_runtime_id runtime_id)
            ~default:unbounded_model_input_capacity_bytes)
   in
   let result =

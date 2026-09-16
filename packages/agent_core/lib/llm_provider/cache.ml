@@ -42,7 +42,6 @@ let request_fingerprint
                      ; request_path
                      ; max_tokens
                      ; max_context
-                     ; max_request_body_bytes
                      ; temperature
                      ; top_p
                      ; top_k
@@ -77,8 +76,8 @@ let request_fingerprint
     config
   in
   (* Excluded, and why. These do not change what the provider is asked:
-     [max_request_body_bytes], [connect_timeout_s] and
-     [max_concurrent_requests] are transport limits enforced on this side;
+     [connect_timeout_s] and [max_concurrent_requests] are transport
+     limits enforced on this side;
      [return_progress] and [tool_stream] select how the answer is delivered,
      not what is asked; [internal_model_rotation_count] is a local attempt
      counter; [supports_*_override] and [model_capabilities_override] gate
@@ -93,7 +92,6 @@ let request_fingerprint
      before the cache lookup, so a refused request never reaches the key. *)
   (* See the exclusion note above for why this one is not in the key. *)
   ignore credential_source;
-  ignore max_request_body_bytes;
   ignore connect_timeout_s;
   ignore max_concurrent_requests;
   ignore return_progress;

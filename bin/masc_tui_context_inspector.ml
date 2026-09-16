@@ -77,7 +77,6 @@ type forecast_carried_origin =
   | Carried_from_ledger
   | Carried_from_turn_record of { turn : int }
   | Carried_halved_after_refusal of { retry : int }
-  | Carried_fit_to_request_cap
   | Carried_whole_history
 
 type forecast_carried =
@@ -92,7 +91,6 @@ type forecast_candidate =
   { runtime_id : string
   ; lane : forecast_lane
   ; marks : forecast_marks option
-  ; request_cap_bytes : int option
   ; parts : (forecast_parts, string) result
   ; history_atoms : int
   ; carried : forecast_carried option
@@ -632,7 +630,6 @@ let decode_forecast_origin = function
       let* retry_json = field "retry" fields in
       let* retry = nonnegative_int "origin.retry" retry_json in
       Ok (Carried_halved_after_refusal { retry })
-    else if String.equal kind "fit_to_request_cap" then Ok Carried_fit_to_request_cap
     else if String.equal kind "whole_history" then Ok Carried_whole_history
     else Error ("origin.kind is not a known kind: " ^ kind)
   | _ -> Error "origin is not an object"
@@ -667,21 +664,13 @@ let decode_forecast_candidate = function
     let* lane = decode_forecast_lane lane_json in
     let* marks_json = field "marks" fields in
     let* marks = decode_forecast_marks marks_json in
-    let* cap_json = field "request_cap_bytes" fields in
-    let* request_cap_bytes =
-      match cap_json with
-      | `Null -> Ok None
-      | json ->
-        let* cap = nonnegative_int "candidate.request_cap_bytes" json in
-        Ok (Some cap)
-    in
     let* parts_json = field "parts" fields in
     let* parts = decode_forecast_parts parts_json in
     let* atoms_json = field "history_atoms" fields in
     let* history_atoms = nonnegative_int "candidate.history_atoms" atoms_json in
     let* carried_json = field "carried" fields in
     let* carried = decode_forecast_carried carried_json in
-    Ok { runtime_id; lane; marks; request_cap_bytes; parts; history_atoms; carried }
+    Ok { runtime_id; lane; marks; parts; history_atoms; carried }
   | _ -> Error "candidate is not an object"
 
 let decode_forecast = function

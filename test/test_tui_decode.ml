@@ -5890,8 +5890,6 @@ let picker_default_runtime =
     ; ("max_context_source", `String "override_clamped_by_capability")
     ; ("max_output_tokens", `Int 8192)
     ; ("is_local", `Bool false)
-    ; ("keeper_dispatchable", `Bool true)
-    ; ("keeper_dispatch_blocked_reason", `Null)
     ; ("is_default", `Bool false)
     ]
 
@@ -5912,8 +5910,6 @@ let runtime_resolved_json =
               ; ("max_context_source", `String "capability")
               ; ("max_output_tokens", `Null)
               ; ("is_local", `Bool true)
-              ; ("keeper_dispatchable", `Bool false)
-              ; ("keeper_dispatch_blocked_reason", `String "not a keeper model")
               ; ("is_default", `Bool false)
               ]
           ] )
@@ -5951,7 +5947,6 @@ let test_decode_runtime_resolved () =
        | first :: _ ->
            Alcotest.(check string) "id" "ollama_cloud.deepseek"
              first.Tui_decode.ro_id;
-           Alcotest.(check bool) "dispatchable" true first.ro_dispatchable;
            Alcotest.(check bool) "top-level default" true first.ro_is_default;
            Alcotest.(check int) "effective context" 200000 first.ro_effective_max_context;
            Alcotest.(check string) "context provenance" "override_clamped_by_capability"
@@ -6092,8 +6087,6 @@ let resolved_runtime id provider model =
     ; "max_output_tokens", `Int 8192
     ; "is_local", `Bool false
     ; "is_default", `Bool false
-    ; "keeper_dispatchable", `Bool true
-    ; "keeper_dispatch_blocked_reason", `Null
     ]
 
 let runtime_lane ?(preferred = None) ?(preferred_at = None) id runtime_ids =
@@ -6285,7 +6278,6 @@ let test_runtime_catalog_probe_is_independent_of_dispatch () =
   | Ok snapshot ->
       let runtime = List.find (fun row -> row.Tui_decode.ro_id = "runtime-c")
           snapshot.rss_resolved.rrs_runtimes in
-      Alcotest.(check bool) "dispatch remains allowed" true runtime.ro_dispatchable;
       (match Tui_decode.runtime_probe_for_id snapshot ~runtime_id:runtime.ro_id with
        | None -> Alcotest.fail "catalog lost failed provider observation"
        | Some probe -> Alcotest.(check string) "failure remains independently visible"

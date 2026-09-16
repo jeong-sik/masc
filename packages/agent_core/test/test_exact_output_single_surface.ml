@@ -66,14 +66,12 @@ type catalog_fixture =
   ; request_path : string
   ; api_key_env : string
   ; capabilities : Capabilities.capabilities
-  ; max_request_body_bytes : int option
   ; body_timeout_s : float option
   }
 
 let catalog_entry
       ?base_url_env
       ?(api_key_env = "")
-      ?max_request_body_bytes
       ?body_timeout_s
       ~id
       ~kind
@@ -89,7 +87,6 @@ let catalog_entry
   ; request_path
   ; api_key_env
   ; capabilities
-  ; max_request_body_bytes
   ; body_timeout_s
   }
 ;;
@@ -114,7 +111,7 @@ let catalog_fixture_toml entry =
      id = %S\n\
      provider_ref = %S\n\
      model_id = %S\n\
-     %s%s"
+     %s"
     entry.id
     (Provider_config.string_of_provider_kind entry.kind)
     entry.base_url
@@ -136,9 +133,6 @@ let catalog_fixture_toml entry =
     entry.id
     entry.id
     (entry.id ^ "-model")
-    (match entry.max_request_body_bytes with
-     | None -> ""
-     | Some bytes -> Printf.sprintf "max_request_body_bytes = %d\n" bytes)
     (match entry.body_timeout_s with
      | None -> ""
      | Some seconds -> Printf.sprintf "body_timeout_s = %.17g\n" seconds)
@@ -527,46 +521,6 @@ let test_deepseek_catalog_is_json_only_before_dispatch () =
         | EO.Output_requirement_rejected -> ()
         | _ -> fail "DeepSeek schema rejection lost its neutral disposition")
      | Ok _ -> fail "DeepSeek provider schema must reject before dispatch")
-;;
-
-let test_request_body_limit_is_typed_and_pre_dispatch () =
-  let id = "request-body-limit" in
-  let admission, completion_posts, token_posts, captures =
-    with_server ~response:(openai_response {|{"name":"must not arrive"}|})
-    @@ fun ~sw:_ ~net:_ ~clock:_ ~base_url ->
-    let entry =
-      catalog_entry
-        ~id
-        ~kind:Provider_config.OpenAI_compat
-        ~base_url
-        ~request_path:"/v1/chat/completions"
-        ~max_request_body_bytes:1
-        ~capabilities:(capabilities ~native:true ~json:true)
-        ()
-    in
-    with_catalog [ entry ]
-    @@ fun snapshot ->
-    EO.admit
-      ~target:(target snapshot id)
-      ~messages:[ msg "this serialized request is larger than one byte" ]
-      (requirement EO.Json_syntax)
-  in
-  (match admission with
-   | Error error ->
-     (match EO.admission_error_disposition error with
-      | EO.Input_capacity
-          (EO.Serialized_request_body_too_large { actual_bytes; limit_bytes }) ->
-        check int "resolved exact-target byte limit" 1 limit_bytes;
-        check
-          bool
-          "actual serialized request bytes measured"
-          true
-          (actual_bytes > limit_bytes)
-      | _ -> fail "oversized request lost its neutral byte-cap disposition")
-   | Ok _ -> fail "oversized exact-output request unexpectedly admitted");
-  check int "completion POST count" 0 completion_posts;
-  check int "token measurement POST count" 0 token_posts;
-  check int "captured request count" 0 (List.length captures)
 ;;
 
 let test_supported_models_membership_is_exact_and_pre_dispatch () =
@@ -2099,10 +2053,6 @@ let () =
             "DeepSeek catalog is JSON-only before dispatch"
             `Quick
             test_deepseek_catalog_is_json_only_before_dispatch
-        ; test_case
-            "request body limit is typed and pre-dispatch"
-            `Quick
-            test_request_body_limit_is_typed_and_pre_dispatch
         ; test_case
             "supported_models exact membership"
             `Quick

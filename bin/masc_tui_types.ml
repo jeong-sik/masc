@@ -1440,7 +1440,6 @@ let rank_runtime_for_lane ~(lane_providers : string list)
       ~(already : string list) (runtime : Tui_decode.runtime_option) =
   let open Tui_decode in
   ( (if List.exists (String.equal runtime.ro_id) already then 1 else 0)
-  , (if not runtime.ro_dispatchable then 1 else 0)
   , (if List.exists (String.equal runtime.ro_provider) lane_providers then 1
      else 0)
   , runtime.ro_id )
@@ -8052,7 +8051,6 @@ let runtime_picker_items (state : state) : runtime_pick_item list =
   let lanes = List.map (fun lane -> Pick_lane lane) state.runtime_lanes in
   let models =
     state.runtime_catalog
-    |> List.filter (fun (o : Tui_decode.runtime_option) -> o.ro_dispatchable)
     |> List.map (fun model -> Pick_model model)
   in
   lanes @ models

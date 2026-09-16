@@ -820,7 +820,7 @@ let run_keeper_cycle
                   the same answer its projection gives it. Rotation to a larger
                   lane only makes this conservative. *)
                let context_budget_bytes =
-                 Runtime.declared_input_byte_ceiling_of_runtime_id effective_runtime_id
+                 Runtime.max_prompt_bytes_of_runtime_id effective_runtime_id
                  |> Option.map (fun cap ->
                    cap * Keeper_config.keeper_context_briefing_share_percent () / 100)
                in

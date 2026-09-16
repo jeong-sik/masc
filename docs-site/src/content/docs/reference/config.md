@@ -45,10 +45,11 @@ server's environment; the fifth is local.
 `llama_server`, `vllm` and `mlx_server` ship commented out — see
 [Local AI models](/runbooks/llama-server/).
 
-**The seeded bindings are keeper-dispatchable.** The catalog carries 31
-provider/model pairs as documented examples, all declaring
-`max-request-body-bytes` so any configured model can take a Keeper turn
-without startup warnings. `[runtime].default` is one of them.
+**Every seeded binding can take a Keeper turn.** The catalog carries 31
+provider/model pairs as documented examples. `[runtime].default` is one of
+them. Whether a request is too large is the provider's verdict: masc sends
+the composed request and, on a refusal, evicts the oldest carried history and
+asks again.
 
 ## runtime.toml
 
@@ -85,7 +86,6 @@ api-name = "deepseek-v4-flash"
 
 [deepseek.deepseek-v4-flash]
 wizard-default = true
-max-request-body-bytes = 1048576
 ```
 
 Roles such as the verifier are assigned by listing `<provider>.<model>` slots in

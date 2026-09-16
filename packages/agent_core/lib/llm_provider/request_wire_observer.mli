@@ -10,8 +10,8 @@
 
     Observation is diagnostic and non-authoritative. Caller rejection or an
     ordinary callback exception is reported as typed failure evidence but does
-    not rewrite the provider result. Request admission remains owned by the
-    typed provider configuration (for example [max_request_body_bytes]).
+    not rewrite the provider result. The body is the provider's to accept or
+    refuse; nothing here measures it against a limit.
 
     @stability Evolving
     @since 0.229.1 *)

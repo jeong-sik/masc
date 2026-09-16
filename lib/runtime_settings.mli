@@ -12,6 +12,7 @@
     - [keeper_handoff] — handoff threshold / cooldown / pressure
     - [keeper_diagnostics] — snapshot / hb tuning / profiling ring
     - [keeper_turn] / [keeper_proactive] / [keeper_rules] — keeper LLM tuning surfaces
+    - [schedule_retention] — how long a finished schedule stays in the ledger
     - [dashboard] — display-only thresholds + truncation lengths
 
     Internal: the deserialization / validation helpers stay private,
@@ -110,6 +111,12 @@ val set_discord_trigger_policy_configured :
 val set_slack_trigger_policy_configured :
   Slack_gateway_state.trigger_policy -> unit
 (** Mirrors {!set_discord_trigger_policy_configured}. *)
+
+val schedule_terminal_retention_days : int Runtime_params.param
+(** How many days a finished schedule stays in the schedule ledger after the
+    wake that ended it, if nothing else is written about it meanwhile. The
+    maintenance loop passes this to {!Schedule_runner.tick} on every pass, so a
+    change takes effect on the next tick. Range \[1, 365\]. *)
 
 (** {1 Initialization + JSON} *)
 

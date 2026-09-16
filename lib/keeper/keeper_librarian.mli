@@ -1,10 +1,10 @@
 (** Pure prompt and output contract for LLM-owned current Memory OS selection.
 
     The Librarian receives the exact current selection plus a bounded slice of
-    new conversation. It returns existing fact identities to retain and new
-    facts to add. Every existing identity must be retained or explicitly
-    dropped. The LLM owns selection within the rendered-fact byte budget; no
-    deterministic ranking, recency rule, or migration path participates.
+    new conversation. It answers with what changes: the identities to retire,
+    with a reason each, and the new facts to add. A current identity it does
+    not name stays. The LLM owns selection; no deterministic ranking, recency
+    rule, or migration path participates.
 
     Wire identities are short surrogate tokens ([m1], [m2], ... in
     current-fact order), not the cryptographic [memory_id]: a 64-hex digest
@@ -65,18 +65,18 @@ type revision =
   }
 
 type selection =
-  { retained_memory_ids : string list
-  ; new_claims : Keeper_memory_os_types.fact list
+  { new_claims : Keeper_memory_os_types.fact list
   ; dropped : Keeper_memory_os_types.dropped_statement list
-    (** One statement per dropped current memory. Totality is enforced:
-        every current identity appears in [retained_memory_ids] or here,
-        so [Missing_disposition] replaces silent forgetting. *)
+    (** One statement per retired memory. The librarian names only what
+        changes; a current memory it does not name here stays, which is what
+        the apply step has always done. The whole-set roll call this answer
+        used to carry was checked and then discarded, and one slip in it threw
+        away the pass (RFC-0456). *)
   ; facts : Keeper_memory_os_types.fact list
   ; revisions : revision list
   ; working_contexts : Keeper_librarian_context.pocket list
   }
 
-val wire_field_retained_memory_ids : string
 val wire_field_new_claims : string
 val wire_field_dropped : string
 val wire_field_claim : string
@@ -100,13 +100,9 @@ type parse_error =
   | Missing_required_fields
   | Claim_schema_mismatch
   | Dropped_schema_mismatch
-  | Unknown_retained_memory_id of string
-  | Duplicate_retained_memory_id of string
   | Duplicate_selected_memory_id of string
   | Unknown_dropped_memory_id of string
   | Duplicate_dropped_memory_id of string
-  | Dropped_memory_id_also_retained of string
-  | Missing_disposition of string
   | Supersedes_unknown_memory_id of string
       (** [supersedes] named a short id the answer's current set does not have. *)
   | Supersedes_not_dropped of string

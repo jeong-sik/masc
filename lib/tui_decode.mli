@@ -730,8 +730,6 @@ type runtime_option = {
   ro_max_context_source : runtime_context_source;
   ro_max_output_tokens : int option;
   ro_is_local : bool;
-  ro_dispatchable : bool;
-  ro_blocked_reason : string option;
   ro_is_default : bool;
   ro_quota_exhausted : bool;
   ro_quota_resets_at : float option;

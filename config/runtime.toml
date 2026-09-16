@@ -784,10 +784,6 @@ supports-image-input = true
 supports-multimodal-inputs = true
 
 [ollama_cloud.ollama-cloud-gemma4-31b]
-# media_failover vision reader (RFC-0414): the eager read serializes a base64
-# image, so this ceiling is sized for it (max image 10 MB -> ~13 MB base64, plus
-# the prompt). This is a caller payload limit for image requests.
-max-request-body-bytes = 20971520
 
 [models.ollama-cloud-glm-5-1]
 reasoning-uncontrolled = true

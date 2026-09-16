@@ -695,7 +695,12 @@ module Try_provider = Masc.Keeper_turn_driver_try_provider
 let compose ~base_path ~front ~wire_cap_bytes ~demote_before messages =
   Try_provider.For_testing.compose_carried_model_input
     ~measure_message_bytes
-    ~front:(Some { Masc.Keeper_carried_front.first_atom = front; source = Masc.Keeper_carried_front.Ledger })
+    ~front:
+      (Some
+         { Masc.Keeper_carried_front.first_atom = front
+         ; atom_count = front + 1
+         ; source = Masc.Keeper_carried_front.Ledger
+         })
     ~reserved_bytes:0
     ~wire_cap_bytes
     ~base_path
@@ -877,6 +882,32 @@ let a_wider_range_over_the_cap_is_left_to_the_refusal () =
   Alcotest.(check bool) "over the cap, on record" true composed.Try_provider.over_request_cap
 ;;
 
+(* A front measured against a longer history names no atom of this one: the
+   composition starts over without it and says which seed it dropped. *)
+let a_front_the_history_shrank_under_starts_over () =
+  let _, messages, _ = oversized_newest_history () in
+  let composed =
+    Try_provider.For_testing.compose_carried_model_input
+      ~measure_message_bytes
+      ~front:
+        (Some
+           { Masc.Keeper_carried_front.first_atom = 3_100
+           ; atom_count = 3_395
+           ; source = Masc.Keeper_carried_front.Ledger
+           })
+      ~reserved_bytes:0
+      ~wire_cap_bytes:None
+      ~base_path:""
+      ~demote_before:0
+      messages
+  in
+  Alcotest.(check bool) "the whole history goes" true
+    (composed.Try_provider.origin = Masc.Keeper_carried_front.Whole_history);
+  Alcotest.(check int) "nothing dropped" 0 composed.Try_provider.projection.Window.dropped_atoms;
+  Alcotest.(check bool) "the dropped seed is on record" true
+    (Option.is_some composed.Try_provider.outlived_seed)
+;;
+
 (* Demotion can shrink an atom only down to its non-demotable residue. When
    that residue alone exceeds the cap, the demoted view is transmitted and
    the cap refusal is what stands. *)
@@ -997,6 +1028,10 @@ let () =
             "still oversized after demotion is transmitted demoted"
             `Quick
             still_oversized_after_demotion_is_transmitted_demoted
+        ; Alcotest.test_case
+            "a front the history shrank under starts over"
+            `Quick
+            a_front_the_history_shrank_under_starts_over
         ] )
     ; ( "measurement"
       , [ Alcotest.test_case

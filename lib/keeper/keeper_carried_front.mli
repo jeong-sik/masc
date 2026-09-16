@@ -24,6 +24,9 @@ type source =
 
 type seed =
   { first_atom : int
+  ; atom_count : int
+        (** How many atoms the history had when the front was measured. A
+            history that has fewer now is not the one the position names. *)
   ; source : source
   }
 
@@ -36,14 +39,29 @@ type origin =
 
 val of_ledger : Keeper_model_input_ledger.t -> seed
 
-val of_records : runtime_id:string -> Turn_record.t list -> seed option
-(** The newest completed record on [runtime_id] carrying a
-    [model_input_window], in any order. An errored turn's record names the
-    runtime that was asked, not the lane whose request it measured, so only
-    a record with a stop reason is read. *)
+val of_records : runtime_id:string -> trace_id:string -> Turn_record.t list -> seed option
+(** The newest completed record of session [trace_id] on [runtime_id]
+    carrying a [model_input_window], in any order. An errored turn's record
+    names the runtime that was asked, not the lane whose request it
+    measured, so only a record with a stop reason is read; a record of
+    another session measured another history. *)
 
-val read_seed : config:Workspace.config -> keeper_name:string -> runtime_id:string -> seed option
-(** {!of_records} over the keeper's newest {!records_read} turn records. *)
+val read_seed
+  :  config:Workspace.config
+  -> keeper_name:string
+  -> runtime_id:string
+  -> trace_id:string
+  -> seed option
+(** {!of_records} over the keeper's newest {!records_read} turn records.
+    Reads the record file on the calling fiber; a turn calls it once, and
+    only while the pair has no ledger. *)
+
+val for_history : atom_count:int -> seed -> seed option
+(** The seed when the history still has at least the atoms it was measured
+    against, [None] when the history shrank under it (a checkpoint purge):
+    the position then names no atom of this history, and carrying the
+    newest atom alone from there would never widen again. The caller starts
+    over as with no seed. *)
 
 val records_read : int
 (** How many records {!read_seed} reads. A keeper that walks three or four

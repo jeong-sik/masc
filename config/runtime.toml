@@ -41,6 +41,19 @@ anchor = "user-home"
 path = ".agents/skills"
 access = "read-write"
 
+[turn]
+# Tokens one request on the AGENT_CORE (HTTP) lane carries: the fixed prompt
+# (system prompt, tool schemas, pinned context) plus the recent verbatim
+# history. The cut aims at this target; a binding's max-request-body-bytes
+# only judges whether the provider accepts the bytes. Nothing is compiled in:
+# with this key undeclared, every HTTP-lane candidate is refused before
+# dispatch (RFC keeper-context-window-in-tokens).
+# 85000 is the fleet median measured on 2026-09-15 under the previous
+# byte-shaped 512 KiB window, where turn quality was judged acceptable.
+# Re-measure it against your keepers (RFC §12); a smaller window sends less
+# history per request and leans more on the librarian's memory.
+context_window_tokens = 85000
+
 [runtime]
 # Fleet default keeper runtime. Moved deepseek-v4-flash -> glm-5.3-flash on the
 # same ollama_cloud wire (no new credential): GLM-5.3-Flash is the newest flash

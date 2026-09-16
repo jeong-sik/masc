@@ -48,6 +48,34 @@ let test_resolved_config_exposes_timeout_knobs () =
     true
     (List.mem "context_window_tokens" names)
 
+(* RFC keeper-context-window-in-tokens: the window is the operator's
+   declaration or nothing. No figure is compiled in, so an unset environment
+   resolves to [None], and a runtime.toml value reaches the reader through
+   the boot-override layer like the other turn settings. *)
+let test_context_window_is_declared_or_none () =
+  let key = Env_config_keeper.KeeperContext.window_tokens_env_key in
+  (* test/dune declares 1024 for the whole test tree; the process cannot
+     unset a variable, so "undeclared" is exercised as the empty value every
+     reader here treats as unset. *)
+  let declared_by_test_tree = Sys.getenv_opt key in
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.putenv key (Option.value declared_by_test_tree ~default:"");
+      Rr.reset_for_tests ())
+    (fun () ->
+      Unix.putenv key "";
+      Rr.reset_for_tests ();
+      Alcotest.(check (option int))
+        "undeclared resolves to None, not a compiled figure"
+        None
+        (Rr.context_window_tokens ());
+      Unix.putenv key "65536";
+      Rr.reset_for_tests ();
+      Alcotest.(check (option int))
+        "a declared value resolves verbatim"
+        (Some 65536)
+        (Rr.context_window_tokens ()))
+
 let test_to_yojson_is_a_json_object () =
   Rr.reset_for_tests ();
   Rr.init ();
@@ -61,6 +89,8 @@ let () =
     [ ( "resolved_config_surface"
       , [ Alcotest.test_case "exposes timeout knobs" `Quick
             test_resolved_config_exposes_timeout_knobs
+        ; Alcotest.test_case "context window is declared or none" `Quick
+            test_context_window_is_declared_or_none
         ; Alcotest.test_case "serializes as object" `Quick
             test_to_yojson_is_a_json_object
         ] )

@@ -894,7 +894,20 @@ let validate_provider_request_cap ~runtime_id
    dispatch, rather than a request the provider refuses every turn. Token
    against token; the request-body cap is not consulted. *)
 let model_input_window_for_candidate ~runtime_id =
-  let window_tokens = Keeper_runtime_resolved.context_window_tokens () in
+  match Keeper_runtime_resolved.context_window_tokens () with
+  | None ->
+    Error
+      (Agent_core.Error.Config
+         (Agent_core.Error.InvalidConfig
+            { field = "turn.context_window_tokens"
+            ; detail =
+                Printf.sprintf
+                  "undeclared; runtime.toml [turn] must declare context_window_tokens, \
+                   the tokens one request carries, before the AGENT_CORE lane can \
+                   dispatch to %s"
+                  runtime_id
+            }))
+  | Some window_tokens ->
   match Runtime.max_context_of_runtime_id runtime_id with
   | Some max_context when window_tokens > max_context ->
     Error

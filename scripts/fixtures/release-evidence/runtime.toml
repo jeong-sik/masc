@@ -55,3 +55,8 @@ max-concurrent = 1
 # positive request-body admission ceiling, so the release-evidence server
 # starts at all. Mirrors production config/runtime.toml for this runtime.
 max-request-body-bytes = 524288
+
+[turn]
+# Tokens one AGENT_CORE-lane request carries (RFC keeper-context-window-in-tokens).
+# No compiled default: without this key every HTTP-lane candidate is refused.
+context_window_tokens = 8192

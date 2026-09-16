@@ -834,11 +834,18 @@ let run_keeper_cycle
                  | Some runtime ->
                    (match runtime.Runtime.execution with
                     | Runtime_execution.Agent_core _ ->
-                      Keeper_context_window.share_bytes
-                        ~window_tokens:(Keeper_runtime_resolved.context_window_tokens ())
-                        ~share_percent
-                        (Keeper_context_window.Density.lookup
-                           ~runtime_id:effective_runtime_id)
+                      (match Keeper_runtime_resolved.context_window_tokens () with
+                       | None ->
+                         (* Undeclared: the lane refuses the candidate before
+                            dispatch, so there is no request to size a
+                            briefing for. *)
+                         None
+                       | Some window_tokens ->
+                         Keeper_context_window.share_bytes
+                           ~window_tokens
+                           ~share_percent
+                           (Keeper_context_window.Density.lookup
+                              ~runtime_id:effective_runtime_id))
                     | Runtime_execution.Claude_code _
                     | Runtime_execution.Antigravity_cli _
                     | Runtime_execution.Codex_app_server _ ->

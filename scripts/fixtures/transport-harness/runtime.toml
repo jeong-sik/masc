@@ -27,3 +27,8 @@ supports-tool-choice = true
 is-default = true
 max-concurrent = 1
 max-request-body-bytes = 65536
+
+[turn]
+# Tokens one AGENT_CORE-lane request carries (RFC keeper-context-window-in-tokens).
+# No compiled default: without this key every HTTP-lane candidate is refused.
+context_window_tokens = 8192

@@ -304,7 +304,7 @@ origin/main 기준이다. 설정 검증, 최종 전송 바이트 검사, 로그�
 ### 10.2 선언
 
 - `runtime.toml [turn] context_window_tokens = N` (env `MASC_KEEPER_CONTEXT_WINDOW_TOKENS`). 다른 `[turn]` 값과 같은 경로(설정 레지스트리 → 부트 오버라이드 → `Keeper_runtime_resolved`)로 읽고, 재기동해야 반영된다.
-- 선언이 없으면 컴파일 기본값 85,000 토큰을 쓴다. 근거는 §2 의 512KB 구간 측정(중앙값 약 85K, 그 크기에서 운영자가 답 품질을 받아들일 만하다고 봄)이다. §5 D 가 말하듯 체감이며, 하네스(§12)로 다시 잰다. 부팅 로그가 값과 출처(env/toml/default)를 한 줄로 남긴다.
+- 코드에 기본값은 없다. 선언이 없으면 HTTP 레인의 모든 후보가 디스패치 전에 typed 설정 오류(`turn.context_window_tokens` undeclared)로 거절되고, 부팅 로그가 error 로 키 이름을 찍는다. 운영자가 파일에 적는 값이 창의 전부다. 라이브 값 85,000 의 근거는 §2 의 512KB 구간 측정(중앙값 약 85K)과 운영자 체감이고, §5 D 가 말하듯 하네스(§12)로 다시 잰다. 부팅 로그가 값과 출처(env/toml)를 한 줄로 남긴다.
 - 후보별 검사(§7.9): 창이 그 런타임의 `max-context` 보다 크면 그 후보는 디스패치 전에 typed 설정 오류(`turn.context_window_tokens`)로 거절되고 레인은 다음 후보로 돈다. 토큰 대 토큰이며 바이트 상한은 보지 않는다.
 - Keeper 별 선언은 이 RFC 범위 밖이다(§11 6단계).
 
@@ -375,7 +375,7 @@ A  = B − R − 핀 − 서문
 | 6 | Keeper 별 `context_window_tokens` | 하네스 뒤 |
 | 7 | 창 크기 하네스(§8 8·12) | 이슈 |
 
-라이브 `runtime.toml` 에는 새 바이너리를 배포한 뒤에 `[turn] context_window_tokens` 를 적는다. 지금 바이너리는 모르는 `[turn]` 키를 오류로 거절한다.
+라이브 `runtime.toml` 의 `[turn] context_window_tokens` 는 새 바이너리를 띄우기 전에 디스크 파일에 적는다. 도는 서버는 디스크 파일을 다시 읽지 않고(설정 API 로 저장할 때만 읽는다), 새 바이너리는 이 키가 없으면 HTTP 레인을 거절하므로 순서는 파일 → `scripts/deploy.sh` 다.
 
 ## 12. 배포 후 측정
 

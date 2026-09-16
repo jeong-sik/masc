@@ -486,6 +486,103 @@ let test_board_read_scroll_reaches_hidden_comments () =
   check int "negative scroll normalizes to zero" 0
     negative.normalized_scroll
 
+(* Below the minimum the post column would be too narrow to read once the
+   comment column takes its fixed share, so the pane falls back to the
+   stacked layout instead of drawing an unreadable post. At and above it, the
+   two columns always add back up to the pane's own width -- nothing is
+   dropped between them, and nothing is drawn twice. *)
+let test_board_read_side_layout_falls_back_when_narrow () =
+  check bool "79 cols keeps the stacked layout" true
+    (Schedule.board_read_side_layout ~cols:79 = None);
+  check bool "99 cols keeps the stacked layout" true
+    (Schedule.board_read_side_layout ~cols:99 = None);
+  for cols = Schedule.board_read_side_minimum_cols to 220 do
+    match Schedule.board_read_side_layout ~cols with
+    | None -> failf "cols=%d: expected a side layout at or above the minimum" cols
+    | Some (body_cols, comment_cols) ->
+        if body_cols + comment_cols <> cols then
+          failf "cols=%d: columns do not sum to the pane width (%d + %d)"
+            cols body_cols comment_cols;
+        if comment_cols < 24 then
+          failf "cols=%d: comment column is too narrow to read (%d)" cols
+            comment_cols;
+        if body_cols < 40 then
+          failf "cols=%d: post column is too narrow to read (%d)" cols
+            body_cols
+  done
+
+(* The heading is drawn from the comment column's own share, so a column with
+   any thread in it always has room for the heading and at least one line
+   under it -- never a heading alone. *)
+let test_board_read_side_allocation_reserves_the_heading () =
+  for terminal_rows = 9 to 40 do
+    for comment_count = 0 to 12 do
+      let allocation =
+        Schedule.allocate_board_read_side ~terminal_rows ~body_line_count:20
+          ~comment_count
+      in
+      if comment_count > 0 && allocation.comment_rows > 0
+         && allocation.comment_rows < 2
+      then
+        failf
+          "rows=%d comments=%d: comment column has a heading with no room \
+           under it (%d rows)"
+          terminal_rows comment_count allocation.comment_rows;
+      if allocation.body_rows < 0 || allocation.comment_rows < 0 then
+        failf "rows=%d comments=%d: negative row allocation" terminal_rows
+          comment_count
+    done
+  done;
+  let no_comments =
+    Schedule.allocate_board_read_side ~terminal_rows:30 ~body_line_count:20
+      ~comment_count:0
+  in
+  check int "no thread spends no row on a heading" 0 no_comments.comment_rows
+
+(* The thread opens on its tail: a reader who lands on a post is usually
+   looking for the latest reply, not the first one, and the side column has
+   no scroll of its own to reach it with first. Scrolling still runs the post
+   down before it starts walking the thread toward its head. *)
+let test_board_read_side_scroll_opens_on_the_tail () =
+  let opening =
+    Schedule.project_board_read_side_scroll ~body_line_count:20 ~body_rows:6
+      ~comment_count:20 ~comment_rows:5 0
+  in
+  check int "post opens at its head" 0 opening.body_offset;
+  check int "thread opens at its tail" 15 opening.comment_offset;
+  let after_body =
+    Schedule.project_board_read_side_scroll ~body_line_count:20 ~body_rows:6
+      ~comment_count:20 ~comment_rows:5 3
+  in
+  check int "scrolling first moves the post" 3 after_body.body_offset;
+  check int "the thread stays pinned to its tail" 15 after_body.comment_offset;
+  let past_body =
+    (* body_line_count - body_rows: the post's own last scrollable offset. *)
+    Schedule.project_board_read_side_scroll ~body_line_count:20 ~body_rows:6
+      ~comment_count:20 ~comment_rows:5 14
+  in
+  check int "post is fully scrolled" 14 past_body.body_offset;
+  check int "thread has not moved yet" 15 past_body.comment_offset;
+  let into_thread =
+    Schedule.project_board_read_side_scroll ~body_line_count:20 ~body_rows:6
+      ~comment_count:20 ~comment_rows:5 16
+  in
+  check int "post stays at its own last offset" 14 into_thread.body_offset;
+  check int "further scroll walks the thread toward its head" 13
+    into_thread.comment_offset;
+  let reaches_head =
+    Schedule.project_board_read_side_scroll ~body_line_count:20 ~body_rows:6
+      ~comment_count:20 ~comment_rows:5 max_int
+  in
+  check int "overscroll clamps to the combined maximum" 29
+    reaches_head.normalized_scroll;
+  check int "the thread reaches its own head" 0 reaches_head.comment_offset;
+  let no_thread =
+    Schedule.project_board_read_side_scroll ~body_line_count:6 ~body_rows:6
+      ~comment_count:0 ~comment_rows:0 0
+  in
+  check int "an empty thread has nowhere to open" 0 no_thread.comment_offset
+
 let test_keeper_detail_scroll_normalizes_across_bounds () =
   let normalize = Schedule.normalize_keeper_detail_scroll in
   let bottom = normalize ~line_count:29 ~content_height:14 max_int in
@@ -1814,6 +1911,12 @@ let () =
             test_board_read_rows_reserve_comments_and_footer
         ; test_case "board read reaches hidden comments" `Quick
             test_board_read_scroll_reaches_hidden_comments
+        ; test_case "board read side layout falls back when narrow" `Quick
+            test_board_read_side_layout_falls_back_when_narrow
+        ; test_case "board read side allocation reserves the heading" `Quick
+            test_board_read_side_allocation_reserves_the_heading
+        ; test_case "board read side scroll opens on the tail" `Quick
+            test_board_read_side_scroll_opens_on_the_tail
         ; test_case "keeper detail scroll follows current bounds" `Quick
             test_keeper_detail_scroll_normalizes_across_bounds
         ; test_case "overview events follow and preserve manual anchor" `Quick

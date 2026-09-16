@@ -2396,47 +2396,116 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
   in
   let total_lines = Board_read_layout.body_count document in
   let detail_line_count = Board_read_layout.comment_count document in
-  let row_budget =
-    Render_schedule.allocate_board_read ~terminal_rows:rows
-      ~body_line_count:total_lines
-      ~comment_count:detail_line_count
+  (* The thread sits beside the post, not under it, when the pane is wide
+     enough for both columns to stay readable (p-7784d032). A narrow pane
+     keeps the stacked layout below -- the same rows, drawn the way they were
+     before the side arrangement existed. *)
+  let side_layout =
+    if detail_line_count > 0 then Render_schedule.board_read_side_layout ~cols
+    else None
   in
-  let content_height = row_budget.body_rows in
-  let comment_height = row_budget.comment_rows in
-  let scroll =
-    Render_schedule.project_board_read_scroll ~body_line_count:total_lines
-      ~body_rows:content_height
-      ~comment_count:detail_line_count
-      ~comment_rows:comment_height state.board_scroll
+  (* [board_read_allocation] and [board_read_side_allocation] share field
+     names but are different record types, so this match cannot return one
+     of them -- only the scroll and the two drawn-row counts survive it. *)
+  let scroll, body_lines_drawn, comment_lines_drawn =
+    match side_layout with
+    | Some (body_cols, comment_cols) ->
+        let side_budget =
+          Render_schedule.allocate_board_read_side ~terminal_rows:rows
+            ~body_line_count:total_lines ~comment_count:detail_line_count
+        in
+        (* The heading spends the comment column's first row; only what is
+           left under it can hold thread lines. *)
+        let comment_header_rows = if side_budget.comment_rows > 0 then 1 else 0 in
+        let comment_content_rows =
+          max 0 (side_budget.comment_rows - comment_header_rows)
+        in
+        let scroll =
+          Render_schedule.project_board_read_side_scroll
+            ~body_line_count:total_lines
+            ~body_rows:side_budget.body_rows
+            ~comment_count:detail_line_count
+            ~comment_rows:comment_content_rows
+            state.board_scroll
+        in
+        (* box_top/box_bottom draw no border in the borderless geometry this
+           pane already uses (see their definitions) -- they would only add
+           two blank rows the row budget above never reserved. The two
+           columns are plain content, exactly [rows_drawn] lines each, so
+           [write_two_panes] zips them without falling back to its blank-pad
+           case. *)
+        let rows_drawn = max side_budget.body_rows side_budget.comment_rows in
+        let body_buf = Buffer.create (4 * 1024) in
+        let comment_buf = Buffer.create (4 * 1024) in
+        for i = 0 to rows_drawn - 1 do
+          if i < side_budget.body_rows then
+            let idx = i + scroll.body_offset in
+            if idx < total_lines then
+              box_line body_buf body_cols
+                ("  " ^ Board_read_layout.body_line document idx)
+            else box_empty body_buf body_cols
+          else box_empty body_buf body_cols
+        done;
+        for i = 0 to rows_drawn - 1 do
+          if i = 0 && comment_header_rows > 0 then
+            box_line comment_buf comment_cols
+              (Ansi.bold
+              ^ Printf.sprintf "  Comments (%d)" detail_line_count
+              ^ Ansi.reset)
+          else if i < side_budget.comment_rows then
+            let idx = i - comment_header_rows + scroll.comment_offset in
+            if idx >= 0 && idx < detail_line_count then
+              box_line comment_buf comment_cols
+                (Board_read_layout.comment_line document idx)
+            else box_empty comment_buf comment_cols
+          else box_empty comment_buf comment_cols
+        done;
+        write_two_panes buf ~left_cols:body_cols ~left:body_buf
+          ~right:comment_buf;
+        (scroll, side_budget.body_rows, comment_content_rows)
+    | None ->
+        let row_budget =
+          Render_schedule.allocate_board_read ~terminal_rows:rows
+            ~body_line_count:total_lines ~comment_count:detail_line_count
+        in
+        let content_height = row_budget.body_rows in
+        let comment_height = row_budget.comment_rows in
+        let scroll =
+          Render_schedule.project_board_read_scroll
+            ~body_line_count:total_lines ~body_rows:content_height
+            ~comment_count:detail_line_count ~comment_rows:comment_height
+            state.board_scroll
+        in
+        for i = 0 to content_height - 1 do
+          let idx = i + scroll.body_offset in
+          if idx < total_lines then
+            box_line buf cols ("  " ^ Board_read_layout.body_line document idx)
+          else box_empty buf cols
+        done;
+        if comment_height > 0 then begin
+          box_divider buf cols;
+          box_line buf cols (Ansi.bold ^ "  Comments" ^ Ansi.reset);
+          for i = 0 to comment_height - 1 do
+            box_line buf cols
+              (Board_read_layout.comment_line document (i + scroll.comment_offset))
+          done
+        end;
+        (scroll, content_height, comment_height)
   in
-  for i = 0 to content_height - 1 do
-    let idx = i + scroll.body_offset in
-    if idx < total_lines then
-      box_line buf cols ("  " ^ Board_read_layout.body_line document idx)
-    else
-      box_empty buf cols
-  done;
-
-  if comment_height > 0 then begin
-    box_divider buf cols;
-    box_line buf cols (Ansi.bold ^ "  Comments" ^ Ansi.reset);
-    for i = 0 to comment_height - 1 do
-      box_line buf cols (Board_read_layout.comment_line document (i + scroll.comment_offset))
-    done
-  end;
-
   (* Reading without a position is guessing: the post body and the comment
      thread each name where they stand, in the window the other reading
      surfaces draw. *)
-  if total_lines > content_height || detail_line_count > comment_height then
+  if
+    total_lines > body_lines_drawn || detail_line_count > comment_lines_drawn
+  then
     box_line_styled buf cols ~style:(Theme.recede ())
       (Printf.sprintf "post %s%s"
          (Masc_tui_scroll.window_text ~scroll:scroll.body_offset
-            ~height:content_height total_lines)
-         (if detail_line_count > comment_height then
+            ~height:body_lines_drawn total_lines)
+         (if detail_line_count > comment_lines_drawn then
             "  \xc2\xb7  comments "
             ^ Masc_tui_scroll.window_text ~scroll:scroll.comment_offset
-                ~height:comment_height detail_line_count
+                ~height:comment_lines_drawn detail_line_count
           else ""));
   box_bottom buf cols;
   scroll.normalized_scroll

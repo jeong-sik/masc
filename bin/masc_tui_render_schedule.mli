@@ -110,6 +110,62 @@ val project_board_read_scroll :
   int ->
   board_read_scroll
 
+(** {1 Board read: comments beside the post}
+
+    The operator asked for the comment thread not under the post but beside
+    it, in a second column on the right (p-7784d032). A narrow terminal keeps
+    the stacked layout, so the side arrangement is something the surface asks
+    for per frame and either gets or falls back from. When the thread is open
+    beside the post it opens showing its tail, because what the reader is
+    usually looking for is the latest reply, not the first one. *)
+
+val board_read_side_minimum_cols : int
+(** The pane width below which the comments stay under the post. The read
+    pane keeps a readable post column and a comment column that is more than
+    a gutter only above this. *)
+
+val board_read_side_comment_cols : int
+(** The width promised to the comment column when the thread sits beside the
+    post. *)
+
+val board_read_side_layout : cols:int -> (int * int) option
+(** [Some (body_cols, comment_cols)] when the pane is wide enough to put the
+    thread beside the post, [None] when it is not and the stacked layout
+    draws instead. The post column keeps the leftover width. *)
+
+type board_read_side_allocation = {
+  body_rows : int;
+  comment_rows : int;
+}
+(** Rows of post body and rows of comment thread the two columns show. Both
+    columns share the pane's row budget; the comment column additionally
+    spends one row on its heading. *)
+
+val allocate_board_read_side :
+  terminal_rows:int ->
+  body_line_count:int ->
+  comment_count:int ->
+  board_read_side_allocation
+(** Split the row budget between the two side-by-side columns. Each column
+    keeps at least one row when it has content, and when the thread has
+    content the heading row comes out of the comment column's own share, not
+    the post's -- so a comment column never shows a heading with nothing
+    readable under it. *)
+
+val project_board_read_side_scroll :
+  body_line_count:int ->
+  body_rows:int ->
+  comment_count:int ->
+  comment_rows:int ->
+  int ->
+  board_read_scroll
+(** Scroll for the side-by-side layout. At scroll 0 the comment column shows
+    its tail -- the latest replies -- whenever the thread is taller than its
+    column, and the post shows its head. Scrolling first walks the post body
+    down; once the post is exhausted further scrolling walks the comment
+    column up toward its head. The normalized scroll therefore still runs
+    from 0 to [body_overflow + comment_overflow]. *)
+
 (** {1 Keeper roster columns} *)
 
 val keeper_marker_width : int

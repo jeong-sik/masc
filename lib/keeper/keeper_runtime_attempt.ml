@@ -125,6 +125,20 @@ let core_error_to_runtime_outcome err =
                   }
             ; message = detail
             }))
+  (* RFC-0454 P2. A closed runtime connection used to reach here as
+     agent-core's [ProviderUnavailable] and rotate on it. Typing the cause
+     must not decide which runtime is tried next, so the attempt outcome is
+     rebuilt from the same provider error the runtime client used to raise.
+     A host stop is not in this match: it carried no rotation before either
+     ([Internal] short-circuits to [None] below) and still carries none. *)
+  | Some
+      (Keeper_internal_error.Runtime_connection_closed { runtime_id; detail; _ })
+    ->
+    Some
+      (Runtime_attempt_fsm.Call_err
+         (provider_error_to_http_error
+            (Llm_provider.Error.ProviderUnavailable
+               { provider = runtime_id; detail })))
   | Some _
   | None ->
     (match err with

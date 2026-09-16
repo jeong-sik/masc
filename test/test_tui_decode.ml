@@ -1002,10 +1002,11 @@ let fleet_safety_json ?(missing = true) () =
            ; "blocker", `String "reaction_capacity_below_target"
            ; "operator_action_required", `Bool true
            ; "bootable_keeper_count", `Int 10
-           ; "running_keeper_fiber_count", `Int 9
+           ; "running_keeper_fiber_count", `Int 8
            ; "executable_keeper_fiber_count", `Int 9
-           ; "failing_keeper_fiber_count", `Int 0
+           ; "failing_keeper_fiber_count", `Int 1
            ; "recovering_keeper_fiber_count", `Int 0
+           ; "turn_configuration_error_keeper_count", `Int 1
            ; "paused_keeper_count", `Int 0
            ; "target_reaction_capacity_count", `Int 10
            ; "reaction_capacity_shortfall_count", `Int 1
@@ -1021,6 +1022,8 @@ let fleet_safety_json ?(missing = true) () =
                        else [ "analyst"; "bluebird" ])) )
              ; ( "executable_keeper_names"
                , `List [ `String "analyst"; `String "bluebird" ] )
+             ; ( "turn_configuration_error_keeper_names"
+               , `List [ `String "bluebird" ] )
              ]) )
     ]
 
@@ -1034,14 +1037,26 @@ let test_decode_fleet_safety_carries_both_name_lists () =
       Alcotest.(check bool) "operator must act" true
         fleet.fs_operator_action_required;
       Alcotest.(check int) "bootable" 10 fleet.fs_bootable_count;
-      Alcotest.(check int) "running" 9 fleet.fs_running_count;
+      Alcotest.(check int) "running" 8 fleet.fs_running_count;
       Alcotest.(check int) "shortfall" 1 fleet.fs_reaction_capacity_shortfall;
       Alcotest.(check int) "task owner without fiber" 1
         fleet.fs_active_task_owner_without_fiber_count;
+      (* The failing partition the header prints beside the whole: retrying
+         plus configuration-blocked. The reader takes both; the server does
+         not precompute the display string. *)
+      Alcotest.(check int) "failing" 1 fleet.fs_failing_count;
+      Alcotest.(check int) "retrying" 0 fleet.fs_recovering_count;
+      Alcotest.(check int) "config-blocked" 1
+        fleet.fs_turn_configuration_error_count;
+      Alcotest.(check (list string)) "config-blocked names" [ "bluebird" ]
+        fleet.fs_turn_configuration_error_names;
       (* The reader takes the difference; the server does not precompute it. *)
       Alcotest.(check (list string)) "keepers that should run"
         [ "analyst"; "bluebird"; "haneul" ] fleet.fs_bootable_names;
-      Alcotest.(check (list string)) "keepers that do run"
+      (* Executable holds every keeper with a live fiber, failing ones
+         included -- bluebird is failing here and stays out of the
+         not-running difference the header draws from it. *)
+      Alcotest.(check (list string)) "keepers that can execute a turn"
         [ "analyst"; "bluebird" ] fleet.fs_executable_names;
       Alcotest.(check (list string)) "the difference names the missing keeper"
         [ "haneul" ]
@@ -1905,12 +1920,27 @@ let verification_request_json ?(evidence = [ "artifact:reports/proof.json" ])
     ; ("evidence_projection_error", evidence_error)
     ]
 
-let verification_snapshot_json ?(total = 3) requests =
+let verification_snapshot_json ?(total = 3) ?(view = "awaiting") ?(offset = 0)
+    ?(truncated = false) ?(unresolved = []) ?backlog_error ?backlog_recovery
+    requests =
   `Assoc
-    [ ("updated_at", `String "2026-08-23T09:00:01Z")
-    ; ("total", `Int total)
-    ; ("requests", `List requests)
-    ]
+    ([ ("updated_at", `String "2026-08-23T09:00:01Z")
+     ; ("total", `Int total)
+     ; ("view", `String view)
+     ; ("offset", `Int offset)
+     ; ("returned", `Int (List.length requests))
+     ; ("truncated", `Bool truncated)
+     ; ( "awaiting_unresolved"
+       , `List (List.map (fun id -> `String id) unresolved) )
+     ; ("requests", `List requests)
+     ]
+     @ (match backlog_error with
+        | None -> []
+        | Some detail -> [ ("backlog_error", `String detail) ])
+     @
+     match backlog_recovery with
+     | None -> []
+     | Some detail -> [ ("backlog_recovery", `String detail) ])
 
 (* Tool inventory. The envelope is /dashboard/tools; the rows are
    [tool_inventory_json]. *)
@@ -5330,6 +5360,98 @@ let test_decode_verification_snapshot_reads_the_live_shape () =
              "wire the approval gate" request.Tui_decode.vr_task_title
        | requests ->
            Alcotest.failf "expected one request, got %d" (List.length requests))
+
+(* The wire spelling and its reader are one pair. This checks the pair is
+   self-consistent, which is not the same as agreeing with the server: rename
+   both sides together and this still passes. What pins the literals to the
+   other program is the walk's query fixture and the server suite's own
+   refusal of an unknown name. *)
+let test_decode_verification_view_round_trips_its_wire_spelling () =
+  List.iter
+    (fun view ->
+      let json =
+        verification_snapshot_json
+          ~view:(Tui_decode.verification_view_to_wire view)
+          []
+      in
+      match Tui_decode.decode_verification_snapshot json with
+      | Ok snapshot ->
+          Alcotest.(check bool)
+            (Tui_decode.verification_view_to_wire view)
+            true
+            (snapshot.Tui_decode.vs_view = view)
+      | Error err -> Alcotest.failf "decode failed: %s" err)
+    [ Tui_decode.Awaiting_queue; Tui_decode.Full_history ]
+
+(* The two lists differ by an order of magnitude on a live workspace, so a
+   name outside the pair cannot be folded into either one. *)
+let test_decode_verification_refuses_an_unknown_view () =
+  match
+    Tui_decode.decode_verification_snapshot
+      (verification_snapshot_json ~view:"pending" [])
+  with
+  | Ok _ -> Alcotest.fail "an unknown view must not decode to a default"
+  | Error _ -> ()
+
+let test_decode_verification_carries_the_page_and_what_it_could_not_resolve ()
+    =
+  match
+    Tui_decode.decode_verification_snapshot
+      (verification_snapshot_json ~total:1401 ~view:"all" ~offset:200
+         ~truncated:true [])
+  with
+  | Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok snapshot ->
+      Alcotest.(check int) "where the page starts" 200
+        snapshot.Tui_decode.vs_offset;
+      Alcotest.(check bool) "more behind it" true
+        snapshot.Tui_decode.vs_truncated;
+      Alcotest.(check bool) "the history, not the queue" true
+        (snapshot.Tui_decode.vs_view = Tui_decode.Full_history)
+
+(* An empty queue and an unresolvable one read the same in the rows. They must
+   not read the same on the screen. *)
+let test_decode_verification_separates_an_empty_queue_from_an_unreadable_one ()
+    =
+  (match
+     Tui_decode.decode_verification_snapshot
+       (verification_snapshot_json ~total:0 [])
+   with
+   | Error err -> Alcotest.failf "decode failed: %s" err
+   | Ok snapshot ->
+       Alcotest.(check (option string)) "nothing is waiting" None
+         snapshot.Tui_decode.vs_backlog_error;
+       Alcotest.(check (list string)) "and nothing is unaccounted for" []
+         snapshot.Tui_decode.vs_awaiting_unresolved);
+  match
+    Tui_decode.decode_verification_snapshot
+      (verification_snapshot_json ~total:0
+         ~backlog_error:"backlog.json: bad json"
+         ~unresolved:[ "vrf-missing" ] [])
+  with
+  | Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok snapshot ->
+      Alcotest.(check (option string)) "the reason survives the empty list"
+        (Some "backlog.json: bad json") snapshot.Tui_decode.vs_backlog_error;
+      Alcotest.(check (list string)) "and so does what it could not resolve"
+        [ "vrf-missing" ] snapshot.Tui_decode.vs_awaiting_unresolved
+
+(* A queue built from a recovery snapshot holds real rows and is older than
+   the workspace. Read as an ordinary queue it would be acted on as current,
+   so it arrives on its own field rather than folded into the error. *)
+let test_decode_verification_separates_a_stale_queue_from_a_failed_one () =
+  match
+    Tui_decode.decode_verification_snapshot
+      (verification_snapshot_json ~total:1
+         ~backlog_recovery:"read from backlog.json.last-good" [])
+  with
+  | Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok snapshot ->
+      Alcotest.(check (option string)) "nothing failed to read" None
+        snapshot.Tui_decode.vs_backlog_error;
+      Alcotest.(check (option string)) "but the queue says where it came from"
+        (Some "read from backlog.json.last-good")
+        snapshot.Tui_decode.vs_backlog_recovery
 
 let test_decode_verification_keeps_no_evidence_apart_from_unreadable () =
   (* An empty list means nothing was submitted. Evidence that exists but could
@@ -9136,6 +9258,16 @@ let () =
       [
         Alcotest.test_case "reads the live shape" `Quick
           test_decode_verification_snapshot_reads_the_live_shape;
+        Alcotest.test_case "the view round-trips its wire spelling" `Quick
+          test_decode_verification_view_round_trips_its_wire_spelling;
+        Alcotest.test_case "an unknown view is refused" `Quick
+          test_decode_verification_refuses_an_unknown_view;
+        Alcotest.test_case "the page and what it could not resolve" `Quick
+          test_decode_verification_carries_the_page_and_what_it_could_not_resolve;
+        Alcotest.test_case "an empty queue is not an unreadable one" `Quick
+          test_decode_verification_separates_an_empty_queue_from_an_unreadable_one;
+        Alcotest.test_case "a stale queue is not a failed one" `Quick
+          test_decode_verification_separates_a_stale_queue_from_a_failed_one;
         Alcotest.test_case "no evidence is not unreadable evidence" `Quick
           test_decode_verification_keeps_no_evidence_apart_from_unreadable;
       ] );

@@ -2103,12 +2103,21 @@ let fetch_fusion_detail ~(host : string) ~(port : int) ~(run_id : string) :
   get_json ~host ~port
     ~path:(fusion_runs_path ^ "/" ^ percent_encode_path_segment run_id)
 
-(** Fetch /api/v1/verification/requests. [limit] bounds the page; the surface
-    lists what is waiting rather than the whole history. *)
-let fetch_verification_requests ~(host : string) ~(port : int) ~(limit : int) :
+(** Fetch one page of one view of /api/v1/verification/requests.
+
+    The store keeps every submission ever made and removes none, so which list
+    is being asked for is part of the question rather than a filter applied to
+    the answer. [limit] bounds the page and [offset] places it. *)
+let fetch_verification_requests ~(host : string) ~(port : int) ~(limit : int)
+    ~(view : Masc.Tui_decode.verification_view) ~(offset : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port
-    ~path:(Printf.sprintf "/api/v1/verification/requests?limit=%d" (max 1 limit))
+    ~path:
+      (Printf.sprintf
+         "/api/v1/verification/requests?view=%s&limit=%d&offset=%d"
+         (Masc.Tui_decode.verification_view_to_wire view)
+         (max 1 limit)
+         (max 0 offset))
 
 (** Fetch /api/v1/dashboard/planning (goals + rollup + task backlog). *)
 let fetch_dashboard_planning ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =

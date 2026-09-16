@@ -451,7 +451,7 @@ let effective_setting_value (row : Keeper_runtime_setting_registry.setting) =
          display_float Env_config_keeper.KeeperBootstrap.post_startup_settle_sec
        | "MASC_KEEPER_REACTIVE_ENABLED"
        | "MASC_KEEPER_AUTONOMOUS_ENABLED" ->
-         display_bool (Feature_flag_registry.get_bool row.env_name)
+         display_bool (Env_config_core.get_bool ~default:true row.env_name)
        | "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC" ->
          display_int Env_config_keeper.KeeperKeepalive.interval_sec
        | "MASC_KEEPER_SNAPSHOT_SEC" ->
@@ -487,7 +487,7 @@ let effective_setting_value (row : Keeper_runtime_setting_registry.setting) =
        | "MASC_KEEPER_ENABLE_THINKING" ->
          display_bool (Env_config_core.get_bool ~default:false row.env_name)
        | "MASC_KEEPER_MODEL_INPUT_DEMOTION_ENABLED" ->
-         display_bool (Feature_flag_registry.get_bool row.env_name)
+         display_bool (Env_config_core.get_bool ~default:true row.env_name)
        | "MASC_KEEPER_SPAWN_OUTPUT_BUFFER_BYTES" ->
          display_int Env_config_keeper.KeeperSpawn.spawn_output_buffer_bytes
        | "MASC_KEEPER_LANE_ADMISSION_WAIT_BUDGET_SEC" ->

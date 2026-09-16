@@ -5937,15 +5937,34 @@ let open_lane_run_detail state ~mailbox ~lane_id ~run_id =
   state.lane_run_detail_scroll <- 0;
   launch_lane_run_detail_load state ~mailbox ~run_id
 
+(* Everything that names a row stops meaning anything when the surface moves
+   to another page or another list: the cursor, the scroll, the open detail
+   and a half-armed approve all point at rows this surface is about to stop
+   holding. The arm in particular must go -- a second press landing on a row
+   that arrived from a different page would approve a task the operator never
+   looked at. *)
+let reset_verification_rows state =
+  state.verification_cursor <- 0;
+  state.verification_scroll <- 0;
+  state.verification_detail_request_id <- None;
+  state.verification_detail_scroll <- 0;
+  state.verification_verdict_armed <- None;
+  state.verification_verdict_error <- None
+
 let launch_verification_load state ~mailbox =
   if state.verification_inflight then ()
   else begin
     state.verification_inflight <- true;
     let host = server_peer_host in
     let port = state.port in
+    (* Read once, here, rather than inside the fiber: the operator can press
+       another view key while this load is in flight, and the answer that
+       arrives must be the one that was asked for. *)
+    let view = state.verification_view in
+    let offset = state.verification_offset in
     let run () =
       let result =
-        try Masc_tui_loader.load_verification ~host ~port ~limit:200 with
+        try Masc_tui_loader.load_verification ~host ~port ~limit:200 ~view ~offset with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (Printexc.to_string exn)
       in
@@ -18077,18 +18096,112 @@ and is loaded on demand through keeper_skill.
           answering "what is coming" should not have a surface binding fire
           underneath it. *)
        | Some k when state.agenda_open ->
+           let close () =
+             state.agenda_open <- false;
+             state.agenda_scroll <- 0;
+             state.agenda_cursor <- 0
+           in
            (match k with
-            | ";" | "esc" ->
-                state.agenda_open <- false;
-                state.agenda_scroll <- 0
+            | ";" | "esc" -> close ()
             | "j" | "down" | "k" | "up" ->
-                let count, height = Masc_tui_render.agenda_viewport state in
-                let move =
-                  match k with
-                  | "j" | "down" -> Masc_tui_scroll.down
-                  | _ -> Masc_tui_scroll.up
-                in
-                state.agenda_scroll <- move ~count ~height state.agenda_scroll
+                let lines = Masc_tui_render.agenda_lines state in
+                (match Masc_tui_agenda.target_indexes lines with
+                 | [] ->
+                     (* Nothing here can be opened, so the keys keep the
+                        meaning they had: a panel of prose is still read. *)
+                     let count, height =
+                       Masc_tui_render.agenda_viewport state
+                     in
+                     let move =
+                       match k with
+                       | "j" | "down" -> Masc_tui_scroll.down
+                       | _ -> Masc_tui_scroll.up
+                     in
+                     state.agenda_scroll <-
+                       move ~count ~height state.agenda_scroll
+                 | targets ->
+                     let position =
+                       let rec find i = function
+                         | [] -> 0
+                         | index :: rest ->
+                             if index = state.agenda_cursor then i
+                             else find (i + 1) rest
+                       in
+                       find 0 targets
+                     in
+                     let next_position =
+                       match k with
+                       | "j" | "down" ->
+                           min (List.length targets - 1) (position + 1)
+                       | _ -> max 0 (position - 1)
+                     in
+                     let cursor = List.nth targets next_position in
+                     state.agenda_cursor <- cursor;
+                     let _, height = Masc_tui_render.agenda_viewport state in
+                     (* Keep the cursor row on screen, scrolling only as far
+                        as it takes, in either direction. *)
+                     if cursor < state.agenda_scroll then
+                       state.agenda_scroll <- cursor
+                     else if cursor >= state.agenda_scroll + height then
+                       state.agenda_scroll <- cursor - height + 1)
+            | "\r" ->
+                let lines = Masc_tui_render.agenda_lines state in
+                (match List.nth_opt lines state.agenda_cursor with
+                 | Some { Masc_tui_agenda.goes_to = Masc_tui_agenda.Nowhere; _ }
+                 | None -> ()
+                 | Some
+                     { Masc_tui_agenda.goes_to = Masc_tui_agenda.Keeper_holding _
+                     ; _
+                     } ->
+                     (* The held call is answered on the Approvals surface,
+                        which is where every held call is answered. *)
+                     close ();
+                     goto_surface state ~mailbox:async_messages Approvals
+                 | Some
+                     { Masc_tui_agenda.goes_to =
+                         Masc_tui_agenda.Stuck_task { task_id; ends_at }
+                     ; _
+                     } -> (
+                     close ();
+                     match ends_at with
+                     | Masc_tui_agenda.Verify_queue ->
+                         (* A stop is granted as a verdict, and verdicts are
+                            signed in the verify queue. Forced onto the queue
+                            view: the reader may have left this surface on the
+                            history, where the row is not. *)
+                         state.verification_view <-
+                           Masc.Tui_decode.Awaiting_queue;
+                         state.verification_offset <- 0;
+                         goto_surface state ~mailbox:async_messages
+                           Verification;
+                         (* Land on the row when the queue has already
+                            answered. A queue still loading lands at the top,
+                            and the reader finds the row with [/]. *)
+                         (match state.verification with
+                          | None -> ()
+                          | Some snapshot ->
+                              let rec place index = function
+                                | [] -> ()
+                                | (request :
+                                    Masc.Tui_decode.verification_request)
+                                  :: rest ->
+                                    if
+                                      String.equal
+                                        request.Masc.Tui_decode.vr_task_id
+                                        task_id
+                                    then state.verification_cursor <- index
+                                    else place (index + 1) rest
+                              in
+                              place 0 snapshot.Masc.Tui_decode.vs_requests)
+                     | Masc_tui_agenda.The_task ->
+                         (* Work nobody holds is read on the task itself, the
+                            same landing the palette gives a task id. *)
+                         goto_surface state ~mailbox:async_messages Overview;
+                         state.task_detail_id <- Some task_id;
+                         state.task_detail_scroll <- 0;
+                         state.task_history <- None;
+                         launch_task_history_load state
+                           ~mailbox:async_messages task_id))
             | _ -> ())
        (* Modal like the agenda sheet: a panel answering "who is mid-turn"
           should not have a surface binding fire underneath it. j/k walk the
@@ -19782,7 +19895,16 @@ and is loaded on demand through keeper_skill.
       | Some "&" -> open_msx_screen state
        | Some ";" ->
            state.agenda_open <- true;
-           state.agenda_scroll <- 0
+           state.agenda_scroll <- 0;
+           (* Open on the first row that leads somewhere rather than on the
+              heading above it, so the first Enter answers something. *)
+           state.agenda_cursor <-
+             (match
+                Masc_tui_agenda.target_indexes
+                  (Masc_tui_render.agenda_lines state)
+              with
+              | first :: _ -> first
+              | [] -> 0)
        | Some "i"
          when (not message_mode)
               && (match state.msg_target_keeper_name with
@@ -22628,6 +22750,51 @@ and is loaded on demand through keeper_skill.
            (* Reject wants a reason, and $EDITOR is the form we already
               have; the editor itself is the confirmation step. *)
            handle_verification_reject ()
+       (* Refused while a load is in flight rather than changing the state
+          without sending a request: [launch_verification_load] returns early
+          when one is already out, so the view and the page would move while
+          the answer on its way stayed the old one, and the next refresh would
+          read a state nothing had asked the server for. *)
+       | Some "h"
+         when state.view = Verification && not state.verification_inflight ->
+           (* The other list. The store keeps every submission ever made, so
+              the history holds rows whose task finished weeks ago; the queue
+              holds what a task is still waiting on. Asking which one is a
+              key rather than a filter the reader applies by eye. *)
+           state.verification_view <-
+             (match state.verification_view with
+              | Masc.Tui_decode.Awaiting_queue -> Masc.Tui_decode.Full_history
+              | Masc.Tui_decode.Full_history -> Masc.Tui_decode.Awaiting_queue);
+           state.verification_offset <- 0;
+           reset_verification_rows state;
+           launch_verification_load state ~mailbox:async_messages
+       | Some ">"
+         when state.view = Verification && not state.verification_inflight ->
+           (* Forward only while the server says a further page exists, so the
+              last page does not silently reload itself. *)
+           (match state.verification with
+            | Some snapshot when snapshot.Masc.Tui_decode.vs_truncated ->
+                state.verification_offset <-
+                  snapshot.Masc.Tui_decode.vs_offset
+                  + List.length snapshot.Masc.Tui_decode.vs_requests;
+                reset_verification_rows state;
+                launch_verification_load state ~mailbox:async_messages
+            | Some _ | None -> ())
+       | Some "<"
+         when state.view = Verification && not state.verification_inflight ->
+           (match state.verification with
+            | Some snapshot when snapshot.Masc.Tui_decode.vs_offset > 0 ->
+                (* Step back by the page that is on screen. A page shorter
+                   than the request limit only happens at the end, and
+                   stepping back by it still lands inside the list. *)
+                let page =
+                  max 1 (List.length snapshot.Masc.Tui_decode.vs_requests)
+                in
+                state.verification_offset <-
+                  max 0 (snapshot.Masc.Tui_decode.vs_offset - page);
+                reset_verification_rows state;
+                launch_verification_load state ~mailbox:async_messages
+            | Some _ | None -> ())
        | Some "x" | Some "X" when state.view = Harness ->
            (* The negative verdict, spelled the way Verification spells its
               own. It was [n], which this surface cannot keep: Harness

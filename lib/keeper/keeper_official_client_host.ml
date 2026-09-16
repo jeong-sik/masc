@@ -845,22 +845,68 @@ let apply_context_injection ~runtime_label ~terminal_error ~context
           ^ Printexc.to_string exn))
 ;;
 
+(* The two runtime stops answer [None] to [summary_of_masc_internal_error] on
+   purpose: a chat row's only carrier for the cause is its text, so the keeper
+   leaves the [masc_agent_core_error] envelope there for the pane to parse
+   (RFC-0454 P2). This consumer has no envelope to fall back on -- the
+   sentence is everything it keeps -- so it says what happened instead of
+   printing the wire label, which is all an operator got from
+   ["runtime_connection_closed"], the client's own exit reason included.
+
+   The wording moves into [summary_of_masc_internal_error] at P3, when the row
+   carries the failure as a field and no longer needs it in the text.
+
+   No catch-all: a new MASC kind decides here at compile time whether it has a
+   sentence or falls back to its kind. *)
+let masc_observation_sentence masc =
+  match Keeper_internal_error.summary_of_masc_internal_error masc with
+  | Some summary -> summary
+  | None ->
+    (match masc with
+     | Keeper_internal_error.Host_stopped_turn { runtime_id; stop } ->
+       Printf.sprintf
+         "runtime %s %s"
+         runtime_id
+         (match stop with
+          | Keeper_internal_error.Host_graceful_shutdown ->
+            "was running this turn when MASC shut down"
+          | Keeper_internal_error.Runtime_reported_interrupt ->
+            "reported this turn as interrupted")
+     | Keeper_internal_error.Runtime_connection_closed
+         { runtime_id; detail; turn_accepted } ->
+       Printf.sprintf
+         "runtime %s closed its connection %s the turn was submitted: %s"
+         runtime_id
+         (if turn_accepted then "after" else "before")
+         detail
+     | Keeper_internal_error.Runtime_exhausted _
+     | Keeper_internal_error.Capacity_backpressure _
+     | Keeper_internal_error.Resumable_cli_session _
+     | Keeper_internal_error.Accept_rejected _
+     | Keeper_internal_error.Internal_unhandled_exception _
+     | Keeper_internal_error.Internal_bridge_exception _
+     | Keeper_internal_error.Internal_contract_rejected _
+     | Keeper_internal_error.Incomplete_tool_transcript _
+     | Keeper_internal_error.Terminal_effect_failed _
+     | Keeper_internal_error.Provider_attempt_effect_fenced _
+     | Keeper_internal_error.Tool_correction_lost _
+     | Keeper_internal_error.Receipt_persistence_failed _
+     | Keeper_internal_error.Gate_replay_repair_required _ ->
+       Keeper_internal_error.kind_of_masc_internal_error masc)
+;;
+
 (* [Keeper_request_failure_core.message] is a sentence for people, and the
    module's contract is that a carried MASC error stays typed instead. The
    boundary observation hands back an [Agent_core.Error.t] and today that is
    always an [Internal] string, but [classify_masc_internal_error] also reads
    the [masc_agent_core_error] prefix out of one, so a MASC error could arrive
-   here as prefixed JSON. Keep its one-line summary -- or its kind, for the
-   kinds that have no summary written yet -- and never the JSON. *)
+   here as prefixed JSON. Keep a sentence, and never the JSON. *)
 let boundary_observation_cause error =
   match Keeper_internal_error.classify_masc_internal_error error with
   | None -> Keeper_request_failure_core.of_core_error error
   | Some masc ->
     { Keeper_request_failure_core.category = Agent_core.Error.category error
-    ; message =
-        (match Keeper_internal_error.summary_of_masc_internal_error masc with
-         | Some summary -> summary
-         | None -> Keeper_internal_error.kind_of_masc_internal_error masc)
+    ; message = masc_observation_sentence masc
     }
 ;;
 

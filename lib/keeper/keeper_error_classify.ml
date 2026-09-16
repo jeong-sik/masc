@@ -46,6 +46,8 @@ let is_transient_internal_runner_error (err : Agent_core.Error.t) : bool =
       | Keeper_turn_driver.Terminal_effect_failed _
       | Keeper_turn_driver.Provider_attempt_effect_fenced _
       | Keeper_turn_driver.Tool_correction_lost _
+      | Keeper_turn_driver.Host_stopped_turn _
+      | Keeper_turn_driver.Runtime_connection_closed _
       | Keeper_turn_driver.Receipt_persistence_failed _
       | Keeper_turn_driver.Gate_replay_repair_required _ )
   | None -> false
@@ -239,6 +241,8 @@ let is_auto_recoverable_runtime_exhausted_error (err : Agent_core.Error.t) : boo
   | Some (Keeper_turn_driver.Terminal_effect_failed _)
   | Some (Keeper_turn_driver.Provider_attempt_effect_fenced _)
   | Some (Keeper_turn_driver.Tool_correction_lost _)
+  | Some (Keeper_turn_driver.Host_stopped_turn _)
+  | Some (Keeper_turn_driver.Runtime_connection_closed _)
   | Some (Keeper_turn_driver.Receipt_persistence_failed _)
   | Some (Keeper_turn_driver.Gate_replay_repair_required _)
   | None ->
@@ -263,6 +267,8 @@ let is_accept_no_usable_progress_error (err : Agent_core.Error.t) : bool =
       | Keeper_turn_driver.Terminal_effect_failed _
       | Keeper_turn_driver.Provider_attempt_effect_fenced _
       | Keeper_turn_driver.Tool_correction_lost _
+      | Keeper_turn_driver.Host_stopped_turn _
+      | Keeper_turn_driver.Runtime_connection_closed _
       | Keeper_turn_driver.Receipt_persistence_failed _
       | Keeper_turn_driver.Gate_replay_repair_required _ )
   | None ->
@@ -345,6 +351,11 @@ let recoverable_runtime_failure_reason (err : Agent_core.Error.t) =
         Some Runtime_exhausted
     | Some (Keeper_turn_driver.Accept_rejected _) ->
         accept_rejection_degraded_retry_reason err
+    (* A closed runtime connection reached this function as agent-core's
+       [ProviderUnavailable] before RFC-0454 P2 typed it, and the arm below
+       for that constructor answers [Server_error]. The typed value does not
+       move the deferred whole-runtime lane, so it answers the same. *)
+    | Some (Keeper_turn_driver.Runtime_connection_closed _) -> Some Server_error
     (* RFC-0159 Phase A: typed [Internal_*] variants are not runtime-rotation
        reasons; they expose previously-opaque raw exception payloads.  *)
     | Some (Keeper_turn_driver.Internal_unhandled_exception _)
@@ -354,6 +365,10 @@ let recoverable_runtime_failure_reason (err : Agent_core.Error.t) =
     | Some (Keeper_turn_driver.Terminal_effect_failed _)
     | Some (Keeper_turn_driver.Provider_attempt_effect_fenced _)
     | Some (Keeper_turn_driver.Tool_correction_lost _)
+    (* The host stopped the turn; a second runtime would re-run what was
+       stopped on purpose. Untyped, this was an [Internal] string and reached
+       the same answer. *)
+    | Some (Keeper_turn_driver.Host_stopped_turn _)
     | Some (Keeper_turn_driver.Receipt_persistence_failed _)
     | Some (Keeper_turn_driver.Gate_replay_repair_required _) ->
         None
@@ -658,6 +673,8 @@ let should_warn_keeper_cycle_failed (err : Agent_core.Error.t) : bool =
   | Some (Keeper_turn_driver.Terminal_effect_failed _)
   | Some (Keeper_turn_driver.Provider_attempt_effect_fenced _)
   | Some (Keeper_turn_driver.Tool_correction_lost _)
+  | Some (Keeper_turn_driver.Host_stopped_turn _)
+  | Some (Keeper_turn_driver.Runtime_connection_closed _)
   | Some (Keeper_turn_driver.Receipt_persistence_failed _)
   | Some (Keeper_turn_driver.Gate_replay_repair_required _)
   | None ->
@@ -716,6 +733,8 @@ let is_runtime_exhausted_error (err : Agent_core.Error.t) : bool =
   | Some (Keeper_turn_driver.Terminal_effect_failed _)
   | Some (Keeper_turn_driver.Provider_attempt_effect_fenced _)
   | Some (Keeper_turn_driver.Tool_correction_lost _)
+  | Some (Keeper_turn_driver.Host_stopped_turn _)
+  | Some (Keeper_turn_driver.Runtime_connection_closed _)
   | Some (Keeper_turn_driver.Receipt_persistence_failed _)
   | Some (Keeper_turn_driver.Gate_replay_repair_required _) -> false
   | None -> false

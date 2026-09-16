@@ -33,9 +33,19 @@ type awaiting =
    [Operator_task_attention] projected it. Flattened to text here: the panel
    draws rows, and three surfaces describing the same row three ways is what
    the projection exists to prevent, so the sentence is made once over there. *)
+(* What ends this wait, as [Operator_task_attention] already knows it: a stop
+   is granted as a verdict in the verify queue, and work nobody holds is read
+   on the task itself. Carried rather than re-derived here from [what], which
+   is a sentence written for a reader. *)
+type ends_at =
+  | Verify_queue
+  | The_task
+
 type stalled =
-  { what : string
+  { task_id : string
+  ; what : string
   ; since_iso : string
+  ; ends_at : ends_at
   }
 
 type 'row reading =
@@ -146,7 +156,13 @@ let clock_half ~now ~localtime ~cells row =
    it. This row is not windowed, so the count is on screen from wherever the
    operator is standing. *)
 let waiting_half waiting =
-  if waiting <= 0 then "" else Printf.sprintf "Awaiting you\xc2\xb7%d" waiting
+  if waiting <= 0 then ""
+  else
+    (* The key in front of the count. The panel behind [;] is the only screen
+       that lists this work, and the footer that names [;] is among the first
+       things a narrow terminal gives up -- so the one count that is never
+       windowed carries its own door. *)
+    Printf.sprintf "; Awaiting you\xc2\xb7%d" waiting
 ;;
 
 let strip ~now ~localtime ~cols t =
@@ -178,9 +194,26 @@ type tone =
   | Quiet
   | Failed
 
+(* Where a row leads. Most lead nowhere -- headings, the blank spacers, the
+   note an empty section draws -- and a row that leads nowhere is a row the
+   cursor does not stop on.
+
+   The panel used to lead nowhere at all: it counted the work waiting on the
+   operator and then had no way to reach any of it, which is a count rather
+   than an answer. *)
+type destination =
+  | Nowhere
+  | Keeper_holding of string
+      (** the keeper sitting on a tool call only an operator releases *)
+  | Stuck_task of
+      { task_id : string
+      ; ends_at : ends_at
+      }
+
 type line =
   { tone : tone
   ; text : string
+  ; goes_to : destination
   }
 
 (* Cells the left column keeps before the right one is dropped: a clock that
@@ -257,7 +290,7 @@ let waited ~now since_iso =
 let stalled_rows_shown = 5
 
 let overlay ~now ~localtime ~cols t =
-  let quiet text = { tone = Quiet; text = "  " ^ text } in
+  let quiet text = { tone = Quiet; text = "  " ^ text; goes_to = Nowhere } in
   (* Why it failed, not only that it did. The reason is beside the flag in the
      state -- "schedule load failed: HTTP 503" -- and this panel dropped it,
      leaving two words that name neither the source nor the fault. Fitted like
@@ -266,7 +299,7 @@ let overlay ~now ~localtime ~cols t =
     (* No "load failed:" in front: the loader's own message already opens with
        the read that failed ("schedule load failed: HTTP 503"), and a prefix
        made the row stutter the way the Gate row did before #35436. *)
-    { tone = Failed; text = two_column ~cols reason "" }
+    { tone = Failed; text = two_column ~cols reason ""; goes_to = Nowhere }
   in
   (* An empty section is an answer only once its list was read. Before that,
      or when the read failed, "nothing is scheduled" and "nobody is waiting on
@@ -280,6 +313,7 @@ let overlay ~now ~localtime ~cols t =
       List.map
         (fun row ->
            { tone = Wake
+           ; goes_to = Nowhere
            ; text =
                two_column
                  ~cols
@@ -300,6 +334,7 @@ let overlay ~now ~localtime ~cols t =
       List.map
         (fun (held : awaiting) ->
            { tone = Question
+           ; goes_to = Keeper_holding held.asked_by
            ; text =
                two_column
                  ~cols
@@ -319,6 +354,8 @@ let overlay ~now ~localtime ~cols t =
       List.map
         (fun (row : stalled) ->
            { tone = Question
+           ; goes_to =
+               Stuck_task { task_id = row.task_id; ends_at = row.ends_at }
            ; text = two_column ~cols row.what (waited ~now row.since_iso)
            })
         shown
@@ -327,9 +364,29 @@ let overlay ~now ~localtime ~cols t =
       then []
       else [ quiet (Printf.sprintf "and %d more \xe2\x80\x94 masc_operator_digest" hidden) ]
   in
-  ({ tone = Heading; text = "Coming up" } :: wakes)
-  @ [ { tone = Quiet; text = "" }; { tone = Heading; text = "Waiting on you" } ]
+  let heading text = { tone = Heading; text; goes_to = Nowhere } in
+  let blank = { tone = Quiet; text = ""; goes_to = Nowhere } in
+  (heading "Coming up" :: wakes)
+  @ [ blank; heading "Waiting on you" ]
   @ questions
-  @ [ { tone = Quiet; text = "" }; { tone = Heading; text = "Stuck on you" } ]
+  @ [ blank; heading "Stuck on you" ]
   @ stuck
+;;
+
+(** Indexes of the rows Enter can act on, in display order. The cursor moves
+    over these, not over prose -- the same shape the answering overlay walks
+    its own lines with, so two panels that both step a subset of their rows
+    step it the same way. *)
+let target_indexes lines =
+  let rec loop index acc = function
+    | [] -> List.rev acc
+    | line :: rest ->
+      loop
+        (index + 1)
+        (match line.goes_to with
+         | Nowhere -> acc
+         | Keeper_holding _ | Stuck_task _ -> index :: acc)
+        rest
+  in
+  loop 0 [] lines
 ;;

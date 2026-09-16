@@ -872,7 +872,10 @@ let bounded_model_input_projection
              measured on and off in one deployment. Default on preserves
              current behavior. *)
           ~base_path:
-            (if Feature_flag_registry.get_bool "MASC_KEEPER_MODEL_INPUT_DEMOTION_ENABLED"
+            (if
+               Env_config_core.get_bool
+                 ~default:true
+                 "MASC_KEEPER_MODEL_INPUT_DEMOTION_ENABLED"
              then ctx.base_path
              else "")
           ~demote_before
@@ -1777,6 +1780,12 @@ let run_try_provider_with_carried_range_eviction
        request admission still enforces the request-body cap. *)
     run_try_provider_attempt ?continuation_checkpoint ~last_request:(ref None) ctx candidate
   | None ->
+    (* An uncapped runtime retries like any other. #36817 kept such a
+       runtime out of the token halving because that walk invented a seed
+       from a declared window and ran 18 refusals to zero; this walk moves a
+       position on the atom axis, stops at a single atom, and without it a
+       history that outgrew the provider would be refused every turn with
+       nothing declared to move the front. *)
     let seed = ctx.carried_front_seed in
     let halved_front = ref None in
     let ctx =
@@ -1891,6 +1900,8 @@ let max_tokens_truncation_error error =
       | Keeper_internal_error.Terminal_effect_failed _
       | Keeper_internal_error.Provider_attempt_effect_fenced _
       | Keeper_internal_error.Tool_correction_lost _
+      | Keeper_internal_error.Host_stopped_turn _
+      | Keeper_internal_error.Runtime_connection_closed _
       | Keeper_internal_error.Receipt_persistence_failed _
       | Keeper_internal_error.Gate_replay_repair_required _ )
   | None ->

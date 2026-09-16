@@ -3190,6 +3190,12 @@ let test_health_json_blocks_terminal_configuration_failures () =
     [ keeper_name ]
     (fleet_safety |> member "configuration_blocked_keeper_names" |> to_list
      |> List.map to_string);
+  Alcotest.(check int) "unscoped turn configuration error count" 1
+    (fleet_safety |> member "turn_configuration_error_keeper_count" |> to_int);
+  Alcotest.(check (list string)) "unscoped name matches inside autoboot too"
+    [ keeper_name ]
+    (fleet_safety |> member "turn_configuration_error_keeper_names" |> to_list
+     |> List.map to_string);
   Alcotest.(check bool) "all targets blocked by configuration" true
     (fleet_safety |> member "all_target_keepers_configuration_blocked" |> to_bool);
   Alcotest.(check string) "fleet status" "blocked"
@@ -3231,6 +3237,51 @@ let test_health_json_blocks_terminal_configuration_failures () =
     (partial |> member "status" |> to_string);
   Alcotest.(check bool) "partial config failure still needs operator" true
     (partial |> member "operator_action_required" |> to_bool)
+
+(* A configuration-blocked keeper outside the autoboot set: manual
+   activation, booted on request. The autoboot-scoped configuration_blocked_*
+   fields must not name it -- they answer "would the auto-booted fleet come
+   up blocked" -- but the failing count does, so the unscoped
+   turn_configuration_error_* pair carries it and the TUI's failing
+   partition still sums. *)
+let test_health_json_counts_configuration_blocker_outside_autoboot () =
+  let keeper_name = "manual-config-failing" in
+  let phase_counts : Server_routes_http_runtime_fleet_scan.keeper_phase_counts =
+    { running = 0; failing = 1; recovering = 0 }
+  in
+  let phase_snapshot : Server_routes_http_runtime_fleet_scan.keeper_phase_snapshot =
+    { counts = phase_counts
+    ; running_names = []
+    ; recovering_names = []
+    ; configuration_blocked_names = [ keeper_name ]
+    ; phase_values = [ keeper_name, Keeper_state_machine.Failing ]
+    ; phase_details = []
+    }
+  in
+  let fleet_safety =
+    Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
+      ~bootable_names:[ keeper_name ]
+      ~autoboot_scan:{ autoboot_names = []; read_errors = [] }
+      ~phase_snapshot
+      ~execution_snapshot:{ owners = []; executable_names = [ keeper_name ] }
+      ~phase_counts
+      ~paused_keepers_json:(`Assoc [ "count", `Int 0 ])
+      ()
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check int) "failing counts the blocked keeper" 1
+    (fleet_safety |> member "failing_keeper_fiber_count" |> to_int);
+  Alcotest.(check int) "autoboot-scoped blocker count stays zero" 0
+    (fleet_safety |> member "configuration_blocked_keeper_count" |> to_int);
+  Alcotest.(check (list string)) "autoboot-scoped blocker names stay empty" []
+    (fleet_safety |> member "configuration_blocked_keeper_names" |> to_list
+     |> List.map to_string);
+  Alcotest.(check int) "unscoped turn configuration error count" 1
+    (fleet_safety |> member "turn_configuration_error_keeper_count" |> to_int);
+  Alcotest.(check (list string)) "unscoped name is present"
+    [ keeper_name ]
+    (fleet_safety |> member "turn_configuration_error_keeper_names" |> to_list
+     |> List.map to_string)
 
 let test_health_json_reaction_ledger_unavailable_shape () =
   let previous_state = Server_auth.For_testing.snapshot_server_state () in
@@ -5559,6 +5610,10 @@ let () =
           Alcotest.test_case
             "health json blocks terminal configuration failures"
             `Quick test_health_json_blocks_terminal_configuration_failures;
+          Alcotest.test_case
+            "health json counts configuration blocker outside autoboot"
+            `Quick
+            test_health_json_counts_configuration_blocker_outside_autoboot;
           Alcotest.test_case
             "health json reaction ledger unavailable shape"
             `Quick test_health_json_reaction_ledger_unavailable_shape;

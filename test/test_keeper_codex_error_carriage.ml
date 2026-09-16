@@ -25,6 +25,13 @@ let class_of (err : Agent_core.Error.t) =
   | Agent_core.Error.Provider (Llm_provider.Error.UnknownVariant _) ->
     "provider:unknown_variant"
   | Agent_core.Error.Internal _ -> "internal"
+  (* A MASC error rides the carrier, so the class is the constructor it
+     carries, not the sentence the carrier's message renders (RFC-0454). *)
+  | Agent_core.Error.Internal_carried _ as carried ->
+    (match Keeper_internal_error.classify_masc_internal_error carried with
+     | Some internal ->
+       "masc:" ^ Keeper_internal_error.kind_of_masc_internal_error internal
+     | None -> "internal")
   | other -> "unexpected:" ^ Agent_core.Error.to_string other
 
 let check label error expected =
@@ -48,9 +55,13 @@ let test_every_variant_lands_in_its_class () =
        { message = "full"; tool_effect_attempted = true })
     "provider:reported:context_window_exceeded_after_tool_effect";
   check "spawn_failed" (Codex.Spawn_failed "no exe") "provider:unavailable";
+  (* Split from [Spawn_failed] by RFC-0454 P2: a client that died after it
+     started is a closed connection, and the pane needs to say so without
+     reading the rendered sentence. Rotation is unchanged —
+     [Keeper_runtime_attempt] rebuilds the same [ProviderUnavailable]. *)
   check "process_exited"
     (Codex.Process_exited { detail = "killed"; turn_accepted = false })
-    "provider:unavailable";
+    "masc:runtime_connection_closed";
   check "protocol_error"
     (Codex.Protocol_error { stage = "turn"; detail = "bad frame" })
     "provider:parse_error";
@@ -76,12 +87,49 @@ let test_every_variant_lands_in_its_class () =
   check "idle timeout after turn/start stays internal"
     (Codex.Timeout { seconds = 300.0; turn_accepted = true })
     "internal";
-  check "turn_interrupted (deliberate stop stays internal)"
+  (* Both are the host stopping a running turn. They stay off the rotation
+     chain (the carrier is still an agent-core internal error) and carry the
+     reason as a value instead of a sentence. *)
+  check "turn_interrupted is a typed host stop"
     Codex.Turn_interrupted
-    "internal";
-  check "runtime shutdown stays internal"
+    "masc:host_stopped_turn";
+  check "runtime shutdown is a typed host stop"
     Codex.Runtime_shutting_down
-    "internal"
+    "masc:host_stopped_turn"
+;;
+
+(* The class above says which constructor; this says the fields survive, which
+   is what the chat pane and the operator read. *)
+let test_host_stop_and_closed_connection_carry_their_fields () =
+  let classify error =
+    Keeper_internal_error.classify_masc_internal_error
+      (Map.codex_error_to_core_error error)
+  in
+  (match classify Codex.Runtime_shutting_down with
+   | Some (Keeper_internal_error.Host_stopped_turn { runtime_id; stop }) ->
+     Alcotest.(check string) "runtime" "codex_app_server" runtime_id;
+     Alcotest.(check bool)
+       "graceful shutdown"
+       true
+       (stop = Keeper_internal_error.Host_graceful_shutdown)
+   | Some _ | None -> Alcotest.fail "host shutdown did not decode");
+  (match classify Codex.Turn_interrupted with
+   | Some (Keeper_internal_error.Host_stopped_turn { stop; _ }) ->
+     Alcotest.(check bool)
+       "runtime-reported interrupt"
+       true
+       (stop = Keeper_internal_error.Runtime_reported_interrupt)
+   | Some _ | None -> Alcotest.fail "turn interrupt did not decode");
+  match
+    classify (Codex.Process_exited { detail = "stdout closed"; turn_accepted = true })
+  with
+  | Some
+      (Keeper_internal_error.Runtime_connection_closed
+         { runtime_id; detail; turn_accepted }) ->
+    Alcotest.(check string) "runtime" "codex_app_server" runtime_id;
+    Alcotest.(check string) "detail" "stdout closed" detail;
+    Alcotest.(check bool) "turn was submitted" true turn_accepted
+  | Some _ | None -> Alcotest.fail "closed connection did not decode"
 
 (* The durable recovery failure follows the same activity axis as the
    agent-core carriage above: an overflow the provider proved over capacity
@@ -141,6 +189,10 @@ let () =
             "every variant lands in its class"
             `Quick
             test_every_variant_lands_in_its_class
+        ; Alcotest.test_case
+            "a host stop and a closed connection carry their fields"
+            `Quick
+            test_host_stop_and_closed_connection_carry_their_fields
         ; Alcotest.test_case
             "context overflow maps to input-rejected recovery"
             `Quick

@@ -1700,12 +1700,14 @@ type fleet_safety = Tui_decode.fleet_safety
   fs_executable_count: int;
   fs_failing_count: int;
   fs_recovering_count: int;
+  fs_configuration_blocked_count: int;
   fs_paused_count: int;
   fs_target_reaction_capacity: int;
   fs_reaction_capacity_shortfall: int;
   fs_bootable_names: string list;
   fs_running_names: string list;
   fs_executable_names: string list;
+  fs_configuration_blocked_names: string list;
   fs_active_task_owner_without_fiber_count: int;
   fs_completion_authority_pending_count: int;
 }

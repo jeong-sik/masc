@@ -534,12 +534,14 @@ type fleet_safety = {
   fs_executable_count : int;
   fs_failing_count : int;
   fs_recovering_count : int;
+  fs_configuration_blocked_count : int;
   fs_paused_count : int;
   fs_target_reaction_capacity : int;
   fs_reaction_capacity_shortfall : int;
   fs_bootable_names : string list;
   fs_running_names : string list;
   fs_executable_names : string list;
+  fs_configuration_blocked_names : string list;
   fs_active_task_owner_without_fiber_count : int;
   fs_completion_authority_pending_count : int;
 }
@@ -8607,6 +8609,9 @@ let decode_fleet_safety json =
   let* fs_recovering_count =
     int_field_or section "recovering_keeper_fiber_count" ~default:0
   in
+  let* fs_configuration_blocked_count =
+    int_field_or section "configuration_blocked_keeper_count" ~default:0
+  in
   let* fs_paused_count = int_field_or section "paused_keeper_count" ~default:0 in
   let* fs_target_reaction_capacity =
     int_field_or section "target_reaction_capacity_count" ~default:0
@@ -8618,6 +8623,9 @@ let decode_fleet_safety json =
   let* fs_running_names = decode_string_name_list section "running_keeper_names" in
   let* fs_executable_names =
     decode_string_name_list section "executable_keeper_names"
+  in
+  let* fs_configuration_blocked_names =
+    decode_string_name_list section "configuration_blocked_keeper_names"
   in
   let* fs_active_task_owner_without_fiber_count =
     int_field_or section "active_task_owner_without_executable_fiber_count" ~default:0
@@ -8634,12 +8642,14 @@ let decode_fleet_safety json =
     ; fs_executable_count
     ; fs_failing_count
     ; fs_recovering_count
+    ; fs_configuration_blocked_count
     ; fs_paused_count
     ; fs_target_reaction_capacity
     ; fs_reaction_capacity_shortfall
     ; fs_bootable_names
     ; fs_running_names
     ; fs_executable_names
+    ; fs_configuration_blocked_names
     ; fs_active_task_owner_without_fiber_count
     ; fs_completion_authority_pending_count
     }

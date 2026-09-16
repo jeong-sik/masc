@@ -1105,7 +1105,7 @@ let test_capacity_failover_preserves_image () =
         let calls = ref [] in
         let first_messages = ref None in
         let complete ~sw:_ ~net:_ ~clock:_ ~config ~messages ?tools:_ () =
-          calls := config.model_id :: !calls;
+          calls := config.Llm_provider.Provider_config.model_id :: !calls;
           match !first_messages with
           | None ->
             first_messages := Some messages;

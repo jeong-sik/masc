@@ -1801,21 +1801,19 @@ let test_release_evidence_fixture_lanes_resolve_without_credentials () =
       | Some runtime_id -> runtime_id
       | None -> fail "release-evidence smoke runtime.toml must declare a default runtime"
     in
-    let default_binding =
-      match
-        List.find_opt
-          (fun (binding : Runtime_schema.binding) ->
-             String.equal
-               (Runtime_schema.binding_key binding)
-               default_runtime_id)
-          config.bindings
-      with
-      | Some binding -> binding
-      | None ->
-        failf
-          "release-evidence smoke default runtime %s must resolve to a binding"
-          default_runtime_id
-    in
+    (match
+       List.find_opt
+         (fun (binding : Runtime_schema.binding) ->
+            String.equal
+              (Runtime_schema.binding_key binding)
+              default_runtime_id)
+         config.bindings
+     with
+     | Some (_ : Runtime_schema.binding) -> ()
+     | None ->
+       failf
+         "release-evidence smoke default runtime %s must resolve to a binding"
+         default_runtime_id);
     List.iter
       (fun lane_id ->
          match

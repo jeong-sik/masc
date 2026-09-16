@@ -636,7 +636,7 @@ let test_recovery_requires_actual_binding_tool_support () =
 let test_summarized_image_reaches_text_runtime_without_source_rewrite () =
   with_fixture
     ~with_image:true
-    (fun env sw base_path _ cp source canonical artifact view server _ ->
+    (fun env sw base_path _ cp source canonical artifact view server ->
        let before = Checkpoint.exact_snapshot_messages source in
        (match run env sw base_path view cp () with
         | Ok _ -> ()

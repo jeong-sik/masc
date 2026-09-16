@@ -125,7 +125,7 @@ let test_cli_slot_answers_after_catalog_exhaustion ?(cli_only = false) () =
     failf
       "the cli slot must answer: %s"
       (Runtime.For_testing.classified_error_detail error)
-  | Ok ((_selection, output), selected_slot, _fitted) ->
+  | Ok ((_selection, output), selected_slot) ->
     check (option string)
       "the declared cli slot ran"
       (Some Fixture.cli_primary_runtime)

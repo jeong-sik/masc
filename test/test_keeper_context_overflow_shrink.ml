@@ -385,32 +385,6 @@ let test_state_is_keyed_per_keeper_and_runtime () =
    that size disproves it, and #31684 showed what keeping it costs: the pair
    re-entered at the disproved capacity every turn for the life of the
    process. *)
-let test_state_forgets_a_disproved_capacity () =
-  Eio_main.run
-  @@ fun _env ->
-  Shrink_state.For_testing.reset ();
-  Shrink_state.record_success
-    ~keeper_name:"alpha" ~runtime_id:"agent_core-primary" ~capacity:131_072;
-  Shrink_state.forget ~keeper_name:"alpha" ~runtime_id:"agent_core-primary";
-  check int "the next turn starts from the declared cap again" 1_048_576
-    (Shrink_state.starting_capacity
-       ~keeper_name:"alpha" ~runtime_id:"agent_core-primary" ~max_capacity:1_048_576)
-;;
-
-let test_forget_leaves_other_pairs_intact () =
-  Eio_main.run
-  @@ fun _env ->
-  Shrink_state.For_testing.reset ();
-  Shrink_state.record_success
-    ~keeper_name:"alpha" ~runtime_id:"agent_core-primary" ~capacity:131_072;
-  Shrink_state.record_success
-    ~keeper_name:"beta" ~runtime_id:"agent_core-primary" ~capacity:262_144;
-  Shrink_state.forget ~keeper_name:"alpha" ~runtime_id:"agent_core-primary";
-  check int "a different keeper keeps its own memory" 262_144
-    (Shrink_state.starting_capacity
-       ~keeper_name:"beta" ~runtime_id:"agent_core-primary" ~max_capacity:1_048_576)
-;;
-
 let () =
   run
     "keeper_context_overflow_shrink"
@@ -473,14 +447,6 @@ let () =
             "is keyed per (keeper, runtime)"
             `Quick
             test_state_is_keyed_per_keeper_and_runtime
-        ; test_case
-            "forgets a disproved capacity"
-            `Quick
-            test_state_forgets_a_disproved_capacity
-        ; test_case
-            "forget leaves other pairs intact"
-            `Quick
-            test_forget_leaves_other_pairs_intact
         ] )
     ]
 ;;

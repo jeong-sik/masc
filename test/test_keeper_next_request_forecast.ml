@@ -20,7 +20,8 @@ let history ~exchanges ~text_bytes =
 let atom_bytes messages =
   List.fold_left (fun sum m -> sum + Keeper_next_request_forecast.measure m) 0 messages
 
-let seed first_atom : Keeper_carried_front.seed = { first_atom; source = Keeper_carried_front.Ledger }
+let seed ~atom_count first_atom : Keeper_carried_front.seed =
+  { first_atom; atom_count; source = Keeper_carried_front.Ledger }
 
 let carry ?front ?counted_tokens ?request_cap_bytes ?reserved_bytes messages =
   Keeper_next_request_forecast.carry
@@ -39,7 +40,7 @@ let carried = function
    before it). A front at atom 6 carries the last four. *)
 let test_a_seeded_front_carries_everything_from_it () =
   let messages = history ~exchanges:10 ~text_bytes:100 in
-  let c = carried (carry ~front:(seed 6) ~counted_tokens:9_000 messages) in
+  let c = carried (carry ~front:(seed ~atom_count:10 6) ~counted_tokens:9_000 messages) in
   Alcotest.(check int) "front" 6 c.first_atom;
   Alcotest.(check int) "four atoms" 4 c.kept_atoms;
   Alcotest.(check bool) "its bytes are a proper part of the history" true
@@ -48,11 +49,16 @@ let test_a_seeded_front_carries_everything_from_it () =
     (c.origin = Keeper_carried_front.Carried Keeper_carried_front.Ledger);
   Alcotest.(check (option int)) "the count rides along" (Some 9_000) c.counted_tokens
 
-let test_a_front_past_the_newest_atom_still_carries_it () =
+(* The front was measured against 3,395 atoms; a purge left 5. The position
+   names nothing here, so the request starts over without a front. *)
+let test_a_front_the_history_shrank_under_is_dropped () =
   let messages = history ~exchanges:5 ~text_bytes:100 in
-  let c = carried (carry ~front:(seed 40) messages) in
-  Alcotest.(check int) "clamped to the newest atom" 4 c.first_atom;
-  Alcotest.(check int) "one atom" 1 c.kept_atoms
+  let c = carried (carry ~front:(seed ~atom_count:3_395 3_100) ~counted_tokens:91_000 messages) in
+  Alcotest.(check int) "from the first atom" 0 c.first_atom;
+  Alcotest.(check int) "all five" 5 c.kept_atoms;
+  Alcotest.(check bool) "the origin says no front" true
+    (c.origin = Keeper_carried_front.Whole_history);
+  Alcotest.(check (option int)) "and no count rides along" None c.counted_tokens
 
 let test_without_a_front_the_cap_says_what_goes () =
   let messages = history ~exchanges:5 ~text_bytes:100 in
@@ -228,8 +234,8 @@ let () =
     ; ( "carry"
       , [ Alcotest.test_case "a seeded front carries everything from it" `Quick
             test_a_seeded_front_carries_everything_from_it
-        ; Alcotest.test_case "a front past the newest atom still carries it" `Quick
-            test_a_front_past_the_newest_atom_still_carries_it
+        ; Alcotest.test_case "a front the history shrank under is dropped" `Quick
+            test_a_front_the_history_shrank_under_is_dropped
         ; Alcotest.test_case "without a front the cap says what goes" `Quick
             test_without_a_front_the_cap_says_what_goes
         ; Alcotest.test_case "the cap fit needs the fixed parts" `Quick

@@ -242,6 +242,15 @@ let tool_marker_color = function
 
 ;;
 
+(* The row this dressing sits in opens dim, and a coloured clause used to
+   close with a bare [Ansi.reset], snapping the plain text after it -- args,
+   counts, the dot between clauses -- back to full foreground. Every close
+   reopens the rung the clause sits in, the way {!Chat_theme.body_context}
+   closes markdown spans inside a dim body. *)
+let tool_reopen = Ansi.reset ^ Ansi.dim
+
+;;
+
 let dress_tool_clause (clause : string) : string =
   let c = String.trim clause in
   match extract_tool_marker c with
@@ -254,19 +263,19 @@ let dress_tool_clause (clause : string) : string =
        | Some idx ->
          let name = String.sub rest 0 idx in
          let args = String.sub rest idx (String.length rest - idx) in
-         Printf.sprintf "%s%s%s %s%s%s%s" col m Ansi.reset
-           (Theme.tool_origin ()) name Ansi.reset args
+         Printf.sprintf "%s%s%s %s%s%s%s" col m tool_reopen
+           (Theme.tool_origin ()) name tool_reopen args
        | None ->
-         Printf.sprintf "%s%s%s %s%s%s" col m Ansi.reset
-           (Theme.tool_origin ()) rest Ansi.reset)
+         Printf.sprintf "%s%s%s %s%s%s" col m tool_reopen
+           (Theme.tool_origin ()) rest tool_reopen)
   | None ->
     if contains_sub c "detail" && contains_sub c "folded" then
-      Printf.sprintf "%s%s%s" (Theme.recede () ^ Ansi.dim) c Ansi.reset
+      Printf.sprintf "%s%s%s" (Theme.recede () ^ Ansi.dim) c tool_reopen
     else if String.starts_with ~prefix:"Ctrl-" c || contains_sub c "carried by the transcript" then
-      Printf.sprintf "%s%s%s" (Theme.recede () ^ Ansi.dim) c Ansi.reset
+      Printf.sprintf "%s%s%s" (Theme.recede () ^ Ansi.dim) c tool_reopen
     else if (String.ends_with ~suffix:"ms" c || String.ends_with ~suffix:"s" c)
             && (match split_last_space c with None -> true | Some (_, _) -> false) then
-      Printf.sprintf "%s%s%s" (Theme.recede () ^ Ansi.dim) c Ansi.reset
+      Printf.sprintf "%s%s%s" (Theme.recede () ^ Ansi.dim) c tool_reopen
     else if contains_sub c "returned" || contains_sub c "failed" || contains_sub c "awaiting" || contains_sub c "running" then
       if contains_sub c ", " then
         let parts = String.split_on_char ',' c in
@@ -275,32 +284,32 @@ let dress_tool_clause (clause : string) : string =
             (fun p ->
               let p = String.trim p in
               if String.ends_with ~suffix:"returned" p then
-                Printf.sprintf "%s%s%s" (Theme.ok ()) p Ansi.reset
+                Printf.sprintf "%s%s%s" (Theme.ok ()) p tool_reopen
               else if contains_sub p "failed" || contains_sub p "never returned" then
-                Printf.sprintf "%s%s%s" (Ansi.bold ^ Theme.bad ()) p Ansi.reset
+                Printf.sprintf "%s%s%s" (Ansi.bold ^ Theme.bad ()) p tool_reopen
               else if contains_sub p "awaiting" then
-                Printf.sprintf "%s%s%s" (Theme.warn ()) p Ansi.reset
+                Printf.sprintf "%s%s%s" (Theme.warn ()) p tool_reopen
               else if contains_sub p "running" then
-                Printf.sprintf "%s%s%s" (Theme.info ()) p Ansi.reset
+                Printf.sprintf "%s%s%s" (Theme.info ()) p tool_reopen
               else p)
             parts
         in
         String.concat ", " dressed
       else if String.ends_with ~suffix:"returned" c then
-        Printf.sprintf "%s%s%s" (Theme.ok ()) c Ansi.reset
+        Printf.sprintf "%s%s%s" (Theme.ok ()) c tool_reopen
       else if contains_sub c "failed" || contains_sub c "never returned" then
-        Printf.sprintf "%s%s%s" (Ansi.bold ^ Theme.bad ()) c Ansi.reset
+        Printf.sprintf "%s%s%s" (Ansi.bold ^ Theme.bad ()) c tool_reopen
       else if contains_sub c "awaiting" then
-        Printf.sprintf "%s%s%s" (Theme.warn ()) c Ansi.reset
+        Printf.sprintf "%s%s%s" (Theme.warn ()) c tool_reopen
       else if contains_sub c "running" then
-        Printf.sprintf "%s%s%s" (Theme.info ()) c Ansi.reset
+        Printf.sprintf "%s%s%s" (Theme.info ()) c tool_reopen
       else c
     else
       match split_last_space c with
       | Some (name, count) when is_all_digits count ->
         Printf.sprintf "%s%s%s %s%s%s"
-          (Theme.tool_origin ()) name Ansi.reset
-          (Theme.recede () ^ Ansi.dim) count Ansi.reset
+          (Theme.tool_origin ()) name tool_reopen
+          (Theme.recede () ^ Ansi.dim) count tool_reopen
       | _ -> c
 
 ;;
@@ -308,7 +317,7 @@ let dress_tool_clause (clause : string) : string =
 let dress_tool_summary (line : string) : string =
   let parts = split_on_middle_dot line in
   let dressed = List.map dress_tool_clause parts in
-  let sep = Printf.sprintf " %s\xc2\xb7%s " (Theme.recede () ^ Ansi.dim) Ansi.reset in
+  let sep = Printf.sprintf " %s\xc2\xb7%s " (Theme.recede () ^ Ansi.dim) tool_reopen in
   String.concat sep dressed
 
 ;;
@@ -409,7 +418,7 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
               Printf.sprintf "%s\xe2\x94\x82%s " (Theme.recede ()) Ansi.reset
         in
         let body_style =
-          if is_tool then Ansi.reset
+          if is_tool then context.opening
           else Chat_theme.body row.style
         in
         if context.ambient_background && not is_tool then
@@ -420,9 +429,7 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
             (Printf.sprintf "%s%s%s%s%s" margin rail
                body_style (dress rest) Ansi.reset))
       else
-        box_line_styled buf cols
-          ~style:(if is_tool then Ansi.reset else context.opening)
-          (dress text)
+        box_line_styled buf cols ~style:context.opening (dress text)
   | Message_layout.Metadata (Message_layout.Timeline_break _) ->
       box_line_styled buf cols ~style:(Theme.info () ^ Ansi.bold) row.text
   | Message_layout.Metadata (Message_layout.Continued_at { timestamp }) ->

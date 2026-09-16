@@ -63,13 +63,6 @@ let record_success ~keeper_name ~runtime_id ~capacity =
    against a 469638-byte reserve, every turn, until the process restarted.
    Forgetting returns the pair to [max_capacity] on the next turn, so the
    discovery runs again against the reserve that exists now. *)
-let forget ~keeper_name ~runtime_id =
-  let key = { Key.keeper_name; runtime_id } in
-  Eio.Mutex.use_rw ~protect:true global.mutex (fun () ->
-    global.last_successful_capacity <-
-      Capacity_map.remove key global.last_successful_capacity)
-;;
-
 module For_testing = struct
   let reset () =
     Eio.Mutex.use_rw ~protect:true global.mutex (fun () ->

@@ -244,7 +244,6 @@ emits-usage-tokens = true
 [mock.mockmodel]
 is-default = true
 max-concurrent = 64
-max-request-body-bytes = 524288
 EOF
 
 cat > "$BASE_PATH/.masc/config/agent-core-models-overlay.toml" <<EOF

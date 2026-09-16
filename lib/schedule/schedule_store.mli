@@ -159,20 +159,26 @@ val cancel_request :
 val refresh_due :
   Workspace_utils.config ->
   now:float ->
+  retention_days:int ->
   (state * int, store_error) result
 (** Marks stored [Scheduled] requests as [Due] when [due_at <= now]. The
     integer is the number of requests changed.
 
     The same pass forgets finished schedules whose wake finished more than
-    {!terminal_schedule_retention_days} ago and about which nothing has been
-    written since, with the wakes of those schedules; their notes stay. A
-    schedule that never ran records no finishing time and is left to
-    {!prune_completed}. At most a bounded number are forgotten per pass, they
-    are not counted in the returned integer, and the count is logged. *)
+    [retention_days] ago and about which nothing has been written since, with
+    the wakes of those schedules; their notes stay. A schedule that never ran
+    records no finishing time and is left to {!prune_completed}. At most a
+    bounded number are forgotten per pass, they are not counted in the returned
+    integer, and the count is logged.
+
+    [retention_days] has no default here: how long to keep a finished schedule
+    is the caller's policy, and a window this pass silently invented would be
+    one an operator cannot change. *)
 
 val terminal_schedule_retention_days : int
-(** How long a finished schedule stays in the ledger after the wake that ended
-    it. *)
+(** The window a caller with no policy of its own should pass as
+    [retention_days]: how long a finished schedule stays in the ledger after
+    the wake that ended it. *)
 
 val reschedule_due_recurring :
   Workspace_utils.config ->

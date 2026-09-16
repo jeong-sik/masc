@@ -149,11 +149,7 @@ type target_catalog_admission_error =
 type wire_admission_error
 type admission_error
 
-type request_body_projection = private
-  { actual_bytes : int
-  ; limit_bytes : int option
-  ; within_limit : bool
-  }
+type request_body_projection = private { actual_bytes : int }
 
 type token_capacity_rejection =
   | Capacity_evidence_not_yet_valid of
@@ -186,10 +182,6 @@ type input_capacity_disposition =
       ; max_context_tokens : int
       }
   | Token_capacity_rejected of token_capacity_rejection
-  | Serialized_request_body_too_large of
-      { actual_bytes : int
-      ; limit_bytes : int
-      }
 
 type candidate_rejection_disposition =
   | Runtime_slot_unavailable
@@ -467,11 +459,10 @@ val domain_schema : output_requirement -> Yojson.Safe.t
 (** Project the exact serialized generation-body size for one catalog-admitted
     target without resolving credentials, allocating an attempt, measuring
     tokens, or dispatching. The same provider serializer and output requirement
-    transformation used by admission produce [actual_bytes].
-
-    [within_limit] compares only the target's declared request-body ceiling.
-    This function is not a token/context-fit oracle; callers must not convert
-    bytes to tokens or infer an undeclared context boundary from it. *)
+    transformation used by admission produce [actual_bytes]. This function is
+    not a token/context-fit oracle and measures the body against nothing:
+    callers must not convert bytes to tokens or infer a context boundary from
+    it. *)
 val project_request_body
   :  target:admitted_target
   -> messages:Types.message list

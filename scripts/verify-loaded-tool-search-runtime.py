@@ -90,7 +90,7 @@ def main():
     threading.Thread(target=provider.serve_forever, daemon=True).start()
     fixtures = Path(__file__).parent / 'fixtures/release-evidence'
     runtime = (fixtures / 'runtime.toml').read_text()
-    runtime += f'\n[providers.search_fixture]\nprotocol = "openai-compatible-http"\nendpoint = "http://127.0.0.1:{provider.server_port}/v1"\n[models.proof]\napi-name = "search-fixture"\nmax-context = 131072\ntools-support = true\nstreaming = true\n[search_fixture.proof]\nmax-request-body-bytes = 1048576\n'
+    runtime += f'\n[providers.search_fixture]\nprotocol = "openai-compatible-http"\nendpoint = "http://127.0.0.1:{provider.server_port}/v1"\n[models.proof]\napi-name = "search-fixture"\nmax-context = 131072\ntools-support = true\nstreaming = true\n[search_fixture.proof]\n'
     overlay = (fixtures / 'agent-core-models-overlay.toml').read_text()
     overlay += f'''
 [[providers]]

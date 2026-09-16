@@ -840,9 +840,11 @@ let cancel_request config ~schedule_id =
 ;;
 
 (* How long a finished schedule stays in the ledger after the wake that ended
-   it. Every mutation rewrites the ledger whole, and a live one held 1,250
-   finished schedules against 22 live ones: 4.3 MB, median finished age 8.6
-   days (2026-09-16). Seven days is the window the user chose on that date.
+   it, when the caller has nothing else to say. Every mutation rewrites the
+   ledger whole, and a live one held 1,250 finished schedules against 22 live
+   ones: 4.3 MB, median finished age 8.6 days (2026-09-16). Seven days is the
+   window the user chose on that date, and it is what the runtime setting
+   starts at; the caller passes the window it wants to each pass.
 
    Only a wake tells the ledger when a schedule finished. A cancellation or an
    expiry writes no time of its own, so a schedule that never ran is not
@@ -850,8 +852,9 @@ let cancel_request config ~schedule_id =
    operator asks. Reading the retention off [due_at] instead would delete a
    long-overdue schedule the moment someone cancelled it. *)
 let terminal_schedule_retention_days = 7
-let terminal_schedule_retention_s =
-  float_of_int terminal_schedule_retention_days *. 24.0 *. 60.0 *. 60.0
+
+let retention_seconds ~retention_days =
+  float_of_int retention_days *. 24.0 *. 60.0 *. 60.0
 ;;
 
 (* One pass forgets at most this many, so a tick's write stays near the size of
@@ -888,7 +891,7 @@ let ledger_times state =
    append-only evidence about intent and history, which [prune_completed] also
    leaves behind, and a note about a schedule the ledger no longer holds is
    still what someone wrote. *)
-let forget_finished_schedules ~now state =
+let forget_finished_schedules ~now ~retention_days state =
   let finished, written_about = ledger_times state in
   let forgettable (request : schedule_request) =
     Schedule_domain.is_terminal request.status
@@ -903,7 +906,7 @@ let forget_finished_schedules ~now state =
              (Hashtbl.find_opt written_about request.schedule_id)
              ~default:finished_at)
       in
-      now -. last_written > terminal_schedule_retention_s
+      now -. last_written > retention_seconds ~retention_days
   in
   let forgotten_ids = Hashtbl.create 16 in
   let kept =
@@ -926,7 +929,7 @@ let forget_finished_schedules ~now state =
   , Hashtbl.length forgotten_ids )
 ;;
 
-let refresh_due config ~now =
+let refresh_due config ~now ~retention_days =
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
     let* state = load_for_mutation config in
     let schedules, changed =
@@ -947,7 +950,7 @@ let refresh_due config ~now =
     let schedules, wakes, forgotten =
       if now < state.updated_at
       then schedules, state.wakes, 0
-      else forget_finished_schedules ~now { state with schedules }
+      else forget_finished_schedules ~now ~retention_days { state with schedules }
     in
     if changed = 0 && forgotten = 0
     then Ok (state, 0)
@@ -957,7 +960,7 @@ let refresh_due config ~now =
         Log.Misc.info
           "schedule_store: forgot %d schedule(s) whose wake finished more than %d days ago"
           forgotten
-          terminal_schedule_retention_days;
+          retention_days;
       let next_state = bump_state state ~schedules ~wakes ~notes:state.notes in
       let* () = write_state config next_state in
       Ok (next_state, changed)))

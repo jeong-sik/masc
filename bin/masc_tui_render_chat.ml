@@ -433,7 +433,9 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
         (* [rows_of_entry] prefixes every body chunk with the two spaces the guard matches, so this arm stays as a safety net. *)
         box_line_styled buf cols ~style:context.opening (dress text)
   | Message_layout.Metadata (Message_layout.Timeline_break _) ->
-      box_line_styled buf cols ~style:(Theme.info () ^ Ansi.bold) row.text
+      (* The hour rail is a scrollbar landmark, not content: it stays, but
+         recedes instead of holding the pane's brightest slot. *)
+      box_line_styled buf cols ~style:(Theme.recede ()) row.text
   | Message_layout.Metadata (Message_layout.Continued_at { timestamp }) ->
       box_line_styled buf cols ~style:(Theme.recede ())
         (Printf.sprintf "[%s]" timestamp)

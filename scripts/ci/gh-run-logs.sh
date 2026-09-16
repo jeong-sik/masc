@@ -38,7 +38,7 @@ set -euo pipefail
 
 REPO="${GH_REPO:-jeong-sik/masc}"
 repo_path() { printf '%s' "${REPO#https://github.com/}"; }
-api() { gh api "repos/$(repo_path)/$1"; }
+api() { gh api "repos/$(repo_path)/$1" "${@:2}"; }
 
 die_auth() { # $1 = http status
   case "$1" in
@@ -52,9 +52,9 @@ die_auth() { # $1 = http status
 
 # gh prints e.g. "gh: Not Found (HTTP 404)" on stderr and exits 1.
 status_of_err() { grep -Eo 'HTTP 40[0-9]' "$1" | grep -Eo '40[0-9]' | head -1; }
-run_api() { # $@: api path — on HTTP 40x die with the loud message
+run_api() { # $@: api path + extra gh flags — on HTTP 40x die with the loud message
   local err; err="$(mktemp)"
-  if ! api "$1" 2>"$err"; then
+  if ! api "$@" 2>"$err"; then
     local code; code="$(status_of_err "$err")"; rm -f "$err"
     die_auth "${code:-0}"
   fi

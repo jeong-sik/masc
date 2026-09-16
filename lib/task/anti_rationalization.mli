@@ -84,6 +84,10 @@ type gate =
   | Structured_tool
   | Invalid_verdict
   | Evaluator_unavailable
+  | Evidence_posture_guard
+        (** A [Note_only] submission whose verdict the reviewer produced
+            without a single successful evidence lookup: refused at the
+            completion boundary (RFC-0417 criteria 3). *)
 
 val gate_to_string : gate -> string
 
@@ -106,12 +110,22 @@ type review_result =
             pulse forever without telling anyone. *)
   }
 
+(** The evidence posture of a completion submission, as the judge sees it.
+    [Note_only]: zero artifacts it can open — every item a note or an unusable
+    reference. [Usable_artifacts n]: [n] readable, untruncated artifacts. The
+    arithmetic is the judge prompt's rules 3 and 4 made typed, so the prose
+    cannot drift from what the snapshot holds. *)
+type evidence_posture =
+  | Note_only
+  | Usable_artifacts of int
+
 val run
   :  ?evaluator_runtime:string
   -> ?generator_runtime:string
   -> ?on_verdict:(review_result -> unit)
   -> ?on_tool_result:(input:Yojson.Safe.t -> Tool_result.result -> unit)
   -> ?sw:Eio.Switch.t option
+  -> ?evidence_posture:evidence_posture option
   -> log_info:(string -> unit)
   -> log_warn:(string -> unit)
   -> render_prompt:(unit -> (string, string) result)
@@ -142,14 +156,8 @@ val run
     operator's to close (RFC-0417 §4.1) and the system lane hands it on
     without a prompt. *)
 
-(** The evidence posture of a completion submission, as the judge sees it.
-    [Note_only]: zero artifacts it can open — every item a note or an unusable
-    reference. [Usable_artifacts n]: [n] readable, untruncated artifacts. The
-    arithmetic is the judge prompt's rules 3 and 4 made typed, so the prose
-    cannot drift from what the snapshot holds. *)
-type evidence_posture =
-  | Note_only
-  | Usable_artifacts of int
+(** The evidence posture type is declared above [run] (which takes it as an
+    optional argument); see its doc comment there. *)
 
 type verdict_question =
   { completion_contract : string list option

@@ -102,11 +102,13 @@ type gate =
   | Structured_tool
   | Invalid_verdict
   | Evaluator_unavailable
+  | Evidence_posture_guard
 
 let gate_to_string = function
   | Structured_tool -> "structured_tool"
   | Invalid_verdict -> "invalid_verdict"
   | Evaluator_unavailable -> "evaluator_unavailable"
+  | Evidence_posture_guard -> "evidence_posture_guard"
 ;;
 
 type review_result =
@@ -410,6 +412,7 @@ let run
       ?(on_verdict : review_result -> unit = fun _ -> ())
       ?(on_tool_result : input:Yojson.Safe.t -> Tool_result.result -> unit = fun ~input:_ _ -> ())
       ?(sw : Eio.Switch.t option = None)
+      ?(evidence_posture : evidence_posture option = None)
       ~(log_info : string -> unit)
       ~(log_warn : string -> unit)
       ~(render_prompt : unit -> (string, string) result)
@@ -426,6 +429,22 @@ let run
   let emit result =
     on_verdict result;
     result
+  in
+  (* RFC-0417 criteria-3 guard hook: count successful evidence lookups the
+     reviewer actually made. [lookup]'s dispatch is wrapped below; a Completed
+     result bumps this counter. Read at the verdict-commit gate. *)
+  let evidence_lookup_success_count = ref 0 in
+  let lookup =
+    match lookup with
+    | No_lookup_surface -> lookup
+    | Lookup_tools { schemas; dispatch; root_layout } ->
+      let wrapped ~name ~args =
+        let result = dispatch ~name ~args in
+        if Tool_result.is_success result
+        then incr evidence_lookup_success_count;
+        result
+      in
+      Lookup_tools { schemas; dispatch = wrapped; root_layout }
   in
   let task_info fmt = Stdlib.Format.ksprintf log_info fmt in
   let task_warn fmt = Stdlib.Format.ksprintf log_warn fmt in
@@ -538,25 +557,55 @@ let run
        let rec attempt ~retryable_error_seen slot remaining =
          match run_attempt slot with
          | Ok {verdict=Some verdict;selected_runtime_id=slot}, _nested_retryable_error_seen ->
-           (match verdict with
-            | Approve reason ->
-              task_info
-                "LLM approved runtime=%s reason=%s"
-                slot
-                reason
-            | Reject reason ->
-              task_info
-                "LLM rejected runtime=%s reason=%s"
-                slot
-                reason);
-           emit
-             { verdict = Some verdict
-             ; evaluator_runtime = slot
-             ; generator_runtime
-             ; gate = Structured_tool
-             ; fallback_reason = None
-             ; evaluator_error_retryable = None
-             }
+           (* RFC-0417 criteria-3: a note-only submission the reviewer approved
+              or rejected without opening a single piece of checkable evidence
+              is not a review. When the posture is [Note_only] and the wrapped
+              dispatch counted zero successful lookups, refuse to commit the
+              verdict and surface the guard gate instead. A posture the caller
+              did not supply ([None]) keeps the legacy path untouched. *)
+           let guard_blocks_verdict =
+             match evidence_posture with
+             | Some Note_only -> !evidence_lookup_success_count = 0
+             | Some (Usable_artifacts _) | None -> false
+           in
+           if guard_blocks_verdict
+           then (
+             let detail =
+               "note-only evidence posture with zero successful evidence \
+                lookups; verdict refused at the completion boundary"
+             in
+             task_warn "%s" detail;
+             (Atomic.get outcome_observer_fn)
+               ~outcome:"evidence_posture_guard"
+               ~runtime:slot;
+             emit
+               { verdict = None
+               ; evaluator_runtime = slot
+               ; generator_runtime
+               ; gate = Evidence_posture_guard
+               ; fallback_reason = Some detail
+               ; evaluator_error_retryable = None
+               })
+           else (
+             (match verdict with
+              | Approve reason ->
+                task_info
+                  "LLM approved runtime=%s reason=%s"
+                  slot
+                  reason
+              | Reject reason ->
+                task_info
+                  "LLM rejected runtime=%s reason=%s"
+                  slot
+                  reason);
+             emit
+               { verdict = Some verdict
+               ; evaluator_runtime = slot
+               ; generator_runtime
+               ; gate = Structured_tool
+               ; fallback_reason = None
+               ; evaluator_error_retryable = None
+               })
          | Ok {verdict=None;selected_runtime_id=slot}, nested_retryable_error_seen ->
            let detail =
              "evaluator did not call report_review_verdict exactly once"
@@ -659,6 +708,7 @@ let review
     ?on_verdict
     ?on_tool_result
     ~sw
+    ~evidence_posture:(Some question.evidence_posture)
     ?goal_blocks:(if image_blocks = [] then None else Some image_blocks)
     ~log_info:(fun message ->
       Log.Task.info "task_id=%s [task-completion-review] %s" req.task_id message)

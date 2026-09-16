@@ -397,7 +397,7 @@ let dispatch_candidates config ~now ~clock consumer candidates =
     candidates
 ;;
 
-let tick ?consumer ?clock config ~now =
+let tick ?consumer ?clock config ~now ~retention_days =
   (* Without a clock every wake stamp copies [now], which is the tick start:
      the store then records a dispatch that took fourteen seconds as one
      that took none. The production caller passes its wall clock; tests that
@@ -407,7 +407,7 @@ let tick ?consumer ?clock config ~now =
     | Some clock -> clock
     | None -> fun () -> now
   in
-  match Schedule_store.refresh_due config ~now with
+  match Schedule_store.refresh_due config ~now ~retention_days with
   | Error err -> Error (Service_error (Schedule_service.Store_error err))
   | Ok (state, due_changed) ->
     let all_candidates = candidates ~now state in

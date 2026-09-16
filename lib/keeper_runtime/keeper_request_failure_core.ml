@@ -3,9 +3,30 @@ type t =
   ; message : string
   }
 
+(* [category] already names the family, so [message] must not say it again.
+   Agent-core renders [Internal] and [Internal_carried] as
+   "Internal error: <payload>", which is that label and nothing more, and the
+   summary then reads "internal: Internal error: ...". Every other family
+   renders the specific failure -- "Rate limited: ...", "Payment required:
+   ...", "Invalid config 'x': ...", "Task timed out: ..." -- which the coarse
+   category does not carry, so those keep what agent-core wrote.
+
+   Matched by constructor. Stripping a prefix off the rendered string would be
+   one new "Internal ..." sentence away from cutting a real message.
+
+   A carried MASC error's payload is its own prefixed JSON, which is the
+   escaping RFC-0454 removes. Both producers classify before they reach here
+   (the header says so), and that precondition carries the same weight either
+   way: [to_string] would have written the same payload behind the prefix. *)
+let message_of_core_error = function
+  | Agent_core.Error.Internal message
+  | Agent_core.Error.Internal_carried { message; _ } -> message
+  | error -> Agent_core.Error.to_string error
+;;
+
 let of_core_error error =
   { category = Agent_core.Error.category error
-  ; message = Agent_core.Error.to_string error
+  ; message = message_of_core_error error
   }
 ;;
 

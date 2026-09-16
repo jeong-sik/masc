@@ -1,0 +1,117 @@
+# task-1528 evidence 02 - loader protection bytes + attribution (regenerated)
+HEAD=eee8f6aee87bc22652a1f824b8e3c1c623e21e22
+UTC=2026-09-16T17:49:58Z
+## repositories+memory_health loaders 5060-5120 (exn->Error conversion, Cancel carve-out, None-branch reset):
+       | Some sw ->
+           Eio.Fiber.fork_daemon ~sw (fun () ->
+               run ();
+               `Stop_daemon)
+       | None ->
+           enqueue_async mailbox
+             (Runtime_surface_loaded
+                (generation, Error "Eio switch is unavailable")))
+
+let launch_repositories_load state ~mailbox =
+  if state.repositories_inflight then ()
+  else begin
+    state.repositories_inflight <- true;
+    let host = server_peer_host in
+    let port = state.port in
+    let run () =
+      let result =
+        try Masc_tui_loader.load_repositories ~host ~port with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+      in
+      enqueue_async mailbox (Repositories_loaded result)
+    in
+    match Eio_context.get_switch_opt () with
+    | Some sw ->
+        Eio.Fiber.fork_daemon ~sw (fun () ->
+            run ();
+            `Stop_daemon)
+    | None ->
+        state.repositories_inflight <- false;
+        enqueue_async mailbox
+          (Repositories_loaded (Error "Eio switch is unavailable"))
+  end
+
+let launch_memory_health_load state ~mailbox =
+  if state.memory_health_inflight then ()
+  else begin
+    state.memory_health_inflight <- true;
+    let host = server_peer_host in
+    let port = state.port in
+    let run () =
+      let result =
+        try Masc_tui_loader.load_memory_health ~host ~port with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+      in
+      enqueue_async mailbox (Memory_loaded result)
+    in
+    match Eio_context.get_switch_opt () with
+    | Some sw ->
+        Eio.Fiber.fork_daemon ~sw (fun () ->
+            run ();
+            `Stop_daemon)
+    | None ->
+        state.memory_health_inflight <- false;
+        enqueue_async mailbox (Memory_loaded (Error "Eio switch is unavailable"))
+  end
+
+let launch_memory_facts_load state ~mailbox ~keeper_name =
+  let host = server_peer_host in
+  let port = state.port in
+## verification loader 5945-5985:
+   looked at. *)
+let reset_verification_rows state =
+  state.verification_cursor <- 0;
+  state.verification_scroll <- 0;
+  state.verification_detail_request_id <- None;
+  state.verification_detail_scroll <- 0;
+  state.verification_verdict_armed <- None;
+  state.verification_verdict_error <- None
+
+let launch_verification_load state ~mailbox =
+  if state.verification_inflight then ()
+  else begin
+    state.verification_inflight <- true;
+    let host = server_peer_host in
+    let port = state.port in
+    (* Read once, here, rather than inside the fiber: the operator can press
+       another view key while this load is in flight, and the answer that
+       arrives must be the one that was asked for. *)
+    let view = state.verification_view in
+    let offset = state.verification_offset in
+    let run () =
+      let result =
+        try Masc_tui_loader.load_verification ~host ~port ~limit:200 ~view ~offset with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+      in
+      enqueue_async mailbox (Verification_loaded result)
+    in
+    match Eio_context.get_switch_opt () with
+    | Some sw ->
+        Eio.Fiber.fork_daemon ~sw (fun () ->
+            run ();
+            `Stop_daemon)
+    | None ->
+        state.verification_inflight <- false;
+        enqueue_async mailbox (Verification_loaded (Error "Eio switch is unavailable"))
+  end
+
+(* One surface's row list: how many rows it has, which one the cursor is on,
+   and how to put the cursor somewhere else.
+
+## conversion pattern count at e3be314f^ (before clone boundary):
+90
+## -S newest hits (deepen=500):
+2d3dc039 2026-09-14 fix(tui): restore guided Lane operations in the workspace (#35999)
+be6cdd05 2026-09-14 fix(keeper): restore interactive chat and durable direct continuity (#35988 이어받음) (#36035)
+c1c35c85 2026-09-14 feat(tui): guide Keeper subscriptions and show acknowledged output positions (#35967 이어받음) (#36007)
+87f74203 2026-09-13 fix(tui): stop observed work and prioritize my queued message (#35653)
+9af12df1 2026-09-13 feat(tui): manage TOML Lane packages and generic actions (#35672)
+5d56d411 2026-09-13 test(tui): wait for the selection band, not for a frame to end (#35618)
+rev_list_count=944

@@ -1,0 +1,4 @@
+# task-1528 evidence 03 - dune build @check at main HEAD (contract item 3)
+HEAD=eee8f6aee87bc22652a1f824b8e3c1c623e21e22
+UTC=2026-09-16T17:49:58Z
+check_exit=0

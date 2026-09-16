@@ -1,0 +1,111 @@
+# task-1528 evidence 01 - surface/flag inventory at main HEAD (regenerated in guest-alive window)
+HEAD=eee8f6aee87bc22652a1f824b8e3c1c623e21e22
+origin_main=eee8f6aee87bc22652a1f824b8e3c1c623e21e22
+UTC=2026-09-16T17:49:58Z
+## contract example file:
+ls: cannot access 'bin/masc_tui_runtime.ml': No such file or directory
+## named load-result constructors (grep -c):
+Repositories_loaded=4
+Memory_loaded=4
+Verification_loaded=4
+Diagnostics_loaded=0
+Config_loaded=0
+Overview_loaded=0
+Wizard_loaded=0
+Runtime_loaded=0
+## inflight flag writes:
+1138:  state.msg_history_inflight <- None;
+3099:    state.keeper_turns_inflight <- true;
+3117:        state.keeper_turns_inflight <- false;
+3363:    state.tools_read_inflight <- Some
+3410:      state.tools_read_inflight <-
+3465:      state.schedule_wake_history_inflight <- Some schedule_id;
+3489:      state.keeper_schedules_inflight <- Some keeper_name;
+4476:  state.keeper_sandbox_logs_inflight <-
+4722:    state.connectors_inflight <- true;
+4739:        state.connectors_inflight <- false;
+5048:      state.runtime_surface_inflight <- Some generation;
+5072:    state.repositories_inflight <- true;
+5089:        state.repositories_inflight <- false;
+5097:    state.memory_health_inflight <- true;
+5114:        state.memory_health_inflight <- false;
+5685:    state.harness_inflight <- true;
+5702:        state.harness_inflight <- false;
+5712:      state.fusion_runs_inflight <- Some generation;
+5744:    state.fusion_detail_inflight <- Some (generation, run_id);
+5777:    state.fusion_historical_inflight <- Some (generation, reference);
+5802:    state.keeper_lanes_inflight <- true;
+5819:        state.keeper_lanes_inflight <- false;
+5826:    state.standalone_lanes_inflight <- true;
+5846:        state.standalone_lanes_inflight <- false;
+5855:    state.clients_surface_inflight <- true;
+5871:        state.clients_surface_inflight <- false;
+5957:    state.verification_inflight <- true;
+5979:        state.verification_inflight <- false;
+6628:    state.msg_history_inflight <- Some (generation, keeper_name);
+6655:              state.msg_history_inflight <- None
+7194:    state.keeper_run_next_inflight <- Some request_id;
+7331:  state.msg_inflight <-
+7384:  state.msg_inflight <-
+7929:  state.keeper_queue_inflight <- keeper_name :: state.keeper_queue_inflight;
+10804:  state.ask_submit_inflight <- false;
+10821:  state.ask_submit_inflight <- true;
+10953:  state.keeper_action_inflight <- None;
+10988:  state.keeper_action_inflight <- Some (keeper_name, action);
+11030:  state.board_post_inflight <- true;
+11114:  state.board_post_inflight <- true;
+12073:      state.keeper_queue_inflight <- List.filter ((<>) keeper_name) state.keeper_queue_inflight;
+12647:      state.board_post_inflight <- false;
+12823:        state.keeper_sandbox_logs_inflight <- None;
+13378:             state.schedule_wake_history_inflight <- None
+13391:      then state.schedule_wake_history_inflight <- None
+13395:           state.keeper_schedules_inflight <- None
+13695:      state.keeper_turns_inflight <- false;
+13909:        state.keeper_run_next_inflight <- None;
+13979:           state.msg_history_inflight <- None
+14312:      state.connectors_inflight <- false;
+14341:           state.runtime_surface_inflight <- None
+14374:      state.repositories_inflight <- false;
+14381:      state.memory_health_inflight <- false;
+14536:      state.keeper_lanes_inflight <- false;
+14548:      state.standalone_lanes_inflight <- false;
+14563:      state.clients_surface_inflight <- false;
+14620:      state.harness_inflight <- false;
+14642:           state.fusion_runs_inflight <- None
+14651:           state.fusion_detail_inflight <- None
+14658:           state.fusion_historical_inflight <- None
+14662:      state.verification_inflight <- false;
+## handler unconditional reset samples:
+  | Repositories_loaded result ->
+      state.repositories_inflight <- false;
+      (match result with
+      | Ok snapshot ->
+          state.repositories <- Some snapshot;
+          state.repositories_error <- None
+      | Error detail -> state.repositories_error <- Some detail)
+  | Memory_loaded result ->
+      state.memory_health_inflight <- false;
+      (match result with
+      | Ok snapshot ->
+          state.memory_health <- Some snapshot;
+           state.fusion_historical_inflight <- None
+       | Some _ | None -> ());
+      apply_fusion_historical_detail_load state generation reference result
+  | Verification_loaded result ->
+      state.verification_inflight <- false;
+      (match result with
+      | Ok snapshot ->
+          state.verification <- Some snapshot;
+          state.verification_error <- None;
+## test coverage discovery (inflight / fork_daemon in test/):
+test/dune
+test/test_heartbeat_integration.ml
+test/test_inference_inflight_observation.ml
+test/test_keeper_antigravity_runtime.ml
+test/test_keeper_board_attention_worker.ml
+test/exact_output_fixture.ml
+test/test_completion_trust_harness.ml
+test/test_keeper_body_timeout_override.ml
+test/test_keeper_chat_discord.ml
+test/test_keeper_chat_event_log.ml
+(empty discovery = no unit-test coverage of loader flag behavior)

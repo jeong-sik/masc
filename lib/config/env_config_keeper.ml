@@ -773,59 +773,6 @@ end
 
 (** {1 Keeper Context Window} *)
 
-module KeeperContext = struct
-  (** Tokens one AGENT_CORE-lane request carries: the fixed prompt (system
-      prompt, tool schemas, pinned context) and the recent verbatim history
-      together. The cut aims at this target; the request-body cap and the
-      provider's own context judge the request separately
-      (RFC keeper-context-window-in-tokens).
-
-      The compiled default is the input size measured on 2026-09-15 across
-      the eight live HTTP bindings while the previous byte-shaped window was
-      at 512 KiB: a median of about 85K tokens per request, at which the
-      operator judged turn quality acceptable and p90 latency stayed under a
-      minute. MASC has no compaction, so this is the working set every
-      request re-sends; the surveyed agents that summarize can afford far
-      larger defaults. It is a starting point to re-measure against a quality
-      harness, not a tuned optimum. An explicit env or runtime.toml value
-      overrides it verbatim.
-
-      Env: [MASC_KEEPER_CONTEXT_WINDOW_TOKENS]; runtime.toml
-      [turn.context_window_tokens]. *)
-  let window_tokens_env_key = "MASC_KEEPER_CONTEXT_WINDOW_TOKENS"
-
-  let window_tokens_min = 1
-  let window_tokens_default = 85_000
-
-  let refuse_declared_window raw detail =
-    raise
-      (Env_config_core.Config_error
-         (Printf.sprintf "invalid %s=%S (%s)" window_tokens_env_key raw detail))
-  ;;
-
-  (* A declared value that is not a positive integer is an operator
-     configuration error, never a fallback: read as unset it would silently
-     swap the operator's window for the compiled default. *)
-  let window_tokens_override () =
-    match Env_config_core.raw_value_opt window_tokens_env_key with
-    | None -> None
-    | Some raw ->
-      (match Safe_ops.int_of_string_safe (String.trim raw) with
-       | Some tokens when tokens >= window_tokens_min -> Some tokens
-       | Some _ ->
-         refuse_declared_window
-           raw
-           (Printf.sprintf "expected an integer of at least %d tokens" window_tokens_min)
-       | None -> refuse_declared_window raw "expected an integer number of tokens")
-  ;;
-
-  let window_tokens () =
-    match window_tokens_override () with
-    | Some tokens -> tokens
-    | None -> window_tokens_default
-  ;;
-end
-
 (** {1 gRPC Heartbeat Reconnect} *)
 
 module KeeperGrpc = struct

@@ -377,6 +377,32 @@ let test_move_front_inside_a_block_restarts_the_blocks () =
   check (option int) "total unknown" None moved.total_tokens
 ;;
 
+let test_table_move_front_moves_the_pairs_ledger () =
+  Ledger.Table.For_testing.reset ();
+  let keeper_name = "alpha" and runtime_id = "r" in
+  (* No ledger yet: nothing to move, nothing written. *)
+  Ledger.Table.move_front ~keeper_name ~runtime_id ~first_atom:5;
+  check bool "no ledger appears from a move" true
+    (Option.is_none (Ledger.Table.lookup ~keeper_name ~runtime_id));
+  let _ =
+    Ledger.Table.observe ~keeper_name ~runtime_id
+      ~request:(request ~first_atom:0 ~atom_count:10 ()) ~usage:(Some (usage 1_000))
+  in
+  let _ =
+    Ledger.Table.observe ~keeper_name ~runtime_id
+      ~request:(request ~first_atom:0 ~atom_count:14 ()) ~usage:(Some (usage 1_400))
+  in
+  Ledger.Table.move_front ~keeper_name ~runtime_id ~first_atom:10;
+  match Ledger.Table.lookup ~keeper_name ~runtime_id with
+  | None -> fail "the ledger stays"
+  | Some t ->
+    check int "the next request composes from the new front" 10 t.last.first_atom;
+    check (option int) "the cold block's size was unknown, so the total is too until the next usage"
+      None t.total_tokens;
+    check int "the measured block stays known" 400 (Ledger.known_tokens t);
+    Ledger.Table.For_testing.reset ()
+;;
+
 let () =
   run
     "keeper_model_input_ledger"
@@ -417,6 +443,7 @@ let () =
         ; test_case "over the cold block" `Quick test_move_front_over_the_cold_block_blanks_the_total
         ; test_case "not advancing" `Quick test_move_front_that_does_not_advance_changes_nothing
         ; test_case "inside a block" `Quick test_move_front_inside_a_block_restarts_the_blocks
+        ; test_case "through the table" `Quick test_table_move_front_moves_the_pairs_ledger
         ] )
     ]
 ;;

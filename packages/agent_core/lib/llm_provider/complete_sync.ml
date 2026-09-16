@@ -264,13 +264,7 @@ let complete_http
                 Ok
                   ( Prepared_completion_request.admitted_body_http_codec admitted_body
                   , Prepared_completion_request.admitted_body_contents admitted_body ))
-           (fun (http_codec, body_str) ->
-              match admitted_body with
-              | Some _ -> Ok (body_deadline, http_codec, body_str)
-              | None ->
-                Result.map
-                  (fun body_str -> body_deadline, http_codec, body_str)
-                  (admit_final_serialized_body ~config body_str)))
+           (fun (http_codec, body_str) -> Ok (body_deadline, http_codec, body_str)))
   in
   match preflight with
   | Error err -> Error err, None

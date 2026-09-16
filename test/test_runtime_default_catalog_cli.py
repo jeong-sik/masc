@@ -22,7 +22,6 @@ streaming = false
 
 [operator_fixture.operator-model]
 max-concurrent = 1
-max-request-body-bytes = 65536
 '''
 OVERLAY = '''
 [[models]]

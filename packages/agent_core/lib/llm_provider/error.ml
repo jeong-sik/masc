@@ -333,7 +333,6 @@ let of_provider_failure ?provider kind message =
     ProviderWireError { provider; format; kind; detail = message }
   | Http_client.Provider_reported_error { error_type } ->
     ProviderReportedError { provider; error_type; detail = message }
-  | Http_client.Request_body_too_large _ -> InvalidRequest { provider; reason = message }
   | Http_client.Response_body_too_large { limit_bytes } ->
     ParseError
       { detail =

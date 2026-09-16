@@ -200,18 +200,6 @@ type binding =
   ; is_default : bool
   ; wizard_default : bool
   ; max_concurrent : int option
-  ; max_request_body_bytes : int option
-        (** Serialized request-body ceiling for this binding, in bytes.
-
-            AGENT_CORE validates this knob and [max_concurrent] together in one function
-            ([Llm_provider] admission declaration) and enforces this one before
-            POST: it serializes the body, measures it, and returns a typed
-            [Request_body_too_large] when the declared ceiling is exceeded. That
-            rejection is pre-dispatch, so it is failover-eligible.
-
-            Undeclared means the gate passes every size, and the ceiling is then
-            discovered only as a gateway 400 after the bytes are already on the
-            wire — post-dispatch, where neither retry nor failover applies. *)
   ; context_marks : context_marks option
         (** [context-high-water-tokens] and [context-low-water-tokens] on the
             binding table, declared together or not at all. Absent means the

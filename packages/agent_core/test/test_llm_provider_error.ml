@@ -564,22 +564,6 @@ let test_provider_failure_remaining_variants_mapping () =
             has "model repeated itself" && has "different model"));
      check bool "a repeat is not retried on the same model" false (Error.is_retryable repeated)
    | _ -> fail "expected typed RepeatingGeneration");
-  let request_body_limit_message =
-    "serialized request body is 2048 bytes, target limit is 1024 bytes"
-  in
-  let request_body_limit =
-    provider_failure
-      (Http_client.Request_body_too_large { actual_bytes = 2048; limit_bytes = 1024 })
-      request_body_limit_message
-  in
-  (match request_body_limit with
-   | Error.InvalidRequest { reason; _ } ->
-     check
-       string
-       "request-body limit diagnostic is not duplicated"
-       request_body_limit_message
-       reason
-   | _ -> fail "expected InvalidRequest for request-body limit");
   let unknown =
     provider_failure
       ~provider:"unknown-provider"

@@ -891,13 +891,12 @@ require_type_block_pattern \
   candidate_rejection_disposition \
   'Input_capacity[[:space:]]+of[[:space:]]+input_capacity_disposition([^[:alnum:]_]|$)'
 require_type_constructor_set \
-  "outer exact flow lost the closed token/byte capacity projection" \
+  "outer exact flow lost the closed token capacity projection" \
   "$exact_output_interface" \
   input_capacity_disposition \
   Token_measurement_required \
   Context_window_exceeded \
-  Token_capacity_rejected \
-  Serialized_request_body_too_large
+  Token_capacity_rejected
 require_type_constructor_set \
   "outer exact flow lost the closed provider-neutral capacity rejection projection" \
   "$exact_output_interface" \
@@ -907,16 +906,14 @@ require_type_constructor_set \
   Capacity_boundary_unknown \
   Capacity_input_rejected
 require_type_field_set \
-  "outer exact flow changed the closed token/byte capacity fields" \
+  "outer exact flow changed the closed token capacity fields" \
   "$exact_output_interface" \
   input_capacity_disposition \
   accepted_through_tokens \
   rejected_from_tokens \
   input_tokens \
   reserved_output_tokens \
-  max_context_tokens \
-  actual_bytes \
-  limit_bytes
+  max_context_tokens
 require_type_block_pattern \
   "token measurement disposition lost accepted-through token evidence" \
   "$exact_output_interface" \
@@ -933,16 +930,6 @@ require_type_block_pattern \
   input_capacity_disposition \
   'Context_window_exceeded[[:space:]]+of[[:space:]]*\{[^}]*input_tokens[[:space:]]*:[^}]*reserved_output_tokens[[:space:]]*:[^}]*max_context_tokens[[:space:]]*:'
 require_type_block_pattern \
-  "serialized request disposition lost actual-byte evidence" \
-  "$exact_output_interface" \
-  input_capacity_disposition \
-  'Serialized_request_body_too_large[[:space:]]+of[[:space:]]*\{[^}]*actual_bytes[[:space:]]*:'
-require_type_block_pattern \
-  "serialized request disposition lost byte-limit evidence" \
-  "$exact_output_interface" \
-  input_capacity_disposition \
-  'Serialized_request_body_too_large[[:space:]]+of[[:space:]]*\{[^}]*limit_bytes[[:space:]]*:'
-require_type_block_pattern \
   "outer exact flow changed accepted-through token evidence" \
   "$exact_output_interface" \
   input_capacity_disposition \
@@ -952,16 +939,6 @@ require_type_block_pattern \
   "$exact_output_interface" \
   input_capacity_disposition \
   'rejected_from_tokens[[:space:]]*:[[:space:]]*int[[:space:]]+option([^[:alnum:]_]|$)'
-require_type_block_pattern \
-  "outer exact flow changed serialized request byte evidence" \
-  "$exact_output_interface" \
-  input_capacity_disposition \
-  'actual_bytes[[:space:]]*:[[:space:]]*int([^[:alnum:]_]|$)'
-require_type_block_pattern \
-  "outer exact flow changed serialized request byte limit" \
-  "$exact_output_interface" \
-  input_capacity_disposition \
-  'limit_bytes[[:space:]]*:[[:space:]]*int([^[:alnum:]_]|$)'
 require_named_function_pattern \
   "exact CountTokens path rebuilt the generation request instead of freezing one artifact" \
   'Backend_anthropic[.]build_request_artifact_with_thinking_control' \

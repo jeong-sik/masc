@@ -17,20 +17,13 @@ let origin_sentence = function
       Printf.sprintf "front from turn #%d's record; nothing counted since the server started" turn
   | Inspector.Carried_halved_after_refusal { retry } ->
       Printf.sprintf "front halved after a refusal (retry %d)" retry
-  | Inspector.Carried_fit_to_request_cap ->
-      "no front to start from: the newest suffix the request cap admits"
-  | Inspector.Carried_whole_history -> "no front to start from and no cap: the whole history"
+  | Inspector.Carried_whole_history -> "no front to start from: the whole history"
 ;;
 
 let candidate_lines ~prose ~fact ~safe ~scale
     (candidate : Inspector.forecast_candidate) =
   let tokens_of_bytes = Masc_tui_token_scale.estimate scale in
   let approx bytes = "\xe2\x89\x88" ^ signed_tokens (tokens_of_bytes bytes) in
-  let cap_suffix =
-    match candidate.request_cap_bytes with
-    | Some cap -> Printf.sprintf "  \xc2\xb7  provider accepts up to %s tok" (approx cap)
-    | None -> ""
-  in
   let head =
     match candidate.lane with
     | Inspector.Lane_not_applicable reason ->
@@ -39,14 +32,13 @@ let candidate_lines ~prose ~fact ~safe ~scale
         (match candidate.marks with
          | Some marks ->
              fact
-               (Printf.sprintf "%s  \xc2\xb7  marks %s / %s tok%s" (safe candidate.runtime_id)
+               (Printf.sprintf "%s  \xc2\xb7  marks %s / %s tok" (safe candidate.runtime_id)
                   (Inspector.format_tokens marks.high_water_tokens)
-                  (Inspector.format_tokens marks.low_water_tokens)
-                  cap_suffix)
+                  (Inspector.format_tokens marks.low_water_tokens))
          | None ->
              fact
-               (Printf.sprintf "%s  \xc2\xb7  no marks declared: only a refusal moves the front%s"
-                  (safe candidate.runtime_id) cap_suffix))
+               (Printf.sprintf "%s  \xc2\xb7  no marks declared: only a refusal moves the front"
+                  (safe candidate.runtime_id)))
   in
   (* The pinned figure names its lane only when it is not this one. *)
   let pinned_provenance (parts : Inspector.forecast_parts) =

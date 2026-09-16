@@ -65,8 +65,7 @@ let librarian_dropped_schema =
 
 let librarian_current_output_schema =
   let fields =
-    [ Keeper_librarian.wire_field_retained_memory_ids, string_array_schema
-    ; ( Keeper_librarian.wire_field_new_claims
+    [ ( Keeper_librarian.wire_field_new_claims
       , `Assoc [ "type", `String "array"; "items", librarian_claim_schema ] )
     ; Keeper_librarian.wire_field_dropped, array_schema librarian_dropped_schema
     ; "working_contexts", array_schema (object_schema

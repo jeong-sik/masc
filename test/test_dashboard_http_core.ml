@@ -1674,7 +1674,8 @@ let test_schedule_exact_lookup_carries_the_wake_history () =
    | Ok _ -> ()
    | Error _ -> fail "the fixture schedule could not be inserted");
   let occurrence now =
-    (match Schedule_store.refresh_due config ~now with
+    (match Schedule_store.refresh_due config ~now
+      ~retention_days:Schedule_store.terminal_schedule_retention_days with
      | Ok _ -> ()
      | Error _ -> fail "refresh_due refused the fixture");
     (match Schedule_store.start_due_candidate config ~now:(now +. 1.0) ~schedule_id with
@@ -1836,7 +1837,8 @@ let test_schedule_page_counts_retained_wakes () =
   insert ~schedule_id:"sched-wakes-retried" ~keeper:"alpha";
   insert ~schedule_id:"sched-wakes-accepted" ~keeper:"beta";
   insert ~schedule_id:"sched-wakes-never" ~keeper:"beta";
-  store_ok "refresh" (Schedule_store.refresh_due config ~now:201.0);
+  store_ok "refresh" (Schedule_store.refresh_due config ~now:201.0
+    ~retention_days:Schedule_store.terminal_schedule_retention_days);
   (* alpha: the attempt failed retryably, so the definition is still live
      (Due) and its newest wake is Failed. *)
   store_ok "start alpha"
@@ -1981,7 +1983,6 @@ streaming = true
 [test_provider.test_model]
 is-default = true
 max-concurrent = 1
-max-request-body-bytes = 65536
 |}
 
 let execution_trust_keeper_row_keys =

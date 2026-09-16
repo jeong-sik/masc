@@ -407,10 +407,6 @@ let turn_event_bus_evidence_detail
 
 type capacity_refusal =
   | Provider_context_window of { limit_tokens : int option }
-  | Serialized_request_body of
-      { actual_bytes : int
-      ; limit_bytes : int
-      }
   | Provider_request_body_refusal of { status : int }
 
 (* Two-axis refusal view over the AGENT_CORE error type. The error is matched
@@ -422,11 +418,6 @@ let capacity_refusal_of_error
   match err with
   | Agent_core.Error.Api (ContextOverflow { limit; _ }) ->
     Some (Provider_context_window { limit_tokens = limit })
-  | Agent_core.Error.Api
-      (InvalidRequest
-         { reason = Request_body_too_large { actual_bytes; limit_bytes }; _ })
-    ->
-    Some (Serialized_request_body { actual_bytes; limit_bytes })
   | Agent_core.Error.Api
       (InvalidRequest
          { reason = Request_body_refused_by_provider { status }; _ })

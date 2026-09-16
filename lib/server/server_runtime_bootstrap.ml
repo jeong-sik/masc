@@ -1165,18 +1165,6 @@ let initialize_owner_state_blocking
           "Skill snapshot config unreadable at boot: snapshot_revision=%s"
           (Skill_catalog_snapshot.snapshot_revision skill_snapshot
            |> Skill_catalog_snapshot.snapshot_revision_to_string))));
-  (* masc#28404. Boot refuses only over runtimes something actually routes to,
-     which is right — an unassigned runtime is not a reason to stay down. But
-     the blocked ones then started silently, and the answer to "why can I not
-     assign this runtime" lived nowhere. One line per blocked runtime at boot is
-     that answer; empty is the healthy state and logs nothing. *)
-  List.iter
-    (fun ((runtime : Runtime.t), reason) ->
-      Log.Server.warn
-        "Runtime %s is not keeper-dispatchable: %s"
-        runtime.id
-        reason)
-    (Runtime.keeper_dispatch_blocked (Runtime.get_runtimes ()));
   (match runtime_initialization, runtime_config_path with
    | Ok _, Some path ->
      (try configure_exact_output_registry ~config_root:(Filename.dirname path) () with

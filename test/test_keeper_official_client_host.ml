@@ -521,8 +521,11 @@ let test_scoped_boundary_error_stops_immediately () =
       (match result.abort_turn with
        | Some (Terminal_tool_boundary { tool_name = "effect";
            outcome = Terminal_failed { failure_class = Tool_result.Runtime_failure;
-             effect_disposition = Tool_result.Effect_outcome_unknown; diagnostic } } as stop) ->
-         check (option string) "exact failure retained" (Some diagnostic) !terminal_error;
+             effect_disposition = Tool_result.Effect_outcome_unknown;
+             detail =
+               Keeper_terminal_effect_detail.Boundary_observation_failed
+                 { model_tool_name = "effect"; message } as detail } } as stop) ->
+         check (option string) "exact failure retained" (Some message) !terminal_error;
          (match Host.host_stop_result ~runtime_id:runtime_label ~model:"fixture"
              ~session_id:"session" ~turn_id:"turn" ~turns_used:1
              ~latency_ms:None ~usage:None stop with
@@ -531,8 +534,8 @@ let test_scoped_boundary_error_stops_immediately () =
              | Some (Terminal_effect_failed
                  { failure_class = Tool_result.Runtime_failure;
                    effect_disposition = Tool_result.Effect_outcome_unknown;
-                   diagnostic = projected }) ->
-               check string "typed outward diagnostic" diagnostic projected
+                   detail = projected }) ->
+               check bool "typed outward detail" true (projected = detail)
              | _ -> fail "scope failure lost its typed effect disposition")
           | Ok _ -> fail "scope failure projected a completed result")
        | _ -> fail (runtime_label ^ " continued after scope observation failure"))))
@@ -547,7 +550,9 @@ let test_scoped_boundary_preserves_terminal_priority () =
         Masc.Keeper_tools_agent_core.Terminal_effect_failed
           { failure_class = Tool_result.Runtime_failure
           ; effect_disposition = Tool_result.Proven_post_effect
-          ; diagnostic = "exact committed effect failure" })
+          ; detail =
+              Keeper_terminal_effect_detail.Tool_failed
+                { internal_tool_name = "effect"; message = "exact committed effect failure" } })
       ~on_tool_boundary:(fun () -> incr checks;
         Ok (Some (Host.Repeated_tool_call { tool_name = "effect"; repeated_count = 3 })))
       (fun _ -> Ok { Agent_core.Types.content = "effect returned"; content_blocks = None; _meta = None })
@@ -557,7 +562,9 @@ let test_scoped_boundary_preserves_terminal_priority () =
     match result.abort_turn with
     | Some (Terminal_tool_boundary { outcome = Terminal_failed
         { effect_disposition = Tool_result.Proven_post_effect;
-          diagnostic = "exact committed effect failure"; _ }; _ }) -> ()
+          detail =
+            Keeper_terminal_effect_detail.Tool_failed
+              { message = "exact committed effect failure"; _ }; _ }; _ }) -> ()
     | _ -> fail "repeat stop replaced stronger terminal evidence")
 ;;
 
@@ -658,7 +665,11 @@ let test_terminal_post_effect_failure_aborts_the_official_client_turn () =
              Masc.Keeper_tools_agent_core.Terminal_effect_failed
                { failure_class = Tool_result.Runtime_failure
                ; effect_disposition = Tool_result.Proven_post_effect
-               ; diagnostic = "prior composition action committed"
+               ; detail =
+                   Keeper_terminal_effect_detail.Tool_failed
+                     { internal_tool_name = "effect"
+                     ; message = "prior composition action committed"
+                     }
                };
            Error
              { Agent_core.Types.message = "terminal node rejected"
@@ -711,7 +722,11 @@ let test_terminal_media_delivery_failure_keeps_applied_effect () =
       (Some "official-client tool result cannot deliver document content\nalready-applied receipt") !handoff;
     match result.abort_turn with
     | Some (Terminal_tool_boundary
-        {outcome=Terminal_failed {effect_disposition=Tool_result.Proven_post_effect; _}; _} as stop) ->
+        {outcome=Terminal_failed
+           {effect_disposition=Tool_result.Proven_post_effect
+           ; detail=Keeper_terminal_effect_detail.Result_delivery_failed
+               {message="official-client tool result cannot deliver document content"; _}
+           ; _}; _} as stop) ->
       (match Host.host_stop_result ~runtime_id:"official-fixture" ~model:"fixture"
         ~session_id:"session-media" ~turn_id:"turn-media" ~turns_used:1
         ~latency_ms:None ~usage:None stop with
@@ -876,7 +891,11 @@ let test_ordinary_post_effect_failure_aborts_the_official_client_turn () =
              Masc.Keeper_tools_agent_core.Terminal_effect_failed
                { failure_class = Tool_result.Runtime_failure
                ; effect_disposition = Tool_result.Effect_outcome_unknown
-               ; diagnostic = "ordinary composition effect is indeterminate"
+               ; detail =
+                   Keeper_terminal_effect_detail.Tool_failed
+                     { internal_tool_name = "effect"
+                     ; message = "ordinary composition effect is indeterminate"
+                     }
                };
            Error
              { Agent_core.Types.message = "ordinary composition failed"
@@ -1061,7 +1080,9 @@ let test_terminal_host_stop_preserves_completed_deferred_and_failed () =
       (Terminal_failed
          { failure_class = Tool_result.Runtime_failure
          ; effect_disposition = Tool_result.Effect_outcome_unknown
-         ; diagnostic = "terminal uncertainty"
+         ; detail =
+             Keeper_terminal_effect_detail.Tool_failed
+               { internal_tool_name = "effect"; message = "terminal uncertainty" }
          })
   with
   | Error _ -> ()

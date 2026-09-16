@@ -407,12 +407,22 @@ let load_for_mutation config : (state, store_error) result =
    we never round-trip corruption through here either. *)
 let write_state config state =
   ensure_dirs config;
-  let json = state_to_yojson state in
+  (* One encoding serves both files, compact and on the pool. The ledger keeps
+     every terminal schedule (4.3 MB, 1,250 of 1,272 rows, 2026-09-16), and
+     encoding it pretty once per file was a 135-151 ms run on the scheduler
+     domain each time: four of them within a second when a schedule fired.
+     Yojson prints that document compact in 15 ms where the pretty printer
+     takes 107 ms. *)
+  let* content =
+    Domain_pool_ref.submit_cpu_or_inline (fun () ->
+      Workspace_utils.encode_json_compact (state_to_yojson state))
+    |> Result.map_error (fun msg -> Persistence_failed ("ledger encoding failed: " ^ msg))
+  in
   let* () =
-    Workspace_utils.write_json_result config (schedules_path config) json
+    Workspace_utils.write_encoded_json_result config (schedules_path config) content
     |> Result.map_error (fun msg -> Persistence_failed msg)
   in
-  (match Workspace_utils.write_json_result config (recovery_path config) json with
+  (match Workspace_utils.write_encoded_json_result config (recovery_path config) content with
    | Ok () -> ()
    | Error msg ->
      Log.Misc.warn
@@ -829,6 +839,77 @@ let cancel_request config ~schedule_id =
          Ok updated_request))
 ;;
 
+(* How long a finished schedule stays in the ledger after the last thing that
+   happened to it. Every mutation rewrites the ledger whole, and a live one had
+   1,250 finished schedules against 22 live ones -- 4.3 MB, with a median
+   finished age of 8.6 days (2026-09-16). The window is the operator's: seven
+   days of finished schedules is what the dashboard shows and what a person
+   asks about after a weekend. [prune_completed] remains for forgetting them
+   all at once. *)
+let terminal_schedule_retention_s = 7.0 *. 24.0 *. 60.0 *. 60.0
+
+(* The newest time the ledger knows for each schedule id: the wakes it ran and
+   the notes written on it. A schedule's own [requested_at] and [due_at] are
+   read from the request itself below. *)
+let last_ledger_activity state =
+  let newest = Hashtbl.create 64 in
+  let note_time schedule_id time =
+    match Hashtbl.find_opt newest schedule_id with
+    | Some seen when seen >= time -> ()
+    | Some _ | None -> Hashtbl.replace newest schedule_id time
+  in
+  List.iter
+    (fun (wake : Schedule_domain.wake_record) ->
+       note_time
+         wake.Schedule_domain.schedule_id
+         (Option.value
+            wake.Schedule_domain.finished_at
+            ~default:wake.Schedule_domain.started_at))
+    state.wakes;
+  List.iter
+    (fun (note : Schedule_domain.schedule_note) ->
+       note_time note.Schedule_domain.schedule_id note.Schedule_domain.created_at)
+    state.notes;
+  newest
+;;
+
+(* The schedules to keep, and the ids of the finished ones whose retention ran
+   out. Their wakes and notes go with them: a note about a schedule the ledger
+   no longer holds names nothing, and the per-schedule wake cap would otherwise
+   keep up to 32 rows of a schedule that is gone. *)
+let forget_finished_schedules ~now state =
+  let newest = last_ledger_activity state in
+  let last_activity (request : schedule_request) =
+    let own = Float.max request.requested_at request.due_at in
+    match Hashtbl.find_opt newest request.schedule_id with
+    | Some seen -> Float.max own seen
+    | None -> own
+  in
+  let kept, forgotten =
+    List.partition
+      (fun (request : schedule_request) ->
+         (not (Schedule_domain.is_terminal request.status))
+         || now -. last_activity request <= terminal_schedule_retention_s)
+      state.schedules
+  in
+  let forgotten_ids = Hashtbl.create (List.length forgotten) in
+  List.iter
+    (fun (request : schedule_request) ->
+       Hashtbl.replace forgotten_ids request.schedule_id ())
+    forgotten;
+  let holds_a_kept_schedule schedule_id = not (Hashtbl.mem forgotten_ids schedule_id) in
+  ( kept
+  , List.filter
+      (fun (wake : Schedule_domain.wake_record) ->
+         holds_a_kept_schedule wake.Schedule_domain.schedule_id)
+      state.wakes
+  , List.filter
+      (fun (note : Schedule_domain.schedule_note) ->
+         holds_a_kept_schedule note.Schedule_domain.schedule_id)
+      state.notes
+  , List.length forgotten )
+;;
+
 let refresh_due config ~now =
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
     let* state = load_for_mutation config in
@@ -845,12 +926,19 @@ let refresh_due config ~now =
         state.schedules
         ([], 0)
     in
-    if changed = 0 then
-      Ok (state, 0)
+    let schedules, wakes, notes, forgotten =
+      forget_finished_schedules ~now { state with schedules }
+    in
+    if changed = 0 && forgotten = 0
+    then Ok (state, 0)
     else (
-      let next_state =
-        bump_state state ~schedules ~wakes:state.wakes ~notes:state.notes
-      in
+      if forgotten > 0
+      then
+        Log.Misc.info
+          "schedule_store: forgot %d schedule(s) finished more than %.0f days ago"
+          forgotten
+          (terminal_schedule_retention_s /. 86400.0);
+      let next_state = bump_state state ~schedules ~wakes ~notes in
       let* () = write_state config next_state in
       Ok (next_state, changed)))
 ;;
@@ -875,12 +963,19 @@ let reschedule_due_recurring config ~now ~schedule_ids =
         state.schedules
         ([], 0)
     in
-    if changed = 0 then
-      Ok (state, 0)
+    let schedules, wakes, notes, forgotten =
+      forget_finished_schedules ~now { state with schedules }
+    in
+    if changed = 0 && forgotten = 0
+    then Ok (state, 0)
     else (
-      let next_state =
-        bump_state state ~schedules ~wakes:state.wakes ~notes:state.notes
-      in
+      if forgotten > 0
+      then
+        Log.Misc.info
+          "schedule_store: forgot %d schedule(s) finished more than %.0f days ago"
+          forgotten
+          (terminal_schedule_retention_s /. 86400.0);
+      let next_state = bump_state state ~schedules ~wakes ~notes in
       let* () = write_state config next_state in
       Ok (next_state, changed)))
 ;;

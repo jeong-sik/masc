@@ -11,14 +11,21 @@ open Keeper_tools_agent_core
 
 let terminal_externalization_failure
       state
-      ({ message; _ } : Tool_bridge.externalization_error)
+      ({ kind; message } : Tool_bridge.externalization_error)
   =
   match state with
   | Keeper_tools_agent_core.Terminal_effect_completed _ ->
+    let detail =
+      match kind with
+      | Tool_bridge.Artifact_storage_failure ->
+        Keeper_terminal_effect_detail.Output_artifact_unstored { message }
+      | Tool_bridge.Inline_budget_exceeded ->
+        Keeper_terminal_effect_detail.Output_over_inline_budget { message }
+    in
     Some
       { Keeper_tools_agent_core.failure_class = Tool_result.Runtime_failure
       ; effect_disposition = Tool_result.Proven_post_effect
-      ; diagnostic = "tool output artifact storage failed: " ^ message
+      ; detail
       }
   | ( Keeper_tools_agent_core.Terminal_effect_open
     | Keeper_tools_agent_core.Deferred_tool_result
@@ -224,7 +231,7 @@ let make_tool_bundle_for_descriptors_with_policy
      not mistake the post-effect continuation for another visible reply. A
      terminal completion supersedes a defer in the same batch; a proven terminal
      failure dominates every state regardless of callback order. Failure is
-     sticky so its first diagnostic remains authoritative. *)
+     sticky so its first detail remains authoritative. *)
   let terminal_effect_state =
     Atomic.make (initial_terminal_effect_state gate_replay_delivery)
   in
@@ -333,8 +340,9 @@ let make_tool_bundle_for_descriptors_with_policy
                      mark_terminal_effect_failed
                        { failure_class = Tool_result.Runtime_failure
                        ; effect_disposition = Tool_result.Effect_outcome_unknown
-                       ; diagnostic =
-                           "terminal tool completed without a typed effect receipt"
+                       ; detail =
+                           Keeper_terminal_effect_detail.Terminal_tool_receipt_missing
+                             { internal_tool_name = internal }
                        })
              , Some mark_terminal_effect_failed
              , Some mark_completed_terminal_externalization_failed )
@@ -476,14 +484,15 @@ let make_tool_bundle_for_descriptors_with_policy
         ?gate_context:gate_context_provider
         ?gate_grant
         ?record_gate_result
-        ~on_completed:(function
+        ~on_completed:(fun ~composition_tool -> function
           | Some receipt -> mark_terminal_effect_completed receipt
           | None ->
             mark_terminal_effect_failed
               { failure_class = Tool_result.Runtime_failure
               ; effect_disposition = Tool_result.Effect_outcome_unknown
-              ; diagnostic =
-                  "terminal composition completed without a typed target receipt"
+              ; detail =
+                  Keeper_terminal_effect_detail.Terminal_composition_receipt_missing
+                    { composition_tool }
               })
         ~on_deferred:mark_deferred_tool_result
         ~on_external_effect_deferred:mark_external_effect_deferred

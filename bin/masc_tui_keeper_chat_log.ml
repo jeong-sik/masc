@@ -203,7 +203,7 @@ type events_page =
   ; events : Journal.journaled_event list
   ; has_more : bool
   ; next_since_seq : Journal.replay_position
-  ; next_since_offset : int
+  ; next_since_offset : Journal.page_start
   }
 
 let events_schema = "masc.keeper_chat_events.v2"
@@ -242,7 +242,10 @@ let decode_events_page (json : Yojson.Safe.t) =
       (* The byte offset past the last event served, handed back beside the
          seq so the next page starts reading there. *)
       match List.assoc_opt "next_since_offset" fields with
-      | Some (`Int offset) when offset >= 0 -> Ok offset
+      | Some (`Int offset) ->
+        (match Journal.page_start_of_wire (Some offset) with
+         | Some start -> Ok start
+         | None -> Error "events body's next_since_offset is not an integer >= 0")
       | Some _ -> Error "events body's next_since_offset is not an integer >= 0"
       | None -> Error "events body has no next_since_offset"
     in
@@ -266,18 +269,58 @@ let decode_events_page (json : Yojson.Safe.t) =
     Error "events body is not an object"
 ;;
 
+(* The events query a page is asked with. It lives here, beside the decoder,
+   because the executable's HTTP module cannot be linked by a test: a cursor
+   dropped or misspelled on the way out would still read correctly, one whole
+   prefix decoded per page, with nothing to fail. [encode_value] is the
+   caller's query-value encoder. *)
+let events_query ~encode_value ~operation_id ~since_seq ~since_offset ~limit =
+  let field name value = Printf.sprintf "&%s=%d" name value in
+  let since_seq_query =
+    match Journal.replay_position_to_wire since_seq with
+    | None -> ""
+    | Some seq -> field "since_seq" seq
+  in
+  let since_offset_query =
+    match Journal.page_start_to_wire since_offset with
+    | None -> ""
+    | Some offset -> field "since_offset" offset
+  in
+  Printf.sprintf
+    "operation_id=%s%s%s&limit=%d"
+    (encode_value operation_id)
+    since_seq_query
+    since_offset_query
+    limit
+;;
+
 type events_error =
   | Unknown_operation
   | Journal_pruned
   | Journal_unavailable of string
+  | Cursor_refused of
+      { refusal : Journal.cursor_refusal
+      ; message : string
+      }
   | Events_refused of string
   | Events_undecodable of string
   | Events_transport of string
+
+let cursor_refusal_to_string = function
+  | Journal.Offset_past_rows -> "the byte cursor lies past the journal"
+  | Journal.Offset_inside_row -> "the byte cursor does not start a row"
+  | Journal.Cursor_pair_mismatch -> "the seq and byte cursors are not a pair"
+;;
 
 let events_error_to_string = function
   | Unknown_operation -> "unknown operation"
   | Journal_pruned -> "journal pruned"
   | Journal_unavailable detail -> "journal unavailable: " ^ detail
+  | Cursor_refused { refusal; message } ->
+    Printf.sprintf
+      "journal moved under the read: %s (%s)"
+      (cursor_refusal_to_string refusal)
+      message
   | Events_refused detail -> "events request refused: " ^ detail
   | Events_undecodable detail -> "events body unreadable: " ^ detail
   | Events_transport detail -> "events request failed: " ^ detail
@@ -305,7 +348,15 @@ let decode_events_error ~status ~credential_sent body =
      | Some (`String "journal_pruned") -> Journal_pruned
      | Some (`String ("journal_unreadable" | "journal_corrupt")) ->
        Journal_unavailable message
-     | Some (`String _) | Some _ | None -> rejected message)
+     | Some (`String code) ->
+       (* The three cursor codes are the journal's own spelling
+          ([Journal.cursor_refusal_of_wire]), read once here; any other code
+          is a body this build does not know. *)
+       (match Journal.cursor_refusal_of_wire code with
+        | Some refusal -> Cursor_refused { refusal; message }
+        | None -> rejected message)
+     | Some (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null)
+     | None -> rejected message)
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
     rejected body
   | exception Yojson.Json_error _ -> rejected body
@@ -339,8 +390,9 @@ let read_whole_journal ~fetch ~since_seq =
       then Ok (List.rev acc)
       else if
         position_advanced ~from:since_seq next_since_seq
-        && next_since_offset > Journal.page_start_offset since_offset
-      then page next_since_seq (Journal.From_offset next_since_offset) acc
+        && Journal.page_start_offset next_since_offset
+           > Journal.page_start_offset since_offset
+      then page next_since_seq next_since_offset acc
       else
         Error
           (Events_undecodable
@@ -350,7 +402,7 @@ let read_whole_journal ~fetch ~since_seq =
                 (Journal.replay_position_to_string since_seq)
                 (Journal.page_start_offset since_offset)
                 (Journal.replay_position_to_string next_since_seq)
-                next_since_offset))
+                (Journal.page_start_offset next_since_offset)))
   in
-  page since_seq Journal.From_first_row []
+  page since_seq Journal.first_row []
 ;;

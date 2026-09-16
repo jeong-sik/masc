@@ -187,10 +187,11 @@ val configured_masc_root : unit -> string option
     [init], even if the store failed to open. Runtime sidecars use this to
     keep their durable projections in the same cluster namespace. *)
 
-val committed_revision : unit -> int
-(** Monotonic in-process revision advanced exactly after each successful
-    durable tool-call append. Readers use it to invalidate derived caches
-    without making the persistence owner depend on a dashboard module. *)
+val committed_revision : keeper_name:string -> int
+(** Monotonic in-process revision of one keeper, advanced exactly after each
+    successful durable tool-call append for that keeper; 0 before its first.
+    Readers use it to invalidate that keeper's derived caches without making
+    the persistence owner depend on a dashboard module. *)
 
 type record_kind =
   | Tool_call

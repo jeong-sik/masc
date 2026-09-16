@@ -936,3 +936,8 @@
  (name test_cohttp_eio_body_flow)
  (modules test_cohttp_eio_body_flow)
  (libraries alcotest eio eio.mock cohttp-eio cstruct uri))
+
+(test
+ (name test_secret_redactor)
+ (modules test_secret_redactor)
+ (libraries llm_provider alcotest))

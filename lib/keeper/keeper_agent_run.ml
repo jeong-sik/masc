@@ -1832,11 +1832,17 @@ let run_turn
                           match terminal_effect_state with
                           | Keeper_tools_agent_core.Terminal_effect_completed _ ->
                             Ok Keeper_turn_outcome.Terminal_effect_settled
-                          | Keeper_tools_agent_core.Terminal_effect_failed failure ->
+                          | Keeper_tools_agent_core.Terminal_effect_failed
+                              { failure_class; effect_disposition; detail } ->
+                            (* The closing tool may already have acted, so this
+                               is the terminal-effect failure itself, not an
+                               opaque internal error that fails open to the next
+                               runtime. The typed carrier also keeps a leaf
+                               message out of the persisted-string classifier. *)
                             Error
-                              (Agent_core.Error.Internal
-                                 ("successful Keeper run retained a failed terminal effect: "
-                                  ^ failure.diagnostic))
+                              (Keeper_internal_error.core_error_of_masc_internal_error
+                                 (Keeper_internal_error.Terminal_effect_failed
+                                    { failure_class; effect_disposition; detail }))
                           | Keeper_tools_agent_core.Terminal_effect_open
                           | Keeper_tools_agent_core.Deferred_tool_result
                           | Keeper_tools_agent_core.External_effect_deferred ->

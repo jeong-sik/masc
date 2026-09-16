@@ -531,6 +531,101 @@ let test_find_latest_entry_result_scans_backwards_across_chunks () =
       (Dated_jsonl.read_error_to_string error)
 ;;
 
+(* Line shapes the backwards scan joins across reads: empty and
+   whitespace-only lines, lines around a chunk long, lines many chunks long, a
+   malformed row, and an unterminated newest row. The scan must hand the
+   filter each non-empty line exactly once, newest first. Reads are counted
+   from the end of the file, so these lengths do not put a newline on a read
+   edge. *)
+let test_a_backwards_scan_visits_every_line_once_newest_first () =
+  let dir = tmpdir "dated_jsonl_scan_shapes" in
+  let chunk = 8192 in
+  let row index length =
+    let prefix = Printf.sprintf {|{"i":%d,"p":"|} index in
+    let suffix = {|"}|} in
+    prefix ^ String.make (max 0 (length - String.length prefix - String.length suffix)) 'x' ^ suffix
+  in
+  let lines =
+    [ row 0 (chunk - 1)
+    ; ""
+    ; row 1 chunk
+    ; "   "
+    ; row 2 (chunk + 1)
+    ; "{not json"
+    ; row 3 (5 * chunk)
+    ; row 4 10
+    ; row 5 (40 * chunk + 17)
+    ; ""
+    ; row 6 (2 * chunk)
+    ]
+  in
+  let month_dir = Filename.concat dir "2026-01" in
+  Fs_compat.mkdir_p month_dir;
+  Fs_compat.append_file
+    (Filename.concat month_dir "01.jsonl")
+    (String.concat "\n" (lines @ [ row 7 (3 * chunk) ]));
+  let store = Dated_jsonl.create ~base_dir:dir () in
+  let seen = ref [] in
+  (match
+     Dated_jsonl.find_latest_entry_result store (fun entry ->
+       seen
+       := (match entry with
+          | Dated_jsonl.Parsed json -> string_of_int (json_i json)
+          | Dated_jsonl.Malformed_json _ -> "malformed")
+          :: !seen;
+       None)
+   with
+   | Ok None -> ()
+   | Ok (Some ()) -> fail "the filter never matches"
+   | Error error -> failf "scan failed: %s" (Dated_jsonl.read_error_to_string error));
+  check
+    (list string)
+    "each non-empty line once, newest first"
+    [ "7"; "6"; "5"; "4"; "3"; "malformed"; "2"; "1"; "0" ]
+    (List.rev !seen)
+;;
+
+(* A line longer than a read used to be joined to the next read on every
+   step, so it was copied once per chunk: 52 MB for a 900 KB row. Reading it
+   once and decoding it once allocates a few times its length. The budget
+   sits between the two: the scan's own copies (two lengths) plus the decode
+   (three), with room, and far under the per-chunk copies. *)
+let allocation_budget_per_row_byte = 16
+
+let test_a_long_row_is_copied_once_not_once_per_read () =
+  let dir = tmpdir "dated_jsonl_scan_long_row" in
+  let long_row =
+    Printf.sprintf {|{"kind":"padding","padding":"%s"}|} (String.make (1 lsl 20) 'x')
+  in
+  write_dated_file
+    dir
+    "2026-01"
+    "01"
+    [ {|{"kind":"turn","value":1}|}; long_row; {|{"kind":"heartbeat","value":2}|} ];
+  let store = Dated_jsonl.create ~base_dir:dir () in
+  let before = Gc.allocated_bytes () in
+  let found =
+    Dated_jsonl.find_latest_entry_result store (function
+      | Dated_jsonl.Parsed json
+        when Yojson.Safe.Util.(json |> member "kind" |> to_string) = "turn" ->
+        Some Yojson.Safe.Util.(json |> member "value" |> to_int)
+      | Dated_jsonl.Parsed _ | Dated_jsonl.Malformed_json _ -> None)
+  in
+  let allocated = Gc.allocated_bytes () -. before in
+  (match found with
+   | Ok (Some value) -> check int "the row past the long one is found" 1 value
+   | Ok None -> fail "the row past the long one was not found"
+   | Error error -> failf "scan failed: %s" (Dated_jsonl.read_error_to_string error));
+  let budget = float_of_int (allocation_budget_per_row_byte * String.length long_row) in
+  if allocated > budget
+  then
+    failf
+      "scanning past a %d byte row allocated %.0f bytes, over the %.0f byte budget"
+      (String.length long_row)
+      allocated
+      budget
+;;
+
 let test_load_tail_lines_drops_partial_chunk_prefix () =
   let dir = tmpdir "dated_jsonl_partial_tail" in
   let path = Filename.concat dir "tail.jsonl" in
@@ -1367,6 +1462,10 @@ let () =
             test_read_recent_result_keeps_unterminated_tail_row;
           test_case "strict latest scan crosses chunks" `Quick
             test_find_latest_entry_result_scans_backwards_across_chunks;
+          test_case "a backwards scan visits every line once, newest first" `Quick
+            test_a_backwards_scan_visits_every_line_once_newest_first;
+          test_case "a long row is copied once, not once per read" `Quick
+            test_a_long_row_is_copied_once_not_once_per_read;
           test_case "drops partial chunk prefix" `Quick test_load_tail_lines_drops_partial_chunk_prefix;
           test_case "matches the pre-rewrite reference" `Quick
             test_load_tail_lines_matches_reference;

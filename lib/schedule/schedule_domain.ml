@@ -82,6 +82,13 @@ let nonempty field value =
   if String.trim value = "" then Error (field ^ " must be non-empty") else Ok value
 ;;
 
+(* The ledger is written as compact JSON, which has no spelling for NaN or an
+   infinity: a time that is not finite could be accepted here and then fail
+   every later write of the whole ledger. *)
+let finite_time field value =
+  if Float.is_finite value then Ok value else Error (field ^ " must be a finite time")
+;;
+
 let decode_error_to_string = Schedule_contract_values.decode_error_to_string
 let actor_kind_to_string = Schedule_contract_values.actor_kind_to_string
 
@@ -828,6 +835,13 @@ let create_request
   let* schedule_id = nonempty "schedule_id" schedule_id in
   let* _ = nonempty "requested_by.id" requested_by.id in
   let* _ = nonempty "scheduled_by.id" scheduled_by.id in
+  let* requested_at = finite_time "requested_at" requested_at in
+  let* due_at = finite_time "due_at" due_at in
+  let* expires_at =
+    match expires_at with
+    | None -> Ok None
+    | Some expires_at -> Result.map Option.some (finite_time "expires_at" expires_at)
+  in
   let* payload = payload_of_yojson payload in
   let* recurrence = validate_recurrence recurrence in
   Ok

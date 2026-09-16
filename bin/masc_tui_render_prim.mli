@@ -438,6 +438,7 @@ val context_split_width : int -> int
 val context_composition_lines :
   cols:int ->
   turn_back:int ->
+  forecast:(Masc_tui_context_inspector.forecast, string) result ->
   Masc_tui_context_inspector.selection ->
   string list
 

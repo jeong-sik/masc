@@ -1,14 +1,33 @@
-(* Three lists draw rows under themselves. Verification draws the armed
-   approval, the server's last refusal, and a scroll row while the queue
-   overflows; Changes draws a preview and the same scroll row; Logs draws the
-   scroll row alone. The frame and the keypress read one layout for how many
-   rows the list gets, so that layout has to count them; a row it misses is a
-   row the footer is pushed out by, and finish_surface drops the last row
-   first. *)
+(* Three lists draw rows under themselves. Verification draws the row naming
+   which list it is reading and where in it, the armed approval, the server's
+   last refusal, and -- when the join has them -- why the queue could not be
+   read, that it came from a snapshot, and which waited-on ids name no record;
+   Changes draws a preview and a scroll row; Logs draws the scroll row alone.
+   The frame and the keypress read one layout for how many rows the list gets,
+   so that layout has to count them; a row it misses is a row the footer is
+   pushed out by, and finish_surface drops the last row first.
+
+   Verification's view row carries the window text a cut page used to draw on
+   a line of its own, so the two are one row and the surface reserves no
+   separate scroll row. It is drawn once a read has answered and not before,
+   which is why the count is zero on a state that has not read. *)
 
 open Masc_tui_types
 
 let state () = create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+
+(* A read that answered with nothing. Enough to make the view row exist,
+   which is what the row budget turns on. *)
+let answered : Masc.Tui_decode.verification_snapshot =
+  { vs_requests = []
+  ; vs_total = 0
+  ; vs_view = Masc.Tui_decode.Awaiting_queue
+  ; vs_offset = 0
+  ; vs_truncated = false
+  ; vs_awaiting_unresolved = []
+  ; vs_backlog_error = None
+  ; vs_backlog_recovery = None
+  }
 
 let layout state =
   match scrolled_surface_rows state Verification with
@@ -26,26 +45,51 @@ let test_the_rows_under_the_list_are_counted () =
   armed.verification_verdict_error <- Some "refused";
   Alcotest.(check int) "and the server's refusal another" (frame + 2)
     (layout armed).sc_chrome;
-  Alcotest.(check bool) "an overflowing queue reserves its scroll row" true
-    (layout (state ())).sc_overflow_takes_row
+  Alcotest.(check bool)
+    "the view row carries the window, so no scroll row is reserved" false
+    (layout (state ())).sc_overflow_takes_row;
+  (* Nothing is drawn under a list no read has answered. *)
+  let read = state () in
+  read.verification <- Some answered;
+  Alcotest.(check int) "a read adds the row naming the view and the page"
+    (frame + 1) (layout read).sc_chrome;
+  read.verification <-
+    Some
+      { answered with
+        Masc.Tui_decode.vs_backlog_error = Some "backlog.json: bad json"
+      };
+  Alcotest.(check int) "a backlog that did not read takes another" (frame + 2)
+    (layout read).sc_chrome;
+  read.verification <-
+    Some { answered with Masc.Tui_decode.vs_backlog_recovery = Some "stale" };
+  Alcotest.(check int) "so does one that came from a snapshot" (frame + 2)
+    (layout read).sc_chrome;
+  read.verification <-
+    Some
+      { answered with
+        Masc.Tui_decode.vs_awaiting_unresolved = [ "vrf-missing" ]
+      };
+  Alcotest.(check int) "so do ids that name no record" (frame + 2)
+    (layout read).sc_chrome
 
-(* The sum the frame actually draws: its fixed rows, the list, and the scroll
-   row once the queue is longer than the list. It has to come out at the body
-   height exactly, armed or not, for the footer to stay on the frame. *)
+(* The sum the frame actually draws: its fixed rows, the rows under the list,
+   and the list. It has to come out at the body height exactly, armed or not,
+   for the footer to stay on the frame. The rows under the list are already in
+   [sc_chrome], so nothing is added here -- adding a scroll row on top is what
+   the old model did, and doing both is one row too many. *)
 let test_an_armed_overflowing_queue_fills_the_body_exactly () =
   let body_rows = 24 in
   let armed = state () in
   armed.verification_verdict_armed <- Some "task-armed";
+  armed.verification <- Some answered;
   let shape = layout armed in
-  let count = 40 in
   let list_rows =
     Masc_tui_scroll.content_height ~rows:body_rows ~chrome:shape.sc_chrome
-      ~count ~preview_keep:shape.sc_preview_keep
+      ~count:40 ~preview_keep:shape.sc_preview_keep
       ~overflow_takes_row:shape.sc_overflow_takes_row
   in
-  let scroll_row = if count > list_rows then 1 else 0 in
-  Alcotest.(check int) "frame + list + scroll row is the body" body_rows
-    (shape.sc_chrome + list_rows + scroll_row)
+  Alcotest.(check int) "frame + list is the body" body_rows
+    (shape.sc_chrome + list_rows)
 
 let test_an_open_detail_is_not_the_list () =
   let detail = state () in

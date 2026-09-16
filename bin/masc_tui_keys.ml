@@ -541,10 +541,16 @@ let for_surface = function
       [ b Navigate "j/k" "move" ~help:"move; in details, scroll the evidence"
       ; b Navigate "v" "next Planning tab"
           ~help:"on to Task Verdicts, then back to Goals"
+      ; b Navigate "h" "queue / history"
+          ~help:"the queue is what a task is still waiting on; the history is \
+                 every request ever submitted, which nothing removes"
       ; b Act "Right / Enter" "details" ~help:"read the request and evidence"
-      ; b Act "Left / Esc" "back" ~help:"back to the verification queue"
+      ; b Act "Left / Esc" "back" ~help:"back to the list"
       ; b Navigate "[ / ]" "previous / next"
           ~help:"while a detail is open, step to the row before or after it"
+      ; b Navigate "< / >" "newer / older"
+          ~help:"step either list a page at a time; one page holds two \
+                 hundred rows, so a shorter queue arrives whole"
       ; b Act "a" "approve" ~help:"approve the row under the cursor (press twice)"
       ; b Act "x" "reject" ~help:"reject with a reason ($EDITOR form)"
       ; b Search "/" "find"

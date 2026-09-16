@@ -1414,10 +1414,11 @@ let load_fusion_detail ~(host : string) ~(port : int) ~(run_id : string) :
   | Error err -> Error ("fusion detail load failed: " ^ err)
   | Ok json -> Tui_decode.decode_fusion_detail json
 
-(** Load the verification queue from /api/v1/verification/requests *)
-let load_verification ~(host : string) ~(port : int) ~(limit : int) :
+(** Load one page of one view from /api/v1/verification/requests *)
+let load_verification ~(host : string) ~(port : int) ~(limit : int)
+    ~(view : Tui_decode.verification_view) ~(offset : int) :
     (Tui_decode.verification_snapshot, string) result =
-  match fetch_verification_requests ~host ~port ~limit with
+  match fetch_verification_requests ~host ~port ~limit ~view ~offset with
   | Error err -> Error ("verification load failed: " ^ err)
   | Ok json -> Tui_decode.decode_verification_snapshot json
 

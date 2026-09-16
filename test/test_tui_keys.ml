@@ -529,9 +529,11 @@ let test_board_compose_footers_are_projected () =
 
 let test_verification_footer_carries_the_verdict_keys () =
   (* Verification is a list/detail surface: Enter explains the request before
-     the two-press approve or the $EDITOR reject reason changes it. *)
+     the two-press approve or the $EDITOR reject reason changes it. [h] names
+     the other list -- the store keeps every submission, so the history holds
+     rows whose task finished weeks ago -- and [< / >] pages that history. *)
   check str "verification names detail, approve, and reject"
-    "j/k:move  v:next Planning tab  [ / ]:previous / next  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:details  Left / Esc:back  a:approve  x:reject  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  v:next Planning tab  h:queue / history  [ / ]:previous / next  < / >:newer / older  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:details  Left / Esc:back  a:approve  x:reject  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Verification)
 
 let test_fusion_footer_pins_the_shared_list_projection () =

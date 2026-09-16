@@ -132,7 +132,15 @@ let plan ~measure_message_bytes ~demote_before messages =
     else { messages; pending = [] })
 ;;
 
-let materialize ~store ~pending messages =
+(* Keyed by tool_use_id, not by the body: hashing a string key would read the
+   whole body, which is the cost this memo exists to remove. The id names the
+   body — [bodies] below already treats id -> body as a function — and a
+   durable tool result's body never changes under its id. *)
+type address_memo = (string, Tool_blob_store.addressed) Hashtbl.t
+
+let create_address_memo () = Hashtbl.create 64
+
+let materialize ~store ~addresses ~pending messages =
   if pending = []
   then { messages; reverted = 0 }
   else (
@@ -163,14 +171,18 @@ let materialize ~store ~pending messages =
       | Agent_core.Types.Audio _ -> None
     in
     (* The bodies this cut still carries, named once so the pass below finds
-       each by its tool_use_id rather than by position. Addressing one is a
-       sha256 over the whole body and nothing else — the store skips writing an
-       address this process already wrote — and a long-lived keeper carries
-       thousands of them into every provider request, which held the main Eio
-       domain for 0.7 to 1.6 seconds per request (2026-09-16 fiber trace). The
-       hashing goes to the CPU pool; the rare write stays on this fiber, where
-       the blob store's filesystem contract belongs. *)
-    let wanted = Hashtbl.create 64 in
+       each by its tool_use_id rather than by position, and paired with the
+       address that names them.
+
+       Addressing one is a sha256 over the whole body and nothing else — the
+       store skips writing an address this process already wrote — and a
+       long-lived keeper carries thousands of them. The attempt runs 62 to 83
+       provider requests over one pinned demotion boundary, so every body but
+       the first request's is already in [addresses]; what is left goes to the
+       CPU pool in one job. The rare write stays on this fiber, where the blob
+       store's filesystem contract belongs. *)
+    let addressed = Hashtbl.create 64 in
+    let queued = Hashtbl.create 16 in
     List.iter
       (fun (message : Agent_core.Types.message) ->
          List.iter
@@ -178,30 +190,31 @@ let materialize ~store ~pending messages =
               match demoted_marker block with
               | None -> ()
               | Some tool_use_id ->
-                if not (Hashtbl.mem wanted tool_use_id)
+                if (not (Hashtbl.mem addressed tool_use_id))
+                   && not (Hashtbl.mem queued tool_use_id)
                 then (
                   match body_of tool_use_id with
                   | None -> ()
-                  | Some body -> Hashtbl.add wanted tool_use_id body))
+                  | Some body ->
+                    (match Hashtbl.find_opt addresses tool_use_id with
+                     | Some address -> Hashtbl.add addressed tool_use_id (body, address)
+                     | None -> Hashtbl.add queued tool_use_id body)))
            message.content)
       messages;
-    let to_address =
-      Hashtbl.fold (fun tool_use_id body acc -> (tool_use_id, body) :: acc) wanted []
-    in
-    let addressed = Hashtbl.create (List.length to_address) in
-    (match to_address with
-     | [] -> ()
-     | _ :: _ ->
-       List.iter
-         (fun (tool_use_id, body, address) ->
-            Hashtbl.add addressed tool_use_id (body, address))
-         (Domain_pool_ref.submit_cpu_or_inline (fun () ->
-            List.map
-              (fun (tool_use_id, body) ->
-                 ( tool_use_id
-                 , body
-                 , Tool_blob_store.address store ~bytes:body ~mime:demoted_mime ))
-              to_address)));
+    List.iter
+      (fun (tool_use_id, body, address) ->
+         Hashtbl.add addresses tool_use_id address;
+         Hashtbl.add addressed tool_use_id (body, address))
+      (match Hashtbl.fold (fun id body acc -> (id, body) :: acc) queued [] with
+       | [] -> []
+       | _ :: _ as to_address ->
+         Domain_pool_ref.submit_cpu_or_inline (fun () ->
+           List.map
+             (fun (tool_use_id, body) ->
+                ( tool_use_id
+                , body
+                , Tool_blob_store.address store ~bytes:body ~mime:demoted_mime ))
+             to_address));
     let reverted = ref 0 in
     let messages =
       List.map

@@ -193,7 +193,11 @@ let bound_holds_for body_label body =
         planned.Demotion.messages
     in
     let outcome =
-      Demotion.materialize ~store ~pending planned.Demotion.messages
+      Demotion.materialize
+        ~store
+        ~addresses:(Demotion.create_address_memo ())
+        ~pending
+        planned.Demotion.messages
     in
     Alcotest.(check int)
       (body_label ^ ": no revert in a healthy store")
@@ -335,6 +339,7 @@ let each_marker_stores_its_own_body () =
   let outcome =
     Demotion.materialize
       ~store
+      ~addresses:(Demotion.create_address_memo ())
       ~pending:planned.Demotion.pending
       planned.Demotion.messages
   in
@@ -364,7 +369,7 @@ let each_marker_stores_its_own_body () =
 let busy_worker_polls = 50
 let busy_worker_poll_interval_s = 0.01
 
-let materialize_addresses_its_bodies_on_the_pool () =
+let materialize_addresses_each_body_once_per_attempt () =
   let store = Tool_blob_store.create ~base_path:(Filename.temp_dir "demote" "") in
   let bodies = List.init 8 (fun i -> Printf.sprintf "body %d:" i ^ String.make 4000 'a') in
   let messages = history_with_tool_bodies bodies in
@@ -390,48 +395,66 @@ let materialize_addresses_its_bodies_on_the_pool () =
       Eio.Promise.resolve occupied_u ();
       Eio.Promise.await release));
   Eio.Promise.await occupied;
-  let outcome = ref None in
+  let addresses = Demotion.create_address_memo () in
+  let materialize () =
+    Demotion.materialize
+      ~store
+      ~addresses
+      ~pending:planned.Demotion.pending
+      planned.Demotion.messages
+  in
+  let first = ref None in
   let clock = Eio.Stdenv.clock env in
   Eio.Fiber.both
-    (fun () ->
-      outcome
-      := Some
-           (Demotion.materialize
-              ~store
-              ~pending:planned.Demotion.pending
-              planned.Demotion.messages))
+    (fun () -> first := Some (materialize ()))
     (fun () ->
       let rec wait polls =
-        if polls > 0 && Option.is_none !outcome
+        if polls > 0 && Option.is_none !first
         then (
           Eio.Time.sleep clock busy_worker_poll_interval_s;
           wait (polls - 1))
       in
       wait busy_worker_polls;
       Alcotest.(check bool)
-        "materialize waits for the busy worker"
+        "the first request waits for the busy worker"
         true
-        (Option.is_none !outcome);
+        (Option.is_none !first);
       Eio.Promise.resolve release_u ());
-  match !outcome with
-  | None -> Alcotest.fail "materialize never finished"
-  | Some outcome ->
-    Alcotest.(check int) "no revert in a healthy store" 0 outcome.Demotion.reverted;
-    let stored =
-      List.map
-        (fun content ->
-           match Tool_output.decode_from_agent_core content with
-           | Tool_output.Decoded reference ->
-             (match Tool_blob_store.fetch store ~sha256:reference.Tool_output.sha256 with
-              | Ok (Some bytes) -> bytes
-              | Ok None -> Alcotest.fail "a marker names a blob the store does not hold"
-              | Error error ->
-                Alcotest.fail (Tool_blob_store.fetch_error_to_string error))
-           | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
-             Alcotest.fail "every planned body leaves as a marker")
-        (markers outcome.Demotion.messages)
-    in
-    Alcotest.(check (list string)) "and still stores each body" bodies stored
+  let first =
+    match !first with
+    | None -> Alcotest.fail "materialize never finished"
+    | Some outcome -> outcome
+  in
+  (* The attempt's later requests demote the same aged results. With the
+     worker occupied again, a second materialize through the same memo
+     finishes anyway: it addressed nothing. *)
+  let occupied, occupied_u = Eio.Promise.create () in
+  let release, release_u = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Domain_pool_ref.submit_cpu_or_inline (fun () ->
+      Eio.Promise.resolve occupied_u ();
+      Eio.Promise.await release));
+  Eio.Promise.await occupied;
+  let second = materialize () in
+  Eio.Promise.resolve release_u ();
+  let stored outcome =
+    List.map
+      (fun content ->
+         match Tool_output.decode_from_agent_core content with
+         | Tool_output.Decoded reference ->
+           (match Tool_blob_store.fetch store ~sha256:reference.Tool_output.sha256 with
+            | Ok (Some bytes) -> bytes
+            | Ok None -> Alcotest.fail "a marker names a blob the store does not hold"
+            | Error error ->
+              Alcotest.fail (Tool_blob_store.fetch_error_to_string error))
+         | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
+           Alcotest.fail "every planned body leaves as a marker")
+      (markers outcome.Demotion.messages)
+  in
+  Alcotest.(check int) "no revert in a healthy store" 0 first.Demotion.reverted;
+  Alcotest.(check int) "nor on the second request" 0 second.Demotion.reverted;
+  Alcotest.(check (list string)) "each marker stores its own body" bodies (stored first);
+  Alcotest.(check (list string)) "and the memo names the same ones" bodies (stored second)
 ;;
 
 (* --- 5. Atoms retained by the raw cut keep their bodies ---------------- *)
@@ -728,6 +751,7 @@ let oversized_newest_atom_is_demoted_as_last_resort () =
   let outcome =
     Demotion.materialize
       ~store
+      ~addresses:(Demotion.create_address_memo ())
       ~pending:planned.Demotion.pending
       windowed.Window.projection.Window.messages
   in
@@ -953,9 +977,9 @@ let () =
         ] )
     ; ( "materialize"
       , [ Alcotest.test_case
-            "addressing runs on the pool"
+            "each body is addressed once per attempt, off this domain"
             `Quick
-            materialize_addresses_its_bodies_on_the_pool
+            materialize_addresses_each_body_once_per_attempt
         ] )
     ]
 ;;

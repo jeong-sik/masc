@@ -2197,8 +2197,16 @@ let () =
     categories;
   check
     "a core failure summary stays on one line"
-    (Keeper_request_failure_core.summary (core_of "first\nsecond\rthird")
-     = "internal: first second third")
+    (* [message] is [Agent_core.Error.to_string], not the text handed to the
+       constructor, so this pins the two things the module promises -- the
+       category label leads, and line breaks in the leaf become spaces --
+       rather than agent-core's own wording for an [Internal] error. *)
+    (let summary =
+       Keeper_request_failure_core.summary (core_of "first\nsecond\rthird")
+     in
+     String.starts_with ~prefix:"internal: " summary
+     && (not (String.contains summary '\n' || String.contains summary '\r'))
+     && contains ~needle:"first second third" summary)
 ;;
 
 let () =

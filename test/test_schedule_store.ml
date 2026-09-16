@@ -1617,32 +1617,51 @@ let test_a_clock_behind_the_ledger_forgets_nothing () =
     (schedule_ids (read_state config))
 ;;
 
-(* The window is the caller's to set, so the same ledger read at the same
-   moment must give different answers for different windows. A pass that
-   ignored [retention_days], or that clamped it to the library's own seven,
-   keeps the schedule in the second half and fails. *)
-let days_waited_since_the_wake = 5
-let window_longer_than_the_wait = 7
-let window_shorter_than_the_wait = 3
+(* The window is the caller's to set, so one ledger read at one moment must
+   give different answers for different windows. Two schedules of different
+   ages make the pair of assertions discriminating: an implementation that
+   ignores [retention_days], or that clamps it to the library's seven from
+   either side, gets one of the two counts wrong.
+
+     window 14, waited 10  -> keep   (a cap at 7 would forget)
+     window  3, waited  5  -> forget (a floor at 7 would keep)
+
+   The times are real ones. [bump_state] stamps [updated_at] with
+   [Unix.gettimeofday ()] whatever the caller's clock says, and [refresh_due]
+   judges no ages when [now] is behind that stamp, so a test on a small
+   made-up timeline never reaches the retention pass at all. *)
+let wide_window_days = 14
+let narrow_window_days = 3
+let days_since_the_older_wake = 10
+let days_since_the_newer_wake = 5
 
 let test_the_retention_window_is_the_callers_to_set () =
   with_workspace
   @@ fun config ->
-  let finished_at = 203.0 in
-  ignore (insert_ok config (make_request ~schedule_id:"ran-and-finished" ()));
-  run_to_completion config ~schedule_id:"ran-and-finished" ~finished_at;
-  let now = finished_at +. days_to_seconds days_waited_since_the_wake in
+  let anchor = Unix.gettimeofday () in
+  let finished_days_ago days = anchor -. days_to_seconds days in
+  let older = "wake-ten-days-back" and newer = "wake-five-days-back" in
+  List.iter
+    (fun schedule_id -> ignore (insert_ok config (make_request ~schedule_id ())))
+    [ older; newer ];
+  run_to_completion config ~schedule_id:older
+    ~finished_at:(finished_days_ago days_since_the_older_wake);
+  run_to_completion config ~schedule_id:newer
+    ~finished_at:(finished_days_ago days_since_the_newer_wake);
+  (* Past the ledger's own stamp, or the pass judges nothing. *)
+  let now = Float.max (read_state config).updated_at (Unix.gettimeofday ()) +. 1.0 in
   let refresh_with retention_days =
-    store_ok
-      (Printf.sprintf "refresh at %d days" retention_days)
-      (Schedule_store.refresh_due config ~now ~retention_days)
+    ignore
+      (store_ok
+         (Printf.sprintf "refresh at %d days" retention_days)
+         (Schedule_store.refresh_due config ~now ~retention_days))
   in
-  ignore (refresh_with window_longer_than_the_wait);
-  check (list string) "a window longer than the wait keeps it"
-    [ "ran-and-finished" ]
+  refresh_with wide_window_days;
+  check (list string) "a window wider than both waits keeps both"
+    [ newer; older ]
     (schedule_ids (read_state config));
-  ignore (refresh_with window_shorter_than_the_wait);
-  check (list string) "a shorter window forgets it on the very next pass"
+  refresh_with narrow_window_days;
+  check (list string) "a window narrower than both forgets both"
     []
     (schedule_ids (read_state config))
 ;;

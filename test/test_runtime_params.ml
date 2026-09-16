@@ -599,6 +599,44 @@ let () =
     Fun.protect ~finally:Eio_guard.disable f
   in
 
+  (* The bounds are written twice -- [register_int]'s ~min/~max validate, and
+     the [meta] a settings screen draws its picker from -- so a test that reads
+     one of them would not notice the other moving. These assert the behaviour:
+     what a fresh process answers, and which values [set] takes. *)
+  let schedule_retention_default_days = 7 in
+  let schedule_retention_shortest_days = 1 in
+  let schedule_retention_longest_days = 365 in
+
+  let test_schedule_retention_default_and_bounds () =
+    Alcotest.(check int) "a process with no override keeps a finished schedule this long"
+      schedule_retention_default_days
+      (Runtime_params.get Runtime_settings.schedule_terminal_retention_days);
+    let refuses days =
+      match Runtime_params.set Runtime_settings.schedule_terminal_retention_days days with
+      | Error _ -> ()
+      | Ok () ->
+        Runtime_params.clear Runtime_settings.schedule_terminal_retention_days;
+        Alcotest.fail
+          (Printf.sprintf "%d days was accepted as a retention window" days)
+    in
+    let accepts days =
+      match Runtime_params.set Runtime_settings.schedule_terminal_retention_days days with
+      | Ok () ->
+        Alcotest.(check int) "reads back what was set" days
+          (Runtime_params.get Runtime_settings.schedule_terminal_retention_days)
+      | Error detail -> Alcotest.fail detail
+    in
+    (* Zero would forget a schedule the moment its wake finished. *)
+    refuses (schedule_retention_shortest_days - 1);
+    refuses (schedule_retention_longest_days + 1);
+    accepts schedule_retention_shortest_days;
+    accepts schedule_retention_longest_days;
+    Runtime_params.clear Runtime_settings.schedule_terminal_retention_days;
+    Alcotest.(check int) "clearing puts the default back"
+      schedule_retention_default_days
+      (Runtime_params.get Runtime_settings.schedule_terminal_retention_days)
+  in
+
   let test_crash_persistence_enqueue_read () =
     with_eio_guard @@ fun () ->
     let tmp_dir = Filename.temp_dir "masc_crash_" "" in
@@ -700,6 +738,8 @@ let () =
             test_keeper_param_override_persist_restore;
           Alcotest.test_case "keeper_diagnostics surface" `Quick
             test_keeper_diagnostics_surface;
+          Alcotest.test_case "schedule retention default and bounds" `Quick
+            test_schedule_retention_default_and_bounds;
         ] );
       ( "crash_persistence",
         [

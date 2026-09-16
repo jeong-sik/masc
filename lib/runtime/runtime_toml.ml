@@ -1814,6 +1814,43 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
               n))
     | Error _ as e -> e
   in
+  (* The eviction marks travel as a pair: one without the other has no
+     meaning, so the parser refuses the half-declaration instead of inventing
+     the missing side. The upper bound against the model's max-context is
+     checked in [Runtime] once the model is resolved. *)
+  let context_marks_result =
+    let high =
+      typed_find "an integer" path tbl "context-high-water-tokens" Otoml.get_integer
+    in
+    let low = typed_find "an integer" path tbl "context-low-water-tokens" Otoml.get_integer in
+    match high, low with
+    | Ok None, Ok None -> Ok None
+    | Ok (Some high_water_tokens), Ok (Some low_water_tokens)
+      when 0 < low_water_tokens && low_water_tokens < high_water_tokens ->
+      Ok (Some { Runtime_schema.high_water_tokens; low_water_tokens })
+    | Ok (Some high_water_tokens), Ok (Some low_water_tokens) ->
+      Error
+        (error
+           (path ^ ".context-low-water-tokens")
+           (Printf.sprintf
+              "context-low-water-tokens must be positive and below \
+               context-high-water-tokens; got low=%d high=%d"
+              low_water_tokens
+              high_water_tokens))
+    | Ok (Some _), Ok None ->
+      Error
+        (error
+           (path ^ ".context-low-water-tokens")
+           "context-high-water-tokens is declared, so context-low-water-tokens must be \
+            declared too: it is where an eviction stops")
+    | Ok None, Ok (Some _) ->
+      Error
+        (error
+           (path ^ ".context-high-water-tokens")
+           "context-low-water-tokens is declared, so context-high-water-tokens must be \
+            declared too: it is where an eviction starts")
+    | Error e, (Ok _ | Error _) | Ok _, Error e -> Error e
+  in
   (* Request-side output budget. AGENT_CORE omits the wire field when this is
      absent, so the provider's own default decides -- 65536 on ollama.com/v1,
      which is where a collapsed generation runs to. Positive-or-omitted mirrors
@@ -1875,6 +1912,7 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
   in
   let* max_concurrent = max_concurrent_result in
   let* max_request_body_bytes = max_request_body_bytes_result in
+  let* context_marks = context_marks_result in
   let* max_tokens = max_tokens_result in
   let* price_input = price_input_result in
   let* price_output = price_output_result in
@@ -1891,6 +1929,7 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
     ; wizard_default
     ; max_concurrent
     ; max_request_body_bytes
+    ; context_marks
     ; max_tokens
     ; price_input
     ; price_output

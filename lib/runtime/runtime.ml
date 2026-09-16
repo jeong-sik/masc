@@ -454,6 +454,11 @@ type load_failure =
       ; execution_model : string
       ; declared_model : string
       }
+  | Context_marks_exceed_max_context of
+      { runtime_id : string
+      ; high_water_tokens : int
+      ; max_context : int
+      }
 
 (* A dangling reference is an operator typo, and unlike every other drop reason
    it is not survivable by ignoring the binding: the runtime the operator
@@ -552,6 +557,15 @@ let to_diagnostic_text ~(config_path : string) : load_failure -> string = functi
       runtime_id
       execution_model
       declared_model
+  | Context_marks_exceed_max_context { runtime_id; high_water_tokens; max_context } ->
+    Printf.sprintf
+      "%s: runtime %S declares context-high-water-tokens = %d above the model's \
+       max-context %d; a request that large is refused before the mark is \
+       reached, so lower the mark or raise max-context"
+      config_path
+      runtime_id
+      high_water_tokens
+      max_context
 ;;
 
 (* The same account, minus the one part this repository did not write. A parse
@@ -573,7 +587,8 @@ let to_operator_text ~(config_path : string) (failure : load_failure) : string =
   | Default_runtime_unresolved _
   | Reference_unresolved _
   | Lane_candidate_unresolved _
-  | Max_context_absent _ -> to_diagnostic_text ~config_path failure
+  | Max_context_absent _
+  | Context_marks_exceed_max_context _ -> to_diagnostic_text ~config_path failure
 ;;
 
 (* The list is carried out whole rather than counted here: the caller decides
@@ -941,6 +956,29 @@ let validate_runtime_max_context (runtimes : t list)
               | None -> "<official-client-selected>")
          ; declared_model = r.model.id
          })
+;;
+
+(* A high-water mark above the model's context cannot be reached: the
+   provider refuses first. Checked here, where the model is resolved, because
+   the binding table cannot see [max-context]. *)
+let validate_runtime_context_marks (runtimes : t list) : (unit, load_failure) result =
+  match
+    List.find_map
+      (fun (r : t) ->
+         match r.binding.Runtime_schema.context_marks, resolve_max_context_of_runtime r with
+         | Some marks, Some (max_context, _)
+           when marks.Runtime_schema.high_water_tokens > max_context ->
+           Some
+             (Context_marks_exceed_max_context
+                { runtime_id = r.id
+                ; high_water_tokens = marks.Runtime_schema.high_water_tokens
+                ; max_context
+                })
+         | Some _, Some _ | Some _, None | None, (Some _ | None) -> None)
+      runtimes
+  with
+  | None -> Ok ()
+  | Some failure -> Error failure
 ;;
 
 type request_body_cap_error = Non_positive_request_body_cap of
@@ -1488,6 +1526,7 @@ let materialize_config
   let* () =
     if validate_max_context then validate_runtime_max_context runtimes else Ok ()
   in
+  let* () = validate_runtime_context_marks runtimes in
   (* The AGENT_CORE catalog membership gate is intentionally not called here:
      [load_list] stays a routing-validity parser for tests and config probes.
      Startup callers choose fail-closed [init_default_strict] or server-visible
@@ -1678,6 +1717,10 @@ let prepare_degraded_loaded ~config_path
   let active_runtimes, _, _, _, _, _ = loaded in
   let* () =
     validate_runtime_max_context active_runtimes
+    |> Result.map_error (to_diagnostic_text ~config_path)
+  in
+  let* () =
+    validate_runtime_context_marks active_runtimes
     |> Result.map_error (to_diagnostic_text ~config_path)
   in
   let* () = validate_keeper_dispatch_request_caps ~config_path
@@ -2093,6 +2136,12 @@ let declared_input_byte_ceiling_of_runtime_id (id : string) : int option =
      | None, None -> None
      | Some only, None | None, Some only -> Some only
      | Some prompt_bytes, Some body_bytes -> Some (min prompt_bytes body_bytes))
+;;
+
+let context_marks_of_runtime_id (id : string) : Runtime_schema.context_marks option =
+  match get_runtime_by_id id with
+  | None -> None
+  | Some rt -> rt.binding.Runtime_schema.context_marks
 ;;
 
 let default_preserve_thinking_for_model (_rt : t) : bool option =

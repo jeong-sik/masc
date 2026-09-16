@@ -283,6 +283,15 @@ type model_spec =
 
 (** {1 Layer 3: Binding — provider × model} *)
 
+(** Where the keeper starts evicting carried history and where it stops, in
+    the provider's tokens of the whole request (RFC
+    keeper-context-window-in-tokens §10.2, §10.5). *)
+type context_marks =
+  { high_water_tokens : int
+  ; low_water_tokens : int
+  }
+[@@deriving show, eq]
+
 type binding =
   { provider_id : string
   ; model_id : string
@@ -293,6 +302,7 @@ type binding =
   ; wizard_default : bool
   ; max_concurrent : int option
   ; max_request_body_bytes : int option
+  ; context_marks : context_marks option
   ; max_tokens : int option
     (** Request-side output budget for this binding ([max_tokens] on Chat
         Completions, [max_output_tokens] on Responses, [num_predict] on Ollama).

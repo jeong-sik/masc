@@ -192,6 +192,85 @@ let test_no_composition_is_refused_with_the_count_read () =
   | Error (Keeper_next_request_forecast.No_first_round_composition _) | Ok _ ->
     Alcotest.fail "nothing to read is its own refusal"
 
+(* The measurer writes the message and reads how much was written; the count
+   has to stay the one [Yojson.Safe.to_string] would give. Only [to_file]
+   appends a newline by default, but the two writers are separate entry
+   points, so this pins them against each other: a suffix, a flag, or a
+   yojson change that moves one and not the other turns red here rather than
+   quietly restating every byte figure the forecast reports. *)
+let messages_whose_encoding_is_worth_pinning =
+  [ message Agent_core.Types.User ""
+  ; message Agent_core.Types.User "plain"
+  ; message Agent_core.Types.Assistant "quotes \" backslash \\ newline \n tab \t"
+  ; message Agent_core.Types.User "유니코드와 이모지 \xf0\x9f\x93\x8a"
+  ; message Agent_core.Types.User (String.make 70000 'x')
+  ; { (message Agent_core.Types.Tool "result") with
+      tool_call_id = Some "call-1"; name = Some "a_tool" }
+  ]
+
+let test_the_measurer_counts_what_to_string_would_write () =
+  let measure = Keeper_next_request_forecast.message_measurer () in
+  List.iteri
+    (fun index m ->
+       let written = measure m in
+       let built =
+         String.length
+           (Yojson.Safe.to_string (Keeper_context_core.message_to_json m))
+       in
+       Alcotest.(check int)
+         (Printf.sprintf "message %d is counted as the string would be" index)
+         built written)
+    messages_whose_encoding_is_worth_pinning
+
+(* One measurer serves a whole walk, so its buffer must not carry bytes from
+   the message before into the next count. *)
+let test_a_measurer_does_not_carry_the_previous_message () =
+  let measure = Keeper_next_request_forecast.message_measurer () in
+  let long = message Agent_core.Types.User (String.make 50000 'y') in
+  let short = message Agent_core.Types.User "z" in
+  let short_first = Keeper_next_request_forecast.message_measurer () short in
+  let (_ : int) = measure long in
+  Alcotest.(check int) "the short message counts the same after a long one"
+    short_first (measure short)
+
+(* The projection measures every message twice, and this is what a dashboard
+   poll pays over the whole durable history. Building the string to take its
+   length allocated the history again, twice: the live code-reviewer
+   checkpoint is 15,212 messages and 73.7 MB, so a poll dropped 147 MB on the
+   main domain. Writing into a reused buffer allocates the JSON tree of one
+   message at a time and nothing that scales with the bytes measured.
+
+   The budget is stated against the bytes measured, not in megabytes, so the
+   fixture can grow without restating it. A measurer that builds each string
+   again lands above it; the check prints what it measured so a later reader
+   can see the margin rather than trust the constant. *)
+let fixture_messages = 400
+let fixture_message_bytes = 4800
+let allocation_allowed_per_byte_measured = 0.75
+
+let test_measuring_a_history_does_not_allocate_it_again () =
+  let messages = history ~exchanges:(fixture_messages / 2) ~text_bytes:fixture_message_bytes in
+  let measure = Keeper_next_request_forecast.message_measurer () in
+  (* Warm the buffer so its one growth is not charged to the measured pass. *)
+  let (_ : int) = measure (List.hd messages) in
+  let before = Gc.allocated_bytes () in
+  let measured =
+    List.fold_left (fun sum m -> sum + measure m) 0 messages
+    + List.fold_left (fun sum m -> sum + measure m) 0 messages
+  in
+  let allocated = Gc.allocated_bytes () -. before in
+  let budget = float_of_int measured *. allocation_allowed_per_byte_measured in
+  Printf.printf
+    "\n  measured %d bytes, allocated %.0f (%.2f per byte measured, budget %.2f)\n%!"
+    measured allocated
+    (allocated /. float_of_int measured)
+    allocation_allowed_per_byte_measured;
+  Alcotest.(check bool)
+    (Printf.sprintf "measuring %d bytes allocated %.0f, over the %.0f budget"
+       measured allocated budget)
+    true
+    (allocated <= budget)
+
 let () =
   Alcotest.run "keeper_next_request_forecast"
     [ ( "parts"
@@ -213,6 +292,14 @@ let () =
             `Quick test_only_post_tool_compositions_are_refused_naming_the_newest_turn
         ; Alcotest.test_case "no composition is refused with the count read" `Quick
             test_no_composition_is_refused_with_the_count_read
+        ] )
+    ; ( "measure"
+      , [ Alcotest.test_case "the measurer counts what to_string would write" `Quick
+            test_the_measurer_counts_what_to_string_would_write
+        ; Alcotest.test_case "a measurer does not carry the previous message" `Quick
+            test_a_measurer_does_not_carry_the_previous_message
+        ; Alcotest.test_case "measuring a history does not allocate it again" `Quick
+            test_measuring_a_history_does_not_allocate_it_again
         ] )
     ; ( "carry"
       , [ Alcotest.test_case "a seeded front carries everything from it" `Quick

@@ -99,8 +99,15 @@ val carry
     from the seeded front, once {!Keeper_carried_front.for_history} admits it
     against this history; without one, the whole history. *)
 
+val message_measurer : unit -> (Agent_core.Types.message -> int)
+(** A measurer of one message's bytes, as the composition's encoder counts
+    them. It owns a buffer it reuses across the messages it measures, so one
+    measurer serves one projection walk and callers do not share one between
+    fibers. *)
+
 val measure : Agent_core.Types.message -> int
-(** Bytes of one message as the composition's encoder counts them. *)
+(** {!message_measurer} for a single message. A walk over a history wants a
+    measurer instead, so the buffer is paid for once rather than per message. *)
 
 type composition =
   { fixed_bytes : int  (** Tool schemas + keeper instructions. *)

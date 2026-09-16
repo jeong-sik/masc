@@ -92,10 +92,33 @@ type t =
   ; candidates : candidate list
   }
 
-let measure (message : Agent_core.Types.message) =
-  String.length
-    (Yojson.Safe.to_string (Keeper_context_core.message_to_json message))
+(* How many bytes one message adds, counted by writing it and reading how much
+   was written rather than by building the string and taking its length.
+
+   The projection below measures every message twice -- once for the whole
+   window, once as pinned or as an atom -- and this is the dashboard's
+   forecast, so a poll pays it over the whole durable history. The live
+   code-reviewer checkpoint is 15,212 messages and 73.7 MB of JSON, and the
+   endpoint took 1.0-1.25 s per call (its own transport log, 2026-09-16), all
+   of it on the main domain, where OCaml 5's scheduler lives: every other
+   fiber waited. [to_string] allocated that 73.7 MB twice per call and dropped
+   it immediately.
+
+   [to_buffer] is the writer [to_string] itself uses, so the count is the
+   same; [~suf:""] because only [to_file] appends a newline by default, and
+   [test_measures_without_building_the_string] pins the two against each
+   other so a yojson change cannot move one without the other. The buffer
+   grows to the largest message once and is reused, so a measurer allocates
+   once rather than once per message. *)
+let message_measurer () =
+  let buf = Buffer.create 65536 in
+  fun (message : Agent_core.Types.message) ->
+    Buffer.clear buf;
+    Yojson.Safe.to_buffer ~suf:"" buf (Keeper_context_core.message_to_json message);
+    Buffer.length buf
 ;;
+
+let measure (message : Agent_core.Types.message) = message_measurer () message
 
 let carry ~measure ~front ~counted_tokens messages =
   let _labelled, atom_count = Runtime_model_input_tail_window.annotate messages in
@@ -277,7 +300,7 @@ let candidate ~config ~keeper_name ~trace_id ~messages ~history_atoms runtime_id
         | None ->
           Keeper_carried_front.read_seed ~config ~keeper_name ~runtime_id ~trace_id, None
       in
-      Some (carry ~measure ~front ~counted_tokens messages)
+      Some (carry ~measure:(message_measurer ()) ~front ~counted_tokens messages)
   in
   { runtime_id
   ; lane

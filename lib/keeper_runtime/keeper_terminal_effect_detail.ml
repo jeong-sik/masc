@@ -11,8 +11,18 @@ type plan_execution_error =
   | Output_validation_failed
   | Output_not_composable
 
+type node_deferral =
+  | Deferral_unrecorded
+  | Generic_deferral
+  | External_effect_deferral
+
 type composition_cause =
   | Node_failed of failed_node
+  | Node_deferred of
+      { node_id : string
+      ; model_tool_name : string
+      ; deferral : node_deferral
+      }
   | Node_observation_failed of
       { node_id : string
       ; model_tool_name : string
@@ -21,10 +31,6 @@ type composition_cause =
   | Plan_execution_failed of
       { node_id : string
       ; error : plan_execution_error
-      }
-  | Outer_completion_mismatch of
-      { expected : Agent_core.Tool_contract.completion
-      ; actual : Agent_core.Tool_contract.completion
       }
 
 type recovery_rejection =
@@ -61,7 +67,7 @@ type t =
       }
   | Boundary_observation_failed of
       { model_tool_name : string
-      ; message : string
+      ; cause : Keeper_request_failure_core.t
       }
   | Recovery_proposal_rejected of
       { model_tool_name : string
@@ -87,14 +93,17 @@ let plan_execution_error_of_string = function
   | _ -> None
 ;;
 
-let completion_label = function
-  | Agent_core.Tool_contract.Continue_after_success -> "continue_after_success"
-  | Agent_core.Tool_contract.Terminal_after_success Agent_core.Tool_contract.Proven_pre_effect ->
-    "terminal_after_success(proven_pre_effect)"
-  | Agent_core.Tool_contract.Terminal_after_success Agent_core.Tool_contract.Proven_post_effect ->
-    "terminal_after_success(proven_post_effect)"
-  | Agent_core.Tool_contract.Terminal_after_success Agent_core.Tool_contract.Effect_outcome_unknown ->
-    "terminal_after_success(effect_outcome_unknown)"
+let node_deferral_to_string = function
+  | Deferral_unrecorded -> "unrecorded"
+  | Generic_deferral -> "generic"
+  | External_effect_deferral -> "external_effect"
+;;
+
+let node_deferral_of_string = function
+  | "unrecorded" -> Some Deferral_unrecorded
+  | "generic" -> Some Generic_deferral
+  | "external_effect" -> Some External_effect_deferral
+  | _ -> None
 ;;
 
 let recovery_rejection_to_string = function
@@ -132,6 +141,17 @@ let summary = function
       (one_line message)
   | Composition_failed
       { composition_tool
+      ; cause = Node_deferred { node_id; model_tool_name; deferral }
+      ; payload = _
+      } ->
+    Printf.sprintf
+      "%s: %s (%s) deferred (%s), so the plan stopped there"
+      composition_tool
+      node_id
+      model_tool_name
+      (node_deferral_to_string deferral)
+  | Composition_failed
+      { composition_tool
       ; cause = Node_observation_failed { node_id; model_tool_name; detail }
       ; payload = _
       } ->
@@ -149,14 +169,6 @@ let summary = function
       composition_tool
       node_id
       (plan_execution_error_to_string error)
-  | Composition_failed
-      { composition_tool; cause = Outer_completion_mismatch { expected; actual }; payload = _ }
-    ->
-    Printf.sprintf
-      "%s: plan requires %s but the call declared %s"
-      composition_tool
-      (completion_label expected)
-      (completion_label actual)
   | Composition_result_manifest_unpersisted { composition_tool; detail } ->
     Printf.sprintf
       "%s: result manifest was not persisted: %s"
@@ -177,11 +189,11 @@ let summary = function
     Printf.sprintf "tool output exceeded its inline budget: %s" (one_line message)
   | Result_delivery_failed { model_tool_name; message } ->
     Printf.sprintf "%s result was not delivered: %s" model_tool_name (one_line message)
-  | Boundary_observation_failed { model_tool_name; message } ->
+  | Boundary_observation_failed { model_tool_name; cause } ->
     Printf.sprintf
       "%s tool boundary observation failed: %s"
       model_tool_name
-      (one_line message)
+      (Keeper_request_failure_core.summary cause)
   | Recovery_proposal_rejected { model_tool_name; rejection; message } ->
     Printf.sprintf
       "%s rejected the recovery proposal (%s): %s"
@@ -199,6 +211,13 @@ let composition_cause_to_yojson = function
       ; "model_tool_name", `String model_tool_name
       ; "message", `String message
       ]
+  | Node_deferred { node_id; model_tool_name; deferral } ->
+    `Assoc
+      [ "kind", `String "node_deferred"
+      ; "node_id", `String node_id
+      ; "model_tool_name", `String model_tool_name
+      ; "deferral", `String (node_deferral_to_string deferral)
+      ]
   | Node_observation_failed { node_id; model_tool_name; detail } ->
     `Assoc
       [ "kind", `String "node_observation_failed"
@@ -211,12 +230,6 @@ let composition_cause_to_yojson = function
       [ "kind", `String "plan_execution_failed"
       ; "node_id", `String node_id
       ; "error", `String (plan_execution_error_to_string error)
-      ]
-  | Outer_completion_mismatch { expected; actual } ->
-    `Assoc
-      [ "kind", `String "outer_completion_mismatch"
-      ; "expected", Agent_core.Tool_contract.completion_to_yojson expected
-      ; "actual", Agent_core.Tool_contract.completion_to_yojson actual
       ]
 ;;
 
@@ -266,11 +279,11 @@ let to_yojson = function
       ; "model_tool_name", `String model_tool_name
       ; "message", `String message
       ]
-  | Boundary_observation_failed { model_tool_name; message } ->
+  | Boundary_observation_failed { model_tool_name; cause } ->
     `Assoc
       [ "kind", `String "boundary_observation_failed"
       ; "model_tool_name", `String model_tool_name
-      ; "message", `String message
+      ; "cause", Keeper_request_failure_core.to_yojson cause
       ]
   | Recovery_proposal_rejected { model_tool_name; rejection; message } ->
     `Assoc
@@ -325,9 +338,9 @@ let enum_field ~context fields name of_string =
   | None -> Error (Printf.sprintf "%s.%s has unknown value %S" context name raw)
 ;;
 
-let completion_field ~context fields name =
+let core_failure_field ~context fields name =
   let* value = field ~context fields name in
-  Agent_core.Tool_contract.completion_of_yojson value
+  Keeper_request_failure_core.of_yojson value
   |> Result.map_error (fun error -> Printf.sprintf "%s.%s: %s" context name error)
 ;;
 
@@ -349,6 +362,12 @@ let composition_cause_of_yojson json =
     let* model_tool_name = string_field ~context fields "model_tool_name" in
     let* message = string_field ~context fields "message" in
     Ok (Node_failed { node_id; model_tool_name; message })
+  | "node_deferred" ->
+    let* fields = with_fields [ "node_id"; "model_tool_name"; "deferral" ] in
+    let* node_id = string_field ~context fields "node_id" in
+    let* model_tool_name = string_field ~context fields "model_tool_name" in
+    let* deferral = enum_field ~context fields "deferral" node_deferral_of_string in
+    Ok (Node_deferred { node_id; model_tool_name; deferral })
   | "node_observation_failed" ->
     let* fields = with_fields [ "node_id"; "model_tool_name"; "detail" ] in
     let* node_id = string_field ~context fields "node_id" in
@@ -360,11 +379,6 @@ let composition_cause_of_yojson json =
     let* node_id = string_field ~context fields "node_id" in
     let* error = enum_field ~context fields "error" plan_execution_error_of_string in
     Ok (Plan_execution_failed { node_id; error })
-  | "outer_completion_mismatch" ->
-    let* fields = with_fields [ "expected"; "actual" ] in
-    let* expected = completion_field ~context fields "expected" in
-    let* actual = completion_field ~context fields "actual" in
-    Ok (Outer_completion_mismatch { expected; actual })
   | unknown -> Error (Printf.sprintf "composition cause has unknown kind %S" unknown)
 ;;
 
@@ -424,10 +438,10 @@ let of_yojson json =
     let* message = string_field ~context fields "message" in
     Ok (Result_delivery_failed { model_tool_name; message })
   | "boundary_observation_failed" ->
-    let* fields = with_fields [ "model_tool_name"; "message" ] in
+    let* fields = with_fields [ "model_tool_name"; "cause" ] in
     let* model_tool_name = string_field ~context fields "model_tool_name" in
-    let* message = string_field ~context fields "message" in
-    Ok (Boundary_observation_failed { model_tool_name; message })
+    let* cause = core_failure_field ~context fields "cause" in
+    Ok (Boundary_observation_failed { model_tool_name; cause })
   | "recovery_proposal_rejected" ->
     let* fields = with_fields [ "model_tool_name"; "rejection"; "message" ] in
     let* model_tool_name = string_field ~context fields "model_tool_name" in

@@ -115,16 +115,19 @@ val save_json_durable_atomic
   -> (unit, durable_write_error) result
 
 (** Strict durable write whose bytes are produced through the process executor
-    pool when it is available. [encoded_source] must be a pure closure; an
-    exception it raises becomes a [Payload_encode] failure. This keeps large
-    checkpoint encodes from monopolizing the Eio scheduler while preserving the
-    same atomic publication and ownership contract; blocking filesystem
-    operations still run in a systhread. *)
+    pool when it is available. [encoded_source] returns the payload as
+    consecutive pieces, which are appended to the file in order; the live
+    canonical checkpoints measured 2026-09-16 were 111MB and 107MB, so a source
+    that joined them would allocate that whole document again on every save.
+    [encoded_source] must be a pure closure; an exception it raises becomes a
+    [Payload_encode] failure. This keeps large checkpoint encodes from monopolizing the Eio
+    scheduler while preserving the same atomic publication and ownership
+    contract; blocking filesystem operations still run in a systhread. *)
 val save_encoded_durable_atomic_from
   :  ?ownership_root:string
   -> ?temp_dir:string
   -> string
-  -> (unit -> string)
+  -> (unit -> string list)
   -> (unit, durable_write_error) result
 
 val durable_write_error_to_string : durable_write_error -> string

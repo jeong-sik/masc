@@ -1,7 +1,8 @@
 name = "masc_dashboard"
 description = """
-Return a concise workspace dashboard summary for the current project. Use \
-scope to choose the current task-focused view or the full workspace view."""
+Return a concise workspace dashboard summary for the current project.
+
+Use scope to choose the current task-focused view or the full workspace view."""
 additional_properties = false
 
 defer_loading = true

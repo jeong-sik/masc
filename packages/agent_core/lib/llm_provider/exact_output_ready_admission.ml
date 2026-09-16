@@ -90,10 +90,6 @@ type wire_admission_error =
   | Token_measurement_failed
   | Unsupported_target_model of { model_id : string }
   | Target_request_rejected
-  | Request_body_too_large of
-      { actual_bytes : int
-      ; limit_bytes : int
-      }
   | Request_serialization_rejected
 
 type admission_error =
@@ -103,11 +99,7 @@ type admission_error =
   | Invalid_schema
   | Wire_admission_rejected of wire_admission_error
 
-type request_body_projection =
-  { actual_bytes : int
-  ; limit_bytes : int option
-  ; within_limit : bool
-  }
+type request_body_projection = { actual_bytes : int }
 
 type request_target =
   { config : PC.t
@@ -310,8 +302,6 @@ let wire_admission_error = function
   | Plan.Unsupported_audio_input -> Unsupported_audio_input
   | Plan.Unsupported_system_prompt -> Unsupported_system_prompt
   | Plan.Provider_request_rejected _ -> Target_request_rejected
-  | Plan.Request_body_too_large { actual_bytes; limit_bytes } ->
-    Request_body_too_large { actual_bytes; limit_bytes }
   | Plan.Request_serialization_rejected _ -> Request_serialization_rejected
 ;;
 
@@ -406,14 +396,7 @@ let project_request_body ~target ~messages requirement =
       ~body_timeout_s:target.body_timeout_s
       ~anthropic_thinking_control:target.anthropic_thinking_control
   with
-  | Ok preflight ->
-    Ok
-      { actual_bytes = Plan.preflight_request_body_bytes preflight
-      ; limit_bytes = config.max_request_body_bytes
-      ; within_limit = true
-      }
-  | Error (Plan.Request_body_too_large { actual_bytes; limit_bytes }) ->
-    Ok { actual_bytes; limit_bytes = Some limit_bytes; within_limit = false }
+  | Ok preflight -> Ok { actual_bytes = Plan.preflight_request_body_bytes preflight }
   | Error error -> Error (Wire_admission_rejected (wire_admission_error error))
 ;;
 

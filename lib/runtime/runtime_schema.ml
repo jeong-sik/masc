@@ -270,9 +270,7 @@ type model_spec =
         Declared in bytes rather than derived from [max-context] because MASC
         has no tokenizer: converting a token budget would need a
         bytes-per-token constant with nothing to justify it, and a wrong
-        constant either truncates silently or overflows silently. This mirrors
-        [max-request-body-bytes] on the Agent_core side, which is likewise an
-        operator-declared byte cap.
+        constant either truncates silently or overflows silently.
 
         [None] applies no ceiling, which is the behaviour every deployment has
         today. Resolved via {!Runtime.max_prompt_bytes_of_runtime_id} →
@@ -301,7 +299,6 @@ type binding =
   ; is_default : bool
   ; wizard_default : bool
   ; max_concurrent : int option
-  ; max_request_body_bytes : int option
   ; context_marks : context_marks option
   ; max_tokens : int option
     (** Request-side output budget for this binding ([max_tokens] on Chat

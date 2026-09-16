@@ -607,7 +607,6 @@ supports-audio-input = true
 supports-video-input = true
 supports-multimodal-inputs = true
 [fixture.vision]
-max-request-body-bytes = 65536
 |}
   in
   let path = Filename.temp_file "vision-transport-capabilities-" ".toml" in

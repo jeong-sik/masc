@@ -2362,8 +2362,6 @@ type runtime_option = {
   ro_max_context_source : runtime_context_source;
   ro_max_output_tokens : int option;
   ro_is_local : bool;
-  ro_dispatchable : bool;
-  ro_blocked_reason : string option;
   ro_is_default : bool;
   ro_quota_exhausted : bool;
   ro_quota_resets_at : float option;
@@ -4260,10 +4258,6 @@ let decode_runtime_option ~default_id json =
     else Ok ()
   in
   let* _binding_is_default = required_bool_field json "is_default" in
-  let* ro_dispatchable = required_bool_field json "keeper_dispatchable" in
-  let* ro_blocked_reason =
-    required_nullable_string_field json "keeper_dispatch_blocked_reason"
-  in
   (* Quota life state (2026-09-12): optional because the document grew these
      fields -- an older server's rows simply lack them, and absence reads as
      unknown, not healthy. *)
@@ -4277,15 +4271,6 @@ let decode_runtime_option ~default_id json =
   in
   let* ro_quota_resets_at = optional_float_field json "quota_resets_at" in
   let* ro_quota_scope = optional_string_field json "quota_scope" in
-  let* () =
-    match ro_dispatchable, ro_blocked_reason with
-    | true, None | false, Some _ -> Ok ()
-    | true, Some _ ->
-        Error
-          (Printf.sprintf "dispatchable runtime %S carries a blocker" ro_id)
-    | false, None ->
-        Error (Printf.sprintf "blocked runtime %S omits its blocker" ro_id)
-  in
   let ro_is_default = Option.equal String.equal default_id (Some ro_id) in
   Ok
     { ro_id
@@ -4295,8 +4280,6 @@ let decode_runtime_option ~default_id json =
     ; ro_max_context_source
     ; ro_max_output_tokens
     ; ro_is_local
-    ; ro_dispatchable
-    ; ro_blocked_reason
     ; ro_is_default
     ; ro_quota_exhausted
     ; ro_quota_resets_at
@@ -4429,10 +4412,7 @@ let decode_runtime_resolved_snapshot json =
                 && Int.equal default.ro_effective_max_context listed.ro_effective_max_context
                 && default.ro_max_context_source = listed.ro_max_context_source
                 && Option.equal Int.equal default.ro_max_output_tokens listed.ro_max_output_tokens
-                && Bool.equal default.ro_is_local listed.ro_is_local
-                && Bool.equal default.ro_dispatchable listed.ro_dispatchable
-                && Option.equal String.equal default.ro_blocked_reason
-                     listed.ro_blocked_reason -> Ok ()
+                && Bool.equal default.ro_is_local listed.ro_is_local -> Ok ()
          | Some _ ->
              Error "default_runtime disagrees with its resolved runtime row")
   in

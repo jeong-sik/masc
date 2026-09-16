@@ -25,10 +25,6 @@ type output_admission_error =
   | Unsupported_audio_input
   | Unsupported_system_prompt
   | Provider_request_rejected of Http_client.http_error
-  | Request_body_too_large of
-      { actual_bytes : int
-      ; limit_bytes : int
-      }
   | Request_serialization_rejected of Http_client.http_error
 
 type finalization_error =

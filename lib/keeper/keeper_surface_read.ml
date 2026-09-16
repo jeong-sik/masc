@@ -167,22 +167,80 @@ let with_notes (notes : (string * string) list) (roster : participant list) :
   in
   annotated @ note_only
 
-let respond ~surface ~limit ~has_more ~notes
-    (messages : Store.chat_message list) : string =
+(* --- Unbound / unknown labels are not an empty lane (task-1596). ---
+   [respond] used to answer any non-blank label with a successful
+   zero-row page, so "slack" with no bound channel and "salc" (typo)
+   were byte-identical to a quiet connected lane — a silent data hole.
+   Post's doctrine already covers the write side ("posting to an
+   unbound surface is an error, not a no-op"); the read side now gets
+   the same binding knowledge, optionally: the knowledge belongs to the
+   runtime, so pure callers (tests, REST reuse) keep the unverified
+   behaviour. [connector_bindings] carries the keeper's bound channel
+   lists for the two connector lanes whose bindings the runtime can
+   prove; gate channels (calendar etc.) have no registry to consult,
+   so a gate label is only accepted when it actually appears on this
+   page — and a gate label with zero rows anywhere honest about it. *)
+
+type connector_bindings = { slack : string list; discord : string list }
+
+type binding_verdict =
+  | Unbound_connector
+  | Unknown_label of string list  (* distinct labels present on this page *)
+
+let error_json message =
+  Yojson.Safe.to_string (`Assoc [ ("error", `String message) ])
+
+(* Exactly the labels this page carries, in the exact-trimmed form the
+   lane filter compares — the hint must name labels that would really
+   have matched. *)
+let page_labels (messages : Store.chat_message list) : string list =
+  messages
+  |> List.filter_map (fun (m : Store.chat_message) ->
+         match m.surface with
+         | Some s -> Some (Surface_ref.lane_label s |> String.trim)
+         | None -> None)
+  |> List.sort_uniq String.compare
+
+let unbound_connector_hint (b : connector_bindings) =
+  let fmt = function [] -> "none" | chans -> String.concat ", " chans in
+  Printf.sprintf
+    "this keeper has no bound channels there (slack: [%s]; discord: [%s]); \
+     a channel becomes connected after its first inbound event — read a \
+     connected lane instead"
+    (fmt b.slack) (fmt b.discord)
+
+let unknown_label_hint = function
+  | [] ->
+      "no lane rows on this page carry any surface label; pass surface \
+       exactly as a lane label shown in Connected Surfaces or chat history"
+  | labels ->
+      Printf.sprintf
+        "no lane rows carry this label; labels present on this page: %s — \
+         pass surface exactly as shown in Connected Surfaces or chat history"
+        (String.concat ", " labels)
+
+(* Core lanes exist for every keeper, so they never read as "unknown";
+   slack/discord are unbound only when the runtime's binding lists say
+   so. Any other label is a gate channel label, and without a registry
+   the page itself is the only evidence: present -> a legitimate lane,
+   absent -> unknown. Same trimmed-exact comparison as the filter. *)
+let classify_surface ~bindings ~(page_labels : string list) surface =
   let surface = String.trim surface in
-  if surface = "" then
-    Yojson.Safe.to_string
-      (`Assoc
-        [
-          ( "error",
-            `String
-              "surface is required. Use a lane label shown in Connected \
-               Surfaces or chat history; this tool reads that connected lane, \
-               not a connector-wide channel registry."
-          );
-        ])
-  else
-    let limit = min max_limit (max 1 limit) in
+  match surface with
+  | "dashboard" | "agent" | "broadcast" | "webhook" -> None
+  | "slack" ->
+      if bindings.slack = [] then Some Unbound_connector else None
+  | "discord" ->
+      if bindings.discord = [] then Some Unbound_connector else None
+  | _ ->
+      if List.mem surface page_labels then None
+      else Some (Unknown_label page_labels)
+
+let respond_unverified ~surface ~limit ~has_more ~notes
+    (messages : Store.chat_message list) : string =
+  (* Non-blank [surface] assumed — the blank rejection lives in
+     [respond], which routes here when nothing can be proven wrong. *)
+  let limit = min max_limit (max 1 limit) in
     let lane =
       List.filter
         (fun (m : Store.chat_message) ->
@@ -208,3 +266,41 @@ let respond ~surface ~limit ~has_more ~notes
            ("has_more", `Bool has_more);
          ]
         @ opt_float_field "oldest_ts" (page_oldest_ts messages)))
+
+(* The tool entry: blank surface stays an error, then — only when the
+   runtime supplied binding knowledge — a label that can be proven
+   wrong is refused with the post-shaped error JSON instead of a
+   silent zero-row page. Without [bindings] the projection is exactly
+   the pure one the tests and REST reuse already pin down. *)
+let respond ?bindings ~surface ~limit ~has_more ~notes
+    (messages : Store.chat_message list) : string =
+  let surface = String.trim surface in
+  if surface = "" then
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ( "error",
+            `String
+              "surface is required. Use a lane label shown in Connected \
+               Surfaces or chat history; this tool reads that connected lane, \
+               not a connector-wide channel registry."
+          );
+        ])
+  else
+    match bindings with
+    | None -> respond_unverified ~surface ~limit ~has_more ~notes messages
+    | Some bindings ->
+        (match
+           classify_surface ~bindings ~page_labels:(page_labels messages)
+             surface
+         with
+         | None ->
+             respond_unverified ~surface ~limit ~has_more ~notes messages
+         | Some Unbound_connector ->
+             error_json
+               (Printf.sprintf "surface %s is not connected: %s" surface
+                  (unbound_connector_hint bindings))
+         | Some (Unknown_label labels) ->
+             error_json
+               (Printf.sprintf "surface %s matches no lane on this page: %s"
+                  surface (unknown_label_hint labels)))

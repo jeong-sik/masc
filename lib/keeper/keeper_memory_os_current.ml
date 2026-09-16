@@ -1297,7 +1297,6 @@ let apply_disposition
       ~keeper_id
       ~now
       ~source
-      ~retained_memory_ids
       ~new_claims
       ()
   =
@@ -1308,7 +1307,6 @@ let apply_disposition
       Set_util.StringSet.empty
       (Option.value dropped_statements ~default:[])
   in
-  let (_ : string list) = retained_memory_ids in
   update_locked
     ?clock
     ?dropped_statements

@@ -268,7 +268,7 @@ supports_native_streaming = false
    | Ok c -> Llm_provider.Model_catalog.set_global c
    | Error e -> fail e);
   let config_path = Filename.concat base_path "runtime.toml" in
-  let config_text cap =
+  let config_text =
     Printf.sprintf
       {|[runtime]
 default = "fixture.sample"
@@ -285,21 +285,15 @@ streaming = false
 [runtime.lanes.recovery_tools]
 candidates = ["fixture.no_tools", "fixture.sample"]
 [fixture.sample]
-%s|}
+|}
       server.base_url
-      (Option.fold ~none:"" ~some:(Printf.sprintf "max-request-body-bytes = %d") cap)
   in
-  write config_path (config_text None);
+  write config_path config_text;
   (match Runtime.init_default_degraded_report ~config_path with
    | Ok Runtime.Initialized -> ()
    | Ok (Runtime.Initialized_degraded _) -> fail "fixture catalog unavailable"
    | Error e -> fail (Runtime.strict_init_error_to_string e));
-  let configure cap =
-    match Runtime.save_config_text ~runtime_config_path:config_path (config_text cap) with
-    | Ok _ -> ()
-    | Error e -> fail e
-  in
-  f env sw base_path session_dir cp source canonical artifact view server configure
+  f env sw base_path session_dir cp source canonical artifact view server
 ;;
 
 let run
@@ -348,14 +342,12 @@ let prefix_exact prefix list =
 let test_actual_transmission_cap_metrics_checkpoint_and_reader () =
   with_fixture
     (fun
-        env sw base_path session_dir cp source canonical artifact view server configure ->
+        env sw base_path session_dir cp source canonical artifact view server ->
        let snapshots = ref []
        and wire = ref []
        and metrics = ref [] in
-       let observe ~runtime_id ~max_request_body_bytes ~body_bytes ~serialized =
-         wire
-         := (runtime_id, max_request_body_bytes, body_bytes, Option.is_some serialized)
-            :: !wire
+       let observe ~runtime_id ~body_bytes ~serialized =
+         wire := (runtime_id, body_bytes, Option.is_some serialized) :: !wire
        in
        let project messages =
          metrics
@@ -499,60 +491,13 @@ let test_actual_transmission_cap_metrics_checkpoint_and_reader () =
             ~sha256:artifact.sha256
           |> Result.get_ok
           |> Option.get);
-       let cap = List.fold_left (fun n s -> max n (String.length s)) 0 bodies in
-       check
-         bool
-         "explicit cap is smaller than canonical history, yet admits its view"
-         true
-         (cap < String.length canonical);
-       configure (Some cap);
-       (match run env sw base_path view cp ~on_request_wire_observation:observe () with
-        | Ok _ -> ()
-        | Error e -> fail (Agent_core.Error.to_string e));
-       check
-         int
-         "explicit-cap view is not cut again before its reader call"
-         4
-         (Exact_output_fixture.post_count server);
-       let first_bytes = String.length (List.hd bodies) in
-       configure (Some (first_bytes - 1));
-       (match run env sw base_path view cp ~on_request_wire_observation:observe () with
-        | Error
-            (Agent_core.Error.Api
-               (Agent_core.Retry.InvalidRequest
-                  { reason =
-                      Agent_core.Retry.Request_body_too_large
-                        { actual_bytes; limit_bytes }
-                  ; _
-                  })) ->
-          check
-            int
-            "final serializer measures the projected envelope exactly"
-            first_bytes
-            actual_bytes;
-          check int "operator cap remains exact" (first_bytes - 1) limit_bytes
-        | Error e -> fail (Agent_core.Error.to_string e)
-        | Ok _ -> fail "oversized final wire admitted");
-       check
-         int
-         "explicit exceeded cap performs no provider I/O"
-         4
-         (Exact_output_fixture.post_count server);
-       check
-         bool
-         "refused exact wire observation remains explicit"
-         true
-         (List.nth_opt !wire 0
-          = Some ("fixture.sample", Some (first_bytes - 1), first_bytes, false));
        evidence
        := Some
             (`Assoc
                 [ "scope", `String "actual scripted HTTP; no external model"
                 ; "source_sha256", `String (View.source_reference view).sha256
                 ; "original_bytes", `Int (String.length canonical)
-                ; "accepted_cap_bytes", `Int cap
-                ; "first_wire_bytes", `Int first_bytes
-                ; "provider_requests", `Int 4
+                ; "provider_requests", `Int 2
                 ; "source_read_sha256", J.member "sha256" page
                 ; "canonical_prefix_preserved", `Bool true
                 ; "native_clients", `String "integration unimplemented"
@@ -562,7 +507,7 @@ let test_actual_transmission_cap_metrics_checkpoint_and_reader () =
 ;;
 
 let test_missing_reader_and_changed_prefix_perform_no_io () =
-  with_fixture (fun env sw base_path _ cp _ _ _ view server _ ->
+  with_fixture (fun env sw base_path _ cp _ _ _ view server ->
     let reject expected = function
       | Error e ->
         check
@@ -599,7 +544,7 @@ let test_missing_reader_and_changed_prefix_perform_no_io () =
 ;;
 
 let test_real_result_completes_open_source_tail () =
-  with_fixture (fun _ _ base_path _ _ _ _ _ _ _ _ ->
+  with_fixture (fun _ _ base_path _ _ _ _ _ _ _ ->
     let open Agent_core.Types in
     let messages =
       [ msg User [ Text "Exact instruction" ]
@@ -650,7 +595,7 @@ let test_real_result_completes_open_source_tail () =
 ;;
 
 let test_recovery_requires_actual_binding_tool_support () =
-  with_fixture (fun env sw base_path _ cp _ _ _ view server _ ->
+  with_fixture (fun env sw base_path _ cp _ _ _ view server ->
     let attempts = ref [] in
     (match
        run
@@ -691,7 +636,7 @@ let test_recovery_requires_actual_binding_tool_support () =
 let test_summarized_image_reaches_text_runtime_without_source_rewrite () =
   with_fixture
     ~with_image:true
-    (fun env sw base_path _ cp source canonical artifact view server _ ->
+    (fun env sw base_path _ cp source canonical artifact view server ->
        let before = Checkpoint.exact_snapshot_messages source in
        (match run env sw base_path view cp () with
         | Ok _ -> ()

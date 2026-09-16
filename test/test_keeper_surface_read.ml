@@ -186,6 +186,79 @@ let test_oldest_ts_absent_when_page_empty () =
   in
   check bool "oldest_ts omitted" true (member "oldest_ts" json = `Null)
 
+(* Task-1596 — with binding knowledge, a label the runtime can prove
+   wrong is refused with the post-shaped error JSON instead of a silent
+   zero-row page. Without bindings the cases above keep the pure,
+   unverified projection. *)
+let bindings = { SR.slack = []; discord = [ "9876543210" ] }
+
+let contains s sub =
+  let n = String.length sub in
+  let rec go i =
+    i + n <= String.length s && (String.sub s i n = sub || go (i + 1))
+  in
+  go 0
+
+let test_unbound_connector_label_is_error () =
+  let json =
+    parse
+      (SR.respond ~bindings ~surface:"slack" ~limit:10 ~has_more:false ~notes:[]
+         discord_fixture)
+  in
+  check bool "unbound slack is an error" true (member "error" json <> `Null);
+  let error = to_string_j (member "error" json) in
+  check bool "error names the label" true (contains error "surface slack");
+  check bool "error names the binding state" true
+    (contains error "no bound channels there (slack: [none]")
+
+let test_unknown_label_is_error_with_page_labels () =
+  let json =
+    parse
+      (SR.respond ~bindings ~surface:"dicsord" ~limit:10 ~has_more:false
+         ~notes:[] discord_fixture)
+  in
+  check bool "typo label is an error" true (member "error" json <> `Null);
+  let error = to_string_j (member "error" json) in
+  check bool "hint names the page's real labels" true
+    (contains error "dashboard, discord")
+
+let test_gate_label_present_on_page_reads () =
+  let gate_fixture =
+    [ msg ~ts:6.0 ~lane:"calendar" ~role:Store.Role.User "standup moved" ]
+  in
+  let json =
+    parse
+      (SR.respond ~bindings ~surface:"calendar" ~limit:10 ~has_more:false
+         ~notes:[] gate_fixture)
+  in
+  check int "gate label present on the page is a legitimate lane" 1
+    (to_int (member "lane_row_count" json))
+
+let test_gate_label_absent_from_page_is_error () =
+  let json =
+    parse
+      (SR.respond ~bindings ~surface:"calendar" ~limit:10 ~has_more:false
+         ~notes:[] discord_fixture)
+  in
+  check bool "gate label with no rows anywhere is refused" true
+    (member "error" json <> `Null)
+
+let test_known_lanes_still_read_with_bindings () =
+  let json =
+    parse
+      (SR.respond ~bindings ~surface:"discord" ~limit:50 ~has_more:false
+         ~notes:[] discord_fixture)
+  in
+  check int "bound connector lane reads as before" 4
+    (to_int (member "lane_row_count" json));
+  let json =
+    parse
+      (SR.respond ~bindings ~surface:"dashboard" ~limit:50 ~has_more:false
+         ~notes:[] discord_fixture)
+  in
+  check int "core lane reads as before" 1
+    (to_int (member "lane_row_count" json))
+
 let () =
   run "keeper_surface_read"
     [
@@ -215,5 +288,18 @@ let () =
             test_roster_groups_by_id_latest_name_wins;
           test_case "keeper's own lines are not participants" `Quick
             test_keeper_own_lines_are_not_participants;
+        ] );
+      ( "refused labels (task-1596)",
+        [
+          test_case "unbound connector label is an error" `Quick
+            test_unbound_connector_label_is_error;
+          test_case "unknown label names the page's labels" `Quick
+            test_unknown_label_is_error_with_page_labels;
+          test_case "gate label present on the page reads" `Quick
+            test_gate_label_present_on_page_reads;
+          test_case "gate label absent from the page is refused" `Quick
+            test_gate_label_absent_from_page_is_error;
+          test_case "known lanes still read with bindings" `Quick
+            test_known_lanes_still_read_with_bindings;
         ] );
     ]

@@ -5096,7 +5096,6 @@ let render_lanes_overview (state : state) =
               let note =
                 if List.exists (String.equal runtime.ro_id) picker.rlp_already
                 then "  (already a slot)"
-                else if not runtime.ro_dispatchable then "  (blocked)"
                 else if List.exists (String.equal runtime.ro_provider) picker.rlp_providers
                 then "  (same provider as a current slot)"
                 else ""
@@ -10369,9 +10368,7 @@ let runtime_overall_badge status =
   style ^ runtime_probe_status_to_string status ^ Ansi.reset
 
 let runtime_route_badge (runtime : Masc.Tui_decode.runtime_option) =
-  if not runtime.ro_dispatchable then (Theme.bad ()) ^ "blocked" ^ Ansi.reset
-  else
-    (match runtime_quota_badge runtime with
+  (match runtime_quota_badge runtime with
      | Some badge -> badge
      | None -> (Theme.info ()) ^ "ready" ^ Ansi.reset)
 
@@ -10519,8 +10516,6 @@ let runtime_detail_lines state target ~width =
             (runtime_bool runtime.ro_is_local)
         @ runtime_detail_field ~width ~style:Ansi.reset "Used by lanes"
             (match lanes with [] -> "unassigned" | values -> String.concat ", " values)
-        @ runtime_detail_field ~width ~style:Ansi.reset "Dispatchable"
-            (runtime_bool runtime.ro_dispatchable)
         @ runtime_detail_field ~width ~style:Ansi.reset "Default runtime"
             (runtime_bool runtime.ro_is_default)
       in
@@ -10530,12 +10525,6 @@ let runtime_detail_lines state target ~width =
         | Some (at, total) ->
             runtime_detail_field ~width ~style:Ansi.reset "Lane position"
               (Printf.sprintf "%d of %d" at total)
-      in
-      let blocker =
-        match runtime.ro_blocked_reason with
-        | None -> []
-        | Some reason ->
-            runtime_detail_field ~width ~style:(Theme.bad ()) "Blocked because" reason
       in
       let sticky =
         match preferred_at with
@@ -10626,7 +10615,7 @@ let runtime_detail_lines state target ~width =
             runtime_detail_field ~width ~style:Ansi.reset "Bound keepers" names
             @ runtime_detail_field ~width ~style:Ansi.reset "Keeper telemetry" activity_str
       in
-      fields @ candidate @ blocker @ sticky @ quota @ keeper_lines @ probe_lines
+      fields @ candidate @ sticky @ quota @ keeper_lines @ probe_lines
 
 let render_runtime_detail (state : state) target =
   let terminal_rows, cols = get_terminal_size () in
@@ -10848,7 +10837,6 @@ let render_runtime (state : state) =
            let note =
              if List.exists (String.equal runtime.ro_id) picker.rlp_already
              then "  (already a candidate)"
-             else if not runtime.ro_dispatchable then "  (blocked)"
              else if List.exists (String.equal runtime.ro_provider) picker.rlp_providers
              then "  (same provider as a current candidate)"
              else ""
@@ -10927,11 +10915,6 @@ let render_runtime (state : state) =
                let detail =
                  String.concat " \xc2\xb7 "
                    (default_fact @ assignment_fact
-                    @ (match
-                         Terminal_text.optional_single_line runtime.ro_blocked_reason
-                       with
-                       | Some reason -> [ "blocked: " ^ reason ]
-                       | None -> [])
                     @ (match lanes with [] -> [] | l -> [ String.concat ", " l ])
                     @ runtime_probe_detail
                         (Option.bind state.runtime_surface (fun snapshot ->
@@ -10989,13 +10972,6 @@ let render_runtime (state : state) =
           let route_probe =
             runtime_route_probe_badge runtime candidate.rcr_probe
           in
-          let route_detail =
-            if runtime.ro_dispatchable then []
-            else
-              match Terminal_text.optional_single_line runtime.ro_blocked_reason with
-              | Some reason -> [ "blocked: " ^ reason ]
-              | None -> []
-          in
           let lane_keepers = keepers_for_lane state candidate.rcr_lane_id in
           let assignment_fact =
             if is_first then
@@ -11051,7 +11027,7 @@ let render_runtime (state : state) =
              half several rows repeat -- so it is the half that can be cut. *)
           let detail =
             String.concat " \xc2\xb7 "
-              (lane_fact @ assignment_fact @ default_fact @ route_detail
+              (lane_fact @ assignment_fact @ default_fact
                @ runtime_probe_detail candidate.rcr_probe)
           in
           let line =
@@ -11817,9 +11793,7 @@ let render_runtime_pick (state : state) =
                   let def = if option.ro_is_default then " [default]" else "" in
                   let quota =
                     if option.ro_quota_exhausted then " " ^ (Theme.warn ()) ^ "[quota exhausted]" ^ Ansi.reset
-                    else match option.ro_blocked_reason with
-                    | Some reason -> " " ^ (Theme.bad ()) ^ "[" ^ Terminal_text.single_line reason ^ "]" ^ Ansi.reset
-                    | None -> ""
+                    else ""
                   in
                   Printf.sprintf "%s%s  %s  %s%s%s"
                     kind_badge target model_desc ctx def quota

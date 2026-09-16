@@ -35,7 +35,6 @@ let agent_completed_response_fields (response : Agent_core.Types.api_response) =
 let invalid_request_reason_to_wire = function
   | Agent_core.Retry.Json_parse_error -> "json_parse_error"
   | Agent_core.Retry.Attempt_rejected -> "attempt_rejected"
-  | Agent_core.Retry.Request_body_too_large _ -> "request_body_too_large"
   | Agent_core.Retry.Request_body_refused_by_provider _ ->
     "request_body_refused_by_provider"
   | Agent_core.Retry.Refusal_body_not_received -> "refusal_body_not_received"
@@ -160,10 +159,6 @@ let core_api_error_fields = function
     ; "reason", `String (invalid_request_reason_to_wire reason)
     ]
     @ (match reason with
-       | Agent_core.Retry.Request_body_too_large { actual_bytes; limit_bytes } ->
-         [ "actual_bytes", `Int actual_bytes
-         ; "limit_bytes", `Int limit_bytes
-         ]
        | Agent_core.Retry.Request_body_refused_by_provider { status } ->
          [ "status", `Int status ]
        | Agent_core.Retry.Json_parse_error

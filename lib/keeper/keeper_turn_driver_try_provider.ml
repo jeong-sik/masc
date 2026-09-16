@@ -622,7 +622,17 @@ type composed =
   ; history_atom_count : int
   ; origin : Keeper_carried_front.origin
   ; over_request_cap : bool
+  ; outlived_seed : Keeper_carried_front.seed option
   }
+
+(* The ledger's session: the history the carried positions belong to. The
+   turn's trace id on the keeper's own turns; an attempt without one has no
+   durable history and shares nothing. *)
+let ledger_session (ctx : try_provider_ctx) =
+  match ctx.session_id with
+  | Some session -> session
+  | None -> "-"
+;;
 
 let compose_carried_model_input
       ~measure_message_bytes
@@ -634,6 +644,18 @@ let compose_carried_model_input
       messages
   =
   let _labelled, history_atom_count = Runtime_model_input_tail_window.annotate messages in
+  (* A front measured against a longer history names no atom of this one:
+     the history shrank under it (a checkpoint purge), so the request starts
+     over as with no front rather than carrying the newest atom alone from a
+     position that would never widen again. *)
+  let front, outlived_seed =
+    match front with
+    | Some seed ->
+      (match Keeper_carried_front.for_history ~atom_count:history_atom_count seed with
+       | Some seed -> Some seed, None
+       | None -> None, Some seed)
+    | None -> None, None
+  in
   let plan ~demote_before =
     if String.equal base_path "" || demote_before = 0
     then { Keeper_model_input_demotion.messages; pending = [] }
@@ -657,16 +679,14 @@ let compose_carried_model_input
       in
       projection, transmitted_bytes, Keeper_carried_front.Carried seed.source
     | None, Some cap ->
-      let target =
-        Runtime_model_input_tail_window.project_target
+      let projection, transmitted_bytes =
+        Runtime_model_input_tail_window.project_within_bytes
           ~measure_message_bytes
           ~target_bytes:cap
           ~reserved_bytes
           candidate
       in
-      ( target.Runtime_model_input_tail_window.projection
-      , target.Runtime_model_input_tail_window.transmitted_bytes
-      , Keeper_carried_front.Fit_to_request_cap )
+      projection, transmitted_bytes, Keeper_carried_front.Fit_to_request_cap
     | None, None ->
       let projection, transmitted_bytes =
         Runtime_model_input_tail_window.project_from_atom
@@ -691,6 +711,7 @@ let compose_carried_model_input
     ; history_atom_count
     ; origin
     ; over_request_cap = over_request_cap transmitted_bytes
+    ; outlived_seed
     }
   in
   let composed = compose (plan ~demote_before) in
@@ -792,6 +813,7 @@ let bounded_model_input_projection
      changes what is sent. *)
   let front_reported = ref false in
   let over_cap_reported = ref false in
+  let outlived_reported = ref false in
   (* The cold-start seed is read once per attempt and only when no ledger
      answers; a ledger appears with the first counted usage and is read live
      on every request after it. *)
@@ -843,6 +865,7 @@ let bounded_model_input_projection
         Keeper_model_input_ledger.Table.lookup
           ~keeper_name:ctx.keeper_name
           ~runtime_id:ctx.runtime_id
+          ~session_id:(ledger_session ctx)
       with
       | Some ledger -> Some (Keeper_carried_front.of_ledger ledger)
       | None -> Lazy.force cold_seed
@@ -903,6 +926,18 @@ let bounded_model_input_projection
         (match ctx.max_request_body_bytes with
          | Some cap -> string_of_int cap
          | None -> "none"));
+    (match composed.outlived_seed with
+     | Some seed when not !outlived_reported ->
+       outlived_reported := true;
+       Log.Keeper.warn
+         ~keeper_name:ctx.keeper_name
+         "model input carried range dropped its front runtime=%s seed=%s seed_atoms=%d \
+          history_atoms=%d: the history shrank under it and the request starts over"
+         ctx.runtime_id
+         (Yojson.Safe.to_string (Keeper_carried_front.seed_to_json seed))
+         seed.atom_count
+         history_atom_count
+     | Some _ | None -> ());
     if composed.over_request_cap && not !over_cap_reported
     then (
       over_cap_reported := true;
@@ -1075,6 +1110,7 @@ let run_try_provider_attempt
                      Keeper_model_input_ledger.Table.observe
                        ~keeper_name:ctx.keeper_name
                        ~runtime_id:ctx.runtime_id
+                       ~session_id:(ledger_session ctx)
                        ~request
                        ~usage
                    in
@@ -1123,6 +1159,7 @@ let run_try_provider_attempt
                          Keeper_model_input_ledger.Table.move_front
                            ~keeper_name:ctx.keeper_name
                            ~runtime_id:ctx.runtime_id
+                           ~session_id:(ledger_session ctx)
                            ~first_atom;
                          Log.Keeper.info
                            ~keeper_name:ctx.keeper_name
@@ -1718,7 +1755,7 @@ let carried_range_eviction_sequence
       ~(last_request : unit -> Keeper_model_input_ledger.request option)
       ~marks
       ~(evict : Keeper_carried_range.step -> unit)
-      ~(halve : first_atom:int -> retry:int -> unit)
+      ~(halve : first_atom:int -> atom_count:int -> retry:int -> unit)
       ~(on_retry : retry:int -> eviction_retry -> unit)
       ~(attempt : unit -> ('ok, Agent_core.Error.t) result)
       ()
@@ -1735,7 +1772,7 @@ let carried_range_eviction_sequence
        with
        | None -> failed
        | Some first_atom ->
-         halve ~first_atom ~retry;
+         halve ~first_atom ~atom_count:request.atom_count ~retry;
          on_retry ~retry (Halved_range { first_atom; atom_count = request.atom_count });
          continue_ ())
   in
@@ -1807,7 +1844,8 @@ let run_try_provider_with_carried_range_eviction
         ~ledger:(fun () ->
           Keeper_model_input_ledger.Table.lookup
             ~keeper_name:ctx.keeper_name
-            ~runtime_id:ctx.runtime_id)
+            ~runtime_id:ctx.runtime_id
+            ~session_id:(ledger_session ctx))
         ~last_request:(fun () -> !last_request)
         ~marks:ctx.context_marks
         ~evict:(function
@@ -1815,19 +1853,22 @@ let run_try_provider_with_carried_range_eviction
             Keeper_model_input_ledger.Table.move_front
               ~keeper_name:ctx.keeper_name
               ~runtime_id:ctx.runtime_id
+              ~session_id:(ledger_session ctx)
               ~first_atom
           | Keeper_carried_range.Unchanged _ -> ())
-        ~halve:(fun ~first_atom ~retry ->
+        ~halve:(fun ~first_atom ~atom_count ~retry ->
           (* With a ledger, the move cuts through its one block and the
              blocks restart from the new front; without one, the halved
              seed is what the next composition on this attempt reads. *)
           Keeper_model_input_ledger.Table.move_front
             ~keeper_name:ctx.keeper_name
             ~runtime_id:ctx.runtime_id
+            ~session_id:(ledger_session ctx)
             ~first_atom;
           halved_front
           := Some
                { Keeper_carried_front.first_atom
+               ; atom_count
                ; source = Keeper_carried_front.Halved_after_refusal { retry }
                })
         ~on_retry:(fun ~retry decision ->

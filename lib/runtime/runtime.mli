@@ -250,6 +250,11 @@ type load_failure =
       ; execution_model : string
       ; declared_model : string
       }
+  | Context_marks_exceed_max_context of
+      { runtime_id : string
+      ; high_water_tokens : int
+      ; max_context : int
+      }
       (** Why {!load_list} refused a configuration. Closed, so a consumer
           decides per case instead of matching rendered text — the contract
           {!drop_reason} keeps one level down. [Toml_unparsable] is the one case
@@ -728,6 +733,14 @@ val max_prompt_bytes_of_runtime_id : string -> int option
     [None] when the model declares none. *)
 
 val declared_input_byte_ceiling_of_runtime_id : string -> int option
+
+val context_marks_of_runtime_id : string -> Runtime_schema.context_marks option
+(** The binding's eviction marks, or [None] when the binding declares none
+    (the keeper then evicts carried history only on a provider refusal). *)
+
+val validate_runtime_context_marks : t list -> (unit, load_failure) result
+(** Refuses a runtime whose high-water mark exceeds its resolved max-context;
+    such a request is refused by the provider before the mark is reached. *)
 (** The smaller of the two byte ceilings a runtime declares over its model
     input: the model's [max-prompt-bytes] and the binding's
     [max-request-body-bytes]. Which one a given path enforces differs —

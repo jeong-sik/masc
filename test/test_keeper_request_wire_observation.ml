@@ -29,14 +29,12 @@ let metric_name = Keeper_metrics.to_string Observation.metric
 type metric_series =
   { keeper_name : string
   ; runtime_id : string
-  ; max_request_body_bytes : int
   }
 
 let observe series body_bytes =
   Observation.observer
     ~keeper_name:series.keeper_name
     ~runtime_id:series.runtime_id
-    ~max_request_body_bytes:(Some series.max_request_body_bytes)
     (observation ~body_bytes)
 ;;
 
@@ -45,7 +43,6 @@ let observe series body_bytes =
 let labels series =
   [ "keeper", series.keeper_name
   ; "runtime_id", series.runtime_id
-  ; "max_request_body_bytes", string_of_int series.max_request_body_bytes
   ]
 ;;
 
@@ -67,7 +64,6 @@ let test_records_admitted_bytes_for_the_keeper () =
   let series =
     { keeper_name = "wire-observation-alpha"
     ; runtime_id = "wire-runtime-alpha"
-    ; max_request_body_bytes = 2_097_152
     }
   in
   let before = recorded series in
@@ -102,7 +98,6 @@ let test_attributes_bytes_to_the_observing_keeper () =
   let alpha =
     { keeper_name = "wire-observation-attribution-alpha"
     ; runtime_id = "wire-runtime-attribution"
-    ; max_request_body_bytes = 524_288
     }
   in
   let beta =
@@ -121,7 +116,6 @@ let test_separates_runtimes_for_the_same_keeper () =
   let alpha =
     { keeper_name = "wire-observation-runtime-attribution"
     ; runtime_id = "wire-runtime-attribution-alpha"
-    ; max_request_body_bytes = 524_288
     }
   in
   let beta = { alpha with runtime_id = "wire-runtime-attribution-beta" } in
@@ -140,35 +134,10 @@ let test_separates_runtimes_for_the_same_keeper () =
     (recorded beta)
 ;;
 
-let test_separates_changed_caps_for_the_same_runtime () =
-  let old_cap =
-    { keeper_name = "wire-observation-cap-attribution"
-    ; runtime_id = "wire-runtime-cap-attribution"
-    ; max_request_body_bytes = 262_144
-    }
-  in
-  let new_cap = { old_cap with max_request_body_bytes = 524_288 } in
-  let old_before = recorded old_cap in
-  let new_before = recorded new_cap in
-  ignore (observe old_cap 131_072);
-  check
-    (float 0.5)
-    "a different cap series stays untouched"
-    new_before
-    (recorded new_cap);
-  ignore (observe new_cap 262_144);
-  check
-    (float 0.5)
-    "the previous cap series retains only its own sample"
-    (old_before +. 131_072.)
-    (recorded old_cap)
-;;
-
 let test_records_byte_scale_histogram_buckets () =
   let series =
     { keeper_name = "wire-observation-buckets"
     ; runtime_id = "wire-runtime-buckets"
-    ; max_request_body_bytes = 2_097_152
     }
   in
   let bucket le =
@@ -210,7 +179,6 @@ let test_admits_a_zero_byte_observation () =
   let series =
     { keeper_name = "wire-observation-zero"
     ; runtime_id = "wire-runtime-zero"
-    ; max_request_body_bytes = 262_144
     }
   in
   check
@@ -228,7 +196,6 @@ let test_forwards_exact_observation () =
         observed := Some (runtime_id, body_bytes))
       ~keeper_name:"wire-observation-callback"
       ~runtime_id:"wire-runtime-callback"
-      ~max_request_body_bytes:(Some 524_288)
       (observation ~body_bytes:333_777)
   in
   check
@@ -251,18 +218,6 @@ let test_metric_name_is_stable () =
     metric_name
 ;;
 
-let test_absent_cap_is_observed_without_fabricating_a_limit () =
-  let keeper_name = "wire-observation-no-cap" in
-  let runtime_id = "wire-runtime-no-cap" in
-  check (result unit reject) "uncapped observation is admitted" (Ok ())
-    (Observation.observer ~keeper_name ~runtime_id ~max_request_body_bytes:None
-       (observation ~body_bytes:700_000));
-  let labels = [ "keeper", keeper_name; "runtime_id", runtime_id
-               ; "max_request_body_bytes", "none" ] in
-  check (float 0.) "exact bytes retain absent-cap provenance" 700_000.
-    (Otel_metric_store_core.metric_value_or_zero metric_name ~labels ())
-;;
-
 let () =
   run
     "keeper request wire observation"
@@ -280,10 +235,6 @@ let () =
             `Quick
             test_separates_runtimes_for_the_same_keeper
         ; test_case
-            "separates changed caps for the same runtime"
-            `Quick
-            test_separates_changed_caps_for_the_same_runtime
-        ; test_case
             "records byte-scale histogram buckets"
             `Quick
             test_records_byte_scale_histogram_buckets
@@ -296,7 +247,6 @@ let () =
             `Quick
             test_forwards_exact_observation
         ; test_case "metric name is stable" `Quick test_metric_name_is_stable
-        ; test_case "absent cap retains exact observation" `Quick test_absent_cap_is_observed_without_fabricating_a_limit
         ] )
     ]
 ;;

@@ -50,14 +50,9 @@ type try_provider_ctx =
   { (* Runtime identity *)
     runtime_id : string
   ; error_runtime_id : string
-  ; max_request_body_bytes : int option
   ; (* The marks the carried range is judged against after each response
        (RFC keeper-context-window-in-tokens §10.5), declared on the binding.
-       [None] leaves eviction to a refusal alone. [max_request_body_bytes]
-       is independent of them: it judges the serialized request and reports
-       the real declared cap to wire-error diagnostics
-       ([observe_request_wire_error], [pre_dispatch_serialization_observer]);
-       a refusal on it evicts the same way a provider's does. *)
+       [None] leaves eviction to a refusal alone. *)
     context_marks : Runtime_schema.context_marks option
   ; (* Where the carried range starts when the process holds no ledger for
        this (keeper, runtime) pair: the range the newest completed turn record
@@ -159,7 +154,6 @@ type try_provider_ctx =
       (Runtime_observation.runtime_observation -> unit) option
   ; on_request_wire_observation :
       (runtime_id:string ->
-       max_request_body_bytes:int option ->
        body_bytes:int ->
        serialized:Llm_provider.Request_wire_observer.observation option ->
        unit)
@@ -454,66 +448,6 @@ let rec await_person_queued_preemption ~clock ~first_event_seen ~person_queued =
          ~person_queued:queued
     then ()
     else await_person_queued_preemption ~clock ~first_event_seen ~person_queued
-;;
-
-let rejected_body_bytes = function
-  | Agent_core.Error.Api
-      (InvalidRequest
-         { reason = Request_body_too_large { actual_bytes; _ }; _ }) ->
-    Some actual_bytes
-  | Agent_core.Error.Api
-      ( InvalidRequest
-          { reason =
-              ( Json_parse_error
-              | Attempt_rejected
-              | Request_body_refused_by_provider _
-              | Refusal_body_not_received
-              | Unknown_invalid_request )
-          ; _
-          }
-      | ContextOverflow _
-      | InputCapacity _
-      | RateLimited _
-      | Overloaded _
-      | ServerError _
-      | AuthError _
-      | AuthorizationError _
-      | PaymentRequired _
-      | NotFound _
-      | NetworkError _
-      | Timeout _ )
-  | Agent_core.Error.Provider _
-  | Agent_core.Error.Agent _
-  | Agent_core.Error.Config _
-  | Agent_core.Error.Mcp _
-  | Agent_core.Error.Serialization _
-  | Agent_core.Error.Io _
-  | Agent_core.Error.Orchestration _
-  | Agent_core.Error.Internal _
-  | Agent_core.Error.Internal_carried _ ->
-    None
-;;
-
-let observe_request_wire_error
-      ~runtime_id
-      ~max_request_body_bytes
-      ~on_request_wire_observation
-      (error : Agent_core.Error.t)
-  =
-  match rejected_body_bytes error, on_request_wire_observation with
-  | Some actual_bytes, Some observe ->
-    (* AGENT_CORE measures this body before rejecting it at serialized-body admission,
-       so its normal post-admission observer is intentionally not invoked. The
-       typed refusal carries the same exact byte count; forwarding it here
-       keeps the failed turn observable without parsing an error string or
-       guessing which runtime attempted the request. *)
-    observe
-      ~runtime_id
-      ~max_request_body_bytes
-      ~body_bytes:actual_bytes
-      ~serialized:None
-  | None, _ | Some _, None ->
-    ()
 ;;
 
 (* The canonical MASC message encoder, also used for checkpoint serialization.
@@ -1207,18 +1141,15 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
           ; preserve_thinking = ctx.preserve_thinking
           ; event_bus = ctx.event_bus
           ; initial_messages = ctx.initial_messages
-            (* The serialized request body is measured against an optional
-               caller [max_request_body_bytes] cap. AGENT_CORE's provider-specific
-               serialization boundary reports every admitted request; a typed
-               [Request_body_too_large] below carries the exact rejected size.
-               the canonical checkpoint's bytes cannot stand in
-               for it — they cover [{system_prompt, messages}] and exclude
-               tool schemas and every provider-specific stream field. AGENT_CORE runs
-               this observer after those are injected and after its own
-               admission check, so the value is the exact byte count.
-               Diagnostic only: AGENT_CORE reports a rejection or a raised callback as
-               typed failure evidence and does not rewrite the provider
-               result. *)
+            (* AGENT_CORE's provider-specific serialization boundary reports
+               every request's exact body size; the canonical checkpoint's
+               bytes cannot stand in for it — they cover
+               [{system_prompt, messages}] and exclude tool schemas and every
+               provider-specific stream field. AGENT_CORE runs this observer
+               after those are injected, so the value is the exact byte count
+               that reaches the provider. Diagnostic only: AGENT_CORE reports a
+               raised callback as typed failure evidence and does not rewrite
+               the provider result. *)
             (* Serialising the admitted body walks every message in the request,
                on every provider request of the turn; on a live keeper that held
                the main domain for 168-229 ms at a time (RFC
@@ -1233,7 +1164,6 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                      (fun observe ->
                         observe
                           ~runtime_id:ctx.runtime_id
-                          ~max_request_body_bytes:ctx.max_request_body_bytes
                           ~body_bytes:
                             observation
                               .Llm_provider.Request_wire_observer.body_bytes
@@ -1517,14 +1447,6 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
            rejected)
       | Error _ as err -> err
     in
-    (match result with
-     | Error error ->
-       observe_request_wire_error
-         ~runtime_id:ctx.runtime_id
-         ~max_request_body_bytes:ctx.max_request_body_bytes
-         ~on_request_wire_observation:ctx.on_request_wire_observation
-         error
-     | Ok _ -> ());
     (match ctx.on_runtime_observation, result with
      | Some emit, Ok run_result ->
        Option.iter emit run_result.Runtime_agent.runtime_observation
@@ -1668,8 +1590,7 @@ let context_overflow_shrink_sequence
 let refusal_evicts = function
   | Agent_core.Error.Api (ContextOverflow _)
   | Agent_core.Error.Api
-      (InvalidRequest
-         { reason = Request_body_too_large _ | Request_body_refused_by_provider _; _ }) ->
+      (InvalidRequest { reason = Request_body_refused_by_provider _; _ }) ->
     true
   | Agent_core.Error.Api
       ( InvalidRequest
@@ -2109,7 +2030,6 @@ module For_testing = struct
   let truncation_recovery = truncation_recovery
   let persist_dropped_response = persist_dropped_response
   let candidate_without_reasoning_effort = candidate_without_reasoning_effort
-  let observe_request_wire_error = observe_request_wire_error
   let message_measurer = message_measurer
   let memoize_message_measurement = memoize_message_measurement
   let message_measurement_hash = Agent_core.Types.Message_value.hash

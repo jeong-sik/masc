@@ -14,11 +14,11 @@ let overflow =
   Agent_core.Error.Api (Agent_core.Retry.ContextOverflow { message = "too long"; limit = None })
 ;;
 
-let body_too_large =
+let body_refused_by_provider =
   Agent_core.Error.Api
     (Agent_core.Retry.InvalidRequest
        { message = "too large"
-       ; reason = Agent_core.Retry.Request_body_too_large { actual_bytes = 10; limit_bytes = 5 }
+       ; reason = Agent_core.Retry.Request_body_refused_by_provider { status = 413 }
        })
 ;;
 
@@ -130,7 +130,7 @@ let test_with_marks_the_refusal_walks_down_to_the_low_water_mark () =
 ;;
 
 let test_a_body_refusal_evicts_like_an_overflow () =
-  let _, trace = run ~ledger_of:(fun _ -> Some four_blocks) [ Error body_too_large; Ok "fits" ] in
+  let _, trace = run ~ledger_of:(fun _ -> Some four_blocks) [ Error body_refused_by_provider; Ok "fits" ] in
   check (list int) "the wire's refusal moved the front" [ 10 ] trace.evictions
 ;;
 

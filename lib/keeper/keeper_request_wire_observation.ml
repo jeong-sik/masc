@@ -1,10 +1,9 @@
 let metric = Keeper_metrics.RuntimeRequestWireBytes
 
 (* Powers-of-two byte-scale measurement buckets. These are histogram schema,
-   not admission thresholds: AGENT_CORE and each runtime's provider configuration
-   remain the only request-size authorities. The finite bounds cover the
-   current 64 KiB, 256 KiB and 1 MiB declared-cap fixtures exactly and retain
-   useful resolution through 8 MiB; the metric store adds +Inf. *)
+   not admission thresholds: the provider is the only request-size authority.
+   The finite bounds retain useful resolution from 64 KiB through 8 MiB; the
+   metric store adds +Inf. *)
 let bucket_upper_bounds_bytes =
   [ 65_536.
   ; 131_072.
@@ -23,23 +22,19 @@ let () =
     bucket_upper_bounds_bytes
 ;;
 
-let record ~keeper_name ~runtime_id ~max_request_body_bytes ~body_bytes =
+let record ~keeper_name ~runtime_id ~body_bytes =
   Otel_metric_store.observe_histogram
     (Keeper_metrics.to_string metric)
-    ~labels:
-      [ "keeper", keeper_name
-      ; "runtime_id", runtime_id
-      ; "max_request_body_bytes", Option.fold ~none:"none" ~some:string_of_int max_request_body_bytes
-      ]
+    ~labels:[ "keeper", keeper_name; "runtime_id", runtime_id ]
     (Float.of_int body_bytes)
 ;;
 
-let observer ?on_observation ~keeper_name ~runtime_id ~max_request_body_bytes
+let observer ?on_observation ~keeper_name ~runtime_id
   : Agent_core.Agent.pre_dispatch_serialization_observer
   =
   fun observation ->
   let body_bytes = observation.Llm_provider.Request_wire_observer.body_bytes in
   Option.iter (fun observe -> observe ~runtime_id ~body_bytes) on_observation;
-  record ~keeper_name ~runtime_id ~max_request_body_bytes ~body_bytes;
+  record ~keeper_name ~runtime_id ~body_bytes;
   Ok ()
 ;;

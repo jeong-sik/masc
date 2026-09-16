@@ -777,20 +777,6 @@ let test_unset_thinking_does_not_disable_reasoning_model () =
     ["", None; "false", Some false; "true", Some true]
 ;;
 
-let test_repo_runtime_toml_all_seeded_bindings_are_keeper_dispatchable () =
-  let path = Filename.concat (repo_root ()) "config/runtime.toml" in
-  match load_list_text ~config_path:path with
-  | Error msg -> failf "repo runtime.toml should load: %s" msg
-  | Ok (runtimes, _, _, _, _) ->
-    check bool "repo runtime seed is nonempty" true (runtimes <> []);
-    check (list string)
-      "all seeded runtimes in repo config/runtime.toml are keeper-dispatchable"
-      []
-      (List.map
-         (fun ((runtime : Runtime.t), reason) ->
-            Printf.sprintf "%s: %s" runtime.id reason)
-         (Runtime.keeper_dispatch_blocked runtimes))
-
 (* `runtime-default-set --setup-lanes` writes the runtime the install wizard
    picked into the exact-output lanes' `slots`, and those admit against the
    AGENT_CORE catalog, not against runtime.toml. A wizard choice with no target
@@ -1519,26 +1505,6 @@ let test_repo_runtime_toml_loads () =
     check bool "at least one runtime" true (List.length runtimes > 0);
     check string "default runtime" "ollama_cloud.ollama-cloud-glm-5-3-flash"
       default.Runtime.id;
-    check (option int) "default Keeper has no invented history byte limit"
-      None (agent_core_provider_config default).max_request_body_bytes;
-    check bool "uncapped fleet default remains dispatchable" true
-      (match Runtime.keeper_dispatch_readiness default with
-       | Runtime.Dispatchable -> true
-       | Runtime.Invalid_request_body_cap _ -> false);
-    let explicit_caps =
-      List.filter_map
-        (fun (runtime : Runtime.t) ->
-           match runtime.execution with
-           | Runtime_execution.Agent_core config ->
-             Option.map (fun cap -> runtime.id, cap) config.max_request_body_bytes
-           | Runtime_execution.Codex_app_server _
-           | Runtime_execution.Claude_code _
-           | Runtime_execution.Antigravity_cli _ -> None)
-        runtimes
-    in
-    check (list (pair string int)) "only the explicit image payload cap is seeded"
-      [ "ollama_cloud.ollama-cloud-gemma4-31b", 20 * 1024 * 1024 ]
-      explicit_caps;
     (match Runtime_toml.parse_file path with
      | Error _ -> fail "repo runtime.toml exact-output lanes must parse"
      | Ok config ->
@@ -1595,33 +1561,6 @@ List.iter
       (agent_core_provider_config default).connect_timeout_s;
     check int "public seed has no keeper assignments" 0
       (List.length assignments);
-    let keeper_dispatch_ids =
-      Runtime.For_testing.keeper_dispatch_runtime_ids
-        ~default_runtime_id:default.id
-        ~assignments
-        ~verifier_exact_slot_ids:
-          (* pinned to the seed by the verifier_exact lane check above *)
-          [ "glm-coding.glm-5-turbo"; "kimi_coding.kimi-for-coding" ]
-        ~media_failover
-        ~lanes
-    in
-    List.iter
-      (fun runtime_id ->
-         match
-           List.find_opt
-             (fun (runtime : Runtime.t) -> String.equal runtime.id runtime_id)
-             runtimes
-         with
-         | None -> failf "expected bounded Keeper runtime in seed: %s" runtime_id
-         | Some runtime ->
-           (match (agent_core_provider_config runtime).max_request_body_bytes with
-            | None -> ()
-            | Some cap when cap > 0 -> ()
-            | Some _ ->
-              failf
-                "%s has a non-positive explicit request body cap"
-                runtime_id))
-      keeper_dispatch_ids;
     check int "Ollama Cloud canonical seed count"
       (List.length ollama_cloud_seed_cases)
       (List.length
@@ -1877,13 +1816,6 @@ let test_release_evidence_fixture_lanes_resolve_without_credentials () =
           "release-evidence smoke default runtime %s must resolve to a binding"
           default_runtime_id
     in
-    check
-      bool
-      "release-evidence smoke default runtime has a positive request-body cap"
-      true
-      (match default_binding.max_request_body_bytes with
-       | Some cap -> cap > 0
-       | None -> false);
     List.iter
       (fun lane_id ->
          match
@@ -2285,38 +2217,6 @@ let test_runtime_toml_parses_optional_max_concurrent () =
          binding.Runtime_schema.max_concurrent
      | bindings -> failf "expected one binding, got %d" (List.length bindings))
 
-let test_runtime_toml_parses_optional_max_request_body_bytes () =
-  let content =
-    "[providers.local]\n\
-     protocol = \"openai-compatible-http\"\n\
-     endpoint = \"http://127.0.0.1:1/v1\"\n\
-     \n\
-     [models.sample]\n\
-     api-name = \"sample\"\n\
-     max-context = 1024\n\
-     \n\
-     [local.sample]\n\
-     max-request-body-bytes = 1048576\n\
-     \n\
-     [runtime]\n\
-     default = \"local.sample\"\n"
-  in
-  match Runtime_toml.parse_string content with
-  | Error errs ->
-    let rendered =
-      errs
-      |> List.map (fun (err : Runtime_toml.parse_error) ->
-        Printf.sprintf "%s: %s" err.path err.message)
-      |> String.concat "\n"
-    in
-    failf "runtime TOML should parse optional max-request-body-bytes:\n%s" rendered
-  | Ok cfg ->
-    (match cfg.Runtime_schema.bindings with
-     | [ binding ] ->
-       check (option int) "explicit max-request-body-bytes opt-in" (Some 1048576)
-         binding.Runtime_schema.max_request_body_bytes
-     | bindings -> failf "expected one binding, got %d" (List.length bindings))
-
 (* RFC-0382 §7: return-progress is a binding-level opt-in (like keep-alive /
    num-ctx) that asks an OpenAI-compat server to stream prompt_progress chunks
    during prefill. Omitted must stay None — only an explicit declaration may
@@ -2624,61 +2524,6 @@ let test_runtime_toml_rejects_non_positive_max_tokens () =
            String.equal err.path "cloud.sample.max-tokens")
          errs)
 
-let test_runtime_toml_omitted_max_request_body_bytes_is_none () =
-  (* Undeclared must stay None rather than acquiring a default. AGENT_CORE reads None as
-     "no ceiling declared" and passes every size; a default here would silently
-     become a product-wide cap nobody chose. *)
-  let content =
-    "[providers.local]\n\
-     protocol = \"openai-compatible-http\"\n\
-     endpoint = \"http://127.0.0.1:1/v1\"\n\
-     \n\
-     [models.sample]\n\
-     api-name = \"sample\"\n\
-     max-context = 1024\n\
-     \n\
-     [local.sample]\n\
-     \n\
-     [runtime]\n\
-     default = \"local.sample\"\n"
-  in
-  match Runtime_toml.parse_string content with
-  | Error _ -> failf "runtime TOML without the knob should still parse"
-  | Ok cfg ->
-    (match cfg.Runtime_schema.bindings with
-     | [ binding ] ->
-       check (option int) "omitted max-request-body-bytes stays None" None
-         binding.Runtime_schema.max_request_body_bytes
-     | bindings -> failf "expected one binding, got %d" (List.length bindings))
-
-let test_keeper_dispatch_runtime_graph_enumeration () =
-  let lanes =
-    [ Runtime_lane.make ~id:"default-a" [ "lane-a"; "lane-b" ]
-    ; Runtime_lane.make ~id:"dormant-lane" [ "lane-c"; "lane-b" ]
-    ; Runtime_lane.make ~id:"cross-e" [ "cross-a"; "lane-b" ]
-    ]
-  in
-  let actual =
-    Runtime.For_testing.keeper_dispatch_runtime_ids
-      ~default_runtime_id:"default-a"
-      ~assignments:[ "keeper-a", "assigned-b" ]
-      ~verifier_exact_slot_ids:[ "verifier-a"; "lane-b" ]
-      ~media_failover:[ "media-c"; "lane-a" ]
-      ~lanes
-  in
-  check
-    (list string)
-    "routed lane candidates, special routes, verifier_exact slots, and media \
-     failover are deduplicated without admitting a dormant lane"
-    (* [cross-e] is declared but nothing routes to it: no assignment, no
-       verifier_exact slot, no media failover entry names it. #29197 removed
-       the cross_verifier route that used to pull it in, so its member
-       [cross-a] is no longer enumerated — same reason [dormant-lane] never
-       was. *)
-    [ "lane-a"; "lane-b"; "assigned-b"; "media-c"; "verifier-a" ]
-    actual
-;;
-
 (* [edit_config_text] exists so a caller does not have to load runtime.toml
    itself: loading outside the lock and then committing loses any write that
    landed in between, and the server and the TUI edit different tables of this
@@ -2749,60 +2594,11 @@ let with_config_save_model_catalog f =
     "[[models]]\nid_prefix = %S\nprovider_name = \"local\"\nbase = \"openai_chat\"\nmax_context_tokens = 1024\n" id in
   with_model_catalog_content (String.concat "\n" (List.map row ["sample"; "lane"; "dormant"])) f
 
-let test_runtime_config_validation_accepts_uncapped_keeper_candidate () =
-  with_config_save_model_catalog @@ fun () ->
-  let content =
-    "[providers.local]\n\
-     protocol = \"openai-compatible-http\"\n\
-     endpoint = \"http://127.0.0.1:1/v1\"\n\
-     \n\
-     [models.sample]\n\
-     api-name = \"sample\"\n\
-     max-context = 1024\n\
-     \n\
-     [models.lane]\n\
-     api-name = \"lane\"\n\
-     max-context = 1024\n\
-     \n\
-     [local.sample]\n\
-     max-request-body-bytes = 65536\n\
-     \n\
-     [local.lane]\n\
-     \n\
-     [runtime]\n\
-     default = \"local.sample\"\n\
-     \n\
-     [runtime.lanes.\"local.sample\"]\n\
-     candidates = [\"local.lane\"]\n"
-  in
-  let snapshot = Runtime.For_testing.snapshot () in
-  let path = Filename.temp_file "uncapped_runtime_" ".toml" in
-  let oc = open_out path in
-  output_string oc content;
-  close_out oc;
-  Fun.protect
-    ~finally:(fun () ->
-      Runtime.For_testing.restore snapshot;
-      try Sys.remove path with
-      | Sys_error _ -> ())
-    (fun () ->
-       match Runtime.save_config_text ~runtime_config_path:path content with
-       | Ok _receipt ->
-         (match Runtime.get_runtime_by_id "local.lane" with
-          | None -> fail "uncapped Keeper candidate was not published"
-          | Some runtime ->
-            check (option int) "omitted cap remains absent after config save" None
-              (agent_core_provider_config runtime).max_request_body_bytes;
-            check bool "uncapped candidate is dispatchable" true
-              (Runtime.keeper_dispatch_readiness runtime = Runtime.Dispatchable))
-       | Error detail -> failf "uncapped Keeper lane candidate should load: %s" detail)
-;;
-
-(* Caller byte caps are optional for both HTTP and official-client runtimes.
-   Explicit positive declarations remain supported. *)
+(* max-prompt-bytes is optional for an official-client runtime. An explicit
+   declaration remains supported. *)
 let test_runtime_config_validation_admits_undeclared_official_client_seed () =
   with_config_save_model_catalog @@ fun () ->
-  let content ~bound ~agent_core_cap =
+  let content ~bound =
     Printf.sprintf
       "[providers.local]\n\
        protocol = \"openai-compatible-http\"\n\
@@ -2821,7 +2617,7 @@ let test_runtime_config_validation_admits_undeclared_official_client_seed () =
        api-name = \"seeded\"\n\
        max-context = 1024\n%s\
        \n\
-       [local.sample]\n%s\
+       [local.sample]\n\
        \n\
        [subscription.seeded]\n\
        \n\
@@ -2831,9 +2627,7 @@ let test_runtime_config_validation_admits_undeclared_official_client_seed () =
        [runtime.assignments]\n\
        \"probe\" = \"subscription.seeded\"\n"
       bound
-      agent_core_cap
   in
-  let declared_agent_core_cap = "max-request-body-bytes = 65536\n" in
   let attempt text =
     let snapshot = Runtime.For_testing.snapshot () in
     let path = Filename.temp_file "official_seed_" ".toml" in
@@ -2847,9 +2641,7 @@ let test_runtime_config_validation_admits_undeclared_official_client_seed () =
         | Sys_error _ -> ())
       (fun () -> Runtime.save_config_text ~runtime_config_path:path text)
   in
-  (match
-     attempt (content ~bound:"" ~agent_core_cap:declared_agent_core_cap)
-   with
+  (match attempt (content ~bound:"") with
    | Ok _receipt -> ()
    | Error detail ->
      failf
@@ -2857,97 +2649,10 @@ let test_runtime_config_validation_admits_undeclared_official_client_seed () =
        detail);
   (* Declaring it stays legal — the key still exists for operators who want the
      seed bounded; it is simply no longer an admission condition. *)
-  (match
-     attempt
-       (content
-          ~bound:"max-prompt-bytes = 131072\n"
-          ~agent_core_cap:declared_agent_core_cap)
-   with
-   | Ok _receipt -> ()
-   | Error detail -> failf "a declared seed bound must still load: %s" detail);
-  match attempt (content ~bound:"" ~agent_core_cap:"") with
+  match attempt (content ~bound:"max-prompt-bytes = 131072\n") with
   | Ok _receipt -> ()
-  | Error detail -> failf "HTTP and official-client runtimes may omit caller byte caps: %s" detail
-
+  | Error detail -> failf "a declared seed bound must still load: %s" detail
 ;;
-
-let test_runtime_config_validation_allows_uncapped_dormant_lane_candidate () =
-  with_config_save_model_catalog @@ fun () ->
-  let content =
-    "[providers.local]\n\
-     protocol = \"openai-compatible-http\"\n\
-     endpoint = \"http://127.0.0.1:1/v1\"\n\
-     \n\
-     [models.sample]\n\
-     api-name = \"sample\"\n\
-     max-context = 1024\n\
-     \n\
-     [models.dormant]\n\
-     api-name = \"dormant\"\n\
-     max-context = 1024\n\
-     \n\
-     [local.sample]\n\
-     max-request-body-bytes = 65536\n\
-     \n\
-     [local.dormant]\n\
-     \n\
-     [runtime]\n\
-     default = \"local.sample\"\n\
-     \n\
-     [runtime.lanes.dormant]\n\
-     candidates = [\"local.dormant\"]\n"
-  in
-  let snapshot = Runtime.For_testing.snapshot () in
-  let path = Filename.temp_file "dormant_uncapped_runtime_" ".toml" in
-  let oc = open_out path in
-  output_string oc content;
-  close_out oc;
-  Fun.protect
-    ~finally:(fun () ->
-      Runtime.For_testing.restore snapshot;
-      try Sys.remove path with
-      | Sys_error _ -> ())
-    (fun () ->
-       match Runtime.save_config_text ~runtime_config_path:path content with
-       | Ok _receipt -> ()
-       | Error detail ->
-         failf
-           "uncapped dormant lane must not block unrelated Keeper routing: %s"
-           detail)
-;;
-
-let test_runtime_toml_rejects_non_positive_max_request_body_bytes () =
-  let template n =
-    Printf.sprintf
-      "[providers.local]\n\
-       protocol = \"openai-compatible-http\"\n\
-       endpoint = \"http://127.0.0.1:1/v1\"\n\
-       \n\
-       [models.sample]\n\
-       api-name = \"sample\"\n\
-       max-context = 1024\n\
-       \n\
-       [local.sample]\n\
-       max-request-body-bytes = %d\n\
-       \n\
-       [runtime]\n\
-       default = \"local.sample\"\n"
-      n
-  in
-  List.iter
-    (fun n ->
-       match Runtime_toml.parse_string (template n) with
-       | Ok _ -> failf "max-request-body-bytes = %d should be rejected" n
-       | Error errs ->
-         let rendered =
-           errs
-           |> List.map (fun (err : Runtime_toml.parse_error) ->
-             Printf.sprintf "%s: %s" err.path err.message)
-           |> String.concat "\n"
-         in
-         check bool (Printf.sprintf "error mentions the knob for %d" n) true
-           (String_util.contains_substring rendered "max-request-body-bytes"))
-    [ 0; -1 ]
 
 let test_runtime_toml_separates_wizard_default_from_runtime_default_marker () =
   let content =
@@ -3310,7 +3015,6 @@ let test_runtime_capability_gate_uses_provider_qualified_catalog () =
      thinking-support = true\n\
      \n\
      [ollama_cloud.shared]\n\
-     max-request-body-bytes = 65536\n\
      \n\
      [runtime]\n\
      default = \"ollama_cloud.shared\"\n"
@@ -3551,91 +3255,6 @@ let test_sibling_exact_lanes_keep_catalog_only_slots () =
     [ "hitl_auto_judge"; "librarian_exact"; "board_attention_exact" ]
 ;;
 
-(* Optional caps do not make a declared, unassigned runtime unavailable. *)
-let test_declared_uncapped_runtime_is_dispatchable () =
-  let runtime_toml =
-    "[providers.local]\n\
-     protocol = \"openai-compatible-http\"\n\
-     endpoint = \"http://127.0.0.1:1/v1\"\n\
-     \n\
-     [models.sample]\n\
-     api-name = \"sample\"\n\
-     max-context = 1024\n\
-     \n\
-     [models.dormant]\n\
-     api-name = \"dormant\"\n\
-     max-context = 1024\n\
-     \n\
-     [local.sample]\n\
-     max-request-body-bytes = 65536\n\
-     \n\
-     [local.dormant]\n\
-     \n\
-     [runtime]\n\
-     default = \"local.sample\"\n"
-  in
-  with_temp_runtime_toml runtime_toml (fun path ->
-    match load_list_text ~config_path:path with
-    | Error msg ->
-      failf "an unassigned uncapped runtime must not fail the load: %s" msg
-    | Ok (runtimes, _, _, _, _) ->
-      check (list string) "both runtimes materialize"
-        [ "local.sample"; "local.dormant" ]
-        (List.map (fun (runtime : Runtime.t) -> runtime.id) runtimes);
-      check (list string) "neither optional cap state blocks dispatch" []
-        (List.map (fun ((runtime : Runtime.t), _) -> runtime.id)
-           (Runtime.keeper_dispatch_blocked runtimes));
-      check bool "the routed runtime is dispatchable" true
-        (match
-           List.find_opt
-             (fun (runtime : Runtime.t) -> String.equal runtime.id "local.sample")
-             runtimes
-         with
-         | Some runtime ->
-           Runtime.keeper_dispatch_readiness runtime = Runtime.Dispatchable
-         | None -> false))
-;;
-
-(* An official-client runtime declares no body cap by design — the spawned
-   vendor client owns its own context window — so it must not be reported as
-   blocked. Without this, the projection would tell operators to add a field
-   that boot validation deliberately does not require of it. *)
-let test_official_client_runtime_is_dispatchable_without_a_body_cap () =
-  let runtime_toml =
-    "[providers.local]\n\
-     protocol = \"openai-compatible-http\"\n\
-     endpoint = \"http://127.0.0.1:1/v1\"\n\
-     \n\
-     [providers.claude_code]\n\
-     protocol = \"claude-code\"\n\
-     command = \"claude\"\n\
-     \n\
-     [models.sample]\n\
-     api-name = \"sample\"\n\
-     max-context = 1024\n\
-     \n\
-     [models.official]\n\
-     api-name = \"claude-sonnet-5\"\n\
-     max-context = 200000\n\
-     \n\
-     [local.sample]\n\
-     max-request-body-bytes = 65536\n\
-     \n\
-     [claude_code.official]\n\
-     \n\
-     [runtime]\n\
-     default = \"local.sample\"\n"
-  in
-  with_temp_runtime_toml runtime_toml (fun path ->
-    match load_list_text ~config_path:path with
-    | Error msg -> failf "official-client runtime should load: %s" msg
-    | Ok (runtimes, _, _, _, _) ->
-      check (list string) "no runtime is reported blocked" []
-        (List.map
-           (fun ((runtime : Runtime.t), _) -> runtime.id)
-           (Runtime.keeper_dispatch_blocked runtimes)))
-;;
-
 (* masc#28403. The runtime this declares — [local.typo] — cannot exist, because
    no [models.typo] row does. Nothing references it, which is the whole point:
    before this was a load error the only way a dangling binding surfaced was an
@@ -3776,7 +3395,6 @@ let test_of_binding_reports_an_undeclared_provider () =
     ; is_default = false
     ; wizard_default = false
     ; max_concurrent = None
-    ; max_request_body_bytes = None
     ; context_marks = None
     ; max_tokens = None
     ; price_input = None
@@ -3921,7 +3539,6 @@ let test_strict_init_rejects_assigned_runtime_absent_from_agent_core_catalog () 
      max-context = 1024\n\
      \n\
      [ollama.good]\n\
-     max-request-body-bytes = 65536\n\
      \n\
      [ollama.missing]\n\
      \n\
@@ -4028,9 +3645,7 @@ api-name = "missing"
 max-context = 8192
 streaming = false
 [fixture.good]
-max-request-body-bytes = 65536
 [fixture.missing]
-max-request-body-bytes = 65536
 |} server.base_url in
   let snapshot = Runtime.For_testing.snapshot () in
   let base_path = Masc_test_deps.setup_test_workspace () in
@@ -4225,7 +3840,6 @@ let test_server_degraded_init_disables_unreferenced_uncatalogued_runtimes () =
      api-name = \"missing-from-agent_core-catalog\"\n\
      \n\
      [ollama.good]\n\
-     max-request-body-bytes = 65536\n\
      \n\
      [ollama.missing]\n\
      \n\
@@ -4614,10 +4228,8 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
        max-context = 1024\n\
        \n\
        [local.chat]\n\
-       max-request-body-bytes = 65536\n\
        \n\
        [local.libr]\n\
-       max-request-body-bytes = 65536\n\
        \n\
        [runtime]\n\
        default = \"%s\"\n\
@@ -5488,9 +5100,6 @@ let () =
           test_case "unset thinking preserves provider defaults and explicit disable"
             `Quick test_unset_thinking_does_not_disable_reasoning_model;
           test_case
-            "repo runtime.toml all seeded bindings are keeper-dispatchable"
-            `Quick test_repo_runtime_toml_all_seeded_bindings_are_keeper_dispatchable;
-          test_case
             "deployment AGENT_CORE catalog modality priority strings resolve"
             `Quick test_deployment_agent_core_model_catalog_modality_priorities_resolve;
           test_case "exact-output lane config is ordered and rejects duplicates" `Quick
@@ -5611,12 +5220,8 @@ let () =
             test_runtime_toml_max_concurrent_flows_to_provider_config;
           test_case "reasoning-effort flows from model row to provider config" `Quick
             test_runtime_toml_reasoning_effort_flows_to_provider_config;
-          test_case "max-request-body-bytes is optional opt-in" `Quick
-            test_runtime_toml_parses_optional_max_request_body_bytes;
           test_case "return-progress is optional opt-in" `Quick
             test_runtime_toml_parses_optional_return_progress;
-          test_case "omitted max-request-body-bytes stays None" `Quick
-            test_runtime_toml_omitted_max_request_body_bytes_is_none;
           test_case "repetition samplers are optional opt-in" `Quick
             test_runtime_toml_parses_repetition_samplers;
           test_case "omitted repetition samplers stay None" `Quick
@@ -5636,27 +5241,9 @@ let () =
           test_case "non-positive max-tokens is rejected" `Quick
             test_runtime_toml_rejects_non_positive_max_tokens;
           test_case
-            "keeper dispatch graph enumeration"
-            `Quick test_keeper_dispatch_runtime_graph_enumeration;
-          test_case
-            "runtime config accepts uncapped keeper candidate"
-            `Quick test_runtime_config_validation_accepts_uncapped_keeper_candidate;
-          test_case
             "runtime config admits an undeclared official-client seed"
             `Quick
             test_runtime_config_validation_admits_undeclared_official_client_seed;
-          test_case
-            "runtime config allows uncapped dormant lane candidate"
-            `Quick
-            test_runtime_config_validation_allows_uncapped_dormant_lane_candidate;
-          test_case
-            "declared uncapped runtime is dispatchable"
-            `Quick test_declared_uncapped_runtime_is_dispatchable;
-          test_case
-            "official-client runtime is dispatchable without a body cap"
-            `Quick test_official_client_runtime_is_dispatchable_without_a_body_cap;
-          test_case "non-positive max-request-body-bytes is rejected" `Quick
-            test_runtime_toml_rejects_non_positive_max_request_body_bytes;
           test_case
             "unknown capabilities key is rejected at load"
             `Quick test_unknown_capability_key_rejected_at_load;

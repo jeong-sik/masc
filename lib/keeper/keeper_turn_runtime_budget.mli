@@ -193,10 +193,6 @@ val turn_event_bus_evidence_detail :
 
 type capacity_refusal =
   | Provider_context_window of { limit_tokens : int option }
-  | Serialized_request_body of
-      { actual_bytes : int
-      ; limit_bytes : int
-      }
   | Provider_request_body_refusal of { status : int }
 (** Why a target refused to serve a request for its size. The closed set keeps
     measured token and byte bounds separate from a provider refusal whose only

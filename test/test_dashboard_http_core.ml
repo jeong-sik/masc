@@ -1981,7 +1981,6 @@ streaming = true
 [test_provider.test_model]
 is-default = true
 max-concurrent = 1
-max-request-body-bytes = 65536
 |}
 
 let execution_trust_keeper_row_keys =

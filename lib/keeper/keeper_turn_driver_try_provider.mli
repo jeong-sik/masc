@@ -24,12 +24,10 @@ type provider_progress_sample =
 type try_provider_ctx =
   { runtime_id : string
   ; error_runtime_id : string
-  ; max_request_body_bytes : int option
   ; context_marks : Runtime_schema.context_marks option
         (** The marks the carried range is judged against after each
             response (RFC keeper-context-window-in-tokens §10.5), as the
-            binding declares them; [None] leaves eviction to a refusal.
-            [max_request_body_bytes] judges the serialized request only. *)
+            binding declares them; [None] leaves eviction to a refusal. *)
   ; carried_front_seed : unit -> Keeper_carried_front.seed option
         (** Where the carried range starts when no ledger holds this
             (keeper, runtime) pair yet: the range the newest completed turn
@@ -93,7 +91,6 @@ type try_provider_ctx =
       (Runtime_observation.runtime_observation -> unit) option
   ; on_request_wire_observation :
       (runtime_id:string ->
-       max_request_body_bytes:int option ->
        body_bytes:int ->
        serialized:Llm_provider.Request_wire_observer.observation option ->
        unit)
@@ -379,19 +376,6 @@ module For_testing : sig
     accept:(Agent_core.Types.api_response -> bool) ->
     Runtime_agent.run_result ->
     (Runtime_agent.run_result, Agent_core.Error.t) result
-
-  val observe_request_wire_error :
-    runtime_id:string ->
-    max_request_body_bytes:int option ->
-    on_request_wire_observation:
-      (runtime_id:string ->
-       max_request_body_bytes:int option ->
-       body_bytes:int ->
-       serialized:Llm_provider.Request_wire_observer.observation option ->
-       unit)
-        option ->
-    Agent_core.Error.t ->
-    unit
 
   val message_measurer : unit -> Agent_core.Types.message -> int
   (** Counts the bytes [Yojson.Safe.to_string] would produce, without building

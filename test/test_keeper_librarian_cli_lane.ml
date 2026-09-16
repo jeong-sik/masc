@@ -85,7 +85,6 @@ let execute ~net ~clock ~base_path ~runner =
       ~keeper_id:"librarian-cli-test"
       ~selected_input
       ~messages
-      ~render_at:(fun _ -> Ok messages)
       ()
 ;;
 

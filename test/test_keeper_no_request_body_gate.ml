@@ -30,13 +30,13 @@ let start_context_refusal_server ~sw ~net =
     Cohttp_eio.Server.run socket server ~on_error:(fun error -> raise error));
   Printf.sprintf "http://127.0.0.1:%d" port, requests
 
-let test_optional_cap_reaches_real_http_and_explicit_cap_stops_before_io () =
+let test_a_large_request_reaches_the_peer_and_a_refusal_moves_the_lane () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   Masc_test_deps.init_eio_clock ~sw env;
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   let catalog_snapshot = Llm_provider.Model_catalog.global () in
-  let base_path = Filename.temp_file "keeper-optional-cap-" "" in
+  let base_path = Filename.temp_file "keeper-no-body-gate-" "" in
   Unix.unlink base_path;
   Unix.mkdir base_path 0o700;
   Eio.Switch.on_release sw (fun () ->
@@ -62,7 +62,7 @@ let test_optional_cap_reaches_real_http_and_explicit_cap_stops_before_io () =
    | Error detail -> fail detail
    | Ok catalog -> Llm_provider.Model_catalog.set_global catalog);
   let config_path = Filename.concat base_path "runtime.toml" in
-  let config_text cap =
+  let config_text =
     Printf.sprintf {|[runtime]
 default = "fixture.sample"
 [providers.fixture]
@@ -73,10 +73,9 @@ api-name = %S
 max-context = 1048576
 streaming = false
 [fixture.sample]
-%s|} server.base_url model_id
-      (Option.fold ~none:"" ~some:(Printf.sprintf "max-request-body-bytes = %d\n") cap)
+|} server.base_url model_id
   in
-  write config_path (config_text None);
+  write config_path config_text;
   (match Runtime.init_default_degraded_report ~config_path with
    | Ok Runtime.Initialized -> ()
    | Ok (Runtime.Initialized_degraded _) -> fail "fixture catalog unexpectedly unavailable"
@@ -86,9 +85,7 @@ streaming = false
     ~config:(Workspace.default_config base_path) in
   (match Tui_decode.decode_runtime_resolved projection with
    | Ok ([runtime], _) ->
-     check string "API and TUI keep the uncapped runtime identity" "fixture.sample" runtime.ro_id;
-     check bool "API and TUI expose uncapped runtime as dispatchable" true runtime.ro_dispatchable;
-     check (option string) "no absent-cap blocker is invented" None runtime.ro_blocked_reason
+     check string "API and TUI keep the runtime identity" "fixture.sample" runtime.ro_id
    | Ok _ -> fail "expected exactly one projected runtime"
    | Error detail -> fail detail);
   let observations = ref [] in
@@ -96,53 +93,35 @@ streaming = false
   let attempt_errors = ref [] in
   let run ?(runtime_id = "fixture.sample") goal =
     Keeper_turn_driver.run_named
-      ~system_prompt:"Optional cap fixture."
-      ~runtime_id ~keeper_name:"optional-cap-proof" ~base_path
+      ~system_prompt:"No body gate fixture."
+      ~runtime_id ~keeper_name:"no-body-gate-proof" ~base_path
       ~agent_core_tools:[] ~goal ~sw ~net:env#net
       ~on_runtime_attempt_error:(fun ~runtime_id ~attempt:_ ~dispatch:_ error ->
         attempt_errors := (runtime_id, error) :: !attempt_errors)
       ~on_model_input_window_observation:(fun ~measurement:_ _ ->
         incr model_input_windows)
-      ~on_request_wire_observation:(fun ~runtime_id:_ ~max_request_body_bytes ~body_bytes ~serialized ->
-        observations := (max_request_body_bytes, body_bytes, Option.is_some serialized) :: !observations)
+      ~on_request_wire_observation:(fun ~runtime_id:_ ~body_bytes ~serialized ->
+        observations := (body_bytes, Option.is_some serialized) :: !observations)
       ()
   in
   let succeed goal = match run goal with
     | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error) in
   let large_goal = String.make (524288 + 1) 'x' in
   succeed large_goal;
-  check int "uncapped Keeper reaches the real HTTP peer" 1
+  check int "the Keeper reaches the real HTTP peer" 1
     (Exact_output_fixture.post_count server);
   let large_body = List.hd (Exact_output_fixture.request_bodies server) in
-  check bool "no replacement 512KiB gate was introduced" true (String.length large_body > 524288);
+  check bool "no client-side byte gate stands before the peer" true (String.length large_body > 524288);
   let messages = Yojson.Safe.Util.(Yojson.Safe.from_string large_body |> member "messages" |> to_list) in
   check bool "the full user input reaches the peer" true
     (List.exists (fun row -> Yojson.Safe.Util.member "content" row = `String large_goal) messages);
-  check (option (triple (option int) int bool)) "uncapped exact wire observation preserves absence"
-    (Some (None, String.length large_body, true)) (List.nth_opt !observations 0);
+  check (option (pair int bool)) "the exact wire observation is the sent body"
+    (Some (String.length large_body, true)) (List.nth_opt !observations 0);
+  check int "the composition observed its window once" 1 !model_input_windows;
   succeed "short";
-  check int "uncapped short reference reaches peer" 2 (Exact_output_fixture.post_count server);
-  let short_body = List.nth (Exact_output_fixture.request_bodies server) 1 in
-  let limit = String.length short_body - 1 in
-  (match Runtime.save_config_text ~runtime_config_path:config_path (config_text (Some limit)) with
-   | Ok _ -> () | Error detail -> fail detail);
-  observations := [];
-  model_input_windows := 0;
-  (match run "short" with
-   | Error (Agent_core.Error.Api (Agent_core.Retry.InvalidRequest
-       { reason = Agent_core.Retry.Request_body_too_large { actual_bytes; limit_bytes }; _ })) ->
-     check int "final serialized body is measured, not estimated" (String.length short_body) actual_bytes;
-     check int "explicit caller cap stays exact" limit limit_bytes
-   | Error error -> failf "expected final byte admission, got %s" (Agent_core.Error.to_string error)
-   | Ok _ -> fail "explicit exceeded byte cap reached provider");
-  check int "history admission succeeds once before final serialized-byte refusal" 1
-    !model_input_windows;
-  check int "explicit exceeded cap performs no HTTP request" 2
-    (Exact_output_fixture.post_count server);
-  check (list (triple (option int) int bool)) "one exact byte refusal, without stale admitted observations"
-    [Some limit, String.length short_body, false] !observations;
+  check int "a short request reaches the peer too" 2 (Exact_output_fixture.post_count server);
   let refused_url, refused_requests = start_context_refusal_server ~sw ~net:env#net in
-  let recovery_config = config_text None ^ Printf.sprintf {|
+  let recovery_config = config_text ^ Printf.sprintf {|
 [providers.overflow]
 protocol = "openai-compatible-http"
 endpoint = %S
@@ -157,18 +136,18 @@ candidates = ["overflow.sample", "fixture.sample"]
   (match !attempt_errors with
    | ("overflow.sample", Agent_core.Error.Api (Agent_core.Retry.ContextOverflow _)) :: _ -> ()
    | _ -> fail "the real peer response must produce a typed context overflow");
-  check int "uncapped context refusal is attempted once, without an invented shrink seed" 1
+  check int "the peer's context refusal is attempted once, without an invented shrink seed" 1
     (Atomic.get refused_requests);
-  check int "the next uncapped candidate completes the same lane turn" 3
+  check int "the next candidate completes the same lane turn" 3
     (Exact_output_fixture.post_count server)
 
-let test_uncapped_runtime_demotes_historical_tool_results () =
+let test_the_runtime_demotes_historical_tool_results () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   Masc_test_deps.init_eio_clock ~sw env;
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   let catalog_snapshot = Llm_provider.Model_catalog.global () in
-  let base_path = Filename.temp_file "keeper-optional-cap-demote-" "" in
+  let base_path = Filename.temp_file "keeper-no-body-gate-demote-" "" in
   Unix.unlink base_path;
   Unix.mkdir base_path 0o700;
   Eio.Switch.on_release sw (fun () ->
@@ -186,7 +165,7 @@ let test_uncapped_runtime_demotes_historical_tool_results () =
   let server = Exact_output_fixture.start_server
     ~sw ~net:env#net ~clock:env#clock
     (Exact_output_fixture.Replies [tool_call_reply; final_reply]) in
-  let model_id = "optional-cap-demote" in
+  let model_id = "no-body-gate-demote" in
   let catalog_path = Filename.concat base_path "models.toml" in
   let catalog_row provider = Printf.sprintf
     "[[models]]\nid_prefix = %S\nprovider_name = %S\nbase = \"openai_chat\"\nmax_context_tokens = 1048576\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n"
@@ -265,7 +244,7 @@ streaming = false
   (match result with
    | Ok _ -> ()
    | Error error -> fail (Agent_core.Error.to_string error));
-  check int "uncapped Keeper completed 2 requests" 2
+  check int "the Keeper completed 2 requests" 2
     (Exact_output_fixture.post_count server);
   let second_body = List.nth (Exact_output_fixture.request_bodies server) 1 in
   check bool "historical tool body was demoted and not sent inline" false
@@ -311,11 +290,11 @@ streaming = false
    | _ -> fail "expected decoded artifact reference for historical tool message")
 
 let () =
-  Alcotest.run "keeper_optional_request_cap"
+  Alcotest.run "keeper_no_request_body_gate"
     [ "actual-dispatch",
-      [ test_case "optional cap and exact explicit admission" `Quick
-          test_optional_cap_reaches_real_http_and_explicit_cap_stops_before_io
-      ; test_case "uncapped runtime demotes historical tool results" `Quick
-          test_uncapped_runtime_demotes_historical_tool_results
+      [ test_case "a large request reaches the peer and a refusal moves the lane" `Quick
+          test_a_large_request_reaches_the_peer_and_a_refusal_moves_the_lane
+      ; test_case "the runtime demotes historical tool results" `Quick
+          test_the_runtime_demotes_historical_tool_results
       ]
     ]

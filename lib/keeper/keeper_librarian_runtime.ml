@@ -83,12 +83,8 @@ let select_recent_messages ~max_messages messages =
   drop drop_count messages
 ;;
 
-let prompt_input_for_librarian ?max_messages (inp : Keeper_librarian.input) =
-  let max_messages =
-    match max_messages with
-    | Some max_messages -> max_messages
-    | None -> prompt_max_messages ()
-  in
+let prompt_input_for_librarian (inp : Keeper_librarian.input) =
+  let max_messages = prompt_max_messages () in
   { inp with
     messages =
       select_recent_messages
@@ -115,15 +111,10 @@ type exact_setup_error =
       }
   | Exact_flow_snapshot_failed of Exact_output.flow_snapshot_error
   | Exact_flow_start_failed of Exact_output.flow_start_error
-  | Exact_input_over_budget of { slot_id : string }
-    (** Even the librarian's fixed material (template, keeper instructions,
-        current facts) with zero conversation messages exceeds this admitted
-        slot's request-body limit — nothing left to shrink. *)
   | Exact_request_projection_failed of { slot_id : string; reason : string }
-    (** The pre-flight request-body projection itself failed for this slot;
-        distinct from over-budget, which is a measured size verdict. The
-        reason names the admission refusal (capability, serialization) so
-        the failure is diagnosable from the line alone. *)
+    (** The pre-flight request projection failed for every slot; this names
+        the first. The reason names the admission refusal (capability,
+        serialization) so the failure is diagnosable from the line alone. *)
 
 type outward_effect =
   | No_outward_effect
@@ -180,14 +171,9 @@ let exact_setup_error_to_string = function
   | Exact_flow_start_failed
       (Exact_output.Flow_id_generation_failed detail) ->
     "exact flow identity allocation failed: " ^ detail
-  | Exact_input_over_budget { slot_id } ->
-    Printf.sprintf
-      "librarian prompt exceeds slot request-body limit even with zero \
-       conversation messages slot=%s"
-      slot_id
   | Exact_request_projection_failed { slot_id; reason } ->
     Printf.sprintf
-      "librarian request-body projection failed for slot=%s reason=%s"
+      "librarian request projection failed for slot=%s reason=%s"
       slot_id reason
 ;;
 
@@ -229,17 +215,6 @@ let render_prompt key variables =
     then Error (Printf.sprintf "%s rendered empty prompt" key)
     else Ok text
   | Error message -> Error (Printf.sprintf "%s: %s" key message)
-;;
-
-let fit_input ~count (inp : Keeper_librarian.input) =
-  let projected = prompt_input_for_librarian ~max_messages:count inp in
-  let organized = match inp.working_context.previous with
-    | None -> []
-    | Some snapshot -> Keeper_librarian_context.current_references snapshot in
-  let fresh, _known = List.partition (fun (s : Keeper_librarian_context.source) ->
-    not (List.mem s.reference organized)) inp.working_context.sources in
-  let sources = List.filteri (fun i _ -> i < count) fresh in
-  {projected with working_context = {inp.working_context with sources}}
 ;;
 
 let render_librarian_prompt input =
@@ -311,52 +286,44 @@ let librarian_output_requirement =
     ~minimum_guarantee:Exact_output.Json_syntax
 ;;
 
-(* Pre-flight size discipline for the exact Librarian lane. The librarian's input
-   scales linearly with conversation text and previously had no byte bound at
-   all (only a 72-message COUNT cap), so an oversized prompt failed at the
-   provider, cost a full round-trip, and with a single admitted slot had
-   nowhere to advance (lane audit W1/W2, live p50 132s). Message count is the
-   shrink axis: dropping older messages only removes prompt bytes, so the
-   serialized size is monotone in the count and binary search applies. *)
+(* Pre-flight projection for the exact Librarian lane: each slot's request
+   either projects (a capability and serialization admission) or is refused
+   outright. Size is not judged here — the provider decides whether it takes
+   the body, and the flow's own advance handles a slot failing at dispatch. *)
 type slot_projection =
-  | Slot_fits
-  | Slot_too_large
+  | Slot_admitted
   | Slot_unusable of string
         (** The projection refused the request outright -- a capability or
-            serialization refusal, not a measured size. *)
+            serialization refusal. *)
 
-type lane_fit =
+type lane_projection =
   { usable : string list
-        (** Slot ids whose projected body still imposes the request-body
-            bound this pre-flight exists to enforce. *)
+        (** Slot ids whose request projected, in ladder order. *)
   ; unusable : (string * string) list
         (** Slot id and refusal reason for each structurally unusable slot. *)
-  ; fits : bool
-        (** Every usable slot's projected body is within its own limit. *)
   }
 
-(* The size decision, pure over one projection per slot in ladder order. A
-   slot whose request cannot be projected at all is structurally unusable and
-   leaves the size decision: it imposes no bound because it cannot run, and
-   the flow's own advance already handles a slot failing at dispatch. Until
-   2026-09-11 one such slot failed the whole pre-flight and took down every
-   slot the run would actually have used -- the appended
+(* Pure over one projection per slot in ladder order. A slot whose request
+   cannot be projected at all is structurally unusable and is excluded rather
+   than fatal. Until 2026-09-11 one such slot failed the whole pre-flight and
+   took down every slot the run would actually have used -- the appended
    openrouter.openrouter-deepseek-v4-flash refused projection on every
    librarian run of the evening while the first two slots were healthy. A
    ladder with no projectable slot left is a misconfiguration; naming that
-   is the caller's job, not a size verdict. *)
-let fit_decision (projections : (string * slot_projection) list) : lane_fit =
+   is the caller's job. *)
+let lane_projection_decision (projections : (string * slot_projection) list)
+  : lane_projection
+  =
   List.fold_left
-    (fun (fit : lane_fit) (slot_id, projection) ->
+    (fun (lane : lane_projection) (slot_id, projection) ->
       match projection with
-      | Slot_fits -> { fit with usable = slot_id :: fit.usable }
-      | Slot_too_large ->
-        { fit with usable = slot_id :: fit.usable; fits = false }
+      | Slot_admitted -> { lane with usable = slot_id :: lane.usable }
       | Slot_unusable reason ->
-        { fit with unusable = (slot_id, reason) :: fit.unusable })
-    { usable = []; unusable = []; fits = true }
+        { lane with unusable = (slot_id, reason) :: lane.unusable })
+    { usable = []; unusable = [] }
     projections
-  |> fun fit -> { fit with usable = List.rev fit.usable; unusable = List.rev fit.unusable }
+  |> fun lane ->
+  { usable = List.rev lane.usable; unusable = List.rev lane.unusable }
 ;;
 
 let slot_reason_pairs ?(sep = "; ") (unusable : (string * string) list) : string =
@@ -373,161 +340,35 @@ let project_slot ~(slot : Runtime_exact_output_registry.selected_slot) ~messages
       librarian_output_requirement
   with
   | Error error -> Slot_unusable (Exact_output.admission_error_reason error)
-  | Ok projection ->
-    if projection.Exact_output.within_limit then Slot_fits else Slot_too_large
+  | Ok (_ : Exact_output.request_body_projection) -> Slot_admitted
 ;;
 
-let project_lane ~selected_slots ~messages : lane_fit =
-  fit_decision
+let project_lane ~selected_slots ~messages : lane_projection =
+  lane_projection_decision
     (List.map
        (fun (slot : Runtime_exact_output_registry.selected_slot) ->
          (slot.slot_id, project_slot ~slot ~messages))
        selected_slots)
 ;;
 
-(* [render_at k] renders the prompt with both message lists trimmed to the
-   newest [k] entries and returns it as the flow's message list. Returns the
-   fitted messages, [Some k] when the full prompt had to shrink (so the
-   caller can record that the observed registration input and the dispatched
-   prompt differ), and the unusable-slot report of the dispatched window, so
-   the caller can say in one line which slots the lane is running without. *)
-let fitted_messages ~selected_slots ~full_messages ~render_at =
-  let open Result.Syntax in
-  (* An empty ladder fits and reports nothing, as the old pre-flight said:
-     the production caller routes an empty slot list to the cli lane before
-     it gets here, so the exported shape keeps that verdict rather than
-     failing with no slot to name and no reason to give. *)
+(* The pre-flight over the ladder: which slots this run is without, or the
+   error naming every refusal when no slot projects. An empty ladder reports
+   nothing -- the production caller routes an empty slot list to the cli lane
+   before it gets here. *)
+let preflight_slots ~selected_slots ~messages =
   match selected_slots with
-  | [] -> Ok ((full_messages, None), [])
-  | _ :: _ ->
-  let full_lane = project_lane ~selected_slots ~messages:full_messages in
-  let over_budget_slot =
-    match full_lane.usable with
-    | slot_id :: _ -> slot_id
-    | [] -> exact_lane_id
-  in
-  match full_lane.usable with
-  | [] ->
-    Error
-      (Exact_setup_failed
-         (Exact_request_projection_failed
-            { slot_id =
-                (match selected_slots with
-                 | (slot : Runtime_exact_output_registry.selected_slot) :: _ ->
-                   slot.slot_id
-                 | [] -> exact_lane_id)
-            ; reason = slot_reason_pairs full_lane.unusable }))
-  | _ :: _ ->
-    if full_lane.fits
-    then Ok ((full_messages, None), full_lane.unusable)
-    else (
-      let full = prompt_max_messages () in
-      let rec search best low high =
-        if low > high
-        then
-          match best with
-          | Some (messages, count, unusable) -> Ok ((messages, Some count), unusable)
-          | None ->
-            Error
-              (Exact_setup_failed (Exact_input_over_budget { slot_id = over_budget_slot }))
-        else (
-          let midpoint = low + ((high - low) / 2) in
-          let* messages = render_at midpoint in
-          let lane = project_lane ~selected_slots ~messages in
-          if lane.usable <> [] && lane.fits
-          then search (Some (messages, midpoint, lane.unusable)) (midpoint + 1) high
-          else search best low (midpoint - 1))
-      in
-      search None 0 (max 0 (full - 1)))
-;;
-
-let select_source_subset ~sources ~fits =
-  let rec select chosen = function
-    | [] -> Ok chosen
-    | source :: rest ->
-      let candidate = chosen @ [source] in
-      Result.bind (fits candidate) (fun accepted ->
-        select (if accepted then candidate else chosen) rest)
-  in select [] sources
-;;
-
-(* Fit source evidence and the prior catalogue together. Reserve room for an
-   executable organization input before adding prior context: a large catalogue
-   must not make every fresh event permanently unselectable. Skipped context
-   pockets remain in the committed snapshot, outside this prompt projection. *)
-let fit_context_input ~(input : Keeper_librarian_context.input) ~fits =
-  let module Context = Keeper_librarian_context in
-  let ( let* ) = Result.bind in
-  let prior_pockets, organized = match input.previous with
-    | None -> [], []
-    | Some snapshot -> snapshot.pockets, Context.current_references snapshot in
-  let fresh = List.filter (fun (s : Context.source) ->
-    not (List.mem s.reference organized)) input.sources in
-  let project sources pockets =
-    {input with sources; previous = Option.map (fun (snapshot : Context.snapshot) ->
-      {snapshot with pockets}) input.previous} in
-  let rec seed = function
-    | [] -> Ok None
-    | source :: rest ->
-      let* accepted = fits (project [source] []) in
-      if accepted then Ok (Some source) else seed rest in
-  let* seed_source = seed fresh in
-  match seed_source with
-  | None -> Ok (project [] [])
-  | Some source ->
-    let rec fit_pockets chosen = function
-      | [] -> Ok chosen
-      | pocket :: rest ->
-        let candidate = chosen @ [pocket] in
-        let* accepted = fits (project [source] candidate) in
-        fit_pockets (if accepted then candidate else chosen) rest in
-    let* pockets = fit_pockets [] prior_pockets in
-    let remaining = List.filter (fun (candidate : Context.source) ->
-      not (String.equal candidate.reference source.reference)) fresh in
-    let rec fit_sources chosen = function
-      | [] -> Ok (project chosen pockets)
-      | next :: rest ->
-        let candidate = chosen @ [next] in
-        let* accepted = fits (project candidate pockets) in
-        fit_sources (if accepted then candidate else chosen) rest in
-    fit_sources [source] remaining
-;;
-
-let fit_working_sources ~selected_slots ~(selected_input : Keeper_librarian.input) ~messages ~render_at =
-  let open Result.Syntax in
-  let full_lane = project_lane ~selected_slots ~messages in
-  if selected_input.working_context.sources = [] || full_lane.fits then
-    let* (messages, fitted_count), unusable = fitted_messages ~selected_slots ~full_messages:messages ~render_at in
-    let input = match fitted_count with None -> selected_input | Some count -> fit_input ~count selected_input in
-    Ok (input, messages, fitted_count, unusable)
-  else
-    let render input =
-      render_librarian_prompt input
-      |> Result.map (fun prompt -> [message Agent_core.Types.User prompt])
-      |> Result.map_error (fun detail -> Prompt_render_failed detail)
-    in
-    let base = fit_input ~count:0 selected_input in
-    let* base_messages = render base in
-    (* Establish that ordinary memory fits without queue material. No single
-       oversized event is allowed to monopolize the source fitting pass. *)
-    let* _, _ = fitted_messages ~selected_slots ~full_messages:base_messages
-        ~render_at:(fun _ -> Ok base_messages) in
-    let* working_context = fit_context_input ~input:selected_input.working_context
-        ~fits:(fun working_context ->
-          let input = {base with working_context} in
-          let* projected = render input in
-          let lane = project_lane ~selected_slots ~messages:projected in
-          Ok (lane.usable <> [] && lane.fits)) in
-    let sources = working_context.sources in
-    let with_sources = {selected_input with working_context} in
-    let* full_messages = render with_sources in
-    let render_at count = render (prompt_input_for_librarian ~max_messages:count with_sources) in
-    let* (messages, fitted_count), unusable = fitted_messages ~selected_slots ~full_messages ~render_at in
-    let input = match fitted_count with None -> with_sources
-      | Some count -> prompt_input_for_librarian ~max_messages:count with_sources in
-    Log.Keeper.info "Librarian source fitting selected=%d deferred=%d; original inputs retained"
-      (List.length sources) (List.length selected_input.working_context.sources - List.length sources);
-    Ok (input, messages, fitted_count, unusable)
+  | [] -> Ok []
+  | (first : Runtime_exact_output_registry.selected_slot) :: _ ->
+    let lane = project_lane ~selected_slots ~messages in
+    (match lane.usable with
+     | [] ->
+       Error
+         (Exact_setup_failed
+            (Exact_request_projection_failed
+               { slot_id = first.slot_id
+               ; reason = slot_reason_pairs lane.unusable
+               }))
+     | _ :: _ -> Ok lane.unusable)
 ;;
 
 let resolve_librarian_slots ~base_path ~keeper_id =
@@ -681,7 +522,6 @@ let execute_exact_output_classified
       ~keeper_id
       ~(selected_input : Keeper_librarian.input)
       ~messages
-      ~render_at
       ()
   =
   let open Result.Syntax in
@@ -690,12 +530,10 @@ let execute_exact_output_classified
   | [] ->
     (match try_cli_slots ~keeper_id ~base_path ~cli_runner ~cli_slots
        ~selected_input ~messages with
-     | Some (runtime_id, selection, output) -> Ok ((selection, output), runtime_id, None)
+     | Some (runtime_id, selection, output) -> Ok ((selection, output), runtime_id)
      | None -> Error Cli_slots_exhausted)
   | _ :: _ ->
-  let* selected_input, messages, fitted_message_count, lane_unusable =
-    fit_working_sources ~selected_slots ~selected_input ~messages ~render_at
-  in
+  let* lane_unusable = preflight_slots ~selected_slots ~messages in
   (if lane_unusable <> [] then
      Log.Keeper.warn ~keeper_name:keeper_id
        "librarian lane=%s pre-flight excluded slot(s) from this run: %s"
@@ -729,7 +567,7 @@ let execute_exact_output_classified
       |> Exact_output.flow_success_candidate
       |> fun candidate -> candidate.visit.identity.candidate_id
     in
-    Ok (success.accepted, selected_slot, fitted_message_count)
+    Ok (success.accepted, selected_slot)
   | Error (Exact_output.Flow_execution_terminal { cause; _ }) ->
     let terminal () = Error (Exact_execution_failed (exact_execution_error cause)) in
     (* Only provider exhaustion may fall back to the cli walk; the
@@ -748,7 +586,7 @@ let execute_exact_output_classified
             ~messages
         with
         | Some (runtime_id, selection, output) ->
-          Ok ((selection, output), runtime_id, fitted_message_count)
+          Ok ((selection, output), runtime_id)
         | None -> terminal ())
      | Exact_output.Flow_attempt_already_started _
      | Exact_output.Flow_attempt_start_failed _
@@ -776,7 +614,7 @@ let execute_exact_output_classified
          ~messages
      with
      | Some (runtime_id, selection, output) ->
-       Ok ((selection, output), runtime_id, fitted_message_count)
+       Ok ((selection, output), runtime_id)
      | None ->
        Error
          (Domain_output_invalid
@@ -972,15 +810,7 @@ let run_best_effort
                |> Result.map (fun material -> material.rendered)
                |> Result.map_error (fun detail -> Prompt_render_failed detail)
              in
-             let render_at max_messages =
-               let shrunk = fit_input ~count:max_messages inp in
-               match render_librarian_prompt shrunk with
-               | Ok rendered ->
-                 Ok [ message Agent_core.Types.User rendered ]
-               | Error detail -> Error (Prompt_render_failed detail)
-             in
-             let* (selection, exact_output), selected_slot, fitted_message_count
-               =
+             let* (selection, exact_output), selected_slot =
                execute_exact_output_classified
                  ?cli_runner
                  ~clock
@@ -989,17 +819,8 @@ let run_best_effort
                  ~keeper_id
                  ~selected_input:prompt_input
                  ~messages:[ message Agent_core.Types.User prompt ]
-                 ~render_at
                  ()
              in
-             (match fitted_message_count with
-              | None -> ()
-              | Some count ->
-                Log.Keeper.info
-                  ~keeper_name:keeper_id
-                  "librarian prompt shrunk to fit slot request-body limits \
-                   messages=%d (registered input shows the full material)"
-                  count);
 
              (* Working context is advisory and has its own revision. A stale
                 or failed context write cannot roll back memory or block the
@@ -1219,8 +1040,6 @@ let run_best_effort
 ;;
 
 module For_testing = struct
-  let fit_context_input = fit_context_input
-  let select_source_subset = select_source_subset
   type classified_error = extraction_error
 
   let classified_error_detail = extraction_error_to_string

@@ -214,12 +214,10 @@ type t =
        [None] is an explicit observation that the raw-trace sink degraded or
        the turn ended before a run reference existed. *)
     (* Runtime id and exact serialized body size for the latest request AGENT_CORE
-       serialized. Admitted requests arrive through AGENT_CORE's pre-dispatch
-       observer; a locally rejected [Request_body_too_large] arrives through
-       that typed error's measured [actual_bytes]. This is not derived from
-       prompt blocks or provider token usage. [None] means this turn ended
-       before AGENT_CORE exposed either exact measurement; both JSON fields are then
-       required explicit nulls. *)
+       serialized, arriving through AGENT_CORE's pre-dispatch observer. This
+       is not derived from prompt blocks or provider token usage. [None] means
+       this turn ended before AGENT_CORE exposed the measurement; both JSON
+       fields are then required explicit nulls. *)
   ; sampling : sampling
   ; usage : usage
   ; ts : float

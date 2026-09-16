@@ -2083,7 +2083,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ?on_ready ~accept_store
         ~sw
         ~clock
         ~broadcast_snapshot:
-          Server_dashboard_http_execution_surfaces.broadcast_operator_snapshot;
+          Server_dashboard_http_execution_surfaces.broadcast_refreshed_operator_snapshot;
       Server_dashboard_http.start_operator_digest_refresh_loop
         ~state
         ~sw

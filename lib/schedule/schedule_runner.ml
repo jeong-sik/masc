@@ -242,7 +242,13 @@ let append_new_signals config candidates =
     let seen_rev = ref (List.rev seen) in
     let rec loop = function
       | [] ->
-        write_seen config (List.rev !seen_rev);
+        (* The key list only grows when a signal is emitted, and it holds
+           every occurrence the store has ever signalled (6,242 keys, 430 KB
+           on a live root). A tick that emits nothing would rewrite the same
+           list, so it writes nothing. *)
+        (match !emitted_rev with
+         | [] -> ()
+         | _ :: _ -> write_seen config (List.rev !seen_rev));
         Ok (List.rev !emitted_rev)
       | (signal : wake_signal) :: rest ->
         let occurrence_id = Schedule_occurrence_id.to_string signal.occurrence_id in

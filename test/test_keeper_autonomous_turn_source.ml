@@ -257,6 +257,50 @@ let test_execution_identity_joins_exact_occurrence () =
     [ None; None; None ] (ids ())
 ;;
 
+(* A history read remembers what a run said while the run's file keeps the
+   identity it had when read (device, inode, size, modification time), and
+   reads the run again once any of them changes. The first proof rewrites the
+   file in place to the same length with a different outcome and puts its
+   modification time back: the remembered outcome is served, so the run was
+   not parsed again. The second changes the length. *)
+let pinned_mtime = 1_700_000_000.
+
+let final_text_of_single_turn config =
+  match Keeper_autonomous_turn_source.load_recent ~config ~keeper_name () with
+  | [ turn ] -> turn.final_text
+  | turns -> Alcotest.failf "expected one turn, got %d" (List.length turns)
+;;
+
+let test_a_run_is_parsed_again_only_when_its_file_changes () =
+  with_workspace @@ fun config ->
+  let path = trace_path config "remembered" in
+  let lines final_text =
+    run_lines ~worker_run_id:"run-remembered" ~start_seq:1 ~base_ts:5000.
+      ~prompt:Keeper_unified_prompt.autonomous_wake_marker ~final_text
+  in
+  write_lines path (lines "first outcome");
+  Unix.utimes path pinned_mtime pinned_mtime;
+  write_turn_record config ~absolute_turn:44
+    ~turn_kind:Turn_record.Autonomous
+    ~raw_trace_run_ref:(Some (run_ref ~path ~worker_run_id:"run-remembered" ~start_seq:1));
+  Alcotest.(check (option string)) "the run is read" (Some "first outcome")
+    (final_text_of_single_turn config);
+  let same_length =
+    String.concat "" (List.map (fun line -> Yojson.Safe.to_string line ^ "\n") (lines "other outcome"))
+  in
+  let inode_before = (Unix.stat path).Unix.st_ino in
+  let channel = open_out_gen [ Open_wronly; Open_binary ] 0o644 path in
+  Fun.protect ~finally:(fun () -> close_out channel) (fun () -> output_string channel same_length);
+  Unix.utimes path pinned_mtime pinned_mtime;
+  Alcotest.(check int) "rewritten in place" inode_before (Unix.stat path).Unix.st_ino;
+  Alcotest.(check (option string)) "an unchanged identity serves what was read"
+    (Some "first outcome") (final_text_of_single_turn config);
+  write_lines path (lines "a longer revised outcome");
+  Unix.utimes path pinned_mtime pinned_mtime;
+  Alcotest.(check (option string)) "a changed length is read again"
+    (Some "a longer revised outcome") (final_text_of_single_turn config)
+;;
+
 let test_direct_marker_spoof_is_excluded () =
   with_workspace @@ fun config ->
   let path = trace_path config "direct" in
@@ -622,6 +666,8 @@ let () =
             test_version_rejected_run_is_not_reread
         ; Alcotest.test_case "missing-trace run is not re-read" `Quick
             test_missing_trace_run_is_not_reread
+        ; Alcotest.test_case "a run is parsed again only when its file changes" `Quick
+            test_a_run_is_parsed_again_only_when_its_file_changes
         ; Alcotest.test_case "rejects mismatched raw session identity" `Quick
             test_mismatched_raw_trace_session_identity_is_skipped
         ; Alcotest.test_case "since and limit use current records" `Quick

@@ -289,6 +289,18 @@ Selecting the currently configured backend preserves its network policy; Advance
 setup can explicitly change it. Disabling guest networking affects sandbox commands.
 MASC model connections and WebFetch use separate server-side network controls.
 
+Apple Container builds images in a VM that uses Rosetta unless its configuration
+sets `[build] rosetta = false`. On a Mac without Rosetta the service still
+answers, but every image build fails. Setup checks this and offers two choices:
+
+- **Build images without Rosetta** writes `rosetta = false` under `[build]` in
+  `~/.config/container/config.toml` (or `$XDG_CONFIG_HOME/container/config.toml`)
+  and restarts the Apple Container service. Containers running in Apple
+  Container stop during the restart. Builds then make arm64 images only, which
+  is what MASC's sandbox image is.
+- **Install Rosetta** runs `softwareupdate --install-rosetta`. It shows Apple's
+  license and may ask for your password.
+
 ```bash
 masc setup                     # reopen connection and sandbox selection
 masc doctor                    # read-only preparation report

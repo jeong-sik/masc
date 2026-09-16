@@ -7,23 +7,45 @@
 open Result_syntax
 
 let target_version = Checkpoint_types.checkpoint_version
-let checkpoint_scope = Printf.sprintf "Checkpoint v%d" target_version
 
-let json_errorf format =
+(* A scope names where a value sits, for an error message. Validation builds
+   it as a chain of small nodes and spells it out only for a value that fails:
+   a checkpoint carrying a reasoning block's token-sized details holds hundreds
+   of thousands of elements, and a scope string for each of them was much of
+   what decoding one allocated. *)
+type scope =
+  | Root of string
+  | Suffix of scope * string
+  | Index of scope * string * int
+
+let rec scope_to_string = function
+  | Root name -> name
+  | Suffix (parent, suffix) -> scope_to_string parent ^ suffix
+  | Index (parent, label, index) ->
+    Printf.sprintf "%s%s[%d]" (scope_to_string parent) label index
+;;
+
+let checkpoint_scope = Root (Printf.sprintf "Checkpoint v%d" target_version)
+
+(* The error names the scope, then says what is wrong with the value there. *)
+let scope_errorf scope format =
   Printf.ksprintf
-    (fun detail -> Error (Error.Serialization (JsonParseError { detail })))
+    (fun rest ->
+       Error
+         (Error.Serialization (JsonParseError { detail = scope_to_string scope ^ rest })))
     format
 ;;
 
-let result_all items =
-  List.fold_left
-    (fun acc item ->
-       let* values = acc in
-       let* value = item in
-       Ok (value :: values))
-    (Ok [])
-    items
-  |> Result.map List.rev
+(* The first element that fails ends the walk, as the per-element results
+   folded together did, without building a result list. *)
+let validate_each ~scope ~label validate values =
+  let rec loop index = function
+    | [] -> Ok ()
+    | value :: rest ->
+      let* _ = validate ~scope:(Index (scope, label, index)) value in
+      loop (index + 1) rest
+  in
+  loop 0 values
 ;;
 
 let duplicate_names names =
@@ -39,7 +61,32 @@ let duplicate_names names =
   |> List.sort_uniq String.compare
 ;;
 
+(* Objects this small are checked for a repeated name pair by pair, which
+   allocates nothing; a larger one sorts its names. *)
+let pairwise_duplicate_scan_limit = 16
+
+let has_duplicate_name fields =
+  let rec pairwise = function
+    | [] -> false
+    | (name, _) :: rest ->
+      List.exists (fun (other, _) -> String.equal name other) rest || pairwise rest
+  in
+  if List.compare_length_with fields pairwise_duplicate_scan_limit <= 0
+  then pairwise fields
+  else not (List.is_empty (duplicate_names (List.map fst fields)))
+;;
+
+(* The mismatch lists are built only for an object that has one. *)
+let object_shape_holds ~required ~optional fields =
+  List.for_all (fun name -> List.mem_assoc name fields) required
+  && List.for_all
+       (fun (name, _) -> List.mem name required || List.mem name optional)
+       fields
+  && not (has_duplicate_name fields)
+;;
+
 let validate_object_shape ~scope ~required ~optional = function
+  | `Assoc fields when object_shape_holds ~required ~optional fields -> Ok fields
   | `Assoc fields ->
     let names = List.map fst fields in
     let duplicates = duplicate_names names in
@@ -49,45 +96,45 @@ let validate_object_shape ~scope ~required ~optional = function
     if duplicates = [] && missing = [] && unknown = []
     then Ok fields
     else
-      json_errorf
-        "%s schema mismatch (missing=[%s], unknown=[%s], duplicate=[%s])"
+      scope_errorf
         scope
+        " schema mismatch (missing=[%s], unknown=[%s], duplicate=[%s])"
         (String.concat "," missing)
         (String.concat "," unknown)
         (String.concat "," duplicates)
-  | _ -> json_errorf "%s must be a JSON object" scope
+  | _ -> scope_errorf scope " must be a JSON object"
 ;;
 
 let required_field ~scope name fields =
   match List.assoc_opt name fields with
   | Some value -> Ok value
-  | None -> json_errorf "%s is missing field %s" scope name
+  | None -> scope_errorf scope " is missing field %s" name
 ;;
 
 let validate_string ~scope = function
   | `String _ -> Ok ()
-  | _ -> json_errorf "%s must be a string" scope
+  | _ -> scope_errorf scope " must be a string"
 ;;
 
 let validate_identifier ~scope = function
   | `String value when String.trim value <> "" -> Ok ()
-  | `String _ -> json_errorf "%s must not be blank" scope
-  | _ -> json_errorf "%s must be a string" scope
+  | `String _ -> scope_errorf scope " must not be blank"
+  | _ -> scope_errorf scope " must be a string"
 ;;
 
 let validate_bool ~scope = function
   | `Bool _ -> Ok ()
-  | _ -> json_errorf "%s must be a boolean" scope
+  | _ -> scope_errorf scope " must be a boolean"
 ;;
 
 let validate_int ~scope = function
   | `Int _ -> Ok ()
-  | _ -> json_errorf "%s must be an integer" scope
+  | _ -> scope_errorf scope " must be an integer"
 ;;
 
 let validate_float ~scope = function
   | `Float _ -> Ok ()
-  | _ -> json_errorf "%s must be a float" scope
+  | _ -> scope_errorf scope " must be a float"
 ;;
 
 let validate_optional ~scope validate = function
@@ -97,27 +144,24 @@ let validate_optional ~scope validate = function
 
 let validate_string_value ~scope ~allowed = function
   | `String value when List.mem value allowed -> Ok ()
-  | `String value -> json_errorf "%s has unsupported value %S" scope value
-  | _ -> json_errorf "%s must be a string" scope
+  | `String value -> scope_errorf scope " has unsupported value %S" value
+  | _ -> scope_errorf scope " must be a string"
 ;;
 
 let validate_list ~scope validate = function
   | `List values ->
-    values
-    |> List.mapi (fun index value ->
-      validate ~scope:(Printf.sprintf "%s[%d]" scope index) value)
-    |> result_all
-    |> Result.map (fun _ -> ())
-  | _ -> json_errorf "%s must be an array" scope
+    validate_each ~scope ~label:"" validate values
+  | _ -> scope_errorf scope " must be an array"
 ;;
 
 let validate_unique_object ~scope = function
+  | `Assoc fields when not (has_duplicate_name fields) -> Ok ()
   | `Assoc fields ->
     let duplicates = duplicate_names (List.map fst fields) in
     if duplicates = []
     then Ok ()
-    else json_errorf "%s duplicates fields [%s]" scope (String.concat "," duplicates)
-  | _ -> json_errorf "%s must be a JSON object" scope
+    else scope_errorf scope " duplicates fields [%s]" (String.concat "," duplicates)
+  | _ -> scope_errorf scope " must be a JSON object"
 ;;
 
 let validate_env_pair ~scope json =
@@ -126,8 +170,8 @@ let validate_env_pair ~scope json =
   in
   let* key = required_field ~scope "key" fields in
   let* value = required_field ~scope "value" fields in
-  let* () = validate_string ~scope:(scope ^ ".key") key in
-  validate_string ~scope:(scope ^ ".value") value
+  let* () = validate_string ~scope:(Suffix (scope, ".key")) key in
+  validate_string ~scope:(Suffix (scope, ".value")) value
 ;;
 
 let validate_tool_param ~scope json =
@@ -142,15 +186,15 @@ let validate_tool_param ~scope json =
   let* description = required_field ~scope "description" fields in
   let* param_type = required_field ~scope "param_type" fields in
   let* required = required_field ~scope "required" fields in
-  let* () = validate_string ~scope:(scope ^ ".name") name in
-  let* () = validate_string ~scope:(scope ^ ".description") description in
+  let* () = validate_string ~scope:(Suffix (scope, ".name")) name in
+  let* () = validate_string ~scope:(Suffix (scope, ".description")) description in
   let* () =
     validate_string_value
-      ~scope:(scope ^ ".param_type")
+      ~scope:(Suffix (scope, ".param_type"))
       ~allowed:[ "string"; "integer"; "number"; "boolean"; "array"; "object" ]
       param_type
   in
-  validate_bool ~scope:(scope ^ ".required") required
+  validate_bool ~scope:(Suffix (scope, ".required")) required
 ;;
 
 let validate_tool_schema ~scope json =
@@ -164,20 +208,22 @@ let validate_tool_schema ~scope json =
   let* name = required_field ~scope "name" fields in
   let* description = required_field ~scope "description" fields in
   let* parameters = required_field ~scope "parameters" fields in
-  let* () = validate_string ~scope:(scope ^ ".name") name in
-  let* () = validate_string ~scope:(scope ^ ".description") description in
-  let* () = validate_list ~scope:(scope ^ ".parameters") validate_tool_param parameters in
+  let* () = validate_string ~scope:(Suffix (scope, ".name")) name in
+  let* () = validate_string ~scope:(Suffix (scope, ".description")) description in
+  let* () =
+    validate_list ~scope:(Suffix (scope, ".parameters")) validate_tool_param parameters
+  in
   let* () =
     match List.assoc_opt "strict" fields with
     | None -> Ok ()
-    | Some strict -> validate_bool ~scope:(scope ^ ".strict") strict
+    | Some strict -> validate_bool ~scope:(Suffix (scope, ".strict")) strict
   in
   (* The authoritative tool argument schema is carried verbatim; only its
      outer shape is contracted here, since its body is provider JSON Schema. *)
   match List.assoc_opt "input_schema" fields with
   | None -> Ok ()
   | Some input_schema ->
-    validate_unique_object ~scope:(scope ^ ".input_schema") input_schema
+    validate_unique_object ~scope:(Suffix (scope, ".input_schema")) input_schema
 ;;
 
 let validate_tool_choice ~scope = function
@@ -197,12 +243,12 @@ let validate_tool_choice ~scope = function
          validate_object_shape ~scope ~required:[ "type"; "name" ] ~optional:[] json
        in
        let* name = required_field ~scope "name" fields in
-       validate_string ~scope:(scope ^ ".name") name
-     | [ `String value ] -> json_errorf "%s has unsupported type %S" scope value
-     | [ _ ] -> json_errorf "%s.type must be a string" scope
-     | [] -> json_errorf "%s is missing field type" scope
-     | _ -> json_errorf "%s duplicates field type" scope)
-  | _ -> json_errorf "%s must be null or a JSON object" scope
+       validate_string ~scope:(Suffix (scope, ".name")) name
+     | [ `String value ] -> scope_errorf scope " has unsupported type %S" value
+     | [ _ ] -> scope_errorf scope ".type must be a string"
+     | [] -> scope_errorf scope " is missing field type"
+     | _ -> scope_errorf scope " duplicates field type")
+  | _ -> scope_errorf scope " must be null or a JSON object"
 ;;
 
 let validate_response_format ~scope = function
@@ -222,13 +268,13 @@ let validate_response_format ~scope = function
        in
        let* schema = required_field ~scope "schema" fields in
        (match schema with
-        | `Null -> json_errorf "%s.schema must not be null" scope
+        | `Null -> scope_errorf scope ".schema must not be null"
         | _ -> Ok ())
-     | [ `String value ] -> json_errorf "%s has unsupported type %S" scope value
-     | [ _ ] -> json_errorf "%s.type must be a string" scope
-     | [] -> json_errorf "%s is missing field type" scope
-     | _ -> json_errorf "%s duplicates field type" scope)
-  | _ -> json_errorf "%s must be a JSON object" scope
+     | [ `String value ] -> scope_errorf scope " has unsupported type %S" value
+     | [ _ ] -> scope_errorf scope ".type must be a string"
+     | [] -> scope_errorf scope " is missing field type"
+     | _ -> scope_errorf scope " duplicates field type")
+  | _ -> scope_errorf scope " must be a JSON object"
 ;;
 
 let current_checkpoint_fields =
@@ -282,20 +328,24 @@ let validate_usage_numbers ~scope fields =
   in
   let* api_calls = required_field ~scope "api_calls" fields in
   let* estimated_cost_usd = required_field ~scope "estimated_cost_usd" fields in
-  let* () = validate_int ~scope:(scope ^ ".total_input_tokens") total_input_tokens in
-  let* () = validate_int ~scope:(scope ^ ".total_output_tokens") total_output_tokens in
+  let* () =
+    validate_int ~scope:(Suffix (scope, ".total_input_tokens")) total_input_tokens
+  in
+  let* () =
+    validate_int ~scope:(Suffix (scope, ".total_output_tokens")) total_output_tokens
+  in
   let* () =
     validate_int
-      ~scope:(scope ^ ".total_cache_creation_input_tokens")
+      ~scope:(Suffix (scope, ".total_cache_creation_input_tokens"))
       total_cache_creation_input_tokens
   in
   let* () =
     validate_int
-      ~scope:(scope ^ ".total_cache_read_input_tokens")
+      ~scope:(Suffix (scope, ".total_cache_read_input_tokens"))
       total_cache_read_input_tokens
   in
-  let* () = validate_int ~scope:(scope ^ ".api_calls") api_calls in
-  validate_float ~scope:(scope ^ ".estimated_cost_usd") estimated_cost_usd
+  let* () = validate_int ~scope:(Suffix (scope, ".api_calls")) api_calls in
+  validate_float ~scope:(Suffix (scope, ".estimated_cost_usd")) estimated_cost_usd
 ;;
 
 let validate_pricing_gap ~scope = function
@@ -316,24 +366,24 @@ let validate_pricing_gap ~scope = function
        in
        let* model_id = required_field ~scope "model_id" fields in
        (match model_id with
-        | `String "" -> json_errorf "%s.model_id must not be empty" scope
+        | `String "" -> scope_errorf scope ".model_id must not be empty"
         | `String _ -> Ok ()
-        | _ -> json_errorf "%s.model_id must be a string" scope)
-     | [ `String value ] -> json_errorf "%s has unsupported kind %S" scope value
-     | [ _ ] -> json_errorf "%s.kind must be a string" scope
-     | [] -> json_errorf "%s is missing field kind" scope
-     | _ -> json_errorf "%s duplicates field kind" scope)
-  | _ -> json_errorf "%s must be null or a JSON object" scope
+        | _ -> scope_errorf scope ".model_id must be a string")
+     | [ `String value ] -> scope_errorf scope " has unsupported kind %S" value
+     | [ _ ] -> scope_errorf scope ".kind must be a string"
+     | [] -> scope_errorf scope " is missing field kind"
+     | _ -> scope_errorf scope " duplicates field kind")
+  | _ -> scope_errorf scope " must be null or a JSON object"
 ;;
 
 let validate_current_usage json =
-  let scope = checkpoint_scope ^ " usage" in
+  let scope = Suffix (checkpoint_scope, " usage") in
   let* fields =
     validate_object_shape ~scope ~required:current_usage_fields ~optional:[] json
   in
   let* () = validate_usage_numbers ~scope fields in
   let* pricing_gap = required_field ~scope "pricing_gap" fields in
-  validate_pricing_gap ~scope:(scope ^ ".pricing_gap") pricing_gap
+  validate_pricing_gap ~scope:(Suffix (scope, ".pricing_gap")) pricing_gap
 ;;
 
 let rec validate_tool_result ~scope json =
@@ -351,27 +401,23 @@ let rec validate_tool_result ~scope json =
   let* () =
     match type_value with
     | `String "tool_result" -> Ok ()
-    | `String value -> json_errorf "%s.type must be tool_result, got %S" scope value
-    | _ -> json_errorf "%s.type must be a string" scope
+    | `String value -> scope_errorf scope ".type must be tool_result, got %S" value
+    | _ -> scope_errorf scope ".type must be a string"
   in
-  let* () = validate_identifier ~scope:(scope ^ ".tool_use_id") tool_use_id in
+  let* () = validate_identifier ~scope:(Suffix (scope, ".tool_use_id")) tool_use_id in
   let* () =
     match content with
     | `String _ -> Ok ()
     | `List blocks ->
-      blocks
-      |> List.mapi (fun index block ->
-        validate_content_block ~scope:(Printf.sprintf "%s.content[%d]" scope index) block)
-      |> result_all
-      |> Result.map (fun _ -> ())
-    | _ -> json_errorf "%s.content must be a string or an array" scope
+      validate_each ~scope ~label:".content" validate_content_block blocks
+    | _ -> scope_errorf scope ".content must be a string or an array"
   in
   let* () =
     match List.assoc_opt "text_content" fields, content with
     | None, _ -> Ok ()
     | Some (`String _), `List _ -> Ok ()
-    | Some _, `List _ -> json_errorf "%s.text_content must be a string" scope
-    | Some _, _ -> json_errorf "%s.text_content requires structured content" scope
+    | Some _, `List _ -> scope_errorf scope ".text_content must be a string"
+    | Some _, _ -> scope_errorf scope ".text_content requires structured content"
   in
   let failure_kind = List.assoc_opt "failure_kind" fields in
   let error_class = List.assoc_opt "error_class" fields in
@@ -386,7 +432,7 @@ let rec validate_tool_result ~scope json =
            | Types.Non_retryable_tool_error
            | Types.Reported_tool_error
            | Types.Unattributed_tool_error ) -> Ok ()
-       | Error _ -> json_errorf "%s.failure_kind is not a supported value" scope)
+       | Error _ -> scope_errorf scope ".failure_kind is not a supported value")
   in
   let* () =
     match error_class with
@@ -394,18 +440,18 @@ let rec validate_tool_result ~scope json =
     | Some value ->
       (match Types.tool_error_class_of_yojson value with
        | Ok (Types.Transient | Types.Deterministic | Types.Unknown) -> Ok ()
-       | Error _ -> json_errorf "%s.error_class is not a supported value" scope)
+       | Error _ -> scope_errorf scope ".error_class is not a supported value")
   in
   match is_error, failure_kind, error_class with
   | `Bool true, None, None ->
-    json_errorf "%s failure is missing failure_kind provenance" scope
+    scope_errorf scope " failure is missing failure_kind provenance"
   | `Bool true, Some _, _ -> Ok json
   | `Bool true, None, Some _ ->
-    json_errorf "%s has error_class without failure_kind" scope
+    scope_errorf scope " has error_class without failure_kind"
   | `Bool false, None, None -> Ok json
   | `Bool false, Some _, _ | `Bool false, None, Some _ ->
-    json_errorf "%s marks success but contains failure provenance" scope
-  | _, _, _ -> json_errorf "%s is_error must be boolean" scope
+    scope_errorf scope " marks success but contains failure provenance"
+  | _, _, _ -> scope_errorf scope " is_error must be boolean"
 
 and validate_content_block ~scope json =
   match json with
@@ -422,7 +468,7 @@ and validate_content_block ~scope json =
          validate_object_shape ~scope ~required:[ "type"; "text" ] ~optional:[] json
        in
        let* text = required_field ~scope "text" fields in
-       let+ () = validate_string ~scope:(scope ^ ".text") text in
+       let+ () = validate_string ~scope:(Suffix (scope, ".text")) text in
        json
      | [ `String "thinking" ] ->
        let* fields =
@@ -433,11 +479,12 @@ and validate_content_block ~scope json =
            json
        in
        let* thinking = required_field ~scope "thinking" fields in
-       let* () = validate_string ~scope:(scope ^ ".thinking") thinking in
+       let* () = validate_string ~scope:(Suffix (scope, ".thinking")) thinking in
        let* () =
          match List.assoc_opt "signature" fields with
          | None -> Ok ()
-         | Some signature -> validate_string ~scope:(scope ^ ".signature") signature
+         | Some signature ->
+           validate_string ~scope:(Suffix (scope, ".signature")) signature
        in
        Ok json
      | [ `String "reasoning_details" ] ->
@@ -450,13 +497,13 @@ and validate_content_block ~scope json =
        in
        let* details = required_field ~scope "details" fields in
        let* () =
-         validate_list ~scope:(scope ^ ".details") validate_unique_object details
+         validate_list ~scope:(Suffix (scope, ".details")) validate_unique_object details
        in
        let* () =
          match List.assoc_opt "reasoning_content" fields with
          | None -> Ok ()
          | Some (`String _) -> Ok ()
-         | Some _ -> json_errorf "%s.reasoning_content must be a string" scope
+         | Some _ -> scope_errorf scope ".reasoning_content must be a string"
        in
        Ok json
      | [ `String "redacted_thinking" ] ->
@@ -464,7 +511,7 @@ and validate_content_block ~scope json =
          validate_object_shape ~scope ~required:[ "type"; "data" ] ~optional:[] json
        in
        let* data = required_field ~scope "data" fields in
-       let+ () = validate_string ~scope:(scope ^ ".data") data in
+       let+ () = validate_string ~scope:(Suffix (scope, ".data")) data in
        json
      | [ `String "tool_use" ] ->
        let* fields =
@@ -476,8 +523,8 @@ and validate_content_block ~scope json =
        in
        let* id = required_field ~scope "id" fields in
        let* name = required_field ~scope "name" fields in
-       let* () = validate_identifier ~scope:(scope ^ ".id") id in
-       let+ () = validate_identifier ~scope:(scope ^ ".name") name in
+       let* () = validate_identifier ~scope:(Suffix (scope, ".id")) id in
+       let+ () = validate_identifier ~scope:(Suffix (scope, ".name")) name in
        json
      | [ `String ("image" | "document" | "audio") ] ->
        let* fields =
@@ -486,36 +533,41 @@ and validate_content_block ~scope json =
        let* source = required_field ~scope "source" fields in
        let* source_fields =
          validate_object_shape
-           ~scope:(scope ^ ".source")
+           ~scope:(Suffix (scope, ".source"))
            ~required:[ "type"; "media_type"; "data" ]
            ~optional:[]
            source
        in
        let* source_type =
-         required_field ~scope:(scope ^ ".source") "type" source_fields
+         required_field ~scope:(Suffix (scope, ".source")) "type" source_fields
        in
        let* media_type =
-         required_field ~scope:(scope ^ ".source") "media_type" source_fields
+         required_field ~scope:(Suffix (scope, ".source")) "media_type" source_fields
        in
-       let* data = required_field ~scope:(scope ^ ".source") "data" source_fields in
+       let* data =
+         required_field ~scope:(Suffix (scope, ".source")) "data" source_fields
+       in
        let* () =
          validate_string_value
-           ~scope:(scope ^ ".source.type")
+           ~scope:(Suffix (scope, ".source.type"))
            ~allowed:[ "base64"; "url"; "file_id" ]
            source_type
        in
-       let* () = validate_string ~scope:(scope ^ ".source.media_type") media_type in
-       let+ () = validate_string ~scope:(scope ^ ".source.data") data in
+       let* () =
+         validate_string ~scope:(Suffix (scope, ".source.media_type")) media_type
+       in
+       let+ () = validate_string ~scope:(Suffix (scope, ".source.data")) data in
        json
-     | [ `String value ] -> json_errorf "%s has unsupported type %S" scope value
-     | [ _ ] -> json_errorf "%s type must be a string" scope
-     | [] -> json_errorf "%s is missing field type" scope
-     | _ -> json_errorf "%s duplicates field type" scope)
-  | _ -> json_errorf "%s must be a JSON object" scope
+     | [ `String value ] -> scope_errorf scope " has unsupported type %S" value
+     | [ _ ] -> scope_errorf scope " type must be a string"
+     | [] -> scope_errorf scope " is missing field type"
+     | _ -> scope_errorf scope " duplicates field type")
+  | _ -> scope_errorf scope " must be a JSON object"
 ;;
 
-let validate_message index json =
-  let scope = Printf.sprintf "%s message[%d]" checkpoint_scope index in
+let message_label = " message"
+
+let validate_message_in ~scope json =
   let* fields =
     validate_object_shape
       ~scope
@@ -528,25 +580,27 @@ let validate_message index json =
   let* role =
     match role with
     | `String (("system" | "user" | "assistant" | "tool") as role) -> Ok role
-    | `String role -> json_errorf "%s.role has unsupported value %S" scope role
-    | _ -> json_errorf "%s.role must be a string" scope
+    | `String role -> scope_errorf scope ".role has unsupported value %S" role
+    | _ -> scope_errorf scope ".role must be a string"
   in
   let* () =
     match List.assoc_opt "name" fields with
     | None -> Ok ()
-    | Some name -> validate_string ~scope:(scope ^ ".name") name
+    | Some name -> validate_string ~scope:(Suffix (scope, ".name")) name
   in
   let* () =
     match List.assoc_opt "tool_call_id" fields with
     | None -> Ok ()
-    | Some tool_call_id -> validate_string ~scope:(scope ^ ".tool_call_id") tool_call_id
+    | Some tool_call_id ->
+      validate_string ~scope:(Suffix (scope, ".tool_call_id")) tool_call_id
   in
   let* () =
     match List.assoc_opt "metadata" fields with
     | None -> Ok ()
     | Some (`Assoc []) ->
-      json_errorf "%s.metadata must be omitted when it has no fields" scope
-    | Some metadata -> validate_unique_object ~scope:(scope ^ ".metadata") metadata
+      scope_errorf scope ".metadata must be omitted when it has no fields"
+    | Some metadata ->
+      validate_unique_object ~scope:(Suffix (scope, ".metadata")) metadata
   in
   match content with
   | `List blocks ->
@@ -560,30 +614,36 @@ let validate_message index json =
     let has_tool_result = List.exists is_tool_result blocks in
     let* () =
       match role, blocks, has_tool_result with
-      | "tool", [], _ -> json_errorf "%s role tool requires at least one ToolResult" scope
+      | "tool", [], _ -> scope_errorf scope " role tool requires at least one ToolResult"
       | "tool", _, true when List.for_all is_tool_result blocks -> Ok ()
       | "tool", _, _ ->
-        json_errorf "%s role tool may contain only ToolResult blocks" scope
+        scope_errorf scope " role tool may contain only ToolResult blocks"
       | ("system" | "user" | "assistant"), _, true ->
-        json_errorf "%s ToolResult requires role tool" scope
+        scope_errorf scope " ToolResult requires role tool"
       | ("system" | "user" | "assistant"), _, false -> Ok ()
-      | _ -> json_errorf "%s has an unsupported role/content combination" scope
+      | _ -> scope_errorf scope " has an unsupported role/content combination"
     in
-    let* _ =
-      blocks
-      |> List.mapi (fun block_index block ->
-        validate_content_block
-          ~scope:(Printf.sprintf "%s content[%d]" scope block_index)
-          block)
-      |> result_all
+    let* () =
+      validate_each ~scope ~label:" content" validate_content_block blocks
     in
     Ok json
-  | _ -> json_errorf "%s content must be an array" scope
+  | _ -> scope_errorf scope " content must be an array"
+;;
+
+(* One message on its own, for the per-message encoding memo. Same answer and
+   the same error text as the message validated inside [validate_messages]. *)
+let validate_message index json =
+  validate_message_in ~scope:(Index (checkpoint_scope, message_label, index)) json
 ;;
 
 let validate_messages = function
-  | `List messages -> messages |> List.mapi validate_message |> result_all
-  | _ -> json_errorf "%s messages must be an array" checkpoint_scope
+  | `List messages ->
+    validate_each
+      ~scope:checkpoint_scope
+      ~label:message_label
+      validate_message_in
+      messages
+  | _ -> scope_errorf checkpoint_scope " messages must be an array"
 ;;
 
 let mcp_session_common_fields =
@@ -597,12 +657,11 @@ let mcp_session_http_fields =
 let transport_kind_of_json ~scope = function
   | `String "stdio" -> Ok `Stdio
   | `String "http" -> Ok `Http
-  | `String value -> json_errorf "%s has unsupported value %S" scope value
-  | _ -> json_errorf "%s must be a string" scope
+  | `String value -> scope_errorf scope " has unsupported value %S" value
+  | _ -> scope_errorf scope " must be a string"
 ;;
 
-let validate_mcp_session index json =
-  let scope = Printf.sprintf "%s mcp_sessions[%d]" checkpoint_scope index in
+let validate_mcp_session ~scope json =
   let* fields =
     validate_object_shape ~scope ~required:mcp_session_http_fields ~optional:[] json
   in
@@ -612,32 +671,41 @@ let validate_mcp_session index json =
   let* env = required_field ~scope "env" fields in
   let* tool_schemas = required_field ~scope "tool_schemas" fields in
   let* transport_kind = required_field ~scope "transport_kind" fields in
-  let* () = validate_string ~scope:(scope ^ ".server_name") server_name in
-  let* () = validate_string ~scope:(scope ^ ".command") command in
-  let* () = validate_list ~scope:(scope ^ ".args") validate_string args in
-  let* () = validate_list ~scope:(scope ^ ".env") validate_env_pair env in
+  let* () = validate_string ~scope:(Suffix (scope, ".server_name")) server_name in
+  let* () = validate_string ~scope:(Suffix (scope, ".command")) command in
+  let* () = validate_list ~scope:(Suffix (scope, ".args")) validate_string args in
+  let* () = validate_list ~scope:(Suffix (scope, ".env")) validate_env_pair env in
   let* () =
-    validate_list ~scope:(scope ^ ".tool_schemas") validate_tool_schema tool_schemas
+    validate_list
+      ~scope:(Suffix (scope, ".tool_schemas"))
+      validate_tool_schema tool_schemas
   in
   let* transport_kind =
-    transport_kind_of_json ~scope:(scope ^ ".transport_kind") transport_kind
+    transport_kind_of_json ~scope:(Suffix (scope, ".transport_kind")) transport_kind
   in
   let* http_base_url = required_field ~scope "http_base_url" fields in
   let* http_headers = required_field ~scope "http_headers" fields in
   let* () =
-    validate_optional ~scope:(scope ^ ".http_base_url") validate_string http_base_url
+    validate_optional
+      ~scope:(Suffix (scope, ".http_base_url"))
+      validate_string http_base_url
   in
   let* () =
-    validate_list ~scope:(scope ^ ".http_headers") validate_env_pair http_headers
+    validate_list ~scope:(Suffix (scope, ".http_headers")) validate_env_pair http_headers
   in
   match transport_kind, http_base_url with
-  | `Http, `Null -> json_errorf "%s HTTP transport requires http_base_url" scope
+  | `Http, `Null -> scope_errorf scope " HTTP transport requires http_base_url"
   | (`Http | `Stdio), _ -> Ok json
 ;;
 
 let validate_mcp_sessions = function
-  | `List sessions -> sessions |> List.mapi validate_mcp_session |> result_all
-  | _ -> json_errorf "%s mcp_sessions must be an array" checkpoint_scope
+  | `List sessions ->
+    validate_each
+      ~scope:checkpoint_scope
+      ~label:" mcp_sessions"
+      validate_mcp_session
+      sessions
+  | _ -> scope_errorf checkpoint_scope " mcp_sessions must be an array"
 ;;
 
 let validate_common_checkpoint_fields ~scope fields =
@@ -661,39 +729,47 @@ let validate_common_checkpoint_fields ~scope fields =
   in
   let* cache_system_prompt = required_field ~scope "cache_system_prompt" fields in
   let* context = required_field ~scope "context" fields in
-  let* () = validate_string ~scope:(scope ^ ".session_id") session_id in
-  let* () = validate_string ~scope:(scope ^ ".agent_name") agent_name in
-  let* () = validate_string ~scope:(scope ^ ".model") model in
+  let* () = validate_string ~scope:(Suffix (scope, ".session_id")) session_id in
+  let* () = validate_string ~scope:(Suffix (scope, ".agent_name")) agent_name in
+  let* () = validate_string ~scope:(Suffix (scope, ".model")) model in
   let* () =
-    validate_optional ~scope:(scope ^ ".system_prompt") validate_string system_prompt
+    validate_optional
+      ~scope:(Suffix (scope, ".system_prompt"))
+      validate_string system_prompt
   in
-  let* () = validate_int ~scope:(scope ^ ".turn_count") turn_count in
-  let* () = validate_float ~scope:(scope ^ ".created_at") created_at in
-  let* () = validate_list ~scope:(scope ^ ".tools") validate_tool_schema tools in
-  let* () = validate_tool_choice ~scope:(scope ^ ".tool_choice") tool_choice in
+  let* () = validate_int ~scope:(Suffix (scope, ".turn_count")) turn_count in
+  let* () = validate_float ~scope:(Suffix (scope, ".created_at")) created_at in
+  let* () = validate_list ~scope:(Suffix (scope, ".tools")) validate_tool_schema tools in
+  let* () = validate_tool_choice ~scope:(Suffix (scope, ".tool_choice")) tool_choice in
   let* () =
-    validate_optional ~scope:(scope ^ ".temperature") validate_float temperature
+    validate_optional ~scope:(Suffix (scope, ".temperature")) validate_float temperature
   in
-  let* () = validate_optional ~scope:(scope ^ ".top_p") validate_float top_p in
-  let* () = validate_optional ~scope:(scope ^ ".top_k") validate_int top_k in
-  let* () = validate_optional ~scope:(scope ^ ".min_p") validate_float min_p in
+  let* () = validate_optional ~scope:(Suffix (scope, ".top_p")) validate_float top_p in
+  let* () = validate_optional ~scope:(Suffix (scope, ".top_k")) validate_int top_k in
+  let* () = validate_optional ~scope:(Suffix (scope, ".min_p")) validate_float min_p in
   let* () =
-    validate_optional ~scope:(scope ^ ".enable_thinking") validate_bool enable_thinking
+    validate_optional
+      ~scope:(Suffix (scope, ".enable_thinking"))
+      validate_bool enable_thinking
   in
   let* () =
     validate_optional
-      ~scope:(scope ^ ".preserve_thinking")
+      ~scope:(Suffix (scope, ".preserve_thinking"))
       validate_bool
       preserve_thinking
   in
   let* () =
-    validate_response_format ~scope:(scope ^ ".response_format") response_format
+    validate_response_format ~scope:(Suffix (scope, ".response_format")) response_format
   in
   let* () =
-    validate_bool ~scope:(scope ^ ".disable_parallel_tool_use") disable_parallel_tool_use
+    validate_bool
+      ~scope:(Suffix (scope, ".disable_parallel_tool_use"))
+      disable_parallel_tool_use
   in
-  let* () = validate_bool ~scope:(scope ^ ".cache_system_prompt") cache_system_prompt in
-  validate_unique_object ~scope:(scope ^ ".context") context
+  let* () =
+    validate_bool ~scope:(Suffix (scope, ".cache_system_prompt")) cache_system_prompt
+  in
+  validate_unique_object ~scope:(Suffix (scope, ".context")) context
 ;;
 
 let validate_v11_json json =
@@ -706,8 +782,8 @@ let validate_v11_json json =
     match version with
     | `Int version when version = target_version -> Ok ()
     | `Int version ->
-      json_errorf "%s has version %d, expected %d" scope version target_version
-    | _ -> json_errorf "%s version must be an integer" scope
+      scope_errorf scope " has version %d, expected %d" version target_version
+    | _ -> scope_errorf scope " version must be an integer"
   in
   let* () = validate_common_checkpoint_fields ~scope fields in
   let* usage = required_field ~scope "usage" fields in
@@ -718,7 +794,7 @@ let validate_v11_json json =
   let* _ = validate_mcp_sessions mcp_sessions in
   let* reasoning_effort = required_field ~scope "reasoning_effort" fields in
   validate_optional
-    ~scope:(scope ^ ".reasoning_effort")
+    ~scope:(Suffix (scope, ".reasoning_effort"))
     (validate_string_value ~allowed:Llm_provider.Reasoning_effort.all_wire_values)
     reasoning_effort
 ;;

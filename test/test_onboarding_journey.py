@@ -49,8 +49,29 @@ def pdf_readiness_parsed(ready=False):
     accepts fails here instead of passing a value production never produces."""
     return SETUP.decode_pdf_tools_readiness(pdf_readiness(ready))
 
-class Journey(unittest.TestCase):
+class StepByStep(unittest.TestCase):
+    """Cases that walk the journey one screen at a time.
+
+    quick_plan looks for claude on PATH, so a developer's Mac and a CI runner
+    would open these cases on different first screens. They are pinned to a
+    computer that has no plan to offer; QuickSetup covers the plan.
+    """
+
     def setUp(self):
+        plan = patch.object(SETUP, 'quick_plan', return_value=None)
+        plan.start()
+        self.addCleanup(plan.stop)
+
+
+def path_without(command, path):
+    """PATH with every directory that holds `command` left out."""
+    return os.pathsep.join(entry for entry in path.split(os.pathsep)
+                           if entry and not os.path.exists(os.path.join(entry, command)))
+
+
+class Journey(StepByStep):
+    def setUp(self):
+        super().setUp()
         renderer = patch.object(SETUP, 'render', return_value=('fixture.native-model', b'', b''))
         renderer.start()
         self.addCleanup(renderer.stop)
@@ -583,6 +604,9 @@ class Journey(unittest.TestCase):
                 for key in list(environment):
                     if key.startswith('MASC_') or key.startswith('AGENT_CORE_'):
                         environment.pop(key)
+                # This case walks step 1; with Claude Code on PATH the journey
+                # opens on the quick setup plan instead.
+                environment['PATH'] = path_without('claude', environment.get('PATH', ''))
                 os.chdir(home)  # helper cannot depend on the source checkout
                 os.execve(BINARY, [BINARY, 'setup'], environment)
             captured = b''
@@ -658,7 +682,8 @@ class Journey(unittest.TestCase):
             if pid == 0:
                 environment = {key: value for key, value in os.environ.items()
                                if not key.startswith(('MASC_', 'AGENT_CORE_'))}
-                environment.update(HOME=home, XDG_CONFIG_HOME=home + '/config', TERM='dumb')
+                environment.update(HOME=home, XDG_CONFIG_HOME=home + '/config', TERM='dumb',
+                                   PATH=path_without('claude', environment.get('PATH', '')))
                 os.chdir(home)
                 os.execve(BINARY, [BINARY, 'setup'], environment)
             captured = b''
@@ -856,7 +881,7 @@ def korean_terminal():
                       clear=False)
 
 
-class LocalVoice(unittest.TestCase):
+class LocalVoice(StepByStep):
     """The voice question the journey asks before the sandbox.
 
     Speaking needs nothing downloaded -- say is in the base system -- so the
@@ -1058,7 +1083,7 @@ class PdfToolsProbe(unittest.TestCase):
         self.assertEqual(run.call_args.kwargs['timeout'], SETUP.PDF_TOOLS_PROBE_TIMEOUT_SECONDS)
 
 
-class InvalidWorkspaceDiagnostic(unittest.TestCase):
+class InvalidWorkspaceDiagnostic(StepByStep):
     """An invalid check is named on screen, and every exit stays open.
 
     `invalid` is not one condition. A dangling assignment is repaired by saving
@@ -1153,7 +1178,7 @@ class InvalidWorkspaceDiagnostic(unittest.TestCase):
         pick.assert_called_once()
 
 
-class FailedSaveReporting(unittest.TestCase):
+class FailedSaveReporting(StepByStep):
     """A save that died in validation is not the operator deferring the step.
 
     Both paths leave the wizard without a model connection, but only one of
@@ -1190,6 +1215,203 @@ class FailedSaveReporting(unittest.TestCase):
             dict(configured=False, readiness='deferred', base_path='/workspace'))
         self.assertEqual(code, 0)
         self.assertIn('workspace is saved', errors)
+
+APPLE_ARGS = ['--sandbox-profile', 'microvm', '--microvm-backend', 'apple_container']
+
+
+def sandbox_row(backend, state, reason=''):
+    return dict(id=backend, state=state, reason=reason,
+                setup_args=APPLE_ARGS if backend == 'apple_container' else ['--sandbox-profile', 'docker'],
+                capabilities=dict(network_modes=['none', 'inherit']))
+
+
+def sandbox_catalog_of(*rows, configured=None):
+    return dict(schema='masc.sandbox_readiness.v1', candidates=list(rows), configured_selection=configured)
+
+
+def actions_of(*ids):
+    return dict(schema='masc.prerequisite_actions.v1', actions=[dict(id=value) for value in ids])
+
+
+class QuickSetup(unittest.TestCase):
+    """One screen, then straight through: workspace, Claude Code, text only, sandbox.
+
+    A fresh Mac asked eleven questions before imp answered (2026-09-15). The
+    plan is offered only where it has a model to go to, and every step that
+    cannot decide on its own hands back to the screen that step already has.
+    """
+
+    def test_without_claude_code_there_is_no_plan(self):
+        with patch.object(SETUP.shutil, 'which', return_value=None), \
+                patch.object(SETUP, 'sandbox_catalog') as catalog:
+            self.assertIsNone(SETUP.quick_plan('masc', '/workspace'))
+        catalog.assert_not_called()
+
+    def test_the_plan_goes_to_apple_container_wherever_the_host_supports_it(self):
+        catalog = sandbox_catalog_of(sandbox_row('apple_container', 'missing_prerequisite'),
+                                     sandbox_row('docker', 'service_ready'))
+        with patch.object(SETUP.shutil, 'which', return_value='/bin/claude'), \
+                patch.object(SETUP, 'sandbox_catalog', return_value=catalog):
+            plan = SETUP.quick_plan('masc', '/workspace')
+        self.assertEqual(plan, dict(model='claude-sonnet-5', sandbox='apple_container', sandbox_ready=False))
+
+    def test_elsewhere_the_plan_takes_a_running_docker_or_leaves_the_sandbox_to_step_4(self):
+        unsupported = sandbox_row('apple_container', 'unsupported_host')
+        for docker, expected in ((sandbox_row('docker', 'service_ready'), 'docker'),
+                                 (sandbox_row('docker', 'probe_failed'), None)):
+            with patch.object(SETUP.shutil, 'which', return_value='/bin/claude'), \
+                    patch.object(SETUP, 'sandbox_catalog', return_value=sandbox_catalog_of(unsupported, docker)):
+                self.assertEqual(SETUP.quick_plan('masc', '/workspace')['sandbox'], expected)
+
+    def test_an_unreadable_sandbox_catalog_offers_no_plan(self):
+        with patch.object(SETUP.shutil, 'which', return_value='/bin/claude'), \
+                patch.object(SETUP, 'sandbox_catalog', side_effect=SETUP.SetupError('unreadable')):
+            self.assertIsNone(SETUP.quick_plan('masc', '/workspace'))
+
+    def journey(self, choices, plan):
+        with patch.object(SETUP, 'onboarding_status', return_value=observation()), \
+                patch.object(SETUP, 'quick_plan', return_value=plan), \
+                patch.object(SETUP, 'pick', side_effect=choices) as picker, \
+                patch.object(SETUP, 'workspace_check', return_value=dict(base_path='/workspace')), \
+                patch.object(SETUP, 'workspace_port', return_value=8945), \
+                patch.object(SETUP, 'select_setup_server', return_value=8945), \
+                patch.object(SETUP, 'wizard', return_value=dict(readiness='verified')) as models, \
+                patch.object(SETUP, 'select_local_voice') as voice, \
+                patch.object(SETUP, 'sandbox_journey', return_value=0) as sandbox, \
+                patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0)), \
+                contextlib.redirect_stderr(io.StringIO()) as errors:
+            code = SETUP.journey('/bin/masc', None, 8945, 10)
+        return code, picker, models, voice, sandbox, errors.getvalue()
+
+    def test_quick_setup_is_one_question_before_imp(self):
+        plan = dict(model='claude-sonnet-5', sandbox='apple_container', sandbox_ready=False)
+        code, picker, models, voice, sandbox, errors = self.journey([[0]], plan)
+        self.assertEqual(code, 0)
+        self.assertEqual([call.args[0] for call in picker.call_args_list], ['Quick setup'])
+        models.assert_called_once_with('/bin/masc', '/workspace', 10, quick_model='claude-sonnet-5')
+        voice.assert_not_called()
+        sandbox.assert_called_once_with('/bin/masc', '/workspace', 8945, quick_backend='apple_container')
+        self.assertIn('Claude Code / claude-sonnet-5', errors)
+
+    def test_choosing_each_step_is_the_journey_as_it_was(self):
+        plan = dict(model='claude-sonnet-5', sandbox='apple_container', sandbox_ready=False)
+        code, picker, models, voice, sandbox, _ = self.journey([[1], [0]], plan)
+        self.assertEqual(code, 0)
+        self.assertEqual([call.args[0] for call in picker.call_args_list], ['Quick setup', '1 \u00b7 Your workspace'])
+        models.assert_called_once_with('/bin/masc', '/workspace', 10, quick_model=None)
+        voice.assert_called_once()
+        sandbox.assert_called_once_with('/bin/masc', '/workspace', 8945, quick_backend=None)
+
+    def test_finishing_later_from_the_plan_writes_nothing(self):
+        plan = dict(model='claude-sonnet-5', sandbox=None, sandbox_ready=False)
+        code, picker, models, _, sandbox, _ = self.journey([[2]], plan)
+        self.assertEqual(code, 0)
+        models.assert_not_called()
+        sandbox.assert_not_called()
+
+    def test_the_quick_model_skips_both_connection_screens_and_is_still_checked(self):
+        runtime = 'fixture.native-model'
+        spec = dict(choice='claude_code', command='/owned/claude', model='claude-sonnet-5',
+                    max_context=200000, tools=True, streaming=False)
+        with patch.object(SETUP, 'render', return_value=(runtime, b'', b'')), \
+                patch.object(SETUP, 'configured_inventory', return_value=dict(runtimes=[], setup_revision='a' * 64)), \
+                patch.object(SETUP, 'quick_connection', return_value=([runtime], [spec], {runtime: 'Claude Code / claude-sonnet-5'})), \
+                patch.object(SETUP, 'select_connections') as screens, \
+                patch.object(SETUP, 'pick') as picker, \
+                patch.object(SETUP, 'configure_many', return_value=dict(readiness='verified')) as verify, \
+                contextlib.redirect_stderr(io.StringIO()):
+            result = SETUP.wizard('/bin/masc', '/workspace', 10, quick_model='claude-sonnet-5')
+        self.assertEqual(result['readiness'], 'verified')
+        screens.assert_not_called()
+        picker.assert_not_called()
+        self.assertEqual(verify.call_args.args[3], [runtime])
+        self.assertTrue(verify.call_args.kwargs['verify'])
+
+    def test_a_quick_model_that_fails_its_check_goes_back_to_the_screens_once(self):
+        runtime = 'fixture.native-model'
+        spec = dict(choice='claude_code', command='/owned/claude', model='claude-sonnet-5',
+                    max_context=200000, tools=True, streaming=False)
+        chosen = ([runtime], [spec], {runtime: 'Claude Code / claude-sonnet-5'})
+        with patch.object(SETUP, 'render', return_value=(runtime, b'', b'')), \
+                patch.object(SETUP, 'configured_inventory', return_value=dict(runtimes=[], setup_revision='a' * 64)), \
+                patch.object(SETUP, 'quick_connection', return_value=chosen) as quick, \
+                patch.object(SETUP, 'select_connections', return_value=([runtime], [spec], dict(chosen[2]))) as screens, \
+                patch.object(SETUP, 'pick', side_effect=[[2], [0]]), \
+                patch.object(SETUP, 'configure_many', side_effect=[SETUP.VerificationError(runtime), dict(readiness='verified')]), \
+                contextlib.redirect_stderr(io.StringIO()):
+            result = SETUP.wizard('/bin/masc', '/workspace', 10, quick_model='claude-sonnet-5')
+        self.assertEqual(result['readiness'], 'verified')
+        quick.assert_called_once()
+        screens.assert_called_once()
+
+    def test_the_quick_connection_needs_claude_code_and_the_model_in_its_catalog(self):
+        claude = dict(choice='claude_code', label='Claude Code')
+        with patch.object(SETUP, 'connection_sources', return_value=[]), contextlib.redirect_stderr(io.StringIO()):
+            self.assertIsNone(SETUP.quick_connection('masc', {}, 10, None, 'claude-sonnet-5'))
+        with patch.object(SETUP, 'connection_sources', return_value=[claude]), \
+                patch.object(SETUP, 'prepare_connection', side_effect=lambda source, _: source), \
+                patch.object(SETUP, 'source_models', return_value=([dict(id='claude-opus-5')], 'catalog')), \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.assertIsNone(SETUP.quick_connection('masc', {}, 10, None, 'claude-sonnet-5'))
+        with patch.object(SETUP, 'connection_sources', return_value=[claude]), \
+                patch.object(SETUP, 'prepare_connection', side_effect=lambda source, _: source), \
+                patch.object(SETUP, 'source_models', return_value=([dict(id='claude-sonnet-5')], 'catalog')), \
+                patch.object(SETUP, 'resolve_model_spec', return_value=('rid', dict(model='claude-sonnet-5'))):
+            self.assertEqual(SETUP.quick_connection('masc', {}, 10, None, 'claude-sonnet-5'),
+                             (['rid'], [dict(model='claude-sonnet-5')], {'rid': 'Claude Code / claude-sonnet-5'}))
+
+    def quick_sandbox(self, catalogs, actions, which, outcome='commands_completed_recheck_required'):
+        with patch.object(SETUP, 'sandbox_catalog', side_effect=catalogs), \
+                patch.object(SETUP, 'prerequisite_catalog', side_effect=actions), \
+                patch.object(SETUP.shutil, 'which', side_effect=which), \
+                patch.object(SETUP, 'execute_prerequisite', return_value=outcome) as execute, \
+                contextlib.redirect_stderr(io.StringIO()):
+            arguments = SETUP.quick_sandbox('/bin/masc', '/workspace', 'apple_container')
+        return arguments, [call.args[2] for call in execute.call_args_list]
+
+    def test_a_fresh_mac_gets_apple_container_installed_started_and_building_without_rosetta(self):
+        missing = actions_of('apple_container_verified_install', 'apple_container_official_install', 'apple_container_start')
+        installed = iter([None, '/usr/local/bin/container', '/usr/local/bin/container'])
+        arguments, steps = self.quick_sandbox(
+            [sandbox_catalog_of(sandbox_row('apple_container', 'missing_prerequisite', 'container: executable missing')),
+             sandbox_catalog_of(sandbox_row('apple_container', 'probe_failed', 'check failed')),
+             sandbox_catalog_of(sandbox_row('apple_container', 'missing_prerequisite', 'Image builds use Rosetta')),
+             sandbox_catalog_of(sandbox_row('apple_container', 'service_ready'))],
+            [missing, missing, actions_of('apple_container_build_without_rosetta', 'rosetta_install')],
+            lambda _name: next(installed))
+        self.assertEqual(steps, ['apple_container_verified_install', 'apple_container_start',
+                                 'apple_container_build_without_rosetta'])
+        self.assertEqual(arguments, APPLE_ARGS + ['--network-mode', 'inherit'])
+
+    def test_a_failed_step_hands_the_sandbox_back_to_step_4(self):
+        arguments, steps = self.quick_sandbox(
+            [sandbox_catalog_of(sandbox_row('apple_container', 'missing_prerequisite'))],
+            [actions_of('apple_container_verified_install', 'apple_container_start')],
+            lambda _name: None, outcome='failed')
+        self.assertIsNone(arguments)
+        self.assertEqual(steps, ['apple_container_verified_install'])
+
+    def test_each_action_runs_once_so_a_service_that_never_answers_ends_at_step_4(self):
+        stuck = sandbox_catalog_of(sandbox_row('apple_container', 'probe_failed'))
+        offered = actions_of('apple_container_verified_install', 'apple_container_start')
+        arguments, steps = self.quick_sandbox([stuck] * 3, [offered] * 3, lambda _name: '/usr/local/bin/container')
+        self.assertIsNone(arguments)
+        self.assertEqual(steps, ['apple_container_start', 'apple_container_verified_install'])
+
+    def test_a_configured_apple_container_keeps_its_network_policy(self):
+        ready = sandbox_catalog_of(sandbox_row('apple_container', 'service_ready'),
+                                   configured=dict(backend='apple_container', network_mode='none'))
+        arguments, steps = self.quick_sandbox([ready], [], lambda _name: None)
+        self.assertEqual(arguments, APPLE_ARGS)
+        self.assertEqual(steps, [])
+
+    def test_the_sandbox_screen_takes_over_when_quick_setup_cannot_finish(self):
+        with patch.object(SETUP, 'quick_sandbox', return_value=None), \
+                patch.object(SETUP, 'select_sandbox', return_value=None) as screen, \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(SETUP.sandbox_journey('/bin/masc', '/workspace', 8945, quick_backend='apple_container'), 0)
+        screen.assert_called_once_with('/bin/masc', '/workspace', port=8945)
+
 
 if __name__ == '__main__':
     unittest.main()

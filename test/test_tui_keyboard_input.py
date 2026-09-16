@@ -6995,14 +6995,23 @@ def memory_journal_timeline_interaction(
             "%Y-%m-%d · %H:00", time.localtime(MEMORY_JOURNAL_REQUEST_TS)
         ).encode()
         styled_rail = re.compile(
-            rb"\x1b\[[0-9;]*m\x1b\[1m"
+            rb"\x1b\[(?:2|90)m"
             + "── ".encode()
             + re.escape(hour)
         )
         if styled_rail.search(drawn) is None:
             raise AssertionError(
-                "Civil-hour rail was not drawn in semantic colour and bold "
-                f"weight for {hour!r}: {drawn!r}"
+                "Civil-hour rail did not recede (dim/gray) "
+                f"for {hour!r}: {drawn!r}"
+            )
+        bold_rail = re.compile(
+            rb"\x1b\[[0-9;]*m\x1b\[1m"
+            + "── ".encode()
+            + re.escape(hour)
+        )
+        if bold_rail.search(drawn) is not None:
+            raise AssertionError(
+                f"Civil-hour rail still held the bold slot for {hour!r}: {drawn!r}"
             )
         # The renderer groups by civil hour (checked above) and does not
         # also draw a per-message HH:MM:SS clock in the resting chat body
@@ -8811,7 +8820,11 @@ def message_origin_badge_interaction(
         master_fd,
         output,
         b"\x06",
-        re.compile(rb"\d\d:\d\d " + re.escape("◀".encode())),
+        # The clock recedes in a span of its own and the mark opens the
+        # speaker's colour after it, so the raw stream carries SGR sequences
+        # between the two. The wait is still on the short clock; the needle
+        # just lets the styles through.
+        re.compile(rb"\d\d:\d\d (?:\x1b\[[0-9;]*m)*" + re.escape("◀".encode())),
     )
     for badge, body, description in (
         (operator_badge, operator_body, "operator"),

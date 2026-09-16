@@ -218,6 +218,15 @@ type row = {
           shows one pays nothing for it. The renderer draws these cells in the
           quiet tone: the rail is structure, and colour on this row is already
           spent saying status. *)
+  gutter_clock_cells : int;
+      (** Cells of {!gutter} between the rail and the speaker mark that hold
+          the clock column, trailing space included. The column is drawn on
+          every inline row -- blank digits where the minute repeated -- so it
+          is part of the margin's width even where there is nothing to read.
+          Zero where the gutter carries no clock of its own: {!Origin_bare},
+          metadata rows, and continuations past the first, whose gutter is a
+          blank held at the first row's width. The renderer recedes these
+          cells so the mark after them keeps the row's one colour. *)
   gutter_label_at : int;
       (** Cells of {!gutter} that belong to the rail, the clock and the speaker
           mark. The

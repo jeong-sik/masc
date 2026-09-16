@@ -387,18 +387,42 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
              second time, down the side of every row the turn touched. *)
           let rail = Message_layout.take_cells row.gutter rail_cells in
           let after_rail = Message_layout.drop_cells row.gutter rail_cells in
-          let marked = Message_layout.take_cells after_rail (at - rail_cells) in
-          let label = Message_layout.drop_cells after_rail (at - rail_cells) in
+          (* The clock is time-chrome, not identity, so it leaves the mark's
+             span and recedes with the rest of the gutter's chrome; the mark
+             after it keeps the row's one colour. The layout holds the clock
+             inside the span [gutter_label_at] measures, so this clamp only
+             restates for the new field what the two above already say. *)
+          let clock_cells =
+            max 0 (min row.gutter_clock_cells (at - rail_cells))
+          in
+          let clock = Message_layout.take_cells after_rail clock_cells in
+          let after_clock = Message_layout.drop_cells after_rail clock_cells in
+          let marked =
+            Message_layout.take_cells after_clock
+              (at - rail_cells - clock_cells)
+          in
+          let label =
+            Message_layout.drop_cells after_clock
+              (at - rail_cells - clock_cells)
+          in
           let rail =
             if String.equal rail "" then ""
             else Printf.sprintf "%s%s%s" (Theme.recede ()) rail Ansi.reset
           in
+          (* Guarded the way [rail] is: a row with no clock column cuts an
+             empty clock, and wrapping emptiness would still spend the escape
+             pair on it. *)
+          let clock =
+            if String.equal clock "" then ""
+            else Printf.sprintf "%s%s%s" (Theme.recede ()) clock Ansi.reset
+          in
           if String.equal label "" then
-            Printf.sprintf "%s%s%s%s%s" rail (Chat_theme.origin row.style)
-              Ansi.bold marked restore
+            Printf.sprintf "%s%s%s%s%s%s" rail clock
+              (Chat_theme.origin row.style) Ansi.bold marked restore
           else
-            Printf.sprintf "%s%s%s%s%s%s%s%s" rail (Chat_theme.origin row.style)
-              Ansi.bold marked Ansi.reset (Theme.recede ()) label restore
+            Printf.sprintf "%s%s%s%s%s%s%s%s%s" rail clock
+              (Chat_theme.origin row.style) Ansi.bold marked Ansi.reset
+              (Theme.recede ()) label restore
       in
       if
         String.length text >= 2 && Char.equal text.[0] ' '

@@ -219,14 +219,21 @@ type row = {
           quiet tone: the rail is structure, and colour on this row is already
           spent saying status. *)
   gutter_clock_cells : int;
-      (** Cells of {!gutter} between the rail and the speaker mark that hold
-          the clock column, trailing space included. The column is drawn on
-          every inline row -- blank digits where the minute repeated -- so it
-          is part of the margin's width even where there is nothing to read.
-          Zero where the gutter carries no clock of its own: {!Origin_bare},
-          metadata rows, and continuations past the first, whose gutter is a
-          blank held at the first row's width. The renderer recedes these
-          cells so the mark after them keeps the row's one colour. *)
+      (** Cells of {!gutter} between the rail's end and the mark's start that
+          the renderer paints as the receded clock column, trailing space
+          included. A full inline row holds six -- five for the clock, one
+          for the space after it -- with blank digits where the minute
+          repeated, since the column is part of the margin's width even where
+          there is nothing to read. A narrow pane caps the count: the label's
+          cells are paid for first, and a partial clock is context rather
+          than an identifier.
+
+          Zero where the gutter has no separately paintable clock boundary.
+          {!Origin_bare} draws no clock; metadata rows and wrapped
+          continuations hold no gutter content of their own; and a
+          continued-speaker row does draw a clock, but its whole span past
+          the rail is receded as one piece, so no boundary is exported for
+          it. The mark after these cells keeps the row's one colour. *)
   gutter_label_at : int;
       (** Cells of {!gutter} that belong to the rail, the clock and the speaker
           mark. The

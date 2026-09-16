@@ -8820,7 +8820,11 @@ def message_origin_badge_interaction(
         master_fd,
         output,
         b"\x06",
-        re.compile(rb"\d\d:\d\d " + re.escape("◀".encode())),
+        # The clock recedes in a span of its own and the mark opens the
+        # speaker's colour after it, so the raw stream carries SGR sequences
+        # between the two. The wait is still on the short clock; the needle
+        # just lets the styles through.
+        re.compile(rb"\d\d:\d\d (?:\x1b\[[0-9;]*m)*" + re.escape("◀".encode())),
     )
     for badge, body, description in (
         (operator_badge, operator_body, "operator"),

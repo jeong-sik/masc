@@ -108,7 +108,41 @@ let candidate_lines ~prose ~fact ~safe ~scale
                     "over the window by %s tok: the newest atom alone exceeds it"
                     (approx by_bytes)))
   in
-  head @ capacity_line @ parts_line @ cut_line
+  (* The request in the order it travels, one numbered row per slot, the
+     [system context] blocks named in the order the assembly concatenates
+     them. Only drawn when the server laid it out, which is when it cut. *)
+  let assembly_lines =
+    match candidate.assembly with
+    | None -> []
+    | Some slots ->
+        let row index label bytes detail =
+          fact
+            (Printf.sprintf "%d  %-16s %8s tok%s" (index + 1) label (approx bytes)
+               (if detail = "" then "" else "  ·  " ^ detail))
+        in
+        prose "In the order the request carries them:"
+        @ List.concat
+            (List.mapi
+               (fun index slot ->
+                 match slot with
+                 | Inspector.Slot_system_prompt { bytes } ->
+                     row index "system prompt" bytes "keeper instructions"
+                 | Inspector.Slot_tools { bytes } -> row index "tools" bytes "schema surface"
+                 | Inspector.Slot_preamble { bytes } ->
+                     row index "[context window]" bytes "says older turns are omitted"
+                 | Inspector.Slot_history { atoms; of_atoms; bytes } ->
+                     row index "history" bytes
+                       (Printf.sprintf "%d of %d atoms, oldest first" atoms of_atoms)
+                 | Inspector.Slot_wake_line { bytes } -> row index "wake line" bytes "newest atom"
+                 | Inspector.Slot_system_context { bytes; blocks } ->
+                     row index "[system context]" bytes
+                       (String.concat "  ·  "
+                          (List.map
+                             (fun (name, block_bytes) -> safe name ^ " " ^ approx block_bytes)
+                             blocks)))
+               slots)
+  in
+  head @ capacity_line @ parts_line @ cut_line @ assembly_lines
 ;;
 
 let lines ~prose ~fact ~safe ~scale

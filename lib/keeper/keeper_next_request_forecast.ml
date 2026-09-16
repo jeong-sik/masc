@@ -32,9 +32,12 @@
 type measured_parts =
   { reserved_turn : int
   ; reserved_bytes : int
+  ; instructions_bytes : int
+  ; schemas_bytes : int
   ; pinned_turn : int
   ; pinned_runtime_id : string
   ; pinned_bytes : int
+  ; pinned_blocks : (Prompt_block_id.t * int) list
   }
 
 type parts_refusal =
@@ -71,9 +74,18 @@ type history_cut =
   | Cut of
       { kept_atoms : int
       ; transmitted_bytes : int
+      ; preamble_bytes : int option
       ; fit : Runtime_model_input_tail_window.target_fit
       }
   | Newest_atom_only of { transmitted_bytes : int }
+
+type slot =
+  | System_prompt of { bytes : int }
+  | Tools of { bytes : int }
+  | Preamble of { bytes : int }
+  | History of { atoms : int; of_atoms : int; bytes : int }
+  | Wake_line of { bytes : int }
+  | System_context of { bytes : int; blocks : (Prompt_block_id.t * int) list }
 
 type candidate =
   { runtime_id : string
@@ -83,6 +95,7 @@ type candidate =
   ; parts : (measured_parts, parts_refusal) result
   ; history_atoms : int
   ; cut : history_cut option
+  ; assembly : slot list option
   }
 
 type t =
@@ -121,8 +134,46 @@ let cut_history ~measure ~capacity ~reserved_bytes ~pinned_bytes messages =
           projection.Runtime_model_input_tail_window.atom_count
           - projection.Runtime_model_input_tail_window.dropped_atoms
       ; transmitted_bytes = target.Runtime_model_input_tail_window.transmitted_bytes
+      ; preamble_bytes =
+          List.find_map
+            (fun message ->
+              if Runtime_model_input_tail_window.is_synthetic_preamble message
+              then Some (measure message)
+              else None)
+            projection.Runtime_model_input_tail_window.messages
       ; fit = target.Runtime_model_input_tail_window.fit
       }
+;;
+
+(* The request in travel order. The system prompt and the tool array are
+   request fields beside the messages; among the messages the cut's preamble
+   comes first when it prepended one, then the kept atoms oldest first, then
+   the wake line as the newest atom, and last the "[system context]" message
+   [Agent_turn.prepare_messages] appends so the conversation prefix stays
+   byte-identical for provider caches. The wake line is one of the kept
+   atoms, so it is taken out of the history slot on both counts. *)
+let assembly ~wake_bytes ~history_atoms (parts : measured_parts) cut =
+  let preamble, history_atoms_kept, history_bytes =
+    match cut with
+    | Cut { kept_atoms; transmitted_bytes; preamble_bytes; _ } ->
+      let preamble, preamble_bytes_taken =
+        match preamble_bytes with
+        | Some bytes -> Some (Preamble { bytes }), bytes
+        | None -> None, 0
+      in
+      preamble, kept_atoms - 1, transmitted_bytes - preamble_bytes_taken - wake_bytes
+    | Newest_atom_only _ -> None, 0, 0
+  in
+  [ Some (System_prompt { bytes = parts.instructions_bytes })
+  ; Some (Tools { bytes = parts.schemas_bytes })
+  ; preamble
+  ; Some
+      (History
+         { atoms = history_atoms_kept; of_atoms = history_atoms - 1; bytes = history_bytes })
+  ; Some (Wake_line { bytes = wake_bytes })
+  ; Some (System_context { bytes = parts.pinned_bytes; blocks = parts.pinned_blocks })
+  ]
+  |> List.filter_map Fun.id
 ;;
 
 (* The window the turn driver would declare for this runtime, with the same
@@ -174,25 +225,32 @@ let request_cap_for ~runtime_id (runtime : Runtime.t option) =
 
 type composition =
   { fixed_bytes : int
+  ; instructions_bytes : int
+  ; schemas_bytes : int
   ; first_round_pinned_bytes : int option
+  ; pinned_blocks : (Prompt_block_id.t * int) list
   }
 
 (* Keeper instructions ride in the system prompt and every other prompt
    block rides as pinned extra system context; the message kinds are the
    history the cut decides about and belong to neither. A composition is a
    first round's when it carries a block the post-tool assembly drops; the
-   predicate is the assembly's own. *)
+   predicate is the assembly's own, and so is the block order: the assembly
+   stable-sorts by [Prompt_block_id.cache_rank]. *)
 let read_composition (components : Turn_record.input_component list) =
-  let fixed, pinned, first_round =
+  let instructions, schemas, blocks_reversed, first_round =
     List.fold_left
-      (fun (fixed, pinned, first_round) (component : Turn_record.input_component) ->
+      (fun (instructions, schemas, blocks, first_round)
+           (component : Turn_record.input_component) ->
         match component.Turn_record.component with
-        | Turn_record.Tool_schemas -> fixed + component.bytes, pinned, first_round
+        | Turn_record.Tool_schemas ->
+          instructions, schemas + component.bytes, blocks, first_round
         | Turn_record.Prompt_block Prompt_block_id.Keeper_instructions ->
-          fixed + component.bytes, pinned, first_round
+          instructions + component.bytes, schemas, blocks, first_round
         | Turn_record.Prompt_block id ->
-          ( fixed
-          , pinned + component.bytes
+          ( instructions
+          , schemas
+          , (id, component.bytes) :: blocks
           , first_round || not (Prompt_block_id.injected_on_post_tool_round id) )
         | Turn_record.Message_user
         | Turn_record.Message_system
@@ -203,12 +261,22 @@ let read_composition (components : Turn_record.input_component list) =
         | Turn_record.Message_tool_result
         | Turn_record.Message_image
         | Turn_record.Message_document
-        | Turn_record.Message_audio -> fixed, pinned, first_round)
-      (0, 0, false)
+        | Turn_record.Message_audio -> instructions, schemas, blocks, first_round)
+      (0, 0, [], false)
       components
   in
-  { fixed_bytes = fixed
+  let pinned_blocks =
+    List.stable_sort
+      (fun (left, _) (right, _) ->
+        Int.compare (Prompt_block_id.cache_rank left) (Prompt_block_id.cache_rank right))
+      (List.rev blocks_reversed)
+  in
+  let pinned = List.fold_left (fun sum (_, bytes) -> sum + bytes) 0 pinned_blocks in
+  { fixed_bytes = instructions + schemas
+  ; instructions_bytes = instructions
+  ; schemas_bytes = schemas
   ; first_round_pinned_bytes = (if first_round then Some pinned else None)
+  ; pinned_blocks = (if first_round then pinned_blocks else [])
   }
 ;;
 
@@ -225,17 +293,26 @@ let select_parts ~runtime_id ~records_read (readings : record_reading list) =
     List.fold_left
       (fun (newest_fixed, newest_pinned) reading ->
         ( (if reading.completed && String.equal reading.runtime_id runtime_id
-           then Some (reading.turn, reading.composition.fixed_bytes)
+           then Some (reading.turn, reading.composition)
            else newest_fixed)
         , match reading.composition.first_round_pinned_bytes with
-          | Some pinned -> Some (reading.turn, reading.runtime_id, pinned)
+          | Some pinned -> Some (reading.turn, reading.runtime_id, pinned, reading.composition)
           | None -> newest_pinned ))
       (None, None)
       readings
   in
   match newest_fixed, newest_pinned with
-  | Some (reserved_turn, reserved_bytes), Some (pinned_turn, pinned_runtime_id, pinned_bytes) ->
-    Ok { reserved_turn; reserved_bytes; pinned_turn; pinned_runtime_id; pinned_bytes }
+  | Some (reserved_turn, fixed), Some (pinned_turn, pinned_runtime_id, pinned_bytes, first) ->
+    Ok
+      { reserved_turn
+      ; reserved_bytes = fixed.fixed_bytes
+      ; instructions_bytes = fixed.instructions_bytes
+      ; schemas_bytes = fixed.schemas_bytes
+      ; pinned_turn
+      ; pinned_runtime_id
+      ; pinned_bytes
+      ; pinned_blocks = first.pinned_blocks
+      }
   | Some (newest_turn, _), None ->
     Error (No_first_round_composition { records_read; newest_turn })
   | None, _ -> Error (No_composition_on_runtime { records_read })
@@ -281,18 +358,21 @@ let newest_parts_for ~config ~keeper_name ~runtime_id =
   select_parts ~runtime_id ~records_read:(List.length records) readings
 ;;
 
+(* The wake line as the cut's encoder counts it, the same figure the cut and
+   the assembly subtract. *)
 let wake_line () =
-  let text = Env_config_keeper.KeeperAutonomous.default_wake_prompt in
-  ( { Agent_core.Types.role = Agent_core.Types.User
-    ; content = [ Agent_core.Types.Text text ]
+  let message =
+    { Agent_core.Types.role = Agent_core.Types.User
+    ; content = [ Agent_core.Types.Text Env_config_keeper.KeeperAutonomous.default_wake_prompt ]
     ; name = None
     ; tool_call_id = None
     ; metadata = []
     }
-  , String.length text )
+  in
+  message, measure message
 ;;
 
-let candidate ~config ~keeper_name ~messages ~history_atoms runtime_id =
+let candidate ~config ~keeper_name ~messages ~history_atoms ~wake_bytes runtime_id =
   let runtime = Runtime.get_runtime_by_id runtime_id in
   let window = window_for ~runtime_id runtime in
   let capacity =
@@ -317,6 +397,11 @@ let candidate ~config ~keeper_name ~messages ~history_atoms runtime_id =
            messages)
     | Some _, Error _ | None, Ok _ | None, Error _ -> None
   in
+  let assembly =
+    match parts, cut with
+    | Ok parts, Some cut -> Some (assembly ~wake_bytes ~history_atoms parts cut)
+    | Error _, _ | Ok _, None -> None
+  in
   { runtime_id
   ; window
   ; capacity
@@ -324,6 +409,7 @@ let candidate ~config ~keeper_name ~messages ~history_atoms runtime_id =
   ; parts
   ; history_atoms
   ; cut
+  ; assembly
   }
 ;;
 
@@ -353,16 +439,49 @@ let forecast ~config ~keeper_name =
          ; checkpoint_messages = List.length history
          ; wake_line_bytes
          ; candidates =
-             [ candidate ~config ~keeper_name ~messages ~history_atoms runtime_id ]
+             [ candidate
+                 ~config
+                 ~keeper_name
+                 ~messages
+                 ~history_atoms
+                 ~wake_bytes:wake_line_bytes
+                 runtime_id
+             ]
          })
 ;;
 
+let blocks_to_json blocks =
+  `List
+    (List.map
+       (fun (id, bytes) ->
+         `Assoc [ "block", `String (Prompt_block_id.to_string id); "bytes", `Int bytes ])
+       blocks)
+;;
+
+let slot_to_json = function
+  | System_prompt { bytes } -> `Assoc [ "slot", `String "system_prompt"; "bytes", `Int bytes ]
+  | Tools { bytes } -> `Assoc [ "slot", `String "tools"; "bytes", `Int bytes ]
+  | Preamble { bytes } -> `Assoc [ "slot", `String "preamble"; "bytes", `Int bytes ]
+  | History { atoms; of_atoms; bytes } ->
+    `Assoc
+      [ "slot", `String "history"
+      ; "atoms", `Int atoms
+      ; "of_atoms", `Int of_atoms
+      ; "bytes", `Int bytes
+      ]
+  | Wake_line { bytes } -> `Assoc [ "slot", `String "wake_line"; "bytes", `Int bytes ]
+  | System_context { bytes; blocks } ->
+    `Assoc
+      [ "slot", `String "system_context"; "bytes", `Int bytes; "blocks", blocks_to_json blocks ]
+;;
+
 let history_cut_to_json = function
-  | Cut { kept_atoms; transmitted_bytes; fit } ->
+  | Cut { kept_atoms; transmitted_bytes; preamble_bytes; fit } ->
     `Assoc
       [ "kind", `String "cut"
       ; "kept_atoms", `Int kept_atoms
       ; "transmitted_bytes", `Int transmitted_bytes
+      ; "preamble_bytes", (match preamble_bytes with None -> `Null | Some n -> `Int n)
       ; ( "fit"
         , match fit with
           | Runtime_model_input_tail_window.Within_target ->
@@ -411,13 +530,18 @@ let candidate_to_json (candidate : candidate) =
           `Assoc
             [ "reserved_measured_on_turn", `Int parts.reserved_turn
             ; "reserved_bytes", `Int parts.reserved_bytes
+            ; "instructions_bytes", `Int parts.instructions_bytes
+            ; "schemas_bytes", `Int parts.schemas_bytes
             ; "pinned_measured_on_turn", `Int parts.pinned_turn
             ; "pinned_measured_on_runtime", `String parts.pinned_runtime_id
             ; "pinned_bytes", `Int parts.pinned_bytes
+            ; "pinned_blocks", blocks_to_json parts.pinned_blocks
             ]
         | Error refusal -> `Assoc [ "error", `String (parts_refusal_to_string refusal) ] )
     ; "history_atoms", `Int candidate.history_atoms
     ; "cut", option_json history_cut_to_json candidate.cut
+    ; ( "assembly"
+      , option_json (fun slots -> `List (List.map slot_to_json slots)) candidate.assembly )
     ]
 ;;
 

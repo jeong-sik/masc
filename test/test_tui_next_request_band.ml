@@ -78,9 +78,28 @@ let measured : Inspector.forecast =
                      Inspector.Overrun
                        { by_bytes = 43_500; cause = Inspector.Fixed_parts_exceed_target }
                  })
+        ; assembly = None
         }
       ]
   }
+
+(* lane-smith at turn 3660 with a density: six history atoms fit after the
+   fixed parts and the pinned blocks. *)
+let assembled : Inspector.forecast_slot list =
+  [ Inspector.Slot_system_prompt { bytes = 10_832 }
+  ; Inspector.Slot_tools { bytes = 71_578 }
+  ; Inspector.Slot_history { atoms = 6; of_atoms = 4318; bytes = 56_909 }
+  ; Inspector.Slot_wake_line { bytes = 191 }
+  ; Inspector.Slot_system_context
+      { bytes = 157_541
+      ; blocks =
+          [ "skill_compositions", 321
+          ; "memory_os_recall", 139_966
+          ; "dynamic_context", 17_218
+          ; "temporal_summary", 36
+          ]
+      }
+  ]
 
 let with_candidate f (forecast : Inspector.forecast) : Inspector.forecast =
   { forecast with candidates = List.map f forecast.candidates }
@@ -131,6 +150,59 @@ let test_a_pinned_figure_from_another_lane_names_it () =
   in
   Alcotest.(check bool) "the lane rides beside the turn" true
     (says "(turn #4033 on claude_code.claude-sonnet-5)" (lines (Ok forecast)))
+
+let test_the_assembly_is_drawn_in_travel_order () =
+  let forecast =
+    with_candidate (fun candidate -> { candidate with assembly = Some assembled }) measured
+  in
+  let rows = lines (Ok forecast) in
+  let position needle =
+    let rec go index = function
+      | [] -> None
+      | row :: rest -> if contains needle (strip row) then Some index else go (index + 1) rest
+    in
+    go 0 rows
+  in
+  (* 10,832 / 3.3 = 3,282; 71,578 / 3.3 = 21,690; 56,909 / 3.3 = 17,245; 157,541 / 3.3 = 47,740. *)
+  Alcotest.(check bool) "each slot is numbered with its share in tokens" true
+    (says ("1  system prompt    " ^ approx ^ "3.3k tok") rows
+     && says ("2  tools            " ^ approx ^ "21.7k tok") rows
+     && says ("3  history          " ^ approx ^ "17.2k tok") rows
+     && says "6 of 4318 atoms, oldest first" rows
+     && says ("4  wake line        " ^ approx ^ "58 tok") rows
+     && says ("5  [system context] " ^ approx ^ "47.7k tok") rows);
+  (* 139,966 / 3.3 = 42,414. *)
+  Alcotest.(check bool) "the context names its blocks in assembly order" true
+    (says
+       ("skill_compositions " ^ approx ^ "97  ·  memory_os_recall " ^ approx
+      ^ "42.4k  ·  dynamic_context " ^ approx ^ "5.2k  ·  temporal_summary " ^ approx ^ "11")
+       rows);
+  Alcotest.(check bool) "and the rows stand in that order on the screen" true
+    (match position "1  system prompt", position "5  [system context]" with
+     | Some first, Some last -> first < last
+     | _ -> false)
+
+let test_a_preamble_slot_is_named_when_the_cut_prepended_one () =
+  let forecast =
+    with_candidate
+      (fun candidate ->
+        { candidate with
+          assembly =
+            Some
+              (Inspector.Slot_system_prompt { bytes = 10_832 }
+               :: Inspector.Slot_tools { bytes = 71_578 }
+               :: Inspector.Slot_preamble { bytes = 260 }
+               :: List.filteri (fun index _ -> index >= 2) assembled)
+        })
+      measured
+  in
+  Alcotest.(check bool) "the preamble takes the third row" true
+    (says ("3  [context window]    " ^ approx ^ "79 tok  ·  says older turns are omitted")
+       (lines (Ok forecast)))
+
+let test_no_assembly_draws_no_order () =
+  Alcotest.(check bool) "without a cut there is no order to draw" false
+    (says "In the order the request carries them" (lines (Ok measured)))
 
 let test_the_newest_atom_overrun_is_named_as_such () =
   let forecast =
@@ -279,7 +351,8 @@ let test_the_forecast_decodes_the_servers_shape () =
                     "pinned_bytes":237000},
            "history_atoms":3395,
            "cut":{"kind":"cut","kept_atoms":1,"transmitted_bytes":12000,
-                  "fit":{"kind":"overrun","by_bytes":43500,"cause":"fixed_parts_exceed_target"}}}]}|}
+                  "fit":{"kind":"overrun","by_bytes":43500,"cause":"fixed_parts_exceed_target"}},
+           "assembly":null}]}|}
   in
   match Inspector.decode_forecast json with
   | Error detail -> Alcotest.fail ("the server's shape decodes: " ^ detail)
@@ -294,7 +367,10 @@ let test_an_unmeasured_capacity_decodes_from_a_null_byte_count () =
          "candidates":[{"runtime_id":"r","window":{"window_tokens":85000,"declared_tokens":85000,"source":"declared"},
            "capacity":{"window_tokens":85000,"capacity_bytes":null},"request_cap_bytes":null,
            "parts":{"error":"no turn record on this runtime carried a composition in the newest 200 records"},
-           "history_atoms":1,"cut":{"kind":"newest_atom_only","kept_atoms":1,"transmitted_bytes":300}}]}|}
+           "history_atoms":1,"cut":{"kind":"newest_atom_only","kept_atoms":1,"transmitted_bytes":300},
+           "assembly":[{"slot":"system_prompt","bytes":10832},{"slot":"tools","bytes":71578},
+                       {"slot":"history","atoms":0,"of_atoms":0,"bytes":0},{"slot":"wake_line","bytes":191},
+                       {"slot":"system_context","bytes":157541,"blocks":[{"block":"memory_os_recall","bytes":139966}]}]}]}|}
   in
   match Inspector.decode_forecast json with
   | Error detail -> Alcotest.fail ("a null capacity decodes: " ^ detail)
@@ -304,6 +380,15 @@ let test_an_unmeasured_capacity_decodes_from_a_null_byte_count () =
             ; cut = Some (Inspector.Forecast_newest_atom_only { transmitted_bytes = 300 })
             ; parts = Error "no turn record on this runtime carried a composition in the newest 200 records"
             ; request_cap_bytes = None
+            ; assembly =
+                Some
+                  [ Inspector.Slot_system_prompt { bytes = 10_832 }
+                  ; Inspector.Slot_tools { bytes = 71_578 }
+                  ; Inspector.Slot_history { atoms = 0; of_atoms = 0; bytes = 0 }
+                  ; Inspector.Slot_wake_line { bytes = 191 }
+                  ; Inspector.Slot_system_context
+                      { bytes = 157_541; blocks = [ "memory_os_recall", 139_966 ] }
+                  ]
             ; _
             }
           ]
@@ -317,7 +402,7 @@ let test_a_refused_window_decodes_from_the_error_shape () =
     Yojson.Safe.from_string
       {|{"schema":"masc.keeper.next-request-forecast.v1","checkpoint_messages":1,"wake_line_bytes":131,
          "candidates":[{"runtime_id":"r","window":{"error":"runtime r resolves no context window"},
-           "capacity":null,"request_cap_bytes":null,"parts":{"error":"no turn record on this runtime carried a composition in the newest 200 records"},"history_atoms":1,"cut":null}]}|}
+           "capacity":null,"request_cap_bytes":null,"parts":{"error":"no turn record on this runtime carried a composition in the newest 200 records"},"history_atoms":1,"cut":null,"assembly":null}]}|}
   in
   match Inspector.decode_forecast json with
   | Ok { candidates = [ { window = Inspector.Window_refused reason; capacity = None; cut = None; _ } ]; _ }
@@ -334,7 +419,7 @@ let test_a_not_applicable_window_decodes_as_such () =
            "window":{"not_applicable":"claude_code.claude-sonnet-5 is an official-client runtime"},
            "capacity":null,"request_cap_bytes":null,
            "parts":{"reserved_measured_on_turn":4700,"reserved_bytes":194651,"pinned_measured_on_turn":4700,"pinned_measured_on_runtime":"claude_code.claude-sonnet-5","pinned_bytes":182167},
-           "history_atoms":4429,"cut":null}]}|}
+           "history_atoms":4429,"cut":null,"assembly":null}]}|}
   in
   match Inspector.decode_forecast json with
   | Ok { candidates = [ { window = Inspector.Window_not_applicable reason; capacity = None; cut = None; parts = Ok parts; _ } ]; _ }
@@ -351,7 +436,7 @@ let test_a_malformed_forecast_fails_the_reading () =
       {|{"schema":"masc.keeper.next-request-forecast.v1","checkpoint_messages":1,"wake_line_bytes":131,
          "candidates":[{"runtime_id":"r","window":{"window_tokens":85000,"declared_tokens":85000,"source":"declared"},
            "capacity":null,"request_cap_bytes":null,"parts":{"error":"x"},"history_atoms":1,
-           "cut":{"kind":"sideways","kept_atoms":1,"transmitted_bytes":300}}]}|}
+           "cut":{"kind":"sideways","kept_atoms":1,"transmitted_bytes":300},"assembly":null}]}|}
   in
   match Inspector.decode_forecast json with
   | Error _ -> ()
@@ -364,6 +449,11 @@ let () =
             test_the_band_reads_at_the_runtimes_density
         ; Alcotest.test_case "a pinned figure from another lane names it" `Quick
             test_a_pinned_figure_from_another_lane_names_it
+        ; Alcotest.test_case "the assembly is drawn in travel order" `Quick
+            test_the_assembly_is_drawn_in_travel_order
+        ; Alcotest.test_case "a preamble slot is named when the cut prepended one" `Quick
+            test_a_preamble_slot_is_named_when_the_cut_prepended_one
+        ; Alcotest.test_case "no assembly draws no order" `Quick test_no_assembly_draws_no_order
         ; Alcotest.test_case "the newest-atom overrun is named as such" `Quick
             test_the_newest_atom_overrun_is_named_as_such
         ; Alcotest.test_case "a fitting cut says so" `Quick test_a_fitting_cut_says_so

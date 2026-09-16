@@ -90,6 +90,14 @@ type forecast_cut =
   | Forecast_cut of { kept_atoms : int; transmitted_bytes : int; fit : forecast_fit }
   | Forecast_newest_atom_only of { transmitted_bytes : int }
 
+type forecast_slot =
+  | Slot_system_prompt of { bytes : int }
+  | Slot_tools of { bytes : int }
+  | Slot_preamble of { bytes : int }
+  | Slot_history of { atoms : int; of_atoms : int; bytes : int }
+  | Slot_wake_line of { bytes : int }
+  | Slot_system_context of { bytes : int; blocks : (string * int) list }
+
 type forecast_candidate =
   { runtime_id : string
   ; window : forecast_window
@@ -98,6 +106,7 @@ type forecast_candidate =
   ; parts : (forecast_parts, string) result
   ; history_atoms : int
   ; cut : forecast_cut option
+  ; assembly : forecast_slot list option
   }
 
 type forecast =
@@ -669,6 +678,60 @@ let decode_forecast_cut = function
     else Error ("cut.kind is not a known kind: " ^ kind)
   | _ -> Error "cut is not an object or null"
 
+let decode_forecast_block = function
+  | `Assoc fields ->
+    let* name_json = field "block" fields in
+    let* name = nonempty_string "block.block" name_json in
+    let* bytes_json = field "bytes" fields in
+    let* bytes = nonnegative_int "block.bytes" bytes_json in
+    Ok (name, bytes)
+  | _ -> Error "block is not an object"
+
+let decode_forecast_slot = function
+  | `Assoc fields ->
+    let* kind_json = field "slot" fields in
+    let* kind = nonempty_string "slot.slot" kind_json in
+    let* bytes_json = field "bytes" fields in
+    let* bytes = nonnegative_int "slot.bytes" bytes_json in
+    (match kind with
+     | "system_prompt" -> Ok (Slot_system_prompt { bytes })
+     | "tools" -> Ok (Slot_tools { bytes })
+     | "preamble" -> Ok (Slot_preamble { bytes })
+     | "wake_line" -> Ok (Slot_wake_line { bytes })
+     | "history" ->
+       let* atoms_json = field "atoms" fields in
+       let* atoms = nonnegative_int "slot.atoms" atoms_json in
+       let* of_json = field "of_atoms" fields in
+       let* of_atoms = nonnegative_int "slot.of_atoms" of_json in
+       Ok (Slot_history { atoms; of_atoms; bytes })
+     | "system_context" ->
+       let* blocks_json = field "blocks" fields in
+       (match blocks_json with
+        | `List items ->
+          let rec decode reversed = function
+            | [] -> Ok (List.rev reversed)
+            | item :: rest ->
+              let* block = decode_forecast_block item in
+              decode (block :: reversed) rest
+          in
+          let* blocks = decode [] items in
+          Ok (Slot_system_context { bytes; blocks })
+        | _ -> Error "slot.blocks is not a list")
+     | other -> Error (Printf.sprintf "slot.slot %S is not a known slot" other))
+  | _ -> Error "slot is not an object"
+
+let decode_forecast_assembly = function
+  | `Null -> Ok None
+  | `List items ->
+    let rec decode reversed = function
+      | [] -> Ok (Some (List.rev reversed))
+      | item :: rest ->
+        let* slot = decode_forecast_slot item in
+        decode (slot :: reversed) rest
+    in
+    decode [] items
+  | _ -> Error "assembly is not a list or null"
+
 let decode_forecast_candidate = function
   | `Assoc fields ->
     let* id_json = field "runtime_id" fields in
@@ -691,7 +754,9 @@ let decode_forecast_candidate = function
     let* history_atoms = nonnegative_int "candidate.history_atoms" atoms_json in
     let* cut_json = field "cut" fields in
     let* cut = decode_forecast_cut cut_json in
-    Ok { runtime_id; window; capacity; request_cap_bytes; parts; history_atoms; cut }
+    let* assembly_json = field "assembly" fields in
+    let* assembly = decode_forecast_assembly assembly_json in
+    Ok { runtime_id; window; capacity; request_cap_bytes; parts; history_atoms; cut; assembly }
   | _ -> Error "candidate is not an object"
 
 let decode_forecast = function

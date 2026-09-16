@@ -147,6 +147,18 @@ type forecast_cut =
   | Forecast_cut of { kept_atoms : int; transmitted_bytes : int; fit : forecast_fit }
   | Forecast_newest_atom_only of { transmitted_bytes : int }
 
+(** One piece of the next request in the position it travels, as the
+    server lays them out: the system prompt and the tool array, then the
+    messages in wire order. *)
+type forecast_slot =
+  | Slot_system_prompt of { bytes : int }
+  | Slot_tools of { bytes : int }
+  | Slot_preamble of { bytes : int }
+  | Slot_history of { atoms : int; of_atoms : int; bytes : int }
+  | Slot_wake_line of { bytes : int }
+  | Slot_system_context of { bytes : int; blocks : (string * int) list }
+      (** [blocks] in the order the assembly concatenates them. *)
+
 type forecast_candidate =
   { runtime_id : string
   ; window : forecast_window
@@ -157,6 +169,7 @@ type forecast_candidate =
             or only post-tool ones, which carry no pinned block. *)
   ; history_atoms : int
   ; cut : forecast_cut option
+  ; assembly : forecast_slot list option  (** [None] whenever [cut] is. *)
   }
 
 type forecast =

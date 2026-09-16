@@ -423,7 +423,13 @@ let test_response_observed_fences_follow_the_disposition () =
   let fenced effect_disposition ~runtime_id ~diagnostic =
     internal_err
       (Keeper_internal_error.Provider_attempt_effect_fenced
-         { runtime_id; effect_disposition; diagnostic })
+         { runtime_id
+         ; effect_disposition
+         ; cause =
+             Keeper_internal_error.Fenced_core
+               (Keeper_request_failure_core.of_core_error
+                  (Agent_core.Error.Internal diagnostic))
+         })
   in
   let lost effect_disposition ~runtime_id =
     internal_err
@@ -431,7 +437,11 @@ let test_response_observed_fences_follow_the_disposition () =
          { runtime_id
          ; effect_disposition
          ; reject_count = 2
-         ; diagnostic = "turn died after two corrective tool rejections"
+         ; cause =
+             Keeper_internal_error.Fenced_core
+               (Keeper_request_failure_core.of_core_error
+                  (Agent_core.Error.Internal
+                     "turn died after two corrective tool rejections"))
          })
   in
   let observed label err =

@@ -47,7 +47,9 @@ val preview_max : int
     {!Tool_output.artifact_ref}. *)
 
 val put : t -> bytes:string -> mime:string -> Tool_output.t
-(** Store [bytes] under its sha256 digest.
+(** Store [bytes] under its sha256 digest. {!address} then {!put_addressed},
+    which is what a caller storing one body wants; the halves are separate for
+    a caller holding many, not because this one is going away.
 
     Returns [Tool_output.Stored {sha256; bytes; preview; mime}] where
     [preview] is the leading sanitized run of [bytes], at most
@@ -69,6 +71,36 @@ val put : t -> bytes:string -> mime:string -> Tool_output.t
     must handle this at their typed boundary and must not emit a marker for
     bytes that were never persisted. A provider projection must not put an
     oversized payload back inline because that defeats externalization. *)
+
+type addressed
+(** The half of a {!put} that reads and writes no file: the sha256 of a body,
+    the preview cut from it, and the address those name. *)
+
+val address : t -> bytes:string -> mime:string -> addressed
+(** The content address of [bytes] under [mime], computed without touching the
+    filesystem. {!put_addressed} then stores it.
+
+    A {!put} of an address this process already wrote does not write, so for a
+    caller holding many bodies the hashing here is the whole cost of the put.
+    Splitting it out lets that caller compute the addresses away from the domain
+    it runs on and keep only the rare write on its own fiber: model input
+    demotion addresses every aged tool result of the whole history on every
+    provider request, thousands of bodies on a long-lived keeper, and hashing
+    them held the main Eio domain for 0.7 to 1.6 seconds per request
+    (2026-09-16 fiber trace).
+
+    @raises Invalid_argument if [mime] is empty, as {!put} does, naming
+    [address] rather than [put]. *)
+
+val addressed_bytes : addressed -> string
+(** The body {!put_addressed} writes. A caller that must put back what it did
+    not manage to store reads it here rather than keeping its own copy, so the
+    bytes written and the bytes restored cannot disagree. *)
+
+val put_addressed : addressed -> Tool_output.t
+(** Store an {!address}ed body. Same contract as {!put}, of which this is the
+    writing half: idempotent, skips an address this process already wrote, and
+    raises [Sys_error] if the write fails. *)
 
 val put_durable : t -> bytes:string -> mime:string -> Tool_output.artifact_ref
 (** Strict variant of {!put}. The payload and its parent directory must both

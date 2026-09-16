@@ -14,7 +14,7 @@ export type StatusSection =
   | 'observatory' | 'journey' | 'agents' | 'runtime'
   | 'internal-agents'
   | 'fleet-health' | 'transport-health'
-  | 'feature-health' | 'lanes' | 'skills' | 'lane-addons'
+  | 'lanes' | 'skills' | 'lane-addons'
 
 function monitorSectionItem(section: string | undefined) {
   if (!section) return undefined
@@ -48,9 +48,6 @@ const LazyFleetHealthPanel = lazy(async () => ({
 }))
 const LazyTransportHealthPanel = lazy(async () => ({
   default: (await import('./transport-health')).TransportHealthPanel,
-}))
-const LazyFeatureHealth = lazy(async () => ({
-  default: (await import('./feature-health')).FeatureHealth,
 }))
 const LazyObservatory = lazy(async () => ({
   default: (await import('./observatory/observatory')).Observatory,
@@ -96,8 +93,6 @@ function renderSection(section: StatusSection) {
       return html`<${LazyFleetHealthPanel} />`
     case 'transport-health':
       return html`<${LazyTransportHealthPanel} />`
-    case 'feature-health':
-      return html`<${LazyFeatureHealth} />`
     case 'agents':
       return html`<${LazyAgentsUnified} />`
   }

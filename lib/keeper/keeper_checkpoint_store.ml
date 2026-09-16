@@ -1407,7 +1407,7 @@ let save_agent_core_classified_typed
             ~ownership_root
             canonical_path
             (fun () ->
-               Agent_core.Checkpoint.to_string_with_encoding_memo encoding_memo payload)
+               Agent_core.Checkpoint.to_pieces_with_encoding_memo encoding_memo payload)
         in
         (match write ckpt with
          | Ok () -> save_outcome_after_write ~session_dir ~canonical_path ~known ckpt

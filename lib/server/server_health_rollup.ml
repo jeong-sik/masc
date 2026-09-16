@@ -10,7 +10,6 @@ type t =
 
 let cached_field_names =
   [
-    "feature_flags";
     "overall_status";
     "operator_action_required";
     "operator_action_reasons";

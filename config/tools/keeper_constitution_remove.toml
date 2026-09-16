@@ -1,10 +1,8 @@
 name = "keeper_constitution_remove"
 description = """
-Take one norm back out of this world's constitution. It stops reaching every \
-keeper's prompt next turn. Removing an article another keeper wrote costs what \
-writing one costs, and both stay in the ledger. An id this world does not hold \
-is a failure, not a quiet success.\
-"""
+Take one norm back out of this world's constitution.
+
+It stops reaching every keeper's prompt next turn. Removing an article another keeper wrote costs what writing one costs, and both stay in the ledger. An id this world does not hold is a failure, not a quiet success."""
 additional_properties = false
 
 defer_loading = true

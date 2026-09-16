@@ -22,7 +22,6 @@ module Official_client_probe = Server_dashboard_official_client_probe
 let config_cache_ttl_s = Server_dashboard_http_core_cache.config_cache_ttl_s
 let standard_cache_ttl_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
 let live_cache_ttl_s = Server_dashboard_http_core_cache.live_cache_ttl_s
-let feature_health_cache_ttl_s = Server_dashboard_http_core_cache.feature_health_cache_ttl_s
 let exact_lane_run_permission = Masc_domain.CanAdmin
 let runtime_probe_read_permission = Masc_domain.CanReadState
 
@@ -3139,20 +3138,6 @@ let add_routes ~sw ~clock router =
                Http.Response.json_value ~request:req
                  (`Assoc [ "ok", `Bool true ]) reqd))
          request reqd)
-  |> Http.Router.get "/api/v1/dashboard/feature-health" (fun _request reqd ->
-       with_public_read (fun _state req reqd ->
-         let cache_key = "feature_health" in
-         (* TTL extended 10s→60s — feature flags + provider rollups move on
-            minute scale, but the compute was measured at 3.5s (page→endpoint
-            profile, cold or near-expiry). 10s TTL means every 11th poll
-            eats 3.5s; 60s collapses to 1/60 polls. *)
-         let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:feature_health_cache_ttl_s (fun () ->
-             Domain_pool_ref.submit_io_or_inline (fun () ->
-               Dashboard_feature_health.json ()))
-         in
-         Http.Response.json_value ~compress:true ~request:req json reqd
-       ) _request reqd)
   (* ── Eval feed (RFC-MASC-005 Phase 2) ── *)
   |> Http.Router.get "/api/v1/dashboard/eval-feed" (fun request reqd ->
        with_public_read (fun state req reqd ->

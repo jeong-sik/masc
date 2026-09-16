@@ -114,6 +114,11 @@ val link_modal_viewport : Masc_tui_types.state -> int * int
 (** The link preview overlay's line count and the rows it shows, so the page
     keys move a window rather than a fixed number of lines. *)
 
+val agenda_lines : Masc_tui_types.state -> Masc_tui_agenda.line list
+(** The agenda panel's rows, as the frame draws them. The keypress that walks
+    the rows Enter can act on reads the same list, so the cursor cannot name a
+    row the frame is not drawing. *)
+
 val agenda_viewport : Masc_tui_types.state -> int * int
 val answering_viewport : Masc_tui_types.state -> int * int
 (** Pure projection for the visible Recent pane, or [None] when it will not

@@ -56,12 +56,22 @@ type awaiting =
 (** A keeper blocked until the operator answers. No time on purpose: the
     answer is due now, and a countdown would read as permission to wait. *)
 
+(** What ends this wait, as {!Operator_task_attention} already knows it: a
+    stop is granted as a verdict in the verify queue, and work nobody holds is
+    read on the task itself. Carried rather than re-derived from [what], which
+    is a sentence written for a reader. *)
+type ends_at =
+  | Verify_queue
+  | The_task
+
 type stalled =
-  { what : string
+  { task_id : string  (** the task the row is about, so a key can open it *)
+  ; what : string
         (** The one line {!Operator_task_attention.summary} wrote. The sentence
             is made there rather than here so the three surfaces that draw this
             row cannot describe it three ways. *)
   ; since_iso : string  (** when it started waiting on the operator *)
+  ; ends_at : ends_at
   }
 (** A task whose only exit belongs to the operator: a stop waiting to be
     granted, work held by an agent with no Keeper queue, a Keeper record that
@@ -126,9 +136,23 @@ type tone =
   | Quiet
   | Failed  (** a read that did not answer, drawn like a failure elsewhere *)
 
+(** Where a row leads. Most lead nowhere -- headings, spacers, the note an
+    empty section draws -- and a row that leads nowhere is one the cursor does
+    not stop on. Before this the panel led nowhere at all: it counted the work
+    waiting on the operator and had no way to reach any of it. *)
+type destination =
+  | Nowhere
+  | Keeper_holding of string
+      (** the keeper sitting on a tool call only an operator releases *)
+  | Stuck_task of
+      { task_id : string
+      ; ends_at : ends_at
+      }
+
 type line =
   { tone : tone
   ; text : string
+  ; goes_to : destination
   }
 
 val overlay :
@@ -140,6 +164,10 @@ val overlay :
     The stuck section is the exception to "every": it draws the oldest few and
     then says how many it did not. Sixty-two rows is a wall, and the list
     itself belongs to a tool. *)
+
+val target_indexes : line list -> int list
+(** Indexes of the rows Enter can act on, in display order. The cursor moves
+    over these, not over prose. *)
 
 val short_who : string -> string
 (** A wake target with its kind prefix removed: ["keeper:edgar.a.poe"] reads

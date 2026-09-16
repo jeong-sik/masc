@@ -1722,11 +1722,14 @@ let test_post_get_long_thread_pages_fit_inline_and_chain () =
     (List.sort String.compare ids)
     (List.sort String.compare seen)
 
-(* The same thread is one page where the reader carries it inline. On the
-   agent-core lane MASC owns the wire and nothing spills below its own
-   ceiling, so cutting the thread at the official-client ceiling would only
-   cost the Keeper extra calls. An MCP caller takes the result whole and pages
-   by count. *)
+(* The same thread is one page only where the reader carries it inline
+   without crossing a wire: MASC owns the process boundary on the agent-core
+   lane, so nothing spills below its own ceiling and cutting the thread at
+   the official-client ceiling would only cost the Keeper extra calls. An MCP
+   caller crosses the same wire as the official-client lane, and
+   [Tool_output.Sent_to_client] resolves to the same ceiling as
+   [default_model_projection] (#36556), so both page a large thread the same
+   way instead of the MCP caller taking it whole. *)
 let test_post_get_page_follows_the_lane_ceiling () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1751,13 +1754,20 @@ let test_post_get_page_follows_the_lane_ceiling () =
     "and still inside the agent-core ceiling"
     true
     (String.length agent_core.body <= Common.max_agent_core_inline_result_bytes);
-  check_page
-    ~label:"MCP caller"
-    (read_page ~result_boundary:Tool_output.Sent_to_client ~label:"MCP caller" post_id [])
-    ~offset:0
-    ~returned:comment_count
-    ~total:comment_count
-    ~next_offset:None;
+  let mcp_caller =
+    read_page ~result_boundary:Tool_output.Sent_to_client ~label:"MCP caller" post_id []
+  in
+  Alcotest.(check int) "MCP caller: offset" 0 mcp_caller.offset;
+  Alcotest.(check int) "MCP caller: total" comment_count mcp_caller.total;
+  Alcotest.(check bool)
+    "the MCP caller's page fits the wire ceiling, like the official-client lane"
+    true
+    (String.length mcp_caller.body <= Common.max_tool_result_wire_bytes);
+  Alcotest.(check bool)
+    "the MCP caller needs more than one page for a thread this large, same ceiling as the \
+     official-client lane"
+    true
+    (mcp_caller.returned < comment_count && Option.is_some mcp_caller.next_offset);
   Alcotest.(check bool)
     "the official-client lane needs more than one page"
     true

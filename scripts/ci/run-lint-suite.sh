@@ -205,9 +205,6 @@ blocking_lints() {
   run_lint "Execute async surface" bash scripts/check-execute-async-surface.sh
   run_lint "HITL exact-flow boundary" bash scripts/check-hitl-exact-flow-boundary.sh
   run_lint "Turn-records envelope parity" bash scripts/check-turn-records-envelope-parity.sh
-  run_lint "Feature flag consistency self-test" \
-    bash scripts/check-feature-flag-consistency.sh --self-test
-  run_lint "Feature flag consistency" bash scripts/check-feature-flag-consistency.sh
   run_lint "Drain loops yield" bash scripts/ci/check-drain-loop-yields.sh
   run_lint "Log severity anti-patterns" bash scripts/ci/check-log-severity-anti-patterns.sh
   run_lint "Determinism contract" bash scripts/ci/check-determinism-contract.sh

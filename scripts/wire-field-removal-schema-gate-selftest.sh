@@ -8,9 +8,12 @@
 #   D. removal + version sentinel bump           -> OK
 #   E. removal + 'schema-compat:' commit note    -> OK
 #   F. wrong ROOT (non-masc tree)                -> exit 2, loud failure
+#   H. removal + vNN MENTION only, no real bump  -> exit 1
 # The F case exists because the ROOT formula was once observed to land on
 # the keeper playground root, where the gate would silently report
 # "no protected module changed" while scanning nothing.
+# The H case exists because the bump test once accepted any -vNN.json(l)
+# substring on an added line (task-1545, F4).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -79,6 +82,21 @@ rm -f lib/keeper_runtime/keeper_event_queue_persistence.ml.bak
 commit "remove facts row + bump v20"
 rc="$(run_gate HEAD~1)"
 [ "$rc" = "0" ] || { echo "self-test FAILED: version bump must pass, got $rc" >&2; cat /tmp/wg-st.out >&2; exit 1; }
+
+# H) removal + a MENTION of a version sentinel on an added line -> FAIL.
+#    A bump must be a MOVE: an old version leaving a `-` line and a
+#    different version arriving on a `+` line. Prose that merely names
+#    event-queue-v19.json is not a bump (task-1545, F4).
+printf 'let field_history = "history"\n' >>lib/keeper/keeper_memory_os_current.ml
+commit "add history row"
+sed -i.bak '/^let field_history = "history"$/d' lib/keeper/keeper_memory_os_current.ml
+rm -f lib/keeper/keeper_memory_os_current.ml.bak
+cat >>lib/keeper_runtime/keeper_event_queue_persistence.ml <<'EOF'
+(* prose: earlier snapshots lived in event-queue-v19.json (task-598) *)
+EOF
+commit "remove history row + only mention v19"
+rc="$(run_gate HEAD~1)"
+[ "$rc" = "1" ] || { echo "self-test FAILED: sentinel mention must NOT count as a bump, got $rc" >&2; cat /tmp/wg-st.out >&2; exit 1; }
 
 # E) removal + schema-compat commit note -> OK.
 sed -i.bak '/^let field_change = "change"$/d' lib/keeper/keeper_memory_os_current.ml

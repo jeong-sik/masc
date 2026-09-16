@@ -93,6 +93,10 @@ let execution_boundary_of_turn_failure error =
       | Keeper_internal_error.Terminal_effect_failed _
       | Keeper_internal_error.Provider_attempt_effect_fenced _
       | Keeper_internal_error.Tool_correction_lost _
+      (* Both are reported by the runtime client, which is the agent-core
+         side of this boundary. *)
+      | Keeper_internal_error.Host_stopped_turn _
+      | Keeper_internal_error.Runtime_connection_closed _
       | Keeper_internal_error.Receipt_persistence_failed _ )
   | None ->
     Keeper_runtime_failure_route.Agent_core_execution

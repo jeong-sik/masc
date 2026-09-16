@@ -74,6 +74,7 @@ type forecast_parts =
   { reserved_measured_on_turn : int
   ; reserved_bytes : int
   ; pinned_measured_on_turn : int
+  ; pinned_measured_on_runtime : string
   ; pinned_bytes : int
   }
 
@@ -616,10 +617,20 @@ let decode_forecast_parts = function
     let* pinned_measured_on_turn =
       nonnegative_int "parts.pinned_measured_on_turn" pinned_turn_json
     in
+    let* pinned_runtime_json = field "pinned_measured_on_runtime" fields in
+    let* pinned_measured_on_runtime =
+      nonempty_string "parts.pinned_measured_on_runtime" pinned_runtime_json
+    in
     let* pinned_json = field "pinned_bytes" fields in
     let* pinned_bytes = nonnegative_int "parts.pinned_bytes" pinned_json in
     Ok
-      (Ok { reserved_measured_on_turn; reserved_bytes; pinned_measured_on_turn; pinned_bytes })
+      (Ok
+         { reserved_measured_on_turn
+         ; reserved_bytes
+         ; pinned_measured_on_turn
+         ; pinned_measured_on_runtime
+         ; pinned_bytes
+         })
   | _ -> Error "parts is not an object"
 
 let decode_forecast_fit = function

@@ -65,6 +65,7 @@ let measured : Inspector.forecast =
               { reserved_measured_on_turn = 3581
               ; reserved_bytes = 87_000
               ; pinned_measured_on_turn = 3579
+              ; pinned_measured_on_runtime = "ollama_cloud.deepseek-v4-1-flash"
               ; pinned_bytes = 237_000
               }
         ; history_atoms = 3395
@@ -112,6 +113,25 @@ let test_the_band_reads_at_the_runtimes_density () =
   Alcotest.(check bool) "the footer counts the checkpoint and the wake line" true
     (says "6012 messages in the checkpoint; the wake line adds 131 bytes as the newest atom" rows)
 
+let test_a_pinned_figure_from_another_lane_names_it () =
+  let forecast =
+    with_candidate
+      (fun candidate ->
+        { candidate with
+          parts =
+            Ok
+              { reserved_measured_on_turn = 4032
+              ; reserved_bytes = 82_410
+              ; pinned_measured_on_turn = 4033
+              ; pinned_measured_on_runtime = "claude_code.claude-sonnet-5"
+              ; pinned_bytes = 140_706
+              }
+        })
+      measured
+  in
+  Alcotest.(check bool) "the lane rides beside the turn" true
+    (says "(turn #4033 on claude_code.claude-sonnet-5)" (lines (Ok forecast)))
+
 let test_the_newest_atom_overrun_is_named_as_such () =
   let forecast =
     with_candidate
@@ -142,6 +162,7 @@ let test_a_fitting_cut_says_so () =
               { reserved_measured_on_turn = 3581
               ; reserved_bytes = 87_000
               ; pinned_measured_on_turn = 3579
+              ; pinned_measured_on_runtime = "ollama_cloud.deepseek-v4-1-flash"
               ; pinned_bytes = 20_000
               }
         ; cut =
@@ -254,7 +275,8 @@ let test_the_forecast_decodes_the_servers_shape () =
                        "density_input_tokens":100000,"density_measured_bytes":330000},
            "request_cap_bytes":524288,
            "parts":{"reserved_measured_on_turn":3581,"reserved_bytes":87000,
-                    "pinned_measured_on_turn":3579,"pinned_bytes":237000},
+                    "pinned_measured_on_turn":3579,"pinned_measured_on_runtime":"ollama_cloud.deepseek-v4-1-flash",
+                    "pinned_bytes":237000},
            "history_atoms":3395,
            "cut":{"kind":"cut","kept_atoms":1,"transmitted_bytes":12000,
                   "fit":{"kind":"overrun","by_bytes":43500,"cause":"fixed_parts_exceed_target"}}}]}|}
@@ -311,7 +333,7 @@ let test_a_not_applicable_window_decodes_as_such () =
          "candidates":[{"runtime_id":"claude_code.claude-sonnet-5",
            "window":{"not_applicable":"claude_code.claude-sonnet-5 is an official-client runtime"},
            "capacity":null,"request_cap_bytes":null,
-           "parts":{"reserved_measured_on_turn":4700,"reserved_bytes":194651,"pinned_measured_on_turn":4700,"pinned_bytes":182167},
+           "parts":{"reserved_measured_on_turn":4700,"reserved_bytes":194651,"pinned_measured_on_turn":4700,"pinned_measured_on_runtime":"claude_code.claude-sonnet-5","pinned_bytes":182167},
            "history_atoms":4429,"cut":null}]}|}
   in
   match Inspector.decode_forecast json with
@@ -340,6 +362,8 @@ let () =
     [ ( "render"
       , [ Alcotest.test_case "the band reads at the runtime's density" `Quick
             test_the_band_reads_at_the_runtimes_density
+        ; Alcotest.test_case "a pinned figure from another lane names it" `Quick
+            test_a_pinned_figure_from_another_lane_names_it
         ; Alcotest.test_case "the newest-atom overrun is named as such" `Quick
             test_the_newest_atom_overrun_is_named_as_such
         ; Alcotest.test_case "a fitting cut says so" `Quick test_a_fitting_cut_says_so

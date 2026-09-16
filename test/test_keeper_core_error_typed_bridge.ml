@@ -848,6 +848,143 @@ let test_gate_replay_repair_failure_is_typed () =
   | None -> Alcotest.fail "typed Gate replay repair did not decode"
 ;;
 
+(* RFC-0454 P2: the two runtime stops the chat pane used to recognise by
+   searching the row for a sentence. *)
+let host_shutdown =
+  KTD.Host_stopped_turn
+    { runtime_id = "codex_app_server"; stop = KTD.Host_graceful_shutdown }
+;;
+
+let connection_closed =
+  KTD.Runtime_connection_closed
+    { runtime_id = "codex_app_server"
+    ; detail = "stdout closed"
+    ; turn_accepted = true
+    }
+;;
+
+let test_runtime_stops_round_trip_through_the_codec () =
+  List.iter
+    (fun error ->
+       let encoded = KTD.masc_internal_error_to_json error in
+       match KTD.parse_masc_internal_error_json encoded with
+       | None ->
+         Alcotest.failf
+           "%s did not decode from its own encoding"
+           (KTD.kind_of_masc_internal_error error)
+       | Some decoded ->
+         Alcotest.(check string)
+           "re-encoding is byte-identical"
+           (Yojson.Safe.to_string encoded)
+           (Yojson.Safe.to_string (KTD.masc_internal_error_to_json decoded)))
+    [ host_shutdown
+    ; KTD.Host_stopped_turn
+        { runtime_id = "codex_app_server"
+        ; stop = KTD.Runtime_reported_interrupt
+        }
+    ; connection_closed
+    ; KTD.Runtime_connection_closed
+        { runtime_id = "claude_code"; detail = "exit 1"; turn_accepted = false }
+    ]
+;;
+
+(* Strict like its siblings: a spelling the encoder does not emit, a missing
+   field, an extra field, or a field of the wrong shape is refused rather than
+   filled in. *)
+let test_the_codec_refuses_what_it_did_not_write () =
+  List.iter
+    (fun (label, json) ->
+       match KTD.parse_masc_internal_error_json (Yojson.Safe.from_string json) with
+       | None -> ()
+       | Some decoded ->
+         Alcotest.failf
+           "%s was accepted as %s"
+           label
+           (KTD.kind_of_masc_internal_error decoded))
+    [ ( "unknown stop spelling"
+      , {|{"kind":"host_stopped_turn","runtime_id":"r","stop":"operator_cancel"}|} )
+    ; "missing stop", {|{"kind":"host_stopped_turn","runtime_id":"r"}|}
+    ; ( "extra field"
+      , {|{"kind":"host_stopped_turn","runtime_id":"r","stop":"host_graceful_shutdown","note":"x"}|}
+      )
+    ; ( "turn_accepted is not a bool"
+      , {|{"kind":"runtime_connection_closed","runtime_id":"r","detail":"d","turn_accepted":"yes"}|}
+      )
+    ; ( "missing detail"
+      , {|{"kind":"runtime_connection_closed","runtime_id":"r","turn_accepted":true}|}
+      )
+    ]
+;;
+
+(* The chat row's only carrier for the cause is its text until RFC-0454 P3
+   gives the row a typed [failure] field, and a summary would take that text.
+   So these two answer [None] here, exactly as the two fences do, and the
+   keeper's user-facing message keeps the envelope the pane reads. *)
+let test_runtime_stops_keep_their_envelope_in_the_row () =
+  List.iter
+    (fun error ->
+       Alcotest.(check (option string))
+         "no summary displaces the envelope"
+         None
+         (KTD.summary_of_masc_internal_error error);
+       let message =
+         AE.user_message_of_core_error
+           (KTD.core_error_of_masc_internal_error error)
+       in
+       Alcotest.(check bool)
+         "the row text still carries the typed failure"
+         true
+         (Option.is_some
+            (KTD.classify_masc_internal_error_of_string message)))
+    [ host_shutdown; connection_closed ]
+;;
+
+(* The typed value must not move the lane. A closed connection reached the
+   rotation chain as [ProviderUnavailable] before it was typed, and both the
+   attempt outcome and the failure route still answer what that answered. *)
+let test_a_closed_connection_rotates_exactly_as_before () =
+  let typed = KTD.core_error_of_masc_internal_error connection_closed in
+  let untyped =
+    CoreError.Provider
+      (Llm_provider.Error.ProviderUnavailable
+         { provider = "codex_app_server"; detail = "stdout closed" })
+  in
+  let outcome = Masc.Keeper_runtime_attempt.core_error_to_runtime_outcome in
+  Alcotest.(check bool)
+    "same attempt outcome"
+    true
+    (outcome typed = outcome untyped);
+  Alcotest.(check bool)
+    "and it is an attempt, not a dead end"
+    true
+    (Option.is_some (outcome typed));
+  List.iter
+    (fun boundary ->
+       Alcotest.(check bool)
+         "same failure route"
+         true
+         (KFR.route_of_error ~boundary typed
+          = KFR.route_of_error ~boundary untyped))
+    [ KFR.Masc_execution; KFR.Agent_core_execution ];
+  Alcotest.(check bool)
+    "still the deferred server-error lane"
+    true
+    (EC.recoverable_runtime_failure_reason typed = Some EC.Server_error)
+;;
+
+(* A host stop carried no rotation before it was typed, and carries none now. *)
+let test_a_host_stop_still_rotates_nowhere () =
+  let typed = KTD.core_error_of_masc_internal_error host_shutdown in
+  Alcotest.(check bool)
+    "no attempt outcome"
+    true
+    (Masc.Keeper_runtime_attempt.core_error_to_runtime_outcome typed = None);
+  Alcotest.(check bool)
+    "no deferred runtime lane"
+    true
+    (EC.recoverable_runtime_failure_reason typed = None)
+;;
+
 let () =
   Alcotest.run
     "keeper_core_error_typed_bridge"
@@ -876,6 +1013,28 @@ let () =
             "provider and model parse rejections remain distinguishable"
             `Quick
             test_server_parse_rejection_split
+        ] )
+    ; ( "typed runtime stops"
+      , [ Alcotest.test_case
+            "a host stop and a closed connection round-trip"
+            `Quick
+            test_runtime_stops_round_trip_through_the_codec
+        ; Alcotest.test_case
+            "the codec refuses what it did not write"
+            `Quick
+            test_the_codec_refuses_what_it_did_not_write
+        ; Alcotest.test_case
+            "both stops keep their envelope in the row"
+            `Quick
+            test_runtime_stops_keep_their_envelope_in_the_row
+        ; Alcotest.test_case
+            "a closed connection rotates exactly as before"
+            `Quick
+            test_a_closed_connection_rotates_exactly_as_before
+        ; Alcotest.test_case
+            "a host stop still rotates nowhere"
+            `Quick
+            test_a_host_stop_still_rotates_nowhere
         ] )
     ; ( "receipt persistence"
       , [ Alcotest.test_case

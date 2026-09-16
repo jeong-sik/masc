@@ -71,8 +71,10 @@ val chat_events_page :
     [1..Keeper_chat_event_log.page_max_limit]. A negative or non-integer
     field is 400 [invalid_input]. An offset past the complete rows is 400
     [since_offset_past_rows], one that does not start a row is 400
-    [since_offset_inside_row], and a first row at the offset whose seq is not
-    past [since_seq] is 400 [cursor_mismatch]. Only the rows the page needs are
+    [since_offset_inside_row], and a pair whose halves did not come from one
+    page — the row before the offset already past [since_seq], the row at it
+    not past [since_seq], or an offset sent with no [since_seq] — is 400
+    [cursor_mismatch] ({!Keeper_chat_event_log.cursor_refusal_to_wire}). Only the rows the page needs are
     decoded; a corrupt one among them is 503 [journal_corrupt]. Exposed so the
     wire contract is tested without an HTTP listener. *)
 
@@ -95,6 +97,18 @@ val handle_mutation
   -> unit
 
 module For_testing : sig
+  val events_page_of_request
+    :  path:string
+    -> Httpun.Request.t
+    -> string
+    -> (Yojson.Safe.t, Httpun.Status.t * string) result
+  (** The two steps the [Chat_events] route is: read the query
+      ([operation_id], [since_seq], [since_offset], [limit]) and serve that
+      page from the journal's complete rows, without redaction. The failure
+      is the response status and its [error] code. The handler composes the
+      same two functions over the rows it read, so a cursor this answers on
+      cannot be dropped between the query and the page. *)
+
   val no_journal_for_settled_operation_message : operation_id:string -> string
   (** The 410 message for {!No_journal_for_settled_operation}: names the
       operation and its ended state, claims no cause. *)

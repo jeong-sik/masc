@@ -135,7 +135,7 @@ type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_
   | Terminal_failed of
       { failure_class : Tool_result.tool_failure_class
       ; effect_disposition : Tool_result.failure_effect_disposition
-      ; diagnostic : string
+      ; detail : Keeper_terminal_effect_detail.t
       }
 
 type host_stop = Runtime_official_client_tool.host_stop =

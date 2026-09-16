@@ -91,7 +91,7 @@ protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:%d"
 [models.sample]
 api-name = "silent-model"
-max-context = 8192
+max-context = 200000
 [silent.sample]
 |}
        port);

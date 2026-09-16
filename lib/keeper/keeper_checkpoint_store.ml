@@ -37,7 +37,13 @@ let list_agent_core_history_files ~(session_dir : string) : string list =
     |> List.filter is_agent_core_history_file
     |> List.sort (fun a b -> compare b a))
 
-let max_agent_core_history_retained = 12
+(* Each entry is a whole checkpoint of the session, and a live keeper's runs
+   111 MB: twelve of them held 1.4 GB per trace directory and 8.4 GB across
+   traces/ (2026-09-16). The only reader is the dashboard checkpoint list,
+   which decodes every retained entry to describe it, so the count is also
+   what that request costs. Three keeps the last few turns to look at or
+   restore. *)
+let max_agent_core_history_retained = 3
 
 let agent_core_history_path ~(session_dir : string) ~(snapshot_id : string) =
   Filename.concat session_dir snapshot_id
@@ -846,6 +852,90 @@ let load_ref_locked ~session_dir ~expected_session_id =
          checkpoint;
        snapshot)
 
+(* What the canonical file holds, against the reference a candidate claims to
+   advance. *)
+type canonical_source =
+  | Source_absent
+  | Source_is_expected
+  | Source_is_other of Keeper_checkpoint_ref.t
+
+(* RFC-0225 §3.2 admission: the reference is a SHA-256 over exactly the
+   canonical bytes, so hashing the file settles whether it still holds the
+   bytes [expected_source_ref] names. The decode this replaces allocated 26 GB
+   in a fifty-minute window on a live server (2026-09-15) over files of
+   13-109 MB, and a save repeats it every turn.
+
+   Equal bytes are not the whole reference: the session and turn it carries are
+   read from the file too, and a reference restored from a stored record
+   ([Keeper_checkpoint_ref.of_persisted]) carries the record's word for them.
+   The canonical summary holds both for exactly the bytes on disk, so a file
+   the summary describes is admitted on the hash alone; otherwise it is decoded
+   once, which publishes the summary for the next save.
+
+   A file whose hash differs is decoded as well, because the refusal names the
+   reference that file now carries. Bytes this build cannot decode therefore
+   still refuse the write. *)
+let canonical_source_locked
+      ~session_dir
+      ~(expected_source_ref : Keeper_checkpoint_ref.t)
+  =
+  let expected_session_id = expected_source_ref.trace_id in
+  let canonical_path =
+    agent_core_checkpoint_path
+      ~session_dir
+      ~session_id:(Keeper_id.Trace_id.to_string expected_session_id)
+  in
+  match load_canonical_bytes_strict canonical_path with
+  | Error error -> Error (Ref_read_failed error)
+  | Ok None -> Ok Source_absent
+  | Ok (Some (identity_before, canonical_bytes)) ->
+    let sha256 =
+      offload_checkpoint_cpu (fun () ->
+        Keeper_checkpoint_ref.sha256_of_canonical_bytes canonical_bytes)
+    in
+    (* The reference the file carries, read from it. The hash above is the one
+       the reference needs, so the decode does not hash the bytes again. *)
+    let decoded_reference () =
+      match decode_checkpoint_off_scheduler canonical_bytes with
+      | Error error -> Error (Ref_read_failed (classify_core_error error))
+      | Ok (checkpoint : Agent_core.Checkpoint.t) ->
+        publish_summary_after_parse
+          ~canonical_path
+          ~identity_before:(Some identity_before)
+          checkpoint;
+        (match Keeper_id.Trace_id.of_string checkpoint.session_id with
+         | Error reason -> Error (Ref_identity_invalid (Session_id_invalid reason))
+         | Ok trace_id
+           when not (Keeper_id.Trace_id.equal trace_id expected_session_id) ->
+           Error (Ref_session_mismatch { expected = expected_session_id; actual = trace_id })
+         | Ok trace_id ->
+           (match
+              Keeper_checkpoint_ref.of_persisted
+                ~trace_id
+                ~turn_count:checkpoint.turn_count
+                ~sha256
+            with
+            | Ok reference -> Ok reference
+            | Error error -> Error (Ref_identity_invalid (Ref_create_failed error))))
+    in
+    let source_of_reference reference =
+      if Keeper_checkpoint_ref.equal reference expected_source_ref
+      then Source_is_expected
+      else Source_is_other reference
+    in
+    if not (String.equal sha256 expected_source_ref.sha256)
+    then Result.map source_of_reference (decoded_reference ())
+    else (
+      match cached_summary ~canonical_path with
+      | Some summary
+        when String.equal
+               summary.summary_session_id
+               (Keeper_id.Trace_id.to_string expected_source_ref.trace_id)
+             && Int.equal summary.summary_turn_count expected_source_ref.turn_count ->
+        Ok Source_is_expected
+      | Some _ | None -> Result.map source_of_reference (decoded_reference ()))
+;;
+
 let load_agent_core_exact_snapshot ~session_dir ~session_id =
   match Keeper_id.Trace_id.of_string session_id with
   | Error reason -> Error (Ref_identity_invalid (Session_id_invalid reason))
@@ -924,7 +1014,13 @@ let save_agent_core_if_source_with
     let expected_session_id = expected_source_ref.trace_id in
     let observed_ref = ref None in
     let committed_installation = ref None in
-    let publish auxiliary =
+    (* Every path through here has installed [candidate_bytes], so the file is
+       the candidate: its summary is the candidate's, without reading the file
+       back. The source check reads the summary to answer the session and turn
+       of bytes whose hash already matched, so a save that leaves none behind
+       makes the next one decode the whole checkpoint. *)
+    let publish ~canonical_path auxiliary =
+      publish_summary_after_write ~canonical_path candidate;
       let installed = { installed_ref = candidate_ref; auxiliary } in
       committed_installation := Some installed;
       Installed installed
@@ -938,15 +1034,15 @@ let save_agent_core_if_source_with
         `Returned
           (with_checkpoint_cas_lock ~session_dir (fun session_dir ->
          let source =
-           match load_ref_locked ~session_dir ~expected_session_id with
-           | Error Ref_not_found when require_absent -> Ok ()
+           match canonical_source_locked ~session_dir ~expected_source_ref with
            | Error error -> Error (Source_unavailable error)
-           | Ok snapshot
-             when require_absent
-                  || not (Keeper_checkpoint_ref.equal expected_source_ref
-                            (exact_snapshot_reference snapshot)) ->
-             Error (Source_changed (exact_snapshot_reference snapshot))
-           | Ok _ -> Ok ()
+           | Ok Source_absent ->
+             if require_absent then Ok () else Error (Source_unavailable Ref_not_found)
+           | Ok Source_is_expected ->
+             if require_absent
+             then Error (Source_changed expected_source_ref)
+             else Ok ()
+           | Ok (Source_is_other reference) -> Error (Source_changed reference)
          in
          match source with
          | Error error -> not_installed error
@@ -965,16 +1061,16 @@ let save_agent_core_if_source_with
                 ~bytes:candidate_bytes
             with
             | Error error when error.Keeper_fs.renamed ->
-              publish [ Commit_durability_unknown error ]
+              publish ~canonical_path [ Commit_durability_unknown error ]
             | Error error -> not_installed (Commit_not_installed error)
             | Ok Keeper_fs.Committed ->
               (* The durable writer installs [candidate_bytes] verbatim - the
                  exact bytes [candidate_ref] was derived from - so the
                  published file and the returned ref agree by construction.
                  The hint is auxiliary and cannot downgrade that fact. *)
-              publish []
+              publish ~canonical_path []
             | Ok (Keeper_fs.Committed_but_observer_failed failure) ->
-              publish [ Commit_observer_failed failure ])))
+              publish ~canonical_path [ Commit_observer_failed failure ])))
       with
       | exn -> `Raised (exn, Printexc.get_raw_backtrace ())
     in

@@ -2090,6 +2090,38 @@ let test_async_append_defers_until_flush env =
           (Safe_ops.json_string_opt "keeper" entry)
       | _ -> Alcotest.fail "expected exactly one entry"))
 
+(* A keeper's revision moves with its own committed appends only, so one
+   keeper's tool calls do not make another keeper's derived caches stale. *)
+let test_a_keepers_revision_moves_with_its_own_appends_only env =
+  with_tmp_log_dir (fun _dir ->
+    Eio.Switch.run (fun sw ->
+      Keeper_tool_call_log.start_flush_fiber
+        ~sw
+        ~clock:(Eio.Stdenv.clock env);
+      let busy_before = Keeper_tool_call_log.committed_revision ~keeper_name:"busy-k" in
+      let quiet_before = Keeper_tool_call_log.committed_revision ~keeper_name:"quiet-k" in
+      let committed = ref 0 in
+      let append () =
+        Keeper_tool_call_log.log_call
+          ~keeper_name:"busy-k"
+          ~tool_name:"masc_status"
+          ~input:(`Assoc [])
+          ~output_text:"ready"
+          ~success:true
+          ~duration_ms:1.0
+          ~on_committed:(fun () -> incr committed)
+          ()
+      in
+      append ();
+      append ();
+      Alcotest.(check int) "both appends committed" 2 !committed;
+      Alcotest.(check int) "the busy keeper's revision moved once per append"
+        (busy_before + 2)
+        (Keeper_tool_call_log.committed_revision ~keeper_name:"busy-k");
+      Alcotest.(check int) "the quiet keeper's revision did not move"
+        quiet_before
+        (Keeper_tool_call_log.committed_revision ~keeper_name:"quiet-k")))
+
 let test_commit_callback_bypasses_async_queue ~success env =
   with_tmp_log_dir (fun _dir ->
     Eio.Switch.run (fun sw ->
@@ -2097,7 +2129,7 @@ let test_commit_callback_bypasses_async_queue ~success env =
         ~sw
         ~clock:(Eio.Stdenv.clock env);
       let committed = ref false in
-      let before_revision = Keeper_tool_call_log.committed_revision () in
+      let before_revision = Keeper_tool_call_log.committed_revision ~keeper_name:"chat-k" in
       Keeper_tool_call_log.log_call
         ~keeper_name:"chat-k"
         ~tool_name:"masc_status"
@@ -2110,7 +2142,7 @@ let test_commit_callback_bypasses_async_queue ~success env =
           Alcotest.(check int) "row readable inside publication callback" 1
             (List.length (read_recent ~n:1 ()));
           Alcotest.(check bool) "history revision advanced before publication" true
-            (Keeper_tool_call_log.committed_revision () > before_revision);
+            (Keeper_tool_call_log.committed_revision ~keeper_name:"chat-k" > before_revision);
           committed := true)
         ();
       Alcotest.(check bool) "callback observed committed row" true !committed;
@@ -2706,5 +2738,7 @@ let () =
             (test_commit_callback_bypasses_async_queue ~success:false)
         ; eio_test "commit callback fails closed without store"
             test_commit_callback_fails_closed_without_store
+        ; eio_env_test "a keeper's revision moves with its own appends only"
+            test_a_keepers_revision_moves_with_its_own_appends_only
         ] )
     ]

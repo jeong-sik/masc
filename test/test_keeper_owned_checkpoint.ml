@@ -91,7 +91,7 @@ let test_survives_canonical_and_history () = with_session (fun session_dir ->
                     messages=(make_checkpoint ~session_id:"session" ~turn_count ~marker:"B active").messages} in
     (match Store.save_agent_core_classified ~session_dir b with Ok _ -> () | Error e -> fail e)
   done;
-  check int "rolling archive actually pruned" 12
+  check int "rolling archive actually pruned" 3
     (List.length (Store.list_agent_core_history_files ~session_dir));
   assert_snapshot "A after twenty B saves" snapshot
     (load session_dir (Store.exact_snapshot_reference snapshot));

@@ -19,6 +19,7 @@
   keeper_request_failure_core
   keeper_terminal_effect_detail
   keeper_internal_error
+  keeper_request_failure
   keeper_runtime_failure_route
   keeper_latched_reason
   keeper_event_queue

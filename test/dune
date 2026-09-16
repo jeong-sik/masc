@@ -15,6 +15,11 @@
  (libraries masc_test_deps))
 
 (test
+ (name test_keeper_request_failure)
+ (modules test_keeper_request_failure)
+ (libraries masc_test_deps))
+
+(test
  (name test_keeper_tool_execute_script_paths)
  (modules test_keeper_tool_execute_script_paths)
  ; Deliberately minimal: the script-paths vocabulary now lives with its

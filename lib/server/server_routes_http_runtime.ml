@@ -553,8 +553,6 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
        file-sink state are exposed here; full log rows stay behind the
        dashboard logs API. *)
     ("logs", Log.Ring.summary_json ());
-    ("feature_flags", let features = Dashboard_feature_health.get_all_features () in
-      Dashboard_feature_health.overview_json features);
     ("gc", quick_gc_json ());
     ("scheduler", scheduler_json ());
     ("keeper_fibers", `Int keeper_fibers);
@@ -723,9 +721,6 @@ let with_full_health_snapshot_lock f =
 let full_health_placeholder_fields ?error ?(component_timed_out = false)
     ?(status = "warming") () =
   [
-    ( "feature_flags",
-      full_health_component_placeholder ?error ~component_timed_out ~status
-        "feature_flags" );
     ("overall_status", `String status);
     ("operator_action_required", `Bool false);
     ("operator_action_reasons", `List []);

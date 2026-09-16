@@ -13,7 +13,6 @@ status: runbook
 - `rate_limit.ml` — 요청 제한
 - `cancellation.ml` — 취소 처리
 - `lib/keeper/keeper_supervisor.ml` — keeper 단위 감독. `.mli`가 스스로 AGENT_CORE `Agent.run` 생명주기는 감독하지 않는다고 한정한다
-- `lib/dashboard/dashboard_feature_health.ml` — `Feature_flag_registry.all_flags` 의 플래그별 health
 - `lib/dashboard/dashboard_harness_health.ml` — harness health 판정을 기록하는 원장 (판정은 다른 곳에서 온다)
 - `lib/fs_compat/capability_recovery_*.ml`, `publication_recovery_*.ml` — 기동 시 파일 표면 정합 복구. `mcp_server.ml` 까지 배선됨
 - `lib/shutdown.ml`, `lib/shutdown_hooks.ml` — 단계가 정의된 graceful shutdown. `bin/main_eio.ml:664` 가 SIGINT/SIGTERM 에 물려 있다

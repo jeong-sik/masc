@@ -449,9 +449,10 @@ let forecast ~config ~keeper_name =
          Runtime_model_input_tail_window.annotate messages
        in
        let assignment_id = Keeper_meta_contract.runtime_id_of_meta meta in
-       (* NDT-OK: one wall-clock read for the quota order and the rests, as
-          the driver's own walk takes it; the lane preference observes its
-          own clock inside [assignment_walk_order]. *)
+       (* The lane preference observes its own clock inside
+          [assignment_walk_order]; this read serves the quota order and the
+          rests, as the driver's own walk takes it. *)
+       (* NDT-OK: one wall-clock read at the boundary, compared with stored expiries. *)
        let now = Unix.gettimeofday () in
        let records, records_read = records_of_store ~config ~keeper_name in
        let readings = readings_of_records records in

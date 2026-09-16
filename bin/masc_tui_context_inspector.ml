@@ -95,6 +95,28 @@ type forecast_slot =
   | Slot_wake_line of { bytes : int }
   | Slot_system_context of { bytes : int; blocks : (string * int) list }
 
+type forecast_rest =
+  | Rest_serving
+  | Rest_resting of { release_at : float; walk_promotes_at_release : bool }
+
+type forecast_place =
+  { walks_at : int
+  ; declared_at : int option
+  ; rest : forecast_rest
+  }
+
+type forecast_preferred =
+  { preferred_runtime_id : string
+  ; noted_at : float
+  ; ttl_s : float
+  }
+
+type forecast_walk =
+  { lane_id : string
+  ; declared : string list
+  ; preferred : forecast_preferred option
+  }
+
 type forecast_candidate =
   { runtime_id : string
   ; lane : forecast_lane
@@ -103,11 +125,13 @@ type forecast_candidate =
   ; history_atoms : int
   ; carried : forecast_carried option
   ; assembly : forecast_slot list option
+  ; place : forecast_place
   }
 
 type forecast =
   { checkpoint_messages : int
   ; wake_line_bytes : int
+  ; walk : forecast_walk
   ; candidates : forecast_candidate list
   }
 
@@ -571,7 +595,80 @@ let format_tokens tokens =
   else if tokens >= 1_000 then Printf.sprintf "%.1fk" (float tokens /. 1_000.)
   else string_of_int tokens
 
-let forecast_schema = "masc.keeper.next-request-forecast.v3"
+let forecast_schema = "masc.keeper.next-request-forecast.v4"
+
+let nonnegative_float name = function
+  | `Float value when Float.is_finite value && value >= 0. -> Ok value
+  | `Int value when value >= 0 -> Ok (Float.of_int value)
+  | _ -> Error (name ^ " is not a non-negative finite number")
+
+let decode_forecast_rest = function
+  | `Assoc fields ->
+    let* kind_json = field "kind" fields in
+    let* kind = nonempty_string "rest.kind" kind_json in
+    (match kind with
+     | "serving" -> Ok Rest_serving
+     | "resting" ->
+       let* release_json = field "release_at" fields in
+       let* release_at = nonnegative_float "rest.release_at" release_json in
+       let* promotes_json = field "walk_promotes_at_release" fields in
+       (match promotes_json with
+        | `Bool walk_promotes_at_release ->
+          Ok (Rest_resting { release_at; walk_promotes_at_release })
+        | _ -> Error "rest.walk_promotes_at_release is not a boolean")
+     | other -> Error ("rest.kind is neither serving nor resting: " ^ other))
+  | _ -> Error "rest is not an object"
+
+let decode_forecast_place = function
+  | `Assoc fields ->
+    let* walks_json = field "walks_at" fields in
+    let* walks_at = nonnegative_int "place.walks_at" walks_json in
+    let* declared_json = field "declared_at" fields in
+    let* declared_at =
+      match declared_json with
+      | `Null -> Ok None
+      | json ->
+        let* index = nonnegative_int "place.declared_at" json in
+        Ok (Some index)
+    in
+    let* rest_json = field "rest" fields in
+    let* rest = decode_forecast_rest rest_json in
+    Ok { walks_at; declared_at; rest }
+  | _ -> Error "place is not an object"
+
+let decode_forecast_preferred = function
+  | `Null -> Ok None
+  | `Assoc fields ->
+    let* id_json = field "runtime_id" fields in
+    let* preferred_runtime_id = nonempty_string "preferred.runtime_id" id_json in
+    let* noted_json = field "noted_at" fields in
+    let* noted_at = nonnegative_float "preferred.noted_at" noted_json in
+    let* ttl_json = field "ttl_s" fields in
+    let* ttl_s = nonnegative_float "preferred.ttl_s" ttl_json in
+    Ok (Some { preferred_runtime_id; noted_at; ttl_s })
+  | _ -> Error "preferred is not an object or null"
+
+let decode_forecast_walk = function
+  | `Assoc fields ->
+    let* lane_json = field "lane_id" fields in
+    let* lane_id = nonempty_string "walk.lane_id" lane_json in
+    let* declared_json = field "declared" fields in
+    let* declared =
+      match declared_json with
+      | `List items ->
+        let rec loop reversed = function
+          | [] -> Ok (List.rev reversed)
+          | item :: rest ->
+            let* id = nonempty_string "walk.declared" item in
+            loop (id :: reversed) rest
+        in
+        loop [] items
+      | _ -> Error "walk.declared is not a list"
+    in
+    let* preferred_json = field "preferred" fields in
+    let* preferred = decode_forecast_preferred preferred_json in
+    Ok { lane_id; declared; preferred }
+  | _ -> Error "walk is not an object"
 
 let decode_forecast_lane = function
   | `Assoc fields when List.mem_assoc "not_applicable" fields ->
@@ -734,7 +831,9 @@ let decode_forecast_candidate = function
     let* carried = decode_forecast_carried carried_json in
     let* assembly_json = field "assembly" fields in
     let* assembly = decode_forecast_assembly assembly_json in
-    Ok { runtime_id; lane; marks; parts; history_atoms; carried; assembly }
+    let* place_json = field "place" fields in
+    let* place = decode_forecast_place place_json in
+    Ok { runtime_id; lane; marks; parts; history_atoms; carried; assembly; place }
   | _ -> Error "candidate is not an object"
 
 let decode_forecast = function
@@ -748,6 +847,8 @@ let decode_forecast = function
       let* checkpoint_messages = nonnegative_int "checkpoint_messages" messages_json in
       let* wake_json = field "wake_line_bytes" fields in
       let* wake_line_bytes = nonnegative_int "wake_line_bytes" wake_json in
+      let* walk_json = field "walk" fields in
+      let* walk = decode_forecast_walk walk_json in
       let* candidates_json = field "candidates" fields in
       (match candidates_json with
        | `List items ->
@@ -758,6 +859,6 @@ let decode_forecast = function
              loop (candidate :: reversed) rest
          in
          let* candidates = loop [] items in
-         Ok { checkpoint_messages; wake_line_bytes; candidates }
+         Ok { checkpoint_messages; wake_line_bytes; walk; candidates }
        | _ -> Error "candidates is not a list")
   | _ -> Error "next-request response is not an object"

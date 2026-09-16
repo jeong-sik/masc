@@ -292,16 +292,17 @@ let deferred_lane_rest ~now hint =
 (* A fresh walk of an assignment, ordered as [run_named] orders a turn without
    a deferred suffix: sticky preference, then quota and backpressure demotion.
    An id that names no lane or runtime is its own single candidate. *)
+let assignment_walk_order ~now assignment_id =
+  match Runtime.resolve_assignment assignment_id with
+  | `Lane lane ->
+    let lane_id = Runtime_lane.id lane in
+    Runtime_lane_preference.prefer_order ~lane_id (Runtime_lane.ordered_candidates lane)
+    |> quota_ordered_runtime_ids ~now
+  | `Unavailable _ | `Missing -> [ assignment_id ]
+;;
+
 let assignment_walk_rest ~now assignment_id =
-  let ordered =
-    match Runtime.resolve_assignment assignment_id with
-    | `Lane lane ->
-      let lane_id = Runtime_lane.id lane in
-      Runtime_lane_preference.prefer_order ~lane_id (Runtime_lane.ordered_candidates lane)
-      |> quota_ordered_runtime_ids ~now
-    | `Unavailable _ | `Missing -> [ assignment_id ]
-  in
-  match ordered with
+  match assignment_walk_order ~now assignment_id with
   | [] -> Walk_head_serving { runtime_id = assignment_id }
   | head :: later -> walk_rest ~now ~head ~later
 ;;

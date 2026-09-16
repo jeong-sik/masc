@@ -97,8 +97,15 @@ type walk_rest =
 (** A deferred suffix in the order the next turn walks it. *)
 val deferred_lane_rest : now:float -> deferred_runtime_lane -> walk_rest
 
+(** The candidates a fresh walk of an assignment dispatches, in order: the
+    lane as declared with the sticky last-good candidate moved first
+    ({!Runtime_lane_preference.prefer_order}), then quota and backpressure
+    demotion. An id that names no lane or runtime is its own single
+    candidate. *)
+val assignment_walk_order : now:float -> string -> string list
+
 (** A fresh walk of an assignment, ordered as a turn without a deferred suffix
-    orders it. *)
+    orders it: {!assignment_walk_order}'s head and its rest. *)
 val assignment_walk_rest : now:float -> string -> walk_rest
 
 (** Whether a wakeup may end a failure wait: a capacity release is MASC's own

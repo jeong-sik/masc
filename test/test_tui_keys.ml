@@ -533,7 +533,7 @@ let test_verification_footer_carries_the_verdict_keys () =
      the other list -- the store keeps every submission, so the history holds
      rows whose task finished weeks ago -- and [< / >] pages that history. *)
   check str "verification names detail, approve, and reject"
-    "j/k:move  v:next Planning tab  h:queue / history  [ / ]:previous / next  < / >:newer / older  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:details  Left / Esc:back  a:approve  x:reject  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  v:next Planning tab  h:queue / history  [ / ]:previous / next  < / >:newer / older  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:details  Left / Esc:back  a / x:approve / reject  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Verification)
 
 let test_fusion_footer_pins_the_shared_list_projection () =
@@ -1544,6 +1544,26 @@ let test_activity_footer_keeps_filter_before_evidence () =
     (List.length labels)
     (List.length (List.sort_uniq String.compare labels))
 
+(* The two keys this surface exists for. Spelled apart they were two items a
+   fitted footer could give up one at a time, and it did: [x] went first, then
+   [a], leaving a queue of work with no drawn way to act on it. Pinned as a
+   pair, they survive every width the sheet draws at.
+
+   The pair is one item -- "a / x:approve / reject" -- so the fitted row holds
+   the token that opens its label. *)
+let test_verification_footer_keeps_the_way_to_answer () =
+  let hints = Masc_tui_keys.footer_hints Verification in
+  let names_the_pair row =
+    String.split_on_char ' ' row
+    |> List.exists (String.starts_with ~prefix:"x:approve")
+  in
+  for cols = 60 to 148 do
+    let row = fitted_footer ~cols hints in
+    Alcotest.(check bool)
+      (Printf.sprintf "%d cols keeps the verdict keys" cols)
+      true (names_the_pair row)
+  done
+
 let section name =
   match List.assoc_opt name (Masc_tui_keys.help_sections ()) with
   | Some entries -> entries
@@ -2499,6 +2519,8 @@ let () =
             test_git_diff_footer_names_scroll_code_and_files
         ; Alcotest.test_case "Verification carries the verdict keys" `Quick
             test_verification_footer_carries_the_verdict_keys
+        ; Alcotest.test_case "Verification keeps the way to answer at every width" `Quick
+            test_verification_footer_keeps_the_way_to_answer
         ; Alcotest.test_case "Fusion pins the shared list projection" `Quick
             test_fusion_footer_pins_the_shared_list_projection
         ; Alcotest.test_case "fusion detail footer names the caller and board keys" `Quick

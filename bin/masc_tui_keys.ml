@@ -552,8 +552,15 @@ let for_surface = function
       ; b Navigate "< / >" "newer / older"
           ~help:"step the history a page at a time; the queue arrives whole, \
                  so this moves nothing there"
-      ; b Act "a" "approve" ~help:"approve the row under the cursor (press twice)"
-      ; b Act "x" "reject" ~help:"reject with a reason ($EDITOR form)"
+      (* One item, spelled the way Approvals spells its own pair. Apart, the
+         fitter gave up [x] and then [a], and what was left was a queue of
+         work with no visible way to act on it -- which is the one thing this
+         surface exists for. [Masc_tui_footer.never_dropped_keys] pins the
+         pair whole; pinning [a] or [x] alone would pin the [a] that creates
+         a keeper and the [x] that deletes one. *)
+      ; b Act "a / x" "approve / reject"
+          ~help:"a approves the row under the cursor (press twice); x rejects \
+                 with a reason ($EDITOR form)"
       ; b Search "/" "find"
           ~help:"jump the cursor to a matching task id, title, or submitter; \
                  the queue answers this, an open detail does not"

@@ -332,16 +332,18 @@ let split_on_double_space text =
    and no key acts on it, which is a gap in that surface rather than in this
    pin. test_tui_keys names all of them and counts the atom per surface, so
    this paragraph cannot drift from the table it describes. *)
-let never_dropped_keys = [ "Esc"; "q"; "y / n"; "/approve /deny"; "Enter" ]
+let never_dropped_keys =
+  [ "Esc"; "q"; "y / n"; "/approve /deny"; "Enter"; "a / x" ]
 
 (* A compound key names its doors one per atom: [Left / Esc], [Right / Esc]
    and [Left/Esc] all hold the Esc door. The pin used to recognise the
    compound only by its " Esc" tail, so a row that spelled it [Left/Esc]
    -- three renderer literals did -- held nothing the fitter would keep,
    and at 60 cells the Board read pane had lost its way out while [z:wide]
-   stayed. The single-letter pins are read by atom too; the two-key pins
-   ([y / n], [/approve /deny]) name a pair and are matched whole, because
-   [n] on its own is the next-match key on the surfaces that search. *)
+   stayed. The single-letter pins are read by atom too; the pairs
+   ([y / n], [/approve /deny], [a / x]) name a pair and are matched whole,
+   because their atoms are ordinary keys elsewhere: [n] is the next-match key
+   on the surfaces that search, [a] creates a keeper and [x] deletes one. *)
 let key_atoms key =
   String.split_on_char '/' key
   |> List.concat_map (String.split_on_char ' ')

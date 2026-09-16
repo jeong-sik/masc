@@ -340,6 +340,16 @@ module Table = struct
       M.find_opt (key ~keeper_name ~runtime_id) global.ledgers)
   ;;
 
+  (* [move_front] in the body is the ledger function above: this binding is
+     not recursive. *)
+  let move_front ~keeper_name ~runtime_id ~first_atom =
+    let key = key ~keeper_name ~runtime_id in
+    Eio.Mutex.use_rw ~protect:true global.mutex (fun () ->
+      match M.find_opt key global.ledgers with
+      | None -> ()
+      | Some t -> global.ledgers <- M.add key (move_front t ~first_atom) global.ledgers)
+  ;;
+
   module For_testing = struct
     let reset () =
       Eio.Mutex.use_rw ~protect:true global.mutex (fun () -> global.ledgers <- M.empty)

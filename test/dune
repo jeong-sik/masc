@@ -131,15 +131,7 @@
    ; Standard tests keep the Docker playground disabled. A dedicated
    ; regression test below pins that sandbox_profile=local still resolves
    ; to local even when MASC_KEEPER_DOCKER_PLAYGROUND=true.
-   (MASC_KEEPER_DOCKER_PLAYGROUND false)
-   ; The compiled default of the keeper token window (85,000, #36709) is
-   ; larger than the max-context of the fixture models these suites drive
-   ; keeper turns against (8,192), so every such turn was refused before it
-   ; reached what the test asserts. A declared window that fits the fixtures
-   ; keeps the tests on their subject. The window itself, default and
-   ; refusal, leaves with RFC keeper-context-window-in-tokens §11 step 1;
-   ; this line goes with it.
-   (MASC_KEEPER_CONTEXT_WINDOW_TOKENS 1024))))
+   (MASC_KEEPER_DOCKER_PLAYGROUND false))))
 
 ; All standard tests share the masc_test_deps wrapper library
 ; (see test/deps/dune for the full dependency list).
@@ -371,9 +363,10 @@
   test_keeper_unified_claim_progress
   test_keeper_unified_context_overflow
   test_keeper_context_overflow_shrink
-  test_keeper_context_window
   test_keeper_model_input_ledger
   test_keeper_carried_range
+  test_keeper_carried_front
+  test_keeper_carried_range_eviction
   test_keeper_next_request_forecast
   test_keeper_provider_call_deadline
   test_keeper_failed_selection_disposition
@@ -730,9 +723,10 @@
   test_keeper_unified_claim_progress
   test_keeper_unified_context_overflow
   test_keeper_context_overflow_shrink
-  test_keeper_context_window
   test_keeper_model_input_ledger
   test_keeper_carried_range
+  test_keeper_carried_front
+  test_keeper_carried_range_eviction
   test_keeper_next_request_forecast
   test_keeper_provider_call_deadline
   test_keeper_failed_selection_disposition

@@ -272,29 +272,6 @@ module KeeperKeepalive : sig
 
 end
 
-(** {1 Keeper context window} *)
-
-module KeeperContext : sig
-  val window_tokens_env_key : string
-  (** [MASC_KEEPER_CONTEXT_WINDOW_TOKENS]; runtime.toml
-      [turn.context_window_tokens]. *)
-
-  val window_tokens_min : int
-  val window_tokens_default : int
-  (** The compiled default, in tokens, and the smallest value the reader
-      accepts. The settings registry projects and validates against these. *)
-
-  val window_tokens_override : unit -> int option
-  (** The operator's declared window, or [None] when unset. A declared value
-      that is not an integer of at least {!window_tokens_min} raises
-      {!Env_config_core.Config_error}. *)
-
-  val window_tokens : unit -> int
-  (** Tokens one AGENT_CORE-lane request carries, fixed prompt and recent
-      verbatim history together: {!window_tokens_override} or
-      {!window_tokens_default} (RFC keeper-context-window-in-tokens). *)
-end
-
 (** {1 gRPC heartbeat reconnect} *)
 
 module KeeperGrpc : sig

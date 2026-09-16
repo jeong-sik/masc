@@ -839,6 +839,86 @@ let test_requested_view_of_string_refuses_an_unknown_name () =
       Alcotest.(check bool) "the refusal names the input" true
         (Astring.String.is_infix ~affix:"pending" detail)
 
+(* The difference is "an id the backlog waits on that names no record
+   anywhere". Taken against a task-filtered list it reported every other
+   task's live id as missing -- the opposite of what the field says. *)
+let test_a_task_filter_does_not_invent_unresolved_ids () =
+  with_temp_base_path (fun base_path ->
+    let mine =
+      create_pending_request ~base_path ~task_id:"task-mine"
+        ~worker:"keeper-alpha" ~criteria:[] ~evidence:[]
+    in
+    let other =
+      create_pending_request ~base_path ~task_id:"task-other"
+        ~worker:"keeper-beta" ~criteria:[] ~evidence:[]
+    in
+    let view =
+      D.Awaiting_operator
+        (D.Backlog_read { live_request_ids = [ mine.V.id; other.V.id ] })
+    in
+    let queue = D.requests_json ~base_path ~task_id:"task-mine" ~view () in
+    Alcotest.(check int) "one row for the task asked about" 1
+      (int_field "total" queue);
+    Alcotest.(check int) "the other task's live id is not missing" 0
+      (int_field "awaiting_unresolved_total" queue);
+    Alcotest.(check (list string)) "and is not named" []
+      (string_list_field "awaiting_unresolved" queue))
+
+(* A queue computed from a recovery snapshot is as old as that snapshot: the
+   rows are real, and anything submitted after it is absent. A reader told
+   nothing would act on it as though it were current. *)
+let test_a_recovered_backlog_answers_with_its_provenance () =
+  with_temp_base_path (fun base_path ->
+    let live =
+      create_pending_request ~base_path ~task_id:"task-live"
+        ~worker:"keeper-alpha" ~criteria:[] ~evidence:[]
+    in
+    let view =
+      D.Awaiting_operator
+        (D.Backlog_recovered
+           { live_request_ids = [ live.V.id ]
+           ; detail = "read from backlog.json.last-good: primary is bad json"
+           })
+    in
+    let queue = D.requests_json ~base_path ~view () in
+    Alcotest.(check int) "the rows are still rows" 1 (int_field "total" queue);
+    Alcotest.(check bool) "nothing failed to read" true
+      (member "backlog_error" queue = `Null);
+    Alcotest.(check bool) "but the answer says where it came from" true
+      (match member "backlog_recovery" queue with
+       | `String _ -> true
+       | _ -> false))
+
+(* Every arm of the queue view emits the same keys. A reader of
+   [awaiting_unresolved_total] used to get a number on success and nothing at
+   all in the one case the field exists to describe. *)
+let test_every_queue_answer_carries_the_same_keys () =
+  with_temp_base_path (fun base_path ->
+    let queue_keys json =
+      match json with
+      | `Assoc fields ->
+          List.sort String.compare
+            (List.filter
+               (fun key ->
+                 List.mem key
+                   [ "backlog_error"
+                   ; "backlog_recovery"
+                   ; "awaiting_unresolved_total"
+                   ; "awaiting_unresolved"
+                   ])
+               (List.map fst fields))
+      | _ -> Alcotest.fail "the projection is not an object"
+    in
+    let of_join join =
+      queue_keys (D.requests_json ~base_path ~view:(D.Awaiting_operator join) ())
+    in
+    let read = of_join (D.Backlog_read { live_request_ids = [] }) in
+    Alcotest.(check (list string)) "an unreadable backlog agrees" read
+      (of_join (D.Backlog_unreadable "backlog.json: bad json"));
+    Alcotest.(check (list string)) "a recovered one agrees" read
+      (of_join
+         (D.Backlog_recovered { live_request_ids = []; detail = "stale" })))
+
 (* ── Registration ───────────────────────────────────── *)
 
 let () =
@@ -878,6 +958,12 @@ let () =
         test_awaiting_view_without_a_readable_backlog_carries_the_reason;
       Alcotest.test_case "an unknown view name is refused" `Quick
         test_requested_view_of_string_refuses_an_unknown_name;
+      Alcotest.test_case "a task filter does not invent unresolved ids" `Quick
+        test_a_task_filter_does_not_invent_unresolved_ids;
+      Alcotest.test_case "a recovered backlog says so" `Quick
+        test_a_recovered_backlog_answers_with_its_provenance;
+      Alcotest.test_case "every answer carries the same keys" `Quick
+        test_every_queue_answer_carries_the_same_keys;
     ];
     "summary_json", [
       Alcotest.test_case "immutable submission count" `Quick

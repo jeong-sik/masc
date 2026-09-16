@@ -21,6 +21,14 @@ val requested_view_of_string : string -> (requested_view, string) result
     is distinct from an empty list: only one of them means there is no work. *)
 type awaiting_join =
   | Backlog_read of { live_request_ids : string list }
+  | Backlog_recovered of
+      { live_request_ids : string list
+      ; detail : string
+      }
+      (** The primary backlog did not read and a [.last-good] snapshot did.
+          The queue is as old as that snapshot, so a task that submitted after
+          it is absent. Reported rather than folded into [Backlog_read], which
+          made a stale queue look current. *)
   | Backlog_unreadable of string
 
 (** The view with everything needed to answer it. The queue cannot be resolved

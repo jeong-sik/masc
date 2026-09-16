@@ -2438,8 +2438,6 @@
 
 (include stanzas/test_workspace_base_path_cache.inc)
 
-(include stanzas/test_dashboard_feature_health.inc)
-
 (include stanzas/test_dashboard_gate_cli_lane.inc)
 
 (include stanzas/test_dashboard_gate_metrics.inc)
@@ -2494,8 +2492,6 @@
 (include stanzas/test_event_kind.inc)
 
 (include stanzas/test_export_symbol_graph.inc)
-
-(include stanzas/test_feature_flag_registry.inc)
 
 (include stanzas/test_fs_atomic_orphan_sweep_10130.inc)
 

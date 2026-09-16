@@ -634,6 +634,316 @@ let test_requests_and_summary_remain_available_after_fd_observation () =
           true
           (member "degraded" summary = `Null)))
 
+(* ── Queue view ─────────────────────────────────────── *)
+
+(* Built through the decoder the store reads with, so the fixture cannot drift
+   from the on-disk shape the way a hand-built record would. *)
+let backlog_of_tasks tasks =
+  let json =
+    `Assoc
+      [ ("tasks", `List tasks)
+      ; ("pending_completion_rejections", `List [])
+      ; ("task_deletion_receipts", `List [])
+      ; ("last_updated", `String "2026-09-16T00:00:00Z")
+      ; ("version", `Int 1)
+      ]
+  in
+  match Masc_domain.backlog_of_yojson json with
+  | Ok backlog -> backlog
+  | Error detail -> Alcotest.fail ("backlog fixture: " ^ detail)
+
+let awaiting_task ~task_id ~verification_id =
+  `Assoc
+    [ ("id", `String task_id)
+    ; ("title", `String "fixture")
+    ; ("description", `String "")
+    ; ("status", `String "awaiting_verification")
+    ; ("created_at", `String "2026-09-16T00:00:00Z")
+    ; ("assignee", `String "keeper-alpha")
+    ; ("started_at", `String "2026-09-16T00:00:00Z")
+    ; ("submitted_at", `String "2026-09-16T00:00:00Z")
+    ; ("intent", `String "complete")
+    ; ("verification_id", `String verification_id)
+    ]
+
+let done_task ~task_id =
+  `Assoc
+    [ ("id", `String task_id)
+    ; ("title", `String "fixture")
+    ; ("description", `String "")
+    ; ("status", `String "done")
+    ; ("created_at", `String "2026-09-16T00:00:00Z")
+    ; ("assignee", `String "keeper-alpha")
+    ; ("completed_at", `String "2026-09-16T00:00:00Z")
+    ]
+
+let request_ids j =
+  match member "requests" j with
+  | `List rows ->
+      List.map
+        (fun row ->
+          match member "request_id" row with
+          | `String id -> id
+          | _ -> Alcotest.fail "request_id is not a string")
+        rows
+  | _ -> Alcotest.fail "requests is not a list"
+
+let string_list_field name j =
+  match member name j with
+  | `List items ->
+      List.map
+        (fun item ->
+          match item with
+          | `String s -> s
+          | _ -> Alcotest.fail (name ^ " holds a non-string"))
+        items
+  | _ -> Alcotest.fail (name ^ " is not a list")
+
+let test_awaiting_request_ids_reads_the_id_the_task_waits_on () =
+  let backlog =
+    backlog_of_tasks
+      [ awaiting_task ~task_id:"task-1" ~verification_id:"vrf-1"
+      ; done_task ~task_id:"task-2"
+      ; awaiting_task ~task_id:"task-3" ~verification_id:"vrf-3"
+      ]
+  in
+  Alcotest.(check (list string))
+    "only awaiting tasks name a request"
+    [ "vrf-1"; "vrf-3" ]
+    (D.awaiting_request_ids backlog)
+
+(* The store keeps every submission, so a task re-submitted twice leaves two
+   records and is waiting on one of them. Matching on task status alone drew
+   both; joining on the id the task carries draws the live one. *)
+let test_awaiting_view_joins_on_the_request_the_task_waits_on () =
+  with_temp_base_path (fun base_path ->
+    let superseded =
+      create_pending_request ~base_path ~task_id:"task-dup"
+        ~worker:"keeper-alpha" ~criteria:[] ~evidence:[ "ref-1" ]
+    in
+    let live =
+      create_pending_request ~base_path ~task_id:"task-dup"
+        ~worker:"keeper-alpha" ~criteria:[] ~evidence:[ "ref-2" ]
+    in
+    let _finished =
+      create_pending_request ~base_path ~task_id:"task-finished"
+        ~worker:"keeper-beta" ~criteria:[] ~evidence:[ "ref-3" ]
+    in
+    let view =
+      D.Awaiting_operator (D.Backlog_read { live_request_ids = [ live.V.id ] })
+    in
+    let queue = D.requests_json ~base_path ~view () in
+    Alcotest.(check int) "queue holds one row" 1 (int_field "total" queue);
+    Alcotest.(check (list string))
+      "the row is the record the task waits on"
+      [ live.V.id ]
+      (request_ids queue);
+    Alcotest.(check string) "view is reported back" "awaiting"
+      (match member "view" queue with
+       | `String s -> s
+       | _ -> Alcotest.fail "view is not a string");
+    Alcotest.(check int) "nothing is unaccounted for" 0
+      (int_field "awaiting_unresolved_total" queue);
+    let history = D.requests_json ~base_path () in
+    Alcotest.(check int) "the history still holds all three" 3
+      (int_field "total" history);
+    Alcotest.(check bool) "the superseded record is still in the history" true
+      (List.mem superseded.V.id (request_ids history)))
+
+(* A task waiting on a record that is not in the store is a task nothing can
+   move. Dropping the id would leave it stuck with no screen able to say why. *)
+let test_awaiting_view_reports_an_id_with_no_record () =
+  with_temp_base_path (fun base_path ->
+    let live =
+      create_pending_request ~base_path ~task_id:"task-live"
+        ~worker:"keeper-alpha" ~criteria:[] ~evidence:[]
+    in
+    let view =
+      D.Awaiting_operator
+        (D.Backlog_read
+           { live_request_ids = [ live.V.id; "vrf-no-such-record" ] })
+    in
+    let queue = D.requests_json ~base_path ~view () in
+    Alcotest.(check int) "only the resolvable id becomes a row" 1
+      (int_field "total" queue);
+    Alcotest.(check int) "the unresolvable id is counted" 1
+      (int_field "awaiting_unresolved_total" queue);
+    Alcotest.(check (list string)) "and named"
+      [ "vrf-no-such-record" ]
+      (string_list_field "awaiting_unresolved" queue))
+
+(* An unreadable backlog is not an empty queue. Answering with the unfiltered
+   store would report every request ever submitted as work. *)
+let test_awaiting_view_without_a_readable_backlog_carries_the_reason () =
+  with_temp_base_path (fun base_path ->
+    let _ =
+      create_pending_request ~base_path ~task_id:"task-live"
+        ~worker:"keeper-alpha" ~criteria:[] ~evidence:[]
+    in
+    let view = D.Awaiting_operator (D.Backlog_unreadable "backlog.json: bad json") in
+    let queue = D.requests_json ~base_path ~view () in
+    Alcotest.(check int) "no queue without a join" 0 (int_field "total" queue);
+    Alcotest.(check (list string)) "and no rows" [] (request_ids queue);
+    Alcotest.(check string) "the reason travels with the empty queue"
+      "backlog.json: bad json"
+      (match member "backlog_error" queue with
+       | `String s -> s
+       | _ -> Alcotest.fail "backlog_error is not a string"))
+
+let test_offset_pages_the_history_without_overlap () =
+  with_temp_base_path (fun base_path ->
+    let made =
+      List.init 5 (fun i ->
+        create_pending_request ~base_path
+          ~task_id:(Printf.sprintf "task-%d" i)
+          ~worker:"keeper-alpha" ~criteria:[] ~evidence:[])
+    in
+    let page offset = D.requests_json ~base_path ~limit:2 ~offset () in
+    let first = page 0 and second = page 2 and third = page 4 in
+    Alcotest.(check int) "total counts the store, not the page" 5
+      (int_field "total" first);
+    Alcotest.(check int) "the page reports its own size" 2
+      (int_field "returned" first);
+    Alcotest.(check int) "and its offset" 2 (int_field "offset" second);
+    Alcotest.(check bool) "a further page exists" true
+      (member "truncated" first = `Bool true);
+    Alcotest.(check bool) "the last page says so" false
+      (member "truncated" third = `Bool true);
+    let walked = request_ids first @ request_ids second @ request_ids third in
+    Alcotest.(check int) "the pages cover the store exactly once" 5
+      (List.length walked);
+    Alcotest.(check int) "with no repeats" 5
+      (List.length (List.sort_uniq String.compare walked));
+    List.iter
+      (fun (r : V.verification_request) ->
+        Alcotest.(check bool)
+          (Printf.sprintf "%s is on some page" r.V.id)
+          true
+          (List.mem r.V.id walked))
+      made;
+    (* Past the end is an empty page, not a wrapped one. *)
+    let beyond = page 99 in
+    Alcotest.(check int) "reading past the end returns nothing" 0
+      (int_field "returned" beyond);
+    Alcotest.(check int) "while still reporting the total" 5
+      (int_field "total" beyond))
+
+let test_requested_view_of_string_refuses_an_unknown_name () =
+  Alcotest.(check bool) "awaiting" true
+    (D.requested_view_of_string "awaiting" = Ok D.Ask_awaiting);
+  Alcotest.(check bool) "all" true
+    (D.requested_view_of_string "all" = Ok D.Ask_all);
+  match D.requested_view_of_string "pending" with
+  | Ok _ -> Alcotest.fail "an unknown view must not resolve to a default"
+  | Error detail ->
+      Alcotest.(check bool) "the refusal names the input" true
+        (Astring.String.is_infix ~affix:"pending" detail)
+
+(* The difference is "an id the backlog waits on that names no record
+   anywhere". Taken against a task-filtered list it reported every other
+   task's live id as missing -- the opposite of what the field says. *)
+let test_a_task_filter_does_not_invent_unresolved_ids () =
+  with_temp_base_path (fun base_path ->
+    let mine =
+      create_pending_request ~base_path ~task_id:"task-mine"
+        ~worker:"keeper-alpha" ~criteria:[] ~evidence:[]
+    in
+    let other =
+      create_pending_request ~base_path ~task_id:"task-other"
+        ~worker:"keeper-beta" ~criteria:[] ~evidence:[]
+    in
+    let view =
+      D.Awaiting_operator
+        (D.Backlog_read { live_request_ids = [ mine.V.id; other.V.id ] })
+    in
+    let queue = D.requests_json ~base_path ~task_id:"task-mine" ~view () in
+    Alcotest.(check int) "one row for the task asked about" 1
+      (int_field "total" queue);
+    Alcotest.(check int) "the other task's live id is not missing" 0
+      (int_field "awaiting_unresolved_total" queue);
+    Alcotest.(check (list string)) "and is not named" []
+      (string_list_field "awaiting_unresolved" queue))
+
+(* A queue computed from a recovery snapshot is as old as that snapshot: the
+   rows are real, and anything submitted after it is absent. A reader told
+   nothing would act on it as though it were current. *)
+let test_a_recovered_backlog_answers_with_its_provenance () =
+  with_temp_base_path (fun base_path ->
+    let live =
+      create_pending_request ~base_path ~task_id:"task-live"
+        ~worker:"keeper-alpha" ~criteria:[] ~evidence:[]
+    in
+    let view =
+      D.Awaiting_operator
+        (D.Backlog_recovered
+           { live_request_ids = [ live.V.id ]
+           ; detail = "read from backlog.json.last-good: primary is bad json"
+           })
+    in
+    let queue = D.requests_json ~base_path ~view () in
+    Alcotest.(check int) "the rows are still rows" 1 (int_field "total" queue);
+    Alcotest.(check bool) "nothing failed to read" true
+      (member "backlog_error" queue = `Null);
+    Alcotest.(check string) "but the answer says where it came from"
+      "read from backlog.json.last-good: primary is bad json"
+      (match member "backlog_recovery" queue with
+       | `String detail -> detail
+       | _ -> Alcotest.fail "backlog_recovery is not a string"))
+
+(* Every arm of the queue view emits the same keys. A reader of
+   [awaiting_unresolved_total] used to get a number on success and nothing at
+   all in the one case the field exists to describe. *)
+let test_every_queue_answer_carries_the_same_keys () =
+  with_temp_base_path (fun base_path ->
+    let queue_keys json =
+      match json with
+      | `Assoc fields ->
+          List.sort String.compare
+            (List.filter
+               (fun key ->
+                 List.mem key
+                   [ "backlog_error"
+                   ; "backlog_recovery"
+                   ; "awaiting_unresolved_total"
+                   ; "awaiting_unresolved"
+                   ])
+               (List.map fst fields))
+      | _ -> Alcotest.fail "the projection is not an object"
+    in
+    let of_join join =
+      queue_keys (D.requests_json ~base_path ~view:(D.Awaiting_operator join) ())
+    in
+    let expected =
+      (* Pinned, not merely compared between the arms: three arms that all
+         emitted nothing would agree with each other and answer nobody. *)
+      [ "awaiting_unresolved"
+      ; "awaiting_unresolved_total"
+      ; "backlog_error"
+      ; "backlog_recovery"
+      ]
+    in
+    let read = of_join (D.Backlog_read { live_request_ids = [] }) in
+    Alcotest.(check (list string)) "the queue names all four" expected read;
+    Alcotest.(check (list string)) "an unreadable backlog agrees" expected
+      (of_join (D.Backlog_unreadable "backlog.json: bad json"));
+    Alcotest.(check (list string)) "a recovered one agrees" expected
+      (of_join
+         (D.Backlog_recovered { live_request_ids = []; detail = "stale" })))
+
+(* The count is exact and the list is one page of it. Unbounded, the list rode
+   every page of every response. *)
+let test_the_unresolved_list_is_bounded_by_the_page () =
+  with_temp_base_path (fun base_path ->
+    let missing = List.init 5 (Printf.sprintf "vrf-missing-%d") in
+    let view =
+      D.Awaiting_operator (D.Backlog_read { live_request_ids = missing })
+    in
+    let queue = D.requests_json ~base_path ~limit:2 ~view () in
+    Alcotest.(check int) "the count is all of them" 5
+      (int_field "awaiting_unresolved_total" queue);
+    Alcotest.(check int) "the list is one page" 2
+      (List.length (string_list_field "awaiting_unresolved" queue)))
+
 (* ── Registration ───────────────────────────────────── *)
 
 let () =
@@ -659,6 +969,28 @@ let () =
         test_requests_and_summary_remain_available_after_fd_observation;
       Alcotest.test_case "survives an unreadable record" `Quick
         test_projection_survives_an_unreadable_record;
+      Alcotest.test_case "offset pages the history without overlap" `Quick
+        test_offset_pages_the_history_without_overlap;
+    ];
+    "queue_view", [
+      Alcotest.test_case "awaiting tasks name the request they wait on" `Quick
+        test_awaiting_request_ids_reads_the_id_the_task_waits_on;
+      Alcotest.test_case "the queue joins on that request, not on status" `Quick
+        test_awaiting_view_joins_on_the_request_the_task_waits_on;
+      Alcotest.test_case "an id with no record is reported, not dropped" `Quick
+        test_awaiting_view_reports_an_id_with_no_record;
+      Alcotest.test_case "an unreadable backlog is not an empty queue" `Quick
+        test_awaiting_view_without_a_readable_backlog_carries_the_reason;
+      Alcotest.test_case "an unknown view name is refused" `Quick
+        test_requested_view_of_string_refuses_an_unknown_name;
+      Alcotest.test_case "a task filter does not invent unresolved ids" `Quick
+        test_a_task_filter_does_not_invent_unresolved_ids;
+      Alcotest.test_case "a recovered backlog says so" `Quick
+        test_a_recovered_backlog_answers_with_its_provenance;
+      Alcotest.test_case "every answer carries the same keys" `Quick
+        test_every_queue_answer_carries_the_same_keys;
+      Alcotest.test_case "the unresolved list is bounded by the page" `Quick
+        test_the_unresolved_list_is_bounded_by_the_page;
     ];
     "summary_json", [
       Alcotest.test_case "immutable submission count" `Quick

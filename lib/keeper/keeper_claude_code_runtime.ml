@@ -292,11 +292,18 @@ let claude_error_to_core_error = function
          { message = Printf.sprintf "Claude Code turn timed out after %.3fs" seconds
          ; phase = None
          })
-  | Runtime_claude_code.Spawn_failed detail
-  | Runtime_claude_code.Process_exited { detail; turn_admitted = _ } ->
+  | Runtime_claude_code.Spawn_failed detail ->
     Agent_core.Error.Provider
       (Llm_provider.Error.ProviderUnavailable
          { provider = "claude_code"; detail })
+  (* RFC-0454 P2, the twin of the Codex runtime's closed connection: the
+     client exited or its stdout reached EOF. Rotation is unchanged —
+     [Keeper_runtime_attempt.core_error_to_runtime_outcome] rebuilds the
+     [ProviderUnavailable] this used to be. *)
+  | Runtime_claude_code.Process_exited { detail; turn_admitted } ->
+    Keeper_internal_error.core_error_of_masc_internal_error
+      (Keeper_internal_error.Runtime_connection_closed
+         { runtime_id = "claude_code"; detail; turn_accepted = turn_admitted })
   | Runtime_claude_code.Turn_transport_interrupted _ as error ->
     Agent_core.Error.Provider
       (Llm_provider.Error.ProviderUnavailable
@@ -368,6 +375,8 @@ let api_usage_of_turn_usage (usage : Runtime_claude_code.turn_usage) =
 ;;
 
 module For_testing = struct
+  let claude_error_to_core_error = claude_error_to_core_error
+
   let observe_stream_native_action ~turn_count ~observe event =
     match
       claude_stream_callback

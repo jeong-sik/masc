@@ -15,9 +15,9 @@ let decision = function
   | Keeper_tools_agent_core.Terminal_effect_completed _ ->
     Ok (Runtime_agent.Yield Runtime_agent.Terminal_tool_completed)
   | Keeper_tools_agent_core.Terminal_effect_failed
-      { failure_class; effect_disposition; diagnostic } ->
+      { failure_class; effect_disposition; detail } ->
     Error
       (Keeper_internal_error.core_error_of_masc_internal_error
          (Keeper_internal_error.Terminal_effect_failed
-            { failure_class; effect_disposition; diagnostic }))
+            { failure_class; effect_disposition; detail }))
 ;;

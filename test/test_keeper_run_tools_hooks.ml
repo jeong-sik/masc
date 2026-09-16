@@ -775,7 +775,7 @@ let test_plain_tool_commits_before_hook_returns ~success () =
           ~completion:Agent_core.Tool_contract.Continue_after_success
           ~schedule:{ planned_index=0; batch_index=0; batch_size=1;
                       execution_mode=Agent_core.Tool_contract.Serial } in
-      let revision = Log.committed_revision () in
+      let revision = Log.committed_revision ~keeper_name:"plain-reader" in
       if success then
         ignore ((Option.get hooks.Agent_core.Hooks.post_tool_use)
           (Agent_core.Hooks.PostToolUse {
@@ -791,7 +791,7 @@ let test_plain_tool_commits_before_hook_returns ~success () =
       check int "hook did not leave execution evidence in the async queue" 0
         (Log.queued_count_for_testing ());
       check bool "history freshness changes before hook returns" true
-        (Log.committed_revision () > revision);
+        (Log.committed_revision ~keeper_name:"plain-reader" > revision);
       let rows = match Log.read_recent ~keeper_name:"plain-reader" () with
         | Ok rows -> rows
         | Error (Log.Index_unavailable detail) -> fail detail in

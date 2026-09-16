@@ -1680,6 +1680,283 @@ let () =
      | _ -> false)
 ;;
 
+(* RFC-0454 D1: a terminal effect failure says what failed as a typed value,
+   and its JSON is objects all the way down. Every constructor survives the
+   strict codec, and the codec refuses what it does not know instead of
+   filling a default. *)
+let () =
+  let module D = Keeper_terminal_effect_detail in
+  let samples =
+    [ D.Tool_failed
+        { internal_tool_name = "keeper_surface_post"; message = "dashboard append failed" }
+    ; D.Composition_failed
+        { composition_tool = "keeper_compose_sangokushi-2-end-command"
+        ; cause =
+            D.Node_failed
+              { node_id = "press"
+              ; model_tool_name = "masc_msx_press"
+              ; message = "no MSX machine is loaded: call masc_msx_load first"
+              }
+        ; payload =
+            `Assoc
+              [ "composition_tool", `String "keeper_compose_sangokushi-2-end-command"
+              ; "cause", `Assoc [ "kind", `String "tool_did_not_complete" ]
+              ]
+        }
+    ; D.Composition_failed
+        { composition_tool = "keeper_compose_plan"
+        ; cause =
+            D.Node_observation_failed
+              { node_id = "read"
+              ; model_tool_name = "BrowserRead"
+              ; detail = "receipt append failed"
+              }
+        ; payload = `List [ `String "any JSON value is display payload" ]
+        }
+    ; D.Composition_failed
+        { composition_tool = "keeper_compose_plan"
+        ; cause =
+            D.Plan_execution_failed
+              { node_id = "post"; error = D.Input_validation_failed }
+        ; payload = `Null
+        }
+    ; D.Composition_failed
+        { composition_tool = "keeper_compose_plan"
+        ; cause =
+            D.Outer_completion_mismatch
+              { expected =
+                  Agent_core.Tool_contract.Terminal_after_success
+                    Agent_core.Tool_contract.Effect_outcome_unknown
+              ; actual = Agent_core.Tool_contract.Continue_after_success
+              }
+        ; payload = `Assoc []
+        }
+    ; D.Composition_result_manifest_unpersisted
+        { composition_tool = "keeper_compose_plan"; detail = "disk full" }
+    ; D.Composition_evidence_unpublished
+        { composition_tool = "keeper_compose_plan"; detail = "directory preparation failed" }
+    ; D.Terminal_tool_receipt_missing { internal_tool_name = "keeper_surface_post" }
+    ; D.Terminal_composition_receipt_missing { composition_tool = "keeper_compose_plan" }
+    ; D.Output_artifact_unstored { message = "artifact store unavailable" }
+    ; D.Output_over_inline_budget
+        { message = "inline tool output exceeds descriptor budget (9 > 8 bytes)" }
+    ; D.Result_delivery_failed { model_tool_name = "keeper_surface_post"; message = "image refused" }
+    ; D.Boundary_observation_failed
+        { model_tool_name = "keeper_surface_post"; message = "repetition snapshot invalid" }
+    ; D.Agent_core_terminal_effect { detail = "terminal tool effect failed" }
+    ]
+    @ List.map
+        (fun rejection ->
+           D.Recovery_proposal_rejected
+             { model_tool_name = "keeper_recovery_propose"
+             ; rejection
+             ; message = "atom 3 covered twice"
+             })
+        [ D.Recovery_store_failed
+        ; D.Recovery_source_unavailable
+        ; D.Recovery_submission_invalid
+        ; D.Recovery_projection_rejected
+        ]
+    @ List.map
+        (fun error ->
+           D.Composition_failed
+             { composition_tool = "keeper_compose_plan"
+             ; cause = D.Plan_execution_failed { node_id = "post"; error }
+             ; payload = `Null
+             })
+        [ D.Unknown_node_id
+        ; D.Input_template_resolution_failed
+        ; D.Input_validation_failed
+        ; D.Output_validation_failed
+        ; D.Output_not_composable
+        ]
+  in
+  (* No wildcard: a new cause, plan error or rejection is a compile error here
+     until it has a sample above. *)
+  let composition_cause = function
+    | D.Node_failed _ -> 0
+    | D.Node_observation_failed _ -> 1
+    | D.Plan_execution_failed _ -> 2
+    | D.Outer_completion_mismatch _ -> 3
+  in
+  let plan_execution_error = function
+    | D.Unknown_node_id -> 0
+    | D.Input_template_resolution_failed -> 1
+    | D.Input_validation_failed -> 2
+    | D.Output_validation_failed -> 3
+    | D.Output_not_composable -> 4
+  in
+  let recovery_rejection = function
+    | D.Recovery_store_failed -> 0
+    | D.Recovery_source_unavailable -> 1
+    | D.Recovery_submission_invalid -> 2
+    | D.Recovery_projection_rejected -> 3
+  in
+  check
+    "terminal effect detail samples cover every composition cause"
+    (List.sort_uniq
+       Int.compare
+       (List.filter_map
+          (function
+            | D.Composition_failed { cause; _ } -> Some (composition_cause cause)
+            | _ -> None)
+          samples)
+     = List.init 4 Fun.id);
+  check
+    "terminal effect detail samples cover every plan execution error"
+    (List.sort_uniq
+       Int.compare
+       (List.filter_map
+          (function
+            | D.Composition_failed { cause = D.Plan_execution_failed { error; _ }; _ } ->
+              Some (plan_execution_error error)
+            | _ -> None)
+          samples)
+     = List.init 5 Fun.id);
+  check
+    "terminal effect detail samples cover every recovery rejection"
+    (List.sort_uniq
+       Int.compare
+       (List.filter_map
+          (function
+            | D.Recovery_proposal_rejected { rejection; _ } ->
+              Some (recovery_rejection rejection)
+            | _ -> None)
+          samples)
+     = List.init 4 Fun.id);
+  (* No wildcard: a new constructor is a compile error here until it has a
+     sample above. *)
+  let constructor = function
+    | D.Tool_failed _ -> 0
+    | D.Composition_failed _ -> 1
+    | D.Composition_result_manifest_unpersisted _ -> 2
+    | D.Composition_evidence_unpublished _ -> 3
+    | D.Terminal_tool_receipt_missing _ -> 4
+    | D.Terminal_composition_receipt_missing _ -> 5
+    | D.Output_artifact_unstored _ -> 6
+    | D.Output_over_inline_budget _ -> 7
+    | D.Result_delivery_failed _ -> 8
+    | D.Boundary_observation_failed _ -> 9
+    | D.Recovery_proposal_rejected _ -> 10
+    | D.Agent_core_terminal_effect _ -> 11
+  in
+  check
+    "terminal effect detail samples cover every constructor"
+    (List.sort_uniq Int.compare (List.map constructor samples)
+     = List.init 12 Fun.id);
+  List.iter
+    (fun detail ->
+       let label = D.summary detail in
+       check
+         ("terminal effect detail round-trips through its codec: " ^ label)
+         (D.of_yojson (Yojson.Safe.from_string (Yojson.Safe.to_string (D.to_yojson detail)))
+          = Ok detail);
+       let internal =
+         Keeper_internal_error.Terminal_effect_failed
+           { failure_class = Tool_result.Runtime_failure
+           ; effect_disposition = Tool_result.Effect_outcome_unknown
+           ; detail
+           }
+       in
+       let json = Keeper_internal_error.masc_internal_error_to_json internal in
+       check
+         ("terminal_effect_failed carries its detail as an object: " ^ label)
+         (match json with
+          | `Assoc fields ->
+            (match List.assoc_opt "detail" fields with
+             | Some (`Assoc _) -> true
+             | Some _ | None -> false)
+          | _ -> false);
+       check
+         ("terminal_effect_failed round-trips through the internal error codec: " ^ label)
+         (Keeper_internal_error.parse_masc_internal_error_json json = Some internal);
+       check
+         ("terminal_effect_failed has a one-line operator summary: " ^ label)
+         (match Keeper_internal_error.summary_of_masc_internal_error internal with
+          | Some text -> not (String.contains text '\n' || String.contains text '\r')
+          | None -> false))
+    samples;
+  check
+    "the incident composition summary names the failed node"
+    (D.summary (List.nth samples 1)
+     = "keeper_compose_sangokushi-2-end-command: press (masc_msx_press) failed: \
+        no MSX machine is loaded: call masc_msx_load first");
+  check
+    "a plan failure summary names where and why the plan stopped"
+    (D.summary (List.nth samples 3)
+     = "keeper_compose_plan: plan stopped at post: input_validation_failed");
+  check
+    "a summary stays on one line when a leaf message spans lines"
+    (D.summary
+       (D.Tool_failed { internal_tool_name = "keeper_surface_post"; message = "first\nsecond\rthird" })
+     = "keeper_surface_post failed: first second third");
+  let rejects label json =
+    check label (match D.of_yojson json with Error _ -> true | Ok _ -> false)
+  in
+  rejects
+    "terminal effect detail refuses an unknown kind"
+    (`Assoc [ "kind", `String "tool_exploded"; "message", `String "boom" ]);
+  rejects
+    "terminal effect detail refuses a missing field"
+    (`Assoc [ "kind", `String "tool_failed"; "message", `String "boom" ]);
+  rejects
+    "terminal effect detail refuses a field it does not know"
+    (`Assoc
+        [ "kind", `String "output_artifact_unstored"
+        ; "message", `String "boom"
+        ; "severity", `String "high"
+        ]);
+  rejects
+    "terminal effect detail refuses a value that is not an object"
+    (`String "tool output artifact storage failed");
+  rejects
+    "terminal effect detail refuses a composition cause written as a string"
+    (`Assoc
+        [ "kind", `String "composition_failed"
+        ; "composition_tool", `String "keeper_compose_plan"
+        ; "cause", `String "node_failed"
+        ; "payload", `Assoc []
+        ]);
+  rejects
+    "terminal effect detail refuses a message that is not a string"
+    (`Assoc
+        [ "kind", `String "tool_failed"
+        ; "internal_tool_name", `String "keeper_surface_post"
+        ; "message", `Int 7
+        ]);
+  rejects
+    "terminal effect detail refuses an unknown plan execution error"
+    (`Assoc
+        [ "kind", `String "composition_failed"
+        ; "composition_tool", `String "keeper_compose_plan"
+        ; ( "cause"
+          , `Assoc
+              [ "kind", `String "plan_execution_failed"
+              ; "node_id", `String "post"
+              ; "error", `String "went_sideways"
+              ] )
+        ; "payload", `Assoc []
+        ]);
+  rejects
+    "terminal effect detail refuses an unknown recovery rejection"
+    (`Assoc
+        [ "kind", `String "recovery_proposal_rejected"
+        ; "model_tool_name", `String "keeper_recovery_propose"
+        ; "rejection", `String "somebody_said_no"
+        ; "message", `String "boom"
+        ]);
+  check
+    "terminal_effect_failed with an unreadable detail does not decode"
+    (Keeper_internal_error.parse_masc_internal_error_json
+       (`Assoc
+           [ "kind", `String "terminal_effect_failed"
+           ; "failure_class", `String "runtime_failure"
+           ; "effect_disposition", `String "effect_outcome_unknown"
+           ; "detail", `String "tool output artifact storage failed"
+           ])
+     = None)
+;;
+
 let () =
   match !failures with
   | [] -> print_endline "test_keeper_terminal_reason_typed: OK"

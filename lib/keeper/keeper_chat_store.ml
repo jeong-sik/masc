@@ -2345,6 +2345,12 @@ let probe_bytes = 256 * 1024
 
 type page = { messages : chat_message list; has_more : bool }
 
+(* One row of [load_page]'s running window. *)
+type window_row =
+  { message : chat_message
+  ; mutable in_window : bool
+  }
+
 (* Lines of the byte slice [[from, upto)). When [from > 0] the first
    element is a (potentially partial) line fragment — dropped, same
    rationale as the RFC-0226 P2 tail read. A final element without a
@@ -2414,27 +2420,35 @@ let load_page ~base_dir ~keeper_name ?before () : page =
        their tool lines and receipts. A primary over the bound takes the
        whole front of the window with it, down to and including the oldest
        primary; a secondary over its bound takes only the oldest secondary,
-       wherever it sits, so the conversation around it stays. *)
-    let q = Queue.create () in
+       wherever it sits, so the conversation around it stays.
+
+       A row leaves the window by being marked, not by rebuilding it. [rows]
+       holds every row pushed, in file order, and [secondaries] the secondary
+       ones; each queue drops a marked row when it reaches the front. Taking
+       the oldest secondary used to copy the whole window, once for every
+       tool row past the bound, and a tail of tool rows made each load
+       quadratic: 20 GB of a live server's allocation in four hours
+       (2026-09-16). *)
+    let rows : window_row Queue.t = Queue.create () in
+    let secondaries : window_row Queue.t = Queue.create () in
     let primary_count = ref 0 in
     let secondary_count = ref 0 in
     let evicted = ref false in
+    let rec take_first_kept queue =
+      let row = Queue.pop queue in
+      if row.in_window then row else take_first_kept queue
+    in
     let pop_front () =
       evicted := true;
-      let popped = Queue.pop q in
-      if is_history_primary popped then decr primary_count else decr secondary_count
+      let row = take_first_kept rows in
+      row.in_window <- false;
+      if is_history_primary row.message then decr primary_count else decr secondary_count
     in
     let drop_oldest_secondary () =
       evicted := true;
-      decr secondary_count;
-      let rec without_first_secondary = function
-        | [] -> []
-        | msg :: rest when is_history_primary msg -> msg :: without_first_secondary rest
-        | _ :: rest -> rest
-      in
-      let kept = Queue.fold (fun acc msg -> msg :: acc) [] q |> List.rev |> without_first_secondary in
-      Queue.clear q;
-      List.iter (fun msg -> Queue.push msg q) kept
+      let row = take_first_kept secondaries in
+      row.in_window <- false;
+      decr secondary_count
     in
     List.iter
       (fun line ->
@@ -2442,8 +2456,13 @@ let load_page ~base_dir ~keeper_name ?before () : page =
         if trimmed <> "" then
           match parse_line ~file_path:path trimmed with
           | Some msg when keep msg ->
-              Queue.push msg q;
-              if is_history_primary msg then incr primary_count else incr secondary_count;
+              let row = { message = msg; in_window = true } in
+              Queue.push row rows;
+              if is_history_primary msg
+              then incr primary_count
+              else (
+                incr secondary_count;
+                Queue.push row secondaries);
               while !primary_count > max_history do
                 pop_front ()
               done;
@@ -2454,7 +2473,10 @@ let load_page ~base_dir ~keeper_name ?before () : page =
       (slice_lines ~path ~from ~upto);
     let messages =
       let redaction = redaction_for ~base_dir ~keeper_name in
-      Queue.fold (fun acc msg -> msg :: acc) [] q
+      Queue.fold
+        (fun acc row -> if row.in_window then row.message :: acc else acc)
+        []
+        rows
       |> List.rev
       |> drop_leading_orphan_tool_messages
       |> List.map (redact_message redaction)

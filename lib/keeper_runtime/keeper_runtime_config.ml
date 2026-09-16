@@ -557,6 +557,10 @@ let effective_setting_value (row : Keeper_runtime_setting_registry.setting) =
          display_float (Env_config_keeper.KeeperGeneratedMedia.retention_seconds ())
        | "MASC_KEEPER_GRPC_RECONNECT_BACKOFF_SEC" ->
          display_float Env_config_keeper.KeeperGrpc.reconnect_backoff_sec
+       | "MASC_KEEPER_CONTEXT_WINDOW_TOKENS" ->
+         (* The window the turn driver resolves, whether declared or compiled:
+            the panel and the request agree on how much history goes out. *)
+         display_int (Env_config_keeper.KeeperContext.window_tokens ())
        | "MASC_KEEPER_AUTONOMOUS_WAKE_PROMPT" ->
          (* Reports the same string the prompt builder uses, so the settings
             panel and the turn agree. *)

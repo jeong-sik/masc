@@ -152,7 +152,7 @@ endpoint = "http://127.0.0.1:2"
 
 [models.test_model]
 api-name = "test-model"
-max-context = 8192
+max-context = 200000
 tools-support = true
 streaming = true
 
@@ -204,7 +204,7 @@ key = "OTHER_QUOTA_TEST_KEY"
 
 [models.test_model]
 api-name = "test-model"
-max-context = 8192
+max-context = 200000
 tools-support = true
 streaming = true
 
@@ -269,7 +269,7 @@ endpoint = "http://127.0.0.1:1"
 
 [models.test_model]
 api-name = "test-model"
-max-context = 8192
+max-context = 200000
 tools-support = true
 streaming = true
 
@@ -308,7 +308,7 @@ streaming = true
 
 [models.non_reasoning]
 api-name = "non-reasoning"
-max-context = 8192
+max-context = 200000
 tools-support = true
 thinking-support = false
 preserve-thinking = false
@@ -361,13 +361,13 @@ endpoint = "http://127.0.0.1:3"
 
 [models.text_model]
 api-name = "text-model"
-max-context = 8192
+max-context = 200000
 tools-support = true
 streaming = true
 
 [models.vision_model]
 api-name = "vision-model"
-max-context = 8192
+max-context = 200000
 tools-support = true
 streaming = true
 
@@ -403,7 +403,7 @@ endpoint = "http://127.0.0.1:1"
 
 [models.test_model]
 api-name = "test-model"
-max-context = 8192
+max-context = 200000
 tools-support = true
 streaming = true
 
@@ -432,7 +432,7 @@ endpoint = "http://127.0.0.1:2"
 
 [models.test_model]
 api-name = "test-model"
-max-context = 8192
+max-context = 200000
 tools-support = true
 streaming = true
 
@@ -612,7 +612,7 @@ endpoint = "http://127.0.0.1:2"
 
 [models.test_model]
 api-name = "test-model"
-max-context = 8192
+max-context = 200000
 tools-support = true
 streaming = true
 
@@ -3531,19 +3531,19 @@ endpoint = "http://127.0.0.1:2"
 
 [models.ollama-cloud-flash]
 api-name = "glm-5.3-flash"
-max-context = 8192
+max-context = 200000
 tools-support = true
 streaming = true
 
 [models.flash]
 api-name = "glm-5.3-flash"
-max-context = 8192
+max-context = 200000
 tools-support = true
 streaming = true
 
 [models.plus]
 api-name = "glm-5.3"
-max-context = 8192
+max-context = 200000
 tools-support = true
 streaming = true
 

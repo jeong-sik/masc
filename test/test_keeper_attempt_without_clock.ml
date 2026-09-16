@@ -54,7 +54,7 @@ protocol = "openai-compatible-http"
 endpoint = %S
 [models.sample]
 api-name = "listener-model"
-max-context = 8192
+max-context = 200000
 [listener.sample]
 |}
        server.Exact_output_fixture.base_url);

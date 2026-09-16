@@ -31,6 +31,7 @@
 | B5 | 스트리밍 문자열 의미 — 일반 `TextDelta`는 append-only이며, producer가 명시한 `TextSnapshot`만 canonical state에서 suffix/replay를 정규화한다. 실제 비준수 endpoint capability 연결은 #30782에서 추적한다. | `packages/agent_core/lib/llm_provider/complete_stream_state.ml` | PR #29149, #30782 |
 | B6 | tool_kind 닫힌 합타입 선언 (실행 기계는 기존 plan IR/executor가 커버) | RFC-0386, `keeper_tool_descriptor.mli:69-82` | PR #29148 |
 | B7 | Goal Verifier standalone worker — durable criterion/proof pending ledger를 `verifier_exact` lane으로 drain하고 typed verifier boundary에 verdict를 commit. artifact lookup surface와 live 동일-run 증거는 후속 | `lib/goal_verification_agent.ml`, `lib/workspace_goals.ml`, RFC-0387 | #29221, #29240 병합; live 증거 대기 |
+| B8 | Goal `Paused`/`Blocked` phase와 `Pause`/`Resume`/`Block`/`Unblock` action — constitution `<goal>` lifecycle이 목표 지점으로 선언하지만 `Goal_phase` ADT에는 없음. 공개 phase 문자열은 `Goal_phase.all`에서 유도하므로 문서상의 이 phase들로는 필터/전이 불가 | `lib/goal/goal_phase.mli`, `lib/workspace_goals.ml:56` | 미구현 — 구현하거나 계약서에서 정리하는 결정 필요 |
 
 ## C. 코드 정리 (헌법 금지 패턴 잔여)
 

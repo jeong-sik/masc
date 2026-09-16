@@ -72,6 +72,7 @@
         <phase>Completed</phase>
         <phase>Dropped</phase>
         <action>Request_complete | Record_proof_proven | Record_proof_refuted | Confirm_completion | Pause | Resume | Block | Unblock | Drop | Reopen</action>
+        [parity B8: Paused/Blocked phase와 Pause/Resume/Block/Unblock action은 아직 goal_phase.mli에 없다 — 목표 지점 선언.]
         <invariant>status 필드는 받지 않는다. 들어오면 decode 실패 → 손상 정책 적용.
                    (goal_store.ml 화이트리스트 디코드)</invariant>
       </lifecycle>

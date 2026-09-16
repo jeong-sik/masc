@@ -147,15 +147,15 @@ let _ = drain_turn_event_bus ~site:"background_poll" () in
 
 **PR 체크:** `rg -n 'let _ = drain_turn_event_bus' lib/` — `~site:` 인자 없는 호출 발견 시 site label 추가.
 
-## 6. Version String Drift (2 occurrences)
+## 6. Version String Drift
 
-`dune-project` version and `packages/agent_core/lib/version.ml` must match.
-CI checks this — but fix it before pushing.
+masc 패키지 버전의 SSOT는 `dune-project`다. `masc.opam`, ROADMAP current, CHANGELOG latest release가 같은 값으로 움직여야 하고, `scripts/check-version-truth.sh`가 이 넷의 일치를 검사한다.
+
+`packages/agent_core/lib/version.ml`은 별도 버전 라인이다 (release-please가 `x-release-please-version` 마커로 관리). `dune-project`와 일치 대상이 아니다.
 
 ```bash
 # Check
-grep '(version' dune-project | head -1
-grep 'let version' packages/agent_core/lib/version.ml
+scripts/check-version-truth.sh
 ```
 
 ## 7. Prompt Changes Need Checkpoint Reset

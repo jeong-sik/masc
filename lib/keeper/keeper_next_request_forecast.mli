@@ -103,9 +103,11 @@ val carry
   -> Agent_core.Types.message list
   -> carried option
 (** The pure arithmetic, for tests: {!Runtime_model_input_tail_window.project_from_atom}
-    from the seeded front; without one, {!Runtime_model_input_tail_window.project_target}
-    at the cap with [reserved_bytes] taken off, which is [None] when those
-    bytes are unknown; without a cap, the whole history. *)
+    from the seeded front, once {!Keeper_carried_front.for_history} admits it
+    against this history; without one,
+    {!Runtime_model_input_tail_window.project_within_bytes} at the cap with
+    [reserved_bytes] taken off, which is [None] when those bytes are unknown;
+    without a cap, the whole history. *)
 
 val measure : Agent_core.Types.message -> int
 (** Bytes of one message as the composition's encoder counts them. *)

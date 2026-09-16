@@ -750,39 +750,45 @@ let with_exact_source_fixture ~session_id f =
     f ~session_dir ~source_ref)
 ;;
 
-(* The source check reads the canonical file and hashes it. A matching file is
-   not parsed: the decode it used to do answered nothing the hash does not, and
-   on a live server it allocated 26 GB in fifty minutes over files of 13-109 MB.
+(* The source check reads the canonical file and hashes it. A file the
+   canonical summary already describes is not parsed again: the decode this
+   replaces allocated 26 GB in fifty minutes on a live server, over files of
+   13-109 MB, and a save repeats it every turn.
 
-   Reading the bytes and hashing them allocates about 0.00 minor words per byte
-   (the bytes themselves land in the major heap), while Yojson's parse alone
-   allocates about 0.35 before the typed decode and the v11 validation
-   (measured on this machine, 2026-09-16). The budget sits between. *)
-let words_per_source_byte_budget = 0.1
+   The budget is measured here rather than guessed: a full load of the same
+   file parses it, so the save is compared against what that parse cost in this
+   process. If the save parsed too, the two would be the same order. *)
+let parse_share_of_a_save = 4.0
 
-let chatty_checkpoint ~session_id ~turn_count ~marker ~messages_of_marker =
+let chatty_checkpoint ~session_id ~turn_count ~marker ~messages =
   let base = make_checkpoint ~session_id ~turn_count ~marker in
-  { base with Agent_core.Checkpoint.messages = messages_of_marker }
+  { base with Agent_core.Checkpoint.messages }
 ;;
 
-let test_a_matching_source_is_hashed_and_not_parsed () =
+let many_short_messages count =
+  List.init count (fun index ->
+    Agent_core.Types.
+      { role = Assistant
+      ; content = [ Text (Printf.sprintf "%d %s" index (String.make 60 'x')) ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      })
+;;
+
+let allocated_minor_words f =
+  let before = Gc.minor_words () in
+  f ();
+  Gc.minor_words () -. before
+;;
+
+let test_a_summarised_source_is_hashed_and_not_parsed () =
   let session_id = "sess-cas-hash-only" in
   let session_dir = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
-    let paragraph = String.make 4096 'x' in
-    let messages =
-      List.init 256 (fun index ->
-        Agent_core.Types.
-          { role = Assistant
-          ; content = [ Text (Printf.sprintf "%d %s" index paragraph) ]
-          ; name = None
-          ; tool_call_id = None
-          ; metadata = []
-          })
-    in
     save_ok ~session_dir
       (chatty_checkpoint ~session_id ~turn_count:8 ~marker:"source"
-         ~messages_of_marker:messages)
+         ~messages:(many_short_messages 8_000))
       "hash-only seed save";
     let source_ref =
       match
@@ -796,24 +802,32 @@ let test_a_matching_source_is_hashed_and_not_parsed () =
     in
     check bool "the source is big enough to tell a hash from a parse" true
       (source_bytes > 1_000_000);
-    let candidate = make_checkpoint ~session_id ~turn_count:9 ~marker:"candidate" in
-    let before = Gc.minor_words () in
-    let installation =
-      Keeper_checkpoint_store.save_agent_core_if_source
-        ~session_dir
-        ~expected_source_ref:source_ref
-        candidate
+    let parse_words =
+      allocated_minor_words (fun () ->
+        match Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id with
+        | Ok _ -> ()
+        | Error _ -> fail "the source could not be loaded")
     in
-    let words = Gc.minor_words () -. before in
-    (match installation with
-     | Keeper_checkpoint_store.Installed _ -> ()
-     | Keeper_checkpoint_store.Not_installed _ ->
+    let candidate = make_checkpoint ~session_id ~turn_count:9 ~marker:"candidate" in
+    let installation = ref None in
+    let save_words =
+      allocated_minor_words (fun () ->
+        installation
+        := Some
+             (Keeper_checkpoint_store.save_agent_core_if_source
+                ~session_dir
+                ~expected_source_ref:source_ref
+                candidate))
+    in
+    (match !installation with
+     | Some (Keeper_checkpoint_store.Installed _) -> ()
+     | Some (Keeper_checkpoint_store.Not_installed _) | None ->
        fail "the candidate was refused against its own source");
     check bool
-      (Printf.sprintf "the source check allocated %.0f words for %d bytes" words
-         source_bytes)
+      (Printf.sprintf "the save allocated %.0f words against a parse's %.0f"
+         save_words parse_words)
       true
-      (words < Float.of_int source_bytes *. words_per_source_byte_budget))
+      (save_words *. parse_share_of_a_save < parse_words))
 ;;
 
 let test_exact_source_cas_allows_one_equal_turn_writer () =
@@ -1647,8 +1661,8 @@ let () =
             test_canonical_checkpoint_is_written_compact;
           test_case "exact source CAS permits one equal-turn writer" `Quick
             test_exact_source_cas_allows_one_equal_turn_writer;
-          test_case "a matching source is hashed and not parsed" `Quick
-            test_a_matching_source_is_hashed_and_not_parsed;
+          test_case "a summarised source is hashed and not parsed" `Quick
+            test_a_summarised_source_is_hashed_and_not_parsed;
           test_case "exact source CAS updates the canonical watermark" `Quick
             test_exact_source_cas_updates_canonical_watermark;
           test_case "release failure preserves Not_installed cause" `Quick

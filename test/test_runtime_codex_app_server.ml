@@ -922,8 +922,8 @@ let test_thread_resume_sends_dynamic_tools () =
   Fun.protect
     ~finally:(fun () -> Sys.remove capture_path)
     (fun () ->
-       let tool : Runtime_codex_app_server.dynamic_tool =
-         { name = "masc_probe"
+       let declare name : Runtime_codex_app_server.dynamic_tool =
+         { name
          ; description = "Return a deterministic fixture marker"
          ; input_schema = `Assoc [ "type", `String "object" ]
          ; call =
@@ -931,6 +931,8 @@ let test_thread_resume_sends_dynamic_tools () =
                { success = true; content = "unused"; content_blocks = None; abort_turn = None })
          }
        in
+       let tool = declare "masc_probe" in
+       let sibling = declare "masc_probe_sibling" in
        with_fixture
          ~capture_path
          [ init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed ]
@@ -972,14 +974,14 @@ let test_thread_resume_sends_dynamic_tools () =
    "deferred dynamic tool must include a namespace", and an empty one answers
    "dynamic tool namespace must not be empty". The word itself carries no
    meaning here -- nothing reads it back -- so what is pinned is that one is
-   sent, not which one. *)
+   sent and that every tool sends the same one, never which word it is. *)
 let test_dynamic_tools_clear_what_the_server_needs_to_defer () =
   let capture_path = Filename.temp_file "masc-codex-defer-requests-" ".jsonl" in
   Fun.protect
     ~finally:(fun () -> Sys.remove capture_path)
     (fun () ->
-       let tool : Runtime_codex_app_server.dynamic_tool =
-         { name = "masc_probe"
+       let declare name : Runtime_codex_app_server.dynamic_tool =
+         { name
          ; description = "Return a deterministic fixture marker"
          ; input_schema = `Assoc [ "type", `String "object" ]
          ; call =
@@ -987,6 +989,8 @@ let test_dynamic_tools_clear_what_the_server_needs_to_defer () =
                { success = true; content = "unused"; content_blocks = None; abort_turn = None })
          }
        in
+       let tool = declare "masc_probe" in
+       let sibling = declare "masc_probe_sibling" in
        with_fixture
          ~capture_path
          [ init_result
@@ -997,20 +1001,33 @@ let test_dynamic_tools_clear_what_the_server_needs_to_defer () =
          ; turn_completed
          ]
          (fun path ->
-            match run_fixture ~dynamic_tools:[ tool ] path with
+            match run_fixture ~dynamic_tools:[ tool; sibling ] path with
             | Error error -> fail (Runtime_codex_app_server.error_to_string error)
             | Ok _ -> ());
        let requests =
          In_channel.with_open_bin capture_path (fun input ->
            In_channel.input_lines input |> List.map Yojson.Safe.from_string)
        in
-       let tool_json =
+       let tool_jsons =
          List.find (fun json -> Yojson.Safe.Util.member "id" json = `Int 3) requests
          |> Yojson.Safe.Util.member "params"
          |> Yojson.Safe.Util.member "dynamicTools"
          |> Yojson.Safe.Util.to_list
-         |> List.hd
        in
+       let tool_json = List.hd tool_jsons in
+       (* Two tools, read both. One word per tool was measured on the live
+          protocol and the declared tools went missing: asked to name three
+          tools it could call, the model named only Codex's own built-ins.
+          Whatever word is sent, every tool has to send the same one. *)
+       check
+         int
+         "the tools name one word between them"
+         1
+         (List.map
+            (fun json -> Yojson.Safe.Util.member "namespace" json |> Yojson.Safe.Util.to_string)
+            tool_jsons
+          |> List.sort_uniq String.compare
+          |> List.length);
        check
          bool
          "the legacy type tag is absent, so this is the canonical encoding"

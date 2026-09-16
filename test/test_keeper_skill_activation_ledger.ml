@@ -204,7 +204,12 @@ let test_a_recorded_ledger_loads_back_as_it_was_returned () =
       [ activation ()
       ; activation ~source:"user" ()
       ; activation ~revision:'b' ()
-      ; activation ~name:"polish" ()
+      ; (* The default id spells call-<source>-<revision>, so a fixture that
+           varies only [name] must say its id: the record key compares
+           skill_tool_use_id alone, and two activations sharing one with
+           different identities are an Invocation_id_collision, not a
+           repeat. *)
+        activation ~name:"polish" ~skill_tool_use_id:"call-polish" ()
       ]
   in
   let loaded =
@@ -219,13 +224,14 @@ let test_a_recorded_ledger_loads_back_as_it_was_returned () =
     (List.length (Ledger.activations recorded))
     (List.length (Ledger.activations loaded));
   check bool "and each one came back identical" true
-    (List.for_all2
-       (fun left right ->
-          Yojson.Safe.equal
-            (Ledger.activation_to_yojson left)
-            (Ledger.activation_to_yojson right))
-       (Ledger.activations recorded)
-       (Ledger.activations loaded))
+    (List.length (Ledger.activations recorded) = List.length (Ledger.activations loaded)
+     && List.for_all2
+          (fun left right ->
+             Yojson.Safe.equal
+               (Ledger.activation_to_yojson left)
+               (Ledger.activation_to_yojson right))
+          (Ledger.activations recorded)
+          (Ledger.activations loaded))
 ;;
 
 let test_same_name_different_identity_or_revision_is_distinct () =

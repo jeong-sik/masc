@@ -3,21 +3,26 @@
 
     The front is the oldest atom the request carries; everything from it to
     the newest atom goes out, and it only ever moves toward the newest atom.
+    It is a position in the keeper's checkpoint history — the trace — and
+    every Agent Core runtime composes its request from that one history, so
+    a position measured on one runtime names the same atom on the next.
     While the process holds a ledger for the (keeper, runtime) pair, the
     front is the ledger's: the last request's front as every eviction since
     moved it. Without one, the first turn after a boot or the first on this
-    runtime, the seed is the range the newest completed turn record on the
-    runtime measured, read as [total_atoms - transmitted_atoms]. With
-    neither, the caller has no atom to start from and carries the whole
-    history; the provider judges it, and the turn driver owns the one move
-    a refusal forces before any usage has been counted, which
+    runtime, the seed is the range the newest completed Agent Core turn
+    record on the trace measured, whichever runtime measured it, read as
+    [total_atoms - transmitted_atoms]; a lane walking to its next candidate
+    starts where the last one left off rather than from the whole history.
+    With neither, the caller has no atom to start from and carries the whole
+    history; the provider judges it, and the turn driver owns the one move a
+    refusal forces before any usage has been counted, which
     {!Halved_after_refusal} names. *)
 
 type source =
   | Ledger  (** The pair's ledger, moved by every eviction since its last request. *)
   | Turn_record of { turn : int }
-      (** The newest completed turn record on the runtime that measured its
-          carried atoms. *)
+      (** The newest completed Agent Core turn record on the trace that
+          measured its carried atoms, whichever runtime ran it. *)
   | Halved_after_refusal of { retry : int }
       (** A provider or wire refusal before any usage: the range was halved
           toward the newest atom, [retry] times so far. *)
@@ -38,22 +43,31 @@ type origin =
 
 val of_ledger : Keeper_model_input_ledger.t -> seed
 
-val of_records : runtime_id:string -> trace_id:string -> Turn_record.t list -> seed option
-(** The newest completed record of session [trace_id] on [runtime_id]
-    carrying a [model_input_window], in any order. An errored turn's record
-    names the runtime that was asked, not the lane whose request it
-    measured, so only a record with a stop reason is read; a record of
-    another session measured another history. *)
+val of_records
+  :  shares_history:(string -> bool)
+  -> trace_id:string
+  -> Turn_record.t list
+  -> seed option
+(** The newest completed record of session [trace_id] carrying a
+    [model_input_window] whose runtime [shares_history], in any order. An
+    errored turn's record names the runtime that was asked, not the lane
+    whose request it measured, so only a record with a stop reason is read;
+    a record of another session measured another history; and
+    [shares_history runtime_id] says whether that runtime composes its
+    request from the checkpoint history the window's atoms are positions
+    in — an Agent Core binding does, an official client hands over a list of
+    its own, whose counts are not positions here. *)
 
 val read_seed
   :  config:Workspace.config
   -> keeper_name:string
-  -> runtime_id:string
   -> trace_id:string
   -> seed option
-(** {!of_records} over the keeper's newest {!records_read} turn records.
-    Reads the record file on the calling fiber; a turn calls it once, and
-    only while the pair has no ledger. *)
+(** {!of_records} over the keeper's newest {!records_read} turn records; a
+    runtime shares the history when the catalog materializes it as an Agent
+    Core binding, and a runtime the catalog no longer has is not read. Reads
+    the record file on the calling fiber; a turn calls it once, and only
+    while the pair has no ledger. *)
 
 val for_history : atom_count:int -> seed -> seed option
 (** The seed when the history still has at least the atoms it was measured
@@ -63,9 +77,9 @@ val for_history : atom_count:int -> seed -> seed option
     over as with no seed. *)
 
 val records_read : int
-(** How many records {!read_seed} reads. A keeper that walks three or four
-    lanes leaves most records on the others, so the read reaches back far
-    enough to meet one on this runtime. *)
+(** How many records {!read_seed} reads. Every completed Agent Core turn
+    leaves one, so the read has to reach back only past errored turns and
+    official-client turns. *)
 
 val clamp : atom_count:int -> int -> int
 (** The front as a position in a history of [atom_count] atoms: at least 0,

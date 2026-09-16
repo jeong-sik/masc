@@ -25,13 +25,13 @@ let record_runtime (record : Turn_record.t) =
   | None -> record.Turn_record.runtime_profile
 ;;
 
-let of_records ~runtime_id ~trace_id (records : Turn_record.t list) =
+let of_records ~shares_history ~trace_id (records : Turn_record.t list) =
   List.fold_left
     (fun newest (record : Turn_record.t) ->
        match record.Turn_record.model_input_window, record.Turn_record.finish_reason with
        | Some window, Some _
-         when String.equal (record_runtime record) runtime_id
-              && String.equal record.Turn_record.trace_id trace_id ->
+         when String.equal record.Turn_record.trace_id trace_id
+              && shares_history (record_runtime record) ->
          let turn = record.Turn_record.absolute_turn in
          (match newest with
           | Some (newest_turn, _) when newest_turn >= turn -> newest
@@ -51,7 +51,24 @@ let of_records ~runtime_id ~trace_id (records : Turn_record.t list) =
 
 let records_read = 200
 
-let read_seed ~config ~keeper_name ~runtime_id ~trace_id =
+(* Whether a runtime's requests are composed from the checkpoint history, so
+   that a window it recorded is a range of atoms of this history. Only an
+   Agent Core binding composes here; an official client assembles its own
+   list and hands it over, so its counts are positions in that list. A
+   runtime the catalog no longer materializes is not read: nothing says
+   which kind it was. *)
+let shares_history runtime_id =
+  match Runtime.get_runtime_by_id runtime_id with
+  | Some runtime ->
+    (match runtime.Runtime.execution with
+     | Runtime_execution.Agent_core _ -> true
+     | Runtime_execution.Codex_app_server _
+     | Runtime_execution.Claude_code _
+     | Runtime_execution.Antigravity_cli _ -> false)
+  | None -> false
+;;
+
+let read_seed ~config ~keeper_name ~trace_id =
   let store = Keeper_types_support.keeper_turn_record_store config keeper_name in
   (* A record that does not parse is treated as absent, the same boundary the
      forecast reader draws; the erasing conversion is not used. *)
@@ -60,7 +77,7 @@ let read_seed ~config ~keeper_name ~runtime_id ~trace_id =
          match Turn_record.of_json json with
          | Error _ -> None
          | Ok record -> Some record)
-  |> of_records ~runtime_id ~trace_id
+  |> of_records ~shares_history ~trace_id
 ;;
 
 let for_history ~atom_count seed = if seed.atom_count > atom_count then None else Some seed

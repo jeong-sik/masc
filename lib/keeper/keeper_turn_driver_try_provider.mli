@@ -30,9 +30,9 @@ type try_provider_ctx =
             binding declares them; [None] leaves eviction to a refusal. *)
   ; carried_front_seed : unit -> Keeper_carried_front.seed option
         (** Where the carried range starts when no ledger holds this
-            (keeper, runtime) pair yet: the range the newest completed turn
-            record on the runtime measured. Read once per attempt, on that
-            path only. *)
+            (keeper, runtime) pair yet: the range the newest completed Agent
+            Core turn record on the trace measured, whichever runtime ran it.
+            Read once per attempt, on that path only. *)
   ; base_path : string
   ; keeper_name : string
   ; name : string
@@ -318,7 +318,8 @@ type composed =
   ; projection : Runtime_model_input_tail_window.projection
   ; transmitted_bytes : int
         (** Pinned messages, the carried atoms and the preamble, as the
-            composition's encoder counts them; excludes the reservation. *)
+            durable encoder counts them, reasoning the wire deletes included;
+            excludes the reservation. *)
   ; history_atom_count : int  (** Atoms in the whole history. *)
   ; origin : Keeper_carried_front.origin
   ; outlived_seed : Keeper_carried_front.seed option
@@ -330,6 +331,26 @@ type composed =
     atoms older than [demote_before], or over every atom when the last
     resort is armed, then the carried range from [front]; the whole history
     without one. Nothing here measures the request against a limit. *)
+
+type request_view =
+  { composed : composed
+  ; carried : Agent_core.Types.message list
+        (** The composed messages with their demotions materialized: what the
+            ledger and the turn record count, in atoms of the checkpoint
+            history. *)
+  ; wire :
+      ( Agent_core.Types.message list
+        , Agent_core.Llm_provider.Reasoning_history_projection.error )
+        result
+        (** The dialect's reasoning projection over [carried] alone, or why
+            it declined; [carried] itself then goes out and the backend
+            judges it. *)
+  }
+(** One request as {!For_testing.request_view} views it: composed in the
+    durable vocabulary first, projected for the wire afterwards. The order
+    keeps atom positions a property of the history rather than of the
+    dialect, so a front measured on one runtime names the same atom on every
+    runtime whatever reasoning each replays or deletes. *)
 
 module For_testing : sig
   val observe_provider_lease :
@@ -394,6 +415,20 @@ module For_testing : sig
     demote_before:int ->
     Agent_core.Types.message list ->
     composed
+
+  val request_view :
+    provider_config:Agent_core.Llm_provider.Provider_config.t ->
+    measure_message_bytes:(Agent_core.Types.message -> int) ->
+    front:Keeper_carried_front.seed option ->
+    last_resort:bool ->
+    base_path:string ->
+    demote_before:int ->
+    materialize:
+      (pending:Keeper_model_input_demotion.pending list ->
+       Agent_core.Types.message list ->
+       Agent_core.Types.message list) ->
+    Agent_core.Types.message list ->
+    request_view
 
   val last_resort_demotes :
     measure_message_bytes:(Agent_core.Types.message -> int) ->

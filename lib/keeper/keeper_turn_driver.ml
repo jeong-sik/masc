@@ -2148,15 +2148,16 @@ let run_named
             ; error_runtime_id
             ; context_marks
             ; (* Read only when the process holds no ledger for this pair:
-                 the range the newest completed turn record on this runtime
-                 measured, so a restart resumes the range the last turn
-                 carried rather than the whole history. A caller that reads
-                 no records leaves the first request to the cap or the whole
+                 the range the newest completed Agent Core turn record on
+                 this history measured, whichever runtime ran it, so a
+                 restart or a lane's next candidate resumes the range the
+                 last turn carried rather than the whole history. A caller
+                 that reads no records leaves the first request to the whole
                  history. *)
               carried_front_seed =
                 (fun () ->
                    match carried_front_seed with
-                   | Some read -> read ~runtime_id:attempt_runtime_id
+                   | Some read -> read ()
                    | None -> None)
             ; base_path
             ; keeper_name

@@ -8,9 +8,10 @@
 
     Live at the time of the call: the pair's ledger (process-local, absent
     after a restart until the first counted usage), the binding's marks, and
-    the checkpoint. Without a ledger the front is the
-    range the newest completed turn record on the runtime measured, exactly
-    as the turn driver seeds it; without that the request is the whole
+    the checkpoint. Without a ledger the front is the range the newest
+    completed Agent Core turn record on the trace measured, whichever
+    runtime ran it, exactly as the turn driver seeds it; without that the
+    request is the whole
     history and the provider judges it. As last measured, from turn
     records: [R] (tool schemas + keeper instructions) from the newest
     composition of a completed turn on the same runtime, because the tool

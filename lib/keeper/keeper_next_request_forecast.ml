@@ -267,15 +267,15 @@ let candidate ~config ~keeper_name ~trace_id ~messages ~history_atoms runtime_id
     | Error _ -> None
     | Ok () ->
       (* The same front the turn driver composes from: the pair's ledger,
-         else the newest completed record on the runtime. *)
+         else the newest completed Agent Core record on the trace, whichever
+         runtime ran it. *)
       let front, counted_tokens =
         match
           Keeper_model_input_ledger.Table.lookup ~keeper_name ~runtime_id ~session_id:trace_id
         with
         | Some ledger ->
           Some (Keeper_carried_front.of_ledger ledger), ledger.Keeper_model_input_ledger.total_tokens
-        | None ->
-          Keeper_carried_front.read_seed ~config ~keeper_name ~runtime_id ~trace_id, None
+        | None -> Keeper_carried_front.read_seed ~config ~keeper_name ~trace_id, None
       in
       Some (carry ~measure ~front ~counted_tokens messages)
   in

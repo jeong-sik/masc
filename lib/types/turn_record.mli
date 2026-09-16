@@ -82,7 +82,12 @@ type model_input_window =
   }
 (** How much of the keeper's own history the dispatched request carried, in
     atoms — one organic user message, or one assistant message together with
-    the tool messages answering it.
+    the tool messages answering it. For an Agent Core request the atoms are
+    positions in the keeper's checkpoint history, whatever reasoning the
+    wire's dialect replays or deletes, so [total_atoms - transmitted_atoms]
+    is the front the request carried from and a front on every Agent Core
+    runtime; an official client hands over a list of its own, and its counts
+    are positions in that list.
 
     Reported beside {!request_wire_observation}, never in place of it: that one
     counts the bytes the provider admitted, this one counts how much

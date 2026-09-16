@@ -12,20 +12,28 @@
    outside a turn assembles them without side effects (a preview would
    consume the operator note and advance nothing else it should).
 
-   Two readings, two turns: a record describes the turn's latest request. The
-   schemas and the instructions ride every round, so the newest record has
-   the current surface. A post-tool round drops every block
-   [Prompt_block_id.injected_on_post_tool_round] refuses, so only a record
-   carrying such a block says what the next first round pins. An errored
-   turn's record names the requested runtime ([settled_runtime_id] falls back
-   to it) while its composition may be a failed attempt's on another lane;
-   [finish_reason] is [None] on exactly that path, so such records are not
-   read. *)
+   Two readings, two turns: a record describes the turn's latest request.
+   The schemas and the instructions are the lane's and ride every round, so
+   R comes from the newest record of a completed turn on the same runtime;
+   an errored turn's record names the requested runtime ([settled_runtime_id]
+   falls back to it) while its composition may be a failed attempt's on
+   another lane, and [finish_reason] is [None] on exactly that path. The
+   pinned blocks are the keeper's, the same content whichever lane runs, and
+   a post-tool round drops every block
+   [Prompt_block_id.injected_on_post_tool_round] refuses, so a first-round
+   composition is recorded mostly by single-request turns: official-client
+   turns (one request each) and turns that errored on their first request.
+   Pinned therefore comes from the newest first-round composition on any
+   lane, completed or not; a composition is real once it was measured, since
+   the record carries none when no request reached the wire. Keepers walk
+   three or four lanes, and on 2026-09-16 analyst's newest 200 records held
+   no completed first round on its bound lane and 78 on claude_code. *)
 
 type measured_parts =
   { reserved_turn : int
   ; reserved_bytes : int
   ; pinned_turn : int
+  ; pinned_runtime_id : string
   ; pinned_bytes : int
   }
 
@@ -40,8 +48,8 @@ let parts_refusal_to_string = function
       records_read
   | No_first_round_composition { records_read; newest_turn } ->
     Printf.sprintf
-      "the newest %d turn records on this runtime hold compositions only from post-tool \
-       rounds (newest turn #%d), which carry no pinned block"
+      "the newest %d turn records hold no first-round composition on any lane (newest \
+       completed turn on this runtime #%d); only a first round carries the pinned blocks"
       records_read
       newest_turn
 ;;
@@ -204,21 +212,30 @@ let read_composition (components : Turn_record.input_component list) =
   }
 ;;
 
+type record_reading =
+  { turn : int
+  ; runtime_id : string
+  ; completed : bool
+  ; composition : composition
+  }
+
 (* Oldest first; each step keeps the newer answer. *)
-let select_parts ~records_read (compositions : (int * composition) list) =
+let select_parts ~runtime_id ~records_read (readings : record_reading list) =
   let newest_fixed, newest_pinned =
     List.fold_left
-      (fun (_newest_fixed, newest_pinned) (turn, composition) ->
-        ( Some (turn, composition.fixed_bytes)
-        , match composition.first_round_pinned_bytes with
-          | Some pinned -> Some (turn, pinned)
+      (fun (newest_fixed, newest_pinned) reading ->
+        ( (if reading.completed && String.equal reading.runtime_id runtime_id
+           then Some (reading.turn, reading.composition.fixed_bytes)
+           else newest_fixed)
+        , match reading.composition.first_round_pinned_bytes with
+          | Some pinned -> Some (reading.turn, reading.runtime_id, pinned)
           | None -> newest_pinned ))
       (None, None)
-      compositions
+      readings
   in
   match newest_fixed, newest_pinned with
-  | Some (reserved_turn, reserved_bytes), Some (pinned_turn, pinned_bytes) ->
-    Ok { reserved_turn; reserved_bytes; pinned_turn; pinned_bytes }
+  | Some (reserved_turn, reserved_bytes), Some (pinned_turn, pinned_runtime_id, pinned_bytes) ->
+    Ok { reserved_turn; reserved_bytes; pinned_turn; pinned_runtime_id; pinned_bytes }
   | Some (newest_turn, _), None ->
     Error (No_first_round_composition { records_read; newest_turn })
   | None, _ -> Error (No_composition_on_runtime { records_read })
@@ -235,31 +252,33 @@ let record_runtime (record : Turn_record.t) =
    read reaches back far enough to meet one. *)
 let recent_records_read = 200
 
-(* A record is read when it is a completed turn on this runtime with an
-   exact composition. [finish_reason] is the stop reason the receipt
-   recorded and is [None] on the error path, the path on which the record's
-   runtime is the requested one rather than the one whose composition it
-   holds (analyst turn #4031: named glm-coding, held claude_code's schemas). *)
+(* Every record with an exact composition is read; [select_parts] decides
+   which lane and which completion each figure may come from. [finish_reason]
+   is the stop reason the receipt recorded and is [None] on the error path,
+   the path on which the record's runtime is the requested one rather than
+   the one whose composition it holds (analyst turn #4031: named glm-coding,
+   held claude_code's schemas). *)
 let newest_parts_for ~config ~keeper_name ~runtime_id =
   let store = Keeper_types_support.keeper_turn_record_store config keeper_name in
   let records = Dated_jsonl.read_recent store recent_records_read in
-  let compositions =
+  let readings =
     List.filter_map
       (fun json ->
         match Turn_record.of_json json with
         | Error _ -> None
         | Ok record ->
-          (match
-             ( String.equal (record_runtime record) runtime_id
-             , record.Turn_record.finish_reason
-             , record.Turn_record.input_components )
-           with
-           | true, Some _, Some components ->
-             Some (record.Turn_record.absolute_turn, read_composition components)
-           | true, None, _ | true, _, None | false, _, _ -> None))
+          (match record.Turn_record.input_components with
+           | None -> None
+           | Some components ->
+             Some
+               { turn = record.Turn_record.absolute_turn
+               ; runtime_id = record_runtime record
+               ; completed = Option.is_some record.Turn_record.finish_reason
+               ; composition = read_composition components
+               }))
       records
   in
-  select_parts ~records_read:(List.length records) compositions
+  select_parts ~runtime_id ~records_read:(List.length records) readings
 ;;
 
 let wake_line () =
@@ -374,7 +393,7 @@ let option_json to_json = function
   | Some value -> to_json value
 ;;
 
-let candidate_to_json candidate =
+let candidate_to_json (candidate : candidate) =
   `Assoc
     [ "runtime_id", `String candidate.runtime_id
     ; ( "window"
@@ -393,6 +412,7 @@ let candidate_to_json candidate =
             [ "reserved_measured_on_turn", `Int parts.reserved_turn
             ; "reserved_bytes", `Int parts.reserved_bytes
             ; "pinned_measured_on_turn", `Int parts.pinned_turn
+            ; "pinned_measured_on_runtime", `String parts.pinned_runtime_id
             ; "pinned_bytes", `Int parts.pinned_bytes
             ]
         | Error refusal -> `Assoc [ "error", `String (parts_refusal_to_string refusal) ] )

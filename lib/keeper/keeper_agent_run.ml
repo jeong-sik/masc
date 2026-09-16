@@ -1614,7 +1614,8 @@ let run_turn
                         Keeper_carried_front.read_seed
                           ~config
                           ~keeper_name:meta.name
-                          ~runtime_id)
+                          ~runtime_id
+                          ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id))
                       ~on_request_attribution:
                         (fun ~runtime_id ~tools ~transmitted ->
                            record_transmitted_model_input

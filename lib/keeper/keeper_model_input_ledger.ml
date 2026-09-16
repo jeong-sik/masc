@@ -325,25 +325,30 @@ module Table = struct
     }
 
   let global = { ledgers = M.empty; mutex = Eio.Mutex.create () }
-  let key ~keeper_name ~runtime_id = keeper_name ^ "\000" ^ runtime_id
+  (* One ledger per history: the session names the checkpoint the atoms
+     are positions in, so a recovery worker's turn on the same keeper and
+     runtime, or a new session, never reads or writes another's front. *)
+  let key ~keeper_name ~runtime_id ~session_id =
+    keeper_name ^ "\000" ^ runtime_id ^ "\000" ^ session_id
+  ;;
 
-  let observe ~keeper_name ~runtime_id ~request ~usage =
-    let key = key ~keeper_name ~runtime_id in
+  let observe ~keeper_name ~runtime_id ~session_id ~request ~usage =
+    let key = key ~keeper_name ~runtime_id ~session_id in
     Eio.Mutex.use_rw ~protect:true global.mutex (fun () ->
       let observation = observe (M.find_opt key global.ledgers) request usage in
       global.ledgers <- M.add key observation.ledger global.ledgers;
       observation)
   ;;
 
-  let lookup ~keeper_name ~runtime_id =
+  let lookup ~keeper_name ~runtime_id ~session_id =
     Eio.Mutex.use_ro global.mutex (fun () ->
-      M.find_opt (key ~keeper_name ~runtime_id) global.ledgers)
+      M.find_opt (key ~keeper_name ~runtime_id ~session_id) global.ledgers)
   ;;
 
   (* [move_front] in the body is the ledger function above: this binding is
      not recursive. *)
-  let move_front ~keeper_name ~runtime_id ~first_atom =
-    let key = key ~keeper_name ~runtime_id in
+  let move_front ~keeper_name ~runtime_id ~session_id ~first_atom =
+    let key = key ~keeper_name ~runtime_id ~session_id in
     Eio.Mutex.use_rw ~protect:true global.mutex (fun () ->
       match M.find_opt key global.ledgers with
       | None -> ()

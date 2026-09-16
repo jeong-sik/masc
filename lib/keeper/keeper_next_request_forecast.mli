@@ -12,14 +12,27 @@
     request-body cap, and the checkpoint. As last measured: [R] (tool
     schemas + keeper instructions) and the pinned blocks (memory recall,
     dynamic context, ...), taken from the newest turn record on the same
-    runtime that carried an exact composition, because a turn measures them
-    with the encoder the cut uses. {!measured_parts.turn} says how old. *)
+    runtime whose composition is a first round's, because a turn measures
+    them with the encoder the cut uses. A record describes the turn's latest
+    request, and a post-tool round drops every block that
+    {!Prompt_block_id.injected_on_post_tool_round} refuses, so a record
+    without such a block says nothing about what the next first round pins.
+    {!measured_parts.turn} says how old the figures are. *)
 
 type measured_parts =
   { turn : int  (** The turn record the two figures were read from. *)
   ; reserved_bytes : int  (** Tool schemas + keeper instructions. *)
   ; pinned_bytes : int  (** Every other prompt block, never cut. *)
   }
+
+type parts_refusal =
+  | No_composition_on_runtime of { records_read : int }
+      (** No record on this runtime carried an exact composition. *)
+  | No_first_round_composition of { records_read : int; newest_turn : int }
+      (** Records on this runtime carried compositions, all of them post-tool
+          rounds; [newest_turn] is the newest of those. *)
+
+val parts_refusal_to_string : parts_refusal -> string
 
 type history_cut =
   | Cut of
@@ -43,10 +56,9 @@ type candidate =
   ; request_cap_bytes : int option
         (** What the provider accepts; [None] when the binding declares none
             or the runtime cannot be resolved. Judges, never shapes. *)
-  ; parts : measured_parts option
-        (** [None] when no turn record on this runtime carried a composition. *)
+  ; parts : (measured_parts, parts_refusal) result
   ; history_atoms : int  (** Atoms in the checkpoint plus the wake line. *)
-  ; cut : history_cut option  (** [None] when [window] or [parts] is missing. *)
+  ; cut : history_cut option  (** [None] when [window] or [parts] is refused. *)
   }
 
 type t =
@@ -76,3 +88,10 @@ val cut_history
 
 val measure : Agent_core.Types.message -> int
 (** Bytes of one message as the cut's encoder counts them. *)
+
+val first_round_parts
+  :  turn:int
+  -> Turn_record.input_component list
+  -> measured_parts option
+(** [R] and the pinned bytes of one composition, or [None] when it carries no
+    block that only a first round injects, which is the post-tool shape. *)

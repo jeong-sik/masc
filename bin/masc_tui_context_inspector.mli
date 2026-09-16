@@ -141,7 +141,9 @@ type forecast_candidate =
   ; window : forecast_window
   ; capacity : forecast_capacity option
   ; request_cap_bytes : int option
-  ; parts : forecast_parts option
+  ; parts : (forecast_parts, string) result
+        (** [Error] is the server's reason: no composition on this runtime,
+            or only post-tool ones, which carry no pinned block. *)
   ; history_atoms : int
   ; cut : forecast_cut option
   }

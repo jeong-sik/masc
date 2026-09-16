@@ -31,26 +31,28 @@ let carry ?front ?counted_tokens messages =
 
 let carried (c : Keeper_next_request_forecast.carried) = c
 
-(* Ten exchanges are ten atoms (an assistant message joins the user message
-   before it). A front at atom 6 carries the last four. *)
+(* Ten exchanges are twenty atoms: each [User] and [Assistant] message opens
+   one, and only [Tool] joins the assistant that issued it — the counting
+   [Runtime_model_input_tail_window.annotate] pins. A front at atom 6 carries
+   the last fourteen. *)
 let test_a_seeded_front_carries_everything_from_it () =
   let messages = history ~exchanges:10 ~text_bytes:100 in
   let c = carried (carry ~front:(seed ~atom_count:10 6) ~counted_tokens:9_000 messages) in
   Alcotest.(check int) "front" 6 c.first_atom;
-  Alcotest.(check int) "four atoms" 4 c.kept_atoms;
+  Alcotest.(check int) "fourteen atoms" 14 c.kept_atoms;
   Alcotest.(check bool) "its bytes are a proper part of the history" true
     (c.transmitted_bytes > 0 && c.transmitted_bytes < atom_bytes messages);
   Alcotest.(check bool) "the origin is the seed's" true
     (c.origin = Keeper_carried_front.Carried Keeper_carried_front.Ledger);
   Alcotest.(check (option int)) "the count rides along" (Some 9_000) c.counted_tokens
 
-(* The front was measured against 3,395 atoms; a purge left 5. The position
+(* The front was measured against 3,395 atoms; a purge left ten. The position
    names nothing here, so the request starts over without a front. *)
 let test_a_front_the_history_shrank_under_is_dropped () =
   let messages = history ~exchanges:5 ~text_bytes:100 in
   let c = carried (carry ~front:(seed ~atom_count:3_395 3_100) ~counted_tokens:91_000 messages) in
   Alcotest.(check int) "from the first atom" 0 c.first_atom;
-  Alcotest.(check int) "all five" 5 c.kept_atoms;
+  Alcotest.(check int) "all ten" 10 c.kept_atoms;
   Alcotest.(check bool) "the origin says no front" true
     (c.origin = Keeper_carried_front.Whole_history);
   Alcotest.(check (option int)) "and no count rides along" None c.counted_tokens
@@ -59,7 +61,7 @@ let test_without_a_front_everything_goes () =
   let messages = history ~exchanges:5 ~text_bytes:100 in
   let c = carried (carry messages) in
   Alcotest.(check int) "from the first atom" 0 c.first_atom;
-  Alcotest.(check int) "all five" 5 c.kept_atoms;
+  Alcotest.(check int) "all ten" 10 c.kept_atoms;
   Alcotest.(check bool) "the origin says so" true
     (c.origin = Keeper_carried_front.Whole_history)
 

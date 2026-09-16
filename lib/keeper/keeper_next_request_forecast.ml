@@ -115,9 +115,10 @@ let carry ~measure ~front ~counted_tokens ~request_cap_bytes ~reserved_bytes mes
       ; counted_tokens
       }
   in
+  let _labelled, atom_count = Runtime_model_input_tail_window.annotate messages in
+  let front = Option.bind front (Keeper_carried_front.for_history ~atom_count) in
   match front, request_cap_bytes, reserved_bytes with
   | Some (seed : Keeper_carried_front.seed), (Some _ | None), (Some _ | None) ->
-    let _labelled, atom_count = Runtime_model_input_tail_window.annotate messages in
     let projection, transmitted_bytes =
       Runtime_model_input_tail_window.project_from_atom
         ~measure_message_bytes:measure
@@ -130,16 +131,16 @@ let carry ~measure ~front ~counted_tokens ~request_cap_bytes ~reserved_bytes mes
       ~origin:(Keeper_carried_front.Carried seed.source)
       ~counted_tokens
   | None, Some cap, Some reserved_bytes ->
-    let target =
-      Runtime_model_input_tail_window.project_target
+    let projection, transmitted_bytes =
+      Runtime_model_input_tail_window.project_within_bytes
         ~measure_message_bytes:measure
         ~target_bytes:cap
         ~reserved_bytes
         messages
     in
     of_projection
-      target.Runtime_model_input_tail_window.projection
-      ~transmitted_bytes:target.Runtime_model_input_tail_window.transmitted_bytes
+      projection
+      ~transmitted_bytes
       ~origin:Keeper_carried_front.Fit_to_request_cap
       ~counted_tokens:None
   | None, Some _, None ->
@@ -267,8 +268,9 @@ let record_runtime (record : Turn_record.t) =
 
 (* A keeper that calls tools on most turns leaves mostly post-tool records
    (lane-smith: one first-round record in thirteen on 2026-09-16), so the
-   read reaches back far enough to meet one. *)
-let recent_records_read = 200
+   read reaches back as far as the carried front's seed does, for the same
+   reason: most records are another lane's. *)
+let recent_records_read = Keeper_carried_front.records_read
 
 (* Every record with an exact composition is read; [select_parts] decides
    which lane and which completion each figure may come from. [finish_reason]
@@ -310,7 +312,7 @@ let wake_line () =
   , String.length text )
 ;;
 
-let candidate ~config ~keeper_name ~messages ~history_atoms runtime_id =
+let candidate ~config ~keeper_name ~trace_id ~messages ~history_atoms runtime_id =
   let runtime = Runtime.get_runtime_by_id runtime_id in
   let lane = lane_for ~runtime_id runtime in
   let parts = newest_parts_for ~config ~keeper_name ~runtime_id in
@@ -322,10 +324,13 @@ let candidate ~config ~keeper_name ~messages ~history_atoms runtime_id =
       (* The same front the turn driver composes from: the pair's ledger,
          else the newest completed record on the runtime. *)
       let front, counted_tokens =
-        match Keeper_model_input_ledger.Table.lookup ~keeper_name ~runtime_id with
+        match
+          Keeper_model_input_ledger.Table.lookup ~keeper_name ~runtime_id ~session_id:trace_id
+        with
         | Some ledger ->
           Some (Keeper_carried_front.of_ledger ledger), ledger.Keeper_model_input_ledger.total_tokens
-        | None -> Keeper_carried_front.read_seed ~config ~keeper_name ~runtime_id, None
+        | None ->
+          Keeper_carried_front.read_seed ~config ~keeper_name ~runtime_id ~trace_id, None
       in
       carry
         ~measure
@@ -374,7 +379,7 @@ let forecast ~config ~keeper_name =
          ; checkpoint_messages = List.length history
          ; wake_line_bytes
          ; candidates =
-             [ candidate ~config ~keeper_name ~messages ~history_atoms runtime_id ]
+             [ candidate ~config ~keeper_name ~trace_id ~messages ~history_atoms runtime_id ]
          })
 ;;
 

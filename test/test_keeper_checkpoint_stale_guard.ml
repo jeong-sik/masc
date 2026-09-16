@@ -7,10 +7,12 @@
     than the canonical checkpoint observed inside the save transaction, without
     turning that watermark hit into keeper lifecycle failure.
 
-    The canonical file is parsed under the stable session lock for every
-    admission decision. No process-local cache, fingerprint, or sidecar may
-    substitute for the checkpoint bytes. The canonical file is written in
-    compact JSON. *)
+    The canonical file is read whole under the stable session lock for every
+    admission decision and hashed against the reference the candidate claims to
+    advance; a file whose hash differs is then parsed, because the refusal
+    names the reference that file now carries. No process-local cache,
+    fingerprint, or sidecar may substitute for reading those bytes. The
+    canonical file is written in compact JSON. *)
 
 open Alcotest
 open Masc
@@ -746,6 +748,91 @@ let with_exact_source_fixture ~session_id f =
       | Error _ -> fail "exact source load failed"
     in
     f ~session_dir ~source_ref)
+;;
+
+(* The source check reads the canonical file and hashes it. A file the
+   canonical summary already describes is not parsed again: the decode this
+   replaces allocated 26 GB in fifty minutes on a live server, over files of
+   13-109 MB, and a save repeats it every turn.
+
+   The budget is measured here rather than guessed: a full load of the same
+   file parses it, so the save is compared against what that parse cost in this
+   process. If the save parsed too, the two would be the same order. *)
+let parse_share_of_a_save = 4.0
+
+let chatty_checkpoint ~session_id ~turn_count ~marker ~messages =
+  let base = make_checkpoint ~session_id ~turn_count ~marker in
+  { base with Agent_core.Checkpoint.messages }
+;;
+
+let many_short_messages count =
+  List.init count (fun index ->
+    Agent_core.Types.
+      { role = Assistant
+      ; content = [ Text (Printf.sprintf "%d %s" index (String.make 60 'x')) ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      })
+;;
+
+let allocated_minor_words f =
+  let before = Gc.minor_words () in
+  f ();
+  Gc.minor_words () -. before
+;;
+
+let test_a_summarised_source_is_hashed_and_not_parsed () =
+  let session_id = "sess-cas-hash-only" in
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
+    save_ok ~session_dir
+      (chatty_checkpoint ~session_id ~turn_count:8 ~marker:"source"
+         ~messages:(many_short_messages 8_000))
+      "hash-only seed save";
+    let source_ref =
+      match
+        Keeper_checkpoint_store.load_agent_core_with_ref ~session_dir ~session_id
+      with
+      | Ok (_, reference) -> reference
+      | Error _ -> fail "hash-only source load failed"
+    in
+    let source_bytes =
+      (Unix.stat (Filename.concat session_dir (session_id ^ ".json"))).Unix.st_size
+    in
+    let parse_words =
+      allocated_minor_words (fun () ->
+        match Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id with
+        | Ok _ -> ()
+        | Error _ -> fail "the source could not be loaded")
+    in
+    (* A parse of this file has to cost enough for the comparison below to mean
+       something: the fixture is 8,000 short messages, whose parse allocates
+       about 0.75 minor words per byte. *)
+    check bool
+      (Printf.sprintf "a parse of %d bytes allocated %.0f words" source_bytes parse_words)
+      true
+      (parse_words > 100_000.0);
+    let candidate = make_checkpoint ~session_id ~turn_count:9 ~marker:"candidate" in
+    let installation = ref None in
+    let save_words =
+      allocated_minor_words (fun () ->
+        installation
+        := Some
+             (Keeper_checkpoint_store.save_agent_core_if_source
+                ~session_dir
+                ~expected_source_ref:source_ref
+                candidate))
+    in
+    (match !installation with
+     | Some (Keeper_checkpoint_store.Installed _) -> ()
+     | Some (Keeper_checkpoint_store.Not_installed _) | None ->
+       fail "the candidate was refused against its own source");
+    check bool
+      (Printf.sprintf "the save allocated %.0f words against a parse's %.0f"
+         save_words parse_words)
+      true
+      (save_words *. parse_share_of_a_save < parse_words))
 ;;
 
 let test_exact_source_cas_allows_one_equal_turn_writer () =
@@ -1528,7 +1615,7 @@ let test_history_retention_after_syscall_offload () =
   ensure_fs env;
   let session_dir = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
-  let retained = 12 in
+  let retained = Keeper_checkpoint_store.max_agent_core_history_retained in
   let checkpoint turn_count =
     { (make_checkpoint ~session_id:"history-retention" ~turn_count ~marker:"history")
       with created_at = 1000. +. float_of_int turn_count }
@@ -1579,6 +1666,8 @@ let () =
             test_canonical_checkpoint_is_written_compact;
           test_case "exact source CAS permits one equal-turn writer" `Quick
             test_exact_source_cas_allows_one_equal_turn_writer;
+          test_case "a summarised source is hashed and not parsed" `Quick
+            test_a_summarised_source_is_hashed_and_not_parsed;
           test_case "exact source CAS updates the canonical watermark" `Quick
             test_exact_source_cas_updates_canonical_watermark;
           test_case "release failure preserves Not_installed cause" `Quick

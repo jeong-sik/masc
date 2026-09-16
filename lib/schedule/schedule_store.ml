@@ -839,75 +839,91 @@ let cancel_request config ~schedule_id =
          Ok updated_request))
 ;;
 
-(* How long a finished schedule stays in the ledger after the last thing that
-   happened to it. Every mutation rewrites the ledger whole, and a live one had
-   1,250 finished schedules against 22 live ones -- 4.3 MB, with a median
-   finished age of 8.6 days (2026-09-16). The window is the operator's: seven
-   days of finished schedules is what the dashboard shows and what a person
-   asks about after a weekend. [prune_completed] remains for forgetting them
-   all at once. *)
-let terminal_schedule_retention_s = 7.0 *. 24.0 *. 60.0 *. 60.0
+(* How long a finished schedule stays in the ledger after the wake that ended
+   it. Every mutation rewrites the ledger whole, and a live one held 1,250
+   finished schedules against 22 live ones: 4.3 MB, median finished age 8.6
+   days (2026-09-16). Seven days is the window the user chose on that date.
 
-(* The newest time the ledger knows for each schedule id: the wakes it ran and
-   the notes written on it. A schedule's own [requested_at] and [due_at] are
-   read from the request itself below. *)
-let last_ledger_activity state =
-  let newest = Hashtbl.create 64 in
-  let note_time schedule_id time =
-    match Hashtbl.find_opt newest schedule_id with
+   Only a wake tells the ledger when a schedule finished. A cancellation or an
+   expiry writes no time of its own, so a schedule that never ran is not
+   forgotten here at all -- [prune_completed] is what forgets those, when an
+   operator asks. Reading the retention off [due_at] instead would delete a
+   long-overdue schedule the moment someone cancelled it. *)
+let terminal_schedule_retention_days = 7
+let terminal_schedule_retention_s =
+  float_of_int terminal_schedule_retention_days *. 24.0 *. 60.0 *. 60.0
+;;
+
+(* One pass forgets at most this many, so a tick's write stays near the size of
+   the ledger it already rewrites, and a clock that jumps forward cannot take
+   the whole ledger and its .last-good mirror in a single write. *)
+let schedules_forgotten_per_pass = 64
+
+(* When each schedule id last finished a wake, and when anything was last
+   written about it. A note keeps its schedule: someone is still using it. *)
+let ledger_times state =
+  let finished = Hashtbl.create 64 in
+  let written_about = Hashtbl.create 64 in
+  let keep table schedule_id time =
+    match Hashtbl.find_opt table schedule_id with
     | Some seen when seen >= time -> ()
-    | Some _ | None -> Hashtbl.replace newest schedule_id time
+    | Some _ | None -> Hashtbl.replace table schedule_id time
   in
   List.iter
     (fun (wake : Schedule_domain.wake_record) ->
-       note_time
-         wake.Schedule_domain.schedule_id
-         (Option.value
-            wake.Schedule_domain.finished_at
-            ~default:wake.Schedule_domain.started_at))
+       Option.iter
+         (fun finished_at ->
+            keep finished wake.Schedule_domain.schedule_id finished_at;
+            keep written_about wake.Schedule_domain.schedule_id finished_at)
+         wake.Schedule_domain.finished_at)
     state.wakes;
   List.iter
     (fun (note : Schedule_domain.schedule_note) ->
-       note_time note.Schedule_domain.schedule_id note.Schedule_domain.created_at)
+       keep written_about note.Schedule_domain.schedule_id note.Schedule_domain.created_at)
     state.notes;
-  newest
+  finished, written_about
 ;;
 
-(* The schedules to keep, and the ids of the finished ones whose retention ran
-   out. Their wakes and notes go with them: a note about a schedule the ledger
-   no longer holds names nothing, and the per-schedule wake cap would otherwise
-   keep up to 32 rows of a schedule that is gone. *)
+(* The schedules to keep and the wakes of those forgotten. Notes stay: they are
+   append-only evidence about intent and history, which [prune_completed] also
+   leaves behind, and a note about a schedule the ledger no longer holds is
+   still what someone wrote. *)
 let forget_finished_schedules ~now state =
-  let newest = last_ledger_activity state in
-  let last_activity (request : schedule_request) =
-    let own = Float.max request.requested_at request.due_at in
-    match Hashtbl.find_opt newest request.schedule_id with
-    | Some seen -> Float.max own seen
-    | None -> own
+  let finished, written_about = ledger_times state in
+  let forgettable (request : schedule_request) =
+    Schedule_domain.is_terminal request.status
+    &&
+    match Hashtbl.find_opt finished request.schedule_id with
+    | None -> false
+    | Some finished_at ->
+      let last_written =
+        Float.max
+          finished_at
+          (Option.value
+             (Hashtbl.find_opt written_about request.schedule_id)
+             ~default:finished_at)
+      in
+      now -. last_written > terminal_schedule_retention_s
   in
-  let kept, forgotten =
-    List.partition
+  let forgotten_ids = Hashtbl.create 16 in
+  let kept =
+    List.filter
       (fun (request : schedule_request) ->
-         (not (Schedule_domain.is_terminal request.status))
-         || now -. last_activity request <= terminal_schedule_retention_s)
+         if Hashtbl.length forgotten_ids >= schedules_forgotten_per_pass
+            || not (forgettable request)
+         then true
+         else (
+           Hashtbl.replace forgotten_ids request.schedule_id ();
+           false))
       state.schedules
   in
-  let forgotten_ids = Hashtbl.create (List.length forgotten) in
-  List.iter
-    (fun (request : schedule_request) ->
-       Hashtbl.replace forgotten_ids request.schedule_id ())
-    forgotten;
   let holds_a_kept_schedule schedule_id = not (Hashtbl.mem forgotten_ids schedule_id) in
   ( kept
   , List.filter
       (fun (wake : Schedule_domain.wake_record) ->
          holds_a_kept_schedule wake.Schedule_domain.schedule_id)
       state.wakes
-  , List.filter
-      (fun (note : Schedule_domain.schedule_note) ->
-         holds_a_kept_schedule note.Schedule_domain.schedule_id)
-      state.notes
-  , List.length forgotten )
+  , Hashtbl.length forgotten_ids )
 ;;
 
 let refresh_due config ~now =
@@ -926,8 +942,12 @@ let refresh_due config ~now =
         state.schedules
         ([], 0)
     in
-    let schedules, wakes, notes, forgotten =
-      forget_finished_schedules ~now { state with schedules }
+    (* A clock behind the ledger's own last write cannot judge how long ago
+       anything finished, so such a tick only marks what is due. *)
+    let schedules, wakes, forgotten =
+      if now < state.updated_at
+      then schedules, state.wakes, 0
+      else forget_finished_schedules ~now { state with schedules }
     in
     if changed = 0 && forgotten = 0
     then Ok (state, 0)
@@ -935,10 +955,10 @@ let refresh_due config ~now =
       if forgotten > 0
       then
         Log.Misc.info
-          "schedule_store: forgot %d schedule(s) finished more than %.0f days ago"
+          "schedule_store: forgot %d schedule(s) whose wake finished more than %d days ago"
           forgotten
-          (terminal_schedule_retention_s /. 86400.0);
-      let next_state = bump_state state ~schedules ~wakes ~notes in
+          terminal_schedule_retention_days;
+      let next_state = bump_state state ~schedules ~wakes ~notes:state.notes in
       let* () = write_state config next_state in
       Ok (next_state, changed)))
 ;;
@@ -963,19 +983,12 @@ let reschedule_due_recurring config ~now ~schedule_ids =
         state.schedules
         ([], 0)
     in
-    let schedules, wakes, notes, forgotten =
-      forget_finished_schedules ~now { state with schedules }
-    in
-    if changed = 0 && forgotten = 0
-    then Ok (state, 0)
+    if changed = 0 then
+      Ok (state, 0)
     else (
-      if forgotten > 0
-      then
-        Log.Misc.info
-          "schedule_store: forgot %d schedule(s) finished more than %.0f days ago"
-          forgotten
-          (terminal_schedule_retention_s /. 86400.0);
-      let next_state = bump_state state ~schedules ~wakes ~notes in
+      let next_state =
+        bump_state state ~schedules ~wakes:state.wakes ~notes:state.notes
+      in
       let* () = write_state config next_state in
       Ok (next_state, changed)))
 ;;

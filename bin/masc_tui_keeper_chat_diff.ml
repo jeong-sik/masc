@@ -18,6 +18,10 @@ type prepared_kind =
       omitted : int;
       row_count : int;
     }
+  | Materialized of {
+      sha256 : string;
+      bytes : int;
+    }
 
 type prepared_change = {
   change : Masc.Tui_decode.file_change;
@@ -76,6 +80,10 @@ let prepare (change : Masc.Tui_decode.file_change) =
           Diff.preview ~context:0 ~max_rows:preview_rows rows
         in
         Written { preview; omitted; row_count = List.length rows }
+    | Masc.Tui_decode.Fc_materialized { sha256; bytes } ->
+        (* The call names the blob, not its text, so there is no body to
+           diff. The coordinates are all the log holds. *)
+        Materialized { sha256; bytes }
   in
   { change; kind }
 
@@ -166,6 +174,9 @@ let omission_row ~max_line_cells omitted =
 
 let attempted_suffix (change : Masc.Tui_decode.file_change) =
   if change.fc_succeeded then "" else " · failed attempt"
+
+let short_sha256 sha256 =
+  if String.length sha256 <= 12 then sha256 else String.sub sha256 0 12
 
 let line_range_label (range : Masc.Keeper_file_change_evidence.line_range) =
   if range.start_line = range.end_line then Printf.sprintf "L%d" range.start_line
@@ -324,6 +335,29 @@ let written_section ~max_line_cells (change : Masc.Tui_decode.file_change)
                           @ preview_block ~max_line_cells ~language:"" lines
                           @ omission_row ~max_line_cells omitted)
 
+let materialized_section ~max_line_cells (change : Masc.Tui_decode.file_change)
+      ~sha256 ~bytes =
+  let summary =
+    if change.fc_succeeded then Printf.sprintf "(%d bytes materialized)" bytes
+    else Printf.sprintf "(%d-byte materialize attempt)" bytes
+  in
+  let address = address_row ~max_line_cells ~summary change in
+  let evidence_rows =
+    match change.fc_line_evidence with
+    | Some (Masc.Keeper_file_change_evidence.Written { new_range = Some range }) ->
+      [ clipped ~max_cells:max_line_cells ("  new " ^ line_range_label range) ]
+    | Some (Masc.Keeper_file_change_evidence.Written { new_range = None }) ->
+      [ "  empty body" ]
+    | None | Some (Masc.Keeper_file_change_evidence.Edited _) -> []
+  in
+  let detail =
+    Printf.sprintf
+      "  materialized blob %s · the log holds the blob's coordinates, not its bytes%s"
+      (short_sha256 sha256) (attempted_suffix change)
+    |> clipped ~max_cells:max_line_cells
+  in
+  [ address; detail ] @ evidence_rows
+
 let section ~max_line_cells prepared =
   let change = prepared.change in
   match prepared.kind with
@@ -332,6 +366,8 @@ let section ~max_line_cells prepared =
         ~replace_all
   | Written { preview; omitted; row_count } ->
       written_section ~max_line_cells change ~preview ~omitted ~row_count
+  | Materialized { sha256; bytes } ->
+      materialized_section ~max_line_cells change ~sha256 ~bytes
 
 let rows ~mode ~max_line_cells ?(activity_details = fun _ -> []) indexed
     (projection : Transcript.tool_projection) =

@@ -17,6 +17,10 @@ type kind =
       line : int;
       text : string;
     }
+  | Materialized of {
+      sha256 : string;
+      bytes : int;
+    }
 
 type t = {
   at : float;
@@ -73,7 +77,8 @@ let writes_files (handler : Keeper_tool_descriptor.runtime_handler) =
   match handler with
   | Keeper_tool_descriptor.Tool_edit_file
   | Keeper_tool_descriptor.Tool_write_file
-  | Keeper_tool_descriptor.Tool_ide_annotate -> true
+  | Keeper_tool_descriptor.Tool_ide_annotate
+  | Keeper_tool_descriptor.Tool_peer_artifact -> true
   | Keeper_tool_descriptor.Tool_execute
   | Keeper_tool_descriptor.Tool_search_files
   | Keeper_tool_descriptor.Tool_read_file
@@ -81,7 +86,6 @@ let writes_files (handler : Keeper_tool_descriptor.runtime_handler) =
   | Keeper_tool_descriptor.Tool_tools_list
   | Keeper_tool_descriptor.Tool_capability_search
   | Keeper_tool_descriptor.Tool_context_status
-  | Keeper_tool_descriptor.Tool_peer_artifact
   | Keeper_tool_descriptor.Tool_artifact_read
   | Keeper_tool_descriptor.Tool_workspace_memory_read
   | Keeper_tool_descriptor.Tool_memory_search
@@ -199,13 +203,16 @@ let validate_line_evidence ~execution_id ~succeeded kind line_evidence =
          "an insert carries a file_change_evidence occurrence_count other than one")
   | Edited _, Some (Keeper_file_change_evidence.Edited _)
   | Inserted _, Some (Keeper_file_change_evidence.Edited _)
-  | Written _, Some (Keeper_file_change_evidence.Written _) -> Ok ()
+  | Written _, Some (Keeper_file_change_evidence.Written _)
+  | Materialized _, Some (Keeper_file_change_evidence.Written _) -> Ok ()
   | Inserted _, Some (Keeper_file_change_evidence.Written _) ->
     Error (Malformed "insert input carries write file_change_evidence")
   | Edited _, Some (Keeper_file_change_evidence.Written _) ->
     Error (Malformed "edit input carries write file_change_evidence")
   | Written _, Some (Keeper_file_change_evidence.Edited _) ->
     Error (Malformed "write input carries edit file_change_evidence")
+  | Materialized _, Some (Keeper_file_change_evidence.Edited _) ->
+    Error (Malformed "materialize input carries edit file_change_evidence")
 
 (* Where the target sits. A relative target is read as the bundle-relative
    path it is, not rebuilt into an absolute one first: whether the keeper ran
@@ -223,6 +230,12 @@ let location_of_target ~target_path =
     | Some (repo_id, relative_path) -> In_repo { repo_id; relative_path }
     | None -> In_bundle { bundle_path = target_path }
 
+(* [kind_of_input] answers [None] when the handler ran but this call did not
+   write a file. Only [Tool_peer_artifact] needs that third answer: its
+   [export] action reads a file into the blob store and its [materialize]
+   action writes a blob into a file, and the action is a field of the call's
+   input, so the handler-level [writes_files] cannot separate them. Every
+   other file-writing handler writes on every call and answers [Some]. *)
 let kind_of_input ~(handler : Keeper_tool_descriptor.runtime_handler) ~keeper input =
   match handler with
   | Keeper_tool_descriptor.Tool_edit_file -> (
@@ -233,11 +246,11 @@ let kind_of_input ~(handler : Keeper_tool_descriptor.runtime_handler) ~keeper in
           let replace_all =
             Option.value ~default:false (Json_field.to_option (Json_field.bool input "replace_all"))
           in
-          Ok (Edited { before; after; replace_all })
+          Ok (Some (Edited { before; after; replace_all }))
       | Error detail, _ | _, Error detail -> Error detail)
   | Keeper_tool_descriptor.Tool_write_file -> (
       match required_string input "content" with
-      | Ok content -> Ok (Written { content })
+      | Ok content -> Ok (Some (Written { content }))
       | Error detail -> Error detail)
   | Keeper_tool_descriptor.Tool_ide_annotate -> (
       (* The line the file received is composed the way the tool composed
@@ -264,8 +277,36 @@ let kind_of_input ~(handler : Keeper_tool_descriptor.runtime_handler) ~keeper in
                   match Lsp_process_manager.memo_line ~path:file_path memo with
                   | Error refusal ->
                       Error (Malformed (Lsp_process_manager.memo_line_refusal_to_string refusal))
-                  | Ok comment_line -> Ok (Inserted { line; text = comment_line }))))
+                  | Ok comment_line -> Ok (Some (Inserted { line; text = comment_line })))))
       | Error detail, _, _ | _, Error detail, _ | _, _, Error detail -> Error detail)
+  | Keeper_tool_descriptor.Tool_peer_artifact -> (
+      (* One handler, two actions: [export] reads a file into the blob store
+         and [materialize] writes a blob's bytes into a file. Only the second
+         is a file change, and the action is a field of the call's input, so
+         the handler-level [writes_files] cannot separate them. The artifact
+         is decoded with the handler's own decoder, so the projection reads
+         the shape the handler read rather than a second copy of it. *)
+      match required_string input "action" with
+      | Error detail -> Error detail
+      | Ok "export" -> Ok None
+      | Ok "materialize" -> (
+          match Json_field.assoc input "artifact" with
+          | Json_field.Field_absent -> Error (Malformed "artifact is absent")
+          | Json_field.Wrong_shape { expected; got } ->
+              Error (Malformed (Printf.sprintf "artifact is %s, expected %s" got expected))
+          | Json_field.Found fields -> (
+              match Keeper_peer_artifact_ref.of_json (`Assoc fields) with
+              | Ok reference ->
+                  Ok
+                    (Some
+                       (Materialized
+                          { sha256 = reference.blob.sha256
+                          ; bytes = reference.blob.bytes
+                          }))
+              | Error detail -> Error (Malformed ("artifact: " ^ detail))))
+      | Ok other ->
+          Error
+            (Malformed (Printf.sprintf "action is %s, expected export or materialize" other)))
   | Keeper_tool_descriptor.Tool_execute
   | Keeper_tool_descriptor.Tool_search_files
   | Keeper_tool_descriptor.Tool_read_file
@@ -273,7 +314,6 @@ let kind_of_input ~(handler : Keeper_tool_descriptor.runtime_handler) ~keeper in
   | Keeper_tool_descriptor.Tool_tools_list
   | Keeper_tool_descriptor.Tool_capability_search
   | Keeper_tool_descriptor.Tool_context_status
-  | Keeper_tool_descriptor.Tool_peer_artifact
   | Keeper_tool_descriptor.Tool_artifact_read
   | Keeper_tool_descriptor.Tool_workspace_memory_read
   | Keeper_tool_descriptor.Tool_memory_search
@@ -320,7 +360,7 @@ let kind_of_input ~(handler : Keeper_tool_descriptor.runtime_handler) ~keeper in
       (* Unreachable through [classify], which asks [writes_files] first. Named
          so that adding a file-writing handler makes the compiler point here
          too, instead of letting the new tool fall into a wildcard. *)
-      Error (Malformed "handler does not write files")
+      Ok None
 
 let classify row =
   match named_tool_of_row row with
@@ -350,38 +390,43 @@ let classify row =
           Result.bind input (fun input ->
               Result.bind (required_string row "keeper") (fun keeper ->
               Result.bind (kind_of_input ~handler ~keeper input) (fun kind ->
-                  let succeeded =
-                    Option.value ~default:false
-                      (Json_field.to_option (Json_field.bool row "success"))
-                  in
-                  let execution_id = optional_string row "execution_id" in
-                  Result.bind (line_evidence_of_row row) (fun line_evidence ->
-                    Result.bind
-                      (validate_line_evidence
-                         ~execution_id
-                         ~succeeded
-                         kind
-                         line_evidence)
-                      (fun () ->
-                        Result.bind (target_path_of_row row) (fun target_path ->
-                          let at =
-                            Option.value ~default:0.
-                              (Json_field.to_option (Json_field.float row "ts"))
-                          in
-                          Ok
-                            { at
-                            ; keeper
-                            ; turn = optional_int row "turn"
-                            ; task_id = optional_string row "task_id"
-                            ; execution_id
-                            ; line_evidence
-                            ; location = location_of_target ~target_path
-                            ; kind
-                            ; succeeded
-                            }))))))
+                  match kind with
+                  | None -> Ok None
+                  | Some kind ->
+                    let succeeded =
+                      Option.value ~default:false
+                        (Json_field.to_option (Json_field.bool row "success"))
+                    in
+                    let execution_id = optional_string row "execution_id" in
+                    Result.bind (line_evidence_of_row row) (fun line_evidence ->
+                      Result.bind
+                        (validate_line_evidence
+                           ~execution_id
+                           ~succeeded
+                           kind
+                           line_evidence)
+                        (fun () ->
+                          Result.bind (target_path_of_row row) (fun target_path ->
+                            let at =
+                              Option.value ~default:0.
+                                (Json_field.to_option (Json_field.float row "ts"))
+                            in
+                            Ok
+                              (Some
+                                 { at
+                                 ; keeper
+                                 ; turn = optional_int row "turn"
+                                 ; task_id = optional_string row "task_id"
+                                 ; execution_id
+                                 ; line_evidence
+                                 ; location = location_of_target ~target_path
+                                 ; kind
+                                 ; succeeded
+                                 })))))))
         in
         (match parsed with
-         | Ok change -> File_change change
+         | Ok None -> Not_a_file_change
+         | Ok (Some change) -> File_change change
          | Error detail -> Unreadable detail)
 
 type tally = {
@@ -558,6 +603,9 @@ let kind_to_json = function
   | Written { content } -> `Assoc [ ("kind", `String "write"); ("content", `String content) ]
   | Inserted { line; text } ->
       `Assoc [ ("kind", `String "insert"); ("line", `Int line); ("text", `String text) ]
+  | Materialized { sha256; bytes } ->
+      `Assoc
+        [ ("kind", `String "materialize"); ("sha256", `String sha256); ("bytes", `Int bytes) ]
 
 let optional_json to_json = function None -> `Null | Some value -> to_json value
 

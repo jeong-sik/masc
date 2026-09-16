@@ -6603,7 +6603,7 @@ let test_composition_action_commit_advances_revision_before_refresh_event () =
        let frames = ref [] in
        Masc.Keeper_tool_call_log.reset_for_testing ();
        Masc.Keeper_tool_call_log.init ~base_path:config.base_path ();
-       let revision_before = Masc.Keeper_tool_call_log.committed_revision () in
+       let revision_before = Masc.Keeper_tool_call_log.committed_revision ~keeper_name:meta.name in
        Masc.Sse.subscribe_external
          ~id:subscriber_id
          ~callback:(fun event ->
@@ -6712,7 +6712,7 @@ let test_composition_action_commit_advances_revision_before_refresh_event () =
               int
               "durable revision advances before refresh"
               (revision_before + 2)
-              (Masc.Keeper_tool_call_log.committed_revision ());
+              (Masc.Keeper_tool_call_log.committed_revision ~keeper_name:meta.name);
             let committed_refresh =
               List.find_map
                 (fun frame ->
@@ -6821,7 +6821,7 @@ let test_composition_telemetry_failure_does_not_change_execution () =
               int
               "unavailable store does not fabricate a durable revision"
               0
-              (Masc.Keeper_tool_call_log.committed_revision ());
+              (Masc.Keeper_tool_call_log.committed_revision ~keeper_name:meta.name);
             let committed_refreshes =
               List.filter_map
                 (fun frame ->

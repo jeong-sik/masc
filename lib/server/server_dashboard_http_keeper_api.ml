@@ -22,7 +22,7 @@ let keeper_file_changes_cache_key ~masc_root ~keeper_name ~window_hours =
     masc_root
     keeper_name
     window_hours
-    (Keeper_tool_call_log.committed_revision ())
+    (Keeper_tool_call_log.committed_revision ~keeper_name)
 ;;
 
 let tool_call_entries ~keeper_name ~limit =
@@ -425,7 +425,7 @@ let keeper_chat_history_freshness config name =
      that dependency even when a separate writer or queued flush appends after
      the chat, raw trace and TurnRecord files stopped changing. Keeper hooks
      commit synchronously before publishing their completion. *)
-  let tool_call_stamp = Keeper_tool_call_log.committed_revision () in
+  let tool_call_stamp = Keeper_tool_call_log.committed_revision ~keeper_name:name in
   Printf.sprintf "%s|%s|%s|%d" chat_stamp trace_stamp turn_record_stamp tool_call_stamp
 ;;
 

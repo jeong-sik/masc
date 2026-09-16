@@ -1,10 +1,11 @@
 (** The NEXT REQUEST band of the context inspector.
 
     Draws {!Masc_tui_context_inspector.forecast}, the server's forward run of
-    the turn's own arithmetic, in tokens. A candidate whose capacity carries a
-    measured density reads every byte figure at that density, the exact ratio
-    for its runtime; one without reads at the tab's scale. A refused window is
-    drawn with its reason; a missing forecast is named, not hidden. *)
+    the turn's own composition, in tokens: the carried range from the pair's
+    front, the marks it is judged against, and what the provider last
+    counted. Byte figures read at the tab's scale; counts are the provider's.
+    An official-client runtime is named with why it carries no range; a
+    missing forecast is named, not hidden. *)
 
 val lines
   :  prose:(string -> string list)

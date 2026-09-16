@@ -53,8 +53,10 @@
 
     Internal helpers stay private at this boundary
     ([shell_prewarm_timeout_s],
-    [_last_broadcast_hash] /
-    [_broadcast_hash_mu] / [broadcast_cached_surface],
+    [last_broadcast_payload] /
+    [broadcast_payload_mu] / [broadcast_cached_surface] /
+    [operator_snapshot_publication_is_current] / [operator_snapshot_json] /
+    [broadcast_current_successful_operator_snapshot],
     [_transport_health_cache],
     [keeper_top_level_status_opt] / [patched_keeper_status],
     [patch_keeper_rows] SSE-event row patcher helper,
@@ -300,7 +302,17 @@ val patch_keeper_row :
 val broadcast_operator_snapshot :
   Server_dashboard_http_core_operator.operator_snapshot_publication -> unit
 (** Publish an operator snapshot on SSE, if the publication still matches the
-    current one. Passed to the snapshot refresh loop at boot. *)
+    current one. The payload is encoded on the calling fiber without yielding,
+    so a caller holding a lock may use it: the /api/v1/operator route and the
+    invalidation observer do. *)
+
+val broadcast_refreshed_operator_snapshot :
+  Server_dashboard_http_core_operator.operator_snapshot_publication -> unit
+(** {!broadcast_operator_snapshot} with the payload encoded on the domain pool,
+    for a caller that holds nothing and may yield. Passed to the snapshot
+    refresh loop at boot. A publication replaced while it encodes is not
+    broadcast; the current one is when it is a success, since a success the
+    route published has no broadcaster of its own. *)
 
 val broadcast_operator_digest : Yojson.Safe.t -> unit
 (** Publish an operator digest on SSE. Passed to the digest refresh loop at

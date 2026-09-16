@@ -64,8 +64,8 @@ let selection ?rows turn : Masc_tui_context_inspector.selection =
   ; rows = (match rows with Some rows -> rows | None -> [ turn ])
   }
 
-let lines ?rows turn =
-  Masc_tui_render_prim.context_composition_lines ~cols:140 ~turn_back:0
+let lines ?rows ?(forecast = Error "next-request not fetched") turn =
+  Masc_tui_render_prim.context_composition_lines ~cols:140 ~turn_back:0 ~forecast
     (selection ?rows turn)
 
 let contains needle line =

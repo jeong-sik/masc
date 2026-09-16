@@ -267,6 +267,19 @@ CLI 인증 저장소에 남으며, 마법사는 CLI·모델 가중치·Docker를
 네트워킹을 끄면 샌드박스 명령에 영향이 있습니다. MASC 모델 연결과 WebFetch는
 서버 쪽의 별도 네트워크 제어를 사용합니다.
 
+Apple Container는 이미지를 따로 띄운 VM 안에서 빌드합니다. 이 VM은 설정에
+`[build] rosetta = false`가 없으면 Rosetta를 씁니다. Rosetta가 없는 맥에서는
+서비스가 응답해도 이미지 빌드가 매번 실패합니다. setup은 이 상태를 먼저 확인하고
+두 가지 중 하나를 고르게 합니다.
+
+- **Build images without Rosetta**: `~/.config/container/config.toml`(또는
+  `$XDG_CONFIG_HOME/container/config.toml`)의 `[build]`에 `rosetta = false`를 쓰고
+  Apple Container 서비스를 다시 시작합니다. 다시 시작하는 동안 Apple Container에서
+  돌던 컨테이너는 멈춥니다. 이후 빌드는 arm64 이미지만 만들고, MASC 샌드박스
+  이미지는 arm64입니다.
+- **Install Rosetta**: `softwareupdate --install-rosetta`를 실행합니다. Apple
+  라이선스가 나오고 비밀번호를 물을 수 있습니다.
+
 ```bash
 masc setup                     # 연결·샌드박스 선택 다시 열기
 masc doctor                    # 읽기 전용 준비 상태 보고

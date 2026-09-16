@@ -6,6 +6,17 @@ type dependency = Sandbox of Sandbox_readiness.backend | Codex_cli | Claude_cli 
 type action_effect = Open_official_installer of { url : string; argv : string list }
   | Run_commands of string list list
   | Install_official_cli of Runtime_official_cli_install.client
+  | Build_without_rosetta of { user_config : string }
+      (** Set [build] rosetta = false in Apple Container's user configuration,
+          then restart its service so the next image build reads it. *)
+type apple_builder =
+  | Builder_unchecked
+  | Needs_missing_rosetta of { user_config : string option }
+(** What setup found about Apple Container's image builder.
+    [Needs_missing_rosetta]: the service answered, the builder uses Rosetta,
+    and Rosetta is not installed. [user_config] is the file Apple Container
+    reads a user's settings from; without one, only installing Rosetta is
+    offered. *)
 type action = private { id : string; label : string; detail : string;
   source_url : string; requires_admin : bool; action_effect : action_effect;
   writes : string option
@@ -21,7 +32,11 @@ val distribution_of_os_release : string -> distribution
     command that has nowhere to write. *)
 val catalog :
   ?model_dir:string ->
+  ?apple_builder:apple_builder ->
   host:Sandbox_readiness.host -> distribution:distribution -> dependency -> action list
+(** [apple_builder] defaults to [Builder_unchecked]. When it is
+    [Needs_missing_rosetta], Apple Container offers the two ways past it --
+    build without Rosetta, or install it -- instead of its installers. *)
 val to_json : action list -> Yojson.Safe.t
 type run_failure =
   | Program_not_found  (** argv's program is not on PATH; nothing ran *)

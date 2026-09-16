@@ -124,22 +124,32 @@ let test_legacy_derived_failure_class_decodes_and_writes_canonical () =
   | Error error -> Alcotest.failf "legacy derived class was rejected: %s" error
 ;;
 
-let test_persisted_terminal_effect_legacy_class_remains_readable () =
+let test_persisted_terminal_effect_keeps_its_failure_class () =
   let persisted =
     `Assoc
       [ "kind", `String "terminal_effect_failed"
-      ; "failure_class", `String "transient_error"
+      ; "failure_class", `String "dependency_unavailable"
       ; "effect_disposition", `String "effect_outcome_unknown"
-      ; "diagnostic", `String "legacy receipt"
+      ; ( "detail"
+        , `Assoc
+            [ "kind", `String "tool_failed"
+            ; "internal_tool_name", `String "fixture"
+            ; "message", `String "persisted receipt"
+            ] )
       ]
   in
   match Keeper_internal_error.parse_masc_internal_error_json persisted with
   | Some
       (Keeper_internal_error.Terminal_effect_failed
-        { failure_class = Tool_result.Dependency_unavailable; _ }) ->
+        { failure_class = Tool_result.Dependency_unavailable
+        ; detail =
+            Keeper_terminal_effect_detail.Tool_failed
+              { internal_tool_name = "fixture"; message = "persisted receipt" }
+        ; _
+        }) ->
     ()
-  | Some _ -> Alcotest.fail "legacy receipt decoded to the wrong internal error"
-  | None -> Alcotest.fail "legacy persisted terminal effect was dropped"
+  | Some _ -> Alcotest.fail "persisted receipt decoded to the wrong internal error"
+  | None -> Alcotest.fail "persisted terminal effect was dropped"
 ;;
 
 let test_exception_message_does_not_infer_failure_class () =
@@ -586,9 +596,9 @@ let () =
             `Quick
             test_legacy_transient_failure_class_decodes_as_dependency
         ; Alcotest.test_case
-            "legacy persisted terminal effect remains readable"
+            "persisted terminal effect keeps its failure class"
             `Quick
-            test_persisted_terminal_effect_legacy_class_remains_readable
+            test_persisted_terminal_effect_keeps_its_failure_class
         ; Alcotest.test_case
             "exception message does not infer failure_class"
             `Quick

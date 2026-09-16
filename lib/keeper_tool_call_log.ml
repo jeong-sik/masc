@@ -192,9 +192,34 @@ type store_state =
   }
 
 let store_state = Atomic.make { store = None; configured = None }
-let committed_revision_ref = Atomic.make 0
+module Keeper_revisions = Map.Make (String)
 
-let committed_revision () = Atomic.get committed_revision_ref
+(* One revision per keeper, so a keeper's derived caches go stale on its own
+   appends only. A single process-wide counter made every keeper's chat
+   history stale on any keeper's tool call, so with a working fleet the
+   history was recomputed on nearly every request. *)
+let committed_revisions = Atomic.make Keeper_revisions.empty
+
+(* No entry is a keeper with no committed append in this process. *)
+let committed_revision ~keeper_name =
+  match Keeper_revisions.find_opt keeper_name (Atomic.get committed_revisions) with
+  | Some revision -> revision
+  | None -> 0
+;;
+
+let rec advance_committed_revision ~keeper_name =
+  let current = Atomic.get committed_revisions in
+  let next =
+    Keeper_revisions.update
+      keeper_name
+      (function
+        | Some revision -> Some (revision + 1)
+        | None -> Some 1)
+      current
+  in
+  if not (Atomic.compare_and_set committed_revisions current next)
+  then advance_committed_revision ~keeper_name
+;;
 
 type record_kind =
   | Tool_call
@@ -366,7 +391,7 @@ let init ?cluster_name ~base_path () =
 let reset_for_testing () =
   Atomic.set store_state { store = None; configured = None };
   reset_file_change_cache ();
-  Atomic.set committed_revision_ref 0;
+  Atomic.set committed_revisions Keeper_revisions.empty;
   Atomic.set async_append_active false;
   Atomic.set append_queue_dropped 0;
   with_append_queue_lock (fun () -> Stdlib.Queue.clear append_queue);
@@ -464,8 +489,7 @@ let record_unavailable_coverage_gap ~keeper_name ~tool_name ?trace_id () =
 let append_to_store_result (entry : append_entry) =
   try
     Dated_jsonl.append entry.store entry.json;
-    (* fire-and-forget: pre-increment count is unused; committed_revision () reads the counter directly. *)
-    ignore (Atomic.fetch_and_add committed_revision_ref 1 : int);
+    advance_committed_revision ~keeper_name:entry.keeper_name;
     Ok ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e

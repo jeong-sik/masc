@@ -1165,25 +1165,42 @@ let test_terminal_externalization_failure_contract () =
     ; Masc.Keeper_tools_agent_core.Terminal_effect_failed
         { failure_class = Tool_result.Workflow_rejection
         ; effect_disposition = Tool_result.Proven_pre_effect
-        ; diagnostic = "original failure"
+        ; detail =
+            Keeper_terminal_effect_detail.Tool_failed
+              { internal_tool_name = "fixture"; message = "original failure" }
         }
     ];
+  let completed =
+    Masc.Keeper_tools_agent_core.Terminal_effect_completed
+      (Masc.Keeper_tool_execution.Surface_post_completed
+         Masc.Keeper_surface_post.To_dashboard)
+  in
+  (match classify completed error with
+   | Some
+       { failure_class = Tool_result.Runtime_failure
+       ; effect_disposition = Tool_result.Proven_post_effect
+       ; detail = Keeper_terminal_effect_detail.Output_artifact_unstored { message }
+       } ->
+     check string "storage failure message is retained" "disk unavailable" message
+   | Some _ | None ->
+     fail "completed terminal effect did not become proven post-effect failure");
+  (* An output over its inline budget is not a storage failure. *)
   match
     classify
-      (Masc.Keeper_tools_agent_core.Terminal_effect_completed
-         (Masc.Keeper_tool_execution.Surface_post_completed
-            Masc.Keeper_surface_post.To_dashboard))
-      error
+      completed
+      { kind = Masc.Tool_bridge.Inline_budget_exceeded
+      ; message = "inline tool output exceeds descriptor budget (9 > 8 bytes)"
+      }
   with
   | Some
-      { failure_class = Tool_result.Runtime_failure
-      ; effect_disposition = Tool_result.Proven_post_effect
-      ; diagnostic
+      { effect_disposition = Tool_result.Proven_post_effect
+      ; detail = Keeper_terminal_effect_detail.Output_over_inline_budget { message }
+      ; _
       } ->
-    check bool "internal diagnostic is retained" true
-      (String_util.contains_substring diagnostic "disk unavailable")
+    check string "budget failure message is retained"
+      "inline tool output exceeds descriptor budget (9 > 8 bytes)" message
   | Some _ | None ->
-    fail "completed terminal effect did not become proven post-effect failure"
+    fail "an over-budget completed output was not recorded as an inline budget failure"
 
 let payload fields = Some (`Assoc fields)
 

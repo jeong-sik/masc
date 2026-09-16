@@ -23,6 +23,23 @@ let model_dir () =
   Option.map
     (fun home -> Filename.concat (Filename.concat home ".cache") "whisper")
     (Sys.getenv_opt "HOME")
+(* Where Apple Container reads a user's settings: $XDG_CONFIG_HOME/container,
+   else ~/.config/container (apple/container PathUtils.BaseConfigPath.home,
+   1.3.1 and 1.4.1). Absent both, building without Rosetta has nowhere to be
+   recorded, and only installing Rosetta is offered. *)
+let container_user_config () =
+  let base = match Sys.getenv_opt "XDG_CONFIG_HOME" with
+    | Some xdg when not (String.equal xdg "") -> Some xdg
+    | Some _ | None -> Option.map (fun home -> Filename.concat home ".config") (Sys.getenv_opt "HOME") in
+  Option.map (fun base -> Filename.concat (Filename.concat base "container") "config.toml") base
+(* A service that is absent or stopped keeps its installers and start action,
+   whatever Rosetta says; see [Sandbox_readiness.apple_container_needs_rosetta]. *)
+let apple_builder host dependency =
+  match host, dependency with
+  | Sandbox.Macos {architecture=Arm64; major}, Prerequisites.Sandbox Apple_container
+    when major >= 26 && Sandbox.apple_container_needs_rosetta ~run:Sandbox.system_runner ->
+    Prerequisites.Needs_missing_rosetta {user_config=container_user_config ()}
+  | _ -> Prerequisites.Builder_unchecked
 let rec wait pid =
   match Unix.waitpid [] pid with
   | _, Unix.WEXITED 0 -> Ok ()
@@ -57,13 +74,16 @@ let actions host dependency =
     In_channel.with_open_text "/etc/os-release" In_channel.input_all
     |> Prerequisites.distribution_of_os_release
     with Sys_error _ -> Prerequisites.Other in
+  let apple_builder = apple_builder host dependency in
   let standard =
-    Prerequisites.catalog ?model_dir:(model_dir ()) ~host ~distribution dependency
+    Prerequisites.catalog ?model_dir:(model_dir ()) ~apple_builder ~host ~distribution dependency
     |> List.map (fun action -> Standard action)
   in
   match host, dependency with
   | Sandbox.Macos {architecture=Arm64; major}, Prerequisites.Sandbox Apple_container when major >= 26 ->
-    Verified_apple_install :: standard
+    (match apple_builder with
+     | Prerequisites.Needs_missing_rosetta _ -> standard
+     | Prerequisites.Builder_unchecked -> Verified_apple_install :: standard)
   | Sandbox.Macos _, Prerequisites.Sandbox Docker ->
     Verified_docker_install :: Verified_docker_launch :: standard
   | _ -> standard

@@ -556,11 +556,6 @@ let run
           Keeper_turn_driver.run_named
             ~runtime_id
             ~keeper_name:(Work.keeper_name work)
-            ~carried_front_seed:(fun ~runtime_id ->
-              Keeper_carried_front.read_seed
-                ~config
-                ~keeper_name:(Work.keeper_name work)
-                ~runtime_id)
             ~base_path:config.base_path
             ~session_id:("recovery-" ^ Work.owner_claim_id owner)
             ~system_prompt:

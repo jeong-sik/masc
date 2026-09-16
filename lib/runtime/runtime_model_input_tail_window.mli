@@ -287,15 +287,19 @@ val project_target
     no suffix fits, the newest atom alone is kept and [fit] says by how much
     and why the request passes the target. Never raises. *)
 
-val project_newest_atom
+val project_within_bytes
   :  measure_message_bytes:(Agent_core.Types.message -> int)
+  -> target_bytes:int
+  -> reserved_bytes:int
   -> Agent_core.Types.message list
   -> projection * int
-(** The smallest transmission that still carries the turn: pinned messages,
-    the newest atom, and the preamble when the cut lands on a non-[User]
-    head. The second component is that view's measured bytes, as
-    [target_projection.transmitted_bytes] counts them. For a runtime whose
-    token density has not been observed yet. *)
+(** The longest suffix whose measured bytes, with the pinned messages, the
+    preamble when one is prepended and [reserved_bytes], fit [target_bytes];
+    the cut is exact, at any atom. When no suffix fits, the newest atom alone
+    is kept. The second component is the view's measured bytes, as
+    [target_projection.transmitted_bytes] counts them. For a request that
+    has no front yet and a declared request-body cap (RFC
+    keeper-context-window-in-tokens §10.4). Never raises. *)
 
 val project_from_atom
   :  measure_message_bytes:(Agent_core.Types.message -> int)

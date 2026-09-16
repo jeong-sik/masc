@@ -265,7 +265,7 @@ val carried_range_eviction_sequence :
   last_request:(unit -> Keeper_model_input_ledger.request option) ->
   marks:Runtime_schema.context_marks option ->
   evict:(Keeper_carried_range.step -> unit) ->
-  halve:(first_atom:int -> retry:int -> unit) ->
+  halve:(first_atom:int -> atom_count:int -> retry:int -> unit) ->
   on_retry:(retry:int -> eviction_retry -> unit) ->
   attempt:(unit -> ('ok, Agent_core.Error.t) result) ->
   unit ->
@@ -321,6 +321,9 @@ type composed =
   ; over_request_cap : bool
         (** The reservation plus [transmitted_bytes] passes the declared
             request-body cap: the wire refuses this request. *)
+  ; outlived_seed : Keeper_carried_front.seed option
+        (** A front the history shrank under, dropped by
+            {!Keeper_carried_front.for_history}; the request started over. *)
   }
 (** One request as {!For_testing.compose_carried_model_input} composes it
     (RFC keeper-context-window-in-tokens §10.4): RFC-0363 demotion over the

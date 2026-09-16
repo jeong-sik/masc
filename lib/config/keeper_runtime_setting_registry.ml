@@ -517,6 +517,19 @@ let all =
       ~category:"transport"
       "Backoff between keeper gRPC reconnect attempts"
   ; setting
+      ~range:(int_range ~min:1 ~max:256 ())
+      ~env_name:"MASC_KEEPER_ADMISSION_MAX_EVENTS"
+      ~exposure:Env_only
+      ~value_kind:Integer
+      ~default:"32"
+      ~reload_class:Next_turn
+      ~consumers:
+        [ "Env_config_keeper.KeeperAdmissionBounds"
+        ; "Keeper_heartbeat_stimulus_intake ready_batch"
+        ]
+      ~category:"turn"
+      "Maximum durable queue selections admitted into one turn; the rest stay pending for a later turn (#29365)"
+  ; setting
       ~env_name:"MASC_SEARXNG_URL"
       ~exposure:(Toml_and_env "web_search.searxng_url")
       ~value_kind:String

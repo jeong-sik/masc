@@ -1,0 +1,111 @@
+=== (3) 큐 길이 상한 수정 전/후 실측 — 명령과 출력 전문 ===
+
+### BEFORE — origin/main:lib/keeper/keeper_heartbeat_stimulus_intake.ml ready_batch (상한 없음, origin/main=7dcc9f72)
+  let ready_batch selections =
+    let first_connector_conversation =
+        List.find_map
+          (fun (selection : Keeper_event_queue_state.pending_selection) ->
+             if stimulus_ready_for_intake ~base_path selection.source
+             then
+               Keeper_event_queue.connector_attention_channel
+                 selection.source.payload
+             else None)
+          selections
+      in
+      let hitl_selected = ref false in
+      List.filter
+        (fun (selection : Keeper_event_queue_state.pending_selection) ->
+           stimulus_ready_for_intake ~base_path selection.source
+           &&
+           match selection.source.payload with
+           | Keeper_event_queue.Hitl_resolved _ ->
+             (* One tool bundle carries one exact cycle grant. Admitting two
+                HITL resolutions would replay only the first while a completed
+                turn ACKed both durable sources. Leave later resolutions queued
+                for their own exact replay turn. *)
+             if !hitl_selected
+             then false
+             else (
+               hitl_selected := true;
+               true)
+           | _ ->
+             (match
+                Keeper_event_queue.connector_attention_channel
+                  selection.source.payload,
+                first_connector_conversation
+              with
+              | None, _ -> true
+              | Some _, None -> false
+              | Some channel, Some first_channel ->
+                Keeper_continuation_channel.same_conversation
+                  channel
+                  first_channel))
+        selections
+  in
+
+### AFTER — HEAD:lib/keeper/keeper_heartbeat_stimulus_intake.ml ready_batch (take max_events, HEAD=f9cc9a38)
+  let ready_batch selections =
+    let first_connector_conversation =
+        List.find_map
+          (fun (selection : Keeper_event_queue_state.pending_selection) ->
+             if stimulus_ready_for_intake ~base_path selection.source
+             then
+               Keeper_event_queue.connector_attention_channel
+                 selection.source.payload
+             else None)
+          selections
+      in
+      let hitl_selected = ref false in
+      let admitted =
+        List.filter
+          (fun (selection : Keeper_event_queue_state.pending_selection) ->
+             stimulus_ready_for_intake ~base_path selection.source
+             &&
+             match selection.source.payload with
+             | Keeper_event_queue.Hitl_resolved _ ->
+               (* One tool bundle carries one exact cycle grant. Admitting two
+                  HITL resolutions would replay only the first while a completed
+                  turn ACKed both durable sources. Leave later resolutions queued
+                  for their own exact replay turn. *)
+               if !hitl_selected
+               then false
+               else (
+                 hitl_selected := true;
+                 true)
+             | _ ->
+               (match
+                  Keeper_event_queue.connector_attention_channel
+                    selection.source.payload,
+                  first_connector_conversation
+                with
+                | None, _ -> true
+                | Some _, None -> false
+                | Some channel, Some first_channel ->
+                  Keeper_continuation_channel.same_conversation
+                    channel
+                    first_channel))
+          selections
+      in
+      (* RFC-event-queue-admit-all-ready bounds the batch: a steady arrival
+         rate must not turn into an unbounded backlog. Selections past the
+         bound stay pending for a later turn instead of being dropped. *)
+      let max_events = Env_config_keeper.KeeperAdmissionBounds.max_events () in
+      let rec take n = function
+        | [] -> []
+        | _ when n <= 0 -> []
+        | x :: rest -> x :: take (n - 1) rest
+      in
+      take max_events admitted
+  in
+
+### 상한 값 실측 — env override + clamp (test_env_config_keeper_admission_bounds)
+Testing `env_config_keeper_admission_bounds'.
+This run has ID `A5S7SM4V'.
+
+  [OK]          defaults preserve documented literals          0   max_events...
+  [OK]          env override wins                              0   max_events...
+  [OK]          clamps                                         0   max_events...
+  [OK]          clamps                                         1   max_events...
+
+Full test results in `/masc-work/lane-smith/masc-repro/_build/_tests/env_config_keeper_admission_bounds'.
+Test Successful in 0.002s. 4 tests run.

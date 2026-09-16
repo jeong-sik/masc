@@ -516,6 +516,29 @@ let test_assignment_walk_order_refuses_a_missing_assignment () =
     | Error (Driver.Catalog_unavailable _) -> Alcotest.fail "missing, not unavailable"
     | Ok _ -> Alcotest.fail "an id that names nothing is refused, not walked")
 
+(* A route is a routing label; the binding a turn opens is the lane's entry
+   candidate. Callers that need a materialized runtime resolve it here rather
+   than handing the label to [get_runtime_by_id], which answers [None] for a
+   lane name. *)
+let test_entry_runtime_id_resolves_a_route_to_the_binding_it_opens () =
+  with_runtime_config runtime_toml_with_lane (fun () ->
+    Alcotest.(check (option string))
+      "a lane name resolves to its first candidate"
+      (Some "primary.test_model")
+      (Runtime.entry_runtime_id_of_route "resilient");
+    Alcotest.(check (option string))
+      "a bare runtime id resolves to itself"
+      (Some "primary.test_model")
+      (Runtime.entry_runtime_id_of_route "primary.test_model");
+    Alcotest.(check (option string))
+      "a name that is neither resolves to nothing"
+      None
+      (Runtime.entry_runtime_id_of_route "no-such-route");
+    Alcotest.(check bool)
+      "the lane name itself names no binding, which is why this exists"
+      true
+      (Option.is_none (Runtime.get_runtime_by_id "resilient")))
+
 let test_resolve_assignment_prefers_lane_over_runtime () =
   with_runtime_config runtime_toml_lane_shadows_runtime (fun () ->
     match Runtime.resolve_assignment "primary.test_model" with
@@ -4029,6 +4052,10 @@ let () =
             "assignment_walk_order refuses a missing assignment"
             `Quick
             test_assignment_walk_order_refuses_a_missing_assignment;
+          Alcotest.test_case
+            "entry_runtime_id_of_route resolves a route to the binding it opens"
+            `Quick
+            test_entry_runtime_id_resolves_a_route_to_the_binding_it_opens;
           Alcotest.test_case
             "a bare runtime assignment gets a lane with somewhere to go"
             `Quick

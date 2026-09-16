@@ -27,7 +27,11 @@ implementation_prs: []
 
 이 RFC 는 **레인에 이름을 준다.** 배정값이 레인 이름을 받게 하고, 레인이 런타임 id 를 흉내 내야 하는 규칙을 없앤다.
 
-새 상태도, 새 Gate 도, 마이그레이션 코드도 만들지 않는다. 바꾸는 것은 검증이 판정하는 이름공간 하나다.
+여는 순간 딸려 나오는 것이 하나 있다. 지금은 배정값 하나가 **경로와 구체적인 바인딩 id 두 일을 겸하고 있다.**
+레인 키가 런타임 id 라서 겸직이 됐을 뿐이다. 이름을 풀면 겸직이 깨지므로, 구체적인 바인딩이 필요한 자리는
+경로를 **그 경로가 처음 여는 바인딩**으로 풀어서 받아야 한다. §3.5.
+
+새 상태도, 새 Gate 도, 마이그레이션 코드도 만들지 않는다.
 
 ## 1. 지금 무슨 일이 일어나는가
 
@@ -149,6 +153,30 @@ a merely declared lane is dormant until a routed root names it.
   다른 이름을 쓰고, "INACTIVE / do not copy" 주석을 지운다.
 - 배정 설명의 "Assignment targets must be runtime ids; a lane id here is rejected at load" 를 새 계약으로 고친다.
 
+### 3.5 경로와 바인딩을 가른다
+
+배정값은 **경로**다. 레인 이름일 수도 있고 런타임 id 일 수도 있다. 턴이 실제로 여는 바인딩은
+그 경로가 풀리는 레인의 **첫 후보**다. 이 규칙은 이미 코드에 있다.
+
+> A lane's entry resolution belongs to its first candidate, because its ID is a routing label and
+> can shadow a runtime binding.
+> — `lib/keeper/keeper_unified_turn_pre_dispatch.ml` `build_runtime_execution`
+
+그 규칙을 `Runtime.entry_runtime_id_of_route` 로 한 자리에 두고, **구체적인 바인딩이 필요한 곳**이 쓴다.
+`get_runtime_by_id` 는 레인을 모르기 때문에 레인 이름에 `None` 을 돌려준다.
+
+| 자리 | 지금 | 왜 |
+|---|---|---|
+| `keeper_effective_tool_surface.ml` `resolve_runtime` | 경로 → 첫 후보 → 바인딩 | posture 는 바인딩의 것이다. 레인 이름으로는 `runtime_not_concrete` 로 떨어졌다 |
+| `keeper_unified_turn.ml` 브리핑 바이트 상한 | 경로 → 첫 후보 → 선언된 상한 | 상한을 선언하는 건 바인딩이다 |
+
+경로가 그대로 내려가야 하는 길은 건드리지 않는다. 드라이버는 `run_named ~runtime_id` 로 **경로**를 받아
+`resolve_assignment` 로 사다리를 편다(`keeper_turn_driver.ml:1447`), 그리고 `build_runtime_execution` 이
+만드는 실행 레코드의 `runtime_id` 도 경로다. 표시·라벨 소비자도 경로를 그대로 보여준다 — 운영자가 적은 것이
+그것이기 때문이다.
+
+오늘 설정은 레인 이름 = 첫 후보라 두 값이 같다. 그래서 이 절도 넓히기다.
+
 ### 3.4 테스트 `test/test_runtime_per_keeper_routing.ml`
 
 - 배정이 런타임 id 가 아닌 이름의 레인을 가리키면 그 후보를 순서대로 건넨다.
@@ -166,6 +194,9 @@ a merely declared lane is dormant until a routed root names it.
 ## 5. 검증
 
 - CI 경계에서 확인한다. PR CI 는 편집한 `test/test_*.ml` 을 실제로 돌린다.
+- `test/test_keeper_turn_driver_failover.ml` 에 `entry_runtime_id_of_route` 를 고정한다: 레인 이름 → 첫 후보,
+  런타임 id → 자기 자신, 없는 이름 → `None`, 그리고 `get_runtime_by_id "resilient"` 가 `None` 이라는 것
+  (이 함수가 존재하는 이유).
 - 넓히기임을 증명하는 것은 §3.4 의 마지막 항목이다 — 오늘의 모양이 계속 통과해야 한다.
 - 배포 뒤 라이브 확인: `/api/v1/runtime/resolved` 에서 각 Keeper 가 받는 후보 목록이
   바꾸기 전과 같은지 본다(라이브 설정을 안 고쳤으니 같아야 한다).

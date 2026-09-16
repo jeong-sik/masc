@@ -1845,6 +1845,23 @@ let resolve_assignment (assigned_id : string) =
         | None -> `Missing))
 ;;
 
+(* A keeper assignment and a route id are routing labels: each names a declared
+   lane or a runtime. The binding a turn actually opens is the lane's first
+   candidate — the rule [Keeper_unified_turn_pre_dispatch.build_runtime_execution]
+   already applies to pick its entry runtime. A caller that needs a concrete
+   binding (a provider posture, a declared byte ceiling, a catalog row) resolves
+   the label here; [get_runtime_by_id] knows nothing about lanes and answers
+   [None] for a lane name. *)
+let entry_runtime_id_of_route (route : string) : string option =
+  match resolve_assignment route with
+  | `Lane lane ->
+    (match Runtime_lane.ordered_candidates lane with
+     | entry :: _ -> Some entry
+     (* A lane with no candidates is refused while loading the configuration. *)
+     | [] -> None)
+  | `Unavailable _ | `Missing -> None
+;;
+
 let resolve_max_context_of_runtime_id (id : string)
   : (int * max_context_source) option
   =

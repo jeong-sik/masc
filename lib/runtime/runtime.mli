@@ -457,10 +457,12 @@ val runtimes_and_media_failover : unit -> t list * string list
     separate reads. *)
 
 val runtime_id_for_keeper : string -> string option
-(** [runtime_id_for_keeper keeper_name] is the runtime id assigned to
-    [keeper_name] in [\[runtime.assignments\]] (runtime.toml SSOT), or [None]
-    when no explicit assignment exists (caller falls back to
-    {!get_default_runtime_id}). The id is opaque (only the AGENT_CORE adapter parses
+(** [runtime_id_for_keeper keeper_name] is the route [keeper_name] is assigned
+    in [\[runtime.assignments\]] (runtime.toml SSOT) — a declared lane name or a
+    runtime id — or [None] when no explicit assignment exists (caller falls back
+    to {!get_default_runtime_id}). It is a routing label, not necessarily a
+    materialized binding: pass it to {!resolve_assignment} to walk the lane, or
+    to {!entry_runtime_id_of_route} for the binding the turn opens first. The id is opaque (only the AGENT_CORE adapter parses
     it). Keeper-to-runtime assignment is not sourced from keeper TOML. *)
 
 val keeper_assignments : unit -> (string * string) list
@@ -568,6 +570,13 @@ val resolve_assignment :
     [Unavailable] preserves the configured identity when its capability catalog
     entry is absent. [Missing] means the id was not configured. Neither selects
     the default in place of the requested runtime. *)
+
+val entry_runtime_id_of_route : string -> string option
+(** The concrete binding id a route opens first: the declared lane's entry
+    candidate, or the runtime itself when the route names one. [None] when the
+    route names neither. Callers needing a materialized runtime resolve the
+    route here first — {!get_runtime_by_id} knows nothing about lanes and
+    answers [None] for a lane name. *)
 
 val get_runtime_by_id : string -> t option
 (** [get_runtime_by_id id] is the materialized runtime whose binding-key id

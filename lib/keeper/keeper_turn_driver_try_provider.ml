@@ -868,9 +868,9 @@ let bounded_model_input_projection
     in
     let composed = view.composed in
     let history_atom_count = composed.history_atom_count in
-    let transmitted =
+    let windowed =
       match view.wire with
-      | Ok transmitted -> Some transmitted
+      | Ok transmitted -> transmitted
       | Error error ->
         (* The backend runs this same projection over this same list and
            refuses the request with its typed error, which the turn's failure
@@ -888,9 +888,8 @@ let bounded_model_input_projection
             (Agent_core.Llm_provider.Reasoning_history_projection
              .error_to_string
                error));
-        None
+        view.carried
     in
-    let windowed = Option.value transmitted ~default:view.carried in
     if not !front_reported
     then (
       front_reported := true;
@@ -929,8 +928,8 @@ let bounded_model_input_projection
          seed.atom_count
          history_atom_count
      | Some _ | None -> ());
-    (match transmitted with
-     | Some _ ->
+    (match view.wire with
+     | Ok _ ->
        Option.iter
          (fun observe ->
             observe
@@ -939,7 +938,7 @@ let bounded_model_input_projection
                  ~history_atom_count
                  composed.projection))
          ctx.on_model_input_window_observation
-     | None -> ());
+     | Error _ -> ());
     (* What this request carried, for the ledger the after-turn hook writes
        once the provider reports its count, and for the front a refusal
        moves: the carried atom range and the bytes of the per-request tail

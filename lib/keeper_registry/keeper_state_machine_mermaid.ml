@@ -30,7 +30,7 @@ let phase_to_mermaid ~(current : phase) : string =
   p "    Offline --> Running : Fiber_started\n";
   p "    Offline --> Draining : stop requested\n";
   p "    Offline --> Stopped : stop while not started\n";
-  p "    Running --> Failing : hb/turn/reconcile fail\n";
+  p "    Running --> Failing : hb/turn fail or credential archived\n";
   p "    Running --> Draining : stop requested\n";
   p "    Running --> Paused : operator pause\n";
   p "    Running --> Stopped : stop requested\n";

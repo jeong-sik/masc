@@ -100,7 +100,14 @@ let rows_of entries =
 let rows = rows_of journal
 let journal_file = "kmsg-events.jsonl"
 
-let served_page ?(start = L.From_first_row) ~since_seq ~limit rows =
+(* The only way to build a cursor: the wire spelling the client sends. *)
+let at_offset offset =
+  match L.page_start_of_wire (Some offset) with
+  | Some start -> start
+  | None -> failf "offset %d is not a cursor" offset
+;;
+
+let served_page ?(start = L.first_row) ~since_seq ~limit rows =
   match L.page_of_rows ~path:journal_file ~since_seq ~start ~limit rows with
   | Ok page -> page
   | Error failure -> fail ("page refused: " ^ L.page_failure_to_string failure)
@@ -146,6 +153,103 @@ let bool_field name body =
   | _ -> fail (name ^ " is not a bool")
 ;;
 
+(* A page asked for from the first row with a held seq finds where to start
+   by bisecting the rows rather than decoding each one it skips. It must
+   serve exactly what a row-by-row skip serves, for every held seq and
+   limit, blank rows included: rows past the seq up to the limit, whether
+   more follow, and the offset of the last row served or, on an empty page,
+   of the last row skipped. *)
+let test_a_held_seq_without_an_offset_serves_what_a_row_by_row_skip_serves () =
+  let pieces =
+    List.mapi
+      (fun index entry ->
+         let blanks = if index mod 3 = 1 then "\n   \n" else "" in
+         blanks, L.journaled_event_to_string entry ^ "\n")
+      journal
+  in
+  let rows = String.concat "" (List.map (fun (blanks, row) -> blanks ^ row) pieces) in
+  let row_ends =
+    List.fold_left
+      (fun (offset, ends) (blanks, row) ->
+         let row_end = offset + String.length blanks + String.length row in
+         row_end, row_end :: ends)
+      (0, [])
+      pieces
+    |> snd
+    |> List.rev
+    |> Array.of_list
+  in
+  let journal_length = List.length journal in
+  List.iter
+    (fun held ->
+       List.iter
+         (fun limit ->
+            let page = served_page ~since_seq:(L.After_seq held) ~limit rows in
+            let past = List.filter (fun seq -> seq > held) (List.init journal_length Fun.id) in
+            let served = List.filteri (fun index _ -> index < limit) past in
+            let expected_offset =
+              match List.rev served with
+              | last :: _ -> row_ends.(last)
+              | [] -> if held >= 0 then row_ends.(min held (journal_length - 1)) else 0
+            in
+            let label what = Printf.sprintf "held %d, limit %d: %s" held limit what in
+            check (list int) (label "seqs")
+              served
+              (List.map (fun (entry : L.journaled_event) -> entry.seq) page.L.events);
+            check bool (label "has more") (List.length past > limit) page.L.has_more;
+            check int (label "next offset") expected_offset page.L.next_offset)
+         (List.init (journal_length + 1) (fun index -> index + 1)))
+    (List.init (journal_length + 2) (fun index -> index - 1))
+;;
+
+(* A corrupt row fails only a page that reads it. A probe that lands on it
+   cannot say which side of the held seq it is on, so the page reads on row by
+   row from what the bisection had settled: a page whose last row, and the
+   row after it that decides [has_more], come before the corrupt row is
+   served, and a page that reaches it fails. *)
+let test_a_corrupt_row_fails_only_a_first_row_page_that_reads_it () =
+  let upto_four, past_four =
+    List.partition (fun (entry : L.journaled_event) -> entry.seq <= 4) journal
+  in
+  let rows = rows_of upto_four ^ "this complete row is not an envelope\n" ^ rows_of past_four in
+  List.iter
+    (fun held ->
+       let page = served_page ~since_seq:(L.After_seq held) ~limit:(3 - held) rows in
+       check (list int)
+         (Printf.sprintf "held %d: the rows up to seq 3" held)
+         (List.init (3 - held) (fun index -> held + 1 + index))
+         (List.map (fun (entry : L.journaled_event) -> entry.seq) page.L.events);
+       check bool (Printf.sprintf "held %d: seq 4 says more follow" held) true page.L.has_more)
+    [ 0; 1; 2 ];
+  match L.page_of_rows ~path:journal_file ~since_seq:(L.After_seq 3) ~start:L.first_row ~limit:1 rows with
+  | Error (L.Page_corrupt _) -> ()
+  | Error failure -> fail ("wrong refusal: " ^ L.page_failure_to_string failure)
+  | Ok _ -> fail "a page that reads the corrupt row was served"
+;;
+
+(* The skip is bisected, so a page near the end of a long journal decodes a
+   handful of rows, not the journal. Decoding every row allocates many times
+   the journal's length; the budget is its length once. *)
+let test_a_held_seq_near_the_end_of_a_long_journal_decodes_a_handful_of_rows () =
+  let length = 20_000 in
+  let rows =
+    rows_of
+      (List.init length (fun seq ->
+         { L.seq; ts = 1_762_300_000.0 +. float_of_int seq; event = E.Text_delta "x" }))
+  in
+  let held = length - 5 in
+  let before = Gc.allocated_bytes () in
+  let page = served_page ~since_seq:(L.After_seq held) ~limit:L.page_max_limit rows in
+  let allocated = Gc.allocated_bytes () -. before in
+  check (list int) "the rows past the held seq" [ held + 1; held + 2; held + 3; held + 4 ]
+    (List.map (fun (entry : L.journaled_event) -> entry.seq) page.L.events);
+  let budget = float_of_int (String.length rows) in
+  if allocated > budget
+  then
+    failf "a page past seq %d allocated %.0f bytes, over the %.0f byte budget" held
+      allocated budget
+;;
+
 let test_chat_events_page_walks_by_seq () =
   let first = page ~since_seq:L.Whole_turn ~limit:3 () in
   check string
@@ -187,7 +291,7 @@ let test_chat_events_page_walks_by_seq () =
           ~operation_id:"kmsg-events"
           ~since_seq:L.Whole_turn
           ~redact_json:Fun.id
-          (L.empty_page L.From_first_row))
+          (L.empty_page L.first_row))
      = `Null);
   check int
     "an empty page from the first row hands back offset 0"
@@ -198,7 +302,7 @@ let test_chat_events_page_walks_by_seq () =
           ~operation_id:"kmsg-events"
           ~since_seq:L.Whole_turn
           ~redact_json:Fun.id
-          (L.empty_page L.From_first_row)))
+          (L.empty_page L.first_row)))
 ;;
 
 (* The pages a client reads by feeding both cursors back are the journal
@@ -216,12 +320,12 @@ let test_chat_events_page_walks_by_offset () =
         | `Null -> L.Whole_turn
         | _ -> fail "next_since_seq is neither an int nor null"
       in
-      let start = L.From_offset (int_field "next_since_offset" body) in
+      let start = at_offset (int_field "next_since_offset" body) in
       if bool_field "has_more" body
       then next ~since_seq:next_since_seq ~start acc
       else List.rev acc
     in
-    next ~since_seq ~start:L.From_first_row []
+    next ~since_seq ~start:L.first_row []
   in
   check (list int)
     "a walk from the whole journal serves every row once"
@@ -244,8 +348,8 @@ let test_chat_events_page_walks_by_offset () =
   check bool
     "the wire spells the first row as an absent offset"
     true
-    (L.page_start_of_wire None = Some L.From_first_row
-     && L.page_start_of_wire (Some 0) = Some (L.From_offset 0)
+    (L.page_start_of_wire None = Some L.first_row
+     && L.page_start_to_wire (at_offset 0) = Some 0
      && Option.is_none (L.page_start_of_wire (Some (-1))))
 ;;
 
@@ -272,46 +376,193 @@ let test_chat_events_page_refuses_what_it_cannot_place () =
     (match
        refused
          ~since_seq:(L.After_seq 5)
-         ~start:(L.From_offset (String.length (rows_of (List.filteri (fun index _ -> index < 6) journal))))
+         ~start:(at_offset (String.length (rows_of (List.filteri (fun index _ -> index < 6) journal))))
          ~limit:3
          with_corrupt_tail
      with
      | L.Page_corrupt _ -> true
-     | L.Page_offset_past_rows _ | L.Page_offset_inside_row _ | L.Page_cursor_mismatch _ ->
+     | L.Page_offset_past_rows _ | L.Page_offset_inside_row _ | L.Page_cursor_mismatch _
+     | L.Page_limit_not_positive _ ->
        false);
   check bool
     "an offset inside a row is refused"
     true
-    (match refused ~since_seq:L.Whole_turn ~start:(L.From_offset 1) ~limit:3 rows with
+    (match refused ~since_seq:L.Whole_turn ~start:(at_offset 1) ~limit:3 rows with
      | L.Page_offset_inside_row 1 -> true
      | L.Page_offset_inside_row _ | L.Page_offset_past_rows _ | L.Page_cursor_mismatch _
-     | L.Page_corrupt _ -> false);
+     | L.Page_limit_not_positive _ | L.Page_corrupt _ -> false);
   check bool
     "an offset past the rows is refused"
     true
     (match
        refused
          ~since_seq:L.Whole_turn
-         ~start:(L.From_offset (String.length rows + 1))
+         ~start:(at_offset (String.length rows + 1))
          ~limit:3
          rows
      with
      | L.Page_offset_past_rows { offset; rows_end } ->
        offset = String.length rows + 1 && rows_end = String.length rows
-     | L.Page_offset_inside_row _ | L.Page_cursor_mismatch _ | L.Page_corrupt _ -> false);
+     | L.Page_offset_inside_row _ | L.Page_cursor_mismatch _ | L.Page_limit_not_positive _
+     | L.Page_corrupt _ -> false);
   let first = page ~since_seq:L.Whole_turn ~limit:3 () in
+  let mismatch ~since_seq ~start =
+    match refused ~since_seq ~start ~limit:3 rows with
+    | L.Page_cursor_mismatch mismatch -> mismatch
+    | L.Page_offset_past_rows _ | L.Page_offset_inside_row _ | L.Page_limit_not_positive _
+    | L.Page_corrupt _ ->
+      fail "a cursor pair was not refused as a mismatch"
+  in
+  (* The offset is behind its seq: the rows between them are ones the client
+     already holds, so the page would serve them twice. *)
   check bool
     "an offset paired with a seq from a later page is refused"
     true
     (match
-       refused
+       mismatch
          ~since_seq:(L.After_seq 5)
-         ~start:(L.From_offset (int_field "next_since_offset" first))
-         ~limit:3
-         rows
+         ~start:(at_offset (int_field "next_since_offset" first))
      with
-     | L.Page_cursor_mismatch { since_seq; row_seq; _ } -> since_seq = 5 && row_seq = 3
-     | L.Page_offset_past_rows _ | L.Page_offset_inside_row _ | L.Page_corrupt _ -> false)
+     | L.Row_at_offset_not_past_held_seq { since_seq; row_seq; _ } ->
+       since_seq = 5 && row_seq = 3
+     | L.Row_before_offset_past_held_seq _ | L.Offset_without_held_seq _ -> false);
+  (* The offset is ahead of its seq: rows 3, 4 and 5 lie between the two and
+     nothing would ever serve them. Refused, not served from seq 6. *)
+  check bool
+    "an offset ahead of its seq is refused instead of skipping the rows between"
+    true
+    (match
+       mismatch
+         ~since_seq:(L.After_seq 2)
+         ~start:
+           (at_offset
+              (String.length (rows_of (List.filteri (fun index _ -> index < 6) journal))))
+     with
+     | L.Row_before_offset_past_held_seq { offset; since_seq; row_seq } ->
+       offset
+       = String.length (rows_of (List.filteri (fun index _ -> index < 6) journal))
+       && since_seq = 2
+       && row_seq = 5
+     | L.Row_at_offset_not_past_held_seq _ | L.Offset_without_held_seq _ -> false);
+  (* The whole journal starts at the first row; an offset beside it places
+     nothing, and would silently skip whatever lies before it. *)
+  check bool
+    "an offset with no held seq is refused"
+    true
+    (match
+       mismatch
+         ~since_seq:L.Whole_turn
+         ~start:(at_offset (int_field "next_since_offset" first))
+     with
+     | L.Offset_without_held_seq offset ->
+       offset = int_field "next_since_offset" first
+     | L.Row_before_offset_past_held_seq _ | L.Row_at_offset_not_past_held_seq _ -> false);
+  check bool
+    "a page of no rows is refused rather than never advancing"
+    true
+    (match refused ~since_seq:L.Whole_turn ~start:L.first_row ~limit:0 rows with
+     | L.Page_limit_not_positive 0 -> true
+     | L.Page_limit_not_positive _ | L.Page_offset_past_rows _
+     | L.Page_offset_inside_row _ | L.Page_cursor_mismatch _ | L.Page_corrupt _ -> false)
+;;
+
+(* An empty page still hands back a pair: the offset moves past every row it
+   skipped, so feeding both cursors back reads what the journal grew. Before,
+   a page that skipped the whole journal handed back offset 0 beside the held
+   seq, and the same reader refused that pair as a mismatch. *)
+let test_an_empty_page_hands_back_a_pair_it_accepts () =
+  let held = List.length journal - 1 in
+  let empty = page ~since_seq:(L.After_seq held) ~limit:3 () in
+  check (list int) "the page is empty" [] (seqs empty);
+  check int
+    "the offset moved past every row it skipped"
+    (String.length rows)
+    (int_field "next_since_offset" empty);
+  let appended =
+    { L.seq = held + 1
+    ; ts = 1_762_400_000.0
+    ; event = E.Text_delta "after the empty page"
+    }
+  in
+  let grown = rows ^ L.journaled_event_to_string appended ^ "\n" in
+  let next =
+    Api.chat_events_page
+      ~operation_id:"kmsg-events"
+      ~since_seq:(L.After_seq held)
+      ~redact_json:Fun.id
+      (served_page
+         ~start:(at_offset (int_field "next_since_offset" empty))
+         ~since_seq:(L.After_seq held)
+         ~limit:3
+         grown)
+  in
+  check (list int) "the pair reads the row appended after it" [ held + 1 ] (seqs next)
+;;
+
+(* The route's own path: the query is read once and the whole of it reaches
+   the page, so a cursor cannot be parsed and then left out. *)
+let test_the_route_reads_both_cursors_from_the_query () =
+  let request query =
+    Httpun.Request.create `GET ("/api/v1/keepers/alpha/chat/events?" ^ query)
+  in
+  let served query rows =
+    match
+      Api.For_testing.events_page_of_request ~path:journal_file (request query) rows
+    with
+    | Ok body -> body
+    | Error (_status, code) -> failf "the route refused the query: %s" code
+  in
+  let after_two =
+    String.length (rows_of (List.filteri (fun index _ -> index < 3) journal))
+  in
+  check (list int)
+    "a query with both cursors serves the rows after them"
+    [ 3; 4 ]
+    (seqs
+       (served
+          (Printf.sprintf
+             "operation_id=kmsg-events&since_seq=2&since_offset=%d&limit=2"
+             after_two)
+          rows));
+  check (list int)
+    "the same seq without the offset serves the same rows"
+    [ 3; 4 ]
+    (seqs (served "operation_id=kmsg-events&since_seq=2&limit=2" rows));
+  let refused query rows =
+    match
+      Api.For_testing.events_page_of_request ~path:journal_file (request query) rows
+    with
+    | Ok _ -> fail "a page was served for a query that cannot be placed"
+    | Error (status, code) -> status, code
+  in
+  check bool
+    "a mismatched pair is a 400 naming the cursor"
+    true
+    (refused
+       (Printf.sprintf
+          "operation_id=kmsg-events&since_seq=5&since_offset=%d&limit=2"
+          after_two)
+       rows
+     = (`Bad_request, "cursor_mismatch"));
+  check bool
+    "an offset inside a row is a 400 naming the cursor"
+    true
+    (refused "operation_id=kmsg-events&since_seq=0&since_offset=1&limit=2" rows
+     = (`Bad_request, "since_offset_inside_row"));
+  check bool
+    "an offset past the rows is a 400 naming the cursor"
+    true
+    (refused
+       (Printf.sprintf
+          "operation_id=kmsg-events&since_seq=0&since_offset=%d&limit=2"
+          (String.length rows + 1))
+       rows
+     = (`Bad_request, "since_offset_past_rows"));
+  check bool
+    "a held offset against a journal with no rows yet is refused, not echoed"
+    true
+    (refused "operation_id=kmsg-events&since_seq=0&since_offset=40&limit=2" ""
+     = (`Bad_request, "since_offset_past_rows"))
 ;;
 
 (* The response is the journal as written: each element is the stage-1
@@ -568,9 +819,29 @@ let () =
       , [ test_case "page walks by seq" `Quick test_chat_events_page_walks_by_seq
         ; test_case "page walks by offset" `Quick test_chat_events_page_walks_by_offset
         ; test_case
+            "a held seq without an offset serves what a row-by-row skip serves"
+            `Quick
+            test_a_held_seq_without_an_offset_serves_what_a_row_by_row_skip_serves
+        ; test_case
+            "a held seq near the end of a long journal decodes a handful of rows"
+            `Quick
+            test_a_held_seq_near_the_end_of_a_long_journal_decodes_a_handful_of_rows
+        ; test_case
+            "a corrupt row fails only a first-row page that reads it"
+            `Quick
+            test_a_corrupt_row_fails_only_a_first_row_page_that_reads_it
+        ; test_case
             "page refuses what it cannot place"
             `Quick
             test_chat_events_page_refuses_what_it_cannot_place
+        ; test_case
+            "an empty page hands back a pair it accepts"
+            `Quick
+            test_an_empty_page_hands_back_a_pair_it_accepts
+        ; test_case
+            "the route reads both cursors from the query"
+            `Quick
+            test_the_route_reads_both_cursors_from_the_query
         ; test_case
             "events are the journal lines"
             `Quick

@@ -3130,6 +3130,7 @@ let context_split_width cols =
 
 
 let context_composition_lines ~cols ~turn_back
+    ~(forecast : (Masc_tui_context_inspector.forecast, string) result)
     (selection : Masc_tui_context_inspector.selection) =
   let module Inspector = Masc_tui_context_inspector in
   (* The usable cells after the two-space indent every row carries. No floor
@@ -3194,7 +3195,7 @@ let context_composition_lines ~cols ~turn_back
   let wire_lines =
     match record.request_wire_observation with
     | Some observation ->
-        [ Printf.sprintf "  %s%s tok prepared request  ·  %s%s" Ansi.dim
+        [ Printf.sprintf "  %s%s tok in the body masc sent  ·  %s%s" Ansi.dim
             (Masc_tui_token_scale.format_estimate scale observation.body_bytes)
             (Keeper_chat.terminal_safe_text observation.runtime_profile)
             Ansi.reset
@@ -3324,23 +3325,26 @@ let context_composition_lines ~cols ~turn_back
               ( "wire shape"
               , Context_bars.sent_pointer_label
               , Printf.sprintf
-                  "%d older atoms stayed behind. A cut falls between atoms, so \
-                   a tool result and the call it answers either both travel \
-                   or neither does."
+                  "An atom is one user message, or one assistant message \
+                   with the tool results it caused. %d older atoms stayed \
+                   behind. A cut falls between atoms, so a tool result and \
+                   the call it answers either both travel or neither does."
                   (max 0 (total - transmitted)) )
           | Turn_record.Durable_shape ->
               ( "durable shape"
               , "in reach this turn"
               , Printf.sprintf
-                  "%d older atoms stayed behind. Measured on the durable \
-                   history masc holds, not on a body that went out: on a lane \
+                  "An atom is one user message, or one assistant message \
+                   with the tool results it caused. %d older atoms stayed \
+                   behind. Measured on the durable history masc holds, not on \
+                   a body that went out: on a lane \
                    whose client assembles the request, these atoms are what \
                    masc could hand over, and a resumed client session already \
                    holds the earlier ones. A cut falls between atoms, so a \
                    tool result and the call it answers stay together."
                   (max 0 (total - transmitted)) )
         in
-        [ Printf.sprintf "  %s%d of %d atoms%s  ·  %.1f%%  ·  %s%s%s" Ansi.bold
+        [ Printf.sprintf "  %s%d of %d kept atoms%s  ·  %.1f%%  ·  %s%s%s" Ansi.bold
             transmitted total Ansi.reset share Ansi.dim measured Ansi.reset
         ; "  "
           ^ Context_bars.reach_bar ~width:bar_width ~transmitted ~total
@@ -3516,7 +3520,7 @@ let context_composition_lines ~cols ~turn_back
                      The rows count content and the request counts the JSON \
                      around it, so the two are compared on one turn and not \
                      expected to match. Read the shares as proportions and the \
-                     prepared-request line as this turn's size."
+                     request band as this turn's size."
                     (Masc_tui_token_scale.format_estimate scale total)
                     (Masc_tui_token_scale.format_estimate scale observation.body_bytes))
            | Some _ ->
@@ -3595,7 +3599,7 @@ let context_composition_lines ~cols ~turn_back
     in
     let inputs =
       List.filter_map
-        (fun r ->
+        (fun (r : Inspector.recent_turn) ->
           match r.Inspector.input_tokens with
           | Some n when n > 0 -> Some n
           | _ -> None)
@@ -3628,29 +3632,39 @@ let context_composition_lines ~cols ~turn_back
     @ velocity_lines
     @ List.concat (List.mapi row selection.Inspector.recent)
   in
+  let next_request_lines =
+    Masc_tui_next_request_band.lines ~prose ~fact
+      ~safe:Keeper_chat.terminal_safe_text ~scale forecast
+  in
   (* Read top to bottom as the turn is built: what came in, what was sent,
      how far back it reached, and what the provider counted on the turns
      before it. The request stood above the components it is made of, so the
      screen opened on a total whose parts were three sections further down. *)
   [ identity; turn; trace; "" ]
   @ [ "  "
-      ^ Context_bars.band ~width ~title:"COMPOSITION"
-          ~caption:"where this turn's input came from, in estimated tokens"
+      ^ Context_bars.band ~width ~title:"WHAT WENT IN"
+          ~caption:"the pieces this request was built from, in estimated tokens"
     ]
   @ component_lines @ [ "" ]
   @ [ "  "
-      ^ Context_bars.band ~width ~title:"SERIALIZED REQUEST"
-          ~caption:"tokens the provider counted, then the estimate from the prepared body"
+      ^ Context_bars.band ~width ~title:"THIS REQUEST, AS SENT"
+          ~caption:"the provider's count of it, then the estimate from the body masc built"
     ]
   @ token_lines
   @ wire_lines
   @ cache_lines
   @ [ "" ]
   @ [ "  "
-      ^ Context_bars.band ~width ~title:"HISTORY REACH"
-          ~caption:"how far back this turn looked"
+      ^ Context_bars.band ~width ~title:"HOW FAR BACK"
+          ~caption:"how much of the kept conversation this request carried"
     ]
   @ history_lines
+  @ [ "" ]
+  @ [ "  "
+      ^ Context_bars.band ~width ~title:"NEXT REQUEST"
+          ~caption:"what the next Agent Core request would carry, computed now"
+    ]
+  @ next_request_lines
   @ [ "" ]
   @ recent_turns_lines @ [ "" ]
   @ prose
@@ -4312,7 +4326,9 @@ let context_inspector_content_lines ~cols state : context_pane_body =
             | Ok selection ->
                 Plain
                   ( context_composition_lines ~cols
-                      ~turn_back:state.context_inspector_turn_back selection
+                      ~turn_back:state.context_inspector_turn_back
+                      ~forecast:reading.Masc_tui_context_inspector.forecast
+                      selection
                   , None )
             | Error detail ->
                 Plain

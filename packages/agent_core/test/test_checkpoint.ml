@@ -373,6 +373,89 @@ let test_tool_image_survives_dispatch_and_checkpoint () =
     (image_data (request restored))
 ;;
 
+(* The v11 validator builds an element's scope string only for an element
+   that fails, so these pin the error text for a failure deep inside nested
+   lists: it must name the message, the block and the detail exactly as a
+   validator that built every scope up front did. *)
+let checkpoint_json_with_raw_messages messages =
+  match Checkpoint.to_json (make_checkpoint ()) with
+  | `Assoc fields ->
+    `Assoc (("messages", `List messages) :: List.remove_assoc "messages" fields)
+  | json ->
+    Alcotest.failf "checkpoint must serialize to an object, got %s" (Yojson.Safe.to_string json)
+;;
+
+let reasoning_message details =
+  `Assoc
+    [ "role", `String "assistant"
+    ; ( "content"
+      , `List [ `Assoc [ "type", `String "reasoning_details"; "details", `List details ] ] )
+    ]
+;;
+
+let detail index = `Assoc [ "type", `String "reasoning.text"; "text", `String (string_of_int index) ]
+
+let v11_detail json =
+  match Checkpoint.of_json json with
+  | Ok _ -> Alcotest.fail "the damaged checkpoint was accepted"
+  | Error (Error.Serialization (Error.JsonParseError { detail })) -> detail
+  | Error error -> Alcotest.failf "expected a JsonParseError, got %s" (Error.to_string error)
+;;
+
+let test_a_failure_deep_in_nested_lists_names_its_element () =
+  let valid = reasoning_message (List.init 2_000 detail) in
+  let duplicated =
+    `Assoc [ "type", `String "reasoning.text"; "text", `String "a"; "text", `String "b" ]
+  in
+  let damaged = reasoning_message [ detail 0; detail 1; duplicated ] in
+  (match Checkpoint.of_json (checkpoint_json_with_raw_messages [ valid ]) with
+   | Ok _ -> ()
+   | Error error -> Alcotest.failf "a valid checkpoint was refused: %s" (Error.to_string error));
+  Alcotest.(check string)
+    "a duplicated detail field names message, block and detail"
+    "Checkpoint v11 message[1] content[0].details[2] duplicates fields [text]"
+    (v11_detail (checkpoint_json_with_raw_messages [ valid; damaged ]));
+  let unknown_field =
+    `Assoc [ "role", `String "user"; "content", `List []; "extra", `Bool true ]
+  in
+  Alcotest.(check string)
+    "an unknown message field names the message"
+    "Checkpoint v11 message[2] schema mismatch (missing=[], unknown=[extra], duplicate=[])"
+    (v11_detail (checkpoint_json_with_raw_messages [ valid; valid; unknown_field ]))
+;;
+
+(* A tool result may hold tool results, to any depth. A validator that checked
+   a failing element again to name it did so at every level, so a bad leaf this
+   deep was checked 2^34 times and decoding never returned. One pass names the
+   whole path. *)
+let nested_tool_result_depth = 32
+
+let test_a_bad_leaf_under_nested_tool_results_fails_once_with_its_path () =
+  let tool_result content =
+    `Assoc
+      [ "type", `String "tool_result"
+      ; "tool_use_id", `String "call-1"
+      ; "content", `List [ content ]
+      ; "is_error", `Bool false
+      ]
+  in
+  let rec nest depth leaf = if depth = 0 then leaf else nest (depth - 1) (tool_result leaf) in
+  let bad_leaf = `Assoc [ "type", `String "text"; "text", `Int 1 ] in
+  let message =
+    `Assoc
+      [ "role", `String "tool"
+      ; "content", `List [ nest nested_tool_result_depth bad_leaf ]
+      ]
+  in
+  let path =
+    String.concat "" (List.init nested_tool_result_depth (fun _ -> ".content[0]"))
+  in
+  Alcotest.(check string)
+    "the error names every level down to the leaf"
+    (Printf.sprintf "Checkpoint v11 message[0] content[0]%s.text must be a string" path)
+    (v11_detail (checkpoint_json_with_raw_messages [ message ]))
+;;
+
 let () =
   let open Alcotest in
   run
@@ -382,6 +465,11 @@ let () =
             test_image_carriers_remain_canonical
         ; test_case "tool PNG reaches provider after checkpoint" `Quick
             test_tool_image_survives_dispatch_and_checkpoint ] )
+    ; ( "v11 contract"
+      , [ test_case "a failure deep in nested lists names its element" `Quick
+            test_a_failure_deep_in_nested_lists_names_its_element
+        ; test_case "a bad leaf under nested tool results fails once with its path" `Quick
+            test_a_bad_leaf_under_nested_tool_results_fails_once_with_its_path ] )
     ; ( "version"
       , [ test_case "checkpoint_version is 11" `Quick (fun () ->
             check int "version" 11 Checkpoint.checkpoint_version)

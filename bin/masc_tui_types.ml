@@ -4519,6 +4519,12 @@ type state = {
   mutable context_inspector_keeper: string option;
   mutable context_inspector_loading: bool;
   mutable context_inspector_generation: int;
+  (* Stepping through turns starts a read per step, and one read asks the
+     server to resolve a whole provider input (hundreds of blob artifacts,
+     seconds of work). The reads a step replaced were left running and their
+     answers thrown away, so holding a key queued that work several times
+     over. Each launch stops the one before it through this. *)
+  mutable context_inspector_cancel: (unit -> unit) option;
   mutable context_inspector_reading:
     (string * Masc_tui_context_inspector.reading) option;
   mutable context_inspector_tab: Masc_tui_context_inspector.tab;
@@ -5783,6 +5789,24 @@ let settled_logs_for_keeper state keeper_name =
     | Some _ -> selected) []
 ;;
 
+(* The requests a history load for [keeper_name] reads no journal for: every
+   settled log that stands for its turn, every request still in flight, and
+   every journal already being read. The settled logs are not
+   {!settled_logs_for_keeper}, which keeps one log per execution for drawing:
+   the other requests of a batch are held too, and leaving them out asked for
+   their journals again on every history load, so the server decoded each of
+   those journals whole on every refresh. *)
+let journal_held_request_ids state keeper_name =
+  List.filter_map
+    (fun log ->
+      if String.equal (turn_log_keeper_name log) keeper_name && turn_log_holds_the_turn log
+      then Some (turn_log_request_id log)
+      else None)
+    state.msg_settled_logs
+  @ List.map (fun entry -> entry.sent_request.request_id) state.msg_inflight
+  @ state.msg_journal_inflight
+;;
+
 (* A settled log takes its place among the others by when its turn started,
    so a turn rebuilt from its journal sits where a turn settled live would
    have. A request already held by a log that stands for its turn is not
@@ -6399,6 +6423,13 @@ let next_keeper_message_target (state : state) =
             (List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers)
 
 (** Create initial state *)
+(* The read a launch replaces is stopped here, and closing the pane stops the
+   one in flight. Passing [None] leaves nothing to stop behind. *)
+let supersede_context_inspector_load state stop =
+  Option.iter (fun previous -> previous ()) state.context_inspector_cancel;
+  state.context_inspector_cancel <- stop
+;;
+
 let create_state
     ?(reasoning_visibility = Reasoning_hidden)
     ?(tool_visibility = Tools_compact)
@@ -6445,6 +6476,7 @@ let create_state
   context_inspector_keeper = None;
   context_inspector_loading = false;
   context_inspector_generation = 0;
+  context_inspector_cancel = None;
   context_inspector_reading = None;
   context_inspector_tab = Masc_tui_context_inspector.Composition;
   context_inspector_cursor = 0;

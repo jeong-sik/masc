@@ -57,6 +57,55 @@ let json stdout f =
   match Yojson.Safe.from_string stdout with
   | value -> f value
   | exception Yojson.Json_error _ -> Probe_failed "Service returned invalid JSON"
+(* Apple Container builds images in a VM of its own, and starts that VM with
+   Rosetta unless its configuration sets [build] rosetta = false (the default is
+   true in apple/container 1.3.1 and 1.4.1). On a Mac without Rosetta the VM
+   refuses to start, so every image build fails -- after the service had
+   answered. Measured 2026-09-15: setup read such a Mac as ready and stopped at
+   "Rosetta is not installed" while preparing imp's image. *)
+type builder_rosetta = Rosetta_not_used | Rosetta_installed | Rosetta_missing
+(* The receipt Apple's Rosetta installer leaves; pkgutil exits non-zero when the
+   package was never installed. *)
+let rosetta_package = "com.apple.pkg.RosettaUpdateAuto"
+let rosetta_missing_reason =
+  "Image builds use Rosetta, which is not installed; build without it or install it"
+(* Rosetta is looked for first: where it is installed the builder starts
+   whatever its setting says, so a Mac that was ready before this check stays
+   ready even when Apple Container's configuration reads differently. *)
+let apple_builder_rosetta ~run =
+  match run ["pkgutil"; "--pkg-info"; rosetta_package] with
+  | Ok _ -> Ok Rosetta_installed
+  | Error Missing_command -> Error "pkgutil is missing, so Rosetta's installation could not be checked"
+  | Error Command_failed ->
+    (* pkgutil exits non-zero when the receipt is absent; a timed-out pkgutil
+       lands here as well. Either way what follows only offers two choices,
+       and both are harmless on a Mac that does have Rosetta. *)
+    let uses_rosetta = match run ["container"; "system"; "property"; "list"; "--format"; "json"] with
+      | Error (Missing_command | Command_failed) -> None
+      | Ok stdout -> (match Yojson.Safe.from_string stdout with
+        | `Assoc fields -> (match List.assoc_opt "build" fields with
+          | Some (`Assoc build) -> (match List.assoc_opt "rosetta" build with
+            | Some (`Bool uses) -> Some uses
+            | Some _ | None -> None)
+          | Some _ | None -> None)
+        | _ -> None
+        | exception Yojson.Json_error _ -> None) in
+    (* A setting that cannot be read is Apple's default, which uses Rosetta:
+       the build is not known to start, and both choices make it start. *)
+    (match uses_rosetta with
+     | Some false -> Ok Rosetta_not_used
+     | Some true | None -> Ok Rosetta_missing)
+let apple_inventory ~run =
+  command ~run ["container"; "list"; "-a"; "--format"; "json"] (fun stdout ->
+    json stdout (function `List _ -> Service_ready | _ -> Probe_failed "Apple Container returned an invalid inventory"))
+(* Only a service that answered has a builder worth asking about. A stopped or
+   absent service is its own missing piece, with its own installer and start
+   actions, however Rosetta stands. *)
+let apple_container_needs_rosetta ~run =
+  match apple_inventory ~run with
+  | Service_ready -> apple_builder_rosetta ~run = Ok Rosetta_missing
+  | Missing_prerequisite _ | Unsupported_host _ | Unsupported_capability _ | Probe_failed _
+  | Needs_configuration _ -> false
 let probe ~host ~run ~require_rootless ~require_userns backend =
   let state = match backend, host with
   | Microsandbox, _ -> Unsupported_capability
@@ -69,8 +118,12 @@ let probe ~host ~run ~require_rootless ~require_userns backend =
   | Apple_container, Macos {major; _} when major < 26 ->
     Unsupported_host "Apple Container requires macOS 26 or newer"
   | Apple_container, Macos _ ->
-    command ~run ["container"; "list"; "-a"; "--format"; "json"] (fun stdout ->
-      json stdout (function `List _ -> Service_ready | _ -> Probe_failed "Apple Container returned an invalid inventory"))
+    (match apple_inventory ~run with
+     | Service_ready -> (match apple_builder_rosetta ~run with
+       | Ok (Rosetta_not_used | Rosetta_installed) -> Service_ready
+       | Ok Rosetta_missing -> Missing_prerequisite rosetta_missing_reason
+       | Error reason -> Probe_failed reason)
+     | unanswered -> unanswered)
   | Nerdctl_kata, Macos _ -> Unsupported_host "Kata setup requires a Linux host with hardware virtualization"
   | Nerdctl_kata, Linux _ ->
     command ~run ["nerdctl"; "info"; "--format"; "{{json .}}"] (fun stdout ->

@@ -7539,7 +7539,7 @@ def context_inspector_interaction() -> Interaction:
             process, master_fd, output, b"/context", composer_showing(b"/context")
         )
         composition = send_and_wait(
-            process, master_fd, output, b"\r", b"HISTORY REACH"
+            process, master_fd, output, b"\r", b"HOW FAR BACK"
         )
         composition_plain = CSI_RE.sub(b"", composition)
         for needle in (
@@ -7551,8 +7551,8 @@ def context_inspector_interaction() -> Interaction:
             # The section is headed in plain words now, and the count reads
             # "of" rather than a fraction. Both are pinned: the heading says
             # which section this is, the count says what it carried.
-            b"how far back this turn looked",
-            b"7 of 9 atoms",
+            b"how much of the kept conversation this request carried",
+            b"7 of 9 kept atoms",
         ):
             if needle not in composition_plain:
                 raise AssertionError(
@@ -16843,6 +16843,15 @@ def held_back_prompts_http_fixtures() -> HttpFixtures:
     return fixtures
 
 
+# The prompts title row carries the pane name, its reading, and the held-back
+# count, and the frame gives the row up from its tail -- the held-back count
+# goes first. At the harness default of a hundred columns it is already gone:
+# the row reads "적용 …". A scenario that asserts the count has to give the row
+# the width its reading needs, the way the keeper-runtime scenario names its
+# own. A hundred and twenty leaves the whole count in the row.
+HELD_BACK_TITLE_COLUMNS = 120
+
+
 def run_held_back_override_regression(executable: str) -> None:
     """A held-back override is visible on the prompts screen.
 
@@ -16858,6 +16867,14 @@ def run_held_back_override_regression(executable: str) -> None:
         output: bytearray,
         _base_path: str,
     ) -> None:
+        resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=30,
+            columns=HELD_BACK_TITLE_COLUMNS,
+            needle=b"MASC Overview",
+        )
         tab_until(process, master_fd, output, b"MASC Config")
         for _ in range(8):
             if b"MASC \xed\x94\x84\xeb\xa1\xac\xed\x94\x84\xed\x8a\xb8" in bytes(output):
@@ -16866,12 +16883,27 @@ def run_held_back_override_regression(executable: str) -> None:
         else:
             raise AssertionError("[p] never reached the prompts pane")
 
-        screen = screen_text(bytes(output))
-        if "적용 안 된 오버라이드 1개".encode() not in screen:
+        # The pane title draws on the frame the switch lands on; the header
+        # that counts the held-back override draws only once the registry
+        # has answered (Masc_tui_render.render_prompt_registry: "A count
+        # only once the registry has answered"). The loop above breaks on
+        # the title, not the answer, so judging the frame it landed on
+        # reads the pane before its data can have arrived. Wait for the
+        # answer instead of the title.
+        if not poll_for_output(
+            process,
+            master_fd,
+            output,
+            "적용 안 된 오버라이드 1개".encode(),
+            start=0,
+            timeout=3.0,
+        ):
             raise AssertionError(
                 "the header does not count the held-back override, so a reader "
                 "cannot see it without landing on the row"
             )
+
+        screen = screen_text(bytes(output))
         if "\u2298".encode() not in screen:
             raise AssertionError("the held-back row carries no mark of its own")
         if b"Unknown template variables: facts_json" not in screen:

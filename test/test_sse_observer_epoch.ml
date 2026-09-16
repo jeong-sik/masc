@@ -113,6 +113,28 @@ let test_missing_or_malformed_response () =
     ]
 ;;
 
+(* A frame written from an object joined out of encoded fields is the frame of
+   the whole value, byte for byte: escapes, floats, nesting and non-ASCII text
+   included. *)
+let test_an_encoded_frame_is_the_frame_of_its_value () =
+  let fields =
+    [ "type", `String "operator_snapshot"
+    ; ( "payload"
+      , `Assoc
+          [ "quote", `String "a \"b\"\n\\c \xc3\xa9"
+          ; "items", `List [ `Int 1; `Float 2.5; `Null; `Bool true; `Assoc [] ]
+          ] )
+    ; "ts_unix", `Float 1789498400.123
+    ]
+  in
+  let encoded =
+    Wire.encoded_object (List.map (fun (key, value) -> key, Wire.encode_json value) fields)
+  in
+  check string "the frame" (Wire.format_event_yojson ~id:7 ~event_type:"message" (`Assoc fields))
+    (Wire.format_event_encoded ~id:7 ~event_type:"message" encoded);
+  check bool "the value" true (Yojson.Safe.equal (`Assoc fields) encoded.Wire.json)
+;;
+
 let () =
   run "observer epoch continuity"
     [ "reconnect",
@@ -126,6 +148,10 @@ let () =
           (fun () -> test_unusable_epoch_cannot_suppress_new_live Wire.Unscoped_cursor [])
       ; test_case "missing capability differs from invalid metadata" `Quick
           test_missing_or_malformed_response
+      ]
+    ; "wire",
+      [ test_case "an encoded frame is the frame of its value" `Quick
+          test_an_encoded_frame_is_the_frame_of_its_value
       ]
     ]
 ;;

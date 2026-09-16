@@ -64,8 +64,8 @@ let selection ?rows turn : Masc_tui_context_inspector.selection =
   ; rows = (match rows with Some rows -> rows | None -> [ turn ])
   }
 
-let lines ?rows turn =
-  Masc_tui_render_prim.context_composition_lines ~cols:140 ~turn_back:0
+let lines ?rows ?(forecast = Error "next-request not fetched") turn =
+  Masc_tui_render_prim.context_composition_lines ~cols:140 ~turn_back:0 ~forecast
     (selection ?rows turn)
 
 let contains needle line =
@@ -182,15 +182,15 @@ let test_a_count_of_unknown_scope_never_becomes_the_ratio () =
 
 let test_the_request_band_leads_with_the_providers_count () =
   let rows = lines (record ~wire:(Some 560_513) ~scope:per_request ()) in
-  match index_of "18.0k / 131.1k tokens" rows, index_of "prepared request" rows with
+  match index_of "18.0k / 131.1k tokens" rows, index_of "in the body masc sent" rows with
   | Some tokens, Some bytes ->
       Alcotest.(check bool) "the count stands above the estimate" true
         (tokens < bytes);
       Alcotest.(check bool) "the estimate names the bytes it was read from" true
-        (contains (approx ^ "18.0k tok prepared request")
+        (contains (approx ^ "18.0k tok in the body masc sent")
            (List.nth rows bytes))
   | None, _ -> Alcotest.fail "the per-request token line is drawn"
-  | _, None -> Alcotest.fail "the prepared-request line is drawn"
+  | _, None -> Alcotest.fail "the body-as-sent line is drawn"
 
 (* This turn's own ratio wins over a page whose other rows disagree. *)
 let test_this_turn_outranks_the_page () =
@@ -219,8 +219,16 @@ let test_no_body_names_what_masc_handed_over () =
   let rows = lines (record ~wire:None ~scope:per_request ()) in
   Alcotest.(check bool) "the band names the client" true
     (says "the runtime client assembled the request itself; masc handed it the" rows);
+  (* The history band below reports its own unobserved window on this
+     fixture, which is a different reading. The claim under test is about the
+     request band, so read only the rows above that band. *)
+  let request_band =
+    match index_of "HOW FAR BACK" rows with
+    | Some stop -> List.filteri (fun index _ -> index < stop) rows
+    | None -> rows
+  in
   Alcotest.(check bool) "and never calls it unobserved" false
-    (says "not observed" rows)
+    (says "not observed" request_band)
 
 let with_window measurement turn =
   { turn with

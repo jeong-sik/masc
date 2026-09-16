@@ -22,7 +22,7 @@ let keeper_file_changes_cache_key ~masc_root ~keeper_name ~window_hours =
     masc_root
     keeper_name
     window_hours
-    (Keeper_tool_call_log.committed_revision ())
+    (Keeper_tool_call_log.committed_revision ~keeper_name)
 ;;
 
 let tool_call_entries ~keeper_name ~limit =
@@ -425,7 +425,7 @@ let keeper_chat_history_freshness config name =
      that dependency even when a separate writer or queued flush appends after
      the chat, raw trace and TurnRecord files stopped changing. Keeper hooks
      commit synchronously before publishing their completion. *)
-  let tool_call_stamp = Keeper_tool_call_log.committed_revision () in
+  let tool_call_stamp = Keeper_tool_call_log.committed_revision ~keeper_name:name in
   Printf.sprintf "%s|%s|%s|%d" chat_stamp trace_stamp turn_record_stamp tool_call_stamp
 ;;
 
@@ -919,8 +919,13 @@ let handle_keeper_get_subroutes state req request reqd =
           Option.bind before_raw (fun raw -> float_of_string_opt (String.trim raw))
         in
         let config = Mcp_server.workspace_config state in
-        Server_auth.respond_json_value_with_cors ~status:`OK request reqd
-          (keeper_chat_history_page_json config name ~before))
+        (* The window read, its parse and the page's JSON are one job on the
+           domain pool, as the cached whole-history read below already is. *)
+        let page =
+          Domain_pool_ref.submit_io_or_inline (fun () ->
+            keeper_chat_history_page_json config name ~before)
+        in
+        Server_auth.respond_json_value_with_cors ~status:`OK request reqd page)
   else if ends_with "/chat/history" then
     let name = extract_name "/chat/history" in
     if name = "" then
@@ -935,8 +940,18 @@ let handle_keeper_get_subroutes state req request reqd =
         (error_json (Printf.sprintf "invalid keeper name: %s" name))
     else
       let config = Mcp_server.workspace_config state in
-      Server_auth.respond_json_value_with_cors ~status:`OK request reqd
+      (* The body is hundreds of KB for a tool-heavy keeper (845 KB measured)
+         and the TUI polls it. Serialising it, hashing it for its validator
+         and compressing it held the main domain on every poll, so that runs
+         on the CPU executor. Responses in general stay on the serving fiber:
+         the executor also runs dashboard computes, and a timeout or error
+         answer must not wait behind them. *)
+      Http.Response.json_value_on_cpu
+        ~status:`OK
+        ~request
+        ~extra_headers:(Server_auth.cors_headers (Server_auth.get_origin request))
         (cached_keeper_chat_history_json config name)
+        reqd
   else if ends_with "/person-notes" then
     (* RFC-0229 P2: keeper-authored person notes for the roster pane.
        Read-only fold over the notes store; same shape as the tool
@@ -1536,6 +1551,28 @@ let handle_keeper_get_subroutes state req request reqd =
          (`Assoc
             [ "error", `String (Keeper_operator_note.read_error_to_string error) ])
          reqd)
+  else if ends_with "/next-request" then
+    (* What the next Agent Core request would carry, computed from the values
+       a turn uses and nothing a turn owns: no dispatch, no cursor, no note. *)
+    let name = extract_name "/next-request" in
+    (match
+       Keeper_next_request_forecast.forecast
+         ~config:(Mcp_server.workspace_config state)
+         ~keeper_name:name
+     with
+     | Ok forecast ->
+       Http.Response.json_value ~compress:true ~request:req
+         (match Keeper_next_request_forecast.to_json forecast with
+          | `Assoc fields ->
+            `Assoc
+              (("dashboard_surface", `String "/api/v1/keepers/:name/next-request")
+               :: fields)
+          | json -> json)
+         reqd
+     | Error detail ->
+       Http.Response.json_value ~status:`Not_found
+         (`Assoc [ "error", `String detail ])
+         reqd)
   else if ends_with "/last-prompt" then
     (* What this keeper was actually told, as text. The turn record keeps each
        block's bytes and digest — how much, never what. The blocks are stable
@@ -1592,26 +1629,31 @@ let handle_keeper_get_subroutes state req request reqd =
                  ])
               reqd
           | Some turn_ref ->
+            (* One provider input resolves hundreds of blob artifacts (212
+               messages and 57 tool schemas for a live keeper turn): each is
+               read, hashed and parsed, and the answer is the whole request.
+               On the scheduler domain that took 2-10 s per call while the
+               context inspector asked for several turns at once. The
+               resolution and the JSON tree run as one pool job, and the body
+               is printed and compressed on the pool too. *)
+            let config = Mcp_server.workspace_config state in
             (match
-               Keeper_provider_input_snapshot.read_resolved
-                 ~config:(Mcp_server.workspace_config state)
-                 ~keeper:name
-                 ~turn_ref
+               Domain_pool_ref.submit_cpu_or_inline (fun () ->
+                 Keeper_provider_input_snapshot.read_resolved
+                   ~config
+                   ~keeper:name
+                   ~turn_ref
+                 |> Result.map (fun resolved ->
+                   match Keeper_provider_input_snapshot.resolved_to_json resolved with
+                   | `Assoc fields ->
+                     `Assoc
+                       (( "dashboard_surface"
+                        , `String "/api/v1/keepers/:name/provider-input" )
+                        :: fields)
+                   | json -> json))
              with
-             | Ok resolved ->
-               Http.Response.json_value
-                 ~compress:true
-                 ~request:req
-                 (match
-                    Keeper_provider_input_snapshot.resolved_to_json resolved
-                  with
-                  | `Assoc fields ->
-                    `Assoc
-                      (( "dashboard_surface"
-                       , `String "/api/v1/keepers/:name/provider-input" )
-                       :: fields)
-                  | json -> json)
-                 reqd
+             | Ok json ->
+               Http.Response.json_value_on_cpu ~compress:true ~request:req json reqd
              | Error
                  (Keeper_provider_input_snapshot.Snapshot_not_found _ as error)
                ->

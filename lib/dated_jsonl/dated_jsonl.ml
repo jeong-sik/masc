@@ -732,45 +732,76 @@ let recent_entry_of_line ~path ?line_number line =
     Malformed_json { path; line_number; detail }
 ;;
 
-(* One step of a backwards scan: read the chunk that ends at
-   [scan_position], join it to the fragment carried from the previous step,
-   and return the complete lines it holds, decoded, newest first, with the
-   state for the next step. Each step is one job on the domain pool through
+(* One step of a backwards scan: read the bytes that end at [scan_position]
+   and return the lines they close, decoded, newest first, with the state for
+   the next step. Each step is one job on the domain pool through
    [off_fiber]; the caller applies its own filter on the fiber and asks for
    the next step only when nothing matched, so a match in the newest chunk
-   costs one job and no caller closure leaves the fiber. *)
+   costs one job and no caller closure leaves the fiber.
+
+   A line that has not reached its start yet is kept as the pieces read so
+   far, in file order, and joined once when its newline is found. Joining the
+   pieces on every step copied such a line once per chunk: reading a 900 KB
+   provider-input row in 8 KB chunks allocated 52 MB, and those scans were a
+   fifth of a live server's allocation on 2026-09-16. A step that
+   finds no newline doubles the next read, so a long line also takes a
+   logarithmic number of jobs; the step after a newline reads [chunk_size]
+   again. *)
 type scan_state =
   { scan_position : int
-  ; right_fragment : string
+  ; read_size : int
+  ; unfinished_line : string list
+    (** The pieces, in file order, of the line that ends at the previous
+        step's read. None of them holds a newline. *)
   }
 
-let scan_step input ~chunk_size ~decode { scan_position = position; right_fragment } =
+let scan_step input ~chunk_size ~decode { scan_position = position; read_size; unfinished_line } =
   let decode_newest_first lines =
     List.fold_left
       (fun acc line -> if line_is_non_empty line then decode line :: acc else acc)
       []
       lines
   in
+  let close_line first_piece = String.concat "" (first_piece :: unfinished_line) in
   if position <= 0
-  then decode_newest_first (String.split_on_char '\n' right_fragment), None
+  then decode_newest_first [ String.concat "" unfinished_line ], None
   else begin
-    let read_start = max 0 (position - chunk_size) in
+    let read_start = max 0 (position - read_size) in
     let read_len = position - read_start in
     seek_in input read_start;
-    let chunk = Bytes.create read_len in
-    really_input input chunk 0 read_len;
-    let combined = Bytes.to_string chunk ^ right_fragment in
-    let parts = String.split_on_char '\n' combined in
-    let left_fragment, complete_lines =
+    let chunk = really_input_string input read_len in
+    match String.index_opt chunk '\n' with
+    | None when read_start = 0 -> decode_newest_first [ close_line chunk ], None
+    | None ->
+      ( []
+      , Some
+          { scan_position = read_start
+          ; read_size = 2 * read_size
+          ; unfinished_line = chunk :: unfinished_line
+          } )
+    | Some first_newline ->
+      let last_newline = String.rindex chunk '\n' in
+      let between =
+        if last_newline > first_newline
+        then
+          String.split_on_char
+            '\n'
+            (String.sub chunk (first_newline + 1) (last_newline - first_newline - 1))
+        else []
+      in
+      let closed =
+        close_line (String.sub chunk (last_newline + 1) (read_len - last_newline - 1))
+      in
+      let leading = String.sub chunk 0 first_newline in
       if read_start = 0
-      then "", parts
+      then decode_newest_first ((leading :: between) @ [ closed ]), None
       else
-        match parts with
-        | [] -> "", []
-        | first :: rest -> first, rest
-    in
-    ( decode_newest_first complete_lines
-    , Some { scan_position = read_start; right_fragment = left_fragment } )
+        ( decode_newest_first (between @ [ closed ])
+        , Some
+            { scan_position = read_start
+            ; read_size = chunk_size
+            ; unfinished_line = [ leading ]
+            } )
   end
 ;;
 
@@ -787,7 +818,11 @@ let find_latest_decoded_from_channel input ~decode f =
        | None -> None
        | Some state -> drive state)
   in
-  drive { scan_position = in_channel_length input; right_fragment = "" }
+  drive
+    { scan_position = in_channel_length input
+    ; read_size = chunk_size
+    ; unfinished_line = []
+    }
 ;;
 
 let find_latest_entry_in_file_result path f =

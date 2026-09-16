@@ -524,8 +524,9 @@ let test_scoped_boundary_error_stops_immediately () =
              effect_disposition = Tool_result.Effect_outcome_unknown;
              detail =
                Keeper_terminal_effect_detail.Boundary_observation_failed
-                 { model_tool_name = "effect"; message } as detail } } as stop) ->
-         check (option string) "exact failure retained" (Some message) !terminal_error;
+                 { model_tool_name = "effect"; cause } as detail } } as stop) ->
+         check (option string) "exact failure retained"
+           (Some cause.Keeper_request_failure_core.message) !terminal_error;
          (match Host.host_stop_result ~runtime_id:runtime_label ~model:"fixture"
              ~session_id:"session" ~turn_id:"turn" ~turns_used:1
              ~latency_ms:None ~usage:None stop with
@@ -540,6 +541,56 @@ let test_scoped_boundary_error_stops_immediately () =
           | Ok _ -> fail "scope failure projected a completed result")
        | _ -> fail (runtime_label ^ " continued after scope observation failure"))))
     [ "Codex"; "Claude Code"; "Antigravity" ]
+;;
+
+(* RFC-0454 P1b: [Keeper_request_failure_core.message] is a sentence for
+   people. A boundary observation that hands back a carried MASC error renders
+   as prefixed JSON, which is the escaping this RFC removes, so the host keeps
+   that error's one-line summary instead. *)
+let test_a_carried_masc_boundary_error_keeps_no_json () =
+  with_active_raw_trace (fun ~path:_ ~active ->
+    let carried =
+      Keeper_internal_error.core_error_of_masc_internal_error
+        (Keeper_internal_error.Terminal_effect_failed
+           { failure_class = Tool_result.Runtime_failure
+           ; effect_disposition = Tool_result.Effect_outcome_unknown
+           ; detail =
+               Keeper_terminal_effect_detail.Composition_failed
+                 { composition_tool = "keeper_compose_plan"
+                 ; cause =
+                     Keeper_terminal_effect_detail.Node_failed
+                       { node_id = "press"
+                       ; model_tool_name = "masc_msx_press"
+                       ; message = "no MSX machine is loaded"
+                       }
+                 ; payload = `Assoc [ "settled", `List [ `String "press" ] ]
+                 }
+           })
+    in
+    let tool, _ = one_dynamic_tool ~active
+      ~on_tool_boundary:(fun () -> Error carried)
+      (fun _ -> Ok { Agent_core.Types.content = "effect returned"; content_blocks = None; _meta = None })
+    in
+    let result = tool.call ~call_id:"carried-masc-boundary" (`Assoc []) in
+    match result.abort_turn with
+    | Some (Terminal_tool_boundary
+        { outcome = Terminal_failed
+            { detail = Keeper_terminal_effect_detail.Boundary_observation_failed
+                { cause; _ }
+            ; _ }
+        ; _ }) ->
+      let message = cause.Keeper_request_failure_core.message in
+      let contains needle =
+        let n = String.length needle and t = String.length message in
+        let rec loop i = i + n <= t && (String.sub message i n = needle || loop (i + 1)) in
+        n = 0 || loop 0
+      in
+      check bool "no envelope prefix reached the message" false
+        (contains "[masc_agent_core_error]");
+      check bool "no escaped JSON document reached the message" false (contains "\\\"");
+      check bool "the summary says what failed" true
+        (contains "no MSX machine is loaded")
+    | _ -> fail "a carried MASC boundary error did not stop the turn")
 ;;
 
 let test_scoped_boundary_preserves_terminal_priority () =
@@ -2247,6 +2298,8 @@ let () =
             test_autonomous_official_boundary_stops_execute_loop_without_scope
         ; test_case "scope observation failure stops official tool call" `Quick
             test_scoped_boundary_error_stops_immediately
+        ; test_case "a carried MASC boundary error keeps no JSON in its message"
+            `Quick test_a_carried_masc_boundary_error_keeps_no_json
         ; test_case "scope stop preserves exact terminal priority" `Quick
             test_scoped_boundary_preserves_terminal_priority
         ; test_case "scope callback replaces provider-local counter" `Quick

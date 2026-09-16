@@ -569,7 +569,7 @@ let messages_field = "messages"
 
 (* The checkpoint object with its message array cut out, as the fields before
    and after it. [checkpoint_json_with_messages] puts the array back as a JSON
-   tree; [to_string_with_encoding_memo] writes already encoded messages between
+   tree; [to_pieces_with_encoding_memo] writes already encoded messages between
    the two halves. *)
 let checkpoint_fields_around_messages cp =
   ( [ "version", `Int cp.version
@@ -1167,8 +1167,11 @@ let separated separator = function
 
 (* [Yojson.Safe.to_string] writes an object as [{"k":v,...}] and an array as
    [[v,...]] with no whitespace, so these pieces concatenate to [to_string cp].
-   [String.concat] sizes the result once from the pieces. *)
-let write_encoded_checkpoint ~before_messages ~after_messages messages =
+   They stay a list: the live canonical checkpoints measured 2026-09-16 were
+   111MB and 107MB, and the writer appends the pieces to the file in order, so
+   joining them here would allocate that whole document a second time on every
+   save. *)
+let encoded_checkpoint_pieces ~before_messages ~after_messages messages =
   let key name = Yojson.Safe.to_string (`String name) in
   let field (name, value) = [ key name; ":"; Yojson.Safe.to_string value ] in
   let messages_member =
@@ -1177,10 +1180,10 @@ let write_encoded_checkpoint ~before_messages ~after_messages messages =
   let members =
     List.map field before_messages @ (messages_member :: List.map field after_messages)
   in
-  String.concat "" (("{" :: List.concat (separated [ "," ] members)) @ [ "}" ])
+  ("{" :: List.concat (separated [ "," ] members)) @ [ "}" ]
 ;;
 
-let to_string_with_encoding_memo memo (cp : Checkpoint_types.t) =
+let to_pieces_with_encoding_memo memo (cp : Checkpoint_types.t) =
   let next = Encoded_messages.create (List.length cp.messages) in
   let rec encode_messages message_index rev_encoded = function
     | [] -> Ok (List.rev rev_encoded)
@@ -1203,12 +1206,15 @@ let to_string_with_encoding_memo memo (cp : Checkpoint_types.t) =
   with
   | Ok ((before_messages, after_messages), messages) ->
     memo.encoded <- next;
-    write_encoded_checkpoint ~before_messages ~after_messages messages
+    encoded_checkpoint_pieces ~before_messages ~after_messages messages
   | Error _ ->
     (* A refusal is reported by the whole-checkpoint encoder, whose message
        names the failing path inside the checkpoint. *)
-    Yojson.Safe.to_string
-      (validated_checkpoint_json_exn ~scope:"Checkpoint.to_string_with_encoding_memo" cp)
+    [ Yojson.Safe.to_string
+        (validated_checkpoint_json_exn
+           ~scope:"Checkpoint.to_pieces_with_encoding_memo"
+           cp)
+    ]
 ;;
 
 let of_string s =

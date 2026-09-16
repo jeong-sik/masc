@@ -1831,6 +1831,28 @@ let test_native_action_observer_keeps_exact_provider_identity () =
      | _ -> false)
 ;;
 
+(* [--tools] narrows the CLI's built-in set to the names it lists, and the
+   CLI defers MCP tool schemas only while its own [ToolSearch] is among them.
+   A posture that drops the name therefore sends every masc tool schema
+   inline on every request, so each posture keeps it. *)
+let test_every_posture_names_the_schema_lookup () =
+  check
+    string
+    "none carries the lookup alone"
+    "ToolSearch"
+    (Runtime_native_tools.claude_code_tools_arg Runtime_native_tools.Native_none);
+  check
+    string
+    "read carries it after the read set"
+    "Read,Glob,Grep,ToolSearch"
+    (Runtime_native_tools.claude_code_tools_arg Runtime_native_tools.Native_read);
+  check
+    string
+    "full is the whole built-in set, which already carries it"
+    "default"
+    (Runtime_native_tools.claude_code_tools_arg Runtime_native_tools.Native_full)
+;;
+
 let () =
   run
     "keeper_claude_code_runtime"
@@ -1913,6 +1935,10 @@ let () =
             "repeated tool stop preserves terminal hook failure"
             `Quick
             test_repeated_tool_stop_preserves_terminal_hook_failure
+        ; test_case
+            "every posture names the schema lookup"
+            `Quick
+            test_every_posture_names_the_schema_lookup
         ] )
     ]
 ;;

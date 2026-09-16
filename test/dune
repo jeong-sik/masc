@@ -3439,6 +3439,13 @@
   masc_tui_image_preview
   alcotest
   masc
+  ; The fenced-row fixtures are built by the producer's own encoder, so the
+  ; suite names Keeper_internal_error, Tool_result and Agent_core.Error
+  ; directly; dune hands a transitive library with -H and naming its modules
+  ; would be unbound.
+  masc.agent_core
+  masc.keeper_runtime
+  masc.tool_types
   masc_tui_keeper_chat_history
   masc_tui_keeper_chat_transcript
   yojson))

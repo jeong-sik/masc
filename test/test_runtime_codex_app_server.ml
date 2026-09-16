@@ -2627,7 +2627,7 @@ let test_keeper_does_not_retry_context_error_after_tool_effect () =
          (match Keeper_internal_error.classify_masc_internal_error error with
           | Some
               (Keeper_internal_error.Provider_attempt_effect_fenced
-                 { effect_disposition; diagnostic; _ }) ->
+                 { effect_disposition; cause; _ }) ->
             check
               string
               "the fence observed a tool effect (not Observation_unavailable)"
@@ -2641,11 +2641,14 @@ let test_keeper_does_not_retry_context_error_after_tool_effect () =
                  effect_disposition);
             check
               bool
-              "the fenced envelope keeps the provider diagnostic"
+              "the fenced envelope keeps the provider cause"
               true
-              (Astring.String.is_infix
-                 ~affix:"context_window_exceeded_after_tool_effect"
-                 diagnostic)
+              (match cause with
+               | Keeper_internal_error.Fenced_core core ->
+                 Astring.String.is_infix
+                   ~affix:"context_window_exceeded_after_tool_effect"
+                   core.Keeper_request_failure_core.message
+               | Keeper_internal_error.Fenced_masc _ -> false)
           | _ -> fail (Agent_core.Error.to_string error))
        | Ok _ -> fail "Keeper retried a context overflow after a tool effect")
 ;;

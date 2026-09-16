@@ -61,7 +61,12 @@ let measured : Inspector.forecast =
                  })
         ; request_cap_bytes = Some 524_288
         ; parts =
-            Some { measured_on_turn = 3581; reserved_bytes = 87_000; pinned_bytes = 237_000 }
+            Ok
+              { reserved_measured_on_turn = 3581
+              ; reserved_bytes = 87_000
+              ; pinned_measured_on_turn = 3579
+              ; pinned_bytes = 237_000
+              }
         ; history_atoms = 3395
         ; cut =
             Some
@@ -90,11 +95,11 @@ let test_the_band_reads_at_the_runtimes_density () =
   Alcotest.(check bool) "the provider's body cap reads at the same density" true
     (says ("provider accepts up to " ^ approx ^ "158.9k tok") rows);
   (* 87,000 / 3.3 = 26,364; 237,000 / 3.3 = 71,818. *)
-  Alcotest.(check bool) "the fixed parts and the pinned blocks carry the turn they were read from"
+  Alcotest.(check bool) "the fixed parts and the pinned blocks each carry the turn they were read from"
     true
     (says
-       ("fixed parts " ^ approx ^ "26.4k tok + pinned " ^ approx
-      ^ "71.8k tok, as measured on turn #3581")
+       ("fixed parts " ^ approx ^ "26.4k tok (turn #3581) + pinned " ^ approx
+      ^ "71.8k tok (turn #3579)")
        rows);
   (* (280,500 - 87,000 - 237,000) / 3.3 = -13,182. *)
   Alcotest.(check bool) "a negative room is drawn with a minus sign" true
@@ -132,7 +137,13 @@ let test_a_fitting_cut_says_so () =
     with_candidate
       (fun candidate ->
         { candidate with
-          parts = Some { measured_on_turn = 3581; reserved_bytes = 87_000; pinned_bytes = 20_000 }
+          parts =
+            Ok
+              { reserved_measured_on_turn = 3581
+              ; reserved_bytes = 87_000
+              ; pinned_measured_on_turn = 3579
+              ; pinned_bytes = 20_000
+              }
         ; cut =
             Some
               (Inspector.Forecast_cut
@@ -161,7 +172,7 @@ let test_an_unmeasured_runtime_reads_at_the_tabs_scale () =
   Alcotest.(check bool) "no density is said plainly" true
     (says "No response on this runtime since the server started, so no density" rows);
   Alcotest.(check bool) "the fixed parts still carry their turn, with no room to compute" true
-    (says (approx ^ "25.7k tok + pinned " ^ approx ^ "69.9k tok, as measured on turn #3581") rows
+    (says (approx ^ "25.7k tok (turn #3581) + pinned " ^ approx ^ "69.9k tok (turn #3579)") rows
      && not (says "history room" rows));
   (* 12,000 / 3.39 = 3,540: the fleet scale, not the runtime's. *)
   Alcotest.(check bool) "the cut is the newest atom, read at the fleet scale" true
@@ -189,12 +200,42 @@ let test_a_refused_window_is_drawn_with_its_reason () =
   Alcotest.(check bool) "no capacity or cut is invented" false
     (says "capacity" rows || says "would go" rows)
 
-let test_a_runtime_with_no_composition_says_so () =
-  let forecast =
-    with_candidate (fun candidate -> { candidate with parts = None; cut = None }) measured
+let test_an_official_client_runtime_is_not_cut_and_says_why () =
+  let reason =
+    "claude_code.claude-sonnet-5 is an official-client runtime: the spawned client owns its \
+     context window and masc applies no Agent Core cut"
   in
-  Alcotest.(check bool) "the missing record is named" true
-    (says "No turn record on this runtime carried a composition" (lines (Ok forecast)))
+  let forecast =
+    with_candidate
+      (fun candidate ->
+        { candidate with
+          runtime_id = "claude_code.claude-sonnet-5"
+        ; window = Inspector.Window_not_applicable reason
+        ; capacity = None
+        ; request_cap_bytes = None
+        ; cut = None
+        })
+      measured
+  in
+  let rows = lines (Ok forecast) in
+  Alcotest.(check bool) "the runtime heads the candidate and the reason follows in prose" true
+    (says "claude_code.claude-sonnet-5" rows && says reason rows);
+  Alcotest.(check bool) "the parts still read, with no room and no cut" true
+    (says ("fixed parts " ^ approx ^ "25.7k tok (turn #3581)") rows
+     && not (says "history room" rows) && not (says "would go" rows))
+
+let test_a_refused_parts_reading_carries_the_servers_reason () =
+  let reason =
+    "the newest 200 turn records on this runtime carry only post-tool compositions \
+     (newest turn #3648); the pinned blocks ride the first round only"
+  in
+  let forecast =
+    with_candidate (fun candidate -> { candidate with parts = Error reason; cut = None }) measured
+  in
+  let rows = lines (Ok forecast) in
+  Alcotest.(check bool) "the reason is the server's, and no cut is invented" true
+    (says ("Fixed parts unknown, so no cut was computed: " ^ reason) rows
+     && not (says "would go" rows))
 
 let test_a_missing_forecast_is_named_not_hidden () =
   Alcotest.(check bool) "the band says why it is empty" true
@@ -212,7 +253,8 @@ let test_the_forecast_decodes_the_servers_shape () =
            "capacity":{"window_tokens":85000,"capacity_bytes":280500,
                        "density_input_tokens":100000,"density_measured_bytes":330000},
            "request_cap_bytes":524288,
-           "parts":{"measured_on_turn":3581,"reserved_bytes":87000,"pinned_bytes":237000},
+           "parts":{"reserved_measured_on_turn":3581,"reserved_bytes":87000,
+                    "pinned_measured_on_turn":3579,"pinned_bytes":237000},
            "history_atoms":3395,
            "cut":{"kind":"cut","kept_atoms":1,"transmitted_bytes":12000,
                   "fit":{"kind":"overrun","by_bytes":43500,"cause":"fixed_parts_exceed_target"}}}]}|}
@@ -228,7 +270,8 @@ let test_an_unmeasured_capacity_decodes_from_a_null_byte_count () =
     Yojson.Safe.from_string
       {|{"schema":"masc.keeper.next-request-forecast.v1","checkpoint_messages":1,"wake_line_bytes":131,
          "candidates":[{"runtime_id":"r","window":{"window_tokens":85000,"declared_tokens":85000,"source":"declared"},
-           "capacity":{"window_tokens":85000,"capacity_bytes":null},"request_cap_bytes":null,"parts":null,
+           "capacity":{"window_tokens":85000,"capacity_bytes":null},"request_cap_bytes":null,
+           "parts":{"error":"no turn record on this runtime carried a composition in the newest 200 records"},
            "history_atoms":1,"cut":{"kind":"newest_atom_only","kept_atoms":1,"transmitted_bytes":300}}]}|}
   in
   match Inspector.decode_forecast json with
@@ -237,7 +280,7 @@ let test_an_unmeasured_capacity_decodes_from_a_null_byte_count () =
       { candidates =
           [ { capacity = Some Inspector.Capacity_unmeasured
             ; cut = Some (Inspector.Forecast_newest_atom_only { transmitted_bytes = 300 })
-            ; parts = None
+            ; parts = Error "no turn record on this runtime carried a composition in the newest 200 records"
             ; request_cap_bytes = None
             ; _
             }
@@ -252,7 +295,7 @@ let test_a_refused_window_decodes_from_the_error_shape () =
     Yojson.Safe.from_string
       {|{"schema":"masc.keeper.next-request-forecast.v1","checkpoint_messages":1,"wake_line_bytes":131,
          "candidates":[{"runtime_id":"r","window":{"error":"runtime r resolves no context window"},
-           "capacity":null,"request_cap_bytes":null,"parts":null,"history_atoms":1,"cut":null}]}|}
+           "capacity":null,"request_cap_bytes":null,"parts":{"error":"no turn record on this runtime carried a composition in the newest 200 records"},"history_atoms":1,"cut":null}]}|}
   in
   match Inspector.decode_forecast json with
   | Ok { candidates = [ { window = Inspector.Window_refused reason; capacity = None; cut = None; _ } ]; _ }
@@ -261,12 +304,31 @@ let test_a_refused_window_decodes_from_the_error_shape () =
   | Ok _ -> Alcotest.fail "an error window reads as refused with nothing derived from it"
   | Error detail -> Alcotest.fail ("the error shape decodes: " ^ detail)
 
+let test_a_not_applicable_window_decodes_as_such () =
+  let json =
+    Yojson.Safe.from_string
+      {|{"schema":"masc.keeper.next-request-forecast.v1","checkpoint_messages":1,"wake_line_bytes":131,
+         "candidates":[{"runtime_id":"claude_code.claude-sonnet-5",
+           "window":{"not_applicable":"claude_code.claude-sonnet-5 is an official-client runtime"},
+           "capacity":null,"request_cap_bytes":null,
+           "parts":{"reserved_measured_on_turn":4700,"reserved_bytes":194651,"pinned_measured_on_turn":4700,"pinned_bytes":182167},
+           "history_atoms":4429,"cut":null}]}|}
+  in
+  match Inspector.decode_forecast json with
+  | Ok { candidates = [ { window = Inspector.Window_not_applicable reason; capacity = None; cut = None; parts = Ok parts; _ } ]; _ }
+    ->
+    Alcotest.(check string) "the reason is the server's"
+      "claude_code.claude-sonnet-5 is an official-client runtime" reason;
+    Alcotest.(check int) "and the parts still decode" 182_167 parts.Inspector.pinned_bytes
+  | Ok _ -> Alcotest.fail "a not_applicable window reads as such, with nothing derived from it"
+  | Error detail -> Alcotest.fail ("the not_applicable shape decodes: " ^ detail)
+
 let test_a_malformed_forecast_fails_the_reading () =
   let json =
     Yojson.Safe.from_string
       {|{"schema":"masc.keeper.next-request-forecast.v1","checkpoint_messages":1,"wake_line_bytes":131,
          "candidates":[{"runtime_id":"r","window":{"window_tokens":85000,"declared_tokens":85000,"source":"declared"},
-           "capacity":null,"request_cap_bytes":null,"parts":null,"history_atoms":1,
+           "capacity":null,"request_cap_bytes":null,"parts":{"error":"x"},"history_atoms":1,
            "cut":{"kind":"sideways","kept_atoms":1,"transmitted_bytes":300}}]}|}
   in
   match Inspector.decode_forecast json with
@@ -285,8 +347,10 @@ let () =
             test_an_unmeasured_runtime_reads_at_the_tabs_scale
         ; Alcotest.test_case "a refused window is drawn with its reason" `Quick
             test_a_refused_window_is_drawn_with_its_reason
-        ; Alcotest.test_case "a runtime with no composition says so" `Quick
-            test_a_runtime_with_no_composition_says_so
+        ; Alcotest.test_case "an official-client runtime is not cut and says why" `Quick
+            test_an_official_client_runtime_is_not_cut_and_says_why
+        ; Alcotest.test_case "a refused parts reading carries the server's reason" `Quick
+            test_a_refused_parts_reading_carries_the_servers_reason
         ; Alcotest.test_case "a missing forecast is named, not hidden" `Quick
             test_a_missing_forecast_is_named_not_hidden
         ] )
@@ -297,6 +361,8 @@ let () =
             test_an_unmeasured_capacity_decodes_from_a_null_byte_count
         ; Alcotest.test_case "a refused window decodes from the error shape" `Quick
             test_a_refused_window_decodes_from_the_error_shape
+        ; Alcotest.test_case "a not-applicable window decodes as such" `Quick
+            test_a_not_applicable_window_decodes_as_such
         ; Alcotest.test_case "a malformed forecast fails the reading" `Quick
             test_a_malformed_forecast_fails_the_reading
         ] )

@@ -106,6 +106,9 @@ type forecast_window =
   | Window_declared of { window_tokens : int; source : string }
   | Window_refused of string
       (** The same contradiction the turn driver refuses on. *)
+  | Window_not_applicable of string
+      (** An official-client runtime: the spawned client owns its window and
+          no Agent Core cut applies. *)
 
 type forecast_density =
   { input_tokens : int
@@ -119,9 +122,14 @@ type forecast_capacity =
           would send the newest atom only. *)
 
 type forecast_parts =
-  { measured_on_turn : int
-  ; reserved_bytes : int  (** Tool schemas + keeper instructions. *)
-  ; pinned_bytes : int  (** Every other prompt block. *)
+  { reserved_measured_on_turn : int
+  ; reserved_bytes : int
+        (** Tool schemas + keeper instructions, from the newest completed
+            turn on the runtime. *)
+  ; pinned_measured_on_turn : int
+  ; pinned_bytes : int
+        (** Every other prompt block, from the newest completed turn whose
+            composition is a first round's. *)
   }
 
 type forecast_overrun_cause =
@@ -141,7 +149,9 @@ type forecast_candidate =
   ; window : forecast_window
   ; capacity : forecast_capacity option
   ; request_cap_bytes : int option
-  ; parts : forecast_parts option
+  ; parts : (forecast_parts, string) result
+        (** [Error] is the server's reason: no composition on this runtime,
+            or only post-tool ones, which carry no pinned block. *)
   ; history_atoms : int
   ; cut : forecast_cut option
   }

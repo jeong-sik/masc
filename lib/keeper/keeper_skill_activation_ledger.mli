@@ -224,7 +224,6 @@ type store_error =
   | Invalid_action_turn of int
   | Invalid_action_observed_at of string
   | Write_failed of Keeper_fs.durable_write_error
-  | Readback_mismatch
 
 val store_error_to_string : store_error -> string
 val store_error_code : store_error -> string

@@ -51,7 +51,7 @@ related: ["keeper-context-window-in-tokens", "claude-code-context-overflow-bound
 | masc 기록의 atom 수 | 턴 레코드 `total_atoms` (그 턴의 이력 원천 전체) | `keepers/<name>/turn-records/` | §2.3 |
 | 턴마다 붙인 System 맥락 | 턴 레코드 `blocks[].bytes`, `digest` | 같은 곳 | §2.4 |
 | 시스템 프롬프트 파일 크기 (디스크 바이트) | `Runtime_claude_code.with_system_prompt_file` | `$TMPDIR/masc-claude-system-*.txt`, 프로세스가 도는 동안 | §2.4 |
-| 새 세션·resume 과 도구 수, 복구 승계 | 서버 로그 `Claude Code turn composition: mode=… tools=…`, `auto-superseded official-client recovery=… failure=…` | `~/me/.masc/logs/system_log_2026-09-15.jsonl` | §2.7 |
+| 새 세션·resume 과 도구 수, 복구 승계 | 서버 로그 `Claude Code turn composition: mode=… tools=…`, `auto-superseded official-client recovery=… failure=…` | `<base-path>/.masc/logs/system_log_2026-09-15.jsonl` | §2.7 |
 
 - 요청은 assistant 항목의 `message.id` 로 센다. 병렬 도구 호출은 같은 id 를 되풀이하므로 한 번만 센다(#36725 과 같은 규칙).
 - `model = "<synthetic>"` 항목은 API 호출이 아니어서 뺐다.

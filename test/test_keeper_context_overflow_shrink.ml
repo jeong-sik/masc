@@ -1,4 +1,5 @@
-(** Tests for #27320 — context-overflow feedback shrink.
+(** Tests for #27320 — context-overflow feedback shrink on the
+    official-client lanes.
 
     Two units are covered directly:
 
@@ -10,11 +11,12 @@
     - {!Keeper_context_overflow_shrink_state}: the process-local (keeper,
       runtime) memory of the last capacity that succeeded.
 
-    [run_try_provider_with_context_overflow_shrink] itself wires these two
-    together with the real [run_try_provider]/[Runtime_agent.run] provider
-    call, which (like [run_try_provider] before it) has no unit-level
-    fixture in this suite — see [test_keeper_turn_driver_failover.ml] for
-    the candidate-rotation layer's equivalent boundary. *)
+    [Keeper_claude_code_runtime] and [Keeper_codex_runtime] wire these two
+    together with their real provider call, which has no unit-level fixture
+    in this suite — see [test_keeper_turn_driver_failover.ml] for the
+    candidate-rotation layer's equivalent boundary. The Agent Core lane's
+    retry is [carried_range_eviction_sequence], covered in
+    [test_keeper_carried_range_eviction.ml]. *)
 
 module Try_provider = Masc.Keeper_turn_driver_try_provider
 module Shrink_state = Masc.Keeper_context_overflow_shrink_state

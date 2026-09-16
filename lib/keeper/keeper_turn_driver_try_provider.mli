@@ -25,11 +25,16 @@ type try_provider_ctx =
   { runtime_id : string
   ; error_runtime_id : string
   ; max_request_body_bytes : int option
-  ; model_input_window : Keeper_context_window.t
-        (** The window this attempt cuts its history to, in tokens. The byte
-            capacity one request cuts to comes from the runtime's observed
-            token density, per request (RFC keeper-context-window-in-tokens).
+  ; context_marks : Runtime_schema.context_marks option
+        (** The marks the carried range is judged against after each
+            response (RFC keeper-context-window-in-tokens §10.5), as the
+            binding declares them; [None] leaves eviction to a refusal.
             [max_request_body_bytes] judges the serialized request only. *)
+  ; carried_front_seed : unit -> Keeper_carried_front.seed option
+        (** Where the carried range starts when no ledger holds this
+            (keeper, runtime) pair yet: the range the newest completed turn
+            record on the runtime measured. Read once per attempt, on that
+            path only. *)
   ; base_path : string
   ; keeper_name : string
   ; name : string
@@ -216,9 +221,10 @@ val context_overflow_shrink_sequence :
   attempt:(capacity:int -> ('ok, Agent_core.Error.t) result) ->
   unit ->
   ('ok, Agent_core.Error.t) result
-(** Provider-oracle retry policy shared by AGENT_CORE and official-client
-    runtimes. The capacity's unit is the caller's windowing unit: tokens on
-    the AGENT_CORE lane, bytes on the official-client lanes.
+(** Provider-oracle retry policy of the official-client runtimes, whose
+    seed history is cut against a declared prompt byte cap; the capacity is
+    in bytes. The Agent Core lane answers the same refusal by moving its
+    carried front ({!run_try_provider_with_carried_range_eviction}).
     [default_capacity] is the policy's ordinary halved value;
     a custom [shrink_capacity] can replace only exceptional starting values
     without copying the shared divisor. The walk carries no attempt count:
@@ -243,13 +249,48 @@ val run_try_provider :
   * Agent_core.Checkpoint.t option
   * (string * Obj.t) option
 
-val run_try_provider_with_context_overflow_shrink :
+type eviction_retry =
+  | Evicted_blocks of Keeper_carried_range.step
+      (** The oldest blocks of the pair's ledger left. *)
+  | Halved_range of
+      { first_atom : int
+      ; atom_count : int
+      }
+      (** No block structure to walk: the range halved toward the newest
+          atom. *)
+
+val carried_range_eviction_sequence :
+  same_run_retry_authorized:(unit -> bool) ->
+  ledger:(unit -> Keeper_model_input_ledger.t option) ->
+  last_request:(unit -> Keeper_model_input_ledger.request option) ->
+  marks:Runtime_schema.context_marks option ->
+  evict:(Keeper_carried_range.step -> unit) ->
+  halve:(first_atom:int -> retry:int -> unit) ->
+  on_retry:(retry:int -> eviction_retry -> unit) ->
+  attempt:(unit -> ('ok, Agent_core.Error.t) result) ->
+  unit ->
+  ('ok, Agent_core.Error.t) result
+(** The Agent Core lane's retry policy over an injected [attempt] (RFC
+    keeper-context-window-in-tokens §10.5). A provider context overflow or a
+    size refusal on the byte axis is answered from the pair's ledger with
+    {!Keeper_carried_range.after_overflow}; [evict] applies the step before
+    the next attempt. When the ledger has no block structure to walk, no
+    usage counted yet or a single block, [last_request]'s range halves
+    toward the newest atom through [halve], and a single atom ends the
+    sequence with the refusal in hand. Every other error ends it at once, as
+    does a refusal once [same_run_retry_authorized] is [false]. *)
+
+val run_try_provider_with_carried_range_eviction :
   ?continuation_checkpoint:Agent_core.Checkpoint.t ->
   try_provider_ctx ->
   Runtime_candidate.t ->
   (Runtime_agent.run_result, Agent_core.Error.t) result
   * Agent_core.Checkpoint.t option
   * (string * Obj.t) option
+(** {!run_try_provider} under {!carried_range_eviction_sequence}: the
+    eviction moves the pair's ledger front, the halving holds a seed for the
+    rest of this attempt, and each retry is recorded on the runtime
+    manifest. *)
 
 val run_try_provider_with_truncation_recovery :
   ?continuation_checkpoint:Agent_core.Checkpoint.t ->
@@ -258,7 +299,7 @@ val run_try_provider_with_truncation_recovery :
   (Runtime_agent.run_result, Agent_core.Error.t) result
   * Agent_core.Checkpoint.t option
   * (string * Obj.t) option
-(** Run the ordinary context-overflow recovery first. When the accepted
+(** Run the carried-range eviction first. When the accepted
     boundary instead reports a typed [MaxTokens] truncation, remove only that
     incomplete Assistant message from the post-run checkpoint and continue the
     same candidate once with thinking disabled. No new User message is added,
@@ -268,6 +309,24 @@ val accept_rejected_error :
   runtime_id:string ->
   response:Agent_core.Types.api_response ->
   Agent_core.Error.t
+
+type composed =
+  { planned : Keeper_model_input_demotion.plan_result
+  ; projection : Runtime_model_input_tail_window.projection
+  ; transmitted_bytes : int
+        (** Pinned messages, the carried atoms and the preamble, as the
+            composition's encoder counts them; excludes the reservation. *)
+  ; history_atom_count : int  (** Atoms in the whole history. *)
+  ; origin : Keeper_carried_front.origin
+  ; over_request_cap : bool
+        (** The reservation plus [transmitted_bytes] passes the declared
+            request-body cap: the wire refuses this request. *)
+  }
+(** One request as {!For_testing.compose_carried_model_input} composes it
+    (RFC keeper-context-window-in-tokens §10.4): RFC-0363 demotion over the
+    atoms older than [demote_before], then the carried range from [front],
+    and #28845's single last resort when the newest atom alone passes the
+    cap. *)
 
 module For_testing : sig
   val observe_provider_lease :
@@ -337,17 +396,15 @@ module For_testing : sig
 
   val message_measurement_hash : Agent_core.Types.message -> int
 
-  val plan_and_window_model_input :
+  val compose_carried_model_input :
     measure_message_bytes:(Agent_core.Types.message -> int) ->
-    target_bytes:int ->
+    front:Keeper_carried_front.seed option ->
     reserved_bytes:int ->
     wire_cap_bytes:int option ->
     base_path:string ->
     demote_before:int ->
     Agent_core.Types.message list ->
-    Keeper_model_input_demotion.plan_result
-    * Runtime_model_input_tail_window.target_projection
-    * int
+    composed
 
   val offload_model_input_cpu : (unit -> 'a) -> 'a
 

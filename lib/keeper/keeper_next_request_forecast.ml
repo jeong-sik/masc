@@ -2,15 +2,14 @@
    carry, computed from the same values a turn uses, without a turn.
 
    The arithmetic is the turn driver's (RFC keeper-context-window-in-tokens
-   §10.3): capacity B = W × density, history room A = B − R − pinned, and the
-   cut is [Runtime_model_input_tail_window.project_target] on the durable
-   history with the wake line appended as the newest atom. W, the density
-   and the request-body cap are read live; R (tool schemas + keeper
+   §10.4): the carried range from the pair's front, over the durable history
+   with the wake line appended as the newest atom. The front, the marks and
+   the request-body cap are read live; R (tool schemas + keeper
    instructions) and the pinned blocks (memory recall, dynamic context, ...)
    are taken from the turn records of completed turns on the same runtime,
-   because a turn measures them with the encoder the cut uses and nothing
-   outside a turn assembles them without side effects (a preview would
-   consume the operator note and advance nothing else it should).
+   because a turn measures them with the encoder the composition uses and
+   nothing outside a turn assembles them without side effects (a preview
+   would consume the operator note and advance nothing else it should).
 
    Two readings, two turns: a record describes the turn's latest request.
    The schemas and the instructions are the lane's and ride every round, so
@@ -54,35 +53,36 @@ let parts_refusal_to_string = function
       newest_turn
 ;;
 
-type window_refusal =
-  | Contradiction of string
+type lane_refusal =
+  | Not_materialized of { runtime_id : string }
   | Not_agent_core of { runtime_id : string }
 
-let window_refusal_to_string = function
-  | Contradiction reason -> reason
+let lane_refusal_to_string = function
+  | Not_materialized { runtime_id } ->
+    Printf.sprintf "runtime %s is not materialized" runtime_id
   | Not_agent_core { runtime_id } ->
     Printf.sprintf
-      "%s is an official-client runtime: the spawned client owns its context window and \
-       masc applies no Agent Core cut"
+      "%s is an official-client runtime: the spawned client owns its context and masc \
+       carries no range for it"
       runtime_id
 ;;
 
-type history_cut =
-  | Cut of
-      { kept_atoms : int
-      ; transmitted_bytes : int
-      ; fit : Runtime_model_input_tail_window.target_fit
-      }
-  | Newest_atom_only of { transmitted_bytes : int }
+type carried =
+  { first_atom : int
+  ; kept_atoms : int
+  ; transmitted_bytes : int
+  ; origin : Keeper_carried_front.origin
+  ; counted_tokens : int option
+  }
 
 type candidate =
   { runtime_id : string
-  ; window : (Keeper_context_window.t, window_refusal) result
-  ; capacity : Keeper_context_window.capacity option
+  ; lane : (unit, lane_refusal) result
+  ; marks : Runtime_schema.context_marks option
   ; request_cap_bytes : int option
   ; parts : (measured_parts, parts_refusal) result
   ; history_atoms : int
-  ; cut : history_cut option
+  ; carried : carried option
   }
 
 type t =
@@ -98,61 +98,79 @@ let measure (message : Agent_core.Types.message) =
     (Yojson.Safe.to_string (Keeper_context_core.message_to_json message))
 ;;
 
-let cut_history ~measure ~capacity ~reserved_bytes ~pinned_bytes messages =
-  match capacity with
-  | Keeper_context_window.Unmeasured _ ->
-    let _projection, transmitted_bytes =
-      Runtime_model_input_tail_window.project_newest_atom
+let carry ~measure ~front ~counted_tokens ~request_cap_bytes ~reserved_bytes messages =
+  let of_projection
+        (projection : Runtime_model_input_tail_window.projection)
+        ~transmitted_bytes
+        ~origin
+        ~counted_tokens
+    =
+    Some
+      { first_atom = projection.Runtime_model_input_tail_window.dropped_atoms
+      ; kept_atoms =
+          projection.Runtime_model_input_tail_window.atom_count
+          - projection.Runtime_model_input_tail_window.dropped_atoms
+      ; transmitted_bytes
+      ; origin
+      ; counted_tokens
+      }
+  in
+  match front, request_cap_bytes, reserved_bytes with
+  | Some (seed : Keeper_carried_front.seed), (Some _ | None), (Some _ | None) ->
+    let _labelled, atom_count = Runtime_model_input_tail_window.annotate messages in
+    let projection, transmitted_bytes =
+      Runtime_model_input_tail_window.project_from_atom
         ~measure_message_bytes:measure
+        ~first_atom:(Keeper_carried_front.clamp ~atom_count seed.first_atom)
         messages
     in
-    Newest_atom_only { transmitted_bytes }
-  | Keeper_context_window.Measured { capacity_bytes; _ } ->
+    of_projection
+      projection
+      ~transmitted_bytes
+      ~origin:(Keeper_carried_front.Carried seed.source)
+      ~counted_tokens
+  | None, Some cap, Some reserved_bytes ->
     let target =
       Runtime_model_input_tail_window.project_target
         ~measure_message_bytes:measure
-        ~target_bytes:capacity_bytes
-        ~reserved_bytes:(reserved_bytes + pinned_bytes)
+        ~target_bytes:cap
+        ~reserved_bytes
         messages
     in
-    let projection = target.Runtime_model_input_tail_window.projection in
-    Cut
-      { kept_atoms =
-          projection.Runtime_model_input_tail_window.atom_count
-          - projection.Runtime_model_input_tail_window.dropped_atoms
-      ; transmitted_bytes = target.Runtime_model_input_tail_window.transmitted_bytes
-      ; fit = target.Runtime_model_input_tail_window.fit
-      }
+    of_projection
+      target.Runtime_model_input_tail_window.projection
+      ~transmitted_bytes:target.Runtime_model_input_tail_window.transmitted_bytes
+      ~origin:Keeper_carried_front.Fit_to_request_cap
+      ~counted_tokens:None
+  | None, Some _, None ->
+    (* The cap fit charges the fixed parts, and they are unknown. *)
+    None
+  | None, None, (Some _ | None) ->
+    let projection, transmitted_bytes =
+      Runtime_model_input_tail_window.project_from_atom
+        ~measure_message_bytes:measure
+        ~first_atom:0
+        messages
+    in
+    of_projection
+      projection
+      ~transmitted_bytes
+      ~origin:Keeper_carried_front.Whole_history
+      ~counted_tokens:None
 ;;
 
-(* The window the turn driver would declare for this runtime, with the same
-   refusal: a window the model cannot carry is a configuration contradiction,
-   named rather than clamped. An official-client runtime declares none: the
-   spawned client owns its window and no Agent Core cut applies. *)
-let window_for ~runtime_id (runtime : Runtime.t option) =
+(* Whether the turn driver would compose a range for this runtime at all.
+   An official-client runtime carries none: the spawned client owns its
+   context. *)
+let lane_for ~runtime_id (runtime : Runtime.t option) =
   match runtime with
-  | None -> Error (Contradiction (Printf.sprintf "runtime %s is not materialized" runtime_id))
+  | None -> Error (Not_materialized { runtime_id })
   | Some runtime ->
     (match runtime.Runtime.execution with
      | Runtime_execution.Codex_app_server _
      | Runtime_execution.Claude_code _
      | Runtime_execution.Antigravity_cli _ -> Error (Not_agent_core { runtime_id })
-     | Runtime_execution.Agent_core _ ->
-       let window_tokens = Keeper_runtime_resolved.context_window_tokens () in
-       (match Runtime.max_context_of_runtime_id runtime_id with
-        | Some max_context when window_tokens > max_context ->
-          Error
-            (Contradiction
-               (Printf.sprintf
-                  "turn.context_window_tokens %d exceeds the %d-token max-context of %s"
-                  window_tokens
-                  max_context
-                  runtime_id))
-        | Some _ -> Ok (Keeper_context_window.declared ~window_tokens)
-        | None ->
-          Error
-            (Contradiction
-               (Printf.sprintf "runtime %s resolves no context window" runtime_id))))
+     | Runtime_execution.Agent_core _ -> Ok ())
 ;;
 
 (* The cap the driver judges the body against, read from the materialized
@@ -294,36 +312,39 @@ let wake_line () =
 
 let candidate ~config ~keeper_name ~messages ~history_atoms runtime_id =
   let runtime = Runtime.get_runtime_by_id runtime_id in
-  let window = window_for ~runtime_id runtime in
-  let capacity =
-    match window with
-    | Error _ -> None
-    | Ok window ->
-      Some
-        (Keeper_context_window.capacity
-           window
-           (Keeper_context_window.Density.lookup ~runtime_id))
-  in
+  let lane = lane_for ~runtime_id runtime in
   let parts = newest_parts_for ~config ~keeper_name ~runtime_id in
-  let cut =
-    match capacity, parts with
-    | Some capacity, Ok parts ->
-      Some
-        (cut_history
-           ~measure
-           ~capacity
-           ~reserved_bytes:parts.reserved_bytes
-           ~pinned_bytes:parts.pinned_bytes
-           messages)
-    | Some _, Error _ | None, Ok _ | None, Error _ -> None
+  let request_cap_bytes = request_cap_for ~runtime_id runtime in
+  let carried =
+    match lane with
+    | Error _ -> None
+    | Ok () ->
+      (* The same front the turn driver composes from: the pair's ledger,
+         else the newest completed record on the runtime. *)
+      let front, counted_tokens =
+        match Keeper_model_input_ledger.Table.lookup ~keeper_name ~runtime_id with
+        | Some ledger ->
+          Some (Keeper_carried_front.of_ledger ledger), ledger.Keeper_model_input_ledger.total_tokens
+        | None -> Keeper_carried_front.read_seed ~config ~keeper_name ~runtime_id, None
+      in
+      carry
+        ~measure
+        ~front
+        ~counted_tokens
+        ~request_cap_bytes
+        ~reserved_bytes:
+          (match parts with
+           | Ok parts -> Some parts.reserved_bytes
+           | Error _ -> None)
+        messages
   in
   { runtime_id
-  ; window
-  ; capacity
-  ; request_cap_bytes = request_cap_for ~runtime_id runtime
+  ; lane
+  ; marks = Runtime.context_marks_of_runtime_id runtime_id
+  ; request_cap_bytes
   ; parts
   ; history_atoms
-  ; cut
+  ; carried
   }
 ;;
 
@@ -357,53 +378,37 @@ let forecast ~config ~keeper_name =
          })
 ;;
 
-let history_cut_to_json = function
-  | Cut { kept_atoms; transmitted_bytes; fit } ->
-    `Assoc
-      [ "kind", `String "cut"
-      ; "kept_atoms", `Int kept_atoms
-      ; "transmitted_bytes", `Int transmitted_bytes
-      ; ( "fit"
-        , match fit with
-          | Runtime_model_input_tail_window.Within_target ->
-            `Assoc [ "kind", `String "within_target" ]
-          | Runtime_model_input_tail_window.Overrun { by_bytes; cause } ->
-            `Assoc
-              [ "kind", `String "overrun"
-              ; "by_bytes", `Int by_bytes
-              ; ( "cause"
-                , `String
-                    (match cause with
-                     | Runtime_model_input_tail_window.Fixed_parts_exceed_target ->
-                       "fixed_parts_exceed_target"
-                     | Runtime_model_input_tail_window.Newest_atom_exceeds_target ->
-                       "newest_atom_exceeds_target") )
-              ] )
-      ]
-  | Newest_atom_only { transmitted_bytes } ->
-    `Assoc
-      [ "kind", `String "newest_atom_only"
-      ; "kept_atoms", `Int 1
-      ; "transmitted_bytes", `Int transmitted_bytes
-      ]
-;;
-
 let option_json to_json = function
   | None -> `Null
   | Some value -> to_json value
 ;;
 
+let carried_to_json (carried : carried) =
+  `Assoc
+    [ "first_atom", `Int carried.first_atom
+    ; "kept_atoms", `Int carried.kept_atoms
+    ; "transmitted_bytes", `Int carried.transmitted_bytes
+    ; "origin", Keeper_carried_front.origin_to_json carried.origin
+    ; "counted_tokens", option_json (fun n -> `Int n) carried.counted_tokens
+    ]
+;;
+
 let candidate_to_json (candidate : candidate) =
   `Assoc
     [ "runtime_id", `String candidate.runtime_id
-    ; ( "window"
-      , match candidate.window with
-        | Ok window -> Keeper_context_window.to_json window
-        | Error (Contradiction _ as refusal) ->
-          `Assoc [ "error", `String (window_refusal_to_string refusal) ]
-        | Error (Not_agent_core _ as refusal) ->
-          `Assoc [ "not_applicable", `String (window_refusal_to_string refusal) ] )
-    ; "capacity", option_json Keeper_context_window.capacity_to_json candidate.capacity
+    ; ( "lane"
+      , match candidate.lane with
+        | Ok () -> `Assoc [ "agent_core", `Bool true ]
+        | Error refusal ->
+          `Assoc [ "not_applicable", `String (lane_refusal_to_string refusal) ] )
+    ; ( "marks"
+      , option_json
+          (fun (marks : Runtime_schema.context_marks) ->
+             `Assoc
+               [ "high_water_tokens", `Int marks.high_water_tokens
+               ; "low_water_tokens", `Int marks.low_water_tokens
+               ])
+          candidate.marks )
     ; "request_cap_bytes", option_json (fun n -> `Int n) candidate.request_cap_bytes
     ; ( "parts"
       , match candidate.parts with
@@ -417,13 +422,13 @@ let candidate_to_json (candidate : candidate) =
             ]
         | Error refusal -> `Assoc [ "error", `String (parts_refusal_to_string refusal) ] )
     ; "history_atoms", `Int candidate.history_atoms
-    ; "cut", option_json history_cut_to_json candidate.cut
+    ; "carried", option_json carried_to_json candidate.carried
     ]
 ;;
 
 let to_json forecast =
   `Assoc
-    [ "schema", `String "masc.keeper.next-request-forecast.v1"
+    [ "schema", `String "masc.keeper.next-request-forecast.v2"
     ; "keeper", `String forecast.keeper
     ; "trace_id", `String forecast.trace_id
     ; "checkpoint_messages", `Int forecast.checkpoint_messages

@@ -209,12 +209,6 @@ let test_payload_too_large_is_classified_from_the_status () =
    | Retry.InvalidRequest { reason = Retry.Unknown_invalid_request; _ } ->
      fail "413 was classified as an unknown invalid request"
    | _ -> fail "413 was not classified as an invalid request at all");
-  (* The limit is absent on purpose: a 413 response carries a status, not a bound, and
-     Request_body_too_large means a measured pair. *)
-  (match Retry.classify_error ~retry_after_header:None ~status:413 ~body:"" with
-   | Retry.InvalidRequest { reason = Retry.Request_body_too_large _; _ } ->
-     fail "a provider refusal was given fabricated measurements"
-   | _ -> ());
   (* Neighbouring statuses keep their own classification. *)
   match
     ( Retry.classify_error ~retry_after_header:None ~status:400 ~body:""

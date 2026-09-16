@@ -55,7 +55,6 @@ let config
       ?(request_path = "/proxy/messages")
       ?max_context
       ?max_concurrent_requests
-      ?max_request_body_bytes
       ?model_capabilities_override
       base_url
   =
@@ -78,7 +77,6 @@ let config
     ~supports_tool_choice_override:true
     ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
     ?max_concurrent_requests
-    ?max_request_body_bytes
     ?model_capabilities_override
     ()
 ;;
@@ -1060,56 +1058,6 @@ let test_resolve_before_measure_skips_count_roundtrip_stream () =
   check int "no /count_tokens round-trip for an unknown limit (stream)" 0 posts
 ;;
 
-let expect_request_body_rejection label = function
-  | Error
-      (Agent_core.Error.Api
-         (Retry.InvalidRequest
-            { reason = Retry.Request_body_too_large { actual_bytes; limit_bytes }; _ }))
-    ->
-    check int (label ^ " declared byte limit") 1 limit_bytes;
-    check bool (label ^ " exact body exceeds limit") true (actual_bytes > limit_bytes)
-  | Error error -> fail (label ^ ": " ^ Agent_core.Error.to_string error)
-  | Ok _ -> fail (label ^ ": oversized completion body was admitted")
-;;
-
-let run_body_admission_before_measurement ~stream =
-  let dispatched = ref false in
-  let result, posts =
-    with_post_counter
-    @@ fun ~sw ~net ~base_url ->
-    let agent =
-      build_admission_agent
-        ~net
-        ~provider_config:(config ~max_context:1048576 ~max_request_body_bytes:1 base_url)
-        ~transport:(dispatch_tripwire dispatched)
-        ()
-    in
-    if stream
-    then
-      Agent_core.Agent.run_stream
-        ~sw
-        ~on_event:(fun _ -> ())
-        agent
-        "admit exact streaming body before measurement"
-    else Agent_core.Agent.run ~sw agent "admit exact sync body before measurement"
-  in
-  result, posts, !dispatched
-;;
-
-let test_sync_body_admission_precedes_measurement () =
-  let result, posts, dispatched = run_body_admission_before_measurement ~stream:false in
-  expect_request_body_rejection "sync" result;
-  check int "sync body rejection makes no count request" 0 posts;
-  check bool "sync body rejection makes no completion request" false dispatched
-;;
-
-let test_stream_body_admission_precedes_measurement () =
-  let result, posts, dispatched = run_body_admission_before_measurement ~stream:true in
-  expect_request_body_rejection "stream" result;
-  check int "stream body rejection makes no count request" 0 posts;
-  check bool "stream body rejection makes no completion request" false dispatched
-;;
-
 let test_serialization_admission_validates_before_io () =
   Eio_main.run
   @@ fun env ->
@@ -1705,14 +1653,6 @@ let () =
             "Kimi Agent overflow blocks dispatch"
             `Quick
             test_kimi_agent_overflow_blocks_dispatch
-        ; test_case
-            "sync body admission precedes token measurement"
-            `Quick
-            test_sync_body_admission_precedes_measurement
-        ; test_case
-            "stream body admission precedes token measurement"
-            `Quick
-            test_stream_body_admission_precedes_measurement
         ; test_case
             "invalid count response is provider parse failure"
             `Quick

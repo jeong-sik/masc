@@ -59,11 +59,6 @@ let core_error_of_http_error ?(accept_rejected = Api_invalid_request) ?provider 
        invalid_request ~reason_kind:Retry.Attempt_rejected reason
      | Config_invalid_config { field } ->
        Error.Config (Error.InvalidConfig { field; detail = reason }))
-  | Http.ProviderFailure
-      { kind = Http.Request_body_too_large { actual_bytes; limit_bytes }; message } ->
-    Error.Api
-      (Retry.InvalidRequest
-         { message; reason = Retry.Request_body_too_large { actual_bytes; limit_bytes } })
   | Http.ProviderFailure { kind = Http.Context_overflow { limit }; message } ->
     (* agent-core boundary: a provider-reported context overflow (e.g. glm 1261) is the
        same consumer contract as a ContextWindowExceeded empty turn — only the
@@ -210,7 +205,6 @@ let ownership_of_provider_failure ~binding = function
   | Http.Cli_policy_invalid _
   | Http.Provider_parse_error _
   | Http.Provider_wire_error _
-  | Http.Request_body_too_large _
   | Http.Response_body_too_large _
   | Http.Empty_completion _
   | Http.Context_overflow _ -> Attempt_local
@@ -368,12 +362,6 @@ let provider_failure_to_yojson = function
     `Assoc
       [ "kind", `String "provider_reported_error"
       ; "error_type_known", `Bool (Option.is_some error_type)
-      ]
-  | Http.Request_body_too_large { actual_bytes; limit_bytes } ->
-    `Assoc
-      [ "kind", `String "request_body_too_large"
-      ; "actual_bytes", `Int actual_bytes
-      ; "limit_bytes", `Int limit_bytes
       ]
   | Http.Response_body_too_large { limit_bytes } ->
     `Assoc [ "kind", `String "response_body_too_large"; "limit_bytes", `Int limit_bytes ]

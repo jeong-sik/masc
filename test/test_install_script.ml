@@ -87,15 +87,12 @@ streaming = true
 
 [ollama_cloud.deepseek-v4-flash]
 wizard-default = true
-max-request-body-bytes = 1048576
 
 [deepseek.deepseek-v4-flash]
 wizard-default = true
-max-request-body-bytes = 1048576
 
 [ollama.gemma4-26b-a4b-qat]
 wizard-default = true
-max-request-body-bytes = 1048576
 |}
        default
        deepseek_display_name);
@@ -263,7 +260,6 @@ streaming = true
 
 [deepseek.deepseek-v4-flash]
 wizard-default = true
-max-request-body-bytes = 1048576
 |};
   runtime_file
 ;;
@@ -1755,7 +1751,6 @@ streaming = true
 
 [deepseek.deepseek-v4-flash]
 wizard-default = true
-max-request-body-bytes = 1048576
 |};
       let _output =
         run_install [ "--provider"; "deepseek" ] tmpdir

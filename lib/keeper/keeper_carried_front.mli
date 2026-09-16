@@ -8,10 +8,10 @@
     moved it. Without one, the first turn after a boot or the first on this
     runtime, the seed is the range the newest completed turn record on the
     runtime measured, read as [total_atoms - transmitted_atoms]. With
-    neither, the caller has no atom to start from and fits the request-body
-    cap or carries the whole history; the turn driver owns that choice, and
-    it owns the one move a refusal forces before any usage has been counted,
-    which {!Halved_after_refusal} names. *)
+    neither, the caller has no atom to start from and carries the whole
+    history; the provider judges it, and the turn driver owns the one move
+    a refusal forces before any usage has been counted, which
+    {!Halved_after_refusal} names. *)
 
 type source =
   | Ledger  (** The pair's ledger, moved by every eviction since its last request. *)
@@ -32,10 +32,9 @@ type seed =
 
 type origin =
   | Carried of source  (** The front came from a seed. *)
-  | Fit_to_request_cap
-      (** No front to start from: the newest suffix the request-body cap
-          admits, until the first usage on the pair is counted. *)
-  | Whole_history  (** No front and no cap: everything, until then. *)
+  | Whole_history
+      (** No front to start from: everything, until the first usage on the
+          pair is counted or a refusal halves the range. *)
 
 val of_ledger : Keeper_model_input_ledger.t -> seed
 
@@ -82,5 +81,4 @@ val origin_to_string : origin -> string
 
 val origin_to_json : origin -> Yojson.Safe.t
 (** One object with a [kind]: [ledger], [turn_record] with [turn],
-    [halved_after_refusal] with [retry], [fit_to_request_cap], or
-    [whole_history]. *)
+    [halved_after_refusal] with [retry], or [whole_history]. *)

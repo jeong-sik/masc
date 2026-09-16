@@ -171,7 +171,7 @@ def main():
     overlay = (fixture_dir / 'agent-core-models-overlay.toml').read_text()
     for name in ['primary', 'alternate']:
         endpoint = f'http://127.0.0.1:{provider_port}/{name}'
-        runtime += f'\n[providers.{name}]\nprotocol = "openai-compatible-http"\nendpoint = "{endpoint}"\n[{name}.sample]\nmax-request-body-bytes = 1048576\n'
+        runtime += f'\n[providers.{name}]\nprotocol = "openai-compatible-http"\nendpoint = "{endpoint}"\n[{name}.sample]\n'
         overlay += f'\n[[providers]]\nid = "{name}"\nkind = "openai_compat"\nbase_url = "{endpoint}"\nrequest_path = "/chat/completions"\napi_key_env = ""\ncapabilities_base = "openai_chat"\n\n[[models]]\nid_prefix = "resume-fixture"\nprovider_name = "{name}"\nbase = "openai_chat"\nmax_context_tokens = 131072\nmax_output_tokens = 1024\nsupports_tools = true\nsupports_native_streaming = false\n'
     runtime += '\n[models.sample]\napi-name = "resume-fixture"\nmax-context = 131072\ntools-support = true\nstreaming = false\n'
     (config / 'runtime.toml').write_text(runtime)

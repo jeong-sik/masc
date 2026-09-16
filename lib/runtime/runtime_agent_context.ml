@@ -116,13 +116,11 @@ type config =
   ; pre_dispatch_serialization_observer :
       Agent_core.Agent.pre_dispatch_serialization_observer option
     (** Caller-owned observer for the exact serialized request body, invoked by
-        AGENT_CORE after every stream-field injection and after the serialized-body
-        admission check. This is the only place MASC can read the byte quantity
-        the provider actually admits against [max_request_body_bytes]:
-        the canonical checkpoint's bytes measure
-        [{system_prompt, messages}] and exclude tool schemas, and a failed
-        request is the only path that reports a size today. The observation is
-        diagnostic and non-authoritative — AGENT_CORE reports a rejection or a raised
+        AGENT_CORE after every stream-field injection, just before dispatch. This
+        is the only place MASC can read the byte quantity that reaches the
+        provider: the canonical checkpoint's bytes measure
+        [{system_prompt, messages}] and exclude tool schemas. The observation
+        is diagnostic and non-authoritative — AGENT_CORE reports a raised
         callback as typed failure evidence without rewriting the result. *)
   ; raw_trace : Agent_core.Raw_trace.t option
   ; trace_link : (string * string) option

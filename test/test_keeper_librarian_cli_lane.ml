@@ -84,7 +84,6 @@ let execute ~net ~clock ~base_path ~runner =
       ~keeper_id:"librarian-cli-test"
       ~selected_input
       ~messages
-      ~render_at:(fun _ -> Ok messages)
       ()
 ;;
 
@@ -125,7 +124,7 @@ let test_cli_slot_answers_after_catalog_exhaustion ?(cli_only = false) () =
     failf
       "the cli slot must answer: %s"
       (Runtime.For_testing.classified_error_detail error)
-  | Ok ((_selection, output), selected_slot, _fitted) ->
+  | Ok ((_selection, output), selected_slot) ->
     check (option string)
       "the declared cli slot ran"
       (Some Fixture.cli_primary_runtime)
@@ -183,7 +182,7 @@ let test_domain_invalid_cli_answer_advances_to_valid_selection () =
   in
   match execute ~net ~clock ~base_path ~runner with
   | Error error -> fail (Runtime.For_testing.classified_error_detail error)
-  | Ok ((_selection, output), slot, _count) ->
+  | Ok ((_selection, output), slot) ->
     check (list string) "domain rejection advances once"
       [Fixture.cli_primary_runtime; Fixture.cli_secondary_runtime] !attempts;
     check string "accepted slot owns selection" Fixture.cli_secondary_runtime slot;

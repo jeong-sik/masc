@@ -1528,6 +1528,67 @@ let test_a_ledger_that_cannot_be_encoded_fails_the_write_as_persistence () =
     (Workspace_core.read_text config (schedules_recovery_path config))
 ;;
 
+(* A finished schedule leaves the ledger a week after the last thing that
+   happened to it, and takes its wakes and notes with it. A live schedule stays
+   however old its times are, and so does one that finished recently. *)
+let a_week_s = 7.0 *. 24.0 *. 60.0 *. 60.0
+
+let test_a_finished_schedule_leaves_the_ledger_a_week_later () =
+  with_workspace
+  @@ fun config ->
+  let settled_long_ago = make_request ~schedule_id:"settled-long-ago" () in
+  let settled_yesterday = make_request ~schedule_id:"settled-yesterday" () in
+  let still_scheduled = make_request ~schedule_id:"still-scheduled" () in
+  ignore (insert_ok config settled_long_ago);
+  ignore (insert_ok config settled_yesterday);
+  ignore (insert_ok config still_scheduled);
+  (* One ran and finished: its wake is the newest thing the ledger knows. *)
+  ignore (store_ok "refresh" (refresh_due config ~now:201.0));
+  ignore
+    (store_ok "start"
+       (start_due_candidate config ~now:202.0 ~schedule_id:settled_long_ago.schedule_id));
+  ignore
+    (store_ok "accept"
+       (accept_running config ~now:203.0 ~schedule_id:settled_long_ago.schedule_id ()));
+  (match cancel_request config ~schedule_id:settled_yesterday.schedule_id with
+   | Ok _ -> ()
+   | Error err -> fail ("cancel: " ^ store_error_to_string err));
+  let now = 203.0 +. (a_week_s *. 2.0) in
+  (* The cancelled one was written about yesterday, so its retention starts
+     there rather than at its due time. *)
+  (match
+     append_note config ~schedule_id:settled_yesterday.schedule_id
+       ~author_id:"operator" ~author_kind:Human_operator ~body:"looked at this"
+       ~now:(now -. 86400.0)
+   with
+   | Ok _ -> ()
+   | Error err -> fail ("note: " ^ store_error_to_string err));
+  ignore (store_ok "retention refresh" (refresh_due config ~now));
+  let state = read_state config in
+  let ids =
+    List.map (fun (r : Schedule_domain.schedule_request) -> r.schedule_id) state.schedules
+    |> List.sort String.compare
+  in
+  check (list string) "only the live and the recent one are kept"
+    [ "settled-yesterday"; "still-scheduled" ] ids;
+  check (list string) "the forgotten schedule's wakes are gone" []
+    (List.filter_map
+       (fun (wake : Schedule_domain.wake_record) ->
+          if String.equal wake.schedule_id "settled-long-ago" then Some wake.schedule_id else None)
+       state.wakes);
+  check int "the recent one keeps its note" 1
+    (List.length
+       (List.filter
+          (fun (note : Schedule_domain.schedule_note) ->
+             String.equal note.schedule_id "settled-yesterday")
+          state.notes));
+  (* Nothing left to forget: the next tick writes nothing. *)
+  let before = Workspace_core.read_text config (schedules_path config) in
+  ignore (store_ok "quiet refresh" (refresh_due config ~now));
+  check string "a tick with nothing to do leaves the ledger alone" before
+    (Workspace_core.read_text config (schedules_path config))
+;;
+
 let () =
   run "Schedule_store"
     [
@@ -1551,6 +1612,8 @@ let () =
             test_a_recurring_occurrence_is_not_settled_by_an_earlier_wake;
           test_case "corrupt primary recovers from last-good" `Quick
             test_recovers_from_last_good;
+          test_case "a finished schedule leaves the ledger a week later" `Quick
+            test_a_finished_schedule_leaves_the_ledger_a_week_later;
           test_case "a mutation encodes the ledger once on the pool" `Quick
             test_a_mutation_encodes_the_ledger_once_on_the_pool;
           test_case "a schedule time that is not finite is refused" `Quick

@@ -1056,7 +1056,6 @@ let run_best_effort
                  { kind = Keeper_memory_os_current.Librarian
                  ; trace_id = input_trace_id inp
                  }
-               ~retained_memory_ids:selection.retained_memory_ids
                ~new_claims:selection.new_claims
                ()
              |> Result.map_error (fun detail ->

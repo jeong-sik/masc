@@ -41,11 +41,10 @@ let input () : Librarian.input =
 ;;
 
 (* Surrogate identities: m1 = current_a (retained), m2 = current_b (dropped)
-   — the totality contract the parser enforces for this input. *)
+   — the parser accepts an answer that names only what changes. *)
 let valid_selection_json =
   `Assoc
     [ "working_contexts", `List []
-    ; Librarian.wire_field_retained_memory_ids, `List [ `String "m1" ]
     ; Librarian.wire_field_new_claims, `List []
     ; ( Librarian.wire_field_dropped
       , `List

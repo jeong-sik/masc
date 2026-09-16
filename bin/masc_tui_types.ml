@@ -8098,10 +8098,25 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
   | Verification ->
       if Option.is_some state.verification_detail_request_id then None
       else
-        (* Under the list sit the armed approval and the server's last
-           refusal, one row each while they stand, and the scroll row while the
-           queue overflows. They are frame rows too; a count without them puts
-           the footer past the frame's last row. *)
+        (* Under the list sit the row naming the view and the page, the
+           armed approval, the server's last refusal, and -- on the queue --
+           what the join could not read or resolve. They are frame rows too;
+           a count without them puts the footer past the frame's last row.
+
+           The view row is unconditional, so it is counted here rather than
+           through [sc_overflow_takes_row]: that flag drops its row when the
+           list is not cut, and this row is drawn either way. It carries the
+           window text a cut page used to draw on its own line, so the two
+           are one row, not two. *)
+        let under_list =
+          match state.verification with
+          | None -> 0
+          | Some s ->
+              (if Option.is_some s.Tui_decode.vs_backlog_error then 1 else 0)
+              + (match s.Tui_decode.vs_awaiting_unresolved with
+                 | [] -> 0
+                 | _ -> 1)
+        in
         Some
           { sc_count =
               (match state.verification with
@@ -8109,9 +8124,11 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
                | Some s -> List.length s.Tui_decode.vs_requests)
           ; sc_chrome =
               listing_chrome ~error:state.verification_error
+              + 1
+              + under_list
               + (if Option.is_some state.verification_verdict_armed then 1 else 0)
               + (if Option.is_some state.verification_verdict_error then 1 else 0)
-          ; sc_overflow_takes_row = true
+          ; sc_overflow_takes_row = false
           ; sc_preview_keep = None
           }
   | Lanes ->

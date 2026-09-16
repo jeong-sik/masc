@@ -550,8 +550,8 @@ let for_surface = function
       ; b Navigate "[ / ]" "previous / next"
           ~help:"while a detail is open, step to the row before or after it"
       ; b Navigate "< / >" "newer / older"
-          ~help:"step the history a page at a time; the queue arrives whole, \
-                 so this moves nothing there"
+          ~help:"step either list a page at a time; one page holds two \
+                 hundred rows, so a shorter queue arrives whole"
       (* One item, spelled the way Approvals spells its own pair. Apart, the
          fitter gave up [x] and then [a], and what was left was a queue of
          work with no visible way to act on it -- which is the one thing this

@@ -138,6 +138,15 @@ module KeeperLaneGate : sig
   val admission_wait_budget_sec : unit -> float
 end
 
+(** {1 Keeper turn admission bounds} *)
+
+module KeeperAdmissionBounds : sig
+  (** Maximum durable queue selections admitted into one turn, clamped to
+      [1, 256]. Default 32. Selections past this bound stay pending for a later
+      turn (#29365). *)
+  val max_events : unit -> int
+end
+
 (** {1 Keeper generated media} *)
 
 module KeeperGeneratedMedia : sig

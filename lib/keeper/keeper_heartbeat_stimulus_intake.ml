@@ -845,34 +845,46 @@ let heartbeat_event_intake
           selections
       in
       let hitl_selected = ref false in
-      List.filter
-        (fun (selection : Keeper_event_queue_state.pending_selection) ->
-           stimulus_ready_for_intake ~base_path selection.source
-           &&
-           match selection.source.payload with
-           | Keeper_event_queue.Hitl_resolved _ ->
-             (* One tool bundle carries one exact cycle grant. Admitting two
-                HITL resolutions would replay only the first while a completed
-                turn ACKed both durable sources. Leave later resolutions queued
-                for their own exact replay turn. *)
-             if !hitl_selected
-             then false
-             else (
-               hitl_selected := true;
-               true)
-           | _ ->
-             (match
-                Keeper_event_queue.connector_attention_channel
-                  selection.source.payload,
-                first_connector_conversation
-              with
-              | None, _ -> true
-              | Some _, None -> false
-              | Some channel, Some first_channel ->
-                Keeper_continuation_channel.same_conversation
-                  channel
-                  first_channel))
-        selections
+      let admitted =
+        List.filter
+          (fun (selection : Keeper_event_queue_state.pending_selection) ->
+             stimulus_ready_for_intake ~base_path selection.source
+             &&
+             match selection.source.payload with
+             | Keeper_event_queue.Hitl_resolved _ ->
+               (* One tool bundle carries one exact cycle grant. Admitting two
+                  HITL resolutions would replay only the first while a completed
+                  turn ACKed both durable sources. Leave later resolutions queued
+                  for their own exact replay turn. *)
+               if !hitl_selected
+               then false
+               else (
+                 hitl_selected := true;
+                 true)
+             | _ ->
+               (match
+                  Keeper_event_queue.connector_attention_channel
+                    selection.source.payload,
+                  first_connector_conversation
+                with
+                | None, _ -> true
+                | Some _, None -> false
+                | Some channel, Some first_channel ->
+                  Keeper_continuation_channel.same_conversation
+                    channel
+                    first_channel))
+          selections
+      in
+      (* RFC-event-queue-admit-all-ready bounds the batch: a steady arrival
+         rate must not turn into an unbounded backlog. Selections past the
+         bound stay pending for a later turn instead of being dropped. *)
+      let max_events = Env_config_keeper.KeeperAdmissionBounds.max_events () in
+      let rec take n = function
+        | [] -> []
+        | _ when n <= 0 -> []
+        | x :: rest -> x :: take (n - 1) rest
+      in
+      take max_events admitted
   in
   let connector_attention_items_of_batch selections =
     let event_ids =

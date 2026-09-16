@@ -2484,6 +2484,10 @@
 
 (include stanzas/test_env_config_keeper_poll_intervals.inc)
 
+(include stanzas/test_env_config_keeper_admission_bounds.inc)
+
+(include stanzas/test_schedule_domain_interval_bound.inc)
+
 (include stanzas/test_env_config_nonneg.inc)
 
 (include stanzas/test_env_config_schedule_runner.inc)

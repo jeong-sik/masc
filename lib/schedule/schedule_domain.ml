@@ -261,8 +261,21 @@ let int_field name fields =
   | Error err -> Error (name ^ ": " ^ err)
 ;;
 
+(* RFC-event-queue-admit-all-ready: a recurrence below this bound is rejected
+   at admission instead of being accepted and then firing without limit
+   (#29365). The bound lives here rather than in Env_config because
+   masc_schedule does not depend on the config library. *)
+let min_interval_sec = 60
+
 let validate_interval interval_sec =
-  if interval_sec <= 0 then Error "recurrence.interval_sec must be positive"
+  if interval_sec <= 0
+  then Error "recurrence.interval_sec must be positive"
+  else if interval_sec < min_interval_sec
+  then
+    Error
+      (Printf.sprintf
+         "recurrence.interval_sec must be at least %d seconds"
+         min_interval_sec)
   else Ok interval_sec
 ;;
 

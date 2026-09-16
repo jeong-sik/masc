@@ -286,9 +286,9 @@ module KeeperContext : sig
   val window_tokens : unit -> int option
   (** Tokens one AGENT_CORE-lane request carries, fixed prompt and recent
       verbatim history together (RFC keeper-context-window-in-tokens), as
-      the operator declared it; [None] when undeclared. Nothing is compiled
-      in. A declared value that is not an integer of at least
-      {!window_tokens_min} raises {!Env_config_core.Config_error}. *)
+      the operator declared it; [None] when undeclared or declared empty.
+      Nothing is compiled in. A declared value that is not an integer of at
+      least {!window_tokens_min} raises {!Env_config_core.Config_error}. *)
 end
 
 (** {1 gRPC heartbeat reconnect} *)

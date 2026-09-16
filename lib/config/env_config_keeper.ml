@@ -800,10 +800,13 @@ module KeeperContext = struct
 
   (* A declared value that is not a positive integer is an operator
      configuration error, never a fallback: read as unset it would refuse
-     every turn for a typo. *)
+     every turn for a typo. An empty value is not a declaration -- it is how
+     an environment clears a variable it cannot unset, the reading every
+     other [get_*] reader here gives it. *)
   let window_tokens () =
     match Env_config_core.raw_value_opt window_tokens_env_key with
     | None -> None
+    | Some raw when String.trim raw = "" -> None
     | Some raw ->
       (match Safe_ops.int_of_string_safe (String.trim raw) with
        | Some tokens when tokens >= window_tokens_min -> Some tokens

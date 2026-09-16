@@ -128,6 +128,12 @@
    ; Avoid non-deterministic external network calls during unit tests.
    (ZAI_API_KEY "")
    (MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED false)
+   ; The transmission window has no compiled default (RFC
+   ; keeper-context-window-in-tokens): a keeper turn on the AGENT_CORE lane
+   ; refuses every candidate until one is declared. This is the test tree's
+   ; declaration, below every fixture runtime's max-context (2048 is the
+   ; smallest declared), so lane and turn suites dispatch as they did.
+   (MASC_KEEPER_CONTEXT_WINDOW_TOKENS 1024)
    ; Standard tests keep the Docker playground disabled. A dedicated
    ; regression test below pins that sandbox_profile=local still resolves
    ; to local even when MASC_KEEPER_DOCKER_PLAYGROUND=true.

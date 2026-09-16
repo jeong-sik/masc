@@ -27,7 +27,7 @@ let test_required_candidate_delivery () =
   write native_command ("#!/bin/sh\nprintf 'unexpected dispatch' > " ^ quoted native_marker ^ "\nexit 99\n");
   Unix.chmod native_command 0o755;
   let row provider model supports_tools = Printf.sprintf
-    "[[models]]\nid_prefix=%S\nprovider_name=%S\nbase=\"openai_chat\"\nmax_context_tokens=8192\nmax_output_tokens=128\nsupports_tools=%b\nsupports_native_streaming=false\n"
+    "[[models]]\nid_prefix=%S\nprovider_name=%S\nbase=\"openai_chat\"\nmax_context_tokens=200000\nmax_output_tokens=128\nsupports_tools=%b\nsupports_native_streaming=false\n"
     model provider supports_tools in
   let catalog_path = Filename.concat root "models.toml" in
   write catalog_path (row "binding" "tool-fixture" false ^ row "good" "tool-fixture" true ^
@@ -49,12 +49,12 @@ command = %S
 is-non-interactive = true
 [models.sample]
 api-name = "tool-fixture"
-max-context = 8192
+max-context = 200000
 tools-support = true
 streaming = false
 [models.no_tools]
 api-name = "tool-fixture"
-max-context = 8192
+max-context = 200000
 tools-support = false
 [binding.sample]
 [good.sample]

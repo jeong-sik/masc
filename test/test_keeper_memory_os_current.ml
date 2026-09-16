@@ -1741,10 +1741,73 @@ let test_commit_notification_preserves_cancellation () =
     check int "cancelled notification does not revoke snapshot" 1 snapshot.revision)
 ;;
 
+(* A commit reads the snapshot, parses it, prints the next one and replaces the
+   file. The parse and the print run on the domain pool: on the scheduler
+   domain they were one 11-24 ms run per commit for files of 150-330 KB (rtev,
+   2026-09-16). With the pool's only worker busy, a commit waits for it. *)
+let busy_worker_polls = 50
+let busy_worker_poll_interval_s = 0.01
+
+let test_a_commit_parses_and_prints_on_the_pool () =
+  with_temp_keepers
+  @@ fun keepers_dir ->
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  (* A snapshot to read back: the parse only runs when the file is there. *)
+  ignore (require_ok (replace ~keepers_dir ~facts:[ fact ~claim:"first" () ] ()));
+  let previous_pool = Domain_pool_ref.get () in
+  Fun.protect
+    ~finally:(fun () ->
+      match previous_pool with
+      | None -> Domain_pool_ref.clear_for_tests ()
+      | Some previous -> Domain_pool_ref.set previous)
+  @@ fun () ->
+  Domain_pool_ref.set (Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env));
+  let occupied, occupied_u = Eio.Promise.create () in
+  let release, release_u = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Domain_pool_ref.submit_cpu_or_inline (fun () ->
+      Eio.Promise.resolve occupied_u ();
+      Eio.Promise.await release));
+  Eio.Promise.await occupied;
+  let committed = ref None in
+  let clock = Eio.Stdenv.clock env in
+  Eio.Fiber.both
+    (fun () ->
+      committed
+      := Some
+           (replace
+              ~keepers_dir
+              ~expected_revision:(Some 1)
+              ~facts:[ fact ~claim:"second" () ]
+              ()))
+    (fun () ->
+      let rec wait polls =
+        if polls > 0 && Option.is_none !committed
+        then (
+          Eio.Time.sleep clock busy_worker_poll_interval_s;
+          wait (polls - 1))
+      in
+      wait busy_worker_polls;
+      check bool "the commit waits for the busy worker" true (Option.is_none !committed);
+      Eio.Promise.resolve release_u ());
+  match !committed with
+  | None -> fail "the commit never finished"
+  | Some result ->
+    let snapshot = require_ok result in
+    check int "and then it is committed" 2 snapshot.Current.revision
+;;
+
 let () =
   run
     "keeper_memory_os_current"
-    [ ( "commit notification"
+    [ ( "commit"
+      , [ test_case "a commit parses and prints on the pool" `Quick
+            test_a_commit_parses_and_prints_on_the_pool
+        ] )
+    ; ( "commit notification"
       , [ test_case "all writers notify outside locks" `Quick test_commit_notifications_follow_all_writers_outside_locks
         ; test_case "snapshot authority independent of journal" `Quick test_commit_notifications_do_not_depend_on_journal
         ; test_case "directory alias emits physical identity" `Quick test_commit_notification_directory_is_physical

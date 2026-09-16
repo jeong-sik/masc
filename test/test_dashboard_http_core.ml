@@ -1123,6 +1123,104 @@ let test_operator_snapshot_publication_rejects_stale_races () =
           ~compute:old_generation_compute
           (`Assoc [ "winner", `String "old-generation" ])))
 
+(* The refresh loop's broadcast encodes on the domain pool. A snapshot the
+   /api/v1/operator route published while it encoded replaces it: the route
+   broadcasts nothing itself, so the loop sends the route's snapshot instead of
+   its own. The broadcast for any other caller stays on its fiber. The 2.8 MB
+   snapshot used to be encoded twice and hashed on the calling fiber. *)
+let busy_worker_polls = 50
+let busy_worker_poll_interval_s = 0.01
+
+let test_refreshed_operator_snapshot_encodes_on_the_pool_and_hands_on_a_newer_one () =
+  with_test_env @@ fun ~env ~sw ~config:_ ->
+  let workspace = Masc_test_deps.setup_test_workspace () in
+  let auth = Masc_test_deps.make_sse_auth workspace "operator-snapshot-observer" in
+  let session_id = "operator-snapshot-observer" in
+  ignore (Lib.Session.McpSessionStore.get_or_create ~id:session_id ());
+  let previous_pool = Domain_pool_ref.get () in
+  Fun.protect
+    ~finally:(fun () ->
+      Lib.Sse.unregister session_id;
+      (match previous_pool with
+       | None -> Domain_pool_ref.clear_for_tests ()
+       | Some previous -> Domain_pool_ref.set previous);
+      Masc_test_deps.cleanup_test_workspace workspace)
+  @@ fun () ->
+  (match Lib.Sse.register ~kind:Lib.Sse.Observer ~auth session_id ~last_event_id:0 with
+   | Ok _ -> ()
+   | Error error -> fail (Lib.Sse.registration_error_to_string error));
+  let publish marker =
+    match
+      Server_dashboard_http_core_operator.For_testing.publish_operator_snapshot_success
+        (`Assoc [ "marker", `String marker ])
+    with
+    | Some publication -> publication
+    | None -> fail ("the " ^ marker ^ " snapshot did not publish")
+  in
+  let frame_marker label =
+    match Lib.Sse.try_pop session_id with
+    | None -> fail (label ^ ": no frame")
+    | Some frame ->
+      (match Lib.Sse.data_payload_of_frame frame with
+       | Error Lib.Sse.Missing_data_payload -> fail (label ^ ": the frame has no data")
+       | Ok data ->
+         let open Yojson.Safe.Util in
+         let event = Yojson.Safe.from_string data in
+         check string (label ^ ": an operator snapshot") "operator_snapshot"
+           (event |> member "type" |> to_string);
+         event |> member "payload" |> member "marker" |> to_string)
+  in
+  Domain_pool_ref.set (Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env));
+  let occupy_worker () =
+    let occupied, occupied_u = Eio.Promise.create () in
+    let release, release_u = Eio.Promise.create () in
+    Eio.Fiber.fork ~sw (fun () ->
+      Domain_pool_ref.submit_cpu_or_inline (fun () ->
+        Eio.Promise.resolve occupied_u ();
+        Eio.Promise.await release));
+    Eio.Promise.await occupied;
+    release_u
+  in
+  let refreshed = publish "refreshed" in
+  let release_u = occupy_worker () in
+  let returned = ref false in
+  let clock = Eio.Stdenv.clock env in
+  Eio.Fiber.both
+    (fun () ->
+      Server_dashboard_http_execution_surfaces.broadcast_refreshed_operator_snapshot
+        refreshed;
+      returned := true)
+    (fun () ->
+      let rec wait polls =
+        if polls > 0 && not !returned
+        then (
+          Eio.Time.sleep clock busy_worker_poll_interval_s;
+          wait (polls - 1))
+      in
+      wait busy_worker_polls;
+      check bool "the refreshed broadcast waits for the busy worker" false !returned;
+      ignore (publish "from the route" : Server_dashboard_http_core_operator.operator_snapshot_publication);
+      Eio.Promise.resolve release_u ());
+  check string "the newer snapshot is sent in place of the replaced one" "from the route"
+    (frame_marker "after the refresh");
+  check (option string) "and nothing else" None (Lib.Sse.try_pop session_id);
+  let inline = publish "inline" in
+  let release_u = occupy_worker () in
+  let outcome =
+    Eio.Fiber.first
+      (fun () ->
+        Server_dashboard_http_execution_surfaces.broadcast_operator_snapshot inline;
+        `Returned)
+      (fun () ->
+        Eio.Time.sleep clock
+          (Float.of_int busy_worker_polls *. busy_worker_poll_interval_s);
+        `Waited)
+  in
+  Eio.Promise.resolve release_u ();
+  check bool "any other caller's broadcast does not wait for the pool" true
+    (outcome = `Returned);
+  check string "and it is sent" "inline" (frame_marker "while the worker is busy")
+
 let test_operator_snapshot_error_clears_previous_success () =
   let success =
     match
@@ -5873,6 +5971,8 @@ let () =
             test_keeper_github_login_stream_flushes_each_event;
           test_case "operator snapshot rejects stale publication races" `Quick
             test_operator_snapshot_publication_rejects_stale_races;
+          test_case "refreshed operator snapshot encodes on the pool and hands on a newer one" `Quick
+            test_refreshed_operator_snapshot_encodes_on_the_pool_and_hands_on_a_newer_one;
           test_case "operator snapshot error clears previous success" `Quick
             test_operator_snapshot_error_clears_previous_success;
           test_case

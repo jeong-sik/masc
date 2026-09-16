@@ -59,6 +59,7 @@ type response_turn =
 type forecast_window =
   | Window_declared of { window_tokens : int; source : string }
   | Window_refused of string
+  | Window_not_applicable of string
 
 type forecast_density =
   { input_tokens : int
@@ -70,8 +71,10 @@ type forecast_capacity =
   | Capacity_unmeasured
 
 type forecast_parts =
-  { measured_on_turn : int
+  { reserved_measured_on_turn : int
   ; reserved_bytes : int
+  ; pinned_measured_on_turn : int
+  ; pinned_measured_on_runtime : string
   ; pinned_bytes : int
   }
 
@@ -570,6 +573,10 @@ let decode_forecast_window = function
     let* error_json = field "error" fields in
     let* error = nonempty_string "window.error" error_json in
     Ok (Window_refused error)
+  | `Assoc fields when List.mem_assoc "not_applicable" fields ->
+    let* reason_json = field "not_applicable" fields in
+    let* reason = nonempty_string "window.not_applicable" reason_json in
+    Ok (Window_not_applicable reason)
   | `Assoc fields ->
     let* tokens_json = field "window_tokens" fields in
     let* window_tokens = nonnegative_int "window.window_tokens" tokens_json in
@@ -600,13 +607,30 @@ let decode_forecast_parts = function
     let* error = nonempty_string "parts.error" error_json in
     Ok (Error error)
   | `Assoc fields ->
-    let* turn_json = field "measured_on_turn" fields in
-    let* measured_on_turn = nonnegative_int "parts.measured_on_turn" turn_json in
+    let* reserved_turn_json = field "reserved_measured_on_turn" fields in
+    let* reserved_measured_on_turn =
+      nonnegative_int "parts.reserved_measured_on_turn" reserved_turn_json
+    in
     let* reserved_json = field "reserved_bytes" fields in
     let* reserved_bytes = nonnegative_int "parts.reserved_bytes" reserved_json in
+    let* pinned_turn_json = field "pinned_measured_on_turn" fields in
+    let* pinned_measured_on_turn =
+      nonnegative_int "parts.pinned_measured_on_turn" pinned_turn_json
+    in
+    let* pinned_runtime_json = field "pinned_measured_on_runtime" fields in
+    let* pinned_measured_on_runtime =
+      nonempty_string "parts.pinned_measured_on_runtime" pinned_runtime_json
+    in
     let* pinned_json = field "pinned_bytes" fields in
     let* pinned_bytes = nonnegative_int "parts.pinned_bytes" pinned_json in
-    Ok (Ok { measured_on_turn; reserved_bytes; pinned_bytes })
+    Ok
+      (Ok
+         { reserved_measured_on_turn
+         ; reserved_bytes
+         ; pinned_measured_on_turn
+         ; pinned_measured_on_runtime
+         ; pinned_bytes
+         })
   | _ -> Error "parts is not an object"
 
 let decode_forecast_fit = function

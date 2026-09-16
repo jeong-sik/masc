@@ -14,8 +14,31 @@ let backlog_recovery_path config =
   backlog_path config ^ ".last-good"
 
 let decode_backlog ~path json =
-  match backlog_of_yojson json with
-  | Ok backlog -> Ok backlog
+  match backlog_of_yojson_with_diagnostics json with
+  | Ok (backlog, dropped) ->
+      (* #27499: the decoder drops a corrupt optional nested field instead of
+         rejecting the whole backlog. Report each drop so the corruption is
+         not silent, while the backlog still opens. *)
+      List.iter
+        (fun (entry : backlog_task_diagnostics) ->
+          (match entry.dropped_outcomes.handoff_context_outcome with
+           | Field_unreadable detail ->
+               Log.Misc.warn
+                 "[read_backlog] %s: task %s handoff_context unreadable, dropped: %s"
+                 path
+                 entry.dropped_task_id
+                 detail
+           | Field_absent | Field_decoded -> ());
+          match entry.dropped_outcomes.reclaim_policy_outcome with
+          | Field_unreadable detail ->
+              Log.Misc.warn
+                "[read_backlog] %s: task %s reclaim_policy unreadable, dropped: %s"
+                path
+                entry.dropped_task_id
+                detail
+          | Field_absent | Field_decoded -> ())
+        dropped;
+      Ok backlog
   | Error msg ->
       Error
         (Printf.sprintf

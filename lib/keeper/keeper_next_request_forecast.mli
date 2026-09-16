@@ -9,30 +9,47 @@
 
     Live at the time of the call: the declared window, the runtime's density
     (process-local, absent after a restart until the first response), the
-    request-body cap, and the checkpoint. As last measured: [R] (tool
-    schemas + keeper instructions) and the pinned blocks (memory recall,
-    dynamic context, ...), taken from the newest turn record on the same
-    runtime whose composition is a first round's, because a turn measures
-    them with the encoder the cut uses. A record describes the turn's latest
-    request, and a post-tool round drops every block that
-    {!Prompt_block_id.injected_on_post_tool_round} refuses, so a record
-    without such a block says nothing about what the next first round pins.
-    {!measured_parts.turn} says how old the figures are. *)
+    request-body cap, and the checkpoint. As last measured, from turn
+    records: [R] (tool schemas + keeper instructions) from the newest
+    composition of a completed turn on the same runtime, because the tool
+    surface is the lane's and an errored turn's record names the requested
+    runtime rather than the one whose composition it holds; the pinned
+    blocks (memory recall, dynamic context, ...) from the newest composition
+    on any lane that is a first round's, because those blocks are the
+    keeper's and a first round is recorded mostly by single-request turns:
+    official-client turns, and turns that errored on their first request. A
+    record describes the turn's latest request; a post-tool round drops
+    every block {!Prompt_block_id.injected_on_post_tool_round} refuses, so
+    only a record carrying such a block says what the next first round
+    pins. {!measured_parts} carries the turn, and for the pinned figure the
+    lane, each came from. *)
 
 type measured_parts =
-  { turn : int  (** The turn record the two figures were read from. *)
+  { reserved_turn : int  (** The completed turn [reserved_bytes] was read from. *)
   ; reserved_bytes : int  (** Tool schemas + keeper instructions. *)
+  ; pinned_turn : int  (** The first-round turn [pinned_bytes] was read from. *)
+  ; pinned_runtime_id : string  (** The lane that turn ran on, as its record names it. *)
   ; pinned_bytes : int  (** Every other prompt block, never cut. *)
   }
 
 type parts_refusal =
   | No_composition_on_runtime of { records_read : int }
-      (** No record on this runtime carried an exact composition. *)
+      (** No completed turn on this runtime carried an exact composition. *)
   | No_first_round_composition of { records_read : int; newest_turn : int }
-      (** Records on this runtime carried compositions, all of them post-tool
-          rounds; [newest_turn] is the newest of those. *)
+      (** Compositions were read, none of them a first round's on any lane;
+          [newest_turn] is the newest completed turn on this runtime. *)
 
 val parts_refusal_to_string : parts_refusal -> string
+
+type window_refusal =
+  | Contradiction of string
+      (** The same contradiction the turn driver refuses on: a window larger
+          than the model's max-context, or no materialized runtime. *)
+  | Not_agent_core of { runtime_id : string }
+      (** An official-client runtime: the spawned client owns its context
+          window and masc applies no Agent Core cut. *)
+
+val window_refusal_to_string : window_refusal -> string
 
 type history_cut =
   | Cut of
@@ -49,13 +66,11 @@ type history_cut =
 
 type candidate =
   { runtime_id : string
-  ; window : (Keeper_context_window.t, string) result
-        (** [Error] names the same contradiction the turn driver refuses on:
-            a window larger than the model's max-context, or no runtime. *)
+  ; window : (Keeper_context_window.t, window_refusal) result
   ; capacity : Keeper_context_window.capacity option  (** [None] with [window = Error]. *)
   ; request_cap_bytes : int option
         (** What the provider accepts; [None] when the binding declares none
-            or the runtime cannot be resolved. Judges, never shapes. *)
+            or the runtime is not an Agent Core one. Judges, never shapes. *)
   ; parts : (measured_parts, parts_refusal) result
   ; history_atoms : int  (** Atoms in the checkpoint plus the wake line. *)
   ; cut : history_cut option  (** [None] when [window] or [parts] is refused. *)
@@ -89,9 +104,27 @@ val cut_history
 val measure : Agent_core.Types.message -> int
 (** Bytes of one message as the cut's encoder counts them. *)
 
-val first_round_parts
-  :  turn:int
-  -> Turn_record.input_component list
-  -> measured_parts option
-(** [R] and the pinned bytes of one composition, or [None] when it carries no
-    block that only a first round injects, which is the post-tool shape. *)
+type composition =
+  { fixed_bytes : int  (** Tool schemas + keeper instructions. *)
+  ; first_round_pinned_bytes : int option
+        (** Every other prompt block, or [None] when the composition carries
+            no block that only a first round injects: the post-tool shape. *)
+  }
+
+val read_composition : Turn_record.input_component list -> composition
+
+type record_reading =
+  { turn : int
+  ; runtime_id : string  (** As the record names it. *)
+  ; completed : bool  (** The record carries a stop reason. *)
+  ; composition : composition
+  }
+
+val select_parts
+  :  runtime_id:string
+  -> records_read:int
+  -> record_reading list
+  -> (measured_parts, parts_refusal) result
+(** Oldest first. [reserved] from the newest completed reading on
+    [runtime_id]; [pinned] from the newest first-round reading on any lane,
+    completed or not. *)

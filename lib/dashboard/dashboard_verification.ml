@@ -23,6 +23,106 @@ let clamp_limit limit =
   else if l > max_limit then max_limit
   else l
 
+(* An offset past the end yields an empty page rather than an error: a reader
+   paging forward should land on "nothing further", not on a failure.
+
+   A negative offset lands on the first page. Not for safety -- [List.drop]
+   returns the whole list on a negative count in 5.5 (it raised in 5.3 only) --
+   but for the numbers beside the page: an unclamped [-5] would be echoed as
+   [offset] and would make [truncated = total > offset + returned] compare
+   against a place the list does not have. The HTTP boundary refuses a
+   negative offset before it arrives; an in-process caller that passes one
+   gets the first page, reported as the first page. *)
+let clamp_offset offset = match offset with
+  | Some n when n > 0 -> n
+  | Some _ | None -> 0
+
+(* ── Queue view ─────────────────────────────────────── *)
+
+(** Which question the caller asks of the same directory.
+
+    The store has no removal path, so [verifications/] holds every request
+    ever submitted, including those whose task finished weeks ago. Reading it
+    as one list answers "what was ever submitted", which is not the question
+    an operator looking for work is asking. The two questions are named rather
+    than separated by a column the reader has to filter by eye. *)
+type requested_view =
+  | Ask_awaiting
+  | Ask_all
+
+let requested_view_to_string = function
+  | Ask_awaiting -> "awaiting"
+  | Ask_all -> "all"
+
+(** An unrecognised name is refused rather than defaulted. A caller that
+    misspells the parameter and silently receives the whole history has been
+    told nothing, and the history is the larger and more misleading of the two
+    answers. *)
+let requested_view_of_string = function
+  | "awaiting" -> Ok Ask_awaiting
+  | "all" -> Ok Ask_all
+  | other ->
+    Error
+      (Printf.sprintf
+         "unknown view %S: expected %S or %S"
+         other
+         (requested_view_to_string Ask_awaiting)
+         (requested_view_to_string Ask_all))
+
+(** What the backlog is waiting on, read by the caller and handed in.
+
+    This module reads the request store and nothing else, so the join key
+    arrives rather than being fetched -- the projection stays a pure function
+    of its arguments and its tests need no backlog on disk.
+
+    [Backlog_unreadable] is carried instead of collapsing to an empty list:
+    "the backlog names nothing" and "the backlog could not be read" are
+    different answers, and only the first one means there is no work. *)
+type awaiting_join =
+  | Backlog_read of { live_request_ids : string list }
+  | Backlog_recovered of
+      { live_request_ids : string list
+      ; detail : string
+      }
+      (** The primary backlog did not read and a [.last-good] snapshot did.
+          The queue is computed, and is as old as that snapshot: a task that
+          submitted after it is not in this answer. Folded into
+          [Backlog_read] this was a queue that looked current and was not. *)
+  | Backlog_unreadable of string
+
+(** The view with everything it needs to be answered. [Ask_awaiting] cannot be
+    resolved without the backlog, so the resolved form carries it and a caller
+    cannot ask for the queue while holding no join. *)
+type queue_view =
+  | Awaiting_operator of awaiting_join
+  | All_requests
+
+let queue_view_requested = function
+  | Awaiting_operator _ -> Ask_awaiting
+  | All_requests -> Ask_all
+
+(** The request id each awaiting task is waiting on.
+
+    [AwaitingVerification] carries that id, so the queue is a join on identity
+    rather than a scan for tasks whose status happens to match. The difference
+    is not cosmetic: a task re-submitted N times leaves N records in the store
+    and is waiting on exactly one of them. Matching by status alone drew all N.
+
+    Every status is named so a new one has to be given an answer here rather
+    than inheriting "not waiting" from a catch-all. *)
+let awaiting_request_ids (backlog : Masc_domain.backlog) : string list =
+  List.filter_map
+    (fun (task : Masc_domain.task) ->
+      match task.Masc_domain.task_status with
+      | Masc_domain.AwaitingVerification { verification_id; _ } ->
+        Some verification_id
+      | Masc_domain.Todo
+      | Masc_domain.Claimed _
+      | Masc_domain.InProgress _
+      | Masc_domain.Done _
+      | Masc_domain.Cancelled _ -> None)
+    backlog.Masc_domain.tasks
+
 (** Criteria are the exact completion-contract statements. *)
 let completion_contract_of_criteria (criteria : V.criterion list) : string list =
   criteria
@@ -176,22 +276,105 @@ let fd_pressure_fields () = Keeper_fd_pressure.projection_fields ()
 (* Compute the request-listing projection from an already-loaded list.
    Factored out so [proof_compose] can share the disk scan between
    summary and request listing. *)
-let requests_json_of_requests ?task_id ~limit (scan : V.request_scan) : Yojson.Safe.t =
+let id_set (requests : V.verification_request list) =
+  let seen = Hashtbl.create (List.length requests) in
+  List.iter
+    (fun (r : V.verification_request) -> Hashtbl.replace seen r.V.id ())
+    requests;
+  seen
+
+(** Apply the view, and report what the join could not account for.
+
+    An id the backlog is waiting on that names no record in the store is a
+    task waiting on something that is not there. Dropping it would leave a
+    task stuck with nothing on any screen to say why, so it is counted and
+    listed rather than filtered away.
+
+    [Backlog_unreadable] yields an empty queue carrying the reason. The
+    alternative -- falling back to the unfiltered history -- would answer a
+    request for "what is waiting on me" with every request ever submitted,
+    which reads as work rather than as a failure to look. *)
+let awaiting_fields ~limit ~backlog_error ~backlog_recovery ~unresolved =
+  (* One key set for every arm of this view. A reader of
+     [awaiting_unresolved_total] used to get a number on success and nothing
+     at all in the failure that field exists to describe. *)
+  [ ("backlog_error", Json_util.string_opt_to_json backlog_error)
+  ; ("backlog_recovery", Json_util.string_opt_to_json backlog_recovery)
+  ; ("awaiting_unresolved_total", `Int (List.length unresolved))
+    (* The count is exact; the list is one page of it. Unbounded, it rode
+       every page of every response -- which is the payload this projection
+       grew an offset to bound. *)
+  ; ( "awaiting_unresolved"
+    , `List (List.map (fun id -> `String id) (take limit unresolved)) )
+  ]
+
+(** Apply the view, and report what the join could not account for.
+
+    [store] is the whole readable scan, not [requests]: the difference is
+    "ids the backlog waits on that name no record anywhere", and taking it
+    against a task-filtered list reported every *other* task's live id as
+    missing. *)
+let filter_by_view ~limit (view : queue_view)
+    ~(store : V.verification_request list)
+    (requests : V.verification_request list)
+  : V.verification_request list * (string * Yojson.Safe.t) list =
+  let join ~recovery live_request_ids =
+    let wanted = Hashtbl.create (List.length live_request_ids) in
+    List.iter (fun id -> Hashtbl.replace wanted id ()) live_request_ids;
+    let kept =
+      List.filter
+        (fun (r : V.verification_request) -> Hashtbl.mem wanted r.V.id)
+        requests
+    in
+    let present = id_set store in
+    let unresolved =
+      List.filter (fun id -> not (Hashtbl.mem present id)) live_request_ids
+    in
+    ( kept
+    , awaiting_fields ~limit ~backlog_error:None ~backlog_recovery:recovery
+        ~unresolved )
+  in
+  match view with
+  | All_requests -> requests, []
+  | Awaiting_operator (Backlog_unreadable detail) ->
+    ( []
+    , awaiting_fields ~limit ~backlog_error:(Some detail)
+        ~backlog_recovery:None ~unresolved:[] )
+  | Awaiting_operator (Backlog_read { live_request_ids }) ->
+    join ~recovery:None live_request_ids
+  | Awaiting_operator (Backlog_recovered { live_request_ids; detail }) ->
+    join ~recovery:(Some detail) live_request_ids
+
+let requests_json_of_requests ?task_id ~limit ~offset ~view
+    (scan : V.request_scan) : Yojson.Safe.t =
   let filtered = filter_by_task_id scan.V.readable task_id in
-  let sorted = sort_desc filtered in
-  let trimmed = take limit sorted in
+  let in_view, view_fields =
+    filter_by_view ~limit view ~store:scan.V.readable filtered
+  in
+  let sorted = sort_desc in_view in
+  let total = List.length sorted in
+  let page = sorted |> List.drop offset |> take limit in
   `Assoc
     ([ ("updated_at", `String (Masc_domain.now_iso ()))
-     ; ("total", `Int (List.length filtered))
-     ; ("requests", `List (List.map request_to_json trimmed))
+     ; ("view", `String (requested_view_to_string (queue_view_requested view)))
+     ; ("total", `Int total)
+     ; ("offset", `Int offset)
+     ; ("returned", `Int (List.length page))
+     (* Whether a further page exists, computed here so a reader does not have
+        to derive it from three numbers and get the boundary wrong. *)
+     ; ("truncated", `Bool (total > offset + List.length page))
+     ; ("requests", `List (List.map request_to_json page))
      ]
+     @ view_fields
      @ unreadable_fields scan
      @ fd_pressure_fields ())
 
-let requests_json ~base_path ?task_id ?limit () : Yojson.Safe.t =
+let requests_json ~base_path ?task_id ?limit ?offset ?view () : Yojson.Safe.t =
   let limit = clamp_limit limit in
+  let offset = clamp_offset offset in
+  let view = match view with Some v -> v | None -> All_requests in
   let scan = load_scan ~base_path () in
-  requests_json_of_requests ?task_id ~limit scan
+  requests_json_of_requests ?task_id ~limit ~offset ~view scan
 
 let summary_json ~base_path () : Yojson.Safe.t =
   let scan = load_scan ~base_path () in
@@ -215,5 +398,7 @@ let proof_compose ~base_path ?limit () : Yojson.Safe.t * Yojson.Safe.t =
        @ unreadable_fields scan
        @ fd_pressure_fields ())
   in
-  let requests = requests_json_of_requests ~limit scan in
+  let requests =
+    requests_json_of_requests ~limit ~offset:0 ~view:All_requests scan
+  in
   summary, requests

@@ -101,9 +101,31 @@ let degrade_on_admission ~posture ~none_supported () =
   | posture, _ -> posture
 ;;
 
+(* Claude Code's own schema lookup, and the reason every posture names it.
+   [--tools] narrows the CLI's built-in set to exactly the names it lists, and
+   [ToolSearch] is one of those built-ins. A list without it therefore also
+   turns off the CLI's deferred loading of MCP tools — [isToolSearchEnabled]
+   refuses when the tool is absent — so every masc tool schema is sent inline
+   on every request instead of by name.
+
+   It carries no posture cost: it observes no local state, reaches no network,
+   and returns only the schemas of tools masc itself declared and already
+   named in [--allowedTools]. So [none] keeps its meaning (no built-in touches
+   the machine) while the CLI can still defer.
+
+   Measured 2026-09-16 in the fleet's own argv shape (empty [--tools],
+   [--strict-mcp-config], [--permission-mode dontAsk]) against a probe MCP
+   server carrying 203 tools: 176,928 input tokens for the first request
+   without this name, 8,926 with it. *)
+let claude_code_schema_lookup_tool_name = "ToolSearch"
+
 let claude_code_tools_arg = function
-  | Native_none -> ""
-  | Native_read -> String.concat "," claude_code_read_tool_names
+  | Native_none -> claude_code_schema_lookup_tool_name
+  | Native_read ->
+    String.concat
+      ","
+      (claude_code_read_tool_names @ [ claude_code_schema_lookup_tool_name ])
+  (* [default] is the whole built-in set, which already carries the lookup. *)
   | Native_full -> "default"
 ;;
 

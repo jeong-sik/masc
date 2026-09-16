@@ -7918,8 +7918,18 @@ def chat_visibility_modes_interaction(
         # summary's first word, with the badge padding and SGR runs between
         # -- the same token-split shape the tool-lane needles above take,
         # because a literal "◆ 전달됨" never exists as contiguous bytes.
+        # The rail is a token of its own, the way " · " is above: a needle
+        # anchored on the gutter mark crosses into the body, and Skill rows
+        # are Shade_quoted, so the renderer draws "│" (>= 0x80, outside the
+        # gap class) between badge padding and body. Body-anchored needles
+        # (✗, 씀, proof) never cross it and keep the plain gap.
         if re.search(
-            "◆".encode() + rb"[\x1b\x20-\x7e]*?" + "전달됨".encode(), initial
+            "◆".encode()
+            + rb"[\x1b\x20-\x7e]*?"
+            + "│".encode()
+            + rb"[\x1b\x20-\x7e]*?"
+            + "전달됨".encode(),
+            initial,
         ) is None:
             raise AssertionError(
                 f"the exact Skill evidence did not start its turn: {initial!r}"

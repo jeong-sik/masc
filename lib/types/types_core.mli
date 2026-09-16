@@ -252,6 +252,33 @@ val task_compact_to_yojson : task -> Yojson.Safe.t
 
 val task_of_yojson : Yojson.Safe.t -> (task, string) result
 
+(** Outcome of decoding one optional nested field. Splits "the key was
+    absent" from "the key was present but could not be decoded" — the two
+    cases the plain [option] field collapses into [None]. *)
+type nested_field_outcome =
+  | Field_absent
+  | Field_decoded
+  | Field_unreadable of string
+[@@deriving show, eq]
+
+val nested_field_outcome_is_unreadable : nested_field_outcome -> bool
+
+(** Per-field decode outcome for the two nested fields whose corruption the
+    decoder drops instead of propagating ([handoff_context],
+    [reclaim_policy]). *)
+type task_decode_diagnostics =
+  { handoff_context_outcome : nested_field_outcome
+  ; reclaim_policy_outcome : nested_field_outcome
+  }
+[@@deriving show, eq]
+
+val task_decode_diagnostics_is_unreadable : task_decode_diagnostics -> bool
+
+(** Like [task_of_yojson], but also returns the typed per-field outcome so a
+    caller can report a dropped corruption instead of silently losing it. *)
+val task_of_yojson_with_diagnostics :
+  Yojson.Safe.t -> (task * task_decode_diagnostics, string) result
+
 type task_claim_readiness =
   | Claim_ready
 
@@ -402,6 +429,21 @@ type backlog =
 
 val backlog_to_yojson : backlog -> Yojson.Safe.t
 val backlog_of_yojson : Yojson.Safe.t -> (backlog, string) result
+
+(** A task whose decode dropped at least one nested field. [dropped_task_index]
+    is the position in [backlog.tasks]; [dropped_task_id] is the decoded id
+    (empty when the id itself was absent). *)
+type backlog_task_diagnostics =
+  { dropped_task_index : int
+  ; dropped_task_id : string
+  ; dropped_outcomes : task_decode_diagnostics
+  }
+[@@deriving show, eq]
+
+(** Like [backlog_of_yojson], but also returns the typed per-task diagnostics
+    for every task whose nested field was dropped. *)
+val backlog_of_yojson_with_diagnostics :
+  Yojson.Safe.t -> (backlog * backlog_task_diagnostics list, string) result
 
 type sse_session =
   { agent_name : string

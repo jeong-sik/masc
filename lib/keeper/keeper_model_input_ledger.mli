@@ -3,13 +3,27 @@
 
     The ledger never estimates. It records, per provider call, the carried
     atom range the projection chose and the [input_tokens] the provider
-    reported for that request. Two consecutive requests under the same
-    prefix, with no atom removed in between, differ by exactly the atoms
-    appended between them plus whatever the per-request tail changed, so
-    that difference is written down as the token count of the appended
-    block. A request whose usage is missing leaves its atoms unmeasured
-    until the next usage arrives; the difference then covers every atom
-    appended since the last measured request, as one block.
+    reported for that request. A usage is a sample only when its request
+    carried no turn context: the per-turn [system context] message (recall,
+    briefing, clock) rides the turn's first request and not the rounds after
+    it, so its tokens belong to no atom. Two consecutive samples under the
+    same prefix, with no atom removed in between, differ by exactly the
+    atoms appended between them, so that difference is written down as the
+    token count of the appended block. A request whose usage is missing or
+    is not a sample leaves its atoms unmeasured until the next sample; the
+    difference then covers every atom appended since the last sample, as
+    one block. The atoms around a turn boundary are measured that way, by
+    the first post-tool round of the next turn.
+
+    The same turn boundary moves the demotion boundary: the previous turn's
+    tool results go out as markers from then on, so the blocks that hold
+    them weigh less than they were measured at. When a sample's demotion
+    boundary differs from the one the total was measured under, the blocks
+    from the lower boundary on and the atoms appended since become one
+    block, whose tokens are the reformed blocks' old counts plus the
+    difference. The difference is exactly the appended atoms plus the
+    reformed atoms' change, so that sum is what they weigh now; it is unknown
+    when a reformed block was never measured.
 
     Anything that breaks the comparison restarts the ledger from the request
     at hand: a different prefix (system prompt or tool schemas), a history
@@ -20,9 +34,12 @@
     usage; the block appended in that same request can then never be
     measured, and when it is evicted in turn the same happens once more.
     The chain ends at the first eviction whose request appends nothing.
+    A front at atom 0 always starts at that unmeasured block, so the move
+    that first adds the omission preamble to the request also leaves the
+    total unknown, and the next sample counts the preamble with the rest.
 
-    A difference that comes out negative (the tail shrank by more than the
-    new atoms added) is reported and not written into any block. A usage
+    A difference that comes out negative is reported and not written into
+    any block. A usage
     reporting zero input tokens is not a measurement; {!usage_of_counts}
     turns it into [None].
 
@@ -39,6 +56,12 @@ type request =
   ; tail_bytes : int
         (** Bytes of the per-request tail (extra system context and other
             pinned messages), measured with the request encoder. *)
+  ; turn_context : bool
+        (** The request carried the per-turn context message, so its usage
+            is not a sample. *)
+  ; demote_before : int
+        (** Atoms below this index went out with their aged tool results as
+            markers; 0 when nothing was demoted. *)
   }
 
 type usage =
@@ -58,11 +81,14 @@ type block =
 type t =
   { prefix_digest : string
   ; total_tokens : int option
-        (** [input_tokens] of the last measured request: prefix, carried atoms
-            and tail together. [None] after a front move removed atoms whose
-            tokens were unknown, until the next usage. *)
+        (** [input_tokens] of the last sample: the prefix, the omission
+            preamble once the front is past atom 0, and the carried atoms.
+            [None] after a front move removed atoms whose tokens were unknown,
+            until the next sample. *)
   ; measured_end_atom : int option
         (** [atom_count] of the request [total_tokens] describes. *)
+  ; measured_demote_before : int option
+        (** [demote_before] of the request [total_tokens] describes. *)
   ; blocks : block list  (** Oldest first, contiguous over the carried range. *)
   ; last : request
   ; last_usage : usage option
@@ -111,7 +137,7 @@ val usage_of_counts : input_tokens:int -> cache_read_input_tokens:int -> usage o
 val move_front : t -> first_atom:int -> t
 (** Apply an eviction decided outside a request: blocks below [first_atom]
     leave, their tokens come off the total when they were all measured, and
-    otherwise the total is unknown until the next usage. A front that does
+    otherwise the total is unknown until the next sample. A front that does
     not advance changes nothing; a front inside a block restarts the blocks
     from it. The next request's [observe] then sees an unchanged front. *)
 

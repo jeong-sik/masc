@@ -50,9 +50,10 @@ type try_provider_ctx =
   { (* Runtime identity *)
     runtime_id : string
   ; error_runtime_id : string
-  ; (* The marks the carried range is judged against after each response
-       (RFC keeper-context-window-in-tokens §10.5), declared on the binding.
-       [None] leaves eviction to a refusal alone. *)
+  ; (* The marks the carried range is judged against once per candidate turn,
+       before its first composition (RFC keeper-context-window-in-tokens
+       §10.5), declared on the binding. [None] leaves eviction to a refusal
+       alone. *)
     context_marks : Runtime_schema.context_marks option
   ; (* Where the carried range starts when the process holds no ledger for
        this (keeper, runtime) pair: the range the newest completed Agent Core
@@ -531,6 +532,9 @@ type composed =
   ; history_atom_count : int
   ; origin : Keeper_carried_front.origin
   ; outlived_seed : Keeper_carried_front.seed option
+  ; demote_before : int
+        (* The boundary the demotion actually applied: 0 when demotion is off,
+           the whole history under the last resort. *)
   }
 
 (* What one provider attempt carries between its requests and the retry
@@ -556,10 +560,16 @@ let ledger_session (ctx : try_provider_ctx) =
   | None -> "-"
 ;;
 
+(* An empty base path turns demotion off, so no atom is below the boundary. *)
+let applied_demote_before ~base_path ~demote_before =
+  if String.equal base_path "" then 0 else demote_before
+;;
+
 let demotion_plan ~measure_message_bytes ~base_path ~demote_before messages =
-  if String.equal base_path "" || demote_before = 0
-  then { Keeper_model_input_demotion.messages; pending = [] }
-  else Keeper_model_input_demotion.plan ~measure_message_bytes ~demote_before messages
+  match applied_demote_before ~base_path ~demote_before with
+  | 0 -> { Keeper_model_input_demotion.messages; pending = [] }
+  | demote_before ->
+    Keeper_model_input_demotion.plan ~measure_message_bytes ~demote_before messages
 ;;
 
 (* Whether the last resort has anything to do: the current turn's own atoms
@@ -595,12 +605,9 @@ let compose_carried_model_input
        | None -> None, Some seed)
     | None -> None, None
   in
+  let demote_before = if last_resort then history_atom_count else demote_before in
   let planned =
-    demotion_plan
-      ~measure_message_bytes
-      ~base_path
-      ~demote_before:(if last_resort then history_atom_count else demote_before)
-      messages
+    demotion_plan ~measure_message_bytes ~base_path ~demote_before messages
   in
   let projection, transmitted_bytes, origin =
     match front with
@@ -624,7 +631,14 @@ let compose_carried_model_input
       in
       projection, transmitted_bytes, Keeper_carried_front.Whole_history
   in
-  { planned; projection; transmitted_bytes; history_atom_count; origin; outlived_seed }
+  { planned
+  ; projection
+  ; transmitted_bytes
+  ; history_atom_count
+  ; origin
+  ; outlived_seed
+  ; demote_before = applied_demote_before ~base_path ~demote_before
+  }
 ;;
 
 (* One request: the range composed in the durable vocabulary, its demotions
@@ -922,11 +936,12 @@ let bounded_model_input_projection
        once the provider reports its count, and for the front a refusal
        moves: the carried atom range and the bytes of the per-request tail
        (the pinned messages), so a difference between two requests can be
-       attributed to the atoms appended between them. Read back from the
-       carried list, in the durable vocabulary: the atoms in it and
-       [history_atom_count] are absolute on every path, and the preamble is
-       tail, not an atom, as the range itself treats it. *)
-    (let transmitted_atoms, tail_bytes =
+       attributed to the atoms appended between them, and whether it carried
+       the turn context, whose count is not a sample of the history. Read
+       back from the carried list, in the durable vocabulary: the atoms in it
+       and [history_atom_count] are absolute on every path, and the preamble
+       is tail, not an atom, as the range itself treats it. *)
+    (let transmitted_atoms, tail_bytes, turn_context =
        offload_model_input_cpu (fun () ->
          let history, preamble =
            List.partition
@@ -953,7 +968,9 @@ let bounded_model_input_projection
              0
              preamble
          in
-         transmitted_atoms, pinned_bytes + preamble_bytes)
+         ( transmitted_atoms
+         , pinned_bytes + preamble_bytes
+         , List.exists Runtime_model_input_tail_window.is_extra_context history ))
      in
      state.last_request
      := Some
@@ -961,6 +978,8 @@ let bounded_model_input_projection
           ; first_atom = history_atom_count - transmitted_atoms
           ; atom_count = history_atom_count
           ; tail_bytes
+          ; turn_context
+          ; demote_before = view.composed.demote_before
           });
     match ctx.model_input_projection with
     | None -> Ok windowed
@@ -1019,10 +1038,11 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
        provider's inclusive prompt total for the request the composition just
        built. The ledger records the request's carried range against the
        count, one line per provider call, so block sizes, front moves and
-       tail changes are read from the provider's numbers, and the marks are
-       judged against the total right after. Composed outermost and always
-       [Continue], so it neither delays nor decides anything the turn's own
-       hooks do. *)
+       tail changes are read from the provider's numbers. The marks are not
+       judged here: a front moved after a response would change the prefix of
+       the turn's next request ([evict_at_turn_boundary]). Composed outermost
+       and always [Continue], so it neither delays nor decides anything the
+       turn's own hooks do. *)
     let ledger_hooks =
       { Agent_core.Hooks.empty with
         after_turn =
@@ -1072,32 +1092,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                         ~keeper_name:ctx.keeper_name
                         "model input ledger runtime=%s %s"
                         ctx.runtime_id
-                        line);
-                   (* The marks, against the total the provider just counted
-                      (RFC §10.5): above the high-water mark the oldest blocks
-                      leave until the projected total is under the low-water
-                      mark, and the next request composes from the new front.
-                      Without marks, only a refusal moves the front. *)
-                   (match ctx.context_marks with
-                    | None -> ()
-                    | Some marks ->
-                      (match
-                         Keeper_carried_range.after_response
-                           ~marks
-                           observation.Keeper_model_input_ledger.ledger
-                       with
-                       | Keeper_carried_range.Unchanged _ -> ()
-                       | Keeper_carried_range.Evicted { first_atom; _ } as step ->
-                         Keeper_model_input_ledger.Table.move_front
-                           ~keeper_name:ctx.keeper_name
-                           ~runtime_id:ctx.runtime_id
-                           ~session_id:(ledger_session ctx)
-                           ~first_atom;
-                         Log.Keeper.info
-                           ~keeper_name:ctx.keeper_name
-                           "model input carried range evicted runtime=%s %s"
-                           ctx.runtime_id
-                           (Yojson.Safe.to_string (Keeper_carried_range.step_to_json step))))
+                        line)
                  | None -> ());
                 Agent_core.Hooks.Continue
               | Agent_core.Hooks.BeforeTurn _
@@ -1736,11 +1731,44 @@ let carried_range_eviction_sequence
     error and for a refusal that survives every move. The front the retry
     composes from is the ledger's after the eviction, or, before any usage
     on this pair, the halved range held for the rest of this attempt. *)
+(* The marks, judged once per candidate turn before its first composition
+   (RFC keeper-context-window-in-tokens §10.5): above the high-water mark the
+   oldest blocks leave until the projected total is under the low-water mark,
+   and every request of the turn composes from that one front. Without marks,
+   only a refusal moves the front. *)
+let evict_at_turn_boundary (ctx : try_provider_ctx) =
+  match ctx.context_marks with
+  | None -> ()
+  | Some marks ->
+    (match
+       Keeper_model_input_ledger.Table.lookup
+         ~keeper_name:ctx.keeper_name
+         ~runtime_id:ctx.runtime_id
+         ~session_id:(ledger_session ctx)
+     with
+     | None -> ()
+     | Some ledger ->
+       (match Keeper_carried_range.at_turn_boundary ~marks ledger with
+        | Keeper_carried_range.Unchanged _ -> ()
+        | Keeper_carried_range.Evicted { first_atom; _ } as step ->
+          Keeper_model_input_ledger.Table.move_front
+            ~keeper_name:ctx.keeper_name
+            ~runtime_id:ctx.runtime_id
+            ~session_id:(ledger_session ctx)
+            ~first_atom;
+          Log.Keeper.info
+            ~keeper_name:ctx.keeper_name
+            "model input carried range evicted runtime=%s %s"
+            ctx.runtime_id
+            (Yojson.Safe.to_string (Keeper_carried_range.step_to_json step))))
+;;
+
 let run_try_provider_with_carried_range_eviction
       ?continuation_checkpoint
       (ctx : try_provider_ctx)
       candidate
   =
+  evict_at_turn_boundary ctx;
   match ctx.recovery_view with
   | Some _ ->
     (* The validated semantic view owns retained source obligations. Retrying

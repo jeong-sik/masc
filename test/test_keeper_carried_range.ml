@@ -34,8 +34,9 @@ let ledger ?(total = None) (blocks : Ledger.block list) : Ledger.t =
   { prefix_digest = "f"
   ; total_tokens = total
   ; measured_end_atom = Option.map (fun _ -> atom_count) total
+  ; measured_demote_before = Option.map (fun _ -> 0) total
   ; blocks
-  ; last = { prefix_digest = "f"; first_atom; atom_count; tail_bytes = 0 }
+  ; last = { prefix_digest = "f"; first_atom; atom_count; tail_bytes = 0; turn_context = false; demote_before = 0 }
   ; last_usage = None
   }
 ;;
@@ -70,13 +71,13 @@ let measured_four =
 let test_within_high_water_leaves_the_range () =
   let t = ledger ~total:(Some 900) measured_four in
   check reason "no eviction" Range.Within_high_water
-    (unchanged_reason (Range.after_response ~marks:(marks ~high:1_000 ~low:600) t))
+    (unchanged_reason (Range.at_turn_boundary ~marks:(marks ~high:1_000 ~low:600) t))
 ;;
 
 let test_unknown_total_cannot_be_judged () =
   let t = ledger measured_four in
   check reason "no total" Range.Total_unknown
-    (unchanged_reason (Range.after_response ~marks:(marks ~high:100 ~low:50) t))
+    (unchanged_reason (Range.at_turn_boundary ~marks:(marks ~high:100 ~low:50) t))
 ;;
 
 (* Total 1,000 (900 in blocks plus the prefix), low-water 500: the first two
@@ -84,7 +85,7 @@ let test_unknown_total_cannot_be_judged () =
 let test_walks_down_to_the_low_water_mark () =
   let t = ledger ~total:(Some 1_000) measured_four in
   let blocks, atoms, tokens, first_atom, projected =
-    evicted (Range.after_response ~marks:(marks ~high:950 ~low:500) t)
+    evicted (Range.at_turn_boundary ~marks:(marks ~high:950 ~low:500) t)
   in
   check int "two blocks" 2 blocks;
   check int "twenty atoms" 20 atoms;
@@ -96,7 +97,7 @@ let test_walks_down_to_the_low_water_mark () =
 let test_never_evicts_the_newest_block () =
   let t = ledger ~total:(Some 1_000) measured_four in
   let blocks, _, tokens, first_atom, projected =
-    evicted (Range.after_response ~marks:(marks ~high:950 ~low:10) t)
+    evicted (Range.at_turn_boundary ~marks:(marks ~high:950 ~low:10) t)
   in
   check int "three of four" 3 blocks;
   check (option int) "750 off" (Some 750) tokens;
@@ -115,7 +116,7 @@ let test_unknown_block_leaves_whole_and_ends_the_walk () =
       ]
   in
   let blocks, atoms, tokens, first_atom, projected =
-    evicted (Range.after_response ~marks:(marks ~high:950 ~low:100) t)
+    evicted (Range.at_turn_boundary ~marks:(marks ~high:950 ~low:100) t)
   in
   check int "measured then unknown" 2 blocks;
   check int "atoms of both" 25 atoms;
@@ -127,7 +128,7 @@ let test_unknown_block_leaves_whole_and_ends_the_walk () =
 let test_single_block_is_not_evictable () =
   let t = ledger ~total:(Some 5_000) [ block ~first:0 ~end_:10 (Some 4_000) ] in
   check reason "nothing to evict" Range.Nothing_evictable
-    (unchanged_reason (Range.after_response ~marks:(marks ~high:100 ~low:50) t));
+    (unchanged_reason (Range.at_turn_boundary ~marks:(marks ~high:100 ~low:50) t));
   check reason "nor on a refusal" Range.Nothing_evictable
     (unchanged_reason (Range.after_overflow ~marks:None t))
 ;;
@@ -176,7 +177,7 @@ let test_cold_start_block_first_leaves_alone_with_the_total_unknown () =
       ]
   in
   let blocks, atoms, tokens, first_atom, projected =
-    evicted (Range.after_response ~marks:(marks ~high:900 ~low:100) t)
+    evicted (Range.at_turn_boundary ~marks:(marks ~high:900 ~low:100) t)
   in
   check int "just the cold block" 1 blocks;
   check int "its atoms" 10 atoms;
@@ -188,13 +189,13 @@ let test_cold_start_block_first_leaves_alone_with_the_total_unknown () =
 let test_total_at_the_high_water_mark_is_within () =
   let t = ledger ~total:(Some 1_000) measured_four in
   check reason "equal is within" Range.Within_high_water
-    (unchanged_reason (Range.after_response ~marks:(marks ~high:1_000 ~low:500) t))
+    (unchanged_reason (Range.at_turn_boundary ~marks:(marks ~high:1_000 ~low:500) t))
 ;;
 
 let test_landing_exactly_on_the_low_water_mark_stops () =
   let t = ledger ~total:(Some 1_000) measured_four in
   let blocks, _, _, _, projected =
-    evicted (Range.after_response ~marks:(marks ~high:950 ~low:450) t)
+    evicted (Range.at_turn_boundary ~marks:(marks ~high:950 ~low:450) t)
   in
   check int "two blocks bring it to 450" 2 blocks;
   check (option int) "exactly the mark" (Some 450) projected
@@ -203,7 +204,7 @@ let test_landing_exactly_on_the_low_water_mark_stops () =
 let test_no_blocks_is_not_evictable () =
   let t = ledger ~total:(Some 1_000) [] in
   check reason "empty" Range.Nothing_evictable
-    (unchanged_reason (Range.after_response ~marks:(marks ~high:100 ~low:50) t))
+    (unchanged_reason (Range.at_turn_boundary ~marks:(marks ~high:100 ~low:50) t))
 ;;
 
 let test_overflow_always_takes_at_least_one_block () =
@@ -219,7 +220,7 @@ let test_overflow_always_takes_at_least_one_block () =
 let () =
   run
     "keeper_carried_range"
-    [ ( "after_response"
+    [ ( "at_turn_boundary"
       , [ test_case "within high water" `Quick test_within_high_water_leaves_the_range
         ; test_case "unknown total" `Quick test_unknown_total_cannot_be_judged
         ; test_case "down to low water" `Quick test_walks_down_to_the_low_water_mark

@@ -87,7 +87,7 @@ let evict ~stop ~at_least_one (ledger : Keeper_model_input_ledger.t) =
      | Some _ | None -> Unchanged Nothing_evictable)
 ;;
 
-let after_response ~(marks : Runtime_schema.context_marks) (ledger : Keeper_model_input_ledger.t) =
+let at_turn_boundary ~(marks : Runtime_schema.context_marks) (ledger : Keeper_model_input_ledger.t) =
   match ledger.total_tokens with
   | None -> Unchanged Total_unknown
   | Some total when total <= marks.high_water_tokens -> Unchanged Within_high_water

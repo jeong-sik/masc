@@ -25,9 +25,10 @@ type try_provider_ctx =
   { runtime_id : string
   ; error_runtime_id : string
   ; context_marks : Runtime_schema.context_marks option
-        (** The marks the carried range is judged against after each
-            response (RFC keeper-context-window-in-tokens §10.5), as the
-            binding declares them; [None] leaves eviction to a refusal. *)
+        (** The marks the carried range is judged against once per candidate
+            turn, before its first composition (RFC
+            keeper-context-window-in-tokens §10.5), as the binding declares
+            them; [None] leaves eviction to a refusal. *)
   ; carried_front_seed : unit -> Keeper_carried_front.seed option
         (** Where the carried range starts when no ledger holds this
             (keeper, runtime) pair yet: the range the newest completed Agent
@@ -290,7 +291,8 @@ val run_try_provider_with_carried_range_eviction :
   (Runtime_agent.run_result, Agent_core.Error.t) result
   * Agent_core.Checkpoint.t option
   * (string * Obj.t) option
-(** {!run_try_provider} under {!carried_range_eviction_sequence}: the
+(** {!run_try_provider} under {!carried_range_eviction_sequence}, after the
+    marks are judged against the pair's ledger once for the turn: the
     eviction moves the pair's ledger front, the halving holds a seed for the
     rest of this attempt, and each retry is recorded on the runtime
     manifest. *)
@@ -325,6 +327,9 @@ type composed =
   ; outlived_seed : Keeper_carried_front.seed option
         (** A front the history shrank under, dropped by
             {!Keeper_carried_front.for_history}; the request started over. *)
+  ; demote_before : int
+        (** The boundary the demotion applied: 0 when demotion is off, the
+            whole history under the last resort. *)
   }
 (** One request as {!For_testing.compose_carried_model_input} composes it
     (RFC keeper-context-window-in-tokens §10.4): RFC-0363 demotion over the

@@ -5,7 +5,7 @@ MASC 하네스 자체를 벤치마크한다. 스펙: docs/superpowers/specs/2026
 ## Setup
 
     ./image/fetch_masc.sh          # prebuilt masc 바이너리
-    uv venv && uv pip install harbor pytest
+    uv venv && uv pip install -r requirements.txt
     export ANTHROPIC_API_KEY=...   # 또는 BENCH_API_KEY_ENV가 가리키는 키
 
 ## Smoke (1 task, arm B)

@@ -1209,6 +1209,12 @@ class CompiledRuntimeSetup(unittest.TestCase):
                 self.assertEqual(configured['runtime']['default'],ids[1])
                 self.assertEqual(configured['runtime']['assignments']['imp'],ids[1])
                 self.assertEqual(configured['runtime']['lanes'][ids[1]]['candidates'],[ids[1],ids[0]])
+                # A two-model selection defines the shared librarian table once,
+                # from the default's render: a second definition would make the
+                # file unparseable, so reaching this assert already proves one.
+                lane = configured['runtime']['exact_output_lanes']['librarian_exact']
+                self.assertEqual(lane['slots'],[ids[1]])
+                self.assertEqual(lane['cli_slots'],[])
                 SETUP.configure_many(BINARY,base,[],[ids[0]])
                 inventory = SETUP.configured_inventory(BINARY,base)
                 self.assertTrue(set(ids) <= {row['id'] for row in inventory['runtimes']})

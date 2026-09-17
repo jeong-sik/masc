@@ -14,7 +14,11 @@ val error_message : error -> string
 val of_json : ?home_dir:string -> Yojson.Safe.t -> (t, error) result
 (** [home_dir] resolves an explicit current-user [~/] Antigravity reference;
     ordinary HTTP File references must already be absolute. No files are read. *)
-type rendered = { runtime_id:string; runtime_toml:string; model_overlay_toml:string }
+type rendered = { runtime_id:string; runtime_toml:string; model_overlay_toml:string;
+  librarian_lane_toml:string }
+(** [librarian_lane_toml] carries the shared [runtime.exact_output_lanes]
+    table separately from the fragment: a composition of several renders
+    appends the lane once, from the primary's render, never per fragment. *)
 val model_id : t -> string
 val render : t -> rendered
 val render_json : rendered -> Yojson.Safe.t

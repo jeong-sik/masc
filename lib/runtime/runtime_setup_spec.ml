@@ -111,7 +111,7 @@ let unverified_capabilities = ["supports_tool_choice";"supports_required_tool_ch
   "supports_parallel_tool_calls";"supports_reasoning";"supports_response_format_json";"supports_structured_output";
   "supports_multimodal_inputs";"supports_image_input";"supports_audio_input";"supports_video_input";
   "supports_document_input";"supports_prompt_caching";"supports_top_k";"supports_min_p";"supports_seed"]
-type rendered = {runtime_id:string;runtime_toml:string;model_overlay_toml:string}
+type rendered = {runtime_id:string;runtime_toml:string;model_overlay_toml:string;librarian_lane_toml:string}
 let render spec =
   let name = choice_name spec.choice in
   let provider = "setup_" ^ name ^ "_" ^ Digestif.SHA256.(to_hex (digest_string spec.canonical_spec)) in
@@ -154,7 +154,12 @@ let render spec =
 
      Declared, not defaulted: the lane is a line an operator can read in
      runtime.toml and replace with a cheaper model, and a fleet that wants no
-     Librarian empties it rather than discovering the feature was never on. *)
+     Librarian empties it rather than discovering the feature was never on.
+
+     The lane travels beside the fragment, not inside it: the table names a
+     region every render speaks for, and the batch that concatenates
+     fragments appends the lane once, from the primary's render, so a
+     multi-model selection cannot define the table twice. *)
   let librarian_lane =
     let slots, cli_slots =
       match spec.transport with
@@ -164,9 +169,8 @@ let render spec =
     table [ "runtime"; "exact_output_lanes"; "librarian_exact" ]
       [ "slots", `List slots; "cli_slots", `List cli_slots ]
   in
-  let runtime = runtime ^ librarian_lane in
-  {runtime_id;runtime_toml=runtime;model_overlay_toml=overlay}
+  {runtime_id;runtime_toml=runtime;model_overlay_toml=overlay;librarian_lane_toml=librarian_lane}
 let render_json value = `Assoc ["runtime_id",`String value.runtime_id;"runtime_toml",`String value.runtime_toml;
-  "model_overlay_toml",`String value.model_overlay_toml]
+  "model_overlay_toml",`String value.model_overlay_toml;"librarian_lane_toml",`String value.librarian_lane_toml]
 
 let model_id spec = spec.model

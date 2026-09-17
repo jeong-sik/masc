@@ -17,7 +17,15 @@
     With neither, the caller has no atom to start from and carries the whole
     history; the provider judges it, and the turn driver owns the one move a
     refusal forces before any usage has been counted, which
-    {!Halved_after_refusal} names. *)
+    {!Halved_after_refusal} names.
+
+    A front is a position: the atom index and the digest of the message that
+    opens that atom
+    ({!Runtime_model_input_tail_window.atom_opening_digest}). A seed is used
+    only while the history in hand opens the same index with the same
+    message ({!for_history}); the history's atom count is not compared. A
+    history one unsaved atom shorter keeps the position, and a purge before
+    the front moves another message under the index and drops it. *)
 
 type source =
   | Ledger  (** The pair's ledger, moved by every eviction since its last request. *)
@@ -30,9 +38,9 @@ type source =
 
 type seed =
   { first_atom : int
-  ; atom_count : int
-        (** How many atoms the history had when the front was measured. A
-            history that has fewer now is not the one the position names. *)
+  ; front_digest : string
+        (** The opening-message digest of [first_atom] in the history the
+            front was measured on. *)
   ; source : source
   }
 
@@ -42,7 +50,9 @@ type origin =
       (** No front to start from: everything, until the first usage on the
           pair is counted or a refusal halves the range. *)
 
-val of_ledger : Keeper_model_input_ledger.t -> seed
+val of_ledger : Keeper_model_input_ledger.t -> seed option
+(** The ledger's front with the digest the ledger recorded for it; [None]
+    when its last request carried no atom, which names no position. *)
 
 (** Who composes a runtime's request, which says whose atoms a window it
     recorded counts. *)
@@ -81,22 +91,65 @@ val of_records
     whose runtime is {!Not_materialized} is not read, since nothing says
     which it was. *)
 
+type unreadable_records =
+  { count : int  (** At least 1. *)
+  ; first_reason : string
+        (** The decoder's error for the oldest row that did not decode. *)
+  }
+(** JSON rows {!read_seed} read that {!Turn_record.of_json} refused. A line
+    that is not JSON is skipped by the store reader before this count and is
+    not in it. *)
+
+type seed_read =
+  { seed : seed option
+  ; unreadable : unreadable_records option
+        (** [None] when every record read decoded. A seed is looked for among
+            the records that did, so [seed = None] with [Some _] here is
+            "records unreadable", not "no record". *)
+  }
+
+val no_seed_read : seed_read
+(** No seed and nothing unreadable: a caller that reads no records. *)
+
+val seed_read_of_rows
+  :  composer:(string -> composer)
+  -> trace_id:string
+  -> Yojson.Safe.t list
+  -> seed_read
+(** {!of_records} over the rows that decode as turn records, with the rows
+    that do not counted and the first refusal kept, rows oldest first. *)
+
 val read_seed
   :  config:Workspace.config
   -> keeper_name:string
   -> trace_id:string
-  -> seed option
-(** {!of_records} over the keeper's newest {!records_read} turn records,
-    each record's runtime answered by {!composer_of_runtime} from the live
-    catalog. Reads the record file on the calling fiber; a turn calls it
-    once, and only while the pair has no ledger. *)
+  -> seed_read
+(** {!seed_read_of_rows} over the JSON rows of the keeper's newest
+    {!records_read} turn records, each record's runtime answered by
+    {!composer_of_runtime} from the live catalog. Reads the record file on the
+    calling fiber; the turn driver calls it once per provider attempt, and
+    only while the pair has no ledger. *)
 
-val for_history : atom_count:int -> seed -> seed option
-(** The seed when the history still has at least the atoms it was measured
-    against, [None] when the history shrank under it (a checkpoint purge):
-    the position then names no atom of this history, and carrying the
-    newest atom alone from there would never widen again. The caller starts
-    over as with no seed. *)
+(** Why {!for_history} dropped a seed. *)
+type dropped_front =
+  | Front_atom_missing
+      (** The history has no atom at [first_atom]: it is shorter than the
+          front. *)
+  | Front_message_differs
+      (** The atom at [first_atom] opens with another message: atoms before
+          the front were removed or replaced. *)
+
+val for_history
+  :  digest_at:(int -> string option)
+  -> seed
+  -> (seed, dropped_front) result
+(** The seed when [digest_at seed.first_atom] is [Some seed.front_digest],
+    where [digest_at] is {!Runtime_model_input_tail_window.atom_opening_digest}
+    over the history in hand; otherwise why not. A dropped position names no
+    atom of this history, and carrying the newest atom alone from there
+    would never widen again, so the caller starts over as with no seed. *)
+
+val dropped_front_to_string : dropped_front -> string
 
 val records_read : int
 (** How many records {!read_seed} reads. Every completed Agent Core turn
@@ -113,6 +166,7 @@ val halve : first_atom:int -> atom_count:int -> int option
 
 val source_to_string : source -> string
 val seed_to_json : seed -> Yojson.Safe.t
+(** [first_atom], [front_digest] and [source]. *)
 val origin_to_string : origin -> string
 
 val origin_to_json : origin -> Yojson.Safe.t

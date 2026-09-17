@@ -2253,7 +2253,7 @@ let run_named
                 (fun () ->
                    match carried_front_seed with
                    | Some read -> read ()
-                   | None -> None)
+                   | None -> Keeper_carried_front.no_seed_read)
             ; base_path
             ; keeper_name
             ; name

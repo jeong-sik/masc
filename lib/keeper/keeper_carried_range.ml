@@ -12,6 +12,7 @@ type step =
       ; evicted_atoms : int
       ; evicted_tokens : int option
       ; first_atom : int
+      ; front_digest : string
       ; projected_total : int option
       }
 
@@ -82,6 +83,7 @@ let evict ~stop ~at_least_one (ledger : Keeper_model_input_ledger.t) =
          ; evicted_atoms = w.evicted_atoms
          ; evicted_tokens = w.evicted_tokens
          ; first_atom = stopped_at.block_first_atom
+         ; front_digest = stopped_at.block_first_digest
          ; projected_total = w.remaining
          }
      | Some _ | None -> Unchanged Nothing_evictable)
@@ -123,7 +125,14 @@ let int_opt = function
 
 let step_to_json = function
   | Unchanged reason -> `Assoc [ "step", `String "unchanged"; "reason", `String (reason_to_string reason) ]
-  | Evicted { evicted_blocks; evicted_atoms; evicted_tokens; first_atom; projected_total } ->
+  | Evicted
+      { evicted_blocks
+      ; evicted_atoms
+      ; evicted_tokens
+      ; first_atom
+      ; front_digest = _
+      ; projected_total
+      } ->
     `Assoc
       [ "step", `String "evicted"
       ; "evicted_blocks", `Int evicted_blocks

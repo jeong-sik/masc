@@ -27,8 +27,20 @@
 
     Anything that breaks the comparison restarts the ledger from the request
     at hand: a different prefix (system prompt or tool schemas), a history
-    that shrank (a new session), a front that moved back, or a front that
-    fell inside a block. A front move over measured blocks only subtracts
+    that no longer holds the last request's positions, a front that moved
+    back, or a front that fell inside a block.
+
+    A position is an atom index together with the digest of the message that
+    opens that atom ({!Runtime_model_input_tail_window.atom_opening_digest}).
+    Each request records the digests of its front and last atoms, and each
+    block the digest of its first. The history the next request is composed
+    from is asked for both of the last request's positions: when either index
+    is gone or opens with another message, the ledger restarts. The atom
+    count is not compared. A history can lose an unsaved attempt's atom and
+    keep every position, or keep its count while an index now opens with
+    another message; only the digests tell the two apart. The atoms between
+    the two positions cannot be proved, so no rule keeps part of the blocks
+    after a shrink. A front move over measured blocks only subtracts
     them. A front move over a block of unknown size (the cold-start block)
     keeps the measured blocks and leaves the total unknown until the next
     usage; the block appended in that same request can then never be
@@ -47,12 +59,33 @@
     are the provider's, so the same atoms carried on another runtime are a
     separate ledger. *)
 
+(** The positions a request carried, named by their opening messages. *)
+type carried_ends =
+  | No_atom_carried
+      (** The request names no position: its history's lookup did not give a
+          digest at both [first_atom] and [atom_count - 1]. That is a request
+          that carried no atom, [first_atom = atom_count], of an empty history
+          or of a non-empty one. The turn driver also records it for a lookup
+          that gives only one of the two, which a lookup over the history the
+          counts were read from does not. Nothing is checked against it later,
+          and it starts no block. *)
+  | Carried_atoms of
+      { front_digest : string
+            (** Opening-message digest of atom [first_atom]. *)
+      ; end_digest : string
+            (** Opening-message digest of atom [atom_count - 1], the newest
+                carried atom. *)
+      }
+
 (** One request as the projection handed it to the provider. *)
 type request =
   { prefix_digest : string
         (** SHA-256 of the system prompt and tool schemas: the fixed prefix F. *)
   ; first_atom : int  (** Index of the oldest carried atom in the durable history. *)
   ; atom_count : int  (** Atoms the durable history held when this request was built. *)
+  ; ends : carried_ends
+        (** Both carried positions as that history opened them. After
+            {!move_front}, [front_digest] is the moved front's. *)
   ; tail_bytes : int
         (** Bytes of the per-request tail (extra system context and other
             pinned messages), measured with the request encoder. *)
@@ -72,6 +105,10 @@ type usage =
 type block =
   { block_first_atom : int
   ; block_end_atom : int  (** Exclusive. *)
+  ; block_first_digest : string
+        (** Opening-message digest of [block_first_atom], read from the
+            history the block was first carried in; an eviction that stops at
+            this block moves the front to this position. *)
   ; tokens : int option
         (** Provider-counted tokens of the atoms in this range, including the
             change of the per-request tail between the two requests that
@@ -116,7 +153,10 @@ type event =
       (** The front moved back toward older atoms, as it does on the request
           after a newest-atom-only one; restarted from this request. *)
   | Prefix_changed  (** System prompt or tool schemas differ; restarted. *)
-  | History_reset  (** The history shrank; restarted. *)
+  | History_reset
+      (** The history no longer opens the last request's front or newest atom
+          with the message that request carried, or has no atom there;
+          restarted. *)
 
 type observation =
   { ledger : t
@@ -127,19 +167,42 @@ type observation =
   ; tail_delta_bytes : int  (** Tail bytes of this request minus the previous. *)
   }
 
-val observe : t option -> request -> usage option -> observation
-(** Pure step. [None] starts a ledger from the request. *)
+val observe
+  :  digest_at:(int -> string option)
+  -> t option
+  -> request
+  -> usage option
+  -> observation
+(** Pure step. [None] starts a ledger from the request. [digest_at] is
+    {!Runtime_model_input_tail_window.atom_opening_digest} over the history
+    [request] was composed from; the last request's positions are checked
+    against it, and a block appended from it is named by it. *)
 
 val usage_of_counts : input_tokens:int -> cache_read_input_tokens:int -> usage option
 (** [None] unless [input_tokens] is positive: a zero-filled usage is the
     shape of a response that reported nothing. *)
 
-val move_front : t -> first_atom:int -> t
+val holds : digest_at:(int -> string option) -> t -> bool
+(** Whether the history [digest_at] reads still opens the last request's
+    front and newest atom with the messages that request recorded; [true] for
+    a last request that carried no atom. The check [observe] makes, for a
+    caller that has to decide before it composes whether the ledger's front
+    names an atom of this history (RFC keeper-context-window-in-tokens
+    §10.3). *)
+
+val move_front : t -> first_atom:int -> front_digest:string -> t option
 (** Apply an eviction decided outside a request: blocks below [first_atom]
     leave, their tokens come off the total when they were all measured, and
-    otherwise the total is unknown until the next sample. A front that does
-    not advance changes nothing; a front inside a block restarts the blocks
-    from it. The next request's [observe] then sees an unchanged front. *)
+    otherwise the total is unknown until the next sample. [front_digest] is
+    the opening-message digest of [first_atom]: the [block_first_digest] of
+    the block an eviction stopped at, or the history's own for a halved
+    front. A front inside a block restarts the blocks from it. The next
+    request's [observe] then sees an unchanged front.
+
+    [None] when the front does not move: [first_atom] at or behind the
+    current front, at or past the last request's atom count, or a ledger whose
+    last request carried no atom. A caller that retries on a move can then
+    tell a retry that would send the same range from one that would not. *)
 
 val known_tokens : t -> int
 (** Sum of the measured blocks' tokens. *)
@@ -169,18 +232,46 @@ module Table : sig
     :  keeper_name:string
     -> runtime_id:string
     -> session_id:string
+    -> digest_at:(int -> string option)
     -> request:request
     -> usage:usage option
     -> observation
 
   val lookup : keeper_name:string -> runtime_id:string -> session_id:string -> t option
 
+  type in_history =
+    | Holds of t  (** The pair's ledger, whose positions this history holds. *)
+    | Dropped_stale of t
+        (** The pair's ledger did not hold ({!holds}) and was removed: its
+            front and blocks name atoms of another history, so it neither
+            chooses the front nor answers a refusal. The next observed
+            request starts a new one. *)
+    | Absent
+
+  val lookup_in_history
+    :  keeper_name:string
+    -> runtime_id:string
+    -> session_id:string
+    -> digest_at:(int -> string option)
+    -> in_history
+  (** The pair's ledger as the history a request composes from sees it
+      (RFC keeper-context-window-in-tokens §10.3: the positions are checked
+      when the request is composed, and a ledger that fails restarts). The
+      restart is the removal: a ledger needs a request and its usage to start
+      from, and the request being composed has neither yet. *)
+
+  type move =
+    | Moved
+    | Not_moved  (** The pair has a ledger and {!move_front} did not move it. *)
+    | No_pair_ledger
+
   val move_front
     :  keeper_name:string
     -> runtime_id:string
     -> session_id:string
     -> first_atom:int
-    -> unit
+    -> front_digest:string
+    -> move
   (** {!move_front} on the pair's ledger, so the next request composes and
       the next observation measures from the new front. A pair without a
       ledger has no front to move, and nothing is written. *)

@@ -29,11 +29,13 @@ type try_provider_ctx =
             turn, before its first composition (RFC
             keeper-context-window-in-tokens §10.5), as the binding declares
             them; [None] leaves eviction to a refusal. *)
-  ; carried_front_seed : unit -> Keeper_carried_front.seed option
+  ; carried_front_seed : unit -> Keeper_carried_front.seed_read
         (** Where the carried range starts when no ledger holds this
             (keeper, runtime) pair yet: the range the newest completed Agent
-            Core turn record on the trace measured, whichever runtime ran it.
-            Read once per attempt, on that path only. *)
+            Core turn record on the trace measured, whichever runtime ran it,
+            with the records that could not be decoded counted. Read once per
+            attempt, on that path only; unreadable records are logged beside
+            the attempt's first carried-range line. *)
   ; base_path : string
   ; keeper_name : string
   ; name : string
@@ -265,8 +267,8 @@ val carried_range_eviction_sequence :
   ledger:(unit -> Keeper_model_input_ledger.t option) ->
   last_request:(unit -> Keeper_model_input_ledger.request option) ->
   marks:Runtime_schema.context_marks option ->
-  evict:(Keeper_carried_range.step -> unit) ->
-  halve:(first_atom:int -> atom_count:int -> retry:int -> unit) ->
+  evict:(Keeper_carried_range.step -> bool) ->
+  halve:(first_atom:int -> atom_count:int -> retry:int -> bool) ->
   last_resort:(retry:int -> bool) ->
   on_retry:(retry:int -> eviction_retry -> unit) ->
   attempt:(unit -> ('ok, Agent_core.Error.t) result) ->
@@ -276,13 +278,17 @@ val carried_range_eviction_sequence :
     keeper-context-window-in-tokens §10.5). A provider context overflow or a
     size refusal on the byte axis is answered from the pair's ledger with
     {!Keeper_carried_range.after_overflow}; [evict] applies the step before
-    the next attempt. When the ledger has no block structure to walk, no
+    the next attempt and answers whether the front moved. When the ledger has no block structure to walk, no
     usage counted yet or a single block, [last_request]'s range halves
-    toward the newest atom through [halve]; at a single atom [last_resort]
+    toward the newest atom through [halve], which answers [false] when it
+    cannot name the halved front by its opening message and so ends the
+    sequence with the refusal in hand; at a single atom [last_resort]
     may arm one more request with the turn's own tool results demoted
     (#28845), and answers [false] once used or with nothing to demote, which
-    ends the sequence with the refusal in hand. Every other error ends it at
-    once, as does a refusal once [same_run_retry_authorized] is [false]. *)
+    ends the sequence with the refusal in hand. Every retry follows a move
+    that [evict] or [halve] reported, so the sequence never resends the range
+    that was refused. Every other error ends it at once, as does a refusal
+    once [same_run_retry_authorized] is [false]. *)
 
 val run_try_provider_with_carried_range_eviction :
   ?continuation_checkpoint:Agent_core.Checkpoint.t ->
@@ -324,9 +330,10 @@ type composed =
             excludes the reservation. *)
   ; history_atom_count : int  (** Atoms in the whole history. *)
   ; origin : Keeper_carried_front.origin
-  ; outlived_seed : Keeper_carried_front.seed option
-        (** A front the history shrank under, dropped by
-            {!Keeper_carried_front.for_history}; the request started over. *)
+  ; outlived_seed : (Keeper_carried_front.seed * Keeper_carried_front.dropped_front) option
+        (** A front this history does not open with the same message, dropped
+            by {!Keeper_carried_front.for_history} with the reason; the
+            request started over. *)
   ; demote_before : int
         (** The boundary the demotion applied: 0 when demotion is off, the
             whole history under the last resort. *)
@@ -412,6 +419,7 @@ module For_testing : sig
   val compose_carried_model_input :
     measure_message_bytes:(Agent_core.Types.message -> int) ->
     front:Keeper_carried_front.seed option ->
+    history_digest_at:(int -> string option) ->
     last_resort:bool ->
     base_path:string ->
     demote_before:int ->
@@ -422,6 +430,7 @@ module For_testing : sig
     provider_config:Agent_core.Llm_provider.Provider_config.t ->
     measure_message_bytes:(Agent_core.Types.message -> int) ->
     front:Keeper_carried_front.seed option ->
+    history_digest_at:(int -> string option) ->
     last_resort:bool ->
     base_path:string ->
     demote_before:int ->
@@ -431,6 +440,32 @@ module For_testing : sig
        Agent_core.Types.message list) ->
     Agent_core.Types.message list ->
     request_view
+
+  val carried_front :
+    keeper_name:string ->
+    runtime_id:string ->
+    session_id:string ->
+    digest_at:(int -> string option) ->
+    cold:(unit -> Keeper_carried_front.seed option) ->
+    Keeper_carried_front.seed option * Keeper_model_input_ledger.t option
+  (** The front a request composes from, [digest_at] being the lookup over
+      the history it composes from: the pair's ledger front while that
+      history holds the ledger ({!Keeper_model_input_ledger.holds}), else
+      [cold ()]. A ledger that does not hold is removed from the table and
+      returned second. *)
+
+  val halve_front :
+    digest_at:(int -> string option) option ->
+    move_ledger:(first_atom:int -> front_digest:string -> Keeper_model_input_ledger.Table.move) ->
+    hold:(Keeper_carried_front.seed -> unit) ->
+    first_atom:int ->
+    retry:int ->
+    bool
+  (** One halving after a refusal: whether the retry carries a strictly
+      later front. [false] when [digest_at] (the refused request's history)
+      has no atom at [first_atom], or when the pair's ledger did not move;
+      [true] when it moved, or when there is no ledger, after [hold] took the
+      halved seed the next composition reads. *)
 
   val last_resort_demotes :
     measure_message_bytes:(Agent_core.Types.message -> int) ->

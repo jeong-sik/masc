@@ -170,7 +170,8 @@ val carry
   -> carried
 (** The pure arithmetic, for tests: {!Runtime_model_input_tail_window.project_from_atom}
     from the seeded front, once {!Keeper_carried_front.for_history} admits it
-    against this history; without one, the whole history. *)
+    against this history (the index opens with the seed's message); without
+    one, or with one it drops, the whole history. *)
 
 
 type composition =

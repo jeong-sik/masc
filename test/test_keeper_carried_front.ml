@@ -2,8 +2,15 @@
     §10.4): where the carried range starts when no ledger holds the pair. *)
 
 module Front = Masc.Keeper_carried_front
+module Ledger = Masc.Keeper_model_input_ledger
+module Window = Runtime_model_input_tail_window
+module Types = Agent_core.Types
 
 open Alcotest
+
+(* The digest a record written by a turn whose front was atom [atom] carries;
+   the records below are never checked against a history. *)
+let recorded_digest atom = Printf.sprintf "front-%d" atom
 
 let record
       ?(runtime = "glm")
@@ -39,7 +46,11 @@ let record
   ; model_input_window =
       Option.map
         (fun (transmitted_atoms, total_atoms) ->
-           { Turn_record.transmitted_atoms; total_atoms; measurement = Turn_record.Wire_shape })
+           { Turn_record.transmitted_atoms
+           ; total_atoms
+           ; measurement = Turn_record.Wire_shape
+           ; front_atom_digest = recorded_digest (total_atoms - transmitted_atoms)
+           })
         window
   ; raw_trace_run_ref = None
   ; sampling = { temperature = None; top_p = None; max_tokens = None; enable_thinking = None }
@@ -88,8 +99,8 @@ let test_the_newest_completed_record_on_the_trace_seeds_the_front () =
   let first_atom, src = seed (of_records records) in
   check int "total minus transmitted of turn 12" 85 first_atom;
   check source "names its turn" (Front.Turn_record { turn = 12 }) src;
-  check int "and the history it was measured against" 110
-    (Option.get (of_records records)).atom_count
+  check string "and the message that record says opened it" (recorded_digest 85)
+    (Option.get (of_records records)).front_digest
 ;;
 
 let test_another_sessions_record_is_another_history () =
@@ -176,28 +187,139 @@ let test_the_composer_is_read_from_the_execution_kind () =
   check composer_t "not in the catalog" Front.Not_materialized (Front.composer_of_runtime None)
 ;;
 
-let test_of_ledger_reads_the_last_request_front () =
-  let ledger : Masc.Keeper_model_input_ledger.t =
-    { prefix_digest = "f"
-    ; total_tokens = Some 10
-    ; measured_end_atom = Some 20
-    ; measured_demote_before = Some 0
-    ; blocks = []
-    ; last = { prefix_digest = "f"; first_atom = 7; atom_count = 20; tail_bytes = 0; turn_context = false; demote_before = 0 }
-    ; last_usage = None
-    }
-  in
-  let first_atom, src = seed (Some (Front.of_ledger ledger)) in
-  check int "the ledger's front" 7 first_atom;
-  check source "ledger" Front.Ledger src;
-  check int "measured against the last request's history" 20 (Front.of_ledger ledger).atom_count
+let ledger_with ~first_atom ~atom_count ends : Ledger.t =
+  { prefix_digest = "f"
+  ; total_tokens = Some 10
+  ; measured_end_atom = Some atom_count
+  ; measured_demote_before = Some 0
+  ; blocks = []
+  ; last =
+      { prefix_digest = "f"
+      ; first_atom
+      ; atom_count
+      ; ends
+      ; tail_bytes = 0
+      ; turn_context = false
+      ; demote_before = 0
+      }
+  ; last_usage = None
+  }
 ;;
 
-let test_for_history_drops_a_front_the_history_shrank_under () =
-  let s : Front.seed = { first_atom = 3_100; atom_count = 3_395; source = Front.Ledger } in
-  check bool "the same history keeps it" true (Front.for_history ~atom_count:3_395 s = Some s);
-  check bool "a longer history keeps it" true (Front.for_history ~atom_count:3_400 s = Some s);
-  check bool "a purged history drops it" true (Front.for_history ~atom_count:2_000 s = None)
+let test_of_ledger_reads_the_last_request_front () =
+  let ledger =
+    ledger_with
+      ~first_atom:7
+      ~atom_count:20
+      (Ledger.Carried_atoms { front_digest = "seven"; end_digest = "nineteen" })
+  in
+  let first_atom, src = seed (Front.of_ledger ledger) in
+  check int "the ledger's front" 7 first_atom;
+  check source "ledger" Front.Ledger src;
+  check string "named by the digest the ledger recorded for it" "seven"
+    (Option.get (Front.of_ledger ledger)).front_digest;
+  check bool "a ledger whose last request carried no atom names no front" true
+    (Option.is_none
+       (Front.of_ledger (ledger_with ~first_atom:0 ~atom_count:0 Ledger.No_atom_carried)))
+;;
+
+let text_message role text : Types.message =
+  { role; content = [ Types.Text text ]; name = None; tool_call_id = None; metadata = [] }
+;;
+
+(* [exchanges n] is [2n] atoms: a user message and an assistant reply each. *)
+let exchanges n =
+  List.concat_map
+    (fun i ->
+       [ text_message Types.User (Printf.sprintf "ask %d" i)
+       ; text_message Types.Assistant (Printf.sprintf "answer %d" i)
+       ])
+    (List.init n Fun.id)
+;;
+
+let seed_at history first_atom : Front.seed =
+  match Window.atom_opening_digest history first_atom with
+  | Some front_digest -> { first_atom; front_digest; source = Front.Ledger }
+  | None -> fail "the seed's own history has the atom"
+;;
+
+let dropped =
+  testable
+    (fun fmt d -> Format.pp_print_string fmt (Front.dropped_front_to_string d))
+    ( = )
+;;
+
+let kept_or_dropped = result (of_pp (fun fmt (s : Front.seed) -> Format.pp_print_int fmt s.first_atom)) dropped
+
+(* 2026-09-17, msx-retro-mania: the attempt that measured the front added one
+   atom it never saved, so the next turn's history was one atom shorter than
+   the one the front was measured on. The front's atom opens with the same
+   message in both, and the position holds. *)
+let test_a_history_one_unsaved_atom_shorter_keeps_the_front () =
+  let measured_on = exchanges 6 in
+  let s = seed_at measured_on 8 in
+  let next_turn = List.filteri (fun index _ -> index < 11) measured_on in
+  check kept_or_dropped "the same message at atom 8" (Ok s)
+    (Front.for_history ~digest_at:(Window.atom_opening_digest next_turn) s)
+;;
+
+(* A purge before the front pulls every later atom one index back: the index
+   now opens with another message. A purge that took the front's own atom
+   along with everything after it leaves no atom at the index. *)
+let test_a_purge_drops_the_front_with_its_reason () =
+  let measured_on = exchanges 6 in
+  let s = seed_at measured_on 8 in
+  let purged_before = List.filteri (fun index _ -> index <> 2) measured_on in
+  check kept_or_dropped "another message at atom 8" (Error Front.Front_message_differs)
+    (Front.for_history ~digest_at:(Window.atom_opening_digest purged_before) s);
+  let cut_short = List.filteri (fun index _ -> index < 8) measured_on in
+  check kept_or_dropped "no atom 8" (Error Front.Front_atom_missing)
+    (Front.for_history ~digest_at:(Window.atom_opening_digest cut_short) s)
+;;
+
+(* The front atom is an assistant message; the tool result that answers it
+   arrives after the front was measured and joins the same atom. The
+   position is the opening message's, so the seed still holds. *)
+let test_a_tool_result_joining_the_front_atom_keeps_the_front () =
+  let assistant_call = text_message Types.Assistant "calling a tool" in
+  let measured_on = exchanges 2 @ [ assistant_call ] in
+  let s = seed_at measured_on 4 in
+  let tool_result =
+    { (text_message Types.Tool "tool output") with Types.tool_call_id = Some "call-1" }
+  in
+  let later = measured_on @ [ tool_result; text_message Types.User "next" ] in
+  check kept_or_dropped "the tool result does not move the position" (Ok s)
+    (Front.for_history ~digest_at:(Window.atom_opening_digest later) s)
+;;
+
+(* The rows a seed is read from: one current record, and two rows the decoder
+   refuses for different reasons. The seed comes from the one that decodes;
+   the two that do not are counted, and the first refusal is the one kept. *)
+let test_rows_that_do_not_decode_are_counted_with_the_first_reason () =
+  let without key json =
+    match json with
+    | `Assoc fields -> `Assoc (List.remove_assoc key fields)
+    | other -> other
+  in
+  let current = Turn_record.to_json (record ~turn:10 (Some (30, 100))) in
+  let rows =
+    [ without "front_atom_digest" (Turn_record.to_json (record ~turn:8 (Some (5, 90))))
+    ; current
+    ; without "keeper" (Turn_record.to_json (record ~turn:9 (Some (5, 95))))
+    ]
+  in
+  let read = Front.seed_read_of_rows ~composer ~trace_id:"trace-1" rows in
+  check int "the seed is the record that decodes" 70
+    (fst (seed read.Front.seed));
+  match read.Front.unreadable with
+  | None -> fail "two rows did not decode and none was counted"
+  | Some unreadable ->
+    check int "both refused rows are counted" 2 unreadable.Front.count;
+    check bool "the first refusal is kept, not the last" true
+      (Astring.String.is_infix ~affix:"front_atom_digest" unreadable.Front.first_reason);
+    check bool "every row decoding counts nothing" true
+      (Option.is_none
+         (Front.seed_read_of_rows ~composer ~trace_id:"trace-1" [ current ]).Front.unreadable)
 ;;
 
 let test_clamp_keeps_the_front_on_an_atom () =
@@ -240,10 +362,17 @@ let () =
         ; test_case "another session" `Quick test_another_sessions_record_is_another_history
         ; test_case "composer from the execution kind" `Quick
             test_the_composer_is_read_from_the_execution_kind
+        ; test_case "undecodable rows counted with the first reason" `Quick
+            test_rows_that_do_not_decode_are_counted_with_the_first_reason
         ] )
     ; ( "front"
       , [ test_case "of_ledger" `Quick test_of_ledger_reads_the_last_request_front
-        ; test_case "for_history" `Quick test_for_history_drops_a_front_the_history_shrank_under
+        ; test_case "one unsaved atom shorter keeps the front" `Quick
+            test_a_history_one_unsaved_atom_shorter_keeps_the_front
+        ; test_case "a purge drops the front with its reason" `Quick
+            test_a_purge_drops_the_front_with_its_reason
+        ; test_case "a joining tool result keeps the front" `Quick
+            test_a_tool_result_joining_the_front_atom_keeps_the_front
         ; test_case "clamp" `Quick test_clamp_keeps_the_front_on_an_atom
         ; test_case "halve" `Quick test_halve_moves_halfway_and_stops_at_one_atom
         ; test_case "origin json" `Quick test_origin_json_names_its_kind

@@ -12,9 +12,12 @@
 # signal that the time is up. That path asks the server for the delegate state
 # once, as it stands, and records it under its own name.
 #
-# Stopping the keepers comes first on both paths. Harbor downloads the task's
-# artifacts while the agent environment is still running, and a keeper still
-# working past the time limit would keep writing into them.
+# Both paths stop the keepers and wait until they are gone before writing
+# result.json. Harbor downloads the task's artifacts while the agent environment
+# is still running, and a keeper still working past the time limit would keep
+# writing into them. keeper_down only submits the shutdown, so the wait is what
+# makes it true; a keeper that is still there when the wait ends is recorded as
+# keepers_stopped=false rather than assumed gone.
 set -euo pipefail
 
 BENCH=/opt/masc-bench
@@ -25,6 +28,22 @@ MODE="$2"
 KEEPER_COUNT="${KEEPER_COUNT:-1}"
 EPISODE_JSON="$BENCH/episode.json"
 INTERRUPTED_MARK="$BENCH/episode.interrupted"
+# The wait for stopped keepers is bounded so that result.json is written inside
+# the agent's recovery exec (RESULT_RECOVERY_TIMEOUT_SEC, 600s, in
+# agents/masc_agent.py). A shutdown normally completes within a few polls.
+KEEPER_STOP_POLL_SEC=2
+KEEPER_STOP_POLLS=60
+
+if [[ "$MODE" == "--interrupted" ]]; then
+  # run_episode.sh is still running after harbor dropped its exec. It may be
+  # polling, or still bringing keepers up and submitting the task when the time
+  # limit lands early. Mark the episode as reported and end that script before
+  # anything else, so it neither starts work after this point nor writes a
+  # second result.json over this one.
+  touch "$INTERRUPTED_MARK"
+  episode_pid="$(cat "$BENCH/episode.pid" 2>/dev/null || true)"
+  [[ "$episode_pid" =~ ^[0-9]+$ ]] && kill "$episode_pid" 2>/dev/null || true
+fi
 
 MCP_TOKEN="$(cat "$BENCH/token")"
 export MCP_TOKEN
@@ -37,10 +56,6 @@ interrupted=false
 final='{}'
 if [[ "$MODE" == "--interrupted" ]]; then
   interrupted=true
-  # run_episode.sh keeps polling after harbor has dropped its exec. The mark
-  # tells that loop the episode is already being reported, so it exits instead
-  # of writing a second result.json over this one.
-  touch "$INTERRUPTED_MARK"
   op_id="$(jq -r '.operation_id // empty' "$EPISODE_JSON" 2>/dev/null || true)"
   if [[ -z "$op_id" ]]; then
     state="NotSubmitted"
@@ -60,10 +75,28 @@ else
   final="$(cat "$3")"
 fi
 
+# keeper_down answers already_absent=true once the keeper has no lane, no
+# shutdown in progress and no metadata; remove_meta makes the completed
+# shutdown reach that answer. Asked again each poll for every keeper still
+# present.
+keepers_stopped=false
 if [[ "$server_up" -eq 1 ]]; then
-  for i in $(seq 1 "${KEEPER_COUNT}"); do
-    mcp_call $((400+i)) masc_keeper_down "$(jq -cn --arg n "bench-${i}" '{name:$n}')" 20 >/dev/null || true
+  remaining=""
+  for i in $(seq 1 "${KEEPER_COUNT}"); do remaining="${remaining} bench-${i}"; done
+  poll=0
+  while [[ -n "${remaining// /}" && "$poll" -lt "$KEEPER_STOP_POLLS" ]]; do
+    still=""
+    for k in ${remaining}; do
+      down="$(mcp_call $((400+poll)) masc_keeper_down \
+        "$(jq -cn --arg n "$k" '{name:$n, remove_meta:true}')" 20 2>/dev/null)" || down='{}'
+      printf '%s' "$down" | jq -e '.already_absent == true' >/dev/null 2>&1 \
+        || still="${still} ${k}"
+    done
+    remaining="${still}"
+    poll=$((poll + 1))
+    [[ -n "${remaining// /}" ]] && sleep "$KEEPER_STOP_POLL_SEC"
   done
+  [[ -z "${remaining// /}" ]] && keepers_stopped=true
 fi
 
 start_epoch="$(jq -r '.start_epoch // empty' "$EPISODE_JSON" 2>/dev/null || true)"
@@ -138,7 +171,7 @@ final="$(printf '%s' "$final" | jq -c 'if type=="object" then . else {} end' 2>/
 [[ "$tool_calls" =~ ^[0-9]+$ ]] || tool_calls=0
 [[ "$dup_calls" =~ ^[0-9]+$ ]] || dup_calls=0
 
-echo "collect_result: state=$state interrupted=$interrupted tool_calls=$tool_calls dup=$dup_calls final_len=${#final}" >&2
+echo "collect_result: state=$state interrupted=$interrupted keepers_stopped=$keepers_stopped tool_calls=$tool_calls dup=$dup_calls final_len=${#final}" >&2
 
 # NOTE: pass `final` via --slurpfile, not --argjson: the select() keeps the
 # last object if the text ever holds multiple values, and a file read keeps
@@ -154,12 +187,14 @@ tmp_result="$(mktemp "${RESULT_JSON}.XXXXXX")"
 jq -n \
   --arg state "$state" \
   --argjson interrupted "$interrupted" \
+  --argjson keepers_stopped "$keepers_stopped" \
   --argjson duration_ms "$duration_ms" \
   --argjson tool_calls "${tool_calls:-0}" \
   --argjson duplicate_tool_calls "${dup_calls:-0}" \
   --argjson usage "$usage_json" \
   --slurpfile final_raw "$final_file" \
-  '{state:$state, interrupted:$interrupted, duration_ms:$duration_ms,
+  '{state:$state, interrupted:$interrupted, keepers_stopped:$keepers_stopped,
+    duration_ms:$duration_ms,
     tool_calls:$tool_calls, duplicate_tool_calls:$duplicate_tool_calls,
     input_tokens:($usage.input_tokens // null),
     output_tokens:($usage.output_tokens // null),

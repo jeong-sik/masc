@@ -239,7 +239,7 @@ def test_cost_prices_each_token_class_at_its_own_rate(tmp_path, monkeypatch):
 def test_the_cache_split_is_not_the_cache_sum(tmp_path, monkeypatch):
     # 600 cache tokens priced as one class would be either 1.5e-03 (all
     # creation) or 1.2e-04 (all read). The real answer is neither, and the
-    # gap is why run_episode.sh reports the two apart.
+    # gap is why collect_result.sh reports the two apart.
     context = context_for(
         tmp_path, monkeypatch, {"anthropic/claude-fable-5": RATES},
         input_tokens=0, output_tokens=0, cache_tokens=600,
@@ -356,3 +356,46 @@ def test_an_episode_that_ends_on_its_own_is_not_collected_twice(tmp_path):
     env = FakeEnv()
     asyncio.run(make_agent(tmp_path, arm="b").run("task", env, AgentContext()))
     assert not any("--interrupted" in c for c in env.commands)
+
+
+class EpisodeEndsInFailure(FakeEnv):
+    """run_episode.sh reported a Failed episode and exited 1 on its own."""
+
+    async def exec(self, command, **kw):
+        self.commands.append(command)
+        self.exec_kwargs.append(kw)
+        if "run_episode.sh" in command:
+            return FakeResult("", return_code=1)
+        if "cat /opt/masc-bench/result.json" in command:
+            return FakeResult('{"state":"Failed","interrupted":false,"final":{}}')
+        return FakeResult("")
+
+
+def test_an_episode_that_fails_on_its_own_is_not_reported_as_interrupted(tmp_path):
+    from harbor.models.agent.context import AgentContext
+
+    env = EpisodeEndsInFailure()
+    ctx = AgentContext()
+    with pytest.raises(Exception):  # harbor's NonZeroAgentExitCodeError
+        asyncio.run(make_agent(tmp_path, arm="b").run("task", env, ctx))
+    assert not any("--interrupted" in c for c in env.commands)
+    assert ctx.metadata["masc_state"] == "Failed"
+    assert ctx.metadata["interrupted"] is False
+
+
+def test_the_interrupted_report_is_bounded_after_the_time_is_up(tmp_path):
+    import agents.masc_agent as m
+    from harbor.models.agent.context import AgentContext
+
+    env = EpisodeRunsUntilCancelled()
+
+    async def go():
+        await asyncio.wait_for(
+            make_agent(tmp_path, arm="b").run("task", env, AgentContext()), timeout=0.05)
+
+    with pytest.raises(asyncio.TimeoutError):
+        asyncio.run(go())
+    recovery = [kw for c, kw in zip(env.commands, env.exec_kwargs)
+                if "--interrupted" in c or "cat /opt/masc-bench/result.json" in c]
+    assert recovery and all(
+        kw.get("timeout_sec") == m.RESULT_RECOVERY_TIMEOUT_SEC for kw in recovery)

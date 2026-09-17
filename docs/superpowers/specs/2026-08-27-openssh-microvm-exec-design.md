@@ -286,9 +286,15 @@ the protocol. The shim:
   shim config's `env_file=` names, `NAME=VALUE` lines in docker's
   `--env-file` grammar. The file is endpoint-resident like `path=`, so the
   denylist does not apply to it, but it may not declare `PATH`, which
-  `path=` owns. The shim refuses the request when that file cannot be read,
-  has a malformed line, or may be written by its group or every user. A boxed
-  run still sets `HOME` and `TMPDIR` to its scratch;
+  `path=` owns, the GitHub token names (`GH_TOKEN`, `GITHUB_TOKEN`,
+  `GH_ENTERPRISE_TOKEN`, `GITHUB_ENTERPRISE_TOKEN`), or the names the runner
+  sets for each request (`GH_CONFIG_DIR`, `GIT_TERMINAL_PROMPT`). The shim
+  refuses the request when that path is not a regular file, when the file is
+  owned by neither root nor the shim's effective uid, or when its group or
+  every user may write it — all decided from the opened descriptor before a
+  byte is read, so a FIFO at the path is refused rather than waited on — and
+  when the file cannot be read or has a malformed line. A boxed run still
+  sets `HOME` and `TMPDIR` to its scratch;
 - `setsid()` the child into its own process group and sets
   `PR_SET_PDEATHSIG=SIGKILL` pre-exec (covers the shim dying first);
 - while the child runs, selects on the child's stdout/stderr pipes, shim stdin

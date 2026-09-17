@@ -682,6 +682,20 @@ let test_repo_runtime_bindings_resolve_through_agent_core_provider_config () =
       , _assignments
       , _media_failover , _lanes ) ->
     check bool "at least one runtime binding" true (List.length runtimes > 0);
+    (* Official-client bindings (claude_code/codex/antigravity) carry no
+       AGENT_CORE Provider_config by design — the catalog gate skips the same
+       three executions. This walk asserts provider-config resolution, so it
+       visits the provider-backed bindings only. *)
+    let provider_backed =
+      List.filter
+        (fun (runtime : Runtime.t) ->
+           match runtime.execution with
+           | Runtime_execution.Agent_core _ -> true
+           | Runtime_execution.Codex_app_server _
+           | Runtime_execution.Claude_code _
+           | Runtime_execution.Antigravity_cli _ -> false)
+        runtimes
+    in
     List.iter
       (fun (runtime : Runtime.t) ->
          match
@@ -705,7 +719,7 @@ let test_repo_runtime_bindings_resolve_through_agent_core_provider_config () =
                true
                (Option.is_some
                   (agent_core_provider_config runtime).model_capabilities_override))
-      runtimes
+      provider_backed
 
 let test_repo_deepseek_thinking_request () =
   with_deployment_agent_core_model_catalog @@ fun _catalog ->
@@ -1318,7 +1332,8 @@ let test_repo_runtime_toml_declares_no_clamped_max_context () =
 (* Anchor examples at their actual commented declarations, not editorial
    headings. Materialized runtime IDs and capabilities below remain the gate. *)
 let self_hosted_example_marker = "[providers.llama_server]"
-let official_client_example_marker = "[providers.claude_code]"
+(* The official clients ship declared, not commented —
+   [test_official_client_declarations_load] gates them from the plain seed. *)
 
 let uncomment_example_region ~(marker : string) (content : string) : string =
   let rec walk acc inside = function
@@ -1450,24 +1465,27 @@ let test_self_hosted_templates_resolve_when_enabled () =
     self_hosted_template_cases
 ;;
 
-(* The Claude Code example has shipped commented since before this gate existed
-   and was never parsed by anything; the Codex and Antigravity ones arrive the
-   same way. A stale command name, a missing required provider field, or a key
-   the parser no longer takes fails here now. *)
-let test_commented_official_client_examples_load () =
+(* The three official clients ship as live declarations now — they were
+   commented examples when this gate was written, uncommented by hand before
+   anything parsed them. Loading the plain seed parses every one: a stale
+   command name, a missing required provider field, or a key the parser no
+   longer takes fails here. *)
+let test_official_client_declarations_load () =
   with_deployment_agent_core_model_catalog @@ fun _catalog ->
-  with_uncommented_seed ~marker:official_client_example_marker
-  @@ fun runtimes ->
-  let ids = List.map (fun (rt : Runtime.t) -> rt.Runtime.id) runtimes in
-  List.iter
-    (fun expected ->
-       if not (List.exists (String.equal expected) ids)
-       then failf "uncommenting the examples did not produce %s" expected)
-    [ "claude_code.claude-code-sonnet"
-    ; "claude_code.claude-code-opus-high"
-    ; "codex_subscription.codex-gpt-5-6"
-    ; "antigravity_subscription.antigravity-gemini-3-7-flash-high"
-    ]
+  let path = Filename.concat (repo_root ()) "config/runtime.toml" in
+  match load_list_text ~config_path:path with
+  | Error msg -> failf "repo runtime.toml should load: %s" msg
+  | Ok (runtimes, _default, _assignments, _media_failover, _lanes) ->
+    let ids = List.map (fun (rt : Runtime.t) -> rt.Runtime.id) runtimes in
+    List.iter
+      (fun expected ->
+         if not (List.exists (String.equal expected) ids)
+         then failf "the official-client declarations did not produce %s" expected)
+      [ "claude_code.claude-code-sonnet"
+      ; "claude_code.claude-code-opus-high"
+      ; "codex_subscription.codex-gpt-5-6"
+      ; "antigravity_subscription.antigravity-gemini-3-7-flash-high"
+      ]
 ;;
 
 (* The capability probe on 2026-08-13 sent 36 requests to the kimi_coding
@@ -4670,6 +4688,41 @@ let antigravity_file_credential =
    path = \"/tmp/antigravity-oauth-token\""
 ;;
 
+(* A "~/" credential path is the operator's home at read time. The seed
+   config ships the Antigravity token that way, one file for every workspace
+   on a machine, and [Runtime_adapter]'s absolute-path rule sees the expanded
+   value rather than the tilde. *)
+let test_file_credential_path_expands_home () =
+  let home =
+    match Sys.getenv_opt "HOME" with
+    | Some home when home <> "" -> home
+    | Some _ | None -> fail "HOME must be set for this case"
+  in
+  with_temp_runtime_toml
+    (antigravity_cli_runtime_toml
+       ~credential:
+         "[providers.antigravity.credentials]\n\
+          type = \"file\"\n\
+          path = \"~/.gemini/antigravity-cli/antigravity-oauth-token\""
+       ~options:"timeout-s = 45.0"
+       ())
+    (fun path ->
+       match load_list_text ~config_path:path with
+       | Error error -> failf "antigravity-cli runtime should load: %s" error
+       | Ok (_, default, _, _, _) ->
+         (match default.execution with
+          | Runtime_execution.Antigravity_cli config ->
+            check
+              string
+              "OAuth source is the home-expanded path"
+              (Filename.concat home ".gemini/antigravity-cli/antigravity-oauth-token")
+              config.oauth_source
+          | Runtime_execution.Agent_core _
+          | Runtime_execution.Claude_code _
+          | Runtime_execution.Codex_app_server _ ->
+            fail "antigravity-cli runtime expected"))
+;;
+
 let test_antigravity_cli_materializes_typed_process_options () =
   let options =
     "agent = \"fixture-agent\"\n\
@@ -4989,6 +5042,8 @@ let () =
             test_codex_app_server_rejects_declared_credentials;
           test_case "antigravity CLI options materialize" `Quick
             test_antigravity_cli_materializes_typed_process_options;
+          test_case "a file credential path expands a leading ~/" `Quick
+            test_file_credential_path_expands_home;
           test_case "antigravity add-dirs reach the execution config" `Quick
             test_antigravity_cli_add_dirs_reach_the_execution_config;
           test_case "antigravity add-dirs reject relative entries" `Quick
@@ -5044,8 +5099,8 @@ let () =
             test_repo_runtime_toml_declares_no_clamped_max_context;
           test_case "self-hosted server templates resolve when enabled" `Quick
             test_self_hosted_templates_resolve_when_enabled;
-          test_case "commented official-client examples load" `Quick
-            test_commented_official_client_examples_load;
+          test_case "official-client declarations load" `Quick
+            test_official_client_declarations_load;
           test_case
             "deployment exact-output catalog admits repo seed lanes"
             `Quick

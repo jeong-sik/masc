@@ -129,6 +129,26 @@ env_file=/etc/masc-exec-shim.env
   `path=` declares it. Request values admitted by `env_allowlist` replace the
   file's values.
 
+In a boxed run (`observe`, `guest_local`) `HOME` and `TMPDIR` are the run's
+scratch directory whatever the env file declares. Other directories the file
+names are outside the box, so under `observe` a payload's writes there are
+refused.
+
+Keep the env file root-owned and `0644`, like the config the bootstrap
+installs. Whoever can write it sets every payload's environment, the loader
+path included, so the shim refuses a file its group or every user may write.
+The shim reads the file for every request, so replace it in one step: write a
+temporary file in the same directory, then `mv` it over the old one.
+
+```sh
+printf '%s\n' 'VIRTUAL_ENV=/opt/venv' | sudo tee /etc/masc-exec-shim.env.tmp >/dev/null
+sudo chmod 0644 /etc/masc-exec-shim.env.tmp
+sudo mv /etc/masc-exec-shim.env.tmp /etc/masc-exec-shim.env
+```
+
+When a line is malformed the shim reports the file and the line number, not
+the line itself, since a line in the wrong place may be a secret.
+
 The bootstrap rewrites `/etc/masc-exec-shim.conf` with `remote_root` and
 `env_allowlist` only, so add these lines again after every bootstrap run
 (masc#36918).
@@ -235,7 +255,7 @@ sentence saying so is not.
 | `remote_ssh_remote_timeout` | The shim's payload timer expired. | Reduce the operation or deliberately increase its typed timeout. |
 | `remote_ssh_transport_error` | Frame/trailer/channel integrity failed. | Inspect sshd/shim logs and revision identity; do not treat it as payload exit. |
 | `remote_ssh_version_error` | A request or result frame has an unsupported protocol version. | Align MASC and shim revisions. |
-| `remote_ssh_shim_config_error` | `/etc/masc-exec-shim.conf` is missing or invalid. | Rerun bootstrap and inspect the strict config keys. |
+| `remote_ssh_shim_config_error` | `/etc/masc-exec-shim.conf` is missing or invalid, or the `env_file=` it names cannot be read, has a malformed line, or may be written by its group or every user. | A detail about the env file (`cannot read env_file <path>`, `env_file <path> line N: ...`, `env_file <path> is writable by ...`): fix that file and do not rerun bootstrap, which rewrites the config without `env_file=`. Any other detail is about the config file: rerun bootstrap and inspect the strict config keys, then add `path=`/`env_file=` again (masc#36918). |
 | `remote_ssh_shim_error` | The shim failed before producing a payload result. | Inspect the named shim detail and remote system state. |
 | `remote_ssh_dispatch_unavailable` | An SSH profile reached an inert Docker/legacy dispatch arm. | Treat as a wiring regression; capture the exact source head and file an issue. |
 | `remote_ssh_read_failed` | A remote read command exited nonzero. | Inspect the returned exit/stderr and remote path. |

@@ -281,7 +281,14 @@ the protocol. The shim:
 - synthesizes a documented minimal base env (`PATH`, `HOME`, `USER`, `TMPDIR`)
   and overlays only endpoint-allowlisted request entries, minus a
   reserved-name denylist (`PATH`, `HOME`, `LD_PRELOAD`, `LD_LIBRARY_PATH`,
-  `DYLD_*`, `BASH_ENV`, `ENV`) that is never accepted from the wire;
+  `DYLD_*`, `BASH_ENV`, `ENV`) that is never accepted from the wire.
+  Between the two sits the environment the endpoint declares: the file its
+  shim config's `env_file=` names, `NAME=VALUE` lines in docker's
+  `--env-file` grammar. The file is endpoint-resident like `path=`, so the
+  denylist does not apply to it, but it may not declare `PATH`, which
+  `path=` owns. The shim refuses the request when that file cannot be read,
+  has a malformed line, or may be written by its group or every user. A boxed
+  run still sets `HOME` and `TMPDIR` to its scratch;
 - `setsid()` the child into its own process group and sets
   `PR_SET_PDEATHSIG=SIGKILL` pre-exec (covers the shim dying first);
 - while the child runs, selects on the child's stdout/stderr pipes, shim stdin

@@ -1029,6 +1029,54 @@ let test_capacity_reports_what_the_window_carried () =
              < observation.Runtime_model_input_tail_window.total_atoms)))
 ;;
 
+(* The reading counts atoms, not messages. An assistant message and the tool
+   results answering it are one atom, so a history of such exchanges has
+   fewer atoms than messages, and the front the window names by its opening
+   message has to be an atom index for the digest to be that atom's. *)
+let test_capacity_reading_counts_atoms_and_names_its_front () =
+  let observed = ref None in
+  let message role text : Agent_core.Types.message =
+    { role; content = [ Text text ]; name = None; tool_call_id = None; metadata = [] }
+  in
+  let messages =
+    List.concat
+      (List.init 20 (fun i ->
+         [ message User (Printf.sprintf "ask %02d" i)
+         ; message Assistant (Printf.sprintf "call %02d" i)
+         ; { (message Tool (Printf.sprintf "result %02d" i)) with
+             Agent_core.Types.tool_call_id = Some (Printf.sprintf "call-%02d" i)
+           }
+         ]))
+  in
+  let atoms = 40 in
+  match
+    Keeper_antigravity_runtime.For_testing.capacity_bounded_model_input_projection
+      ~declared_max_prompt_bytes:(Some 4096)
+      ~system_prompt:"system"
+      ~goal:"goal"
+      ~on_model_input_window_observation:(fun o -> observed := Some o)
+      None
+  with
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok None -> fail "a declared capacity produced no projection"
+  | Ok (Some project) ->
+    (match project messages with
+     | Error error -> fail (Agent_core.Error.to_string error)
+     | Ok _ ->
+       (match !observed with
+        | None -> fail "the projection cut the history and reported nothing"
+        | Some observation ->
+          check int "the total is the atoms, not the 60 messages" atoms
+            observation.Runtime_model_input_tail_window.total_atoms;
+          check bool "a cut happened" true
+            (observation.Runtime_model_input_tail_window.transmitted_atoms < atoms);
+          check (option string) "the front is named by the atom at total - transmitted"
+            (Runtime_model_input_tail_window.atom_opening_digest
+               messages
+               (atoms - observation.Runtime_model_input_tail_window.transmitted_atoms))
+            (Some observation.Runtime_model_input_tail_window.front_atom_digest)))
+;;
+
 let test_capacity_undeclared_passes_source_through () =
   (match
      capacity_projection
@@ -1298,6 +1346,8 @@ let () =
               "the window reports what it carried and what it was offered"
               `Quick
               test_capacity_reports_what_the_window_carried
+          ; test_case "window reading counts atoms and names its front" `Quick
+              test_capacity_reading_counts_atoms_and_names_its_front
         ] )
     ]
 ;;

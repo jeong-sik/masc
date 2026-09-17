@@ -96,11 +96,11 @@ type seed_read =
 
 let no_seed_read = { seed = None; unreadable = None }
 
-let read_seed ~config ~keeper_name ~trace_id =
-  let store = Keeper_types_support.keeper_turn_record_store config keeper_name in
-  (* A record that does not decode gives no seed, and it is counted rather
-     than dropped: "no record" and "records that could not be read" are
-     different answers to why a turn started without a front. *)
+(* A JSON row that does not decode as a turn record gives no seed, and it is
+   counted: "no record" and "records that could not be decoded" are different
+   answers to why a turn started without a front. A line that is not JSON at
+   all never reaches here; [Dated_jsonl.read_recent] skips it uncounted. *)
+let seed_read_of_rows ~composer ~trace_id rows =
   let records_rev, unreadable =
     List.fold_left
       (fun (records, unreadable) json ->
@@ -113,15 +113,17 @@ let read_seed ~config ~keeper_name ~trace_id =
                 | None -> { count = 1; first_reason = reason }
                 | Some (seen : unreadable_records) -> { seen with count = seen.count + 1 }) ))
       ([], None)
-      (Dated_jsonl.read_recent store records_read)
+      rows
   in
-  { seed =
-      of_records
-        ~composer:(fun runtime_id -> composer_of_runtime (Runtime.get_runtime_by_id runtime_id))
-        ~trace_id
-        (List.rev records_rev)
-  ; unreadable
-  }
+  { seed = of_records ~composer ~trace_id (List.rev records_rev); unreadable }
+;;
+
+let read_seed ~config ~keeper_name ~trace_id =
+  let store = Keeper_types_support.keeper_turn_record_store config keeper_name in
+  seed_read_of_rows
+    ~composer:(fun runtime_id -> composer_of_runtime (Runtime.get_runtime_by_id runtime_id))
+    ~trace_id
+    (Dated_jsonl.read_recent store records_read)
 ;;
 
 type dropped_front =

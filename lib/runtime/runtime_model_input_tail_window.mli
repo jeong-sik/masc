@@ -205,9 +205,10 @@ val observe
 (** [observe ~digest_at ~history_atom_count projection] pairs what [projection]
     transmitted with the history it was measured against, and names the
     front it carried from by [digest_at], {!atom_opening_digest} applied to
-    that history. [None] when the projection carried no atom, or [digest_at]
-    has no atom at the front: a window without a front atom has no position
-    to report.
+    that history. [None] when [digest_at] has no atom at the front index
+    [history_atom_count - transmitted]: a projection that carried no atom puts
+    it at [history_atom_count], past the history's last atom, and a window
+    without a front atom has no position to report.
 
     [history_atom_count] is passed in rather than read off [projection]
     because a projection only knows the list it was handed. The demotion

@@ -982,15 +982,28 @@ let test_opening_digest_names_the_first_message_of_each_atom () =
   | None -> Alcotest.fail "atom 0 exists"
 ;;
 
-(* A projection that carried no atom has no front to name. *)
+(* A projection that carried no atom has no front to name: its front index is
+   the history's atom count, which the lookup over that history has no atom
+   at. The same history carrying its newest atom does name one, so the [None]
+   is the index, not the lookup. *)
 let test_a_window_without_an_atom_is_no_observation () =
-  let projection = { Window.messages = []; dropped_atoms = 0; atom_count = 0 } in
-  Alcotest.(check bool) "nothing carried, nothing observed" true
-    (Option.is_none
-       (Window.observe
-          ~digest_at:(Window.atom_opening_digest [])
-          ~history_atom_count:0
-          projection))
+  let history = atoms 5 in
+  let atom_count = count_atoms history in
+  let digest_at = Window.atom_opening_digest history in
+  let observe ~dropped_atoms =
+    Window.observe
+      ~digest_at
+      ~history_atom_count:atom_count
+      { Window.messages = []; dropped_atoms; atom_count }
+  in
+  Alcotest.(check bool) "every atom dropped, nothing observed" true
+    (Option.is_none (observe ~dropped_atoms:atom_count));
+  match observe ~dropped_atoms:(atom_count - 1) with
+  | None -> Alcotest.fail "the newest atom alone is a window"
+  | Some observed ->
+    Alcotest.(check (option string)) "named by the newest atom"
+      (digest_at (atom_count - 1))
+      (Some observed.Window.front_atom_digest)
 ;;
 
 let () =

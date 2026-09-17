@@ -94,9 +94,11 @@ val of_records
 type unreadable_records =
   { count : int  (** At least 1. *)
   ; first_reason : string
-        (** The decoder's error for the oldest record that did not decode. *)
+        (** The decoder's error for the oldest row that did not decode. *)
   }
-(** Turn records {!read_seed} read and could not decode. *)
+(** JSON rows {!read_seed} read that {!Turn_record.of_json} refused. A line
+    that is not JSON is skipped by the store reader before this count and is
+    not in it. *)
 
 type seed_read =
   { seed : seed option
@@ -109,16 +111,24 @@ type seed_read =
 val no_seed_read : seed_read
 (** No seed and nothing unreadable: a caller that reads no records. *)
 
+val seed_read_of_rows
+  :  composer:(string -> composer)
+  -> trace_id:string
+  -> Yojson.Safe.t list
+  -> seed_read
+(** {!of_records} over the rows that decode as turn records, with the rows
+    that do not counted and the first refusal kept, rows oldest first. *)
+
 val read_seed
   :  config:Workspace.config
   -> keeper_name:string
   -> trace_id:string
   -> seed_read
-(** {!of_records} over the keeper's newest {!records_read} turn records,
-    each record's runtime answered by {!composer_of_runtime} from the live
-    catalog, with the records that did not decode counted. Reads the record
-    file on the calling fiber; a turn calls it once, and only while the pair
-    has no ledger. *)
+(** {!seed_read_of_rows} over the JSON rows of the keeper's newest
+    {!records_read} turn records, each record's runtime answered by
+    {!composer_of_runtime} from the live catalog. Reads the record file on the
+    calling fiber; the turn driver calls it once per provider attempt, and
+    only while the pair has no ledger. *)
 
 (** Why {!for_history} dropped a seed. *)
 type dropped_front =

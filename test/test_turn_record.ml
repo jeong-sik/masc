@@ -524,6 +524,29 @@ let test_record_carries_transmitted_history_share () =
        check string "the front's digest survives" (String.make 64 'b')
          window.Turn_record.front_atom_digest)
 
+(* A row written before the window's front was named carries no
+   [front_atom_digest] key even when it has no window at all. The key is
+   required like the other three, so that row is refused too: the store is
+   emptied at deploy, and a row the reset missed is refused rather than read
+   as a row without a window. *)
+let test_codec_rejects_a_row_without_a_window_or_the_digest_key () =
+  let json =
+    match
+      Turn_record.to_json
+        { (sample_record ()) with Turn_record.model_input_window = None }
+    with
+    | `Assoc fields ->
+      check bool "the window keys are null" true
+        (List.assoc_opt "transmitted_atoms" fields = Some `Null);
+      `Assoc (List.remove_assoc "front_atom_digest" fields)
+    | other -> other
+  in
+  match Turn_record.of_json json with
+  | Ok _ -> fail "decoded a row without the front_atom_digest key"
+  | Error message ->
+    check bool "the missing key is named" true
+      (Astring.String.is_infix ~affix:"front_atom_digest" message)
+
 (* A window written before the front was named by its opening message has
    the three counts and no digest. It names no position a later turn can
    check, so it is not read as a window without one: the record does not
@@ -982,6 +1005,8 @@ let () =
             test_codec_rejects_transmitting_more_than_held
         ; test_case "window without its front digest rejected" `Quick
             test_codec_rejects_a_window_without_its_front_digest
+        ; test_case "row without a window or the digest key rejected" `Quick
+            test_codec_rejects_a_row_without_a_window_or_the_digest_key
         ; test_case "half an observation rejected" `Quick
             test_codec_rejects_half_an_observation
         ; test_case "mismatched turn_ref rejected" `Quick

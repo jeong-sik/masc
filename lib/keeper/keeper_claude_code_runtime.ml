@@ -102,9 +102,11 @@ let model_input_projection_for_capacity
   let windowed =
     if capacity_bytes = unbounded_model_input_capacity_bytes
     then (
-      (* No cut is still a reading: everything offered was carried. Leaving
-         this branch silent would put the turn record's absent window back
-         for any runtime whose declared cap is unbounded. *)
+      (* No cut is still a reading: everything offered was carried, reported
+         with the atom it starts from. Leaving this branch silent would put
+         the turn record's absent window back for any runtime whose declared
+         cap is unbounded. A list with no atom has no front to report, and
+         [Runtime_model_input_tail_window.observe] reports nothing for it. *)
       observe_window
         { Runtime_model_input_tail_window.messages
         ; dropped_atoms = 0

@@ -292,6 +292,36 @@ let test_a_tool_result_joining_the_front_atom_keeps_the_front () =
     (Front.for_history ~digest_at:(Window.atom_opening_digest later) s)
 ;;
 
+(* The rows a seed is read from: one current record, and two rows the decoder
+   refuses for different reasons. The seed comes from the one that decodes;
+   the two that do not are counted, and the first refusal is the one kept. *)
+let test_rows_that_do_not_decode_are_counted_with_the_first_reason () =
+  let without key json =
+    match json with
+    | `Assoc fields -> `Assoc (List.remove_assoc key fields)
+    | other -> other
+  in
+  let current = Turn_record.to_json (record ~turn:10 (Some (30, 100))) in
+  let rows =
+    [ without "front_atom_digest" (Turn_record.to_json (record ~turn:8 (Some (5, 90))))
+    ; current
+    ; without "keeper" (Turn_record.to_json (record ~turn:9 (Some (5, 95))))
+    ]
+  in
+  let read = Front.seed_read_of_rows ~composer ~trace_id:"trace-1" rows in
+  check int "the seed is the record that decodes" 70
+    (fst (seed read.Front.seed));
+  match read.Front.unreadable with
+  | None -> fail "two rows did not decode and none was counted"
+  | Some unreadable ->
+    check int "both refused rows are counted" 2 unreadable.Front.count;
+    check bool "the first refusal is kept, not the last" true
+      (Astring.String.is_infix ~affix:"front_atom_digest" unreadable.Front.first_reason);
+    check bool "every row decoding counts nothing" true
+      (Option.is_none
+         (Front.seed_read_of_rows ~composer ~trace_id:"trace-1" [ current ]).Front.unreadable)
+;;
+
 let test_clamp_keeps_the_front_on_an_atom () =
   check int "below zero" 0 (Front.clamp ~atom_count:5 (-2));
   check int "past the newest" 4 (Front.clamp ~atom_count:5 9);
@@ -332,6 +362,8 @@ let () =
         ; test_case "another session" `Quick test_another_sessions_record_is_another_history
         ; test_case "composer from the execution kind" `Quick
             test_the_composer_is_read_from_the_execution_kind
+        ; test_case "undecodable rows counted with the first reason" `Quick
+            test_rows_that_do_not_decode_are_counted_with_the_first_reason
         ] )
     ; ( "front"
       , [ test_case "of_ledger" `Quick test_of_ledger_reads_the_last_request_front

@@ -47,17 +47,15 @@ type window_observation =
   ; front_atom_digest : string
   }
 
-(* A window names its front by the message that opens it, so a window that
-   carried no atom has no front to name and is no observation. *)
+(* A window names its front by the message that opens it. A projection that
+   carried no atom puts its front at [history_atom_count], an index the
+   history's lookup has no atom at, so it is no observation. *)
 let observe ~digest_at ~history_atom_count (projection : projection) =
   let transmitted_atoms = projection.atom_count - projection.dropped_atoms in
-  if transmitted_atoms <= 0
-  then None
-  else
-    Option.map
-      (fun front_atom_digest ->
-         { transmitted_atoms; total_atoms = history_atom_count; front_atom_digest })
-      (digest_at (history_atom_count - transmitted_atoms))
+  Option.map
+    (fun front_atom_digest ->
+       { transmitted_atoms; total_atoms = history_atom_count; front_atom_digest })
+    (digest_at (history_atom_count - transmitted_atoms))
 ;;
 
 let budget_error_to_string = function

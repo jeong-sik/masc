@@ -130,7 +130,10 @@ let model_input_projection_for_capacity
   let windowed =
     if capacity_bytes = unbounded_model_input_capacity_bytes
     then (
-      (* No cut is still a reading: everything offered was carried. *)
+      (* No cut is still a reading: everything offered was carried, reported
+         with the atom it starts from. A list with no atom has no front to
+         report, and [Runtime_model_input_tail_window.observe] reports nothing
+         for it. *)
       observe_window
         { Runtime_model_input_tail_window.messages
         ; dropped_atoms = 0

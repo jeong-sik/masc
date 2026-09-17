@@ -45,16 +45,27 @@ type message_change =
       { kept : int
       ; added : int
       }
-  | Front_dropped of
-      { dropped : int
-      ; kept : int
-      ; added : int
-      }
   | Tail_removed of
       { kept : int
       ; removed : int
       }
-  | Rewritten_at of
+  | Block_dropped of
+      { at : int
+      ; dropped : int
+      ; kept_after : int
+      ; added : int
+      }
+  | Rewritten_in_place of
+      { first_index : int
+      ; last_index : int
+      ; rewritten : int
+      ; previous_bytes : int
+      ; current_bytes : int
+      ; first_previous_role : Agent_core.Types.role
+      ; first_current_role : Agent_core.Types.role
+      ; added : int
+      }
+  | Diverged_at of
       { index : int
       ; previous_role : Agent_core.Types.role
       ; previous_bytes : int
@@ -112,6 +123,48 @@ let longest_suffix_that_prefixes ~previous ~current =
   failure.(length - 1)
 ;;
 
+(* [from] is the first position where the two lists differ. The lists are a
+   rewrite in place when no message moved: the previous list is not longer
+   than the current one, and after the last differing position below
+   [previous_count] at least one message is equal at the same position. That
+   aligned message is what tells a rewrite apart from a shift. *)
+let rewritten_in_place ~previous ~current ~from =
+  let previous_count = Array.length previous in
+  if previous_count > Array.length current
+  then None
+  else (
+    let rec scan index ((rewritten, last_index, previous_bytes, current_bytes) as acc) =
+      if index = previous_count
+      then acc
+      else if String.equal previous.(index).sha256 current.(index).sha256
+      then scan (index + 1) acc
+      else
+        scan
+          (index + 1)
+          ( rewritten + 1
+          , index
+          , previous_bytes + previous.(index).bytes
+          , current_bytes + current.(index).bytes )
+    in
+    let rewritten, last_index, previous_bytes, current_bytes =
+      scan from (0, from, 0, 0)
+    in
+    if last_index < previous_count - 1
+    then
+      Some
+        (Rewritten_in_place
+           { first_index = from
+           ; last_index
+           ; rewritten
+           ; previous_bytes
+           ; current_bytes
+           ; first_previous_role = previous.(from).role
+           ; first_current_role = current.(from).role
+           ; added = Array.length current - previous_count
+           })
+    else None)
+;;
+
 let classify_messages ~previous ~current =
   let previous_count = Array.length previous in
   let current_count = Array.length current in
@@ -121,29 +174,36 @@ let classify_messages ~previous ~current =
   else if common = current_count
   then Tail_removed { kept = current_count; removed = previous_count - current_count }
   else (
-    (* Both lists hold a message at [common] and the two differ, so the
-       previous list is not a prefix of the current one and any overlap found
-       here leaves at least one message dropped. The overlap is looked for only
-       when the lists already differ at their first message: with a shared
-       first message the prefix a cache reuses is [common] messages long, and
-       [Rewritten_at] reports that length where [Front_dropped] would not. *)
-    let kept =
-      if common = 0 then longest_suffix_that_prefixes ~previous ~current else 0
+    (* Both lists hold a message at [common] and the two differ. A block was
+       dropped at [common] when a suffix of what followed it in the previous
+       request is where the current request continues; the longest such suffix
+       is the smallest drop. *)
+    let previous_rest = Array.sub previous common (previous_count - common) in
+    let current_rest = Array.sub current common (current_count - common) in
+    let kept_after =
+      longest_suffix_that_prefixes ~previous:previous_rest ~current:current_rest
     in
-    if kept > 0
+    if kept_after > 0
     then
-      Front_dropped
-        { dropped = previous_count - kept; kept; added = current_count - kept }
+      Block_dropped
+        { at = common
+        ; dropped = Array.length previous_rest - kept_after
+        ; kept_after
+        ; added = Array.length current_rest - kept_after
+        }
     else
-      Rewritten_at
-        { index = common
-        ; previous_role = previous.(common).role
-        ; previous_bytes = previous.(common).bytes
-        ; current_role = current.(common).role
-        ; current_bytes = current.(common).bytes
-        ; previous_count
-        ; current_count
-        })
+      match rewritten_in_place ~previous ~current ~from:common with
+      | Some change -> change
+      | None ->
+        Diverged_at
+          { index = common
+          ; previous_role = previous.(common).role
+          ; previous_bytes = previous.(common).bytes
+          ; current_role = current.(common).role
+          ; current_bytes = current.(common).bytes
+          ; previous_count
+          ; current_count
+          })
 ;;
 
 let compare_requests ~previous ~current =
@@ -171,16 +231,38 @@ let compare_requests ~previous ~current =
 let message_change_to_json = function
   | Appended { kept; added } ->
     `Assoc [ "kind", `String "appended"; "kept", `Int kept; "added", `Int added ]
-  | Front_dropped { dropped; kept; added } ->
-    `Assoc
-      [ "kind", `String "front_dropped"
-      ; "dropped", `Int dropped
-      ; "kept", `Int kept
-      ; "added", `Int added
-      ]
   | Tail_removed { kept; removed } ->
     `Assoc [ "kind", `String "tail_removed"; "kept", `Int kept; "removed", `Int removed ]
-  | Rewritten_at
+  | Block_dropped { at; dropped; kept_after; added } ->
+    `Assoc
+      [ "kind", `String "block_dropped"
+      ; "at", `Int at
+      ; "dropped", `Int dropped
+      ; "kept_after", `Int kept_after
+      ; "added", `Int added
+      ]
+  | Rewritten_in_place
+      { first_index
+      ; last_index
+      ; rewritten
+      ; previous_bytes
+      ; current_bytes
+      ; first_previous_role
+      ; first_current_role
+      ; added
+      } ->
+    `Assoc
+      [ "kind", `String "rewritten_in_place"
+      ; "first_index", `Int first_index
+      ; "last_index", `Int last_index
+      ; "rewritten", `Int rewritten
+      ; "previous_bytes", `Int previous_bytes
+      ; "current_bytes", `Int current_bytes
+      ; "first_previous_role", `String (Agent_core.Types.role_to_string first_previous_role)
+      ; "first_current_role", `String (Agent_core.Types.role_to_string first_current_role)
+      ; "added", `Int added
+      ]
+  | Diverged_at
       { index
       ; previous_role
       ; previous_bytes
@@ -190,7 +272,7 @@ let message_change_to_json = function
       ; current_count
       } ->
     `Assoc
-      [ "kind", `String "rewritten_at"
+      [ "kind", `String "diverged_at"
       ; "index", `Int index
       ; "previous_role", `String (Agent_core.Types.role_to_string previous_role)
       ; "previous_bytes", `Int previous_bytes

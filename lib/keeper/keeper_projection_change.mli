@@ -41,21 +41,39 @@ type message_change =
       }
       (** The previous list is a prefix of the current list. [added = 0] is
           an identical list. *)
-  | Front_dropped of
-      { dropped : int
-      ; kept : int
-      ; added : int
-      }
-      (** The two lists differ at their first message and
-          [previous[dropped..]] is a prefix of the current list, with
-          [dropped > 0] and [kept > 0]. The smallest such [dropped] is
-          reported. *)
   | Tail_removed of
       { kept : int
       ; removed : int
       }
       (** The current list is a strict prefix of the previous list. *)
-  | Rewritten_at of
+  | Block_dropped of
+      { at : int
+      ; dropped : int
+      ; kept_after : int
+      ; added : int
+      }
+      (** The lists share [at] leading messages, then
+          [previous[at + dropped ..]] is a prefix of [current[at ..]], with
+          [dropped > 0] and [kept_after > 0]. [at = 0] is a drop at the front;
+          [at > 0] is a drop behind messages that stayed in place. The smallest
+          such [dropped] is reported. *)
+  | Rewritten_in_place of
+      { first_index : int
+      ; last_index : int
+      ; rewritten : int
+      ; previous_bytes : int
+      ; current_bytes : int
+      ; first_previous_role : Agent_core.Types.role
+      ; first_current_role : Agent_core.Types.role
+      ; added : int
+      }
+      (** No message moved: the previous list is not longer than the current
+          one, [rewritten] positions between [first_index] and [last_index]
+          hold a different message, and the message after [last_index] in the
+          previous list is equal at the same position in the current one.
+          [previous_bytes] and [current_bytes] sum the rewritten positions.
+          [added] counts messages past the previous list's end. *)
+  | Diverged_at of
       { index : int
       ; previous_role : Agent_core.Types.role
       ; previous_bytes : int
@@ -80,8 +98,8 @@ type change =
           own digests and do not depend on [messages]. *)
 
 val compare_requests : previous:previous_request -> current:request_digests -> change
-(** Checked in order: [Appended], [Tail_removed], [Front_dropped],
-    [Rewritten_at]. A pair that fits more than one shape because of repeated
+(** Checked in order: [Appended], [Tail_removed], [Block_dropped],
+    [Rewritten_in_place], [Diverged_at]. A pair that fits more than one shape because of repeated
     messages gets the first. *)
 
 val change_to_json : change -> Yojson.Safe.t

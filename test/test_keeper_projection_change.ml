@@ -88,30 +88,27 @@ let test_appended () =
     (Change.Appended { kept = 0; added = 2 })
 ;;
 
-let test_front_dropped () =
+let test_block_dropped () =
   check_messages
     "window moved past the oldest messages"
     ~previous:[ user "a"; assistant "b"; user "c"; assistant "d" ]
     ~current:[ user "c"; assistant "d"; user "e" ]
-    (Change.Front_dropped { dropped = 2; kept = 2; added = 1 });
+    (Change.Block_dropped { at = 0; dropped = 2; kept_after = 2; added = 1 });
   check_messages
     "a repeated message reports the smallest drop"
     ~previous:[ user "a"; user "x"; user "x" ]
     ~current:[ user "x"; user "x"; user "z" ]
-    (Change.Front_dropped { dropped = 1; kept = 2; added = 1 });
+    (Change.Block_dropped { at = 0; dropped = 1; kept_after = 2; added = 1 });
   check_messages
-    "a shared first message reports the shared length, not a drop"
+    "a block dropped behind a message that stayed first"
+    ~previous:[ user "instruction"; user "o1"; assistant "o2"; user "o3"; assistant "r1" ]
+    ~current:[ user "instruction"; user "o3"; assistant "r1"; user "n1" ]
+    (Change.Block_dropped { at = 1; dropped = 2; kept_after = 2; added = 1 });
+  check_messages
+    "a repeated message behind a shared first message"
     ~previous:[ user "x"; user "x"; user "y" ]
     ~current:[ user "x"; user "y"; user "z" ]
-    (Change.Rewritten_at
-       { index = 1
-       ; previous_role = Agent_core.Types.User
-       ; previous_bytes = payload_bytes (user "x")
-       ; current_role = Agent_core.Types.User
-       ; current_bytes = payload_bytes (user "y")
-       ; previous_count = 3
-       ; current_count = 3
-       })
+    (Change.Block_dropped { at = 1; dropped = 1; kept_after = 1; added = 1 })
 ;;
 
 let test_tail_removed () =
@@ -122,21 +119,72 @@ let test_tail_removed () =
     (Change.Tail_removed { kept = 1; removed = 2 })
 ;;
 
-let test_rewritten_at () =
+let test_rewritten_in_place () =
   let previous_message = user "b" in
   let current_message = assistant "b rewritten" in
   check_messages
-    "first difference with both messages"
+    "one message replaced, the next one still in place"
     ~previous:[ user "a"; previous_message; user "c" ]
     ~current:[ user "a"; current_message; user "c"; user "d" ]
-    (Change.Rewritten_at
+    (Change.Rewritten_in_place
+       { first_index = 1
+       ; last_index = 1
+       ; rewritten = 1
+       ; previous_bytes = payload_bytes previous_message
+       ; current_bytes = payload_bytes current_message
+       ; first_previous_role = Agent_core.Types.User
+       ; first_current_role = Agent_core.Types.Assistant
+       ; added = 1
+       });
+  let old_result = user "tool result, full" in
+  let shrunk_result = user "short" in
+  let old_second = user "second result, full" in
+  let shrunk_second = user "short 2" in
+  check_messages
+    "two separate older messages shrunk while later ones stay"
+    ~previous:[ user "s"; old_result; assistant "a1"; old_second; assistant "a2"; user "u" ]
+    ~current:
+      [ user "s"; shrunk_result; assistant "a1"; shrunk_second; assistant "a2"; user "u" ]
+    (Change.Rewritten_in_place
+       { first_index = 1
+       ; last_index = 3
+       ; rewritten = 2
+       ; previous_bytes = payload_bytes old_result + payload_bytes old_second
+       ; current_bytes = payload_bytes shrunk_result + payload_bytes shrunk_second
+       ; first_previous_role = Agent_core.Types.User
+       ; first_current_role = Agent_core.Types.User
+       ; added = 0
+       })
+;;
+
+let test_diverged_at () =
+  let previous_message = user "b" in
+  let current_message = assistant "b rewritten" in
+  check_messages
+    "a difference with nothing aligned after it"
+    ~previous:[ user "a"; previous_message ]
+    ~current:[ user "a"; current_message; user "c" ]
+    (Change.Diverged_at
        { index = 1
        ; previous_role = Agent_core.Types.User
        ; previous_bytes = payload_bytes previous_message
        ; current_role = Agent_core.Types.Assistant
        ; current_bytes = payload_bytes current_message
-       ; previous_count = 3
-       ; current_count = 4
+       ; previous_count = 2
+       ; current_count = 3
+       });
+  check_messages
+    "a longer previous list is never read as a rewrite in place"
+    ~previous:[ user "a"; user "b"; user "c"; user "d" ]
+    ~current:[ user "a"; user "x"; user "c" ]
+    (Change.Diverged_at
+       { index = 1
+       ; previous_role = Agent_core.Types.User
+       ; previous_bytes = payload_bytes (user "b")
+       ; current_role = Agent_core.Types.User
+       ; current_bytes = payload_bytes (user "x")
+       ; previous_count = 4
+       ; current_count = 3
        });
   let rendered =
     Change.compare_requests
@@ -203,18 +251,27 @@ let test_long_lists () =
     "long distinct history dropped at the front"
     ~previous:history
     ~current:(List.filteri (fun index _ -> index >= 1_500) history @ numbered "new" 20)
-    (Change.Front_dropped { dropped = 1_500; kept = long_count - 1_500; added = 20 });
+    (Change.Block_dropped
+       { at = 0; dropped = 1_500; kept_after = long_count - 1_500; added = 20 });
+  check_messages
+    "long distinct history dropped behind a pinned first message"
+    ~previous:(user "instruction" :: history)
+    ~current:
+      ((user "instruction" :: List.filteri (fun index _ -> index >= 1_500) history)
+       @ numbered "new" 20)
+    (Change.Block_dropped
+       { at = 1; dropped = 1_500; kept_after = long_count - 1_500; added = 20 });
   let same = List.init long_count (fun _ -> user "same") in
   check_messages
     "long repeated history dropped at the front"
     ~previous:(user "oldest" :: same)
     ~current:(same @ [ user "newest" ])
-    (Change.Front_dropped { dropped = 1; kept = long_count; added = 1 });
+    (Change.Block_dropped { at = 0; dropped = 1; kept_after = long_count; added = 1 });
   check_messages
     "long repeated history rewritten at the tail"
     ~previous:(same @ [ user "a" ])
     ~current:(same @ [ user "b" ])
-    (Change.Rewritten_at
+    (Change.Diverged_at
        { index = long_count
        ; previous_role = Agent_core.Types.User
        ; previous_bytes = payload_bytes (user "a")
@@ -237,9 +294,10 @@ let () =
         ] )
     ; ( "message change"
       , [ test_case "appended" `Quick test_appended
-        ; test_case "front dropped" `Quick test_front_dropped
+        ; test_case "block dropped" `Quick test_block_dropped
         ; test_case "tail removed" `Quick test_tail_removed
-        ; test_case "rewritten at" `Quick test_rewritten_at
+        ; test_case "rewritten in place" `Quick test_rewritten_in_place
+        ; test_case "diverged at" `Quick test_diverged_at
         ; test_case "long lists" `Quick test_long_lists
         ] )
     ; ( "prefix parts"

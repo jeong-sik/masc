@@ -98,7 +98,10 @@ class MascAgent(BaseInstalledAgent):
         container_env = self._container_env()
         binaries = await container_binaries(
             self, environment, BENCH_ROOT, with_gh="GH_TOKEN" in container_env)
-        config_dir = render_arm(self.arm, self.runtime_id, self.effort)
+        # A lane may read provider limits over the network while rendering;
+        # harbor installs every trial in one event loop.
+        config_dir = await asyncio.to_thread(
+            render_arm, self.arm, self.runtime_id, self.effort)
         await self.exec_as_root(environment, f"mkdir -p {REMOTE}/bin")
         for binary in binaries:
             await environment.upload_file(binary, f"{REMOTE}/bin/{binary.name}")

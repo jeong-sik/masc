@@ -152,21 +152,53 @@ type lane_terminal_error =
    non-rotating error before resolvable alternatives are tried. Order is
    therefore resolvable-active, then resolvable-exhausted, then unresolvable —
    declared relative order preserved within each class (PR #28219 review). *)
+type demotion =
+  | Not_demoted
+  | Failed_without_rest
+  | Told_to_rest
+
+(* Three places, declared order kept within each. A path told to rest -- an
+   exhausted quota or a rate limit -- goes behind a path that only failed
+   without answering: the failed one can be dispatched now, and behind a resting
+   head it would make the next dispatch wait for that head's release
+   (RFC-0458 §3.4). It is also what keeps a released rate limit promoting its
+   path past the ones still resting, even while a failed attempt keeps it
+   behind the ones that answered. *)
 let demote_unavailable_candidates ~now ~quota_scope_of ~candidate_backpressure_of candidates =
-  let available, backpressured = List.partition (fun candidate ->
+  let demotion candidate =
     let quota_exhausted =
       Option.fold ~none:false
         ~some:(fun scope -> Runtime_quota_window.is_exhausted ~scope ~now)
         (quota_scope_of candidate)
     in
-    let rate_limited =
-      Option.fold ~none:false
-        ~some:(fun candidate -> Option.is_some
-          (Runtime_candidate_backpressure.candidate_backpressure ~now ~candidate))
-        (candidate_backpressure_of candidate)
+    let observed =
+      Option.bind (candidate_backpressure_of candidate) (fun candidate ->
+        Runtime_candidate_backpressure.candidate_backpressure ~now ~candidate)
     in
-    not (quota_exhausted || rate_limited)) candidates in
-  available @ backpressured
+    match quota_exhausted, observed with
+    | true, (Some _ | None)
+    | false, Some { Runtime_candidate_backpressure.rate_limit = Some _; failed_attempt = _ } ->
+      Told_to_rest
+    | false, Some { Runtime_candidate_backpressure.rate_limit = None; failed_attempt = Some _ } ->
+      Failed_without_rest
+    | false, Some { Runtime_candidate_backpressure.rate_limit = None; failed_attempt = None }
+    | false, None ->
+      Not_demoted
+  in
+  let placed = List.map (fun candidate -> demotion candidate, candidate) candidates in
+  let in_place wanted =
+    List.filter_map
+      (fun (demotion, candidate) ->
+         match wanted, demotion with
+         | Not_demoted, Not_demoted
+         | Failed_without_rest, Failed_without_rest
+         | Told_to_rest, Told_to_rest -> Some candidate
+         | Not_demoted, (Failed_without_rest | Told_to_rest)
+         | Failed_without_rest, (Not_demoted | Told_to_rest)
+         | Told_to_rest, (Not_demoted | Failed_without_rest) -> None)
+      placed
+  in
+  in_place Not_demoted @ in_place Failed_without_rest @ in_place Told_to_rest
 ;;
 
 let quota_ordered_runtime_ids ~now runtime_ids =
@@ -760,6 +792,35 @@ let attempt_runtime_candidates
            (fun candidate -> Runtime_candidate_backpressure.note_rate_limit ~candidate ~retry_after)
            attempt_candidate_backpressure
        in
+       (* The route calls every timeout a provider timeout, including one that
+          expired in MASC's own admission -- a permit queue or local capacity
+          -- before anything was sent. That says nothing about the candidate.
+          The typed phase is read here because the route does not carry it. *)
+       let expired_in_admission =
+         let admission = function
+           | Some (Llm_provider.Http_client.Queue | Llm_provider.Http_client.Capacity_backpressure) ->
+             true
+           | Some
+               ( Llm_provider.Http_client.First_token | Llm_provider.Http_client.Wall_clock
+               | Llm_provider.Http_client.Http_operation
+               | Llm_provider.Http_client.Non_streaming_body
+               | Llm_provider.Http_client.Stream_body | Llm_provider.Http_client.Stream_idle _
+               | Llm_provider.Http_client.Provider_step
+               | Llm_provider.Http_client.Cli_stdout_idle
+               | Llm_provider.Http_client.Unknown_timeout )
+           | None -> false
+         in
+         match error with
+         | Agent_core.Error.Api (Llm_provider.Retry.Timeout { phase; message = _ }) -> admission phase
+         | Agent_core.Error.Provider
+             (Llm_provider.Error.Timeout { timeout_phase; provider = _; detail = _ }) ->
+           admission timeout_phase
+         | Agent_core.Error.Api _ | Agent_core.Error.Provider _ | Agent_core.Error.Agent _
+         | Agent_core.Error.Mcp _ | Agent_core.Error.Config _
+         | Agent_core.Error.Serialization _ | Agent_core.Error.Io _
+         | Agent_core.Error.Orchestration _ | Agent_core.Error.Internal _
+         | Agent_core.Error.Internal_carried _ -> false
+       in
        let note_failed_attempt failure =
          Option.iter
            (fun candidate -> Runtime_candidate_backpressure.note_failed_attempt ~candidate ~failure)
@@ -789,7 +850,8 @@ let attempt_runtime_candidates
           note_failed_attempt Runtime_candidate_backpressure.Network_transient
         | Keeper_runtime_failure_route.Retry_after_observed
             { retry_class = Keeper_runtime_failure_route.Provider_timeout; retry_after = _ } ->
-          note_failed_attempt Runtime_candidate_backpressure.Provider_timeout
+          if not expired_in_admission
+          then note_failed_attempt Runtime_candidate_backpressure.Provider_timeout
         (* MASC's own slot and client envelope, not a fact about the candidate. *)
         | Keeper_runtime_failure_route.Retry_after_observed
             { retry_class = Keeper_runtime_failure_route.Capacity_backpressure; retry_after = _ } ->

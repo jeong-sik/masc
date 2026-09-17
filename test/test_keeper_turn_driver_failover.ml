@@ -2476,6 +2476,43 @@ let test_rate_limit_order_never_excludes_and_success_clears () =
         Alcotest.fail "actual Retry-After hint was lost")
 ;;
 
+let quota_lane_candidate id =
+  (Option.get (Runtime.get_runtime_by_id id)).Runtime.candidate_backpressure
+;;
+
+(* Every quota_lane path starts serving: no candidate observation, no quota
+   window. *)
+let reset_quota_lane_rests () =
+  Runtime_quota_window.reset_for_testing ();
+  List.iter
+    (fun id ->
+       Runtime_candidate_backpressure.note_candidate_success ~candidate:(quota_lane_candidate id))
+    [ "shared_a.test_model"; "shared_b.test_model"; "other.test_model" ]
+;;
+
+let quota_lane_suffix ?(failure = retryable_network_error "previous attempt") = function
+  | next_runtime_id :: later_runtime_ids ->
+    Driver.For_testing.make_deferred_runtime_lane
+      ~assignment_id:"quota_lane" ~failed_runtime_id:"previous.test_model"
+      ~next_runtime_id ~later_runtime_ids ~failure
+  | [] -> Alcotest.fail "a deferred suffix names at least one path"
+;;
+
+let rate_limited_route =
+  Keeper_runtime_failure_route.Retry_after_observed
+    { retry_class = Keeper_runtime_failure_route.Rate_limited; retry_after = None }
+;;
+
+let describe_dispatch ~now = function
+  | None -> "no provider wait"
+  | Some (Driver.Dispatch_now { runtime_id }) -> "dispatch " ^ runtime_id
+  | Some (Driver.Wait_until { release_at; waiting_on; wait }) ->
+    Printf.sprintf "wait %.0fs for %s (%s)" (release_at -. now) waiting_on
+      (match wait with
+       | Driver.Capacity_release -> "capacity"
+       | Driver.Path_release -> "path")
+;;
+
 let failed_attempt_of runtime_id =
   match observed_candidate runtime_id with
   | Some
@@ -2586,12 +2623,33 @@ let test_only_the_candidates_own_failures_are_evidence () =
         (Some Runtime_candidate_backpressure.Network_transient)
         (one "shared_b.test_model" (retryable_network_error "connection refused"));
       reset_quota_lane_rests ();
+      Alcotest.check attempt_failure "a provider that sent no first token"
+        (Some Runtime_candidate_backpressure.Provider_timeout)
+        (one "shared_a.test_model"
+           (Agent_core.Error.Provider
+              (Llm_provider.Error.Timeout
+                 { provider = "shared_a"
+                 ; timeout_phase = Some Llm_provider.Http_client.First_token
+                 ; detail = "no first token"
+                 })));
+      reset_quota_lane_rests ();
       List.iter
         (fun (label, error) ->
            Alcotest.check attempt_failure label None (one "other.test_model" error);
            Alcotest.(check bool) (label ^ " leaves no rate limit either") true
              (Option.is_none (observed_candidate "other.test_model")))
-        [ "provider overload is MASC-side capacity"
+        [ "a permit that MASC's own queue never granted"
+        , Agent_core.Error.Provider
+            (Llm_provider.Error.Timeout
+               { provider = "other"
+               ; timeout_phase = Some Llm_provider.Http_client.Queue
+               ; detail = "no admission permit"
+               })
+        ; "local capacity that expired before sending"
+        , Agent_core.Error.Api
+            (Agent_core.Retry.Timeout
+               { message = "capacity"; phase = Some Llm_provider.Http_client.Capacity_backpressure })
+        ; "provider overload is MASC-side capacity"
         , Agent_core.Error.Api (Agent_core.Retry.Overloaded { message = "overloaded" })
         ; "a model the provider does not know rotates"
         , Agent_core.Error.Api (Agent_core.Retry.NotFound { message = "no such model" })
@@ -2614,15 +2672,60 @@ let test_a_yield_before_the_first_token_clears_no_evidence () =
         ~failure:Runtime_candidate_backpressure.Provider_timeout;
       Runtime_candidate_backpressure.note_rate_limit
         ~candidate:runtime.candidate_backpressure ~retry_after:None;
+      let scope = Option.get (Runtime.quota_scope_of_runtime_id id) in
+      Runtime_quota_window.note_observed_exhausted ~scope;
       let (_ : (unit, Agent_core.Error.t) result) =
         walk_once ~provider_answered:(fun () -> false) (fun _ -> Ok ()) [id]
       in
+      Alcotest.(check bool) "the observed quota survives the yield" true
+        (Runtime_quota_window.is_exhausted ~scope ~now:(Unix.gettimeofday ()));
       Alcotest.check attempt_failure "the timeout survives the yield"
         (Some Runtime_candidate_backpressure.Provider_timeout) (failed_attempt_of id);
       Alcotest.(check bool) "the rate limit survives the yield" true
         (match observed_candidate id with
          | Some { Runtime_candidate_backpressure.rate_limit = Some _; failed_attempt = _ } -> true
          | Some { Runtime_candidate_backpressure.rate_limit = None; failed_attempt = _ } | None -> false)))
+;;
+
+(* The review of this change found a failed path waiting for a resting one:
+   with the failed attempt behind a path told to rest, the next dispatch waited
+   for that head's release though the failed path could serve now. *)
+let test_a_path_that_only_failed_walks_before_one_told_to_rest () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    reset_quota_lane_rests ();
+    Fun.protect ~finally:reset_quota_lane_rests (fun () ->
+      let resting = "shared_a.test_model" and failed = "other.test_model" in
+      Runtime_quota_window.note_observed_exhausted
+        ~scope:(Option.get (Runtime.quota_scope_of_runtime_id resting));
+      Runtime_candidate_backpressure.note_failed_attempt
+        ~candidate:(quota_lane_candidate failed)
+        ~failure:Runtime_candidate_backpressure.Provider_timeout;
+      Alcotest.(check (list string)) "the failed path walks before the resting one"
+        [ failed; resting ]
+        (backpressure_order [ resting; failed ]);
+      let now = Unix.gettimeofday () in
+      Alcotest.(check string) "and the next dispatch goes to it now"
+        ("dispatch " ^ failed)
+        (describe_dispatch ~now
+           (Driver.next_dispatch_after_failure ~now ~route:rate_limited_route
+              ~assignment_id:"quota_lane" (Some (quota_lane_suffix [ resting; failed ]))))))
+;;
+
+(* 402 still records through the route: the credential's quota window. *)
+let test_payment_required_still_exhausts_the_quota_scope () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    reset_quota_lane_rests ();
+    Fun.protect ~finally:reset_quota_lane_rests (fun () ->
+      let id = "other.test_model" in
+      let (_ : (unit, Agent_core.Error.t) result) =
+        walk_once
+          (fun _ -> Error (Agent_core.Error.Api (Agent_core.Retry.PaymentRequired { message = "pay" })))
+          [ id ]
+      in
+      Alcotest.(check bool) "the quota scope is exhausted" true
+        (Runtime_quota_window.is_exhausted
+           ~scope:(Option.get (Runtime.quota_scope_of_runtime_id id))
+           ~now:(Unix.gettimeofday ()))))
 ;;
 
 let test_the_production_answer_test_reads_provider_turns () =
@@ -2635,43 +2738,6 @@ let test_the_production_answer_test_reads_provider_turns () =
   Alcotest.(check bool) "a completed run did" true
     (Driver.For_testing.run_result_answered
        { yielded with stop_reason = Runtime_agent.Completed })
-;;
-
-let quota_lane_candidate id =
-  (Option.get (Runtime.get_runtime_by_id id)).Runtime.candidate_backpressure
-;;
-
-(* Every quota_lane path starts serving: no candidate observation, no quota
-   window. *)
-let reset_quota_lane_rests () =
-  Runtime_quota_window.reset_for_testing ();
-  List.iter
-    (fun id ->
-       Runtime_candidate_backpressure.note_candidate_success ~candidate:(quota_lane_candidate id))
-    [ "shared_a.test_model"; "shared_b.test_model"; "other.test_model" ]
-;;
-
-let quota_lane_suffix ?(failure = retryable_network_error "previous attempt") = function
-  | next_runtime_id :: later_runtime_ids ->
-    Driver.For_testing.make_deferred_runtime_lane
-      ~assignment_id:"quota_lane" ~failed_runtime_id:"previous.test_model"
-      ~next_runtime_id ~later_runtime_ids ~failure
-  | [] -> Alcotest.fail "a deferred suffix names at least one path"
-;;
-
-let rate_limited_route =
-  Keeper_runtime_failure_route.Retry_after_observed
-    { retry_class = Keeper_runtime_failure_route.Rate_limited; retry_after = None }
-;;
-
-let describe_dispatch ~now = function
-  | None -> "no provider wait"
-  | Some (Driver.Dispatch_now { runtime_id }) -> "dispatch " ^ runtime_id
-  | Some (Driver.Wait_until { release_at; waiting_on; wait }) ->
-    Printf.sprintf "wait %.0fs for %s (%s)" (release_at -. now) waiting_on
-      (match wait with
-       | Driver.Capacity_release -> "capacity"
-       | Driver.Path_release -> "path")
 ;;
 
 (* RFC-provider-path-rest §3.3 and #34653: the head of a deferred suffix in
@@ -4342,6 +4408,10 @@ let () =
             test_a_yield_before_the_first_token_clears_no_evidence;
           Alcotest.test_case "the production answer test reads provider turns" `Quick
             test_the_production_answer_test_reads_provider_turns;
+          Alcotest.test_case "a path that only failed walks before one told to rest" `Quick
+            test_a_path_that_only_failed_walks_before_one_told_to_rest;
+          Alcotest.test_case "402 still exhausts the quota scope" `Quick
+            test_payment_required_still_exhausts_the_quota_scope;
           Alcotest.test_case "a deferred suffix waits only while its walk head rests" `Quick
             test_a_deferred_suffix_waits_only_while_its_walk_head_rests;
           Alcotest.test_case "a failure without a suffix waits until a fresh walk head serves"

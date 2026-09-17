@@ -69,10 +69,12 @@ val quota_ordered_deferred_runtime_lane :
 
 (** Whether one runtime path is resting at a given instant
     (RFC-provider-path-rest §3.3). Read from the 429 candidate observation and
-    the quota window. [walk_promotes_at_release] is [true] when the walk order
-    stops holding the path back at [release_at]: every rest on it was stated by
-    the provider and not cut by the cap. An id the runtime table cannot resolve
-    is serving. *)
+    the quota window; a failed attempt is no rest (RFC-0458 §3.4).
+    [walk_promotes_at_release] is [true] when the walk order moves the path
+    ahead of the paths still told to rest at [release_at]: every rest on it was
+    stated by the provider and not cut by the cap. A failed attempt the path
+    also holds keeps it behind the paths with no evidence. An id the runtime
+    table cannot resolve is serving. *)
 type path_rest =
   | Path_serving
   | Path_resting of

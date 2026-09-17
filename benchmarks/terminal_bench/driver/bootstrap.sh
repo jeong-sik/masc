@@ -52,7 +52,30 @@ bench_install_deps
 install -m 0755 "$BENCH/bin/masc-exec-shim" /usr/local/bin/masc-exec-shim
 # The shim refuses to run without its config (exec_shim.mli): remote_root must
 # match the endpoint's remote_root in the rendered runtime.toml (/root).
-printf 'remote_root=/root\n' > /etc/masc-exec-shim.conf
+#
+# The shim replaces the payload PATH with its fixed default
+# (/usr/local/bin:/usr/bin:/bin) unless the endpoint names one with `path=`, the
+# endpoint operator's statement (exec_shim.mli). This endpoint is the task
+# container, and the PATH harbor's exec carries here is the one the task image
+# declares: /opt/conda/bin, /opt/venv/bin, /opt/java/openjdk/bin, the sbin
+# directories. Without it the keeper's commands miss tools every other agent in
+# the same container finds (21 of the 66 4.0.0 tasks put tools in a directory
+# outside the default, masc#36907). The shim refuses empty and relative
+# entries, so those are left out; a repeated entry is kept once.
+# Through release 0.35.19 the shim looks up an argv program in its own
+# process PATH rather than this one, so only `sh -c` payloads see it until
+# the lookup fix (masc#36916) ships.
+shim_path=""
+IFS=':' read -r -a path_entries <<<"${PATH}"
+for entry in "${path_entries[@]}"; do
+  [[ "${entry}" == /* ]] || continue
+  [[ ":${shim_path}:" == *":${entry}:"* ]] && continue
+  shim_path="${shim_path:+${shim_path}:}${entry}"
+done
+{
+  printf 'remote_root=/root\n'
+  if [[ -n "${shim_path}" ]]; then printf 'path=%s\n' "${shim_path}"; fi
+} > /etc/masc-exec-shim.conf
 chmod 644 /etc/masc-exec-shim.conf
 
 # --- sshd on localhost, root key auth (keeper remote_ssh endpoint target) ---

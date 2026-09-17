@@ -30,6 +30,7 @@ disk there.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import shutil
@@ -45,6 +46,7 @@ if TYPE_CHECKING:
 
 BENCH_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BENCH_ROOT / "configs"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from render_configs import (  # noqa: E402
     ARMS,
@@ -52,6 +54,7 @@ from render_configs import (  # noqa: E402
     effective_runtime_id,
     render_arm,
 )
+from masc_dist import container_binaries  # noqa: E402
 
 REMOTE = "/opt/masc-bench"
 TOKEN_PATH = f"{REMOTE}/token"
@@ -145,35 +148,25 @@ class MascSidecar:
             # for, before any of them is addressed. See the module docstring.
             "BENCH_KEEPER_POOL": ",".join(self.pool_names),
         }
-        # Required, not optional. bootstrap.sh brings the pool up with
-        # masc_keeper_up under `set -euo pipefail`, and keeper_up's remote_ssh
-        # preflight runs `gh auth status` against <keeper root>/.config/gh --
-        # which bootstrap only writes when this token is present. Left
-        # optional, a host with just the model-provider key fails setup inside
-        # keeper_up, where the message names a keeper rather than the missing
-        # credential.
-        gh_token = os.environ.get("GH_TOKEN")
-        if not gh_token:
-            raise RuntimeError(
-                "GH_TOKEN not set in harbor process env; the keeper pool's "
-                "remote_ssh preflight runs `gh auth status` and keeper_up "
-                "refuses without a GitHub identity"
-            )
-        env["GH_TOKEN"] = gh_token
+        # Optional. A keeper gets a GitHub login only when this is set:
+        # bootstrap writes hosts.yml from it, and the remote_ssh preflight
+        # runs `gh auth status` only for an endpoint that has one (#35412).
+        # _get_env also sees what `harbor run --ae` gives the agent, which harbor
+        # applies to every exec as well; os.environ alone would disagree with
+        # the container about whether a login was given.
+        gh_token = self._get_env("GH_TOKEN")
+        if gh_token:
+            env["GH_TOKEN"] = gh_token
         return env
 
     async def install_masc(self, environment: BaseEnvironment) -> None:
-        binaries = [BENCH_ROOT / "dist" / "masc", BENCH_ROOT / "dist" / "masc-exec-shim"]
-        for binary in binaries:
-            if not binary.exists():
-                raise RuntimeError("run image/fetch_masc.sh first")
-        # gh is required by the keeper_up preflight and is absent from debian
-        # stable, which most task base images use, so it ships in dist/ when
-        # fetched. deps.sh falls back to the package manager without it.
-        vendored_gh = BENCH_ROOT / "dist" / "gh"
-        if vendored_gh.exists():
-            binaries.append(vendored_gh)
-        config_dir = render_arm(self.arm, self.keeper_runtime_id, self.keeper_effort)
+        container_env = self.masc_container_env()
+        binaries = await container_binaries(
+            self, environment, BENCH_ROOT, with_gh="GH_TOKEN" in container_env)
+        # A lane may read provider limits over the network while rendering;
+        # harbor installs every trial in one event loop.
+        config_dir = await asyncio.to_thread(
+            render_arm, self.arm, self.keeper_runtime_id, self.keeper_effort)
         await self.exec_as_root(environment, f"mkdir -p {REMOTE}/bin")
         for binary in binaries:
             await environment.upload_file(binary, f"{REMOTE}/bin/{binary.name}")
@@ -189,7 +182,7 @@ class MascSidecar:
             environment,
             f"chmod +x {REMOTE}/bin/masc {REMOTE}/driver/*.sh && "
             f"bash {REMOTE}/driver/bootstrap.sh",
-            env=self.masc_container_env(),
+            env=container_env,
         )
 
 

@@ -60,6 +60,9 @@ def main():
         root = Path(temporary)
         config = root / "shim.conf"
         config.write_text(f"remote_root={root}\nscratch_root={root}\n")
+        # The shim refuses a config its group or every user may write; set the
+        # mode rather than leave it to the umask.
+        config.chmod(0o644)
         cases = [
             ("effect", ["/bin/sh", "-c", "exit 127"], "sandbox_applied", "unrestricted", 127),
             ("observe", ["/bin/sh", "-c", "printf discard >/dev/null"],

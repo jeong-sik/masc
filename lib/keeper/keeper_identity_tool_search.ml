@@ -103,25 +103,22 @@ let summary_of description =
    the listing is built here, because only this turn knows what is attached. *)
 let declared = Tool_schemas_identity_tool_search.schema
 
-(* [placed] are the entries this turn hands over with their schemas, so the
-   model reads them from its own tool list. Naming them here as well would
-   spend the listing's bytes -- charged to every request of the turn -- on a
-   name the schema beside it already carries. Measured over three days, that
-   duplication was a median 7 of the listed tools and reached 24, a third of
-   one listing. They stay in [entries]: asking for a tool that is already
+(* Every entry, including the ones this turn also places with their schemas.
+   This description sits in the tool array, which is the head of the
+   provider's cache prefix, so it has to read the same on the turn that loads
+   a tool and on the turn after, when that tool is placed. Leaving placed names
+   out would change the description at exactly that boundary and forfeit the
+   cached prefix from this tool on, history included. Naming them costs a
+   median 143 bytes and at most 375 per request, 0.21% of the median 73 KB of
+   tool schemas (1,694 requests, 2026-09-17). Asking for a tool that is already
    callable answers rather than refuses.
 
    Names only. The one-line summaries rode here too until 2026-09-02, and at
    57 to 86 listed tools that was 6 to 9 KB on every request of every turn,
    7 to 14% of the whole tool surface. A summary is shown when its tool is
    loaded, once, in the answer. *)
-let description_of ~placed entries =
-  let omitted name = List.exists (String.equal name) placed in
-  match
-    List.filter_map
-      (fun entry -> if omitted entry.name then None else Some entry.name)
-      entries
-  with
+let description_of entries =
+  match List.map (fun entry -> entry.name) entries with
   | [] -> declared.Masc_domain.description
   | names -> declared.Masc_domain.description ^ "\n" ^ String.concat ", " names
 ;;
@@ -172,15 +169,25 @@ let describe entry = Printf.sprintf "- %s: %s" entry.name entry.summary
 
 (* Puts [found] into the running agent's callable set and answers with what
    each one does, so the model can pick among what it just loaded without
-   waiting for the schemas of the next request. *)
-let load_found ~agent ~usage ~receipts ~invocation found =
+   waiting for the schemas of the next request.
+
+   In the slot the next turn places it: the bundle builds that turn's array as
+   this tool followed by the placed entries in [entries] order, so the loaded
+   tool is ranked the same way here. Appended at the end instead, the array
+   the rest of this turn sends and the array the next turn sends would hold
+   the same tools in a different order, and the turn boundary would forfeit
+   the cached prefix a second time. *)
+let load_found ~agent ~entries ~usage ~receipts ~invocation found =
   match
     Keeper_tool_load_receipts.loaded
       receipts
       ~invocation
       ~names:(List.map (fun entry -> entry.name) found)
       ~apply:(fun () ->
-        Agent_core.Agent.extend_tools agent (List.map (fun entry -> entry.callable) found))
+        Agent_core.Agent.extend_tools
+          ~order:(tool_name :: List.map (fun entry -> entry.name) entries)
+          agent
+          (List.map (fun entry -> entry.callable) found))
   with
   | Error (Keeper_tool_load_receipts.Work_scope_unavailable _ as error) ->
     Error
@@ -249,7 +256,7 @@ let load ~keeper_name ~agent_cell ~entries ~usage ~receipts ~invocation requeste
       let loaded = match found with
         | [] -> Ok []
         | _ :: _ ->
-          load_found ~agent ~usage ~receipts ~invocation found
+          load_found ~agent ~entries ~usage ~receipts ~invocation found
           |> Result.map (fun content -> [content])
       in
       Result.map
@@ -463,16 +470,11 @@ let make ~keeper_name { deferred; agent_cell; history; carry_window; receipts } 
                ; "dropped", Json_util.json_string_list dropped
                ])
          "Tools this conversation ran are outside the carry window");
-    let placed =
-      List.map
-        (fun (tool : Agent_core.Tool.t) -> tool.Agent_core.Tool.schema.name)
-        already_used
-    in
     let schema =
       match
         Agent_core.Types.tool_schema_of_input_schema
           ~name:tool_name
-          ~description:(description_of ~placed entries)
+          ~description:(description_of entries)
           ~input_schema:declared.Masc_domain.input_schema
           ()
       with

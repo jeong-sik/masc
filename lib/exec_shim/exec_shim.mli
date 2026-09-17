@@ -52,7 +52,8 @@
     The payload's environment is synthesized server-side: a documented
     minimal base env ({!default_base_path} for [PATH]; [HOME], [USER],
     [TMPDIR] taken from the shim's own environment when present, else the
-    defaults [/tmp], ["masc"], [/tmp]) overlaid with the endpoint-allowlisted
+    defaults [/tmp], ["masc"], [/tmp]), then the endpoint's declared
+    environment ([env_file=], {!endpoint_env}), then the endpoint-allowlisted
     request entries and the runner-owned [GH_CONFIG_DIR] and
     [GIT_TERMINAL_PROMPT] entries.  A reserved-name denylist is NEVER accepted
     from the wire — the denylist beats both allowlists. *)
@@ -88,21 +89,47 @@ val denylisted_env_name : string -> bool
     with the [DYLD_] prefix.  Matching is case-sensitive; [PATH] from the
     wire is dropped even when it appears in the endpoint allowlist. *)
 
+type endpoint_env = private (string * string) list
+(** The environment an endpoint's operator declares for every payload, read
+    from the file the shim config's [env_file=] names: what a person logged in
+    on that host runs with and the minimal base env does not carry (a venv's
+    [VIRTUAL_ENV], a CUDA [LD_LIBRARY_PATH]).  It is endpoint-resident like
+    [path=], so {!denylisted_env_name} does not apply to it: an operator may
+    declare [LD_LIBRARY_PATH].  [PATH] is refused — [path=] is also the list
+    {!resolve_program} searches, and one source keeps the payload's [PATH]
+    and that search the same.  Built only by {!parse_env_file}. *)
+
+val no_endpoint_env : endpoint_env
+(** The endpoint declares nothing: no [env_file=]. *)
+
+val parse_env_file : string -> (endpoint_env, string) result
+(** docker's [--env-file] grammar without its host-lookup form.  One
+    [NAME=VALUE] per line; [NAME] is [[A-Za-z_][A-Za-z0-9_]*] starting at the
+    first column; [VALUE] is the rest of the line byte for byte (untrimmed,
+    may contain [=]).  Blank lines and lines whose first non-blank character
+    is ['#'] are skipped.  A line without [=] (docker's "take it from the
+    reader's environment", which here would be an sshd session's), an invalid
+    name, [PATH], a value holding a NUL byte, or a name declared twice is
+    rejected with
+    [remote_ssh_shim_config_error]. *)
+
 val synthesize_env :
   path:string ->
+  endpoint_env:endpoint_env ->
   base_env:(string * string) list ->
   allowlist:string list ->
   request_env:(string * string) list ->
   (string * string) list
-(** [synthesize_env ~base_env ~allowlist ~request_env] is the payload's
-    full environment: the minimal base env (see above; [base_env] is the
-    shim's own process environment — the function itself is pure and performs
-    no process-state lookups; [path] is the payload [PATH], the endpoint
-    config's [payload_path] joined on [:])
-    with each non-denylisted request entry overlaid
+(** [synthesize_env ~endpoint_env ~base_env ~allowlist ~request_env] is the
+    payload's full environment: the minimal base env (see above; [base_env] is
+    the shim's own process environment — the function itself is pure and
+    performs no process-state lookups; [path] is the payload [PATH], the
+    endpoint config's [payload_path] joined on [:]), with [endpoint_env]
+    replacing or adding its names,
+    then each non-denylisted request entry overlaid
     when its name is in [allowlist] or is one of the runner-owned
     [GH_CONFIG_DIR] and [GIT_TERMINAL_PROMPT] names.  A request entry whose
-    name collides with a base key replaces the base value.  Duplicate names in
+    name collides with a base or endpoint name replaces that value.  Duplicate names in
     [request_env] are last-wins.  The result has unique keys; order is
     unspecified. *)
 
@@ -207,14 +234,22 @@ val check_request_root_jail
     statement (the file is endpoint-resident), never the wire's. An empty or
     relative entry is rejected.
 
+    [env_file] is optional: the absolute path of a file declaring the
+    payload's environment ({!endpoint_env}, grammar in {!parse_env_file}).
+    The shim reads it for every request; an unreadable or malformed file
+    refuses the request with [remote_ssh_shim_config_error], as the config
+    file itself does.
+
     Unknown keys, duplicate keys, a missing/relative/empty [remote_root],
-    a malformed [path], or an unreadable file are all rejected with
-    [remote_ssh_shim_config_error] and the shim refuses to execute. *)
+    a malformed [path], a relative or empty [env_file] or [scratch_root], or
+    an unreadable file are all rejected with [remote_ssh_shim_config_error]
+    and the shim refuses to execute. *)
 
 type config =
   { remote_root : string
   ; env_allowlist : string list
   ; payload_path : string list  (** [path=] entries, or {!default_payload_path}. *)
+  ; env_file : string option  (** [env_file=], absolute; [None] when absent. *)
   ; scratch_root : string
     (** [scratch_root=] (absolute): where a boxed run gets its one writable
         directory, which is also the payload's HOME and TMPDIR and is removed
@@ -235,6 +270,21 @@ val jail_for_request
     directory read as an escape. *)
 
 val parse_config : string -> (config, string) result
+
+val read_env_file : string option -> (endpoint_env, string) result
+(** {!no_endpoint_env} for [None]; otherwise the named file through
+    {!parse_env_file}, or [remote_ssh_shim_config_error] when it cannot be
+    read. *)
+
+val payload_env :
+  config:config ->
+  base_env:(string * string) list ->
+  request_env:(string * string) list ->
+  ((string * string) list, string) result
+(** The environment one request's payload runs with: [config]'s [env_file]
+    read and layered by {!synthesize_env} under [config]'s [path=] and
+    [env_allowlist].  Exposed so the composition the dispatcher runs is
+    testable, like {!jail_for_request}. *)
 
 (** {1 The box (RFC-0422)} *)
 

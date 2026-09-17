@@ -3,11 +3,10 @@
 # verify each runs in a container of that architecture. No local build
 # (constitution).
 #
-# Harbor builds a Terminal-Bench 4.0 task image from its Dockerfile for the
-# Docker daemon's own architecture, and a single-architecture base image still
-# runs as that one. So one run can hold arm64 and amd64 task containers, and
-# the agent picks dist/linux-x64 or dist/linux-arm64 per container by
-# `uname -m` (agents/masc_dist.py).
+# Terminal-Bench 4.0.0 task images are prebuilt for amd64, while a task built
+# from its Dockerfile takes the Docker daemon's architecture. The agent picks
+# dist/linux-x64 or dist/linux-arm64 per container by `uname -m`
+# (agents/masc_dist.py), so both are fetched.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

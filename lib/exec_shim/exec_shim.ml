@@ -103,32 +103,48 @@ let is_env_name name =
 
 (* docker's --env-file grammar without its host-lookup form: NAME=VALUE, the
    value is the rest of the line byte for byte, blank lines and lines whose
-   first non-blank character is '#' are skipped. A line holding only a name
+   first non-blank character is '#' are skipped. docker reads lines with
+   bufio.ScanLines, which drops one '\r' before the line end, so a file saved
+   with CRLF endings means the same values here. A line holding only a name
    would take the value from the reading process, which here is an sshd
-   session's -- not something the operator wrote -- so it is refused. *)
-let parse_env_file content =
-  let err fmt =
-    Printf.ksprintf (fun m -> Error (config_error_code ^ ": env_file: " ^ m)) fmt in
+   session's -- not something the operator wrote -- so it is refused.
+
+   An error names the file and the line number and says what is wrong, never
+   the line's text: a malformed line may be a secret value. *)
+let parse_env_file ~path content =
+  let err n fmt =
+    Printf.ksprintf
+      (fun m ->
+        Error (Printf.sprintf "%s: env_file %s line %d: %s" config_error_code path n m))
+      fmt in
+  let first_line_of_name = Hashtbl.create 16 in
   let declare declared (n, line) =
     Result.bind declared (fun declared ->
+        let line =
+          if String.ends_with ~suffix:"\r" line
+          then String.sub line 0 (String.length line - 1)
+          else line in
         let body = String.trim line in
         if body = "" || body.[0] = '#'
         then Ok declared
         else
           match String.index_opt line '=' with
-          | None -> err "line %d is not NAME=VALUE: %S" n line
+          | None -> err n "not NAME=VALUE"
           | Some i ->
             let name = String.sub line 0 i in
             let value = String.sub line (i + 1) (String.length line - i - 1) in
             if not (is_env_name name)
-            then err "line %d: %S is not an environment variable name" n name
+            then err n "the text before '=' is not an environment variable name"
             else if name = "PATH"
-            then err "line %d: PATH comes from path=, the directories programs are looked up in" n
+            then err n "PATH comes from path=, the directories programs are looked up in"
             else if String.contains value '\000'
-            then err "line %d: the value of %s holds a NUL byte, which exec cannot pass" n name
-            else if List.mem_assoc name declared
-            then err "line %d: %s is declared twice" n name
-            else Ok ((name, value) :: declared)) in
+            then err n "the value holds a NUL byte, which exec cannot pass"
+            else
+              match Hashtbl.find_opt first_line_of_name name with
+              | Some first -> err n "a name is declared twice, on lines %d and %d" first n
+              | None ->
+                Hashtbl.add first_line_of_name name n;
+                Ok ((name, value) :: declared)) in
   List.fold_left declare (Ok no_endpoint_env)
     (List.mapi (fun i line -> (i + 1, line)) (String.split_on_char '\n' content))
 
@@ -369,23 +385,56 @@ let config_path () =
   | Some p when p <> "" -> p
   | _ -> default_config_path
 
+(* The file's metadata comes from the descriptor its bytes are read from, so a
+   check on the mode is about the same file as the content even when the path
+   is replaced in between. The bytes are read to end of file rather than to a
+   length taken first, which a file still being written would make stale. *)
 let read_endpoint_file ~what path =
-  try
-    let ic = open_in_bin path in
-    Ok
-      (Fun.protect
-         ~finally:(fun () -> close_in_noerr ic)
-         (fun () -> really_input_string ic (in_channel_length ic)))
-  with
-  | Sys_error _ ->
-    Error (Printf.sprintf "%s: cannot read %s %s" config_error_code what path)
+  let cannot_read () =
+    Error (Printf.sprintf "%s: cannot read %s %s" config_error_code what path) in
+  match open_in_bin path with
+  | exception Sys_error _ -> cannot_read ()
+  | ic ->
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () ->
+        match
+          let stats = Unix.fstat (Unix.descr_of_in_channel ic) in
+          let content = In_channel.input_all ic in
+          (stats, content)
+        with
+        | read -> Ok read
+        | exception (Sys_error _ | Unix.Unix_error _) -> cannot_read ())
 
 let load_config () =
-  Result.bind (read_endpoint_file ~what:"config file" (config_path ())) parse_config
+  Result.bind (read_endpoint_file ~what:"config file" (config_path ()))
+    (fun (_stats, content) -> parse_config content)
+
+let group_write_bit = 0o020
+let other_write_bit = 0o002
+
+(* Whoever can write the env file sets the environment of every payload on the
+   host, the loader path included, so only its owner may write it. The owner
+   is not checked: a container that runs the shim as root keeps a root-owned
+   0644 file, like the config the bootstrap installs. *)
+let env_file_writers_besides_owner perm =
+  match perm land group_write_bit <> 0, perm land other_write_bit <> 0 with
+  | false, false -> None
+  | true, false -> Some "its group"
+  | false, true -> Some "every user"
+  | true, true -> Some "its group and every user"
 
 let read_env_file = function
   | None -> Ok no_endpoint_env
-  | Some path -> Result.bind (read_endpoint_file ~what:"env_file" path) parse_env_file
+  | Some path ->
+    Result.bind (read_endpoint_file ~what:"env_file" path) (fun (stats, content) ->
+        match env_file_writers_besides_owner stats.Unix.st_perm with
+        | Some writers ->
+          Error
+            (Printf.sprintf
+               "%s: env_file %s is writable by %s (mode %04o); only its owner may write it"
+               config_error_code path writers stats.Unix.st_perm)
+        | None -> parse_env_file ~path content)
 
 (* Named and reachable for the same reason as [jail_for_request]: the config
    naming an env file, reading it and layering it under the wire are three

@@ -97,21 +97,32 @@ type endpoint_env = private (string * string) list
     [path=], so {!denylisted_env_name} does not apply to it: an operator may
     declare [LD_LIBRARY_PATH].  [PATH] is refused — [path=] is also the list
     {!resolve_program} searches, and one source keeps the payload's [PATH]
-    and that search the same.  Built only by {!parse_env_file}. *)
+    and that search the same.  Built only by {!parse_env_file}.
+
+    In a boxed run ([observe], [guest_local]) [HOME] and [TMPDIR] are the
+    run's scratch directory ({!scratch_env}) whatever the file declares.
+    Other directories the file names lie outside the box: under [observe]
+    a payload's writes there are refused. *)
 
 val no_endpoint_env : endpoint_env
 (** The endpoint declares nothing: no [env_file=]. *)
 
-val parse_env_file : string -> (endpoint_env, string) result
+val parse_env_file : path:string -> string -> (endpoint_env, string) result
 (** docker's [--env-file] grammar without its host-lookup form.  One
     [NAME=VALUE] per line; [NAME] is [[A-Za-z_][A-Za-z0-9_]*] starting at the
     first column; [VALUE] is the rest of the line byte for byte (untrimmed,
-    may contain [=]).  Blank lines and lines whose first non-blank character
-    is ['#'] are skipped.  A line without [=] (docker's "take it from the
-    reader's environment", which here would be an sshd session's), an invalid
-    name, [PATH], a value holding a NUL byte, or a name declared twice is
-    rejected with
-    [remote_ssh_shim_config_error]. *)
+    may contain [=]).  One ['\r'] before the line end is dropped, as docker's
+    line reader drops it, so a file with CRLF endings declares the same
+    values.  Blank lines and lines whose first non-blank character is ['#']
+    are skipped.  A line without [=] (docker's "take it from the reader's
+    environment", which here would be an sshd session's), an invalid name,
+    [PATH], a value holding a NUL byte, or a name declared twice is rejected
+    with [remote_ssh_shim_config_error].
+
+    [path] is the file the content was read from and appears only in the
+    error.  The error names that file, the line number and what is wrong, and
+    prints nothing from the line but the name [PATH], since a malformed line
+    may be a secret value. *)
 
 val synthesize_env :
   path:string ->
@@ -236,9 +247,9 @@ val check_request_root_jail
 
     [env_file] is optional: the absolute path of a file declaring the
     payload's environment ({!endpoint_env}, grammar in {!parse_env_file}).
-    The shim reads it for every request; an unreadable or malformed file
-    refuses the request with [remote_ssh_shim_config_error], as the config
-    file itself does.
+    The shim reads it for every request; an unreadable or malformed file, or
+    one its group or every user may write, refuses the request with
+    [remote_ssh_shim_config_error], as the config file itself does.
 
     Unknown keys, duplicate keys, a missing/relative/empty [remote_root],
     a malformed [path], a relative or empty [env_file] or [scratch_root], or
@@ -273,8 +284,10 @@ val parse_config : string -> (config, string) result
 
 val read_env_file : string option -> (endpoint_env, string) result
 (** {!no_endpoint_env} for [None]; otherwise the named file through
-    {!parse_env_file}, or [remote_ssh_shim_config_error] when it cannot be
-    read. *)
+    {!parse_env_file}.  [remote_ssh_shim_config_error] when it cannot be
+    read, or when its mode lets its group or every user write it: whoever
+    writes it sets every payload's environment.  Its owner is not checked,
+    so a root-owned [0644] file is accepted. *)
 
 val payload_env :
   config:config ->

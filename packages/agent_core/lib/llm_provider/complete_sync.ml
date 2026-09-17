@@ -203,7 +203,9 @@ let parse_sync_response
 let%test "sync: an error finish without a provider condition is provider-reported" =
   let parse body =
     parse_sync_response
-      ~http_codec:Provider_http_codec.Openai_chat
+      ~http_codec:
+        (Provider_http_codec.of_config
+           (Provider_config.make ~kind:Provider_config.OpenAI_compat ~model_id:"m" ~base_url:"u" ()))
       ~provider_kind:Provider_config.OpenAI_compat
       body
   in
@@ -242,7 +244,9 @@ let%test "sync: an error finish without a provider condition is provider-reporte
 let%test "sync: a top-level 502 is that refusal with the error object as its body" =
   match
     parse_sync_response
-      ~http_codec:Provider_http_codec.Openai_chat
+      ~http_codec:
+        (Provider_http_codec.of_config
+           (Provider_config.make ~kind:Provider_config.OpenAI_compat ~model_id:"m" ~base_url:"u" ()))
       ~provider_kind:Provider_config.OpenAI_compat
       {|{"id":"c","model":"m","error":{"code":502,"message":"Provider disconnected"},"choices":[{"index":0,"finish_reason":"error","message":{"content":"partial"}}]}|}
   with
@@ -256,7 +260,9 @@ let%test "sync: a top-level 502 is that refusal with the error object as its bod
 let%test "sync: an unreadable response is a provider parse failure" =
   match
     parse_sync_response
-      ~http_codec:Provider_http_codec.Openai_chat
+      ~http_codec:
+        (Provider_http_codec.of_config
+           (Provider_config.make ~kind:Provider_config.OpenAI_compat ~model_id:"m" ~base_url:"u" ()))
       ~provider_kind:Provider_config.OpenAI_compat
       {|{"id":"c","model":"m","choices":[{"message":{"content":"ok"}}]}|}
   with

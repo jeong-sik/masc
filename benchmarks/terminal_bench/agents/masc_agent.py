@@ -86,7 +86,10 @@ class MascAgent(BaseInstalledAgent):
         # runs `gh auth status` only for an endpoint that has one (#35412).
         # Terminal-Bench tasks do not need GitHub, and a token passed here
         # lands in every task container of the run.
-        gh_token = os.environ.get("GH_TOKEN")
+        # _get_env also sees what `harbor run --ae` gives the agent, which harbor
+        # applies to every exec as well; os.environ alone would disagree with
+        # the container about whether a login was given.
+        gh_token = self._get_env("GH_TOKEN")
         if gh_token:
             env["GH_TOKEN"] = gh_token
         return env

@@ -1,91 +1,12 @@
 (** Error translation helpers for keeper Agent.run orchestration. *)
 
-let runtime_provider_label provider =
-  match Option.map String.trim provider with
-  | Some provider when provider <> "" -> Printf.sprintf "Runtime provider '%s'" provider
-  | _ -> "Runtime provider"
-;;
-
-(* One sentence, naming the failure once.
-
-   The stacked form read "Runtime provider unavailable: connection closed.
-   Check provider health or select another runtime. Detail: End_of_file" --
-   the same failure named four times at decreasing abstraction, ending in
-   OCaml's vocabulary rather than the operator's. Each layer prepended its own
-   framing without reading what the layer below had already said.
-
-   Two kinds let the detail speak instead of a condition phrase: a name
-   resolution failure is about one host, and [Unknown] has no label worth the
-   name. Writing both would repeat the fact -- "could not be resolved: failed
-   to resolve hostname" -- which is the shape being removed. Every other kind
-   states the condition and drops the exception, which restates it in OCaml's
-   words ([End_of_file] renders exactly the constructor the kind already is)
-   and stays in the typed error for logs regardless.
-
-   Guidance stays only where the action is specific and not implied by the
-   condition. A refused connection means nothing is listening; exhausted local
-   resources mean too many requests at once. "Check provider health" after a
-   dropped connection is not an instruction. *)
-let provider_network_user_message ?provider ~kind ~detail () =
-  let who = runtime_provider_label provider in
-  let detail_speaks fallback =
-    match String.trim detail with
-    | "" -> who ^ " " ^ fallback
-    | detail -> who ^ ": " ^ detail
-  in
-  match kind with
-  | Llm_provider.Http_client.Connection_refused ->
-    who ^ " refused the connection; nothing is listening on the runtime endpoint"
-  | Llm_provider.Http_client.Dns_failure -> detail_speaks "could not be resolved"
-  | Llm_provider.Http_client.Tls_error -> who ^ " failed the TLS handshake"
-  | Llm_provider.Http_client.Timeout -> who ^ " did not respond in time"
-  | Llm_provider.Http_client.Local_resource_exhaustion ->
-    "Local network resources are exhausted; fewer requests at once are needed"
-  | Llm_provider.Http_client.End_of_file -> who ^ " closed the connection"
-  | Llm_provider.Http_client.Unknown -> detail_speaks "could not be reached"
-;;
-
-let structured_internal_error_user_message err =
-  match Keeper_internal_error.classify_masc_internal_error err with
-  | Some internal_error -> (
-    match Keeper_internal_error.summary_of_masc_internal_error internal_error with
-    | Some summary -> summary
-    | None -> Agent_core.Error.to_string err)
-  | None -> Agent_core.Error.to_string err
-;;
-
-(* The raw provider diagnostic ("Context overflow: empty completion
-   (stop_reason=model_context_window_exceeded): provider returned an empty
-   assistant turn …") reached dashboard chat verbatim, repeatedly, on
-   2026-07-21. State the condition in the user's terms instead. Only the
-   typed [Api ContextOverflow] arm exists: the [Provider] path collapses the
-   overflow into [InvalidRequest] with a string reason (the module-boundary
-   classification loss RFC-0353 tracks), and matching that string here would
-   be a classifier — the fix for that path is upstream type preservation. *)
-let context_overflow_user_message ~limit =
-  let limit_part =
-    match limit with
-    | Some tokens -> Printf.sprintf " (model window ~%d tokens)" tokens
-    | None -> ""
-  in
-  "This conversation no longer fits the model's context window"
-  ^ limit_part
-  ^ ". The message was not processed; a shorter message may fit."
-;;
-
-let user_message_of_core_error = function
-  | Agent_core.Error.Api (Agent_core.Retry.NetworkError { message; kind }) ->
-    provider_network_user_message ~kind ~detail:message ()
-  | Agent_core.Error.Api (Agent_core.Retry.ContextOverflow { limit; _ }) ->
-    context_overflow_user_message ~limit
-  | Agent_core.Error.Api (Agent_core.Retry.InputCapacity _) ->
-    "The runtime flow reported a typed input-capacity failure. MASC did not \
-     select another runtime; the failure is escalated as \
-     a deterministic judgment."
-  | Agent_core.Error.Provider
-      (Llm_provider.Error.NetworkError { provider; kind; detail; _ }) ->
-    provider_network_user_message ~provider ~kind ~detail ()
-  | err -> structured_internal_error_user_message err
+(* One SSOT for the sentence a failed request shows a person: the typed value
+   renders itself ([Keeper_request_failure.summary]). This used to be four
+   renderers here, and the row they wrote was the only place the cause
+   survived; RFC-0454 D2 moved the decision into the value, so this is the
+   projection plus its summary and nothing else. *)
+let user_message_of_core_error err =
+  Keeper_request_failure.summary (Keeper_request_failure.of_core_error err)
 ;;
 
 type core_termination_semantics =

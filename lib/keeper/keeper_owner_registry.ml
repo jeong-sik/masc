@@ -158,10 +158,14 @@ let prepare_operation_store_path pool keeper_name =
 ;;
 
 (* What the operator reads in the transcript for a request the restart cut
-   off. Same shape as the stream's [persisted_error_reply], so the row renders
-   as the failure it is and does not read as the keeper's own words. *)
+   off. The cause is a value ([Server_restarted]) and its summary is the
+   sentence; the prefix is the stream's [persisted_error_reply] shape, so the
+   row renders as the failure it is and does not read as the keeper's own
+   words (RFC-0454 D2). *)
 let restart_interrupted_reply =
-  "Keeper request failed: the server restarted before this request finished."
+  "Keeper request failed: "
+  ^ Keeper_request_failure.summary
+      { Keeper_request_failure.cause = Keeper_request_failure.Server_restarted }
 ;;
 
 (* A request the restart cut off is settled [Failed Interrupted_by_restart] in

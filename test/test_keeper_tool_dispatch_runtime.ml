@@ -1,5 +1,12 @@
 open Alcotest
 
+(* What the operator's window currently says. The store takes the window as an
+   argument -- it is reachable from a raw Domain, where reading a setting
+   raises -- so every caller names it. These cases are not about the window and
+   pass what production passes. *)
+let history_retained () =
+  Masc.Runtime_params.get Masc.Runtime_settings.keeper_checkpoint_history_retained
+
 (* The Gate replay/resolution wording lives in managed prompt templates
    under the config/prompts/keeper.gate_replay prefix; without a loaded
    registry the
@@ -31,8 +38,7 @@ module Workspace = Masc.Workspace
 module Publication_availability =
   Masc.Keeper_publication_recovery_availability
 module Recovery_test = Fs_compat_test_support.Publication_recovery_for_testing
-module Capability_write_test =
-  Fs_compat_test_support.Capability_write_for_testing
+module Capability_write_test = Fs_compat_test_support.Capability_write_for_testing
 
 let tool_ok ?(tool_name = "") message =
   Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
@@ -5199,13 +5205,18 @@ let composition_invocation ~completion =
     ~completion
 ;;
 
-let frozen_capability_surface () =
+let frozen_capability_surface
+      ?(tool_deny = [])
+      ?(sandbox_profile = Masc.Keeper_types_profile.Docker)
+      ()
+  =
   let snapshot =
     Skill_catalog_snapshot.config_unreadable
       ~detail:"dispatch boundary test has no Skill sources"
   in
   Masc.Keeper_capability_surface.create
-    ~tool_deny:[]
+    ~tool_deny
+    ~sandbox_profile
     ~skill_names:None
     ~global_skill_catalog:Masc.Keeper_skill_catalog.empty
     ~skill_inventory:(Masc.Keeper_skill_inventory.of_snapshot snapshot)
@@ -5293,12 +5304,10 @@ let check_frozen_surface_rejection label (result : KET.executed_tool_result) =
     Yojson.Safe.Util.(data |> member "error" |> to_string)
 ;;
 
-(* [Read] used to stand here too: a Keeper could declare tool groups and leave
-   it out, so dispatching it was a rejection. #31728 removed that declaration
-   and the surface now holds every model-visible descriptor, so no capability
-   surface can exclude [Read] and the half that asked for it is gone. What a
-   surface still does not hold is a name registered only in [Tool_dispatch]
-   with no descriptor behind it, which is what this covers. *)
+(* A surface with no deny and a sandbox that runs every Tool holds every
+   model-visible descriptor. What it still does not hold is a name registered
+   only in [Tool_dispatch] with no descriptor behind it, which is what this
+   covers; a denied or sandbox-refused Tool is covered below. *)
 let test_frozen_surface_direct_dispatch_rejects_registered_only_tool () =
   with_exec_fixture "frozen-surface-direct-excluded"
   @@ fun ~config ~meta ~publication_recovery ~ctx_work ->
@@ -5317,7 +5326,54 @@ let test_frozen_surface_direct_dispatch_rejects_registered_only_tool () =
   in
   check_frozen_surface_rejection
     "registered-only fallback"
-    registered_result
+    registered_result;
+  check string "a name with no inventory row reads outside the surface"
+    "outside_tool_surface"
+    Yojson.Safe.Util.(
+      execution_data_exn "registered-only fallback" registered_result
+      |> member "availability"
+      |> to_string)
+;;
+
+(* A Tool the profile denies or the sandbox refuses keeps an inventory row, and
+   calling it by name answers with that row's reason, the same words
+   [keeper_tools_list] shows for it. *)
+let test_frozen_surface_rejection_names_the_inventory_reason () =
+  with_exec_fixture "frozen-surface-rejection-reason"
+  @@ fun ~config ~meta ~publication_recovery ~ctx_work ->
+  let call ~capability_surface name =
+    KET.execute_keeper_tool_call_for_capability_surface_with_outcome
+      ~capability_surface
+      ~config
+      ~meta
+      ~publication_recovery
+      ~ctx_work
+      ~name
+      ~input:(`Assoc [])
+      ()
+  in
+  let denied =
+    call
+      ~capability_surface:(frozen_capability_surface ~tool_deny:[ "keeper_lane_status" ] ())
+      "keeper_lane_status"
+  in
+  check_frozen_surface_rejection "denied Tool" denied;
+  check string "a denied call names the deny" "denied_by_profile"
+    Yojson.Safe.Util.(
+      execution_data_exn "denied Tool" denied |> member "availability" |> to_string);
+  let refused =
+    call
+      ~capability_surface:
+        (frozen_capability_surface ~sandbox_profile:Masc.Keeper_types_profile.Micro_vm ())
+      "keeper_spawn"
+  in
+  check_frozen_surface_rejection "sandbox-refused Tool" refused;
+  let refused_data = execution_data_exn "sandbox-refused Tool" refused in
+  check string "a refused call names the sandbox" "refused_by_sandbox"
+    Yojson.Safe.Util.(refused_data |> member "availability" |> to_string);
+  check bool "a refused call carries the start refusal" true
+    (Option.is_some
+       Yojson.Safe.Util.(refused_data |> member "sandbox_refusal" |> to_string_option))
 ;;
 
 let test_frozen_surface_direct_dispatch_accepts_included_exact_descriptor () =
@@ -8937,7 +8993,8 @@ let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_un
       let original = {original with Agent_core.Checkpoint.session_id; context;
         messages=[Agent_core.Types.user_msg "Finish the original research";
           Agent_core.Types.assistant_msg "Earlier completed effect receipt remains available"]} in
-      Checkpoint.save_agent_core_classified ~session_dir original |> require "original checkpoint" |> ignore;
+      Checkpoint.save_agent_core_classified
+        ~history_retained:(history_retained ()) ~session_dir original |> require "original checkpoint" |> ignore;
       if checkpoint_failure then (
         let channel = open_out_bin (Filename.concat session_dir "accepted-checkpoints") in
         output_string channel "retention destination is not a directory";
@@ -9002,7 +9059,8 @@ let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_un
               messages=original.messages @ List.init index (fun offset ->
                 Agent_core.Types.user_msg ("Independent history " ^ string_of_int (offset + 1)));
               created_at=original.created_at +. float_of_int index} in
-            (match Checkpoint.save_agent_core_classified ~session_dir later |> require "rolling history during accepted-store outage" with
+            (match Checkpoint.save_agent_core_classified
+              ~history_retained:(history_retained ()) ~session_dir later |> require "rolling history during accepted-store outage" with
              | Checkpoint.Saved _ -> ()
              | _ -> fail "rolling history was not installed")
           done);
@@ -9057,7 +9115,8 @@ let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_un
         [Agent_core.Types.user_msg "Independent newer user context"];
         turn_count=original.turn_count + (if retention_rollover then 21 else 1);
         context=newer_context; created_at=original.created_at +. 21.} in
-      (match Checkpoint.save_agent_core_classified ~session_dir newer |> require "newer history" with
+      (match Checkpoint.save_agent_core_classified
+        ~history_retained:(history_retained ()) ~session_dir newer |> require "newer history" with
        | Checkpoint.Saved _ -> ()
        | _ -> fail "newer history was not installed");
       let before_reconcile = Checkpoint.load_agent_core_exact_snapshot ~session_dir ~session_id
@@ -9747,6 +9806,8 @@ let () =
         test_surface_post_append_failure_does_not_complete_terminal_effect;
       test_case "frozen surface rejects a registered-only tool" `Quick
         test_frozen_surface_direct_dispatch_rejects_registered_only_tool;
+      test_case "frozen surface rejection names the inventory reason" `Quick
+        test_frozen_surface_rejection_names_the_inventory_reason;
       test_case "frozen surface accepts its exact descriptor" `Quick
         test_frozen_surface_direct_dispatch_accepts_included_exact_descriptor;
       test_case "frozen surface rejects a same-id counterfeit descriptor" `Quick

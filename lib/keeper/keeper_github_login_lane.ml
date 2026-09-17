@@ -28,12 +28,12 @@ let resolve ~(config : Workspace.config) ~keeper_name =
   Keeper_sandbox_ssh.create ~base_path ~keeper_name ~endpoint ()
 ;;
 
-let run_remote endpoint ~timeout_sec ~on_stdout_chunk ~on_stderr_chunk ~argv =
+let run_remote ?(stdin_content = None) endpoint ~timeout_sec ~on_stdout_chunk ~on_stderr_chunk ~argv =
   let run = Keeper_sandbox_remote.runner ~timeout_sec endpoint in
   run
     ~on_stdout_chunk
     ~on_stderr_chunk
-    ~stdin_content:None
+    ~stdin_content
     ~argv
     ~env:[||]
     ~cwd:(Some (Keeper_sandbox_remote.remote_root endpoint))
@@ -123,6 +123,16 @@ let remote_lane ~(config : Workspace.config) ~keeper_name ~hostname =
                ~on_stdout_chunk:(Some on_stdout_chunk)
                ~on_stderr_chunk:(Some on_stderr_chunk)
                ~argv:(Keeper_github_identity.login_argv ~hostname)))
+    ; run_login_with_token =
+        (fun ~token ->
+          Masc_exec.Sandbox_target.status_tuple
+            (run_remote
+               endpoint
+               ~timeout_sec:step_timeout_sec
+               ~on_stdout_chunk:None
+               ~on_stderr_chunk:None
+               ~stdin_content:(Some token)
+               ~argv:(Keeper_github_identity.login_with_token_argv ~hostname)))
     ; secure_after_login = (fun () -> secure_config_files ~redaction endpoint ~gh_dir)
     ; observe_after_login =
         (fun () ->

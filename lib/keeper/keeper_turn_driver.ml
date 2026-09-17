@@ -95,6 +95,20 @@ let selected_runtime_result ?official_client_settlement (runtime : Runtime.t) ~l
     result
 ;;
 
+(* Whether the candidate answered at all. An attempt that yielded before any
+   provider turn completed -- the pre-first-token yield that
+   [Runtime_agent.yielded_pre_first_token] builds when a person queues behind
+   a silent provider -- did not, so it is no evidence the candidate is back. *)
+let run_result_answered (run_result : Runtime_agent.run_result) =
+  match run_result.Runtime_agent.stop_reason with
+  | Runtime_agent.Completed -> true
+  | Runtime_agent.Yielded_to_operation_queued { turns_used }
+  | Runtime_agent.Yielded_to_durable_stimulus { turns_used }
+  | Runtime_agent.Yielded_after_repeated_tool_call { turns_used; tool_name = _; repeated_count = _ }
+  | Runtime_agent.Yielded_after_repeated_assistant_text { turns_used; repeated_count = _ }
+  | Runtime_agent.InputRequired { turns_used; request = _ } -> turns_used > 0
+;;
+
 let apply_official_client_accept ~runtime_id ~accept ~terminal_effect_state
     (run_result : Runtime_agent.run_result) =
   match run_result.stop_reason, terminal_effect_state () with
@@ -138,21 +152,53 @@ type lane_terminal_error =
    non-rotating error before resolvable alternatives are tried. Order is
    therefore resolvable-active, then resolvable-exhausted, then unresolvable —
    declared relative order preserved within each class (PR #28219 review). *)
+type demotion =
+  | Not_demoted
+  | Failed_without_rest
+  | Told_to_rest
+
+(* Three places, declared order kept within each. A path told to rest -- an
+   exhausted quota or a rate limit -- goes behind a path that only failed
+   without answering: the failed one can be dispatched now, and behind a resting
+   head it would make the next dispatch wait for that head's release
+   (RFC-0458 §3.4). It is also what keeps a released rate limit promoting its
+   path past the ones still resting, even while a failed attempt keeps it
+   behind the ones that answered. *)
 let demote_unavailable_candidates ~now ~quota_scope_of ~candidate_backpressure_of candidates =
-  let available, backpressured = List.partition (fun candidate ->
+  let demotion candidate =
     let quota_exhausted =
       Option.fold ~none:false
         ~some:(fun scope -> Runtime_quota_window.is_exhausted ~scope ~now)
         (quota_scope_of candidate)
     in
-    let rate_limited =
-      Option.fold ~none:false
-        ~some:(fun candidate -> Option.is_some
-          (Runtime_candidate_backpressure.candidate_backpressure ~now ~candidate))
-        (candidate_backpressure_of candidate)
+    let observed =
+      Option.bind (candidate_backpressure_of candidate) (fun candidate ->
+        Runtime_candidate_backpressure.candidate_backpressure ~now ~candidate)
     in
-    not (quota_exhausted || rate_limited)) candidates in
-  available @ backpressured
+    match quota_exhausted, observed with
+    | true, (Some _ | None)
+    | false, Some { Runtime_candidate_backpressure.rate_limit = Some _; failed_attempt = _ } ->
+      Told_to_rest
+    | false, Some { Runtime_candidate_backpressure.rate_limit = None; failed_attempt = Some _ } ->
+      Failed_without_rest
+    | false, Some { Runtime_candidate_backpressure.rate_limit = None; failed_attempt = None }
+    | false, None ->
+      Not_demoted
+  in
+  let placed = List.map (fun candidate -> demotion candidate, candidate) candidates in
+  let in_place wanted =
+    List.filter_map
+      (fun (demotion, candidate) ->
+         match wanted, demotion with
+         | Not_demoted, Not_demoted
+         | Failed_without_rest, Failed_without_rest
+         | Told_to_rest, Told_to_rest -> Some candidate
+         | Not_demoted, (Failed_without_rest | Told_to_rest)
+         | Failed_without_rest, (Not_demoted | Told_to_rest)
+         | Told_to_rest, (Not_demoted | Failed_without_rest) -> None)
+      placed
+  in
+  in_place Not_demoted @ in_place Failed_without_rest @ in_place Told_to_rest
 ;;
 
 let quota_ordered_runtime_ids ~now runtime_ids =
@@ -206,8 +252,10 @@ type next_dispatch =
    again. It holds an unstated rest back until a success, so that release ends
    only the wait, not the demotion; a stated time beyond the cap is the same,
    because the cap ends the wait before the provider's time ends the demotion.
-   A quota observation carries no noted time and rests from [now]. An id the
-   table cannot resolve is no evidence of a rest. *)
+   A quota observation carries no noted time and rests from [now]. A failed
+   attempt is not a rest: it demotes the path until the candidate answers and
+   never makes a dispatch wait (RFC-0458 §3.4). An id the table cannot resolve
+   is no evidence of a rest. *)
 let path_rest ~now runtime_id =
   match Runtime.get_runtime_by_id runtime_id with
   | None -> Path_serving
@@ -222,8 +270,12 @@ let path_rest ~now runtime_id =
           ~now
           ~candidate:runtime.candidate_backpressure
       with
-      | None -> None
-      | Some (Runtime_candidate_backpressure.Unknown_scope_rate_limit { noted_at; retry_after }) ->
+      | None | Some { Runtime_candidate_backpressure.rate_limit = None; failed_attempt = _ } -> None
+      | Some
+          { Runtime_candidate_backpressure.rate_limit =
+              Some (Runtime_candidate_backpressure.Unknown_scope_rate_limit { noted_at; retry_after })
+          ; failed_attempt = _
+          } ->
         let promotes =
           match retry_after with
           | Some seconds when (not (Float.is_nan seconds)) && seconds > 0.0 ->
@@ -500,6 +552,7 @@ let attempt_runtime_candidates
     ?(on_retry_deferred = fun _ -> ())
     ?(on_attempt_error = fun ~runtime_id:_ ~attempt:_ ~dispatch:_ _error -> ())
     ?(on_lane_terminal_error = fun (_ : lane_terminal_error) -> ())
+    ?(provider_answered = fun _ -> true)
     ?quota_scope_of
     ?model_of
     ?candidate_backpressure_of
@@ -693,16 +746,21 @@ let attempt_runtime_candidates
          ~status:"completed"
          ~decision:(runtime_attempt_decision ~idx ~runtime_id:attempt_runtime_id)
          Keeper_runtime_manifest.Runtime_completed;
-       Option.iter
-         (fun candidate -> Runtime_candidate_backpressure.note_candidate_success ~candidate)
-         attempt_candidate_backpressure;
-       (* A call getting through is the only evidence a quota came back that
-          a provider stating no reset time leaves available, so it is what
-          clears the observation. A stated window is left alone: it names a
-          time, and one success inside it does not make that untrue. *)
-       (match attempt_quota_scope with
-        | Some scope -> Runtime_quota_window.note_succeeded ~scope
-        | None -> ());
+       (* An attempt that ended before the candidate answered -- a yield to a
+          queued person before the first token -- says nothing about the
+          candidate, so it clears no evidence (RFC-0458 §3.4). *)
+       if provider_answered value
+       then (
+         Option.iter
+           (fun candidate -> Runtime_candidate_backpressure.note_candidate_success ~candidate)
+           attempt_candidate_backpressure;
+         (* A call getting through is the only evidence a quota came back that
+            a provider stating no reset time leaves available, so it is what
+            clears the observation. A stated window is left alone: it names a
+            time, and one success inside it does not make that untrue. *)
+         match attempt_quota_scope with
+         | Some scope -> Runtime_quota_window.note_succeeded ~scope
+         | None -> ());
        Ok value
      | Error error, checkpoint_after, effect_disposition, dispatch ->
        emit_runtime_manifest
@@ -734,14 +792,76 @@ let attempt_runtime_candidates
            (fun candidate -> Runtime_candidate_backpressure.note_rate_limit ~candidate ~retry_after)
            attempt_candidate_backpressure
        in
-       (match error with
-        | Agent_core.Error.Api (Llm_provider.Retry.RateLimited { retry_after; _ })
-        | Agent_core.Error.Provider (Llm_provider.Error.RateLimit { retry_after; _ }) ->
-            note_rate_limit retry_after
-        | Agent_core.Error.Provider (Llm_provider.Error.HardQuota { retry_after; _ }) ->
-            note_quota retry_after
-        | Agent_core.Error.Api (Llm_provider.Retry.PaymentRequired _) -> note_quota None
-        | _ -> ());
+       (* The route calls every timeout a provider timeout, including one that
+          expired in MASC's own admission -- a permit queue or local capacity
+          -- before anything was sent. That says nothing about the candidate.
+          The typed phase is read here because the route does not carry it. *)
+       let expired_in_admission =
+         let admission = function
+           | Some (Llm_provider.Http_client.Queue | Llm_provider.Http_client.Capacity_backpressure) ->
+             true
+           | Some
+               ( Llm_provider.Http_client.First_token | Llm_provider.Http_client.Wall_clock
+               | Llm_provider.Http_client.Http_operation
+               | Llm_provider.Http_client.Non_streaming_body
+               | Llm_provider.Http_client.Stream_body | Llm_provider.Http_client.Stream_idle _
+               | Llm_provider.Http_client.Provider_step
+               | Llm_provider.Http_client.Cli_stdout_idle
+               | Llm_provider.Http_client.Unknown_timeout )
+           | None -> false
+         in
+         match error with
+         | Agent_core.Error.Api (Llm_provider.Retry.Timeout { phase; message = _ }) -> admission phase
+         | Agent_core.Error.Provider
+             (Llm_provider.Error.Timeout { timeout_phase; provider = _; detail = _ }) ->
+           admission timeout_phase
+         | Agent_core.Error.Api _ | Agent_core.Error.Provider _ | Agent_core.Error.Agent _
+         | Agent_core.Error.Mcp _ | Agent_core.Error.Config _
+         | Agent_core.Error.Serialization _ | Agent_core.Error.Io _
+         | Agent_core.Error.Orchestration _ | Agent_core.Error.Internal _
+         | Agent_core.Error.Internal_carried _ -> false
+       in
+       let note_failed_attempt failure =
+         Option.iter
+           (fun candidate -> Runtime_candidate_backpressure.note_failed_attempt ~candidate ~failure)
+           attempt_candidate_backpressure
+       in
+       (* The evidence follows the failure route, the one classification of
+          this error that the keeper's failure handling reads, rather than a
+          second reading of the error. That second reading recorded 429, 402
+          and HardQuota and dropped everything else, including a closed runtime
+          connection the route calls a server error (RFC-0458 §3.4). *)
+       (match
+          Keeper_runtime_failure_route.route_of_error
+            ~boundary:Keeper_runtime_failure_route.Agent_core_execution
+            error
+        with
+        | Keeper_runtime_failure_route.Retry_after_observed
+            { retry_class = Keeper_runtime_failure_route.Rate_limited; retry_after } ->
+          note_rate_limit retry_after
+        | Keeper_runtime_failure_route.Retry_after_observed
+            { retry_class = Keeper_runtime_failure_route.Hard_quota; retry_after } ->
+          note_quota retry_after
+        | Keeper_runtime_failure_route.Retry_after_observed
+            { retry_class = Keeper_runtime_failure_route.Server_error; retry_after = _ } ->
+          note_failed_attempt Runtime_candidate_backpressure.Server_error
+        | Keeper_runtime_failure_route.Retry_after_observed
+            { retry_class = Keeper_runtime_failure_route.Network_transient; retry_after = _ } ->
+          note_failed_attempt Runtime_candidate_backpressure.Network_transient
+        | Keeper_runtime_failure_route.Retry_after_observed
+            { retry_class = Keeper_runtime_failure_route.Provider_timeout; retry_after = _ } ->
+          if not expired_in_admission
+          then note_failed_attempt Runtime_candidate_backpressure.Provider_timeout
+        (* MASC's own slot and client envelope, not a fact about the candidate. *)
+        | Keeper_runtime_failure_route.Retry_after_observed
+            { retry_class = Keeper_runtime_failure_route.Capacity_backpressure; retry_after = _ } ->
+          ()
+        (* The candidate answered, badly; RFC-0458 §5 leaves these without
+           evidence until a measurement says otherwise. *)
+        | Keeper_runtime_failure_route.Rotate_now _ -> ()
+        (* The turn's input or MASC itself failed; another candidate would not
+           do better, so this is no evidence about this one. *)
+        | Keeper_runtime_failure_route.Exhausted_visible_alive _ -> ());
        (* Stable demotion retains every declared candidate, including when
           all are observed unavailable. Neither hint causes a wait or gate. *)
        let rest = demote_rest rest in
@@ -1594,6 +1714,7 @@ let run_named
          never resolved is a dead head. *)
       | Resolved_runtime _ -> true
       | Missing_runtime _ -> false)
+    ~provider_answered:(fun (named : named_run_result) -> run_result_answered named.run_result)
     ~emit_runtime_manifest
     ~run_attempt:(fun ~idx ~runtime_id:attempt_runtime_id candidate ->
       match candidate with
@@ -2265,6 +2386,8 @@ let run_named
 
 module For_testing = struct
   type nonrec provider_attempt_outcomes = provider_attempt_outcomes
+
+  let run_result_answered = run_result_answered
 
   let make_deferred_runtime_lane ~assignment_id ~failed_runtime_id
         ~next_runtime_id ~later_runtime_ids ~failure =

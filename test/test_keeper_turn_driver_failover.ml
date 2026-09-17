@@ -2425,8 +2425,12 @@ let test_http_429_preserves_unknown_scope_and_fallback () =
        | Error error -> Alcotest.failf "fallback failed: %s" (Agent_core.Error.to_string error));
       List.iter (fun id ->
         (match observed_candidate id with
-         | Some (Runtime_candidate_backpressure.Unknown_scope_rate_limit { retry_after = None; _ }) -> ()
-         | Some (Runtime_candidate_backpressure.Unknown_scope_rate_limit _) | None ->
+         | Some
+             { Runtime_candidate_backpressure.rate_limit =
+                 Some (Runtime_candidate_backpressure.Unknown_scope_rate_limit { retry_after = None; _ })
+             ; failed_attempt = None
+             } -> ()
+         | Some _ | None ->
            Alcotest.fail "rate limit must retain unknown scope and absent hint");
         let scope = Option.get (Runtime.quota_scope_of_runtime_id id) in
         Alcotest.(check bool) "no credential quota inferred" false
@@ -2462,9 +2466,13 @@ let test_rate_limit_order_never_excludes_and_success_clears () =
     Alcotest.(check bool) "success clears even an unexpired hint" true
       (Option.is_none (observed_candidate "shared_b.test_model"));
     match observed_candidate "shared_a.test_model" with
-    | Some (Runtime_candidate_backpressure.Unknown_scope_rate_limit { retry_after = Some seconds; _ }) ->
+    | Some
+        { Runtime_candidate_backpressure.rate_limit =
+            Some (Runtime_candidate_backpressure.Unknown_scope_rate_limit { retry_after = Some seconds; _ })
+        ; failed_attempt = _
+        } ->
         Alcotest.(check (float 0.)) "actual HTTP header survives driver ingress" 300. seconds
-    | Some (Runtime_candidate_backpressure.Unknown_scope_rate_limit _) | None ->
+    | Some _ | None ->
         Alcotest.fail "actual Retry-After hint was lost")
 ;;
 
@@ -2503,6 +2511,233 @@ let describe_dispatch ~now = function
       (match wait with
        | Driver.Capacity_release -> "capacity"
        | Driver.Path_release -> "path")
+;;
+
+let failed_attempt_of runtime_id =
+  match observed_candidate runtime_id with
+  | Some
+      { Runtime_candidate_backpressure.failed_attempt =
+          Some (Runtime_candidate_backpressure.Failed_attempt { failure; noted_at = _ })
+      ; rate_limit = _
+      } -> Some failure
+  | Some { Runtime_candidate_backpressure.failed_attempt = None; rate_limit = _ } | None -> None
+;;
+
+let attempt_failure : Runtime_candidate_backpressure.attempt_failure option Alcotest.testable =
+  Alcotest.testable
+    (fun fmt failure ->
+       Format.pp_print_string fmt
+         (match failure with
+          | None -> "none"
+          | Some Runtime_candidate_backpressure.Server_error -> "server_error"
+          | Some Runtime_candidate_backpressure.Network_transient -> "network_transient"
+          | Some Runtime_candidate_backpressure.Provider_timeout -> "provider_timeout"))
+    ( = )
+;;
+
+let walk_once ?provider_answered outcomes ids =
+  Driver.For_testing.attempt_runtime_candidates
+    ?provider_answered
+    ~runtime_id:"quota_lane" ~runtime_id_of:Fun.id
+    ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+    ~run_attempt:(fun ~idx:_ ~runtime_id _ -> attempt_without_effect (outcomes runtime_id) None)
+    ids
+;;
+
+(* RFC-0458 §3.4: a timeout, a server error and a network failure leave the
+   same kind of evidence a 429 does, carry no time and make no dispatch wait,
+   and an answer from that candidate clears it. Before, the driver recorded
+   only 429, 402 and HardQuota, and the next turn led with the dead head. *)
+let test_failed_attempts_demote_until_the_candidate_answers () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    reset_quota_lane_rests ();
+    Fun.protect ~finally:reset_quota_lane_rests (fun () ->
+      let ids = ["shared_a.test_model"; "shared_b.test_model"; "other.test_model"] in
+      let result =
+        walk_once
+          (function
+            | "shared_a.test_model" ->
+              Error (Agent_core.Error.Api
+                (Agent_core.Retry.Timeout { message = "no first token"; phase = None }))
+            | "shared_b.test_model" ->
+              Error (Agent_core.Error.Api
+                (Agent_core.Retry.ServerError { status = 503; message = "unavailable" }))
+            | "other.test_model" -> Ok ()
+            | other -> Alcotest.failf "unexpected candidate %s" other)
+          ids
+      in
+      (match result with
+       | Ok () -> ()
+       | Error error -> Alcotest.failf "fallback failed: %s" (Agent_core.Error.to_string error));
+      Alcotest.check attempt_failure "a timeout is evidence"
+        (Some Runtime_candidate_backpressure.Provider_timeout) (failed_attempt_of "shared_a.test_model");
+      Alcotest.check attempt_failure "a server error is evidence"
+        (Some Runtime_candidate_backpressure.Server_error) (failed_attempt_of "shared_b.test_model");
+      Alcotest.check attempt_failure "the candidate that answered holds none"
+        None (failed_attempt_of "other.test_model");
+      Alcotest.(check (list string)) "the next walk leads with the candidate that answered"
+        ["other.test_model"; "shared_a.test_model"; "shared_b.test_model"]
+        (backpressure_order ids);
+      let now = Unix.gettimeofday () in
+      List.iter
+        (fun id ->
+           match Driver.path_rest ~now id with
+           | Driver.Path_serving -> ()
+           | Driver.Path_resting _ -> Alcotest.failf "%s: a failed attempt made the path rest" id)
+        ["shared_a.test_model"; "shared_b.test_model"];
+      let (_ : (unit, Agent_core.Error.t) result) =
+        walk_once
+          (function
+            | "shared_a.test_model" -> Ok ()
+            | other -> Alcotest.failf "unexpected candidate %s" other)
+          ["shared_a.test_model"]
+      in
+      Alcotest.check attempt_failure "an answer clears the timeout"
+        None (failed_attempt_of "shared_a.test_model");
+      Alcotest.(check (list string)) "the answered candidate returns to its declared place"
+        ["shared_a.test_model"; "other.test_model"; "shared_b.test_model"]
+        (backpressure_order ids)))
+;;
+
+(* The evidence follows the failure route. A closed runtime connection is
+   routed as a server error, so it is evidence; MASC's own capacity, a
+   candidate that answered badly, and a failure of the turn's input are not
+   facts about the candidate. *)
+let test_only_the_candidates_own_failures_are_evidence () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    reset_quota_lane_rests ();
+    Fun.protect ~finally:reset_quota_lane_rests (fun () ->
+      let one id error =
+        let (_ : (unit, Agent_core.Error.t) result) =
+          walk_once (fun _ -> Error error) [id]
+        in
+        failed_attempt_of id
+      in
+      Alcotest.check attempt_failure "a closed runtime connection"
+        (Some Runtime_candidate_backpressure.Server_error)
+        (one "shared_a.test_model"
+           (Keeper_internal_error.core_error_of_masc_internal_error
+              (Keeper_internal_error.Runtime_connection_closed
+                 { runtime_id = "shared_a.test_model"; detail = "stdout closed"; turn_accepted = true })));
+      Alcotest.check attempt_failure "a network failure"
+        (Some Runtime_candidate_backpressure.Network_transient)
+        (one "shared_b.test_model" (retryable_network_error "connection refused"));
+      reset_quota_lane_rests ();
+      Alcotest.check attempt_failure "a provider that sent no first token"
+        (Some Runtime_candidate_backpressure.Provider_timeout)
+        (one "shared_a.test_model"
+           (Agent_core.Error.Provider
+              (Llm_provider.Error.Timeout
+                 { provider = "shared_a"
+                 ; timeout_phase = Some Llm_provider.Http_client.First_token
+                 ; detail = "no first token"
+                 })));
+      reset_quota_lane_rests ();
+      List.iter
+        (fun (label, error) ->
+           Alcotest.check attempt_failure label None (one "other.test_model" error);
+           Alcotest.(check bool) (label ^ " leaves no rate limit either") true
+             (Option.is_none (observed_candidate "other.test_model")))
+        [ "a permit that MASC's own queue never granted"
+        , Agent_core.Error.Provider
+            (Llm_provider.Error.Timeout
+               { provider = "other"
+               ; timeout_phase = Some Llm_provider.Http_client.Queue
+               ; detail = "no admission permit"
+               })
+        ; "local capacity that expired before sending"
+        , Agent_core.Error.Api
+            (Agent_core.Retry.Timeout
+               { message = "capacity"; phase = Some Llm_provider.Http_client.Capacity_backpressure })
+        ; "provider overload is MASC-side capacity"
+        , Agent_core.Error.Api (Agent_core.Retry.Overloaded { message = "overloaded" })
+        ; "a model the provider does not know rotates"
+        , Agent_core.Error.Api (Agent_core.Retry.NotFound { message = "no such model" })
+        ; "a context overflow is the turn's input"
+        , Agent_core.Error.Api
+            (Agent_core.Retry.ContextOverflow { message = "too long"; limit = None })
+        ]))
+;;
+
+(* An attempt that yielded before its first token never heard from the
+   candidate, so it must not clear evidence that it was down. *)
+let test_a_yield_before_the_first_token_clears_no_evidence () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    reset_quota_lane_rests ();
+    Fun.protect ~finally:reset_quota_lane_rests (fun () ->
+      let id = "shared_a.test_model" in
+      let runtime = Option.get (Runtime.get_runtime_by_id id) in
+      Runtime_candidate_backpressure.note_failed_attempt
+        ~candidate:runtime.candidate_backpressure
+        ~failure:Runtime_candidate_backpressure.Provider_timeout;
+      Runtime_candidate_backpressure.note_rate_limit
+        ~candidate:runtime.candidate_backpressure ~retry_after:None;
+      let scope = Option.get (Runtime.quota_scope_of_runtime_id id) in
+      Runtime_quota_window.note_observed_exhausted ~scope;
+      let (_ : (unit, Agent_core.Error.t) result) =
+        walk_once ~provider_answered:(fun () -> false) (fun _ -> Ok ()) [id]
+      in
+      Alcotest.(check bool) "the observed quota survives the yield" true
+        (Runtime_quota_window.is_exhausted ~scope ~now:(Unix.gettimeofday ()));
+      Alcotest.check attempt_failure "the timeout survives the yield"
+        (Some Runtime_candidate_backpressure.Provider_timeout) (failed_attempt_of id);
+      Alcotest.(check bool) "the rate limit survives the yield" true
+        (match observed_candidate id with
+         | Some { Runtime_candidate_backpressure.rate_limit = Some _; failed_attempt = _ } -> true
+         | Some { Runtime_candidate_backpressure.rate_limit = None; failed_attempt = _ } | None -> false)))
+;;
+
+(* The review of this change found a failed path waiting for a resting one:
+   with the failed attempt behind a path told to rest, the next dispatch waited
+   for that head's release though the failed path could serve now. *)
+let test_a_path_that_only_failed_walks_before_one_told_to_rest () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    reset_quota_lane_rests ();
+    Fun.protect ~finally:reset_quota_lane_rests (fun () ->
+      let resting = "shared_a.test_model" and failed = "other.test_model" in
+      Runtime_quota_window.note_observed_exhausted
+        ~scope:(Option.get (Runtime.quota_scope_of_runtime_id resting));
+      Runtime_candidate_backpressure.note_failed_attempt
+        ~candidate:(quota_lane_candidate failed)
+        ~failure:Runtime_candidate_backpressure.Provider_timeout;
+      Alcotest.(check (list string)) "the failed path walks before the resting one"
+        [ failed; resting ]
+        (backpressure_order [ resting; failed ]);
+      let now = Unix.gettimeofday () in
+      Alcotest.(check string) "and the next dispatch goes to it now"
+        ("dispatch " ^ failed)
+        (describe_dispatch ~now
+           (Driver.next_dispatch_after_failure ~now ~route:rate_limited_route
+              ~assignment_id:"quota_lane" (Some (quota_lane_suffix [ resting; failed ]))))))
+;;
+
+(* 402 still records through the route: the credential's quota window. *)
+let test_payment_required_still_exhausts_the_quota_scope () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    reset_quota_lane_rests ();
+    Fun.protect ~finally:reset_quota_lane_rests (fun () ->
+      let id = "other.test_model" in
+      let (_ : (unit, Agent_core.Error.t) result) =
+        walk_once
+          (fun _ -> Error (Agent_core.Error.Api (Agent_core.Retry.PaymentRequired { message = "pay" })))
+          [ id ]
+      in
+      Alcotest.(check bool) "the quota scope is exhausted" true
+        (Runtime_quota_window.is_exhausted
+           ~scope:(Option.get (Runtime.quota_scope_of_runtime_id id))
+           ~now:(Unix.gettimeofday ()))))
+;;
+
+let test_the_production_answer_test_reads_provider_turns () =
+  let yielded = Runtime_agent.yielded_pre_first_token ~session_id:"session" in
+  Alcotest.(check bool) "a pre-first-token yield did not hear the candidate" false
+    (Driver.For_testing.run_result_answered yielded);
+  Alcotest.(check bool) "a yield after a provider turn did" true
+    (Driver.For_testing.run_result_answered
+       { yielded with stop_reason = Runtime_agent.Yielded_to_durable_stimulus { turns_used = 1 } });
+  Alcotest.(check bool) "a completed run did" true
+    (Driver.For_testing.run_result_answered
+       { yielded with stop_reason = Runtime_agent.Completed })
 ;;
 
 (* RFC-provider-path-rest §3.3 and #34653: the head of a deferred suffix in
@@ -4165,6 +4400,18 @@ let () =
             test_http_429_preserves_unknown_scope_and_fallback;
           Alcotest.test_case "rate limit never excludes and success clears" `Quick
             test_rate_limit_order_never_excludes_and_success_clears;
+          Alcotest.test_case "failed attempts demote until the candidate answers" `Quick
+            test_failed_attempts_demote_until_the_candidate_answers;
+          Alcotest.test_case "only the candidate's own failures are evidence" `Quick
+            test_only_the_candidates_own_failures_are_evidence;
+          Alcotest.test_case "a yield before the first token clears no evidence" `Quick
+            test_a_yield_before_the_first_token_clears_no_evidence;
+          Alcotest.test_case "the production answer test reads provider turns" `Quick
+            test_the_production_answer_test_reads_provider_turns;
+          Alcotest.test_case "a path that only failed walks before one told to rest" `Quick
+            test_a_path_that_only_failed_walks_before_one_told_to_rest;
+          Alcotest.test_case "402 still exhausts the quota scope" `Quick
+            test_payment_required_still_exhausts_the_quota_scope;
           Alcotest.test_case "a deferred suffix waits only while its walk head rests" `Quick
             test_a_deferred_suffix_waits_only_while_its_walk_head_rests;
           Alcotest.test_case "a failure without a suffix waits until a fresh walk head serves"

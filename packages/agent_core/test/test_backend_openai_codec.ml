@@ -269,6 +269,72 @@ let parse_empty json : Parse.empty_completion =
   | Ok _ -> Alcotest.fail "expected Empty_completion, got Ok"
 ;;
 
+let parse_provider_error label body =
+  match Parse.parse_openai_response_result body with
+  | Error (Parse.Provider_error { message; error_type; provider_status }) ->
+    message, error_type, provider_status
+  | Error (Parse.Unreadable_response reason) ->
+    Alcotest.failf "%s: read as unreadable (%s)" label reason
+  | Error (Parse.Empty_completion _) ->
+    Alcotest.failf "%s: read as an empty completion" label
+  | Ok _ -> Alcotest.failf "%s: read as a completed response" label
+;;
+
+let declared_status (provider_status : provider_status option) =
+  Option.map (fun (declared : provider_status) -> declared.status) provider_status
+;;
+
+(* A 200 whose choice finished with "error" is the provider failing, not a
+   stop reason (OpenRouter's normalized finish_reason vocabulary). *)
+let test_parse_error_finish_is_a_provider_error () =
+  let message, _, provider_status =
+    parse_provider_error
+      "choice error"
+      {|{"id":"c","model":"m","choices":[{"index":0,"finish_reason":"error","message":{"content":"partial"},"error":{"code":502,"message":"Provider disconnected"}}]}|}
+  in
+  check_string "message" "Provider disconnected" message;
+  Alcotest.(check (option int)) "declared status" (Some 502) (declared_status provider_status);
+  Alcotest.(check (option string))
+    "the body is the choice's error object alone"
+    (Some {|{"error":{"code":502,"message":"Provider disconnected"}}|})
+    (Option.map (fun (declared : provider_status) -> declared.error_body) provider_status);
+  let _, _, provider_status =
+    parse_provider_error
+      "no error object"
+      {|{"id":"c","model":"m","choices":[{"index":0,"finish_reason":"error","message":{"content":"partial"}}]}|}
+  in
+  Alcotest.(check (option int)) "no status to read" None (declared_status provider_status)
+;;
+
+let test_parse_top_level_error_declares_status () =
+  let message, error_type, provider_status =
+    parse_provider_error
+      "top-level error"
+      {|{"error":{"code":429,"message":"rate limited","metadata":{"error_type":"rate_limit_exceeded"}}}|}
+  in
+  check_string "message" "rate limited" message;
+  Alcotest.(check (option string))
+    "OpenRouter's metadata error_type"
+    (Some "rate_limit_exceeded")
+    error_type;
+  Alcotest.(check (option int)) "declared status" (Some 429) (declared_status provider_status);
+  let message, _, provider_status =
+    parse_provider_error "string code" {|{"error":{"code":"1261","message":"Prompt exceeds max length"}}|}
+  in
+  check_string "message" "Prompt exceeds max length" message;
+  Alcotest.(check (option int))
+    "a vendor code declares no status"
+    None
+    (declared_status provider_status);
+  let _, _, provider_status =
+    parse_provider_error "4xx code" {|{"error":{"code":403,"message":"moderation"}}|}
+  in
+  Alcotest.(check (option int))
+    "a 4xx is not a provider condition"
+    None
+    (declared_status provider_status)
+;;
+
 let test_parse_reasoning_content_and_tool_calls_coexist () =
   (* 2025-2026 providers (DeepSeek, Kimi, Qwen, MiMo) return reasoning_content
      alongside tool_calls. Both must survive parsing into [content]: the
@@ -2948,7 +3014,11 @@ let () =
             test_parallel_tool_calls_fields
         ] )
     ; ( "parse"
-      , [ Alcotest.test_case "usage fallbacks" `Quick test_usage_openai_fallbacks
+      , [ Alcotest.test_case "an error finish is a provider error" `Quick
+            test_parse_error_finish_is_a_provider_error
+        ; Alcotest.test_case "a top-level error declares its status" `Quick
+            test_parse_top_level_error_declares_status
+        ; Alcotest.test_case "usage fallbacks" `Quick test_usage_openai_fallbacks
         ; Alcotest.test_case
             "text list reasoning and reported telemetry"
             `Quick

@@ -190,7 +190,16 @@ let rec mkdir_p p =
     try Unix.mkdir p 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
   end
 
-let ensure_parent_dir path = mkdir_p (Filename.dirname path)
+(* [store_addressed] fixes one failure contract for every way a put can fail:
+   the atomic replacement already raises [Sys_error], so a parent directory it
+   cannot create must not escape as a raw [Unix.Unix_error] only because it
+   failed earlier. Same convention as [Fs_compat]'s one-catch normalization. *)
+let ensure_parent_dir path =
+  try mkdir_p (Filename.dirname path) with
+  | Unix.Unix_error (code, fn, arg) ->
+    raise
+      (Sys_error
+         (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)))
 
 let fetch t ~sha256 =
   match validate_sha256 sha256 with

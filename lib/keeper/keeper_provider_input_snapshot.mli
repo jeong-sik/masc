@@ -131,3 +131,12 @@ type payload =
 (** The canonical message encoding as the snapshot stores it, with its
     digest. Pure; safe on any domain. *)
 val message_payload : Agent_core.Types.message -> payload
+
+(** The tool schema encoding as the snapshot stores it, with its digest. Pure;
+    safe on any domain. *)
+val tool_schema_payload : Agent_core.Tool.t -> payload
+
+(** The system prompt bytes as the snapshot stores them, with their digest.
+    [None] for an empty prompt, which the snapshot records as absent. Pure;
+    safe on any domain. *)
+val system_prompt_payload : string -> payload option

@@ -1239,6 +1239,12 @@ let run_turn
     let request_wire_evidence_ref : request_wire_evidence option ref =
       ref None
     in
+    (* What the next provider request of this keeper turn is compared against.
+       Not cleared per runtime attempt: each row names its runtime profile, so
+       a lane switch between two requests stays visible in the rows. *)
+    let previous_request_projection_ref =
+      ref Keeper_projection_change.No_request_yet
+    in
     (* Kept apart from the evidence cells rather than folded into them: the
        window cut is observed before serialization, so a turn whose request was
        refused at the wire has a real cut and no wire observation. Sharing one
@@ -1670,7 +1676,36 @@ let run_turn
                              ; wire_tools = request_tools
                              }
                            in
-                           request_wire_evidence_ref := Some wire_evidence)
+                           request_wire_evidence_ref := Some wire_evidence;
+                           (* The provider content, not the projected list:
+                              AGENT_CORE appends the extra-system-context
+                              carrier after the history of every request, so
+                              when a request only extends the history, the
+                              previous request's carrier sits where the new
+                              history starts and every comparison would report
+                              a rewrite at that position. *)
+                           previous_request_projection_ref
+                           := (if not (Keeper_wire_capture.enabled ())
+                               then Keeper_projection_change.Request_not_digested
+                               else
+                                 match !current_request_provider_content_ref with
+                                 | Some (Ok provider_content) ->
+                                   Keeper_wire_capture
+                                   .capture_request_projection_change
+                                     ~masc_root:(Workspace.masc_root_dir config)
+                                     ~keeper_name:meta.name
+                                     ~turn_id:manifest_keeper_turn_id
+                                     ~agent_core_turn:acc.current_turn
+                                     ~trace_id:meta.runtime.trace_id
+                                     ~runtime_profile:runtime_id
+                                     ~previous:!previous_request_projection_ref
+                                     ~system_prompt:
+                                       (Inference_utils.sanitize_text_utf8
+                                          turn_system_prompt)
+                                     ~tools:request_tools
+                                     ~messages:provider_content
+                                 | Some (Error _) | None ->
+                                   Keeper_projection_change.Request_not_digested))
                       ~on_official_client_result_handoff:
                         s.Keeper_run_tools.observe_official_client_result_handoff
                       ~on_official_client_native_action:

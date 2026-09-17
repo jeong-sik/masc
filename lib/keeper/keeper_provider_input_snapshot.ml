@@ -403,6 +403,10 @@ let tool_schema_payload (tool : Agent_core.Tool.t) =
   Agent_core.Tool.schema_to_json tool |> Yojson.Safe.to_string |> payload_of_string
 ;;
 
+let system_prompt_payload system_prompt =
+  if String.equal system_prompt "" then None else Some (payload_of_string system_prompt)
+;;
+
 let store_artifact store ~reusable ~mime { payload_bytes = bytes; payload_sha256 = sha256 } =
   let bytes_length = String.length bytes in
   match Artifact_map.find_opt (sha256, mime) reusable with
@@ -437,7 +441,7 @@ let write_best_effort
        this fiber, which owns the file I/O. *)
     let system_payload, message_payloads, tool_payloads =
       Domain_pool_ref.submit_cpu_or_inline (fun () ->
-        ( (if String.equal system_prompt "" then None else Some (payload_of_string system_prompt))
+        ( system_prompt_payload system_prompt
         , List.map message_payload messages
         , List.map tool_schema_payload tools ))
     in

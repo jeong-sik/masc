@@ -1,0 +1,252 @@
+open Alcotest
+open Masc
+
+module Change = Keeper_projection_change
+module Snapshot = Keeper_provider_input_snapshot
+
+let user text = Agent_core.Types.text_message Agent_core.Types.User text
+let assistant text = Agent_core.Types.text_message Agent_core.Types.Assistant text
+
+let tool name =
+  Agent_core.Tool.create
+    ~name
+    ~description:"fixture tool"
+    ~parameters:[]
+    (fun _ -> Ok { Agent_core.Types.content = "ok"; content_blocks = None; _meta = None })
+;;
+
+let fixture_system_prompt = "fixture system prompt"
+let fixture_tools = [ tool "masc_status" ]
+
+let digest ?(system_prompt = fixture_system_prompt) ?(tools = fixture_tools) messages =
+  Change.digest_request ~system_prompt ~tools ~messages
+;;
+
+let numbered label count =
+  List.init count (fun index -> user (Printf.sprintf "%s-%d" label index))
+;;
+
+let render change = Yojson.Safe.to_string (Change.change_to_json change)
+
+let payload_bytes message =
+  String.length (Snapshot.message_payload message).Snapshot.payload_bytes
+;;
+
+(* Compares two message lists under the fixture system prompt and tools, and
+   checks the whole change, flags included, through its JSON rendering. *)
+let check_messages label ~previous ~current expected =
+  let actual =
+    Change.compare_requests
+      ~previous:(Change.Request_digested (digest previous))
+      ~current:(digest current)
+  in
+  check
+    string
+    label
+    (render
+       (Change.Follows_previous_request
+          { messages = expected; system_prompt_changed = false; tools_changed = false }))
+    (render actual)
+;;
+
+let test_first_request_of_turn () =
+  let change =
+    Change.compare_requests ~previous:Change.No_request_yet ~current:(digest [ user "a" ])
+  in
+  check string "no earlier request" (render Change.First_request_of_turn) (render change)
+;;
+
+let test_previous_request_not_digested () =
+  let change =
+    Change.compare_requests
+      ~previous:Change.Request_not_digested
+      ~current:(digest [ user "a" ])
+  in
+  check
+    string
+    "an undigested request is not skipped over"
+    (render Change.Previous_request_not_digested)
+    (render change)
+;;
+
+let test_appended () =
+  let history = [ user "a"; assistant "b" ] in
+  check_messages
+    "history extended"
+    ~previous:history
+    ~current:(history @ [ user "c"; assistant "d" ])
+    (Change.Appended { kept = 2; added = 2 });
+  check_messages
+    "identical list"
+    ~previous:history
+    ~current:history
+    (Change.Appended { kept = 2; added = 0 });
+  check_messages
+    "from an empty list"
+    ~previous:[]
+    ~current:history
+    (Change.Appended { kept = 0; added = 2 })
+;;
+
+let test_front_dropped () =
+  check_messages
+    "window moved past the oldest messages"
+    ~previous:[ user "a"; assistant "b"; user "c"; assistant "d" ]
+    ~current:[ user "c"; assistant "d"; user "e" ]
+    (Change.Front_dropped { dropped = 2; kept = 2; added = 1 });
+  check_messages
+    "a repeated message reports the smallest drop"
+    ~previous:[ user "a"; user "x"; user "x" ]
+    ~current:[ user "x"; user "x"; user "z" ]
+    (Change.Front_dropped { dropped = 1; kept = 2; added = 1 });
+  check_messages
+    "a shared first message reports the shared length, not a drop"
+    ~previous:[ user "x"; user "x"; user "y" ]
+    ~current:[ user "x"; user "y"; user "z" ]
+    (Change.Rewritten_at
+       { index = 1
+       ; previous_role = Agent_core.Types.User
+       ; previous_bytes = payload_bytes (user "x")
+       ; current_role = Agent_core.Types.User
+       ; current_bytes = payload_bytes (user "y")
+       ; previous_count = 3
+       ; current_count = 3
+       })
+;;
+
+let test_tail_removed () =
+  check_messages
+    "current list is a strict prefix"
+    ~previous:[ user "a"; assistant "b"; user "c" ]
+    ~current:[ user "a" ]
+    (Change.Tail_removed { kept = 1; removed = 2 })
+;;
+
+let test_rewritten_at () =
+  let previous_message = user "b" in
+  let current_message = assistant "b rewritten" in
+  check_messages
+    "first difference with both messages"
+    ~previous:[ user "a"; previous_message; user "c" ]
+    ~current:[ user "a"; current_message; user "c"; user "d" ]
+    (Change.Rewritten_at
+       { index = 1
+       ; previous_role = Agent_core.Types.User
+       ; previous_bytes = payload_bytes previous_message
+       ; current_role = Agent_core.Types.Assistant
+       ; current_bytes = payload_bytes current_message
+       ; previous_count = 3
+       ; current_count = 4
+       });
+  let rendered =
+    Change.compare_requests
+      ~previous:(Change.Request_digested (digest [ previous_message ]))
+      ~current:(digest [ current_message ])
+    |> Change.change_to_json
+  in
+  let messages = Yojson.Safe.Util.member "messages" rendered in
+  check
+    string
+    "roles are written as provider role names"
+    "assistant"
+    (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "current_role" messages))
+;;
+
+let flags change =
+  match change with
+  | Change.Follows_previous_request { system_prompt_changed; tools_changed; _ } ->
+    system_prompt_changed, tools_changed
+  | Change.First_request_of_turn | Change.Previous_request_not_digested ->
+    failf "expected a comparison, got %s" (render change)
+;;
+
+let test_system_prompt_and_tools_flags () =
+  let messages = [ user "a" ] in
+  let compare ~previous ~current =
+    Change.compare_requests ~previous:(Change.Request_digested previous) ~current |> flags
+  in
+  check
+    (pair bool bool)
+    "system prompt changed, tools same"
+    (true, false)
+    (compare
+       ~previous:(digest messages)
+       ~current:(digest ~system_prompt:"another system prompt" messages));
+  check
+    (pair bool bool)
+    "tools changed, system prompt same"
+    (false, true)
+    (compare
+       ~previous:(digest messages)
+       ~current:(digest ~tools:(fixture_tools @ [ tool "masc_board" ]) messages));
+  check
+    (pair bool bool)
+    "tool order is part of the prefix"
+    (false, true)
+    (compare
+       ~previous:(digest ~tools:[ tool "masc_status"; tool "masc_board" ] messages)
+       ~current:(digest ~tools:[ tool "masc_board"; tool "masc_status" ] messages));
+  check
+    (pair bool bool)
+    "flags do not follow the message change"
+    (true, true)
+    (compare
+       ~previous:(digest [ user "x" ])
+       ~current:(digest ~system_prompt:"" ~tools:[] [ user "y" ]))
+;;
+
+let long_count = 6_000
+
+let test_long_lists () =
+  let history = numbered "history" long_count in
+  check_messages
+    "long distinct history dropped at the front"
+    ~previous:history
+    ~current:(List.filteri (fun index _ -> index >= 1_500) history @ numbered "new" 20)
+    (Change.Front_dropped { dropped = 1_500; kept = long_count - 1_500; added = 20 });
+  let same = List.init long_count (fun _ -> user "same") in
+  check_messages
+    "long repeated history dropped at the front"
+    ~previous:(user "oldest" :: same)
+    ~current:(same @ [ user "newest" ])
+    (Change.Front_dropped { dropped = 1; kept = long_count; added = 1 });
+  check_messages
+    "long repeated history rewritten at the tail"
+    ~previous:(same @ [ user "a" ])
+    ~current:(same @ [ user "b" ])
+    (Change.Rewritten_at
+       { index = long_count
+       ; previous_role = Agent_core.Types.User
+       ; previous_bytes = payload_bytes (user "a")
+       ; current_role = Agent_core.Types.User
+       ; current_bytes = payload_bytes (user "b")
+       ; previous_count = long_count + 1
+       ; current_count = long_count + 1
+       })
+;;
+
+let () =
+  Alcotest.run
+    "keeper projection change"
+    [ ( "turn boundary"
+      , [ test_case "first request of a turn" `Quick test_first_request_of_turn
+        ; test_case
+            "a request without digests is not compared across"
+            `Quick
+            test_previous_request_not_digested
+        ] )
+    ; ( "message change"
+      , [ test_case "appended" `Quick test_appended
+        ; test_case "front dropped" `Quick test_front_dropped
+        ; test_case "tail removed" `Quick test_tail_removed
+        ; test_case "rewritten at" `Quick test_rewritten_at
+        ; test_case "long lists" `Quick test_long_lists
+        ] )
+    ; ( "prefix parts"
+      , [ test_case
+            "system prompt and tools flags"
+            `Quick
+            test_system_prompt_and_tools_flags
+        ] )
+    ]
+;;

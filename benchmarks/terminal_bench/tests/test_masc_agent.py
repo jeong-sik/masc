@@ -25,6 +25,7 @@ class FakeEnv:
         self.exec_kwargs = []
         self.uploads = []
         self.default_user = None
+        self.machine = "x86_64"
 
     async def upload_file(self, src, dst):
         self.uploads.append(("file", str(src), dst))
@@ -35,6 +36,8 @@ class FakeEnv:
     async def exec(self, command, **kw):
         self.commands.append(command)
         self.exec_kwargs.append(kw)
+        if command.endswith("uname -m"):
+            return FakeResult(f"{self.machine}\n")
         if "cat /opt/masc-bench/result.json" in command:
             return FakeResult('{"state":"Succeeded","duration_ms":1234,'
                               '"tool_calls":17,"duplicate_tool_calls":2,"final":{}}')
@@ -44,9 +47,16 @@ class FakeEnv:
 @pytest.fixture(autouse=True)
 def _provider_key(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    # run_episode.sh seeds the keeper's gh hosts.yml from this and then calls
-    # keeper_up, whose remote_ssh preflight refuses without a gh identity.
-    monkeypatch.setenv("GH_TOKEN", "test-gh-token")
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+
+
+def fake_bench(tmp_path, dist_dir="linux-x64", names=("masc", "masc-exec-shim")):
+    root = tmp_path / "bench"
+    (root / "dist" / dist_dir).mkdir(parents=True)
+    for name in names:
+        (root / "dist" / dist_dir / name).write_text("")
+    (root / "driver").mkdir()
+    return root
 
 
 def make_agent(tmp_path, **kw):
@@ -69,11 +79,7 @@ def test_install_uploads_binary_driver_config(tmp_path, monkeypatch):
     # side effect. Same fixture shape as the vendored-gh test below.
     import agents.masc_agent as m
 
-    root = tmp_path / "bench"
-    (root / "dist").mkdir(parents=True)
-    for name in ("masc", "masc-exec-shim"):
-        (root / "dist" / name).write_text("")
-    (root / "driver").mkdir()
+    root = fake_bench(tmp_path)
 
     async def go():
         monkeypatch.setattr(m, "BENCH_ROOT", root)
@@ -126,26 +132,64 @@ def test_claude_code_lane_requires_oauth_token(tmp_path, monkeypatch):
         a._container_env()
 
 
-def test_vendored_gh_is_uploaded_when_present(tmp_path, monkeypatch):
-    # deps.sh installs $BENCH/bin/gh system-wide when it is there; the
-    # keeper_up preflight runs `gh auth status` and debian stable has no gh
-    # package, so the vendored copy is what makes those base images work.
+def install_into(tmp_path, monkeypatch, root, env):
     import agents.masc_agent as m
 
-    async def go(root):
-        monkeypatch.setattr(m, "BENCH_ROOT", root)
-        a = make_agent(tmp_path, arm="b")
-        env = FakeEnv()
-        await a.install(env)
-        return env
+    monkeypatch.setattr(m, "BENCH_ROOT", root)
+    asyncio.run(make_agent(tmp_path, arm="b").install(env))
+    return {(src, dst) for kind, src, dst in env.uploads if kind == "file"}
 
-    root = tmp_path / "bench"
-    (root / "dist").mkdir(parents=True)
-    for name in ("masc", "masc-exec-shim", "gh"):
-        (root / "dist" / name).write_text("")
-    (root / "driver").mkdir()
-    env = asyncio.run(go(root))
-    assert ("file", "/opt/masc-bench/bin/gh") in [(k, d) for k, _, d in env.uploads]
+
+def test_gh_is_uploaded_only_for_a_run_that_gives_a_github_login(tmp_path, monkeypatch):
+    root = fake_bench(tmp_path, names=("masc", "masc-exec-shim", "gh"))
+    gh = (str(root / "dist" / "linux-x64" / "gh"), "/opt/masc-bench/bin/gh")
+    assert gh not in install_into(tmp_path, monkeypatch, root, FakeEnv())
+    monkeypatch.setenv("GH_TOKEN", "test-gh-token")
+    assert gh in install_into(tmp_path, monkeypatch, root, FakeEnv())
+
+
+# --- the binaries follow the task container's architecture -----------------
+#
+# Harbor builds a 4.0 task image for the Docker daemon's architecture, so on
+# Apple Silicon the task container is arm64 and an amd64 masc cannot start in
+# it. A single-architecture base image still runs amd64, emulated.
+
+
+def test_an_arm64_container_gets_the_arm64_binaries(tmp_path, monkeypatch):
+    root = fake_bench(tmp_path, dist_dir="linux-arm64")
+    # Both architectures fetched, as fetch_masc.sh leaves them.
+    (root / "dist" / "linux-x64").mkdir()
+    for name in ("masc", "masc-exec-shim"):
+        (root / "dist" / "linux-x64" / name).write_text("")
+    env = FakeEnv()
+    env.machine = "aarch64"
+    uploads = install_into(tmp_path, monkeypatch, root, env)
+    assert uploads >= {
+        (str(root / "dist" / "linux-arm64" / "masc"), "/opt/masc-bench/bin/masc"),
+        (str(root / "dist" / "linux-arm64" / "masc-exec-shim"),
+         "/opt/masc-bench/bin/masc-exec-shim"),
+    }
+
+
+def test_an_amd64_container_gets_the_x64_binaries(tmp_path, monkeypatch):
+    root = fake_bench(tmp_path, dist_dir="linux-x64")
+    uploads = install_into(tmp_path, monkeypatch, root, FakeEnv())
+    assert (str(root / "dist" / "linux-x64" / "masc"), "/opt/masc-bench/bin/masc") in uploads
+
+
+def test_a_container_architecture_without_a_release_is_refused_by_name(tmp_path, monkeypatch):
+    env = FakeEnv()
+    env.machine = "ppc64le"
+    with pytest.raises(RuntimeError, match="ppc64le"):
+        install_into(tmp_path, monkeypatch, fake_bench(tmp_path), env)
+    assert env.uploads == []
+
+
+def test_a_missing_architecture_names_the_fetch_step(tmp_path, monkeypatch):
+    env = FakeEnv()
+    env.machine = "aarch64"
+    with pytest.raises(RuntimeError, match="fetch_masc.sh"):
+        install_into(tmp_path, monkeypatch, fake_bench(tmp_path, dist_dir="linux-x64"), env)
 
 
 # --- episode cost ----------------------------------------------------------
@@ -234,12 +278,12 @@ def test_a_missing_cache_class_does_not_zero_the_rest(tmp_path, monkeypatch):
     assert context.cost_usd == pytest.approx(1000 * 2e-06 + 100 * 1e-05)
 
 
-def test_the_env_refuses_without_a_github_credential(tmp_path, monkeypatch):
-    """keeper_up refuses a remote_ssh keeper with no gh identity, and
-    run_episode.sh calls it under set -e: the credential is named here."""
-    monkeypatch.delenv("GH_TOKEN", raising=False)
-    with pytest.raises(RuntimeError, match="GH_TOKEN"):
-        make_agent(tmp_path)._container_env()
+def test_an_episode_runs_without_a_github_credential(tmp_path, monkeypatch):
+    """The remote_ssh preflight checks a GitHub login only for an endpoint that
+    has one (#35412), and a token given here reaches every task container."""
+    assert "GH_TOKEN" not in make_agent(tmp_path)._container_env()
+    monkeypatch.setenv("GH_TOKEN", "test-gh-token")
+    assert make_agent(tmp_path)._container_env()["GH_TOKEN"] == "test-gh-token"
 
 
 # --- harbor's agent timeout is the only bound on an episode ----------------
@@ -274,11 +318,7 @@ def test_the_container_env_names_no_episode_deadline(tmp_path):
 def test_bootstrap_is_bounded_by_harbor_setup_timeout_alone(tmp_path, monkeypatch):
     import agents.masc_agent as m
 
-    root = tmp_path / "bench"
-    (root / "dist").mkdir(parents=True)
-    for name in ("masc", "masc-exec-shim"):
-        (root / "dist" / name).write_text("")
-    (root / "driver").mkdir()
+    root = fake_bench(tmp_path)
     monkeypatch.setattr(m, "BENCH_ROOT", root)
     env = FakeEnv()
     asyncio.run(make_agent(tmp_path, arm="b").install(env))

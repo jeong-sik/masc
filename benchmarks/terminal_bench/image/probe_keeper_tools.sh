@@ -19,7 +19,14 @@ set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 BENCH_DIR="$(dirname "$HERE")"
 IMAGE="${PROBE_IMAGE:-ubuntu:24.04}"
-PLATFORM="${PROBE_PLATFORM:-linux/amd64}"
+# The Docker daemon's own platform unless told otherwise: harbor builds task
+# images for it (agents/masc_dist.py), so that is what a task container runs.
+PLATFORM="${PROBE_PLATFORM:-$(docker version --format '{{.Server.Os}}/{{.Server.Arch}}')}"
+case "${PLATFORM}" in
+  linux/amd64) DIST_DIR="${BENCH_DIR}/dist/linux-x64" ;;
+  linux/arm64) DIST_DIR="${BENCH_DIR}/dist/linux-arm64" ;;
+  *) echo "no MASC release binary for platform ${PLATFORM}" >&2; exit 2 ;;
+esac
 RUNTIME_ID="${BENCH_RUNTIME_ID:-anthropic.claude-sonnet-5}"
 POOL="${BENCH_KEEPER_POOL:-bench-1}"
 KEEPER="${POOL%%,*}"
@@ -46,7 +53,7 @@ esac
 # the provider as an auth failure.
 key="${!key_env:-}"
 [[ -n "${key}" ]] || { echo "${key_env} is not set" >&2; exit 2; }
-[[ -x "${BENCH_DIR}/dist/masc" ]] || { echo "run image/fetch_masc.sh first" >&2; exit 2; }
+[[ -x "${DIST_DIR}/masc" ]] || { echo "run image/fetch_masc.sh first" >&2; exit 2; }
 
 cfg="${BENCH_DIR}/configs/out-probe"
 rm -rf "${cfg}"
@@ -84,7 +91,7 @@ docker run -d --name "${NAME}" --platform "${PLATFORM}" \
 # inode out from under a live mount. Both cost a run before this changed.
 docker exec "${NAME}" mkdir -p /opt/masc-bench/bin || { echo "STAGE_FAIL mkdir" >&2; exit 1; }
 for f in masc masc-exec-shim gh; do
-  [[ -f "${BENCH_DIR}/dist/${f}" ]] && docker cp "${BENCH_DIR}/dist/${f}" "${NAME}:/opt/masc-bench/bin/${f}"
+  [[ -f "${DIST_DIR}/${f}" ]] && docker cp "${DIST_DIR}/${f}" "${NAME}:/opt/masc-bench/bin/${f}"
 done
 docker cp "${BENCH_DIR}/driver" "${NAME}:/opt/masc-bench/driver"
 docker cp "${cfg}/k" "${NAME}:/opt/masc-bench/config"

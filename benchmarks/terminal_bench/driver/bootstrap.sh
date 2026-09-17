@@ -124,8 +124,8 @@ you are asked, verify it, and stop. Do not ask questions."
       IFS=',' read -r -a pool <<< "${BENCH_KEEPER_POOL}"
       pool_id=300
       for k in "${pool[@]}"; do
-        # remote_ssh preflight requires <remote_root>/<name> to exist, and it
-        # runs `gh auth status` against <keeper root>/.config/gh.
+        # remote_ssh preflight requires <remote_root>/<name> to exist. A GitHub
+        # identity only when GH_TOKEN is given (gh_seed.sh).
         mkdir -p "/root/${k}"
         seed_gh_hosts "${k}"
         pool_id=$((pool_id + 1))

@@ -83,6 +83,14 @@ let superseding_claim ?(claim = "B, corrected") supersedes () =
     ]
 ;;
 
+let absorbing_claim ?(claim = "A and B, together") absorbs () =
+  `Assoc
+    [ Librarian.wire_field_claim, `String claim
+    ; Librarian.wire_field_category, `String "fact"
+    ; Librarian.wire_field_absorbs, absorbs
+    ]
+;;
+
 let dropped_json ?(reason = "superseded by newer state") id =
   `Assoc
     [ Librarian.wire_field_memory_id, `String id
@@ -166,6 +174,85 @@ let test_supersedes_must_name_a_known_memory () =
   | Error error ->
     failf "wrong rejection: %s" (Librarian.parse_error_to_string error)
   | Ok _ -> fail "an unknown short id must be rejected"
+;;
+
+(* RFC-0456 §4.2: a new claim names the current memories it now says in
+   [absorbs]. They leave the facts like a drop, but as absorbed statements
+   pointing at the new claim, so their rows can be kept rather than lost. *)
+let test_absorbs_moves_the_named_memories_into_the_new_claim () =
+  match
+    parse
+      (selection_json
+         ~dropped:[]
+         ~new_claims:[ absorbing_claim (`List [ `String "m1"; `String "m2" ]) () ]
+         ())
+  with
+  | Error error -> failf "absorbs rejected: %s" (Librarian.parse_error_to_string error)
+  | Ok selection ->
+    let into = Memory.memory_id (fact ~claim:"A and B, together") in
+    check (list (pair string string)) "both current memories, each into the new claim"
+      [ current_a_id, into; current_b_id, into ]
+      (List.map
+         (fun (a : Memory.absorbed_statement) -> a.absorbed, a.into)
+         selection.absorbed);
+    check (list string) "only the new claim remains"
+      [ "A and B, together" ]
+      (List.map (fun (f : Memory.fact) -> f.claim) selection.facts);
+    check int "nothing was dropped" 0 (List.length selection.dropped)
+;;
+
+let expect_parse_error label expected json =
+  match parse json with
+  | Error error when error = expected -> ()
+  | Error error -> failf "%s: wrong rejection: %s" label (Librarian.parse_error_to_string error)
+  | Ok _ -> failf "%s: accepted" label
+;;
+
+let test_absorbs_must_not_name_a_dropped_memory () =
+  expect_parse_error "absorbing what the same answer drops"
+    (Librarian.Absorbs_dropped_memory_id current_b_id)
+    (selection_json ~new_claims:[ absorbing_claim (`List [ `String "m2" ]) () ] ())
+;;
+
+let test_absorbs_names_each_memory_once () =
+  expect_parse_error "two claims absorbing one memory"
+    (Librarian.Absorbs_memory_id_twice current_a_id)
+    (selection_json
+       ~dropped:[]
+       ~new_claims:
+         [ absorbing_claim ~claim:"A, one way" (`List [ `String "m1" ]) ()
+         ; absorbing_claim ~claim:"A, another way" (`List [ `String "m1" ]) ()
+         ]
+       ());
+  expect_parse_error "one list naming a memory twice"
+    (Librarian.Absorbs_memory_id_twice current_a_id)
+    (selection_json
+       ~dropped:[]
+       ~new_claims:[ absorbing_claim (`List [ `String "m1"; `String "m1" ]) () ]
+       ())
+;;
+
+let test_absorbs_must_name_a_known_memory () =
+  expect_parse_error "an unknown short id"
+    (Librarian.Absorbs_unknown_memory_id "m9")
+    (selection_json ~dropped:[] ~new_claims:[ absorbing_claim (`List [ `String "m9" ]) () ] ())
+;;
+
+let test_absorbs_must_be_a_list_of_short_ids () =
+  List.iter
+    (fun (label, absorbs) ->
+       expect_parse_error label Librarian.Claim_schema_mismatch
+         (selection_json ~dropped:[] ~new_claims:[ absorbing_claim absorbs () ] ()))
+    [ "a bare string", `String "m1"
+    ; "a number in the list", `List [ `Int 1 ]
+    ; "a blank id", `List [ `String "  " ]
+    ];
+  match
+    parse
+      (selection_json ~dropped:[] ~new_claims:[ absorbing_claim (`List []) () ] ())
+  with
+  | Error error -> failf "an empty absorbs rejected: %s" (Librarian.parse_error_to_string error)
+  | Ok selection -> check int "an empty list absorbs nothing" 0 (List.length selection.absorbed)
 ;;
 
 let test_supersedes_must_be_a_string_or_null () =
@@ -1240,6 +1327,16 @@ let () =
             test_supersedes_must_name_a_dropped_memory
         ; test_case "supersedes must name a known memory" `Quick
             test_supersedes_must_name_a_known_memory
+        ; test_case "absorbs moves the named memories into the new claim" `Quick
+            test_absorbs_moves_the_named_memories_into_the_new_claim
+        ; test_case "absorbs must not name a dropped memory" `Quick
+            test_absorbs_must_not_name_a_dropped_memory
+        ; test_case "absorbs names each memory once" `Quick
+            test_absorbs_names_each_memory_once
+        ; test_case "absorbs must name a known memory" `Quick
+            test_absorbs_must_name_a_known_memory
+        ; test_case "absorbs must be a list of short ids" `Quick
+            test_absorbs_must_be_a_list_of_short_ids
         ; test_case "supersedes must be a string or null" `Quick
             test_supersedes_must_be_a_string_or_null
         ; test_case "new claim names the board post it was read from" `Quick

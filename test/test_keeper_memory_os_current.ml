@@ -66,11 +66,13 @@ let replace
 let apply_disposition
       ~keepers_dir
       ?dropped_statements
+      ?absorbed
       ?(new_claims = [])
       ()
   =
   Current.apply_disposition
     ?dropped_statements
+    ?absorbed
     ~keepers_dir
     ~keeper_id:"keeper"
     ~now:200.0
@@ -1792,6 +1794,132 @@ let test_a_commit_parses_and_prints_on_the_pool () =
     check int "and then it is committed" 2 snapshot.Current.revision
 ;;
 
+module Absorbed = Masc.Keeper_memory_absorbed
+
+let absorbed_records ~keepers_dir =
+  Absorbed.read ~keepers_dir ~keeper_id:"keeper"
+  |> List.map (fun (line, result) ->
+    match result with
+    | Ok record -> record
+    | Error error ->
+      failf "absorbed line %d: %s" line (Absorbed.read_error_to_string error))
+;;
+
+let seed_three ~keepers_dir =
+  let a = fact ~claim:"A" () in
+  let b = fact ~claim:"B" () in
+  let c = fact ~claim:"C" () in
+  let (_ : Current.t) = replace ~keepers_dir ~facts:[ a; b; c ] () |> require_ok in
+  a, b, c
+;;
+
+(* RFC-0456 §4.2: a fact a new claim absorbs leaves the snapshot and its row is
+   kept beside it, naming the claim that now says it and the pass that did. *)
+let test_absorbed_facts_leave_the_snapshot_with_their_rows_kept () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let a, b, c = seed_three ~keepers_dir in
+  let together = fact ~claim:"A and B" () in
+  let into = Types.memory_id together in
+  let committed =
+    apply_disposition
+      ~keepers_dir
+      ~absorbed:
+        [ { Types.absorbed = Types.memory_id a; into }
+        ; { Types.absorbed = Types.memory_id b; into }
+        ]
+      ~new_claims:[ together ]
+      ()
+    |> require_ok
+  in
+  check (list string) "C stays and the new claim joins"
+    (List.sort compare (fact_ids [ c; together ]))
+    (List.sort compare (fact_ids committed.facts));
+  let records = absorbed_records ~keepers_dir in
+  check (list string) "one row per absorbed fact, as the snapshot held it"
+    [ "A"; "B" ]
+    (List.map (fun (r : Absorbed.record) -> r.fact.claim) records);
+  List.iter
+    (fun (r : Absorbed.record) ->
+       check string "into the new claim" into r.into;
+       check string "the row's id is its fact's" (Types.memory_id r.fact) r.memory_id;
+       check string "the pass's trace" "trace" r.trace_id;
+       check (float 0.) "the pass's clock" 200.0 r.recorded_at)
+    records
+;;
+
+(* The row is the only copy once the snapshot moves on, so a row that cannot be
+   written keeps the fact where it was. *)
+let test_a_failed_absorbed_write_commits_nothing () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let a, b, c = seed_three ~keepers_dir in
+  Unix.mkdir (Absorbed.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper") 0o700;
+  let together = fact ~claim:"A and B" () in
+  (match
+     apply_disposition
+       ~keepers_dir
+       ~absorbed:[ { Types.absorbed = Types.memory_id a; into = Types.memory_id together } ]
+       ~new_claims:[ together ]
+       ()
+   with
+   | Ok _ -> fail "a pass whose absorbed rows cannot be written committed"
+   | Error _ -> ());
+  let current =
+    apply_disposition ~keepers_dir () |> require_ok
+  in
+  check (list string) "the snapshot still holds A, B and C and not the new claim"
+    (List.sort compare (fact_ids [ a; b; c ]))
+    (List.sort compare (fact_ids current.facts))
+;;
+
+let test_an_absorbed_fact_no_longer_current_writes_no_row () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let _a, _b, _c = seed_three ~keepers_dir in
+  let gone = fact ~claim:"retracted during the pass" () in
+  let together = fact ~claim:"something new" () in
+  let (_ : Current.t) =
+    apply_disposition
+      ~keepers_dir
+      ~absorbed:[ { Types.absorbed = Types.memory_id gone; into = Types.memory_id together } ]
+      ~new_claims:[ together ]
+      ()
+    |> require_ok
+  in
+  check int "no row for a fact the snapshot no longer holds" 0
+    (List.length (absorbed_records ~keepers_dir))
+;;
+
+let test_absorbed_record_codec () =
+  let absorbed_fact = fact ~claim:"A" () in
+  let into = Types.memory_id (fact ~claim:"A and B" ()) in
+  let record : Absorbed.record =
+    { recorded_at = 200.0
+    ; trace_id = "trace"
+    ; memory_id = Types.memory_id absorbed_fact
+    ; into
+    ; fact = absorbed_fact
+    }
+  in
+  (match Absorbed.record_of_json (Absorbed.record_to_json record) with
+   | Ok decoded -> check bool "round trip" true (decoded = record)
+   | Error error -> failf "round trip rejected: %s" (Types.wire_error_to_string error));
+  let rejects label json =
+    match Absorbed.record_of_json json with
+    | Ok _ -> failf "%s: accepted" label
+    | Error _ -> ()
+  in
+  let with_field name value =
+    match Absorbed.record_to_json record with
+    | `Assoc fields -> `Assoc (List.map (fun (k, v) -> if String.equal k name then k, value else k, v) fields)
+    | _ -> fail "record_to_json is an object"
+  in
+  rejects "an id that is not its fact's" (with_field "memory_id" (`String into));
+  rejects "a fact absorbed into itself" (with_field "into" (`String record.memory_id));
+  rejects "an extra field"
+    (match Absorbed.record_to_json record with
+     | `Assoc fields -> `Assoc (("extra", `Null) :: fields)
+     | _ -> fail "record_to_json is an object")
+;;
+
 let () =
   run
     "keeper_memory_os_current"
@@ -1988,6 +2116,22 @@ let () =
             "a keeper writing during a librarian pass"
             `Quick
             test_a_keeper_write_during_a_librarian_pass_keeps_both
+        ; test_case
+            "absorbed facts leave with their rows kept"
+            `Quick
+            test_absorbed_facts_leave_the_snapshot_with_their_rows_kept
+        ; test_case
+            "a failed absorbed write commits nothing"
+            `Quick
+            test_a_failed_absorbed_write_commits_nothing
+        ; test_case
+            "an absorbed fact no longer current writes no row"
+            `Quick
+            test_an_absorbed_fact_no_longer_current_writes_no_row
+        ; test_case
+            "absorbed record codec"
+            `Quick
+            test_absorbed_record_codec
         ] )
     ]
 ;;

@@ -1293,6 +1293,7 @@ let make_snapshot
 let apply_disposition
       ?clock
       ?dropped_statements
+      ?(absorbed = [])
       ~keepers_dir
       ~keeper_id
       ~now
@@ -1307,6 +1308,13 @@ let apply_disposition
       Set_util.StringSet.empty
       (Option.value dropped_statements ~default:[])
   in
+  let absorbed_into =
+    List.fold_left
+      (fun into_of (statement : Keeper_memory_os_types.absorbed_statement) ->
+         Set_util.StringMap.add statement.absorbed statement.into into_of)
+      Set_util.StringMap.empty
+      absorbed
+  in
   update_locked
     ?clock
     ?dropped_statements
@@ -1319,9 +1327,38 @@ let apply_disposition
          | None -> []
          | Some snapshot -> snapshot.facts
        in
+       (* RFC-0456 §4.2: an absorbed fact leaves the snapshot only with its row
+          kept, so the rows are written here, under the lock and before the
+          snapshot is replaced. A failed write fails this commit. A fact the
+          keeper retracted during the pass is no longer current and has no row
+          to keep. *)
+       let absorbed_records =
+         List.filter_map
+           (fun fact ->
+              let identity = memory_id fact in
+              match Set_util.StringMap.find_opt identity absorbed_into with
+              | None -> None
+              | Some into ->
+                Some
+                  { Keeper_memory_absorbed.recorded_at = now
+                  ; trace_id = (source : source).trace_id
+                  ; memory_id = identity
+                  ; into
+                  ; fact
+                  })
+           current
+       in
+       let* () =
+         Keeper_memory_absorbed.append_all ~keepers_dir ~keeper_id absorbed_records
+         |> Result.map_error Keeper_memory_absorbed.append_error_to_string
+       in
        let kept =
          List.filter
-           (fun fact -> not (Set_util.StringSet.mem (memory_id fact) retired))
+           (fun fact ->
+              let identity = memory_id fact in
+              not
+                (Set_util.StringSet.mem identity retired
+                 || Set_util.StringMap.mem identity absorbed_into))
            current
        in
        let kept_ids =

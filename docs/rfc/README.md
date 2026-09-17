@@ -352,6 +352,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-skills-as-tools | Skill 과 Tool 은 한 카탈로그의 두 표면 — SKILL.md 가 지시·합성·비동기를 선언한다 | Active | - |
 | RFC-spawn-a-process-that-outlives-the-call | Spawn: a process that outlives the call | Draft | - |
 | RFC-toml-as-declarative-system-and-vocabulary-authority | # RFC — TOML as Declarative System and Wire Vocabulary Authority | Draft | - |
+| RFC-tool-librarian-action-absorption | Tool Librarian: 도구 호출 궤적을 읽어 반복 패턴을 컴포지션으로 흡수(Absorb)한다 | Draft | - |
 | RFC-tool-results-age-out-of-context | 도구 결과는 만든 턴에서만 원문이다 — 히스토리에 남은 누적을 닫는다 | Draft | - |
 | RFC-tools-as-shell-commands | 도구를 셸 first-class 커맨드로 — 순차 결합의 provider 왕복을 없앤다 | Draft | - |
 | RFC-tui-chat-boundary-continuity | Keeper 채팅 화면 — 대화는 이어지게, 계기판은 경계 안으로 | Draft | - |

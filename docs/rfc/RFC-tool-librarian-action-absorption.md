@@ -78,7 +78,7 @@ MASC의 Memory OS에서 Librarian은 이미 완벽한 흡수 메커니즘을 수
 Tool Librarian은 실시간 턴을 방해하지 않는 **오프라인/스탠드얼론 분석 파이프라인**으로 동작한다.
 
 ```
- [~/.masc/tool_calls/ 프로덕션 로그 (수만 건)]
+ [<base-path>/.masc/tool_calls/ 프로덕션 로그 (수만 건)]
                        ↓
  [1단계: 미흡수 궤적(Unabsorbed Trace) 시퀀스 마이닝]
    - N-gram 빈도 분석 (예: Tool A → Tool B)
@@ -131,7 +131,7 @@ $$\text{Absorption Rate} = \frac{\text{컴포지션 호출 횟수}}{\text{컴포
 ## 5. 단계별 구현 계획
 
 ### Phase 1: 시퀀스 마이너 도구 (`scripts/tool-call-sequence-miner`)
-- `~/.masc/tool_calls/*.jsonl`을 스캔하여 키퍼별 연속 도구 호출 쌍(Pair) 및 삼중(Triplet) 빈도와 실패율을 집계하는 CLI 작성.
+- `<base-path>/.masc/tool_calls/*.jsonl`을 스캔하여 키퍼별 연속 도구 호출 쌍(Pair) 및 삼중(Triplet) 빈도와 실패율을 집계하는 CLI 작성.
 - 오늘 당장 드러난 상위 호출 도구들의 실제 결합 빈도를 정량화.
 
 ### Phase 2: 컴포지션 Dry-Run 테스트 러너 (`test_keeper_composition_dry_run`)

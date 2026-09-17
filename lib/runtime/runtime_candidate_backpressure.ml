@@ -6,7 +6,7 @@
     unchanged catalog publication; rebound or removed rows leave no global
     registry behind. *)
 
-module State = Runtime_lane_preference_state
+module State = Runtime_candidate_backpressure_state
 
 (* NDT-OK: the wall clock stamps the observation; no deterministic replay
    logic branches on these timestamps. *)

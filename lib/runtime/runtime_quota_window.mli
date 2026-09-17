@@ -9,7 +9,7 @@
     This module remembers that fact and lets candidate ordering act on it.
     It is an ordering preference, not an admission gate — a demoted
     candidate is still attempted when it is all the lane has left, so no
-    new fail-closed path exists.  Sibling of {!Runtime_lane_preference};
+    new fail-closed path exists.  Sibling of {!Runtime_candidate_backpressure};
     the table is shared across keepers on purpose because provider quota
     windows are account-scoped.
 
@@ -19,7 +19,7 @@
     {!note_observed_exhausted} records the observation instead and claims no
     end: it is cleared by the next success on the scope, not by a clock.
     Coarse HTTP 429 / Provider.RateLimit does not establish credential
-    ownership; it belongs to {!Runtime_lane_preference}'s candidate-only
+    ownership; it belongs to {!Runtime_candidate_backpressure}'s candidate-only
     observation instead. RFC-0370 §3.3, RFC-0433. *)
 
 type scope

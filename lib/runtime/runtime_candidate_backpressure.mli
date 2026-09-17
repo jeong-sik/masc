@@ -7,7 +7,7 @@
     lives on the materialized runtime; frozen attempts retain the same cell,
     and the runtime catalog owns its lifetime. *)
 
-type candidate_backpressure = Runtime_lane_preference_state.candidate_backpressure =
+type candidate_backpressure = Runtime_candidate_backpressure_state.candidate_backpressure =
   | Unknown_scope_rate_limit of { noted_at : float; retry_after : float option }
 
 type candidate_binding =

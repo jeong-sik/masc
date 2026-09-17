@@ -2341,8 +2341,8 @@ let rate_limit_error_from_a_429 ?(retry_after_header = None) ~body () =
 
 let observed_candidate runtime_id =
   let runtime = Option.get (Runtime.get_runtime_by_id runtime_id) in
-  Runtime_lane_preference.candidate_backpressure
-    ~now:(Unix.gettimeofday ()) ~candidate:runtime.candidate_preference
+  Runtime_candidate_backpressure.candidate_backpressure
+    ~now:(Unix.gettimeofday ()) ~candidate:runtime.candidate_backpressure
 ;;
 
 let backpressure_order runtime_ids =
@@ -2383,8 +2383,8 @@ let test_http_429_preserves_unknown_scope_and_fallback () =
        | Error error -> Alcotest.failf "fallback failed: %s" (Agent_core.Error.to_string error));
       List.iter (fun id ->
         (match observed_candidate id with
-         | Some (Runtime_lane_preference.Unknown_scope_rate_limit { retry_after = None; _ }) -> ()
-         | Some (Runtime_lane_preference.Unknown_scope_rate_limit _) | None ->
+         | Some (Runtime_candidate_backpressure.Unknown_scope_rate_limit { retry_after = None; _ }) -> ()
+         | Some (Runtime_candidate_backpressure.Unknown_scope_rate_limit _) | None ->
            Alcotest.fail "rate limit must retain unknown scope and absent hint");
         let scope = Option.get (Runtime.quota_scope_of_runtime_id id) in
         Alcotest.(check bool) "no credential quota inferred" false
@@ -2400,7 +2400,7 @@ let test_rate_limit_order_never_excludes_and_success_clears () =
     let ids = ["shared_a.test_model"; "shared_b.test_model"] in
     List.iter (fun id ->
       let runtime = Option.get (Runtime.get_runtime_by_id id) in
-      Runtime_lane_preference.note_rate_limit ~candidate:runtime.candidate_preference
+      Runtime_candidate_backpressure.note_rate_limit ~candidate:runtime.candidate_backpressure
         ~retry_after:(Some 300.)) ids;
     Alcotest.(check (list string)) "all observed candidates remain in declared order"
       ids (backpressure_order ids);
@@ -2420,14 +2420,14 @@ let test_rate_limit_order_never_excludes_and_success_clears () =
     Alcotest.(check bool) "success clears even an unexpired hint" true
       (Option.is_none (observed_candidate "shared_b.test_model"));
     match observed_candidate "shared_a.test_model" with
-    | Some (Runtime_lane_preference.Unknown_scope_rate_limit { retry_after = Some seconds; _ }) ->
+    | Some (Runtime_candidate_backpressure.Unknown_scope_rate_limit { retry_after = Some seconds; _ }) ->
         Alcotest.(check (float 0.)) "actual HTTP header survives driver ingress" 300. seconds
-    | Some (Runtime_lane_preference.Unknown_scope_rate_limit _) | None ->
+    | Some (Runtime_candidate_backpressure.Unknown_scope_rate_limit _) | None ->
         Alcotest.fail "actual Retry-After hint was lost")
 ;;
 
 let quota_lane_candidate id =
-  (Option.get (Runtime.get_runtime_by_id id)).Runtime.candidate_preference
+  (Option.get (Runtime.get_runtime_by_id id)).Runtime.candidate_backpressure
 ;;
 
 (* Every quota_lane path starts serving: no candidate observation, no quota
@@ -2436,7 +2436,7 @@ let reset_quota_lane_rests () =
   Runtime_quota_window.reset_for_testing ();
   List.iter
     (fun id ->
-       Runtime_lane_preference.note_candidate_success ~candidate:(quota_lane_candidate id))
+       Runtime_candidate_backpressure.note_candidate_success ~candidate:(quota_lane_candidate id))
     [ "shared_a.test_model"; "shared_b.test_model"; "other.test_model" ]
 ;;
 
@@ -2473,9 +2473,9 @@ let test_a_deferred_suffix_waits_only_while_its_walk_head_rests () =
     Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
       reset_quota_lane_rests ();
       let now = Unix.gettimeofday () in
-      Runtime_lane_preference.note_rate_limit
+      Runtime_candidate_backpressure.note_rate_limit
         ~candidate:(quota_lane_candidate "shared_a.test_model") ~retry_after:(Some 300.);
-      Runtime_lane_preference.note_rate_limit
+      Runtime_candidate_backpressure.note_rate_limit
         ~candidate:(quota_lane_candidate "shared_b.test_model") ~retry_after:(Some 120.);
       let describe = function
         | Driver.Walk_head_serving { runtime_id } -> "serving " ^ runtime_id
@@ -2499,9 +2499,9 @@ let test_a_deferred_suffix_waits_only_while_its_walk_head_rests () =
       (* An unstated rest ends the wait but not the demotion, so the walk keeps
          that path behind the resting head: waiting for its shorter release
          would dispatch the head while it still rests. *)
-      Runtime_lane_preference.note_candidate_success
+      Runtime_candidate_backpressure.note_candidate_success
         ~candidate:(quota_lane_candidate "shared_b.test_model");
-      Runtime_lane_preference.note_rate_limit
+      Runtime_candidate_backpressure.note_rate_limit
         ~candidate:(quota_lane_candidate "shared_b.test_model") ~retry_after:None;
       Alcotest.(check string) "an unstated rest behind the head does not shorten the wait"
         "resting shared_a.test_model for 300s"
@@ -2555,9 +2555,9 @@ let test_a_failure_without_a_suffix_waits_until_a_fresh_walk_head_serves () =
       Alcotest.(check string) "a serving fresh walk head waits only for the failed path"
         (Printf.sprintf "wait %.0fs for quota_lane (path)" floor_sec)
         (decide ());
-      Runtime_lane_preference.note_rate_limit
+      Runtime_candidate_backpressure.note_rate_limit
         ~candidate:(quota_lane_candidate "shared_a.test_model") ~retry_after:(Some 600.);
-      Runtime_lane_preference.note_rate_limit
+      Runtime_candidate_backpressure.note_rate_limit
         ~candidate:(quota_lane_candidate "shared_b.test_model") ~retry_after:None;
       Runtime_quota_window.note_exhausted
         ~scope:(Option.get (Runtime.quota_scope_of_runtime_id "other.test_model"))
@@ -2576,7 +2576,7 @@ let test_a_chat_retry_follows_the_shared_next_dispatch () =
     Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
       reset_quota_lane_rests ();
       let now = Unix.gettimeofday () in
-      Runtime_lane_preference.note_rate_limit
+      Runtime_candidate_backpressure.note_rate_limit
         ~candidate:(quota_lane_candidate "shared_a.test_model") ~retry_after:(Some 300.);
       let not_before lane =
         match Masc.Keeper_direct_runtime_continuation.For_testing.retry_not_before ~now lane with
@@ -2617,7 +2617,7 @@ let test_rate_limit_candidate_survives_unchanged_reload_only () =
       let result = Driver.For_testing.attempt_runtime_candidates
         ~runtime_id:"quota_lane" ~runtime_id_of:(fun (rt : Runtime.t) -> rt.id)
         ~quota_scope_of:(fun rt -> Some (Runtime.quota_scope_of_runtime rt))
-        ~candidate_preference_of:(fun (rt : Runtime.t) -> Some rt.candidate_preference)
+        ~candidate_backpressure_of:(fun (rt : Runtime.t) -> Some rt.candidate_backpressure)
         ~candidate_dispatchable:(fun _ -> true)
         ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
         ~run_attempt:(fun ~idx:_ ~runtime_id:_ _ ->
@@ -2642,8 +2642,8 @@ let test_rate_limit_candidate_survives_unchanged_reload_only () =
     attempt old (fun () -> reload_runtime_config
       (runtime_toml_quota_lane_with_shared_credential "REBOUND_QUOTA_TEST_KEY"));
     Alcotest.(check bool) "old response remains on old frozen binding" true
-      (Option.is_some (Runtime_lane_preference.candidate_backpressure
-        ~now:(Unix.gettimeofday ()) ~candidate:old.candidate_preference));
+      (Option.is_some (Runtime_candidate_backpressure.candidate_backpressure
+        ~now:(Unix.gettimeofday ()) ~candidate:old.candidate_backpressure));
     Alcotest.(check bool) "replacement does not inherit old response" true
       (Option.is_none (observed_candidate "shared_a.test_model"));
     Alcotest.(check (list string)) "replacement starts in declared order"
@@ -2664,7 +2664,7 @@ let test_rate_limit_credential_rotation_under_same_reference () =
         let result = Driver.For_testing.attempt_runtime_candidates
           ~runtime_id:"quota_lane" ~runtime_id_of:(fun (rt : Runtime.t) -> rt.id)
           ~quota_scope_of:(fun rt -> Some (Runtime.quota_scope_of_runtime rt))
-          ~candidate_preference_of:(fun (rt : Runtime.t) -> Some rt.candidate_preference)
+          ~candidate_backpressure_of:(fun (rt : Runtime.t) -> Some rt.candidate_backpressure)
           ~candidate_dispatchable:(fun _ -> true)
           ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
           ~run_attempt:(fun ~idx:_ ~runtime_id:_ _ ->
@@ -2676,8 +2676,8 @@ let test_rate_limit_credential_rotation_under_same_reference () =
          | Error (Agent_core.Error.Api (Llm_provider.Retry.RateLimited _)) -> ()
          | Error _ | Ok _ -> Alcotest.fail "expected actual transport rate limit");
         Alcotest.(check bool) "old observation stays attached to dispatched value" true
-          (Option.is_some (Runtime_lane_preference.candidate_backpressure
-            ~now:(Unix.gettimeofday ()) ~candidate:old.candidate_preference));
+          (Option.is_some (Runtime_candidate_backpressure.candidate_backpressure
+            ~now:(Unix.gettimeofday ()) ~candidate:old.candidate_backpressure));
         Alcotest.(check bool) "same reference with new resolved credential has no old observation" true
           (Option.is_none (observed_candidate "shared_a.test_model"))))
 ;;

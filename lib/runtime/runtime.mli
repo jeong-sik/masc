@@ -13,7 +13,7 @@ type t =
   ; model : model_spec
   ; binding : binding
   ; execution : Runtime_execution.t
-  ; candidate_preference : Runtime_lane_preference.candidate
+  ; candidate_backpressure : Runtime_candidate_backpressure.candidate
     (** Candidate-only backpressure tied to the frozen dispatch binding. *)
   ; quota_scope : Runtime_quota_window.scope
     (** Quota ownership key frozen at materialization, from the same

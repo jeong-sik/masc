@@ -138,7 +138,7 @@ type lane_terminal_error =
    non-rotating error before resolvable alternatives are tried. Order is
    therefore resolvable-active, then resolvable-exhausted, then unresolvable —
    declared relative order preserved within each class (PR #28219 review). *)
-let demote_unavailable_candidates ~now ~quota_scope_of ~candidate_preference_of candidates =
+let demote_unavailable_candidates ~now ~quota_scope_of ~candidate_backpressure_of candidates =
   let available, backpressured = List.partition (fun candidate ->
     let quota_exhausted =
       Option.fold ~none:false
@@ -148,8 +148,8 @@ let demote_unavailable_candidates ~now ~quota_scope_of ~candidate_preference_of 
     let rate_limited =
       Option.fold ~none:false
         ~some:(fun candidate -> Option.is_some
-          (Runtime_lane_preference.candidate_backpressure ~now ~candidate))
-        (candidate_preference_of candidate)
+          (Runtime_candidate_backpressure.candidate_backpressure ~now ~candidate))
+        (candidate_backpressure_of candidate)
     in
     not (quota_exhausted || rate_limited)) candidates in
   available @ backpressured
@@ -161,8 +161,8 @@ let quota_ordered_runtime_ids ~now runtime_ids =
   let resolvable, unresolvable = List.partition (fun (_, rt) -> Option.is_some rt) resolved in
   let ordered = demote_unavailable_candidates ~now
     ~quota_scope_of:(fun (_, rt) -> Option.map Runtime.quota_scope_of_runtime rt)
-    ~candidate_preference_of:(fun (_, rt) ->
-      Option.map (fun (rt : Runtime.t) -> rt.candidate_preference) rt)
+    ~candidate_backpressure_of:(fun (_, rt) ->
+      Option.map (fun (rt : Runtime.t) -> rt.candidate_backpressure) rt)
     resolvable in
   List.map fst (ordered @ unresolvable)
 ;;
@@ -218,12 +218,12 @@ let path_rest ~now runtime_id =
     in
     let rate_limit_rest =
       match
-        Runtime_lane_preference.candidate_backpressure
+        Runtime_candidate_backpressure.candidate_backpressure
           ~now
-          ~candidate:runtime.candidate_preference
+          ~candidate:runtime.candidate_backpressure
       with
       | None -> None
-      | Some (Runtime_lane_preference.Unknown_scope_rate_limit { noted_at; retry_after }) ->
+      | Some (Runtime_candidate_backpressure.Unknown_scope_rate_limit { noted_at; retry_after }) ->
         let promotes =
           match retry_after with
           | Some seconds when (not (Float.is_nan seconds)) && seconds > 0.0 ->
@@ -502,7 +502,7 @@ let attempt_runtime_candidates
     ?(on_lane_terminal_error = fun (_ : lane_terminal_error) -> ())
     ?quota_scope_of
     ?model_of
-    ?candidate_preference_of
+    ?candidate_backpressure_of
     ?candidate_dispatchable
     ~runtime_id ~runtime_id_of
     ~(emit_runtime_manifest :
@@ -528,12 +528,12 @@ let attempt_runtime_candidates
       fun candidate ->
         Runtime.quota_scope_of_runtime_id (runtime_id_of candidate)
   in
-  let candidate_preference_of =
-    match candidate_preference_of with
-    | Some candidate_preference_of -> candidate_preference_of
+  let candidate_backpressure_of =
+    match candidate_backpressure_of with
+    | Some candidate_backpressure_of -> candidate_backpressure_of
     | None -> fun candidate ->
         Runtime.get_runtime_by_id (runtime_id_of candidate)
-        |> Option.map (fun (runtime : Runtime.t) -> runtime.candidate_preference)
+        |> Option.map (fun (runtime : Runtime.t) -> runtime.candidate_backpressure)
   in
   (* Mid-walk demotion shares the pre-walk rule: never move an
      exhausted-but-dispatchable candidate behind one that cannot dispatch, or
@@ -603,7 +603,7 @@ let attempt_runtime_candidates
     in
     demote_unavailable_candidates
       ~now:(Unix.gettimeofday ())
-      ~quota_scope_of ~candidate_preference_of
+      ~quota_scope_of ~candidate_backpressure_of
       dispatchable
     @ undispatchable
   in
@@ -680,7 +680,7 @@ let attempt_runtime_candidates
        the provider returns could then attribute the old credential's
        response to the replacement catalog row. *)
     let attempt_quota_scope = quota_scope_of candidate in
-    let attempt_candidate_preference = candidate_preference_of candidate in
+    let attempt_candidate_backpressure = candidate_backpressure_of candidate in
     emit_runtime_manifest
       ~status:"attempt"
       ~decision:(runtime_attempt_decision ~idx ~runtime_id:attempt_runtime_id)
@@ -694,8 +694,8 @@ let attempt_runtime_candidates
          ~decision:(runtime_attempt_decision ~idx ~runtime_id:attempt_runtime_id)
          Keeper_runtime_manifest.Runtime_completed;
        Option.iter
-         (fun candidate -> Runtime_lane_preference.note_candidate_success ~candidate)
-         attempt_candidate_preference;
+         (fun candidate -> Runtime_candidate_backpressure.note_candidate_success ~candidate)
+         attempt_candidate_backpressure;
        (* A call getting through is the only evidence a quota came back that
           a provider stating no reset time leaves available, so it is what
           clears the observation. A stated window is left alone: it names a
@@ -731,8 +731,8 @@ let attempt_runtime_candidates
        in
        let note_rate_limit retry_after =
          Option.iter
-           (fun candidate -> Runtime_lane_preference.note_rate_limit ~candidate ~retry_after)
-           attempt_candidate_preference
+           (fun candidate -> Runtime_candidate_backpressure.note_rate_limit ~candidate ~retry_after)
+           attempt_candidate_backpressure
        in
        (match error with
         | Agent_core.Error.Api (Llm_provider.Retry.RateLimited { retry_after; _ })
@@ -936,8 +936,8 @@ let modality_reroute_candidates ~now ~deferred_runtime_lane ~first_candidate
          ~now
          ~quota_scope_of:(fun (runtime : Runtime.t) ->
            Some (Runtime.quota_scope_of_runtime runtime))
-         ~candidate_preference_of:(fun (runtime : Runtime.t) ->
-           Some runtime.Runtime.candidate_preference)
+         ~candidate_backpressure_of:(fun (runtime : Runtime.t) ->
+           Some runtime.Runtime.candidate_backpressure)
 
 (* RFC-0440 §3: the media walk (every candidate that takes the media, live ones
    first), then the lane's remaining candidates as the degrade tail — per-attempt
@@ -1579,8 +1579,8 @@ let run_named
     ~quota_scope_of:(function
       | Resolved_runtime runtime -> Some (Runtime.quota_scope_of_runtime runtime)
       | Missing_runtime _ -> None)
-    ~candidate_preference_of:(function
-      | Resolved_runtime runtime -> Some runtime.Runtime.candidate_preference
+    ~candidate_backpressure_of:(function
+      | Resolved_runtime runtime -> Some runtime.Runtime.candidate_backpressure
       | Missing_runtime _ -> None)
     ~model_of:(function
       (* The served name comes from the same frozen snapshot as the quota

@@ -1,8 +1,8 @@
-(** Unit tests for Runtime_lane_preference — a candidate's observed
+(** Unit tests for Runtime_candidate_backpressure — a candidate's observed
     backpressure. The pure state functions take their clock as an argument;
     nothing here reads the process clock. *)
 
-module State = Runtime_lane_preference_state
+module State = Runtime_candidate_backpressure_state
 
 let test_rate_limit_hint_expires_exactly () =
   let noted = State.note_rate_limit ~noted_at:10. ~retry_after:(Some 5.) None in
@@ -42,24 +42,24 @@ let test_rate_limit_delayed_observation_keeps_newer_hint () =
    elapses or a success clears it; a success on a clear cell changes nothing. *)
 let test_a_candidate_cell_holds_the_observation_until_success () =
   let candidate =
-    Runtime_lane_preference.create_candidate
-      ~binding:(Runtime_lane_preference.Http_binding_unavailable "fixture")
+    Runtime_candidate_backpressure.create_candidate
+      ~binding:(Runtime_candidate_backpressure.Http_binding_unavailable "fixture")
   in
   Alcotest.(check bool) "fresh cell observes nothing" true
     (Option.is_none
-       (Runtime_lane_preference.candidate_backpressure ~now:0. ~candidate));
-  Runtime_lane_preference.note_rate_limit ~candidate ~retry_after:None;
+       (Runtime_candidate_backpressure.candidate_backpressure ~now:0. ~candidate));
+  Runtime_candidate_backpressure.note_rate_limit ~candidate ~retry_after:None;
   Alcotest.(check bool) "a no-hint rate limit is held" true
     (Option.is_some
-       (Runtime_lane_preference.candidate_backpressure ~now:1e12 ~candidate));
-  Runtime_lane_preference.note_candidate_success ~candidate;
+       (Runtime_candidate_backpressure.candidate_backpressure ~now:1e12 ~candidate));
+  Runtime_candidate_backpressure.note_candidate_success ~candidate;
   Alcotest.(check bool) "a success clears it" true
     (Option.is_none
-       (Runtime_lane_preference.candidate_backpressure ~now:1e12 ~candidate))
+       (Runtime_candidate_backpressure.candidate_backpressure ~now:1e12 ~candidate))
 ;;
 
 let () =
-  Alcotest.run "runtime_lane_preference"
+  Alcotest.run "runtime_candidate_backpressure"
     [ ( "candidate backpressure"
       , [ Alcotest.test_case "hint expires at provider boundary" `Quick
             test_rate_limit_hint_expires_exactly

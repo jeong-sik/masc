@@ -84,7 +84,8 @@ blocking_lints() {
   # suite changes the correct answer without touching this script, which is
   # how both MSX fixtures came to name two suites while test_tui_msx_tick.ml
   # existed -- red on main, and only seen when #34637 edited the script for
-  # another reason. It costs about a second.
+  # another reason. Measured 2026-09-17 on a laptop: 34s before the module and
+  # file-name mappings (RFC-0428), 54s with them.
   run_lint "Edited-tests selector self-test" \
     bash scripts/ci/run-edited-tests.sh --self-test
   run_self_test_when_changed "Prompt source words self-test" \
@@ -126,6 +127,12 @@ blocking_lints() {
   run_self_test_when_changed "Dune suite scope self-test (RFC-0428)" \
     scripts/ci/dune_suite_scope.py \
     python3 scripts/ci/test_dune_suite_scope.py
+  # The same step runs what this helper says calls or names a change. A
+  # comment it mistakes for code runs a suite for nothing; a call it misses
+  # merges a change without its suite. Its fixtures are synthetic.
+  run_self_test_when_changed "Referencing suites self-test (RFC-0428)" \
+    scripts/ci/referencing_suites.py \
+    python3 scripts/ci/test_referencing_suites.py
   # test.yml's targeted path runs a suite's executable outside dune, so the
   # stanza's (setenv ...) does not apply and has to be read out. A stanza this
   # reader cannot parse would otherwise surface as a dispatch that ran the

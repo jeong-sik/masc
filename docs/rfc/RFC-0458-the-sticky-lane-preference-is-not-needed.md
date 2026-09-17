@@ -8,7 +8,7 @@ author: vincent + claude
 supersedes: []
 superseded_by: null
 related: ["provider-path-rest", "0370", "0440", "keeper-context-window-in-tokens"]
-implementation_prs: []
+implementation_prs: ["#36881"]
 ---
 
 # RFC-0458 — sticky 레인 선호는 필요 없다
@@ -25,8 +25,10 @@ analyst 가 그렇게 4턴 연속 Claude Code 에 머물렀다(#36858).
 sticky 선호를 없앤다. 대신 넣는 장치는 없다.
 
 - sticky 가 원래 막으려던 것은 "시간당 rate-limit 창에 걸린 머리를 매 턴 두드리는 일"이다
-  (#25386). 그 일은 2026-09-15 의 RFC-provider-path-rest 가 429·402·타임아웃에 provider 가
-  말한 시각까지의 쉼을 주면서 이미 맡았다. 쉬는 경로는 걸음에서 뒤로 간다.
+  (#25386). 429·402 는 2026-09-15 의 RFC-provider-path-rest 가 쉼과 강등으로 이미 맡았다.
+- 타임아웃·5xx·네트워크 실패는 아무것도 남기지 않아, 다음 턴에 같은 머리를 다시 먼저 불렀다.
+  이 실패도 429 와 같은 칸에 증거로 남기고, 그 후보가 성공할 때까지 걸음에서 뒤로 보낸다
+  (§3.4). 시간으로 풀리는 쉼은 만들지 않는다.
 - 쉼을 남기지 않는 실패(반복 생성 등)는 같은 턴 안에서 다음 후보로 회전한다. 지금도 그렇다.
 - 걷는 순서는 선언이다. 마지막 성공은 순서를 바꾸지 않는다. 마지막 후보는 앞 후보가 전부
   실패하거나 쉴 때만 걷히고, 다음 사이클은 다시 머리부터다.
@@ -85,8 +87,9 @@ analyst, glm-coding 레인, 14:06Z~15:57Z.
 1. **원래 목적은 다른 장치가 맡았다.** #25386 의 문제 서술은 "an hourly provider rate-limit
    window is hit on every turn before the lane fails over"다. 그때는 경로별 쉼이 없었다.
    provider-path-rest 뒤로 429 는 힌트 시각 또는 60초, 402 는 리셋 시각 또는 900초를 쉬고,
-   쉬는 경로는 `quota_ordered_runtime_ids` 가 뒤로 보낸다. 죽은 머리를 매 턴 두드리는 일은
-   sticky 없이도 일어나지 않는다.
+   증거가 남은 경로는 `quota_ordered_runtime_ids` 가 뒤로 보낸다. 힌트가 없으면 뒤로 가는
+   것은 그 후보가 성공할 때까지다. 타임아웃·5xx·네트워크 실패는 증거를 남기지 않았으므로,
+   그 머리를 매 턴 두드리는 일은 sticky 를 뺀 뒤에도 남았다. §3.4 가 닫는다.
 2. **sticky 는 증거가 아니라 캐시다.** "머리가 죽어 있다"를 재지 않고 "마지막에 누가
    성공했나"만 기억한다. 머리가 살아나도 알 길이 없고, TTL 은 마지막 성공에서 다시 세어져
    성공하는 fallback 은 영구히 머리다.
@@ -100,8 +103,8 @@ analyst, glm-coding 레인, 14:06Z~15:57Z.
 
 ### 3.1 규칙
 
-> 걷는 순서는 선언이다. 쉬는 경로만 뒤로 가고, 쉼은 provider 의 증거와 풀리는 시각을 가진다.
-> 마지막 성공은 아무것도 바꾸지 않는다.
+> 걷는 순서는 선언이다. 관측된 실패의 증거가 남은 후보만 뒤로 가고, 증거는 provider 가 말한
+> 시각이 지나거나 그 후보가 성공하면 풀린다. 마지막 성공은 다른 후보의 순서를 바꾸지 않는다.
 
 `assignment_walk_order ~now id` 는 선언 순서에 quota·backpressure 강등만 적용한다.
 같은 턴 안의 회전(`attempt_runtime_candidates`)은 그 순서를 걷는다.
@@ -133,6 +136,42 @@ analyst, glm-coding 레인, 14:06Z~15:57Z.
 는 자리 그대로 마지막 후보다. 이미지 후보로 넣었던 뜻은 RFC-0440 이 capability 로 맡으므로
 이 자리에 남길지는 운영자가 정한다.
 
+### 3.4 타임아웃·5xx·네트워크 실패도 증거로 남긴다
+
+운영자 결정(2026-09-17): 숫자로 된 쉼을 새로 만들지 않고, 429 와 같은 칸에 증거로 남겨
+그 후보가 성공할 때까지 순서를 내린다. 한 번의 일시 장애로 머리가 재시작 전까지 돌아오지
+않을 수 있다는 것을 알고 골랐다(힌트 없는 429 가 이미 그렇다).
+
+라이브 근거(runtime-manifests, 2026-09-16~17): 첫 시도가 실패한 1,388번 중 **408번**은 바로
+다음 턴에 같은 머리를 다시 첫 시도로 불러 또 실패했다. 다음 턴에 같은 머리가 성공한 것은
+**45번**이다. 되풀이된 실패에 든 시간은 합쳐 약 75,000초다. manifest 의 `error_kind` 는
+`api`·`provider` 로만 나뉘어, 이 408번에는 인증·잘못된 요청처럼 이 절이 다루지 않는 실패도
+섞여 있을 수 있다.
+
+규칙:
+
+1. **기록은 경로 분류 하나로 한다.** 지금은 실패를 경로로 분류하는 곳
+   (`Keeper_runtime_failure_route.route_of_error`)과 증거를 남기는 곳
+   (`keeper_turn_driver.ml` 의 `Agent_core.Error.t` match, 나머지는 `| _ -> ()`)이 따로
+   분류한다. 그래서 `Runtime_connection_closed` 는 `Server_error` 로 걷히지만 증거 쪽에는
+   닿지 않는다. 증거는 경로 값에서 남긴다. `Retry_after_observed` 의 `retry_class` 로:
+   - `Rate_limited` → 지금처럼 후보 칸의 429 증거
+   - `Hard_quota` → 지금처럼 quota 창
+   - `Server_error`·`Network_transient`·`Provider_timeout` → 후보 칸의 실패 증거(새 variant)
+   - `Capacity_backpressure` → 남기지 않는다. MASC 자신의 슬롯과 클라이언트 봉투라 후보의
+     사실이 아니다.
+   - `Rotate_now`·`Exhausted_visible_alive` → 남기지 않는다(§5).
+   wildcard 없이 전부 나열한다. 새 class 가 생기면 컴파일러가 이 자리를 가리킨다.
+2. **칸은 하나다.** `Runtime_candidate_backpressure_state` 에 variant 를 더한다. 증거에는
+   관측 시각과 class 만 있고 풀리는 시각은 없다. 한 칸에 증거가 둘이면 나중 관측이 남는다.
+3. **순서만 바꾸고 기다리게 하지 않는다.** 이 증거는 `demote_unavailable_candidates` 의
+   강등에만 쓰인다. `path_rest` 는 이 증거에 풀리는 시각을 주지 않으므로, 다음 dispatch 를
+   늦추지 않는다. 후보를 빼지도 않는다. 모두 증거가 있으면 선언 순서대로 다 걷는다.
+4. **첫 토큰 전에 양보한 시도는 성공이 아니다.** 사람의 메시지로 선점된 시도는
+   `Ok (yielded_pre_first_token …)` 로 끝나 성공 갈래를 탄다. 지금은 응답을 한 번도 받지
+   않은 후보의 429 증거와 quota 관측이 이 길로 지워진다. 양보한 시도는 증거를 지우지도
+   남기지도 않는다.
+
 ## 4. 고르지 않은 대안
 
 - **(a) TTL 을 마지막 성공이 아니라 머리가 죽은 시각에서 재기.** 되돌아오는 길은 생기지만
@@ -145,10 +184,19 @@ analyst, glm-coding 레인, 14:06Z~15:57Z.
   회전 실패에 429 floor(60초)의 쉼을 주는 것은 keeper 사이클 간격(수 분)보다 짧아 다음
   사이클에는 어차피 머리를 부르고, 같은 턴 안의 회전은 지금도 되므로 하는 일이 없다. 더 긴
   쉼은 근거 없는 창을 하나 더 만드는 것이다.
+- **(d) 타임아웃·5xx·네트워크에 시간으로 풀리는 쉼.** (c) 와 같은 이유로 고르지 않았다.
+  §3.4 는 시각 대신 그 후보의 성공으로 푼다.
+- **(e) 다른 후보가 한 번 성공하면 머리의 증거를 풀기.** 머리가 빨리 돌아오지만, 죽은 머리를
+  사이클마다 한 번씩 두드리는 비용(타임아웃이면 제한 시간 전체)이 남는다. 위 408번이 그
+  비용이다.
 
 ## 5. 남는 비용
 
-쉼을 남기지 않는 실패(`Rotate_now`: `Generation_repeated`, `No_progress_*`,
+§3.4 의 비용: 증거가 남은 머리는 앞선 후보가 모두 실패한 턴에만 다시 걷힌다. fallback 이
+계속 답하면 머리는 재시작 전까지 돌아오지 않는다. 위 측정에서 다음 턴에 머리가 되살아난
+45번이 이 비용의 크기다.
+
+증거를 남기지 않는 실패(`Rotate_now`: `Generation_repeated`, `No_progress_*`,
 `Refusal_body_not_received` …)를 내는 머리는 사이클마다 한 번 헛되이 불리고 나서 회전한다.
 실린 범위(수십 K 토큰) 한 번과 실패를 알아차리는 시간(반복 생성은 스트림이 한계까지 가야
 끊긴다, 수십 초)이다. 2026-09-16 analyst 는 92분에 4번이었다.
@@ -162,6 +210,11 @@ analyst, glm-coding 레인, 14:06Z~15:57Z.
 
 - `assignment_walk_order`: 어떤 성공 뒤에도 선언 순서다. 쉬는 경로는 뒤로 간다.
 - `attempt_runtime_candidates`: 성공이 어떤 등록도 남기지 않는다(`note_success` 가 없다).
+- 타임아웃·5xx·네트워크로 실패한 후보는 다음 걸음에서 뒤로 가고, 그 후보가 성공하면 돌아온다.
+  기다림은 생기지 않는다.
+- `Runtime_connection_closed` 도 같은 증거를 남긴다(경로 분류 하나).
+- `Capacity_backpressure`·`Rotate_now`·`Exhausted_visible_alive` 는 증거를 남기지 않는다.
+- 첫 토큰 전에 양보한 시도는 기존 429 증거와 quota 관측을 지우지 않는다.
 - 예측·밴드·대시보드·TUI 에 preferred 필드가 없다.
 
 라이브(배포 뒤 1시간):
@@ -184,5 +237,6 @@ analyst, glm-coding 레인, 14:06Z~15:57Z.
 
 | 단계 | 내용 | 상태 |
 |---|---|---|
-| 1 | §3.2 전부 한 PR: sticky 삭제, 모듈 이름 변경, 드라이버·예측·밴드·대시보드·TUI·테스트 | RFC |
-| 2 | 배포 뒤 §6 측정, 결과를 이 RFC §5 에 적는다 | RFC |
+| 1 | §3.2 전부 한 PR: sticky 삭제, 모듈 이름 변경, 드라이버·예측·밴드·대시보드·TUI·테스트 | #36881 머지 |
+| 2 | §3.4 한 PR: 경로 값으로 증거 기록, 실패 증거 variant, 양보 시도의 성공 제외 | RFC |
+| 3 | 배포 뒤 §6 측정, 결과를 이 RFC §5 에 적는다 | RFC |

@@ -195,11 +195,11 @@ def openrouter_lists(monkeypatch):
 
     asked = []
 
-    def window(wire_model):
+    def limits(wire_model):
         asked.append(wire_model)
-        return 131072
+        return render_configs.OpenRouterLimits(max_context=111616, max_output=16384)
 
-    monkeypatch.setattr(render_configs, "openrouter_context_length", window)
+    monkeypatch.setattr(render_configs, "openrouter_limits", limits)
     return asked
 
 
@@ -258,32 +258,38 @@ def test_two_renders_of_one_arm_do_not_share_a_directory():
     assert (a / "runtime.toml").read_text() == (b / "runtime.toml").read_text()
 
 
-def test_an_openrouter_lane_declares_the_window_openrouter_lists(openrouter_lists):
+def test_an_openrouter_lane_declares_the_window_and_output_budget(openrouter_lists, tmp_path):
     # 0.35.19 refuses a runtime with no catalog max-context and no override
     # ("no silent default — RFC-0206 §2.1"), and OpenRouter models are not in
     # the catalog: masc_keeper_up answered "Model setup required" (2026-09-17).
-    rt = (render_arm("b", runtime_id="openrouter.z-ai/glm-4.7-flash", effort="high")
-          / "runtime.toml").read_text()
-    assert "max-context = 131072" in rt
+    import tomllib
+
+    out = render_arm("b", runtime_id="openrouter.z-ai/glm-4.7-flash", effort="high",
+                     out_root=tmp_path)
+    runtime = tomllib.loads((out / "runtime.toml").read_text())
+    assert runtime["models"]["z-ai-glm-4.7-flash"]["max-context"] == 111616
+    assert "max-context" not in runtime["providers"]["openrouter"]
+    overlay = tomllib.loads((out / "agent-core-models-overlay.toml").read_text())
+    assert overlay["models"][0]["max_output_tokens"] == 16384
     assert openrouter_lists == ["z-ai/glm-4.7-flash"]
 
 
-def test_a_catalog_lane_declares_no_window_override():
-    rt = (render_arm("b", runtime_id="anthropic.claude-fable-5", effort="high")
-          / "runtime.toml").read_text()
-    assert "max-context" not in rt
+def test_a_catalog_lane_declares_no_window_override(tmp_path):
+    import tomllib
+
+    out = render_arm("b", runtime_id="anthropic.claude-fable-5", effort="high",
+                     out_root=tmp_path)
+    runtime = tomllib.loads((out / "runtime.toml").read_text())
+    assert "max-context" not in runtime["models"]["claude-fable-5"]
 
 
-def test_a_model_openrouter_does_not_list_is_refused(monkeypatch):
+def endpoints_listing(monkeypatch, endpoints):
     import io
     import json
 
     import render_configs
 
-    listing = {"data": [{"id": "z-ai/glm-4.7-flash", "context_length": 200000,
-                         "top_provider": {"context_length": 131072}},
-                        {"id": "vendor/no-window", "context_length": None,
-                         "top_provider": {}}]}
+    fetched = []
 
     class Response(io.BytesIO):
         def __enter__(self):
@@ -292,10 +298,47 @@ def test_a_model_openrouter_does_not_list_is_refused(monkeypatch):
         def __exit__(self, *exc):
             return False
 
-    monkeypatch.setattr(render_configs.urllib.request, "urlopen",
-                        lambda *a, **k: Response(json.dumps(listing).encode()))
-    assert render_configs.openrouter_context_length("z-ai/glm-4.7-flash") == 131072
-    with pytest.raises(ValueError, match="no context_length"):
-        render_configs.openrouter_context_length("vendor/no-window")
-    with pytest.raises(ValueError, match="lists no model"):
-        render_configs.openrouter_context_length("vendor/absent")
+    def urlopen(url, **_):
+        fetched.append(url)
+        return Response(json.dumps({"data": {"endpoints": endpoints}}).encode())
+
+    render_configs.openrouter_limits.cache_clear()
+    monkeypatch.setattr(render_configs.urllib.request, "urlopen", urlopen)
+    return render_configs, fetched
+
+
+def test_every_endpoint_can_serve_the_declared_input_and_output(monkeypatch):
+    # The real z-ai/glm-4.7-flash endpoint list, 2026-09-17.
+    render_configs, fetched = endpoints_listing(monkeypatch, [
+        {"provider_name": "Venice", "context_length": 128000, "max_completion_tokens": 16384},
+        {"provider_name": "Cloudflare", "context_length": 131072, "max_completion_tokens": 117964},
+        {"provider_name": "Novita", "context_length": 200000, "max_completion_tokens": 128000},
+    ])
+    limits = render_configs.openrouter_limits("z-ai/glm-4.7-flash")
+    assert limits == render_configs.OpenRouterLimits(max_context=111616, max_output=16384)
+    render_configs.openrouter_limits("z-ai/glm-4.7-flash")
+    assert len(fetched) == 1, "read once per process"
+    render_configs.openrouter_limits.cache_clear()
+
+
+def test_an_endpoint_without_a_completion_limit_does_not_set_the_budget(monkeypatch):
+    render_configs, _ = endpoints_listing(monkeypatch, [
+        {"context_length": 64000, "max_completion_tokens": None},
+        {"context_length": 128000, "max_completion_tokens": 8192},
+    ])
+    assert render_configs.openrouter_limits("vendor/model") == (
+        render_configs.OpenRouterLimits(max_context=64000 - 8192, max_output=8192))
+    render_configs.openrouter_limits.cache_clear()
+
+
+@pytest.mark.parametrize("endpoints, reason", [
+    ([], "no endpoints"),
+    ([{"context_length": None, "max_completion_tokens": 4096}], "no context_length"),
+    ([{"context_length": 8192, "max_completion_tokens": None}], "declares max_completion_tokens"),
+    ([{"context_length": 8192, "max_completion_tokens": 8192}], "leaves no input"),
+])
+def test_limits_openrouter_cannot_state_are_refused(monkeypatch, endpoints, reason):
+    render_configs, _ = endpoints_listing(monkeypatch, endpoints)
+    with pytest.raises(ValueError, match=reason):
+        render_configs.openrouter_limits("vendor/model")
+    render_configs.openrouter_limits.cache_clear()

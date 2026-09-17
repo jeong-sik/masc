@@ -8,6 +8,29 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
+SITE_DOCS = ("docs-site/src/content/docs/getting-started/quickstart.md",
+             "docs-site/src/content/docs/ko/getting-started/quickstart.md")
+INSTALL_DOCS = ("README.md", "README.ko.md", "docs/INSTALL.md",
+                "docs/INSTALL.ko.md") + SITE_DOCS
+
+
+def checkout(destination):
+    # Local shared objects avoid copying history; refs and working files
+    # belong to this fixture. No original checkout/tag is modified.
+    subprocess.run(["git", "clone", "--quiet", "--shared", "--no-tags",
+                    "--single-branch", str(ROOT), str(destination)], check=True)
+    for name in ("check-doc-truth.sh", "check-version-truth.sh", "bump-version.sh"):
+        shutil.copy2(ROOT / "scripts" / name, destination / "scripts" / name)
+    return destination
+
+
+def package_version(repo):
+    return re.search(r"(?m)^\(version ([^)]+)\)", (repo / "dune-project").read_text()).group(1)
+
+
+def run_script(repo, env, script, *args):
+    return subprocess.run(["bash", "scripts/" + script, *args], cwd=repo,
+                          env=env, text=True, capture_output=True)
 
 
 class StableDocumentationInputs(unittest.TestCase):
@@ -15,19 +38,12 @@ class StableDocumentationInputs(unittest.TestCase):
     def setUpClass(cls):
         cls.temporary = tempfile.TemporaryDirectory(prefix="masc-doc-truth-")
         cls.addClassCleanup(cls.temporary.cleanup)
-        cls.repo = Path(cls.temporary.name) / "checkout"
-        # Local shared objects avoid copying history; refs and working files
-        # belong to this fixture. No original checkout/tag is modified.
-        subprocess.run(["git", "clone", "--quiet", "--shared", "--no-tags",
-                        "--single-branch", str(ROOT), str(cls.repo)], check=True)
-        for name in ("check-doc-truth.sh", "check-version-truth.sh"):
-            shutil.copy2(ROOT / "scripts" / name, cls.repo / "scripts" / name)
+        cls.repo = checkout(Path(cls.temporary.name) / "checkout")
         cls.env = {key: value for key, value in os.environ.items()
                    if not key.startswith("GIT_") and key != "GITHUB_REF"}
 
     def run_script(self, script, *args):
-        return subprocess.run(["bash", "scripts/" + script, *args], cwd=self.repo,
-                              env=self.env, text=True, capture_output=True)
+        return run_script(self.repo, self.env, script, *args)
 
     def test_tags_do_not_change_the_same_checkout_verdict(self):
         tags = subprocess.check_output(["git", "tag", "--list"], cwd=self.repo, text=True)
@@ -40,48 +56,47 @@ class StableDocumentationInputs(unittest.TestCase):
         self.assertEqual((after.returncode, after.stdout, after.stderr),
                          (before.returncode, before.stdout, before.stderr))
 
-    def test_candidate_install_pin_requires_explicit_availability_notice(self):
-        site_docs = ("docs-site/src/content/docs/getting-started/quickstart.md",
-                     "docs-site/src/content/docs/ko/getting-started/quickstart.md")
-        names = ("README.md", "README.ko.md", "docs/INSTALL.md",
-                 "docs/INSTALL.ko.md") + site_docs
-        publication_docs = ("ROADMAP.md", "docs/PRODUCT-OPERATING-PLAN.md")
-        originals = {name: (self.repo / name).read_text()
-                     for name in names + publication_docs}
-        version = re.search(r"(?m)^\(version ([^)]+)\)",
-                            (self.repo / "dune-project").read_text()).group(1)
-        notice = f"> Installation target: v{version} (check tag availability on GitHub Releases)."
-        # Model an unpublished candidate independently of today's release.
-        # The check requires the prior publication to name a real changelog row.
-        prior_versions = [value for value in re.findall(
-            r"(?m)^## \[([0-9][^]]*)\]", (self.repo / "CHANGELOG.md").read_text())
-                          if value != version]
-        self.assertTrue(prior_versions, "fixture needs a previous changelog release")
-        try:
-            for name, text in originals.items():
-                if name in publication_docs:
-                    text, count = re.subn(
-                        r"(?m)^(> Latest published GitHub release: )v[^ ]+",
-                        lambda match: match.group(1) + "v" + prior_versions[0], text)
-                    self.assertEqual(count, 1)
-                text = re.sub(r"(?m)^TAG=v[^ ]+$", "TAG=v" + version, text)
-                if name in site_docs:
-                    # The site pages carry the version in prose and a heading
-                    # as well as the pin, and name only one version.
-                    text = re.sub(r"[0-9]+\.[0-9]+\.[0-9]+", version, text)
-                if name.startswith("README") and notice not in text:
-                    text = notice + "\n\n" + text
-                (self.repo / name).write_text(text)
-            accepted = self.run_script("check-doc-truth.sh")
+    def test_bump_moves_every_install_pin_to_the_candidate(self):
+        # A separate checkout: the bump rewrites a dozen files this class's
+        # other tests read.
+        with tempfile.TemporaryDirectory(prefix="masc-bump-") as parent:
+            repo = checkout(Path(parent) / "checkout")
+            current = package_version(repo)
+            major, minor, patch = current.split(".")
+            candidate = f"{major}.{minor}.{int(patch) + 1}"
+            bumped = subprocess.run(["bash", "scripts/bump-version.sh", candidate],
+                                    cwd=repo, env=self.env, text=True, capture_output=True)
+            self.assertEqual(bumped.returncode, 0, bumped.stdout + bumped.stderr)
+
+            for name in INSTALL_DOCS:
+                pins = re.findall(r"(?m)^TAG=v(.+)$", (repo / name).read_text())
+                self.assertEqual(pins, [candidate], name)
+            for name in ("README.md", "README.ko.md"):
+                text = (repo / name).read_text()
+                self.assertEqual(re.findall(r"releases/tag/v([0-9.]+)", text), [candidate], name)
+            for name in SITE_DOCS:
+                versions = set(re.findall(r"[0-9]+\.[0-9]+\.[0-9]+", (repo / name).read_text()))
+                self.assertEqual(versions, {candidate}, name)
+
+            # The bump leaves a TBD changelog stub, which the version check
+            # refuses; a release fills it before tagging.
+            changelog = repo / "CHANGELOG.md"
+            filled, count = re.subn(r"(?m)^- TBD$", "- Fixture entry.",
+                                    changelog.read_text(), count=1)
+            self.assertEqual(count, 1)
+            changelog.write_text(filled)
+            accepted = run_script(repo, self.env, "check-doc-truth.sh")
             self.assertEqual(accepted.returncode, 0, accepted.stdout + accepted.stderr)
-            readme = self.repo / "README.md"
+
+            # The candidate is not the published release, so the pin stands
+            # only with the availability notice beside it.
+            notice = f"> Installation target: v{candidate} (check tag availability on GitHub Releases)."
+            readme = repo / "README.md"
+            self.assertIn(notice, readme.read_text())
             readme.write_text(readme.read_text().replace(notice, ""))
-            refused = self.run_script("check-doc-truth.sh")
+            refused = run_script(repo, self.env, "check-doc-truth.sh")
             self.assertNotEqual(refused.returncode, 0)
             self.assertIn("Installation target:", refused.stderr)
-        finally:
-            for name, text in originals.items():
-                (self.repo / name).write_text(text)
 
     def test_checked_in_version_mismatch_still_fails(self):
         path = self.repo / "dune-project"
@@ -98,9 +113,8 @@ class StableDocumentationInputs(unittest.TestCase):
             path.write_text(original)
 
     def test_explicit_release_tag_still_must_match_package(self):
-        version = re.search(r"(?m)^\(version ([^)]+)\)",
-                            (self.repo / "dune-project").read_text()).group(1)
-        good = self.run_script("check-version-truth.sh", "--tag", "v" + version)
+        version = package_version(self.repo)
+        good =self.run_script("check-version-truth.sh", "--tag", "v" + version)
         self.assertEqual(good.returncode, 0, good.stdout + good.stderr)
         bad = self.run_script("check-version-truth.sh", "--tag", "v999.0.0")
         self.assertNotEqual(bad.returncode, 0, bad.stdout + bad.stderr)

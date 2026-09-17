@@ -329,6 +329,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-keeper-vision-delegation-tool | Vision-as-a-tool delegation (decouple multimodal input from conversation runt... | Draft | - |
 | RFC-keeper-workspace-root-only | 시스템은 workspace root 만 정한다 (레이아웃 규정 폐기) | Draft | - |
 | RFC-keeper-writes-own-compositions | Keeper가 자기 composition 카탈로그를 쓴다 — 제안은 staged, 반영은 승인 뒤 | Draft | - |
+| RFC-last-path-resumes-after-progress | 마지막 경로가 잠깐 실패해도, 진전을 남긴 작업은 그 경로가 쉰 뒤 이어서 돈다 | Draft | - |
 | RFC-main-domain-scheduler-latency | Main domain scheduler latency: measure it, then remove what makes it wait | Draft | - |
 | RFC-mcp-dual-bearer-oauth | MCP dual authentication: static bearer and local OAuth 2.1 | Draft | - |
 | RFC-memory-os-bounded-context-and-librarian-curator | Memory OS 2.0 — bounded working set 전송 계약과 librarian curator 계약 | Draft | - |

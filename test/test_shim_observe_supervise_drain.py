@@ -111,6 +111,9 @@ def main():
         root = Path(temporary)
         config = root / "shim.conf"
         config.write_text(f"remote_root={root}\nscratch_root={root}\n")
+        # The shim refuses a config its group or every user may write; set the
+        # mode rather than leave it to the umask.
+        config.chmod(0o644)
         status, stdout, stderr = call(
             binary, root, config, major, ["python3", "-c", CHILD_SCRIPT], timeout_sec=10)
         text_out = stdout.decode(errors="replace")

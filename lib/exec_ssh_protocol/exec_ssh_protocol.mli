@@ -87,6 +87,13 @@ val user_notif_capability : string
     2, a separate PR: fd-passing and the supervisor's read/decode/respond
     loop). *)
 
+val github_token_env_names : string list
+(** The environment names a GitHub token rides in: [GH_TOKEN], [GITHUB_TOKEN],
+    [GH_ENTERPRISE_TOKEN], [GITHUB_ENTERPRISE_TOKEN]. The server strips them
+    from what a keeper's commands inherit so each keeper acts as its own
+    GitHub identity ([GH_CONFIG_DIR]); the shim refuses them in an endpoint's
+    [env_file] for the same reason. *)
+
 val default_scratch_root : string
 (** [/tmp]: where a shim makes a boxed request's scratch when its config
     names no [scratch_root]. Shared with the microvm boot, which mounts the

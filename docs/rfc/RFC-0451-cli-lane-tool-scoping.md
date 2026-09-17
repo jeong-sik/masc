@@ -36,13 +36,15 @@ related: ["attached-service-tool-scoping", "0434", "0413"]
 
 ## 1. 지금 무엇이 도구를 고르는가
 
-Keeper 하나의 턴 도구 집합은 `Keeper_capability_surface.create` 가 정한다. 인자는 하나뿐이다.
+Keeper 하나의 턴 도구 집합은 `Keeper_capability_surface.create` 가 정한다. 도구를 빼는 인자는 둘이다.
 
 ```ocaml
-val create : tool_deny:string list -> ... -> t
+val create :
+  tool_deny:string list ->
+  sandbox_profile:Keeper_types_profile_sandbox.sandbox_profile -> ... -> t
 ```
 
-`tool_deny` 는 **거부 목록**이다. 프로필이 이름을 대고 빼지 않으면 모든 Keeper 가 모든 모델 가시 도구를 든다. 허용 목록은 없다.
+`tool_deny` 는 **거부 목록**이다. `sandbox_profile` 은 그 lane 이 돌릴 수 없는 도구를 뺀다(지금은 microvm·remote_ssh 의 spawn 도구 네 개, `Keeper_spawn_boundary`). 빠진 도구는 인벤토리 행에 `denied_by_profile`·`refused_by_sandbox` 로 남는다. 이 둘로 빼지 않으면 모든 Keeper 가 모든 모델 가시 도구를 든다. 허용 목록은 없다.
 
 그래서 표면 증가를 막는 유일한 장치가 전역 바이트 상한(`test_keeper_tool_schema_bytes.ml`)이다. 상한은 범위 지정의 대역이지 범위 지정이 아니다. 도구가 하나 늘 때마다 숫자를 올리고 "무엇을 샀는지" 를 적는 일이 반복되는 이유다 — 그 기록으로 파일에 적힌 PR 번호가 12개다(`rg -o "#3[0-9]{4}" test/test_keeper_tool_schema_bytes.ml | sort -u | wc -l`).
 

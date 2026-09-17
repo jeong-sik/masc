@@ -4769,6 +4769,9 @@ type state = {
   mutable keeper_config_view: (string * string list) option;
   mutable keeper_config_view_error: string option;
   mutable github_identity_view: (string * string list) option;
+  mutable github_identity_view_error: string option;
+  mutable github_token_input: string option;
+  mutable github_token_save_status: string option;
   (* The Identity tab. Stamped with the keeper it was fetched for, like the
      other fetched tabs, so the pane shows loading rather than another
      keeper's answer. The providers are held rather than pre-rendered lines
@@ -4794,7 +4797,6 @@ type state = {
      until it is sent, and cleared with the form -- a field left filled is a
      credential sitting in the process for as long as the pane is up. *)
   mutable identity_app_form: identity_app_form option;
-  mutable github_identity_view_error: string option;
   mutable task_cursor: int;
   mutable task_detail_id: string option;
   mutable task_detail_scroll: int;
@@ -5712,6 +5714,7 @@ type text_input_target =
   | Text_row_search
   | Text_identity_app_form
   | Text_identity_filter
+  | Text_github_token
   | Text_board_draft
 
 (* The order is the key dispatch's order, which is what an operator already
@@ -5722,6 +5725,11 @@ let text_input_target (state : state) ~compact_viewport =
   let identity_surface =
     state.view = Keepers Keeper_detail
     && state.detail_tab = Detail_identity
+    && not compact_viewport
+  in
+  let github_surface =
+    state.view = Keepers Keeper_detail
+    && state.detail_tab = Detail_github
     && not compact_viewport
   in
   if state.keeper_deletions_open then None
@@ -5750,6 +5758,8 @@ let text_input_target (state : state) ~compact_viewport =
     Some Text_identity_app_form
   else if identity_surface && Option.is_some state.identity_filter then
     Some Text_identity_filter
+  else if github_surface && Option.is_some state.github_token_input then
+    Some Text_github_token
   else if state.view = Board && state.board_mode = Board_compose then
     Some Text_board_draft
   else None
@@ -6603,6 +6613,8 @@ let create_state
   keeper_config_view = None;
   keeper_config_view_error = None;
   github_identity_view = None;
+  github_token_input = None;
+  github_token_save_status = None;
   identity_view = None;
   identity_view_error = None;
   identity_login = None;

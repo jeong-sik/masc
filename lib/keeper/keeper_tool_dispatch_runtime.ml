@@ -21,35 +21,55 @@ type descriptor_dispatch_resolution =
   | Return_descriptor_invariant of Keeper_tool_descriptor.t
   | Try_registered_only_route
 
+(* Why the call is outside the surface. A tool the profile denies or the
+   sandbox refuses keeps an inventory row that names the reason, and the
+   rejection repeats it, so [keeper_tools_list] and this answer agree. A name
+   registered only in dispatch, or a descriptor value the surface does not
+   hold, has no row. *)
+type frozen_surface_absence =
+  | No_inventory_row
+  | Inventory_row of Keeper_capability_surface.capability_availability
+
 type frozen_surface_admission_error =
   | Descriptor_outside_frozen_surface of
       { requested_tool : string
       ; descriptor_id : string
+      ; absence : frozen_surface_absence
       }
-  | Tool_name_absent_from_frozen_surface of { requested_tool : string }
+  | Tool_name_absent_from_frozen_surface of
+      { requested_tool : string
+      ; absence : frozen_surface_absence
+      }
+
+let absence_of_row = function
+  | Some availability -> Inventory_row availability
+  | None -> No_inventory_row
+;;
 
 let frozen_surface_admission_error_to_execution error =
-  let requested_tool, detail_fields =
+  let requested_tool, absence, detail_fields =
     match error with
-    | Descriptor_outside_frozen_surface { requested_tool; descriptor_id } ->
-      requested_tool, [ "descriptor_id", `String descriptor_id ]
-    | Tool_name_absent_from_frozen_surface { requested_tool } ->
-      requested_tool, []
+    | Descriptor_outside_frozen_surface { requested_tool; descriptor_id; absence } ->
+      requested_tool, absence, [ "descriptor_id", `String descriptor_id ]
+    | Tool_name_absent_from_frozen_surface { requested_tool; absence } ->
+      requested_tool, absence, []
+  in
+  let availability_fields =
+    match absence with
+    | No_inventory_row -> [ "availability", `String "outside_tool_surface" ]
+    | Inventory_row availability ->
+      ( "availability"
+      , `String
+          (Keeper_capability_surface.capability_availability_to_string availability) )
+      :: Keeper_capability_surface.availability_detail_fields availability
   in
   let data =
     `Assoc
       ([ "ok", `Bool false
        ; "error", `String "tool_outside_frozen_capability_surface"
        ; "tool", `String requested_tool
-         (* Spelled here rather than taken from
-            [Keeper_capability_surface.capability_availability], which
-            describes a row in the frozen inventory. This is the opposite
-            situation -- the name the model called is in no row at all. The
-            two read the same because that type used to carry an
-            [Outside_tool_surface] constructor, which #31728 made unreachable
-            and this purge removed. *)
-       ; "availability", `String "outside_tool_surface"
        ]
+       @ availability_fields
        @ detail_fields)
   in
   Keeper_tool_execution.failure_data
@@ -68,7 +88,14 @@ let admit_descriptor capability_authority ~requested_tool descriptor =
     else
       Error
         (Descriptor_outside_frozen_surface
-           { requested_tool; descriptor_id = descriptor.Keeper_tool_descriptor.id })
+           { requested_tool
+           ; descriptor_id = descriptor.Keeper_tool_descriptor.id
+           ; absence =
+               absence_of_row
+                 (Keeper_capability_surface.tool_row_availability
+                    capability_surface
+                    descriptor)
+           })
 ;;
 
 let admit_tool_name capability_authority requested_tool =
@@ -83,7 +110,16 @@ let admit_tool_name capability_authority requested_tool =
       Keeper_capability_surface.descriptors capability_surface
       |> List.exists is_exposed_name
     then Ok ()
-    else Error (Tool_name_absent_from_frozen_surface { requested_tool })
+    else
+      Error
+        (Tool_name_absent_from_frozen_surface
+           { requested_tool
+           ; absence =
+               absence_of_row
+                 (Keeper_capability_surface.tool_row_availability_for_name
+                    capability_surface
+                    requested_tool)
+           })
 ;;
 
 let resolve_descriptor_dispatch = function

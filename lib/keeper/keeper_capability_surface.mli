@@ -15,8 +15,11 @@ type capability_availability =
       (** A model-visible Tool the Keeper profile's [tool_deny] names. It is
           not in {!descriptors}; the row says why. *)
   | Refused_by_sandbox of { detail : string }
-      (** A model-visible Tool the Keeper's sandbox profile cannot run, with
-          the refusal the handler would return. It is not in {!descriptors}. *)
+      (** A model-visible Tool the Keeper's sandbox profile cannot run. [detail]
+          is the start refusal {!Keeper_spawn_boundary.of_sandbox_profile}
+          gives: the handler's own answer for [keeper_spawn], and for
+          [keeper_spawn_read]/[_wait]/[_stop] the reason no handle can exist
+          for them to address. It is not in {!descriptors}. *)
   | Node_tools_outside_surface of { tools : string list }
       (** A composition Skill whose plan runs node tools this surface does not
           admit, named by their model names. The composition is withheld from
@@ -72,8 +75,8 @@ val create
     ["keeper_spawn"; "masc_keeper_delegate"]) the keeper's profile
     refuses; matching descriptors are neither listed to the model nor present
     in the dispatch bundle built from {!descriptors}, and their inventory row
-    reads [Denied_by_profile]. Names that match no model-visible descriptor
-    deny nothing -- the setup site logs them. A keeper with no selection passes
+    reads [Denied_by_profile]. A name that matches no model-visible descriptor
+    is refused where the profile loads. A keeper with no selection passes
     [[]]: the argument is mandatory because an optional here would sit in
     front of only labelled arguments, which OCaml never erases.
 
@@ -87,6 +90,16 @@ val descriptors : t -> Keeper_tool_descriptor.t list
 val admits : t -> Keeper_tool_descriptor.t -> bool
 (** Whether this exact descriptor value is on the surface. Direct dispatch and
     composition withholding both decide with this predicate. *)
+
+val tool_row_availability :
+  t -> Keeper_tool_descriptor.t -> capability_availability option
+(** The inventory row for this exact descriptor value, or [None] when no row
+    holds it. *)
+
+val tool_row_availability_for_name : t -> string -> capability_availability option
+(** The inventory row whose descriptor answers to this model name, or [None]
+    when no row does. A dispatch rejection reports this instead of a bare
+    "outside the surface" when a row exists. *)
 
 val skill_projection : t -> Keeper_skill_catalog.turn_projection
 val skill_catalog : t -> Keeper_skill_catalog.t
@@ -113,7 +126,9 @@ val capability_availability_to_string : capability_availability -> string
 val availability_detail_fields : capability_availability -> (string * Yojson.Safe.t) list
 (** The fields an availability carries beyond its name: [sandbox_refusal] for
     [Refused_by_sandbox], [outside_node_tools] for [Node_tools_outside_surface],
-    none for the rest. Every row that prints an availability appends these. *)
+    none for the rest. The model-facing rows append these: [keeper_tools_list],
+    capability search, and a frozen-surface dispatch rejection. Digest material
+    carries the availability name only. *)
 val skill_capability_to_yojson : skill_capability -> Yojson.Safe.t
 val candidate_to_yojson : candidate -> Yojson.Safe.t
 val candidate_name : candidate -> string

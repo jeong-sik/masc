@@ -5205,14 +5205,18 @@ let composition_invocation ~completion =
     ~completion
 ;;
 
-let frozen_capability_surface () =
+let frozen_capability_surface
+      ?(tool_deny = [])
+      ?(sandbox_profile = Masc.Keeper_types_profile.Docker)
+      ()
+  =
   let snapshot =
     Skill_catalog_snapshot.config_unreadable
       ~detail:"dispatch boundary test has no Skill sources"
   in
   Masc.Keeper_capability_surface.create
-    ~tool_deny:[]
-    ~sandbox_profile:Masc.Keeper_types_profile.Docker
+    ~tool_deny
+    ~sandbox_profile
     ~skill_names:None
     ~global_skill_catalog:Masc.Keeper_skill_catalog.empty
     ~skill_inventory:(Masc.Keeper_skill_inventory.of_snapshot snapshot)
@@ -5300,12 +5304,10 @@ let check_frozen_surface_rejection label (result : KET.executed_tool_result) =
     Yojson.Safe.Util.(data |> member "error" |> to_string)
 ;;
 
-(* [Read] used to stand here too: a Keeper could declare tool groups and leave
-   it out, so dispatching it was a rejection. #31728 removed that declaration
-   and the surface now holds every model-visible descriptor, so no capability
-   surface can exclude [Read] and the half that asked for it is gone. What a
-   surface still does not hold is a name registered only in [Tool_dispatch]
-   with no descriptor behind it, which is what this covers. *)
+(* A surface with no deny and a sandbox that runs every Tool holds every
+   model-visible descriptor. What it still does not hold is a name registered
+   only in [Tool_dispatch] with no descriptor behind it, which is what this
+   covers; a denied or sandbox-refused Tool is covered below. *)
 let test_frozen_surface_direct_dispatch_rejects_registered_only_tool () =
   with_exec_fixture "frozen-surface-direct-excluded"
   @@ fun ~config ~meta ~publication_recovery ~ctx_work ->
@@ -5324,7 +5326,54 @@ let test_frozen_surface_direct_dispatch_rejects_registered_only_tool () =
   in
   check_frozen_surface_rejection
     "registered-only fallback"
-    registered_result
+    registered_result;
+  check string "a name with no inventory row reads outside the surface"
+    "outside_tool_surface"
+    Yojson.Safe.Util.(
+      execution_data_exn "registered-only fallback" registered_result
+      |> member "availability"
+      |> to_string)
+;;
+
+(* A Tool the profile denies or the sandbox refuses keeps an inventory row, and
+   calling it by name answers with that row's reason, the same words
+   [keeper_tools_list] shows for it. *)
+let test_frozen_surface_rejection_names_the_inventory_reason () =
+  with_exec_fixture "frozen-surface-rejection-reason"
+  @@ fun ~config ~meta ~publication_recovery ~ctx_work ->
+  let call ~capability_surface name =
+    KET.execute_keeper_tool_call_for_capability_surface_with_outcome
+      ~capability_surface
+      ~config
+      ~meta
+      ~publication_recovery
+      ~ctx_work
+      ~name
+      ~input:(`Assoc [])
+      ()
+  in
+  let denied =
+    call
+      ~capability_surface:(frozen_capability_surface ~tool_deny:[ "keeper_lane_status" ] ())
+      "keeper_lane_status"
+  in
+  check_frozen_surface_rejection "denied Tool" denied;
+  check string "a denied call names the deny" "denied_by_profile"
+    Yojson.Safe.Util.(
+      execution_data_exn "denied Tool" denied |> member "availability" |> to_string);
+  let refused =
+    call
+      ~capability_surface:
+        (frozen_capability_surface ~sandbox_profile:Masc.Keeper_types_profile.Micro_vm ())
+      "keeper_spawn"
+  in
+  check_frozen_surface_rejection "sandbox-refused Tool" refused;
+  let refused_data = execution_data_exn "sandbox-refused Tool" refused in
+  check string "a refused call names the sandbox" "refused_by_sandbox"
+    Yojson.Safe.Util.(refused_data |> member "availability" |> to_string);
+  check bool "a refused call carries the start refusal" true
+    (Option.is_some
+       Yojson.Safe.Util.(refused_data |> member "sandbox_refusal" |> to_string_option))
 ;;
 
 let test_frozen_surface_direct_dispatch_accepts_included_exact_descriptor () =
@@ -9757,6 +9806,8 @@ let () =
         test_surface_post_append_failure_does_not_complete_terminal_effect;
       test_case "frozen surface rejects a registered-only tool" `Quick
         test_frozen_surface_direct_dispatch_rejects_registered_only_tool;
+      test_case "frozen surface rejection names the inventory reason" `Quick
+        test_frozen_surface_rejection_names_the_inventory_reason;
       test_case "frozen surface accepts its exact descriptor" `Quick
         test_frozen_surface_direct_dispatch_accepts_included_exact_descriptor;
       test_case "frozen surface rejects a same-id counterfeit descriptor" `Quick

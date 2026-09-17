@@ -337,11 +337,11 @@ let test_catalog_status_tracks_source_precedence () =
   | valid -> failf "expected two exact valid items, got %d" (List.length valid)
 ;;
 
-(* Every Tool the inventory carries is either callable this turn or not
-   something the model can call at all. There is no third state: until #31728
-   a Keeper could declare tool groups and put a model-visible Tool outside its
-   own surface, and no Keeper ever did. *)
-let test_every_inventoried_tool_is_active_or_not_model_invocable () =
+(* With no deny and a sandbox that runs every Tool, each inventoried Tool is
+   either callable this turn or not something the model can call at all. A
+   deny or a sandbox refusal is the only way a model-visible Tool reads
+   otherwise; the tests below cover those. *)
+let test_unrestricted_inventory_is_active_or_not_model_invocable () =
   let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
   let frozen = snapshot config [ [] ] in
   let surface = capability_surface frozen in
@@ -904,14 +904,33 @@ let test_spawn_start_follows_sandbox_profile () =
             with
             | None -> fail (label ^ " keeper has no inventory row for " ^ name)
             | Some row ->
-              check bool (label ^ " " ^ name ^ " row carries the handler's refusal") true
+              check bool (label ^ " " ^ name ^ " row carries the start refusal") true
                 (row.availability
                  = Masc.Keeper_capability_surface.Refused_by_sandbox
                      { detail = expected_refusal });
               check (option string) (label ^ " " ^ name ^ " row names no invocation") None
                 (Masc.Keeper_capability_surface.candidate_invocation_name
-                   (Masc.Keeper_capability_surface.Ordinary_tool row)))
-         spawn_tools)
+                   (Masc.Keeper_capability_surface.Ordinary_tool row));
+              check (option string) (label ^ " " ^ name ^ " row prints the refusal")
+                (Some expected_refusal)
+                Yojson.Safe.Util.(
+                  Masc.Keeper_capability_surface.candidate_to_yojson
+                    (Masc.Keeper_capability_surface.Ordinary_tool row)
+                  |> member "capability"
+                  |> member "sandbox_refusal"
+                  |> to_string_option))
+         spawn_tools;
+       let denied_and_refused =
+         capability_surface ~tool_deny:[ "keeper_spawn" ] ~sandbox_profile frozen
+       in
+       check bool (label ^ " a deny names the reason ahead of the sandbox") true
+         (List.exists
+            (fun (capability : Masc.Keeper_capability_surface.tool_capability) ->
+               List.mem "keeper_spawn"
+                 (Masc.Keeper_tool_descriptor.keeper_model_names capability.descriptor)
+               && capability.availability
+                  = Masc.Keeper_capability_surface.Denied_by_profile)
+            (Masc.Keeper_capability_surface.tool_capabilities denied_and_refused)))
     [ "microvm", Masc.Keeper_types_profile.Micro_vm
     ; "remote_ssh", Masc.Keeper_types_profile.Remote_ssh
     ]
@@ -1127,8 +1146,8 @@ let () =
             test_invalid_sibling_isolated_with_digest
         ; test_case "catalog source precedence" `Quick
             test_catalog_status_tracks_source_precedence
-        ; test_case "every inventoried Tool is active or not model invocable" `Quick
-            test_every_inventoried_tool_is_active_or_not_model_invocable
+        ; test_case "unrestricted inventory is active or not model invocable" `Quick
+            test_unrestricted_inventory_is_active_or_not_model_invocable
         ; test_case "operator-only Tool inventory and search" `Quick
             test_operator_only_tool_is_in_inventory_and_search
         ; test_case "complete inventory preserves Agent Core surface" `Quick

@@ -128,8 +128,8 @@ let create
      way it is not listed to the model and not in the dispatch bundle. Its
      inventory row stays, under the reason, so an operator reading the
      inventory sees why the tool is absent; a row is not an invocation, and
-     [candidate_invocation_name] answers only for an active candidate. The
-     setup site logs any deny entry that named nothing. *)
+     [candidate_invocation_name] answers only for an active candidate. A deny
+     entry that names nothing is refused where the profile loads. *)
   let denied descriptor =
     tool_deny <> []
     && List.exists
@@ -140,11 +140,14 @@ let create
      a process: the handler refuses every start with the rule applied here.
      Read, wait and stop address handles in the turn's spawn registry, which is
      created per turn and filled only by a start, so on such a profile they
-     could only answer that the handle is unknown. *)
+     could only answer that the handle is unknown. Every one of the four
+     carries the start refusal, the reason none of them can do anything. Like a
+     deny, it applies only to a descriptor the model could otherwise call. *)
   let sandbox_refusal descriptor =
     if
       descriptor.Keeper_tool_descriptor.runtime_handler
       = Keeper_tool_descriptor.Tool_keeper_spawn_dispatch
+      && Keeper_tool_descriptor.keeper_model_names descriptor <> []
     then (
       match Keeper_spawn_boundary.of_sandbox_profile sandbox_profile with
       | Keeper_spawn_boundary.Refuses_start { detail } -> Some detail
@@ -205,6 +208,22 @@ let create
 
 let descriptors surface = surface.descriptors
 let admits surface descriptor = descriptor_admitted surface.descriptors descriptor
+
+let tool_row_availability surface descriptor =
+  List.find_map
+    (fun (capability : tool_capability) ->
+       if capability.descriptor == descriptor then Some capability.availability else None)
+    surface.tool_capabilities
+;;
+
+let tool_row_availability_for_name surface name =
+  List.find_map
+    (fun (capability : tool_capability) ->
+       if List.mem name (Keeper_tool_descriptor.keeper_model_names capability.descriptor)
+       then Some capability.availability
+       else None)
+    surface.tool_capabilities
+;;
 let skill_projection surface = surface.skill_projection
 let skill_catalog surface = surface.skill_projection.catalog
 let tool_capabilities surface = surface.tool_capabilities

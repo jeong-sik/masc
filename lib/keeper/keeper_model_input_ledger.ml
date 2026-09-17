@@ -6,6 +6,7 @@ type request =
   ; atom_count : int
   ; tail_bytes : int
   ; turn_context : bool
+  ; demote_before : int
   }
 
 type usage =
@@ -23,6 +24,7 @@ type t =
   { prefix_digest : string
   ; total_tokens : int option
   ; measured_end_atom : int option
+  ; measured_demote_before : int option
   ; blocks : block list
   ; last : request
   ; last_usage : usage option
@@ -65,6 +67,7 @@ let start (request : request) (usage : usage option) =
   { prefix_digest = request.prefix_digest
   ; total_tokens = Option.map (fun (u : usage) -> u.input_tokens) usage
   ; measured_end_atom = Option.map (fun (_ : usage) -> request.atom_count) usage
+  ; measured_demote_before = Option.map (fun (_ : usage) -> request.demote_before) usage
   ; blocks = [ base_block request ]
   ; last = request
   ; last_usage = usage
@@ -108,6 +111,44 @@ let assign_tail blocks ~from_atom ~delta =
         ; tokens = Some delta
         }
       ]
+;;
+
+(* The demotion boundary moved between the sample the total describes and
+   this one, so the atoms from [changed_from] on are carried in another form
+   than they were measured in. Those blocks and the atoms appended since the
+   sample become one block. The difference is exactly the appended atoms plus
+   the change of the reformed ones, so adding back what the reformed blocks
+   weighed leaves what they and the appended atoms weigh now. Unknown when a
+   reformed block was never measured. *)
+let merge_reformed blocks ~changed_from ~measured_end ~delta =
+  let before, after = List.partition (fun b -> b.block_end_atom <= changed_from) blocks in
+  match after with
+  | [] -> blocks, false
+  | first :: _ ->
+    let last = List.nth after (List.length after - 1) in
+    (* Blocks past [measured_end] are the appended atoms [delta] measures. *)
+    let reformed = List.filter (fun b -> b.block_first_atom < measured_end) after in
+    let weighed =
+      List.fold_left
+        (fun sum b ->
+           match sum, b.tokens with
+           | Some total, Some tokens -> Some (total + tokens)
+           | Some _, None | None, (Some _ | None) -> None)
+        (Some 0)
+        reformed
+    in
+    let tokens =
+      match weighed with
+      | Some old when old + delta >= 0 -> Some (old + delta)
+      | Some _ | None -> None
+    in
+    ( before
+      @ [ { block_first_atom = first.block_first_atom
+          ; block_end_atom = last.block_end_atom
+          ; tokens
+          }
+        ]
+    , Option.is_some tokens )
 ;;
 
 let rec observe (previous : t option) (request : request) (usage : usage option)
@@ -170,26 +211,36 @@ and observe_trimmed (t : t) (request : request) (usage : usage option)
       | Some u, Some total -> Some (u.input_tokens - total)
       | Some _, None | None, (Some _ | None) -> None
     in
-    (* A negative difference is a tail that shrank by more than the new atoms
-       added; it is reported but not written into a block. *)
-    let blocks, measured =
-      match delta_tokens, t.measured_end_atom with
-      | Some delta, Some from_atom when new_atoms > 0 && delta >= 0 ->
-        assign_tail blocks ~from_atom ~delta, true
-      | Some _, (Some _ | None) | None, (Some _ | None) -> blocks, false
+    let reformed_from =
+      match t.measured_demote_before with
+      | Some before when before <> request.demote_before ->
+        Some (min before request.demote_before)
+      | Some _ | None -> None
     in
-    let total_tokens, measured_end_atom =
+    (* A negative difference with no reformed atoms is reported but not
+       written into a block. *)
+    let blocks, measured =
+      match delta_tokens, t.measured_end_atom, reformed_from with
+      | Some delta, Some measured_end, Some changed_from ->
+        merge_reformed blocks ~changed_from ~measured_end ~delta
+      | Some delta, Some from_atom, None when new_atoms > 0 && delta >= 0 ->
+        assign_tail blocks ~from_atom ~delta, true
+      | Some _, Some _, None | Some _, None, (Some _ | None) | None, (Some _ | None), (Some _ | None)
+        -> blocks, false
+    in
+    let total_tokens, measured_end_atom, measured_demote_before =
       match usage with
-      | Some u -> Some u.input_tokens, Some request.atom_count
+      | Some u -> Some u.input_tokens, Some request.atom_count, Some request.demote_before
       | None ->
         (match previous_total, t.measured_end_atom with
-         | Some total, Some at -> Some total, Some at
-         | Some _, None | None, (Some _ | None) -> None, None)
+         | Some total, Some at -> Some total, Some at, t.measured_demote_before
+         | Some _, None | None, (Some _ | None) -> None, None, None)
     in
     let ledger =
       { prefix_digest = t.prefix_digest
       ; total_tokens
       ; measured_end_atom
+      ; measured_demote_before
       ; blocks
       ; last = request
       ; last_usage = (match usage with Some _ -> usage | None -> t.last_usage)
@@ -220,16 +271,18 @@ let move_front (t : t) ~first_atom =
       { t with
         total_tokens = None
       ; measured_end_atom = None
+      ; measured_demote_before = None
       ; blocks = [ base_block last ]
       ; last
       }
     | `Trimmed (kept, evicted_tokens) ->
-      let total_tokens, measured_end_atom =
+      let total_tokens, measured_end_atom, measured_demote_before =
         match t.total_tokens, evicted_tokens with
-        | Some total, Some evicted -> Some (total - evicted), t.measured_end_atom
-        | Some _, None | None, (Some _ | None) -> None, None
+        | Some total, Some evicted ->
+          Some (total - evicted), t.measured_end_atom, t.measured_demote_before
+        | Some _, None | None, (Some _ | None) -> None, None, None
       in
-      { t with total_tokens; measured_end_atom; blocks = kept; last })
+      { t with total_tokens; measured_end_atom; measured_demote_before; blocks = kept; last })
 ;;
 
 let known_tokens t =
@@ -286,6 +339,7 @@ let to_json t =
     ; "atom_count", `Int t.last.atom_count
     ; "tail_bytes", `Int t.last.tail_bytes
     ; "turn_context", `Bool t.last.turn_context
+    ; "demote_before", `Int t.last.demote_before
     ; "blocks", `Int (List.length t.blocks)
     ; ( "measured_blocks"
       , `Int (List.length (List.filter (fun b -> Option.is_some b.tokens) t.blocks)) )

@@ -16,12 +16,13 @@ let request
       ?(prefix_digest = prefix)
       ?(tail_bytes = 100)
       ?(turn_context = false)
+      ?(demote_before = 0)
       ~first_atom
       ~atom_count
       ()
   : Ledger.request
   =
-  { prefix_digest; first_atom; atom_count; tail_bytes; turn_context }
+  { prefix_digest; first_atom; atom_count; tail_bytes; turn_context; demote_before }
 ;;
 
 let usage ?(cache_read_input_tokens = 0) input_tokens : Ledger.usage =
@@ -103,6 +104,63 @@ let test_turn_context_request_starts_without_a_total () =
   check (option int) "no delta against no total" None o2.delta_tokens;
   check (option int) "the sample becomes the total" (Some 1_300) o2.ledger.total_tokens;
   check (option int) "measured up to the sample" (Some 12) o2.ledger.measured_end_atom
+;;
+
+(* A turn boundary moves the demotion boundary: the previous turn's tool
+   results go out as markers from then on. The reformed block and the atoms
+   appended since become one block weighing its old count plus the difference,
+   which is what they weigh now, even when the difference is negative. *)
+let test_moved_demotion_boundary_merges_the_reformed_blocks () =
+  let o1 =
+    step None (request ~first_atom:0 ~atom_count:10 ~demote_before:10 ()) (Some (usage 1_000))
+  in
+  let o2 =
+    step
+      (Some o1.ledger)
+      (request ~first_atom:0 ~atom_count:14 ~demote_before:10 ())
+      (Some (usage 1_400))
+  in
+  check blocks_testable "measured under one boundary"
+    [ 0, 10, None; 10, 14, Some 400 ]
+    (block_tokens o2.ledger);
+  let o3 =
+    step
+      (Some o2.ledger)
+      (request ~first_atom:0 ~atom_count:16 ~demote_before:14 ())
+      (Some (usage 1_450))
+  in
+  check string "event" "appended_measured" (Ledger.event_to_string o3.event);
+  check (option int) "delta" (Some 50) o3.delta_tokens;
+  check blocks_testable "the reformed block and the new atoms: 400 + 50"
+    [ 0, 10, None; 10, 16, Some 450 ]
+    (block_tokens o3.ledger);
+  let shrank =
+    step
+      (Some o2.ledger)
+      (request ~first_atom:0 ~atom_count:16 ~demote_before:14 ())
+      (Some (usage 1_350))
+  in
+  check (option int) "the demotion saved more than was appended" (Some (-50)) shrank.delta_tokens;
+  check blocks_testable "still written: 400 - 50"
+    [ 0, 10, None; 10, 16, Some 350 ]
+    (block_tokens shrank.ledger)
+;;
+
+let test_moved_demotion_boundary_over_an_unmeasured_block_leaves_it_unknown () =
+  let o1 =
+    step None (request ~first_atom:0 ~atom_count:10 ~demote_before:0 ()) (Some (usage 1_000))
+  in
+  let o2 =
+    step
+      (Some o1.ledger)
+      (request ~first_atom:0 ~atom_count:12 ~demote_before:10 ())
+      (Some (usage 1_100))
+  in
+  check string "event" "appended_unmeasured" (Ledger.event_to_string o2.event);
+  check blocks_testable "the cold block and the new atoms merge unmeasured"
+    [ 0, 12, None ]
+    (block_tokens o2.ledger);
+  check (option int) "the total is the new sample" (Some 1_100) o2.ledger.total_tokens
 ;;
 
 let test_usage_gap_measures_the_stretch_as_one_block () =
@@ -333,9 +391,8 @@ let test_repeated_range_without_usage_changes_nothing () =
   check blocks_testable "blocks kept" [ 0, 10, None ] (block_tokens o2.ledger)
 ;;
 
-(* Carried atoms can get cheaper between two samples: after a refusal the
-   last resort sends this turn's tool results as markers. The difference then
-   comes out negative. It is reported; no block is written. *)
+(* A difference that comes out negative under an unchanged demotion boundary
+   is reported; no block is written. *)
 let test_negative_difference_is_reported_not_written () =
   let o1 = step None (request ~first_atom:0 ~atom_count:10 ()) (Some (usage 1_000)) in
   let o2 =
@@ -450,6 +507,10 @@ let () =
         ; test_case "turn context" `Quick test_turn_context_request_is_not_a_sample
         ; test_case "turn context first" `Quick
             test_turn_context_request_starts_without_a_total
+        ; test_case "demotion boundary moved" `Quick
+            test_moved_demotion_boundary_merges_the_reformed_blocks
+        ; test_case "demotion over the cold block" `Quick
+            test_moved_demotion_boundary_over_an_unmeasured_block_leaves_it_unknown
         ; test_case "usage gap" `Quick test_usage_gap_measures_the_stretch_as_one_block
         ; test_case "repeated range" `Quick test_repeated_range_adds_no_block
         ; test_case "repeated without usage" `Quick

@@ -532,6 +532,9 @@ type composed =
   ; history_atom_count : int
   ; origin : Keeper_carried_front.origin
   ; outlived_seed : Keeper_carried_front.seed option
+  ; demote_before : int
+        (* The boundary the demotion actually applied: 0 when demotion is off,
+           the whole history under the last resort. *)
   }
 
 (* What one provider attempt carries between its requests and the retry
@@ -557,10 +560,16 @@ let ledger_session (ctx : try_provider_ctx) =
   | None -> "-"
 ;;
 
+(* An empty base path turns demotion off, so no atom is below the boundary. *)
+let applied_demote_before ~base_path ~demote_before =
+  if String.equal base_path "" then 0 else demote_before
+;;
+
 let demotion_plan ~measure_message_bytes ~base_path ~demote_before messages =
-  if String.equal base_path "" || demote_before = 0
-  then { Keeper_model_input_demotion.messages; pending = [] }
-  else Keeper_model_input_demotion.plan ~measure_message_bytes ~demote_before messages
+  match applied_demote_before ~base_path ~demote_before with
+  | 0 -> { Keeper_model_input_demotion.messages; pending = [] }
+  | demote_before ->
+    Keeper_model_input_demotion.plan ~measure_message_bytes ~demote_before messages
 ;;
 
 (* Whether the last resort has anything to do: the current turn's own atoms
@@ -596,12 +605,9 @@ let compose_carried_model_input
        | None -> None, Some seed)
     | None -> None, None
   in
+  let demote_before = if last_resort then history_atom_count else demote_before in
   let planned =
-    demotion_plan
-      ~measure_message_bytes
-      ~base_path
-      ~demote_before:(if last_resort then history_atom_count else demote_before)
-      messages
+    demotion_plan ~measure_message_bytes ~base_path ~demote_before messages
   in
   let projection, transmitted_bytes, origin =
     match front with
@@ -625,7 +631,14 @@ let compose_carried_model_input
       in
       projection, transmitted_bytes, Keeper_carried_front.Whole_history
   in
-  { planned; projection; transmitted_bytes; history_atom_count; origin; outlived_seed }
+  { planned
+  ; projection
+  ; transmitted_bytes
+  ; history_atom_count
+  ; origin
+  ; outlived_seed
+  ; demote_before = applied_demote_before ~base_path ~demote_before
+  }
 ;;
 
 (* One request: the range composed in the durable vocabulary, its demotions
@@ -966,6 +979,7 @@ let bounded_model_input_projection
           ; atom_count = history_atom_count
           ; tail_bytes
           ; turn_context
+          ; demote_before = view.composed.demote_before
           });
     match ctx.model_input_projection with
     | None -> Ok windowed

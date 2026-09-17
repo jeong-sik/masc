@@ -15,6 +15,16 @@
     one block. The atoms around a turn boundary are measured that way, by
     the first post-tool round of the next turn.
 
+    The same turn boundary moves the demotion boundary: the previous turn's
+    tool results go out as markers from then on, so the blocks that hold
+    them weigh less than they were measured at. When a sample's demotion
+    boundary differs from the one the total was measured under, the blocks
+    from the lower boundary on and the atoms appended since become one
+    block, whose tokens are the reformed blocks' old counts plus the
+    difference. The difference is exactly the appended atoms plus the
+    reformed atoms' change, so that sum is what they weigh now; it is unknown
+    when a reformed block was never measured.
+
     Anything that breaks the comparison restarts the ledger from the request
     at hand: a different prefix (system prompt or tool schemas), a history
     that shrank (a new session), a front that moved back, or a front that
@@ -49,6 +59,9 @@ type request =
   ; turn_context : bool
         (** The request carried the per-turn context message, so its usage
             is not a sample. *)
+  ; demote_before : int
+        (** Atoms below this index went out with their aged tool results as
+            markers; 0 when nothing was demoted. *)
   }
 
 type usage =
@@ -74,6 +87,8 @@ type t =
             until the next sample. *)
   ; measured_end_atom : int option
         (** [atom_count] of the request [total_tokens] describes. *)
+  ; measured_demote_before : int option
+        (** [demote_before] of the request [total_tokens] describes. *)
   ; blocks : block list  (** Oldest first, contiguous over the carried range. *)
   ; last : request
   ; last_usage : usage option

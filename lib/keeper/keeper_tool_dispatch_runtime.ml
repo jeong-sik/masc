@@ -28,11 +28,6 @@ type frozen_surface_admission_error =
       }
   | Tool_name_absent_from_frozen_surface of { requested_tool : string }
 
-let descriptor_is_in_frozen_surface capability_surface descriptor =
-  Keeper_capability_surface.descriptors capability_surface
-  |> List.exists (fun admitted -> admitted == descriptor)
-;;
-
 let frozen_surface_admission_error_to_execution error =
   let requested_tool, detail_fields =
     match error with
@@ -68,7 +63,7 @@ let admit_descriptor capability_authority ~requested_tool descriptor =
   match capability_authority with
   | Keeper_tool_runtime.Compatibility_meta -> Ok ()
   | Keeper_tool_runtime.Frozen_surface capability_surface ->
-    if descriptor_is_in_frozen_surface capability_surface descriptor
+    if Keeper_capability_surface.admits capability_surface descriptor
     then Ok ()
     else
       Error

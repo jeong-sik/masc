@@ -11,6 +11,11 @@ type capability_availability =
   | Active
   | Outside_skill_surface
   | Not_model_invocable
+  | Node_tools_outside_surface of { tools : string list }
+      (** A composition Skill whose plan runs node tools this surface does not
+          admit, named by their model names. The composition is withheld from
+          the executable catalog; see
+          {!Keeper_skill_catalog.withhold_compositions_outside}. *)
   | Invalid_definition
   | Missing_task_skill
       (** Reserved for an exact Task Skill reference that Task resolution
@@ -66,6 +71,11 @@ val create
     front of only labelled arguments, which OCaml never erases. *)
 
 val descriptors : t -> Keeper_tool_descriptor.t list
+
+val admits : t -> Keeper_tool_descriptor.t -> bool
+(** Whether this exact descriptor value is on the surface. Direct dispatch and
+    composition withholding both decide with this predicate. *)
+
 val skill_projection : t -> Keeper_skill_catalog.turn_projection
 val skill_catalog : t -> Keeper_skill_catalog.t
 val tool_capabilities : t -> tool_capability list

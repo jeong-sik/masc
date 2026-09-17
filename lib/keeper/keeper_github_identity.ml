@@ -1,3 +1,5 @@
+let ( let* ) = Result.bind
+
 type auth_result =
   { authenticated : bool
   ; login : string option
@@ -24,6 +26,9 @@ type login_lane =
   { run_login :
       on_stdout_chunk:(string -> unit)
       -> on_stderr_chunk:(string -> unit)
+      -> Unix.process_status * string * string
+  ; run_login_with_token :
+      token:string
       -> Unix.process_status * string * string
   ; secure_after_login : unit -> (unit, string) result
   ; observe_after_login : unit -> (observation, string) result
@@ -796,6 +801,19 @@ let login_argv ~hostname =
   ]
 ;;
 
+let login_with_token_argv ~hostname =
+  [ "gh"
+  ; "auth"
+  ; "login"
+  ; "--hostname"
+  ; hostname
+  ; "--git-protocol"
+  ; "https"
+  ; "--insecure-storage"
+  ; "--with-token"
+  ]
+;;
+
 let logout_argv ~hostname = [ "gh"; "auth"; "logout"; "--hostname"; hostname ]
 
 let projected_base_env ~base_path ~keeper_name =
@@ -1020,6 +1038,13 @@ let local_lane ~config ~keeper_name ~hostname =
               ~on_stdout_chunk
               ~on_stderr_chunk
               (login_argv ~hostname))
+      ; run_login_with_token =
+          (fun ~token ->
+            Process_eio.run_argv_with_stdin_and_status_split
+              ~timeout_sec:30.0
+              ~env
+              ~stdin_content:token
+              (login_with_token_argv ~hostname))
       ; secure_after_login = (fun () -> secure_config_files ~config ~keeper_name)
       ; observe_after_login = (fun () -> observe ~config ~keeper_name ~hostname)
       }
@@ -1226,6 +1251,33 @@ let run_cli_login ~(lane : login_lane) =
       true
   in
   if secured && observed then 0 else 1
+;;
+
+let set_token ~(lane : login_lane) ~base_path ~keeper_name ~token =
+  let token = String.trim token in
+  if String.equal token "" then Error "token must not be empty"
+  else
+    let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
+    let redact text = Keeper_secret_redaction.redact_text redaction text in
+    let status, _stdout, stderr = lane.run_login_with_token ~token in
+    match status with
+    | Unix.WEXITED 0 ->
+      let* () = lane.secure_after_login () in
+      lane.observe_after_login ()
+    | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+      let detail = String.trim (redact stderr) in
+      let msg = if String.equal detail "" then process_exit_text status else detail in
+      Error ("gh auth login --with-token failed: " ^ msg)
+;;
+
+let run_cli_set_token ~(lane : login_lane) ~base_path ~keeper_name ~token =
+  match set_token ~lane ~base_path ~keeper_name ~token with
+  | Error message ->
+    prerr_endline message;
+    1
+  | Ok observation ->
+    observation_to_yojson observation |> Yojson.Safe.pretty_to_string |> print_endline;
+    0
 ;;
 
 let run_cli_status ~config ~keeper_name ~hostname =

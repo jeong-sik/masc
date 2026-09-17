@@ -91,9 +91,16 @@ type turn_unavailable =
 
 type configured_name_unavailable = Configured_name_unavailable of string
 
+type withheld_composition =
+  { tool_name : string
+  ; reference : Skill_reference.t option
+  ; outside_node_tools : string list
+  }
+
 type turn_projection =
   { catalog : t
   ; unavailable : turn_unavailable list
+  ; withheld : withheld_composition list
   }
 
 type exact_surface_availability =
@@ -414,7 +421,65 @@ let project_turn ~names ~global ~task =
            selected, collision ~tool_name ~selected:winner ~unavailable:skill :: unavailable)
   in
   List.fold_left add ([], List.rev configured_unavailable) selected_candidates
-  |> fun (catalog, unavailable) -> { catalog; unavailable = List.rev unavailable }
+  |> fun (catalog, unavailable) ->
+  { catalog; unavailable = List.rev unavailable; withheld = [] }
+;;
+
+(* A composition's nodes cross the same frozen surface a direct call crosses,
+   so a node descriptor that surface does not admit fails that node on every
+   call. Listing the composition anyway only moves the refusal from the listing
+   to the call. [admits] is the surface's own admission predicate, so what is
+   withheld here is exactly what the executor would refuse. A plan node whose
+   descriptor is missing cannot be admitted either. *)
+let outside_node_tools ~admits (entry : Catalog.entry) =
+  Keeper_tool_plan.nodes entry.plan
+  |> List.filter_map (fun (node : Keeper_tool_plan.node) ->
+    match Keeper_tool_plan.descriptor entry.plan node.id with
+    | Some descriptor when admits descriptor -> None
+    | Some _ | None -> Some node.tool_name)
+  |> Json_util.dedupe_keep_order
+;;
+
+let withhold_compositions_outside ~admits projection =
+  let catalog, withheld =
+    List.fold_left
+      (fun (catalog, withheld) (skill : skill) ->
+         match skill.surface with
+         | Instruction -> skill :: catalog, withheld
+         | Composition entry ->
+           (match outside_node_tools ~admits entry with
+            | [] -> skill :: catalog, withheld
+            | outside_node_tools ->
+              let composition : withheld_composition =
+                { tool_name = Catalog.tool_name entry
+                ; reference = skill.reference
+                ; outside_node_tools
+                }
+              in
+              catalog, composition :: withheld))
+      ([], [])
+      projection.catalog
+  in
+  { projection with
+    catalog = List.rev catalog
+  ; withheld = projection.withheld @ List.rev withheld
+  }
+;;
+
+let withheld_composition projection reference =
+  List.find_opt
+    (fun (composition : withheld_composition) ->
+       match composition.reference with
+       | Some known -> Skill_reference.equal known reference
+       | None -> false)
+    projection.withheld
+;;
+
+let withheld_composition_to_string (composition : withheld_composition) =
+  Printf.sprintf
+    "composition tool %S runs node tools this turn's surface does not admit: %s"
+    composition.tool_name
+    (String.concat ", " composition.outside_node_tools)
 ;;
 
 let turn_unavailable_to_string = function
@@ -488,9 +553,13 @@ let exact_surfaces projection ~task =
              Composition_tool { tool_name = Catalog.tool_name entry }
            | None ->
              let diagnostic =
-               match collision_for_reference projection.unavailable reference with
-               | Some collision -> turn_unavailable_to_string collision
-               | None ->
+               match
+                 ( withheld_composition projection reference
+                 , collision_for_reference projection.unavailable reference )
+               with
+               | Some withheld, _ -> withheld_composition_to_string withheld
+               | None, Some collision -> turn_unavailable_to_string collision
+               | None, None ->
                  Printf.sprintf
                    "exact Task Skill is unavailable in the executable turn projection: %s"
                    (Skill_reference.to_yojson reference |> Yojson.Safe.to_string)

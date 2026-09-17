@@ -208,9 +208,14 @@ let executable_selection ~projection selection =
    P1) came from the preview reassembling the projection by hand and passing
    nothing, which rendered every Task Skill as unavailable while the real turn
    advertised it. Callers pass the already-frozen [selection]; this function
-   never re-resolves, so the turn-boundary freeze contract stays intact. *)
+   never re-resolves, so the turn-boundary freeze contract stays intact.
+
+   The projection comes from [Keeper_capability_surface.create], the call the
+   executable bundle makes, so a composition the surface withholds is
+   advertised as unavailable here too rather than as a callable tool. *)
 let exact_task_surfaces
       ~snapshot
+      ~tool_deny
       ~skill_names
       ~selection
       ~current_task
@@ -218,7 +223,13 @@ let exact_task_surfaces
   =
   let global, _ = Keeper_skill_catalog.of_snapshot snapshot in
   let projection =
-    Keeper_skill_catalog.project_turn ~names:skill_names ~global ~task:(skills selection)
+    Keeper_capability_surface.create
+      ~tool_deny
+      ~skill_names
+      ~global_skill_catalog:global
+      ~skill_inventory:(Keeper_skill_inventory.of_snapshot snapshot)
+      ~task_skills:(skills selection)
+    |> Keeper_capability_surface.skill_projection
   in
   let task_ids =
     let current =

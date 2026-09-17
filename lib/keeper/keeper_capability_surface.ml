@@ -2,6 +2,7 @@ type capability_availability =
   | Active
   | Outside_skill_surface
   | Not_model_invocable
+  | Node_tools_outside_surface of { tools : string list }
   | Invalid_definition
   | Missing_task_skill
   | Missing_configured_skill
@@ -50,10 +51,17 @@ let valid_skill_availability
   if Keeper_skill_catalog.exact_is_executable skill_projection valid.reference
   then Active
   else
-    match skill_names with
-    | Some names when not (List.exists (String.equal valid.reference.identity.name) names) ->
-      Outside_skill_surface
-    | None | Some _ -> Not_model_invocable
+    match
+      Keeper_skill_catalog.withheld_composition skill_projection valid.reference
+    with
+    | Some withheld ->
+      Node_tools_outside_surface { tools = withheld.outside_node_tools }
+    | None ->
+      (match skill_names with
+       | Some names
+         when not (List.exists (String.equal valid.reference.identity.name) names) ->
+         Outside_skill_surface
+       | None | Some _ -> Not_model_invocable)
 ;;
 
 let skill_capability ~skill_names ~skill_projection = function
@@ -99,6 +107,12 @@ let missing_skill_capabilities ~skill_names ~skill_inventory =
           })
 ;;
 
+(* Physical identity, because the surface holds the canonical descriptor values
+   and a descriptor that merely shares a name or id is not the one admitted. *)
+let descriptor_admitted descriptors descriptor =
+  List.exists (fun admitted -> admitted == descriptor) descriptors
+;;
+
 let create
       ~tool_deny
       ~skill_names
@@ -128,6 +142,8 @@ let create
       ~names:skill_names
       ~global:global_skill_catalog
       ~task:task_skills
+    |> Keeper_skill_catalog.withhold_compositions_outside
+         ~admits:(descriptor_admitted descriptors)
   in
   let tool_capabilities =
     Keeper_tool_descriptor.all_descriptors ()
@@ -168,6 +184,7 @@ let create
 ;;
 
 let descriptors surface = surface.descriptors
+let admits surface descriptor = descriptor_admitted surface.descriptors descriptor
 let skill_projection surface = surface.skill_projection
 let skill_catalog surface = surface.skill_projection.catalog
 let tool_capabilities surface = surface.tool_capabilities
@@ -196,6 +213,7 @@ let capability_availability_to_string = function
   | Active -> "active"
   | Outside_skill_surface -> "outside_skill_surface"
   | Not_model_invocable -> "not_model_invocable"
+  | Node_tools_outside_surface _ -> "node_tools_outside_surface"
   | Invalid_definition -> "invalid_definition"
   | Missing_task_skill -> "missing_task_skill"
   | Missing_configured_skill -> "missing_configured_skill"
@@ -255,6 +273,17 @@ let invalid_reference_fields (invalid : Keeper_skill_inventory.invalid_skill) =
     ]
 ;;
 
+let availability_detail_fields = function
+  | Node_tools_outside_surface { tools } ->
+    [ "outside_node_tools", Json_util.json_string_list tools ]
+  | Active
+  | Outside_skill_surface
+  | Not_model_invocable
+  | Invalid_definition
+  | Missing_task_skill
+  | Missing_configured_skill -> []
+;;
+
 let skill_capability_to_yojson capability =
   let availability =
     capability_availability_to_string capability.availability
@@ -276,6 +305,7 @@ let skill_capability_to_yojson capability =
        ; "exposure", `String (skill_exposure_to_string capability.exposure)
        ; "availability", `String availability
        ]
+       @ availability_detail_fields capability.availability
        @ skill_kind_to_fields valid.kind)
   | Exact_skill (Keeper_skill_inventory.Invalid invalid) ->
     `Assoc

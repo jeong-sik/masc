@@ -22,6 +22,7 @@ class FakeResult:
 class FakeEnv:
     def __init__(self):
         self.commands = []
+        self.exec_kwargs = []
         self.uploads = []
         self.default_user = None
 
@@ -33,6 +34,7 @@ class FakeEnv:
 
     async def exec(self, command, **kw):
         self.commands.append(command)
+        self.exec_kwargs.append(kw)
         if "cat /opt/masc-bench/result.json" in command:
             return FakeResult('{"state":"Succeeded","duration_ms":1234,'
                               '"tool_calls":17,"duplicate_tool_calls":2,"final":{}}')
@@ -193,7 +195,7 @@ def test_cost_prices_each_token_class_at_its_own_rate(tmp_path, monkeypatch):
 def test_the_cache_split_is_not_the_cache_sum(tmp_path, monkeypatch):
     # 600 cache tokens priced as one class would be either 1.5e-03 (all
     # creation) or 1.2e-04 (all read). The real answer is neither, and the
-    # gap is why run_episode.sh reports the two apart.
+    # gap is why collect_result.sh reports the two apart.
     context = context_for(
         tmp_path, monkeypatch, {"anthropic/claude-fable-5": RATES},
         input_tokens=0, output_tokens=0, cache_tokens=600,
@@ -238,3 +240,122 @@ def test_the_env_refuses_without_a_github_credential(tmp_path, monkeypatch):
     monkeypatch.delenv("GH_TOKEN", raising=False)
     with pytest.raises(RuntimeError, match="GH_TOKEN"):
         make_agent(tmp_path)._container_env()
+
+
+# --- harbor's agent timeout is the only bound on an episode ----------------
+#
+# Terminal-Bench 4.0 gives every task 28800s. The adapter used to stop the
+# episode at 2400s on its own and cap bootstrap at 900s, so a full run measured
+# 40 minutes of an 8-hour task. Harbor never tells an installed agent its
+# timeout; it cancels run() when the time is up.
+
+
+class EpisodeRunsUntilCancelled(FakeEnv):
+    """run_episode.sh never returns; the interrupted report is what exists."""
+
+    async def exec(self, command, **kw):
+        if "run_episode.sh" in command:
+            self.commands.append(command)
+            self.exec_kwargs.append(kw)
+            await asyncio.Event().wait()
+        self.commands.append(command)
+        self.exec_kwargs.append(kw)
+        if "cat /opt/masc-bench/result.json" in command:
+            return FakeResult('{"state":"Running","interrupted":true,'
+                              '"duration_ms":28800000,"tool_calls":412,'
+                              '"duplicate_tool_calls":9,"final":{}}')
+        return FakeResult("")
+
+
+def test_the_container_env_names_no_episode_deadline(tmp_path):
+    assert "EPISODE_TIMEOUT_SEC" not in make_agent(tmp_path)._container_env()
+
+
+def test_bootstrap_is_bounded_by_harbor_setup_timeout_alone(tmp_path, monkeypatch):
+    import agents.masc_agent as m
+
+    root = tmp_path / "bench"
+    (root / "dist").mkdir(parents=True)
+    for name in ("masc", "masc-exec-shim"):
+        (root / "dist" / name).write_text("")
+    (root / "driver").mkdir()
+    monkeypatch.setattr(m, "BENCH_ROOT", root)
+    env = FakeEnv()
+    asyncio.run(make_agent(tmp_path, arm="b").install(env))
+    bootstrap = [kw for c, kw in zip(env.commands, env.exec_kwargs)
+                 if "bootstrap.sh" in c]
+    assert bootstrap and bootstrap[0].get("timeout_sec") is None
+
+
+def test_a_harbor_timeout_stops_the_keepers_and_reports_the_episode(tmp_path):
+    from harbor.models.agent.context import AgentContext
+
+    env = EpisodeRunsUntilCancelled()
+    ctx = AgentContext()
+
+    async def go():
+        # The same call harbor makes (trial.py: asyncio.wait_for(run(...))).
+        await asyncio.wait_for(make_agent(tmp_path, arm="b").run("task", env, ctx),
+                               timeout=0.05)
+
+    with pytest.raises(asyncio.TimeoutError):
+        asyncio.run(go())
+    collect = [i for i, c in enumerate(env.commands)
+               if "collect_result.sh /opt/masc-bench/result.json --interrupted" in c]
+    read = [i for i, c in enumerate(env.commands)
+            if "cat /opt/masc-bench/result.json" in c]
+    assert collect and read and collect[0] < read[0]
+    assert ctx.metadata["interrupted"] is True
+    assert ctx.metadata["masc_state"] == "Running"
+    assert ctx.metadata["tool_calls"] == 412
+
+
+def test_an_episode_that_ends_on_its_own_is_not_collected_twice(tmp_path):
+    from harbor.models.agent.context import AgentContext
+
+    env = FakeEnv()
+    asyncio.run(make_agent(tmp_path, arm="b").run("task", env, AgentContext()))
+    assert not any("--interrupted" in c for c in env.commands)
+
+
+class EpisodeEndsInFailure(FakeEnv):
+    """run_episode.sh reported a Failed episode and exited 1 on its own."""
+
+    async def exec(self, command, **kw):
+        self.commands.append(command)
+        self.exec_kwargs.append(kw)
+        if "run_episode.sh" in command:
+            return FakeResult("", return_code=1)
+        if "cat /opt/masc-bench/result.json" in command:
+            return FakeResult('{"state":"Failed","interrupted":false,"final":{}}')
+        return FakeResult("")
+
+
+def test_an_episode_that_fails_on_its_own_is_not_reported_as_interrupted(tmp_path):
+    from harbor.models.agent.context import AgentContext
+
+    env = EpisodeEndsInFailure()
+    ctx = AgentContext()
+    with pytest.raises(Exception):  # harbor's NonZeroAgentExitCodeError
+        asyncio.run(make_agent(tmp_path, arm="b").run("task", env, ctx))
+    assert not any("--interrupted" in c for c in env.commands)
+    assert ctx.metadata["masc_state"] == "Failed"
+    assert ctx.metadata["interrupted"] is False
+
+
+def test_the_interrupted_report_is_bounded_after_the_time_is_up(tmp_path):
+    import agents.masc_agent as m
+    from harbor.models.agent.context import AgentContext
+
+    env = EpisodeRunsUntilCancelled()
+
+    async def go():
+        await asyncio.wait_for(
+            make_agent(tmp_path, arm="b").run("task", env, AgentContext()), timeout=0.05)
+
+    with pytest.raises(asyncio.TimeoutError):
+        asyncio.run(go())
+    recovery = [kw for c, kw in zip(env.commands, env.exec_kwargs)
+                if "--interrupted" in c or "cat /opt/masc-bench/result.json" in c]
+    assert recovery and all(
+        kw.get("timeout_sec") == m.RESULT_RECOVERY_TIMEOUT_SEC for kw in recovery)

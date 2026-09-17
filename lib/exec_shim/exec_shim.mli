@@ -253,15 +253,16 @@ val check_request_root_jail
     payload's environment ({!endpoint_env}, grammar in {!parse_env_file}).
     The shim reads it for every request and refuses the request with
     [remote_ssh_shim_config_error] when it is not a regular file, cannot be
-    read, is malformed, or fails {!refuse_env_file}.
+    read, is malformed, or fails {!refuse_endpoint_file}.
 
     Unknown keys, duplicate keys, a missing/relative/empty [remote_root],
     a malformed [path], a relative or empty [env_file] or [scratch_root], or
-    a config path that is not a regular file or cannot be read are all
-    rejected with [remote_ssh_shim_config_error] and the shim refuses to
-    execute.  Only a regular file is read, and that is decided before
-    reading, so a FIFO at the path is refused rather than waited on.  An
-    error names a key or a line number, never text from the file. *)
+    a config path that is not a regular file, fails {!refuse_endpoint_file}
+    or cannot be read are all rejected with [remote_ssh_shim_config_error]
+    and the shim refuses to execute.  Only a regular file is read, and that
+    and its owner and mode are decided before reading, so a FIFO at the path
+    is refused rather than waited on.  An error names a key or a line
+    number, never text from the file. *)
 
 type config =
   { remote_root : string
@@ -289,29 +290,38 @@ val jail_for_request
 
 val parse_config : string -> (config, string) result
 
-type env_file_writers =
+type endpoint_file_writers =
   | Its_group
   | Every_user
   | Its_group_and_every_user
 
-type env_file_refusal =
+type endpoint_file_refusal =
   | Owned_by of int  (** the file's owner uid: neither root nor the shim's *)
-  | Writable_by of env_file_writers  (** who besides the owner may write it *)
+  | Writable_by of endpoint_file_writers  (** who besides the owner may write it *)
 
-val refuse_env_file : euid:int -> owner:int -> perm:int -> env_file_refusal option
-(** Why an env file with owner uid [owner] and permission bits [perm] is
-    refused by a shim whose effective uid is [euid]; [None] when it may be
-    read.  Whoever writes the file sets every payload's environment, so the
-    rule is sshd's StrictModes: the owner is root or [euid], and neither its
-    group nor every user may write it.  An owner outside those two is
-    reported first.  A file owned by the shim's own account passes, but that
-    account runs the payloads and they can rewrite it: keep the file
-    root-owned [0644]. *)
+val refuse_endpoint_file :
+  euid:int -> owner:int -> perm:int -> endpoint_file_refusal option
+(** Why the config file or an env file with owner uid [owner] and permission
+    bits [perm] is refused by a shim whose effective uid is [euid]; [None]
+    when it may be read.  Whoever writes the config names the payload [PATH]
+    and the env file, and whoever writes the env file sets every payload's
+    environment, so the rule for both is sshd's StrictModes: the owner is
+    root or [euid], and neither its group nor every user may write it.  An
+    owner outside those two is reported first.  A file owned by the shim's
+    own account passes, but that account runs the payloads and they can
+    rewrite it: keep both files root-owned [0644]. *)
+
+val read_config_file : string -> (config, string) result
+(** The config at a path through {!parse_config}.
+    [remote_ssh_shim_config_error] when the path is not a regular file, when
+    {!refuse_endpoint_file} refuses its owner or mode (both decided before the
+    file is read), or when it cannot be read.  The shim reads
+    [$MASC_EXEC_SHIM_CONFIG] or [/etc/masc-exec-shim.conf] through it. *)
 
 val read_env_file : string option -> (endpoint_env, string) result
 (** {!no_endpoint_env} for [None]; otherwise the named file through
     {!parse_env_file}.  [remote_ssh_shim_config_error] when the path is not a
-    regular file, when {!refuse_env_file} refuses its owner or mode (both
+    regular file, when {!refuse_endpoint_file} refuses its owner or mode (both
     decided before the file is read), or when it cannot be read.  The error
     names the path, and the owner uid or the mode, as a number. *)
 

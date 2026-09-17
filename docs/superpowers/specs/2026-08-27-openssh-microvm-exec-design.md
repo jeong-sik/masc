@@ -293,8 +293,10 @@ the protocol. The shim:
   owned by neither root nor the shim's effective uid, or when its group or
   every user may write it — all decided from the opened descriptor before a
   byte is read, so a FIFO at the path is refused rather than waited on — and
-  when the file cannot be read or has a malformed line. A boxed run still
-  sets `HOME` and `TMPDIR` to its scratch;
+  when the file cannot be read or has a malformed line. The shim config
+  file is held to the same owner and mode rule, since whoever writes it names
+  `path=` and `env_file=`. A boxed run still sets `HOME` and `TMPDIR` to its
+  scratch;
 - `setsid()` the child into its own process group and sets
   `PR_SET_PDEATHSIG=SIGKILL` pre-exec (covers the shim dying first);
 - while the child runs, selects on the child's stdout/stderr pipes, shim stdin

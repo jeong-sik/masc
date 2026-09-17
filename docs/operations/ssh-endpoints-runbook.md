@@ -137,10 +137,11 @@ scratch directory whatever the env file declares. Other directories the file
 names are outside the box, so under `observe` a payload's writes there are
 refused.
 
-Keep the env file a regular file, root-owned and `0644`, like the config the
-bootstrap installs. Whoever can write it sets every payload's environment, the
-loader path included, so the shim refuses the request, before it reads the
-file, when:
+Keep the config and the env file regular files, root-owned and `0644`; the
+bootstrap installs the config that way. Whoever can write the config names the
+payload `PATH` and the env file, and whoever can write the env file sets every
+payload's environment, the loader path included. So the shim refuses the
+request, before it reads either file, when:
 
 - the path is not a regular file (a FIFO, a device, a directory);
 - the file's owner is neither root nor the account the shim runs as. A file
@@ -270,7 +271,7 @@ sentence saying so is not.
 | `remote_ssh_remote_timeout` | The shim's payload timer expired. | Reduce the operation or deliberately increase its typed timeout. |
 | `remote_ssh_transport_error` | Frame/trailer/channel integrity failed. | Inspect sshd/shim logs and revision identity; do not treat it as payload exit. |
 | `remote_ssh_version_error` | A request or result frame has an unsupported protocol version. | Align MASC and shim revisions. |
-| `remote_ssh_shim_config_error` | `/etc/masc-exec-shim.conf` is missing or invalid, or the `env_file=` it names is not a regular file, cannot be read, has a malformed line, is owned by neither root nor the shim's account, or may be written by its group or every user. | A detail that names the env file's path (`cannot read env_file <path>`, `env_file <path> is not a regular file`, `env_file <path> line N: ...`, `env_file <path> is owned by uid N`, `env_file <path> is writable by ...`): fix that file and do not rerun bootstrap, which rewrites the config without `env_file=`. Any other detail is about the config file, including `env_file must not be empty` and `env_file must be an absolute path` (the `env_file=` line itself is wrong): rerun bootstrap and inspect the strict config keys, then add `path=`/`env_file=` again (masc#36918). |
+| `remote_ssh_shim_config_error` | `/etc/masc-exec-shim.conf` is missing, invalid, owned by neither root nor the shim's account, or may be written by its group or every user; or the `env_file=` it names is not a regular file, cannot be read, has a malformed line, or fails the same owner and mode rule. | A detail that names the env file's path (`cannot read env_file <path>`, `env_file <path> is not a regular file`, `env_file <path> line N: ...`, `env_file <path> is owned by uid N`, `env_file <path> is writable by ...`): fix that file and do not rerun bootstrap, which rewrites the config without `env_file=`. `config file <path> is owned by uid N` or `config file <path> is writable by ...`: make the config root-owned `0644` with `sudo chown root:root` and `sudo chmod 0644`; rerunning bootstrap resets the mode but keeps the owner of an existing file. Any other detail is about the config file, including `env_file must not be empty` and `env_file must be an absolute path` (the `env_file=` line itself is wrong): rerun bootstrap and inspect the strict config keys, then add `path=`/`env_file=` again (masc#36918). |
 | `remote_ssh_shim_error` | The shim failed before producing a payload result. | Inspect the named shim detail and remote system state. |
 | `remote_ssh_dispatch_unavailable` | An SSH profile reached an inert Docker/legacy dispatch arm. | Treat as a wiring regression; capture the exact source head and file an issue. |
 | `remote_ssh_read_failed` | A remote read command exited nonzero. | Inspect the returned exit/stderr and remote path. |

@@ -425,8 +425,9 @@ let with_tmp_tree f =
     ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote root)))
     (fun () -> f root)
 
-(* Mode set, not left to the umask: an env file others may write is refused. *)
-let write_env_file path content =
+(* Mode set, not left to the umask: a config or env file others may write is
+   refused. *)
+let write_endpoint_file path content =
   Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc content);
   Unix.chmod path 0o644
 
@@ -491,17 +492,18 @@ let test_read_env_file () =
       (match Exec_shim.read_env_file (Some env_file) with
        | Ok _ -> fail "a named env_file that is not there must refuse the request"
        | Error e -> check bool "an absent env_file is a config error" true (is_config_error e));
-      write_env_file env_file "VIRTUAL_ENV=/opt/venv\n";
+      write_endpoint_file env_file "VIRTUAL_ENV=/opt/venv\n";
       match Exec_shim.read_env_file (Some env_file) with
       | Ok env ->
         check (list (pair string string)) "the file's declarations"
           [ "VIRTUAL_ENV", "/opt/venv" ] (declared env)
       | Error e -> fail e)
 
-(* The owner and mode rule over synthetic uids and modes, so a file owned by
-   another account needs no chown. The Terminal-Bench container runs the shim
-   as root with a root-owned 0644 file. *)
-let test_env_file_owner_and_mode_rule () =
+(* The owner and mode rule the config file and an env file share, over
+   synthetic uids and modes, so a file owned by another account needs no
+   chown. The Terminal-Bench container runs the shim as root with root-owned
+   0644 files. *)
+let test_endpoint_file_owner_and_mode_rule () =
   let show = function
     | None -> "read"
     | Some (Exec_shim.Owned_by uid) -> Printf.sprintf "owned by uid %d" uid
@@ -513,7 +515,7 @@ let test_env_file_owner_and_mode_rule () =
   let shim = 1000 and other = 1001 and root = 0 in
   List.iter
     (fun (label, euid, owner, perm, expected) ->
-      check string label expected (show (Exec_shim.refuse_env_file ~euid ~owner ~perm)))
+      check string label expected (show (Exec_shim.refuse_endpoint_file ~euid ~owner ~perm)))
     [ "root-owned 0644", shim, root, 0o644, "read"
     ; "owned by the shim's uid, 0644", shim, shim, 0o644, "read"
     ; "owned by another uid, 0644", shim, other, 0o644, "owned by uid 1001"
@@ -568,7 +570,7 @@ let test_read_env_file_reads_only_a_regular_file () =
 let test_read_env_file_refuses_a_file_others_may_write () =
   with_tmp_tree (fun root ->
       let env_file = Filename.concat root "shim.env" in
-      write_env_file env_file "VIRTUAL_ENV=/opt/venv\n";
+      write_endpoint_file env_file "VIRTUAL_ENV=/opt/venv\n";
       List.iter
         (fun (mode, writers) ->
           Unix.chmod env_file mode;
@@ -588,6 +590,55 @@ let test_read_env_file_refuses_a_file_others_may_write () =
           [ "VIRTUAL_ENV", "/opt/venv" ] (declared env)
       | Error e -> fail e)
 
+(* Whoever can write the config names the payload PATH and the env file. *)
+let test_read_config_file_refuses_a_file_others_may_write () =
+  with_tmp_tree (fun root ->
+      let config_file = Filename.concat root "shim.conf" in
+      write_endpoint_file config_file (Printf.sprintf "remote_root=%s\n" root);
+      List.iter
+        (fun (mode, writers) ->
+          Unix.chmod config_file mode;
+          let label = Printf.sprintf "mode %04o" mode in
+          match Exec_shim.read_config_file config_file with
+          | Ok _ -> fail (label ^ " must refuse the config")
+          | Error e ->
+            check bool (label ^ " is a config error") true (is_config_error e);
+            check bool (label ^ " names the config file") true
+              (contains ("config file " ^ config_file) e);
+            check bool (label ^ " says who could write it") true
+              (contains ("writable by " ^ writers ^ " (") e))
+        [ 0o666, "its group and every user"; 0o664, "its group"; 0o646, "every user" ];
+      Unix.chmod config_file 0o644;
+      match Exec_shim.read_config_file config_file with
+      | Ok config ->
+        check string "a file only its owner may write is read" root config.Exec_shim.remote_root
+      | Error e -> fail e)
+
+(* Every way out of the reader closes the descriptor it opened: a refused mode,
+   a path that is not a regular file, a missing file, and a read. Counted from
+   the descriptor table, since a leak returns no error. *)
+let test_endpoint_file_reads_leave_no_descriptor_open () =
+  let open_descriptors () = Array.length (Sys.readdir "/dev/fd") in
+  with_tmp_tree (fun root ->
+      let env_file = Filename.concat root "shim.env" in
+      write_endpoint_file env_file "VIRTUAL_ENV=/opt/venv\n";
+      let before = open_descriptors () in
+      let reads =
+        [ "a read", (fun () -> Exec_shim.read_env_file (Some env_file))
+        ; "a directory", (fun () -> Exec_shim.read_env_file (Some (Filename.concat root "sub")))
+        ; "a missing file", (fun () -> Exec_shim.read_env_file (Some (Filename.concat root "absent")))
+        ; ( "a refused mode"
+          , fun () ->
+              Unix.chmod env_file 0o664;
+              Exec_shim.read_env_file (Some env_file) )
+        ]
+      in
+      List.iter
+        (fun (label, read) ->
+          ignore (read ());
+          check int (label ^ " leaves the descriptor count unchanged") before (open_descriptors ()))
+        reads)
+
 (* A boxed run (observe, guest_local) lays its scratch over the payload env the
    dispatcher built: HOME and TMPDIR are the scratch whatever the file says,
    and the file's other names still reach the payload. *)
@@ -601,7 +652,7 @@ let test_boxed_run_scratch_is_laid_over_the_endpoint_env () =
         | Ok config -> config
         | Error e -> fail ("config fixture rejected: " ^ e)
       in
-      write_env_file env_file "VIRTUAL_ENV=/opt/venv\nHOME=/root\nTMPDIR=/var/tmp\n";
+      write_endpoint_file env_file "VIRTUAL_ENV=/opt/venv\nHOME=/root\nTMPDIR=/var/tmp\n";
       match Exec_shim.payload_env ~config ~base_env:shim_env ~request_env:[] with
       | Error e -> fail e
       | Ok env ->
@@ -631,7 +682,7 @@ let test_payload_env_reads_the_configured_file () =
         | Ok config -> config
         | Error e -> fail ("config fixture rejected: " ^ e)
       in
-      write_env_file env_file "VIRTUAL_ENV=/opt/venv\nLANG=C.UTF-8\n";
+      write_endpoint_file env_file "VIRTUAL_ENV=/opt/venv\nLANG=C.UTF-8\n";
       (match Exec_shim.payload_env ~config ~base_env:shim_env ~request_env:[ "LANG", "C" ] with
        | Error e -> fail e
        | Ok env ->
@@ -641,7 +692,7 @@ let test_payload_env_reads_the_configured_file () =
            (List.assoc_opt "PATH" env);
          check (option string) "the allowlisted wire value is laid over the file" (Some "C")
            (List.assoc_opt "LANG" env));
-      write_env_file env_file "PATH=/opt/venv/bin\n";
+      write_endpoint_file env_file "PATH=/opt/venv/bin\n";
       match Exec_shim.payload_env ~config ~base_env:shim_env ~request_env:[] with
       | Ok _ -> fail "a malformed env_file must refuse the request"
       | Error e -> check bool "a malformed env_file is a config error" true (is_config_error e))
@@ -951,11 +1002,15 @@ let () =
                   ; test_case "errors name the line, not its text" `Quick
                       test_env_file_error_names_the_line_not_its_text
                   ; test_case "read" `Quick test_read_env_file
-                  ; test_case "owner and mode rule" `Quick test_env_file_owner_and_mode_rule
+                  ; test_case "owner and mode rule" `Quick test_endpoint_file_owner_and_mode_rule
                   ; test_case "reads only a regular file" `Quick
                       test_read_env_file_reads_only_a_regular_file
                   ; test_case "refuses a file others may write" `Quick
                       test_read_env_file_refuses_a_file_others_may_write
+                  ; test_case "a config file others may write is refused" `Quick
+                      test_read_config_file_refuses_a_file_others_may_write
+                  ; test_case "reads leave no descriptor open" `Quick
+                      test_endpoint_file_reads_leave_no_descriptor_open
                   ; test_case "payload env reads the configured file" `Quick
                       test_payload_env_reads_the_configured_file
                   ; test_case "a boxed run's scratch is laid over it" `Quick

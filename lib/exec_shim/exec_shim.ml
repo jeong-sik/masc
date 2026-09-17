@@ -388,69 +388,27 @@ let config_path () =
   | Some p when p <> "" -> p
   | _ -> default_config_path
 
-(* Only a regular file is read, and whether the path is one is decided before a
-   byte is read. The open is nonblocking, so a FIFO nobody writes to does not
-   hang it; the kind then comes from the descriptor, and a FIFO, a device or a
-   directory is refused. [check] judges the same metadata, also before the
-   read, so a file the caller refuses is never read. Metadata and bytes come
-   from one descriptor, so the check is about the same file as the content
-   even when the path is replaced in between. The bytes are read to end of
-   file rather than to a length taken first, which a file still being written
-   would make stale. The descriptor is closed once, in [finally]; the channel
-   over it is not closed, since that would close the descriptor a second
-   time. *)
-let read_endpoint_file ~what ~check path =
-  let cannot_read () =
-    Error (Printf.sprintf "%s: cannot read %s %s" config_error_code what path) in
-  match Unix.openfile path [ Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC ] 0 with
-  | exception Unix.Unix_error _ -> cannot_read ()
-  | fd ->
-    Fun.protect
-      ~finally:(fun () -> try Unix.close fd with Unix.Unix_error _ -> ())
-      (fun () ->
-        match Unix.fstat fd with
-        | exception Unix.Unix_error _ -> cannot_read ()
-        | { Unix.st_kind = Unix.S_REG; _ } as stats ->
-          Result.bind (check stats) (fun () ->
-              match
-                Unix.clear_nonblock fd;
-                In_channel.input_all (Unix.in_channel_of_descr fd)
-              with
-              | content -> Ok content
-              | exception (Sys_error _ | Unix.Unix_error _) -> cannot_read ())
-        | { Unix.st_kind =
-              ( Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
-              | Unix.S_SOCK )
-          ; _
-          } ->
-          Error
-            (Printf.sprintf "%s: %s %s is not a regular file" config_error_code what path))
-
-let load_config () =
-  Result.bind
-    (read_endpoint_file ~what:"config file" ~check:(fun _ -> Ok ()) (config_path ()))
-    parse_config
-
 let root_uid = 0
 let group_write_bit = 0o020
 let other_write_bit = 0o002
 
-type env_file_writers =
+type endpoint_file_writers =
   | Its_group
   | Every_user
   | Its_group_and_every_user
 
-type env_file_refusal =
+type endpoint_file_refusal =
   | Owned_by of int
-  | Writable_by of env_file_writers
+  | Writable_by of endpoint_file_writers
 
-(* Whoever can write the env file sets the environment of every payload on the
-   host, the loader path included. The rule is sshd's StrictModes for an
-   authorized_keys file: owned by root or by the account reading it, and
+(* Whoever can write the config names the payload PATH and the env file, and
+   whoever can write the env file sets the environment of every payload on the
+   host, the loader path included. The rule for both is sshd's StrictModes for
+   an authorized_keys file: owned by root or by the account reading it, and
    written by no one else. The shim's own account is accepted, but it is also
    the account that runs the payloads, and a payload can rewrite a file its
    account owns; a root-owned 0644 file is the one a payload cannot change. *)
-let refuse_env_file ~euid ~owner ~perm =
+let refuse_endpoint_file ~euid ~owner ~perm =
   if owner <> root_uid && owner <> euid
   then Some (Owned_by owner)
   else
@@ -460,30 +418,85 @@ let refuse_env_file ~euid ~owner ~perm =
     | false, true -> Some (Writable_by Every_user)
     | true, true -> Some (Writable_by Its_group_and_every_user)
 
-let env_file_writers_text = function
+let endpoint_file_writers_text = function
   | Its_group -> "its group"
   | Every_user -> "every user"
   | Its_group_and_every_user -> "its group and every user"
 
+(* Only a regular file is read, and whether the path is one is decided before a
+   byte is read. The open is nonblocking, so a FIFO nobody writes to does not
+   hang it; the kind then comes from the descriptor, and a FIFO, a device or a
+   directory is refused. The owner and mode are judged from the same metadata,
+   also before the read, so a refused file is never read. Metadata and bytes
+   come from one descriptor, so the verdict is about the same file as the
+   content even when the path is replaced in between. The bytes are read to end
+   of file rather than to a length taken first, which a file still being written
+   would make stale. Until the channel exists the descriptor is closed directly;
+   once it exists the channel owns the descriptor and [close_in_noerr] is its
+   only close, as Unix.in_channel_of_descr asks. *)
+let read_endpoint_file ~what path =
+  let cannot_read () =
+    Error (Printf.sprintf "%s: cannot read %s %s" config_error_code what path) in
+  let close_descriptor fd = try Unix.close fd with Unix.Unix_error _ -> () in
+  match Unix.openfile path [ Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC ] 0 with
+  | exception Unix.Unix_error _ -> cannot_read ()
+  | fd ->
+    let euid = Unix.geteuid () in
+    let verdict =
+      match Unix.fstat fd with
+      | exception Unix.Unix_error _ -> cannot_read ()
+      | { Unix.st_kind = Unix.S_REG; st_uid; st_perm; _ } ->
+        (match refuse_endpoint_file ~euid ~owner:st_uid ~perm:st_perm with
+         | None -> Ok ()
+         | Some (Owned_by owner) ->
+           Error
+             (Printf.sprintf
+                "%s: %s %s is owned by uid %d; only root or the shim's own uid (%d) \
+                 may own it"
+                config_error_code what path owner euid)
+         | Some (Writable_by writers) ->
+           Error
+             (Printf.sprintf
+                "%s: %s %s is writable by %s (mode %04o); only its owner may write it"
+                config_error_code what path (endpoint_file_writers_text writers) st_perm))
+      (* [openfile] follows a symbolic link, so [fstat] never reports [S_LNK];
+         the kind is listed so the match stays exhaustive. *)
+      | { Unix.st_kind =
+            ( Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
+            | Unix.S_SOCK )
+        ; _
+        } ->
+        Error (Printf.sprintf "%s: %s %s is not a regular file" config_error_code what path)
+    in
+    match verdict with
+    | Error _ as refused ->
+      close_descriptor fd;
+      refused
+    | Ok () ->
+      (match
+         Unix.clear_nonblock fd;
+         Unix.in_channel_of_descr fd
+       with
+       | exception Unix.Unix_error _ ->
+         close_descriptor fd;
+         cannot_read ()
+       | channel ->
+         Fun.protect
+           ~finally:(fun () -> close_in_noerr channel)
+           (fun () ->
+             match In_channel.input_all channel with
+             | content -> Ok content
+             | exception Sys_error _ -> cannot_read ()))
+
+let read_config_file path =
+  Result.bind (read_endpoint_file ~what:"config file" path) parse_config
+
+let load_config () = read_config_file (config_path ())
+
 let read_env_file = function
   | None -> Ok no_endpoint_env
   | Some path ->
-    let euid = Unix.geteuid () in
-    let check stats =
-      match refuse_env_file ~euid ~owner:stats.Unix.st_uid ~perm:stats.Unix.st_perm with
-      | None -> Ok ()
-      | Some (Owned_by owner) ->
-        Error
-          (Printf.sprintf
-             "%s: env_file %s is owned by uid %d; only root or the shim's own uid (%d) \
-              may own it"
-             config_error_code path owner euid)
-      | Some (Writable_by writers) ->
-        Error
-          (Printf.sprintf
-             "%s: env_file %s is writable by %s (mode %04o); only its owner may write it"
-             config_error_code path (env_file_writers_text writers) stats.Unix.st_perm) in
-    Result.bind (read_endpoint_file ~what:"env_file" ~check path) (parse_env_file ~path)
+    Result.bind (read_endpoint_file ~what:"env_file" path) (parse_env_file ~path)
 
 (* Named and reachable for the same reason as [jail_for_request]: the config
    naming an env file, reading it and layering it under the wire are three

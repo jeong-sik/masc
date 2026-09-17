@@ -26,18 +26,11 @@ bench_masc_failure_reason() {
 
 bench_install_deps() {
   # --- dependencies -----------------------------------------------------------
-  # Terminal-Bench task images are not one distro. The 4.0 set alone ships
-  # ubuntu 24.04 and 22.04, debian-based python:*-slim, fedora, micromamba, coq,
-  # node, bun and cuda bases, and a hardcoded `libssl3t64` names a package that
-  # exists only on ubuntu 24.04.
-  #
-  # That is not what cost the 2026-09-11 matrix 36 of its 72 trials per arm.
-  # Measured on 2026-09-12: 12 of the 24 mini-suite images are debian 12 with
-  # glibc 2.36, and the released binary asks for GLIBC_2.38, so it cannot start
-  # there at all — 12 tasks x 3 attempts is exactly the 36 that were lost, and
-  # the 12 that survived are precisely the images at 2.39 or newer. Installing
-  # packages cannot recover those; only a release built at a lower floor can
-  # (masc#35321).
+  # Terminal-Bench task images are not one distro. The 4.0.0 set ships ubuntu
+  # 24.04 and 22.04, debian-based python:*-slim, fedora, micromamba, coq, node,
+  # bun and cuda bases, and a hardcoded `libssl3t64` names a package that exists
+  # only on ubuntu 24.04. A glibc older than the release binary's floor (2.35,
+  # scripts/check-glibc-floor.sh) cannot be fixed by a package at all.
   #
   # So: install by package-manager family, ask for the runtime libraries only if
   # the binary cannot already run, and fail with the distro named rather than

@@ -143,6 +143,28 @@ let render spec =
     ^ table ~array:true ["providers"] ["id",`String provider;"kind",`String kind;"base_url",`String h.endpoint;
       "request_path",`String h.request_path;"api_key_env",`String h.api_key_env;"capabilities_base",`String base]
     ^ table ~array:true ["targets"] ["id",`String runtime_id;"provider_ref",`String provider;"model_id",`String spec.model] in
+  (* The Librarian is the only thing that retires a memory, and it runs on its
+     own exact-output lane. A workspace that declares no slot for that lane
+     boots with one WARN and curates nothing, so the store the keeper writes
+     grows without anything reading it back -- the failure setup is least able
+     to explain, because every screen looks healthy. The runtime this setup
+     just verified is the one runtime this workspace is known to have, so it
+     is the slot. An HTTP runtime is admitted by its overlay target id and an
+     official client by its runtime id, which are the same string here.
+
+     Declared, not defaulted: the lane is a line an operator can read in
+     runtime.toml and replace with a cheaper model, and a fleet that wants no
+     Librarian empties it rather than discovering the feature was never on. *)
+  let librarian_lane =
+    let slots, cli_slots =
+      match spec.transport with
+      | Client _ -> [], [ `String runtime_id ]
+      | Http _ -> [ `String runtime_id ], []
+    in
+    table [ "runtime"; "exact_output_lanes"; "librarian_exact" ]
+      [ "slots", `List slots; "cli_slots", `List cli_slots ]
+  in
+  let runtime = runtime ^ librarian_lane in
   {runtime_id;runtime_toml=runtime;model_overlay_toml=overlay}
 let render_json value = `Assoc ["runtime_id",`String value.runtime_id;"runtime_toml",`String value.runtime_toml;
   "model_overlay_toml",`String value.model_overlay_toml]

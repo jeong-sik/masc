@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
-"""rfc-generate-index.py — Generate RFC index table from frontmatter.
+"""rfc-generate-index.py — RFC index from frontmatter, and its consistency gate.
+
+The table itself is not committed (#35498): when it was, every RFC pull
+request carried the same README hunk, so concurrently open RFCs conflicted
+pairwise. Render it on demand instead; what CI gates is the frontmatter the
+table derives from — filename/rfc agreement, reference validity, sub-document
+parents, and one number per document set.
 
 Usage:
-  scripts/rfc-generate-index.py              # print to stdout
-  scripts/rfc-generate-index.py --check       # exit 1 if stale
-  scripts/rfc-generate-index.py --update      # overwrite README table
+  scripts/rfc-generate-index.py              # print the index table to stdout
+  scripts/rfc-generate-index.py --check      # exit 1 on frontmatter inconsistency
 """
 
 from __future__ import annotations
@@ -16,7 +21,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 RFC_DIR = Path("docs/rfc")
-README = RFC_DIR / "README.md"
 TABLE_HEADER = "| RFC | Title | Status | Sub-docs |"
 TABLE_SEP = "|---|---|---|---|"
 RFC_NUMBERED_FILE_RE = re.compile(r"^RFC-(?P<number>\d{4})-(?P<slug>.+)\.md$")
@@ -318,44 +322,6 @@ def generate_table(entries: dict[str, RfcEntry]) -> str:
     return "\n".join(lines)
 
 
-def check_mode(table: str) -> int:
-    text = README.read_text(encoding="utf-8")
-    start = text.find(TABLE_HEADER)
-    if start == -1:
-        print("ERROR: Table header not found in README.md", file=sys.stderr)
-        return 1
-    end = text.find("\n\n", start)
-    if end == -1:
-        end = len(text)
-    existing = text[start:end].rstrip("\n")
-    if existing == table:
-        print("OK: RFC index table is up to date")
-        return 0
-    print(
-        "MISMATCH: RFC index table is stale. Run: scripts/rfc-generate-index.py --update"
-    )
-    for i, (a, b) in enumerate(zip(existing.splitlines(), table.splitlines())):
-        if a != b:
-            print(f"  line {i + 1}: {a!r} != {b!r}")
-    return 1
-
-
-def update_mode(table: str) -> int:
-    text = README.read_text(encoding="utf-8")
-    start = text.find(TABLE_HEADER)
-    if start == -1:
-        print("ERROR: Table header not found in README.md", file=sys.stderr)
-        return 1
-    end = text.find("\n\n", start)
-    if end == -1:
-        end = len(text)
-    suffix = text[end:].lstrip("\n")
-    new_text = text[:start] + table + "\n\n" + suffix
-    README.write_text(new_text, encoding="utf-8")
-    print(f"Updated RFC index table in {README}")
-    return 0
-
-
 def main() -> int:
     import os
 
@@ -367,18 +333,26 @@ def main() -> int:
             check=True,
         ).stdout.strip()
     )
+    if "--update" in sys.argv:
+        print(
+            "ERROR: --update is gone: the index table is no longer committed "
+            "(#35498). Run without arguments to print it.",
+            file=sys.stderr,
+        )
+        return 2
     entries, issues = collect_entries()
     if issues:
         for issue in issues:
             print(f"ERROR: {issue}", file=sys.stderr)
         return 1
-    table = generate_table(entries)
 
     if "--check" in sys.argv:
-        return check_mode(table)
-    if "--update" in sys.argv:
-        return update_mode(table)
-    print(table)
+        documents = sum(
+            len(entry.documents) + len(entry.sub_docs) for entry in entries.values()
+        )
+        print(f"OK: RFC frontmatter is consistent ({documents} documents)")
+        return 0
+    print(generate_table(entries))
     return 0
 
 

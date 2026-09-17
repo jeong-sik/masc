@@ -80,6 +80,13 @@ bench_install_deps() {
     exit 1
   fi
 
+  # setpriv reads PID 1's environment as its owner (endpoint_env.sh). It comes
+  # with util-linux, which debian and ubuntu always carry; installed on its own
+  # line so a missing package name cannot skip the tools above.
+  if ! command -v setpriv >/dev/null 2>&1; then
+    pm_install util-linux || true
+  fi
+
   # gh only for a keeper given a GitHub login. The remote_ssh preflight runs
   # `gh auth status` only when gh_seed.sh has written a hosts.yml, which it
   # does only from GH_TOKEN; gh is absent from debian stable, so the agent

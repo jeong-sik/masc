@@ -600,6 +600,157 @@ let parse_sequence lines =
   in
   Ok { participants; events = List.rev !events }
 
+(* ── State diagrams ────────────────────────────────────────────────────── *)
+
+let split_on_arrow text =
+  let n = String.length text in
+  let rec find_arrow i =
+    if i + 2 < n && text.[i] = '-' && text.[i + 1] = '-' && text.[i + 2] = '>' then
+      Some (i, 3)
+    else if i + 1 < n && text.[i] = '-' && text.[i + 1] = '>' then
+      Some (i, 2)
+    else if i >= n then None
+    else find_arrow (i + 1)
+  in
+  let rec collect pos =
+    match find_arrow pos with
+    | None -> [ String.trim (String.sub text pos (n - pos)) ]
+    | Some (i, len) ->
+        let part = String.trim (String.sub text pos (i - pos)) in
+        part :: collect (i + len)
+  in
+  collect 0
+
+let parse_state_statement line current_dir declared edges =
+  let word, rest = first_word line in
+  match word with
+  | "direction" ->
+      (match direction_of_word (String.uppercase_ascii rest) with
+       | Some d ->
+           current_dir := d;
+           Ok ()
+       | None -> Error ("unknown direction: " ^ rest))
+  | "classdef" | "class" | "style" | "linkstyle" | "click" | "note" ->
+      Ok ()
+  | _ when String.contains line '-' && (find_from line 0 "-->" <> None || find_from line 0 "->" <> None) ->
+      let trans_part, label_part =
+        match String.index_opt line ':' with
+        | Some i ->
+            (String.sub line 0 i, String.trim (String.sub line (i + 1) (String.length line - i - 1)))
+        | None -> (line, "")
+      in
+      let parts = split_on_arrow trans_part |> List.filter (fun s -> s <> "") in
+      if List.length parts < 2 then Error ("malformed state transition: " ^ trans_part)
+      else
+        let rec add_transitions = function
+          | [] | [ _ ] -> Ok ()
+          | u_raw :: (v_raw :: _ as tail) ->
+              let clean_name s =
+                let s = String.trim s in
+                let n = String.length s in
+                if n >= 2 && s.[0] = '"' && s.[n - 1] = '"' then
+                  String.sub s 1 (n - 2)
+                else s
+              in
+              let from_id =
+                if u_raw = "[*]" then begin
+                  declare declared "[*]" ~label:"[*]" ~shape:Round ~explicit:false;
+                  "[*]"
+                end else
+                  let name = clean_name u_raw in
+                  declare declared name ~label:name ~shape:Round ~explicit:false;
+                  name
+              in
+              let to_id =
+                if v_raw = "[*]" then begin
+                  declare declared "[*]_end" ~label:"[*]" ~shape:Round ~explicit:false;
+                  "[*]_end"
+                end else
+                  let name = clean_name v_raw in
+                  declare declared name ~label:name ~shape:Round ~explicit:false;
+                  name
+              in
+              let label = if label_part = "" then None else Some (label_text label_part) in
+              edges :=
+                { from_id
+                ; to_id
+                ; directed = true
+                ; style = Solid
+                ; label
+                } :: !edges;
+              add_transitions tail
+        in
+        add_transitions parts
+  | "state" ->
+      if rest = "" then Error "expected state identifier after 'state'"
+      else if rest.[0] = '"' then
+        match String.index_from_opt rest 1 '"' with
+        | Some close ->
+            let desc = String.sub rest 1 (close - 1) in
+            let after = String.trim (String.sub rest (close + 1) (String.length rest - close - 1)) in
+            let as_word, id = first_word after in
+            if as_word = "as" && id <> "" then begin
+              declare declared id ~label:desc ~shape:Round ~explicit:true;
+              Ok ()
+            end else Error "expected 'as <id>' after state description"
+        | None -> Error "unclosed quote in state description"
+      else
+        (match String.index_opt rest ':' with
+         | Some colon ->
+             let id = String.trim (String.sub rest 0 colon) in
+             let desc = String.trim (String.sub rest (colon + 1) (String.length rest - colon - 1)) in
+             if id <> "" then begin
+               declare declared id ~label:desc ~shape:Round ~explicit:true;
+               Ok ()
+             end else Error "expected state id before colon"
+         | None ->
+             let id =
+               match String.index_opt rest ' ' with
+               | Some i -> String.trim (String.sub rest 0 i)
+               | None -> String.trim rest
+             in
+             if id <> "" then begin
+               declare declared id ~label:id ~shape:Round ~explicit:true;
+               Ok ()
+             end else Ok ())
+  | _ ->
+      match String.index_opt line ':' with
+      | Some colon ->
+          let id = String.trim (String.sub line 0 colon) in
+          let desc = String.trim (String.sub line (colon + 1) (String.length line - colon - 1)) in
+          if id <> "" && id <> "[*]" then begin
+            declare declared id ~label:desc ~shape:Round ~explicit:true;
+            Ok ()
+          end else Ok ()
+      | None ->
+          let id = String.trim line in
+          if id <> "" && id <> "[*]" then begin
+            declare declared id ~label:id ~shape:Round ~explicit:true;
+            Ok ()
+          end else Ok ()
+
+let parse_state_diagram ?(initial_dir = Top_down) lines =
+  let declared = { order = []; table = Hashtbl.create 16 } in
+  let edges = ref [] in
+  let current_dir = ref initial_dir in
+  let rec go = function
+    | [] -> Ok ()
+    | (number, statement) :: more ->
+        match parse_state_statement statement current_dir declared edges with
+        | Ok () -> go more
+        | Error what -> Error (Parse_error { line = number; what })
+  in
+  let* () = go (split_statements lines) in
+  let nodes =
+    List.rev declared.order |> List.map (fun id -> Hashtbl.find declared.table id)
+  in
+  Ok
+    { direction = !current_dir
+    ; nodes
+    ; edges = List.rev !edges
+    ; groups = []
+    }
+
 let parse text =
   match source_lines text with
   | [] -> Error (Parse_error { line = 1; what = "empty diagram" })
@@ -719,6 +870,17 @@ let parse text =
       | [ "sequenceDiagram" ] ->
           let* sequence = parse_sequence rest in
           Ok (Sequence sequence)
+      | [ ("stateDiagram" | "stateDiagram-v2") ] ->
+          let* graph = parse_state_diagram ~initial_dir:Top_down rest in
+          Ok (Graph graph)
+      | [ ("stateDiagram" | "stateDiagram-v2"); dir_word ] ->
+          let* initial_dir =
+            match direction_of_word (String.uppercase_ascii dir_word) with
+            | Some d -> Ok d
+            | None -> Error (Unsupported ("stateDiagram direction " ^ dir_word))
+          in
+          let* graph = parse_state_diagram ~initial_dir rest in
+          Ok (Graph graph)
       | word :: _ -> Error (Unsupported word)
       | [] -> Error (Parse_error { line = header_line; what = "empty header" }))
 

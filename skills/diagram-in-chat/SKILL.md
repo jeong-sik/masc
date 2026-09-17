@@ -9,15 +9,15 @@ description: "Draws a flow, pipeline, state machine, message exchange or set of 
 라이브러리로 그리고, TUI 는 자기 렌더러(`bin/masc_tui_mermaid.ml`)로 상자와 선을 그린다.
 운영자가 어느 쪽으로 읽을지 모르니 TUI 가 그릴 수 있는 범위 안에서 쓴다.
 
-TUI 가 그리는 것은 두 종류다. `graph`/`flowchart` 와 `sequenceDiagram`. 나머지
-(`classDiagram`, `erDiagram`, `stateDiagram`, `gantt`, `pie` …)는 그리지 않고, 소스를 그대로
+TUI 가 그리는 것은 세 종류다. `graph`/`flowchart`, `sequenceDiagram`, 그리고 `stateDiagram`/`stateDiagram-v2`. 나머지
+(`classDiagram`, `erDiagram`, `gantt`, `pie` …)는 그리지 않고, 소스를 그대로
 보여주면서 그 위에 이렇게 한 줄 적는다.
 
 ```
 mermaid: classDiagram is not drawn here; the source follows
 ```
 
-상태 머신도 `stateDiagram` 대신 `graph TD` 로 쓴다.
+상태 머신은 `stateDiagram-v2` 로 쓰거나 `graph TD` 로 쓴다. `[*]` 는 시작/종료 상태로 그려진다.
 
 ## 폭이 제일 자주 문제다
 

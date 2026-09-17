@@ -472,6 +472,114 @@ let test_a_quoted_label_may_hold_a_bracket () =
     ]
     (render "graph TD\nA[\"fixed [HOLD: see #1]\"]")
 
+(* ── State diagrams ────────────────────────────────────────────────────── *)
+
+let state_td_rows =
+  [ {| ╭─────╮|}
+  ; {| │ [*] │|}
+  ; {| ╰──┬──╯|}
+  ; {|    │|}
+  ; {|    v|}
+  ; {|╭───┴───╮|}
+  ; {|│ Still │|}
+  ; {|╰───┬───╯|}
+  ; {|    │ EvMove|}
+  ; {|    └┐|}
+  ; {|     v|}
+  ; {|╭────┴───╮|}
+  ; {|│ Moving │|}
+  ; {|╰────┬───╯|}
+  ; {|     │|}
+  ; {|    ┌┘|}
+  ; {|    v|}
+  ; {| ╭──┴──╮|}
+  ; {| │ [*] │|}
+  ; {| ╰─────╯|}
+  ]
+
+let test_state_diagram_top_down () =
+  Alcotest.check rows "top down state diagram with [*] start and stop"
+    state_td_rows
+    (render
+       "stateDiagram-v2\n\
+        [*] --> Still\n\
+        Still --> Moving : EvMove\n\
+        Moving --> [*]")
+
+let state_lr_rows =
+  [ {|╭─────╮  ╭───────╮  ╭────────╮  ╭─────╮|}
+  ; {|│ [*] ├─>┤ First ├─>┤ Second ├─>┤ [*] │|}
+  ; {|╰─────╯  ╰───────╯  ╰────────╯  ╰─────╯|}
+  ]
+
+let test_state_diagram_left_right () =
+  Alcotest.check rows "left right state diagram"
+    state_lr_rows
+    (render
+       "stateDiagram\n\
+        direction LR\n\
+        [*] --> First\n\
+        First --> Second\n\
+        Second --> [*]")
+
+let state_desc_rows =
+  [ {|╭──────────────╮|}
+  ; {|│ Offline Host │|}
+  ; {|╰───────┬──────╯|}
+  ; {|        │ Boot|}
+  ; {|       ┌┘|}
+  ; {|       v|}
+  ; {|   ╭───┴───╮|}
+  ; {|   │ Ready │|}
+  ; {|   ╰───────╯|}
+  ]
+
+let test_state_diagram_labels_and_descriptions () =
+  Alcotest.check rows "state description and transition label"
+    state_desc_rows
+    (render
+       "stateDiagram-v2\n\
+        state \"Offline Host\" as Off\n\
+        Off --> On : Boot\n\
+        state On : Ready")
+
+let test_state_diagram_keeper_fsm_parses () =
+  let src =
+    "stateDiagram-v2\n\
+     [*] --> Offline\n\
+     Offline --> Running : Fiber_started\n\
+     Offline --> Stopped : stop while not started\n\
+     Running --> Stopped : stop requested\n\
+     Stopped --> [*]\n\
+     classDef active fill:#22c55e\n\
+     class Offline active"
+  in
+  match Mermaid.parse src with
+  | Ok (Mermaid.Graph g) ->
+      Alcotest.(check int) "5 distinct states" 5 (List.length g.nodes);
+      Alcotest.(check int) "5 transitions" 5 (List.length g.edges);
+      Alcotest.(check bool) "has start state" true (List.exists (fun (n : Mermaid.node) -> n.id = "[*]") g.nodes);
+      Alcotest.(check bool) "has end state" true (List.exists (fun (n : Mermaid.node) -> n.id = "[*]_end") g.nodes)
+  | Ok (Mermaid.Sequence _) -> Alcotest.fail "parsed as sequence instead of graph"
+  | Error (Mermaid.Unsupported what) -> Alcotest.failf "unsupported: %s" what
+  | Error (Mermaid.Parse_error { line; what }) -> Alcotest.failf "line %d: %s" line what
+  | Error (Mermaid.Too_wide _) -> Alcotest.fail "too wide"
+
+let test_state_diagram_skips_classdef_and_notes () =
+  let src =
+    "stateDiagram-v2\n\
+     [*] --> Active\n\
+     note right of Active : this is skipped\n\
+     classDef c1 fill:#fff\n\
+     class Active c1\n\
+     Active --> [*]"
+  in
+  match Mermaid.parse src with
+  | Ok (Mermaid.Graph g) ->
+      Alcotest.(check int) "3 nodes" 3 (List.length g.nodes);
+      Alcotest.(check int) "2 edges" 2 (List.length g.edges)
+  | _ -> Alcotest.fail "expected Ok Graph"
+
 let () =
   Alcotest.run "tui mermaid"
     [ ( "goldens"
@@ -555,5 +663,14 @@ let () =
             test_strokes_heads_and_shapes_are_read
         ; Alcotest.test_case "styling statements change nothing" `Quick
             test_styling_statements_change_nothing
+        ] )
+    ; ( "state"
+      , [ Alcotest.test_case "top down state diagram" `Quick test_state_diagram_top_down
+        ; Alcotest.test_case "left right state diagram" `Quick test_state_diagram_left_right
+        ; Alcotest.test_case "labels and descriptions" `Quick
+            test_state_diagram_labels_and_descriptions
+        ; Alcotest.test_case "keeper fsm parses" `Quick test_state_diagram_keeper_fsm_parses
+        ; Alcotest.test_case "skips classdef and notes" `Quick
+            test_state_diagram_skips_classdef_and_notes
         ] )
     ]

@@ -1,16 +1,14 @@
 #!/usr/bin/env bash
-# The three places that name the shim's C stubs must name the same ones.
+# The shim's C stubs named by its library stanzas must be the .c files the
+# static build copies.
 #
-# masc-exec-shim is built twice from the same sources: by dune in the repo
-# (lib/exec_shim/dune) and by scripts/build-shim-static.sh, which copies the
-# sources into a scratch project and writes that project's dune itself. A
-# stub added to one and not the other builds here and fails to link there,
-# or worse links there against a stale copy.
-#
-# The third list is the source list build-shim-static.sh copies. A .c file
-# named by a dune stanza but not copied does not reach the scratch project
-# at all; a .c copied but named by neither stanza is dead weight that a
-# reader will take for a live stub.
+# masc-exec-shim is built twice from the same sources: by dune in the repo and
+# by scripts/build-shim-static.sh in a scratch project. Both builds include
+# the one stanza file lib/exec_shim/shim_libraries.inc, so they name the same
+# stubs. What can still drift is the source list the static build copies: a
+# .c file named by a stanza but not copied does not reach the scratch project
+# at all; a .c copied but named by no stanza is dead weight that a reader will
+# take for a live stub.
 #
 # Usage: shim-stub-set-agrees.sh [--fail|--print|--self-test]
 
@@ -18,7 +16,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUILD_SCRIPT="scripts/build-shim-static.sh"
-LIBRARY_DUNE="lib/exec_shim/dune"
+LIBRARY_STANZAS="lib/exec_shim/shim_libraries.inc"
 
 # The words of the (names ...) field inside the (foreign_stubs ...) form of
 # whichever text arrives on stdin, one per line, sorted.
@@ -37,14 +35,7 @@ stub_names_of_stdin() {
 }
 
 repo_stubs() {
-  stub_names_of_stdin < "${ROOT}/${LIBRARY_DUNE}"
-}
-
-# The scratch project's dune is a heredoc inside the build script, so it is
-# read from the script's text rather than by running it: running it needs a
-# docker daemon, and this guard answers without one.
-scratch_stubs() {
-  stub_names_of_stdin < "${ROOT}/${BUILD_SCRIPT}"
+  stub_names_of_stdin < "${ROOT}/${LIBRARY_STANZAS}"
 }
 
 copied_stubs() {
@@ -54,38 +45,25 @@ copied_stubs() {
 }
 
 report() {
-  local repo scratch copied status=0
+  local repo copied status=0
   repo="$(repo_stubs)"
-  scratch="$(scratch_stubs)"
   copied="$(copied_stubs)"
 
   if [ -z "${repo}" ]; then
-    echo "[shim-stub-set] no (foreign_stubs (names ...)) found in ${LIBRARY_DUNE}" >&2
+    echo "[shim-stub-set] no (foreign_stubs (names ...)) found in ${LIBRARY_STANZAS}" >&2
     return 1
   fi
 
-  local only_repo only_scratch only_copied
-  only_repo="$(comm -23 <(printf '%s\n' "${repo}") <(printf '%s\n' "${scratch}"))"
-  only_scratch="$(comm -13 <(printf '%s\n' "${repo}") <(printf '%s\n' "${scratch}"))"
+  local only_copied
   only_copied="$(comm -3 <(printf '%s\n' "${repo}") <(printf '%s\n' "${copied}"))"
 
-  if [ -n "${only_repo}" ]; then
-    echo "[shim-stub-set] named by ${LIBRARY_DUNE} but not by the scratch project:" >&2
-    printf '  %s\n' ${only_repo} >&2
-    status=1
-  fi
-  if [ -n "${only_scratch}" ]; then
-    echo "[shim-stub-set] named by the scratch project but not by ${LIBRARY_DUNE}:" >&2
-    printf '  %s\n' ${only_scratch} >&2
-    status=1
-  fi
   if [ -n "${only_copied}" ]; then
     echo "[shim-stub-set] the stub set and the copied .c files disagree:" >&2
     printf '  %s\n' ${only_copied} >&2
     status=1
   fi
   if [ "${status}" -eq 0 ]; then
-    echo "[shim-stub-set] $(printf '%s\n' "${repo}" | wc -l | tr -d ' ') stub(s) agree across all three lists"
+    echo "[shim-stub-set] $(printf '%s\n' "${repo}" | wc -l | tr -d ' ') stub(s) agree with the copied sources"
   fi
   return "${status}"
 }
@@ -120,8 +98,7 @@ self_test() {
 
 case "${1:---fail}" in
   --print)
-    echo "repo:    $(repo_stubs | tr '\n' ' ')"
-    echo "scratch: $(scratch_stubs | tr '\n' ' ')"
+    echo "stanzas: $(repo_stubs | tr '\n' ' ')"
     echo "copied:  $(copied_stubs | tr '\n' ' ')"
     ;;
   --fail) report ;;

@@ -38,6 +38,7 @@ type dashboard_purge_artifact =
   | Keeper_working_context_recall_artifact
   | Keeper_working_context_artifact
   | Keeper_memory_journal_artifact
+  | Keeper_memory_absorbed_artifact
   | Keeper_playground_bundles_artifact
   | Keeper_runtime_configuration_artifact
   | Keeper_configuration_artifact

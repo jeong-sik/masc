@@ -163,6 +163,7 @@ val read_for_keepers_dir :
 val apply_disposition
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?dropped_statements:Keeper_memory_os_types.dropped_statement list
+  -> absorbed:Keeper_memory_os_types.absorbed_statement list
   -> keepers_dir:string
   -> keeper_id:string
   -> now:float
@@ -185,7 +186,14 @@ val apply_disposition
 
     A fact the decision never mentions is left alone. A retired fact is retired
     even if the keeper re-observed it during the pass: the judgment was about
-    the claim, and a re-observation does not answer it. *)
+    the claim, and a re-observation does not answer it.
+
+    An [absorbed] fact that is still current leaves the snapshot too, and its
+    row is appended to {!Keeper_memory_absorbed} under the lock, after the next
+    snapshot is built and printed and right before it replaces the old one; if
+    that append fails, nothing is committed (RFC-0456 §4.2). Required rather
+    than defaulted: a caller that leaves it out would add the merged claim and
+    keep every fact it absorbs current. *)
 
 val replace
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t

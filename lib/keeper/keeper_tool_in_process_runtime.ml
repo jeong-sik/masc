@@ -1927,29 +1927,29 @@ let spawn_outside_boundary ~name ~(profile : sandbox_profile) ~detail =
            ]))
 ;;
 
-let spawn_sandbox_argv ~turn_sandbox_factory ~cwd ~command_argv =
-  match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
-  | Keeper_sandbox_factory.No_factory ->
-    Error "spawn needs a turn sandbox and this turn has no factory"
-  | Keeper_sandbox_factory.Remote_ssh_profile ->
-    Error
-      "spawn does not cross the remote_ssh boundary: the exec shim speaks a \
-       framed protocol over one connection, so there is no argv to background. \
-       Run the command with Execute."
-  (* Same boundary, other transport: a microvm guest owns its tree and is
-     reached through the shim over [container exec] (RFC-0400). *)
-  | Keeper_sandbox_factory.Runtime { guest_profile = Micro_vm_guest; _ } ->
-    Error
-      "spawn does not cross the microvm boundary: the guest's tree lives on \
-       its work volume and the exec shim speaks a framed protocol over one \
-       connection, so there is no argv to background. Run the command with \
-       Execute."
-  | Keeper_sandbox_factory.Runtime { runtime; guest_profile = Docker_guest; _ } ->
-    Keeper_turn_sandbox_runtime.exec_argv
-      ~validate_cached_container:false
-      runtime
-      ~cwd
-      ~command_argv
+let spawn_sandbox_argv ~sandbox_profile ~turn_sandbox_factory ~cwd ~command_argv =
+  (* The profile decides, through the rule the capability surface also applies;
+     the factory only supplies the container once the profile can start one. *)
+  match Keeper_spawn_boundary.of_sandbox_profile sandbox_profile with
+  | Keeper_spawn_boundary.Refuses_start { detail } -> Error detail
+  | Keeper_spawn_boundary.Starts_in_container ->
+    (match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
+     | Keeper_sandbox_factory.No_factory ->
+       Error "spawn needs a turn sandbox and this turn has no factory"
+     | Keeper_sandbox_factory.Runtime { runtime; guest_profile = Docker_guest; _ } ->
+       Keeper_turn_sandbox_runtime.exec_argv
+         ~validate_cached_container:false
+         runtime
+         ~cwd
+         ~command_argv
+     (* The factory was built from a different profile than the one this call
+        carries, so its guest is not the Docker container the profile names. *)
+     | Keeper_sandbox_factory.Remote_ssh_profile
+     | Keeper_sandbox_factory.Runtime { guest_profile = Micro_vm_guest; _ } ->
+       Error
+         "spawn: the turn sandbox resolved to an endpoint guest while the \
+          Keeper profile names Docker, so there is no container argv to \
+          background")
 
 let handle_keeper_spawn_with_outcome
       ~(config : Workspace.config)
@@ -2025,7 +2025,11 @@ let handle_keeper_spawn_with_outcome
                      ]))
           else (
             match
-              spawn_sandbox_argv ~turn_sandbox_factory ~cwd:host_cwd ~command_argv
+              spawn_sandbox_argv
+                ~sandbox_profile:meta.sandbox_profile
+                ~turn_sandbox_factory
+                ~cwd:host_cwd
+                ~command_argv
             with
             | Error detail ->
               spawn_outside_boundary ~name ~profile:meta.sandbox_profile ~detail

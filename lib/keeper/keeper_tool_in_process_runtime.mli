@@ -314,14 +314,15 @@ val handle_keeper_webmcp_with_outcome
     did not run. *)
 
 val spawn_sandbox_argv
-  :  turn_sandbox_factory:Keeper_sandbox_factory.t option
+  :  sandbox_profile:Keeper_types_profile_sandbox.sandbox_profile
+  -> turn_sandbox_factory:Keeper_sandbox_factory.t option
   -> cwd:string
   -> command_argv:string list
   -> (string list, string) result
 (** The argv a spawn backgrounds on the host for the turn's Docker container,
-    or the refusal: no factory, or a keeper whose tree lives on its endpoint
-    (remote_ssh, microvm), where the shim runs one command per connection and
-    there is nothing to background. Resolving the factory boots nothing.
+    or the refusal: a profile {!Keeper_spawn_boundary.of_sandbox_profile}
+    refuses (remote_ssh, microvm), or no factory. Resolving the factory boots
+    nothing.
     Exported for the same reason as {!spawn_outside_boundary}: the decision
     is otherwise reachable only through the handler. *)
 

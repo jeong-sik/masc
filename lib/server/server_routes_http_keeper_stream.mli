@@ -388,7 +388,10 @@ module For_testing : sig
     string ->
     (canonical_reply_payload, canonical_reply_payload_error) result
   val direct_reply_terminal_error :
-    ?has_visible_blocks:bool -> Yojson.Safe.t option -> string -> string option
+    ?has_visible_blocks:bool ->
+    Yojson.Safe.t option ->
+    string ->
+    Keeper_request_failure.cause option
   val persisted_reply_blocks :
     turn_outcome:Keeper_turn_outcome.t ->
     Keeper_chat_blocks.chat_block list option ->

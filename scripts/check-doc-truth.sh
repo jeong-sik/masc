@@ -96,19 +96,18 @@ changelog_latest_release="$(sed -n 's/^## \[\([0-9][^]]*\)\].*/\1/p' CHANGELOG.m
 
 [[ -n "$readme_tag" ]] || fail "missing TAG= install pin in README.md"
 [[ -n "$readme_ko_tag" ]] || fail "missing TAG= install pin in README.ko.md"
-# A literal install pin names the published release, or an explicitly
-# announced current release target whose availability the reader must check.
-# A version bump alone does not authorize advertising an unpublished tag.
-if [[ "$readme_tag" != "$roadmap_published_release" ]]; then
-  # A release candidate may document its own pinned installation before tag
-  # publication, but it must explicitly name that target and ask the reader
-  # to check availability. Published-release metadata remains factual.
-  [[ "$readme_tag" == "$package_version" ]] || \
-    fail "README install TAG ($readme_tag) is neither the published release nor the current package"
-  for readme in README.md README.ko.md; do
-    require_contains "$readme" "> Installation target: v$readme_tag (check tag availability on GitHub Releases)."
-  done
-fi
+# A literal install pin names the published release or the current package.
+# scripts/bump-version.sh moves every pin to the package it bumps to, so
+# between that bump and the tag the pin names a release that does not exist
+# yet, and the notice beside it tells the reader to check. The notice stands
+# whichever of the two the pin names: the bump rewrites that line rather than
+# adding it, so a README that dropped it while pinned to a published release
+# would pass here and fail the next bump.
+[[ "$readme_tag" == "$roadmap_published_release" || "$readme_tag" == "$package_version" ]] || \
+  fail "README install TAG ($readme_tag) is neither the published release nor the current package"
+for readme in README.md README.ko.md; do
+  require_contains "$readme" "> Installation target: v$readme_tag (check tag availability on GitHub Releases)."
+done
 [[ "$readme_ko_tag" == "$readme_tag" ]] || \
   fail "README.ko install TAG ($readme_ko_tag) != README install TAG ($readme_tag)"
 

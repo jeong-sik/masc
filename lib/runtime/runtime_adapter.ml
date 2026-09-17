@@ -513,6 +513,49 @@ let model_capabilities_override_of_model_spec
       spec.capabilities
 ;;
 
+(* The window handed to AGENT_CORE is MASC's effective window, not the raw
+   runtime.toml override (#36540). Keeper turns are budgeted with the override
+   clamped by the capability catalog cap
+   ([Runtime.resolve_max_context_of_runtime]), and AGENT_CORE's
+   [Provider_config.context_window] — exact-fit admission and response
+   telemetry — reads [config.max_context] verbatim when set. Passing the raw
+   override sized those paths against a window the keeper budget never
+   admitted. The capability cap is resolved exactly as
+   [Provider_config.capabilities_for_config_model] will resolve it for the
+   built config: the computed override when present, otherwise the catalog
+   row for the same wire/provider/model triple. *)
+let effective_max_context_of_model_spec
+      ~(wire : Llm_provider.Provider_kind.t)
+      ~(provider_id : string)
+      ~(model_capabilities_override : Llm_provider.Capabilities.capabilities option)
+      (spec : Runtime_schema.model_spec)
+  =
+  match spec.max_context with
+  | None -> None
+  | Some declared ->
+    let capability_cap =
+      let capabilities =
+        match model_capabilities_override with
+        | Some _ as found -> found
+        | None ->
+          Llm_provider.Capabilities.for_provider_model_id
+            ~wire:(Some wire)
+            ~allow_bare_fallback:false
+            ~provider_label:provider_id
+            ~model_id:spec.api_name
+      in
+      match capabilities with
+      | Some caps ->
+        (match caps.max_context_tokens with
+         | Some cap when cap > 0 -> Some cap
+         | Some _ | None -> None)
+      | None -> None
+    in
+    (match capability_cap with
+     | Some cap when declared > cap -> Some cap
+     | Some _ | None -> Some declared)
+;;
+
 (* --- provider × model spec → Provider_config.t --- *)
 let provider_config_from_declared_provider ?keep_alive ?num_ctx ?repeat_penalty
     ?max_tokens
@@ -544,6 +587,13 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx ?repeat_penalty
          model_capabilities_override_of_model_spec
            ~wire:kind
            ~provider_id:provider.id
+           spec
+       in
+       let max_context =
+         effective_max_context_of_model_spec
+           ~wire:kind
+           ~provider_id:provider.id
+           ~model_capabilities_override
            spec
        in
        let request_path =
@@ -586,7 +636,7 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx ?repeat_penalty
             ~credential_source
             ~headers
             ~request_path
-            ?max_context:spec.max_context
+            ?max_context
             ?supports_tool_choice_override
             ?model_capabilities_override
             ?temperature:spec.temperature
@@ -626,6 +676,13 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx ?repeat_penalty
            ~provider_id:provider.id
            spec
        in
+       let max_context =
+         effective_max_context_of_model_spec
+           ~wire:kind
+           ~provider_id:provider.id
+           ~model_capabilities_override
+           spec
+       in
        Ok
          (Llm_provider.Provider_config.make
             ~kind
@@ -635,7 +692,7 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx ?repeat_penalty
             ~base_url:""
             ~api_key
             ~headers:(Option.value ~default:[] provider.headers)
-            ?max_context:spec.max_context
+            ?max_context
             ?supports_tool_choice_override
             ?model_capabilities_override
             ?temperature:spec.temperature

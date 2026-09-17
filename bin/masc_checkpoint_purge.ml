@@ -142,6 +142,11 @@ let () =
     | Some value -> Config_dir_resolver.absolute_path value
     | None -> Config_dir_resolver.base_path_or_cwd ()
   in
+  (* The save below prunes the session's checkpoint history to the window the
+     operator set, and that window lives in this workspace's overrides. Without
+     this the purge would answer with the shipped default and trim a history
+     the operator asked to keep. *)
+  Masc.Runtime_params.restore ~base_path;
   let session_dir = Filename.concat (Filename.concat base_path "traces") trace in
   let checkpoint_path = Store.agent_core_checkpoint_path ~session_dir ~session_id:trace in
   if not (Sys.file_exists checkpoint_path)
@@ -197,7 +202,13 @@ let () =
          let backup_path = Filename.concat backup_dir (trace ^ ".json") in
          write_file_bytes backup_path original_bytes;
          Printf.printf "backup: %s (%d bytes)\n" backup_path before_len;
-         (match Store.save_agent_core_classified ~session_dir purged with
+         (match
+            Store.save_agent_core_classified ~session_dir
+              ~history_retained:
+                (Masc.Runtime_params.get
+                   Masc.Runtime_settings.keeper_checkpoint_history_retained)
+              purged
+          with
           | Error detail -> error ("save failed (backup retained): " ^ detail)
           | Ok (Store.Stale_noop { incoming_turn_count; known_turn_count }) ->
             error

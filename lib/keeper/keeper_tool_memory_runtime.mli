@@ -5,6 +5,9 @@
     sync regression test catches drift). *)
 type memory_search_source =
   | Memory
+  | Absorbed
+      (** Facts a librarian pass merged into a newer claim (RFC-0456 §4.2),
+          read from [<keeper>.memory-absorbed.jsonl]. *)
   | History
   | All
 

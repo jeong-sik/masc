@@ -2,7 +2,7 @@
 
 사용: python aggregate.py <jobs-dir>
 행: job(=arm), task, trial, reward(0/1), duration_ms, tokens, tool_calls.
-레이아웃은 Phase 0 실측으로 확정 (harbor 0.22.0):
+레이아웃은 harbor 0.23.0 의 TrialResult (models/trial/result.py) 기준:
   <jobs>/<job-name>/<task>__<suffix>/result.json  (trial-level, task_name 있음)
   <jobs>/<job-name>/result.json                    (job-level, task_name 없음 — 스킵)
   trial 필드: task_name, trial_name, agent_result(AgentContext),
@@ -29,6 +29,10 @@ COLUMNS = [
     # 표에서 공짜와 구분되지 않는다. 끝에 붙인다 — 기존 컬럼 위치를 읽는
     # 소비자가 있을 수 있다.
     "keeper_cost_unreported_rows",
+    # harbor 의 에이전트 타임아웃이 에피소드를 끊었는지, 그때 keeper 가 실제로
+    # 멈췄는지. masc_state 만으로는 "시간 초과로 끊긴 Running" 과 다른 이유의
+    # Running 이 구분되지 않는다.
+    "interrupted", "keepers_stopped",
 ]
 
 
@@ -69,7 +73,7 @@ def main() -> None:
             out.writerow([
                 trial_dir.parent.name, trial_dir.name.split("__")[0],
                 trial_dir.name, "", "", "", "", "", "", "", "",
-                read_error or "unreadable", "",
+                read_error or "unreadable", "", "", "",
             ])
             continue
         verifier = data.get("verifier_result") or {}
@@ -89,6 +93,8 @@ def main() -> None:
             cell(meta.get("duplicate_tool_calls")),
             cell(meta.get("masc_state")),
             cell((meta.get("keeper_usage") or {}).get("cost_rows_unreported")),
+            cell(meta.get("interrupted")),
+            cell(meta.get("keepers_stopped")),
         ])
 
 

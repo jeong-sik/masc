@@ -882,13 +882,15 @@ let keeper_delegate_list_body ~(config : Workspace.config) ~caller args =
                ; "message", `String detail
                ])))
 ;;
-let complete_keeper_msg_stream_result result =
-  if not (tool_result_success result) then result
-  else begin
+let complete_keeper_msg_stream_result : Turn.dispatch -> Turn.dispatch = function
+  | Turn.Turn_failed _ as dispatch -> dispatch
+  | Turn.Turn_settled result when not (tool_result_success result) ->
+    Turn.Turn_settled result
+  | Turn.Turn_settled result ->
     invalidate_keeper_list_cache ();
-    tool_result_ok_data
-      (annotate_keeper_json ~runtime_class:"keeper" (Tool_result.data result))
-  end
+    Turn.Turn_settled
+      (tool_result_ok_data
+         (annotate_keeper_json ~runtime_class:"keeper" (Tool_result.data result)))
 
 let handle_keeper_msg_stream_admitted
       ~operation_id
@@ -909,7 +911,19 @@ let handle_keeper_msg_stream_admitted
     Keeper_invocation_contract.direct_message_with_keeper_name message raw_name
   with
   | Error error ->
-    tool_result_error ~class_:Tool_result.Policy_rejection (Keeper_invocation_contract.request_error_to_string error)
+    let detail = Keeper_invocation_contract.request_error_to_string error in
+    let failure =
+      { Keeper_request_failure.cause =
+          Keeper_request_failure.Invocation_rejected { detail }
+      }
+    in
+    Turn.Turn_failed
+      { result =
+          tool_result_error
+            ~class_:Tool_result.Policy_rejection
+            (Keeper_request_failure.summary failure)
+      ; failure
+      }
   | Ok message ->
     let event_bus = Event_bus_slots.get_keeper () in
     Turn.handle_keeper_msg_admitted

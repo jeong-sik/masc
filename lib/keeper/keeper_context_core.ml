@@ -104,6 +104,8 @@ let save_agent_core_checkpoint_classified
     (match
        Keeper_checkpoint_store.save_agent_core_classified
          ~session_dir:session.session_dir
+         ~history_retained:
+           (Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained)
          checkpoint
      with
      | Ok outcome -> Ok (checkpoint, outcome)

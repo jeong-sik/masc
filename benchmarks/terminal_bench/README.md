@@ -11,7 +11,7 @@ MASC 하네스 자체를 Terminal-Bench 4.0.0 전체로 잰다.
 ## 준비
 
     ./image/fetch_masc.sh                         # 최신 릴리스, linux-x64 와 linux-arm64 둘 다
-    uv venv -p 3.12 && uv pip install 'harbor==0.23.0' pytest
+    uv venv -p 3.12 && uv pip install -r requirements.txt   # harbor 0.23.0 고정
     export ANTHROPIC_API_KEY=...                  # 모델 제공자 키 (아래 레인 표)
 
 - Harbor hub 의 4.0.0 태스크는 태스크마다 미리 빌드된 이미지(`docker_image`)를 쓰고, 그

@@ -172,11 +172,13 @@ def literal_target(path: str, suite_dir: str) -> str | None:
     for var in ROOT_VARS:
         rest = path[len(var):]
         if path.startswith(var) and not VAR_RE.search(rest):
-            return os.path.join(os.path.relpath(".", suite_dir), rest)
+            return os.path.join(
+                os.path.relpath(REPO_ROOT, os.path.join(REPO_ROOT, suite_dir)), rest
+            )
     return None
 
 
-def collect_literal_deps(form, suite_dir: str = DEFAULT_SUITE_DIR) -> list[str]:
+def collect_literal_deps(form, suite_dir: str) -> list[str]:
     """Literal file targets required by a directly executed test action.
 
     Building the test executable does not build these action dependencies.
@@ -341,7 +343,7 @@ def stanza_text(suite: str, suite_dir: str = DEFAULT_SUITE_DIR) -> tuple[str, bo
 
 
 def suite_env(
-    suite: str, text: str, own_file: bool = True, suite_dir: str = DEFAULT_SUITE_DIR
+    suite: str, text: str, own_file: bool = True, *, suite_dir: str
 ) -> tuple[list[tuple[str, str]], list[str]]:
     forms = parse(tokenize(text))
     if own_file:
@@ -465,7 +467,7 @@ def self_test() -> int:
         else:
             print(f"pass {label}")
 
-    env, deps = suite_env("test_alpha", FIXTURE_PLAIN)
+    env, deps = suite_env("test_alpha", FIXTURE_PLAIN, suite_dir=DEFAULT_SUITE_DIR)
     check(
         "nested setenv keeps source order",
         env,
@@ -509,7 +511,7 @@ def self_test() -> int:
     )
 
     sibling = "(test (name test_spawn) (deps sibling.exe ../config/runtime.toml))"
-    env, deps = suite_env("test_spawn", sibling)
+    env, deps = suite_env("test_spawn", sibling, suite_dir=DEFAULT_SUITE_DIR)
     check(
         "literal action dependencies need building without setenv", deps,
         ["sibling.exe", "../config/runtime.toml"],
@@ -517,7 +519,7 @@ def self_test() -> int:
     check("action dependencies do not invent environment values", env, [])
     _, deps = suite_env(
         "test_spawn", sibling + "(test (name test_other) (deps other.exe))",
-        own_file=False,
+        own_file=False, suite_dir=DEFAULT_SUITE_DIR
     )
     check(
         "neighboring suite dependencies do not leak", deps,
@@ -525,16 +527,16 @@ def self_test() -> int:
     )
     _, deps = suite_env(
         "test_two", "(tests (names test_one test_two) (deps shared.exe))",
-        own_file=False,
+        own_file=False, suite_dir=DEFAULT_SUITE_DIR
     )
     check("group members receive the group's action dependencies", deps, ["shared.exe"])
     _, deps = suite_env(
         "test_spawn", "(test (name test_spawn) (deps sibling.exe)"
-        " (action (setenv RUNNER %{dep:sibling.exe} (run %{test}))))",
+        " (action (setenv RUNNER %{dep:sibling.exe} (run %{test}))))", suite_dir=DEFAULT_SUITE_DIR
     )
     check("the same target declared twice is built once", deps, ["sibling.exe"])
 
-    env, _ = suite_env("test_beta", FIXTURE_SPLIT)
+    env, _ = suite_env("test_beta", FIXTURE_SPLIT, suite_dir=DEFAULT_SUITE_DIR)
     check("a setenv split across lines is one pair", env, [("HOME", "/tmp/beta-home")])
 
     # test/stanzas/test_keeper_turn_fsm_tla_parity.inc builds against a spec
@@ -544,7 +546,7 @@ def self_test() -> int:
     _, deps = suite_env(
         "test_prroot",
         "(test (name test_prroot)"
-        " (deps %{project_root}/specs/keeper-turn-fsm/KeeperTurnFSM.tla))",
+        " (deps %{project_root}/specs/keeper-turn-fsm/KeeperTurnFSM.tla))", suite_dir=DEFAULT_SUITE_DIR
     )
     check(
         "a %{project_root}/ dep resolves to the checkout root", deps,
@@ -558,13 +560,13 @@ def self_test() -> int:
     try:
         suite_env(
             "test_var",
-            "(test (name test_var) (deps %{unknown_var}/spec.tla))",
+            "(test (name test_var) (deps %{unknown_var}/spec.tla))", suite_dir=DEFAULT_SUITE_DIR
         )
     except StanzaError:
         raise AssertionError("deps are not env values; an unknown one is dropped, not refused")
     _, deps = suite_env(
         "test_var",
-        "(test (name test_var) (deps %{unknown_var}/spec.tla))",
+        "(test (name test_var) (deps %{unknown_var}/spec.tla))", suite_dir=DEFAULT_SUITE_DIR
     )
     check(
         "a variable only dune can name stays in runtest's hands", deps,
@@ -577,7 +579,7 @@ def self_test() -> int:
     # the files it reads -- a verdict about the runner, not the change.
     _, deps = suite_env(
         "test_tree",
-        "(test (name test_tree) (deps (source_tree ../skills)))",
+        "(test (name test_tree) (deps (source_tree ../skills)))", suite_dir=DEFAULT_SUITE_DIR
     )
     check("a source_tree dep is a build target", deps, ["../skills"])
     check(
@@ -590,7 +592,7 @@ def self_test() -> int:
     _, deps = suite_env(
         "test_glob",
         "(test (name test_glob)"
-        " (deps (glob_files *.json) (alias runtest-deps) (source_tree ../lib)))",
+        " (deps (glob_files *.json) (alias runtest-deps) (source_tree ../lib)))", suite_dir=DEFAULT_SUITE_DIR
     )
     check("glob and alias deps stay with dune's runtest action", deps, ["../lib"])
 
@@ -603,7 +605,7 @@ def self_test() -> int:
         "test_wsroot",
         "(test (name test_wsroot)"
         " (deps (source_tree %{workspace_root}/config/prompts)"
-        " %{workspace_root}/test/fixtures/golden))",
+        " %{workspace_root}/test/fixtures/golden))", suite_dir=DEFAULT_SUITE_DIR
     )
     check(
         "a %{workspace_root}/ dep, tree or file, resolves to the checkout root",
@@ -612,9 +614,25 @@ def self_test() -> int:
     )
     _, deps = suite_env(
         "test_tree_var",
-        "(test (name test_tree_var) (deps (source_tree %{unknown_var}/tree)))",
+        "(test (name test_tree_var) (deps (source_tree %{unknown_var}/tree)))", suite_dir=DEFAULT_SUITE_DIR
     )
     check("a source_tree under a variable only dune can name is dropped", deps, [])
+    _, deps = suite_env(
+        "test_deep",
+        "(test (name test_deep) (deps %{project_root}/specs/a.tla))",
+        suite_dir="packages/agent_core/test",
+    )
+    absolute_dir = os.path.join(REPO_ROOT, "packages/agent_core/test")
+    _, deps = suite_env(
+        "test_deep",
+        "(test (name test_deep) (deps %{project_root}/specs/a.tla))",
+        suite_dir=absolute_dir,
+    )
+    check(
+        "an absolute stanza directory lands at the checkout root from any cwd",
+        [os.path.normpath(os.path.join(absolute_dir, d)) for d in deps],
+        [os.path.join(REPO_ROOT, "specs/a.tla")],
+    )
     _, deps = suite_env(
         "test_deep",
         "(test (name test_deep) (deps %{project_root}/specs/a.tla))",
@@ -626,7 +644,7 @@ def self_test() -> int:
         ["specs/a.tla"],
     )
 
-    env, deps = suite_env("test_gamma", FIXTURE_DEP)
+    env, deps = suite_env("test_gamma", FIXTURE_DEP, suite_dir=DEFAULT_SUITE_DIR)
     check("a dep value becomes its path", env, [("MASC_MAIN_EIO_EXE", "../bin/main_eio.exe")])
     check("and is reported as a target to build", deps, ["../bin/main_eio.exe"])
     check(
@@ -636,7 +654,7 @@ def self_test() -> int:
     )
 
     try:
-        suite_env("test_delta", FIXTURE_UNKNOWN_VAR)
+        suite_env("test_delta", FIXTURE_UNKNOWN_VAR, suite_dir=DEFAULT_SUITE_DIR)
         failures += 1
         print("FAIL an unresolvable dune variable was accepted", file=sys.stderr)
     except StanzaError as exc:
@@ -646,7 +664,7 @@ def self_test() -> int:
         else:
             print("pass an unresolvable dune variable is an error, not a skip")
 
-    env, _ = suite_env("test_one", FIXTURE_GROUP, own_file=False)
+    env, _ = suite_env("test_one", FIXTURE_GROUP, own_file=False, suite_dir=DEFAULT_SUITE_DIR)
     check("a group stanza with no action yields nothing", env, [])
 
     # This used to assert the empty environment, which pinned the silent
@@ -655,12 +673,12 @@ def self_test() -> int:
     # against the wrong directory ran the suite with a partial environment
     # and said nothing. Refusing is the only answer that separates the two.
     try:
-        suite_env("test_absent", FIXTURE_PLAIN, own_file=False)
+        suite_env("test_absent", FIXTURE_PLAIN, own_file=False, suite_dir=DEFAULT_SUITE_DIR)
         check("a suite this text does not declare is refused", "answered", "refused")
     except StanzaError:
         check("a suite this text does not declare is refused", "refused", "refused")
 
-    env, deps = suite_env("test_epsilon", FIXTURE_RULE)
+    env, deps = suite_env("test_epsilon", FIXTURE_RULE, suite_dir=DEFAULT_SUITE_DIR)
     check(
         "a (rule (alias runtest)) stanza is read like any other",
         env,
@@ -672,7 +690,7 @@ def self_test() -> int:
     )
 
     try:
-        suite_env("test_zeta", "(tests (names test_zeta))\n(setenv OTHER x (run y))", own_file=False)
+        suite_env("test_zeta", "(tests (names test_zeta))\n(setenv OTHER x (run y))", own_file=False, suite_dir=DEFAULT_SUITE_DIR)
         failures += 1
         print("FAIL an unattributable inline setenv was accepted", file=sys.stderr)
     except StanzaError:
@@ -685,7 +703,7 @@ def self_test() -> int:
     # only whether the file contained "(setenv" anywhere refused every one of
     # them, and test_tui_turn_rail could not be dispatched at all.
     neighbours = FIXTURE_PLAIN + "\n" + FIXTURE_GROUP
-    env, _ = suite_env("test_one", neighbours, own_file=False)
+    env, _ = suite_env("test_one", neighbours, own_file=False, suite_dir=DEFAULT_SUITE_DIR)
     check("a suite with no setenv beside one that has some", env, [])
 
     # Shared includes are real test declarations, not one suite named after
@@ -706,13 +724,13 @@ def self_test() -> int:
               + FIXTURE_PLAIN)
         text, own_file = stanza_text("test_shared_two", fixture)
         check("shared include selects named group", own_file, False)
-        env, deps = suite_env("test_shared_two", text, own_file=own_file)
+        env, deps = suite_env("test_shared_two", text, own_file=own_file, suite_dir=DEFAULT_SUITE_DIR)
         check("nested include preserves group environment", env,
               [("SHARED_RUNNER", "sibling.exe")])
         check("included deps keep the suite directory as their base", deps,
               ["sibling.exe", "../config/runtime.toml"])
         text, own_file = stanza_text("test_alpha", fixture)
-        env, _ = suite_env("test_alpha", text, own_file=own_file)
+        env, _ = suite_env("test_alpha", text, own_file=own_file, suite_dir=DEFAULT_SUITE_DIR)
         check("shared-file sibling environment does not leak", env,
               [("MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED", "false"),
                ("MASC_BASE_PATH", "/tmp/test-alpha"),
@@ -732,7 +750,7 @@ def self_test() -> int:
 
     text, own_file = stanza_text("test_types_coverage")
     check("real shared coverage suite is discoverable",
-          suite_env("test_types_coverage", text, own_file=own_file), ([], []))
+          suite_env("test_types_coverage", text, own_file=own_file, suite_dir=DEFAULT_SUITE_DIR), ([], []))
     check("coverage members are included in check-all",
           "test_types_coverage" in inline_suite_names(), True)
 
@@ -740,7 +758,7 @@ def self_test() -> int:
     real = os.path.join(stanza_dir(DEFAULT_SUITE_DIR), "test_heartbeat_integration.inc")
     if os.path.exists(real):
         with open(real, encoding="utf-8") as handle:
-            env, _ = suite_env("test_heartbeat_integration", handle.read())
+            env, _ = suite_env("test_heartbeat_integration", handle.read(), suite_dir=DEFAULT_SUITE_DIR)
         check(
             "the real stanza reads what test.yml hardcoded",
             env,
@@ -755,7 +773,7 @@ def self_test() -> int:
     if os.path.exists(outside):
         text, own_file = stanza_text("test_provider", "packages/agent_core/test")
         check("a suite outside test/ has no stanzas file", own_file, False)
-        env, _deps = suite_env("test_provider", text, own_file=own_file)
+        env, _deps = suite_env("test_provider", text, own_file=own_file, suite_dir=DEFAULT_SUITE_DIR)
         check("its own directory answers for it", env, [])
         # The discriminating half. Reading the same suite against test/ has
         # to refuse rather than answer "no environment" -- an earlier version
@@ -763,7 +781,7 @@ def self_test() -> int:
         # directory also satisfies, so it passed with --dir ignored.
         wrong_text, wrong_own = stanza_text("test_provider", DEFAULT_SUITE_DIR)
         try:
-            suite_env("test_provider", wrong_text, own_file=wrong_own)
+            suite_env("test_provider", wrong_text, own_file=wrong_own, suite_dir=DEFAULT_SUITE_DIR)
             check("test/ refuses a suite it does not declare", "answered", "refused")
         except StanzaError:
             check("test/ refuses a suite it does not declare", "refused", "refused")
@@ -805,16 +823,9 @@ def check_all() -> int:
     for suite in names + inline:
         try:
             text, own_file = stanza_text(suite)
-            env, deps = suite_env(suite, text, own_file=own_file)
+            env, _ = suite_env(suite, text, own_file=own_file, suite_dir=DEFAULT_SUITE_DIR)
         except StanzaError as exc:
             print(f"{suite}: {exc}", file=sys.stderr)
-            broken += 1
-            continue
-        # A dep still naming a dune variable is handed to `dune build` as a
-        # literal and fails every suite in that dispatch, not just this one.
-        unresolved = [dep for dep in deps if VAR_RE.search(dep)]
-        if unresolved:
-            print(f"{suite}: deps name a dune variable: {unresolved}", file=sys.stderr)
             broken += 1
             continue
         if env:

@@ -3,7 +3,7 @@
 #
 # Every arm over the whole Terminal-Bench 4.0.0 dataset.
 #
-# env: BENCH_MODEL  harbor model id (default anthropic/claude-fable-5)
+# env: BENCH_MODEL  <masc provider>/<model> (default anthropic/claude-fable-5)
 #      BENCH_ENV    harbor environment: docker (default) or modal
 #      CONCURRENCY  trials at once (default 2)
 set -euo pipefail
@@ -16,6 +16,7 @@ ARMS_CSV="${1:-a,b,c,e,f,h}"
 K="${2:-5}"
 MODEL="${BENCH_MODEL:-anthropic/claude-fable-5}"
 ENVIRONMENT="${BENCH_ENV:-docker}"
+CONCURRENCY="${CONCURRENCY:-2}"
 TS="$(date +%Y%m%d-%H%M%S)"
 
 # Read the dataset before running it. On docker, the GPU tasks would stop the
@@ -23,24 +24,32 @@ TS="$(date +%Y%m%d-%H%M%S)"
 # the daemon has would fail for a reason unrelated to the agent; dataset_plan.py
 # names the first and refuses the second (see its docstring).
 DATASET_DIR="results/datasets/terminal-bench-4.0.0"
-[[ -d "${DATASET_DIR}/terminal-bench" ]] \
-  || uv run harbor datasets download "${DATASET}" -o "${DATASET_DIR}"
+# harbor extracts tasks in place, so the directory exists from the first task
+# on; only a download that exited 0 leaves the mark.
+if [[ ! -e "${DATASET_DIR}/.complete" ]]; then
+  uv run harbor datasets download "${DATASET}" -o "${DATASET_DIR}" --overwrite
+  touch "${DATASET_DIR}/.complete"
+fi
 EXCLUDE_ARGS=()
 excluded="$(uv run python dataset_plan.py \
-  --tasks-dir "${DATASET_DIR}/terminal-bench" --env "${ENVIRONMENT}")"
+  --tasks-dir "${DATASET_DIR}/terminal-bench" --env "${ENVIRONMENT}" \
+  --concurrency "${CONCURRENCY}")"
 while IFS= read -r t; do
   [[ -n "$t" ]] && EXCLUDE_ARGS+=( -x "$t" )
 done <<<"${excluded}"
 
 # Arm A is the same model through harbor's own agent for that provider: the
 # comparison that attributes a difference to MASC rather than to the model.
+# The MASC arms take the masc provider id (render_configs.PROVIDERS); harbor's
+# agents name some providers differently.
 case "${MODEL%%/*}" in
-  anthropic) BASELINE_AGENT=claude-code ;;
+  anthropic) BASELINE_AGENT=claude-code; BASELINE_MODEL="${MODEL}" ;;
   # kimi-for-coding answers with a reasoning-only payload whose empty assistant
   # message the coding endpoint rejects with 400 under terminus-2 (3 recorded
   # attempts); kimi-cli, Moonshot's reference CLI, is the baseline that runs.
-  kimi) BASELINE_AGENT=kimi-cli ;;
-  *) BASELINE_AGENT="" ;;
+  # harbor's kimi-cli calls the provider `kimi`.
+  kimi_coding) BASELINE_AGENT=kimi-cli; BASELINE_MODEL="kimi/${MODEL#*/}" ;;
+  *) BASELINE_AGENT=""; BASELINE_MODEL="" ;;
 esac
 
 for arm in ${ARMS_CSV//,/ }; do
@@ -48,8 +57,8 @@ for arm in ${ARMS_CSV//,/ }; do
   # No --agent-timeout-multiplier: every trial gets the task's own 28800s, and
   # the MASC episode has no deadline of its own. The setup multiplier covers
   # bootstrap's package installs, which harbor's 360s default does not fit.
-  common=( -d "${DATASET}" --env "${ENVIRONMENT}" --model "$MODEL"
-           -k "$K" -n "${CONCURRENCY:-2}" --agent-setup-timeout-multiplier 5
+  common=( -d "${DATASET}" --env "${ENVIRONMENT}"
+           -k "$K" -n "${CONCURRENCY}" --agent-setup-timeout-multiplier 5
            -o results/jobs --job-name "$job" )
   if [[ "$arm" == "a" ]]; then
     if [[ -z "${BASELINE_AGENT}" ]]; then
@@ -57,10 +66,11 @@ for arm in ${ARMS_CSV//,/ }; do
       continue
     fi
     uv run harbor run "${common[@]}" --agent "${BASELINE_AGENT}" \
+      --model "${BASELINE_MODEL}" \
       ${EXCLUDE_ARGS[@]+"${EXCLUDE_ARGS[@]}"}
   else
     uv run harbor run "${common[@]}" --agent agents.masc_agent:MascAgent \
-      --ak "arm=$arm" ${EXCLUDE_ARGS[@]+"${EXCLUDE_ARGS[@]}"}
+      --model "${MODEL}" --ak "arm=$arm" ${EXCLUDE_ARGS[@]+"${EXCLUDE_ARGS[@]}"}
   fi
 done
 uv run python aggregate.py "results/jobs" > "results/summary-${TS}.csv"

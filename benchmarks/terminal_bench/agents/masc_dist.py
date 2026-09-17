@@ -78,6 +78,22 @@ def require_fetched_release(bench_root: Path) -> None:
             "whose shim reads the env_file= the bootstrap writes; run image/fetch_masc.sh again")
 
 
+def refuse_a_named_agent_user(environment: BaseEnvironment) -> None:
+    """Refuse a task that names the account its agent runs as.
+
+    harbor runs an agent's commands as the task's `[agent] user` when it names
+    one (environment.default_user during setup) and as the image's USER
+    otherwise. The bench runs keeper commands as PID 1's user
+    (driver/endpoint_account.sh), which is the image's USER, so a named account
+    would differ without a word. No 4.0.0 task names one.
+    """
+    if environment.default_user is not None:
+        raise RuntimeError(
+            f"the task runs its agent as {environment.default_user!r}; the bench runs "
+            "keeper commands as the image's user (driver/endpoint_account.sh) and does "
+            "not follow a named one")
+
+
 async def container_binaries(
     agent: BaseInstalledAgent,
     environment: BaseEnvironment,
@@ -87,6 +103,7 @@ async def container_binaries(
 ) -> list[Path]:
     """The binaries to upload for this container's architecture."""
     require_fetched_release(bench_root)
+    refuse_a_named_agent_user(environment)
     result = await agent.exec_as_root(environment, UNAME_COMMAND)
     output = result.stdout or ""
     marked = [line[len(UNAME_MARK):].strip() for line in output.splitlines()

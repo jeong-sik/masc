@@ -38,6 +38,7 @@ from masc_sidecar import (  # noqa: E402
     MASC_MCP_URL,
     MCP_SERVER_NAME,
     MascSidecar,
+    merge_endpoint_env_left_out,
     merge_keeper_usage,
     pool_names,
     pool_prompt,
@@ -103,6 +104,7 @@ class KeeperToolsOpenCode(MascSidecar, OpenCode):
         # What the keepers spent is not in what opencode reports, and the arm is
         # compared on cost.
         await merge_keeper_usage(self, environment, context)
+        await merge_endpoint_env_left_out(environment, context)
 
     def _build_register_config_command(self) -> str | None:
         """Add the MASC server to opencode.json with its bearer header.

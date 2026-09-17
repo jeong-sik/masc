@@ -4,6 +4,7 @@ One line the shim refuses refuses the whole file and so every request, which is
 why the helper leaves such entries out. The refused names are the shim's, so
 they are compared with the OCaml sources rather than restated here.
 """
+import json
 import re
 import subprocess
 from pathlib import Path
@@ -13,9 +14,9 @@ REPO = BENCH.parents[1]
 HELPER = BENCH / "driver" / "endpoint_env.sh"
 
 
-def env_lines_of(raw):
+def env_lines_of(raw, record=""):
     done = subprocess.run(
-        ["bash", "-c", 'source "$1" && bench_endpoint_env_lines', "_", str(HELPER)],
+        ["bash", "-c", 'source "$1" && bench_endpoint_env_lines "$2"', "_", str(HELPER), record],
         input=raw, capture_output=True, check=True)
     return done.stdout.decode().splitlines(), done.stderr.decode()
 
@@ -58,11 +59,14 @@ def test_what_the_shim_would_refuse_is_left_out_by_name():
         "AFTER=still read",
     ])
     assert lines == ["KEPT=first", "AFTER=still read"]
-    for name in ("PATH", "GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR", "GIT_TERMINAL_PROMPT",
-                 "MULTI", "CARRIAGE"):
-        assert f"left out {name}," in stderr
-    assert "left out a second KEPT" in stderr
-    assert "not an environment variable name" in stderr
+    for name in ("GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR", "GIT_TERMINAL_PROMPT"):
+        assert f"left out {name} (refused_by_shim)" in stderr
+    # path= carries PATH, so it is not reported as a variable the keeper lacks.
+    assert "PATH" not in stderr
+    for name in ("MULTI", "CARRIAGE"):
+        assert f"left out {name} (not_one_line)" in stderr
+    assert "left out KEPT (repeated)" in stderr
+    assert "left out an entry (not_a_name)" in stderr
     # Names are reported, never values.
     for value in ("ghp_not_for_the_file", "ghs_not_for_the_file", "second=line", "/root/.config/gh"):
         assert value not in stderr
@@ -83,6 +87,35 @@ def test_an_entry_the_input_ends_without_a_nul_is_read():
     assert stderr == ""
 
 
+def test_what_is_left_out_is_recorded_for_the_result(tmp_path):
+    record = tmp_path / "left-out.tsv"
+    record.write_text("stale\tfrom an earlier bootstrap\n")
+    lines, _ = env_lines_of(
+        b"PATH=/usr/bin\0GH_TOKEN=ghp_x\0MULTI=a\nb\0A=1\0A=2\0" + b"1BAD=x\0KEEP=yes\0",
+        str(record))
+    assert lines == ["A=1", "KEEP=yes"]
+    assert record.read_text().splitlines() == [
+        "GH_TOKEN\trefused_by_shim", "MULTI\tnot_one_line", "A\trepeated", "\tnot_a_name"]
+    assert "ghp_x" not in record.read_text()
+    as_json = subprocess.run(
+        ["bash", "-c", 'source "$1" && bench_env_left_out_json "$2"', "_", str(HELPER), str(record)],
+        capture_output=True, text=True, check=True).stdout
+    assert json.loads(as_json) == [
+        {"name": "GH_TOKEN", "reason": "refused_by_shim"},
+        {"name": "MULTI", "reason": "not_one_line"},
+        {"name": "A", "reason": "repeated"},
+        {"name": "", "reason": "not_a_name"},
+    ]
+
+
+def test_no_record_is_an_empty_list(tmp_path):
+    as_json = subprocess.run(
+        ["bash", "-c", 'source "$1" && bench_env_left_out_json "$2"', "_", str(HELPER),
+         str(tmp_path / "never-written.tsv")],
+        capture_output=True, text=True, check=True).stdout
+    assert json.loads(as_json) == []
+
+
 def ocaml_string_list(source, binding):
     match = re.search(rf"let {binding}\s*=\s*\[(.*?)\]", source, re.S)
     assert match, f"{binding} is no longer a list literal"
@@ -92,8 +125,7 @@ def ocaml_string_list(source, binding):
 def test_the_left_out_names_are_the_shims_refusals():
     shim = (REPO / "lib/exec_shim/exec_shim.ml").read_text()
     protocol = (REPO / "lib/exec_ssh_protocol/exec_ssh_protocol.ml").read_text()
-    refused = (["PATH"]
-               + ocaml_string_list(protocol, "github_token_env_names")
+    refused = (ocaml_string_list(protocol, "github_token_env_names")
                + ocaml_string_list(shim, "runtime_env_allowlist"))
     listed = subprocess.run(
         ["bash", "-c", 'source "$1" && printf "%s\\n" "${BENCH_ENV_FILE_REFUSED_NAMES[@]}"',

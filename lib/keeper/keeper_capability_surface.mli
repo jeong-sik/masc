@@ -11,6 +11,12 @@ type capability_availability =
   | Active
   | Outside_skill_surface
   | Not_model_invocable
+  | Denied_by_profile
+      (** A model-visible Tool the Keeper profile's [tool_deny] names. It is
+          not in {!descriptors}; the row says why. *)
+  | Refused_by_sandbox of { detail : string }
+      (** A model-visible Tool the Keeper's sandbox profile cannot run, with
+          the refusal the handler would return. It is not in {!descriptors}. *)
   | Node_tools_outside_surface of { tools : string list }
       (** A composition Skill whose plan runs node tools this surface does not
           admit, named by their model names. The composition is withheld from
@@ -64,16 +70,17 @@ val create
   -> t
 (** [tool_deny] holds model-visible tool names (e.g.
     ["keeper_spawn"; "masc_keeper_delegate"]) the keeper's profile
-    refuses; matching descriptors leave the surface entirely, so the tool is
-    neither listed to the model nor present in the dispatch bundle built from
-    {!descriptors}. Names that match no model-visible descriptor deny
-    nothing -- the setup site logs them. A keeper with no selection passes
+    refuses; matching descriptors are neither listed to the model nor present
+    in the dispatch bundle built from {!descriptors}, and their inventory row
+    reads [Denied_by_profile]. Names that match no model-visible descriptor
+    deny nothing -- the setup site logs them. A keeper with no selection passes
     [[]]: the argument is mandatory because an optional here would sit in
     front of only labelled arguments, which OCaml never erases.
 
-    [sandbox_profile] is the Keeper's profile. The four spawn tools leave the
-    surface the same way when {!Keeper_spawn_boundary.of_sandbox_profile}
-    refuses a start for it, and a composition that runs one is then withheld. *)
+    [sandbox_profile] is the Keeper's profile. The four spawn tools leave
+    {!descriptors} the same way when {!Keeper_spawn_boundary.of_sandbox_profile}
+    refuses a start for it, their rows read [Refused_by_sandbox], and a
+    composition that runs one is then withheld. *)
 
 val descriptors : t -> Keeper_tool_descriptor.t list
 
@@ -102,6 +109,11 @@ val digest : t -> string
     separately exposed Skill snapshot revision is not digest material. *)
 
 val capability_availability_to_string : capability_availability -> string
+
+val availability_detail_fields : capability_availability -> (string * Yojson.Safe.t) list
+(** The fields an availability carries beyond its name: [sandbox_refusal] for
+    [Refused_by_sandbox], [outside_node_tools] for [Node_tools_outside_surface],
+    none for the rest. Every row that prints an availability appends these. *)
 val skill_capability_to_yojson : skill_capability -> Yojson.Safe.t
 val candidate_to_yojson : candidate -> Yojson.Safe.t
 val candidate_name : candidate -> string

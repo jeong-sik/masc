@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Run the test suites whose source this pull request edits, and nothing else.
-# RFC-0428.
+# Run the test suites this pull request's changes select, every one of them,
+# within the step's budget; a suite the budget does not reach fails the step
+# by name. RFC-0428.
 #
 # What this does NOT do is run a suite the way `dune test` runs it. A stanza
 # can carry deps only the runtest action materialises, an (action (setenv ...))
@@ -15,13 +16,22 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
 
-# --self-test drives select_sources() over fixtures and never reaches the
-# API, so it takes neither a pull-request number nor a repository.
+# --self-test drives select_sources() and run_selected() over fixtures and
+# never reaches the API, so it takes neither a pull-request number, a
+# repository nor a budget.
 self_test_only=false
 [ "${1:-}" = "--self-test" ] && self_test_only=true
 
+usage="usage: run-edited-tests.sh <pr-number> --budget-seconds <seconds> | --self-test"
 if [ "${self_test_only}" = false ]; then
-  pr_number="${1:?usage: run-edited-tests.sh <pr-number> | --self-test}"
+  pr_number="${1:?${usage}}"
+  # The budget is the step's, and pr-check.yml sets the step's timeout-minutes
+  # above it so this script, not the runner, ends a step that runs out.
+  if [ "${2:-}" != "--budget-seconds" ] || ! [[ "${3:-}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "${usage}" >&2
+    exit 2
+  fi
+  budget_seconds="$3"
   repo="${MASC_TARGET_REPO:-${GITHUB_REPOSITORY}}"
 fi
 scope_tool="${repo_root}/scripts/ci/dune_suite_scope.py"
@@ -454,6 +464,248 @@ DECLARED
   fi
 }
 
+# Seconds left of the step's budget. SECONDS counts from this shell's start,
+# which is the step's start to within reading the file list.
+budget_left() {
+  echo $(( budget_seconds - SECONDS ))
+}
+
+# A suite's own bound, or what is left of the budget when that is less.
+bounded_by_budget() {
+  local own="$1" left
+  left=$(budget_left)
+  if [ "${left}" -lt "${own}" ]; then
+    echo "${left}"
+  else
+    echo "${own}"
+  fi
+}
+
+# Runs ${sources}; sets ${ran}, ${skipped} and ${failed}.
+#
+# Everything selected runs, and the budget is what bounds it (RFC-0428,
+# "넓힌 선택"). A suite the budget does not reach is named in ${failed}: the
+# selection grew about threefold, and a step that passed without the suites
+# it had no time for would read as those suites passing.
+#
+# The linked suites are built by one dune invocation rather than one each.
+# Measured in run 35216373548, one at a time: 71s for the first suite, which
+# compiles the shared libraries, then 9s, 7s and 4s; at that rate the p90
+# selection of 78 suites does not fit a 12-minute step. _build starts empty
+# on every run -- only the opam switch is cached -- so an executable present
+# after that build was linked from this checkout, and one absent failed to
+# link.
+run_selected() {
+  local known_failures_file="test/ci-known-failures.txt"
+  local known_failures=""
+  if [ -f "${known_failures_file}" ]; then
+    known_failures=$( { grep -vE '^[[:space:]]*(#|$)' "${known_failures_file}" \
+      || [ $? -eq 1 ]; } | sed 's/[[:space:]]*#.*$//; s/[[:space:]]*$//')
+  fi
+
+  ran=0
+  skipped=0
+  failed=""
+  # Indexed arrays with a separate count: macOS's bash 3.2 treats an empty
+  # "${a[@]}" as unbound under nounset.
+  local linked_ids=() linked_deps=() linked_envs=() linked_count=0
+  local python_sources=() python_count=0
+  local source dir name verdict stanza_deps stanza_env
+
+  while IFS= read -r source; do
+    [ -n "${source}" ] || continue
+    dir=$(dirname "${source}")
+    case "${source}" in
+      *.py) name=$(basename "${source}" .py) ;;
+      *) name=$(basename "${source}" .ml) ;;
+    esac
+    # The suites main is known not to pass. The nightly ratchet holds this
+    # list in both directions -- a suite that fails unlisted is a new break, a
+    # listed one that passes has to come off -- so it is the record of what a
+    # pull request is not answerable for.
+    if printf '%s\n' "${known_failures}" | grep -Fxq "${dir}/${name}"; then
+      echo "-- ${dir}/${name}: listed in ${known_failures_file}"
+      skipped=$((skipped + 1))
+      continue
+    fi
+    case "${source}" in
+      *.py)
+        python_sources[python_count]="${source}"
+        python_count=$((python_count + 1))
+        continue
+        ;;
+    esac
+    verdict=$(python3 "${scope_tool}" "${dir}" "${name}")
+    case "${verdict}" in
+      run) ;;
+      *)
+        echo "-- ${dir}/${name}: ${verdict#skip }"
+        skipped=$((skipped + 1))
+        continue
+        ;;
+    esac
+    # What dune would supply and a direct run does not: the files the stanza
+    # declares as deps, and the environment its (setenv ...) action sets. The
+    # reader is the one test.yml's targeted path uses. It errors rather than
+    # guessing, and an error is a skip -- a suite run under the wrong
+    # environment reports verdicts that look real.
+    if ! stanza_deps=$(python3 "${stanza_reader}" --dir "${dir}" --deps "${name}" 2>&1); then
+      echo "-- ${dir}/${name}: ${stanza_deps}"
+      skipped=$((skipped + 1))
+      continue
+    fi
+    if ! stanza_env=$(python3 "${stanza_reader}" --dir "${dir}" "${name}" 2>&1); then
+      echo "-- ${dir}/${name}: ${stanza_env}"
+      skipped=$((skipped + 1))
+      continue
+    fi
+    linked_ids[linked_count]="${dir}/${name}"
+    linked_deps[linked_count]="${stanza_deps}"
+    linked_envs[linked_count]="${stanza_env}"
+    linked_count=$((linked_count + 1))
+  done <<EOF
+${sources}
+EOF
+
+  local i id target left limit status binary
+  local targets=() target_count=0 build_status=0 build_ran_out=false
+  local linked_built=()
+  i=0
+  while [ "${i}" -lt "${linked_count}" ]; do
+    targets[target_count]="${linked_ids[i]}.exe"
+    target_count=$((target_count + 1))
+    while IFS= read -r target; do
+      [ -n "${target}" ] || continue
+      targets[target_count]="${target}"
+      target_count=$((target_count + 1))
+    done <<DEPS
+${linked_deps[i]}
+DEPS
+    linked_built[i]=true
+    i=$((i + 1))
+  done
+  if [ "${linked_count}" -gt 0 ]; then
+    left=$(budget_left)
+    if [ "${left}" -le 0 ]; then
+      build_ran_out=true
+    else
+      echo "== building ${linked_count} suites in one dune invocation"
+      timeout "${left}" dune build "${targets[@]}" < /dev/null || build_status=$?
+      [ "${build_status}" -ne 124 ] || build_ran_out=true
+    fi
+  fi
+  # A failed invocation says something failed, not which suite. An absent
+  # executable is that suite's. A present one whose stanza also declares
+  # deps may still have lost a dep, so those are asked again one at a time;
+  # dune answers at once for what is already built.
+  if [ "${build_status}" -ne 0 ] && [ "${build_ran_out}" = false ]; then
+    i=0
+    while [ "${i}" -lt "${linked_count}" ]; do
+      id=${linked_ids[i]}
+      if [ ! -x "${repo_root}/_build/default/${id}.exe" ]; then
+        linked_built[i]=false
+      elif [ -n "${linked_deps[i]}" ]; then
+        left=$(budget_left)
+        if [ "${left}" -le 0 ]; then
+          build_ran_out=true
+          break
+        fi
+        targets=("${id}.exe")
+        while IFS= read -r target; do
+          [ -n "${target}" ] && targets+=("${target}")
+        done <<DEPS
+${linked_deps[i]}
+DEPS
+        timeout "${left}" dune build "${targets[@]}" < /dev/null || linked_built[i]=false
+      fi
+      i=$((i + 1))
+    done
+  fi
+
+  i=0
+  while [ "${i}" -lt "${linked_count}" ]; do
+    id=${linked_ids[i]}
+    dir=${id%/*}
+    name=${id##*/}
+    i=$((i + 1))
+    binary="${repo_root}/_build/default/${id}.exe"
+    if [ ! -x "${binary}" ] && [ "${build_ran_out}" = true ]; then
+      failed="${failed}${id} (not built: the step budget ran out)\n"
+      continue
+    fi
+    if [ "${linked_built[i - 1]}" = false ]; then
+      failed="${failed}${id} (build)\n"
+      continue
+    fi
+    if [ ! -x "${binary}" ]; then
+      # The build reported success and the binary is not where dune puts it,
+      # which is a different thing from a suite that failed to link.
+      failed="${failed}${id} (built, but no binary at ${binary})\n"
+      continue
+    fi
+    if [ "$(budget_left)" -le 0 ]; then
+      failed="${failed}${id} (not run: the step budget ran out)\n"
+      continue
+    fi
+    limit=$(bounded_by_budget "${per_suite_timeout}")
+    local stanza_setenv=()
+    while IFS= read -r assignment; do
+      [ -n "${assignment}" ] && stanza_setenv+=("${assignment}")
+    done <<ENVS
+${linked_envs[i - 1]}
+ENVS
+    echo "== ${id}"
+    status=0
+    # dune runs a suite from inside its own build directory, and suites read
+    # relative paths from there. DUNE_SOURCEROOT is what the ones that want
+    # the checkout read; without it they fall back to the cwd, which from
+    # here would be the wrong tree.
+    ( cd "${repo_root}/_build/default/${dir}" \
+      && env DUNE_SOURCEROOT="${repo_root}" \
+         ${stanza_setenv+"${stanza_setenv[@]}"} \
+         timeout "${limit}" "./${name}.exe" < /dev/null ) || status=$?
+    if [ "${status}" -eq 0 ]; then
+      ran=$((ran + 1))
+    elif [ "${status}" -eq 124 ] && [ "${limit}" -lt "${per_suite_timeout}" ]; then
+      failed="${failed}${id} (stopped at the step budget after ${limit}s)\n"
+    else
+      failed="${failed}${id} (run)\n"
+    fi
+  done
+
+  # A .py suite has no executable to build and run, so dune runs it: the rule
+  # supplies the deps and the environment its action declares. Asked for by
+  # path (@test/runtest-x, not @runtest-x) so a name that stopped existing
+  # fails here instead of matching a rule in some other directory.
+  # Measured 2026-09-13: the alias exits 0 on a pass and 1 on a planted
+  # failure, both forms, so this is a verdict and not a build line that
+  # always reports success.
+  i=0
+  while [ "${i}" -lt "${python_count}" ]; do
+    source=${python_sources[i]}
+    i=$((i + 1))
+    dir=$(dirname "${source}")
+    name=$(basename "${source}" .py)
+    if [ "$(budget_left)" -le 0 ]; then
+      failed="${failed}${dir}/${name} (not run: the step budget ran out)\n"
+      continue
+    fi
+    local own
+    own=$(suite_timeout "${source}")
+    limit=$(bounded_by_budget "${own}")
+    echo "== ${dir}/${name} (dune rule)"
+    status=0
+    timeout "${limit}" dune build "@${dir}/runtest-${name}" < /dev/null || status=$?
+    if [ "${status}" -eq 0 ]; then
+      ran=$((ran + 1))
+    elif [ "${status}" -eq 124 ] && [ "${limit}" -lt "${own}" ]; then
+      failed="${failed}${dir}/${name} (stopped at the step budget after ${limit}s)\n"
+    else
+      failed="${failed}${dir}/${name} (run)\n"
+    fi
+  done
+}
+
 # Fixtures for --self-test. Each is a changed-file list and the suites it must
 # select; a mapping that stops selecting them, or starts selecting more, fails
 # here rather than by going quiet on a later pull request.
@@ -691,6 +943,86 @@ self_test() {
   check "a .py with no rule of its own selects nothing" "" \
     "test/test_browser_activation.py"
 
+  # The runner, over a stand-in dune that links at once. What these pin is
+  # the budget and the build verdicts: a slow suite is stopped at the budget
+  # and the suites after it are named, a build the budget cuts off names every
+  # suite, and a suite that does not link is the build's failure. The scope
+  # and stanza readers are stubbed; their own self-tests cover them.
+  write_stand_in_dune() {
+    cat > "$1" <<'FAKE'
+#!/usr/bin/env bash
+# dune build <target>...: writes each executable target. A name holding
+# "broken" does not link, "failing" exits 1, "slow" outlasts any budget here.
+[ "$1" = build ] || exit 2
+shift
+sleep "${FAKE_DUNE_BUILD_SECONDS}"
+status=0
+for target in "$@"; do
+  name=$(basename "${target}" .exe)
+  case "${name}" in
+    *broken*) echo "stand-in dune: ${name} does not link" >&2; status=1; continue ;;
+    *slow*) body='exec sleep 60' ;;
+    *failing*) body='exit 1' ;;
+    *) body='exit 0' ;;
+  esac
+  mkdir -p "_build/default/$(dirname "${target}")"
+  printf '#!/bin/sh\n%s\n' "${body}" > "_build/default/${target}"
+  chmod +x "_build/default/${target}"
+done
+exit "${status}"
+FAKE
+    chmod +x "$1"
+  }
+  # Called in a subshell: it moves into a scratch root and repoints the
+  # globals run_selected reads.
+  runner_failures() {
+    local build_seconds="$1" budget="$2"
+    shift 2
+    work=$(mktemp -d)
+    trap 'rm -rf "${work}"' EXIT
+    mkdir -p "${work}/bin" "${work}/root"
+    write_stand_in_dune "${work}/bin/dune"
+    printf 'print("run")\n' > "${work}/scope.py"
+    : > "${work}/reader.py"
+    PATH="${work}/bin:${PATH}"
+    export FAKE_DUNE_BUILD_SECONDS="${build_seconds}"
+    scope_tool="${work}/scope.py"
+    stanza_reader="${work}/reader.py"
+    repo_root="${work}/root"
+    cd "${repo_root}"
+    sources=$(printf 'test/%s.ml\n' "$@")
+    budget_seconds="${budget}"
+    SECONDS=0
+    run_selected > /dev/null 2>&1
+    # The seconds a stopped suite was given depend on where the clock stood.
+    printf '%b' "${failed}" | sed -E 's/ after [0-9]+s\)/)/' | tr '\n' ';'
+  }
+  runner_check() {
+    local label="$1" want="$2"
+    shift 2
+    local got
+    got=$(runner_failures "$@")
+    if [ "${got}" = "${want}" ]; then
+      echo "ok   ${label}"
+    else
+      echo "FAIL ${label}"
+      echo "     want: ${want:-<nothing>}"
+      echo "     got:  ${got:-<nothing>}"
+      failures=$((failures + 1))
+    fi
+  }
+  runner_check "suites within the budget all run" "" 0 30 \
+    test_ok test_ok_too
+  runner_check "the budget stops a slow suite and names the suites after it" \
+    "test/test_broken (build);test/test_failing (run);test/test_slow (stopped at the step budget);test/test_zz_after (not run: the step budget ran out);" \
+    0 3 test_ok test_broken test_failing test_slow test_zz_after
+  # The build starts with budget left and outlasts it, so the timeout on the
+  # build is what ends it. With a one-second budget the budget was already
+  # spent before the build began, and that case passed without the timeout.
+  runner_check "a build the budget cuts off names every suite" \
+    "test/test_ok (not built: the step budget ran out);test/test_failing (not built: the step budget ran out);" \
+    8 3 test_ok test_failing
+
   if [ "${failures}" -eq 0 ]; then
     echo "run-edited-tests self-test: all cases pass"
     return 0
@@ -713,121 +1045,7 @@ changed=$(gh api "repos/${repo}/pulls/${pr_number}/files" \
 
 select_sources || exit 0
 
-# The suites main is known not to pass. The nightly ratchet holds this list in
-# both directions -- a suite that fails unlisted is a new break, a listed one
-# that passes has to come off -- so it is the record of what a pull request is
-# not answerable for. Running one here and failing on it would stop a pull
-# request for a break it did not cause, which is what kept this step advisory.
-known_failures_file="test/ci-known-failures.txt"
-known_failures=""
-if [ -f "${known_failures_file}" ]; then
-  known_failures=$( { grep -vE '^[[:space:]]*(#|$)' "${known_failures_file}" \
-    || [ $? -eq 1 ]; } | sed 's/[[:space:]]*#.*$//; s/[[:space:]]*$//')
-fi
-
-is_known_failure() {
-  printf '%s\n' "${known_failures}" | grep -Fxq "$1"
-}
-
-ran=0
-skipped=0
-failed=""
-while IFS= read -r source; do
-  [ -n "${source}" ] || continue
-  dir=$(dirname "${source}")
-  case "${source}" in
-    *.py) name=$(basename "${source}" .py) ;;
-    *) name=$(basename "${source}" .ml) ;;
-  esac
-  if is_known_failure "${dir}/${name}"; then
-    echo "-- ${dir}/${name}: listed in ${known_failures_file}"
-    skipped=$((skipped + 1))
-    continue
-  fi
-  # A .py suite has no executable to build and run, so dune runs it: the rule
-  # supplies the deps and the environment its action declares, which is what
-  # the stanza reader below reconstructs by hand for a linked suite. Asked
-  # for by path (@test/runtest-x, not @runtest-x) so a name that stopped
-  # existing fails here instead of matching a rule in some other directory.
-  #
-  # Measured 2026-09-13: the alias exits 0 on a pass and 1 on a planted
-  # failure, both forms, so this is a verdict and not a build line that
-  # always reports success.
-  case "${source}" in
-    *.py)
-      echo "== ${dir}/${name} (dune rule)"
-      if ! timeout "$(suite_timeout "${source}")" \
-        dune build "@${dir}/runtest-${name}" < /dev/null
-      then
-        failed="${failed}${dir}/${name} (run)\n"
-      else
-        ran=$((ran + 1))
-      fi
-      continue
-      ;;
-  esac
-  verdict=$(python3 "${scope_tool}" "${dir}" "${name}")
-  case "${verdict}" in
-    run) ;;
-    *)
-      echo "-- ${dir}/${name}: ${verdict#skip }"
-      skipped=$((skipped + 1))
-      continue
-      ;;
-  esac
-  # What dune would supply and this does not: the files the stanza declares
-  # as deps, and the environment its (setenv ...) action sets. The reader is
-  # the one test.yml's targeted path already uses, so a suite run here and a
-  # suite run there are given the same things. It errors rather than
-  # guessing, and an error is this step's skip -- a suite run under the
-  # wrong environment reports verdicts that look real.
-  if ! stanza_deps=$(python3 "${stanza_reader}" --dir "${dir}" --deps "${name}" 2>&1); then
-    echo "-- ${dir}/${name}: ${stanza_deps}"
-    skipped=$((skipped + 1))
-    continue
-  fi
-  if ! stanza_env=$(python3 "${stanza_reader}" --dir "${dir}" "${name}" 2>&1); then
-    echo "-- ${dir}/${name}: ${stanza_env}"
-    skipped=$((skipped + 1))
-    continue
-  fi
-  deps=()
-  while IFS= read -r target; do
-    [ -n "${target}" ] && deps+=("${target}")
-  done <<< "${stanza_deps}"
-  stanza_setenv=()
-  while IFS= read -r assignment; do
-    [ -n "${assignment}" ] && stanza_setenv+=("${assignment}")
-  done <<< "${stanza_env}"
-  echo "== ${dir}/${name}"
-  if ! dune build "${dir}/${name}.exe" ${deps+"${deps[@]}"} < /dev/null; then
-    failed="${failed}${dir}/${name} (build)\n"
-    continue
-  fi
-  # dune runs a suite from inside its own build directory, and suites read
-  # relative paths from there. DUNE_SOURCEROOT is what the ones that want the
-  # checkout read; without it they fall back to the cwd, which from here would
-  # be the wrong tree.
-  binary="${repo_root}/_build/default/${dir}/${name}.exe"
-  if [ ! -x "${binary}" ]; then
-    # The build reported success and the binary is not where dune puts it,
-    # which is a different thing from a suite that failed. Saying so keeps
-    # the two apart in the log.
-    failed="${failed}${dir}/${name} (built, but no binary at ${binary})\n"
-    continue
-  fi
-  if ! ( cd "${repo_root}/_build/default/${dir}" \
-         && env DUNE_SOURCEROOT="${repo_root}" \
-            ${stanza_setenv+"${stanza_setenv[@]}"} \
-            timeout "${per_suite_timeout}" "./${name}.exe" < /dev/null ); then
-    failed="${failed}${dir}/${name} (run)\n"
-    continue
-  fi
-  ran=$((ran + 1))
-done <<EOF
-${sources}
-EOF
-
+run_selected
 
 echo "ran ${ran}, skipped ${skipped}"
 

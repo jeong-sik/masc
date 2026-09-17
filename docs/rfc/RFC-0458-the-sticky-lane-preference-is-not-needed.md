@@ -157,16 +157,26 @@ analyst, glm-coding 레인, 14:06Z~15:57Z.
    닿지 않는다. 증거는 경로 값에서 남긴다. `Retry_after_observed` 의 `retry_class` 로:
    - `Rate_limited` → 지금처럼 후보 칸의 429 증거
    - `Hard_quota` → 지금처럼 quota 창
-   - `Server_error`·`Network_transient`·`Provider_timeout` → 후보 칸의 실패 증거(새 variant)
+   - `Server_error`·`Network_transient`·`Provider_timeout` → 후보 칸의 실패 증거. 다만 경로는
+     MASC 자신의 입장 단계(허가 대기열 `Queue`, 로컬 용량 `Capacity_backpressure`)에서 끝난
+     타임아웃도 `Provider_timeout` 이라 부른다. 아무것도 보내지 않은 실패라 후보의 사실이
+     아니므로, 그 두 phase 는 증거로 남기지 않는다. 경로가 이 둘을 가르지 못하는 문제는 따로
+     고친다.
    - `Capacity_backpressure` → 남기지 않는다. MASC 자신의 슬롯과 클라이언트 봉투라 후보의
      사실이 아니다.
    - `Rotate_now`·`Exhausted_visible_alive` → 남기지 않는다(§5).
    wildcard 없이 전부 나열한다. 새 class 가 생기면 컴파일러가 이 자리를 가리킨다.
-2. **칸은 하나다.** `Runtime_candidate_backpressure_state` 에 variant 를 더한다. 증거에는
-   관측 시각과 class 만 있고 풀리는 시각은 없다. 한 칸에 증거가 둘이면 나중 관측이 남는다.
-3. **순서만 바꾸고 기다리게 하지 않는다.** 이 증거는 `demote_unavailable_candidates` 의
-   강등에만 쓰인다. `path_rest` 는 이 증거에 풀리는 시각을 주지 않으므로, 다음 dispatch 를
-   늦추지 않는다. 후보를 빼지도 않는다. 모두 증거가 있으면 선언 순서대로 다 걷는다.
+2. **한 칸에 두 증거를 나란히 둔다.** 후보 칸은 `{ rate_limit; failed_attempt }` 다. 429 는
+   provider 가 말한 시각을 가질 수 있고 그 시각이 기다림을 정한다. 실패 증거는 시각이 없고
+   순서만 바꾼다. 둘이 한 자리를 다투면, 나중에 난 타임아웃이 아직 창이 남은 429 의 시각을
+   지워 기다림이 사라진다. 그래서 서로 지우지 않고, 그 후보가 답하면 둘 다 지운다. 실패
+   증거에는 관측 시각과 class 만 있다.
+3. **순서만 바꾸고 기다리게 하지 않는다.** 강등은 세 자리다. 증거 없음, 실패만 함, 쉬라는 말을
+   들음(quota 소진이나 429). 각 자리 안에서는 선언 순서를 지킨다. 실패만 한 경로를 쉬는 경로
+   뒤에 두면, 지금 보낼 수 있는데도 다음 dispatch 가 쉬는 머리가 풀릴 때까지 기다린다. 이
+   순서는 풀린 429 가 여전히 쉬는 경로들보다 앞으로 올라오게도 한다(`walk_promotes_at_release`).
+   `path_rest` 는 실패 증거에 풀리는 시각을 주지 않는다. 후보를 빼지도 않는다. 모두 증거가
+   있으면 선언 순서대로 다 걷는다.
 4. **첫 토큰 전에 양보한 시도는 성공이 아니다.** 사람의 메시지로 선점된 시도는
    `Ok (yielded_pre_first_token …)` 로 끝나 성공 갈래를 탄다. 지금은 응답을 한 번도 받지
    않은 후보의 429 증거와 quota 관측이 이 길로 지워진다. 양보한 시도는 증거를 지우지도

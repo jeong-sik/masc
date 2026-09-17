@@ -182,8 +182,6 @@ val carry
     from the seeded front, once {!Keeper_carried_front.for_history} admits it
     against this history; without one, the whole history. *)
 
-val measure : Agent_core.Types.message -> int
-(** Bytes of one message as the composition's encoder counts them. *)
 
 type composition =
   { fixed_bytes : int  (** Tool schemas + keeper instructions. *)

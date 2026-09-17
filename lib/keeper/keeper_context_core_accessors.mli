@@ -56,6 +56,7 @@ val role_to_string : Agent_core.Types.role -> string
 val role_of_string_opt : string -> Agent_core.Types.role option
 
 val message_to_json : Agent_core.Types.message -> Yojson.Safe.t
+val message_measurer : unit -> (Agent_core.Types.message -> int)
 
 val message_of_json : Yojson.Safe.t -> Agent_core.Types.message
 

@@ -55,6 +55,11 @@ val role_to_string : Agent_core.Types.role -> string
 val role_of_string_opt : string -> Agent_core.Types.role option
 
 val message_to_json : Agent_core.Types.message -> Yojson.Safe.t
+
+val message_measurer : unit -> (Agent_core.Types.message -> int)
+(** A measurer of how many bytes {!message_to_json} serializes a message to,
+    as [Yojson.Safe.to_string] would count them, without building the string.
+    One measurer owns one reused buffer and belongs to one walk. *)
 val message_of_json : Yojson.Safe.t -> Agent_core.Types.message
 
 (** Project a JSONL entry to its visible-text rendering used by

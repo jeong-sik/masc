@@ -74,8 +74,9 @@ type carried =
             [transmitted_bytes]. *)
   ; origin : Keeper_carried_front.origin
   ; counted_tokens : int option
-        (** The ledger's measured total for its last request, when known;
-            what the marks are read against. *)
+        (** The ledger's measured total for its last sample, a request
+            without the turn context, when known; what the marks are read
+            against. *)
   }
 
 (** One piece of the request in the position it travels. The order is the

@@ -182,7 +182,7 @@ let test_of_ledger_reads_the_last_request_front () =
     ; total_tokens = Some 10
     ; measured_end_atom = Some 20
     ; blocks = []
-    ; last = { prefix_digest = "f"; first_atom = 7; atom_count = 20; tail_bytes = 0 }
+    ; last = { prefix_digest = "f"; first_atom = 7; atom_count = 20; tail_bytes = 0; turn_context = false }
     ; last_usage = None
     }
   in

@@ -12,10 +12,16 @@ open Alcotest
 
 let prefix = "f-prefix"
 
-let request ?(prefix_digest = prefix) ?(tail_bytes = 100) ~first_atom ~atom_count ()
+let request
+      ?(prefix_digest = prefix)
+      ?(tail_bytes = 100)
+      ?(turn_context = false)
+      ~first_atom
+      ~atom_count
+      ()
   : Ledger.request
   =
-  { prefix_digest; first_atom; atom_count; tail_bytes }
+  { prefix_digest; first_atom; atom_count; tail_bytes; turn_context }
 ;;
 
 let usage ?(cache_read_input_tokens = 0) input_tokens : Ledger.usage =
@@ -54,18 +60,49 @@ let test_appended_atoms_are_measured_by_the_difference () =
   check (option int) "measured up to the new end" (Some 12) o2.ledger.measured_end_atom
 ;;
 
-let test_tail_change_is_part_of_the_difference_and_reported () =
-  let o1 =
-    step None (request ~first_atom:0 ~atom_count:10 ~tail_bytes:100 ()) (Some (usage 1_000))
-  in
+(* A turn's first request carries the turn context, whose tokens belong to
+   no atom. Its count moves nothing: the atoms it carried wait for the first
+   post-tool round, which measures them against the last sample. *)
+let test_turn_context_request_is_not_a_sample () =
+  let o1 = step None (request ~first_atom:0 ~atom_count:10 ()) (Some (usage 1_000)) in
   let o2 =
     step
       (Some o1.ledger)
-      (request ~first_atom:0 ~atom_count:12 ~tail_bytes:160 ())
-      (Some (usage 1_320))
+      (request ~first_atom:0 ~atom_count:12 ~tail_bytes:250_000 ~turn_context:true ())
+      (Some (usage 80_000))
   in
-  check int "tail grew by 60 bytes" 60 o2.tail_delta_bytes;
-  check (option int) "the block is charged the whole difference" (Some 320) o2.delta_tokens
+  check string "event" "appended_unmeasured" (Ledger.event_to_string o2.event);
+  check (option int) "no delta from a turn-context count" None o2.delta_tokens;
+  check (option int) "total stays the last sample" (Some 1_000) o2.ledger.total_tokens;
+  check (option int) "measured end unchanged" (Some 10) o2.ledger.measured_end_atom;
+  check int "the tail change is still reported" 249_900 o2.tail_delta_bytes;
+  let o3 =
+    step (Some o2.ledger) (request ~first_atom:0 ~atom_count:14 ()) (Some (usage 1_600))
+  in
+  check (option int) "the next sample measures across it" (Some 600) o3.delta_tokens;
+  check blocks_testable "the atoms of both requests form one block"
+    [ 0, 10, None; 10, 14, Some 600 ]
+    (block_tokens o3.ledger)
+;;
+
+(* A ledger that starts on a turn's first request has no total until a
+   sample arrives. *)
+let test_turn_context_request_starts_without_a_total () =
+  let o1 =
+    step
+      None
+      (request ~first_atom:0 ~atom_count:10 ~turn_context:true ())
+      (Some (usage 80_000))
+  in
+  check string "event" "started" (Ledger.event_to_string o1.event);
+  check (option int) "no total" None o1.ledger.total_tokens;
+  check (option int) "no measured end" None o1.ledger.measured_end_atom;
+  let o2 =
+    step (Some o1.ledger) (request ~first_atom:0 ~atom_count:12 ()) (Some (usage 1_300))
+  in
+  check (option int) "no delta against no total" None o2.delta_tokens;
+  check (option int) "the sample becomes the total" (Some 1_300) o2.ledger.total_tokens;
+  check (option int) "measured up to the sample" (Some 12) o2.ledger.measured_end_atom
 ;;
 
 let test_usage_gap_measures_the_stretch_as_one_block () =
@@ -84,13 +121,13 @@ let test_usage_gap_measures_the_stretch_as_one_block () =
     (block_tokens o3.ledger)
 ;;
 
-let test_repeated_range_records_only_the_tail_change () =
+let test_repeated_range_adds_no_block () =
   let o1 = step None (request ~first_atom:0 ~atom_count:10 ()) (Some (usage 1_000)) in
   let o2 =
     step (Some o1.ledger) (request ~first_atom:0 ~atom_count:10 ()) (Some (usage 1_010))
   in
   check string "event" "repeated" (Ledger.event_to_string o2.event);
-  check (option int) "delta is the tail alone" (Some 10) o2.delta_tokens;
+  check (option int) "the difference is reported" (Some 10) o2.delta_tokens;
   check blocks_testable "no block added" [ 0, 10, None ] (block_tokens o2.ledger);
   check (option int) "total follows the usage" (Some 1_010) o2.ledger.total_tokens
 ;;
@@ -296,21 +333,16 @@ let test_repeated_range_without_usage_changes_nothing () =
   check blocks_testable "blocks kept" [ 0, 10, None ] (block_tokens o2.ledger)
 ;;
 
-(* A tail that shrank by more than the new atoms added makes the difference
-   negative. It is reported; no block is written. *)
+(* Carried atoms can get cheaper between two samples: after a refusal the
+   last resort sends this turn's tool results as markers. The difference then
+   comes out negative. It is reported; no block is written. *)
 let test_negative_difference_is_reported_not_written () =
-  let o1 =
-    step None (request ~first_atom:0 ~atom_count:10 ~tail_bytes:2_000 ()) (Some (usage 1_000))
-  in
+  let o1 = step None (request ~first_atom:0 ~atom_count:10 ()) (Some (usage 1_000)) in
   let o2 =
-    step
-      (Some o1.ledger)
-      (request ~first_atom:0 ~atom_count:12 ~tail_bytes:100 ())
-      (Some (usage 900))
+    step (Some o1.ledger) (request ~first_atom:0 ~atom_count:12 ()) (Some (usage 900))
   in
   check string "event" "appended_unmeasured" (Ledger.event_to_string o2.event);
   check (option int) "delta reported" (Some (-100)) o2.delta_tokens;
-  check int "tail shrank" (-1_900) o2.tail_delta_bytes;
   check blocks_testable "the new block stays unmeasured"
     [ 0, 10, None; 10, 12, None ]
     (block_tokens o2.ledger);
@@ -415,9 +447,11 @@ let () =
     [ ( "difference"
       , [ test_case "first request" `Quick test_first_request_starts_with_one_unmeasured_block
         ; test_case "appended atoms" `Quick test_appended_atoms_are_measured_by_the_difference
-        ; test_case "tail change" `Quick test_tail_change_is_part_of_the_difference_and_reported
+        ; test_case "turn context" `Quick test_turn_context_request_is_not_a_sample
+        ; test_case "turn context first" `Quick
+            test_turn_context_request_starts_without_a_total
         ; test_case "usage gap" `Quick test_usage_gap_measures_the_stretch_as_one_block
-        ; test_case "repeated range" `Quick test_repeated_range_records_only_the_tail_change
+        ; test_case "repeated range" `Quick test_repeated_range_adds_no_block
         ; test_case "repeated without usage" `Quick
             test_repeated_range_without_usage_changes_nothing
         ; test_case "negative difference" `Quick

@@ -56,6 +56,12 @@ val preamble_marker_key : string
     exists only in the transmitted copy; nothing writes it to durable
     state. *)
 
+val is_extra_context : Agent_core.Types.message -> bool
+(** Whether the per-turn context assembler authored the message: any
+    extra-system-context provenance, including an [Invalid] or [Duplicate]
+    tag. Such a message is {!Pinned}, and a request carrying it is not a
+    sample of the carried history's size. *)
+
 type label =
   | Pinned
       (** Survives every cut: [System] entries and messages carrying

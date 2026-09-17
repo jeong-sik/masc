@@ -35,13 +35,13 @@ let ledger ?(total = Some 1_000) (blocks : Ledger.block list) : Ledger.t =
   ; total_tokens = total
   ; measured_end_atom = Option.map (fun _ -> atom_count) total
   ; blocks
-  ; last = { prefix_digest = "f"; first_atom; atom_count; tail_bytes = 0 }
+  ; last = { prefix_digest = "f"; first_atom; atom_count; tail_bytes = 0; turn_context = false }
   ; last_usage = None
   }
 ;;
 
 let request ~first_atom ~atom_count : Ledger.request =
-  { prefix_digest = "f"; first_atom; atom_count; tail_bytes = 0 }
+  { prefix_digest = "f"; first_atom; atom_count; tail_bytes = 0; turn_context = false }
 ;;
 
 type trace =

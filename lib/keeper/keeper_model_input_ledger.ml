@@ -5,6 +5,7 @@ type request =
   ; first_atom : int
   ; atom_count : int
   ; tail_bytes : int
+  ; turn_context : bool
   }
 
 type usage =
@@ -112,6 +113,9 @@ let assign_tail blocks ~from_atom ~delta =
 let rec observe (previous : t option) (request : request) (usage : usage option)
   : observation
   =
+  (* The turn context's tokens belong to no atom, so a request that carried
+     it is read like one without usage: its atoms wait for the next sample. *)
+  let usage = if request.turn_context then None else usage in
   let restart event =
     { ledger = start request usage
     ; event
@@ -202,10 +206,10 @@ and observe_trimmed (t : t) (request : request) (usage : usage option)
 ;;
 
 (* Apply an eviction the carried range decided: the same trimming a request
-   would report as [Front_moved], applied now so a decision taken before the
-   next usage (a refusal retry) sees the moved front. A front that does not
-   advance leaves the ledger as it is; a front inside a block restarts the
-   blocks from the new front with the total unknown, as [observe] would. *)
+   would report as [Front_moved], applied now so the next composition (the
+   turn's first, or a refusal retry) sees the moved front. A front that does
+   not advance leaves the ledger as it is; a front inside a block restarts
+   the blocks from the new front with the total unknown, as [observe] would. *)
 let move_front (t : t) ~first_atom =
   if first_atom <= t.last.first_atom
   then t
@@ -281,6 +285,7 @@ let to_json t =
     ; "first_atom", `Int t.last.first_atom
     ; "atom_count", `Int t.last.atom_count
     ; "tail_bytes", `Int t.last.tail_bytes
+    ; "turn_context", `Bool t.last.turn_context
     ; "blocks", `Int (List.length t.blocks)
     ; ( "measured_blocks"
       , `Int (List.length (List.filter (fun b -> Option.is_some b.tokens) t.blocks)) )

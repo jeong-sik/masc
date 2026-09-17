@@ -17,11 +17,13 @@ Arm A는 Harbor 빌트인 kimi-cli라 여기서 렌더하지 않는다.
 """
 from __future__ import annotations
 
+import functools
 import json
 import re
 import shutil
 import tempfile
 import urllib.request
+from dataclasses import dataclass
 from pathlib import Path
 
 BENCH_ROOT = Path(__file__).resolve().parents[1]
@@ -263,30 +265,53 @@ accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
 {thinking_control}{sampling_lines}{max_output_lines}supports_parallel_tool_calls = {parallel}
 """
 
-OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
-OPENROUTER_MODELS_TIMEOUT_S = 30
+OPENROUTER_ENDPOINTS_URL = "https://openrouter.ai/api/v1/models/{model}/endpoints"
+OPENROUTER_TIMEOUT_S = 30
 
 
-def openrouter_context_length(wire_model: str) -> int:
-    """The prompt window OpenRouter serves `wire_model` with.
+@dataclass(frozen=True, slots=True)
+class OpenRouterLimits:
+    max_context: int  # runtime.toml max-context: the input window masc plans against
+    max_output: int   # overlay max_output_tokens: the max_tokens masc requests
 
-    A request goes to the top provider, whose window can be smaller than the
-    model's own (z-ai/glm-4.7-flash: 131072 against 200000, 2026-09-17), so
-    that one is used when OpenRouter reports it. A model OpenRouter does not
-    list, or lists without a window, is refused rather than given a number.
+
+@functools.lru_cache(maxsize=None)
+def openrouter_limits(wire_model: str) -> OpenRouterLimits:
+    """Input window and output budget that every OpenRouter endpoint of
+    `wire_model` can serve.
+
+    OpenRouter routes a request to any of the model's endpoints, and each
+    endpoint's context_length counts input and output together, while masc's
+    max-context is the input window alone (runtime.ml "Effective input context
+    window"). Left to the catalog, glm-4.7-flash asked for max_tokens 128000
+    against endpoints of 128000 and 131072 (2026-09-17). So the output budget
+    is the smallest max_completion_tokens any endpoint declares, and the input
+    window is the smallest context_length minus that budget.
+
+    Read once per process: harbor installs every trial in one event loop, and
+    a run must not have trials planning against different windows.
     """
-    with urllib.request.urlopen(OPENROUTER_MODELS_URL,
-                                timeout=OPENROUTER_MODELS_TIMEOUT_S) as response:
-        models = json.load(response)["data"]
-    for model in models:
-        if model.get("id") != wire_model:
-            continue
-        window = (model.get("top_provider") or {}).get("context_length") \
-            or model.get("context_length")
-        if isinstance(window, int) and window > 0:
-            return window
-        raise ValueError(f"OpenRouter lists {wire_model!r} with no context_length")
-    raise ValueError(f"OpenRouter lists no model {wire_model!r}")
+    url = OPENROUTER_ENDPOINTS_URL.format(model=wire_model)
+    with urllib.request.urlopen(url, timeout=OPENROUTER_TIMEOUT_S) as response:
+        endpoints = (json.load(response).get("data") or {}).get("endpoints") or []
+    if not endpoints:
+        raise ValueError(f"OpenRouter lists no endpoints for {wire_model!r}")
+    windows = [e.get("context_length") for e in endpoints]
+    if not all(isinstance(w, int) and w > 0 for w in windows):
+        raise ValueError(f"an OpenRouter endpoint of {wire_model!r} has no context_length")
+    outputs = [e.get("max_completion_tokens") for e in endpoints
+               if isinstance(e.get("max_completion_tokens"), int)
+               and e["max_completion_tokens"] > 0]
+    if not outputs:
+        raise ValueError(
+            f"no OpenRouter endpoint of {wire_model!r} declares max_completion_tokens")
+    max_output = min(outputs)
+    max_context = min(windows) - max_output
+    if max_context <= 0:
+        raise ValueError(
+            f"{wire_model!r}: smallest window {min(windows)} leaves no input "
+            f"beside an output budget of {max_output}")
+    return OpenRouterLimits(max_context=max_context, max_output=max_output)
 
 
 def model_binding_id(wire_model: str) -> str:
@@ -330,8 +355,8 @@ PROVIDERS = {
     # fable 대비 입력 단가 1~2자릿수 아래라 넓은 매트릭스에 맞다.
     # OpenRouter serves models the AGENT_CORE catalog has no row for, and masc
     # refuses a runtime with neither a catalog max-context nor an override
-    # (RFC-0206 §2.1, measured on 0.35.19). The override is read from
-    # OpenRouter's own model list at render time: openrouter_context_length.
+    # (RFC-0206 §2.1, measured on 0.35.19). Both the window and the output
+    # budget are read from OpenRouter's endpoint list: openrouter_limits.
     "openrouter": dict(context_from_openrouter=True,
                        protocol="openai-compatible-http",
                        endpoint="https://openrouter.ai/api/v1",
@@ -445,6 +470,11 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
             f"effort {effort!r} is not admitted by Claude Code; "
             f"expected one of {CLAUDE_CODE_EFFORTS}")
 
+    # Before anything is written: a lookup that fails must not leave a
+    # half-rendered config directory behind.
+    openrouter = (openrouter_limits(model_alias)
+                  if pcfg.get("context_from_openrouter") else None)
+
     if out_root is not None:
         root = out_root / arm
         if root.exists():
@@ -496,8 +526,7 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
             f'reasoning-effort = "{effort}"\nthinking-support = true\n'
             if pcfg["capabilities_base"] in EFFORT_CAPABLE_BASES else ""),
         max_context_line=(
-            f"max-context = {openrouter_context_length(model_alias)}\n"
-            if pcfg.get("context_from_openrouter") else ""),
+            f"max-context = {openrouter.max_context}\n" if openrouter else ""),
         **pcfg)
     if spec["skills"]:
         # skills=True arm만 seed의 [skills]/[[skills.sources]] 블록을 보존한다.
@@ -529,7 +558,8 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
         max_output_lines = "max_output_tokens = 64000\n"
     elif pcfg["capabilities_base"] == "openai":
         thinking_control = 'thinking_control_format = "reasoning_effort"\n'
-        max_output_lines = ""
+        max_output_lines = (
+            f"max_output_tokens = {openrouter.max_output}\n" if openrouter else "")
     else:
         thinking_control = ""
         max_output_lines = ""

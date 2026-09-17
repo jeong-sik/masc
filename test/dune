@@ -5921,7 +5921,8 @@
 (rule
  (alias runtest-test_install_runtime_setup)
  (deps test_install_runtime_setup.py ../scripts/install-runtime-setup.py
-       ../bin/main_eio.exe (source_tree ../scripts/fixtures/release-evidence))
+       ../bin/main_eio.exe (source_tree ../scripts/fixtures/release-evidence)
+       ../config/runtime.toml ../config/agent-core-models-overlay.toml)
  (action
   (run python3 %{dep:test_install_runtime_setup.py} --binary %{dep:../bin/main_eio.exe})))
 

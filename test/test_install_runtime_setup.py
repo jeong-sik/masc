@@ -1215,6 +1215,38 @@ class CompiledRuntimeSetup(unittest.TestCase):
                 configured = tomllib.loads((config / 'runtime.toml').read_text())
                 self.assertEqual(configured['runtime']['assignments']['imp'],ids[0])
 
+    def test_seed_workspace_saves_connections_and_points_the_librarian_lane_at_the_default(self):
+        # The shipped seed, not the release-evidence fixture: the seed already
+        # declares [runtime.exact_output_lanes.librarian_exact], so a second
+        # writer of that table fails here and nowhere in the fixture runs.
+        import tomllib
+        def seeded(tmp):
+            config = Path(tmp) / '.masc/config'
+            config.mkdir(parents=True)
+            for name in ('runtime.toml', 'agent-core-models-overlay.toml'):
+                (config / name).write_bytes((ROOT / 'config' / name).read_bytes())
+            return Path(tmp), config / 'runtime.toml'
+        def librarian(runtime):
+            return tomllib.loads(runtime.read_text())['runtime']['exact_output_lanes']['librarian_exact']
+        env = {k: v for k, v in os.environ.items() if not k.startswith(('MASC_', 'AGENT_CORE_'))}
+        with patch.dict(os.environ, env, clear=True):
+            with tempfile.TemporaryDirectory(prefix='runtime-seed-one-') as tmp:
+                base, runtime = seeded(tmp)
+                http = spec()
+                http_id = SETUP.render(http, BINARY)[0]
+                SETUP.configure(BINARY, base, http)
+                self.assertEqual(librarian(runtime), dict(slots=[http_id], cli_slots=[]))
+                client = spec('claude_code')
+                client_id = SETUP.render(client, BINARY)[0]
+                SETUP.configure(BINARY, base, client)
+                self.assertEqual(librarian(runtime), dict(slots=[], cli_slots=[client_id]))
+            with tempfile.TemporaryDirectory(prefix='runtime-seed-two-') as tmp:
+                base, runtime = seeded(tmp)
+                models = [spec(), dict(spec(), model='second-owned-model')]
+                ids = [SETUP.render(model, BINARY)[0] for model in models]
+                SETUP.configure_many(BINARY, base, models, ids, default_id=ids[1])
+                self.assertEqual(librarian(runtime), dict(slots=[ids[1]], cli_slots=[]))
+
     def test_real_validator_accepts_each_transport_and_reuses_identical_connection(self):
         fixture = ROOT / 'scripts/fixtures/release-evidence'
         for choice in SETUP.CHOICES:

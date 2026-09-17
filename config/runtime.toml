@@ -1088,17 +1088,16 @@ max-concurrent = 1
 
 
 # ── Runtime lanes (ordered failover) ─────────────────────────────────
-# A lane is an ordered list of runtime candidates. When a keeper is assigned
-# to a lane, the turn attempts candidates in order until one succeeds or the
-# lane is exhausted. Lanes are resolved at config load; unknown candidate ids
-# abort startup. Ordering is the only semantics; a lane table carries only
-# [candidates].
+# A lane is an ordered list of runtime candidates under a name you pick. When a
+# keeper is assigned to a lane, the turn attempts candidates in order until one
+# succeeds or the lane is exhausted. Lanes are resolved at config load; unknown
+# candidate ids abort startup. Ordering is the only semantics; a lane table
+# carries only [candidates].
 #
-# NOTE: this example lane is INACTIVE. A lane id must shadow a runtime id
-# (`<provider>.<model>`) to be reachable (see the rule below); "default" is
-# not a runtime id, so this group is never expanded. Kept only as a shape
-# example — do not copy it as-is.
-[runtime.lanes.default]
+# The name is yours: it does not have to be a runtime id, and two lanes may
+# start at the same runtime under different names. A lane that no assignment
+# names is never walked.
+[runtime.lanes.coding]
 candidates = [
   "ollama_cloud.deepseek-v4-flash",
   "deepseek.deepseek-v4-pro",
@@ -1117,10 +1116,12 @@ candidates = [
 # judge/evaluator lanes ([runtime.exact_output_lanes.verifier_exact] and
 # [fusion].judge).
 #
-# Assignment targets must be runtime ids (<provider>.<model>); a lane id here
-# is rejected at load. A keeper reaches a [runtime.lanes] failover group only
-# when the lane id shadows a runtime id (resolve_assignment prefers the lane
-# on collision).
+# An assignment names a [runtime.lanes] lane or a runtime id
+# (<provider>.<model>). A lane of that name is taken first, so a lane named
+# after a runtime still wins. A name that is neither is rejected at load — which
+# is why a lane with a name of its own is worth more than one that copies a
+# runtime id: delete it and the load fails instead of quietly falling back to
+# [this runtime, [runtime].default].
 [runtime.assignments]
 # example: pin a test keeper to an explicit runtime
 # canary = "deepseek.deepseek-v4-pro"

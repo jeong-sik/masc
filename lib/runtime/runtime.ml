@@ -396,10 +396,12 @@ let find_declared_lane (lanes : Runtime_lane.t list) (id : string) =
 ;;
 
 (* Each [runtime] reference is validated under its field's admission contract:
-   - [Runtime_only] requires a declared runtime id for keeper assignments and
-     media_failover entries. Assignment execution may still resolve a
-     same-named lane first.
-   - [Lane_then_runtime] admits a declared lane or runtime id for route ids.
+   - [Runtime_only] requires a declared runtime id. media_failover is the only
+     field on it: its entries name runtimes that can read an image, and the
+     order of that list is the whole walk. No lane expands underneath it.
+   - [Lane_then_runtime] admits a declared lane name or a runtime id. Keeper
+     assignments and route ids are on it, so validation judges the same target
+     [resolve_assignment] hands the consumer: lane first, runtime second.
    Unknown ids are rejected while loading the configuration. *)
 type reference_domain =
   | Runtime_only
@@ -641,7 +643,7 @@ let assignment_references (assignments : (string * string) list) =
       { site = Printf.sprintf "[runtime.assignments].%s" keeper_name
       ; shape = Scalar
       ; id = runtime_id
-      ; domain = Runtime_only
+      ; domain = Lane_then_runtime
       })
     assignments
 ;;
@@ -1335,21 +1337,16 @@ let materialize_config
                  ~runtime_count:(List.length runtimes) did))
        | Some rt -> Ok rt)
   in
-  (* Assignments are checked before lanes are materialized, which keeps the order
-     in which a typo'd assignment surfaces ahead of a typo'd lane candidate.
-     [Runtime_only] never consults the lane list, so the empty list here is not a
-     stand-in for lanes that do not exist yet — it states that no lane is
-     admissible at this site, which is the assignment contract runtime.mli
-     documents and Keeper_turn_driver's lane-aware dispatch relies on. *)
-  let* () =
-    validate_runtime_references ~dropped_bindings runtimes []
-      (assignment_references assignments)
-  in
-  (* Lanes are materialized before every route validation so any route id can
-     name a lane (#25394); candidate resolution is enforced by [validate_lanes]
-     inside [lanes_of_decls]. *)
+  (* Assignments name a declared lane or a runtime (RFC-0457), so they are
+     validated with the materialized lanes, like every other route id (#25394).
+     A typo'd lane candidate can now surface before a typo'd assignment — the
+     lane list the assignment names is the thing that had to exist first. *)
   let* lanes =
     lanes_of_decls ~dropped_bindings ~default_runtime_id:rt.id runtimes cfg.lane_decls
+  in
+  let* () =
+    validate_runtime_references ~dropped_bindings runtimes lanes
+      (assignment_references assignments)
   in
   let* () =
     validate_runtime_references ~dropped_bindings runtimes lanes
@@ -1841,6 +1838,23 @@ let resolve_assignment (assigned_id : string) =
             String.equal missing.runtime_id assigned_id) degradation.report.missing_models) with
         | Some missing -> `Unavailable missing
         | None -> `Missing))
+;;
+
+(* A keeper assignment and a route id are routing labels: each names a declared
+   lane or a runtime. The binding a turn actually opens is the lane's first
+   candidate — the rule [Keeper_unified_turn_pre_dispatch.build_runtime_execution]
+   already applies to pick its entry runtime. A caller that needs a concrete
+   binding (a provider posture, a declared byte ceiling, a catalog row) resolves
+   the label here; [get_runtime_by_id] knows nothing about lanes and answers
+   [None] for a lane name. *)
+let entry_runtime_id_of_route (route : string) : string option =
+  match resolve_assignment route with
+  | `Lane lane ->
+    (match Runtime_lane.ordered_candidates lane with
+     | entry :: _ -> Some entry
+     (* A lane with no candidates is refused while loading the configuration. *)
+     | [] -> None)
+  | `Unavailable _ | `Missing -> None
 ;;
 
 let resolve_max_context_of_runtime_id (id : string)

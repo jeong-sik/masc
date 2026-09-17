@@ -399,10 +399,6 @@ module For_testing : sig
     Runtime_agent.run_result ->
     (Runtime_agent.run_result, Agent_core.Error.t) result
 
-  val message_measurer : unit -> Agent_core.Types.message -> int
-  (** Counts the bytes [Yojson.Safe.to_string] would produce, without building
-      the string. Each call returns a measurer with its own buffer. *)
-
   val memoize_message_measurement :
     (Agent_core.Types.message -> int) -> Agent_core.Types.message -> int
 

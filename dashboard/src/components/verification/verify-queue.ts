@@ -211,11 +211,18 @@ function VqActions({
 }) {
   const [rejectOpen, setRejectOpen] = useState(false)
   const [reason, setReason] = useState('')
+  const [reasonError, setReasonError] = useState<string | null>(null)
   const st = vqGateStats(item, checks)
   const doReject = () => {
-    onResolve(item, 'reject', reason.trim() || '사유 미기재')
+    const trimmed = reason.trim()
+    if (trimmed === '') {
+      setReasonError('반려 사유를 입력해야 합니다')
+      return
+    }
+    onResolve(item, 'reject', trimmed)
     setRejectOpen(false)
     setReason('')
+    setReasonError(null)
   }
   return html`
     <div class="vq-actions">
@@ -251,8 +258,12 @@ function VqActions({
         <textarea
           value=${reason}
           placeholder="무엇이 부족한지, 무엇을 다시 해야 하는지…"
-          onInput=${(e: Event) => setReason((e.target as HTMLTextAreaElement).value)}
+          onInput=${(e: Event) => {
+            setReason((e.target as HTMLTextAreaElement).value)
+            if (reasonError) setReasonError(null)
+          }}
         ></textarea>
+        ${reasonError ? html`<div class="vq-form-error" role="alert">${reasonError}</div>` : null}
         <div class="vq-form-row">
           <button class="vq-act reject mini" disabled=${pending} onClick=${doReject}>✕ 반려하고 반송</button>
           <button class="vq-act mini" onClick=${() => { setRejectOpen(false); setReason('') }}>취소</button>
@@ -582,7 +593,7 @@ export function VerifyQueue() {
     setErrors(prev => ({ ...prev, [taskId]: null }))
     void submitVerificationVerdict(
       decision === 'reject'
-        ? { taskId, decision, reason: reason ?? '사유 미기재' }
+        ? { taskId, decision, reason: reason ?? '' }
         : { taskId, decision },
     )
       .then(() => {

@@ -20,7 +20,10 @@ type t =
   }
 
 val of_core_error : Agent_core.Error.t -> t
-(** Project an agent-core error. [message] is its rendered text. *)
+(** Project an agent-core error. [message] is its rendered text, except for
+    [Internal] and [Internal_carried], whose rendering is "Internal error: "
+    and then the payload: [category] already says that, so those two keep the
+    payload alone. *)
 
 val summary : t -> string
 (** One line for people: line breaks in [message] become spaces. Computed from

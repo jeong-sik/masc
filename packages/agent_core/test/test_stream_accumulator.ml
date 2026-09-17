@@ -523,21 +523,25 @@ let test_accumulate_message_delta_cache_update () =
     Alcotest.fail ("unexpected finalize error: " ^ stream_error_to_string err)
 ;;
 
-(* A mid-stream error that declares the HTTP status its failure carries keeps
-   that status through to the typed stream failure. *)
+(* A mid-stream error that declares a provider condition keeps that status and
+   its error body through to the typed stream failure. *)
 let test_accumulate_keeps_declared_status () =
   let acc = Streaming.create_stream_acc () in
+  let error_body = {|{"error":{"code":502,"message":"Provider disconnected"}}|} in
   Streaming.accumulate_event
     acc
     (SSEError
        { message = "Provider disconnected"
        ; error_type = None
-       ; http_status = Some 502
-       ; raw = {|{"error":{"code":502}}|}
+       ; provider_status = Some { status = 502; error_body }
+       ; raw = {|{"error":{"code":502,"message":"Provider disconnected"},"choices":[]}|}
        });
   match Streaming.finalize_stream_acc acc with
-  | Error (Stream_provider_error { http_status; _ }) ->
-    Alcotest.(check (option int)) "declared status" (Some 502) http_status
+  | Error (Stream_provider_error { provider_status = Some provider_status; _ }) ->
+    Alcotest.(check int) "declared status" 502 provider_status.status;
+    Alcotest.(check string) "error body" error_body provider_status.error_body
+  | Error (Stream_provider_error { provider_status = None; _ }) ->
+    Alcotest.fail "the declared status was dropped"
   | Error _ -> Alcotest.fail "expected provider error"
   | Ok _ -> Alcotest.fail "failed stream must not finalize successfully"
 ;;
@@ -550,7 +554,7 @@ let test_accumulate_ignores_ping () =
   Streaming.accumulate_event acc Ping;
   Streaming.accumulate_event
     acc
-    (SSEError { message = "oops"; error_type = None; http_status = None; raw = "oops" });
+    (SSEError { message = "oops"; error_type = None; provider_status = None; raw = "oops" });
   Streaming.accumulate_event acc MessageStop;
   Streaming.accumulate_event acc (ContentBlockStop { index = 0 });
   Alcotest.(check bool)

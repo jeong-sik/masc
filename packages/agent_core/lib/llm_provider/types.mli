@@ -725,6 +725,23 @@ val repeating_generation_message
     repeated, how many times, after how many bytes. [repeated] is shown to 120
     bytes. *)
 
+(** A provider condition an OpenAI-compatible provider declared for an error it
+    reported inside a response it had already accepted with [200]: rate limited
+    ([429]) or failing itself ([5xx]). No other status is carried; the reader
+    ([Openai_error_envelope]) says why.
+
+    [status] is that HTTP status. [error_body] is the body the failure is
+    classified from as a refusal with that status: only the provider's error
+    object, serialized as [{"error": <error object>}], so
+    [Retry.classify_error] reads its [message] and [retry_after] whether the
+    object sat at the top level of the response or on a choice, and nothing
+    else the response carried (choice content, tool arguments, usage) becomes
+    part of the refusal. *)
+type provider_status =
+  { status : int
+  ; error_body : string
+  }
+
 type sse_event =
   | MessageStart of
       { id : string
@@ -751,7 +768,7 @@ type sse_event =
   | SSEError of
       { message : string
       ; error_type : string option
-      ; http_status : int option
+      ; provider_status : provider_status option
       ; raw : string
       }
   (** A provider-reported error delivered mid-stream. [error_type] is the
@@ -759,10 +776,10 @@ type sse_event =
             ["rate_limit_exceeded"]) and [raw] the original error JSON, so the
             consumer can converge onto the same classification path as an
             initial HTTP error instead of collapsing to [NetworkError {Unknown}].
-            [http_status] is the HTTP status the provider declares for the
-            error inside the envelope, because the stream's own [200] was
-            already sent (OpenRouter and vLLM put it in a numeric
-            [error.code]); [None] when the envelope carries none. *)
+            [provider_status] is the {!provider_status} the provider declared
+            inside the envelope, because the stream's own [200] was already
+            sent; [None] when the envelope declares none. [raw] stays the whole
+            payload, for diagnostics. *)
   | NDJSONError of
       { message : string
       ; error_type : string option
@@ -841,7 +858,7 @@ type stream_error =
   | Stream_provider_error of
       { message : string
       ; error_type : string option
-      ; http_status : int option
+      ; provider_status : provider_status option
       ; raw : string
       }
   | Stream_parse_failed of

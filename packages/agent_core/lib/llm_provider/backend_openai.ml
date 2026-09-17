@@ -367,8 +367,8 @@ let%test "parse_openai_response_result error returns Error" =
       (`Assoc [ "error", `Assoc [ "message", `String "rate limited" ] ])
   in
   match parse_openai_response_result json_str with
-  | Error (Backend_openai_parse.Provider_error { message; http_status = _ }) ->
-    message = "rate limited"
+  | Error (Backend_openai_parse.Provider_error { message; _ }) -> message = "rate limited"
+  | Error (Backend_openai_parse.Unreadable_response _)
   | Error (Backend_openai_parse.Empty_completion _) -> false
   | Ok _ -> false
 ;;
@@ -733,7 +733,9 @@ let%test "parse_openai_response_result null content fails closed (agent-core bou
      [Ok content=[]] that stormed downstream. *)
   match parse_openai_response_result json_str with
   | Error (Backend_openai_parse.Empty_completion e) -> e.stop_reason = EndTurn
-  | Error (Backend_openai_parse.Provider_error _) | Ok _ -> false
+  | Error (Backend_openai_parse.Provider_error _)
+  | Error (Backend_openai_parse.Unreadable_response _)
+  | Ok _ -> false
 ;;
 
 let%test "parse_openai_response_result blank content with tool_calls stays Ok (agent-core boundary)" =
@@ -890,8 +892,9 @@ let%test "parse_openai_response_result JSON list wrapping" =
 let%test "parse_openai_response_result error without message" =
   let json_str = Yojson.Safe.to_string (`Assoc [ "error", `Assoc [] ]) in
   match parse_openai_response_result json_str with
-  | Error (Backend_openai_parse.Provider_error { message; http_status = _ }) ->
+  | Error (Backend_openai_parse.Provider_error { message; _ }) ->
     message = "Unknown API error"
+  | Error (Backend_openai_parse.Unreadable_response _)
   | Error (Backend_openai_parse.Empty_completion _) -> false
   | Ok _ -> false
 ;;

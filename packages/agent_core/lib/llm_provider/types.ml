@@ -1665,6 +1665,13 @@ let repeating_generation_message ~repeated ~occurrences ~bytes_seen shape =
       shown
 ;;
 
+(* See types.mli: a 429 or 5xx an OpenAI-compatible provider declared inside a
+   response it had already accepted, and only its error object as the body. *)
+type provider_status =
+  { status : int
+  ; error_body : string
+  }
+
 type sse_event =
   | MessageStart of
       { id : string
@@ -1696,14 +1703,15 @@ type sse_event =
                 converge onto the same classification path as an initial HTTP
                 error instead of collapsing to [NetworkError {Unknown}].
                 [None] when the provider omits it. *)
-      ; http_status : int option
-        (** The HTTP status the provider declares inside the envelope, since
-                the stream's own [200] is already on the wire. [None] when the
-                envelope carries none. *)
+      ; provider_status : provider_status option
+        (** The provider condition declared inside the envelope, since the
+                stream's own [200] is already on the wire. [None] when the
+                envelope declares none. *)
       ; raw : string
-        (** Original error payload JSON, carried verbatim so the consumer
-                can feed it to [Retry.classify_error] (retry_after, hard-quota
-                detection) exactly as the non-streaming path does. *)
+        (** Original error payload JSON, carried verbatim for diagnostics.
+                It is the whole chunk: a declared provider condition is
+                classified from [provider_status]'s [error_body], not from
+                this payload. *)
       }
   | NDJSONError of
       { message : string
@@ -1753,7 +1761,7 @@ type stream_error =
   | Stream_provider_error of
       { message : string
       ; error_type : string option
-      ; http_status : int option
+      ; provider_status : provider_status option
       ; raw : string
       }
   | Stream_parse_failed of

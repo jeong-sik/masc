@@ -19,8 +19,8 @@ let emit_stream_event on_event evt =
 ;;
 
 let stream_error_event = function
-  | Types.Stream_provider_error { message; error_type; http_status; raw } ->
-    Types.SSEError { message; error_type; http_status; raw }
+  | Types.Stream_provider_error { message; error_type; provider_status; raw } ->
+    Types.SSEError { message; error_type; provider_status; raw }
   | Types.Stream_parse_failed { reason; raw } ->
     Types.SSEParseFailed { reason; raw }
   | Types.Stream_ndjson_parse_failed { reason; raw } ->
@@ -537,7 +537,8 @@ let complete_stream_http
         | `Thinking | `Answer | `Tool_call_start | `Tool_call_arg_delta
         | `Tool_call_complete -> true
         | `Skip | `Substrate | `Heartbeat | `Done | `Wire_error _
-        | `Provider_reported_error | `Capability_mismatch -> false
+        | `Provider_reported_error | `Provider_declared_condition | `Capability_mismatch ->
+          false
       in
       let classify_chunk_kind ~block_kind_at (evt : Types.sse_event) =
         match evt with
@@ -567,7 +568,12 @@ let complete_stream_http
            satisfied its contract and the provider reported a problem inside
            it. Classifying it as a wire error made the summary contradict the
            [Provider_reported_error] this stream actually returns. *)
-        | Types.SSEError _ -> `Provider_reported_error
+        | Types.SSEError { provider_status = None; _ } -> `Provider_reported_error
+        (* A provider condition declared in the envelope (429 or 5xx) is
+           returned as that [HttpError], not as [Provider_reported_error].
+           Its label is named at finalize from the error the stream returns,
+           so the summary names that [HttpError] too. *)
+        | Types.SSEError { provider_status = Some _; _ } -> `Provider_declared_condition
         | Types.NDJSONError _ -> `Provider_reported_error
         (* [SSEParseFailed] is emitted by format-agnostic producers — the
            Ollama (NDJSON) tool-routing path raises it via
@@ -785,6 +791,7 @@ let complete_stream_http
                     terminal_state
                     := Telemetry_event.Terminal_error
                          Complete_stream_error.provider_reported_terminal_label
+                  | `Provider_declared_condition -> produce Http_client.Streaming_unknown
                   | `Capability_mismatch ->
                     produce Http_client.Streaming_unknown;
                     terminal_state
@@ -1110,13 +1117,22 @@ let complete_stream_http
                     then (
                       failure_emitted := true;
                       emit_stream_event on_event (stream_error_event serr));
+                    let err =
+                      Complete_stream_error.http_error_of_stream_error
+                        ~wire_format:active_wire_format
+                        serr
+                    in
                     (match !terminal_state with
                      | Telemetry_event.Terminal_done ->
                        terminal_state
                        := Telemetry_event.Terminal_error
                             (match serr with
-                             | Types.Stream_provider_error _ ->
+                             | Types.Stream_provider_error { provider_status = None; _ } ->
                                Complete_stream_error.provider_reported_terminal_label
+                             | Types.Stream_provider_error { provider_status = Some _; _ } ->
+                               Complete_stream_error.returned_error_terminal_label
+                                 active_wire_format
+                                 err
                              | Types.Stream_parse_failed _
                              | Types.Stream_ndjson_parse_failed _
                              | Types.Stream_unknown_event _
@@ -1129,10 +1145,7 @@ let complete_stream_http
                                Complete_stream_error.capability_mismatch_terminal_label)
                      | Telemetry_event.Terminal_error _
                      | Telemetry_event.Terminal_cancelled -> ());
-                    Error
-                      (Complete_stream_error.http_error_of_stream_error
-                         ~wire_format:active_wire_format
-                         serr)
+                    Error err
                 in
                 (* Agent Core contract: emit one [Streaming_summary] at stream
                    finalize on the normal path. [terminal_state] defaults to
@@ -1245,16 +1258,7 @@ let complete_stream_http
             terminal -> terminal
           | Telemetry_event.Terminal_done ->
             Telemetry_event.Terminal_error
-              (Printf.sprintf
-                 "%s_stream_error: %s"
-                 (Http_client.provider_wire_format_to_string active_wire_format)
-                 (match err with
-                  | Http_client.NetworkError { message; _ }
-                  | Http_client.TimeoutError { message; _ } -> message
-                  | Http_client.HttpError { code; _ } -> Printf.sprintf "HTTP %d" code
-                  | Http_client.AcceptRejected { reason } -> reason
-                  | Http_client.ProviderTerminal { message; _ } -> message
-                  | Http_client.ProviderFailure { message; _ } -> message))
+              (Complete_stream_error.returned_error_terminal_label active_wire_format err)
         in
         publish_summary ~terminal ();
         Error err)

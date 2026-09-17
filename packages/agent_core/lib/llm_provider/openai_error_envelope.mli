@@ -10,20 +10,40 @@
 type t =
   { message : string
   ; error_type : string option
-    (** The object's [type], OpenAI's discriminator; [None] when absent. *)
-  ; http_status : int option
-    (** A numeric [code] from 100 to 599 (RFC 9110 section 15): the HTTP status
-        the provider declares for the failure, because the response's own
-        [200] had already been sent. OpenRouter's mid-stream error carries
-        [code: number] from the table of its HTTP errors
-        (openrouter.ai/docs/api-reference/errors), as vLLM does. [None] for a
-        string [code] -- OpenAI's own, glm's ["1261"] -- or a number outside
-        that range. *)
+    (** The object's [type] (OpenAI's discriminator); when it has none,
+        OpenRouter's [metadata.error_type]. Diagnostic only: it rides
+        [Http_client.Provider_reported_error], whose contract is that
+        agent_core infers no retry semantics from it. *)
+  ; provider_status : Types.provider_status option
+    (** A numeric [code] that states the provider's condition: [429] (Too Many
+        Requests, RFC 6585 section 4) or [500]-[599] (the server error class,
+        RFC 9110 section 15.6). Those describe the provider -- rate limited,
+        or failing itself -- and mean the same before the stream started and
+        after. The body is only this error object ({!Types.provider_status}).
+
+        Every other [code] is not used, [None]:
+        - Any other number, including [400], [401], [402], [403] and [413].
+          The request had already been accepted when the [200] went out, so a
+          [4xx] reported after it does not mean this request is invalid, and
+          OpenRouter's errors reference tells readers to use
+          [metadata.error_type], "not the HTTP status code alone", to tell its
+          error categories apart. A number outside the HTTP range (e.g.
+          [1261]) is a vendor's own code.
+        - A string [code]: OpenAI's own ([rate_limit_exceeded]) and glm's
+          (["1261"]) name no status.
+
+        OpenRouter's errors reference types a mid-stream [error.code] as the
+        HTTP status number (e.g. [429], [502]); its streaming reference's
+        mid-stream example carries the string ["server_error"] instead. Both
+        shapes are read; only the first can declare a status.
+        (https://openrouter.ai/docs/api_reference/errors-and-debugging.md,
+        https://openrouter.ai/docs/api_reference/streaming.md) *)
   }
 
 (** An [error] member's value: an object, or a bare message string
-    (Ollama / llama.cpp). [fallback_message] is the message when an object has
-    no string [message]. [None] for any other JSON value. *)
+    (Ollama / llama.cpp), which declares no status. [fallback_message] is the
+    message when an object has no string [message]. [None] for any other JSON
+    value. *)
 val of_error_value : fallback_message:string -> Yojson.Safe.t -> t option
 
 (** The error a choice that finished with [error] reports: its [error] member

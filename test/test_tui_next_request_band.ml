@@ -1,8 +1,9 @@
 (* The NEXT REQUEST band draws the server's forecast in tokens at the tab's
    scale: the carried range from the pair's front, the marks it is judged
-   against, and what the provider last counted. The band is rendered here
-   through its own entry point with plain folding, so the assertions are
-   about the sentences, not the pane. *)
+   against, what the provider last counted, and the parts in the order the
+   request carries them. The band is rendered here through its own entry
+   point with plain folding, so the assertions are about the sentences, not
+   the pane. *)
 
 module Inspector = Masc_tui_context_inspector
 module Band = Masc_tui_next_request_band
@@ -68,9 +69,35 @@ let measured : Inspector.forecast =
               ; origin = Inspector.Carried_from_ledger
               ; counted_tokens = Some 91_000
               }
+        ; assembly = None
+        ; place = { walks_at = 0; declared_at = Some 0; rest = Inspector.Rest_serving }
         }
       ]
+  ; walk =
+      Ok
+        { lane_id = "ollama_cloud.deepseek-v4-1-flash"
+        ; declared = [ "ollama_cloud.deepseek-v4-1-flash" ]
+        ; preferred = None
+        }
   }
+
+(* lane-smith at turn 3660: six history atoms ride between the fixed parts
+   and the pinned blocks. *)
+let assembled : Inspector.forecast_slot list =
+  [ Inspector.Slot_system_prompt { bytes = 10_832 }
+  ; Inspector.Slot_tools { bytes = 71_578 }
+  ; Inspector.Slot_history { atoms = 6; of_atoms = 4318; bytes = 56_909 }
+  ; Inspector.Slot_wake_line { bytes = 191 }
+  ; Inspector.Slot_system_context
+      { bytes = 157_541
+      ; blocks =
+          [ "skill_compositions", 321
+          ; "memory_os_recall", 139_966
+          ; "dynamic_context", 17_218
+          ; "temporal_summary", 36
+          ]
+      }
+  ]
 
 let with_candidate f (forecast : Inspector.forecast) : Inspector.forecast =
   { forecast with candidates = List.map f forecast.candidates }
@@ -114,6 +141,63 @@ let test_a_pinned_figure_from_another_lane_names_it () =
   in
   Alcotest.(check bool) "the lane rides beside the turn" true
     (says "(turn #4033 on claude_code.claude-sonnet-5)" (lines (Ok forecast)))
+
+let test_the_assembly_is_drawn_in_travel_order () =
+  let forecast =
+    with_candidate (fun candidate -> { candidate with assembly = Some assembled }) measured
+  in
+  let rows = lines (Ok forecast) in
+  let position needle =
+    let rec go index = function
+      | [] -> None
+      | row :: rest -> if contains needle (strip row) then Some index else go (index + 1) rest
+    in
+    go 0 rows
+  in
+  (* 10,832 / 3.39 = 3,195; 71,578 / 3.39 = 21,114; 56,909 / 3.39 = 16,787;
+     191 / 3.39 = 56; 157,541 / 3.39 = 46,472. The label column is sixteen
+     cells and the figure is right-aligned in eight bytes. *)
+  Alcotest.(check bool) "each slot is numbered with its share in tokens" true
+    (says ("1  system prompt     " ^ approx ^ "3.2k tok") rows
+     && says ("2  tools            " ^ approx ^ "21.1k tok") rows
+     && says ("3  history          " ^ approx ^ "16.8k tok") rows
+     && says "6 of 4318 atoms, oldest first" rows
+     && says ("4  wake line           " ^ approx ^ "56 tok") rows
+     && says ("5  [system context] " ^ approx ^ "46.5k tok") rows);
+  (* 321 / 3.39 = 95; 139,966 / 3.39 = 41,288; 17,218 / 3.39 = 5,079; 36 / 3.39 = 11. *)
+  Alcotest.(check bool) "the context names its blocks in assembly order" true
+    (says
+       ("skill_compositions " ^ approx ^ "95  \xc2\xb7  memory_os_recall " ^ approx
+      ^ "41.3k  \xc2\xb7  dynamic_context " ^ approx ^ "5.1k  \xc2\xb7  temporal_summary " ^ approx
+      ^ "11")
+       rows);
+  Alcotest.(check bool) "and the rows stand in that order on the screen" true
+    (match position "1  system prompt", position "5  [system context]" with
+     | Some first, Some last -> first < last
+     | _ -> false)
+
+let test_a_preamble_slot_is_named_when_the_range_prepended_one () =
+  let forecast =
+    with_candidate
+      (fun candidate ->
+        { candidate with
+          assembly =
+            Some
+              (Inspector.Slot_system_prompt { bytes = 10_832 }
+               :: Inspector.Slot_tools { bytes = 71_578 }
+               :: Inspector.Slot_preamble { bytes = 260 }
+               :: List.filteri (fun index _ -> index >= 2) assembled)
+        })
+      measured
+  in
+  (* 260 / 3.39 = 77. *)
+  Alcotest.(check bool) "the preamble takes the third row" true
+    (says ("3  [context window]    " ^ approx ^ "77 tok  \xc2\xb7  says older turns are omitted")
+       (lines (Ok forecast)))
+
+let test_no_assembly_draws_no_order () =
+  Alcotest.(check bool) "without a layout there is no order to draw" false
+    (says "In the order the request carries them" (lines (Ok measured)))
 
 let test_no_marks_says_only_a_refusal_moves_the_front () =
   let forecast =
@@ -216,17 +300,20 @@ let test_the_forecast_decodes_the_servers_shape () =
   let json =
     Yojson.Safe.from_string
       {|{"dashboard_surface":"/api/v1/keepers/:name/next-request",
-         "schema":"masc.keeper.next-request-forecast.v2","keeper":"lane-smith",
+         "schema":"masc.keeper.next-request-forecast.v4","keeper":"lane-smith",
          "trace_id":"trace-1","checkpoint_messages":6012,"wake_line_bytes":131,
+         "walk":{"lane_id":"ollama_cloud.deepseek-v4-1-flash","declared":["ollama_cloud.deepseek-v4-1-flash"],"preferred":null},
          "candidates":[{"runtime_id":"ollama_cloud.deepseek-v4-1-flash",
            "lane":{"agent_core":true},
            "marks":{"high_water_tokens":120000,"low_water_tokens":80000},
            "parts":{"reserved_measured_on_turn":3581,"reserved_bytes":87000,
+                    "instructions_bytes":10832,"schemas_bytes":76168,
                     "pinned_measured_on_turn":3579,"pinned_measured_on_runtime":"ollama_cloud.deepseek-v4-1-flash",
-                    "pinned_bytes":237000},
+                    "pinned_bytes":237000,"pinned_blocks":[{"block":"memory_os_recall","bytes":237000}]},
            "history_atoms":3395,
-           "carried":{"first_atom":3100,"kept_atoms":295,"transmitted_bytes":170000,
-                      "origin":{"kind":"ledger"},"counted_tokens":91000}}]}|}
+           "carried":{"first_atom":3100,"kept_atoms":295,"transmitted_bytes":170000,"preamble_bytes":null,
+                      "origin":{"kind":"ledger"},"counted_tokens":91000},
+           "assembly":null,"place":{"walks_at":0,"declared_at":0,"rest":{"kind":"serving"}}}]}|}
   in
   match Inspector.decode_forecast json with
   | Error detail -> Alcotest.fail ("the server's shape decodes: " ^ detail)
@@ -234,15 +321,21 @@ let test_the_forecast_decodes_the_servers_shape () =
     Alcotest.(check bool) "every field lands where the band reads it" true
       (forecast = measured)
 
-let test_null_marks_count_and_a_record_origin_decode () =
+let test_null_marks_count_a_record_origin_and_a_layout_decode () =
   let json =
     Yojson.Safe.from_string
-      {|{"schema":"masc.keeper.next-request-forecast.v2","checkpoint_messages":1,"wake_line_bytes":131,
+      {|{"schema":"masc.keeper.next-request-forecast.v4","checkpoint_messages":1,"wake_line_bytes":131,
+         "walk":{"lane_id":"r","declared":["r"],"preferred":null},
          "candidates":[{"runtime_id":"r","lane":{"agent_core":true},"marks":null,
            "parts":{"error":"no completed turn on this runtime carried a composition in the newest 200 records"},
            "history_atoms":1,
-           "carried":{"first_atom":0,"kept_atoms":1,"transmitted_bytes":300,
-                      "origin":{"kind":"turn_record","turn":41},"counted_tokens":null}}]}|}
+           "carried":{"first_atom":0,"kept_atoms":1,"transmitted_bytes":300,"preamble_bytes":260,
+                      "origin":{"kind":"turn_record","turn":41},"counted_tokens":null},
+           "assembly":[{"slot":"system_prompt","bytes":10832},{"slot":"tools","bytes":71578},
+                       {"slot":"preamble","bytes":260},
+                       {"slot":"history","atoms":0,"of_atoms":0,"bytes":0},{"slot":"wake_line","bytes":191},
+                       {"slot":"system_context","bytes":157541,"blocks":[{"block":"memory_os_recall","bytes":139966}]}],
+           "place":{"walks_at":0,"declared_at":0,"rest":{"kind":"serving"}}}]}|}
   in
   match Inspector.decode_forecast json with
   | Error detail -> Alcotest.fail ("null marks decode: " ^ detail)
@@ -257,25 +350,38 @@ let test_null_marks_count_and_a_record_origin_decode () =
                   ; _
                   }
             ; parts = Error "no completed turn on this runtime carried a composition in the newest 200 records"
+            ; assembly = Some slots
             ; _
             }
           ]
       ; _
-      } -> ()
-  | Ok _ -> Alcotest.fail "null marks read as none, the origin as the record's turn"
+      } ->
+    Alcotest.(check bool) "the layout decodes slot by slot" true
+      (slots
+       = [ Inspector.Slot_system_prompt { bytes = 10_832 }
+         ; Inspector.Slot_tools { bytes = 71_578 }
+         ; Inspector.Slot_preamble { bytes = 260 }
+         ; Inspector.Slot_history { atoms = 0; of_atoms = 0; bytes = 0 }
+         ; Inspector.Slot_wake_line { bytes = 191 }
+         ; Inspector.Slot_system_context
+             { bytes = 157_541; blocks = [ "memory_os_recall", 139_966 ] }
+         ])
+  | Ok _ -> Alcotest.fail "null marks read as none, the origin as the record's turn, the layout as slots"
 
 let test_a_not_applicable_lane_decodes_as_such () =
   let json =
     Yojson.Safe.from_string
-      {|{"schema":"masc.keeper.next-request-forecast.v2","checkpoint_messages":1,"wake_line_bytes":131,
+      {|{"schema":"masc.keeper.next-request-forecast.v4","checkpoint_messages":1,"wake_line_bytes":131,
+         "walk":{"lane_id":"glm-coding.glm-5.3-flash","declared":["glm-coding.glm-5.3-flash","claude_code.claude-sonnet-5"],"preferred":null},
          "candidates":[{"runtime_id":"claude_code.claude-sonnet-5",
            "lane":{"not_applicable":"claude_code.claude-sonnet-5 is an official-client runtime"},
            "marks":null,
            "parts":{"reserved_measured_on_turn":4700,"reserved_bytes":194651,"pinned_measured_on_turn":4700,"pinned_measured_on_runtime":"claude_code.claude-sonnet-5","pinned_bytes":182167},
-           "history_atoms":4429,"carried":null}]}|}
+           "history_atoms":4429,"carried":null,"assembly":null,
+           "place":{"walks_at":1,"declared_at":1,"rest":{"kind":"serving"}}}]}|}
   in
   match Inspector.decode_forecast json with
-  | Ok { candidates = [ { lane = Inspector.Lane_not_applicable reason; carried = None; parts = Ok parts; _ } ]; _ }
+  | Ok { candidates = [ { lane = Inspector.Lane_not_applicable reason; carried = None; assembly = None; parts = Ok parts; _ } ]; _ }
     ->
     Alcotest.(check string) "the reason is the server's"
       "claude_code.claude-sonnet-5 is an official-client runtime" reason;
@@ -286,23 +392,180 @@ let test_a_not_applicable_lane_decodes_as_such () =
 let test_a_malformed_forecast_fails_the_reading () =
   let json =
     Yojson.Safe.from_string
-      {|{"schema":"masc.keeper.next-request-forecast.v2","checkpoint_messages":1,"wake_line_bytes":131,
+      {|{"schema":"masc.keeper.next-request-forecast.v4","checkpoint_messages":1,"wake_line_bytes":131,
+         "walk":{"lane_id":"r","declared":["r"],"preferred":null},
          "candidates":[{"runtime_id":"r","lane":{"agent_core":true},"marks":null,
            "parts":{"error":"x"},"history_atoms":1,
-           "carried":{"first_atom":0,"kept_atoms":1,"transmitted_bytes":300,"origin":{"kind":"sideways"},"counted_tokens":null}}]}|}
+           "carried":{"first_atom":0,"kept_atoms":1,"transmitted_bytes":300,"origin":{"kind":"sideways"},"counted_tokens":null},
+           "assembly":null,"place":{"walks_at":0,"declared_at":0,"rest":{"kind":"serving"}}}]}|}
   in
   match Inspector.decode_forecast json with
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "an unknown origin kind is refused, not read as absent"
 
+let test_an_unknown_slot_fails_the_reading () =
+  let json =
+    Yojson.Safe.from_string
+      {|{"schema":"masc.keeper.next-request-forecast.v4","checkpoint_messages":1,"wake_line_bytes":131,
+         "walk":{"lane_id":"r","declared":["r"],"preferred":null},
+         "candidates":[{"runtime_id":"r","lane":{"agent_core":true},"marks":null,
+           "parts":{"error":"x"},"history_atoms":1,"carried":null,
+           "assembly":[{"slot":"sideways","bytes":1}],"place":{"walks_at":0,"declared_at":0,"rest":{"kind":"serving"}}}]}|}
+  in
+  match Inspector.decode_forecast json with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "an unknown slot is refused, not read as absent"
+
 let test_the_old_schema_is_refused () =
   let json =
     Yojson.Safe.from_string
-      {|{"schema":"masc.keeper.next-request-forecast.v1","checkpoint_messages":1,"wake_line_bytes":131,"candidates":[]}|}
+      {|{"schema":"masc.keeper.next-request-forecast.v3","checkpoint_messages":1,"wake_line_bytes":131,"candidates":[]}|}
   in
   match Inspector.decode_forecast json with
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "a server on the previous shape is named, not half-read"
+
+(* analyst on the glm-coding lane after the walk found claude_code good at
+   15:37:47Z: the sticky candidate walks first, the declared head second,
+   and a resting kimi is named with its release. *)
+let walked : Inspector.forecast =
+  let candidate runtime_id place : Inspector.forecast_candidate =
+    { runtime_id
+    ; lane = Inspector.Lane_agent_core
+    ; marks = None
+    ; parts = Error "no composition"
+    ; history_atoms = 6362
+    ; carried = None
+    ; assembly = None
+    ; place
+    }
+  in
+  { checkpoint_messages = 6358
+  ; wake_line_bytes = 131
+  ; walk =
+      Ok
+        { lane_id = "glm-coding.glm-5.3-flash"
+        ; declared =
+            [ "glm-coding.glm-5.3-flash"
+            ; "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"
+            ; "kimi_coding.kimi-k3"
+            ; "claude_code.claude-sonnet-5"
+            ]
+        ; preferred =
+            Some
+              { preferred_runtime_id = "claude_code.claude-sonnet-5"
+              ; noted_at = 56_267.
+              ; ttl_s = 3600.
+              }
+        }
+  ; candidates =
+      [ candidate "claude_code.claude-sonnet-5"
+          { walks_at = 0; declared_at = Some 3; rest = Inspector.Rest_serving }
+      ; candidate "glm-coding.glm-5.3-flash"
+          { walks_at = 1; declared_at = Some 0; rest = Inspector.Rest_serving }
+      ; candidate "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"
+          { walks_at = 2; declared_at = Some 1; rest = Inspector.Rest_serving }
+      ; candidate "kimi_coding.kimi-k3"
+          { walks_at = 3
+          ; declared_at = Some 2
+          ; rest = Inspector.Rest_resting { release_at = 60_000.; walk_promotes_at_release = true }
+          }
+      ]
+  }
+
+let test_every_candidate_says_where_it_walks_and_why () =
+  let rows = lines (Ok walked) in
+  Alcotest.(check bool) "the sticky last-good candidate walks first and says since when" true
+    (says
+       "Walks first: the lane's last good candidate since 15:37:47Z, kept 60 min after each \
+        success."
+       rows);
+  Alcotest.(check bool) "the declared head walks second" true
+    (says "Walks second: the declared head." rows);
+  Alcotest.(check bool) "a later candidate names its declared place" true
+    (says "Walks third: declared second on lane glm-coding.glm-5.3-flash." rows);
+  Alcotest.(check bool) "a resting path names its release" true
+    (says
+       "Walks 4th: declared third on lane glm-coding.glm-5.3-flash; resting until 16:40:00Z, \
+        when the walk promotes it."
+       rows);
+  Alcotest.(check bool) "the footer names the lane and the count" true
+    (says "Lane glm-coding.glm-5.3-flash: 4 candidates in the order the next cycle walks them"
+       rows);
+  Alcotest.(check bool) "and no longer claims only the bound runtime is forecast" false
+    (says "Only the bound runtime" rows)
+
+let test_the_assembly_is_drawn_for_the_first_walker_alone () =
+  let second : Inspector.forecast_candidate =
+    match measured.candidates with
+    | [ first ] ->
+      { first with
+        runtime_id = "kimi_coding.kimi-k3"
+      ; place = { walks_at = 1; declared_at = Some 1; rest = Inspector.Rest_serving }
+      }
+    | _ -> Alcotest.fail "one measured candidate"
+  in
+  let forecast =
+    { (with_candidate (fun candidate -> { candidate with assembly = Some assembled }) measured) with
+      candidates =
+        List.map
+          (fun (candidate : Inspector.forecast_candidate) ->
+             { candidate with assembly = Some assembled })
+          (measured.candidates @ [ second ])
+    }
+  in
+  let rows = lines (Ok forecast) in
+  let count needle = List.length (List.filter (fun row -> contains needle (strip row)) rows) in
+  Alcotest.(check int) "one layout on the screen" 1 (count "In the order the request carries them");
+  Alcotest.(check int) "both candidates are named" 2 (count "Walks ")
+
+let test_the_walk_and_the_place_decode () =
+  let json =
+    Yojson.Safe.from_string
+      {|{"schema":"masc.keeper.next-request-forecast.v4","checkpoint_messages":1,"wake_line_bytes":131,
+         "walk":{"lane_id":"l","declared":["a","b"],"preferred":{"runtime_id":"b","noted_at":56267.5,"ttl_s":3600}},
+         "candidates":[{"runtime_id":"b","lane":{"agent_core":true},"marks":null,"parts":{"error":"x"},
+           "history_atoms":1,"carried":null,"assembly":null,
+           "place":{"walks_at":0,"declared_at":1,"rest":{"kind":"resting","release_at":60000,"walk_promotes_at_release":false}}},
+          {"runtime_id":"z","lane":{"agent_core":true},"marks":null,"parts":{"error":"x"},
+           "history_atoms":1,"carried":null,"assembly":null,
+           "place":{"walks_at":1,"declared_at":null,"rest":{"kind":"serving"}}}]}|}
+  in
+  match Inspector.decode_forecast json with
+  | Error detail -> Alcotest.fail ("the walk decodes: " ^ detail)
+  | Ok { walk = Ok walk; candidates = [ first; second ]; _ } ->
+    Alcotest.(check bool) "the preferred candidate and its stamp" true
+      (walk.preferred
+       = Some { preferred_runtime_id = "b"; noted_at = 56_267.5; ttl_s = 3600. }
+       && walk.declared = [ "a"; "b" ]);
+    Alcotest.(check bool) "a resting place with its release" true
+      (first.place
+       = { walks_at = 0
+         ; declared_at = Some 1
+         ; rest = Inspector.Rest_resting { release_at = 60_000.; walk_promotes_at_release = false }
+         });
+    Alcotest.(check bool) "an undeclared id has no declared place" true
+      (second.place = { walks_at = 1; declared_at = None; rest = Inspector.Rest_serving })
+  | Ok _ -> Alcotest.fail "two candidates decode"
+
+(* An assignment the driver would refuse: the server says why, the band
+   names it in place of any candidate. *)
+let test_a_refused_walk_is_named_not_walked () =
+  let json =
+    Yojson.Safe.from_string
+      {|{"schema":"masc.keeper.next-request-forecast.v4","checkpoint_messages":7,"wake_line_bytes":131,
+         "walk":{"refusal":"the assignment names no configured lane or runtime"},"candidates":[]}|}
+  in
+  match Inspector.decode_forecast json with
+  | Error detail -> Alcotest.fail ("a refused walk decodes: " ^ detail)
+  | Ok ({ walk = Error refusal; candidates = []; _ } as forecast) ->
+    Alcotest.(check string) "the reason is the server's"
+      "the assignment names no configured lane or runtime" refusal;
+    let rows = lines (Ok forecast) in
+    Alcotest.(check bool) "the band names it" true
+      (says "Next request not walked: the assignment names no configured lane or runtime" rows);
+    Alcotest.(check bool) "and walks nothing" false (says "Walks " rows || says "Lane " rows)
+  | Ok _ -> Alcotest.fail "a refused walk reads as a refusal with no candidates"
 
 let () =
   Alcotest.run "tui_next_request_band"
@@ -311,6 +574,11 @@ let () =
             test_the_band_names_the_marks_and_the_range
         ; Alcotest.test_case "a pinned figure from another lane names it" `Quick
             test_a_pinned_figure_from_another_lane_names_it
+        ; Alcotest.test_case "the assembly is drawn in travel order" `Quick
+            test_the_assembly_is_drawn_in_travel_order
+        ; Alcotest.test_case "a preamble slot is named when the range prepended one" `Quick
+            test_a_preamble_slot_is_named_when_the_range_prepended_one
+        ; Alcotest.test_case "no assembly draws no order" `Quick test_no_assembly_draws_no_order
         ; Alcotest.test_case "no marks says only a refusal moves the front" `Quick
             test_no_marks_says_only_a_refusal_moves_the_front
         ; Alcotest.test_case "a cold front names its record and nothing counted" `Quick
@@ -323,16 +591,26 @@ let () =
             test_an_official_client_runtime_carries_no_range_and_says_why
         ; Alcotest.test_case "a missing forecast is named, not hidden" `Quick
             test_a_missing_forecast_is_named_not_hidden
+        ; Alcotest.test_case "every candidate says where it walks and why" `Quick
+            test_every_candidate_says_where_it_walks_and_why
+        ; Alcotest.test_case "the assembly is drawn for the first walker alone" `Quick
+            test_the_assembly_is_drawn_for_the_first_walker_alone
         ] )
     ; ( "decode"
       , [ Alcotest.test_case "the forecast decodes the server's shape" `Quick
             test_the_forecast_decodes_the_servers_shape
-        ; Alcotest.test_case "null marks, count and a record origin decode" `Quick
-            test_null_marks_count_and_a_record_origin_decode
+        ; Alcotest.test_case "null marks, count, a record origin and a layout decode" `Quick
+            test_null_marks_count_a_record_origin_and_a_layout_decode
         ; Alcotest.test_case "a not-applicable lane decodes as such" `Quick
             test_a_not_applicable_lane_decodes_as_such
         ; Alcotest.test_case "a malformed forecast fails the reading" `Quick
             test_a_malformed_forecast_fails_the_reading
+        ; Alcotest.test_case "an unknown slot fails the reading" `Quick
+            test_an_unknown_slot_fails_the_reading
         ; Alcotest.test_case "the old schema is refused" `Quick test_the_old_schema_is_refused
+        ; Alcotest.test_case "the walk and the place decode" `Quick
+            test_the_walk_and_the_place_decode
+        ; Alcotest.test_case "a refused walk is named, not walked" `Quick
+            test_a_refused_walk_is_named_not_walked
         ] )
     ]

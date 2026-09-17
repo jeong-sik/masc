@@ -5197,7 +5197,7 @@ def paste_into_a_field_interaction() -> Interaction:
         #
         # The armed footer names more than those two -- editing in $EDITOR and
         # cycling the hearth sit between them -- so the two keys this step is
-        # about are matched with what may come between, the way the TOOLS lane
+        # about are matched with what may come between, the way the tool lane
         # needle tolerates padding. A literal "s:send  d:discard" pinned a
         # footer that had since grown, and starved.
         send_and_wait(
@@ -6963,13 +6963,17 @@ def autonomous_turn_history_interaction() -> Interaction:
              "the unrecorded reasoning count"),
             ("\u2713 masc_task_history \u00b7 32ms".encode(), "the returned call"),
             ("\u2717 tool_execute \u00b7 1200ms".encode(), "the failed call"),
-            ("\u00b7 THINKING".encode(), "the thinking lane"),
-            # The label is padded to its column now, so "TOOLS" no longer sits
-            # against the rule. The block marker in front of it is what tells
-            # this row from the word appearing anywhere else.
-            ("\u25a0 TOOLS".encode(), "the tool block header"),
+            # No lane word on the work lanes any more: the mark already says
+            # which lane the row is, so the badge is the glyph and its
+            # padding and nothing else. What pins the thinking row is its
+            # mark against the first words of the withheld-note body, with
+            # whatever padding the badge puts between -- never the mark
+            # alone, which the body's own " · " separators also carry.
+            (re.compile("\u00b7\\s+2 reasoning steps".encode()),
+             "the thinking lane"),
+            ("\u25a0".encode(), "the tool block mark"),
         ):
-            if needle not in plain_pane:
+            if find_needle(plain_pane, needle) < 0:
                 raise AssertionError(
                     f"Autonomous turn history did not draw {what}: {pane!r}"
                 )
@@ -6995,14 +6999,23 @@ def memory_journal_timeline_interaction(
             "%Y-%m-%d · %H:00", time.localtime(MEMORY_JOURNAL_REQUEST_TS)
         ).encode()
         styled_rail = re.compile(
-            rb"\x1b\[[0-9;]*m\x1b\[1m"
+            rb"\x1b\[(?:2|90)m"
             + "── ".encode()
             + re.escape(hour)
         )
         if styled_rail.search(drawn) is None:
             raise AssertionError(
-                "Civil-hour rail was not drawn in semantic colour and bold "
-                f"weight for {hour!r}: {drawn!r}"
+                "Civil-hour rail did not recede (dim/gray) "
+                f"for {hour!r}: {drawn!r}"
+            )
+        bold_rail = re.compile(
+            rb"\x1b\[[0-9;]*m\x1b\[1m"
+            + "── ".encode()
+            + re.escape(hour)
+        )
+        if bold_rail.search(drawn) is not None:
+            raise AssertionError(
+                f"Civil-hour rail still held the bold slot for {hour!r}: {drawn!r}"
             )
         # The renderer groups by civil hour (checked above) and does not
         # also draw a per-message HH:MM:SS clock in the resting chat body
@@ -7806,7 +7819,7 @@ def chat_visibility_modes_interaction(
             start=pane_start,
             timeout=5.0,
         )
-        # The TOOLS lane colours each token separately and pads columns,
+        # The tool lane colours each token separately and pads columns,
         # so a literal "✗ masc_fusion · 1200ms" never exists as contiguous
         # bytes. Match the tokens while tolerating SGR runs and padding
         # between them, like the [tag]constraint probe needle tolerates
@@ -7827,7 +7840,7 @@ def chat_visibility_modes_interaction(
             start=pane_start,
             timeout=5.0,
         )
-        # Same TOOLS-lane token colouring: cross-check needles that span
+        # Same tool-lane token colouring: cross-check needles that span
         # word boundaries must tolerate SGR runs and padding inside them.
         settled_at = pane_start
         for needle in (
@@ -7854,8 +7867,20 @@ def chat_visibility_modes_interaction(
                 + rb"[\x1b\x20-\x7e]*?"
                 + "씀".encode()
             ),
+            # The summary line's tail on the same one row the compact skill
+            # row keeps: dim separators, the name (its bold SGR is pinned
+            # below) and the action count. The " · " separators are named
+            # tokens here because the gap class does not cover their bytes.
             re.compile(
-                rb"masc_fusion[\x1b\x20-\x7e]*?\xc2\xb7[\x1b\x20-\x7e]*?observed"
+                "씀".encode()
+                + rb"[\x1b\x20-\x7e]*?"
+                + rb"\xc2\xb7"
+                + rb"[\x1b\x20-\x7e]*?"
+                + rb"ci-red-attribution"
+                + rb"[\x1b\x20-\x7e]*?"
+                + rb"\xc2\xb7"
+                + rb"[\x1b\x20-\x7e]*?"
+                + rb"1 action"
             ),
         ):
             wait_for_output(
@@ -7889,26 +7914,57 @@ def chat_visibility_modes_interaction(
             )
         if b"2 reasoning steps \xc2\xb7 text not recorded" in initial:
             raise AssertionError(f"hidden reasoning was still drawn: {initial!r}")
-        if re.search("◆\\s+SKILL".encode(), CSI_RE.sub(b"", initial)) is None:
+        # The lane word went: the skill row leads with its mark and the
+        # summary's first word, with the badge padding and SGR runs between
+        # -- the same token-split shape the tool-lane needles above take,
+        # because a literal "◆ 전달됨" never exists as contiguous bytes.
+        # The rail is a token of its own, the way " · " is above: a needle
+        # anchored on the gutter mark crosses into the body, and Skill rows
+        # are Shade_quoted, so the renderer draws "│" (>= 0x80, outside the
+        # gap class) between badge padding and body. Body-anchored needles
+        # (✗, 씀, proof) never cross it and keep the plain gap.
+        if re.search(
+            "◆".encode()
+            + rb"[\x1b\x20-\x7e]*?"
+            + "│".encode()
+            + rb"[\x1b\x20-\x7e]*?"
+            + "전달됨".encode(),
+            initial,
+        ) is None:
             raise AssertionError(
                 f"the exact Skill evidence did not start its turn: {initial!r}"
             )
         if b"\x1b[1mci-red-attribution" not in initial:
             raise AssertionError(f"the Skill name was not bold: {initial!r}")
+        # The rest of the skill row rides the tool toggle now: the action
+        # rows and the proof line exist only behind Ctrl-D, so the compact
+        # frame must not carry them. Their presence is waited for below,
+        # after the flip.
+        for leaked in (
+            re.compile(
+                rb"masc_fusion[\x1b\x20-\x7e]*?\xc2\xb7[\x1b\x20-\x7e]*?observed"
+            ),
+            re.compile(rb"proof[\x1b\x20-\x7e]*?\xc2\xb7[\x1b\x20-\x7e]*?turn="),
+        ):
+            if leaked.search(initial) is not None:
+                raise AssertionError(
+                    f"skill detail leaked into the compact frame: {initial!r}"
+                )
 
         folded = send_and_wait(
             process, master_fd, output, b"\x12", b"reasoning:folded"
         )
-        # The fold marker's wording changed: the count line now reads
-        # "THINKING · 2 reasoning steps · text not recorded"; the old
+        # The fold marker's wording changed: the count line is the thinking
+        # lane's mark and its padding over "2 reasoning steps · text not
+        # recorded" (no lane word -- the mark says the lane); the old
         # "Reasoning / N line(s) folded" labels no longer exist.
         if b"2 reasoning steps" not in folded or b"text not recorded" not in folded:
             raise AssertionError(f"folded reasoning did not draw its count: {folded!r}")
 
         # \x12 flips reasoning visibility and the renderer answers with a
         # diff frame: the header tag (reasoning:folded -> reasoning:full)
-        # is what gets re-emitted. The THINKING count row is unchanged by
-        # the flip, so it is not redrawn -- asserting its reappearance
+        # is what gets re-emitted. The thinking-lane count row is unchanged
+        # by the flip, so it is not redrawn -- asserting its reappearance
         # here starves even though the row stays on screen.
         full = send_and_wait(
             process,
@@ -7953,10 +8009,11 @@ def chat_visibility_modes_interaction(
                     f"{tool_calls_gate.calls} GETs"
                 )
             tool_calls_gate.release.set()
-        # The tools pane redraw never re-emits the transcript rows above it:
-        # "observed action" and the proof/turn line belong to the folded
-        # world and are asserted there. The pane's own first badge is the
-        # fusion row's state (FAILED) at tools_start.
+        # The flip re-renders the transcript rows it changes: the skill row's
+        # action list and proof line exist only in this world, so they are
+        # waited for after tools_start rather than asserted of the compact
+        # frame. The pane's own first badge is the fusion row's state
+        # (FAILED) at tools_start.
         wait_for_output(
             process,
             master_fd,
@@ -7981,10 +8038,28 @@ def chat_visibility_modes_interaction(
             start=tools_start,
             timeout=5.0,
         )
+        # The skill detail the compact frame must not carry: this world's
+        # redraw of the transcript rows is the one place the action rows and
+        # the proof line are emitted, so they are waited for here.
+        for needle in (
+            re.compile(
+                rb"masc_fusion[\x1b\x20-\x7e]*?\xc2\xb7[\x1b\x20-\x7e]*?observed"
+            ),
+            re.compile(rb"proof[\x1b\x20-\x7e]*?\xc2\xb7[\x1b\x20-\x7e]*?turn="),
+        ):
+            wait_for_output(
+                process,
+                master_fd,
+                output,
+                needle,
+                start=tools_start,
+                timeout=5.0,
+            )
         tools += bytes(output[tools_start:])
         # "batch 2"/"width 3" are colour-split per token in the pane, so
-        # they are asserted as token regexes; the turn= proof row is not
-        # part of the pane's redraw at all.
+        # they are asserted as token regexes; the turn= proof row belongs to
+        # the transcript's skill row and is waited for above, not read out
+        # of this buffer.
         for needle in (
             b"masc_fusion",
             b"state",
@@ -8811,7 +8886,11 @@ def message_origin_badge_interaction(
         master_fd,
         output,
         b"\x06",
-        re.compile(rb"\d\d:\d\d " + re.escape("◀".encode())),
+        # The clock recedes in a span of its own and the mark opens the
+        # speaker's colour after it, so the raw stream carries SGR sequences
+        # between the two. The wait is still on the short clock; the needle
+        # just lets the styles through.
+        re.compile(rb"\d\d:\d\d (?:\x1b\[[0-9;]*m)*" + re.escape("◀".encode())),
     )
     for badge, body, description in (
         (operator_badge, operator_body, "operator"),

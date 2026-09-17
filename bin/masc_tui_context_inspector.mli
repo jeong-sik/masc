@@ -143,6 +143,48 @@ type forecast_carried =
         (** The ledger's measured total for its last request, when known. *)
   }
 
+(** One piece of the next request in the position it travels, as the
+    server lays them out: the system prompt and the tool array, then the
+    messages in wire order. *)
+type forecast_slot =
+  | Slot_system_prompt of { bytes : int }
+  | Slot_tools of { bytes : int }
+  | Slot_preamble of { bytes : int }
+  | Slot_history of { atoms : int; of_atoms : int; bytes : int }
+      (** [atoms] carried of [of_atoms] in the checkpoint, the wake line
+          on neither side. *)
+  | Slot_wake_line of { bytes : int }
+  | Slot_system_context of { bytes : int; blocks : (string * int) list }
+      (** [blocks] in the order the assembly concatenates them. *)
+
+(** Whether a candidate's path rests now, as the server read it. *)
+type forecast_rest =
+  | Rest_serving
+  | Rest_resting of { release_at : float; walk_promotes_at_release : bool }
+
+(** Where a candidate stands in the walk the next fresh cycle takes. *)
+type forecast_place =
+  { walks_at : int  (** 0 walks first. *)
+  ; declared_at : int option
+        (** The candidate's index in the lane's declaration; [None] when the
+            lane does not declare it. *)
+  ; rest : forecast_rest
+  }
+
+type forecast_preferred =
+  { preferred_runtime_id : string
+  ; noted_at : float  (** Unix epoch of the success that set it. *)
+  ; ttl_s : float  (** How long a success keeps it; every success renews it. *)
+  }
+
+type forecast_walk =
+  { lane_id : string
+  ; declared : string list  (** The lane as declared, head first. *)
+  ; preferred : forecast_preferred option
+        (** The lane's sticky last-good candidate, shared by every keeper the
+            lane routes; it walks first while it lasts. *)
+  }
+
 type forecast_candidate =
   { runtime_id : string
   ; lane : forecast_lane
@@ -153,12 +195,21 @@ type forecast_candidate =
             or only post-tool ones, which carry no pinned block. *)
   ; history_atoms : int
   ; carried : forecast_carried option  (** [None] when the lane is refused. *)
+  ; assembly : forecast_slot list option
+        (** The request in travel order; [None] whenever [carried] or
+            [parts] is. *)
+  ; place : forecast_place
   }
 
 type forecast =
   { checkpoint_messages : int
   ; wake_line_bytes : int
+  ; walk : (forecast_walk, string) result
+        (** [Error] is the server's reason the driver would not dispatch the
+            assignment at all; the candidates are then empty. *)
   ; candidates : forecast_candidate list
+        (** Every candidate of the keeper's lane, in the order the next
+            fresh cycle walks them. *)
   }
 
 type reading =

@@ -481,6 +481,41 @@ let test_lanes_accessor_returns_declared_lanes () =
         (Runtime_lane.id lane)
     | _ -> Alcotest.fail "expected exactly one lane")
 
+(* The order the forecast shows is the order the walk takes: the sticky
+   last-good candidate first, read from the same observation, and the
+   declared order once nothing is remembered. *)
+let test_assignment_walk_order_puts_the_sticky_candidate_first () =
+  with_runtime_config runtime_toml_with_lane (fun () ->
+    Runtime_lane_preference.reset_for_testing ();
+    Fun.protect ~finally:Runtime_lane_preference.reset_for_testing (fun () ->
+      let now = Unix.gettimeofday () in
+      (match Driver.assignment_walk_order ~now "resilient" with
+       | Error _ -> Alcotest.fail "the lane resolves"
+       | Ok walk ->
+         Alcotest.(check (list string)) "nothing remembered: the declared order"
+           [ "primary.test_model"; "fallback.test_model" ] walk.Driver.order;
+         Alcotest.(check bool) "and no preferred candidate" true
+           (Option.is_none walk.Driver.preferred));
+      Runtime_lane_preference.note_success ~lane_id:"resilient"
+        ~candidate:"fallback.test_model";
+      match Driver.assignment_walk_order ~now "resilient" with
+      | Error _ -> Alcotest.fail "the lane resolves"
+      | Ok walk ->
+        Alcotest.(check string) "the lane" "resilient" walk.Driver.lane_id;
+        Alcotest.(check (list string)) "as declared"
+          [ "primary.test_model"; "fallback.test_model" ] walk.Driver.declared;
+        Alcotest.(check (list string)) "the remembered candidate walks first"
+          [ "fallback.test_model"; "primary.test_model" ] walk.Driver.order;
+        Alcotest.(check (option string)) "and is named as the preferred one"
+          (Some "fallback.test_model") (Option.map fst walk.Driver.preferred)))
+
+let test_assignment_walk_order_refuses_a_missing_assignment () =
+  with_runtime_config runtime_toml_with_lane (fun () ->
+    match Driver.assignment_walk_order ~now:(Unix.gettimeofday ()) "not.configured" with
+    | Error Driver.Assignment_missing -> ()
+    | Error (Driver.Catalog_unavailable _) -> Alcotest.fail "missing, not unavailable"
+    | Ok _ -> Alcotest.fail "an id that names nothing is refused, not walked")
+
 let test_resolve_assignment_prefers_lane_over_runtime () =
   with_runtime_config runtime_toml_lane_shadows_runtime (fun () ->
     match Runtime.resolve_assignment "primary.test_model" with
@@ -3986,6 +4021,14 @@ let () =
             "resolve_assignment prefers lane over runtime"
             `Quick
             test_resolve_assignment_prefers_lane_over_runtime;
+          Alcotest.test_case
+            "assignment_walk_order puts the sticky candidate first"
+            `Quick
+            test_assignment_walk_order_puts_the_sticky_candidate_first;
+          Alcotest.test_case
+            "assignment_walk_order refuses a missing assignment"
+            `Quick
+            test_assignment_walk_order_refuses_a_missing_assignment;
           Alcotest.test_case
             "a bare runtime assignment gets a lane with somewhere to go"
             `Quick

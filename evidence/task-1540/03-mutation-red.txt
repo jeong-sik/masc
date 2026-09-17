@@ -1,0 +1,16 @@
+# task-1540 evidence 03 - mutation: fix reverted via git checkout HEAD^ -- lib/goal/reliable_change_g1.ml, new test must go red
+HEAD=e9889bab657eb13447e4d2ca055dedb9256df2bd
+UTC=2026-09-16T14:52:30Z
+guard_occurrences_before=1
+guard_occurrences_after_revert=0
+mutant_build_exit=0
+> [FAIL]        strict_parsing              5   usage non-object guard.
+  [OK]          strict_parsing              6   observation roundtrip.
+
+--
+│ [FAIL]        strict_parsing              5   usage non-object guard.        │
+└──────────────────────────────────────────────────────────────────────────────┘
+ASSERT non-object usage row decode failed: JSON type error: Can't get member 'reported' of non-object type string
+mutant_suite_exit=1
+mutant_OK_count=14
+mutant_FAIL_count=2

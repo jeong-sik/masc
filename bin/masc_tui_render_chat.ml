@@ -233,12 +233,25 @@ let extract_tool_marker s =
 
 ;;
 
+(* The row this dressing sits in opens dim, and a coloured clause used to
+   close with a bare [Ansi.reset], snapping the plain text after it -- args,
+   counts, the dot between clauses -- back to full foreground. Every close
+   reopens the rung the clause sits in, the way {!Chat_theme.body_context}
+   closes markdown spans inside a dim body. *)
+let tool_reopen = Ansi.reset ^ Ansi.dim
+
+;;
+
+(* SGR 1 does not clear SGR 2: inside the dim row, bold alone would leave a
+   failure as faint as the work around it. The bad arms reset before they
+   shout -- here and in the [failed] words of [dress_tool_clause] -- and the
+   [tool_reopen] closing the clause re-contains the line to the dim rung. *)
 let tool_marker_color = function
   | "✓" | "√" -> Theme.ok ()
-  | "✗" | "×" | "!" -> Ansi.bold ^ Theme.bad ()
+  | "✗" | "×" | "!" -> Ansi.reset ^ Ansi.bold ^ Theme.bad ()
   | "▶" | "?" -> Theme.warn ()
   | "◌" -> Theme.info ()
-  | _ -> Ansi.reset
+  | _ -> tool_reopen
 
 ;;
 
@@ -254,19 +267,19 @@ let dress_tool_clause (clause : string) : string =
        | Some idx ->
          let name = String.sub rest 0 idx in
          let args = String.sub rest idx (String.length rest - idx) in
-         Printf.sprintf "%s%s%s %s%s%s%s" col m Ansi.reset
-           (Theme.tool_origin ()) name Ansi.reset args
+         Printf.sprintf "%s%s%s %s%s%s%s" col m tool_reopen
+           (Theme.tool_origin ()) name tool_reopen args
        | None ->
-         Printf.sprintf "%s%s%s %s%s%s" col m Ansi.reset
-           (Theme.tool_origin ()) rest Ansi.reset)
+         Printf.sprintf "%s%s%s %s%s%s" col m tool_reopen
+           (Theme.tool_origin ()) rest tool_reopen)
   | None ->
     if contains_sub c "detail" && contains_sub c "folded" then
-      Printf.sprintf "%s%s%s" (Theme.recede () ^ Ansi.dim) c Ansi.reset
+      Printf.sprintf "%s%s%s" (Theme.recede () ^ Ansi.dim) c tool_reopen
     else if String.starts_with ~prefix:"Ctrl-" c || contains_sub c "carried by the transcript" then
-      Printf.sprintf "%s%s%s" (Theme.recede () ^ Ansi.dim) c Ansi.reset
+      Printf.sprintf "%s%s%s" (Theme.recede () ^ Ansi.dim) c tool_reopen
     else if (String.ends_with ~suffix:"ms" c || String.ends_with ~suffix:"s" c)
             && (match split_last_space c with None -> true | Some (_, _) -> false) then
-      Printf.sprintf "%s%s%s" (Theme.recede () ^ Ansi.dim) c Ansi.reset
+      Printf.sprintf "%s%s%s" (Theme.recede () ^ Ansi.dim) c tool_reopen
     else if contains_sub c "returned" || contains_sub c "failed" || contains_sub c "awaiting" || contains_sub c "running" then
       if contains_sub c ", " then
         let parts = String.split_on_char ',' c in
@@ -275,32 +288,32 @@ let dress_tool_clause (clause : string) : string =
             (fun p ->
               let p = String.trim p in
               if String.ends_with ~suffix:"returned" p then
-                Printf.sprintf "%s%s%s" (Theme.ok ()) p Ansi.reset
+                Printf.sprintf "%s%s%s" (Theme.ok ()) p tool_reopen
               else if contains_sub p "failed" || contains_sub p "never returned" then
-                Printf.sprintf "%s%s%s" (Ansi.bold ^ Theme.bad ()) p Ansi.reset
+                Printf.sprintf "%s%s%s" (Ansi.reset ^ Ansi.bold ^ Theme.bad ()) p tool_reopen
               else if contains_sub p "awaiting" then
-                Printf.sprintf "%s%s%s" (Theme.warn ()) p Ansi.reset
+                Printf.sprintf "%s%s%s" (Theme.warn ()) p tool_reopen
               else if contains_sub p "running" then
-                Printf.sprintf "%s%s%s" (Theme.info ()) p Ansi.reset
+                Printf.sprintf "%s%s%s" (Theme.info ()) p tool_reopen
               else p)
             parts
         in
         String.concat ", " dressed
       else if String.ends_with ~suffix:"returned" c then
-        Printf.sprintf "%s%s%s" (Theme.ok ()) c Ansi.reset
+        Printf.sprintf "%s%s%s" (Theme.ok ()) c tool_reopen
       else if contains_sub c "failed" || contains_sub c "never returned" then
-        Printf.sprintf "%s%s%s" (Ansi.bold ^ Theme.bad ()) c Ansi.reset
+        Printf.sprintf "%s%s%s" (Ansi.reset ^ Ansi.bold ^ Theme.bad ()) c tool_reopen
       else if contains_sub c "awaiting" then
-        Printf.sprintf "%s%s%s" (Theme.warn ()) c Ansi.reset
+        Printf.sprintf "%s%s%s" (Theme.warn ()) c tool_reopen
       else if contains_sub c "running" then
-        Printf.sprintf "%s%s%s" (Theme.info ()) c Ansi.reset
+        Printf.sprintf "%s%s%s" (Theme.info ()) c tool_reopen
       else c
     else
       match split_last_space c with
       | Some (name, count) when is_all_digits count ->
         Printf.sprintf "%s%s%s %s%s%s"
-          (Theme.tool_origin ()) name Ansi.reset
-          (Theme.recede () ^ Ansi.dim) count Ansi.reset
+          (Theme.tool_origin ()) name tool_reopen
+          (Theme.recede () ^ Ansi.dim) count tool_reopen
       | _ -> c
 
 ;;
@@ -308,7 +321,7 @@ let dress_tool_clause (clause : string) : string =
 let dress_tool_summary (line : string) : string =
   let parts = split_on_middle_dot line in
   let dressed = List.map dress_tool_clause parts in
-  let sep = Printf.sprintf " %s\xc2\xb7%s " (Theme.recede () ^ Ansi.dim) Ansi.reset in
+  let sep = Printf.sprintf " %s\xc2\xb7%s " (Theme.recede () ^ Ansi.dim) tool_reopen in
   String.concat sep dressed
 
 ;;
@@ -374,18 +387,42 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
              second time, down the side of every row the turn touched. *)
           let rail = Message_layout.take_cells row.gutter rail_cells in
           let after_rail = Message_layout.drop_cells row.gutter rail_cells in
-          let marked = Message_layout.take_cells after_rail (at - rail_cells) in
-          let label = Message_layout.drop_cells after_rail (at - rail_cells) in
+          (* The clock is time-chrome, not identity, so it leaves the mark's
+             span and recedes with the rest of the gutter's chrome; the mark
+             after it keeps the row's one colour. The layout holds the clock
+             inside the span [gutter_label_at] measures, so this clamp only
+             restates for the new field what the two above already say. *)
+          let clock_cells =
+            max 0 (min row.gutter_clock_cells (at - rail_cells))
+          in
+          let clock = Message_layout.take_cells after_rail clock_cells in
+          let after_clock = Message_layout.drop_cells after_rail clock_cells in
+          let marked =
+            Message_layout.take_cells after_clock
+              (at - rail_cells - clock_cells)
+          in
+          let label =
+            Message_layout.drop_cells after_clock
+              (at - rail_cells - clock_cells)
+          in
           let rail =
             if String.equal rail "" then ""
             else Printf.sprintf "%s%s%s" (Theme.recede ()) rail Ansi.reset
           in
+          (* Guarded the way [rail] is: a row with no clock column cuts an
+             empty clock, and wrapping emptiness would still spend the escape
+             pair on it. *)
+          let clock =
+            if String.equal clock "" then ""
+            else Printf.sprintf "%s%s%s" (Theme.recede ()) clock Ansi.reset
+          in
           if String.equal label "" then
-            Printf.sprintf "%s%s%s%s%s" rail (Chat_theme.origin row.style)
-              Ansi.bold marked restore
+            Printf.sprintf "%s%s%s%s%s%s" rail clock
+              (Chat_theme.origin row.style) Ansi.bold marked restore
           else
-            Printf.sprintf "%s%s%s%s%s%s%s%s" rail (Chat_theme.origin row.style)
-              Ansi.bold marked Ansi.reset (Theme.recede ()) label restore
+            Printf.sprintf "%s%s%s%s%s%s%s%s%s" rail clock
+              (Chat_theme.origin row.style) Ansi.bold marked Ansi.reset
+              (Theme.recede ()) label restore
       in
       if
         String.length text >= 2 && Char.equal text.[0] ' '
@@ -408,10 +445,7 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
           | _, Message_layout.Shade_quoted ->
               Printf.sprintf "%s\xe2\x94\x82%s " (Theme.recede ()) Ansi.reset
         in
-        let body_style =
-          if is_tool then Ansi.reset
-          else Chat_theme.body row.style
-        in
+        let body_style = context.opening in
         if context.ambient_background && not is_tool then
           box_line_styled buf cols ~style:context.opening
             (Printf.sprintf "%s  %s" margin (dress rest))
@@ -420,11 +454,12 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
             (Printf.sprintf "%s%s%s%s%s" margin rail
                body_style (dress rest) Ansi.reset))
       else
-        box_line_styled buf cols
-          ~style:(if is_tool then Ansi.reset else context.opening)
-          (dress text)
+        (* [rows_of_entry] prefixes every body chunk with the two spaces the guard matches, so this arm stays as a safety net. *)
+        box_line_styled buf cols ~style:context.opening (dress text)
   | Message_layout.Metadata (Message_layout.Timeline_break _) ->
-      box_line_styled buf cols ~style:(Theme.info () ^ Ansi.bold) row.text
+      (* The hour rail is a scrollbar landmark, not content: it stays, but
+         recedes instead of holding the pane's brightest slot. *)
+      box_line_styled buf cols ~style:(Theme.recede ()) row.text
   | Message_layout.Metadata (Message_layout.Continued_at { timestamp }) ->
       box_line_styled buf cols ~style:(Theme.recede ())
         (Printf.sprintf "[%s]" timestamp)
@@ -682,7 +717,11 @@ let tool_detail_palette () : Tool_detail.palette =
   ; number = Masc_tui_theme.Syntax.json_number
   ; literal = Masc_tui_theme.Syntax.json_literal
   ; punctuation = Masc_tui_theme.Syntax.json_punctuation
-  ; reset = Ansi.reset
+    (* The pane opens these rows dim; a bare reset after the first painted
+       span would drop every following byte back to full weight. Close the
+       way the markdown palette closes: reset, then reopen the rung the tree
+       sits in. *)
+  ; reset = Ansi.reset ^ Ansi.dim
   }
 
 
@@ -1101,9 +1140,13 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
     | Message_status -> "STATUS"
     | Message_local -> "LOCAL"
     | Message_error -> "ERROR"
-    | Message_tool -> "TOOLS"
-    | Message_skill _ -> "SKILL"
-    | Message_thinking -> "THINKING"
+    (* No lane word on the work lanes: the mark already says which lane the
+       row is, so the badge holds the glyph and its padding and nothing
+       else. The column itself stays — [align_role_label] pads the empty
+       label to the same cells the words occupied. *)
+    | Message_tool -> ""
+    | Message_skill _ -> ""
+    | Message_thinking -> ""
     | Message_memory -> "JOURNAL"
   in
   (* Turn identity stays in the typed request id. The speaker glyph already
@@ -1188,17 +1231,14 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
           | Message_skill _ -> (
               match message.me_skill_activity with
               | None -> message.me_text
-              (* Always full, not tied to [msg_tool_visibility]: a skill row is
-                 one of ours, and whether a served skill was actually delivered
-                 and used is the fact the row exists to carry. Folding it behind
-                 the tool toggle made "SERVED ONLY vs DELIVERED · USED" the same
-                 keystroke away as a docker exec's schedule, so the operator saw
-                 only a name and a state and had to expand to learn if the skill
-                 did anything. A skill has few rows (the action list and one
-                 proof line), so showing them costs little and the toggle still
-                 governs the tool projections beside it. *)
+              (* The summary line carries the fact this row exists for —
+                 "delivered and used, N actions" — so it never folds. The
+                 action list, proof line and detail ride the tool toggle:
+                 Ctrl-D opens them, the resting pane stays one line. *)
               | Some activity ->
-                  Keeper_chat_transcript.skill_rows ~full:true activity
+                  Keeper_chat_transcript.skill_rows
+                    ~full:(state.msg_tool_visibility = Masc_tui_types.Tools_full)
+                    activity
                   |> String.concat "\n")
           (* The Memory journal's change arrives inside a ["```diff"]
              fence, so a leading [+] is fence content rather than a list
@@ -1894,8 +1934,8 @@ let render_keeper_message (state : state) =
         |> String.concat " · "
       in
       let title =
-        screen_title
-          (Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 chat" display_keeper_name)
+        Printf.sprintf "%s Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 chat%s"
+          (Theme.recede ()) display_keeper_name Ansi.reset
       in
       let mode_suffix =
         if String.equal modes "" then ""
@@ -2151,24 +2191,25 @@ let render_keeper_message (state : state) =
                       then folded_thinking_summary (String.concat "\n" lines)
                       else String.concat "\n" lines
                     in
-                    entry Message_layout.Thinking (label "THINKING") (annotate_body body)
+                    entry Message_layout.Thinking (label "") (annotate_body body)
                 | Keeper_chat_transcript.Drawn_tools block ->
                     let projection =
                       Keeper_chat_transcript.project_tool_block
                         (tool_projection_mode state) block
                     in
                     let body = String.concat "\n" (projected_tool_rows projection) in
-                    entry (tool_block_style projection) (label "TOOLS") (annotate_body body)
+                    entry (tool_block_style projection) (label "") (annotate_body body)
                 | Keeper_chat_transcript.Drawn_skill skill ->
                     entry
                       (Message_layout.Skill (skill_tone_of_state skill.state))
-                      (label "SKILL")
+                      (label "")
                       (String.concat "\n"
-                         (* Full on the block too: the same reason the
-                            committed skill rows are always full — the skill's
-                            delivery and observed actions are the feature this
-                            row reports, not a detail behind the tool toggle. *)
-                         (Keeper_chat_transcript.skill_rows ~full:true skill))
+                         (* Same fold as the committed rows: the summary line
+                            stays, the action list, proof line and detail ride
+                            the tool toggle. *)
+                         (Keeper_chat_transcript.skill_rows
+                            ~full:(state.msg_tool_visibility = Masc_tui_types.Tools_full)
+                            skill))
                 | Keeper_chat_transcript.Drawn_text text
                 | Keeper_chat_transcript.Drawn_reply text ->
                     entry Message_layout.Keeper (label keeper_label) (annotate_body text)

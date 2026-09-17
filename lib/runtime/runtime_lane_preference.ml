@@ -37,6 +37,16 @@ let observe ~lane_id =
 let prefer_order ~lane_id candidates =
   State.reorder (observe ~lane_id) candidates
 
+let prefer_order_with ~lane_id candidates =
+  let observation = observe ~lane_id in
+  let preferred =
+    match State.preferred observation with
+    | Some (candidate, _) as preferred when List.exists (String.equal candidate) candidates ->
+        preferred
+    | Some _ | None -> None
+  in
+  State.reorder observation candidates, preferred
+
 let note_success ~lane_id ~candidate =
   let noted_at = now () in
   apply_transition (fun state ->

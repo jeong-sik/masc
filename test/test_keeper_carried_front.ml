@@ -59,7 +59,15 @@ let seed = function
   | None -> fail "a seed was expected"
 ;;
 
-let of_records = Front.of_records ~trace_id:"trace-1"
+(* A stand-in for the catalog: [read_seed] puts the question to
+   {!Front.composer_of_runtime}, pinned below on its own. *)
+let composer = function
+  | "claude_code" -> Front.Hands_over_its_own_list
+  | "gone" -> Front.Not_materialized
+  | _ -> Front.Composes_from_the_history
+;;
+
+let of_records = Front.of_records ~trace_id:"trace-1" ~composer
 
 let source =
   testable
@@ -67,18 +75,21 @@ let source =
     ( = )
 ;;
 
-let test_the_newest_completed_record_on_the_runtime_seeds_the_front () =
+(* The lane walked glm, kimi, deepseek over one history. The newest completed
+   record seeds the front whichever runtime measured it: a position in the
+   checkpoint history is the same position on every Agent Core runtime. *)
+let test_the_newest_completed_record_on_the_trace_seeds_the_front () =
   let records =
-    [ record ~turn:10 (Some (30, 100))
-    ; record ~turn:12 (Some (25, 110))
-    ; record ~turn:11 (Some (40, 105))
+    [ record ~turn:10 ~runtime:"glm" (Some (30, 100))
+    ; record ~turn:12 ~runtime:"deepseek" (Some (25, 110))
+    ; record ~turn:11 ~runtime:"kimi" (Some (40, 105))
     ]
   in
-  let first_atom, src = seed (of_records ~runtime_id:"glm" records) in
+  let first_atom, src = seed (of_records records) in
   check int "total minus transmitted of turn 12" 85 first_atom;
   check source "names its turn" (Front.Turn_record { turn = 12 }) src;
   check int "and the history it was measured against" 110
-    (Option.get (of_records ~runtime_id:"glm" records)).atom_count
+    (Option.get (of_records records)).atom_count
 ;;
 
 let test_another_sessions_record_is_another_history () =
@@ -86,35 +97,83 @@ let test_another_sessions_record_is_another_history () =
     [ record ~turn:10 (Some (30, 100)); record ~turn:12 ~trace:"trace-2" (Some (5, 500)) ]
   in
   check int "the newer record belongs to another session" 70
-    (fst (seed (of_records ~runtime_id:"glm" records)));
+    (fst (seed (of_records records)));
   check int "and is the one that session reads" 495
-    (fst (seed (Front.of_records ~runtime_id:"glm" ~trace_id:"trace-2" records)))
+    (fst (seed (Front.of_records ~trace_id:"trace-2" ~composer records)))
 ;;
 
-let test_an_errored_or_other_lane_record_is_skipped () =
+(* An errored turn's record has no stop reason; an official client's window
+   counts a list of its own, so its newer record is not this history's; a
+   runtime the catalog no longer has could be either, so its record is not
+   read. *)
+let test_an_errored_or_official_client_record_is_skipped () =
   let records =
     [ record ~turn:10 (Some (30, 100))
     ; record ~turn:12 ~finish:None (Some (5, 110))
     ; record ~turn:13 ~runtime:"claude_code" (Some (5, 120))
     ; record ~turn:14 (None)
+    ; record ~turn:15 ~runtime:"gone" (Some (5, 130))
     ]
   in
-  let first_atom, src = seed (of_records ~runtime_id:"glm" records) in
+  let first_atom, src = seed (of_records records) in
   check int "only turn 10 qualifies" 70 first_atom;
   check source "turn 10" (Front.Turn_record { turn = 10 }) src
 ;;
 
+(* The record's runtime names the runtime that was asked; the wire
+   observation names the one that measured. The history question is put to
+   the latter. *)
 let test_the_wire_observation_names_the_runtime_when_present () =
   let records =
-    [ record ~turn:10 ~runtime:"glm" ~wire_runtime:(Some "deepseek") (Some (30, 100)) ]
+    [ record ~turn:10 ~runtime:"glm" ~wire_runtime:(Some "claude_code") (Some (30, 100)) ]
   in
-  check bool "read as deepseek's, not glm's" true
-    (Option.is_none (of_records ~runtime_id:"glm" records));
-  check int "and found under deepseek" 70 (fst (seed (of_records ~runtime_id:"deepseek" records)))
+  check bool "measured by an official client: skipped" true
+    (Option.is_none (of_records records));
+  let records =
+    [ record ~turn:10 ~runtime:"claude_code" ~wire_runtime:(Some "deepseek") (Some (30, 100)) ]
+  in
+  check int "measured by deepseek: read" 70 (fst (seed (of_records records)))
 ;;
 
 let test_no_record_means_no_seed () =
-  check bool "empty" true (Option.is_none (of_records ~runtime_id:"glm" []))
+  check bool "empty" true (Option.is_none (of_records []))
+;;
+
+let composer_t =
+  testable (fun fmt c -> Format.pp_print_string fmt (Front.composer_to_string c)) ( = )
+;;
+
+(* Every execution kind answers, and a runtime the catalog does not
+   materialize answers that it is unknown rather than either. *)
+let test_the_composer_is_read_from_the_execution_kind () =
+  let agent_core =
+    Runtime_execution.Agent_core
+      (Agent_core.Llm_provider.Provider_config.make
+         ~kind:Agent_core.Llm_provider.Provider_config.OpenAI_compat
+         ~model_id:"model-a"
+         ~base_url:"https://provider.example"
+         ())
+  in
+  check composer_t "agent core composes from the history" Front.Composes_from_the_history
+    (Front.composer_of_execution agent_core);
+  check composer_t "claude code hands over its own list" Front.Hands_over_its_own_list
+    (Front.composer_of_execution
+       (Runtime_execution.Claude_code { cli_path = "claude"; model = None; timeout_s = 1. }));
+  check composer_t "codex hands over its own list" Front.Hands_over_its_own_list
+    (Front.composer_of_execution
+       (Runtime_execution.Codex_app_server { cli_path = "codex"; model = None; timeout_s = 1. }));
+  check composer_t "antigravity hands over its own list" Front.Hands_over_its_own_list
+    (Front.composer_of_execution
+       (Runtime_execution.Antigravity_cli
+          { cli_path = "antigravity"
+          ; model = "m"
+          ; agent = None
+          ; effort = None
+          ; oauth_source = "env"
+          ; timeout_s = 1.
+          ; add_dirs = []
+          }));
+  check composer_t "not in the catalog" Front.Not_materialized (Front.composer_of_runtime None)
 ;;
 
 let test_of_ledger_reads_the_last_request_front () =
@@ -170,13 +229,16 @@ let () =
   run
     "keeper_carried_front"
     [ ( "of_records"
-      , [ test_case "newest completed record on the runtime" `Quick
-            test_the_newest_completed_record_on_the_runtime_seeds_the_front
-        ; test_case "errored or other lane skipped" `Quick test_an_errored_or_other_lane_record_is_skipped
+      , [ test_case "newest completed record on the trace" `Quick
+            test_the_newest_completed_record_on_the_trace_seeds_the_front
+        ; test_case "errored or official client skipped" `Quick
+            test_an_errored_or_official_client_record_is_skipped
         ; test_case "wire observation names the runtime" `Quick
             test_the_wire_observation_names_the_runtime_when_present
         ; test_case "no record" `Quick test_no_record_means_no_seed
         ; test_case "another session" `Quick test_another_sessions_record_is_another_history
+        ; test_case "composer from the execution kind" `Quick
+            test_the_composer_is_read_from_the_execution_kind
         ] )
     ; ( "front"
       , [ test_case "of_ledger" `Quick test_of_ledger_reads_the_last_request_front

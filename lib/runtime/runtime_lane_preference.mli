@@ -18,6 +18,12 @@ val prefer_order : lane_id:string -> string list -> string list
     the input unchanged when no entry is remembered, the entry expired, or
     the remembered candidate is not a member of [candidates]. *)
 
+val prefer_order_with : lane_id:string -> string list -> string list * (string * float) option
+(** {!prefer_order} and the entry it moved first, from one observation: the
+    remembered candidate with its [noted_at] when it is live and a member of
+    [candidates], [None] otherwise — exactly when the order is the input
+    unchanged. *)
+
 val note_success : lane_id:string -> candidate:string -> unit
 (** Remember [candidate] as the last-good candidate for [lane_id], stamped
     with the current time.  Called on every successful attempt, whether the

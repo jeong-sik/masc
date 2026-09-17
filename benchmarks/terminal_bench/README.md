@@ -51,14 +51,19 @@ MASC 하네스 자체를 벤치마크한다. 스펙: docs/superpowers/specs/2026
 2.0 매트릭스는 내부 절제 비교용으로 버전 일관성만 필요하다. 외부 닻과 비교하려면
 4.0 확인런을 승자 arm + Terminus 베이스라인(arm-a)에만:
 
-    harbor run -d terminal-bench@4.0 --agent agents.masc_agent:MascAgent \
+    harbor run -d terminal-bench/terminal-bench@4.0.0 --agent agents.masc_agent:MascAgent \
       -m anthropic/claude-fable-5 --ak arm=<winner> -k 3 \
-      --agent-setup-timeout-multiplier 5 --agent-timeout-multiplier 3 \
+      --agent-setup-timeout-multiplier 5 \
       -o results/jobs-40 --job-name <winner>-40-$(date +%Y%m%d-%H%M%S)
 
-- 4.0 은 타임아웃이 8시간 플랫이고 saturated 태스크를 제거했다. multiplier 3
-  (45분) 유지 시 heavy 태스크는 여전히 못 끝내니, 비용을 감수하고 재려면
-  multiplier 를 키운다.
+- 4.0.0 은 66 태스크 전부 에이전트 타임아웃이 28800s(8시간)다. 공식 조건 그대로
+  `--agent-timeout-multiplier` 를 주지 않는다.
+- 에피소드에는 자체 마감이 없다. harbor 는 설치형 에이전트에게 타임아웃 값을
+  알려 주지 않고, 시간이 다 되면 `run()` 을 취소한다. 그때 `MascAgent` 가
+  `driver/collect_result.sh --interrupted` 로 keeper 를 멈추고 그 순간의 상태와
+  토큰·도구 호출 수를 `result.json` 에 쓴다(`interrupted: true`).
+- `--agent-setup-timeout-multiplier 5` 는 설치 단계용이다. harbor 기본 설치
+  타임아웃은 360s 이고 에이전트 작업 시간에 포함되지 않는다.
 - 비교 닻(Anthropic 공식, 4.0): Fable 5 42.0% / Opus 5 52.3% /
   Fable 5.1 55.8% / Mythos 5.1 60.9%. 2.0 서브셋 숫자와 직접 비교하지 않는다.
 

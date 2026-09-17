@@ -18,8 +18,12 @@ INSTRUCTION_FILE="$1"
 RESULT_JSON="$2"
 KEEPER_COUNT="${KEEPER_COUNT:-1}"
 RUNTIME_ID="${BENCH_RUNTIME_ID:?BENCH_RUNTIME_ID required (e.g. anthropic.claude-fable-5)}"
-EPISODE_TIMEOUT_SEC="${EPISODE_TIMEOUT_SEC:-3600}"
 POLL_INTERVAL_SEC=10
+# The episode has no deadline of its own. Harbor's agent timeout (28800s on
+# every Terminal-Bench 4.0 task) is the only bound: when it fires, harbor
+# cancels the agent and the agent runs collect_result.sh --interrupted, which
+# leaves this mark for the loop below.
+INTERRUPTED_MARK="$BENCH/episode.interrupted"
 
 KEEPER_INSTRUCTIONS="You are an autonomous engineering agent inside a Linux container. \
 Complete the task by running shell commands (your tool calls execute in this container as root). \
@@ -61,7 +65,12 @@ for i in $(seq 1 "${KEEPER_COUNT}"); do
 done
 
 start_epoch="$(date +%s)"
+# What collect_result.sh needs to report an episode it did not watch end.
+jq -n --argjson start "$start_epoch" '{start_epoch:$start, operation_id:null}' \
+  > "$BENCH/episode.json"
 printf '%s' "$lead_msg" > "$BENCH/episode-message.txt"
+final_file="$(mktemp)"
+printf '{}' > "$final_file"
 submit="$(mcp_call 200 masc_keeper_msg \
   "$(jq -cn --arg name bench-1 --rawfile m "$BENCH/episode-message.txt" \
     '{name:$name, message:$m}')" 60)" || {
@@ -69,28 +78,25 @@ submit="$(mcp_call 200 masc_keeper_msg \
   submit="$(mcp_call 200 masc_keeper_msg \
     "$(jq -cn --arg name bench-1 --rawfile m "$BENCH/episode-message.txt" \
       '{name:$name, message:$m}')" 60)" || {
-    jq -n \
-      --argjson duration_ms $(( ($(date +%s) - start_epoch) * 1000 )) \
-      '{state:"Error", duration_ms:$duration_ms, tool_calls:0,
-        duplicate_tool_calls:0, final:{}}' \
-      > "$RESULT_JSON"
-    cat "$RESULT_JSON"
+    bash "$BENCH/driver/collect_result.sh" "$RESULT_JSON" Error "$final_file"
     exit 1
   }
 }
 op_id="$(printf '%s' "$submit" | jq -r '.operation_id // empty')"
 [[ -n "$op_id" ]] || { echo "keeper_msg returned no operation_id: $submit" >&2; exit 1; }
+jq -n --argjson start "$start_epoch" --arg op "$op_id" \
+  '{start_epoch:$start, operation_id:$op}' > "$BENCH/episode.json"
 
 # The poll must not let a client failure decide the episode. `|| true` made a
-# transport error indistinguishable from "not finished yet", so a run whose
-# status calls all failed sat here to the deadline and was recorded as
-# Timeout — on the one field the benchmark measures. Failures are counted and
-# reported as their own state instead.
-state="Timeout"; final='{}'
+# transport error indistinguishable from "not finished yet". Failures are
+# counted and reported as their own state instead.
+state=""; final='{}'
 poll_failures=0
 POLL_FAILURE_LIMIT="${POLL_FAILURE_LIMIT:-10}"
-deadline=$(( start_epoch + EPISODE_TIMEOUT_SEC ))
-while [[ "$(date +%s)" -lt "$deadline" ]]; do
+while [[ -z "$state" ]]; do
+  # Harbor's time limit already ended this episode and collect_result.sh has
+  # reported it; a second result.json would overwrite that report.
+  [[ -e "$INTERRUPTED_MARK" ]] && exit 1
   if st="$(mcp_call 300 masc_keeper_delegate_status "$(jq -cn \
     --arg op "$op_id" \
     '{target:{kind:"keeper",name:"bench-1"}, operation_id:$op}')" 30)"
@@ -112,108 +118,14 @@ while [[ "$(date +%s)" -lt "$deadline" ]]; do
     "") : ;;
     Succeeded|Failed|Cancelled) state="$s"; final="$st"; break ;;
     # An unmapped terminal state is surfaced under its own name rather than
-    # polled until it looks like a timeout.
+    # polled until harbor's time limit ends the episode.
     *) state="$s"; final="$st"; break ;;
   esac
   sleep "$POLL_INTERVAL_SEC"
 done
-end_epoch="$(date +%s)"
+[[ -e "$INTERRUPTED_MARK" ]] && exit 1
 
-for i in $(seq 1 "${KEEPER_COUNT}"); do
-  mcp_call $((400+i)) masc_keeper_down "$(jq -cn --arg n "bench-${i}" '{name:$n}')" 20 >/dev/null || true
-done
-
-# --- metrics: tool calls + duplicate calls from the tool_calls jsonl store ---
-tool_log_dir="$MASC_BASE_PATH/.masc/tool_calls"
-tool_calls=0; dup_calls=0
-if [[ -d "$tool_log_dir" ]]; then
-  # Guarded like the usage block below: one malformed line in the jsonl store
-  # makes jq exit non-zero, and under `set -euo pipefail` an unguarded
-  # assignment aborted the script here — after the episode state was known and
-  # before result.json was written, so harbor recorded no result at all.
-  # Counted as a stream (`jq -c . | wc -l`): every entry carries multi-KB
-  # output blobs, and `jq -s` materializes all of them just to take a length.
-  # Equivalent under the same guard: verified on a synthetic store — clean
-  # N, malformed-mixed and empty all agree, pipefail keeps the 0-degrade.
-  # Invariant (measured 2026-09-14): the count must stay a stream — swapping
-  # in `jq -s 'length'` re-materializes every multi-KB blob per episode.
-  tool_calls="$(find "$tool_log_dir" -name '*.jsonl' -exec cat {} + | jq -c . | wc -l | tr -d ' ')" \
-    || tool_calls=0
-  dup_calls="$(find "$tool_log_dir" -name '*.jsonl' -exec cat {} + \
-    | jq -s 'group_by([.tool, ((.input // .arguments // {})|tostring)]) | map(select(length>1) | (length-1)) | add // 0')" \
-    || dup_calls=0
-fi
-
-# --- token usage: episode-summed from the agent-core trace dumps ---
-# Cache creation and cache read are summed into cache_tokens for harbor's
-# single n_cache_tokens field, and also reported apart. They are priced
-# differently -- 2.5e-06 against 2e-07 per token for claude-sonnet-5, a factor
-# of twelve -- so a cost computed from the sum is not a cost.
-#
-# Each .masc/traces/<session>/trace-*.json carries a cumulative top-level
-# `usage` block (total_input_tokens / total_output_tokens /
-# total_cache_creation_input_tokens / total_cache_read_input_tokens /
-# api_calls). A session dir can hold several per-turn dumps, so keep the dump
-# with the most api_calls per session, then sum across sessions. The sibling
-# agent-core-snapshot-*.json repeats the same block and is excluded to avoid
-# double counting. Emits null when no traces exist.
-usage_json='null'
-traces_dir="$MASC_BASE_PATH/.masc/traces"
-if [[ -d "$traces_dir" ]]; then
-  usage_json="$(find "$traces_dir" -type f -name 'trace-*.json' -print0 2>/dev/null \
-    | xargs -0 jq -c '{s:(input_filename|split("/")[-2]), u:(.usage // {}), a:(.usage.api_calls // 0)}' 2>/dev/null \
-    | jq -sc '
-        if length == 0 then null
-        else
-          (group_by(.s) | map(max_by(.a) | .u)) as $us
-          | { input_tokens: ($us | map(.total_input_tokens // 0) | add),
-              output_tokens: ($us | map(.total_output_tokens // 0) | add),
-              cache_creation_tokens:
-                ($us | map(.total_cache_creation_input_tokens // 0) | add),
-              cache_read_tokens:
-                ($us | map(.total_cache_read_input_tokens // 0) | add),
-              cache_tokens: ($us | map((.total_cache_creation_input_tokens // 0)
-                                       + (.total_cache_read_input_tokens // 0)) | add) }
-        end' 2>/dev/null)" || usage_json='null'
-fi
-if ! printf '%s' "$usage_json" | jq -e 'type == "object"' >/dev/null 2>&1; then
-  usage_json='null'
-fi
-
-# Belt-and-suspenders: --argjson needs each value to be exactly one JSON text.
-# A multi-line/invalid `final` (or a non-numeric counter) must degrade to a
-# placeholder instead of killing the episode with jq's exit 2.
-final="$(printf '%s' "$final" | jq -c 'if type=="object" then . else {} end' 2>/dev/null | tail -n 1)" || true
-[[ -n "$final" ]] || final='{}'
-[[ "$tool_calls" =~ ^[0-9]+$ ]] || tool_calls=0
-[[ "$dup_calls" =~ ^[0-9]+$ ]] || dup_calls=0
-
-echo "run_episode: state=$state tool_calls=$tool_calls dup=$dup_calls final_len=${#final}" >&2
-
-# NOTE: pass `final` via --slurpfile, not --argjson: the select() keeps the
-# last object if the text ever holds multiple values, and a file read keeps
-# jq-1.7 (ubuntu:24.04) away from any argument-length quirks.
-# Never write this as ${final:-{}}: bash closes the expansion at the first
-# '}', so the default's second '}' becomes a literal suffix and corrupts the
-# payload. The guard above already pins final to '{}' when empty.
-final_file="$(mktemp)"
 printf '%s' "$final" > "$final_file"
-jq -n \
-  --arg state "$state" \
-  --argjson duration_ms $(( (end_epoch - start_epoch) * 1000 )) \
-  --argjson tool_calls "${tool_calls:-0}" \
-  --argjson duplicate_tool_calls "${dup_calls:-0}" \
-  --argjson usage "$usage_json" \
-  --slurpfile final_raw "$final_file" \
-  '{state:$state, duration_ms:$duration_ms, tool_calls:$tool_calls,
-    duplicate_tool_calls:$duplicate_tool_calls,
-    input_tokens:($usage.input_tokens // null),
-    output_tokens:($usage.output_tokens // null),
-    cache_tokens:($usage.cache_tokens // null),
-    cache_creation_tokens:($usage.cache_creation_tokens // null),
-    cache_read_tokens:($usage.cache_read_tokens // null),
-    final:($final_raw | map(select(type=="object")) | last // {})}' \
-  > "$RESULT_JSON"
+bash "$BENCH/driver/collect_result.sh" "$RESULT_JSON" "$state" "$final_file"
 rm -f "$final_file"
-cat "$RESULT_JSON"
 [[ "$state" == "Succeeded" ]]

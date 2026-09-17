@@ -17,10 +17,9 @@ done < suite/mini-suite.txt
 
 for arm in ${ARMS_CSV//,/ }; do
   job="arm-${arm}-${TS}"
-  # Same wall-clock budget for every arm (smoke-proven values): without the
-  # agent timeout multiplier harbor's default kills MASC's 2400s episodes
-  # from the outside and they record as exceptions instead of a clean
-  # Timeout state.
+  # Every arm gets the task's own agent timeout: no multiplier, and the MASC
+  # episode has no deadline of its own. The setup multiplier covers bootstrap's
+  # package installs, which harbor's 360s default does not fit.
   if [[ "$arm" == "a" ]]; then
     # Arm A baseline is harbor's kimi-cli agent (phase0-notes.md "arm A 성공
     # 커맨드"): terminus-2 is retired — kimi-for-coding answers with a
@@ -31,13 +30,13 @@ for arm in ${ARMS_CSV//,/ }; do
     # completes with arm a missing from every summary row.
     uv run harbor run -d terminal-bench@2.0 --agent kimi-cli \
       --model "$MODEL" -k "$K" -n "${CONCURRENCY:-2}" \
-      --agent-setup-timeout-multiplier 5 --agent-timeout-multiplier 3 \
+      --agent-setup-timeout-multiplier 5 \
       -o results/jobs --job-name "$job" "${TASK_ARGS[@]}"
   else
     uv run harbor run -d terminal-bench@2.0 \
       --agent agents.masc_agent:MascAgent --model "$MODEL" \
       --ak "arm=$arm" -k "$K" -n "${CONCURRENCY:-2}" \
-      --agent-setup-timeout-multiplier 5 --agent-timeout-multiplier 3 \
+      --agent-setup-timeout-multiplier 5 \
       -o results/jobs --job-name "$job" "${TASK_ARGS[@]}"
   fi
 done

@@ -213,10 +213,13 @@ OFFICIAL_CLIENT_OVERLAY_TOML = """\
 # embedded AGENT_CORE catalog by api-name (see render_configs.py).
 """
 
-# Per-turn bound for the official client. Production binds opus-5 at max
-# effort with 900s; the bench episode cap (EPISODE_TIMEOUT_SEC=2400) stays the
-# outer bound.
-OFFICIAL_CLIENT_TURN_TIMEOUT_S = 900.0
+# The official client's turn-timeout-s is an idle window: the turn ends when
+# the CLI stream stays silent that long. A keeper waiting on one long tool call
+# (a build, a test suite) is silent for its whole duration, so any value here
+# would cut real work short. 0 removes it (keeper_claude_code_runtime.ml); the
+# runtime's whole-turn wall-clock ceiling still applies, and harbor's agent
+# timeout bounds the episode.
+OFFICIAL_CLIENT_TURN_TIMEOUT_S = 0.0
 CLAUDE_CODE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
 
 OVERLAY_TOML = """\

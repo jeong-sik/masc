@@ -339,6 +339,11 @@ type attempt_inference_policy =
   }
 
 module For_testing : sig
+  val run_result_answered : Runtime_agent.run_result -> bool
+  (** Whether a successful attempt heard from its candidate: [false] for an
+      attempt that yielded before any provider turn completed, which clears no
+      failure evidence (RFC-0458 §3.4). *)
+
   val make_deferred_runtime_lane :
     assignment_id:string ->
     failed_runtime_id:string ->
@@ -488,6 +493,7 @@ module For_testing : sig
       Agent_core.Error.t ->
       unit) ->
     ?on_lane_terminal_error:(lane_terminal_error -> unit) ->
+    ?provider_answered:('result -> bool) ->
     ?quota_scope_of:('candidate -> Runtime_quota_window.scope option) ->
     ?model_of:('candidate -> string option) ->
     ?candidate_backpressure_of:('candidate -> Runtime_candidate_backpressure.candidate option) ->

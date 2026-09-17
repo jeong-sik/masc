@@ -49,6 +49,9 @@ class FakeEnv:
 def _provider_key(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     monkeypatch.delenv("GH_TOKEN", raising=False)
+    # Rendering an openrouter lane reads the model's window from OpenRouter.
+    import render_configs
+    monkeypatch.setattr(render_configs, "openrouter_context_length", lambda _: 131072)
 
 
 def make_agent(tmp_path, **kw):

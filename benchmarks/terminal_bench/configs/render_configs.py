@@ -17,9 +17,11 @@ Arm A는 Harbor 빌트인 kimi-cli라 여기서 렌더하지 않는다.
 """
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import tempfile
+import urllib.request
 from pathlib import Path
 
 BENCH_ROOT = Path(__file__).resolve().parents[1]
@@ -118,7 +120,7 @@ key = "{api_key_env}"
 
 [models."{binding_id}"]
 api-name = "{model_alias}"
-# HTTP lanes deliver tools off the catalog capability, not this key
+{max_context_line}# HTTP lanes deliver tools off the catalog capability, not this key
 # (keeper_effective_tool_surface: the Agent_core arm reads
 # capabilities.supports_tools; only the Claude_code arm reads
 # runtime.model.tools_support). It is declared anyway because it is true, and
@@ -261,6 +263,32 @@ accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
 {thinking_control}{sampling_lines}{max_output_lines}supports_parallel_tool_calls = {parallel}
 """
 
+OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
+OPENROUTER_MODELS_TIMEOUT_S = 30
+
+
+def openrouter_context_length(wire_model: str) -> int:
+    """The prompt window OpenRouter serves `wire_model` with.
+
+    A request goes to the top provider, whose window can be smaller than the
+    model's own (z-ai/glm-4.7-flash: 131072 against 200000, 2026-09-17), so
+    that one is used when OpenRouter reports it. A model OpenRouter does not
+    list, or lists without a window, is refused rather than given a number.
+    """
+    with urllib.request.urlopen(OPENROUTER_MODELS_URL,
+                                timeout=OPENROUTER_MODELS_TIMEOUT_S) as response:
+        models = json.load(response)["data"]
+    for model in models:
+        if model.get("id") != wire_model:
+            continue
+        window = (model.get("top_provider") or {}).get("context_length") \
+            or model.get("context_length")
+        if isinstance(window, int) and window > 0:
+            return window
+        raise ValueError(f"OpenRouter lists {wire_model!r} with no context_length")
+    raise ValueError(f"OpenRouter lists no model {wire_model!r}")
+
+
 def model_binding_id(wire_model: str) -> str:
     """runtime.toml 의 model id 로 쓸 수 있는 이름.
 
@@ -300,7 +328,12 @@ PROVIDERS = {
     # 슬래시가 들어가므로 --model openrouter/z-ai/glm-5.3 처럼 주면
     # runtime_id 는 openrouter.z-ai/glm-5.3 이 된다. glm/deepseek 계열은
     # fable 대비 입력 단가 1~2자릿수 아래라 넓은 매트릭스에 맞다.
-    "openrouter": dict(protocol="openai-compatible-http",
+    # OpenRouter serves models the AGENT_CORE catalog has no row for, and masc
+    # refuses a runtime with neither a catalog max-context nor an override
+    # (RFC-0206 §2.1, measured on 0.35.19). The override is read from
+    # OpenRouter's own model list at render time: openrouter_context_length.
+    "openrouter": dict(context_from_openrouter=True,
+                       protocol="openai-compatible-http",
                        endpoint="https://openrouter.ai/api/v1",
                        api_key_env="OPENROUTER_API_KEY",
                        kind="openai_compat",
@@ -462,6 +495,9 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
         effort_lines=(
             f'reasoning-effort = "{effort}"\nthinking-support = true\n'
             if pcfg["capabilities_base"] in EFFORT_CAPABLE_BASES else ""),
+        max_context_line=(
+            f"max-context = {openrouter_context_length(model_alias)}\n"
+            if pcfg.get("context_from_openrouter") else ""),
         **pcfg)
     if spec["skills"]:
         # skills=True arm만 seed의 [skills]/[[skills.sources]] 블록을 보존한다.

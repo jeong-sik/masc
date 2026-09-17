@@ -1,6 +1,8 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "configs"))
 
 from render_configs import (  # noqa: E402
@@ -187,7 +189,21 @@ def test_claude_code_lane_rejects_minimal_effort():
         render_arm("b", runtime_id="claude_code.claude-sonnet-5", effort="minimal")
 
 
-def test_a_slashed_wire_model_binds_by_slug_and_keeps_the_wire_name():
+@pytest.fixture
+def openrouter_lists(monkeypatch):
+    import render_configs
+
+    asked = []
+
+    def window(wire_model):
+        asked.append(wire_model)
+        return 131072
+
+    monkeypatch.setattr(render_configs, "openrouter_context_length", window)
+    return asked
+
+
+def test_a_slashed_wire_model_binds_by_slug_and_keeps_the_wire_name(openrouter_lists):
     # runtime_toml.ml refuses a model id outside [A-Za-z0-9._-]+, and the
     # OpenRouter wire id carries a vendor slash. Rendering it verbatim made
     # the whole config fail to load ("model id must match"), which surfaced
@@ -240,3 +256,46 @@ def test_two_renders_of_one_arm_do_not_share_a_directory():
     assert a != b
     assert a.exists() and b.exists()
     assert (a / "runtime.toml").read_text() == (b / "runtime.toml").read_text()
+
+
+def test_an_openrouter_lane_declares_the_window_openrouter_lists(openrouter_lists):
+    # 0.35.19 refuses a runtime with no catalog max-context and no override
+    # ("no silent default — RFC-0206 §2.1"), and OpenRouter models are not in
+    # the catalog: masc_keeper_up answered "Model setup required" (2026-09-17).
+    rt = (render_arm("b", runtime_id="openrouter.z-ai/glm-4.7-flash", effort="high")
+          / "runtime.toml").read_text()
+    assert "max-context = 131072" in rt
+    assert openrouter_lists == ["z-ai/glm-4.7-flash"]
+
+
+def test_a_catalog_lane_declares_no_window_override():
+    rt = (render_arm("b", runtime_id="anthropic.claude-fable-5", effort="high")
+          / "runtime.toml").read_text()
+    assert "max-context" not in rt
+
+
+def test_a_model_openrouter_does_not_list_is_refused(monkeypatch):
+    import io
+    import json
+
+    import render_configs
+
+    listing = {"data": [{"id": "z-ai/glm-4.7-flash", "context_length": 200000,
+                         "top_provider": {"context_length": 131072}},
+                        {"id": "vendor/no-window", "context_length": None,
+                         "top_provider": {}}]}
+
+    class Response(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(render_configs.urllib.request, "urlopen",
+                        lambda *a, **k: Response(json.dumps(listing).encode()))
+    assert render_configs.openrouter_context_length("z-ai/glm-4.7-flash") == 131072
+    with pytest.raises(ValueError, match="no context_length"):
+        render_configs.openrouter_context_length("vendor/no-window")
+    with pytest.raises(ValueError, match="lists no model"):
+        render_configs.openrouter_context_length("vendor/absent")

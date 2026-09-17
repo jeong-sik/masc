@@ -345,7 +345,9 @@ let observe_turn ~keeper_name ~usage () =
    with, which forfeits the prefix anyway, so the cut rides an invalidation
    already being paid -- except when that name was loaded through the listing
    during the turn. Its later requests already held it in the slot this turn
-   places it in, so there the cut is the only change at the boundary (#36947).
+   places it in, so there the cut is the only change at the boundary. That
+   cost is kept: measured 2026-09-17 it was about 0.2% of the fleet's uncached
+   input a day, on one provider (#36947).
 
    The consequence is that the window is sampled at those calls and not
    continuously: between two of them the carried set is frozen, so a tool can

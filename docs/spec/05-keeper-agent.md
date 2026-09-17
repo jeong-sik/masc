@@ -122,7 +122,7 @@ type session_context = {
 }
 ```
  
-세션 디렉토리 내에 `Agent_core.Checkpoint.t` 스냅샷이 유지된다. 몇 개까지 남길지는 런타임 설정 `keeper.checkpoint_history_retained`(기본 3, 범위 0~64)가 정하고, 초과분은 `prune_agent_core_history`가 저장할 때마다 지운다.
+세션 디렉토리 내에 `Agent_core.Checkpoint.t` 스냅샷이 유지된다. 몇 개까지 남길지는 런타임 설정 `keeper.checkpoint_history_retained`(기본 3, 범위 0~12)가 정하고, 초과분은 `prune_agent_core_history`가 저장할 때마다 지운다.
 
 ### 3.4 Workspace Boundary
 

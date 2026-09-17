@@ -206,7 +206,12 @@ let current_memory_ids facts =
    not an absorption, and a row repeating another row's memory_id and into
    states the same thing, kept once at its last write. The third -- an [into]
    that never became current -- reads as [into_current = false], which is
-   what it is. *)
+   what it is.
+
+   Kept at the last write, [absorbed_at] is the time of the last row stating
+   it: the retry's when a failed pass was retried, which is the usual order,
+   and a pass that did not commit when a failed pass follows a committed one.
+   No row says which of its passes committed. *)
 let search_absorbed_facts ~keepers_dir ~keeper_id ~current_ids ~query ~limit =
   match
     Domain_pool_ref.submit_io_or_inline (fun () ->
@@ -426,7 +431,7 @@ let keeper_memory_search_with_outcome
         ~base_path:config.Workspace.base_path
     in
     let source_label = memory_search_source_to_string source in
-    let durable_json ~fact_jsons ~fact_total ~total_matches ~extra_matches ~unreadable =
+    let durable_json ~fact_jsons ~fact_total ~total_matches ~extra_matches ~absorbed_fields =
       `Assoc
         ([ "query", `String query
          ; "source", `String source_label
@@ -435,34 +440,50 @@ let keeper_memory_search_with_outcome
          ; "matches", `List (fact_jsons @ extra_matches)
          ]
          @ (if total_matches = 0 then [ "no_match", `Bool true ] else [])
-         @
-         match unreadable with
-         | [] -> []
-         | _ :: _ ->
-           [ ( "absorbed_unreadable_lines"
-             , `List (List.map (fun (line, _) -> `Int line) unreadable) )
-           ])
+         @ absorbed_fields)
     in
     (* A line of the absorbed store that does not decode is left out of the
-       results, and both the model and the operator are told which. The store
-       is append-only, so the same lines are reported on every search until
-       someone repairs the file. *)
-    let report_unreadable (absorbed : absorbed_search) =
-      match absorbed.unreadable with
-      | [] -> ()
-      | _ :: _ ->
+       results, and both the model and the operator are told. The store is
+       append-only, so the same lines are reported on every search until the
+       file is repaired; a count and the first and last line numbers keep that
+       report the same size however many lines there are. For source=all, a
+       store that cannot be read at all is named beside the stores that
+       answered rather than taking their results with it. *)
+    let absorbed_fields ~(absorbed : absorbed_search) ~unavailable =
+      (match absorbed.unreadable with
+       | [] -> []
+       | (first, first_error) :: _ ->
+         let last = List.fold_left (fun _ (line, _) -> line) first absorbed.unreadable in
+         Log.Keeper.warn
+           ~keeper_name:meta.name
+           "keeper_memory_search left out %d absorbed memory line(s) it could not read; first: line %d: %s"
+           (List.length absorbed.unreadable)
+           first
+           (Keeper_memory_absorbed.read_error_to_string first_error);
+         [ ( "absorbed_unreadable_lines"
+           , `Assoc
+               [ "count", `Int (List.length absorbed.unreadable)
+               ; "first", `Int first
+               ; "last", `Int last
+               ] )
+         ])
+      @
+      match unavailable with
+      | None -> []
+      | Some error ->
         Log.Keeper.warn
           ~keeper_name:meta.name
-          "keeper_memory_search left out absorbed memory lines it could not read: %s"
-          (String.concat
-             "; "
-             (List.map
-                (fun (line, error) ->
-                   Printf.sprintf
-                     "line %d: %s"
-                     line
-                     (Keeper_memory_absorbed.read_error_to_string error))
-                absorbed.unreadable))
+          "keeper_memory_search answered source=all without the absorbed memory store: %s"
+          (durable_search_error_detail error);
+        [ ( "unavailable_stores"
+          , `List
+              [ `Assoc
+                  [ "store", `String absorbed_store
+                  ; "error_kind", `String (durable_search_error_kind_to_string error)
+                  ; "detail", `String (durable_search_error_detail error)
+                  ]
+              ] )
+        ]
     in
     let result =
       match source with
@@ -487,17 +508,18 @@ let keeper_memory_search_with_outcome
             | Error _ as error -> error
             | Ok (fact_matches, fact_total) ->
               let absorbed_limit = max 0 (limit - List.length fact_matches) in
-              (match
-                 search_absorbed_facts
-                   ~keepers_dir
-                   ~keeper_id:meta.name
-                   ~current_ids:(current_memory_ids facts)
-                   ~query
-                   ~limit:absorbed_limit
-               with
-               | Error _ as error -> error
-               | Ok absorbed ->
-                 report_unreadable absorbed;
+              let absorbed, unavailable =
+                match
+                  search_absorbed_facts
+                    ~keepers_dir
+                    ~keeper_id:meta.name
+                    ~current_ids:(current_memory_ids facts)
+                    ~query
+                    ~limit:absorbed_limit
+                with
+                | Ok absorbed -> absorbed, None
+                | Error error -> { matches = []; candidates = 0; unreadable = [] }, Some error
+              in
                  let history_limit =
                    max 0 (absorbed_limit - List.length absorbed.matches)
                  in
@@ -528,8 +550,8 @@ let keeper_memory_search_with_outcome
                        ~fact_total:(fact_total + absorbed.candidates)
                        ~total_matches
                        ~extra_matches
-                       ~unreadable:absorbed.unreadable
-                   , ordinary_memory_ids fact_matches ))))
+                       ~absorbed_fields:(absorbed_fields ~absorbed ~unavailable)
+                   , ordinary_memory_ids fact_matches )))
       | Absorbed ->
         (* No Retrieved event: an absorbed fact is not a current memory, and
            the events sidecar is about current memories (RFC-0418). *)
@@ -546,14 +568,13 @@ let keeper_memory_search_with_outcome
             with
             | Error _ as error -> error
             | Ok absorbed ->
-              report_unreadable absorbed;
               Ok
                 ( durable_json
                     ~fact_jsons:(List.map absorbed_match_to_json absorbed.matches)
                     ~fact_total:absorbed.candidates
                     ~total_matches:(List.length absorbed.matches)
                     ~extra_matches:[]
-                    ~unreadable:absorbed.unreadable
+                    ~absorbed_fields:(absorbed_fields ~absorbed ~unavailable:None)
                 , [] )))
       | Memory ->
         (match read_current_facts ~keepers_dir ~keeper_id:meta.name with
@@ -568,7 +589,7 @@ let keeper_memory_search_with_outcome
                     ~fact_total:total_candidates
                     ~total_matches:(List.length matches)
                     ~extra_matches:[]
-                    ~unreadable:[]
+                    ~absorbed_fields:[]
                 , ordinary_memory_ids matches )))
     in
     match result with

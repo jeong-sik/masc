@@ -1349,8 +1349,53 @@ let test_absorbed_facts_are_searchable () =
   let torn = search "absorbed" in
   Alcotest.(check int) "the readable rows are still returned" 2
     (List.length (matches torn));
-  Alcotest.(check bool) "and the line that does not decode is named" true
-    (json_field "absorbed_unreadable_lines" torn = `List [ `Int 5 ])
+  Alcotest.(check bool) "and the line that does not decode is counted" true
+    (json_field "absorbed_unreadable_lines" torn
+     = `Assoc [ "count", `Int 1; "first", `Int 5; "last", `Int 5 ])
+;;
+
+(* The absorbed store is one of three that source=all reads. When it cannot be
+   read at all, source=absorbed fails as a store that did not answer, and
+   source=all still answers from the current facts and names the store it went
+   without. *)
+let test_an_unreadable_absorbed_store_leaves_all_its_current_facts () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "absorbed-unreadable" in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+  in
+  replace_current_facts ~keepers_dir ~keeper_id:meta.name [ fact "gamma deploys on friday" ];
+  Unix.mkdir
+    (Masc.Keeper_memory_absorbed.path_for_keepers_dir ~keepers_dir ~keeper_id:meta.name)
+    0o700;
+  let search source =
+    Runtime.keeper_memory_search_with_outcome
+      ~config
+      ~meta
+      ~ctx_work:(empty_ctx ())
+      ~args:(`Assoc [ "query", `String "deploy"; "source", `String source ])
+  in
+  let absorbed = search "absorbed" in
+  check_failure_class "absorbed alone" Tool_result.Dependency_unavailable absorbed;
+  Alcotest.(check string) "the absorbed store is named"
+    "absorbed_read_failed"
+    (string_field "error_kind"
+       (Yojson.Safe.from_string absorbed.Masc.Keeper_tool_execution.raw_output));
+  let all =
+    (search "all").Masc.Keeper_tool_execution.raw_output |> Yojson.Safe.from_string
+  in
+  (match json_field "matches" all with
+   | `List [ matched ] ->
+     Alcotest.(check string) "the current fact is still answered"
+       "gamma deploys on friday" (string_field "text" matched)
+   | _ -> Alcotest.fail "expected the one current fact");
+  match json_field "unavailable_stores" all with
+  | `List [ store ] ->
+    Alcotest.(check string) "and the missing store is named" "absorbed_memory"
+      (string_field "store" store)
+  | _ -> Alcotest.fail "expected the absorbed store to be named unavailable"
 ;;
 
 (* A write that cannot reach its store is the same dependency failure. The
@@ -1768,6 +1813,10 @@ let () =
             "absorbed facts are searchable"
             `Quick
             test_absorbed_facts_are_searchable
+        ; Alcotest.test_case
+            "an unreadable absorbed store leaves all its current facts"
+            `Quick
+            test_an_unreadable_absorbed_store_leaves_all_its_current_facts
         ; Alcotest.test_case
             "unwritable store is a dependency failure"
             `Quick

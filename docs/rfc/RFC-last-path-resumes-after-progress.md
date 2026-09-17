@@ -1,13 +1,13 @@
 ---
 rfc: "last-path-resumes-after-progress"
-title: "마지막 경로가 잠깐 실패해도, 도구를 실행한 채팅 작업은 그 경로가 쉰 뒤 이어서 돈다"
+title: "마지막 경로가 잠깐 실패해도, 도구를 실행한 채팅 작업은 같은 경로에서 이어서 돈다"
 status: Draft
 created: 2026-09-17
-updated: 2026-09-17
+updated: 2026-09-18
 author: claude
 supersedes: []
 superseded_by: null
-related: ["provider-path-rest"]
+related: ["provider-path-rest", "0458"]
 ---
 
 # RFC: 마지막 경로의 일시 실패 뒤, 진전을 남긴 채팅 작업은 이어서 돈다 (last-path-resumes-after-progress)
@@ -21,11 +21,12 @@ related: ["provider-path-rest"]
 이 RFC 는 채팅 작업(`masc_keeper_msg` 가 만드는 direct operation)에 한해, 마지막 후보도
 같은 경로에서 이어 가게 한다. 조건은 셋이다.
 
-- 실패가 시간이 지나면 풀리는 종류이고, 풀리는 시각이 상한 안에 있다 (3.3).
+- 실패가 시간이 지나면 풀리는 종류다 (3.3).
 - 실패한 시도가 도구를 실행해 결과를 체크포인트에 남겼다. 즉 진전이 있었다 (3.2).
 - 앞선 후보의 context 초과가 이 턴의 실패를 대표하지 않는다 (3.1).
 
-이어가기는 실패한 경로가 쉬고 난 뒤, 같은 작업이 최신 체크포인트에서 시작한다.
+이어가기는 같은 작업이 최신 체크포인트에서 시작한다. 공급자가 풀리는 시각을 말해 경로에 쉼이
+기록됐으면 그 시각에, 아니면 곧바로다. 새 쉼은 만들지 않는다(RFC-0458 §3.4).
 횟수를 세는 장치는 두지 않는다. 이어갈 때마다 새로 실행한 도구 결과가 필요하므로, 이어가기
 횟수는 작업이 실제로 실행한 도구 묶음의 수를 넘지 못한다.
 
@@ -85,7 +86,8 @@ RFC `provider-path-rest` §5 는 suffix 가 없는 실패를 일부러 뺐다.
 ### 3.1 규칙
 
 > 채팅 작업의 마지막 후보 시도가 3.3 의 이유로 실패했고, 그 시도가 도구 결과를 체크포인트에
-> 새로 남겼으면, 같은 작업을 같은 경로에서 그 경로의 쉼이 끝난 뒤 최신 체크포인트부터 잇는다.
+> 새로 남겼으면, 같은 작업을 같은 경로에서 최신 체크포인트부터 잇는다. 그 경로에 공급자가 말한
+> 쉼이 기록돼 있으면 그 쉼이 끝난 뒤다.
 
 `keeper_turn_driver.ml:842` 의 `else if is_last` 가지에서 아래를 모두 만족하면 hint 를 넘긴다.
 
@@ -154,49 +156,43 @@ match 해, 도구를 실행한 stage 일 때만 새 관측값을 켠다. 이 관
 
 | route | 대상 | 이유 |
 |---|---|---|
-| `Retry_after_observed { Rate_limited; retry_after }` | 예, 단 3.4 의 상한 안 | 공급자가 시간이 지나면 푸는 제한. 주간 한도를 429 로 보내는 공급자도 있다(`provider-path-rest` §4). 그 경우 진전 없이 한 번 더 실패하고 끝난다 |
-| `Retry_after_observed { Capacity_backpressure; _ }` | 예, 단 상한 안 | 공급자나 masc 슬롯의 일시 과부하 |
-| `Retry_after_observed { Server_error; _ }` | 예, 단 상한 안 | 5xx, 공급자 일시 장애. `EmptyCompletion` 도 여기로 온다(`keeper_runtime_failure_route.ml:236`–`237`). 모델 동작이면 진전 없이 한 번 더 실패하고 끝난다 |
+| `Retry_after_observed { Rate_limited; retry_after }` | 예 | 공급자가 시간이 지나면 푸는 제한. 주간 한도를 429 로 보내는 공급자도 있다(`provider-path-rest` §4). 그 경우 진전 없이 한 번 더 실패하고 끝난다 |
+| `Retry_after_observed { Capacity_backpressure; _ }` | 예 | 공급자나 masc 슬롯의 일시 과부하 |
+| `Retry_after_observed { Server_error; _ }` | 예 | 5xx, 공급자 일시 장애. `EmptyCompletion` 도 여기로 온다(`keeper_runtime_failure_route.ml:236`–`237`). 모델 동작이면 진전 없이 한 번 더 실패하고 끝난다 |
 | `Retry_after_observed { Network_transient; _ }` | 예 | 전송 계층 끊김 |
 | `Retry_after_observed { Provider_timeout; _ }` | 예 | 마감 초과 |
-| `Retry_after_observed { Hard_quota; retry_after = Some _ }` | 예, 단 상한 안 | 공급자가 리셋 시각을 말했다. `path_rest_sec` 과 `note_quota` 도 이 시각을 쓴다 |
+| `Retry_after_observed { Hard_quota; retry_after = Some _ }` | 예 | 공급자가 리셋 시각을 말했다. `path_rest_sec` 과 `note_quota` 도 이 시각을 쓴다 |
 | `Retry_after_observed { Hard_quota; retry_after = None }` | 아니오 | 리셋을 모른다. 결제 전에는 풀리지 않을 수 있다 |
 | `Rotate_now _` | 아니오 | 자격 증명·모델 없음·반복 생성은 이 경로의 속성이라 기다려도 같다 |
 | `Exhausted_visible_alive _` | 아니오 | 요청 자체의 문제, context 초과, 설정 불일치, 통합 결함 |
 
 판정 함수는 `Keeper_runtime_failure_route` 에 둔다.
-`route_resumes_on_same_path : cap_sec:float -> route -> bool` 이고, route 와 `retry_class` 를
-빠짐없이 match 한다.
+`route_resumes_on_same_path : route -> bool` 이고, route 와 `retry_class` 를
+빠짐없이 match 한다. 대기 시간은 판정에 쓰지 않는다(3.4).
 
-### 3.4 쉬는 시간과 상한
+### 3.4 쉬는 시간
 
-같은 경로로 잇는 대기는 `path_rest_sec`
-(`lib/keeper_runtime/keeper_runtime_failure_route.ml:327`)로 계산한다. 입력은 hint 의
-`failure`, 즉 마지막 후보 자신의 오류다.
+같은 경로로 잇는 작업에 새 쉼을 만들지 않는다. RFC-0458 §3.4 의 운영자 결정(2026-09-17)이
+"숫자로 된 쉼을 새로 만들지 않는다" 이고, 5xx·끊김·timeout 은 쉼이 아니라 실패 증거만 남긴다.
 
-- 공급자가 시간을 말했으면 그 값(최소 1초)
-- 말하지 않았으면 `rate_limit_backoff_floor_sec` (60초)
-- 상한은 `rate_limit_backoff_cap_sec` 다. 기본 900초이고, `MASC_KEEPER_RATE_LIMIT_BACKOFF_CAP_SEC`
-  로 60–3600초 사이에서 바꿀 수 있다(`lib/config/env_config_keeper.ml:597`–`600`).
+기다림은 이미 있는 갈래가 정한다. 채팅 lane 의 `retry_not_before`
+(`keeper_direct_runtime_continuation.ml:107`)가 읽는 `next_dispatch_after_failure`
+(`lib/keeper/keeper_turn_driver.ml:394`)는 hint 가 있으면 route 와 상관없이
+`deferred_lane_rest ~now hint` 를 따른다(`:408`–`420`). 같은 경로 hint 에서 그 답은 이렇다.
 
-**상한을 넘는 시간을 공급자가 말하면 이어 가지 않는다.** `path_rest_sec` 은 그 값을 상한으로
-자른다(`:345`). 잘린 시각에 재개하면 공급자가 말한 시각 전이라 실패가 확실하다. 그러니 작업을
-지금 끝내 실패를 보이는 편이 낫다.
+- 실패한 경로에 쉼이 기록돼 있다: 429 의 rate limit 증거나 quota 창(`path_rest`, `:259`).
+  → `Wait_until { release_at = 그 시각; wait = Path_release }`
+- 기록이 없다: 5xx·끊김·timeout, 그리고 쉼을 남기지 않은 실패.
+  → `Dispatch_now`
+- `Capacity_backpressure` 는 hint 와 상관없이 MASC 자신의 쉼을 기다린다(`:401`–`407`).
 
-채팅 lane 의 `retry_not_before`(`keeper_direct_runtime_continuation.ml:107`)는
-`next_dispatch_after_failure` 를 읽는다. 여기에 `next_runtime_id = failed_runtime_id` 인 hint 를
-route 가지보다 **먼저** match 하는 경우를 더한다. 답은
-`Wait_until { release_at = max (실패 시각 + path_rest_sec) (deferred_lane_rest 의 시각); wait = Path_release }`
-이다. 5xx·끊김·timeout 에는 경로별 쉼 저장소가 없다(`path_rest` 는 후보 backpressure 와 quota
-window 만 읽는다). 이 경우를 따로 두지 않으면 `Dispatch_now` 로 곧바로 다시 부른다.
+그래서 이 갈래는 바꾸지 않는다. 대기 시간의 상한도 판정에 넣지 않는다. 공급자가 말한 시각이
+`path_rest_sec` 의 상한(`rate_limit_backoff_cap_sec`)에 잘려 그 전에 재개하면, 재개한 시도는
+도구를 실행하기 전에 실패하고 3.2 에 따라 작업이 끝난다. 호출 한 번이 그 비용이다.
 
-**성질 P 가 어디까지 지켜지나**: `provider-path-rest` 의 P 는 "쉬기 시작한 경로에 풀리기 전에
-다시 보내지 않는다" 다. 이 RFC 는 P 를 **이 작업에 대해서만** 지킨다.
-- 429·402 의 쉼은 공유 저장소에 기록되어 다른 작업도 순서에서 뒤로 민다(지금과 같다).
-- 5xx·끊김·timeout 의 쉼은 이 작업의 `not_before` 에만 있다. 대기 중인 작업은 다른 작업의
-  claim 을 막지 않는다(`keeper_chat_operation_store.ml:1182`–`1188`). 그래서 다른 채팅 작업이나
-  다른 keeper 는 그 경로를 곧바로 부른다. 지금도 그렇다. 이 쉼을 공유 저장소에 올리면 모든
-  keeper 의 순서가 바뀌므로 이 RFC 범위에서 뺀다.
+**성질 P 와의 관계**: `provider-path-rest` 의 P 는 "쉬기 시작한 경로에 풀리기 전에 다시 보내지
+않는다" 다. 5xx·끊김·timeout 에는 RFC-0458 뒤로 쉼이 없으니 곧바로 보내도 P 를 깨지 않는다.
+429·quota 의 쉼은 공유 저장소에 있고, 이 작업도 그 시각을 기다린다.
 
 ### 3.5 heartbeat lane 은 바꾸지 않는다
 
@@ -209,7 +205,8 @@ window 만 읽는다). 이 경우를 따로 두지 않으면 `Dispatch_now` 로 
   반복을 끝내지 못한다.
 - 게다가 지금 heartbeat 는 suffix 없는 5xx·끊김·timeout 에 cadence 를 wake 가 끊을 수 있게
   잔다(`keeper_turn_driver.ml:382`–`388`, `keeper_heartbeat_loop.ml:1526`–`1530`). 같은 경로 hint 가
-  들어가면 최소 60초를 wake 가 못 끊게 자고, 남은 자극을 60초마다 다시 돌린다.
+  들어가면 이 cadence 대신 3.4 의 hint 갈래를 따르고, 그 답은 `Dispatch_now` 라서 남은 자극을
+  쉬지 않고 다시 돌린다.
 
 부르는 쪽이 순회에 이어가기 방식을 알린다.
 
@@ -237,7 +234,6 @@ type failure_continuation =
 - `lib/keeper/keeper_turn_driver.{ml,mli}`
   - `attempt_runtime_candidates` 가 `failure_continuation` 과 진전 관측값을 받는다.
   - `else if is_last` 가지에서 3.1 의 hint 를 넘긴다.
-  - `next_dispatch_after_failure` 에 같은 경로 경우를 route 가지보다 먼저 둔다 (3.4).
   - `.mli` 문서의 "remaining candidates" 설명을 고친다.
 - `lib/keeper/keeper_turn.ml`: `Resume_operation_checkpoint` 를 넘긴다.
 - `lib/keeper/keeper_unified_turn_execution.ml`: `Restart_cycle` 을 넘긴다.
@@ -279,8 +275,11 @@ Phase 2 는 "공급자가 요청을 받은 뒤 생성을 끊었다" 는 사실�
 - §3.1 표에 한 줄을 더한다: "채팅 lane, suffix 없음, 마지막 시도가 도구를 실행한 뒤 3.3 대상
   route 로 실패 → 실패한 경로가 풀릴 때 같은 경로로 잇는다."
 - §4.2 의 전제 "suffix 에는 실패한 경로가 들어 있지 않다" 는 같은 경로 hint 에서 성립하지 않는다.
-  이 hint 에 대해서는 3.4 의 `Wait_until` 이 P 를 지킨다. 범위는 이 작업뿐이다.
+  그래도 P 는 지켜진다. 이 hint 의 기다림은 경로에 기록된 쉼이 정한다(3.4).
 - §4.3 의 끝나는 이유 옆에, 같은 경로로 잇는 경우는 3.2 의 진전 조건이 끝을 만든다고 적는다.
+
+RFC-0458 과의 관계: §3.4 의 실패 증거는 걷는 순서만 바꾼다. 후보가 하나면 순서가 바뀌어도 같은
+후보다. 이 RFC 는 그 실패로 작업을 잃지 않게 할 뿐, 쉼이나 순서 규칙을 더하지 않는다.
 
 ## 6. 고르지 않은 대안
 
@@ -288,7 +287,9 @@ Phase 2 는 "공급자가 요청을 받은 뒤 생성을 끊었다" 는 사실�
   피하는 모양이다. 숫자를 정할 근거도 없다.
 - **모든 체크포인트를 진전으로 세기**: 3.2 의 거부된 응답 반복을 막지 못한다.
 - **heartbeat lane 에도 적용**: 3.5 의 이유로 끝이 없다.
-- **쉼 없이 곧바로 재시도**: P 를 깬다. 공급자가 내려간 동안 같은 호출을 되풀이한다.
+- **5xx·끊김·timeout 에 경로 쉼(예: 60초 최소값) 두기**: RFC-0458 §3.4 의 운영자 결정과 어긋난다.
+  곧바로 재개해서 생기는 비용, 곧 짧은 장애 중 재개한 시도가 도구 실행 전에 실패해 작업이 끝나는
+  경우는 7 의 벤치 실측으로 잰다. 문제라고 나오면 RFC-0458 §5 처럼 증거와 함께 쉼을 더한다.
 - **벤치 설정에서 같은 모델을 런타임 id 여러 개로 복제**: 제품 동작을 바꾸지 않고 기존
   failover 를 속여 쓰는 설정이다. 후보 수보다 한 번 적게만 견디고, 실제 사용자는 이 설정을
   쓰지 않는다.
@@ -297,29 +298,29 @@ Phase 2 는 "공급자가 요청을 받은 뒤 생성을 끊었다" 는 사실�
 
 ## 7. 검증
 
-- `route_resumes_on_same_path`: route 전체에 대한 표 테스트. 대기 시간이 상한 안/밖인 경우, 리셋 시각이
-  있는/없는 `Hard_quota` 를 포함한다.
+- `route_resumes_on_same_path`: route 전체에 대한 표 테스트. 리셋 시각이 있는/없는 `Hard_quota` 를
+  포함한다.
 - 진전 관측: stage 마다 관측값이 켜지는지. `After_assistant_collected` 만 저장된 시도는 꺼져 있다.
 - 후보 순회
   - `Resume_operation_checkpoint` + 마지막 후보 + 대상 route + 도구 실행 → 같은 경로 hint
   - 도구 실행 없음, 응답만 수집 → hint 없음
   - `Restart_cycle` → hint 없음
   - `observed_overflow` 가 있으면 → hint 없음
-  - 대상 아닌 route, 상한을 넘는 대기 → hint 없음
+  - 대상 아닌 route → hint 없음
   - 후보가 둘 이상일 때의 기존 hint 는 그대로
   - 기존 `test_single_candidate_checkpoint_failure_has_no_hint`
     (`test/test_keeper_turn_driver_failover.ml:3721`)는 `allow_retry=false` 인 네트워크 오류에서
     hint 가 없다고 고정한다. `Restart_cycle` 경우로 남기고, `Resume_operation_checkpoint` 경우를
     새로 둔다.
-- `next_dispatch_after_failure`
-  - 같은 경로 hint + 5xx → 60초 `Wait_until Path_release`
-  - 429 + 대기 5초 → 5초
-  - 경로 저장소의 쉼이 더 길면 그 시각
+- `next_dispatch_after_failure` (코드는 그대로, 같은 경로 hint 에서의 답을 고정)
+  - 같은 경로 hint + 5xx → `Dispatch_now`
+  - 같은 경로 hint + 그 경로에 기록된 429 쉼 → 그 시각까지 `Wait_until Path_release`
 - 채팅 작업 (기존 재개 테스트 옆)
   - 마지막 후보가 도구 실행 뒤 502 → 작업 `Queued`, 같은 id 로 같은 경로에서 재개해 완료
   - 재개한 시도가 도구 실행 전에 다시 502 → `Failed`
   - 응답이 거부된 뒤 no-thinking 이어가기가 429 → `Failed` (hint 없음)
 - 벤치 실측: 같은 DeepSeek 스모크를 다시 돌려, 스트림 중간 5xx 뒤 에피소드가 이어지는지 기록한다.
+  곧바로 재개한 시도가 도구 실행 전에 다시 실패해 끝난 작업 수도 센다(6 의 비용).
   1.1 의 상태 없는 끊김은 Phase 2 전까지 그대로 실패한다.
 
 ## 8. 확인 못 한 것
@@ -327,6 +328,7 @@ Phase 2 는 "공급자가 요청을 받은 뒤 생성을 끊었다" 는 사실�
 - OpenRouter 연결 끊김이 실제로 어느 모양(소켓 오류, 끝 표시 없는 SSE, 오류 finish)으로
   오는지 비율을 모른다. 1.1 은 한 건이다.
 - 재개할 때마다 체크포인트를 다시 읽고 컨텍스트를 다시 보내는 비용(토큰·지연)을 재지 않았다.
+- 짧은 장애가 얼마나 이어지는지, 곧바로 재개한 시도가 그 안에 걸리는 비율을 모른다.
 - heartbeat 의 새 사이클이 실패한 턴의 도구 결과를 history 에 얼마나 담는지(3.5 의 "새 턴" 이 일을
   처음부터 다시 하는지)는 코드로 끝까지 따라가지 않았다. 3.5 의 결정은 wake 대기 방식이 바뀌는
   문제만으로도 성립한다.

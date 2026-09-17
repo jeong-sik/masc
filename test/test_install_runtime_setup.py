@@ -1218,7 +1218,8 @@ class CompiledRuntimeSetup(unittest.TestCase):
     def test_seed_workspace_saves_connections_and_points_the_librarian_lane_at_the_default(self):
         # The shipped seed, not the release-evidence fixture: the seed already
         # declares [runtime.exact_output_lanes.librarian_exact], so a second
-        # writer of that table fails here and nowhere in the fixture runs.
+        # writer of that table fails on a single connection here, where the
+        # fixture, which declares no such table, fails only on two.
         import tomllib
         def seeded(tmp):
             config = Path(tmp) / '.masc/config'

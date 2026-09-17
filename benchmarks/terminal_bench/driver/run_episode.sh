@@ -33,7 +33,17 @@ rm -f "$INTERRUPTED_MARK" "$BENCH/episode.json" "$RESULT_JSON"
 # every task image (python:*-slim ships without procps).
 printf '%s\n' "$$" > "$EPISODE_PID_FILE"
 final_file="$(mktemp)"
-trap 'rm -f "$final_file"' EXIT
+setup_error_file="$(mktemp)"
+trap 'rm -f "$final_file" "$setup_error_file"' EXIT
+
+# report_setup_failure <state> <keeper>: result.json for a keeper that could
+# not be brought up, then exit 1.
+report_setup_failure() {
+  jq -n --arg keeper "$2" --rawfile error "$setup_error_file" \
+    '{keeper:$keeper, error:$error}' > "$final_file"
+  bash "$BENCH/driver/collect_result.sh" "$RESULT_JSON" "$1" "$final_file"
+  exit 1
+}
 
 KEEPER_INSTRUCTIONS="You are an autonomous engineering agent inside a Linux container. \
 Complete the task by running shell commands (your tool calls execute in this container as root). \
@@ -66,12 +76,20 @@ for i in $(seq 1 "${KEEPER_COUNT}"); do
   # (remote_github_identity_missing); gh_seed.sh seeds hosts.yml from
   # ${GH_TOKEN} and is a no-op when it is unset.
   seed_gh_hosts "${k}"
-  mcp_call $((100+i)) masc_keeper_up "$(jq -cn \
-    --arg name "$k" --arg ins "$KEEPER_INSTRUCTIONS" --arg rid "$RUNTIME_ID" \
-    '{name:$name, instructions:$ins, runtime_id:$rid, activation_mode:"manual"}')" 90 >/dev/null
-  curl -fsS -m 20 -X POST "http://127.0.0.1:8935/api/v1/keepers/tool-approval-mode" \
-    -H "Authorization: Bearer ${MCP_TOKEN}" -H 'Content-Type: application/json' \
-    -d "{\"name\":\"${k}\",\"mode\":\"yolo\"}" >/dev/null
+  # A keeper that does not come up is the episode's result, not a reason to
+  # leave none: the failure is reported through collect_result.sh with the
+  # server's own words.
+  if ! mcp_call $((100+i)) masc_keeper_up "$(jq -cn \
+      --arg name "$k" --arg ins "$KEEPER_INSTRUCTIONS" --arg rid "$RUNTIME_ID" \
+      '{name:$name, instructions:$ins, runtime_id:$rid, activation_mode:"manual"}')" 90 \
+      >/dev/null 2>"$setup_error_file"; then
+    report_setup_failure KeeperUpFailed "$k"
+  fi
+  if ! curl -fsS -m 20 -X POST "http://127.0.0.1:8935/api/v1/keepers/tool-approval-mode" \
+      -H "Authorization: Bearer ${MCP_TOKEN}" -H 'Content-Type: application/json' \
+      -d "{\"name\":\"${k}\",\"mode\":\"yolo\"}" >/dev/null 2>"$setup_error_file"; then
+    report_setup_failure ApprovalModeFailed "$k"
+  fi
 done
 
 start_epoch="$(date +%s)"

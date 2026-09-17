@@ -298,6 +298,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0455 | Task 는 모든 상태에서 나갈 수 있어야 한다 — 남은 상태마다 그 상태를 벗어나게 할 행위자가 있다 | Draft | - |
 | 0456 | Librarian 의 출력 계약이 무변경을 가장 안전한 답으로 만든다 — 점호를 없애고 퇴장 경로를 가른다 | Draft | - |
 | 0457 | Keeper 배정은 레인 이름을 받는다 — 레인이 런타임 id 를 흉내 내야 닿는 규칙을 없앤다 | Draft | - |
+| 0458 | sticky 레인 선호는 필요 없다 — 걷는 순서는 선언이고 쉼은 provider 의 것이다 | Draft | - |
 | RFC-a-language-server-the-keeper-can-ask | A language server the Keeper can ask | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
 | RFC-attached-service-tool-scoping | 도구 스키마를 매 턴 전량 싣는 것을 그만둔다 | Accepted | - |

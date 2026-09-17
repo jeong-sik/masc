@@ -133,3 +133,14 @@ artifact 없는 것이 정상이기 때문이다(#33052). 계산은 판정자 �
 - task-1306 — 이 게이트·원클릭·테스트를 실은 작업 나무.
 
 관련: #33046, task-1306, task-1303(사례), RFC-0407, RFC-0361.
+
+## 9. Disposition
+
+- **2026-09-04 운영자 결정: `build-hitl-pipeline`.** 취소 청구 판정의 최종 권한을
+  운영자 승인 표면(dashboard/TUI 1-클릭)으로 옮기고, 시스템 LLM 판정은 권고로
+  강등한다. 운영자 무응답 시에는 §5 `stay_pending`(타이머 fallback 없음)을 따른다.
+  (task-1306)
+
+주의: task-1306 계약은 이 문서를 `RFC-0402`로 지칭하지만, 저장소의 실제
+`RFC-0402`는 Memory OS Board 출처 문서(`RFC-0402-memory-os-board-provenance.md`)다.
+취소 판정 권위 문서는 이 문서(RFC-0417)이며, disposition은 여기에 기록한다.

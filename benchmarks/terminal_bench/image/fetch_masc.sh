@@ -26,14 +26,12 @@ if [[ -z "${MASC_VERSION}" ]]; then
   echo "[fetch] latest release: v${MASC_VERSION}"
 fi
 
-# The bench gives a keeper a GitHub login only when GH_TOKEN is set. Releases
-# before 0.35.15 run `gh auth status` in the remote_ssh preflight whether or
-# not the endpoint has a login (#35488), so without GH_TOKEN every keeper_up on
-# them is refused.
-MIN_VERSION_WITHOUT_GH_LOGIN="0.35.15"
-if [[ -z "${GH_TOKEN:-}" ]] \
-   && [[ "$(printf '%s\n%s\n' "${MIN_VERSION_WITHOUT_GH_LOGIN}" "${MASC_VERSION}" | sort -V | head -1)" != "${MIN_VERSION_WITHOUT_GH_LOGIN}" ]]; then
-  echo "masc ${MASC_VERSION} needs a GitHub login for every keeper; use ${MIN_VERSION_WITHOUT_GH_LOGIN} or later, or set GH_TOKEN" >&2
+# The bootstrap writes env_file= into the shim config, a key a shim before
+# 0.35.20 refuses as unknown, and with it every request (masc#36919). The same
+# release is the first whose shim looks an argv program up in path= (masc#36916).
+MIN_MASC_VERSION="0.35.20"
+if [[ "$(printf '%s\n%s\n' "${MIN_MASC_VERSION}" "${MASC_VERSION}" | sort -V | head -1)" != "${MIN_MASC_VERSION}" ]]; then
+  echo "masc ${MASC_VERSION} is older than ${MIN_MASC_VERSION}, the first release whose shim reads the env_file= the bootstrap writes; use ${MIN_MASC_VERSION} or later" >&2
   exit 1
 fi
 

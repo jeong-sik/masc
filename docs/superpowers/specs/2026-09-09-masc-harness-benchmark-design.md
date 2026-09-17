@@ -113,10 +113,10 @@ reward(검증 통과), wall-clock, input/output/cache 토큰, $/task(litellm 단
 
 ## 6. 리스크
 
-1. **실행 환경 차이**: keeper 명령은 이미지가 선언한 환경변수를 보지 못한다(#36907). PATH 는
-   bootstrap 이 shim 설정으로 넘기지만, v0.35.19 shim 은 argv 명령의 프로그램을 자기 PATH 에서
-   찾아서 `sh -c` 명령에만 효과가 있다(#36916 릴리스 전까지). harbor 기본 에이전트는 둘 다 보므로
-   arm A 대비 불리하다. 해결 전 결과에는 이 한계를 적는다.
+1. **실행 환경 차이**: bootstrap 이 이미지의 환경을 shim `env_file=` 로, PATH 를 `path=` 로 넘긴다
+   (0.35.20 이상). shim 이 받지 않는 이름(GitHub 토큰 이름, `GH_CONFIG_DIR`·`GIT_TERMINAL_PROMPT`)과
+   여러 줄 값은 빠진다. 이미지가 그런 이름을 선언한 태스크에서는 harbor 기본 에이전트와 보는 환경이
+   달라서, 결과에 bootstrap 로그의 뺀 이름을 같이 적는다.
 2. **태스크 선언 도구**: `mcp_servers`·`skills_dir` 를 keeper 에 연결하지 않는다(#36908).
 3. **GPU·자원·에뮬레이션**: 로컬 docker 는 GPU 3태스크를 못 돌리고, 16 CPU 태스크 때문에
    사실상 동시 실행 1이다. Apple Silicon 에서는 amd64 이미지가 에뮬레이션으로 돌아 시간 조건이

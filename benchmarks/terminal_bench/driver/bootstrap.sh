@@ -62,9 +62,6 @@ install -m 0755 "$BENCH/bin/masc-exec-shim" /usr/local/bin/masc-exec-shim
 # the same container finds (21 of the 66 4.0.0 tasks put tools in a directory
 # outside the default, masc#36907). The shim refuses empty and relative
 # entries, so those are left out; a repeated entry is kept once.
-# Through release 0.35.19 the shim looks up an argv program in its own
-# process PATH rather than this one, so only `sh -c` payloads see it until
-# the lookup fix (masc#36916) ships.
 shim_path=""
 IFS=':' read -r -a path_entries <<<"${PATH}"
 for entry in "${path_entries[@]}"; do
@@ -72,9 +69,18 @@ for entry in "${path_entries[@]}"; do
   [[ ":${shim_path}:" == *":${entry}:"* ]] && continue
   shim_path="${shim_path:+${shim_path}:}${entry}"
 done
+# The image's other environment variables reach the payloads through env_file=
+# (endpoint_env.sh). The shim reads the config and the env file only when root
+# or its own account owns them and no one else may write them, so both are
+# root-owned 0644.
+# shellcheck source-path=SCRIPTDIR source=endpoint_env.sh
+source "$BENCH/driver/endpoint_env.sh"
+bench_endpoint_env_lines /proc/1/environ > /etc/masc-exec-shim.env
+chmod 644 /etc/masc-exec-shim.env
 {
   printf 'remote_root=/root\n'
   if [[ -n "${shim_path}" ]]; then printf 'path=%s\n' "${shim_path}"; fi
+  printf 'env_file=/etc/masc-exec-shim.env\n'
 } > /etc/masc-exec-shim.conf
 chmod 644 /etc/masc-exec-shim.conf
 

@@ -100,7 +100,7 @@ a merely declared lane is dormant until a routed root names it.
 
 ### 1.3 라이브에서 실제로 새고 있다
 
-2026-09-16 `~/me/.masc/config/runtime.toml` 기준.
+2026-09-16 `config/runtime.toml` 기준.
 
 | 선언된 레인 | 이 키를 가리키는 배정 | 결과 |
 |---|---|---|

@@ -49,7 +49,13 @@ A round is three acceptance-runner bundles on one pinned binary. One passing
 run is evidence, never a score.
 
 1. Run `keeper_multi_collaboration_acceptance.py --run` three times with the
-   same `--expected-source-sha`; keep every `bundle.json`.
+   same `--expected-source-sha`; keep every `bundle.json`. Each run installs
+   the composition Skills it measures from
+   `scripts/fixtures/keeper-multi-collaboration/skills/` into the campaign
+   workspace's `project-masc` skill source through `/api/v1/skills/editor/*`,
+   so the campaign `runtime.toml` must declare that source `read-write`.
+   `--preflight` only reads: before the first run it lists the fixtures as
+   `pending` and passes only if that source is writable.
 2. Write `residuals.json` (`masc.keeper_campaign_residuals.v1`): one entry per
    assertion that failed in any of the three runs, with `cause` from the closed
    set `infra_rate_limit | harness | model_behavior | product` and the tracking

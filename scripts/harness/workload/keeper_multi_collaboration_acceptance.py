@@ -8,7 +8,10 @@ Memory, and Context outcomes behind.
 
 Mutation is fail-closed: ``--run`` requires both ``--allow-mutation`` and an
 exact ``--expected-base-path`` match against ``/health?full=1``.  ``--preflight``
-and ``--validate-catalog`` are read-only.
+and ``--validate-catalog`` are read-only.  ``--run`` installs the campaign's
+composition fixture Skills (``scripts/fixtures/keeper-multi-collaboration/skills``)
+into the campaign workspace after the base-path match and before preflight
+judges the composition surfaces.
 """
 
 from __future__ import annotations
@@ -42,6 +45,51 @@ DEFAULT_CATALOG = (
     / "keeper-multi-collaboration"
     / "missions.json"
 )
+# The composition Skills this campaign measures are the runner's own fixtures,
+# not product builtins and not whatever an operator keeps in a runtime skill
+# tree. Each catalog identity in keeper_required_skill_identities names one
+# package under the catalog's sibling skills/ directory; --run installs it into
+# the campaign workspace through the skill editor API before preflight judges
+# the surfaces.
+COMPOSITION_FIXTURE_DIRNAME = "skills"
+COMPOSITION_TOOL_PREFIX = "keeper_compose_"
+SKILL_EDITOR_CREATE_ROUTE = "/api/v1/skills/editor/create"
+SKILL_EDITOR_SAVE_ROUTE = "/api/v1/skills/editor/save"
+SKILL_EDITOR_SOURCES_ROUTE = "/api/v1/skills/editor/sources"
+# The shape the acceptance assertions judge. The runtime scheduler, not this
+# file, decides it: board and lane are Concurrent descriptors with no
+# dependency, so they share batch 0; search is Concurrent too but reads lane's
+# output, so it runs alone in batch 1. Every node's output is small by shape,
+# because the assertions refuse a nested row whose logged output was cut.
+# test/test_acceptance_composition_fixtures.ml pins that the installed fixture
+# really schedules this way, and the Python suite pins these names to the
+# fixture's declaration.
+INLINE_FIXTURE = "acceptance-inline-probe"
+INLINE_FIXTURE_TOOL = COMPOSITION_TOOL_PREFIX + INLINE_FIXTURE
+INLINE_FIXTURE_PARALLEL_NODES: tuple[str, ...] = ("board", "lane")
+INLINE_FIXTURE_DATAFLOW_NODE = "search"
+INLINE_FIXTURE_DATAFLOW_EXECUTION_MODE = "concurrent"
+INLINE_FIXTURE_NODES: tuple[str, ...] = (
+    *INLINE_FIXTURE_PARALLEL_NODES,
+    INLINE_FIXTURE_DATAFLOW_NODE,
+)
+INLINE_FIXTURE_DATAFLOW_SOURCE_NODE = "lane"
+INLINE_FIXTURE_DATAFLOW_SOURCE_FIELD = "profile"
+INLINE_FIXTURE_DATAFLOW_INPUT_FIELD = "query"
+ASYNC_FIXTURE = "acceptance-async-probe"
+ASYNC_FIXTURE_TOOL = COMPOSITION_TOOL_PREFIX + ASYNC_FIXTURE
+ASYNC_FIXTURE_NODES: tuple[str, ...] = ("board", "lane")
+# The batches the server plans for each fixture, in order, as the skill editor
+# reports them: (execution_mode, sorted node ids). Install compares them before
+# any Keeper exists, so a descriptor that changed its execution mode fails the
+# run here instead of in the assertions at the end of a campaign.
+COMPOSITION_FIXTURE_BATCHES: dict[str, list[tuple[str, list[str]]]] = {
+    INLINE_FIXTURE: [
+        ("concurrent", sorted(INLINE_FIXTURE_PARALLEL_NODES)),
+        (INLINE_FIXTURE_DATAFLOW_EXECUTION_MODE, [INLINE_FIXTURE_DATAFLOW_NODE]),
+    ],
+    ASYNC_FIXTURE: [("concurrent", sorted(ASYNC_FIXTURE_NODES))],
+}
 SCHEMA = "masc.keeper_multi_collaboration_evidence.v1"
 # The lanes a keeper may run under. Mirrors the ``sandbox_profile`` enum of
 # ``config/tools/masc_keeper_up.toml``; the acceptance test pins the two lists
@@ -708,6 +756,22 @@ def load_catalog(path: pathlib.Path) -> dict[str, Any]:
         raise AcceptanceError(
             "keeper_required_skill_identities must not contain duplicates"
         )
+    if sorted(package_id for _, package_id, _ in required_identity_keys) != sorted(
+        COMPOSITION_FIXTURE_BATCHES
+    ):
+        raise AcceptanceError(
+            "keeper_required_skill_identities must name exactly the runner's "
+            f"composition fixtures: {sorted(COMPOSITION_FIXTURE_BATCHES)}"
+        )
+    for identity_key in required_identity_keys:
+        fixture_path = composition_fixture_path(
+            catalog_path=path, identity_key=identity_key
+        )
+        if not fixture_path.is_file():
+            raise AcceptanceError(
+                "keeper_required_skill_identities names a package with no "
+                f"fixture: {fixture_path}"
+            )
     approaches = catalog.get("execution_approaches")
     if (
         catalog.get("approaches_apply_to_each_mission") is not True
@@ -1161,6 +1225,231 @@ def skill_reference_json(key: tuple[str, str, str, str]) -> dict[str, Any]:
     }
 
 
+def composition_fixture_path(
+    *, catalog_path: pathlib.Path, identity_key: tuple[str, str, str]
+) -> pathlib.Path:
+    _source_id, package_id, _name = identity_key
+    return (
+        catalog_path.parent / COMPOSITION_FIXTURE_DIRNAME / package_id / "SKILL.md"
+    )
+
+
+def default_dashboard_route_url(mcp_url: str, route: str) -> str:
+    parsed = urllib.parse.urlsplit(mcp_url)
+    return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, route, "", ""))
+
+
+def post_skill_editor(
+    url: str, token: str, timeout: float, payload: dict[str, Any]
+) -> dict[str, Any]:
+    """POST one skill-editor request and return its JSON outcome.
+
+    The editor routes are admin tier and answer a typed error body
+    ({ok:false, code, error}) with a non-2xx status. That body is the reason
+    the install failed, so it is carried into the error instead of the bare
+    HTTP status.
+    """
+    body = json.dumps(payload).encode("utf-8")
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    request = urllib.request.Request(url, data=body, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            value = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode("utf-8", errors="replace")
+        raise AcceptanceError(
+            f"skill editor request {url} failed: HTTP {error.code}: {detail[:500]}"
+        ) from error
+    except (OSError, json.JSONDecodeError) as error:
+        # OSError covers URLError and a timeout or reset while reading the
+        # answer. A create may have committed server-side by then; a rerun
+        # finds the identity published and saves against it.
+        raise AcceptanceError(f"skill editor request {url} failed: {error}") from error
+    if not isinstance(value, dict):
+        raise AcceptanceError(f"skill editor response from {url} is not a JSON object")
+    return value
+
+
+def read_writable_skill_source_ids(url: str, token: str, timeout: float) -> list[str]:
+    """The skill sources the campaign workspace can write, by id.
+
+    This is what a campaign server has to offer before a run can install its
+    fixtures, so a read-only preflight asks it instead of requiring fixtures
+    that only a run puts there.
+    """
+    headers = {"Accept": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    request = urllib.request.Request(url, headers=headers, method="GET")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            value = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode("utf-8", errors="replace")
+        raise AcceptanceError(
+            f"writable skill sources read failed: HTTP {error.code}: {detail[:500]}"
+        ) from error
+    except (OSError, json.JSONDecodeError) as error:
+        raise AcceptanceError(f"writable skill sources read failed: {error}") from error
+    sources = value.get("sources") if isinstance(value, dict) else None
+    if not isinstance(sources, list) or not all(
+        isinstance(source, dict) and isinstance(source.get("source_id"), str)
+        for source in sources
+    ):
+        raise AcceptanceError(
+            f"writable skill sources response has no source list: {str(value)[:500]}"
+        )
+    return sorted(source["source_id"] for source in sources)
+
+
+def published_skill_references(
+    skills: dict[str, Any], identity_key: tuple[str, str, str]
+) -> list[tuple[str, str, str, str]]:
+    snapshot = skills.get("snapshot")
+    rows = snapshot.get("skills") if isinstance(snapshot, dict) else None
+    references: set[tuple[str, str, str, str]] = set()
+    for index, row in enumerate(rows if isinstance(rows, list) else []):
+        if not isinstance(row, dict):
+            continue
+        try:
+            reference_key = canonical_skill_reference_key(
+                {
+                    "identity": row.get("identity"),
+                    "content_revision": row.get("content_revision"),
+                },
+                context=f"snapshot.skills[{index}]",
+            )
+        except AcceptanceError:
+            # A malformed row is composition_surface_status's to report; it
+            # cannot be the published revision of this identity.
+            continue
+        if reference_key[:3] == identity_key:
+            references.add(reference_key)
+    return sorted(references)
+
+
+def planned_fixture_batches(batches: Any) -> list[tuple[str, list[str]]] | None:
+    if not isinstance(batches, list):
+        return None
+    planned: list[tuple[str, list[str]]] = []
+    for batch in batches:
+        if not isinstance(batch, dict):
+            return None
+        mode = batch.get("execution_mode")
+        node_ids = batch.get("node_ids")
+        if not isinstance(mode, str) or not isinstance(node_ids, list):
+            return None
+        if not all(isinstance(node_id, str) for node_id in node_ids):
+            return None
+        planned.append((mode, sorted(node_ids)))
+    return planned
+
+
+# Outcomes after which the fixture text is the published revision. Anything
+# else the editor answers (created_but_unpublished, saved_but_unpublished)
+# wrote a file the Keeper turns will not see.
+SKILL_EDITOR_PUBLISHED_OUTCOMES = {
+    SKILL_EDITOR_CREATE_ROUTE: {"created_and_published"},
+    SKILL_EDITOR_SAVE_ROUTE: {"saved_and_published", "unchanged"},
+}
+
+
+def install_composition_fixtures(
+    *,
+    catalog: dict[str, Any],
+    catalog_path: pathlib.Path,
+    skills: dict[str, Any],
+    mcp_url: str,
+    token: str,
+    timeout: float,
+) -> list[dict[str, Any]]:
+    """Publish every catalog fixture into the campaign workspace.
+
+    An identity the snapshot does not publish is created in its declared
+    source; one it already publishes is saved against that exact revision, so
+    a rerun on the same workspace either reports unchanged or replaces a
+    fixture an older runner left behind. The server parses the text with the
+    same parser a Keeper turn uses, so a fixture it would reject fails here,
+    before any Keeper exists.
+    """
+    if skills.get("state") != "ready":
+        raise AcceptanceError(
+            "cannot install composition fixtures: skills snapshot state="
+            f"{skills.get('state')!r}"
+        )
+    receipts: list[dict[str, Any]] = []
+    for index, identity in enumerate(catalog["keeper_required_skill_identities"]):
+        identity_key = canonical_skill_identity_key(
+            identity, context=f"keeper_required_skill_identities[{index}]"
+        )
+        source_id, package_id, _name = identity_key
+        source_text = composition_fixture_path(
+            catalog_path=catalog_path, identity_key=identity_key
+        ).read_text(encoding="utf-8")
+        published = published_skill_references(skills, identity_key)
+        if not published:
+            route = SKILL_EDITOR_CREATE_ROUTE
+            payload: dict[str, Any] = {
+                "source_id": source_id,
+                "package_id": package_id,
+                "source_text": source_text,
+            }
+        elif len(published) == 1:
+            route = SKILL_EDITOR_SAVE_ROUTE
+            payload = {
+                "reference": skill_reference_json(published[0]),
+                "source_text": source_text,
+            }
+        else:
+            raise AcceptanceError(
+                "cannot install composition fixture: snapshot publishes "
+                f"{len(published)} revisions of "
+                + json.dumps(skill_identity_json(identity_key), sort_keys=True)
+            )
+        outcome = post_skill_editor(
+            default_dashboard_route_url(mcp_url, route), token, timeout, payload
+        )
+        status = outcome.get("status")
+        if status not in SKILL_EDITOR_PUBLISHED_OUTCOMES[route]:
+            raise AcceptanceError(
+                f"composition fixture {package_id} was not published: "
+                f"route={route} status={status!r} reason={outcome.get('reason')!r}"
+            )
+        preview = outcome.get("preview")
+        profile = preview.get("profile") if isinstance(preview, dict) else None
+        installed_reference = canonical_skill_reference_key(
+            profile.get("reference") if isinstance(profile, dict) else None,
+            context=f"{route} preview.profile.reference",
+        )
+        if installed_reference[:3] != identity_key:
+            raise AcceptanceError(
+                f"composition fixture {package_id} was published under another "
+                "identity: "
+                + json.dumps(skill_reference_json(installed_reference), sort_keys=True)
+            )
+        flow = profile.get("flow")
+        planned_batches = planned_fixture_batches(
+            flow.get("batches") if isinstance(flow, dict) else None
+        )
+        if planned_batches != COMPOSITION_FIXTURE_BATCHES[package_id]:
+            raise AcceptanceError(
+                f"composition fixture {package_id} is planned as {planned_batches}, "
+                f"the acceptance assertions judge {COMPOSITION_FIXTURE_BATCHES[package_id]}"
+            )
+        receipts.append(
+            {
+                "route": route,
+                "status": status,
+                "reference": skill_reference_json(installed_reference),
+                "snapshot_revision": outcome.get("snapshot_revision"),
+                "flow": flow,
+            }
+        )
+    return receipts
+
+
 def composition_surface_status(
     *,
     skills: dict[str, Any],
@@ -1297,13 +1586,23 @@ def composition_surface_status(
 def preflight(
     *,
     catalog: dict[str, Any],
+    catalog_path: pathlib.Path,
     mcp_url: str,
     health_url: str,
     token: str,
     timeout: float,
     expected_base_path: str | None,
     expected_source_sha: str | None,
+    install_fixtures: bool,
 ) -> tuple[McpClient, dict[str, Any], dict[str, Any]]:
+    # Installing writes into the campaign workspace, so it is refused unless
+    # the health check below can pin that workspace and binary first. An empty
+    # base path would match a health answer that carries no paths at all.
+    if install_fixtures and (not expected_base_path or not expected_source_sha):
+        raise AcceptanceError(
+            "installing composition fixtures requires --expected-base-path and "
+            "--expected-source-sha"
+        )
     health = read_health(health_url, token, timeout)
     effective_base_path = health_base_path(health)
     if expected_base_path is not None and effective_base_path != expected_base_path:
@@ -1331,15 +1630,79 @@ def preflight(
     missing = sorted(required - available)
     skills_url = default_skills_url(mcp_url)
     skills = read_skills(skills_url, token, timeout)
+    fixture_receipts: list[dict[str, Any]] = []
+    if install_fixtures and not missing:
+        fixture_receipts = install_composition_fixtures(
+            catalog=catalog,
+            catalog_path=catalog_path,
+            skills=skills,
+            mcp_url=mcp_url,
+            token=token,
+            timeout=timeout,
+        )
+        skills = read_skills(skills_url, token, timeout)
     composition_surfaces = composition_surface_status(
         skills=skills,
         required_skill_identities=catalog["keeper_required_skill_identities"],
         skills_url=skills_url,
     )
+    installed_references = sorted(
+        (receipt["reference"] for receipt in fixture_receipts),
+        key=lambda reference: json.dumps(reference, sort_keys=True),
+    )
+    published_references = sorted(
+        composition_surfaces["required_skill_references"],
+        key=lambda reference: json.dumps(reference, sort_keys=True),
+    )
+    # A snapshot that publishes another revision than the one just installed
+    # would run the Keepers on text this runner did not ship.
+    installed_revision_published = (
+        not fixture_receipts or installed_references == published_references
+    )
+    # Read-only, an unpublished fixture is one a run has not installed yet.
+    # What the server has to offer for that install is a writable, ready
+    # source with the fixture's source id; that is what this mode can judge.
+    # An unresolved identity with published revisions is not pending: the
+    # snapshot publishes it more than once, and a run refuses to install it.
+    # The status precedence reports unresolved identities first, so the
+    # published ones are judged here from the lists underneath it.
+    pending_fixture_identities: list[dict[str, str]] = []
+    ambiguous_fixture_identities: list[dict[str, str]] = []
+    writable_source_ids: list[str] | None = None
+    if (
+        not install_fixtures
+        and not missing
+        and composition_surfaces["status"] == "required_identity_not_published"
+    ):
+        for identity in composition_surfaces["unresolved_required_skill_identities"]:
+            identity_key = canonical_skill_identity_key(
+                identity, context="unresolved_required_skill_identities"
+            )
+            if published_skill_references(skills, identity_key):
+                ambiguous_fixture_identities.append(identity)
+            else:
+                pending_fixture_identities.append(identity)
+        writable_source_ids = read_writable_skill_source_ids(
+            default_dashboard_route_url(mcp_url, SKILL_EDITOR_SOURCES_ROUTE),
+            token,
+            timeout,
+        )
+    unwritable_source_ids = sorted(
+        {identity["source_id"] for identity in pending_fixture_identities}
+        - set(writable_source_ids if writable_source_ids is not None else [])
+    )
+    pending_install_ready = (
+        bool(pending_fixture_identities)
+        and not ambiguous_fixture_identities
+        and not unwritable_source_ids
+        and not composition_surfaces["missing_skill_references"]
+        and not composition_surfaces["required_unavailable_surfaces"]
+    )
+    surfaces_ready = composition_surfaces["status"] == "ok" or pending_install_ready
     result = {
         "status": (
             "passed"
-            if not missing and composition_surfaces["status"] == "ok"
+            if not missing and surfaces_ready and installed_revision_published
             else "failed"
         ),
         "checked_at": utc_now(),
@@ -1353,11 +1716,29 @@ def preflight(
         "available_tool_count": len(available),
         "missing_operator_tools": missing,
         "keeper_required_tools": catalog["keeper_required_tools"],
+        "composition_fixture_installation": {
+            "requested": install_fixtures,
+            "receipts": fixture_receipts,
+            "pending": pending_fixture_identities,
+            "published_more_than_once": ambiguous_fixture_identities,
+            "writable_source_ids": writable_source_ids,
+        },
         "composition_surfaces": composition_surfaces,
     }
     if missing:
         raise AcceptanceError(f"deployed runtime is missing operator tools: {missing}")
-    if composition_surfaces["status"] != "ok":
+    if ambiguous_fixture_identities:
+        raise AcceptanceError(
+            "composition fixtures are published more than once in this campaign "
+            f"workspace: {ambiguous_fixture_identities}"
+        )
+    if unwritable_source_ids:
+        raise AcceptanceError(
+            "composition fixtures cannot be installed into this campaign workspace: "
+            f"skill sources {unwritable_source_ids} are not writable and ready "
+            f"(writable: {writable_source_ids})"
+        )
+    if not surfaces_ready:
         raise AcceptanceError(
             "composition surfaces are not ready for this campaign: "
             f"status={composition_surfaces['status']} "
@@ -1367,6 +1748,12 @@ def preflight(
             "unresolved="
             f"{composition_surfaces.get('unresolved_required_skill_identities')} — "
             f"inspect {composition_surfaces['skills_url']}"
+        )
+    if not installed_revision_published:
+        raise AcceptanceError(
+            "composition fixtures were installed but the snapshot publishes other "
+            f"revisions: installed={installed_references} "
+            f"published={published_references}"
         )
     return client, health, result
 
@@ -1886,7 +2273,7 @@ class MissionRun:
 
     def run_parallel_wave(self, post_id: str) -> None:
         composition_instruction = (
-            "먼저 keeper_compose_mission-snapshot을 정확히 한 번 호출하고 그 typed 결과를 확인하세요. "
+            f"먼저 {INLINE_FIXTURE_TOOL}를 정확히 한 번 호출하고 그 typed 결과를 확인하세요. "
         )
         prompts = {
             "coordinator": (
@@ -1924,7 +2311,7 @@ class MissionRun:
             ),
             "researcher": (
                 composition_instruction
-                + "keeper_compose_background-snapshot을 정확히 한 번 제출하고 request_id를 보존하세요. "
+                + f"{ASYNC_FIXTURE_TOOL}를 정확히 한 번 제출하고 request_id를 보존하세요. "
                 + f"Mission {self.marker}. masc_fusion으로 'How should five resident agents preserve "
                 "progress when one work source fails?'를 비동기로 시작하세요. Fusion을 기다리거나 polling하지 말고 "
                 f"즉시 exact Task {self.task_ids['researcher']}를 claim하고, Board post {post_id}에 "
@@ -1950,7 +2337,7 @@ class MissionRun:
                 f"continuity-{step}",
                 (
                     f"Mission {self.marker}, continuity step {step}. "
-                    "keeper_compose_mission-snapshot을 정확히 한 번 호출하세요. "
+                    f"{INLINE_FIXTURE_TOOL}를 정확히 한 번 호출하세요. "
                     f"Board post {post_id}에서 {previous}를 확인한 다음 CONTINUITY_STEP_{step} "
                     "comment를 남기세요. 최초 turn의 continuity secret은 다시 쓰거나 추측하지 마세요."
                 ),
@@ -1968,6 +2355,14 @@ class MissionRun:
                 "MASC_COMPOSITION_KEEPER_NAME": self.roles["coordinator"],
                 "MASC_COMPOSITION_EXPECTED_BASE_PATH": self.expected_base_path,
                 "MASC_COMPOSITION_BROWSER_ARTIFACT_DIR": str(browser_dir),
+                # The browser proof looks for one run of the inline fixture
+                # and expands the node whose input came from another node's
+                # output; the fixture shape is this runner's, so it is handed
+                # over rather than restated in the script.
+                "MASC_COMPOSITION_INLINE_NODES": json.dumps(
+                    list(INLINE_FIXTURE_NODES)
+                ),
+                "MASC_COMPOSITION_EXPANDED_NODE": INLINE_FIXTURE_DATAFLOW_NODE,
                 "MASC_GOAL_VERIFICATION_GOAL_ID": self.verifier_goal_id,
                 "MASC_GOAL_VERIFICATION_RUN_ID": str(
                     self.goal_verifier_evidence.get("proven_run_id", "")
@@ -2934,11 +3329,11 @@ class MissionRun:
                 and len({row.get("tool_use_id") for row in rows}) == expected_count
             )
 
-        inline_runs = composition_runs("keeper_compose_mission-snapshot")
-        async_runs = composition_runs("keeper_compose_background-snapshot")
-        autonomous_inline_runs = autonomous_composition_runs(
-            "keeper_compose_mission-snapshot"
-        )
+        inline_runs = composition_runs(INLINE_FIXTURE_TOOL)
+        async_runs = composition_runs(ASYNC_FIXTURE_TOOL)
+        autonomous_inline_runs = autonomous_composition_runs(INLINE_FIXTURE_TOOL)
+        inline_node_count = len(INLINE_FIXTURE_NODES)
+        inline_row_count = len(required_inline_turn_labels) * inline_node_count
         composition_rows = [row for rows in inline_runs.values() for row in rows]
         inline_turn_runs: dict[str, tuple[str, list[dict[str, Any]]]] = {}
         inline_turn_errors: list[str] = []
@@ -2952,7 +3347,7 @@ class MissionRun:
             turn_rows = [
                 row
                 for row in rows_for_turn(role, turn)
-                if row.get("composition_tool") == "keeper_compose_mission-snapshot"
+                if row.get("composition_tool") == INLINE_FIXTURE_TOOL
             ]
             run_ids = {
                 row.get("composition_run_id")
@@ -2968,19 +3363,19 @@ class MissionRun:
             outer_rows = [
                 row
                 for row in rows_for_turn(role, turn)
-                if row.get("tool") == "keeper_compose_mission-snapshot"
+                if row.get("tool") == INLINE_FIXTURE_TOOL
             ]
             parent_ids = {row.get("parent_tool_use_id") for row in run_rows}
             node_ids = {row.get("composition_node_id") for row in run_rows}
             if (
-                len(run_rows) != 4
+                len(run_rows) != inline_node_count
                 or len(outer_rows) != 1
-                or node_ids != {"clock", "board", "board-peer", "memory"}
+                or node_ids != set(INLINE_FIXTURE_NODES)
                 or len(parent_ids) != 1
                 or next(iter(parent_ids)) != outer_rows[0].get("tool_use_id")
                 or not all(row.get("disposition") == "completed" for row in run_rows)
                 or not all(has_nested_settlement_evidence(row) for row in run_rows)
-                or not has_unique_nested_identities(run_rows, 4)
+                or not has_unique_nested_identities(run_rows, inline_node_count)
             ):
                 inline_turn_errors.append(f"{label}:invalid_rows={len(run_rows)}")
                 continue
@@ -3015,15 +3410,17 @@ class MissionRun:
             for row in rows
         }
         inline_row_universe_exact = (
-            len(inline_action_rows) == 56
-            and len(full_inline_action_rows) == 56
-            and len(accepted_inline_row_identities) == 56
+            len(inline_action_rows) == inline_row_count
+            and len(full_inline_action_rows) == inline_row_count
+            and len(accepted_inline_row_identities) == inline_row_count
             and full_inline_row_identities == accepted_inline_row_identities
         )
         inline_action_identities_globally_unique = (
-            len(inline_action_rows) == 56
-            and len({row.get("execution_id") for row in inline_action_rows}) == 56
-            and len({row.get("tool_use_id") for row in inline_action_rows}) == 56
+            len(inline_action_rows) == inline_row_count
+            and len({row.get("execution_id") for row in inline_action_rows})
+            == inline_row_count
+            and len({row.get("tool_use_id") for row in inline_action_rows})
+            == inline_row_count
         )
 
         researcher_turn = self.turns.get("parallel-researcher")
@@ -3035,7 +3432,7 @@ class MissionRun:
         async_submit_rows = [
             row
             for row in researcher_rows
-            if row.get("tool") == "keeper_compose_background-snapshot"
+            if row.get("tool") == ASYNC_FIXTURE_TOOL
         ]
         async_status_rows = [
             row for row in researcher_rows if row.get("tool") == "keeper_composition_status"
@@ -3125,36 +3522,39 @@ class MissionRun:
                 any(
                     row.get("composition_node_id") == node
                     and row.get("batch_index") == 0
-                    and row.get("batch_size") == 3
+                    and row.get("batch_size") == len(INLINE_FIXTURE_PARALLEL_NODES)
                     and row.get("execution_mode") == "concurrent"
                     for row in rows
                 )
-                for node in ("clock", "board", "board-peer")
+                for node in INLINE_FIXTURE_PARALLEL_NODES
             )
             for rows in required_inline_rows
         )
-        sequential_dataflow_observed = len(required_inline_rows) > 0 and all(
-            any(
+
+        def dataflow_observed(rows: list[dict[str, Any]]) -> bool:
+            source_outputs = [
+                parse_json_maybe(row.get("output", ""))
+                for row in rows
+                if row.get("composition_node_id")
+                == INLINE_FIXTURE_DATAFLOW_SOURCE_NODE
+            ]
+            if len(source_outputs) != 1 or not isinstance(source_outputs[0], dict):
+                return False
+            source_value = source_outputs[0].get(INLINE_FIXTURE_DATAFLOW_SOURCE_FIELD)
+            return isinstance(source_value, str) and any(
                 isinstance(row.get("input"), dict)
-                and row["input"].get("query") == clock_output.get("now_iso")
+                and row["input"].get(INLINE_FIXTURE_DATAFLOW_INPUT_FIELD)
+                == source_value
                 and row.get("batch_index") == 1
                 and row.get("batch_size") == 1
-                and row.get("execution_mode") == "serial"
+                and row.get("execution_mode") == INLINE_FIXTURE_DATAFLOW_EXECUTION_MODE
                 and row.get("disposition") == "completed"
                 for row in rows
-                if row.get("composition_node_id") == "memory"
+                if row.get("composition_node_id") == INLINE_FIXTURE_DATAFLOW_NODE
             )
-            for rows in required_inline_rows
-            for clock_output in [
-                parse_json_maybe(
-                    next(
-                        row.get("output", "")
-                        for row in rows
-                        if row.get("composition_node_id") == "clock"
-                    )
-                )
-            ]
-            if isinstance(clock_output, dict)
+
+        sequential_dataflow_observed = len(required_inline_rows) > 0 and all(
+            dataflow_observed(rows) for rows in required_inline_rows
         )
         typed_context_observed = bool(composition_rows) and all(
             isinstance(row.get("composition_run_id"), str)
@@ -3466,26 +3866,31 @@ class MissionRun:
                 and inline_run_ids_globally_unique
                 and inline_row_universe_exact
                 and inline_action_identities_globally_unique,
-                f"exact completed inline runs={len(inline_turn_runs)}/14 "
+                f"exact completed inline runs={len(inline_turn_runs)}/"
+                f"{len(required_inline_turn_labels)} "
                 f"errors={inline_turn_errors} unattributed={sorted(unattributed_inline_runs)} "
                 f"autonomous={sorted(autonomous_inline_runs)}",
             ),
             "composition_parallel_schedule_observed": (
                 parallel_schedule_observed,
-                "clock/board/board-peer share exact concurrent batch 0 of size 3",
+                f"{'/'.join(INLINE_FIXTURE_PARALLEL_NODES)} share exact concurrent "
+                f"batch 0 of size {len(INLINE_FIXTURE_PARALLEL_NODES)}",
             ),
             "composition_sequential_dataflow_observed": (
                 sequential_dataflow_observed,
-                "memory node receives typed clock output in serial batch 1",
+                f"{INLINE_FIXTURE_DATAFLOW_NODE} input "
+                f"{INLINE_FIXTURE_DATAFLOW_INPUT_FIELD} equals the same run's "
+                f"{INLINE_FIXTURE_DATAFLOW_SOURCE_NODE} output "
+                f"{INLINE_FIXTURE_DATAFLOW_SOURCE_FIELD} alone in batch 1",
             ),
             "composition_async_observed": (
                 len(async_runs) == 1
                 and async_outer_terminal
                 and all(
                     role == "researcher"
-                    and len(rows) == 2
+                    and len(rows) == len(ASYNC_FIXTURE_NODES)
                     and {row.get("composition_node_id") for row in rows}
-                    == {"clock", "board"}
+                    == set(ASYNC_FIXTURE_NODES)
                     and all(
                         row.get("composition_execution") == "async"
                         and row.get("disposition") == "completed"
@@ -3497,7 +3902,7 @@ class MissionRun:
                         == async_submit_rows[0].get("tool_use_id")
                         for row in rows
                     )
-                    and has_unique_nested_identities(rows, 2)
+                    and has_unique_nested_identities(rows, len(ASYNC_FIXTURE_NODES))
                     for (role, _), rows in async_runs.items()
                 )
                 and composition_run_ids_globally_unique
@@ -3513,11 +3918,12 @@ class MissionRun:
                 self.browser_proof.get("schema")
                 == "masc.keeper_composition_browser_evidence.v1"
                 and self.browser_proof.get("keeper") == self.roles["coordinator"]
-                and self.browser_proof.get("nodes")
-                == ["board", "board-peer", "clock", "memory"]
+                and self.browser_proof.get("nodes") == sorted(INLINE_FIXTURE_NODES)
                 and self.browser_proof.get("execution") == "inline"
                 and self.browser_proof.get("dispositions")
-                == ["completed", "completed", "completed", "completed"]
+                == ["completed"] * len(INLINE_FIXTURE_NODES)
+                and self.browser_proof.get("expanded_node")
+                == INLINE_FIXTURE_DATAFLOW_NODE
                 and self.browser_proof.get("input_visible") is True
                 and self.browser_proof.get("output_visible") is True
                 and isinstance(self.browser_proof.get("screenshot_sha256"), str)
@@ -4191,7 +4597,8 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     try:
-        catalog = load_catalog(pathlib.Path(args.catalog))
+        catalog_path = pathlib.Path(args.catalog)
+        catalog = load_catalog(catalog_path)
         runtime_by_role = parse_runtime_by_role(args.runtime_by_role_json)
         validate_runtime_strategy(
             runtime_id=args.runtime_id,
@@ -4249,38 +4656,48 @@ def main() -> int:
                 "take on this lane and model, measured, not assumed (r6 glm-5-turbo "
                 "fit 150s; r8 glm-5.3 builder turns ran 200-250s)"
             )
+        # A run installs its composition fixtures inside preflight, so every
+        # argument the run needs is settled before that first write.
+        if args.run:
+            if not args.allow_mutation:
+                raise AcceptanceError("--run requires explicit --allow-mutation")
+            if not args.expected_base_path:
+                raise AcceptanceError("--run requires exact --expected-base-path")
+            if not args.expected_source_sha:
+                raise AcceptanceError("--run requires exact --expected-source-sha")
+            if not args.output_dir:
+                raise AcceptanceError("--run requires --output-dir")
+            if not args.token_file:
+                raise AcceptanceError("--run requires --token-file")
+            if not args.browser_proof_script:
+                raise AcceptanceError("--run requires --browser-proof-script")
+            if not args.turn_settle_budget_sec > 0:
+                raise AcceptanceError(
+                    "--turn-settle-budget must be positive, got "
+                    f"{args.turn_settle_budget_sec!r}"
+                )
+            runtime_receipt = runtime_strategy_receipt(
+                runtime_id=args.runtime_id,
+                runtime_by_role=runtime_by_role,
+                require_heterogeneous=args.require_heterogeneous_runtimes,
+            )
+            output_dir = pathlib.Path(args.output_dir).resolve()
+            prepare_output_dir(output_dir)
         client, health, preflight_result = preflight(
             catalog=catalog,
+            catalog_path=catalog_path,
             mcp_url=args.mcp_url,
             health_url=health_url,
             token=token,
             timeout=args.timeout,
             expected_base_path=args.expected_base_path,
             expected_source_sha=args.expected_source_sha,
+            install_fixtures=args.run,
         )
         if args.preflight:
             print(json.dumps(preflight_result, ensure_ascii=False, indent=2))
             return 0
 
-        if not args.allow_mutation:
-            raise AcceptanceError("--run requires explicit --allow-mutation")
-        runtime_receipt = runtime_strategy_receipt(
-            runtime_id=args.runtime_id,
-            runtime_by_role=runtime_by_role,
-            require_heterogeneous=args.require_heterogeneous_runtimes,
-        )
-        if not args.expected_base_path:
-            raise AcceptanceError("--run requires exact --expected-base-path")
-        if not args.expected_source_sha:
-            raise AcceptanceError("--run requires exact --expected-source-sha")
-        if not args.output_dir:
-            raise AcceptanceError("--run requires --output-dir")
-        if not args.token_file:
-            raise AcceptanceError("--run requires --token-file")
-        if not args.browser_proof_script:
-            raise AcceptanceError("--run requires --browser-proof-script")
-        output_dir = pathlib.Path(args.output_dir).resolve()
-        prepare_output_dir(output_dir)
         writer = EvidenceWriter(output_dir)
         writer.write_json("health.json", health)
         writer.write_json("preflight.json", preflight_result)

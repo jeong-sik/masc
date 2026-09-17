@@ -2571,6 +2571,21 @@ let post_keeper_github_login_streaming ~clock ~(host : string) ~(port : int)
       Error (named_refusal "github-login" ~status ~body)
   | Ok (Masc_http_client.Pool.Streamed _) -> Ok ()
 
+(** POST /api/v1/keepers/:name/github-token — set a personal access token (PAT)
+    for the selected keeper. *)
+let post_keeper_github_token ~(host : string) ~(port : int)
+    ~(keeper_name : string) ~(token : string) ?(hostname = "github.com") () :
+    (Yojson.Safe.t, string) result =
+  let path =
+    Printf.sprintf "/api/v1/keepers/%s/github-token"
+      (percent_encode_path_segment keeper_name)
+  in
+  let body =
+    Yojson.Safe.to_string
+      (`Assoc [ "token", `String token; "hostname", `String hostname ])
+  in
+  post_json ~host ~port ~path ~body
+
 (** Fetch what the working tree holds for one file ([GET /api/v1/git/diff]).
 
     The other half of the diff story. A file change says what a keeper tried

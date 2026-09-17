@@ -2765,6 +2765,10 @@ let keeper_github_action_cmd name doc run =
       $ keeper_github_keeper_arg
       $ keeper_github_hostname_arg)
 
+let keeper_github_token_arg =
+  let doc = "Personal access token (PAT). If omitted, read from standard input." in
+  Arg.(value & opt (some string) None & info [ "token" ] ~docv:"TOKEN" ~doc)
+
 let keeper_github_cmd =
   let login =
     keeper_github_action_cmd
@@ -2789,6 +2793,64 @@ let keeper_github_cmd =
           prerr_endline message;
           1
         | Ok lane -> Keeper_github_identity.run_cli_login ~lane)
+  in
+  let set_token =
+    let invoke base_path keeper_name hostname token_opt =
+      let config = Workspace_utils.default_config base_path in
+      if not (Keeper_config.validate_name keeper_name)
+      then (
+        prerr_endline (Printf.sprintf "invalid keeper name: %s" keeper_name);
+        1)
+      else
+        let token =
+          match token_opt with
+          | Some tok -> String.trim tok
+          | None ->
+            if Unix.isatty Unix.stdin then (
+              prerr_string "Enter GitHub personal access token (PAT): ";
+              flush stderr;
+              String.trim (read_line ()))
+            else
+              let ch = In_channel.input_all stdin in
+              String.trim ch
+        in
+        if String.equal token "" then (
+          prerr_endline "token must not be empty";
+          1)
+        else
+          match Keeper_meta_store.read_effective_meta config keeper_name with
+          | Error message ->
+            prerr_endline message;
+            1
+          | Ok None ->
+            prerr_endline (Printf.sprintf "keeper %S not found" keeper_name);
+            1
+          | Ok (Some meta) ->
+            Eio_main.run
+            @@ fun env ->
+            Process_eio.init
+              ~cwd_default:(Eio.Stdenv.cwd env)
+              ~proc_mgr:(Eio.Stdenv.process_mgr env)
+              ~clock:(Eio.Stdenv.clock env);
+            match Keeper_github_login_lane.for_keeper ~config ~meta ~hostname with
+            | Error message ->
+              prerr_endline message;
+              1
+            | Ok lane ->
+              Keeper_github_identity.run_cli_set_token
+                ~lane
+                ~base_path:config.Workspace.base_path
+                ~keeper_name:meta.Keeper_meta_contract.name
+                ~token
+    in
+    Cmd.v
+      (Cmd.info "set-token" ~doc:"Set a personal access token (e.g. Fine-grained PAT) for a Keeper.")
+      Term.(
+        const invoke
+        $ base_path
+        $ keeper_github_keeper_arg
+        $ keeper_github_hostname_arg
+        $ keeper_github_token_arg)
   in
   (* Status and logout still read and write this host's directory. For a
      Remote_ssh Keeper they therefore answer about the host, which is what
@@ -2816,7 +2878,7 @@ let keeper_github_cmd =
   in
   Cmd.group
     (Cmd.info "keeper-github" ~doc:"Manage Keeper-specific GitHub CLI identity.")
-    [ login; status; logout ]
+    [ login; set_token; status; logout ]
 
 let build_commit_cmd_exit () =
   match Build_identity.embedded_commit with

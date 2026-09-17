@@ -2,6 +2,13 @@ open Alcotest
 open Masc
 module Store = Keeper_checkpoint_store
 
+(* What the operator's window currently says. The store takes the window as an
+   argument -- it is reachable from a raw Domain, where reading a setting
+   raises -- so every caller names it. These cases are not about the window and
+   pass what production passes. *)
+let history_retained () =
+  Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained
+
 let () = Server_startup_state.mark_state_ready () |> Result.get_ok
 
 let make_checkpoint ~session_id ~turn_count ~marker =
@@ -89,7 +96,8 @@ let test_survives_canonical_and_history () = with_session (fun session_dir ->
   for turn_count = 2 to 21 do
     let b = {a with Agent_core.Checkpoint.turn_count; created_at=float_of_int turn_count;
                     messages=(make_checkpoint ~session_id:"session" ~turn_count ~marker:"B active").messages} in
-    (match Store.save_agent_core_classified ~session_dir b with Ok _ -> () | Error e -> fail e)
+    (match Store.save_agent_core_classified
+      ~history_retained:(history_retained ()) ~session_dir b with Ok _ -> () | Error e -> fail e)
   done;
   check int "rolling archive actually pruned" 3
     (List.length (Store.list_agent_core_history_files ~session_dir));
@@ -109,7 +117,8 @@ let test_same_reference_retry () = with_session (fun session_dir ->
 
 let test_missing_never_uses_canonical () = with_session (fun session_dir ->
   let a, snapshot = accepted "canonical only" in
-  (match Store.save_agent_core_classified ~session_dir a with Ok _ -> () | Error e -> fail e);
+  (match Store.save_agent_core_classified
+    ~history_retained:(history_retained ()) ~session_dir a with Ok _ -> () | Error e -> fail e);
   match Store.load_retained_exact_snapshot ~session_dir ~reference:(Store.exact_snapshot_reference snapshot) with
   | Error (Store.Source_unavailable Store.Ref_not_found) -> ()
   | _ -> fail "missing retained artifact fell back to canonical")
@@ -126,7 +135,8 @@ let test_corruption_is_never_repaired () =
     (match Store.retain_exact_snapshot ~session_dir snapshot with
      | Store.Not_installed _ -> () | Store.Installed _ -> fail "corrupt evidence was silently repaired");
     check string "corrupt bytes retained" bytes (read path);
-    (match Store.save_agent_core_classified ~session_dir {a with turn_count=2} with Ok _ -> () | Error e -> fail e);
+    (match Store.save_agent_core_classified
+      ~history_retained:(history_retained ()) ~session_dir {a with turn_count=2} with Ok _ -> () | Error e -> fail e);
     match Store.load_agent_core ~session_dir ~session_id:"session" with
     | Ok b -> check int "unrelated canonical remains usable" 2 b.turn_count
     | Error _ -> fail "corruption poisoned unrelated canonical")) [false;true]

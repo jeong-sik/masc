@@ -10,6 +10,7 @@
 
     - [keeper_lifecycle] — heartbeat / supervisor / restart limits
     - [keeper_handoff] — handoff threshold / cooldown / pressure
+    - [keeper_retention] — how much of a keeper's past each store keeps
     - [keeper_diagnostics] — snapshot / hb tuning / profiling ring
     - [keeper_turn] / [keeper_proactive] / [keeper_rules] — keeper LLM tuning surfaces
     - [schedule_retention] — how long a finished schedule stays in the ledger
@@ -36,6 +37,12 @@ val keeper_snapshot_sec : int Runtime_params.param
 
 val keeper_work_as_hb_enabled : bool Runtime_params.param
 (** Enable work-as-heartbeat fallback. *)
+
+val keeper_checkpoint_history_retained : int Runtime_params.param
+(** How many past checkpoints of a session are kept beside the canonical one.
+    Each is a whole checkpoint, 111MB on a live keeper, and one dashboard
+    checkpoint request decodes every one it finds beyond the newest, which is
+    what caps the range at \[0, 12\]. *)
 
 val keeper_stage_timing_ring_size : int Runtime_params.param
 (** Stage-timing ring buffer size.  Applied on fiber restart only —

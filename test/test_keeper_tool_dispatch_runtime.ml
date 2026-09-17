@@ -1,5 +1,12 @@
 open Alcotest
 
+(* What the operator's window currently says. The store takes the window as an
+   argument -- it is reachable from a raw Domain, where reading a setting
+   raises -- so every caller names it. These cases are not about the window and
+   pass what production passes. *)
+let history_retained () =
+  Masc.Runtime_params.get Masc.Runtime_settings.keeper_checkpoint_history_retained
+
 (* The Gate replay/resolution wording lives in managed prompt templates
    under the config/prompts/keeper.gate_replay prefix; without a loaded
    registry the
@@ -31,8 +38,7 @@ module Workspace = Masc.Workspace
 module Publication_availability =
   Masc.Keeper_publication_recovery_availability
 module Recovery_test = Fs_compat_test_support.Publication_recovery_for_testing
-module Capability_write_test =
-  Fs_compat_test_support.Capability_write_for_testing
+module Capability_write_test = Fs_compat_test_support.Capability_write_for_testing
 
 let tool_ok ?(tool_name = "") message =
   Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
@@ -8937,7 +8943,8 @@ let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_un
       let original = {original with Agent_core.Checkpoint.session_id; context;
         messages=[Agent_core.Types.user_msg "Finish the original research";
           Agent_core.Types.assistant_msg "Earlier completed effect receipt remains available"]} in
-      Checkpoint.save_agent_core_classified ~session_dir original |> require "original checkpoint" |> ignore;
+      Checkpoint.save_agent_core_classified
+        ~history_retained:(history_retained ()) ~session_dir original |> require "original checkpoint" |> ignore;
       if checkpoint_failure then (
         let channel = open_out_bin (Filename.concat session_dir "accepted-checkpoints") in
         output_string channel "retention destination is not a directory";
@@ -9002,7 +9009,8 @@ let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_un
               messages=original.messages @ List.init index (fun offset ->
                 Agent_core.Types.user_msg ("Independent history " ^ string_of_int (offset + 1)));
               created_at=original.created_at +. float_of_int index} in
-            (match Checkpoint.save_agent_core_classified ~session_dir later |> require "rolling history during accepted-store outage" with
+            (match Checkpoint.save_agent_core_classified
+              ~history_retained:(history_retained ()) ~session_dir later |> require "rolling history during accepted-store outage" with
              | Checkpoint.Saved _ -> ()
              | _ -> fail "rolling history was not installed")
           done);
@@ -9057,7 +9065,8 @@ let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_un
         [Agent_core.Types.user_msg "Independent newer user context"];
         turn_count=original.turn_count + (if retention_rollover then 21 else 1);
         context=newer_context; created_at=original.created_at +. 21.} in
-      (match Checkpoint.save_agent_core_classified ~session_dir newer |> require "newer history" with
+      (match Checkpoint.save_agent_core_classified
+        ~history_retained:(history_retained ()) ~session_dir newer |> require "newer history" with
        | Checkpoint.Saved _ -> ()
        | _ -> fail "newer history was not installed");
       let before_reconcile = Checkpoint.load_agent_core_exact_snapshot ~session_dir ~session_id

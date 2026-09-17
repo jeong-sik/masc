@@ -107,6 +107,32 @@ organization's approved secret-file procedure.
 For a planned host-key rotation, verify the new fingerprint out of band and
 rerun with `--replace-host-key`. Never use that flag merely to clear a mismatch.
 
+### Tools and environment the host declares
+
+A keeper's command does not run in a login shell. The shim builds its
+environment: `PATH=/usr/local/bin:/usr/bin:/bin`, `HOME`, `USER`, `TMPDIR`, and
+the request values the endpoint's `env_allowlist` admits. A host whose tools
+live in a venv, conda or a CUDA install declares that in
+`/etc/masc-exec-shim.conf`:
+
+```text
+path=/opt/venv/bin:/usr/local/bin:/usr/bin:/bin
+env_file=/etc/masc-exec-shim.env
+```
+
+- `path=` is the payload `PATH` and the directories the shim looks programs up
+  in.
+- `env_file=` names a file of `NAME=VALUE` lines (docker `--env-file` grammar,
+  values taken byte for byte) that every payload runs with, for example
+  `VIRTUAL_ENV=/opt/venv` or `LD_LIBRARY_PATH=/usr/local/cuda/lib64`. The
+  request denylist does not apply to it; `PATH` is refused there because
+  `path=` declares it. Request values admitted by `env_allowlist` replace the
+  file's values.
+
+The bootstrap rewrites `/etc/masc-exec-shim.conf` with `remote_root` and
+`env_allowlist` only, so add these lines again after every bootstrap run
+(masc#36918).
+
 ## 4. Create or migrate a keeper
 
 Use both fields in the same update:

@@ -83,6 +83,65 @@ let handle_keeper_github_login_post state req reqd =
            | Error _ -> ())
 ;;
 
+let handle_keeper_github_token_post state req reqd body_str =
+  let req_path = Http.Request.path req in
+  let name = extract_keeper_name_for_suffix req_path keeper_suffix_github_token in
+  let config = Mcp_server.workspace_config state in
+  if name = "" then respond_error reqd "keeper name is required"
+  else if not (Keeper_config.validate_name name) then
+    respond_error reqd (Printf.sprintf "invalid keeper name: %s" name)
+  else
+    let parsed =
+      try
+        let json = Yojson.Safe.from_string body_str in
+        let token =
+          match Json_util.assoc_member_opt "token" json with
+          | Some (`String s) when String.trim s <> "" -> Ok (String.trim s)
+          | _ -> Error "token is required and must be a non-empty string"
+        in
+        let hostname =
+          match Json_util.assoc_member_opt "hostname" json with
+          | Some (`String s) when String.trim s <> "" -> String.trim s
+          | _ ->
+            (match Server_utils.query_param req "hostname" with
+             | Some h -> h
+             | None -> "github.com")
+        in
+        match token with
+        | Ok tok -> Ok (tok, hostname)
+        | Error err -> Error err
+      with
+      | Yojson.Json_error msg -> Error (Printf.sprintf "invalid json: %s" msg)
+      | exn -> Error (Printexc.to_string exn)
+    in
+    match parsed with
+    | Error msg -> respond_error ~status:`Bad_request reqd msg
+    | Ok (token, hostname) ->
+      match Keeper_meta_store.read_effective_meta config name with
+      | Error message -> respond_error ~status:`Internal_server_error reqd message
+      | Ok None ->
+        respond_error ~status:`Not_found reqd (Printf.sprintf "keeper %S not found" name)
+      | Ok (Some meta) ->
+        match Keeper_github_login_lane.for_keeper ~config ~meta ~hostname with
+        | Error message -> respond_error ~status:`Internal_server_error reqd message
+        | Ok lane ->
+          match
+            Keeper_github_identity.set_token
+              ~lane
+              ~base_path:config.Workspace.base_path
+              ~keeper_name:name
+              ~token
+          with
+          | Ok observation ->
+            Http.Response.json_value
+              ~compress:true
+              ~request:req
+              (Keeper_github_identity.observation_to_yojson observation)
+              reqd
+          | Error message ->
+            respond_error ~status:`Bad_request reqd message
+;;
+
 let declared_provider_id json =
   match Json_util.assoc_member_opt "provider" json with
   | Some (`String value) when String.trim value <> "" -> Ok (String.trim value)

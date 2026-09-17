@@ -174,11 +174,12 @@ fi
 
 echo "PROBE_OK marker=${MARKER} written by the keeper"
 # The marker proves a file appeared; the receipt proves where the command ran.
-# Kept in a heredoc rather than -c, because the nested quoting of a one-liner
-# inside this shell string is what broke the first version of this block.
-docker exec "${NAME}" sh -c \
-  'find /opt/masc-bench/base/.masc/tool_calls -name "*.jsonl" -exec tail -1 {} +' \
-  | python3 <<'PYEOF' || true
+# The program is written as a heredoc, because the nested quoting of a one-liner
+# inside this shell string is what broke the first version of this block, and
+# handed over with -c. `python3 <<'PYEOF'` made the heredoc python's stdin: the
+# program was read from it and the piped tool calls never arrived, so this
+# printed nothing and `|| true` hid that (masc#36909).
+receipt_summary="$(cat <<'PYEOF'
 import json, sys
 for line in sys.stdin:
     line = line.strip()
@@ -195,3 +196,7 @@ for line in sys.stdin:
           "| host:", result.get("remote_host"),
           "| boundary:", (receipt[0].get("receipt") or {}).get("boundary"))
 PYEOF
+)"
+docker exec "${NAME}" sh -c \
+  'find /opt/masc-bench/base/.masc/tool_calls -name "*.jsonl" -exec tail -1 {} +' \
+  | python3 -c "${receipt_summary}" || true

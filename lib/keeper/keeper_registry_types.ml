@@ -17,8 +17,12 @@ exception Operator_interrupt
 (* One string for every [Operator_interrupt] terminal (ledger rows, queued
    outcomes, tool responses) so the incident class stays greppable as one
    thing. The classification itself is typed on the exception; this is only
-   the human-facing detail. *)
-let operator_interrupt_detail = "operator interrupted the turn"
+   the human-facing detail, and the typed request failure renders it
+   (RFC-0454 D2) so the chat row and this path cannot word it apart. *)
+let operator_interrupt_detail =
+  Keeper_request_failure.summary
+    { Keeper_request_failure.cause = Keeper_request_failure.Operator_cancelled }
+;;
 
 (* Recursive classifier for every shape Eio can deliver the interrupt in:
    bare at the [Switch.run] boundary, [Cancelled]-wrapped inside the switch,

@@ -339,6 +339,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-outlive-process-adoption | 턴보다 오래 사는 프로세스가 머지됐는데도 죽는다 — 채택 갭을 먼저 진단한다 | Draft | - |
 | RFC-per-keeper-github-cli-identity | Keeper-specific GitHub CLI identity | Draft | - |
 | RFC-prompts-and-tool-definitions-outside-ocaml | 프롬프트와 도구 정의를 OCaml 밖으로 — 모델이 읽는 모든 글은 config 파일이 소유한다 | Draft | - |
+| RFC-provider-declared-backpressure | 공급자가 밀어내면 그 엔드포인트의 허가 수를 줄인다 | Draft | - |
 | RFC-provider-path-rest | 사용량 제한은 그 경로만 쉬게 하고, Keeper 는 다음에 보낼 경로의 쉼만 기다린다 | Draft | - |
 | RFC-runtime-load-failure-reaches-the-operator | 설정을 못 읽은 이유가 화면까지 닿는다 | Draft | - |
 | RFC-runtime-note-field-and-dashboard-surfacing | Per-runtime note field & dashboard surfacing | Draft | - |

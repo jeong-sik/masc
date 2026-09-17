@@ -184,6 +184,12 @@ printf '%s' "$final" > "$final_file"
 # Written beside the target and renamed into place: the agent reads this file
 # right after the script returns, and a reader must never see half of it.
 tmp_result="$(mktemp "${RESULT_JSON}.XXXXXX")"
+# A report from run_episode.sh that was already running when harbor's time
+# limit ended the episode (its parent script is killed, this child is not)
+# must not replace the interrupted report.
+episode_reported_interrupted() {
+  [[ "$MODE" != "--interrupted" && -e "$INTERRUPTED_MARK" ]]
+}
 jq -n \
   --arg state "$state" \
   --argjson interrupted "$interrupted" \
@@ -203,6 +209,10 @@ jq -n \
     cache_read_tokens:($usage.cache_read_tokens // null),
     final:($final_raw | map(select(type=="object")) | last // {})}' \
   > "$tmp_result"
+if episode_reported_interrupted; then
+  rm -f "$tmp_result" "$final_file"
+  exit 1
+fi
 mv "$tmp_result" "$RESULT_JSON"
 rm -f "$final_file"
 cat "$RESULT_JSON"

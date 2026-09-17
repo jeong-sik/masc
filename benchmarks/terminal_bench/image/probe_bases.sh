@@ -19,8 +19,14 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 BENCH_DIR="$(dirname "$HERE")"
-DIST_DIR="${BENCH_DIR}/dist"
-PLATFORM="${PROBE_PLATFORM:-linux/amd64}"
+# The Docker daemon's own platform unless told otherwise: harbor builds task
+# images for it (agents/masc_dist.py), so that is what a task container runs.
+PLATFORM="${PROBE_PLATFORM:-$(docker version --format '{{.Server.Os}}/{{.Server.Arch}}')}"
+case "${PLATFORM}" in
+  linux/amd64) DIST_DIR="${BENCH_DIR}/dist/linux-x64" ;;
+  linux/arm64) DIST_DIR="${BENCH_DIR}/dist/linux-arm64" ;;
+  *) echo "no MASC release binary for platform ${PLATFORM}" >&2; exit 2 ;;
+esac
 TIMEOUT_SEC="${PROBE_TIMEOUT_SEC:-600}"
 
 DEFAULT_IMAGES=(

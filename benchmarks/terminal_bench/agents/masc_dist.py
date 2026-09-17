@@ -1,0 +1,62 @@
+"""Which prebuilt binaries go into a task container.
+
+Harbor builds a Terminal-Bench 4.0 task image from the task's Dockerfile with
+no platform set, so the image takes the Docker daemon's own architecture:
+arm64 on Apple Silicon, amd64 on a Linux x86 host or Modal. A base image that
+publishes a single architecture still runs as that one, emulated. The
+architecture is therefore a property of each container. It is read from the
+container at install time, not taken from the host or from a fetch setting.
+
+image/fetch_masc.sh places both release architectures under dist/linux-x64 and
+dist/linux-arm64.
+"""
+from __future__ import annotations
+
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from harbor.agents.installed.base import BaseInstalledAgent
+    from harbor.environments.base import BaseEnvironment
+
+# `uname -m` inside the container -> the dist/ directory fetch_masc.sh fills.
+# MASC releases Linux binaries for these two only.
+DIST_DIR_BY_MACHINE = {
+    "x86_64": "linux-x64",
+    "aarch64": "linux-arm64",
+}
+
+REQUIRED_BINARIES = ("masc", "masc-exec-shim")
+# gh is needed only when the keeper is given a GitHub login: the remote_ssh
+# preflight runs `gh auth status` when the endpoint has a hosts.yml, and
+# gh_seed.sh writes one only from GH_TOKEN.
+GH_BINARY = "gh"
+
+
+async def container_binaries(
+    agent: BaseInstalledAgent,
+    environment: BaseEnvironment,
+    bench_root: Path,
+    *,
+    with_gh: bool,
+) -> list[Path]:
+    """The binaries to upload for this container's architecture."""
+    result = await agent.exec_as_root(environment, "uname -m")
+    machine = (result.stdout or "").strip()
+    dist_dir_name = DIST_DIR_BY_MACHINE.get(machine)
+    if dist_dir_name is None:
+        raise RuntimeError(
+            f"task container architecture {machine!r} has no MASC release "
+            f"binary; releases cover {sorted(DIST_DIR_BY_MACHINE)}"
+        )
+    dist_dir = bench_root / "dist" / dist_dir_name
+    binaries = [dist_dir / name for name in REQUIRED_BINARIES]
+    if with_gh:
+        binaries.append(dist_dir / GH_BINARY)
+    missing = [str(binary) for binary in binaries if not binary.exists()]
+    if missing:
+        raise RuntimeError(
+            f"{machine} task container needs {', '.join(missing)}; "
+            "run image/fetch_masc.sh first"
+        )
+    return binaries

@@ -26,7 +26,8 @@ class FakeEnv:
         self.commands.append(command)
 
         class R:
-            stdout = ""
+            # The container architecture masc_dist.container_binaries reads.
+            stdout = "x86_64\n" if command.endswith("uname -m") else ""
             stderr = ""
             returncode = 0
             return_code = 0
@@ -39,7 +40,6 @@ def _provider_key(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     # keeper_up's remote_ssh preflight refuses without a gh identity, and
     # bootstrap writes the keeper's hosts.yml from this token.
-    monkeypatch.setenv("GH_TOKEN", "test-gh-token")
 
 
 def make_agent(tmp_path, **kw):
@@ -153,10 +153,10 @@ def test_install_adds_masc_on_top_of_claude_code(tmp_path, monkeypatch):
     import masc_sidecar
 
     fake_root = tmp_path / "bench-root"
-    (fake_root / "dist").mkdir(parents=True)
+    (fake_root / "dist" / "linux-x64").mkdir(parents=True)
     (fake_root / "driver").mkdir()
     for name in ("masc", "masc-exec-shim"):
-        (fake_root / "dist" / name).write_bytes(b"")
+        (fake_root / "dist" / "linux-x64" / name).write_bytes(b"")
     (fake_root / "driver" / "bootstrap.sh").write_text("")
     monkeypatch.setattr(masc_sidecar, "BENCH_ROOT", fake_root)
 

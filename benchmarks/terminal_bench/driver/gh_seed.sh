@@ -1,10 +1,11 @@
 # Shared bench helpers for seeding a per-keeper gh identity.
 #
+# A keeper has a GitHub identity only when this writes its hosts.yml. The
 # remote_ssh preflight (keeper_sandbox_remote.perform_preflight) runs
-# `gh auth status` with GH_CONFIG_DIR=<keeper root>/.config/gh and refuses
-# keeper_up without a GitHub identity (remote_github_identity_missing).
+# `gh auth status` with GH_CONFIG_DIR=<keeper root>/.config/gh only for an
+# endpoint that has one, and skips the identity step otherwise (#35412).
 # Both bootstrap.sh (keeper pool standup) and run_episode.sh (episode
-# keepers) need the same seeded hosts.yml, so the one recipe lives here.
+# keepers) seed the same way, so the one recipe lives here.
 
 # seed_gh_hosts <keeper-name>
 # Writes <root>/<keeper-name>/.config/gh/hosts.yml from ${GH_TOKEN}.

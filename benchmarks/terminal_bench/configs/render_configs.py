@@ -73,13 +73,18 @@ def denied_tools(spec: dict) -> list[str]:
         denied += DELEGATE_TOOLS
     return denied
 
+# The endpoint's remote_root: a directory per keeper, owned by the task image's
+# user whose commands run there (driver/endpoint_account.sh BENCH_REMOTE_ROOT,
+# compared in tests/test_endpoint_account.py).
+REMOTE_ROOT = "/opt/masc-bench/remote"
+
 # Canonical bench keeper instructions. Rendered into every keeper profile TOML
 # (keeper_up requires non-empty keeper.instructions); run_episode.sh passes
 # the same text on the keeper_up call.
 KEEPER_INSTRUCTIONS = (
     "You are an autonomous engineering agent inside a Linux container. "
     "Complete the task by running shell commands (your tool calls execute in "
-    "this container as root). Work directly; do not ask questions. "
+    "this container). Work directly; do not ask questions. "
     "When the task is verifiably done, finish."
 )
 
@@ -152,7 +157,7 @@ cli_slots = ["{runtime_id}"]
 [exec.ssh.endpoints.local]
 host = "127.0.0.1"
 user = "root"
-remote_root = "/root"
+remote_root = "{remote_root}"
 port = 22
 identity_file = "/opt/masc-bench/ssh/id_ed25519"
 
@@ -201,7 +206,7 @@ cli_slots = ["{runtime_id}"]
 [exec.ssh.endpoints.local]
 host = "127.0.0.1"
 user = "root"
-remote_root = "/root"
+remote_root = "{remote_root}"
 port = 22
 identity_file = "/opt/masc-bench/ssh/id_ed25519"
 
@@ -503,7 +508,8 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
             turn_timeout_s=OFFICIAL_CLIENT_TURN_TIMEOUT_S,
             wall_clock_ceiling_s=OFFICIAL_CLIENT_WALL_CLOCK_CEILING_S,
             fusion=str(spec["fusion"]).lower(),
-            max_concurrent=4 if spec["parallel"] else 1)
+            max_concurrent=4 if spec["parallel"] else 1,
+            remote_root=REMOTE_ROOT)
         if spec["skills"]:
             runtime_toml += "\n" + seed_skills_block()
         (root / "runtime.toml").write_text(runtime_toml)
@@ -522,6 +528,7 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
         binding_id=binding_id,
         effort=effort, fusion=str(spec["fusion"]).lower(),
         max_concurrent=4 if spec["parallel"] else 1,
+        remote_root=REMOTE_ROOT,
         effort_lines=(
             f'reasoning-effort = "{effort}"\nthinking-support = true\n'
             if pcfg["capabilities_base"] in EFFORT_CAPABLE_BASES else ""),

@@ -1926,11 +1926,46 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
     }
 ;;
 
-(* Parse one provider table ([<provider>.*]) into its Layer-3 bindings.
-   Each direct sub-key is a model binding. Layer-4 aliases ([<p>.<m>.<a>])
-   are dropped: when a model entry contains nested sub-tables (the former
-   alias declarations), only the model's own leaf fields are used to build
-   the binding; the nested sub-tables are ignored. *)
+(* The keys a model binding declares, as [parse_binding_fields] reads them.
+   Anything else under [<provider>.<model>] is refused, a nested table
+   included: a misspelled [context-high-water-token] would otherwise load as a
+   binding without marks, and the provider's overflow refusal would then have
+   nothing declared to evict against. *)
+let binding_keys =
+  [ "enabled"
+  ; "is-default"
+  ; "wizard-default"
+  ; "max-concurrent"
+  ; "context-high-water-tokens"
+  ; "context-low-water-tokens"
+  ; "max-tokens"
+  ; "price-input"
+  ; "price-output"
+  ; "keep-alive"
+  ; "num-ctx"
+  ; "repeat-penalty"
+  ; "repeat-last-n"
+  ; "return-progress"
+  ]
+;;
+
+let unknown_binding_keys ~path entries =
+  List.concat_map
+    (fun (key, _) ->
+       if List.mem key binding_keys
+       then []
+       else
+         error
+           (path ^ "." ^ key)
+           (Printf.sprintf
+              "unknown binding key %S; a model binding declares only %s"
+              key
+              (String.concat ", " binding_keys)))
+    entries
+;;
+
+(* Parse one provider table ([<provider>.*]) into its bindings. Each direct
+   sub-key is a model binding table. *)
 let parse_provider_table (provider_id : string) (tbl : Otoml.t)
   : (Runtime_schema.binding list, parse_error list) result
   =
@@ -1938,17 +1973,21 @@ let parse_provider_table (provider_id : string) (tbl : Otoml.t)
   partition_results
     (List.map
        (fun (model_id, sub) ->
+          let path = Printf.sprintf "%s.%s" provider_id model_id in
           if is_toml_table sub
           then (
-            (* [sub] is TomlTable/TomlInlineTable (per [is_toml_table]); both
-               unwrap to a (key, value) list via [Otoml.get_table]. The
-               nested sub-tables (Layer-4 aliases) are filtered out so the
-               binding is built from this model's own leaf fields only. *)
-            let fields = Otoml.get_table sub in
-            let leaf_fields = List.filter (fun (_, v) -> not (is_toml_table v)) fields in
-            let synthetic_tbl = Otoml.TomlTable leaf_fields in
-            parse_binding_fields provider_id model_id synthetic_tbl)
-          else parse_binding_fields provider_id model_id sub)
+            match unknown_binding_keys ~path (Otoml.get_table sub) with
+            | [] -> parse_binding_fields provider_id model_id sub
+            | errors -> Error errors)
+          else
+            Error
+              (error
+                 path
+                 (Printf.sprintf
+                    "[%s] holds model bindings; %S must be a [%s] table"
+                    provider_id
+                    model_id
+                    path)))
        entries)
 ;;
 

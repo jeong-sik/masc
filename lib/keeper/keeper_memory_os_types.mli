@@ -12,6 +12,7 @@ val wire_field_reason : string
 (** On a librarian claim: the short id of the dropped memory this claim
     continues (RFC-0418). *)
 val wire_field_supersedes : string
+val wire_field_absorbs : string
 
 (** Claim-object fields accepted from the librarian and rendered in retry
     prompts. *)
@@ -130,6 +131,14 @@ val wire_json_field
 type dropped_statement =
   { memory_id : string
   ; reason : string
+  }
+
+(** A current memory a new claim now says (RFC-0456 §4.2): [absorbed] leaves
+    the snapshot and its row goes to {!Keeper_memory_absorbed}; [into] is the
+    new claim's identity. No reason: the new claim is the reason. *)
+type absorbed_statement =
+  { absorbed : string
+  ; into : string
   }
 
 val dropped_statement_to_json : dropped_statement -> Yojson.Safe.t

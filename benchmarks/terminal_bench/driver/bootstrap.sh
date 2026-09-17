@@ -48,10 +48,17 @@ source "$BENCH/driver/deps.sh"
 bench_install_deps
 
 # The remote_ssh exec lane runs `masc-exec-shim` on the remote PATH; the
-# "remote" here is this same container, so install the static binary system-wide.
-install -m 0755 "$BENCH/bin/masc-exec-shim" /usr/local/bin/masc-exec-shim
+# "remote" here is this same container. The name is a wrapper that runs the
+# static binary as the task image's user, the account harbor's own agents run
+# their commands as (endpoint_account.sh).
+# shellcheck source-path=SCRIPTDIR source=endpoint_account.sh
+source "$BENCH/driver/endpoint_account.sh"
+bench_install_shim_as_image_user "$BENCH/bin/masc-exec-shim"
 # The shim refuses to run without its config (exec_shim.mli): remote_root must
-# match the endpoint's remote_root in the rendered runtime.toml (/root).
+# match the endpoint's remote_root in the rendered runtime.toml
+# (BENCH_REMOTE_ROOT), which belongs to root and holds a directory per keeper
+# that belongs to the image's user.
+install -d -m 0755 "$BENCH_REMOTE_ROOT"
 #
 # The shim replaces the payload PATH with its fixed default
 # (/usr/local/bin:/usr/bin:/bin) unless the endpoint names one with `path=`, the
@@ -62,9 +69,6 @@ install -m 0755 "$BENCH/bin/masc-exec-shim" /usr/local/bin/masc-exec-shim
 # the same container finds (21 of the 66 4.0.0 tasks put tools in a directory
 # outside the default, masc#36907). The shim refuses empty and relative
 # entries, so those are left out; a repeated entry is kept once.
-# Through release 0.35.19 the shim looks up an argv program in its own
-# process PATH rather than this one, so only `sh -c` payloads see it until
-# the lookup fix (masc#36916) ships.
 shim_path=""
 IFS=':' read -r -a path_entries <<<"${PATH}"
 for entry in "${path_entries[@]}"; do
@@ -72,9 +76,19 @@ for entry in "${path_entries[@]}"; do
   [[ ":${shim_path}:" == *":${entry}:"* ]] && continue
   shim_path="${shim_path:+${shim_path}:}${entry}"
 done
+# The image's other environment variables reach the payloads through env_file=
+# (endpoint_env.sh). The shim reads the config and the env file only when root
+# or its own account owns them and no one else may write them, so both are
+# root-owned 0644.
+# shellcheck source-path=SCRIPTDIR source=endpoint_env.sh
+source "$BENCH/driver/endpoint_env.sh"
+bench_pid1_environ "$(bench_image_uid)" "$(bench_image_gid)" \
+  | bench_endpoint_env_lines "$BENCH/endpoint-env-left-out.tsv" > /etc/masc-exec-shim.env
+chmod 644 /etc/masc-exec-shim.env
 {
-  printf 'remote_root=/root\n'
+  printf 'remote_root=%s\n' "$BENCH_REMOTE_ROOT"
   if [[ -n "${shim_path}" ]]; then printf 'path=%s\n' "${shim_path}"; fi
+  printf 'env_file=/etc/masc-exec-shim.env\n'
 } > /etc/masc-exec-shim.conf
 chmod 644 /etc/masc-exec-shim.conf
 
@@ -147,14 +161,14 @@ for _ in $(seq 1 60); do
     # stance; the model addresses keepers that already exist.
     if [[ -n "${BENCH_KEEPER_POOL:-}" ]]; then
       pool_instructions="You are an autonomous engineering agent inside a Linux \
-container. Your tool calls execute in this container as root. Do exactly what \
+container. Your tool calls execute in this container. Do exactly what \
 you are asked, verify it, and stop. Do not ask questions."
       IFS=',' read -r -a pool <<< "${BENCH_KEEPER_POOL}"
       pool_id=300
       for k in "${pool[@]}"; do
         # remote_ssh preflight requires <remote_root>/<name> to exist. A GitHub
         # identity only when GH_TOKEN is given (gh_seed.sh).
-        mkdir -p "/root/${k}"
+        bench_keeper_root "${k}"
         seed_gh_hosts "${k}"
         pool_id=$((pool_id + 1))
         mcp_call "${pool_id}" masc_keeper_up "$(jq -cn \

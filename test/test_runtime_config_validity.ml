@@ -2824,6 +2824,45 @@ let test_runtime_toml_reports_both_mistyped_context_marks () =
     check bool "low-water error kept" true (names "local.sample.context-low-water-tokens")
 ;;
 
+(* A binding declares a closed set of keys. A misspelled mark must stop the
+   load at its own path, not load as a binding without marks. *)
+let binding_with_extra line =
+  "[providers.local]\n\
+   protocol = \"openai-compatible-http\"\n\
+   endpoint = \"http://127.0.0.1:1/v1\"\n\
+   \n\
+   [models.sample]\n\
+   api-name = \"sample\"\n\
+   max-context = 1024\n\
+   \n\
+   [local.sample]\n\
+   is-default = true\n\
+   context-low-water-tokens = 300\n"
+  ^ line
+  ^ "\n[runtime]\ndefault = \"local.sample\"\n"
+;;
+
+let test_runtime_toml_rejects_an_unknown_binding_key () =
+  match Runtime_toml.parse_string (binding_with_extra "context-high-water-token = 900\n") with
+  | Ok _ -> fail "a misspelled mark must not load"
+  | Error errs ->
+    check bool "the error names the misspelled key" true
+      (List.exists
+         (fun (err : Runtime_toml.parse_error) ->
+            String.equal err.path "local.sample.context-high-water-token")
+         errs)
+;;
+
+let test_runtime_toml_rejects_a_table_inside_a_binding () =
+  match Runtime_toml.parse_string (binding_with_extra "context-high-water-tokens = 900\n\n[local.sample.alias]\nname = \"x\"\n") with
+  | Ok _ -> fail "a table inside a binding must not load"
+  | Error errs ->
+    check bool "the error names the nested table" true
+      (List.exists
+         (fun (err : Runtime_toml.parse_error) -> String.equal err.path "local.sample.alias")
+         errs)
+;;
+
 let test_runtime_context_marks_failure_renders_both_numbers () =
   let text =
     Runtime.to_diagnostic_text
@@ -5193,6 +5232,10 @@ let () =
             test_runtime_toml_reports_both_mistyped_context_marks;
           test_case "context marks failure renders its numbers" `Quick
             test_runtime_context_marks_failure_renders_both_numbers;
+          test_case "an unknown binding key is refused" `Quick
+            test_runtime_toml_rejects_an_unknown_binding_key;
+          test_case "a table inside a binding is refused" `Quick
+            test_runtime_toml_rejects_a_table_inside_a_binding;
           test_case "non-positive max-concurrent is rejected" `Quick
             test_runtime_toml_rejects_non_positive_max_concurrent;
           test_case "max-concurrent flows from binding to provider config" `Quick

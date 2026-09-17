@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
+  parseExpectedInlineNodes,
   selectCompleteInlineRun,
   waitForKeeperComposerReady,
 } from './keeper-composition-browser-evidence.mjs'
@@ -18,6 +19,13 @@ const tokenFile = required('MASC_COMPOSITION_DASHBOARD_TOKEN_FILE')
 const keeperName = required('MASC_COMPOSITION_KEEPER_NAME')
 const expectedBasePath = required('MASC_COMPOSITION_EXPECTED_BASE_PATH')
 const artifactDir = required('MASC_COMPOSITION_BROWSER_ARTIFACT_DIR')
+const expectedInlineNodes = parseExpectedInlineNodes(required('MASC_COMPOSITION_INLINE_NODES'))
+const expandedNode = required('MASC_COMPOSITION_EXPANDED_NODE')
+if (!expectedInlineNodes.includes(expandedNode)) {
+  throw new Error(
+    `expanded node ${expandedNode} is not one of the inline nodes ${JSON.stringify(expectedInlineNodes)}`,
+  )
+}
 const goalVerificationGoalId = required('MASC_GOAL_VERIFICATION_GOAL_ID')
 // Optional on purpose: when the RW23 phase left no proven run (#32597), the
 // composition proof still runs and the goal-verification measurement records
@@ -101,18 +109,18 @@ try {
     execution: node.getAttribute('data-composition-execution'),
     disposition: node.getAttribute('data-tool-call-disposition'),
   })))
-  const complete = selectCompleteInlineRun(rows)
+  const complete = selectCompleteInlineRun(rows, expectedInlineNodes)
   if (!complete) {
     throw new Error(`no complete inline composition run in inspector rows: ${JSON.stringify(rows)}`)
   }
 
   const [compositionRunId, runRows] = complete
-  const exactMemoryRow = page.locator(
-    `[data-composition-run="${compositionRunId}"][data-composition-node="memory"]`,
+  const expandedRow = page.locator(
+    `[data-composition-run="${compositionRunId}"][data-composition-node="${expandedNode}"]`,
   )
-  await exactMemoryRow.locator('button[aria-expanded="false"]').click()
-  await exactMemoryRow.getByLabel('도구 호출 입력 복사').waitFor()
-  await exactMemoryRow.getByLabel('도구 호출 출력 복사').waitFor()
+  await expandedRow.locator('button[aria-expanded="false"]').click()
+  await expandedRow.getByLabel('도구 호출 입력 복사').waitFor()
+  await expandedRow.getByLabel('도구 호출 출력 복사').waitFor()
 
   const pageMeasurements = await page.evaluate(() => ({
     document_width: document.documentElement.scrollWidth,
@@ -128,9 +136,9 @@ try {
     execution: 'inline',
     dispositions: runRows.map(row => row.disposition),
     visible_composition_rows: rows.length,
-    expanded_node: 'memory',
-    input_visible: await exactMemoryRow.getByLabel('도구 호출 입력 복사').isVisible(),
-    output_visible: await exactMemoryRow.getByLabel('도구 호출 출력 복사').isVisible(),
+    expanded_node: expandedNode,
+    input_visible: await expandedRow.getByLabel('도구 호출 입력 복사').isVisible(),
+    output_visible: await expandedRow.getByLabel('도구 호출 출력 복사').isVisible(),
     viewport,
     ...pageMeasurements,
     screenshot_file: 'keeper-composition-inspector.png',
@@ -216,7 +224,6 @@ try {
   }
   process.stdout.write(`${JSON.stringify({
     composition: measurement,
-    persistence: persistenceMeasurement,
     goal_verification: goalVerificationMeasurement,
   })}\n`)
 } catch (error) {

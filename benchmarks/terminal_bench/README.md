@@ -10,7 +10,7 @@ MASC 하네스 자체를 Terminal-Bench 4.0.0 전체로 잰다.
 
 ## 준비
 
-    ./image/fetch_masc.sh                         # 최신 릴리스, linux-x64 와 linux-arm64 둘 다
+    ./image/fetch_masc.sh                         # 최신 릴리스(`image/min_masc_version` 이상), linux-x64 와 linux-arm64 둘 다
     uv venv -p 3.12 && uv pip install -r requirements.txt   # harbor 0.23.0 고정
     export ANTHROPIC_API_KEY=...                  # 모델 제공자 키 (아래 레인 표)
 
@@ -25,7 +25,7 @@ MASC 하네스 자체를 Terminal-Bench 4.0.0 전체로 잰다.
   masc keeper 작업 레인 안에서는 rootless podman 이 이미지를 받은 뒤 컨테이너 실행 단계
   (`mount proc`)에서 권한 거부로 멈췄다(#36905 리뷰 실측).
 - `GH_TOKEN` 은 선택이다. 주면 keeper 가 GitHub 로그인을 갖고 `gh` 도 같이 올라간다.
-  주지 않으면 remote_ssh 사전 점검이 신원 확인을 건너뛴다(v0.35.15+, #35488).
+  주지 않으면 remote_ssh 사전 점검이 신원 확인을 건너뛴다(#35488).
   주면 전체 실행의 모든 태스크 컨테이너에 그 토큰이 들어간다.
 
 ## 한 태스크 스모크
@@ -182,12 +182,15 @@ deps.sh 는 패키지 매니저 계열(apt/dnf/apk)을 감지하고, 런타임 �
 
 ## 4.0.0 에서 아직 맞지 않는 조건
 
-- keeper 명령은 태스크 이미지가 선언한 환경변수(`VIRTUAL_ENV`, `PYTHONPATH`, 서비스 주소 등)를
-  보지 못한다. `masc-exec-shim` 이 페이로드 환경을 새로 만들기 때문이다 — #36907.
-- `PATH` 는 bootstrap 이 컨테이너의 PATH 를 shim 설정 `path=` 로 넘긴다. 다만 릴리스
-  v0.35.19 의 shim 은 argv 로 부른 프로그램을 자기 프로세스 PATH(sshd 세션)에서 찾기
-  때문에, 지금은 `sh -c` 로 실행한 명령에만 효과가 있다. shim 이 `path=` 에서 찾도록
-  고친 #36916 이 릴리스되면 argv 명령에도 적용된다.
+- 태스크 이미지가 선언한 환경변수 가운데 shim 이 받지 않는 이름(GitHub 토큰 이름,
+  `GH_CONFIG_DIR`·`GIT_TERMINAL_PROMPT`)과 여러 줄 값은 keeper 명령에 닿지 않는다.
+  나머지는 bootstrap 이 컨테이너 PID 1 의 환경을 PID 1 소유자 권한(`setpriv`)으로 읽어
+  shim `env_file=` 로 옮기고(`driver/endpoint_env.sh`), `PATH` 는 `path=` 로 넘긴다.
+  뺀 이름은 bootstrap 의 stderr 에만 찍힌다. harbor 는 그 출력을 trial.log 에 DEBUG 로
+  남기되 앞 250자와 뒤 750자만 남기므로(`_truncate_output`), 긴 설치 출력 사이에서는 사라질 수 있다.
+- 이미지가 root 가 아닌 사용자로 도는 태스크(`rs-archive-clone`, `risk-scorer-replay`,
+  `fp8-rmsnorm-gemm`)에서도 keeper 명령은 root 로 돈다. `env_file=` 은 그 이미지 사용자의
+  `HOME` 을 넘기므로, root 로 도는 명령이 그 사용자의 HOME 을 쓴다.
 - 태스크가 선언한 `mcp_servers`(medical-claims-processing)와 `skills_dir`
   (cumulative-layout-shift)를 keeper 에 연결하지 않는다 — #36908
 - GPU 태스크 3개는 GPU 를 주는 환경(`BENCH_ENV=modal`)에서만 돈다. 이 호스트에는 Modal

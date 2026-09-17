@@ -9,6 +9,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from agents.masc_agent import MascAgent  # noqa: E402
+import masc_dist  # noqa: E402
 
 
 class FakeResult:
@@ -52,11 +53,15 @@ def _provider_key(monkeypatch):
     monkeypatch.delenv("GH_TOKEN", raising=False)
 
 
-def fake_bench(tmp_path, dist_dir="linux-x64", names=("masc", "masc-exec-shim")):
+def fake_bench(tmp_path, dist_dir="linux-x64", names=("masc", "masc-exec-shim"),
+               version=None):
     root = tmp_path / "bench"
     (root / "dist" / dist_dir).mkdir(parents=True)
     for name in names:
         (root / "dist" / dist_dir / name).write_text("")
+    # image/fetch_masc.sh records the release it fetched; the floor by default.
+    fetched = masc_dist.MIN_VERSION_FILE.read_text() if version is None else version
+    (root / "dist" / ".version").write_text(fetched)
     (root / "driver").mkdir()
     return root
 
@@ -201,6 +206,41 @@ def test_a_missing_architecture_names_the_fetch_step(tmp_path, monkeypatch):
     env.machine = "aarch64"
     with pytest.raises(RuntimeError, match="fetch_masc.sh"):
         install_into(tmp_path, monkeypatch, fake_bench(tmp_path, dist_dir="linux-x64"), env)
+
+
+# --- the fetched release must be one the bootstrap works with --------------
+#
+# An older shim refuses the bootstrap's env_file= per command, after install
+# and keeper_up have passed, so the task would score zero instead of the run
+# being refused. The check reads dist/.version before anything reaches the
+# container.
+
+
+@pytest.mark.parametrize("version, reason", [
+    ("0.35.19", "older than"),
+    ("0.35.20-rc1", "not an X.Y.Z release"),
+    ("v0.35.20", "not an X.Y.Z release"),
+])
+def test_a_release_the_bootstrap_cannot_use_is_refused_before_upload(
+        tmp_path, monkeypatch, version, reason):
+    env = FakeEnv()
+    with pytest.raises(RuntimeError, match=reason):
+        install_into(tmp_path, monkeypatch, fake_bench(tmp_path, version=version), env)
+    assert env.uploads == []
+
+
+def test_a_dist_without_a_recorded_release_names_the_fetch_step(tmp_path, monkeypatch):
+    root = fake_bench(tmp_path)
+    (root / "dist" / ".version").unlink()
+    env = FakeEnv()
+    with pytest.raises(RuntimeError, match="fetch_masc.sh"):
+        install_into(tmp_path, monkeypatch, root, env)
+    assert env.uploads == []
+
+
+def test_releases_compare_as_numbers():
+    assert masc_dist.release_version("0.35.100") > masc_dist.release_version("0.35.20")
+    assert masc_dist.release_version(" 0.35.20\n") == (0, 35, 20)
 
 
 # --- episode cost ----------------------------------------------------------

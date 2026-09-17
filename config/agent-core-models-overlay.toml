@@ -187,7 +187,10 @@ supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
 thinking_control_format = "none"
-reasoning_replay = "preserve_always"
+reasoning_streaming_format = "delta:reasoning"
+# Replay thinking blocks within the active user turn's tool loop, but drop
+# historical thinking from older completed turns to prevent multi-megabyte CoT accumulation.
+reasoning_replay = "latest_user_turn_tool_calls"
 supports_multimodal_inputs = true
 supports_image_input = true
 modality_priority = "visual_first"
@@ -365,7 +368,9 @@ supports_tool_choice = false
 supports_reasoning = true
 thinking_control_format = "none"
 reasoning_streaming_format = "delta:reasoning"
-reasoning_replay = "preserve_always"
+# Replay thinking blocks within the active user turn's tool loop, but drop
+# historical thinking from older completed turns to prevent multi-megabyte CoT accumulation.
+reasoning_replay = "latest_user_turn_tool_calls"
 supports_multimodal_inputs = true
 supports_image_input = true
 modality_priority = "visual_first"

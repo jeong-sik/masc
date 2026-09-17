@@ -17,8 +17,8 @@ not run, because its verdicts look real.
 
 Build targets include literal files in the stanza's (deps ...) as well as
 %{dep:...} environment values. This is not a Dune dependency-expression
-evaluator: glob, alias and variable-bearing deps remain owned by Dune's
-runtest action. A (source_tree DIR) dep is passed through as the target
+evaluator: glob, alias and deps under any variable other than
+%{project_root}/ and %{workspace_root}/ remain owned by Dune's runtest action. A (source_tree DIR) dep is passed through as the target
 `dune build DIR` accepts from the root -- building it is a normal build, not
 the runtest action, and a targeted run without it misses the tree the suite
 reads.
@@ -153,7 +153,30 @@ def collect_setenv(form) -> list[tuple[str, str]]:
     return found
 
 
-def collect_literal_deps(form) -> list[str]:
+# Dune variables that name the checkout root. This repository has one
+# dune-project and its dune-workspace at the root, so the project root and the
+# workspace root are both REPO_ROOT, and rewriting either prefix is not a guess.
+ROOT_VARS = ("%{project_root}/", "%{workspace_root}/")
+
+
+def literal_target(path: str, suite_dir: str) -> str | None:
+    """PATH as the stanza directory sees it, or None when only dune can name it.
+
+    A root variable becomes the way back from SUITE_DIR to the checkout root,
+    because main() prefixes every dep with SUITE_DIR. Any other variable stays
+    with Dune's runtest action: guessing it would hand `dune build` a literal
+    '%{...}', which fails the whole targeted build rather than the one suite.
+    """
+    if not VAR_RE.search(path):
+        return path
+    for var in ROOT_VARS:
+        rest = path[len(var):]
+        if path.startswith(var) and not VAR_RE.search(rest):
+            return os.path.join(os.path.relpath(".", suite_dir), rest)
+    return None
+
+
+def collect_literal_deps(form, suite_dir: str = DEFAULT_SUITE_DIR) -> list[str]:
     """Literal file targets required by a directly executed test action.
 
     Building the test executable does not build these action dependencies.
@@ -164,31 +187,24 @@ def collect_literal_deps(form) -> list[str]:
     if form[0] == "deps":
         collected = []
         for item in form[1:]:
-            if not isinstance(item, str):
+            if isinstance(item, str):
+                paths = [item]
+            elif item and item[0] == "source_tree":
                 # A list dep is a dependency expression: (source_tree DIR),
                 # (glob_files ...), (alias ...). Only source_tree names a
                 # target `dune build` accepts from the root -- the directory
                 # itself, which copies the tree into _build. The others name
                 # nothing a build target can be, so they stay with Dune's
                 # runtest action.
-                if item and item[0] == "source_tree":
-                    collected.extend(str(d) for d in item[1:] if isinstance(d, str))
+                paths = [d for d in item[1:] if isinstance(d, str)]
+            else:
                 continue
-            if VAR_RE.search(item):
-                # A %{project_root}/ dep names a file inside this checkout:
-                # the project root is what this script resolves against
-                # (REPO_ROOT), so rewriting the prefix is not a guess. The
-                # suite runs in test/ relative to the root, and the runner
-                # prefixes each dep with the stanza directory, so ../ keeps
-                # the target at the checkout root. Dune variables the reader
-                # cannot resolve stay refused -- guessing them would run the
-                # suite with a literal '%{...}'.
-                if item.startswith("%{project_root}/"):
-                    collected.append("../" + item[len("%{project_root}/"):])
-                continue
-            collected.append(item)
+            for path in paths:
+                target = literal_target(path, suite_dir)
+                if target is not None:
+                    collected.append(target)
         return collected
-    return [dep for item in form for dep in collect_literal_deps(item)]
+    return [dep for item in form for dep in collect_literal_deps(item, suite_dir)]
 
 
 def resolve(key: str, value: str) -> tuple[str, str | None]:
@@ -325,12 +341,12 @@ def stanza_text(suite: str, suite_dir: str = DEFAULT_SUITE_DIR) -> tuple[str, bo
 
 
 def suite_env(
-    suite: str, text: str, own_file: bool = True
+    suite: str, text: str, own_file: bool = True, suite_dir: str = DEFAULT_SUITE_DIR
 ) -> tuple[list[tuple[str, str]], list[str]]:
     forms = parse(tokenize(text))
     if own_file:
         pairs = collect_setenv(forms)
-        deps = collect_literal_deps(forms)
+        deps = collect_literal_deps(forms, suite_dir)
     else:
         pairs = []
         deps = []
@@ -356,7 +372,7 @@ def suite_env(
                 continue
             matched = True
             pairs.extend(collect_setenv(form))
-            deps.extend(collect_literal_deps(form))
+            deps.extend(collect_literal_deps(form, suite_dir))
         if unattributable:
             raise StanzaError(
                 "declared inline in this directory's dune next to a setenv "
@@ -578,6 +594,38 @@ def self_test() -> int:
     )
     check("glob and alias deps stay with dune's runtest action", deps, ["../lib"])
 
+    # test/dune's test_keeper_system_prompt_bytes carries (deps (source_tree
+    # %{workspace_root}/config/prompts) %{workspace_root}/test/fixtures/...).
+    # The source_tree branch used to pass the directory through unread, so a
+    # dispatch naming that suite built test/%{workspace_root}/config/prompts
+    # and dune failed the whole targeted build before any suite ran.
+    _, deps = suite_env(
+        "test_wsroot",
+        "(test (name test_wsroot)"
+        " (deps (source_tree %{workspace_root}/config/prompts)"
+        " %{workspace_root}/test/fixtures/golden))",
+    )
+    check(
+        "a %{workspace_root}/ dep, tree or file, resolves to the checkout root",
+        [os.path.normpath(os.path.join("test", d)) for d in deps],
+        ["config/prompts", "test/fixtures/golden"],
+    )
+    _, deps = suite_env(
+        "test_tree_var",
+        "(test (name test_tree_var) (deps (source_tree %{unknown_var}/tree)))",
+    )
+    check("a source_tree under a variable only dune can name is dropped", deps, [])
+    _, deps = suite_env(
+        "test_deep",
+        "(test (name test_deep) (deps %{project_root}/specs/a.tla))",
+        suite_dir="packages/agent_core/test",
+    )
+    check(
+        "a root dep from a deeper stanza directory still lands at the root",
+        [os.path.normpath(os.path.join("packages/agent_core/test", d)) for d in deps],
+        ["specs/a.tla"],
+    )
+
     env, deps = suite_env("test_gamma", FIXTURE_DEP)
     check("a dep value becomes its path", env, [("MASC_MAIN_EIO_EXE", "../bin/main_eio.exe")])
     check("and is reported as a target to build", deps, ["../bin/main_eio.exe"])
@@ -757,9 +805,16 @@ def check_all() -> int:
     for suite in names + inline:
         try:
             text, own_file = stanza_text(suite)
-            env, _ = suite_env(suite, text, own_file=own_file)
+            env, deps = suite_env(suite, text, own_file=own_file)
         except StanzaError as exc:
             print(f"{suite}: {exc}", file=sys.stderr)
+            broken += 1
+            continue
+        # A dep still naming a dune variable is handed to `dune build` as a
+        # literal and fails every suite in that dispatch, not just this one.
+        unresolved = [dep for dep in deps if VAR_RE.search(dep)]
+        if unresolved:
+            print(f"{suite}: deps name a dune variable: {unresolved}", file=sys.stderr)
             broken += 1
             continue
         if env:
@@ -800,7 +855,7 @@ def main(argv: list[str]) -> int:
     suite = args[1] if want_deps else args[0]
     try:
         text, own_file = stanza_text(suite, suite_dir)
-        env, deps = suite_env(suite, text, own_file=own_file)
+        env, deps = suite_env(suite, text, own_file=own_file, suite_dir=suite_dir)
     except StanzaError as exc:
         print(f"{suite}: {exc}", file=sys.stderr)
         return 1

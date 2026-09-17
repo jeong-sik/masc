@@ -21,6 +21,7 @@ let target =
       | Some Tui_types.Text_row_search -> "row-search"
       | Some Tui_types.Text_identity_app_form -> "identity-app-form"
       | Some Tui_types.Text_identity_filter -> "identity-filter"
+      | Some Tui_types.Text_github_token -> "github-token"
       | Some Tui_types.Text_browser_url -> "browser-url"
       | Some Tui_types.Text_ask_answer -> "ask-answer"
       | Some Tui_types.Text_board_draft -> "board-draft"))

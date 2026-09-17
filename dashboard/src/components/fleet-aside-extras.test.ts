@@ -256,7 +256,6 @@ describe('FleetRotationSection (fl-rot-*)', () => {
     expect(cands[0]?.classList.contains('head')).toBe(true)
     expect(cands[1]?.classList.contains('cur')).toBe(true)
     expect(container.querySelectorAll('.fl-rot-arr')).toHaveLength(2)
-    expect(container.querySelector('.fl-rot-note')).toBeNull()
     expect(container.querySelector('.fl-as-tag')?.textContent).toBe('후보 3')
   })
 

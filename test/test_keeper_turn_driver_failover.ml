@@ -496,6 +496,21 @@ let test_assignment_walk_order_is_the_declared_order () =
       Alcotest.(check (list string)) "the walk is the declared order"
         [ "primary.test_model"; "fallback.test_model" ] walk.Driver.order)
 
+(* A head under 429 backpressure walks behind its sibling. The declaration
+   does not move; only the order does, and it says so (RFC-0457 §3). *)
+let test_assignment_walk_order_demotes_a_resting_head () =
+  with_runtime_config runtime_toml_with_lane (fun () ->
+    let head = Option.get (Runtime.get_runtime_by_id "primary.test_model") in
+    Runtime_candidate_backpressure.note_rate_limit
+      ~candidate:head.Runtime.candidate_backpressure ~retry_after:None;
+    match Driver.assignment_walk_order ~now:(Unix.gettimeofday ()) "resilient" with
+    | Error _ -> Alcotest.fail "the lane resolves"
+    | Ok walk ->
+      Alcotest.(check (list string)) "the declaration is untouched"
+        [ "primary.test_model"; "fallback.test_model" ] walk.Driver.declared;
+      Alcotest.(check (list string)) "the resting head walks last"
+        [ "fallback.test_model"; "primary.test_model" ] walk.Driver.order)
+
 let test_assignment_walk_order_refuses_a_missing_assignment () =
   with_runtime_config runtime_toml_with_lane (fun () ->
     match Driver.assignment_walk_order ~now:(Unix.gettimeofday ()) "not.configured" with
@@ -3970,6 +3985,10 @@ let () =
             `Quick
             test_assignment_walk_order_is_the_declared_order;
           Alcotest.test_case
+            "assignment_walk_order demotes a resting head"
+            `Quick
+            test_assignment_walk_order_demotes_a_resting_head;
+          Alcotest.test_case
             "assignment_walk_order refuses a missing assignment"
             `Quick
             test_assignment_walk_order_refuses_a_missing_assignment;
@@ -4049,7 +4068,7 @@ let () =
             "attempt loop moves past a 402"
             `Quick
             test_attempt_loop_moves_past_payment_required;
-                    Alcotest.test_case
+          Alcotest.test_case
             "runtime dedupe preserves first occurrence"
             `Quick
             test_runtime_dedupe_preserves_first_occurrence;

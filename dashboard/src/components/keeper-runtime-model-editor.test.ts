@@ -464,6 +464,27 @@ describe('KeeperRuntimeModelEditor (read-only card)', () => {
       .toContain('assignment projection에 Keeper가 없습니다')
   })
 
+  it('shows an explicit lane assignment as its lane id', async () => {
+    refs.config = makeConfig({ selected_runtime_id: 'a.one' })
+    refs.resolved.mockResolvedValue(makeRuntimeResolved({
+      lanes: [
+        { id: 'lane-x', runtime_ids: ['a.one', 'b.two'] },
+      ],
+      assignments: [
+        { keeper: 'lane-keeper', assignment_source: 'explicit', resolved: { kind: 'lane', id: 'lane-x' } },
+      ],
+    }))
+    render(
+      html`<${KeeperRuntimeModelEditor} keeperName="lane-keeper" onOpenRuntimeConfig=${vi.fn()} />`,
+      container,
+    )
+    await flush()
+    await flush()
+
+    expect(container.querySelector('[data-testid="keeper-runtime-assignment-source"]')?.textContent?.trim())
+      .toBe('explicit → lane-x')
+  })
+
   it('surfaces a runtime-resolved fetch error instead of rendering an absent badge', async () => {
     refs.config = makeConfig({ selected_runtime_id: 'a.one' })
     refs.resolved.mockRejectedValue(new Error('runtime resolved unavailable'))

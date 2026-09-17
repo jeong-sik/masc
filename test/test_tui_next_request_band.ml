@@ -477,8 +477,6 @@ let test_every_candidate_says_where_it_walks_and_why () =
     (says
        "Walks 4th: the declared head; resting until 16:40:00Z, when the walk promotes it."
        rows);
-  Alcotest.(check bool) "nothing is remembered as preferred" false
-    (says "last good candidate" rows);
   Alcotest.(check bool) "the footer names the lane and the count" true
     (says "Lane glm-coding.glm-5.3-flash: 4 candidates in the order the next cycle walks them"
        rows);

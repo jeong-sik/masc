@@ -1584,7 +1584,7 @@ let run_named
       | Missing_runtime _ -> None)
     ~model_of:(function
       (* The served name comes from the same frozen snapshot as the quota
-         scope and preference above: a runtime.toml reload mid-walk must not
+         scope and backpressure above: a runtime.toml reload mid-walk must not
          turn the same-model refusal off by dropping the id from the table. *)
       | Resolved_runtime runtime -> Some runtime.Runtime.model.api_name
       | Missing_runtime _ -> None)

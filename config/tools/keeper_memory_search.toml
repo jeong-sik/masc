@@ -1,4 +1,7 @@
 name = "keeper_memory_search"
+
+# Reachable inside a keeper's shell line: `masc memory search <query>`.
+shell_command = "memory search"
 description = """
 Search your durable Memory OS facts or conversation history. Memory OS fact \
 results preserve snapshot order and include exact memory_id, category, and \

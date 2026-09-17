@@ -1,5 +1,8 @@
 name = "masc_tasks"
 title = "List Tasks"
+
+# Reachable inside a keeper's shell line: `masc tasks list`.
+shell_command = "tasks list"
 description = """
 List tasks in backlog with their status and assignee. Defaults to active \
 tasks (todo/claimed/in_progress/awaiting_verification). Use \

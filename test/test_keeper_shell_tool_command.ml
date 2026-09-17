@@ -13,6 +13,12 @@ let () =
     = Some ("masc_board_post_get", [ "p-1" ]));
   assert (K.split_words [ "board"; "list" ] = Some ("masc_board_list", []));
   assert (K.split_words [ "lane"; "status" ] = Some ("keeper_lane_status", []));
+  assert (K.split_words [ "tasks"; "list" ] = Some ("masc_tasks", []));
+  assert (
+    K.split_words [ "memory"; "search"; "lane" ]
+    = Some ("keeper_memory_search", [ "lane" ]));
+  assert (K.split_words [ "status" ] = Some ("masc_status", []));
+  assert (K.split_words [ "goal"; "list" ] = Some ("masc_goal_list", []));
   (* The path alone splits fine; the argument count is the schema's word,
      not the split's. *)
   assert (
@@ -55,7 +61,42 @@ let () =
             []
         with
         | Ok (`Assoc []) -> ()
-        | Ok _ | Error _ -> assert false)))
+        | Ok _ | Error _ -> assert false)));
+  (match Masc.Keeper_tool_runtime.descriptor_for_internal "keeper_memory_search" with
+   | None -> assert false
+   | Some descriptor ->
+     (match
+        Masc.Keeper_shell_tool_command.args_json_of_words ~descriptor [ "lane" ]
+      with
+      | Ok (`Assoc [ ("query", `String "lane") ]) -> ()
+      | Ok _ | Error _ -> assert false);
+     (match Masc.Keeper_shell_tool_command.args_json_of_words ~descriptor [] with
+      | Error message -> assert (String.length message > 0)
+      | Ok _ -> assert false));
+  (match Masc.Keeper_tool_runtime.descriptor_for_internal "masc_tasks" with
+   | None -> assert false
+   | Some descriptor ->
+     (match
+        Masc.Keeper_shell_tool_command.args_json_of_words ~descriptor []
+      with
+      | Ok (`Assoc []) -> ()
+      | Ok _ | Error _ -> assert false));
+  (match Masc.Keeper_tool_runtime.descriptor_for_internal "masc_status" with
+   | None -> assert false
+   | Some descriptor ->
+     (match
+        Masc.Keeper_shell_tool_command.args_json_of_words ~descriptor []
+      with
+      | Ok (`Assoc []) -> ()
+      | Ok _ | Error _ -> assert false));
+  (match Masc.Keeper_tool_runtime.descriptor_for_internal "masc_goal_list" with
+   | None -> assert false
+   | Some descriptor ->
+     (match
+        Masc.Keeper_shell_tool_command.args_json_of_words ~descriptor []
+      with
+      | Ok (`Assoc []) -> ()
+      | Ok _ | Error _ -> assert false))
 
 (* The surface a lane with no turn has (#32730). The host replays an approved
    effect with no descriptor lookup and no dispatch, so it cannot route a

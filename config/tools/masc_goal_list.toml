@@ -1,4 +1,7 @@
 name = "masc_goal_list"
+
+# Reachable inside a keeper's shell line: `masc goal list`.
+shell_command = "goal list"
 description = """
 List shared planning goals, optionally filtered by explicit lifecycle phase."""
 additional_properties = false

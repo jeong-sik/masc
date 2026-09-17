@@ -98,6 +98,7 @@ let with_bundle ?(history = []) ?(attached = true) ?(with_loader = true) f =
   let capability_surface =
     Keeper_capability_surface.create
       ~tool_deny:[]
+      ~sandbox_profile:Masc.Keeper_types_profile.Docker
       ~skill_names:None
       ~global_skill_catalog:Keeper_skill_catalog.empty
       ~skill_inventory:(Keeper_skill_inventory.of_snapshot snapshot)

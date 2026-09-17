@@ -30,6 +30,7 @@ disk there.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import shutil
@@ -45,6 +46,7 @@ if TYPE_CHECKING:
 
 BENCH_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BENCH_ROOT / "configs"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from render_configs import (  # noqa: E402
     ARMS,
@@ -52,6 +54,7 @@ from render_configs import (  # noqa: E402
     effective_runtime_id,
     render_arm,
 )
+from masc_dist import container_binaries  # noqa: E402
 
 REMOTE = "/opt/masc-bench"
 TOKEN_PATH = f"{REMOTE}/token"
@@ -64,7 +67,7 @@ MCP_SERVER_NAME = "masc"
 POOL_PROMPT = """\
 A MASC server runs in this container and is registered as the MCP server \
 `{server}`. A fleet of keeper agents is already running on it: {names}. Each \
-one executes its shell commands in this same container, as root.
+one executes its shell commands in this same container.
 
 - `masc_keeper_msg` gives a keeper work. `masc_keeper_status` and \
 `masc_keeper_list` report on what they are doing.
@@ -145,35 +148,25 @@ class MascSidecar:
             # for, before any of them is addressed. See the module docstring.
             "BENCH_KEEPER_POOL": ",".join(self.pool_names),
         }
-        # Required, not optional. bootstrap.sh brings the pool up with
-        # masc_keeper_up under `set -euo pipefail`, and keeper_up's remote_ssh
-        # preflight runs `gh auth status` against <keeper root>/.config/gh --
-        # which bootstrap only writes when this token is present. Left
-        # optional, a host with just the model-provider key fails setup inside
-        # keeper_up, where the message names a keeper rather than the missing
-        # credential.
-        gh_token = os.environ.get("GH_TOKEN")
-        if not gh_token:
-            raise RuntimeError(
-                "GH_TOKEN not set in harbor process env; the keeper pool's "
-                "remote_ssh preflight runs `gh auth status` and keeper_up "
-                "refuses without a GitHub identity"
-            )
-        env["GH_TOKEN"] = gh_token
+        # Optional. A keeper gets a GitHub login only when this is set:
+        # bootstrap writes hosts.yml from it, and the remote_ssh preflight
+        # runs `gh auth status` only for an endpoint that has one (#35412).
+        # _get_env also sees what `harbor run --ae` gives the agent, which harbor
+        # applies to every exec as well; os.environ alone would disagree with
+        # the container about whether a login was given.
+        gh_token = self._get_env("GH_TOKEN")
+        if gh_token:
+            env["GH_TOKEN"] = gh_token
         return env
 
     async def install_masc(self, environment: BaseEnvironment) -> None:
-        binaries = [BENCH_ROOT / "dist" / "masc", BENCH_ROOT / "dist" / "masc-exec-shim"]
-        for binary in binaries:
-            if not binary.exists():
-                raise RuntimeError("run image/fetch_masc.sh first")
-        # gh is required by the keeper_up preflight and is absent from debian
-        # stable, which most task base images use, so it ships in dist/ when
-        # fetched. deps.sh falls back to the package manager without it.
-        vendored_gh = BENCH_ROOT / "dist" / "gh"
-        if vendored_gh.exists():
-            binaries.append(vendored_gh)
-        config_dir = render_arm(self.arm, self.keeper_runtime_id, self.keeper_effort)
+        container_env = self.masc_container_env()
+        binaries = await container_binaries(
+            self, environment, BENCH_ROOT, with_gh="GH_TOKEN" in container_env)
+        # A lane may read provider limits over the network while rendering;
+        # harbor installs every trial in one event loop.
+        config_dir = await asyncio.to_thread(
+            render_arm, self.arm, self.keeper_runtime_id, self.keeper_effort)
         await self.exec_as_root(environment, f"mkdir -p {REMOTE}/bin")
         for binary in binaries:
             await environment.upload_file(binary, f"{REMOTE}/bin/{binary.name}")
@@ -189,8 +182,7 @@ class MascSidecar:
             environment,
             f"chmod +x {REMOTE}/bin/masc {REMOTE}/driver/*.sh && "
             f"bash {REMOTE}/driver/bootstrap.sh",
-            env=self.masc_container_env(),
-            timeout_sec=900,
+            env=container_env,
         )
 
 
@@ -311,6 +303,41 @@ async def merge_keeper_usage(
         # the keeper's half says so.
         "parent_fields_unreported": parent_unreported,
     }
+
+
+ENDPOINT_ENV_LEFT_OUT = f"{REMOTE}/endpoint-env-left-out.tsv"
+# Harbor's docker environment returns stderr inside stdout (masc_dist.UNAME_MARK),
+# so the JSON is printed on a marked line of its own.
+LEFT_OUT_MARK = "MASC_ENDPOINT_ENV_LEFT_OUT="
+
+
+async def merge_endpoint_env_left_out(
+    environment: BaseEnvironment, context: AgentContext
+) -> None:
+    """Carry the image variables the keepers ran without into the result.
+
+    The bootstrap records each one it could not hand to the shim
+    (driver/endpoint_env.sh). masc_agent reads it from collect_result.sh; arm K
+    never runs that script, so the record is read here.
+    """
+    if context.metadata is None:
+        context.metadata = {}
+    result = await environment.exec(
+        f"bash -c 'source {REMOTE}/driver/endpoint_env.sh && "
+        f"printf \"{LEFT_OUT_MARK}%s\\n\" \"$(bench_env_left_out_json {ENDPOINT_ENV_LEFT_OUT})\"'",
+        user="root",
+    )
+    output = result.stdout or ""
+    marked = [line[len(LEFT_OUT_MARK):] for line in output.splitlines()
+              if line.startswith(LEFT_OUT_MARK)]
+    if result.return_code != 0 or len(marked) != 1:
+        context.metadata["endpoint_env_left_out"] = {
+            "read_failed": (result.stderr or output)[-400:]}
+        return
+    try:
+        context.metadata["endpoint_env_left_out"] = json.loads(marked[0])
+    except json.JSONDecodeError as exc:
+        context.metadata["endpoint_env_left_out"] = {"read_failed": str(exc)}
 
 
 def read_token_guard() -> str:

@@ -281,7 +281,22 @@ the protocol. The shim:
 - synthesizes a documented minimal base env (`PATH`, `HOME`, `USER`, `TMPDIR`)
   and overlays only endpoint-allowlisted request entries, minus a
   reserved-name denylist (`PATH`, `HOME`, `LD_PRELOAD`, `LD_LIBRARY_PATH`,
-  `DYLD_*`, `BASH_ENV`, `ENV`) that is never accepted from the wire;
+  `DYLD_*`, `BASH_ENV`, `ENV`) that is never accepted from the wire.
+  Between the two sits the environment the endpoint declares: the file its
+  shim config's `env_file=` names, `NAME=VALUE` lines in docker's
+  `--env-file` grammar. The file is endpoint-resident like `path=`, so the
+  denylist does not apply to it, but it may not declare `PATH`, which
+  `path=` owns, the GitHub token names (`GH_TOKEN`, `GITHUB_TOKEN`,
+  `GH_ENTERPRISE_TOKEN`, `GITHUB_ENTERPRISE_TOKEN`), or the names the runner
+  sets for each request (`GH_CONFIG_DIR`, `GIT_TERMINAL_PROMPT`). The shim
+  refuses the request when that path is not a regular file, when the file is
+  owned by neither root nor the shim's effective uid, or when its group or
+  every user may write it — all decided from the opened descriptor before a
+  byte is read, so a FIFO at the path is refused rather than waited on — and
+  when the file cannot be read or has a malformed line. The shim config
+  file is held to the same owner and mode rule, since whoever writes it names
+  `path=` and `env_file=`. A boxed run still sets `HOME` and `TMPDIR` to its
+  scratch;
 - `setsid()` the child into its own process group and sets
   `PR_SET_PDEATHSIG=SIGKILL` pre-exec (covers the shim dying first);
 - while the child runs, selects on the child's stdout/stderr pipes, shim stdin

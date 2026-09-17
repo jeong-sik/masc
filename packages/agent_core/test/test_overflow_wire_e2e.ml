@@ -47,8 +47,10 @@ let stop_reason_testable =
    descriptive message on any non-empty-completion outcome. *)
 let empty_completion_stop_reason label = function
   | Error (Parse.Empty_completion e) -> e.Parse.stop_reason
-  | Error (Parse.Provider_error msg) ->
-    Alcotest.failf "%s: expected Empty_completion, got Provider_error %s" label msg
+  | Error (Parse.Provider_error { message; _ }) ->
+    Alcotest.failf "%s: expected Empty_completion, got Provider_error %s" label message
+  | Error (Parse.Unreadable_response message) ->
+    Alcotest.failf "%s: expected Empty_completion, got Unreadable_response %s" label message
   | Ok _ -> Alcotest.failf "%s: expected Empty_completion, got Ok (non-empty turn)" label
 ;;
 

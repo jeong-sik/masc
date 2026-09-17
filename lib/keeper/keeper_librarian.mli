@@ -72,6 +72,10 @@ type selection =
         the apply step has always done. The whole-set roll call this answer
         used to carry was checked and then discarded, and one slip in it threw
         away the pass (RFC-0456). *)
+  ; absorbed : Keeper_memory_os_types.absorbed_statement list
+    (** One statement per current memory a new claim names in [absorbs]
+        (RFC-0456 §4.2). Each is current, in no [dropped] statement, and
+        absorbed by one claim only; [into] is that claim's identity. *)
   ; facts : Keeper_memory_os_types.fact list
   ; revisions : revision list
   ; working_contexts : Keeper_librarian_context.pocket list
@@ -84,6 +88,7 @@ val wire_field_category : string
 val wire_field_memory_id : string
 val wire_field_reason : string
 val wire_field_supersedes : string
+val wire_field_absorbs : string
 val wire_current_fields : string list
 val wire_claim_fields : string list
 val wire_dropped_fields : string list
@@ -108,6 +113,13 @@ type parse_error =
   | Supersedes_not_dropped of string
       (** [supersedes] named a memory that is retained in the same answer; a
           revision drops what it continues. *)
+  | Absorbs_unknown_memory_id of string
+      (** [absorbs] named a short id the answer's current set does not have. *)
+  | Absorbs_dropped_memory_id of string
+      (** [absorbs] named a memory the same answer drops: a dropped memory is
+          gone, not said by the new claim. *)
+  | Absorbs_memory_id_twice of string
+      (** Two [absorbs] lists, or one list twice, named the same memory. *)
 
 val parse_error_to_string : parse_error -> string
 

@@ -173,7 +173,7 @@ let parse_sse_event event_type data_str =
            | None -> data_str
          in
          let error_type = err |> member "type" |> to_string_option in
-         Some (SSEError { message; error_type; raw = data_str })
+         Some (SSEError { message; error_type; provider_status = None; raw = data_str })
        | other -> Some (SSEUnknownEventType { event_type = other; raw = data_str }))
   with
   | Yojson.Safe.Util.Type_error (msg, _) ->
@@ -392,6 +392,7 @@ type openai_sse_parse_result =
   | Openai_provider_error of
       { message : string
       ; error_type : string option
+      ; provider_status : Types.provider_status option
       ; raw : string
       }
   | Openai_parse_failed of openai_chunk_parse_error
@@ -610,25 +611,39 @@ let parse_openai_delta_tool_calls delta =
     Error "malformed_delta_tool_calls:not_list"
 ;;
 
+let openai_provider_error_of_envelope ~raw (envelope : Openai_error_envelope.t) =
+  Openai_provider_error
+    { message = envelope.message
+    ; error_type = envelope.error_type
+    ; provider_status = envelope.provider_status
+    ; raw
+    }
+;;
+
 let openai_provider_error_of_json ~raw json =
-  match assoc_field_opt "error" json with
-  | Some (`Assoc _ as error) ->
-    let message =
-      match assoc_field_opt "message" error with
-      | Some (`String message) -> message
-      | None | Some (`Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
-        -> raw
-    in
-    let error_type =
-      match assoc_field_opt "type" error with
-      | Some (`String error_type) -> Some error_type
-      | None | Some (`Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
-        -> None
-    in
-    Some (Openai_provider_error { message; error_type; raw })
-  | Some (`String message) ->
-    Some (Openai_provider_error { message; error_type = None; raw })
-  | None | Some (`List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) -> None
+  Option.map
+    (openai_provider_error_of_envelope ~raw)
+    (Option.bind
+       (assoc_field_opt "error" json)
+       (Openai_error_envelope.of_error_value ~fallback_message:raw))
+;;
+
+let choice_finished_with_provider_error choice =
+  match assoc_field_opt "finish_reason" choice with
+  | Some (`String finish_reason) -> Stop_reason_wire.is_provider_error_finish finish_reason
+  | None | Some (`Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) ->
+    false
+;;
+
+(* A choice that finished with [error] is the provider failing, whether or not
+   the chunk also carries the error object: OpenRouter's streaming reference
+   puts it at the top level (read first, by [openai_provider_error_of_json]),
+   its API overview declares it on the choice, and a chunk may carry neither.
+   None of them is a stop reason. *)
+let openai_choice_provider_error ~raw choice =
+  openai_provider_error_of_envelope
+    ~raw
+    (Openai_error_envelope.of_errored_choice ~fallback_message:raw choice)
 ;;
 
 let openai_parse_failed ~raw reason = Openai_parse_failed { reason; raw }
@@ -721,6 +736,8 @@ let parse_openai_sse_chunk ~streaming_reasoning data_str : openai_sse_parse_resu
                       ; chunk_usage
                       ; chunk_timings
                       })
+               | Some (`List (choice :: _)) when choice_finished_with_provider_error choice ->
+                 openai_choice_provider_error ~raw:data_str choice
                | Some (`List (choice :: _)) ->
                  let delta = choice |> member "delta" in
                  let delta_content = delta |> member "content" |> to_string_option in
@@ -1447,8 +1464,8 @@ let openai_sse_parse_result_to_events state = function
   | Openai_chunk chunk -> openai_chunk_to_events state chunk
   | Openai_done -> [ MessageStop ], None
   | Openai_empty -> [], None
-  | Openai_provider_error { message; error_type; raw } ->
-    [ SSEError { message; error_type; raw } ], None
+  | Openai_provider_error { message; error_type; provider_status; raw } ->
+    [ SSEError { message; error_type; provider_status; raw } ], None
   | Openai_parse_failed { reason; raw } -> [ SSEParseFailed { reason; raw } ], None
   | Openai_undeclared_reasoning_member { declared; member; raw } ->
     (* The stream fails on the chunk that exposed the row: the raw payload is
@@ -2131,6 +2148,7 @@ let responses_sse_to_events (state : openai_stream_state) event_type data_str
            (SSEError
               { message = responses_error_message json
               ; error_type = responses_error_type json
+              ; provider_status = None
               ; raw = data_str
               })
        | "response.in_progress"

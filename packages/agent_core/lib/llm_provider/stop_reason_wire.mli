@@ -34,6 +34,16 @@ type wire_finish =
     [Context_window_exceeded] without duplicating its wire spellings here. *)
 val wire_finish_of_string : string -> wire_finish
 
+(** [true] for the finish reason an OpenAI-compatible provider ends a choice
+    with when the provider failed after its response was committed: OpenRouter
+    normalizes every model's [finish_reason] to [tool_calls], [stop], [length],
+    [content_filter] or [error] (openrouter.ai/docs/api-reference/overview).
+    [error] says how the provider failed, not how the model stopped, so a
+    parser reads the chunk or response that carries it as a provider error and
+    never hands it to {!wire_finish_of_string}. Case-insensitive, like that
+    decoder. *)
+val is_provider_error_finish : string -> bool
+
 (** Canonical parse-time mapping for backends that know the assembled tool-block
     set at parse time (the non-streaming OpenAI parser). [Tool_calls] without a
     tool block fails closed to [UnmatchedToolCalls]. [Other] re-decodes through

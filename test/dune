@@ -4828,8 +4828,10 @@
   ../scripts/harness/workload/keeper_multi_collaboration_acceptance.py
   ../scripts/harness/workload/keeper_multi_collaboration_acceptance.sh
   ../scripts/fixtures/keeper-multi-collaboration/missions.json
+  (source_tree ../scripts/fixtures/keeper-multi-collaboration/skills)
   ../config/tools/masc_keeper_up.toml
   ../lib/server/server_routes_http_routes_dashboard.ml
+  ../lib/server/server_skill_editor.ml
   ../lib/keeper/keeper_tool_approval_mode.ml)
  (action
   (run python3 %{dep:test_keeper_multi_collaboration_acceptance.py})))
@@ -4837,6 +4839,8 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_keeper_multi_collaboration_acceptance)))
+
+(include stanzas/test_acceptance_composition_fixtures.inc)
 
 (rule
  (alias runtest-test_campaign_scoreboard)

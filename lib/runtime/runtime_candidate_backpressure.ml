@@ -12,8 +12,21 @@ module State = Runtime_candidate_backpressure_state
    logic branches on these timestamps. *)
 let now () = Unix.gettimeofday ()
 
-type candidate_backpressure = State.candidate_backpressure =
+type rate_limit = State.rate_limit =
   | Unknown_scope_rate_limit of { noted_at : float; retry_after : float option }
+
+type attempt_failure = State.attempt_failure =
+  | Server_error
+  | Network_transient
+  | Provider_timeout
+
+type failed_attempt = State.failed_attempt =
+  | Failed_attempt of { noted_at : float; failure : attempt_failure }
+
+type candidate_backpressure = State.candidate_backpressure =
+  { rate_limit : rate_limit option
+  ; failed_attempt : failed_attempt option
+  }
 
 type candidate_binding =
   | Resolved_http_binding of Agent_core.Binding_identity.t
@@ -22,10 +35,10 @@ type candidate_binding =
 
 type candidate =
   { binding : candidate_binding
-  ; backpressure : candidate_backpressure option Atomic.t
+  ; backpressure : candidate_backpressure Atomic.t
   }
 
-let create_candidate ~binding = { binding; backpressure = Atomic.make None }
+let create_candidate ~binding = { binding; backpressure = Atomic.make State.empty }
 
 let same_candidate_binding left right =
   match left.binding, right.binding with
@@ -46,7 +59,13 @@ let note_rate_limit ~candidate ~retry_after =
   (* See update_candidate: CAS publishes the observation; discard its read-back value, not an error. *)
   ignore (update_candidate candidate (State.note_rate_limit ~noted_at ~retry_after))
 
-let note_candidate_success ~candidate = Atomic.set candidate.backpressure None
+let note_failed_attempt ~candidate ~failure =
+  let noted_at = now () in
+  (* See update_candidate: CAS publishes the observation; discard its read-back value, not an error. *)
+  ignore (update_candidate candidate (State.note_failed_attempt ~noted_at ~failure))
+
+let note_candidate_success ~candidate = Atomic.set candidate.backpressure State.empty
 
 let candidate_backpressure ~now ~candidate =
-  update_candidate candidate (State.observe_rate_limit ~now)
+  let observed = update_candidate candidate (State.observe ~now) in
+  if State.is_empty observed then None else Some observed

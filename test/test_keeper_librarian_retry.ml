@@ -1255,6 +1255,7 @@ let test_keeper_memory_io_offload_fallback_and_domain_safety env () =
             ~keeper_id
             ~now:1_000_000.
             ~source:{ kind = Current.Librarian; trace_id = "trace-init" }
+            ~absorbed:[]
             ~new_claims:[ fact_initial ]
             ()
         in

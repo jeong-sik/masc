@@ -111,30 +111,94 @@ let append_all ~keepers_dir ~keeper_id records =
   | Ok [] -> Ok ()
   | Ok (_ :: _ as lines) ->
     let path = path_for_keepers_dir ~keepers_dir ~keeper_id in
-    (try Ok (Fs_compat.append_jsonl_batch path lines) with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn -> Error (Write_failed { path; message = Printexc.to_string exn }))
+    let suffix =
+      String.concat "" (List.map (fun json -> Yojson.Safe.to_string json ^ "\n") lines)
+    in
+    let failed message = Error (Write_failed { path; message }) in
+    (match Fs_compat.append_private_jsonl_durable_locked_result path suffix with
+     | Fs_compat.Private_file_succeeded () -> Ok ()
+     | Fs_compat.Private_file_succeeded_with_cleanup_failure { value = (); cleanup_failure } ->
+       Log.Keeper.warn
+         ~keeper_name:keeper_id
+         "absorbed memory append committed; descriptor settlement failed path=%s: %s"
+         path
+         (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
+       Ok ()
+     | Fs_compat.Private_file_failed error ->
+       failed (Fs_compat.private_jsonl_append_error_to_string error)
+     | Fs_compat.Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
+       failed
+         (Printf.sprintf
+            "%s; descriptor settlement also failed: %s"
+            (Fs_compat.private_jsonl_append_error_to_string error)
+            (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
+     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+     | exception Sys_error message -> failed message
+     | exception Unix.Unix_error (code, fn, arg) ->
+       failed (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)))
 ;;
 
 type read_error =
   | Not_json of string
   | Malformed of W.wire_error
+  | Incomplete_line
 
 let read_error_to_string = function
   | Not_json message -> "absorbed memory line is not valid JSON: " ^ message
   | Malformed error -> "absorbed memory line rejected: " ^ W.wire_error_to_string error
+  | Incomplete_line -> "absorbed memory line has no newline: an append never completed"
+;;
+
+let decode_line line =
+  match Yojson.Safe.from_string line with
+  | json -> Result.map_error (fun error -> Malformed error) (record_of_json json)
+  | exception Yojson.Json_error message -> Error (Not_json message)
+;;
+
+let numbered_lines ~rows ~rows_end ~end_offset =
+  (* [rows] is every newline-terminated line, so what follows its last newline
+     is the empty string and not a line. *)
+  let complete =
+    match List.rev (String.split_on_char '\n' rows) with
+    | [] -> []
+    | _after_last_newline :: reversed -> List.rev reversed
+  in
+  let decoded = List.mapi (fun index line -> index + 1, decode_line line) complete in
+  if rows_end < end_offset
+  then decoded @ [ List.length complete + 1, Error Incomplete_line ]
+  else decoded
 ;;
 
 let read ~keepers_dir ~keeper_id =
   let path = path_for_keepers_dir ~keepers_dir ~keeper_id in
-  match Fs_compat.load_file_opt path with
-  | None -> []
-  | Some contents ->
-    String.split_on_char '\n' contents
-    |> List.filter (fun line -> not (String.equal (String.trim line) ""))
-    |> List.mapi (fun index line ->
-      ( index + 1
-      , match Yojson.Safe.from_string line with
-        | json -> Result.map_error (fun error -> Malformed error) (record_of_json json)
-        | exception Yojson.Json_error message -> Error (Not_json message) ))
+  let of_rows = function
+    | Fs_compat.Private_jsonl_rows.Rows_missing -> Ok []
+    | Fs_compat.Private_jsonl_rows.Rows_present { rows; rows_end; end_offset } ->
+      Ok (numbered_lines ~rows ~rows_end ~end_offset)
+  in
+  let settled cleanup_failure =
+    Log.Keeper.warn
+      ~keeper_name:keeper_id
+      "absorbed memory read; descriptor settlement failed path=%s: %s"
+      path
+      (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)
+  in
+  let unreadable exn =
+    Error
+      (Printf.sprintf
+         "absorbed memory store unreadable path=%s: %s"
+         path
+         (Printexc.to_string exn))
+  in
+  match Fs_compat.read_private_jsonl_rows_locked_result path with
+  | Fs_compat.Private_file_succeeded rows -> of_rows rows
+  | Fs_compat.Private_file_succeeded_with_cleanup_failure { value; cleanup_failure } ->
+    settled cleanup_failure;
+    of_rows value
+  | Fs_compat.Private_file_failed (Fs_compat.Private_jsonl_rows.Io_failed exn) ->
+    unreadable exn
+  | Fs_compat.Private_file_failed_with_cleanup_failure
+      { error = Fs_compat.Private_jsonl_rows.Io_failed exn; cleanup_failure } ->
+    settled cleanup_failure;
+    unreadable exn
 ;;

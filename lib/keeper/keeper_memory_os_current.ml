@@ -1092,6 +1092,7 @@ let read_journal_tail ~keepers_dir ~keeper_id ~limit =
 let update_locked_with_error
       ?clock
       ?dropped_statements
+      ?before_replace
       ~store_error
       ~keepers_dir
       ~keeper_id
@@ -1185,6 +1186,14 @@ let update_locked_with_error
            Domain_pool_ref.submit_cpu_or_inline (fun () ->
              Yojson.Safe.pretty_to_string (to_json next) ^ "\n")
          in
+         (* Last before the replace, after the pool wait: a write made here and
+            a snapshot that is then not replaced are split only by the replace
+            failing, not by a cancellation while the print is on the pool. *)
+         let* () =
+           match before_replace with
+           | None -> Ok ()
+           | Some write -> write ~previous ~next
+         in
          match Fs_compat.save_file_atomic snapshot_path content with
          | Ok () ->
            committed := Some
@@ -1223,10 +1232,19 @@ let update_locked_with_error
       Printexc.raise_with_backtrace exn backtrace)
 ;;
 
-let update_locked ?clock ?dropped_statements ~keepers_dir ~keeper_id ~now build =
+let update_locked
+      ?clock
+      ?dropped_statements
+      ?before_replace
+      ~keepers_dir
+      ~keeper_id
+      ~now
+      build
+  =
   update_locked_with_error
     ?clock
     ?dropped_statements
+    ?before_replace
     ~store_error:Fun.id
     ~keepers_dir
     ~keeper_id
@@ -1293,7 +1311,7 @@ let make_snapshot
 let apply_disposition
       ?clock
       ?dropped_statements
-      ?(absorbed = [])
+      ~absorbed
       ~keepers_dir
       ~keeper_id
       ~now
@@ -1315,9 +1333,43 @@ let apply_disposition
       Set_util.StringMap.empty
       absorbed
   in
+  (* RFC-0456 §4.2: an absorbed fact leaves the snapshot only with its row kept.
+     The rows are the absorbed facts the locked snapshot held and the next one
+     does not, so a fact the keeper retracted during the pass has no row, and
+     they are written just before the replace; a failed write fails this
+     commit. *)
+  let write_absorbed_rows ~(previous : t option) ~(next : t) =
+    let next_ids =
+      List.fold_left
+        (fun ids fact -> Set_util.StringSet.add (memory_id fact) ids)
+        Set_util.StringSet.empty
+        next.facts
+    in
+    let rows =
+      List.filter_map
+        (fun fact ->
+           let identity = memory_id fact in
+           match Set_util.StringMap.find_opt identity absorbed_into with
+           | Some into when not (Set_util.StringSet.mem identity next_ids) ->
+             Some
+               { Keeper_memory_absorbed.recorded_at = now
+               ; trace_id = (source : source).trace_id
+               ; memory_id = identity
+               ; into
+               ; fact
+               }
+           | Some _ | None -> None)
+        (match previous with
+         | None -> []
+         | Some snapshot -> snapshot.facts)
+    in
+    Keeper_memory_absorbed.append_all ~keepers_dir ~keeper_id rows
+    |> Result.map_error Keeper_memory_absorbed.append_error_to_string
+  in
   update_locked
     ?clock
     ?dropped_statements
+    ~before_replace:write_absorbed_rows
     ~keepers_dir
     ~keeper_id
     ~now
@@ -1326,31 +1378,6 @@ let apply_disposition
          match previous with
          | None -> []
          | Some snapshot -> snapshot.facts
-       in
-       (* RFC-0456 §4.2: an absorbed fact leaves the snapshot only with its row
-          kept, so the rows are written here, under the lock and before the
-          snapshot is replaced. A failed write fails this commit. A fact the
-          keeper retracted during the pass is no longer current and has no row
-          to keep. *)
-       let absorbed_records =
-         List.filter_map
-           (fun fact ->
-              let identity = memory_id fact in
-              match Set_util.StringMap.find_opt identity absorbed_into with
-              | None -> None
-              | Some into ->
-                Some
-                  { Keeper_memory_absorbed.recorded_at = now
-                  ; trace_id = (source : source).trace_id
-                  ; memory_id = identity
-                  ; into
-                  ; fact
-                  })
-           current
-       in
-       let* () =
-         Keeper_memory_absorbed.append_all ~keepers_dir ~keeper_id absorbed_records
-         |> Result.map_error Keeper_memory_absorbed.append_error_to_string
        in
        let kept =
          List.filter

@@ -66,13 +66,13 @@ let replace
 let apply_disposition
       ~keepers_dir
       ?dropped_statements
-      ?absorbed
+      ?(absorbed = [])
       ?(new_claims = [])
       ()
   =
   Current.apply_disposition
     ?dropped_statements
-    ?absorbed
+    ~absorbed
     ~keepers_dir
     ~keeper_id:"keeper"
     ~now:200.0
@@ -993,7 +993,9 @@ let test_purge_plan_removes_memory_sidecars () =
   check bool "plan removes the working context" true
     (contains Shutdown.Keeper_working_context_artifact);
   check bool "plan removes the memory journal" true
-    (contains Shutdown.Keeper_memory_journal_artifact)
+    (contains Shutdown.Keeper_memory_journal_artifact);
+  check bool "plan removes the absorbed memory rows" true
+    (contains Shutdown.Keeper_memory_absorbed_artifact)
 ;;
 
 let test_stale_replace_rejects_concurrent_explicit_write () =
@@ -1797,12 +1799,16 @@ let test_a_commit_parses_and_prints_on_the_pool () =
 module Absorbed = Masc.Keeper_memory_absorbed
 
 let absorbed_records ~keepers_dir =
-  Absorbed.read ~keepers_dir ~keeper_id:"keeper"
-  |> List.map (fun (line, result) ->
-    match result with
-    | Ok record -> record
-    | Error error ->
-      failf "absorbed line %d: %s" line (Absorbed.read_error_to_string error))
+  match Absorbed.read ~keepers_dir ~keeper_id:"keeper" with
+  | Error message -> failf "absorbed store: %s" message
+  | Ok lines ->
+    List.map
+      (fun (line, result) ->
+         match result with
+         | Ok record -> record
+         | Error error ->
+           failf "absorbed line %d: %s" line (Absorbed.read_error_to_string error))
+      lines
 ;;
 
 let seed_three ~keepers_dir =
@@ -1871,6 +1877,36 @@ let test_a_failed_absorbed_write_commits_nothing () =
     (List.sort compare (fact_ids current.facts))
 ;;
 
+(* A crash during an append leaves a last line with no newline. The durable
+   append refuses to write after it, so the pass fails and the snapshot keeps
+   the facts, and the reader reports the fragment as the line it is. *)
+let test_an_absorbing_pass_refuses_a_store_that_ends_mid_line () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let a, b, c = seed_three ~keepers_dir in
+  let path = Absorbed.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  let channel = open_out_gen [ Open_wronly; Open_creat; Open_trunc ] 0o600 path in
+  output_string channel "{\"recorded_at\": 1";
+  close_out channel;
+  let together = fact ~claim:"A and B" () in
+  (match
+     apply_disposition
+       ~keepers_dir
+       ~absorbed:[ { Types.absorbed = Types.memory_id a; into = Types.memory_id together } ]
+       ~new_claims:[ together ]
+       ()
+   with
+   | Ok _ -> fail "a pass appended after a line that never completed"
+   | Error _ -> ());
+  let current = apply_disposition ~keepers_dir () |> require_ok in
+  check (list string) "the snapshot still holds A, B and C and not the new claim"
+    (List.sort compare (fact_ids [ a; b; c ]))
+    (List.sort compare (fact_ids current.facts));
+  match Absorbed.read ~keepers_dir ~keeper_id:"keeper" with
+  | Error message -> failf "absorbed store: %s" message
+  | Ok [ (1, Error Absorbed.Incomplete_line) ] -> ()
+  | Ok lines -> failf "expected one incomplete line, read %d lines" (List.length lines)
+;;
+
 let test_an_absorbed_fact_no_longer_current_writes_no_row () =
   with_temp_keepers @@ fun keepers_dir ->
   let _a, _b, _c = seed_three ~keepers_dir in
@@ -1912,7 +1948,10 @@ let test_absorbed_record_codec () =
     | `Assoc fields -> `Assoc (List.map (fun (k, v) -> if String.equal k name then k, value else k, v) fields)
     | _ -> fail "record_to_json is an object"
   in
-  rejects "an id that is not its fact's" (with_field "memory_id" (`String into));
+  (* Neither [into] nor the fact's identity, so only the identity check can
+     reject it. *)
+  let unrelated = Types.memory_id (fact ~claim:"unrelated" ()) in
+  rejects "an id that is not its fact's" (with_field "memory_id" (`String unrelated));
   rejects "a fact absorbed into itself" (with_field "into" (`String record.memory_id));
   rejects "an extra field"
     (match Absorbed.record_to_json record with
@@ -2124,6 +2163,10 @@ let () =
             "a failed absorbed write commits nothing"
             `Quick
             test_a_failed_absorbed_write_commits_nothing
+        ; test_case
+            "an absorbing pass refuses a store that ends mid-line"
+            `Quick
+            test_an_absorbing_pass_refuses_a_store_that_ends_mid_line
         ; test_case
             "an absorbed fact no longer current writes no row"
             `Quick

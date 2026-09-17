@@ -180,7 +180,10 @@ deps.sh 는 패키지 매니저 계열(apt/dnf/apk)을 감지하고, 런타임 �
 
 - keeper 명령은 태스크 이미지가 선언한 환경변수(`VIRTUAL_ENV`, `PYTHONPATH`, 서비스 주소 등)를
   보지 못한다. `masc-exec-shim` 이 페이로드 환경을 새로 만들기 때문이다 — #36907.
-  `PATH` 는 bootstrap 이 컨테이너의 PATH 를 shim 설정 `path=` 로 넘겨 맞춘다.
+- `PATH` 는 bootstrap 이 컨테이너의 PATH 를 shim 설정 `path=` 로 넘긴다. 다만 릴리스
+  v0.35.19 의 shim 은 argv 로 부른 프로그램을 자기 프로세스 PATH(sshd 세션)에서 찾기
+  때문에, 지금은 `sh -c` 로 실행한 명령에만 효과가 있다. shim 이 `path=` 에서 찾도록
+  고친 #36916 이 릴리스되면 argv 명령에도 적용된다.
 - 태스크가 선언한 `mcp_servers`(medical-claims-processing)와 `skills_dir`
   (cumulative-layout-shift)를 keeper 에 연결하지 않는다 — #36908
 - GPU 태스크 3개는 GPU 를 주는 환경(`BENCH_ENV=modal`)에서만 돈다. 이 호스트에는 Modal

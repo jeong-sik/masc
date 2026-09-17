@@ -62,6 +62,9 @@ install -m 0755 "$BENCH/bin/masc-exec-shim" /usr/local/bin/masc-exec-shim
 # the same container finds (21 of the 66 4.0.0 tasks put tools in a directory
 # outside the default, masc#36907). The shim refuses empty and relative
 # entries, so those are left out; a repeated entry is kept once.
+# Through release 0.35.19 the shim looks up an argv program in its own
+# process PATH rather than this one, so only `sh -c` payloads see it until
+# the lookup fix (masc#36916) ships.
 shim_path=""
 IFS=':' read -r -a path_entries <<<"${PATH}"
 for entry in "${path_entries[@]}"; do

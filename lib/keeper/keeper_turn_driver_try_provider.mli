@@ -327,6 +327,9 @@ type composed =
   ; outlived_seed : Keeper_carried_front.seed option
         (** A front the history shrank under, dropped by
             {!Keeper_carried_front.for_history}; the request started over. *)
+  ; demote_before : int
+        (** The boundary the demotion applied: 0 when demotion is off, the
+            whole history under the last resort. *)
   }
 (** One request as {!For_testing.compose_carried_model_input} composes it
     (RFC keeper-context-window-in-tokens §10.4): RFC-0363 demotion over the

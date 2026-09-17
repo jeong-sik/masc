@@ -4506,6 +4506,12 @@ type state = {
   mutable voice_send_on_stop: bool;
   mutable answering_open: bool;
   mutable answering_scroll: int;
+  (* The Memory facts list's [Enter] detail: the whole fact text in its own
+     wide overlay instead of the narrow inline block under the row. Modal
+     like the other overlays, and like them the scroll survives only while
+     it is open. *)
+  mutable memory_fact_detail_open: bool;
+  mutable memory_fact_detail_scroll: int;
   (* Cursor over the overlay's actionable rows (running / just finished);
      Enter opens that keeper's chat. An index into the overlay's line list,
      kept on a target row by the key handler. *)
@@ -6496,6 +6502,8 @@ let create_state
   answering_open = false;
   answering_scroll = 0;
   answering_cursor = 0;
+  memory_fact_detail_open = false;
+  memory_fact_detail_scroll = 0;
   keeper_turn_finishes = [];
   keeper_turns_observed_at = None;
   context_inspector_open = false;

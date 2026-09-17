@@ -112,7 +112,7 @@ let keeper_roster_marquee_target (state : state) ~cols =
 let acting_pane_columns (state : state) ~terminal_cols =
   let modal =
     Option.is_some state.lane_addons || state.palette_open || state.context_inspector_open || state.keeper_deletions_open || state.help_open
-    || state.agenda_open || state.answering_open
+    || state.agenda_open || state.answering_open || state.memory_fact_detail_open
   in
   if modal
      || Masc_tui_types.on_activity_screen state.view
@@ -9483,7 +9483,55 @@ let render_memory (state : state) =
         ~push:c.push ~push_styled:c.push_styled ~push_selected:c.push_selected
         ~push_divider:c.push_divider ~push_empty:c.push_empty)
 
-let render_memory_facts (state : state) =
+(* The Memory facts list's [Enter] reading: the whole fact wrapped to this
+   overlay's own width and windowed, instead of the narrow block the list
+   draws under the row. Same lines, more columns and more rows, and a scroll
+   of its own -- the list stays behind it and is redrawn when it closes. *)
+let render_memory_fact_detail (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let buf = Buffer.create 4096 in
+  box_top buf cols;
+  box_line buf cols (screen_title " MASC MEMORY - FACT DETAIL");
+  box_line_styled buf cols ~style:Ansi.dim
+    " Enter on the fact list opens this reading; arrivals do not replace it";
+  box_empty buf cols;
+  let facts = Masc_tui_types.memory_fact_rows state in
+  let total = List.length facts in
+  let cursor = max 0 (min state.memory_facts_cursor (max 0 (total - 1))) in
+  let detail_cols = max 30 (cols - 4) in
+  let lines =
+    match List.nth_opt facts cursor with
+    | None -> [ "    This list has no fact row to read." ]
+    | Some row -> Render_memory.memory_fact_detail_lines ~cols:detail_cols row
+  in
+  (* One chrome row more than a plain listing: the window marker under the
+     content. [listing_rows_below_the_body] counts the box closure and the
+     footer hint only, so the marker is reserved on top of it. *)
+  let content_height =
+    max 1 (rows - count_frame_lines buf - listing_rows_below_the_body - 1) in
+  let max_scroll = max 0 (List.length lines - content_height) in
+  let scroll = min max_scroll (max 0 state.memory_fact_detail_scroll) in
+  let window = Rows.of_list ~first:scroll ~height:content_height lines in
+  for i = 0 to content_height - 1 do
+    match Rows.at window (scroll + i) with
+    | None -> box_empty buf cols
+    | Some line -> box_line buf cols line
+  done;
+  box_line_styled buf cols ~style:(Theme.recede ())
+    (Printf.sprintf "  [detail rows %s]"
+       (Masc_tui_scroll.window_text ~scroll ~height:content_height (List.length lines)));
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols
+       ~hints:"j/k:scroll  PgUp/PgDn:page  Esc:close");
+  finish_surface state ~surface_key:"memory-fact-detail" ~rows:terminal_rows ~cols buf
+
+let rec render_memory_facts (state : state) =
+  if state.memory_fact_detail_open then render_memory_fact_detail state
+  else render_memory_facts_list state
+
+and render_memory_facts_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let open Masc.Tui_decode in
   let keeper_name = Render_memory.facts_keeper_label state.memory_facts_keeper in

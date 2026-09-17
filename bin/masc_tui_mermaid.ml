@@ -10,6 +10,10 @@ type shape =
   | Rect
   | Round
   | Diamond
+  | Database
+  | Subroutine
+  | Stadium
+  | Circle
 
 type node = {
   id : string;
@@ -166,10 +170,10 @@ let is_arrow_char = function
 
 (* The shape openers, longest first so [[[] is read before [[]. *)
 let openers =
-  [ ("[[", "]]", Rect)
-  ; ("[(", ")]", Round)
-  ; ("([", "])", Round)
-  ; ("((", "))", Round)
+  [ ("[[", "]]", Subroutine)
+  ; ("[(", ")]", Database)
+  ; ("([", "])", Stadium)
+  ; ("((", "))", Circle)
   ; ("{{", "}}", Diamond)
   ; ("[", "]", Rect)
   ; ("(", ")", Round)
@@ -1006,11 +1010,23 @@ let down = 2
 let left = 4
 let right = 8
 
+type border_style =
+  | Border_solid
+  | Border_dotted
+  | Border_thick
+  | Border_double
+  | Border_cylinder
+
+let border_of_line_style = function
+  | Solid -> Border_solid
+  | Dotted -> Border_dotted
+  | Thick -> Border_thick
+
 type cell =
   | Empty
   | Line of {
       mask : int;
-      style : line_style;
+      style : border_style;
       round : bool;  (* a rounded box corner *)
     }
   | Text of string
@@ -1037,7 +1053,7 @@ let add_bits canvas r c ~style bits ~round =
        | Line existing ->
            Line
              { mask = existing.mask lor bits
-             ; style = (if existing.style = style then style else Solid)
+             ; style = (if existing.style = style then style else Border_solid)
              ; round = existing.round || round
              }
        | (Text _ | Skip) as kept -> kept)
@@ -1084,30 +1100,59 @@ let draw_line canvas ~style (r1, c1) (r2, c2) =
     done)
   else invalid_arg "Masc_tui_mermaid.draw_line: not a straight run"
 
-let glyph_of_line ~mask ~style ~round =
+let glyph_of_line ~mask ~(style : border_style) ~round =
   let vertical = mask land (up lor down) <> 0 and horizontal = mask land (left lor right) <> 0 in
   if vertical && not horizontal then
     match style with
-    | Solid -> "\xe2\x94\x82"
-    | Dotted -> "\xe2\x94\x86"
-    | Thick -> "\xe2\x94\x83"
+    | Border_solid -> "\xe2\x94\x82"
+    | Border_dotted -> "\xe2\x94\x86"
+    | Border_thick -> "\xe2\x94\x83"
+    | Border_double | Border_cylinder -> "\xe2\x95\x91"
   else if horizontal && not vertical then
     match style with
-    | Solid -> "\xe2\x94\x80"
-    | Dotted -> "\xe2\x94\x84"
-    | Thick -> "\xe2\x94\x81"
+    | Border_solid -> "\xe2\x94\x80"
+    | Border_dotted -> "\xe2\x94\x84"
+    | Border_thick -> "\xe2\x94\x81"
+    | Border_double -> "\xe2\x95\x90"
+    | Border_cylinder -> "\xe2\x94\x80"
   else
-    match mask with
-    | 5 -> if round then "\xe2\x95\xaf" else "\xe2\x94\x98" (* up left *)
-    | 9 -> if round then "\xe2\x95\xb0" else "\xe2\x94\x94" (* up right *)
-    | 6 -> if round then "\xe2\x95\xae" else "\xe2\x94\x90" (* down left *)
-    | 10 -> if round then "\xe2\x95\xad" else "\xe2\x94\x8c" (* down right *)
-    | 7 -> "\xe2\x94\xa4"
-    | 11 -> "\xe2\x94\x9c"
-    | 13 -> "\xe2\x94\xb4"
-    | 14 -> "\xe2\x94\xac"
-    | 15 -> "\xe2\x94\xbc"
-    | _ -> " "
+    match style with
+    | Border_double ->
+        (match mask with
+         | 5 -> "\xe2\x95\x9d" (* ╝ up left *)
+         | 9 -> "\xe2\x95\x9a" (* ╚ up right *)
+         | 6 -> "\xe2\x95\x97" (* ╗ down left *)
+         | 10 -> "\xe2\x95\x94" (* ╔ down right *)
+         | 7 -> "\xe2\x95\xa3" (* ╣ *)
+         | 11 -> "\xe2\x95\xa0" (* ╠ *)
+         | 13 -> "\xe2\x95\xa9" (* ╩ *)
+         | 14 -> "\xe2\x95\xa6" (* ╦ *)
+         | 15 -> "\xe2\x95\xac" (* ╬ *)
+         | _ -> " ")
+    | Border_cylinder ->
+        (match mask with
+         | 5 -> "\xe2\x95\x9c" (* ╜ up left *)
+         | 9 -> "\xe2\x95\x99" (* ╙ up right *)
+         | 6 -> "\xe2\x95\x96" (* ╖ down left *)
+         | 10 -> "\xe2\x95\x93" (* ╓ down right *)
+         | 7 -> "\xe2\x95\xa2" (* ╢ *)
+         | 11 -> "\xe2\x95\x9f" (* ╟ *)
+         | 13 -> "\xe2\x94\xb4"
+         | 14 -> "\xe2\x94\xac"
+         | 15 -> "\xe2\x94\xbc"
+         | _ -> " ")
+    | Border_solid | Border_dotted | Border_thick ->
+        match mask with
+        | 5 -> if round then "\xe2\x95\xaf" else "\xe2\x94\x98" (* up left *)
+        | 9 -> if round then "\xe2\x95\xb0" else "\xe2\x94\x94" (* up right *)
+        | 6 -> if round then "\xe2\x95\xae" else "\xe2\x94\x90" (* down left *)
+        | 10 -> if round then "\xe2\x95\xad" else "\xe2\x94\x8c" (* down right *)
+        | 7 -> "\xe2\x94\xa4"
+        | 11 -> "\xe2\x94\x9c"
+        | 13 -> "\xe2\x94\xb4"
+        | 14 -> "\xe2\x94\xac"
+        | 15 -> "\xe2\x94\xbc"
+        | _ -> " "
 
 let rows_of_canvas canvas =
   Array.to_list canvas.cells
@@ -1136,7 +1181,7 @@ let ordering_sweeps = 4
 let shown_label node =
   match node.shape with
   | Diamond -> "\xe2\x9f\xa8" ^ node.label ^ "\xe2\x9f\xa9"
-  | Rect | Round -> node.label
+  | Rect | Round | Database | Subroutine | Stadium | Circle -> node.label
 
 let box_width node = Layout.display_width (shown_label node) + (2 * box_pad)
 
@@ -1563,8 +1608,13 @@ let rec layout_scope ~cols ~direction ~node_of ~nodes ~groups ~edges =
                 let r0, c0 = rc (p.flow_start, p.cross_start) in
                 let r1, c1 = rc (p.flow_start + p.flow_extent - 1, p.cross_start + p.cross_extent - 1) in
                 let top = min r0 r1 and bottom = max r0 r1 and lft = min c0 c1 and rgt = max c0 c1 in
-                let round = node.shape = Round in
-                let line = Solid in
+                let round = node.shape = Round || node.shape = Stadium || node.shape = Circle in
+                let line =
+                  match node.shape with
+                  | Subroutine -> Border_double
+                  | Database -> Border_cylinder
+                  | Rect | Round | Diamond | Stadium | Circle -> Border_solid
+                in
                 add_bits canvas top lft ~style:line ~round (down lor right);
                 add_bits canvas top rgt ~style:line ~round (down lor left);
                 add_bits canvas bottom lft ~style:line ~round (up lor right);
@@ -1584,7 +1634,7 @@ let rec layout_scope ~cols ~direction ~node_of ~nodes ~groups ~edges =
                   rc (p.flow_start + p.flow_extent - 1, p.cross_start + p.cross_extent - 1)
                 in
                 let top = min r0 r1 and bottom = max r0 r1 and lft = min c0 c1 and rgt = max c0 c1 in
-                let line = Solid in
+                let line = Border_solid in
                 add_bits canvas top lft ~style:line ~round:false (down lor right);
                 add_bits canvas top rgt ~style:line ~round:false (down lor left);
                 add_bits canvas bottom lft ~style:line ~round:false (up lor right);
@@ -1609,7 +1659,7 @@ let rec layout_scope ~cols ~direction ~node_of ~nodes ~groups ~edges =
             match p.item with
             | Dummy ->
                 let c = centre i in
-                draw_line canvas ~style:Solid (rc (p.flow_start, c)) (rc (flow_end i, c))
+                draw_line canvas ~style:Border_solid (rc (p.flow_start, c)) (rc (flow_end i, c))
             | Real _ | Cluster _ -> ())
           items;
         (* Segments. *)
@@ -1618,7 +1668,7 @@ let rec layout_scope ~cols ~direction ~node_of ~nodes ~groups ~edges =
             let l = items.(seg.seg_from).layer in
             let cs = centre seg.seg_from and ct = centre seg.seg_to in
             let fs = flow_end seg.seg_from and ft = items.(seg.seg_to).flow_start in
-            let style = seg.seg_style in
+            let style = border_of_line_style seg.seg_style in
             (if cs = ct then draw_line canvas ~style (rc (fs, cs)) (rc (ft, ct))
              else
                let f_bus = band_start.(l) + band_extent l + label_region l + bus.(k) in
@@ -1780,21 +1830,21 @@ let render_sequence ~cols (seq : sequence) =
         (fun i p ->
           let lft = margin + x.(i) and w = widths.(i) in
           let rgt = lft + w - 1 in
-          add_bits canvas 0 lft ~style:Solid ~round:false (down lor right);
-          add_bits canvas 0 rgt ~style:Solid ~round:false (down lor left);
-          add_bits canvas 2 lft ~style:Solid ~round:false (up lor right);
-          add_bits canvas 2 rgt ~style:Solid ~round:false (up lor left);
+          add_bits canvas 0 lft ~style:Border_solid ~round:false (down lor right);
+          add_bits canvas 0 rgt ~style:Border_solid ~round:false (down lor left);
+          add_bits canvas 2 lft ~style:Border_solid ~round:false (up lor right);
+          add_bits canvas 2 rgt ~style:Border_solid ~round:false (up lor left);
           for c = lft + 1 to rgt - 1 do
-            add_bits canvas 0 c ~style:Solid ~round:false (left lor right);
-            add_bits canvas 2 c ~style:Solid ~round:false (left lor right)
+            add_bits canvas 0 c ~style:Border_solid ~round:false (left lor right);
+            add_bits canvas 2 c ~style:Border_solid ~round:false (left lor right)
           done;
-          add_bits canvas 1 lft ~style:Solid ~round:false (up lor down);
-          add_bits canvas 1 rgt ~style:Solid ~round:false (up lor down);
+          add_bits canvas 1 lft ~style:Border_solid ~round:false (up lor down);
+          add_bits canvas 1 rgt ~style:Border_solid ~round:false (up lor down);
           put_text canvas 1 (lft + 2) p.alias)
         participants;
       (* Lifelines, from under each box to the last row. *)
       for i = 0 to n - 1 do
-        draw_line canvas ~style:Solid (2, col i) (rows - 1, col i)
+        draw_line canvas ~style:Border_solid (2, col i) (rows - 1, col i)
       done;
       (* Events, top to bottom. Frames remember the row they opened on. *)
       let frames = ref [] in
@@ -1812,17 +1862,18 @@ let render_sequence ~cols (seq : sequence) =
           (match event with
            | Message { m_from; m_to; m_text; m_style; m_head } ->
                let a = index_of m_from and b = index_of m_to in
+               let m_bstyle = border_of_line_style m_style in
                if a = b then (
                  let c = col a in
                  put_text canvas r (c + self_loop_cells) m_text;
-                 draw_line canvas ~style:m_style (r + 1, c) (r + 1, c + 3);
-                 draw_line canvas ~style:m_style (r + 1, c + 3) (r + 2, c + 3);
-                 draw_line canvas ~style:m_style (r + 2, c + 1) (r + 2, c + 3);
+                 draw_line canvas ~style:m_bstyle (r + 1, c) (r + 1, c + 3);
+                 draw_line canvas ~style:m_bstyle (r + 1, c + 3) (r + 2, c + 3);
+                 draw_line canvas ~style:m_bstyle (r + 2, c + 1) (r + 2, c + 3);
                  put_text canvas (r + 2) (c + 1) (head_glyph m_head ~rightward:false))
                else (
                  let cf = col a and ct = col b in
                  put_text canvas r (min cf ct + 2) m_text;
-                 draw_line canvas ~style:m_style (r + 1, cf) (r + 1, ct);
+                 draw_line canvas ~style:m_bstyle (r + 1, cf) (r + 1, ct);
                  if ct > cf then put_text canvas (r + 1) (ct - 1) (head_glyph m_head ~rightward:true)
                  else put_text canvas (r + 1) (ct + 1) (head_glyph m_head ~rightward:false))
            | Note { n_over; n_text } ->
@@ -1852,9 +1903,9 @@ let render_sequence ~cols (seq : sequence) =
                  incr depth;
                  frames := (d, r) :: !frames;
                  let l = d and rt = width - 1 - d in
-                 draw_line canvas ~style:Solid (r, l) (r, rt);
-                 add_bits canvas r l ~style:Solid ~round:false down;
-                 add_bits canvas r rt ~style:Solid ~round:false down;
+                 draw_line canvas ~style:Border_solid (r, l) (r, rt);
+                 add_bits canvas r l ~style:Border_solid ~round:false down;
+                 add_bits canvas r rt ~style:Border_solid ~round:false down;
                  put_text canvas r (l + 2)
                    (" " ^ b_kind ^ (if b_label = "" then "" else " " ^ b_label) ^ " "))
                else frames := (-1, r) :: !frames
@@ -1862,7 +1913,7 @@ let render_sequence ~cols (seq : sequence) =
                match !frames with
                | (d, _) :: _ when d >= 0 ->
                    let l = d and rt = width - 1 - d in
-                   draw_line canvas ~style:Dotted (r, l) (r, rt);
+                   draw_line canvas ~style:Border_dotted (r, l) (r, rt);
                    put_text canvas r (l + 2)
                      (" else" ^ (if label = "" then "" else " " ^ label) ^ " ")
                | (_, _) :: _ | [] -> ())
@@ -1873,9 +1924,9 @@ let render_sequence ~cols (seq : sequence) =
                    if d >= 0 then (
                      decr depth;
                      let l = d and rt = width - 1 - d in
-                     draw_line canvas ~style:Solid (opened, l) (r, l);
-                     draw_line canvas ~style:Solid (opened, rt) (r, rt);
-                     draw_line canvas ~style:Solid (r, l) (r, rt))
+                     draw_line canvas ~style:Border_solid (opened, l) (r, l);
+                     draw_line canvas ~style:Border_solid (opened, rt) (r, rt);
+                     draw_line canvas ~style:Border_solid (r, l) (r, rt))
                | [] -> ()));
           row := r + event_rows event)
         seq.events;

@@ -34,9 +34,13 @@ type direction =
   | Right_left
 
 type shape =
-  | Rect  (** [id[label]], [id[[label]]], [id>label]] *)
-  | Round  (** [id(label)], [id([label])], [id[(label)]], [id((label))] *)
+  | Rect  (** [id[label]], [id>label]] *)
+  | Round  (** [id(label)] *)
   | Diamond  (** [id{label}], [id{{label}}]; drawn as a box whose label wears ⟨ ⟩ *)
+  | Database  (** [id[(label)]]; drawn as a cylinder box with ╓ ╖ ╙ ╜ corners and ║ sides *)
+  | Subroutine  (** [id[[label]]]; drawn as a double-line box with ╔ ╗ ╚ ╝ corners and ║ ═ borders *)
+  | Stadium  (** [id([label])]; drawn with rounded ends *)
+  | Circle  (** [id((label))]; drawn as a circle node *)
 
 type node = {
   id : string;

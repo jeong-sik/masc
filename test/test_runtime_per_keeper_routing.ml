@@ -2539,18 +2539,12 @@ let test_an_assignment_names_a_lane_of_its_own_name () =
     Alcotest.(check (list string))
       "the lane walks its own candidates and ends at [runtime].default"
       [ "openai.gpt"; "openai.small"; "runpod_mtp.qwen" ]
-      (candidates_of lanes "coding");
-    Alcotest.(check bool)
-      "dispatch reaches the lane's tail through the assignment"
-      true
-      (List.mem
-         "openai.small"
-         (Runtime.For_testing.keeper_dispatch_runtime_ids
-            ~default_runtime_id:"runpod_mtp.qwen"
-            ~assignments
-            ~verifier_exact_slot_ids:[]
-            ~media_failover:[]
-            ~lanes))
+      (candidates_of lanes "coding")
+    (* The dispatch-reachability projection this test also consulted was the
+       local request-cap validation's; #36828 removed both when body size
+       became the server's judgement. The candidate walk above is the
+       surviving surface: the assignment resolves to the lane, and the lane's
+       ordered candidates are the dispatch walk. *)
 ;;
 
 let test_two_lanes_may_start_at_the_same_runtime () =
@@ -2584,22 +2578,11 @@ let test_an_assignment_naming_no_lane_is_refused () =
 let test_a_lane_named_after_its_head_still_wins () =
   match load_lane_config runtime_config_lane_named_after_its_head with
   | Error msg -> Alcotest.failf "the pre-existing lane spelling must keep loading: %s" msg
-  | Ok (_runtimes, _default, assignments, _media_failover, lanes) ->
+  | Ok (_runtimes, _default, _assignments, _media_failover, lanes) ->
     Alcotest.(check (list string))
       "the lane is taken over the same-named runtime"
       [ "openai.gpt"; "openai.small"; "runpod_mtp.qwen" ]
-      (candidates_of lanes "openai.gpt");
-    Alcotest.(check bool)
-      "dispatch still expands through it"
-      true
-      (List.mem
-         "openai.small"
-         (Runtime.For_testing.keeper_dispatch_runtime_ids
-            ~default_runtime_id:"runpod_mtp.qwen"
-            ~assignments
-            ~verifier_exact_slot_ids:[]
-            ~media_failover:[]
-            ~lanes))
+      (candidates_of lanes "openai.gpt")
 ;;
 
 let () =

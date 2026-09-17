@@ -1337,21 +1337,16 @@ let materialize_config
                  ~runtime_count:(List.length runtimes) did))
        | Some rt -> Ok rt)
   in
-  (* Assignments are checked before lanes are materialized, which keeps the order
-     in which a typo'd assignment surfaces ahead of a typo'd lane candidate.
-     [Runtime_only] never consults the lane list, so the empty list here is not a
-     stand-in for lanes that do not exist yet — it states that no lane is
-     admissible at this site, which is the assignment contract runtime.mli
-     documents and Keeper_turn_driver's lane-aware dispatch relies on. *)
-  let* () =
-    validate_runtime_references ~dropped_bindings runtimes []
-      (assignment_references assignments)
-  in
-  (* Lanes are materialized before every route validation so any route id can
-     name a lane (#25394); candidate resolution is enforced by [validate_lanes]
-     inside [lanes_of_decls]. *)
+  (* Assignments name a declared lane or a runtime (RFC-0457), so they are
+     validated with the materialized lanes, like every other route id (#25394).
+     A typo'd lane candidate can now surface before a typo'd assignment — the
+     lane list the assignment names is the thing that had to exist first. *)
   let* lanes =
     lanes_of_decls ~dropped_bindings ~default_runtime_id:rt.id runtimes cfg.lane_decls
+  in
+  let* () =
+    validate_runtime_references ~dropped_bindings runtimes lanes
+      (assignment_references assignments)
   in
   let* () =
     validate_runtime_references ~dropped_bindings runtimes lanes

@@ -669,25 +669,29 @@ max-concurrent = 1
 max-concurrent = 1
 |}
 
-(* Pins the current assignment contract: [runtime.assignments] targets must be
-   runtime ids, so a keeper can only reach a lane when the lane id shadows a
-   runtime id ([resolve_assignment] prefers lanes on collision). Direct lane
-   assignment also has no pre-dispatch context budget resolution
-   ([resolve_max_context_resolution_for_runtime_id] resolves runtime ids only),
-   so accepting it at load would just move this failure to every turn. *)
-let test_assignment_to_lane_id_rejected_at_load () =
+(* RFC-0457: [runtime.assignments] targets name a declared lane or a runtime.
+   A lane target loads, and the pre-dispatch context budget resolves through
+   the lane's entry binding ([entry_runtime_id_of_route]) — the failure the
+   old contract refused this config for rather than hit at every turn. *)
+let test_assignment_to_lane_id_loads () =
   let path = Filename.temp_file "runtime_failover_lane_assign_" ".toml" in
   write_file path runtime_toml_assignment_to_lane;
   Fun.protect
     ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
     (fun () ->
        match load_list_text ~config_path:path with
-       | Ok _ -> Alcotest.fail "expected load to fail on lane-targeted assignment"
        | Error msg ->
+         Alcotest.failf "a lane-targeted assignment must load: %s" msg
+       | Ok (_runtimes, _default, assignments, _media_failover, lanes) ->
+         Alcotest.(check (option string))
+           "the assignment keeps its lane target" (Some "resilient")
+           (List.assoc_opt "canary" assignments);
          Alcotest.(check bool)
-           "error names the assignment"
+           "the named lane is materialized"
            true
-           (contains ~needle:"[runtime.assignments].canary" msg))
+           (List.exists
+              (fun lane -> String.equal (Runtime_lane.id lane) "resilient")
+              lanes))
 
 let test_unknown_lane_candidate_rejected_at_load () =
   let path = Filename.temp_file "runtime_failover_bad_" ".toml" in
@@ -4073,9 +4077,9 @@ let () =
             `Quick
             test_unknown_lane_candidate_rejected_at_load;
           Alcotest.test_case
-            "assignment to lane id rejected at load"
+            "assignment to lane id loads"
             `Quick
-            test_assignment_to_lane_id_rejected_at_load;
+            test_assignment_to_lane_id_loads;
           Alcotest.test_case
             "lane media degrade uses first candidate runtime id"
             `Quick

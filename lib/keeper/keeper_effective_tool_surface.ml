@@ -324,7 +324,9 @@ let resolve_runtime keeper_name =
      rule [Keeper_unified_turn_pre_dispatch.build_runtime_execution] uses to
      size the turn. *)
   let runtime_id =
-    Option.value (Runtime.entry_runtime_id_of_route route) ~default:route
+    match Runtime.entry_runtime_id_of_route route with
+    | Some binding -> binding
+    | None -> route
   in
   match Runtime.get_runtime_by_id runtime_id with
   | Some runtime -> Ok (runtime_id, runtime)

@@ -24,10 +24,14 @@ def checkout(destination):
     return destination
 
 
-def package_version(repo):
-    match = re.search(r"(?m)^\(version ([^)]+)\)", (repo / "dune-project").read_text())
-    assert match is not None, "dune-project names no version"
+def first_group(pattern, text):
+    match = re.search(pattern, text)
+    assert match is not None, pattern
     return match.group(1)
+
+
+def package_version(repo):
+    return first_group(r"(?m)^\(version ([^)]+)\)", (repo / "dune-project").read_text())
 
 
 def run_script(repo, env, script, *args):
@@ -100,6 +104,26 @@ class StableDocumentationInputs(unittest.TestCase):
             self.assertNotEqual(refused.returncode, 0)
             self.assertIn("Installation target:", refused.stderr)
 
+    def test_a_pin_on_the_published_release_still_needs_the_notice(self):
+        # The bump rewrites the notice rather than adding it, so a README that
+        # lost it while pinned to a published release must fail here instead
+        # of at the next bump.
+        readme = self.repo / "README.md"
+        original = readme.read_text()
+        tag = first_group(r"(?m)^TAG=v(.+)$", original)
+        published = first_group(r"(?m)^> Latest published GitHub release: v([^ ]+)",
+                                (self.repo / "ROADMAP.md").read_text())
+        self.assertEqual(tag, published, "fixture needs a pin on the published release")
+        notice = f"> Installation target: v{tag} (check tag availability on GitHub Releases)."
+        try:
+            self.assertEqual(original.count(notice), 1)
+            readme.write_text(original.replace(notice, ""))
+            refused = self.run_script("check-doc-truth.sh")
+            self.assertNotEqual(refused.returncode, 0)
+            self.assertIn("Installation target:", refused.stderr)
+        finally:
+            readme.write_text(original)
+
     def test_checked_in_version_mismatch_still_fails(self):
         path = self.repo / "dune-project"
         original = path.read_text()
@@ -116,7 +140,7 @@ class StableDocumentationInputs(unittest.TestCase):
 
     def test_explicit_release_tag_still_must_match_package(self):
         version = package_version(self.repo)
-        good =self.run_script("check-version-truth.sh", "--tag", "v" + version)
+        good = self.run_script("check-version-truth.sh", "--tag", "v" + version)
         self.assertEqual(good.returncode, 0, good.stdout + good.stderr)
         bad = self.run_script("check-version-truth.sh", "--tag", "v999.0.0")
         self.assertNotEqual(bad.returncode, 0, bad.stdout + bad.stderr)

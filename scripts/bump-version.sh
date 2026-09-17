@@ -103,8 +103,9 @@ echo "  SPEC-INDEX.md updated"
 # 8) Install pins — the copy-paste block in README, INSTALL and the site
 # quickstart names the release being cut. Nothing else moves them, and they
 # sat on v0.35.14 while five later releases went out. Until the tag exists
-# the README's "check tag availability" line is what check-doc-truth.sh
-# requires of a pin on an unpublished version, so it moves with them.
+# the pins name a release readers cannot download yet; the README's "check tag
+# availability" line, which check-doc-truth.sh requires beside every pin,
+# moves with them.
 for readme in README.md README.ko.md; do
   sedi -E "s#releases/tag/v[0-9]+\.[0-9]+\.[0-9]+#releases/tag/v$NEW_VERSION#g" \
     "$ROOT_DIR/$readme"

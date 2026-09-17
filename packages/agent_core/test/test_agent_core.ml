@@ -200,6 +200,58 @@ let test_extend_tools_with_nothing_changes_nothing () =
   Alcotest.(check int) "still empty" 0 (Tool_set.size (Agent.tools agent))
 ;;
 
+(* A caller that composes the whole tool array in one order on the next turn
+   hands that order here, so a set widened one tool at a time comes out the
+   way the next turn sends it. The array is a provider cache prefix; the same
+   tools in another order are a different prefix. *)
+let test_extend_tools_places_by_order () =
+  Eio_main.run
+  @@ fun env ->
+  let tool name =
+    Tool.create ~name ~description:name ~parameters:[] (fun _ ->
+      Ok { Types.content = name; content_blocks = None; _meta = None })
+  in
+  let agent =
+    Agent.create
+      ~config:(Types.default_config ~model:"test-model")
+      ~tools:[ tool "always"; tool "search"; tool "second"; tool "mcp" ]
+      ~net:env#net
+      ()
+  in
+  Agent.extend_tools
+    ~order:[ "search"; "first"; "second"; "third" ]
+    agent
+    [ tool "third"; tool "first"; tool "stray" ];
+  Alcotest.(check (list string))
+    "ranked tools take their slot, held tools stay put, unranked go last"
+    [ "always"; "search"; "first"; "second"; "third"; "mcp"; "stray" ]
+    (Tool_set.names (Agent.tools agent));
+  let later =
+    Agent.create
+      ~config:(Types.default_config ~model:"test-model")
+      ~tools:[ tool "later" ]
+      ~net:env#net
+      ()
+  in
+  Agent.extend_tools ~order:[ "earlier"; "later" ] later [ tool "earlier" ];
+  Alcotest.(check (list string))
+    "with nothing ranked before it, a tool goes before the first ranked after it"
+    [ "earlier"; "later" ]
+    (Tool_set.names (Agent.tools later));
+  let between =
+    Agent.create
+      ~config:(Types.default_config ~model:"test-model")
+      ~tools:[ tool "a"; tool "x"; tool "c" ]
+      ~net:env#net
+      ()
+  in
+  Agent.extend_tools ~order:[ "a"; "b"; "c" ] between [ tool "b" ];
+  Alcotest.(check (list string))
+    "after the last lower-ranked tool, not before the first higher-ranked one"
+    [ "a"; "b"; "x"; "c" ]
+    (Tool_set.names (Agent.tools between))
+;;
+
 let test_version_info () =
   Alcotest.(check string) "version" Agent_core.Version.version Agent_core.version;
   Alcotest.(check string) "name" "agent_core" Agent_core.name
@@ -236,6 +288,8 @@ let () =
             test_extend_tools_does_not_rebind_an_existing_name
         ; test_case "extend_tools with nothing changes nothing" `Quick
             test_extend_tools_with_nothing_changes_nothing
+        ; test_case "extend_tools places by order" `Quick
+            test_extend_tools_places_by_order
         ; test_case "a widened tool reaches the next request" `Quick
             test_a_widened_tool_reaches_the_next_request
         ; test_case "version info" `Quick test_version_info

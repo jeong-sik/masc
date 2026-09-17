@@ -3430,6 +3430,13 @@ let add_routes ~sw ~clock router =
              (fun state _agent_name req reqd ->
                Keeper_api.handle_keeper_github_login_post state req reqd)
              request reqd
+       | Keeper_api.Keeper_post_github_token ->
+           with_token_permission_auth ~permission:Masc_domain.CanAdmin
+             (fun state _agent_name req reqd ->
+               Http.Request.read_body_async reqd (fun body_str ->
+                 Keeper_api.handle_keeper_github_token_post state req reqd body_str
+               )
+             ) request reqd
        | Keeper_api.Keeper_post_identity_refresh ->
            (* Reads from a provider and writes a catalog into this keeper's
               own state, so it carries the same authority as starting the

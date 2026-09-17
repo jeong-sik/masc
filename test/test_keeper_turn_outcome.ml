@@ -17,6 +17,12 @@ module Ops = Masc.Keeper_tool_surface_ops
 module Stream = Server_routes_http_keeper_stream
 module Response_text = Masc.Keeper_agent_run_response_text
 
+(* [direct_reply_terminal_error] answers with a cause, not a sentence
+   (RFC-0454 D2); these cases only assert whether there is one. *)
+let summary_of_cause cause =
+  Keeper_request_failure.summary { Keeper_request_failure.cause }
+;;
+
 let outcome : TO.t testable =
   testable
     (fun fmt t -> Format.pp_print_string fmt (TO.to_label t))
@@ -126,9 +132,8 @@ let test_external_effect_completed_has_no_direct_reply_error () =
       ]
   in
   check (option string) "terminal surface delivery is already visible" None
-    (Stream.For_testing.direct_reply_terminal_error
-       (Some payload_json)
-       "")
+    (Option.map summary_of_cause
+       (Stream.For_testing.direct_reply_terminal_error (Some payload_json) ""))
 
 let test_canonical_payload_carries_delivery_target () =
   let turn_ref = Ids.Turn_ref.make ~trace_id:"post-target" ~absolute_turn:3 in
@@ -243,9 +248,10 @@ let test_external_effect_status_survives_server_projection () =
     check string "server keeps control status out of reply text" "" canonical.visible_reply;
     check (option string) "server accepts typed control status without prose"
       None
-      (Stream.For_testing.direct_reply_terminal_error
-         (Some canonical.payload_json)
-         canonical.visible_reply);
+      (Option.map summary_of_cause
+         (Stream.For_testing.direct_reply_terminal_error
+            (Some canonical.payload_json)
+            canonical.visible_reply));
     match
       Stream.For_testing.queued_delivery_outcome_of_turn_ref
         (Some canonical.turn_ref)

@@ -426,7 +426,9 @@ let keeper_tools_list_json_for_surface ~capability_surface =
              , `String
                  (Keeper_capability_surface.capability_availability_to_string
                     capability.availability) )
-           ]))
+           ]
+         @ Keeper_capability_surface.availability_detail_fields
+             capability.availability))
   in
   let skills =
     Keeper_capability_surface.skill_capabilities capability_surface

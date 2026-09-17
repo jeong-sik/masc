@@ -541,6 +541,7 @@ let test_spawn_does_not_cross_the_guest_boundary () =
   let factory = Masc.Keeper_sandbox_factory.create ~config ~meta () in
   let result =
     Masc.Keeper_tool_in_process_runtime.spawn_sandbox_argv
+      ~sandbox_profile:meta.sandbox_profile
       ~turn_sandbox_factory:(Some factory)
       ~cwd:(Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta)
       ~command_argv:[ "sleep"; "1" ]

@@ -209,6 +209,8 @@ let test_keeper_name_selection_filters_prompt_and_activation_task_views () =
   match
     Selection.exact_task_surfaces
       ~snapshot:skill_snapshot
+      ~tool_deny:[]
+      ~sandbox_profile:Masc.Keeper_types_profile.Docker
       ~skill_names:(Some [ "guide" ])
       ~selection
       ~current_task:Inputs.No_current_task
@@ -234,6 +236,70 @@ let test_keeper_name_selection_filters_prompt_and_activation_task_views () =
                (fun (_, entries) ->
                   List.map Masc.Keeper_skill_catalog.exact_surface_to_yojson entries)
                surfaces)))
+;;
+
+let test_denied_node_tool_withholds_task_composition_from_prompt () =
+  let config = config (source_row ~id:"only" ~path:"skills") in
+  let skill_snapshot =
+    snapshot
+      config
+      [ [ "lane-read", composition_document ~name:"lane-read" ~node_id:"lane" ] ]
+  in
+  let source_id =
+    match config.sources with
+    | [ source ] -> source.id
+    | _ -> fail "expected one source"
+  in
+  let task_reference =
+    exact_reference
+      skill_snapshot
+      ~source_id
+      ~package_id:"lane-read"
+      ~name:"lane-read"
+  in
+  let selection =
+    match
+      Selection.resolve_for_task
+        ~snapshot:skill_snapshot
+        ~task_id:"task-001"
+        [ task_reference ]
+    with
+    | Ok selection -> selection
+    | Error error -> fail (Selection.error_to_string error)
+  in
+  let surfaces ~tool_deny =
+    Selection.exact_task_surfaces
+      ~snapshot:skill_snapshot
+      ~tool_deny
+      ~sandbox_profile:Masc.Keeper_types_profile.Docker
+      ~skill_names:None
+      ~selection
+      ~current_task:Inputs.No_current_task
+      ~held_task_skills:
+        [ { Inputs.held_task_id = "task-001"; held_skills = [ task_reference ] } ]
+  in
+  (match surfaces ~tool_deny:[] with
+   | [ ( "task-001"
+       , [ { Masc.Keeper_skill_catalog.availability =
+               Masc.Keeper_skill_catalog.Composition_tool { tool_name }
+           ; _
+           }
+         ] ) ] ->
+     check string "an admitted Task composition is advertised as its tool"
+       "keeper_compose_lane-read" tool_name
+   | _ -> fail "an admitted Task composition was not advertised as a composition");
+  match surfaces ~tool_deny:[ "keeper_lane_status" ] with
+  | [ ( "task-001"
+      , [ { Masc.Keeper_skill_catalog.availability =
+              Masc.Keeper_skill_catalog.Exact_unavailable { diagnostic }
+          ; _
+          }
+        ] ) ] ->
+    check string "the prompt row names the node tool the surface does not admit"
+      "composition tool \"keeper_compose_lane-read\" runs node tools this turn's \
+       surface does not admit: keeper_lane_status"
+      diagnostic
+  | _ -> fail "a withheld Task composition was still advertised as callable"
 ;;
 
 let test_shadow_reference_selects_shadow_not_effective_winner () =
@@ -775,6 +841,8 @@ let () =
             test_keeper_name_selection_filters_global_and_task_exactly
         ; test_case "Keeper names filter prompt and activation Task views" `Quick
             test_keeper_name_selection_filters_prompt_and_activation_task_views
+        ; test_case "denied node tool withholds Task composition from prompt" `Quick
+            test_denied_node_tool_withholds_task_composition_from_prompt
         ; test_case "held shadow composition collision is exact" `Quick
             test_held_shadow_composition_wins_with_exact_collision_evidence
         ; test_case "malformed exact composition falls back" `Quick

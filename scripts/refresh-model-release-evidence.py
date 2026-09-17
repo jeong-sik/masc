@@ -2,8 +2,10 @@
 """Observe official evidence and optional account model lists without fabricating release dates.
 
 The resulting report is review input, not a capability overlay. Account discovery
-uses the install helper's existing discover_models ABI; a listing's created/date
-fields cannot enter official release evidence. No model turns are sent.
+drives the install helper's native discovery ABI through the installed MASC
+executable (native_discover_models; the Codex client catalog via catalog_models);
+provider wire formats stay owned by the binary. A listing's created/date fields
+cannot enter official release evidence. No model turns are sent.
 """
 import argparse
 import datetime as dt
@@ -84,6 +86,23 @@ def fetch_source(url, timeout):
         return {'status': 'unavailable'}
 
 
+def account_discovery(helper, binary, timeout):
+    """Bind the install helper's discovery ABI for one refresh run.
+
+    The dispatch mirrors the installer's own source_models: Codex answers
+    through the binary's client catalog, HTTP connections through the native
+    discovery command, which owns the wire formats.
+    """
+    def discover(source):
+        try:
+            if source['choice'] == 'codex':
+                return helper['catalog_models'](binary, 'codex'), None
+            return helper['native_discover_models'](binary, source, timeout)
+        except helper['SetupError']:
+            return [], 'unavailable'
+    return discover
+
+
 def observe(catalog, *, observed_at, fetch, discovery=None, discover=None):
     validate_catalog(catalog)
     sources = sorted({row['release']['source_url'] for row in catalog['models'] if row['release']['status'] == 'official_release'})
@@ -92,11 +111,11 @@ def observe(catalog, *, observed_at, fetch, discovery=None, discover=None):
               'sources': [{'source_url': url, **fetch(url)} for url in sources]}
     if discovery is None:
         return report
-    if set(discovery) != {'schema', 'connections'} or discovery['schema'] != 'masc.model_discovery_request.v1' or not isinstance(discovery['connections'], list):
+    if set(discovery) != {'schema', 'connections'} or discovery['schema'] != 'masc.model_discovery_request.v2' or not isinstance(discovery['connections'], list):
         raise ValueError('invalid discovery request schema')
     identifiers = set()
     for connection in discovery['connections']:
-        if set(connection) != {'id', 'publisher', 'choice', 'endpoint', 'api_key_env', 'command'}:
+        if set(connection) != {'id', 'publisher', 'choice', 'endpoint', 'api_key_env'}:
             raise ValueError('unexpected discovery connection fields')
         if any(not isinstance(value, str) for value in connection.values()) or not connection['id'] or connection['id'] in identifiers:
             raise ValueError('invalid or duplicate discovery connection identity')
@@ -104,8 +123,8 @@ def observe(catalog, *, observed_at, fetch, discovery=None, discover=None):
         if connection['choice'] not in ('codex', 'ollama', 'llama_cpp', 'vllm', 'openai_compatible'):
             report['account_discovery'].append({'connection_id': connection['id'], 'status': 'unsupported'})
             continue
-        rows, _ = discover(connection['choice'], endpoint=connection['endpoint'],
-                           api_key_env=connection['api_key_env'], command=connection['command'])
+        source = {key: connection[key] for key in ('choice', 'endpoint', 'api_key_env')}
+        rows, _ = discover(source)
         # Select only safe ABI outputs. Raw provider rows, auth paths, endpoint,
         # credentials and any created/listed timestamps never reach the report.
         models = []
@@ -124,6 +143,8 @@ def main():
     parser.add_argument('--catalog', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--discovery-request', type=Path)
+    parser.add_argument('--masc-binary', type=Path,
+                        help='installed MASC executable; required with --discovery-request')
     parser.add_argument('--timeout', type=float, default=15)
     args = parser.parse_args()
     try:
@@ -132,12 +153,10 @@ def main():
         request = strict_json(args.discovery_request.read_text()) if args.discovery_request else None
         discover = None
         if request:
+            if not args.masc_binary:
+                raise ValueError('account discovery requires --masc-binary')
             helper = runpy.run_path(str(Path(__file__).with_name('install-runtime-setup.py')))
-            def discover(choice, **kwargs):
-                try:
-                    return helper['discover_models'](choice, timeout=args.timeout, **kwargs)
-                except helper['SetupError']:
-                    return [], 'unavailable'
+            discover = account_discovery(helper, str(args.masc_binary), args.timeout)
 
         report = observe(catalog, observed_at=dt.datetime.now(dt.timezone.utc).isoformat(),
                          fetch=lambda url: fetch_source(url, args.timeout), discovery=request, discover=discover)

@@ -9,6 +9,18 @@
 (** Tool handler return type: (success, message). *)
 type tool_result = Keeper_types_profile.tool_result
 
+(** What an admitted chat turn answers with: the tool result its caller
+    carries, and — when the turn failed — the typed cause beside it
+    (RFC-0454 D2). The cause crosses this boundary as the value it is; the
+    tool result's [data] is dropped downstream, so encoding it there and
+    decoding it back would be a JSON round trip inside one process. *)
+type dispatch =
+  | Turn_settled of tool_result
+  | Turn_failed of
+      { result : tool_result
+      ; failure : Keeper_request_failure.t
+      }
+
 (** Start or reconfigure a keeper agent. *)
 val handle_keeper_up : _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_result
 
@@ -93,7 +105,7 @@ val handle_keeper_msg_admitted :
   ?continuation_channel:Keeper_continuation_channel.t ->
   _ Keeper_types_profile.context ->
   Keeper_invocation_contract.direct_message ->
-  tool_result
+  dispatch
 (** Execute a direct message under an already-held chat admission token. Only
     the Owner operation child uses this path, after atomically claiming the
     latest durable operation body. *)

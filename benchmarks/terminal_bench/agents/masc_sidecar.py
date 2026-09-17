@@ -190,7 +190,6 @@ class MascSidecar:
             f"chmod +x {REMOTE}/bin/masc {REMOTE}/driver/*.sh && "
             f"bash {REMOTE}/driver/bootstrap.sh",
             env=self.masc_container_env(),
-            timeout_sec=900,
         )
 
 

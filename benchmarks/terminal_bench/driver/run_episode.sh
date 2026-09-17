@@ -85,9 +85,15 @@ for i in $(seq 1 "${KEEPER_COUNT}"); do
       >/dev/null 2>"$setup_error_file"; then
     report_setup_failure KeeperUpFailed "$k"
   fi
-  if ! curl -fsS -m 20 -X POST "http://127.0.0.1:8935/api/v1/keepers/tool-approval-mode" \
+  # Not `curl -f`: it drops the response body on an HTTP error, and the body
+  # is the server's reason.
+  approval_status="$(curl -sS -m 20 -o "$setup_error_file" -w '%{http_code}' \
+      -X POST "http://127.0.0.1:8935/api/v1/keepers/tool-approval-mode" \
       -H "Authorization: Bearer ${MCP_TOKEN}" -H 'Content-Type: application/json' \
-      -d "{\"name\":\"${k}\",\"mode\":\"yolo\"}" >/dev/null 2>"$setup_error_file"; then
+      -d "{\"name\":\"${k}\",\"mode\":\"yolo\"}" 2>>"$setup_error_file")" \
+    || approval_status="000"
+  if [[ "$approval_status" != 2?? ]]; then
+    printf '\nHTTP %s\n' "$approval_status" >> "$setup_error_file"
     report_setup_failure ApprovalModeFailed "$k"
   fi
 done

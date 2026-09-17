@@ -74,7 +74,7 @@ loader 검증, 감사 기록이 붙으므로 파일을 직접 고치는 것보�
 
 - 구조화된 설정 화면에 웹 검색이 없다. TUI 의 `params` pane 은 `Runtime_params`
   레지스트리를 읽는데 거기에 웹 검색 항목이 하나도 없다. 그래서 `[web_search]`
-  라는 섹션이 있다는 것도, 키가 넷이라는 것도, 어느 공급자가 어느 변수를 보는지도
+  라는 섹션이 있다는 것도, 키가 여섯이라는 것도, 어느 공급자가 어느 변수를 보는지도
   화면에 나오지 않는다. 원문 편집기는 이미 아는 사람만 쓸 수 있다.
 - 지금 어느 공급자가 쓸 수 있는 상태인지 묻는 방법이 없다. `masc_config` 는 읽기
   전용이고 유효한 설정만 낸다. 비어 있는 이유가 변수가 없어서인지 순서에서 빠져서인지
@@ -90,13 +90,20 @@ loader 검증, 감사 기록이 붙으므로 파일을 직접 고치는 것보�
 `runtime.toml` 은 커밋되는 파일이라서 비밀에는 TOML 키를 주지 않는다. 키는
 `Env_only` 로 고정이고, 서버를 띄우는 셸에 직접 export 해야 한다.
 
-TOML 로 저장할 수 있는 것은 네 개다: `web_search.searxng_url`,
-`web_search.provider`, `web_search.provider_order`, `web_search.fallbacks`.
+TOML 로 저장할 수 있는 것은 여섯 개다: `web_search.searxng_url`,
+`web_search.provider`, `web_search.provider_order`, `web_search.fallbacks`,
+`web_search.timeout_sec`, `web_search.cache_ttl_sec`.
+
+SearXNG 는 키가 필요 없는 유일한 공급자이고, 그것을 로컬에 세우는 헬퍼가
+`scripts/searxng-local.sh` 에 이미 있다. Docker 로 컨테이너를 올리고
+`start` / `status` / `logs` / `stop` 을 갖췄다. 다만 저장소 안에만 있고
+`install.sh` 가 배포하지 않으므로 바이너리로 설치한 사람에게는 없는 물건이다.
 
 ### 1.2 브라우저 레인
 
-`scripts/install.sh:1376` 은 이미 `masc-browser-host` 를 설치 위치에 넣는다.
-실행 파일은 있다. 없는 것은 그 다음 절차다.
+`scripts/install.sh:1505` 는 이미 `masc-browser-host` 를 설치 위치에 넣는다
+(`install_release_companion` 이 릴리즈 자산을 받아 체크섬을 확인하고 실행 권한을
+준다). 실행 파일은 있다. 없는 것은 그다음 절차다.
 
 `connectors/browser/install-host.sh` 가 하는 일은 다음과 같다.
 
@@ -177,7 +184,7 @@ TOML 로 저장할 수 있는 것은 네 개다: `web_search.searxng_url`,
 도메인은 모듈 안에 두고 CLI 는 그 위에 얇게 얹는다. HTTP 라우트는 이번에 만들지
 않지만, 나중에 붙일 때 JSON 변환만 더하면 되도록 경계는 음성과 같게 둔다.
 
-쓰는 값은 TOML 이 이미 받는 네 개다.
+쓰는 값은 TOML 이 이미 받는 여섯 개다.
 
 ```toml
 [web_search]
@@ -185,7 +192,14 @@ searxng_url    = "http://localhost:8888"
 provider       = "brave"
 provider_order = "searxng,brave,tavily"
 fallbacks      = "exa"
+timeout_sec    = 15
+cache_ttl_sec  = 900.0
 ```
+
+`provider_order` 를 쓸 때 주의할 것이 하나 있다. 기본 순서는 자격증명으로 걸러지지만
+(`default_provider_order`), 설정된 순서는 걸러지지 않고 그대로 쓰인다
+(`lib/tool_misc_web_search.ml:248`). 그래서 변수가 없는 공급자를 순서에 적으면
+그 자리는 매번 실패한다. 명령은 저장하기 전에 그 상태를 알린다.
 
 쓰지 않는 값은 API 키다.
 
@@ -278,10 +292,10 @@ fallbacks      = "exa"
 |---|---|
 | 섹션이 생기고 주석이 살아남는다 | 주석과 다른 표가 든 `runtime.toml` 에 명령을 돌리고 그 바이트가 그대로인지 본다 |
 | 두 번 돌려도 같다 | 같은 입력으로 두 번 돌리고 파일이 같은지 본다 |
-| 자격증명 판정이 실제 호출과 맞다 | 변수를 하나만 둔 상태에서 명령이 낸 목록과 `provider_plan ()` 이 같은지 본다 |
+| 자격증명 판정이 실제 호출과 맞다 | 변수를 하나만 둔 상태에서 명령이 낸 목록과 `provider_plan ()` 이 같은지 본다. `provider_order` 를 설정한 경우는 따로 본다 — 그때 `provider_plan ()` 은 자격증명으로 거르지 않으므로 두 목록이 갈리는 것이 정상이고, 명령은 그 차이를 알리는 쪽이어야 한다 |
 | 브라우저 설정이 스크립트와 같은 결과를 낸다 | 같은 워크스페이스에 스크립트와 명령을 각각 돌려 파일 내용과 권한을 비교한다 |
 | 업그레이드 경로가 끊기지 않는다 | `install-local-build.sh` 가 등록된 manifest 를 새 명령으로도 같은 수만큼 갱신하는지 본다 |
-| 판정이 바뀐다 | 설정 전후로 `Browser_lane_launcher.verdict` 가 `Absent` 에서 `Aligned` 로 가는지 본다 |
+| 판정이 바뀐다 | 설정 전후로 `Browser_lane_launcher.verdict` 를 본다. 서버를 띄운 뒤라야 `Aligned` 가 되고, 띄우지 않으면 `Unverified` 에서 멈춘다 (`lib/browser_lane_launcher.ml:85`) |
 
 이미 있는 테스트: `test/test_install_script.ml`,
 `test/test_browser_native_host.py`, `connectors/browser/tests/`.

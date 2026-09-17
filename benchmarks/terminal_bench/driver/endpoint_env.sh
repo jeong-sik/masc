@@ -42,33 +42,56 @@ bench_pid1_environ() {
     cat /proc/1/environ
 }
 
+# <record file, or empty> <name> <reason>: one entry left out, named on stderr
+# and, with a record file, appended to it as NAME<TAB>REASON.
+bench_env_left_out() {
+  echo "[bootstrap] env_file: left out ${2:-an entry} (${3})" >&2
+  [[ -z "$1" ]] || printf '%s\t%s\n' "$2" "$3" >> "$1"
+}
+
 # NUL-separated environment on stdin: NAME=VALUE lines on stdout. An entry the
-# input ends without a NUL is read too.
+# input ends without a NUL is read too. What is left out is recorded in the file
+# given, which collect_result.sh puts into result.json; the reasons are
+# refused_by_shim, not_one_line, repeated and not_a_name (with no name, since it
+# is not one).
+# [record file]
 bench_endpoint_env_lines() {
-  local entry name value refused written=":" newline=$'\n' cr=$'\r'
+  local record="${1:-}" entry name value refused written=":" newline=$'\n' cr=$'\r'
+  [[ -z "${record}" ]] || : > "${record}"
   while IFS= read -r -d '' entry || [[ -n "${entry}" ]]; do
     [[ "${entry}" == *=* ]] || continue
     name="${entry%%=*}"
     value="${entry#*=}"
     if [[ ! "${name}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
-      echo "[bootstrap] env_file: left out an entry whose name is not an environment variable name" >&2
+      bench_env_left_out "${record}" "" not_a_name
       continue
     fi
     for refused in "${BENCH_ENV_FILE_REFUSED_NAMES[@]}"; do
       if [[ "${name}" == "${refused}" ]]; then
-        echo "[bootstrap] env_file: left out ${name}, which the shim refuses" >&2
+        bench_env_left_out "${record}" "${name}" refused_by_shim
         continue 2
       fi
     done
     if [[ "${value}" == *"${newline}"* || "${value}" == *"${cr}" ]]; then
-      echo "[bootstrap] env_file: left out ${name}, whose value is not one line" >&2
+      bench_env_left_out "${record}" "${name}" not_one_line
       continue
     fi
     if [[ "${written}" == *":${name}:"* ]]; then
-      echo "[bootstrap] env_file: left out a second ${name}" >&2
+      bench_env_left_out "${record}" "${name}" repeated
       continue
     fi
     written="${written}${name}:"
     printf '%s=%s\n' "${name}" "${value}"
   done
+}
+
+# <record file>: its entries as a JSON array of {name, reason} on stdout; [] when
+# the file is missing or empty. A bootstrap that never ran records nothing.
+bench_env_left_out_json() {
+  local record="$1"
+  if [[ ! -s "${record}" ]]; then
+    printf '[]\n'
+    return 0
+  fi
+  jq -Rsc 'split("\n") | map(select(length > 0) | split("\t") | {name: .[0], reason: .[1]})' "${record}"
 }

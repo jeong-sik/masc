@@ -67,7 +67,7 @@ MCP_SERVER_NAME = "masc"
 POOL_PROMPT = """\
 A MASC server runs in this container and is registered as the MCP server \
 `{server}`. A fleet of keeper agents is already running on it: {names}. Each \
-one executes its shell commands in this same container, as root.
+one executes its shell commands in this same container.
 
 - `masc_keeper_msg` gives a keeper work. `masc_keeper_status` and \
 `masc_keeper_list` report on what they are doing.

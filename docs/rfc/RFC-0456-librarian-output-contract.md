@@ -263,6 +263,15 @@ id 하나다. `translate_revisions` (`:448-466`) 도 1:1 로 매핑한다. 24개
 거부할 때와 같은 길이다. 원문을 잃는 일은 없고 정리가 한 번 미뤄진다. `Revised` 이벤트처럼
 커밋 뒤에 쓰면, 쓰기 실패가 그 사실의 유일한 원문을 지운다.
 
+쓰는 때는 다음 스냅샷을 만들고 출력까지 끝낸 뒤, 교체 바로 앞이다. 쓰기는 fsync 하는
+추가이고, 실패하면 되돌린다. 스냅샷 교체도 fsync 하므로 전원이 나가도 스냅샷만 남고 원문이
+사라지는 순서가 없다. 출력은 풀에서 기다리는 동안 취소될 수 있어서 그보다 앞에 쓰지 않는다.
+
+그래도 기록을 쓴 뒤 교체가 실패하면, 커밋되지 않은 회차의 기록이 남는다. 그런 기록은
+셋 중 하나다. (a) 아직 현재인 사실을 가리킨다. (b) 뒤 회차가 커밋한 기록과 `memory_id`·`into`
+가 같다. (c) 그 사실이 나중에 다른 길로 빠져서, 한 번도 현재가 된 적 없는 `into` 를 가리킨다.
+검색은 (a)를 결과에 넣지 않고, (b)를 한 건으로 센다. (c)는 `into_current = false` 로 보인다.
+
 **적용이 흡수된 id 도 스냅샷에서 뺀다.** `dropped` 와 달리 이유를 요구하지 않는다. 이유는
 새 claim 자체다. 저널의 `change.removed` 에는 지금처럼 나간 행이 전부 남는다.
 
@@ -366,7 +375,7 @@ type summary =
 
 | 자리 | 규칙 | 왜 의심스러운가 |
 |---|---|---|
-| `keeper_memory_os_current.ml:703-722` | `maintain_supported_facts` — 전제가 사라진 derived fact 를 자동 무효화 | 판정자 없이 잊는다. 라이브에서 16,000 회차에 6번 발동 (code-reviewer 0 / analyst 1 / rondo 2 / lane-smith 3) |
+| `keeper_memory_os_current.ml:703-722` | `maintain_supported_facts` — 전제가 사라진 derived fact 를 자동 무효화 | 판정자 없이 잊는다. 라이브에서 16,000 회차에 6번 발동 (code-reviewer 0 / analyst 1 / rondo 2 / lane-smith 3). `absorbs` 도 전제를 빼므로 같은 규칙이 돈다. 흡수 기록은 흡수된 사실에만 남고, 그 때문에 무효화된 derived fact 에는 남지 않는다. Librarian 입력에는 전제가 보이지 않아 미리 피할 수 없다. 2026-09-17 스냅샷 24개, 사실 2,813개 중 전제를 가진 사실은 최대 10개(0.36%) |
 | `keeper_memory_os_current.ml:729-737` | `merge_observation` — Board 가 Transcript 를 이기는 우선순위표 | "두 번째 읽기는 첫 번째가 주지 않은 것을 주지 않는다"는 판단이 match 로 굳어 있다. 내용이 아니라 출처 표기라 경계선 |
 | `keeper_librarian_runtime.ml:394-435` | `fitted_messages` — body 한도에 맞을 때까지 메시지를 이분 탐색으로 줄인다 | 한도 자체는 바깥이 강제하는 물리값이지만, **무엇을 버릴지**를 코드가 정한다 (오래된 것부터) |
 | `keeper_librarian_runtime.ml:458-494` | `fit_context_input` — source 를 탐욕적으로 채운다 | 같음. 무엇이 들어갈지를 코드가 정한다 |

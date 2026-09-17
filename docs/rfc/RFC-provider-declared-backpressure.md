@@ -34,7 +34,7 @@ Z.ai coding plan 은 동시 요청 수의 상한을 공개하지 않고 형편�
 
 ### 1.2 무엇이 아닌가
 
-- **credit 소진이 아니다.** 소진이면 코드 1308("Usage limit reached for …")이나 1310 이 온다. 온 것은 1302 뿐이다.
+- **credit 소진이 아니다.** 5시간 credit 이 떨어지면 1316("Usage limit reached for the past 5 hours"), 주간이면 1310, 다른 창이면 1308 이 온다. 09-14~17 나흘 시스템 로그에 이 문구는 0건이고, 429 문구 3,695줄은 전부 1302 의 것이다(문구는 공급자 본문에서 그대로 온다. `Retry.RateLimited { message }`). 시간축도 같은 말을 한다. 09-16 에 429 가 난 179분 중 146분에는 같은 분 안에 glm 완료가 있고, 완료 없이 429 만 이어진 가장 긴 구간은 2분이다. credit 벽이면 다음 회전까지 완료가 끊긴다.
 - **masc 가 선언보다 많이 보낸 것이 아니다.** 허가는 엔드포인트 identity(kind, base_url, key)마다 하나라 keeper 든 시스템 경로든 같은 4칸을 나눠 쓴다. 완료 요청으로 복원한 동시 건수는 429 시점 중앙값 1, 최대 3 이었다. 다만 429 로 끝난 요청 자체는 costs 에 없어 이 복원은 아래로 치우친다.
 - **요청 빈도만의 문제도 아니다.** 429 직전 60초의 완료 요청 수는 중앙값 1 로, 성공한 요청 직전(5)보다 적다. 공급자가 줄일 때는 우리 요청 대부분이 실패해 완료분이 비기 때문이다. 이 지표로는 동시성과 빈도를 가를 수 없다.
 
@@ -42,6 +42,8 @@ Z.ai coding plan 은 동시 요청 수의 상한을 공개하지 않고 형편�
 
 - [docs.z.ai/api-reference/api-code](https://docs.z.ai/api-reference/api-code) (2026-09-16 확인): 1302 = "Rate limit reached for requests", HTTP 429, 조치 "요청 빈도·동시성을 줄여라". 1305 = 일시 과부하, 1308/1310 = 사용량 한도.
 - [docs.z.ai/devpack/usage-policy](https://docs.z.ai/devpack/usage-policy) (검색 결과 요약, Medium): 동시성 한도는 플랜에 묶이고 자원 형편에 따라 **동적으로** 조정된다. Max > Pro > Lite. 숫자는 공개하지 않는다.
+- [docs.z.ai/devpack/overview](https://docs.z.ai/devpack/overview) (2026-09-17 확인): 5시간 credit 은 요청 수가 아니라 (입력 토큰×배수 + 캐시 입력×배수 + 출력×배수)/10,000 이고, 소비한 시점에서 5시간 뒤 되돌아온다. Lite 2,000 / Pro 12,000 / Max 28,000. 주간은 10,000 / 60,000 / 140,000.
+- [docs.z.ai/devpack/notice/event-glm-5.3-flash](https://docs.z.ai/devpack/notice/event-glm-5.3-flash) (2026-09-17 확인): 9/3~9/20 매일 23:00~09:00 SGT(15:00~01:00 UTC) glm-5.3-flash 이벤트, 다른 에이전트는 quota 2배. 09-16 의 429 비율은 이 창 안 11%(161/1,421), 밖 6%(120/2,038). 이벤트 시간에 공급자가 더 붐빈다는 해석은 추정이고 이 RFC 는 그 위에 서지 않는다.
 - Retry-After: 오늘 로그에서 retry_after 값이 붙은 거절은 claude_code 의 주간 한도뿐이다. glm 1302 에는 없었다.
 
 ### 1.4 지금 masc 가 하는 것

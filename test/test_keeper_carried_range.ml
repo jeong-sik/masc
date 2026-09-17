@@ -14,8 +14,11 @@ let marks ~high ~low : Runtime_schema.context_marks =
   { high_water_tokens = high; low_water_tokens = low }
 ;;
 
+(* Atom [i] of the synthetic history opens with the message ["m<i>"]. *)
+let opener i = Printf.sprintf "m%d" i
+
 let block ~first ~end_ tokens : Ledger.block =
-  { block_first_atom = first; block_end_atom = end_; tokens }
+  { block_first_atom = first; block_end_atom = end_; block_first_digest = opener first; tokens }
 ;;
 
 (* A ledger whose carried range starts at the first block and whose total is
@@ -36,7 +39,20 @@ let ledger ?(total = None) (blocks : Ledger.block list) : Ledger.t =
   ; measured_end_atom = Option.map (fun _ -> atom_count) total
   ; measured_demote_before = Option.map (fun _ -> 0) total
   ; blocks
-  ; last = { prefix_digest = "f"; first_atom; atom_count; tail_bytes = 0; turn_context = false; demote_before = 0 }
+  ; last =
+      { prefix_digest = "f"
+      ; first_atom
+      ; atom_count
+      ; ends =
+          (match blocks with
+           | [] -> Ledger.No_atom_carried
+           | _ :: _ ->
+             Ledger.Carried_atoms
+               { front_digest = opener first_atom; end_digest = opener (atom_count - 1) })
+      ; tail_bytes = 0
+      ; turn_context = false
+      ; demote_before = 0
+      }
   ; last_usage = None
   }
 ;;
@@ -91,7 +107,11 @@ let test_walks_down_to_the_low_water_mark () =
   check int "twenty atoms" 20 atoms;
   check (option int) "their tokens" (Some 550) tokens;
   check int "front moves to the third block" 20 first_atom;
-  check (option int) "projected total" (Some 450) projected
+  check (option int) "projected total" (Some 450) projected;
+  match Range.at_turn_boundary ~marks:(marks ~high:950 ~low:500) t with
+  | Range.Evicted { front_digest; _ } ->
+    check string "the moved front is named by the block it stopped at" (opener 20) front_digest
+  | Range.Unchanged _ -> fail "expected an eviction"
 ;;
 
 let test_never_evicts_the_newest_block () =

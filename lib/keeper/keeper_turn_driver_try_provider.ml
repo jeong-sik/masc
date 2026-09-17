@@ -59,7 +59,7 @@ type try_provider_ctx =
        this (keeper, runtime) pair: the range the newest completed Agent Core
        turn record on the trace measured, whichever runtime ran it. Read once
        per attempt, on that path only. *)
-    carried_front_seed : unit -> Keeper_carried_front.seed option
+    carried_front_seed : unit -> Keeper_carried_front.seed_read
   ; base_path : string
   ; keeper_name : string
   ; name : string
@@ -530,11 +530,22 @@ type composed =
   ; projection : Runtime_model_input_tail_window.projection
   ; transmitted_bytes : int
   ; history_atom_count : int
+  ; history_digest_at : int -> string option
+        (* [Runtime_model_input_tail_window.atom_opening_digest] over the
+           durable history the range was composed from. *)
   ; origin : Keeper_carried_front.origin
-  ; outlived_seed : Keeper_carried_front.seed option
+  ; outlived_seed : (Keeper_carried_front.seed * Keeper_carried_front.dropped_front) option
   ; demote_before : int
         (* The boundary the demotion actually applied: 0 when demotion is off,
            the whole history under the last resort. *)
+  }
+
+(* A request as the ledger reads it, with the history it was composed from:
+   the ledger checks its last positions against that history, and a halving
+   names its new front by it. *)
+type sent_request =
+  { request : Keeper_model_input_ledger.request
+  ; digest_at : int -> string option
   }
 
 (* What one provider attempt carries between its requests and the retry
@@ -542,7 +553,7 @@ type composed =
    resort is armed for the next composition, and how to ask whether arming
    it would change anything. *)
 type attempt_state =
-  { last_request : Keeper_model_input_ledger.request option ref
+  { last_request : sent_request option ref
   ; last_resort_armed : bool ref
   ; last_resort_probe : (unit -> bool) option ref
   }
@@ -593,16 +604,19 @@ let compose_carried_model_input
       messages
   =
   let _labelled, history_atom_count = Runtime_model_input_tail_window.annotate messages in
-  (* A front measured against a longer history names no atom of this one:
-     the history shrank under it (a checkpoint purge), so the request starts
-     over as with no front rather than carrying the newest atom alone from a
-     position that would never widen again. *)
+  let history_digest_at = Runtime_model_input_tail_window.atom_opening_digest messages in
+  (* A front whose index this history does not open with the same message
+     names no atom of it: the history is shorter than the front, or atoms
+     before the front were purged. The request starts over as with no front
+     rather than carrying the newest atom alone from a position that would
+     never widen again. A history that only lost an unsaved attempt's tail
+     keeps the position. *)
   let front, outlived_seed =
     match front with
     | Some seed ->
-      (match Keeper_carried_front.for_history ~atom_count:history_atom_count seed with
-       | Some seed -> Some seed, None
-       | None -> None, Some seed)
+      (match Keeper_carried_front.for_history ~digest_at:history_digest_at seed with
+       | Ok seed -> Some seed, None
+       | Error dropped -> None, Some (seed, dropped))
     | None -> None, None
   in
   let demote_before = if last_resort then history_atom_count else demote_before in
@@ -635,6 +649,7 @@ let compose_carried_model_input
   ; projection
   ; transmitted_bytes
   ; history_atom_count
+  ; history_digest_at
   ; origin
   ; outlived_seed
   ; demote_before = applied_demote_before ~base_path ~demote_before
@@ -790,8 +805,8 @@ let bounded_model_input_projection
           ~runtime_id:ctx.runtime_id
           ~session_id:(ledger_session ctx)
       with
-      | Some ledger -> Some (Keeper_carried_front.of_ledger ledger)
-      | None -> Lazy.force cold_seed
+      | Some ledger -> Keeper_carried_front.of_ledger ledger
+      | None -> (Lazy.force cold_seed).Keeper_carried_front.seed
     in
     (* The last resort is consumed by one composition: the request it shapes
        is the retry the refusal asked for, and the requests after a success
@@ -908,26 +923,43 @@ let bounded_model_input_projection
          | Some marks ->
            Printf.sprintf "%d/%d" marks.high_water_tokens marks.low_water_tokens
          | None -> "none")
-        last_resort);
+        last_resort;
+      (* The cold seed is read only when no ledger answered; when it was, the
+         records it could not decode are part of why the range started where
+         it did. *)
+      if Lazy.is_val cold_seed
+      then (
+        match (Lazy.force cold_seed).Keeper_carried_front.unreadable with
+        | Some unreadable ->
+          Log.Keeper.warn
+            ~keeper_name:ctx.keeper_name
+            "model input carried range seed read skipped unreadable turn records \
+             runtime=%s unreadable=%d first_reason=%s"
+            ctx.runtime_id
+            unreadable.Keeper_carried_front.count
+            unreadable.Keeper_carried_front.first_reason
+        | None -> ()));
     (match composed.outlived_seed with
-     | Some seed when not !outlived_reported ->
+     | Some (seed, dropped) when not !outlived_reported ->
        outlived_reported := true;
        Log.Keeper.warn
          ~keeper_name:ctx.keeper_name
-         "model input carried range dropped its front runtime=%s seed=%s seed_atoms=%d \
-          history_atoms=%d: the history shrank under it and the request starts over"
+         "model input carried range dropped its front runtime=%s seed=%s reason=%s \
+          history_atoms=%d: the history does not open that atom with the same message, \
+          and the request starts over"
          ctx.runtime_id
          (Yojson.Safe.to_string (Keeper_carried_front.seed_to_json seed))
-         seed.atom_count
+         (Keeper_carried_front.dropped_front_to_string dropped)
          history_atom_count
      | Some _ | None -> ());
     (match view.wire with
      | Ok _ ->
        Option.iter
          (fun observe ->
-            observe
-              ~measurement:Turn_record.Wire_shape
+            Option.iter
+              (observe ~measurement:Turn_record.Wire_shape)
               (Runtime_model_input_tail_window.observe
+                 ~digest_at:composed.history_digest_at
                  ~history_atom_count
                  composed.projection))
          ctx.on_model_input_window_observation
@@ -972,14 +1004,32 @@ let bounded_model_input_projection
          , pinned_bytes + preamble_bytes
          , List.exists Runtime_model_input_tail_window.is_extra_context history ))
      in
+     let first_atom = history_atom_count - transmitted_atoms in
+     (* Both positions are read off the history the range was composed from.
+        A request that carried no atom has neither; one that carried any has
+        both, since the lookup and [history_atom_count] come from that one
+        history. *)
+     let ends =
+       match
+         ( composed.history_digest_at first_atom
+         , composed.history_digest_at (history_atom_count - 1) )
+       with
+       | Some front_digest, Some end_digest ->
+         Keeper_model_input_ledger.Carried_atoms { front_digest; end_digest }
+       | None, (Some _ | None) | Some _, None -> Keeper_model_input_ledger.No_atom_carried
+     in
      state.last_request
      := Some
-          { Keeper_model_input_ledger.prefix_digest
-          ; first_atom = history_atom_count - transmitted_atoms
-          ; atom_count = history_atom_count
-          ; tail_bytes
-          ; turn_context
-          ; demote_before = view.composed.demote_before
+          { request =
+              { Keeper_model_input_ledger.prefix_digest
+              ; first_atom
+              ; atom_count = history_atom_count
+              ; ends
+              ; tail_bytes
+              ; turn_context
+              ; demote_before = view.composed.demote_before
+              }
+          ; digest_at = composed.history_digest_at
           });
     match ctx.model_input_projection with
     | None -> Ok windowed
@@ -1050,7 +1100,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
             (function
               | Agent_core.Hooks.AfterTurn { response; _ } ->
                 (match !last_request with
-                 | Some request ->
+                 | Some { request; digest_at } ->
                    let usage =
                      Option.bind response.Agent_core.Types.usage
                        (fun (u : Agent_core.Types.api_usage) ->
@@ -1063,6 +1113,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                        ~keeper_name:ctx.keeper_name
                        ~runtime_id:ctx.runtime_id
                        ~session_id:(ledger_session ctx)
+                       ~digest_at
                        ~request
                        ~usage
                    in
@@ -1664,7 +1715,9 @@ let eviction_retry_to_json = function
    [false] once used or when there is nothing to demote, and the refusal
    stands. Every step is a position on the atom axis chosen against the
    provider's verdict; nothing measures the request against a limit of its
-   own. [same_run_retry_authorized]
+   own. [halve] answers [false] when the history the last request was
+   composed from has no atom at the halved front to name it by, and the
+   refusal then stands. [same_run_retry_authorized]
    is the same gate [Keeper_turn_driver]'s declared-lane walk applies before
    rotating candidates: a retry here is a same-run retry too, so it must not
    fire once AGENT_CORE has mutated agent state at a durable checkpoint
@@ -1675,7 +1728,7 @@ let carried_range_eviction_sequence
       ~(last_request : unit -> Keeper_model_input_ledger.request option)
       ~marks
       ~(evict : Keeper_carried_range.step -> unit)
-      ~(halve : first_atom:int -> atom_count:int -> retry:int -> unit)
+      ~(halve : first_atom:int -> atom_count:int -> retry:int -> bool)
       ~(last_resort : retry:int -> bool)
       ~(on_retry : retry:int -> eviction_retry -> unit)
       ~(attempt : unit -> ('ok, Agent_core.Error.t) result)
@@ -1698,9 +1751,11 @@ let carried_range_eviction_sequence
            continue_ ())
          else failed
        | Some first_atom ->
-         halve ~first_atom ~atom_count:request.atom_count ~retry;
-         on_retry ~retry (Halved_range { first_atom; atom_count = request.atom_count });
-         continue_ ())
+         if halve ~first_atom ~atom_count:request.atom_count ~retry
+         then (
+           on_retry ~retry (Halved_range { first_atom; atom_count = request.atom_count });
+           continue_ ())
+         else failed)
   in
   let rec go ~retry =
     match attempt () with
@@ -1750,12 +1805,13 @@ let evict_at_turn_boundary (ctx : try_provider_ctx) =
      | Some ledger ->
        (match Keeper_carried_range.at_turn_boundary ~marks ledger with
         | Keeper_carried_range.Unchanged _ -> ()
-        | Keeper_carried_range.Evicted { first_atom; _ } as step ->
+        | Keeper_carried_range.Evicted { first_atom; front_digest; _ } as step ->
           Keeper_model_input_ledger.Table.move_front
             ~keeper_name:ctx.keeper_name
             ~runtime_id:ctx.runtime_id
             ~session_id:(ledger_session ctx)
-            ~first_atom;
+            ~first_atom
+            ~front_digest;
           Log.Keeper.info
             ~keeper_name:ctx.keeper_name
             "model input carried range evicted runtime=%s %s"
@@ -1789,7 +1845,8 @@ let run_try_provider_with_carried_range_eviction
         carried_front_seed =
           (fun () ->
              match !halved_front with
-             | Some halved -> Some halved
+             | Some halved ->
+               { Keeper_carried_front.seed = Some halved; unreadable = None }
              | None -> seed ())
       }
     in
@@ -1806,31 +1863,44 @@ let run_try_provider_with_carried_range_eviction
             ~keeper_name:ctx.keeper_name
             ~runtime_id:ctx.runtime_id
             ~session_id:(ledger_session ctx))
-        ~last_request:(fun () -> !(state.last_request))
+        ~last_request:(fun () ->
+          Option.map (fun (sent : sent_request) -> sent.request) !(state.last_request))
         ~marks:ctx.context_marks
         ~evict:(function
-          | Keeper_carried_range.Evicted { first_atom; _ } ->
+          | Keeper_carried_range.Evicted { first_atom; front_digest; _ } ->
             Keeper_model_input_ledger.Table.move_front
               ~keeper_name:ctx.keeper_name
               ~runtime_id:ctx.runtime_id
               ~session_id:(ledger_session ctx)
               ~first_atom
+              ~front_digest
           | Keeper_carried_range.Unchanged _ -> ())
-        ~halve:(fun ~first_atom ~atom_count ~retry ->
+        ~halve:(fun ~first_atom ~atom_count:_ ~retry ->
           (* With a ledger, the move cuts through its one block and the
              blocks restart from the new front; without one, the halved
-             seed is what the next composition on this attempt reads. *)
-          Keeper_model_input_ledger.Table.move_front
-            ~keeper_name:ctx.keeper_name
-            ~runtime_id:ctx.runtime_id
-            ~session_id:(ledger_session ctx)
-            ~first_atom;
-          halved_front
-          := Some
-               { Keeper_carried_front.first_atom
-               ; atom_count
-               ; source = Keeper_carried_front.Halved_after_refusal { retry }
-               })
+             seed is what the next composition on this attempt reads. Either
+             way the new front is named by the message that opens it in the
+             history the refused request was composed from, which the retry
+             composes from again. *)
+          match
+            Option.bind !(state.last_request) (fun (sent : sent_request) ->
+              sent.digest_at first_atom)
+          with
+          | None -> false
+          | Some front_digest ->
+            Keeper_model_input_ledger.Table.move_front
+              ~keeper_name:ctx.keeper_name
+              ~runtime_id:ctx.runtime_id
+              ~session_id:(ledger_session ctx)
+              ~first_atom
+              ~front_digest;
+            halved_front
+            := Some
+                 { Keeper_carried_front.first_atom
+                 ; front_digest
+                 ; source = Keeper_carried_front.Halved_after_refusal { retry }
+                 };
+            true)
         ~last_resort:(fun ~retry:_ ->
           (* Once per attempt, and only when the current turn carries a tool
              result the store could hold; the composition consumes the arm

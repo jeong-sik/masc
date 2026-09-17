@@ -24,8 +24,19 @@ let body_refused_by_provider =
 
 let unrelated = Agent_core.Error.Api (Agent_core.Retry.Timeout { message = "slow"; phase = None })
 
+(* Atom [i] of the synthetic history opens with the message ["m<i>"]. *)
+let opener i = Printf.sprintf "m%d" i
+
+let ends ~first_atom ~atom_count =
+  if first_atom < atom_count
+  then
+    Ledger.Carried_atoms
+      { front_digest = opener first_atom; end_digest = opener (atom_count - 1) }
+  else Ledger.No_atom_carried
+;;
+
 let block ~first ~end_ tokens : Ledger.block =
-  { block_first_atom = first; block_end_atom = end_; tokens }
+  { block_first_atom = first; block_end_atom = end_; block_first_digest = opener first; tokens }
 ;;
 
 let ledger ?(total = Some 1_000) (blocks : Ledger.block list) : Ledger.t =
@@ -36,13 +47,28 @@ let ledger ?(total = Some 1_000) (blocks : Ledger.block list) : Ledger.t =
   ; measured_end_atom = Option.map (fun _ -> atom_count) total
   ; measured_demote_before = Option.map (fun _ -> 0) total
   ; blocks
-  ; last = { prefix_digest = "f"; first_atom; atom_count; tail_bytes = 0; turn_context = false; demote_before = 0 }
+  ; last =
+      { prefix_digest = "f"
+      ; first_atom
+      ; atom_count
+      ; ends = ends ~first_atom ~atom_count
+      ; tail_bytes = 0
+      ; turn_context = false
+      ; demote_before = 0
+      }
   ; last_usage = None
   }
 ;;
 
 let request ~first_atom ~atom_count : Ledger.request =
-  { prefix_digest = "f"; first_atom; atom_count; tail_bytes = 0; turn_context = false; demote_before = 0 }
+  { prefix_digest = "f"
+  ; first_atom
+  ; atom_count
+  ; ends = ends ~first_atom ~atom_count
+  ; tail_bytes = 0
+  ; turn_context = false
+  ; demote_before = 0
+  }
 ;;
 
 type trace =
@@ -74,7 +100,8 @@ let run
         | Range.Evicted { first_atom; _ } -> trace.evictions <- first_atom :: trace.evictions
         | Range.Unchanged _ -> ())
       ~halve:(fun ~first_atom ~atom_count:_ ~retry ->
-        trace.halvings <- (first_atom, retry) :: trace.halvings)
+        trace.halvings <- (first_atom, retry) :: trace.halvings;
+        true)
       ~last_resort
       ~on_retry:(fun ~retry _ -> trace.retries <- retry)
       ~attempt:(fun () ->
@@ -165,7 +192,8 @@ let test_without_a_ledger_the_range_halves_until_it_fits () =
       ~evict:(fun _ -> ())
       ~halve:(fun ~first_atom ~atom_count:_ ~retry ->
         front := first_atom;
-        trace.halvings <- (first_atom, retry) :: trace.halvings)
+        trace.halvings <- (first_atom, retry) :: trace.halvings;
+        true)
       ~last_resort:(fun ~retry:_ -> false)
       ~on_retry:(fun ~retry _ -> trace.retries <- retry)
       ~attempt:(fun () ->
@@ -189,7 +217,9 @@ let test_halving_ends_at_one_atom_when_every_request_is_refused () =
       ~last_request:(fun () -> Some (request ~first_atom:!front ~atom_count:16))
       ~marks:None
       ~evict:(fun _ -> ())
-      ~halve:(fun ~first_atom ~atom_count:_ ~retry:_ -> front := first_atom)
+      ~halve:(fun ~first_atom ~atom_count:_ ~retry:_ ->
+        front := first_atom;
+        true)
       ~last_resort:(fun ~retry:_ -> false)
       ~on_retry:(fun ~retry:_ _ -> ())
       ~attempt:(fun () -> incr attempts; Error overflow)
@@ -199,6 +229,29 @@ let test_halving_ends_at_one_atom_when_every_request_is_refused () =
   (* 0 → 8 → 12 → 14 → 15: four halvings, five requests, then one atom. *)
   check int "five attempts" 5 !attempts;
   check int "the front ends on the newest atom" 15 !front
+;;
+
+(* The halved front is named by the message that opens it in the refused
+   request's history. When that history has no atom there to name, nothing
+   moves, and asking again would compose the same refused request: the
+   refusal stands. *)
+let test_a_halving_that_cannot_name_its_front_ends_the_sequence () =
+  let attempts = ref 0 in
+  let outcome =
+    Try_provider.carried_range_eviction_sequence
+      ~same_run_retry_authorized:(fun () -> true)
+      ~ledger:(fun () -> None)
+      ~last_request:(fun () -> Some (request ~first_atom:0 ~atom_count:16))
+      ~marks:None
+      ~evict:(fun _ -> ())
+      ~halve:(fun ~first_atom:_ ~atom_count:_ ~retry:_ -> false)
+      ~last_resort:(fun ~retry:_ -> false)
+      ~on_retry:(fun ~retry:_ _ -> fail "no retry is recorded for a move that did not happen")
+      ~attempt:(fun () -> incr attempts; Error overflow)
+      ()
+  in
+  check bool "the refusal stands" true (Result.is_error outcome);
+  check int "one attempt" 1 !attempts
 ;;
 
 let test_a_single_atom_ends_the_sequence_with_the_refusal () =
@@ -303,6 +356,8 @@ let () =
         ; test_case "no ledger halves" `Quick test_without_a_ledger_the_range_halves_until_it_fits
         ; test_case "halving ends at one atom" `Quick
             test_halving_ends_at_one_atom_when_every_request_is_refused
+        ; test_case "halving without a nameable front ends" `Quick
+            test_a_halving_that_cannot_name_its_front_ends_the_sequence
         ; test_case "single atom ends" `Quick test_a_single_atom_ends_the_sequence_with_the_refusal
         ; test_case "single atom arms the last resort" `Quick
             test_a_refused_single_atom_arms_the_last_resort_once

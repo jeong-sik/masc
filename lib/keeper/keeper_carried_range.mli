@@ -38,6 +38,10 @@ type step =
       ; evicted_tokens : int option
             (** Known when every evicted block was measured. *)
       ; first_atom : int  (** The oldest carried atom after the eviction. *)
+      ; front_digest : string
+            (** The opening-message digest of [first_atom], from the block
+                the walk stopped at: what {!Keeper_model_input_ledger.move_front}
+                records the moved front with. *)
       ; projected_total : int option
             (** The last measured total minus the evicted tokens, when both
                 were known; the next usage replaces it either way. *)

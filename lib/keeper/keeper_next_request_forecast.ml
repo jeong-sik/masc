@@ -142,12 +142,14 @@ let measure (message : Agent_core.Types.message) =
 
 let carry ~measure ~front ~counted_tokens messages =
   let _labelled, atom_count = Runtime_model_input_tail_window.annotate messages in
+  let digest_at = Runtime_model_input_tail_window.atom_opening_digest messages in
   let first_atom, origin, counted_tokens =
-    match Option.bind front (Keeper_carried_front.for_history ~atom_count) with
-    | Some (seed : Keeper_carried_front.seed) ->
+    match Option.map (Keeper_carried_front.for_history ~digest_at) front with
+    | Some (Ok (seed : Keeper_carried_front.seed)) ->
       ( Keeper_carried_front.clamp ~atom_count seed.first_atom
       , Keeper_carried_front.Carried seed.source
       , counted_tokens )
+    | Some (Error (Keeper_carried_front.Front_atom_missing | Keeper_carried_front.Front_message_differs))
     | None -> 0, Keeper_carried_front.Whole_history, None
   in
   let projection, transmitted_bytes =
@@ -402,7 +404,7 @@ let candidate
           Keeper_model_input_ledger.Table.lookup ~keeper_name ~runtime_id ~session_id:trace_id
         with
         | Some ledger ->
-          Some (Keeper_carried_front.of_ledger ledger), ledger.Keeper_model_input_ledger.total_tokens
+          Keeper_carried_front.of_ledger ledger, ledger.Keeper_model_input_ledger.total_tokens
         | None -> seed, None
       in
       Some

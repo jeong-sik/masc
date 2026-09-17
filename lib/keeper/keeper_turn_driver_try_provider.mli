@@ -29,11 +29,13 @@ type try_provider_ctx =
             turn, before its first composition (RFC
             keeper-context-window-in-tokens §10.5), as the binding declares
             them; [None] leaves eviction to a refusal. *)
-  ; carried_front_seed : unit -> Keeper_carried_front.seed option
+  ; carried_front_seed : unit -> Keeper_carried_front.seed_read
         (** Where the carried range starts when no ledger holds this
             (keeper, runtime) pair yet: the range the newest completed Agent
-            Core turn record on the trace measured, whichever runtime ran it.
-            Read once per attempt, on that path only. *)
+            Core turn record on the trace measured, whichever runtime ran it,
+            with the records that could not be decoded counted. Read once per
+            attempt, on that path only; unreadable records are logged beside
+            the attempt's first carried-range line. *)
   ; base_path : string
   ; keeper_name : string
   ; name : string
@@ -266,7 +268,7 @@ val carried_range_eviction_sequence :
   last_request:(unit -> Keeper_model_input_ledger.request option) ->
   marks:Runtime_schema.context_marks option ->
   evict:(Keeper_carried_range.step -> unit) ->
-  halve:(first_atom:int -> atom_count:int -> retry:int -> unit) ->
+  halve:(first_atom:int -> atom_count:int -> retry:int -> bool) ->
   last_resort:(retry:int -> bool) ->
   on_retry:(retry:int -> eviction_retry -> unit) ->
   attempt:(unit -> ('ok, Agent_core.Error.t) result) ->
@@ -278,7 +280,9 @@ val carried_range_eviction_sequence :
     {!Keeper_carried_range.after_overflow}; [evict] applies the step before
     the next attempt. When the ledger has no block structure to walk, no
     usage counted yet or a single block, [last_request]'s range halves
-    toward the newest atom through [halve]; at a single atom [last_resort]
+    toward the newest atom through [halve], which answers [false] when it
+    cannot name the halved front by its opening message and so ends the
+    sequence with the refusal in hand; at a single atom [last_resort]
     may arm one more request with the turn's own tool results demoted
     (#28845), and answers [false] once used or with nothing to demote, which
     ends the sequence with the refusal in hand. Every other error ends it at
@@ -323,10 +327,16 @@ type composed =
             durable encoder counts them, reasoning the wire deletes included;
             excludes the reservation. *)
   ; history_atom_count : int  (** Atoms in the whole history. *)
+  ; history_digest_at : int -> string option
+        (** {!Runtime_model_input_tail_window.atom_opening_digest} over the
+            durable history the range was composed from: the lookup the
+            seed was checked with, and the one the request's positions and
+            the window's front are named by. *)
   ; origin : Keeper_carried_front.origin
-  ; outlived_seed : Keeper_carried_front.seed option
-        (** A front the history shrank under, dropped by
-            {!Keeper_carried_front.for_history}; the request started over. *)
+  ; outlived_seed : (Keeper_carried_front.seed * Keeper_carried_front.dropped_front) option
+        (** A front this history does not open with the same message, dropped
+            by {!Keeper_carried_front.for_history} with the reason; the
+            request started over. *)
   ; demote_before : int
         (** The boundary the demotion applied: 0 when demotion is off, the
             whole history under the last resort. *)

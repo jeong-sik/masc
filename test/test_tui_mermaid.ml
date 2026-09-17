@@ -580,6 +580,53 @@ let test_state_diagram_skips_classdef_and_notes () =
       Alcotest.(check int) "2 edges" 2 (List.length g.edges)
   | _ -> Alcotest.fail "expected Ok Graph"
 
+let test_composite_state_draws_titled_box () =
+  let src =
+    "stateDiagram-v2\n\
+     state Active {\n\
+         [*] --> Running\n\
+         Running --> Paused\n\
+     }\n\
+     [*] --> Active\n\
+     Active --> [*]"
+  in
+  let drawn = render src in
+  Alcotest.(check bool) "renders active bounding box" true (List.exists (contains "Active") drawn);
+  Alcotest.(check bool) "renders inner Running node" true (List.exists (contains "Running") drawn);
+  Alcotest.(check bool) "renders inner Paused node" true (List.exists (contains "Paused") drawn)
+
+let test_state_diagram_choice_pseudo_state () =
+  let src =
+    "stateDiagram-v2\n\
+     state is_valid <<choice>>\n\
+     [*] --> is_valid\n\
+     is_valid --> Ok : yes\n\
+     is_valid --> Error : no"
+  in
+  let drawn = render src in
+  Alcotest.(check bool) "draws choice with diamond brackets" true
+    (List.exists (contains "\xe2\x9f\xa8is_valid\xe2\x9f\xa9") drawn)
+
+let test_nested_composite_states () =
+  let src =
+    "stateDiagram-v2\n\
+     state Outer {\n\
+         state Inner {\n\
+             [*] --> Deep\n\
+         }\n\
+     }"
+  in
+  let drawn = render src in
+  Alcotest.(check bool) "renders outer box" true (List.exists (contains "Outer") drawn);
+  Alcotest.(check bool) "renders inner box" true (List.exists (contains "Inner") drawn);
+  Alcotest.(check bool) "renders deep node" true (List.exists (contains "Deep") drawn)
+
+let test_unclosed_composite_state_is_refused () =
+  match failure "stateDiagram-v2\nstate OpenBlock {\n[*] --> S1" with
+  | Mermaid.Unsupported what ->
+      Alcotest.(check bool) "mentions open state" true (contains "state OpenBlock with no }" what)
+  | Mermaid.Parse_error _ | Mermaid.Too_wide _ -> Alcotest.fail "not Unsupported"
+
 let () =
   Alcotest.run "tui mermaid"
     [ ( "goldens"
@@ -672,5 +719,13 @@ let () =
         ; Alcotest.test_case "keeper fsm parses" `Quick test_state_diagram_keeper_fsm_parses
         ; Alcotest.test_case "skips classdef and notes" `Quick
             test_state_diagram_skips_classdef_and_notes
+        ; Alcotest.test_case "composite state draws titled box" `Quick
+            test_composite_state_draws_titled_box
+        ; Alcotest.test_case "choice pseudo-state" `Quick
+            test_state_diagram_choice_pseudo_state
+        ; Alcotest.test_case "nested composite states" `Quick
+            test_nested_composite_states
+        ; Alcotest.test_case "unclosed composite state is refused" `Quick
+            test_unclosed_composite_state_is_refused
         ] )
     ]

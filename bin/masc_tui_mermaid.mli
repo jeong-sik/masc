@@ -12,7 +12,7 @@
     and thick edges, edge labels in both spellings, chains and [&] groups.
     [stateDiagram] and [stateDiagram-v2] in the four directions, with rounded
     state boxes, initial and terminal [[*]] pseudo-states, transition labels,
-    and state descriptions.
+    state descriptions, choice pseudo-states, and composite state bounding boxes.
     [sequenceDiagram] draws participants, lifelines, messages with their
     text, notes and the framed blocks. A diagram of any other kind, or a
     line this grammar cannot read, comes back as a {!failure} naming the

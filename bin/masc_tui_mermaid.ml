@@ -621,17 +621,70 @@ let split_on_arrow text =
   in
   collect 0
 
-let parse_state_statement line current_dir declared edges =
+let parse_composite_state_header text =
+  let n = String.length text in
+  let inner = String.trim (String.sub text 0 (n - 1)) in
+  let word, rest = first_word inner in
+  if word = "state" then
+    if rest = "" then Error "expected state id before '{'"
+    else if rest.[0] = '"' then
+      match String.index_from_opt rest 1 '"' with
+      | Some close ->
+          let desc = String.sub rest 1 (close - 1) in
+          let after = String.trim (String.sub rest (close + 1) (String.length rest - close - 1)) in
+          let as_word, id = first_word after in
+          if as_word = "as" && id <> "" then Ok (id, desc)
+          else Error "expected 'as <id>' after state description"
+      | None -> Error "unclosed quote in state description"
+    else
+      let id = String.trim rest in
+      if id <> "" then Ok (id, id)
+      else Error "expected state id before '{'"
+  else
+    let id = String.trim inner in
+    if id <> "" then Ok (id, id)
+    else Error "expected state id before '{'"
+
+let parse_state_statement stack line current_dir declared edges =
+  let track_in_frame id =
+    match !stack with
+    | [] -> ()
+    | frame :: _ ->
+        if not (List.mem id frame.f_nodes) then
+          frame.f_nodes <- id :: frame.f_nodes
+  in
   let word, rest = first_word line in
   match word with
   | "direction" ->
       (match direction_of_word (String.uppercase_ascii rest) with
        | Some d ->
-           current_dir := d;
+           (match !stack with
+            | [] -> current_dir := d
+            | frame :: _ -> frame.f_direction <- Some d);
            Ok ()
        | None -> Error ("unknown direction: " ^ rest))
   | "classdef" | "class" | "style" | "linkstyle" | "click" | "note" ->
       Ok ()
+  | "state" when find_from rest 0 "<<" <> None ->
+      (match find_from rest 0 "<<" with
+       | Some p1 ->
+           (match find_from rest (p1 + 2) ">>" with
+            | Some p2 ->
+                let id = String.trim (String.sub rest 0 p1) in
+                let tag = String.lowercase_ascii (String.trim (String.sub rest (p1 + 2) (p2 - p1 - 2))) in
+                let shape =
+                  match tag with
+                  | "choice" -> Diamond
+                  | "fork" | "join" -> Rect
+                  | _ -> Round
+                in
+                if id <> "" then begin
+                  declare declared id ~label:id ~shape ~explicit:true;
+                  track_in_frame id;
+                  Ok ()
+                end else Error "expected state id before '<<'"
+            | None -> Error "unclosed '<<' in pseudo-state")
+       | None -> Ok ())
   | _ when String.contains line '-' && (find_from line 0 "-->" <> None || find_from line 0 "->" <> None) ->
       let trans_part, label_part =
         match String.index_opt line ':' with
@@ -653,23 +706,35 @@ let parse_state_statement line current_dir declared edges =
                 else s
               in
               let from_id =
-                if u_raw = "[*]" then begin
-                  declare declared "[*]" ~label:"[*]" ~shape:Round ~explicit:false;
-                  "[*]"
-                end else
+                if u_raw = "[*]" then
+                  let id =
+                    match !stack with
+                    | [] -> "[*]"
+                    | frame :: _ -> frame.f_id ^ "_[*]"
+                  in
+                  declare declared id ~label:"[*]" ~shape:Round ~explicit:false;
+                  id
+                else
                   let name = clean_name u_raw in
                   declare declared name ~label:name ~shape:Round ~explicit:false;
                   name
               in
               let to_id =
-                if v_raw = "[*]" then begin
-                  declare declared "[*]_end" ~label:"[*]" ~shape:Round ~explicit:false;
-                  "[*]_end"
-                end else
+                if v_raw = "[*]" then
+                  let id =
+                    match !stack with
+                    | [] -> "[*]_end"
+                    | frame :: _ -> frame.f_id ^ "_[*]_end"
+                  in
+                  declare declared id ~label:"[*]" ~shape:Round ~explicit:false;
+                  id
+                else
                   let name = clean_name v_raw in
                   declare declared name ~label:name ~shape:Round ~explicit:false;
                   name
               in
+              track_in_frame from_id;
+              track_in_frame to_id;
               let label = if label_part = "" then None else Some (label_text label_part) in
               edges :=
                 { from_id
@@ -691,6 +756,7 @@ let parse_state_statement line current_dir declared edges =
             let as_word, id = first_word after in
             if as_word = "as" && id <> "" then begin
               declare declared id ~label:desc ~shape:Round ~explicit:true;
+              track_in_frame id;
               Ok ()
             end else Error "expected 'as <id>' after state description"
         | None -> Error "unclosed quote in state description"
@@ -701,6 +767,7 @@ let parse_state_statement line current_dir declared edges =
              let desc = String.trim (String.sub rest (colon + 1) (String.length rest - colon - 1)) in
              if id <> "" then begin
                declare declared id ~label:desc ~shape:Round ~explicit:true;
+               track_in_frame id;
                Ok ()
              end else Error "expected state id before colon"
          | None ->
@@ -711,6 +778,7 @@ let parse_state_statement line current_dir declared edges =
              in
              if id <> "" then begin
                declare declared id ~label:id ~shape:Round ~explicit:true;
+               track_in_frame id;
                Ok ()
              end else Ok ())
   | _ ->
@@ -720,12 +788,14 @@ let parse_state_statement line current_dir declared edges =
           let desc = String.trim (String.sub line (colon + 1) (String.length line - colon - 1)) in
           if id <> "" && id <> "[*]" then begin
             declare declared id ~label:desc ~shape:Round ~explicit:true;
+            track_in_frame id;
             Ok ()
           end else Ok ()
       | None ->
           let id = String.trim line in
           if id <> "" && id <> "[*]" then begin
             declare declared id ~label:id ~shape:Round ~explicit:true;
+            track_in_frame id;
             Ok ()
           end else Ok ()
 
@@ -733,14 +803,59 @@ let parse_state_diagram ?(initial_dir = Top_down) lines =
   let declared = { order = []; table = Hashtbl.create 16 } in
   let edges = ref [] in
   let current_dir = ref initial_dir in
+  let stack = ref [] in
+  let top_groups = ref [] in
   let rec go = function
     | [] -> Ok ()
     | (number, statement) :: more ->
-        match parse_state_statement statement current_dir declared edges with
-        | Ok () -> go more
-        | Error what -> Error (Parse_error { line = number; what })
+        let trimmed = String.trim statement in
+        if String.length trimmed > 0 && trimmed.[String.length trimmed - 1] = '{' then
+          match parse_composite_state_header trimmed with
+          | Error what -> Error (Parse_error { line = number; what })
+          | Ok (id, label) ->
+              if Hashtbl.mem declared.table id then
+                Error (Parse_error { line = number; what = "state " ^ id ^ " has the name of an existing node" })
+              else if List.exists (fun (f : frame) -> String.equal f.f_id id) !stack then
+                Error (Parse_error { line = number; what = "state " ^ id ^ " is already open" })
+              else begin
+                stack :=
+                  { f_id = id
+                  ; f_label = label
+                  ; f_direction = None
+                  ; f_nodes = []
+                  ; f_children = []
+                  }
+                  :: !stack;
+                go more
+              end
+        else if trimmed = "}" then
+          match !stack with
+          | [] -> Error (Parse_error { line = number; what = "} with no matching state block" })
+          | frame :: rest ->
+              let group =
+                { group_id = frame.f_id
+                ; group_label = frame.f_label
+                ; group_direction = frame.f_direction
+                ; group_nodes = List.rev frame.f_nodes
+                ; group_children = List.rev frame.f_children
+                }
+              in
+              stack := rest;
+              (match rest with
+               | parent :: _ -> parent.f_children <- group :: parent.f_children
+               | [] -> top_groups := group :: !top_groups);
+              go more
+        else
+          match parse_state_statement stack statement current_dir declared edges with
+          | Ok () -> go more
+          | Error what -> Error (Parse_error { line = number; what })
   in
   let* () = go (split_statements lines) in
+  let* () =
+    match !stack with
+    | [] -> Ok ()
+    | frame :: _ -> Error (Unsupported ("state " ^ frame.f_id ^ " with no }"))
+  in
   let nodes =
     List.rev declared.order |> List.map (fun id -> Hashtbl.find declared.table id)
   in
@@ -748,7 +863,7 @@ let parse_state_diagram ?(initial_dir = Top_down) lines =
     { direction = !current_dir
     ; nodes
     ; edges = List.rev !edges
-    ; groups = []
+    ; groups = List.rev !top_groups
     }
 
 let parse text =

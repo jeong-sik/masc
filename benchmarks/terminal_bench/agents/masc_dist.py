@@ -1,11 +1,12 @@
 """Which prebuilt binaries go into a task container.
 
-Harbor builds a Terminal-Bench 4.0 task image from the task's Dockerfile with
-no platform set, so the image takes the Docker daemon's own architecture:
-arm64 on Apple Silicon, amd64 on a Linux x86 host or Modal. A base image that
-publishes a single architecture still runs as that one, emulated. The
-architecture is therefore a property of each container. It is read from the
-container at install time, not taken from the host or from a fetch setting.
+Terminal-Bench 4.0.0 on the Harbor hub pins a prebuilt image per task
+(`[environment] docker_image`), published for amd64 only (65 of 66 checked in
+the registry on 2026-09-17; one lookup timed out): on Apple Silicon they run
+emulated. A task without `docker_image` is built from its Dockerfile with no
+platform set and takes the Docker daemon's architecture instead. The
+architecture is therefore a property of each container, read from it at
+install time rather than taken from the host or a fetch setting.
 
 image/fetch_masc.sh places both release architectures under dist/linux-x64 and
 dist/linux-arm64.

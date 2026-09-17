@@ -445,6 +445,7 @@ let prepare_agent_setup
   let capability_surface =
     Keeper_capability_surface.create
       ~tool_deny:profile_defaults.Keeper_types_profile.tool_deny
+      ~sandbox_profile:meta.sandbox_profile
       ~skill_names
       ~global_skill_catalog
       ~skill_inventory:(Keeper_skill_inventory.of_snapshot skill_snapshot)

@@ -1,26 +1,32 @@
 #!/usr/bin/env bash
 # Does the bench dependency install survive a Terminal-Bench task base image?
 #
-# The 2026-09-11 matrix lost 36 of 72 trials per MASC arm before a single LLM
-# token was spent, because bootstrap.sh asked apt for `libssl3t64` — a package
-# that exists only on ubuntu 24.04. This probe answers the same question for
+# A package name, a glibc floor or a missing sshd fails every trial on that
+# base image before a single LLM token is spent. This probe answers that for
 # free: it runs driver/deps.sh against a base image and reports whether the
 # masc binary can run and sshd exists afterwards. No API key, no task, no
 # server.
 #
-#   ./image/probe_bases.sh                    # the 4.0 set's distinct bases
+#   ./image/probe_bases.sh                    # the 4.0.0 set's distinct bases
 #   ./image/probe_bases.sh ubuntu:22.04 ...   # specific images
 #
-# Base images seen in terminal-bench@4.0.0 (66 tasks, counted 2026-09-12):
-#   ubuntu:24.04 x14, python:3.1x-slim(-bookworm) x30+, ubuntu:22.04 x3,
-#   mambaorg/micromamba x3, plus fedora, coq, node, bun, playwright, cuda,
-#   temurin, vllm and debian:12-slim singletons.
+# Final-stage base images of terminal-bench/terminal-bench@4.0.0 (66 tasks,
+# counted from the Dockerfiles 2026-09-17): ubuntu:24.04 x14 (2 pinned),
+# python:3.1x-slim(-bookworm) x32, ubuntu:22.04 x3, mambaorg/micromamba x3,
+# node x3, plus fedora, coq, bun, playwright, cuda x2, pytorch, temurin, vllm,
+# miniforge and debian:12-slim.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 BENCH_DIR="$(dirname "$HERE")"
-DIST_DIR="${BENCH_DIR}/dist"
+# Terminal-Bench 4.0.0 task images are prebuilt for amd64 (agents/masc_dist.py),
+# so that is the platform a task container runs, emulated on Apple Silicon.
 PLATFORM="${PROBE_PLATFORM:-linux/amd64}"
+case "${PLATFORM}" in
+  linux/amd64) DIST_DIR="${BENCH_DIR}/dist/linux-x64" ;;
+  linux/arm64) DIST_DIR="${BENCH_DIR}/dist/linux-arm64" ;;
+  *) echo "no MASC release binary for platform ${PLATFORM}" >&2; exit 2 ;;
+esac
 TIMEOUT_SEC="${PROBE_TIMEOUT_SEC:-600}"
 
 DEFAULT_IMAGES=(

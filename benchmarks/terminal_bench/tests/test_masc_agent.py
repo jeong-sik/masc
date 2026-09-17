@@ -22,8 +22,10 @@ class FakeResult:
 class FakeEnv:
     def __init__(self):
         self.commands = []
+        self.exec_kwargs = []
         self.uploads = []
         self.default_user = None
+        self.machine = "x86_64"
 
     async def upload_file(self, src, dst):
         self.uploads.append(("file", str(src), dst))
@@ -33,6 +35,11 @@ class FakeEnv:
 
     async def exec(self, command, **kw):
         self.commands.append(command)
+        self.exec_kwargs.append(kw)
+        if "uname -m" in command:
+            # harbor's docker exec folds stderr into stdout.
+            return FakeResult("bash: warning: setlocale: LC_ALL: cannot change locale\n"
+                              f"MASC_UNAME_M={self.machine}\n")
         if "cat /opt/masc-bench/result.json" in command:
             return FakeResult('{"state":"Succeeded","duration_ms":1234,'
                               '"tool_calls":17,"duplicate_tool_calls":2,"final":{}}')
@@ -42,9 +49,16 @@ class FakeEnv:
 @pytest.fixture(autouse=True)
 def _provider_key(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    # run_episode.sh seeds the keeper's gh hosts.yml from this and then calls
-    # keeper_up, whose remote_ssh preflight refuses without a gh identity.
-    monkeypatch.setenv("GH_TOKEN", "test-gh-token")
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+
+
+def fake_bench(tmp_path, dist_dir="linux-x64", names=("masc", "masc-exec-shim")):
+    root = tmp_path / "bench"
+    (root / "dist" / dist_dir).mkdir(parents=True)
+    for name in names:
+        (root / "dist" / dist_dir / name).write_text("")
+    (root / "driver").mkdir()
+    return root
 
 
 def make_agent(tmp_path, **kw):
@@ -67,11 +81,7 @@ def test_install_uploads_binary_driver_config(tmp_path, monkeypatch):
     # side effect. Same fixture shape as the vendored-gh test below.
     import agents.masc_agent as m
 
-    root = tmp_path / "bench"
-    (root / "dist").mkdir(parents=True)
-    for name in ("masc", "masc-exec-shim"):
-        (root / "dist" / name).write_text("")
-    (root / "driver").mkdir()
+    root = fake_bench(tmp_path)
 
     async def go():
         monkeypatch.setattr(m, "BENCH_ROOT", root)
@@ -124,26 +134,73 @@ def test_claude_code_lane_requires_oauth_token(tmp_path, monkeypatch):
         a._container_env()
 
 
-def test_vendored_gh_is_uploaded_when_present(tmp_path, monkeypatch):
-    # deps.sh installs $BENCH/bin/gh system-wide when it is there; the
-    # keeper_up preflight runs `gh auth status` and debian stable has no gh
-    # package, so the vendored copy is what makes those base images work.
+def install_into(tmp_path, monkeypatch, root, env):
+    """{remote path: the local file uploaded there last}."""
     import agents.masc_agent as m
 
-    async def go(root):
-        monkeypatch.setattr(m, "BENCH_ROOT", root)
-        a = make_agent(tmp_path, arm="b")
-        env = FakeEnv()
-        await a.install(env)
-        return env
+    monkeypatch.setattr(m, "BENCH_ROOT", root)
+    asyncio.run(make_agent(tmp_path, arm="b").install(env))
+    final = {}
+    for kind, src, dst in env.uploads:
+        if kind == "file":
+            final[dst] = src
+    return final
 
-    root = tmp_path / "bench"
-    (root / "dist").mkdir(parents=True)
-    for name in ("masc", "masc-exec-shim", "gh"):
-        (root / "dist" / name).write_text("")
-    (root / "driver").mkdir()
-    env = asyncio.run(go(root))
-    assert ("file", "/opt/masc-bench/bin/gh") in [(k, d) for k, _, d in env.uploads]
+
+def test_gh_is_uploaded_only_for_a_run_that_gives_a_github_login(tmp_path, monkeypatch):
+    root = fake_bench(tmp_path, names=("masc", "masc-exec-shim", "gh"))
+    assert "/opt/masc-bench/bin/gh" not in install_into(tmp_path, monkeypatch, root, FakeEnv())
+    monkeypatch.setenv("GH_TOKEN", "test-gh-token")
+    uploads = install_into(tmp_path, monkeypatch, root, FakeEnv())
+    assert uploads["/opt/masc-bench/bin/gh"] == str(root / "dist" / "linux-x64" / "gh")
+
+
+# --- the binaries follow the task container's architecture -----------------
+#
+# Harbor builds a 4.0 task image for the Docker daemon's architecture, so on
+# Apple Silicon the task container is arm64 and an amd64 masc cannot start in
+# it. A single-architecture base image still runs amd64, emulated. Both
+# architectures are fetched, as image/fetch_masc.sh leaves them.
+
+
+def both_architectures(tmp_path):
+    root = fake_bench(tmp_path, dist_dir="linux-arm64")
+    (root / "dist" / "linux-x64").mkdir()
+    for name in ("masc", "masc-exec-shim"):
+        (root / "dist" / "linux-x64" / name).write_text("")
+    return root
+
+
+def expected(root, dist_dir):
+    return {f"/opt/masc-bench/bin/{name}": str(root / "dist" / dist_dir / name)
+            for name in ("masc", "masc-exec-shim")}
+
+
+def test_an_arm64_container_gets_the_arm64_binaries(tmp_path, monkeypatch):
+    root = both_architectures(tmp_path)
+    env = FakeEnv()
+    env.machine = "aarch64"
+    assert install_into(tmp_path, monkeypatch, root, env) == expected(root, "linux-arm64")
+
+
+def test_an_amd64_container_gets_the_x64_binaries(tmp_path, monkeypatch):
+    root = both_architectures(tmp_path)
+    assert install_into(tmp_path, monkeypatch, root, FakeEnv()) == expected(root, "linux-x64")
+
+
+def test_a_container_architecture_without_a_release_is_refused_by_name(tmp_path, monkeypatch):
+    env = FakeEnv()
+    env.machine = "ppc64le"
+    with pytest.raises(RuntimeError, match="ppc64le"):
+        install_into(tmp_path, monkeypatch, fake_bench(tmp_path), env)
+    assert env.uploads == []
+
+
+def test_a_missing_architecture_names_the_fetch_step(tmp_path, monkeypatch):
+    env = FakeEnv()
+    env.machine = "aarch64"
+    with pytest.raises(RuntimeError, match="fetch_masc.sh"):
+        install_into(tmp_path, monkeypatch, fake_bench(tmp_path, dist_dir="linux-x64"), env)
 
 
 # --- episode cost ----------------------------------------------------------
@@ -193,7 +250,7 @@ def test_cost_prices_each_token_class_at_its_own_rate(tmp_path, monkeypatch):
 def test_the_cache_split_is_not_the_cache_sum(tmp_path, monkeypatch):
     # 600 cache tokens priced as one class would be either 1.5e-03 (all
     # creation) or 1.2e-04 (all read). The real answer is neither, and the
-    # gap is why run_episode.sh reports the two apart.
+    # gap is why collect_result.sh reports the two apart.
     context = context_for(
         tmp_path, monkeypatch, {"anthropic/claude-fable-5": RATES},
         input_tokens=0, output_tokens=0, cache_tokens=600,
@@ -232,9 +289,124 @@ def test_a_missing_cache_class_does_not_zero_the_rest(tmp_path, monkeypatch):
     assert context.cost_usd == pytest.approx(1000 * 2e-06 + 100 * 1e-05)
 
 
-def test_the_env_refuses_without_a_github_credential(tmp_path, monkeypatch):
-    """keeper_up refuses a remote_ssh keeper with no gh identity, and
-    run_episode.sh calls it under set -e: the credential is named here."""
-    monkeypatch.delenv("GH_TOKEN", raising=False)
-    with pytest.raises(RuntimeError, match="GH_TOKEN"):
-        make_agent(tmp_path)._container_env()
+def test_an_episode_runs_without_a_github_credential(tmp_path, monkeypatch):
+    """The remote_ssh preflight checks a GitHub login only for an endpoint that
+    has one (#35412), and a token given here reaches every task container."""
+    assert "GH_TOKEN" not in make_agent(tmp_path)._container_env()
+    monkeypatch.setenv("GH_TOKEN", "test-gh-token")
+    assert make_agent(tmp_path)._container_env()["GH_TOKEN"] == "test-gh-token"
+
+
+# --- harbor's agent timeout is the only bound on an episode ----------------
+#
+# Terminal-Bench 4.0 gives every task 28800s. The adapter used to stop the
+# episode at 2400s on its own and cap bootstrap at 900s, so a full run measured
+# 40 minutes of an 8-hour task. Harbor never tells an installed agent its
+# timeout; it cancels run() when the time is up.
+
+
+class EpisodeRunsUntilCancelled(FakeEnv):
+    """run_episode.sh never returns; the interrupted report is what exists."""
+
+    async def exec(self, command, **kw):
+        if "run_episode.sh" in command:
+            self.commands.append(command)
+            self.exec_kwargs.append(kw)
+            await asyncio.Event().wait()
+        self.commands.append(command)
+        self.exec_kwargs.append(kw)
+        if "cat /opt/masc-bench/result.json" in command:
+            return FakeResult('{"state":"Running","interrupted":true,'
+                              '"duration_ms":28800000,"tool_calls":412,'
+                              '"duplicate_tool_calls":9,"final":{}}')
+        return FakeResult("")
+
+
+def test_the_container_env_names_no_episode_deadline(tmp_path):
+    assert "EPISODE_TIMEOUT_SEC" not in make_agent(tmp_path)._container_env()
+
+
+def test_bootstrap_is_bounded_by_harbor_setup_timeout_alone(tmp_path, monkeypatch):
+    import agents.masc_agent as m
+
+    root = fake_bench(tmp_path)
+    monkeypatch.setattr(m, "BENCH_ROOT", root)
+    env = FakeEnv()
+    asyncio.run(make_agent(tmp_path, arm="b").install(env))
+    bootstrap = [kw for c, kw in zip(env.commands, env.exec_kwargs)
+                 if "bootstrap.sh" in c]
+    assert bootstrap and bootstrap[0].get("timeout_sec") is None
+
+
+def test_a_harbor_timeout_stops_the_keepers_and_reports_the_episode(tmp_path):
+    from harbor.models.agent.context import AgentContext
+
+    env = EpisodeRunsUntilCancelled()
+    ctx = AgentContext()
+
+    async def go():
+        # The same call harbor makes (trial.py: asyncio.wait_for(run(...))).
+        await asyncio.wait_for(make_agent(tmp_path, arm="b").run("task", env, ctx),
+                               timeout=0.05)
+
+    with pytest.raises(asyncio.TimeoutError):
+        asyncio.run(go())
+    collect = [i for i, c in enumerate(env.commands)
+               if "collect_result.sh /opt/masc-bench/result.json --interrupted" in c]
+    read = [i for i, c in enumerate(env.commands)
+            if "cat /opt/masc-bench/result.json" in c]
+    assert collect and read and collect[0] < read[0]
+    assert ctx.metadata["interrupted"] is True
+    assert ctx.metadata["masc_state"] == "Running"
+    assert ctx.metadata["tool_calls"] == 412
+
+
+def test_an_episode_that_ends_on_its_own_is_not_collected_twice(tmp_path):
+    from harbor.models.agent.context import AgentContext
+
+    env = FakeEnv()
+    asyncio.run(make_agent(tmp_path, arm="b").run("task", env, AgentContext()))
+    assert not any("--interrupted" in c for c in env.commands)
+
+
+class EpisodeEndsInFailure(FakeEnv):
+    """run_episode.sh reported a Failed episode and exited 1 on its own."""
+
+    async def exec(self, command, **kw):
+        self.commands.append(command)
+        self.exec_kwargs.append(kw)
+        if "run_episode.sh" in command:
+            return FakeResult("", return_code=1)
+        if "cat /opt/masc-bench/result.json" in command:
+            return FakeResult('{"state":"Failed","interrupted":false,"final":{}}')
+        return FakeResult("")
+
+
+def test_an_episode_that_fails_on_its_own_is_not_reported_as_interrupted(tmp_path):
+    from harbor.models.agent.context import AgentContext
+
+    env = EpisodeEndsInFailure()
+    ctx = AgentContext()
+    with pytest.raises(Exception):  # harbor's NonZeroAgentExitCodeError
+        asyncio.run(make_agent(tmp_path, arm="b").run("task", env, ctx))
+    assert not any("--interrupted" in c for c in env.commands)
+    assert ctx.metadata["masc_state"] == "Failed"
+    assert ctx.metadata["interrupted"] is False
+
+
+def test_the_interrupted_report_is_bounded_after_the_time_is_up(tmp_path):
+    import agents.masc_agent as m
+    from harbor.models.agent.context import AgentContext
+
+    env = EpisodeRunsUntilCancelled()
+
+    async def go():
+        await asyncio.wait_for(
+            make_agent(tmp_path, arm="b").run("task", env, AgentContext()), timeout=0.05)
+
+    with pytest.raises(asyncio.TimeoutError):
+        asyncio.run(go())
+    recovery = [kw for c, kw in zip(env.commands, env.exec_kwargs)
+                if "--interrupted" in c or "cat /opt/masc-bench/result.json" in c]
+    assert recovery and all(
+        kw.get("timeout_sec") == m.RESULT_RECOVERY_TIMEOUT_SEC for kw in recovery)

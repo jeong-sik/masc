@@ -3,7 +3,7 @@
 Three unrelated causes reach the same place in bench_install_deps, and each
 needs a different fix from whoever reads the failure:
 
-- the binary is for another architecture   → re-fetch with MASC_LINUX_ARCH
+- the binary is for another architecture   → the uploaded dist/linux-* does not match uname -m
 - the container's glibc is older than the binary's floor → a different build
 - a shared library really is missing       → install a package
 

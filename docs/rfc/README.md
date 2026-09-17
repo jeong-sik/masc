@@ -298,6 +298,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0455 | Task 는 모든 상태에서 나갈 수 있어야 한다 — 남은 상태마다 그 상태를 벗어나게 할 행위자가 있다 | Draft | - |
 | 0456 | Librarian 의 출력 계약이 무변경을 가장 안전한 답으로 만든다 — 점호를 없애고 퇴장 경로를 가른다 | Draft | - |
 | 0457 | Keeper 배정은 레인 이름을 받는다 — 레인이 런타임 id 를 흉내 내야 닿는 규칙을 없앤다 | Draft | - |
+| 0458 | sticky 레인 선호는 필요 없다 — 걷는 순서는 선언이고 쉼은 provider 의 것이다 | Draft | - |
 | RFC-a-language-server-the-keeper-can-ask | A language server the Keeper can ask | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
 | RFC-attached-service-tool-scoping | 도구 스키마를 매 턴 전량 싣는 것을 그만둔다 | Accepted | - |
@@ -340,6 +341,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-outlive-process-adoption | 턴보다 오래 사는 프로세스가 머지됐는데도 죽는다 — 채택 갭을 먼저 진단한다 | Draft | - |
 | RFC-per-keeper-github-cli-identity | Keeper-specific GitHub CLI identity | Draft | - |
 | RFC-prompts-and-tool-definitions-outside-ocaml | 프롬프트와 도구 정의를 OCaml 밖으로 — 모델이 읽는 모든 글은 config 파일이 소유한다 | Draft | - |
+| RFC-provider-declared-backpressure | 공급자가 밀어내면 그 엔드포인트의 허가 수를 줄인다 | Draft | - |
 | RFC-provider-path-rest | 사용량 제한은 그 경로만 쉬게 하고, Keeper 는 다음에 보낼 경로의 쉼만 기다린다 | Draft | - |
 | RFC-runtime-load-failure-reaches-the-operator | 설정을 못 읽은 이유가 화면까지 닿는다 | Draft | - |
 | RFC-runtime-note-field-and-dashboard-surfacing | Per-runtime note field & dashboard surfacing | Draft | - |

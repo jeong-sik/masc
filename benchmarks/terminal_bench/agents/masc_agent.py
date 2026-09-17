@@ -2,11 +2,12 @@
 
 install(): prebuilt masc 바이너리 + bash 드라이버 + 렌더된 arm config를
 태스크 컨테이너 /opt/masc-bench에 업로드하고 bootstrap.sh를 root로 실행한다.
-run(): instruction을 업로드하고 run_episode.sh를 실행한 뒤 result.json을
+run(): instruction을 업로드하고 run_episode.sh를 실행한 뒤 collect_result.sh 가 쓴 result.json을
 읽어 AgentContext에 싣는다.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import shutil
@@ -19,6 +20,7 @@ from harbor.models.agent.context import AgentContext
 
 BENCH_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BENCH_ROOT / "configs"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from render_configs import (  # noqa: E402
     ARMS,
@@ -26,20 +28,26 @@ from render_configs import (  # noqa: E402
     effective_runtime_id,
     render_arm,
 )
+from masc_dist import container_binaries  # noqa: E402
 
 REMOTE = "/opt/masc-bench"
+
+# Bounds the report written after harbor's agent timeout has already fired.
+# Harbor waits for run() to return once it cancels it, with no limit of its
+# own, so an exec into a wedged container would hold the trial open forever.
+# This is not time given to the agent: the keepers are stopped first, and what
+# remains is counting the tool-call store and the trace dumps.
+RESULT_RECOVERY_TIMEOUT_SEC = 600
 
 
 class MascAgent(BaseInstalledAgent):
     def __init__(self, logs_dir, model_name=None, arm="b",
-                 runtime_id=None, effort="high", episode_timeout_sec=2400,
-                 **kwargs):
+                 runtime_id=None, effort="high", **kwargs):
         super().__init__(logs_dir=logs_dir, model_name=model_name, **kwargs)
         if arm not in ARMS:
             raise ValueError(f"unknown arm {arm!r}; expected one of {sorted(ARMS)}")
         self.arm = arm
         self.effort = effort
-        self.episode_timeout_sec = episode_timeout_sec
         if runtime_id:
             self.runtime_id = runtime_id
         elif model_name and "/" in model_name:
@@ -72,39 +80,28 @@ class MascAgent(BaseInstalledAgent):
             # takes the wire form; keeper_up takes this one.
             "BENCH_RUNTIME_ID": effective_runtime_id(self.runtime_id),
             "KEEPER_COUNT": str(ARMS[self.arm]["keepers"]),
-            # Must fire before harbor's agent timeout (task default 900s x
-            # multiplier) or the exec is killed and result.json never lands.
-            "EPISODE_TIMEOUT_SEC": str(self.episode_timeout_sec),
         }
-        # Required, not optional. keeper_up's remote_ssh preflight runs `gh
-        # auth status` and refuses without a GitHub identity
-        # (remote_github_identity_missing). run_episode.sh seeds hosts.yml
-        # from this token and then calls masc_keeper_up unconditionally under
-        # `set -euo pipefail`, so an absent token kills the episode there
-        # instead of naming the missing credential here. README.md already
-        # calls it needed; this is the code saying the same.
-        gh_token = os.environ.get("GH_TOKEN")
-        if not gh_token:
-            raise RuntimeError(
-                "GH_TOKEN not set in harbor process env; keeper_up's "
-                "remote_ssh preflight runs `gh auth status` and refuses "
-                "without a GitHub identity"
-            )
-        env["GH_TOKEN"] = gh_token
+        # Optional. A keeper gets a GitHub login only when this is set:
+        # gh_seed.sh writes hosts.yml from it, and the remote_ssh preflight
+        # runs `gh auth status` only for an endpoint that has one (#35412).
+        # Terminal-Bench tasks do not need GitHub, and a token passed here
+        # lands in every task container of the run.
+        # _get_env also sees what `harbor run --ae` gives the agent, which harbor
+        # applies to every exec as well; os.environ alone would disagree with
+        # the container about whether a login was given.
+        gh_token = self._get_env("GH_TOKEN")
+        if gh_token:
+            env["GH_TOKEN"] = gh_token
         return env
 
     async def install(self, environment: BaseEnvironment) -> None:
-        binaries = [BENCH_ROOT / "dist" / "masc", BENCH_ROOT / "dist" / "masc-exec-shim"]
-        for binary in binaries:
-            if not binary.exists():
-                raise RuntimeError("run image/fetch_masc.sh first")
-        # gh is required by the keeper_up preflight and is absent from debian
-        # stable, which most task base images use, so it ships in dist/ when
-        # fetched. deps.sh falls back to the package manager without it.
-        vendored_gh = BENCH_ROOT / "dist" / "gh"
-        if vendored_gh.exists():
-            binaries.append(vendored_gh)
-        config_dir = render_arm(self.arm, self.runtime_id, self.effort)
+        container_env = self._container_env()
+        binaries = await container_binaries(
+            self, environment, BENCH_ROOT, with_gh="GH_TOKEN" in container_env)
+        # A lane may read provider limits over the network while rendering;
+        # harbor installs every trial in one event loop.
+        config_dir = await asyncio.to_thread(
+            render_arm, self.arm, self.runtime_id, self.effort)
         await self.exec_as_root(environment, f"mkdir -p {REMOTE}/bin")
         for binary in binaries:
             await environment.upload_file(binary, f"{REMOTE}/bin/{binary.name}")
@@ -120,8 +117,7 @@ class MascAgent(BaseInstalledAgent):
             environment,
             f"chmod +x {REMOTE}/bin/masc {REMOTE}/driver/*.sh && "
             f"bash {REMOTE}/driver/bootstrap.sh",
-            env=self._container_env(),
-            timeout_sec=900,
+            env=container_env,
         )
 
     async def run(self, instruction: str, environment: BaseEnvironment,
@@ -130,27 +126,47 @@ class MascAgent(BaseInstalledAgent):
         instr_local.parent.mkdir(parents=True, exist_ok=True)
         instr_local.write_text(instruction)
         await environment.upload_file(instr_local, f"{REMOTE}/instruction.txt")
+        interrupted = False
         try:
             await self.exec_as_root(
                 environment,
                 f"bash {REMOTE}/driver/run_episode.sh "
                 f"{REMOTE}/instruction.txt {REMOTE}/result.json",
                 env=self._container_env(),
-                timeout_sec=None,  # Harbor의 agent timeout이 상한
+                timeout_sec=None,  # harbor's agent timeout is the only bound
             )
+        except asyncio.CancelledError:
+            # Harbor enforces its agent timeout by cancelling run(), and never
+            # tells the agent what the timeout is. The episode in the container
+            # is still running and has written no result yet.
+            interrupted = True
+            raise
         finally:
-            # run_episode.sh는 Succeeded가 아니면 non-zero로 끝나 위에서 raise된다.
-            # Harbor가 agent error로 기록하도록 예외는 삼키지 않되, 그 전에
-            # result.json을 회수해 context에 싣는다. 에피소드 실패 시 파일이
-            # 없을 수 있어 || true로 회수 자체는 실패하지 않게 한다.
+            # run_episode.sh exits non-zero unless the episode Succeeded, so
+            # the exec above raises. Harbor must still record that as the run
+            # error; before it does, the result is recovered into the context.
             # Nothing in here may raise. It runs in `finally`, so an
             # exception raised while recovering the result would replace the
             # episode failure this block exists to preserve — a truncated
             # result.json would surface as a JSONDecodeError from the
             # recovery path instead of as the run error.
+            if interrupted:
+                # Its own try: a report that fails to finish must not stop the
+                # read below, which may still find one written by the episode.
+                try:
+                    await self.exec_as_root(
+                        environment,
+                        f"bash {REMOTE}/driver/collect_result.sh "
+                        f"{REMOTE}/result.json --interrupted",
+                        env=self._container_env(),
+                        timeout_sec=RESULT_RECOVERY_TIMEOUT_SEC,
+                    )
+                except Exception:  # noqa: BLE001 - see above
+                    self.logger.exception("reporting the interrupted episode failed")
             try:
                 result = await self.exec_as_root(
-                    environment, f"cat {REMOTE}/result.json 2>/dev/null || true")
+                    environment, f"cat {REMOTE}/result.json 2>/dev/null || true",
+                    timeout_sec=RESULT_RECOVERY_TIMEOUT_SEC)
                 if result.stdout and result.stdout.strip():
                     (Path(self.logs_dir) / "result.json").write_text(result.stdout)
                 self.populate_context_post_run(context)
@@ -218,7 +234,7 @@ class MascAgent(BaseInstalledAgent):
         fallback = final.get("usage") or {}
 
         def usage(key: str):
-            # run_episode.sh emits episode-summed usage at the top level, read
+            # collect_result.sh emits episode-summed usage at the top level, read
             # from the agent-core trace dumps under .masc/traces. It always
             # writes the keys, using null when there was nothing to sum, so
             # `data.get(key, fallback)` never reaches the fallback — the key is
@@ -233,6 +249,8 @@ class MascAgent(BaseInstalledAgent):
         context.metadata = {
             **(context.metadata or {}),
             "masc_state": data.get("state"),
+            "interrupted": data.get("interrupted"),
+            "keepers_stopped": data.get("keepers_stopped"),
             "duration_ms": data.get("duration_ms"),
             "tool_calls": data.get("tool_calls"),
             "duplicate_tool_calls": data.get("duplicate_tool_calls"),

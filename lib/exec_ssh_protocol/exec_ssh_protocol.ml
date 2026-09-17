@@ -92,6 +92,14 @@ let major_of_probe (p : probe) : (major, string) result =
 
 let observe_capability = "observe"
 let user_notif_capability = "user_notif"
+let github_token_env_names =
+  [ "GH_TOKEN"
+  ; "GITHUB_TOKEN"
+  ; "GH_ENTERPRISE_TOKEN"
+  ; "GITHUB_ENTERPRISE_TOKEN"
+  ]
+;;
+
 let default_scratch_root = "/tmp"
 
 let mode_to_string = function

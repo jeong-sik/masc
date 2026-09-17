@@ -531,9 +531,65 @@ let test_refusal_of_rule_bytes () =
      failf "unknown rule should raise Failure, got %s"
        (Printexc.to_string exn))
 
+(* {1 program lookup}
+
+   Unix.execvpe searches the shim process's PATH, not the payload PATH it is
+   handed, so a tool living only in a [path=] directory was never found (a
+   Terminal-Bench task image with /opt/conda/bin in its PATH, reached over
+   remote_ssh, whose sshd session PATH has no such entry). *)
+
+let write_file path ~perm =
+  let oc = open_out path in
+  output_string oc "#!/bin/sh\nexit 0\n";
+  close_out oc;
+  Unix.chmod path perm
+
+let test_program_with_a_slash_is_executed_as_named () =
+  check (option string) "a path is not searched"
+    (Some "/opt/conda/bin/python")
+    (Exec_shim.resolve_program ~payload_path:[ "/usr/bin" ]
+       ~is_executable:(fun _ -> false) "/opt/conda/bin/python")
+
+let test_program_is_found_in_the_first_payload_directory_holding_it () =
+  let present = [ "/opt/venv/bin/python"; "/usr/bin/python" ] in
+  check (option string) "the payload path order decides"
+    (Some "/opt/venv/bin/python")
+    (Exec_shim.resolve_program
+       ~payload_path:[ "/opt/conda/bin"; "/opt/venv/bin"; "/usr/bin" ]
+       ~is_executable:(fun candidate -> List.mem candidate present) "python")
+
+let test_program_absent_from_the_payload_path_is_not_found () =
+  check (option string) "no fallback to any other PATH" None
+    (Exec_shim.resolve_program ~payload_path:[ "/opt/conda/bin" ]
+       ~is_executable:(fun _ -> false) "python")
+
+let test_lookup_reads_the_filesystem_of_the_payload_path () =
+  with_tmp_tree (fun root ->
+      let tools = Filename.concat root "tools" in
+      Unix.mkdir tools 0o755;
+      write_file (Filename.concat tools "masc_probe_tool") ~perm:0o755;
+      write_file (Filename.concat tools "not_executable") ~perm:0o644;
+      Unix.mkdir (Filename.concat tools "a_directory") 0o755;
+      let resolve = Exec_shim.resolve_program ~payload_path:[ root; tools ]
+          ~is_executable:Exec_shim.is_executable_file in
+      check (option string) "an executable file in a later directory"
+        (Some (Filename.concat tools "masc_probe_tool")) (resolve "masc_probe_tool");
+      check (option string) "a file without execute permission" None
+        (resolve "not_executable");
+      check (option string) "a directory" None (resolve "a_directory"))
+
 let () =
   run "exec shim"
-    [ "env", [ test_case "minimal base env" `Quick test_minimal_base_env
+    [ "program lookup",
+      [ test_case "a program with a slash is executed as named" `Quick
+          test_program_with_a_slash_is_executed_as_named
+      ; test_case "the first payload directory holding it wins" `Quick
+          test_program_is_found_in_the_first_payload_directory_holding_it
+      ; test_case "absent from the payload path is not found" `Quick
+          test_program_absent_from_the_payload_path_is_not_found
+      ; test_case "lookup reads the filesystem" `Quick
+          test_lookup_reads_the_filesystem_of_the_payload_path ]
+    ; "env", [ test_case "minimal base env" `Quick test_minimal_base_env
              ; test_case "base env defaults" `Quick test_base_env_defaults
              ; test_case "allowlist overlay survives" `Quick test_allowlist_overlay_survives
              ; test_case "runtime identity env survives an empty allowlist" `Quick

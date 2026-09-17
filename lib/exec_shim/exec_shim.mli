@@ -65,6 +65,23 @@ val default_base_path : string
 val default_payload_path : string list
 (** {!default_base_path} split on [:]. *)
 
+val is_executable_file : string -> bool
+(** [true] when [path] is a regular file this process may execute. *)
+
+val resolve_program :
+  payload_path:string list ->
+  is_executable:(string -> bool) ->
+  string ->
+  string option
+(** The file the shim executes for a request's program name. A name
+    containing ['/'] is returned as given. Otherwise the first directory of
+    [payload_path] (the endpoint's [path=], or {!default_payload_path}) holding
+    an entry for which [is_executable] holds names it; [None] when none does.
+
+    The shim does not leave this to [Unix.execvpe]: that searches the shim
+    process's own [PATH], not the [PATH] in the environment it is given, so a
+    tool that lives only in a [path=] directory was never found. *)
+
 val denylisted_env_name : string -> bool
 (** [true] for names never accepted from the wire: [PATH], [HOME],
     [LD_PRELOAD], [LD_LIBRARY_PATH], [BASH_ENV], [ENV], and every name

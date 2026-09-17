@@ -33,6 +33,22 @@ let review () =
     ~base_path:(Filename.get_temp_dir_name ())
     request
 
+(* Same review, but with the posture the caller chooses. The criteria-3 guard
+   keys off the posture, so a test that wants the legacy structured-tool path
+   must ask for a non-[Note_only] posture explicitly. *)
+let review_with_posture posture =
+  AR.review
+    ~evaluator_runtime:"task-reviewer"
+    ~question:
+      { AR.completion_contract = None
+      ; required_evidence = []
+      ; evidence_posture = posture
+      ; few_shot_block = ""
+      }
+    ~lookup:AR.No_lookup_surface
+    ~base_path:(Filename.get_temp_dir_name ())
+    request
+
 let test_explicit_base_path_reaches_reviewer () =
   let expected =
     Filename.concat
@@ -78,7 +94,9 @@ let test_structured_tool_is_the_only_semantic_verdict () =
     (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
        Ok {AR.selected_runtime_id="task-reviewer";verdict=Some (AR.Approve "")})
     (fun () ->
-       let result = review () in
+       (* A usable-artifact posture: this test is about the structured tool
+          being the only semantic verdict, not about the criteria-3 guard. *)
+       let result = review_with_posture (AR.Usable_artifacts 1) in
        Alcotest.(check string)
          "gate"
          "structured_tool"

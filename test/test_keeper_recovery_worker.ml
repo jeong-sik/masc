@@ -6,6 +6,13 @@ module Projection = Keeper_recovery_projection
 module Checkpoint = Keeper_checkpoint_store
 module J = Yojson.Safe.Util
 
+(* What the operator's window currently says. The store takes the window as an
+   argument -- it is reachable from a raw Domain, where reading a setting
+   raises -- so every caller names it. These cases are not about the window and
+   pass what production passes. *)
+let history_retained () =
+  Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained
+
 let fixture_evidence = ref None
 let () = Mirage_crypto_rng_unix.use_default ()
 let () = Server_startup_state.mark_state_ready () |> Result.get_ok
@@ -178,7 +185,8 @@ let with_fixture f =
   ignore (Keeper_fs.ensure_dir (Workspace.masc_root_dir config));
   let session_dir = Filename.concat base_path "session" in
   let save marker =
-    (match Checkpoint.save_agent_core_classified ~session_dir (checkpoint marker) with
+    (match Checkpoint.save_agent_core_classified
+      ~history_retained:(history_retained ()) ~session_dir (checkpoint marker) with
      | Ok _ -> ()
      | Error e -> fail e);
     match

@@ -216,6 +216,7 @@ let executable_selection ~projection selection =
 let exact_task_surfaces
       ~snapshot
       ~tool_deny
+      ~sandbox_profile
       ~skill_names
       ~selection
       ~current_task
@@ -225,6 +226,7 @@ let exact_task_surfaces
   let projection =
     Keeper_capability_surface.create
       ~tool_deny
+      ~sandbox_profile
       ~skill_names
       ~global_skill_catalog:global
       ~skill_inventory:(Keeper_skill_inventory.of_snapshot snapshot)

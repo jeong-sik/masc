@@ -5212,6 +5212,7 @@ let frozen_capability_surface () =
   in
   Masc.Keeper_capability_surface.create
     ~tool_deny:[]
+    ~sandbox_profile:Masc.Keeper_types_profile.Docker
     ~skill_names:None
     ~global_skill_catalog:Masc.Keeper_skill_catalog.empty
     ~skill_inventory:(Masc.Keeper_skill_inventory.of_snapshot snapshot)

@@ -117,7 +117,12 @@ let valid_named name inventory =
   | None -> failf "valid Skill %S missing from inventory" name
 ;;
 
-let capability_surface ?(tool_deny = []) ?(skill_names = None) frozen =
+let capability_surface
+      ?(tool_deny = [])
+      ?(sandbox_profile = Masc.Keeper_types_profile.Docker)
+      ?(skill_names = None)
+      frozen
+  =
   ignore (Masc_test_deps.init_unified_tool_registry ());
   let global_skill_catalog, diagnostics =
     Masc.Keeper_skill_catalog.of_snapshot frozen
@@ -125,6 +130,7 @@ let capability_surface ?(tool_deny = []) ?(skill_names = None) frozen =
   check int "catalog diagnostics" 0 (List.length diagnostics);
   Masc.Keeper_capability_surface.create
     ~tool_deny
+    ~sandbox_profile
     ~skill_names
     ~global_skill_catalog
     ~skill_inventory:(Inventory.of_snapshot frozen)
@@ -795,6 +801,81 @@ let test_composition_follows_node_tool_admission () =
     Yojson.Safe.Util.(row |> member "outside_node_tools" |> to_list |> filter_string)
 ;;
 
+let spawn_composition_document =
+  {|---
+name: spawn-plan
+description: Start one command beside the turn.
+---
+
+```toml composition
+[[compositions]]
+name = "spawn-plan"
+description = "Start one command beside the turn."
+execution = "inline"
+
+[[compositions.nodes]]
+id = "start"
+tool = "keeper_spawn"
+[compositions.nodes.input]
+kind = "object"
+[[compositions.nodes.input.fields]]
+name = "argv"
+[compositions.nodes.input.fields.value]
+kind = "array"
+[[compositions.nodes.input.fields.value.items]]
+kind = "literal"
+value = "true"
+```
+|}
+;;
+
+let test_spawn_start_follows_sandbox_profile () =
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let frozen =
+    snapshot config [ [ candidate ~directory:"spawn-plan" spawn_composition_document ] ]
+  in
+  let valid = valid_named "spawn-plan" (Inventory.of_snapshot frozen) in
+  let model_names surface =
+    Masc.Keeper_capability_surface.descriptors surface
+    |> List.concat_map Masc.Keeper_tool_descriptor.keeper_model_names
+  in
+  let composition_tools surface =
+    Masc.Keeper_capability_surface.skill_catalog surface
+    |> Masc.Keeper_skill_catalog.composition_entries
+    |> List.map Masc.Keeper_tool_composition_catalog.tool_name
+  in
+  let docker = capability_surface frozen in
+  check bool "a Docker keeper is offered keeper_spawn" true
+    (List.mem "keeper_spawn" (model_names docker));
+  check (list string) "a Docker keeper is offered the spawn composition"
+    [ "keeper_compose_spawn-plan" ] (composition_tools docker);
+  List.iter
+    (fun (label, sandbox_profile) ->
+       let refused = capability_surface ~sandbox_profile frozen in
+       let spawn_tools =
+         [ "keeper_spawn"; "keeper_spawn_read"; "keeper_spawn_wait"; "keeper_spawn_stop" ]
+       in
+       List.iter
+         (fun name ->
+            check bool ("a Docker keeper is offered " ^ name) true
+              (List.mem name (model_names docker));
+            check bool (label ^ " keeper is not offered " ^ name) false
+              (List.mem name (model_names refused)))
+         spawn_tools;
+       check int (label ^ " surface loses exactly the spawn tools")
+         (List.length (model_names docker) - List.length spawn_tools)
+         (List.length (model_names refused));
+       check (list string) (label ^ " keeper is not offered the spawn composition")
+         [] (composition_tools refused);
+       check bool (label ^ " operator row names keeper_spawn") true
+         ((exact_capability_by_reference refused valid.reference).availability
+          = Masc.Keeper_capability_surface.Node_tools_outside_surface
+              { tools = [ "keeper_spawn" ] }))
+    [ "microvm", Masc.Keeper_types_profile.Micro_vm
+    ; "remote_ssh", Masc.Keeper_types_profile.Remote_ssh
+    ]
+;;
+
 let test_surface_digest_binds_exact_tool_reference () =
   let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
   let surface = capability_surface (snapshot config [ [] ]) in
@@ -1031,6 +1112,8 @@ let () =
             test_tool_deny_removes_descriptors_from_surface
         ; test_case "composition follows node tool admission" `Quick
             test_composition_follows_node_tool_admission
+        ; test_case "spawn start follows sandbox profile" `Quick
+            test_spawn_start_follows_sandbox_profile
         ; test_case "surface digest is path independent" `Quick
             test_surface_digest_is_path_independent
         ; test_case "unreadable diagnostics stay public only" `Quick

@@ -210,6 +210,7 @@ let test_keeper_name_selection_filters_prompt_and_activation_task_views () =
     Selection.exact_task_surfaces
       ~snapshot:skill_snapshot
       ~tool_deny:[]
+      ~sandbox_profile:Masc.Keeper_types_profile.Docker
       ~skill_names:(Some [ "guide" ])
       ~selection
       ~current_task:Inputs.No_current_task
@@ -270,6 +271,7 @@ let test_denied_node_tool_withholds_task_composition_from_prompt () =
     Selection.exact_task_surfaces
       ~snapshot:skill_snapshot
       ~tool_deny
+      ~sandbox_profile:Masc.Keeper_types_profile.Docker
       ~skill_names:None
       ~selection
       ~current_task:Inputs.No_current_task

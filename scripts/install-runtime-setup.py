@@ -169,6 +169,12 @@ def render(spec, binary=None):
         if spec.get('thinking_disable_encodable') is True:
             target['enable_thinking'] = False
         overlay = table(('targets',), target, array=True)
+        # The Librarian is the only thing that retires a memory and it runs on
+        # its own exact-output lane; a workspace that declares no slot for it
+        # boots with one WARN and curates nothing. A named catalog provider is
+        # always an HTTP connection, so the slot is the overlay target id.
+        runtime += table(('runtime', 'exact_output_lanes', 'librarian_exact'),
+                         {'slots': [provider + '.' + model_key], 'cli_slots': []})
         return provider + '.' + model_key, runtime.encode(), overlay.encode()
 
     if not binary:
@@ -1984,10 +1990,12 @@ QUICK_MODEL = 'claude-sonnet-5'
 # The order quick setup takes Apple Container's own actions in. Each runs at
 # most once, so a service that never becomes ready ends in the step 4 screen
 # instead of a loop. An installed client is started before it is reinstalled.
+# The default kernel is set once the service is up: the kernel download goes
+# through the running service, and every image build after it boots one.
 QUICK_APPLE_INSTALLED_ORDER = ('apple_container_build_without_rosetta', 'apple_container_start',
-                               'apple_container_verified_install')
+                               'apple_container_kernel_set', 'apple_container_verified_install')
 QUICK_APPLE_MISSING_ORDER = ('apple_container_build_without_rosetta', 'apple_container_verified_install',
-                             'apple_container_start')
+                             'apple_container_start', 'apple_container_kernel_set')
 
 
 def quick_plan(binary, base_path):

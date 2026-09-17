@@ -68,7 +68,7 @@ function VqActions({ task, checks, verifier, reassign, onResolve, onReassign, co
   const [reason, setReason] = useVqState('');
   const st = vqGateStats(task, checks);
   const keepers = (window.KEEPERS || []).filter(k => k.role === 'keeper');
-  const doReject = () => { onResolve(task.id, 'rejected', { reason: reason.trim() || '사유 미기재' }); setMode(null); setReason(''); };
+  const doReject = () => { const trimmed = reason.trim(); if (!trimmed) return; onResolve(task.id, 'rejected', { reason: trimmed }); setMode(null); setReason(''); };
   return (
     <React.Fragment>
       <div className="vq-actions">

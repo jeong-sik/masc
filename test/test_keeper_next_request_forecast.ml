@@ -17,15 +17,19 @@ let history ~exchanges ~text_bytes =
       [ message Agent_core.Types.User text; message Agent_core.Types.Assistant text ])
     (List.init exchanges Fun.id)
 
+(* One measurer for the whole walk, as the projection uses one: a measurer
+   owns a buffer, so one per message would cost more than the strings the
+   measurer exists to avoid. *)
 let atom_bytes messages =
-  List.fold_left (fun sum m -> sum + Keeper_next_request_forecast.measure m) 0 messages
+  let measure = Keeper_context_core.message_measurer () in
+  List.fold_left (fun sum m -> sum + measure m) 0 messages
 
 let seed ~atom_count first_atom : Keeper_carried_front.seed =
   { first_atom; atom_count; source = Keeper_carried_front.Ledger }
 
 let carry ?front ?counted_tokens messages =
   Keeper_next_request_forecast.carry
-    ~measure:Keeper_next_request_forecast.measure
+    ~measure:(Keeper_context_core.message_measurer ())
     ~front
     ~counted_tokens
     messages
@@ -258,6 +262,68 @@ let test_no_composition_is_refused_with_the_count_read () =
   | Error (Keeper_next_request_forecast.No_first_round_composition _) | Ok _ ->
     Alcotest.fail "nothing to read is its own refusal"
 
+(* The claim is that measuring does not build what it measures, so the check
+   is that the allocation does not grow with the bytes measured. A budget
+   stated per byte measured looked like the same thing and is not: it falls as
+   the fixture grows, so it says more about the fixture than the code. Measured
+   over the same histories at 1x and 4x the message size, per-message-distinct
+   content, each message measured twice as the projection measures it:
+
+     measurer writing into a reused buffer     512,176 -> 512,176   1.0x
+     memoizing the string builder            1,833,576 -> 5,721,432  3.1x
+     building the string                     3,465,776 -> 11,260,976 3.2x
+
+   Both rejected alternatives grow with the history; this one does not. The
+   fixture gives every message distinct content on purpose -- with shared
+   bodies a memo hits, and the memoized string builder comes in under any
+   ratio budget while still allocating the history again on real input. *)
+(* The larger size is past the measurer's initial buffer, so that walk grows
+   its buffer once. That growth belongs to neither measured window -- the
+   warm-up below takes it -- and a fixture that stayed under the initial size
+   would never exercise the path at all. *)
+let fixture_messages = 100
+let fixture_message_bytes = 20_000
+let fixture_growth = 4
+let measurer_initial_buffer_bytes = 65_536
+let allocation_allowed_to_grow_by = 2.0
+
+let measure_history_allocation ~text_bytes =
+  let messages =
+    List.init fixture_messages (fun index ->
+      message
+        (if index mod 2 = 0 then Agent_core.Types.User else Agent_core.Types.Assistant)
+        (Printf.sprintf "%d " index ^ String.make text_bytes (Char.chr (65 + (index mod 26)))))
+  in
+  let measure = Keeper_context_core.message_measurer () in
+  (* Warm the buffer: whatever growth this size needs is paid here. *)
+  List.iter (fun m -> ignore (measure m : int)) messages;
+  let before = Gc.allocated_bytes () in
+  let measured =
+    List.fold_left (fun sum m -> sum + measure m) 0 messages
+    + List.fold_left (fun sum m -> sum + measure m) 0 messages
+  in
+  (measured, Gc.allocated_bytes () -. before)
+
+let test_measuring_does_not_allocate_what_it_measures () =
+  Alcotest.(check bool)
+    "the larger fixture crosses the measurer's initial buffer"
+    true
+    (fixture_message_bytes * fixture_growth > measurer_initial_buffer_bytes);
+  let small_bytes, small_allocated = measure_history_allocation ~text_bytes:fixture_message_bytes in
+  let large_bytes, large_allocated =
+    measure_history_allocation ~text_bytes:(fixture_message_bytes * fixture_growth)
+  in
+  Printf.printf
+    "\n  %d bytes -> %.0f allocated; %d bytes -> %.0f allocated (%.2fx for %.2fx the bytes)\n%!"
+    small_bytes small_allocated large_bytes large_allocated
+    (large_allocated /. small_allocated)
+    (float_of_int large_bytes /. float_of_int small_bytes);
+  Alcotest.(check bool)
+    (Printf.sprintf "%.2fx more bytes measured allocated %.2fx more"
+       (float_of_int large_bytes /. float_of_int small_bytes)
+       (large_allocated /. small_allocated))
+    true
+    (large_allocated <= small_allocated *. allocation_allowed_to_grow_by)
 (* lane-smith at turn 3660: the fixed parts from that turn, the pinned
    blocks from the last first round, in the assembly's order. *)
 let parts_for_assembly : Keeper_next_request_forecast.measured_parts =
@@ -441,6 +507,10 @@ let () =
             `Quick test_only_post_tool_compositions_are_refused_naming_the_newest_turn
         ; Alcotest.test_case "no composition is refused with the count read" `Quick
             test_no_composition_is_refused_with_the_count_read
+        ] )
+    ; ( "measure"
+      , [ Alcotest.test_case "measuring does not allocate what it measures" `Quick
+            test_measuring_does_not_allocate_what_it_measures
         ] )
     ; ( "carry"
       , [ Alcotest.test_case "a seeded front carries everything from it" `Quick

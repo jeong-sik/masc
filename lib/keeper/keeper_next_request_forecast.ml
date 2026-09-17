@@ -134,6 +134,7 @@ type t =
   ; candidates : candidate list
   }
 
+
 let measure (message : Agent_core.Types.message) =
   String.length
     (Yojson.Safe.to_string (Keeper_context_core.message_to_json message))
@@ -404,7 +405,12 @@ let candidate
           Some (Keeper_carried_front.of_ledger ledger), ledger.Keeper_model_input_ledger.total_tokens
         | None -> seed, None
       in
-      Some (carry ~measure ~front ~counted_tokens messages)
+      Some
+        (carry
+           ~measure:(Keeper_context_core.message_measurer ())
+           ~front
+           ~counted_tokens
+           messages)
   in
   let assembly =
     match parts, carried with

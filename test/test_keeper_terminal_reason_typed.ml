@@ -2197,16 +2197,25 @@ let () =
     categories;
   check
     "a core failure summary stays on one line"
-    (* [message] is [Agent_core.Error.to_string], not the text handed to the
-       constructor, so this pins the two things the module promises -- the
-       category label leads, and line breaks in the leaf become spaces --
-       rather than agent-core's own wording for an [Internal] error. *)
-    (let summary =
-       Keeper_request_failure_core.summary (core_of "first\nsecond\rthird")
-     in
-     String.starts_with ~prefix:"internal: " summary
-     && (not (String.contains summary '\n' || String.contains summary '\r'))
-     && contains ~needle:"first second third" summary)
+    (Keeper_request_failure_core.summary (core_of "first\nsecond\rthird")
+     = "internal: first second third");
+  (* The category says "internal" once. Agent-core renders an [Internal] error
+     as "Internal error: <payload>", so keeping that rendering would say it
+     twice. *)
+  check
+    "an internal failure's message is its payload, not agent-core's rendering"
+    ((core_of "snapshot fingerprint invalid").Keeper_request_failure_core.message
+     = "snapshot fingerprint invalid");
+  (* The other families name the specific failure, which the coarse category
+     does not carry, so their rendering is kept whole. *)
+  check
+    "a rate limit keeps what agent-core wrote"
+    ((Keeper_request_failure_core.of_core_error
+        (Agent_core.Error.Api
+           (Llm_provider.Retry.RateLimited
+              { retry_after = None; message = "slow down" })))
+       .Keeper_request_failure_core.message
+     = "Rate limited: slow down")
 ;;
 
 let () =

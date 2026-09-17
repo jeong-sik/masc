@@ -1,5 +1,13 @@
 # Phase 0: Disable Local Playground (Fail-Closed) Implementation Plan
 
+> **Status: executed, then removed — do not re-execute.** Phase 0 shipped
+> 2026-08-27/28 and was entirely removed on 2026-08-31 (#32078, #32103):
+> the `Local` sandbox profile, `Env_config_sandbox.Gate`, and
+> `MASC_EXEC_ALLOW_LOCAL_PLAYGROUND` no longer exist, and
+> `lib/config/feature_flag_registry.ml` was deleted on 2026-09-16 (#36813).
+> Every file/line instruction below is historical. Current contract:
+> RFC-0394's 2026-08-31 note.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make the `Local` sandbox profile impossible to use — rejected at config load, keeper create/update, and dispatch — behind a default-off gate with a dev/test escape hatch (`MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1`).

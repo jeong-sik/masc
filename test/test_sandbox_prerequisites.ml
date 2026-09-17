@@ -313,11 +313,27 @@ let test_a_builder_without_rosetta_offers_the_two_ways_past_it () =
      check (list (list string)) "Apple's installer, which shows its license to the operator"
        [["softwareupdate";"--install-rosetta"]] steps
    | P.Open_official_installer _ | P.Install_official_cli _ | P.Build_without_rosetta _ ->
-     fail "installing Rosetta runs Apple's installer");
+     fail "installing Rosetta is not the installer page");
   let without = find "apple_container_build_without_rosetta"
       (apple_catalog (needs_rosetta (Some "/Users/u/.config/container/config.toml"))) in
   check bool "building without Rosetta needs no administrator" false without.requires_admin;
   check (option string) "the file it writes is published" (Some "/Users/u/.config/container/config.toml") without.writes
+
+(* A builder whose VM starts but boots no kernel is missing exactly the
+   kernel: the one action sets Apple's recommended one as the default, without
+   administrator permission, and the service's installers are not reoffered. *)
+let test_a_builder_without_a_default_kernel_offers_to_install_it () =
+  let ids = List.map (fun (action : P.action) -> action.id) (apple_catalog P.Needs_default_kernel) in
+  check (list string) "installing the recommended kernel is the one action"
+    ["apple_container_kernel_set"] ids;
+  let install = find "apple_container_kernel_set" (apple_catalog P.Needs_default_kernel) in
+  check bool "the kernel download needs no administrator permission" false install.requires_admin;
+  (match install.action_effect with
+   | P.Run_commands steps ->
+     check (list (list string)) "Apple's recommended kernel, set as the default"
+       [["container";"system";"kernel";"set";"--recommended"]] steps
+   | P.Open_official_installer _ | P.Install_official_cli _ | P.Build_without_rosetta _ ->
+     fail "the kernel action is not a command")
 
 let rec remove_tree path =
   match (Unix.lstat path).Unix.st_kind with
@@ -400,6 +416,8 @@ let () = run "prerequisite actions" ["user-selected plans",[
   test_case "effects are not readiness" `Quick test_completion_never_means_ready;
   test_case "a builder without Rosetta offers the two ways past it" `Quick
     test_a_builder_without_rosetta_offers_the_two_ways_past_it;
+  test_case "a builder without a default kernel offers to install it" `Quick
+    test_a_builder_without_a_default_kernel_offers_to_install_it;
   test_case "building without Rosetta writes one line, then restarts" `Quick
     test_building_without_rosetta_writes_one_line_then_restarts];
   "hearing on a fresh machine",[

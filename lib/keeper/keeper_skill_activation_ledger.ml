@@ -231,7 +231,6 @@ type store_error =
   | Invalid_action_turn of int
   | Invalid_action_observed_at of string
   | Write_failed of Keeper_fs.durable_write_error
-  | Readback_mismatch
 
 let decode_error_code = function
   | Expected_object _ -> "expected_object"
@@ -295,7 +294,6 @@ let store_error_code = function
   | Invalid_action_turn _ -> "invalid_action_turn"
   | Invalid_action_observed_at _ -> "invalid_action_observed_at"
   | Write_failed _ -> "write_failed"
-  | Readback_mismatch -> "readback_mismatch"
 ;;
 
 let store_error_to_string = function
@@ -333,7 +331,6 @@ let store_error_to_string = function
     "Skill action observation time is invalid: " ^ value
   | Write_failed error ->
     "write failed: " ^ Keeper_fs.durable_write_error_to_string error
-  | Readback_mismatch -> "readback mismatch"
 ;;
 
 let schema = "masc.skill-activations/v5"
@@ -1795,12 +1792,18 @@ let persist_locked
       (to_yojson next)
     |> Result.map_error (fun error -> Write_failed error)
   in
-  let* readback =
-    read_locked ~ownership_root ~expected_trace_id:trace_id session_dir
-  in
-  if String.equal readback.revision next.revision
-  then Ok readback
-  else Error Readback_mismatch
+  (* [next] is what was written, so it is what this returns. Reading the file
+     back to compare its revision decoded the whole ledger a second time on the
+     caller's domain, under the session lock a checkpoint save also needs, and
+     the ledger is one JSON document rewritten whole on every activation: 844
+     activations, 898KB, and the msx keeper's tool fiber spent 1.9 of every 300
+     seconds of the main domain on it (rtev, 2026-09-16).
+
+     What it checked was that the codec reads back what it writes. That is a
+     property of the codec, pinned by [a recorded ledger loads back as it was
+     returned] rather than paid for on every write; the write itself already
+     reports a failure at any stage, and the rename is atomic. *)
+  Ok next
 ;;
 
 let record ~config ~trace_id (activation : activation) =

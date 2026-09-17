@@ -3496,18 +3496,18 @@ let test_every_routing_field_names_itself_in_its_diagnostic () =
 
 let test_routing_reference_domains_stay_distinct () =
   let lane = "\n[runtime.lanes.safe]\ncandidates = [\"local.good\"]\n" in
-  (* An assignment resolves among runtimes only. runtime.mli documents the
-     assignment snapshot as ids that resolve to a configured runtime, so admitting
-     a lane here would load a config the assignment consumer cannot look up. *)
-  let assignment =
-    load_error_of_runtime_toml
-      ~what:"an assignment naming a lane"
-      (routing_reference_base ^ lane ^ "\n[runtime.assignments]\nkeeper_a = \"safe\"\n")
-  in
-  check bool "assignment refuses a lane id" true
-    (String_util.contains_substring assignment "[runtime.assignments].keeper_a = \"safe\"");
-  (* Keeper_vision_tool resolves media_failover entries among runtimes
-     (keeper_vision_tool.ml:82-89), so the same refusal applies. *)
+  (* An assignment names a declared lane or a runtime (RFC-0457): the
+     assignment consumer resolves the lane through [resolve_assignment], so a
+     lane target loads. Media_failover stays runtime-only — its consumers
+     (Keeper_vision_tool) resolve entries among runtimes alone. *)
+  with_temp_runtime_toml
+    (routing_reference_base ^ lane ^ "\n[runtime.assignments]\nkeeper_a = \"safe\"\n")
+    (fun path ->
+       match load_list_text ~config_path:path with
+       | Error msg -> failf "an assignment naming a lane must load: %s" msg
+       | Ok (_runtimes, _default, assignments, _media_failover, _lanes) ->
+         check (option string) "assignment keeps its lane target" (Some "safe")
+           (List.assoc_opt "keeper_a" assignments));
   let media =
     load_error_of_runtime_toml
       ~what:"a media_failover entry naming a lane"

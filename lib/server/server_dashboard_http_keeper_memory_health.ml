@@ -42,8 +42,29 @@ let librarian_failures_metric =
   Keeper_metrics.(to_string MemoryOsLibrarianFailures)
 ;;
 
-let file_size_bytes path =
-  if Sys.file_exists path then (Unix.stat path).Unix.st_size else 0
+(* What the operator needs here is what this memory costs the model, so the
+   figure is the recall block's own bytes -- the same strings
+   [Keeper_memory_os_recall] injects -- not the snapshot file on disk. The
+   file carries first_seen, origin, basis and JSON punctuation that never
+   reach a request, so its size answered a question nobody asked. A snapshot
+   that could not be read has no rendering and reports nothing. *)
+let rendered_bytes facts =
+  String.length (Keeper_memory_os_render.render_facts facts)
+;;
+
+let rendered_source_bytes ~facts ~invalidations =
+  List.fold_left
+    (fun total fact ->
+       total + String.length (Keeper_memory_source_current.render_fact fact))
+    0
+    facts
+  + List.fold_left
+      (fun total invalidation ->
+         total
+         + String.length
+             (Keeper_memory_source_current.render_invalidation invalidation))
+      0
+      invalidations
 ;;
 
 let librarian_lane_busy_for_keeper keeper_id =
@@ -121,9 +142,6 @@ let vision_ingest_error_count_for_keeper keeper_id =
 ;;
 
 let source_health ~keepers_dir keeper_id =
-  let snapshot_path =
-    Keeper_memory_source_current.path_for_keepers_dir ~keepers_dir ~keeper_id
-  in
   match
     Keeper_memory_source_current.read_for_keepers_dir ~keepers_dir ~keeper_id
   with
@@ -139,7 +157,10 @@ let source_health ~keepers_dir keeper_id =
     { revision = snapshot.revision
     ; facts = List.length snapshot.facts
     ; invalidations = List.length snapshot.invalidations
-    ; snapshot_bytes = file_size_bytes snapshot_path
+    ; snapshot_bytes =
+        rendered_source_bytes
+          ~facts:snapshot.facts
+          ~invalidations:snapshot.invalidations
     ; snapshot_present = true
     ; read_error = None
     }
@@ -147,16 +168,13 @@ let source_health ~keepers_dir keeper_id =
     { revision = 0
     ; facts = 0
     ; invalidations = 0
-    ; snapshot_bytes = file_size_bytes snapshot_path
+    ; snapshot_bytes = 0
     ; snapshot_present = false
     ; read_error = Some message
     }
 ;;
 let keeper_health ~keepers_dir keeper_id =
   let source_health = source_health ~keepers_dir keeper_id in
-  let snapshot_path =
-    Keeper_memory_os_current.path_for_keepers_dir ~keepers_dir ~keeper_id
-  in
   match
     Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id
   with
@@ -202,7 +220,7 @@ let keeper_health ~keepers_dir keeper_id =
     ; observed_facts
     ; derived_facts
     ; support_invalidations = List.length snapshot.change.invalidated
-    ; snapshot_bytes = file_size_bytes snapshot_path
+    ; snapshot_bytes = rendered_bytes snapshot.facts
     ; added = List.length snapshot.change.added
     ; removed = List.length snapshot.change.removed
     ; snapshot_present = true
@@ -227,7 +245,7 @@ let keeper_health ~keepers_dir keeper_id =
     ; observed_facts = 0
     ; derived_facts = 0
     ; support_invalidations = 0
-    ; snapshot_bytes = file_size_bytes snapshot_path
+    ; snapshot_bytes = 0
     ; added = 0
     ; removed = 0
     ; snapshot_present = false

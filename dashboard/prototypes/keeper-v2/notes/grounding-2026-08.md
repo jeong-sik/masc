@@ -7,7 +7,7 @@
 - rail(`V2_PRIMARY_SURFACE_IDS`) **변화 없음**: overview · keepers · registry · monitoring · workspace · approvals(Gate) · schedule · board · fusion · logs · code · connectors · settings.
 - Settings 12섹션 **변화 없음**.
 - **monitoring 섹션 추가**: `internal-agents` = "Internal Agents · Nondeterministic runs and tool evidence."
-  → 현재: agents(Keeper Fleet) · internal-agents · fleet-health(Tool Monitor) · runtime · observatory. hidden: transport-health · feature-health · journey.
+  → 현재: agents(Keeper Fleet) · internal-agents · fleet-health(Tool Monitor) · runtime · observatory. hidden: transport-health · feature-health · journey. (2026-09-16 갱신: feature-health는 #36813에서 제거됨)
 - **monitoring:cognition 제거** (hidden 이었음) → `agents` 로 redirect.
 - **lab 섹션 추가**: `audit-integrity` = "감사 무결성 · Per-keeper resilience audit hash-chain verification result."
 - **lab:memory-subsystems(Memory OS) 제거** — `lab:memory-explore` → `keeper-memory-health`, `lab:design-canvas` → `tools`.

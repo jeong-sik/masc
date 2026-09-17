@@ -518,6 +518,29 @@ let test_assignment_walk_order_refuses_a_missing_assignment () =
     | Error (Driver.Catalog_unavailable _) -> Alcotest.fail "missing, not unavailable"
     | Ok _ -> Alcotest.fail "an id that names nothing is refused, not walked")
 
+(* A route is a routing label; the binding a turn opens is the lane's entry
+   candidate. Callers that need a materialized runtime resolve it here rather
+   than handing the label to [get_runtime_by_id], which answers [None] for a
+   lane name. *)
+let test_entry_runtime_id_resolves_a_route_to_the_binding_it_opens () =
+  with_runtime_config runtime_toml_with_lane (fun () ->
+    Alcotest.(check (option string))
+      "a lane name resolves to its first candidate"
+      (Some "primary.test_model")
+      (Runtime.entry_runtime_id_of_route "resilient");
+    Alcotest.(check (option string))
+      "a bare runtime id resolves to itself"
+      (Some "primary.test_model")
+      (Runtime.entry_runtime_id_of_route "primary.test_model");
+    Alcotest.(check (option string))
+      "a name that is neither resolves to nothing"
+      None
+      (Runtime.entry_runtime_id_of_route "no-such-route");
+    Alcotest.(check bool)
+      "the lane name itself names no binding, which is why this exists"
+      true
+      (Option.is_none (Runtime.get_runtime_by_id "resilient")))
+
 let test_resolve_assignment_prefers_lane_over_runtime () =
   with_runtime_config runtime_toml_lane_shadows_runtime (fun () ->
     match Runtime.resolve_assignment "primary.test_model" with
@@ -648,25 +671,29 @@ max-concurrent = 1
 max-concurrent = 1
 |}
 
-(* Pins the current assignment contract: [runtime.assignments] targets must be
-   runtime ids, so a keeper can only reach a lane when the lane id shadows a
-   runtime id ([resolve_assignment] prefers lanes on collision). Direct lane
-   assignment also has no pre-dispatch context budget resolution
-   ([resolve_max_context_resolution_for_runtime_id] resolves runtime ids only),
-   so accepting it at load would just move this failure to every turn. *)
-let test_assignment_to_lane_id_rejected_at_load () =
+(* RFC-0457: [runtime.assignments] targets name a declared lane or a runtime.
+   A lane target loads, and the pre-dispatch context budget resolves through
+   the lane's entry binding ([entry_runtime_id_of_route]) — the failure the
+   old contract refused this config for rather than hit at every turn. *)
+let test_assignment_to_lane_id_loads () =
   let path = Filename.temp_file "runtime_failover_lane_assign_" ".toml" in
   write_file path runtime_toml_assignment_to_lane;
   Fun.protect
     ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
     (fun () ->
        match load_list_text ~config_path:path with
-       | Ok _ -> Alcotest.fail "expected load to fail on lane-targeted assignment"
        | Error msg ->
+         Alcotest.failf "a lane-targeted assignment must load: %s" msg
+       | Ok (_runtimes, _default, assignments, _media_failover, lanes) ->
+         Alcotest.(check (option string))
+           "the assignment keeps its lane target" (Some "resilient")
+           (List.assoc_opt "canary" assignments);
          Alcotest.(check bool)
-           "error names the assignment"
+           "the named lane is materialized"
            true
-           (contains ~needle:"[runtime.assignments].canary" msg))
+           (List.exists
+              (fun lane -> String.equal (Runtime_lane.id lane) "resilient")
+              lanes))
 
 let test_unknown_lane_candidate_rejected_at_load () =
   let path = Filename.temp_file "runtime_failover_bad_" ".toml" in
@@ -3993,6 +4020,10 @@ let () =
             `Quick
             test_assignment_walk_order_refuses_a_missing_assignment;
           Alcotest.test_case
+            "entry_runtime_id_of_route resolves a route to the binding it opens"
+            `Quick
+            test_entry_runtime_id_resolves_a_route_to_the_binding_it_opens;
+          Alcotest.test_case
             "a bare runtime assignment gets a lane with somewhere to go"
             `Quick
             test_bare_runtime_assignment_gets_a_lane_with_somewhere_to_go;
@@ -4009,9 +4040,9 @@ let () =
             `Quick
             test_unknown_lane_candidate_rejected_at_load;
           Alcotest.test_case
-            "assignment to lane id rejected at load"
+            "assignment to lane id loads"
             `Quick
-            test_assignment_to_lane_id_rejected_at_load;
+            test_assignment_to_lane_id_loads;
           Alcotest.test_case
             "lane media degrade uses first candidate runtime id"
             `Quick

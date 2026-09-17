@@ -20,6 +20,7 @@ import test_tui_keyboard_input as h
 
 SOURCE_MODULES = (
     "bin/masc_tui.ml",
+    "bin/masc_tui_keys.ml",
     "bin/masc_tui_render.ml",
     "bin/masc_tui_types.ml",
 )
@@ -34,6 +35,7 @@ CLAIM = " ".join("clause-%04d" % i for i in range(1200))
 # surface has to cover: the reading owns the whole terminal, and only Esc gives
 # either of them back.
 LIST_STRIP = b"c/C:category"
+LIST_DETAIL_HINT = b"Enter:detail"
 SIDE_PANE = b"no events"
 
 
@@ -85,7 +87,7 @@ def run(executable: str) -> None:
         h.wait_for_output(process, master_fd, output, b"clause-0000",
                           start=0, timeout=5.0)
         h.drain_until_quiet(process, master_fd, output)
-        for needle in (LIST_STRIP, SIDE_PANE):
+        for needle in (LIST_STRIP, LIST_DETAIL_HINT, SIDE_PANE):
             if needle not in plain_screen(output):
                 raise AssertionError(
                     f"the fact browser never drew {needle!r}: "
@@ -152,7 +154,7 @@ def run(executable: str) -> None:
         plain = plain_screen(output)
         if b"FACT DETAIL" in plain:
             raise AssertionError("Esc left the wide reading on the screen")
-        for needle in (LIST_STRIP, SIDE_PANE):
+        for needle in (LIST_STRIP, LIST_DETAIL_HINT, SIDE_PANE):
             if needle not in plain:
                 raise AssertionError(
                     f"Esc did not give {needle!r} back: {plain[-900:]!r}")

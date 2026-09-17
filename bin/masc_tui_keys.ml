@@ -1097,6 +1097,8 @@ let footer_hints_git_diff =
 let footer_hints_memory_facts =
   hints_of_bindings
     ([ b Navigate "j/k" "move"
+     ; b Act "Enter" "detail"
+         ~help:"read the whole fact in a wide overlay that owns the terminal"
      ; b Act "c / C" "category" ~help:"cycle category filter (forward / backward)"
      ; b Act "s" "sort" ~help:"cycle sort (recency, last retrieved, retrieved count, category, claim)"
      ; b Act "a / A" "all fleet" ~help:"switch to consolidated memory across entire fleet"

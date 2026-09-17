@@ -9486,46 +9486,58 @@ let render_memory (state : state) =
 (* The Memory facts list's [Enter] reading: the whole fact wrapped to this
    overlay's own width and windowed, instead of the narrow block the list
    draws under the row. Same lines, more columns and more rows, and a scroll
-   of its own -- the list stays behind it and is redrawn when it closes. *)
+   of its own -- the list stays behind it and is redrawn when it closes.
+
+   It wears the shared overlay chrome, [Chrome_overlay], the frame the contract
+   names for a surface opened over another one: the box, the title and the
+   footer come from there, and the window it clamps to is the frame's own
+   budget rather than a second tally of the same rows. The window marker rides
+   the footer row the way the patch reading's does. *)
 let render_memory_fact_detail (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let buf = Buffer.create 4096 in
-  box_top buf cols;
-  box_line buf cols (screen_title " MASC MEMORY - FACT DETAIL");
-  box_line_styled buf cols ~style:Ansi.dim
-    " Enter on the fact list opens this reading; arrivals do not replace it";
-  box_empty buf cols;
   let facts = Masc_tui_types.memory_fact_rows state in
   let total = List.length facts in
   let cursor = max 0 (min state.memory_facts_cursor (max 0 (total - 1))) in
-  let detail_cols = max 30 (cols - 4) in
+  let detail_cols = max 30 (framed_inner_width cols) in
   let lines =
     match List.nth_opt facts cursor with
     | None -> [ "    This list has no fact row to read." ]
     | Some row -> Render_memory.memory_fact_detail_lines ~cols:detail_cols row
   in
-  (* One chrome row more than a plain listing: the window marker under the
-     content. [listing_rows_below_the_body] counts the box closure and the
-     footer hint only, so the marker is reserved on top of it. *)
+  let total_lines = List.length lines in
+  (* The frame spends [surface_chrome_rows] of the body on its own chrome, so
+     the window's height is worked out here, from the number the frame itself
+     uses, before anything is drawn. Counting the buffer afterwards -- what
+     this surface did first -- is a second tally of one thing, and being one
+     row out is not a visible mistake: [finish_surface] drops the rows past the
+     edge, and the row it drops is the footer naming the way back. *)
   let content_height =
-    max 1 (rows - count_frame_lines buf - listing_rows_below_the_body - 1) in
-  let max_scroll = max 0 (List.length lines - content_height) in
+    max 1
+      (Masc_tui_types.surface_body_rows state ~terminal_rows - surface_chrome_rows)
+  in
+  let max_scroll = max 0 (total_lines - content_height) in
   let scroll = min max_scroll (max 0 state.memory_fact_detail_scroll) in
-  let window = Rows.of_list ~first:scroll ~height:content_height lines in
-  for i = 0 to content_height - 1 do
-    match Rows.at window (scroll + i) with
-    | None -> box_empty buf cols
-    | Some line -> box_line buf cols line
-  done;
-  box_line_styled buf cols ~style:(Theme.recede ())
-    (Printf.sprintf "  [detail rows %s]"
-       (Masc_tui_scroll.window_text ~scroll ~height:content_height (List.length lines)));
-  box_bottom buf cols;
-  Buffer.add_string buf
-    (footer_line state ~max_cells:cols
-       ~hints:"j/k:scroll  PgUp/PgDn:page  Esc:close");
-  finish_surface state ~surface_key:"memory-fact-detail" ~rows:terminal_rows ~cols buf
+  surface_chrome state ~terminal_rows ~cols ~surface_key:"memory-fact-detail"
+    ~frame:Chrome_overlay
+    (* The drawing says what it actually clamped to, so [G]'s sentinel and a
+       scroll past the end are corrected in the state rather than only on the
+       screen. *)
+    ~clamped:(fun () -> Some (Memory_fact_detail_scroll scroll))
+    ~title:(screen_title " MASC MEMORY - FACT DETAIL")
+    ~hints:
+      (* The marker leads the row, as the patch reading's does: it carries no
+         colon, so the fitter can shed no whole key of it and a narrow terminal
+         keeps the count. *)
+      (Printf.sprintf
+         "[detail rows %s]  j/k:scroll  PgUp/PgDn:page  g/G:top/bottom  Esc:close"
+         (Masc_tui_scroll.window_text ~scroll ~height:content_height total_lines))
+    ~body:(fun ~budget:_ c ->
+      let window = Rows.of_list ~first:scroll ~height:content_height lines in
+      for i = 0 to content_height - 1 do
+        match Rows.at window (scroll + i) with
+        | None -> c.push_empty ()
+        | Some line -> c.push line
+      done)
 
 let rec render_memory_facts (state : state) =
   if state.memory_fact_detail_open then render_memory_fact_detail state

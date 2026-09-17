@@ -7367,6 +7367,7 @@ type clamped_scroll =
   | Acting of int
   | Acting_selection of int * int
   | Acting_detail_scroll of int
+  | Memory_fact_detail_scroll of int
   | Verification_detail_scroll of int
   | Harness_detail_scroll of int
   | Fusion_detail_scroll of int
@@ -7450,6 +7451,7 @@ let apply_clamped_scroll (state : state) = function
   | Acting value -> state.acting_scroll <- value
   | Acting_selection (scroll, cursor) -> state.acting_scroll <- scroll; state.acting_cursor <- cursor
   | Acting_detail_scroll value -> state.acting_detail_scroll <- value
+  | Memory_fact_detail_scroll value -> state.memory_fact_detail_scroll <- value
   | Verification_detail_scroll value ->
       state.verification_detail_scroll <- value
   | Harness_detail_scroll value -> state.harness_detail_scroll <- value

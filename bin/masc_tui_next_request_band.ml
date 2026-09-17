@@ -41,21 +41,15 @@ let ordinal = function
       Printf.sprintf "%d%s" n suffix
 ;;
 
-(* Why the candidate walks where it does: the lane's sticky last-good
-   candidate goes first while it lasts, the rest keep their declared order,
-   and a resting path is named with its release. *)
+(* Why the candidate walks where it does: the declared order, with a resting
+   path moved behind its siblings and named with its release. *)
 let walk_sentence ~safe (walk : Inspector.forecast_walk)
     (candidate : Inspector.forecast_candidate) =
   let why =
-    match walk.preferred with
-    | Some preferred when String.equal preferred.preferred_runtime_id candidate.runtime_id ->
-        Printf.sprintf "the lane's last good candidate since %s, kept %.0f min after each success"
-          (clock preferred.noted_at) (preferred.ttl_s /. 60.)
-    | Some _ | None ->
-        (match candidate.place.declared_at with
-         | Some 0 -> "the declared head"
-         | Some n -> Printf.sprintf "declared %s on lane %s" (ordinal n) (safe walk.lane_id)
-         | None -> Printf.sprintf "not declared on lane %s" (safe walk.lane_id))
+    match candidate.place.declared_at with
+    | Some 0 -> "the declared head"
+    | Some n -> Printf.sprintf "declared %s on lane %s" (ordinal n) (safe walk.lane_id)
+    | None -> Printf.sprintf "not declared on lane %s" (safe walk.lane_id)
   in
   let rest =
     match candidate.place.rest with

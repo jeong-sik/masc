@@ -98,18 +98,17 @@ type walk_rest =
 val deferred_lane_rest : now:float -> deferred_runtime_lane -> walk_rest
 
 (** The candidates a fresh walk of an assignment dispatches, in [order]: the
-    lane [declared] with the sticky last-good candidate moved first
-    ({!Runtime_lane_preference.prefer_order_with}), then quota and
-    backpressure demotion. [preferred] is that candidate with the time it was
-    noted, from the same observation the order was taken from, so it is
-    always a member of [order]. The walk may still replace the head for an
-    input modality it cannot take (RFC-0265); a turn that failed and deferred
-    its input walks its remaining candidates instead. *)
+    lane [declared], then quota and backpressure demotion, which moves a
+    resting or exhausted candidate behind its siblings and excludes none.
+    Nothing else reorders it: a success leaves no preference behind, so the
+    cycle after a failover starts from the declared head again. The walk may
+    still replace the head for an input modality it cannot take (RFC-0265);
+    a turn that failed and deferred its input walks its remaining candidates
+    instead. *)
 type walk_order =
   { lane_id : string
   ; declared : string list
   ; order : string list
-  ; preferred : (string * float) option
   }
 
 (** Why a fresh walk would not dispatch the assignment at all, as
@@ -481,7 +480,6 @@ module For_testing : sig
       (runtime_id:string -> attempt:int -> Agent_core.Error.t -> bool) ->
     ?allow_accept_no_progress_retry:
       (runtime_id:string -> attempt:int -> Agent_core.Error.t -> bool) ->
-    ?lane_id:string ->
     ?on_retry_deferred:(deferred_runtime_lane -> unit) ->
     ?on_attempt_error:
       (runtime_id:string ->
@@ -492,7 +490,7 @@ module For_testing : sig
     ?on_lane_terminal_error:(lane_terminal_error -> unit) ->
     ?quota_scope_of:('candidate -> Runtime_quota_window.scope option) ->
     ?model_of:('candidate -> string option) ->
-    ?candidate_preference_of:('candidate -> Runtime_lane_preference.candidate option) ->
+    ?candidate_backpressure_of:('candidate -> Runtime_candidate_backpressure.candidate option) ->
     ?candidate_dispatchable:('candidate -> bool) ->
     runtime_id:string ->
     runtime_id_of:('candidate -> string) ->

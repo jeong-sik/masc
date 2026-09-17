@@ -171,18 +171,9 @@ type forecast_place =
   ; rest : forecast_rest
   }
 
-type forecast_preferred =
-  { preferred_runtime_id : string
-  ; noted_at : float  (** Unix epoch of the success that set it. *)
-  ; ttl_s : float  (** How long a success keeps it; every success renews it. *)
-  }
-
 type forecast_walk =
   { lane_id : string
   ; declared : string list  (** The lane as declared, head first. *)
-  ; preferred : forecast_preferred option
-        (** The lane's sticky last-good candidate, shared by every keeper the
-            lane routes; it walks first while it lasts. *)
   }
 
 type forecast_candidate =

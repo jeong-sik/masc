@@ -2,8 +2,8 @@
     audit-adversarial-20260912 L3).
 
     A keeper cycle is budgeted under a deferred-lane assignment (the lane
-    key, e.g. "claude_code.claude-sonnet-5") whose [Runtime_lane_preference]
-    sticky ordering dispatches other candidates first. Before the L3 fix the
+    key, e.g. "claude_code.claude-sonnet-5") whose walk dispatches other
+    candidates first when the head rests. Before the L3 fix the
     "keeper cycle FAILED" report substituted the dispatched candidate only
     when a same-turn deferral hint existed; every unhinted failure named the
     lane key, so 62 lines of "runtime=claude_code… error=Payment required"

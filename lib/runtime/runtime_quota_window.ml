@@ -1,6 +1,6 @@
 (** Process-local provider quota windows.  See the [.mli] for the contract.
 
-    Implementation notes, mirroring {!Runtime_lane_preference}:
+    Implementation notes, mirroring {!Runtime_candidate_backpressure}:
 
     - State is a small [Hashtbl] guarded by [Stdlib.Mutex] (record/read may
       be called from outside Eio fibers, so [Eio.Mutex] is not required).

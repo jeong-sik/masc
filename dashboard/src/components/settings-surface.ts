@@ -1718,15 +1718,6 @@ export function SettingsSurface() {
                               </div>
                             `)}
                           </div>
-                          ${lane.preferred_candidate !== null
-                            ? html`
-                              <div class="rt-fo-foot">
-                                <span class="set-hint mono" data-testid=${`runtime-lane-${lane.id}-sticky`}>
-                                  sticky → ${lane.preferred_candidate} (TTL 내 마지막 성공 후보)
-                                </span>
-                              </div>
-                            `
-                            : null}
                         </div>
                       `)}
                     </div>

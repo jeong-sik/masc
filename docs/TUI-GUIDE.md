@@ -1429,11 +1429,10 @@ metadata reachability reading by exact `runtime_id`.
 ```
 
 The authority is `runtime.toml`, read through two server-owned views.
-`GET /api/v1/runtime/resolved` projects lane order, candidate identity,
-provider/model labels, dispatchability, and sticky preference. The sticky
-timestamp means **last successful
-candidate**, so the row says `last success`; it is never presented as failure
-history. `GET /api/v1/dashboard/runtime-probe` supplies only a cached provider
+`GET /api/v1/runtime/resolved` projects lane order, candidate identity and
+provider/model labels. The lane fact on each row says why that candidate is
+the one the lane walks: `head`, `fallback #n`, or `single candidate`.
+`GET /api/v1/dashboard/runtime-probe` supplies only a cached provider
 metadata-endpoint reachability reading. It does not send a completion, execute a CLI
 runtime, or report lane failover history.
 

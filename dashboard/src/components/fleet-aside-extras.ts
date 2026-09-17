@@ -8,7 +8,7 @@
 //                디자인의 admitted/deferred/dropped 회계(fl-q-acct/fl-q-c)는
 //                라이브 소스가 없어 렌더하지 않는다.
 //   · fl-rot-* — GET /api/v1/runtime/resolved 의 lane 후보 체인
-//                (Runtime_lane_preference sticky 선호 포함). 디자인의
+//                (선언 순서). 디자인의
 //                failover 이벤트 피드(fl-rot-ev*)는 keeper 별 라이브 이벤트
 //                소스가 없어 생략한다.
 //   · fl-as-mini/fl-mini — keeper 카운터 필드 중 관측되는 것만. 디자인의
@@ -176,9 +176,8 @@ function fleetRotationLane(
 
 /** 디자인 AsideRotation. 후보 체인은 runtime/resolved 의 lane 정의가, 현재
  *  후보 표시(cur)는 keeper 의 runtime_canonical 이 담당한다. 디자인의
- *  "수동 전환" 태그는 masc 에 맞지 않는다 — lane 은 마지막 성공 후보를 먼저
- *  시도하는 sticky 선호(Runtime_lane_preference)를 가지므로, 태그 문구는
- *  관측된 사실(후보 수)만 담는다. */
+ *  "수동 전환" 태그는 masc 에 맞지 않는다 — lane 은 선언 순서로 걷고 쉬는
+ *  후보만 뒤로 가므로, 태그 문구는 관측된 사실(후보 수)만 담는다. */
 export function FleetRotationSection({ keeper }: { keeper: Keeper }) {
   useEffect(() => {
     void loadRuntimeResolved()
@@ -193,7 +192,7 @@ export function FleetRotationSection({ keeper }: { keeper: Keeper }) {
   return html`
     <div class="fl-as-sec" data-testid="fleet-rotation-section">
       <h4>런타임 후보 ${lane
-        ? html`<span class="fl-as-tag" title="lane ${lane.id} — 마지막 성공 후보를 먼저 시도하는 sticky 선호">후보 ${lane.runtime_ids.length}</span>`
+        ? html`<span class="fl-as-tag" title="lane ${lane.id} — 선언 순서로 걷는 후보">후보 ${lane.runtime_ids.length}</span>`
         : null}</h4>
       ${lane && lane.runtime_ids.length > 0 ? html`
         <div class="fl-rot">
@@ -205,9 +204,6 @@ export function FleetRotationSection({ keeper }: { keeper: Keeper }) {
               <//>
             `)}
           </div>
-          <div class="fl-rot-note mono">${lane.preferred_candidate
-            ? `마지막 성공 후보 ${lane.preferred_candidate} 를 먼저 시도합니다 (sticky 선호)`
-            : '기록된 선호 후보 없음'}</div>
         </div>
       ` : html`
         <div class="fl-rot-na">${note}</div>

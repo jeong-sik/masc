@@ -13,7 +13,7 @@ type t =
   ; model : model_spec
   ; binding : binding
   ; execution : Runtime_execution.t
-  ; candidate_preference : Runtime_lane_preference.candidate
+  ; candidate_backpressure : Runtime_candidate_backpressure.candidate
     (** Candidate-only backpressure tied to the frozen dispatch binding. *)
   ; quota_scope : Runtime_quota_window.scope
     (** Quota ownership key frozen at materialization, from the same
@@ -564,8 +564,8 @@ val resolve_assignment :
   string -> [ `Lane of Runtime_lane.t | `Unavailable of missing_catalog_model | `Missing ]
 (** Resolve a keeper assignment to a lane. The id names a declared lane or a
     runtime, and a lane of that name is taken first; an id naming a bare runtime
-    gets a lane of its own, because the lane id is what keys sticky candidate
-    preference and quota demotion. Every lane ends
+    gets a lane of its own, because the lane is what carries failover and quota
+    demotion. Every lane ends
     at [\[runtime\].default], so a walk always has a next candidate.
     [Unavailable] preserves the configured identity when its capability catalog
     entry is absent. [Missing] means the id was not configured. Neither selects

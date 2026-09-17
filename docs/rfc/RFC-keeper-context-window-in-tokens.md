@@ -424,7 +424,7 @@ thinking 은 공급자 규칙에 따른다(§10.7). DeepSeek 은 `tools` 를 쓰
 
 ### 10.11 2026-09-17 측정: 꼬리와 판정 시점
 
-origin/main `64ef87af83` 의 원장은 T 를 실은 usage 로도 전체와 묶음을 갱신하고, 공급자 응답마다 판정해 그 자리에서 앞을 옮긴다. 라이브 `~/me/.masc` 의 비움 로그(`model input carried range evicted`)와 비용 기록(`costs/2026-09/*.jsonl`)을 keeper·런타임·시각으로 이어 쟀다.
+origin/main `64ef87af83` 의 원장은 T 를 실은 usage 로도 전체와 묶음을 갱신하고, 공급자 응답마다 판정해 그 자리에서 앞을 옮긴다. 라이브 `<base-path>/.masc` 의 비움 로그(`model input carried range evicted`)와 비용 기록(`costs/2026-09/*.jsonl`)을 keeper·런타임·시각으로 이어 쟀다.
 
 | 날짜 | 비움 | `evicted_tokens` 모름 | 비움 다음 요청이 같은 keeper 턴 |
 |---|---|---|---|

@@ -2169,6 +2169,49 @@ let test_max_context_accessor_clamps_to_provider_cap () =
       resolution.Keeper_context_runtime.effective_budget)
 ;;
 
+(* #36540: the [Provider_config] handed to AGENT_CORE must carry the same
+   effective window the keeper budget uses. The adapter used to forward the
+   raw runtime.toml override, so AGENT_CORE's exact-fit admission and response
+   telemetry ([Provider_config.context_window]) sized against 524288 while the
+   keeper budget was 131072. *)
+let test_agent_core_provider_config_carries_effective_context_window () =
+  with_runtime_thinking (fun () ->
+    let provider_config_of runtime_id =
+      match Runtime.get_runtime_by_id runtime_id with
+      | Some (rt : Runtime.t) ->
+        (match rt.execution with
+         | Runtime_execution.Agent_core config -> config
+         | Runtime_execution.Codex_app_server _
+         | Runtime_execution.Claude_code _
+         | Runtime_execution.Antigravity_cli _ ->
+           Alcotest.failf "%s must materialize as an agent_core runtime" runtime_id)
+      | None -> Alcotest.failf "expected %s runtime" runtime_id
+    in
+    let stalecontext = provider_config_of "ollama_cloud.stalecontext" in
+    Alcotest.(check (option int))
+      "over-catalog override is clamped in the AGENT_CORE-facing config"
+      (Some 131072)
+      stalecontext.Llm_provider.Provider_config.max_context;
+    Alcotest.(check (option int))
+      "context_window (exact-fit admission, response telemetry) reads the clamped window"
+      (Some 131072)
+      (Llm_provider.Provider_config.context_window stalecontext);
+    let thinkdefault = provider_config_of "ollama_cloud.thinkdefault" in
+    Alcotest.(check (option int))
+      "in-catalog override passes through untouched"
+      (Some 128000)
+      thinkdefault.Llm_provider.Provider_config.max_context;
+    Alcotest.(check (option int))
+      "context_window reads the declared window under the cap"
+      (Some 128000)
+      (Llm_provider.Provider_config.context_window thinkdefault);
+    let think = provider_config_of "ollama_cloud.think" in
+    Alcotest.(check (option int))
+      "uncatalogued model keeps its runtime.toml window"
+      (Some 128000)
+      (Llm_provider.Provider_config.context_window think))
+;;
+
 (* A model the embedded catalog has no row for, served over ollama_cloud's
    OpenAI-compatible wire. Its only window is the runtime.toml declaration, so
    that value must stand: the provider preset has no window to clamp it with.
@@ -2778,6 +2821,10 @@ let () =
             "max_context_of_runtime_id clamps runtime TOML to provider cap"
             `Quick
             test_max_context_accessor_clamps_to_provider_cap
+        ; Alcotest.test_case
+            "AGENT_CORE provider config carries the effective window"
+            `Quick
+            test_agent_core_provider_config_carries_effective_context_window
         ; Alcotest.test_case
             "uncatalogued model keeps its runtime.toml window"
             `Quick

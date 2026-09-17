@@ -116,8 +116,8 @@ reward(검증 통과), wall-clock, input/output/cache 토큰, $/task(litellm 단
 1. **실행 환경 차이**: keeper 명령은 harbor 기본 에이전트처럼 이미지의 `USER` 로 돈다. 엔드포인트는
    root 로 접속하고, shim 래퍼가 `setpriv` 로 PID 1 의 uid·gid 가 된다. bootstrap 이 이미지의 환경을
    shim `env_file=` 로, PATH 를 `path=` 로 넘긴다(0.35.20 이상). shim 이 받지 않는 이름(GitHub 토큰
-   이름, `GH_CONFIG_DIR`·`GIT_TERMINAL_PROMPT`)과 여러 줄 값은 빠지고, 그 이름과 이유는
-   `result.json` 의 `endpoint_env_left_out` 에 남는다. 이미지가 그런 이름을 선언한 태스크에서는 harbor
+   이름, `GH_CONFIG_DIR`·`GIT_TERMINAL_PROMPT`)과 여러 줄 값은 빠지고, 그 이름과 이유는 trial 결과의
+   agent metadata `endpoint_env_left_out` 에 남는다. 이미지가 그런 이름을 선언한 태스크에서는 harbor
    기본 에이전트와 보는 환경이 다르므로 결과를 읽을 때 이 필드를 같이 본다.
 2. **태스크 선언 도구**: `mcp_servers`·`skills_dir` 를 keeper 에 연결하지 않는다(#36908).
 3. **GPU·자원·에뮬레이션**: 로컬 docker 는 GPU 3태스크를 못 돌리고, 16 CPU 태스크 때문에

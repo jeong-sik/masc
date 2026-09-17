@@ -305,6 +305,41 @@ async def merge_keeper_usage(
     }
 
 
+ENDPOINT_ENV_LEFT_OUT = f"{REMOTE}/endpoint-env-left-out.tsv"
+# Harbor's docker environment returns stderr inside stdout (masc_dist.UNAME_MARK),
+# so the JSON is printed on a marked line of its own.
+LEFT_OUT_MARK = "MASC_ENDPOINT_ENV_LEFT_OUT="
+
+
+async def merge_endpoint_env_left_out(
+    environment: BaseEnvironment, context: AgentContext
+) -> None:
+    """Carry the image variables the keepers ran without into the result.
+
+    The bootstrap records each one it could not hand to the shim
+    (driver/endpoint_env.sh). masc_agent reads it from collect_result.sh; arm K
+    never runs that script, so the record is read here.
+    """
+    if context.metadata is None:
+        context.metadata = {}
+    result = await environment.exec(
+        f"bash -c 'source {REMOTE}/driver/endpoint_env.sh && "
+        f"printf \"{LEFT_OUT_MARK}%s\\n\" \"$(bench_env_left_out_json {ENDPOINT_ENV_LEFT_OUT})\"'",
+        user="root",
+    )
+    output = result.stdout or ""
+    marked = [line[len(LEFT_OUT_MARK):] for line in output.splitlines()
+              if line.startswith(LEFT_OUT_MARK)]
+    if result.return_code != 0 or len(marked) != 1:
+        context.metadata["endpoint_env_left_out"] = {
+            "read_failed": (result.stderr or output)[-400:]}
+        return
+    try:
+        context.metadata["endpoint_env_left_out"] = json.loads(marked[0])
+    except json.JSONDecodeError as exc:
+        context.metadata["endpoint_env_left_out"] = {"read_failed": str(exc)}
+
+
 def read_token_guard() -> str:
     """Shell that puts a non-empty bearer token in `$masc_token`, or exits 1.
 

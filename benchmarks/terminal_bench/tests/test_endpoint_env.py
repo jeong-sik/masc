@@ -59,8 +59,10 @@ def test_what_the_shim_would_refuse_is_left_out_by_name():
         "AFTER=still read",
     ])
     assert lines == ["KEPT=first", "AFTER=still read"]
-    for name in ("PATH", "GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR", "GIT_TERMINAL_PROMPT"):
+    for name in ("GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR", "GIT_TERMINAL_PROMPT"):
         assert f"left out {name} (refused_by_shim)" in stderr
+    # path= carries PATH, so it is not reported as a variable the keeper lacks.
+    assert "PATH" not in stderr
     for name in ("MULTI", "CARRIAGE"):
         assert f"left out {name} (not_one_line)" in stderr
     assert "left out KEPT (repeated)" in stderr
@@ -89,7 +91,8 @@ def test_what_is_left_out_is_recorded_for_the_result(tmp_path):
     record = tmp_path / "left-out.tsv"
     record.write_text("stale\tfrom an earlier bootstrap\n")
     lines, _ = env_lines_of(
-        b"GH_TOKEN=ghp_x\0MULTI=a\nb\0A=1\0A=2\0" + b"1BAD=x\0KEEP=yes\0", str(record))
+        b"PATH=/usr/bin\0GH_TOKEN=ghp_x\0MULTI=a\nb\0A=1\0A=2\0" + b"1BAD=x\0KEEP=yes\0",
+        str(record))
     assert lines == ["A=1", "KEEP=yes"]
     assert record.read_text().splitlines() == [
         "GH_TOKEN\trefused_by_shim", "MULTI\tnot_one_line", "A\trepeated", "\tnot_a_name"]
@@ -122,8 +125,7 @@ def ocaml_string_list(source, binding):
 def test_the_left_out_names_are_the_shims_refusals():
     shim = (REPO / "lib/exec_shim/exec_shim.ml").read_text()
     protocol = (REPO / "lib/exec_ssh_protocol/exec_ssh_protocol.ml").read_text()
-    refused = (["PATH"]
-               + ocaml_string_list(protocol, "github_token_env_names")
+    refused = (ocaml_string_list(protocol, "github_token_env_names")
                + ocaml_string_list(shim, "runtime_env_allowlist"))
     listed = subprocess.run(
         ["bash", "-c", 'source "$1" && printf "%s\\n" "${BENCH_ENV_FILE_REFUSED_NAMES[@]}"',

@@ -229,6 +229,16 @@ def test_a_release_the_bootstrap_cannot_use_is_refused_before_upload(
     assert env.uploads == []
 
 
+def test_a_task_that_names_its_agent_user_is_refused_before_upload(tmp_path, monkeypatch):
+    # harbor would run its own agents as that account; the keepers run as the
+    # image's user, so the two would differ.
+    env = FakeEnv()
+    env.default_user = "agent"
+    with pytest.raises(RuntimeError, match="'agent'"):
+        install_into(tmp_path, monkeypatch, fake_bench(tmp_path), env)
+    assert env.uploads == []
+
+
 def test_a_dist_without_a_recorded_release_names_the_fetch_step(tmp_path, monkeypatch):
     root = fake_bench(tmp_path)
     (root / "dist" / ".version").unlink()
@@ -276,6 +286,14 @@ def context_for(tmp_path, monkeypatch, table, **usage):
     context = SimpleNamespace(metadata=None)
     agent.populate_context_post_run(context)
     return context
+
+
+def test_the_image_variables_the_keepers_lacked_reach_harbor_metadata(tmp_path):
+    left_out = [{"name": "GH_TOKEN", "reason": "refused_by_shim"}]
+    write_result(tmp_path, endpoint_env_left_out=left_out)
+    context = SimpleNamespace(metadata=None)
+    make_agent(tmp_path).populate_context_post_run(context)
+    assert context.metadata["endpoint_env_left_out"] == left_out
 
 
 def test_cost_prices_each_token_class_at_its_own_rate(tmp_path, monkeypatch):

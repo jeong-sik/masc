@@ -19,27 +19,26 @@
 # uid and gid for the read.
 #
 # One line the shim will not take refuses the whole file, and with it every
-# request (exec_shim.ml parse_env_file). Such entries are left out and their
-# names written to stderr: PATH, which path= carries; the GitHub token names,
+# request (exec_shim.ml parse_env_file). PATH is skipped, since path= carries
+# it. Other such entries are left out and recorded: the GitHub token names,
 # which would make every keeper one GitHub login; the names the runner sets for
 # each request. A value holding a newline cannot be one line, and a value ending
 # in a carriage return would lose it to the shim's CRLF handling, so both are
 # left out as well. A repeated name keeps its first value, as the shim refuses
 # a name declared twice.
 
-# The shim's refusals: "PATH" and Exec_ssh_protocol.github_token_env_names in
+# The shim's refusals besides PATH: Exec_ssh_protocol.github_token_env_names in
 # parse_env_file, and Exec_shim.runtime_env_allowlist.
 # tests/test_endpoint_env.py compares this list with those sources.
 BENCH_ENV_FILE_REFUSED_NAMES=(
-  PATH
   GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN
   GH_CONFIG_DIR GIT_TERMINAL_PROMPT
 )
 
-# PID 1's NUL-separated environment on stdout, read as PID 1's owner.
+# <PID 1 uid> <PID 1 gid>: PID 1's NUL-separated environment on stdout, read as
+# its owner (endpoint_account.sh bench_image_uid and bench_image_gid).
 bench_pid1_environ() {
-  setpriv --reuid "$(stat -c %u /proc/1)" --regid "$(stat -c %g /proc/1)" --clear-groups \
-    cat /proc/1/environ
+  setpriv --reuid "$1" --regid "$2" --clear-groups cat /proc/1/environ
 }
 
 # <record file, or empty> <name> <reason>: one entry left out, named on stderr
@@ -53,7 +52,8 @@ bench_env_left_out() {
 # input ends without a NUL is read too. What is left out is recorded in the file
 # given, which collect_result.sh puts into result.json; the reasons are
 # refused_by_shim, not_one_line, repeated and not_a_name (with no name, since it
-# is not one).
+# is not one). PATH is not left out: the shim refuses it here because path=
+# carries it, and the bootstrap writes path= from the same PATH.
 # [record file]
 bench_endpoint_env_lines() {
   local record="${1:-}" entry name value refused written=":" newline=$'\n' cr=$'\r'
@@ -66,6 +66,7 @@ bench_endpoint_env_lines() {
       bench_env_left_out "${record}" "" not_a_name
       continue
     fi
+    [[ "${name}" != PATH ]] || continue
     for refused in "${BENCH_ENV_FILE_REFUSED_NAMES[@]}"; do
       if [[ "${name}" == "${refused}" ]]; then
         bench_env_left_out "${record}" "${name}" refused_by_shim

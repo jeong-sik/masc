@@ -27,8 +27,7 @@ def wrapper_text(binary, setpriv, uid, gid, entry):
 
 def run_wrapper(tmp_path, entry, *args):
     shim = tmp_path / "release-shim"
-    shim.write_text('#!/bin/sh\nprintf "HOME=%s USER=%s LOGNAME=%s ARGS=%s\\n" '
-                    '"$HOME" "$USER" "$LOGNAME" "$*"\n')
+    shim.write_text('#!/bin/sh\nprintf "HOME=%s USER=%s ARGS=%s\\n" "$HOME" "$USER" "$*"\n')
     shim.chmod(0o755)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -54,18 +53,20 @@ def test_an_account_with_a_passwd_entry_keeps_its_name_home_and_groups(tmp_path)
     output, options = run_wrapper(
         tmp_path, "agent:x:1000:1001:Agent:/home/agent:/bin/bash", "--probe")
     assert options == ["--reuid=1000", "--regid=1001", "--init-groups"]
-    assert output == "HOME=/home/agent USER=agent LOGNAME=agent ARGS=--probe"
+    assert output == "HOME=/home/agent USER=agent ARGS=--probe"
 
 
-def test_an_account_without_one_gets_what_docker_exec_gives_it(tmp_path):
+def test_an_account_without_one_gets_docker_s_home_and_groups_and_its_uid_as_user(tmp_path):
+    # docker exec gives such an account HOME=/ and no supplementary groups, and
+    # no USER; the shim always gives a payload USER, so it is the uid here.
     output, options = run_wrapper(tmp_path, "", "a", "b c")
     assert options == ["--reuid=1000", "--regid=1001", "--clear-groups"]
-    assert output == "HOME=/ USER=1000 LOGNAME=1000 ARGS=a b c"
+    assert output == "HOME=/ USER=1000 ARGS=a b c"
 
 
 def test_a_home_with_quotes_and_spaces_reaches_the_shim_whole(tmp_path):
     output, _ = run_wrapper(tmp_path, "o:x:1000:1001::/home/o'brien dir:/bin/sh")
-    assert output == "HOME=/home/o'brien dir USER=o LOGNAME=o ARGS="
+    assert output == "HOME=/home/o'brien dir USER=o ARGS="
 
 
 def test_the_rendered_endpoint_uses_the_directory_the_bootstrap_prepares():
@@ -76,4 +77,3 @@ def test_the_rendered_endpoint_uses_the_directory_the_bootstrap_prepares():
     out = render_configs.render_arm("b", runtime_id="anthropic.claude-fable-5", effort="high")
     runtime_toml = (out / "runtime.toml").read_text()
     assert f'remote_root = "{render_configs.REMOTE_ROOT}"' in runtime_toml
-    assert '"/root"' not in runtime_toml

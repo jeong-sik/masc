@@ -23,8 +23,10 @@ BENCH_REMOTE_ROOT=/opt/masc-bench/remote
 BENCH_SHIM_BINARY=/usr/local/libexec/masc-exec-shim
 BENCH_SHIM_COMMAND=/usr/local/bin/masc-exec-shim
 
-bench_image_uid() { stat -c %u /proc/1; }
-bench_image_gid() { stat -c %g /proc/1; }
+# PID 1's effective uid and gid, from /proc/1/status rather than the owner of
+# /proc/1: the kernel shows a non-dumpable process's /proc directory as root's.
+bench_image_uid() { awk '$1 == "Uid:" { print $3 }' /proc/1/status; }
+bench_image_gid() { awk '$1 == "Gid:" { print $3 }' /proc/1/status; }
 
 # <text>: the text as one single-quoted word for /bin/sh.
 bench_sh_quote() {
@@ -37,10 +39,13 @@ bench_sh_quote() {
 #
 # setpriv and env are named by absolute path: the wrapper runs in an sshd
 # session whose PATH is not the image's, and fedora keeps setpriv in /usr/sbin.
-# With a passwd entry the wrapper takes the account's name, home and
-# supplementary groups, as `docker exec -u` does. Without one, docker gives the
-# command HOME=/ and no supplementary groups, and so does the wrapper; the name
-# is the uid.
+# With a passwd entry the wrapper takes the account's home and supplementary
+# groups, as `docker exec -u` does, and its name as USER. Without one, docker
+# gives the command HOME=/ and no supplementary groups, and so does the wrapper.
+# USER differs from docker there: docker sets none, while the shim always gives
+# a payload USER (its own, or "masc"), so the wrapper hands it the uid.
+# The shim reads only HOME, USER and TMPDIR from its own environment, and an
+# env_file HOME from the image replaces this HOME for payloads.
 bench_shim_wrapper_text() {
   local binary="$1" setpriv="$2" env_command="$3" uid="$4" gid="$5" entry="$6" name home groups
   if [[ -n "${entry}" ]]; then
@@ -53,10 +58,9 @@ bench_shim_wrapper_text() {
   fi
   printf '#!/bin/sh\n'
   printf '# Written by the bench bootstrap (driver/endpoint_account.sh).\n'
-  printf 'exec %s --reuid=%s --regid=%s %s %s HOME=%s USER=%s LOGNAME=%s %s "$@"\n' \
+  printf 'exec %s --reuid=%s --regid=%s %s %s HOME=%s USER=%s %s "$@"\n' \
     "$(bench_sh_quote "${setpriv}")" "${uid}" "${gid}" "${groups}" "$(bench_sh_quote "${env_command}")" \
-    "$(bench_sh_quote "${home}")" "$(bench_sh_quote "${name}")" "$(bench_sh_quote "${name}")" \
-    "$(bench_sh_quote "${binary}")"
+    "$(bench_sh_quote "${home}")" "$(bench_sh_quote "${name}")" "$(bench_sh_quote "${binary}")"
 }
 
 # Installs the release shim off PATH and the wrapper in its place.
@@ -77,6 +81,9 @@ bench_install_shim_as_image_user() {
 # <keeper name>: the keeper's directory, owned by the image's user.
 bench_keeper_root() {
   local keeper="$1"
+  # The image's user walks through the bench directory to reach its own; the
+  # mode is set here rather than left to the umask of whoever made it.
+  chmod 0755 "${BENCH_REMOTE_ROOT%/*}"
   install -d -m 0755 "${BENCH_REMOTE_ROOT}"
   install -d -m 0755 -o "$(bench_image_uid)" -g "$(bench_image_gid)" "${BENCH_REMOTE_ROOT}/${keeper}"
 }

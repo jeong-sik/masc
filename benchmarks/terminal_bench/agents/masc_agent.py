@@ -254,6 +254,8 @@ class MascAgent(BaseInstalledAgent):
             "duration_ms": data.get("duration_ms"),
             "tool_calls": data.get("tool_calls"),
             "duplicate_tool_calls": data.get("duplicate_tool_calls"),
+            # The image variables its keepers ran without (driver/endpoint_env.sh).
+            "endpoint_env_left_out": data.get("endpoint_env_left_out"),
             "arm": self.arm,
             "runtime_id": self.runtime_id,
         }

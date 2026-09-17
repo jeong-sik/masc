@@ -675,6 +675,7 @@ let run_keeper_invocation_turn_admitted_inner
               | Ok selection ->
                 Keeper_task_skill_turn.exact_task_surfaces
                   ~snapshot:skill_snapshot
+                  ~tool_deny:profile_defaults.tool_deny
                   ~skill_names:profile_defaults.skill_names
                   ~selection
                   ~current_task

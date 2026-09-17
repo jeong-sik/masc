@@ -378,6 +378,7 @@ let active_capability_descriptor_ids surface =
     | Masc.Keeper_capability_surface.Active -> Some capability.descriptor.id
     | Outside_skill_surface
     | Not_model_invocable
+    | Node_tools_outside_surface _
     | Invalid_definition
     | Missing_task_skill
     | Missing_configured_skill -> None)
@@ -758,6 +759,42 @@ let test_tool_deny_removes_descriptors_from_surface () =
     (Masc.Keeper_capability_surface.digest noop)
 ;;
 
+let test_composition_follows_node_tool_admission () =
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let frozen =
+    snapshot config [ [ candidate ~directory:"lane-plan" composition_document ] ]
+  in
+  let valid = valid_named "lane-plan" (Inventory.of_snapshot frozen) in
+  let composition_tools surface =
+    Masc.Keeper_capability_surface.skill_catalog surface
+    |> Masc.Keeper_skill_catalog.composition_entries
+    |> List.map Masc.Keeper_tool_composition_catalog.tool_name
+  in
+  let admitted = capability_surface frozen in
+  check (list string) "composition is offered while its node tool is admitted"
+    [ "keeper_compose_lane-plan" ] (composition_tools admitted);
+  check bool "admitted composition is active" true
+    ((exact_capability_by_reference admitted valid.reference).availability
+     = Masc.Keeper_capability_surface.Active);
+  let withheld = capability_surface ~tool_deny:[ "keeper_lane_status" ] frozen in
+  check (list string) "composition leaves the executable catalog with its node tool"
+    [] (composition_tools withheld);
+  let capability = exact_capability_by_reference withheld valid.reference in
+  check bool "withheld composition names the node tool outside the surface" true
+    (capability.availability
+     = Masc.Keeper_capability_surface.Node_tools_outside_surface
+         { tools = [ "keeper_lane_status" ] });
+  check bool "withheld composition is operator only" true
+    (capability.exposure = Masc.Keeper_capability_surface.Operator_only);
+  let projection = Masc.Keeper_capability_surface.skill_projection withheld in
+  check int "withholding is configured state, not a turn projection error" 0
+    (List.length projection.Masc.Keeper_skill_catalog.unavailable);
+  let row = Masc.Keeper_capability_surface.skill_capability_to_yojson capability in
+  check (list string) "operator row carries the node tools"
+    [ "keeper_lane_status" ]
+    Yojson.Safe.Util.(row |> member "outside_node_tools" |> to_list |> filter_string)
+;;
+
 let test_surface_digest_binds_exact_tool_reference () =
   let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
   let surface = capability_surface (snapshot config [ [] ]) in
@@ -992,6 +1029,8 @@ let () =
             test_surface_digest_binds_exact_tool_reference
         ; test_case "tool deny removes descriptors from surface" `Quick
             test_tool_deny_removes_descriptors_from_surface
+        ; test_case "composition follows node tool admission" `Quick
+            test_composition_follows_node_tool_admission
         ; test_case "surface digest is path independent" `Quick
             test_surface_digest_is_path_independent
         ; test_case "unreadable diagnostics stay public only" `Quick

@@ -770,6 +770,7 @@ let run_keeper_cycle
                  | Ok merged ->
                    Keeper_task_skill_turn.exact_task_surfaces
                      ~snapshot:skill_snapshot
+                     ~tool_deny:profile_defaults.tool_deny
                      ~skill_names:profile_defaults.skill_names
                      ~selection:merged
                      ~current_task

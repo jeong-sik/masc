@@ -2,12 +2,13 @@
     keeper turn.
 
     A provider prompt cache reuses the longest common prefix of consecutive
-    requests. This module digests the parts that prefix is made of -- the
-    system prompt, the tool schemas, and the provider-bound messages -- and
-    classifies how the current message list relates to the previous one. Every
-    digest is the SHA-256 of the payload {!Keeper_provider_input_snapshot}
-    stores for the same value, so a digest here names a provider-input
-    snapshot artifact.
+    requests. This module digests the parts of that prefix that can change
+    between two requests of one keeper turn -- the tool schemas and the
+    messages -- and classifies how the current message list relates to the
+    previous one. The system prompt is not digested: a keeper turn hands every
+    request the same one. Messages and tool schemas are serialized the way
+    {!Keeper_provider_input_snapshot} stores them, so there is one encoding of
+    each; no digest leaves this module.
 
     The comparison is pure and linear in the two message counts. *)
 
@@ -15,14 +16,13 @@ type request_digests
 (** The digests of one request. *)
 
 val digest_request :
-  system_prompt:string ->
   tools:Agent_core.Tool.t list ->
   messages:Agent_core.Types.message list ->
   request_digests
-(** Serializes and hashes the system prompt, every tool schema, and every
-    message, in order. [system_prompt] is expected in the form the
-    provider-input snapshot receives it. Pure and CPU-bound; safe on any
-    domain. *)
+(** Serializes and hashes every tool schema and every message, in order. The
+    work is proportional to the request, and is done again for every request:
+    nothing is reused from the previous request's digests. Pure and CPU-bound;
+    safe on any domain. *)
 
 val message_count : request_digests -> int
 
@@ -91,15 +91,14 @@ type change =
   | Previous_request_not_digested
   | Follows_previous_request of
       { messages : message_change
-      ; system_prompt_changed : bool
       ; tools_changed : bool
       }
-      (** [system_prompt_changed] and [tools_changed] are computed from their
-          own digests and do not depend on [messages]. *)
+      (** [tools_changed] compares the tool schema digests in order and does
+          not depend on [messages]. *)
 
 val compare_requests : previous:previous_request -> current:request_digests -> change
 (** Checked in order: [Appended], [Tail_removed], [Block_dropped],
-    [Rewritten_in_place], [Diverged_at]. A pair that fits more than one shape because of repeated
-    messages gets the first. *)
+    [Rewritten_in_place], [Diverged_at]. A pair that fits more than one shape
+    because of repeated messages gets the first. *)
 
 val change_to_json : change -> Yojson.Safe.t

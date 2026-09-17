@@ -1625,6 +1625,13 @@ let run_turn
                           ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id))
                       ~on_request_attribution:
                         (fun ~runtime_id ~tools ~transmitted ->
+                           (* Official-client lanes send their requests
+                              through their own client and never reach the
+                              wire observation below, so the next AGENT_CORE
+                              request cannot be compared with the one before
+                              this. *)
+                           previous_request_projection_ref
+                           := Keeper_projection_change.Request_not_digested;
                            record_transmitted_model_input
                              ~runtime_id
                              ~tools
@@ -1683,7 +1690,7 @@ let run_turn
                               when a request only extends the history, the
                               previous request's carrier sits where the new
                               history starts and every comparison would report
-                              a rewrite at that position. *)
+                              a divergence at that position. *)
                            previous_request_projection_ref
                            := (if not (Keeper_wire_capture.enabled ())
                                then Keeper_projection_change.Request_not_digested
@@ -1699,9 +1706,6 @@ let run_turn
                                      ~trace_id:meta.runtime.trace_id
                                      ~runtime_profile:runtime_id
                                      ~previous:!previous_request_projection_ref
-                                     ~system_prompt:
-                                       (Inference_utils.sanitize_text_utf8
-                                          turn_system_prompt)
                                      ~tools:request_tools
                                      ~messages:provider_content
                                  | Some (Error _) | None ->

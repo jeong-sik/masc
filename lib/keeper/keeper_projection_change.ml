@@ -5,8 +5,7 @@ type message_digest =
   }
 
 type request_digests =
-  { system_prompt_sha256 : string option
-  ; tool_schema_sha256s : string list
+  { tool_schema_sha256s : string list
   ; messages : message_digest array
   }
 
@@ -18,12 +17,8 @@ let message_digest message =
   }
 ;;
 
-let digest_request ~system_prompt ~tools ~messages =
-  { system_prompt_sha256 =
-      Option.map
-        (fun payload -> payload.Keeper_provider_input_snapshot.payload_sha256)
-        (Keeper_provider_input_snapshot.system_prompt_payload system_prompt)
-  ; tool_schema_sha256s =
+let digest_request ~tools ~messages =
+  { tool_schema_sha256s =
       List.map
         (fun tool ->
            (Keeper_provider_input_snapshot.tool_schema_payload tool)
@@ -80,7 +75,6 @@ type change =
   | Previous_request_not_digested
   | Follows_previous_request of
       { messages : message_change
-      ; system_prompt_changed : bool
       ; tools_changed : bool
       }
 
@@ -213,12 +207,6 @@ let compare_requests ~previous ~current =
   | Request_digested previous ->
     Follows_previous_request
       { messages = classify_messages ~previous:previous.messages ~current:current.messages
-      ; system_prompt_changed =
-          not
-            (Option.equal
-               String.equal
-               previous.system_prompt_sha256
-               current.system_prompt_sha256)
       ; tools_changed =
           not
             (List.equal
@@ -287,11 +275,10 @@ let change_to_json = function
   | First_request_of_turn -> `Assoc [ "kind", `String "first_request_of_turn" ]
   | Previous_request_not_digested ->
     `Assoc [ "kind", `String "previous_request_not_digested" ]
-  | Follows_previous_request { messages; system_prompt_changed; tools_changed } ->
+  | Follows_previous_request { messages; tools_changed } ->
     `Assoc
       [ "kind", `String "follows_previous_request"
       ; "messages", message_change_to_json messages
-      ; "system_prompt_changed", `Bool system_prompt_changed
       ; "tools_changed", `Bool tools_changed
       ]
 ;;

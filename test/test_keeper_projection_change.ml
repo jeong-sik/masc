@@ -15,12 +15,8 @@ let tool name =
     (fun _ -> Ok { Agent_core.Types.content = "ok"; content_blocks = None; _meta = None })
 ;;
 
-let fixture_system_prompt = "fixture system prompt"
 let fixture_tools = [ tool "masc_status" ]
-
-let digest ?(system_prompt = fixture_system_prompt) ?(tools = fixture_tools) messages =
-  Change.digest_request ~system_prompt ~tools ~messages
-;;
+let digest ?(tools = fixture_tools) messages = Change.digest_request ~tools ~messages
 
 let numbered label count =
   List.init count (fun index -> user (Printf.sprintf "%s-%d" label index))
@@ -32,8 +28,8 @@ let payload_bytes message =
   String.length (Snapshot.message_payload message).Snapshot.payload_bytes
 ;;
 
-(* Compares two message lists under the fixture system prompt and tools, and
-   checks the whole change, flags included, through its JSON rendering. *)
+(* Compares two message lists under the fixture tools, and checks the whole
+   change, the tools flag included, through its JSON rendering. *)
 let check_messages label ~previous ~current expected =
   let actual =
     Change.compare_requests
@@ -44,8 +40,7 @@ let check_messages label ~previous ~current expected =
     string
     label
     (render
-       (Change.Follows_previous_request
-          { messages = expected; system_prompt_changed = false; tools_changed = false }))
+       (Change.Follows_previous_request { messages = expected; tools_changed = false }))
     (render actual)
 ;;
 
@@ -116,7 +111,12 @@ let test_tail_removed () =
     "current list is a strict prefix"
     ~previous:[ user "a"; assistant "b"; user "c" ]
     ~current:[ user "a" ]
-    (Change.Tail_removed { kept = 1; removed = 2 })
+    (Change.Tail_removed { kept = 1; removed = 2 });
+  check_messages
+    "every message removed"
+    ~previous:[ user "a" ]
+    ~current:[]
+    (Change.Tail_removed { kept = 0; removed = 1 })
 ;;
 
 let test_rewritten_in_place () =
@@ -200,47 +200,43 @@ let test_diverged_at () =
     (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "current_role" messages))
 ;;
 
-let flags change =
+let tools_changed change =
   match change with
-  | Change.Follows_previous_request { system_prompt_changed; tools_changed; _ } ->
-    system_prompt_changed, tools_changed
+  | Change.Follows_previous_request { tools_changed; _ } -> tools_changed
   | Change.First_request_of_turn | Change.Previous_request_not_digested ->
     failf "expected a comparison, got %s" (render change)
 ;;
 
-let test_system_prompt_and_tools_flags () =
+let test_tools_flag () =
   let messages = [ user "a" ] in
   let compare ~previous ~current =
-    Change.compare_requests ~previous:(Change.Request_digested previous) ~current |> flags
+    Change.compare_requests ~previous:(Change.Request_digested previous) ~current
+    |> tools_changed
   in
   check
-    (pair bool bool)
-    "system prompt changed, tools same"
-    (true, false)
-    (compare
-       ~previous:(digest messages)
-       ~current:(digest ~system_prompt:"another system prompt" messages));
+    bool
+    "same tools"
+    false
+    (compare ~previous:(digest messages) ~current:(digest messages));
   check
-    (pair bool bool)
-    "tools changed, system prompt same"
-    (false, true)
+    bool
+    "a tool added"
+    true
     (compare
        ~previous:(digest messages)
        ~current:(digest ~tools:(fixture_tools @ [ tool "masc_board" ]) messages));
   check
-    (pair bool bool)
+    bool
     "tool order is part of the prefix"
-    (false, true)
+    true
     (compare
        ~previous:(digest ~tools:[ tool "masc_status"; tool "masc_board" ] messages)
        ~current:(digest ~tools:[ tool "masc_board"; tool "masc_status" ] messages));
   check
-    (pair bool bool)
-    "flags do not follow the message change"
-    (true, true)
-    (compare
-       ~previous:(digest [ user "x" ])
-       ~current:(digest ~system_prompt:"" ~tools:[] [ user "y" ]))
+    bool
+    "the flag does not follow the message change"
+    false
+    (compare ~previous:(digest [ user "x" ]) ~current:(digest [ user "y" ]))
 ;;
 
 let long_count = 6_000
@@ -300,11 +296,6 @@ let () =
         ; test_case "diverged at" `Quick test_diverged_at
         ; test_case "long lists" `Quick test_long_lists
         ] )
-    ; ( "prefix parts"
-      , [ test_case
-            "system prompt and tools flags"
-            `Quick
-            test_system_prompt_and_tools_flags
-        ] )
+    ; "tool schemas", [ test_case "tools flag" `Quick test_tools_flag ]
     ]
 ;;

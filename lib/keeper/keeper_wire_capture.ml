@@ -274,20 +274,20 @@ let capture_response ~base_path ~masc_root ~keeper_name ~turn_id ~agent_core_tur
 
 (* The [request] row above is taken before model-input projection, so it
    cannot say what the provider received. This row is taken at the pre-dispatch
-   serialization boundary, once per provider request, from the provider-bound
-   messages of that request. It holds positions, roles, byte counts and digest
-   comparisons, and no message, prompt or schema text, so it is written without
-   the secret redaction the text rows need. *)
+   serialization boundary, once per provider request, from the messages of that
+   request after projection, without the extra-system-context carrier AGENT_CORE
+   appends last. It holds positions, roles, byte counts and digest comparisons,
+   and no message or schema text, so it is written without the secret redaction
+   the text rows need. *)
 let capture_request_projection_change ~masc_root ~keeper_name ~turn_id
-    ~agent_core_turn ~trace_id ~runtime_profile ~previous ~system_prompt ~tools
-    ~messages =
+    ~agent_core_turn ~trace_id ~runtime_profile ~previous ~tools ~messages =
   if not (enabled ()) then Keeper_projection_change.Request_not_digested
   else
     let turn_label = string_of_int turn_id in
     match
       Domain_pool_ref.submit_cpu_or_inline (fun () ->
         let current =
-          Keeper_projection_change.digest_request ~system_prompt ~tools ~messages
+          Keeper_projection_change.digest_request ~tools ~messages
         in
         current, Keeper_projection_change.compare_requests ~previous ~current)
     with

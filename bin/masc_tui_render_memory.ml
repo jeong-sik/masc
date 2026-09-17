@@ -79,9 +79,15 @@ let memory_updated_text = function
   | None -> "-"
   | Some ts -> memory_date ts
 
+(* Every size on this screen is the recall block the keeper injects, not the
+   snapshot file: the file's first_seen, origin, basis and JSON punctuation
+   never reach a request. Bytes, not tokens, because no provider this fleet
+   runs counts a block inside a request -- the carried range has measured
+   tokens because the ledger diffs consecutive usage totals, and a pinned
+   block has no such pair. *)
 let memory_context_lines (k : memory_keeper_health) =
   let current_line =
-    Printf.sprintf "  %s · %s · snapshot r%d · %s · updated %s"
+    Printf.sprintf "  %s · %s · snapshot r%d · recall %s · updated %s"
       k.mkh_keeper_id (memory_state_label (memory_state k)) k.mkh_revision
       (Masc_tui_context_inspector.format_bytes k.mkh_snapshot_bytes)
       (memory_updated_text k.mkh_updated_at)
@@ -98,7 +104,7 @@ let memory_context_lines (k : memory_keeper_health) =
   in
   let source_line =
     Printf.sprintf
-      "  source-bound snapshot r%d · facts %d · invalidations %d · %s · %s"
+      "  source-bound snapshot r%d · facts %d · invalidations %d · recall %s · %s"
       k.mkh_source_revision k.mkh_source_facts k.mkh_source_invalidations
       (Masc_tui_context_inspector.format_bytes k.mkh_source_snapshot_bytes)
       (if k.mkh_source_snapshot_present then "present" else "absent")
@@ -440,7 +446,7 @@ let render_memory_body ~cols ~budget (state : state)
   (match state.memory_health with
    | None -> push ("  Total: " ^ missing_reading "waiting for memory snapshots")
    | Some snapshot ->
-       push (Printf.sprintf "  Total %s · %d ordinary + %d source · %s · %s"
+       push (Printf.sprintf "  Total %s · %d ordinary + %d source · recall %s · %s"
          (Masc_tui_message_layout.count_noun (snapshot.mhs_total_facts + snapshot.mhs_total_source_facts) "fact")
          snapshot.mhs_total_facts snapshot.mhs_total_source_facts
          (Masc_tui_context_inspector.format_bytes

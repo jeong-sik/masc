@@ -503,7 +503,7 @@ let render_section_tools ~cols (state : state) : string list =
     | Some mhs ->
         let total_facts = mhs.mhs_total_facts in
         let header =
-          Printf.sprintf "    Ordinary facts: %d · source facts: %d · ordinary snapshots: %s"
+          Printf.sprintf "    Ordinary facts: %d · source facts: %d · ordinary recall: %s"
             total_facts
             mhs.mhs_total_source_facts
             (Masc_tui_context_inspector.format_bytes (List.fold_left (fun acc (k : Decode.memory_keeper_health) -> acc + k.mkh_snapshot_bytes) 0 mhs.mhs_keepers))

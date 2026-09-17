@@ -3,7 +3,8 @@
     A fact a new claim names in [absorbs] leaves the current snapshot because
     the new claim now says it, not because it was wrong. Its row is kept here,
     in a per-keeper append-only [<keeper>.memory-absorbed.jsonl], so its text
-    outlives the snapshot. The librarian writes the rows under the snapshot
+    outlives the snapshot and [keeper_memory_search] (source [absorbed] or
+    [all]) can still reach it. The librarian writes the rows under the snapshot
     lock, after the next snapshot is built and printed and right before it
     replaces the old one; a failed write fails the pass, so no absorbed fact
     leaves the snapshot without its row here. The file is never rewritten or

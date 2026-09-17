@@ -33,12 +33,18 @@ let container_user_config () =
     | Some _ | None -> Option.map (fun home -> Filename.concat home ".config") (Sys.getenv_opt "HOME") in
   Option.map (fun base -> Filename.concat (Filename.concat base "container") "config.toml") base
 (* A service that is absent or stopped keeps its installers and start action,
-   whatever Rosetta says; see [Sandbox_readiness.apple_container_needs_rosetta]. *)
+   whatever Rosetta says; see [Sandbox_readiness.apple_container_needs_rosetta].
+   Rosetta is asked first: a builder that cannot start never reaches a kernel.
+   A builder that starts but has no default kernel gets its own action, so the
+   readiness answer and the offered fix name the same missing piece. *)
 let apple_builder host dependency =
   match host, dependency with
   | Sandbox.Macos {architecture=Arm64; major}, Prerequisites.Sandbox Apple_container
     when major >= 26 && Sandbox.apple_container_needs_rosetta ~run:Sandbox.system_runner ->
     Prerequisites.Needs_missing_rosetta {user_config=container_user_config ()}
+  | Sandbox.Macos {architecture=Arm64; major}, Prerequisites.Sandbox Apple_container
+    when major >= 26 && Sandbox.apple_container_needs_default_kernel ~run:Sandbox.system_runner ->
+    Prerequisites.Needs_default_kernel
   | _ -> Prerequisites.Builder_unchecked
 let rec wait pid =
   match Unix.waitpid [] pid with
@@ -82,7 +88,7 @@ let actions host dependency =
   match host, dependency with
   | Sandbox.Macos {architecture=Arm64; major}, Prerequisites.Sandbox Apple_container when major >= 26 ->
     (match apple_builder with
-     | Prerequisites.Needs_missing_rosetta _ -> standard
+     | Prerequisites.Needs_missing_rosetta _ | Prerequisites.Needs_default_kernel -> standard
      | Prerequisites.Builder_unchecked -> Verified_apple_install :: standard)
   | Sandbox.Macos _, Prerequisites.Sandbox Docker ->
     Verified_docker_install :: Verified_docker_launch :: standard

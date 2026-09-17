@@ -261,9 +261,35 @@ let int_field name fields =
   | Error err -> Error (name ^ ": " ^ err)
 ;;
 
+(* RFC-event-queue-admit-all-ready: a recurrence below this bound is rejected
+   at admission instead of being accepted and then firing without limit
+   (#29365). The bound lives here rather than in Env_config because
+   masc_schedule does not depend on the config library. *)
+let min_interval_sec = 60
+
+(* [validate_interval] is shared by the decoder ([recurrence_of_yojson] ->
+   [schedule_request_of_yojson] -> [Schedule_store]), so it may enforce only
+   structural validity. The admission bound lives in [check_admission]:
+   applying it here would make the whole schedule ledger unparseable the first
+   time a pre-bound record reached [collect_results]'s fail-fast Result fold
+   (review 5224937258 on #36848). *)
 let validate_interval interval_sec =
-  if interval_sec <= 0 then Error "recurrence.interval_sec must be positive"
+  if interval_sec <= 0
+  then Error "recurrence.interval_sec must be positive"
   else Ok interval_sec
+;;
+
+(* Creation-time guard for [create_request] only. Existing records below the
+   bound stay readable so [Schedule_store] never corrupts; they keep their
+   pre-bound interval until the operator edits them. *)
+let check_admission recurrence =
+  match recurrence with
+  | Interval { interval_sec } when interval_sec < min_interval_sec ->
+    Error
+      (Printf.sprintf
+         "recurrence.interval_sec must be at least %d seconds"
+         min_interval_sec)
+  | Interval _ | One_shot | Daily _ | Cron _ -> Ok recurrence
 ;;
 
 (* Daily recurrence intentionally uses fixed offsets only. This keeps dispatch
@@ -844,6 +870,7 @@ let create_request
   in
   let* payload = payload_of_yojson payload in
   let* recurrence = validate_recurrence recurrence in
+  let* recurrence = check_admission recurrence in
   Ok
     { schedule_instance_id = Random_id.uuid_v7 ()
     ; schedule_id

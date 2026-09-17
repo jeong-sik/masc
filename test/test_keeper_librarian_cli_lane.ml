@@ -41,11 +41,10 @@ let input () : Librarian.input =
 ;;
 
 (* Surrogate identities: m1 = current_a (retained), m2 = current_b (dropped)
-   — the totality contract the parser enforces for this input. *)
+   — the parser accepts an answer that names only what changes. *)
 let valid_selection_json =
   `Assoc
     [ "working_contexts", `List []
-    ; Librarian.wire_field_retained_memory_ids, `List [ `String "m1" ]
     ; Librarian.wire_field_new_claims, `List []
     ; ( Librarian.wire_field_dropped
       , `List
@@ -85,7 +84,6 @@ let execute ~net ~clock ~base_path ~runner =
       ~keeper_id:"librarian-cli-test"
       ~selected_input
       ~messages
-      ~render_at:(fun _ -> Ok messages)
       ()
 ;;
 
@@ -126,7 +124,7 @@ let test_cli_slot_answers_after_catalog_exhaustion ?(cli_only = false) () =
     failf
       "the cli slot must answer: %s"
       (Runtime.For_testing.classified_error_detail error)
-  | Ok ((_selection, output), selected_slot, _fitted) ->
+  | Ok ((_selection, output), selected_slot) ->
     check (option string)
       "the declared cli slot ran"
       (Some Fixture.cli_primary_runtime)
@@ -184,7 +182,7 @@ let test_domain_invalid_cli_answer_advances_to_valid_selection () =
   in
   match execute ~net ~clock ~base_path ~runner with
   | Error error -> fail (Runtime.For_testing.classified_error_detail error)
-  | Ok ((_selection, output), slot, _count) ->
+  | Ok ((_selection, output), slot) ->
     check (list string) "domain rejection advances once"
       [Fixture.cli_primary_runtime; Fixture.cli_secondary_runtime] !attempts;
     check string "accepted slot owns selection" Fixture.cli_secondary_runtime slot;

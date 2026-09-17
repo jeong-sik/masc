@@ -1800,26 +1800,6 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
               n))
     | Error _ as e -> e
   in
-  (* Paired with max-concurrent on purpose: AGENT_CORE validates both in one admission
-     declaration and enforces this one before POST by serializing, measuring and
-     returning a typed Request_body_too_large. Only max-concurrent was declarable
-     here, so the byte ceiling could not be expressed at all and the AGENT_CORE gate
-     passed every size. Same shape as its sibling, including the >= 1 rule AGENT_CORE
-     already enforces on the declaration. *)
-  let max_request_body_bytes_result =
-    match typed_find "an integer" path tbl "max-request-body-bytes" Otoml.get_integer with
-    | Ok None -> Ok None
-    | Ok (Some n) when n > 0 -> Ok (Some n)
-    | Ok (Some n) ->
-      Error
-        (error
-           (path ^ ".max-request-body-bytes")
-           (Printf.sprintf
-              "max-request-body-bytes must be a positive integer or omitted for no \
-               declared ceiling; got %d"
-              n))
-    | Error _ as e -> e
-  in
   (* The eviction marks travel as a pair: one without the other has no
      meaning, so the parser refuses the half-declaration instead of inventing
      the missing side. The upper bound against the model's max-context is
@@ -1860,9 +1840,9 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
   in
   (* Request-side output budget. AGENT_CORE omits the wire field when this is
      absent, so the provider's own default decides -- 65536 on ollama.com/v1,
-     which is where a collapsed generation runs to. Positive-or-omitted mirrors
-     max-request-body-bytes: 0 would mean "ask for no output at all", which no
-     caller wants and every envelope rejects differently. *)
+     which is where a collapsed generation runs to. Positive or omitted: 0 would
+     mean "ask for no output at all", which no caller wants and every envelope
+     rejects differently. *)
   let max_tokens_result =
     match typed_find "an integer" path tbl "max-tokens" Otoml.get_integer with
     | Ok None -> Ok None
@@ -1918,7 +1898,6 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
     (* DET-OK: omitted means not selected for install wizard. *)
   in
   let* max_concurrent = max_concurrent_result in
-  let* max_request_body_bytes = max_request_body_bytes_result in
   let* context_marks = context_marks_result in
   let* max_tokens = max_tokens_result in
   let* price_input = price_input_result in
@@ -1935,7 +1914,6 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
     ; is_default
     ; wizard_default
     ; max_concurrent
-    ; max_request_body_bytes
     ; context_marks
     ; max_tokens
     ; price_input

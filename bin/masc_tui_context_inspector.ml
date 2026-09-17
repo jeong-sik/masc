@@ -77,7 +77,6 @@ type forecast_carried_origin =
   | Carried_from_ledger
   | Carried_from_turn_record of { turn : int }
   | Carried_halved_after_refusal of { retry : int }
-  | Carried_fit_to_request_cap
   | Carried_whole_history
 
 type forecast_carried =
@@ -88,19 +87,44 @@ type forecast_carried =
   ; counted_tokens : int option
   }
 
+type forecast_slot =
+  | Slot_system_prompt of { bytes : int }
+  | Slot_tools of { bytes : int }
+  | Slot_preamble of { bytes : int }
+  | Slot_history of { atoms : int; of_atoms : int; bytes : int }
+  | Slot_wake_line of { bytes : int }
+  | Slot_system_context of { bytes : int; blocks : (string * int) list }
+
+type forecast_rest =
+  | Rest_serving
+  | Rest_resting of { release_at : float; walk_promotes_at_release : bool }
+
+type forecast_place =
+  { walks_at : int
+  ; declared_at : int option
+  ; rest : forecast_rest
+  }
+
+type forecast_walk =
+  { lane_id : string
+  ; declared : string list
+  }
+
 type forecast_candidate =
   { runtime_id : string
   ; lane : forecast_lane
   ; marks : forecast_marks option
-  ; request_cap_bytes : int option
   ; parts : (forecast_parts, string) result
   ; history_atoms : int
   ; carried : forecast_carried option
+  ; assembly : forecast_slot list option
+  ; place : forecast_place
   }
 
 type forecast =
   { checkpoint_messages : int
   ; wake_line_bytes : int
+  ; walk : (forecast_walk, string) result
   ; candidates : forecast_candidate list
   }
 
@@ -564,7 +588,70 @@ let format_tokens tokens =
   else if tokens >= 1_000 then Printf.sprintf "%.1fk" (float tokens /. 1_000.)
   else string_of_int tokens
 
-let forecast_schema = "masc.keeper.next-request-forecast.v2"
+let forecast_schema = "masc.keeper.next-request-forecast.v5"
+
+let nonnegative_float name = function
+  | `Float value when Float.is_finite value && value >= 0. -> Ok value
+  | `Int value when value >= 0 -> Ok (Float.of_int value)
+  | _ -> Error (name ^ " is not a non-negative finite number")
+
+let decode_forecast_rest = function
+  | `Assoc fields ->
+    let* kind_json = field "kind" fields in
+    let* kind = nonempty_string "rest.kind" kind_json in
+    (match kind with
+     | "serving" -> Ok Rest_serving
+     | "resting" ->
+       let* release_json = field "release_at" fields in
+       let* release_at = nonnegative_float "rest.release_at" release_json in
+       let* promotes_json = field "walk_promotes_at_release" fields in
+       (match promotes_json with
+        | `Bool walk_promotes_at_release ->
+          Ok (Rest_resting { release_at; walk_promotes_at_release })
+        | _ -> Error "rest.walk_promotes_at_release is not a boolean")
+     | other -> Error ("rest.kind is neither serving nor resting: " ^ other))
+  | _ -> Error "rest is not an object"
+
+let decode_forecast_place = function
+  | `Assoc fields ->
+    let* walks_json = field "walks_at" fields in
+    let* walks_at = nonnegative_int "place.walks_at" walks_json in
+    let* declared_json = field "declared_at" fields in
+    let* declared_at =
+      match declared_json with
+      | `Null -> Ok None
+      | json ->
+        let* index = nonnegative_int "place.declared_at" json in
+        Ok (Some index)
+    in
+    let* rest_json = field "rest" fields in
+    let* rest = decode_forecast_rest rest_json in
+    Ok { walks_at; declared_at; rest }
+  | _ -> Error "place is not an object"
+
+let decode_forecast_walk = function
+  | `Assoc fields when List.mem_assoc "refusal" fields ->
+    let* refusal_json = field "refusal" fields in
+    let* refusal = nonempty_string "walk.refusal" refusal_json in
+    Ok (Error refusal)
+  | `Assoc fields ->
+    let* lane_json = field "lane_id" fields in
+    let* lane_id = nonempty_string "walk.lane_id" lane_json in
+    let* declared_json = field "declared" fields in
+    let* declared =
+      match declared_json with
+      | `List items ->
+        let rec loop reversed = function
+          | [] -> Ok (List.rev reversed)
+          | item :: rest ->
+            let* id = nonempty_string "walk.declared" item in
+            loop (id :: reversed) rest
+        in
+        loop [] items
+      | _ -> Error "walk.declared is not a list"
+    in
+    Ok (Ok { lane_id; declared })
+  | _ -> Error "walk is not an object"
 
 let decode_forecast_lane = function
   | `Assoc fields when List.mem_assoc "not_applicable" fields ->
@@ -632,7 +719,6 @@ let decode_forecast_origin = function
       let* retry_json = field "retry" fields in
       let* retry = nonnegative_int "origin.retry" retry_json in
       Ok (Carried_halved_after_refusal { retry })
-    else if String.equal kind "fit_to_request_cap" then Ok Carried_fit_to_request_cap
     else if String.equal kind "whole_history" then Ok Carried_whole_history
     else Error ("origin.kind is not a known kind: " ^ kind)
   | _ -> Error "origin is not an object"
@@ -659,6 +745,59 @@ let decode_forecast_carried = function
     Ok (Some { first_atom; kept_atoms; transmitted_bytes; origin; counted_tokens })
   | _ -> Error "carried is not an object or null"
 
+let decode_forecast_block = function
+  | `Assoc fields ->
+    let* name_json = field "block" fields in
+    let* name = nonempty_string "block.block" name_json in
+    let* bytes_json = field "bytes" fields in
+    let* bytes = nonnegative_int "block.bytes" bytes_json in
+    Ok (name, bytes)
+  | _ -> Error "block is not an object"
+
+let decode_forecast_slot = function
+  | `Assoc fields ->
+    let* kind_json = field "slot" fields in
+    let* kind = nonempty_string "slot.slot" kind_json in
+    let* bytes_json = field "bytes" fields in
+    let* bytes = nonnegative_int "slot.bytes" bytes_json in
+    if String.equal kind "system_prompt" then Ok (Slot_system_prompt { bytes })
+    else if String.equal kind "tools" then Ok (Slot_tools { bytes })
+    else if String.equal kind "preamble" then Ok (Slot_preamble { bytes })
+    else if String.equal kind "wake_line" then Ok (Slot_wake_line { bytes })
+    else if String.equal kind "history" then
+      let* atoms_json = field "atoms" fields in
+      let* atoms = nonnegative_int "slot.atoms" atoms_json in
+      let* of_json = field "of_atoms" fields in
+      let* of_atoms = nonnegative_int "slot.of_atoms" of_json in
+      Ok (Slot_history { atoms; of_atoms; bytes })
+    else if String.equal kind "system_context" then
+      let* blocks_json = field "blocks" fields in
+      (match blocks_json with
+       | `List items ->
+         let rec decode reversed = function
+           | [] -> Ok (List.rev reversed)
+           | item :: rest ->
+             let* block = decode_forecast_block item in
+             decode (block :: reversed) rest
+         in
+         let* blocks = decode [] items in
+         Ok (Slot_system_context { bytes; blocks })
+       | _ -> Error "slot.blocks is not a list")
+    else Error ("slot.slot is not a known slot: " ^ kind)
+  | _ -> Error "slot is not an object"
+
+let decode_forecast_assembly = function
+  | `Null -> Ok None
+  | `List items ->
+    let rec decode reversed = function
+      | [] -> Ok (Some (List.rev reversed))
+      | item :: rest ->
+        let* slot = decode_forecast_slot item in
+        decode (slot :: reversed) rest
+    in
+    decode [] items
+  | _ -> Error "assembly is not a list or null"
+
 let decode_forecast_candidate = function
   | `Assoc fields ->
     let* id_json = field "runtime_id" fields in
@@ -667,21 +806,17 @@ let decode_forecast_candidate = function
     let* lane = decode_forecast_lane lane_json in
     let* marks_json = field "marks" fields in
     let* marks = decode_forecast_marks marks_json in
-    let* cap_json = field "request_cap_bytes" fields in
-    let* request_cap_bytes =
-      match cap_json with
-      | `Null -> Ok None
-      | json ->
-        let* cap = nonnegative_int "candidate.request_cap_bytes" json in
-        Ok (Some cap)
-    in
     let* parts_json = field "parts" fields in
     let* parts = decode_forecast_parts parts_json in
     let* atoms_json = field "history_atoms" fields in
     let* history_atoms = nonnegative_int "candidate.history_atoms" atoms_json in
     let* carried_json = field "carried" fields in
     let* carried = decode_forecast_carried carried_json in
-    Ok { runtime_id; lane; marks; request_cap_bytes; parts; history_atoms; carried }
+    let* assembly_json = field "assembly" fields in
+    let* assembly = decode_forecast_assembly assembly_json in
+    let* place_json = field "place" fields in
+    let* place = decode_forecast_place place_json in
+    Ok { runtime_id; lane; marks; parts; history_atoms; carried; assembly; place }
   | _ -> Error "candidate is not an object"
 
 let decode_forecast = function
@@ -695,6 +830,8 @@ let decode_forecast = function
       let* checkpoint_messages = nonnegative_int "checkpoint_messages" messages_json in
       let* wake_json = field "wake_line_bytes" fields in
       let* wake_line_bytes = nonnegative_int "wake_line_bytes" wake_json in
+      let* walk_json = field "walk" fields in
+      let* walk = decode_forecast_walk walk_json in
       let* candidates_json = field "candidates" fields in
       (match candidates_json with
        | `List items ->
@@ -705,6 +842,6 @@ let decode_forecast = function
              loop (candidate :: reversed) rest
          in
          let* candidates = loop [] items in
-         Ok { checkpoint_messages; wake_line_bytes; candidates }
+         Ok { checkpoint_messages; wake_line_bytes; walk; candidates }
        | _ -> Error "candidates is not a list")
   | _ -> Error "next-request response is not an object"

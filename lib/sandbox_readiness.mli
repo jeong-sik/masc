@@ -36,6 +36,14 @@ val apple_container_needs_rosetta : run:runner -> bool
 (** The Apple Container service answered its inventory, and its builder cannot
     start: [apple_builder_rosetta] is [Rosetta_missing]. False for a service
     that is absent or stopped, which needs installing or starting first. *)
+val apple_container_needs_default_kernel : run:runner -> bool
+(** The Apple Container service answered its inventory and its builder starts,
+    but no default kernel is configured, so the first image build would die
+    with "default kernel not configured". False for a service that is absent
+    or stopped, which needs installing or starting first. *)
+val kernel_missing_reason : string
+(** The missing-prerequisite reason [probe] reports for that state; published
+    so the readiness answer and the offered action name the same piece. *)
 val probe : host:host -> run:runner -> require_rootless:bool -> require_userns:bool -> backend -> entry
 val recommend : host:host -> configured:backend option -> entry list -> backend option
 val catalog_json : host:host -> configured:backend option -> entry list -> Yojson.Safe.t

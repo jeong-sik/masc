@@ -167,31 +167,25 @@ val apply_disposition
   -> keeper_id:string
   -> now:float
   -> source:source
-  -> retained_memory_ids:string list
   -> new_claims:Keeper_memory_os_types.fact list
   -> unit
   -> (t, string) result
 (** Apply a librarian's decision to whatever the snapshot holds when the lock
     is taken.
 
-    The librarian decides three things about the facts it was shown: keep this
-    one, retire that one for the reason in [dropped_statements], add these new
-    claims. Those are the decision. The whole-set list it also carries is a
-    projection of them against the snapshot it read, and writing that
-    projection is what forced the write to demand nothing had changed
-    meanwhile — a keeper recording one fact of its own during the pass threw
-    the whole pass away.
+    The librarian says what changes: retire this one for the reason in
+    [dropped_statements], add these new claims. Keeping is what happens to
+    everything else, here and in {!Keeper_librarian.selection}.
 
-    A fact the decision never mentions is one the librarian never saw, so it is
-    left alone. A retired fact is retired even if the keeper re-observed it
-    during the pass: the judgment was about the claim, and a re-observation
-    does not answer it.
+    It used to also carry a whole-set "keep" list. That list was never read
+    here, and requiring it cost the librarian a correct restatement of every
+    current identity on each pass, where one slip threw the pass away — which
+    left "retain everything, drop nothing, claim nothing" as the one answer
+    that always passed (RFC-0456).
 
-    [retained_memory_ids] is the librarian's explicit "keep" list. It is not
-    read here — keeping is what happens to anything not retired — but it is
-    required, because a caller that cannot name what it kept has not made a
-    total decision, and totality is what stops silent forgetting
-    ({!Keeper_librarian.selection}). *)
+    A fact the decision never mentions is left alone. A retired fact is retired
+    even if the keeper re-observed it during the pass: the judgment was about
+    the claim, and a re-observation does not answer it. *)
 
 val replace
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t

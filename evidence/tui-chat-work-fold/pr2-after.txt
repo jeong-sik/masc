@@ -1,0 +1,30 @@
+ 1 |  Overview  Activity  ▸Keepers  Lanes  Memory  Board  Planning  Fusion  Workspace  Config
+ 2 | 
+ 3 |    Keepers ▸ alpha ▸ chat
+ 4 |   ● healthy AUTO · gate: Auto Judge · running · configured: anthropic.claude-opus-5
+ 5 |  ──────────────────────────────────────────────────────────────────────────────────────────────────
+ 6 |   ── 2026-08-22 · 06:00 ──────────────────────────────────────────────────────────────────────────
+ 7 |      ╭ 06:41 ◆         │ 전달됨, 도구 씀 · ci-red-attribution · 1 action
+ 8 |      ╰       ■         │ ✗ masc_fusion · 1200ms
+ 9 |   ── 2026-09-01 · 23:00 ──────────────────────────────────────────────────────────────────────────
+10 |   ╌╌╌┤ 23:34 ◈ JOURNAL ┊ Librarian committed current memory revision 9 · now 1 added, 1 removed, 3
+11 |                        ┊ retained · Ctrl-N
+12 |   ── 2026-09-17 · 03:00 ──────────────────────────────────────────────────────────────────────────
+13 |      ╭ 03:30 ▶ YOU       ship the release
+14 |      ╰       ● alpha     reply-ship the release
+15 | 
+16 | 
+17 | 
+18 | 
+19 | 
+20 | 
+21 | 
+22 | 
+23 | 
+24 | 
+25 | 
+26 | 
+27 |  ──────────────────────────────────────────────────────────────────────────────────────────────────
+28 |     >   (Ctrl-Y to speak, Ctrl-A to keep listening)
+29 | 
+30 |   Enter:send  Ctrl-J:NL  Ctrl-R:reasoning  Ctrl-D:tools  Ctrl-N:journal  Esc:list  …?

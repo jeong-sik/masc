@@ -1,6 +1,4 @@
 type t = {
-  registry :
-    (string, Prompt_registry_types.prompt_entry) Hashtbl.t;
   version_index : (string, string list) Hashtbl.t;
   override_tbl :
     (string, Prompt_override_persistence.entry) Hashtbl.t;
@@ -14,7 +12,6 @@ type t = {
 
 let create () =
   {
-    registry = Hashtbl.create 64;
     version_index = Hashtbl.create 64;
     override_tbl = Hashtbl.create 16;
     meta_tbl = Hashtbl.create 32;

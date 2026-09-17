@@ -523,25 +523,3 @@ let project_from_atom ~measure_message_bytes ~first_atom messages =
     { messages = assembled; dropped_atoms = drop; atom_count }, transmitted_bytes)
 ;;
 
-let project_within_bytes ~measure_message_bytes ~target_bytes ~reserved_bytes messages =
-  let labelled, atom_count = annotate messages in
-  let pinned_bytes = pinned_bytes_of ~measure_message_bytes labelled in
-  if atom_count = 0
-  then { messages; dropped_atoms = 0; atom_count }, pinned_bytes
-  else (
-    let preamble_bytes = measure_message_bytes preamble_message in
-    let available_bytes = target_bytes - reserved_bytes - pinned_bytes - preamble_bytes in
-    let _, suffix = atom_suffix_bytes ~measure_message_bytes ~atom_count labelled in
-    let drop =
-      if available_bytes < 0
-      then atom_count - 1
-      else min (atom_count - 1) (exact_drop ~available_bytes ~atom_count suffix)
-    in
-    let assembled, preamble_prepended =
-      assemble_with_preamble ~allow_empty_history:false ~atom_count ~drop ~messages labelled
-    in
-    let transmitted_bytes =
-      pinned_bytes + suffix.(drop) + if preamble_prepended then preamble_bytes else 0
-    in
-    { messages = assembled; dropped_atoms = drop; atom_count }, transmitted_bytes)
-;;

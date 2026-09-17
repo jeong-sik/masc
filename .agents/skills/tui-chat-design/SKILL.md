@@ -1,6 +1,6 @@
 ---
 name: tui-chat-design
-description: "masc TUI 채팅 화면이 무엇을 어떤 기호로 그리는지 정리한 표와 규칙이다. 말한 사람 마크, 턴 레일, 왼쪽 여백의 순서, 시계 칸, Ctrl-F 밀도 단계, 줄 문구를 바꾸거나 새 기호를 넣기 전에 쓴다. 바꾼 화면을 실제로 띄워 확인하는 방법은 tui-pty-scenario 에 있다."
+description: "masc TUI 채팅 화면이 무엇을 어떤 기호로 그리는지 정리한 표와 규칙이다. 말한 사람 마크, 턴 레일, 왼쪽 여백의 순서, 시계 칸, Ctrl-F 밀도 단계, 밝기 위계와 끝난 일의 접힘, 줄 문구를 바꾸거나 새 기호를 넣기 전에 쓴다. 바꾼 화면을 실제로 띄워 확인하는 방법은 tui-pty-scenario 에 있다."
 ---
 
 # masc 채팅 화면의 기호와 규칙
@@ -36,6 +36,21 @@ description: "masc TUI 채팅 화면이 무엇을 어떤 기호로 그리는지 
 `NO_COLOR` 가 켜지면 색이 사라진다. 그래서 누가 말했는지는 색이 아니라 마크가 답해야 한다.
 색으로만 구분되는 상태를 만들면 색 없는 터미널에서는 그 상태가 안 보인다.
 
+## 밝기는 위계다
+
+모양이 무엇인가를, 색이 누구인가·어떤 상태인가를 말한다면, 밝기는 위계만 말한다.
+밝은 자리는 화면에 몇 개 없어야 한다.
+
+- **말만 전경이다.** `User`·`Inbound`·`Keeper` 본문은 터미널 전경을 유지한다. `Local` 은
+  명령에 대한 답이라 읽는 글이라 누르지 않는다.
+- **일·소식·생각은 한 단계 아래다.** `Tool`·`Skill`·`Journal`·`Thinking` 본문은 dim 이다
+  (`Chat_theme.body`, `bin/masc_tui_ansi.ml`). dim 본문 안의 bold·링크가 닫힐 때 dim 을 다시
+  연다 — 스팬 하나가 그 뒤의 줄을 전부 밝히지 못한다.
+- **크롬은 가장 조용하다.** 날짜 레일, 시계, 곁줄, 여백 라벨, 브레드크럼은 `Theme.recede ()`
+  단계다. 스크롤 방향타로는 남지만 밝은 자리를 쓰지 않는다.
+- **실패는 이 규칙의 예외다.** `✗` 와 `failed` 절은 reset→bold→bright red 로 서고, 실패 줄은
+  접히지 않는다. 성공이 가라앉는 만큼 실패가 도드라져야 한다.
+
 ## 턴 레일 — `turn_rail_glyph`
 
 레일은 "이 줄이 어느 턴에 속하나" 한 가지에만 답한다. 누가 말했나는 마크가 답한다.
@@ -66,8 +81,12 @@ description: "masc TUI 채팅 화면이 무엇을 어떤 기호로 그리는지 
    곁줄이 없는 줄도 5칸을 다 쓴다. 폭이 줄마다 달라지면 스크롤할 때 본문 줄바꿈이 바뀐다.
 2. **시계** — `chat_clock_column = 5` 칸 + 띄움 1칸. `Origin_inline` 에서만 그린다.
    모든 줄의 시계 칸은 같은 5칸이다. 칸 폭이 줄마다 다르면 본문 줄바꿈도 줄마다 달라진다.
+   시계는 recede 단계로 눌려 있고, 마크만 말한 사람의 색을 지킨다
+   (시계 칸의 경계는 `gutter_clock_cells`).
 3. **마크 + 띄움 + 라벨** — 라벨 칸은 `chat_role_label_column = 10`. 마크 칸은 라벨 칸 안에서 뺀다.
    이름이 넘치면 가운데를 줄인다(`fit_middle`). 마크는 줄이는 범위 밖에 있어서 긴 이름에서도 남는다.
+   도구·스킬·생각 줄은 라벨 단어를 쓰지 않는다 — 마크가 이미 레인을 말한다.
+   칸은 그대로 두고 마크와 띄움만 그린다.
 4. **인용 막대** — 남이 쓴 글(`Tool`·`Skill`·`Status`·`Local`)은 흐린 `│`, `Journal` 은 `┊`,
    말(`User`·`Inbound`·`Keeper`·`Error`·`Thinking`)은 빈칸 두 칸이다.
 5. **본문**
@@ -94,6 +113,25 @@ Ctrl-F 는 `Origin_inline → Origin_row → Origin_bare → Origin_inline` 으�
 (`Masc_tui_types.next_origin_display`). 기본값은 `Masc_tui_types` 의 상태 생성에서 정한다.
 
 기본값 하나만으로 읽을 수 있어야 한다. "Ctrl-F 누르면 보인다" 는 기본값이 모자란다는 뜻이다.
+
+## 끝난 일은 접힌다
+
+끝난 일은 화면의 주인공이 아니다. 무엇이 남고 무엇이 접히는지는 정해져 있다.
+
+- **끝난 스킬은 요약 한 줄이다.** `전달됨, 도구 씀 · 이름 · N action`
+  (`Keeper_chat_transcript.skill_rows`). 전달만 됐는지 실제로 쓰였는지는 기본 밀도에서
+  읽혀야 한다 — 이름만 남기는 접힘은 금지다.
+- **`↳` 호출 줄, `proof · turn=… · use=…`, detail 줄은 Ctrl-D 뒤다.**
+  `msg_tool_visibility = Tools_full` 일 때만 그린다. 새 키를 만들지 않고 기존 도구 펼침 축에
+  탄다.
+- **도구 블록은 기본 `Tools_compact` 다.** 반환된 호출은 inventory 헤더 한 줄로 접히고,
+  실패·미반환·진행 중 호출은 헤더의 절이 아니라 자기 마크의 독립 줄로 남는다 — 단 셋
+  이상 모였을 때만. 둘 이하면 쪼개도 Full 이 그리는 두 줄이라 접지 않고, 실패도 헤더가
+  `1 failed: web_fetch` 처럼 이름을 불러 한 줄이다 (`project_tool_block` Compact 팔,
+  `bin/masc_tui_keeper_chat_transcript.ml`).
+- **돌아가는 동안에도 같은 토글로 그린다.** 라이브 블록과 확정된 블록은 같은
+  `project_tool_block` / `skill_rows` 를 지난다. 줄이 접히는 시점은 완료가 아니라
+  Ctrl-D 토글이다.
 
 ## 줄의 문구
 

@@ -2362,8 +2362,6 @@ type runtime_option = {
   ro_max_context_source : runtime_context_source;
   ro_max_output_tokens : int option;
   ro_is_local : bool;
-  ro_dispatchable : bool;
-  ro_blocked_reason : string option;
   ro_is_default : bool;
   ro_quota_exhausted : bool;
   ro_quota_resets_at : float option;
@@ -2373,8 +2371,6 @@ type runtime_option = {
 type runtime_resolved_lane = {
   rrl_id : string;
   rrl_runtime_ids : string list;
-  rrl_preferred_candidate : string option;
-  rrl_preferred_at_ts : float option;
 }
 
 type runtime_resolved_snapshot = {
@@ -2390,7 +2386,6 @@ type runtime_candidate_row = {
   rcr_position : int;
   rcr_candidate_count : int;
   rcr_runtime : runtime_option;
-  rcr_preferred_at_ts : float option;
   rcr_probe : runtime_provider_probe option;
 }
 
@@ -4260,10 +4255,6 @@ let decode_runtime_option ~default_id json =
     else Ok ()
   in
   let* _binding_is_default = required_bool_field json "is_default" in
-  let* ro_dispatchable = required_bool_field json "keeper_dispatchable" in
-  let* ro_blocked_reason =
-    required_nullable_string_field json "keeper_dispatch_blocked_reason"
-  in
   (* Quota life state (2026-09-12): optional because the document grew these
      fields -- an older server's rows simply lack them, and absence reads as
      unknown, not healthy. *)
@@ -4277,15 +4268,6 @@ let decode_runtime_option ~default_id json =
   in
   let* ro_quota_resets_at = optional_float_field json "quota_resets_at" in
   let* ro_quota_scope = optional_string_field json "quota_scope" in
-  let* () =
-    match ro_dispatchable, ro_blocked_reason with
-    | true, None | false, Some _ -> Ok ()
-    | true, Some _ ->
-        Error
-          (Printf.sprintf "dispatchable runtime %S carries a blocker" ro_id)
-    | false, None ->
-        Error (Printf.sprintf "blocked runtime %S omits its blocker" ro_id)
-  in
   let ro_is_default = Option.equal String.equal default_id (Some ro_id) in
   Ok
     { ro_id
@@ -4295,8 +4277,6 @@ let decode_runtime_option ~default_id json =
     ; ro_max_context_source
     ; ro_max_output_tokens
     ; ro_is_local
-    ; ro_dispatchable
-    ; ro_blocked_reason
     ; ro_is_default
     ; ro_quota_exhausted
     ; ro_quota_resets_at
@@ -4322,12 +4302,6 @@ let decode_runtime_resolved_lane json =
         | bad -> field_type_error "runtime_ids" "a string" bad)
       runtime_ids
   in
-  let* rrl_preferred_candidate =
-    required_nullable_string_field json "preferred_candidate"
-  in
-  let* rrl_preferred_at_ts =
-    required_nullable_float_field json "preferred_at_ts"
-  in
   let* () =
     match rrl_runtime_ids with
     | [] -> Error (Printf.sprintf "runtime lane %S has no candidates" rrl_id)
@@ -4349,30 +4323,7 @@ let decode_runtime_resolved_lane json =
     in
     loop rrl_runtime_ids
   in
-  let* () =
-    match rrl_preferred_candidate, rrl_preferred_at_ts with
-    | None, None -> Ok ()
-    | Some candidate, Some at
-      when at >= 0.0 && List.mem candidate rrl_runtime_ids -> Ok ()
-    | Some candidate, Some at when at < 0.0 ->
-        Error
-          (Printf.sprintf "runtime lane %S has negative preferred_at_ts" rrl_id)
-    | Some candidate, Some _ ->
-        Error
-          (Printf.sprintf "runtime lane %S prefers absent candidate %S" rrl_id
-             candidate)
-    | Some _, None | None, Some _ ->
-        Error
-          (Printf.sprintf
-             "runtime lane %S preferred_candidate and preferred_at_ts disagree"
-             rrl_id)
-  in
-  Ok
-    { rrl_id
-    ; rrl_runtime_ids
-    ; rrl_preferred_candidate
-    ; rrl_preferred_at_ts
-    }
+  Ok { rrl_id; rrl_runtime_ids }
 
 let decode_runtime_resolved_snapshot json =
   let* rrs_generated_at_iso = required_string_field json "generated_at_iso" in
@@ -4429,10 +4380,7 @@ let decode_runtime_resolved_snapshot json =
                 && Int.equal default.ro_effective_max_context listed.ro_effective_max_context
                 && default.ro_max_context_source = listed.ro_max_context_source
                 && Option.equal Int.equal default.ro_max_output_tokens listed.ro_max_output_tokens
-                && Bool.equal default.ro_is_local listed.ro_is_local
-                && Bool.equal default.ro_dispatchable listed.ro_dispatchable
-                && Option.equal String.equal default.ro_blocked_reason
-                     listed.ro_blocked_reason -> Ok ()
+                && Bool.equal default.ro_is_local listed.ro_is_local -> Ok ()
          | Some _ ->
              Error "default_runtime disagrees with its resolved runtime row")
   in
@@ -4492,18 +4440,11 @@ let join_runtime_surface ~probe ~probe_error ~resolved =
                  (Printf.sprintf "runtime lane %S names absent runtime %S"
                     lane.rrl_id runtime_id)
            | Some runtime ->
-               let rcr_preferred_at_ts =
-                 match lane.rrl_preferred_candidate with
-                 | Some preferred when String.equal preferred runtime_id ->
-                     lane.rrl_preferred_at_ts
-                 | Some _ | None -> None
-               in
                loop (position + 1)
                  ({ rcr_lane_id = lane.rrl_id
                   ; rcr_position = position
                   ; rcr_candidate_count = candidate_count
                   ; rcr_runtime = runtime
-                  ; rcr_preferred_at_ts
                   ; rcr_probe = Hashtbl.find_opt probe_by_runtime runtime_id
                   }
                   :: acc)

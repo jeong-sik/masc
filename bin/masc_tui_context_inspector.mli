@@ -99,8 +99,8 @@ type response_turn =
 
 (** What the next Agent Core request would carry, as the server computes it
     from the turn's own values without a turn
-    ([/api/v1/keepers/:name/next-request]). Live: the pair's carried front,
-    the binding's marks and the request-body cap. As last measured, with the
+    ([/api/v1/keepers/:name/next-request]). Live: the pair's carried front
+    and the binding's marks. As last measured, with the
     turn they were read from: the fixed prompt parts and the pinned blocks. *)
 type forecast_lane =
   | Lane_agent_core
@@ -132,9 +132,7 @@ type forecast_carried_origin =
   | Carried_from_turn_record of { turn : int }
       (** No ledger since the server started: the range that turn's record measured. *)
   | Carried_halved_after_refusal of { retry : int }
-  | Carried_fit_to_request_cap
-      (** No front to start from: the newest suffix the request cap admits. *)
-  | Carried_whole_history  (** No front and no cap. *)
+  | Carried_whole_history  (** No front to start from: everything. *)
 
 type forecast_carried =
   { first_atom : int
@@ -145,25 +143,64 @@ type forecast_carried =
         (** The ledger's measured total for its last request, when known. *)
   }
 
+(** One piece of the next request in the position it travels, as the
+    server lays them out: the system prompt and the tool array, then the
+    messages in wire order. *)
+type forecast_slot =
+  | Slot_system_prompt of { bytes : int }
+  | Slot_tools of { bytes : int }
+  | Slot_preamble of { bytes : int }
+  | Slot_history of { atoms : int; of_atoms : int; bytes : int }
+      (** [atoms] carried of [of_atoms] in the checkpoint, the wake line
+          on neither side. *)
+  | Slot_wake_line of { bytes : int }
+  | Slot_system_context of { bytes : int; blocks : (string * int) list }
+      (** [blocks] in the order the assembly concatenates them. *)
+
+(** Whether a candidate's path rests now, as the server read it. *)
+type forecast_rest =
+  | Rest_serving
+  | Rest_resting of { release_at : float; walk_promotes_at_release : bool }
+
+(** Where a candidate stands in the walk the next fresh cycle takes. *)
+type forecast_place =
+  { walks_at : int  (** 0 walks first. *)
+  ; declared_at : int option
+        (** The candidate's index in the lane's declaration; [None] when the
+            lane does not declare it. *)
+  ; rest : forecast_rest
+  }
+
+type forecast_walk =
+  { lane_id : string
+  ; declared : string list  (** The lane as declared, head first. *)
+  }
+
 type forecast_candidate =
   { runtime_id : string
   ; lane : forecast_lane
   ; marks : forecast_marks option
         (** As the binding declares them; [None] leaves eviction to a refusal. *)
-  ; request_cap_bytes : int option
   ; parts : (forecast_parts, string) result
         (** [Error] is the server's reason: no composition on this runtime,
             or only post-tool ones, which carry no pinned block. *)
   ; history_atoms : int
-  ; carried : forecast_carried option
-        (** [None] when the lane is refused, or when the cap fit would need
-            the refused parts. *)
+  ; carried : forecast_carried option  (** [None] when the lane is refused. *)
+  ; assembly : forecast_slot list option
+        (** The request in travel order; [None] whenever [carried] or
+            [parts] is. *)
+  ; place : forecast_place
   }
 
 type forecast =
   { checkpoint_messages : int
   ; wake_line_bytes : int
+  ; walk : (forecast_walk, string) result
+        (** [Error] is the server's reason the driver would not dispatch the
+            assignment at all; the candidates are then empty. *)
   ; candidates : forecast_candidate list
+        (** Every candidate of the keeper's lane, in the order the next
+            fresh cycle walks them. *)
   }
 
 type reading =

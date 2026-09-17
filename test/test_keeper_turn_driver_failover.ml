@@ -159,11 +159,9 @@ streaming = true
 [primary.test_model]
 is-default = true
 max-concurrent = 1
-max-request-body-bytes = 65536
 
 [fallback.test_model]
 max-concurrent = 1
-max-request-body-bytes = 65536
 |}
 
 let runtime_toml_quota_lane_with_shared_credential shared_credential =
@@ -210,13 +208,10 @@ streaming = true
 
 [shared_a.test_model]
 is-default = true
-max-request-body-bytes = 65536
 
 [shared_b.test_model]
-max-request-body-bytes = 65536
 
 [other.test_model]
-max-request-body-bytes = 65536
 |}
     shared_credential
     shared_credential
@@ -276,7 +271,6 @@ streaming = true
 [primary.test_model]
 is-default = true
 max-concurrent = 1
-max-request-body-bytes = 65536
 |}
 
 let runtime_toml_thinking_lane =
@@ -317,11 +311,9 @@ streaming = true
 [thinking.reasoning_big]
 is-default = true
 max-concurrent = 1
-max-request-body-bytes = 65536
 
 [plain.non_reasoning]
 max-concurrent = 1
-max-request-body-bytes = 65536
 |}
 
 let runtime_thinking_lane_model_catalog =
@@ -377,15 +369,12 @@ supports-image-input = true
 [primary.text_model]
 is-default = true
 max-concurrent = 1
-max-request-body-bytes = 65536
 
 [lanevision.vision_model]
 max-concurrent = 1
-max-request-body-bytes = 65536
 
 [outsidevision.vision_model]
 max-concurrent = 1
-max-request-body-bytes = 65536
 |}
 
 let runtime_toml_unknown_lane_candidate =
@@ -439,11 +428,9 @@ streaming = true
 [primary.test_model]
 is-default = true
 max-concurrent = 1
-max-request-body-bytes = 65536
 
 [fallback.test_model]
 max-concurrent = 1
-max-request-body-bytes = 65536
 |}
 
 let with_runtime_config toml f =
@@ -494,6 +481,66 @@ let test_lanes_accessor_returns_declared_lanes () =
         (Runtime_lane.id lane)
     | _ -> Alcotest.fail "expected exactly one lane")
 
+(* The order the forecast shows is the order the walk takes: the declared
+   order, demoted only by quota and backpressure. Nothing is remembered from
+   an earlier success, so a lane always starts from its head (#36858). *)
+let test_assignment_walk_order_is_the_declared_order () =
+  with_runtime_config runtime_toml_with_lane (fun () ->
+    let now = Unix.gettimeofday () in
+    match Driver.assignment_walk_order ~now "resilient" with
+    | Error _ -> Alcotest.fail "the lane resolves"
+    | Ok walk ->
+      Alcotest.(check string) "the lane" "resilient" walk.Driver.lane_id;
+      Alcotest.(check (list string)) "as declared"
+        [ "primary.test_model"; "fallback.test_model" ] walk.Driver.declared;
+      Alcotest.(check (list string)) "the walk is the declared order"
+        [ "primary.test_model"; "fallback.test_model" ] walk.Driver.order)
+
+(* A head under 429 backpressure walks behind its sibling. The declaration
+   does not move; only the order does, and it says so (RFC-0457 §3). *)
+let test_assignment_walk_order_demotes_a_resting_head () =
+  with_runtime_config runtime_toml_with_lane (fun () ->
+    let head = Option.get (Runtime.get_runtime_by_id "primary.test_model") in
+    Runtime_candidate_backpressure.note_rate_limit
+      ~candidate:head.Runtime.candidate_backpressure ~retry_after:None;
+    match Driver.assignment_walk_order ~now:(Unix.gettimeofday ()) "resilient" with
+    | Error _ -> Alcotest.fail "the lane resolves"
+    | Ok walk ->
+      Alcotest.(check (list string)) "the declaration is untouched"
+        [ "primary.test_model"; "fallback.test_model" ] walk.Driver.declared;
+      Alcotest.(check (list string)) "the resting head walks last"
+        [ "fallback.test_model"; "primary.test_model" ] walk.Driver.order)
+
+let test_assignment_walk_order_refuses_a_missing_assignment () =
+  with_runtime_config runtime_toml_with_lane (fun () ->
+    match Driver.assignment_walk_order ~now:(Unix.gettimeofday ()) "not.configured" with
+    | Error Driver.Assignment_missing -> ()
+    | Error (Driver.Catalog_unavailable _) -> Alcotest.fail "missing, not unavailable"
+    | Ok _ -> Alcotest.fail "an id that names nothing is refused, not walked")
+
+(* A route is a routing label; the binding a turn opens is the lane's entry
+   candidate. Callers that need a materialized runtime resolve it here rather
+   than handing the label to [get_runtime_by_id], which answers [None] for a
+   lane name. *)
+let test_entry_runtime_id_resolves_a_route_to_the_binding_it_opens () =
+  with_runtime_config runtime_toml_with_lane (fun () ->
+    Alcotest.(check (option string))
+      "a lane name resolves to its first candidate"
+      (Some "primary.test_model")
+      (Runtime.entry_runtime_id_of_route "resilient");
+    Alcotest.(check (option string))
+      "a bare runtime id resolves to itself"
+      (Some "primary.test_model")
+      (Runtime.entry_runtime_id_of_route "primary.test_model");
+    Alcotest.(check (option string))
+      "a name that is neither resolves to nothing"
+      None
+      (Runtime.entry_runtime_id_of_route "no-such-route");
+    Alcotest.(check bool)
+      "the lane name itself names no binding, which is why this exists"
+      true
+      (Option.is_none (Runtime.get_runtime_by_id "resilient")))
+
 let test_resolve_assignment_prefers_lane_over_runtime () =
   with_runtime_config runtime_toml_lane_shadows_runtime (fun () ->
     match Runtime.resolve_assignment "primary.test_model" with
@@ -509,7 +556,7 @@ let test_resolve_assignment_prefers_lane_over_runtime () =
         (Runtime_lane.ordered_candidates lane))
 
 (* A keeper assigned to a bare runtime id used to dispatch without a lane, which
-   turned off failover, sticky candidate preference and quota demotion at once.
+   turned off failover and quota demotion at once.
    It now gets a lane of its own that ends at [runtime].default. *)
 let test_bare_runtime_assignment_gets_a_lane_with_somewhere_to_go () =
   with_runtime_config runtime_toml_with_lane (fun () ->
@@ -619,32 +666,34 @@ streaming = true
 [primary.test_model]
 is-default = true
 max-concurrent = 1
-max-request-body-bytes = 65536
 
 [fallback.test_model]
 max-concurrent = 1
-max-request-body-bytes = 65536
 |}
 
-(* Pins the current assignment contract: [runtime.assignments] targets must be
-   runtime ids, so a keeper can only reach a lane when the lane id shadows a
-   runtime id ([resolve_assignment] prefers lanes on collision). Direct lane
-   assignment also has no pre-dispatch context budget resolution
-   ([resolve_max_context_resolution_for_runtime_id] resolves runtime ids only),
-   so accepting it at load would just move this failure to every turn. *)
-let test_assignment_to_lane_id_rejected_at_load () =
+(* RFC-0457: [runtime.assignments] targets name a declared lane or a runtime.
+   A lane target loads, and the pre-dispatch context budget resolves through
+   the lane's entry binding ([entry_runtime_id_of_route]) — the failure the
+   old contract refused this config for rather than hit at every turn. *)
+let test_assignment_to_lane_id_loads () =
   let path = Filename.temp_file "runtime_failover_lane_assign_" ".toml" in
   write_file path runtime_toml_assignment_to_lane;
   Fun.protect
     ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
     (fun () ->
        match load_list_text ~config_path:path with
-       | Ok _ -> Alcotest.fail "expected load to fail on lane-targeted assignment"
        | Error msg ->
+         Alcotest.failf "a lane-targeted assignment must load: %s" msg
+       | Ok (_runtimes, _default, assignments, _media_failover, lanes) ->
+         Alcotest.(check (option string))
+           "the assignment keeps its lane target" (Some "resilient")
+           (List.assoc_opt "canary" assignments);
          Alcotest.(check bool)
-           "error names the assignment"
+           "the named lane is materialized"
            true
-           (contains ~needle:"[runtime.assignments].canary" msg))
+           (List.exists
+              (fun lane -> String.equal (Runtime_lane.id lane) "resilient")
+              lanes))
 
 let test_unknown_lane_candidate_rejected_at_load () =
   let path = Filename.temp_file "runtime_failover_bad_" ".toml" in
@@ -743,61 +792,6 @@ let test_prior_checkpoint_appends_current_goal_once () =
       "current goal appended exactly once"
       1
       current_goal_count)
-
-let test_deferred_tail_rejects_transformed_invalid_request_cap () =
-  with_runtime_config runtime_toml_with_lane (fun () ->
-    Eio_main.run
-    @@ fun env ->
-    Eio.Switch.run
-    @@ fun sw ->
-    Masc_test_deps.init_eio_clock ~sw env;
-    let transformed_urls = ref [] in
-    let deferred_runtime_lane =
-      Driver.For_testing.make_deferred_runtime_lane
-        ~assignment_id:"resilient"
-        ~failed_runtime_id:"previous.test_model"
-        ~next_runtime_id:"primary.test_model"
-        ~later_runtime_ids:[ "fallback.test_model" ]
-        ~failure:(retryable_network_error "previous cycle failed")
-    in
-    let result =
-      Driver.run_named
-        ~system_prompt:"You are the runtime failover test Keeper."
-        ~runtime_id:"resilient"
-        ~keeper_name:"deferred-request-cap"
-        ~base_path:(Filename.get_temp_dir_name ())
-        ~agent_core_tools:[]
-        ~goal:"prove final provider request admission"
-        ~deferred_runtime_lane
-        ~provider_config_transform:(fun provider_config ->
-          transformed_urls := provider_config.base_url :: !transformed_urls;
-          if String.equal provider_config.base_url "http://127.0.0.1:2"
-          then Ok { provider_config with max_request_body_bytes = Some 0 }
-          else Ok provider_config)
-        ~sw
-        ~net:env#net
-        ()
-    in
-    (match result with
-     | Error
-         (Agent_core.Error.Config
-           (Agent_core.Error.InvalidConfig
-             { field = "max-request-body-bytes"; detail })) ->
-       Alcotest.(check bool)
-         "typed rejection names the deferred tail runtime"
-         true
-         (contains ~needle:"fallback.test_model" detail)
-     | Error error ->
-       Alcotest.failf
-         "expected final request-cap rejection, got %s"
-         (Agent_core.Error.to_string error)
-     | Ok _ ->
-       Alcotest.fail
-         "transformed invalid-cap deferred runtime reached provider execution");
-    Alcotest.(check (list string))
-      "capped next candidate runs, then transformed tail is checked"
-      [ "http://127.0.0.1:1"; "http://127.0.0.1:2" ]
-      (List.rev !transformed_urls))
 
 let test_lane_media_degrade_uses_first_candidate_runtime_id () =
   with_runtime_config runtime_toml_with_lane (fun () ->
@@ -1810,46 +1804,6 @@ let test_media_turn_starts_from_the_live_walk_head () =
               ~first_runtime:assigned
               ~remaining_runtimes:[ text_only ]))))
 
-(* The media walk reaches past the lane, so a winner can be a runtime the lane
-   does not declare. Recording it for the lane erases the last in-lane success
-   and promotes nothing in its place: prefer_order reorders the lane's own
-   candidates, and the winner is in none of them. The next text turn then
-   starts from the declared head again (#34823). *)
-let test_an_out_of_lane_winner_keeps_the_lanes_own_preference () =
-  with_runtime_config runtime_toml_with_lane (fun () ->
-    Runtime_lane_preference.reset_for_testing ();
-    (* An in-lane success the lane is entitled to keep. *)
-    Runtime_lane_preference.note_success ~lane_id:"resilient"
-      ~candidate:"fallback.test_model";
-    let events = ref [] in
-    let result =
-      Driver.For_testing.attempt_runtime_candidates
-        ~lane_id:"resilient"
-        ~runtime_id:"resilient"
-        ~runtime_id_of:(fun runtime_id -> runtime_id)
-        ~emit_runtime_manifest:(emit_manifest_collector events)
-        ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
-          attempt_without_effect (Ok runtime_id) None)
-        [ "media.out_of_lane_model" ]
-    in
-    (match result with
-     | Ok runtime_id ->
-       Alcotest.(check string)
-         "the out-of-lane candidate served the turn"
-         "media.out_of_lane_model"
-         runtime_id
-     | Error error ->
-       Alcotest.failf "expected candidate success, got %s"
-         (Agent_core.Error.to_string error));
-    match Runtime.get_lane_by_id "resilient" with
-    | None -> Alcotest.fail "expected lane 'resilient' to be configured"
-    | Some lane ->
-      Alcotest.(check (list string))
-        "the in-lane success still leads the lane's order"
-        [ "fallback.test_model"; "primary.test_model" ]
-        (Runtime_lane_preference.prefer_order ~lane_id:"resilient"
-           (Runtime_lane.ordered_candidates lane)))
-
 (* RFC-0440 §3: a 402 belongs to the candidate's account, so the walk moves to
    the next candidate in the same turn and does not call the first one again. *)
 let test_attempt_loop_moves_past_payment_required () =
@@ -2429,8 +2383,8 @@ let rate_limit_error_from_a_429 ?(retry_after_header = None) ~body () =
 
 let observed_candidate runtime_id =
   let runtime = Option.get (Runtime.get_runtime_by_id runtime_id) in
-  Runtime_lane_preference.candidate_backpressure
-    ~now:(Unix.gettimeofday ()) ~candidate:runtime.candidate_preference
+  Runtime_candidate_backpressure.candidate_backpressure
+    ~now:(Unix.gettimeofday ()) ~candidate:runtime.candidate_backpressure
 ;;
 
 let backpressure_order runtime_ids =
@@ -2471,8 +2425,8 @@ let test_http_429_preserves_unknown_scope_and_fallback () =
        | Error error -> Alcotest.failf "fallback failed: %s" (Agent_core.Error.to_string error));
       List.iter (fun id ->
         (match observed_candidate id with
-         | Some (Runtime_lane_preference.Unknown_scope_rate_limit { retry_after = None; _ }) -> ()
-         | Some (Runtime_lane_preference.Unknown_scope_rate_limit _) | None ->
+         | Some (Runtime_candidate_backpressure.Unknown_scope_rate_limit { retry_after = None; _ }) -> ()
+         | Some (Runtime_candidate_backpressure.Unknown_scope_rate_limit _) | None ->
            Alcotest.fail "rate limit must retain unknown scope and absent hint");
         let scope = Option.get (Runtime.quota_scope_of_runtime_id id) in
         Alcotest.(check bool) "no credential quota inferred" false
@@ -2488,7 +2442,7 @@ let test_rate_limit_order_never_excludes_and_success_clears () =
     let ids = ["shared_a.test_model"; "shared_b.test_model"] in
     List.iter (fun id ->
       let runtime = Option.get (Runtime.get_runtime_by_id id) in
-      Runtime_lane_preference.note_rate_limit ~candidate:runtime.candidate_preference
+      Runtime_candidate_backpressure.note_rate_limit ~candidate:runtime.candidate_backpressure
         ~retry_after:(Some 300.)) ids;
     Alcotest.(check (list string)) "all observed candidates remain in declared order"
       ids (backpressure_order ids);
@@ -2508,24 +2462,23 @@ let test_rate_limit_order_never_excludes_and_success_clears () =
     Alcotest.(check bool) "success clears even an unexpired hint" true
       (Option.is_none (observed_candidate "shared_b.test_model"));
     match observed_candidate "shared_a.test_model" with
-    | Some (Runtime_lane_preference.Unknown_scope_rate_limit { retry_after = Some seconds; _ }) ->
+    | Some (Runtime_candidate_backpressure.Unknown_scope_rate_limit { retry_after = Some seconds; _ }) ->
         Alcotest.(check (float 0.)) "actual HTTP header survives driver ingress" 300. seconds
-    | Some (Runtime_lane_preference.Unknown_scope_rate_limit _) | None ->
+    | Some (Runtime_candidate_backpressure.Unknown_scope_rate_limit _) | None ->
         Alcotest.fail "actual Retry-After hint was lost")
 ;;
 
 let quota_lane_candidate id =
-  (Option.get (Runtime.get_runtime_by_id id)).Runtime.candidate_preference
+  (Option.get (Runtime.get_runtime_by_id id)).Runtime.candidate_backpressure
 ;;
 
 (* Every quota_lane path starts serving: no candidate observation, no quota
-   window, no sticky preference. *)
+   window. *)
 let reset_quota_lane_rests () =
   Runtime_quota_window.reset_for_testing ();
-  Runtime_lane_preference.reset_for_testing ();
   List.iter
     (fun id ->
-       Runtime_lane_preference.note_candidate_success ~candidate:(quota_lane_candidate id))
+       Runtime_candidate_backpressure.note_candidate_success ~candidate:(quota_lane_candidate id))
     [ "shared_a.test_model"; "shared_b.test_model"; "other.test_model" ]
 ;;
 
@@ -2562,9 +2515,9 @@ let test_a_deferred_suffix_waits_only_while_its_walk_head_rests () =
     Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
       reset_quota_lane_rests ();
       let now = Unix.gettimeofday () in
-      Runtime_lane_preference.note_rate_limit
+      Runtime_candidate_backpressure.note_rate_limit
         ~candidate:(quota_lane_candidate "shared_a.test_model") ~retry_after:(Some 300.);
-      Runtime_lane_preference.note_rate_limit
+      Runtime_candidate_backpressure.note_rate_limit
         ~candidate:(quota_lane_candidate "shared_b.test_model") ~retry_after:(Some 120.);
       let describe = function
         | Driver.Walk_head_serving { runtime_id } -> "serving " ^ runtime_id
@@ -2588,9 +2541,9 @@ let test_a_deferred_suffix_waits_only_while_its_walk_head_rests () =
       (* An unstated rest ends the wait but not the demotion, so the walk keeps
          that path behind the resting head: waiting for its shorter release
          would dispatch the head while it still rests. *)
-      Runtime_lane_preference.note_candidate_success
+      Runtime_candidate_backpressure.note_candidate_success
         ~candidate:(quota_lane_candidate "shared_b.test_model");
-      Runtime_lane_preference.note_rate_limit
+      Runtime_candidate_backpressure.note_rate_limit
         ~candidate:(quota_lane_candidate "shared_b.test_model") ~retry_after:None;
       Alcotest.(check string) "an unstated rest behind the head does not shorten the wait"
         "resting shared_a.test_model for 300s"
@@ -2644,9 +2597,9 @@ let test_a_failure_without_a_suffix_waits_until_a_fresh_walk_head_serves () =
       Alcotest.(check string) "a serving fresh walk head waits only for the failed path"
         (Printf.sprintf "wait %.0fs for quota_lane (path)" floor_sec)
         (decide ());
-      Runtime_lane_preference.note_rate_limit
+      Runtime_candidate_backpressure.note_rate_limit
         ~candidate:(quota_lane_candidate "shared_a.test_model") ~retry_after:(Some 600.);
-      Runtime_lane_preference.note_rate_limit
+      Runtime_candidate_backpressure.note_rate_limit
         ~candidate:(quota_lane_candidate "shared_b.test_model") ~retry_after:None;
       Runtime_quota_window.note_exhausted
         ~scope:(Option.get (Runtime.quota_scope_of_runtime_id "other.test_model"))
@@ -2665,7 +2618,7 @@ let test_a_chat_retry_follows_the_shared_next_dispatch () =
     Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
       reset_quota_lane_rests ();
       let now = Unix.gettimeofday () in
-      Runtime_lane_preference.note_rate_limit
+      Runtime_candidate_backpressure.note_rate_limit
         ~candidate:(quota_lane_candidate "shared_a.test_model") ~retry_after:(Some 300.);
       let not_before lane =
         match Masc.Keeper_direct_runtime_continuation.For_testing.retry_not_before ~now lane with
@@ -2706,7 +2659,7 @@ let test_rate_limit_candidate_survives_unchanged_reload_only () =
       let result = Driver.For_testing.attempt_runtime_candidates
         ~runtime_id:"quota_lane" ~runtime_id_of:(fun (rt : Runtime.t) -> rt.id)
         ~quota_scope_of:(fun rt -> Some (Runtime.quota_scope_of_runtime rt))
-        ~candidate_preference_of:(fun (rt : Runtime.t) -> Some rt.candidate_preference)
+        ~candidate_backpressure_of:(fun (rt : Runtime.t) -> Some rt.candidate_backpressure)
         ~candidate_dispatchable:(fun _ -> true)
         ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
         ~run_attempt:(fun ~idx:_ ~runtime_id:_ _ ->
@@ -2731,8 +2684,8 @@ let test_rate_limit_candidate_survives_unchanged_reload_only () =
     attempt old (fun () -> reload_runtime_config
       (runtime_toml_quota_lane_with_shared_credential "REBOUND_QUOTA_TEST_KEY"));
     Alcotest.(check bool) "old response remains on old frozen binding" true
-      (Option.is_some (Runtime_lane_preference.candidate_backpressure
-        ~now:(Unix.gettimeofday ()) ~candidate:old.candidate_preference));
+      (Option.is_some (Runtime_candidate_backpressure.candidate_backpressure
+        ~now:(Unix.gettimeofday ()) ~candidate:old.candidate_backpressure));
     Alcotest.(check bool) "replacement does not inherit old response" true
       (Option.is_none (observed_candidate "shared_a.test_model"));
     Alcotest.(check (list string)) "replacement starts in declared order"
@@ -2753,7 +2706,7 @@ let test_rate_limit_credential_rotation_under_same_reference () =
         let result = Driver.For_testing.attempt_runtime_candidates
           ~runtime_id:"quota_lane" ~runtime_id_of:(fun (rt : Runtime.t) -> rt.id)
           ~quota_scope_of:(fun rt -> Some (Runtime.quota_scope_of_runtime rt))
-          ~candidate_preference_of:(fun (rt : Runtime.t) -> Some rt.candidate_preference)
+          ~candidate_backpressure_of:(fun (rt : Runtime.t) -> Some rt.candidate_backpressure)
           ~candidate_dispatchable:(fun _ -> true)
           ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
           ~run_attempt:(fun ~idx:_ ~runtime_id:_ _ ->
@@ -2765,8 +2718,8 @@ let test_rate_limit_credential_rotation_under_same_reference () =
          | Error (Agent_core.Error.Api (Llm_provider.Retry.RateLimited _)) -> ()
          | Error _ | Ok _ -> Alcotest.fail "expected actual transport rate limit");
         Alcotest.(check bool) "old observation stays attached to dispatched value" true
-          (Option.is_some (Runtime_lane_preference.candidate_backpressure
-            ~now:(Unix.gettimeofday ()) ~candidate:old.candidate_preference));
+          (Option.is_some (Runtime_candidate_backpressure.candidate_backpressure
+            ~now:(Unix.gettimeofday ()) ~candidate:old.candidate_backpressure));
         Alcotest.(check bool) "same reference with new resolved credential has no old observation" true
           (Option.is_none (observed_candidate "shared_a.test_model"))))
 ;;
@@ -2992,34 +2945,32 @@ let test_official_client_does_not_inherit_registry_api_key_scope () =
               ~scope:registry_api_key_scope
               ~now:100.0)))
 
-let test_attempt_loop_without_lane_id_does_not_update_sticky_preference () =
-  Runtime_lane_preference.reset_for_testing ();
-  let events = ref [] in
-  let result =
-    Driver.For_testing.attempt_runtime_candidates
-      ~runtime_id:"resilient"
-      ~runtime_id_of:(fun runtime_id -> runtime_id)
-      ~emit_runtime_manifest:(emit_manifest_collector events)
-      ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
-        attempt_without_effect (Ok runtime_id) None)
-      [ "media.fallback_model" ]
-  in
-  (match result with
-   | Ok runtime_id ->
-     Alcotest.(check string)
-       "rerouted candidate can still serve turn"
-       "media.fallback_model"
-       runtime_id
-   | Error e ->
-     Alcotest.failf
-       "expected candidate success, got %s"
-       (Agent_core.Error.to_string e));
-  Alcotest.(check (list string))
-    "lane preference remains declared order without lane id"
-    [ "primary.text_model"; "media.fallback_model" ]
-    (Runtime_lane_preference.prefer_order
-       ~lane_id:"resilient"
-       [ "primary.text_model"; "media.fallback_model" ])
+(* A success leaves no trace on the walk: the next assignment_walk_order is
+   the declared order whichever candidate served the previous turn. *)
+let test_a_success_leaves_the_next_walk_declared () =
+  with_runtime_config runtime_toml_with_lane (fun () ->
+    let events = ref [] in
+    let result =
+      Driver.For_testing.attempt_runtime_candidates
+        ~runtime_id:"resilient"
+        ~runtime_id_of:(fun runtime_id -> runtime_id)
+        ~emit_runtime_manifest:(emit_manifest_collector events)
+        ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
+          attempt_without_effect (Ok runtime_id) None)
+        [ "fallback.test_model" ]
+    in
+    (match result with
+     | Ok runtime_id ->
+       Alcotest.(check string) "the fallback served the turn"
+         "fallback.test_model" runtime_id
+     | Error e ->
+       Alcotest.failf "expected candidate success, got %s"
+         (Agent_core.Error.to_string e));
+    match Driver.assignment_walk_order ~now:(Unix.gettimeofday ()) "resilient" with
+    | Error _ -> Alcotest.fail "the lane resolves"
+    | Ok walk ->
+      Alcotest.(check (list string)) "the next walk starts from the declared head"
+        [ "primary.test_model"; "fallback.test_model" ] walk.Driver.order)
 
 let test_typed_checkpoint_is_the_same_run_retry_authority () =
   let stages =
@@ -3553,15 +3504,12 @@ streaming = true
 [ollama_cloud.ollama-cloud-flash]
 is-default = true
 max-concurrent = 1
-max-request-body-bytes = 65536
 
 [glm_coding.flash]
 max-concurrent = 1
-max-request-body-bytes = 65536
 
 [glm_coding.plus]
 max-concurrent = 1
-max-request-body-bytes = 65536
 |}
 
 let test_registry_identity_is_the_served_name_not_the_model_id () =
@@ -4060,6 +4008,22 @@ let () =
             `Quick
             test_resolve_assignment_prefers_lane_over_runtime;
           Alcotest.test_case
+            "assignment_walk_order is the declared order"
+            `Quick
+            test_assignment_walk_order_is_the_declared_order;
+          Alcotest.test_case
+            "assignment_walk_order demotes a resting head"
+            `Quick
+            test_assignment_walk_order_demotes_a_resting_head;
+          Alcotest.test_case
+            "assignment_walk_order refuses a missing assignment"
+            `Quick
+            test_assignment_walk_order_refuses_a_missing_assignment;
+          Alcotest.test_case
+            "entry_runtime_id_of_route resolves a route to the binding it opens"
+            `Quick
+            test_entry_runtime_id_resolves_a_route_to_the_binding_it_opens;
+          Alcotest.test_case
             "a bare runtime assignment gets a lane with somewhere to go"
             `Quick
             test_bare_runtime_assignment_gets_a_lane_with_somewhere_to_go;
@@ -4076,9 +4040,9 @@ let () =
             `Quick
             test_unknown_lane_candidate_rejected_at_load;
           Alcotest.test_case
-            "assignment to lane id rejected at load"
+            "assignment to lane id loads"
             `Quick
-            test_assignment_to_lane_id_rejected_at_load;
+            test_assignment_to_lane_id_loads;
           Alcotest.test_case
             "lane media degrade uses first candidate runtime id"
             `Quick
@@ -4136,10 +4100,6 @@ let () =
             `Quick
             test_attempt_loop_moves_past_payment_required;
           Alcotest.test_case
-            "an out-of-lane winner keeps the lane's own preference"
-            `Quick
-            test_an_out_of_lane_winner_keeps_the_lanes_own_preference;
-          Alcotest.test_case
             "runtime dedupe preserves first occurrence"
             `Quick
             test_runtime_dedupe_preserves_first_occurrence;
@@ -4151,10 +4111,6 @@ let () =
             "prior checkpoint appends current goal once"
             `Quick
             test_prior_checkpoint_appends_current_goal_once;
-          Alcotest.test_case
-            "deferred tail rejects transformed invalid request cap"
-            `Quick
-            test_deferred_tail_rejects_transformed_invalid_request_cap;
           Alcotest.test_case
             "attempt loop stops on nonretryable failure"
             `Quick
@@ -4236,9 +4192,9 @@ let () =
             `Quick
             test_official_client_does_not_inherit_registry_api_key_scope;
           Alcotest.test_case
-            "attempt loop without lane id does not update sticky preference"
+            "a success leaves the next walk declared"
             `Quick
-            test_attempt_loop_without_lane_id_does_not_update_sticky_preference;
+            test_a_success_leaves_the_next_walk_declared;
           Alcotest.test_case
             "typed checkpoint is same-run retry authority"
             `Quick

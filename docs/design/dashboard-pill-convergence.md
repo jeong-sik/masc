@@ -10,8 +10,8 @@ Related: `docs/design/keeper-v2-v12-gap-current.md`, keeper-v2 design ("v2" proj
 The keeper-v2 gap analysis (2026-06-20) found the design's central primitive thesis — **one `<Pill>`
 with a tone + a few variants** — unimplemented in the dashboard. Three competing badge primitives
 coexist in `common/` with divergent tone enums, and ~66 forked `*Pill/*Badge/*Chip` definitions live
-across feature components, including **two distinct same-named `StatusPill`** (`feature-health.ts`,
-`harness-health-sections.ts`). Every keeper-v2 surface port re-rolls these atoms, so the divergence
+across feature components, including **two distinct same-named `StatusPill`** (`feature-health.ts`
+— removed 2026-09-16 in #36813 — and `harness-health-sections.ts`). Every keeper-v2 surface port re-rolls these atoms, so the divergence
 compounds. This doc defines the converged `<Pill>` and the migration policy.
 
 Why a doc and not an RFC: this is an additive, test-guarded design-system convergence with no

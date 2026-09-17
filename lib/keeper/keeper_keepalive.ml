@@ -982,7 +982,19 @@ let rec start_keepalive
     let lane_parent_sw =
       match Eio_context.get_root_switch_opt () with
       | Some root_sw -> root_sw
-      | None -> ctx.sw
+      | None ->
+        (* #26622/#26587: no server root switch is installed, so this call
+           is trusting [ctx.sw] to already be a switch that outlives the
+           lane -- true for standalone/test bootstrap, a bug for any other
+           caller. Nothing here can tell the two apart by type, so make the
+           substitution observable instead of silent. *)
+        Log.Keeper.warn
+          "%s: start_keepalive has no server root switch installed; using \
+           ctx.sw as the lane's parent switch. This is expected only for \
+           standalone/test bootstrap -- any other caller has a switch that \
+           does not outlive the lane."
+          m.name;
+        ctx.sw
     in
   let lifecycle_state =
     Keeper_lifecycle_admission.state

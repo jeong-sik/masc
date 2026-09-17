@@ -34,7 +34,6 @@ type catalog_fixture =
   ; serving_constraint : bool
   ; serving_accepted_through_tokens : int
   ; serving_rejected_from_tokens : int
-  ; max_request_body_bytes : int option
   ; model_id : string
   ; anthropic_thinking_control : string option
   ; enable_thinking : bool option
@@ -45,7 +44,6 @@ let catalog_entry
       ?(serving_constraint = false)
       ?(serving_accepted_through_tokens = 524298)
       ?(serving_rejected_from_tokens = 524299)
-      ?max_request_body_bytes
       ?(kind = "openai_compat")
       ?(request_path = "/v1/chat/completions")
       ?(api_key_env = "")
@@ -69,7 +67,6 @@ let catalog_entry
   ; serving_constraint
   ; serving_accepted_through_tokens
   ; serving_rejected_from_tokens
-  ; max_request_body_bytes
   ; model_id = Option.value model_id ~default:(id ^ "-model")
   ; anthropic_thinking_control
   ; enable_thinking
@@ -83,9 +80,6 @@ let catalog_fixture_toml entry =
     (match entry.body_timeout_s with
      | None -> ""
      | Some seconds -> Printf.sprintf "body_timeout_s = %.17g\n" seconds)
-    ^ (match entry.max_request_body_bytes with
-       | None -> ""
-       | Some bytes -> Printf.sprintf "max_request_body_bytes = %d\n" bytes)
     ^
     match entry.enable_thinking with
     | None -> ""
@@ -1376,81 +1370,6 @@ let test_unmeasured_constraint_advances_only_after_durable_settlement () =
   | Error _ -> fail "durably settled admission rejection did not reach its successor"
 ;;
 
-let test_request_body_capacity_advances_only_after_durable_settlement () =
-  let (result, transition), posts =
-    with_counted_server
-      ~measurement_reply:(Measurement_tokens 1)
-      ~response:(openai_response {|{"name":"accepted"}|})
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
-    with_catalog
-      [ catalog_entry
-          ~max_request_body_bytes:1
-          ~id:"body-capped"
-          ~base_url
-          ~native:true
-          ~json:true
-          ()
-      ; catalog_entry ~id:"body-successor" ~base_url ~native:true ~json:true ()
-      ]
-    @@ fun snapshot ->
-    let transition = ref None in
-    let result =
-      execute_with_accepting_test_validator
-        ~net
-        ~on_measurement_terminal:(fun _ -> Ok ())
-        ~before_measurement_dispatch:(fun _ -> Ok ())
-        ~before_dispatch:(fun _ -> Ok ())
-        ~before_advance:(fun ~failed ~next ->
-          match failed with
-          | EO.Flow_candidate_rejected rejection ->
-            let actual_bytes, limit_bytes =
-              match EO.candidate_rejection_disposition rejection with
-              | EO.Input_capacity
-                  (EO.Serialized_request_body_too_large { actual_bytes; limit_bytes }) ->
-                actual_bytes, limit_bytes
-              | _ -> fail "request-body rejection lost its neutral disposition"
-            in
-            check bool "serialized body exceeds the exact cap" true (actual_bytes > 1);
-            check int "declared cap remains exact" 1 limit_bytes;
-            check
-              bool
-              "body cap starts no measurement wire"
-              true
-              (EO.candidate_rejection_measurement_dispatch_fact rejection
-               = EO.No_measurement_dispatch);
-            check
-              bool
-              "body cap remains a typed local rejection"
-              true
-              (EO.candidate_rejection_measurement_outcome rejection
-               = EO.Measurement_local_invalid);
-            transition
-            := Some
-                 ( (EO.candidate_rejection_identity rejection).candidate_id
-                 , next.identity.candidate_id );
-            Ok ()
-          | _ -> fail "request-body rejection lost its typed durable transition")
-        (start_flow (frozen_flow snapshot [ "body-capped"; "body-successor" ]))
-    in
-    result, !transition
-  in
-  check int "body cap starts no measurement wire" 0 posts.measurement_posts;
-  check int "only body-cap successor generates" 1 posts.generation_posts;
-  check
-    (option (pair string string))
-    "request-body transition is explicit"
-    (Some ("body-capped", "body-successor"))
-    transition;
-  match result with
-  | Ok success ->
-    check
-      string
-      "body-cap successor succeeds"
-      "body-successor"
-      (candidate_id (EO.flow_success_candidate success))
-  | Error _ -> fail "durably settled body-cap rejection did not reach its successor"
-;;
-
 let test_request_body_projection_is_exact_and_credential_free () =
   let id = "body-projection" in
   let base_url = "https://projection.invalid" in
@@ -1459,18 +1378,10 @@ let test_request_body_projection_is_exact_and_credential_free () =
     EO.make_output_requirement ~schema ~minimum_guarantee:EO.Provider_schema
   in
   let messages = [ msg "measure the exact provider request body" ] in
-  let project ?max_request_body_bytes () =
+  let project () =
     with_catalog
       ~getenv:credential_getenv
-      [ catalog_entry
-          ?max_request_body_bytes
-          ~api_key_env
-          ~id
-          ~base_url
-          ~native:true
-          ~json:true
-          ()
-      ]
+      [ catalog_entry ~api_key_env ~id ~base_url ~native:true ~json:true () ]
     @@ fun snapshot ->
     let target = admitted_target snapshot id in
     let projection =
@@ -1483,49 +1394,23 @@ let test_request_body_projection_is_exact_and_credential_free () =
      | Ok _ -> fail "fixture did not retain its missing credential");
     projection
   in
-  let uncapped = project () in
-  check bool "uncapped body projection is finite" true (uncapped.actual_bytes > 0);
-  check (option int) "uncapped target preserves no limit" None uncapped.limit_bytes;
-  check bool "uncapped projection fits" true uncapped.within_limit;
-  let exact = project ~max_request_body_bytes:uncapped.actual_bytes () in
-  check
-    int
-    "declared cap does not change body bytes"
-    uncapped.actual_bytes
-    exact.actual_bytes;
-  check
-    (option int)
-    "exact cap is preserved"
-    (Some uncapped.actual_bytes)
-    exact.limit_bytes;
-  check bool "exact boundary fits" true exact.within_limit;
-  let rejected = project ~max_request_body_bytes:(uncapped.actual_bytes - 1) () in
-  check
-    int
-    "over-limit projection returns the same exact body bytes"
-    uncapped.actual_bytes
-    rejected.actual_bytes;
-  check
-    (option int)
-    "over-limit projection preserves the exact cap"
-    (Some (uncapped.actual_bytes - 1))
-    rejected.limit_bytes;
-  check bool "limit minus one is rejected" false rejected.within_limit
+  let projection = project () in
+  check bool "body projection is finite" true (projection.actual_bytes > 0);
+  check int "the projection is the same bytes on every read" projection.actual_bytes (project ()).actual_bytes
 ;;
 
-let test_measured_token_and_body_capacity_are_independent () =
+let test_measured_token_capacity_admits_and_rejects () =
   let large_input = String.make 65536 'x' in
   let response =
     {|{"id":"msg-flow","type":"message","role":"assistant","model":"flow","content":[{"type":"text","text":"{\"name\":\"accepted\"}"}],"stop_reason":"end_turn","usage":{"input_tokens":2,"output_tokens":1}}|}
   in
   let cases =
-    [ "low-token large-byte success", 2, 100000, `Success
-    ; "token boundary rejection", 3, 100000, `Token_rejected
-    ; "serialized byte rejection", 2, 1, `Body_rejected
+    [ "low-token large-byte success", 2, `Success
+    ; "token boundary rejection", 3, `Token_rejected
     ]
   in
   List.iter
-    (fun (label, measured_tokens, max_request_body_bytes, expected) ->
+    (fun (label, measured_tokens, expected) ->
        let (result, evidence), posts =
          with_counted_server
            ~measurement_reply:(Measurement_tokens measured_tokens)
@@ -1538,7 +1423,6 @@ let test_measured_token_and_body_capacity_are_independent () =
                ~serving_constraint:true
                ~serving_accepted_through_tokens:2
                ~serving_rejected_from_tokens:3
-               ~max_request_body_bytes
                ~id:"measured-capacity"
                ~base_url
                ~native:true
@@ -1604,25 +1488,9 @@ let test_measured_token_and_body_capacity_are_independent () =
            (EO.candidate_rejection_measurement_outcome rejection
             = EO.Measurement_succeeded);
          check int (label ^ " fabricates no attempt") 0 (List.length evidence.attempts)
-       | `Body_rejected, Error (EO.Flow_candidates_exhausted { rejection; _ }) ->
-         (match EO.candidate_rejection_disposition rejection with
-          | EO.Input_capacity
-              (EO.Serialized_request_body_too_large { actual_bytes; limit_bytes = 1 }) ->
-            check bool (label ^ " measures final bytes") true (actual_bytes > 1)
-          | _ -> fail (label ^ " lost its typed byte-capacity rejection"));
-         check int (label ^ " measurement dispatches") 0 posts.measurement_posts;
-         check int (label ^ " generation dispatches") 0 posts.generation_posts;
-         check
-           bool
-           (label ^ " records local preflight rejection")
-           true
-           (EO.candidate_rejection_measurement_outcome rejection
-            = EO.Measurement_local_invalid);
-         check int (label ^ " fabricates no attempt") 0 (List.length evidence.attempts)
        | `Success, Error _ -> fail (label ^ " did not admit")
-       | (`Token_rejected | `Body_rejected), Ok _ -> fail (label ^ " dispatched")
-       | (`Token_rejected | `Body_rejected), Error _ ->
-         fail (label ^ " returned the wrong terminal error"))
+       | `Token_rejected, Ok _ -> fail (label ^ " dispatched")
+       | `Token_rejected, Error _ -> fail (label ^ " returned the wrong terminal error"))
     cases
 ;;
 
@@ -2947,7 +2815,7 @@ let test_all_candidate_rejections_return_typed_zero_dispatch_terminal () =
           ~json:true
           ()
       ; catalog_entry
-          ~max_request_body_bytes:1
+          ~serving_constraint:true
           ~id:"rejected-b"
           ~base_url
           ~native:true
@@ -3020,10 +2888,8 @@ let test_all_candidate_rejections_return_typed_zero_dispatch_terminal () =
       "rejected-b"
       (EO.candidate_rejection_identity rejection).candidate_id;
     (match EO.candidate_rejection_disposition rejection with
-     | EO.Input_capacity
-         (EO.Serialized_request_body_too_large { actual_bytes; limit_bytes }) ->
-       check bool "terminal body remains over cap" true (actual_bytes > limit_bytes)
-     | _ -> fail "terminal admission receipt lost its neutral body-cap disposition");
+     | EO.Input_capacity _ -> ()
+     | _ -> fail "terminal admission receipt lost its neutral capacity disposition");
     check int "terminal retains zero attempts" 0 (List.length terminal_evidence.attempts);
     check
       int
@@ -4263,17 +4129,13 @@ let () =
             `Quick
             test_unmeasured_constraint_advances_only_after_durable_settlement
         ; test_case
-            "request body cap advances after durable settlement"
-            `Quick
-            test_request_body_capacity_advances_only_after_durable_settlement
-        ; test_case
             "request body projection is exact and credential-free"
             `Quick
             test_request_body_projection_is_exact_and_credential_free
         ; test_case
-            "measured token and serialized body capacities are independent"
+            "measured token capacity admits and rejects"
             `Quick
-            test_measured_token_and_body_capacity_are_independent
+            test_measured_token_capacity_admits_and_rejects
         ; test_case
             "measurement receipt codec and monotonic transition"
             `Quick

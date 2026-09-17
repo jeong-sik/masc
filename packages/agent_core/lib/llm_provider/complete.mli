@@ -63,8 +63,8 @@ val prepare_request
     provider-native token-measurement round-trip. [stream = true] includes every
     transport-owned stream-field injection. The returned immutable artifact
     freezes the codec, body bytes, and digest consumed by a later admitted
-    built-in HTTP dispatch. The check is pure and returns the same typed
-    [Request_body_too_large] failure as final HTTP dispatch. *)
+    built-in HTTP dispatch. The check is pure; the body is the provider's to
+    accept or refuse. *)
 val admit_request_body
   :  stream:bool
   -> prepared_request
@@ -136,10 +136,8 @@ val admitted_fit : admitted_request -> context_fit
     send and return metadata only. Streaming inspection includes every
     transport-owned field injection such as [stream_options.include_usage].
 
-    The function performs no network I/O and does not apply
-    [Provider_config.max_request_body_bytes]; callers may use [body_bytes] to
-    project an input before the authoritative final admission check. All other
-    request validation remains active. The request body, headers, prompts, and
+    The function performs no network I/O; callers may use [body_bytes] to
+    project an input. All other request validation remains active. The request body, headers, prompts, and
     tool arguments are not returned. *)
 val inspect_serialized_request
   :  stream:bool

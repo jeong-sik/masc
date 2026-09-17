@@ -3858,7 +3858,11 @@ let launch_code_entries_load state ~mailbox =
       in
       match Eio_context.get_switch_opt () with
       | Some sw ->
-          Eio.Fiber.fork_daemon ~sw (fun () ->
+          Masc_tui_fork_guard.launch ~sw
+            ~on_sync_failure:(fun detail ->
+                enqueue_async mailbox
+                  (Code_entries_loaded (request, Error detail)))
+            (fun () ->
               run ();
               `Stop_daemon)
       | None ->
@@ -4732,7 +4736,11 @@ let launch_connectors_load state ~mailbox =
     in
     match Eio_context.get_switch_opt () with
     | Some sw ->
-        Eio.Fiber.fork_daemon ~sw (fun () ->
+        Masc_tui_fork_guard.launch ~sw
+          ~on_sync_failure:(fun detail ->
+              state.connectors_inflight <- false;
+              enqueue_async mailbox (Connectors_loaded (Error detail)))
+          (fun () ->
             run ();
             `Stop_daemon)
     | None ->
@@ -5082,7 +5090,11 @@ let launch_repositories_load state ~mailbox =
     in
     match Eio_context.get_switch_opt () with
     | Some sw ->
-        Eio.Fiber.fork_daemon ~sw (fun () ->
+        Masc_tui_fork_guard.launch ~sw
+          ~on_sync_failure:(fun detail ->
+              state.repositories_inflight <- false;
+              enqueue_async mailbox (Repositories_loaded (Error detail)))
+          (fun () ->
             run ();
             `Stop_daemon)
     | None ->
@@ -5107,7 +5119,11 @@ let launch_memory_health_load state ~mailbox =
     in
     match Eio_context.get_switch_opt () with
     | Some sw ->
-        Eio.Fiber.fork_daemon ~sw (fun () ->
+        Masc_tui_fork_guard.launch ~sw
+          ~on_sync_failure:(fun detail ->
+              state.memory_health_inflight <- false;
+              enqueue_async mailbox (Memory_loaded (Error detail)))
+          (fun () ->
             run ();
             `Stop_daemon)
     | None ->
@@ -5695,7 +5711,11 @@ let launch_harness_load state ~mailbox =
     in
     match Eio_context.get_switch_opt () with
     | Some sw ->
-        Eio.Fiber.fork_daemon ~sw (fun () ->
+        Masc_tui_fork_guard.launch ~sw
+          ~on_sync_failure:(fun detail ->
+              state.harness_inflight <- false;
+              enqueue_async mailbox (Harness_loaded (Error detail)))
+          (fun () ->
             run ();
             `Stop_daemon)
     | None ->
@@ -5812,7 +5832,11 @@ let launch_keeper_lanes_load state ~mailbox =
     in
     match Eio_context.get_switch_opt () with
     | Some sw ->
-        Eio.Fiber.fork_daemon ~sw (fun () ->
+        Masc_tui_fork_guard.launch ~sw
+          ~on_sync_failure:(fun detail ->
+              state.keeper_lanes_inflight <- false;
+              enqueue_async mailbox (Lanes_loaded (Error detail)))
+          (fun () ->
             run ();
             `Stop_daemon)
     | None ->
@@ -5839,7 +5863,12 @@ let launch_lanes_load state ~mailbox =
     in
     match Eio_context.get_switch_opt () with
     | Some sw ->
-        Eio.Fiber.fork_daemon ~sw (fun () ->
+        Masc_tui_fork_guard.launch ~sw
+          ~on_sync_failure:(fun detail ->
+              state.standalone_lanes_inflight <- false;
+              enqueue_async mailbox
+                (Standalone_lanes_loaded (standalone_generation, Error detail)))
+          (fun () ->
             run ();
             `Stop_daemon)
     | None ->
@@ -5866,7 +5895,14 @@ let launch_clients_load state ~mailbox =
       enqueue_async mailbox (Clients_loaded (generation, result))
     in
     match Eio_context.get_switch_opt () with
-    | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+    | Some sw ->
+        Masc_tui_fork_guard.launch ~sw
+          ~on_sync_failure:(fun detail ->
+              state.clients_surface_inflight <- false;
+              enqueue_async mailbox (Clients_loaded (generation, Error detail)))
+          (fun () ->
+            run ();
+            `Stop_daemon)
     | None ->
         state.clients_surface_inflight <- false;
         enqueue_async mailbox
@@ -5972,7 +6008,11 @@ let launch_verification_load state ~mailbox =
     in
     match Eio_context.get_switch_opt () with
     | Some sw ->
-        Eio.Fiber.fork_daemon ~sw (fun () ->
+        Masc_tui_fork_guard.launch ~sw
+          ~on_sync_failure:(fun detail ->
+              state.verification_inflight <- false;
+              enqueue_async mailbox (Verification_loaded (Error detail)))
+          (fun () ->
             run ();
             `Stop_daemon)
     | None ->

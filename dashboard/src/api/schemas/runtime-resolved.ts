@@ -42,25 +42,12 @@ const RuntimeResolutionSchema = object({
   max_output_tokens: nullable(number()),
   is_local: boolean(),
   is_default: boolean(),
-  // masc#28404: a runtime can be declared, materialized, and listed here while
-  // being impossible to assign to a keeper (an Agent_core binding with no
-  // positive max-request-body-bytes). Boot validation judges only routes that
-  // are already reachable, so this state used to be visible nowhere — the
-  // operator saw the runtime in this list and learned it was blocked only by
-  // assigning it. `keeper_dispatch_blocked_reason` is null exactly when
-  // `keeper_dispatchable` is true.
-  keeper_dispatchable: boolean(),
-  keeper_dispatch_blocked_reason: nullable(string()),
 })
 
 const RuntimeLaneSchema = object({
   id: string(),
+  // The lane as declared, head first: the order a fresh cycle walks.
   runtime_ids: array(string()),
-  // Sticky failover preference (Runtime_lane_preference): the last-good
-  // candidate the lane tries first, plus when it was recorded (epoch seconds).
-  // Both null when nothing is remembered or the entry expired.
-  preferred_candidate: nullable(string()),
-  preferred_at_ts: nullable(number()),
 })
 
 const ResolvedAssignmentTargetSchema = union([

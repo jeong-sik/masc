@@ -231,26 +231,22 @@ function makeRuntimeResolved(
       id: 'rt-a', provider: 'P', model: 'm1',
       effective_max_context: 128000, max_context_source: 'override',
       max_output_tokens: null, is_local: false, is_default: true,
-      keeper_dispatchable: true, keeper_dispatch_blocked_reason: null,
     },
     runtimes: [
       {
         id: 'rt-a', provider: 'P', model: 'm1',
         effective_max_context: 128000, max_context_source: 'override',
         max_output_tokens: null, is_local: false, is_default: true,
-        keeper_dispatchable: true, keeper_dispatch_blocked_reason: null,
       },
       {
         id: 'rt-b', provider: 'P', model: 'm2',
         effective_max_context: 128000, max_context_source: 'override',
         max_output_tokens: null, is_local: false, is_default: false,
-        keeper_dispatchable: true, keeper_dispatch_blocked_reason: null,
       },
       {
         id: 'rt-c', provider: 'P', model: 'm3',
         effective_max_context: 128000, max_context_source: 'override',
         max_output_tokens: null, is_local: false, is_default: false,
-        keeper_dispatchable: true, keeper_dispatch_blocked_reason: null,
       },
     ],
     lanes: [],
@@ -1390,14 +1386,10 @@ describe('SettingsSurface', () => {
         {
           id: 'default',
           runtime_ids: ['rt-a', 'rt-b'],
-          preferred_candidate: 'rt-b',
-          preferred_at_ts: 1750000000,
         },
         {
           id: 'vision',
           runtime_ids: ['rt-c'],
-          preferred_candidate: null,
-          preferred_at_ts: null,
         },
       ],
     }))
@@ -1416,11 +1408,6 @@ describe('SettingsSurface', () => {
     expect(cands.map(c => c.querySelector('.rt-fo-id')?.textContent)).toEqual(['rt-a', 'rt-b'])
     expect(cands.map(c => c.classList.contains('head'))).toEqual([true, false])
     expect(cands[0]!.querySelector('.rt-fo-rank')?.textContent).toBe('1차')
-    expect(laneDefault.querySelector('[data-testid="runtime-lane-default-sticky"]')?.textContent)
-      .toContain('sticky → rt-b')
-
-    const laneVision = container.querySelector('[data-testid="runtime-lane-vision"]') as HTMLElement
-    expect(laneVision.querySelector('[data-testid="runtime-lane-vision-sticky"]')).toBeNull()
     // read-only: no candidate edit controls (the routing PATCH writer covers
     // default + media_failover only)
     expect(container.querySelector('[data-testid="runtime-lanes-section"]')?.querySelector('button, select, input'))

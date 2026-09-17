@@ -22,15 +22,11 @@ let test_http_effect_checkpoint_owner_restart_alternate ?(interleave = false) ?(
   Masc_test_deps.init_eio_clock ~sw env;
   Fs_compat.set_fs env#fs;
   ignore (Server_startup_state.mark_state_ready ());
-  (* Each case declares a fresh primary->alternate scenario. A previous
-     case's successful alternate remains sticky outside Runtime's snapshot. *)
-  Runtime_lane_preference.reset_for_testing ();
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   let catalog_snapshot = Llm_provider.Model_catalog.global () in
   let base_path = Filename.temp_file "direct-runtime-resume-" "" in
   Unix.unlink base_path; Unix.mkdir base_path 0o700;
   Eio.Switch.on_release sw (fun () ->
-    Runtime_lane_preference.reset_for_testing ();
     Runtime.For_testing.restore runtime_snapshot;
     (match catalog_snapshot with None -> Llm_provider.Model_catalog.clear_global ()
      | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
@@ -64,7 +60,7 @@ let test_http_effect_checkpoint_owner_restart_alternate ?(interleave = false) ?(
     Cohttp_eio.Server.run socket server ~on_error:raise);
   let catalog_path = Filename.concat base_path "models.toml" in
   write catalog_path (String.concat "\n" (List.map (fun provider -> Printf.sprintf
-    "[[models]]\nid_prefix = \"resume-fixture\"\nprovider_name = %S\nbase = \"openai_chat\"\nmax_context_tokens = 8192\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n" provider)
+    "[[models]]\nid_prefix = \"resume-fixture\"\nprovider_name = %S\nbase = \"openai_chat\"\nmax_context_tokens = 200000\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n" provider)
     ["primary"; "removed"; "alternate"]));
   Llm_provider.Model_catalog.load_file catalog_path |> require "catalog" |> Llm_provider.Model_catalog.set_global;
   let runtime_path = Filename.concat base_path "runtime.toml" in
@@ -81,7 +77,7 @@ endpoint = "http://127.0.0.1:%d/alternate"
 %s
 [models.sample]
 api-name = "resume-fixture"
-max-context = 8192
+max-context = 200000
 tools-support = true
 streaming = false
 [primary.sample]

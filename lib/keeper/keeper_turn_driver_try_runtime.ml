@@ -68,7 +68,6 @@ let attempt_rejected_should_try_next = function
       (Agent_core.Retry.InvalidRequest
          { reason =
              ( Agent_core.Retry.Json_parse_error
-             | Agent_core.Retry.Request_body_too_large _
              | Agent_core.Retry.Request_body_refused_by_provider _
              | Agent_core.Retry.Unknown_invalid_request )
          ; _

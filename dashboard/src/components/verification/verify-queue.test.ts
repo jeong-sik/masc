@@ -177,6 +177,19 @@ describe('VerifyQueue', () => {
     expect(container.querySelector('.vq-verdict-body')?.textContent).toContain('“게이트 증거 미충족”')
   })
 
+  it('refuses to submit a reject with an empty reason instead of fabricating one', async () => {
+    tasks.value = [makeTask()]
+    const { container } = render(html`<${VerifyQueue} />`)
+
+    fireEvent.click(screen.getByText('✕ 반려'))
+    fireEvent.click(screen.getByText('✕ 반려하고 반송'))
+    await waitFor(() => {
+      expect(container.querySelector('.vq-form-error')?.textContent).toContain('반려 사유')
+    })
+    expect(submitVerificationVerdict).not.toHaveBeenCalled()
+    expect(container.querySelector('.vq-form')).toBeTruthy()
+  })
+
   it('surfaces mutation errors inline and keeps the task in the queue', async () => {
     submitVerificationVerdict.mockRejectedValue(new Error('Task task-1 is done; operator evidence and verdicts require awaiting_verification'))
     tasks.value = [makeTask()]

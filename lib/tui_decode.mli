@@ -730,8 +730,6 @@ type runtime_option = {
   ro_max_context_source : runtime_context_source;
   ro_max_output_tokens : int option;
   ro_is_local : bool;
-  ro_dispatchable : bool;
-  ro_blocked_reason : string option;
   ro_is_default : bool;
   ro_quota_exhausted : bool;
   ro_quota_resets_at : float option;
@@ -740,10 +738,7 @@ type runtime_option = {
 
 type runtime_resolved_lane = {
   rrl_id : string;
-  rrl_runtime_ids : string list;
-  rrl_preferred_candidate : string option;
-  rrl_preferred_at_ts : float option;
-      (** Sticky last-success observation, not a failure timestamp. *)
+  rrl_runtime_ids : string list;  (** The lane as declared, head first. *)
 }
 
 type runtime_resolved_snapshot = {
@@ -762,7 +757,6 @@ type runtime_candidate_row = {
   rcr_position : int;
   rcr_candidate_count : int;
   rcr_runtime : runtime_option;
-  rcr_preferred_at_ts : float option;
   rcr_probe : runtime_provider_probe option;
 }
 
@@ -2345,8 +2339,7 @@ val decode_runtime_probe_snapshot :
 val decode_runtime_resolved_snapshot :
   Yojson.Safe.t -> (runtime_resolved_snapshot, string) result
 (** Strict Runtime-surface slice of [GET /api/v1/runtime/resolved]. Runtime and
-    lane identities must be unique, lane candidates must exist, and sticky
-    preferred candidate/time fields must be present or absent together.
+    lane identities must be unique and lane candidates must exist.
     Assignment and max-context fields belong to other consumers and are not
     duplicated into this light projection. *)
 

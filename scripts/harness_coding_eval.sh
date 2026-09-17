@@ -154,9 +154,9 @@ model_alias_of() {
 }
 
 # The server dispatches only runtimes declared in runtime.toml, so a model
-# asked for on the command line must exist there as a keeper-dispatchable
-# entry (positive max-request-body-bytes). The declaration goes into this
-# invocation's isolated config copy only; the repo config is not touched.
+# asked for on the command line must exist there as a binding. The
+# declaration goes into this invocation's isolated config copy only; the repo
+# config is not touched.
 declare_requested_runtimes() {
   local runtime_toml="${CONFIG_DIR}/runtime.toml"
   local entry provider model alias
@@ -175,7 +175,7 @@ declare_requested_runtimes() {
       printf '\n[models."%s"]\napi-name = "%s"\nmax-context = 32768\ntools-support = true\nstreaming = true\n' \
         "${alias}" "${model}" >> "${runtime_toml}"
     fi
-    printf '\n[%s."%s"]\nmax-request-body-bytes = 524288\nmax-concurrent = 1\n' \
+    printf '\n[%s."%s"]\nmax-concurrent = 1\n' \
       "${provider}" "${alias}" >> "${runtime_toml}"
     # The runtime also needs an agent-core catalog row, or the server boots it
     # disabled ("degraded catalog mode") and quietly routes the keeper to the

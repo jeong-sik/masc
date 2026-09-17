@@ -296,6 +296,8 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0453 | keeper health 는 phase 의 투영이지 heartbeat 나이가 아니다 | Accepted | - |
 | 0454 | 실패한 keeper 요청은 문자열이 아니라 typed 값으로 남긴다 | Draft | - |
 | 0455 | Task 는 모든 상태에서 나갈 수 있어야 한다 — 남은 상태마다 그 상태를 벗어나게 할 행위자가 있다 | Draft | - |
+| 0456 | Librarian 의 출력 계약이 무변경을 가장 안전한 답으로 만든다 — 점호를 없애고 퇴장 경로를 가른다 | Draft | - |
+| 0457 | Keeper 배정은 레인 이름을 받는다 — 레인이 런타임 id 를 흉내 내야 닿는 규칙을 없앤다 | Draft | - |
 | RFC-a-language-server-the-keeper-can-ask | A language server the Keeper can ask | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
 | RFC-attached-service-tool-scoping | 도구 스키마를 매 턴 전량 싣는 것을 그만둔다 | Accepted | - |
@@ -332,6 +334,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-memory-os-bounded-context-and-librarian-curator | Memory OS 2.0 — bounded working set 전송 계약과 librarian curator 계약 | Draft | - |
 | RFC-msx-surface-focus-mode | 관전 화면의 surface 경유와 포커스 모드 | Draft | - |
 | RFC-observe-by-waking-not-polling | 관찰은 폴링이 아니라 깨움으로 — 조건 충족 시 턴을 돌려준다 | Draft | - |
+| RFC-official-client-conversation-in-masc | Record official-client turns in the keeper checkpoint so the token window can... | Draft | - |
 | RFC-one-provider-two-wires | One provider, two wires | Implemented | - |
 | RFC-outlive-process-adoption | 턴보다 오래 사는 프로세스가 머지됐는데도 죽는다 — 채택 갭을 먼저 진단한다 | Draft | - |
 | RFC-per-keeper-github-cli-identity | Keeper-specific GitHub CLI identity | Draft | - |
@@ -341,6 +344,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-runtime-note-field-and-dashboard-surfacing | Per-runtime note field & dashboard surfacing | Draft | - |
 | RFC-schedule-history-and-outcome | # RFC — A schedule's past and its result | Draft | - |
 | RFC-settings-typed-delivery | 설정은 env 이름이 아니라 typed 값으로 읽는 곳에 닿는다 | Draft | - |
+| RFC-setup-web-search-and-browser-lane | 웹 검색과 브라우저 레인도 음성처럼 다시 열리는 설정 명령을 갖는다 | Draft | - |
 | RFC-shell-ir-lines-heredoc-dquote | 셸 서브셋이 줄과 인용 heredoc과 큰따옴표 보간을 읽는다 | Draft | - |
 | RFC-shell-ir-simple-param-expansion | Shell IR가 단순 파라미터 확장($VAR)을 닫는다 — env 세팅 패턴이 마지막 걸림돌이다 | Draft | - |
 | RFC-shell-ir-typed-command-substitution | typed 커맨드 치환 — `$(cmd)`를 자식 IR로 읽고, 그 stdout을 argv 한 원소로 쓴다 | Draft | - |

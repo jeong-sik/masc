@@ -47,7 +47,6 @@ type t =
   ; request_path : string
   ; max_tokens : int option
   ; max_context : int option
-  ; max_request_body_bytes : int option
   ; temperature : float option
   ; top_p : float option
   ; top_k : int option
@@ -101,7 +100,6 @@ let make
       ?request_path
       ?max_tokens
       ?max_context
-      ?max_request_body_bytes
       ?temperature
       ?top_p
       ?top_k
@@ -163,7 +161,6 @@ let make
   ; request_path
   ; max_tokens
   ; max_context
-  ; max_request_body_bytes
   ; temperature
   ; top_p
   ; top_k

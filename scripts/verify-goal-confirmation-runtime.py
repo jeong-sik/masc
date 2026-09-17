@@ -92,7 +92,7 @@ def main():
     fixtures = Path(__file__).parent / 'fixtures/release-evidence'
     runtime = (fixtures / 'runtime.toml').read_text()
     runtime += '\n[runtime.exact_output_lanes.verifier_exact]\nslots = ["goal_fixture.proof"]\n'
-    runtime += f'\n[providers.goal_fixture]\nprotocol = "openai-compatible-http"\nendpoint = "http://127.0.0.1:{provider.server_port}/v1"\n[models.proof]\napi-name = "goal-fixture"\nmax-context = 131072\ntools-support = true\nstreaming = true\n[goal_fixture.proof]\nmax-request-body-bytes = 1048576\n'
+    runtime += f'\n[providers.goal_fixture]\nprotocol = "openai-compatible-http"\nendpoint = "http://127.0.0.1:{provider.server_port}/v1"\n[models.proof]\napi-name = "goal-fixture"\nmax-context = 131072\ntools-support = true\nstreaming = true\n[goal_fixture.proof]\n'
     overlay = (fixtures / 'agent-core-models-overlay.toml').read_text()
     overlay += f'''
 [[providers]]

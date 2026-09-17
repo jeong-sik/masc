@@ -137,6 +137,7 @@ type row = {
   shade : shade;
   text : string;
   gutter_rail_cells : int;
+  gutter_clock_cells : int;
   gutter_label_at : int;
   gutter : string;
   action : row_action;
@@ -1153,6 +1154,7 @@ let metadata_row ~(previous : entry option) ~inner_width (entry : entry) =
       ; shade = Shade_none
       ; text = fitted
       ; gutter_rail_cells = 0
+      ; gutter_clock_cells = 0
       ; gutter_label_at = 0
       ; gutter = ""
       ; action = Action_none
@@ -1194,6 +1196,7 @@ let timeline_break_row ~(previous : entry option) ~inner_width (entry : entry) =
         ; shade = Shade_none
         ; text
         ; gutter_rail_cells = 0
+        ; gutter_clock_cells = 0
         ; gutter_label_at = 0
         ; gutter = ""
         ; action = Action_none
@@ -1388,16 +1391,19 @@ let origin_gutter ~origin ~previous ~inner_width entry =
         let continued = clock ^ continued_mark entry.style ^ " " in
         (* The rail keeps its own span even here. Past it the row is all
            receded: a continuation draws no name, so there is no boundary left
-           between a mark and a label to colour differently. *)
-        Some (fit_width continued (display_width filled), rail_cells, rail_cells)
-      else Some (filled, rail_cells, label_at)
+           between a mark and a label to colour differently -- and none to
+           export. The clock falls inside the receded span, so it recedes with
+           the rest without a boundary of its own. *)
+        Some
+          (fit_width continued (display_width filled), rail_cells, rail_cells, 0)
+      else Some (filled, rail_cells, label_at, clock_cells)
 
 let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry =
   let gutter = origin_gutter ~origin ~previous ~inner_width entry in
   let gutter_width =
     match gutter with
     | None -> 0
-    | Some (text, rail_cells, _) -> rail_cells + display_width text
+    | Some (text, rail_cells, _, _) -> rail_cells + display_width text
   in
   let body_width = max min_body_cells (inner_width - 2 - gutter_width) in
   (* Keepers write markdown. Rendering it is the caller's to supply, so this
@@ -1420,7 +1426,9 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
     | chunks -> chunks
   in
   let body_rows =
-    let margin, rail_cells, label_at = Option.value gutter ~default:("", 0, 0) in
+    let margin, rail_cells, label_at, clock_cells =
+      Option.value gutter ~default:("", 0, 0, 0)
+    in
     let blank = fit_width "" (display_width margin) in
     let last = List.length body_chunks - 1 in
     (* The bracket runs the height of the entry, so a wrapped body keeps the
@@ -1459,6 +1467,9 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
       ; shade = shade_of_style entry.style
       ; text = "  " ^ chunk
       ; gutter_rail_cells = rail_cells
+      (* A wrapped row's gutter is blanks held at the first row's width: no
+         clock column of its own, so no boundary to hand the renderer. *)
+      ; gutter_clock_cells = (if index = 0 then clock_cells else 0)
       ; gutter_label_at = (if index = 0 then label_at else rail_cells)
       ; gutter = rail_at index ^ (if index = 0 then margin else blank)
       (* The fold marker sits at the end of the first row, so that is the
@@ -1532,6 +1543,7 @@ let collapse_repeated_body_rows ~inner_width rows =
           ~inner_width:(inner_width - display_width row.gutter)
           repeated_rows
     ; gutter_rail_cells = row.gutter_rail_cells
+    ; gutter_clock_cells = 0
     ; gutter_label_at = 0
     ; gutter = row.gutter
     ; action = Action_none
@@ -1596,6 +1608,7 @@ let newest_entry_window ~inner_width ~height rows =
         ; shade = Shade_none
         ; text = viewport_gap_text ~inner_width hidden_rows
         ; gutter_rail_cells = 0
+        ; gutter_clock_cells = 0
         ; gutter_label_at = 0
         ; gutter = ""
         ; action = Action_none

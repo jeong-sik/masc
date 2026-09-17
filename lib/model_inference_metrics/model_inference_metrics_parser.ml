@@ -28,7 +28,7 @@ let provider_opt_of_fields ~(model : string) (fields : (string * Yojson.Safe.t) 
 ;;
 
 (* [executed_runtime_id] is the candidate that answered; [runtime_id] is the
-   lane it answered on. Sticky lane ordering can make those different
+   lane it answered on. In-turn failover can make those different
    runtimes, and this function's callers ask the first question, so prefer
    the answerer wherever the producer recorded one. Records written before
    masc#35043, and turns that failed before any candidate reported in, carry

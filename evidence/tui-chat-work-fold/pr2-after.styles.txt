@@ -1,0 +1,87 @@
+row  1:  Overview  Activity  ▸Keepers  Lanes  Memory  Board  Planning  Fusion  Workspace  Config
+      [dim] 'Overview'
+      [dim] 'Activity'
+      [bold fg:bright-cyan] '▸Keepers'
+      [dim] 'Lanes'
+      [dim] 'Memory'
+      [dim] 'Board'
+      [dim] 'Planning'
+      [dim] 'Fusion'
+      [dim] 'Workspace'
+      [dim] 'Config'
+row  2: (blank)
+row  3:    Keepers ▸ alpha ▸ chat
+      [dim] ' Keepers ▸ alpha ▸ chat'
+row  4:   ● healthy AUTO · gate: Auto Judge · running · configured: anthropic.claude-opus-5
+      [dim] '● healthy'
+      [fg:bright-cyan] 'AUTO'
+      [dim] '· gate: Auto Judge'
+      [dim] ' · running · configured: anthropic.claude-opus-5'
+row  5:  ──────────────────────────────────────────────────────────────────────────────────────────────────
+      [dim] '──────────────────────────────────────────────────────────────────────────────────────────────────'
+row  6:   ── 2026-08-22 · 06:00 ──────────────────────────────────────────────────────────────────────────
+      [dim] '── 2026-08-22 · 06:00 ──────────────────────────────────────────────────────────────────────────'
+row  7:      ╭ 06:41 ◆         │ 전달됨, 도구 씀 · ci-red-attribution · 1 action
+      [dim] '   ╭'
+      [dim] '06:41'
+      [fg:bright-green bold] '◆'
+      [dim] '│'
+      [dim bold] '전달됨,'
+      [dim bold] '도구'
+      [dim bold] '씀'
+      [dim] ' ·'
+      [dim bold] 'ci-red-attribution'
+      [dim] ' · 1 action'
+row  8:      ╰       ■         │ ✗ masc_fusion · 1200ms
+      [dim] '   ╰'
+      [fg:gray bold] '■'
+      [dim] '│'
+      [bold fg:bright-red] '✗'
+      [dim fg:bright-magenta] 'masc_fusion'
+      [dim dim dim] '·'
+      [dim dim dim] '1200ms'
+row  9:   ── 2026-09-01 · 23:00 ──────────────────────────────────────────────────────────────────────────
+      [dim] '── 2026-09-01 · 23:00 ──────────────────────────────────────────────────────────────────────────'
+row 10:   ╌╌╌┤ 23:34 ◈ JOURNAL ┊ Librarian committed current memory revision 9 · now 1 added, 1 removed, 3
+      [dim] '╌╌╌┤'
+      [dim] '23:34'
+      [dim bold] '◈'
+      [dim] 'JOURNAL'
+      [dim] '┊'
+      [dim] 'Librarian committed current memory revision 9 · now 1 added, 1 removed, 3'
+row 11:                        ┊ retained · Ctrl-N
+      [dim] '┊'
+      [dim] 'retained · Ctrl-N'
+row 12:   ── 2026-09-17 · 03:00 ──────────────────────────────────────────────────────────────────────────
+      [dim] '── 2026-09-17 · 03:00 ──────────────────────────────────────────────────────────────────────────'
+row 13:      ╭ 03:30 ▶ YOU       ship the release
+      [dim] '   ╭'
+      [dim] '03:30'
+      [fg:bright-cyan bold] '▶'
+      [dim] 'YOU'
+      [default] 'ship the release'
+row 14:      ╰       ● alpha     reply-ship the release
+      [dim] '   ╰'
+      [fg:bright-blue bold] '●'
+      [dim] 'alpha'
+      [default] 'reply-ship the release'
+row 15: (blank)
+row 16: (blank)
+row 17: (blank)
+row 18: (blank)
+row 19: (blank)
+row 20: (blank)
+row 21: (blank)
+row 22: (blank)
+row 23: (blank)
+row 24: (blank)
+row 25: (blank)
+row 26: (blank)
+row 27:  ──────────────────────────────────────────────────────────────────────────────────────────────────
+      [dim] '──────────────────────────────────────────────────────────────────────────────────────────────────'
+row 28:     >   (Ctrl-Y to speak, Ctrl-A to keep listening)
+      [fg:bright-cyan] '  >'
+      [dim] '  (Ctrl-Y to speak, Ctrl-A to keep listening)'
+row 29: (blank)
+row 30:   Enter:send  Ctrl-J:NL  Ctrl-R:reasoning  Ctrl-D:tools  Ctrl-N:journal  Esc:list  …?
+      [dim] '  Enter:send  Ctrl-J:NL  Ctrl-R:reasoning  Ctrl-D:tools  Ctrl-N:journal  Esc:list  …?'

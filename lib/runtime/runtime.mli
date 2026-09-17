@@ -13,7 +13,7 @@ type t =
   ; model : model_spec
   ; binding : binding
   ; execution : Runtime_execution.t
-  ; candidate_preference : Runtime_lane_preference.candidate
+  ; candidate_backpressure : Runtime_candidate_backpressure.candidate
     (** Candidate-only backpressure tied to the frozen dispatch binding. *)
   ; quota_scope : Runtime_quota_window.scope
     (** Quota ownership key frozen at materialization, from the same
@@ -369,47 +369,14 @@ val load_list :
     keeper_assignments, media_failover, lanes)].
     Fails ([Error]) if
     [\[runtime\].default] is missing / unresolved, if any
-    [\[runtime.assignments\]] target does not resolve to a configured runtime, if any
+    [\[runtime.assignments\]] target names neither a declared lane nor a
+    configured runtime, if any
     [\[runtime\].media_failover] entry does not resolve, or if any
     [\[runtime.lanes.<id>\]] candidate does not resolve (mirrors default
     validation — no silent fallback for a typo'd id). [keeper_assignments] is the
-    keeper→runtime-id list; [media_failover] is the RFC-0265 ordered reroute
+    keeper→lane-name-or-runtime-id list; [media_failover] is the RFC-0265 ordered reroute
     list; [lanes] is the ordered failover candidate lists. *)
 
-type request_body_cap_error = Non_positive_request_body_cap of
-  { runtime_id : string
-  }
-(** A materialized runtime configuration reaches a Keeper provider boundary
-    with a non-positive explicit serialized-request body ceiling. *)
-
-val request_body_cap_error_to_string : request_body_cap_error -> string
-
-val validate_request_body_cap :
-  runtime_id:string
-  -> Llm_provider.Provider_config.t
-  -> (int option, request_body_cap_error) result
-(** Pure final-provider-config guard shared by every Keeper provider-call
-    boundary. Config admission uses it for statically reachable routes; call
-    sites must invoke it again after feature-local transforms. The successful
-    value preserves absence or the exact positive caller cap on that final config. *)
-
-type keeper_dispatch_readiness =
-  | Dispatchable
-  | Invalid_request_body_cap of { table_path : string }
-      (** An explicitly supplied caller cap is invalid. Omission is valid. *)
-
-val keeper_dispatch_readiness : t -> keeper_dispatch_readiness
-(** The single definition of "blocked", so the operator-facing projection and
-    the fail-closed boot gate cannot disagree. Official-client runtimes are
-    always [Dispatchable]: the spawned vendor client owns its own context
-    window. *)
-
-val keeper_dispatch_blocker : keeper_dispatch_readiness -> string option
-(** Operator-facing reason, [None] when dispatchable. *)
-
-val keeper_dispatch_blocked : t list -> (t * string) list
-(** Every runtime a keeper could not be assigned to, in declaration order, with
-    its reason. Empty is the healthy state. *)
 
 (** {1 Lazy default runtime singleton}
 
@@ -468,20 +435,6 @@ module For_testing : sig
     (unit -> unit) -> (unit, string) result
   (** Production writer admission with an injected journal-parent sync. *)
 
-  val keeper_dispatch_runtime_ids :
-    default_runtime_id:string ->
-    assignments:(string * string) list ->
-    verifier_exact_slot_ids:string list ->
-    media_failover:string list ->
-    lanes:Runtime_lane.t list ->
-    string list
-  (** Ordered, deduplicated runtime ids reachable by Keeper default/assignment
-      roots (including a same-named lane's candidates), the explicit
-      the [verifier_exact] exact-output lane's declared
-      slots (the completion-authority judgement route, RFC-0361 D7(a)), and
-      explicit runtime-only media failover routing. Dormant declared lanes are
-      excluded. *)
-
   val save_config_text_with_sync_parent :
     ?runtime_config_path:string ->
     sync_parent:(string -> unit) ->
@@ -504,10 +457,12 @@ val runtimes_and_media_failover : unit -> t list * string list
     separate reads. *)
 
 val runtime_id_for_keeper : string -> string option
-(** [runtime_id_for_keeper keeper_name] is the runtime id assigned to
-    [keeper_name] in [\[runtime.assignments\]] (runtime.toml SSOT), or [None]
-    when no explicit assignment exists (caller falls back to
-    {!get_default_runtime_id}). The id is opaque (only the AGENT_CORE adapter parses
+(** [runtime_id_for_keeper keeper_name] is the route [keeper_name] is assigned
+    in [\[runtime.assignments\]] (runtime.toml SSOT) — a declared lane name or a
+    runtime id — or [None] when no explicit assignment exists (caller falls back
+    to {!get_default_runtime_id}). It is a routing label, not necessarily a
+    materialized binding: pass it to {!resolve_assignment} to walk the lane, or
+    to {!entry_runtime_id_of_route} for the binding the turn opens first. The id is opaque (only the AGENT_CORE adapter parses
     it). Keeper-to-runtime assignment is not sourced from keeper TOML. *)
 
 val keeper_assignments : unit -> (string * string) list
@@ -607,13 +562,21 @@ val get_lane_by_id : string -> Runtime_lane.t option
 
 val resolve_assignment :
   string -> [ `Lane of Runtime_lane.t | `Unavailable of missing_catalog_model | `Missing ]
-(** Resolve a keeper assignment id to a lane. Declared lanes shadow runtimes;
-    an id naming a bare runtime gets a lane of its own, because the lane id is
-    what keys sticky candidate preference and quota demotion. Every lane ends
+(** Resolve a keeper assignment to a lane. The id names a declared lane or a
+    runtime, and a lane of that name is taken first; an id naming a bare runtime
+    gets a lane of its own, because the lane is what carries failover and quota
+    demotion. Every lane ends
     at [\[runtime\].default], so a walk always has a next candidate.
     [Unavailable] preserves the configured identity when its capability catalog
     entry is absent. [Missing] means the id was not configured. Neither selects
     the default in place of the requested runtime. *)
+
+val entry_runtime_id_of_route : string -> string option
+(** The concrete binding id a route opens first: the declared lane's entry
+    candidate, or the runtime itself when the route names one. [None] when the
+    route names neither. Callers needing a materialized runtime resolve the
+    route here first — {!get_runtime_by_id} knows nothing about lanes and
+    answers [None] for a lane name. *)
 
 val get_runtime_by_id : string -> t option
 (** [get_runtime_by_id id] is the materialized runtime whose binding-key id
@@ -732,8 +695,6 @@ val max_prompt_bytes_of_runtime_id : string -> int option
 (** Declared [max-prompt-bytes] for the model bound to this runtime id, or
     [None] when the model declares none. *)
 
-val declared_input_byte_ceiling_of_runtime_id : string -> int option
-
 val context_marks_of_runtime_id : string -> Runtime_schema.context_marks option
 (** The binding's eviction marks, or [None] when the binding declares none
     (the keeper then evicts carried history only on a provider refusal). *)
@@ -741,18 +702,6 @@ val context_marks_of_runtime_id : string -> Runtime_schema.context_marks option
 val validate_runtime_context_marks : t list -> (unit, load_failure) result
 (** Refuses a runtime whose high-water mark exceeds its resolved max-context;
     such a request is refused by the provider before the mark is reached. *)
-(** The smaller of the two byte ceilings a runtime declares over its model
-    input: the model's [max-prompt-bytes] and the binding's
-    [max-request-body-bytes]. Which one a given path enforces differs —
-    [Keeper_antigravity_runtime] projects against the first, the generic
-    driver against the second through {!validate_request_body_cap} — so a
-    caller that must fit inside whatever this runtime enforces satisfies both.
-    [None] when neither is declared, which is the same answer those paths give
-    such a runtime.
-
-    The two count different things (prompt bytes against whole-request bytes),
-    so this is a ceiling for something known to be one part of the input, not
-    a budget for the input itself. *)
 
 val top_p_of_runtime_id : string -> float option
 (** Request [top_p] from the materialized AGENT_CORE provider config for runtime [id],

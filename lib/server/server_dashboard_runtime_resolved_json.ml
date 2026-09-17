@@ -26,12 +26,7 @@ let runtime_resolution_json (rt : Runtime.t) : Yojson.Safe.t =
            "runtime resolved projection invariant violated: runtime %S has no max-context resolution"
            rt.id)
   in
-  (* TEL-OK: read-only projection into the response document; the boot path is
-     where a blocked runtime is logged. *)
-  let dispatch_blocker =
-    Runtime.keeper_dispatch_blocker (Runtime.keeper_dispatch_readiness rt)
-  in
-  (* Life state beyond dispatchability: the quota window says whether the
+  (* Life state: the quota window says whether the
      provider side of this runtime is currently refusing work (2026-09-12
      operator ask: the runtime list shows what exists, not what is alive).
      [Until] is a provider-stated reset deadline; [Observed] is a hard-quota
@@ -52,15 +47,6 @@ let runtime_resolution_json (rt : Runtime.t) : Yojson.Safe.t =
     ; "max_output_tokens", int_opt_json (Runtime.max_output_tokens_of_runtime_id rt.id)
     ; "is_local", `Bool (Runtime.is_local_runtime rt)
     ; "is_default", `Bool rt.binding.is_default
-      (* masc#28404: a runtime can be declared, materialized, and listed here
-         while being impossible to assign to a keeper. Boot validation judges
-         only reachable ids, so that state used to have no observer — the
-         operator saw a runtime in this list, tried to assign it, and only then
-         learned it was blocked. Reported per runtime rather than as a separate
-         endpoint so "what is applied" and "what could be applied" are read from
-         one document. *)
-    ; "keeper_dispatchable", `Bool (Option.is_none dispatch_blocker)
-    ; "keeper_dispatch_blocked_reason", string_opt_json dispatch_blocker
     ; "quota_exhausted", `Bool quota_exhausted
     ; "quota_resets_at", (match quota_resets_at with Some t -> `Float t | None -> `Null)
     ; "quota_scope", `String quota_scope_label
@@ -68,20 +54,9 @@ let runtime_resolution_json (rt : Runtime.t) : Yojson.Safe.t =
 ;;
 
 let lane_json (lane : Runtime_lane.t) : Yojson.Safe.t =
-  (* Sticky failover preference (Runtime_lane_preference) is read-only
-     operator observability: which candidate the lane will try first next. *)
-  let candidates = Runtime_lane.ordered_candidates lane in
-  let preferred =
-    match Runtime_lane_preference.preferred_of_lane ~lane_id:(Runtime_lane.id lane) with
-    | Some (candidate, _) as preference
-      when List.exists (String.equal candidate) candidates -> preference
-    | Some _ | None -> None
-  in
   `Assoc
     [ "id", `String (Runtime_lane.id lane)
-    ; "runtime_ids", Json_util.json_string_list candidates
-    ; "preferred_candidate", string_opt_json (Option.map fst preferred)
-    ; "preferred_at_ts", Json_util.float_opt_to_json (Option.map snd preferred)
+    ; "runtime_ids", Json_util.json_string_list (Runtime_lane.ordered_candidates lane)
     ]
 ;;
 

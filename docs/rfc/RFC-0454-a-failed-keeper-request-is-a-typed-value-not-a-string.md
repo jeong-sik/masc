@@ -288,6 +288,28 @@ P2 는 표의 한 줄이지만 한 번에 들어가지 않는다. 첫 조각은 
   `failure` 필드를 가지면 그때 한 줄을 돌려준다. 그래서 fence 없는 host 정지·연결
   끊김 row 도 지금 그대로 lifecycle 배지를 그린다.
 
+### P2 두 번째 조각이 한 일 — 실패를 만드는 곳이 값을 만든다
+
+`Keeper_request_failure` 를 `lib/keeper_runtime/` 에 만들고, 실패 row 를 만드는
+경로가 전부 이 값을 만들게 했다. row 형식·SSE payload·Slack·Discord·TUI 는
+그대로다. 실패는 아직 글자로 row 에 닿고, 값이 row 에 실리는 건 D3 다.
+
+- `cause` 는 닫힌 합타입이고 `summary` 는 필드가 아니라 함수다. 문자열을 이유로
+  받는 생성자는 없다. `Raised` 는 잡은 예외에서만 만들고 자리(`failure_site`)를
+  닫힌 값으로 적는다.
+- agent-core 에러를 사람이 읽을 문장으로 바꾸던 곳은 `Keeper_agent_error` 하나뿐이었다.
+  그 네 갈래(`Api NetworkError`, `Api ContextOverflow`, `Api InputCapacity`,
+  `Provider NetworkError`)를 생성자로 올렸고, 나머지는 `Core`(= `Keeper_request_failure_core`)
+  와 `Masc` 로 간다. `Keeper_agent_error.user_message_of_core_error` 는 이제
+  `Keeper_request_failure.summary` 를 부르는 한 줄이다. §2.2 두 번째 표의 나머지
+  생성자(`Rate_limited`, `Payment_required` 등)는 아직 `Core` 에 남아 있다.
+- 값은 dispatch 경계를 값으로 건넌다. `Keeper_turn.dispatch` 가
+  `Turn_settled | Turn_failed { result; failure }` 두 생성자이고,
+  `Keeper_tool_surface.dispatch_keeper_msg_stream_admitted` 가 그대로 돌려준다.
+  `Tool_result.data` 로 JSON 을 실어 서버가 다시 읽는 왕복은 없다.
+- `summary_of_masc_internal_error` 가 `None` 인 kind 는 그대로 봉투를 돌려준다.
+  채팅 pane 이 아직 그 봉투를 읽어 배지를 그리기 때문이다(D3 에서 바뀐다).
+
 P1a 와 P1b 는 각각 혼자 들어갈 수 있다. 단 P1b 는 fenced `diagnostic` 을 읽는 TUI 두 곳을 같은 PR 에서 함께 고쳐야 한다. 안 그러면 host-shutdown 표시가 조용히 사라진다(`bin/masc_tui_keeper_chat_history.ml` 170, 테스트는 손으로 만든 옛 모양을 쓰므로 초록으로 남는다: `test/test_tui_keeper_chat_history.ml` 358).
 
 ## 6. 성공 기준

@@ -138,7 +138,7 @@ type lane_terminal_error =
    non-rotating error before resolvable alternatives are tried. Order is
    therefore resolvable-active, then resolvable-exhausted, then unresolvable —
    declared relative order preserved within each class (PR #28219 review). *)
-let demote_unavailable_candidates ~now ~quota_scope_of ~candidate_preference_of candidates =
+let demote_unavailable_candidates ~now ~quota_scope_of ~candidate_backpressure_of candidates =
   let available, backpressured = List.partition (fun candidate ->
     let quota_exhausted =
       Option.fold ~none:false
@@ -148,8 +148,8 @@ let demote_unavailable_candidates ~now ~quota_scope_of ~candidate_preference_of 
     let rate_limited =
       Option.fold ~none:false
         ~some:(fun candidate -> Option.is_some
-          (Runtime_lane_preference.candidate_backpressure ~now ~candidate))
-        (candidate_preference_of candidate)
+          (Runtime_candidate_backpressure.candidate_backpressure ~now ~candidate))
+        (candidate_backpressure_of candidate)
     in
     not (quota_exhausted || rate_limited)) candidates in
   available @ backpressured
@@ -161,8 +161,8 @@ let quota_ordered_runtime_ids ~now runtime_ids =
   let resolvable, unresolvable = List.partition (fun (_, rt) -> Option.is_some rt) resolved in
   let ordered = demote_unavailable_candidates ~now
     ~quota_scope_of:(fun (_, rt) -> Option.map Runtime.quota_scope_of_runtime rt)
-    ~candidate_preference_of:(fun (_, rt) ->
-      Option.map (fun (rt : Runtime.t) -> rt.candidate_preference) rt)
+    ~candidate_backpressure_of:(fun (_, rt) ->
+      Option.map (fun (rt : Runtime.t) -> rt.candidate_backpressure) rt)
     resolvable in
   List.map fst (ordered @ unresolvable)
 ;;
@@ -218,12 +218,12 @@ let path_rest ~now runtime_id =
     in
     let rate_limit_rest =
       match
-        Runtime_lane_preference.candidate_backpressure
+        Runtime_candidate_backpressure.candidate_backpressure
           ~now
-          ~candidate:runtime.candidate_preference
+          ~candidate:runtime.candidate_backpressure
       with
       | None -> None
-      | Some (Runtime_lane_preference.Unknown_scope_rate_limit { noted_at; retry_after }) ->
+      | Some (Runtime_candidate_backpressure.Unknown_scope_rate_limit { noted_at; retry_after }) ->
         let promotes =
           match retry_after with
           | Some seconds when (not (Float.is_nan seconds)) && seconds > 0.0 ->
@@ -290,13 +290,12 @@ let deferred_lane_rest ~now hint =
 ;;
 
 (* A fresh walk of an assignment, ordered as [run_named] orders a turn without
-   a deferred suffix: sticky preference, then quota and backpressure demotion.
-   An id that names no lane or runtime is its own single candidate. *)
+   a deferred suffix: the lane as declared, then quota and backpressure
+   demotion. *)
 type walk_order =
   { lane_id : string
   ; declared : string list
   ; order : string list
-  ; preferred : (string * float) option
   }
 
 type assignment_refusal =
@@ -314,15 +313,7 @@ let assignment_walk_order ~now assignment_id =
   | `Lane lane ->
     let lane_id = Runtime_lane.id lane in
     let declared = Runtime_lane.ordered_candidates lane in
-    let preferred_first, preferred =
-      Runtime_lane_preference.prefer_order_with ~lane_id declared
-    in
-    Ok
-      { lane_id
-      ; declared
-      ; order = quota_ordered_runtime_ids ~now preferred_first
-      ; preferred
-      }
+    Ok { lane_id; declared; order = quota_ordered_runtime_ids ~now declared }
   | `Unavailable missing -> Error (Catalog_unavailable missing)
   | `Missing -> Error Assignment_missing
 ;;
@@ -501,27 +492,17 @@ let lane_should_retry
     | Some http_err -> Runtime_attempt_fsm.should_try_next http_err
     | None -> false
 
-(* Whether a runtime is one of the lane's own declared candidates.
-   [Runtime_lane_preference.prefer_order] reorders the list it is given, which
-   for a lane is that lane's candidates, so a preference naming a runtime
-   outside them promotes nothing. *)
-let lane_declares ~lane_id runtime_id =
-  match Runtime.get_lane_by_id lane_id with
-  | None -> false
-  | Some lane -> List.mem runtime_id (Runtime_lane.ordered_candidates lane)
-
 let attempt_runtime_candidates
     ?(pre_tool_rejects = ref [])
     ?(allow_retry = fun ~runtime_id:_ ~attempt:_ _error -> true)
     ?(allow_accept_no_progress_retry = fun ~runtime_id:_ ~attempt:_ _error ->
       true)
-    ?lane_id
     ?(on_retry_deferred = fun _ -> ())
     ?(on_attempt_error = fun ~runtime_id:_ ~attempt:_ ~dispatch:_ _error -> ())
     ?(on_lane_terminal_error = fun (_ : lane_terminal_error) -> ())
     ?quota_scope_of
     ?model_of
-    ?candidate_preference_of
+    ?candidate_backpressure_of
     ?candidate_dispatchable
     ~runtime_id ~runtime_id_of
     ~(emit_runtime_manifest :
@@ -547,12 +528,12 @@ let attempt_runtime_candidates
       fun candidate ->
         Runtime.quota_scope_of_runtime_id (runtime_id_of candidate)
   in
-  let candidate_preference_of =
-    match candidate_preference_of with
-    | Some candidate_preference_of -> candidate_preference_of
+  let candidate_backpressure_of =
+    match candidate_backpressure_of with
+    | Some candidate_backpressure_of -> candidate_backpressure_of
     | None -> fun candidate ->
         Runtime.get_runtime_by_id (runtime_id_of candidate)
-        |> Option.map (fun (runtime : Runtime.t) -> runtime.candidate_preference)
+        |> Option.map (fun (runtime : Runtime.t) -> runtime.candidate_backpressure)
   in
   (* Mid-walk demotion shares the pre-walk rule: never move an
      exhausted-but-dispatchable candidate behind one that cannot dispatch, or
@@ -622,7 +603,7 @@ let attempt_runtime_candidates
     in
     demote_unavailable_candidates
       ~now:(Unix.gettimeofday ())
-      ~quota_scope_of ~candidate_preference_of
+      ~quota_scope_of ~candidate_backpressure_of
       dispatchable
     @ undispatchable
   in
@@ -699,7 +680,7 @@ let attempt_runtime_candidates
        the provider returns could then attribute the old credential's
        response to the replacement catalog row. *)
     let attempt_quota_scope = quota_scope_of candidate in
-    let attempt_candidate_preference = candidate_preference_of candidate in
+    let attempt_candidate_backpressure = candidate_backpressure_of candidate in
     emit_runtime_manifest
       ~status:"attempt"
       ~decision:(runtime_attempt_decision ~idx ~runtime_id:attempt_runtime_id)
@@ -712,28 +693,9 @@ let attempt_runtime_candidates
          ~status:"completed"
          ~decision:(runtime_attempt_decision ~idx ~runtime_id:attempt_runtime_id)
          Keeper_runtime_manifest.Runtime_completed;
-       (* Sticky failover: remember the winning candidate so later turns on
-          this lane start from it (idx 0 or a failover success alike).
-
-          Only a candidate the lane declares. The media walk reaches past
-          the lane into media_failover, and a winner from out there cannot
-          be remembered for this lane: [prefer_order] would find it in no lane list and
-          promote nothing, while the record has already replaced the last
-          in-lane success. The next text turn then starts from the declared
-          head again, and if that head is the one that was failing, it
-          fails again every turn (#34823).
-
-          A lane_id naming no configured lane records nothing either. There
-          is no candidate list for [prefer_order] to reorder, so the entry
-          could never be read. *)
-       (match lane_id with
-        | Some lane_id when lane_declares ~lane_id attempt_runtime_id ->
-          Runtime_lane_preference.note_success ~lane_id
-            ~candidate:attempt_runtime_id
-        | Some _ | None -> ());
        Option.iter
-         (fun candidate -> Runtime_lane_preference.note_candidate_success ~candidate)
-         attempt_candidate_preference;
+         (fun candidate -> Runtime_candidate_backpressure.note_candidate_success ~candidate)
+         attempt_candidate_backpressure;
        (* A call getting through is the only evidence a quota came back that
           a provider stating no reset time leaves available, so it is what
           clears the observation. A stated window is left alone: it names a
@@ -769,8 +731,8 @@ let attempt_runtime_candidates
        in
        let note_rate_limit retry_after =
          Option.iter
-           (fun candidate -> Runtime_lane_preference.note_rate_limit ~candidate ~retry_after)
-           attempt_candidate_preference
+           (fun candidate -> Runtime_candidate_backpressure.note_rate_limit ~candidate ~retry_after)
+           attempt_candidate_backpressure
        in
        (match error with
         | Agent_core.Error.Api (Llm_provider.Retry.RateLimited { retry_after; _ })
@@ -974,8 +936,8 @@ let modality_reroute_candidates ~now ~deferred_runtime_lane ~first_candidate
          ~now
          ~quota_scope_of:(fun (runtime : Runtime.t) ->
            Some (Runtime.quota_scope_of_runtime runtime))
-         ~candidate_preference_of:(fun (runtime : Runtime.t) ->
-           Some runtime.Runtime.candidate_preference)
+         ~candidate_backpressure_of:(fun (runtime : Runtime.t) ->
+           Some runtime.Runtime.candidate_backpressure)
 
 (* RFC-0440 §3: the media walk (every candidate that takes the media, live ones
    first), then the lane's remaining candidates as the degrade tail — per-attempt
@@ -1412,9 +1374,9 @@ let run_named
     | _ -> ()
   in
   (* Lanes shadow runtimes: a lane id takes precedence over a runtime id so
-     operators can route through explicit failover groups.  Lane candidate
-     order passes through the sticky last-good preference so a known-healthy
-     failover candidate is tried before re-hitting a dead head candidate. *)
+     operators can route through explicit failover groups. The order is the
+     declaration's; a resting or exhausted candidate is demoted behind its
+     siblings, never remembered as a preference. *)
   (* Quota/backpressure demotion is ordering only — a demoted candidate is still
      attempted when the lane has nothing else (RFC-0370 §3.3). Apply it while
      selecting a fresh lane walk. A deferred suffix was already frozen before
@@ -1432,24 +1394,17 @@ let run_named
       ~now:(Unix.gettimeofday ())
       candidates
   in
-  let* lane_id_opt, lane_candidate_ids =
+  let* lane_candidate_ids =
     match output_contract, deferred_runtime_lane with
-    | Tool_verdict, _ -> Ok (None, [runtime_id])
-    | Provider_default, Some hint ->
-      Ok (Some hint.assignment_id, deferred_runtime_ids hint)
+    | Tool_verdict, _ -> Ok [runtime_id]
+    | Provider_default, Some hint -> Ok (deferred_runtime_ids hint)
     | Provider_default, None ->
       (match Runtime.resolve_assignment runtime_id with
-       | `Missing -> Ok (None, [])
+       | `Missing -> Ok []
        | `Unavailable missing ->
          Error (Runtime_agent_core_runner.runtime_catalog_error_to_core_error
            ("Capability catalog entry unavailable: " ^ Runtime.missing_catalog_model_to_string missing))
-       | `Lane lane ->
-         let lane_id = Runtime_lane.id lane in
-         Ok
-           ( Some lane_id
-           , Runtime_lane_preference.prefer_order ~lane_id
-               (Runtime_lane.ordered_candidates lane)
-             |> demote_quota_exhausted ))
+       | `Lane lane -> Ok (Runtime_lane.ordered_candidates lane |> demote_quota_exhausted))
   in
   if lane_candidate_ids = []
   then
@@ -1592,20 +1547,9 @@ let run_named
       project ~mode blocks
   in
   (* Sequential candidate attempt loop. On failure we record a manifest row and
-     move to the next candidate; on success we record completion and return.
-     Modality reroutes are capability routing decisions, not provider-failure
-     discoveries.  Do not let a media-only reroute update the lane-global
-     sticky failover preference; otherwise one keeper can pin unrelated later
-     text-only turns to a less-trusted fallback for the preference TTL. *)
-  let sticky_lane_id =
-    match reroute_decision with
-    | Runtime_agent.Reroute _ -> None
-    | Runtime_agent.No_reroute_needed | Runtime_agent.No_capable_runtime _ ->
-      lane_id_opt
-  in
+     move to the next candidate; on success we record completion and return. *)
   attempt_runtime_candidates
     ~pre_tool_rejects
-    ?lane_id:sticky_lane_id
     ?on_retry_deferred:on_runtime_retry_deferred
     ?on_attempt_error:on_runtime_attempt_error
     ?on_lane_terminal_error:on_runtime_lane_terminal_error
@@ -1635,12 +1579,12 @@ let run_named
     ~quota_scope_of:(function
       | Resolved_runtime runtime -> Some (Runtime.quota_scope_of_runtime runtime)
       | Missing_runtime _ -> None)
-    ~candidate_preference_of:(function
-      | Resolved_runtime runtime -> Some runtime.Runtime.candidate_preference
+    ~candidate_backpressure_of:(function
+      | Resolved_runtime runtime -> Some runtime.Runtime.candidate_backpressure
       | Missing_runtime _ -> None)
     ~model_of:(function
       (* The served name comes from the same frozen snapshot as the quota
-         scope and preference above: a runtime.toml reload mid-walk must not
+         scope and backpressure above: a runtime.toml reload mid-walk must not
          turn the same-model refusal off by dropping the id from the table. *)
       | Resolved_runtime runtime -> Some runtime.Runtime.model.api_name
       | Missing_runtime _ -> None)

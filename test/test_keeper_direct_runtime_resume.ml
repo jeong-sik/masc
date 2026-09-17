@@ -6,6 +6,13 @@ module Continuation = Keeper_direct_runtime_continuation
 module Checkpoint = Keeper_checkpoint_store
 module Store = Keeper_chat_operation_store
 
+(* What the operator's window currently says. The store takes the window as an
+   argument -- it is reachable from a raw Domain, where reading a setting
+   raises -- so every caller names it. These cases are not about the window and
+   pass what production passes. *)
+let history_retained () =
+  Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained
+
 let require label = function Ok value -> value | Error _ -> fail (label ^ " failed")
 let write path value =
   let channel = open_out_bin path in
@@ -22,15 +29,11 @@ let test_http_effect_checkpoint_owner_restart_alternate ?(interleave = false) ?(
   Masc_test_deps.init_eio_clock ~sw env;
   Fs_compat.set_fs env#fs;
   ignore (Server_startup_state.mark_state_ready ());
-  (* Each case declares a fresh primary->alternate scenario. A previous
-     case's successful alternate remains sticky outside Runtime's snapshot. *)
-  Runtime_lane_preference.reset_for_testing ();
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   let catalog_snapshot = Llm_provider.Model_catalog.global () in
   let base_path = Filename.temp_file "direct-runtime-resume-" "" in
   Unix.unlink base_path; Unix.mkdir base_path 0o700;
   Eio.Switch.on_release sw (fun () ->
-    Runtime_lane_preference.reset_for_testing ();
     Runtime.For_testing.restore runtime_snapshot;
     (match catalog_snapshot with None -> Llm_provider.Model_catalog.clear_global ()
      | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
@@ -169,7 +172,8 @@ is-default = true
       Keeper_repetition_scope.save context frame;
       let checkpoint_sink (snapshot : Agent_core.Agent.checkpoint_snapshot) =
         let checkpoint = {snapshot.checkpoint with session_id} in
-        Checkpoint.save_agent_core_classified ~session_dir checkpoint |> Result.map (fun _ -> ()) in
+        Checkpoint.save_agent_core_classified
+          ~history_retained:(history_retained ()) ~session_dir checkpoint |> Result.map (fun _ -> ()) in
       let deferred = ref None in
       Option.iter (fun admission -> Continuation.consume ~base_path ~keeper_name ~operation_id admission
         |> require "consume same checkpoint") admission;
@@ -254,7 +258,8 @@ is-default = true
         Agent_core.Types.make_message ~role:Agent_core.Types.Assistant
           [Agent_core.Types.Text "Board receipt: newer shared work already posted once"]];
       turn_count=checkpoint.turn_count + 1} in
-    Checkpoint.save_agent_core_classified ~session_dir checkpoint |> require "advance shared canonical history" |> ignore;
+    Checkpoint.save_agent_core_classified
+      ~history_retained:(history_retained ()) ~session_dir checkpoint |> require "advance shared canonical history" |> ignore;
     if lose_retained then (
       (* Model the observed pre-fix store: the original reference exists in the
          journal, but no retained bytes authorize a replay after restart. *)

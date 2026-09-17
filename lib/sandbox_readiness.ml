@@ -98,12 +98,40 @@ let apple_builder_rosetta ~run =
 let apple_inventory ~run =
   command ~run ["container"; "list"; "-a"; "--format"; "json"] (fun stdout ->
     json stdout (function `List _ -> Service_ready | _ -> Probe_failed "Apple Container returned an invalid inventory"))
+(* The build also boots a kernel, and Apple Container boots one only when a
+   default kernel is configured. A machine that never ran [container system
+   kernel set] has no default: the service still answers, the readiness above
+   still passes, and the first [container build] dies with "default kernel not
+   configured for architecture arm64". Measured 2026-09-17 on a fresh Mac:
+   setup stopped at imp's image preparation with exactly that error. The
+   property list carries the configured kernel as [kernel.binaryPath]; every
+   unreadable shape -- the field absent, an empty object, an empty path --
+   names no configured kernel. *)
+let kernel_missing_reason =
+  "No default kernel is configured for this architecture; image builds need one"
+let apple_default_kernel_configured ~run =
+  match run ["container"; "system"; "property"; "list"; "--format"; "json"] with
+  | Error (Missing_command | Command_failed) -> false
+  | Ok stdout ->
+    (match Yojson.Safe.from_string stdout with
+     | `Assoc fields -> (match List.assoc_opt "kernel" fields with
+       | Some (`Assoc kernel) -> (match List.assoc_opt "binaryPath" kernel with
+         | Some (`String path) -> path <> ""
+         | Some _ | None -> false)
+       | Some _ | None -> false)
+     | _ -> false
+     | exception Yojson.Json_error _ -> false)
 (* Only a service that answered has a builder worth asking about. A stopped or
    absent service is its own missing piece, with its own installer and start
    actions, however Rosetta stands. *)
 let apple_container_needs_rosetta ~run =
   match apple_inventory ~run with
   | Service_ready -> apple_builder_rosetta ~run = Ok Rosetta_missing
+  | Missing_prerequisite _ | Unsupported_host _ | Unsupported_capability _ | Probe_failed _
+  | Needs_configuration _ -> false
+let apple_container_needs_default_kernel ~run =
+  match apple_inventory ~run with
+  | Service_ready -> not (apple_default_kernel_configured ~run)
   | Missing_prerequisite _ | Unsupported_host _ | Unsupported_capability _ | Probe_failed _
   | Needs_configuration _ -> false
 let probe ~host ~run ~require_rootless ~require_userns backend =
@@ -120,8 +148,10 @@ let probe ~host ~run ~require_rootless ~require_userns backend =
   | Apple_container, Macos _ ->
     (match apple_inventory ~run with
      | Service_ready -> (match apple_builder_rosetta ~run with
-       | Ok (Rosetta_not_used | Rosetta_installed) -> Service_ready
        | Ok Rosetta_missing -> Missing_prerequisite rosetta_missing_reason
+       | Ok (Rosetta_not_used | Rosetta_installed) ->
+         if apple_default_kernel_configured ~run then Service_ready
+         else Missing_prerequisite kernel_missing_reason
        | Error reason -> Probe_failed reason)
      | unanswered -> unanswered)
   | Nerdctl_kata, Macos _ -> Unsupported_host "Kata setup requires a Linux host with hardware virtualization"

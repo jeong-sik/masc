@@ -21,7 +21,7 @@ type t =
     (** Turn owner materialized at load time. HTTP bindings become
         [Agent_core]; official client runtimes remain distinct and can never
         be dispatched as a fake LLM provider config. *)
-  ; candidate_preference : Runtime_lane_preference.candidate
+  ; candidate_backpressure : Runtime_candidate_backpressure.candidate
     (** Candidate-only backpressure tied to the frozen dispatch binding. *)
   ; quota_scope : Runtime_quota_window.scope
     (** Quota ownership key frozen at materialization, from the same
@@ -322,18 +322,18 @@ let of_binding (cfg : config) (b : binding) : (t, drop_reason) result =
            ; model
            ; binding = b
            ; execution
-           ; candidate_preference = (
+           ; candidate_backpressure = (
                let binding = match execution with
                  | Runtime_execution.Agent_core config ->
                      (match Agent_core.Binding_identity.of_provider_config
                        ~transport:Agent_core.Binding_identity.Http config with
-                      | Ok binding -> Runtime_lane_preference.Resolved_http_binding binding
-                      | Error reason -> Runtime_lane_preference.Http_binding_unavailable reason)
+                      | Ok binding -> Runtime_candidate_backpressure.Resolved_http_binding binding
+                      | Error reason -> Runtime_candidate_backpressure.Http_binding_unavailable reason)
                  | Runtime_execution.Codex_app_server _
                  | Runtime_execution.Claude_code _
-                 | Runtime_execution.Antigravity_cli _ -> Runtime_lane_preference.Official_client_binding
+                 | Runtime_execution.Antigravity_cli _ -> Runtime_candidate_backpressure.Official_client_binding
                in
-               Runtime_lane_preference.create_candidate ~binding)
+               Runtime_candidate_backpressure.create_candidate ~binding)
            ; quota_scope = quota_scope_of_materialized ~provider ~execution
            }
        | Error reason -> Error (Execution_unbuildable reason))
@@ -1469,9 +1469,9 @@ let set_loaded
       && Runtime_schema.equal_provider old.provider runtime.provider
       && Runtime_schema.equal_model_spec old.model runtime.model
       && Runtime_schema.equal_binding old.binding runtime.binding
-      && Runtime_lane_preference.same_candidate_binding
-           old.candidate_preference runtime.candidate_preference) previous with
-    | Some old -> { runtime with candidate_preference = old.candidate_preference }
+      && Runtime_candidate_backpressure.same_candidate_binding
+           old.candidate_backpressure runtime.candidate_backpressure) previous with
+    | Some old -> { runtime with candidate_backpressure = old.candidate_backpressure }
     | None -> runtime
   in
   let runtimes = List.map preserve_candidate runtimes in
@@ -1814,8 +1814,8 @@ let max_context_of_runtime (rt : t) : int =
 (* Resolve a keeper assignment to a lane. Declared lanes are preferred so a lane
    id can shadow a runtime id (lanes are explicit operator routing constructs).
    An assignment naming a bare runtime gets a lane of its own rather than a
-   bare dispatch target: the lane id is what keys sticky preference and quota
-   demotion, so without one those mechanisms are simply off for that keeper.
+   bare dispatch target: the lane is what carries failover and quota demotion,
+   so without one those mechanisms are simply off for that keeper.
    [Unavailable] retains a configured ID whose capability catalog entry is
    absent; [Missing] means no configured lane or runtime has that ID. *)
 let resolve_assignment (assigned_id : string) =

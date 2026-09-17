@@ -15,6 +15,11 @@
  (libraries masc_test_deps))
 
 (test
+ (name test_keeper_request_failure)
+ (modules test_keeper_request_failure)
+ (libraries masc_test_deps))
+
+(test
  (name test_keeper_tool_execute_script_paths)
  (modules test_keeper_tool_execute_script_paths)
  ; Deliberately minimal: the script-paths vocabulary now lives with its
@@ -246,7 +251,7 @@
   test_keeper_running_reconcile_attempt
   test_attempt_state
   test_runtime_attempt_fsm
-  test_runtime_lane_preference
+  test_runtime_candidate_backpressure
   test_runtime_quota_window
   test_keeper_turn_driver_accept
   test_keeper_sandbox_persistent
@@ -605,7 +610,7 @@
   test_keeper_running_reconcile_attempt
   test_attempt_state
   test_runtime_attempt_fsm
-  test_runtime_lane_preference
+  test_runtime_candidate_backpressure
   test_runtime_quota_window
   test_keeper_turn_driver_accept
   test_keeper_sandbox_persistent
@@ -5921,7 +5926,8 @@
 (rule
  (alias runtest-test_install_runtime_setup)
  (deps test_install_runtime_setup.py ../scripts/install-runtime-setup.py
-       ../bin/main_eio.exe (source_tree ../scripts/fixtures/release-evidence))
+       ../bin/main_eio.exe (source_tree ../scripts/fixtures/release-evidence)
+       ../config/runtime.toml ../config/agent-core-models-overlay.toml)
  (action
   (run python3 %{dep:test_install_runtime_setup.py} --binary %{dep:../bin/main_eio.exe})))
 

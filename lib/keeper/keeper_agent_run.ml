@@ -1483,6 +1483,8 @@ let run_turn
                   Keeper_checkpoint_store.save_agent_core_classified_with_encoding_memo
                     ~session_dir:session.session_dir
                     ~encoding_memo:checkpoint_encoding_memo
+                    ~history_retained:
+                      (Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained)
                     checkpoint
                 with
                 | Ok (Keeper_checkpoint_store.Saved _) ->

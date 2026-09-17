@@ -2,7 +2,10 @@
 
 (** User-facing agent-core error message for keeper chat/tool surfaces.
     Keeps low-level agent-core prefixes out of persisted keeper replies while
-    telemetry and terminal reason codes continue to use structured errors. *)
+    telemetry and terminal reason codes continue to use structured errors.
+
+    The sentence is [Keeper_request_failure.summary] of the projected value
+    (RFC-0454 D2); this name exists for the surfaces that still take a string. *)
 val user_message_of_core_error : Agent_core.Error.t -> string
 
 (** Layer-aware termination semantics for agent-core errors crossing the AGENT_CORE ->

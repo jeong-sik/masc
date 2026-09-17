@@ -97,13 +97,12 @@ type slot =
       (** [blocks] in the order the assembly concatenates them. *)
 
 (** Where a candidate stands in the walk the next fresh cycle takes: the
-    lane as declared with the sticky last-good candidate moved first
-    ({!Runtime_lane_preference.prefer_order_with}), then quota and
-    backpressure demotion ({!Keeper_turn_driver.assignment_walk_order}). Two
-    things the walk does are not forecast: a head replaced for an input
-    modality it cannot take (RFC-0265), and a turn that failed and deferred
-    its input, whose next cycle walks the remaining candidates instead;
-    that hint lives in the heartbeat loop. *)
+    lane as declared, then quota and backpressure demotion
+    ({!Keeper_turn_driver.assignment_walk_order}). Two things the walk does
+    are not forecast: a head replaced for an input modality it cannot take
+    (RFC-0265), and a turn that failed and deferred its input, whose next
+    cycle walks the remaining candidates instead; that hint lives in the
+    heartbeat loop. *)
 type place =
   { walks_at : int  (** 0 walks first. *)
   ; declared_at : int option
@@ -113,19 +112,9 @@ type place =
         (** Whether the path rests now (RFC-provider-path-rest §3.3). *)
   }
 
-type preferred =
-  { preferred_runtime_id : string
-  ; noted_at : float  (** Unix epoch of the success that set it. *)
-  ; ttl_s : float  (** How long a success keeps it; every success renews it. *)
-  }
-
 type walk =
   { lane_id : string
   ; declared : string list  (** The lane as declared, head first. *)
-  ; preferred : preferred option
-        (** The lane's sticky last-good candidate, shared by every keeper the
-            lane routes, read from the same observation the order was; it
-            is a member of the candidates and walks first while it lasts. *)
   }
 
 type walk_refusal = Keeper_turn_driver.assignment_refusal

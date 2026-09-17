@@ -6261,21 +6261,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                      lane.rrl_runtime_ids)
               in
               add_row "Failover Chain:" hops;
-              (match lane.rrl_preferred_candidate with
-               | Some pref ->
-                   let short_p =
-                     match String.split_on_char '.' pref with
-                     | [ _prov; m ] -> m
-                     | _ -> pref
-                   in
-                   add_row "Active Candidate:"
-                     (Printf.sprintf "%s (sticky winner)" short_p)
-               | None ->
-                   match lane.rrl_runtime_ids with
-                   | first :: _ ->
-                       add_row "Active Candidate:"
-                         (Printf.sprintf "%s (head)" first)
-                   | [] -> ())
+              (match lane.rrl_runtime_ids with
+               | first :: _ -> add_row "Head Candidate:" first
+               | [] -> ())
           | None -> ())
      | Some { ra_target_id = Some tid; _ } ->
          (match state.runtime_surface with
@@ -10414,7 +10402,6 @@ let runtime_detail_lines state target ~width =
                ( row.rcr_runtime
                , [ row.rcr_lane_id ]
                , Some (row.rcr_position, row.rcr_candidate_count)
-               , row.rcr_preferred_at_ts
                , row.rcr_probe ))
     | Some snapshot, Runtime_catalog_entry { runtime_id } ->
         runtime_all_rows snapshot
@@ -10423,14 +10410,14 @@ let runtime_detail_lines state target ~width =
                let probe =
                  Tui_decode.runtime_probe_for_id snapshot ~runtime_id:runtime.ro_id
                in
-               runtime, lanes, None, None, probe)
+               runtime, lanes, None, probe)
   in
   match reading with
   | None ->
       [ Theme.warn (),
         "  This runtime row is no longer present in the refreshed projection"
       ]
-  | Some (runtime, lanes, position, preferred_at, probe) ->
+  | Some (runtime, lanes, position, probe) ->
       let fields =
         runtime_detail_field ~width ~style:Ansi.reset "Runtime ID" runtime.ro_id
         @ runtime_detail_field ~width ~style:Ansi.reset "Provider" runtime.ro_provider
@@ -10456,17 +10443,6 @@ let runtime_detail_lines state target ~width =
         | Some (at, total) ->
             runtime_detail_field ~width ~style:Ansi.reset "Lane position"
               (Printf.sprintf "%d of %d" at total)
-      in
-      let sticky =
-        match preferred_at with
-        | None -> []
-        | Some at ->
-            (* The terminal's clock, like every other timestamp on the screen;
-               the list row beside this reads "last success 19:18:20" and the
-               detail read the same instant as "2026-08-24T10:18:20Z". *)
-            runtime_detail_field ~width ~style:Ansi.dim "Last successful at"
-              (Terminal_text.short_timestamp
-                 (Masc_domain.iso8601_of_unix_seconds at))
       in
       let quota =
         match runtime_quota_badge runtime with
@@ -10546,7 +10522,7 @@ let runtime_detail_lines state target ~width =
             runtime_detail_field ~width ~style:Ansi.reset "Bound keepers" names
             @ runtime_detail_field ~width ~style:Ansi.reset "Keeper telemetry" activity_str
       in
-      fields @ candidate @ sticky @ quota @ keeper_lines @ probe_lines
+      fields @ candidate @ quota @ keeper_lines @ probe_lines
 
 let render_runtime_detail (state : state) target =
   let terminal_rows, cols = get_terminal_size () in
@@ -10875,7 +10851,6 @@ let render_runtime (state : state) =
           let runtime = candidate.rcr_runtime in
           let is_first = candidate.rcr_position = 1 in
           let is_last = candidate.rcr_position = candidate.rcr_candidate_count in
-          let is_active = Option.is_some candidate.rcr_preferred_at_ts in
           (* A lane id is the workspace's name and a fallback row's cell is
              this renderer's own word, and the two are cut by different
              rules -- see [runtime_label_column]. *)
@@ -10890,8 +10865,7 @@ let render_runtime (state : state) =
                    (candidate.rcr_position - 1))
           in
           let candidate_label =
-            Printf.sprintf "%s%d/%d %s"
-              (if is_active then "\xe2\x98\x85 " else "")
+            Printf.sprintf "%d/%d %s"
               candidate.rcr_position
               candidate.rcr_candidate_count
               (Terminal_text.single_line runtime.ro_id)
@@ -10920,30 +10894,9 @@ let render_runtime (state : state) =
             else []
           in
           let lane_fact =
-            match candidate.rcr_preferred_at_ts with
-            | Some at ->
-                (* One timestamp, said once. [rcr_preferred_at_ts] carries
-                   [Runtime_lane_preference.preferred_of_lane]'s [noted_at],
-                   which {!Runtime_lane_preference.note_success} re-stamps on
-                   every successful attempt -- so it is when the candidate
-                   last answered, and never a point the stickiness has run
-                   from. The row said both, printing the same value twice,
-                   and the "sticky since" half was the one that was not true.
-
-                   It also cost the width that made the rest of this cell
-                   disappear: 53 columns of detail in the 18 a 100-column
-                   terminal leaves it (#36131). *)
-                [ (Theme.ok ())
-                  ^ "\xe2\x98\x85 active (last success "
-                  ^ Terminal_text.clock_timestamp
-                      (Masc_domain.iso8601_of_unix_seconds at)
-                  ^ ")"
-                  ^ Ansi.reset
-                ]
-            | None when candidate.rcr_candidate_count = 1 -> [ "single candidate" ]
-            | None ->
-                if is_first then [ "head" ]
-                else [ Printf.sprintf "fallback #%d" (candidate.rcr_position - 1) ]
+            if candidate.rcr_candidate_count = 1 then [ "single candidate" ]
+            else if is_first then [ "head" ]
+            else [ Printf.sprintf "fallback #%d" (candidate.rcr_position - 1) ]
           in
           let default_fact = if runtime.ro_is_default then [ (Theme.ok ()) ^ "[default]" ^ Ansi.reset ] else [] in
           (* The lane fact leads. This cell is what is left of the row after
@@ -11694,20 +11647,8 @@ let render_runtime_pick (state : state) =
                          lane.rrl_runtime_ids)
                   in
                   let hops = Printf.sprintf "(%d hops)" (List.length lane.rrl_runtime_ids) in
-                  let pref =
-                    match lane.rrl_preferred_candidate with
-                    | Some p ->
-                        let short_p =
-                          match String.split_on_char '.' p with
-                          | [ _prov; m ] -> m
-                          | _ -> p
-                        in
-                        Printf.sprintf " [active: %s]" short_p
-                    | None -> ""
-                  in
                   let route_col = fit_width (Terminal_text.single_line chain) (max 24 (cols - 62)) in
-                  Printf.sprintf "%s%s  %s  %s%s"
-                    kind_badge target route_col hops (Ansi.dim ^ pref ^ Ansi.reset)
+                  Printf.sprintf "%s%s  %s  %s" kind_badge target route_col hops
               | Masc_tui_types.Pick_model option ->
                   let kind_badge = Ansi.dim ^ "[MODEL]" ^ Ansi.reset in
                   let target = fit_width (Terminal_text.single_line option.ro_id) 24 in

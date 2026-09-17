@@ -7,12 +7,12 @@ file, long-polls `/browser-lane/poll`, and forwards `browser.info`, `tabs.list`,
 frames. It posts correlated replies to `/browser-lane/result`. These cover
 browser metadata, tab listing, page text/elements, screenshots, and page interactions.
 
-After installing MASC, register its native host separately. Use the same
-published tag as the installed binary (the example requires `v0.34.0` to have
-been published). No source checkout or local build is required:
+After installing MASC, register its native host separately. The commands take
+the host installer and the extension from the tag of the installed `masc`
+binary. No source checkout or local build is required:
 
 ```sh
-TAG=v0.34.0
+TAG="v$("$HOME/.local/bin/masc" --version 2>/dev/null)"
 BASE_PATH="$HOME/masc-workspace"
 curl -fsSL "https://raw.githubusercontent.com/jeong-sik/masc/$TAG/connectors/browser/install-host.sh" \
   -o /tmp/masc-install-host.sh

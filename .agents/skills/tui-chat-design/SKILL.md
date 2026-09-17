@@ -124,9 +124,14 @@ Ctrl-F 는 `Origin_inline → Origin_row → Origin_bare → Origin_inline` 으�
 - **`↳` 호출 줄, `proof · turn=… · use=…`, detail 줄은 Ctrl-D 뒤다.**
   `msg_tool_visibility = Tools_full` 일 때만 그린다. 새 키를 만들지 않고 기존 도구 펼침 축에
   탄다.
-- **도구 블록은 기본 `Tools_compact` 다.** 호출이 둘 이하면 호출별 줄을 그리고, 셋 이상이면
-  inventory 헤더 한 줄로 접는다. 실패·진행 중 호출은 접지 않고 독립 줄로 남는다.
-- **진행 중인 일은 펼쳐진 채다.** 완료되는 순간 접혀 한 줄이 된다.
+- **도구 블록은 기본 `Tools_compact` 다.** 반환된 호출은 inventory 헤더 한 줄로 접히고,
+  실패·미반환·진행 중 호출은 헤더의 절이 아니라 자기 마크의 독립 줄로 남는다 — 단 셋
+  이상 모였을 때만. 둘 이하면 쪼개도 Full 이 그리는 두 줄이라 접지 않고, 실패도 헤더가
+  `1 failed: web_fetch` 처럼 이름을 불러 한 줄이다 (`project_tool_block` Compact 팔,
+  `bin/masc_tui_keeper_chat_transcript.ml`).
+- **돌아가는 동안에도 같은 토글로 그린다.** 라이브 블록과 확정된 블록은 같은
+  `project_tool_block` / `skill_rows` 를 지난다. 줄이 접히는 시점은 완료가 아니라
+  Ctrl-D 토글이다.
 
 ## 줄의 문구
 

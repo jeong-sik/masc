@@ -17,6 +17,13 @@
 open Alcotest
 open Masc
 
+(* What the operator's window currently says. The store takes the window as an
+   argument -- it is reachable from a raw Domain, where reading a setting
+   raises -- so every caller names it. These cases are not about the window and
+   pass what production passes. *)
+let history_retained () =
+  Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained
+
 let () =
   Server_startup_state.mark_state_ready ()
   |> Result.get_ok
@@ -78,7 +85,8 @@ let make_checkpoint ~session_id ~turn_count ~marker =
   }
 
 let save_ok ~session_dir ckpt label =
-  match Keeper_checkpoint_store.save_agent_core_classified ~session_dir ckpt with
+  match Keeper_checkpoint_store.save_agent_core_classified
+    ~history_retained:(history_retained ()) ~session_dir ckpt with
   | Ok _ -> ()
   | Error e -> fail (label ^ " unexpectedly failed: " ^ e)
 
@@ -120,6 +128,7 @@ let test_structurally_invalid_checkpoint_is_refused_at_the_store () =
   let sid = "structural-guard" in
   match
     Keeper_checkpoint_store.save_agent_core_classified
+      ~history_retained:(history_retained ())
       ~session_dir
       (checkpoint_with_orphan_tool_result ~session_id:sid)
   with
@@ -188,6 +197,7 @@ let test_unencodable_payload_is_recovered_at_the_sink () =
   let path = Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:sid in
   match
     Keeper_checkpoint_store.save_agent_core_classified
+      ~history_retained:(history_retained ())
       ~session_dir
       (checkpoint_with_unencodable_tool_use ~session_id:sid)
   with
@@ -238,6 +248,7 @@ let test_stage_saves_sharing_one_memo_write_canonical_bytes () =
   let save label (cp : Agent_core.Checkpoint.t) expected =
     match
       Keeper_checkpoint_store.save_agent_core_classified_with_encoding_memo
+        ~history_retained:(history_retained ())
         ~session_dir
         ~encoding_memo
         cp
@@ -317,7 +328,8 @@ let test_forward_equal_and_stale () =
     save_ok ~session_dir (make_checkpoint ~session_id:sid ~turn_count:6 ~marker:"v6b") "equal save";
     (* Stale write must be a nonfatal no-op and must not touch disk. *)
     (match
-       Keeper_checkpoint_store.save_agent_core_classified ~session_dir
+       Keeper_checkpoint_store.save_agent_core_classified
+         ~history_retained:(history_retained ()) ~session_dir
          (make_checkpoint ~session_id:sid ~turn_count:4 ~marker:"v4-stale")
      with
      | Ok (Keeper_checkpoint_store.Stale_noop
@@ -344,7 +356,8 @@ let test_disk_is_the_watermark_ssot () =
     let sid = "sess-cold" in
     save_ok ~session_dir (make_checkpoint ~session_id:sid ~turn_count:8 ~marker:"v8") "seed save";
     (match
-       Keeper_checkpoint_store.save_agent_core_classified ~session_dir
+       Keeper_checkpoint_store.save_agent_core_classified
+         ~history_retained:(history_retained ()) ~session_dir
          (make_checkpoint ~session_id:sid ~turn_count:3 ~marker:"v3-stale")
      with
      | Ok (Keeper_checkpoint_store.Stale_noop
@@ -371,7 +384,8 @@ let test_externally_replaced_canonical_is_the_watermark () =
       (make_checkpoint ~session_id ~turn_count:9 ~marker:"external-v9"
        |> Agent_core.Checkpoint.to_string);
     match
-      Keeper_checkpoint_store.save_agent_core_classified ~session_dir
+      Keeper_checkpoint_store.save_agent_core_classified
+        ~history_retained:(history_retained ()) ~session_dir
         (make_checkpoint ~session_id ~turn_count:7 ~marker:"stale-v7")
     with
     | Ok
@@ -418,7 +432,8 @@ let test_superseded_canonical_is_replaced () =
         ~version:(Agent_core.Checkpoint.checkpoint_version - 1)
     in
     (match
-       Keeper_checkpoint_store.save_agent_core_classified ~session_dir
+       Keeper_checkpoint_store.save_agent_core_classified
+         ~history_retained:(history_retained ()) ~session_dir
          (make_checkpoint ~session_id ~turn_count:1 ~marker:"after-the-bump")
      with
      | Ok (Keeper_checkpoint_store.Saved _) -> ()
@@ -449,7 +464,8 @@ let test_newer_canonical_is_not_replaced () =
     in
     let before = Fs_compat.load_file canonical_path in
     (match
-       Keeper_checkpoint_store.save_agent_core_classified ~session_dir
+       Keeper_checkpoint_store.save_agent_core_classified
+         ~history_retained:(history_retained ()) ~session_dir
          (make_checkpoint ~session_id ~turn_count:1 ~marker:"older-binary")
      with
      | Ok _ -> fail "an older binary overwrote a newer canonical"
@@ -469,7 +485,8 @@ let test_empty_session_id_rejected () =
   let session_dir = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
     (match
-       Keeper_checkpoint_store.save_agent_core_classified ~session_dir
+       Keeper_checkpoint_store.save_agent_core_classified
+         ~history_retained:(history_retained ()) ~session_dir
          (make_checkpoint ~session_id:"" ~turn_count:1 ~marker:"empty")
      with
      | Ok _ -> fail "checkpoint store accepted an empty session_id"
@@ -597,6 +614,7 @@ let test_invalid_existing_checkpoint_fails_closed () =
     Fs_compat.save_file path corrupt;
     (match
        Keeper_checkpoint_store.save_agent_core_classified
+         ~history_retained:(history_retained ())
          ~session_dir
          (make_checkpoint ~session_id ~turn_count:9 ~marker:"must-not-write")
      with
@@ -612,6 +630,7 @@ let test_invalid_existing_checkpoint_fails_closed () =
     Fs_compat.save_file path mismatched;
     (match
        Keeper_checkpoint_store.save_agent_core_classified
+         ~history_retained:(history_retained ())
          ~session_dir
          (make_checkpoint ~session_id ~turn_count:11 ~marker:"must-not-replace")
      with
@@ -632,12 +651,14 @@ let test_multi_domain_writers_leave_max_turn_on_disk () =
     let writer_count = List.length turns in
     let ready = Atomic.make 0 in
     let start = Atomic.make false in
+    (* Read here, not inside the writer: the writers are raw Domains. *)
+    let history_retained = history_retained () in
     let writer turn_count =
       Atomic.incr ready;
       while not (Atomic.get start) do
         Domain.cpu_relax ()
       done;
-      Keeper_checkpoint_store.save_agent_core_classified
+      Keeper_checkpoint_store.save_agent_core_classified ~history_retained
         ~session_dir
         (make_checkpoint
            ~session_id
@@ -708,9 +729,12 @@ let test_ready_runtime_raw_domain_save () =
   Fun.protect ~finally:(fun () -> cleanup_dir base_dir) @@ fun () ->
   let session_id = "raw-domain-ready" in
   let session_dir = Filename.concat base_dir "new-session" in
+  (* Read on this fiber: a raw Domain cannot take the settings mutex, which is
+     why the store takes the window as an argument instead of reading it. *)
+  let history_retained = history_retained () in
   let result =
     Domain.spawn (fun () ->
-      Keeper_checkpoint_store.save_agent_core_classified ~session_dir
+      Keeper_checkpoint_store.save_agent_core_classified ~history_retained ~session_dir
         (make_checkpoint ~session_id ~turn_count:11 ~marker:"raw-domain"))
     |> Domain.join
   in
@@ -975,7 +999,8 @@ let test_exact_source_cas_updates_canonical_watermark () =
      | Keeper_checkpoint_store.Not_installed _ ->
        fail "release failure downgraded the installed checkpoint");
     match
-      Keeper_checkpoint_store.save_agent_core_classified ~session_dir
+      Keeper_checkpoint_store.save_agent_core_classified
+        ~history_retained:(history_retained ()) ~session_dir
         (make_checkpoint ~session_id ~turn_count:8 ~marker:"stale!")
     with
     | Ok
@@ -1421,6 +1446,7 @@ let test_summary_answers_watermark_and_count_without_reading () =
    | Error _ -> fail "message count read the unreadable file");
   match
     Keeper_checkpoint_store.save_agent_core_classified
+      ~history_retained:(history_retained ())
       ~session_dir
       (make_checkpoint ~session_id:sid ~turn_count:2 ~marker:"stale")
   with
@@ -1514,6 +1540,7 @@ let test_summary_follows_a_checkpoint_replaced_behind_it () =
    | Error _ -> fail "replacement could not be read");
   (match
      Keeper_checkpoint_store.save_agent_core_classified
+       ~history_retained:(history_retained ())
        ~session_dir
        (make_checkpoint ~session_id:sid ~turn_count:4 ~marker:"four")
    with
@@ -1615,7 +1642,7 @@ let test_history_retention_after_syscall_offload () =
   ensure_fs env;
   let session_dir = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
-  let retained = Keeper_checkpoint_store.max_agent_core_history_retained in
+  let retained = (Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained) in
   let checkpoint turn_count =
     { (make_checkpoint ~session_id:"history-retention" ~turn_count ~marker:"history")
       with created_at = 1000. +. float_of_int turn_count }
@@ -1629,6 +1656,58 @@ let test_history_retention_after_syscall_offload () =
   check bool "oldest retained snapshot survives" true (List.mem (snapshot 3) files);
   check bool "newest snapshot survives" true (List.mem (snapshot (retained + 2)) files)
 
+(* The window an operator sets has to reach the prune. [save_ok] reads the
+   setting the way production does and hands it to the save, so these two
+   counts are the whole path: a save that ignored [~history_retained], or a
+   prune that clamped it to the shipped default, fails one of them. Both
+   directions are checked because a clamp only shows up in one. *)
+let widened_history_window = 5
+let narrowed_history_window = 1
+
+let test_history_window_follows_the_runtime_setting () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  let session_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime_params.clear Runtime_settings.keeper_checkpoint_history_retained;
+      cleanup_dir session_dir)
+  @@ fun () ->
+  let default_window =
+    Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained
+  in
+  let set_window window =
+    match
+      Runtime_params.set Runtime_settings.keeper_checkpoint_history_retained window
+    with
+    | Ok () -> ()
+    | Error detail -> fail ("setting the history window failed: " ^ detail)
+  in
+  let retained_files () =
+    List.length (Keeper_checkpoint_store.list_agent_core_history_files ~session_dir)
+  in
+  let checkpoint turn_count =
+    { (make_checkpoint ~session_id:"history-setting" ~turn_count ~marker:"history")
+      with created_at = 2000. +. float_of_int turn_count }
+  in
+  let next_turn = ref 0 in
+  let save_one () =
+    incr next_turn;
+    save_ok ~session_dir (checkpoint !next_turn) "history save"
+  in
+  set_window widened_history_window;
+  for _ = 1 to widened_history_window + 2 do save_one () done;
+  check int "a window wider than the default keeps that many"
+    widened_history_window (retained_files ());
+  set_window narrowed_history_window;
+  save_one ();
+  check int "narrowing it cuts the history down on the very next save"
+    narrowed_history_window (retained_files ());
+  Runtime_params.clear Runtime_settings.keeper_checkpoint_history_retained;
+  for _ = 1 to default_window + 1 do save_one () done;
+  check int "clearing the override puts the default window back"
+    default_window (retained_files ())
+
 let () =
   run "Keeper_checkpoint_store checkpoint watermark (RFC-0225 §3.2)"
     [
@@ -1638,6 +1717,8 @@ let () =
             test_history_link_keeps_transaction_until_cancelled_job_finishes;
           test_case "history syscall retains exact rolling window" `Quick
             test_history_retention_after_syscall_offload;
+          test_case "history window follows the runtime setting" `Quick
+            test_history_window_follows_the_runtime_setting;
           test_case "run context binds generation before AGENT_CORE checkpoint" `Quick
             test_run_context_binds_generation_before_agent_core_checkpoint;
           test_case "forward and equal saves pass, stale save is no-op" `Quick

@@ -11,10 +11,16 @@ let docker security = [ ["docker";"info";"--format";"{{json .}}"],
 let probe ?(rootless=false) ?(userns=false) host responses backend =
   S.probe ~host ~run:(run_fixture responses) ~require_rootless:rootless ~require_userns:userns backend
 let apple_inventory = ["container";"list";"-a";"--format";"json"], Ok "[]"
-let apple_build ~rosetta = ["container";"system";"property";"list";"--format";"json"],
-  Ok (Printf.sprintf {|{"build":{"cpus":2,"memory":"2048mb","rosetta":%b},"container":{"cpus":4}}|} rosetta)
+(* The one property-list reply both builder questions read: [build.rosetta]
+   for the VM's start, [kernel.binaryPath] for the kernel its builds boot. *)
+let apple_properties ?(kernel="opt/kata/share/kata-containers/vmlinux-6.18.35-197-debug") ~rosetta () =
+  ["container";"system";"property";"list";"--format";"json"],
+  Ok (Printf.sprintf {|{"build":{"cpus":2,"memory":"2048mb","rosetta":%b},"container":{"cpus":4},"kernel":{"binaryPath":"%s"}}|}
+        rosetta kernel)
+let apple_build ~rosetta = apple_properties ~rosetta ()
 let rosetta_receipt = ["pkgutil";"--pkg-info";"com.apple.pkg.RosettaUpdateAuto"]
-let apple_ready = [apple_inventory; rosetta_receipt, Ok "package-id: com.apple.pkg.RosettaUpdateAuto\n"]
+let apple_ready = [apple_inventory; rosetta_receipt, Ok "package-id: com.apple.pkg.RosettaUpdateAuto\n"
+  ; apple_properties ~rosetta:true ()]
 let test_service_not_presence () =
   let missing = probe linux [] S.Docker in
   check bool "missing command classified" true
@@ -182,7 +188,7 @@ let test_an_apple_builder_that_cannot_start_is_not_ready () =
   let no_rosetta = rosetta_receipt, Error S.Command_failed in
   check bool "with Rosetta installed the builder is ready" true
     (state apple_ready = S.Service_ready);
-  check bool "and its configuration is not read, so a changed reply cannot unready it" false
+  check bool "and its property list was read once, for the kernel" true
     (List.mem ["container";"system";"property";"list";"--format";"json"] !asked);
   check bool "without Rosetta, a builder set not to use it is ready" true
     (state [apple_inventory; no_rosetta; apple_build ~rosetta:false] = S.Service_ready);
@@ -205,11 +211,50 @@ let test_an_apple_builder_that_cannot_start_is_not_ready () =
   check bool "a Mac whose builder needs Rosetta is not steered to Apple Container" true
     (S.recommend ~host:mac ~configured:None
        [probe mac needs_rosetta S.Apple_container; probe mac (docker []) S.Docker] = Some S.Docker)
+
+(* The same service with Rosetta settled but no default kernel configured:
+   the VM starts, and the first [container build] dies asking for one. The
+   property list carries the configured kernel as [kernel.binaryPath]; every
+   shape that names none -- an empty object, an empty path, the field absent
+   -- reads as unconfigured. Measured 2026-09-17 on a fresh Mac. *)
+let test_an_apple_builder_without_a_default_kernel_is_not_ready () =
+  let state responses =
+    (probe mac responses S.Apple_container).state in
+  let no_kernel ~rosetta = ["container";"system";"property";"list";"--format";"json"],
+    Ok (Printf.sprintf {|{"build":{"rosetta":%b},"kernel":{}}|} rosetta) in
+  check bool "a builder that starts but boots no kernel is a missing prerequisite" true
+    (match state [apple_inventory; rosetta_receipt, Ok "package-id: com.apple.pkg.RosettaUpdateAuto\n";
+                  no_kernel ~rosetta:false] with
+     | S.Missing_prerequisite reason -> String.equal reason S.kernel_missing_reason
+     | _ -> false);
+  List.iter (fun unreadable ->
+      check bool "a kernel that cannot be read is not configured" true
+        (match state [apple_inventory; rosetta_receipt, Ok "package-id: com.apple.pkg.RosettaUpdateAuto\n";
+                      unreadable] with
+         | S.Missing_prerequisite _ -> true | _ -> false))
+    [ ["container";"system";"property";"list";"--format";"json"], Ok {|{"build":{"rosetta":false}}|}
+    ; ["container";"system";"property";"list";"--format";"json"],
+      Ok {|{"build":{"rosetta":false},"kernel":{"binaryPath":""}}|}
+    ; ["container";"system";"property";"list";"--format";"json"], Ok "not json" ];
+  check bool "the CLI's answer: a service that answered and boots no kernel" true
+    (S.apple_container_needs_default_kernel
+       ~run:(run_fixture [apple_inventory; rosetta_receipt, Ok "package-id: com.apple.pkg.RosettaUpdateAuto\n";
+                          no_kernel ~rosetta:false]));
+  check bool "a stopped service is not a kernel question" false
+    (S.apple_container_needs_default_kernel
+       ~run:(run_fixture [["container";"list";"-a";"--format";"json"], Error S.Command_failed;
+                          no_kernel ~rosetta:false]));
+  check bool "a Mac that boots no kernel is not steered to Apple Container" true
+    (S.recommend ~host:mac ~configured:None
+       [probe mac [apple_inventory; rosetta_receipt, Ok "package-id: com.apple.pkg.RosettaUpdateAuto\n";
+                   no_kernel ~rosetta:false] S.Apple_container;
+        probe mac (docker []) S.Docker] = Some S.Docker)
 let () = run "sandbox readiness" ["selection",[
   test_case "real service reply, not CLI presence" `Quick test_service_not_presence;
   test_case "catalog selection boundary" `Quick test_catalog_selection_boundary;
   test_case "hardening requirements" `Quick test_hardening;
   test_case "OS recommendation and configured preference" `Quick test_recommendation;
+  test_case "a builder without a default kernel" `Quick test_an_apple_builder_without_a_default_kernel_is_not_ready;
   test_case "Kata prerequisites" `Quick test_kata_prerequisites;
   test_case "stale setup cannot overwrite newer selection" `Quick test_commit_conflict;
   test_case "validated staged selection preserves decisions" `Quick test_staging;

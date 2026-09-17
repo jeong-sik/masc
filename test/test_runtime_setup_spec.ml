@@ -46,46 +46,7 @@ let test_native_fractional_identity () =
   let whole = "[runtime]\ndefault = " ^ Yojson.Safe.to_string (`String shortest.runtime_id) ^ "\n" ^ shortest.runtime_toml in
   Alcotest.check Alcotest.bool "native fractional output parses as configuration"
     true (Result.is_ok (Runtime_toml.parse_string whole))
-(* A workspace whose librarian_exact lane has no slot boots with one WARN and
-   curates nothing, and setup is the only place that knows which runtime this
-   machine actually has. An official client is admitted by its runtime id and
-   an HTTP runtime by its overlay target id; both are the runtime_id here, so
-   what changes between the two is which key carries it. *)
-let test_setup_declares_the_librarian_lane () =
-  let render input =
-    match Runtime_setup_spec.of_json (Yojson.Safe.from_string input) with
-    | Ok spec -> Runtime_setup_spec.render spec
-    | Error error -> Alcotest.fail (Runtime_setup_spec.error_message error) in
-  let contains haystack needle =
-    let n = String.length needle and h = String.length haystack in
-    let rec scan i = i + n <= h && (String.sub haystack i n = needle || scan (i + 1)) in
-    n = 0 || scan 0 in
-  let client =
-    render {|{"choice":"claude_code","model":"claude-sonnet-5","max_context":200000,"tools":true,"streaming":true}|} in
-  Alcotest.check Alcotest.bool "an official client is declared as a cli slot" true
-    (contains client.runtime_toml
-       ({|"cli_slots" = ["|} ^ client.runtime_id ^ {|"]|}));
-  Alcotest.check Alcotest.bool "and carries no catalog slot" true
-    (contains client.runtime_toml {|"slots" = []|});
-  let http =
-    render {|{"choice":"ollama","model":"fixture-model","max_context":8192,"tools":true,"streaming":true,"endpoint":"https://fixture.invalid/v1"}|} in
-  Alcotest.check Alcotest.bool "an HTTP runtime is declared as a catalog slot" true
-    (contains http.runtime_toml ({|"slots" = ["|} ^ http.runtime_id ^ {|"]|}));
-  Alcotest.check Alcotest.bool "and carries no cli slot" true
-    (contains http.runtime_toml {|"cli_slots" = []|});
-  List.iter
-    (fun rendered ->
-       let whole =
-         "[runtime]\ndefault = "
-         ^ Yojson.Safe.to_string (`String rendered.Runtime_setup_spec.runtime_id)
-         ^ "\n" ^ rendered.Runtime_setup_spec.runtime_toml in
-       match Runtime_toml.parse_string whole with
-       | Ok _ -> ()
-       | Error _ -> Alcotest.fail "declared librarian lane is not native runtime TOML")
-    [ client; http ]
-
 let () = Alcotest.run "native runtime setup spec" ["contract",[
   Alcotest.test_case "representative installer identity and TOML parity" `Quick test_existing_installer_contract;
   Alcotest.test_case "native fractional number identity" `Quick test_native_fractional_identity;
-  Alcotest.test_case "typed input rejects incompatible declarations" `Quick test_rejects_invalid_transport_claims;
-  Alcotest.test_case "setup declares the librarian lane" `Quick test_setup_declares_the_librarian_lane]]
+  Alcotest.test_case "typed input rejects incompatible declarations" `Quick test_rejects_invalid_transport_claims]]

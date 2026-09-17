@@ -38,8 +38,7 @@ import {
   loadRuntimeResolved,
   runtimeResolvedState,
 } from '../lib/runtime-resolved-resource'
-import type { RuntimeAssignment, RuntimeLaneSnapshot } from '../api/schemas/runtime-resolved'
-import { formatCompactAge } from '../lib/format-time'
+import type { RuntimeAssignment } from '../api/schemas/runtime-resolved'
 import {
   runtimeCatalogDeclaredSpec,
   runtimeCatalogEffectiveCapabilities,
@@ -184,26 +183,6 @@ function AssignmentSourceBadge({ assignment }: { assignment: RuntimeAssignment }
   `
 }
 
-// Sticky failover observability for lane-routed keepers: the lane's
-// remembered last-good candidate (Runtime_lane_preference) is what the next
-// turn tries first, so the operator sees it next to the assignment badge.
-// Rendered only while the preference is live — an expired/absent entry
-// renders nothing rather than a guessed value.
-function LaneStickyBadge({ lane }: { lane: RuntimeLaneSnapshot }) {
-  if (lane.preferred_candidate == null) return null
-  const ageSec = lane.preferred_at_ts != null ? Date.now() / 1000 - lane.preferred_at_ts : null
-  return html`
-    <span
-      class="rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)] text-[var(--color-fg-muted)]"
-      data-testid="keeper-runtime-lane-sticky"
-      data-sticky-candidate=${lane.preferred_candidate}
-      title="sticky failover: TTL 내 마지막 성공 후보를 다음 턴에 우선 시도"
-    >
-      sticky → ${lane.preferred_candidate}${ageSec != null ? ` · ${formatCompactAge(ageSec)}` : ''}
-    </span>
-  `
-}
-
 function AssignmentTruth({
   state,
   keeperName,
@@ -221,13 +200,9 @@ function AssignmentTruth({
   if (!assignment) {
     return html`<span class="text-3xs text-[var(--color-status-warn)]" data-testid="keeper-runtime-assignment-missing">assignment projection에 Keeper가 없습니다.</span>`
   }
-  const lane = assignment.resolved.kind === 'lane'
-    ? state.data.lanes.find(item => item.id === assignment.resolved.id) ?? null
-    : null
   return html`
     <${Fragment}>
       <${AssignmentSourceBadge} assignment=${assignment} />
-      ${lane ? html`<${LaneStickyBadge} lane=${lane} />` : null}
     <//>
   `
 }

@@ -345,6 +345,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-runtime-note-field-and-dashboard-surfacing | Per-runtime note field & dashboard surfacing | Draft | - |
 | RFC-schedule-history-and-outcome | # RFC — A schedule's past and its result | Draft | - |
 | RFC-settings-typed-delivery | 설정은 env 이름이 아니라 typed 값으로 읽는 곳에 닿는다 | Draft | - |
+| RFC-setup-web-search-and-browser-lane | 웹 검색과 브라우저 레인도 음성처럼 다시 열리는 설정 명령을 갖는다 | Draft | - |
 | RFC-shell-ir-lines-heredoc-dquote | 셸 서브셋이 줄과 인용 heredoc과 큰따옴표 보간을 읽는다 | Draft | - |
 | RFC-shell-ir-simple-param-expansion | Shell IR가 단순 파라미터 확장($VAR)을 닫는다 — env 세팅 패턴이 마지막 걸림돌이다 | Draft | - |
 | RFC-shell-ir-typed-command-substitution | typed 커맨드 치환 — `$(cmd)`를 자식 IR로 읽고, 그 stdout을 argv 한 원소로 쓴다 | Draft | - |

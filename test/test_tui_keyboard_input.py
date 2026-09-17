@@ -6971,12 +6971,22 @@ def autonomous_turn_history_interaction() -> Interaction:
             # alone, which the body's own " · " separators also carry.
             (re.compile("\u00b7\\s+2 reasoning steps".encode()),
              "the thinking lane"),
-            ("\u25a0".encode(), "the tool block mark"),
+            # The block header row carries the badge, the quoted rail and
+            # the first call's status on one stripped row, so the mark is
+            # pinned against them the way the thinking lane is pinned
+            # against its body -- never the bare mark alone.
+            (re.compile("\u25a0\\s+\u2502\\s+\u2717".encode()),
+             "the tool block mark"),
         ):
             if find_needle(plain_pane, needle) < 0:
                 raise AssertionError(
                     f"Autonomous turn history did not draw {what}: {pane!r}"
                 )
+        # The lane words are gone for good: a revert that puts TOOLS or
+        # THINKING back on a badge must fail here, not pass silently.
+        for word in (b"TOOLS", b"THINKING"):
+            if word in plain_pane:
+                raise AssertionError(f"the lane word {word} is back: {pane!r}")
         escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
         os.write(master_fd, b"q")
 
@@ -7950,14 +7960,20 @@ def chat_visibility_modes_interaction(
                 raise AssertionError(
                     f"skill detail leaked into the compact frame: {initial!r}"
                 )
+        # The lane word is gone for good: a revert that puts SKILL back on
+        # the badge must fail here, not pass silently. Stripped, because
+        # the badge's SGR runs make a raw-byte absence shape-dependent.
+        if b"SKILL" in CSI_RE.sub(b"", initial):
+            raise AssertionError(f"the lane word SKILL is back: {initial!r}")
 
         folded = send_and_wait(
             process, master_fd, output, b"\x12", b"reasoning:folded"
         )
         # The fold marker's wording changed: the count line is the thinking
         # lane's mark and its padding over "2 reasoning steps · text not
-        # recorded" (no lane word -- the mark says the lane); the old
-        # "Reasoning / N line(s) folded" labels no longer exist.
+        # recorded" (no lane word -- the mark says the lane); for this
+        # one-line count row the old "Reasoning / N line(s) folded" label
+        # does not exist (it still fires for multi-line thinking bodies).
         if b"2 reasoning steps" not in folded or b"text not recorded" not in folded:
             raise AssertionError(f"folded reasoning did not draw its count: {folded!r}")
 
@@ -8042,8 +8058,12 @@ def chat_visibility_modes_interaction(
         # redraw of the transcript rows is the one place the action rows and
         # the proof line are emitted, so they are waited for here.
         for needle in (
+            # The action row's "↳" leads its body, so the needle starts
+            # there: the glyph is the fold's own shape, not just its text.
             re.compile(
-                rb"masc_fusion[\x1b\x20-\x7e]*?\xc2\xb7[\x1b\x20-\x7e]*?observed"
+                "\u21b3".encode()
+                + rb"[\x1b\x20-\x7e]*?"
+                + rb"masc_fusion[\x1b\x20-\x7e]*?\xc2\xb7[\x1b\x20-\x7e]*?observed"
             ),
             re.compile(rb"proof[\x1b\x20-\x7e]*?\xc2\xb7[\x1b\x20-\x7e]*?turn="),
         ):
@@ -11816,20 +11836,14 @@ def runtime_resolved_response() -> HttpResponse:
                 {
                     "id": "primary",
                     "runtime_ids": ["runtime-a", "runtime-b"],
-                    "preferred_candidate": "runtime-b",
-                    "preferred_at_ts": 1787566700.0,
                 },
                 {
                     "id": "degraded",
                     "runtime_ids": ["runtime-c"],
-                    "preferred_candidate": None,
-                    "preferred_at_ts": None,
                 },
                 {
                     "id": "unobserved",
                     "runtime_ids": ["runtime-d"],
-                    "preferred_candidate": None,
-                    "preferred_at_ts": None,
                 },
             ],
             "assignments": [
@@ -11947,10 +11961,9 @@ def runtime_surface_interaction(
                 "Resolved A / model-a",
                 "ready / reachable",
                 "CLI not probed",
-                # #36155 renamed this half: the timestamp beside "active" is
-                # the last success, and "sticky since" claimed a point the
-                # stickiness never ran from.
-                "active (last success",
+                # The lane fact says why this candidate is the one the lane
+                # walks: head, fallback #n, or single candidate.
+                "fallback #1",
                 "unobserved",
                 "single candidate",
                 # A fallback row's lane cell is a word this renderer wrote,
@@ -11971,8 +11984,10 @@ def runtime_surface_interaction(
                 )
             # Cut from the middle, the cell kept the half that says nothing:
             # "\u2514\u2026ack #1". A lane id is told apart by its tail and keeps the
-            # middle cut; a label is told apart by its head.
-            if "ack #" in stale_plain:
+            # middle cut; a label is told apart by its head. The detail column
+            # spells "fallback #1" whole, so only the ellipsis-led form is the
+            # cut one.
+            if "\u2026ack #" in stale_plain:
                 raise AssertionError(
                     f"Runtime cut a fallback label from its middle: {stale_plain!r}"
                 )

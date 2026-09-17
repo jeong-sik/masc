@@ -115,12 +115,11 @@ let build_runtime_execution
          (Agent_core.Error.InvalidConfig
             { field = "runtime.context_window"; detail }))
   | Ok entry_resolution ->
-    (* #28765: the prompt is shaped once per turn, but sticky reordering
-       and in-turn failover mean any candidate in the entry point's lane
-       can end up serving that same prompt. The only single budget no
-       serving candidate can overflow is the minimum across the lane's
-       candidates — and a minimum is order-independent, so when the
-       sticky reorder runs stops mattering. A runtime outside any lane
+    (* #28765: the prompt is shaped once per turn, but in-turn failover
+       means any candidate in the entry point's lane can end up serving
+       that same prompt. The only single budget no serving candidate can
+       overflow is the minimum across the lane's candidates — and a minimum
+       is order-independent. A runtime outside any lane
        keeps its own resolution. A lane's entry resolution belongs to its
        first candidate, because its ID is a routing label and can shadow a
        runtime binding. The lane is resolved once through the same

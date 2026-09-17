@@ -116,8 +116,11 @@ val parse_env_file : path:string -> string -> (endpoint_env, string) result
     values.  Blank lines and lines whose first non-blank character is ['#']
     are skipped.  A line without [=] (docker's "take it from the reader's
     environment", which here would be an sshd session's), an invalid name,
-    [PATH], a value holding a NUL byte, or a name declared twice is rejected
-    with [remote_ssh_shim_config_error].
+    [PATH], a GitHub token name ({!Exec_ssh_protocol.github_token_env_names}:
+    one token would make every keeper on the endpoint one GitHub identity), a
+    name the runner sets for each request ([GH_CONFIG_DIR],
+    [GIT_TERMINAL_PROMPT]), a value holding a NUL byte, or a name declared
+    twice is rejected with [remote_ssh_shim_config_error].
 
     [path] is the file the content was read from and appears only in the
     error.  The error names that file, the line number and what is wrong, and

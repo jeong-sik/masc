@@ -1,11 +1,3 @@
-let github_token_env_names =
-  [ "GH_TOKEN"
-  ; "GITHUB_TOKEN"
-  ; "GH_ENTERPRISE_TOKEN"
-  ; "GITHUB_ENTERPRISE_TOKEN"
-  ]
-;;
-
 type auth_result =
   { authenticated : bool
   ; login : string option
@@ -288,12 +280,14 @@ let projected_config_dir env =
     env
 ;;
 
-let strip_github_token_env env = remove_env_keys github_token_env_names env
+let strip_github_token_env env =
+  remove_env_keys Exec_ssh_protocol.github_token_env_names env
+;;
 
 let projected_token_env_names env =
   List.filter
     (fun name -> Array.exists (fun entry -> String.equal (env_key entry) name) env)
-    github_token_env_names
+    Exec_ssh_protocol.github_token_env_names
 ;;
 
 type tool_identity_state =
@@ -845,13 +839,13 @@ let entries_for_names names env =
 
 let minimal_host_process_env () =
   Unix.environment ()
-  |> remove_env_keys ("GH_CONFIG_DIR" :: github_token_env_names)
+  |> remove_env_keys ("GH_CONFIG_DIR" :: Exec_ssh_protocol.github_token_env_names)
   |> entries_for_names host_process_env_names
 ;;
 
 let github_probe_env projected_env =
   Array.append
-    (entries_for_names github_token_env_names projected_env)
+    (entries_for_names Exec_ssh_protocol.github_token_env_names projected_env)
     (minimal_host_process_env ())
 ;;
 

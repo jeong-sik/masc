@@ -351,6 +351,10 @@ let test_env_file_rejects () =
     ; "an empty name", "=y\n"
     ; "a name declared twice", "A=1\nA=2\n"
     ; "a NUL byte in the value", "A=x\000y\n"
+    ; "a GitHub token", "GH_TOKEN=ghp_x\n"
+    ; "a GitHub Enterprise token", "GITHUB_ENTERPRISE_TOKEN=x\n"
+    ; "the runner's GitHub config dir", "GH_CONFIG_DIR=/root/.config/gh\n"
+    ; "the runner's prompt guard", "GIT_TERMINAL_PROMPT=1\n"
     ]
 
 let test_endpoint_env_overlays_the_base () =

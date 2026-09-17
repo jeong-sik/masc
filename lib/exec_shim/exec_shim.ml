@@ -137,6 +137,12 @@ let parse_env_file ~path content =
             then err n "the text before '=' is not an environment variable name"
             else if name = "PATH"
             then err n "PATH comes from path=, the directories programs are looked up in"
+            else if List.mem name Exec_ssh_protocol.github_token_env_names
+            then
+              err n "%s would make every keeper on this endpoint one GitHub identity; \
+                     each keeper's own login is its GH_CONFIG_DIR" name
+            else if List.mem name runtime_env_allowlist
+            then err n "%s is set by the masc runner for each request" name
             else if String.contains value '\000'
             then err n "the value holds a NUL byte, which exec cannot pass"
             else

@@ -126,8 +126,11 @@ env_file=/etc/masc-exec-shim.env
   values taken byte for byte) that every payload runs with, for example
   `VIRTUAL_ENV=/opt/venv` or `LD_LIBRARY_PATH=/usr/local/cuda/lib64`. The
   request denylist does not apply to it; `PATH` is refused there because
-  `path=` declares it. Request values admitted by `env_allowlist` replace the
-  file's values.
+  `path=` declares it. GitHub token names (`GH_TOKEN`, `GITHUB_TOKEN`,
+  `GH_ENTERPRISE_TOKEN`, `GITHUB_ENTERPRISE_TOKEN`) and the names the runner
+  sets for each request (`GH_CONFIG_DIR`, `GIT_TERMINAL_PROMPT`) are refused
+  too: each keeper acts as its own GitHub login. Request values admitted by
+  `env_allowlist` replace the file's values.
 
 In a boxed run (`observe`, `guest_local`) `HOME` and `TMPDIR` are the run's
 scratch directory whatever the env file declares. Other directories the file

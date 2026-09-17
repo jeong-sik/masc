@@ -168,8 +168,8 @@ harbor 없이 컨테이너 하나에서 arm K 의 기계 경로 전체를 확인
     ./image/probe_bases.sh python:3.13-slim # 특정 이미지만
 
 `driver/deps.sh` 를 태스크 베이스 이미지에서 그대로 돌려 masc 가 실행되는지와 sshd 가
-있는지만 본다. API 키도 태스크도 서버도 필요 없다. 플랫폼은 harbor 와 같이
-`DOCKER_DEFAULT_PLATFORM`, 없으면 Docker 데몬 것을 쓴다.
+있는지만 본다. API 키도 태스크도 서버도 필요 없다. 플랫폼은 4.0.0 태스크 이미지와 같은
+`linux/amd64` 가 기본이고 `PROBE_PLATFORM` 으로 바꾼다.
 
 deps.sh 는 패키지 매니저 계열(apt/dnf/apk)을 감지하고, 런타임 라이브러리는
 `masc --version` 이 실패할 때만 설치하며, 안 되면 배포판 이름과 이유(아키텍처·glibc·
@@ -178,9 +178,9 @@ deps.sh 는 패키지 매니저 계열(apt/dnf/apk)을 감지하고, 런타임 �
 
 ## 4.0.0 에서 아직 맞지 않는 조건
 
-- keeper 명령은 태스크 이미지가 선언한 `PATH`·환경변수를 보지 못한다. `masc-exec-shim`
-  이 PATH 를 `/usr/local/bin:/usr/bin:/bin` 로 고정한다. 21/66 태스크가 PATH 디렉터리를
-  잃는다 — #36907
+- keeper 명령은 태스크 이미지가 선언한 환경변수(`VIRTUAL_ENV`, `PYTHONPATH`, 서비스 주소 등)를
+  보지 못한다. `masc-exec-shim` 이 페이로드 환경을 새로 만들기 때문이다 — #36907.
+  `PATH` 는 bootstrap 이 컨테이너의 PATH 를 shim 설정 `path=` 로 넘겨 맞춘다.
 - 태스크가 선언한 `mcp_servers`(medical-claims-processing)와 `skills_dir`
   (cumulative-layout-shift)를 keeper 에 연결하지 않는다 — #36908
 - GPU 태스크 3개는 GPU 를 주는 환경(`BENCH_ENV=modal`)에서만 돈다. 이 호스트에는 Modal

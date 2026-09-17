@@ -57,6 +57,11 @@ chmod 644 /etc/masc-exec-shim.conf
 
 # --- sshd on localhost, root key auth (keeper remote_ssh endpoint target) ---
 install -d -m 0755 /run/sshd
+# Debian's openssh-server package makes host keys when it installs; Fedora's
+# leaves that to the sshd-keygen systemd unit, which no task container runs, so
+# sshd exits with "no hostkeys available" (terminal-bench/retro-console-soc,
+# Fedora 42). -A makes each missing default key and leaves existing ones.
+ssh-keygen -A
 install -d -m 0700 "$BENCH/ssh" /root/.ssh
 [[ -f "$BENCH/ssh/id_ed25519" ]] || ssh-keygen -t ed25519 -N '' -q -f "$BENCH/ssh/id_ed25519"
 install -m 0600 "$BENCH/ssh/id_ed25519.pub" /root/.ssh/authorized_keys

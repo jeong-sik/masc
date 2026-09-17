@@ -325,7 +325,7 @@ let test_env_file_declares_values_verbatim () =
     (declared env)
 
 (* docker reads the file with bufio.ScanLines, which drops the '\r' of a CRLF
-   ending; a file saved on Windows declares the same values. *)
+   ending; a file with CRLF line endings declares the same values. *)
 let test_env_file_crlf_lines () =
   let env =
     endpoint_env_of
@@ -454,6 +454,32 @@ let test_env_file_error_names_the_line_not_its_text () =
     (contains "declared twice, on lines 1 and 3" e);
   check bool "a name declared twice is not printed" false (contains "TOKEN" e)
 
+(* A secret pasted into the config in the wrong place stays out of the error:
+   the error names the line or the key and says what is wrong. *)
+let test_parse_config_errors_print_no_file_text () =
+  let secret = "ghp_0123456789abcdef" in
+  List.iter
+    (fun (label, content, expected) ->
+      match Exec_shim.parse_config content with
+      | Ok _ -> fail (label ^ " must be rejected")
+      | Error e ->
+        check string (label ^ ": the whole error") (Exec_shim.config_error_code ^ ": " ^ expected) e;
+        check bool (label ^ ": does not print the file's text") false (contains secret e))
+    [ "a line without '='", "remote_root=/srv/masc\n" ^ secret ^ "\n",
+      "line 2 is not key=value"
+    ; "an unknown key", "remote_root=/srv/masc\n\n" ^ secret ^ "=1\n", "line 3 has an unknown key"
+    ; "an unknown key before a malformed line", secret ^ "=1\nnot a pair\n",
+      "line 1 has an unknown key"
+    ; "a relative remote_root", "remote_root=" ^ secret ^ "\n",
+      "remote_root must be an absolute path"
+    ; "a relative env_file", "remote_root=/srv/masc\nenv_file=" ^ secret ^ "\n",
+      "env_file must be an absolute path"
+    ; "an empty path entry", "remote_root=/srv/masc\npath=/" ^ secret ^ "::/bin\n",
+      "path has an empty entry"
+    ; "a relative path entry", "remote_root=/srv/masc\npath=/usr/bin:" ^ secret ^ "\n",
+      "path entries must be absolute"
+    ]
+
 let test_read_env_file () =
   (match Exec_shim.read_env_file None with
    | Ok env -> check (list (pair string string)) "no env_file declares nothing" [] (declared env)
@@ -470,9 +496,73 @@ let test_read_env_file () =
           [ "VIRTUAL_ENV", "/opt/venv" ] (declared env)
       | Error e -> fail e)
 
-(* Whoever can write the file sets every payload's environment. The owner is
-   not checked: the Terminal-Bench container runs the shim as root with a
-   root-owned 0644 file. *)
+(* The owner and mode rule over synthetic uids and modes, so a file owned by
+   another account needs no chown. The Terminal-Bench container runs the shim
+   as root with a root-owned 0644 file. *)
+let test_env_file_owner_and_mode_rule () =
+  let show = function
+    | None -> "read"
+    | Some (Exec_shim.Owned_by uid) -> Printf.sprintf "owned by uid %d" uid
+    | Some (Exec_shim.Writable_by Exec_shim.Its_group) -> "writable by its group"
+    | Some (Exec_shim.Writable_by Exec_shim.Every_user) -> "writable by every user"
+    | Some (Exec_shim.Writable_by Exec_shim.Its_group_and_every_user) ->
+      "writable by its group and every user"
+  in
+  let shim = 1000 and other = 1001 and root = 0 in
+  List.iter
+    (fun (label, euid, owner, perm, expected) ->
+      check string label expected (show (Exec_shim.refuse_env_file ~euid ~owner ~perm)))
+    [ "root-owned 0644", shim, root, 0o644, "read"
+    ; "owned by the shim's uid, 0644", shim, shim, 0o644, "read"
+    ; "owned by another uid, 0644", shim, other, 0o644, "owned by uid 1001"
+    ; "root-owned 0664", shim, root, 0o664, "writable by its group"
+    ; "root-owned 0646", shim, root, 0o646, "writable by every user"
+    ; "owned by the shim's uid, 0666", shim, shim, 0o666, "writable by its group and every user"
+    ; "a root shim, root-owned 0644", root, root, 0o644, "read"
+    ; "a root shim, a file another uid owns", root, other, 0o644, "owned by uid 1001"
+    ; "another owner is reported before the mode", shim, other, 0o666, "owned by uid 1001"
+    ]
+
+(* Only a regular file is read. A plain open of a FIFO nobody writes to blocks
+   forever, so that read runs in a child an alarm ends: a regression fails the
+   test instead of hanging it. *)
+let test_read_env_file_reads_only_a_regular_file () =
+  let refused path =
+    match Exec_shim.read_env_file (Some path) with
+    | Ok _ -> `Read
+    | Error e when is_config_error e && contains (path ^ " is not a regular file") e -> `Refused
+    | Error _ -> `Refused_for_another_reason
+  in
+  let alarm_sec = 5 in
+  with_tmp_tree (fun root ->
+      let fifo = Filename.concat root "shim.env" in
+      Unix.mkfifo fifo 0o644;
+      (match Unix.fork () with
+       | 0 ->
+         ignore (Unix.alarm alarm_sec);
+         Unix._exit
+           (match refused fifo with
+            | `Refused -> 0
+            | `Read -> 1
+            | `Refused_for_another_reason -> 2)
+       | child ->
+         (match snd (Unix.waitpid [] child) with
+          | Unix.WEXITED 0 -> ()
+          | Unix.WEXITED 1 -> fail "a FIFO was read as an env file"
+          | Unix.WEXITED _ -> fail "a FIFO was refused, but not as a file that is not regular"
+          | Unix.WSIGNALED signal when signal = Sys.sigalrm ->
+            fail "reading a FIFO without a writer blocked"
+          | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> fail "the reading child was killed"));
+      List.iter
+        (fun (label, path) ->
+          match refused path with
+          | `Refused -> ()
+          | `Read -> fail (label ^ " was read as an env file")
+          | `Refused_for_another_reason ->
+            fail (label ^ " was refused, but not as a file that is not regular"))
+        [ "a directory", Filename.concat root "sub"; "a character device", "/dev/null" ])
+
+(* Whoever can write the file sets every payload's environment. *)
 let test_read_env_file_refuses_a_file_others_may_write () =
   with_tmp_tree (fun root ->
       let env_file = Filename.concat root "shim.env" in
@@ -859,6 +949,9 @@ let () =
                   ; test_case "errors name the line, not its text" `Quick
                       test_env_file_error_names_the_line_not_its_text
                   ; test_case "read" `Quick test_read_env_file
+                  ; test_case "owner and mode rule" `Quick test_env_file_owner_and_mode_rule
+                  ; test_case "reads only a regular file" `Quick
+                      test_read_env_file_reads_only_a_regular_file
                   ; test_case "refuses a file others may write" `Quick
                       test_read_env_file_refuses_a_file_others_may_write
                   ; test_case "payload env reads the configured file" `Quick
@@ -875,6 +968,8 @@ let () =
                 ; test_case "requires remote_root" `Quick test_parse_config_requires_root
                 ; test_case "rejects relative root" `Quick test_parse_config_rejects_relative_root
                 ; test_case "rejects unknown key" `Quick test_parse_config_rejects_unknown_key
+                ; test_case "errors print no file text" `Quick
+                    test_parse_config_errors_print_no_file_text
                 ; test_case "path entries" `Quick test_parse_config_path_ok
                 ; test_case "rejects a bad path" `Quick test_parse_config_rejects_bad_path
                 ; test_case "env_file" `Quick test_parse_config_env_file

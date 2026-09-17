@@ -291,6 +291,64 @@ let test_verdict_enum_mirrors_valid_verdict_strings () =
           | _ -> Alcotest.fail "properties.verdict is not an object"))
 ;;
 
+(* RFC-0417 criteria 3 (variant B): a note-only submission whose verdict the
+   reviewer produced without a single successful evidence lookup is refused at
+   the completion boundary. The mock reviewer returns an Approve without making
+   any lookup call, so the wrapped dispatch counter stays at 0 and the guard
+   must fire instead of committing the structured verdict. *)
+let test_note_only_without_lookup_is_guarded () =
+  with_reviewer
+    (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+       Ok {AR.selected_runtime_id="task-reviewer";verdict=Some (AR.Approve "everything looks fine")})
+    (fun () ->
+       let result = review () in
+       Alcotest.(check string)
+         "gate"
+         "evidence_posture_guard"
+         (AR.gate_to_string result.gate);
+       Alcotest.(check bool) "no fabricated verdict" true (Option.is_none result.verdict))
+;;
+
+(* Contrast case: when the posture carries usable artifacts, the guard does
+   not fire and the structured verdict is committed as before. *)
+let test_usable_artifacts_posture_is_not_guarded () =
+  with_reviewer
+    (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+       Ok {AR.selected_runtime_id="task-reviewer";verdict=Some (AR.Approve "checked the artifact")})
+    (fun () ->
+       let result =
+         AR.review
+           ~evaluator_runtime:"task-reviewer"
+           ~question:
+             { AR.completion_contract = None
+             ; required_evidence = []
+             ; evidence_posture = AR.Usable_artifacts 1
+             ; few_shot_block = ""
+             }
+           ~lookup:AR.No_lookup_surface
+           ~base_path:(Filename.get_temp_dir_name ())
+           request
+       in
+       Alcotest.(check string)
+         "gate"
+         "structured_tool"
+         (AR.gate_to_string result.gate);
+       match result.verdict with
+       | Some (AR.Approve _) -> ()
+       | Some (AR.Reject reason) -> Alcotest.failf "unexpected reject: %s" reason
+       | None -> Alcotest.fail "structured verdict was lost")
+;;
+
+(* The verdict enum mirror test catches drift between the TOML literal and
+   [valid_verdict_strings]; the guard gate is a new outcome the CA serialises
+   through [gate_to_string], so its string form must stay stable. *)
+let test_guard_gate_string_is_stable () =
+  Alcotest.(check string)
+    "guard gate serialisation"
+    "evidence_posture_guard"
+    (AR.gate_to_string AR.Evidence_posture_guard)
+;;
+
 let () =
   configure_prompt_registry ();
   Alcotest.run
@@ -340,5 +398,17 @@ let () =
             "verdict enum mirrors valid_verdict_strings"
             `Quick
             test_verdict_enum_mirrors_valid_verdict_strings
+        ; Alcotest.test_case
+            "note-only without lookup is guarded"
+            `Quick
+            test_note_only_without_lookup_is_guarded
+        ; Alcotest.test_case
+            "usable artifacts posture is not guarded"
+            `Quick
+            test_usable_artifacts_posture_is_not_guarded
+        ; Alcotest.test_case
+            "guard gate string is stable"
+            `Quick
+            test_guard_gate_string_is_stable
         ] )
     ]

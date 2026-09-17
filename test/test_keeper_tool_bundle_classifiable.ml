@@ -841,6 +841,7 @@ let test_bundle_matches_expected_projection () =
         ~tool_delivery:Keeper_effective_tool_surface.Tools_delivered
         ~native_posture:None
         ~tool_deny:[]
+        ~sandbox_profile:Masc.Keeper_types_profile.Docker
         ~skill_names:None
         ~current_task_id:(Some "task-001")
         ~task_skill_references:[ task_reference ]

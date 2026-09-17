@@ -852,15 +852,18 @@ let test_spawn_start_follows_sandbox_profile () =
   List.iter
     (fun (label, sandbox_profile) ->
        let refused = capability_surface ~sandbox_profile frozen in
-       check bool (label ^ " keeper is not offered keeper_spawn") false
-         (List.mem "keeper_spawn" (model_names refused));
+       let spawn_tools =
+         [ "keeper_spawn"; "keeper_spawn_read"; "keeper_spawn_wait"; "keeper_spawn_stop" ]
+       in
        List.iter
          (fun name ->
-            check bool (label ^ " keeper keeps " ^ name ^ " for existing handles") true
+            check bool ("a Docker keeper is offered " ^ name) true
+              (List.mem name (model_names docker));
+            check bool (label ^ " keeper is not offered " ^ name) false
               (List.mem name (model_names refused)))
-         [ "keeper_spawn_read"; "keeper_spawn_wait"; "keeper_spawn_stop" ];
-       check int (label ^ " surface loses exactly the start")
-         (List.length (model_names docker) - 1)
+         spawn_tools;
+       check int (label ^ " surface loses exactly the spawn tools")
+         (List.length (model_names docker) - List.length spawn_tools)
          (List.length (model_names refused));
        check (list string) (label ^ " keeper is not offered the spawn composition")
          [] (composition_tools refused);

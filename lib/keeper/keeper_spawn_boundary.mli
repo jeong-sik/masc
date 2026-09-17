@@ -1,6 +1,6 @@
 (** Whether a Keeper's sandbox profile can start a process that outlives the
     call. The capability surface and the spawn handler decide with this one
-    function, so a Keeper is never offered a [keeper_spawn] its lane refuses on
+    function, so a Keeper is never offered spawn tools its lane refuses on
     every call. *)
 
 type t =

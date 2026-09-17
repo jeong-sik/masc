@@ -71,9 +71,9 @@ val create
     [[]]: the argument is mandatory because an optional here would sit in
     front of only labelled arguments, which OCaml never erases.
 
-    [sandbox_profile] is the Keeper's profile. [keeper_spawn] leaves the surface
-    the same way when {!Keeper_spawn_boundary.of_sandbox_profile} refuses a
-    start for it, and a composition that runs it is then withheld. *)
+    [sandbox_profile] is the Keeper's profile. The four spawn tools leave the
+    surface the same way when {!Keeper_spawn_boundary.of_sandbox_profile}
+    refuses a start for it, and a composition that runs one is then withheld. *)
 
 val descriptors : t -> Keeper_tool_descriptor.t list
 

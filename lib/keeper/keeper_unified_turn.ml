@@ -771,6 +771,7 @@ let run_keeper_cycle
                    Keeper_task_skill_turn.exact_task_surfaces
                      ~snapshot:skill_snapshot
                      ~tool_deny:profile_defaults.tool_deny
+                     ~sandbox_profile:meta.sandbox_profile
                      ~skill_names:profile_defaults.skill_names
                      ~selection:merged
                      ~current_task

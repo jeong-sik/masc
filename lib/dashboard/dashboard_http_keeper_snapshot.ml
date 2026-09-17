@@ -163,6 +163,7 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
             | Ok selection ->
               Keeper_task_skill_turn.exact_task_surfaces
                 ~snapshot:skill_snapshot ~tool_deny:defaults.tool_deny
+                ~sandbox_profile:m.sandbox_profile
                 ~skill_names:defaults.skill_names
                 ~selection ~current_task
                 ~held_task_skills:observation.held_task_skills

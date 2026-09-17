@@ -67,10 +67,30 @@ let test_batch () = fixture (fun base runtime binary spec original ->
   Alcotest.check Alcotest.int "original permissions retained" 0o640 (Unix.stat runtime).st_perm;
   Alcotest.check Alcotest.bool "stage removed" false (Sys.file_exists (text (Filename.concat base "stage-path")));
   let after = text runtime in
+  (* #36885 emitted the fixed-name lane table once per added connection and a
+     two-model setup stopped parsing; the lane is now the batch's one-shot
+     emission, admitted by the primary runtime. *)
+  let lanes text =
+    match Runtime_toml.parse_string text with
+    | Error _ -> Alcotest.fail "published runtime.toml does not parse"
+    | Ok parsed ->
+      List.filter
+        (fun (decl : Runtime_schema.exact_output_lane_decl) ->
+           String.equal decl.Runtime_schema.id (Runtime.exact_lane_id Runtime.Librarian))
+        parsed.Runtime_schema.exact_output_lane_decls in
+  (match lanes after with
+   | [decl] ->
+     Alcotest.check (Alcotest.list Alcotest.string) "lane admitted by the primary client id"
+       [List.hd ids] decl.Runtime_schema.cli_slot_ids;
+     Alcotest.check (Alcotest.list Alcotest.string) "no catalog slot on a client lane"
+       [] decl.Runtime_schema.slot_ids
+   | _ -> Alcotest.fail "librarian lane must be declared exactly once");
   let next = get (Batch.observe ~base_path:base) in
   ignore (get (apply base binary specs ids next false));
   (* Existing identities must not append the provider/model definitions again. *)
-  Alcotest.check Alcotest.string "idempotent connection definitions" (after ^ "\n# native lane writer fixture\n") (text runtime))
+  Alcotest.check Alcotest.string "idempotent connection definitions" (after ^ "\n# native lane writer fixture\n") (text runtime);
+  Alcotest.check Alcotest.int "a repeated configure adds no second lane" 1
+    (List.length (lanes (text runtime))))
 let test_cas () = fixture (fun base runtime binary spec original ->
   fake base binary "(base/'.masc/config/runtime.toml').write_text('operator concurrent update')";
   let specs=[spec "new"] in let ids=List.map (fun s -> (Runtime_setup_spec.render s).runtime_id) specs in

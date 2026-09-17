@@ -48,10 +48,12 @@ let test_native_fractional_identity () =
     true (Result.is_ok (Runtime_toml.parse_string whole))
 (* A workspace whose librarian_exact lane has no slot boots with one WARN and
    curates nothing, and setup is the only place that knows which runtime this
-   machine actually has. An official client is admitted by its runtime id and
-   an HTTP runtime by its overlay target id; both are the runtime_id here, so
-   what changes between the two is which key carries it. *)
-let test_setup_declares_the_librarian_lane () =
+   machine actually has. The lane rides the batch, not the render: its table
+   path is fixed, so a fragment carrying it appends one copy per added
+   connection and the file stops parsing (RC verification 2026-09-17). An
+   official client is admitted by its runtime id and an HTTP runtime by its
+   overlay target id, so the fragment's slot key follows the transport. *)
+let test_render_leaves_the_librarian_lane_to_the_batch () =
   let render input =
     match Runtime_setup_spec.of_json (Yojson.Safe.from_string input) with
     | Ok spec -> Runtime_setup_spec.render spec
@@ -60,32 +62,32 @@ let test_setup_declares_the_librarian_lane () =
     let n = String.length needle and h = String.length haystack in
     let rec scan i = i + n <= h && (String.sub haystack i n = needle || scan (i + 1)) in
     n = 0 || scan 0 in
-  let client =
-    render {|{"choice":"claude_code","model":"claude-sonnet-5","max_context":200000,"tools":true,"streaming":true}|} in
-  Alcotest.check Alcotest.bool "an official client is declared as a cli slot" true
-    (contains client.runtime_toml
-       ({|"cli_slots" = ["|} ^ client.runtime_id ^ {|"]|}));
-  Alcotest.check Alcotest.bool "and carries no catalog slot" true
-    (contains client.runtime_toml {|"slots" = []|});
-  let http =
-    render {|{"choice":"ollama","model":"fixture-model","max_context":8192,"tools":true,"streaming":true,"endpoint":"https://fixture.invalid/v1"}|} in
-  Alcotest.check Alcotest.bool "an HTTP runtime is declared as a catalog slot" true
-    (contains http.runtime_toml ({|"slots" = ["|} ^ http.runtime_id ^ {|"]|}));
-  Alcotest.check Alcotest.bool "and carries no cli slot" true
-    (contains http.runtime_toml {|"cli_slots" = []|});
   List.iter
     (fun rendered ->
+       Alcotest.check Alcotest.bool "a rendered fragment declares no fixed-name lane table" false
+         (contains rendered.Runtime_setup_spec.runtime_toml "exact_output_lanes");
        let whole =
          "[runtime]\ndefault = "
          ^ Yojson.Safe.to_string (`String rendered.Runtime_setup_spec.runtime_id)
          ^ "\n" ^ rendered.Runtime_setup_spec.runtime_toml in
        match Runtime_toml.parse_string whole with
        | Ok _ -> ()
-       | Error _ -> Alcotest.fail "declared librarian lane is not native runtime TOML")
-    [ client; http ]
+       | Error _ -> Alcotest.fail "rendered fragment is not native runtime TOML")
+    [ render {|{"choice":"claude_code","model":"claude-sonnet-5","max_context":200000,"tools":true,"streaming":true}|};
+      render {|{"choice":"ollama","model":"fixture-model","max_context":8192,"tools":true,"streaming":true,"endpoint":"https://fixture.invalid/v1"}|} ];
+  let client = Runtime_setup_spec.librarian_lane_toml ~cli:true ~runtime_id:"fixture.client" in
+  Alcotest.check Alcotest.bool "an official client is declared as a cli slot" true
+    (contains client {|"cli_slots" = ["fixture.client"]|});
+  Alcotest.check Alcotest.bool "and carries no catalog slot" true
+    (contains client {|"slots" = []|});
+  let http = Runtime_setup_spec.librarian_lane_toml ~cli:false ~runtime_id:"fixture.http" in
+  Alcotest.check Alcotest.bool "an HTTP runtime is declared as a catalog slot" true
+    (contains http {|"slots" = ["fixture.http"]|});
+  Alcotest.check Alcotest.bool "and carries no cli slot" true
+    (contains http {|"cli_slots" = []|})
 
 let () = Alcotest.run "native runtime setup spec" ["contract",[
   Alcotest.test_case "representative installer identity and TOML parity" `Quick test_existing_installer_contract;
   Alcotest.test_case "native fractional number identity" `Quick test_native_fractional_identity;
   Alcotest.test_case "typed input rejects incompatible declarations" `Quick test_rejects_invalid_transport_claims;
-  Alcotest.test_case "setup declares the librarian lane" `Quick test_setup_declares_the_librarian_lane]]
+  Alcotest.test_case "render leaves the librarian lane to the batch" `Quick test_render_leaves_the_librarian_lane_to_the_batch]]

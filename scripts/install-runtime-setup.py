@@ -169,12 +169,9 @@ def render(spec, binary=None):
         if spec.get('thinking_disable_encodable') is True:
             target['enable_thinking'] = False
         overlay = table(('targets',), target, array=True)
-        # The Librarian is the only thing that retires a memory and it runs on
-        # its own exact-output lane; a workspace that declares no slot for it
-        # boots with one WARN and curates nothing. A named catalog provider is
-        # always an HTTP connection, so the slot is the overlay target id.
-        runtime += table(('runtime', 'exact_output_lanes', 'librarian_exact'),
-                         {'slots': [provider + '.' + model_key], 'cli_slots': []})
+        # The librarian_exact lane is declared once per configure by the native
+        # batch, not per render: its table path is fixed, so a render carrying
+        # it would duplicate the table for every added connection.
         return provider + '.' + model_key, runtime.encode(), overlay.encode()
 
     if not binary:

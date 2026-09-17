@@ -17,6 +17,15 @@ val of_json : ?home_dir:string -> Yojson.Safe.t -> (t, error) result
 type rendered = { runtime_id:string; runtime_toml:string; model_overlay_toml:string }
 val model_id : t -> string
 val render : t -> rendered
+val librarian_lane_toml : cli:bool -> runtime_id:string -> string
+(** The one-shot [runtime.exact_output_lanes.librarian_exact] declaration for
+    the runtime a setup just verified. Emitted by the batch once per
+    configure, never per spec: the table path is fixed, so per-spec emission
+    writes the table once per added connection and the file stops parsing.
+    [cli] selects [cli_slots] over [slots]. *)
+val is_client_transport : t -> bool
+(** Whether the spec connects through an official client command rather than
+    an HTTP endpoint; exact-output lane admission keys differ between the two. *)
 val render_json : rendered -> Yojson.Safe.t
 (** Private native CLI/Python ABI only: TOML may contain credential paths.
     Web receipts must project only safe runtime/model identities. *)

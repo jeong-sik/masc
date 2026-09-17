@@ -195,6 +195,55 @@ let configure_locked ~pending_credentials ~binary ~base ~expected_revision ~spec
   let added = String.concat "" (List.map (fun (r:Runtime_setup_spec.rendered) -> r.runtime_toml) additions) in
   let overlay_added = String.concat "" (List.map (fun (r:Runtime_setup_spec.rendered) -> r.model_overlay_toml) additions) in
   let runtime_text = content first ^ (if added="" then "" else "\n" ^ added) in
+  (* The librarian lane is declared once per workspace, on the primary selected
+     runtime, and only when no declaration exists yet. Per-spec emission is not
+     an option: the table path is fixed, so every added connection would write
+     it again and the file stops parsing (RC verification 2026-09-17). *)
+  let runtime_text =
+    let lane_id = Runtime.exact_lane_id Runtime.Librarian in
+    let declared =
+      List.exists
+        (fun (decl : Runtime_schema.exact_output_lane_decl) ->
+           String.equal decl.Runtime_schema.id lane_id)
+        parsed.Runtime_schema.exact_output_lane_decls
+    in
+    if declared then runtime_text
+    else
+      (match selected with
+       | [] -> runtime_text
+       | primary :: _ ->
+         let cli =
+           match
+             List.find_opt
+               (fun (spec, (row : Runtime_setup_spec.rendered)) ->
+                  String.equal row.Runtime_setup_spec.runtime_id primary)
+               (List.combine specs rendered)
+           with
+           | Some (spec, _) -> Some (Runtime_setup_spec.is_client_transport spec)
+           | None ->
+             (match
+                List.find_opt
+                  (fun (binding : Runtime_schema.binding) ->
+                     String.equal (Runtime.id_of_binding binding) primary)
+                  parsed.Runtime_schema.bindings
+              with
+              | Some binding ->
+                (match
+                   List.find_opt
+                     (fun (provider : Runtime_schema.provider) ->
+                        String.equal provider.Runtime_schema.id binding.Runtime_schema.provider_id)
+                     parsed.Runtime_schema.providers
+                 with
+                 | Some { Runtime_schema.transport = Runtime_schema.Cli _; _ } -> Some true
+                 | Some { Runtime_schema.transport = Runtime_schema.Http _; _ } -> Some false
+                 | None -> None)
+              | None -> None)
+         in
+         (match cli with
+          | Some cli ->
+            runtime_text ^ Runtime_setup_spec.librarian_lane_toml ~cli ~runtime_id:primary
+          | None -> runtime_text))
+  in
   let overlay_text = content second ^ overlay_added in
   let* validated = with_stage (fun stage ->
     let _,runtime,overlay = paths stage in

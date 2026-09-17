@@ -19,9 +19,9 @@ set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 BENCH_DIR="$(dirname "$HERE")"
 IMAGE="${PROBE_IMAGE:-ubuntu:24.04}"
-# The platform harbor builds task images for (agents/masc_dist.py): docker
-# compose honours DOCKER_DEFAULT_PLATFORM, and otherwise uses the daemon's own.
-PLATFORM="${PROBE_PLATFORM:-${DOCKER_DEFAULT_PLATFORM:-$(docker version --format '{{.Server.Os}}/{{.Server.Arch}}')}}"
+# Terminal-Bench 4.0.0 task images are prebuilt for amd64 (agents/masc_dist.py),
+# so that is the platform a task container runs, emulated on Apple Silicon.
+PLATFORM="${PROBE_PLATFORM:-linux/amd64}"
 case "${PLATFORM}" in
   linux/amd64) DIST_DIR="${BENCH_DIR}/dist/linux-x64" ;;
   linux/arm64) DIST_DIR="${BENCH_DIR}/dist/linux-arm64" ;;

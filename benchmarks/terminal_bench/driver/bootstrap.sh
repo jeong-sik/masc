@@ -75,7 +75,7 @@ done
 # root-owned 0644.
 # shellcheck source-path=SCRIPTDIR source=endpoint_env.sh
 source "$BENCH/driver/endpoint_env.sh"
-bench_endpoint_env_lines /proc/1/environ > /etc/masc-exec-shim.env
+bench_pid1_environ | bench_endpoint_env_lines > /etc/masc-exec-shim.env
 chmod 644 /etc/masc-exec-shim.env
 {
   printf 'remote_root=/root\n'

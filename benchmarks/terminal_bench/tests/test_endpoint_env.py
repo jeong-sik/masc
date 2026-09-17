@@ -13,17 +13,19 @@ REPO = BENCH.parents[1]
 HELPER = BENCH / "driver" / "endpoint_env.sh"
 
 
-def env_lines(tmp_path, entries):
-    environ = tmp_path / "environ"
-    environ.write_bytes(b"".join(e.encode() + b"\0" for e in entries))
+def env_lines_of(raw):
     done = subprocess.run(
-        ["bash", "-c", 'source "$1" && bench_endpoint_env_lines "$2"', "_", str(HELPER), str(environ)],
-        capture_output=True, text=True, check=True)
-    return done.stdout.splitlines(), done.stderr
+        ["bash", "-c", 'source "$1" && bench_endpoint_env_lines', "_", str(HELPER)],
+        input=raw, capture_output=True, check=True)
+    return done.stdout.decode().splitlines(), done.stderr.decode()
 
 
-def test_the_image_environment_becomes_one_line_per_name(tmp_path):
-    lines, stderr = env_lines(tmp_path, [
+def env_lines(entries):
+    return env_lines_of(b"".join(e.encode() + b"\0" for e in entries))
+
+
+def test_the_image_environment_becomes_one_line_per_name():
+    lines, stderr = env_lines([
         "VIRTUAL_ENV=/opt/venv",
         "LD_LIBRARY_PATH=/usr/local/cuda/lib64",
         "EMPTY=",
@@ -40,8 +42,8 @@ def test_the_image_environment_becomes_one_line_per_name(tmp_path):
     assert stderr == ""
 
 
-def test_what_the_shim_would_refuse_is_left_out_by_name(tmp_path):
-    lines, stderr = env_lines(tmp_path, [
+def test_what_the_shim_would_refuse_is_left_out_by_name():
+    lines, stderr = env_lines([
         "PATH=/opt/venv/bin:/usr/bin",
         "GH_TOKEN=ghp_not_for_the_file",
         "GITHUB_TOKEN=ghs_not_for_the_file",
@@ -66,13 +68,19 @@ def test_what_the_shim_would_refuse_is_left_out_by_name(tmp_path):
         assert value not in stderr
 
 
-def test_every_line_is_one_the_shim_reads(tmp_path):
-    lines, _ = env_lines(tmp_path, [
+def test_every_line_is_one_the_shim_reads():
+    lines, _ = env_lines([
         "A=1", "B=x\ny", "C=z\r", "D=trailing\\", "E=#not a comment", "F= ",
     ])
     grammar = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=[^\n]*$")
     assert lines == ["A=1", "D=trailing\\", "E=#not a comment", "F= "]
     assert all(grammar.match(line) and not line.endswith("\r") for line in lines)
+
+
+def test_an_entry_the_input_ends_without_a_nul_is_read():
+    lines, stderr = env_lines_of(b"A=1\0B=2")
+    assert lines == ["A=1", "B=2"]
+    assert stderr == ""
 
 
 def ocaml_string_list(source, binding):

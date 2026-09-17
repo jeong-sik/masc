@@ -10,7 +10,7 @@ MASC 하네스 자체를 Terminal-Bench 4.0.0 전체로 잰다.
 
 ## 준비
 
-    ./image/fetch_masc.sh                         # 최신 릴리스(0.35.20 이상), linux-x64 와 linux-arm64 둘 다
+    ./image/fetch_masc.sh                         # 최신 릴리스(`image/min_masc_version` 이상), linux-x64 와 linux-arm64 둘 다
     uv venv -p 3.12 && uv pip install -r requirements.txt   # harbor 0.23.0 고정
     export ANTHROPIC_API_KEY=...                  # 모델 제공자 키 (아래 레인 표)
 
@@ -184,8 +184,13 @@ deps.sh 는 패키지 매니저 계열(apt/dnf/apk)을 감지하고, 런타임 �
 
 - 태스크 이미지가 선언한 환경변수 가운데 shim 이 받지 않는 이름(GitHub 토큰 이름,
   `GH_CONFIG_DIR`·`GIT_TERMINAL_PROMPT`)과 여러 줄 값은 keeper 명령에 닿지 않는다.
-  나머지는 bootstrap 이 컨테이너 PID 1 의 환경을 shim `env_file=` 로 옮기고
-  (`driver/endpoint_env.sh`), `PATH` 는 `path=` 로 넘긴다. 뺀 이름은 bootstrap 로그에 남는다.
+  나머지는 bootstrap 이 컨테이너 PID 1 의 환경을 PID 1 소유자 권한(`setpriv`)으로 읽어
+  shim `env_file=` 로 옮기고(`driver/endpoint_env.sh`), `PATH` 는 `path=` 로 넘긴다.
+  뺀 이름은 bootstrap 의 stderr 에만 찍힌다. harbor 는 그 출력을 trial.log 에 DEBUG 로
+  남기되 앞 250자와 뒤 750자만 남기므로(`_truncate_output`), 긴 설치 출력 사이에서는 사라질 수 있다.
+- 이미지가 root 가 아닌 사용자로 도는 태스크(`rs-archive-clone`, `risk-scorer-replay`,
+  `fp8-rmsnorm-gemm`)에서도 keeper 명령은 root 로 돈다. `env_file=` 은 그 이미지 사용자의
+  `HOME` 을 넘기므로, root 로 도는 명령이 그 사용자의 HOME 을 쓴다.
 - 태스크가 선언한 `mcp_servers`(medical-claims-processing)와 `skills_dir`
   (cumulative-layout-shift)를 keeper 에 연결하지 않는다 — #36908
 - GPU 태스크 3개는 GPU 를 주는 환경(`BENCH_ENV=modal`)에서만 돈다. 이 호스트에는 Modal

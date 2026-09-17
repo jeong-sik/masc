@@ -159,6 +159,9 @@ def test_install_adds_masc_on_top_of_claude_code(tmp_path, monkeypatch):
     for name in ("masc", "masc-exec-shim"):
         (fake_root / "dist" / "linux-x64" / name).write_bytes(b"")
     (fake_root / "driver" / "bootstrap.sh").write_text("")
+    # A fetched release at the floor, as image/fetch_masc.sh records it.
+    import masc_dist
+    (fake_root / "dist" / ".version").write_text(masc_dist.MIN_VERSION_FILE.read_text())
     monkeypatch.setattr(masc_sidecar, "BENCH_ROOT", fake_root)
 
     async def go():

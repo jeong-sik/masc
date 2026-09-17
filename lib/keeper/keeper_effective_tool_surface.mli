@@ -86,6 +86,7 @@ module For_testing : sig
     tool_delivery:tool_delivery ->
     native_posture:Runtime_native_tools.posture option ->
     tool_deny:string list ->
+    sandbox_profile:Keeper_types_profile_sandbox.sandbox_profile ->
     skill_names:string list option ->
     current_task_id:string option ->
     task_skill_references:Skill_reference.t list ->

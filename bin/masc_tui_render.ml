@@ -6780,8 +6780,34 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
               | Some _, _ ->
                   [ Ansi.dim ^ "  (no projection reported for this Keeper)" ^ Ansi.reset ]))
       | Detail_github ->
-          stamped_or state.github_identity_view
-            state.github_identity_view_error
+          let base =
+            stamped_or state.github_identity_view
+              state.github_identity_view_error
+          in
+          let input_lines =
+            match state.github_token_input with
+            | Some draft ->
+                let masked =
+                  let len = String.length draft in
+                  if len = 0 then "(empty)"
+                  else if len <= 8 then String.make len '*'
+                  else
+                    String.sub draft 0 4 ^ String.make (len - 8) '*' ^ String.sub draft (len - 4) 4
+                in
+                [ (Theme.ok ()) ^ "  ┌─ Set GitHub Personal Access Token (PAT) ─" ^ Ansi.reset
+                ; "  │ Token: " ^ masked ^ "█"
+                ; "  │ " ^ Ansi.dim ^ "(Enter: save, Esc: cancel)" ^ Ansi.reset
+                ; "  └─────────────────────────────────────────"
+                ; ""
+                ]
+            | None -> []
+          in
+          let status_lines =
+            match state.github_token_save_status with
+            | Some status -> [ "  " ^ status; "" ]
+            | None -> []
+          in
+          input_lines @ status_lines @ base
       | Detail_identity ->
           stamped_or
             (Option.map

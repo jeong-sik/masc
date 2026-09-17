@@ -72,6 +72,8 @@ val executable_selection :
 
 val exact_task_surfaces :
   snapshot:Skill_catalog_snapshot.t ->
+  tool_deny:string list ->
+  sandbox_profile:Keeper_types_profile_sandbox.sandbox_profile ->
   skill_names:string list option ->
   selection:t ->
   current_task:Keeper_world_observation_inputs.current_task_observation ->
@@ -79,7 +81,8 @@ val exact_task_surfaces :
   (string * Keeper_skill_catalog.exact_surface list) list
 (** Project the per-task exact Skill surfaces a turn advertises and executes,
     keyed by task id in observation order (current task first). Takes the
-    already-resolved frozen [selection] and never re-resolves. [skill_names]
-    is the same profile selection used by the executable bundle, so prompt,
-    bundle, and preview consumers share one computation without breaking the
-    turn-boundary freeze. *)
+    already-resolved frozen [selection] and never re-resolves. [tool_deny],
+    [sandbox_profile] and [skill_names] are the same inputs the executable bundle passes to
+    {!Keeper_capability_surface.create}, which builds this projection too, so
+    prompt, bundle, and preview consumers share one computation without
+    breaking the turn-boundary freeze. *)

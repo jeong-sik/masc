@@ -33,24 +33,28 @@ A changed page does not silently change the reviewed release date or its
 `checked_on` date. The original catalog is never rewritten by this job.
 
 For explicit local account discovery, the same script accepts
-`--discovery-request FILE` with this ABI:
+`--discovery-request FILE` together with `--masc-binary PATH` (the installed
+MASC executable, which owns the discovery wire formats) with this ABI:
 
 ```json
-{"schema":"masc.model_discovery_request.v1","connections":[{
+{"schema":"masc.model_discovery_request.v2","connections":[{
   "id":"my-local-server","publisher":"my-local-publisher",
   "choice":"openai_compatible","endpoint":"http://127.0.0.1:8000/v1",
-  "api_key_env":"","command":""
+  "api_key_env":""
 }]}
 ```
 
-Supported choices reuse `install-runtime-setup.py:discover_models`: Codex,
-Ollama, llama.cpp, vLLM and OpenAI-compatible HTTP. This enumerates metadata;
-it sends no model turn. HTTP authorization, when supplied, uses the existing
-helper's environment-name boundary. Neither credential values nor endpoint or
-credential paths are copied into the report. The report selects only model IDs
-and separately joins reviewed release evidence. Provider `created`, model-list
-insertion times and arbitrary `release_date` response fields are never admitted
-as release evidence. Unsupported and empty/unavailable discovery remain explicit.
+Supported choices dispatch through `install-runtime-setup.py` the way the setup
+wizard does: Codex answers from the installed client catalog
+(`catalog_models`), while Ollama, llama.cpp, vLLM and OpenAI-compatible HTTP go
+through the native discovery command (`native_discover_models`). This
+enumerates metadata; it sends no model turn. HTTP authorization, when supplied,
+uses the existing helper's environment-name boundary. Neither credential values
+nor endpoint or credential paths are copied into the report. The report selects
+only model IDs and separately joins reviewed release evidence. Provider
+`created`/`provider_listed_at`, model-list insertion times and arbitrary
+`release_date` response fields are never admitted as release evidence.
+Unsupported and empty/unavailable discovery remain explicit.
 Account model names can themselves be private; do not publish local reports.
 
 This first stage provides typed evidence and daily observation, not an automatic

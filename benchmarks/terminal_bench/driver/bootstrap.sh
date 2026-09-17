@@ -52,11 +52,39 @@ bench_install_deps
 install -m 0755 "$BENCH/bin/masc-exec-shim" /usr/local/bin/masc-exec-shim
 # The shim refuses to run without its config (exec_shim.mli): remote_root must
 # match the endpoint's remote_root in the rendered runtime.toml (/root).
-printf 'remote_root=/root\n' > /etc/masc-exec-shim.conf
+#
+# The shim replaces the payload PATH with its fixed default
+# (/usr/local/bin:/usr/bin:/bin) unless the endpoint names one with `path=`, the
+# endpoint operator's statement (exec_shim.mli). This endpoint is the task
+# container, and the PATH harbor's exec carries here is the one the task image
+# declares: /opt/conda/bin, /opt/venv/bin, /opt/java/openjdk/bin, the sbin
+# directories. Without it the keeper's commands miss tools every other agent in
+# the same container finds (21 of the 66 4.0.0 tasks put tools in a directory
+# outside the default, masc#36907). The shim refuses empty and relative
+# entries, so those are left out; a repeated entry is kept once.
+# Through release 0.35.19 the shim looks up an argv program in its own
+# process PATH rather than this one, so only `sh -c` payloads see it until
+# the lookup fix (masc#36916) ships.
+shim_path=""
+IFS=':' read -r -a path_entries <<<"${PATH}"
+for entry in "${path_entries[@]}"; do
+  [[ "${entry}" == /* ]] || continue
+  [[ ":${shim_path}:" == *":${entry}:"* ]] && continue
+  shim_path="${shim_path:+${shim_path}:}${entry}"
+done
+{
+  printf 'remote_root=/root\n'
+  if [[ -n "${shim_path}" ]]; then printf 'path=%s\n' "${shim_path}"; fi
+} > /etc/masc-exec-shim.conf
 chmod 644 /etc/masc-exec-shim.conf
 
 # --- sshd on localhost, root key auth (keeper remote_ssh endpoint target) ---
 install -d -m 0755 /run/sshd
+# Debian's openssh-server package makes host keys when it installs; Fedora's
+# leaves that to the sshd-keygen systemd unit, which no task container runs, so
+# sshd exits with "no hostkeys available" (terminal-bench/retro-console-soc,
+# Fedora 42). -A makes each missing default key and leaves existing ones.
+ssh-keygen -A
 install -d -m 0700 "$BENCH/ssh" /root/.ssh
 [[ -f "$BENCH/ssh/id_ed25519" ]] || ssh-keygen -t ed25519 -N '' -q -f "$BENCH/ssh/id_ed25519"
 install -m 0600 "$BENCH/ssh/id_ed25519.pub" /root/.ssh/authorized_keys
@@ -124,8 +152,8 @@ you are asked, verify it, and stop. Do not ask questions."
       IFS=',' read -r -a pool <<< "${BENCH_KEEPER_POOL}"
       pool_id=300
       for k in "${pool[@]}"; do
-        # remote_ssh preflight requires <remote_root>/<name> to exist, and it
-        # runs `gh auth status` against <keeper root>/.config/gh.
+        # remote_ssh preflight requires <remote_root>/<name> to exist. A GitHub
+        # identity only when GH_TOKEN is given (gh_seed.sh).
         mkdir -p "/root/${k}"
         seed_gh_hosts "${k}"
         pool_id=$((pool_id + 1))

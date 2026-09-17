@@ -19,7 +19,14 @@ set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 BENCH_DIR="$(dirname "$HERE")"
 IMAGE="${PROBE_IMAGE:-ubuntu:24.04}"
+# Terminal-Bench 4.0.0 task images are prebuilt for amd64 (agents/masc_dist.py),
+# so that is the platform a task container runs, emulated on Apple Silicon.
 PLATFORM="${PROBE_PLATFORM:-linux/amd64}"
+case "${PLATFORM}" in
+  linux/amd64) DIST_DIR="${BENCH_DIR}/dist/linux-x64" ;;
+  linux/arm64) DIST_DIR="${BENCH_DIR}/dist/linux-arm64" ;;
+  *) echo "no MASC release binary for platform ${PLATFORM}" >&2; exit 2 ;;
+esac
 RUNTIME_ID="${BENCH_RUNTIME_ID:-anthropic.claude-sonnet-5}"
 POOL="${BENCH_KEEPER_POOL:-bench-1}"
 KEEPER="${POOL%%,*}"
@@ -46,7 +53,7 @@ esac
 # the provider as an auth failure.
 key="${!key_env:-}"
 [[ -n "${key}" ]] || { echo "${key_env} is not set" >&2; exit 2; }
-[[ -x "${BENCH_DIR}/dist/masc" ]] || { echo "run image/fetch_masc.sh first" >&2; exit 2; }
+[[ -x "${DIST_DIR}/masc" ]] || { echo "run image/fetch_masc.sh first" >&2; exit 2; }
 
 cfg="${BENCH_DIR}/configs/out-probe"
 rm -rf "${cfg}"
@@ -84,7 +91,7 @@ docker run -d --name "${NAME}" --platform "${PLATFORM}" \
 # inode out from under a live mount. Both cost a run before this changed.
 docker exec "${NAME}" mkdir -p /opt/masc-bench/bin || { echo "STAGE_FAIL mkdir" >&2; exit 1; }
 for f in masc masc-exec-shim gh; do
-  [[ -f "${BENCH_DIR}/dist/${f}" ]] && docker cp "${BENCH_DIR}/dist/${f}" "${NAME}:/opt/masc-bench/bin/${f}"
+  [[ -f "${DIST_DIR}/${f}" ]] && docker cp "${DIST_DIR}/${f}" "${NAME}:/opt/masc-bench/bin/${f}"
 done
 docker cp "${BENCH_DIR}/driver" "${NAME}:/opt/masc-bench/driver"
 docker cp "${cfg}/k" "${NAME}:/opt/masc-bench/config"
@@ -167,11 +174,12 @@ fi
 
 echo "PROBE_OK marker=${MARKER} written by the keeper"
 # The marker proves a file appeared; the receipt proves where the command ran.
-# Kept in a heredoc rather than -c, because the nested quoting of a one-liner
-# inside this shell string is what broke the first version of this block.
-docker exec "${NAME}" sh -c \
-  'find /opt/masc-bench/base/.masc/tool_calls -name "*.jsonl" -exec tail -1 {} +' \
-  | python3 <<'PYEOF' || true
+# The program is written as a heredoc, because the nested quoting of a one-liner
+# inside this shell string is what broke the first version of this block, and
+# handed over with -c. `python3 <<'PYEOF'` made the heredoc python's stdin: the
+# program was read from it and the piped tool calls never arrived, so this
+# printed nothing and `|| true` hid that (masc#36909).
+receipt_summary="$(cat <<'PYEOF'
 import json, sys
 for line in sys.stdin:
     line = line.strip()
@@ -188,3 +196,7 @@ for line in sys.stdin:
           "| host:", result.get("remote_host"),
           "| boundary:", (receipt[0].get("receipt") or {}).get("boundary"))
 PYEOF
+)"
+docker exec "${NAME}" sh -c \
+  'find /opt/masc-bench/base/.masc/tool_calls -name "*.jsonl" -exec tail -1 {} +' \
+  | python3 -c "${receipt_summary}" || true

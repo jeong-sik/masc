@@ -97,21 +97,36 @@ type endpoint_env = private (string * string) list
     [path=], so {!denylisted_env_name} does not apply to it: an operator may
     declare [LD_LIBRARY_PATH].  [PATH] is refused — [path=] is also the list
     {!resolve_program} searches, and one source keeps the payload's [PATH]
-    and that search the same.  Built only by {!parse_env_file}. *)
+    and that search the same.  Built only by {!parse_env_file}.
+
+    In a boxed run ([observe], [guest_local]) [HOME] and [TMPDIR] are the
+    run's scratch directory ({!scratch_env}) whatever the file declares.
+    Other directories the file names lie outside the box: under [observe]
+    a payload's writes there are refused. *)
 
 val no_endpoint_env : endpoint_env
 (** The endpoint declares nothing: no [env_file=]. *)
 
-val parse_env_file : string -> (endpoint_env, string) result
+val parse_env_file : path:string -> string -> (endpoint_env, string) result
 (** docker's [--env-file] grammar without its host-lookup form.  One
     [NAME=VALUE] per line; [NAME] is [[A-Za-z_][A-Za-z0-9_]*] starting at the
     first column; [VALUE] is the rest of the line byte for byte (untrimmed,
-    may contain [=]).  Blank lines and lines whose first non-blank character
-    is ['#'] are skipped.  A line without [=] (docker's "take it from the
-    reader's environment", which here would be an sshd session's), an invalid
-    name, [PATH], a value holding a NUL byte, or a name declared twice is
-    rejected with
-    [remote_ssh_shim_config_error]. *)
+    may contain [=]).  One ['\r'] before the line end is dropped, as docker's
+    line reader drops it, so a file with CRLF endings declares the same
+    values.  Blank lines and lines whose first non-blank character is ['#']
+    are skipped.  A line without [=] (docker's "take it from the reader's
+    environment", which here would be an sshd session's), an invalid name,
+    [PATH], a GitHub token name ({!Exec_ssh_protocol.github_token_env_names}:
+    one token would make every keeper on the endpoint one GitHub identity), a
+    name the runner sets for each request ([GH_CONFIG_DIR],
+    [GIT_TERMINAL_PROMPT]), a value holding a NUL byte, or a name declared
+    twice is rejected with [remote_ssh_shim_config_error].
+
+    [path] is the file the content was read from and appears only in the
+    error.  The error prints that path, the line number, and only the fixed
+    names it refuses ([PATH], the GitHub token names, [GH_CONFIG_DIR],
+    [GIT_TERMINAL_PROMPT]) — never other text from the line, since a
+    malformed line may be a secret value. *)
 
 val synthesize_env :
   path:string ->
@@ -236,14 +251,18 @@ val check_request_root_jail
 
     [env_file] is optional: the absolute path of a file declaring the
     payload's environment ({!endpoint_env}, grammar in {!parse_env_file}).
-    The shim reads it for every request; an unreadable or malformed file
-    refuses the request with [remote_ssh_shim_config_error], as the config
-    file itself does.
+    The shim reads it for every request and refuses the request with
+    [remote_ssh_shim_config_error] when it is not a regular file, cannot be
+    read, is malformed, or fails {!refuse_endpoint_file}.
 
     Unknown keys, duplicate keys, a missing/relative/empty [remote_root],
     a malformed [path], a relative or empty [env_file] or [scratch_root], or
-    an unreadable file are all rejected with [remote_ssh_shim_config_error]
-    and the shim refuses to execute. *)
+    a config path that is not a regular file, fails {!refuse_endpoint_file}
+    or cannot be read are all rejected with [remote_ssh_shim_config_error]
+    and the shim refuses to execute.  Only a regular file is read, and that
+    and its owner and mode are decided before reading, so a FIFO at the path
+    is refused rather than waited on.  An error names a key or a line
+    number, never text from the file. *)
 
 type config =
   { remote_root : string
@@ -271,10 +290,40 @@ val jail_for_request
 
 val parse_config : string -> (config, string) result
 
+type endpoint_file_writers =
+  | Its_group
+  | Every_user
+  | Its_group_and_every_user
+
+type endpoint_file_refusal =
+  | Owned_by of int  (** the file's owner uid: neither root nor the shim's *)
+  | Writable_by of endpoint_file_writers  (** who besides the owner may write it *)
+
+val refuse_endpoint_file :
+  euid:int -> owner:int -> perm:int -> endpoint_file_refusal option
+(** Why the config file or an env file with owner uid [owner] and permission
+    bits [perm] is refused by a shim whose effective uid is [euid]; [None]
+    when it may be read.  Whoever writes the config names the payload [PATH]
+    and the env file, and whoever writes the env file sets every payload's
+    environment, so the rule for both is sshd's StrictModes: the owner is
+    root or [euid], and neither its group nor every user may write it.  An
+    owner outside those two is reported first.  A file owned by the shim's
+    own account passes, but that account runs the payloads and they can
+    rewrite it: keep both files root-owned [0644]. *)
+
+val read_config_file : string -> (config, string) result
+(** The config at a path through {!parse_config}.
+    [remote_ssh_shim_config_error] when the path is not a regular file, when
+    {!refuse_endpoint_file} refuses its owner or mode (both decided before the
+    file is read), or when it cannot be read.  The shim reads
+    [$MASC_EXEC_SHIM_CONFIG] or [/etc/masc-exec-shim.conf] through it. *)
+
 val read_env_file : string option -> (endpoint_env, string) result
 (** {!no_endpoint_env} for [None]; otherwise the named file through
-    {!parse_env_file}, or [remote_ssh_shim_config_error] when it cannot be
-    read. *)
+    {!parse_env_file}.  [remote_ssh_shim_config_error] when the path is not a
+    regular file, when {!refuse_endpoint_file} refuses its owner or mode (both
+    decided before the file is read), or when it cannot be read.  The error
+    names the path, and the owner uid or the mode, as a number. *)
 
 val payload_env :
   config:config ->

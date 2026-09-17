@@ -2,7 +2,7 @@
 
 사용: python aggregate.py <jobs-dir>
 행: job(=arm), task, trial, reward(0/1), duration_ms, tokens, tool_calls.
-레이아웃은 Phase 0 실측으로 확정 (harbor 0.22.0):
+레이아웃은 harbor 0.23.0 의 TrialResult (models/trial/result.py) 기준:
   <jobs>/<job-name>/<task>__<suffix>/result.json  (trial-level, task_name 있음)
   <jobs>/<job-name>/result.json                    (job-level, task_name 없음 — 스킵)
   trial 필드: task_name, trial_name, agent_result(AgentContext),

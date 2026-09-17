@@ -1736,6 +1736,7 @@ let test_keeper_stream_bridge_does_not_requarantine_failed_attempt_tool () =
            , SSEError
                { message = "provider failed"
                ; error_type = Some "server_error"
+               ; provider_status = None
                ; raw = {|{"error":"provider failed"}|}
                } )
          ; "incomplete", StreamIncomplete { reason = "max_output_tokens" }
@@ -2926,7 +2927,7 @@ let test_keeper_stream_bridge_attempt_failures_are_not_turn_terminals () =
   let open Agent_core.Types in
   let provider_kind = Agent_core.Llm_provider.Provider_kind.Gemini in
   let failures =
-    [ "sse_error", SSEError { message = "no credits"; error_type = Some "insufficient_quota"; raw = "{}" }
+    [ "sse_error", SSEError { message = "no credits"; error_type = Some "insufficient_quota"; provider_status = None; raw = "{}" }
     ; "ndjson_error", NDJSONError { message = "rejected"; error_type = None; raw = "{}" }
     ; "sse_parse_failed", SSEParseFailed { raw = "garbage"; reason = "not json" }
     ; "ndjson_parse_failed", NDJSONParseFailed { raw = "garbage"; reason = "not json" }

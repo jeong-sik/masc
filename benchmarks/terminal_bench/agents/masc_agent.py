@@ -2,7 +2,7 @@
 
 install(): prebuilt masc 바이너리 + bash 드라이버 + 렌더된 arm config를
 태스크 컨테이너 /opt/masc-bench에 업로드하고 bootstrap.sh를 root로 실행한다.
-run(): instruction을 업로드하고 run_episode.sh를 실행한 뒤 result.json을
+run(): instruction을 업로드하고 run_episode.sh를 실행한 뒤 collect_result.sh 가 쓴 result.json을
 읽어 AgentContext에 싣는다.
 """
 from __future__ import annotations
@@ -156,8 +156,10 @@ class MascAgent(BaseInstalledAgent):
             # episode failure this block exists to preserve — a truncated
             # result.json would surface as a JSONDecodeError from the
             # recovery path instead of as the run error.
-            try:
-                if interrupted:
+            if interrupted:
+                # Its own try: a report that fails to finish must not stop the
+                # read below, which may still find one written by the episode.
+                try:
                     await self.exec_as_root(
                         environment,
                         f"bash {REMOTE}/driver/collect_result.sh "
@@ -165,6 +167,9 @@ class MascAgent(BaseInstalledAgent):
                         env=self._container_env(),
                         timeout_sec=RESULT_RECOVERY_TIMEOUT_SEC,
                     )
+                except Exception:  # noqa: BLE001 - see above
+                    self.logger.exception("reporting the interrupted episode failed")
+            try:
                 result = await self.exec_as_root(
                     environment, f"cat {REMOTE}/result.json 2>/dev/null || true",
                     timeout_sec=RESULT_RECOVERY_TIMEOUT_SEC)
@@ -235,7 +240,7 @@ class MascAgent(BaseInstalledAgent):
         fallback = final.get("usage") or {}
 
         def usage(key: str):
-            # run_episode.sh emits episode-summed usage at the top level, read
+            # collect_result.sh emits episode-summed usage at the top level, read
             # from the agent-core trace dumps under .masc/traces. It always
             # writes the keys, using null when there was nothing to sum, so
             # `data.get(key, fallback)` never reaches the fallback — the key is
@@ -251,6 +256,7 @@ class MascAgent(BaseInstalledAgent):
             **(context.metadata or {}),
             "masc_state": data.get("state"),
             "interrupted": data.get("interrupted"),
+            "keepers_stopped": data.get("keepers_stopped"),
             "duration_ms": data.get("duration_ms"),
             "tool_calls": data.get("tool_calls"),
             "duplicate_tool_calls": data.get("duplicate_tool_calls"),

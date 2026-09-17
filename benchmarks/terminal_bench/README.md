@@ -54,10 +54,11 @@ MASC 하네스 자체를 Terminal-Bench 4.0.0 전체로 잰다.
   시작 전에 이름과 숫자를 대고 거부한다. `CONCURRENCY` 만큼 큰 태스크가 동시에 도는
   경우도 같이 본다.
 
-로컬 docker 로 GPU 가 아닌 63개를 다 돌리려면 Docker Desktop 에 CPU 16개 이상,
-`docker info` 의 `MemTotal` 이 16384 MiB 이상이 되게 메모리를 줘야 한다. Docker
-Desktop 에 16 GiB 를 줘도 `MemTotal` 은 15972 MiB 로 보고된다(2026-09-17 실측).
-동시 실행 수를 올리면 필요한 양도 같이 커진다.
+로컬 docker 로 GPU 가 아닌 63개를 다 돌리려면 `CONCURRENCY=1` 에서 Docker Desktop 에
+CPU 16개 이상, `docker info` 의 `MemTotal` 이 16384 MiB 이상이 되게 메모리를 줘야 한다.
+Docker Desktop 에 16 GiB 를 줘도 `MemTotal` 은 15972 MiB 로 보고된다(2026-09-17 실측).
+기본값 `CONCURRENCY=2` 에서는 가장 큰 두 태스크(16 CPU, 8 CPU)가 같이 돌 수 있어서
+CPU 24개가 필요하다. CPU 가 16개인 Mac 에서는 로컬 docker 로 동시 실행 1 만 된다.
 
 ### 타임아웃
 

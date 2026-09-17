@@ -108,10 +108,11 @@ let declared = Tool_schemas_identity_tool_search.schema
    provider's cache prefix, so it has to read the same on the turn that loads
    a tool and on the turn after, when that tool is placed. Leaving placed names
    out would change the description at exactly that boundary and forfeit the
-   cached prefix from this tool on, history included. Naming them costs a
-   median 143 bytes and at most 375 per request, 0.21% of the median 73 KB of
-   tool schemas (1,694 requests, 2026-09-17). Asking for a tool that is already
-   callable answers rather than refuses.
+   cached prefix from this tool on, history included. Over 1,694 requests in
+   two capture files of 2026-09-17, naming them cost a median 143 bytes and a
+   p90 of 375, 0.21% of the median 73 KB of tool schemas; the largest carried
+   set measured, 41 tools, is under 1 KB of names. Asking for a tool that is
+   already callable answers rather than refuses.
 
    Names only. The one-line summaries rode here too until 2026-09-02, and at
    57 to 86 listed tools that was 6 to 9 KB on every request of every turn,
@@ -239,6 +240,15 @@ let load ~keeper_name ~agent_cell ~entries ~usage ~receipts ~invocation requeste
            | None -> Either.Right name)
         requested
     in
+    (* The listing names placed tools too, so asking for one the agent already
+       holds is expected. Loading it again would add nothing, record a receipt
+       that keeps it placed past the carry window, and report it loaded. *)
+    let found, found_held =
+      List.partition
+        (fun entry ->
+           not (Agent_core.Tool_set.mem entry.name (Agent_core.Agent.tools agent)))
+        found
+    in
     let callable, unknown =
       List.partition_map
         (fun name ->
@@ -250,6 +260,7 @@ let load ~keeper_name ~agent_cell ~entries ~usage ~receipts ~invocation requeste
            | None -> Either.Right name)
         unknown
     in
+    let callable = List.map describe found_held @ callable in
     match found, callable with
     | [], [] -> refusal (Printf.sprintf "not in the list: %s" (String.concat ", " unknown))
     | _ ->
@@ -330,8 +341,11 @@ let observe_turn ~keeper_name ~usage () =
    from the turn before pays the whole prefix again. A call to a name already
    carried only moves that name's ordinal, which leaves the array identical,
    so cutting there would forfeit the prefix for a change nothing else asked
-   for. A call to a name not carried adds it to the array, which forfeits the
-   prefix anyway, so the cut rides an invalidation already being paid.
+   for. A call to a name not carried adds it to the array the turn started
+   with, which forfeits the prefix anyway, so the cut rides an invalidation
+   already being paid -- except when that name was loaded through the listing
+   during the turn. Its later requests already held it in the slot this turn
+   places it in, so there the cut is the only change at the boundary (#36947).
 
    The consequence is that the window is sampled at those calls and not
    continuously: between two of them the carried set is frozen, so a tool can

@@ -623,9 +623,46 @@ let test_a_loaded_tool_takes_the_slot_the_next_turn_places_it_in () =
     (names (array_of next_turn))
 ;;
 
-(* Omitted from the prose, not from the surface: a model that names a tool it
-   already has must be answered, not refused, or the omission would turn a
-   redundant line into a dead end. *)
+(* The listing names placed tools too. Asking for one the agent already holds
+   answers that it is callable and records no load: a receipt would keep the
+   tool placed past the carry window with nothing having been loaded. *)
+let test_naming_a_held_tool_records_no_load () =
+  Eio_main.run
+  @@ fun env ->
+  let offering = offered two_offered in
+  let receipts = make_receipts ~context:(Agent_core.Context.create_sync ()) offering in
+  let agent_cell = ref None in
+  let this_turn =
+    match
+      placement ~agent_cell ~receipts ~history:[ called "atlassian_jira_search" ] offering
+    with
+    | Some p -> p
+    | None -> fail "an attached service was offered and produced no placement"
+  in
+  let agent =
+    Agent_core.Agent.create
+      ~config:(Agent_core.Types.default_config ~model:"test-model")
+      ~tools:
+        (this_turn.Keeper_identity_tool_search.tool
+         :: this_turn.Keeper_identity_tool_search.already_used)
+      ~net:env#net
+      ()
+  in
+  agent_cell := Some agent;
+  (match
+     execute
+       this_turn.Keeper_identity_tool_search.tool
+       (names_input [ "atlassian_jira_search" ])
+   with
+   | Ok { content; _ } ->
+     check bool "the answer says it is already callable" true
+       (String.starts_with ~prefix:"already callable:" content)
+   | Error e -> failf "naming a held tool was refused: %s" e.Agent_core.Types.message);
+  check (list string) "no load was recorded" [] (Load_receipts.pending_names receipts)
+;;
+
+(* A model that names a tool this conversation carries must be answered, not
+   refused, or a redundant request would turn into a dead end. *)
 let test_a_carried_tool_can_still_be_named () =
   Eio_main.run
   @@ fun env ->
@@ -1296,6 +1333,8 @@ let () =
             test_the_listing_reads_the_same_whatever_is_placed
         ; test_case "a loaded tool takes the slot the next turn places it in" `Quick
             test_a_loaded_tool_takes_the_slot_the_next_turn_places_it_in
+        ; test_case "naming a held tool records no load" `Quick
+            test_naming_a_held_tool_records_no_load
         ; test_case "a carried tool can still be named" `Quick
             test_a_carried_tool_can_still_be_named
         ] )

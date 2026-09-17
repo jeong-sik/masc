@@ -237,7 +237,19 @@ let test_extend_tools_places_by_order () =
   Alcotest.(check (list string))
     "with nothing ranked before it, a tool goes before the first ranked after it"
     [ "earlier"; "later" ]
-    (Tool_set.names (Agent.tools later))
+    (Tool_set.names (Agent.tools later));
+  let between =
+    Agent.create
+      ~config:(Types.default_config ~model:"test-model")
+      ~tools:[ tool "a"; tool "x"; tool "c" ]
+      ~net:env#net
+      ()
+  in
+  Agent.extend_tools ~order:[ "a"; "b"; "c" ] between [ tool "b" ];
+  Alcotest.(check (list string))
+    "after the last lower-ranked tool, not before the first higher-ranked one"
+    [ "a"; "b"; "x"; "c" ]
+    (Tool_set.names (Agent.tools between))
 ;;
 
 let test_version_info () =

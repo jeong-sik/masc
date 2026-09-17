@@ -20,7 +20,7 @@ let shim_env = [ ("HOME", "/home/dev")
 (* {1 env synthesis} *)
 
 let test_minimal_base_env () =
-  let env = Exec_shim.synthesize_env ~path:Exec_shim.default_base_path ~base_env:shim_env ~allowlist:[] ~request_env:[] in
+  let env = Exec_shim.synthesize_env ~endpoint_env:Exec_shim.no_endpoint_env ~path:Exec_shim.default_base_path ~base_env:shim_env ~allowlist:[] ~request_env:[] in
   check (option string) "PATH is the fixed minimal value"
     (Some Exec_shim.default_base_path) (List.assoc_opt "PATH" env);
   check (option string) "HOME from shim env" (Some "/home/dev") (List.assoc_opt "HOME" env);
@@ -29,20 +29,20 @@ let test_minimal_base_env () =
   check int "base env is exactly PATH/HOME/USER/TMPDIR" 4 (List.length env)
 
 let test_base_env_defaults () =
-  let env = Exec_shim.synthesize_env ~path:Exec_shim.default_base_path ~base_env:[] ~allowlist:[] ~request_env:[] in
+  let env = Exec_shim.synthesize_env ~endpoint_env:Exec_shim.no_endpoint_env ~path:Exec_shim.default_base_path ~base_env:[] ~allowlist:[] ~request_env:[] in
   check (option string) "HOME default" (Some "/tmp") (List.assoc_opt "HOME" env);
   check (option string) "USER default" (Some "masc") (List.assoc_opt "USER" env);
   check (option string) "TMPDIR default" (Some "/tmp") (List.assoc_opt "TMPDIR" env)
 
 let test_allowlist_overlay_survives () =
-  let env = Exec_shim.synthesize_env ~path:Exec_shim.default_base_path ~base_env:shim_env ~allowlist:[ "FOO" ]
+  let env = Exec_shim.synthesize_env ~endpoint_env:Exec_shim.no_endpoint_env ~path:Exec_shim.default_base_path ~base_env:shim_env ~allowlist:[ "FOO" ]
       ~request_env:[ ("FOO", "ok"); ("BAR", "not-allowlisted") ] in
   check (option string) "allowlisted FOO kept" (Some "ok") (List.assoc_opt "FOO" env);
   check (option string) "non-allowlisted BAR dropped" None (List.assoc_opt "BAR" env)
 
 let test_runtime_identity_env_survives_empty_allowlist () =
   let env =
-    Exec_shim.synthesize_env ~path:Exec_shim.default_base_path ~base_env:shim_env ~allowlist:[]
+    Exec_shim.synthesize_env ~endpoint_env:Exec_shim.no_endpoint_env ~path:Exec_shim.default_base_path ~base_env:shim_env ~allowlist:[]
       ~request_env:
         [ "GH_CONFIG_DIR", "/srv/masc/playground/keeper-a/.config/gh"
         ; "GIT_TERMINAL_PROMPT", "0"
@@ -58,7 +58,7 @@ let test_runtime_identity_env_survives_empty_allowlist () =
     (List.assoc_opt "LANG" env)
 
 let test_denylist_beats_allowlist () =
-  let env = Exec_shim.synthesize_env ~path:Exec_shim.default_base_path ~base_env:[]
+  let env = Exec_shim.synthesize_env ~endpoint_env:Exec_shim.no_endpoint_env ~path:Exec_shim.default_base_path ~base_env:[]
       ~allowlist:[ "PATH"; "FOO" ]
       ~request_env:[ ("PATH", "/evil/bin"); ("FOO", "ok") ] in
   check bool "wire PATH dropped" true (List.assoc_opt "PATH" env <> Some "/evil/bin");
@@ -73,7 +73,7 @@ let test_denylist_names () =
              ; ("DYLD_PRINT_LIBRARIES", "1")
              ; ("BASH_ENV", "/evil.sh")
              ; ("ENV", "/evil.sh") ] in
-  let env = Exec_shim.synthesize_env ~path:Exec_shim.default_base_path ~base_env:shim_env ~allowlist:(List.map fst wire)
+  let env = Exec_shim.synthesize_env ~endpoint_env:Exec_shim.no_endpoint_env ~path:Exec_shim.default_base_path ~base_env:shim_env ~allowlist:(List.map fst wire)
       ~request_env:wire in
   List.iter
     (fun (k, v) ->
@@ -261,7 +261,7 @@ let test_parse_config_rejects_bad_path () =
 
 let test_synthesize_env_takes_config_path () =
   let env =
-    Exec_shim.synthesize_env ~path:"/home/opam/.opam/5.5/bin:/usr/bin"
+    Exec_shim.synthesize_env ~endpoint_env:Exec_shim.no_endpoint_env ~path:"/home/opam/.opam/5.5/bin:/usr/bin"
       ~base_env:shim_env ~allowlist:[] ~request_env:[ ("PATH", "/wire/bin") ]
   in
   check (option string) "config path replaces the fixed base"
@@ -288,6 +288,108 @@ let test_parse_config_rejects_unknown_key () =
     check bool "config error code" true
       (String.starts_with ~prefix:"remote_ssh_shim_config_error" e)
 
+(* {1 endpoint env file} *)
+
+let endpoint_env_of content =
+  match Exec_shim.parse_env_file content with
+  | Ok env -> env
+  | Error e -> fail ("env file fixture rejected: " ^ e)
+
+let declared (env : Exec_shim.endpoint_env) =
+  List.sort compare (env :> (string * string) list)
+
+let is_config_error e = String.starts_with ~prefix:Exec_shim.config_error_code e
+
+let test_env_file_declares_values_verbatim () =
+  let env =
+    endpoint_env_of
+      (String.concat "\n"
+         [ "# written from the task image"
+         ; ""
+         ; "VIRTUAL_ENV=/opt/venv"
+         ; "LD_LIBRARY_PATH=/usr/local/cuda/lib64"
+         ; "PS1=\\u@\\h $ "
+         ; "JAVA_OPTS=-Dkey=value"
+         ; "EMPTY="
+         ; "  # an indented comment"
+         ; "" ])
+  in
+  check (list (pair string string)) "each name with the rest of its line"
+    [ "EMPTY", ""
+    ; "JAVA_OPTS", "-Dkey=value"
+    ; "LD_LIBRARY_PATH", "/usr/local/cuda/lib64"
+    ; "PS1", "\\u@\\h $ "
+    ; "VIRTUAL_ENV", "/opt/venv" ]
+    (declared env)
+
+let test_env_file_rejects () =
+  List.iter
+    (fun (label, content) ->
+      match Exec_shim.parse_env_file content with
+      | Ok _ -> fail (label ^ " must be rejected")
+      | Error e -> check bool (label ^ " is a config error") true (is_config_error e))
+    [ "PATH", "PATH=/opt/venv/bin:/usr/bin\n"
+    ; "a name without a value", "VIRTUAL_ENV\n"
+    ; "an indented name", "  VIRTUAL_ENV=/opt/venv\n"
+    ; "a name starting with a digit", "1X=y\n"
+    ; "a dash in the name", "MY-VAR=y\n"
+    ; "an empty name", "=y\n"
+    ; "a name declared twice", "A=1\nA=2\n"
+    ; "a NUL byte in the value", "A=x\000y\n"
+    ]
+
+let test_endpoint_env_overlays_the_base () =
+  let endpoint_env =
+    endpoint_env_of "VIRTUAL_ENV=/opt/venv\nLD_LIBRARY_PATH=/usr/local/cuda/lib64\nHOME=/root\n"
+  in
+  let env =
+    Exec_shim.synthesize_env ~path:"/opt/venv/bin:/usr/bin" ~endpoint_env ~base_env:shim_env
+      ~allowlist:[] ~request_env:[]
+  in
+  check (option string) "a declared name is added" (Some "/opt/venv")
+    (List.assoc_opt "VIRTUAL_ENV" env);
+  check (option string) "an operator may declare the loader path"
+    (Some "/usr/local/cuda/lib64") (List.assoc_opt "LD_LIBRARY_PATH" env);
+  check (option string) "a declared HOME replaces the session's" (Some "/root")
+    (List.assoc_opt "HOME" env);
+  check (option string) "PATH is still path=" (Some "/opt/venv/bin:/usr/bin")
+    (List.assoc_opt "PATH" env);
+  check int "names stay unique"
+    (List.length (List.sort_uniq compare (List.map fst env))) (List.length env)
+
+let test_wire_meets_the_endpoint_env () =
+  let endpoint_env =
+    endpoint_env_of "VIRTUAL_ENV=/opt/venv\nLD_LIBRARY_PATH=/usr/local/cuda/lib64\nLANG=C.UTF-8\n"
+  in
+  let env =
+    Exec_shim.synthesize_env ~path:Exec_shim.default_base_path ~endpoint_env ~base_env:shim_env
+      ~allowlist:[ "VIRTUAL_ENV"; "LD_LIBRARY_PATH" ]
+      ~request_env:[ "VIRTUAL_ENV", "/work/venv"; "LD_LIBRARY_PATH", "/evil/lib"; "LANG", "fr_FR" ]
+  in
+  check (option string) "an allowlisted wire value replaces the declared one"
+    (Some "/work/venv") (List.assoc_opt "VIRTUAL_ENV" env);
+  check (option string) "the denylist still keeps the wire off the loader path"
+    (Some "/usr/local/cuda/lib64") (List.assoc_opt "LD_LIBRARY_PATH" env);
+  check (option string) "a wire value outside the allowlist leaves the declared one"
+    (Some "C.UTF-8") (List.assoc_opt "LANG" env)
+
+let test_parse_config_env_file () =
+  (match Exec_shim.parse_config "remote_root=/srv/masc\nenv_file=/etc/masc-exec-shim.env\n" with
+   | Ok c ->
+     check (option string) "env_file" (Some "/etc/masc-exec-shim.env") c.Exec_shim.env_file
+   | Error e -> fail e);
+  (match Exec_shim.parse_config "remote_root=/srv/masc\n" with
+   | Ok c -> check (option string) "no env_file declares nothing" None c.Exec_shim.env_file
+   | Error e -> fail e);
+  List.iter
+    (fun (label, content) ->
+      match Exec_shim.parse_config content with
+      | Ok _ -> fail (label ^ " must be rejected")
+      | Error e -> check bool (label ^ " is a config error") true (is_config_error e))
+    [ "a relative env_file", "remote_root=/srv/masc\nenv_file=etc/masc-exec-shim.env\n"
+    ; "an empty env_file", "remote_root=/srv/masc\nenv_file=\n"
+    ]
+
 (* {1 path jail} *)
 
 let contains needle haystack =
@@ -301,6 +403,55 @@ let with_tmp_tree f =
   Fun.protect
     ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote root)))
     (fun () -> f root)
+
+let write_env_file path content =
+  Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc content)
+
+let test_read_env_file () =
+  (match Exec_shim.read_env_file None with
+   | Ok env -> check (list (pair string string)) "no env_file declares nothing" [] (declared env)
+   | Error e -> fail e);
+  with_tmp_tree (fun root ->
+      let env_file = Filename.concat root "shim.env" in
+      (match Exec_shim.read_env_file (Some env_file) with
+       | Ok _ -> fail "a named env_file that is not there must refuse the request"
+       | Error e -> check bool "an absent env_file is a config error" true (is_config_error e));
+      write_env_file env_file "VIRTUAL_ENV=/opt/venv\n";
+      match Exec_shim.read_env_file (Some env_file) with
+      | Ok env ->
+        check (list (pair string string)) "the file's declarations"
+          [ "VIRTUAL_ENV", "/opt/venv" ] (declared env)
+      | Error e -> fail e)
+
+(* The composition the dispatcher runs: the config names the file, the file is
+   read, and its declarations sit between the base and the wire. *)
+let test_payload_env_reads_the_configured_file () =
+  with_tmp_tree (fun root ->
+      let env_file = Filename.concat root "shim.env" in
+      let config =
+        match
+          Exec_shim.parse_config
+            (Printf.sprintf
+               "remote_root=%s\npath=/opt/venv/bin:/usr/bin\nenv_allowlist=LANG\nenv_file=%s\n"
+               root env_file)
+        with
+        | Ok config -> config
+        | Error e -> fail ("config fixture rejected: " ^ e)
+      in
+      write_env_file env_file "VIRTUAL_ENV=/opt/venv\nLANG=C.UTF-8\n";
+      (match Exec_shim.payload_env ~config ~base_env:shim_env ~request_env:[ "LANG", "C" ] with
+       | Error e -> fail e
+       | Ok env ->
+         check (option string) "declared in the file" (Some "/opt/venv")
+           (List.assoc_opt "VIRTUAL_ENV" env);
+         check (option string) "path= is the PATH" (Some "/opt/venv/bin:/usr/bin")
+           (List.assoc_opt "PATH" env);
+         check (option string) "the allowlisted wire value is laid over the file" (Some "C")
+           (List.assoc_opt "LANG" env));
+      write_env_file env_file "PATH=/opt/venv/bin\n";
+      match Exec_shim.payload_env ~config ~base_env:shim_env ~request_env:[] with
+      | Ok _ -> fail "a malformed env_file must refuse the request"
+      | Error e -> check bool "a malformed env_file is a config error" true (is_config_error e))
 
 let test_jail_allows_root_itself () =
   with_tmp_tree (fun root ->
@@ -531,16 +682,81 @@ let test_refusal_of_rule_bytes () =
      failf "unknown rule should raise Failure, got %s"
        (Printexc.to_string exn))
 
+(* {1 program lookup}
+
+   Unix.execvpe searches the shim process's PATH, not the payload PATH it is
+   handed, so a tool living only in a [path=] directory was never found (a
+   Terminal-Bench task image with /opt/conda/bin in its PATH, reached over
+   remote_ssh, whose sshd session PATH has no such entry). *)
+
+let write_file path ~perm =
+  let oc = open_out path in
+  output_string oc "#!/bin/sh\nexit 0\n";
+  close_out oc;
+  Unix.chmod path perm
+
+let test_program_with_a_slash_is_executed_as_named () =
+  check (option string) "a path is not searched"
+    (Some "/opt/conda/bin/python")
+    (Exec_shim.resolve_program ~payload_path:[ "/usr/bin" ]
+       ~is_executable:(fun _ -> false) "/opt/conda/bin/python")
+
+let test_program_is_found_in_the_first_payload_directory_holding_it () =
+  let present = [ "/opt/venv/bin/python"; "/usr/bin/python" ] in
+  check (option string) "the payload path order decides"
+    (Some "/opt/venv/bin/python")
+    (Exec_shim.resolve_program
+       ~payload_path:[ "/opt/conda/bin"; "/opt/venv/bin"; "/usr/bin" ]
+       ~is_executable:(fun candidate -> List.mem candidate present) "python")
+
+let test_program_absent_from_the_payload_path_is_not_found () =
+  check (option string) "no fallback to any other PATH" None
+    (Exec_shim.resolve_program ~payload_path:[ "/opt/conda/bin" ]
+       ~is_executable:(fun _ -> false) "python")
+
+let test_lookup_reads_the_filesystem_of_the_payload_path () =
+  with_tmp_tree (fun root ->
+      let tools = Filename.concat root "tools" in
+      Unix.mkdir tools 0o755;
+      write_file (Filename.concat tools "masc_probe_tool") ~perm:0o755;
+      write_file (Filename.concat tools "not_executable") ~perm:0o644;
+      Unix.mkdir (Filename.concat tools "a_directory") 0o755;
+      let resolve = Exec_shim.resolve_program ~payload_path:[ root; tools ]
+          ~is_executable:Exec_shim.is_executable_file in
+      check (option string) "an executable file in a later directory"
+        (Some (Filename.concat tools "masc_probe_tool")) (resolve "masc_probe_tool");
+      check (option string) "a file without execute permission" None
+        (resolve "not_executable");
+      check (option string) "a directory" None (resolve "a_directory"))
+
 let () =
   run "exec shim"
-    [ "env", [ test_case "minimal base env" `Quick test_minimal_base_env
+    [ "program lookup",
+      [ test_case "a program with a slash is executed as named" `Quick
+          test_program_with_a_slash_is_executed_as_named
+      ; test_case "the first payload directory holding it wins" `Quick
+          test_program_is_found_in_the_first_payload_directory_holding_it
+      ; test_case "absent from the payload path is not found" `Quick
+          test_program_absent_from_the_payload_path_is_not_found
+      ; test_case "lookup reads the filesystem" `Quick
+          test_lookup_reads_the_filesystem_of_the_payload_path ]
+    ; "env", [ test_case "minimal base env" `Quick test_minimal_base_env
              ; test_case "base env defaults" `Quick test_base_env_defaults
              ; test_case "allowlist overlay survives" `Quick test_allowlist_overlay_survives
              ; test_case "runtime identity env survives an empty allowlist" `Quick
                  test_runtime_identity_env_survives_empty_allowlist
              ; test_case "denylist beats allowlist" `Quick test_denylist_beats_allowlist
              ; test_case "denylist names" `Quick test_denylist_names
-             ; test_case "denylist predicate" `Quick test_denylisted_predicate ]
+             ; test_case "denylist predicate" `Quick test_denylisted_predicate
+             ; test_case "endpoint env overlays the base" `Quick
+                 test_endpoint_env_overlays_the_base
+             ; test_case "wire meets the endpoint env" `Quick test_wire_meets_the_endpoint_env ]
+    ; "env file", [ test_case "declares values verbatim" `Quick
+                      test_env_file_declares_values_verbatim
+                  ; test_case "rejects" `Quick test_env_file_rejects
+                  ; test_case "read" `Quick test_read_env_file
+                  ; test_case "payload env reads the configured file" `Quick
+                      test_payload_env_reads_the_configured_file ]
     ; "kill policy", [ test_case "on eof" `Quick test_kill_policy_on_eof
                      ; test_case "on timeout" `Quick test_kill_policy_on_timeout
                      ; test_case "on child exit" `Quick test_kill_policy_on_child_exit ]
@@ -553,6 +769,7 @@ let () =
                 ; test_case "rejects unknown key" `Quick test_parse_config_rejects_unknown_key
                 ; test_case "path entries" `Quick test_parse_config_path_ok
                 ; test_case "rejects a bad path" `Quick test_parse_config_rejects_bad_path
+                ; test_case "env_file" `Quick test_parse_config_env_file
                 ; test_case "synthesize_env takes the config path" `Quick
                     test_synthesize_env_takes_config_path ]
     ; "jail", [ test_case "allows root itself" `Quick test_jail_allows_root_itself

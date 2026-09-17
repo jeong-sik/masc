@@ -69,7 +69,9 @@ let declared_is_not_verified () = with_workspace @@ fun base ->
     String.concat "\n" (List.filter (fun line -> not (String.starts_with ~prefix:"default = " line)) (String.split_on_char '\n' runtime_before))
       ^ "\n[runtime.assignments]\nimp = \"ollama_cloud.deepseek-v4-flash\"\n";
     runtime_before ^ "\n[runtime.lanes.broken]\ncandidates = [\"not.configured\"]\n";
-    runtime_before ^ "\n[runtime.lanes.only_lane]\ncandidates = [\"ollama_cloud.deepseek-v4-flash\"]\n[runtime.assignments]\nimp = \"only_lane\"\n"
+    (* An assignment naming neither a declared lane nor a runtime is rejected
+       at load, whatever the admission domain. *)
+    runtime_before ^ "\n[runtime.assignments]\nimp = \"never-declared-anywhere\"\n"
   ] in
   List.iter (fun invalid ->
     write runtime_path invalid;
@@ -77,6 +79,14 @@ let declared_is_not_verified () = with_workspace @@ fun base ->
     check bool "invalid runtime references are not merely unverified" true
       (condition Onboarding_status.Model_connection state = Onboarding_status.Invalid);
     check string "invalid config preserved" invalid (read runtime_path)) invalid_configs;
+  (* RFC-0456: an assignment may name a declared lane. The doctor resolves the
+     lane's entry candidate, so a lane-bound imp reads as declared but
+     unverified, not as a load failure. *)
+  write runtime_path
+    (runtime_before ^ "\n[runtime.lanes.only_lane]\ncandidates = [\"ollama_cloud.deepseek-v4-flash\"]\n[runtime.assignments]\nimp = \"only_lane\"\n");
+  let lane_named = Onboarding_status.inspect ~base_path:(Some base) in
+  check bool "an assignment naming a declared lane is not a load failure" true
+    (condition Onboarding_status.Model_connection lane_named = Onboarding_status.Needs_verification);
   write runtime_path runtime_before;
   let metadata_dir = Filename.concat root "keepers" in
   Unix.mkdir metadata_dir 0o700;

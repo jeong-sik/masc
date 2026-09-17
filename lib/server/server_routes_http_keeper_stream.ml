@@ -1161,6 +1161,12 @@ let execute_keeper_stream_tool_streaming
   let config = workspace_scope.config in
   let start_time = Eio.Time.now clock in
   let body, disposition =
+    (* Every failure here is a typed value first; its summary is what the
+       string-shaped stream and row API still take (RFC-0454 D2). *)
+    let failed failure_class cause =
+      ( Keeper_request_failure.summary { Keeper_request_failure.cause }
+      , Tool_result.Failed failure_class )
+    in
     try
       let keeper_ctx : _ Keeper_tool_surface.context =
         {
@@ -1188,31 +1194,34 @@ let execute_keeper_stream_tool_streaming
           ~message
       in
       match dispatched with
-      | Some result ->
+      | Some (Keeper_turn.Turn_settled result) ->
           let body = Tool_result.message result in
           body, keeper_stream_disposition_of_result result
-      | None ->
-        ( "masc_keeper_msg stream dispatch unavailable"
-        , Tool_result.Failed Tool_result.Runtime_failure )
+      | Some (Keeper_turn.Turn_failed { result; failure }) ->
+          (* The turn already decided why it failed, and the value crossed
+             this boundary as a value. The stream renders it once here
+             instead of each producer formatting its own sentence. *)
+          ( Keeper_request_failure.summary failure
+          , keeper_stream_disposition_of_result result )
+      | None -> failed Tool_result.Runtime_failure Keeper_request_failure.Dispatch_unavailable
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | Workspace.Not_initialized ->
-        ( Masc_domain.masc_error_to_string
-            (Masc_domain.System Masc_domain.System_error.NotInitialized)
-        , Tool_result.Failed Tool_result.Runtime_failure )
+        failed Tool_result.Runtime_failure Keeper_request_failure.Server_not_initialized
     | exn when Keeper_registry_types.is_operator_interrupt exn ->
         (* #28810: operator-requested turn interrupt is a typed cancellation,
            not a crash. The guard covers every Eio delivery shape — bare,
            [Finally_raised], [Multiple] — while genuinely cancelled fibers
            re-raise above (#28868 review). *)
         Log.Mcp.info "tools/call interrupted by operator (stream)";
-        ( Keeper_registry_types.operator_interrupt_detail
-        , Tool_result.Failed Tool_result.Operator_cancelled )
+        failed Tool_result.Operator_cancelled Keeper_request_failure.Operator_cancelled
     | exn ->
         let err = Printexc.to_string exn in
         Log.Mcp.error "tools/call crashed (stream): %s" err;
-        ( Printf.sprintf "Internal error: %s" err
-        , Tool_result.Failed Tool_result.Runtime_failure )
+        failed
+          Tool_result.Runtime_failure
+          (Keeper_request_failure.Raised
+             { site = Keeper_request_failure.Stream_dispatch; exn = err })
   in
   let success = keeper_stream_success disposition in
       let end_time = Eio.Time.now clock in
@@ -1422,6 +1431,21 @@ let canonical_reply_payload_of_body ~redact_text body =
     }
 ;;
 
+(* Which part of the reply contract the projection refused. The detail keeps
+   the producer's own sentence; this says what the screen can match on. *)
+let reply_contract_field_of_payload_error
+  : canonical_reply_payload_error -> Keeper_request_failure.reply_contract_field
+  = function
+  | Malformed_reply_json _
+  | Reply_payload_not_object
+  | Missing_payload_field _
+  | Duplicate_payload_field _
+  | Invalid_payload_field_type _ -> Keeper_request_failure.Reply_payload
+  | Unknown_turn_outcome -> Keeper_request_failure.Turn_outcome
+  | Invalid_turn_ref -> Keeper_request_failure.Turn_ref
+  | Invalid_external_effect_target _ -> Keeper_request_failure.External_effect_target
+;;
+
 let persisted_error_reply err =
   let detail =
     match String.trim err with
@@ -1430,15 +1454,26 @@ let persisted_error_reply err =
   in
   "Keeper request failed: " ^ detail
 
-let empty_direct_reply_error =
-  "Keeper completed without a visible reply; the runtime returned only thinking or internal state."
-
-let direct_reply_terminal_error ?(has_visible_blocks = false) payload_json_opt visible_reply =
+(* The two answers this returns are causes, not sentences: the contract
+   refused the payload, or the turn produced nothing to show (RFC-0454 D2). *)
+let direct_reply_terminal_error ?(has_visible_blocks = false) payload_json_opt visible_reply
+  : Keeper_request_failure.cause option
+  =
+  let empty_direct_reply =
+    Keeper_request_failure.No_visible_reply
+      { stage = Keeper_request_failure.Terminal_projection
+      ; had_blocks = has_visible_blocks
+      }
+  in
   match Keeper_turn_outcome.of_reply_payload payload_json_opt with
   | Error error ->
     Some
-      ("Keeper reply contract error: "
-       ^ Keeper_turn_outcome.decode_error_to_string error)
+      (Keeper_request_failure.Reply_contract_rejected
+         { field = Keeper_request_failure.Turn_outcome
+         ; detail =
+             "Keeper reply contract error: "
+             ^ Keeper_turn_outcome.decode_error_to_string error
+         })
   | Ok turn_outcome ->
     (match
        turn_outcome, String_util.trim_nonempty visible_reply, has_visible_blocks
@@ -1448,10 +1483,8 @@ let direct_reply_terminal_error ?(has_visible_blocks = false) payload_json_opt v
      | Keeper_turn_outcome.Awaiting_gate_approval, _, _ -> None
      | Keeper_turn_outcome.No_visible_reply, _, true -> None
      | Keeper_turn_outcome.Visible_reply, None, true -> None
-     | Keeper_turn_outcome.No_visible_reply, _, false ->
-       Some empty_direct_reply_error
-     | Keeper_turn_outcome.Visible_reply, None, false ->
-       Some empty_direct_reply_error
+     | Keeper_turn_outcome.No_visible_reply, _, false -> Some empty_direct_reply
+     | Keeper_turn_outcome.Visible_reply, None, false -> Some empty_direct_reply
      | Keeper_turn_outcome.Visible_reply, Some _, _ -> None)
 
 let persisted_reply_blocks ~turn_outcome media_blocks =
@@ -1966,6 +1999,8 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
     | [] -> None
     | media_blocks -> Some media_blocks
   in
+  (* [err] is [Keeper_request_failure.summary] of the cause its producer
+     built. The row still carries text; RFC-0454 D3 gives it the value. *)
   let persist_failure_reply ?blocks ?turn_ref err =
     (* The failure marker is typed, not an utterance: it renders for the
        operator but does not advance the lane watermark, so the user
@@ -2000,7 +2035,8 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
   in
   let run_turn request_sw =
     let start_time = Time_compat.now () in
-        let finish_projection_failure kind detail =
+        let finish_projection_failure kind (failure : Keeper_request_failure.t) =
+          let detail = Keeper_request_failure.summary failure in
           let persisted = persist_failure_reply detail in
           let queued_outcome =
             match persisted with
@@ -2032,7 +2068,11 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
           in
           if String.equal payload.name direct_target && String.trim payload.name <> ""
           then Ok ()
-          else Error "Keeper chat payload identity does not match its direct message"
+          else
+            Error
+              { Keeper_request_failure.cause =
+                  Keeper_request_failure.Chat_identity_mismatch
+              }
         in
         (* Whether a keeper can take a turn lives in the registry, not on
            disk. [ensure_keeper_exists] downstream reads meta, which an
@@ -2048,14 +2088,18 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
           then Ok ()
           else
             Error
-              (Printf.sprintf
-                 "keeper %s is not registered in this server process; retry shortly or start it before sending a message"
-                 payload.name)
+              { Keeper_request_failure.cause =
+                  Keeper_request_failure.Keeper_not_registered { keeper = payload.name }
+              }
         in
         let operation_prepare =
           Result.bind keeper_is_registered (fun () ->
             Result.bind payload_identity (fun () ->
-              append_queued_user_row_once ()))
+              append_queued_user_row_once ()
+              |> Result.map_error (fun detail ->
+                   { Keeper_request_failure.cause =
+                       Keeper_request_failure.User_row_unpersisted { detail }
+                   })))
         in
         let dispatch_result =
           match operation_prepare with
@@ -2078,9 +2122,8 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
           with
           | Eio.Cancel.Cancelled _ as e -> raise e
           | exn ->
-              Log.Keeper.warn
-                "keeper_stream: streaming dispatch raised: %s"
-                (Printexc.to_string exn);
+              let exn_repr = Printexc.to_string exn in
+              Log.Keeper.warn "keeper_stream: streaming dispatch raised: %s" exn_repr;
               (* A second non-streaming dispatch is a distinct asynchronous
                  turn whose submission acknowledgement returns before its
                  events. Retrying here can duplicate provider/tool effects,
@@ -2089,7 +2132,13 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                  [persist_failure_reply] retains sealed call evidence and media
                  already completed, while quarantining the failed unsealed
                  provider scope. *)
-              Error (Printexc.to_string exn))
+              Error
+                { Keeper_request_failure.cause =
+                    Keeper_request_failure.Raised
+                      { site = Keeper_request_failure.Stream_streaming_call
+                      ; exn = exn_repr
+                      }
+                })
         in
         match dispatch_result with
         | Ok (`Ran ((Tool_result.Completed () | Tool_result.Deferred ()), body)) ->
@@ -2112,7 +2161,12 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                "keeper_stream: canonical terminal projection rejected keeper=%s error=%s"
                payload.name
                internal_detail;
-             finish_projection_failure Stream_projection_failed detail
+             finish_projection_failure
+               Stream_projection_failed
+               { Keeper_request_failure.cause =
+                   Keeper_request_failure.Reply_contract_rejected
+                     { field = reply_contract_field_of_payload_error error; detail }
+               }
            | Ok canonical_reply ->
             let payload_json_opt = Some canonical_reply.payload_json in
             let body = canonical_reply.poll_body in
@@ -2132,7 +2186,9 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                direct_reply_terminal_error ~has_visible_blocks payload_json_opt
                  visible_reply
              with
-             | Some err ->
+             | Some cause ->
+                 let failure = { Keeper_request_failure.cause } in
+                 let err = Keeper_request_failure.summary failure in
                  let queued_outcome =
                    match persist_failure_reply ?turn_ref err with
                    | Ok () -> Some (Failed { kind = Turn_failed; detail = err })
@@ -2226,9 +2282,6 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                                         turn_ref))))
                    | Keeper_turn_outcome.No_visible_reply, _
                    | Keeper_turn_outcome.Visible_reply, None ->
-                       let detail =
-                         "no visible reply was produced for this queued message"
-                       in
                        (match
                           empty_reply_delivery_plan ~has_visible_blocks
                             ~has_tool_calls:(tool_calls <> [])
@@ -2246,6 +2299,15 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                                  ();
                                Ok (Some (queued_delivery_outcome_of_turn_ref turn_ref)))
                         | `Failure ->
+                          let failure =
+                            { Keeper_request_failure.cause =
+                                Keeper_request_failure.No_visible_reply
+                                  { stage = Keeper_request_failure.Queued_delivery
+                                  ; had_blocks = has_visible_blocks
+                                  }
+                            }
+                          in
+                          let detail = Keeper_request_failure.summary failure in
                           persist_failure_reply ?turn_ref detail
                           |> Result.map (fun () ->
                                  Some (Failed { kind = No_visible_reply; detail })))
@@ -2338,7 +2400,8 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
               ~tool_name:"masc_keeper_msg"
               ~start_time
               err
-        | Error err ->
+        | Error failure ->
+            let err = Keeper_request_failure.summary failure in
             let persisted = persist_failure_reply err in
             let queued_outcome =
               match persisted with
@@ -2395,7 +2458,15 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                    });
               publish_inline_completion ()
             | exception exn ->
-              let detail = Printexc.to_string exn in
+              let detail =
+                Keeper_request_failure.summary
+                  { Keeper_request_failure.cause =
+                      Keeper_request_failure.Raised
+                        { site = Keeper_request_failure.Stream_turn_body
+                        ; exn = Printexc.to_string exn
+                        }
+                  }
+              in
               push_worker_event
                 (Stream_terminal
                    { status = Stream_error
@@ -2407,7 +2478,15 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
        with
        | Eio.Cancel.Cancelled _ as exn -> raise exn
        | exn ->
-         let body = Printexc.to_string exn in
+         let body =
+           Keeper_request_failure.summary
+             { Keeper_request_failure.cause =
+                 Keeper_request_failure.Raised
+                   { site = Keeper_request_failure.Stream_submit
+                   ; exn = Printexc.to_string exn
+                   }
+             }
+         in
          let queued_outcome =
            match persist_failure_reply body with
            | Ok () -> Some (Failed { kind = Turn_failed; detail = body })

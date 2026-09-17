@@ -1170,7 +1170,10 @@ let here_marker = " \xc2\xb7 you are here"
    them on the five tabs where they do nothing. *)
 let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
   match tab with
-  | Detail_github -> [ b Act "L" "login" ~help:"start the gh device-flow login" ]
+  | Detail_github ->
+      [ b Act "L" "login" ~help:"start the gh device-flow login"
+      ; b Act "P" "token" ~help:"set fine-grained PAT / token"
+      ]
   | Detail_sandbox ->
       [ b Act "o" "actual logs"
       ; b Act "d/m/s" "backend"

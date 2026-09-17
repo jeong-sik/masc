@@ -16,6 +16,7 @@ val keeper_suffix_config : string
 val keeper_suffix_secrets : string
 val keeper_suffix_github_identity : string
 val keeper_suffix_github_login : string
+val keeper_suffix_github_token : string
 
 val keeper_suffix_oauth_login : string
 
@@ -75,6 +76,7 @@ type keeper_post_route_kind =
   | Keeper_post_config
   | Keeper_post_secrets
   | Keeper_post_github_login
+  | Keeper_post_github_token
   | Keeper_post_oauth_login
   | Keeper_post_identity_refresh
   | Keeper_post_identity_switch

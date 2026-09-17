@@ -11,10 +11,6 @@ val agent_core_checkpoint_path :
 (** [true] iff [filename] is an AGENT_CORE history archive file. *)
 (** Sorted-descending list of AGENT_CORE history archive filenames in
     [session_dir]. *)
-val max_agent_core_history_retained : int
-(** How many past checkpoints of a session are kept beside the canonical one.
-    Each is a whole checkpoint, 111 MB on a live keeper, and the dashboard
-    checkpoint list decodes every one it finds. *)
 
 val list_agent_core_history_files : session_dir:string -> string list
 
@@ -58,6 +54,12 @@ type save_agent_core_outcome =
     [Saved] means payload, rename, and parent-directory fsync succeeded; history
     is observed best effort.
 
+    [history_retained] is how many past checkpoints to leave beside the
+    canonical one; zero writes no history at all. The caller reads it from
+    [Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained] on
+    its own fiber -- this store is also reachable from a raw Domain, where
+    taking the settings mutex raises, so it never reads the setting itself.
+
     RFC-0225 §3.2 checkpoint watermark: returns [Ok Stale_noop] when
     [ckpt.turn_count] is older than the canonical checkpoint currently on disk.
     A stale writer must not clobber a conversation the newer writer already
@@ -66,6 +68,7 @@ type save_agent_core_outcome =
     is never treated as a cold store. *)
 val save_agent_core_classified :
   session_dir:string ->
+  history_retained:int ->
   Agent_core.Checkpoint.t ->
   (save_agent_core_outcome, string) result
 
@@ -77,6 +80,7 @@ val save_agent_core_classified :
 val save_agent_core_classified_with_encoding_memo :
   session_dir:string ->
   encoding_memo:Agent_core.Checkpoint.encoding_memo ->
+  history_retained:int ->
   Agent_core.Checkpoint.t ->
   (save_agent_core_outcome, string) result
 

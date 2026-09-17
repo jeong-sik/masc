@@ -6,6 +6,13 @@ module Runtime_lens_scan = Server_dashboard_http_keeper_runtime_manifest_scan
 module Runtime_lens_swimlane = Server_dashboard_http_keeper_runtime_lens_swimlane
 module T = Trajectory
 
+(* What the operator's window currently says. The store takes the window as an
+   argument -- it is reachable from a raw Domain, where reading a setting
+   raises -- so every caller names it. These cases are not about the window and
+   pass what production passes. *)
+let history_retained () =
+  Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained
+
 let mk_thinking_with_turn ~turn ~block_index ~reasoning_kind =
   T.Withheld_thinking
     { ts = Float.of_int turn
@@ -527,7 +534,8 @@ let test_checkpoint_inventory_preserves_partial_load_failures () =
   |> Result.get_ok;
   let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
   let current = make_inventory_checkpoint ~session_id:trace_id ~turn_count:2 ~created_at:2.0 in
-  (match Keeper_checkpoint_store.save_agent_core_classified ~session_dir current with
+  (match Keeper_checkpoint_store.save_agent_core_classified
+    ~history_retained:(history_retained ()) ~session_dir current with
    | Ok _ -> ()
    | Error detail -> fail ("checkpoint inventory current save failed: " ^ detail));
   let corrupt_history =

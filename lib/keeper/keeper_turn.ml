@@ -24,6 +24,31 @@ open Otel_spans
 
 type tool_result = Keeper_types_profile.tool_result
 
+type dispatch =
+  | Turn_settled of tool_result
+  | Turn_failed of
+      { result : tool_result
+      ; failure : Keeper_request_failure.t
+      }
+
+(* The turn answers with a tool result the caller already knows how to carry,
+   and — when it failed — with the typed cause beside it. Two constructors
+   rather than an optional field: a failed turn always has a cause, and the
+   server should not have to invent one for a case the types allow but no
+   producer builds. Encoding the cause into [Tool_result.data] and decoding it
+   in the server would be a JSON round trip inside one process, and [`Ran]
+   drops [data] anyway (RFC-0454 §2.2, last bullet). *)
+let dispatch_ok result = Turn_settled result
+
+let dispatch_failed ~class_ ?tool_name cause =
+  let failure = { Keeper_request_failure.cause } in
+  Turn_failed
+    { result =
+        tool_result_error ?tool_name ~class_ (Keeper_request_failure.summary failure)
+    ; failure
+    }
+;;
+
 let handle_keeper_up = Keeper_turn_up.handle_keeper_up
 let handle_keeper_down = Keeper_turn_lifecycle.handle_keeper_down
 
@@ -241,15 +266,29 @@ let turn_resources_error ~surface failure =
      Dependency_unavailable, so anything reading the payload got the opposite
      answer from anything reading the result. One value now feeds both. *)
   let class_ = Tool_result.Dependency_unavailable in
-  tool_result_error_data
-    ~class_
-    ~tool_name:(invocation_tool_name surface)
-    (`Assoc
-       [ "error", `String "keeper_turn_resources_unavailable"
-       ; ( "failure_class"
-         , `String (Tool_result.tool_failure_class_to_string class_) )
-       ; "detail", `String detail
-       ])
+  let resource =
+    match failure with
+    | Keeper_publication_recovery_scope.Registry_entry_not_found _ ->
+      Keeper_request_failure.Registry_entry_missing
+    | Keeper_publication_recovery_scope.Registry_entry_unhealthy _ ->
+      Keeper_request_failure.Registry_entry_unhealthy
+  in
+  Turn_failed
+    { result =
+        tool_result_error_data
+          ~class_
+          ~tool_name:(invocation_tool_name surface)
+          (`Assoc
+             [ "error", `String "keeper_turn_resources_unavailable"
+             ; ( "failure_class"
+               , `String (Tool_result.tool_failure_class_to_string class_) )
+             ; "detail", `String detail
+             ])
+    ; failure =
+        { Keeper_request_failure.cause =
+            Keeper_request_failure.Turn_resources_unavailable { resource; detail }
+        }
+    }
 ;;
 
 let require_registered_keeper ~base_path ~name ~action =
@@ -397,7 +436,7 @@ let run_keeper_invocation_turn_admitted_inner
       ~request
       ?direct_message
       ctx
-  : tool_result
+  : dispatch
   =
   with_span
     ~name:"keeper_turn"
@@ -449,7 +488,10 @@ let run_keeper_invocation_turn_admitted_inner
     with
     (* The named keeper does not exist. That is the caller naming something
        absent, not this turn falling over. *)
-    | Error e -> tool_result_error ~class_:Tool_result.Workflow_rejection e
+    | Error detail ->
+      dispatch_failed
+        ~class_:Tool_result.Workflow_rejection
+        (Keeper_request_failure.Keeper_meta_unresolved { keeper = name; detail })
     | Ok meta0 ->
       (match
          Keeper_publication_recovery_scope.resolve_turn_resources
@@ -465,9 +507,10 @@ let run_keeper_invocation_turn_admitted_inner
            ~entry_meta:entry.meta
        with
        | Error err ->
-         tool_result_error
-           ~class_:Tool_result.Runtime_failure
-           (Agent_core.Error.to_string err)
+         let { Keeper_request_failure.cause } =
+           Keeper_request_failure.of_core_error err
+         in
+         dispatch_failed ~class_:Tool_result.Runtime_failure cause
        | Ok (profile_defaults, meta) ->
             let base_dir =
               let root = session_base_dir ctx.config in
@@ -493,7 +536,11 @@ let run_keeper_invocation_turn_admitted_inner
                ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id
                ~session_dir ~session_id
                |> Result.map (Option.map (fun admission -> Keeper_agent_run.Runtime_continuation admission)))) with
-       | Error detail -> tool_result_error ~class_:Tool_result.Runtime_failure detail
+       | Error detail ->
+         dispatch_failed
+           ~class_:Tool_result.Runtime_failure
+           (Keeper_request_failure.Turn_continuation_unpersisted
+              { stage = Keeper_request_failure.Continuation_load; detail })
        | Ok direct_resume ->
       let deferred_lane = ref None in
       let produced_checkpoint = ref None in
@@ -565,9 +612,11 @@ let run_keeper_invocation_turn_admitted_inner
         | Some checkpoint -> Ok checkpoint.Keeper_semantic_execution.runtime_id
         | None -> resolve_direct_turn_runtime_id ~meta ~resume_lane ~gate_resume in
       match selected_runtime with
-      | Error e ->
+      | Error detail ->
         Progress.stop_tracking turn_task_id;
-        tool_result_error ~class_:Tool_result.Runtime_failure ("" ^ e)
+        dispatch_failed
+          ~class_:Tool_result.Runtime_failure
+          (Keeper_request_failure.Runtime_selection_failed { detail })
       | Ok turn_runtime_id ->
       (* start_keepalive is deferred AFTER run_turn completes.
          Starting it here causes the heartbeat fiber to immediately grab LLM
@@ -590,7 +639,10 @@ let run_keeper_invocation_turn_admitted_inner
        with
 	         | Error error ->
 	           Progress.stop_tracking turn_task_id;
-	           tool_result_error ~class_:Tool_result.Runtime_failure (Agent_core.Error.to_string error)
+	           let { Keeper_request_failure.cause } =
+	             Keeper_request_failure.of_core_error error
+	           in
+	           dispatch_failed ~class_:Tool_result.Runtime_failure cause
 	         | Ok initial_execution ->
             let live_worktree_change = None in
             (* The direct-message lane used to construct its prompt before it
@@ -929,14 +981,19 @@ let run_keeper_invocation_turn_admitted_inner
                       ~config:ctx.config ~keeper_name:meta.name ~operation_id
                       ~session_dir ~session_id ~approval_ids:!gate_ids () in
                 match gate_wait with
-                | Error detail -> tool_result_error ~class_:Tool_result.Runtime_failure detail
+                | Error detail ->
+                  dispatch_failed
+                    ~class_:Tool_result.Runtime_failure
+                    (Keeper_request_failure.Turn_continuation_unpersisted
+                       { stage = Keeper_request_failure.Gate_suspend; detail })
                 | Ok true ->
                   let () = match Keeper_direct_gate_continuation.reconcile ~config:ctx.config ~meta with
                     | Ok () -> ()
                     | Error detail -> Log.Keeper.warn "direct Gate reconciliation: %s" detail in
                   restart_keepalive_after_message_turn ctx meta;
                   Progress.stop_tracking turn_task_id;
-                  Tool_result.make_deferred ~tool_name:"masc_keeper_msg"
+                  dispatch_ok
+                  @@ Tool_result.make_deferred ~tool_name:"masc_keeper_msg"
                     ~start_time:(Time_compat.now ())
                     ~data:(`Assoc ["reply", `String "";
                       Keeper_turn_outcome.wire_key, `String (Keeper_turn_outcome.to_label Keeper_turn_outcome.Continuation_checkpoint);
@@ -952,9 +1009,14 @@ let run_keeper_invocation_turn_admitted_inner
                     ~session_dir ~session_id lane in
               Progress.stop_tracking turn_task_id;
               (match deferred with
-               | Error detail -> tool_result_error ~class_:Tool_result.Runtime_failure detail
+               | Error detail ->
+                 dispatch_failed
+                   ~class_:Tool_result.Runtime_failure
+                   (Keeper_request_failure.Turn_continuation_unpersisted
+                      { stage = Keeper_request_failure.Runtime_continuation_defer; detail })
                | Ok () ->
-                 Tool_result.make_deferred ~tool_name:"masc_keeper_msg"
+                 dispatch_ok
+                 @@ Tool_result.make_deferred ~tool_name:"masc_keeper_msg"
                    ~start_time:(Time_compat.now ())
                    ~data:(`Assoc [
                      "reply", `String "";
@@ -964,7 +1026,9 @@ let run_keeper_invocation_turn_admitted_inner
                      "tool_call_evidence", `List []]) ())
             | Error err ->
               let e_str = Agent_core.Error.to_string err in
-              let user_message = Keeper_agent_error.user_message_of_core_error err in
+              let { Keeper_request_failure.cause } =
+                Keeper_request_failure.of_core_error err
+              in
               (try
                  let _ = Trajectory.finalize trajectory_acc
                    (Trajectory.Failed e_str) in
@@ -973,7 +1037,7 @@ let run_keeper_invocation_turn_admitted_inner
                  ~label:"trajectory finalize (agent_run error)" exn);
               restart_keepalive_after_message_turn ctx meta;
               Progress.stop_tracking turn_task_id;
-              tool_result_error ~class_:Tool_result.Runtime_failure user_message
+              dispatch_failed ~class_:Tool_result.Runtime_failure cause
             | Ok (result, _) ->
               (try
                  let _ = Trajectory.finalize trajectory_acc
@@ -1026,7 +1090,11 @@ let run_keeper_invocation_turn_admitted_inner
                             ~settled_session ~frame))
                 else Ok () in
               (match retained with
-               | Error detail -> tool_result_error ~class_:Tool_result.Runtime_failure detail
+               | Error detail ->
+                 dispatch_failed
+                   ~class_:Tool_result.Runtime_failure
+                   (Keeper_request_failure.Turn_continuation_unpersisted
+                      { stage = Keeper_request_failure.Checkpoint_retain; detail })
                | Ok () ->
               restart_keepalive_after_message_turn ctx updated_meta;
               Progress.Tracker.complete turn_tracker
@@ -1075,10 +1143,11 @@ let run_keeper_invocation_turn_admitted_inner
                     Ids.Turn_ref.to_yojson turn_ref );
                 ] @ terminal_effect_fields)
               in
-              if checkpoint_yield then
-                Tool_result.make_deferred ~tool_name:"masc_keeper_msg"
-                  ~start_time:(Time_compat.now ()) ~data:reply_json ()
-              else tool_result_ok_data reply_json)
+              dispatch_ok
+                (if checkpoint_yield then
+                   Tool_result.make_deferred ~tool_name:"masc_keeper_msg"
+                     ~start_time:(Time_compat.now ()) ~data:reply_json ()
+                 else tool_result_ok_data reply_json))
 
 )))))
 
@@ -1113,7 +1182,7 @@ let run_keeper_invocation_turn_admitted
       ~request
       ?direct_message
       ctx
-  : tool_result
+  : dispatch
   =
   let base_path = ctx.config.base_path in
   let name = Keeper_invocation_contract.target_name request in

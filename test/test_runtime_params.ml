@@ -643,6 +643,53 @@ let () =
       (Runtime_params.get Runtime_settings.schedule_terminal_retention_days)
   in
 
+  (* The bounds are written twice -- [register_int]'s ~min/~max validate, and
+     the [meta] a settings screen draws its picker from -- so a test that read
+     one of them would not notice the other moving. These assert the
+     behaviour: what a fresh process answers, and which values [set] takes. *)
+  let checkpoint_history_default = 3 in
+  let checkpoint_history_smallest = 0 in
+  let checkpoint_history_largest = 12 in
+
+  let test_checkpoint_history_default_and_bounds () =
+    (* An assertion that fails inside this case would otherwise leave its
+       override standing for the rest of the executable. *)
+    Fun.protect
+      ~finally:(fun () ->
+        Runtime_params.clear Runtime_settings.keeper_checkpoint_history_retained)
+    @@ fun () ->
+    Alcotest.(check int) "a process with no override keeps this many past checkpoints"
+      checkpoint_history_default
+      (Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained);
+    let refuses count =
+      match
+        Runtime_params.set Runtime_settings.keeper_checkpoint_history_retained count
+      with
+      | Error _ -> ()
+      | Ok () ->
+        Runtime_params.clear Runtime_settings.keeper_checkpoint_history_retained;
+        Alcotest.fail (Printf.sprintf "%d was accepted as a history window" count)
+    in
+    let accepts count =
+      match
+        Runtime_params.set Runtime_settings.keeper_checkpoint_history_retained count
+      with
+      | Ok () ->
+        Alcotest.(check int) "reads back what was set" count
+          (Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained)
+      | Error detail -> Alcotest.fail detail
+    in
+    refuses (checkpoint_history_smallest - 1);
+    (* One dashboard request decodes every retained entry beyond the newest. *)
+    refuses (checkpoint_history_largest + 1);
+    accepts checkpoint_history_smallest;
+    accepts checkpoint_history_largest;
+    Runtime_params.clear Runtime_settings.keeper_checkpoint_history_retained;
+    Alcotest.(check int) "clearing puts the default back"
+      checkpoint_history_default
+      (Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained)
+  in
+
   let test_crash_persistence_enqueue_read () =
     with_eio_guard @@ fun () ->
     let tmp_dir = Filename.temp_dir "masc_crash_" "" in
@@ -746,6 +793,8 @@ let () =
             test_keeper_diagnostics_surface;
           Alcotest.test_case "schedule retention default and bounds" `Quick
             test_schedule_retention_default_and_bounds;
+          Alcotest.test_case "checkpoint history default and bounds" `Quick
+            test_checkpoint_history_default_and_bounds;
         ] );
       ( "crash_persistence",
         [

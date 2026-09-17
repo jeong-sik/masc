@@ -74,10 +74,8 @@ bench_install_deps() {
   pm_refresh || true
 
   # Operational tools. sshd is not optional: the keeper exec lane is remote_ssh
-  # back into this same container. gh is not optional either — the keeper_up
-  # preflight runs `gh auth status` and refuses without a GitHub identity — and
-  # it is absent from debian stable, so it is shipped in dist/ instead of
-  # installed. jq and curl drive the MCP client in driver/mcp.sh.
+  # back into this same container. jq and curl drive the MCP client in
+  # driver/mcp.sh. git and rg are what the remote_ssh preflight probes.
   if command -v apt-get >/dev/null 2>&1; then
     pm_install openssh-server jq curl ca-certificates git ripgrep || true
   elif command -v dnf >/dev/null 2>&1 || command -v microdnf >/dev/null 2>&1; then
@@ -89,11 +87,16 @@ bench_install_deps() {
     exit 1
   fi
 
-  # gh ships in dist/ when fetched; fall back to the package manager if not.
-  if [[ -x "$BENCH/bin/gh" ]]; then
-    install -m 0755 "$BENCH/bin/gh" /usr/local/bin/gh
-  elif ! command -v gh >/dev/null 2>&1; then
-    pm_install gh || true
+  # gh only for a keeper given a GitHub login. The remote_ssh preflight runs
+  # `gh auth status` only when gh_seed.sh has written a hosts.yml, which it
+  # does only from GH_TOKEN; gh is absent from debian stable, so the agent
+  # uploads it from dist/ in that case.
+  if [[ -n "${GH_TOKEN:-}" ]]; then
+    if [[ -x "$BENCH/bin/gh" ]]; then
+      install -m 0755 "$BENCH/bin/gh" /usr/local/bin/gh
+    elif ! command -v gh >/dev/null 2>&1; then
+      pm_install gh || true
+    fi
   fi
 
   # Runtime libraries: only if the binary cannot already run. ldd on the 0.35.x
@@ -118,9 +121,9 @@ bench_install_deps() {
     case "$(bench_masc_failure_reason "$why")" in
       arch)
         echo "masc will not run on $(distro_id): wrong architecture." >&2
-        echo "  container is $(uname -m); the binary in dist/ is for another one." >&2
-        echo "  re-fetch with MASC_LINUX_ARCH matching the task images" >&2
-        echo "  (Terminal-Bench images are amd64, so MASC_LINUX_ARCH=x64)." >&2
+        echo "  container is $(uname -m); the uploaded binary is for another one." >&2
+        echo "  the agent picks dist/linux-x64 or dist/linux-arm64 by uname -m;" >&2
+        echo "  check that image/fetch_masc.sh filled both." >&2
         ;;
       glibc)
         echo "masc will not run on $(distro_id): its glibc is too old." >&2
@@ -149,7 +152,9 @@ bench_install_deps() {
   # Everything the operational install is for, not only what preflight probes:
   # ca-certificates and a working sshd are equally load-bearing, and their
   # absence used to surface as a TLS error from an unrelated curl.
-  for tool in git rg gh df jq curl ssh; do
+  required_tools="git rg df jq curl ssh"
+  [[ -n "${GH_TOKEN:-}" ]] && required_tools="${required_tools} gh"
+  for tool in ${required_tools}; do
     command -v "${tool}" >/dev/null 2>&1 || missing="${missing} ${tool}"
   done
   if [[ -n "${missing}" ]]; then

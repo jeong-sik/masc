@@ -71,10 +71,7 @@ for i in $(seq 1 "${KEEPER_COUNT}"); do
   # the keeper root <remote_root>/<name> to already exist; the bench endpoint
   # is this same container with remote_root=/root.
   mkdir -p "/root/${k}"
-  # Preflight also runs `gh auth status` with GH_CONFIG_DIR=<keeper root>/
-  # .config/gh and refuses keeper_up without a GitHub identity
-  # (remote_github_identity_missing); gh_seed.sh seeds hosts.yml from
-  # ${GH_TOKEN} and is a no-op when it is unset.
+  # A GitHub identity only when GH_TOKEN is given (gh_seed.sh).
   seed_gh_hosts "${k}"
   # A keeper that does not come up is the episode's result, not a reason to
   # leave none: the failure is reported through collect_result.sh with the

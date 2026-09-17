@@ -20,6 +20,7 @@ from harbor.models.agent.context import AgentContext
 
 BENCH_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BENCH_ROOT / "configs"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from render_configs import (  # noqa: E402
     ARMS,
@@ -27,6 +28,7 @@ from render_configs import (  # noqa: E402
     effective_runtime_id,
     render_arm,
 )
+from masc_dist import container_binaries  # noqa: E402
 
 REMOTE = "/opt/masc-bench"
 
@@ -79,34 +81,23 @@ class MascAgent(BaseInstalledAgent):
             "BENCH_RUNTIME_ID": effective_runtime_id(self.runtime_id),
             "KEEPER_COUNT": str(ARMS[self.arm]["keepers"]),
         }
-        # Required, not optional. keeper_up's remote_ssh preflight runs `gh
-        # auth status` and refuses without a GitHub identity
-        # (remote_github_identity_missing). run_episode.sh seeds hosts.yml
-        # from this token and then calls masc_keeper_up unconditionally under
-        # `set -euo pipefail`, so an absent token kills the episode there
-        # instead of naming the missing credential here. README.md already
-        # calls it needed; this is the code saying the same.
-        gh_token = os.environ.get("GH_TOKEN")
-        if not gh_token:
-            raise RuntimeError(
-                "GH_TOKEN not set in harbor process env; keeper_up's "
-                "remote_ssh preflight runs `gh auth status` and refuses "
-                "without a GitHub identity"
-            )
-        env["GH_TOKEN"] = gh_token
+        # Optional. A keeper gets a GitHub login only when this is set:
+        # gh_seed.sh writes hosts.yml from it, and the remote_ssh preflight
+        # runs `gh auth status` only for an endpoint that has one (#35412).
+        # Terminal-Bench tasks do not need GitHub, and a token passed here
+        # lands in every task container of the run.
+        # _get_env also sees what `harbor run --ae` gives the agent, which harbor
+        # applies to every exec as well; os.environ alone would disagree with
+        # the container about whether a login was given.
+        gh_token = self._get_env("GH_TOKEN")
+        if gh_token:
+            env["GH_TOKEN"] = gh_token
         return env
 
     async def install(self, environment: BaseEnvironment) -> None:
-        binaries = [BENCH_ROOT / "dist" / "masc", BENCH_ROOT / "dist" / "masc-exec-shim"]
-        for binary in binaries:
-            if not binary.exists():
-                raise RuntimeError("run image/fetch_masc.sh first")
-        # gh is required by the keeper_up preflight and is absent from debian
-        # stable, which most task base images use, so it ships in dist/ when
-        # fetched. deps.sh falls back to the package manager without it.
-        vendored_gh = BENCH_ROOT / "dist" / "gh"
-        if vendored_gh.exists():
-            binaries.append(vendored_gh)
+        container_env = self._container_env()
+        binaries = await container_binaries(
+            self, environment, BENCH_ROOT, with_gh="GH_TOKEN" in container_env)
         config_dir = render_arm(self.arm, self.runtime_id, self.effort)
         await self.exec_as_root(environment, f"mkdir -p {REMOTE}/bin")
         for binary in binaries:
@@ -123,7 +114,7 @@ class MascAgent(BaseInstalledAgent):
             environment,
             f"chmod +x {REMOTE}/bin/masc {REMOTE}/driver/*.sh && "
             f"bash {REMOTE}/driver/bootstrap.sh",
-            env=self._container_env(),
+            env=container_env,
         )
 
     async def run(self, instruction: str, environment: BaseEnvironment,

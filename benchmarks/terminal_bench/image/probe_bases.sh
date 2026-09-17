@@ -19,8 +19,14 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 BENCH_DIR="$(dirname "$HERE")"
-DIST_DIR="${BENCH_DIR}/dist"
+# Terminal-Bench 4.0.0 task images are prebuilt for amd64 (agents/masc_dist.py),
+# so that is the platform a task container runs, emulated on Apple Silicon.
 PLATFORM="${PROBE_PLATFORM:-linux/amd64}"
+case "${PLATFORM}" in
+  linux/amd64) DIST_DIR="${BENCH_DIR}/dist/linux-x64" ;;
+  linux/arm64) DIST_DIR="${BENCH_DIR}/dist/linux-arm64" ;;
+  *) echo "no MASC release binary for platform ${PLATFORM}" >&2; exit 2 ;;
+esac
 TIMEOUT_SEC="${PROBE_TIMEOUT_SEC:-600}"
 
 DEFAULT_IMAGES=(

@@ -14,9 +14,13 @@ MASC 하네스 자체를 Terminal-Bench 4.0.0 전체로 잰다.
     uv venv -p 3.12 && uv pip install 'harbor==0.23.0' pytest
     export ANTHROPIC_API_KEY=...                  # 모델 제공자 키 (아래 레인 표)
 
-- harbor 는 4.0.0 태스크 이미지를 태스크 Dockerfile 로 그 자리에서 빌드한다. 플랫폼을
-  지정하지 않아서 Docker 데몬 아키텍처를 따른다(Apple Silicon 이면 arm64). 에이전트는
-  컨테이너마다 `uname -m` 을 읽어 `dist/linux-x64` 나 `dist/linux-arm64` 를 올린다.
+- Harbor hub 의 4.0.0 태스크는 태스크마다 미리 빌드된 이미지(`docker_image`)를 쓰고, 그
+  이미지는 amd64 전용이다(2026-09-17 registry 조회, 66개 중 65개 확인). Apple Silicon
+  에서는 전부 에뮬레이션으로 돈다. 에이전트는 컨테이너마다 `uname -m` 을 읽어
+  `dist/linux-x64` 나 `dist/linux-arm64` 를 올린다.
+- 에뮬레이션은 CPU 를 많이 쓰는 태스크를 느리게 만든다. 8시간 제한 안에서 걸리는 시간이
+  네이티브 amd64 환경과 달라지므로, 리더보드와 비교할 실행은 amd64 환경(`BENCH_ENV=modal`)
+  에서 돌린다.
 - `GH_TOKEN` 은 선택이다. 주면 keeper 가 GitHub 로그인을 갖고 `gh` 도 같이 올라간다.
   주지 않으면 remote_ssh 사전 점검이 신원 확인을 건너뛴다(v0.35.15+, #35488).
   주면 전체 실행의 모든 태스크 컨테이너에 그 토큰이 들어간다.

@@ -15,7 +15,8 @@
   `terminal-bench/<task>` 이고 harbor 의 `-i`/`-x` 는 이 이름으로 매칭한다.
 - 에이전트 타임아웃: 66개 전부 28800s. 검증은 전부 `environment_mode = "separate"` —
   에이전트 환경을 멈춘 뒤 새 컨테이너에서, 선언된 `artifacts` 만 넘겨받아 검증한다.
-- 태스크 이미지는 태스크 Dockerfile 로 빌드되고 플랫폼 지정이 없다. Docker 데몬 아키텍처를 따른다.
+- 태스크마다 미리 빌드된 amd64 전용 이미지(`[environment] docker_image`, digest 고정)를 쓴다.
+  Apple Silicon 에서는 에뮬레이션으로 돈다.
 - 자원: CPU 2–16, 메모리 4096–32768 MiB. GPU(H100) 요구 태스크 3개.
 - 태스크별 선언: `mcp_servers`(비어 있지 않은 것 1개), `skills_dir` 1개, `healthcheck` 1개,
   docker-compose 11개.
@@ -115,8 +116,9 @@ reward(검증 통과), wall-clock, input/output/cache 토큰, $/task(litellm 단
 1. **실행 환경 차이**: keeper 명령은 이미지가 선언한 PATH·환경변수를 보지 못한다(#36907).
    harbor 기본 에이전트는 보므로 arm A 대비 불리하다. 해결 전 결과에는 이 한계를 적는다.
 2. **태스크 선언 도구**: `mcp_servers`·`skills_dir` 를 keeper 에 연결하지 않는다(#36908).
-3. **GPU·자원**: 로컬 docker 는 GPU 3태스크를 못 돌리고, 16 CPU 태스크 때문에 사실상
-   동시 실행 1이다. 전체 세트는 GPU 를 주는 환경이 필요하다.
+3. **GPU·자원·에뮬레이션**: 로컬 docker 는 GPU 3태스크를 못 돌리고, 16 CPU 태스크 때문에
+   사실상 동시 실행 1이다. Apple Silicon 에서는 amd64 이미지가 에뮬레이션으로 돌아 시간 조건이
+   달라진다. 리더보드와 비교할 전체 세트는 GPU 를 주는 amd64 환경이 필요하다.
 4. **네트워크**: 검증 환경에서 인터넷을 막는 태스크가 있다. 에이전트 단계의 LLM API 접근은
    태스크 설정을 따른다.
 

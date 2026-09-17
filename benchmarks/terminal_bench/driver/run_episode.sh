@@ -24,6 +24,16 @@ POLL_INTERVAL_SEC=10
 # cancels the agent and the agent runs collect_result.sh --interrupted, which
 # leaves this mark for the loop below.
 INTERRUPTED_MARK="$BENCH/episode.interrupted"
+EPISODE_PID_FILE="$BENCH/episode.pid"
+
+# A container can run more than one episode (harbor multi-step trials reuse the
+# environment). What the previous one left must not end or answer for this one.
+rm -f "$INTERRUPTED_MARK" "$BENCH/episode.json" "$RESULT_JSON"
+# collect_result.sh --interrupted ends this script by pid: pkill is not in
+# every task image (python:*-slim ships without procps).
+printf '%s\n' "$$" > "$EPISODE_PID_FILE"
+final_file="$(mktemp)"
+trap 'rm -f "$final_file"' EXIT
 
 KEEPER_INSTRUCTIONS="You are an autonomous engineering agent inside a Linux container. \
 Complete the task by running shell commands (your tool calls execute in this container as root). \
@@ -66,7 +76,6 @@ start_epoch="$(date +%s)"
 jq -n --argjson start "$start_epoch" '{start_epoch:$start, operation_id:null}' \
   > "$BENCH/episode.json"
 printf '%s' "$lead_msg" > "$BENCH/episode-message.txt"
-final_file="$(mktemp)"
 printf '{}' > "$final_file"
 submit="$(mcp_call 200 masc_keeper_msg \
   "$(jq -cn --arg name bench-1 --rawfile m "$BENCH/episode-message.txt" \
@@ -80,7 +89,12 @@ submit="$(mcp_call 200 masc_keeper_msg \
   }
 }
 op_id="$(printf '%s' "$submit" | jq -r '.operation_id // empty')"
-[[ -n "$op_id" ]] || { echo "keeper_msg returned no operation_id: $submit" >&2; exit 1; }
+if [[ -z "$op_id" ]]; then
+  echo "keeper_msg returned no operation_id: $submit" >&2
+  printf '%s' "$submit" > "$final_file"
+  bash "$BENCH/driver/collect_result.sh" "$RESULT_JSON" NoOperationId "$final_file"
+  exit 1
+fi
 jq -n --argjson start "$start_epoch" --arg op "$op_id" \
   '{start_epoch:$start, operation_id:$op}' > "$BENCH/episode.json"
 
@@ -98,7 +112,7 @@ while [[ -z "$state" ]]; do
     --arg op "$op_id" \
     '{target:{kind:"keeper",name:"bench-1"}, operation_id:$op}')" 30)"
   then
-    poll_failures=0
+    :
   else
     poll_failures=$(( poll_failures + 1 ))
     if [[ "$poll_failures" -ge "$POLL_FAILURE_LIMIT" ]]; then
@@ -110,12 +124,24 @@ while [[ -z "$state" ]]; do
     sleep "$POLL_INTERVAL_SEC"
     continue
   fi
+  # The operation state is Keeper_chat_operation.state, a closed set encoded
+  # by name (keeper_chat_operation.ml): Queued and Running are still working,
+  # the other three are terminal. A response with no state is a failed poll.
+  # A name outside the set is a state this driver has not been taught, and is
+  # reported under that name rather than polled until the time limit.
   s="$(printf '%s' "$st" | jq -r '.state // empty' 2>/dev/null || true)"
   case "$s" in
-    "") : ;;
+    Queued|Running) poll_failures=0 ;;
     Succeeded|Failed|Cancelled) state="$s"; final="$st"; break ;;
-    # An unmapped terminal state is surfaced under its own name rather than
-    # polled until harbor's time limit ends the episode.
+    "")
+      poll_failures=$(( poll_failures + 1 ))
+      if [[ "$poll_failures" -ge "$POLL_FAILURE_LIMIT" ]]; then
+        state="PollError"
+        final="$(jq -cn --arg last "$st" --argjson n "$poll_failures" \
+          '{error:"delegate_status carried no state", failures:$n, last:$last}')"
+        break
+      fi
+      ;;
     *) state="$s"; final="$st"; break ;;
   esac
   sleep "$POLL_INTERVAL_SEC"
@@ -124,5 +150,4 @@ done
 
 printf '%s' "$final" > "$final_file"
 bash "$BENCH/driver/collect_result.sh" "$RESULT_JSON" "$state" "$final_file"
-rm -f "$final_file"
 [[ "$state" == "Succeeded" ]]

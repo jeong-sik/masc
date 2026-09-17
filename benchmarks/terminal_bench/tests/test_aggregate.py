@@ -48,7 +48,7 @@ def test_aggregate_rows(tmp_path, monkeypatch, capsys):
     row1 = lines[1].split(",")
     assert row1[:5] == ["arm-b-20260910-1200", "fix-git", "fix-git__Abc123", "1", "1234"]
     assert row1[5:9] == ["100", "50", "10", "0.01"]
-    assert row1[9:] == ["17", "2", "Succeeded", ""]
+    assert row1[9:] == ["17", "2", "Succeeded", "", "", ""]
     row2 = lines[2].split(",")
     assert row2[2] == "fix-git__Def456" and row2[3] == "0"
 
@@ -103,7 +103,7 @@ def test_a_missing_measurement_stays_blank(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["aggregate.py", str(jobs)])
     aggregate.main()
     row = capsys.readouterr().out.strip().splitlines()[1].split(",")
-    assert row[4:] == ["", "", "", "", "", "", "", "", ""]
+    assert row[4:] == ["", "", "", "", "", "", "", "", "", "", ""]
 
 
 def test_unpriced_keeper_rows_reach_the_table(tmp_path, monkeypatch, capsys):
@@ -143,8 +143,8 @@ def test_unpriced_keeper_rows_reach_the_table(tmp_path, monkeypatch, capsys):
     import csv as _csv
     import io
     rows = list(_csv.reader(io.StringIO(capsys.readouterr().out)))
-    assert rows[0][-1] == "keeper_cost_unreported_rows"
-    by_trial = {row[2]: row[-1] for row in rows[1:]}
+    column = rows[0].index("keeper_cost_unreported_rows")
+    by_trial = {row[2]: row[column] for row in rows[1:]}
     assert by_trial["fix-git__Unpriced"] == "2"
     # Zero is a measurement here too: this arm priced every keeper row.
     assert by_trial["fix-git__Priced"] == "0"
@@ -165,7 +165,23 @@ def test_a_comma_in_a_field_does_not_shift_the_columns(tmp_path, monkeypatch, ca
 
     rows = list(_csv.reader(io.StringIO(capsys.readouterr().out)))
     assert rows[1][1] == "fix,git"
-    # masc_state is second from the end now that the keeper cost count is
-    # appended after it.
-    assert rows[1][-2] == "Failed, no runtime"
+    assert rows[1][rows[0].index("masc_state")] == "Failed, no runtime"
     assert len(rows[1]) == len(rows[0])
+
+
+def test_the_interruption_and_keeper_stop_columns_come_from_metadata(
+        tmp_path, monkeypatch, capsys):
+    import csv
+    import io
+
+    jobs = tmp_path / "jobs"
+    make_trial(jobs, "arm-b/fix-git__Int",
+               agent_result={"metadata": {"masc_state": "Running",
+                                          "interrupted": True,
+                                          "keepers_stopped": False}})
+    monkeypatch.setattr(sys, "argv", ["aggregate.py", str(jobs)])
+    aggregate.main()
+    rows = list(csv.DictReader(io.StringIO(capsys.readouterr().out)))
+    assert rows[0]["masc_state"] == "Running"
+    assert rows[0]["interrupted"] == "True"
+    assert rows[0]["keepers_stopped"] == "False"

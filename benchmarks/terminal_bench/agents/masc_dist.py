@@ -26,6 +26,13 @@ DIST_DIR_BY_MACHINE = {
     "aarch64": "linux-arm64",
 }
 
+# Harbor's docker environment returns stderr inside stdout, so anything the
+# container's shell prints first (a setlocale warning from an image that sets
+# LC_ALL to a locale it never generated) arrives before `uname -m`. The value is
+# printed on a line of its own and read from that line only.
+UNAME_MARK = "MASC_UNAME_M="
+UNAME_COMMAND = f"printf '{UNAME_MARK}%s\\n' \"$(uname -m)\""
+
 REQUIRED_BINARIES = ("masc", "masc-exec-shim")
 # gh is needed only when the keeper is given a GitHub login: the remote_ssh
 # preflight runs `gh auth status` when the endpoint has a hosts.yml, and
@@ -41,8 +48,14 @@ async def container_binaries(
     with_gh: bool,
 ) -> list[Path]:
     """The binaries to upload for this container's architecture."""
-    result = await agent.exec_as_root(environment, "uname -m")
-    machine = (result.stdout or "").strip()
+    result = await agent.exec_as_root(environment, UNAME_COMMAND)
+    output = result.stdout or ""
+    marked = [line[len(UNAME_MARK):].strip() for line in output.splitlines()
+              if line.startswith(UNAME_MARK)]
+    if len(marked) != 1:
+        raise RuntimeError(
+            f"could not read the task container architecture from {output!r}")
+    machine = marked[0]
     dist_dir_name = DIST_DIR_BY_MACHINE.get(machine)
     if dist_dir_name is None:
         raise RuntimeError(

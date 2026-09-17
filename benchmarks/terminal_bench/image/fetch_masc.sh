@@ -27,6 +27,17 @@ if [[ -z "${MASC_VERSION}" ]]; then
   echo "[fetch] latest release: v${MASC_VERSION}"
 fi
 
+# The bench gives a keeper a GitHub login only when GH_TOKEN is set. Releases
+# before 0.35.15 run `gh auth status` in the remote_ssh preflight whether or
+# not the endpoint has a login (#35488), so without GH_TOKEN every keeper_up on
+# them is refused.
+MIN_VERSION_WITHOUT_GH_LOGIN="0.35.15"
+if [[ -z "${GH_TOKEN:-}" ]] \
+   && [[ "$(printf '%s\n%s\n' "${MIN_VERSION_WITHOUT_GH_LOGIN}" "${MASC_VERSION}" | sort -V | head -1)" != "${MIN_VERSION_WITHOUT_GH_LOGIN}" ]]; then
+  echo "masc ${MASC_VERSION} needs a GitHub login for every keeper; use ${MIN_VERSION_WITHOUT_GH_LOGIN} or later, or set GH_TOKEN" >&2
+  exit 1
+fi
+
 # gh is uploaded only when the run passes GH_TOKEN, and is absent from debian
 # stable, which many task base images use.
 GH_VERSION="${GH_VERSION:-2.65.0}"
@@ -39,7 +50,7 @@ ARCHES=(
 
 mkdir -p "${DIST_DIR}"
 for row in "${ARCHES[@]}"; do
-  read -r dir masc_arch pkg_arch platform <<<"${row}"
+  read -r dir masc_arch pkg_arch _ <<<"${row}"
   out="${DIST_DIR}/${dir}"
   mkdir -p "${out}"
   if ! gh release download "v${MASC_VERSION}" -R jeong-sik/masc \
@@ -55,19 +66,30 @@ for row in "${ARCHES[@]}"; do
   curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${pkg_arch}.tar.gz" \
     | tar -xz -C "${out}" --strip-components=2 "gh_${GH_VERSION}_linux_${pkg_arch}/bin/gh"
   chmod +x "${out}/masc" "${out}/masc-exec-shim" "${out}/gh"
-
-  # Verify by running it, and let that verdict stand. The old form was
-  #   bash -c 'masc --version || masc --help | head -5'
-  # whose inner shell inherits no errexit and ends in `head`, so it exits 0 for
-  # a truncated download, a wrong-arch asset, or a binary missing every
-  # library — while its comment claimed to verify the binary runs.
-  echo "[fetch] verify ${dir} on ${platform}"
-  docker run --rm --platform "${platform}" \
-    -v "${out}:/opt/dist:ro" \
-    ubuntu:24.04 /opt/dist/masc --version
 done
 printf '%s\n' "$MASC_VERSION" > "${DIST_DIR}/.version"
 
 # Record what was downloaded. A release asset can be replaced or truncated,
 # and nothing else here would notice.
-( cd "${DIST_DIR}" && shasum -a 256 linux-*/masc linux-*/masc-exec-shim linux-*/gh > SHA256SUMS )
+if command -v shasum >/dev/null 2>&1; then sum=(shasum -a 256); else sum=(sha256sum); fi
+( cd "${DIST_DIR}" && "${sum[@]}" linux-*/masc linux-*/masc-exec-shim linux-*/gh > SHA256SUMS )
+
+# Verify by running it, and let that verdict stand. The old form was
+#   bash -c 'masc --version || masc --help | head -5'
+# whose inner shell inherits no errexit and ends in `head`, so it exits 0 for a
+# truncated download, a wrong-arch asset, or a binary missing every library —
+# while its comment claimed to verify the binary runs.
+#
+# A platform this Docker cannot run at all (no emulation for it) is named and
+# skipped: no task container of that platform can run on this host either.
+for row in "${ARCHES[@]}"; do
+  read -r dir _ _ platform <<<"${row}"
+  if ! docker run --rm --platform "${platform}" ubuntu:24.04 true >/dev/null 2>&1; then
+    echo "[fetch] ${dir}: this Docker cannot run ${platform} containers; not verified here"
+    continue
+  fi
+  echo "[fetch] verify ${dir} on ${platform}"
+  docker run --rm --platform "${platform}" \
+    -v "${DIST_DIR}/${dir}:/opt/dist:ro" \
+    ubuntu:24.04 /opt/dist/masc --version
+done

@@ -36,8 +36,10 @@ class FakeEnv:
     async def exec(self, command, **kw):
         self.commands.append(command)
         self.exec_kwargs.append(kw)
-        if command.endswith("uname -m"):
-            return FakeResult(f"{self.machine}\n")
+        if "uname -m" in command:
+            # harbor's docker exec folds stderr into stdout.
+            return FakeResult("bash: warning: setlocale: LC_ALL: cannot change locale\n"
+                              f"MASC_UNAME_M={self.machine}\n")
         if "cat /opt/masc-bench/result.json" in command:
             return FakeResult('{"state":"Succeeded","duration_ms":1234,'
                               '"tool_calls":17,"duplicate_tool_calls":2,"final":{}}')
@@ -133,48 +135,57 @@ def test_claude_code_lane_requires_oauth_token(tmp_path, monkeypatch):
 
 
 def install_into(tmp_path, monkeypatch, root, env):
+    """{remote path: the local file uploaded there last}."""
     import agents.masc_agent as m
 
     monkeypatch.setattr(m, "BENCH_ROOT", root)
     asyncio.run(make_agent(tmp_path, arm="b").install(env))
-    return {(src, dst) for kind, src, dst in env.uploads if kind == "file"}
+    final = {}
+    for kind, src, dst in env.uploads:
+        if kind == "file":
+            final[dst] = src
+    return final
 
 
 def test_gh_is_uploaded_only_for_a_run_that_gives_a_github_login(tmp_path, monkeypatch):
     root = fake_bench(tmp_path, names=("masc", "masc-exec-shim", "gh"))
-    gh = (str(root / "dist" / "linux-x64" / "gh"), "/opt/masc-bench/bin/gh")
-    assert gh not in install_into(tmp_path, monkeypatch, root, FakeEnv())
+    assert "/opt/masc-bench/bin/gh" not in install_into(tmp_path, monkeypatch, root, FakeEnv())
     monkeypatch.setenv("GH_TOKEN", "test-gh-token")
-    assert gh in install_into(tmp_path, monkeypatch, root, FakeEnv())
+    uploads = install_into(tmp_path, monkeypatch, root, FakeEnv())
+    assert uploads["/opt/masc-bench/bin/gh"] == str(root / "dist" / "linux-x64" / "gh")
 
 
 # --- the binaries follow the task container's architecture -----------------
 #
 # Harbor builds a 4.0 task image for the Docker daemon's architecture, so on
 # Apple Silicon the task container is arm64 and an amd64 masc cannot start in
-# it. A single-architecture base image still runs amd64, emulated.
+# it. A single-architecture base image still runs amd64, emulated. Both
+# architectures are fetched, as image/fetch_masc.sh leaves them.
 
 
-def test_an_arm64_container_gets_the_arm64_binaries(tmp_path, monkeypatch):
+def both_architectures(tmp_path):
     root = fake_bench(tmp_path, dist_dir="linux-arm64")
-    # Both architectures fetched, as fetch_masc.sh leaves them.
     (root / "dist" / "linux-x64").mkdir()
     for name in ("masc", "masc-exec-shim"):
         (root / "dist" / "linux-x64" / name).write_text("")
+    return root
+
+
+def expected(root, dist_dir):
+    return {f"/opt/masc-bench/bin/{name}": str(root / "dist" / dist_dir / name)
+            for name in ("masc", "masc-exec-shim")}
+
+
+def test_an_arm64_container_gets_the_arm64_binaries(tmp_path, monkeypatch):
+    root = both_architectures(tmp_path)
     env = FakeEnv()
     env.machine = "aarch64"
-    uploads = install_into(tmp_path, monkeypatch, root, env)
-    assert uploads >= {
-        (str(root / "dist" / "linux-arm64" / "masc"), "/opt/masc-bench/bin/masc"),
-        (str(root / "dist" / "linux-arm64" / "masc-exec-shim"),
-         "/opt/masc-bench/bin/masc-exec-shim"),
-    }
+    assert install_into(tmp_path, monkeypatch, root, env) == expected(root, "linux-arm64")
 
 
 def test_an_amd64_container_gets_the_x64_binaries(tmp_path, monkeypatch):
-    root = fake_bench(tmp_path, dist_dir="linux-x64")
-    uploads = install_into(tmp_path, monkeypatch, root, FakeEnv())
-    assert (str(root / "dist" / "linux-x64" / "masc"), "/opt/masc-bench/bin/masc") in uploads
+    root = both_architectures(tmp_path)
+    assert install_into(tmp_path, monkeypatch, root, FakeEnv()) == expected(root, "linux-x64")
 
 
 def test_a_container_architecture_without_a_release_is_refused_by_name(tmp_path, monkeypatch):
@@ -239,7 +250,7 @@ def test_cost_prices_each_token_class_at_its_own_rate(tmp_path, monkeypatch):
 def test_the_cache_split_is_not_the_cache_sum(tmp_path, monkeypatch):
     # 600 cache tokens priced as one class would be either 1.5e-03 (all
     # creation) or 1.2e-04 (all read). The real answer is neither, and the
-    # gap is why run_episode.sh reports the two apart.
+    # gap is why collect_result.sh reports the two apart.
     context = context_for(
         tmp_path, monkeypatch, {"anthropic/claude-fable-5": RATES},
         input_tokens=0, output_tokens=0, cache_tokens=600,
@@ -356,3 +367,46 @@ def test_an_episode_that_ends_on_its_own_is_not_collected_twice(tmp_path):
     env = FakeEnv()
     asyncio.run(make_agent(tmp_path, arm="b").run("task", env, AgentContext()))
     assert not any("--interrupted" in c for c in env.commands)
+
+
+class EpisodeEndsInFailure(FakeEnv):
+    """run_episode.sh reported a Failed episode and exited 1 on its own."""
+
+    async def exec(self, command, **kw):
+        self.commands.append(command)
+        self.exec_kwargs.append(kw)
+        if "run_episode.sh" in command:
+            return FakeResult("", return_code=1)
+        if "cat /opt/masc-bench/result.json" in command:
+            return FakeResult('{"state":"Failed","interrupted":false,"final":{}}')
+        return FakeResult("")
+
+
+def test_an_episode_that_fails_on_its_own_is_not_reported_as_interrupted(tmp_path):
+    from harbor.models.agent.context import AgentContext
+
+    env = EpisodeEndsInFailure()
+    ctx = AgentContext()
+    with pytest.raises(Exception):  # harbor's NonZeroAgentExitCodeError
+        asyncio.run(make_agent(tmp_path, arm="b").run("task", env, ctx))
+    assert not any("--interrupted" in c for c in env.commands)
+    assert ctx.metadata["masc_state"] == "Failed"
+    assert ctx.metadata["interrupted"] is False
+
+
+def test_the_interrupted_report_is_bounded_after_the_time_is_up(tmp_path):
+    import agents.masc_agent as m
+    from harbor.models.agent.context import AgentContext
+
+    env = EpisodeRunsUntilCancelled()
+
+    async def go():
+        await asyncio.wait_for(
+            make_agent(tmp_path, arm="b").run("task", env, AgentContext()), timeout=0.05)
+
+    with pytest.raises(asyncio.TimeoutError):
+        asyncio.run(go())
+    recovery = [kw for c, kw in zip(env.commands, env.exec_kwargs)
+                if "--interrupted" in c or "cat /opt/masc-bench/result.json" in c]
+    assert recovery and all(
+        kw.get("timeout_sec") == m.RESULT_RECOVERY_TIMEOUT_SEC for kw in recovery)

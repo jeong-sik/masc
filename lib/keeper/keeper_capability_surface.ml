@@ -115,6 +115,7 @@ let descriptor_admitted descriptors descriptor =
 
 let create
       ~tool_deny
+      ~sandbox_profile
       ~skill_names
       ~global_skill_catalog
       ~skill_inventory
@@ -133,9 +134,33 @@ let create
          (fun name -> List.mem name tool_deny)
          (Keeper_tool_descriptor.keeper_model_names descriptor)
   in
+  (* A spawn start the sandbox profile cannot run leaves the surface for the
+     same reason a denied tool does: the handler refuses it on every call with
+     the rule applied here. Only [Start] leaves. [Read], [Wait] and [Stop]
+     address handles that already exist, and the handler keeps them open so a
+     handle from another profile can still be reaped. *)
+  let refused_by_sandbox descriptor =
+    descriptor.Keeper_tool_descriptor.runtime_handler
+    = Keeper_tool_descriptor.Tool_keeper_spawn_dispatch
+    && (match Keeper_spawn_boundary.of_sandbox_profile sandbox_profile with
+        | Keeper_spawn_boundary.Refuses_start _ -> true
+        | Keeper_spawn_boundary.Starts_in_container -> false)
+    && (match
+          Tool_schemas_spawn.find_definition
+            descriptor.Keeper_tool_descriptor.internal_name
+        with
+        | Some { action = Tool_schemas_spawn.Start; _ } -> true
+        | Some
+            { action =
+                Tool_schemas_spawn.Read | Tool_schemas_spawn.Wait | Tool_schemas_spawn.Stop
+            ; _
+            }
+        | None -> false)
+  in
+  let leaves_surface descriptor = denied descriptor || refused_by_sandbox descriptor in
   let descriptors =
     Keeper_tool_descriptor.model_visible_descriptors ()
-    |> List.filter (fun descriptor -> not (denied descriptor))
+    |> List.filter (fun descriptor -> not (leaves_surface descriptor))
   in
   let skill_projection =
     Keeper_skill_catalog.project_turn
@@ -147,7 +172,7 @@ let create
   in
   let tool_capabilities =
     Keeper_tool_descriptor.all_descriptors ()
-    |> List.filter (fun descriptor -> not (denied descriptor))
+    |> List.filter (fun descriptor -> not (leaves_surface descriptor))
     |> List.map (fun descriptor ->
       { descriptor
         (* A descriptor that names itself to the model is in the surface, and

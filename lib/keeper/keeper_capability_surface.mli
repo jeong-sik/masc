@@ -56,6 +56,7 @@ type candidate =
 
 val create
   :  tool_deny:string list
+  -> sandbox_profile:Keeper_types_profile_sandbox.sandbox_profile
   -> skill_names:string list option
   -> global_skill_catalog:Keeper_skill_catalog.t
   -> skill_inventory:Keeper_skill_inventory.t
@@ -68,7 +69,11 @@ val create
     {!descriptors}. Names that match no model-visible descriptor deny
     nothing -- the setup site logs them. A keeper with no selection passes
     [[]]: the argument is mandatory because an optional here would sit in
-    front of only labelled arguments, which OCaml never erases. *)
+    front of only labelled arguments, which OCaml never erases.
+
+    [sandbox_profile] is the Keeper's profile. [keeper_spawn] leaves the surface
+    the same way when {!Keeper_spawn_boundary.of_sandbox_profile} refuses a
+    start for it, and a composition that runs it is then withheld. *)
 
 val descriptors : t -> Keeper_tool_descriptor.t list
 

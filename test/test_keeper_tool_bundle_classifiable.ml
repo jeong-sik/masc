@@ -320,6 +320,7 @@ let with_bundle_tools
        let capability_surface =
          Keeper_capability_surface.create
            ~tool_deny:[]
+           ~sandbox_profile:Masc.Keeper_types_profile.Docker
            ~skill_names:None
            ~global_skill_catalog:skill_catalog
            ~skill_inventory:(Keeper_skill_inventory.of_snapshot skill_snapshot)

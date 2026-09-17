@@ -10,13 +10,16 @@
     What is drawn is a closed set. [graph] and [flowchart] in the four
     directions, with rectangular, rounded and diamond nodes, solid, dotted
     and thick edges, edge labels in both spellings, chains and [&] groups.
+    [stateDiagram] and [stateDiagram-v2] in the four directions, with rounded
+    state boxes, initial and terminal [[*]] pseudo-states, transition labels,
+    and state descriptions.
     [sequenceDiagram] draws participants, lifelines, messages with their
     text, notes and the framed blocks. A diagram of any other kind, or a
     line this grammar cannot read, comes back as a {!failure} naming the
     kind or the line, and the caller shows the source under that name. Nothing is guessed. [subgraph] blocks are
-    read and their nodes drawn, but the grouping box itself is not
-    (RFC-0429 §3.3); [classDef], [class], [style], [linkStyle] and [click]
-    statements are accepted and change nothing on a text canvas.
+    drawn as titled bounding boxes around their members (RFC-0429 §3.3);
+    [classDef], [class], [style], [linkStyle] and [click] statements are
+    accepted and change nothing on a text canvas.
 
     Layout is layered: back edges are turned around so the rest is a DAG,
     layers come from the longest path, an edge across several layers gets a

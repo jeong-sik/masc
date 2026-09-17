@@ -541,3 +541,6 @@ let zero_usage : usage_metrics =
 let reset_runtime_state (m : keeper_meta) : keeper_meta =
   map_usage (fun _ -> zero_usage) m
 ;;
+
+(* RFC-0428 gate budget measurement: this line exists only to make the pull
+   request gate select the suites that call this module. Not for merge. *)

@@ -27,7 +27,9 @@ class FakeEnv:
 
         class R:
             # The container architecture masc_dist.container_binaries reads.
-            stdout = "x86_64\n" if command.endswith("uname -m") else ""
+            stdout = (
+                "bash: warning: setlocale: LC_ALL: cannot change locale\n"
+                "MASC_UNAME_M=x86_64\n" if "uname -m" in command else "")
             stderr = ""
             returncode = 0
             return_code = 0
@@ -38,8 +40,7 @@ class FakeEnv:
 @pytest.fixture(autouse=True)
 def _provider_key(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    # keeper_up's remote_ssh preflight refuses without a gh identity, and
-    # bootstrap writes the keeper's hosts.yml from this token.
+    monkeypatch.delenv("GH_TOKEN", raising=False)
 
 
 def make_agent(tmp_path, **kw):

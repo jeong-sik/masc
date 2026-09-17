@@ -19,9 +19,9 @@ set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 BENCH_DIR="$(dirname "$HERE")"
 IMAGE="${PROBE_IMAGE:-ubuntu:24.04}"
-# The Docker daemon's own platform unless told otherwise: harbor builds task
-# images for it (agents/masc_dist.py), so that is what a task container runs.
-PLATFORM="${PROBE_PLATFORM:-$(docker version --format '{{.Server.Os}}/{{.Server.Arch}}')}"
+# The platform harbor builds task images for (agents/masc_dist.py): docker
+# compose honours DOCKER_DEFAULT_PLATFORM, and otherwise uses the daemon's own.
+PLATFORM="${PROBE_PLATFORM:-${DOCKER_DEFAULT_PLATFORM:-$(docker version --format '{{.Server.Os}}/{{.Server.Arch}}')}}"
 case "${PLATFORM}" in
   linux/amd64) DIST_DIR="${BENCH_DIR}/dist/linux-x64" ;;
   linux/arm64) DIST_DIR="${BENCH_DIR}/dist/linux-arm64" ;;

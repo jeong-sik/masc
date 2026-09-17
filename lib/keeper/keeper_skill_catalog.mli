@@ -199,8 +199,6 @@ val withhold_compositions_outside :
 val withheld_composition :
   turn_projection -> Skill_reference.t -> withheld_composition option
 
-val withheld_composition_to_string : withheld_composition -> string
-
 val turn_unavailable_to_string : turn_unavailable -> string
 val configured_names_unavailable : turn_projection -> configured_name_unavailable list
 val configured_name_unavailable_to_yojson : configured_name_unavailable -> Yojson.Safe.t

@@ -108,9 +108,9 @@ fence 는 정확히 하나의 composition 을 선언하고, 그 `name` 은 스�
 
 노드가 부르는 도구가 그 턴의 도구 목록에 없으면 `keeper_compose_<name>` 도 목록에 뜨지 않는다.
 노드는 직접 호출과 같은 목록 검사를 지나므로, 띄워 봐야 부를 때마다 그 노드에서 실패한다.
-`keeper.tools.deny` 로 뺀 도구를 쓰는 합성 스킬이 이렇게 된다. 운영자 행(`keeper_tools_list`,
-대시보드)에는 `availability = "node_tools_outside_surface"` 와 빠진 도구 이름
-`outside_node_tools` 가 남는다.
+`keeper.tools.deny` 로 뺀 도구를 쓰는 합성 스킬이 이렇게 된다. task 가 지정한 스킬이면 프롬프트에도
+사용할 수 없는 스킬로 실린다. `keeper_tools_list`·`keeper_capability_search` 가 돌려주는 스킬 행에는
+`availability = "node_tools_outside_surface"` 와 빠진 도구 이름 `outside_node_tools` 가 남는다.
 
 ````markdown
 ---

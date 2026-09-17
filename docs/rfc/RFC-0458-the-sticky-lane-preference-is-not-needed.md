@@ -1,5 +1,5 @@
 ---
-rfc: "0457"
+rfc: "0458"
 title: "sticky 레인 선호는 필요 없다 — 걷는 순서는 선언이고 쉼은 provider 의 것이다"
 status: Draft
 created: 2026-09-17
@@ -11,7 +11,7 @@ related: ["provider-path-rest", "0370", "0440", "keeper-context-window-in-tokens
 implementation_prs: []
 ---
 
-# RFC-0457 — sticky 레인 선호는 필요 없다
+# RFC-0458 — sticky 레인 선호는 필요 없다
 
 ## 0. 요약
 

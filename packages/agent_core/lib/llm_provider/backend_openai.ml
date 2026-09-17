@@ -367,7 +367,8 @@ let%test "parse_openai_response_result error returns Error" =
       (`Assoc [ "error", `Assoc [ "message", `String "rate limited" ] ])
   in
   match parse_openai_response_result json_str with
-  | Error (Backend_openai_parse.Provider_error msg) -> msg = "rate limited"
+  | Error (Backend_openai_parse.Provider_error { message; http_status = _ }) ->
+    message = "rate limited"
   | Error (Backend_openai_parse.Empty_completion _) -> false
   | Ok _ -> false
 ;;
@@ -889,7 +890,8 @@ let%test "parse_openai_response_result JSON list wrapping" =
 let%test "parse_openai_response_result error without message" =
   let json_str = Yojson.Safe.to_string (`Assoc [ "error", `Assoc [] ]) in
   match parse_openai_response_result json_str with
-  | Error (Backend_openai_parse.Provider_error msg) -> msg = "Unknown API error"
+  | Error (Backend_openai_parse.Provider_error { message; http_status = _ }) ->
+    message = "Unknown API error"
   | Error (Backend_openai_parse.Empty_completion _) -> false
   | Ok _ -> false
 ;;

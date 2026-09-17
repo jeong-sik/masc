@@ -142,7 +142,16 @@ let%test "oversized payload remains a typed wire fact" =
 
 (* Preserve the distinction between a provider-owned error envelope and a
    response that violates the declared wire contract. Retry policy is
-   intentionally not inferred here. *)
+   intentionally not inferred here.
+
+   An envelope that declares an HTTP status is the one exception to reading it
+   as [Provider_reported_error]: the provider failed after the stream's own
+   [200] went out, so it put the status its failure carries inside the error
+   object instead (OpenRouter mid-stream errors). That is the refusal a status
+   line would have been, with the envelope as its body, and it becomes that
+   [HttpError] so the classification a status gets before the stream
+   ([Retry.classify_refusal]) is the one it gets here. Without a declared
+   status the envelope stays provider-owned diagnostic data. *)
 let http_error_of_stream_error
       ?(wire_format = Http_client.Sse)
       (serr : Types.stream_error)
@@ -152,7 +161,11 @@ let http_error_of_stream_error
     Http_client.provider_wire_format_to_string wire_format |> String.uppercase_ascii
   in
   match serr with
-  | Types.Stream_provider_error { message; error_type; raw } ->
+  | Types.Stream_provider_error { http_status = Some code; raw; message = _; error_type = _ }
+    ->
+    Http_client.HttpError
+      { code; body = Http_client.Received raw; retry_after_header = None }
+  | Types.Stream_provider_error { message; error_type; http_status = None; raw } ->
     Http_client.ProviderFailure
       { kind = Http_client.Provider_reported_error { error_type }
       ; message =
@@ -252,6 +265,7 @@ let%test "generic stream provider type stays diagnostic" =
       (Types.Stream_provider_error
          { message = "provider refused"
          ; error_type = Some "provider_owned_type"
+         ; http_status = None
          ; raw = "{}"
          })
   with
@@ -263,12 +277,34 @@ let%test "generic stream provider type stays diagnostic" =
   | _ -> false
 ;;
 
+let%test "a stream error that declares a status is that refusal" =
+  let raw = {|{"error":{"code":429,"message":"slow down"},"choices":[{"finish_reason":"error"}]}|} in
+  match
+    http_error_of_stream_error
+      (Types.Stream_provider_error
+         { message = "slow down"; error_type = None; http_status = Some 429; raw })
+  with
+  | Http_client.HttpError
+      { code = 429; body = Http_client.Received body; retry_after_header = None } ->
+    String.equal body raw
+    &&
+      (match
+         Retry.classify_refusal
+           ~retry_after_header:None
+           ~status:429
+           ~body:(Http_client.Received body)
+       with
+      | Retry.RateLimited _ -> true
+      | _ -> false)
+  | _ -> false
+;;
+
 let%test "provider error diagnostic uses the active wire format" =
   match
     http_error_of_stream_error
       ~wire_format:Http_client.Ndjson
       (Types.Stream_provider_error
-         { message = "provider refused"; error_type = None; raw = "{}" })
+         { message = "provider refused"; error_type = None; http_status = None; raw = "{}" })
   with
   | Http_client.ProviderFailure { message; _ } ->
     message = "NDJSON stream error: provider refused raw=\"{}\""

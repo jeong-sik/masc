@@ -20,11 +20,14 @@ type empty_completion =
   }
 
 type parse_error =
-  | Provider_error of string
+  | Provider_error of
+      { message : string
+      ; http_status : int option
+      }
   | Empty_completion of empty_completion
 
 let parse_error_to_string = function
-  | Provider_error msg -> msg
+  | Provider_error { message; http_status = _ } -> message
   | Empty_completion { stop_reason; model; _ } ->
     Printf.sprintf
       "empty completion (no thinking, text, or tool calls; model=%s, stop_reason=%s)"
@@ -319,6 +322,16 @@ let telemetry_of_openai_json json =
     so tagged reasoning becomes a [Thinking] block instead of leaking into the
     visible [Text] answer. The default keeps every byte of [content] in [Text],
     byte-identical to the pre-split behavior. *)
+let unknown_api_error = "Unknown API error"
+
+let provider_error (envelope : Openai_error_envelope.t) =
+  Provider_error { message = envelope.message; http_status = envelope.http_status }
+;;
+
+(* A response this parser cannot read has always been reported the way a
+   provider error without a declared status is. *)
+let unreadable_response message = Provider_error { message; http_status = None }
+
 let parse_openai_response_result_json_raw
       ?(content_inline_reasoning = Capabilities.No_content_inline_reasoning)
       (raw_json : Yojson.Safe.t)
@@ -337,16 +350,32 @@ let parse_openai_response_result_json_raw
     let* finish_reason =
       match choice |> member "finish_reason" |> to_string_option with
       | Some finish_reason -> Ok finish_reason
-      | None -> Error "malformed_openai_response:missing_finish_reason"
+      | None ->
+        Error (unreadable_response "malformed_openai_response:missing_finish_reason")
+    in
+    let* () =
+      if Stop_reason_wire.is_provider_error_finish finish_reason
+      then
+        Error
+          (provider_error
+             (Openai_error_envelope.of_errored_choice
+                ~fallback_message:unknown_api_error
+                choice))
+      else Ok ()
     in
     let text_content = text_content_of_openai_content (msg |> member "content") in
-    let* tool_blocks = parse_tool_calls_field (msg |> member "tool_calls") in
+    let* tool_blocks =
+      parse_tool_calls_field (msg |> member "tool_calls")
+      |> Result.map_error unreadable_response
+    in
     (* Ollama uses "reasoning"; OpenAI-compatible providers commonly use
        "reasoning_content"; MiniMax split mode may return "reasoning_details".
        MiniMax split reasoning stays as [ReasoningDetails] so the original
        provider message shape can be replayed without overloading visible or
        redacted thinking channels. Other reasoning text stays [Thinking]. *)
-    let* thinking_blocks = reasoning_content_blocks_of_message_result msg in
+    let* thinking_blocks =
+      reasoning_content_blocks_of_message_result msg |> Result.map_error unreadable_response
+    in
     (* Models declaring [Think_tags] (e.g. GLM served through ollama-cloud,
        Qwen3 chat-template runtimes) embed part of their reasoning inside
        [message.content] itself. Feed the complete string through the same
@@ -384,13 +413,15 @@ let parse_openai_response_result_json_raw
       ; telemetry = telemetry_of_openai_json json
       }
   | err ->
-    let msg =
-      err
-      |> member "message"
-      |> to_string_option
-      |> Option.value ~default:"Unknown API error"
-    in
-    Error msg
+    Error
+      (provider_error
+         (Option.value
+            (Openai_error_envelope.of_error_value ~fallback_message:unknown_api_error err)
+            ~default:
+              { Openai_error_envelope.message = unknown_api_error
+              ; error_type = None
+              ; http_status = None
+              }))
 ;;
 
 (* agent-core boundary fail-closed wrapper: an all-empty completion (no thinking, no text,
@@ -402,7 +433,7 @@ let parse_openai_response_result_json
       raw_json
   =
   match parse_openai_response_result_json_raw ~content_inline_reasoning raw_json with
-  | Error msg -> Error (Provider_error msg)
+  | Error _ as error -> error
   | Ok ({ content = []; id; model; stop_reason; usage; telemetry } : Types.api_response)
     -> Error (Empty_completion { id; model; stop_reason; usage; telemetry })
   | Ok resp -> Ok resp
@@ -427,7 +458,10 @@ let%test "missing finish reason is not synthesized as stop" =
     parse_openai_response_result
       {|{"id":"chat-1","model":"m","choices":[{"message":{"content":"ok"}}]}|}
   with
-  | Error (Provider_error "malformed_openai_response:missing_finish_reason") -> true
+  | Error
+      (Provider_error
+        { message = "malformed_openai_response:missing_finish_reason"; http_status = None })
+    -> true
   | Error _ | Ok _ -> false
 ;;
 

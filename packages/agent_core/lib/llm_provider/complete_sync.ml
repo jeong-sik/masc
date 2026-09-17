@@ -97,7 +97,14 @@ let parse_sync_response
            body
        with
        | Ok response -> Ok response
-       | Error (Backend_openai_parse.Provider_error message) ->
+       | Error (Backend_openai_parse.Provider_error { http_status = Some code; message = _ })
+         ->
+         (* The error object declared the status its failure carries inside a
+            200; it is that refusal, with this response as its body. *)
+         Error
+           (Http_client.HttpError
+              { code; body = Http_client.Received body; retry_after_header = None })
+       | Error (Backend_openai_parse.Provider_error { http_status = None; message }) ->
          Error
            (Http_client.HttpError
               { code = 400; body = Http_client.Received message; retry_after_header = None })
@@ -110,7 +117,7 @@ let parse_sync_response
        | Ok response -> Ok response
        | Error (Backend_openai_parse.Empty_completion empty) ->
          Error (Http_client.empty_completion_error ~stop_reason:empty.stop_reason)
-       | Error (Backend_openai_parse.Provider_error message) ->
+       | Error (Backend_openai_parse.Provider_error { message; http_status = _ }) ->
          provider_parse_failure ~parser:"glm" message)
   with
   | Yojson.Json_error message

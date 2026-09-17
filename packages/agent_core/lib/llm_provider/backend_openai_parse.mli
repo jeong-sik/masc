@@ -19,10 +19,16 @@ type empty_completion =
   }
 
 (** Parse failure. [Provider_error] is a provider-reported API error (the JSON
-    [error] body). [Empty_completion] is a fail-closed all-empty 200 that would
+    [error] body, or the error of a choice that finished with [error]), and
+    also a response this parser cannot read. Its [http_status] is the status
+    the error object declares ({!Openai_error_envelope}); [None] when it
+    declares none. [Empty_completion] is a fail-closed all-empty 200 that would
     otherwise have parsed as [Ok content=[]] and stormed downstream. *)
 type parse_error =
-  | Provider_error of string
+  | Provider_error of
+      { message : string
+      ; http_status : int option
+      }
   | Empty_completion of empty_completion
 
 (** Human-readable rendering of a {!parse_error} for logs / test failures. *)

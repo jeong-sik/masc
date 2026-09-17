@@ -1696,6 +1696,10 @@ type sse_event =
                 converge onto the same classification path as an initial HTTP
                 error instead of collapsing to [NetworkError {Unknown}].
                 [None] when the provider omits it. *)
+      ; http_status : int option
+        (** The HTTP status the provider declares inside the envelope, since
+                the stream's own [200] is already on the wire. [None] when the
+                envelope carries none. *)
       ; raw : string
         (** Original error payload JSON, carried verbatim so the consumer
                 can feed it to [Retry.classify_error] (retry_after, hard-quota
@@ -1749,6 +1753,7 @@ type stream_error =
   | Stream_provider_error of
       { message : string
       ; error_type : string option
+      ; http_status : int option
       ; raw : string
       }
   | Stream_parse_failed of

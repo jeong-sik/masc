@@ -751,13 +751,18 @@ type sse_event =
   | SSEError of
       { message : string
       ; error_type : string option
+      ; http_status : int option
       ; raw : string
       }
   (** A provider-reported error delivered mid-stream. [error_type] is the
             provider's error-object [type] discriminator (e.g.
             ["rate_limit_exceeded"]) and [raw] the original error JSON, so the
             consumer can converge onto the same classification path as an
-            initial HTTP error instead of collapsing to [NetworkError {Unknown}]. *)
+            initial HTTP error instead of collapsing to [NetworkError {Unknown}].
+            [http_status] is the HTTP status the provider declares for the
+            error inside the envelope, because the stream's own [200] was
+            already sent (OpenRouter and vLLM put it in a numeric
+            [error.code]); [None] when the envelope carries none. *)
   | NDJSONError of
       { message : string
       ; error_type : string option
@@ -836,6 +841,7 @@ type stream_error =
   | Stream_provider_error of
       { message : string
       ; error_type : string option
+      ; http_status : int option
       ; raw : string
       }
   | Stream_parse_failed of

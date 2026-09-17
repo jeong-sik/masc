@@ -15,6 +15,11 @@
  (libraries masc_test_deps))
 
 (test
+ (name test_keeper_request_failure)
+ (modules test_keeper_request_failure)
+ (libraries masc_test_deps))
+
+(test
  (name test_keeper_tool_execute_script_paths)
  (modules test_keeper_tool_execute_script_paths)
  ; Deliberately minimal: the script-paths vocabulary now lives with its
@@ -5921,7 +5926,8 @@
 (rule
  (alias runtest-test_install_runtime_setup)
  (deps test_install_runtime_setup.py ../scripts/install-runtime-setup.py
-       ../bin/main_eio.exe (source_tree ../scripts/fixtures/release-evidence))
+       ../bin/main_eio.exe (source_tree ../scripts/fixtures/release-evidence)
+       ../config/runtime.toml ../config/agent-core-models-overlay.toml)
  (action
   (run python3 %{dep:test_install_runtime_setup.py} --binary %{dep:../bin/main_eio.exe})))
 

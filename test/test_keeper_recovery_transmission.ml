@@ -5,6 +5,13 @@ module View = Keeper_recovery_transmission
 module Checkpoint = Keeper_checkpoint_store
 module J = Yojson.Safe.Util
 
+(* What the operator's window currently says. The store takes the window as an
+   argument -- it is reachable from a raw Domain, where reading a setting
+   raises -- so every caller names it. These cases are not about the window and
+   pass what production passes. *)
+let history_retained () =
+  Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained
+
 let () = Mirage_crypto_rng_unix.use_default ()
 let () = Server_startup_state.mark_state_ready () |> Result.get_ok
 let evidence = ref None
@@ -73,7 +80,8 @@ let checkpoint messages =
 ;;
 
 let save session_dir checkpoint =
-  (match Checkpoint.save_agent_core_classified ~session_dir checkpoint with
+  (match Checkpoint.save_agent_core_classified
+    ~history_retained:(history_retained ()) ~session_dir checkpoint with
    | Ok _ -> ()
    | Error e -> fail e);
   match
@@ -366,7 +374,8 @@ let test_actual_transmission_cap_metrics_checkpoint_and_reader () =
            { s.checkpoint with session_id = cp.Agent_core.Checkpoint.session_id }
          in
          snapshots := checkpoint :: !snapshots;
-         Checkpoint.save_agent_core_classified ~session_dir checkpoint
+         Checkpoint.save_agent_core_classified
+           ~history_retained:(history_retained ()) ~session_dir checkpoint
          |> Result.map (fun _ -> ())
        in
        (match

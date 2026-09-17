@@ -25,7 +25,9 @@ def checkout(destination):
 
 
 def package_version(repo):
-    return re.search(r"(?m)^\(version ([^)]+)\)", (repo / "dune-project").read_text()).group(1)
+    match = re.search(r"(?m)^\(version ([^)]+)\)", (repo / "dune-project").read_text())
+    assert match is not None, "dune-project names no version"
+    return match.group(1)
 
 
 def run_script(repo, env, script, *args):

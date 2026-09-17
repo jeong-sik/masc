@@ -14,10 +14,14 @@ related: []
 
 ## 0. 요약
 
-설치를 끝까지 마쳐도 웹 검색은 쓸 수 있는 공급자가 하나도 없고, 브라우저 레인은
-그런 기능이 있다는 표시조차 나오지 않는다. 둘 다 설정하는 방법이 제품 안에 없다.
-`runtime.toml` 을 직접 열거나 `connectors/browser/host/README.md` 의 curl 절차를
-손으로 따라가는 것이 전부다.
+설치를 끝까지 마쳐도 웹 검색은 쓸 수 있는 공급자가 하나도 없다. 브라우저 레인은
+실행 파일까지 설치되지만 그다음 절차가 손에 남는다.
+
+설정하는 방법이 아예 없는 것은 아니다. `runtime.toml` 원문 편집기가 TUI 와
+대시보드에 있고, 브라우저는 README 의 curl 절차와 그것을 가리키는 안내가 있다.
+없는 것은 **무엇을 써야 하는지 알려주는 쪽**이다. 웹 검색은 구조화된 설정 화면에
+나오지 않아서 섹션 이름부터 알 수 없고, 어느 공급자가 지금 쓸 수 있는지 묻는
+방법도 없다. 브라우저는 확장 파일을 태그에 맞춰 손으로 받아야 한다.
 
 음성은 이 문제를 이미 풀어놨다. `Voice_setup` 이 `[voice]` 섹션만 쓰고,
 `masc voice-local-setup` 으로 따로 열려 있고, 설치 마법사 3단계는 그 명령을 그대로
@@ -53,18 +57,35 @@ related: []
 모델 연결, 음성, 샌드박스, 첫 대화 다섯 단계를 지나는 동안 웹 검색을 한 번도
 묻지 않는다.
 
-설치를 마친 뒤에 바꾸려고 해도 갈 곳이 없다.
+설치를 마친 뒤에 설정하려면 `runtime.toml` 을 원문으로 여는 수밖에 없다. 여는
+방법은 셋이고 셋 다 원문 편집기다.
 
-- `masc_config` 도구는 읽기 전용이다. 유효한 설정을 출처와 함께 보여주고 민감한
-  값은 가린다. 쓰지는 않는다.
-- CLI 하위 명령에 웹 검색용이 없다. 모델 런타임용 `runtime-default-set`,
-  `runtime-probe`, `runtime-wizard-catalog` 만 있다.
-- TUI 슬래시 명령에도 설정 화면이 없다.
-- 서버 라우트에도 없다. 음성은 `lib/server/server_voice_setup_actions.ml` 로 열려
-  있지만 `lib/server/` 어디에도 웹 검색 설정을 받는 자리가 없다.
-- 남는 것은 `<base-path>/.masc/config/runtime.toml` 을 직접 여는 것뿐이다.
+| 방법 | 어디 |
+|---|---|
+| TUI | `/settings` 의 `runtime.toml` pane 에서 `e` 가 `$EDITOR` 를 연다. 저장 전 preview 로 검증하고 커밋 영수증을 낸다 |
+| 대시보드 | `dashboard/src/components/runtime-toml-editor.ts` |
+| 파일 | `<base-path>/.masc/config/runtime.toml` |
 
-그런데 직접 열어도 API 키는 넣을 수 없다.
+앞의 둘은 `POST /api/v1/runtime/config/raw` 를 지난다
+(`lib/server/server_routes_http_routes_dashboard.ml:2239`). `CanAdmin` 권한,
+loader 검증, 감사 기록이 붙으므로 파일을 직접 고치는 것보다 안전하다.
+
+없는 것은 여는 방법이 아니라 **무엇을 써야 하는지 알려주는 것**이다.
+
+- 구조화된 설정 화면에 웹 검색이 없다. TUI 의 `params` pane 은 `Runtime_params`
+  레지스트리를 읽는데 거기에 웹 검색 항목이 하나도 없다. 그래서 `[web_search]`
+  라는 섹션이 있다는 것도, 키가 넷이라는 것도, 어느 공급자가 어느 변수를 보는지도
+  화면에 나오지 않는다. 원문 편집기는 이미 아는 사람만 쓸 수 있다.
+- 지금 어느 공급자가 쓸 수 있는 상태인지 묻는 방법이 없다. `masc_config` 는 읽기
+  전용이고 유효한 설정만 낸다. 비어 있는 이유가 변수가 없어서인지 순서에서 빠져서인지
+  구분해주지 않는다.
+- CLI 하위 명령에 웹 검색용이 없다.
+- MCP 도구에도 없다. `masc_web_search` 는 검색만 하고 설정하지 않는다.
+- 웹 검색 전용 HTTP 라우트가 없다. 음성은 `lib/server/server_voice_setup_actions.ml`
+  로 열려 있다.
+- 설치 마법사가 묻지 않는다.
+
+그리고 어느 방법으로 열어도 API 키는 넣을 수 없다.
 `lib/config/keeper_runtime_setting_registry.ml:564` 가 그 이유를 적어두었다 —
 `runtime.toml` 은 커밋되는 파일이라서 비밀에는 TOML 키를 주지 않는다. 키는
 `Env_only` 로 고정이고, 서버를 띄우는 셸에 직접 export 해야 한다.
@@ -90,16 +111,25 @@ TOML 로 저장할 수 있는 것은 네 개다: `web_search.searxng_url`,
 확장 파일 두 개(`manifest.json`, `background.js`)는 이 스크립트가 건드리지 않는다.
 소스 체크아웃이 없으면 GitHub 에서 태그를 맞춰 curl 로 받아야 한다.
 
-온보딩 체크는 설치하지 않은 사람에게 아무것도 말하지 않는다.
-`lib/operator/onboarding_status.ml:149` 의 `browser_lane_check` 는 판정이
-`Absent` 이면 체크를 만들지 않는다. 설치한 뒤에 어긋난 경우만 조언으로 나온다.
-그래서 처음 쓰는 사람은 이런 기능이 있다는 것을 알 방법이 없다.
+안내가 없지는 않다. `scripts/install.sh` 는 설치를 마치며 README 링크를 한 줄
+찍고(`browser registration: …`), 키퍼가 브라우저 도구를 부르면
+`lib/browser_lane_launcher.ml:113` 의 `Not_installed` 메시지가 `install-host.sh` 를
+이름으로 지목한다. `scripts/install-local-build.sh:57` 은 이미 등록된 manifest 를
+돌며 새 실행 파일로 다시 설치해준다. 다만 그것은 소스 체크아웃이 있는 사람의
+업그레이드 경로이고, 처음 설치를 대신하지 않는다.
+
+온보딩 체크만 침묵한다. `lib/operator/onboarding_status.ml:149` 의
+`browser_lane_check` 는 판정이 `Absent` 이면 체크를 만들지 않는다. 설치한 뒤에
+어긋난 경우만 조언으로 나온다.
 
 ## 2. 마법사에 단계만 더하면 안 되는 이유
 
-설치할 때 한 번 지나가는 설정이 된다. 그 자리에서 건너뛴 사람, 나중에 키를 새로
-발급받은 사람, 다른 공급자로 옮기려는 사람 모두 돌아올 곳이 없다. 지금 없는 것은
-"설치 중에 묻는 화면" 이 아니라 "설정하는 방법" 이다.
+설치할 때 한 번 지나가는 화면이 된다. 그 자리에서 건너뛴 사람, 나중에 키를 새로
+발급받은 사람, 다른 공급자로 옮기려는 사람은 §1.1 의 원문 편집기로 돌아간다.
+원문 편집기는 이미 아는 사람에게만 쓸모가 있으므로, 마법사에서 한 번 본 화면이
+그 사람이 받은 유일한 설명이 된다. 화면은 지나가고 설명은 남지 않는다.
+
+지금 없는 것은 "설치 중에 묻는 화면" 이 아니라 "언제든 다시 열리는 설명" 이다.
 
 마법사도 이미 다섯 단계다. 앞에 두 단계를 더 세우면 모델 연결까지 가는 길이
 길어진다. 웹 검색과 브라우저는 모델 없이는 의미가 없으므로 뒤에 붙어야 하고,
@@ -157,9 +187,12 @@ provider_order = "searxng,brave,tavily"
 fallbacks      = "exa"
 ```
 
-쓰지 않는 값은 API 키다. 대신 명령이 공급자마다 지금 상태를 보여준다. 자격증명이
-있는 공급자와 없는 공급자를 나누고, 없는 쪽에는 어느 변수 이름을 export 해야
-하는지 정확한 철자로 낸다. 판정은 `Tool_misc_web_search.provider_has_credentials`
+쓰지 않는 값은 API 키다.
+
+명령의 값어치는 쓰는 쪽보다 보여주는 쪽에 있다. 네 값은 원문 편집기로도 쓸 수
+있지만, 무엇을 쓸지 아는 사람만 그렇게 할 수 있다. 명령은 공급자마다 지금 상태를
+보여준다. 자격증명이 있는 공급자와 없는 공급자를 나누고, 없는 쪽에는 어느 변수
+이름을 export 해야 하는지 정확한 철자로 낸다. 판정은 `Tool_misc_web_search.provider_has_credentials`
 가 쓰는 것과 같은 읽기 경로(`Env_config_core.raw_value_opt`)로 한다. 두 곳이 다른
 경로를 읽어서 생긴 문제가 이미 한 번 있었다 — 공급자가 고를 수 있는 상태로 보인
 다음 호출에서 아무것도 못 찾았다(#21972 P2-3).
@@ -192,7 +225,9 @@ fallbacks      = "exa"
 5. `Browser_lane_launcher.observe` 의 판정을 그대로 낸다
 
 `install-host.sh` 는 지운다. 같은 일을 두 곳이 하면 한쪽만 고쳐지는 날이 온다.
-`connectors/browser/host/README.md` 의 curl 절차도 새 명령으로 바꾼다.
+그러면 부르는 쪽도 같이 바꿔야 한다. `scripts/install-local-build.sh:57` 이 이미
+등록된 manifest 를 돌며 이 스크립트를 실행하고 있으므로, 같은 순회를 새 명령으로
+옮긴다. `connectors/browser/host/README.md` 의 curl 절차도 새 명령으로 바꾼다.
 
 ### 4.3 마법사
 
@@ -230,6 +265,12 @@ fallbacks      = "exa"
 - **키 변수 이름을 설정 가능하게.** §4.1 에 이유를 적었다.
 - **HTTP 라우트.** 음성에는 있지만 이번에는 만들지 않는다. 대시보드에서 이 설정을
   바꾸려는 요구가 아직 없다. 경계만 같게 두어 나중에 JSON 변환만 더하면 되게 한다.
+- **웹 검색을 `Runtime_params` 에 등록하기.** 등록하면 TUI 의 `params` pane 에
+  이름과 타입이 나오므로 §1.1 의 첫 번째 문제는 줄어든다. 그런데 나머지가 남는다.
+  `params` pane 은 값을 보여주지 지금 어느 공급자가 쓸 수 있는지 판정하지 않고,
+  API 키는 여기서도 못 쓴다. `Runtime_params` 는 살아 있는 서버를 조율하는 자리인데
+  웹 검색 값은 요청할 때 읽으므로 성격도 다르다. 설정 명령을 만든 뒤에도 이 등록이
+  따로 이득이면 그때 별도로 다룬다.
 
 ## 6. 검증
 
@@ -239,6 +280,7 @@ fallbacks      = "exa"
 | 두 번 돌려도 같다 | 같은 입력으로 두 번 돌리고 파일이 같은지 본다 |
 | 자격증명 판정이 실제 호출과 맞다 | 변수를 하나만 둔 상태에서 명령이 낸 목록과 `provider_plan ()` 이 같은지 본다 |
 | 브라우저 설정이 스크립트와 같은 결과를 낸다 | 같은 워크스페이스에 스크립트와 명령을 각각 돌려 파일 내용과 권한을 비교한다 |
+| 업그레이드 경로가 끊기지 않는다 | `install-local-build.sh` 가 등록된 manifest 를 새 명령으로도 같은 수만큼 갱신하는지 본다 |
 | 판정이 바뀐다 | 설정 전후로 `Browser_lane_launcher.verdict` 가 `Absent` 에서 `Aligned` 로 가는지 본다 |
 
 이미 있는 테스트: `test/test_install_script.ml`,

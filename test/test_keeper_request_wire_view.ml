@@ -60,6 +60,7 @@ let view ~front history : Try_provider.request_view =
     ~provider_config
     ~measure_message_bytes
     ~front
+    ~history_digest_at:(Window.atom_opening_digest history)
     ~last_resort:false
     ~base_path:""
     ~demote_before:0
@@ -81,7 +82,7 @@ let test_the_window_counts_atoms_of_the_history_whatever_the_wire_deletes () =
   let observation =
     match
       Window.observe
-        ~digest_at:composed.Try_provider.history_digest_at
+        ~digest_at:(Window.atom_opening_digest history)
         ~history_atom_count:composed.Try_provider.history_atom_count
         composed.Try_provider.projection
     with

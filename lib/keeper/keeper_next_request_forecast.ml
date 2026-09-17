@@ -381,6 +381,7 @@ let candidate
       ~keeper_name
       ~trace_id
       ~messages
+      ~digest_at
       ~history_atoms
       ~wake_bytes
       ~readings
@@ -396,16 +397,18 @@ let candidate
     match lane with
     | Error _ -> None
     | Ok () ->
-      (* The same front the turn driver composes from: the pair's ledger,
-         else the seed the newest completed Agent Core record on the trace
-         gives every candidate alike. *)
+      (* The same front the turn driver composes from: the pair's ledger
+         while this history holds its positions, else the seed the newest
+         completed Agent Core record on the trace gives every candidate alike.
+         The forecast only reads: a ledger that does not hold is passed over
+         here and dropped by the turn driver's next composition. *)
       let front, counted_tokens =
         match
           Keeper_model_input_ledger.Table.lookup ~keeper_name ~runtime_id ~session_id:trace_id
         with
-        | Some ledger ->
+        | Some ledger when Keeper_model_input_ledger.holds ~digest_at ledger ->
           Keeper_carried_front.of_ledger ledger, ledger.Keeper_model_input_ledger.total_tokens
-        | None -> seed, None
+        | Some _ | None -> seed, None
       in
       Some
         (carry
@@ -449,6 +452,7 @@ let forecast ~config ~keeper_name =
        let _labelled, history_atoms =
          Runtime_model_input_tail_window.annotate messages
        in
+       let digest_at = Runtime_model_input_tail_window.atom_opening_digest messages in
        let assignment_id = Keeper_meta_contract.runtime_id_of_meta meta in
        (* NDT-OK: one wall-clock read at the boundary, compared with stored expiries. *)
        let now = Unix.gettimeofday () in
@@ -472,6 +476,7 @@ let forecast ~config ~keeper_name =
                     ~keeper_name
                     ~trace_id
                     ~messages
+                    ~digest_at
                     ~history_atoms
                     ~wake_bytes:wake_line_bytes
                     ~readings

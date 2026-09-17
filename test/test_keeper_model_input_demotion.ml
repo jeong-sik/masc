@@ -706,6 +706,7 @@ let compose ~base_path ~front ~last_resort ~demote_before messages =
          ; front_digest
          ; source = Masc.Keeper_carried_front.Ledger
          })
+    ~history_digest_at:(Window.atom_opening_digest messages)
     ~last_resort
     ~base_path
     ~demote_before
@@ -868,6 +869,7 @@ let a_front_the_history_shrank_under_starts_over () =
            ; front_digest = String.make 64 'f'
            ; source = Masc.Keeper_carried_front.Ledger
            })
+      ~history_digest_at:(Window.atom_opening_digest messages)
       ~last_resort:false
       ~base_path:""
       ~demote_before:0
@@ -880,6 +882,37 @@ let a_front_the_history_shrank_under_starts_over () =
     (match composed.Try_provider.outlived_seed with
      | Some (_, Masc.Keeper_carried_front.Front_atom_missing) -> true
      | Some (_, Masc.Keeper_carried_front.Front_message_differs) | None -> false)
+;;
+
+(* The history has an atom at the front, but it opens with another message
+   than the one the front was measured on: atoms before it were removed. The
+   composition starts over and records that reason, not the missing-atom one. *)
+let a_front_that_opens_with_another_message_starts_over () =
+  let _, messages, _ = oversized_newest_history () in
+  let composed =
+    Try_provider.For_testing.compose_carried_model_input
+      ~measure_message_bytes
+      ~front:
+        (Some
+           { Masc.Keeper_carried_front.first_atom = 1
+           ; front_digest = String.make 64 'f'
+           ; source = Masc.Keeper_carried_front.Ledger
+           })
+      ~history_digest_at:(Window.atom_opening_digest messages)
+      ~last_resort:false
+      ~base_path:""
+      ~demote_before:0
+      messages
+  in
+  Alcotest.(check bool) "atom 1 exists" true
+    (Option.is_some (Window.atom_opening_digest messages 1));
+  Alcotest.(check bool) "the whole history goes" true
+    (composed.Try_provider.origin = Masc.Keeper_carried_front.Whole_history);
+  Alcotest.(check int) "nothing dropped" 0 composed.Try_provider.projection.Window.dropped_atoms;
+  Alcotest.(check bool) "the dropped seed is on record, with the other message as its reason" true
+    (match composed.Try_provider.outlived_seed with
+     | Some (_, Masc.Keeper_carried_front.Front_message_differs) -> true
+     | Some (_, Masc.Keeper_carried_front.Front_atom_missing) | None -> false)
 ;;
 
 let () =
@@ -961,6 +994,10 @@ let () =
             "a front the history shrank under starts over"
             `Quick
             a_front_the_history_shrank_under_starts_over
+        ; Alcotest.test_case
+            "a front that opens with another message starts over"
+            `Quick
+            a_front_that_opens_with_another_message_starts_over
         ] )
     ; ( "measurement"
       , [ Alcotest.test_case

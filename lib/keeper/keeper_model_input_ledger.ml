@@ -321,40 +321,49 @@ let observe ~digest_at (previous : t option) (request : request) (usage : usage 
                   })))
 ;;
 
+let holds ~digest_at (t : t) = history_holds ~digest_at t.last
+
 (* Apply an eviction the carried range decided: the same trimming a request
    would report as [Front_moved], applied now so the next composition (the
-   turn's first, or a refusal retry) sees the moved front. A front that does
-   not advance leaves the ledger as it is; a front inside a block restarts
-   the blocks from the new front with the total unknown, as [observe] would.
-   The moved front is recorded with the message that opens it, so the next
-   composition and the next [observe] check the position they compose from;
-   the last atom's digest stays the last request's. A ledger whose last
-   request carried no atom has no front to move. *)
+   turn's first, or a refusal retry) sees the moved front. A front inside a
+   block restarts the blocks from the new front with the total unknown, as
+   [observe] would. The moved front is recorded with the message that opens
+   it, so the next composition and the next [observe] check the position
+   they compose from; the last atom's digest stays the last request's.
+
+   [None] when nothing moves, so a caller that retries on a move never asks
+   again with the front it already had: a front at or behind the current one,
+   a front at or past the last request's atom count (there is no atom there to
+   carry from), or a ledger whose last request carried no atom and so has no
+   front. *)
 let move_front (t : t) ~first_atom ~front_digest =
   match t.last.ends with
-  | No_atom_carried -> t
-  | Carried_atoms { front_digest = _; end_digest } when first_atom > t.last.first_atom ->
+  | No_atom_carried -> None
+  | Carried_atoms { front_digest = _; end_digest }
+    when first_atom > t.last.first_atom && first_atom < t.last.atom_count ->
     let last =
       { t.last with first_atom; ends = Carried_atoms { front_digest; end_digest } }
     in
     (match trim_front t.blocks ~first_atom with
-    | `Cut ->
-      { t with
-        total_tokens = None
-      ; measured_end_atom = None
-      ; measured_demote_before = None
-      ; blocks = base_blocks last
-      ; last
-      }
-    | `Trimmed (kept, evicted_tokens) ->
-      let total_tokens, measured_end_atom, measured_demote_before =
-        match t.total_tokens, evicted_tokens with
-        | Some total, Some evicted ->
-          Some (total - evicted), t.measured_end_atom, t.measured_demote_before
-        | Some _, None | None, (Some _ | None) -> None, None, None
-      in
-      { t with total_tokens; measured_end_atom; measured_demote_before; blocks = kept; last })
-  | Carried_atoms _ -> t
+     | `Cut ->
+       Some
+         { t with
+           total_tokens = None
+         ; measured_end_atom = None
+         ; measured_demote_before = None
+         ; blocks = base_blocks last
+         ; last
+         }
+     | `Trimmed (kept, evicted_tokens) ->
+       let total_tokens, measured_end_atom, measured_demote_before =
+         match t.total_tokens, evicted_tokens with
+         | Some total, Some evicted ->
+           Some (total - evicted), t.measured_end_atom, t.measured_demote_before
+         | Some _, None | None, (Some _ | None) -> None, None, None
+       in
+       Some
+         { t with total_tokens; measured_end_atom; measured_demote_before; blocks = kept; last })
+  | Carried_atoms _ -> None
 ;;
 
 let known_tokens t =
@@ -476,15 +485,45 @@ module Table = struct
       M.find_opt (key ~keeper_name ~runtime_id ~session_id) global.ledgers)
   ;;
 
+  type in_history =
+    | Holds of t
+    | Dropped_stale of t
+    | Absent
+
+  (* The digests are read outside the lock; the removal happens only if the
+     ledger that failed the check is still the pair's, so a ledger another
+     observation wrote in between is not the one dropped. *)
+  let lookup_in_history ~keeper_name ~runtime_id ~session_id ~digest_at =
+    match lookup ~keeper_name ~runtime_id ~session_id with
+    | None -> Absent
+    | Some t when holds ~digest_at t -> Holds t
+    | Some stale ->
+      let key = key ~keeper_name ~runtime_id ~session_id in
+      Eio.Mutex.use_rw ~protect:true global.mutex (fun () ->
+        match M.find_opt key global.ledgers with
+        | Some current when current == stale -> global.ledgers <- M.remove key global.ledgers
+        | Some _ | None -> ());
+      Dropped_stale stale
+  ;;
+
+  type move =
+    | Moved
+    | Not_moved
+    | No_pair_ledger
+
   (* [move_front] in the body is the ledger function above: this binding is
      not recursive. *)
   let move_front ~keeper_name ~runtime_id ~session_id ~first_atom ~front_digest =
     let key = key ~keeper_name ~runtime_id ~session_id in
     Eio.Mutex.use_rw ~protect:true global.mutex (fun () ->
       match M.find_opt key global.ledgers with
-      | None -> ()
+      | None -> No_pair_ledger
       | Some t ->
-        global.ledgers <- M.add key (move_front t ~first_atom ~front_digest) global.ledgers)
+        (match move_front t ~first_atom ~front_digest with
+         | Some moved ->
+           global.ledgers <- M.add key moved global.ledgers;
+           Moved
+         | None -> Not_moved))
   ;;
 
   module For_testing = struct

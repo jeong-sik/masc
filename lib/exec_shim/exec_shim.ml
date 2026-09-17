@@ -96,6 +96,37 @@ let synthesize_env ~path ~base_env ~allowlist ~request_env =
     else env in
   List.fold_left upsert base request_env
 
+(* {1 Program lookup} *)
+
+(* Unix.execvpe searches the PATH of the calling process, not the PATH in the
+   environment it is handed (measured on OCaml 5.5 with glibc, musl and macOS
+   libc: a program only in the given env PATH fails with ENOENT). The shim's
+   own PATH is whatever started it -- an sshd session's -- so [path=] reached
+   the payload's environment but never the lookup of the program the request
+   names. The lookup is done here against the payload path instead, and the
+   program handed to execvpe carries a slash, which makes libc exec it without
+   searching. *)
+let is_executable_file path =
+  match Unix.stat path with
+  | { Unix.st_kind = Unix.S_REG; _ } ->
+    (try
+       Unix.access path [ Unix.X_OK ];
+       true
+     with
+     | Unix.Unix_error _ -> false)
+  | _ -> false
+  | exception Unix.Unix_error _ -> false
+
+let resolve_program ~payload_path ~is_executable name =
+  if String.contains name '/'
+  then Some name
+  else
+    List.find_map
+      (fun dir ->
+        let candidate = Filename.concat dir name in
+        if is_executable candidate then Some candidate else None)
+      payload_path
+
 (* {1 Kill policy} *)
 
 let kill_grace_sec = 2.0
@@ -472,7 +503,7 @@ let refusal_of_rule_bytes (rule : bytes) =
 ;;
 
 let spawn ?(before_exec = fun () -> ()) ?observe_sock
-    ~argv ~env ~cwd ()
+    ~program ~argv ~env ~cwd ()
   =
   let opened = ref [] in
   let pipe ?(cloexec = false) () =
@@ -538,7 +569,15 @@ let spawn ?(before_exec = fun () -> ()) ?observe_sock
           closes on exec; no acknowledgement is not evidence of success. *)
        acknowledge "A";
        sandbox_applied := true;
-       Unix.execvpe (List.hd argv) (Array.of_list argv)
+       (* [program] is argv's program resolved against the payload path
+          (resolve_program); none found reads as the ENOENT execvpe reported
+          before, through the same exit-127 path below. *)
+       let program =
+         match program with
+         | Some path -> path
+         | None -> raise (Unix.Unix_error (Unix.ENOENT, "execvpe", List.hd argv))
+       in
+       Unix.execvpe program (Array.of_list argv)
          (Array.of_list (List.map (fun (k, v) -> k ^ "=" ^ v) env))
      with
      | Sandbox_refused_socket ->
@@ -1011,7 +1050,11 @@ let run () =
                    with Unix.Unix_error _ -> None)
                  else None
                in
-               try spawn ~before_exec ?observe_sock ~argv ~env ~cwd () with
+               let program =
+                 resolve_program ~payload_path:config.payload_path
+                   ~is_executable:is_executable_file (List.hd argv)
+               in
+               try spawn ~before_exec ?observe_sock ~program ~argv ~env ~cwd () with
                | exn ->
                  (match observe_sock with
                   | Some (child_end, parent_end) ->

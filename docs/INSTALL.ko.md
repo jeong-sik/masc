@@ -135,9 +135,10 @@ bash /tmp/masc-install.sh --base-path "$HOME/masc-workspace"
 ```
 
 최신 릴리스가 아니라 특정 릴리스를 설치하려면 그 태그의 설치기를 받아 고정합니다.
+먼저 GitHub Releases 에 그 태그가 있는지 확인하세요.
 
 ```bash
-TAG=v0.35.14
+TAG=v0.35.19
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh &&
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"

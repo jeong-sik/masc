@@ -118,6 +118,7 @@ let project
       ~tool_delivery
       ~native_posture
       ~tool_deny
+      ~sandbox_profile
       ~skill_names
       ~current_task_id
       ~task_skill_references
@@ -147,6 +148,7 @@ let project
     let capability_surface =
       Keeper_capability_surface.create
         ~tool_deny
+        ~sandbox_profile
         ~skill_names
         ~global_skill_catalog
         ~skill_inventory:(Keeper_skill_inventory.of_snapshot skill_snapshot)
@@ -480,6 +482,7 @@ let resolve ~config ~keeper_name =
                      ~tool_delivery:(runtime_tool_delivery runtime)
                      ~native_posture
                      ~tool_deny:profile_defaults.tool_deny
+                     ~sandbox_profile:meta.sandbox_profile
                      ~skill_names:profile_defaults.skill_names
                      ~current_task_id
                      ~skills_left_out

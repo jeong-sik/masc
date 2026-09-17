@@ -55,6 +55,9 @@ def main():
         run(["docker", "build", "--quiet", "--tag", image, str(fixture)])
         config = root / "shim.conf"
         config.write_text(f"remote_root={work}\npath=/usr/local/bin:/usr/bin:/bin\nenv_allowlist=\n")
+        # The shim refuses a config its group or every user may write; set the
+        # mode rather than leave it to the umask.
+        config.chmod(0o644)
         (work / "sentinel.txt").write_text("keep\n")
         (work / "probe.magic").write_text("0 string hello sample\n")
         helper = work / "fsmonitor"

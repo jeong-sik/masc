@@ -103,32 +103,54 @@ let is_env_name name =
 
 (* docker's --env-file grammar without its host-lookup form: NAME=VALUE, the
    value is the rest of the line byte for byte, blank lines and lines whose
-   first non-blank character is '#' are skipped. A line holding only a name
+   first non-blank character is '#' are skipped. docker reads lines with
+   bufio.ScanLines, which drops one '\r' before the line end, so a file saved
+   with CRLF endings means the same values here. A line holding only a name
    would take the value from the reading process, which here is an sshd
-   session's -- not something the operator wrote -- so it is refused. *)
-let parse_env_file content =
-  let err fmt =
-    Printf.ksprintf (fun m -> Error (config_error_code ^ ": env_file: " ^ m)) fmt in
+   session's -- not something the operator wrote -- so it is refused.
+
+   An error names the file and the line number and says what is wrong, never
+   the line's text: a malformed line may be a secret value. *)
+let parse_env_file ~path content =
+  let err n fmt =
+    Printf.ksprintf
+      (fun m ->
+        Error (Printf.sprintf "%s: env_file %s line %d: %s" config_error_code path n m))
+      fmt in
+  let first_line_of_name = Hashtbl.create 16 in
   let declare declared (n, line) =
     Result.bind declared (fun declared ->
+        let line =
+          if String.ends_with ~suffix:"\r" line
+          then String.sub line 0 (String.length line - 1)
+          else line in
         let body = String.trim line in
         if body = "" || body.[0] = '#'
         then Ok declared
         else
           match String.index_opt line '=' with
-          | None -> err "line %d is not NAME=VALUE: %S" n line
+          | None -> err n "not NAME=VALUE"
           | Some i ->
             let name = String.sub line 0 i in
             let value = String.sub line (i + 1) (String.length line - i - 1) in
             if not (is_env_name name)
-            then err "line %d: %S is not an environment variable name" n name
+            then err n "the text before '=' is not an environment variable name"
             else if name = "PATH"
-            then err "line %d: PATH comes from path=, the directories programs are looked up in" n
+            then err n "PATH comes from path=, the directories programs are looked up in"
+            else if List.mem name Exec_ssh_protocol.github_token_env_names
+            then
+              err n "%s would make every keeper on this endpoint one GitHub identity; \
+                     each keeper's own login is its GH_CONFIG_DIR" name
+            else if List.mem name runtime_env_allowlist
+            then err n "%s is set by the masc runner for each request" name
             else if String.contains value '\000'
-            then err "line %d: the value of %s holds a NUL byte, which exec cannot pass" n name
-            else if List.mem_assoc name declared
-            then err "line %d: %s is declared twice" n name
-            else Ok ((name, value) :: declared)) in
+            then err n "the value holds a NUL byte, which exec cannot pass"
+            else
+              match Hashtbl.find_opt first_line_of_name name with
+              | Some first -> err n "a name is declared twice, on lines %d and %d" first n
+              | None ->
+                Hashtbl.add first_line_of_name name n;
+                Ok ((name, value) :: declared)) in
   List.fold_left declare (Ok no_endpoint_env)
     (List.mapi (fun i line -> (i + 1, line)) (String.split_on_char '\n' content))
 
@@ -284,13 +306,16 @@ let default_config_path = "/etc/masc-exec-shim.conf"
 
 let config_keys = [ "remote_root"; "env_allowlist"; "path"; "env_file"; "scratch_root" ]
 
+(* An error names the key or the line number and says what is wrong, never
+   text from the file: a line or a value in the wrong place may be a secret.
+   The one key an error prints is a known one, a fixed name. *)
 let parse_config content =
   let ( let* ) = Result.bind in
   let err fmt = Printf.ksprintf (fun m -> Error (config_error_code ^ ": " ^ m)) fmt in
   let absolute_path key = function
     | "" -> err "%s must not be empty" key
     | value when not (String.starts_with ~prefix:"/" value) ->
-      err "%s must be an absolute path, got %S" key value
+      err "%s must be an absolute path" key
     | value -> Ok value in
   (* [path] replaces the payload PATH outright, so every entry has to stand
      on its own: an empty entry would be the current directory to execvp,
@@ -303,61 +328,55 @@ let parse_config content =
     | [] | [ "" ] -> err "path must name at least one directory"
     | entries ->
       (match List.find_opt (fun entry -> not (String.starts_with ~prefix:"/" entry)) entries with
-       | Some "" -> err "path has an empty entry: %S" value
-       | Some entry -> err "path entries must be absolute, got %S" entry
+       | Some "" -> err "path has an empty entry"
+       | Some _ -> err "path entries must be absolute"
        | None -> Ok entries) in
+  (* A key is judged on its own line, so an unknown one is reported by that
+     line's number and a duplicate is always a known key. *)
   let parse_line n line acc =
     let line = String.trim line in
     if line = "" || String.starts_with ~prefix:"#" line
     then Ok acc
     else
       match String.index_opt line '=' with
-      | None -> err "line %d is not key=value: %S" (n + 1) line
+      | None -> err "line %d is not key=value" (n + 1)
       | Some i ->
         let key = String.trim (String.sub line 0 i) in
         let value = String.trim (String.sub line (i + 1) (String.length line - i - 1)) in
-        if List.mem_assoc key acc
+        if not (List.mem key config_keys)
+        then err "line %d has an unknown key" (n + 1)
+        else if List.mem_assoc key acc
         then err "duplicate key %S (line %d)" key (n + 1)
         else Ok ((key, value) :: acc) in
-  match
+  let* entries =
     List.fold_left
       (fun acc (n, line) -> Result.bind acc (parse_line n line))
       (Ok [])
-      (List.mapi (fun i l -> (i, l)) (String.split_on_char '\n' content))
-  with
-  | Error _ as e -> e
-  | Ok entries ->
-    let unknown =
-      List.filter_map
-        (fun (k, _) -> if List.mem k config_keys then None else Some k)
-        entries in
-    (match unknown with
-     | k :: _ -> err "unknown key %S" k
-     | [] ->
-       let* remote_root =
-         match List.assoc_opt "remote_root" entries with
-         | None -> err "missing required key \"remote_root\""
-         | Some root -> absolute_path "remote_root" root in
-       let env_allowlist =
-         match List.assoc_opt "env_allowlist" entries with
-         | None -> []
-         | Some v ->
-           String.split_on_char ',' v
-           |> List.map String.trim
-           |> List.filter (fun s -> s <> "") in
-       let* payload_path =
-         match List.assoc_opt "path" entries with
-         | None -> Ok default_payload_path
-         | Some value -> payload_path_of value in
-       let* env_file =
-         match List.assoc_opt "env_file" entries with
-         | None -> Ok None
-         | Some file -> Result.map Option.some (absolute_path "env_file" file) in
-       let* scratch_root =
-         match List.assoc_opt "scratch_root" entries with
-         | None -> Ok Exec_ssh_protocol.default_scratch_root
-         | Some root -> absolute_path "scratch_root" root in
-       Ok { remote_root; env_allowlist; payload_path; env_file; scratch_root })
+      (List.mapi (fun i l -> (i, l)) (String.split_on_char '\n' content)) in
+  let* remote_root =
+    match List.assoc_opt "remote_root" entries with
+    | None -> err "missing required key \"remote_root\""
+    | Some root -> absolute_path "remote_root" root in
+  let env_allowlist =
+    match List.assoc_opt "env_allowlist" entries with
+    | None -> []
+    | Some v ->
+      String.split_on_char ',' v
+      |> List.map String.trim
+      |> List.filter (fun s -> s <> "") in
+  let* payload_path =
+    match List.assoc_opt "path" entries with
+    | None -> Ok default_payload_path
+    | Some value -> payload_path_of value in
+  let* env_file =
+    match List.assoc_opt "env_file" entries with
+    | None -> Ok None
+    | Some file -> Result.map Option.some (absolute_path "env_file" file) in
+  let* scratch_root =
+    match List.assoc_opt "scratch_root" entries with
+    | None -> Ok Exec_ssh_protocol.default_scratch_root
+    | Some root -> absolute_path "scratch_root" root in
+  Ok { remote_root; env_allowlist; payload_path; env_file; scratch_root }
 
 (* Read here rather than through Env_config_core: the shim is a standalone
    binary deployed to the remote host, where masc's config layer does not
@@ -369,23 +388,115 @@ let config_path () =
   | Some p when p <> "" -> p
   | _ -> default_config_path
 
-let read_endpoint_file ~what path =
-  try
-    let ic = open_in_bin path in
-    Ok
-      (Fun.protect
-         ~finally:(fun () -> close_in_noerr ic)
-         (fun () -> really_input_string ic (in_channel_length ic)))
-  with
-  | Sys_error _ ->
-    Error (Printf.sprintf "%s: cannot read %s %s" config_error_code what path)
+let root_uid = 0
+let group_write_bit = 0o020
+let other_write_bit = 0o002
 
-let load_config () =
-  Result.bind (read_endpoint_file ~what:"config file" (config_path ())) parse_config
+type endpoint_file_writers =
+  | Its_group
+  | Every_user
+  | Its_group_and_every_user
+
+type endpoint_file_refusal =
+  | Owned_by of int
+  | Writable_by of endpoint_file_writers
+
+(* Whoever can write the config names the payload PATH and the env file, and
+   whoever can write the env file sets the environment of every payload on the
+   host, the loader path included. The rule for both is sshd's StrictModes for
+   an authorized_keys file: owned by root or by the account reading it, and
+   written by no one else. The shim's own account is accepted, but it is also
+   the account that runs the payloads, and a payload can rewrite a file its
+   account owns; a root-owned 0644 file is the one a payload cannot change. *)
+let refuse_endpoint_file ~euid ~owner ~perm =
+  if owner <> root_uid && owner <> euid
+  then Some (Owned_by owner)
+  else
+    match perm land group_write_bit <> 0, perm land other_write_bit <> 0 with
+    | false, false -> None
+    | true, false -> Some (Writable_by Its_group)
+    | false, true -> Some (Writable_by Every_user)
+    | true, true -> Some (Writable_by Its_group_and_every_user)
+
+let endpoint_file_writers_text = function
+  | Its_group -> "its group"
+  | Every_user -> "every user"
+  | Its_group_and_every_user -> "its group and every user"
+
+(* Only a regular file is read, and whether the path is one is decided before a
+   byte is read. The open is nonblocking, so a FIFO nobody writes to does not
+   hang it; the kind then comes from the descriptor, and a FIFO, a device or a
+   directory is refused. The owner and mode are judged from the same metadata,
+   also before the read, so a refused file is never read. Metadata and bytes
+   come from one descriptor, so the verdict is about the same file as the
+   content even when the path is replaced in between. The bytes are read to end
+   of file rather than to a length taken first, which a file still being written
+   would make stale. Until the channel exists the descriptor is closed directly;
+   once it exists the channel owns the descriptor and [close_in_noerr] is its
+   only close, as Unix.in_channel_of_descr asks. *)
+let read_endpoint_file ~what path =
+  let cannot_read () =
+    Error (Printf.sprintf "%s: cannot read %s %s" config_error_code what path) in
+  let close_descriptor fd = try Unix.close fd with Unix.Unix_error _ -> () in
+  match Unix.openfile path [ Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC ] 0 with
+  | exception Unix.Unix_error _ -> cannot_read ()
+  | fd ->
+    let euid = Unix.geteuid () in
+    let verdict =
+      match Unix.fstat fd with
+      | exception Unix.Unix_error _ -> cannot_read ()
+      | { Unix.st_kind = Unix.S_REG; st_uid; st_perm; _ } ->
+        (match refuse_endpoint_file ~euid ~owner:st_uid ~perm:st_perm with
+         | None -> Ok ()
+         | Some (Owned_by owner) ->
+           Error
+             (Printf.sprintf
+                "%s: %s %s is owned by uid %d; only root or the shim's own uid (%d) \
+                 may own it"
+                config_error_code what path owner euid)
+         | Some (Writable_by writers) ->
+           Error
+             (Printf.sprintf
+                "%s: %s %s is writable by %s (mode %04o); only its owner may write it"
+                config_error_code what path (endpoint_file_writers_text writers) st_perm))
+      (* [openfile] follows a symbolic link, so [fstat] never reports [S_LNK];
+         the kind is listed so the match stays exhaustive. *)
+      | { Unix.st_kind =
+            ( Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
+            | Unix.S_SOCK )
+        ; _
+        } ->
+        Error (Printf.sprintf "%s: %s %s is not a regular file" config_error_code what path)
+    in
+    match verdict with
+    | Error _ as refused ->
+      close_descriptor fd;
+      refused
+    | Ok () ->
+      (match
+         Unix.clear_nonblock fd;
+         Unix.in_channel_of_descr fd
+       with
+       | exception Unix.Unix_error _ ->
+         close_descriptor fd;
+         cannot_read ()
+       | channel ->
+         Fun.protect
+           ~finally:(fun () -> close_in_noerr channel)
+           (fun () ->
+             match In_channel.input_all channel with
+             | content -> Ok content
+             | exception Sys_error _ -> cannot_read ()))
+
+let read_config_file path =
+  Result.bind (read_endpoint_file ~what:"config file" path) parse_config
+
+let load_config () = read_config_file (config_path ())
 
 let read_env_file = function
   | None -> Ok no_endpoint_env
-  | Some path -> Result.bind (read_endpoint_file ~what:"env_file" path) parse_env_file
+  | Some path ->
+    Result.bind (read_endpoint_file ~what:"env_file" path) (parse_env_file ~path)
 
 (* Named and reachable for the same reason as [jail_for_request]: the config
    naming an env file, reading it and layering it under the wire are three

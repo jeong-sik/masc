@@ -115,6 +115,11 @@ case "${1-}:${2-}" in
       exit 41
     fi
     printf '%s\n' "$@" > "$GH_CONFIG_DIR/login-args"
+    for arg in "$@"; do
+      if [ "$arg" = "--with-token" ]; then
+        cat > "$GH_CONFIG_DIR/received-token"
+      fi
+    done
     printf '%s\n' "stored-user" > "$GH_CONFIG_DIR/stored-login"
     printf '%s\n' "github.com:" "  user: stored-user" "  oauth_token: fixture-token" > "$GH_CONFIG_DIR/hosts.yml"
     ;;
@@ -180,6 +185,43 @@ let test_fake_gh_login_and_effective_identity () =
            (match observation.effective_probe_scope with
             | `Host_process_credential_only -> "host_process_credential_only"
             | `Endpoint_process_only -> "endpoint_process_only"))
+;;
+
+let test_fake_gh_set_token () =
+  with_temp_base @@ fun base_path config ->
+  let keeper_name = "github-token-keeper" in
+  let fake_bin = Filename.concat base_path "fake-bin" in
+  let fake_gh = Filename.concat fake_bin "gh" in
+  write_file fake_gh fake_gh_script;
+  Unix.chmod fake_gh 0o700;
+  let previous_path = Sys.getenv "PATH" in
+  Unix.putenv "PATH" (fake_bin ^ ":" ^ previous_path);
+  Fun.protect
+    ~finally:(fun () -> Unix.putenv "PATH" previous_path)
+    (fun () ->
+       let expected_argv =
+         Github.login_with_token_argv ~hostname:"github.com"
+       in
+       Alcotest.(check (list string)) "login_with_token_argv structure"
+         [ "gh"; "auth"; "login"; "--hostname"; "github.com"; "--git-protocol"; "https"; "--insecure-storage"; "--with-token" ]
+         expected_argv;
+       match Github.local_lane ~config ~keeper_name ~hostname:"github.com" with
+       | Error message -> Alcotest.fail message
+       | Ok lane ->
+         (match Github.set_token ~lane ~base_path ~keeper_name ~token:"github_pat_fixture_secret" with
+          | Error message -> Alcotest.fail message
+          | Ok observation ->
+            let keeper_config = Github.config_dir ~config ~keeper_name in
+            let login_args = read_file (Filename.concat keeper_config "login-args") in
+            Alcotest.(check bool) "--with-token passed in argv" true
+              (String.contains login_args '\n'
+               && String.ends_with ~suffix:"--with-token\n" login_args);
+            let received_token = read_file (Filename.concat keeper_config "received-token") in
+            Alcotest.(check string) "token passed via stdin" "github_pat_fixture_secret" received_token;
+            Alcotest.(check (option string)) "stored identity updated"
+              (Some "stored-user") observation.stored.login);
+         Alcotest.(check int) "run_cli_set_token exits 0" 0
+           (Github.run_cli_set_token ~lane ~base_path ~keeper_name ~token:"github_pat_second_secret"))
 ;;
 
 let test_config_dir_does_not_chmod_ancestor () =
@@ -665,6 +707,10 @@ let () =
             "fake gh login and effective identity"
             `Quick
             test_fake_gh_login_and_effective_identity
+        ; Alcotest.test_case
+            "fake gh set token and argv"
+            `Quick
+            test_fake_gh_set_token
         ; Alcotest.test_case
             "config directory keeps ancestor mode"
             `Quick

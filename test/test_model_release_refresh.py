@@ -2,6 +2,7 @@
 import importlib.util
 import json
 from pathlib import Path
+import tempfile
 import unittest
 import runpy
 import threading
@@ -11,6 +12,26 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('refresh', ROOT/'scripts/refresh-model-release-evidence.py')
 refresh = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(refresh)
+
+# Stands in for the installed MASC executable's `runtime-discover-models`
+# command: reads the helper-written connection spec, queries the fixture
+# server, and answers with the native observation shape — including the
+# provider listing timestamp the refresh report must never project.
+FAKE_DISCOVERY_BINARY = '''#!/usr/bin/env python3
+import json
+import sys
+from urllib.request import urlopen
+
+spec = json.loads(open(sys.argv[sys.argv.index('--spec') + 1]).read())
+rows = json.load(urlopen(spec['endpoint'].rstrip('/') + '/models', timeout=10))['data']
+print(json.dumps({
+    'source': 'account_or_server_model_list',
+    'account_availability_verified': False,
+    'models': [{'id': row['id'], 'label': row['id'], 'context': None,
+                'provider_listed_at': row.get('created'), 'release_date': None}
+               for row in rows],
+}))
+'''
 
 
 class RefreshEvidence(unittest.TestCase):
@@ -27,16 +48,17 @@ class RefreshEvidence(unittest.TestCase):
 
     def test_account_created_timestamp_does_not_create_release(self):
         requested = []
-        def discover(choice, **kwargs):
-            requested.append((choice, kwargs))
+        def discover(source):
+            requested.append(source)
             return [{'id': 'fixture-new-model', 'created': 1788998400, 'release_date': '2026-09-10',
                      'api_key': 'DO_NOT_PROJECT'}], 'untrusted raw error description'
-        request = {'schema': 'masc.model_discovery_request.v1', 'connections': [{
+        request = {'schema': 'masc.model_discovery_request.v2', 'connections': [{
             'id': 'local-fixture', 'publisher': 'fixture', 'choice': 'openai_compatible',
-            'endpoint': 'http://127.0.0.1:8000/v1', 'api_key_env': 'FIXTURE_KEY', 'command': ''}]}
+            'endpoint': 'http://127.0.0.1:8000/v1', 'api_key_env': 'FIXTURE_KEY'}]}
         report = refresh.observe(self.catalog, observed_at='2026-09-10T00:00:00Z',
                                  fetch=lambda _: {'status': 'unavailable'}, discovery=request, discover=discover)
-        self.assertEqual(requested[0][0], 'openai_compatible')
+        self.assertEqual(requested[0]['choice'], 'openai_compatible')
+        self.assertEqual(requested[0]['endpoint'], 'http://127.0.0.1:8000/v1')
         self.assertEqual(report['account_discovery'][0]['models'], [{'model_id': 'fixture-new-model', 'release': {'status': 'unknown'}}])
         serialized = json.dumps(report)
         for forbidden in ('DO_NOT_PROJECT', '1788998400', 'FIXTURE_KEY', '127.0.0.1', 'untrusted raw'):
@@ -60,15 +82,20 @@ class RefreshEvidence(unittest.TestCase):
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
-            request = {'schema': 'masc.model_discovery_request.v1', 'connections': [{
-                'id': 'fixture', 'publisher': 'local', 'choice': 'openai_compatible',
-                'endpoint': f'http://127.0.0.1:{server.server_port}/v1', 'api_key_env': '', 'command': ''}]}
-            report = refresh.observe(self.catalog, observed_at='2026-09-10T00:00:00Z',
-                                     fetch=lambda _: {'status': 'unavailable'}, discovery=request,
-                                     discover=helper['discover_models'])
+            with tempfile.TemporaryDirectory() as directory:
+                binary = Path(directory) / 'masc'
+                binary.write_text(FAKE_DISCOVERY_BINARY)
+                binary.chmod(0o700)
+                request = {'schema': 'masc.model_discovery_request.v2', 'connections': [{
+                    'id': 'fixture', 'publisher': 'local', 'choice': 'openai_compatible',
+                    'endpoint': f'http://127.0.0.1:{server.server_port}/v1', 'api_key_env': ''}]}
+                report = refresh.observe(self.catalog, observed_at='2026-09-10T00:00:00Z',
+                                         fetch=lambda _: {'status': 'unavailable'}, discovery=request,
+                                         discover=refresh.account_discovery(helper, str(binary), 10))
             self.assertEqual(calls, ['/v1/models'])
             self.assertEqual(report['account_discovery'][0]['models'],
                              [{'model_id': 'local-served-model', 'release': {'status': 'unknown'}}])
+            self.assertNotIn('1788998400', json.dumps(report))
         finally:
             server.shutdown()
             thread.join()

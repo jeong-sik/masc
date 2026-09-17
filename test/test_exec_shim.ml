@@ -1,8 +1,10 @@
 open Alcotest
 
-(* Pure-core tests for the masc-exec-shim library (Phase 1 SSH remote
-   execution lane, spec §4.2).  No real signals, no fork: the kill policy
-   and status mapping are asserted as pure decisions. *)
+(* Tests for the masc-exec-shim library (Phase 1 SSH remote execution lane,
+   spec §4.2).  The kill policy and status mapping are asserted as pure
+   decisions, with no real signals.  Config and env file tests read real files
+   in temporary directories; the FIFO case reads in a forked child under an
+   alarm, so a read that blocks fails the test instead of hanging it. *)
 
 let show_kill_action = function
   | Exec_shim.Sigterm_pgid -> "Sigterm_pgid"

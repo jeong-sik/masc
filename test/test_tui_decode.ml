@@ -5920,8 +5920,6 @@ let runtime_resolved_json =
               ; ( "runtime_ids"
                 , `List
                     [ `String "ollama_cloud.deepseek"; `String "exact.embed" ] )
-              ; ("preferred_candidate", `Null)
-              ; ("preferred_at_ts", `Null)
               ]
           ] )
     ; ( "assignments"
@@ -6089,15 +6087,13 @@ let resolved_runtime id provider model =
     ; "is_default", `Bool false
     ]
 
-let runtime_lane ?(preferred = None) ?(preferred_at = None) id runtime_ids =
+let runtime_lane id runtime_ids =
   `Assoc
     [ "id", `String id
     ; "runtime_ids", `List (List.map (fun runtime_id -> `String runtime_id) runtime_ids)
-    ; "preferred_candidate", (match preferred with Some value -> `String value | None -> `Null)
-    ; "preferred_at_ts", (match preferred_at with Some value -> `Float value | None -> `Null)
     ]
 
-let runtime_resolved_surface_json ?(broken_preference = false) () =
+let runtime_resolved_surface_json () =
   let runtime_a = resolved_runtime "runtime-a" "Resolved A" "model-a" in
   let runtimes =
     [ runtime_a
@@ -6106,7 +6102,6 @@ let runtime_resolved_surface_json ?(broken_preference = false) () =
     ; resolved_runtime "runtime-d" "Resolved D" "model-d"
     ]
   in
-  let preferred_at = if broken_preference then None else Some 1787566700.0 in
   `Assoc
     [ "generated_at_iso", `String "2026-08-24T10:20:02Z"
     ; "source", `String "/api/v1/runtime/resolved"
@@ -6115,8 +6110,7 @@ let runtime_resolved_surface_json ?(broken_preference = false) () =
     ; "runtimes", `List runtimes
     ; ( "lanes"
       , `List
-          [ runtime_lane ~preferred:(Some "runtime-b") ~preferred_at
-              "primary" [ "runtime-a"; "runtime-b" ]
+          [ runtime_lane "primary" [ "runtime-a"; "runtime-b" ]
           ; runtime_lane "degraded" [ "runtime-c" ]
           ; runtime_lane "unobserved" [ "runtime-d" ]
           ] )
@@ -6151,13 +6145,11 @@ let test_decode_and_join_runtime_surface () =
                 probe.rps_refresh_state)
        | None -> Alcotest.fail "fixture probe became unavailable");
       (match snapshot.rss_candidates with
-       | first :: preferred :: failed :: unobserved :: [] ->
+       | first :: second :: failed :: unobserved :: [] ->
            Alcotest.(check string) "lane order" "primary" first.rcr_lane_id;
-           Alcotest.(check int) "candidate position" 2 preferred.rcr_position;
+           Alcotest.(check int) "candidate position" 2 second.rcr_position;
            Alcotest.(check string) "resolved provider wins" "Resolved A"
              first.rcr_runtime.ro_provider;
-           Alcotest.(check (option (float 0.001))) "last success stays typed"
-             (Some 1787566700.0) preferred.rcr_preferred_at_ts;
            (match failed.rcr_probe with
             | Some row ->
                 Alcotest.(check string) "failure kind" "network_error"
@@ -6324,14 +6316,6 @@ let test_runtime_default_limits_must_match_listed_row () =
      "max_context_source", `String "capability";
      "max_output_tokens", `Null;
      "is_local", `Bool true]
-
-let test_runtime_resolved_rejects_half_preference () =
-  match
-    Tui_decode.decode_runtime_resolved_snapshot
-      (runtime_resolved_surface_json ~broken_preference:true ())
-  with
-  | Ok _ -> Alcotest.fail "preferred candidate without its timestamp decoded"
-  | Error _ -> ()
 
 let test_runtime_surface_keeps_resolved_rows_without_a_probe () =
   match
@@ -9038,8 +9022,6 @@ let () =
           test_runtime_limits_reject_unknown_or_invalid_values
       ; Alcotest.test_case "default limits match listed runtime" `Quick
           test_runtime_default_limits_must_match_listed_row
-      ; Alcotest.test_case "rejects half a sticky preference" `Quick
-          test_runtime_resolved_rejects_half_preference
       ; Alcotest.test_case "keeps resolved rows without a probe" `Quick
           test_runtime_surface_keeps_resolved_rows_without_a_probe
       ] );

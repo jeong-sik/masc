@@ -1817,8 +1817,8 @@ let max_context_of_runtime (rt : t) : int =
 (* Resolve a keeper assignment to a lane. Declared lanes are preferred so a lane
    id can shadow a runtime id (lanes are explicit operator routing constructs).
    An assignment naming a bare runtime gets a lane of its own rather than a
-   bare dispatch target: the lane id is what keys sticky preference and quota
-   demotion, so without one those mechanisms are simply off for that keeper.
+   bare dispatch target: the lane is what carries failover and quota demotion,
+   so without one those mechanisms are simply off for that keeper.
    [Unavailable] retains a configured ID whose capability catalog entry is
    absent; [Missing] means no configured lane or runtime has that ID. *)
 let resolve_assignment (assigned_id : string) =

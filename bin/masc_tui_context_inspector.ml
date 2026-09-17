@@ -105,16 +105,9 @@ type forecast_place =
   ; rest : forecast_rest
   }
 
-type forecast_preferred =
-  { preferred_runtime_id : string
-  ; noted_at : float
-  ; ttl_s : float
-  }
-
 type forecast_walk =
   { lane_id : string
   ; declared : string list
-  ; preferred : forecast_preferred option
   }
 
 type forecast_candidate =
@@ -595,7 +588,7 @@ let format_tokens tokens =
   else if tokens >= 1_000 then Printf.sprintf "%.1fk" (float tokens /. 1_000.)
   else string_of_int tokens
 
-let forecast_schema = "masc.keeper.next-request-forecast.v4"
+let forecast_schema = "masc.keeper.next-request-forecast.v5"
 
 let nonnegative_float name = function
   | `Float value when Float.is_finite value && value >= 0. -> Ok value
@@ -636,18 +629,6 @@ let decode_forecast_place = function
     Ok { walks_at; declared_at; rest }
   | _ -> Error "place is not an object"
 
-let decode_forecast_preferred = function
-  | `Null -> Ok None
-  | `Assoc fields ->
-    let* id_json = field "runtime_id" fields in
-    let* preferred_runtime_id = nonempty_string "preferred.runtime_id" id_json in
-    let* noted_json = field "noted_at" fields in
-    let* noted_at = nonnegative_float "preferred.noted_at" noted_json in
-    let* ttl_json = field "ttl_s" fields in
-    let* ttl_s = nonnegative_float "preferred.ttl_s" ttl_json in
-    Ok (Some { preferred_runtime_id; noted_at; ttl_s })
-  | _ -> Error "preferred is not an object or null"
-
 let decode_forecast_walk = function
   | `Assoc fields when List.mem_assoc "refusal" fields ->
     let* refusal_json = field "refusal" fields in
@@ -669,9 +650,7 @@ let decode_forecast_walk = function
         loop [] items
       | _ -> Error "walk.declared is not a list"
     in
-    let* preferred_json = field "preferred" fields in
-    let* preferred = decode_forecast_preferred preferred_json in
-    Ok (Ok { lane_id; declared; preferred })
+    Ok (Ok { lane_id; declared })
   | _ -> Error "walk is not an object"
 
 let decode_forecast_lane = function

@@ -1308,10 +1308,10 @@ let run_keeper_cycle
                   (* [final_execution.runtime_id] names the deferred-lane
                      assignment this cycle was budgeted under, not
                      necessarily the concrete candidate
-                     [attempt_runtime_candidates] dispatched:
-                     [Runtime_lane_preference] sticky ordering can route a
-                     lane keyed by one runtime id to a different candidate
-                     first. [keeper_cycle_failed_runtime_attribution] takes
+                     [attempt_runtime_candidates] dispatched: a lane keyed by
+                     one runtime id walks a different candidate first when
+                     the head rests or a deferred suffix starts elsewhere.
+                     [keeper_cycle_failed_runtime_attribution] takes
                      [runtime=] from the last dispatched entry of
                      [turn_state.runtime_attempt_errors] (never from a
                      pre-dispatch refusal and never from the execution

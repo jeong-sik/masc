@@ -215,8 +215,6 @@ describe('FleetRotationSection (fl-rot-*)', () => {
       {
         id: 'lane-main',
         runtime_ids: ['claude/main', 'codex/main', 'local/gguf'],
-        preferred_candidate: 'codex/main',
-        preferred_at_ts: 1_700_000_000,
       },
     ],
     assignments: [
@@ -258,8 +256,7 @@ describe('FleetRotationSection (fl-rot-*)', () => {
     expect(cands[0]?.classList.contains('head')).toBe(true)
     expect(cands[1]?.classList.contains('cur')).toBe(true)
     expect(container.querySelectorAll('.fl-rot-arr')).toHaveLength(2)
-    expect(container.querySelector('.fl-rot-note')?.textContent)
-      .toContain('codex/main')
+    expect(container.querySelector('.fl-rot-note')).toBeNull()
     expect(container.querySelector('.fl-as-tag')?.textContent).toBe('후보 3')
   })
 

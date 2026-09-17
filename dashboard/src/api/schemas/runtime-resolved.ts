@@ -46,12 +46,8 @@ const RuntimeResolutionSchema = object({
 
 const RuntimeLaneSchema = object({
   id: string(),
+  // The lane as declared, head first: the order a fresh cycle walks.
   runtime_ids: array(string()),
-  // Sticky failover preference (Runtime_lane_preference): the last-good
-  // candidate the lane tries first, plus when it was recorded (epoch seconds).
-  // Both null when nothing is remembered or the entry expired.
-  preferred_candidate: nullable(string()),
-  preferred_at_ts: nullable(number()),
 })
 
 const ResolvedAssignmentTargetSchema = union([

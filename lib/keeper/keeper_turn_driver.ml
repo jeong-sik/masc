@@ -290,13 +290,12 @@ let deferred_lane_rest ~now hint =
 ;;
 
 (* A fresh walk of an assignment, ordered as [run_named] orders a turn without
-   a deferred suffix: sticky preference, then quota and backpressure demotion.
-   An id that names no lane or runtime is its own single candidate. *)
+   a deferred suffix: the lane as declared, then quota and backpressure
+   demotion. *)
 type walk_order =
   { lane_id : string
   ; declared : string list
   ; order : string list
-  ; preferred : (string * float) option
   }
 
 type assignment_refusal =
@@ -314,15 +313,7 @@ let assignment_walk_order ~now assignment_id =
   | `Lane lane ->
     let lane_id = Runtime_lane.id lane in
     let declared = Runtime_lane.ordered_candidates lane in
-    let preferred_first, preferred =
-      Runtime_lane_preference.prefer_order_with ~lane_id declared
-    in
-    Ok
-      { lane_id
-      ; declared
-      ; order = quota_ordered_runtime_ids ~now preferred_first
-      ; preferred
-      }
+    Ok { lane_id; declared; order = quota_ordered_runtime_ids ~now declared }
   | `Unavailable missing -> Error (Catalog_unavailable missing)
   | `Missing -> Error Assignment_missing
 ;;
@@ -501,21 +492,11 @@ let lane_should_retry
     | Some http_err -> Runtime_attempt_fsm.should_try_next http_err
     | None -> false
 
-(* Whether a runtime is one of the lane's own declared candidates.
-   [Runtime_lane_preference.prefer_order] reorders the list it is given, which
-   for a lane is that lane's candidates, so a preference naming a runtime
-   outside them promotes nothing. *)
-let lane_declares ~lane_id runtime_id =
-  match Runtime.get_lane_by_id lane_id with
-  | None -> false
-  | Some lane -> List.mem runtime_id (Runtime_lane.ordered_candidates lane)
-
 let attempt_runtime_candidates
     ?(pre_tool_rejects = ref [])
     ?(allow_retry = fun ~runtime_id:_ ~attempt:_ _error -> true)
     ?(allow_accept_no_progress_retry = fun ~runtime_id:_ ~attempt:_ _error ->
       true)
-    ?lane_id
     ?(on_retry_deferred = fun _ -> ())
     ?(on_attempt_error = fun ~runtime_id:_ ~attempt:_ ~dispatch:_ _error -> ())
     ?(on_lane_terminal_error = fun (_ : lane_terminal_error) -> ())
@@ -712,25 +693,6 @@ let attempt_runtime_candidates
          ~status:"completed"
          ~decision:(runtime_attempt_decision ~idx ~runtime_id:attempt_runtime_id)
          Keeper_runtime_manifest.Runtime_completed;
-       (* Sticky failover: remember the winning candidate so later turns on
-          this lane start from it (idx 0 or a failover success alike).
-
-          Only a candidate the lane declares. The media walk reaches past
-          the lane into media_failover, and a winner from out there cannot
-          be remembered for this lane: [prefer_order] would find it in no lane list and
-          promote nothing, while the record has already replaced the last
-          in-lane success. The next text turn then starts from the declared
-          head again, and if that head is the one that was failing, it
-          fails again every turn (#34823).
-
-          A lane_id naming no configured lane records nothing either. There
-          is no candidate list for [prefer_order] to reorder, so the entry
-          could never be read. *)
-       (match lane_id with
-        | Some lane_id when lane_declares ~lane_id attempt_runtime_id ->
-          Runtime_lane_preference.note_success ~lane_id
-            ~candidate:attempt_runtime_id
-        | Some _ | None -> ());
        Option.iter
          (fun candidate -> Runtime_lane_preference.note_candidate_success ~candidate)
          attempt_candidate_preference;
@@ -1412,9 +1374,9 @@ let run_named
     | _ -> ()
   in
   (* Lanes shadow runtimes: a lane id takes precedence over a runtime id so
-     operators can route through explicit failover groups.  Lane candidate
-     order passes through the sticky last-good preference so a known-healthy
-     failover candidate is tried before re-hitting a dead head candidate. *)
+     operators can route through explicit failover groups. The order is the
+     declaration's; a resting or exhausted candidate is demoted behind its
+     siblings, never remembered as a preference. *)
   (* Quota/backpressure demotion is ordering only — a demoted candidate is still
      attempted when the lane has nothing else (RFC-0370 §3.3). Apply it while
      selecting a fresh lane walk. A deferred suffix was already frozen before
@@ -1432,24 +1394,17 @@ let run_named
       ~now:(Unix.gettimeofday ())
       candidates
   in
-  let* lane_id_opt, lane_candidate_ids =
+  let* lane_candidate_ids =
     match output_contract, deferred_runtime_lane with
-    | Tool_verdict, _ -> Ok (None, [runtime_id])
-    | Provider_default, Some hint ->
-      Ok (Some hint.assignment_id, deferred_runtime_ids hint)
+    | Tool_verdict, _ -> Ok [runtime_id]
+    | Provider_default, Some hint -> Ok (deferred_runtime_ids hint)
     | Provider_default, None ->
       (match Runtime.resolve_assignment runtime_id with
-       | `Missing -> Ok (None, [])
+       | `Missing -> Ok []
        | `Unavailable missing ->
          Error (Runtime_agent_core_runner.runtime_catalog_error_to_core_error
            ("Capability catalog entry unavailable: " ^ Runtime.missing_catalog_model_to_string missing))
-       | `Lane lane ->
-         let lane_id = Runtime_lane.id lane in
-         Ok
-           ( Some lane_id
-           , Runtime_lane_preference.prefer_order ~lane_id
-               (Runtime_lane.ordered_candidates lane)
-             |> demote_quota_exhausted ))
+       | `Lane lane -> Ok (Runtime_lane.ordered_candidates lane |> demote_quota_exhausted))
   in
   if lane_candidate_ids = []
   then
@@ -1592,20 +1547,9 @@ let run_named
       project ~mode blocks
   in
   (* Sequential candidate attempt loop. On failure we record a manifest row and
-     move to the next candidate; on success we record completion and return.
-     Modality reroutes are capability routing decisions, not provider-failure
-     discoveries.  Do not let a media-only reroute update the lane-global
-     sticky failover preference; otherwise one keeper can pin unrelated later
-     text-only turns to a less-trusted fallback for the preference TTL. *)
-  let sticky_lane_id =
-    match reroute_decision with
-    | Runtime_agent.Reroute _ -> None
-    | Runtime_agent.No_reroute_needed | Runtime_agent.No_capable_runtime _ ->
-      lane_id_opt
-  in
+     move to the next candidate; on success we record completion and return. *)
   attempt_runtime_candidates
     ~pre_tool_rejects
-    ?lane_id:sticky_lane_id
     ?on_retry_deferred:on_runtime_retry_deferred
     ?on_attempt_error:on_runtime_attempt_error
     ?on_lane_terminal_error:on_runtime_lane_terminal_error

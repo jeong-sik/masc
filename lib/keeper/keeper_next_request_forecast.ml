@@ -97,16 +97,9 @@ type place =
   ; rest : Keeper_turn_driver.path_rest
   }
 
-type preferred =
-  { preferred_runtime_id : string
-  ; noted_at : float
-  ; ttl_s : float
-  }
-
 type walk =
   { lane_id : string
   ; declared : string list
-  ; preferred : preferred option
   }
 
 type walk_refusal = Keeper_turn_driver.assignment_refusal
@@ -449,9 +442,6 @@ let forecast ~config ~keeper_name =
          Runtime_model_input_tail_window.annotate messages
        in
        let assignment_id = Keeper_meta_contract.runtime_id_of_meta meta in
-       (* The lane preference observes its own clock inside
-          [assignment_walk_order]; this read serves the quota order and the
-          rests, as the driver's own walk takes it. *)
        (* NDT-OK: one wall-clock read at the boundary, compared with stored expiries. *)
        let now = Unix.gettimeofday () in
        let records, records_read = records_of_store ~config ~keeper_name in
@@ -466,19 +456,8 @@ let forecast ~config ~keeper_name =
        let walk, candidates =
          match Keeper_turn_driver.assignment_walk_order ~now assignment_id with
          | Error refusal -> Error refusal, []
-         | Ok { Keeper_turn_driver.lane_id; declared; order; preferred } ->
-           ( Ok
-               { lane_id
-               ; declared
-               ; preferred =
-                   Option.map
-                     (fun (preferred_runtime_id, noted_at) ->
-                        { preferred_runtime_id
-                        ; noted_at
-                        ; ttl_s = Runtime_lane_preference.ttl_s ()
-                        })
-                     preferred
-               }
+         | Ok { Keeper_turn_driver.lane_id; declared; order } ->
+           ( Ok { lane_id; declared }
            , List.mapi
                (fun walks_at runtime_id ->
                   candidate
@@ -607,21 +586,12 @@ let walk_to_json (walk : walk) =
   `Assoc
     [ "lane_id", `String walk.lane_id
     ; "declared", `List (List.map (fun id -> `String id) walk.declared)
-    ; ( "preferred"
-      , option_json
-          (fun (preferred : preferred) ->
-             `Assoc
-               [ "runtime_id", `String preferred.preferred_runtime_id
-               ; "noted_at", `Float preferred.noted_at
-               ; "ttl_s", `Float preferred.ttl_s
-               ])
-          walk.preferred )
     ]
 ;;
 
 let to_json forecast =
   `Assoc
-    [ "schema", `String "masc.keeper.next-request-forecast.v4"
+    [ "schema", `String "masc.keeper.next-request-forecast.v5"
     ; "keeper", `String forecast.keeper
     ; "trace_id", `String forecast.trace_id
     ; "checkpoint_messages", `Int forecast.checkpoint_messages

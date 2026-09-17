@@ -1,157 +1,8 @@
-(** Unit tests for Runtime_lane_preference — sticky lane candidate ordering.
+(** Unit tests for Runtime_lane_preference — a candidate's observed
+    backpressure. The pure state functions take their clock as an argument;
+    nothing here reads the process clock. *)
 
-    Each case resets the process-local table first; the TTL case shrinks
-    [MASC_LANE_PREFERENCE_TTL_S] via env (re-read per call) instead of
-    injecting a clock. *)
-
-let candidates = [ "alpha"; "beta"; "gamma" ]
 module State = Runtime_lane_preference_state
-
-let test_state_active_preference_reorders () =
-  let state =
-    State.remember ~lane_id:"lane-1" ~candidate:"beta" ~noted_at:10.0 State.empty
-  in
-  let _, observation = State.observe ~now:12.0 ~ttl_s:5.0 ~lane_id:"lane-1" state in
-  Alcotest.(check (list string))
-    "active candidate leads"
-    [ "beta"; "alpha"; "gamma" ]
-    (State.reorder observation candidates);
-  Alcotest.(check (option (pair string (float 0.001))))
-    "active diagnostics retain timestamp"
-    (Some ("beta", 10.0))
-    (State.preferred observation)
-;;
-
-let test_state_expiry_is_explicit_and_pruned () =
-  let state =
-    State.remember ~lane_id:"lane-1" ~candidate:"beta" ~noted_at:10.0 State.empty
-  in
-  let pruned, first = State.observe ~now:15.0 ~ttl_s:5.0 ~lane_id:"lane-1" state in
-  (match first with
-   | State.Expired_preference -> ()
-   | State.No_preference | State.Active_preference _ ->
-     Alcotest.fail "expiry was not represented explicitly");
-  let _, second =
-    State.observe ~now:15.0 ~ttl_s:5.0 ~lane_id:"lane-1" pruned
-  in
-  match second with
-  | State.No_preference -> ()
-  | State.Expired_preference | State.Active_preference _ ->
-    Alcotest.fail "expired preference was not pruned"
-;;
-
-let test_state_zero_ttl_disables_stickiness () =
-  let state =
-    State.remember ~lane_id:"lane-1" ~candidate:"beta" ~noted_at:11.0 State.empty
-  in
-  let _, observation = State.observe ~now:10.0 ~ttl_s:0.0 ~lane_id:"lane-1" state in
-  match observation with
-  | State.Expired_preference -> ()
-  | State.No_preference | State.Active_preference _ ->
-    Alcotest.fail "zero TTL retained an active preference"
-;;
-
-let test_state_delayed_older_success_cannot_replace_latest () =
-  let state =
-    State.empty
-    |> State.remember ~lane_id:"lane-1" ~candidate:"beta" ~noted_at:11.0
-    |> State.remember ~lane_id:"lane-1" ~candidate:"alpha" ~noted_at:10.0
-  in
-  let _, observation = State.observe ~now:12.0 ~ttl_s:5.0 ~lane_id:"lane-1" state in
-  Alcotest.(check (option (pair string (float 0.001))))
-    "newer success remains authoritative"
-    (Some ("beta", 11.0))
-    (State.preferred observation)
-;;
-
-let test_identity_without_state () =
-  Runtime_lane_preference.reset_for_testing ();
-  Alcotest.(check (list string)) "no state keeps declared order" candidates
-    (Runtime_lane_preference.prefer_order ~lane_id:"lane-1" candidates)
-
-let test_preferred_first_after_success () =
-  Runtime_lane_preference.reset_for_testing ();
-  Runtime_lane_preference.note_success ~lane_id:"lane-1" ~candidate:"beta";
-  Alcotest.(check (list string)) "remembered candidate leads"
-    [ "beta"; "alpha"; "gamma" ]
-    (Runtime_lane_preference.prefer_order ~lane_id:"lane-1" candidates)
-
-let test_success_on_head_is_harmless () =
-  Runtime_lane_preference.reset_for_testing ();
-  Runtime_lane_preference.note_success ~lane_id:"lane-1" ~candidate:"alpha";
-  Alcotest.(check (list string)) "head success keeps declared order"
-    candidates
-    (Runtime_lane_preference.prefer_order ~lane_id:"lane-1" candidates)
-
-let test_lane_isolation () =
-  Runtime_lane_preference.reset_for_testing ();
-  Runtime_lane_preference.note_success ~lane_id:"lane-1" ~candidate:"beta";
-  Alcotest.(check (list string)) "other lane unaffected" candidates
-    (Runtime_lane_preference.prefer_order ~lane_id:"lane-2" candidates)
-
-let test_non_member_ignored () =
-  Runtime_lane_preference.reset_for_testing ();
-  Runtime_lane_preference.note_success ~lane_id:"lane-1" ~candidate:"gone";
-  Alcotest.(check (list string)) "non-member remembered id keeps order"
-    candidates
-    (Runtime_lane_preference.prefer_order ~lane_id:"lane-1" candidates)
-
-let test_ttl_expiry_restores_order () =
-  Runtime_lane_preference.reset_for_testing ();
-  Unix.putenv "MASC_LANE_PREFERENCE_TTL_S" "0.05";
-  Fun.protect
-    ~finally:(fun () -> Unix.putenv "MASC_LANE_PREFERENCE_TTL_S" "")
-    (fun () ->
-      Alcotest.(check (float 0.001)) "env ttl applies" 0.05
-        (Runtime_lane_preference.ttl_s ());
-      Runtime_lane_preference.note_success ~lane_id:"lane-1" ~candidate:"beta";
-      Alcotest.(check (list string)) "fresh entry leads"
-        [ "beta"; "alpha"; "gamma" ]
-        (Runtime_lane_preference.prefer_order ~lane_id:"lane-1" candidates);
-      Unix.sleepf 0.1;
-      Alcotest.(check (list string)) "expired entry restores declared order"
-        candidates
-        (Runtime_lane_preference.prefer_order ~lane_id:"lane-1" candidates))
-
-let test_preferred_of_lane_none_without_state () =
-  Runtime_lane_preference.reset_for_testing ();
-  Alcotest.(check (option (pair string (float 0.001)))) "no state -> None" None
-    (Runtime_lane_preference.preferred_of_lane ~lane_id:"lane-1")
-
-let test_preferred_of_lane_returns_candidate_and_ts () =
-  Runtime_lane_preference.reset_for_testing ();
-  let before = Unix.gettimeofday () in
-  Runtime_lane_preference.note_success ~lane_id:"lane-1" ~candidate:"beta";
-  let after = Unix.gettimeofday () in
-  match Runtime_lane_preference.preferred_of_lane ~lane_id:"lane-1" with
-  | Some (candidate, noted_at) ->
-    Alcotest.(check string) "remembered candidate" "beta" candidate;
-    Alcotest.(check bool) "ts stamped at note time" true
-      (Float.compare noted_at before >= 0 && Float.compare noted_at after <= 0)
-  | None -> Alcotest.fail "expected sticky preference"
-
-let test_preferred_of_lane_isolation () =
-  Runtime_lane_preference.reset_for_testing ();
-  Runtime_lane_preference.note_success ~lane_id:"lane-1" ~candidate:"beta";
-  Alcotest.(check (option (pair string (float 0.001)))) "other lane -> None"
-    None
-    (Runtime_lane_preference.preferred_of_lane ~lane_id:"lane-2")
-
-let test_preferred_of_lane_expires () =
-  Runtime_lane_preference.reset_for_testing ();
-  Unix.putenv "MASC_LANE_PREFERENCE_TTL_S" "0.05";
-  Fun.protect
-    ~finally:(fun () -> Unix.putenv "MASC_LANE_PREFERENCE_TTL_S" "")
-    (fun () ->
-      Runtime_lane_preference.note_success ~lane_id:"lane-1" ~candidate:"beta";
-      (match Runtime_lane_preference.preferred_of_lane ~lane_id:"lane-1" with
-       | Some (candidate, _) ->
-         Alcotest.(check string) "fresh entry visible" "beta" candidate
-       | None -> Alcotest.fail "expected fresh sticky preference");
-      Unix.sleepf 0.1;
-      Alcotest.(check (option (pair string (float 0.001)))) "expired -> None"
-        None
-        (Runtime_lane_preference.preferred_of_lane ~lane_id:"lane-1"))
 
 let test_rate_limit_hint_expires_exactly () =
   let noted = State.note_rate_limit ~noted_at:10. ~retry_after:(Some 5.) None in
@@ -187,6 +38,26 @@ let test_rate_limit_delayed_observation_keeps_newer_hint () =
     (Option.is_none (State.observe_rate_limit ~now:23. delayed))
 ;;
 
+(* The cell on a materialized candidate: a rate limit is held until its hint
+   elapses or a success clears it; a success on a clear cell changes nothing. *)
+let test_a_candidate_cell_holds_the_observation_until_success () =
+  let candidate =
+    Runtime_lane_preference.create_candidate
+      ~binding:(Runtime_lane_preference.Http_binding_unavailable "fixture")
+  in
+  Alcotest.(check bool) "fresh cell observes nothing" true
+    (Option.is_none
+       (Runtime_lane_preference.candidate_backpressure ~now:0. ~candidate));
+  Runtime_lane_preference.note_rate_limit ~candidate ~retry_after:None;
+  Alcotest.(check bool) "a no-hint rate limit is held" true
+    (Option.is_some
+       (Runtime_lane_preference.candidate_backpressure ~now:1e12 ~candidate));
+  Runtime_lane_preference.note_candidate_success ~candidate;
+  Alcotest.(check bool) "a success clears it" true
+    (Option.is_none
+       (Runtime_lane_preference.candidate_backpressure ~now:1e12 ~candidate))
+;;
+
 let () =
   Alcotest.run "runtime_lane_preference"
     [ ( "candidate backpressure"
@@ -198,45 +69,7 @@ let () =
             test_rate_limit_invalid_hints_do_not_create_deadlines
         ; Alcotest.test_case "delayed observation retains newer hint" `Quick
             test_rate_limit_delayed_observation_keeps_newer_hint
-        ])
-    ; ( "state"
-      , [ Alcotest.test_case
-            "active preference reorders"
-            `Quick
-            test_state_active_preference_reorders
-        ; Alcotest.test_case
-            "expiry is explicit and pruned"
-            `Quick
-            test_state_expiry_is_explicit_and_pruned
-        ; Alcotest.test_case
-            "zero TTL disables stickiness"
-            `Quick
-            test_state_zero_ttl_disables_stickiness
-        ; Alcotest.test_case
-            "delayed older success cannot replace latest"
-            `Quick
-            test_state_delayed_older_success_cannot_replace_latest
-        ] )
-    ; ( "prefer_order"
-      , [ Alcotest.test_case "identity without state" `Quick
-            test_identity_without_state
-        ; Alcotest.test_case "remembered candidate first" `Quick
-            test_preferred_first_after_success
-        ; Alcotest.test_case "head success harmless" `Quick
-            test_success_on_head_is_harmless
-        ; Alcotest.test_case "lane isolation" `Quick test_lane_isolation
-        ; Alcotest.test_case "non-member ignored" `Quick test_non_member_ignored
-        ; Alcotest.test_case "ttl expiry restores order" `Quick
-            test_ttl_expiry_restores_order
-        ] )
-    ; ( "preferred_of_lane"
-      , [ Alcotest.test_case "none without state" `Quick
-            test_preferred_of_lane_none_without_state
-        ; Alcotest.test_case "candidate and ts" `Quick
-            test_preferred_of_lane_returns_candidate_and_ts
-        ; Alcotest.test_case "lane isolation" `Quick
-            test_preferred_of_lane_isolation
-        ; Alcotest.test_case "ttl expiry hides entry" `Quick
-            test_preferred_of_lane_expires
+        ; Alcotest.test_case "a candidate cell holds the observation until success" `Quick
+            test_a_candidate_cell_holds_the_observation_until_success
         ] )
     ]

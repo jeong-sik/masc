@@ -560,8 +560,8 @@ val get_lane_by_id : string -> Runtime_lane.t option
 val resolve_assignment :
   string -> [ `Lane of Runtime_lane.t | `Unavailable of missing_catalog_model | `Missing ]
 (** Resolve a keeper assignment id to a lane. Declared lanes shadow runtimes;
-    an id naming a bare runtime gets a lane of its own, because the lane id is
-    what keys sticky candidate preference and quota demotion. Every lane ends
+    an id naming a bare runtime gets a lane of its own, because the lane is
+    what carries failover and quota demotion. Every lane ends
     at [\[runtime\].default], so a walk always has a next candidate.
     [Unavailable] preserves the configured identity when its capability catalog
     entry is absent. [Missing] means the id was not configured. Neither selects

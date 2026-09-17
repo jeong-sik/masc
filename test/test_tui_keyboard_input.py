@@ -11816,20 +11816,14 @@ def runtime_resolved_response() -> HttpResponse:
                 {
                     "id": "primary",
                     "runtime_ids": ["runtime-a", "runtime-b"],
-                    "preferred_candidate": "runtime-b",
-                    "preferred_at_ts": 1787566700.0,
                 },
                 {
                     "id": "degraded",
                     "runtime_ids": ["runtime-c"],
-                    "preferred_candidate": None,
-                    "preferred_at_ts": None,
                 },
                 {
                     "id": "unobserved",
                     "runtime_ids": ["runtime-d"],
-                    "preferred_candidate": None,
-                    "preferred_at_ts": None,
                 },
             ],
             "assignments": [
@@ -11947,10 +11941,9 @@ def runtime_surface_interaction(
                 "Resolved A / model-a",
                 "ready / reachable",
                 "CLI not probed",
-                # #36155 renamed this half: the timestamp beside "active" is
-                # the last success, and "sticky since" claimed a point the
-                # stickiness never ran from.
-                "active (last success",
+                # The lane fact says why this candidate is the one the lane
+                # walks: head, fallback #n, or single candidate.
+                "fallback #1",
                 "unobserved",
                 "single candidate",
                 # A fallback row's lane cell is a word this renderer wrote,
@@ -11971,8 +11964,10 @@ def runtime_surface_interaction(
                 )
             # Cut from the middle, the cell kept the half that says nothing:
             # "\u2514\u2026ack #1". A lane id is told apart by its tail and keeps the
-            # middle cut; a label is told apart by its head.
-            if "ack #" in stale_plain:
+            # middle cut; a label is told apart by its head. The detail column
+            # spells "fallback #1" whole, so only the ellipsis-led form is the
+            # cut one.
+            if "\u2026ack #" in stale_plain:
                 raise AssertionError(
                     f"Runtime cut a fallback label from its middle: {stale_plain!r}"
                 )

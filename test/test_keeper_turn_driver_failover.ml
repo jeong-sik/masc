@@ -481,33 +481,20 @@ let test_lanes_accessor_returns_declared_lanes () =
         (Runtime_lane.id lane)
     | _ -> Alcotest.fail "expected exactly one lane")
 
-(* The order the forecast shows is the order the walk takes: the sticky
-   last-good candidate first, read from the same observation, and the
-   declared order once nothing is remembered. *)
-let test_assignment_walk_order_puts_the_sticky_candidate_first () =
+(* The order the forecast shows is the order the walk takes: the declared
+   order, demoted only by quota and backpressure. Nothing is remembered from
+   an earlier success, so a lane always starts from its head (#36858). *)
+let test_assignment_walk_order_is_the_declared_order () =
   with_runtime_config runtime_toml_with_lane (fun () ->
-    Runtime_lane_preference.reset_for_testing ();
-    Fun.protect ~finally:Runtime_lane_preference.reset_for_testing (fun () ->
-      let now = Unix.gettimeofday () in
-      (match Driver.assignment_walk_order ~now "resilient" with
-       | Error _ -> Alcotest.fail "the lane resolves"
-       | Ok walk ->
-         Alcotest.(check (list string)) "nothing remembered: the declared order"
-           [ "primary.test_model"; "fallback.test_model" ] walk.Driver.order;
-         Alcotest.(check bool) "and no preferred candidate" true
-           (Option.is_none walk.Driver.preferred));
-      Runtime_lane_preference.note_success ~lane_id:"resilient"
-        ~candidate:"fallback.test_model";
-      match Driver.assignment_walk_order ~now "resilient" with
-      | Error _ -> Alcotest.fail "the lane resolves"
-      | Ok walk ->
-        Alcotest.(check string) "the lane" "resilient" walk.Driver.lane_id;
-        Alcotest.(check (list string)) "as declared"
-          [ "primary.test_model"; "fallback.test_model" ] walk.Driver.declared;
-        Alcotest.(check (list string)) "the remembered candidate walks first"
-          [ "fallback.test_model"; "primary.test_model" ] walk.Driver.order;
-        Alcotest.(check (option string)) "and is named as the preferred one"
-          (Some "fallback.test_model") (Option.map fst walk.Driver.preferred)))
+    let now = Unix.gettimeofday () in
+    match Driver.assignment_walk_order ~now "resilient" with
+    | Error _ -> Alcotest.fail "the lane resolves"
+    | Ok walk ->
+      Alcotest.(check string) "the lane" "resilient" walk.Driver.lane_id;
+      Alcotest.(check (list string)) "as declared"
+        [ "primary.test_model"; "fallback.test_model" ] walk.Driver.declared;
+      Alcotest.(check (list string)) "the walk is the declared order"
+        [ "primary.test_model"; "fallback.test_model" ] walk.Driver.order)
 
 let test_assignment_walk_order_refuses_a_missing_assignment () =
   with_runtime_config runtime_toml_with_lane (fun () ->
@@ -531,7 +518,7 @@ let test_resolve_assignment_prefers_lane_over_runtime () =
         (Runtime_lane.ordered_candidates lane))
 
 (* A keeper assigned to a bare runtime id used to dispatch without a lane, which
-   turned off failover, sticky candidate preference and quota demotion at once.
+   turned off failover and quota demotion at once.
    It now gets a lane of its own that ends at [runtime].default. *)
 let test_bare_runtime_assignment_gets_a_lane_with_somewhere_to_go () =
   with_runtime_config runtime_toml_with_lane (fun () ->
@@ -1775,46 +1762,6 @@ let test_media_turn_starts_from_the_live_walk_head () =
               ~first_runtime:assigned
               ~remaining_runtimes:[ text_only ]))))
 
-(* The media walk reaches past the lane, so a winner can be a runtime the lane
-   does not declare. Recording it for the lane erases the last in-lane success
-   and promotes nothing in its place: prefer_order reorders the lane's own
-   candidates, and the winner is in none of them. The next text turn then
-   starts from the declared head again (#34823). *)
-let test_an_out_of_lane_winner_keeps_the_lanes_own_preference () =
-  with_runtime_config runtime_toml_with_lane (fun () ->
-    Runtime_lane_preference.reset_for_testing ();
-    (* An in-lane success the lane is entitled to keep. *)
-    Runtime_lane_preference.note_success ~lane_id:"resilient"
-      ~candidate:"fallback.test_model";
-    let events = ref [] in
-    let result =
-      Driver.For_testing.attempt_runtime_candidates
-        ~lane_id:"resilient"
-        ~runtime_id:"resilient"
-        ~runtime_id_of:(fun runtime_id -> runtime_id)
-        ~emit_runtime_manifest:(emit_manifest_collector events)
-        ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
-          attempt_without_effect (Ok runtime_id) None)
-        [ "media.out_of_lane_model" ]
-    in
-    (match result with
-     | Ok runtime_id ->
-       Alcotest.(check string)
-         "the out-of-lane candidate served the turn"
-         "media.out_of_lane_model"
-         runtime_id
-     | Error error ->
-       Alcotest.failf "expected candidate success, got %s"
-         (Agent_core.Error.to_string error));
-    match Runtime.get_lane_by_id "resilient" with
-    | None -> Alcotest.fail "expected lane 'resilient' to be configured"
-    | Some lane ->
-      Alcotest.(check (list string))
-        "the in-lane success still leads the lane's order"
-        [ "fallback.test_model"; "primary.test_model" ]
-        (Runtime_lane_preference.prefer_order ~lane_id:"resilient"
-           (Runtime_lane.ordered_candidates lane)))
-
 (* RFC-0440 §3: a 402 belongs to the candidate's account, so the walk moves to
    the next candidate in the same turn and does not call the first one again. *)
 let test_attempt_loop_moves_past_payment_required () =
@@ -2484,10 +2431,9 @@ let quota_lane_candidate id =
 ;;
 
 (* Every quota_lane path starts serving: no candidate observation, no quota
-   window, no sticky preference. *)
+   window. *)
 let reset_quota_lane_rests () =
   Runtime_quota_window.reset_for_testing ();
-  Runtime_lane_preference.reset_for_testing ();
   List.iter
     (fun id ->
        Runtime_lane_preference.note_candidate_success ~candidate:(quota_lane_candidate id))
@@ -2957,34 +2903,32 @@ let test_official_client_does_not_inherit_registry_api_key_scope () =
               ~scope:registry_api_key_scope
               ~now:100.0)))
 
-let test_attempt_loop_without_lane_id_does_not_update_sticky_preference () =
-  Runtime_lane_preference.reset_for_testing ();
-  let events = ref [] in
-  let result =
-    Driver.For_testing.attempt_runtime_candidates
-      ~runtime_id:"resilient"
-      ~runtime_id_of:(fun runtime_id -> runtime_id)
-      ~emit_runtime_manifest:(emit_manifest_collector events)
-      ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
-        attempt_without_effect (Ok runtime_id) None)
-      [ "media.fallback_model" ]
-  in
-  (match result with
-   | Ok runtime_id ->
-     Alcotest.(check string)
-       "rerouted candidate can still serve turn"
-       "media.fallback_model"
-       runtime_id
-   | Error e ->
-     Alcotest.failf
-       "expected candidate success, got %s"
-       (Agent_core.Error.to_string e));
-  Alcotest.(check (list string))
-    "lane preference remains declared order without lane id"
-    [ "primary.text_model"; "media.fallback_model" ]
-    (Runtime_lane_preference.prefer_order
-       ~lane_id:"resilient"
-       [ "primary.text_model"; "media.fallback_model" ])
+(* A success leaves no trace on the walk: the next assignment_walk_order is
+   the declared order whichever candidate served the previous turn. *)
+let test_a_success_leaves_the_next_walk_declared () =
+  with_runtime_config runtime_toml_with_lane (fun () ->
+    let events = ref [] in
+    let result =
+      Driver.For_testing.attempt_runtime_candidates
+        ~runtime_id:"resilient"
+        ~runtime_id_of:(fun runtime_id -> runtime_id)
+        ~emit_runtime_manifest:(emit_manifest_collector events)
+        ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
+          attempt_without_effect (Ok runtime_id) None)
+        [ "fallback.test_model" ]
+    in
+    (match result with
+     | Ok runtime_id ->
+       Alcotest.(check string) "the fallback served the turn"
+         "fallback.test_model" runtime_id
+     | Error e ->
+       Alcotest.failf "expected candidate success, got %s"
+         (Agent_core.Error.to_string e));
+    match Driver.assignment_walk_order ~now:(Unix.gettimeofday ()) "resilient" with
+    | Error _ -> Alcotest.fail "the lane resolves"
+    | Ok walk ->
+      Alcotest.(check (list string)) "the next walk starts from the declared head"
+        [ "primary.test_model"; "fallback.test_model" ] walk.Driver.order)
 
 let test_typed_checkpoint_is_the_same_run_retry_authority () =
   let stages =
@@ -4022,9 +3966,9 @@ let () =
             `Quick
             test_resolve_assignment_prefers_lane_over_runtime;
           Alcotest.test_case
-            "assignment_walk_order puts the sticky candidate first"
+            "assignment_walk_order is the declared order"
             `Quick
-            test_assignment_walk_order_puts_the_sticky_candidate_first;
+            test_assignment_walk_order_is_the_declared_order;
           Alcotest.test_case
             "assignment_walk_order refuses a missing assignment"
             `Quick
@@ -4105,11 +4049,7 @@ let () =
             "attempt loop moves past a 402"
             `Quick
             test_attempt_loop_moves_past_payment_required;
-          Alcotest.test_case
-            "an out-of-lane winner keeps the lane's own preference"
-            `Quick
-            test_an_out_of_lane_winner_keeps_the_lanes_own_preference;
-          Alcotest.test_case
+                    Alcotest.test_case
             "runtime dedupe preserves first occurrence"
             `Quick
             test_runtime_dedupe_preserves_first_occurrence;
@@ -4202,9 +4142,9 @@ let () =
             `Quick
             test_official_client_does_not_inherit_registry_api_key_scope;
           Alcotest.test_case
-            "attempt loop without lane id does not update sticky preference"
+            "a success leaves the next walk declared"
             `Quick
-            test_attempt_loop_without_lane_id_does_not_update_sticky_preference;
+            test_a_success_leaves_the_next_walk_declared;
           Alcotest.test_case
             "typed checkpoint is same-run retry authority"
             `Quick

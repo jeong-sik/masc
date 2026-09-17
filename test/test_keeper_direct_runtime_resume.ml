@@ -22,15 +22,11 @@ let test_http_effect_checkpoint_owner_restart_alternate ?(interleave = false) ?(
   Masc_test_deps.init_eio_clock ~sw env;
   Fs_compat.set_fs env#fs;
   ignore (Server_startup_state.mark_state_ready ());
-  (* Each case declares a fresh primary->alternate scenario. A previous
-     case's successful alternate remains sticky outside Runtime's snapshot. *)
-  Runtime_lane_preference.reset_for_testing ();
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   let catalog_snapshot = Llm_provider.Model_catalog.global () in
   let base_path = Filename.temp_file "direct-runtime-resume-" "" in
   Unix.unlink base_path; Unix.mkdir base_path 0o700;
   Eio.Switch.on_release sw (fun () ->
-    Runtime_lane_preference.reset_for_testing ();
     Runtime.For_testing.restore runtime_snapshot;
     (match catalog_snapshot with None -> Llm_provider.Model_catalog.clear_global ()
      | Some catalog -> Llm_provider.Model_catalog.set_global catalog);

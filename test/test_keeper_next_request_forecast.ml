@@ -381,11 +381,7 @@ let test_the_json_carries_the_walk_and_each_place () =
     ; wake_line_bytes = 131
     ; walk =
         Ok
-          { lane_id = "glm"
-          ; declared = [ "glm"; "claude_code" ]
-          ; preferred =
-              Some { preferred_runtime_id = "claude_code"; noted_at = 56_267.; ttl_s = 3600. }
-          }
+          { lane_id = "glm"; declared = [ "glm"; "claude_code" ] }
     ; candidates =
         [ candidate "claude_code"
             { walks_at = 0; declared_at = Some 1; rest = Keeper_turn_driver.Path_serving }
@@ -401,10 +397,10 @@ let test_the_json_carries_the_walk_and_each_place () =
   in
   let json = Keeper_next_request_forecast.to_json forecast in
   let open Yojson.Safe.Util in
-  Alcotest.(check string) "the schema names the shape" "masc.keeper.next-request-forecast.v4"
+  Alcotest.(check string) "the schema names the shape" "masc.keeper.next-request-forecast.v5"
     (json |> member "schema" |> to_string);
-  Alcotest.(check string) "the preferred candidate rides with the walk" "claude_code"
-    (json |> member "walk" |> member "preferred" |> member "runtime_id" |> to_string);
+  Alcotest.(check string) "the lane rides with the walk" "glm"
+    (json |> member "walk" |> member "lane_id" |> to_string);
   Alcotest.(check (list string)) "the declaration rides in order" [ "glm"; "claude_code" ]
     (json |> member "walk" |> member "declared" |> to_list |> List.map to_string);
   let places = json |> member "candidates" |> to_list |> List.map (member "place") in

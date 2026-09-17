@@ -525,8 +525,13 @@ let test_scoped_boundary_error_stops_immediately () =
              detail =
                Keeper_terminal_effect_detail.Boundary_observation_failed
                  { model_tool_name = "effect"; cause } as detail } } as stop) ->
-         check (option string) "exact failure retained"
-           (Some cause.Keeper_request_failure_core.message) !terminal_error;
+         (* The latch keeps agent-core's rendering; the typed cause keeps the
+            payload, because [category] already says "internal". Same failure
+            text, one without the family prefix. *)
+         check bool "exact failure retained" true
+           (String.ends_with
+              ~suffix:cause.Keeper_request_failure_core.message
+              (Option.value ~default:"" !terminal_error));
          (match Host.host_stop_result ~runtime_id:runtime_label ~model:"fixture"
              ~session_id:"session" ~turn_id:"turn" ~turns_used:1
              ~latency_ms:None ~usage:None stop with

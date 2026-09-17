@@ -29,6 +29,10 @@ COLUMNS = [
     # 표에서 공짜와 구분되지 않는다. 끝에 붙인다 — 기존 컬럼 위치를 읽는
     # 소비자가 있을 수 있다.
     "keeper_cost_unreported_rows",
+    # harbor 의 에이전트 타임아웃이 에피소드를 끊었는지, 그때 keeper 가 실제로
+    # 멈췄는지. masc_state 만으로는 "시간 초과로 끊긴 Running" 과 다른 이유의
+    # Running 이 구분되지 않는다.
+    "interrupted", "keepers_stopped",
 ]
 
 
@@ -69,7 +73,7 @@ def main() -> None:
             out.writerow([
                 trial_dir.parent.name, trial_dir.name.split("__")[0],
                 trial_dir.name, "", "", "", "", "", "", "", "",
-                read_error or "unreadable", "",
+                read_error or "unreadable", "", "", "",
             ])
             continue
         verifier = data.get("verifier_result") or {}
@@ -89,6 +93,8 @@ def main() -> None:
             cell(meta.get("duplicate_tool_calls")),
             cell(meta.get("masc_state")),
             cell((meta.get("keeper_usage") or {}).get("cost_rows_unreported")),
+            cell(meta.get("interrupted")),
+            cell(meta.get("keepers_stopped")),
         ])
 
 

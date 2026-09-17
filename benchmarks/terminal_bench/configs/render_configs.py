@@ -181,6 +181,7 @@ tools-support = true
 streaming = true
 reasoning-effort = "{effort}"
 turn-timeout-s = {turn_timeout_s}
+wall-clock-ceiling-s = {wall_clock_ceiling_s}
 
 [{provider}."{binding_id}"]
 max-concurrent = {max_concurrent}
@@ -213,10 +214,17 @@ OFFICIAL_CLIENT_OVERLAY_TOML = """\
 # embedded AGENT_CORE catalog by api-name (see render_configs.py).
 """
 
-# Per-turn bound for the official client. Production binds opus-5 at max
-# effort with 900s; the bench episode cap (EPISODE_TIMEOUT_SEC=2400) stays the
-# outer bound.
-OFFICIAL_CLIENT_TURN_TIMEOUT_S = 900.0
+# The official client's turn-timeout-s is an idle window: the turn ends when
+# the CLI stream stays silent that long. A keeper waiting on one long tool call
+# (a build, a test suite) is silent for its whole duration, so any value here
+# would cut real work short. 0 removes it (keeper_claude_code_runtime.ml).
+OFFICIAL_CLIENT_TURN_TIMEOUT_S = 0.0
+# The whole-turn ceiling cannot be removed (runtime_toml.ml
+# wall_clock_ceiling_opt_field) and defaults to 14400s
+# (Runtime_wall_clock.default_ceiling_s), half of the 28800s agent timeout
+# every Terminal-Bench 4.0.0 task declares. Set to that timeout, a single turn
+# is bounded by the task's own time and nothing shorter.
+OFFICIAL_CLIENT_WALL_CLOCK_CEILING_S = 28800.0
 CLAUDE_CODE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
 
 OVERLAY_TOML = """\
@@ -430,6 +438,7 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
             binding_id=binding_id,
             protocol=pcfg["protocol"], command=pcfg["command"], effort=effort,
             turn_timeout_s=OFFICIAL_CLIENT_TURN_TIMEOUT_S,
+            wall_clock_ceiling_s=OFFICIAL_CLIENT_WALL_CLOCK_CEILING_S,
             fusion=str(spec["fusion"]).lower(),
             max_concurrent=4 if spec["parallel"] else 1)
         if spec["skills"]:

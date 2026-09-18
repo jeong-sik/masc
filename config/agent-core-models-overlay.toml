@@ -14,55 +14,6 @@ request_path = "/chat/completions"
 api_key_env = "ZAI_API_KEY"
 capabilities_base = "glm"
 
-# Z.AI coding-plan runtime capability rows.
-[[models]]
-id_prefix = "GLM-5-Turbo"
-provider_name = "glm-coding"
-base = "glm"
-max_context_tokens = 200000
-max_output_tokens = 128000
-supports_tools = true
-supports_tool_choice = true
-supports_named_tool_choice = false
-supports_reasoning = true
-supports_response_format_json = true
-supports_native_streaming = true
-reasoning_streaming_format = "delta:reasoning_content"
-# GLM thinking with tool calls keeps the intermediate reasoning inside the
-# current user turn's tool-call rounds and drops it when a new user turn
-# starts (bigmodel.cn official request-flow diagram, checked 2026-08-24).
-# Undeclared, the row fell back to No_replay and the model re-derived its
-# plan on every tool round. #30015 keeps the synthetic extra-context
-# carrier out of the latest-user boundary, so this policy is effective on
-# keeper turns.
-reasoning_replay = "latest_user_turn_tool_calls"
-input_per_million = 1.2
-output_per_million = 4.0
-cache_write_multiplier = 1.0
-cache_read_multiplier = 0.2
-
-[[models]]
-id_prefix = "glm-4.7"
-provider_name = "glm-coding"
-base = "glm"
-max_context_tokens = 200000
-max_output_tokens = 128000
-supports_tools = true
-supports_tool_choice = true
-supports_named_tool_choice = false
-supports_reasoning = true
-supports_response_format_json = true
-supports_native_streaming = true
-reasoning_streaming_format = "delta:reasoning_content"
-# Same provider contract as the GLM-5-Turbo row above; undeclared, the row
-# fell back to No_replay and the model repeated identical tool calls within
-# a turn (task-838 mirror-drift family).
-reasoning_replay = "latest_user_turn_tool_calls"
-input_per_million = 0.6
-output_per_million = 2.2
-cache_write_multiplier = 1.0
-cache_read_multiplier = 0.18333333333333332
-
 # Kimi Code coding-plan gateway under [providers.kimi_code].
 [[models]]
 id_prefix = "kimi-for-coding"
@@ -242,6 +193,25 @@ supports_structured_output = false
 # bound to deepseek-v4-flash via the deepseek-direct substitute,
 # runtime.toml:492) and surfaced live as Enable_not_encodable on the first
 # post-bump turn. Mirrors agent_core models.toml @476.
+# The base catalog carries no ollama_cloud row for this model, so this row is
+# what resolves it; thinking control and the effort ladder come from
+# base = ollama_cloud. /api/show 2026-09-18 reports
+# caps=[completion,thinking,tools,vision] and context_length=1048576, and the
+# vision capability is what separates it from the deepseek-v4-flash row below.
+[[models]]
+id_prefix = "deepseek-v4.1-flash"
+provider_name = "ollama_cloud"
+base = "ollama_cloud"
+max_context_tokens = 1048576
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+reasoning_streaming_format = "delta:reasoning"
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_response_format_json = true
+supports_structured_output = false
+
 [[models]]
 id_prefix = "deepseek-v4-flash"
 provider_name = "ollama_cloud"
@@ -266,8 +236,7 @@ supports_native_streaming = true
 # because nothing in the catalog answered the question.
 #
 # Every number below was measured against this endpoint on 2026-08-30, not
-# copied from a model card. The coding wire is not the general API, and the
-# glm-4.7 row below shows the two can differ.
+# copied from a model card. The coding wire is not the general API.
 [[models]]
 id_prefix = "glm-5.3"
 provider_name = "glm-coding"
@@ -373,42 +342,8 @@ supports_response_format_json = false
 supports_structured_output = false
 supports_native_streaming = true
 
-# Exact-only copies bind target admission to the exact provider credential above.
-[[models]]
-id_prefix = "GLM-5-Turbo"
-provider_name = "glm-coding-exact"
-base = "glm"
-max_context_tokens = 200000
-max_output_tokens = 128000
-supports_tools = true
-supports_tool_choice = true
-supports_named_tool_choice = false
-supports_reasoning = true
-supports_response_format_json = true
-supports_native_streaming = true
-reasoning_streaming_format = "delta:reasoning_content"
-# Mirror repair (task-838): exact-only copy of the glm-coding row above,
-# which carries this key with the #30031 contract citation.
-reasoning_replay = "latest_user_turn_tool_calls"
-
-[[models]]
-id_prefix = "glm-4.7"
-provider_name = "glm-coding-exact"
-base = "glm"
-max_context_tokens = 200000
-max_output_tokens = 128000
-supports_tools = true
-supports_tool_choice = true
-supports_named_tool_choice = false
-supports_reasoning = true
-supports_response_format_json = true
-supports_native_streaming = true
-reasoning_streaming_format = "delta:reasoning_content"
-# Mirror repair (task-838): exact-only copy of the glm-coding row above.
-reasoning_replay = "latest_user_turn_tool_calls"
-
-# GLM-5.3 exact-only copy — primary judgement slot, mirroring the GLM-5-Turbo
-# and glm-4.7 copies above under the same exact provider credential.
+# Exact-only copy that binds target admission to the exact provider credential
+# above. GLM-5.3 is the primary judgement slot.
 [[models]]
 id_prefix = "glm-5.3"
 provider_name = "glm-coding-exact"
@@ -459,16 +394,6 @@ model_id = "glm-5.3"
 # #36979/#36984). Headroom over the slowest healthy exact call measured on
 # this endpoint (973s, wkbl 2026-09-13..16).
 connect_timeout_s = 1200.0
-
-[[targets]]
-id = "glm-coding.glm-5-turbo"
-provider_ref = "glm-coding-exact"
-model_id = "GLM-5-Turbo"
-
-[[targets]]
-id = "glm-coding.glm-4-7-coding"
-provider_ref = "glm-coding-exact"
-model_id = "glm-4.7"
 
 [[targets]]
 id = "kimi_coding.kimi-for-coding"

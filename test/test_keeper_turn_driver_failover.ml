@@ -122,7 +122,7 @@ let collecting_deferral continuation deferred =
 let resume_chat_operation =
   Driver.Resume_operation_checkpoint
     { operation_id =
-        (match Masc.Keeper_chat_operation.Operation_id.of_string "kmsg-walk-under-test" with
+        (match Keeper_operation_id.of_string "kmsg-walk-under-test" with
          | Ok operation_id -> operation_id
          | Error detail -> failwith detail)
     }

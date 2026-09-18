@@ -19,6 +19,9 @@ type output_admission_error =
   | Global_admission_not_allowed
   | Invalid_connect_timeout of float
   | Invalid_body_timeout of float
+  | Missing_deadline
+      (** Neither a connect nor a body timeout is declared, so the wire runs
+          with no deadline at all. At least one budget must be declared. *)
   | Caller_supplied_header_not_allowed of string
   | Unsupported_image_input
   | Unsupported_document_input

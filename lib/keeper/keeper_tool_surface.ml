@@ -222,8 +222,8 @@ type keeper_clear_report =
   | Clear_no_checkpoint
   | Clear_attempted of Keeper_history_clear.outcome
 
-(* A clear that did not end as an emptied history with its line written.
-   [effect_disposition] says whether the checkpoint on disk changed. *)
+(* A clear the store did not report as saved. [effect_disposition] says what is
+   known of the checkpoint on disk: untouched, or not known. *)
 let keeper_clear_failure
       ~class_
       ~effect_disposition
@@ -309,13 +309,20 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
         (Keeper_turn_failure_streak.reset
            ~base_path:config.base_path
            ~keeper_name:name);
-      let cleared ~cleared_message_count =
+      (* [line_error]: the history was emptied and its [history_cleared] line
+         could not be written. That does not fail the clear, as a turn's line
+         does not fail the turn: it is logged, counted and named in the
+         result. *)
+      let cleared ?line_error ~cleared_message_count () =
         Log.Keeper.warn
           "%s: context cleared by operator (reason=%s, preserve_system=%b, cleared=%d msgs)"
           name reason preserve_system cleared_message_count;
         tool_result_ok_data
           (`Assoc
-            [
+            ((match line_error with
+              | None -> []
+              | Some detail -> [ "history_cleared_line_error", `String detail ])
+             @ [
                  ("name", `String name);
                  ("phase_before", `String phase_before);
                  ( "phase_after"
@@ -327,10 +334,10 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
                  ("checkpoint_found", `Bool checkpoint_found);
                  ("preserve_system_prompt", `Bool preserve_system);
               ("reason", `String reason);
-            ])
+            ]))
       in
-      (* Only an emptied checkpoint with its line written is a cleared history;
-         every other outcome of the store is reported as what it was. *)
+      (* A clear the store did not save is reported as what it was, never as a
+         message count. *)
       let result =
         match report with
         | Clear_meta_unreadable detail ->
@@ -348,10 +355,10 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
                   checkpoint was not looked up: %s"
                  detail)
             []
-        | Clear_no_checkpoint -> cleared ~cleared_message_count:0
+        | Clear_no_checkpoint -> cleared ~cleared_message_count:0 ()
         | Clear_attempted
             (Keeper_history_clear.Cleared { cleared_message_count; marker = Ok () }) ->
-          cleared ~cleared_message_count
+          cleared ~cleared_message_count ()
         | Clear_attempted
             (Keeper_history_clear.Cleared { cleared_message_count; marker = Error detail })
           ->
@@ -363,19 +370,7 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
             Keeper_metrics.(to_string TurnBoundaryFailures)
             ~labels:[ "keeper", name; "site", "history_cleared" ]
             ();
-          keeper_clear_failure
-            ~class_:Tool_result.Runtime_failure
-            ~effect_disposition:Tool_result.Proven_post_effect
-            ~code:Tool_args.Internal_error
-            ~message:
-              (Printf.sprintf
-                 "history cleared (%d messages), but the history_cleared line could \
-                  not be written: %s. Run masc_keeper_clear again now: it writes the \
-                  line if this failure was transient. The same error again means the \
-                  turn-boundary store is damaged and every append to it is refused."
-                 cleared_message_count
-                 detail)
-            [ "cleared_message_count", `Int cleared_message_count ]
+          cleared ~line_error:detail ~cleared_message_count ()
         | Clear_attempted
             (Keeper_history_clear.Superseded { incoming_turn_count; known_turn_count }) ->
           Log.Keeper.warn

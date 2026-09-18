@@ -535,8 +535,8 @@ let test_a_superseded_clear_writes_nothing () =
 ;;
 
 (* A store that ends mid-line refuses every append. The history is emptied all
-   the same, so the outcome has to say the line is missing: a history that
-   started over with nothing to explain it is what stops a reader. *)
+   the same, so the outcome has to say the line is missing: until the next turn
+   ends and says so itself, nothing explains why the history started over. *)
 let test_a_clear_whose_line_is_refused_says_so () =
   with_saved_history ~turn_count:3
   @@ fun ~keepers_dir ~base_dir ~session context ->

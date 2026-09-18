@@ -16,11 +16,14 @@ type outcome =
   | Cleared of
       { cleared_message_count : int
       ; marker : (unit, string) result
-            (** Whether the [History_cleared] line was written. On [Error] the
-                history started over with no line to say why. Running the
-                clear again writes one when the failure was transient. A store
-                that ends mid-line refuses every append until it is repaired,
-                so there the same error comes back. *)
+            (** Whether the [History_cleared] line was written. [Error] does
+                not undo or fail the clear, as a turn's line does not fail the
+                turn. Until the keeper's next turn ends and says
+                [Fresh_history] itself, nothing in the store explains why the
+                history started over; if that turn dies first, nothing ever
+                does (RFC §6). A store that ends mid-line refuses every
+                append until it is repaired, so clearing again does not help
+                there. *)
       }
       (** The emptied checkpoint is the canonical one on disk. *)
   | Superseded of

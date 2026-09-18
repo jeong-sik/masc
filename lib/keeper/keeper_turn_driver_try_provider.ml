@@ -60,6 +60,11 @@ type try_provider_ctx =
        turn record on the trace measured, whichever runtime ran it. Read once
        per attempt, on that path only. *)
     carried_front_seed : unit -> Keeper_carried_front.seed_read
+  ; (* Where a front halved after a refusal is kept for the rest of the
+       turn. The position is a fact about the history, not about the
+       candidate that was refused, so the lane's next candidate composes
+       from it instead of starting at the whole history again. *)
+    hold_carried_front : Keeper_carried_front.seed -> unit
   ; base_path : string
   ; keeper_name : string
   ; name : string
@@ -1888,7 +1893,8 @@ let halve_front ~digest_at ~move_ledger ~hold ~first_atom ~retry =
     declared-lane candidate rotation and cascade fallback for every other
     error and for a refusal that survives every move. The front the retry
     composes from is the ledger's after the eviction, or, before any usage
-    on this pair, the halved range held for the rest of this attempt. *)
+    on this pair, the halved range, which the turn holds for every
+    candidate the lane walks to. *)
 (* The marks, judged once per candidate turn before its first composition
    (RFC keeper-context-window-in-tokens §10.5): above the high-water mark the
    oldest blocks leave until the projected total is under the low-water mark,
@@ -1946,18 +1952,6 @@ let run_try_provider_with_carried_range_eviction
        position on the atom axis, stops at a single atom, and without it a
        history that outgrew the provider would be refused every turn with
        nothing declared to move the front. *)
-    let seed = ctx.carried_front_seed in
-    let halved_front = ref None in
-    let ctx =
-      { ctx with
-        carried_front_seed =
-          (fun () ->
-             match !halved_front with
-             | Some halved ->
-               { Keeper_carried_front.seed = Some halved; unreadable = None }
-             | None -> seed ())
-      }
-    in
     let state = new_attempt_state () in
     let last_resort_used = ref false in
     let checkpoint_after = ref None in
@@ -2000,7 +1994,7 @@ let run_try_provider_with_carried_range_eviction
                  ~keeper_name:ctx.keeper_name
                  ~runtime_id:ctx.runtime_id
                  ~session_id:(ledger_session ctx))
-            ~hold:(fun halved -> halved_front := Some halved)
+            ~hold:ctx.hold_carried_front
             ~first_atom
             ~retry)
         ~last_resort:(fun ~retry:_ ->

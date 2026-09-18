@@ -14,7 +14,7 @@
     [total_atoms - transmitted_atoms]; a lane walking to its next candidate
     starts from the range the last completed turn carried rather than from
     the whole history.
-    With neither, a refused range from the same trace is read as a ceiling
+    With neither, the range an unfinished turn on the same trace reached
     ({!Refused_range}); with none of the three the caller has no atom to
     start from and carries the whole history; the provider judges it, and the turn driver owns the one move a
     refusal forces before any usage has been counted, which
@@ -35,14 +35,16 @@ type source =
           measured its carried atoms, whichever runtime ran it. *)
   | Refused_range of { turn : int }
       (** The newest Agent Core turn record on the trace whose turn never
-          finished: the range it carried is the largest one known to be too
-          big for that provider. It is read as a ceiling, so the composition
-          starts halfway between it and the newest atom rather than at it
+          finished: the narrowest range that turn tried, since every
+          candidate of a turn shares the front a refusal moves. The
+          composition starts there, at the position the turn reached, and
+          moves no further on its own — a turn ends for reasons that say
+          nothing about size, and those repeat
           ({!Keeper_turn_driver_try_provider.compose_carried_model_input}).
-          Without this, a keeper whose seeds are gone repeats the whole
+          Without this record a keeper whose seeds are gone repeats the whole
           history every turn: the halving a refusal forces lives only inside
-          the attempt, and the record that would carry it forward was
-          skipped for having no finish reason (2026-09-18: five keepers). *)
+          the turn, and the record that carries it forward was skipped for
+          having no finish reason (2026-09-18: five keepers). *)
   | Halved_after_refusal of { retry : int }
       (** A provider or wire refusal before any usage: the range was halved
           toward the newest atom, [retry] times so far. *)

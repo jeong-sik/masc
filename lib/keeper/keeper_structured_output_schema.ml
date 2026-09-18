@@ -224,13 +224,37 @@ let without_response_format (provider_cfg : Llm_provider.Provider_config.t) =
    response format; the tool schema carries the verdict enum SSOT. *)
 let anti_rationalization_reviewer_provider_config = without_response_format
 
+(* Not every wire can be told to stop thinking: Grok's reasoning has no off
+   switch, Kimi's coding models return thinking nobody asked for, and a
+   [Reasoning_effort] row whose ladder omits "none" cannot spell the disable at
+   all. Asking for it there is fail-closed in agent_core, so the sub-call dies
+   before dispatch instead of running deterministically — the shape that broke
+   every image analysis in 2026-08 and that
+   [Keeper_vision_tool] still answers by hardcoding [enable_thinking = None]
+   for one fleet.
+
+   So ask the predicate the request itself will face, about the request itself,
+   and drop only the toggle when the answer is no. What is left is the same
+   remedy the vision lane hardcodes: thinking uncontrolled, [clear_thinking]
+   and [preserve_thinking] keeping history out of the reply. The trade is
+   explicit — on a wire whose reasoning arrives in its own response field the
+   JSON stays clean, and on one that inlines it the model's thoughts can reach
+   the content this sub-call parses. That is a parse failure where the refusal
+   was a certain failure. *)
 let for_deterministic_subcall ~max_tokens (provider_cfg : Llm_provider.Provider_config.t) =
-  { provider_cfg with
-    Llm_provider.Provider_config.max_tokens
-  ; tool_choice = None
-  ; disable_parallel_tool_use = true
-  ; enable_thinking = Some false
-  ; preserve_thinking = Some false
-  ; clear_thinking = Some true
-  }
+  let requested =
+    { provider_cfg with
+      Llm_provider.Provider_config.max_tokens
+    ; tool_choice = None
+    ; disable_parallel_tool_use = true
+    ; enable_thinking = Some false
+    ; preserve_thinking = Some false
+    ; clear_thinking = Some true
+    }
+  in
+  match
+    Llm_provider.Complete_common.thinking_control_request_rejection_reason requested
+  with
+  | None -> requested
+  | Some _ -> { requested with Llm_provider.Provider_config.enable_thinking = None }
 ;;

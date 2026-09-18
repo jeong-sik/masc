@@ -2103,9 +2103,15 @@ let thinking_was_enabled = function
    one condition here, and only one of them is about thinking.
 
    Turning thinking off is the remedy for a budget spent thinking, so it is
-   worth a second attempt only when thinking was on. Dropping the rejected
-   response is owed either way: accept judged it unusable, and a checkpoint
-   that keeps it feeds it back as input on every later turn.
+   worth a second attempt only when thinking was on and this candidate's wire
+   can be told to stop. The second half is not rhetorical: Grok's reasoning has
+   no off switch, Kimi's coding rows return thinking nobody asked for, and a
+   [Reasoning_effort] row whose ladder omits "none" cannot spell the disable.
+   Attempting it there spends the turn on a request refused before dispatch,
+   and on a lane with one candidate there is nothing to rotate to (#36972).
+   Dropping the rejected response is owed either way: accept judged it
+   unusable, and a checkpoint that keeps it feeds it back as input on every
+   later turn.
 
    Measured on a live keeper, 2026-09-03, with thinking off throughout: the model
    collapsed into one repeated word, accept rejected it at max_tokens, and
@@ -2120,13 +2126,13 @@ type truncation_recovery =
   | Retry_without_thinking of Agent_core.Checkpoint.t
   | Drop_rejected_response of Agent_core.Checkpoint.t
 
-let truncation_recovery ~enable_thinking ~result ~checkpoint =
+let truncation_recovery ~enable_thinking ~thinking_can_be_disabled ~result ~checkpoint =
   match result, checkpoint with
   | Error error, Some checkpoint when max_tokens_truncation_error error -> (
     match checkpoint_before_incomplete_response checkpoint with
     | None -> Recovery_not_applicable
     | Some cut ->
-      if thinking_was_enabled enable_thinking
+      if thinking_was_enabled enable_thinking && thinking_can_be_disabled
       then Retry_without_thinking cut
       else Drop_rejected_response cut)
   | Error _, _ | Ok _, _ -> Recovery_not_applicable
@@ -2169,6 +2175,26 @@ let candidate_without_reasoning_effort (candidate : Runtime_candidate.t) : Runti
     }
 ;;
 
+(* Asked of the request the retry would actually send, not of an approximation
+   of it: the same candidate, effort stripped, thinking off. AGENT_CORE answers
+   from the row's dialect and effort ladder, which is where "this wire has no
+   way to say stop thinking" lives.
+
+   The Anthropic-side pair rule ([Backend_anthropic.validate_thinking_controls],
+   reached inside [build_request_artifact]) is a second validator this question
+   does not reach. [candidate_without_reasoning_effort] above is what answers
+   it, by removing the effort that rule forbids alongside an explicit disable. *)
+let retry_without_thinking_admitted (candidate : Runtime_candidate.t) =
+  let retry_cfg =
+    { (Runtime_candidate.provider_cfg (candidate_without_reasoning_effort candidate)) with
+      Llm_provider.Provider_config.enable_thinking = Some false
+    ; preserve_thinking = Some false
+    }
+  in
+  Option.is_none
+    (Llm_provider.Complete_common.thinking_control_request_rejection_reason retry_cfg)
+;;
+
 let run_try_provider_with_truncation_recovery
       ?continuation_checkpoint
       (ctx : try_provider_ctx)
@@ -2177,9 +2203,11 @@ let run_try_provider_with_truncation_recovery
   let first_result, checkpoint_after, success_sample =
     run_try_provider_with_carried_range_eviction ?continuation_checkpoint ctx candidate
   in
+  let thinking_can_be_disabled = retry_without_thinking_admitted candidate in
   match
     truncation_recovery
       ~enable_thinking:ctx.enable_thinking
+      ~thinking_can_be_disabled
       ~result:first_result
       ~checkpoint:checkpoint_after
   with
@@ -2217,7 +2245,11 @@ let run_try_provider_with_truncation_recovery
       ~decision:
         (`Assoc
           ([ "continuation", `String "none"
-           ; "thinking", `String "already_disabled"
+           ; ( "thinking"
+             , `String
+                 (if thinking_can_be_disabled
+                  then "already_disabled"
+                  else "cannot_be_disabled") )
            ; ( "checkpoint_write"
              , `String
                  (match persisted with

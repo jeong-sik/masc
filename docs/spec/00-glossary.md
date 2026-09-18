@@ -62,13 +62,17 @@ status: reference
 
 ## Task Lifecycle
 
-**Requester**
-: Task 를 만든 쪽. `created_by` 에 만들 때 한 번 적히고 바뀌지 않는다. Keeper 는
-  자기가 만든 `Todo` 를 자동 claim 대상에서 뺀다.
+**Created By**
+: Task 를 만든 에이전트나 사람의 이름(`created_by`). 만들 때 한 번 적히고 바뀌지 않는다.
+  Keeper 는 자기가 만든 `Todo` 를 자동 claim 대상에서 뺀다.
 
 **Assignee**
 : `Claimed`, `InProgress`, `AwaitingVerification` 에 적힌 에이전트 이름. 앞의 둘에서는
   지금 일을 맡은 쪽이고, `AwaitingVerification` 에서는 제출한 쪽이다.
+
+**Producer**
+: 판정 쪽 코드가 제출한 에이전트를 부르는 이름. 같은 에이전트가 상태에서는 `assignee`,
+  verification 레코드에서는 `worker` 로 적힌다.
 
 **Claim**
 : `Todo` 인 Task 를 맡는 전이. 한 에이전트는 `Claimed` 와 `InProgress` 를 합쳐 하나만
@@ -80,24 +84,25 @@ status: reference
 
 **Submission**
 : 맡은 쪽이 증거와 함께 완료를 내는 전이(`Submit_for_verification`). 상태는
-  `AwaitingVerification` 이 되고 새 Verification ID 를 받는다. 대기 중인 Task 는 claim
-  한도에 세지 않는다. 제출자는 대기 중에 다시 낼 수 있고 그때마다 id 가 바뀐다.
+  `AwaitingVerification` 이 되고 새 Verification ID 를 받는다. 판정을 기다리는 Task 는
+  claim 한도에 세지 않는다. Producer 는 기다리는 중에 다시 낼 수 있고 그때마다 id 가
+  바뀐다.
 
 **Intent**
-: 대기 중인 청구가 완료(`Complete_task`)인지 중단(`Cancel_task`)인지. 맡은 쪽의 cancel 은
-  `Cancel_task` 청구가 된다. `Todo` 의 cancel 은 청구 없이 바로 `Cancelled` 다.
+: 판정을 기다리는 것이 완료 제출(`Complete_task`)인지 취소 요청(`Cancel_task`)인지. 맡은
+  쪽의 cancel 은 취소 요청이 된다. `Todo` 의 cancel 은 요청 없이 바로 `Cancelled` 다.
 
 **Verification ID**
 : 제출 하나의 식별자. 판정은 자기가 읽은 id 가 지금 id 와 같을 때만 적용된다.
 
 **Completion Authority**
 : 판정을 내리는 쪽. 서버 안의 판정 에이전트(`System_llm_agent`)이거나 인증된 HTTP
-  경로로 들어온 운영자(`Human_operator`)다. Keeper 는 판정하지 못한다. 중단 청구는
+  경로로 들어온 운영자(`Human_operator`)다. Keeper 는 판정하지 못한다. 취소 요청은
   운영자만 승인한다.
 
 **Verdict**
-: `Verdict_approved` 또는 `Verdict_rejected { reason }`. 완료 청구의 승인은 `Done`, 중단
-  청구의 승인은 `Cancelled`, 거절은 어느 쪽이든 제출자의 `InProgress` 다.
+: `Verdict_approved` 또는 `Verdict_rejected { reason }`. 완료 제출의 승인은 `Done`, 취소
+  요청의 승인은 `Cancelled`, 거절은 어느 쪽이든 Producer 의 `InProgress` 다.
 
 **Handoff Context**
 : Task 에 붙어 다니는 인계 메모. summary, reason, next_step, evidence_refs, updated_by
@@ -107,20 +112,13 @@ status: reference
 **Evidence Reference**
 : 제출에 다는 증거 참조. `artifact:`, `note:`, `board:`, `fusion:` 네 형식만 열린다.
 
-**Rejection Delivery**
-: 거절을 제출자 Keeper 에게 알릴 때까지 backlog 의 `pending_completion_rejections` 에
-  남는 항목. 제출자에게 Keeper 큐가 없으면 Task 를 `Todo` 로 되돌린다.
-
 **Operator Attention**
 : 운영자만 풀 수 있는 Task 의 목록(`Operator_task_attention.item`). 종류는 `Cancel_claim`,
   `Held_without_actor`, `Producer_record_unreadable` 이다.
 
-**Cycle Count**
-: Release 로 `Todo` 에 돌아온 횟수. 화면 표시에만 쓰고 claim 순서를 바꾸지 않는다.
-
 **Current Task**
-: 에이전트 기록의 `current_task` 와 Keeper meta 의 `current_task_id`. 권위는 backlog 이고
-  이 둘은 거기서 다시 계산되는 표시다.
+: 에이전트 기록의 `current_task`, Keeper meta 의 `current_task_id`, planning 의 current
+  task. 권위는 backlog 이고 이 셋은 거기서 다시 계산되는 표시다.
 
 ## Repository Execution
 

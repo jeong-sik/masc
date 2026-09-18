@@ -171,9 +171,9 @@ run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskLifecycle.tla" \
 # has to catch the bug alone.
 run_tlc "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla"
 run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla"
-for label in verdict-assigns stop-submission anyone-withdraws \
-  withdraw-keeps-holder submit-keeps-hold submit-without-hold \
-  accept-without-verdict superseded-verdict; do
+for label in verdict-assigns cancel-request anyone-cancels \
+  cancel-keeps-holder submit-keeps-hold submit-without-hold \
+  done-without-verdict superseded-verdict; do
   run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla" \
     "TaskOwnership-${label}-buggy.cfg" "${label}-buggy"
 done

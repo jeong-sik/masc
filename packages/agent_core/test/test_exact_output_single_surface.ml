@@ -244,12 +244,6 @@ let execution_receipt execution =
 ;;
 
 let execute_once ~net ?clock execution =
-  (* Fixture targets declare a connect budget by default and a declared
-     budget refuses to run without a measurement clock; default to the
-     context clock the same way the production callers resolve theirs. *)
-  let clock =
-    match clock with Some _ as passed -> passed | None -> Eio_context.get_clock_opt ()
-  in
   let before_dispatch (candidate : EO.flow_attempt_receipt) =
     Atomic.set execution.receipt (Some candidate.EO.receipt);
     Ok ()
@@ -403,7 +397,7 @@ let cancel_execute_once_after_dispatch ~sw ~net ~clock ~request_seen execution =
         ignore
           (Eio.Cancel.sub (fun context ->
              Eio.Promise.resolve notify_cancel_context context;
-             execute_once ~net execution));
+             execute_once ~net ~clock execution));
         false
       with
       | Eio.Cancel.Cancelled Caller_cancelled -> true
@@ -707,7 +701,7 @@ let test_no_measure_one_post_and_wire_authority () =
   let run ?(domain_schema = schema) ~id ~kind ~path ~response inspect =
     let (provenance, plan_fingerprint, result), completion_posts, token_posts, captures =
       with_server ~response
-      @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+      @@ fun ~sw:_ ~net ~clock ~base_url ->
       let entry =
         catalog_entry
           ~id
@@ -723,7 +717,7 @@ let test_no_measure_one_post_and_wire_authority () =
       let execution =
         flow_for_schema snapshot id domain_schema EO.Provider_schema |> attempt
       in
-      EO.plan_provenance ready, EO.plan_fingerprint ready, execute_once ~net execution
+      EO.plan_provenance ready, EO.plan_fingerprint ready, execute_once ~net ~clock execution
     in
     check int (id ^ " completion posts") 1 completion_posts;
     check int (id ^ " token posts") 0 token_posts;
@@ -852,7 +846,7 @@ let test_provider_trace_fingerprint_anchors_normalized_headers_and_body () =
   let run ~response_headers response =
     let result, posts, _, _ =
       with_server ~response_headers ~response
-      @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+      @@ fun ~sw:_ ~net ~clock ~base_url ->
       let entry =
         catalog_entry
           ~id:"provider-trace-surface"
@@ -864,7 +858,7 @@ let test_provider_trace_fingerprint_anchors_normalized_headers_and_body () =
       in
       with_catalog [ entry ]
       @@ fun snapshot ->
-      execute_once ~net (attempt (flow snapshot "provider-trace-surface" EO.Json_syntax))
+      execute_once ~net ~clock (attempt (flow snapshot "provider-trace-surface" EO.Json_syntax))
     in
     check int "provider trace uses one POST" 1 posts;
     match result with
@@ -906,7 +900,7 @@ let test_response_received_error_evidence_matrix () =
   let run label response matches_cause =
     let result, posts, _, _ =
       with_server ~response
-      @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+      @@ fun ~sw:_ ~net ~clock ~base_url ->
       let entry =
         catalog_entry
           ~id:"error-surface"
@@ -918,7 +912,7 @@ let test_response_received_error_evidence_matrix () =
       in
       with_catalog [ entry ]
       @@ fun snapshot ->
-      execute_once ~net (attempt (flow snapshot "error-surface" EO.Json_syntax))
+      execute_once ~net ~clock (attempt (flow snapshot "error-surface" EO.Json_syntax))
     in
     check int (label ^ " dispatches once") 1 posts;
     match result with
@@ -972,7 +966,7 @@ let check_receipt label ~phase ~dispatch_count ~http_status receipt =
 let test_public_receipt_phase_matrix () =
   let pre_result, pre_posts, _, _ =
     with_server ~response:"unused"
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
     let entry =
       catalog_entry
         ~id:"pre-dispatch-surface"
@@ -985,7 +979,7 @@ let test_public_receipt_phase_matrix () =
     in
     with_catalog [ entry ]
     @@ fun snapshot ->
-    execute_once ~net (attempt (flow snapshot "pre-dispatch-surface" EO.Json_syntax))
+    execute_once ~net ~clock (attempt (flow snapshot "pre-dispatch-surface" EO.Json_syntax))
   in
   check int "pre-dispatch has zero POSTs" 0 pre_posts;
   (match pre_result with
@@ -1000,7 +994,7 @@ let test_public_receipt_phase_matrix () =
    | Ok _ | Error _ -> fail "pre-dispatch failure was not typed conservatively");
   let abort_result, abort_posts, _, _ =
     with_server ~abort_completion:true ~response:"unused"
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
     let entry =
       catalog_entry
         ~id:"abort-surface"
@@ -1012,7 +1006,7 @@ let test_public_receipt_phase_matrix () =
     in
     with_catalog [ entry ]
     @@ fun snapshot ->
-    execute_once ~net (attempt (flow snapshot "abort-surface" EO.Json_syntax))
+    execute_once ~net ~clock (attempt (flow snapshot "abort-surface" EO.Json_syntax))
   in
   check int "abort observes one POST" 1 abort_posts;
   (match abort_result with
@@ -1026,7 +1020,7 @@ let test_public_receipt_phase_matrix () =
    | Ok _ | Error _ -> fail "post-abort failure lost dispatch evidence");
   let rate_result, rate_posts, _, _ =
     with_server ~status:`Too_many_requests ~response:"rate limited"
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
     let entry =
       catalog_entry
         ~id:"rate-surface"
@@ -1038,7 +1032,7 @@ let test_public_receipt_phase_matrix () =
     in
     with_catalog [ entry ]
     @@ fun snapshot ->
-    execute_once ~net (attempt (flow snapshot "rate-surface" EO.Json_syntax))
+    execute_once ~net ~clock (attempt (flow snapshot "rate-surface" EO.Json_syntax))
   in
   check int "429 observes one POST" 1 rate_posts;
   (* The receipt always carried the status; the cause did not, and the cause is
@@ -1060,7 +1054,7 @@ let test_public_receipt_phase_matrix () =
    | Ok _ | Error _ -> fail "429 lost status or raw body");
   let terminal_result, terminal_posts, _, _ =
     with_server ~response:(openai_response {|{"name":"accepted"}|})
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
     let entry =
       catalog_entry
         ~id:"terminal-surface"
@@ -1078,7 +1072,7 @@ let test_public_receipt_phase_matrix () =
       "flow starts without an allocated attempt"
       0
       (List.length (EO.flow_attempt_evidence execution.flow).attempts);
-    execute_once ~net execution
+    execute_once ~net ~clock execution
   in
   check int "terminal observes one POST" 1 terminal_posts;
   match terminal_result with
@@ -1099,7 +1093,7 @@ let test_reasoning_response_bytes_do_not_enter_json_output () =
   in
   let result, posts, _, _ =
     with_server ~response
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
     let entry =
       catalog_entry
         ~id:"reasoning-response-surface"
@@ -1112,6 +1106,7 @@ let test_reasoning_response_bytes_do_not_enter_json_output () =
     with_catalog [ entry ]
     @@ fun snapshot ->
     execute_once
+      ~clock
       ~net
       (attempt (flow snapshot "reasoning-response-surface" EO.Json_syntax))
   in
@@ -1224,7 +1219,7 @@ let test_normalization_error_classes () =
   let run label response matches =
     let result, posts, _, _ =
       with_server ~response
-      @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+      @@ fun ~sw:_ ~net ~clock ~base_url ->
       let entry =
         catalog_entry
           ~id:"normalization-surface"
@@ -1236,7 +1231,7 @@ let test_normalization_error_classes () =
       in
       with_catalog [ entry ]
       @@ fun snapshot ->
-      execute_once ~net (attempt (flow snapshot "normalization-surface" EO.Json_syntax))
+      execute_once ~net ~clock (attempt (flow snapshot "normalization-surface" EO.Json_syntax))
     in
     check int (label ^ " dispatches once") 1 posts;
     match result with
@@ -1279,7 +1274,7 @@ let test_attempt_rejects_concurrent_duplicate_before_second_dispatch () =
   let response = openai_response {|{"name":"accepted"}|} in
   let (first, second), posts, _, _ =
     with_server ~response
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
     let entry =
       catalog_entry
         ~id:"concurrent-surface"
@@ -1295,8 +1290,8 @@ let test_attempt_rejects_concurrent_duplicate_before_second_dispatch () =
     let first_promise, first_resolver = Eio.Promise.create () in
     let second_promise, second_resolver = Eio.Promise.create () in
     Eio.Fiber.both
-      (fun () -> execute_once ~net execution |> Eio.Promise.resolve first_resolver)
-      (fun () -> execute_once ~net execution |> Eio.Promise.resolve second_resolver);
+      (fun () -> execute_once ~net ~clock execution |> Eio.Promise.resolve first_resolver)
+      (fun () -> execute_once ~net ~clock execution |> Eio.Promise.resolve second_resolver);
     Eio.Promise.await first_promise, Eio.Promise.await second_promise
   in
   check int "one concurrent completion post" 1 posts;
@@ -1317,7 +1312,7 @@ let test_parallel_attempts_from_one_plan_do_not_share_identity_or_state () =
   let response = openai_response {|{"name":"accepted"}|} in
   let (first_id, first, second_id, second), posts, _, _ =
     with_server ~response
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
     let entry =
       catalog_entry
         ~id:"parallel-attempt-surface"
@@ -1335,8 +1330,8 @@ let test_parallel_attempts_from_one_plan_do_not_share_identity_or_state () =
     let first_promise, first_resolver = Eio.Promise.create () in
     let second_promise, second_resolver = Eio.Promise.create () in
     Eio.Fiber.both
-      (fun () -> execute_once ~net first_attempt |> Eio.Promise.resolve first_resolver)
-      (fun () -> execute_once ~net second_attempt |> Eio.Promise.resolve second_resolver);
+      (fun () -> execute_once ~net ~clock first_attempt |> Eio.Promise.resolve first_resolver)
+      (fun () -> execute_once ~net ~clock second_attempt |> Eio.Promise.resolve second_resolver);
     let first = Eio.Promise.await first_promise in
     let second = Eio.Promise.await second_promise in
     let first_id =
@@ -1393,7 +1388,7 @@ let test_cancellation_leaves_queryable_monotonic_receipt () =
     in
     let receipt = execution_receipt execution in
     let phase = EO.receipt_phase receipt in
-    let duplicate = execute_once ~net execution in
+    let duplicate = execute_once ~net ~clock execution in
     cancelled, phase, duplicate
   in
   check bool "caller cancellation observed" true cancelled;
@@ -1484,7 +1479,7 @@ let test_body_cancellation_retains_response_status () =
     let timed_out =
       try
         match
-          Eio.Time.with_timeout_exn clock 0.05 (fun () -> execute_once ~net execution)
+          Eio.Time.with_timeout_exn clock 0.05 (fun () -> execute_once ~net ~clock execution)
         with
         | Ok _ | Error _ -> false
       with
@@ -1539,7 +1534,7 @@ let test_overlay_endpoint_and_credential_are_materialized () =
   let response = openai_response {|{"name":"accepted"}|} in
   let result, posts, _, captures =
     with_server ~response
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
     let entry =
       catalog_entry
         ~id:"environment-surface"
@@ -1565,7 +1560,7 @@ let test_overlay_endpoint_and_credential_are_materialized () =
     @@ fun snapshot ->
     frozen_base_url := "https://rotated.invalid";
     frozen_credential := "rotated-surface-secret";
-    flow snapshot "environment-surface" EO.Json_syntax |> attempt |> execute_once ~net
+    flow snapshot "environment-surface" EO.Json_syntax |> attempt |> execute_once ~net ~clock
   in
   check int "environment target dispatches once" 1 posts;
   (match result with
@@ -1592,7 +1587,7 @@ let test_credential_rotation_keeps_snapshot_bound_wire_authority () =
   let response = openai_response {|{"name":"accepted"}|} in
   let (result_a, result_b), posts, token_posts, captures =
     with_server ~response
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
     let entry =
       catalog_entry
         ~id:"credential-rotation-surface"
@@ -1666,7 +1661,7 @@ let test_credential_rotation_keeps_snapshot_bound_wire_authority () =
         (requirement EO.Json_syntax)
         admitted_target
       |> attempt
-      |> execute_once ~net
+      |> execute_once ~net ~clock
     in
     let result_a = execute "credential-rotation-a" handle_a in
     let result_b = execute "credential-rotation-b" handle_b in
@@ -1698,7 +1693,7 @@ let test_identity_survives_success_error_and_cancellation () =
   let run ?(status = `OK) response =
     let (provenance, result), posts, _, _ =
       with_server ~status ~response
-      @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+      @@ fun ~sw:_ ~net ~clock ~base_url ->
       let entry =
         catalog_entry
           ~id:"identity-surface"
@@ -1712,7 +1707,7 @@ let test_identity_survives_success_error_and_cancellation () =
       @@ fun snapshot ->
       let ready = plan snapshot "identity-surface" EO.Json_syntax in
       let execution = flow snapshot "identity-surface" EO.Json_syntax |> attempt in
-      EO.plan_provenance ready, execute_once ~net execution
+      EO.plan_provenance ready, execute_once ~net ~clock execution
     in
     check int "identity path dispatches once" 1 posts;
     provenance, result
@@ -1854,7 +1849,7 @@ let test_gemini_any_of_nullable_enum_admitted_unchanged () =
     let id = "gemini-any-of-" ^ label in
     let (provenance, result), completion_posts, token_posts, captures =
       with_server ~response:(gemini_response content)
-      @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+      @@ fun ~sw:_ ~net ~clock ~base_url ->
       let entry =
         gemini_exact_entry ~base_url:(base_url ^ "/v1beta/models") ~id ~request_path:"" ()
       in
@@ -1875,7 +1870,7 @@ let test_gemini_any_of_nullable_enum_admitted_unchanged () =
       let execution =
         flow_for_schema snapshot id domain_schema EO.Provider_schema |> attempt
       in
-      EO.plan_provenance ready, execute_once ~net execution
+      EO.plan_provenance ready, execute_once ~net ~clock execution
     in
     check int (label ^ " Gemini generation POST") 1 completion_posts;
     check int (label ^ " Gemini token POST") 0 token_posts;

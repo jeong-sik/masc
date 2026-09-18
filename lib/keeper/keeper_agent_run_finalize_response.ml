@@ -9,6 +9,73 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_agent_result
 
+(* Where this finished turn left the durable history (RFC
+   librarian-is-the-brain §4.3). An agent-core turn with no saved checkpoint is
+   the store's stale no-op: the canonical checkpoint on disk is a newer
+   writer's, so this turn has no position of its own to state and writes no
+   line. *)
+let turn_boundary_position ~checkpoint_owner saved_checkpoint =
+  match saved_checkpoint with
+  | Some checkpoint ->
+    Some
+      (Keeper_turn_boundaries.position_of_messages
+         checkpoint.Agent_core.Checkpoint.messages)
+  | None ->
+    (match checkpoint_owner with
+     | Runtime_execution.Official_client -> Some (Ok Keeper_turn_boundaries.No_atom_history)
+     | Runtime_execution.Masc_agent_core -> None)
+;;
+
+(* The checkpoint is already durable when this runs, so a line that cannot be
+   built or written is reported and the turn still finishes: the next finished
+   turn's line then closes a span of two turns. *)
+let record_turn_boundary
+      ~config
+      ~(meta : Keeper_meta_contract.keeper_meta)
+      ~turn
+      ~checkpoint_owner
+      saved_checkpoint
+  =
+  let not_recorded ~site detail =
+    Log.Keeper.error
+      ~keeper_name:meta.name
+      "turn boundary not recorded turn=%d: %s"
+      turn
+      detail;
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string TurnBoundaryFailures)
+      ~labels:[ "keeper", meta.name; "site", site ]
+      ()
+  in
+  match turn_boundary_position ~checkpoint_owner saved_checkpoint with
+  | None ->
+    Log.Keeper.warn
+      ~keeper_name:meta.name
+      "turn boundary not recorded turn=%d: the checkpoint save was a stale no-op"
+      turn
+  | Some (Error detail) -> not_recorded ~site:"position" detail
+  | Some (Ok position) ->
+    let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+    let record : Keeper_turn_boundaries.record =
+      { recorded_at = Time_compat.now ()
+      ; session_id = trace_id
+      ; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
+      ; position
+      }
+    in
+    (match
+       Keeper_turn_boundaries.append
+         ~keepers_dir:
+           (Config_dir_resolver.keepers_dir_for_base_path
+              ~base_path:config.Workspace.base_path)
+         ~keeper_id:meta.name
+         record
+     with
+     | Ok () -> ()
+     | Error error ->
+       not_recorded ~site:"append" (Keeper_turn_boundaries.append_error_to_string error))
+;;
+
 let finalize
     ~config
     ~meta
@@ -242,6 +309,12 @@ let finalize
     | Runtime_execution.Official_client, None -> Ok None
   in
   let* saved_checkpoint = saved_checkpoint_result in
+    record_turn_boundary
+      ~config
+      ~meta
+      ~turn:manifest_keeper_turn_id
+      ~checkpoint_owner
+      saved_checkpoint;
     (* Retired proof-ledger evaluation is absent. Strict Task completion
        judgment is owned by the authenticated operator or typed judge
        boundary. *)

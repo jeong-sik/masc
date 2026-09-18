@@ -201,6 +201,7 @@ type t =
   | WireCaptureResponseSuppressed (* counter: keeper-visible response suppressed before wire capture *)
   | WireCaptureWriteFailures    (* counter: wire-capture write raised an exception *)
   | WireCaptureRecordSkipped    (* counter: wire-capture record dropped — rotation name space exhausted or append guard refused *)
+  | TurnBoundaryFailures        (* counter: a finished turn's boundary line was not built or not written *)
 [@@deriving enumerate]
 
 (** String conversion
@@ -416,6 +417,7 @@ let to_string = function
     "masc_keeper_wire_capture_response_suppressed_total"
   | WireCaptureWriteFailures -> "masc_keeper_wire_capture_write_failures_total"
   | WireCaptureRecordSkipped -> "masc_keeper_wire_capture_record_skipped_total"
+  | TurnBoundaryFailures -> "masc_keeper_turn_boundary_failures_total"
 ;;
 
 type collection =

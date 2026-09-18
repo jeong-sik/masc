@@ -5085,6 +5085,7 @@
   ../lib/fs_compat/capability_exact_read_stubs.c))
 
 (include stanzas/test_keeper_turn_attempt_observer.inc)
+(include stanzas/test_keeper_turn_boundaries.inc)
 (include stanzas/test_keeper_gate_effect_coverage.inc)
 (include stanzas/test_keeper_gate_auto_judge_labels.inc)
 (include stanzas/test_keeper_gate_replay.inc)

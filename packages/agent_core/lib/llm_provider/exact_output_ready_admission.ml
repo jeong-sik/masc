@@ -76,6 +76,7 @@ type wire_admission_error =
   | Global_admission_not_allowed
   | Invalid_connect_timeout
   | Invalid_body_timeout
+  | Missing_deadline
   | Caller_supplied_header_not_allowed
   | Unsupported_image_input
   | Unsupported_document_input
@@ -296,6 +297,7 @@ let wire_admission_error = function
   | Plan.Global_admission_not_allowed -> Global_admission_not_allowed
   | Plan.Invalid_connect_timeout _ -> Invalid_connect_timeout
   | Plan.Invalid_body_timeout _ -> Invalid_body_timeout
+  | Plan.Missing_deadline -> Missing_deadline
   | Plan.Caller_supplied_header_not_allowed _ -> Caller_supplied_header_not_allowed
   | Plan.Unsupported_image_input -> Unsupported_image_input
   | Plan.Unsupported_document_input -> Unsupported_document_input

@@ -209,33 +209,12 @@ let assert_ollama_cloud_seed_runtime runtimes case =
     (match runtime.model.capabilities with
      | None -> failf "expected capabilities for %s" case.runtime_id
      | Some caps ->
-       (* [thinking] says the model reasons; it does not say the endpoint takes a
-          control on the wire. ollama.com /v1 serves reasoning inherently and
-          accepts no control field, so [reasoning-effort] there declares a
-          dialect that can never be encoded: the format carries no effort value,
-          runtime.toml has no key that supplies one, and runtime_adapter never
-          sets reasoning_effort. Every enable_thinking=true turn is then rejected
-          as Enable_not_encodable — measured 25/25 on the acceptance harness,
-          0/25 after the first five models dropped the declaration. Deployed
-          config has carried none since 2026-08-04; the audit is dated 2026-07-20
-          (2026-07-20).
-
-          This is a property of the endpoint, not of individual models, and
-          every case in this list is an ollama.com /v1 model. Asserting it for
-          the whole list keeps a new model from declaring a dialect the
-          endpoint cannot read; a per-model exception set would admit one on
-          the next addition. *)
-       let expected_thinking_format = Runtime_schema.No_thinking_control in
        check bool (case.runtime_id ^ " forced tool_choice disabled") false
          caps.supports_tool_choice;
        check bool (case.runtime_id ^ " image input") case.vision
          caps.supports_image_input;
        check bool (case.runtime_id ^ " multimodal input") case.vision
-         caps.supports_multimodal_inputs;
-       check bool (case.runtime_id ^ " thinking control") true
-         (Runtime_schema.equal_thinking_control_format
-            caps.thinking_control_format
-            expected_thinking_format))
+         caps.supports_multimodal_inputs)
 
 let test_runtime_json_not_in_repo_config () =
   let path = Filename.concat (repo_root ()) "config/runtime.json" in

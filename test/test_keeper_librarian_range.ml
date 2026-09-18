@@ -222,13 +222,46 @@ let test_an_unreadable_line_stops_and_a_torn_tail_does_not () =
   let saved = history 2 in
   let readable = [ 1, Ok (restarted ()); 2, Ok (turn_ended ~fresh:true saved) ] in
   check string "a line the decoder refused may have been a restart line"
+    "stop: line 3 unreadable"
+    (select ~lines:(readable @ [ 3, Error (Boundaries.Not_json "{") ]) saved);
+  check string "a turn that continued a history is no reason to go on"
     "stop: line 2 unreadable"
     (select
-       ~lines:[ 1, Ok (restarted ()); 2, Error (Boundaries.Not_json "{"); 3, Ok (turn_ended ~fresh:true saved) ]
+       ~lines:
+         [ 1, Ok (restarted ())
+         ; 2, Error (Boundaries.Not_json "{")
+         ; 3, Ok (turn_ended ~turn:2 ~fresh:false saved)
+         ]
        saved);
   check string "a fragment with no newline is not a line, and is not counted"
     "read [0,2) turns=1 seen=2"
     (select ~lines:(readable @ [ 3, Error Boundaries.Incomplete_line ]) saved)
+;;
+
+(* Row 2c, second half: the file is never rewritten, so a refused line would
+   stop every later round as well. A restart line after it ends that: the round
+   starts at atom zero whatever the refused line said. *)
+let test_a_restart_after_an_unreadable_line_lets_the_rounds_go_on () =
+  let saved = history 2 in
+  check string "the restart decides the start, so the refused line cannot"
+    "read [0,2) turns=1 seen=3"
+    (select
+       ~lines:
+         [ 1, Ok (restarted ())
+         ; 2, Error (Boundaries.Not_json "{")
+         ; 3, Ok (turn_ended ~fresh:true saved)
+         ]
+       saved);
+  check string "and the round after it resumes from the position, not from zero"
+    "nothing"
+    (select
+       ~progress:(progress_at ~seen:3 saved 2)
+       ~lines:
+         [ 1, Ok (restarted ())
+         ; 2, Error (Boundaries.Not_json "{")
+         ; 3, Ok (turn_ended ~fresh:true saved)
+         ]
+       saved)
 ;;
 
 (* {1 How much is read} *)
@@ -363,6 +396,8 @@ let () =
             test_a_position_of_another_trace_is_reported
         ; test_case "an unreadable line stops and a torn tail does not" `Quick
             test_an_unreadable_line_stops_and_a_torn_tail_does_not
+        ; test_case "a restart after an unreadable line lets the rounds go on" `Quick
+            test_a_restart_after_an_unreadable_line_lets_the_rounds_go_on
         ] )
     ; ( "extent"
       , [ test_case "after a failed round only the oldest turn is read" `Quick

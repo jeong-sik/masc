@@ -120,10 +120,22 @@ type start =
   | No_position
   | Mismatch of P.position
 
+(* Row 2c. A refused line stops the round because it may be a restart line.
+   Once a restart line of this trace follows it, it cannot be one that still
+   matters: a restart puts the start at atom zero, and no content makes a start
+   smaller than that, while any cut point it carried belongs to a history that
+   has since been renumbered. The restart must be of this trace, because what
+   trace the refused line belonged to is exactly what cannot be read. *)
+let dead_line ~own line =
+  List.exists (fun (later, written) -> later > line && is_restart written) own
+;;
+
 let select ~trace_id ~lines ~progress ~messages extent =
+  let own = lines_of_trace ~trace_id lines in
   match first_unreadable lines with
-  | Some (line, error) -> Stop (Unreadable_line { line; error })
-  | None ->
+  | Some (line, error) when not (dead_line ~own line) ->
+    Stop (Unreadable_line { line; error })
+  | Some _ | None ->
     let other_trace =
       match progress with
       | Some { P.position; boundary_lines_seen = _ } ->
@@ -134,7 +146,6 @@ let select ~trace_id ~lines ~progress ~messages extent =
      | Some position -> Position_in_other_trace position
      | None ->
        let boundary_lines_seen = complete_line_count lines in
-       let own = lines_of_trace ~trace_id lines in
        let _labelled, atom_count = Window.annotate messages in
        let digest_at = Window.atom_opening_digest messages in
        let cuts = List.filter_map (fun (_, written) -> cut_point ~digest_at ~atom_count written) own in

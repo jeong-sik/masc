@@ -38,7 +38,13 @@ type stop =
       }
       (** Row 2c. A newline-terminated line the decoder refused. It is not
           dropped, because it may be a restart line, and not read as one,
-          because that would be a convenient value for unknown input. *)
+          because that would be a convenient value for unknown input.
+
+          The file is never rewritten, so a line that stops a round stops
+          every later one as well, until a restart line of this trace is
+          appended after it. From then on the refused line cannot change
+          where a round starts -- a restart puts that at atom zero -- and the
+          rounds go on. *)
   | Position_mismatch of
       { position : Keeper_librarian_progress.position
       ; atom_count : int

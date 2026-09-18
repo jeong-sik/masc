@@ -128,6 +128,14 @@ let render spec =
     | None -> "") in
   let runtime = runtime ^ table ["models";model_key] ["api-name",`String spec.model;"max-context",`Int spec.context;
     "tools-support",`Bool spec.tools;"streaming",`Bool spec.streaming]
+    (* The wizard's provider id carries a hash of the operator's answers, so no
+       catalog row can ever name it and the binding's model is one AGENT_CORE
+       has no entry for. Declaring the table is how a deployment says "these
+       are this model's capabilities, defaults where I stated nothing":
+       [Provider_config.capabilities_for_config_model] answers from the
+       declaration and never reaches the catalog, which is what keeps the
+       startup gate from rejecting the binding as catalog-missing. *)
+    ^ table ["models";model_key;"capabilities"] []
     ^ table [provider;model_key] (["wizard-default",`Bool true] @ if spec.choice=Ollama then ["num-ctx",`Int spec.context] else []) in
   {runtime_id;runtime_toml=runtime}
 let render_json value = `Assoc ["runtime_id",`String value.runtime_id;"runtime_toml",`String value.runtime_toml]

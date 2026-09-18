@@ -163,6 +163,14 @@ if ! printf '%s' "$usage_json" | jq -e 'type == "object"' >/dev/null 2>&1; then
   usage_json='null'
 fi
 
+# --- the image environment the keeper's commands did not get ---
+# The bootstrap records each entry it could not hand to the shim, one
+# NAME<TAB>REASON line (endpoint_env.sh), so a result says which of the image's
+# variables its keepers ran without.
+# shellcheck source-path=SCRIPTDIR source=endpoint_env.sh
+source "$BENCH/driver/endpoint_env.sh"
+left_out_json="$(bench_env_left_out_json "$BENCH/endpoint-env-left-out.tsv")" || left_out_json='[]'
+
 # Belt-and-suspenders: --argjson needs each value to be exactly one JSON text.
 # A multi-line/invalid `final` (or a non-numeric counter) must degrade to a
 # placeholder instead of killing the episode with jq's exit 2.
@@ -198,6 +206,7 @@ jq -n \
   --argjson tool_calls "${tool_calls:-0}" \
   --argjson duplicate_tool_calls "${dup_calls:-0}" \
   --argjson usage "$usage_json" \
+  --argjson endpoint_env_left_out "$left_out_json" \
   --slurpfile final_raw "$final_file" \
   '{state:$state, interrupted:$interrupted, keepers_stopped:$keepers_stopped,
     duration_ms:$duration_ms,
@@ -207,6 +216,7 @@ jq -n \
     cache_tokens:($usage.cache_tokens // null),
     cache_creation_tokens:($usage.cache_creation_tokens // null),
     cache_read_tokens:($usage.cache_read_tokens // null),
+    endpoint_env_left_out:$endpoint_env_left_out,
     final:($final_raw | map(select(type=="object")) | last // {})}' \
   > "$tmp_result"
 if episode_reported_interrupted; then

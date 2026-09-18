@@ -178,7 +178,14 @@ let test_fusion_judge_schema_uses_parser_wire_contract () =
          (List.sort String.compare (type_tokens (schema_property field claim_schema))))
     [ Keeper_memory_os_types.wire_field_board_post_id
     ; Keeper_memory_os_types.wire_field_board_comment_id
-    ]
+    ];
+  (* RFC-0456 §4.2: every claim answers [absorbs], an empty array when it
+     absorbs nothing. *)
+  check
+    (list string)
+    "absorbs is a required array"
+    [ "array" ]
+    (type_tokens (schema_property Keeper_memory_os_types.wire_field_absorbs claim_schema))
 ;;
 
 let test_librarian_dropped_schema_is_closed () =

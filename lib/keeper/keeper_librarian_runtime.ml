@@ -870,6 +870,7 @@ let run_best_effort
                Keeper_memory_os_current.apply_disposition
                ~clock
                ~dropped_statements:selection.dropped
+               ~absorbed:selection.absorbed
                ~keepers_dir
                ~keeper_id
                ~now:(Time_compat.now ())

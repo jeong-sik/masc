@@ -1388,6 +1388,65 @@ let test_validate_reasoning_effort_checks_the_explicit_disable () =
       (Result.is_ok (validate "effort-off-object-model")))
 ;;
 
+(* The ladder answers, but the admission predicate is what a caller asks before
+   it builds a request at all. Until 2026-09-18 its disable arm read
+   [thinking_control_format] alone: a [Reasoning_effort] row whose ladder omits
+   "none" was admitted here and refused by the wire builder a moment later, so
+   the caller learned at dispatch what this predicate exists to tell it
+   beforehand. On a lane holding one candidate that costs the whole turn
+   (#36972, after #26787, #30701 and #28447). *)
+let test_thinking_admission_asks_the_effort_ladder_about_a_disable () =
+  let manifest =
+    Yojson.Safe.from_string
+      {|{"schema_version":1,"models":[
+          {"id_prefix":"admit-off-model","base":"openai_chat_extended","thinking_control_format":"reasoning_effort","accepted_reasoning_efforts":["low"]},
+          {"id_prefix":"admit-off-ok-model","base":"openai_chat_extended","thinking_control_format":"reasoning_effort","accepted_reasoning_efforts":["none","low"]}]}|}
+    |> Capability_manifest.of_json
+    |> Result.get_ok
+  in
+  Fun.protect ~finally:Capability_manifest.clear_global (fun () ->
+    Capability_manifest.set_global manifest;
+    let cfg model_id =
+      let declared_capabilities =
+        match Capabilities.for_model_id model_id with
+        | Some capabilities -> capabilities
+        | None -> Alcotest.failf "fixture capability %s was not declared" model_id
+      in
+      Provider_config.make
+        ~kind:OpenAI_compat
+        ~model_id
+        ~base_url:"https://api.openai.com/v1"
+        ~model_capabilities_override:declared_capabilities
+        ~enable_thinking:false
+        ()
+    in
+    (match
+       Complete_common.thinking_control_request_rejection_reason (cfg "admit-off-model")
+     with
+     | None ->
+       Alcotest.fail
+         "a ladder without none cannot carry the disable, and admission must say so"
+     | Some reason ->
+       let mentions needle =
+         let rec search from =
+           from + String.length needle <= String.length reason
+           && (String.sub reason from (String.length needle) = needle
+               || search (from + 1))
+         in
+         search 0
+       in
+       Alcotest.(check bool)
+         (Printf.sprintf "the reason names the efforts the row does accept: %s" reason)
+         true
+         (mentions "low"));
+    Alcotest.(check bool)
+      "a ladder carrying none admits the disable"
+      true
+      (Option.is_none
+         (Complete_common.thinking_control_request_rejection_reason
+            (cfg "admit-off-ok-model"))))
+;;
+
 let test_validate_reasoning_effort_fails_closed_without_declaration () =
   let config =
     Provider_config.make
@@ -2622,6 +2681,10 @@ let () =
             "reasoning effort checks the explicit disable"
             `Quick
             test_validate_reasoning_effort_checks_the_explicit_disable
+        ; Alcotest.test_case
+            "thinking admission asks the effort ladder about a disable"
+            `Quick
+            test_thinking_admission_asks_the_effort_ladder_about_a_disable
         ; Alcotest.test_case
             "an auto-enabling wire needs a declared effort"
             `Quick

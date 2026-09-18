@@ -222,6 +222,32 @@ def test_a_slashed_wire_model_binds_by_slug_and_keeps_the_wire_name(openrouter_l
     assert 'id_prefix = "z-ai/glm-4.7-flash"' in overlay
 
 
+def test_the_router_lane_inherits_its_ladder_instead_of_declaring_one(
+        openrouter_lists):
+    # An accepted_reasoning_efforts list written here is a capability claim the
+    # benchmark makes up about someone else's API. The router publishes one
+    # contract for everything it serves, so the catalog base carries it
+    # (Capabilities.openrouter_capabilities) and this lane names that base.
+    out = render_arm("b", runtime_id="openrouter.z-ai/glm-4.7-flash", effort="high")
+    overlay = (out / "agent-core-models-overlay.toml").read_text()
+    assert 'base = "openrouter"' in overlay
+    assert "accepted_reasoning_efforts" not in overlay
+    # The dialect comes with the base too, so it is not repeated either.
+    assert "thinking_control_format" not in overlay
+    # The effort still reaches the runtime; inheriting is not disabling.
+    rt = (out / "runtime.toml").read_text()
+    assert 'reasoning-effort = "high"' in rt
+
+
+def test_a_base_with_no_catalog_ladder_still_declares_one():
+    # The two bases below have no ladder in the catalog yet, so the lane cannot
+    # run without one. Each is a gap to close there; this pins that the
+    # remaining declarations are exactly those two and not a blanket default.
+    out = render_arm("b", runtime_id="anthropic.claude-sonnet-5", effort="high")
+    overlay = (out / "agent-core-models-overlay.toml").read_text()
+    assert "accepted_reasoning_efforts" in overlay
+
+
 def test_effective_runtime_id_is_what_masc_resolves():
     assert effective_runtime_id("openrouter.z-ai/glm-4.7-flash") == (
         "openrouter.z-ai-glm-4.7-flash"

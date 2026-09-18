@@ -73,13 +73,18 @@ def denied_tools(spec: dict) -> list[str]:
         denied += DELEGATE_TOOLS
     return denied
 
+# The endpoint's remote_root: a directory per keeper, owned by the task image's
+# user whose commands run there (driver/endpoint_account.sh BENCH_REMOTE_ROOT,
+# compared in tests/test_endpoint_account.py).
+REMOTE_ROOT = "/opt/masc-bench/remote"
+
 # Canonical bench keeper instructions. Rendered into every keeper profile TOML
 # (keeper_up requires non-empty keeper.instructions); run_episode.sh passes
 # the same text on the keeper_up call.
 KEEPER_INSTRUCTIONS = (
     "You are an autonomous engineering agent inside a Linux container. "
     "Complete the task by running shell commands (your tool calls execute in "
-    "this container as root). Work directly; do not ask questions. "
+    "this container). Work directly; do not ask questions. "
     "When the task is verifiably done, finish."
 )
 
@@ -152,7 +157,7 @@ cli_slots = ["{runtime_id}"]
 [exec.ssh.endpoints.local]
 host = "127.0.0.1"
 user = "root"
-remote_root = "/root"
+remote_root = "{remote_root}"
 port = 22
 identity_file = "/opt/masc-bench/ssh/id_ed25519"
 
@@ -201,7 +206,7 @@ cli_slots = ["{runtime_id}"]
 [exec.ssh.endpoints.local]
 host = "127.0.0.1"
 user = "root"
-remote_root = "/root"
+remote_root = "{remote_root}"
 port = 22
 identity_file = "/opt/masc-bench/ssh/id_ed25519"
 
@@ -259,10 +264,7 @@ base = "{capabilities_base}"
 supports_reasoning = true
 supports_tools = true
 supports_native_streaming = true
-# Without an accepted_reasoning_efforts contract the request validator rejects
-# any reasoning-effort (provider_config.ml Undeclared_reasoning_effort_capability).
-accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
-{thinking_control}{sampling_lines}{max_output_lines}supports_parallel_tool_calls = {parallel}
+{accepted_efforts_lines}{thinking_control}{sampling_lines}{max_output_lines}supports_parallel_tool_calls = {parallel}
 """
 
 OPENROUTER_ENDPOINTS_URL = "https://openrouter.ai/api/v1/models/{model}/endpoints"
@@ -363,7 +365,7 @@ PROVIDERS = {
                        api_key_env="OPENROUTER_API_KEY",
                        kind="openai_compat",
                        request_path="/chat/completions",
-                       capabilities_base="openai"),
+                       capabilities_base="openrouter"),
     "kimi_coding": dict(protocol="openai-compatible-http",
                         endpoint="https://api.kimi.com/coding/v1",
                         api_key_env="KIMI_API_KEY",
@@ -400,7 +402,21 @@ def is_official_client(provider: str) -> bool:
 #   No_thinking_control, so any reasoning_effort is rejected by
 #   reasoning_dialect.validate_request_control_inputs. K2.7-code thinks
 #   always-on anyway (supports_thinking_type="only").
-EFFORT_CAPABLE_BASES = {"anthropic", "openai"}
+# - openrouter: the router's own base, which declares the reasoning_effort
+#   dialect and the accepted ladder (Capabilities.openrouter_capabilities).
+EFFORT_CAPABLE_BASES = {"anthropic", "openai", "openrouter"}
+
+# An accepted_reasoning_efforts contract has to exist before the validator will
+# carry any reasoning-effort at all (provider_config.ml
+# Undeclared_reasoning_effort_capability). Where the catalog base declares one,
+# nothing belongs here — the bench is a consumer of those facts like any other
+# caller, and a ladder written here is a capability claim the benchmark made up
+# about someone else's API. The two entries below are the bases that still have
+# no catalog ladder; each is a gap to close there, not a value to maintain here.
+ACCEPTED_EFFORTS_BY_BASE = {
+    "anthropic": ["low", "medium", "high", "xhigh", "max"],
+    "openai": ["low", "medium", "high", "xhigh", "max"],
+}
 
 
 def seed_skills_block() -> str:
@@ -503,7 +519,8 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
             turn_timeout_s=OFFICIAL_CLIENT_TURN_TIMEOUT_S,
             wall_clock_ceiling_s=OFFICIAL_CLIENT_WALL_CLOCK_CEILING_S,
             fusion=str(spec["fusion"]).lower(),
-            max_concurrent=4 if spec["parallel"] else 1)
+            max_concurrent=4 if spec["parallel"] else 1,
+            remote_root=REMOTE_ROOT)
         if spec["skills"]:
             runtime_toml += "\n" + seed_skills_block()
         (root / "runtime.toml").write_text(runtime_toml)
@@ -522,6 +539,7 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
         binding_id=binding_id,
         effort=effort, fusion=str(spec["fusion"]).lower(),
         max_concurrent=4 if spec["parallel"] else 1,
+        remote_root=REMOTE_ROOT,
         effort_lines=(
             f'reasoning-effort = "{effort}"\nthinking-support = true\n'
             if pcfg["capabilities_base"] in EFFORT_CAPABLE_BASES else ""),
@@ -560,6 +578,12 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
         thinking_control = 'thinking_control_format = "reasoning_effort"\n'
         max_output_lines = (
             f"max_output_tokens = {openrouter.max_output}\n" if openrouter else "")
+    elif pcfg["capabilities_base"] == "openrouter":
+        # The router's base already carries the dialect, so repeating it here
+        # would be a second place to keep it right.
+        thinking_control = ""
+        max_output_lines = (
+            f"max_output_tokens = {openrouter.max_output}\n" if openrouter else "")
     else:
         thinking_control = ""
         max_output_lines = ""
@@ -572,8 +596,15 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
     sampling_lines = (
         'ignored_sampling_parameters = ["temperature", "top_p"]\n'
         if pcfg["capabilities_base"] in ("kimi", "anthropic") else "")
+    accepted_efforts = ACCEPTED_EFFORTS_BY_BASE.get(pcfg["capabilities_base"])
+    accepted_efforts_lines = (
+        "accepted_reasoning_efforts = ["
+        + ", ".join(f'"{effort}"' for effort in accepted_efforts)
+        + "]\n"
+        if accepted_efforts else "")
     (root / "agent-core-models-overlay.toml").write_text(OVERLAY_TOML.format(
         provider=provider, model_alias=model_alias,
+        accepted_efforts_lines=accepted_efforts_lines,
         thinking_control=thinking_control,
         sampling_lines=sampling_lines,
         max_output_lines=max_output_lines,

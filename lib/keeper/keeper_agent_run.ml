@@ -805,7 +805,7 @@ let run_turn
       ?official_task_reference
       ?on_gate_evidence_admitted
       ?deferred_runtime_lane
-      ?on_runtime_retry_deferred
+      ?runtime_retry_deferral
       ?on_runtime_attempt_failed
       ?on_produced_checkpoint
       ?on_runtime_lane_terminal_error
@@ -831,9 +831,16 @@ let run_turn
     Option.iter (record_produced_checkpoint ~runtime_id:error.origin_runtime_id ~attempt:error.origin_attempt)
       error.checkpoint_after;
     Option.iter (fun callback -> callback error) on_runtime_lane_terminal_error in
-  let record_runtime_retry_deferred hint =
-    deferred_runtime_lane_ref := Some hint;
-    Option.iter (fun callback -> callback hint) on_runtime_retry_deferred
+  let runtime_retry_deferral =
+    Option.map
+      (fun { Keeper_turn_driver.continuation; on_deferred } ->
+         { Keeper_turn_driver.continuation
+         ; on_deferred =
+             (fun hint ->
+                deferred_runtime_lane_ref := Some hint;
+                on_deferred hint)
+         })
+      runtime_retry_deferral
   in
   let user_message = Keeper_run_prompt.sanitize_user_message user_message in
   Masc_runtime_events.emit_turn_start ();
@@ -1450,6 +1457,15 @@ let run_turn
                 ctx_work.checkpoint.Agent_core.Checkpoint.working_context
          in
          let last_persisted_checkpoint_ref = ref None in
+         (* What this dispatch wrote to the canonical checkpoint. Marked from
+            the save's own answer below, because only a [Saved] reaches the
+            checkpoint a resumed operation reads; a [Stale_noop] leaves it as
+            it was. The runtime lane reads this to decide whether a failed last
+            candidate has tool results to resume from
+            (RFC last-path-resumes-after-progress §3.2). *)
+         let checkpoint_progress =
+           Atomic.make Keeper_turn_driver_try_provider.No_checkpoint_stage
+         in
          (* The stage saves of this turn and its finalize save write one
             growing history. The memo keeps each saved message's encoding, so a
             save encodes only the messages the previous save did not write; the
@@ -1489,6 +1505,9 @@ let run_turn
                 with
                 | Ok (Keeper_checkpoint_store.Saved _) ->
                   last_persisted_checkpoint_ref := Some checkpoint;
+                  Keeper_turn_driver_try_provider.observe_checkpoint_saved
+                    checkpoint_progress
+                    snapshot.stage;
                   Ok ()
                 | Ok (Keeper_checkpoint_store.Stale_noop _) -> Ok ()
                 | Error _ as error -> error
@@ -1528,7 +1547,8 @@ let run_turn
                              config
                              manifest)
                       ?deferred_runtime_lane
-                      ~on_runtime_retry_deferred:record_runtime_retry_deferred
+                      ?runtime_retry_deferral
+                      ~checkpoint_progress
                       ~on_runtime_lane_terminal_error:record_runtime_lane_terminal_error
                       ?on_deferred_runtime_consumed
                       ~temperature
@@ -2210,6 +2230,8 @@ let run_turn
                   ; total_atoms =
                       observation.Runtime_model_input_tail_window.total_atoms
                   ; measurement
+                  ; front_atom_digest =
+                      observation.Runtime_model_input_tail_window.front_atom_digest
                   })
                !model_input_window_ref)
           ~raw_trace_run_ref

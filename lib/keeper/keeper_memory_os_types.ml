@@ -14,6 +14,7 @@ let wire_field_memory_id = "memory_id"
 let wire_field_reason = "reason"
 let wire_field_basis = "basis"
 let wire_field_supersedes = "supersedes"
+let wire_field_absorbs = "absorbs"
 let wire_field_kind = "kind"
 let wire_field_derivations = "derivations"
 let wire_field_board = "board"
@@ -264,6 +265,7 @@ let wire_librarian_claim_fields =
   ; wire_field_board_post_id
   ; wire_field_board_comment_id
   ; wire_field_supersedes
+  ; wire_field_absorbs
   ]
 ;;
 
@@ -274,6 +276,11 @@ let wire_librarian_dropped_fields =
 type dropped_statement =
   { memory_id : string
   ; reason : string
+  }
+
+type absorbed_statement =
+  { absorbed : string
+  ; into : string
   }
 
 let dropped_statement_to_json (d : dropped_statement) =

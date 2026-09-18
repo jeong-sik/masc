@@ -417,9 +417,11 @@ let accept_rejected_core_error
    repeated word, rejected at max_tokens, message_assistant_text 136 KB ->
    308 KB over twelve turns in 30-40 KB steps -- the size of the rejected
    text each time. *)
+(* The wire below can be told to stop thinking; the case where it cannot is
+   [test_a_wire_that_cannot_stop_thinking_drops_instead_of_retrying]. *)
 let truncation_recovery ~enable_thinking ~result ~checkpoint =
   Masc.Keeper_turn_driver_try_provider.For_testing.truncation_recovery
-    ~enable_thinking ~result ~checkpoint
+    ~enable_thinking ~thinking_can_be_disabled:true ~result ~checkpoint
 
 let max_tokens_rejection () =
   Error
@@ -466,6 +468,29 @@ let test_a_rejected_response_leaves_the_checkpoint_either_way () =
     Alcotest.fail "thinking is already off; there is no remedy to retry"
   | Masc.Keeper_turn_driver_try_provider.For_testing.Recovery_not_applicable ->
     Alcotest.fail "the rejected response must leave the checkpoint"
+
+(* Thinking was on, so the remedy looks available -- but some wires have no way
+   to say "stop thinking": Grok's reasoning has no off switch, and a
+   Reasoning_effort row whose ladder omits "none" cannot spell the disable.
+   Sending it anyway spends the turn on a request refused before dispatch, and a
+   lane holding one candidate has nothing to rotate to (#36972, the fourth turn
+   lost this way after #26787, #30701 and #28447). The rejected response is owed
+   the same drop it gets when thinking was already off. *)
+let test_a_wire_that_cannot_stop_thinking_drops_instead_of_retrying () =
+  let checkpoint = assistant_ended_checkpoint () in
+  match
+    Masc.Keeper_turn_driver_try_provider.For_testing.truncation_recovery
+      ~enable_thinking:(Some true) ~thinking_can_be_disabled:false
+      ~result:(max_tokens_rejection ()) ~checkpoint:(Some checkpoint)
+  with
+  | Masc.Keeper_turn_driver_try_provider.For_testing.Drop_rejected_response cut ->
+    Alcotest.(check int)
+      "the rejected response is dropped without a retry that cannot be sent" 1
+      (List.length cut.Agent_core.Checkpoint.messages)
+  | Masc.Keeper_turn_driver_try_provider.For_testing.Retry_without_thinking _ ->
+    Alcotest.fail "this wire has no field that can carry the disable"
+  | Masc.Keeper_turn_driver_try_provider.For_testing.Recovery_not_applicable ->
+    Alcotest.fail "the rejected response must still leave the checkpoint"
 
 (* 2026-09-11: the no-thinking truncation retry re-dispatches the same
    candidate; with the runtime declaring reasoning-effort the retry died in
@@ -2331,6 +2356,10 @@ let () =
             "a rejected response leaves the checkpoint either way"
             `Quick
             test_a_rejected_response_leaves_the_checkpoint_either_way;
+          Alcotest.test_case
+            "a wire that cannot stop thinking drops instead of retrying"
+            `Quick
+            test_a_wire_that_cannot_stop_thinking_drops_instead_of_retrying;
           Alcotest.test_case
             "truncation retry candidate drops reasoning effort"
             `Quick

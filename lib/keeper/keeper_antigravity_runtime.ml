@@ -151,8 +151,13 @@ let bounded_history_projection ~capacity_bytes ~reserved_bytes
     | None -> Ok messages
     | Some project -> project messages
   in
-  let history_atom_count = List.length messages in
   Domain_pool_ref.submit_cpu_or_inline (fun () ->
+    (* Atoms, not messages: the window's front is named by the message that
+       opens atom [total_atoms - transmitted_atoms], so both counts have to
+       be the atoms [Runtime_model_input_tail_window.annotate] numbers. *)
+    let _labelled, history_atom_count =
+      Runtime_model_input_tail_window.annotate messages
+    in
     match
       (* [project_with_drop] rather than [project]: the same cut, keeping the
          counts instead of discarding them. The Agent Core path publishes this
@@ -168,8 +173,10 @@ let bounded_history_projection ~capacity_bytes ~reserved_bytes
     | Ok projection ->
       Option.iter
         (fun observe ->
-           observe
+           Option.iter
+             observe
              (Runtime_model_input_tail_window.observe
+                ~digest_at:(Runtime_model_input_tail_window.atom_opening_digest messages)
                 ~history_atom_count
                 projection))
         on_model_input_window_observation;

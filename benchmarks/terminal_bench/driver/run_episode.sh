@@ -13,6 +13,8 @@ MCP_TOKEN="$(cat "$BENCH/token")"
 export MCP_TOKEN
 source "$BENCH/driver/mcp.sh"
 source "$BENCH/driver/gh_seed.sh"
+# shellcheck source-path=SCRIPTDIR source=endpoint_account.sh
+source "$BENCH/driver/endpoint_account.sh"
 
 INSTRUCTION_FILE="$1"
 RESULT_JSON="$2"
@@ -46,7 +48,7 @@ report_setup_failure() {
 }
 
 KEEPER_INSTRUCTIONS="You are an autonomous engineering agent inside a Linux container. \
-Complete the task by running shell commands (your tool calls execute in this container as root). \
+Complete the task by running shell commands (your tool calls execute in this container). \
 Work directly; do not ask questions. When the task is verifiably done, finish."
 
 server_ready=0
@@ -69,8 +71,9 @@ for i in $(seq 1 "${KEEPER_COUNT}"); do
   k="bench-${i}"
   # remote_ssh preflight (keeper_sandbox_remote.perform_preflight) requires
   # the keeper root <remote_root>/<name> to already exist; the bench endpoint
-  # is this same container with remote_root=/root.
-  mkdir -p "/root/${k}"
+  # is this same container, and the keeper's commands run there as the image's
+  # user (endpoint_account.sh).
+  bench_keeper_root "${k}"
   # A GitHub identity only when GH_TOKEN is given (gh_seed.sh).
   seed_gh_hosts "${k}"
   # A keeper that does not come up is the episode's result, not a reason to

@@ -1243,6 +1243,161 @@ let test_corrupt_snapshot_is_a_dependency_failure () =
   Alcotest.(check bool) "the detail names the file" true (mentions_path 0)
 ;;
 
+(* RFC-0456 §4.2: a fact a librarian pass absorbed is found through
+   source=absorbed and source=all, named with the claim that now says it. Rows a
+   pass wrote before a replace that failed are recognised: a row for a fact
+   that is still current is not returned, and a row repeating another's
+   memory_id and into is returned once, at its last write. A line that does not
+   decode is left out and named. *)
+let test_absorbed_facts_are_searchable () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "absorbed-search" in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+  in
+  let id = Masc.Keeper_memory_os_types.memory_id in
+  let alpha = fact "alpha deploys on tuesday" in
+  let beta = fact "beta deploys on tuesday" in
+  let gamma = fact "gamma deploys on friday" in
+  replace_current_facts ~keepers_dir ~keeper_id:meta.name [ alpha; beta; gamma ];
+  let merged = fact "alpha and beta deploy on tuesday" in
+  (match
+     Current.apply_disposition
+       ~keepers_dir
+       ~keeper_id:meta.name
+       ~now:(Time_compat.now ())
+       ~source:{ Current.kind = Current.Librarian; trace_id = "pass" }
+       ~absorbed:
+         [ { Masc.Keeper_memory_os_types.absorbed = id alpha; into = id merged }
+         ; { Masc.Keeper_memory_os_types.absorbed = id beta; into = id merged }
+         ]
+       ~new_claims:[ merged ]
+       ()
+   with
+   | Ok _ -> ()
+   | Error detail -> Alcotest.fail detail);
+  let uncommitted (absorbed : Masc.Keeper_memory_os_types.fact) =
+    { Masc.Keeper_memory_absorbed.recorded_at = Time_compat.now ()
+    ; trace_id = "failed-pass"
+    ; memory_id = id absorbed
+    ; into = id merged
+    ; fact = absorbed
+    }
+  in
+  (match
+     Masc.Keeper_memory_absorbed.append_all
+       ~keepers_dir
+       ~keeper_id:meta.name
+       [ uncommitted gamma; uncommitted alpha ]
+   with
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (Masc.Keeper_memory_absorbed.append_error_to_string error));
+  let search source =
+    Runtime.keeper_memory_search_json
+      ~config
+      ~meta
+      ~ctx_work:(empty_ctx ())
+      ~args:
+        (`Assoc [ "query", `String "deploy"; "source", `String source; "limit", `Int 10 ])
+    |> Yojson.Safe.from_string
+  in
+  let matches response =
+    match json_field "matches" response with
+    | `List items -> items
+    | _ -> Alcotest.fail "matches is a list"
+  in
+  let absorbed = matches (search "absorbed") in
+  Alcotest.(check (list string))
+    "each absorbed statement once, at its last write, and none for a current fact"
+    [ "beta deploys on tuesday"; "alpha deploys on tuesday" ]
+    (List.map (string_field "text") absorbed);
+  List.iter
+    (fun matched ->
+       Alcotest.(check string) "the store is named" "absorbed_memory"
+         (string_field "store" matched);
+       Alcotest.(check string) "into names the merged claim" (id merged)
+         (string_field "into" matched);
+       Alcotest.(check bool) "and says it is current" true
+         (json_field "into_current" matched = `Bool true))
+    absorbed;
+  Alcotest.(check (list string))
+    "all returns the current facts, then the absorbed ones"
+    [ "current_memory_snapshot"
+    ; "current_memory_snapshot"
+    ; "absorbed_memory"
+    ; "absorbed_memory"
+    ]
+    (List.filter_map
+       (function
+         | `Assoc fields -> Option.map Yojson.Safe.Util.to_string (List.assoc_opt "store" fields)
+         | _ -> None)
+       (matches (search "all")));
+  Alcotest.(check (list string))
+    "memory still returns only current facts"
+    [ "gamma deploys on friday"; "alpha and beta deploy on tuesday" ]
+    (List.map (string_field "text") (matches (search "memory")));
+  let channel =
+    open_out_gen
+      [ Open_wronly; Open_append ]
+      0o600
+      (Masc.Keeper_memory_absorbed.path_for_keepers_dir ~keepers_dir ~keeper_id:meta.name)
+  in
+  output_string channel "{\"recorded_at\": 1";
+  close_out channel;
+  let torn = search "absorbed" in
+  Alcotest.(check int) "the readable rows are still returned" 2
+    (List.length (matches torn));
+  Alcotest.(check bool) "and the line that does not decode is counted" true
+    (json_field "absorbed_unreadable_lines" torn
+     = `Assoc [ "count", `Int 1; "first", `Int 5; "last", `Int 5 ])
+;;
+
+(* The absorbed store is one of three that source=all reads. When it cannot be
+   read at all, source=absorbed fails as a store that did not answer, and
+   source=all still answers from the current facts and names the store it went
+   without. *)
+let test_an_unreadable_absorbed_store_leaves_all_its_current_facts () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "absorbed-unreadable" in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+  in
+  replace_current_facts ~keepers_dir ~keeper_id:meta.name [ fact "gamma deploys on friday" ];
+  Unix.mkdir
+    (Masc.Keeper_memory_absorbed.path_for_keepers_dir ~keepers_dir ~keeper_id:meta.name)
+    0o700;
+  let search source =
+    Runtime.keeper_memory_search_with_outcome
+      ~config
+      ~meta
+      ~ctx_work:(empty_ctx ())
+      ~args:(`Assoc [ "query", `String "deploy"; "source", `String source ])
+  in
+  let absorbed = search "absorbed" in
+  check_failure_class "absorbed alone" Tool_result.Dependency_unavailable absorbed;
+  Alcotest.(check string) "the absorbed store is named"
+    "absorbed_read_failed"
+    (string_field "error_kind"
+       (Yojson.Safe.from_string absorbed.Masc.Keeper_tool_execution.raw_output));
+  let all =
+    (search "all").Masc.Keeper_tool_execution.raw_output |> Yojson.Safe.from_string
+  in
+  (match json_field "matches" all with
+   | `List [ matched ] ->
+     Alcotest.(check string) "the current fact is still answered"
+       "gamma deploys on friday" (string_field "text" matched)
+   | _ -> Alcotest.fail "expected the one current fact");
+  match json_field "unavailable_stores" all with
+  | `List [ store ] ->
+    Alcotest.(check string) "and the missing store is named" "absorbed_memory"
+      (string_field "store" store)
+  | _ -> Alcotest.fail "expected the absorbed store to be named unavailable"
+;;
+
 (* A write that cannot reach its store is the same dependency failure. The
    class tells the model that other arguments will not save the claim. A store
    error does not say whether the new snapshot was moved into place before it,
@@ -1654,6 +1809,14 @@ let () =
             "corrupt snapshot is a dependency failure"
             `Quick
             test_corrupt_snapshot_is_a_dependency_failure
+        ; Alcotest.test_case
+            "absorbed facts are searchable"
+            `Quick
+            test_absorbed_facts_are_searchable
+        ; Alcotest.test_case
+            "an unreadable absorbed store leaves all its current facts"
+            `Quick
+            test_an_unreadable_absorbed_store_leaves_all_its_current_facts
         ; Alcotest.test_case
             "unwritable store is a dependency failure"
             `Quick

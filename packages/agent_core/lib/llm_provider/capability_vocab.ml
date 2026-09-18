@@ -740,6 +740,7 @@ let base_label_values =
   ; (* string-only presets not expressible as a Provider_kind.t *)
     "openai_compat_chat_extended"
   ; "openai_chat_extended"
+  ; "openrouter"
   ; "xai"
   ; "mistral"
   ; "cohere"

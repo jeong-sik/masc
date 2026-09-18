@@ -56,6 +56,12 @@ export interface Task {
   goal_id?: string | null
   status?: 'todo' | 'in_progress' | 'claimed' | 'awaiting_verification' | 'done' | 'cancelled' | 'blocked' | 'paused' | 'unknown'
   status_raw?: string | null
+  /** The question an `awaiting_verification` task asked: `complete` finishes,
+   *  `cancel` stops. It rides on the task status (types_core.ml) because an
+   *  approval must know which terminal state it authorises, and it is the
+   *  reliable stop signal — unlike a request's `cancellation_reason`, which a
+   *  stop submitted before the field was kept (2026-09-15) does not carry. */
+  verification_intent?: 'complete' | 'cancel' | null
   priority?: number
   assignee?: string
   description?: string

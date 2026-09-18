@@ -183,6 +183,23 @@ describe('normalizeTaskStatus', () => {
       .toMatchObject({ predecessor_task_id: null })
   })
 
+  // The task status carries the verification question at the top level; the
+  // verify queue keys a stop on it, so dropping it here would re-lock every
+  // cancellation whose request record kept no sentence.
+  it('carries the verification intent through to the store', () => {
+    expect(normalizeTask({
+      id: 'task-4',
+      title: 'Stop request',
+      status: 'awaiting_verification',
+      intent: 'cancel',
+    })).toMatchObject({ verification_intent: 'cancel' })
+  })
+
+  it('reports an unknown verification intent as null', () => {
+    expect(normalizeTask({ id: 'task-5', title: 'Task', intent: 'whatever' }))
+      .toMatchObject({ verification_intent: null })
+  })
+
 })
 
 describe('normalizeMessage', () => {

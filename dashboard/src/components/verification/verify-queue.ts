@@ -137,12 +137,19 @@ function vqGateStats(item: VqQueueItem, checks: VqChecks) {
 
 // A stop is judged on the sentence the producer gave, not on the completion
 // contract: the gate checklist is about finishing, so it must not hold a stop
-// shut. The backend refuses a stop without a stated reason
-// (workspace_task_transitions.ml), and a completion drops the field entirely
-// rather than sending a null (verification_protocol.ml), so a non-empty
-// cancellationReason is a reliable "this is a stop".
+// shut. The reliable signal is the task status's verification intent
+// ("cancel"), which every awaiting task carries (types_core.ml) — including a
+// stop submitted before the request record kept its sentence
+// (cancellation_reason, #36513, 2026-09-15). That request field stays as a
+// second signal: a record carrying it is a stop, reason or none.
 function vqIsCancel(item: VqQueueItem): boolean {
-  return item.cancellationReason != null
+  return item.task.verification_intent === 'cancel' || item.cancellationReason != null
+}
+
+// The sentence the operator judges, when the record kept it. A stop submitted
+// before the record kept a copy has the intent but no sentence.
+function vqStopSentence(item: VqQueueItem): string {
+  return item.cancellationReason ?? '중단 요청 · 사유 미기록(제출 시점이 사유 보존 이전)'
 }
 
 // ── gate checklist ────────────────────────────────────────────
@@ -331,8 +338,8 @@ function VqReview(props: {
     ${task.predecessor_task_id
       ? html`<div class="vq-note rerun">↻ 재실행 제출 · predecessor <b>${task.predecessor_task_id}</b> — 반려 후 재검증</div>`
       : null}
-    ${item.cancellationReason
-      ? html`<div class="vq-note rerun">■ 중단 요청 · 완료가 아니라 포기를 판정합니다 — ${item.cancellationReason}</div>`
+    ${vqIsCancel(item)
+      ? html`<div class="vq-note rerun">■ 중단 요청 · 완료가 아니라 포기를 판정합니다 — ${vqStopSentence(item)}</div>`
       : null}
     <${VqGate} item=${item} checks=${props.checks} onToggleGate=${props.onToggleGate} />
     ${handoff && handoff.summary
@@ -497,8 +504,8 @@ function VqTriage(props: VqBodyProps) {
               </div>
               <button class="vq-tri-more" onClick=${() => setExpand(item.task.id)}>게이트 증거 검토 →</button>
             ` : html`
-              ${item.cancellationReason
-                ? html`<div class="vq-note rerun">■ 중단 요청 · 완료가 아니라 포기를 판정합니다 — ${item.cancellationReason}</div>`
+              ${vqIsCancel(item)
+                ? html`<div class="vq-note rerun">■ 중단 요청 · 완료가 아니라 포기를 판정합니다 — ${vqStopSentence(item)}</div>`
                 : null}
               <${VqGate} item=${item} checks=${props.checks} onToggleGate=${props.onToggleGate} />
               <${VqActions}
@@ -538,11 +545,14 @@ const VQ_VERDICT_META: Record<VerificationVerdictDecision, { cls: string; mark: 
 
 function VqVerdictRow({ verdict }: { verdict: VqSessionVerdict }) {
   const m = VQ_VERDICT_META[verdict.decision]
+  const cancelled = verdict.decision === 'approve' && vqIsCancel(verdict.item)
+  const lbl = cancelled ? '중단 승인' : m.lbl
+  const tail = cancelled ? 'task → cancelled' : m.tail
   return html`
     <div class="vq-verdict ${m.cls}">
       <span class="vq-verdict-mark">${m.mark}</span>
       <span class="vq-verdict-body">
-        <b>${verdict.item.task.id}</b> ${verdict.item.task.title} — ${m.lbl} · ${m.tail}${verdict.reason ? ` · “${verdict.reason}”` : ''}
+        <b>${verdict.item.task.id}</b> ${verdict.item.task.title} — ${lbl} · ${tail}${verdict.reason ? ` · “${verdict.reason}”` : ''}
       </span>
     </div>
   `

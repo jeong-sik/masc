@@ -268,10 +268,32 @@ describe('VerifyQueue', () => {
     expect(notes.some(t => t.includes('중단 요청'))).toBe(false)
   })
 
-  // A stop is judged on its sentence, not on the completion contract: the
-  // approve must not wait on gate rows that describe finishing.
-  it('approves a stop without confirming the completion gates', async () => {
-    tasks.value = [makeTask()]
+  // A stop is approvable without the completion gate. The reliable signal is
+  // the task status intent, so this holds even for a stop whose request record
+  // kept no sentence (null cancellation_reason) on a task with no contract —
+  // the exact shape the queue could never approve before.
+  it('approves a stop from its status intent alone, with no gate and no reason', async () => {
+    tasks.value = [makeTask({ contract: { completion_contract: [] }, verification_intent: 'cancel' })]
+    mockState.value = {
+      loading: false,
+      error: null,
+      data: requestsResponse([{ cancellation_reason: null }]),
+    }
+    const { container } = render(html`<${VerifyQueue} />`)
+
+    const approve = screen.getByText('✓ 중단 승인') as HTMLButtonElement
+    expect(approve.disabled).toBe(false)
+    expect(container.querySelector('.vq-note.rerun')?.textContent).toContain('중단 요청')
+
+    fireEvent.click(approve)
+    await waitFor(() => {
+      expect(submitVerificationVerdict).toHaveBeenCalledWith({ taskId: 'task-1', decision: 'approve' })
+    })
+  })
+
+  // A stop that carries its sentence still approves, and the gate is untouched.
+  it('approves a stop that carries its sentence, gate untouched', () => {
+    tasks.value = [makeTask({ verification_intent: 'cancel' })]
     mockState.value = {
       loading: false,
       error: null,
@@ -285,11 +307,16 @@ describe('VerifyQueue', () => {
     expect(approve.disabled).toBe(false)
     // the completion gate is untouched and still unconfirmed
     expect(container.querySelector('.vq-gate-h .n')?.textContent).toBe('0/2 확인')
+  })
 
-    fireEvent.click(approve)
-    await waitFor(() => {
-      expect(submitVerificationVerdict).toHaveBeenCalledWith({ taskId: 'task-1', decision: 'approve' })
-    })
+  // A completion keeps the completion gate: with no contract clause there is
+  // nothing confirmed, so its approve stays locked.
+  it('keeps a completion gated when no clause is confirmed', () => {
+    tasks.value = [makeTask({ contract: { completion_contract: [] }, verification_intent: 'complete' })]
+    render(html`<${VerifyQueue} />`)
+
+    const approve = screen.getByText('✓ 승인 · 통과') as HTMLButtonElement
+    expect(approve.disabled).toBe(true)
   })
 
   it('renders a rerun note and handoff note from task fields', () => {

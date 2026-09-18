@@ -264,10 +264,7 @@ base = "{capabilities_base}"
 supports_reasoning = true
 supports_tools = true
 supports_native_streaming = true
-# Without an accepted_reasoning_efforts contract the request validator rejects
-# any reasoning-effort (provider_config.ml Undeclared_reasoning_effort_capability).
-accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
-{thinking_control}{sampling_lines}{max_output_lines}supports_parallel_tool_calls = {parallel}
+{accepted_efforts_lines}{thinking_control}{sampling_lines}{max_output_lines}supports_parallel_tool_calls = {parallel}
 """
 
 OPENROUTER_ENDPOINTS_URL = "https://openrouter.ai/api/v1/models/{model}/endpoints"
@@ -368,7 +365,7 @@ PROVIDERS = {
                        api_key_env="OPENROUTER_API_KEY",
                        kind="openai_compat",
                        request_path="/chat/completions",
-                       capabilities_base="openai"),
+                       capabilities_base="openrouter"),
     "kimi_coding": dict(protocol="openai-compatible-http",
                         endpoint="https://api.kimi.com/coding/v1",
                         api_key_env="KIMI_API_KEY",
@@ -405,7 +402,21 @@ def is_official_client(provider: str) -> bool:
 #   No_thinking_control, so any reasoning_effort is rejected by
 #   reasoning_dialect.validate_request_control_inputs. K2.7-code thinks
 #   always-on anyway (supports_thinking_type="only").
-EFFORT_CAPABLE_BASES = {"anthropic", "openai"}
+# - openrouter: the router's own base, which declares the reasoning_effort
+#   dialect and the accepted ladder (Capabilities.openrouter_capabilities).
+EFFORT_CAPABLE_BASES = {"anthropic", "openai", "openrouter"}
+
+# An accepted_reasoning_efforts contract has to exist before the validator will
+# carry any reasoning-effort at all (provider_config.ml
+# Undeclared_reasoning_effort_capability). Where the catalog base declares one,
+# nothing belongs here — the bench is a consumer of those facts like any other
+# caller, and a ladder written here is a capability claim the benchmark made up
+# about someone else's API. The two entries below are the bases that still have
+# no catalog ladder; each is a gap to close there, not a value to maintain here.
+ACCEPTED_EFFORTS_BY_BASE = {
+    "anthropic": ["low", "medium", "high", "xhigh", "max"],
+    "openai": ["low", "medium", "high", "xhigh", "max"],
+}
 
 
 def seed_skills_block() -> str:
@@ -567,6 +578,12 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
         thinking_control = 'thinking_control_format = "reasoning_effort"\n'
         max_output_lines = (
             f"max_output_tokens = {openrouter.max_output}\n" if openrouter else "")
+    elif pcfg["capabilities_base"] == "openrouter":
+        # The router's base already carries the dialect, so repeating it here
+        # would be a second place to keep it right.
+        thinking_control = ""
+        max_output_lines = (
+            f"max_output_tokens = {openrouter.max_output}\n" if openrouter else "")
     else:
         thinking_control = ""
         max_output_lines = ""
@@ -579,8 +596,15 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
     sampling_lines = (
         'ignored_sampling_parameters = ["temperature", "top_p"]\n'
         if pcfg["capabilities_base"] in ("kimi", "anthropic") else "")
+    accepted_efforts = ACCEPTED_EFFORTS_BY_BASE.get(pcfg["capabilities_base"])
+    accepted_efforts_lines = (
+        "accepted_reasoning_efforts = ["
+        + ", ".join(f'"{effort}"' for effort in accepted_efforts)
+        + "]\n"
+        if accepted_efforts else "")
     (root / "agent-core-models-overlay.toml").write_text(OVERLAY_TOML.format(
         provider=provider, model_alias=model_alias,
+        accepted_efforts_lines=accepted_efforts_lines,
         thinking_control=thinking_control,
         sampling_lines=sampling_lines,
         max_output_lines=max_output_lines,

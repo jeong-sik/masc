@@ -1,5 +1,5 @@
 ---
-rfc: "librarian-is-the-brain"
+rfc: "librarian-lifecycle"
 title: "Librarian 생명주기 — 끝난 턴을 빠짐없이 순서대로 읽고, 읽은 위치를 남긴다"
 status: Draft
 created: 2026-09-18

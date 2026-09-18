@@ -17,6 +17,31 @@ implementation_prs: []
 - 작성: 2026-09-18. 코드는 origin/main `84fb520c34`, 실측은 같은 날 라이브 `<base-path>/.masc`.
 - 관련: 창 RFC(`keeper-context-window-in-tokens`) §13 개정 Draft #37008, Memory OS RFC(`memory-os-bounded-context-and-librarian-curator`), RFC-0456, RFC-0363, 이슈 #37004·#36979
 
+## 읽기 전에 — 말의 뜻
+
+이 문서는 message, atom, 이력, 세션, 턴을 구분해서 쓴다. 큰 것부터 적는다.
+
+```
+Keeper
+└─ 세션(trace)              한 번에 하나. 이력이 새로 시작하면 세션도 새로 시작한다
+   └─ checkpoint 파일        <세션 디렉터리>/<session_id>.json. 세션당 하나
+      ├─ system_prompt, tools, 모델 설정 …
+      └─ messages  ← 이 문서가 "이력"이라 부르는 것
+         ├─ message = { role, content }
+         │    role    : System, User, Assistant, Tool
+         │    content : Text, Thinking, ToolUse, ToolResult, Image 의 목록
+         └─ atom = message 를 묶는 단위
+              User 메시지 하나                              → atom 하나
+              Assistant 메시지와 그것에 답한 Tool 메시지들   → atom 하나
+```
+
+- **atom** 은 따로 저장되지 않는다. `messages` 를 앞에서부터 세면 나오는 묶음이다(`runtime_model_input_tail_window.mli`). 도구 호출과 그 결과를 한 묶음으로 두는 이유는 이력을 잘라 보낼 때 결과만 남고 호출이 빠지면 provider 가 거절하기 때문이다. 그래서 자르는 자리는 atom 경계에만 온다. atom 의 무게는 고르지 않다(같은 파일의 머리말: 0.3KB~8.7KB). 이 문서는 atom 번호를 **위치**로만 쓰고 크기를 재는 데는 쓰지 않는다.
+- **턴** 은 위 나무 안에 없다. Keeper 가 깨어나서 끝낼 때까지의 실행 한 번이고 이름은 `Turn_ref`(trace id, 몇 번째 턴)다. 턴 하나가 돌면 이력 끝에 atom 몇 개가 덧붙으므로 턴은 이력 안의 연속된 구간 하나에 대응한다. 그 구간이 어디인지는 어디에도 적히지 않는다(§2.5 의 D5). 턴 기록(`Turn_record`)에는 "몇 atom 을 보냈나"는 있어도 "이 턴의 메시지가 이력의 몇 번부터 몇 번인가"는 없다.
+- 코드에는 "턴"이 둘이다. 이 문서의 턴은 **Keeper 턴**(깨어나서 끝날 때까지)이다. checkpoint 의 `turn_count` 가 세는 것은 **Agent-Core 턴**(LLM 왕복 한 번)이고 Keeper 턴 하나 안에서 도구를 부를 때마다 는다.
+- atom 을 하나도 남기지 않는 턴이 있고(§4.3 의 빈 범위), atom 이력이 아예 없는 턴이 있다(§4.8 의 공식 클라이언트).
+
+**Librarian 이 턴이 아니라 이력을 보는 이유.** 첫째, 오간 말이 남는 곳이 이력뿐이다. 턴은 실행이지 저장소가 아니다. 둘째, 줄이려는 것이 이력이다. Keeper 의 요청은 system, tools, 이력의 일부, facts, 새 입력으로 이뤄지고 그중 자라는 것이 이력이다. "여기서부터만 보낸다"는 이력 안의 위치로만 말할 수 있다. 셋째, Librarian 의 "여기까지 읽었다"와 창의 "여기서부터 보낸다"가 같은 자(atom 번호)를 써야 바꿔 읽을 필요가 없다. 턴이 쓰이는 곳은 하나다. 읽은 위치를 옮겨도 되는 자리가 턴 끝이다. 그래서 §4.6 의 턴 끝 기록은 "턴 41 이 끝났다"는 사건을 "이력 120 번"이라는 위치로 옮겨 적는 한 줄이다.
+
 ## 1. 결정 (운영자, 2026-09-18)
 
 1. **Keeper 가 몸이면 Librarian 은 뇌에 기록하는 존재다.** Keeper 는 세상에서 움직인다. 뇌는 Keeper 가 생각할 때 쓰는 기억이다(facts, 받은 일 정리). Librarian 은 Keeper 가 겪은 것을 수시로 읽어 거기에 적는다. 생각을 대신하지 않는다. Librarian 은 Keeper 마다 따로다.

@@ -52,6 +52,17 @@ let composer_to_string = function
   | Not_materialized -> "not_materialized"
 ;;
 
+(* An official client's record is read too. Its window is measured where the
+   Agent Core path measures its own: the three official-client runtimes count
+   atoms of the message list masc handed the agent and name the front with
+   that list's opening digest (keeper_claude_code_runtime.ml:85-99,
+   keeper_codex_runtime.ml:116-127, keeper_antigravity_runtime.ml:158-181),
+   and that list is the keeper's checkpoint history — the projection runs over
+   [agent.state.messages] (pipeline_stage_prepare.ml:148-154). What it cannot
+   answer is a runtime the catalog no longer has, because nothing then says
+   which list was counted. Skipping the official ones cost a keeper that had
+   run 20 turns on claude_code the whole history on its first Agent Core turn
+   after them (2026-09-18: code-reviewer turn 4059, 13 MB per candidate). *)
 let of_records ~composer ~trace_id (records : Turn_record.t list) =
   List.fold_left
     (fun newest (record : Turn_record.t) ->
@@ -60,7 +71,7 @@ let of_records ~composer ~trace_id (records : Turn_record.t list) =
          , record.Turn_record.finish_reason
          , composer (record_runtime record) )
        with
-       | Some window, finish_reason, Composes_from_the_history
+       | Some window, finish_reason, (Composes_from_the_history | Hands_over_its_own_list)
          when String.equal record.Turn_record.trace_id trace_id ->
          let turn = record.Turn_record.absolute_turn in
          (match newest with
@@ -78,10 +89,8 @@ let of_records ~composer ~trace_id (records : Turn_record.t list) =
                 ; front_digest = window.Turn_record.front_atom_digest
                 ; source
                 } ))
-       | ( Some _
-         , _
-         , (Hands_over_its_own_list | Not_materialized) )
-       | Some _, _, Composes_from_the_history
+       | Some _, _, Not_materialized
+       | Some _, _, (Composes_from_the_history | Hands_over_its_own_list)
        | None, _, _ -> newest)
     None
     records

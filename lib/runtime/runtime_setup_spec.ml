@@ -3,7 +3,7 @@ type http_kind = Openai_compat | Anthropic | Kimi | Glm | Ollama_kind
 type credential = Env_reference of string | File_reference of string
 type transport =
   | Http of {endpoint:string; credential:credential option;
-      kind:http_kind; request_path:string; api_key_env:string}
+      kind:http_kind; request_path:string option}
   | Client of {command:string; oauth:string option; timeout:float option}
 type t = {choice:choice; model:string; context:int; tools:bool; streaming:bool;
   transport:transport; canonical_spec:string}
@@ -78,13 +78,15 @@ let of_json ?home_dir = function
         | (Llama_cpp | Vllm | Openai_compatible),(None | Some "openai_compat") -> Ok Openai_compat
         | (Llama_cpp | Vllm | Openai_compatible),Some "glm" -> Ok Glm
         | _ -> invalid "provider_kind" in
+      (* Kept as an option rather than defaulted here: the dialect's default is
+         the loader's to compute, and writing it back would restate a fact the
+         catalog vocabulary already owns. Only a surface the operator names
+         needs carrying, because nothing else can know it. *)
       let* request_path = optional fields "request_path" in
-      let request_path = match request_path with
-        | Some path -> path
-        | None -> (match choice with Ollama -> "/api/chat" | Messages -> "/v1/messages" | _ -> "/chat/completions") in
-      let* () = if valid_path request_path then Ok () else invalid "request_path" in
-      let api_key_env = match env with Some name -> name | None -> "" in
-      Ok (Http {endpoint;credential;kind;request_path;api_key_env}))
+      let* () = match request_path with
+        | Some path when not (valid_path path) -> invalid "request_path"
+        | Some _ | None -> Ok () in
+      Ok (Http {endpoint;credential;kind;request_path}))
     else (
       let* command = if List.mem_assoc "command" fields then required fields "command"
         else Ok (match choice with Claude_code -> "claude" | Codex -> "codex" | _ -> "agy") in
@@ -136,7 +138,9 @@ let render spec =
   let transport_fields,credential = match spec.transport with
     | Http h ->
       (if protocol_fixes_dialect spec.choice then [] else ["kind",`String (wire_kind_name h.kind)])
-      @ ["endpoint",`String h.endpoint],h.credential
+      @ ["endpoint",`String h.endpoint]
+      @ (match h.request_path with None -> [] | Some path -> ["request-path",`String path]),
+      h.credential
     | Client c -> ["command",`String c.command;"is-non-interactive",`Bool true]
       @ (match c.timeout with None -> [] | Some timeout -> ["timeout-s",`Float timeout]),
       Option.map (fun path -> File_reference path) c.oauth in

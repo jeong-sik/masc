@@ -454,6 +454,11 @@ supports_native_streaming = true
 id = "glm-coding.glm-5-3"
 provider_ref = "glm-coding-exact"
 model_id = "glm-5.3"
+# Every exact-output lane leads here, and a plan whose target declares no
+# connect and no body budget is rejected at admission (Missing_deadline,
+# #36979/#36984). Headroom over the slowest healthy exact call measured on
+# this endpoint (973s, wkbl 2026-09-13..16).
+connect_timeout_s = 1200.0
 
 [[targets]]
 id = "glm-coding.glm-5-turbo"
@@ -482,6 +487,10 @@ id = "ollama_cloud.deepseek-v4-flash"
 provider_ref = "ollama_cloud"
 model_id = "deepseek-v4-flash"
 enable_thinking = false
+# Deadline-less exact-output targets are rejected at admission
+# (Missing_deadline, #36979/#36984); 600s mirrors the deployment's
+# ollama_cloud provider budget.
+connect_timeout_s = 600.0
 
 # The install wizard's OpenRouter choice. A wizard-pickable HTTP runtime owes
 # a row here, and thinking is off for the same reason as the ollama_cloud row
@@ -507,6 +516,10 @@ id = "ollama_cloud.ollama-cloud-deepseek-v4-flash"
 provider_ref = "ollama_cloud"
 model_id = "deepseek-v4-flash"
 enable_thinking = false
+# Same admission rule as the sibling rows above; the settings here stay
+# admission-only because verifier dispatch goes through the runtime.toml
+# binding of the same name.
+connect_timeout_s = 600.0
 
 # Every runtime the install wizard can pick needs a target row here, because
 # `runtime-default-set --setup-lanes` writes the chosen runtime id into the

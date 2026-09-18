@@ -25,6 +25,14 @@ let body_refused_by_provider =
        })
 ;;
 
+let unattributed_refusal =
+  Agent_core.Error.Api
+    (Agent_core.Retry.InvalidRequest
+       { message = "refused, reason not modelled"
+       ; reason = Agent_core.Retry.Unknown_invalid_request
+       })
+;;
+
 let unrelated = Agent_core.Error.Api (Agent_core.Retry.Timeout { message = "slow"; phase = None })
 
 (* Atom [i] of the synthetic history opens with the message ["m<i>"]. *)
@@ -163,6 +171,17 @@ let test_with_marks_the_refusal_walks_down_to_the_low_water_mark () =
   check bool "answered" true (Result.is_ok outcome);
   (* 1,000 - 300 - 250 = 450, still above 400; the third block brings it to 250. *)
   check (list int) "three blocks left" [ 30 ] trace.evictions
+;;
+
+(* A refusal agent core cannot attribute is still a refusal of this request:
+   the same bytes draw the same answer, so the range shrinks. 2026-09-18:
+   ollama_cloud answered a 9.5 MB request with prose the classifier leaves
+   unknown, and the turn ended instead of carrying less. *)
+let test_an_unattributed_refusal_shrinks_the_range () =
+  let _, trace =
+    run ~ledger_of:(fun _ -> Some four_blocks) [ Error unattributed_refusal; Ok "fits" ]
+  in
+  check (list int) "the unattributed refusal moved the front" [ 10 ] trace.evictions
 ;;
 
 let test_a_body_refusal_evicts_like_an_overflow () =
@@ -540,6 +559,8 @@ let () =
         ; test_case "marks walk to the low-water mark" `Quick
             test_with_marks_the_refusal_walks_down_to_the_low_water_mark
         ; test_case "body refusal evicts" `Quick test_a_body_refusal_evicts_like_an_overflow
+        ; test_case "an unattributed refusal shrinks the range" `Quick
+            test_an_unattributed_refusal_shrinks_the_range
         ; test_case "single block halves" `Quick test_a_single_block_halves_the_last_request
         ; test_case "no ledger halves" `Quick test_without_a_ledger_the_range_halves_until_it_fits
         ; test_case "halving ends at one atom" `Quick

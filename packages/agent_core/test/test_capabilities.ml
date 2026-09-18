@@ -1700,10 +1700,15 @@ let test_frontier_grouped_tool_thinking_provider_contracts () =
       , Extended_thinking
       , No_structured_output
       (* DeepSeek tool calling with thinking requires the tool-round
-         reasoning back on every request (api-docs.deepseek.com
+         reasoning back on every request of the sequence (api-docs.deepseek.com
          /guides/thinking_mode, 2026-08-24); Ollama /v1 threads incoming
-         assistant [reasoning] into the template. *)
-      , Replay_tool_turn_only
+         assistant [reasoning] into the template. The sequence, not the
+         history: replaying every prior turn is DeepSeek's own server rule
+         (400 when an earlier reasoning_content is missing), and ollama.com
+         states no requirement for incoming thinking while its cloud model
+         cards say previous turns' thoughts must not be in the history
+         (ollama.com/library/gemma4:31b-cloud, 2026-09-18). *)
+      , Replay_latest_user_tool_turn_only
       (* 2026-08-15 (closes #28749): no control wire on /v1. *)
       , Delta_stream "reasoning" )
     ; ( "Ollama Cloud DeepSeek V4 Flash"
@@ -1711,8 +1716,9 @@ let test_frontier_grouped_tool_thinking_provider_contracts () =
       , "deepseek-v4-flash"
       , Extended_thinking
       , No_structured_output
-      (* Same tool-round replay contract as the V4 Pro row above. *)
-      , Replay_tool_turn_only
+      (* Same tool-round replay contract, and the same boundary, as the V4 Pro
+         row above. *)
+      , Replay_latest_user_tool_turn_only
       (* 2026-08-15 (closes #28749): no control wire on /v1. *)
       , Delta_stream "reasoning" )
     ; ( "Ollama Cloud GLM 5.2"

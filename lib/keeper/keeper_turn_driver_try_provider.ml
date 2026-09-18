@@ -41,6 +41,12 @@ type provider_progress_sample =
             answered; nobody had. *)
   }
 
+(* What this dispatch's checkpoints have recorded so far, strongest last. *)
+type checkpoint_progress =
+  | No_checkpoint_stage
+  | Checkpoint_stage_reached
+  | Tool_results_saved
+
 (** Explicit context record for the extracted [try_provider] function.
 
     Each field corresponds to a variable captured by the original closure.
@@ -136,7 +142,7 @@ type try_provider_ctx =
   ; cache_system_prompt : bool
   ; yield_on_tool : bool
   ; checkpoint_sink : Agent_core.Agent.checkpoint_sink option
-  ; checkpoint_stage_observed : bool Atomic.t
+  ; checkpoint_progress : checkpoint_progress Atomic.t
   ; context_injector : Agent_core.Hooks.context_injector option
   ; context : Agent_core.Context.t option
   ; enable_thinking : bool option
@@ -292,11 +298,72 @@ let apply_accept
     @return [(result, checkpoint_after, liveness_success_sample)] tuple. The
     sample is not recorded here; the caller records it only after the runtime
     accept predicate accepts the response. *)
-let observe_checkpoint_stage observed (_ : Agent_core.Agent.checkpoint_stage) =
-  Atomic.set observed true
+(* Progress only moves forward: a later stage never erases a saved tool
+   result, and a stage reached after one does not lower it. *)
+let progress_advances ~current ~next =
+  match current, next with
+  | No_checkpoint_stage, (Checkpoint_stage_reached | Tool_results_saved)
+  | Checkpoint_stage_reached, Tool_results_saved ->
+    true
+  | No_checkpoint_stage, No_checkpoint_stage
+  | Checkpoint_stage_reached, (No_checkpoint_stage | Checkpoint_stage_reached)
+  | Tool_results_saved, (No_checkpoint_stage | Checkpoint_stage_reached | Tool_results_saved) ->
+    false
 ;;
 
-let same_run_retry_allowed observed = not (Atomic.get observed)
+let rec advance_checkpoint_progress progress next =
+  let current = Atomic.get progress in
+  if progress_advances ~current ~next
+     && not (Atomic.compare_and_set progress current next)
+  then advance_checkpoint_progress progress next
+;;
+
+let observe_checkpoint_stage progress (_ : Agent_core.Agent.checkpoint_stage) =
+  advance_checkpoint_progress progress Checkpoint_stage_reached
+;;
+
+(* RFC last-path-resumes-after-progress §3.2: a chat operation resumes from its
+   latest saved checkpoint, so only a stage written after tools ran, and saved,
+   is progress a resumed attempt does not repeat. [After_assistant_collected]
+   is saved before accept judges the answer and keeps a refused one, so
+   counting it would resume into the same refusal. *)
+let observe_checkpoint_saved progress (stage : Agent_core.Agent.checkpoint_stage) =
+  match stage with
+  | Agent_core.Agent.After_tool_results_appended
+  | Agent_core.Agent.After_context_injection ->
+    advance_checkpoint_progress progress Tool_results_saved
+  | Agent_core.Agent.After_assistant_collected
+  | Agent_core.Agent.After_rejected_response_dropped ->
+    ()
+;;
+
+(* The stage is marked before the save is delegated: a failed save still ends
+   same-run retry, because the attempt may already hold effects. Saved tool
+   results are marked only once the sink said the save succeeded; with no sink
+   nothing was saved. *)
+let observing_checkpoint_sink progress sink (snapshot : Agent_core.Agent.checkpoint_snapshot) =
+  observe_checkpoint_stage progress snapshot.stage;
+  match sink with
+  | None -> Ok ()
+  | Some sink ->
+    let saved = sink snapshot in
+    (match saved with
+     | Ok () -> observe_checkpoint_saved progress snapshot.stage
+     | Error _ -> ());
+    saved
+;;
+
+let same_run_retry_allowed progress =
+  match Atomic.get progress with
+  | No_checkpoint_stage -> true
+  | Checkpoint_stage_reached | Tool_results_saved -> false
+;;
+
+let tool_results_saved progress =
+  match Atomic.get progress with
+  | Tool_results_saved -> true
+  | No_checkpoint_stage | Checkpoint_stage_reached -> false
+;;
 
 (* #28417: how often the stall watchdog samples the progress signal while a
    provider attempt runs. Small enough that the reported stall time stays
@@ -981,11 +1048,8 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
     ~status:"resolved"
     ~decision:(`Assoc [ "resolved_lane", `String resolved_lane ])
     Keeper_runtime_manifest.Provider_lane_resolved;
-  let checkpoint_sink (snapshot : Agent_core.Agent.checkpoint_snapshot) =
-    observe_checkpoint_stage ctx.checkpoint_stage_observed snapshot.stage;
-    match ctx.checkpoint_sink with
-    | Some sink -> sink snapshot
-    | None -> Ok ()
+  let checkpoint_sink =
+    observing_checkpoint_sink ctx.checkpoint_progress ctx.checkpoint_sink
   in
   (* The attempt's bounded wait for the binding's admission permit, as Agent
      Core writes it: on while the wait is on, then the instant it settled.
@@ -1522,7 +1586,7 @@ let default_context_overflow_shrink_capacity ~capacity =
    doc comment for why the byte-axis and token-axis siblings are excluded.
    [same_run_retry_authorized] mirrors the exact same-run authority gate
    [Keeper_turn_driver]'s declared-lane walk applies before rotating
-   candidates ([same_run_retry_allowed] / [checkpoint_stage_observed]): a
+   candidates ([same_run_retry_allowed] / [checkpoint_progress]): a
    shrink retry is a same-run retry too, so it must not fire once AGENT_CORE has
    mutated agent state at a durable checkpoint stage. *)
 let context_overflow_shrink_sequence
@@ -1772,7 +1836,7 @@ let run_try_provider_with_carried_range_eviction
     let result =
       carried_range_eviction_sequence
         ~same_run_retry_authorized:(fun () ->
-          same_run_retry_allowed ctx.checkpoint_stage_observed)
+          same_run_retry_allowed ctx.checkpoint_progress)
         ~ledger:(fun () ->
           Keeper_model_input_ledger.Table.lookup
             ~keeper_name:ctx.keeper_name

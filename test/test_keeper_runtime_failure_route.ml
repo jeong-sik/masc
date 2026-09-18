@@ -487,6 +487,69 @@ let test_response_observed_fences_follow_the_disposition () =
              ~runtime_id:"codex_app_server.gpt-5.5"
              ~diagnostic:"Turn_input_write_failed")))
 
+
+(* RFC last-path-resumes-after-progress §3.3: which failures pass with time on
+   the path that answered them. A quota resumes only with a reset it named. *)
+let test_route_resumes_on_same_path_per_class () =
+  let retry ?retry_after retry_class =
+    KFR.Retry_after_observed { retry_class; retry_after }
+  in
+  let rotate rotate = KFR.Rotate_now { rotate } in
+  let terminal terminal =
+    KFR.Exhausted_visible_alive
+      { terminal; provenance = KFR.Masc_internal_error; detail = "" }
+  in
+  let check_resumes expected (label, route) =
+    Alcotest.(check bool)
+      (label ^ " " ^ KFR.route_kind_label route ^ ":" ^ KFR.route_class_label route)
+      expected
+      (KFR.route_resumes_on_same_path route)
+  in
+  List.iter
+    (check_resumes true)
+    [ "", retry KFR.Rate_limited
+    ; "with a hint", retry ~retry_after:30.0 KFR.Rate_limited
+    ; "", retry KFR.Capacity_backpressure
+    ; "", retry KFR.Server_error
+    ; "", retry KFR.Network_transient
+    ; "", retry KFR.Provider_timeout
+    ; "with a reset", retry ~retry_after:3600.0 KFR.Hard_quota
+    ];
+  List.iter
+    (check_resumes false)
+    [ "without a reset", retry KFR.Hard_quota
+    ; "with a zero reset", retry ~retry_after:0.0 KFR.Hard_quota
+    ; "with a negative reset", retry ~retry_after:(-5.0) KFR.Hard_quota
+    ; "with a NaN reset", retry ~retry_after:Float.nan KFR.Hard_quota
+    ; "", rotate KFR.Auth_failed
+    ; "", rotate KFR.Model_unavailable
+    ; "", rotate KFR.Resumable_cli_session
+    ; "", rotate KFR.Candidates_filtered
+    ; "", rotate KFR.Runtime_exhausted
+    ; "", rotate KFR.No_progress_empty
+    ; "", rotate KFR.No_progress_thinking_only
+    ; "", rotate KFR.No_progress_truncated
+    ; "", rotate KFR.Refusal_body_not_received
+    ; "", rotate KFR.Generation_repeated
+    ; "", rotate KFR.Attempt_rejected
+    ; "", terminal KFR.Deterministic_request
+    ; "", terminal KFR.Context_overflow
+    ; "", terminal KFR.Contract_violation
+    ; "", terminal KFR.Protocol_error
+    ; "", terminal KFR.Config_mismatch
+    ; "", terminal KFR.Provider_integration
+    ; "", terminal KFR.Terminal_effect_dependency_unavailable
+    ; "", terminal KFR.Terminal_effect_policy_rejection
+    ; "", terminal KFR.Terminal_effect_runtime_failure
+    ; "", terminal KFR.Terminal_effect_workflow_rejection
+    ; "", terminal KFR.Terminal_effect_operator_cancelled
+    ; "", terminal (KFR.Provider_attempt_effect_fenced KFR.Fenced_effect_attempted)
+    ; "", terminal (KFR.Provider_attempt_effect_fenced KFR.Fenced_observation_unavailable)
+    ; "", terminal (KFR.Tool_correction_lost KFR.Fenced_effect_attempted)
+    ; "", terminal (KFR.Tool_correction_lost KFR.Fenced_observation_unavailable)
+    ; "", terminal KFR.Internal_opaque
+    ]
+
 let () =
   Alcotest.run
     "keeper_runtime_failure_route"
@@ -542,5 +605,11 @@ let () =
             "fences follow the lane's observation"
             `Quick
             test_response_observed_fences_follow_the_disposition
+        ] )
+    ; ( "route_resumes_on_same_path"
+      , [ Alcotest.test_case
+            "every class is placed"
+            `Quick
+            test_route_resumes_on_same_path_per_class
         ] )
     ]

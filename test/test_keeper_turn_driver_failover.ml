@@ -8,6 +8,7 @@ let load_list_text ~config_path =
 
 module Runtime_manifest = Masc.Keeper_runtime_manifest
 module Driver = Masc.Keeper_turn_driver
+module Try_provider = Masc.Keeper_turn_driver_try_provider
 module Deferred_store = Masc.Keeper_deferred_runtime_lane_store
 module Agent_run_receipt = Masc.Keeper_agent_run_receipt.For_testing
 module Run_tools_setup = Masc.Keeper_run_tools_setup
@@ -110,6 +111,10 @@ let attempt_without_effect result checkpoint =
   , checkpoint
   , Masc.Keeper_provider_attempt_effect.No_effect_observed
   , Masc.Keeper_attempt_dispatch.Dispatched )
+;;
+
+let collecting_deferral continuation deferred =
+  { Driver.continuation; on_deferred = (fun hint -> deferred := hint :: !deferred) }
 ;;
 
 (* A candidate the walk refuses before invoking anything: its error is the
@@ -1959,14 +1964,14 @@ let test_failed_lane_receipt_counts_missing_tail () =
 let test_attempt_loop_retries_transport_failure_before_checkpoint () =
   let attempts = ref [] in
   let events = ref [] in
-  let checkpoint_stage_observed = Atomic.make false in
+  let checkpoint_progress = Atomic.make Try_provider.No_checkpoint_stage in
   let result =
     Driver.For_testing.attempt_runtime_candidates
       ~runtime_id:"resilient"
       ~runtime_id_of:(fun runtime_id -> runtime_id)
       ~emit_runtime_manifest:(emit_manifest_collector events)
       ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _error ->
-        Driver.For_testing.same_run_retry_allowed checkpoint_stage_observed)
+        Driver.For_testing.same_run_retry_allowed checkpoint_progress)
       ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
         attempts := !attempts @ [ runtime_id ];
         match candidate with
@@ -1992,7 +1997,7 @@ let test_attempt_loop_retries_transport_failure_before_checkpoint () =
   Alcotest.(check bool)
     "transport failed before any checkpoint stage"
     true
-    (Driver.For_testing.same_run_retry_allowed checkpoint_stage_observed);
+    (Driver.For_testing.same_run_retry_allowed checkpoint_progress);
   let events = List.rev !events in
   Alcotest.(check (list string))
     "manifest events"
@@ -2122,7 +2127,10 @@ let test_attempt_loop_retries_provider_wire_failure_same_turn () =
       ~runtime_id:"resilient"
       ~runtime_id_of:(fun runtime_id -> runtime_id)
       ~emit_runtime_manifest:(emit_manifest_collector events)
-      ~on_retry_deferred:(fun _ -> incr deferred)
+      ~retry_deferral:
+        { Driver.continuation = Driver.Restart_cycle
+        ; on_deferred = (fun _ -> incr deferred)
+        }
       ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
         attempts := !attempts @ [ runtime_id ];
         match candidate with
@@ -2159,7 +2167,7 @@ let check_effect_disposition_blocks_same_turn_retry label effect_disposition =
   let result =
     Driver.For_testing.attempt_runtime_candidates
       ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _ -> true)
-      ~on_retry_deferred:(fun hint -> deferred := hint :: !deferred)
+      ~retry_deferral:(collecting_deferral Driver.Restart_cycle deferred)
       ~runtime_id:"primary.test_model"
       ~runtime_id_of:Fun.id
       ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
@@ -3212,14 +3220,15 @@ let test_typed_checkpoint_is_the_same_run_retry_authority () =
     [ Agent_core.Agent.After_assistant_collected
     ; Agent_core.Agent.After_tool_results_appended
     ; Agent_core.Agent.After_context_injection
+    ; Agent_core.Agent.After_rejected_response_dropped
     ]
   in
   List.iter
     (fun stage ->
        let attempts = ref [] in
        let events = ref [] in
-       let checkpoint_stage_observed = Atomic.make false in
-       Driver.For_testing.observe_checkpoint_stage checkpoint_stage_observed stage;
+       let checkpoint_progress = Atomic.make Try_provider.No_checkpoint_stage in
+       Driver.For_testing.observe_checkpoint_stage checkpoint_progress stage;
        let primary_error = retryable_network_error "response-stage failure" in
        let result =
          Driver.For_testing.attempt_runtime_candidates
@@ -3227,7 +3236,7 @@ let test_typed_checkpoint_is_the_same_run_retry_authority () =
            ~runtime_id_of:(fun runtime_id -> runtime_id)
            ~emit_runtime_manifest:(emit_manifest_collector events)
            ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _error ->
-             Driver.For_testing.same_run_retry_allowed checkpoint_stage_observed)
+             Driver.For_testing.same_run_retry_allowed checkpoint_progress)
            ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
              attempts := !attempts @ [ runtime_id ];
              match candidate with
@@ -3827,7 +3836,7 @@ let test_deferred_hint_after_a_repeat_names_a_different_model () =
     let result =
       Driver.For_testing.attempt_runtime_candidates
         ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _ -> false)
-        ~on_retry_deferred:(fun hint -> deferred := hint :: !deferred)
+        ~retry_deferral:(collecting_deferral Driver.Restart_cycle deferred)
         ~runtime_id:"lane.glm"
         ~runtime_id_of:Fun.id
         ~model_of:flash_or_plus
@@ -3870,7 +3879,7 @@ let test_checkpoint_denial_defers_exact_frozen_suffix_once () =
   let result =
     Driver.For_testing.attempt_runtime_candidates
       ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _ -> false)
-      ~on_retry_deferred:(fun hint -> deferred := hint :: !deferred)
+      ~retry_deferral:(collecting_deferral Driver.Restart_cycle deferred)
       ~runtime_id:"lane.frozen"
       ~runtime_id_of:Fun.id
       ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
@@ -3932,7 +3941,7 @@ let test_deferred_cycle_post_checkpoint_replaces_hint_with_tail () =
   let result =
     Driver.For_testing.attempt_runtime_candidates
       ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _ -> false)
-      ~on_retry_deferred:(fun hint -> deferred := hint :: !deferred)
+      ~retry_deferral:(collecting_deferral Driver.Restart_cycle deferred)
       ~runtime_id:"runtime.b"
       ~runtime_id_of:Fun.id
       ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
@@ -3958,7 +3967,7 @@ let test_single_candidate_checkpoint_failure_has_no_hint () =
   let result =
     Driver.For_testing.attempt_runtime_candidates
       ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _ -> false)
-      ~on_retry_deferred:(fun hint -> deferred := hint :: !deferred)
+      ~retry_deferral:(collecting_deferral Driver.Restart_cycle deferred)
       ~runtime_id:"runtime.only"
       ~runtime_id_of:Fun.id
       ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
@@ -3970,6 +3979,233 @@ let test_single_candidate_checkpoint_failure_has_no_hint () =
   in
   (match result with Error _ -> () | Ok _ -> Alcotest.fail "expected failure");
   Alcotest.(check int) "no successor means no hint" 0 (List.length !deferred)
+
+
+let progress_snapshot stage =
+  { Agent_core.Agent.stage
+  ; turn = 1
+  ; timestamp = 1.
+  ; checkpoint =
+      Masc.Keeper_context_runtime.checkpoint_of_context
+        (Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"progress")
+  }
+;;
+
+let progress_label = function
+  | Try_provider.No_checkpoint_stage -> "no checkpoint stage"
+  | Try_provider.Checkpoint_stage_reached -> "checkpoint stage reached"
+  | Try_provider.Tool_results_saved -> "tool results saved"
+;;
+
+(* RFC last-path-resumes-after-progress §3.2: every stage ends same-run retry,
+   and only a stage written after tools ran, once its save succeeded, is
+   progress a resumed operation keeps. *)
+let test_checkpoint_progress_counts_saved_tool_results_only () =
+  let saved_tool_results = function
+    | Agent_core.Agent.After_tool_results_appended | Agent_core.Agent.After_context_injection -> true
+    | Agent_core.Agent.After_assistant_collected
+    | Agent_core.Agent.After_rejected_response_dropped -> false
+  in
+  let sinks =
+    [ "no sink", None, false
+    ; "a save that succeeds", Some (fun _ -> Ok ()), true
+    ; "a save that fails", Some (fun _ -> Error "disk full"), false
+    ]
+  in
+  List.iter
+    (fun stage ->
+       List.iter
+         (fun (sink_label, sink, saves) ->
+            let progress = Atomic.make Try_provider.No_checkpoint_stage in
+            let returned =
+              Driver.For_testing.observing_checkpoint_sink progress sink (progress_snapshot stage)
+            in
+            let label =
+              Agent_core.Agent.checkpoint_stage_to_string stage ^ " with " ^ sink_label
+            in
+            Alcotest.(check bool) (label ^ ": the sink's answer is returned") saves
+              (Result.is_ok returned && Option.is_some sink);
+            Alcotest.(check string) label
+              (progress_label
+                 (if saves && saved_tool_results stage
+                  then Try_provider.Tool_results_saved
+                  else Try_provider.Checkpoint_stage_reached))
+              (progress_label (Atomic.get progress));
+            Alcotest.(check bool) (label ^ ": no same-run retry") false
+              (Driver.For_testing.same_run_retry_allowed progress))
+         sinks)
+    [ Agent_core.Agent.After_assistant_collected
+    ; Agent_core.Agent.After_tool_results_appended
+    ; Agent_core.Agent.After_context_injection
+    ; Agent_core.Agent.After_rejected_response_dropped
+    ];
+  let progress = Atomic.make Try_provider.No_checkpoint_stage in
+  let save stage =
+    ignore
+      (Driver.For_testing.observing_checkpoint_sink progress
+         (Some (fun _ -> Ok ()))
+         (progress_snapshot stage)
+       : (unit, string) result)
+  in
+  save Agent_core.Agent.After_tool_results_appended;
+  save Agent_core.Agent.After_assistant_collected;
+  Alcotest.(check string) "a later answer stage keeps the saved tool results"
+    (progress_label Try_provider.Tool_results_saved)
+    (progress_label (Atomic.get progress))
+;;
+
+let bad_gateway =
+  Agent_core.Error.Api
+    (Agent_core.Retry.ServerError { status = 502; message = "bad gateway" })
+;;
+
+(* One chat-lane walk. [attempt ~save candidate] may save checkpoint stages
+   through the production sink wrapper before it returns the candidate's
+   error; the walk reads progress from the same value the driver does. *)
+let same_path_walk ~continuation candidates attempt =
+  let deferred = ref [] in
+  let progress = Atomic.make Try_provider.No_checkpoint_stage in
+  let save stage outcome =
+    ignore
+      (Driver.For_testing.observing_checkpoint_sink progress
+         (Some (fun _ -> outcome))
+         (progress_snapshot stage)
+       : (unit, string) result)
+  in
+  let result =
+    Driver.For_testing.attempt_runtime_candidates
+      ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _ ->
+        Driver.For_testing.same_run_retry_allowed progress)
+      ~retry_deferral:(collecting_deferral continuation deferred)
+      ~tool_results_saved:(fun () -> Driver.For_testing.tool_results_saved progress)
+      ~runtime_id:"lane.chat"
+      ~runtime_id_of:Fun.id
+      ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+      ~run_attempt:(fun ~idx:_ ~runtime_id:_ candidate ->
+        attempt_without_effect (Error (attempt ~save candidate)) None)
+      candidates
+  in
+  result, List.rev !deferred
+;;
+
+let describe_hint (hint : Driver.deferred_runtime_lane) =
+  Printf.sprintf "%s: %s -> [%s]" hint.Driver.assignment_id hint.Driver.failed_runtime_id
+    (String.concat "; " (Driver.deferred_runtime_ids hint))
+;;
+
+(* RFC last-path-resumes-after-progress §3.1: the last candidate of a chat
+   operation saved tool results and then failed on a server error, so the
+   operation continues on that candidate. The hint keeps the assignment and
+   names nothing but the failed candidate, alone or at the end of a lane. *)
+let test_a_chat_operation_resumes_its_last_candidate_after_saved_tool_results () =
+  let tools_then_bad_gateway ~save _candidate =
+    save Agent_core.Agent.After_tool_results_appended (Ok ());
+    bad_gateway
+  in
+  let result, hints =
+    same_path_walk ~continuation:Driver.Resume_operation_checkpoint [ "only" ]
+      tools_then_bad_gateway
+  in
+  Alcotest.(check (list string)) "a lone candidate defers to itself"
+    [ "lane.chat: only -> [only]" ] (List.map describe_hint hints);
+  Alcotest.(check (result string string)) "the turn still fails with its own error"
+    (Error (Agent_core.Error.to_string bad_gateway))
+    (Result.map_error Agent_core.Error.to_string result);
+  let _result, hints =
+    same_path_walk ~continuation:Driver.Resume_operation_checkpoint [ "first"; "last" ]
+      (fun ~save candidate ->
+         match candidate with
+         | "first" -> retryable_network_error "first dropped before any stage"
+         | _ -> tools_then_bad_gateway ~save candidate)
+  in
+  Alcotest.(check (list string)) "the end of a lane defers to that candidate only"
+    [ "lane.chat: last -> [last]" ] (List.map describe_hint hints)
+;;
+
+(* §3.1–§3.5: each condition alone withholds the same-path hint. *)
+let test_no_same_path_hint_unless_every_condition_holds () =
+  let overflow =
+    Agent_core.Error.Api
+      (Agent_core.Retry.ContextOverflow { message = "too long"; limit = Some 32768 })
+  in
+  let cases =
+    [ ( "no stage saved"
+      , Driver.Resume_operation_checkpoint
+      , [ "only" ]
+      , fun ~save:_ _ -> bad_gateway )
+    ; ( "only the answer saved"
+      , Driver.Resume_operation_checkpoint
+      , [ "only" ]
+      , fun ~save _ ->
+          save Agent_core.Agent.After_assistant_collected (Ok ());
+          bad_gateway )
+    ; ( "the tool-results save failed"
+      , Driver.Resume_operation_checkpoint
+      , [ "only" ]
+      , fun ~save _ ->
+          save Agent_core.Agent.After_tool_results_appended (Error "disk full");
+          bad_gateway )
+    ; ( "a heartbeat cycle restarts"
+      , Driver.Restart_cycle
+      , [ "only" ]
+      , fun ~save _ ->
+          save Agent_core.Agent.After_tool_results_appended (Ok ());
+          bad_gateway )
+    ; ( "a failure that waiting does not change"
+      , Driver.Resume_operation_checkpoint
+      , [ "only" ]
+      , fun ~save _ ->
+          save Agent_core.Agent.After_context_injection (Ok ());
+          Agent_core.Error.Api (Agent_core.Retry.NotFound { message = "no such model" }) )
+    ; ( "an earlier candidate overflowed"
+      , Driver.Resume_operation_checkpoint
+      , [ "wide"; "narrow" ]
+      , fun ~save candidate ->
+          match candidate with
+          | "wide" -> overflow
+          | _ ->
+            save Agent_core.Agent.After_tool_results_appended (Ok ());
+            bad_gateway )
+    ]
+  in
+  List.iter
+    (fun (label, continuation, candidates, attempt) ->
+       let _result, hints = same_path_walk ~continuation candidates attempt in
+       Alcotest.(check (list string)) label [] (List.map describe_hint hints))
+    cases
+;;
+
+(* §3.4: the wait of a same-path suffix is the rest recorded on the path. A
+   server error records none, so the retry dispatches at once; a 429 that
+   stated its wait holds the path until then. *)
+let test_a_same_path_suffix_waits_only_for_a_recorded_rest () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    reset_quota_lane_rests ();
+    Fun.protect ~finally:reset_quota_lane_rests (fun () ->
+      let path = "other.test_model" in
+      let same_path failure =
+        Driver.For_testing.make_deferred_runtime_lane
+          ~assignment_id:"quota_lane" ~failed_runtime_id:path ~next_runtime_id:path
+          ~later_runtime_ids:[] ~failure
+      in
+      let next ~route failure =
+        let now = Unix.gettimeofday () in
+        describe_dispatch ~now
+          (Driver.next_dispatch_after_failure ~now ~route ~assignment_id:"quota_lane"
+             (Some (same_path failure)))
+      in
+      let server_route =
+        Keeper_runtime_failure_route.route_of_error
+          ~boundary:Keeper_runtime_failure_route.Agent_core_execution bad_gateway
+      in
+      Alcotest.(check string) "a server error dispatches the same path at once"
+        ("dispatch " ^ path) (next ~route:server_route bad_gateway);
+      Runtime_candidate_backpressure.note_rate_limit
+        ~candidate:(quota_lane_candidate path) ~retry_after:(Some 120.);
+      Alcotest.(check string) "a stated 429 rest holds the same path until it ends"
+        ("wait 120s for " ^ path ^ " (path)")
+        (next ~route:rate_limited_route bad_gateway)))
+;;
 
 let test_deferred_hint_refs_are_not_shared () =
   let failure = retryable_network_error "checkpoint failure" in
@@ -4188,7 +4424,7 @@ let test_access_failover_preserves_effect_and_caller_authority () =
     let deferred = ref [] in
     let result = Driver.For_testing.attempt_runtime_candidates
       ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _ -> false)
-      ~on_retry_deferred:(fun hint -> deferred := hint :: !deferred)
+      ~retry_deferral:(collecting_deferral Driver.Restart_cycle deferred)
       ~runtime_id:"access-lane" ~runtime_id_of:Fun.id
       ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
       ~run_attempt:(fun ~idx:_ ~runtime_id:_ _ ->
@@ -4418,6 +4654,8 @@ let () =
             `Quick test_a_failure_without_a_suffix_waits_until_a_fresh_walk_head_serves;
           Alcotest.test_case "a chat retry follows the shared next dispatch" `Quick
             test_a_chat_retry_follows_the_shared_next_dispatch;
+          Alcotest.test_case "a same-path suffix waits only for a recorded rest" `Quick
+            test_a_same_path_suffix_waits_only_for_a_recorded_rest;
           Alcotest.test_case "rate limit survives only unchanged binding reload" `Quick
             test_rate_limit_candidate_survives_unchanged_reload_only;
           Alcotest.test_case "rate limit identity detects same-reference credential rotation" `Quick
@@ -4510,6 +4748,18 @@ let () =
             "single candidate checkpoint failure has no hint"
             `Quick
             test_single_candidate_checkpoint_failure_has_no_hint;
+          Alcotest.test_case
+            "checkpoint progress counts saved tool results only"
+            `Quick
+            test_checkpoint_progress_counts_saved_tool_results_only;
+          Alcotest.test_case
+            "a chat operation resumes its last candidate after saved tool results"
+            `Quick
+            test_a_chat_operation_resumes_its_last_candidate_after_saved_tool_results;
+          Alcotest.test_case
+            "no same-path hint unless every condition holds"
+            `Quick
+            test_no_same_path_hint_unless_every_condition_holds;
           Alcotest.test_case
             "deferred hint refs are not shared"
             `Quick

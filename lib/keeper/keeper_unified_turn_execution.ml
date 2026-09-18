@@ -150,7 +150,9 @@ let run (ctx : ctx)
       [test_keeper_turn_driver_failover] proves both directions: transport
       failure before any stage may fall back, while every typed stage blocks a
       same-run fallback. *)
-   let checkpoint_stage_observed = Atomic.make false in
+   let checkpoint_progress =
+     Atomic.make Keeper_turn_driver_try_provider.No_checkpoint_stage
+   in
    (* The tool rows of a continuation turn, collected from the same stream
       the chat lane persists from and appended once the turn settles. Only a
       turn that continues an approval replay collects: it is the one turn
@@ -265,8 +267,10 @@ let run (ctx : ctx)
                    (List.rev turn_state.runtime_rotation_attempts)
                  ?deferred_runtime_lane:
                    (if is_retry then None else deferred_runtime_lane)
-                 ~on_runtime_retry_deferred:
-                   (fun hint -> deferred_runtime_lane_ref := Some hint)
+                 ~runtime_retry_deferral:
+                   { Keeper_turn_driver.continuation = Keeper_turn_driver.Restart_cycle
+                   ; on_deferred = (fun hint -> deferred_runtime_lane_ref := Some hint)
+                   }
                  ~on_runtime_attempt_failed:
                    (fun ~runtime_id ~dispatch ~error ->
                       runtime_attempt_errors_ref
@@ -290,7 +294,7 @@ let run (ctx : ctx)
                  ?trace_link:(trace_link ())
                  ~on_checkpoint_stage:
                    (Keeper_turn_driver_try_provider.observe_checkpoint_stage
-                      checkpoint_stage_observed)
+                      checkpoint_progress)
                    (* This module is the autonomous lane's turn runner
                       ([Keeper_unified_turn.run_keeper_cycle] → here, only ever
                       reached via the Keeper Owner child); the chat
@@ -389,7 +393,7 @@ let run (ctx : ctx)
       let checkpoint_observed =
         not
           (Keeper_turn_driver_try_provider.same_run_retry_allowed
-             checkpoint_stage_observed)
+             checkpoint_progress)
       in
       let same_run_retry_has_input_authority = not checkpoint_observed in
       if not same_run_retry_has_input_authority

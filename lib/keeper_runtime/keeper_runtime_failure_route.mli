@@ -198,3 +198,16 @@ val response_observed : route -> bool
     [Internal_opaque] is [false] although it also holds an accept rejection
     without a no-progress hint: the route cannot tell that apart from an
     unhandled exception, so the evidence keeps its wake. *)
+
+val route_resumes_on_same_path : route -> bool
+(** Whether a failure passes with time on the path that answered it, so a chat
+    operation whose last candidate failed after saving tool results continues
+    on that same path (RFC last-path-resumes-after-progress §3.3).
+
+    [true]: [Rate_limited], [Capacity_backpressure], [Server_error],
+    [Network_transient], [Provider_timeout], and [Hard_quota] with a usable
+    reset hint (positive, not NaN).
+
+    [false]: [Hard_quota] without one, every rotation, and every terminal
+    class. How long the path rests is not read here: the chat lane's wait
+    follows the rest recorded on the path. *)

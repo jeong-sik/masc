@@ -805,7 +805,7 @@ let run_turn
       ?official_task_reference
       ?on_gate_evidence_admitted
       ?deferred_runtime_lane
-      ?on_runtime_retry_deferred
+      ?runtime_retry_deferral
       ?on_runtime_attempt_failed
       ?on_produced_checkpoint
       ?on_runtime_lane_terminal_error
@@ -831,9 +831,16 @@ let run_turn
     Option.iter (record_produced_checkpoint ~runtime_id:error.origin_runtime_id ~attempt:error.origin_attempt)
       error.checkpoint_after;
     Option.iter (fun callback -> callback error) on_runtime_lane_terminal_error in
-  let record_runtime_retry_deferred hint =
-    deferred_runtime_lane_ref := Some hint;
-    Option.iter (fun callback -> callback hint) on_runtime_retry_deferred
+  let runtime_retry_deferral =
+    Option.map
+      (fun { Keeper_turn_driver.continuation; on_deferred } ->
+         { Keeper_turn_driver.continuation
+         ; on_deferred =
+             (fun hint ->
+                deferred_runtime_lane_ref := Some hint;
+                on_deferred hint)
+         })
+      runtime_retry_deferral
   in
   let user_message = Keeper_run_prompt.sanitize_user_message user_message in
   Masc_runtime_events.emit_turn_start ();
@@ -1528,7 +1535,7 @@ let run_turn
                              config
                              manifest)
                       ?deferred_runtime_lane
-                      ~on_runtime_retry_deferred:record_runtime_retry_deferred
+                      ?runtime_retry_deferral
                       ~on_runtime_lane_terminal_error:record_runtime_lane_terminal_error
                       ?on_deferred_runtime_consumed
                       ~temperature

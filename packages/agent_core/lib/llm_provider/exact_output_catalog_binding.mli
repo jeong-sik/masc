@@ -1,6 +1,11 @@
 type exact_binding_error =
   | Provider_missing
+      (** No provider entry in the catalog has the id passed as
+          [~provider_ref]. *)
   | Model_missing
+      (** No model entry of that provider declares the id passed as
+          [~model_id]. Exact binding is identity-based, not prefix-based:
+          the whole id must match. *)
 
 type endpoint_error =
   | Malformed_base_url
@@ -55,6 +60,8 @@ val validate_timeout
   -> (unit, string) result
 
 val model_identities_unique : Model_catalog.model_entry list -> bool
+(** [true] when no two entries share the provider/model identity — the
+    precondition that makes exact binding in {!resolve_exact} unambiguous. *)
 
 val validate_overlay_model_identities
   :  base:Model_catalog.model_entry list
@@ -69,6 +76,12 @@ val resolve_exact
   -> ( Model_catalog.provider_entry * Model_catalog.model_entry
        , exact_binding_error )
        result
+(** Exact identity binding: the provider is found by [provider.id =
+    provider_ref] and the model by [entry.provider_name = provider.id] and
+    [entry.id_prefix = model_id] — the id is compared whole, despite the
+    field name. Callers holding a display or api_name (the label a gateway
+    shows) must not pass it here; resolve that label to the catalog id
+    first. Fails with {!Provider_missing} or {!Model_missing}. *)
 
 val merge_exact_model_entries
   :  base:Model_catalog.model_entry list
@@ -85,6 +98,11 @@ val anthropic_thinking_control_string
   -> string
 
 val target_model_admitted : Capabilities.capabilities -> model_id:string -> bool
+(** Whether the model may serve an exact request at all: [true] when the
+    capability row declares no [supported_models] list at all, otherwise
+    [true] only when [model_id] appears in it. Admission turns a [false]
+    here into {!Exact_output_ready_admission.wire_admission_error.Unsupported_target_model}.
+    Compare ids against this function, never against an api_name. *)
 
 val catalog_anthropic_thinking_control
   :  Capability_vocab.anthropic_thinking_control option

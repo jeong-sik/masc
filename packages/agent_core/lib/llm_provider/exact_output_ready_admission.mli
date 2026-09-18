@@ -68,6 +68,10 @@ type token_capacity_rejection =
       ; accepted_through_tokens : int
       ; rejected_from_tokens : int
       }
+(** Why a measured token-capacity observation could not admit the request:
+    the probe evidence is not yet valid, has expired, left the boundary
+    unobserved, or the probe itself rejected the input size. Mirrors the
+    [Serving_constraint] rejection constructors one-to-one. *)
 
 type context_fit = Prepared_completion_request.context_fit
 
@@ -102,7 +106,15 @@ type admission_error =
   | Unsupported_schema_keyword of string
   | Unsupported_schema_type of string
   | Invalid_schema
+      (** The output requirement itself is not expressible on the wire:
+          the provider-native schema is unavailable for this contract, or a
+          keyword/type in the requirement is rejected. *)
   | Wire_admission_rejected of wire_admission_error
+      (** Every remaining gate — deadlines, capabilities, image/document/
+          audio/system-prompt restrictions, frozen-header rules, token
+          measurement, context fit, and the target-model admission gate
+          ({!wire_admission_error.Unsupported_target_model}). *)
+
 
 type request_body_projection = private { actual_bytes : int }
 
@@ -132,21 +144,32 @@ val make_output_requirement
   -> minimum_guarantee:minimum_guarantee
   -> output_requirement
 
-(** Purely serialize the exact provider request body for one credential-free
-    admitted-target projection. The returned count is produced by the same
-    provider serializer used by admission. Token/context fit is deliberately
-    outside this body-only contract. *)
 val project_request_body
   :  target:Exact_output_resolver.projection_target
   -> messages:Types.message list
   -> output_requirement
   -> (request_body_projection, admission_error) result
+(** Purely serialize the exact provider request body for one credential-free
+    admitted-target projection. The returned count is produced by the same
+    provider serializer used by admission. Token/context fit is deliberately
+    outside this body-only contract. The same wire gates as {!admit} apply —
+    including {!Unsupported_target_model} — so a projected body can never
+    disagree with a plan admission on the same inputs. *)
 
 val admit
   :  target:Exact_output_resolver.selected_target
   -> messages:Types.message list
   -> output_requirement
   -> (ready_plan, admission_error) result
+(** Freeze the generation plan for an already-measured-free path: runs every
+    pure contract check, ending in the output-contract gate — the target's
+    {!Exact_output_resolver.selected_target_model_admitted} (itself
+    {!Exact_output_catalog_binding.target_model_admitted} on the target's own
+    catalog id and capabilities) must be [true], otherwise this fails with
+    {!Wire_admission_rejected} carrying
+    {!Unsupported_target_model.[Unsupported_target_model]}. All remaining
+    checks report through {!wire_admission_error} inside
+    {!Wire_admission_rejected}. *)
 
 val admit_candidate_request
   :  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
@@ -160,6 +183,18 @@ val admit_candidate_request
   -> messages:Types.message list
   -> output_requirement
   -> (ready_plan, 'callback_error flow_request_error) result
+(** [admit] plus a provider-native token measurement, run through the caller
+    given network and clock: admission runs first (same gates, so
+    {!Flow_request_admission_failed} carries the full {!admission_error}),
+    then the count-tokens probe dispatches on [net] with its timeouts — a
+    missing clock fails as
+    {!Flow_request_measurement_clock_required_for_timeout} — and the three
+    callbacks bracket the probe: [before_measurement_dispatch] may veto
+    ({!Flow_request_before_measurement_dispatch_failed} wraps the callback's
+    own error), [on_measurement_receipt] observes, and
+    [on_measurement_terminal] receives the final probe result, whose failure
+    surfaces as {!Flow_request_measurement_terminal_callback_failed}. Any
+    callback failure aborts the flow without consuming an admission. *)
 
 val plan_provenance : ready_plan -> plan_provenance
 val plan_fingerprint : ready_plan -> string

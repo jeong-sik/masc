@@ -54,6 +54,21 @@ Keeper
 | 창이 보는 위치 | Keeper 요청이 이력의 어디서부터 실리는가. 지금 코드의 `front` | §7 (라) |
 | 밀림 | 끝났는데 아직 안 읽은 턴이 있는 상태. 그 범위가 밀린 구간이다 | |
 
+기억(fact) 쪽의 말이다. 이 RFC 는 이 부분을 바꾸지 않는다(RFC-0456, RFC-0418 의 계약). 회차의 출력이 어디로 가는지 읽으려면 필요하다.
+
+| 말 | 뜻 | 코드 이름 |
+|---|---|---|
+| fact | 기억 하나. 문장(`claim`), 분류(`category`), 처음·마지막으로 본 시각, 누가 적었나(`origin`), 무엇에 근거하나(`basis`)로 이뤄진다. id 필드는 없다. id 는 `claim` 글자의 SHA-256 이라 글자가 하나라도 다르면 다른 fact 다 | `Keeper_memory_os_types.fact`, `memory_id` |
+| `authored` / `injected` | 누가 적었나. `authored` 는 Keeper 가 `memory_write` 도구로 직접 적은 것이고 `injected` 는 Librarian 이 대화에서 뽑아 넣은 것이다. "주입"이 아니라 "Librarian 이 뽑음"으로 읽는다 | `origin.kind` |
+| `observed` / `derived` | 무엇에 근거하나. `observed` 는 어디서 읽었는지(자기 대화, Board 글)를 갖고 `derived` 는 근거가 된 다른 fact 의 id 를 갖는다. 근거가 사라지면 `derived` fact 도 무효가 된다 | `basis` |
+| `dropped` | 회차가 "이 기억을 버린다"고 말한 것. 이유를 같이 적는다. 스냅숏에서 빠지고, 저널 커밋 줄에 id·이유와 원문이 남는다 | `dropped_statement`, 저널의 `dropped`·`change.removed` |
+| `supersedes` | 옛 기억 하나를 새 claim 하나가 고쳐 쓴다(1:1). 옛 id 는 같은 답의 `dropped` 에도 있어야 한다. 기억 이벤트에 `revised`(옛 id → 새 id)가 남아 거슬러 올라갈 수 있다 | `revision`, `Keeper_memory_os_events.Revised` |
+| `absorbs` | 기억 여러 개를 새 claim 하나가 대신 말한다(N:1). 흡수된 id 는 `dropped` 에 있으면 안 된다. 스냅숏에서 빠지고 원문은 "어느 claim 으로 들어갔나"와 함께 남아 검색으로 다시 찾을 수 있다 | `absorbed_statement`, `<keeper>.memory-absorbed.jsonl` |
+| `retrieved` | 이 fact 가 `keeper_memory_search` 결과에 나온 횟수 | `Keeper_memory_os_events.Retrieved` |
+| `cited` | 이름은 "인용"이지만 기록되는 곳은 하나다. Keeper 가 `keeper_memory_retract` 로 이 fact 를 id 로 지목해 철회에 성공했을 때다. 그래서 살아 있는 fact 에서는 늘 0 이다 | `Keeper_memory_os_events.Cited` |
+
+회차가 말하지 않은 fact 는 그대로 남는다. 규칙을 하나라도 어긴 답(모르는 id, `supersedes` 의 id 가 `dropped` 에 없음, `absorbs` 의 id 가 `dropped` 에 있음)은 회차 전체가 거절되고 기억은 바뀌지 않는다. 2026-09-18 라이브 20개 Keeper 의 fact 2,462개 가운데 `injected` 가 2,157개, `derived` 가 9개였고, 기억 이벤트는 `revised` 3,632건, `retrieved` 1,508건, `cited` 116건, 흡수 기록은 300줄이었다.
+
 ### 턴 하나를 따라가 보기
 
 trace 하나에 atom 이 112개 쌓여 있고, 사람이 rondo 에게 말을 걸어 턴 41이 도는 경우다. 번호는 설명을 위해 1부터 센다. 코드의 `end_atom` 은 "몇 개 쌓였나"이므로 같은 값이 나온다.
@@ -217,7 +232,7 @@ flowchart TD
   Q["받은 일이 바뀜"] --> S
   BOOT["서버 기동"] --> L1
   S --> L1["Librarian 루프가 디스크에서 읽는다<br/>진행 파일, 턴 끝 기록<br/>Keeper 마다 루프 하나, 서버 소유"]
-  L1 --> C1{"진행 파일이 가리키는 줄 뒤에<br/>줄이 있나"}
+  L1 --> C1{"읽은 위치보다 end_atom 이<br/>큰 줄이 있나"}
   C1 -->|"있음"| N{"바로 앞 회차가 두 턴 이상을 읽다 실패했나"}
   N -->|"아니오"| L2["checkpoint 에서 읽은 위치부터<br/>기록된 마지막 턴 끝까지 자른다"]
   N -->|"예"| L3["가장 오래된 한 턴만 자른다"]
@@ -273,13 +288,13 @@ flowchart TD
 | # | 비교 | 종류 | 쓰는 곳 |
 |---|---|---|---|
 | 1 | 설정이 `Enabled` 인가 | variant | 루프 입구. 지금의 끄는 스위치 그대로다 |
-| 2 | 진행 파일이 가리키는 줄: `turn_ref` 와 위치가 같은 줄 | 같음 | 안 읽은 턴 찾기. 그 줄 뒤의 줄이 안 읽은 턴이다 |
+| 2 | 안 읽은 턴: 읽은 위치와 같은 trace 의 줄 가운데 `end_atom` 이 읽은 위치보다 큰 줄. 줄은 파일 위치가 아니라 `end_atom` 으로 줄 세운다 | 같음(trace), 정수 순서 | 안 읽은 턴 찾기. checkpoint 저장은 잠금 아래에서 직렬화되지만 줄을 쓰는 일은 그 잠금이 풀린 뒤라서 파일 순서는 턴 순서가 아닐 수 있다. 함께 끝난 두 턴은 `turn_ref` 도 같을 수 있다. 그래서 읽은 위치는 줄이 아니라 값(trace, `end_atom`, digest)이다 |
 | 3 | 범위의 시작: 그 줄이 `Fresh_history` 거나 앞 줄이 `history_cleared` 면 0. 아니면 같은 trace(`turn_ref` 의 trace id)의 앞 줄의 `end_atom`. 앞 줄도 없으면 그 줄은 읽지 않고 위치의 기준점으로만 쓴다(기록 전부터 있던 세션의 첫 줄) | variant, 같음 | 범위 계산 |
 | 3a | 바로 앞 회차가 실패했고 그 범위가 두 턴 이상이었나 | result, 한 줄인가 여러 줄인가 | 전부 읽을지 가장 오래된 한 턴만 읽을지 |
 | 3b | 범위가 비었나: 시작과 끝의 atom 번호가 같은가 | 같음 | 비었으면 LLM 을 부르지 않고 위치만 옮긴다 |
 | 4 | 위치의 종류: `Atom_history`, `Empty_atom_history`, `No_atom_history`, `Stale_noop` | variant, 전부 나열 | 읽는 방법 고르기(§4.6, §4.8) |
 | 5 | 범위 양 끝 atom 의 digest 가 checkpoint 의 그 자리와 같은가 | 같음 | 읽기 직전 |
-| 5a | 진행 파일을 쓰기 직전: 회차를 시작할 때 본 줄이 턴 끝 기록에 그대로 있는가 | 같음 | 없으면 쓰지 않는다. 그 사이에 purge 가 있었다(§4.6) |
+| 5a | 진행 파일을 쓰기 직전: 회차를 시작할 때 범위의 끝으로 삼은 줄이 턴 끝 기록에 그대로 있는가 | 같음 | 없으면 쓰지 않는다. 그 사이에 purge 가 있었다(§4.6) |
 | 6 | 상대방 관측의 시각이 앞 턴 끝 시각과 이 턴 끝 시각 사이인가 | 시각 순서 | 입력 만들기(§4.7) |
 | 7 | 출력이 스키마와 맞는가 | typed 디코드 | 지금 그대로 |
 | 8 | facts 저장이 `Ok` 인가 | result | 위치를 옮길지 |
@@ -292,7 +307,7 @@ flowchart TD
 - **I1 순서·빠짐없음** — 턴 끝 기록에 있는 턴은 하나도 빠짐없이 파일 순서대로 읽힌다. Librarian 이 멈췄다 돌아오면 그 사이의 구간을 전부 읽는다.
 - **I2 기억 먼저, 위치는 맨 끝** — facts 저장이 `Ok` 인 뒤에 위치를 옮긴다. 중간에 죽으면 같은 턴을 한 번 더 읽는다. 글자가 같은 claim 은 SHA256 id 가 거른다. 말만 바뀐 중복은 다음 회차의 `absorbs` 가 접는다. 위치만 옮겨지고 기억이 빠지는 일은 없다.
 - **I3 건너뛰지 않는다** — 위치는 읽은 턴만 지나간다. 읽지 못한 턴이 있으면 그 앞에 선다(§4.10). 읽을 원문이 없는 경우는 둘이고 둘 다 기록을 남긴다: 턴 끝 기록 전부터 있던 이력(§10), `keeper_clear` 가 원문을 지운 구간(§4.6).
-- **I4 밀림이 보인다** — 진행 파일이 가리키는 줄 뒤의 줄 수가 typed 값으로 TUI 와 대시보드에 뜬다. Gate 가 아니다.
+- **I4 밀림이 보인다** — 읽은 위치 뒤에 끝난 턴의 수(§4.4 의 2 로 센 줄 수)가 typed 값으로 TUI 와 대시보드에 뜬다. Gate 가 아니다.
 - **I5 실패 뒤에 혼자 돌지 않는다** — 실패한 회차 뒤에는 신호를 기다린다. 같은 실패를 쉬지 않고 되풀이하는 루프가 없다.
 - **I6 고른 숫자 없음** — §2.4 의 값을 지우고 §4.4 밖의 조건을 더하지 않는다.
 - **I7 Keeper 는 Librarian 을 기다리지 않는다** — Keeper 기동, 재기동, 턴 진행 어디에도 Librarian 완료를 기다리는 자리가 없다.
@@ -308,15 +323,17 @@ flowchart TD
    - 위치는 넷 가운데 하나다. `Atom_history { end_atom; last_atom_digest }`: `end_atom` 은 atom 수(마지막 atom 의 다음 번호)이고 `last_atom_digest` 는 atom `end_atom - 1` 을 여는 메시지의 digest 다. `Empty_atom_history`: atom 이 0개다. `No_atom_history`: 공식 클라이언트라 Agent-Core checkpoint 가 없다. `Stale_noop`: Agent-Core 턴인데 저장이 stale no-op 이었다(더 새 writer 가 파일을 쥐고 있었다). 그 턴의 메시지는 durable 이력에 없으므로 읽을 범위가 없는 줄이다. 줄을 빼지 않고 남기는 이유는 밀린 턴 수를 줄 수로 세기 때문이다.
    - 위치는 저장이 돌려준 checkpoint 로 계산한다. 저장은 그 턴의 꼬리를 자르므로(`keeper_replay_checkpoint.ml`) 런타임이 돌려준 checkpoint 로 계산하면 디스크와 어긋난다.
    - 시작할 때의 이력은 `Fresh_history`(불러온 checkpoint 없이 시작했다) 또는 `Continued_history` 다. Keeper 가 이미 아는 값이다(`keeper_run_context.ml` 의 `loaded_checkpoint_present`). 읽는 쪽은 이 값으로 범위의 시작을 정한다(§4.4 의 3). checkpoint 를 못 읽어 같은 trace 에서 이력이 새로 시작한 턴도 이 값이 `Fresh_history` 라서 앞 줄의 `end_atom` 에 속지 않는다.
-   - checkpoint 저장 뒤에 쓰고(`keeper_agent_run_finalize_response.ml` 의 checkpoint 저장 바로 다음), 쓴 뒤 Librarian 을 깨운다. 쓰기가 실패해도 턴은 실패하지 않는다. ERROR 로그와 metric 을 남긴다. 빠진 줄의 내용은 잃지 않는다. 다음 줄의 범위가 앞 줄의 끝에서 시작하므로 두 턴을 같이 덮는다.
+   - checkpoint 저장 뒤에 쓰고(`keeper_agent_run_finalize_response.ml` 의 checkpoint 저장 바로 다음), 쓴 뒤 Librarian 을 깨운다. 쓰기가 실패해도, 쓰다가 예외가 나도 턴은 실패하지 않는다(취소만 예외다). checkpoint 가 이미 저장됐고 턴의 영수증은 아직 없는 자리이기 때문이다. ERROR 로그와 metric 을 남긴다. 일시적인 실패로 빠진 줄의 내용은 잃지 않는다. 다음 줄의 범위가 앞 줄의 끝에서 시작하므로 두 턴을 같이 덮는다.
+   - 서버가 append 도중에 죽으면 파일이 줄 중간에서 끝날 수 있다. 그러면 그 뒤의 append 가 전부 거절된다. 이 저장소에서 잘린 끝을 자르는 일은 process-start recovery 전용이다(`Fs_compat.recover_private_jsonl_durable_locked_result`). 그 호출은 Librarian 루프가 뜰 때 하는 첫 읽기(§8 의 4단계)에 둔다. 그때까지 그 Keeper 의 턴은 기록되지 않는다. 내용은 잃지 않는다. 복구 뒤 첫 줄의 범위가 그 사이를 덮는다.
+   - checkpoint 저장이 복구 사본을 쓴 드문 경우(payload 인코딩 거절 뒤 문제 json 을 뺀 사본), 저장이 돌려주는 값은 디스크의 값과 다르다(#37018). 마지막 atom 을 여는 메시지에 그 json 이 있었으면 digest 가 디스크와 어긋나고, 읽는 쪽은 §4.4 의 5 에서 선다. #37018 이 닫히면 사라지는 빈틈이다.
    - 모든 후보가 죽어 finalize 를 거치지 않은 턴은 줄이 없다. 그 턴이 턴 도중 저장으로 이력에 남긴 조각은 다음 줄의 범위에 들어가 읽힌다.
    - 도구 결과를 기다리며 끝난 턴이 있으면, 다음 턴에 도착한 Tool 메시지는 이미 읽은 atom 에 붙는다(atom 은 User·Assistant 메시지가 열고 Tool 메시지는 앞 atom 에 붙는다). Librarian 은 도구 결과 본문을 읽지 않으므로 놓치는 것은 그 결과의 `is_error` 표시 하나다. 받아들인다.
    - `keeper_clear` 도구는 checkpoint 의 메시지를 비우고 저장한다(`keeper_tool_surface.ml`). 그 뒤의 턴은 checkpoint 를 불러와 시작하므로 `Continued_history` 인데 atom 번호는 0 근처에서 다시 시작한다. 이 사실은 비운 쪽만 안다. 그래서 `keeper_clear` 가 `history_cleared` 줄을 남긴다(§8 의 1b). 읽는 쪽은 그 줄 뒤의 범위를 0 에서 시작한다. 그 줄 앞의 안 읽은 턴은 원문이 지워졌으므로 읽을 수 없다. 몇 턴이 안 읽힌 채 지워졌는지를 저널에 남기고 위치를 그 줄로 옮긴다.
    - 어휘는 기존 `Runtime_model_input_tail_window.atom_opening_digest` 를 그대로 쓴다. 창 조립의 `project_from_atom ~first_atom` 과 같은 단위다.
    - 턴의 시작은 적지 않는다. 직전 턴의 끝이 곧 시작이다. `demote_before` 는 resume·HITL 턴에서 안전한 하한이 아니다(그 턴들은 user 메시지가 이미 checkpoint 에 들어간 채로 시작한다).
-   - 진행 파일이 가리키는 줄 앞의 줄은 지워도 뜻이 같다. 지우는 일은 2단계에서 파일 읽는 비용을 재고 넣는다. 넣는다면 조건은 "가리키는 줄 앞"뿐이고 크기나 줄 수 문턱은 두지 않는다.
+   - 읽은 위치보다 앞에서 끝난 줄은 지워도 뜻이 같다. 지우는 일은 2단계에서 파일 읽는 비용을 재고 넣는다. 넣는다면 조건은 "읽은 위치보다 앞"뿐이고 크기나 줄 수 문턱은 두지 않는다.
 2. **진행 파일** `<keepers_dir>/<keeper>.librarian-progress.json`
-   - 마지막으로 읽은 턴: `turn_ref`, 위치.
+   - 읽은 위치: trace id, `end_atom`, 그 자리 atom 의 digest. 줄을 가리키지 않고 값을 갖는다(§4.4 의 2).
    - 쓰는 곳은 그 Keeper 의 Librarian 루프 하나다.
    - 없으면 "아직 읽은 적 없음"이다. 추측이 아니라 사실이다.
    - 못 읽거나 턴 끝 기록과 맞지 않으면 typed 오류다. 빈 상태로 떨어뜨리지 않는다. 빈 상태가 되면 이력 전체가 밀린 것으로 보인다. 오류는 화면에 뜨고(§4.9), 푸는 방법은 그 Keeper 의 두 파일을 purge 로 같이 지우는 것이다.
@@ -324,7 +341,7 @@ flowchart TD
    - purge 는 두 파일을 같이 지운다. purge 가 회차 도중에 일어나면 루프가 옛 위치를 되살려 쓸 수 있다. 그래서 진행 파일을 쓰기 직전에 턴 끝 기록의 잠금을 잡고, 회차를 시작할 때 본 줄이 그대로 있는지 확인한다(§4.4 의 5a). 없으면 쓰지 않는다.
    - 이 파일이 갖는 것은 읽은 위치다. 창이 보는 위치는 §7 (라)의 파일이 따로 갖는다. 창 조립은 이 파일을 직접 쓰지 않는다.
 
-두 파일 모두 Keeper purge 변형(`keeper_shutdown_types.ml`, `server_dashboard_http_delete_actions.ml`)과 배포 preflight 의 저장소 목록(`bin/deployment_preflight_helper.ml`)에 등록한다.
+두 파일 모두 Keeper purge 변형(`keeper_shutdown_types.ml`, `server_dashboard_http_delete_actions.ml`)에 등록한다. 배포 preflight 의 저장소 목록(`bin/deployment_preflight_helper.ml`)에는 읽는 쪽이 들어가는 2단계에서 등록한다. 그 목록의 `on_refusal` 칸은 "읽는 쪽이 못 읽는 줄을 어떻게 하는가"를 적는 자리라서, 읽는 쪽이 없는 1단계에서 적으면 거짓 문장이 된다. preflight lint 가 `exact_field_names_result` 로 읽는 저장소를 못 보는 빈틈(#37019)도 그때 같이 본다.
 
 ### 4.7 회차의 입력
 
@@ -404,9 +421,9 @@ TUI Memory 헤더, health JSON, 대시보드에 밀린 턴 수, 마지막 성공
 
 | 단계 | 내용 | 혼자 들어가도 안전한 이유 |
 |---|---|---|
-| 1 | 턴 끝 기록. 쓰기만 하고 읽는 곳은 없다. purge·preflight 등록 | 동작이 바뀌지 않는다 |
+| 1 | 턴 끝 기록. 쓰기만 하고 읽는 곳은 없다. purge 등록 | 동작이 바뀌지 않는다 |
 | 1b | `keeper_clear` 가 `history_cleared` 줄을 남긴다(§4.6) | 읽는 곳이 없다. 4단계 전에 있어야 한다 |
-| 2 | 진행 파일 저장소와 순수 함수 둘: (턴 끝 기록, 진행 파일)에서 다음에 읽을 턴을 고르기, (checkpoint, 범위)에서 메시지를 자르기. I1·I9 와 §4.4 의 2~5 를 여기서 테스트한다 | 부르는 곳이 없다 |
+| 2 | 진행 파일 저장소와 순수 함수 둘: (턴 끝 기록, 진행 파일)에서 다음에 읽을 턴을 고르기, (checkpoint, 범위)에서 메시지를 자르기. I1·I9 와 §4.4 의 2~5 를 여기서 테스트한다. 두 파일을 배포 preflight 에 등록한다 | 부르는 곳이 없다 |
 | 3 | 하네스(§9) | 저장소 밖 실행 |
 | 4 | 서버 소유 루프. 회차는 지금의 프롬프트, 스키마, 레인, 저장 경로를 그대로 쓰고 입력만 §4.7 로 바꾼다. 같은 PR 에서 Keeper 턴 끝 경로의 제출을 끈다. #36979·#37004 가 닫힌 뒤에 넣는다 | 두 경로가 같이 돌면 같은 턴을 두 번 읽는다. 그래서 한 PR 에서 바꾼다 |
 | 5 | 죽은 것을 지운다: cadence, 72, 턴 끝 1칸(`remember_turn`·`attempt_remembered`), memory lane 의 Librarian 예약과 lifecycle 결합(30초 대기 포함), 그 소비자들(설정, 런타임 설정 등록, health JSON, TUI·대시보드 디코더, 저널의 `cadence_deferred`, 그 값을 핀한 테스트) | 4 와 같은 스택으로 이어서 머지한다 |

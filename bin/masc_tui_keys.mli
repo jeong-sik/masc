@@ -168,6 +168,24 @@ val footer_hints_memory_facts : string
 (** The Memory fact browser opened by Enter on a health row: row movement,
     the category cycle, search, and the way back to the table. *)
 
+val bindings_memory_facts : binding list
+(** The fact browser's own keys. Separate from {!for_surface} because they are
+    conditional on the browser being open: the health row's [Enter], [s] and
+    [Esc] mean other things under these names, so [?] files them under Memory
+    with the screen named. *)
+
+val bindings_memory_fact_detail : binding list
+(** The reading the browser's [Enter] opens. One fact scrolls under the
+    cursor instead of the cursor moving rows, so it owns page and edge keys
+    the browser row has none of; [?] files them under Memory with the screen
+    named. *)
+
+val memory_fact_detail_hints : string
+(** The keys the reading's footer row leads with, [key:label] joined by two
+    spaces. Projects {!bindings_memory_fact_detail}, so the footer and the
+    help sheet cannot name different keys. The renderer leads the row with the
+    window marker, which is not a key. *)
+
 val keeper_detail_tab_bindings :
   Masc_tui_types.keeper_detail_tab -> binding list
 (** A detail tab's own keys. Separate from {!for_surface} because they are

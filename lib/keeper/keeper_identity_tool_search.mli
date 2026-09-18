@@ -143,10 +143,11 @@ type placement =
             continuously, so between them a tool can age past it and stay
             placed.
 
-            A tool the window drops returns to the listing on the same
-            request, because the listing omits exactly the names placed with
-            schemas. Nothing becomes unreachable; what changes is whether a
-            tool's schema is charged before it is asked for. A call the model
+            The listing names every offered tool, placed or not, so it reads
+            the same whichever tools the window holds and a tool the window
+            drops is still one load away. Nothing becomes unreachable; what
+            changes is whether a tool's schema is charged before it is asked
+            for. A call the model
             makes to a dropped name is refused by admission and costs a round
             trip -- see {!make} for what the model is told.
 

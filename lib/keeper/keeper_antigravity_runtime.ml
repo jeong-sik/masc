@@ -102,47 +102,26 @@ let current_goal_label () =
 
 let prompt_section_separator = "\n\n"
 
-let measure_model_input_message_bytes (message : Agent_core.Types.message) =
-  String.length (history_role_label message.role)
-  + String.length (Host.encode_history_message message)
-  + String.length prompt_section_separator
-;;
-
-(* The declared per-model [max-prompt-bytes] is the only authority that can
-   bound this provider's turn prompt. The reactive shrink contract the other
-   official clients rely on has no stimulus here: agy 1.1.12 does not refuse
-   an oversized prompt with a typed overflow — it silently truncates the
-   stdin payload (11,386,764 bytes sent, 185,751-byte USER_INPUT recorded by
-   the client, 2026-08-14) so the goal at the tail never reaches the model,
-   and while stalled on the oversized payload its print-mode response
-   subscriber is killed ("Publish killing slow subscriber ... stalled for
-   5s"), after which the result event reports SUCCESS with an empty
-   response. Six of six spawns failed exactly that way on 2026-08-14, each
-   parking the session and re-sending the full history to a fresh
-   conversation. Windowing the provider-bound history up front to the
-   declared capacity is therefore this runtime's admission contract, not a
-   second authority over a provider-owned window.
-
-   [prompt_section_framing_reserved_bytes] is derived from the actual label
-   literals [prompt_for_turn] concatenates, so a label change cannot silently
-   outgrow the reserve. Each history message is charged its actual role label
-   plus one separator; charging a separator for the last message too is a
-   deliberate conservative byte that keeps the rendered prompt within the
-   declared cap without depending on deployment margin. *)
-let prompt_section_framing_reserved_bytes () =
-  String.length (system_instructions_label ())
-  + String.length (current_goal_label ())
-  + (2 * String.length prompt_section_separator)
-;;
+(* agy states no prompt size limit: it is in no flag of `agy --help` and in
+   no field of its stream. A 2,078,915-byte prompt went end to end and the
+   model answered from markers placed at 0, 25, 50, 75 and 100 percent of it
+   (2026-09-18, agy 1.2.6), so the history is handed over whole and the CLI
+   decides what to do with it. An earlier reading of agy 1.1.12 concluded the
+   opposite from a truncated payload (11,386,764 bytes offered, 185,751
+   recorded, 2026-08-14); that is the shape a stdin write which timed out
+   also leaves, and it does not reproduce here. *)
 
 (* The source projection runs first: the one production source appends a
-   bounded typed Gate replay reference (keeper_agent_run.ml), and on this
-   lane the window is the only authority over the transmitted bytes — there
-   is no provider refusal to catch an append that lands after the cut, so
-   the window must see everything that ships. The appended reference is the
-   newest material and survives the tail window. *)
-let bounded_history_projection ~capacity_bytes ~reserved_bytes
-    ?on_model_input_window_observation source_projection
+   bounded typed Gate replay reference (keeper_agent_run.ml). The reading
+   counts what that produced, so the appended reference is in the numbers the
+   turn record carries. *)
+(* Everything offered goes to the CLI, and what went is reported. Carrying no
+   cut is still a reading — the range starts at the oldest atom — and the turn
+   record needs it: a keeper's next turn reads the range its last one carried
+   (RFC keeper-context-window-in-tokens §10.4), and a turn that reports
+   nothing leaves the next one composing the whole history from scratch. The
+   claude_code sibling states the same rule for its uncapped lane. *)
+let observed_history_projection ?on_model_input_window_observation source_projection
   : Agent_core.Agent.model_input_projection
   =
   fun messages ->
@@ -151,65 +130,26 @@ let bounded_history_projection ~capacity_bytes ~reserved_bytes
     | None -> Ok messages
     | Some project -> project messages
   in
-  let history_atom_count = List.length messages in
   Domain_pool_ref.submit_cpu_or_inline (fun () ->
-    match
-      (* [project_with_drop] rather than [project]: the same cut, keeping the
-         counts instead of discarding them. The Agent Core path publishes this
-         reading; discarding it here wrote every Antigravity turn record with
-         no window and no input composition, which is what [/context] reads. *)
-      Runtime_model_input_tail_window.project_with_drop
-        ~allow_empty_history:true
-        ~measure_message_bytes:measure_model_input_message_bytes
-        ~capacity_bytes
-        ~reserved_bytes
-        messages
-    with
-    | Ok projection ->
-      Option.iter
-        (fun observe ->
-           observe
-             (Runtime_model_input_tail_window.observe
-                ~history_atom_count
-                projection))
-        on_model_input_window_observation;
-      Ok projection.Runtime_model_input_tail_window.messages
-    | Error error ->
-      Error (Runtime_model_input_tail_window.budget_error_to_core_error error))
-;;
-
-let capacity_bounded_model_input_projection ~declared_max_prompt_bytes
-    ~system_prompt ~goal ?on_model_input_window_observation source_projection
-  =
-  match declared_max_prompt_bytes with
-  (* [None] keeps passing the source through unchanged, as the interface
-     says. A runtime that declares no cap cuts nothing, so there is no window
-     reading to report and inventing one would claim a measurement that was
-     never taken. *)
-  | None -> Ok source_projection
-  | Some capacity_bytes ->
-    let reserved_bytes =
-      String.length system_prompt
-      + String.length goal
-      + prompt_section_framing_reserved_bytes ()
+    (* Atoms, not messages: the window's front is named by the message that
+       opens atom [total_atoms - transmitted_atoms], so both counts have to
+       be the atoms [Runtime_model_input_tail_window.annotate] numbers. *)
+    let _labelled, history_atom_count =
+      Runtime_model_input_tail_window.annotate messages
     in
-    if reserved_bytes >= capacity_bytes
-    then
-      Error
-        (config_error
-           ~field:"max_prompt_bytes"
-           (Printf.sprintf
-              "Antigravity fixed prompt sections (system prompt and goal) measure %d bytes, at or above the declared max-prompt-bytes %d; no history window can fit"
-              reserved_bytes
-              capacity_bytes))
-    else
-      Ok
-        (Some
-           (bounded_history_projection
-              ~capacity_bytes
-              ~reserved_bytes
-              ?on_model_input_window_observation
-              source_projection))
+    Option.iter
+      (fun observe ->
+         Option.iter
+           observe
+           (Runtime_model_input_tail_window.observe
+              ~digest_at:(Runtime_model_input_tail_window.atom_opening_digest messages)
+              ~history_atom_count
+              { Runtime_model_input_tail_window.messages
+              ; dropped_atoms = 0
+              ; atom_count = history_atom_count
+              }))
+      on_model_input_window_observation;
+    Ok messages)
 ;;
 
 let prompt_for_turn ~is_resume ~goal (prepared : Host.prepared_turn) =
@@ -481,16 +421,11 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
       | None -> Ok goal
       | Some blocks -> Host.text_of_blocks ~runtime_label ~field:"goal_blocks" blocks
     in
-    let declared_max_prompt_bytes =
-      Runtime_inference.resolve_max_prompt_bytes ~runtime_id
-    in
-    let* model_input_projection =
-      capacity_bounded_model_input_projection
-        ~declared_max_prompt_bytes
-        ~system_prompt
-        ~goal
-        ?on_model_input_window_observation
-        model_input_projection
+    let model_input_projection =
+      Some
+        (observed_history_projection
+           ?on_model_input_window_observation
+           model_input_projection)
     in
     let* () = match official_task_reference with
       | None -> Ok ()
@@ -541,15 +476,12 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     Log.Keeper.info
       ~keeper_name
       "%s turn composition: mode=%s prompt_bytes=%d system_prompt_bytes=%d \
-       goal_bytes=%d declared_max_prompt_bytes=%s"
+       goal_bytes=%d"
       runtime_label
       (if is_resume then "resume" else "start")
       (String.length prompt)
       (String.length prepared.system_prompt)
-      (String.length goal)
-      (match declared_max_prompt_bytes with
-       | None -> "undeclared"
-       | Some bytes -> string_of_int bytes);
+      (String.length goal);
     let terminal_error = ref None in
     let* dynamic_tools =
       Host.dynamic_tools
@@ -1161,9 +1093,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
 ;;
 
 module For_testing = struct
-  let capacity_bounded_model_input_projection =
-    capacity_bounded_model_input_projection
-  ;;
+  let observed_history_projection = observed_history_projection
 
   let start_prompt_bytes ~system_prompt ~goal messages =
     let prepared : Host.prepared_turn =
@@ -1172,13 +1102,4 @@ module For_testing = struct
     Result.map String.length (prompt_for_turn ~is_resume:false ~goal prepared)
   ;;
 
-  (* One byte more than this is the smallest admissible declared capacity.
-     This is not the rendered empty-history prompt: the reserve charges both
-     separators (the with-history worst case), while an empty-history render
-     joins its two sections with one. *)
-  let reserved_prompt_bytes ~system_prompt ~goal =
-    String.length system_prompt
-    + String.length goal
-    + prompt_section_framing_reserved_bytes ()
-  ;;
 end

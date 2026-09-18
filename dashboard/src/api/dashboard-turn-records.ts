@@ -472,6 +472,10 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     'transmitted_atoms',
     'total_atoms',
     'model_input_measurement',
+    // The window's front position (RFC keeper-context-window-in-tokens
+    // §10.4). The inspector does not render it; it is accepted so a record
+    // carrying it is not rejected as unknown.
+    'front_atom_digest',
     'runtime_profile',
     'selected_model',
     'finish_reason',

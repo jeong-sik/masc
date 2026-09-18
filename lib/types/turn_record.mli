@@ -80,6 +80,14 @@ type model_input_window =
   { transmitted_atoms : int
   ; total_atoms : int
   ; measurement : model_input_measurement
+  ; front_atom_digest : string
+        (** SHA-256 hex of the message that opens the front atom, index
+            [total_atoms - transmitted_atoms]
+            ([Runtime_model_input_tail_window.atom_opening_digest]). The
+            index and this digest together are the position a later turn
+            resumes from: the position holds only while that index still
+            opens with the same message, whatever the history's atom count
+            is now. *)
   }
 (** How much of the keeper's own history the dispatched request carried, in
     atoms — one organic user message, or one assistant message together with
@@ -103,7 +111,12 @@ type model_input_window =
     transmitted messages alone: dropped atoms leave no trace, so a reader given
     only the request cannot distinguish a keeper that sent all of a short
     history from one that sent the tail of a long one. Pinned messages are not
-    atoms and appear in neither count. *)
+    atoms and appear in neither count.
+
+    The four fields are written as the keys [transmitted_atoms],
+    [total_atoms], [model_input_measurement] and [front_atom_digest], all
+    present or all null. A record without the [front_atom_digest] key does not
+    decode. *)
 
 type turn_kind =
   | Autonomous

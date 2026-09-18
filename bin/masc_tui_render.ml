@@ -112,7 +112,7 @@ let keeper_roster_marquee_target (state : state) ~cols =
 let acting_pane_columns (state : state) ~terminal_cols =
   let modal =
     Option.is_some state.lane_addons || state.palette_open || state.context_inspector_open || state.keeper_deletions_open || state.help_open
-    || state.agenda_open || state.answering_open
+    || state.agenda_open || state.answering_open || state.memory_fact_detail_open
   in
   if modal
      || Masc_tui_types.on_activity_screen state.view
@@ -9483,7 +9483,68 @@ let render_memory (state : state) =
         ~push:c.push ~push_styled:c.push_styled ~push_selected:c.push_selected
         ~push_divider:c.push_divider ~push_empty:c.push_empty)
 
-let render_memory_facts (state : state) =
+(* The Memory facts list's [Enter] reading: the whole fact wrapped to this
+   overlay's own width and windowed, instead of the narrow block the list
+   draws under the row. Same lines, more columns and more rows, and a scroll
+   of its own -- the list stays behind it and is redrawn when it closes.
+
+   It wears the shared overlay chrome, [Chrome_overlay], the frame the contract
+   names for a surface opened over another one: the box, the title and the
+   footer come from there, and the window it clamps to is the frame's own
+   budget rather than a second tally of the same rows. The window marker rides
+   the footer row the way the patch reading's does. *)
+let render_memory_fact_detail (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let facts = Masc_tui_types.memory_fact_rows state in
+  let total = List.length facts in
+  let cursor = max 0 (min state.memory_facts_cursor (max 0 (total - 1))) in
+  let detail_cols = max 30 (framed_inner_width cols) in
+  let lines =
+    match List.nth_opt facts cursor with
+    | None -> [ "    This list has no fact row to read." ]
+    | Some row -> Render_memory.memory_fact_detail_lines ~cols:detail_cols row
+  in
+  let total_lines = List.length lines in
+  (* The frame spends [surface_chrome_rows] of the body on its own chrome, so
+     the window's height is worked out here, from the number the frame itself
+     uses, before anything is drawn. Counting the buffer afterwards -- what
+     this surface did first -- is a second tally of one thing, and being one
+     row out is not a visible mistake: [finish_surface] drops the rows past the
+     edge, and the row it drops is the footer naming the way back. *)
+  let content_height =
+    max 1
+      (Masc_tui_types.surface_body_rows state ~terminal_rows - surface_chrome_rows)
+  in
+  let max_scroll = max 0 (total_lines - content_height) in
+  let scroll = min max_scroll (max 0 state.memory_fact_detail_scroll) in
+  surface_chrome state ~terminal_rows ~cols ~surface_key:"memory-fact-detail"
+    ~frame:Chrome_overlay
+    (* The drawing says what it actually clamped to, so [G]'s sentinel and a
+       scroll past the end are corrected in the state rather than only on the
+       screen. *)
+    ~clamped:(fun () -> Some (Memory_fact_detail_scroll scroll))
+    ~title:(screen_title " MASC MEMORY - FACT DETAIL")
+    ~hints:
+      (* The keys project the same bindings the help sheet carries, so the
+         footer and [?] cannot teach different keys. The marker leads, as the
+         patch reading's does: it carries no colon, so the fitter can shed no
+         whole key of it and a narrow terminal keeps the count. *)
+      (Printf.sprintf "[detail rows %s]  %s"
+         (Masc_tui_scroll.window_text ~scroll ~height:content_height total_lines)
+         Masc_tui_keys.memory_fact_detail_hints)
+    ~body:(fun ~budget:_ c ->
+      let window = Rows.of_list ~first:scroll ~height:content_height lines in
+      for i = 0 to content_height - 1 do
+        match Rows.at window (scroll + i) with
+        | None -> c.push_empty ()
+        | Some line -> c.push line
+      done)
+
+let rec render_memory_facts (state : state) =
+  if state.memory_fact_detail_open then render_memory_fact_detail state
+  else render_memory_facts_list state
+
+and render_memory_facts_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let open Masc.Tui_decode in
   let keeper_name = Render_memory.facts_keeper_label state.memory_facts_keeper in

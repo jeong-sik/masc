@@ -116,7 +116,13 @@ let sample_record () : Turn_record.t =
         { runtime_profile = "ollama_cloud.deepseek-v4-flash"
         ; body_bytes = 560_513
         }
-  ; model_input_window = Some { transmitted_atoms = 15; total_atoms = 7_706; measurement = Wire_shape }
+  ; model_input_window =
+      Some
+        { transmitted_atoms = 15
+        ; total_atoms = 7_706
+        ; measurement = Wire_shape
+        ; front_atom_digest = String.make 64 'a'
+        }
   ; raw_trace_run_ref =
       Some
         { worker_run_id = "worker-run-41"
@@ -489,6 +495,7 @@ let test_codec_requires_current_observation_fields () =
     ; "request_body_bytes"
     ; "transmitted_atoms"
     ; "total_atoms"
+    ; "front_atom_digest"
     ]
 
 (* The record has to carry how much of its own history the turn transmitted,
@@ -502,6 +509,7 @@ let test_record_carries_transmitted_history_share () =
           { Turn_record.transmitted_atoms = 7
           ; total_atoms = 7_700
           ; measurement = Wire_shape
+          ; front_atom_digest = String.make 64 'b'
           }
     }
   in
@@ -512,7 +520,69 @@ let test_record_carries_transmitted_history_share () =
      | None -> failf "roundtrip dropped the share"
      | Some window ->
        check int "transmitted survives" 7 window.Turn_record.transmitted_atoms;
-       check int "total survives" 7_700 window.Turn_record.total_atoms)
+       check int "total survives" 7_700 window.Turn_record.total_atoms;
+       check string "the front's digest survives" (String.make 64 'b')
+         window.Turn_record.front_atom_digest)
+
+(* A row written before the window's front was named carries no
+   [front_atom_digest] key even when it has no window at all. The key is
+   required like the other three, so that row is refused too: the store is
+   emptied at deploy, and a row the reset missed is refused rather than read
+   as a row without a window. *)
+let test_codec_rejects_a_row_without_a_window_or_the_digest_key () =
+  let json =
+    match
+      Turn_record.to_json
+        { (sample_record ()) with Turn_record.model_input_window = None }
+    with
+    | `Assoc fields ->
+      check bool "the window keys are null" true
+        (List.assoc_opt "transmitted_atoms" fields = Some `Null);
+      `Assoc (List.remove_assoc "front_atom_digest" fields)
+    | other -> other
+  in
+  match Turn_record.of_json json with
+  | Ok _ -> fail "decoded a row without the front_atom_digest key"
+  | Error message ->
+    check bool "the missing key is named" true
+      (Astring.String.is_infix ~affix:"front_atom_digest" message)
+
+(* A window written before the front was named by its opening message has
+   the three counts and no digest. It names no position a later turn can
+   check, so it is not read as a window without one: the record does not
+   decode. *)
+let test_codec_rejects_a_window_without_its_front_digest () =
+  let json =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields -> `Assoc (List.remove_assoc "front_atom_digest" fields)
+    | other -> other
+  in
+  (match json with
+   | `Assoc fields ->
+     check bool "the three counts are still there" true
+       (List.for_all
+          (fun key ->
+             match List.assoc_opt key fields with
+             | Some `Null | None -> false
+             | Some _ -> true)
+          [ "transmitted_atoms"; "total_atoms"; "model_input_measurement" ])
+   | _ -> fail "the sample record is an object");
+  (match Turn_record.of_json json with
+   | Ok _ -> fail "decoded a window without its front digest"
+   | Error message ->
+     check bool "the missing key is named" true
+       (Astring.String.is_infix ~affix:"front_atom_digest" message));
+  let null_digest =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields ->
+      `Assoc (("front_atom_digest", `Null) :: List.remove_assoc "front_atom_digest" fields)
+    | other -> other
+  in
+  match Turn_record.of_json null_digest with
+  | Ok _ -> fail "decoded three counts beside a null digest"
+  | Error message ->
+    check bool "all four or none" true
+      (Astring.String.is_infix ~affix:"front_atom_digest" message)
 
 (* A share above 1 is not a large number, it is a contradiction: the reader
    would render a keeper transmitting more history than it holds. *)
@@ -933,6 +1003,10 @@ let () =
             test_record_carries_transmitted_history_share
         ; test_case "transmitting more than held rejected" `Quick
             test_codec_rejects_transmitting_more_than_held
+        ; test_case "window without its front digest rejected" `Quick
+            test_codec_rejects_a_window_without_its_front_digest
+        ; test_case "row without a window or the digest key rejected" `Quick
+            test_codec_rejects_a_row_without_a_window_or_the_digest_key
         ; test_case "half an observation rejected" `Quick
             test_codec_rejects_half_an_observation
         ; test_case "mismatched turn_ref rejected" `Quick

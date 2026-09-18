@@ -31,6 +31,7 @@ type catalog_fixture =
   ; native : bool
   ; json : bool
   ; body_timeout_s : float option
+  ; connect_timeout_s : float option
   ; serving_constraint : bool
   ; serving_accepted_through_tokens : int
   ; serving_rejected_from_tokens : int
@@ -41,6 +42,7 @@ type catalog_fixture =
 
 let catalog_entry
       ?body_timeout_s
+      ?(connect_timeout_s = Some 30.0)
       ?(serving_constraint = false)
       ?(serving_accepted_through_tokens = 524298)
       ?(serving_rejected_from_tokens = 524299)
@@ -64,6 +66,7 @@ let catalog_entry
   ; native
   ; json
   ; body_timeout_s
+  ; connect_timeout_s
   ; serving_constraint
   ; serving_accepted_through_tokens
   ; serving_rejected_from_tokens
@@ -77,6 +80,10 @@ let catalog_fixture_toml entry =
   (* The model row owns the Anthropic wire dialect. The target row owns the
      explicit request policy, so capability never implies enablement. *)
   let target_options =
+    (match entry.connect_timeout_s with
+     | None -> ""
+     | Some seconds -> Printf.sprintf "connect_timeout_s = %.17g\n" seconds)
+    ^
     (match entry.body_timeout_s with
      | None -> ""
      | Some seconds -> Printf.sprintf "body_timeout_s = %.17g\n" seconds)
@@ -439,6 +446,10 @@ let execute_with_accepting_test_validator
       ~before_advance
       flow
   =
+  (* Fixture targets declare a connect budget by default, and a flow with a
+     declared budget refuses to run without a measurement clock, so every
+     case that dispatches passes the stdenv clock the server runner already
+     hands it. *)
   EO.execute_flow_once
     ~net
     ?clock
@@ -451,9 +462,10 @@ let execute_with_accepting_test_validator
   |> transport_test_result
 ;;
 
-let execute_ok ~net flow =
+let execute_ok ~net ?clock flow =
   execute_with_accepting_test_validator
     ~net
+    ?clock
     ~on_measurement_terminal:(fun _ -> Ok ())
     ~before_measurement_dispatch:(fun _ -> Ok ())
     ~before_dispatch:(fun _ -> Ok ())
@@ -461,9 +473,10 @@ let execute_ok ~net flow =
     flow
 ;;
 
-let execute_with_validator ~net ~before_advance ~validate flow =
+let execute_with_validator ~net ?clock ~before_advance ~validate flow =
   EO.execute_flow_once
     ~net
+    ?clock
     ~on_measurement_terminal:(fun _ -> Ok ())
     ~before_measurement_dispatch:(fun _ -> Ok ())
     ~before_dispatch:(fun _ -> Ok ())
@@ -492,7 +505,7 @@ let flow_snapshot_ids ready =
 let test_snapshot_defers_admission_and_allocates_nonshared_current_attempts () =
   let (before_a, before_b, result_a, result_b), posts =
     with_server ~response:(openai_response {|{"name":"accepted"}|})
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
     let entry id native json = catalog_entry ~id ~base_url ~native ~json () in
     with_catalog
       [ entry "flow-good-a" true true
@@ -531,7 +544,7 @@ let test_snapshot_defers_admission_and_allocates_nonshared_current_attempts () =
       "flow B handle and evidence share one identity"
       (EO.flow_id_to_string before_b.flow_id)
       (EO.flow_id_to_string (EO.flow_attempt_id flow_b));
-    before_a, before_b, execute_ok ~net flow_a, execute_ok ~net flow_b
+    before_a, before_b, execute_ok ~net ~clock flow_a, execute_ok ~net ~clock flow_b
   in
   check int "two independent current attempts make two POSTs" 2 posts;
   check
@@ -610,7 +623,7 @@ let test_snapshot_defers_admission_and_allocates_nonshared_current_attempts () =
 let test_later_missing_credential_does_not_block_current_success () =
   let (result, advances), posts =
     with_server ~response:(openai_response {|{"name":"accepted"}|})
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
       ~getenv:credential_getenv
       [ catalog_entry ~id:"current-good" ~base_url ~native:true ~json:true ()
@@ -626,6 +639,7 @@ let test_later_missing_credential_does_not_block_current_success () =
     let advances = ref 0 in
     let result =
       execute_with_accepting_test_validator
+        ~clock
         ~net
         ~on_measurement_terminal:(fun _ -> Ok ())
         ~before_measurement_dispatch:(fun _ -> Ok ())
@@ -675,12 +689,13 @@ let test_json_syntax_requests_json_mode_when_the_target_can_enforce_it () =
     with_counted_server
       ~measurement_reply:(Measurement_tokens 1)
       ~response:(openai_response {|{"name":"accepted"}|})
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog [ catalog_entry ~id:"text-json" ~base_url ~native:true ~json:true () ]
     @@ fun snapshot ->
     let advances = ref 0 in
     let result =
       execute_with_accepting_test_validator
+        ~clock
         ~net
         ~on_measurement_terminal:(fun _ -> Ok ())
         ~before_measurement_dispatch:(fun _ -> Ok ())
@@ -755,13 +770,14 @@ let test_json_syntax_stays_prompt_only_without_json_mode () =
     with_counted_server
       ~measurement_reply:(Measurement_tokens 1)
       ~response:(openai_response {|{"name":"accepted"}|})
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
       [ catalog_entry ~id:"text-only" ~base_url ~native:false ~json:false () ]
     @@ fun snapshot ->
     let advances = ref 0 in
     let result =
       execute_with_accepting_test_validator
+        ~clock
         ~net
         ~on_measurement_terminal:(fun _ -> Ok ())
         ~before_measurement_dispatch:(fun _ -> Ok ())
@@ -797,7 +813,7 @@ let test_fenced_text_json_advances_to_frozen_successor () =
   in
   let (result, observed_advance, advances), posts =
     with_server ~first_response ~response:(openai_response {|{"name":"accepted"}|})
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
       [ catalog_entry ~id:"fenced-text" ~base_url ~native:false ~json:false ()
       ; catalog_entry ~id:"bare-text" ~base_url ~native:false ~json:false ()
@@ -807,6 +823,7 @@ let test_fenced_text_json_advances_to_frozen_successor () =
     let advances = ref 0 in
     let result =
       execute_with_accepting_test_validator
+        ~clock
         ~net
         ~on_measurement_terminal:(fun _ -> Ok ())
         ~before_measurement_dispatch:(fun _ -> Ok ())
@@ -871,7 +888,7 @@ let test_missing_output_advances_to_frozen_successor () =
   let first_response = `OK, missing_output_response in
   let (result, observed_advance, advances), posts =
     with_server ~first_response ~response:(openai_response {|{"name":"accepted"}|})
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
       [ catalog_entry ~id:"missing-text" ~base_url ~native:false ~json:false ()
       ; catalog_entry ~id:"present-text" ~base_url ~native:false ~json:false ()
@@ -881,6 +898,7 @@ let test_missing_output_advances_to_frozen_successor () =
       let advances = ref 0 in
       let result =
         execute_with_accepting_test_validator
+          ~clock
           ~net
           ~on_measurement_terminal:(fun _ -> Ok ())
           ~before_measurement_dispatch:(fun _ -> Ok ())
@@ -932,7 +950,7 @@ let test_provider_schema_still_requires_native_capability () =
   in
   let (result, evidence), posts =
     with_counted_server ~measurement_reply:(Measurement_tokens 1) ~response:"unused"
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
       [ catalog_entry ~id:"no-native-schema" ~base_url ~native:false ~json:false () ]
     @@ fun snapshot ->
@@ -942,6 +960,7 @@ let test_provider_schema_still_requires_native_capability () =
     in
     let result =
       execute_with_accepting_test_validator
+        ~clock
         ~net
         ~on_measurement_terminal:(fun _ ->
           fail "provider-schema rejection reached measurement terminal")
@@ -986,7 +1005,7 @@ let test_provider_schema_still_requires_native_capability () =
 let test_missing_current_credential_advances_after_durable_settlement () =
   let (result, transitions, bound, next_visit), posts =
     with_server ~response:(openai_response {|{"name":"accepted"}|})
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
       ~getenv:credential_getenv
       [ catalog_entry
@@ -1004,6 +1023,7 @@ let test_missing_current_credential_advances_after_durable_settlement () =
     let next_visit = ref None in
     let result =
       execute_with_accepting_test_validator
+        ~clock
         ~net
         ~on_measurement_terminal:(fun _ -> Ok ())
         ~before_measurement_dispatch:(fun _ -> Ok ())
@@ -1102,7 +1122,7 @@ let test_missing_current_credential_advances_after_durable_settlement () =
 let test_read_failed_current_credential_advances_to_good_successor () =
   let (result, advances), posts =
     with_server ~response:(openai_response {|{"name":"accepted"}|})
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
       ~getenv:credential_getenv
       [ catalog_entry
@@ -1118,6 +1138,7 @@ let test_read_failed_current_credential_advances_to_good_successor () =
     let advances = ref [] in
     let result =
       execute_with_accepting_test_validator
+        ~clock
         ~net
         ~on_measurement_terminal:(fun _ -> Ok ())
         ~before_measurement_dispatch:(fun _ -> Ok ())
@@ -1159,7 +1180,7 @@ let test_read_failed_current_credential_advances_to_good_successor () =
 let test_credential_rejections_are_ordered_zero_dispatch_terminal () =
   let (result, transitions, evidence), posts =
     with_server ~response:(openai_response {|{"name":"unused"}|})
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
       ~getenv:credential_getenv
       [ catalog_entry
@@ -1194,6 +1215,7 @@ let test_credential_rejections_are_ordered_zero_dispatch_terminal () =
     in
     let result =
       execute_with_accepting_test_validator
+        ~clock
         ~net
         ~on_measurement_terminal:(fun _ -> Ok ())
         ~before_measurement_dispatch:(fun _ -> Ok ())
@@ -1271,7 +1293,7 @@ let test_credential_rejections_are_ordered_zero_dispatch_terminal () =
 let test_unmeasured_constraint_advances_only_after_durable_settlement () =
   let (result, transitions, bound), posts =
     with_server ~response:(openai_response {|{"name":"accepted"}|})
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
       [ catalog_entry
           ~id:"constrained-exact"
@@ -1288,6 +1310,7 @@ let test_unmeasured_constraint_advances_only_after_durable_settlement () =
     let bound = ref [] in
     let result =
       execute_with_accepting_test_validator
+        ~clock
         ~net
         ~on_measurement_terminal:(fun _ -> Ok ())
         ~before_measurement_dispatch:(fun _ -> Ok ())
@@ -1415,7 +1438,7 @@ let test_measured_token_capacity_admits_and_rejects () =
          with_counted_server
            ~measurement_reply:(Measurement_tokens measured_tokens)
            ~response
-         @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+         @@ fun ~sw:_ ~net ~clock ~base_url ->
          with_catalog
            [ catalog_entry
                ~kind:"anthropic"
@@ -1436,6 +1459,7 @@ let test_measured_token_capacity_admits_and_rejects () =
          in
          let result =
            execute_with_accepting_test_validator
+             ~clock
              ~net
              ~on_measurement_terminal:(fun _ -> Ok ())
              ~before_measurement_dispatch:(fun _ -> Ok ())
@@ -1500,7 +1524,7 @@ let test_measurement_receipt_codec_and_transition () =
   in
   let (intent, terminal), posts =
     with_counted_server ~measurement_reply:(Measurement_tokens 1) ~response
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
       [ catalog_entry
           ~kind:"anthropic"
@@ -1518,6 +1542,7 @@ let test_measurement_receipt_codec_and_transition () =
     let terminal = ref None in
     let result =
       execute_with_accepting_test_validator
+        ~clock
         ~net
         ~before_measurement_dispatch:(fun measurement ->
           intent := Some (EO.flow_measurement_receipt_snapshot measurement);
@@ -1857,7 +1882,7 @@ let test_measurement_fence_rejection_is_terminal_without_wire () =
   in
   let (result, replay, evidence, intent_callbacks, terminal_callbacks, advances), posts =
     with_counted_server ~measurement_reply:(Measurement_tokens 1) ~response
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
       [ catalog_entry
           ~kind:"anthropic"
@@ -1887,6 +1912,7 @@ let test_measurement_fence_rejection_is_terminal_without_wire () =
     let advances = ref 0 in
     let result =
       execute_with_accepting_test_validator
+        ~clock
         ~net
         ~on_measurement_terminal:(fun measurement ->
           incr terminal_callbacks;
@@ -1924,7 +1950,7 @@ let test_measurement_fence_rejection_is_terminal_without_wire () =
         flow
     in
     ( result
-    , execute_ok ~net flow
+    , execute_ok ~net ~clock flow
     , EO.flow_attempt_evidence flow
     , !intent_callbacks
     , !terminal_callbacks
@@ -1993,7 +2019,7 @@ let test_measurement_fence_nested_http_does_not_mark_outer_dispatch () =
   in
   let (result, evidence), posts =
     with_counted_server ~measurement_reply:(Measurement_tokens 1) ~response
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
       [ catalog_entry
           ~kind:"anthropic"
@@ -2009,6 +2035,7 @@ let test_measurement_fence_nested_http_does_not_mark_outer_dispatch () =
     let flow = start_flow (frozen_flow snapshot [ "measurement-nested-journal" ]) in
     let result =
       execute_with_accepting_test_validator
+        ~clock
         ~net
         ~before_measurement_dispatch:(fun measurement ->
           let before = EO.flow_measurement_receipt_snapshot measurement in
@@ -2071,7 +2098,7 @@ let test_measurement_terminal_callback_failure_blocks_generation () =
   in
   let (result, replay, evidence, terminal_callbacks, advances), posts =
     with_counted_server ~measurement_reply:(Measurement_tokens 1) ~response
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
       [ catalog_entry
           ~kind:"anthropic"
@@ -2100,6 +2127,7 @@ let test_measurement_terminal_callback_failure_blocks_generation () =
     let advances = ref 0 in
     let result =
       execute_with_accepting_test_validator
+        ~clock
         ~net
         ~before_measurement_dispatch:(fun measurement ->
           let snapshot = EO.flow_measurement_receipt_snapshot measurement in
@@ -2128,7 +2156,7 @@ let test_measurement_terminal_callback_failure_blocks_generation () =
         flow
     in
     ( result
-    , execute_ok ~net flow
+    , execute_ok ~net ~clock flow
     , EO.flow_attempt_evidence flow
     , !terminal_callbacks
     , !advances )
@@ -2168,6 +2196,7 @@ let test_measurement_predispatch_failure_records_zero_dispatch () =
     Eio_main.run
     @@ fun env ->
     let net = Eio.Stdenv.net env in
+    let clock = Eio.Stdenv.clock env in
     let dead_url = Printf.sprintf "http://127.0.0.1:%d" (fresh_port ()) in
     with_catalog
       [ catalog_entry
@@ -2186,6 +2215,7 @@ let test_measurement_predispatch_failure_records_zero_dispatch () =
     let terminal_callbacks = ref 0 in
     let result =
       execute_with_accepting_test_validator
+        ~clock
         ~net
         ~before_measurement_dispatch:(fun measurement ->
           incr intent_callbacks;
@@ -2218,7 +2248,7 @@ let test_measurement_predispatch_failure_records_zero_dispatch () =
         flow
     in
     ( result
-    , execute_ok ~net flow
+    , execute_ok ~net ~clock flow
     , EO.flow_attempt_evidence flow
     , !intent_callbacks
     , !terminal_callbacks )
@@ -2297,6 +2327,7 @@ let test_measurement_cancellation_terminalizes_receipt () =
         ignore
           (Eio.Time.with_timeout_exn clock 0.01 (fun () ->
              execute_with_accepting_test_validator
+               ~clock
                ~net
                ~on_measurement_terminal:(fun measurement ->
                  incr terminal_callbacks;
@@ -2320,7 +2351,7 @@ let test_measurement_cancellation_terminalizes_receipt () =
       with
       | Eio.Time.Timeout -> true
     in
-    let replay = execute_ok ~net flow in
+    let replay = execute_ok ~net ~clock flow in
     timed_out, replay, EO.flow_attempt_evidence flow, !terminal_callbacks, !advances
   in
   let ( ( before_timed_out
@@ -2468,7 +2499,7 @@ let test_predispatch_measurement_failure_advances_without_wire () =
   in
   let (result, advances, evidence), posts =
     with_counted_server ~measurement_reply:(Measurement_tokens 1) ~response
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
     let dead_url = Printf.sprintf "http://127.0.0.1:%d" (fresh_port ()) in
     with_catalog
       [ catalog_entry
@@ -2499,6 +2530,7 @@ let test_predispatch_measurement_failure_advances_without_wire () =
     let advances = ref 0 in
     let result =
       execute_with_accepting_test_validator
+        ~clock
         ~net
         ~on_measurement_terminal:(fun _ -> Ok ())
         ~before_measurement_dispatch:(fun _ -> Ok ())
@@ -2563,7 +2595,7 @@ let test_postdispatch_measurement_failures_do_not_advance () =
     (fun (label, measurement_reply, expected_outcome) ->
        let (result, replay, evidence, advances, terminal_callbacks), posts =
          with_counted_server ~measurement_reply ~response
-         @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+         @@ fun ~sw:_ ~net ~clock ~base_url ->
          with_catalog
            [ catalog_entry
                ~kind:"anthropic"
@@ -2591,6 +2623,7 @@ let test_postdispatch_measurement_failures_do_not_advance () =
          let terminal_callbacks = ref 0 in
          let result =
            execute_with_accepting_test_validator
+             ~clock
              ~net
              ~on_measurement_terminal:(fun measurement ->
                incr terminal_callbacks;
@@ -2610,7 +2643,7 @@ let test_postdispatch_measurement_failures_do_not_advance () =
                Ok ())
              flow
          in
-         let replay = execute_ok ~net flow in
+         let replay = execute_ok ~net ~clock flow in
          result, replay, EO.flow_attempt_evidence flow, !advances, !terminal_callbacks
        in
        check int (label ^ " measurement posts") 1 posts.measurement_posts;
@@ -2648,7 +2681,7 @@ let test_exact_anthropic_frozen_artifact_parity () =
   in
   let successes, posts =
     with_counted_server ~measurement_reply:(Measurement_tokens 1) ~response
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
       [ catalog_entry
           ~kind:"anthropic"
@@ -2700,7 +2733,7 @@ let test_exact_anthropic_frozen_artifact_parity () =
     @@ fun snapshot ->
     let execute id =
       let flow = start_flow (frozen_flow snapshot [ id ]) in
-      match execute_ok ~net flow with
+      match execute_ok ~net ~clock flow with
       | Error _ -> failf "%s did not execute" id
       | Ok success -> EO.flow_success_output success
     in
@@ -2805,7 +2838,7 @@ let test_exact_anthropic_frozen_artifact_parity () =
 let test_all_candidate_rejections_return_typed_zero_dispatch_terminal () =
   let (result, transitions, evidence), posts =
     with_server ~response:(openai_response {|{"name":"unused"}|})
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
       [ catalog_entry
           ~serving_constraint:true
@@ -2827,6 +2860,7 @@ let test_all_candidate_rejections_return_typed_zero_dispatch_terminal () =
     let flow = start_flow (frozen_flow snapshot [ "rejected-a"; "rejected-b" ]) in
     let result =
       execute_with_accepting_test_validator
+        ~clock
         ~net
         ~on_measurement_terminal:(fun _ -> Ok ())
         ~before_measurement_dispatch:(fun _ -> Ok ())
@@ -2908,7 +2942,7 @@ let test_exception_after_durable_rejection_stops_before_successor () =
     (fun () ->
        let (raised, replay, evidence, observed), posts =
          with_server ~response:(openai_response {|{"name":"must-not-dispatch"}|})
-         @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+         @@ fun ~sw:_ ~net ~clock ~base_url ->
          with_catalog
            ~getenv:credential_getenv
            [ catalog_entry
@@ -2938,6 +2972,7 @@ let test_exception_after_durable_rejection_stops_before_successor () =
              ignore
                (execute_with_accepting_test_validator
                   ~net
+                  ~clock
                   ~on_measurement_terminal:(fun _ -> Ok ())
                   ~before_measurement_dispatch:(fun _ -> Ok ())
                   ~before_dispatch:(fun candidate ->
@@ -2974,7 +3009,7 @@ let test_exception_after_durable_rejection_stops_before_successor () =
            with
            | Rejection_advance_committed_before_successor -> true
          in
-         raised, execute_ok ~net flow, EO.flow_attempt_evidence flow, !observed
+         raised, execute_ok ~net ~clock flow, EO.flow_attempt_evidence flow, !observed
        in
        check bool "exception escaped after durable rejection settlement" true raised;
        check int "rejection and withheld successor dispatch nothing" 0 posts;
@@ -3012,7 +3047,7 @@ let test_exception_after_durable_rejection_stops_before_successor () =
 let test_predispatch_transport_failure_advances_after_durable_callback () =
   let (result, bound, advanced, events), posts =
     with_server ~response:(openai_response {|{"name":"accepted"}|})
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
     let dead_url = Printf.sprintf "http://127.0.0.1:%d" (fresh_port ()) in
     with_catalog
       [ catalog_entry ~id:"flow-dead" ~base_url:dead_url ~native:true ~json:true ()
@@ -3025,6 +3060,7 @@ let test_predispatch_transport_failure_advances_after_durable_callback () =
     let events = ref [] in
     let result =
       execute_with_accepting_test_validator
+        ~clock
         ~net
         ~on_measurement_terminal:(fun _ -> Ok ())
         ~before_measurement_dispatch:(fun _ -> Ok ())
@@ -3108,7 +3144,7 @@ let test_exception_after_durable_advance_stops_before_successor () =
        in
        let (raised, replay, evidence, bound, committed), posts =
          with_server ~response:(openai_response {|{"name":"unused"}|})
-         @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+         @@ fun ~sw:_ ~net ~clock ~base_url ->
          let dead_url = Printf.sprintf "http://127.0.0.1:%d" (fresh_port ()) in
          with_catalog
            [ catalog_entry
@@ -3135,6 +3171,7 @@ let test_exception_after_durable_advance_stops_before_successor () =
              ignore
                (execute_with_accepting_test_validator
                   ~net
+                  ~clock
                   ~on_measurement_terminal:(fun _ -> Ok ())
                   ~before_measurement_dispatch:(fun _ -> Ok ())
                   ~before_dispatch:(fun candidate ->
@@ -3178,7 +3215,7 @@ let test_exception_after_durable_advance_stops_before_successor () =
            with
            | Advance_committed_before_successor -> true
          in
-         let replay = execute_ok ~net flow in
+         let replay = execute_ok ~net ~clock flow in
          let evidence = EO.flow_attempt_evidence flow in
          let committed =
            In_channel.with_open_bin durable_path In_channel.input_all
@@ -3266,13 +3303,14 @@ let test_exception_after_durable_advance_stops_before_successor () =
 let test_callback_failures_are_terminal () =
   let before_dispatch_result, before_dispatch_posts =
     with_server ~response:(openai_response {|{"name":"unused"}|})
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
       [ catalog_entry ~id:"bind-a" ~base_url ~native:true ~json:true ()
       ; catalog_entry ~id:"bind-b" ~base_url ~native:true ~json:true ()
       ]
     @@ fun snapshot ->
     execute_with_accepting_test_validator
+      ~clock
       ~net
       ~on_measurement_terminal:(fun _ -> Ok ())
       ~before_measurement_dispatch:(fun _ -> Ok ())
@@ -3313,7 +3351,7 @@ let test_callback_failures_are_terminal () =
    | Ok _ | Error _ -> fail "failed bind did not return typed terminal evidence");
   let before_advance_result, before_advance_posts =
     with_server ~response:(openai_response {|{"name":"unused"}|})
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
     let dead_url = Printf.sprintf "http://127.0.0.1:%d" (fresh_port ()) in
     with_catalog
       [ catalog_entry ~id:"advance-a" ~base_url:dead_url ~native:true ~json:true ()
@@ -3321,6 +3359,7 @@ let test_callback_failures_are_terminal () =
       ]
     @@ fun snapshot ->
     execute_with_accepting_test_validator
+      ~clock
       ~net
       ~on_measurement_terminal:(fun _ -> Ok ())
       ~before_measurement_dispatch:(fun _ -> Ok ())
@@ -3356,7 +3395,7 @@ let assert_typed_capacity_refusal_advances_once ~label ~first_response ~assert_c
       , posts )
     =
     with_server ~first_response ~response:(openai_response {|{"name":"accepted"}|})
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
       [ catalog_entry ~id:refused_id ~base_url ~native:true ~json:true ()
       ; catalog_entry ~id:successor_id ~base_url ~native:true ~json:true ()
@@ -3367,6 +3406,7 @@ let assert_typed_capacity_refusal_advances_once ~label ~first_response ~assert_c
     let observed_advance = ref None in
     let result =
       execute_with_accepting_test_validator
+        ~clock
         ~net
         ~on_measurement_terminal:(fun _ -> Ok ())
         ~before_measurement_dispatch:(fun _ -> Ok ())
@@ -3393,7 +3433,7 @@ let assert_typed_capacity_refusal_advances_once ~label ~first_response ~assert_c
         evidence.attempts
     in
     ( result
-    , execute_ok ~net flow
+    , execute_ok ~net ~clock flow
     , !advances
     , evidence
     , !observed_advance
@@ -3455,7 +3495,7 @@ let test_context_window_400_prose_remains_terminal () =
   in
   let (result, advances), posts =
     with_server ~status:`Bad_request ~response
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
       [ catalog_entry ~id:"context-prose-a" ~base_url ~native:true ~json:true ()
       ; catalog_entry ~id:"context-prose-b" ~base_url ~native:true ~json:true ()
@@ -3464,6 +3504,7 @@ let test_context_window_400_prose_remains_terminal () =
     let advances = ref 0 in
     let result =
       execute_with_accepting_test_validator
+        ~clock
         ~net
         ~on_measurement_terminal:(fun _ -> Ok ())
         ~before_measurement_dispatch:(fun _ -> Ok ())
@@ -3519,7 +3560,7 @@ let test_rate_limited_429_refusal_advances_once_to_successor () =
 let test_generic_400_remains_terminal_without_advance () =
   let (result, advances, evidence), posts =
     with_server ~status:`Bad_request ~response:{|{"error":"generic request rejection"}|}
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
       [ catalog_entry ~id:"generic-400-a" ~base_url ~native:true ~json:true ()
       ; catalog_entry ~id:"generic-400-b" ~base_url ~native:true ~json:true ()
@@ -3529,6 +3570,7 @@ let test_generic_400_remains_terminal_without_advance () =
     let advances = ref 0 in
     let result =
       execute_with_accepting_test_validator
+        ~clock
         ~net
         ~on_measurement_terminal:(fun _ -> Ok ())
         ~before_measurement_dispatch:(fun _ -> Ok ())
@@ -3563,7 +3605,7 @@ let test_postdispatch_and_structural_outcomes_never_advance () =
   let run ?(status = `OK) ?(abort_completion = false) label response =
     let (result, advances), posts =
       with_server ~status ~abort_completion ~response
-      @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+      @@ fun ~sw:_ ~net ~clock ~base_url ->
       with_catalog
         [ catalog_entry ~id:(label ^ "-a") ~base_url ~native:true ~json:true ()
         ; catalog_entry ~id:(label ^ "-b") ~base_url ~native:true ~json:true ()
@@ -3572,6 +3614,7 @@ let test_postdispatch_and_structural_outcomes_never_advance () =
       let advances = ref 0 in
       let result =
         execute_with_accepting_test_validator
+          ~clock
           ~net
           ~on_measurement_terminal:(fun _ -> Ok ())
           ~before_measurement_dispatch:(fun _ -> Ok ())
@@ -3642,7 +3685,7 @@ let test_snapshot_preserves_caller_declared_order () =
 let test_semantic_rejection_advances_to_declared_successor () =
   let (result, validated_ids, advances), posts =
     with_server ~response:(openai_response {|{"name":"accepted"}|})
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
       [ catalog_entry ~id:"semantic-a" ~base_url ~native:true ~json:true ()
       ; catalog_entry ~id:"semantic-b" ~base_url ~native:true ~json:true ()
@@ -3652,6 +3695,7 @@ let test_semantic_rejection_advances_to_declared_successor () =
     let advances = ref 0 in
     let result =
       execute_with_validator
+        ~clock
         ~net
         ~before_advance:(fun ~failed:_ ~next:_ ->
           incr advances;
@@ -3697,7 +3741,7 @@ let test_semantic_rejection_advances_to_declared_successor () =
 let test_all_semantic_rejections_return_nonempty_ordered_exhaustion () =
   let (result, advances), posts =
     with_server ~response:(openai_response {|{"name":"rejected"}|})
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
       [ catalog_entry ~id:"reject-a" ~base_url ~native:true ~json:true ()
       ; catalog_entry ~id:"reject-b" ~base_url ~native:true ~json:true ()
@@ -3707,6 +3751,7 @@ let test_all_semantic_rejections_return_nonempty_ordered_exhaustion () =
     let advances = ref 0 in
     let result =
       execute_with_validator
+        ~clock
         ~net
         ~before_advance:(fun ~failed:_ ~next:_ ->
           incr advances;
@@ -3741,10 +3786,62 @@ let test_all_semantic_rejections_return_nonempty_ordered_exhaustion () =
   | Ok _ | Error _ -> fail "semantic exhaustion lost its typed nonempty trace"
 ;;
 
+let test_missing_deadline_rejects_every_candidate_before_dispatch () =
+  (* Neither a connect nor a body budget is declared: the measurement
+     transport would arm no deadline at all, so admission must reject the
+     plan before any request leaves, for every candidate in the flow. *)
+  let result, posts =
+    with_server ~response:(openai_response {|{"name":"unused"}|})
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_catalog
+      [ catalog_entry
+          ~connect_timeout_s:None
+          ~id:"no-deadline-a"
+          ~base_url
+          ~native:true
+          ~json:true
+          ()
+      ; catalog_entry
+          ~connect_timeout_s:None
+          ~id:"no-deadline-b"
+          ~base_url
+          ~native:true
+          ~json:true
+          ()
+      ]
+    @@ fun snapshot ->
+    execute_with_validator
+      ~clock
+      ~net
+      ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+      ~validate:(fun _ -> EO.Accept {|{"name":"unused"}|})
+      (start_flow (frozen_flow snapshot [ "no-deadline-a"; "no-deadline-b" ]))
+  in
+  check int "missing-deadline candidates never reach the provider" 0 posts;
+  match result with
+  | Error
+      (EO.Flow_execution_terminal
+         { cause = (EO.Flow_candidates_exhausted { rejection; _ } as error); _ }) ->
+    check
+      bool
+      "missing-deadline rejection starts no outward dispatch"
+      true
+      (EO.flow_execution_error_generation_dispatch error = EO.No_generation_dispatch);
+    (match EO.candidate_rejection_disposition rejection with
+     | EO.Runtime_contract_rejected -> ()
+     | _ -> fail "missing-deadline rejection lost its typed disposition");
+    check
+      string
+      "exhaustion names the last deadline-less candidate"
+      "no-deadline-b"
+      (EO.candidate_rejection_identity rejection).candidate_id
+  | Ok _ | Error _ -> fail "deadline-less plan was not rejected pre-dispatch"
+;;
+
 let test_admission_and_semantic_rejections_share_one_declared_walk () =
   let (result, transitions, validated_ids), posts =
     with_server ~response:(openai_response {|{"name":"accepted"}|})
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
       ~getenv:credential_getenv
       [ catalog_entry
@@ -3762,6 +3859,7 @@ let test_admission_and_semantic_rejections_share_one_declared_walk () =
     let validated_ids = ref [] in
     let result =
       execute_with_validator
+        ~clock
         ~net
         ~before_advance:(fun ~failed ~next ->
           transitions
@@ -3807,7 +3905,7 @@ let test_prior_semantic_rejection_survives_later_transport_terminal () =
       ~first_response
       ~status:`Bad_request
       ~response:{|{"error":"generic invalid request"}|}
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
       [ catalog_entry ~id:"prior-semantic" ~base_url ~native:true ~json:true ()
       ; catalog_entry ~id:"later-terminal" ~base_url ~native:true ~json:true ()
@@ -3816,6 +3914,7 @@ let test_prior_semantic_rejection_survives_later_transport_terminal () =
     let advances = ref 0 in
     let result =
       execute_with_validator
+        ~clock
         ~net
         ~before_advance:(fun ~failed:_ ~next:_ ->
           incr advances;
@@ -3862,7 +3961,7 @@ let test_gemini_structural_sibling_rejects_before_outer_dispatch () =
   in
   let (result, evidence), posts =
     with_counted_server ~measurement_reply:(Measurement_tokens 1) ~response:"unused"
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
       [ catalog_entry
           ~kind:"gemini"
@@ -3879,6 +3978,7 @@ let test_gemini_structural_sibling_rejects_before_outer_dispatch () =
     in
     let result =
       execute_with_accepting_test_validator
+        ~clock
         ~net
         ~before_measurement_dispatch:(fun _ ->
           fail "schema rejection reached measurement intent")
@@ -3951,7 +4051,10 @@ let test_structural_predispatch_failure_does_not_advance () =
     let terminals = ref 0 in
     let advances = ref 0 in
     let result =
-      execute_with_accepting_test_validator
+      (* This case must run with no clock at all, so it calls the flow
+         directly instead of through the helpers, whose call sites now
+         forward the server runner's clock. *)
+      EO.execute_flow_once
         ~net
         ~before_measurement_dispatch:(fun _ ->
           incr intents;
@@ -3963,10 +4066,23 @@ let test_structural_predispatch_failure_does_not_advance () =
         ~before_advance:(fun ~failed:_ ~next:_ ->
           incr advances;
           Ok ())
+        ~validate:accepting_test_validator
         flow
+      |> transport_test_result
+    in
+    let replay =
+      EO.execute_flow_once
+        ~net
+        ~before_measurement_dispatch:(fun _ -> Ok ())
+        ~on_measurement_terminal:(fun _ -> Ok ())
+        ~before_dispatch:(fun _ -> Ok ())
+        ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+        ~validate:accepting_test_validator
+        flow
+      |> transport_test_result
     in
     ( result
-    , execute_ok ~net flow
+    , replay
     , EO.flow_attempt_evidence flow
     , !intents
     , !terminals
@@ -4006,13 +4122,14 @@ let test_structural_predispatch_failure_does_not_advance () =
 let test_concurrent_duplicate_flow_does_not_double_dispatch () =
   let (left, right), posts =
     with_server ~response_delay_s:0.1 ~response:(openai_response {|{"name":"accepted"}|})
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
       [ catalog_entry ~id:"concurrent-flow" ~base_url ~native:true ~json:true () ]
     @@ fun snapshot ->
     let flow = start_flow (frozen_flow snapshot [ "concurrent-flow" ]) in
     let execute () : (EO.flow_success, string EO.flow_execution_error) result =
       execute_with_accepting_test_validator
+        ~clock
         ~net
         ~on_measurement_terminal:(fun _ -> Ok ())
         ~before_measurement_dispatch:(fun _ -> Ok ())
@@ -4058,13 +4175,13 @@ let test_cancellation_terminalizes_outer_attempt () =
     let timed_out =
       try
         ignore
-          (Eio.Time.with_timeout_exn clock 0.01 (fun () -> execute_ok ~net flow)
+          (Eio.Time.with_timeout_exn clock 0.01 (fun () -> execute_ok ~net ~clock flow)
            : (EO.flow_success, _ EO.flow_execution_error) result);
         false
       with
       | Eio.Time.Timeout -> true
     in
-    let replay = execute_ok ~net flow in
+    let replay = execute_ok ~net ~clock flow in
     timed_out, replay, EO.flow_attempt_evidence flow
   in
   check bool "cancellation escaped" true timed_out;
@@ -4224,6 +4341,10 @@ let () =
             "all semantic rejections return typed nonempty exhaustion"
             `Quick
             test_all_semantic_rejections_return_nonempty_ordered_exhaustion
+        ; test_case
+            "missing deadline rejects every candidate before dispatch"
+            `Quick
+            test_missing_deadline_rejects_every_candidate_before_dispatch
         ; test_case
             "admission and semantic rejections share one declared walk"
             `Quick

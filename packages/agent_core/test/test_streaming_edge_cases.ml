@@ -195,7 +195,13 @@ let test_first_token_classifier_edges () =
     [ ContentBlockStop { index = 0 }
     ; MessageDelta { stop_reason = None; usage = None }
     ; MessageStop
-    ; SSEError { message = "boom"; error_type = None; provider_status = None; raw = "boom" }
+    ; SSEError
+        { message = "boom"
+        ; error_type = None
+        ; provider_status = None
+        ; report = Provider_stated
+        ; raw = "boom"
+        }
     ; NDJSONError { message = "boom"; error_type = None; raw = "boom" }
     ; SSEParseFailed { raw = "x"; reason = "bad" }
     ; SSEUnknownEventType { event_type = "future"; raw = "{}" }

@@ -19720,6 +19720,32 @@ and is loaded on demand through keeper_skill.
            goto_surface state ~mailbox:async_messages Tools
        (* System logs hang off Activity the same way: one key from the
           parent, off the Tab ring. *)
+       | Some ("esc" | "left") when state.view = Memory && state.memory_fact_detail_open ->
+           state.memory_fact_detail_open <- false;
+           state.memory_fact_detail_scroll <- 0
+       | Some ("j" | "down" | "k" | "up" | "pageup" | "pagedown" | "g" | "G" as move)
+         when state.view = Memory && state.memory_fact_detail_open ->
+           let terminal_rows, _ = get_terminal_size () in
+           let page = max 1 (surface_body_rows state ~terminal_rows) in
+           (match move with
+            | "g" -> state.memory_fact_detail_scroll <- 0
+            | "G" ->
+                (* Rendering clamps this to the claim's final wrapped page, the
+                   way the acting reading clamps its own. *)
+                state.memory_fact_detail_scroll <- max_int
+            | _ ->
+                let delta = match move with
+                  | "j" | "down" -> 1 | "k" | "up" -> -1
+                  | "pageup" -> -page | _ -> page in
+                state.memory_fact_detail_scroll <-
+                  (if delta > 0 then
+                     Masc_tui_types.scroll_down_from state.memory_fact_detail_scroll
+                       ~by:delta
+                   else max 0 (state.memory_fact_detail_scroll + delta)))
+       | Some ("\r" | "\n" | "enter")
+         when state.view = Memory && Option.is_some state.memory_facts_keeper ->
+           state.memory_fact_detail_open <- true;
+           state.memory_fact_detail_scroll <- 0
        | Some ("esc" | "left")
          when state.view = Acting && Option.is_some state.acting_detail ->
            state.acting_detail <- None;

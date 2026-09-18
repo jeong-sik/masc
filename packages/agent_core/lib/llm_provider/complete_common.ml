@@ -408,6 +408,13 @@ type thinking_control_request_rejection =
   | Enable_not_declared
   | Enable_not_encodable
   | Disable_not_encodable
+  | Disable_outside_effort_ladder of
+      { accepted : Reasoning_effort.t list option
+        (** the row's declared ladder, or [None] when it declares none *)
+      }
+      (** the row can express a thinking state, but not the off one: its wire
+          carries the disable as the effort [none] and the ladder does not
+          accept that value *)
   | Request_control_invalid of Reasoning_dialect.request_control_rejection
 
 let openai_compat_request_control_artifact
@@ -497,7 +504,35 @@ let thinking_control_request_rejection
         && caps.thinking_control_format = Capabilities.No_thinking_control
         && not preserve_wire_encodes_toggle
     in
-    if disable_not_encodable then Some Disable_not_encodable else None
+    if disable_not_encodable
+    then Some Disable_not_encodable
+    else (
+      (* The wire that carries a disable as the effort [none] answers whether
+         it can carry it in the ladder, not in [thinking_control_format]. Until
+         2026-09-18 this arm read the format alone and admitted requests the
+         wire builder then refused, so the caller learned at
+         [Backend_openai_request] time what this predicate exists to tell it
+         beforehand (#36972, the fourth turn lost to that gap after #26787,
+         #30701 and #28447). The other three rejections are effort-direction
+         faults that stand whatever the toggle says; only the disable one is
+         this arm's question. *)
+      match caps.Capabilities.thinking_control_format with
+      | Capabilities.Reasoning_effort -> (
+        match Provider_config.validate_reasoning_effort_request_typed config with
+        | Error (Provider_config.Explicit_disable_outside_ladder { accepted; _ }) ->
+          Some (Disable_outside_effort_ladder { accepted })
+        | Error
+            ( Provider_config.Unsupported_reasoning_effort _
+            | Provider_config.Undeclared_reasoning_effort_capability _
+            | Provider_config.Reasoning_undeclared_on_auto_enabling_wire _ )
+        | Ok () -> None)
+      | Capabilities.No_thinking_control
+      | Capabilities.Thinking_object
+      | Capabilities.Thinking_object_adaptive
+      | Capabilities.Thinking_object_only
+      | Capabilities.Chat_template_kwargs
+      | Capabilities.Chat_template_token _
+      | Capabilities.Ollama_think -> None)
 ;;
 
 (* Operator-facing rejection reason for an unsatisfiable thinking-control
@@ -550,6 +585,19 @@ let thinking_control_request_rejection_reason
           Use the dialect's explicit control value (for example reasoning_effort), or \
           declare the exact wire dialect for this endpoint."
          config.model_id
+         resolved_dialect)
+  | Some (Disable_outside_effort_ladder { accepted }) ->
+    Some
+      (Printf.sprintf
+         "model %S carries an explicit thinking disable as reasoning_effort=none, and \
+          its accepted efforts are %s. Declare \"none\" in accepted_reasoning_efforts \
+          for a row whose wire honours it, or route the work to a model that can be \
+          asked to stop thinking (%s)."
+         config.model_id
+         (match accepted with
+          | None -> "undeclared"
+          | Some accepted ->
+            String.concat ", " (List.map Reasoning_effort.to_string accepted))
          resolved_dialect)
   | Some (Request_control_invalid rejection) ->
     Some (Reasoning_dialect.request_control_rejection_to_message rejection)

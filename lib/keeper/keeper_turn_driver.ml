@@ -133,6 +133,15 @@ type deferred_runtime_lane =
 let deferred_runtime_ids hint =
   hint.next_runtime_id :: hint.later_runtime_ids
 
+type failure_continuation =
+  | Resume_operation_checkpoint of { operation_id : Keeper_operation_id.t }
+  | Restart_cycle
+
+type runtime_retry_deferral =
+  { continuation : failure_continuation
+  ; on_deferred : deferred_runtime_lane -> unit
+  }
+
 (* The candidate error a runtime walk returns as the lane's error, together
    with the candidate that produced it. The walk may return an error observed
    on an earlier candidate than the one it ended on (a typed context overflow
@@ -549,7 +558,8 @@ let attempt_runtime_candidates
     ?(allow_retry = fun ~runtime_id:_ ~attempt:_ _error -> true)
     ?(allow_accept_no_progress_retry = fun ~runtime_id:_ ~attempt:_ _error ->
       true)
-    ?(on_retry_deferred = fun _ -> ())
+    ?retry_deferral
+    ?(tool_results_saved = fun () -> false)
     ?(on_attempt_error = fun ~runtime_id:_ ~attempt:_ ~dispatch:_ _error -> ())
     ?(on_lane_terminal_error = fun (_ : lane_terminal_error) -> ())
     ?(provider_answered = fun _ -> true)
@@ -777,7 +787,13 @@ let attempt_runtime_candidates
           provider hint as candidate-only ordering evidence. A shared
           credential quota requires the distinct HardQuota/402 contract. *)
        let note_quota retry_after =
-         match attempt_quota_scope, retry_after with
+         (* A hint the provider did not really state -- zero, negative, NaN --
+            named no reset. Planting it as a window would date the quota to a
+            moment already past, and that window replaces an observation the
+            scope already carried ([Runtime_quota_window]), leaving the scope
+            looking available. The rule for reading a hint is the one
+            [path_rest_sec] and [route_resumes_on_same_path] read. *)
+         match attempt_quota_scope, Keeper_runtime_failure_route.usable_retry_after retry_after with
          | None, _ -> ()
          | Some scope, Some retry_after_s ->
            Runtime_quota_window.note_exhausted
@@ -831,11 +847,12 @@ let attempt_runtime_candidates
           second reading of the error. That second reading recorded 429, 402
           and HardQuota and dropped everything else, including a closed runtime
           connection the route calls a server error (RFC-0458 §3.4). *)
-       (match
-          Keeper_runtime_failure_route.route_of_error
-            ~boundary:Keeper_runtime_failure_route.Agent_core_execution
-            error
-        with
+       let route =
+         Keeper_runtime_failure_route.route_of_error
+           ~boundary:Keeper_runtime_failure_route.Agent_core_execution
+           error
+       in
+       (match route with
         | Keeper_runtime_failure_route.Retry_after_observed
             { retry_class = Keeper_runtime_failure_route.Rate_limited; retry_after } ->
           note_rate_limit retry_after
@@ -967,7 +984,59 @@ let attempt_runtime_candidates
             telemetry already published each candidate's own error. *)
          match observed_overflow with
          | Some overflow -> lane_terminal overflow
-         | None -> lane_terminal (this_candidate error))
+         | None ->
+           (* RFC last-path-resumes-after-progress §3.1: a chat operation whose
+              last candidate saved tool results before a failure that passes
+              with time continues on that candidate from its latest
+              checkpoint. Each such resume needs tool results saved after the
+              previous one, so resumes cannot outnumber the tool rounds the
+              operation ran. A cycle-restarting lane starts a new turn that
+              regains progress with its first tool, so it never resumes here. *)
+           (match retry_deferral with
+            | Some
+                { continuation = Resume_operation_checkpoint { operation_id }
+                ; on_deferred
+                }
+              when tool_results_saved ()
+                   && Keeper_runtime_failure_route.route_resumes_on_same_path route ->
+              Log.Keeper.info
+                "deferred operation %s to the path it failed on \
+                 (runtime_id=%s assignment=%s route=%s:%s)"
+                (Keeper_operation_id.to_string operation_id)
+                attempt_runtime_id
+                runtime_id
+                (Keeper_runtime_failure_route.route_kind_label route)
+                (Keeper_runtime_failure_route.route_class_label route);
+              (* The row a reader counts this decision by. Only a lane that
+                 named an operation reaches it, so a lane that must not resume
+                 is the lane whose walks never carry this status. *)
+              emit_runtime_manifest
+                ~status:"deferred_same_path"
+                ~decision:
+                  (`Assoc
+                    [ "idx", `Int idx
+                    ; "runtime_id", `String attempt_runtime_id
+                    ; "operation_id", `String (Keeper_operation_id.to_string operation_id)
+                    ; ( "route"
+                      , `String
+                          (Keeper_runtime_failure_route.route_kind_label route
+                           ^ ":"
+                           ^ Keeper_runtime_failure_route.route_class_label route) )
+                    ])
+                Keeper_runtime_manifest.Runtime_routed;
+              on_deferred
+                { assignment_id = runtime_id
+                ; failed_runtime_id = attempt_runtime_id
+                ; next_runtime_id = attempt_runtime_id
+                ; later_runtime_ids = []
+                ; failure = error
+                }
+            | Some
+                { continuation = Resume_operation_checkpoint _ | Restart_cycle
+                ; on_deferred = _
+                }
+            | None -> ());
+           lane_terminal (this_candidate error))
        else (
          (* The next cycle starts from this hint with an empty memory of
             repeats, so a candidate whose model repeated in this walk must
@@ -980,13 +1049,16 @@ let attempt_runtime_candidates
          in
          (match error_is_retryable, effect_retry_admitted, rest_for_next_cycle with
           | true, true, next :: later ->
-            on_retry_deferred
-              { assignment_id = runtime_id
-              ; failed_runtime_id = attempt_runtime_id
-              ; next_runtime_id = runtime_id_of next
-              ; later_runtime_ids = List.map runtime_id_of later
-              ; failure = error
-              }
+            Option.iter
+              (fun { continuation = _; on_deferred } ->
+                 on_deferred
+                   { assignment_id = runtime_id
+                   ; failed_runtime_id = attempt_runtime_id
+                   ; next_runtime_id = runtime_id_of next
+                   ; later_runtime_ids = List.map runtime_id_of later
+                   ; failure = error
+                   })
+              retry_deferral
           | false, _, _ | true, false, _ | true, true, [] -> ());
          lane_terminal (this_candidate terminal_error)))
   in
@@ -1417,7 +1489,8 @@ let run_named
     ?runtime_manifest_append
     ?deferred_runtime_lane
     ?on_runtime_attempt
-    ?on_runtime_retry_deferred
+    ?runtime_retry_deferral
+    ?checkpoint_progress
     ?on_runtime_attempt_error
     ?on_runtime_lane_terminal_error
     ?on_deferred_runtime_consumed
@@ -1450,12 +1523,30 @@ let run_named
 	  (* Lane-aware dispatch: resolve a runtime id or ordered failover lane, then
 	     attempt candidates sequentially with manifest evidence per attempt. *)
 	  let runtime_id = String.trim runtime_id in
+	  (* A front halved after a refusal is a position in this history, so it
+	     holds for every Agent Core candidate of this turn. Kept here, at the
+	     turn, because the lane walks candidates one by one: held inside a
+	     candidate's own run it was lost at the walk's next step, and the
+	     next candidate composed the whole history again (2026-09-18:
+	     pr-updater shrank 16 MB to 3.7 MB on one candidate and sent 16 MB
+	     to the next). *)
+	  let halved_carried_front = ref None in
 	  (* Audit F8: removed dead routing knobs from the signature so callers cannot
 	     pass values that would be silently ignored. *)
   let routing_run_id = Random_id.hex ~bytes:16 in
   let turn_start = Mtime_clock.now () in
   let seq_ref = ref 0 in
-  let checkpoint_stage_observed = Atomic.make false in
+  (* What this dispatch's checkpoints recorded. The caller passes the value it
+     marks from its own sink: only that sink knows whether a write reached the
+     canonical checkpoint or was skipped as stale, and its [Ok ()] does not say
+     which ([Keeper_agent_run], [Keeper_checkpoint_store.Stale_noop]). A caller
+     that marks nothing gets a value that never reaches [Tool_results_saved],
+     so its lane ends a failed last candidate instead of resuming on it. *)
+  let checkpoint_progress =
+    match checkpoint_progress with
+    | Some progress -> progress
+    | None -> Atomic.make Keeper_turn_driver_try_provider.No_checkpoint_stage
+  in
   let emit_runtime_manifest ?status ?decision event =
     match runtime_manifest_context, runtime_manifest_append with
     | Some manifest_ctx, Some append ->
@@ -1670,13 +1761,15 @@ let run_named
      move to the next candidate; on success we record completion and return. *)
   attempt_runtime_candidates
     ~pre_tool_rejects
-    ?on_retry_deferred:on_runtime_retry_deferred
+    ?retry_deferral:runtime_retry_deferral
+    ~tool_results_saved:(fun () ->
+      Keeper_turn_driver_try_provider.tool_results_saved checkpoint_progress)
     ?on_attempt_error:on_runtime_attempt_error
     ?on_lane_terminal_error:on_runtime_lane_terminal_error
     ~allow_retry:(fun ~runtime_id:attempt_runtime_id ~attempt error ->
       let allowed =
         Keeper_turn_driver_try_provider.same_run_retry_allowed
-          checkpoint_stage_observed
+          checkpoint_progress
       in
       if not allowed
       then
@@ -2251,9 +2344,14 @@ let run_named
                  history. *)
               carried_front_seed =
                 (fun () ->
-                   match carried_front_seed with
-                   | Some read -> read ()
-                   | None -> None)
+                   match !halved_carried_front with
+                   | Some seed ->
+                     { Keeper_carried_front.seed = Some seed; unreadable = None }
+                   | None ->
+                     (match carried_front_seed with
+                      | Some read -> read ()
+                      | None -> Keeper_carried_front.no_seed_read))
+            ; hold_carried_front = (fun seed -> halved_carried_front := Some seed)
             ; base_path
             ; keeper_name
             ; name
@@ -2342,7 +2440,7 @@ let run_named
                 Option.map
                   (canonical_checkpoint_sink ~replay_prefix_projection)
                   checkpoint_sink
-            ; checkpoint_stage_observed
+            ; checkpoint_progress
             ; context_injector
             ; context
             ; enable_thinking = inference_policy.attempt_enable_thinking
@@ -2424,6 +2522,15 @@ module For_testing = struct
 
   let observe_checkpoint_stage =
     Keeper_turn_driver_try_provider.observe_checkpoint_stage
+
+  let observing_checkpoint_sink =
+    Keeper_turn_driver_try_provider.observing_checkpoint_sink
+
+  let observe_checkpoint_saved =
+    Keeper_turn_driver_try_provider.observe_checkpoint_saved
+
+  let tool_results_saved =
+    Keeper_turn_driver_try_provider.tool_results_saved
 
   let same_run_retry_allowed =
     Keeper_turn_driver_try_provider.same_run_retry_allowed

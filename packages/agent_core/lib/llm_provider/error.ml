@@ -333,6 +333,14 @@ let of_provider_failure ?provider kind message =
     ProviderWireError { provider; format; kind; detail = message }
   | Http_client.Provider_reported_error { error_type } ->
     ProviderReportedError { provider; error_type; detail = message }
+  (* The provider took the request and then ended the generation without
+     saying why. There is no envelope to report and no status to classify, and
+     what the caller sees is the provider failing to serve this call: the same
+     class the documented shape of this failure carries when the provider does
+     attach its object (OpenRouter's mid-stream 502 "Provider disconnected").
+     The exact fact stays on the transport kind
+     ([Http_client.Provider_interrupted]). *)
+  | Http_client.Provider_interrupted -> ProviderUnavailable { provider; detail = message }
   | Http_client.Response_body_too_large { limit_bytes } ->
     ParseError
       { detail =

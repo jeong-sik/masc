@@ -1266,7 +1266,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
      decides whether another lane candidate runs; the turn's Completion path
      is the only publisher of a terminal event. Each failure stays visible
      as its typed protocol error. *)
-  | SSEError { message; error_type; provider_status = _; raw = _ } ->
+  | SSEError { message; error_type; provider_status = _; report = _; raw = _ } ->
       poison_scope_with bridge_state ~kind:Sse_error
         ~reason:(redact_text message)
         ~diagnostic:

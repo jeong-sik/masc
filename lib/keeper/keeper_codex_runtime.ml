@@ -110,19 +110,35 @@ let model_input_projection_for_capacity
     ?on_model_input_window_observation
     source_projection
     messages =
-  let history_atom_count = List.length messages in
+  (* Atoms, not messages: the window's front is named by the message that
+     opens atom [total_atoms - transmitted_atoms], so both counts have to be
+     the atoms [Runtime_model_input_tail_window.annotate] numbers. *)
+  let _labelled, history_atom_count =
+    Runtime_model_input_tail_window.annotate messages
+  in
+  let observe_window projection =
+    Option.iter
+      (fun observe ->
+         Option.iter
+           observe
+           (Runtime_model_input_tail_window.observe
+              ~digest_at:(Runtime_model_input_tail_window.atom_opening_digest messages)
+              ~history_atom_count
+              projection))
+      on_model_input_window_observation
+  in
   let windowed =
     if capacity_bytes = unbounded_model_input_capacity_bytes
     then (
-      (* No cut is still a reading: everything offered was carried. *)
-      Option.iter
-        (fun observe ->
-           observe
-             { Runtime_model_input_tail_window.transmitted_atoms =
-                 history_atom_count
-             ; total_atoms = history_atom_count
-             })
-        on_model_input_window_observation;
+      (* No cut is still a reading: everything offered was carried, reported
+         with the atom it starts from. A list with no atom has no front to
+         report, and [Runtime_model_input_tail_window.observe] reports nothing
+         for it. *)
+      observe_window
+        { Runtime_model_input_tail_window.messages
+        ; dropped_atoms = 0
+        ; atom_count = history_atom_count
+        };
       Ok messages)
     else
       Domain_pool_ref.submit_cpu_or_inline (fun () ->
@@ -134,13 +150,7 @@ let model_input_projection_for_capacity
             messages
         with
         | Ok projection ->
-          Option.iter
-            (fun observe ->
-               observe
-                 (Runtime_model_input_tail_window.observe
-                    ~history_atom_count
-                    projection))
-            on_model_input_window_observation;
+          observe_window projection;
           Ok projection.Runtime_model_input_tail_window.messages
         | Error error ->
           Error

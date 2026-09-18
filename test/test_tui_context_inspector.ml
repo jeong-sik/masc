@@ -28,7 +28,12 @@ let record ?(blocks = []) ?input_components ?(usage_scope = Runtime_usage_scope.
   ; request_wire_observation =
       Some { runtime_profile = "glm-coding"; body_bytes = 4096 }
   ; model_input_window =
-      Some { transmitted_atoms = 3; total_atoms = 4; measurement = Wire_shape }
+      Some
+        { transmitted_atoms = 3
+        ; total_atoms = 4
+        ; measurement = Wire_shape
+        ; front_atom_digest = String.make 64 'c'
+        }
   ; raw_trace_run_ref = None
   ; sampling =
       { temperature = Some 0.2

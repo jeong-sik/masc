@@ -140,7 +140,8 @@ type forecast_carried =
   ; transmitted_bytes : int
   ; origin : forecast_carried_origin
   ; counted_tokens : int option
-        (** The ledger's measured total for its last request, when known. *)
+        (** The ledger's measured total for its last sample, a request
+            without the turn context, when known. *)
   }
 
 (** One piece of the next request in the position it travels, as the

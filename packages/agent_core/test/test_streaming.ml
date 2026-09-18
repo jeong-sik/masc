@@ -102,7 +102,15 @@ let test_sse_ping () =
 ;;
 
 let test_sse_error () =
-  let evt = SSEError { message = "overloaded"; error_type = None; provider_status = None; raw = "overloaded" } in
+  let evt =
+    SSEError
+      { message = "overloaded"
+      ; error_type = None
+      ; provider_status = None
+      ; report = Provider_stated
+      ; raw = "overloaded"
+      }
+  in
   match evt with
   | SSEError { message; _ } ->
     Alcotest.(check string) "error message" "overloaded" message

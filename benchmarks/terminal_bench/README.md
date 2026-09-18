@@ -175,7 +175,7 @@ harbor 없이 컨테이너 하나에서 arm K 의 기계 경로 전체를 확인
 있는지만 본다. API 키도 태스크도 서버도 필요 없다. 플랫폼은 4.0.0 태스크 이미지와 같은
 `linux/amd64` 가 기본이고 `PROBE_PLATFORM` 으로 바꾼다.
 
-deps.sh 는 패키지 매니저 계열(apt/dnf/apk)을 감지하고, 런타임 라이브러리는
+deps.sh 는 패키지 매니저 계열(apt/dnf)을 감지하고, 런타임 라이브러리는
 `masc --version` 이 실패할 때만 설치하며, 안 되면 배포판 이름과 이유(아키텍처·glibc·
 라이브러리)를 찍고 끝난다. 릴리스 바이너리의 glibc 바닥값은 2.35 다
 (`scripts/check-glibc-floor.sh`, v0.35.19 실측).

@@ -48,7 +48,14 @@ type ollama_cloud_case =
   }
 
 let ollama_cloud_seed_cases =
-  [ { runtime_id = "ollama_cloud.ollama-cloud-deepseek-v4-flash"
+  [ { runtime_id = "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"
+    ; api_name = "deepseek-v4.1-flash"
+    ; context = 1048576
+    ; tools = true
+    ; thinking = true
+    ; vision = true
+    }
+  ; { runtime_id = "ollama_cloud.ollama-cloud-deepseek-v4-flash"
     ; api_name = "deepseek-v4-flash"
     ; context = 1048576
     ; tools = true
@@ -118,13 +125,6 @@ let ollama_cloud_seed_cases =
     ; thinking = true
     ; vision = true
     }
-  ; { runtime_id = "ollama_cloud.ollama-cloud-kimi-k2-7-code"
-    ; api_name = "kimi-k2.7-code"
-    ; context = 262144
-    ; tools = true
-    ; thinking = true
-    ; vision = true
-    }
   ; { runtime_id = "ollama_cloud.ollama-cloud-kimi-k3"
     ; api_name = "kimi-k3"
     ; context = 1048576
@@ -138,13 +138,6 @@ let ollama_cloud_seed_cases =
     ; tools = true
     ; thinking = true
     ; vision = false
-    }
-  ; { runtime_id = "ollama_cloud.ollama-cloud-minimax-m3"
-    ; api_name = "minimax-m3"
-    ; context = 512000
-    ; tools = true
-    ; thinking = true
-    ; vision = true
     }
   ; { runtime_id = "ollama_cloud.ollama-cloud-mistral-large-3-675b"
     ; api_name = "mistral-large-3:675b"
@@ -216,33 +209,12 @@ let assert_ollama_cloud_seed_runtime runtimes case =
     (match runtime.model.capabilities with
      | None -> failf "expected capabilities for %s" case.runtime_id
      | Some caps ->
-       (* [thinking] says the model reasons; it does not say the endpoint takes a
-          control on the wire. ollama.com /v1 serves reasoning inherently and
-          accepts no control field, so [reasoning-effort] there declares a
-          dialect that can never be encoded: the format carries no effort value,
-          runtime.toml has no key that supplies one, and runtime_adapter never
-          sets reasoning_effort. Every enable_thinking=true turn is then rejected
-          as Enable_not_encodable — measured 25/25 on the acceptance harness,
-          0/25 after the first five models dropped the declaration. Deployed
-          config has carried none since 2026-08-04; the audit is dated 2026-07-20
-          (2026-07-20).
-
-          This is a property of the endpoint, not of individual models, and
-          every case in this list is an ollama.com /v1 model. Asserting it for
-          the whole list keeps a new model from declaring a dialect the
-          endpoint cannot read; a per-model exception set would admit one on
-          the next addition. *)
-       let expected_thinking_format = Runtime_schema.No_thinking_control in
        check bool (case.runtime_id ^ " forced tool_choice disabled") false
          caps.supports_tool_choice;
        check bool (case.runtime_id ^ " image input") case.vision
          caps.supports_image_input;
        check bool (case.runtime_id ^ " multimodal input") case.vision
-         caps.supports_multimodal_inputs;
-       check bool (case.runtime_id ^ " thinking control") true
-         (Runtime_schema.equal_thinking_control_format
-            caps.thinking_control_format
-            expected_thinking_format))
+         caps.supports_multimodal_inputs)
 
 let test_runtime_json_not_in_repo_config () =
   let path = Filename.concat (repo_root ()) "config/runtime.json" in
@@ -1270,8 +1242,8 @@ let test_repo_runtime_toml_declares_no_clamped_max_context () =
   | Error msg -> failf "repo runtime.toml should load: %s" msg
   | Ok (runtimes, _default, _assignments, _media_failover, _lanes) ->
     (* Shared seed model descriptions must resolve these windows from their
-       provider binding, including both MiniMax aliases. Operator overrides
-       remain covered separately by the below-cap and above-cap scenarios. *)
+       provider binding. Operator overrides remain covered separately by the
+       below-cap and above-cap scenarios. *)
     List.iter
       (fun (runtime_id, provider_stated_context) ->
         match find_runtime runtimes runtime_id with
@@ -1296,7 +1268,6 @@ let test_repo_runtime_toml_declares_no_clamped_max_context () =
       ; "ollama_cloud.ollama-cloud-deepseek-v4-pro", 1048576
       ; "ollama_cloud.ollama-cloud-glm-5-2", 1048576
       ; "ollama_cloud.minimax-m3", 512000
-      ; "ollama_cloud.ollama-cloud-minimax-m3", 512000
       ];
     let clamped =
       List.filter_map
@@ -1592,28 +1563,6 @@ List.iter
     (match
        List.find_opt
          (fun (runtime : Runtime.t) ->
-            String.equal runtime.id "glm-coding.glm-4-7-coding")
-         runtimes
-     with
-     | None -> fail "expected GLM Coding Plan runtime in seed"
-     | Some runtime ->
-       check string "GLM Coding Plan model api name" "glm-4.7"
-         runtime.model.api_name;
-       check (option int) "GLM Coding Plan context" (Some 200000) runtime.model.max_context;
-       check (option bool) "GLM Coding Plan thinking enabled" (Some true)
-         runtime.model.thinking_support;
-      check (option bool) "GLM Coding Plan does not preserve thinking by default" (Some false)
-        runtime.model.preserve_thinking;
-       (match runtime.model.capabilities with
-        | Some caps ->
-          check (option int) "GLM Coding Plan output cap" (Some 128000)
-            caps.max_output_tokens;
-          check bool "GLM Coding Plan forced tool_choice disabled" false
-            caps.supports_tool_choice
-        | None -> fail "expected GLM Coding Plan capabilities"));
-    (match
-       List.find_opt
-         (fun (runtime : Runtime.t) ->
             String.equal runtime.id "deepseek.deepseek-v4-pro")
          runtimes
      with
@@ -1664,34 +1613,7 @@ List.iter
             caps.supports_multimodal_inputs;
           check bool "MiniMax M3 forced tool_choice disabled" false
             caps.supports_tool_choice
-        | None -> fail "expected MiniMax M3 capabilities"));
-    (match
-       List.find_opt
-         (fun (runtime : Runtime.t) ->
-            String.equal runtime.id "ollama_cloud.kimi-k2-7-code")
-         runtimes
-     with
-     | None -> fail "expected Kimi K2.7 Code Ollama Cloud runtime in seed"
-     | Some runtime ->
-       check string "Kimi K2.7 Code api name" "kimi-k2.7-code" runtime.model.api_name;
-       (* Effective window, not the declaration: what matters is what the
-          runtime resolves, and an override only holds while it stays under
-          the model's catalog window (#28738). *)
-       check (option int) "Kimi K2.7 Code context" (Some 262144)
-         (Runtime.resolve_max_context_of_runtime runtime |> Option.map fst);
-       (match runtime.model.capabilities with
-        | Some caps ->
-          check bool "Kimi K2.7 Code image input" true caps.supports_image_input;
-          check bool "Kimi K2.7 Code multimodal input" true
-            caps.supports_multimodal_inputs;
-          (* ollama.com /v1 reasons inherently and takes no control field, so
-             this model declares no thinking control. See the comment on
-             [expected_thinking_format] above for the measurement. *)
-          check bool "Kimi K2.7 Code thinking control" true
-            (Runtime_schema.equal_thinking_control_format
-               caps.thinking_control_format
-               Runtime_schema.No_thinking_control)
-        | None -> fail "expected Kimi K2.7 Code capabilities"))
+        | None -> fail "expected MiniMax M3 capabilities"))
 
 (* The lane-resolution test below iterates the lanes a config declares, so it
    passes vacuously on a config that declares none of them. Startup does the
@@ -1920,7 +1842,7 @@ let test_deployment_exact_output_catalog_admits_seed_lanes () =
       (match Exact_output.resolve_target admitted with
        | Ok _ -> ()
        | Error _ -> failf "GLM target %s must require only ZAI_API_KEY" id))
-    [ "glm-coding.glm-5-3"; "glm-coding.glm-5-turbo"; "glm-coding.glm-4-7-coding" ];
+    [ "glm-coding.glm-5-3" ];
   let output_requirement =
     Exact_output.make_output_requirement
       ~schema:

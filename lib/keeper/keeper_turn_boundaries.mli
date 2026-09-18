@@ -1,18 +1,35 @@
 (** Where each finished keeper turn left the durable history (RFC
-    librarian-is-the-brain §4.3).
+    librarian-lifecycle §4.6).
 
     A finished turn appends one line to a per-keeper append-only
     [<keeper>.turn-boundaries.jsonl], after its checkpoint is saved. The line
     names the turn and the end of the saved history in the atom vocabulary of
     {!Runtime_model_input_tail_window}: how many atoms the checkpoint holds and
     the digest of the message that opens the last one. A turn's start is not
-    written; the end the previous line states is that start.
+    written; the end an earlier line states is that start.
 
-    A line that cannot be built or written does not fail the turn: the
-    checkpoint is already durable, and the next line then closes a span of two
-    turns. An agent-core turn whose checkpoint save was a stale no-op writes no
-    line, because the checkpoint on disk is a newer writer's. The file is never
-    rewritten or trimmed. *)
+    {2 What a reader may rely on}
+
+    - A line that cannot be built or written does not fail the turn: the
+      checkpoint is already durable. After a transient append failure the next
+      line's span covers both turns, so nothing is lost.
+    - A crash in the middle of an append can leave the file ending mid-line.
+      Every later append is then refused until process-start recovery
+      ([Fs_compat.recover_private_jsonl_durable_locked_result]) truncates the
+      torn tail. That call belongs to the reader's boot path (RFC §8 step 4),
+      not to this module; until it runs, turns of that keeper go unrecorded.
+    - File order is not turn order. The checkpoint save is serialized by the
+      session lock; this append happens after that lock is released. A reader
+      orders the [Atom_history] lines of one trace by [end_atom], not by their
+      position in the file, and must not assume [turn_ref] is unique: two turns
+      of one keeper that finish together both take the next turn number.
+    - [last_atom_digest] is computed from the checkpoint the save returned. On
+      the store's payload-encode recovery path the bytes on disk are a recovery
+      copy with the unencodable json dropped, while the save still returns the
+      original (masc #37018). If the message that opens the last atom carried
+      that json, the digest describes bytes that were not stored. Rare.
+
+    The file is never rewritten or trimmed by this module. *)
 
 type position =
   | Atom_history of
@@ -27,13 +44,36 @@ type position =
   | No_atom_history
       (** The runtime keeps no Agent-Core checkpoint (an official client), so
           the turn has no atom history to end. *)
+  | Stale_noop
+      (** An Agent-Core turn whose checkpoint save was a stale no-op: a newer
+          writer owns the canonical checkpoint, and this turn's messages are
+          not in the durable history. The line is kept, with no span of its
+          own, because a reader counts finished turns in lines. *)
+
+(** Whether the turn began from a durable history. The keeper run context
+    already knows this ([Keeper_run_context.loaded_checkpoint_present]); a
+    reader cannot infer it. [Fresh_history] covers every way a history starts
+    over without a marker of its own: a new trace, a purged or superseded
+    checkpoint, and a checkpoint that could not be read. *)
+type history_at_start =
+  | Fresh_history  (** No checkpoint was loaded: the history began empty. *)
+  | Continued_history  (** A checkpoint was loaded and the turn appended to it. *)
+
+(** What a line states. One constructor today. The wire form carries a [kind]
+    tag from the first line ever written, so a later kind of line is a new
+    constructor rather than a new field on a strictly decoded line. *)
+type event =
+  | Turn_ended of
+      { turn_ref : Ids.Turn_ref.t
+            (** The finished turn. Its trace id is the keeper trace id, which
+                is also the session id of the checkpoint. *)
+      ; history_at_start : history_at_start
+      ; position : position
+      }
 
 type record =
   { recorded_at : float (** Unix seconds, when the finished turn built its line. *)
-  ; session_id : string
-        (** The keeper trace id, which is the session id of its checkpoint. *)
-  ; turn_ref : Ids.Turn_ref.t (** The finished turn. *)
-  ; position : position
+  ; event : event
   }
 
 val path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
@@ -51,11 +91,11 @@ val position_of_messages : Agent_core.Types.message list -> (position, string) r
 
 val record_to_json : record -> Yojson.Safe.t
 
-(** Field-exact, and [position] is field-exact for its [kind]: an unknown
-    [kind] or a field its kind does not carry is rejected, never defaulted.
-    [recorded_at] must be finite, [session_id] and [last_atom_digest]
-    non-blank, [end_atom] at least one, and [turn_ref] a reference
-    {!Ids.Turn_ref.of_string} reads back. *)
+(** Field-exact for the line's [kind], and [position] is field-exact for its
+    own [kind]: an unknown [kind], an unknown [history_at_start] token, or a
+    field its kind does not carry is rejected, never defaulted. [recorded_at]
+    must be finite, [last_atom_digest] non-blank, [end_atom] at least one, and
+    [turn_ref] a reference {!Ids.Turn_ref.of_string} reads back. *)
 val record_of_json : Yojson.Safe.t -> (record, Keeper_memory_os_types.wire_error) result
 
 (** {1 Store} *)

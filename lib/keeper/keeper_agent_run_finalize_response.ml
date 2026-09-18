@@ -9,31 +9,33 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_agent_result
 
-(* Where this finished turn left the durable history (RFC
-   librarian-is-the-brain §4.3). An agent-core turn with no saved checkpoint is
-   the store's stale no-op: the canonical checkpoint on disk is a newer
-   writer's, so this turn has no position of its own to state and writes no
-   line. *)
+(* Where this finished turn left the durable history (RFC librarian-lifecycle
+   §4.6). The checkpoint in hand is the one the save returned, trimmed the way
+   it was stored. An agent-core turn with no saved checkpoint is the store's
+   stale no-op -- a missing checkpoint is an [Error] that never reaches here --
+   and says so in its line rather than leaving no line. *)
 let turn_boundary_position ~checkpoint_owner saved_checkpoint =
   match saved_checkpoint with
   | Some checkpoint ->
-    Some
-      (Keeper_turn_boundaries.position_of_messages
-         checkpoint.Agent_core.Checkpoint.messages)
+    Keeper_turn_boundaries.position_of_messages checkpoint.Agent_core.Checkpoint.messages
   | None ->
     (match checkpoint_owner with
-     | Runtime_execution.Official_client -> Some (Ok Keeper_turn_boundaries.No_atom_history)
-     | Runtime_execution.Masc_agent_core -> None)
+     | Runtime_execution.Official_client -> Ok Keeper_turn_boundaries.No_atom_history
+     | Runtime_execution.Masc_agent_core -> Ok Keeper_turn_boundaries.Stale_noop)
 ;;
 
 (* The checkpoint is already durable when this runs, so a line that cannot be
-   built or written is reported and the turn still finishes: the next finished
-   turn's line then closes a span of two turns. *)
+   built or written is reported and the turn still finishes. That holds for an
+   exception as well as an [Error]: past this point the turn has a saved
+   checkpoint and no receipt yet, so nothing raised here may escape except a
+   cancellation. After a transient failure the next line's span covers both
+   turns; a torn tail is different, see {!Keeper_turn_boundaries}. *)
 let record_turn_boundary
       ~config
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~turn
       ~checkpoint_owner
+      ~history_at_start
       saved_checkpoint
   =
   let not_recorded ~site detail =
@@ -48,19 +50,19 @@ let record_turn_boundary
       ()
   in
   match turn_boundary_position ~checkpoint_owner saved_checkpoint with
-  | None ->
-    Log.Keeper.warn
-      ~keeper_name:meta.name
-      "turn boundary not recorded turn=%d: the checkpoint save was a stale no-op"
-      turn
-  | Some (Error detail) -> not_recorded ~site:"position" detail
-  | Some (Ok position) ->
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+  | exception exn -> not_recorded ~site:"position" (Printexc.to_string exn)
+  | Error detail -> not_recorded ~site:"position" detail
+  | Ok position ->
     let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
     let record : Keeper_turn_boundaries.record =
       { recorded_at = Time_compat.now ()
-      ; session_id = trace_id
-      ; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
-      ; position
+      ; event =
+          Keeper_turn_boundaries.Turn_ended
+            { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
+            ; history_at_start
+            ; position
+            }
       }
     in
     (match
@@ -73,7 +75,9 @@ let record_turn_boundary
      with
      | Ok () -> ()
      | Error error ->
-       not_recorded ~site:"append" (Keeper_turn_boundaries.append_error_to_string error))
+       not_recorded ~site:"append" (Keeper_turn_boundaries.append_error_to_string error)
+     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+     | exception exn -> not_recorded ~site:"append" (Printexc.to_string exn))
 ;;
 
 let finalize
@@ -96,6 +100,7 @@ let finalize
     ~runtime_id_string
     ~max_context
     ~checkpoint_owner
+    ~history_at_start
     ~official_client_settlement
     ~history_messages
     ~prompt_metrics
@@ -314,6 +319,7 @@ let finalize
       ~meta
       ~turn:manifest_keeper_turn_id
       ~checkpoint_owner
+      ~history_at_start
       saved_checkpoint;
     (* Retired proof-ledger evaluation is absent. Strict Task completion
        judgment is owned by the authenticated operator or typed judge

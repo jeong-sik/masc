@@ -1,5 +1,5 @@
-(* Turn boundary records (RFC librarian-is-the-brain §4.3). See the interface
-   for the contract. *)
+(* Turn boundary records (RFC librarian-lifecycle §4.6). See the interface for
+   the contract. *)
 
 module W = Keeper_memory_os_types
 module Window = Runtime_model_input_tail_window
@@ -18,12 +18,22 @@ type position =
       }
   | Empty_atom_history
   | No_atom_history
+  | Stale_noop
+
+type history_at_start =
+  | Fresh_history
+  | Continued_history
+
+type event =
+  | Turn_ended of
+      { turn_ref : Ids.Turn_ref.t
+      ; history_at_start : history_at_start
+      ; position : position
+      }
 
 type record =
   { recorded_at : float
-  ; session_id : string
-  ; turn_ref : Ids.Turn_ref.t
-  ; position : position
+  ; event : event
   }
 
 let position_of_messages messages =
@@ -42,17 +52,25 @@ let position_of_messages messages =
             last_atom))
 ;;
 
-let field_recorded_at = "recorded_at"
-let field_session_id = "session_id"
-let field_turn_ref = "turn_ref"
-let field_position = "position"
 let field_kind = "kind"
+let field_recorded_at = "recorded_at"
+let field_turn_ref = "turn_ref"
+let field_history_at_start = "history_at_start"
+let field_position = "position"
 let field_end_atom = "end_atom"
 let field_last_atom_digest = "last_atom_digest"
+let kind_turn_ended = "turn_ended"
 let kind_atom_history = "atom_history"
 let kind_empty_atom_history = "empty_atom_history"
 let kind_no_atom_history = "no_atom_history"
-let fields = [ field_recorded_at; field_session_id; field_turn_ref; field_position ]
+let kind_stale_noop = "stale_noop"
+let token_fresh_history = "fresh"
+let token_continued_history = "continued"
+
+let turn_ended_fields =
+  [ field_kind; field_recorded_at; field_turn_ref; field_history_at_start; field_position ]
+;;
+
 let atom_history_fields = [ field_kind; field_end_atom; field_last_atom_digest ]
 let bare_position_fields = [ field_kind ]
 let non_blank s = not (String.equal (String.trim s) "")
@@ -67,7 +85,7 @@ let validate_position = function
     if non_blank last_atom_digest
     then Ok ()
     else W.wire_fail [ W.Wire_field field_last_atom_digest ] W.Blank_string
-  | Empty_atom_history | No_atom_history -> Ok ()
+  | Empty_atom_history | No_atom_history | Stale_noop -> Ok ()
 ;;
 
 (* Shared by the decoder and [append], so a row this module wrote is a row this
@@ -80,20 +98,17 @@ let validate (r : record) =
     then Ok ()
     else W.wire_fail [ W.Wire_field field_recorded_at ] W.Not_finite
   in
-  let* () =
-    if non_blank r.session_id
-    then Ok ()
-    else W.wire_fail [ W.Wire_field field_session_id ] W.Blank_string
-  in
-  let* () =
-    let printed = Ids.Turn_ref.to_string r.turn_ref in
-    match Ids.Turn_ref.of_string printed with
-    | Some read_back when Ids.Turn_ref.equal read_back r.turn_ref -> Ok ()
-    | Some _ | None ->
-      W.wire_fail [ W.Wire_field field_turn_ref ] (W.Not_a_turn_ref printed)
-  in
-  let* () = W.wire_at (W.Wire_field field_position) (validate_position r.position) in
-  Ok r
+  match r.event with
+  | Turn_ended { turn_ref; history_at_start = _; position } ->
+    let* () =
+      let printed = Ids.Turn_ref.to_string turn_ref in
+      match Ids.Turn_ref.of_string printed with
+      | Some read_back when Ids.Turn_ref.equal read_back turn_ref -> Ok ()
+      | Some _ | None ->
+        W.wire_fail [ W.Wire_field field_turn_ref ] (W.Not_a_turn_ref printed)
+    in
+    let* () = W.wire_at (W.Wire_field field_position) (validate_position position) in
+    Ok r
 ;;
 
 let position_to_json = function
@@ -105,15 +120,24 @@ let position_to_json = function
       ]
   | Empty_atom_history -> `Assoc [ field_kind, `String kind_empty_atom_history ]
   | No_atom_history -> `Assoc [ field_kind, `String kind_no_atom_history ]
+  | Stale_noop -> `Assoc [ field_kind, `String kind_stale_noop ]
+;;
+
+let history_at_start_to_string = function
+  | Fresh_history -> token_fresh_history
+  | Continued_history -> token_continued_history
 ;;
 
 let record_to_json (r : record) =
-  `Assoc
-    [ field_recorded_at, `Float r.recorded_at
-    ; field_session_id, `String r.session_id
-    ; field_turn_ref, `String (Ids.Turn_ref.to_string r.turn_ref)
-    ; field_position, position_to_json r.position
-    ]
+  match r.event with
+  | Turn_ended { turn_ref; history_at_start; position } ->
+    `Assoc
+      [ field_kind, `String kind_turn_ended
+      ; field_recorded_at, `Float r.recorded_at
+      ; field_turn_ref, `String (Ids.Turn_ref.to_string turn_ref)
+      ; field_history_at_start, `String (history_at_start_to_string history_at_start)
+      ; field_position, position_to_json position
+      ]
 ;;
 
 (* The kind names the fields the object carries, so it is read first and the
@@ -136,29 +160,48 @@ let position_of_json (json : Yojson.Safe.t) =
     then (
       let* () = W.exact_field_names_result bare_position_fields assoc in
       Ok No_atom_history)
+    else if String.equal kind kind_stale_noop
+    then (
+      let* () = W.exact_field_names_result bare_position_fields assoc in
+      Ok Stale_noop)
     else W.wire_fail [ W.Wire_field field_kind ] (W.Unknown_token kind)
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
     W.wire_here W.Expected_object
 ;;
 
+let history_at_start_of_string token =
+  if String.equal token token_fresh_history
+  then Ok Fresh_history
+  else if String.equal token token_continued_history
+  then Ok Continued_history
+  else W.wire_fail [ W.Wire_field field_history_at_start ] (W.Unknown_token token)
+;;
+
+(* The line's kind names the fields it carries, so it is read first and the
+   exact-fields check is made against that kind's set. *)
 let record_of_json (json : Yojson.Safe.t) =
   match json with
   | `Assoc assoc ->
-    let* () = W.exact_field_names_result fields assoc in
-    let* recorded_at = W.wire_number_field field_recorded_at assoc in
-    let* session_id = W.wire_string_field field_session_id assoc in
-    let* turn_ref_text = W.wire_string_field field_turn_ref assoc in
-    let* turn_ref =
-      match Ids.Turn_ref.of_string turn_ref_text with
-      | Some turn_ref -> Ok turn_ref
-      | None ->
-        W.wire_fail [ W.Wire_field field_turn_ref ] (W.Not_a_turn_ref turn_ref_text)
-    in
-    let* position_json = W.wire_json_field field_position assoc in
-    let* position =
-      W.wire_at (W.Wire_field field_position) (position_of_json position_json)
-    in
-    validate { recorded_at; session_id; turn_ref; position }
+    let* kind = W.wire_string_field field_kind assoc in
+    if String.equal kind kind_turn_ended
+    then (
+      let* () = W.exact_field_names_result turn_ended_fields assoc in
+      let* recorded_at = W.wire_number_field field_recorded_at assoc in
+      let* turn_ref_text = W.wire_string_field field_turn_ref assoc in
+      let* turn_ref =
+        match Ids.Turn_ref.of_string turn_ref_text with
+        | Some turn_ref -> Ok turn_ref
+        | None ->
+          W.wire_fail [ W.Wire_field field_turn_ref ] (W.Not_a_turn_ref turn_ref_text)
+      in
+      let* history_at_start_token = W.wire_string_field field_history_at_start assoc in
+      let* history_at_start = history_at_start_of_string history_at_start_token in
+      let* position_json = W.wire_json_field field_position assoc in
+      let* position =
+        W.wire_at (W.Wire_field field_position) (position_of_json position_json)
+      in
+      validate { recorded_at; event = Turn_ended { turn_ref; history_at_start; position } })
+    else W.wire_fail [ W.Wire_field field_kind ] (W.Unknown_token kind)
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
     W.wire_here W.Expected_object
 ;;

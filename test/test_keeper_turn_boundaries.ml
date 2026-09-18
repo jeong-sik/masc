@@ -1,6 +1,6 @@
-(** Tests for {!Masc.Keeper_turn_boundaries} (RFC librarian-is-the-brain
-    §4.3): the line a finished keeper turn leaves to say where its saved atom
-    history ended. *)
+(** Tests for {!Masc.Keeper_turn_boundaries} (RFC librarian-lifecycle §4.6):
+    the line a finished keeper turn leaves to say where its saved atom history
+    ended. *)
 
 open Alcotest
 
@@ -29,19 +29,34 @@ let message ~role text : Types.message =
   }
 ;;
 
-let record ?(turn = 1) position : Boundaries.record =
+let record
+      ?(turn = 1)
+      ?(trace_id = "trace")
+      ?(history_at_start = Boundaries.Continued_history)
+      position
+  : Boundaries.record
+  =
   { Boundaries.recorded_at = 200.0
-  ; session_id = "trace"
-  ; turn_ref = Ids.Turn_ref.make ~trace_id:"trace" ~absolute_turn:turn
-  ; position
+  ; event =
+      Boundaries.Turn_ended
+        { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
+        ; history_at_start
+        ; position
+        }
   }
 ;;
 
 let atom_history = Boundaries.Atom_history { end_atom = 2; last_atom_digest = "digest" }
 
 let every_position =
-  [ atom_history; Boundaries.Empty_atom_history; Boundaries.No_atom_history ]
+  [ atom_history
+  ; Boundaries.Empty_atom_history
+  ; Boundaries.No_atom_history
+  ; Boundaries.Stale_noop
+  ]
 ;;
+
+let every_history_at_start = [ Boundaries.Fresh_history; Boundaries.Continued_history ]
 
 let print_record fmt written =
   Format.pp_print_string fmt (Yojson.Safe.to_string (Boundaries.record_to_json written))
@@ -49,9 +64,16 @@ let print_record fmt written =
 
 let record_equal (left : Boundaries.record) (right : Boundaries.record) =
   Float.equal left.recorded_at right.recorded_at
-  && String.equal left.session_id right.session_id
-  && Ids.Turn_ref.equal left.turn_ref right.turn_ref
-  && left.position = right.position
+  &&
+  match left.event, right.event with
+  | ( Boundaries.Turn_ended
+        { turn_ref = left_ref; history_at_start = left_start; position = left_position }
+    , Boundaries.Turn_ended
+        { turn_ref = right_ref; history_at_start = right_start; position = right_position }
+    ) ->
+    Ids.Turn_ref.equal left_ref right_ref
+    && left_start = right_start
+    && left_position = right_position
 ;;
 
 let record_t : Boundaries.record testable = testable print_record record_equal
@@ -62,12 +84,31 @@ let position_t : Boundaries.position testable =
 
 let test_every_position_kind_round_trips () =
   List.iter
-    (fun position ->
-       let written = record position in
-       match Boundaries.record_of_json (Boundaries.record_to_json written) with
-       | Ok decoded -> check record_t "round trip" written decoded
-       | Error error -> failf "round trip rejected: %s" (Wire.wire_error_to_string error))
-    every_position
+    (fun history_at_start ->
+       List.iter
+         (fun position ->
+            let written = record ~history_at_start position in
+            match Boundaries.record_of_json (Boundaries.record_to_json written) with
+            | Ok decoded -> check record_t "round trip" written decoded
+            | Error error ->
+              failf "round trip rejected: %s" (Wire.wire_error_to_string error))
+         every_position)
+    every_history_at_start
+;;
+
+(* The wire form is a contract with lines already on disk, so it is pinned as
+   text: the tag that lets a later kind of line be a new constructor, no
+   session id beside the turn reference that already carries the trace id, and
+   the two tokens a reader branches on. *)
+let test_the_line_a_turn_writes () =
+  check string "a continued turn that ended an atom history"
+    {|{"kind":"turn_ended","recorded_at":200.0,"turn_ref":"trace#1","history_at_start":"continued","position":{"kind":"atom_history","end_atom":2,"last_atom_digest":"digest"}}|}
+    (Yojson.Safe.to_string (Boundaries.record_to_json (record atom_history)));
+  check string "a fresh turn whose save was a stale no-op"
+    {|{"kind":"turn_ended","recorded_at":200.0,"turn_ref":"trace#1","history_at_start":"fresh","position":{"kind":"stale_noop"}}|}
+    (Yojson.Safe.to_string
+       (Boundaries.record_to_json
+          (record ~history_at_start:Boundaries.Fresh_history Boundaries.Stale_noop)))
 ;;
 
 let fields_of label (json : Yojson.Safe.t) =
@@ -128,10 +169,24 @@ let test_decode_refuses_what_its_kind_does_not_carry () =
     (with_position
        (fun fields -> fields @ [ "end_atom", `Int 2 ])
        (record Boundaries.Empty_atom_history));
-  check_rejection "a line without its session"
+  check_rejection "a kind of line this build does not know"
+    ~path:[ Wire.Wire_field "kind" ]
+    ~reason:(Wire.Unknown_token "history_cleared")
+    (with_fields (replacing "kind" (`String "history_cleared")) (record atom_history));
+  check_rejection "a line without its kind"
     ~path:[]
-    ~reason:(Wire.Field_set_mismatch { missing = [ "session_id" ]; unexpected = [] })
-    (with_fields (without "session_id") (record atom_history));
+    ~reason:(Wire.Field_set_mismatch { missing = [ "kind" ]; unexpected = [] })
+    (with_fields (without "kind") (record atom_history));
+  check_rejection "a line that does not say how its history began"
+    ~path:[]
+    ~reason:(Wire.Field_set_mismatch { missing = [ "history_at_start" ]; unexpected = [] })
+    (with_fields (without "history_at_start") (record atom_history));
+  (* The trace id lives in [turn_ref]. A second copy beside it is a field this
+     line does not carry. *)
+  check_rejection "a line that repeats the trace id as a session id"
+    ~path:[]
+    ~reason:(Wire.Field_set_mismatch { missing = []; unexpected = [ "session_id" ] })
+    (with_fields (fun fields -> fields @ [ "session_id", `String "trace" ]) (record atom_history));
   check_rejection "a line with a field no reader knows"
     ~path:[]
     ~reason:(Wire.Field_set_mismatch { missing = []; unexpected = [ "extra" ] })
@@ -147,10 +202,10 @@ let test_decode_refuses_values_no_turn_writes () =
     ~path:[ Wire.Wire_field "position"; Wire.Wire_field "last_atom_digest" ]
     ~reason:Wire.Blank_string
     (with_position (replacing "last_atom_digest" (`String " ")) (record atom_history));
-  check_rejection "a blank session"
-    ~path:[ Wire.Wire_field "session_id" ]
-    ~reason:Wire.Blank_string
-    (with_fields (replacing "session_id" (`String " ")) (record atom_history));
+  check_rejection "a history start neither fresh nor continued"
+    ~path:[ Wire.Wire_field "history_at_start" ]
+    ~reason:(Wire.Unknown_token "sometimes")
+    (with_fields (replacing "history_at_start" (`String "sometimes")) (record atom_history));
   check_rejection "a turn reference with no turn number"
     ~path:[ Wire.Wire_field "turn_ref" ]
     ~reason:(Wire.Not_a_turn_ref "no-turn-number")
@@ -191,6 +246,26 @@ let test_position_agrees_with_the_window () =
       (position_of "user, assistant and tool" history)
 ;;
 
+(* A turn that reaches the boundary line with no saved checkpoint is one of two
+   things, and the checkpoint owner says which: an official client, which keeps
+   no Agent-Core checkpoint, or an agent-core turn whose save was a stale no-op.
+   The second used to be written as the first. *)
+let test_a_turn_without_a_saved_checkpoint () =
+  let position_without_checkpoint checkpoint_owner =
+    match
+      Masc.Keeper_agent_run_finalize_response.turn_boundary_position
+        ~checkpoint_owner
+        None
+    with
+    | Ok position -> position
+    | Error detail -> failf "no checkpoint has no messages to reject: %s" detail
+  in
+  check position_t "an official client has no atom history" Boundaries.No_atom_history
+    (position_without_checkpoint Runtime_execution.Official_client);
+  check position_t "an agent-core turn saved nothing of its own" Boundaries.Stale_noop
+    (position_without_checkpoint Runtime_execution.Masc_agent_core)
+;;
+
 let read_lines ~keepers_dir =
   match Boundaries.read ~keepers_dir ~keeper_id with
   | Error message -> failf "turn boundary store: %s" message
@@ -228,11 +303,7 @@ let test_appended_lines_read_back_in_order () =
    refuses it, so writing such a line would leave a row no reader decodes. *)
 let test_a_line_no_reader_decodes_is_not_written () =
   with_temp_keepers @@ fun keepers_dir ->
-  let unreadable =
-    { (record Boundaries.No_atom_history) with
-      Boundaries.turn_ref = Ids.Turn_ref.make ~trace_id:"" ~absolute_turn:1
-    }
-  in
+  let unreadable = record ~trace_id:"" Boundaries.No_atom_history in
   (match Boundaries.append ~keepers_dir ~keeper_id unreadable with
    | Error (Boundaries.Invalid_record _) -> ()
    | Error (Boundaries.Write_failed _ as error) ->
@@ -258,13 +329,17 @@ let () =
     [ ( "codec"
       , [ test_case "every position kind round trips" `Quick
             test_every_position_kind_round_trips
+        ; test_case "the line a turn writes" `Quick test_the_line_a_turn_writes
         ; test_case "refuses what its kind does not carry" `Quick
             test_decode_refuses_what_its_kind_does_not_carry
         ; test_case "refuses values no turn writes" `Quick
             test_decode_refuses_values_no_turn_writes
         ] )
     ; ( "position"
-      , [ test_case "agrees with the window" `Quick test_position_agrees_with_the_window ] )
+      , [ test_case "agrees with the window" `Quick test_position_agrees_with_the_window
+        ; test_case "a turn without a saved checkpoint" `Quick
+            test_a_turn_without_a_saved_checkpoint
+        ] )
     ; ( "store"
       , [ test_case "appended lines read back in order" `Quick
             test_appended_lines_read_back_in_order

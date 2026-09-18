@@ -3971,20 +3971,34 @@ let assert_production_keeper_result result =
 ;;
 
 (* An official-client turn saves no AGENT_CORE checkpoint, so the boundary line
-   it leaves names the turn and states that there is no atom history. *)
+   it leaves names the turn and states that there is no atom history. The
+   workspace is new, so no checkpoint was loaded and the run context's answer
+   reaches the line as a fresh history. *)
 let assert_official_client_turn_boundary ~base_path ~trace_id =
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   match
     Keeper_turn_boundaries.read ~keepers_dir ~keeper_id:"codex-production-fixture"
   with
   | Error detail -> fail ("turn boundary store: " ^ detail)
-  | Ok [ (1, Ok boundary) ] ->
-    check string "turn boundary session" trace_id
-      boundary.Keeper_turn_boundaries.session_id;
-    check string "turn boundary turn" (trace_id ^ "#1")
-      (Ids.Turn_ref.to_string boundary.Keeper_turn_boundaries.turn_ref);
+  | Ok
+      [ ( 1
+        , Ok
+            { Keeper_turn_boundaries.recorded_at = _
+            ; event =
+                Keeper_turn_boundaries.Turn_ended { turn_ref; history_at_start; position }
+            } )
+      ] ->
+    check string "turn boundary turn" (trace_id ^ "#1") (Ids.Turn_ref.to_string turn_ref);
+    check bool "the first turn of a new workspace began from a fresh history" true
+      (history_at_start = Keeper_turn_boundaries.Fresh_history);
     check bool "an official client turn has no atom history" true
-      (boundary.Keeper_turn_boundaries.position = Keeper_turn_boundaries.No_atom_history)
+      (position = Keeper_turn_boundaries.No_atom_history)
+  | Ok [ (line, Error error) ] ->
+    fail
+      (Printf.sprintf
+         "turn boundary line %d: %s"
+         line
+         (Keeper_turn_boundaries.read_error_to_string error))
   | Ok lines ->
     fail (Printf.sprintf "expected one turn boundary line, read %d" (List.length lines))
 ;;

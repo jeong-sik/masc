@@ -31,6 +31,7 @@ type catalog_fixture =
   ; native : bool
   ; json : bool
   ; body_timeout_s : float option
+  ; connect_timeout_s : float option
   ; serving_constraint : bool
   ; serving_accepted_through_tokens : int
   ; serving_rejected_from_tokens : int
@@ -41,6 +42,7 @@ type catalog_fixture =
 
 let catalog_entry
       ?body_timeout_s
+      ?(connect_timeout_s = Some 30.0)
       ?(serving_constraint = false)
       ?(serving_accepted_through_tokens = 524298)
       ?(serving_rejected_from_tokens = 524299)
@@ -64,6 +66,7 @@ let catalog_entry
   ; native
   ; json
   ; body_timeout_s
+  ; connect_timeout_s
   ; serving_constraint
   ; serving_accepted_through_tokens
   ; serving_rejected_from_tokens
@@ -77,6 +80,10 @@ let catalog_fixture_toml entry =
   (* The model row owns the Anthropic wire dialect. The target row owns the
      explicit request policy, so capability never implies enablement. *)
   let target_options =
+    (match entry.connect_timeout_s with
+     | None -> ""
+     | Some seconds -> Printf.sprintf "connect_timeout_s = %.17g\n" seconds)
+    ^
     (match entry.body_timeout_s with
      | None -> ""
      | Some seconds -> Printf.sprintf "body_timeout_s = %.17g\n" seconds)
@@ -3741,6 +3748,55 @@ let test_all_semantic_rejections_return_nonempty_ordered_exhaustion () =
   | Ok _ | Error _ -> fail "semantic exhaustion lost its typed nonempty trace"
 ;;
 
+let test_missing_deadline_rejects_every_candidate_before_dispatch () =
+  (* Neither a connect nor a body budget is declared: the measurement
+     transport would arm no deadline at all, so admission must reject the
+     plan before any request leaves, for every candidate in the flow. *)
+  let result, posts =
+    with_server ~response:(openai_response {|{"name":"unused"}|})
+    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    with_catalog
+      [ catalog_entry
+          ~connect_timeout_s:None
+          ~id:"no-deadline-a"
+          ~base_url
+          ~native:true
+          ~json:true
+          ()
+      ; catalog_entry
+          ~connect_timeout_s:None
+          ~id:"no-deadline-b"
+          ~base_url
+          ~native:true
+          ~json:true
+          ()
+      ]
+    @@ fun snapshot ->
+    execute_with_validator
+      ~net
+      ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+      ~validate:(fun _ -> EO.Accept {|{"name":"unused"}|})
+      (start_flow (frozen_flow snapshot [ "no-deadline-a"; "no-deadline-b" ]))
+  in
+  check int "missing-deadline candidates never reach the provider" 0 posts;
+  match result with
+  | Error (EO.Flow_candidates_exhausted { rejection; _ } as error) ->
+    check
+      bool
+      "missing-deadline rejection starts no outward dispatch"
+      true
+      (EO.flow_execution_error_generation_dispatch error = EO.No_generation_dispatch);
+    (match EO.candidate_rejection_disposition rejection with
+     | EO.Runtime_contract_rejected -> ()
+     | _ -> fail "missing-deadline rejection lost its typed disposition");
+    check
+      string
+      "exhaustion names the last deadline-less candidate"
+      "no-deadline-b"
+      (EO.candidate_rejection_identity rejection).candidate_id
+  | Ok _ | Error _ -> fail "deadline-less plan was not rejected pre-dispatch"
+;;
+
 let test_admission_and_semantic_rejections_share_one_declared_walk () =
   let (result, transitions, validated_ids), posts =
     with_server ~response:(openai_response {|{"name":"accepted"}|})
@@ -4224,6 +4280,10 @@ let () =
             "all semantic rejections return typed nonempty exhaustion"
             `Quick
             test_all_semantic_rejections_return_nonempty_ordered_exhaustion
+        ; test_case
+            "missing deadline rejects every candidate before dispatch"
+            `Quick
+            test_missing_deadline_rejects_every_candidate_before_dispatch
         ; test_case
             "admission and semantic rejections share one declared walk"
             `Quick

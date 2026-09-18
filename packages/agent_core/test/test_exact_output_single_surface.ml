@@ -67,12 +67,14 @@ type catalog_fixture =
   ; api_key_env : string
   ; capabilities : Capabilities.capabilities
   ; body_timeout_s : float option
+  ; connect_timeout_s : float option
   }
 
 let catalog_entry
       ?base_url_env
       ?(api_key_env = "")
       ?body_timeout_s
+      ?(connect_timeout_s = Some 30.0)
       ~id
       ~kind
       ~base_url
@@ -88,6 +90,7 @@ let catalog_entry
   ; api_key_env
   ; capabilities
   ; body_timeout_s
+  ; connect_timeout_s
   }
 ;;
 
@@ -133,9 +136,12 @@ let catalog_fixture_toml entry =
     entry.id
     entry.id
     (entry.id ^ "-model")
-    (match entry.body_timeout_s with
+    (match entry.connect_timeout_s with
      | None -> ""
-     | Some seconds -> Printf.sprintf "body_timeout_s = %.17g\n" seconds)
+     | Some seconds -> Printf.sprintf "connect_timeout_s = %.17g\n" seconds)
+    ^ (match entry.body_timeout_s with
+       | None -> ""
+       | Some seconds -> Printf.sprintf "body_timeout_s = %.17g\n" seconds)
 ;;
 
 let with_catalog ?(getenv = fun _ -> Ok None) entries f =

@@ -1168,7 +1168,8 @@ let prompt_only_snapshot base_url =
        [[targets]]\n\
        id = \"hitl-incapable\"\n\
        provider_ref = \"hitl-incapable-provider\"\n\
-       model_id = \"hitl-incapable-model\"\n"
+       model_id = \"hitl-incapable-model\"\n\
+       connect_timeout_s = 30.0\n"
       base_url
   in
   let io : EO.resolver_io = { getenv = (fun _ -> Ok None) } in

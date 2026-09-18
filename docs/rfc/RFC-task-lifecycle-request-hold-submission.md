@@ -265,6 +265,10 @@ stateDiagram-v2
   거절 사유가 `note:` 증거로, 옛 `verification_id` 가 증거 참조로 다음 제출에 들어간다. 돌아온 Task 를 남이
   이어받는 이 설계에서는 더 자주 생길 일이라 같은 단계에서 고친다. 저장된 handoff 의 `updated_by` 가
   제출자가 아니면 읽지 않는다.
+- 판정이 도착했는데 요청이 이미 거둬졌거나 제출이 교체됐으면 멈춤으로 알리지 않는다. 지금은 커밋 오류가
+  전부 `Commit_failed { detail : string }` 하나로 뭉쳐 "producer or operator must act" 글이 올라간다
+  (`completion_authority_agent.ml:739-741`). 심사 중에 요청을 거두는 길이 생기면 이 경우가 늘어난다.
+  "물음이 사라졌다"와 "쓰지 못했다"를 닫힌 합으로 가르고, 앞의 것은 실행 기록에만 남긴다.
 - 운영자 판정 요청은 자기가 본 `verification_id` 를 실어 보낸다. 지금은 서버가 커밋 직전의 id 를 읽어
   넣어서(`server_routes_http_routes_verification.ml:134-145`), 운영자가 N번째 제출을 보는 사이
   다시 제출되면 클릭이 N+1번째에 적용된다. 시스템 판정에는 이미 있는 검사다
@@ -295,10 +299,14 @@ type withdrawal_standing =
 - 거두는 것은 판정을 거치지 않는다. 남의 제출을 심사하는 일이 아니라 자기 요청을 물리는 일이다.
   RFC-0417 의 원칙("일이 존재를 멈추는 허락은 시스템 LLM 이 내리지 않는다")은 그대로 지켜진다.
   시스템 판정자는 여전히 그 허락을 내리지 않는다.
-- 세탁 걱정: Keeper 가 혼자 닿을 수 있는 끝 상태가 생긴다. 다만 그 끝은 `Cancelled` 이고 `Done` 이
-  아니며, 자기가 낸 요청에 한정된다. 운영자나 다른 에이전트의 요청은 거두지 못하므로, 지금의
-  `release` → `cancel` 보다 좁다.
+- 세탁 걱정: Keeper 가 혼자 닿을 수 있는 끝 상태가 생긴다. 범위는 좁지 않다. 완료된 347건 중 199건은
+  요청자 본인이 맡아 끝낸 것이라, 자기 요청을 스스로 맡는 일이 절반을 넘는다. 그래도 그 끝은 `Cancelled`
+  로 기록되고 `Done` 이 아니다. 운영자나 다른 에이전트의 요청은 거두지 못한다. 지금은 `release` →
+  `cancel` 로 누구의 요청이든 혼자 끝낼 수 있으므로 지금보다는 좁다.
 - 요청자가 거두면 맡고 있던 쪽은 알림을 받는다(§3.6). 지금은 요청자만 알림을 받는다.
+- 요청자가 거두면 맡고 있던 쪽의 에이전트 기록(`current_task`)도 비운다. 지금 전이 코드는 호출자 기록만
+  고친다(`workspace_task_transitions.ml:489-498`). 모든 기록에서 그 Task 를 지우는 함수는 이미 있고
+  Task 삭제가 쓴다(`Task_cache_invariant.clear_stale_agent_task_for_task_result`, `workspace_task.ml:61`).
 - `created_by` 가 비어 있는 Task 는 운영자만 거둘 수 있다. 모르는 값을 허용으로 읽지 않는다.
 - 자격 검사는 이름 비교다. 다른 소유 검사(`same_task_actor`)와 강도가 같다. Keeper 도구는 서버가 아는
   이름(`keeper_agent_sender ~meta`)으로 호출되므로 속일 수 없지만, MCP 클라이언트는 이름을 스스로 적는다
@@ -431,7 +439,7 @@ OCaml 쪽은 임의의 액션·판정 열을 돌려 `OneTaskPerAgent` 를 확인
 | 0 | 이 문서와 `TaskOwnership.tla` | `scripts/tla-check.sh` 에서 깨끗한 모델 통과, 버그 모델 6개 위반 |
 | 1 | 거절 판정 → `Todo`. `set_current = None`. `release_unroutable_rejected_task_r` 삭제. 알림 문장. 운영자 판정 요청에 `verification_id`. 남이 쓴 handoff 를 제출 증거로 읽지 않기 | 속성 테스트 `OneTaskPerAgent`. §4.2 첫 줄이 새 판정에서 0 |
 | 2 | `intent` → `basis`. `assignee` → `submitter`. `keeper_task_done` 의 `basis`. 판정 프롬프트. `Operator_routed` 삭제 | `Found_the_outcome` 제출이 시스템 판정을 받는 테스트 |
-| 3 | `Cancel` → `Withdraw`. 자격 검사. `keeper_task_withdraw`. 맡은 쪽 알림 | `release` → `withdraw` 가 요청자 아닌 쪽에서 거절되는 테스트 |
+| 3 | `Cancel` → `Withdraw`. 자격 검사. `keeper_task_withdraw`. 맡은 쪽 알림과 기록 정리. 사라진 물음을 멈춤으로 알리지 않기 | `release` → `withdraw` 가 요청자 아닌 쪽에서 거절되는 테스트 |
 | 4 | 운영자 목록(`Review_stalled`), TUI·dashboard 의 `basis`, 헌법 개정, `docs/spec/02-types-and-invariants.md` 정정, `TaskLifecycle.tla` 삭제 | §4.2 셋째 줄 0 |
 
 2와 3은 같이 배포한다. 2만 나가면 "하면 안 되는 일" 갈래가 잠시 `release` 하나로 줄어든다.

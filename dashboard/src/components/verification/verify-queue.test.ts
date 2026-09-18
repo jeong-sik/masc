@@ -306,6 +306,10 @@ describe('VerifyQueue', () => {
     const approve = screen.getByText('✓ 중단 승인') as HTMLButtonElement
     expect(approve.disabled).toBe(false)
     expect(container.querySelector('.vq-note.rerun')?.textContent).toContain('중단 요청')
+    // a stop is decidable, so the card is pinned and the bar counts it ready —
+    // an empty completion gate must not hide it from the operator
+    expect(container.querySelector('.vq-card.pinned')).toBeTruthy()
+    expect(container.querySelector('.vq-bar-stats')?.textContent).toContain('승인 준비')
 
     fireEvent.click(approve)
     await waitFor(() => {

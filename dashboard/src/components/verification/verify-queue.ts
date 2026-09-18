@@ -376,7 +376,7 @@ function VqStack(props: VqBodyProps) {
       ${props.queue.map(item => {
         const st = vqGateStats(item, props.checks)
         return html`
-          <article key=${item.task.id} class="vq-card ${st.allConfirmed ? 'pinned' : ''}">
+          <article key=${item.task.id} class="vq-card ${vqIsCancel(item) || st.allConfirmed ? 'pinned' : ''}">
             <div class="vq-card-top">
               <div class="grow">
                 <div class="vq-req-id mono">${item.task.id}${item.task.priority != null ? ` · P${item.task.priority}` : ''}</div>
@@ -633,7 +633,9 @@ export function VerifyQueue() {
       })
   }
 
-  const ready = queue.filter(i => vqGateStats(i, checks).allConfirmed).length
+  // A stop needs the operator's one click too, so it is ready the moment it is
+  // a cancellation — not only when a completion gate is fully confirmed.
+  const ready = queue.filter(i => vqIsCancel(i) || vqGateStats(i, checks).allConfirmed).length
   const bad = queue.filter(i => i.projectionError != null).length
 
   const bodyProps: VqBodyProps = {
@@ -655,7 +657,7 @@ export function VerifyQueue() {
         >검증 레인</span>
         <div class="vq-bar-stats">
           <span class="vq-bar-stat volt"><b>${queue.length}</b> 대기</span>
-          <span class="vq-bar-stat"><b>${ready}</b> 통과 준비</span>
+          <span class="vq-bar-stat"><b>${ready}</b> 승인 준비</span>
           ${bad > 0 ? html`<span class="vq-bar-stat bad"><b>${bad}</b> 증거 실패</span>` : null}
         </div>
         <span class="vq-bar-spacer"></span>

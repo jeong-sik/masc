@@ -46,6 +46,12 @@ type try_provider_ctx =
             keeper-context-window-in-tokens §10.5), as the binding declares
             them; [None] leaves eviction to a refusal. *)
   ; carried_front_seed : unit -> Keeper_carried_front.seed_read
+  ; hold_carried_front : Keeper_carried_front.seed -> unit
+        (** Keeps a front halved after a refusal for the rest of the turn,
+            so the lane's next candidate reads it through
+            {!carried_front_seed} rather than composing the whole history
+            again. A halved position names an atom of the history, which
+            every Agent Core candidate of the turn composes from. *)
         (** Where the carried range starts when no ledger holds this
             (keeper, runtime) pair yet: the range the newest completed Agent
             Core turn record on the trace measured, whichever runtime ran it,
@@ -444,6 +450,12 @@ module For_testing : sig
       but for [reasoning_effort = None], because the wires that admit effort
       reject it with thinking disabled. *)
   val candidate_without_reasoning_effort : Runtime_candidate.t -> Runtime_candidate.t
+
+  (** Whether the no-thinking retry would be admitted on this candidate, asked
+      of the request it would send and answered by the admission every request
+      meets ([Complete_common.validate_all]). This is what
+      {!truncation_recovery} reads as [thinking_can_be_disabled]. *)
+  val retry_without_thinking_admitted : Runtime_candidate.t -> bool
 
   val apply_accept :
     runtime_id:string ->

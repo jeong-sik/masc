@@ -239,13 +239,27 @@ def test_the_router_lane_inherits_its_ladder_instead_of_declaring_one(
     assert 'reasoning-effort = "high"' in rt
 
 
-def test_a_base_with_no_catalog_ladder_still_declares_one():
-    # The two bases below have no ladder in the catalog yet, so the lane cannot
-    # run without one. Each is a gap to close there; this pins that the
-    # remaining declarations are exactly those two and not a blanket default.
-    out = render_arm("b", runtime_id="anthropic.claude-sonnet-5", effort="high")
-    overlay = (out / "agent-core-models-overlay.toml").read_text()
-    assert "accepted_reasoning_efforts" in overlay
+def test_no_lane_writes_a_ladder_of_its_own():
+    # Which efforts a model takes is a fact the vendors publish per model:
+    # gpt-6-astra answers HTTP 400 to none while gpt-5.6-sol, -terra and -luna
+    # accept it, so one list written here is wrong for one side or the other.
+    # The catalog is where that fact lives; a lane whose model has no row is
+    # refused by name (Undeclared_reasoning_effort_capability), which is the
+    # outcome to keep.
+    # An absence on its own is the weak kind of assertion this file is being
+    # cleaned of: an empty render, or one that dropped the row entirely, would
+    # satisfy it. So the row is pinned present first, and the ladder absent
+    # from that row.
+    for runtime_id, model_alias in (
+            ("anthropic.claude-fable-5", "claude-fable-5"),
+            ("openai.gpt-6-astra", "gpt-6-astra")):
+        provider = runtime_id.split(".", 1)[0]
+        out = render_arm("b", runtime_id=runtime_id, effort="high")
+        overlay = (out / "agent-core-models-overlay.toml").read_text()
+        assert f'provider_name = "{provider}"' in overlay, runtime_id
+        assert f'id_prefix = "{model_alias}"' in overlay, runtime_id
+        assert "supports_reasoning = true" in overlay, runtime_id
+        assert "accepted_reasoning_efforts" not in overlay, runtime_id
 
 
 def test_effective_runtime_id_is_what_masc_resolves():

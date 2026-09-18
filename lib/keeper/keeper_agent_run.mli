@@ -271,8 +271,7 @@ val run_turn
   -> ?official_task_reference:Keeper_official_task_reference.t
   -> ?on_gate_evidence_admitted:(Agent_core.Checkpoint.t -> (unit, string) result)
   -> ?deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane
-  -> ?on_runtime_retry_deferred:
-       (Keeper_turn_driver.deferred_runtime_lane -> unit)
+  -> ?runtime_retry_deferral:Keeper_turn_driver.runtime_retry_deferral
   -> ?on_runtime_attempt_failed:
        (runtime_id:string
         -> dispatch:Keeper_attempt_dispatch.t

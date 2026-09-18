@@ -118,6 +118,7 @@ let project
       ~tool_delivery
       ~native_posture
       ~tool_deny
+      ~sandbox_profile
       ~skill_names
       ~current_task_id
       ~task_skill_references
@@ -147,6 +148,7 @@ let project
     let capability_surface =
       Keeper_capability_surface.create
         ~tool_deny
+        ~sandbox_profile
         ~skill_names
         ~global_skill_catalog
         ~skill_inventory:(Keeper_skill_inventory.of_snapshot skill_snapshot)
@@ -314,10 +316,19 @@ let project
 ;;
 
 let resolve_runtime keeper_name =
-  let runtime_id =
+  let route =
     Option.value
       (Runtime.runtime_id_for_keeper keeper_name)
       ~default:(Runtime.get_default_runtime_id ())
+  in
+  (* The assignment is a routing label. A posture belongs to a binding, and the
+     binding this keeper opens first is the route's entry candidate — the same
+     rule [Keeper_unified_turn_pre_dispatch.build_runtime_execution] uses to
+     size the turn. *)
+  let runtime_id =
+    match Runtime.entry_runtime_id_of_route route with
+    | Some binding -> binding
+    | None -> route
   in
   match Runtime.get_runtime_by_id runtime_id with
   | Some runtime -> Ok (runtime_id, runtime)
@@ -325,8 +336,8 @@ let resolve_runtime keeper_name =
     Error
       ( "runtime_not_concrete"
       , Printf.sprintf
-          "runtime assignment %S is a lane or is not materialized; no exact official-client posture can be projected"
-          runtime_id )
+          "runtime assignment %S resolves to no materialized binding; no exact official-client posture can be projected"
+          route )
 ;;
 
 let resolve_native_posture ~base_path ~keeper_name (runtime : Runtime.t) =
@@ -471,6 +482,7 @@ let resolve ~config ~keeper_name =
                      ~tool_delivery:(runtime_tool_delivery runtime)
                      ~native_posture
                      ~tool_deny:profile_defaults.tool_deny
+                     ~sandbox_profile:meta.sandbox_profile
                      ~skill_names:profile_defaults.skill_names
                      ~current_task_id
                      ~skills_left_out

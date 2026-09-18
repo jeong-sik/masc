@@ -725,6 +725,35 @@ val repeating_generation_message
     repeated, how many times, after how many bytes. [repeated] is shown to 120
     bytes. *)
 
+(** A provider condition an OpenAI-compatible provider declared for an error it
+    reported inside a response it had already accepted with [200]: rate limited
+    ([429]) or failing itself ([5xx]). No other status is carried; the reader
+    ([Openai_error_envelope]) says why.
+
+    [status] is that HTTP status. [error_body] is the body the failure is
+    classified from as a refusal with that status: only the provider's error
+    object, serialized as [{"error": <error object>}], so
+    [Retry.classify_error] reads its [message] and [retry_after] whether the
+    object sat at the top level of the response or on a choice, and nothing
+    else the response carried (choice content, tool arguments, usage) becomes
+    part of the refusal. *)
+type provider_status =
+  { status : int
+  ; error_body : string
+  }
+
+(** Where an error a provider reported inside an accepted response came from.
+    - [Provider_stated]: an [error] member arrived and the values beside this
+      one are what it said.
+    - [Unstated_errored_choice]: the choice finished with [error]
+      ({!Stop_reason_wire.is_provider_error_finish}) and no [error] member
+      arrived anywhere in the response. The provider ended the generation and
+      kept the reason to itself, so there is nothing to read a type or a
+      status from. *)
+type provider_report =
+  | Provider_stated
+  | Unstated_errored_choice
+
 type sse_event =
   | MessageStart of
       { id : string
@@ -751,13 +780,19 @@ type sse_event =
   | SSEError of
       { message : string
       ; error_type : string option
+      ; provider_status : provider_status option
+      ; report : provider_report
       ; raw : string
       }
   (** A provider-reported error delivered mid-stream. [error_type] is the
             provider's error-object [type] discriminator (e.g.
             ["rate_limit_exceeded"]) and [raw] the original error JSON, so the
             consumer can converge onto the same classification path as an
-            initial HTTP error instead of collapsing to [NetworkError {Unknown}]. *)
+            initial HTTP error instead of collapsing to [NetworkError {Unknown}].
+            [provider_status] is the {!provider_status} the provider declared
+            inside the envelope, because the stream's own [200] was already
+            sent; [None] when the envelope declares none. [raw] stays the whole
+            payload, for diagnostics. *)
   | NDJSONError of
       { message : string
       ; error_type : string option
@@ -836,6 +871,8 @@ type stream_error =
   | Stream_provider_error of
       { message : string
       ; error_type : string option
+      ; provider_status : provider_status option
+      ; report : provider_report
       ; raw : string
       }
   | Stream_parse_failed of

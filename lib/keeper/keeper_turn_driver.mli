@@ -60,6 +60,26 @@ type lane_terminal_error =
   }
 
 val deferred_runtime_ids : deferred_runtime_lane -> string list
+
+(** How the lane that dispatched a turn continues after the turn fails
+    (RFC last-path-resumes-after-progress §3.5).
+    - [Resume_operation_checkpoint]: the chat lane. The named operation resumes
+      from its latest saved checkpoint, so tool results it saved are not run
+      again. It carries the operation because only a lane that has one can
+      resume: the heartbeat lane runs no chat operation, and a cycle that
+      resumed a path this way would never end (§3.5). The driver reports the
+      operation when it defers one to the path it failed on.
+    - [Restart_cycle]: the heartbeat lane. The next cycle is a new turn. *)
+type failure_continuation =
+  | Resume_operation_checkpoint of { operation_id : Keeper_operation_id.t }
+  | Restart_cycle
+
+(** Where a lane walk hands the suffix a failed turn defers to, and how that
+    lane continues. A walk without one defers nothing. *)
+type runtime_retry_deferral =
+  { continuation : failure_continuation
+  ; on_deferred : deferred_runtime_lane -> unit
+  }
 val quota_ordered_deferred_runtime_lane :
   now:float -> deferred_runtime_lane -> deferred_runtime_lane
 (** Apply active quota-window ordering to a frozen deferred suffix while
@@ -69,10 +89,12 @@ val quota_ordered_deferred_runtime_lane :
 
 (** Whether one runtime path is resting at a given instant
     (RFC-provider-path-rest §3.3). Read from the 429 candidate observation and
-    the quota window. [walk_promotes_at_release] is [true] when the walk order
-    stops holding the path back at [release_at]: every rest on it was stated by
-    the provider and not cut by the cap. An id the runtime table cannot resolve
-    is serving. *)
+    the quota window; a failed attempt is no rest (RFC-0458 §3.4).
+    [walk_promotes_at_release] is [true] when the walk order moves the path
+    ahead of the paths still told to rest at [release_at]: every rest on it was
+    stated by the provider and not cut by the cap. A failed attempt the path
+    also holds keeps it behind the paths with no evidence. An id the runtime
+    table cannot resolve is serving. *)
 type path_rest =
   | Path_serving
   | Path_resting of
@@ -97,8 +119,34 @@ type walk_rest =
 (** A deferred suffix in the order the next turn walks it. *)
 val deferred_lane_rest : now:float -> deferred_runtime_lane -> walk_rest
 
+(** The candidates a fresh walk of an assignment dispatches, in [order]: the
+    lane [declared], then quota and backpressure demotion, which moves a
+    resting or exhausted candidate behind its siblings and excludes none.
+    Nothing else reorders it: a success leaves no preference behind, so the
+    cycle after a failover starts from the declared head again. The walk may
+    still replace the head for an input modality it cannot take (RFC-0265);
+    a turn that failed and deferred its input walks the suffix it deferred
+    instead: the candidates after the one that failed, or, for a chat
+    operation whose last candidate failed after saving tool results, that
+    candidate again. *)
+type walk_order =
+  { lane_id : string
+  ; declared : string list
+  ; order : string list
+  }
+
+(** Why a fresh walk would not dispatch the assignment at all, as
+    [run_named] refuses it. *)
+type assignment_refusal =
+  | Assignment_missing  (** The id names no configured lane or runtime. *)
+  | Catalog_unavailable of Runtime.missing_catalog_model
+      (** The configured identity has no capability catalog entry. *)
+
+val assignment_refusal_to_string : assignment_refusal -> string
+val assignment_walk_order : now:float -> string -> (walk_order, assignment_refusal) result
+
 (** A fresh walk of an assignment, ordered as a turn without a deferred suffix
-    orders it. *)
+    orders it: {!assignment_walk_order}'s head and its rest. *)
 val assignment_walk_rest : now:float -> string -> walk_rest
 
 (** Whether a wakeup may end a failure wait: a capacity release is MASC's own
@@ -255,12 +303,14 @@ val run_named :
     (measurement:Turn_record.model_input_measurement
      -> Runtime_model_input_tail_window.window_observation
      -> unit) ->
-  ?carried_front_seed:(runtime_id:string -> Keeper_carried_front.seed option) ->
+  ?carried_front_seed:(unit -> Keeper_carried_front.seed_read) ->
   ?runtime_manifest_context:Keeper_runtime_manifest.turn_context ->
   ?runtime_manifest_append:(Keeper_runtime_manifest.t -> unit) ->
   ?deferred_runtime_lane:deferred_runtime_lane ->
   ?on_runtime_attempt:(runtime_attempt -> unit) ->
-  ?on_runtime_retry_deferred:(deferred_runtime_lane -> unit) ->
+  ?runtime_retry_deferral:runtime_retry_deferral ->
+  ?checkpoint_progress:
+    Keeper_turn_driver_try_provider.checkpoint_progress Atomic.t ->
   ?on_runtime_attempt_error:
     (runtime_id:string ->
     attempt:int ->
@@ -315,6 +365,11 @@ type attempt_inference_policy =
   }
 
 module For_testing : sig
+  val run_result_answered : Runtime_agent.run_result -> bool
+  (** Whether a successful attempt heard from its candidate: [false] for an
+      attempt that yielded before any provider turn completed, which clears no
+      failure evidence (RFC-0458 §3.4). *)
+
   val make_deferred_runtime_lane :
     assignment_id:string ->
     failed_runtime_id:string ->
@@ -456,8 +511,8 @@ module For_testing : sig
       (runtime_id:string -> attempt:int -> Agent_core.Error.t -> bool) ->
     ?allow_accept_no_progress_retry:
       (runtime_id:string -> attempt:int -> Agent_core.Error.t -> bool) ->
-    ?lane_id:string ->
-    ?on_retry_deferred:(deferred_runtime_lane -> unit) ->
+    ?retry_deferral:runtime_retry_deferral ->
+    ?tool_results_saved:(unit -> bool) ->
     ?on_attempt_error:
       (runtime_id:string ->
       attempt:int ->
@@ -465,9 +520,10 @@ module For_testing : sig
       Agent_core.Error.t ->
       unit) ->
     ?on_lane_terminal_error:(lane_terminal_error -> unit) ->
+    ?provider_answered:('result -> bool) ->
     ?quota_scope_of:('candidate -> Runtime_quota_window.scope option) ->
     ?model_of:('candidate -> string option) ->
-    ?candidate_preference_of:('candidate -> Runtime_lane_preference.candidate option) ->
+    ?candidate_backpressure_of:('candidate -> Runtime_candidate_backpressure.candidate option) ->
     ?candidate_dispatchable:('candidate -> bool) ->
     runtime_id:string ->
     runtime_id_of:('candidate -> string) ->
@@ -486,11 +542,31 @@ module For_testing : sig
       * Keeper_attempt_dispatch.t) ->
     'candidate list ->
     ('result, Agent_core.Error.t) result
+  (** [tool_results_saved] reads whether the attempt that just failed saved
+      tool results; without it the walk reads [false]. A [retry_deferral] with
+      [Resume_operation_checkpoint] defers the last candidate to itself only
+      when it reads [true] and the failure's route passes with time. *)
 
   val observe_checkpoint_stage :
-    bool Atomic.t -> Agent_core.Agent.checkpoint_stage -> unit
+    Keeper_turn_driver_try_provider.checkpoint_progress Atomic.t ->
+    Agent_core.Agent.checkpoint_stage ->
+    unit
 
-  val same_run_retry_allowed : bool Atomic.t -> bool
+  val observing_checkpoint_sink :
+    Keeper_turn_driver_try_provider.checkpoint_progress Atomic.t ->
+    Agent_core.Agent.checkpoint_sink option ->
+    Agent_core.Agent.checkpoint_sink
+
+  val observe_checkpoint_saved :
+    Keeper_turn_driver_try_provider.checkpoint_progress Atomic.t ->
+    Agent_core.Agent.checkpoint_stage ->
+    unit
+
+  val same_run_retry_allowed :
+    Keeper_turn_driver_try_provider.checkpoint_progress Atomic.t -> bool
+
+  val tool_results_saved :
+    Keeper_turn_driver_try_provider.checkpoint_progress Atomic.t -> bool
 
   val accept_no_progress_should_try_next : Agent_core.Error.t -> bool
 

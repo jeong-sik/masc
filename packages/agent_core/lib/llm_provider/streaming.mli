@@ -100,6 +100,8 @@ type openai_sse_parse_result =
   | Openai_provider_error of
       { message : string
       ; error_type : string option
+      ; provider_status : Types.provider_status option
+      ; report : Types.provider_report
       ; raw : string
       }
   | Openai_parse_failed of openai_chunk_parse_error

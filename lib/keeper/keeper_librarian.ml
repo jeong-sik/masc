@@ -52,6 +52,7 @@ type revision =
 type selection =
   { new_claims : fact list
   ; dropped : dropped_statement list
+  ; absorbed : Keeper_memory_os_types.absorbed_statement list
   ; facts : fact list
   ; revisions : revision list
   ; working_contexts : Keeper_librarian_context.pocket list
@@ -64,6 +65,7 @@ let wire_field_category = Keeper_memory_os_types.wire_field_category
 let wire_field_memory_id = Keeper_memory_os_types.wire_field_memory_id
 let wire_field_reason = Keeper_memory_os_types.wire_field_reason
 let wire_field_supersedes = Keeper_memory_os_types.wire_field_supersedes
+let wire_field_absorbs = Keeper_memory_os_types.wire_field_absorbs
 let wire_claim_fields = Keeper_memory_os_types.wire_librarian_claim_fields
 let wire_dropped_fields = Keeper_memory_os_types.wire_librarian_dropped_fields
 let wire_current_fields =
@@ -265,6 +267,9 @@ type parse_error =
   | Duplicate_dropped_memory_id of string
   | Supersedes_unknown_memory_id of string
   | Supersedes_not_dropped of string
+  | Absorbs_unknown_memory_id of string
+  | Absorbs_dropped_memory_id of string
+  | Absorbs_memory_id_twice of string
 
 let parse_error_to_string = function
   | Top_level_not_object -> "top_level_not_object"
@@ -282,6 +287,9 @@ let parse_error_to_string = function
     "duplicate_dropped_memory_id: " ^ identity
   | Supersedes_unknown_memory_id token -> "supersedes_unknown_memory_id: " ^ token
   | Supersedes_not_dropped identity -> "supersedes_not_dropped: " ^ identity
+  | Absorbs_unknown_memory_id token -> "absorbs_unknown_memory_id: " ^ token
+  | Absorbs_dropped_memory_id identity -> "absorbs_dropped_memory_id: " ^ identity
+  | Absorbs_memory_id_twice identity -> "absorbs_memory_id_twice: " ^ identity
 ;;
 
 let fact_of_json ~now (json : Yojson.Safe.t) : fact option =
@@ -342,21 +350,48 @@ let fact_of_json ~now (json : Yojson.Safe.t) : fact option =
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
 ;;
 
+(* A new claim as the answer states it: the fact, the short id it corrects in
+   [supersedes], and the short ids it absorbs in [absorbs]. *)
+type new_claim =
+  { claim_fact : fact
+  ; supersedes_token : string option
+  ; absorbs_tokens : string list
+  }
+
 (* [supersedes] names, by its short id, the dropped memory this claim
-   continues. Absent or null is a claim that continues nothing. Any other
-   value that is not a non-blank string rejects the claim like any other
-   malformed field. Whether the id exists and was dropped is checked once the
-   ids are translated, where that answer lives. *)
-let new_claim_of_json ~now (json : Yojson.Safe.t) : (fact * string option) option =
+   continues. Absent or null is a claim that continues nothing. [absorbs] names,
+   by short id, the current memories this claim now says (RFC-0456 §4.2);
+   absent, null or empty absorbs nothing. Any other value, or a list holding
+   anything but non-blank strings, rejects the claim like any other malformed
+   field. Whether the ids exist, and whether they were dropped, is checked once
+   the ids are translated, where that answer lives. *)
+let new_claim_of_json ~now (json : Yojson.Safe.t) : new_claim option =
   match fact_of_json ~now json, json with
   | Some fact, `Assoc fields ->
-    (match List.assoc_opt wire_field_supersedes fields with
-     | None | Some `Null -> Some (fact, None)
-     | Some (`String raw) ->
-       (match trim_nonempty raw with
-        | Some token -> Some (fact, Some token)
-        | None -> None)
-     | Some (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _) -> None)
+    let supersedes =
+      match List.assoc_opt wire_field_supersedes fields with
+      | None | Some `Null -> Some None
+      | Some (`String raw) ->
+        (match trim_nonempty raw with
+         | Some token -> Some (Some token)
+         | None -> None)
+      | Some (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _) -> None
+    in
+    let absorbs =
+      match List.assoc_opt wire_field_absorbs fields with
+      | None | Some `Null -> Some []
+      | Some (`List items) ->
+        traverse
+          (function
+            | `String raw -> trim_nonempty raw
+            | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null -> None)
+          items
+      | Some (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `String _) -> None
+    in
+    (match supersedes, absorbs with
+     | Some supersedes_token, Some absorbs_tokens ->
+       Some { claim_fact = fact; supersedes_token; absorbs_tokens }
+     | None, _ | _, None -> None)
   | None, _ -> None
   | Some _, (`Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _) ->
     None
@@ -423,8 +458,8 @@ let translate_revisions ~by_surrogate ~(dropped : dropped_statement list) pairs 
   in
   let rec loop acc = function
     | [] -> Ok (List.rev acc)
-    | (_, None) :: rest -> loop acc rest
-    | (fact, Some token) :: rest ->
+    | { supersedes_token = None; claim_fact = _; absorbs_tokens = _ } :: rest -> loop acc rest
+    | { supersedes_token = Some token; claim_fact = fact; absorbs_tokens = _ } :: rest ->
       (match String_map.find_opt token by_surrogate with
        | None -> Error (Supersedes_unknown_memory_id token)
        | Some superseded ->
@@ -454,7 +489,44 @@ let current_facts inp =
    librarian's judgment and no rule here narrows it. It is whether the answer
    refers to memories the librarian was actually shown: a retired id has to name
    one of them, exactly once, and a new claim must not already be on file. *)
-let materialize_facts ~current_facts ~new_claims ~dropped =
+(* An absorbed memory has to be one the librarian saw, has to still be current
+   in the answer (a dropped one is gone, not said by the new claim), and can be
+   said by one new claim only. *)
+let translate_absorbs ~by_surrogate ~(dropped : dropped_statement list) new_claims =
+  let dropped_ids =
+    List.fold_left
+      (fun set (statement : dropped_statement) -> String_set.add statement.memory_id set)
+      String_set.empty
+      dropped
+  in
+  let rec tokens seen acc ~into = function
+    | [] -> Ok (seen, acc)
+    | token :: rest ->
+      (match String_map.find_opt token by_surrogate with
+       | None -> Error (Absorbs_unknown_memory_id token)
+       | Some absorbed ->
+         if String_set.mem absorbed dropped_ids
+         then Error (Absorbs_dropped_memory_id absorbed)
+         else if String_set.mem absorbed seen
+         then Error (Absorbs_memory_id_twice absorbed)
+         else
+           tokens
+             (String_set.add absorbed seen)
+             ({ Keeper_memory_os_types.absorbed; into } :: acc)
+             ~into
+             rest)
+  in
+  let rec claims seen acc = function
+    | [] -> Ok (List.rev acc)
+    | claim :: rest ->
+      (match tokens seen acc ~into:(memory_id claim.claim_fact) claim.absorbs_tokens with
+       | Ok (seen, acc) -> claims seen acc rest
+       | Error _ as error -> error)
+  in
+  claims String_set.empty [] new_claims
+;;
+
+let materialize_facts ~current_facts ~new_claims ~dropped ~absorbed =
   let open Result.Syntax in
   let current_by_id = current_facts_by_id current_facts in
   let rec validate_dropped seen = function
@@ -467,9 +539,16 @@ let materialize_facts ~current_facts ~new_claims ~dropped =
       else validate_dropped (String_set.add statement.memory_id seen) rest
   in
   let* dropped_ids = validate_dropped String_set.empty dropped in
+  let leaving =
+    List.fold_left
+      (fun ids (statement : Keeper_memory_os_types.absorbed_statement) ->
+         String_set.add statement.absorbed ids)
+      dropped_ids
+      absorbed
+  in
   let retained =
     List.filter
-      (fun fact -> not (String_set.mem (memory_id fact) dropped_ids))
+      (fun fact -> not (String_set.mem (memory_id fact) leaving))
       current_facts
   in
   let retained_ids =
@@ -537,33 +616,40 @@ let selection_of_json_result ?now (inp : input) (json : Yojson.Safe.t) :
                    traverse (new_claim_of_json ~now) claim_items
                    , traverse dropped_statement_of_json dropped_items
                  with
-                 | Some new_claim_pairs, Some dropped ->
-                   let new_claims = List.map fst new_claim_pairs in
+                 | Some stated_claims, Some dropped ->
+                   let new_claims =
+                     List.map (fun claim -> claim.claim_fact) stated_claims
+                   in
                    let by_surrogate =
                      surrogate_identity_map (current_facts inp)
                    in
                    (match translate_dropped_ids ~by_surrogate dropped with
                    | Ok dropped ->
-                     (match
-                        materialize_facts
-                          ~current_facts:(current_facts inp)
-                          ~new_claims
-                          ~dropped
-                      with
-                      | Ok facts ->
+                     (match translate_absorbs ~by_surrogate ~dropped stated_claims with
+                      | Ok absorbed ->
                         (match
-                           translate_revisions ~by_surrogate ~dropped new_claim_pairs
+                           materialize_facts
+                             ~current_facts:(current_facts inp)
+                             ~new_claims
+                             ~dropped
+                             ~absorbed
                          with
-                         | Ok revisions ->
-                           Ok
-                             { new_claims
-                             ; dropped
-                             ; facts
-                             ; revisions
-                             ; working_contexts
-                             }
+                         | Ok facts ->
+                           (match
+                              translate_revisions ~by_surrogate ~dropped stated_claims
+                            with
+                            | Ok revisions ->
+                              Ok
+                                { new_claims
+                                ; dropped
+                                ; absorbed
+                                ; facts
+                                ; revisions
+                                ; working_contexts
+                                }
+                            | Error _ as error -> error)
                          | Error _ as error -> error)
-                    | Error _ as error -> error)
+                      | Error _ as error -> error)
                    | Error _ as error -> error)
                  | Some _, None -> Error Dropped_schema_mismatch
                  | None, _ -> Error Claim_schema_mismatch)))

@@ -102,7 +102,15 @@ let test_sse_ping () =
 ;;
 
 let test_sse_error () =
-  let evt = SSEError { message = "overloaded"; error_type = None; raw = "overloaded" } in
+  let evt =
+    SSEError
+      { message = "overloaded"
+      ; error_type = None
+      ; provider_status = None
+      ; report = Provider_stated
+      ; raw = "overloaded"
+      }
+  in
   match evt with
   | SSEError { message; _ } ->
     Alcotest.(check string) "error message" "overloaded" message
@@ -264,6 +272,109 @@ let test_parse_error_event () =
     Alcotest.(check (option string)) "error type" (Some "overloaded_error") error_type
   | Some _ -> Alcotest.fail "unexpected event type"
   | None -> Alcotest.fail "parse returned None"
+;;
+
+(* A mid-stream error chunk: the provider failed after the 200 went out, so the
+   chunk carries the error at the top level beside a choice that finished with
+   "error". The shape is the "Mid-Stream Errors" example of OpenRouter's
+   streaming reference (api_reference/streaming), whose code is the string
+   "server_error". The numeric code follows OpenRouter's errors reference
+   (api_reference/errors-and-debugging), which types a mid-stream error.code as
+   the HTTP status number (e.g. 429, 502). *)
+let openrouter_mid_stream_error ~code =
+  Printf.sprintf
+    {|{"id":"cmpl-abc123","object":"chat.completion.chunk","created":1234567890,"model":"openai/gpt-4o","provider":"openai","error":{"code":%s,"message":"Provider disconnected unexpectedly"},"choices":[{"index":0,"delta":{"content":""},"finish_reason":"error"}]}|}
+    code
+;;
+
+let parse_openai data =
+  Agent_core.Llm_provider.Streaming.parse_openai_sse_chunk
+    ~streaming_reasoning:Agent_core.Llm_provider.Reasoning_dialect.No_streaming_reasoning
+    data
+;;
+
+let require_provider_error label = function
+  | Agent_core.Llm_provider.Streaming.Openai_provider_error { message; provider_status; _ }
+    -> message, provider_status
+  | Agent_core.Llm_provider.Streaming.Openai_chunk _ ->
+    Alcotest.failf "%s: read as a chunk, whose finish_reason becomes a stop reason" label
+  | Agent_core.Llm_provider.Streaming.Openai_done
+  | Agent_core.Llm_provider.Streaming.Openai_empty
+  | Agent_core.Llm_provider.Streaming.Openai_parse_failed _
+  | Agent_core.Llm_provider.Streaming.Openai_undeclared_reasoning_member _ ->
+    Alcotest.failf "%s: expected a provider error" label
+;;
+
+let declared_status (provider_status : provider_status option) =
+  Option.map (fun (declared : provider_status) -> declared.status) provider_status
+;;
+
+let test_openai_mid_stream_error_declares_status () =
+  let message, provider_status =
+    require_provider_error "numeric code" (parse_openai (openrouter_mid_stream_error ~code:"502"))
+  in
+  Alcotest.(check string) "message" "Provider disconnected unexpectedly" message;
+  Alcotest.(check (option int)) "declared status" (Some 502) (declared_status provider_status);
+  Alcotest.(check (option string))
+    "the body is the error object alone, not the chunk"
+    (Some {|{"error":{"code":502,"message":"Provider disconnected unexpectedly"}}|})
+    (Option.map (fun (declared : provider_status) -> declared.error_body) provider_status);
+  let _, provider_status =
+    require_provider_error
+      "string code"
+      (parse_openai (openrouter_mid_stream_error ~code:{|"server_error"|}))
+  in
+  Alcotest.(check (option int))
+    "a string code declares no status"
+    None
+    (declared_status provider_status);
+  let _, provider_status =
+    require_provider_error "4xx code" (parse_openai (openrouter_mid_stream_error ~code:"400"))
+  in
+  Alcotest.(check (option int))
+    "a 4xx after the 200 is not a provider condition"
+    None
+    (declared_status provider_status)
+;;
+
+let test_openai_error_finish_without_error_object () =
+  let _, provider_status =
+    require_provider_error
+      "bare error finish"
+      (parse_openai
+         {|{"id":"c","model":"deepseek/deepseek-v4.1-flash","choices":[{"index":0,"delta":{"content":""},"finish_reason":"error"}]}|})
+  in
+  Alcotest.(check (option int)) "no status to read" None (declared_status provider_status)
+;;
+
+let test_openai_error_finish_with_choice_error () =
+  let message, provider_status =
+    require_provider_error
+      "choice error"
+      (parse_openai
+         {|{"id":"c","model":"m","choices":[{"index":0,"delta":{"content":"partial"},"finish_reason":"error","error":{"code":429,"message":"slow down"}}]}|})
+  in
+  Alcotest.(check string) "message" "slow down" message;
+  Alcotest.(check (option int)) "declared status" (Some 429) (declared_status provider_status);
+  Alcotest.(check (option string))
+    "the body is the choice's error object alone"
+    (Some {|{"error":{"code":429,"message":"slow down"}}|})
+    (Option.map (fun (declared : provider_status) -> declared.error_body) provider_status)
+;;
+
+let test_openai_normal_finish_stays_a_chunk () =
+  match parse_openai {|{"id":"c","model":"m","choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}|} with
+  | Agent_core.Llm_provider.Streaming.Openai_chunk chunk ->
+    Alcotest.(check (option string))
+      "finish reason"
+      (Some "stop")
+      chunk.Agent_core.Llm_provider.Streaming.finish_reason
+  | Agent_core.Llm_provider.Streaming.Openai_done
+  | Agent_core.Llm_provider.Streaming.Openai_empty
+  | Agent_core.Llm_provider.Streaming.Openai_provider_error _
+  | Agent_core.Llm_provider.Streaming.Openai_parse_failed _
+  | Agent_core.Llm_provider.Streaming.Openai_undeclared_reasoning_member _ ->
+    Alcotest.fail "a stop finish must stay a chunk"
 ;;
 
 let test_parse_invalid_json () =
@@ -678,6 +789,21 @@ let () =
         ; test_case "message_stop" `Quick test_sse_message_stop
         ; test_case "ping" `Quick test_sse_ping
         ; test_case "sse_error" `Quick test_sse_error
+        ] )
+    ; ( "openai_provider_error_finish"
+      , [ test_case
+            "mid-stream error declares its status"
+            `Quick
+            test_openai_mid_stream_error_declares_status
+        ; test_case
+            "error finish without an error object"
+            `Quick
+            test_openai_error_finish_without_error_object
+        ; test_case
+            "error finish with a choice error"
+            `Quick
+            test_openai_error_finish_with_choice_error
+        ; test_case "a stop finish stays a chunk" `Quick test_openai_normal_finish_stays_a_chunk
         ] )
     ; ( "parse_sse_event"
       , [ test_case "message_start" `Quick test_parse_message_start

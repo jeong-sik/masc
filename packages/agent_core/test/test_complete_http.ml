@@ -2012,6 +2012,61 @@ let test_complete_provider_error_envelope_is_not_a_wire_error () =
   | Exit -> ()
 ;;
 
+(* A provider condition declared inside the stream -- a mid-stream error whose
+   numeric code is 502 -- is returned as that [HttpError], with only the error
+   object as its body. The summary is labelled from the error returned, the
+   label any [HttpError] the stream returns gets, not [provider_stream_error],
+   which names a returned [Provider_reported_error]. *)
+let test_complete_declared_provider_condition_is_that_http_error () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url =
+      start_sse_server
+        ~sw
+        ~net:env#net
+        "data: {\"id\":\"c\",\"model\":\"m\",\"error\":{\"code\":502,\"message\":\"Provider disconnected\"},\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial\"},\"finish_reason\":\"error\"}]}\n\n"
+    in
+    let telemetry = ref [] in
+    (match
+       Complete.complete_stream
+         ~sw
+         ~net:env#net
+         ~config:(make_openai_config url)
+         ~messages
+         ~on_event:(fun _ -> ())
+         ~on_telemetry:(fun event -> telemetry := event :: !telemetry)
+         ()
+     with
+     | Error
+         (Http_client.HttpError
+            { code = 502; body = Http_client.Received body; retry_after_header = None }) ->
+       check
+         string
+         "the refusal body is the error object alone"
+         {|{"error":{"code":502,"message":"Provider disconnected"}}|}
+         body
+     | Error _ -> fail "expected the declared 502 as an HttpError"
+     | Ok _ -> fail "a mid-stream provider error must not complete successfully");
+    let terminal =
+      List.find_map
+        (function
+          | Telemetry_event.Streaming_summary { terminal; _ } -> Some terminal
+          | _ -> None)
+        !telemetry
+    in
+    check
+      (option (testable Telemetry_event.pp_streaming_terminal ( = )))
+      "the summary names the returned HttpError"
+      (Some (Telemetry_event.Terminal_error "sse_stream_error: HTTP 502"))
+      terminal;
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
 let test_complete_ollama_malformed_ndjson_is_wire_error () =
   Eio_main.run
   @@ fun env ->
@@ -4360,6 +4415,10 @@ let () =
             "provider error envelope is not a wire failure"
             `Quick
             test_complete_provider_error_envelope_is_not_a_wire_error
+        ; test_case
+            "a declared provider condition is that HttpError"
+            `Quick
+            test_complete_declared_provider_condition_is_that_http_error
         ; test_case
             "malformed Ollama NDJSON preserves its wire format"
             `Quick

@@ -120,6 +120,31 @@ describe('keeper turn record cache token counts', () => {
     })
   })
 
+  // The writer names the window's front by the message that opens it
+  // (front_atom_digest). The decoder rejects keys it does not know, so a row
+  // carrying the window must still decode.
+  it('accepts a row whose window names its front atom digest', async () => {
+    getMock.mockResolvedValue(
+      payload(
+        entry({
+          transmitted_atoms: 7,
+          total_atoms: 9,
+          model_input_measurement: 'wire_shape',
+          front_atom_digest: 'a'.repeat(64),
+        }),
+      ),
+    )
+
+    const response = await fetchKeeperTurnRecords('sangsu')
+
+    expect(response.entries).toHaveLength(1)
+    expect(response.entries[0]?.record).toMatchObject({
+      transmitted_atoms: 7,
+      total_atoms: 9,
+      model_input_measurement: 'wire_shape',
+    })
+  })
+
   it('leaves the counts undefined when the row does not carry them', async () => {
     getMock.mockResolvedValue(payload(entry()))
 

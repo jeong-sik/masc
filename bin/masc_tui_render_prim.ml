@@ -3313,10 +3313,11 @@ let context_composition_lines ~cols ~turn_back
         let share =
           if total <= 0 then 0. else float transmitted /. float total *. 100.
         in
-        (* What the newest run is depends on what was measured. A wire shape
-           is the body that went out. A durable shape is the history masc
-           holds, projected the same way: on a lane whose client assembles
-           the request it is what masc could hand over, and a resumed client
+        (* What the newest run is depends on who composed it. A wire shape
+           is Agent Core's: the range it cut from the checkpoint history and
+           projected for the wire, so these atoms went out. A durable shape
+           is an official client's: the list masc handed over, which the
+           client assembles into its own request, and a resumed client
            session already holds the earlier turns, so "sent" would claim a
            transmission nothing observed. *)
         let measured, label, reach_prose =

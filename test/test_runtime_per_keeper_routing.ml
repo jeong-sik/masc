@@ -2169,6 +2169,49 @@ let test_max_context_accessor_clamps_to_provider_cap () =
       resolution.Keeper_context_runtime.effective_budget)
 ;;
 
+(* #36540: the [Provider_config] handed to AGENT_CORE must carry the same
+   effective window the keeper budget uses. The adapter used to forward the
+   raw runtime.toml override, so AGENT_CORE's exact-fit admission and response
+   telemetry ([Provider_config.context_window]) sized against 524288 while the
+   keeper budget was 131072. *)
+let test_agent_core_provider_config_carries_effective_context_window () =
+  with_runtime_thinking (fun () ->
+    let provider_config_of runtime_id =
+      match Runtime.get_runtime_by_id runtime_id with
+      | Some (rt : Runtime.t) ->
+        (match rt.execution with
+         | Runtime_execution.Agent_core config -> config
+         | Runtime_execution.Codex_app_server _
+         | Runtime_execution.Claude_code _
+         | Runtime_execution.Antigravity_cli _ ->
+           Alcotest.failf "%s must materialize as an agent_core runtime" runtime_id)
+      | None -> Alcotest.failf "expected %s runtime" runtime_id
+    in
+    let stalecontext = provider_config_of "ollama_cloud.stalecontext" in
+    Alcotest.(check (option int))
+      "over-catalog override is clamped in the AGENT_CORE-facing config"
+      (Some 131072)
+      stalecontext.Llm_provider.Provider_config.max_context;
+    Alcotest.(check (option int))
+      "context_window (exact-fit admission, response telemetry) reads the clamped window"
+      (Some 131072)
+      (Llm_provider.Provider_config.context_window stalecontext);
+    let thinkdefault = provider_config_of "ollama_cloud.thinkdefault" in
+    Alcotest.(check (option int))
+      "in-catalog override passes through untouched"
+      (Some 128000)
+      thinkdefault.Llm_provider.Provider_config.max_context;
+    Alcotest.(check (option int))
+      "context_window reads the declared window under the cap"
+      (Some 128000)
+      (Llm_provider.Provider_config.context_window thinkdefault);
+    let think = provider_config_of "ollama_cloud.think" in
+    Alcotest.(check (option int))
+      "uncatalogued model keeps its runtime.toml window"
+      (Some 128000)
+      (Llm_provider.Provider_config.context_window think))
+;;
+
 (* A model the embedded catalog has no row for, served over ollama_cloud's
    OpenAI-compatible wire. Its only window is the runtime.toml declaration, so
    that value must stand: the provider preset has no window to clamp it with.
@@ -2389,6 +2432,199 @@ let test_assignment_typo_keeps_not_found () =
     (string_contains msg "could not be materialized")
 ;;
 
+(* ---- a lane is reached by its name ----
+
+   [[runtime.assignments]] admits a declared lane name or a runtime id, and a
+   lane of that name is taken first. Before this, an assignment was validated as
+   a runtime id only, so a lane was reachable only by carrying the id of its own
+   head binding: lanes could not be named, two ladders could not start at the
+   same runtime, and deleting a lane left the assignment silently walking
+   [head; [runtime].default] with nothing reported. *)
+
+let lane_fixture_bindings =
+  {|
+[providers.runpod_mtp]
+display-name = "RunPod"
+protocol = "openai-compatible-http"
+endpoint = "https://runpod.example/v1"
+
+[providers.openai]
+display-name = "OpenAI"
+protocol = "openai-compatible-http"
+endpoint = "https://api.openai.example/v1"
+
+[models.qwen]
+api-name = "qwen"
+max-context = 128000
+tools-support = true
+streaming = true
+
+[models.gpt]
+api-name = "gpt"
+max-context = 64000
+tools-support = true
+streaming = true
+
+[models.small]
+api-name = "small"
+max-context = 32000
+tools-support = true
+streaming = true
+
+[runpod_mtp.qwen]
+is-default = true
+max-concurrent = 4
+
+[openai.gpt]
+is-default = true
+max-concurrent = 1
+
+[openai.small]
+max-concurrent = 1
+|}
+;;
+
+(* The lane name carries no runtime id. Nothing but the assignment reaches it. *)
+let runtime_config_lane_named_freely =
+  {|
+[runtime]
+default = "runpod_mtp.qwen"
+
+[runtime.lanes.coding]
+candidates = ["openai.gpt", "openai.small"]
+
+[runtime.assignments]
+nu = "coding"
+|}
+  ^ lane_fixture_bindings
+;;
+
+(* Two ladders start at the same runtime under names of their own. [careful]
+   already ends at [runtime].default, [fast] does not — so only [fast] has the
+   terminal default appended. *)
+let runtime_config_two_lanes_one_head =
+  {|
+[runtime]
+default = "runpod_mtp.qwen"
+
+[runtime.lanes.fast]
+candidates = ["openai.gpt", "openai.small"]
+
+[runtime.lanes.careful]
+candidates = ["openai.gpt", "runpod_mtp.qwen"]
+
+[runtime.assignments]
+nu = "fast"
+mu = "careful"
+|}
+  ^ lane_fixture_bindings
+;;
+
+(* The lane the assignment names is not declared: the load must refuse instead
+   of walking [coding] as a runtime id or falling back to the default. *)
+let runtime_config_assignment_names_no_lane =
+  {|
+[runtime]
+default = "runpod_mtp.qwen"
+
+[runtime.assignments]
+nu = "coding"
+|}
+  ^ lane_fixture_bindings
+;;
+
+(* The pre-existing spelling — a lane carrying its head's runtime id — keeps
+   working, because the lane is still looked up before the runtime. *)
+let runtime_config_lane_named_after_its_head =
+  {|
+[runtime]
+default = "runpod_mtp.qwen"
+
+[runtime.lanes."openai.gpt"]
+candidates = ["openai.gpt", "openai.small"]
+
+[runtime.assignments]
+nu = "openai.gpt"
+|}
+  ^ lane_fixture_bindings
+;;
+
+let load_lane_config content =
+  with_temp_dir "runtime-lane-name" @@ fun dir ->
+  let path = Filename.concat dir "runtime.toml" in
+  write_file path content;
+  match Runtime.load_list ~config_path:path with
+  | Ok loaded -> Ok loaded
+  | Error failure -> Error (Runtime.to_diagnostic_text ~config_path:path failure)
+;;
+
+let lane_named lanes name =
+  List.find_opt (fun lane -> String.equal (Runtime_lane.id lane) name) lanes
+;;
+
+let candidates_of lanes name =
+  match lane_named lanes name with
+  | None -> Alcotest.failf "no lane named %S survived the load" name
+  | Some lane -> Runtime_lane.ordered_candidates lane
+;;
+
+let test_an_assignment_names_a_lane_of_its_own_name () =
+  match load_lane_config runtime_config_lane_named_freely with
+  | Error msg -> Alcotest.failf "a freely named lane must load: %s" msg
+  | Ok (_runtimes, _default, assignments, _media_failover, lanes) ->
+    Alcotest.(check (option string))
+      "the assignment keeps the lane name it was written with"
+      (Some "coding")
+      (List.assoc_opt "nu" assignments);
+    Alcotest.(check (list string))
+      "the lane walks its own candidates and ends at [runtime].default"
+      [ "openai.gpt"; "openai.small"; "runpod_mtp.qwen" ]
+      (candidates_of lanes "coding")
+    (* The dispatch-reachability projection this test also consulted was the
+       local request-cap validation's; #36828 removed both when body size
+       became the server's judgement. The candidate walk above is the
+       surviving surface: the assignment resolves to the lane, and the lane's
+       ordered candidates are the dispatch walk. *)
+;;
+
+let test_two_lanes_may_start_at_the_same_runtime () =
+  match load_lane_config runtime_config_two_lanes_one_head with
+  | Error msg -> Alcotest.failf "two lanes sharing a head must load: %s" msg
+  | Ok (_runtimes, _default, _assignments, _media_failover, lanes) ->
+    Alcotest.(check (list string))
+      "[fast] keeps its own tail"
+      [ "openai.gpt"; "openai.small"; "runpod_mtp.qwen" ]
+      (candidates_of lanes "fast");
+    Alcotest.(check (list string))
+      "[careful] keeps a different tail from the same head"
+      [ "openai.gpt"; "runpod_mtp.qwen" ]
+      (candidates_of lanes "careful")
+;;
+
+let test_an_assignment_naming_no_lane_is_refused () =
+  match load_lane_config runtime_config_assignment_names_no_lane with
+  | Ok _ -> Alcotest.fail "an assignment naming neither a lane nor a runtime must be refused"
+  | Error msg ->
+    Alcotest.(check bool)
+      "the refusal names the unresolved assignment target"
+      true
+      (string_contains msg "coding");
+    Alcotest.(check bool)
+      "the refusal keeps the not-found-among-runtimes wording"
+      true
+      (string_contains msg "not found among")
+;;
+
+let test_a_lane_named_after_its_head_still_wins () =
+  match load_lane_config runtime_config_lane_named_after_its_head with
+  | Error msg -> Alcotest.failf "the pre-existing lane spelling must keep loading: %s" msg
+  | Ok (_runtimes, _default, _assignments, _media_failover, lanes) ->
+    Alcotest.(check (list string))
+      "the lane is taken over the same-named runtime"
+      [ "openai.gpt"; "openai.small"; "runpod_mtp.qwen" ]
+      (candidates_of lanes "openai.gpt")
+;;
+
 let () =
   (match Llm_provider.Model_catalog.load_default () with
    | Error msg -> Alcotest.failf "packaged AGENT_CORE models.toml should load: %s" msg
@@ -2583,6 +2819,10 @@ let () =
             `Quick
             test_max_context_accessor_clamps_to_provider_cap
         ; Alcotest.test_case
+            "AGENT_CORE provider config carries the effective window"
+            `Quick
+            test_agent_core_provider_config_carries_effective_context_window
+        ; Alcotest.test_case
             "uncatalogued model keeps its runtime.toml window"
             `Quick
             test_max_context_of_uncatalogued_model_keeps_runtime_declaration
@@ -2622,6 +2862,24 @@ let () =
             "assignment typo keeps the not-found-among-runtimes message"
             `Quick
             test_assignment_typo_keeps_not_found
+        ] )
+    ; ( "lane names"
+      , [ Alcotest.test_case
+            "an assignment names a lane of its own name"
+            `Quick
+            test_an_assignment_names_a_lane_of_its_own_name
+        ; Alcotest.test_case
+            "two lanes may start at the same runtime"
+            `Quick
+            test_two_lanes_may_start_at_the_same_runtime
+        ; Alcotest.test_case
+            "an assignment naming no lane and no runtime is refused"
+            `Quick
+            test_an_assignment_naming_no_lane_is_refused
+        ; Alcotest.test_case
+            "a lane named after its head still wins over that runtime"
+            `Quick
+            test_a_lane_named_after_its_head_still_wins
         ] )
     ]
 ;;

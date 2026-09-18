@@ -489,6 +489,54 @@ let openai_compat_chat_extended_capabilities =
   }
 ;;
 
+(* A router publishes one effort contract for every model it serves: it accepts
+   the whole ladder and maps a level the chosen model lacks to the nearest one
+   it has, rather than refusing the request
+   (https://openrouter.ai/docs/use-cases/reasoning-tokens, checked 2026-09-18).
+   That makes the accepted set a property of the router, which is why it can be
+   declared here instead of once per model row.
+
+   [None_] is left out although the router accepts it. "The router takes the
+   value" and "the model stops thinking" are different claims, and mapping to
+   the nearest level turns the first into the second only by luck: a model with
+   no off state receives the neighbouring level and reasons on. The cost of
+   omitting it is that a caller asking to disable thinking is refused before
+   dispatch and takes its other path; the cost of including it would be a reply
+   the caller believes is thinking-free. A model whose off behaviour is
+   documented or measured declares [None_] on its own catalog row. *)
+let openrouter_capabilities =
+  { openai_compat_chat_extended_capabilities with
+    accepted_reasoning_efforts =
+      Some
+        [ Reasoning_effort.Minimal
+        ; Reasoning_effort.Low
+        ; Reasoning_effort.Medium
+        ; Reasoning_effort.High
+        ; Reasoning_effort.XHigh
+        ; Reasoning_effort.Max
+        ]
+  }
+;;
+
+let%test "the router's ladder carries every level it maps, and no off value" =
+  match openrouter_capabilities.accepted_reasoning_efforts with
+  | None -> false
+  | Some accepted ->
+    (* The omission is the decision, so it is the assertion: a request asking
+       this router to stop thinking is refused here rather than mapped to a
+       neighbouring level and returned as a thinking-free reply. *)
+    (not (List.mem Reasoning_effort.None_ accepted))
+    && List.for_all
+         (fun effort -> List.mem effort accepted)
+         [ Reasoning_effort.Minimal
+         ; Reasoning_effort.Low
+         ; Reasoning_effort.Medium
+         ; Reasoning_effort.High
+         ; Reasoning_effort.XHigh
+         ; Reasoning_effort.Max
+         ]
+;;
+
 let mimo_capabilities =
   { openai_compat_chat_capabilities with
     max_context_tokens = Some 1_000_000
@@ -759,6 +807,7 @@ let capabilities_for_provider_label label =
     (match label with
      | "openai_compat_chat_extended" | "openai_chat_extended" ->
        Some openai_compat_chat_extended_capabilities
+     | "openrouter" -> Some openrouter_capabilities
      | "xai" | "mistral" -> Some openai_compat_chat_extended_capabilities
      | "cohere" -> Some openai_compat_chat_capabilities
      | "mimo" -> Some mimo_capabilities
@@ -2322,6 +2371,7 @@ let%test "capabilities_for_provider_label: all declared labels resolve" =
     ; "openai"
     ; "openai_chat"
     ; "openai_chat_extended"
+    ; "openrouter"
     ; "gemini"
     ; "ollama"
     ; "glm"

@@ -5,7 +5,7 @@
     this module owns parsing, validation, and response shapes. *)
 
 (** [handle_goal_list ctx args] handles [masc_goal_list].
-    Optional filter: [phase] (executing / blocked / completed / etc.).
+    Optional filter: [phase] (executing / verifying / awaiting_confirmation / completed / dropped).
     Returns the goal list with a
     rollup summary.  Validation errors return
     [(false, error_json)] without touching the store. *)

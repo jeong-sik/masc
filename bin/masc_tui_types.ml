@@ -4506,6 +4506,12 @@ type state = {
   mutable voice_send_on_stop: bool;
   mutable answering_open: bool;
   mutable answering_scroll: int;
+  (* The Memory facts list's [Enter] detail: the whole fact text in its own
+     wide overlay instead of the narrow inline block under the row. Modal
+     like the other overlays, and like them the scroll survives only while
+     it is open. *)
+  mutable memory_fact_detail_open: bool;
+  mutable memory_fact_detail_scroll: int;
   (* Cursor over the overlay's actionable rows (running / just finished);
      Enter opens that keeper's chat. An index into the overlay's line list,
      kept on a target row by the key handler. *)
@@ -4769,6 +4775,9 @@ type state = {
   mutable keeper_config_view: (string * string list) option;
   mutable keeper_config_view_error: string option;
   mutable github_identity_view: (string * string list) option;
+  mutable github_identity_view_error: string option;
+  mutable github_token_input: string option;
+  mutable github_token_save_status: string option;
   (* The Identity tab. Stamped with the keeper it was fetched for, like the
      other fetched tabs, so the pane shows loading rather than another
      keeper's answer. The providers are held rather than pre-rendered lines
@@ -4794,7 +4803,6 @@ type state = {
      until it is sent, and cleared with the form -- a field left filled is a
      credential sitting in the process for as long as the pane is up. *)
   mutable identity_app_form: identity_app_form option;
-  mutable github_identity_view_error: string option;
   mutable task_cursor: int;
   mutable task_detail_id: string option;
   mutable task_detail_scroll: int;
@@ -5712,6 +5720,7 @@ type text_input_target =
   | Text_row_search
   | Text_identity_app_form
   | Text_identity_filter
+  | Text_github_token
   | Text_board_draft
 
 (* The order is the key dispatch's order, which is what an operator already
@@ -5722,6 +5731,11 @@ let text_input_target (state : state) ~compact_viewport =
   let identity_surface =
     state.view = Keepers Keeper_detail
     && state.detail_tab = Detail_identity
+    && not compact_viewport
+  in
+  let github_surface =
+    state.view = Keepers Keeper_detail
+    && state.detail_tab = Detail_github
     && not compact_viewport
   in
   if state.keeper_deletions_open then None
@@ -5750,6 +5764,8 @@ let text_input_target (state : state) ~compact_viewport =
     Some Text_identity_app_form
   else if identity_surface && Option.is_some state.identity_filter then
     Some Text_identity_filter
+  else if github_surface && Option.is_some state.github_token_input then
+    Some Text_github_token
   else if state.view = Board && state.board_mode = Board_compose then
     Some Text_board_draft
   else None
@@ -6486,6 +6502,8 @@ let create_state
   answering_open = false;
   answering_scroll = 0;
   answering_cursor = 0;
+  memory_fact_detail_open = false;
+  memory_fact_detail_scroll = 0;
   keeper_turn_finishes = [];
   keeper_turns_observed_at = None;
   context_inspector_open = false;
@@ -6603,6 +6621,8 @@ let create_state
   keeper_config_view = None;
   keeper_config_view_error = None;
   github_identity_view = None;
+  github_token_input = None;
+  github_token_save_status = None;
   identity_view = None;
   identity_view_error = None;
   identity_login = None;
@@ -7347,6 +7367,7 @@ type clamped_scroll =
   | Acting of int
   | Acting_selection of int * int
   | Acting_detail_scroll of int
+  | Memory_fact_detail_scroll of int
   | Verification_detail_scroll of int
   | Harness_detail_scroll of int
   | Fusion_detail_scroll of int
@@ -7430,6 +7451,7 @@ let apply_clamped_scroll (state : state) = function
   | Acting value -> state.acting_scroll <- value
   | Acting_selection (scroll, cursor) -> state.acting_scroll <- scroll; state.acting_cursor <- cursor
   | Acting_detail_scroll value -> state.acting_detail_scroll <- value
+  | Memory_fact_detail_scroll value -> state.memory_fact_detail_scroll <- value
   | Verification_detail_scroll value ->
       state.verification_detail_scroll <- value
   | Harness_detail_scroll value -> state.harness_detail_scroll <- value

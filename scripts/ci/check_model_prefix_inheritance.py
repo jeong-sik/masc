@@ -69,9 +69,18 @@ def runtime_models() -> set[Model]:
     if not isinstance(model_rows, dict) or not isinstance(provider_rows, dict):
         raise ValueError("runtime requires [models] and [providers] tables")
     models: set[Model] = set()
-    for provider in provider_rows:
+    for provider, provider_row in provider_rows.items():
         if not isinstance(provider, str):
             raise ValueError("runtime provider id must be a string")
+        if not isinstance(provider_row, dict):
+            raise ValueError(f"runtime provider {provider!r} is malformed")
+        # A provider that declares `command` is an official client (claude-code,
+        # codex-app-server, antigravity-cli): the CLI owns the wire and its
+        # capabilities, so no AGENT_CORE catalog row describes it and none is
+        # owed. The schema admits exactly one of `endpoint` and `command`, so
+        # the key is the transport itself, not a list of provider names.
+        if "command" in provider_row:
+            continue
         bindings = data.get(provider)
         if bindings is None:
             continue

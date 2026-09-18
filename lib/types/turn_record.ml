@@ -64,6 +64,7 @@ type model_input_window =
   { transmitted_atoms : int
   ; total_atoms : int
   ; measurement : model_input_measurement
+  ; front_atom_digest : string
   }
 
 type turn_kind =
@@ -204,13 +205,14 @@ let to_json (r : t) : Yojson.Safe.t =
       `String observation.runtime_profile, `Int observation.body_bytes
     | None -> `Null, `Null
   in
-  let transmitted_atoms, total_atoms, model_input_measurement =
+  let transmitted_atoms, total_atoms, model_input_measurement, front_atom_digest =
     match r.model_input_window with
     | Some window ->
       ( `Int window.transmitted_atoms
       , `Int window.total_atoms
-      , `String (model_input_measurement_to_string window.measurement) )
-    | None -> `Null, `Null, `Null
+      , `String (model_input_measurement_to_string window.measurement)
+      , `String window.front_atom_digest )
+    | None -> `Null, `Null, `Null, `Null
   in
   `Assoc
     ([ ( "execution_ids"
@@ -233,6 +235,7 @@ let to_json (r : t) : Yojson.Safe.t =
      ; "transmitted_atoms", transmitted_atoms
      ; "total_atoms", total_atoms
      ; "model_input_measurement", model_input_measurement
+     ; "front_atom_digest", front_atom_digest
      ; ( "raw_trace_run_ref"
        , match r.raw_trace_run_ref with
          | Some run_ref -> raw_trace_run_ref_to_json run_ref
@@ -501,6 +504,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
             ; "transmitted_atoms"
             ; "total_atoms"
             ; "model_input_measurement"
+            ; "front_atom_digest"
             ; "raw_trace_run_ref"
             ; "selected_model"
             ; "finish_reason"
@@ -603,17 +607,22 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
           let* raw = as_nonempty_string name json in
           model_input_measurement_of_string raw)
       in
+      let* front_atom_digest =
+        nullable "front_atom_digest" fields as_nonempty_string
+      in
       let* model_input_window =
-        match transmitted_atoms, total_atoms, measurement with
-        | Some transmitted_atoms, Some total_atoms, Some measurement ->
+        match transmitted_atoms, total_atoms, measurement, front_atom_digest with
+        | Some transmitted_atoms, Some total_atoms, Some measurement, Some front_atom_digest ->
           if transmitted_atoms > total_atoms
           then Error "turn_record: transmitted_atoms cannot exceed total_atoms"
-          else Ok (Some { transmitted_atoms; total_atoms; measurement })
-        | None, None, None -> Ok None
+          else
+            Ok (Some { transmitted_atoms; total_atoms; measurement; front_atom_digest })
+        | None, None, None, None -> Ok None
         | _ ->
           Error
-            "turn_record: transmitted_atoms, total_atoms and \
-             model_input_measurement must all be present or all be null"
+            "turn_record: transmitted_atoms, total_atoms, \
+             model_input_measurement and front_atom_digest must all be present \
+             or all be null"
       in
       let* raw_trace_run_ref_json = require "raw_trace_run_ref" fields in
       let* raw_trace_run_ref =

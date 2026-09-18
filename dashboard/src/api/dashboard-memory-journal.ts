@@ -77,6 +77,17 @@ export type MemoryJournalEntry =
       readonly snapshotPresent: boolean
       readonly cadenceDeferred: boolean
     }
+  // A quarantine is neither a pass that committed nor a pass that failed: the
+  // server records it on its own outcome when an undecodable snapshot moves
+  // aside. It carries no trace id, so trace-joined views leave it out by
+  // construction.
+  | {
+      readonly ok: true
+      readonly outcome: 'quarantined'
+      readonly recordedAt: number
+      readonly rejection: string
+      readonly rejectedPath: string
+    }
   | { readonly ok: false; readonly error: string }
 
 export type MemoryJournal = {
@@ -177,7 +188,7 @@ function decodeSupportInvalidations(
 }
 
 function decodeCommitted(raw: Record<string, unknown>): MemoryJournalEntry | null {
-  const allowed = ['ok', 'outcome', 'recorded_at', 'revision', 'source', 'change']
+  const allowed = ['structural_id', 'ok', 'outcome', 'recorded_at', 'revision', 'source', 'change']
   const allowedWithDropped = [...allowed, 'dropped']
   if (!hasExactKeys(raw, raw.dropped === undefined ? allowed : allowedWithDropped)) return null
   const recordedAt = asNumber(raw.recorded_at)
@@ -235,6 +246,7 @@ function decodeCommitted(raw: Record<string, unknown>): MemoryJournalEntry | nul
 
 function decodeFailed(raw: Record<string, unknown>): MemoryJournalEntry | null {
   if (!hasExactKeys(raw, [
+    'structural_id',
     'ok',
     'outcome',
     'recorded_at',
@@ -264,10 +276,26 @@ function decodeFailed(raw: Record<string, unknown>): MemoryJournalEntry | null {
   }
 }
 
+function decodeQuarantined(raw: Record<string, unknown>): MemoryJournalEntry | null {
+  if (!hasExactKeys(raw, [
+    'structural_id',
+    'ok',
+    'outcome',
+    'recorded_at',
+    'rejection',
+    'rejected_path',
+  ])) return null
+  const recordedAt = asNumber(raw.recorded_at)
+  const rejection = exactNonEmptyString(raw.rejection)
+  const rejectedPath = exactNonEmptyString(raw.rejected_path)
+  if (recordedAt == null || rejection == null || rejectedPath == null) return null
+  return { ok: true, outcome: 'quarantined', recordedAt, rejection, rejectedPath }
+}
+
 function decodeEntry(raw: unknown): MemoryJournalEntry | null {
   if (!isRecord(raw)) return null
   if (raw.ok === false) {
-    if (!hasExactKeys(raw, ['ok', 'error'])) return null
+    if (!hasExactKeys(raw, ['structural_id', 'ok', 'error'])) return null
     const error = exactNonEmptyString(raw.error)
     return error == null ? null : { ok: false, error }
   }
@@ -277,6 +305,8 @@ function decodeEntry(raw: unknown): MemoryJournalEntry | null {
       return decodeCommitted(raw)
     case 'failed':
       return decodeFailed(raw)
+    case 'quarantined':
+      return decodeQuarantined(raw)
     default:
       // An outcome this build does not know came from a wider one. Rendering
       // it as something else would describe a pass that never happened.

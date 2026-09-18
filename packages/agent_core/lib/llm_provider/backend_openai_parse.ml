@@ -20,11 +20,18 @@ type empty_completion =
   }
 
 type parse_error =
-  | Provider_error of string
+  | Provider_error of
+      { message : string
+      ; error_type : string option
+      ; provider_status : Types.provider_status option
+      ; report : Types.provider_report
+      }
+  | Unreadable_response of string
   | Empty_completion of empty_completion
 
 let parse_error_to_string = function
-  | Provider_error msg -> msg
+  | Provider_error { message; error_type = _; provider_status = _; report = _ } -> message
+  | Unreadable_response message -> message
   | Empty_completion { stop_reason; model; _ } ->
     Printf.sprintf
       "empty completion (no thinking, text, or tool calls; model=%s, stop_reason=%s)"
@@ -309,8 +316,26 @@ let telemetry_of_openai_json json =
     }
 ;;
 
-(** Parse an OpenAI-compatible JSON response string into an [api_response].
-    Returns [Error msg] when the response body contains an API error.
+let unknown_api_error = "Unknown API error"
+
+let provider_error (envelope : Openai_error_envelope.t) =
+  Provider_error
+    { message = envelope.message
+    ; error_type = envelope.error_type
+    ; provider_status = envelope.provider_status
+    ; report = envelope.report
+    }
+;;
+
+let unreadable_response message = Unreadable_response message
+
+(** Parse an already-parsed OpenAI-compatible JSON response into an
+    [api_response]. Returns [Error (Provider_error _)] when the provider
+    reported an error -- a top-level [error] object or string, or a choice
+    that finished with [error] -- and [Error (Unreadable_response _)] when the
+    body is not a response this parser can read: no [finish_reason], malformed
+    tool calls or reasoning, or a top-level [error] that is neither an object
+    nor a string.
 
     [content_inline_reasoning] is the catalog-declared contract for reasoning
     embedded in the content channel (see
@@ -337,16 +362,32 @@ let parse_openai_response_result_json_raw
     let* finish_reason =
       match choice |> member "finish_reason" |> to_string_option with
       | Some finish_reason -> Ok finish_reason
-      | None -> Error "malformed_openai_response:missing_finish_reason"
+      | None ->
+        Error (unreadable_response "malformed_openai_response:missing_finish_reason")
+    in
+    let* () =
+      if Stop_reason_wire.is_provider_error_finish finish_reason
+      then
+        Error
+          (provider_error
+             (Openai_error_envelope.of_errored_choice
+                ~fallback_message:unknown_api_error
+                choice))
+      else Ok ()
     in
     let text_content = text_content_of_openai_content (msg |> member "content") in
-    let* tool_blocks = parse_tool_calls_field (msg |> member "tool_calls") in
+    let* tool_blocks =
+      parse_tool_calls_field (msg |> member "tool_calls")
+      |> Result.map_error unreadable_response
+    in
     (* Ollama uses "reasoning"; OpenAI-compatible providers commonly use
        "reasoning_content"; MiniMax split mode may return "reasoning_details".
        MiniMax split reasoning stays as [ReasoningDetails] so the original
        provider message shape can be replayed without overloading visible or
        redacted thinking channels. Other reasoning text stays [Thinking]. *)
-    let* thinking_blocks = reasoning_content_blocks_of_message_result msg in
+    let* thinking_blocks =
+      reasoning_content_blocks_of_message_result msg |> Result.map_error unreadable_response
+    in
     (* Models declaring [Think_tags] (e.g. GLM served through ollama-cloud,
        Qwen3 chat-template runtimes) embed part of their reasoning inside
        [message.content] itself. Feed the complete string through the same
@@ -384,13 +425,9 @@ let parse_openai_response_result_json_raw
       ; telemetry = telemetry_of_openai_json json
       }
   | err ->
-    let msg =
-      err
-      |> member "message"
-      |> to_string_option
-      |> Option.value ~default:"Unknown API error"
-    in
-    Error msg
+    (match Openai_error_envelope.of_error_value ~fallback_message:unknown_api_error err with
+     | Some envelope -> Error (provider_error envelope)
+     | None -> Error (unreadable_response "malformed_openai_response:error_not_object_or_string"))
 ;;
 
 (* agent-core boundary fail-closed wrapper: an all-empty completion (no thinking, no text,
@@ -402,7 +439,7 @@ let parse_openai_response_result_json
       raw_json
   =
   match parse_openai_response_result_json_raw ~content_inline_reasoning raw_json with
-  | Error msg -> Error (Provider_error msg)
+  | Error _ as error -> error
   | Ok ({ content = []; id; model; stop_reason; usage; telemetry } : Types.api_response)
     -> Error (Empty_completion { id; model; stop_reason; usage; telemetry })
   | Ok resp -> Ok resp
@@ -427,7 +464,44 @@ let%test "missing finish reason is not synthesized as stop" =
     parse_openai_response_result
       {|{"id":"chat-1","model":"m","choices":[{"message":{"content":"ok"}}]}|}
   with
-  | Error (Provider_error "malformed_openai_response:missing_finish_reason") -> true
+  | Error (Unreadable_response "malformed_openai_response:missing_finish_reason") -> true
+  | Error _ | Ok _ -> false
+;;
+
+let%test "a top-level error that is neither an object nor a string is unreadable" =
+  match parse_openai_response_result {|{"error":502}|} with
+  | Error (Unreadable_response "malformed_openai_response:error_not_object_or_string") ->
+    true
+  | Error _ | Ok _ -> false
+;;
+
+let%test "an error finish with no object says the generation was interrupted" =
+  match
+    parse_openai_response_result
+      {|{"id":"c","model":"m","choices":[{"index":0,"finish_reason":"error","message":{"content":"partial"}}]}|}
+  with
+  | Error (Provider_error { report = Types.Unstated_errored_choice; provider_status = None; _ })
+    -> true
+  | Error _ | Ok _ -> false
+;;
+
+let%test "an error finish carries the envelope's type and provider condition" =
+  match
+    parse_openai_response_result
+      {|{"id":"c","model":"m","choices":[{"index":0,"finish_reason":"error","message":{"content":"partial"},"error":{"code":503,"message":"overloaded","metadata":{"error_type":"provider_overloaded"}}}]}|}
+  with
+  | Error
+      (Provider_error
+        { message = "overloaded"
+        ; error_type = Some "provider_overloaded"
+        ; provider_status =
+            Some
+              { Types.status = 503
+              ; error_body =
+                  {|{"error":{"code":503,"message":"overloaded","metadata":{"error_type":"provider_overloaded"}}}|}
+              }
+        ; report = Types.Provider_stated
+        }) -> true
   | Error _ | Ok _ -> false
 ;;
 

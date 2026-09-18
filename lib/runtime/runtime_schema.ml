@@ -361,11 +361,13 @@ type config =
   ; bindings : binding list
   ; default_runtime_id : string option
   ; keeper_assignments : (string * string) list
-    (** [\[runtime.assignments\]] — keeper name → runtime id ["provider.model"].
+    (** [\[runtime.assignments\]] — keeper name → a declared [\[runtime.lanes\]]
+        name or a runtime id ["provider.model"]. A lane name is resolved first,
+        so a lane whose name is also a runtime id still wins.
         runtime.toml is the sole SSOT for keeper-to-runtime assignment; keeper
         TOML does not carry a runtime selector. A keeper absent from this table routes to the default
-        runtime; an assignment to an unknown id is rejected at load
-        ({!Runtime.load_list}), mirroring [\[runtime\].default] validation. The
+        runtime; an assignment naming neither a lane nor a runtime is rejected at
+        load ({!Runtime.load_list}), mirroring [\[runtime\].default] validation. The
         id is an opaque binding key here — only the AGENT_CORE adapter parses it into
         provider/model/spec. *)
   ; media_failover : string list

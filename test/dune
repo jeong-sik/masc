@@ -15,6 +15,11 @@
  (libraries masc_test_deps))
 
 (test
+ (name test_keeper_request_failure)
+ (modules test_keeper_request_failure)
+ (libraries masc_test_deps))
+
+(test
  (name test_keeper_tool_execute_script_paths)
  (modules test_keeper_tool_execute_script_paths)
  ; Deliberately minimal: the script-paths vocabulary now lives with its
@@ -246,7 +251,7 @@
   test_keeper_running_reconcile_attempt
   test_attempt_state
   test_runtime_attempt_fsm
-  test_runtime_lane_preference
+  test_runtime_candidate_backpressure
   test_runtime_quota_window
   test_keeper_turn_driver_accept
   test_keeper_sandbox_persistent
@@ -366,6 +371,7 @@
   test_keeper_model_input_ledger
   test_keeper_carried_range
   test_keeper_carried_front
+  test_keeper_request_wire_view
   test_keeper_carried_range_eviction
   test_keeper_next_request_forecast
   test_keeper_provider_call_deadline
@@ -604,7 +610,7 @@
   test_keeper_running_reconcile_attempt
   test_attempt_state
   test_runtime_attempt_fsm
-  test_runtime_lane_preference
+  test_runtime_candidate_backpressure
   test_runtime_quota_window
   test_keeper_turn_driver_accept
   test_keeper_sandbox_persistent
@@ -725,6 +731,7 @@
   test_keeper_model_input_ledger
   test_keeper_carried_range
   test_keeper_carried_front
+  test_keeper_request_wire_view
   test_keeper_carried_range_eviction
   test_keeper_next_request_forecast
   test_keeper_provider_call_deadline
@@ -875,6 +882,9 @@
   test_operator_surface_toml_parity)
  (libraries
  masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
+  ;; test_keeper_turn_driver_failover builds the operation id the chat lane's
+  ;; failure continuation carries; the type is opaque without its own library.
+  masc.keeper_operation_identity
   ;; test_keeper_model_input_demotion installs a one-worker Domain_pool to
   ;; prove materialize addresses its bodies there.
   masc.masc_core eio_main
@@ -2483,6 +2493,10 @@
 (include stanzas/test_env_config_keeper_bootstrap_intervals.inc)
 
 (include stanzas/test_env_config_keeper_poll_intervals.inc)
+
+(include stanzas/test_env_config_keeper_admission_bounds.inc)
+
+(include stanzas/test_schedule_domain_admission_split.inc)
 
 (include stanzas/test_env_config_nonneg.inc)
 
@@ -4817,8 +4831,10 @@
   ../scripts/harness/workload/keeper_multi_collaboration_acceptance.py
   ../scripts/harness/workload/keeper_multi_collaboration_acceptance.sh
   ../scripts/fixtures/keeper-multi-collaboration/missions.json
+  (source_tree ../scripts/fixtures/keeper-multi-collaboration/skills)
   ../config/tools/masc_keeper_up.toml
   ../lib/server/server_routes_http_routes_dashboard.ml
+  ../lib/server/server_skill_editor.ml
   ../lib/keeper/keeper_tool_approval_mode.ml)
  (action
   (run python3 %{dep:test_keeper_multi_collaboration_acceptance.py})))
@@ -4826,6 +4842,8 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_keeper_multi_collaboration_acceptance)))
+
+(include stanzas/test_acceptance_composition_fixtures.inc)
 
 (rule
  (alias runtest-test_campaign_scoreboard)
@@ -5824,6 +5842,16 @@
  (deps (alias runtest-test_tui_tab_strip_pty)))
 
 (rule
+ (alias runtest-test_tui_memory_fact_detail_pty)
+ (deps test_tui_memory_fact_detail_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_memory_fact_detail_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_memory_fact_detail_pty)))
+
+(rule
  (alias runtest-test_tui_lane_detail_says_what_the_lane_answers)
  (deps test_tui_lane_detail_says_what_the_lane_answers.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
  (action
@@ -5915,7 +5943,8 @@
 (rule
  (alias runtest-test_install_runtime_setup)
  (deps test_install_runtime_setup.py ../scripts/install-runtime-setup.py
-       ../bin/main_eio.exe (source_tree ../scripts/fixtures/release-evidence))
+       ../bin/main_eio.exe (source_tree ../scripts/fixtures/release-evidence)
+       ../config/runtime.toml ../config/agent-core-models-overlay.toml)
  (action
   (run python3 %{dep:test_install_runtime_setup.py} --binary %{dep:../bin/main_eio.exe})))
 
@@ -6409,3 +6438,8 @@
  (name test_tui_queue_inspection)
  (modules test_tui_queue_inspection)
  (libraries alcotest astring masc masc.keeper_runtime masc_tui_queue_inspection yojson))
+
+(test
+ (name test_tui_fork_guard)
+ (modules test_tui_fork_guard)
+ (libraries alcotest masc_tui_fork_guard eio eio_main))

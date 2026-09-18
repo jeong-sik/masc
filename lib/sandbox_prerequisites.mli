@@ -12,6 +12,10 @@ type action_effect = Open_official_installer of { url : string; argv : string li
 type apple_builder =
   | Builder_unchecked
   | Needs_missing_rosetta of { user_config : string option }
+  | Needs_default_kernel
+      (** The service answered and the builder starts, but no default kernel is
+          configured, so the first image build dies; installing the recommended
+          kernel is the one action offered. *)
 (** What setup found about Apple Container's image builder.
     [Needs_missing_rosetta]: the service answered, the builder uses Rosetta,
     and Rosetta is not installed. [user_config] is the file Apple Container
@@ -36,7 +40,8 @@ val catalog :
   host:Sandbox_readiness.host -> distribution:distribution -> dependency -> action list
 (** [apple_builder] defaults to [Builder_unchecked]. When it is
     [Needs_missing_rosetta], Apple Container offers the two ways past it --
-    build without Rosetta, or install it -- instead of its installers. *)
+    build without Rosetta, or install it -- instead of its installers. When it
+    is [Needs_default_kernel], it offers installing the recommended kernel. *)
 val to_json : action list -> Yojson.Safe.t
 type run_failure =
   | Program_not_found  (** argv's program is not on PATH; nothing ran *)

@@ -1,8 +1,10 @@
 open Alcotest
 
-(* Pure-core tests for the masc-exec-shim library (Phase 1 SSH remote
-   execution lane, spec §4.2).  No real signals, no fork: the kill policy
-   and status mapping are asserted as pure decisions. *)
+(* Tests for the masc-exec-shim library (Phase 1 SSH remote execution lane,
+   spec §4.2).  The kill policy and status mapping are asserted as pure
+   decisions, with no real signals.  Config and env file tests read real files
+   in temporary directories; the FIFO case reads in a forked child under an
+   alarm, so a read that blocks fails the test instead of hanging it. *)
 
 let show_kill_action = function
   | Exec_shim.Sigterm_pgid -> "Sigterm_pgid"
@@ -20,7 +22,7 @@ let shim_env = [ ("HOME", "/home/dev")
 (* {1 env synthesis} *)
 
 let test_minimal_base_env () =
-  let env = Exec_shim.synthesize_env ~path:Exec_shim.default_base_path ~base_env:shim_env ~allowlist:[] ~request_env:[] in
+  let env = Exec_shim.synthesize_env ~endpoint_env:Exec_shim.no_endpoint_env ~path:Exec_shim.default_base_path ~base_env:shim_env ~allowlist:[] ~request_env:[] in
   check (option string) "PATH is the fixed minimal value"
     (Some Exec_shim.default_base_path) (List.assoc_opt "PATH" env);
   check (option string) "HOME from shim env" (Some "/home/dev") (List.assoc_opt "HOME" env);
@@ -29,20 +31,20 @@ let test_minimal_base_env () =
   check int "base env is exactly PATH/HOME/USER/TMPDIR" 4 (List.length env)
 
 let test_base_env_defaults () =
-  let env = Exec_shim.synthesize_env ~path:Exec_shim.default_base_path ~base_env:[] ~allowlist:[] ~request_env:[] in
+  let env = Exec_shim.synthesize_env ~endpoint_env:Exec_shim.no_endpoint_env ~path:Exec_shim.default_base_path ~base_env:[] ~allowlist:[] ~request_env:[] in
   check (option string) "HOME default" (Some "/tmp") (List.assoc_opt "HOME" env);
   check (option string) "USER default" (Some "masc") (List.assoc_opt "USER" env);
   check (option string) "TMPDIR default" (Some "/tmp") (List.assoc_opt "TMPDIR" env)
 
 let test_allowlist_overlay_survives () =
-  let env = Exec_shim.synthesize_env ~path:Exec_shim.default_base_path ~base_env:shim_env ~allowlist:[ "FOO" ]
+  let env = Exec_shim.synthesize_env ~endpoint_env:Exec_shim.no_endpoint_env ~path:Exec_shim.default_base_path ~base_env:shim_env ~allowlist:[ "FOO" ]
       ~request_env:[ ("FOO", "ok"); ("BAR", "not-allowlisted") ] in
   check (option string) "allowlisted FOO kept" (Some "ok") (List.assoc_opt "FOO" env);
   check (option string) "non-allowlisted BAR dropped" None (List.assoc_opt "BAR" env)
 
 let test_runtime_identity_env_survives_empty_allowlist () =
   let env =
-    Exec_shim.synthesize_env ~path:Exec_shim.default_base_path ~base_env:shim_env ~allowlist:[]
+    Exec_shim.synthesize_env ~endpoint_env:Exec_shim.no_endpoint_env ~path:Exec_shim.default_base_path ~base_env:shim_env ~allowlist:[]
       ~request_env:
         [ "GH_CONFIG_DIR", "/srv/masc/playground/keeper-a/.config/gh"
         ; "GIT_TERMINAL_PROMPT", "0"
@@ -58,7 +60,7 @@ let test_runtime_identity_env_survives_empty_allowlist () =
     (List.assoc_opt "LANG" env)
 
 let test_denylist_beats_allowlist () =
-  let env = Exec_shim.synthesize_env ~path:Exec_shim.default_base_path ~base_env:[]
+  let env = Exec_shim.synthesize_env ~endpoint_env:Exec_shim.no_endpoint_env ~path:Exec_shim.default_base_path ~base_env:[]
       ~allowlist:[ "PATH"; "FOO" ]
       ~request_env:[ ("PATH", "/evil/bin"); ("FOO", "ok") ] in
   check bool "wire PATH dropped" true (List.assoc_opt "PATH" env <> Some "/evil/bin");
@@ -73,7 +75,7 @@ let test_denylist_names () =
              ; ("DYLD_PRINT_LIBRARIES", "1")
              ; ("BASH_ENV", "/evil.sh")
              ; ("ENV", "/evil.sh") ] in
-  let env = Exec_shim.synthesize_env ~path:Exec_shim.default_base_path ~base_env:shim_env ~allowlist:(List.map fst wire)
+  let env = Exec_shim.synthesize_env ~endpoint_env:Exec_shim.no_endpoint_env ~path:Exec_shim.default_base_path ~base_env:shim_env ~allowlist:(List.map fst wire)
       ~request_env:wire in
   List.iter
     (fun (k, v) ->
@@ -261,7 +263,7 @@ let test_parse_config_rejects_bad_path () =
 
 let test_synthesize_env_takes_config_path () =
   let env =
-    Exec_shim.synthesize_env ~path:"/home/opam/.opam/5.5/bin:/usr/bin"
+    Exec_shim.synthesize_env ~endpoint_env:Exec_shim.no_endpoint_env ~path:"/home/opam/.opam/5.5/bin:/usr/bin"
       ~base_env:shim_env ~allowlist:[] ~request_env:[ ("PATH", "/wire/bin") ]
   in
   check (option string) "config path replaces the fixed base"
@@ -288,6 +290,127 @@ let test_parse_config_rejects_unknown_key () =
     check bool "config error code" true
       (String.starts_with ~prefix:"remote_ssh_shim_config_error" e)
 
+(* {1 endpoint env file} *)
+
+let env_file_fixture_path = "/etc/masc-exec-shim.env"
+
+let endpoint_env_of content =
+  match Exec_shim.parse_env_file ~path:env_file_fixture_path content with
+  | Ok env -> env
+  | Error e -> fail ("env file fixture rejected: " ^ e)
+
+let declared (env : Exec_shim.endpoint_env) =
+  List.sort compare (env :> (string * string) list)
+
+let is_config_error e = String.starts_with ~prefix:Exec_shim.config_error_code e
+
+let test_env_file_declares_values_verbatim () =
+  let env =
+    endpoint_env_of
+      (String.concat "\n"
+         [ "# written from the task image"
+         ; ""
+         ; "VIRTUAL_ENV=/opt/venv"
+         ; "LD_LIBRARY_PATH=/usr/local/cuda/lib64"
+         ; "PS1=\\u@\\h $ "
+         ; "JAVA_OPTS=-Dkey=value"
+         ; "EMPTY="
+         ; "  # an indented comment"
+         ; "" ])
+  in
+  check (list (pair string string)) "each name with the rest of its line"
+    [ "EMPTY", ""
+    ; "JAVA_OPTS", "-Dkey=value"
+    ; "LD_LIBRARY_PATH", "/usr/local/cuda/lib64"
+    ; "PS1", "\\u@\\h $ "
+    ; "VIRTUAL_ENV", "/opt/venv" ]
+    (declared env)
+
+(* docker reads the file with bufio.ScanLines, which drops the '\r' of a CRLF
+   ending; a file with CRLF line endings declares the same values. *)
+let test_env_file_crlf_lines () =
+  let env =
+    endpoint_env_of
+      "# written on Windows\r\n\r\nVIRTUAL_ENV=/opt/venv\r\n  # indented\r\nJAVA_OPTS=-Dkey=value\r\nLAST=x\r"
+  in
+  check (list (pair string string)) "values end before the '\\r'"
+    [ "JAVA_OPTS", "-Dkey=value"; "LAST", "x"; "VIRTUAL_ENV", "/opt/venv" ]
+    (declared env);
+  check (list (pair string string)) "only one '\\r' is the line ending"
+    [ "A", "x\r" ] (declared (endpoint_env_of "A=x\r\r\n"))
+
+let test_env_file_rejects () =
+  List.iter
+    (fun (label, content) ->
+      match Exec_shim.parse_env_file ~path:env_file_fixture_path content with
+      | Ok _ -> fail (label ^ " must be rejected")
+      | Error e -> check bool (label ^ " is a config error") true (is_config_error e))
+    [ "PATH", "PATH=/opt/venv/bin:/usr/bin\n"
+    ; "a name without a value", "VIRTUAL_ENV\n"
+    ; "an indented name", "  VIRTUAL_ENV=/opt/venv\n"
+    ; "a name starting with a digit", "1X=y\n"
+    ; "a dash in the name", "MY-VAR=y\n"
+    ; "an empty name", "=y\n"
+    ; "a name declared twice", "A=1\nA=2\n"
+    ; "a NUL byte in the value", "A=x\000y\n"
+    ; "a GitHub token", "GH_TOKEN=ghp_x\n"
+    ; "a GitHub Enterprise token", "GITHUB_ENTERPRISE_TOKEN=x\n"
+    ; "the runner's GitHub config dir", "GH_CONFIG_DIR=/root/.config/gh\n"
+    ; "the runner's prompt guard", "GIT_TERMINAL_PROMPT=1\n"
+    ]
+
+let test_endpoint_env_overlays_the_base () =
+  let endpoint_env =
+    endpoint_env_of "VIRTUAL_ENV=/opt/venv\nLD_LIBRARY_PATH=/usr/local/cuda/lib64\nHOME=/root\n"
+  in
+  let env =
+    Exec_shim.synthesize_env ~path:"/opt/venv/bin:/usr/bin" ~endpoint_env ~base_env:shim_env
+      ~allowlist:[] ~request_env:[]
+  in
+  check (option string) "a declared name is added" (Some "/opt/venv")
+    (List.assoc_opt "VIRTUAL_ENV" env);
+  check (option string) "an operator may declare the loader path"
+    (Some "/usr/local/cuda/lib64") (List.assoc_opt "LD_LIBRARY_PATH" env);
+  check (option string) "a declared HOME replaces the session's" (Some "/root")
+    (List.assoc_opt "HOME" env);
+  check (option string) "PATH is still path=" (Some "/opt/venv/bin:/usr/bin")
+    (List.assoc_opt "PATH" env);
+  check int "names stay unique"
+    (List.length (List.sort_uniq compare (List.map fst env))) (List.length env)
+
+let test_wire_meets_the_endpoint_env () =
+  let endpoint_env =
+    endpoint_env_of "VIRTUAL_ENV=/opt/venv\nLD_LIBRARY_PATH=/usr/local/cuda/lib64\nLANG=C.UTF-8\n"
+  in
+  let env =
+    Exec_shim.synthesize_env ~path:Exec_shim.default_base_path ~endpoint_env ~base_env:shim_env
+      ~allowlist:[ "VIRTUAL_ENV"; "LD_LIBRARY_PATH" ]
+      ~request_env:[ "VIRTUAL_ENV", "/work/venv"; "LD_LIBRARY_PATH", "/evil/lib"; "LANG", "fr_FR" ]
+  in
+  check (option string) "an allowlisted wire value replaces the declared one"
+    (Some "/work/venv") (List.assoc_opt "VIRTUAL_ENV" env);
+  check (option string) "the denylist still keeps the wire off the loader path"
+    (Some "/usr/local/cuda/lib64") (List.assoc_opt "LD_LIBRARY_PATH" env);
+  check (option string) "a wire value outside the allowlist leaves the declared one"
+    (Some "C.UTF-8") (List.assoc_opt "LANG" env)
+
+let test_parse_config_env_file () =
+  (match Exec_shim.parse_config "remote_root=/srv/masc\nenv_file=/etc/masc-exec-shim.env\n" with
+   | Ok c ->
+     check (option string) "env_file" (Some "/etc/masc-exec-shim.env") c.Exec_shim.env_file
+   | Error e -> fail e);
+  (match Exec_shim.parse_config "remote_root=/srv/masc\n" with
+   | Ok c -> check (option string) "no env_file declares nothing" None c.Exec_shim.env_file
+   | Error e -> fail e);
+  List.iter
+    (fun (label, content) ->
+      match Exec_shim.parse_config content with
+      | Ok _ -> fail (label ^ " must be rejected")
+      | Error e -> check bool (label ^ " is a config error") true (is_config_error e))
+    [ "a relative env_file", "remote_root=/srv/masc\nenv_file=etc/masc-exec-shim.env\n"
+    ; "an empty env_file", "remote_root=/srv/masc\nenv_file=\n"
+    ]
+
 (* {1 path jail} *)
 
 let contains needle haystack =
@@ -301,6 +424,278 @@ let with_tmp_tree f =
   Fun.protect
     ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote root)))
     (fun () -> f root)
+
+(* Mode set, not left to the umask: a config or env file others may write is
+   refused. *)
+let write_endpoint_file path content =
+  Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc content);
+  Unix.chmod path 0o644
+
+(* A malformed line may be a secret pasted in the wrong place. The error leads
+   the operator to the line without printing it. *)
+let test_env_file_error_names_the_line_not_its_text () =
+  let secret = "ghp_0123456789abcdef" in
+  let error_of content =
+    match Exec_shim.parse_env_file ~path:env_file_fixture_path content with
+    | Ok _ -> fail "the fixture must be rejected"
+    | Error e -> e
+  in
+  List.iter
+    (fun (label, content, line) ->
+      let e = error_of content in
+      check bool (label ^ ": names the file and the line") true
+        (contains (Printf.sprintf "%s line %d: " env_file_fixture_path line) e);
+      check bool (label ^ ": does not print the line") false (contains secret e))
+    [ "a line without '='", "A=1\n" ^ secret ^ "\n", 2
+    ; "an invalid name", "export " ^ secret ^ "=x\n", 1
+    ; "a NUL byte in the value", "TOKEN=" ^ secret ^ "\000\n", 1
+    ; "PATH", "\nPATH=/" ^ secret ^ "\n", 2
+    ; "a name declared twice", "TOKEN=a\nTOKEN=" ^ secret ^ "\n", 2
+    ];
+  let e = error_of "TOKEN=a\nOTHER=b\nTOKEN=c\n" in
+  check bool "a name declared twice reports both lines" true
+    (contains "declared twice, on lines 1 and 3" e);
+  check bool "a name declared twice is not printed" false (contains "TOKEN" e)
+
+(* A secret pasted into the config in the wrong place stays out of the error:
+   the error names the line or the key and says what is wrong. *)
+let test_parse_config_errors_print_no_file_text () =
+  let secret = "ghp_0123456789abcdef" in
+  List.iter
+    (fun (label, content, expected) ->
+      match Exec_shim.parse_config content with
+      | Ok _ -> fail (label ^ " must be rejected")
+      | Error e ->
+        check string (label ^ ": the whole error") (Exec_shim.config_error_code ^ ": " ^ expected) e;
+        check bool (label ^ ": does not print the file's text") false (contains secret e))
+    [ "a line without '='", "remote_root=/srv/masc\n" ^ secret ^ "\n",
+      "line 2 is not key=value"
+    ; "an unknown key", "remote_root=/srv/masc\n\n" ^ secret ^ "=1\n", "line 3 has an unknown key"
+    ; "an unknown key before a malformed line", secret ^ "=1\nnot a pair\n",
+      "line 1 has an unknown key"
+    ; "a relative remote_root", "remote_root=" ^ secret ^ "\n",
+      "remote_root must be an absolute path"
+    ; "a relative env_file", "remote_root=/srv/masc\nenv_file=" ^ secret ^ "\n",
+      "env_file must be an absolute path"
+    ; "an empty path entry", "remote_root=/srv/masc\npath=/" ^ secret ^ "::/bin\n",
+      "path has an empty entry"
+    ; "a relative path entry", "remote_root=/srv/masc\npath=/usr/bin:" ^ secret ^ "\n",
+      "path entries must be absolute"
+    ]
+
+let test_read_env_file () =
+  (match Exec_shim.read_env_file None with
+   | Ok env -> check (list (pair string string)) "no env_file declares nothing" [] (declared env)
+   | Error e -> fail e);
+  with_tmp_tree (fun root ->
+      let env_file = Filename.concat root "shim.env" in
+      (match Exec_shim.read_env_file (Some env_file) with
+       | Ok _ -> fail "a named env_file that is not there must refuse the request"
+       | Error e -> check bool "an absent env_file is a config error" true (is_config_error e));
+      write_endpoint_file env_file "VIRTUAL_ENV=/opt/venv\n";
+      match Exec_shim.read_env_file (Some env_file) with
+      | Ok env ->
+        check (list (pair string string)) "the file's declarations"
+          [ "VIRTUAL_ENV", "/opt/venv" ] (declared env)
+      | Error e -> fail e)
+
+(* The owner and mode rule the config file and an env file share, over
+   synthetic uids and modes, so a file owned by another account needs no
+   chown. The Terminal-Bench container runs the shim as root with root-owned
+   0644 files. *)
+let test_endpoint_file_owner_and_mode_rule () =
+  let show = function
+    | None -> "read"
+    | Some (Exec_shim.Owned_by uid) -> Printf.sprintf "owned by uid %d" uid
+    | Some (Exec_shim.Writable_by Exec_shim.Its_group) -> "writable by its group"
+    | Some (Exec_shim.Writable_by Exec_shim.Every_user) -> "writable by every user"
+    | Some (Exec_shim.Writable_by Exec_shim.Its_group_and_every_user) ->
+      "writable by its group and every user"
+  in
+  let shim = 1000 and other = 1001 and root = 0 in
+  List.iter
+    (fun (label, euid, owner, perm, expected) ->
+      check string label expected (show (Exec_shim.refuse_endpoint_file ~euid ~owner ~perm)))
+    [ "root-owned 0644", shim, root, 0o644, "read"
+    ; "owned by the shim's uid, 0644", shim, shim, 0o644, "read"
+    ; "owned by another uid, 0644", shim, other, 0o644, "owned by uid 1001"
+    ; "root-owned 0664", shim, root, 0o664, "writable by its group"
+    ; "root-owned 0646", shim, root, 0o646, "writable by every user"
+    ; "owned by the shim's uid, 0666", shim, shim, 0o666, "writable by its group and every user"
+    ; "a root shim, root-owned 0644", root, root, 0o644, "read"
+    ; "a root shim, a file another uid owns", root, other, 0o644, "owned by uid 1001"
+    ; "another owner is reported before the mode", shim, other, 0o666, "owned by uid 1001"
+    ]
+
+(* Only a regular file is read. A plain open of a FIFO nobody writes to blocks
+   forever, so that read runs in a child an alarm ends: a regression fails the
+   test instead of hanging it. *)
+let test_read_env_file_reads_only_a_regular_file () =
+  let refused path =
+    match Exec_shim.read_env_file (Some path) with
+    | Ok _ -> `Read
+    | Error e when is_config_error e && contains (path ^ " is not a regular file") e -> `Refused
+    | Error _ -> `Refused_for_another_reason
+  in
+  let alarm_sec = 5 in
+  with_tmp_tree (fun root ->
+      let fifo = Filename.concat root "shim.env" in
+      Unix.mkfifo fifo 0o644;
+      (match Unix.fork () with
+       | 0 ->
+         ignore (Unix.alarm alarm_sec);
+         Unix._exit
+           (match refused fifo with
+            | `Refused -> 0
+            | `Read -> 1
+            | `Refused_for_another_reason -> 2)
+       | child ->
+         (match snd (Unix.waitpid [] child) with
+          | Unix.WEXITED 0 -> ()
+          | Unix.WEXITED 1 -> fail "a FIFO was read as an env file"
+          | Unix.WEXITED _ -> fail "a FIFO was refused, but not as a file that is not regular"
+          | Unix.WSIGNALED signal when signal = Sys.sigalrm ->
+            fail "reading a FIFO without a writer blocked"
+          | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> fail "the reading child was killed"));
+      List.iter
+        (fun (label, path) ->
+          match refused path with
+          | `Refused -> ()
+          | `Read -> fail (label ^ " was read as an env file")
+          | `Refused_for_another_reason ->
+            fail (label ^ " was refused, but not as a file that is not regular"))
+        [ "a directory", Filename.concat root "sub"; "a character device", "/dev/null" ])
+
+(* Whoever can write the file sets every payload's environment. *)
+let test_read_env_file_refuses_a_file_others_may_write () =
+  with_tmp_tree (fun root ->
+      let env_file = Filename.concat root "shim.env" in
+      write_endpoint_file env_file "VIRTUAL_ENV=/opt/venv\n";
+      List.iter
+        (fun (mode, writers) ->
+          Unix.chmod env_file mode;
+          let label = Printf.sprintf "mode %04o" mode in
+          match Exec_shim.read_env_file (Some env_file) with
+          | Ok _ -> fail (label ^ " must refuse the request")
+          | Error e ->
+            check bool (label ^ " is a config error") true (is_config_error e);
+            check bool (label ^ " names the file") true (contains env_file e);
+            check bool (label ^ " says who could write it") true
+              (contains ("writable by " ^ writers ^ " (") e))
+        [ 0o666, "its group and every user"; 0o664, "its group"; 0o646, "every user" ];
+      Unix.chmod env_file 0o644;
+      match Exec_shim.read_env_file (Some env_file) with
+      | Ok env ->
+        check (list (pair string string)) "a file only its owner may write is read"
+          [ "VIRTUAL_ENV", "/opt/venv" ] (declared env)
+      | Error e -> fail e)
+
+(* Whoever can write the config names the payload PATH and the env file. *)
+let test_read_config_file_refuses_a_file_others_may_write () =
+  with_tmp_tree (fun root ->
+      let config_file = Filename.concat root "shim.conf" in
+      write_endpoint_file config_file (Printf.sprintf "remote_root=%s\n" root);
+      List.iter
+        (fun (mode, writers) ->
+          Unix.chmod config_file mode;
+          let label = Printf.sprintf "mode %04o" mode in
+          match Exec_shim.read_config_file config_file with
+          | Ok _ -> fail (label ^ " must refuse the config")
+          | Error e ->
+            check bool (label ^ " is a config error") true (is_config_error e);
+            check bool (label ^ " names the config file") true
+              (contains ("config file " ^ config_file) e);
+            check bool (label ^ " says who could write it") true
+              (contains ("writable by " ^ writers ^ " (") e))
+        [ 0o666, "its group and every user"; 0o664, "its group"; 0o646, "every user" ];
+      Unix.chmod config_file 0o644;
+      match Exec_shim.read_config_file config_file with
+      | Ok config ->
+        check string "a file only its owner may write is read" root config.Exec_shim.remote_root
+      | Error e -> fail e)
+
+(* Every way out of the reader closes the descriptor it opened: a refused mode,
+   a path that is not a regular file, a missing file, and a read. Counted from
+   the descriptor table, since a leak returns no error. *)
+let test_endpoint_file_reads_leave_no_descriptor_open () =
+  let open_descriptors () = Array.length (Sys.readdir "/dev/fd") in
+  with_tmp_tree (fun root ->
+      let env_file = Filename.concat root "shim.env" in
+      write_endpoint_file env_file "VIRTUAL_ENV=/opt/venv\n";
+      let before = open_descriptors () in
+      let reads =
+        [ "a read", (fun () -> Exec_shim.read_env_file (Some env_file))
+        ; "a directory", (fun () -> Exec_shim.read_env_file (Some (Filename.concat root "sub")))
+        ; "a missing file", (fun () -> Exec_shim.read_env_file (Some (Filename.concat root "absent")))
+        ; ( "a refused mode"
+          , fun () ->
+              Unix.chmod env_file 0o664;
+              Exec_shim.read_env_file (Some env_file) )
+        ]
+      in
+      List.iter
+        (fun (label, read) ->
+          ignore (read ());
+          check int (label ^ " leaves the descriptor count unchanged") before (open_descriptors ()))
+        reads)
+
+(* A boxed run (observe, guest_local) lays its scratch over the payload env the
+   dispatcher built: HOME and TMPDIR are the scratch whatever the file says,
+   and the file's other names still reach the payload. *)
+let test_boxed_run_scratch_is_laid_over_the_endpoint_env () =
+  with_tmp_tree (fun root ->
+      let env_file = Filename.concat root "shim.env" in
+      let config =
+        match
+          Exec_shim.parse_config (Printf.sprintf "remote_root=%s\nenv_file=%s\n" root env_file)
+        with
+        | Ok config -> config
+        | Error e -> fail ("config fixture rejected: " ^ e)
+      in
+      write_endpoint_file env_file "VIRTUAL_ENV=/opt/venv\nHOME=/root\nTMPDIR=/var/tmp\n";
+      match Exec_shim.payload_env ~config ~base_env:shim_env ~request_env:[] with
+      | Error e -> fail e
+      | Ok env ->
+        let scratch = "/tmp/masc-observe-1-abc" in
+        let boxed = Exec_shim.scratch_env ~scratch env in
+        check (option string) "HOME is the scratch, not the file's" (Some scratch)
+          (List.assoc_opt "HOME" boxed);
+        check (option string) "TMPDIR is the scratch, not the file's" (Some scratch)
+          (List.assoc_opt "TMPDIR" boxed);
+        check (option string) "a name the file declares survives the box" (Some "/opt/venv")
+          (List.assoc_opt "VIRTUAL_ENV" boxed);
+        check int "names stay unique"
+          (List.length (List.sort_uniq compare (List.map fst boxed))) (List.length boxed))
+
+(* The composition the dispatcher runs: the config names the file, the file is
+   read, and its declarations sit between the base and the wire. *)
+let test_payload_env_reads_the_configured_file () =
+  with_tmp_tree (fun root ->
+      let env_file = Filename.concat root "shim.env" in
+      let config =
+        match
+          Exec_shim.parse_config
+            (Printf.sprintf
+               "remote_root=%s\npath=/opt/venv/bin:/usr/bin\nenv_allowlist=LANG\nenv_file=%s\n"
+               root env_file)
+        with
+        | Ok config -> config
+        | Error e -> fail ("config fixture rejected: " ^ e)
+      in
+      write_endpoint_file env_file "VIRTUAL_ENV=/opt/venv\nLANG=C.UTF-8\n";
+      (match Exec_shim.payload_env ~config ~base_env:shim_env ~request_env:[ "LANG", "C" ] with
+       | Error e -> fail e
+       | Ok env ->
+         check (option string) "declared in the file" (Some "/opt/venv")
+           (List.assoc_opt "VIRTUAL_ENV" env);
+         check (option string) "path= is the PATH" (Some "/opt/venv/bin:/usr/bin")
+           (List.assoc_opt "PATH" env);
+         check (option string) "the allowlisted wire value is laid over the file" (Some "C")
+           (List.assoc_opt "LANG" env));
+      write_endpoint_file env_file "PATH=/opt/venv/bin\n";
+      match Exec_shim.payload_env ~config ~base_env:shim_env ~request_env:[] with
+      | Ok _ -> fail "a malformed env_file must refuse the request"
+      | Error e -> check bool "a malformed env_file is a config error" true (is_config_error e))
 
 let test_jail_allows_root_itself () =
   with_tmp_tree (fun root ->
@@ -531,16 +926,95 @@ let test_refusal_of_rule_bytes () =
      failf "unknown rule should raise Failure, got %s"
        (Printexc.to_string exn))
 
+(* {1 program lookup}
+
+   Unix.execvpe searches the shim process's PATH, not the payload PATH it is
+   handed, so a tool living only in a [path=] directory was never found (a
+   Terminal-Bench task image with /opt/conda/bin in its PATH, reached over
+   remote_ssh, whose sshd session PATH has no such entry). *)
+
+let write_file path ~perm =
+  let oc = open_out path in
+  output_string oc "#!/bin/sh\nexit 0\n";
+  close_out oc;
+  Unix.chmod path perm
+
+let test_program_with_a_slash_is_executed_as_named () =
+  check (option string) "a path is not searched"
+    (Some "/opt/conda/bin/python")
+    (Exec_shim.resolve_program ~payload_path:[ "/usr/bin" ]
+       ~is_executable:(fun _ -> false) "/opt/conda/bin/python")
+
+let test_program_is_found_in_the_first_payload_directory_holding_it () =
+  let present = [ "/opt/venv/bin/python"; "/usr/bin/python" ] in
+  check (option string) "the payload path order decides"
+    (Some "/opt/venv/bin/python")
+    (Exec_shim.resolve_program
+       ~payload_path:[ "/opt/conda/bin"; "/opt/venv/bin"; "/usr/bin" ]
+       ~is_executable:(fun candidate -> List.mem candidate present) "python")
+
+let test_program_absent_from_the_payload_path_is_not_found () =
+  check (option string) "no fallback to any other PATH" None
+    (Exec_shim.resolve_program ~payload_path:[ "/opt/conda/bin" ]
+       ~is_executable:(fun _ -> false) "python")
+
+let test_lookup_reads_the_filesystem_of_the_payload_path () =
+  with_tmp_tree (fun root ->
+      let tools = Filename.concat root "tools" in
+      Unix.mkdir tools 0o755;
+      write_file (Filename.concat tools "masc_probe_tool") ~perm:0o755;
+      write_file (Filename.concat tools "not_executable") ~perm:0o644;
+      Unix.mkdir (Filename.concat tools "a_directory") 0o755;
+      let resolve = Exec_shim.resolve_program ~payload_path:[ root; tools ]
+          ~is_executable:Exec_shim.is_executable_file in
+      check (option string) "an executable file in a later directory"
+        (Some (Filename.concat tools "masc_probe_tool")) (resolve "masc_probe_tool");
+      check (option string) "a file without execute permission" None
+        (resolve "not_executable");
+      check (option string) "a directory" None (resolve "a_directory"))
+
 let () =
   run "exec shim"
-    [ "env", [ test_case "minimal base env" `Quick test_minimal_base_env
+    [ "program lookup",
+      [ test_case "a program with a slash is executed as named" `Quick
+          test_program_with_a_slash_is_executed_as_named
+      ; test_case "the first payload directory holding it wins" `Quick
+          test_program_is_found_in_the_first_payload_directory_holding_it
+      ; test_case "absent from the payload path is not found" `Quick
+          test_program_absent_from_the_payload_path_is_not_found
+      ; test_case "lookup reads the filesystem" `Quick
+          test_lookup_reads_the_filesystem_of_the_payload_path ]
+    ; "env", [ test_case "minimal base env" `Quick test_minimal_base_env
              ; test_case "base env defaults" `Quick test_base_env_defaults
              ; test_case "allowlist overlay survives" `Quick test_allowlist_overlay_survives
              ; test_case "runtime identity env survives an empty allowlist" `Quick
                  test_runtime_identity_env_survives_empty_allowlist
              ; test_case "denylist beats allowlist" `Quick test_denylist_beats_allowlist
              ; test_case "denylist names" `Quick test_denylist_names
-             ; test_case "denylist predicate" `Quick test_denylisted_predicate ]
+             ; test_case "denylist predicate" `Quick test_denylisted_predicate
+             ; test_case "endpoint env overlays the base" `Quick
+                 test_endpoint_env_overlays_the_base
+             ; test_case "wire meets the endpoint env" `Quick test_wire_meets_the_endpoint_env ]
+    ; "env file", [ test_case "declares values verbatim" `Quick
+                      test_env_file_declares_values_verbatim
+                  ; test_case "CRLF lines" `Quick test_env_file_crlf_lines
+                  ; test_case "rejects" `Quick test_env_file_rejects
+                  ; test_case "errors name the line, not its text" `Quick
+                      test_env_file_error_names_the_line_not_its_text
+                  ; test_case "read" `Quick test_read_env_file
+                  ; test_case "owner and mode rule" `Quick test_endpoint_file_owner_and_mode_rule
+                  ; test_case "reads only a regular file" `Quick
+                      test_read_env_file_reads_only_a_regular_file
+                  ; test_case "refuses a file others may write" `Quick
+                      test_read_env_file_refuses_a_file_others_may_write
+                  ; test_case "a config file others may write is refused" `Quick
+                      test_read_config_file_refuses_a_file_others_may_write
+                  ; test_case "reads leave no descriptor open" `Quick
+                      test_endpoint_file_reads_leave_no_descriptor_open
+                  ; test_case "payload env reads the configured file" `Quick
+                      test_payload_env_reads_the_configured_file
+                  ; test_case "a boxed run's scratch is laid over it" `Quick
+                      test_boxed_run_scratch_is_laid_over_the_endpoint_env ]
     ; "kill policy", [ test_case "on eof" `Quick test_kill_policy_on_eof
                      ; test_case "on timeout" `Quick test_kill_policy_on_timeout
                      ; test_case "on child exit" `Quick test_kill_policy_on_child_exit ]
@@ -551,8 +1025,11 @@ let () =
                 ; test_case "requires remote_root" `Quick test_parse_config_requires_root
                 ; test_case "rejects relative root" `Quick test_parse_config_rejects_relative_root
                 ; test_case "rejects unknown key" `Quick test_parse_config_rejects_unknown_key
+                ; test_case "errors print no file text" `Quick
+                    test_parse_config_errors_print_no_file_text
                 ; test_case "path entries" `Quick test_parse_config_path_ok
                 ; test_case "rejects a bad path" `Quick test_parse_config_rejects_bad_path
+                ; test_case "env_file" `Quick test_parse_config_env_file
                 ; test_case "synthesize_env takes the config path" `Quick
                     test_synthesize_env_takes_config_path ]
     ; "jail", [ test_case "allows root itself" `Quick test_jail_allows_root_itself

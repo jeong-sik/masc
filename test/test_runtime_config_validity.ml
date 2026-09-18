@@ -682,6 +682,20 @@ let test_repo_runtime_bindings_resolve_through_agent_core_provider_config () =
       , _assignments
       , _media_failover , _lanes ) ->
     check bool "at least one runtime binding" true (List.length runtimes > 0);
+    (* Official-client bindings (claude_code/codex/antigravity) carry no
+       AGENT_CORE Provider_config by design — the catalog gate skips the same
+       three executions. This walk asserts provider-config resolution, so it
+       visits the provider-backed bindings only. *)
+    let provider_backed =
+      List.filter
+        (fun (runtime : Runtime.t) ->
+           match runtime.execution with
+           | Runtime_execution.Agent_core _ -> true
+           | Runtime_execution.Codex_app_server _
+           | Runtime_execution.Claude_code _
+           | Runtime_execution.Antigravity_cli _ -> false)
+        runtimes
+    in
     List.iter
       (fun (runtime : Runtime.t) ->
          match
@@ -705,7 +719,7 @@ let test_repo_runtime_bindings_resolve_through_agent_core_provider_config () =
                true
                (Option.is_some
                   (agent_core_provider_config runtime).model_capabilities_override))
-      runtimes
+      provider_backed
 
 let test_repo_deepseek_thinking_request () =
   with_deployment_agent_core_model_catalog @@ fun _catalog ->
@@ -1318,7 +1332,8 @@ let test_repo_runtime_toml_declares_no_clamped_max_context () =
 (* Anchor examples at their actual commented declarations, not editorial
    headings. Materialized runtime IDs and capabilities below remain the gate. *)
 let self_hosted_example_marker = "[providers.llama_server]"
-let official_client_example_marker = "[providers.claude_code]"
+(* The official clients ship declared, not commented —
+   [test_official_client_declarations_load] gates them from the plain seed. *)
 
 let uncomment_example_region ~(marker : string) (content : string) : string =
   let rec walk acc inside = function
@@ -1450,24 +1465,27 @@ let test_self_hosted_templates_resolve_when_enabled () =
     self_hosted_template_cases
 ;;
 
-(* The Claude Code example has shipped commented since before this gate existed
-   and was never parsed by anything; the Codex and Antigravity ones arrive the
-   same way. A stale command name, a missing required provider field, or a key
-   the parser no longer takes fails here now. *)
-let test_commented_official_client_examples_load () =
+(* The three official clients ship as live declarations now — they were
+   commented examples when this gate was written, uncommented by hand before
+   anything parsed them. Loading the plain seed parses every one: a stale
+   command name, a missing required provider field, or a key the parser no
+   longer takes fails here. *)
+let test_official_client_declarations_load () =
   with_deployment_agent_core_model_catalog @@ fun _catalog ->
-  with_uncommented_seed ~marker:official_client_example_marker
-  @@ fun runtimes ->
-  let ids = List.map (fun (rt : Runtime.t) -> rt.Runtime.id) runtimes in
-  List.iter
-    (fun expected ->
-       if not (List.exists (String.equal expected) ids)
-       then failf "uncommenting the examples did not produce %s" expected)
-    [ "claude_code.claude-code-sonnet"
-    ; "claude_code.claude-code-opus-high"
-    ; "codex_subscription.codex-gpt-5-6"
-    ; "antigravity_subscription.antigravity-gemini-3-7-flash-high"
-    ]
+  let path = Filename.concat (repo_root ()) "config/runtime.toml" in
+  match load_list_text ~config_path:path with
+  | Error msg -> failf "repo runtime.toml should load: %s" msg
+  | Ok (runtimes, _default, _assignments, _media_failover, _lanes) ->
+    let ids = List.map (fun (rt : Runtime.t) -> rt.Runtime.id) runtimes in
+    List.iter
+      (fun expected ->
+         if not (List.exists (String.equal expected) ids)
+         then failf "the official-client declarations did not produce %s" expected)
+      [ "claude_code.claude-code-sonnet"
+      ; "claude_code.claude-code-opus-high"
+      ; "codex_subscription.codex-gpt-5-6"
+      ; "antigravity_subscription.antigravity-gemini-3-7-flash-high"
+      ]
 ;;
 
 (* The capability probe on 2026-08-13 sent 36 requests to the kimi_coding
@@ -2806,6 +2824,45 @@ let test_runtime_toml_reports_both_mistyped_context_marks () =
     check bool "low-water error kept" true (names "local.sample.context-low-water-tokens")
 ;;
 
+(* A binding declares a closed set of keys. A misspelled mark must stop the
+   load at its own path, not load as a binding without marks. *)
+let binding_with_extra line =
+  "[providers.local]\n\
+   protocol = \"openai-compatible-http\"\n\
+   endpoint = \"http://127.0.0.1:1/v1\"\n\
+   \n\
+   [models.sample]\n\
+   api-name = \"sample\"\n\
+   max-context = 1024\n\
+   \n\
+   [local.sample]\n\
+   is-default = true\n\
+   context-low-water-tokens = 300\n"
+  ^ line
+  ^ "\n[runtime]\ndefault = \"local.sample\"\n"
+;;
+
+let test_runtime_toml_rejects_an_unknown_binding_key () =
+  match Runtime_toml.parse_string (binding_with_extra "context-high-water-token = 900\n") with
+  | Ok _ -> fail "a misspelled mark must not load"
+  | Error errs ->
+    check bool "the error names the misspelled key" true
+      (List.exists
+         (fun (err : Runtime_toml.parse_error) ->
+            String.equal err.path "local.sample.context-high-water-token")
+         errs)
+;;
+
+let test_runtime_toml_rejects_a_table_inside_a_binding () =
+  match Runtime_toml.parse_string (binding_with_extra "context-high-water-tokens = 900\n\n[local.sample.alias]\nname = \"x\"\n") with
+  | Ok _ -> fail "a table inside a binding must not load"
+  | Error errs ->
+    check bool "the error names the nested table" true
+      (List.exists
+         (fun (err : Runtime_toml.parse_error) -> String.equal err.path "local.sample.alias")
+         errs)
+;;
+
 let test_runtime_context_marks_failure_renders_both_numbers () =
   let text =
     Runtime.to_diagnostic_text
@@ -3496,18 +3553,18 @@ let test_every_routing_field_names_itself_in_its_diagnostic () =
 
 let test_routing_reference_domains_stay_distinct () =
   let lane = "\n[runtime.lanes.safe]\ncandidates = [\"local.good\"]\n" in
-  (* An assignment resolves among runtimes only. runtime.mli documents the
-     assignment snapshot as ids that resolve to a configured runtime, so admitting
-     a lane here would load a config the assignment consumer cannot look up. *)
-  let assignment =
-    load_error_of_runtime_toml
-      ~what:"an assignment naming a lane"
-      (routing_reference_base ^ lane ^ "\n[runtime.assignments]\nkeeper_a = \"safe\"\n")
-  in
-  check bool "assignment refuses a lane id" true
-    (String_util.contains_substring assignment "[runtime.assignments].keeper_a = \"safe\"");
-  (* Keeper_vision_tool resolves media_failover entries among runtimes
-     (keeper_vision_tool.ml:82-89), so the same refusal applies. *)
+  (* An assignment names a declared lane or a runtime (RFC-0457): the
+     assignment consumer resolves the lane through [resolve_assignment], so a
+     lane target loads. Media_failover stays runtime-only — its consumers
+     (Keeper_vision_tool) resolve entries among runtimes alone. *)
+  with_temp_runtime_toml
+    (routing_reference_base ^ lane ^ "\n[runtime.assignments]\nkeeper_a = \"safe\"\n")
+    (fun path ->
+       match load_list_text ~config_path:path with
+       | Error msg -> failf "an assignment naming a lane must load: %s" msg
+       | Ok (_runtimes, _default, assignments, _media_failover, _lanes) ->
+         check (option string) "assignment keeps its lane target" (Some "safe")
+           (List.assoc_opt "keeper_a" assignments));
   let media =
     load_error_of_runtime_toml
       ~what:"a media_failover entry naming a lane"
@@ -3719,10 +3776,7 @@ streaming = false
       let body = List.nth (Exact_output_fixture.request_bodies server) 2 |> Yojson.Safe.from_string in
       check string "restored route used its own model, not default" "missing"
         Yojson.Safe.Util.(body |> member "model" |> to_string));
-      (* Prove restoration before changing this assignment into a declared lane.
-         A successful lane candidate is sticky for the same assignment ID, so
-         running the shadow scenario first would exercise a different contract:
-         retaining that candidate when the lane becomes an implicit fallback. *)
+      (* Prove restoration before changing this assignment into a declared lane. *)
       with_model_catalog_content catalog @@ fun () ->
       let shadowed_lane_toml = runtime_toml ^
         "\n[runtime.lanes.\"fixture.missing\"]\ncandidates = [\"fixture.good\"]\n" in
@@ -4120,75 +4174,6 @@ let test_structured_judge_runtime_key_is_rejected () =
             && String_util.contains_substring error.message "unknown [runtime] key")
          errors)
 
-let test_removed_preference_keeps_runtime_projection_readable () =
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
-  Masc_test_deps.init_eio_clock ~sw env;
-  let runtime_snapshot = Runtime.For_testing.snapshot () in
-  let base_path = Masc_test_deps.setup_test_workspace () in
-  Runtime_lane_preference.reset_for_testing ();
-  Fun.protect
-    ~finally:(fun () ->
-      Runtime_lane_preference.reset_for_testing ();
-      Runtime.For_testing.restore runtime_snapshot;
-      Masc_test_deps.cleanup_test_workspace base_path)
-    (fun () ->
-      let catalog = {|[[models]]
-id_prefix = "preference-fixture"
-provider_name = "fixture"
-base = "openai_chat"
-max_context_tokens = 8192
-max_output_tokens = 1024
-supports_tools = true
-|} in
-      let content candidates = Printf.sprintf {|[runtime]
-default = "fixture.alpha"
-[runtime.lanes.primary]
-candidates = %s
-[providers.fixture]
-protocol = "openai-compatible-http"
-endpoint = "http://127.0.0.1:9"
-[models.alpha]
-api-name = "preference-fixture"
-[models.beta]
-api-name = "preference-fixture"
-[fixture.alpha]
-[fixture.beta]
-|} candidates in
-      with_model_catalog_content catalog @@ fun () ->
-      with_temp_runtime_toml (content {|["fixture.alpha", "fixture.beta"]|}) @@ fun path ->
-      (match Runtime.init_default_degraded_report ~config_path:path with
-       | Ok Runtime.Initialized -> ()
-       | Ok (Runtime.Initialized_degraded _) -> fail "fixture runtime degraded"
-       | Error e -> fail (Runtime.strict_init_error_to_string e));
-      let project expected =
-        let json = Server_dashboard_runtime_resolved_json.build
-          ~generated_at_iso:"2026-09-08T00:00:00Z"
-          ~config:(Workspace.default_config base_path) in
-        let resolved = match Tui_decode.decode_runtime_resolved_snapshot json with
-          | Ok value -> value
-          | Error e -> failf "TUI rejected actual runtime producer: %s" e in
-        let lane = List.find
-          (fun (l : Tui_decode.runtime_resolved_lane) -> l.rrl_id = "primary")
-          resolved.rrs_lanes in
-        check (option string) "displayed preference is currently dispatchable"
-          expected lane.rrl_preferred_candidate;
-        lane in
-      Runtime_lane_preference.note_success ~lane_id:"primary" ~candidate:"fixture.beta";
-      ignore (project (Some "fixture.beta"));
-      (match Runtime.save_config_text ~runtime_config_path:path
-          (content {|["fixture.alpha"]|}) with
-       | Ok _ -> () | Error e -> fail e);
-      let remembered = Runtime_lane_preference.preferred_of_lane ~lane_id:"primary" in
-      check (option string) "test retains the old observed preference"
-        (Some "fixture.beta") (Option.map fst remembered);
-      let lane = project None in
-      check (option (float 0.)) "no orphan preference timestamp" None lane.rrl_preferred_at_ts;
-      check (list string) "dispatch candidate ordering matches the remaining candidate"
-        ["fixture.alpha"]
-        (Runtime_lane_preference.prefer_order ~lane_id:"primary" lane.rrl_runtime_ids))
-;;
-
 let test_save_config_text_commits_exact_registry_with_runtime_state () =
   let catalog_row id = Printf.sprintf
     "[[models]]\nid_prefix = %S\nprovider_name = \"local\"\nbase = \"ollama\"\nmax_context_tokens = 1024\n" id in
@@ -4530,7 +4515,7 @@ let test_runtime_max_context_override_above_cap_is_clamped () =
                execution.max_context_resolution.requested_override))
 
 (* #28765: the observed incident shape — a 1,048,576-window lane entry
-   point whose sticky-reordered sibling has a 203,000 window. The turn
+   point whose sibling has a 203,000 window. The turn
    budget must be the smallest candidate window, because the prompt is
    shaped once and any candidate can serve it. *)
 let test_lane_budget_is_bound_by_smallest_candidate_window () =
@@ -4740,6 +4725,41 @@ let antigravity_file_credential =
   "[providers.antigravity.credentials]\n\
    type = \"file\"\n\
    path = \"/tmp/antigravity-oauth-token\""
+;;
+
+(* A "~/" credential path is the operator's home at read time. The seed
+   config ships the Antigravity token that way, one file for every workspace
+   on a machine, and [Runtime_adapter]'s absolute-path rule sees the expanded
+   value rather than the tilde. *)
+let test_file_credential_path_expands_home () =
+  let home =
+    match Sys.getenv_opt "HOME" with
+    | Some home when home <> "" -> home
+    | Some _ | None -> fail "HOME must be set for this case"
+  in
+  with_temp_runtime_toml
+    (antigravity_cli_runtime_toml
+       ~credential:
+         "[providers.antigravity.credentials]\n\
+          type = \"file\"\n\
+          path = \"~/.gemini/antigravity-cli/antigravity-oauth-token\""
+       ~options:"timeout-s = 45.0"
+       ())
+    (fun path ->
+       match load_list_text ~config_path:path with
+       | Error error -> failf "antigravity-cli runtime should load: %s" error
+       | Ok (_, default, _, _, _) ->
+         (match default.execution with
+          | Runtime_execution.Antigravity_cli config ->
+            check
+              string
+              "OAuth source is the home-expanded path"
+              (Filename.concat home ".gemini/antigravity-cli/antigravity-oauth-token")
+              config.oauth_source
+          | Runtime_execution.Agent_core _
+          | Runtime_execution.Claude_code _
+          | Runtime_execution.Codex_app_server _ ->
+            fail "antigravity-cli runtime expected"))
 ;;
 
 let test_antigravity_cli_materializes_typed_process_options () =
@@ -5061,6 +5081,8 @@ let () =
             test_codex_app_server_rejects_declared_credentials;
           test_case "antigravity CLI options materialize" `Quick
             test_antigravity_cli_materializes_typed_process_options;
+          test_case "a file credential path expands a leading ~/" `Quick
+            test_file_credential_path_expands_home;
           test_case "antigravity add-dirs reach the execution config" `Quick
             test_antigravity_cli_add_dirs_reach_the_execution_config;
           test_case "antigravity add-dirs reject relative entries" `Quick
@@ -5116,8 +5138,8 @@ let () =
             test_repo_runtime_toml_declares_no_clamped_max_context;
           test_case "self-hosted server templates resolve when enabled" `Quick
             test_self_hosted_templates_resolve_when_enabled;
-          test_case "commented official-client examples load" `Quick
-            test_commented_official_client_examples_load;
+          test_case "official-client declarations load" `Quick
+            test_official_client_declarations_load;
           test_case
             "deployment exact-output catalog admits repo seed lanes"
             `Quick
@@ -5128,8 +5150,6 @@ let () =
           test_case
             "save_config_text commits exact registry with runtime state"
             `Quick test_save_config_text_commits_exact_registry_with_runtime_state;
-          test_case "removed sticky candidate keeps the TUI projection readable"
-            `Quick test_removed_preference_keeps_runtime_projection_readable;
           test_case
             "web_search TOML keys resolve through the declarative catalog"
             `Quick test_toml_catalog_resolves_web_search_keys;
@@ -5212,6 +5232,10 @@ let () =
             test_runtime_toml_reports_both_mistyped_context_marks;
           test_case "context marks failure renders its numbers" `Quick
             test_runtime_context_marks_failure_renders_both_numbers;
+          test_case "an unknown binding key is refused" `Quick
+            test_runtime_toml_rejects_an_unknown_binding_key;
+          test_case "a table inside a binding is refused" `Quick
+            test_runtime_toml_rejects_a_table_inside_a_binding;
           test_case "non-positive max-concurrent is rejected" `Quick
             test_runtime_toml_rejects_non_positive_max_concurrent;
           test_case "max-concurrent flows from binding to provider config" `Quick

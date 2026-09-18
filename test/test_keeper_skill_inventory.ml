@@ -117,7 +117,12 @@ let valid_named name inventory =
   | None -> failf "valid Skill %S missing from inventory" name
 ;;
 
-let capability_surface ?(tool_deny = []) ?(skill_names = None) frozen =
+let capability_surface
+      ?(tool_deny = [])
+      ?(sandbox_profile = Masc.Keeper_types_profile.Docker)
+      ?(skill_names = None)
+      frozen
+  =
   ignore (Masc_test_deps.init_unified_tool_registry ());
   let global_skill_catalog, diagnostics =
     Masc.Keeper_skill_catalog.of_snapshot frozen
@@ -125,6 +130,7 @@ let capability_surface ?(tool_deny = []) ?(skill_names = None) frozen =
   check int "catalog diagnostics" 0 (List.length diagnostics);
   Masc.Keeper_capability_surface.create
     ~tool_deny
+    ~sandbox_profile
     ~skill_names
     ~global_skill_catalog
     ~skill_inventory:(Inventory.of_snapshot frozen)
@@ -331,11 +337,11 @@ let test_catalog_status_tracks_source_precedence () =
   | valid -> failf "expected two exact valid items, got %d" (List.length valid)
 ;;
 
-(* Every Tool the inventory carries is either callable this turn or not
-   something the model can call at all. There is no third state: until #31728
-   a Keeper could declare tool groups and put a model-visible Tool outside its
-   own surface, and no Keeper ever did. *)
-let test_every_inventoried_tool_is_active_or_not_model_invocable () =
+(* With no deny and a sandbox that runs every Tool, each inventoried Tool is
+   either callable this turn or not something the model can call at all. A
+   deny or a sandbox refusal is the only way a model-visible Tool reads
+   otherwise; the tests below cover those. *)
+let test_unrestricted_inventory_is_active_or_not_model_invocable () =
   let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
   let frozen = snapshot config [ [] ] in
   let surface = capability_surface frozen in
@@ -378,6 +384,9 @@ let active_capability_descriptor_ids surface =
     | Masc.Keeper_capability_surface.Active -> Some capability.descriptor.id
     | Outside_skill_surface
     | Not_model_invocable
+    | Denied_by_profile
+    | Refused_by_sandbox _
+    | Node_tools_outside_surface _
     | Invalid_definition
     | Missing_task_skill
     | Missing_configured_skill -> None)
@@ -740,14 +749,24 @@ let test_tool_deny_removes_descriptors_from_surface () =
   check int "exactly the two named descriptors left"
     (List.length (model_names full) - 2)
     (List.length (model_names denied));
-  let capability_names surface =
-    Masc.Keeper_capability_surface.tool_capabilities surface
-    |> List.concat_map
+  let spawn_row =
+    Masc.Keeper_capability_surface.tool_capabilities denied
+    |> List.find_opt
          (fun (capability : Masc.Keeper_capability_surface.tool_capability) ->
-           Masc.Keeper_tool_descriptor.keeper_model_names capability.descriptor)
+           List.mem "keeper_spawn"
+             (Masc.Keeper_tool_descriptor.keeper_model_names capability.descriptor))
+    |> function
+    | Some capability -> capability
+    | None -> fail "denied spawn has no inventory row"
   in
-  check bool "denied spawn leaves the capability list too" false
-    (List.mem "keeper_spawn" (capability_names denied));
+  check bool "denied spawn keeps an inventory row that names the deny" true
+    (spawn_row.availability = Masc.Keeper_capability_surface.Denied_by_profile);
+  check (option string) "a denied row names no invocation" None
+    (Masc.Keeper_capability_surface.candidate_invocation_name
+       (Masc.Keeper_capability_surface.Ordinary_tool spawn_row));
+  check int "inventory keeps every canonical descriptor under a deny"
+    (List.length (Tool_descriptor.all_descriptors ()))
+    (List.length (Masc.Keeper_capability_surface.tool_capabilities denied));
   check bool "deny changes the surface digest" false
     (String.equal
        (Masc.Keeper_capability_surface.digest full)
@@ -756,6 +775,165 @@ let test_tool_deny_removes_descriptors_from_surface () =
   check string "a deny entry naming nothing changes nothing"
     (Masc.Keeper_capability_surface.digest full)
     (Masc.Keeper_capability_surface.digest noop)
+;;
+
+let test_composition_follows_node_tool_admission () =
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let frozen =
+    snapshot config [ [ candidate ~directory:"lane-plan" composition_document ] ]
+  in
+  let valid = valid_named "lane-plan" (Inventory.of_snapshot frozen) in
+  let composition_tools surface =
+    Masc.Keeper_capability_surface.skill_catalog surface
+    |> Masc.Keeper_skill_catalog.composition_entries
+    |> List.map Masc.Keeper_tool_composition_catalog.tool_name
+  in
+  let admitted = capability_surface frozen in
+  check (list string) "composition is offered while its node tool is admitted"
+    [ "keeper_compose_lane-plan" ] (composition_tools admitted);
+  check bool "admitted composition is active" true
+    ((exact_capability_by_reference admitted valid.reference).availability
+     = Masc.Keeper_capability_surface.Active);
+  let withheld = capability_surface ~tool_deny:[ "keeper_lane_status" ] frozen in
+  check (list string) "composition leaves the executable catalog with its node tool"
+    [] (composition_tools withheld);
+  let capability = exact_capability_by_reference withheld valid.reference in
+  check bool "withheld composition names the node tool outside the surface" true
+    (capability.availability
+     = Masc.Keeper_capability_surface.Node_tools_outside_surface
+         { tools = [ "keeper_lane_status" ] });
+  check bool "withheld composition is operator only" true
+    (capability.exposure = Masc.Keeper_capability_surface.Operator_only);
+  check (option string) "withheld composition names no invocation" None
+    (Masc.Keeper_capability_surface.candidate_invocation_name
+       (Masc.Keeper_capability_surface.Skill capability));
+  let projection = Masc.Keeper_capability_surface.skill_projection withheld in
+  check int "withholding is configured state, not a turn projection error" 0
+    (List.length projection.Masc.Keeper_skill_catalog.unavailable);
+  let row = Masc.Keeper_capability_surface.skill_capability_to_yojson capability in
+  check (list string) "operator row carries the node tools"
+    [ "keeper_lane_status" ]
+    Yojson.Safe.Util.(row |> member "outside_node_tools" |> to_list |> filter_string)
+;;
+
+let spawn_composition_document =
+  {|---
+name: spawn-plan
+description: Start one command beside the turn.
+---
+
+```toml composition
+[[compositions]]
+name = "spawn-plan"
+description = "Start one command beside the turn."
+execution = "inline"
+
+[[compositions.nodes]]
+id = "start"
+tool = "keeper_spawn"
+[compositions.nodes.input]
+kind = "object"
+[[compositions.nodes.input.fields]]
+name = "argv"
+[compositions.nodes.input.fields.value]
+kind = "array"
+[[compositions.nodes.input.fields.value.items]]
+kind = "literal"
+value = "true"
+```
+|}
+;;
+
+let test_spawn_start_follows_sandbox_profile () =
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let frozen =
+    snapshot config [ [ candidate ~directory:"spawn-plan" spawn_composition_document ] ]
+  in
+  let valid = valid_named "spawn-plan" (Inventory.of_snapshot frozen) in
+  let model_names surface =
+    Masc.Keeper_capability_surface.descriptors surface
+    |> List.concat_map Masc.Keeper_tool_descriptor.keeper_model_names
+  in
+  let composition_tools surface =
+    Masc.Keeper_capability_surface.skill_catalog surface
+    |> Masc.Keeper_skill_catalog.composition_entries
+    |> List.map Masc.Keeper_tool_composition_catalog.tool_name
+  in
+  let docker = capability_surface frozen in
+  check bool "a Docker keeper is offered keeper_spawn" true
+    (List.mem "keeper_spawn" (model_names docker));
+  check (list string) "a Docker keeper is offered the spawn composition"
+    [ "keeper_compose_spawn-plan" ] (composition_tools docker);
+  List.iter
+    (fun (label, sandbox_profile) ->
+       let refused = capability_surface ~sandbox_profile frozen in
+       let spawn_tools =
+         [ "keeper_spawn"; "keeper_spawn_read"; "keeper_spawn_wait"; "keeper_spawn_stop" ]
+       in
+       List.iter
+         (fun name ->
+            check bool ("a Docker keeper is offered " ^ name) true
+              (List.mem name (model_names docker));
+            check bool (label ^ " keeper is not offered " ^ name) false
+              (List.mem name (model_names refused)))
+         spawn_tools;
+       check int (label ^ " surface loses exactly the spawn tools")
+         (List.length (model_names docker) - List.length spawn_tools)
+         (List.length (model_names refused));
+       check (list string) (label ^ " keeper is not offered the spawn composition")
+         [] (composition_tools refused);
+       check bool (label ^ " operator row names keeper_spawn") true
+         ((exact_capability_by_reference refused valid.reference).availability
+          = Masc.Keeper_capability_surface.Node_tools_outside_surface
+              { tools = [ "keeper_spawn" ] });
+       let expected_refusal =
+         match Masc.Keeper_spawn_boundary.of_sandbox_profile sandbox_profile with
+         | Masc.Keeper_spawn_boundary.Refuses_start { detail } -> detail
+         | Masc.Keeper_spawn_boundary.Starts_in_container ->
+           fail (label ^ " profile was expected to refuse a start")
+       in
+       List.iter
+         (fun name ->
+            match
+              Masc.Keeper_capability_surface.tool_capabilities refused
+              |> List.find_opt
+                   (fun (capability : Masc.Keeper_capability_surface.tool_capability) ->
+                     List.mem name
+                       (Masc.Keeper_tool_descriptor.keeper_model_names
+                          capability.descriptor))
+            with
+            | None -> fail (label ^ " keeper has no inventory row for " ^ name)
+            | Some row ->
+              check bool (label ^ " " ^ name ^ " row carries the start refusal") true
+                (row.availability
+                 = Masc.Keeper_capability_surface.Refused_by_sandbox
+                     { detail = expected_refusal });
+              check (option string) (label ^ " " ^ name ^ " row names no invocation") None
+                (Masc.Keeper_capability_surface.candidate_invocation_name
+                   (Masc.Keeper_capability_surface.Ordinary_tool row));
+              check (option string) (label ^ " " ^ name ^ " row prints the refusal")
+                (Some expected_refusal)
+                Yojson.Safe.Util.(
+                  Masc.Keeper_capability_surface.candidate_to_yojson
+                    (Masc.Keeper_capability_surface.Ordinary_tool row)
+                  |> member "capability"
+                  |> member "sandbox_refusal"
+                  |> to_string_option))
+         spawn_tools;
+       let denied_and_refused =
+         capability_surface ~tool_deny:[ "keeper_spawn" ] ~sandbox_profile frozen
+       in
+       check bool (label ^ " a deny names the reason ahead of the sandbox") true
+         (List.exists
+            (fun (capability : Masc.Keeper_capability_surface.tool_capability) ->
+               List.mem "keeper_spawn"
+                 (Masc.Keeper_tool_descriptor.keeper_model_names capability.descriptor)
+               && capability.availability
+                  = Masc.Keeper_capability_surface.Denied_by_profile)
+            (Masc.Keeper_capability_surface.tool_capabilities denied_and_refused)))
+    [ "microvm", Masc.Keeper_types_profile.Micro_vm
+    ; "remote_ssh", Masc.Keeper_types_profile.Remote_ssh
+    ]
 ;;
 
 let test_surface_digest_binds_exact_tool_reference () =
@@ -968,8 +1146,8 @@ let () =
             test_invalid_sibling_isolated_with_digest
         ; test_case "catalog source precedence" `Quick
             test_catalog_status_tracks_source_precedence
-        ; test_case "every inventoried Tool is active or not model invocable" `Quick
-            test_every_inventoried_tool_is_active_or_not_model_invocable
+        ; test_case "unrestricted inventory is active or not model invocable" `Quick
+            test_unrestricted_inventory_is_active_or_not_model_invocable
         ; test_case "operator-only Tool inventory and search" `Quick
             test_operator_only_tool_is_in_inventory_and_search
         ; test_case "complete inventory preserves Agent Core surface" `Quick
@@ -992,6 +1170,10 @@ let () =
             test_surface_digest_binds_exact_tool_reference
         ; test_case "tool deny removes descriptors from surface" `Quick
             test_tool_deny_removes_descriptors_from_surface
+        ; test_case "composition follows node tool admission" `Quick
+            test_composition_follows_node_tool_admission
+        ; test_case "spawn start follows sandbox profile" `Quick
+            test_spawn_start_follows_sandbox_profile
         ; test_case "surface digest is path independent" `Quick
             test_surface_digest_is_path_independent
         ; test_case "unreadable diagnostics stay public only" `Quick

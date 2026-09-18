@@ -805,7 +805,7 @@ let run_turn
       ?official_task_reference
       ?on_gate_evidence_admitted
       ?deferred_runtime_lane
-      ?on_runtime_retry_deferred
+      ?runtime_retry_deferral
       ?on_runtime_attempt_failed
       ?on_produced_checkpoint
       ?on_runtime_lane_terminal_error
@@ -831,9 +831,16 @@ let run_turn
     Option.iter (record_produced_checkpoint ~runtime_id:error.origin_runtime_id ~attempt:error.origin_attempt)
       error.checkpoint_after;
     Option.iter (fun callback -> callback error) on_runtime_lane_terminal_error in
-  let record_runtime_retry_deferred hint =
-    deferred_runtime_lane_ref := Some hint;
-    Option.iter (fun callback -> callback hint) on_runtime_retry_deferred
+  let runtime_retry_deferral =
+    Option.map
+      (fun { Keeper_turn_driver.continuation; on_deferred } ->
+         { Keeper_turn_driver.continuation
+         ; on_deferred =
+             (fun hint ->
+                deferred_runtime_lane_ref := Some hint;
+                on_deferred hint)
+         })
+      runtime_retry_deferral
   in
   let user_message = Keeper_run_prompt.sanitize_user_message user_message in
   Masc_runtime_events.emit_turn_start ();
@@ -1258,9 +1265,9 @@ let run_turn
       s.Keeper_run_tools.model_input_projection
     in
     let model_input_projection messages =
-      (* [messages] carries the current provider attempt's transmission view.
-         An explicit request-body cap enables bounded_model_input_projection;
-         without that caller policy the full prepared history reaches here.
+      (* [messages] is the current provider attempt's transmission view: the
+         carried range [Keeper_turn_driver_try_provider.bounded_model_input_projection]
+         composed, as the wire's reasoning projection leaves it.
          The source projection appends only a bounded typed Gate replay
          reference; exact replay bytes remain in the artifact store. The
          provenance check below compares against the list as received, so its
@@ -1450,6 +1457,15 @@ let run_turn
                 ctx_work.checkpoint.Agent_core.Checkpoint.working_context
          in
          let last_persisted_checkpoint_ref = ref None in
+         (* What this dispatch wrote to the canonical checkpoint. Marked from
+            the save's own answer below, because only a [Saved] reaches the
+            checkpoint a resumed operation reads; a [Stale_noop] leaves it as
+            it was. The runtime lane reads this to decide whether a failed last
+            candidate has tool results to resume from
+            (RFC last-path-resumes-after-progress §3.2). *)
+         let checkpoint_progress =
+           Atomic.make Keeper_turn_driver_try_provider.No_checkpoint_stage
+         in
          (* The stage saves of this turn and its finalize save write one
             growing history. The memo keeps each saved message's encoding, so a
             save encodes only the messages the previous save did not write; the
@@ -1483,10 +1499,15 @@ let run_turn
                   Keeper_checkpoint_store.save_agent_core_classified_with_encoding_memo
                     ~session_dir:session.session_dir
                     ~encoding_memo:checkpoint_encoding_memo
+                    ~history_retained:
+                      (Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained)
                     checkpoint
                 with
                 | Ok (Keeper_checkpoint_store.Saved _) ->
                   last_persisted_checkpoint_ref := Some checkpoint;
+                  Keeper_turn_driver_try_provider.observe_checkpoint_saved
+                    checkpoint_progress
+                    snapshot.stage;
                   Ok ()
                 | Ok (Keeper_checkpoint_store.Stale_noop _) -> Ok ()
                 | Error _ as error -> error
@@ -1526,7 +1547,8 @@ let run_turn
                              config
                              manifest)
                       ?deferred_runtime_lane
-                      ~on_runtime_retry_deferred:record_runtime_retry_deferred
+                      ?runtime_retry_deferral
+                      ~checkpoint_progress
                       ~on_runtime_lane_terminal_error:record_runtime_lane_terminal_error
                       ?on_deferred_runtime_consumed
                       ~temperature
@@ -1610,11 +1632,10 @@ let run_turn
                         (fun ~measurement observation ->
                            model_input_window_ref :=
                              Some (measurement, observation))
-                      ~carried_front_seed:(fun ~runtime_id ->
+                      ~carried_front_seed:(fun () ->
                         Keeper_carried_front.read_seed
                           ~config
                           ~keeper_name:meta.name
-                          ~runtime_id
                           ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id))
                       ~on_request_attribution:
                         (fun ~runtime_id ~tools ~transmitted ->
@@ -2209,6 +2230,8 @@ let run_turn
                   ; total_atoms =
                       observation.Runtime_model_input_tail_window.total_atoms
                   ; measurement
+                  ; front_atom_digest =
+                      observation.Runtime_model_input_tail_window.front_atom_digest
                   })
                !model_input_window_ref)
           ~raw_trace_run_ref

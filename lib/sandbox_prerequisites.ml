@@ -6,6 +6,7 @@ type action_effect = Open_official_installer of { url : string; argv : string li
   | Install_official_cli of Runtime_official_cli_install.client
   | Build_without_rosetta of { user_config : string }
 type apple_builder = Builder_unchecked | Needs_missing_rosetta of { user_config : string option }
+                   | Needs_default_kernel
 type action = { id : string; label : string; detail : string;
   source_url : string; requires_admin : bool; action_effect : action_effect;
   writes : string option }
@@ -227,6 +228,11 @@ let rec catalog ?model_dir ?(apple_builder=Builder_unchecked) ~host ~distributio
         piece, not a missing install: offering the installer again here would
         send the operator away from the choice that unblocks the build. *)
      | Needs_missing_rosetta {user_config} -> rosetta_choices ~user_config
+     | Needs_default_kernel ->
+       [commands ~id:"apple_container_kernel_set" ~label:"Install the recommended default kernel"
+          ~detail:"Downloads Apple's recommended kernel for this architecture and sets it as Apple Container's default; every image build boots it. Needs the service running and network access, and downloads a few hundred megabytes."
+          ~source_url:apple_source ~requires_admin:false
+          [["container";"system";"kernel";"set";"--recommended"]]]
      | Builder_unchecked ->
        [open_ ~id:"apple_container_official_install" ~label:"Open Apple Container signed installer"
           ~detail:"Choose the signed installer package on Apple's release page and complete the macOS installer. Opening this page does not install or verify the package."

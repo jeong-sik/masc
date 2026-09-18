@@ -7,6 +7,7 @@
   tcp_address_race
   complete_stream_error
   complete_stream_state
+  openai_error_envelope
   model_catalog_embedded
   provider_http_codec
   tool_result_projection

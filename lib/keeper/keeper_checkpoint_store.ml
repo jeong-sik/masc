@@ -41,9 +41,19 @@ let list_agent_core_history_files ~(session_dir : string) : string list =
    111 MB: twelve of them held 1.4 GB per trace directory and 8.4 GB across
    traces/ (2026-09-16). The only reader is the dashboard checkpoint list,
    which decodes every retained entry to describe it, so the count is also
-   what that request costs. Three keeps the last few turns to look at or
-   restore. *)
-let max_agent_core_history_retained = 3
+   what that request costs.
+
+   Disk and how far back an operator can look pull against each other, and
+   which way to lean is theirs to say, so the window is the runtime setting
+   [keeper.checkpoint_history_retained] rather than a number a deploy fixed.
+
+   This store does not read it. Reading a runtime setting takes the Eio read
+   mutex, which raises for a caller on a raw Domain
+   ([Eio_guard.with_mutex_ro]), and the store is reachable from one -- see the
+   stale-guard "raw Domain saves through Unix context" test. A read in here
+   would raise inside the best-effort archive wrapper that swallows it, and the
+   prune would stop without ever saying so. The caller reads the setting on its
+   own fiber and passes the answer in. *)
 
 let agent_core_history_path ~(session_dir : string) ~(snapshot_id : string) =
   Filename.concat session_dir snapshot_id
@@ -93,11 +103,11 @@ let agent_core_history_snapshot_id_of_checkpoint (ckpt : Agent_core.Checkpoint.t
   Printf.sprintf "%s%013d%s"
     agent_core_history_prefix created_ms agent_core_history_suffix
 
-let prune_agent_core_history ~(session_dir : string) : unit =
+let prune_agent_core_history ~(session_dir : string) ~(retained : int) : unit =
   let files = list_agent_core_history_files ~session_dir in
-  if List.length files > max_agent_core_history_retained then
+  if List.length files > retained then
     files
-    |> List.filteri (fun index _ -> index >= max_agent_core_history_retained)
+    |> List.filteri (fun index _ -> index >= retained)
     |> List.iter (fun filename ->
          let path = agent_core_history_path ~session_dir ~snapshot_id:filename in
          try
@@ -133,7 +143,13 @@ let hardlink_agent_core_history_from_canonical
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn -> Error (Printexc.to_string exn)
 
-let save_agent_core_history ~(session_dir : string) (ckpt : Agent_core.Checkpoint.t) : unit =
+(* A window of zero keeps nothing, so this writes nothing: the hardlink below
+   is cheap but its fallback encodes the whole checkpoint, and the prune would
+   delete either one again on the way out. *)
+let save_agent_core_history
+    ~(session_dir : string) ~(retained : int) (ckpt : Agent_core.Checkpoint.t) : unit =
+  if retained <= 0 then prune_agent_core_history ~session_dir ~retained
+  else begin
   let snapshot_id = agent_core_history_snapshot_id_of_checkpoint ckpt in
   let save_snapshot_file () =
     Keeper_fs.save_atomic
@@ -150,13 +166,14 @@ let save_agent_core_history ~(session_dir : string) (ckpt : Agent_core.Checkpoin
   in
   match save_result with
   | Ok () ->
-    prune_agent_core_history ~session_dir
+    prune_agent_core_history ~session_dir ~retained
   | Error msg ->
     Log.Keeper.warn "save_agent_core_history failed for %s: %s" snapshot_id msg;
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string CheckpointFailures)
       ~labels:[("site", Keeper_checkpoint_store_failure_site.(to_label Agent_core_save))]
       ()
+  end
 
 let delete_agent_core_history_files ~(session_dir : string) ~(snapshot_ids : string list)
     : string list * string list =
@@ -603,8 +620,8 @@ let with_session_lock ~session_dir f =
   with_session_lock_typed ~session_dir (fun session_dir -> Ok (f session_dir))
   |> Result.map_error save_agent_core_error_to_string
 
-let archive_agent_core_history_best_effort ~session_dir ckpt =
-  try save_agent_core_history ~session_dir ckpt with
+let archive_agent_core_history_best_effort ~session_dir ~retained ckpt =
+  try save_agent_core_history ~session_dir ~retained ckpt with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     Log.Keeper.warn "AGENT_CORE snapshot archive write failed for %s: %s"
@@ -1337,9 +1354,9 @@ module For_testing = struct
   ;;
 end
 
-let save_outcome_after_write ~session_dir ~canonical_path ~known ckpt =
+let save_outcome_after_write ~session_dir ~canonical_path ~known ~history_retained ckpt =
   publish_summary_after_write ~canonical_path ckpt;
-  archive_agent_core_history_best_effort ~session_dir ckpt;
+  archive_agent_core_history_best_effort ~session_dir ~retained:history_retained ckpt;
   Ok
     (Saved
        { relation = save_relation ~known ~incoming:ckpt.turn_count
@@ -1349,6 +1366,7 @@ let save_outcome_after_write ~session_dir ~canonical_path ~known ckpt =
 let save_agent_core_classified_typed
     ~(session_dir : string)
     ~(encoding_memo : Agent_core.Checkpoint.encoding_memo)
+    ~(history_retained : int)
     (ckpt : Agent_core.Checkpoint.t)
   : (save_agent_core_outcome, save_agent_core_error) result =
   match Keeper_transcript_unit.validate ckpt.messages with
@@ -1410,7 +1428,7 @@ let save_agent_core_classified_typed
                Agent_core.Checkpoint.to_pieces_with_encoding_memo encoding_memo payload)
         in
         (match write ckpt with
-         | Ok () -> save_outcome_after_write ~session_dir ~canonical_path ~known ckpt
+         | Ok () -> save_outcome_after_write ~session_dir ~canonical_path ~known ~history_retained ckpt
          (* #31677: a payload-encode refusal means the in-memory checkpoint
             carries a json payload the v10 contract cannot encode — a
             provider-authored duplicate key or non-finite float. Without
@@ -1432,20 +1450,23 @@ let save_agent_core_classified_typed
              (match write recovered with
               | Error retry_error -> Error (Canonical_write_failed retry_error)
               | Ok () ->
-                save_outcome_after_write ~session_dir ~canonical_path ~known recovered))
+                save_outcome_after_write ~session_dir ~canonical_path ~known ~history_retained recovered))
          | Error error -> Error (Canonical_write_failed error)))
 
 let save_agent_core_classified_with_encoding_memo
     ~(session_dir : string)
     ~(encoding_memo : Agent_core.Checkpoint.encoding_memo)
+    ~(history_retained : int)
     (ckpt : Agent_core.Checkpoint.t)
   : (save_agent_core_outcome, string) result =
-  save_agent_core_classified_typed ~session_dir ~encoding_memo ckpt
+  save_agent_core_classified_typed ~session_dir ~encoding_memo ~history_retained ckpt
   |> Result.map_error save_agent_core_error_to_string
 
-let save_agent_core_classified ~(session_dir : string) (ckpt : Agent_core.Checkpoint.t)
+let save_agent_core_classified
+    ~(session_dir : string) ~(history_retained : int) (ckpt : Agent_core.Checkpoint.t)
   : (save_agent_core_outcome, string) result =
   save_agent_core_classified_with_encoding_memo
     ~session_dir
     ~encoding_memo:(Agent_core.Checkpoint.create_encoding_memo ())
+    ~history_retained
     ckpt

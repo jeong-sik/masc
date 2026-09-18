@@ -66,8 +66,7 @@ let test_search_follows_the_runtime_mode () =
       rrs_default_runtime_id = Some "assigned";
       rrs_runtimes = [runtime "unassigned"; runtime "assigned"];
       rrs_lanes =
-        [{rrl_id = "lane-only"; rrl_runtime_ids = ["assigned"];
-          rrl_preferred_candidate = None; rrl_preferred_at_ts = None}] } in
+        [{rrl_id = "lane-only"; rrl_runtime_ids = ["assigned"]}] } in
   let snapshot = match Masc.Tui_decode.join_runtime_surface
       ~probe:None ~probe_error:None ~resolved with
     | Ok snapshot -> snapshot | Error detail -> Alcotest.fail detail in

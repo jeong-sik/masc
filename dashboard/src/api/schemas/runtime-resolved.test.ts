@@ -18,8 +18,6 @@ const validRuntime = {
 const validLane = {
   id: 'lane-x',
   runtime_ids: ['rt-a', 'rt-b'],
-  preferred_candidate: 'rt-b',
-  preferred_at_ts: 1_750_000_000,
 } as const
 
 function responseWith(runtime: Record<string, unknown>) {
@@ -46,20 +44,13 @@ describe('runtime-resolved schema', () => {
     }))).toThrow(RuntimeResolvedSchemaDriftError)
   })
 
-  it('accepts a lane carrying the sticky failover preference', () => {
+  it('accepts a lane as its declared candidate order', () => {
     const parsed = parseRuntimeResolvedResponse({ ...responseWith(validRuntime), lanes: [validLane] })
     expect(parsed.lanes[0]).toMatchObject(validLane)
   })
 
-  it('accepts a lane with no live sticky preference (nulls, not absent)', () => {
-    const lane = { ...validLane, preferred_candidate: null, preferred_at_ts: null }
-    const parsed = parseRuntimeResolvedResponse({ ...responseWith(validRuntime), lanes: [lane] })
-    expect(parsed.lanes[0]?.preferred_candidate).toBeNull()
-    expect(parsed.lanes[0]?.preferred_at_ts).toBeNull()
-  })
-
-  it('rejects a lane missing the sticky fields (schema drift guard)', () => {
-    const { preferred_candidate: _candidate, preferred_at_ts: _ts, ...lane } = validLane
+  it('rejects a lane without its candidates (schema drift guard)', () => {
+    const { runtime_ids: _ids, ...lane } = validLane
     expect(() => parseRuntimeResolvedResponse({ ...responseWith(validRuntime), lanes: [lane] }))
       .toThrow(RuntimeResolvedSchemaDriftError)
   })

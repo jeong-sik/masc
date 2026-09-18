@@ -116,9 +116,21 @@ type turn_unavailable =
 
 type configured_name_unavailable = private Configured_name_unavailable of string
 
+type withheld_composition = private
+  { tool_name : string
+  ; reference : Skill_reference.t option
+  ; outside_node_tools : string list
+      (** Model names of the plan nodes the turn surface does not admit, in plan
+          order, each once. *)
+  }
+(** A projected composition kept out of the executable catalog because one of
+    its nodes cannot run on this turn's surface. This is the turn's configured
+    state, not a projection error: it is not in [unavailable]. *)
+
 type turn_projection = private
   { catalog : t
   ; unavailable : turn_unavailable list
+  ; withheld : withheld_composition list
   }
 
 type exact_surface_availability =
@@ -176,6 +188,16 @@ val project_turn : names:string list option -> global:t -> task:skill list -> tu
     publish one model tool name, the Task-first entry stays available and the
     other reference is returned as typed unavailable instead of silently
     replacing either identity. *)
+
+val withhold_compositions_outside :
+  admits:(Keeper_tool_descriptor.t -> bool) -> turn_projection -> turn_projection
+(** Move every composition that names a plan node descriptor [admits] refuses
+    from [catalog] to [withheld]. [admits] must be the turn surface's admission
+    predicate, the one direct dispatch applies, so the executable catalog never
+    offers a composition whose node the executor would refuse. *)
+
+val withheld_composition :
+  turn_projection -> Skill_reference.t -> withheld_composition option
 
 val turn_unavailable_to_string : turn_unavailable -> string
 val configured_names_unavailable : turn_projection -> configured_name_unavailable list

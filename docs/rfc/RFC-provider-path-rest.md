@@ -189,7 +189,7 @@ client 용량에서도 오고 경로별 저장소가 없으므로 route 로만 �
 - 뒤의 경로가 일찍 풀려도 순서가 안 풀리면 대기를 줄이지 않는다. 줄이면 다음 턴이 아직
   쉬는 첫 경로를 부른다.
 
-suffix 가 없으면 같은 규칙을 assignment 의 새 walk 순서(sticky 선호 → quota·backpressure
+suffix 가 없으면 같은 규칙을 assignment 의 새 walk 순서(선언 순서 → quota·backpressure
 강등)에 적용하고, 실패한 경로의 쉼과 비교해 늦은 쪽을 쓴다.
 
 ### 3.4 chat lane

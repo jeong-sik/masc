@@ -4,6 +4,13 @@ open Masc
 module Effort = Llm_provider.Reasoning_effort
 module Host = Keeper_official_client_host
 
+(* What the operator's window currently says. The store takes the window as an
+   argument -- it is reachable from a raw Domain, where reading a setting
+   raises -- so every caller names it. These cases are not about the window and
+   pass what production passes. *)
+let history_retained () =
+  Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained
+
 let effort_string = Option.map Effort.to_string
 
 let expect_effort label expected result =
@@ -525,8 +532,13 @@ let test_scoped_boundary_error_stops_immediately () =
              detail =
                Keeper_terminal_effect_detail.Boundary_observation_failed
                  { model_tool_name = "effect"; cause } as detail } } as stop) ->
-         check (option string) "exact failure retained"
-           (Some cause.Keeper_request_failure_core.message) !terminal_error;
+         (* The latch keeps agent-core's rendering; the typed cause keeps the
+            payload, because [category] already says "internal". Same failure
+            text, one without the family prefix. *)
+         check bool "exact failure retained" true
+           (String.ends_with
+              ~suffix:cause.Keeper_request_failure_core.message
+              (Option.value ~default:"" !terminal_error));
          (match Host.host_stop_result ~runtime_id:runtime_label ~model:"fixture"
              ~session_id:"session" ~turn_id:"turn" ~turns_used:1
              ~latency_ms:None ~usage:None stop with
@@ -2145,6 +2157,7 @@ let test_persist_appends_roundtrips_in_call_order () =
   let session_id = "trace-reject-persist" in
   (match
      Keeper_checkpoint_store.save_agent_core_classified
+       ~history_retained:(history_retained ())
        ~session_dir
        (persistence_checkpoint ~session_id)
    with

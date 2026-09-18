@@ -109,6 +109,11 @@ val trim_opt : string option -> string option
 
 val strip_trailing_slashes : string -> string
 val strip_path_trailing_slashes : string -> string
+val expand_home_prefix : string -> string
+(** A value that starts with ["~/"] with that prefix replaced by [HOME]; any
+    other value, and a value with no [HOME] to read, unchanged. The one rule
+    every config path that names a file under the operator's home shares. *)
+
 val normalize_path_lexically : string -> string
 val normalize_masc_base_path_input : string -> string
 val existing_dir : string -> bool

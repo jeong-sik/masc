@@ -95,6 +95,20 @@ let selected_runtime_result ?official_client_settlement (runtime : Runtime.t) ~l
     result
 ;;
 
+(* Whether the candidate answered at all. An attempt that yielded before any
+   provider turn completed -- the pre-first-token yield that
+   [Runtime_agent.yielded_pre_first_token] builds when a person queues behind
+   a silent provider -- did not, so it is no evidence the candidate is back. *)
+let run_result_answered (run_result : Runtime_agent.run_result) =
+  match run_result.Runtime_agent.stop_reason with
+  | Runtime_agent.Completed -> true
+  | Runtime_agent.Yielded_to_operation_queued { turns_used }
+  | Runtime_agent.Yielded_to_durable_stimulus { turns_used }
+  | Runtime_agent.Yielded_after_repeated_tool_call { turns_used; tool_name = _; repeated_count = _ }
+  | Runtime_agent.Yielded_after_repeated_assistant_text { turns_used; repeated_count = _ }
+  | Runtime_agent.InputRequired { turns_used; request = _ } -> turns_used > 0
+;;
+
 let apply_official_client_accept ~runtime_id ~accept ~terminal_effect_state
     (run_result : Runtime_agent.run_result) =
   match run_result.stop_reason, terminal_effect_state () with
@@ -119,6 +133,15 @@ type deferred_runtime_lane =
 let deferred_runtime_ids hint =
   hint.next_runtime_id :: hint.later_runtime_ids
 
+type failure_continuation =
+  | Resume_operation_checkpoint of { operation_id : Keeper_operation_id.t }
+  | Restart_cycle
+
+type runtime_retry_deferral =
+  { continuation : failure_continuation
+  ; on_deferred : deferred_runtime_lane -> unit
+  }
+
 (* The candidate error a runtime walk returns as the lane's error, together
    with the candidate that produced it. The walk may return an error observed
    on an earlier candidate than the one it ended on (a typed context overflow
@@ -138,21 +161,53 @@ type lane_terminal_error =
    non-rotating error before resolvable alternatives are tried. Order is
    therefore resolvable-active, then resolvable-exhausted, then unresolvable —
    declared relative order preserved within each class (PR #28219 review). *)
-let demote_unavailable_candidates ~now ~quota_scope_of ~candidate_preference_of candidates =
-  let available, backpressured = List.partition (fun candidate ->
+type demotion =
+  | Not_demoted
+  | Failed_without_rest
+  | Told_to_rest
+
+(* Three places, declared order kept within each. A path told to rest -- an
+   exhausted quota or a rate limit -- goes behind a path that only failed
+   without answering: the failed one can be dispatched now, and behind a resting
+   head it would make the next dispatch wait for that head's release
+   (RFC-0458 §3.4). It is also what keeps a released rate limit promoting its
+   path past the ones still resting, even while a failed attempt keeps it
+   behind the ones that answered. *)
+let demote_unavailable_candidates ~now ~quota_scope_of ~candidate_backpressure_of candidates =
+  let demotion candidate =
     let quota_exhausted =
       Option.fold ~none:false
         ~some:(fun scope -> Runtime_quota_window.is_exhausted ~scope ~now)
         (quota_scope_of candidate)
     in
-    let rate_limited =
-      Option.fold ~none:false
-        ~some:(fun candidate -> Option.is_some
-          (Runtime_lane_preference.candidate_backpressure ~now ~candidate))
-        (candidate_preference_of candidate)
+    let observed =
+      Option.bind (candidate_backpressure_of candidate) (fun candidate ->
+        Runtime_candidate_backpressure.candidate_backpressure ~now ~candidate)
     in
-    not (quota_exhausted || rate_limited)) candidates in
-  available @ backpressured
+    match quota_exhausted, observed with
+    | true, (Some _ | None)
+    | false, Some { Runtime_candidate_backpressure.rate_limit = Some _; failed_attempt = _ } ->
+      Told_to_rest
+    | false, Some { Runtime_candidate_backpressure.rate_limit = None; failed_attempt = Some _ } ->
+      Failed_without_rest
+    | false, Some { Runtime_candidate_backpressure.rate_limit = None; failed_attempt = None }
+    | false, None ->
+      Not_demoted
+  in
+  let placed = List.map (fun candidate -> demotion candidate, candidate) candidates in
+  let in_place wanted =
+    List.filter_map
+      (fun (demotion, candidate) ->
+         match wanted, demotion with
+         | Not_demoted, Not_demoted
+         | Failed_without_rest, Failed_without_rest
+         | Told_to_rest, Told_to_rest -> Some candidate
+         | Not_demoted, (Failed_without_rest | Told_to_rest)
+         | Failed_without_rest, (Not_demoted | Told_to_rest)
+         | Told_to_rest, (Not_demoted | Failed_without_rest) -> None)
+      placed
+  in
+  in_place Not_demoted @ in_place Failed_without_rest @ in_place Told_to_rest
 ;;
 
 let quota_ordered_runtime_ids ~now runtime_ids =
@@ -161,8 +216,8 @@ let quota_ordered_runtime_ids ~now runtime_ids =
   let resolvable, unresolvable = List.partition (fun (_, rt) -> Option.is_some rt) resolved in
   let ordered = demote_unavailable_candidates ~now
     ~quota_scope_of:(fun (_, rt) -> Option.map Runtime.quota_scope_of_runtime rt)
-    ~candidate_preference_of:(fun (_, rt) ->
-      Option.map (fun (rt : Runtime.t) -> rt.candidate_preference) rt)
+    ~candidate_backpressure_of:(fun (_, rt) ->
+      Option.map (fun (rt : Runtime.t) -> rt.candidate_backpressure) rt)
     resolvable in
   List.map fst (ordered @ unresolvable)
 ;;
@@ -206,8 +261,10 @@ type next_dispatch =
    again. It holds an unstated rest back until a success, so that release ends
    only the wait, not the demotion; a stated time beyond the cap is the same,
    because the cap ends the wait before the provider's time ends the demotion.
-   A quota observation carries no noted time and rests from [now]. An id the
-   table cannot resolve is no evidence of a rest. *)
+   A quota observation carries no noted time and rests from [now]. A failed
+   attempt is not a rest: it demotes the path until the candidate answers and
+   never makes a dispatch wait (RFC-0458 §3.4). An id the table cannot resolve
+   is no evidence of a rest. *)
 let path_rest ~now runtime_id =
   match Runtime.get_runtime_by_id runtime_id with
   | None -> Path_serving
@@ -218,12 +275,16 @@ let path_rest ~now runtime_id =
     in
     let rate_limit_rest =
       match
-        Runtime_lane_preference.candidate_backpressure
+        Runtime_candidate_backpressure.candidate_backpressure
           ~now
-          ~candidate:runtime.candidate_preference
+          ~candidate:runtime.candidate_backpressure
       with
-      | None -> None
-      | Some (Runtime_lane_preference.Unknown_scope_rate_limit { noted_at; retry_after }) ->
+      | None | Some { Runtime_candidate_backpressure.rate_limit = None; failed_attempt = _ } -> None
+      | Some
+          { Runtime_candidate_backpressure.rate_limit =
+              Some (Runtime_candidate_backpressure.Unknown_scope_rate_limit { noted_at; retry_after })
+          ; failed_attempt = _
+          } ->
         let promotes =
           match retry_after with
           | Some seconds when (not (Float.is_nan seconds)) && seconds > 0.0 ->
@@ -290,20 +351,41 @@ let deferred_lane_rest ~now hint =
 ;;
 
 (* A fresh walk of an assignment, ordered as [run_named] orders a turn without
-   a deferred suffix: sticky preference, then quota and backpressure demotion.
-   An id that names no lane or runtime is its own single candidate. *)
+   a deferred suffix: the lane as declared, then quota and backpressure
+   demotion. *)
+type walk_order =
+  { lane_id : string
+  ; declared : string list
+  ; order : string list
+  }
+
+type assignment_refusal =
+  | Assignment_missing
+  | Catalog_unavailable of Runtime.missing_catalog_model
+
+let assignment_refusal_to_string = function
+  | Assignment_missing -> "the assignment names no configured lane or runtime"
+  | Catalog_unavailable missing ->
+    "capability catalog entry unavailable: " ^ Runtime.missing_catalog_model_to_string missing
+;;
+
+let assignment_walk_order ~now assignment_id =
+  match Runtime.resolve_assignment assignment_id with
+  | `Lane lane ->
+    let lane_id = Runtime_lane.id lane in
+    let declared = Runtime_lane.ordered_candidates lane in
+    Ok { lane_id; declared; order = quota_ordered_runtime_ids ~now declared }
+  | `Unavailable missing -> Error (Catalog_unavailable missing)
+  | `Missing -> Error Assignment_missing
+;;
+
+(* An assignment the walk would refuse still names a path whose rest the
+   failure wait reads; it rests as its own single candidate. *)
 let assignment_walk_rest ~now assignment_id =
-  let ordered =
-    match Runtime.resolve_assignment assignment_id with
-    | `Lane lane ->
-      let lane_id = Runtime_lane.id lane in
-      Runtime_lane_preference.prefer_order ~lane_id (Runtime_lane.ordered_candidates lane)
-      |> quota_ordered_runtime_ids ~now
-    | `Unavailable _ | `Missing -> [ assignment_id ]
-  in
-  match ordered with
-  | [] -> Walk_head_serving { runtime_id = assignment_id }
-  | head :: later -> walk_rest ~now ~head ~later
+  match assignment_walk_order ~now assignment_id with
+  | Ok { order = head :: later; _ } -> walk_rest ~now ~head ~later
+  | Ok { order = []; _ } | Error (Assignment_missing | Catalog_unavailable _) ->
+    Walk_head_serving { runtime_id = assignment_id }
 ;;
 
 (* The next dispatch after a failed turn, shared by the heartbeat cycle and
@@ -471,27 +553,19 @@ let lane_should_retry
     | Some http_err -> Runtime_attempt_fsm.should_try_next http_err
     | None -> false
 
-(* Whether a runtime is one of the lane's own declared candidates.
-   [Runtime_lane_preference.prefer_order] reorders the list it is given, which
-   for a lane is that lane's candidates, so a preference naming a runtime
-   outside them promotes nothing. *)
-let lane_declares ~lane_id runtime_id =
-  match Runtime.get_lane_by_id lane_id with
-  | None -> false
-  | Some lane -> List.mem runtime_id (Runtime_lane.ordered_candidates lane)
-
 let attempt_runtime_candidates
     ?(pre_tool_rejects = ref [])
     ?(allow_retry = fun ~runtime_id:_ ~attempt:_ _error -> true)
     ?(allow_accept_no_progress_retry = fun ~runtime_id:_ ~attempt:_ _error ->
       true)
-    ?lane_id
-    ?(on_retry_deferred = fun _ -> ())
+    ?retry_deferral
+    ?(tool_results_saved = fun () -> false)
     ?(on_attempt_error = fun ~runtime_id:_ ~attempt:_ ~dispatch:_ _error -> ())
     ?(on_lane_terminal_error = fun (_ : lane_terminal_error) -> ())
+    ?(provider_answered = fun _ -> true)
     ?quota_scope_of
     ?model_of
-    ?candidate_preference_of
+    ?candidate_backpressure_of
     ?candidate_dispatchable
     ~runtime_id ~runtime_id_of
     ~(emit_runtime_manifest :
@@ -517,12 +591,12 @@ let attempt_runtime_candidates
       fun candidate ->
         Runtime.quota_scope_of_runtime_id (runtime_id_of candidate)
   in
-  let candidate_preference_of =
-    match candidate_preference_of with
-    | Some candidate_preference_of -> candidate_preference_of
+  let candidate_backpressure_of =
+    match candidate_backpressure_of with
+    | Some candidate_backpressure_of -> candidate_backpressure_of
     | None -> fun candidate ->
         Runtime.get_runtime_by_id (runtime_id_of candidate)
-        |> Option.map (fun (runtime : Runtime.t) -> runtime.candidate_preference)
+        |> Option.map (fun (runtime : Runtime.t) -> runtime.candidate_backpressure)
   in
   (* Mid-walk demotion shares the pre-walk rule: never move an
      exhausted-but-dispatchable candidate behind one that cannot dispatch, or
@@ -592,7 +666,7 @@ let attempt_runtime_candidates
     in
     demote_unavailable_candidates
       ~now:(Unix.gettimeofday ())
-      ~quota_scope_of ~candidate_preference_of
+      ~quota_scope_of ~candidate_backpressure_of
       dispatchable
     @ undispatchable
   in
@@ -669,7 +743,7 @@ let attempt_runtime_candidates
        the provider returns could then attribute the old credential's
        response to the replacement catalog row. *)
     let attempt_quota_scope = quota_scope_of candidate in
-    let attempt_candidate_preference = candidate_preference_of candidate in
+    let attempt_candidate_backpressure = candidate_backpressure_of candidate in
     emit_runtime_manifest
       ~status:"attempt"
       ~decision:(runtime_attempt_decision ~idx ~runtime_id:attempt_runtime_id)
@@ -682,35 +756,21 @@ let attempt_runtime_candidates
          ~status:"completed"
          ~decision:(runtime_attempt_decision ~idx ~runtime_id:attempt_runtime_id)
          Keeper_runtime_manifest.Runtime_completed;
-       (* Sticky failover: remember the winning candidate so later turns on
-          this lane start from it (idx 0 or a failover success alike).
-
-          Only a candidate the lane declares. The media walk reaches past
-          the lane into media_failover, and a winner from out there cannot
-          be remembered for this lane: [prefer_order] would find it in no lane list and
-          promote nothing, while the record has already replaced the last
-          in-lane success. The next text turn then starts from the declared
-          head again, and if that head is the one that was failing, it
-          fails again every turn (#34823).
-
-          A lane_id naming no configured lane records nothing either. There
-          is no candidate list for [prefer_order] to reorder, so the entry
-          could never be read. *)
-       (match lane_id with
-        | Some lane_id when lane_declares ~lane_id attempt_runtime_id ->
-          Runtime_lane_preference.note_success ~lane_id
-            ~candidate:attempt_runtime_id
-        | Some _ | None -> ());
-       Option.iter
-         (fun candidate -> Runtime_lane_preference.note_candidate_success ~candidate)
-         attempt_candidate_preference;
-       (* A call getting through is the only evidence a quota came back that
-          a provider stating no reset time leaves available, so it is what
-          clears the observation. A stated window is left alone: it names a
-          time, and one success inside it does not make that untrue. *)
-       (match attempt_quota_scope with
-        | Some scope -> Runtime_quota_window.note_succeeded ~scope
-        | None -> ());
+       (* An attempt that ended before the candidate answered -- a yield to a
+          queued person before the first token -- says nothing about the
+          candidate, so it clears no evidence (RFC-0458 §3.4). *)
+       if provider_answered value
+       then (
+         Option.iter
+           (fun candidate -> Runtime_candidate_backpressure.note_candidate_success ~candidate)
+           attempt_candidate_backpressure;
+         (* A call getting through is the only evidence a quota came back that
+            a provider stating no reset time leaves available, so it is what
+            clears the observation. A stated window is left alone: it names a
+            time, and one success inside it does not make that untrue. *)
+         match attempt_quota_scope with
+         | Some scope -> Runtime_quota_window.note_succeeded ~scope
+         | None -> ());
        Ok value
      | Error error, checkpoint_after, effect_disposition, dispatch ->
        emit_runtime_manifest
@@ -727,7 +787,13 @@ let attempt_runtime_candidates
           provider hint as candidate-only ordering evidence. A shared
           credential quota requires the distinct HardQuota/402 contract. *)
        let note_quota retry_after =
-         match attempt_quota_scope, retry_after with
+         (* A hint the provider did not really state -- zero, negative, NaN --
+            named no reset. Planting it as a window would date the quota to a
+            moment already past, and that window replaces an observation the
+            scope already carried ([Runtime_quota_window]), leaving the scope
+            looking available. The rule for reading a hint is the one
+            [path_rest_sec] and [route_resumes_on_same_path] read. *)
+         match attempt_quota_scope, Keeper_runtime_failure_route.usable_retry_after retry_after with
          | None, _ -> ()
          | Some scope, Some retry_after_s ->
            Runtime_quota_window.note_exhausted
@@ -739,17 +805,80 @@ let attempt_runtime_candidates
        in
        let note_rate_limit retry_after =
          Option.iter
-           (fun candidate -> Runtime_lane_preference.note_rate_limit ~candidate ~retry_after)
-           attempt_candidate_preference
+           (fun candidate -> Runtime_candidate_backpressure.note_rate_limit ~candidate ~retry_after)
+           attempt_candidate_backpressure
        in
-       (match error with
-        | Agent_core.Error.Api (Llm_provider.Retry.RateLimited { retry_after; _ })
-        | Agent_core.Error.Provider (Llm_provider.Error.RateLimit { retry_after; _ }) ->
-            note_rate_limit retry_after
-        | Agent_core.Error.Provider (Llm_provider.Error.HardQuota { retry_after; _ }) ->
-            note_quota retry_after
-        | Agent_core.Error.Api (Llm_provider.Retry.PaymentRequired _) -> note_quota None
-        | _ -> ());
+       (* The route calls every timeout a provider timeout, including one that
+          expired in MASC's own admission -- a permit queue or local capacity
+          -- before anything was sent. That says nothing about the candidate.
+          The typed phase is read here because the route does not carry it. *)
+       let expired_in_admission =
+         let admission = function
+           | Some (Llm_provider.Http_client.Queue | Llm_provider.Http_client.Capacity_backpressure) ->
+             true
+           | Some
+               ( Llm_provider.Http_client.First_token | Llm_provider.Http_client.Wall_clock
+               | Llm_provider.Http_client.Http_operation
+               | Llm_provider.Http_client.Non_streaming_body
+               | Llm_provider.Http_client.Stream_body | Llm_provider.Http_client.Stream_idle _
+               | Llm_provider.Http_client.Provider_step
+               | Llm_provider.Http_client.Cli_stdout_idle
+               | Llm_provider.Http_client.Unknown_timeout )
+           | None -> false
+         in
+         match error with
+         | Agent_core.Error.Api (Llm_provider.Retry.Timeout { phase; message = _ }) -> admission phase
+         | Agent_core.Error.Provider
+             (Llm_provider.Error.Timeout { timeout_phase; provider = _; detail = _ }) ->
+           admission timeout_phase
+         | Agent_core.Error.Api _ | Agent_core.Error.Provider _ | Agent_core.Error.Agent _
+         | Agent_core.Error.Mcp _ | Agent_core.Error.Config _
+         | Agent_core.Error.Serialization _ | Agent_core.Error.Io _
+         | Agent_core.Error.Orchestration _ | Agent_core.Error.Internal _
+         | Agent_core.Error.Internal_carried _ -> false
+       in
+       let note_failed_attempt failure =
+         Option.iter
+           (fun candidate -> Runtime_candidate_backpressure.note_failed_attempt ~candidate ~failure)
+           attempt_candidate_backpressure
+       in
+       (* The evidence follows the failure route, the one classification of
+          this error that the keeper's failure handling reads, rather than a
+          second reading of the error. That second reading recorded 429, 402
+          and HardQuota and dropped everything else, including a closed runtime
+          connection the route calls a server error (RFC-0458 §3.4). *)
+       let route =
+         Keeper_runtime_failure_route.route_of_error
+           ~boundary:Keeper_runtime_failure_route.Agent_core_execution
+           error
+       in
+       (match route with
+        | Keeper_runtime_failure_route.Retry_after_observed
+            { retry_class = Keeper_runtime_failure_route.Rate_limited; retry_after } ->
+          note_rate_limit retry_after
+        | Keeper_runtime_failure_route.Retry_after_observed
+            { retry_class = Keeper_runtime_failure_route.Hard_quota; retry_after } ->
+          note_quota retry_after
+        | Keeper_runtime_failure_route.Retry_after_observed
+            { retry_class = Keeper_runtime_failure_route.Server_error; retry_after = _ } ->
+          note_failed_attempt Runtime_candidate_backpressure.Server_error
+        | Keeper_runtime_failure_route.Retry_after_observed
+            { retry_class = Keeper_runtime_failure_route.Network_transient; retry_after = _ } ->
+          note_failed_attempt Runtime_candidate_backpressure.Network_transient
+        | Keeper_runtime_failure_route.Retry_after_observed
+            { retry_class = Keeper_runtime_failure_route.Provider_timeout; retry_after = _ } ->
+          if not expired_in_admission
+          then note_failed_attempt Runtime_candidate_backpressure.Provider_timeout
+        (* MASC's own slot and client envelope, not a fact about the candidate. *)
+        | Keeper_runtime_failure_route.Retry_after_observed
+            { retry_class = Keeper_runtime_failure_route.Capacity_backpressure; retry_after = _ } ->
+          ()
+        (* The candidate answered, badly; RFC-0458 §5 leaves these without
+           evidence until a measurement says otherwise. *)
+        | Keeper_runtime_failure_route.Rotate_now _ -> ()
+        (* The turn's input or MASC itself failed; another candidate would not
+           do better, so this is no evidence about this one. *)
+        | Keeper_runtime_failure_route.Exhausted_visible_alive _ -> ());
        (* Stable demotion retains every declared candidate, including when
           all are observed unavailable. Neither hint causes a wait or gate. *)
        let rest = demote_rest rest in
@@ -855,7 +984,59 @@ let attempt_runtime_candidates
             telemetry already published each candidate's own error. *)
          match observed_overflow with
          | Some overflow -> lane_terminal overflow
-         | None -> lane_terminal (this_candidate error))
+         | None ->
+           (* RFC last-path-resumes-after-progress §3.1: a chat operation whose
+              last candidate saved tool results before a failure that passes
+              with time continues on that candidate from its latest
+              checkpoint. Each such resume needs tool results saved after the
+              previous one, so resumes cannot outnumber the tool rounds the
+              operation ran. A cycle-restarting lane starts a new turn that
+              regains progress with its first tool, so it never resumes here. *)
+           (match retry_deferral with
+            | Some
+                { continuation = Resume_operation_checkpoint { operation_id }
+                ; on_deferred
+                }
+              when tool_results_saved ()
+                   && Keeper_runtime_failure_route.route_resumes_on_same_path route ->
+              Log.Keeper.info
+                "deferred operation %s to the path it failed on \
+                 (runtime_id=%s assignment=%s route=%s:%s)"
+                (Keeper_operation_id.to_string operation_id)
+                attempt_runtime_id
+                runtime_id
+                (Keeper_runtime_failure_route.route_kind_label route)
+                (Keeper_runtime_failure_route.route_class_label route);
+              (* The row a reader counts this decision by. Only a lane that
+                 named an operation reaches it, so a lane that must not resume
+                 is the lane whose walks never carry this status. *)
+              emit_runtime_manifest
+                ~status:"deferred_same_path"
+                ~decision:
+                  (`Assoc
+                    [ "idx", `Int idx
+                    ; "runtime_id", `String attempt_runtime_id
+                    ; "operation_id", `String (Keeper_operation_id.to_string operation_id)
+                    ; ( "route"
+                      , `String
+                          (Keeper_runtime_failure_route.route_kind_label route
+                           ^ ":"
+                           ^ Keeper_runtime_failure_route.route_class_label route) )
+                    ])
+                Keeper_runtime_manifest.Runtime_routed;
+              on_deferred
+                { assignment_id = runtime_id
+                ; failed_runtime_id = attempt_runtime_id
+                ; next_runtime_id = attempt_runtime_id
+                ; later_runtime_ids = []
+                ; failure = error
+                }
+            | Some
+                { continuation = Resume_operation_checkpoint _ | Restart_cycle
+                ; on_deferred = _
+                }
+            | None -> ());
+           lane_terminal (this_candidate error))
        else (
          (* The next cycle starts from this hint with an empty memory of
             repeats, so a candidate whose model repeated in this walk must
@@ -868,13 +1049,16 @@ let attempt_runtime_candidates
          in
          (match error_is_retryable, effect_retry_admitted, rest_for_next_cycle with
           | true, true, next :: later ->
-            on_retry_deferred
-              { assignment_id = runtime_id
-              ; failed_runtime_id = attempt_runtime_id
-              ; next_runtime_id = runtime_id_of next
-              ; later_runtime_ids = List.map runtime_id_of later
-              ; failure = error
-              }
+            Option.iter
+              (fun { continuation = _; on_deferred } ->
+                 on_deferred
+                   { assignment_id = runtime_id
+                   ; failed_runtime_id = attempt_runtime_id
+                   ; next_runtime_id = runtime_id_of next
+                   ; later_runtime_ids = List.map runtime_id_of later
+                   ; failure = error
+                   })
+              retry_deferral
           | false, _, _ | true, false, _ | true, true, [] -> ());
          lane_terminal (this_candidate terminal_error)))
   in
@@ -944,8 +1128,8 @@ let modality_reroute_candidates ~now ~deferred_runtime_lane ~first_candidate
          ~now
          ~quota_scope_of:(fun (runtime : Runtime.t) ->
            Some (Runtime.quota_scope_of_runtime runtime))
-         ~candidate_preference_of:(fun (runtime : Runtime.t) ->
-           Some runtime.Runtime.candidate_preference)
+         ~candidate_backpressure_of:(fun (runtime : Runtime.t) ->
+           Some runtime.Runtime.candidate_backpressure)
 
 (* RFC-0440 §3: the media walk (every candidate that takes the media, live ones
    first), then the lane's remaining candidates as the degrade tail — per-attempt
@@ -1305,7 +1489,8 @@ let run_named
     ?runtime_manifest_append
     ?deferred_runtime_lane
     ?on_runtime_attempt
-    ?on_runtime_retry_deferred
+    ?runtime_retry_deferral
+    ?checkpoint_progress
     ?on_runtime_attempt_error
     ?on_runtime_lane_terminal_error
     ?on_deferred_runtime_consumed
@@ -1343,7 +1528,17 @@ let run_named
   let routing_run_id = Random_id.hex ~bytes:16 in
   let turn_start = Mtime_clock.now () in
   let seq_ref = ref 0 in
-  let checkpoint_stage_observed = Atomic.make false in
+  (* What this dispatch's checkpoints recorded. The caller passes the value it
+     marks from its own sink: only that sink knows whether a write reached the
+     canonical checkpoint or was skipped as stale, and its [Ok ()] does not say
+     which ([Keeper_agent_run], [Keeper_checkpoint_store.Stale_noop]). A caller
+     that marks nothing gets a value that never reaches [Tool_results_saved],
+     so its lane ends a failed last candidate instead of resuming on it. *)
+  let checkpoint_progress =
+    match checkpoint_progress with
+    | Some progress -> progress
+    | None -> Atomic.make Keeper_turn_driver_try_provider.No_checkpoint_stage
+  in
   let emit_runtime_manifest ?status ?decision event =
     match runtime_manifest_context, runtime_manifest_append with
     | Some manifest_ctx, Some append ->
@@ -1382,9 +1577,9 @@ let run_named
     | _ -> ()
   in
   (* Lanes shadow runtimes: a lane id takes precedence over a runtime id so
-     operators can route through explicit failover groups.  Lane candidate
-     order passes through the sticky last-good preference so a known-healthy
-     failover candidate is tried before re-hitting a dead head candidate. *)
+     operators can route through explicit failover groups. The order is the
+     declaration's; a resting or exhausted candidate is demoted behind its
+     siblings, never remembered as a preference. *)
   (* Quota/backpressure demotion is ordering only — a demoted candidate is still
      attempted when the lane has nothing else (RFC-0370 §3.3). Apply it while
      selecting a fresh lane walk. A deferred suffix was already frozen before
@@ -1402,24 +1597,17 @@ let run_named
       ~now:(Unix.gettimeofday ())
       candidates
   in
-  let* lane_id_opt, lane_candidate_ids =
+  let* lane_candidate_ids =
     match output_contract, deferred_runtime_lane with
-    | Tool_verdict, _ -> Ok (None, [runtime_id])
-    | Provider_default, Some hint ->
-      Ok (Some hint.assignment_id, deferred_runtime_ids hint)
+    | Tool_verdict, _ -> Ok [runtime_id]
+    | Provider_default, Some hint -> Ok (deferred_runtime_ids hint)
     | Provider_default, None ->
       (match Runtime.resolve_assignment runtime_id with
-       | `Missing -> Ok (None, [])
+       | `Missing -> Ok []
        | `Unavailable missing ->
          Error (Runtime_agent_core_runner.runtime_catalog_error_to_core_error
            ("Capability catalog entry unavailable: " ^ Runtime.missing_catalog_model_to_string missing))
-       | `Lane lane ->
-         let lane_id = Runtime_lane.id lane in
-         Ok
-           ( Some lane_id
-           , Runtime_lane_preference.prefer_order ~lane_id
-               (Runtime_lane.ordered_candidates lane)
-             |> demote_quota_exhausted ))
+       | `Lane lane -> Ok (Runtime_lane.ordered_candidates lane |> demote_quota_exhausted))
   in
   if lane_candidate_ids = []
   then
@@ -1562,27 +1750,18 @@ let run_named
       project ~mode blocks
   in
   (* Sequential candidate attempt loop. On failure we record a manifest row and
-     move to the next candidate; on success we record completion and return.
-     Modality reroutes are capability routing decisions, not provider-failure
-     discoveries.  Do not let a media-only reroute update the lane-global
-     sticky failover preference; otherwise one keeper can pin unrelated later
-     text-only turns to a less-trusted fallback for the preference TTL. *)
-  let sticky_lane_id =
-    match reroute_decision with
-    | Runtime_agent.Reroute _ -> None
-    | Runtime_agent.No_reroute_needed | Runtime_agent.No_capable_runtime _ ->
-      lane_id_opt
-  in
+     move to the next candidate; on success we record completion and return. *)
   attempt_runtime_candidates
     ~pre_tool_rejects
-    ?lane_id:sticky_lane_id
-    ?on_retry_deferred:on_runtime_retry_deferred
+    ?retry_deferral:runtime_retry_deferral
+    ~tool_results_saved:(fun () ->
+      Keeper_turn_driver_try_provider.tool_results_saved checkpoint_progress)
     ?on_attempt_error:on_runtime_attempt_error
     ?on_lane_terminal_error:on_runtime_lane_terminal_error
     ~allow_retry:(fun ~runtime_id:attempt_runtime_id ~attempt error ->
       let allowed =
         Keeper_turn_driver_try_provider.same_run_retry_allowed
-          checkpoint_stage_observed
+          checkpoint_progress
       in
       if not allowed
       then
@@ -1605,12 +1784,12 @@ let run_named
     ~quota_scope_of:(function
       | Resolved_runtime runtime -> Some (Runtime.quota_scope_of_runtime runtime)
       | Missing_runtime _ -> None)
-    ~candidate_preference_of:(function
-      | Resolved_runtime runtime -> Some runtime.Runtime.candidate_preference
+    ~candidate_backpressure_of:(function
+      | Resolved_runtime runtime -> Some runtime.Runtime.candidate_backpressure
       | Missing_runtime _ -> None)
     ~model_of:(function
       (* The served name comes from the same frozen snapshot as the quota
-         scope and preference above: a runtime.toml reload mid-walk must not
+         scope and backpressure above: a runtime.toml reload mid-walk must not
          turn the same-model refusal off by dropping the id from the table. *)
       | Resolved_runtime runtime -> Some runtime.Runtime.model.api_name
       | Missing_runtime _ -> None)
@@ -1620,6 +1799,7 @@ let run_named
          never resolved is a dead head. *)
       | Resolved_runtime _ -> true
       | Missing_runtime _ -> false)
+    ~provider_answered:(fun (named : named_run_result) -> run_result_answered named.run_result)
     ~emit_runtime_manifest
     ~run_attempt:(fun ~idx ~runtime_id:attempt_runtime_id candidate ->
       match candidate with
@@ -2148,16 +2328,17 @@ let run_named
             ; error_runtime_id
             ; context_marks
             ; (* Read only when the process holds no ledger for this pair:
-                 the range the newest completed turn record on this runtime
-                 measured, so a restart resumes the range the last turn
-                 carried rather than the whole history. A caller that reads
-                 no records leaves the first request to the cap or the whole
+                 the range the newest completed Agent Core turn record on
+                 this history measured, whichever runtime ran it, so a
+                 restart or a lane's next candidate resumes the range the
+                 last turn carried rather than the whole history. A caller
+                 that reads no records leaves the first request to the whole
                  history. *)
               carried_front_seed =
                 (fun () ->
                    match carried_front_seed with
-                   | Some read -> read ~runtime_id:attempt_runtime_id
-                   | None -> None)
+                   | Some read -> read ()
+                   | None -> Keeper_carried_front.no_seed_read)
             ; base_path
             ; keeper_name
             ; name
@@ -2246,7 +2427,7 @@ let run_named
                 Option.map
                   (canonical_checkpoint_sink ~replay_prefix_projection)
                   checkpoint_sink
-            ; checkpoint_stage_observed
+            ; checkpoint_progress
             ; context_injector
             ; context
             ; enable_thinking = inference_policy.attempt_enable_thinking
@@ -2291,6 +2472,8 @@ let run_named
 module For_testing = struct
   type nonrec provider_attempt_outcomes = provider_attempt_outcomes
 
+  let run_result_answered = run_result_answered
+
   let make_deferred_runtime_lane ~assignment_id ~failed_runtime_id
         ~next_runtime_id ~later_runtime_ids ~failure =
     restore_deferred_runtime_lane ~assignment_id ~failed_runtime_id
@@ -2326,6 +2509,15 @@ module For_testing = struct
 
   let observe_checkpoint_stage =
     Keeper_turn_driver_try_provider.observe_checkpoint_stage
+
+  let observing_checkpoint_sink =
+    Keeper_turn_driver_try_provider.observing_checkpoint_sink
+
+  let observe_checkpoint_saved =
+    Keeper_turn_driver_try_provider.observe_checkpoint_saved
+
+  let tool_results_saved =
+    Keeper_turn_driver_try_provider.tool_results_saved
 
   let same_run_retry_allowed =
     Keeper_turn_driver_try_provider.same_run_retry_allowed

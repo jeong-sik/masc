@@ -805,7 +805,7 @@ let test_memory_header_and_row_share_their_offsets () =
     if columns.Schedule.mcol_show_updated then
       check_right_cell "UPDATED" "R" ~header ~row ~inner_width;
     check_right_cell "FACTS" "F" ~header ~row ~inner_width;
-    check_right_cell "SIZE" "Z" ~header ~row ~inner_width;
+    check_right_cell "RECALL" "Z" ~header ~row ~inner_width;
     if columns.Schedule.mcol_show_source then
       check_left_cell "SOURCE" "U" ~header ~row ~inner_width;
     check_right_cell "\xce\x94" "D" ~header ~row ~inner_width

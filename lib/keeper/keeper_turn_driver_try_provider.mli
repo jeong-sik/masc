@@ -21,18 +21,37 @@ type provider_progress_sample =
             excluding it here leaves nothing unbounded. *)
   }
 
+(** What one dispatch's checkpoints have recorded so far. It only moves
+    forward, in this order.
+    - [No_checkpoint_stage]: AGENT_CORE has not reached a checkpoint stage, so
+      the agent state is as the dispatch began and another candidate may take
+      the same run.
+    - [Checkpoint_stage_reached]: a stage was reached, whether or not its save
+      succeeded. The attempt may hold effects, so no same-run retry.
+    - [Tool_results_saved]: a stage written after tools ran
+      ([After_tool_results_appended], [After_context_injection]) was saved. A
+      chat operation resumed from its latest checkpoint does not run those
+      tools again (RFC last-path-resumes-after-progress §3.2). *)
+type checkpoint_progress =
+  | No_checkpoint_stage
+  | Checkpoint_stage_reached
+  | Tool_results_saved
+
 type try_provider_ctx =
   { runtime_id : string
   ; error_runtime_id : string
   ; context_marks : Runtime_schema.context_marks option
-        (** The marks the carried range is judged against after each
-            response (RFC keeper-context-window-in-tokens §10.5), as the
-            binding declares them; [None] leaves eviction to a refusal. *)
-  ; carried_front_seed : unit -> Keeper_carried_front.seed option
+        (** The marks the carried range is judged against once per candidate
+            turn, before its first composition (RFC
+            keeper-context-window-in-tokens §10.5), as the binding declares
+            them; [None] leaves eviction to a refusal. *)
+  ; carried_front_seed : unit -> Keeper_carried_front.seed_read
         (** Where the carried range starts when no ledger holds this
-            (keeper, runtime) pair yet: the range the newest completed turn
-            record on the runtime measured. Read once per attempt, on that
-            path only. *)
+            (keeper, runtime) pair yet: the range the newest completed Agent
+            Core turn record on the trace measured, whichever runtime ran it,
+            with the records that could not be decoded counted. Read once per
+            attempt, on that path only; unreadable records are logged beside
+            the attempt's first carried-range line. *)
   ; base_path : string
   ; keeper_name : string
   ; name : string
@@ -74,7 +93,7 @@ type try_provider_ctx =
   ; cache_system_prompt : bool
   ; yield_on_tool : bool
   ; checkpoint_sink : Agent_core.Agent.checkpoint_sink option
-  ; checkpoint_stage_observed : bool Atomic.t
+  ; checkpoint_progress : checkpoint_progress Atomic.t
   ; context_injector : Agent_core.Hooks.context_injector option
   ; context : Agent_core.Context.t option
   ; enable_thinking : bool option
@@ -139,9 +158,31 @@ val apply_accept :
   (Runtime_agent.run_result, Agent_core.Error.t) result
 
 val observe_checkpoint_stage :
-  bool Atomic.t -> Agent_core.Agent.checkpoint_stage -> unit
+  checkpoint_progress Atomic.t -> Agent_core.Agent.checkpoint_stage -> unit
+(** Marks that a stage was reached. Called before the stage is saved. *)
 
-val same_run_retry_allowed : bool Atomic.t -> bool
+val observe_checkpoint_saved :
+  checkpoint_progress Atomic.t -> Agent_core.Agent.checkpoint_stage -> unit
+(** Marks [Tool_results_saved] for a stage written after tools ran. Only the
+    owner of the checkpoint sink may call it, and only for a write it made:
+    a sink answers [Ok ()] for a write it skipped as well
+    ([Keeper_checkpoint_store.Stale_noop], which leaves the canonical
+    checkpoint untouched), and a resumed operation would not read the
+    checkpoint that write claimed. *)
+
+val observing_checkpoint_sink :
+  checkpoint_progress Atomic.t ->
+  Agent_core.Agent.checkpoint_sink option ->
+  Agent_core.Agent.checkpoint_sink
+(** The sink an attempt hands AGENT_CORE: marks the stage, then delegates to
+    the caller's sink and returns its answer unread. Saved tool results are
+    not marked here — see {!observe_checkpoint_saved}. *)
+
+val same_run_retry_allowed : checkpoint_progress Atomic.t -> bool
+(** [true] only at [No_checkpoint_stage]. *)
+
+val tool_results_saved : checkpoint_progress Atomic.t -> bool
+(** [true] only at [Tool_results_saved]. *)
 
 type provider_lease_phase =
   | Provider_active_since of float
@@ -264,8 +305,8 @@ val carried_range_eviction_sequence :
   ledger:(unit -> Keeper_model_input_ledger.t option) ->
   last_request:(unit -> Keeper_model_input_ledger.request option) ->
   marks:Runtime_schema.context_marks option ->
-  evict:(Keeper_carried_range.step -> unit) ->
-  halve:(first_atom:int -> atom_count:int -> retry:int -> unit) ->
+  evict:(Keeper_carried_range.step -> bool) ->
+  halve:(first_atom:int -> atom_count:int -> retry:int -> bool) ->
   last_resort:(retry:int -> bool) ->
   on_retry:(retry:int -> eviction_retry -> unit) ->
   attempt:(unit -> ('ok, Agent_core.Error.t) result) ->
@@ -275,13 +316,17 @@ val carried_range_eviction_sequence :
     keeper-context-window-in-tokens §10.5). A provider context overflow or a
     size refusal on the byte axis is answered from the pair's ledger with
     {!Keeper_carried_range.after_overflow}; [evict] applies the step before
-    the next attempt. When the ledger has no block structure to walk, no
+    the next attempt and answers whether the front moved. When the ledger has no block structure to walk, no
     usage counted yet or a single block, [last_request]'s range halves
-    toward the newest atom through [halve]; at a single atom [last_resort]
+    toward the newest atom through [halve], which answers [false] when it
+    cannot name the halved front by its opening message and so ends the
+    sequence with the refusal in hand; at a single atom [last_resort]
     may arm one more request with the turn's own tool results demoted
     (#28845), and answers [false] once used or with nothing to demote, which
-    ends the sequence with the refusal in hand. Every other error ends it at
-    once, as does a refusal once [same_run_retry_authorized] is [false]. *)
+    ends the sequence with the refusal in hand. Every retry follows a move
+    that [evict] or [halve] reported, so the sequence never resends the range
+    that was refused. Every other error ends it at once, as does a refusal
+    once [same_run_retry_authorized] is [false]. *)
 
 val run_try_provider_with_carried_range_eviction :
   ?continuation_checkpoint:Agent_core.Checkpoint.t ->
@@ -290,7 +335,8 @@ val run_try_provider_with_carried_range_eviction :
   (Runtime_agent.run_result, Agent_core.Error.t) result
   * Agent_core.Checkpoint.t option
   * (string * Obj.t) option
-(** {!run_try_provider} under {!carried_range_eviction_sequence}: the
+(** {!run_try_provider} under {!carried_range_eviction_sequence}, after the
+    marks are judged against the pair's ledger once for the turn: the
     eviction moves the pair's ledger front, the halving holds a seed for the
     rest of this attempt, and each retry is recorded on the runtime
     manifest. *)
@@ -318,18 +364,44 @@ type composed =
   ; projection : Runtime_model_input_tail_window.projection
   ; transmitted_bytes : int
         (** Pinned messages, the carried atoms and the preamble, as the
-            composition's encoder counts them; excludes the reservation. *)
+            durable encoder counts them, reasoning the wire deletes included;
+            excludes the reservation. *)
   ; history_atom_count : int  (** Atoms in the whole history. *)
   ; origin : Keeper_carried_front.origin
-  ; outlived_seed : Keeper_carried_front.seed option
-        (** A front the history shrank under, dropped by
-            {!Keeper_carried_front.for_history}; the request started over. *)
+  ; outlived_seed : (Keeper_carried_front.seed * Keeper_carried_front.dropped_front) option
+        (** A front this history does not open with the same message, dropped
+            by {!Keeper_carried_front.for_history} with the reason; the
+            request started over. *)
+  ; demote_before : int
+        (** The boundary the demotion applied: 0 when demotion is off, the
+            whole history under the last resort. *)
   }
 (** One request as {!For_testing.compose_carried_model_input} composes it
     (RFC keeper-context-window-in-tokens §10.4): RFC-0363 demotion over the
     atoms older than [demote_before], or over every atom when the last
     resort is armed, then the carried range from [front]; the whole history
     without one. Nothing here measures the request against a limit. *)
+
+type request_view =
+  { composed : composed
+  ; carried : Agent_core.Types.message list
+        (** The composed messages with their demotions materialized: what the
+            ledger and the turn record count, in atoms of the checkpoint
+            history. *)
+  ; wire :
+      ( Agent_core.Types.message list
+        , Agent_core.Llm_provider.Reasoning_history_projection.error )
+        result
+        (** The dialect's reasoning projection over [carried] alone, or why
+            it declined; [carried] itself is then handed over, and the
+            backend, running the same projection, refuses the request with
+            its typed error. *)
+  }
+(** One request as {!For_testing.request_view} views it: composed in the
+    durable vocabulary first, projected for the wire afterwards. The order
+    keeps atom positions a property of the history rather than of the
+    dialect, so a front measured on one runtime names the same atom on every
+    runtime whatever reasoning each replays or deletes. *)
 
 module For_testing : sig
   val observe_provider_lease :
@@ -344,9 +416,10 @@ module For_testing : sig
 
   (** What a max-tokens rejection owes the checkpoint. Retrying without
       thinking is a remedy for a budget spent thinking and applies only when
-      thinking was on; dropping the rejected response is owed either way,
-      because accept judged it unusable and a checkpoint that keeps it feeds
-      it back as input on every later turn. *)
+      thinking was on and the candidate's wire can be told to stop; dropping
+      the rejected response is owed either way, because accept judged it
+      unusable and a checkpoint that keeps it feeds it back as input on every
+      later turn. *)
   type truncation_recovery =
     | Recovery_not_applicable
     | Retry_without_thinking of Agent_core.Checkpoint.t
@@ -354,6 +427,7 @@ module For_testing : sig
 
   val truncation_recovery :
     enable_thinking:bool option ->
+    thinking_can_be_disabled:bool ->
     result:(Runtime_agent.run_result, Agent_core.Error.t) result ->
     checkpoint:Agent_core.Checkpoint.t option ->
     truncation_recovery
@@ -377,10 +451,6 @@ module For_testing : sig
     Runtime_agent.run_result ->
     (Runtime_agent.run_result, Agent_core.Error.t) result
 
-  val message_measurer : unit -> Agent_core.Types.message -> int
-  (** Counts the bytes [Yojson.Safe.to_string] would produce, without building
-      the string. Each call returns a measurer with its own buffer. *)
-
   val memoize_message_measurement :
     (Agent_core.Types.message -> int) -> Agent_core.Types.message -> int
 
@@ -389,11 +459,53 @@ module For_testing : sig
   val compose_carried_model_input :
     measure_message_bytes:(Agent_core.Types.message -> int) ->
     front:Keeper_carried_front.seed option ->
+    history_digest_at:(int -> string option) ->
     last_resort:bool ->
     base_path:string ->
     demote_before:int ->
     Agent_core.Types.message list ->
     composed
+
+  val request_view :
+    provider_config:Agent_core.Llm_provider.Provider_config.t ->
+    measure_message_bytes:(Agent_core.Types.message -> int) ->
+    front:Keeper_carried_front.seed option ->
+    history_digest_at:(int -> string option) ->
+    last_resort:bool ->
+    base_path:string ->
+    demote_before:int ->
+    materialize:
+      (pending:Keeper_model_input_demotion.pending list ->
+       Agent_core.Types.message list ->
+       Agent_core.Types.message list) ->
+    Agent_core.Types.message list ->
+    request_view
+
+  val carried_front :
+    keeper_name:string ->
+    runtime_id:string ->
+    session_id:string ->
+    digest_at:(int -> string option) ->
+    cold:(unit -> Keeper_carried_front.seed option) ->
+    Keeper_carried_front.seed option * Keeper_model_input_ledger.t option
+  (** The front a request composes from, [digest_at] being the lookup over
+      the history it composes from: the pair's ledger front while that
+      history holds the ledger ({!Keeper_model_input_ledger.holds}), else
+      [cold ()]. A ledger that does not hold is removed from the table and
+      returned second. *)
+
+  val halve_front :
+    digest_at:(int -> string option) option ->
+    move_ledger:(first_atom:int -> front_digest:string -> Keeper_model_input_ledger.Table.move) ->
+    hold:(Keeper_carried_front.seed -> unit) ->
+    first_atom:int ->
+    retry:int ->
+    bool
+  (** One halving after a refusal: whether the retry carries a strictly
+      later front. [false] when [digest_at] (the refused request's history)
+      has no atom at [first_atom], or when the pair's ledger did not move;
+      [true] when it moved, or when there is no ledger, after [hold] took the
+      halved seed the next composition reads. *)
 
   val last_resort_demotes :
     measure_message_bytes:(Agent_core.Types.message -> int) ->

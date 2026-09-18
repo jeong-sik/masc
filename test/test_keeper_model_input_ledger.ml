@@ -12,23 +12,70 @@ open Alcotest
 
 let prefix = "f-prefix"
 
-let request ?(prefix_digest = prefix) ?(tail_bytes = 100) ~first_atom ~atom_count ()
+(* A synthetic history names atom [i] by the message ["m<i>"] that opens it;
+   [history ~atom_count] is the lookup over the first [atom_count] of them, as
+   [Runtime_model_input_tail_window.atom_opening_digest] answers for a real
+   history. A test that replaces or removes messages builds its own. *)
+let opener i = Printf.sprintf "m%d" i
+
+let history ~atom_count i = if i >= 0 && i < atom_count then Some (opener i) else None
+
+let ends_in (digest_at : int -> string option) ~first_atom ~atom_count =
+  match digest_at first_atom, digest_at (atom_count - 1) with
+  | Some front_digest, Some end_digest -> Ledger.Carried_atoms { front_digest; end_digest }
+  | None, (Some _ | None) | Some _, None -> Ledger.No_atom_carried
+;;
+
+let request
+      ?(prefix_digest = prefix)
+      ?(tail_bytes = 100)
+      ?(turn_context = false)
+      ?(demote_before = 0)
+      ?digest_at
+      ~first_atom
+      ~atom_count
+      ()
   : Ledger.request
   =
-  { prefix_digest; first_atom; atom_count; tail_bytes }
+  let digest_at = Option.value digest_at ~default:(history ~atom_count) in
+  { prefix_digest
+  ; first_atom
+  ; atom_count
+  ; ends = ends_in digest_at ~first_atom ~atom_count
+  ; tail_bytes
+  ; turn_context
+  ; demote_before
+  }
 ;;
 
 let usage ?(cache_read_input_tokens = 0) input_tokens : Ledger.usage =
   { input_tokens; cache_read_input_tokens }
 ;;
 
-let step ledger req u = Ledger.observe ledger req u
+(* The request's own history is the one the ledger checks against, unless a
+   test hands another. *)
+let step ?digest_at ledger (req : Ledger.request) u =
+  let digest_at = Option.value digest_at ~default:(history ~atom_count:req.atom_count) in
+  Ledger.observe ~digest_at ledger req u
+;;
 
 let block_tokens (t : Ledger.t) =
   List.map (fun (b : Ledger.block) -> b.block_first_atom, b.block_end_atom, b.tokens) t.blocks
 ;;
 
 let blocks_testable = list (triple int int (option int))
+
+let block_digests (t : Ledger.t) =
+  List.map (fun (b : Ledger.block) -> b.block_first_digest) t.blocks
+;;
+
+(* The ledger a move produced; a test that expects no move says so with
+   [Option.is_none] instead. *)
+let moved_to t ~first_atom =
+  match Ledger.move_front t ~first_atom ~front_digest:(opener first_atom) with
+  | Some moved -> moved
+  | None -> failf "expected the front to move to %d" first_atom
+;;
 
 let test_first_request_starts_with_one_unmeasured_block () =
   let o = step None (request ~first_atom:0 ~atom_count:10 ()) (Some (usage 1_000)) in
@@ -54,18 +101,109 @@ let test_appended_atoms_are_measured_by_the_difference () =
   check (option int) "measured up to the new end" (Some 12) o2.ledger.measured_end_atom
 ;;
 
-let test_tail_change_is_part_of_the_difference_and_reported () =
+(* A turn's first request carries the turn context, whose tokens belong to
+   no atom. Its count moves nothing: the atoms it carried wait for the first
+   post-tool round, which measures them against the last sample. *)
+let test_turn_context_request_is_not_a_sample () =
+  let o1 = step None (request ~first_atom:0 ~atom_count:10 ()) (Some (usage 1_000)) in
+  let o2 =
+    step
+      (Some o1.ledger)
+      (request ~first_atom:0 ~atom_count:12 ~tail_bytes:250_000 ~turn_context:true ())
+      (Some (usage 80_000))
+  in
+  check string "event" "appended_unmeasured" (Ledger.event_to_string o2.event);
+  check (option int) "no delta from a turn-context count" None o2.delta_tokens;
+  check (option int) "total stays the last sample" (Some 1_000) o2.ledger.total_tokens;
+  check (option int) "measured end unchanged" (Some 10) o2.ledger.measured_end_atom;
+  check int "the tail change is still reported" 249_900 o2.tail_delta_bytes;
+  let o3 =
+    step (Some o2.ledger) (request ~first_atom:0 ~atom_count:14 ()) (Some (usage 1_600))
+  in
+  check (option int) "the next sample measures across it" (Some 600) o3.delta_tokens;
+  check blocks_testable "the atoms of both requests form one block"
+    [ 0, 10, None; 10, 14, Some 600 ]
+    (block_tokens o3.ledger)
+;;
+
+(* A ledger that starts on a turn's first request has no total until a
+   sample arrives. *)
+let test_turn_context_request_starts_without_a_total () =
   let o1 =
-    step None (request ~first_atom:0 ~atom_count:10 ~tail_bytes:100 ()) (Some (usage 1_000))
+    step
+      None
+      (request ~first_atom:0 ~atom_count:10 ~turn_context:true ())
+      (Some (usage 80_000))
+  in
+  check string "event" "started" (Ledger.event_to_string o1.event);
+  check (option int) "no total" None o1.ledger.total_tokens;
+  check (option int) "no measured end" None o1.ledger.measured_end_atom;
+  let o2 =
+    step (Some o1.ledger) (request ~first_atom:0 ~atom_count:12 ()) (Some (usage 1_300))
+  in
+  check (option int) "no delta against no total" None o2.delta_tokens;
+  check (option int) "the sample becomes the total" (Some 1_300) o2.ledger.total_tokens;
+  check (option int) "measured up to the sample" (Some 12) o2.ledger.measured_end_atom
+;;
+
+(* A turn boundary moves the demotion boundary: the previous turn's tool
+   results go out as markers from then on. The reformed block and the atoms
+   appended since become one block weighing its old count plus the difference,
+   which is what they weigh now, even when the difference is negative. *)
+let test_moved_demotion_boundary_merges_the_reformed_blocks () =
+  let o1 =
+    step None (request ~first_atom:0 ~atom_count:10 ~demote_before:10 ()) (Some (usage 1_000))
   in
   let o2 =
     step
       (Some o1.ledger)
-      (request ~first_atom:0 ~atom_count:12 ~tail_bytes:160 ())
-      (Some (usage 1_320))
+      (request ~first_atom:0 ~atom_count:14 ~demote_before:10 ())
+      (Some (usage 1_400))
   in
-  check int "tail grew by 60 bytes" 60 o2.tail_delta_bytes;
-  check (option int) "the block is charged the whole difference" (Some 320) o2.delta_tokens
+  check blocks_testable "measured under one boundary"
+    [ 0, 10, None; 10, 14, Some 400 ]
+    (block_tokens o2.ledger);
+  let o3 =
+    step
+      (Some o2.ledger)
+      (request ~first_atom:0 ~atom_count:16 ~demote_before:14 ())
+      (Some (usage 1_450))
+  in
+  check string "event" "appended_measured" (Ledger.event_to_string o3.event);
+  check (option int) "delta" (Some 50) o3.delta_tokens;
+  check blocks_testable "the reformed block and the new atoms: 400 + 50"
+    [ 0, 10, None; 10, 16, Some 450 ]
+    (block_tokens o3.ledger);
+  check (list string) "the merged block is named by its first atom, not the appended one"
+    [ opener 0; opener 10 ]
+    (block_digests o3.ledger);
+  let shrank =
+    step
+      (Some o2.ledger)
+      (request ~first_atom:0 ~atom_count:16 ~demote_before:14 ())
+      (Some (usage 1_350))
+  in
+  check (option int) "the demotion saved more than was appended" (Some (-50)) shrank.delta_tokens;
+  check blocks_testable "still written: 400 - 50"
+    [ 0, 10, None; 10, 16, Some 350 ]
+    (block_tokens shrank.ledger)
+;;
+
+let test_moved_demotion_boundary_over_an_unmeasured_block_leaves_it_unknown () =
+  let o1 =
+    step None (request ~first_atom:0 ~atom_count:10 ~demote_before:0 ()) (Some (usage 1_000))
+  in
+  let o2 =
+    step
+      (Some o1.ledger)
+      (request ~first_atom:0 ~atom_count:12 ~demote_before:10 ())
+      (Some (usage 1_100))
+  in
+  check string "event" "appended_unmeasured" (Ledger.event_to_string o2.event);
+  check blocks_testable "the cold block and the new atoms merge unmeasured"
+    [ 0, 12, None ]
+    (block_tokens o2.ledger);
+  check (option int) "the total is the new sample" (Some 1_100) o2.ledger.total_tokens
 ;;
 
 let test_usage_gap_measures_the_stretch_as_one_block () =
@@ -81,16 +219,19 @@ let test_usage_gap_measures_the_stretch_as_one_block () =
   check (option int) "delta spans both requests" (Some 500) o3.delta_tokens;
   check blocks_testable "the two unmeasured blocks merge into one"
     [ 0, 10, None; 10, 14, Some 500 ]
-    (block_tokens o3.ledger)
+    (block_tokens o3.ledger);
+  check (list string) "the merged block is named by its first atom, not the later one"
+    [ opener 0; opener 10 ]
+    (block_digests o3.ledger)
 ;;
 
-let test_repeated_range_records_only_the_tail_change () =
+let test_repeated_range_adds_no_block () =
   let o1 = step None (request ~first_atom:0 ~atom_count:10 ()) (Some (usage 1_000)) in
   let o2 =
     step (Some o1.ledger) (request ~first_atom:0 ~atom_count:10 ()) (Some (usage 1_010))
   in
   check string "event" "repeated" (Ledger.event_to_string o2.event);
-  check (option int) "delta is the tail alone" (Some 10) o2.delta_tokens;
+  check (option int) "the difference is reported" (Some 10) o2.delta_tokens;
   check blocks_testable "no block added" [ 0, 10, None ] (block_tokens o2.ledger);
   check (option int) "total follows the usage" (Some 1_010) o2.ledger.total_tokens
 ;;
@@ -296,21 +437,15 @@ let test_repeated_range_without_usage_changes_nothing () =
   check blocks_testable "blocks kept" [ 0, 10, None ] (block_tokens o2.ledger)
 ;;
 
-(* A tail that shrank by more than the new atoms added makes the difference
-   negative. It is reported; no block is written. *)
+(* A difference that comes out negative under an unchanged demotion boundary
+   is reported; no block is written. *)
 let test_negative_difference_is_reported_not_written () =
-  let o1 =
-    step None (request ~first_atom:0 ~atom_count:10 ~tail_bytes:2_000 ()) (Some (usage 1_000))
-  in
+  let o1 = step None (request ~first_atom:0 ~atom_count:10 ()) (Some (usage 1_000)) in
   let o2 =
-    step
-      (Some o1.ledger)
-      (request ~first_atom:0 ~atom_count:12 ~tail_bytes:100 ())
-      (Some (usage 900))
+    step (Some o1.ledger) (request ~first_atom:0 ~atom_count:12 ()) (Some (usage 900))
   in
   check string "event" "appended_unmeasured" (Ledger.event_to_string o2.event);
   check (option int) "delta reported" (Some (-100)) o2.delta_tokens;
-  check int "tail shrank" (-1_900) o2.tail_delta_bytes;
   check blocks_testable "the new block stays unmeasured"
     [ 0, 10, None; 10, 12, None ]
     (block_tokens o2.ledger);
@@ -339,7 +474,7 @@ let test_prefix_digest_is_stable_and_separates_prompts () =
 
 let test_move_front_over_measured_blocks_adjusts_the_total () =
   let t = four_measured_blocks () in
-  let moved = Ledger.move_front t ~first_atom:14 in
+  let moved = moved_to t ~first_atom:14 in
   check blocks_testable "two blocks left"
     [ 14, 16, Some 200; 16, 18, Some 250 ]
     (block_tokens moved);
@@ -357,7 +492,7 @@ let test_move_front_over_the_cold_block_blanks_the_total () =
   let o2 =
     step (Some o1.ledger) (request ~first_atom:0 ~atom_count:12 ()) (Some (usage 1_300))
   in
-  let moved = Ledger.move_front o2.ledger ~first_atom:10 in
+  let moved = moved_to o2.ledger ~first_atom:10 in
   check blocks_testable "the measured block stays" [ 10, 12, Some 300 ] (block_tokens moved);
   check (option int) "total unknown" None moved.total_tokens;
   check (option int) "measured end unknown" None moved.measured_end_atom
@@ -365,37 +500,58 @@ let test_move_front_over_the_cold_block_blanks_the_total () =
 
 let test_move_front_that_does_not_advance_changes_nothing () =
   let t = four_measured_blocks () in
-  check bool "same front, same ledger" true (Ledger.move_front t ~first_atom:10 == t);
-  check bool "a front behind the current one changes nothing" true
-    (Ledger.move_front t ~first_atom:3 == t)
+  let stays first_atom =
+    Option.is_none (Ledger.move_front t ~first_atom ~front_digest:(opener first_atom))
+  in
+  check bool "the same front is no move" true (stays 10);
+  check bool "a front behind the current one is no move" true (stays 3);
+  (* The last request carried atoms 10 to 17: there is no atom at 18 or past
+     it to carry from, and a retry from there would carry the same newest atom
+     it was refused with. *)
+  check bool "a front at the last request's atom count is no move" true (stays 18);
+  check bool "a front past it is no move" true (stays 25)
 ;;
 
 let test_move_front_inside_a_block_restarts_the_blocks () =
   let t = four_measured_blocks () in
-  let moved = Ledger.move_front t ~first_atom:13 in
+  let moved = moved_to t ~first_atom:13 in
   check blocks_testable "one unknown block from the new front" [ 13, 18, None ] (block_tokens moved);
-  check (option int) "total unknown" None moved.total_tokens
+  check (option int) "total unknown" None moved.total_tokens;
+  check (list string) "the restarted block is named by the moved front" [ opener 13 ]
+    (block_digests moved)
 ;;
 
 let test_table_move_front_moves_the_pairs_ledger () =
   Ledger.Table.For_testing.reset ();
   let keeper_name = "alpha" and runtime_id = "r" and session_id = "trace-1" in
   (* No ledger yet: nothing to move, nothing written. *)
-  Ledger.Table.move_front ~keeper_name ~runtime_id ~session_id ~first_atom:5;
+  check bool "the move says there is no ledger" true
+    (Ledger.Table.move_front ~keeper_name ~runtime_id ~session_id ~first_atom:5
+       ~front_digest:(opener 5)
+     = Ledger.Table.No_pair_ledger);
   check bool "no ledger appears from a move" true
     (Option.is_none (Ledger.Table.lookup ~keeper_name ~runtime_id ~session_id));
-  let _ =
+  let (_ : Ledger.observation) =
     Ledger.Table.observe ~keeper_name ~runtime_id ~session_id
+      ~digest_at:(history ~atom_count:10)
       ~request:(request ~first_atom:0 ~atom_count:10 ()) ~usage:(Some (usage 1_000))
   in
-  let _ =
+  let (_ : Ledger.observation) =
     Ledger.Table.observe ~keeper_name ~runtime_id ~session_id
+      ~digest_at:(history ~atom_count:14)
       ~request:(request ~first_atom:0 ~atom_count:14 ()) ~usage:(Some (usage 1_400))
   in
   (* Another session of the same keeper and runtime is another history. *)
   check bool "a recovery session reads no front from the keeper's turns" true
     (Option.is_none (Ledger.Table.lookup ~keeper_name ~runtime_id ~session_id:"recovery-1"));
-  Ledger.Table.move_front ~keeper_name ~runtime_id ~session_id ~first_atom:10;
+  check bool "the move says it moved" true
+    (Ledger.Table.move_front ~keeper_name ~runtime_id ~session_id ~first_atom:10
+       ~front_digest:(opener 10)
+     = Ledger.Table.Moved);
+  check bool "moving to the same front again says it did not" true
+    (Ledger.Table.move_front ~keeper_name ~runtime_id ~session_id ~first_atom:10
+       ~front_digest:(opener 10)
+     = Ledger.Table.Not_moved);
   match Ledger.Table.lookup ~keeper_name ~runtime_id ~session_id with
   | None -> fail "the ledger stays"
   | Some t ->
@@ -404,6 +560,118 @@ let test_table_move_front_moves_the_pairs_ledger () =
       None t.total_tokens;
     check int "the measured block stays known" 400 (Ledger.known_tokens t);
     Ledger.Table.For_testing.reset ()
+;;
+
+(* The same number of atoms is not the same history. An attempt that was never
+   saved appended atom 9; the next turn appended its own new input at the same
+   index. The count matches, the message at the last index does not, and the
+   ledger does not attribute the next usage to atoms it never counted. *)
+let test_same_count_with_another_last_message_restarts () =
+  let o1 = step None (request ~first_atom:0 ~atom_count:10 ()) (Some (usage 1_000)) in
+  let replaced i = if i = 9 then Some "another input" else history ~atom_count:10 i in
+  let o2 =
+    step
+      ~digest_at:replaced
+      (Some o1.ledger)
+      (request ~digest_at:replaced ~first_atom:0 ~atom_count:10 ())
+      (Some (usage 1_050))
+  in
+  check string "event" "history_reset" (Ledger.event_to_string o2.event);
+  check (option int) "no difference taken" None o2.delta_tokens;
+  check blocks_testable "restarted from the request" [ 0, 10, None ] (block_tokens o2.ledger)
+;;
+
+(* Only the front's message changed: the history has the same atoms, and the
+   newest one still opens with the message the ledger recorded. The front
+   check alone has to restart it. *)
+let test_another_message_at_the_front_restarts () =
+  let o1 = step None (request ~first_atom:4 ~atom_count:10 ()) (Some (usage 1_000)) in
+  let replaced i = if i = 4 then Some "another message" else history ~atom_count:10 i in
+  check (option string) "the newest atom opens as recorded" (Some (opener 9)) (replaced 9);
+  let o2 =
+    step
+      ~digest_at:replaced
+      (Some o1.ledger)
+      (request ~digest_at:replaced ~first_atom:4 ~atom_count:10 ())
+      (Some (usage 1_000))
+  in
+  check string "event" "history_reset" (Ledger.event_to_string o2.event)
+;;
+
+(* A request that carried no atom names no position: it starts no block, the
+   next request is not checked against it, and it has no front to move. *)
+let test_a_request_without_an_atom_names_no_position () =
+  let empty = request ~first_atom:0 ~atom_count:0 () in
+  check bool "no position" true (empty.ends = Ledger.No_atom_carried);
+  let o1 = step None empty (Some (usage 500)) in
+  check blocks_testable "no block" [] (block_tokens o1.ledger);
+  check bool "no front to move" true
+    (Option.is_none (Ledger.move_front o1.ledger ~first_atom:0 ~front_digest:(opener 0)));
+  let o2 =
+    step (Some o1.ledger) (request ~first_atom:0 ~atom_count:3 ()) (Some (usage 800))
+  in
+  check string "the next request appends; nothing is checked" "appended_measured"
+    (Ledger.event_to_string o2.event);
+  check blocks_testable "the appended atoms are one measured block" [ 0, 3, Some 300 ]
+    (block_tokens o2.ledger)
+;;
+
+(* The lookup holds both recorded positions but has no atom where the appended
+   block would start: it is not the history the request counted, and the
+   block cannot be named. *)
+let test_a_lookup_without_the_appended_atom_restarts () =
+  let o1 = step None (request ~first_atom:0 ~atom_count:10 ()) (Some (usage 1_000)) in
+  let gap i = if i = 10 then None else history ~atom_count:12 i in
+  let o2 =
+    step
+      ~digest_at:gap
+      (Some o1.ledger)
+      (request ~first_atom:0 ~atom_count:12 ())
+      (Some (usage 1_300))
+  in
+  check string "event" "history_reset" (Ledger.event_to_string o2.event)
+;;
+
+(* Both positions hold: the ledger keeps appending, and every block is named
+   by the message that opens its first atom in the history it was carried in. *)
+let test_both_positions_holding_keeps_appending () =
+  let o1 = step None (request ~first_atom:0 ~atom_count:10 ()) (Some (usage 1_000)) in
+  let o2 =
+    step (Some o1.ledger) (request ~first_atom:0 ~atom_count:12 ()) (Some (usage 1_300))
+  in
+  let o3 =
+    step (Some o2.ledger) (request ~first_atom:0 ~atom_count:14 ()) (Some (usage 1_500))
+  in
+  check string "event" "appended_measured" (Ledger.event_to_string o3.event);
+  check blocks_testable "measurement continues"
+    [ 0, 10, None; 10, 12, Some 300; 12, 14, Some 200 ]
+    (block_tokens o3.ledger);
+  check (list string) "each block names its opening message"
+    [ opener 0; opener 10; opener 12 ]
+    (block_digests o3.ledger)
+;;
+
+(* An eviction moves the front to a block boundary and records the digest the
+   block carries, so the next request's check reads the moved front against
+   the message that opens it, not the old front's. *)
+let test_a_moved_front_is_checked_at_its_own_position () =
+  let t = four_measured_blocks () in
+  let moved = moved_to t ~first_atom:14 in
+  (match moved.last.ends with
+   | Ledger.Carried_atoms { front_digest; end_digest } ->
+     check string "the moved front's digest" (opener 14) front_digest;
+     check string "the last atom's digest is the last request's" (opener 17) end_digest
+   | Ledger.No_atom_carried -> fail "the ledger carried atoms");
+  let replaced i = if i = 14 then Some "another message" else history ~atom_count:20 i in
+  let o =
+    step
+      ~digest_at:replaced
+      (Some moved)
+      (request ~digest_at:replaced ~first_atom:14 ~atom_count:20 ())
+      (Some (usage 800))
+  in
+  check string "another message at the moved front restarts" "history_reset"
+    (Ledger.event_to_string o.event)
 ;;
 
 (* The pair table sits behind an Eio mutex, so the table tests need a
@@ -415,9 +683,15 @@ let () =
     [ ( "difference"
       , [ test_case "first request" `Quick test_first_request_starts_with_one_unmeasured_block
         ; test_case "appended atoms" `Quick test_appended_atoms_are_measured_by_the_difference
-        ; test_case "tail change" `Quick test_tail_change_is_part_of_the_difference_and_reported
+        ; test_case "turn context" `Quick test_turn_context_request_is_not_a_sample
+        ; test_case "turn context first" `Quick
+            test_turn_context_request_starts_without_a_total
+        ; test_case "demotion boundary moved" `Quick
+            test_moved_demotion_boundary_merges_the_reformed_blocks
+        ; test_case "demotion over the cold block" `Quick
+            test_moved_demotion_boundary_over_an_unmeasured_block_leaves_it_unknown
         ; test_case "usage gap" `Quick test_usage_gap_measures_the_stretch_as_one_block
-        ; test_case "repeated range" `Quick test_repeated_range_records_only_the_tail_change
+        ; test_case "repeated range" `Quick test_repeated_range_adds_no_block
         ; test_case "repeated without usage" `Quick
             test_repeated_range_without_usage_changes_nothing
         ; test_case "negative difference" `Quick
@@ -438,6 +712,17 @@ let () =
     ; ( "restart"
       , [ test_case "prefix change" `Quick test_prefix_change_restarts
         ; test_case "shrunk history" `Quick test_shrunk_history_restarts
+        ; test_case "same count, another last message" `Quick
+            test_same_count_with_another_last_message_restarts
+        ; test_case "another message at the front" `Quick
+            test_another_message_at_the_front_restarts
+        ; test_case "a request without an atom" `Quick
+            test_a_request_without_an_atom_names_no_position
+        ; test_case "lookup without the appended atom" `Quick
+            test_a_lookup_without_the_appended_atom_restarts
+        ; test_case "both positions hold" `Quick test_both_positions_holding_keeps_appending
+        ; test_case "moved front checked at its position" `Quick
+            test_a_moved_front_is_checked_at_its_own_position
         ] )
     ; "json", [ test_case "counts only" `Quick test_json_reports_counts_not_the_block_list ]
     ; ( "inputs"

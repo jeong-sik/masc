@@ -112,7 +112,7 @@ let keeper_roster_marquee_target (state : state) ~cols =
 let acting_pane_columns (state : state) ~terminal_cols =
   let modal =
     Option.is_some state.lane_addons || state.palette_open || state.context_inspector_open || state.keeper_deletions_open || state.help_open
-    || state.agenda_open || state.answering_open
+    || state.agenda_open || state.answering_open || state.memory_fact_detail_open
   in
   if modal
      || Masc_tui_types.on_activity_screen state.view
@@ -6384,21 +6384,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                      lane.rrl_runtime_ids)
               in
               add_row "Failover Chain:" hops;
-              (match lane.rrl_preferred_candidate with
-               | Some pref ->
-                   let short_p =
-                     match String.split_on_char '.' pref with
-                     | [ _prov; m ] -> m
-                     | _ -> pref
-                   in
-                   add_row "Active Candidate:"
-                     (Printf.sprintf "%s (sticky winner)" short_p)
-               | None ->
-                   match lane.rrl_runtime_ids with
-                   | first :: _ ->
-                       add_row "Active Candidate:"
-                         (Printf.sprintf "%s (head)" first)
-                   | [] -> ())
+              (match lane.rrl_runtime_ids with
+               | first :: _ -> add_row "Head Candidate:" first
+               | [] -> ())
           | None -> ())
      | Some { ra_target_id = Some tid; _ } ->
          (match state.runtime_surface with
@@ -6915,8 +6903,34 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
               | Some _, _ ->
                   [ Ansi.dim ^ "  (no projection reported for this Keeper)" ^ Ansi.reset ]))
       | Detail_github ->
-          stamped_or state.github_identity_view
-            state.github_identity_view_error
+          let base =
+            stamped_or state.github_identity_view
+              state.github_identity_view_error
+          in
+          let input_lines =
+            match state.github_token_input with
+            | Some draft ->
+                let masked =
+                  let len = String.length draft in
+                  if len = 0 then "(empty)"
+                  else if len <= 8 then String.make len '*'
+                  else
+                    String.sub draft 0 4 ^ String.make (len - 8) '*' ^ String.sub draft (len - 4) 4
+                in
+                [ (Theme.ok ()) ^ "  ┌─ Set GitHub Personal Access Token (PAT) ─" ^ Ansi.reset
+                ; "  │ Token: " ^ masked ^ "█"
+                ; "  │ " ^ Ansi.dim ^ "(Enter: save, Esc: cancel)" ^ Ansi.reset
+                ; "  └─────────────────────────────────────────"
+                ; ""
+                ]
+            | None -> []
+          in
+          let status_lines =
+            match state.github_token_save_status with
+            | Some status -> [ "  " ^ status; "" ]
+            | None -> []
+          in
+          input_lines @ status_lines @ base
       | Detail_identity ->
           stamped_or
             (Option.map
@@ -9592,7 +9606,68 @@ let render_memory (state : state) =
         ~push:c.push ~push_styled:c.push_styled ~push_selected:c.push_selected
         ~push_divider:c.push_divider ~push_empty:c.push_empty)
 
-let render_memory_facts (state : state) =
+(* The Memory facts list's [Enter] reading: the whole fact wrapped to this
+   overlay's own width and windowed, instead of the narrow block the list
+   draws under the row. Same lines, more columns and more rows, and a scroll
+   of its own -- the list stays behind it and is redrawn when it closes.
+
+   It wears the shared overlay chrome, [Chrome_overlay], the frame the contract
+   names for a surface opened over another one: the box, the title and the
+   footer come from there, and the window it clamps to is the frame's own
+   budget rather than a second tally of the same rows. The window marker rides
+   the footer row the way the patch reading's does. *)
+let render_memory_fact_detail (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let facts = Masc_tui_types.memory_fact_rows state in
+  let total = List.length facts in
+  let cursor = max 0 (min state.memory_facts_cursor (max 0 (total - 1))) in
+  let detail_cols = max 30 (framed_inner_width cols) in
+  let lines =
+    match List.nth_opt facts cursor with
+    | None -> [ "    This list has no fact row to read." ]
+    | Some row -> Render_memory.memory_fact_detail_lines ~cols:detail_cols row
+  in
+  let total_lines = List.length lines in
+  (* The frame spends [surface_chrome_rows] of the body on its own chrome, so
+     the window's height is worked out here, from the number the frame itself
+     uses, before anything is drawn. Counting the buffer afterwards -- what
+     this surface did first -- is a second tally of one thing, and being one
+     row out is not a visible mistake: [finish_surface] drops the rows past the
+     edge, and the row it drops is the footer naming the way back. *)
+  let content_height =
+    max 1
+      (Masc_tui_types.surface_body_rows state ~terminal_rows - surface_chrome_rows)
+  in
+  let max_scroll = max 0 (total_lines - content_height) in
+  let scroll = min max_scroll (max 0 state.memory_fact_detail_scroll) in
+  surface_chrome state ~terminal_rows ~cols ~surface_key:"memory-fact-detail"
+    ~frame:Chrome_overlay
+    (* The drawing says what it actually clamped to, so [G]'s sentinel and a
+       scroll past the end are corrected in the state rather than only on the
+       screen. *)
+    ~clamped:(fun () -> Some (Memory_fact_detail_scroll scroll))
+    ~title:(screen_title " MASC MEMORY - FACT DETAIL")
+    ~hints:
+      (* The keys project the same bindings the help sheet carries, so the
+         footer and [?] cannot teach different keys. The marker leads, as the
+         patch reading's does: it carries no colon, so the fitter can shed no
+         whole key of it and a narrow terminal keeps the count. *)
+      (Printf.sprintf "[detail rows %s]  %s"
+         (Masc_tui_scroll.window_text ~scroll ~height:content_height total_lines)
+         Masc_tui_keys.memory_fact_detail_hints)
+    ~body:(fun ~budget:_ c ->
+      let window = Rows.of_list ~first:scroll ~height:content_height lines in
+      for i = 0 to content_height - 1 do
+        match Rows.at window (scroll + i) with
+        | None -> c.push_empty ()
+        | Some line -> c.push line
+      done)
+
+let rec render_memory_facts (state : state) =
+  if state.memory_fact_detail_open then render_memory_fact_detail state
+  else render_memory_facts_list state
+
+and render_memory_facts_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let open Masc.Tui_decode in
   let keeper_name = Render_memory.facts_keeper_label state.memory_facts_keeper in
@@ -10537,7 +10612,6 @@ let runtime_detail_lines state target ~width =
                ( row.rcr_runtime
                , [ row.rcr_lane_id ]
                , Some (row.rcr_position, row.rcr_candidate_count)
-               , row.rcr_preferred_at_ts
                , row.rcr_probe ))
     | Some snapshot, Runtime_catalog_entry { runtime_id } ->
         runtime_all_rows snapshot
@@ -10546,14 +10620,14 @@ let runtime_detail_lines state target ~width =
                let probe =
                  Tui_decode.runtime_probe_for_id snapshot ~runtime_id:runtime.ro_id
                in
-               runtime, lanes, None, None, probe)
+               runtime, lanes, None, probe)
   in
   match reading with
   | None ->
       [ Theme.warn (),
         "  This runtime row is no longer present in the refreshed projection"
       ]
-  | Some (runtime, lanes, position, preferred_at, probe) ->
+  | Some (runtime, lanes, position, probe) ->
       let fields =
         runtime_detail_field ~width ~style:Ansi.reset "Runtime ID" runtime.ro_id
         @ runtime_detail_field ~width ~style:Ansi.reset "Provider" runtime.ro_provider
@@ -10579,17 +10653,6 @@ let runtime_detail_lines state target ~width =
         | Some (at, total) ->
             runtime_detail_field ~width ~style:Ansi.reset "Lane position"
               (Printf.sprintf "%d of %d" at total)
-      in
-      let sticky =
-        match preferred_at with
-        | None -> []
-        | Some at ->
-            (* The terminal's clock, like every other timestamp on the screen;
-               the list row beside this reads "last success 19:18:20" and the
-               detail read the same instant as "2026-08-24T10:18:20Z". *)
-            runtime_detail_field ~width ~style:Ansi.dim "Last successful at"
-              (Terminal_text.short_timestamp
-                 (Masc_domain.iso8601_of_unix_seconds at))
       in
       let quota =
         match runtime_quota_badge runtime with
@@ -10669,7 +10732,7 @@ let runtime_detail_lines state target ~width =
             runtime_detail_field ~width ~style:Ansi.reset "Bound keepers" names
             @ runtime_detail_field ~width ~style:Ansi.reset "Keeper telemetry" activity_str
       in
-      fields @ candidate @ sticky @ quota @ keeper_lines @ probe_lines
+      fields @ candidate @ quota @ keeper_lines @ probe_lines
 
 let render_runtime_detail (state : state) target =
   let terminal_rows, cols = get_terminal_size () in
@@ -10998,7 +11061,6 @@ let render_runtime (state : state) =
           let runtime = candidate.rcr_runtime in
           let is_first = candidate.rcr_position = 1 in
           let is_last = candidate.rcr_position = candidate.rcr_candidate_count in
-          let is_active = Option.is_some candidate.rcr_preferred_at_ts in
           (* A lane id is the workspace's name and a fallback row's cell is
              this renderer's own word, and the two are cut by different
              rules -- see [runtime_label_column]. *)
@@ -11013,8 +11075,7 @@ let render_runtime (state : state) =
                    (candidate.rcr_position - 1))
           in
           let candidate_label =
-            Printf.sprintf "%s%d/%d %s"
-              (if is_active then "\xe2\x98\x85 " else "")
+            Printf.sprintf "%d/%d %s"
               candidate.rcr_position
               candidate.rcr_candidate_count
               (Terminal_text.single_line runtime.ro_id)
@@ -11043,30 +11104,9 @@ let render_runtime (state : state) =
             else []
           in
           let lane_fact =
-            match candidate.rcr_preferred_at_ts with
-            | Some at ->
-                (* One timestamp, said once. [rcr_preferred_at_ts] carries
-                   [Runtime_lane_preference.preferred_of_lane]'s [noted_at],
-                   which {!Runtime_lane_preference.note_success} re-stamps on
-                   every successful attempt -- so it is when the candidate
-                   last answered, and never a point the stickiness has run
-                   from. The row said both, printing the same value twice,
-                   and the "sticky since" half was the one that was not true.
-
-                   It also cost the width that made the rest of this cell
-                   disappear: 53 columns of detail in the 18 a 100-column
-                   terminal leaves it (#36131). *)
-                [ (Theme.ok ())
-                  ^ "\xe2\x98\x85 active (last success "
-                  ^ Terminal_text.clock_timestamp
-                      (Masc_domain.iso8601_of_unix_seconds at)
-                  ^ ")"
-                  ^ Ansi.reset
-                ]
-            | None when candidate.rcr_candidate_count = 1 -> [ "single candidate" ]
-            | None ->
-                if is_first then [ "head" ]
-                else [ Printf.sprintf "fallback #%d" (candidate.rcr_position - 1) ]
+            if candidate.rcr_candidate_count = 1 then [ "single candidate" ]
+            else if is_first then [ "head" ]
+            else [ Printf.sprintf "fallback #%d" (candidate.rcr_position - 1) ]
           in
           let default_fact = if runtime.ro_is_default then [ (Theme.ok ()) ^ "[default]" ^ Ansi.reset ] else [] in
           (* The lane fact leads. This cell is what is left of the row after
@@ -11817,20 +11857,8 @@ let render_runtime_pick (state : state) =
                          lane.rrl_runtime_ids)
                   in
                   let hops = Printf.sprintf "(%d hops)" (List.length lane.rrl_runtime_ids) in
-                  let pref =
-                    match lane.rrl_preferred_candidate with
-                    | Some p ->
-                        let short_p =
-                          match String.split_on_char '.' p with
-                          | [ _prov; m ] -> m
-                          | _ -> p
-                        in
-                        Printf.sprintf " [active: %s]" short_p
-                    | None -> ""
-                  in
                   let route_col = fit_width (Terminal_text.single_line chain) (max 24 (cols - 62)) in
-                  Printf.sprintf "%s%s  %s  %s%s"
-                    kind_badge target route_col hops (Ansi.dim ^ pref ^ Ansi.reset)
+                  Printf.sprintf "%s%s  %s  %s" kind_badge target route_col hops
               | Masc_tui_types.Pick_model option ->
                   let kind_badge = Ansi.dim ^ "[MODEL]" ^ Ansi.reset in
                   let target = fit_width (Terminal_text.single_line option.ro_id) 24 in

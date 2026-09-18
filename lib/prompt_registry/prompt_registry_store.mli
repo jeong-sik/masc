@@ -1,10 +1,10 @@
 (** Prompt_registry_store — process-wide prompt registry state +
     its read/write and override-mutation mutexes.
 
-    Owns the four Hashtbls and two refs that {!Prompt_registry}
+    Owns the three Hashtbls and two refs that {!Prompt_registry}
     rebinds at the top level so the rest of the codebase can
-    keep using the bare names ([Prompt_registry.registry] /
-    [Prompt_registry.override_tbl] / etc) while the storage
+    keep using the bare names ([Prompt_registry.override_tbl] /
+    [Prompt_registry.meta_tbl] / etc) while the storage
     layout itself lives in this module.
 
     The record is exposed concretely because every field is
@@ -13,10 +13,17 @@
     field without making the abstraction any richer.
 
     Internal helper [default_state] (the cached singleton) is
-    hidden — callers consume it through the {!default} accessor. *)
+    hidden — callers consume it through the {!default} accessor.
+
+    #29545: a fourth Hashtbl, [registry] (keyed by
+    [Prompt_registry_types.prompt_entry]), lived here until this
+    field was removed. Nothing ever wrote to it ([Hashtbl.replace
+    registry] / [Hashtbl.add registry] had zero call sites), so
+    every read through it was vacuously empty and it was not
+    exposed by [prompt_registry.mli]. Deleted along with the now-
+    fully-unused [prompt_entry] type. *)
 
 type t = {
-  registry : (string, Prompt_registry_types.prompt_entry) Hashtbl.t;
   version_index : (string, string list) Hashtbl.t;
   override_tbl :
     (string, Prompt_override_persistence.entry) Hashtbl.t;

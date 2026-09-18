@@ -185,3 +185,21 @@ let text_of_history_jsonl_json (json : Yojson.Safe.t) : string =
   match content_blocks_of_json json with
   | Some blocks -> text_of_blocks blocks
   | None -> ""
+
+(* How many bytes [message_to_json] would serialize to, counted by writing the
+   value and reading how much was written. [Yojson.Safe.to_string] is
+   [to_buffer] followed by [Buffer.contents], so the count is the same one and
+   the copy is what this drops.
+
+   One buffer per measurer, and a measurer belongs to one walk. [clear] keeps
+   the capacity the largest message already paid for, so a walk pays for the
+   buffer once instead of once per message; the buffer dies with the measurer.
+   Callers that measure a single message still want a measurer -- the buffer
+   costs more than the string a single measurement would have built. *)
+let message_measurer () =
+  let buffer = Buffer.create 65536 in
+  fun (message : Agent_core.Types.message) ->
+    Buffer.clear buffer;
+    Yojson.Safe.to_buffer buffer (message_to_json message);
+    Buffer.length buffer
+;;

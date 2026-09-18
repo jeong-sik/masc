@@ -470,6 +470,8 @@ let effective_setting_value (row : Keeper_runtime_setting_registry.setting) =
          display_int (Env_config_keeper.KeeperWireCapture.max_bytes ())
        | "MASC_KEEPER_DEBUG" ->
          display_bool Env_config_keeper.KeeperRuntime.debug
+       | "MASC_KEEPER_ADMISSION_MAX_EVENTS" ->
+         display_int (Env_config_keeper.KeeperAdmissionBounds.max_events ())
        | "MASC_KEEPER_BATCH_LIMIT" ->
          display_int
            (bounded_int_from_env

@@ -2148,6 +2148,7 @@ type async_msg =
       (** provider id, then how many scopes were recorded *)
   | Github_login_lines of string * string list
   | Github_login_finished of string * (unit, string) result
+  | Github_token_saved of string * (Yojson.Safe.t, string) result
   | Observer_opened of {
       session_id : string;
       handshake : (Sse_wire.observer_handshake option, string) result;
@@ -3858,7 +3859,11 @@ let launch_code_entries_load state ~mailbox =
       in
       match Eio_context.get_switch_opt () with
       | Some sw ->
-          Eio.Fiber.fork_daemon ~sw (fun () ->
+          Masc_tui_fork_guard.launch ~sw
+            ~on_sync_failure:(fun detail ->
+                enqueue_async mailbox
+                  (Code_entries_loaded (request, Error detail)))
+            (fun () ->
               run ();
               `Stop_daemon)
       | None ->
@@ -4226,6 +4231,28 @@ let launch_github_login state ~mailbox keeper_name =
   | None ->
       enqueue_async mailbox
         (Github_login_finished (keeper_name, Error "Eio switch is unavailable"))
+
+let launch_github_token_save state ~mailbox keeper_name token =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try
+        Masc_tui_http.post_keeper_github_token ~host ~port ~keeper_name ~token ()
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Github_token_saved (keeper_name, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Github_token_saved (keeper_name, Error "Eio switch is unavailable"))
 
 let launch_runtime_config_load state ~mailbox =
   let host = server_peer_host in
@@ -4732,7 +4759,11 @@ let launch_connectors_load state ~mailbox =
     in
     match Eio_context.get_switch_opt () with
     | Some sw ->
-        Eio.Fiber.fork_daemon ~sw (fun () ->
+        Masc_tui_fork_guard.launch ~sw
+          ~on_sync_failure:(fun detail ->
+              state.connectors_inflight <- false;
+              enqueue_async mailbox (Connectors_loaded (Error detail)))
+          (fun () ->
             run ();
             `Stop_daemon)
     | None ->
@@ -5082,7 +5113,11 @@ let launch_repositories_load state ~mailbox =
     in
     match Eio_context.get_switch_opt () with
     | Some sw ->
-        Eio.Fiber.fork_daemon ~sw (fun () ->
+        Masc_tui_fork_guard.launch ~sw
+          ~on_sync_failure:(fun detail ->
+              state.repositories_inflight <- false;
+              enqueue_async mailbox (Repositories_loaded (Error detail)))
+          (fun () ->
             run ();
             `Stop_daemon)
     | None ->
@@ -5107,7 +5142,11 @@ let launch_memory_health_load state ~mailbox =
     in
     match Eio_context.get_switch_opt () with
     | Some sw ->
-        Eio.Fiber.fork_daemon ~sw (fun () ->
+        Masc_tui_fork_guard.launch ~sw
+          ~on_sync_failure:(fun detail ->
+              state.memory_health_inflight <- false;
+              enqueue_async mailbox (Memory_loaded (Error detail)))
+          (fun () ->
             run ();
             `Stop_daemon)
     | None ->
@@ -5695,7 +5734,11 @@ let launch_harness_load state ~mailbox =
     in
     match Eio_context.get_switch_opt () with
     | Some sw ->
-        Eio.Fiber.fork_daemon ~sw (fun () ->
+        Masc_tui_fork_guard.launch ~sw
+          ~on_sync_failure:(fun detail ->
+              state.harness_inflight <- false;
+              enqueue_async mailbox (Harness_loaded (Error detail)))
+          (fun () ->
             run ();
             `Stop_daemon)
     | None ->
@@ -5812,7 +5855,11 @@ let launch_keeper_lanes_load state ~mailbox =
     in
     match Eio_context.get_switch_opt () with
     | Some sw ->
-        Eio.Fiber.fork_daemon ~sw (fun () ->
+        Masc_tui_fork_guard.launch ~sw
+          ~on_sync_failure:(fun detail ->
+              state.keeper_lanes_inflight <- false;
+              enqueue_async mailbox (Lanes_loaded (Error detail)))
+          (fun () ->
             run ();
             `Stop_daemon)
     | None ->
@@ -5839,7 +5886,12 @@ let launch_lanes_load state ~mailbox =
     in
     match Eio_context.get_switch_opt () with
     | Some sw ->
-        Eio.Fiber.fork_daemon ~sw (fun () ->
+        Masc_tui_fork_guard.launch ~sw
+          ~on_sync_failure:(fun detail ->
+              state.standalone_lanes_inflight <- false;
+              enqueue_async mailbox
+                (Standalone_lanes_loaded (standalone_generation, Error detail)))
+          (fun () ->
             run ();
             `Stop_daemon)
     | None ->
@@ -5866,7 +5918,14 @@ let launch_clients_load state ~mailbox =
       enqueue_async mailbox (Clients_loaded (generation, result))
     in
     match Eio_context.get_switch_opt () with
-    | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+    | Some sw ->
+        Masc_tui_fork_guard.launch ~sw
+          ~on_sync_failure:(fun detail ->
+              state.clients_surface_inflight <- false;
+              enqueue_async mailbox (Clients_loaded (generation, Error detail)))
+          (fun () ->
+            run ();
+            `Stop_daemon)
     | None ->
         state.clients_surface_inflight <- false;
         enqueue_async mailbox
@@ -5972,7 +6031,11 @@ let launch_verification_load state ~mailbox =
     in
     match Eio_context.get_switch_opt () with
     | Some sw ->
-        Eio.Fiber.fork_daemon ~sw (fun () ->
+        Masc_tui_fork_guard.launch ~sw
+          ~on_sync_failure:(fun detail ->
+              state.verification_inflight <- false;
+              enqueue_async mailbox (Verification_loaded (Error detail)))
+          (fun () ->
             run ();
             `Stop_daemon)
     | None ->
@@ -13340,6 +13403,20 @@ let apply_async_message state ~base_path ~http_refresh_inflight
        | Error detail ->
            add_event state "error" (keeper_name ^ ": github login: " ^ detail));
       launch_github_identity_view state ~mailbox keeper_name)
+  | Github_token_saved (keeper_name, result) -> (
+      (match result with
+       | Ok json ->
+           add_event state "system" (keeper_name ^ ": github token saved");
+           state.github_token_save_status <-
+             Some ((Theme.ok ()) ^ "✓ Token saved successfully" ^ Ansi.reset);
+           state.github_identity_view <-
+             Some (keeper_name, Masc_tui_loader.github_identity_lines json);
+           state.github_identity_view_error <- None
+       | Error detail ->
+           add_event state "error" (keeper_name ^ ": github token save: " ^ detail);
+           state.github_token_save_status <-
+             Some ((Theme.bad ()) ^ "✗ Token save failed: " ^ detail ^ Ansi.reset));
+      launch_github_identity_view state ~mailbox keeper_name)
   | System_logs_loaded result -> apply_system_logs_load state result
   | Schedules_loaded (request, result) -> (
       match Snapshot_read.settle state.schedules_read request with
@@ -17048,6 +17125,9 @@ and is loaded on demand through keeper_skill.
                 state.identity_filter <-
                   Some (Option.value state.identity_filter ~default:"" ^ text);
                 state.identity_cursor <- 0
+            | Some Text_github_token ->
+                let current = Option.value state.github_token_input ~default:"" in
+                state.github_token_input <- Some (current ^ text)
             (* A board post holds many lines, so this one takes the paste
                whole rather than on one line. It does not spill to a file the
                way the chat draft does: that file is written into the keeper's
@@ -18849,6 +18929,31 @@ and is loaded on demand through keeper_skill.
                   || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
              narrow (query ^ s)
            | _ -> ())
+       | Some k
+         when text_input_target state ~compact_viewport
+              = Some Text_github_token -> (
+           let draft = Option.value state.github_token_input ~default:"" in
+           match k with
+           | "esc" ->
+               state.github_token_input <- None
+           | "\127" | "\b" ->
+               state.github_token_input <-
+                 Some (Masc_tui_message_layout.drop_last_utf8_scalar draft)
+           | "\r" | "\n" -> (
+               match selected_keeper state with
+               | Some keeper ->
+                   let token = String.trim draft in
+                   state.github_token_input <- None;
+                   if not (String.equal token "") then (
+                     state.github_token_save_status <-
+                       Some (Ansi.dim ^ "Saving GitHub token…" ^ Ansi.reset);
+                     launch_github_token_save state ~mailbox:async_messages keeper.k_name token)
+               | None -> state.github_token_input <- None)
+           | s
+             when (String.length s = 1 && Char.code s.[0] >= 32)
+                  || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
+               state.github_token_input <- Some (draft ^ s)
+           | _ -> ())
        | Some "/"
          when state.view = Keepers Keeper_detail
               && state.detail_tab = Detail_identity
@@ -19458,6 +19563,11 @@ and is loaded on demand through keeper_skill.
                   Some (keeper.k_name, [ "# github login"; "(starting gh device flow\xe2\x80\xa6)" ]);
                 launch_github_login state ~mailbox:async_messages keeper.k_name
             | None -> ())
+       | Some ("P" | "p")
+         when state.view = Keepers Keeper_detail
+              && state.detail_tab = Detail_github ->
+           state.github_token_input <- Some "";
+           state.github_token_save_status <- None
        (* The number the Identity tab printed. Both sides index
           [identity_connectable], so what the screen numbered and what this
           starts are the same list. *)
@@ -19610,6 +19720,32 @@ and is loaded on demand through keeper_skill.
            goto_surface state ~mailbox:async_messages Tools
        (* System logs hang off Activity the same way: one key from the
           parent, off the Tab ring. *)
+       | Some ("esc" | "left") when state.view = Memory && state.memory_fact_detail_open ->
+           state.memory_fact_detail_open <- false;
+           state.memory_fact_detail_scroll <- 0
+       | Some ("j" | "down" | "k" | "up" | "pageup" | "pagedown" | "g" | "G" as move)
+         when state.view = Memory && state.memory_fact_detail_open ->
+           let terminal_rows, _ = get_terminal_size () in
+           let page = max 1 (surface_body_rows state ~terminal_rows) in
+           (match move with
+            | "g" -> state.memory_fact_detail_scroll <- 0
+            | "G" ->
+                (* Rendering clamps this to the claim's final wrapped page, the
+                   way the acting reading clamps its own. *)
+                state.memory_fact_detail_scroll <- max_int
+            | _ ->
+                let delta = match move with
+                  | "j" | "down" -> 1 | "k" | "up" -> -1
+                  | "pageup" -> -page | _ -> page in
+                state.memory_fact_detail_scroll <-
+                  (if delta > 0 then
+                     Masc_tui_types.scroll_down_from state.memory_fact_detail_scroll
+                       ~by:delta
+                   else max 0 (state.memory_fact_detail_scroll + delta)))
+       | Some ("\r" | "\n" | "enter")
+         when state.view = Memory && Option.is_some state.memory_facts_keeper ->
+           state.memory_fact_detail_open <- true;
+           state.memory_fact_detail_scroll <- 0
        | Some ("esc" | "left")
          when state.view = Acting && Option.is_some state.acting_detail ->
            state.acting_detail <- None;

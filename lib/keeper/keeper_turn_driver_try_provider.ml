@@ -41,6 +41,12 @@ type provider_progress_sample =
             answered; nobody had. *)
   }
 
+(* What this dispatch's checkpoints have recorded so far, strongest last. *)
+type checkpoint_progress =
+  | No_checkpoint_stage
+  | Checkpoint_stage_reached
+  | Tool_results_saved
+
 (** Explicit context record for the extracted [try_provider] function.
 
     Each field corresponds to a variable captured by the original closure.
@@ -50,14 +56,16 @@ type try_provider_ctx =
   { (* Runtime identity *)
     runtime_id : string
   ; error_runtime_id : string
-  ; (* The marks the carried range is judged against after each response
-       (RFC keeper-context-window-in-tokens §10.5), declared on the binding.
-       [None] leaves eviction to a refusal alone. *)
+  ; (* The marks the carried range is judged against once per candidate turn,
+       before its first composition (RFC keeper-context-window-in-tokens
+       §10.5), declared on the binding. [None] leaves eviction to a refusal
+       alone. *)
     context_marks : Runtime_schema.context_marks option
   ; (* Where the carried range starts when the process holds no ledger for
-       this (keeper, runtime) pair: the range the newest completed turn record
-       on the runtime measured. Read once per attempt, on that path only. *)
-    carried_front_seed : unit -> Keeper_carried_front.seed option
+       this (keeper, runtime) pair: the range the newest completed Agent Core
+       turn record on the trace measured, whichever runtime ran it. Read once
+       per attempt, on that path only. *)
+    carried_front_seed : unit -> Keeper_carried_front.seed_read
   ; base_path : string
   ; keeper_name : string
   ; name : string
@@ -135,7 +143,7 @@ type try_provider_ctx =
   ; cache_system_prompt : bool
   ; yield_on_tool : bool
   ; checkpoint_sink : Agent_core.Agent.checkpoint_sink option
-  ; checkpoint_stage_observed : bool Atomic.t
+  ; checkpoint_progress : checkpoint_progress Atomic.t
   ; context_injector : Agent_core.Hooks.context_injector option
   ; context : Agent_core.Context.t option
   ; enable_thinking : bool option
@@ -291,11 +299,78 @@ let apply_accept
     @return [(result, checkpoint_after, liveness_success_sample)] tuple. The
     sample is not recorded here; the caller records it only after the runtime
     accept predicate accepts the response. *)
-let observe_checkpoint_stage observed (_ : Agent_core.Agent.checkpoint_stage) =
-  Atomic.set observed true
+(* Progress only moves forward: a later stage never erases a saved tool
+   result, and a stage reached after one does not lower it. *)
+let progress_advances ~current ~next =
+  match current, next with
+  | No_checkpoint_stage, (Checkpoint_stage_reached | Tool_results_saved)
+  | Checkpoint_stage_reached, Tool_results_saved ->
+    true
+  | No_checkpoint_stage, No_checkpoint_stage
+  | Checkpoint_stage_reached, (No_checkpoint_stage | Checkpoint_stage_reached)
+  | Tool_results_saved, (No_checkpoint_stage | Checkpoint_stage_reached | Tool_results_saved) ->
+    false
 ;;
 
-let same_run_retry_allowed observed = not (Atomic.get observed)
+let rec advance_checkpoint_progress progress next =
+  let current = Atomic.get progress in
+  if progress_advances ~current ~next
+     && not (Atomic.compare_and_set progress current next)
+  then advance_checkpoint_progress progress next
+;;
+
+let observe_checkpoint_stage progress (_ : Agent_core.Agent.checkpoint_stage) =
+  advance_checkpoint_progress progress Checkpoint_stage_reached
+;;
+
+(* RFC last-path-resumes-after-progress §3.2: a chat operation resumes from its
+   latest saved checkpoint, so only a stage written after tools ran, and
+   written to that checkpoint, is progress a resumed attempt does not repeat.
+   [After_assistant_collected] is saved before accept judges the answer and
+   keeps a refused one, so counting it would resume into the same refusal.
+
+   Only the sink's owner may call this. A sink answers [Ok ()] for a write it
+   skipped as well as for one it made: the keeper's checkpoint store answers
+   [Stale_noop] when the canonical checkpoint is already ahead of the incoming
+   turn, and the keeper's sink turns that into [Ok ()]
+   ([Keeper_agent_run], [Keeper_checkpoint_store.Stale_noop]). Reading progress
+   off that answer would claim a checkpoint the operation would not resume
+   from, and the tools it holds would run a second time. *)
+let observe_checkpoint_saved progress (stage : Agent_core.Agent.checkpoint_stage) =
+  match stage with
+  | Agent_core.Agent.After_tool_results_appended
+  | Agent_core.Agent.After_context_injection ->
+    advance_checkpoint_progress progress Tool_results_saved
+  | Agent_core.Agent.After_assistant_collected
+  | Agent_core.Agent.After_rejected_response_dropped ->
+    ()
+;;
+
+(* The stage is marked before the save is delegated: a failed save still ends
+   same-run retry, because the attempt may already hold effects. What the sink
+   did with the checkpoint is not read here -- its answer does not say whether
+   anything was written -- so the sink's owner marks that itself with
+   [observe_checkpoint_saved]. A dispatch whose owner marks nothing holds no
+   saved tool results, and its lane's last candidate ends the turn as it did
+   before this observation existed. *)
+let observing_checkpoint_sink progress sink (snapshot : Agent_core.Agent.checkpoint_snapshot) =
+  observe_checkpoint_stage progress snapshot.stage;
+  match sink with
+  | None -> Ok ()
+  | Some sink -> sink snapshot
+;;
+
+let same_run_retry_allowed progress =
+  match Atomic.get progress with
+  | No_checkpoint_stage -> true
+  | Checkpoint_stage_reached | Tool_results_saved -> false
+;;
+
+let tool_results_saved progress =
+  match Atomic.get progress with
+  | Tool_results_saved -> true
+  | No_checkpoint_stage | Checkpoint_stage_reached -> false
+;;
 
 (* #28417: how often the stall watchdog samples the progress signal while a
    provider attempt runs. Small enough that the reported stall time stays
@@ -450,29 +525,6 @@ let rec await_person_queued_preemption ~clock ~first_event_seen ~person_queued =
     else await_person_queued_preemption ~clock ~first_event_seen ~person_queued
 ;;
 
-(* The canonical MASC message encoder, also used for checkpoint serialization.
-   It is not the provider's encoder, and nothing here converts its bytes to
-   tokens: the range is a position on the atom axis, the bytes it measures
-   are judged against the request-body cap alone, and the provider counts
-   the tokens (RFC keeper-context-window-in-tokens).
-
-   [Yojson.Safe.to_string] is [to_buffer] followed by [Buffer.contents], so
-   measuring through a buffer counts the same bytes and stops allocating a
-   copy of every message to read its length. Projection measures the whole
-   durable history per attempt, and a keeper turn makes 62 to 83 attempts.
-
-   One buffer per measurer. A measurer is driven by one fiber, and its pool
-   jobs run under [Eio.Executor_pool.submit_exn], which blocks until the job
-   finishes, so two domains are never inside the buffer at once. [clear] keeps
-   the capacity the largest message already paid for; the buffer dies with the
-   measurer. *)
-let message_measurer () =
-  let buffer = Buffer.create 65536 in
-  fun (message : Agent_core.Types.message) ->
-    Buffer.clear buffer;
-    Yojson.Safe.to_buffer buffer (Keeper_context_core.message_to_json message);
-    Buffer.length buffer
-;;
 
 (* The memo is keyed by message value ([Agent_core.Types.Message_value]). Each
    request passes its history through [Complete_common.transmitted_history],
@@ -552,7 +604,18 @@ type composed =
   ; transmitted_bytes : int
   ; history_atom_count : int
   ; origin : Keeper_carried_front.origin
-  ; outlived_seed : Keeper_carried_front.seed option
+  ; outlived_seed : (Keeper_carried_front.seed * Keeper_carried_front.dropped_front) option
+  ; demote_before : int
+        (* The boundary the demotion actually applied: 0 when demotion is off,
+           the whole history under the last resort. *)
+  }
+
+(* A request as the ledger reads it, with the history it was composed from:
+   the ledger checks its last positions against that history, and a halving
+   names its new front by it. *)
+type sent_request =
+  { request : Keeper_model_input_ledger.request
+  ; digest_at : int -> string option
   }
 
 (* What one provider attempt carries between its requests and the retry
@@ -560,7 +623,7 @@ type composed =
    resort is armed for the next composition, and how to ask whether arming
    it would change anything. *)
 type attempt_state =
-  { last_request : Keeper_model_input_ledger.request option ref
+  { last_request : sent_request option ref
   ; last_resort_armed : bool ref
   ; last_resort_probe : (unit -> bool) option ref
   }
@@ -578,10 +641,16 @@ let ledger_session (ctx : try_provider_ctx) =
   | None -> "-"
 ;;
 
+(* An empty base path turns demotion off, so no atom is below the boundary. *)
+let applied_demote_before ~base_path ~demote_before =
+  if String.equal base_path "" then 0 else demote_before
+;;
+
 let demotion_plan ~measure_message_bytes ~base_path ~demote_before messages =
-  if String.equal base_path "" || demote_before = 0
-  then { Keeper_model_input_demotion.messages; pending = [] }
-  else Keeper_model_input_demotion.plan ~measure_message_bytes ~demote_before messages
+  match applied_demote_before ~base_path ~demote_before with
+  | 0 -> { Keeper_model_input_demotion.messages; pending = [] }
+  | demote_before ->
+    Keeper_model_input_demotion.plan ~measure_message_bytes ~demote_before messages
 ;;
 
 (* Whether the last resort has anything to do: the current turn's own atoms
@@ -599,36 +668,56 @@ let last_resort_demotes ~measure_message_bytes ~base_path messages =
 let compose_carried_model_input
       ~measure_message_bytes
       ~(front : Keeper_carried_front.seed option)
+      ~(history_digest_at : int -> string option)
       ~last_resort
       ~base_path
       ~demote_before
       messages
   =
   let _labelled, history_atom_count = Runtime_model_input_tail_window.annotate messages in
-  (* A front measured against a longer history names no atom of this one:
-     the history shrank under it (a checkpoint purge), so the request starts
-     over as with no front rather than carrying the newest atom alone from a
-     position that would never widen again. *)
+  (* A front whose index this history does not open with the same message
+     names no atom of it: the history is shorter than the front, or atoms
+     before the front were purged. The request starts over as with no front
+     rather than carrying the newest atom alone from a position that would
+     never widen again. A history that only lost an unsaved attempt's tail
+     keeps the position. *)
   let front, outlived_seed =
     match front with
     | Some seed ->
-      (match Keeper_carried_front.for_history ~atom_count:history_atom_count seed with
-       | Some seed -> Some seed, None
-       | None -> None, Some seed)
+      (match Keeper_carried_front.for_history ~digest_at:history_digest_at seed with
+       | Ok seed -> Some seed, None
+       | Error dropped -> None, Some (seed, dropped))
     | None -> None, None
   in
+  let demote_before = if last_resort then history_atom_count else demote_before in
   let planned =
-    demotion_plan
-      ~measure_message_bytes
-      ~base_path
-      ~demote_before:(if last_resort then history_atom_count else demote_before)
-      messages
+    demotion_plan ~measure_message_bytes ~base_path ~demote_before messages
   in
   let projection, transmitted_bytes, origin =
     match front with
     | Some (seed : Keeper_carried_front.seed) ->
       let first_atom =
         Keeper_carried_front.clamp ~atom_count:history_atom_count seed.first_atom
+      in
+      (* A range the provider refused is a ceiling, not a start. The turn that
+         carried it never finished, so its front is the largest range known to
+         be too big, and starting there again sends that range plus whatever
+         the history gained since. The move is the one a refusal forces inside
+         a turn (RFC keeper-context-window-in-tokens §10.4), continued across
+         the turn boundary instead of restarting: halfway toward the newest
+         atom. When one atom is left the ceiling itself stands, and the
+         in-turn ladder answers the next refusal. *)
+      let first_atom =
+        match seed.source with
+        | Keeper_carried_front.Refused_range _ ->
+          (match
+             Keeper_carried_front.halve ~first_atom ~atom_count:history_atom_count
+           with
+           | Some halved -> halved
+           | None -> first_atom)
+        | Keeper_carried_front.Ledger
+        | Keeper_carried_front.Turn_record _
+        | Keeper_carried_front.Halved_after_refusal _ -> first_atom
       in
       let projection, transmitted_bytes =
         Runtime_model_input_tail_window.project_from_atom
@@ -646,20 +735,94 @@ let compose_carried_model_input
       in
       projection, transmitted_bytes, Keeper_carried_front.Whole_history
   in
-  { planned; projection; transmitted_bytes; history_atom_count; origin; outlived_seed }
+  { planned
+  ; projection
+  ; transmitted_bytes
+  ; history_atom_count
+  ; origin
+  ; outlived_seed
+  ; demote_before = applied_demote_before ~base_path ~demote_before
+  }
 ;;
 
-let projected_initial_message_count ~provider_config initial_messages =
-  match initial_messages with
-  | [] -> 0
-  | initial ->
-    (match
-       Agent_core.Llm_provider.Complete_common.transmitted_history
-         ~config:provider_config
-         initial
-     with
-     | Ok projected -> List.length projected
-     | Error _ -> List.length initial)
+(* One request: the range composed in the durable vocabulary, its demotions
+   materialized, then the wire's view of the carried range. [composed] and
+   [carried] count atoms of the checkpoint history — the vocabulary of the
+   ledger, the seed and the forecast — and [wire] is the dialect's reasoning
+   projection over [carried] alone, or why it declined. The order is the
+   point: a position measured on one runtime names the same atom on every
+   runtime whatever reasoning each dialect replays or deletes, a dialect that
+   deletes a whole reasoning-only assistant message shortens the wire list
+   and not the history the front is a position in, and the projection walks
+   the carried range rather than the whole checkpoint. Projecting first
+   would make the atom count a property of the dialect, so a front read from
+   another runtime's record could fall under
+   [Keeper_carried_front.for_history] and start the whole history over. *)
+type request_view =
+  { composed : composed
+  ; carried : Agent_core.Types.message list
+  ; wire :
+      ( Agent_core.Types.message list
+        , Agent_core.Llm_provider.Reasoning_history_projection.error )
+        result
+  }
+
+let request_view
+      ~provider_config
+      ~measure_message_bytes
+      ~front
+      ~history_digest_at
+      ~last_resort
+      ~base_path
+      ~demote_before
+      ~materialize
+      messages
+  =
+  let composed =
+    offload_model_input_cpu (fun () ->
+      compose_carried_model_input
+        ~measure_message_bytes
+        ~front
+        ~history_digest_at
+        ~last_resort
+        ~base_path
+        ~demote_before
+        messages)
+  in
+  let carried =
+    match composed.planned.Keeper_model_input_demotion.pending with
+    | [] -> composed.projection.Runtime_model_input_tail_window.messages
+    | pending -> materialize ~pending composed.projection.Runtime_model_input_tail_window.messages
+  in
+  let wire =
+    offload_model_input_cpu (fun () ->
+      Agent_core.Llm_provider.Complete_common.transmitted_history
+        ~config:provider_config
+        carried)
+  in
+  { composed; carried; wire }
+;;
+
+(* Where the next request's range starts (RFC keeper-context-window-in-tokens
+   §10.3, §10.4). The pair's ledger answers only while the history this
+   request composes from still opens its front and newest atom with the
+   messages it recorded; one that does not is dropped here, where the
+   mismatch is first seen, and is returned so the caller can say so. Kept
+   instead, its front would be dropped by [Keeper_carried_front.for_history]
+   on every request while its stale blocks and front still answered the
+   refusal path, which then retried the whole history without end. The cold
+   seed is read only when no ledger answers. *)
+let carried_front ~keeper_name ~runtime_id ~session_id ~digest_at ~cold =
+  match
+    Keeper_model_input_ledger.Table.lookup_in_history
+      ~keeper_name
+      ~runtime_id
+      ~session_id
+      ~digest_at
+  with
+  | Keeper_model_input_ledger.Table.Holds ledger -> Keeper_carried_front.of_ledger ledger, None
+  | Keeper_model_input_ledger.Table.Dropped_stale stale -> cold (), Some stale
+  | Keeper_model_input_ledger.Table.Absent -> cold (), None
 ;;
 
 (* The carried range runs here rather than in the caller because its front
@@ -694,9 +857,9 @@ let bounded_model_input_projection
         ~system_prompt:ctx.system_prompt
         ~tools:ctx.tools)
   in
-  let initial_message_index =
-    projected_initial_message_count ~provider_config ctx.initial_messages
-  in
+  (* A position in the durable history, which is what the composition
+     annotates: the messages the turn was seeded with come first. *)
+  let initial_message_index = List.length ctx.initial_messages in
   (* One memo per provider attempt, not per request.  A turn issues one
      projection per provider request — measured on the live wire capture:
      83 requests for turn 12263, 62 for 15638 — and every request re-measures
@@ -714,7 +877,9 @@ let bounded_model_input_projection
      The memo is keyed by message value ([Agent_core.Types.Message_value]), so
      a record that projection rebuilt for this request still hits the entry an
      earlier request measured. *)
-  let measure_message_bytes = memoize_message_measurement (message_measurer ()) in
+  let measure_message_bytes =
+    memoize_message_measurement (Keeper_context_core.message_measurer ())
+  in
   (* Scoped to the attempt for the same reason and with the same safety: the
      demotion boundary is pinned to the turn's seed, so every request of this
      attempt demotes the same aged tool results, and addressing one is a
@@ -725,11 +890,12 @@ let bounded_model_input_projection
   (* Scoped to the attempt, written by the one fiber that drives it. The
      closure below runs per provider request — 62 to 83 of them in one keeper
      turn on the traces this window's own comment cites — and a keeper whose
-     history carries a malformed tag falls back on every one of them, forever.
-     Narrating that per request is the shape this codebase already had to undo
-     once: [Reasoning_history_projection.observe]'s comment records a WARN
-     firing ~973x/day about routine normalisation before it was demoted. *)
-  let fallback_reported = ref false in
+     carried range holds a malformed tag declines on every one of them until
+     the range moves past it. Narrating that per request is the shape this
+     codebase already had to undo once: [Reasoning_history_projection.observe]'s
+     comment records a WARN firing ~973x/day about routine normalisation
+     before it was demoted. *)
+  let decline_reported = ref false in
   (* Once per attempt, not per request, for the same reason: where the range
      started for the first request, and a range that passes the request-body
      cap. Each is a fact an operator reads against the declaration; neither
@@ -741,57 +907,32 @@ let bounded_model_input_projection
      on every request after it. *)
   let cold_seed = lazy (ctx.carried_front_seed ()) in
   fun messages ->
-    (* Measure the history the wire will carry, not the history the checkpoint
-       holds. [Keeper_context_core.message_to_json] is the durable encoder — it
-       must keep reasoning verbatim — but a dialect that replays none of it
-       deletes every such block before serialization. Budgeting against the
-       durable shape charges the window for bytes the provider never receives,
-       and the room they take comes out of transmitted conversation: 23.6% of
-       it on a live 2026-08-14 trace from a reasoning-heavy lane.
-
-       The projection is the same one the serializer runs, through the same
-       per-codec function, and it is idempotent — the backend applying it again
-       to this output finds nothing left to drop. *)
-    let messages, measurement =
-      match
-        Agent_core.Llm_provider.Complete_common.transmitted_history
-          ~config:provider_config
-          messages
-      with
-      | Ok transmitted -> transmitted, Turn_record.Wire_shape
-      | Error error ->
-        (* A refusal here must not become the turn's refusal. The projection
-           validates reasoning provenance across the whole list it is given,
-           and it is given the whole checkpoint — so one malformed tag anywhere
-           in a keeper's lifetime would otherwise abort every later turn, with
-           no typed refusal for the eviction retry to catch. Before this
-           composition existed the same check ran only over the transmitted
-           tail, inside the backend, and still does: falling back to the
-           durable shape restores exactly that scope. The cost is measuring
-           bytes the wire deletes, which is the previous behaviour, not a new
-           failure. *)
-        if not !fallback_reported
-        then (
-          fallback_reported := true;
-          Log.Keeper.warn
-            "%s: model input measured against durable shape; reasoning \
-             projection declined: %s"
-            ctx.keeper_name
-            (Agent_core.Llm_provider.Reasoning_history_projection
-             .error_to_string
-               error));
-        messages, Turn_record.Durable_shape
+    (* [messages] is the durable history, the checkpoint's messages, in which
+       the ledger, the seed and the forecast count atoms; the range is
+       composed in that vocabulary and the wire's projection runs afterwards
+       over the carried range alone ([request_view]). *)
+    let history_digest_at =
+      offload_model_input_cpu (fun () ->
+        Runtime_model_input_tail_window.atom_opening_digest messages)
     in
-    let front =
-      match
-        Keeper_model_input_ledger.Table.lookup
-          ~keeper_name:ctx.keeper_name
-          ~runtime_id:ctx.runtime_id
-          ~session_id:(ledger_session ctx)
-      with
-      | Some ledger -> Some (Keeper_carried_front.of_ledger ledger)
-      | None -> Lazy.force cold_seed
+    let front, dropped_ledger =
+      carried_front
+        ~keeper_name:ctx.keeper_name
+        ~runtime_id:ctx.runtime_id
+        ~session_id:(ledger_session ctx)
+        ~digest_at:history_digest_at
+        ~cold:(fun () -> (Lazy.force cold_seed).Keeper_carried_front.seed)
     in
+    Option.iter
+      (fun stale ->
+         Log.Keeper.info
+           ~keeper_name:ctx.keeper_name
+           "model input ledger dropped runtime=%s: the history this request composes \
+            from does not open the ledger's front or newest atom with the message it \
+            recorded ledger=%s"
+           ctx.runtime_id
+           (Yojson.Safe.to_string (Keeper_model_input_ledger.to_json stale)))
+      dropped_ledger;
     (* The last resort is consumed by one composition: the request it shapes
        is the retry the refusal asked for, and the requests after a success
        compose with the ordinary boundary again. *)
@@ -814,33 +955,85 @@ let bounded_model_input_projection
                 ~measure_message_bytes
                 ~base_path:demotion_base_path
                 messages));
-    let composed =
+    (* RFC-0351 §4: a tool result is cycle-scoped. What the keeper is
+       reasoning over right now is what this turn produced, and
+       [ctx.initial_messages] is exactly the history the turn was seeded
+       with — so everything past it is this turn's own work and stays
+       verbatim, and everything before it was already reported through a
+       receipt or a board post and becomes a readable address. The
+       boundary moves once per turn, so appending a message cannot
+       rewrite the retained prefix. *)
+    let demote_before =
       offload_model_input_cpu (fun () ->
-        (* RFC-0351 §4: a tool result is cycle-scoped. What the keeper is
-           reasoning over right now is what this turn produced, and
-           [ctx.initial_messages] is exactly the history the turn was seeded
-           with — so everything past it is this turn's own work and stays
-           verbatim, and everything before it was already reported through a
-           receipt or a board post and becomes a readable address. The
-           boundary moves once per turn, so appending a message cannot
-           rewrite the retained prefix. *)
-        let demote_before =
-          Runtime_model_input_tail_window.first_atom_at_or_after
-            messages
-            ~message_index:initial_message_index
-        in
-        compose_carried_model_input
-          ~measure_message_bytes
-          ~front
-          ~last_resort
-          ~base_path:demotion_base_path
-          ~demote_before
-          messages)
+        Runtime_model_input_tail_window.first_atom_at_or_after
+          messages
+          ~message_index:initial_message_index)
     in
+    let view =
+      request_view
+        ~provider_config
+        ~measure_message_bytes
+        ~front
+        ~history_digest_at
+        ~last_resort
+        ~base_path:demotion_base_path
+        ~demote_before
+        ~materialize:(fun ~pending messages ->
+          (* Blob materialization writes files, so it stays on the owning Eio
+             fiber rather than in the CPU domain pool. The store skips writing
+             an address this process already wrote, so on a long-lived keeper
+             the sha256 over every aged body was all this call did, and it
+             held this domain for one uninterrupted run of 0.7 to 1.6 seconds
+             per request (2026-09-16 trace). The attempt's memo answers every
+             request after the first; whatever is left goes to the pool.
+
+             A reverted body is larger than the marker it was measured as; the
+             range is a position, not a size, so the same atoms go out and the
+             provider counts them. *)
+          let outcome =
+            Keeper_model_input_demotion.materialize
+              ~store:(Tool_blob_store.create ~base_path:ctx.base_path)
+              ~addresses:demotion_addresses
+              ~pending
+              messages
+          in
+          outcome.Keeper_model_input_demotion.messages)
+        messages
+    in
+    let composed = view.composed in
     let history_atom_count = composed.history_atom_count in
+    let windowed =
+      match view.wire with
+      | Ok transmitted -> transmitted
+      | Error error ->
+        (* The backend runs this same projection over this same list and
+           refuses the request with its typed error, which the turn's failure
+           route reads; the carried range is handed over for that refusal,
+           and nothing is observed for a body that does not go out. A
+           malformed tag outside the carried range no longer reaches the
+           projection at all. *)
+        if not !decline_reported
+        then (
+          decline_reported := true;
+          Log.Keeper.warn
+            "%s: reasoning projection declined over the carried range; the \
+             backend refuses the request: %s"
+            ctx.keeper_name
+            (Agent_core.Llm_provider.Reasoning_history_projection
+             .error_to_string
+               error));
+        view.carried
+    in
     if not !front_reported
     then (
       front_reported := true;
+      let transmitted_bytes =
+        offload_model_input_cpu (fun () ->
+          List.fold_left
+            (fun sum message -> sum + measure_message_bytes message)
+            0
+            windowed)
+      in
       Log.Keeper.info
         ~keeper_name:ctx.keeper_name
         "model input carried range runtime=%s origin=%s first_atom=%d atoms=%d/%d \
@@ -850,72 +1043,69 @@ let bounded_model_input_projection
         composed.projection.Runtime_model_input_tail_window.dropped_atoms
         (history_atom_count - composed.projection.Runtime_model_input_tail_window.dropped_atoms)
         history_atom_count
-        composed.transmitted_bytes
+        transmitted_bytes
         reserved_bytes
         (match ctx.context_marks with
          | Some marks ->
            Printf.sprintf "%d/%d" marks.high_water_tokens marks.low_water_tokens
          | None -> "none")
-        last_resort);
+        last_resort;
+      (* The cold seed is read only when no ledger answered; when it was, the
+         records it could not decode are part of why the range started where
+         it did. *)
+      if Lazy.is_val cold_seed
+      then (
+        match (Lazy.force cold_seed).Keeper_carried_front.unreadable with
+        | Some unreadable ->
+          Log.Keeper.warn
+            ~keeper_name:ctx.keeper_name
+            "model input carried range seed read skipped unreadable turn records \
+             runtime=%s unreadable=%d first_reason=%s"
+            ctx.runtime_id
+            unreadable.Keeper_carried_front.count
+            unreadable.Keeper_carried_front.first_reason
+        | None -> ()));
     (match composed.outlived_seed with
-     | Some seed when not !outlived_reported ->
+     | Some (seed, dropped) when not !outlived_reported ->
        outlived_reported := true;
        Log.Keeper.warn
          ~keeper_name:ctx.keeper_name
-         "model input carried range dropped its front runtime=%s seed=%s seed_atoms=%d \
-          history_atoms=%d: the history shrank under it and the request starts over"
+         "model input carried range dropped its front runtime=%s seed=%s reason=%s \
+          history_atoms=%d: the history does not open that atom with the same message, \
+          and the request starts over"
          ctx.runtime_id
          (Yojson.Safe.to_string (Keeper_carried_front.seed_to_json seed))
-         seed.atom_count
+         (Keeper_carried_front.dropped_front_to_string dropped)
          history_atom_count
      | Some _ | None -> ());
-    let projection_messages =
-      match composed.planned.Keeper_model_input_demotion.pending with
-      | [] -> composed.projection.Runtime_model_input_tail_window.messages
-      | pending ->
-        (* Blob materialization writes files, so it stays on the owning Eio
-           fiber rather than in the CPU domain pool. The store skips writing
-           an address this process already wrote, so on a long-lived keeper
-           the sha256 over every aged body was all this call did, and it
-           held this domain for one uninterrupted run of 0.7 to 1.6 seconds
-           per request (2026-09-16 trace). The attempt's memo answers every
-           request after the first; whatever is left goes to the pool.
-
-           A reverted body is larger than the marker it was measured as; the
-           range is a position, not a size, so the same atoms go out and the
-           provider counts them. *)
-        let outcome =
-          Keeper_model_input_demotion.materialize
-            ~store:(Tool_blob_store.create ~base_path:ctx.base_path)
-            ~addresses:demotion_addresses
-            ~pending
-            composed.projection.Runtime_model_input_tail_window.messages
-        in
-        outcome.Keeper_model_input_demotion.messages
-    in
-    Option.iter
-      (fun observe ->
-         observe
-           ~measurement
-           (Runtime_model_input_tail_window.observe
-              ~history_atom_count
-              composed.projection))
-      ctx.on_model_input_window_observation;
+    (match view.wire with
+     | Ok _ ->
+       Option.iter
+         (fun observe ->
+            Option.iter
+              (observe ~measurement:Turn_record.Wire_shape)
+              (Runtime_model_input_tail_window.observe
+                 ~digest_at:history_digest_at
+                 ~history_atom_count
+                 composed.projection))
+         ctx.on_model_input_window_observation
+     | Error _ -> ());
     (* What this request carried, for the ledger the after-turn hook writes
        once the provider reports its count, and for the front a refusal
        moves: the carried atom range and the bytes of the per-request tail
        (the pinned messages), so a difference between two requests can be
-       attributed to the atoms appended between them. Read back from the
-       transmitted list: the atoms in the final list and [history_atom_count]
-       are absolute on every path, and the preamble is tail, not an atom, as
-       the range itself treats it. *)
-    (let transmitted_atoms, tail_bytes =
+       attributed to the atoms appended between them, and whether it carried
+       the turn context, whose count is not a sample of the history. Read
+       back from the carried list, in the durable vocabulary: the atoms in it
+       and [history_atom_count] are absolute on every path, and the preamble
+       is tail, not an atom, as the range itself treats it. *)
+    (let transmitted_atoms, tail_bytes, turn_context =
        offload_model_input_cpu (fun () ->
          let history, preamble =
            List.partition
              (fun message ->
                 not (Runtime_model_input_tail_window.is_synthetic_preamble message))
-             projection_messages
+             view.carried
          in
          let labelled, transmitted_atoms =
            Runtime_model_input_tail_window.annotate history
@@ -936,16 +1126,45 @@ let bounded_model_input_projection
              0
              preamble
          in
-         transmitted_atoms, pinned_bytes + preamble_bytes)
+         ( transmitted_atoms
+         , pinned_bytes + preamble_bytes
+         , List.exists Runtime_model_input_tail_window.is_extra_context history ))
+     in
+     let first_atom = history_atom_count - transmitted_atoms in
+     (* Both positions are read off the lookup over the history the range was
+        composed from, whose atom count [history_atom_count] is.
+        - (Some, Some): the range carried atoms [first_atom] to the newest.
+        - (None, None): the history has no atom; nothing was carried.
+        - (None, Some _): [first_atom] is outside the history, which it is
+          when this request carried no atom of a non-empty one. The
+          composition always carries the newest atom, so it does not occur
+          on this path.
+        - (Some _, None): cannot occur. A front index below the atom count
+          puts the newest index at or above it, and both are read from the
+          same lookup.
+        Every pair but the first records no position: the next observation
+        checks nothing against it and starts no block from it. *)
+     let ends =
+       match
+         history_digest_at first_atom, history_digest_at (history_atom_count - 1)
+       with
+       | Some front_digest, Some end_digest ->
+         Keeper_model_input_ledger.Carried_atoms { front_digest; end_digest }
+       | None, (Some _ | None) | Some _, None -> Keeper_model_input_ledger.No_atom_carried
      in
      state.last_request
      := Some
-          { Keeper_model_input_ledger.prefix_digest
-          ; first_atom = history_atom_count - transmitted_atoms
-          ; atom_count = history_atom_count
-          ; tail_bytes
+          { request =
+              { Keeper_model_input_ledger.prefix_digest
+              ; first_atom
+              ; atom_count = history_atom_count
+              ; ends
+              ; tail_bytes
+              ; turn_context
+              ; demote_before = view.composed.demote_before
+              }
+          ; digest_at = history_digest_at
           });
-    let windowed = projection_messages in
     match ctx.model_input_projection with
     | None -> Ok windowed
     | Some inner -> inner windowed
@@ -965,11 +1184,8 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
     ~status:"resolved"
     ~decision:(`Assoc [ "resolved_lane", `String resolved_lane ])
     Keeper_runtime_manifest.Provider_lane_resolved;
-  let checkpoint_sink (snapshot : Agent_core.Agent.checkpoint_snapshot) =
-    observe_checkpoint_stage ctx.checkpoint_stage_observed snapshot.stage;
-    match ctx.checkpoint_sink with
-    | Some sink -> sink snapshot
-    | None -> Ok ()
+  let checkpoint_sink =
+    observing_checkpoint_sink ctx.checkpoint_progress ctx.checkpoint_sink
   in
   (* The attempt's bounded wait for the binding's admission permit, as Agent
      Core writes it: on while the wait is on, then the instant it settled.
@@ -1003,10 +1219,11 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
        provider's inclusive prompt total for the request the composition just
        built. The ledger records the request's carried range against the
        count, one line per provider call, so block sizes, front moves and
-       tail changes are read from the provider's numbers, and the marks are
-       judged against the total right after. Composed outermost and always
-       [Continue], so it neither delays nor decides anything the turn's own
-       hooks do. *)
+       tail changes are read from the provider's numbers. The marks are not
+       judged here: a front moved after a response would change the prefix of
+       the turn's next request ([evict_at_turn_boundary]). Composed outermost
+       and always [Continue], so it neither delays nor decides anything the
+       turn's own hooks do. *)
     let ledger_hooks =
       { Agent_core.Hooks.empty with
         after_turn =
@@ -1014,7 +1231,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
             (function
               | Agent_core.Hooks.AfterTurn { response; _ } ->
                 (match !last_request with
-                 | Some request ->
+                 | Some { request; digest_at } ->
                    let usage =
                      Option.bind response.Agent_core.Types.usage
                        (fun (u : Agent_core.Types.api_usage) ->
@@ -1027,6 +1244,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                        ~keeper_name:ctx.keeper_name
                        ~runtime_id:ctx.runtime_id
                        ~session_id:(ledger_session ctx)
+                       ~digest_at
                        ~request
                        ~usage
                    in
@@ -1056,32 +1274,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                         ~keeper_name:ctx.keeper_name
                         "model input ledger runtime=%s %s"
                         ctx.runtime_id
-                        line);
-                   (* The marks, against the total the provider just counted
-                      (RFC §10.5): above the high-water mark the oldest blocks
-                      leave until the projected total is under the low-water
-                      mark, and the next request composes from the new front.
-                      Without marks, only a refusal moves the front. *)
-                   (match ctx.context_marks with
-                    | None -> ()
-                    | Some marks ->
-                      (match
-                         Keeper_carried_range.after_response
-                           ~marks
-                           observation.Keeper_model_input_ledger.ledger
-                       with
-                       | Keeper_carried_range.Unchanged _ -> ()
-                       | Keeper_carried_range.Evicted { first_atom; _ } as step ->
-                         Keeper_model_input_ledger.Table.move_front
-                           ~keeper_name:ctx.keeper_name
-                           ~runtime_id:ctx.runtime_id
-                           ~session_id:(ledger_session ctx)
-                           ~first_atom;
-                         Log.Keeper.info
-                           ~keeper_name:ctx.keeper_name
-                           "model input carried range evicted runtime=%s %s"
-                           ctx.runtime_id
-                           (Yojson.Safe.to_string (Keeper_carried_range.step_to_json step))))
+                        line)
                  | None -> ());
                 Agent_core.Hooks.Continue
               | Agent_core.Hooks.BeforeTurn _
@@ -1506,7 +1699,7 @@ let default_context_overflow_shrink_capacity ~capacity =
    doc comment for why the byte-axis and token-axis siblings are excluded.
    [same_run_retry_authorized] mirrors the exact same-run authority gate
    [Keeper_turn_driver]'s declared-lane walk applies before rotating
-   candidates ([same_run_retry_allowed] / [checkpoint_stage_observed]): a
+   candidates ([same_run_retry_allowed] / [checkpoint_progress]): a
    shrink retry is a same-run retry too, so it must not fire once AGENT_CORE has
    mutated agent state at a durable checkpoint stage. *)
 let context_overflow_shrink_sequence
@@ -1590,15 +1783,28 @@ let context_overflow_shrink_sequence
 let refusal_evicts = function
   | Agent_core.Error.Api (ContextOverflow _)
   | Agent_core.Error.Api
-      (InvalidRequest { reason = Request_body_refused_by_provider _; _ }) ->
+      (InvalidRequest { reason = Request_body_refused_by_provider _; _ })
+  (* A refusal whose reason agent core does not model is still a refusal OF
+     THIS REQUEST: the provider read it and declined it. Resending the same
+     bytes draws the same answer, so the only lever left is to carry less.
+     The sequence retries only while the front moves strictly later and
+     returns the refusal once a single atom is left, so this bounds at
+     log2(atoms) attempts rather than looping.
+
+     2026-09-18: five keepers sat in that loop. After the turn-record hard
+     cut (#36955) every seed was unreadable, each turn composed the whole
+     history, the provider refused the 15 MB body (a modelled body refusal,
+     one halving), and then refused 9.5 MB with an error body whose only
+     field is prose naming the prompt tokens and the model limit. That prose
+     stays Unknown_invalid_request on purpose -- Retry.classify_error has
+     tests pinning it, because reading the sentence would be a string
+     classifier. The turn ended and the next turn started over. *)
+  | Agent_core.Error.Api (InvalidRequest { reason = Unknown_invalid_request; _ }) ->
     true
   | Agent_core.Error.Api
       ( InvalidRequest
           { reason =
-              ( Json_parse_error
-              | Attempt_rejected
-              | Refusal_body_not_received
-              | Unknown_invalid_request )
+              (Json_parse_error | Attempt_rejected | Refusal_body_not_received)
           ; _
           }
       | InputCapacity _
@@ -1653,7 +1859,10 @@ let eviction_retry_to_json = function
    [false] once used or when there is nothing to demote, and the refusal
    stands. Every step is a position on the atom axis chosen against the
    provider's verdict; nothing measures the request against a limit of its
-   own. [same_run_retry_authorized]
+   own. Every retry follows a move: [evict] and [halve] answer whether the
+   next composition carries a strictly later front, and [false] ends the
+   sequence with the refusal in hand, so no retry resends the range that was
+   refused. [same_run_retry_authorized]
    is the same gate [Keeper_turn_driver]'s declared-lane walk applies before
    rotating candidates: a retry here is a same-run retry too, so it must not
    fire once AGENT_CORE has mutated agent state at a durable checkpoint
@@ -1663,8 +1872,8 @@ let carried_range_eviction_sequence
       ~(ledger : unit -> Keeper_model_input_ledger.t option)
       ~(last_request : unit -> Keeper_model_input_ledger.request option)
       ~marks
-      ~(evict : Keeper_carried_range.step -> unit)
-      ~(halve : first_atom:int -> atom_count:int -> retry:int -> unit)
+      ~(evict : Keeper_carried_range.step -> bool)
+      ~(halve : first_atom:int -> atom_count:int -> retry:int -> bool)
       ~(last_resort : retry:int -> bool)
       ~(on_retry : retry:int -> eviction_retry -> unit)
       ~(attempt : unit -> ('ok, Agent_core.Error.t) result)
@@ -1687,9 +1896,11 @@ let carried_range_eviction_sequence
            continue_ ())
          else failed
        | Some first_atom ->
-         halve ~first_atom ~atom_count:request.atom_count ~retry;
-         on_retry ~retry (Halved_range { first_atom; atom_count = request.atom_count });
-         continue_ ())
+         if halve ~first_atom ~atom_count:request.atom_count ~retry
+         then (
+           on_retry ~retry (Halved_range { first_atom; atom_count = request.atom_count });
+           continue_ ())
+         else failed)
   in
   let rec go ~retry =
     match attempt () with
@@ -1704,13 +1915,41 @@ let carried_range_eviction_sequence
         | Some ledger ->
           (match Keeper_carried_range.after_overflow ~marks ledger with
            | Keeper_carried_range.Evicted _ as step ->
-             evict step;
-             on_retry ~retry (Evicted_blocks step);
-             continue_ ()
+             if evict step
+             then (
+               on_retry ~retry (Evicted_blocks step);
+               continue_ ())
+             else failed
            | Keeper_carried_range.Unchanged _ -> halve_last_request ~retry ~failed ~continue_)
         | None -> halve_last_request ~retry ~failed ~continue_)
   in
   go ~retry:0
+;;
+
+(* One halving after a refusal, answering whether the retry carries a
+   strictly later front. [first_atom] is the halved position, after the front
+   the refused request carried; [digest_at] is the lookup over the history
+   that request was composed from, which the retry composes from again.
+   - No digest at [first_atom]: nothing names the new front. [false].
+   - The pair has a ledger: the next composition reads the ledger, so the
+     answer is whether the ledger's front moved. A stale ledger was dropped
+     when the refused request was composed, so a ledger here holds.
+   - No ledger: the halved seed is what the next composition reads, and it is
+     after the refused front by construction. [true]. *)
+let halve_front ~digest_at ~move_ledger ~hold ~first_atom ~retry =
+  match Option.bind digest_at (fun digest_at -> digest_at first_atom) with
+  | None -> false
+  | Some front_digest ->
+    (match move_ledger ~first_atom ~front_digest with
+     | Keeper_model_input_ledger.Table.Moved -> true
+     | Keeper_model_input_ledger.Table.Not_moved -> false
+     | Keeper_model_input_ledger.Table.No_pair_ledger ->
+       hold
+         { Keeper_carried_front.first_atom
+         ; front_digest
+         ; source = Keeper_carried_front.Halved_after_refusal { retry }
+         };
+       true)
 ;;
 
 (** Same as [run_try_provider], except a refusal that says the request
@@ -1720,11 +1959,50 @@ let carried_range_eviction_sequence
     error and for a refusal that survives every move. The front the retry
     composes from is the ledger's after the eviction, or, before any usage
     on this pair, the halved range held for the rest of this attempt. *)
+(* The marks, judged once per candidate turn before its first composition
+   (RFC keeper-context-window-in-tokens §10.5): above the high-water mark the
+   oldest blocks leave until the projected total is under the low-water mark,
+   and every request of the turn composes from that one front. Without marks,
+   only a refusal moves the front. *)
+let evict_at_turn_boundary (ctx : try_provider_ctx) =
+  match ctx.context_marks with
+  | None -> ()
+  | Some marks ->
+    (match
+       Keeper_model_input_ledger.Table.lookup
+         ~keeper_name:ctx.keeper_name
+         ~runtime_id:ctx.runtime_id
+         ~session_id:(ledger_session ctx)
+     with
+     | None -> ()
+     | Some ledger ->
+       (match Keeper_carried_range.at_turn_boundary ~marks ledger with
+        | Keeper_carried_range.Unchanged _ -> ()
+        | Keeper_carried_range.Evicted { first_atom; front_digest; _ } as step ->
+          (match
+             Keeper_model_input_ledger.Table.move_front
+               ~keeper_name:ctx.keeper_name
+               ~runtime_id:ctx.runtime_id
+               ~session_id:(ledger_session ctx)
+               ~first_atom
+               ~front_digest
+           with
+           | Keeper_model_input_ledger.Table.Moved ->
+             Log.Keeper.info
+               ~keeper_name:ctx.keeper_name
+               "model input carried range evicted runtime=%s %s"
+               ctx.runtime_id
+               (Yojson.Safe.to_string (Keeper_carried_range.step_to_json step))
+           | Keeper_model_input_ledger.Table.Not_moved
+           | Keeper_model_input_ledger.Table.No_pair_ledger -> ())))
+;;
+
 let run_try_provider_with_carried_range_eviction
       ?continuation_checkpoint
       (ctx : try_provider_ctx)
       candidate
   =
+  evict_at_turn_boundary ctx;
   match ctx.recovery_view with
   | Some _ ->
     (* The validated semantic view owns retained source obligations. Retrying
@@ -1745,7 +2023,8 @@ let run_try_provider_with_carried_range_eviction
         carried_front_seed =
           (fun () ->
              match !halved_front with
-             | Some halved -> Some halved
+             | Some halved ->
+               { Keeper_carried_front.seed = Some halved; unreadable = None }
              | None -> seed ())
       }
     in
@@ -1756,37 +2035,44 @@ let run_try_provider_with_carried_range_eviction
     let result =
       carried_range_eviction_sequence
         ~same_run_retry_authorized:(fun () ->
-          same_run_retry_allowed ctx.checkpoint_stage_observed)
+          same_run_retry_allowed ctx.checkpoint_progress)
         ~ledger:(fun () ->
           Keeper_model_input_ledger.Table.lookup
             ~keeper_name:ctx.keeper_name
             ~runtime_id:ctx.runtime_id
             ~session_id:(ledger_session ctx))
-        ~last_request:(fun () -> !(state.last_request))
+        ~last_request:(fun () ->
+          Option.map (fun (sent : sent_request) -> sent.request) !(state.last_request))
         ~marks:ctx.context_marks
         ~evict:(function
-          | Keeper_carried_range.Evicted { first_atom; _ } ->
-            Keeper_model_input_ledger.Table.move_front
-              ~keeper_name:ctx.keeper_name
-              ~runtime_id:ctx.runtime_id
-              ~session_id:(ledger_session ctx)
-              ~first_atom
-          | Keeper_carried_range.Unchanged _ -> ())
-        ~halve:(fun ~first_atom ~atom_count ~retry ->
+          | Keeper_carried_range.Evicted { first_atom; front_digest; _ } ->
+            (match
+               Keeper_model_input_ledger.Table.move_front
+                 ~keeper_name:ctx.keeper_name
+                 ~runtime_id:ctx.runtime_id
+                 ~session_id:(ledger_session ctx)
+                 ~first_atom
+                 ~front_digest
+             with
+             | Keeper_model_input_ledger.Table.Moved -> true
+             | Keeper_model_input_ledger.Table.Not_moved
+             | Keeper_model_input_ledger.Table.No_pair_ledger -> false)
+          | Keeper_carried_range.Unchanged _ -> false)
+        ~halve:(fun ~first_atom ~atom_count:_ ~retry ->
           (* With a ledger, the move cuts through its one block and the
              blocks restart from the new front; without one, the halved
              seed is what the next composition on this attempt reads. *)
-          Keeper_model_input_ledger.Table.move_front
-            ~keeper_name:ctx.keeper_name
-            ~runtime_id:ctx.runtime_id
-            ~session_id:(ledger_session ctx)
-            ~first_atom;
-          halved_front
-          := Some
-               { Keeper_carried_front.first_atom
-               ; atom_count
-               ; source = Keeper_carried_front.Halved_after_refusal { retry }
-               })
+          halve_front
+            ~digest_at:
+              (Option.map (fun (sent : sent_request) -> sent.digest_at) !(state.last_request))
+            ~move_ledger:
+              (Keeper_model_input_ledger.Table.move_front
+                 ~keeper_name:ctx.keeper_name
+                 ~runtime_id:ctx.runtime_id
+                 ~session_id:(ledger_session ctx))
+            ~hold:(fun halved -> halved_front := Some halved)
+            ~first_atom
+            ~retry)
         ~last_resort:(fun ~retry:_ ->
           (* Once per attempt, and only when the current turn carries a tool
              result the store could hold; the composition consumes the arm
@@ -1887,9 +2173,18 @@ let thinking_was_enabled = function
    one condition here, and only one of them is about thinking.
 
    Turning thinking off is the remedy for a budget spent thinking, so it is
-   worth a second attempt only when thinking was on. Dropping the rejected
-   response is owed either way: accept judged it unusable, and a checkpoint
-   that keeps it feeds it back as input on every later turn.
+   worth a second attempt only when thinking was on and this candidate's wire
+   can be told to stop. The second half is not rhetorical: some rows declare a
+   thinking control that has no off state, and a categorical effort row whose
+   ladder omits the off value cannot spell the disable at all. Which surfaces
+   those are is catalog data, recorded in agent_core's
+   docs/design/provider-reasoning-dialects.md; the decision here reads the
+   typed answer. Attempting the retry on such a row spends the turn on a
+   request refused before dispatch, and on a lane with one candidate there is
+   nothing to rotate to (#36972).
+   Dropping the rejected response is owed either way: accept judged it
+   unusable, and a checkpoint that keeps it feeds it back as input on every
+   later turn.
 
    Measured on a live keeper, 2026-09-03, with thinking off throughout: the model
    collapsed into one repeated word, accept rejected it at max_tokens, and
@@ -1904,13 +2199,13 @@ type truncation_recovery =
   | Retry_without_thinking of Agent_core.Checkpoint.t
   | Drop_rejected_response of Agent_core.Checkpoint.t
 
-let truncation_recovery ~enable_thinking ~result ~checkpoint =
+let truncation_recovery ~enable_thinking ~thinking_can_be_disabled ~result ~checkpoint =
   match result, checkpoint with
   | Error error, Some checkpoint when max_tokens_truncation_error error -> (
     match checkpoint_before_incomplete_response checkpoint with
     | None -> Recovery_not_applicable
     | Some cut ->
-      if thinking_was_enabled enable_thinking
+      if thinking_was_enabled enable_thinking && thinking_can_be_disabled
       then Retry_without_thinking cut
       else Drop_rejected_response cut)
   | Error _, _ | Ok _, _ -> Recovery_not_applicable
@@ -1953,6 +2248,27 @@ let candidate_without_reasoning_effort (candidate : Runtime_candidate.t) : Runti
     }
 ;;
 
+(* Asked of the request the retry would actually send, not of an approximation
+   of it: the same candidate, effort stripped, thinking off.
+
+   [Complete_common.validate_all] is the admission every request meets on its
+   way out ([Complete.complete], [Complete_sync], [Complete_stream] all begin
+   there), and it routes the thinking question by provider kind, each kind to
+   the rule that actually governs it. A narrower predicate would answer for
+   some kinds and guess for the rest: read on its own,
+   [thinking_control_request_rejection] calls a row whose thinking control
+   lives on a separate capability axis unable to disable, when that wire turns
+   thinking off by sending no thinking field at all. *)
+let retry_without_thinking_admitted (candidate : Runtime_candidate.t) =
+  let retry_cfg =
+    { (Runtime_candidate.provider_cfg (candidate_without_reasoning_effort candidate)) with
+      Llm_provider.Provider_config.enable_thinking = Some false
+    ; preserve_thinking = Some false
+    }
+  in
+  Result.is_ok (Llm_provider.Complete_common.validate_all retry_cfg)
+;;
+
 let run_try_provider_with_truncation_recovery
       ?continuation_checkpoint
       (ctx : try_provider_ctx)
@@ -1961,9 +2277,11 @@ let run_try_provider_with_truncation_recovery
   let first_result, checkpoint_after, success_sample =
     run_try_provider_with_carried_range_eviction ?continuation_checkpoint ctx candidate
   in
+  let thinking_can_be_disabled = retry_without_thinking_admitted candidate in
   match
     truncation_recovery
       ~enable_thinking:ctx.enable_thinking
+      ~thinking_can_be_disabled
       ~result:first_result
       ~checkpoint:checkpoint_after
   with
@@ -2001,7 +2319,11 @@ let run_try_provider_with_truncation_recovery
       ~decision:
         (`Assoc
           ([ "continuation", `String "none"
-           ; "thinking", `String "already_disabled"
+           ; ( "thinking"
+             , `String
+                 (if thinking_can_be_disabled
+                  then "already_disabled"
+                  else "cannot_be_disabled") )
            ; ( "checkpoint_write"
              , `String
                  (match persisted with
@@ -2030,10 +2352,12 @@ module For_testing = struct
   let truncation_recovery = truncation_recovery
   let persist_dropped_response = persist_dropped_response
   let candidate_without_reasoning_effort = candidate_without_reasoning_effort
-  let message_measurer = message_measurer
   let memoize_message_measurement = memoize_message_measurement
+  let carried_front = carried_front
+  let halve_front = halve_front
   let message_measurement_hash = Agent_core.Types.Message_value.hash
   let compose_carried_model_input = compose_carried_model_input
+  let request_view = request_view
   let last_resort_demotes = last_resort_demotes
   let offload_model_input_cpu = offload_model_input_cpu
 end

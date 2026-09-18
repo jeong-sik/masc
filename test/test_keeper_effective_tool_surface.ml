@@ -191,6 +191,7 @@ let project
     ~tool_delivery:Keeper_effective_tool_surface.Tools_delivered
     ~native_posture:(Some native_posture)
     ~tool_deny:[]
+    ~sandbox_profile:Masc.Keeper_types_profile.Docker
     ~skill_names
     ~current_task_id:(Some "task-001")
     ~skills_left_out
@@ -435,6 +436,7 @@ let test_external_composition_preserves_snapshot_provenance () =
       ~official_client_kind:"codex"
       ~tool_delivery:Keeper_effective_tool_surface.Tools_delivered
             ~tool_deny:[]
+            ~sandbox_profile:Masc.Keeper_types_profile.Docker
 ~native_posture:None
       ~skill_names:None
       ~current_task_id:None
@@ -702,6 +704,7 @@ let test_turn_admission_covers_held_tasks_beyond_current () =
                ~official_client_kind:"agent_core"
                ~tool_delivery:Keeper_effective_tool_surface.Tools_delivered
                               ~tool_deny:[]
+                              ~sandbox_profile:Masc.Keeper_types_profile.Docker
 ~native_posture:None
                ~skill_names:None
                ~current_task_id:(Some task_a)
@@ -808,6 +811,7 @@ let test_runtime_capability_suppression_is_explicit_and_empty () =
       ~tool_delivery:
         Keeper_effective_tool_surface.Tools_suppressed_runtime_unsupported
             ~tool_deny:[]
+            ~sandbox_profile:Masc.Keeper_types_profile.Docker
 ~native_posture:None
       ~skill_names:None
       ~current_task_id:(Some "task-001")
@@ -933,6 +937,7 @@ let test_frozen_selection_carries_the_shadowed_exact_reference () =
       ~official_client_kind:"agent_core"
       ~tool_delivery:Keeper_effective_tool_surface.Tools_delivered
             ~tool_deny:[]
+            ~sandbox_profile:Masc.Keeper_types_profile.Docker
 ~native_posture:None
       ~skill_names:None
       ~current_task_id:None

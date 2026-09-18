@@ -1736,6 +1736,8 @@ let test_keeper_stream_bridge_does_not_requarantine_failed_attempt_tool () =
            , SSEError
                { message = "provider failed"
                ; error_type = Some "server_error"
+               ; provider_status = None
+               ; report = Provider_stated
                ; raw = {|{"error":"provider failed"}|}
                } )
          ; "incomplete", StreamIncomplete { reason = "max_output_tokens" }
@@ -2926,7 +2928,14 @@ let test_keeper_stream_bridge_attempt_failures_are_not_turn_terminals () =
   let open Agent_core.Types in
   let provider_kind = Agent_core.Llm_provider.Provider_kind.Gemini in
   let failures =
-    [ "sse_error", SSEError { message = "no credits"; error_type = Some "insufficient_quota"; raw = "{}" }
+    [ ( "sse_error"
+      , SSEError
+          { message = "no credits"
+          ; error_type = Some "insufficient_quota"
+          ; provider_status = None
+          ; report = Provider_stated
+          ; raw = "{}"
+          } )
     ; "ndjson_error", NDJSONError { message = "rejected"; error_type = None; raw = "{}" }
     ; "sse_parse_failed", SSEParseFailed { raw = "garbage"; reason = "not json" }
     ; "ndjson_parse_failed", NDJSONParseFailed { raw = "garbage"; reason = "not json" }
@@ -3430,8 +3439,13 @@ let test_direct_reply_terminal_error_rejects_no_visible_reply () =
     Server_routes_http_keeper_stream.For_testing.direct_reply_terminal_error
       (Some payload_json) ""
   in
-  check bool "thinking-only direct reply is terminal error" true
-    (Option.is_some err)
+  (* The answer is the constructor, not a sentence (RFC-0454 D2). *)
+  match err with
+  | Some
+      (Keeper_request_failure.No_visible_reply
+         { stage = Keeper_request_failure.Terminal_projection; had_blocks = false }) -> ()
+  | Some _ | None ->
+    fail "a thinking-only direct reply must project to No_visible_reply"
 
 let test_direct_reply_terminal_error_allows_checkpoint () =
   let payload_json =
@@ -3447,6 +3461,20 @@ let test_direct_reply_terminal_error_allows_checkpoint () =
       (Some payload_json) ""
   in
   check bool "checkpoint can stay user-only" true (Option.is_none err)
+
+let test_direct_reply_terminal_error_names_the_refused_contract_field () =
+  let payload_json =
+    `Assoc [ ("runtime_class", `String "keeper"); ("reply", `String "hi") ]
+  in
+  match
+    Server_routes_http_keeper_stream.For_testing.direct_reply_terminal_error
+      (Some payload_json) "hi"
+  with
+  | Some
+      (Keeper_request_failure.Reply_contract_rejected
+         { field = Keeper_request_failure.Turn_outcome; _ }) -> ()
+  | Some _ | None ->
+    fail "a payload with no turn_outcome must name the contract field it broke"
 
 let test_keeper_tool_failure_log_details_include_preview_and_class () =
   let error_body = String.make 260 'x' in
@@ -4109,6 +4137,8 @@ let () =
             test_direct_reply_terminal_error_rejects_no_visible_reply;
           test_case "direct reply allows continuation checkpoint" `Quick
             test_direct_reply_terminal_error_allows_checkpoint;
+          test_case "direct reply names the refused contract field" `Quick
+            test_direct_reply_terminal_error_names_the_refused_contract_field;
           test_case "redacted reply rewrite preserves no-visible outcome" `Quick
             test_redacted_reply_rewrite_preserves_typed_no_visible_outcome;
           test_case "redacted reply rewrite preserves checkpoint payload" `Quick

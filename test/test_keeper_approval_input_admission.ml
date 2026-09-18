@@ -1,5 +1,12 @@
 module Admission = Masc.Keeper_approval_input_admission
 
+(* What the operator's window currently says. The store takes the window as an
+   argument -- it is reachable from a raw Domain, where reading a setting
+   raises -- so every caller names it. These cases are not about the window and
+   pass what production passes. *)
+let history_retained () =
+  Masc.Runtime_params.get Masc.Runtime_settings.keeper_checkpoint_history_retained
+
 let checkpoint ?(working_context = Some (`Assoc [])) messages =
   Agent_core.Checkpoint.
     { version = checkpoint_version
@@ -124,7 +131,8 @@ let durable_restart () = with_directory (fun root ->
   let b = Agent_core.Types.user_msg "B progressed after approval input" in
   let newer = { first with messages = first.messages @ [b]; turn_count = 3 } in
   Agent_core.Context.set newer.context "newer" (`String "B");
-  ignore (Masc.Keeper_checkpoint_store.save_agent_core_classified ~session_dir newer |> unwrap);
+  ignore (Masc.Keeper_checkpoint_store.save_agent_core_classified
+    ~history_retained:(history_retained ()) ~session_dir newer |> unwrap);
   let after = admit (checkpoint []) in
   Alcotest.(check int) "fresh canonical turn retained" 3 after.turn_count;
   Alcotest.(check bool) "B message retained" true (List.hd (List.rev after.messages) = b);
@@ -202,7 +210,8 @@ let gate_and_answer_co_admission () = with_directory (fun root ->
     (Admission.contains ~identity:ask_identity ~message:answer disk.messages);
   let later = { disk with turn_count = 12;
     messages = disk.messages @ List.init 10 (fun _ -> Agent_core.Types.user_msg "Continue.") } in
-  ignore (Masc.Keeper_checkpoint_store.save_agent_core_classified ~session_dir later |> unwrap);
+  ignore (Masc.Keeper_checkpoint_store.save_agent_core_classified
+    ~history_retained:(history_retained ()) ~session_dir later |> unwrap);
   let retried = admit (checkpoint []) in
   Alcotest.(check int) "same Gate and Ask retry retains ten later turns without duplication" 12
     (List.length retried.messages);

@@ -13,7 +13,7 @@ val provider_context_json :
   Yojson.Safe.t
 (** [runtime_id] names the lane this turn was budgeted under.
     [executed_runtime_id] names the candidate that actually answered, which
-    sticky lane ordering can make a different runtime. Two questions, two
+    in-turn failover can make a different runtime. Two questions, two
     fields: reading the lane as the answerer filed 162 payment-required
     errors against a provider that was serving normally (masc#35043). Emitted
     as [null] when no candidate reported in. *)

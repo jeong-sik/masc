@@ -1,12 +1,4 @@
-(** Prompt registry types — entries, metadata, resolution. *)
-
-type prompt_entry = {
-  id : string;
-  template : string;
-  version : string;
-  variables : string list;
-  created_at : float;
-}
+(** Prompt registry types — metadata, resolution. *)
 
 type operator_surface =
   | Primary

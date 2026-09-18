@@ -1,11 +1,3 @@
-type prompt_entry = {
-  id : string;
-  template : string;
-  version : string;
-  variables : string list;
-  created_at : float;
-}
-
 type operator_surface =
   | Primary
   | Fragment

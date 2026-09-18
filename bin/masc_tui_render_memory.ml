@@ -79,11 +79,26 @@ let memory_updated_text = function
   | None -> "-"
   | Some ts -> memory_date ts
 
+(* Every size on this screen is the recall block the keeper injects, not the
+   snapshot file: the file's first_seen, origin, basis and JSON punctuation
+   never reach a request.
+
+   Read in tokens, because that is the unit the window is declared in and the
+   only unit an operator can hold a keeper's memory against. No provider this
+   fleet runs counts a block inside a request, and this screen carries no turn
+   record to take a ratio from, so the figure is the fleet scale and wears the
+   "≈" every estimated token figure in this TUI wears. The exact count is
+   derivable -- a first round carries the pinned blocks and the post-tool round
+   in the same turn does not, so their (total - carried) difference is the
+   pinned bundle -- and wants the ledger to expose carried tokens per record. *)
+let recall_tokens bytes =
+  Masc_tui_token_scale.format_estimate Masc_tui_token_scale.fleet bytes
+;;
 let memory_context_lines (k : memory_keeper_health) =
   let current_line =
-    Printf.sprintf "  %s · %s · snapshot r%d · %s · updated %s"
+    Printf.sprintf "  %s · %s · snapshot r%d · recall %s tok · updated %s"
       k.mkh_keeper_id (memory_state_label (memory_state k)) k.mkh_revision
-      (Masc_tui_context_inspector.format_bytes k.mkh_snapshot_bytes)
+      (recall_tokens k.mkh_snapshot_bytes)
       (memory_updated_text k.mkh_updated_at)
   in
   let facts_line =
@@ -98,9 +113,9 @@ let memory_context_lines (k : memory_keeper_health) =
   in
   let source_line =
     Printf.sprintf
-      "  source-bound snapshot r%d · facts %d · invalidations %d · %s · %s"
+      "  source-bound snapshot r%d · facts %d · invalidations %d · recall %s tok · %s"
       k.mkh_source_revision k.mkh_source_facts k.mkh_source_invalidations
-      (Masc_tui_context_inspector.format_bytes k.mkh_source_snapshot_bytes)
+      (recall_tokens k.mkh_source_snapshot_bytes)
       (if k.mkh_source_snapshot_present then "present" else "absent")
   in
   let vision_line =
@@ -177,9 +192,9 @@ let memory_row_line columns (k : memory_keeper_health) =
   let source =
     if Option.is_some k.mkh_source_read_error then "read error"
     else if k.mkh_source_snapshot_present then
-      Printf.sprintf "r%d i%d %s" k.mkh_source_revision
+      Printf.sprintf "r%d i%d %s tok" k.mkh_source_revision
         k.mkh_source_invalidations
-        (Masc_tui_context_inspector.format_bytes k.mkh_source_snapshot_bytes)
+        (recall_tokens k.mkh_source_snapshot_bytes)
     else em_dash
   in
   let delta =
@@ -200,8 +215,7 @@ let memory_row_line columns (k : memory_keeper_health) =
       ; mrow_updated = memory_updated_text k.mkh_updated_at
       ; mrow_facts = ordinary_reading (fun () -> string_of_int k.mkh_facts)
       ; mrow_size =
-          ordinary_reading (fun () ->
-              Masc_tui_context_inspector.format_bytes k.mkh_snapshot_bytes)
+          ordinary_reading (fun () -> recall_tokens k.mkh_snapshot_bytes)
       ; mrow_source = source
       ; mrow_delta = delta
       }
@@ -440,10 +454,10 @@ let render_memory_body ~cols ~budget (state : state)
   (match state.memory_health with
    | None -> push ("  Total: " ^ missing_reading "waiting for memory snapshots")
    | Some snapshot ->
-       push (Printf.sprintf "  Total %s · %d ordinary + %d source · %s · %s"
+       push (Printf.sprintf "  Total %s · %d ordinary + %d source · recall %s tok · %s"
          (Masc_tui_message_layout.count_noun (snapshot.mhs_total_facts + snapshot.mhs_total_source_facts) "fact")
          snapshot.mhs_total_facts snapshot.mhs_total_source_facts
-         (Masc_tui_context_inspector.format_bytes
+         (recall_tokens
             (snapshot.mhs_total_snapshot_bytes + snapshot.mhs_total_source_snapshot_bytes))
          (Masc_tui_message_layout.count_noun (List.length snapshot.mhs_keepers) "keeper")));
   (match state.memory_health with

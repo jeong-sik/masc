@@ -451,6 +451,29 @@ module KeeperLaneGate = struct
   ;;
 end
 
+(** {1 Keeper Turn Admission Bounds} *)
+
+module KeeperAdmissionBounds = struct
+  let clamp_int ~min_value ~max_value value =
+    max min_value (min max_value value)
+  ;;
+
+  let max_events_default = 32
+  let max_events_ceiling = 256
+
+  (** Maximum number of durable queue selections admitted into one turn.
+      [ready_batch] used to admit every ready selection in the snapshot, so a
+      steady arrival rate became an unbounded backlog even while every Keeper
+      stayed alive (#29365). Selections past this bound stay pending for a
+      later turn instead of being dropped. Range: [1, 256]. Default 32.
+
+      @category Limits @ops_class operator *)
+  let max_events () =
+    get_int_nonneg ~default:max_events_default "MASC_KEEPER_ADMISSION_MAX_EVENTS"
+    |> clamp_int ~min_value:1 ~max_value:max_events_ceiling
+  ;;
+end
+
 (** {1 Keeper Generated Media Configuration} *)
 
 module KeeperGeneratedMedia = struct

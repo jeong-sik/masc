@@ -2,7 +2,7 @@
 
 Arm 체인 (spec §6.2): b(1 keeper, 전부 off) -> c(+skills) -> d(+composition)
 -> e(+parallel) -> f(4 keepers) -> g(8 keepers) -> h(fusion on).
-Arm A는 Harbor 빌트인 kimi-cli라 여기서 렌더하지 않는다.
+Arm A는 run_matrix.sh 가 모델 제공자의 harbor 기본 에이전트로 돌리므로 여기서 렌더하지 않는다.
 
 스키마 근거 (main checkout에서 확인):
 - keeper TOML: lib/keeper/keeper_types_profile_toml_parser.ml — 허용 키는
@@ -17,9 +17,13 @@ Arm A는 Harbor 빌트인 kimi-cli라 여기서 렌더하지 않는다.
 """
 from __future__ import annotations
 
+import functools
+import json
 import re
 import shutil
 import tempfile
+import urllib.request
+from dataclasses import dataclass
 from pathlib import Path
 
 BENCH_ROOT = Path(__file__).resolve().parents[1]
@@ -69,13 +73,18 @@ def denied_tools(spec: dict) -> list[str]:
         denied += DELEGATE_TOOLS
     return denied
 
+# The endpoint's remote_root: a directory per keeper, owned by the task image's
+# user whose commands run there (driver/endpoint_account.sh BENCH_REMOTE_ROOT,
+# compared in tests/test_endpoint_account.py).
+REMOTE_ROOT = "/opt/masc-bench/remote"
+
 # Canonical bench keeper instructions. Rendered into every keeper profile TOML
 # (keeper_up requires non-empty keeper.instructions); run_episode.sh passes
 # the same text on the keeper_up call.
 KEEPER_INSTRUCTIONS = (
     "You are an autonomous engineering agent inside a Linux container. "
     "Complete the task by running shell commands (your tool calls execute in "
-    "this container as root). Work directly; do not ask questions. "
+    "this container). Work directly; do not ask questions. "
     "When the task is verifiably done, finish."
 )
 
@@ -118,7 +127,7 @@ key = "{api_key_env}"
 
 [models."{binding_id}"]
 api-name = "{model_alias}"
-# HTTP lanes deliver tools off the catalog capability, not this key
+{max_context_line}# HTTP lanes deliver tools off the catalog capability, not this key
 # (keeper_effective_tool_surface: the Agent_core arm reads
 # capabilities.supports_tools; only the Claude_code arm reads
 # runtime.model.tools_support). It is declared anyway because it is true, and
@@ -148,7 +157,7 @@ cli_slots = ["{runtime_id}"]
 [exec.ssh.endpoints.local]
 host = "127.0.0.1"
 user = "root"
-remote_root = "/root"
+remote_root = "{remote_root}"
 port = 22
 identity_file = "/opt/masc-bench/ssh/id_ed25519"
 
@@ -181,6 +190,7 @@ tools-support = true
 streaming = true
 reasoning-effort = "{effort}"
 turn-timeout-s = {turn_timeout_s}
+wall-clock-ceiling-s = {wall_clock_ceiling_s}
 
 [{provider}."{binding_id}"]
 max-concurrent = {max_concurrent}
@@ -196,7 +206,7 @@ cli_slots = ["{runtime_id}"]
 [exec.ssh.endpoints.local]
 host = "127.0.0.1"
 user = "root"
-remote_root = "/root"
+remote_root = "{remote_root}"
 port = 22
 identity_file = "/opt/masc-bench/ssh/id_ed25519"
 
@@ -213,10 +223,17 @@ OFFICIAL_CLIENT_OVERLAY_TOML = """\
 # embedded AGENT_CORE catalog by api-name (see render_configs.py).
 """
 
-# Per-turn bound for the official client. Production binds opus-5 at max
-# effort with 900s; the bench episode cap (EPISODE_TIMEOUT_SEC=2400) stays the
-# outer bound.
-OFFICIAL_CLIENT_TURN_TIMEOUT_S = 900.0
+# The official client's turn-timeout-s is an idle window: the turn ends when
+# the CLI stream stays silent that long. A keeper waiting on one long tool call
+# (a build, a test suite) is silent for its whole duration, so any value here
+# would cut real work short. 0 removes it (keeper_claude_code_runtime.ml).
+OFFICIAL_CLIENT_TURN_TIMEOUT_S = 0.0
+# The whole-turn ceiling cannot be removed (runtime_toml.ml
+# wall_clock_ceiling_opt_field) and defaults to 14400s
+# (Runtime_wall_clock.default_ceiling_s), half of the 28800s agent timeout
+# every Terminal-Bench 4.0.0 task declares. Set to that timeout, a single turn
+# is bounded by the task's own time and nothing shorter.
+OFFICIAL_CLIENT_WALL_CLOCK_CEILING_S = 28800.0
 CLAUDE_CODE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
 
 OVERLAY_TOML = """\
@@ -247,11 +264,57 @@ base = "{capabilities_base}"
 supports_reasoning = true
 supports_tools = true
 supports_native_streaming = true
-# Without an accepted_reasoning_efforts contract the request validator rejects
-# any reasoning-effort (provider_config.ml Undeclared_reasoning_effort_capability).
-accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
-{thinking_control}{sampling_lines}{max_output_lines}supports_parallel_tool_calls = {parallel}
+{accepted_efforts_lines}{thinking_control}{sampling_lines}{max_output_lines}supports_parallel_tool_calls = {parallel}
 """
+
+OPENROUTER_ENDPOINTS_URL = "https://openrouter.ai/api/v1/models/{model}/endpoints"
+OPENROUTER_TIMEOUT_S = 30
+
+
+@dataclass(frozen=True, slots=True)
+class OpenRouterLimits:
+    max_context: int  # runtime.toml max-context: the input window masc plans against
+    max_output: int   # overlay max_output_tokens: the max_tokens masc requests
+
+
+@functools.lru_cache(maxsize=None)
+def openrouter_limits(wire_model: str) -> OpenRouterLimits:
+    """Input window and output budget that every OpenRouter endpoint of
+    `wire_model` can serve.
+
+    OpenRouter routes a request to any of the model's endpoints, and each
+    endpoint's context_length counts input and output together, while masc's
+    max-context is the input window alone (runtime.ml "Effective input context
+    window"). Left to the catalog, glm-4.7-flash asked for max_tokens 128000
+    against endpoints of 128000 and 131072 (2026-09-17). So the output budget
+    is the smallest max_completion_tokens any endpoint declares, and the input
+    window is the smallest context_length minus that budget.
+
+    Read once per process: harbor installs every trial in one event loop, and
+    a run must not have trials planning against different windows.
+    """
+    url = OPENROUTER_ENDPOINTS_URL.format(model=wire_model)
+    with urllib.request.urlopen(url, timeout=OPENROUTER_TIMEOUT_S) as response:
+        endpoints = (json.load(response).get("data") or {}).get("endpoints") or []
+    if not endpoints:
+        raise ValueError(f"OpenRouter lists no endpoints for {wire_model!r}")
+    windows = [e.get("context_length") for e in endpoints]
+    if not all(isinstance(w, int) and w > 0 for w in windows):
+        raise ValueError(f"an OpenRouter endpoint of {wire_model!r} has no context_length")
+    outputs = [e.get("max_completion_tokens") for e in endpoints
+               if isinstance(e.get("max_completion_tokens"), int)
+               and e["max_completion_tokens"] > 0]
+    if not outputs:
+        raise ValueError(
+            f"no OpenRouter endpoint of {wire_model!r} declares max_completion_tokens")
+    max_output = min(outputs)
+    max_context = min(windows) - max_output
+    if max_context <= 0:
+        raise ValueError(
+            f"{wire_model!r}: smallest window {min(windows)} leaves no input "
+            f"beside an output budget of {max_output}")
+    return OpenRouterLimits(max_context=max_context, max_output=max_output)
+
 
 def model_binding_id(wire_model: str) -> str:
     """runtime.toml 의 model id 로 쓸 수 있는 이름.
@@ -292,12 +355,17 @@ PROVIDERS = {
     # 슬래시가 들어가므로 --model openrouter/z-ai/glm-5.3 처럼 주면
     # runtime_id 는 openrouter.z-ai/glm-5.3 이 된다. glm/deepseek 계열은
     # fable 대비 입력 단가 1~2자릿수 아래라 넓은 매트릭스에 맞다.
-    "openrouter": dict(protocol="openai-compatible-http",
+    # OpenRouter serves models the AGENT_CORE catalog has no row for, and masc
+    # refuses a runtime with neither a catalog max-context nor an override
+    # (RFC-0206 §2.1, measured on 0.35.19). Both the window and the output
+    # budget are read from OpenRouter's endpoint list: openrouter_limits.
+    "openrouter": dict(context_from_openrouter=True,
+                       protocol="openai-compatible-http",
                        endpoint="https://openrouter.ai/api/v1",
                        api_key_env="OPENROUTER_API_KEY",
                        kind="openai_compat",
                        request_path="/chat/completions",
-                       capabilities_base="openai"),
+                       capabilities_base="openrouter"),
     "kimi_coding": dict(protocol="openai-compatible-http",
                         endpoint="https://api.kimi.com/coding/v1",
                         api_key_env="KIMI_API_KEY",
@@ -334,7 +402,21 @@ def is_official_client(provider: str) -> bool:
 #   No_thinking_control, so any reasoning_effort is rejected by
 #   reasoning_dialect.validate_request_control_inputs. K2.7-code thinks
 #   always-on anyway (supports_thinking_type="only").
-EFFORT_CAPABLE_BASES = {"anthropic", "openai"}
+# - openrouter: the router's own base, which declares the reasoning_effort
+#   dialect and the accepted ladder (Capabilities.openrouter_capabilities).
+EFFORT_CAPABLE_BASES = {"anthropic", "openai", "openrouter"}
+
+# An accepted_reasoning_efforts contract has to exist before the validator will
+# carry any reasoning-effort at all (provider_config.ml
+# Undeclared_reasoning_effort_capability). Where the catalog base declares one,
+# nothing belongs here — the bench is a consumer of those facts like any other
+# caller, and a ladder written here is a capability claim the benchmark made up
+# about someone else's API. The two entries below are the bases that still have
+# no catalog ladder; each is a gap to close there, not a value to maintain here.
+ACCEPTED_EFFORTS_BY_BASE = {
+    "anthropic": ["low", "medium", "high", "xhigh", "max"],
+    "openai": ["low", "medium", "high", "xhigh", "max"],
+}
 
 
 def seed_skills_block() -> str:
@@ -404,6 +486,11 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
             f"effort {effort!r} is not admitted by Claude Code; "
             f"expected one of {CLAUDE_CODE_EFFORTS}")
 
+    # Before anything is written: a lookup that fails must not leave a
+    # half-rendered config directory behind.
+    openrouter = (openrouter_limits(model_alias)
+                  if pcfg.get("context_from_openrouter") else None)
+
     if out_root is not None:
         root = out_root / arm
         if root.exists():
@@ -430,8 +517,10 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
             binding_id=binding_id,
             protocol=pcfg["protocol"], command=pcfg["command"], effort=effort,
             turn_timeout_s=OFFICIAL_CLIENT_TURN_TIMEOUT_S,
+            wall_clock_ceiling_s=OFFICIAL_CLIENT_WALL_CLOCK_CEILING_S,
             fusion=str(spec["fusion"]).lower(),
-            max_concurrent=4 if spec["parallel"] else 1)
+            max_concurrent=4 if spec["parallel"] else 1,
+            remote_root=REMOTE_ROOT)
         if spec["skills"]:
             runtime_toml += "\n" + seed_skills_block()
         (root / "runtime.toml").write_text(runtime_toml)
@@ -450,9 +539,12 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
         binding_id=binding_id,
         effort=effort, fusion=str(spec["fusion"]).lower(),
         max_concurrent=4 if spec["parallel"] else 1,
+        remote_root=REMOTE_ROOT,
         effort_lines=(
             f'reasoning-effort = "{effort}"\nthinking-support = true\n'
             if pcfg["capabilities_base"] in EFFORT_CAPABLE_BASES else ""),
+        max_context_line=(
+            f"max-context = {openrouter.max_context}\n" if openrouter else ""),
         **pcfg)
     if spec["skills"]:
         # skills=True arm만 seed의 [skills]/[[skills.sources]] 블록을 보존한다.
@@ -484,7 +576,14 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
         max_output_lines = "max_output_tokens = 64000\n"
     elif pcfg["capabilities_base"] == "openai":
         thinking_control = 'thinking_control_format = "reasoning_effort"\n'
-        max_output_lines = ""
+        max_output_lines = (
+            f"max_output_tokens = {openrouter.max_output}\n" if openrouter else "")
+    elif pcfg["capabilities_base"] == "openrouter":
+        # The router's base already carries the dialect, so repeating it here
+        # would be a second place to keep it right.
+        thinking_control = ""
+        max_output_lines = (
+            f"max_output_tokens = {openrouter.max_output}\n" if openrouter else "")
     else:
         thinking_control = ""
         max_output_lines = ""
@@ -497,8 +596,15 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
     sampling_lines = (
         'ignored_sampling_parameters = ["temperature", "top_p"]\n'
         if pcfg["capabilities_base"] in ("kimi", "anthropic") else "")
+    accepted_efforts = ACCEPTED_EFFORTS_BY_BASE.get(pcfg["capabilities_base"])
+    accepted_efforts_lines = (
+        "accepted_reasoning_efforts = ["
+        + ", ".join(f'"{effort}"' for effort in accepted_efforts)
+        + "]\n"
+        if accepted_efforts else "")
     (root / "agent-core-models-overlay.toml").write_text(OVERLAY_TOML.format(
         provider=provider, model_alias=model_alias,
+        accepted_efforts_lines=accepted_efforts_lines,
         thinking_control=thinking_control,
         sampling_lines=sampling_lines,
         max_output_lines=max_output_lines,

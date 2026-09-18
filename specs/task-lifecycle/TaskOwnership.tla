@@ -14,8 +14,11 @@
 \*   pending[t]  is a submission before the authority?
 \*               writers: the submitter (Submit, Resubmit), a verdict
 \*
-\* A verdict reads a submission and answers it. It never chooses who works
-\* next. The bug models below are what the code did when this was written.
+\* Closing a request ends its hold and its submission with it, so whoever may
+\* close the request also clears own[t] and pending[t]. Nothing else writes
+\* across these lines. In particular a verdict answers a submission and never
+\* chooses who works next. The bug models below are what the code did when
+\* this was written, or slips the design has to exclude.
 \*
 \* How the three facts read as [task_status] (lib/types/types_core.mli):
 \*   Open, nobody holds, nothing pending   Todo
@@ -34,16 +37,18 @@ VARIABLES
     req,           \* "Open" | "Accepted" | "Withdrawn"
     own,           \* holder, or NoOne
     pending,       \* a submission awaits review
-    judgeable,     \* the pending submission is one the system judge may answer
+    judgeable,     \* the pending submission is of a kind the system judge may answer
     submitter,     \* who placed the pending submission
     sub,           \* identity of the latest submission
     verdict,       \* "none" | "confirmed" | "not_confirmed"
     verdict_for,   \* which submission the returned verdict read
-    withdrawn_by   \* who withdrew the request
+    withdrawn_by,  \* who withdrew the request
+    stalled,       \* the judge cannot answer the pending submission right now
+    claimed_by     \* every agent that has held the Task
 
 vars ==
     <<author, req, own, pending, judgeable, submitter, sub, verdict,
-      verdict_for, withdrawn_by>>
+      verdict_for, withdrawn_by, stalled, claimed_by>>
 
 Requesters == Agents \cup {Operator}
 
@@ -58,6 +63,8 @@ TypeOK ==
     /\ verdict \in [Tasks -> {"none", "confirmed", "not_confirmed"}]
     /\ verdict_for \in [Tasks -> 0..MaxSubmissions]
     /\ withdrawn_by \in [Tasks -> Requesters \cup {NoOne}]
+    /\ stalled \in [Tasks -> BOOLEAN]
+    /\ claimed_by \in [Tasks -> SUBSET Agents]
 
 Init ==
     /\ author \in [Tasks -> Requesters]
@@ -70,6 +77,8 @@ Init ==
     /\ verdict = [t \in Tasks |-> "none"]
     /\ verdict_for = [t \in Tasks |-> 0]
     /\ withdrawn_by = [t \in Tasks |-> NoOne]
+    /\ stalled = [t \in Tasks |-> FALSE]
+    /\ claimed_by = [t \in Tasks |-> {}]
 
 Held(a) == {t \in Tasks : own[t] = a}
 
@@ -82,14 +91,17 @@ Claim(t, a) ==
     /\ ~pending[t]
     /\ Held(a) = {}
     /\ own' = [own EXCEPT ![t] = a]
+    /\ claimed_by' = [claimed_by EXCEPT ![t] = @ \cup {a}]
     /\ UNCHANGED <<author, req, pending, judgeable, submitter, sub, verdict,
-                   verdict_for, withdrawn_by>>
+                   verdict_for, withdrawn_by, stalled>>
 
+\* The holder gives the Task back. An operator releasing a Task for an agent
+\* that no longer exists has the same effect and is not modelled apart.
 Release(t, a) ==
     /\ own[t] = a
     /\ own' = [own EXCEPT ![t] = NoOne]
     /\ UNCHANGED <<author, req, pending, judgeable, submitter, sub, verdict,
-                   verdict_for, withdrawn_by>>
+                   verdict_for, withdrawn_by, stalled, claimed_by>>
 
 \* --------------------------------------------------------------- submission
 
@@ -104,10 +116,12 @@ Submit(t, a) ==
     /\ sub' = [sub EXCEPT ![t] = @ + 1]
     /\ verdict' = [verdict EXCEPT ![t] = "none"]
     /\ verdict_for' = [verdict_for EXCEPT ![t] = 0]
-    /\ UNCHANGED <<author, req, withdrawn_by>>
+    /\ stalled' = [stalled EXCEPT ![t] = FALSE]
+    /\ UNCHANGED <<author, req, withdrawn_by, claimed_by>>
 
 \* The submitter may replace its own submission while nobody has answered it.
 \* This is a right over the submission, not over the Task: own[t] stays NoOne.
+\* A new submission is looked at afresh, so it also clears a stall.
 Resubmit(t, a) ==
     /\ pending[t]
     /\ submitter[t] = a
@@ -115,20 +129,46 @@ Resubmit(t, a) ==
     /\ sub' = [sub EXCEPT ![t] = @ + 1]
     /\ verdict' = [verdict EXCEPT ![t] = "none"]
     /\ verdict_for' = [verdict_for EXCEPT ![t] = 0]
+    /\ stalled' = [stalled EXCEPT ![t] = FALSE]
     /\ UNCHANGED <<author, req, own, pending, judgeable, submitter,
-                   withdrawn_by>>
+                   withdrawn_by, claimed_by>>
 
 \* ------------------------------------------------------------------ verdict
 
 JudgeReturns(t) ==
     /\ pending[t]
     /\ judgeable[t]
+    /\ ~stalled[t]
     /\ verdict[t] = "none"
     /\ \E s \in 1..sub[t], v \in {"confirmed", "not_confirmed"} :
          /\ verdict' = [verdict EXCEPT ![t] = v]
          /\ verdict_for' = [verdict_for EXCEPT ![t] = s]
     /\ UNCHANGED <<author, req, own, pending, judgeable, submitter, sub,
-                   withdrawn_by>>
+                   withdrawn_by, stalled, claimed_by>>
+
+\* The review could not be carried out: the evaluator is misconfigured, its
+\* lookup surface failed, and nothing will retry. The submission stays where
+\* it is. This is a failure, not a kind of submission: [judgeable] stays TRUE.
+JudgeCannotAnswer(t) ==
+    /\ pending[t]
+    /\ judgeable[t]
+    /\ ~stalled[t]
+    /\ verdict[t] = "none"
+    /\ stalled' = [stalled EXCEPT ![t] = TRUE]
+    /\ UNCHANGED <<author, req, own, pending, judgeable, submitter, sub,
+                   verdict, verdict_for, withdrawn_by, claimed_by>>
+
+\* The operator may answer any pending submission, stalled or not. The answer
+\* names the submission the operator read, so a click that raced a
+\* resubmission is discarded like any other superseded verdict.
+OperatorReturns(t) ==
+    /\ pending[t]
+    /\ verdict[t] = "none"
+    /\ \E s \in 1..sub[t], v \in {"confirmed", "not_confirmed"} :
+         /\ verdict' = [verdict EXCEPT ![t] = v]
+         /\ verdict_for' = [verdict_for EXCEPT ![t] = s]
+    /\ UNCHANGED <<author, req, own, pending, judgeable, submitter, sub,
+                   withdrawn_by, stalled, claimed_by>>
 
 DiscardSuperseded(t) ==
     /\ pending[t]
@@ -137,7 +177,7 @@ DiscardSuperseded(t) ==
     /\ verdict' = [verdict EXCEPT ![t] = "none"]
     /\ verdict_for' = [verdict_for EXCEPT ![t] = 0]
     /\ UNCHANGED <<author, req, own, pending, judgeable, submitter, sub,
-                   withdrawn_by>>
+                   withdrawn_by, stalled, claimed_by>>
 
 ApplyConfirmed(t) ==
     /\ pending[t]
@@ -145,8 +185,9 @@ ApplyConfirmed(t) ==
     /\ verdict_for[t] = sub[t]
     /\ req' = [req EXCEPT ![t] = "Accepted"]
     /\ pending' = [pending EXCEPT ![t] = FALSE]
+    /\ stalled' = [stalled EXCEPT ![t] = FALSE]
     /\ UNCHANGED <<author, own, judgeable, submitter, sub, verdict,
-                   verdict_for, withdrawn_by>>
+                   verdict_for, withdrawn_by, claimed_by>>
 
 \* The submission was not confirmed. The Task is simply open and unheld again;
 \* the reason travels with it as context. Nobody is put to work by this step.
@@ -157,13 +198,15 @@ ApplyNotConfirmed(t) ==
     /\ pending' = [pending EXCEPT ![t] = FALSE]
     /\ verdict' = [verdict EXCEPT ![t] = "none"]
     /\ verdict_for' = [verdict_for EXCEPT ![t] = 0]
+    /\ stalled' = [stalled EXCEPT ![t] = FALSE]
     /\ UNCHANGED <<author, req, own, judgeable, submitter, sub,
-                   withdrawn_by>>
+                   withdrawn_by, claimed_by>>
 
 \* --------------------------------------------------------------- withdrawal
 
 \* Retracting a request is the requester's call, whatever the Task is doing.
-\* It is not a submission and no judge is asked.
+\* It is not a submission and no judge is asked. It ends the hold and the
+\* pending submission too: a closed request owes nothing and awaits nothing.
 Withdraw(t, who) ==
     /\ req[t] = "Open"
     /\ who = author[t] \/ who = Operator
@@ -173,23 +216,25 @@ Withdraw(t, who) ==
     /\ pending' = [pending EXCEPT ![t] = FALSE]
     /\ verdict' = [verdict EXCEPT ![t] = "none"]
     /\ verdict_for' = [verdict_for EXCEPT ![t] = 0]
-    /\ UNCHANGED <<author, judgeable, submitter, sub>>
+    /\ stalled' = [stalled EXCEPT ![t] = FALSE]
+    /\ UNCHANGED <<author, judgeable, submitter, sub, claimed_by>>
 
 NextClean ==
     \/ \E t \in Tasks, a \in Agents :
          Claim(t, a) \/ Release(t, a) \/ Submit(t, a) \/ Resubmit(t, a)
     \/ \E t \in Tasks :
          \/ JudgeReturns(t)
+         \/ JudgeCannotAnswer(t)
+         \/ OperatorReturns(t)
          \/ DiscardSuperseded(t)
          \/ ApplyConfirmed(t)
          \/ ApplyNotConfirmed(t)
     \/ \E t \in Tasks, who \in Requesters : Withdraw(t, who)
 
 \* ================================================================ bug models
-\* Each one is what the code does today, or a slip the design must exclude.
 
-\* Today: a rejection restores InProgress for the producer, whatever the
-\* producer has picked up since.
+\* The code when this was written: a rejection restores InProgress for the
+\* producer, whatever the producer has picked up since.
 BugVerdictReturnsTaskToSubmitter(t) ==
     /\ pending[t]
     /\ verdict[t] = "not_confirmed"
@@ -198,10 +243,12 @@ BugVerdictReturnsTaskToSubmitter(t) ==
     /\ own' = [own EXCEPT ![t] = submitter[t]]
     /\ verdict' = [verdict EXCEPT ![t] = "none"]
     /\ verdict_for' = [verdict_for EXCEPT ![t] = 0]
-    /\ UNCHANGED <<author, req, judgeable, submitter, sub, withdrawn_by>>
+    /\ stalled' = [stalled EXCEPT ![t] = FALSE]
+    /\ UNCHANGED <<author, req, judgeable, submitter, sub, withdrawn_by,
+                   claimed_by>>
 
-\* Today: a holder that wants out for good submits a stop that only the
-\* operator may answer.
+\* The code when this was written: a holder that wants out for good places a
+\* stop request that only the operator may answer.
 BugStopSubmissionOnlyOperatorAnswers(t, a) ==
     /\ own[t] = a
     /\ sub[t] < MaxSubmissions
@@ -210,9 +257,11 @@ BugStopSubmissionOnlyOperatorAnswers(t, a) ==
     /\ judgeable' = [judgeable EXCEPT ![t] = FALSE]
     /\ submitter' = [submitter EXCEPT ![t] = a]
     /\ sub' = [sub EXCEPT ![t] = @ + 1]
-    /\ UNCHANGED <<author, req, verdict, verdict_for, withdrawn_by>>
+    /\ UNCHANGED <<author, req, verdict, verdict_for, withdrawn_by, stalled,
+                   claimed_by>>
 
-\* Today: any agent may cancel a Todo it did not ask for.
+\* The code when this was written: any agent may cancel a Todo it did not ask
+\* for.
 BugAnyoneWithdraws(t, a) ==
     /\ req[t] = "Open"
     /\ own[t] = NoOne
@@ -221,7 +270,48 @@ BugAnyoneWithdraws(t, a) ==
     /\ req' = [req EXCEPT ![t] = "Withdrawn"]
     /\ withdrawn_by' = [withdrawn_by EXCEPT ![t] = a]
     /\ UNCHANGED <<author, own, pending, judgeable, submitter, sub, verdict,
-                   verdict_for>>
+                   verdict_for, stalled, claimed_by>>
+
+\* A slip the new transitions make possible: the request is closed but the
+\* agent that held the Task is left holding it.
+BugWithdrawKeepsHolder(t, who) ==
+    /\ req[t] = "Open"
+    /\ who = author[t] \/ who = Operator
+    /\ req' = [req EXCEPT ![t] = "Withdrawn"]
+    /\ withdrawn_by' = [withdrawn_by EXCEPT ![t] = who]
+    /\ pending' = [pending EXCEPT ![t] = FALSE]
+    /\ verdict' = [verdict EXCEPT ![t] = "none"]
+    /\ verdict_for' = [verdict_for EXCEPT ![t] = 0]
+    /\ stalled' = [stalled EXCEPT ![t] = FALSE]
+    /\ UNCHANGED <<author, own, judgeable, submitter, sub, claimed_by>>
+
+\* A slip: submitting without letting go, so the Task is held and pending.
+BugSubmitKeepsHold(t, a) ==
+    /\ own[t] = a
+    /\ sub[t] < MaxSubmissions
+    /\ pending' = [pending EXCEPT ![t] = TRUE]
+    /\ judgeable' = [judgeable EXCEPT ![t] = TRUE]
+    /\ submitter' = [submitter EXCEPT ![t] = a]
+    /\ sub' = [sub EXCEPT ![t] = @ + 1]
+    /\ verdict' = [verdict EXCEPT ![t] = "none"]
+    /\ verdict_for' = [verdict_for EXCEPT ![t] = 0]
+    /\ UNCHANGED <<author, req, own, withdrawn_by, stalled, claimed_by>>
+
+\* Carried over from TaskLifecycle.tla (BugSkipClaim): work is submitted by an
+\* agent that never held the Task.
+BugSubmitWithoutHold(t, a) ==
+    /\ req[t] = "Open"
+    /\ own[t] = NoOne
+    /\ ~pending[t]
+    /\ a \notin claimed_by[t]
+    /\ sub[t] < MaxSubmissions
+    /\ pending' = [pending EXCEPT ![t] = TRUE]
+    /\ judgeable' = [judgeable EXCEPT ![t] = TRUE]
+    /\ submitter' = [submitter EXCEPT ![t] = a]
+    /\ sub' = [sub EXCEPT ![t] = @ + 1]
+    /\ verdict' = [verdict EXCEPT ![t] = "none"]
+    /\ verdict_for' = [verdict_for EXCEPT ![t] = 0]
+    /\ UNCHANGED <<author, req, own, withdrawn_by, stalled, claimed_by>>
 
 \* Carried over from TaskLifecycle.tla.
 BugAcceptWithoutVerdict(t, a) ==
@@ -229,7 +319,7 @@ BugAcceptWithoutVerdict(t, a) ==
     /\ req' = [req EXCEPT ![t] = "Accepted"]
     /\ own' = [own EXCEPT ![t] = NoOne]
     /\ UNCHANGED <<author, pending, judgeable, submitter, sub, verdict,
-                   verdict_for, withdrawn_by>>
+                   verdict_for, withdrawn_by, stalled, claimed_by>>
 
 BugSupersededVerdictAccepts(t) ==
     /\ pending[t]
@@ -237,8 +327,9 @@ BugSupersededVerdictAccepts(t) ==
     /\ verdict_for[t] # sub[t]
     /\ req' = [req EXCEPT ![t] = "Accepted"]
     /\ pending' = [pending EXCEPT ![t] = FALSE]
+    /\ stalled' = [stalled EXCEPT ![t] = FALSE]
     /\ UNCHANGED <<author, own, judgeable, submitter, sub, verdict,
-                   verdict_for, withdrawn_by>>
+                   verdict_for, withdrawn_by, claimed_by>>
 
 SpecClean == Init /\ [][NextClean]_vars
 SpecBugVerdictReturns ==
@@ -248,6 +339,13 @@ SpecBugStopSubmission ==
                               BugStopSubmissionOnlyOperatorAnswers(t, a)]_vars
 SpecBugAnyoneWithdraws ==
     Init /\ [][NextClean \/ \E t \in Tasks, a \in Agents : BugAnyoneWithdraws(t, a)]_vars
+SpecBugWithdrawKeepsHolder ==
+    Init /\ [][NextClean \/ \E t \in Tasks, who \in Requesters :
+                              BugWithdrawKeepsHolder(t, who)]_vars
+SpecBugSubmitKeepsHold ==
+    Init /\ [][NextClean \/ \E t \in Tasks, a \in Agents : BugSubmitKeepsHold(t, a)]_vars
+SpecBugSubmitWithoutHold ==
+    Init /\ [][NextClean \/ \E t \in Tasks, a \in Agents : BugSubmitWithoutHold(t, a)]_vars
 SpecBugAcceptWithoutVerdict ==
     Init /\ [][NextClean \/ \E t \in Tasks, a \in Agents :
                               BugAcceptWithoutVerdict(t, a)]_vars
@@ -267,9 +365,17 @@ HeldOrPendingNotBoth == \A t \in Tasks : ~(own[t] # NoOne /\ pending[t])
 ClosedOwesNothing ==
     \A t \in Tasks : req[t] # "Open" => (own[t] = NoOne /\ ~pending[t])
 
-\* Every pending submission is one the system judge may answer. The operator
-\* is never the only way out of a wait.
-PendingNeverNeedsOperator == \A t \in Tasks : pending[t] => judgeable[t]
+\* No kind of submission is one that only the operator may answer. This is a
+\* statement about kinds, not about liveness: a review can still fail
+\* (JudgeCannotAnswer), and then the operator is who repairs it.
+NoOperatorOnlySubmissionKind == \A t \in Tasks : pending[t] => judgeable[t]
+
+\* A stall is a property of a pending submission and ends with it.
+StalledOnlyWhilePending == \A t \in Tasks : stalled[t] => pending[t]
+
+\* A submission comes from an agent that held the Task.
+SubmissionRequiresHold ==
+    \A t \in Tasks : pending[t] => submitter[t] \in claimed_by[t]
 
 \* Accepted only through a confirming verdict read against the live submission.
 AcceptedRequiresLiveConfirmation ==
@@ -286,7 +392,9 @@ Safety ==
     /\ OneTaskPerAgent
     /\ HeldOrPendingNotBoth
     /\ ClosedOwesNothing
-    /\ PendingNeverNeedsOperator
+    /\ NoOperatorOnlySubmissionKind
+    /\ StalledOnlyWhilePending
+    /\ SubmissionRequiresHold
     /\ AcceptedRequiresLiveConfirmation
     /\ WithdrawnRequiresStanding
 

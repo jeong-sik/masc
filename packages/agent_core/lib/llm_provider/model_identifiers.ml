@@ -36,6 +36,11 @@ module Id_prefix : sig
   (** Comparison-time normalization (ASCII case-fold + trim); stored bytes
       are never rewritten. *)
 
+  val starts_with : prefix:t -> t -> bool
+  (** Prefix matching with the same comparison-time normalization as
+      [equal] (ASCII case-fold + trim on both sides); the only sanctioned
+      prefix comparison on [t]. *)
+
   val to_string : t -> string
   (** The original, unnormalized bytes. *)
 end = struct
@@ -61,6 +66,12 @@ end = struct
     String.equal
       (String.lowercase_ascii (String.trim a))
       (String.lowercase_ascii (String.trim b))
+  ;;
+
+  let starts_with ~prefix t =
+    String.starts_with
+      ~prefix:(String.lowercase_ascii (String.trim prefix))
+      (String.lowercase_ascii (String.trim t))
   ;;
 
   let to_string t = t

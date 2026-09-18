@@ -38,6 +38,14 @@ module Id_prefix : sig
   (** Comparison-time normalization (ASCII case-fold + trim); stored bytes
       are never rewritten. *)
 
+  val starts_with : prefix:t -> t -> bool
+  (** Prefix matching for catalog rows, e.g. wizard client gating on
+      [claude-] / [gpt-].  Same comparison-time normalization as
+      {!equal} (ASCII case-fold + trim on both sides); raw bytes are
+      never rewritten.  This is the only sanctioned prefix comparison on
+      [t]: escaping through {!to_string} to run [String.starts_with]
+      bypasses the shared normalization and is a review flag. *)
+
   val to_string : t -> string
   (** The original, unnormalized bytes. *)
 end

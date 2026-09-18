@@ -10,6 +10,9 @@ Measurement records and research syntheses, one row per file. A
 
 | Date | Record |
 | --- | --- |
+| 2026-09-18 | [TypeSafe Jev(System One) 분석과 masc 판단 레인 적용 가능성 (r1)](2026-09-18-typesafe-jev-masc-applicability-r1.md) |
+| 2026-09-18 | [TypeSafe Jev replay 근거 기록](2026-09-18-typesafe-jev-masc-applicability-evidence-record.md) |
+| 2026-09-09 | [Browser Lane composition experiments](2026-09-09-browser-composition-patterns.md) |
 | 2026-09-05 | [기억은 무엇으로 굳는가: 연구와 기성 제품이 쓰는 강화 신호, 그리고 masc 에 없는 것](2026-09-05-memory-reinforcement-signals-in-research-and-products.md) |
 | 2026-09-05 | [메인 도메인 지연 — 라이브 실측과 원인 모델 (r1)](2026-09-05-main-domain-scheduler-latency-research-r1.md) |
 | 2026-09-05 | [메인 도메인 지연 근거 기록](2026-09-05-main-domain-scheduler-latency-evidence-record.md) |

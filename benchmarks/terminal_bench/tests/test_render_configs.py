@@ -240,9 +240,9 @@ def test_the_router_lane_inherits_its_ladder_instead_of_declaring_one(
 
 
 def test_no_lane_writes_a_ladder_of_its_own():
-    # Which efforts a model takes is a model fact the vendors publish per model
-    # -- gpt-5 has minimal and no max, gpt-5.5 has no max, gpt-6-astra answers
-    # HTTP 400 to none -- so one list written here is wrong for most of them.
+    # Which efforts a model takes is a fact the vendors publish per model:
+    # gpt-6-astra answers HTTP 400 to none while gpt-5.6-sol, -terra and -luna
+    # accept it, so one list written here is wrong for one side or the other.
     # The catalog is where that fact lives; a lane whose model has no row is
     # refused by name (Undeclared_reasoning_effort_capability), which is the
     # outcome to keep.

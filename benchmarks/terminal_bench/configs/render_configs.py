@@ -450,10 +450,14 @@ def is_official_client(provider: str) -> bool:
 # model fact, not a provider one, and the vendors publish it that way
 # (2026-09-18):
 #
-# - gpt-6-astra takes low..max and rejects `none` with HTTP 400; gpt-5.6 takes
-#   `none`; gpt-5.5 has no `max`; gpt-5 has `minimal` and neither `xhigh` nor
-#   `max`. One list covering "openai" is wrong for three of those four, and
-#   wrong here means a 400 mid-run rather than a refusal before dispatch.
+# - gpt-6-astra takes low..max and does not take `none`, answering HTTP 400 to
+#   it; gpt-5.6-sol, -terra and -luna take `none` as well, and document
+#   `medium (default)` where astra's page documents no default at all. The
+#   other five values are the same across all four, so the split is one value
+#   wide -- and one value is enough: a list under "openai" either carries
+#   `none` and is wrong for the flagship, where wrong means a 400 mid-run
+#   rather than a refusal before dispatch, or omits it and is wrong for the
+#   other three.
 # - Anthropic's enum is low..max with no `none` (thinking is turned off by
 #   `thinking.type`, not by an effort), and "Not every model that supports
 #   `max` supports `xhigh`". The catalog already declares exactly that set for

@@ -253,11 +253,17 @@ different account authority.* `claude_code` 라는 라벨에 API 키 기본값�
 | `[[targets]]` | 바인딩에서 파생한다 |
 | `[[models]]` | `[models.X]` + `[models.X.capabilities]` — 표의 **존재**가 곧 배포의 보증이다 |
 | `[[providers]]` 의 `kind`·`capabilities_base` | `[providers.X] kind` |
+| `[[providers]]` 의 `request_path` | `[providers.X] request-path` |
 
-그래서 `[providers.X]` 에 `kind` 를 더한다. 카탈로그에 행이 **없을 때만** 읽고, 읽히지
-않을 자리(카탈로그가 이미 답함, `protocol` 이 이미 방언을 정함, 공식 클라이언트)에
-적으면 조용히 무시하지 않고 거절한다. 하나의 값이 방언·capability preset·기본 request
-path 를 모두 정하므로 새 축이 생기지 않는다.
+그래서 `[providers.X]` 에 `kind` 와 `request-path` 를 더한다. 둘 다 카탈로그에 행이
+**없을 때만** 읽고, 읽히지 않을 자리(카탈로그가 이미 답함, `protocol` 이 이미 방언을
+정함, 공식 클라이언트)에 적으면 조용히 무시하지 않고 거절한다.
+
+`kind` 하나가 방언·capability preset·기본 request path 를 모두 정하므로 새 축이 생기지
+않는다. `request-path` 는 그 기본값으로 안 되는 경우 — 벤더 서버 앞에 게이트웨이가
+있어서 레이아웃이 다른 경우 — 에만 필요하고, 그래서 마법사도 운영자가 직접 이름을
+댔을 때만 적는다. 기본값을 적어두면 그건 계산 결과의 사본이고, overlay 가 바로
+그것이었다.
 
 규칙은 모델 쪽과 같은 모양이다 — **카탈로그가 아는 것은 카탈로그가, 모르는 것은 배포가
 말한다.**

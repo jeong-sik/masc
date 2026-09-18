@@ -3997,59 +3997,70 @@ let progress_label = function
   | Try_provider.Tool_results_saved -> "tool results saved"
 ;;
 
-(* RFC last-path-resumes-after-progress §3.2: every stage ends same-run retry,
-   and only a stage written after tools ran, once its save succeeded, is
-   progress a resumed operation keeps. *)
-let test_checkpoint_progress_counts_saved_tool_results_only () =
-  let saved_tool_results = function
-    | Agent_core.Agent.After_tool_results_appended | Agent_core.Agent.After_context_injection -> true
-    | Agent_core.Agent.After_assistant_collected
-    | Agent_core.Agent.After_rejected_response_dropped -> false
-  in
+(* RFC last-path-resumes-after-progress §3.2: reaching a stage ends same-run
+   retry whatever the sink answers, and only the sink's owner marks the tool
+   results it actually wrote. A sink answers [Ok ()] for a write it skipped as
+   well ([Keeper_checkpoint_store.Stale_noop]), so the wrapper never reads
+   progress out of that answer. *)
+let test_a_sink_answer_is_not_progress () =
   let sinks =
-    [ "no sink", None, false
-    ; "a save that succeeds", Some (fun _ -> Ok ()), true
-    ; "a save that fails", Some (fun _ -> Error "disk full"), false
+    [ "no sink", None
+    ; "a save that answers Ok", Some (fun _ -> Ok ())
+    ; "a save that fails", Some (fun _ -> Error "disk full")
     ]
   in
   List.iter
     (fun stage ->
        List.iter
-         (fun (sink_label, sink, saves) ->
+         (fun (sink_label, sink) ->
             let progress = Atomic.make Try_provider.No_checkpoint_stage in
-            let returned =
+            let (_ : (unit, string) result) =
               Driver.For_testing.observing_checkpoint_sink progress sink (progress_snapshot stage)
             in
             let label =
               Agent_core.Agent.checkpoint_stage_to_string stage ^ " with " ^ sink_label
             in
-            Alcotest.(check bool) (label ^ ": the sink's answer is returned") saves
-              (Result.is_ok returned && Option.is_some sink);
             Alcotest.(check string) label
-              (progress_label
-                 (if saves && saved_tool_results stage
-                  then Try_provider.Tool_results_saved
-                  else Try_provider.Checkpoint_stage_reached))
+              (progress_label Try_provider.Checkpoint_stage_reached)
               (progress_label (Atomic.get progress));
             Alcotest.(check bool) (label ^ ": no same-run retry") false
-              (Driver.For_testing.same_run_retry_allowed progress))
+              (Driver.For_testing.same_run_retry_allowed progress);
+            Alcotest.(check bool) (label ^ ": no tool results") false
+              (Driver.For_testing.tool_results_saved progress))
          sinks)
     [ Agent_core.Agent.After_assistant_collected
     ; Agent_core.Agent.After_tool_results_appended
     ; Agent_core.Agent.After_context_injection
     ; Agent_core.Agent.After_rejected_response_dropped
+    ]
+;;
+
+(* What the owner marks: a stage written after tools ran counts, the answer
+   stages do not, and a later answer stage does not erase it. *)
+let test_the_sink_owner_marks_written_tool_results () =
+  List.iter
+    (fun (stage, counts) ->
+       let progress = Atomic.make Try_provider.No_checkpoint_stage in
+       Driver.For_testing.observe_checkpoint_saved progress stage;
+       Alcotest.(check string)
+         (Agent_core.Agent.checkpoint_stage_to_string stage)
+         (progress_label
+            (if counts then Try_provider.Tool_results_saved else Try_provider.No_checkpoint_stage))
+         (progress_label (Atomic.get progress)))
+    [ Agent_core.Agent.After_tool_results_appended, true
+    ; Agent_core.Agent.After_context_injection, true
+    ; Agent_core.Agent.After_assistant_collected, false
+    ; Agent_core.Agent.After_rejected_response_dropped, false
     ];
   let progress = Atomic.make Try_provider.No_checkpoint_stage in
-  let save stage =
-    ignore
-      (Driver.For_testing.observing_checkpoint_sink progress
-         (Some (fun _ -> Ok ()))
-         (progress_snapshot stage)
-       : (unit, string) result)
+  Driver.For_testing.observe_checkpoint_saved progress Agent_core.Agent.After_tool_results_appended;
+  let (_ : (unit, string) result) =
+    Driver.For_testing.observing_checkpoint_sink
+      progress
+      (Some (fun _ -> Ok ()))
+      (progress_snapshot Agent_core.Agent.After_assistant_collected)
   in
-  save Agent_core.Agent.After_tool_results_appended;
-  save Agent_core.Agent.After_assistant_collected;
-  Alcotest.(check string) "a later answer stage keeps the saved tool results"
+  Alcotest.(check string) "a later answer stage keeps the written tool results"
     (progress_label Try_provider.Tool_results_saved)
     (progress_label (Atomic.get progress))
 ;;
@@ -4059,18 +4070,36 @@ let bad_gateway =
     (Agent_core.Retry.ServerError { status = 502; message = "bad gateway" })
 ;;
 
+(* What a keeper's checkpoint write did, as its sink sees it. *)
+type write_outcome =
+  | Wrote
+  | Wrote_nothing
+  | Write_failed
+
 (* One chat-lane walk. [attempt ~save candidate] may save checkpoint stages
    through the production sink wrapper before it returns the candidate's
    error; the walk reads progress from the same value the driver does. *)
 let same_path_walk ~continuation candidates attempt =
   let deferred = ref [] in
   let progress = Atomic.make Try_provider.No_checkpoint_stage in
+  (* As the keeper's own sink does: the stage goes through the wrapper, and the
+     owner marks what its write actually reached. [Wrote_nothing] is the
+     store's stale no-op, which answers [Ok ()] and leaves the canonical
+     checkpoint as it was. *)
   let save stage outcome =
-    ignore
-      (Driver.For_testing.observing_checkpoint_sink progress
-         (Some (fun _ -> outcome))
-         (progress_snapshot stage)
-       : (unit, string) result)
+    let answer =
+      match outcome with
+      | Wrote | Wrote_nothing -> Ok ()
+      | Write_failed -> Error "disk full"
+    in
+    let (_ : (unit, string) result) =
+      Driver.For_testing.observing_checkpoint_sink progress
+        (Some (fun _ -> answer))
+        (progress_snapshot stage)
+    in
+    match outcome with
+    | Wrote -> Driver.For_testing.observe_checkpoint_saved progress stage
+    | Wrote_nothing | Write_failed -> ()
   in
   let result =
     Driver.For_testing.attempt_runtime_candidates
@@ -4099,7 +4128,7 @@ let describe_hint (hint : Driver.deferred_runtime_lane) =
    names nothing but the failed candidate, alone or at the end of a lane. *)
 let test_a_chat_operation_resumes_its_last_candidate_after_saved_tool_results () =
   let tools_then_bad_gateway ~save _candidate =
-    save Agent_core.Agent.After_tool_results_appended (Ok ());
+    save Agent_core.Agent.After_tool_results_appended Wrote;
     bad_gateway
   in
   let result, hints =
@@ -4137,25 +4166,33 @@ let test_no_same_path_hint_unless_every_condition_holds () =
       , Driver.Resume_operation_checkpoint
       , [ "only" ]
       , fun ~save _ ->
-          save Agent_core.Agent.After_assistant_collected (Ok ());
+          save Agent_core.Agent.After_assistant_collected Wrote;
           bad_gateway )
     ; ( "the tool-results save failed"
       , Driver.Resume_operation_checkpoint
       , [ "only" ]
       , fun ~save _ ->
-          save Agent_core.Agent.After_tool_results_appended (Error "disk full");
+          save Agent_core.Agent.After_tool_results_appended Write_failed;
+          bad_gateway )
+    (* The store's stale no-op: the sink answered [Ok ()] and the canonical
+       checkpoint the operation would resume from was left as it was. *)
+    ; ( "the tool-results write was skipped as stale"
+      , Driver.Resume_operation_checkpoint
+      , [ "only" ]
+      , fun ~save _ ->
+          save Agent_core.Agent.After_tool_results_appended Wrote_nothing;
           bad_gateway )
     ; ( "a heartbeat cycle restarts"
       , Driver.Restart_cycle
       , [ "only" ]
       , fun ~save _ ->
-          save Agent_core.Agent.After_tool_results_appended (Ok ());
+          save Agent_core.Agent.After_tool_results_appended Wrote;
           bad_gateway )
     ; ( "a failure that waiting does not change"
       , Driver.Resume_operation_checkpoint
       , [ "only" ]
       , fun ~save _ ->
-          save Agent_core.Agent.After_context_injection (Ok ());
+          save Agent_core.Agent.After_context_injection Wrote;
           Agent_core.Error.Api (Agent_core.Retry.NotFound { message = "no such model" }) )
     ; ( "an earlier candidate overflowed"
       , Driver.Resume_operation_checkpoint
@@ -4164,7 +4201,7 @@ let test_no_same_path_hint_unless_every_condition_holds () =
           match candidate with
           | "wide" -> overflow
           | _ ->
-            save Agent_core.Agent.After_tool_results_appended (Ok ());
+            save Agent_core.Agent.After_tool_results_appended Wrote;
             bad_gateway )
     ]
   in
@@ -4749,9 +4786,13 @@ let () =
             `Quick
             test_single_candidate_checkpoint_failure_has_no_hint;
           Alcotest.test_case
-            "checkpoint progress counts saved tool results only"
+            "a sink answer is not progress"
             `Quick
-            test_checkpoint_progress_counts_saved_tool_results_only;
+            test_a_sink_answer_is_not_progress;
+          Alcotest.test_case
+            "the sink owner marks written tool results"
+            `Quick
+            test_the_sink_owner_marks_written_tool_results;
           Alcotest.test_case
             "a chat operation resumes its last candidate after saved tool results"
             `Quick

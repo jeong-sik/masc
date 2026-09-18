@@ -306,6 +306,8 @@ val run_named :
   ?deferred_runtime_lane:deferred_runtime_lane ->
   ?on_runtime_attempt:(runtime_attempt -> unit) ->
   ?runtime_retry_deferral:runtime_retry_deferral ->
+  ?checkpoint_progress:
+    Keeper_turn_driver_try_provider.checkpoint_progress Atomic.t ->
   ?on_runtime_attempt_error:
     (runtime_id:string ->
     attempt:int ->

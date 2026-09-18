@@ -160,17 +160,20 @@ val observe_checkpoint_stage :
 
 val observe_checkpoint_saved :
   checkpoint_progress Atomic.t -> Agent_core.Agent.checkpoint_stage -> unit
-(** Marks [Tool_results_saved] for a stage written after tools ran. Called
-    only after the stage was saved. *)
+(** Marks [Tool_results_saved] for a stage written after tools ran. Only the
+    owner of the checkpoint sink may call it, and only for a write it made:
+    a sink answers [Ok ()] for a write it skipped as well
+    ([Keeper_checkpoint_store.Stale_noop], which leaves the canonical
+    checkpoint untouched), and a resumed operation would not read the
+    checkpoint that write claimed. *)
 
 val observing_checkpoint_sink :
   checkpoint_progress Atomic.t ->
   Agent_core.Agent.checkpoint_sink option ->
   Agent_core.Agent.checkpoint_sink
-(** The sink an attempt hands AGENT_CORE: marks the stage, delegates the save
-    to the caller's sink, and marks saved tool results when that save
-    succeeded. With no caller sink nothing is saved and the stage alone is
-    marked. *)
+(** The sink an attempt hands AGENT_CORE: marks the stage, then delegates to
+    the caller's sink and returns its answer unread. Saved tool results are
+    not marked here — see {!observe_checkpoint_saved}. *)
 
 val same_run_retry_allowed : checkpoint_progress Atomic.t -> bool
 (** [true] only at [No_checkpoint_stage]. *)

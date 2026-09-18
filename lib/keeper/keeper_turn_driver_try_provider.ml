@@ -323,10 +323,18 @@ let observe_checkpoint_stage progress (_ : Agent_core.Agent.checkpoint_stage) =
 ;;
 
 (* RFC last-path-resumes-after-progress §3.2: a chat operation resumes from its
-   latest saved checkpoint, so only a stage written after tools ran, and saved,
-   is progress a resumed attempt does not repeat. [After_assistant_collected]
-   is saved before accept judges the answer and keeps a refused one, so
-   counting it would resume into the same refusal. *)
+   latest saved checkpoint, so only a stage written after tools ran, and
+   written to that checkpoint, is progress a resumed attempt does not repeat.
+   [After_assistant_collected] is saved before accept judges the answer and
+   keeps a refused one, so counting it would resume into the same refusal.
+
+   Only the sink's owner may call this. A sink answers [Ok ()] for a write it
+   skipped as well as for one it made: the keeper's checkpoint store answers
+   [Stale_noop] when the canonical checkpoint is already ahead of the incoming
+   turn, and the keeper's sink turns that into [Ok ()]
+   ([Keeper_agent_run], [Keeper_checkpoint_store.Stale_noop]). Reading progress
+   off that answer would claim a checkpoint the operation would not resume
+   from, and the tools it holds would run a second time. *)
 let observe_checkpoint_saved progress (stage : Agent_core.Agent.checkpoint_stage) =
   match stage with
   | Agent_core.Agent.After_tool_results_appended
@@ -338,19 +346,17 @@ let observe_checkpoint_saved progress (stage : Agent_core.Agent.checkpoint_stage
 ;;
 
 (* The stage is marked before the save is delegated: a failed save still ends
-   same-run retry, because the attempt may already hold effects. Saved tool
-   results are marked only once the sink said the save succeeded; with no sink
-   nothing was saved. *)
+   same-run retry, because the attempt may already hold effects. What the sink
+   did with the checkpoint is not read here -- its answer does not say whether
+   anything was written -- so the sink's owner marks that itself with
+   [observe_checkpoint_saved]. A dispatch whose owner marks nothing holds no
+   saved tool results, and its lane's last candidate ends the turn as it did
+   before this observation existed. *)
 let observing_checkpoint_sink progress sink (snapshot : Agent_core.Agent.checkpoint_snapshot) =
   observe_checkpoint_stage progress snapshot.stage;
   match sink with
   | None -> Ok ()
-  | Some sink ->
-    let saved = sink snapshot in
-    (match saved with
-     | Ok () -> observe_checkpoint_saved progress snapshot.stage
-     | Error _ -> ());
-    saved
+  | Some sink -> sink snapshot
 ;;
 
 let same_run_retry_allowed progress =

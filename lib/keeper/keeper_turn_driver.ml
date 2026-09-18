@@ -1453,6 +1453,7 @@ let run_named
     ?deferred_runtime_lane
     ?on_runtime_attempt
     ?runtime_retry_deferral
+    ?checkpoint_progress
     ?on_runtime_attempt_error
     ?on_runtime_lane_terminal_error
     ?on_deferred_runtime_consumed
@@ -1490,8 +1491,16 @@ let run_named
   let routing_run_id = Random_id.hex ~bytes:16 in
   let turn_start = Mtime_clock.now () in
   let seq_ref = ref 0 in
+  (* What this dispatch's checkpoints recorded. The caller passes the value it
+     marks from its own sink: only that sink knows whether a write reached the
+     canonical checkpoint or was skipped as stale, and its [Ok ()] does not say
+     which ([Keeper_agent_run], [Keeper_checkpoint_store.Stale_noop]). A caller
+     that marks nothing gets a value that never reaches [Tool_results_saved],
+     so its lane ends a failed last candidate instead of resuming on it. *)
   let checkpoint_progress =
-    Atomic.make Keeper_turn_driver_try_provider.No_checkpoint_stage
+    match checkpoint_progress with
+    | Some progress -> progress
+    | None -> Atomic.make Keeper_turn_driver_try_provider.No_checkpoint_stage
   in
   let emit_runtime_manifest ?status ?decision event =
     match runtime_manifest_context, runtime_manifest_append with

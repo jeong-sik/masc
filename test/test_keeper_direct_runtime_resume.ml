@@ -423,14 +423,26 @@ is-default = true
       let frame = Keeper_repetition_snapshot.admit Keeper_repetition_snapshot.empty
           (Keeper_repetition_snapshot.Fresh scope) |> require "scope" in
       Keeper_repetition_scope.save context frame;
+      (* As production does (Keeper_agent_run): the write's own answer decides
+         what is marked. A [Stale_noop] answers [Ok ()] and leaves the
+         canonical checkpoint untouched, so it marks nothing. *)
+      let checkpoint_progress =
+        Atomic.make Keeper_turn_driver_try_provider.No_checkpoint_stage in
       let checkpoint_sink (snapshot : Agent_core.Agent.checkpoint_snapshot) =
         let checkpoint = {snapshot.checkpoint with session_id} in
-        Checkpoint.save_agent_core_classified
-          ~history_retained:(history_retained ()) ~session_dir checkpoint |> Result.map (fun _ -> ()) in
+        match Checkpoint.save_agent_core_classified
+                ~history_retained:(history_retained ()) ~session_dir checkpoint with
+        | Ok (Checkpoint.Saved _) ->
+          Keeper_turn_driver_try_provider.observe_checkpoint_saved
+            checkpoint_progress snapshot.stage;
+          Ok ()
+        | Ok (Checkpoint.Stale_noop _) -> Ok ()
+        | Error detail -> Error detail in
       let deferred = ref None in
       Option.iter (fun admission -> Continuation.consume ~base_path ~keeper_name ~operation_id admission
         |> require "consume same checkpoint") admission;
       let result = Keeper_turn_driver.run_named
+        ~checkpoint_progress
         ~runtime_id:(match admission with None -> "direct" | Some value -> (Continuation.lane value).next_runtime_id)
         ~keeper_name ~base_path ~session_id ~goal:"Finish original task"
         ~system_prompt:"Use the effect receipt to finish the original task."

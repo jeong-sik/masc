@@ -842,6 +842,48 @@ let test_ollama_cloud_current_catalog_resolves () =
     cases
 ;;
 
+(* One model, two endpoints, two replay contracts.
+
+   DeepSeek's own API refuses a tools request with 400 when an earlier
+   reasoning_content is missing, so its rows replay every prior turn
+   (api-docs.deepseek.com/guides/thinking_mode/, read 2026-09-18). The same
+   weights served by ollama.com owe only the active tool-call sequence: Ollama
+   documents no requirement for incoming thinking, and its cloud model cards
+   say thoughts from previous turns must not be in the history
+   (ollama.com/library/gemma4:31b-cloud). Carrying all of history there cost a
+   live keeper 4.7 MB of a 7.83 MB request on 2026-09-18.
+
+   The two are pinned together because the rows drifted by being copied: the
+   direct rows took this value from the ollama_cloud rows (#33593). *)
+let test_deepseek_replay_contract_differs_by_who_serves_it () =
+  let replay ~provider_label ~model_id =
+    match
+      Capabilities.for_provider_model_id
+        ~wire:None
+        ~allow_bare_fallback:false
+        ~provider_label
+        ~model_id
+    with
+    | None -> failf "%s/%s should resolve" provider_label model_id
+    | Some c -> c.reasoning_replay_override
+  in
+  List.iter
+    (fun model_id ->
+       check
+         bool
+         (model_id ^ " on ollama_cloud replays the active sequence only")
+         true
+         (replay ~provider_label:"ollama_cloud" ~model_id
+          = Capabilities.Force_latest_user_turn_tool_calls);
+       check
+         bool
+         (model_id ^ " on deepseek replays every prior turn")
+         true
+         (replay ~provider_label:"deepseek" ~model_id
+          = Capabilities.Force_drop_without_tool_preserve_with_tool))
+    [ "deepseek-v4-flash"; "deepseek-v4-pro" ]
+;;
+
 let test_ollama_cloud_v1_vendor_models_resolve_exact_capabilities () =
   List.iter
     (fun model_id ->
@@ -3204,6 +3246,10 @@ let () =
             "ollama cloud current catalog"
             `Quick
             test_ollama_cloud_current_catalog_resolves
+        ; test_case
+            "deepseek replay contract differs by who serves it"
+            `Quick
+            test_deepseek_replay_contract_differs_by_who_serves_it
         ; test_case
             "ollama cloud v1 vendor models resolve exact capabilities"
             `Quick

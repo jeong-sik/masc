@@ -108,7 +108,10 @@ status: reference
   History 안에는 turn의 경계가 없으므로, turn이라는 사건을 History 안의 위치로
   옮겨 적는 유일한 기록이다. turn이 불러온 Checkpoint 없이 시작했는지
   (`fresh`/`continued`)도 같이 적는다. 파일에 쌓인 순서는 turn 순서가 아닐 수
-  있어서 읽는 쪽은 Atom 수로 줄을 세운다.
+  있어서 읽는 쪽은 Atom 수로 줄을 세운다. `masc_keeper_clear`가 History를 비우면
+  같은 파일에 `history_cleared` 줄이 남는다. 비운 뒤의 turn은 `continued`인데
+  Atom 번호가 0 근처에서 다시 시작하므로, 그 이유를 말해 주는 줄이다. 비운
+  Checkpoint가 저장된 뒤에만 쓴다.
 
 **Generation**
 : 같은 Keeper가 새 trace로 이어진 횟수. 초기값은 0이다.

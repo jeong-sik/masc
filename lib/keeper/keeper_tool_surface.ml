@@ -215,6 +215,31 @@ let keeper_reset_body ~(config : Workspace.config) args : tool_result =
 let handle_keeper_reset ctx args : tool_result =
   keeper_reset_body ~config:ctx.config args
 
+(* A clear that did not end as an emptied history with its line written.
+   [effect_disposition] says whether the checkpoint on disk changed. *)
+let keeper_clear_failure
+      ~class_
+      ~effect_disposition
+      ~(code : Tool_args.error_code)
+      ~message
+      fields
+  : tool_result
+  =
+  let data =
+    error_assoc
+      (("error_code", `String (error_code_to_string code))
+       :: ("message", `String message)
+       :: fields)
+  in
+  Tool_result.make_err
+    ~tool_name:""
+    ~class_
+    ~start_time:(Time_compat.now ())
+    ~data
+    ~effect_disposition
+    (Yojson.Safe.to_string data)
+;;
+
 (** Last-resort context clear.
 
     Drops all conversation messages from the keeper's checkpoint file,
@@ -243,70 +268,36 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
       let preserve_system = get_bool args "preserve_system_prompt" true in
       let phase_before = Keeper_state_machine.phase_to_string entry.phase in
       let base_dir = Keeper_types_profile.session_base_dir config in
-      (* Must use the keeper's OWN trace_id to locate its checkpoint file.
-         Using generate_trace_id () would create a fresh session dir and
-         always report 0 cleared messages, because the existing checkpoint
-         lives under meta.runtime.trace_id. *)
-      let meta_for_trace =
+      (* The checkpoint lives under the keeper's own trace id
+         ([meta.runtime.trace_id]), so a keeper whose meta cannot be read has
+         no checkpoint to look for. *)
+      let loaded =
         match read_meta_resolved config name with
-        | Ok (Some (_, meta)) -> Some meta
-        | _ -> None
-      in
-      let trace_id =
-        match meta_for_trace with
-        | Some meta -> Keeper_id.Trace_id.to_string meta.runtime.trace_id
-        | None -> Keeper_context_runtime.generate_trace_id ()
-      in
-      let session, ctx_opt =
-        Keeper_context_runtime.load_context_from_checkpoint
-          ~trace_id
-          ~base_dir
-      in
-      let checkpoint_found = Option.is_some ctx_opt in
-      let cleared_count =
-        match ctx_opt with
-        | None -> 0
-        | Some wctx ->
-          let existing_messages = Keeper_context_runtime.messages_of_context wctx in
-          let msg_count = List.length existing_messages in
-          let cleared_messages =
-            if preserve_system then
-              (* Keep only system-role messages *)
-              List.filter
-                (fun (m : Agent_core.Types.message) ->
-                   (=) m.role Llm_provider.Types.System)
-                existing_messages
-            else
-              []
+        | Ok (Some (_, meta)) ->
+          let session, ctx_opt =
+            Keeper_context_runtime.load_context_from_checkpoint
+              ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+              ~base_dir
           in
-          let checkpoint =
-            { (Keeper_context_runtime.checkpoint_of_context wctx) with
-              messages = cleared_messages
-            }
-          in
-          let cleared_ctx = { checkpoint } in
-          (match meta_for_trace with
-           | Some meta ->
-               (match
-                  Keeper_context_runtime.save_agent_core_checkpoint
-                    ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta meta)
-                    ~keeper_name:meta.name
-                    ~session
-                    ~agent_name:meta.name
-                    ~ctx:cleared_ctx
-                with
-                | Ok _ -> ()
-                | Error err ->
-                    let detail =
-                      Keeper_context_core.checkpoint_write_error_to_string
-                        ~persistence_error_to_string:Fun.id
-                        err
-                    in
-                    Log.Keeper.warn
-                      "%s: failed to save cleared AGENT_CORE checkpoint: %s"
-                      name detail)
-           | None -> ());
-          msg_count - List.length cleared_messages
+          Option.map (fun wctx -> meta, session, wctx) ctx_opt
+        | Ok None | Error _ -> None
+      in
+      let checkpoint_found = Option.is_some loaded in
+      (* [None] when there was no checkpoint to clear. *)
+      let outcome =
+        match loaded with
+        | None -> None
+        | Some (meta, session, wctx) ->
+          Some
+            (Keeper_history_clear.clear
+               ~keepers_dir:
+                 (Config_dir_resolver.keepers_dir_for_base_path
+                    ~base_path:config.base_path)
+               ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta meta)
+               ~keeper_name:meta.name
+               ~session
+               ~preserve_system
+               wctx)
       in
       (* Dispatch FSM event to clear overflow conditions *)
       Keeper_context_runtime.dispatch_keeper_phase_event
@@ -317,27 +308,94 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
         (Keeper_turn_failure_streak.reset
            ~base_path:config.base_path
            ~keeper_name:name);
-      Log.Keeper.warn
-        "%s: context cleared by operator (reason=%s, preserve_system=%b, cleared=%d msgs)"
-        name reason preserve_system cleared_count;
+      let cleared ~cleared_message_count =
+        Log.Keeper.warn
+          "%s: context cleared by operator (reason=%s, preserve_system=%b, cleared=%d msgs)"
+          name reason preserve_system cleared_message_count;
+        tool_result_ok_data
+          (`Assoc
+            [
+                 ("name", `String name);
+                 ("phase_before", `String phase_before);
+                 ( "phase_after"
+                 , `String
+                     (match Keeper_registry.get ~base_path:config.base_path name with
+                      | Some entry -> Keeper_state_machine.phase_to_string entry.phase
+                      | None -> "unknown") );
+                 ("cleared_message_count", `Int cleared_message_count);
+                 ("checkpoint_found", `Bool checkpoint_found);
+                 ("preserve_system_prompt", `Bool preserve_system);
+              ("reason", `String reason);
+            ])
+      in
+      (* Only an emptied checkpoint with its line written is a cleared history;
+         every other outcome of the store is reported as what it was. *)
+      let result =
+        match outcome with
+        | None -> cleared ~cleared_message_count:0
+        | Some (Keeper_history_clear.Cleared { cleared_message_count; marker = Ok () }) ->
+          cleared ~cleared_message_count
+        | Some
+            (Keeper_history_clear.Cleared { cleared_message_count; marker = Error detail })
+          ->
+          Log.Keeper.error
+            "%s: context cleared by operator (reason=%s, cleared=%d msgs) but the \
+             history_cleared line was not written: %s"
+            name reason cleared_message_count detail;
+          Otel_metric_store.inc_counter
+            Keeper_metrics.(to_string TurnBoundaryFailures)
+            ~labels:[ "keeper", name; "site", "history_cleared" ]
+            ();
+          keeper_clear_failure
+            ~class_:Tool_result.Runtime_failure
+            ~effect_disposition:Tool_result.Proven_post_effect
+            ~code:Tool_args.Internal_error
+            ~message:
+              (Printf.sprintf
+                 "history cleared (%d messages), but the history_cleared line could \
+                  not be written: %s. Run masc_keeper_clear again to write it."
+                 cleared_message_count
+                 detail)
+            [ "cleared_message_count", `Int cleared_message_count ]
+        | Some (Keeper_history_clear.Superseded { incoming_turn_count; known_turn_count })
+          ->
+          Log.Keeper.warn
+            "%s: operator clear wrote nothing (reason=%s): the checkpoint on disk has \
+             turn_count %d, the one this clear loaded has %d"
+            name reason known_turn_count incoming_turn_count;
+          keeper_clear_failure
+            ~class_:Tool_result.Workflow_rejection
+            ~effect_disposition:Tool_result.Proven_pre_effect
+            ~code:Tool_args.Conflict
+            ~message:
+              (Printf.sprintf
+                 "history not cleared: the checkpoint on disk (turn_count %d) is newer \
+                  than the one this clear loaded (turn_count %d), so nothing was \
+                  written. Run masc_keeper_clear again."
+                 known_turn_count
+                 incoming_turn_count)
+            [ "incoming_turn_count", `Int incoming_turn_count
+            ; "known_turn_count", `Int known_turn_count
+            ]
+        | Some (Keeper_history_clear.Not_saved { detail }) ->
+          Log.Keeper.error
+            "%s: operator clear could not save the emptied checkpoint (reason=%s): %s"
+            name reason detail;
+          keeper_clear_failure
+            ~class_:Tool_result.Runtime_failure
+            ~effect_disposition:Tool_result.Effect_outcome_unknown
+            ~code:Tool_args.Internal_error
+            ~message:
+              (Printf.sprintf
+                 "history not cleared: the emptied checkpoint could not be saved: %s. \
+                  Run masc_keeper_clear again."
+                 detail)
+            []
+      in
       Otel_metric_store.inc_counter Keeper_metrics.(to_string OperatorClear)
         ~labels:[("keeper", name);
                  ("preserve_system", Bool.to_string preserve_system)] ();
-      tool_result_ok_data
-        (`Assoc
-          [
-               ("name", `String name);
-               ("phase_before", `String phase_before);
-               ( "phase_after"
-               , `String
-                   (match Keeper_registry.get ~base_path:config.base_path name with
-                    | Some entry -> Keeper_state_machine.phase_to_string entry.phase
-                    | None -> "unknown") );
-               ("cleared_message_count", `Int cleared_count);
-               ("checkpoint_found", `Bool checkpoint_found);
-               ("preserve_system_prompt", `Bool preserve_system);
-            ("reason", `String reason);
-          ])
+      result
 
 let handle_keeper_clear ctx args : tool_result =
   keeper_clear_body ~config:ctx.config args

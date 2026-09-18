@@ -30,6 +30,7 @@ type event =
       ; history_at_start : history_at_start
       ; position : position
       }
+  | History_cleared of { trace_id : string }
 
 type record =
   { recorded_at : float
@@ -59,7 +60,9 @@ let field_history_at_start = "history_at_start"
 let field_position = "position"
 let field_end_atom = "end_atom"
 let field_last_atom_digest = "last_atom_digest"
+let field_trace_id = "trace_id"
 let kind_turn_ended = "turn_ended"
+let kind_history_cleared = "history_cleared"
 let kind_atom_history = "atom_history"
 let kind_empty_atom_history = "empty_atom_history"
 let kind_no_atom_history = "no_atom_history"
@@ -71,6 +74,7 @@ let turn_ended_fields =
   [ field_kind; field_recorded_at; field_turn_ref; field_history_at_start; field_position ]
 ;;
 
+let history_cleared_fields = [ field_kind; field_recorded_at; field_trace_id ]
 let atom_history_fields = [ field_kind; field_end_atom; field_last_atom_digest ]
 let bare_position_fields = [ field_kind ]
 let non_blank s = not (String.equal (String.trim s) "")
@@ -109,6 +113,10 @@ let validate (r : record) =
     in
     let* () = W.wire_at (W.Wire_field field_position) (validate_position position) in
     Ok r
+  | History_cleared { trace_id } ->
+    if non_blank trace_id
+    then Ok r
+    else W.wire_fail [ W.Wire_field field_trace_id ] W.Blank_string
 ;;
 
 let position_to_json = function
@@ -137,6 +145,12 @@ let record_to_json (r : record) =
       ; field_turn_ref, `String (Ids.Turn_ref.to_string turn_ref)
       ; field_history_at_start, `String (history_at_start_to_string history_at_start)
       ; field_position, position_to_json position
+      ]
+  | History_cleared { trace_id } ->
+    `Assoc
+      [ field_kind, `String kind_history_cleared
+      ; field_recorded_at, `Float r.recorded_at
+      ; field_trace_id, `String trace_id
       ]
 ;;
 
@@ -201,6 +215,12 @@ let record_of_json (json : Yojson.Safe.t) =
         W.wire_at (W.Wire_field field_position) (position_of_json position_json)
       in
       validate { recorded_at; event = Turn_ended { turn_ref; history_at_start; position } })
+    else if String.equal kind kind_history_cleared
+    then (
+      let* () = W.exact_field_names_result history_cleared_fields assoc in
+      let* recorded_at = W.wire_number_field field_recorded_at assoc in
+      let* trace_id = W.wire_string_field field_trace_id assoc in
+      validate { recorded_at; event = History_cleared { trace_id } })
     else W.wire_fail [ W.Wire_field field_kind ] (W.Unknown_token kind)
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
     W.wire_here W.Expected_object

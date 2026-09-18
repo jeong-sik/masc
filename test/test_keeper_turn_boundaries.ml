@@ -1,6 +1,7 @@
 (** Tests for {!Masc.Keeper_turn_boundaries} (RFC librarian-lifecycle §4.6):
     the line a finished keeper turn leaves to say where its saved atom history
-    ended. *)
+    ended, and the line {!Masc.Keeper_history_clear} leaves once it has emptied
+    one. *)
 
 open Alcotest
 
@@ -46,6 +47,10 @@ let record
   }
 ;;
 
+let cleared ?(trace_id = "trace") () : Boundaries.record =
+  { Boundaries.recorded_at = 200.0; event = Boundaries.History_cleared { trace_id } }
+;;
+
 let atom_history = Boundaries.Atom_history { end_atom = 2; last_atom_digest = "digest" }
 
 let every_position =
@@ -74,6 +79,11 @@ let record_equal (left : Boundaries.record) (right : Boundaries.record) =
     Ids.Turn_ref.equal left_ref right_ref
     && left_start = right_start
     && left_position = right_position
+  | ( Boundaries.History_cleared { trace_id = left_trace }
+    , Boundaries.History_cleared { trace_id = right_trace } ) ->
+    String.equal left_trace right_trace
+  | Boundaries.Turn_ended _, Boundaries.History_cleared _
+  | Boundaries.History_cleared _, Boundaries.Turn_ended _ -> false
 ;;
 
 let record_t : Boundaries.record testable = testable print_record record_equal
@@ -93,7 +103,11 @@ let test_every_position_kind_round_trips () =
             | Error error ->
               failf "round trip rejected: %s" (Wire.wire_error_to_string error))
          every_position)
-    every_history_at_start
+    every_history_at_start;
+  let written = cleared () in
+  match Boundaries.record_of_json (Boundaries.record_to_json written) with
+  | Ok decoded -> check record_t "a cleared history round trips" written decoded
+  | Error error -> failf "round trip rejected: %s" (Wire.wire_error_to_string error)
 ;;
 
 (* The wire form is a contract with lines already on disk, so it is pinned as
@@ -109,6 +123,15 @@ let test_the_line_a_turn_writes () =
     (Yojson.Safe.to_string
        (Boundaries.record_to_json
           (record ~history_at_start:Boundaries.Fresh_history Boundaries.Stale_noop)))
+;;
+
+(* The clear is not a turn, so its line names the trace and nothing of a turn:
+   no turn reference, no position. The history it leaves holds no atom either
+   way, which is why the line has no position to state. *)
+let test_the_line_a_clear_writes () =
+  check string "a cleared history"
+    {|{"kind":"history_cleared","recorded_at":200.0,"trace_id":"trace"}|}
+    (Yojson.Safe.to_string (Boundaries.record_to_json (cleared ())))
 ;;
 
 let fields_of label (json : Yojson.Safe.t) =
@@ -171,8 +194,28 @@ let test_decode_refuses_what_its_kind_does_not_carry () =
        (record Boundaries.Empty_atom_history));
   check_rejection "a kind of line this build does not know"
     ~path:[ Wire.Wire_field "kind" ]
-    ~reason:(Wire.Unknown_token "history_cleared")
+    ~reason:(Wire.Unknown_token "no_such_line")
+    (with_fields (replacing "kind" (`String "no_such_line")) (record atom_history));
+  (* A kind names its own field set: a turn's fields under the clear's kind are
+     the wrong fields, not a turn line with a different tag. *)
+  check_rejection "a turn's fields under the kind of a cleared history"
+    ~path:[]
+    ~reason:
+      (Wire.Field_set_mismatch
+         { missing = [ "trace_id" ]
+         ; unexpected = [ "history_at_start"; "position"; "turn_ref" ]
+         })
     (with_fields (replacing "kind" (`String "history_cleared")) (record atom_history));
+  check_rejection "a cleared history that does not name its trace"
+    ~path:[]
+    ~reason:(Wire.Field_set_mismatch { missing = [ "trace_id" ]; unexpected = [] })
+    (with_fields (without "trace_id") (cleared ()));
+  check_rejection "a cleared history that states a position"
+    ~path:[]
+    ~reason:(Wire.Field_set_mismatch { missing = []; unexpected = [ "position" ] })
+    (with_fields
+       (fun fields -> fields @ [ "position", `Assoc [ "kind", `String "empty_atom_history" ] ])
+       (cleared ()));
   check_rejection "a line without its kind"
     ~path:[]
     ~reason:(Wire.Field_set_mismatch { missing = [ "kind" ]; unexpected = [] })
@@ -193,7 +236,11 @@ let test_decode_refuses_what_its_kind_does_not_carry () =
     (with_fields (fun fields -> fields @ [ "extra", `Null ]) (record atom_history))
 ;;
 
-let test_decode_refuses_values_no_turn_writes () =
+let test_decode_refuses_values_no_writer_writes () =
+  check_rejection "a cleared history of no trace"
+    ~path:[ Wire.Wire_field "trace_id" ]
+    ~reason:Wire.Blank_string
+    (with_fields (replacing "trace_id" (`String " ")) (cleared ()));
   check_rejection "an atom history that ends before its first atom"
     ~path:[ Wire.Wire_field "position"; Wire.Wire_field "end_atom" ]
     ~reason:Wire.Not_positive
@@ -285,15 +332,16 @@ let test_appended_lines_read_back_in_order () =
     (List.length (read_lines ~keepers_dir));
   let written =
     List.mapi (fun index position -> record ~turn:(index + 1) position) every_position
+    @ [ cleared () ]
   in
   List.iter
-    (fun finished ->
-       match Boundaries.append ~keepers_dir ~keeper_id finished with
+    (fun line ->
+       match Boundaries.append ~keepers_dir ~keeper_id line with
        | Ok () -> ()
        | Error error -> failf "append: %s" (Boundaries.append_error_to_string error))
     written;
-  check (list (pair int record_t)) "one numbered line per turn, in the order they finished"
-    (List.mapi (fun index finished -> index + 1, finished) written)
+  check (list (pair int record_t)) "one numbered line per append, in the order appended"
+    (List.mapi (fun index line -> index + 1, line) written)
     (read_lines ~keepers_dir);
   check string "the file the RFC names" "keeper.turn-boundaries.jsonl"
     (Filename.basename (Boundaries.path_for_keepers_dir ~keepers_dir ~keeper_id))
@@ -303,12 +351,19 @@ let test_appended_lines_read_back_in_order () =
    refuses it, so writing such a line would leave a row no reader decodes. *)
 let test_a_line_no_reader_decodes_is_not_written () =
   with_temp_keepers @@ fun keepers_dir ->
-  let unreadable = record ~trace_id:"" Boundaries.No_atom_history in
-  (match Boundaries.append ~keepers_dir ~keeper_id unreadable with
-   | Error (Boundaries.Invalid_record _) -> ()
-   | Error (Boundaries.Write_failed _ as error) ->
-     failf "refused for the wrong reason: %s" (Boundaries.append_error_to_string error)
-   | Ok () -> fail "a turn reference no reader can parse was written");
+  List.iter
+    (fun (label, unreadable) ->
+       match Boundaries.append ~keepers_dir ~keeper_id unreadable with
+       | Error (Boundaries.Invalid_record _) -> ()
+       | Error (Boundaries.Write_failed _ as error) ->
+         failf
+           "%s: refused for the wrong reason: %s"
+           label
+           (Boundaries.append_error_to_string error)
+       | Ok () -> failf "%s: written" label)
+    [ "a turn reference no reader can parse", record ~trace_id:"" Boundaries.No_atom_history
+    ; "a cleared history of no trace", cleared ~trace_id:"" ()
+    ];
   check int "nothing was written" 0 (List.length (read_lines ~keepers_dir))
 ;;
 
@@ -323,6 +378,168 @@ let test_purge_plan_removes_the_turn_boundary_log () =
     (List.exists (fun entry -> entry = Shutdown.Keeper_turn_boundaries_artifact) plan)
 ;;
 
+(* {1 The clear} *)
+
+module Clear = Masc.Keeper_history_clear
+module Context = Masc.Keeper_context_core
+
+let cleared_trace = "trace-cleared"
+let runtime_id = "test-runtime"
+
+let conversation =
+  [ message ~role:Types.System "pinned"
+  ; message ~role:Types.User "question"
+  ; message ~role:Types.Assistant "answer"
+  ]
+;;
+
+let is_system (saved : Types.message) =
+  match saved.role with
+  | Types.System -> true
+  | Types.User | Types.Assistant | Types.Tool -> false
+;;
+
+let at_turn_count turn_count (context : Context.working_context)
+  : Context.working_context
+  =
+  { Keeper_types.checkpoint =
+      { (Context.checkpoint_of_context context) with Agent_core.Checkpoint.turn_count }
+  }
+;;
+
+(* A keeper whose checkpoint on disk holds [conversation] at [turn_count], and
+   the keepers directory its boundary lines go to. *)
+let with_saved_history ~turn_count f =
+  Eio_main.run
+  @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  with_temp_keepers
+  @@ fun keepers_dir ->
+  let base_dir = Filename.temp_dir "history-clear-" "" in
+  Fun.protect
+    ~finally:(fun () -> Fs_compat.remove_tree base_dir)
+    (fun () ->
+       let session = Context.create_session ~session_id:cleared_trace ~base_dir in
+       let context =
+         Context.append_many (Context.create ~eio:true ~system_prompt:"system") conversation
+         |> at_turn_count turn_count
+       in
+       (match
+          Context.save_agent_core_checkpoint_classified
+            ~runtime_id
+            ~keeper_name:keeper_id
+            ~session
+            ~agent_name:keeper_id
+            ~ctx:context
+        with
+        | Ok (_, Masc.Keeper_checkpoint_store.Saved _) -> ()
+        | Ok (_, Masc.Keeper_checkpoint_store.Stale_noop _) ->
+          fail "the fixture checkpoint was not saved"
+        | Error error ->
+          failf
+            "the fixture checkpoint was not saved: %s"
+            (Context.checkpoint_write_error_to_string
+               ~persistence_error_to_string:Fun.id
+               error));
+       f ~keepers_dir ~base_dir ~session context)
+;;
+
+let saved_messages ~base_dir =
+  match Context.load_context_from_checkpoint ~trace_id:cleared_trace ~base_dir with
+  | _session, Some context -> Context.messages_of_context context
+  | _session, None -> fail "the checkpoint is gone"
+;;
+
+let clear ~keepers_dir ~session context =
+  Clear.clear
+    ~keepers_dir
+    ~runtime_id
+    ~keeper_name:keeper_id
+    ~session
+    ~preserve_system:true
+    context
+;;
+
+let describe_outcome = function
+  | Clear.Cleared { cleared_message_count; marker = Ok () } ->
+    Printf.sprintf "cleared %d messages, line written" cleared_message_count
+  | Clear.Cleared { cleared_message_count; marker = Error detail } ->
+    Printf.sprintf "cleared %d messages, line not written: %s" cleared_message_count detail
+  | Clear.Superseded { incoming_turn_count; known_turn_count } ->
+    Printf.sprintf "superseded: held %d, store has %d" incoming_turn_count known_turn_count
+  | Clear.Not_saved { detail } -> "not saved: " ^ detail
+;;
+
+let test_a_clear_empties_the_history_and_then_says_so () =
+  with_saved_history ~turn_count:3
+  @@ fun ~keepers_dir ~base_dir ~session context ->
+  let before = saved_messages ~base_dir in
+  let pinned = List.length (List.filter is_system before) in
+  (match clear ~keepers_dir ~session context with
+   | Clear.Cleared { cleared_message_count; marker = Ok () } ->
+     check int "every conversation message was removed" (List.length before - pinned)
+       cleared_message_count
+   | (Clear.Cleared { marker = Error _; _ } | Clear.Superseded _ | Clear.Not_saved _) as
+     other -> failf "expected a cleared history: %s" (describe_outcome other));
+  let after = saved_messages ~base_dir in
+  check int "the pinned messages are kept" pinned (List.length after);
+  check bool "nothing but pinned messages is kept" true (List.for_all is_system after);
+  check position_t "the saved history holds no atom" Boundaries.Empty_atom_history
+    (position_of "cleared history" after);
+  match read_lines ~keepers_dir with
+  | [ (1, { Boundaries.recorded_at = _; event = Boundaries.History_cleared { trace_id } })
+    ] ->
+    check string "the line names the trace the checkpoint is saved under" cleared_trace
+      trace_id
+  | lines -> failf "expected one history_cleared line, read %d" (List.length lines)
+;;
+
+(* The store refuses a checkpoint older than the one it holds: a turn saved
+   while the clear held its copy. The clear used to report its message count
+   anyway. *)
+let test_a_superseded_clear_writes_nothing () =
+  with_saved_history ~turn_count:5
+  @@ fun ~keepers_dir ~base_dir ~session context ->
+  let before = saved_messages ~base_dir in
+  (match clear ~keepers_dir ~session (at_turn_count 3 context) with
+   | Clear.Superseded { incoming_turn_count; known_turn_count } ->
+     check int "the clear held the older checkpoint" 3 incoming_turn_count;
+     check int "the store holds the newer one" 5 known_turn_count
+   | (Clear.Cleared _ | Clear.Not_saved _) as other ->
+     failf "expected a superseded clear: %s" (describe_outcome other));
+  check int "the history on disk is untouched" (List.length before)
+    (List.length (saved_messages ~base_dir));
+  check int "no line says the history was cleared" 0
+    (List.length (read_lines ~keepers_dir))
+;;
+
+(* A store that ends mid-line refuses every append. The history is emptied all
+   the same, so the outcome has to say the line is missing: a history that
+   started over with nothing to explain it is what stops a reader. *)
+let test_a_clear_whose_line_is_refused_says_so () =
+  with_saved_history ~turn_count:3
+  @@ fun ~keepers_dir ~base_dir ~session context ->
+  let torn = {|{"kind":"turn_ended"|} in
+  let store =
+    Unix.openfile
+      (Boundaries.path_for_keepers_dir ~keepers_dir ~keeper_id)
+      [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC ]
+      0o600
+  in
+  let written = Unix.write_substring store torn 0 (String.length torn) in
+  Unix.close store;
+  check int "the fixture line was written whole" (String.length torn) written;
+  (match Boundaries.read ~keepers_dir ~keeper_id with
+   | Ok [ (1, Error Boundaries.Incomplete_line) ] -> ()
+   | Ok _ | Error _ -> fail "the fixture store does not end mid-line");
+  (match clear ~keepers_dir ~session context with
+   | Clear.Cleared { cleared_message_count = _; marker = Error _ } -> ()
+   | (Clear.Cleared { marker = Ok (); _ } | Clear.Superseded _ | Clear.Not_saved _) as
+     other -> failf "expected a cleared history with no line: %s" (describe_outcome other));
+  check bool "the history was emptied" true
+    (List.for_all is_system (saved_messages ~base_dir))
+;;
+
 let () =
   run
     "keeper_turn_boundaries"
@@ -330,10 +547,11 @@ let () =
       , [ test_case "every position kind round trips" `Quick
             test_every_position_kind_round_trips
         ; test_case "the line a turn writes" `Quick test_the_line_a_turn_writes
+        ; test_case "the line a clear writes" `Quick test_the_line_a_clear_writes
         ; test_case "refuses what its kind does not carry" `Quick
             test_decode_refuses_what_its_kind_does_not_carry
-        ; test_case "refuses values no turn writes" `Quick
-            test_decode_refuses_values_no_turn_writes
+        ; test_case "refuses values no writer writes" `Quick
+            test_decode_refuses_values_no_writer_writes
         ] )
     ; ( "position"
       , [ test_case "agrees with the window" `Quick test_position_agrees_with_the_window
@@ -347,6 +565,14 @@ let () =
             test_a_line_no_reader_decodes_is_not_written
         ; test_case "the purge plan removes the log" `Quick
             test_purge_plan_removes_the_turn_boundary_log
+        ] )
+    ; ( "clear"
+      , [ test_case "empties the history and then says so" `Quick
+            test_a_clear_empties_the_history_and_then_says_so
+        ; test_case "a superseded clear writes nothing" `Quick
+            test_a_superseded_clear_writes_nothing
+        ; test_case "a clear whose line is refused says so" `Quick
+            test_a_clear_whose_line_is_refused_says_so
         ] )
     ]
 ;;

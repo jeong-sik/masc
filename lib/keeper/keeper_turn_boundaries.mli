@@ -8,6 +8,10 @@
     the digest of the message that opens the last one. A turn's start is not
     written; the end an earlier line states is that start.
 
+    [masc_keeper_clear] is the other writer. It empties a history outside any
+    turn, and appends a [History_cleared] line once the emptied checkpoint is
+    saved.
+
     {2 What a reader may rely on}
 
     - A line that cannot be built or written does not fail the turn: the
@@ -23,6 +27,16 @@
       orders the [Atom_history] lines of one trace by [end_atom], not by their
       position in the file, and must not assume [turn_ref] is unique: two turns
       of one keeper that finish together both take the next turn number.
+    - A history starts over in two ways, and each leaves a line that is written
+      after the fact: a [Turn_ended] line with [Fresh_history], or a
+      [History_cleared] line. Neither moves a reader's position by itself. A
+      reader whose position no longer matches the checkpoint (the digest of
+      atom [end_atom - 1] differs, or that atom is gone) looks for such a line
+      of the same trace that was appended after it last confirmed its
+      position. With one, it starts again from atom zero; without one, the
+      mismatch has no explanation and the reader stops. A position that still
+      matches is kept whatever lines there are: the clear was undone by a turn
+      that saved over it.
     - [last_atom_digest] is computed from the checkpoint the save returned. On
       the store's payload-encode recovery path the bytes on disk are a recovery
       copy with the unencodable json dropped, while the save still returns the
@@ -59,9 +73,9 @@ type history_at_start =
   | Fresh_history  (** No checkpoint was loaded: the history began empty. *)
   | Continued_history  (** A checkpoint was loaded and the turn appended to it. *)
 
-(** What a line states. One constructor today. The wire form carries a [kind]
-    tag from the first line ever written, so a later kind of line is a new
-    constructor rather than a new field on a strictly decoded line. *)
+(** What a line states. The wire form carries a [kind] tag from the first line
+    ever written, so a kind of line is a constructor rather than a field on a
+    strictly decoded line. *)
 type event =
   | Turn_ended of
       { turn_ref : Ids.Turn_ref.t
@@ -70,9 +84,20 @@ type event =
       ; history_at_start : history_at_start
       ; position : position
       }
+  | History_cleared of { trace_id : string }
+      (** [masc_keeper_clear] saved the checkpoint of this trace with no atom
+          in it ({!Keeper_history_clear}). The turn after a clear loads that
+          checkpoint, so its line says [Continued_history] while its
+          [end_atom] starts over near zero; only the clear knows why, and this
+          line is where it says so.
+
+          The line is appended after the emptied checkpoint is saved, never
+          before. It does not say the history is still empty: a turn that was
+          running during the clear saves its own, full history over the
+          emptied one. *)
 
 type record =
-  { recorded_at : float (** Unix seconds, when the finished turn built its line. *)
+  { recorded_at : float (** Unix seconds, when the writer built the line. *)
   ; event : event
   }
 
@@ -94,8 +119,9 @@ val record_to_json : record -> Yojson.Safe.t
 (** Field-exact for the line's [kind], and [position] is field-exact for its
     own [kind]: an unknown [kind], an unknown [history_at_start] token, or a
     field its kind does not carry is rejected, never defaulted. [recorded_at]
-    must be finite, [last_atom_digest] non-blank, [end_atom] at least one, and
-    [turn_ref] a reference {!Ids.Turn_ref.of_string} reads back. *)
+    must be finite, [last_atom_digest] and [trace_id] non-blank, [end_atom] at
+    least one, and [turn_ref] a reference {!Ids.Turn_ref.of_string} reads
+    back. *)
 val record_of_json : Yojson.Safe.t -> (record, Keeper_memory_os_types.wire_error) result
 
 (** {1 Store} *)

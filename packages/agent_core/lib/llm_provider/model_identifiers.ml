@@ -28,6 +28,10 @@ module Id_prefix : sig
       [model entry field "id_prefix" must not have leading or trailing
       whitespace]. *)
 
+  val of_string_exn : string -> t
+  (** Same invariants as {!of_string}; raises [Invalid_argument] on
+      violation (programmer error in test builders and fixtures). *)
+
   val equal : t -> t -> bool
   (** Comparison-time normalization (ASCII case-fold + trim); stored bytes
       are never rewritten. *)
@@ -47,7 +51,17 @@ end = struct
     else Ok raw
   ;;
 
-  let equal a b = String.equal (String.lowercase_ascii (String.trim a)) (String.lowercase_ascii (String.trim b))
+  let of_string_exn raw =
+    match of_string raw with
+    | Ok value -> value
+    | Error message -> invalid_arg ("Model_identifiers.Id_prefix: " ^ message)
+  ;;
+
+  let equal a b =
+    String.equal
+      (String.lowercase_ascii (String.trim a))
+      (String.lowercase_ascii (String.trim b))
+  ;;
 
   let to_string t = t
 end
@@ -59,6 +73,10 @@ module Api_name : sig
   (** Same invariants as {!Id_prefix.of_string}; messages are neutral
       ([api_name must not be empty] / [api_name must not have leading or
       trailing whitespace]) until a loader moves its validation here. *)
+
+  val of_string_exn : string -> t
+  (** Same invariants as {!of_string}; raises [Invalid_argument] on
+      violation (programmer error in test builders and fixtures). *)
 
   val equal : t -> t -> bool
   (** Comparison-time normalization (ASCII case-fold + trim). *)
@@ -76,7 +94,17 @@ end = struct
     else Ok raw
   ;;
 
-  let equal a b = String.equal (String.lowercase_ascii (String.trim a)) (String.lowercase_ascii (String.trim b))
+  let of_string_exn raw =
+    match of_string raw with
+    | Ok value -> value
+    | Error message -> invalid_arg ("Model_identifiers.Api_name: " ^ message)
+  ;;
+
+  let equal a b =
+    String.equal
+      (String.lowercase_ascii (String.trim a))
+      (String.lowercase_ascii (String.trim b))
+  ;;
 
   let to_string t = t
 end
@@ -88,6 +116,10 @@ module Model_id : sig
   (** Same invariants as {!Id_prefix.of_string}; messages are neutral
       ([model_id must not be empty] / [model_id must not have leading or
       trailing whitespace]) until a loader moves its validation here. *)
+
+  val of_string_exn : string -> t
+  (** Same invariants as {!of_string}; raises [Invalid_argument] on
+      violation (programmer error in test builders and fixtures). *)
 
   val equal : t -> t -> bool
   (** Comparison-time normalization (ASCII case-fold + trim). *)
@@ -105,7 +137,17 @@ end = struct
     else Ok raw
   ;;
 
-  let equal a b = String.equal (String.lowercase_ascii (String.trim a)) (String.lowercase_ascii (String.trim b))
+  let of_string_exn raw =
+    match of_string raw with
+    | Ok value -> value
+    | Error message -> invalid_arg ("Model_identifiers.Model_id: " ^ message)
+  ;;
+
+  let equal a b =
+    String.equal
+      (String.lowercase_ascii (String.trim a))
+      (String.lowercase_ascii (String.trim b))
+  ;;
 
   let to_string t = t
 end

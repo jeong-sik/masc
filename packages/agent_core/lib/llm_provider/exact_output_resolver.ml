@@ -612,7 +612,7 @@ let canonical_catalog_evidence catalog model_entries target_declarations =
     |> List.concat_map (fun (model : Model_catalog.model_entry) ->
       [ "model"
       ; option_string model.provider_name
-      ; model.id_prefix
+      ; Model_identifiers.Id_prefix.to_string model.id_prefix
       ; option_string model.base_label
       ; Binding.option_int model.max_context_tokens
       ; Binding.option_int model.max_output_tokens

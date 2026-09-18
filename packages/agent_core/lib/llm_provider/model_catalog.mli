@@ -4,7 +4,7 @@
     replacing hardcoded code-level registries. *)
 
 type model_entry =
-  { id_prefix : string
+  { id_prefix : Model_identifiers.Id_prefix.t
   ; base_label : string option
     (** Registry provider identity for OpenAI-compatible model families whose
         wire kind alone would otherwise collapse to [openai_compat]. This is

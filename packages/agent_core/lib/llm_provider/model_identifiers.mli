@@ -30,6 +30,10 @@ module Id_prefix : sig
       [model entry field "id_prefix" must not have leading or trailing
       whitespace]. *)
 
+  val of_string_exn : string -> t
+  (** Same invariants as {!of_string}; raises [Invalid_argument] on
+      violation (programmer error in test builders and fixtures). *)
+
   val equal : t -> t -> bool
   (** Comparison-time normalization (ASCII case-fold + trim); stored bytes
       are never rewritten. *)
@@ -47,6 +51,10 @@ module Api_name : sig
       ([api_name must not be empty] / [api_name must not have leading or
       trailing whitespace]) until a loader moves its validation here. *)
 
+  val of_string_exn : string -> t
+  (** Same invariants as {!of_string}; raises [Invalid_argument] on
+      violation (programmer error in test builders and fixtures). *)
+
   val equal : t -> t -> bool
   (** Comparison-time normalization (ASCII case-fold + trim). *)
 
@@ -61,6 +69,10 @@ module Model_id : sig
   (** Same invariants as {!Id_prefix.of_string}; messages are neutral
       ([model_id must not be empty] / [model_id must not have leading or
       trailing whitespace]) until a loader moves its validation here. *)
+
+  val of_string_exn : string -> t
+  (** Same invariants as {!of_string}; raises [Invalid_argument] on
+      violation (programmer error in test builders and fixtures). *)
 
   val equal : t -> t -> bool
   (** Comparison-time normalization (ASCII case-fold + trim). *)

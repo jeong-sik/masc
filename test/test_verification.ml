@@ -1665,6 +1665,19 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
           ignore (W.init config ~agent_name:(Some "system-test-worker"));
           ensure_keeper_meta config "system-test-worker";
           ensure_producer_playground config "system-test-worker";
+          (* RFC-0417 criteria-3: a note-only submission with zero successful
+             lookups is refused at the completion boundary. This test pins boot
+             recovery and the commit path, so it submits a real artifact and
+             the guard admits the verdict. *)
+          Fs_compat.save_file
+            (Filename.concat
+               (Keeper_sandbox_config.host_root_abs_of_agent
+                  ~base_path:
+                    (Workspace_verification_store.project_root_of_base_path
+                       config.base_path)
+                  ~agent_name:"system-test-worker")
+               "boot-recovery-evidence.txt")
+            "the captured evidence this boot-recovery run reviews";
           ignore
             (W.add_task
                config
@@ -1683,7 +1696,7 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
                ~agent_name:"system-test-worker"
                ~task_id:"task-001"
                ~action:Masc_domain.Submit_for_verification
-               ~notes:"note:system-review-evidence"
+               ~notes:"artifact:boot-recovery-evidence.txt"
                ()
            with
            | Ok _ -> ()
@@ -1896,6 +1909,17 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
           ignore (W.init config ~agent_name:(Some "snapshot-test-worker"));
           ensure_keeper_meta config "snapshot-test-worker";
           ensure_producer_playground config "snapshot-test-worker";
+          (* RFC-0417 criteria-3: submit a real artifact so the guard admits
+             the verdict; this test pins the persisted request contract. *)
+          Fs_compat.save_file
+            (Filename.concat
+               (Keeper_sandbox_config.host_root_abs_of_agent
+                  ~base_path:
+                    (Workspace_verification_store.project_root_of_base_path
+                       config.base_path)
+                  ~agent_name:"snapshot-test-worker")
+               "snapshot-evidence.txt")
+            "the captured evidence for the persisted contract run";
           ignore
             (W.add_task
                config
@@ -1914,7 +1938,7 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
                ~agent_name:"snapshot-test-worker"
                ~task_id:"task-001"
                ~action:Masc_domain.Submit_for_verification
-               ~notes:"note:snapshot-evidence"
+               ~notes:"artifact:snapshot-evidence.txt"
                ()
            with
            | Ok _ -> ()

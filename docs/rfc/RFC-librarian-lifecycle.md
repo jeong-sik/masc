@@ -19,12 +19,13 @@ implementation_prs: []
 
 ## 읽기 전에 — 말의 뜻
 
-이 문서는 message, atom, 이력, 세션, 턴을 구분해서 쓴다. 큰 것부터 적는다.
+이 문서는 message, atom, 이력, trace, 턴을 구분해서 쓴다. 짧은 정의는 `docs/spec/00-glossary.md` 에 있고, 여기에는 이 문서를 읽는 데 필요한 만큼을 풀어 적는다. 큰 것부터 적는다.
 
 ```
 Keeper
-└─ 세션(trace)              한 번에 하나. 이력이 새로 시작하면 세션도 새로 시작한다
-   └─ checkpoint 파일        <세션 디렉터리>/<session_id>.json. 세션당 하나
+└─ trace                    Keeper 의 한 generation. 한 번에 하나다
+   └─ checkpoint 파일        <trace 디렉터리>/<trace id>.json. trace 당 하나
+                            (checkpoint 안의 session_id 필드가 이 trace id 다. 이름만 둘이고 값은 하나다)
       ├─ system_prompt, tools, 모델 설정 …
       └─ messages  ← 이 문서가 "이력"이라 부르는 것
          ├─ message = { role, content }
@@ -37,8 +38,39 @@ Keeper
 
 - **atom** 은 따로 저장되지 않는다. `messages` 를 앞에서부터 세면 나오는 묶음이다(`runtime_model_input_tail_window.mli`). 도구 호출과 그 결과를 한 묶음으로 두는 이유는 이력을 잘라 보낼 때 결과만 남고 호출이 빠지면 provider 가 거절하기 때문이다. 그래서 자르는 자리는 atom 경계에만 온다. atom 의 무게는 고르지 않다(같은 파일의 머리말: 0.3KB~8.7KB). 이 문서는 atom 번호를 **위치**로만 쓰고 크기를 재는 데는 쓰지 않는다.
 - **턴** 은 위 나무 안에 없다. Keeper 가 깨어나서 끝낼 때까지의 실행 한 번이고 이름은 `Turn_ref`(trace id, 몇 번째 턴)다. 턴 하나가 돌면 이력 끝에 atom 몇 개가 덧붙으므로 턴은 이력 안의 연속된 구간 하나에 대응한다. 그 구간이 어디인지는 어디에도 적히지 않는다(§2.5 의 D5). 턴 기록(`Turn_record`)에는 "몇 atom 을 보냈나"는 있어도 "이 턴의 메시지가 이력의 몇 번부터 몇 번인가"는 없다.
-- 코드에는 "턴"이 둘이다. 이 문서의 턴은 **Keeper 턴**(깨어나서 끝날 때까지)이다. checkpoint 의 `turn_count` 가 세는 것은 **Agent-Core 턴**(LLM 왕복 한 번)이고 Keeper 턴 하나 안에서 도구를 부를 때마다 는다.
+- 코드에는 "턴"이 둘이다(용어집의 Keeper Turn, agent core Turn). 이 문서의 턴은 **Keeper 턴**(깨어나서 끝날 때까지)이다. checkpoint 의 `turn_count` 가 세는 것은 **agent core 턴**(LLM 왕복 한 번)이고 Keeper 턴 하나 안에서 도구를 부를 때마다 는다.
 - atom 을 하나도 남기지 않는 턴이 있고(§4.3 의 빈 범위), atom 이력이 아예 없는 턴이 있다(§4.8 의 공식 클라이언트).
+
+이 문서가 쓰는 나머지 말이다. 같은 것은 끝까지 같은 말로 부른다.
+
+| 말 | 뜻 | 코드 이름 |
+|---|---|---|
+| 회차 | Librarian 이 LLM 을 한 번 불러 기억을 고치는 일 하나 | `run_best_effort`, `librarian_exact` 레인의 run |
+| 슬롯 | 레인에 등록된 모델 후보 하나. 앞 슬롯이 안 되면 다음 슬롯을 쓴다 | exact-output slot |
+| facts | Keeper 의 기억 항목들. 파일 하나(스냅숏)에 전부 들어 있고, Keeper 턴의 첫 요청에 전부 실린다 | `<keeper>.memory-current.json`, `Memory_os_recall` 블록 |
+| 받은 일 | Keeper 에게 들어왔고 아직 처리되지 않은 요청들 | working-context 의 `sources` |
+| 받은 일 정리 | 받은 일을 묶어 맥락과 다음 할 일을 적은 것 | `working_contexts`, pocket |
+| 읽은 위치 | Librarian 이 이력의 어디까지 읽었는가. atom 번호다 | `<keeper>.librarian-progress.json` |
+| 창이 보는 위치 | Keeper 요청이 이력의 어디서부터 실리는가. 지금 코드의 `front` | §7 (라) |
+| 밀림 | 끝났는데 아직 안 읽은 턴이 있는 상태. 그 범위가 밀린 구간이다 | |
+
+### 턴 하나를 따라가 보기
+
+trace 하나에 atom 이 112개 쌓여 있고, 사람이 rondo 에게 말을 걸어 턴 41이 도는 경우다. 번호는 설명을 위해 1부터 센다. 코드의 `end_atom` 은 "몇 개 쌓였나"이므로 같은 값이 나온다.
+
+| 순서 | 일어나는 일 | 이력 | 어디에 남나 |
+|---|---|---|---|
+| 1 | 턴 시작. checkpoint 를 불러온다 | 112 | 불러왔으므로 이 턴은 `Continued_history` |
+| 2 | 첫 요청을 만든다: system, tools, 이력의 일부, facts 전부와 받은 일 참조, 새 user 메시지 | 113 (user) | facts 블록은 매 턴 새로 만들어 붙이는 것이라 atom 으로 세지 않는다(`is_extra_context`) |
+| 3 | 모델이 도구를 부른다. 도구 결과가 돌아온다 | 114 (assistant + tool) | 결과는 새 atom 을 열지 않고 114 에 붙는다. 턴 도중에도 checkpoint 가 저장된다 |
+| 4 | 3이 몇 번 되풀이된다 | 115 ~ 119 | agent core 턴이 그만큼 는다. Keeper 턴은 여전히 41 하나다 |
+| 5 | 모델이 말로 답하고 끝낸다 | 120 (assistant) | |
+| 6 | 저장. 이 턴의 꼬리를 다듬어 checkpoint 에 쓴다 | 120 | 사람이 말을 건 턴은 그대로 남는다. 내부 생각 턴은 끝의 assistant 가 빠지고, 도구를 안 썼으면 그 턴의 몫이 통째로 빠진다(`keeper_replay_checkpoint.ml`) |
+| 7 | 턴 끝 기록에 한 줄 | | "턴 41, `Continued_history`, 120 에서 끝남, 120번 atom 의 digest" |
+| 8 | Librarian 이 깬다. 읽은 위치는 112 다 | | 113 ~ 120 을 읽는다. 도구 결과 본문은 `[tool result omitted]` 로, thinking 은 빼고 읽는다 |
+| 9 | 회차: Keeper 역할, facts 전부, 받은 일, 113 ~ 120 을 넣어 LLM 1회 | | 출력을 facts 와 받은 일 정리에 합친다 |
+| 10 | 읽은 위치를 120 으로 옮긴다 | | |
+| 11 | 턴 42 시작. 첫 요청에 새 facts 가 실린다 | | 창이 보는 위치가 읽은 위치를 따르게 된 뒤에는(§7 (라)) 이력은 121 부터 실린다 |
 
 **Librarian 이 턴이 아니라 이력을 보는 이유.** 첫째, 오간 말이 남는 곳이 이력뿐이다. 턴은 실행이지 저장소가 아니다. 둘째, 줄이려는 것이 이력이다. Keeper 의 요청은 system, tools, 이력의 일부, facts, 새 입력으로 이뤄지고 그중 자라는 것이 이력이다. "여기서부터만 보낸다"는 이력 안의 위치로만 말할 수 있다. 셋째, Librarian 의 "여기까지 읽었다"와 창의 "여기서부터 보낸다"가 같은 자(atom 번호)를 써야 바꿔 읽을 필요가 없다. 턴이 쓰이는 곳은 하나다. 읽은 위치를 옮겨도 되는 자리가 턴 끝이다. 그래서 §4.6 의 턴 끝 기록은 "턴 41 이 끝났다"는 사건을 "이력 120 번"이라는 위치로 옮겨 적는 한 줄이다.
 
@@ -242,7 +274,7 @@ flowchart TD
 |---|---|---|---|
 | 1 | 설정이 `Enabled` 인가 | variant | 루프 입구. 지금의 끄는 스위치 그대로다 |
 | 2 | 진행 파일이 가리키는 줄: `turn_ref` 와 위치가 같은 줄 | 같음 | 안 읽은 턴 찾기. 그 줄 뒤의 줄이 안 읽은 턴이다 |
-| 3 | 범위의 시작: 그 줄이 `Fresh_history` 거나 앞 줄이 `history_cleared` 면 0. 아니면 같은 `session_id` 의 앞 줄의 `end_atom`. 앞 줄도 없으면 그 줄은 읽지 않고 위치의 기준점으로만 쓴다(기록 전부터 있던 세션의 첫 줄) | variant, 같음 | 범위 계산 |
+| 3 | 범위의 시작: 그 줄이 `Fresh_history` 거나 앞 줄이 `history_cleared` 면 0. 아니면 같은 trace(`turn_ref` 의 trace id)의 앞 줄의 `end_atom`. 앞 줄도 없으면 그 줄은 읽지 않고 위치의 기준점으로만 쓴다(기록 전부터 있던 세션의 첫 줄) | variant, 같음 | 범위 계산 |
 | 3a | 바로 앞 회차가 실패했고 그 범위가 두 턴 이상이었나 | result, 한 줄인가 여러 줄인가 | 전부 읽을지 가장 오래된 한 턴만 읽을지 |
 | 3b | 범위가 비었나: 시작과 끝의 atom 번호가 같은가 | 같음 | 비었으면 LLM 을 부르지 않고 위치만 옮긴다 |
 | 4 | 위치의 종류: `Atom_history`, `Empty_atom_history`, `No_atom_history`, `Stale_noop` | variant, 전부 나열 | 읽는 방법 고르기(§4.6, §4.8) |
@@ -265,17 +297,17 @@ flowchart TD
 - **I6 고른 숫자 없음** — §2.4 의 값을 지우고 §4.4 밖의 조건을 더하지 않는다.
 - **I7 Keeper 는 Librarian 을 기다리지 않는다** — Keeper 기동, 재기동, 턴 진행 어디에도 Librarian 완료를 기다리는 자리가 없다.
 - **I8 Keeper 마다 따로** — 한 Keeper 의 Librarian 이 밀리거나 멈추거나 호출이 오래 걸려도 다른 Keeper 의 Librarian 과 턴은 늦어지지 않는다.
-- **I9 읽은 턴은 다시 읽지 않는다** — 같은 세션 안에서 위치는 앞으로만 간다. Keeper 의 instructions 가 바뀌어도 지나간 턴을 다시 읽지 않는다.
+- **I9 읽은 턴은 다시 읽지 않는다** — 같은 trace 안에서 위치는 앞으로만 간다. Keeper 의 instructions 가 바뀌어도 지나간 턴을 다시 읽지 않는다.
 
 ### 4.6 파일 둘을 새로 둔다
 
 기억 스냅숏과 턴 기록은 필드 이름이 정확히 일치해야 디코딩된다(`keeper_memory_os_current.ml` `of_json` 의 `exact_field_names_result`, `turn_record.ml` `of_json`). 스냅숏에 필드를 더하면 배포와 롤백 때 모든 Keeper 의 facts 가 격리된다. 턴 기록에 더하면 hard cut 이 배포 preflight, raw-trace 정리, 창의 첫 요청까지 번진다. 턴 기록은 보존 기간(`jsonl_retention_days`)이 지나면 정리 pass 가 지우기도 한다(`server_runtime_startup_maintenance.ml`). 그래서 둘 다 기존 저장소 밖에 둔다.
 
 1. **턴 끝 기록** `<keepers_dir>/<keeper>.turn-boundaries.jsonl`
-   - 끝난 턴마다 한 줄: `kind`, `session_id`, `turn_ref`, 시작할 때의 이력, 위치, 끝난 시각. `kind` 는 지금 `turn_ended` 하나다. 첫날부터 구분자를 두는 이유는 이 파일도 필드 이름이 정확히 일치해야 읽히기 때문이다. 구분자가 있으면 나중에 다른 종류의 줄을 variant 로 더할 수 있고, 기존 줄에 필드를 더하는 hard cut 을 피한다.
+   - 끝난 턴마다 한 줄: `kind`, `turn_ref`, 시작할 때의 이력, 위치, 끝난 시각. trace id 는 `turn_ref` 안에 있으므로 따로 적지 않는다. `kind` 는 지금 `turn_ended` 하나다. 첫날부터 구분자를 두는 이유는 이 파일도 필드 이름이 정확히 일치해야 읽히기 때문이다. 구분자가 있으면 나중에 다른 종류의 줄을 variant 로 더할 수 있고, 기존 줄에 필드를 더하는 hard cut 을 피한다.
    - 위치는 넷 가운데 하나다. `Atom_history { end_atom; last_atom_digest }`: `end_atom` 은 atom 수(마지막 atom 의 다음 번호)이고 `last_atom_digest` 는 atom `end_atom - 1` 을 여는 메시지의 digest 다. `Empty_atom_history`: atom 이 0개다. `No_atom_history`: 공식 클라이언트라 Agent-Core checkpoint 가 없다. `Stale_noop`: Agent-Core 턴인데 저장이 stale no-op 이었다(더 새 writer 가 파일을 쥐고 있었다). 그 턴의 메시지는 durable 이력에 없으므로 읽을 범위가 없는 줄이다. 줄을 빼지 않고 남기는 이유는 밀린 턴 수를 줄 수로 세기 때문이다.
    - 위치는 저장이 돌려준 checkpoint 로 계산한다. 저장은 그 턴의 꼬리를 자르므로(`keeper_replay_checkpoint.ml`) 런타임이 돌려준 checkpoint 로 계산하면 디스크와 어긋난다.
-   - 시작할 때의 이력은 `Fresh_history`(불러온 checkpoint 없이 시작했다) 또는 `Continued_history` 다. Keeper 가 이미 아는 값이다(`keeper_run_context.ml` 의 `loaded_checkpoint_present`). 읽는 쪽은 이 값으로 범위의 시작을 정한다(§4.4 의 3). checkpoint 를 못 읽어 같은 세션에서 이력이 새로 시작한 턴도 이 값이 `Fresh_history` 라서 앞 줄의 `end_atom` 에 속지 않는다.
+   - 시작할 때의 이력은 `Fresh_history`(불러온 checkpoint 없이 시작했다) 또는 `Continued_history` 다. Keeper 가 이미 아는 값이다(`keeper_run_context.ml` 의 `loaded_checkpoint_present`). 읽는 쪽은 이 값으로 범위의 시작을 정한다(§4.4 의 3). checkpoint 를 못 읽어 같은 trace 에서 이력이 새로 시작한 턴도 이 값이 `Fresh_history` 라서 앞 줄의 `end_atom` 에 속지 않는다.
    - checkpoint 저장 뒤에 쓰고(`keeper_agent_run_finalize_response.ml` 의 checkpoint 저장 바로 다음), 쓴 뒤 Librarian 을 깨운다. 쓰기가 실패해도 턴은 실패하지 않는다. ERROR 로그와 metric 을 남긴다. 빠진 줄의 내용은 잃지 않는다. 다음 줄의 범위가 앞 줄의 끝에서 시작하므로 두 턴을 같이 덮는다.
    - 모든 후보가 죽어 finalize 를 거치지 않은 턴은 줄이 없다. 그 턴이 턴 도중 저장으로 이력에 남긴 조각은 다음 줄의 범위에 들어가 읽힌다.
    - 도구 결과를 기다리며 끝난 턴이 있으면, 다음 턴에 도착한 Tool 메시지는 이미 읽은 atom 에 붙는다(atom 은 User·Assistant 메시지가 열고 Tool 메시지는 앞 atom 에 붙는다). Librarian 은 도구 결과 본문을 읽지 않으므로 놓치는 것은 그 결과의 `is_error` 표시 하나다. 받아들인다.
@@ -284,13 +316,13 @@ flowchart TD
    - 턴의 시작은 적지 않는다. 직전 턴의 끝이 곧 시작이다. `demote_before` 는 resume·HITL 턴에서 안전한 하한이 아니다(그 턴들은 user 메시지가 이미 checkpoint 에 들어간 채로 시작한다).
    - 진행 파일이 가리키는 줄 앞의 줄은 지워도 뜻이 같다. 지우는 일은 2단계에서 파일 읽는 비용을 재고 넣는다. 넣는다면 조건은 "가리키는 줄 앞"뿐이고 크기나 줄 수 문턱은 두지 않는다.
 2. **진행 파일** `<keepers_dir>/<keeper>.librarian-progress.json`
-   - 마지막으로 읽은 턴: `session_id`, `turn_ref`, 위치.
+   - 마지막으로 읽은 턴: `turn_ref`, 위치.
    - 쓰는 곳은 그 Keeper 의 Librarian 루프 하나다.
    - 없으면 "아직 읽은 적 없음"이다. 추측이 아니라 사실이다.
    - 못 읽거나 턴 끝 기록과 맞지 않으면 typed 오류다. 빈 상태로 떨어뜨리지 않는다. 빈 상태가 되면 이력 전체가 밀린 것으로 보인다. 오류는 화면에 뜨고(§4.9), 푸는 방법은 그 Keeper 의 두 파일을 purge 로 같이 지우는 것이다.
    - 이력이 새로 시작하는 일은 줄이 말한다. checkpoint 를 못 읽었거나 버전이 바뀌었거나(`keeper_context_core.ml` 의 `load_context_from_checkpoint` 가 `None` 을 돌려주는 모든 경우) purge 로 지워졌으면 다음 턴의 줄이 `Fresh_history` 다. `keeper_clear` 는 `history_cleared` 줄을 남긴다. 그래서 루프 말고는 누구도 이 파일을 고쳐 쓰지 않는다.
    - purge 는 두 파일을 같이 지운다. purge 가 회차 도중에 일어나면 루프가 옛 위치를 되살려 쓸 수 있다. 그래서 진행 파일을 쓰기 직전에 턴 끝 기록의 잠금을 잡고, 회차를 시작할 때 본 줄이 그대로 있는지 확인한다(§4.4 의 5a). 없으면 쓰지 않는다.
-   - 이 파일은 Librarian 이 읽은 곳이다. 창이 보는 위치는 §7 (라)의 파일이 따로 갖는다. 창 조립은 이 파일을 직접 쓰지 않는다.
+   - 이 파일이 갖는 것은 읽은 위치다. 창이 보는 위치는 §7 (라)의 파일이 따로 갖는다. 창 조립은 이 파일을 직접 쓰지 않는다.
 
 두 파일 모두 Keeper purge 변형(`keeper_shutdown_types.ml`, `server_dashboard_http_delete_actions.ml`)과 배포 preflight 의 저장소 목록(`bin/deployment_preflight_helper.ml`)에 등록한다.
 
@@ -312,7 +344,7 @@ flowchart TD
 
 ### 4.8 공식 클라이언트 턴
 
-이 턴들은 checkpoint 가 없어 atom 이력이 없다(`No_atom_history`). 읽을 거리는 세션 디렉터리의 두 파일에 있다(`keeper_context_core_history.ml` `persist_message`, `classify_history_entry`).
+이 턴들은 checkpoint 가 없어 atom 이력이 없다(`No_atom_history`). 읽을 거리는 trace 디렉터리의 두 파일에 있다(`keeper_context_core_history.ml` `persist_message`, `classify_history_entry`).
 
 | 턴 | 남는 줄 |
 |---|---|
@@ -416,4 +448,4 @@ TUI Memory 헤더, health JSON, 대시보드에 밀린 턴 수, 마지막 성공
 
 ## 10. 열어 둔 결정
 
-1. **기록 전부터 있던 이력.** 턴 끝 기록이 시작되기 전의 이력에는 턴 끝이 없다. 0번 atom 부터 읽기로 하면 수천 atom 이 한 덩어리가 되어 첫 회차부터 읽지 못한다. 그래서 그런 세션의 첫 줄은 읽지 않고 위치의 기준점으로만 쓴다(§4.4 의 3). 그 앞의 구간은 지금 경로가 맨 뒤 72개 방식으로 읽던 구간이다. 권고는 그 구간을 다시 읽지 않고, "이 Keeper 는 여기서부터 새 생명주기로 읽는다"를 저널에 한 줄 남기는 것이다. 다른 선택은 이력을 비우고 새 세션으로 시작하는 것이다. constitution `legacy_residue`("과거 데이터 호환에 시간을 쓰지 않는다. 바닥부터 다시 쌓아도 된다")는 둘 다 허용한다. 옛 구간을 읽으려고 코드를 더하는 것만 허용하지 않는다. 새로 생기는 세션은 이 문제가 없다. 첫 줄이 `Fresh_history` 라서 0번부터 빠짐없이 읽는다.
+1. **기록 전부터 있던 이력.** 턴 끝 기록이 시작되기 전의 이력에는 턴 끝이 없다. 0번 atom 부터 읽기로 하면 수천 atom 이 한 덩어리가 되어 첫 회차부터 읽지 못한다. 그래서 그런 trace 의 첫 줄은 읽지 않고 위치의 기준점으로만 쓴다(§4.4 의 3). 그 앞의 구간은 지금 경로가 맨 뒤 72개 방식으로 읽던 구간이다. 권고는 그 구간을 다시 읽지 않고, "이 Keeper 는 여기서부터 새 생명주기로 읽는다"를 저널에 한 줄 남기는 것이다. 다른 선택은 이력을 비우고 새 trace 로 시작하는 것이다. constitution `legacy_residue`("과거 데이터 호환에 시간을 쓰지 않는다. 바닥부터 다시 쌓아도 된다")는 둘 다 허용한다. 옛 구간을 읽으려고 코드를 더하는 것만 허용하지 않는다. 새로 생기는 trace 는 이 문제가 없다. 첫 줄이 `Fresh_history` 라서 0번부터 빠짐없이 읽는다.

@@ -128,6 +128,12 @@ type entry = {
       (** The civil-hour rail this entry belongs under. [None] is reserved for
           rows without a trustworthy observation time; they do not invent a
           timeline heading from display text. *)
+  span_clock : string option;
+      (** The pane-level span clock for a turn block's head row
+          ([Rail_opens]). Folded into the body text *before* wrapping, so it
+          consumes body budget like any other word and no row exceeds the
+          block's wrap width. [None] on every other row; nothing shifts when
+          a turn has no span to say. *)
   role_label : string;
   role_label_mark_cells : int;
       (** Cells the speaker mark occupies at the head of {!role_label}, from

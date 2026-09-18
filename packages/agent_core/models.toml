@@ -3563,15 +3563,16 @@ reasoning_streaming_format = "delta:reasoning_content"
 reasoning_replay = "drop_without_tool_preserve_with_tool"
 supports_native_streaming = true
 
-# Local Ollama Gemma 4 26B-A4B QAT build, probed 2026-06-12. Accepts
-# tool_choice, unlike the generic unsloth/gemma-4 row above.
+# Local Ollama Gemma 4 26B-A4B QAT build, probed 2026-06-12. No
+# supports_tool_choice here: the ollama preset says false because native
+# /api/chat does not serialize the field, so a row claiming true would have a
+# forced choice dropped with no error. The deleted overlay claimed true.
 [[models]]
 id_prefix = "hf.co/unsloth/gemma-4-26B-A4B-it-qat-GGUF:UD-Q4_K_XL"
 provider_name = "ollama"
 base = "ollama"
 max_context_tokens = 262144
 supports_tools = true
-supports_tool_choice = true
 supports_reasoning = true
 thinking_control_format = "chat_template_token"
 thinking_control_token = "<|think|>"

@@ -198,13 +198,39 @@ let http_error_of_stream_error
       { provider_status = Some { Types.status; error_body }
       ; message = _
       ; error_type = _
+      ; report = _
       ; raw = _
       } ->
     Http_client.HttpError
       { code = status; body = Http_client.Received error_body; retry_after_header = None }
-  | Types.Stream_provider_error { message; error_type; provider_status = None; raw } ->
+  | Types.Stream_provider_error
+      { message
+      ; error_type
+      ; provider_status = None
+      ; report = Types.Provider_stated
+      ; raw
+      } ->
     Http_client.ProviderFailure
       { kind = Http_client.Provider_reported_error { error_type }
+      ; message =
+          Printf.sprintf
+            "%s stream error: %s raw=%S"
+            wire_label
+            message
+            (parse_error_raw_excerpt raw)
+      }
+  (* The choice said the generation failed and no error object arrived with
+     it: nothing declares a type or a status, and the answer stopped part-way
+     for a reason the provider kept to itself. *)
+  | Types.Stream_provider_error
+      { message
+      ; error_type = _
+      ; provider_status = None
+      ; report = Types.Unstated_errored_choice
+      ; raw
+      } ->
+    Http_client.ProviderFailure
+      { kind = Http_client.Provider_interrupted
       ; message =
           Printf.sprintf
             "%s stream error: %s raw=%S"
@@ -296,6 +322,38 @@ let http_error_of_stream_error
       { kind = Http_client.Capability_mismatch { capability = Some capability }; message }
 ;;
 
+(* A choice that finished with [error] and carried no error object: nothing
+   declares a type or a status, so the failure says the generation was
+   interrupted rather than reporting an envelope that never arrived. *)
+let%test "an errored choice with no object reads as an interrupted generation" =
+  match
+    Streaming.parse_openai_sse_chunk
+      ~streaming_reasoning:Reasoning_dialect.No_streaming_reasoning
+      {|{"id":"c","choices":[{"index":0,"delta":{"content":"partial"},"finish_reason":"error"}]}|}
+  with
+  | Streaming.Openai_provider_error { message; error_type; provider_status; report; raw } ->
+    report = Types.Unstated_errored_choice
+    &&
+    (match
+       http_error_of_stream_error
+         (Types.Stream_provider_error
+            { message; error_type; provider_status; report; raw })
+     with
+     (* The kind is the fact under test. The message is display text built by
+        the same printf as its siblings, and the wire-format test below covers
+        that shape. *)
+     | Http_client.ProviderFailure { kind = Http_client.Provider_interrupted; message = _ } ->
+       true
+     | Http_client.ProviderFailure _ | Http_client.HttpError _
+     | Http_client.NetworkError _ | Http_client.TimeoutError _
+     | Http_client.AcceptRejected _ | Http_client.ProviderTerminal _ -> false)
+  | Streaming.Openai_chunk _
+  | Streaming.Openai_done
+  | Streaming.Openai_empty
+  | Streaming.Openai_parse_failed _
+  | Streaming.Openai_undeclared_reasoning_member _ -> false
+;;
+
 let%test "generic stream provider type stays diagnostic" =
   match
     http_error_of_stream_error
@@ -303,6 +361,7 @@ let%test "generic stream provider type stays diagnostic" =
          { message = "provider refused"
          ; error_type = Some "provider_owned_type"
          ; provider_status = None
+         ; report = Types.Provider_stated
          ; raw = "{}"
          })
   with
@@ -326,10 +385,11 @@ let%test "a choice-level 429 is a rate limit classified from its error object al
       ~streaming_reasoning:Reasoning_dialect.No_streaming_reasoning
       chunk
   with
-  | Streaming.Openai_provider_error { message; error_type; provider_status; raw } ->
+  | Streaming.Openai_provider_error { message; error_type; provider_status; report; raw } ->
     (match
        http_error_of_stream_error
-         (Types.Stream_provider_error { message; error_type; provider_status; raw })
+         (Types.Stream_provider_error
+            { message; error_type; provider_status; report; raw })
      with
      | Http_client.HttpError
          { code = 429; body = Http_client.Received body; retry_after_header = None } ->
@@ -361,10 +421,11 @@ let%test "a top-level 502 is a server error and a 4xx code stays provider-owned"
          code)
   in
   let http_error = function
-    | Streaming.Openai_provider_error { message; error_type; provider_status; raw } ->
+    | Streaming.Openai_provider_error { message; error_type; provider_status; report; raw } ->
       Some
         (http_error_of_stream_error
-           (Types.Stream_provider_error { message; error_type; provider_status; raw }))
+           (Types.Stream_provider_error
+              { message; error_type; provider_status; report; raw }))
     | Streaming.Openai_chunk _
     | Streaming.Openai_done
     | Streaming.Openai_empty
@@ -394,7 +455,12 @@ let%test "provider error diagnostic uses the active wire format" =
     http_error_of_stream_error
       ~wire_format:Http_client.Ndjson
       (Types.Stream_provider_error
-         { message = "provider refused"; error_type = None; provider_status = None; raw = "{}" })
+         { message = "provider refused"
+         ; error_type = None
+         ; provider_status = None
+         ; report = Types.Provider_stated
+         ; raw = "{}"
+         })
   with
   | Http_client.ProviderFailure { message; _ } ->
     message = "NDJSON stream error: provider refused raw=\"{}\""

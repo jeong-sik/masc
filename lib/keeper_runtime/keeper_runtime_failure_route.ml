@@ -254,8 +254,22 @@ let route_of_provider_error ~err (p : Llm_provider.Error.provider_error) =
   | Llm_provider.Error.MissingApiKey _ -> exhaust_failure Config_mismatch
   | Llm_provider.Error.InvalidConfig _ -> exhaust_failure Config_mismatch
   | Llm_provider.Error.InvalidRequest _ -> exhaust_failure Deterministic_request
+  (* The stream ended before the completion contract's stop reason. The
+     provider accepted the request and the bytes that would have said why the
+     generation stopped never arrived, which is what a dropped transport looks
+     like; the other wire kinds are defects in what did arrive, and the same
+     bytes arrive again on the next call. *)
+  | Llm_provider.Error.ProviderWireError
+      { kind = Llm_provider.Http_client.Incomplete_stream; _ } ->
+    observe_retry Network_transient
+  | Llm_provider.Error.ProviderWireError
+      { kind =
+          ( Llm_provider.Http_client.Malformed_payload
+          | Llm_provider.Http_client.Unknown_event
+          | Llm_provider.Http_client.Oversized_payload )
+      ; _
+      }
   | Llm_provider.Error.ParseError _
-  | Llm_provider.Error.ProviderWireError _
   | Llm_provider.Error.ProviderReportedError _
   | Llm_provider.Error.UnknownVariant _
   | Llm_provider.Error.ProviderTerminal _ ->

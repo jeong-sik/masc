@@ -9525,12 +9525,13 @@ let render_memory_fact_detail (state : state) =
     ~clamped:(fun () -> Some (Memory_fact_detail_scroll scroll))
     ~title:(screen_title " MASC MEMORY - FACT DETAIL")
     ~hints:
-      (* The marker leads the row, as the patch reading's does: it carries no
-         colon, so the fitter can shed no whole key of it and a narrow terminal
-         keeps the count. *)
-      (Printf.sprintf
-         "[detail rows %s]  j/k:scroll  PgUp/PgDn:page  g/G:top/bottom  Esc:close"
-         (Masc_tui_scroll.window_text ~scroll ~height:content_height total_lines))
+      (* The keys project the same bindings the help sheet carries, so the
+         footer and [?] cannot teach different keys. The marker leads, as the
+         patch reading's does: it carries no colon, so the fitter can shed no
+         whole key of it and a narrow terminal keeps the count. *)
+      (Printf.sprintf "[detail rows %s]  %s"
+         (Masc_tui_scroll.window_text ~scroll ~height:content_height total_lines)
+         Masc_tui_keys.memory_fact_detail_hints)
     ~body:(fun ~budget:_ c ->
       let window = Rows.of_list ~first:scroll ~height:content_height lines in
       for i = 0 to content_height - 1 do

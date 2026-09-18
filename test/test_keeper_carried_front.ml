@@ -88,7 +88,7 @@ let source =
 
 (* The lane walked glm, kimi, deepseek over one history. The newest completed
    record seeds the front whichever runtime measured it: a position in the
-   checkpoint history is the same position on every Agent Core runtime. *)
+   checkpoint history is the same position on every runtime. *)
 let test_the_newest_completed_record_on_the_trace_seeds_the_front () =
   let records =
     [ record ~turn:10 ~runtime:"glm" (Some (30, 100))
@@ -113,10 +113,10 @@ let test_another_sessions_record_is_another_history () =
     (fst (seed (Front.of_records ~trace_id:"trace-2" ~composer records)))
 ;;
 
-(* An official client's window counts a list of its own, so its newer record
-   is not this history's; a runtime the catalog no longer has could be
-   either, so its record is not read; a record with no window says nothing. *)
-let test_an_official_client_or_unmaterialized_record_is_skipped () =
+(* An official client cuts the same history, so its record names a position
+   here and is read. A runtime the catalog no longer has could have counted
+   anything, so its record is not; a record with no window says nothing. *)
+let test_an_official_clients_record_is_read_and_an_unmaterialized_one_is_not () =
   let records =
     [ record ~turn:10 (Some (30, 100))
     ; record ~turn:13 ~runtime:"claude_code" (Some (5, 120))
@@ -125,8 +125,8 @@ let test_an_official_client_or_unmaterialized_record_is_skipped () =
     ]
   in
   let first_atom, src = seed (of_records records) in
-  check int "only turn 10 qualifies" 70 first_atom;
-  check source "turn 10" (Front.Turn_record { turn = 10 }) src
+  check int "the official client's turn 13 is the newest read" 115 first_atom;
+  check source "turn 13" (Front.Turn_record { turn = 13 }) src
 ;;
 
 (* A turn that never finished still measured what it sent, and that range is
@@ -154,12 +154,12 @@ let test_a_completed_record_after_an_unfinished_one_seeds_the_front () =
    the latter. *)
 let test_the_wire_observation_names_the_runtime_when_present () =
   let records =
-    [ record ~turn:10 ~runtime:"glm" ~wire_runtime:(Some "claude_code") (Some (30, 100)) ]
+    [ record ~turn:10 ~runtime:"glm" ~wire_runtime:(Some "gone") (Some (30, 100)) ]
   in
-  check bool "measured by an official client: skipped" true
+  check bool "measured by a runtime the catalog lost: skipped" true
     (Option.is_none (of_records records));
   let records =
-    [ record ~turn:10 ~runtime:"claude_code" ~wire_runtime:(Some "deepseek") (Some (30, 100)) ]
+    [ record ~turn:10 ~runtime:"gone" ~wire_runtime:(Some "deepseek") (Some (30, 100)) ]
   in
   check int "measured by deepseek: read" 70 (fst (seed (of_records records)))
 ;;
@@ -374,8 +374,8 @@ let () =
     [ ( "of_records"
       , [ test_case "newest completed record on the trace" `Quick
             test_the_newest_completed_record_on_the_trace_seeds_the_front
-        ; test_case "errored or official client skipped" `Quick
-            test_an_official_client_or_unmaterialized_record_is_skipped
+        ; test_case "an official client is read, an unmaterialized runtime is not" `Quick
+            test_an_official_clients_record_is_read_and_an_unmaterialized_one_is_not
         ; test_case "an unfinished record is read and named apart" `Quick
             test_an_unfinished_record_is_read_and_named_apart
         ; test_case "a completed record after an unfinished one seeds" `Quick

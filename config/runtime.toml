@@ -144,6 +144,14 @@ key = "DEEPSEEK_API_KEY"
 display-name = "GLM Coding Plan"
 protocol = "openai-compatible-http"
 endpoint = "https://api.z.ai/api/coding/paas/v4"
+# Exact-output lanes lead with this provider, and a plan whose wire carries
+# no connect and no body budget is now rejected at admission (Missing_deadline,
+# #36979): with both absent the measurement transport arms no deadline and a
+# provider that holds the connection open hangs the request for the life of
+# the connection — measured at up to 13.3h on wkbl's curator lane. The value
+# keeps headroom over the slowest healthy exact-output call observed on this
+# endpoint (973s, wkbl 2026-09-13~16); narrow it per deployment.
+connect-timeout-s = 1200.0
 
 [providers.glm-coding.healthcheck]
 path = "/models"

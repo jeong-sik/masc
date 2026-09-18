@@ -27,6 +27,7 @@
 - Keeper: the history range a refusal narrowed carries to the next candidate in the same turn. A lane that moved on sent the whole history again: on 09-18 deepseek narrowed 16,014 KB to 8,723 KB to 3,733 KB and kimi immediately sent 16,014 KB. A turn that did not finish no longer has its record halved again by the next turn — the polisher's turns 4089 to 4092 held a history of 7,537 while the transmitted size fell 1885, 943, 472, 236. The origin string in logs and JSON reads `unfinished_turn#<turn>` where it read `refused_range#<turn>` (#36986).
 - Keeper: a refusal whose reason this codebase cannot type narrows the history range as a typed one does. From 02:20 KST on 09-18 five keepers — msx-retro-mania, won-chik, kidsnote-slack-context-collector, pr-updater, goo-yang-bong — sent 15 MB and 9.5 MB every twenty seconds, were refused, and completed no turn. Sending the whole history on a turn's first request is unchanged (#36977).
 
+## [0.35.20] - 2026-09-17
 
 ### Upgrade notes
 

@@ -126,7 +126,7 @@ def render(spec, binary=None):
         if default_command is not None:
             raise SetupError('a named catalog provider is an HTTP connection')
         allowed = {'choice', 'model', 'max_context', 'tools', 'streaming',
-                   'endpoint', 'api_key_env', 'credential_file', 'provider_kind', 'request_path',
+                   'endpoint', 'api_key_env', 'credential_file', 'provider_kind',
                    'provider_id', 'provider_display_name', 'model_key', 'provider_declared',
                    'reasoning_effort', 'wizard_default'}
         if set(spec) - allowed:
@@ -523,7 +523,7 @@ def connection_sources(inventory):
                           command=row.get('command') or '', api_key_env=row.get('api_key_env') or '',
                           credential_kind=row.get('credential_kind', 'unknown'),
                           credential_file=row.get('credential_file'), provider_kind=row.get('provider_kind'),
-                          request_path=row.get('request_path'), rows=[])
+                          rows=[])
             sources.append(source)
         source['rows'].append(row)
     for integration in inventory.get('integrations', []):
@@ -537,7 +537,7 @@ def connection_sources(inventory):
                       api_key_env=integration.get('api_key_env') or '',
                       credential_kind=integration.get('credential_kind', 'env' if integration.get('api_key_env') else 'none'),
                       credential_file=integration.get('credential_file'),
-                      provider_kind=integration.get('provider_kind'), request_path=integration.get('request_path'),
+                      provider_kind=integration.get('provider_kind'),
                       origin=integration['origin'], setup_support=integration['setup_support'], rows=[])
         # A catalog-advertised new connection carries the provider's own name,
         # so the wizard renders a named provider instead of an anonymous one.
@@ -1301,7 +1301,7 @@ def resolve_model_spec(source, model, timeout, binary=None):
                 streaming=choice in ('claude_code', 'codex', 'antigravity'))
     if CHOICES[choice][1] is None:
         spec.update(endpoint=source['endpoint'])
-        spec.update({key: source[key] for key in ('api_key_env', 'credential_file', 'provider_kind', 'request_path') if source.get(key)})
+        spec.update({key: source[key] for key in ('api_key_env', 'credential_file', 'provider_kind') if source.get(key)})
     elif source['command']:
         spec['command'] = source['command']
     if choice == 'antigravity':

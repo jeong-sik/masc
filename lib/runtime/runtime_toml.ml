@@ -699,21 +699,6 @@ let parse_provider (id : string) (tbl : Otoml.t)
                             Llm_provider.Provider_config.string_of_provider_kind
                             Llm_provider.Provider_config.all_provider_kinds)))))
        in
-       (* Same rule as [kind]: the catalog names the surface for a provider it
-          knows, so this is read only for an endpoint it does not. Absolute
-          because it is joined onto the endpoint, not resolved against it. *)
-       let request_path_result =
-         match typed_find "a string" path tbl "request-path" Otoml.get_string with
-         | Error errors -> Error errors
-         | Ok None -> Ok None
-         | Ok (Some raw) when String.length raw > 0 && Char.equal raw.[0] '/' ->
-           Ok (Some raw)
-         | Ok (Some raw) ->
-           Error
-             (error
-                (path ^ ".request-path")
-                (Printf.sprintf "request-path must be absolute, got %S" raw))
-       in
        let connect_timeout_key = Runtime_schema.connect_timeout_s_key in
        let connect_timeout_result =
          strict_float_find path tbl connect_timeout_key
@@ -725,23 +710,20 @@ let parse_provider (id : string) (tbl : Otoml.t)
           , healthcheck_result
           , connect_timeout_result
           , is_non_interactive_result
-          , wire_kind_result
-          , request_path_result )
+          , wire_kind_result )
         with
-        | Error errs, _, _, _, _, _, _
-        | _, Error errs, _, _, _, _, _
-        | _, _, Error errs, _, _, _, _
-        | _, _, _, Error errs, _, _, _
-        | _, _, _, _, Error errs, _, _
-        | _, _, _, _, _, Error errs, _
-        | _, _, _, _, _, _, Error errs -> Error errs
+        | Error errs, _, _, _, _, _
+        | _, Error errs, _, _, _, _
+        | _, _, Error errs, _, _, _
+        | _, _, _, Error errs, _, _
+        | _, _, _, _, Error errs, _
+        | _, _, _, _, _, Error errs -> Error errs
         | ( Ok capabilities
           , Ok enabled_opt
           , Ok healthcheck_path
           , Ok connect_timeout_s
           , Ok is_non_interactive
-          , Ok wire_kind
-          , Ok request_path ) ->
+          , Ok wire_kind ) ->
           let enabled = match enabled_opt with Some value -> value | None -> true in
           Ok
             { Runtime_schema.id
@@ -750,7 +732,6 @@ let parse_provider (id : string) (tbl : Otoml.t)
             ; protocol
             ; api_format
             ; wire_kind
-            ; request_path
             ; transport
             ; is_non_interactive
             ; credentials

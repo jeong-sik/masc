@@ -3,7 +3,7 @@ type http_kind = Openai_compat | Anthropic | Kimi | Glm | Ollama_kind
 type credential = Env_reference of string | File_reference of string
 type transport =
   | Http of {endpoint:string; credential:credential option;
-      kind:http_kind; request_path:string option}
+      kind:http_kind}
   | Client of {command:string; oauth:string option; timeout:float option}
 type t = {choice:choice; model:string; context:int; tools:bool; streaming:bool;
   transport:transport; canonical_spec:string}
@@ -38,10 +38,6 @@ let valid_endpoint value =
     && Uri.userinfo uri = None && Uri.query uri = [] && Uri.fragment uri = None
     && (match Uri.port uri with None -> true | Some port -> port >= 1 && port <= 65535)
   with Invalid_argument _ -> false
-let valid_path value =
-  let uri = Uri.of_string value in
-  safe_text value && String.starts_with ~prefix:"/" value
-  && Uri.scheme uri = None && Uri.host uri = None && Uri.query uri = [] && Uri.fragment uri = None
 (* Match pathlib's lexical POSIX File spelling without resolving symlinks or
    reading a credential. Parent traversal remains explicit, as in the input. *)
 let reference_path path =
@@ -56,7 +52,7 @@ let of_json ?home_dir = function
       | "claude_code" -> Ok Claude_code | "codex" -> Ok Codex | "antigravity" -> Ok Antigravity
       | _ -> invalid "choice" in
     let allowed = ["choice";"model";"max_context";"tools";"streaming"]
-      @ (if http choice then ["endpoint";"api_key_env";"credential_file";"provider_kind";"request_path"] else ["command"])
+      @ (if http choice then ["endpoint";"api_key_env";"credential_file";"provider_kind"] else ["command"])
       @ (if choice = Antigravity then ["credential_file";"timeout_s"] else []) in
     let* () = if List.for_all (fun (key,_) -> List.mem key allowed) fields then Ok () else invalid "unexpected fields" in
     let* model = required fields "model" in
@@ -78,15 +74,7 @@ let of_json ?home_dir = function
         | (Llama_cpp | Vllm | Openai_compatible),(None | Some "openai_compat") -> Ok Openai_compat
         | (Llama_cpp | Vllm | Openai_compatible),Some "glm" -> Ok Glm
         | _ -> invalid "provider_kind" in
-      (* Kept as an option rather than defaulted here: the dialect's default is
-         the loader's to compute, and writing it back would restate a fact the
-         catalog vocabulary already owns. Only a surface the operator names
-         needs carrying, because nothing else can know it. *)
-      let* request_path = optional fields "request_path" in
-      let* () = match request_path with
-        | Some path when not (valid_path path) -> invalid "request_path"
-        | Some _ | None -> Ok () in
-      Ok (Http {endpoint;credential;kind;request_path}))
+      Ok (Http {endpoint;credential;kind}))
     else (
       let* command = if List.mem_assoc "command" fields then required fields "command"
         else Ok (match choice with Claude_code -> "claude" | Codex -> "codex" | _ -> "agy") in
@@ -138,9 +126,7 @@ let render spec =
   let transport_fields,credential = match spec.transport with
     | Http h ->
       (if protocol_fixes_dialect spec.choice then [] else ["kind",`String (wire_kind_name h.kind)])
-      @ ["endpoint",`String h.endpoint]
-      @ (match h.request_path with None -> [] | Some path -> ["request-path",`String path]),
-      h.credential
+      @ ["endpoint",`String h.endpoint],h.credential
     | Client c -> ["command",`String c.command;"is-non-interactive",`Bool true]
       @ (match c.timeout with None -> [] | Some timeout -> ["timeout-s",`Float timeout]),
       Option.map (fun path -> File_reference path) c.oauth in

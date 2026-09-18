@@ -1144,7 +1144,7 @@ class CompiledRuntimeSetup(unittest.TestCase):
 
     def test_a_credential_file_spec_lands_in_the_binding_credentials_table(self):
         import tomllib
-        configured = dict(spec('messages'), credential_file='/private/saved-key', request_path='/v1/messages')
+        configured = dict(spec('messages'), credential_file='/private/saved-key')
         _, runtime = SETUP.render(configured, BINARY)
         providers = tomllib.loads(runtime.decode())['providers']
         self.assertEqual(next(iter(providers.values()))['credentials'],

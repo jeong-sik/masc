@@ -329,53 +329,22 @@ let refuse_unread_wire_kind ~reason (provider : Runtime_schema.provider) =
     ~reason
 ;;
 
-(* The surface travels with the dialect: both are facts about an endpoint, and
-   the catalog states both for a provider it knows. Refusing them in the same
-   positions keeps one rule rather than two that drift. *)
-let refuse_unread_request_path ~reason (provider : Runtime_schema.provider) =
-  refuse_unread_declaration
-    provider
-    ~key:"request-path"
-    ~value:provider.Runtime_schema.request_path
-    ~reason
-;;
-
 let provider_kind_for_http_provider ?registry_entry (provider : Runtime_schema.provider)
     : (Llm_provider.Provider_config.provider_kind, string) result =
   let ( let* ) = Result.bind in
   let* () =
     match provider.api_format, registry_provider_kind registry_entry with
     | (Codex_app_server_runtime | Claude_code_runtime | Antigravity_cli_runtime), _ ->
-      let* () =
-        refuse_unread_wire_kind
-          provider
-          ~reason:"an official client speaks no HTTP dialect"
-      in
-      refuse_unread_request_path
+      refuse_unread_wire_kind
         provider
-        ~reason:"an official client serves no HTTP surface"
-    | (Gemini_api | Vertex_gemini_api | Ollama_api), None ->
+        ~reason:"an official client speaks no HTTP dialect"
+    | (Gemini_api | Vertex_gemini_api | Ollama_api), _ ->
       refuse_unread_wire_kind
         provider
         ~reason:
           (Printf.sprintf "protocol %s already fixes the dialect" provider.protocol)
-    | (Gemini_api | Vertex_gemini_api | Ollama_api), Some _ ->
-      let* () =
-        refuse_unread_wire_kind
-          provider
-          ~reason:
-            (Printf.sprintf "protocol %s already fixes the dialect" provider.protocol)
-      in
-      refuse_unread_request_path
-        provider
-        ~reason:"the AGENT_CORE catalog has a row for it and owns that fact"
     | (Chat_completions_api | Messages_api), Some _ ->
-      let* () =
-        refuse_unread_wire_kind
-          provider
-          ~reason:"the AGENT_CORE catalog has a row for it and owns that fact"
-      in
-      refuse_unread_request_path
+      refuse_unread_wire_kind
         provider
         ~reason:"the AGENT_CORE catalog has a row for it and owns that fact"
     | (Chat_completions_api | Messages_api), None -> Ok ()
@@ -461,12 +430,6 @@ let request_path_for_http_provider ~(provider : Runtime_schema.provider) ~regist
      Providers absent from the catalog keep the protocol default exactly as
      before: no catalog row means no separate surface to name. *)
   let request_path =
-    match registry_entry, provider.Runtime_schema.request_path with
-    (* No catalog row means nothing else names the surface, so the deployment's
-       own statement is the only one there is. With a row the loader has
-       already refused a declaration, so this cannot shadow the catalog. *)
-    | None, Some declared -> declared
-    | _ ->
     match registry_entry with
     | Some entry
       when same_provider_kind

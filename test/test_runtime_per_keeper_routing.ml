@@ -2523,74 +2523,6 @@ max-concurrent = 1
     (string_contains msg "already fixes the dialect")
 ;;
 
-(* The surface is the other fact only the endpoint's owner knows. A vendor's
-   own server follows its dialect's layout, but a gateway in front of one does
-   not, and nothing in the catalog can name that. *)
-let test_declared_request_path_is_refused_when_the_catalog_owns_the_fact () =
-  let msg =
-    load_list_error
-      {|
-[runtime]
-default = "openrouter.model"
-
-[providers.openrouter]
-display-name = "OpenRouter"
-protocol = "openai-compatible-http"
-request-path = "/inference/v2/chat"
-endpoint = "https://openrouter.ai/api/v1"
-
-[models.model]
-api-name = "model"
-max-context = 8000
-tools-support = true
-streaming = true
-
-[openrouter.model]
-is-default = true
-max-concurrent = 1
-|}
-  in
-  Alcotest.(check bool)
-    "refusal names the key and the value"
-    true
-    (string_contains msg "declares request-path \"/inference/v2/chat\"");
-  Alcotest.(check bool)
-    "refusal says the catalog owns that fact"
-    true
-    (string_contains msg "owns that fact")
-;;
-
-let test_a_relative_request_path_is_refused () =
-  let msg =
-    load_list_error
-      {|
-[runtime]
-default = "local.model"
-
-[providers.local]
-display-name = "Gateway"
-protocol = "openai-compatible-http"
-kind = "openai_compat"
-request-path = "inference/v2/chat"
-endpoint = "https://gateway.example"
-
-[models.model]
-api-name = "model"
-max-context = 8000
-tools-support = true
-streaming = true
-
-[local.model]
-is-default = true
-max-concurrent = 1
-|}
-  in
-  Alcotest.(check bool)
-    "refusal explains that the surface is joined, not resolved"
-    true
-    (string_contains msg "request-path must be absolute")
-;;
-
 let test_assignment_typo_keeps_not_found () =
   let msg = load_list_error runtime_config_typo_assignment in
   Alcotest.(check bool)
@@ -3045,14 +2977,7 @@ let () =
             "a dialect the protocol already fixes is refused, not ignored"
             `Quick
             test_declared_kind_is_refused_where_the_protocol_fixes_it
-        ; Alcotest.test_case
-            "a surface the catalog already owns is refused, not ignored"
-            `Quick
-            test_declared_request_path_is_refused_when_the_catalog_owns_the_fact
-        ; Alcotest.test_case
-            "a relative surface is refused"
-            `Quick
-            test_a_relative_request_path_is_refused
+
         ; Alcotest.test_case
             "assignment typo keeps the not-found-among-runtimes message"
             `Quick

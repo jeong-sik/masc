@@ -210,13 +210,29 @@ overlay 를 합치는 방법도 둘이다.
 
 같은 무게를 두 엔드포인트가 서빙하면 답이 둘이다. DeepSeek 자체 API 는 `tools` 가 실린 요청에 이전 턴 `reasoning_content` 를 전부 되돌려 보내라고 요구하고, 안 보내면 400 을 낸다 (api-docs.deepseek.com/guides/thinking_mode/, 2026-09-18 확인). 같은 모델을 Ollama 가 서빙할 때는 그 요구가 없고, 클라우드 모델 카드는 오히려 반대로 적는다 — 이전 턴 생각은 다음 사용자 턴 앞에 넣지 말라 (ollama.com/library/gemma4:31b-cloud, 2026-09-18 확인).
 
-그래서 재전송 정책은 모델의 성질이 아니라 엔드포인트의 성질이다. 내장 카탈로그 행은 `provider_name` 으로 엔드포인트를 이미 가르고 있어서 답할 수 있다. 배포가 새 엔드포인트를 묶으면 그 행이 없다. 이때 답을 적을 자리가 `runtime.toml` 이다.
+그래서 재전송 정책은 모델의 성질이 아니라 엔드포인트의 성질이다. 카탈로그 행은 `provider_name` 으로 엔드포인트를 이미 가르고 있다. **행의 키가 (provider, model) 이므로, 축이 갈라진다는 사실 자체가 카탈로그 안에서 표현된다.**
 
-2026-09-18 에 이 구멍이 실측으로 드러났다. Ollama 가 서빙하는 deepseek 행이 DeepSeek 의 규칙을 물려받고 있어서, 라이브 keeper lane 요청 7.83 MB 중 4.7 MB(60%)가 그 엔드포인트가 만들지도 않은 reasoning 이었다. `reasoning-streaming-format`, `thinking-control-format`, `reasoning-effort`, `reasoning-uncontrolled` 는 `runtime.toml` 에 적을 수 있는데 이 축만 키가 없었다.
+2026-09-18 에 이 구멍이 실측으로 드러났다. Ollama 가 서빙하는 deepseek 행이 DeepSeek 의 규칙을 물려받고 있어서, 라이브 keeper lane 요청 7.83 MB 중 4.7 MB(60%)가 그 엔드포인트가 만들지도 않은 reasoning 이었다. 고친 자리는 카탈로그 행이다 (#36981).
 
-**규칙.** 원칙 3의 "이 wire 를 쓰는 모든 모델에 늘 참인가" 옆에 하나를 더 둔다. **"같은 모델을 다른 곳이 서빙해도 같은 값인가."** 같으면 카탈로그 행에 둔다. 서빙하는 쪽에 따라 달라지면, 카탈로그 행은 내장 엔드포인트의 답만 적고 같은 키를 `runtime.toml` 에도 연다. `runtime.toml` 에 키가 없는 것은 값이 아니다 — 카탈로그가 계속 답한다. 키가 있는데 적힌 값을 어휘가 모르면 로드를 거절한다 (RFC-0342 D2).
+**규칙.** 원칙 3의 "이 wire 를 쓰는 모든 모델에 늘 참인가" 옆에 하나를 더 둔다. **"같은 모델을 다른 곳이 서빙해도 같은 값인가."** 같으면 한 행으로 족하다. 서빙하는 쪽에 따라 달라지면 **엔드포인트마다 행을 나눈다.** 새 키를 만들지 않고, 배포 파일에 적을 자리를 열지도 않는다.
 
-이 축을 지금 밟고 있는 PR 은 #36980(masc `runtime.toml` 에 키를 연다)과 #36981(내장 `ollama_cloud` deepseek 행을 고친다)이다. §4.4 에 겹침을 적는다.
+### 2.2.1 개정 (2026-09-18 오후) — 배포는 `runtime.toml` 에 적지 않는다
+
+이 절의 앞선 판은 "배포가 새 엔드포인트를 묶으면 카탈로그에 그 행이 없으니 `runtime.toml` 이 답을 적을 수 있어야 한다" 고 적었고, 그 결론으로 PR #36980 이 `runtime.toml` 에 `reasoning-replay` 키를 열었다. **전제가 틀렸다. 행이 없으면 카탈로그에 넣으면 된다.**
+
+같은 날 오후에 라이브 배포의 overlay 를 세었다.
+
+| | |
+|---|---|
+| `[[models]]` 행 | 6 |
+| 그중 카탈로그에 **없던** 모델 | 5 |
+| 카탈로그 값을 **덮어쓴** 행 | **0** |
+
+덮어쓰기 능력은 한 번도 쓰이지 않았다. overlay 는 덮어쓰기 계층이 아니라 카탈로그 갱신이 안 따라와서 배포가 대신 적어 두던 곳이었다. #37009 가 그 6행과 provider 1개를 카탈로그로 옮긴다.
+
+그러므로 배포가 새 엔드포인트를 묶을 때 할 일은 카탈로그에 행을 더하는 것이고, `runtime.toml` 은 **그중 무엇을 어떤 이름·자격증명으로 쓰는지**만 적는다. #36980 은 이 이유로 닫았다.
+
+같은 날 장애 세 건이 전부 같은 사실이 두 벌 있어서 난 일이었다 — 창이 두 벌(작은 쪽이 이김), 요청 상한이 세 벌, 슬롯 선언이 두 벌(#37004). 상세는 #37008.
 
 지금 이 규칙을 적용할 수 있는 필드는 넷뿐이다. `runtime_schema.ml:130-156` 에서 `max_output_tokens`, `declared_thinking_control_format`, `reasoning_streaming_format`, `reasoning_replay_override` 만 `option` 이고, `supports_*` 15개와 `emits_usage_tokens` 는 평범한 `bool` 이다. presence 가 없으니 "안 적음" 과 "false 로 적음" 이 구별되지 않고, 카탈로그 행이 있는 모델에서는 `runtime_adapter.ml:456-490` 이 그 필드들을 아예 얹지 않는다 — 적어도 조용히 안 먹는다. #36994 가 이것을 든다. 원칙 2를 필드 단위로 실행하려면 presence 가 먼저다.
 
@@ -418,7 +434,8 @@ preset 을 fixture 바탕이나 인자로만 쓰는 파일이 20개다. `capabil
 ### 4.4 다른 PR 과 겹침
 
 - 2026-09-18 기준 열린 PR 19개 중 `packages/agent_core/lib/llm_provider/`, `models.toml`, overlay 를 건드리는 것은 넷이다. (이 문단의 앞선 판은 "없다" 고 적었다. 그 뒤에 열린 PR 들이다.)
-  - **#36980** — masc `runtime.toml` 에 `reasoning-replay` 키를 연다. 바꾸는 파일이 §3 이 이름을 적은 자리와 겹친다 (`runtime_toml.ml`, `runtime_schema.ml(i)`, `runtime_adapter.ml`). §2.2 의 축을 실행한다.
+  - **#36980** — 닫힘 (2026-09-18). `runtime.toml` 에 `reasoning-replay` 키를 여는 PR 이었다. §2.2.1 이 그 전제를 뒤집는다.
+  - **#37009** — 배포 overlay 의 6행과 provider 1개를 카탈로그로 옮기고, exact 슬롯을 런타임 바인딩에서 만든다. 이 RFC 의 원칙 1을 배포 경계까지 실행한다.
   - **#36981** — 내장 `models.toml` 의 `ollama_cloud` deepseek 4행을 고친다. 3.a 가 세는 "preset 과 다른 값" 목록을 바꾸므로, 3.a 를 열 때 개수를 다시 잰다.
   - **#36969** — overlay 의 Kimi 행을 건드리고, `keeper_turn_driver_try_provider.ml` 에서 이력 범위를 자른다. 원칙 2와 부딪히는지는 그 PR 에서 본다. 행이 아니라 요청 조립 쪽 변경이라 3.a~3.f 와 직접 겹치지는 않는다.
   - **#36984** — `exact_output.ml`, `exact_output_plan.ml(i)`, `exact_output_ready_admission.ml(i)` 와 overlay 를 건드린다. §3 이 이름을 적은 `exact_output_catalog_binding.ml` 은 안 건드린다.

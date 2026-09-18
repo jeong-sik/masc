@@ -134,7 +134,7 @@ let deferred_runtime_ids hint =
   hint.next_runtime_id :: hint.later_runtime_ids
 
 type failure_continuation =
-  | Resume_operation_checkpoint
+  | Resume_operation_checkpoint of { operation_id : Keeper_operation_id.t }
   | Restart_cycle
 
 type runtime_retry_deferral =
@@ -987,9 +987,20 @@ let attempt_runtime_candidates
               operation ran. A cycle-restarting lane starts a new turn that
               regains progress with its first tool, so it never resumes here. *)
            (match retry_deferral with
-            | Some { continuation = Resume_operation_checkpoint; on_deferred }
+            | Some
+                { continuation = Resume_operation_checkpoint { operation_id }
+                ; on_deferred
+                }
               when tool_results_saved ()
                    && Keeper_runtime_failure_route.route_resumes_on_same_path route ->
+              Log.Keeper.info
+                "deferred operation %s to the path it failed on \
+                 (runtime_id=%s assignment=%s route=%s:%s)"
+                (Keeper_operation_id.to_string operation_id)
+                attempt_runtime_id
+                runtime_id
+                (Keeper_runtime_failure_route.route_kind_label route)
+                (Keeper_runtime_failure_route.route_class_label route);
               on_deferred
                 { assignment_id = runtime_id
                 ; failed_runtime_id = attempt_runtime_id
@@ -997,7 +1008,10 @@ let attempt_runtime_candidates
                 ; later_runtime_ids = []
                 ; failure = error
                 }
-            | Some { continuation = Resume_operation_checkpoint | Restart_cycle; on_deferred = _ }
+            | Some
+                { continuation = Resume_operation_checkpoint _ | Restart_cycle
+                ; on_deferred = _
+                }
             | None -> ());
            lane_terminal (this_candidate error))
        else (

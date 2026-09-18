@@ -63,12 +63,15 @@ val deferred_runtime_ids : deferred_runtime_lane -> string list
 
 (** How the lane that dispatched a turn continues after the turn fails
     (RFC last-path-resumes-after-progress §3.5).
-    - [Resume_operation_checkpoint]: the chat lane. The same operation resumes
+    - [Resume_operation_checkpoint]: the chat lane. The named operation resumes
       from its latest saved checkpoint, so tool results it saved are not run
-      again.
+      again. It carries the operation because only a lane that has one can
+      resume: the heartbeat lane runs no chat operation, and a cycle that
+      resumed a path this way would never end (§3.5). The driver reports the
+      operation when it defers one to the path it failed on.
     - [Restart_cycle]: the heartbeat lane. The next cycle is a new turn. *)
 type failure_continuation =
-  | Resume_operation_checkpoint
+  | Resume_operation_checkpoint of { operation_id : Keeper_operation_id.t }
   | Restart_cycle
 
 (** Where a lane walk hands the suffix a failed turn defers to, and how that

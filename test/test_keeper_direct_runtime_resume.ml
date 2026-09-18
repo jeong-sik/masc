@@ -186,7 +186,8 @@ is-default = true
         ~continue_from_checkpoint:(Option.is_some admission)
         ?deferred_runtime_lane:(Option.map Continuation.lane admission)
         ~runtime_retry_deferral:
-          { Keeper_turn_driver.continuation = Keeper_turn_driver.Resume_operation_checkpoint
+          { Keeper_turn_driver.continuation =
+              Keeper_turn_driver.Resume_operation_checkpoint { operation_id }
           ; on_deferred = (fun value -> deferred := Some value) } () in
       match result, !deferred with
       | Error _, Some lane ->
@@ -451,7 +452,8 @@ is-default = true
         ~continue_from_checkpoint:(Option.is_some admission)
         ?deferred_runtime_lane:(Option.map Continuation.lane admission)
         ~runtime_retry_deferral:
-          { Keeper_turn_driver.continuation = Keeper_turn_driver.Resume_operation_checkpoint
+          { Keeper_turn_driver.continuation =
+              Keeper_turn_driver.Resume_operation_checkpoint { operation_id }
           ; on_deferred = (fun value -> deferred := Some value) } () in
       let outcome_execution outcome delivery =
         Server_routes_http_keeper_stream.For_testing.operation_execution_of_outcome

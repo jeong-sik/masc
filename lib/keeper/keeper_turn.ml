@@ -922,6 +922,7 @@ let run_keeper_invocation_turn_admitted_inner
                                       ~runtime_retry_deferral:
                                         { Keeper_turn_driver.continuation =
                                             Keeper_turn_driver.Resume_operation_checkpoint
+                                              { operation_id }
                                         ; on_deferred = (fun lane -> deferred_lane := Some lane)
                                         }
                                       ~on_produced_checkpoint:(fun ~runtime_id ~attempt checkpoint ->

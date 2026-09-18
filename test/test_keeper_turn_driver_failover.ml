@@ -117,6 +117,17 @@ let collecting_deferral continuation deferred =
   { Driver.continuation; on_deferred = (fun hint -> deferred := hint :: !deferred) }
 ;;
 
+(* The chat lane's continuation names the operation that would resume; only a
+   lane running one can build it. *)
+let resume_chat_operation =
+  Driver.Resume_operation_checkpoint
+    { operation_id =
+        (match Masc.Keeper_operation_id.of_string "kmsg-walk-under-test" with
+         | Ok operation_id -> operation_id
+         | Error detail -> failwith detail)
+    }
+;;
+
 (* A candidate the walk refuses before invoking anything: its error is the
    walk's own verdict, not the candidate's answer. *)
 let attempt_rejected_before_dispatch error =
@@ -4132,7 +4143,7 @@ let test_a_chat_operation_resumes_its_last_candidate_after_saved_tool_results ()
     bad_gateway
   in
   let result, hints =
-    same_path_walk ~continuation:Driver.Resume_operation_checkpoint [ "only" ]
+    same_path_walk ~continuation:resume_chat_operation [ "only" ]
       tools_then_bad_gateway
   in
   Alcotest.(check (list string)) "a lone candidate defers to itself"
@@ -4141,7 +4152,7 @@ let test_a_chat_operation_resumes_its_last_candidate_after_saved_tool_results ()
     (Error (Agent_core.Error.to_string bad_gateway))
     (Result.map_error Agent_core.Error.to_string result);
   let _result, hints =
-    same_path_walk ~continuation:Driver.Resume_operation_checkpoint [ "first"; "last" ]
+    same_path_walk ~continuation:resume_chat_operation [ "first"; "last" ]
       (fun ~save candidate ->
          match candidate with
          | "first" -> retryable_network_error "first dropped before any stage"
@@ -4159,17 +4170,17 @@ let test_no_same_path_hint_unless_every_condition_holds () =
   in
   let cases =
     [ ( "no stage saved"
-      , Driver.Resume_operation_checkpoint
+      , resume_chat_operation
       , [ "only" ]
       , fun ~save:_ _ -> bad_gateway )
     ; ( "only the answer saved"
-      , Driver.Resume_operation_checkpoint
+      , resume_chat_operation
       , [ "only" ]
       , fun ~save _ ->
           save Agent_core.Agent.After_assistant_collected Wrote;
           bad_gateway )
     ; ( "the tool-results save failed"
-      , Driver.Resume_operation_checkpoint
+      , resume_chat_operation
       , [ "only" ]
       , fun ~save _ ->
           save Agent_core.Agent.After_tool_results_appended Write_failed;
@@ -4177,7 +4188,7 @@ let test_no_same_path_hint_unless_every_condition_holds () =
     (* The store's stale no-op: the sink answered [Ok ()] and the canonical
        checkpoint the operation would resume from was left as it was. *)
     ; ( "the tool-results write was skipped as stale"
-      , Driver.Resume_operation_checkpoint
+      , resume_chat_operation
       , [ "only" ]
       , fun ~save _ ->
           save Agent_core.Agent.After_tool_results_appended Wrote_nothing;
@@ -4189,13 +4200,13 @@ let test_no_same_path_hint_unless_every_condition_holds () =
           save Agent_core.Agent.After_tool_results_appended Wrote;
           bad_gateway )
     ; ( "a failure that waiting does not change"
-      , Driver.Resume_operation_checkpoint
+      , resume_chat_operation
       , [ "only" ]
       , fun ~save _ ->
           save Agent_core.Agent.After_context_injection Wrote;
           Agent_core.Error.Api (Agent_core.Retry.NotFound { message = "no such model" }) )
     ; ( "an earlier candidate overflowed"
-      , Driver.Resume_operation_checkpoint
+      , resume_chat_operation
       , [ "wide"; "narrow" ]
       , fun ~save candidate ->
           match candidate with

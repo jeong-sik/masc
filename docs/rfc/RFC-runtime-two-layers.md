@@ -49,7 +49,18 @@ implementation_prs: []
 
 층이 많아서 불편한 것이 아니라, **같은 사실이 여러 곳에 적히고 어느 쪽이 이기는지 배포자가 알 수 없다.**
 
-**주소가 두 곳.** 9개 provider 중 6개가 카탈로그와 `runtime.toml` 양쪽에 선언돼 있다. 철자만 다르다 — `endpoint`/`protocol` 대 `base_url`/`kind`.
+**주소가 두 곳.** 9개 provider 중 6개가 카탈로그와 `runtime.toml` 양쪽에 주소를 갖는다 — `endpoint` 대 `base_url`. 이건 같은 사실이다.
+
+`protocol` 과 `kind` 는 다르다. 초안에서 같은 사실이라고 적었는데 **틀렸다.** 6개를 하나씩 대조하면 4개만 겹치고 2개는 서로 다른 것을 말한다.
+
+| provider | `protocol` (배포) | `kind` (카탈로그) | |
+|---|---|---|---|
+| deepseek · kimi_coding · openrouter | `openai-compatible-http` | `openai_compat` | 겹침 |
+| ollama | `ollama-http` | `ollama` | 겹침 |
+| **glm-coding** | `openai-compatible-http` | **`glm`** | 모양은 OpenAI 호환, 방언은 GLM |
+| **ollama_cloud** | `openai-compatible-http` | `ollama` (+`openai_compat`) | `protocol` 이 두 wire 중 하나를 고른다 |
+
+`protocol` 은 **요청 모양**이고 `kind` 는 **벤더 방언**이다. 둘은 서로를 결정하지 않는다. `ollama_cloud` 에서는 `protocol` 이 곧 wire 선택이고, 그건 `RFC-one-provider-two-wires` §4.3 이 구현한 `runtime_adapter.ml:244-248` 이 하는 일이다. 그러므로 이 RFC 는 `protocol` 을 없애지 않는다.
 
 **자격증명이 두 곳.** `runtime.toml` 은 `glm-coding` 이 `ZAI_API_KEY` 를 읽는다고 하고, 카탈로그는 `ZAI_CODING_API_KEY` 라고 한다. 지금은 카탈로그가 이긴다. 삭제된 배포 overlay 는 `glm-coding-exact` 라는 가짜 provider 행을 만들어 env 이름만 덮어쓰는 방식으로 이걸 우회하고 있었다.
 
@@ -227,20 +238,47 @@ different account authority.* `claude_code` 라는 라벨에 API 키 기본값�
 (`agy --model gemini-3.7-flash-high`). 옮길 카탈로그가 없는 게 아니라, 옮길 사실이
 카탈로그의 종류가 아니다.
 
+## 구현이 밝힌 것 — 카탈로그가 모르는 endpoint
+
+층을 걷어낸 자리에서 **줄일 수 없는 사실 하나**가 드러났다. 설치 마법사는 provider id 를
+운영자 답의 해시로 만들기 때문에(`setup_vllm_<sha256>`) **어떤 카탈로그 행과도 영원히
+맞지 않는다.** 그 뒤의 모델도 당연히 카탈로그에 없다.
+
+지워진 배포 overlay 는 사실 마법사의 두 번째 출력 파일이었다
+(`runtime_setup_batch.ml` 이 설치마다 `runtime.toml` 과 함께 썼다). 거기에 세 덩어리가
+있었고, 두 층 설계에서 집이 각각 다르다.
+
+| overlay 조각 | 집 |
+|---|---|
+| `[[targets]]` | 바인딩에서 파생한다 |
+| `[[models]]` | `[models.X]` + `[models.X.capabilities]` — 표의 **존재**가 곧 배포의 보증이다 |
+| `[[providers]]` 의 `kind`·`capabilities_base` | `[providers.X] kind` |
+
+그래서 `[providers.X]` 에 `kind` 를 더한다. 카탈로그에 행이 **없을 때만** 읽고, 읽히지
+않을 자리(카탈로그가 이미 답함, `protocol` 이 이미 방언을 정함, 공식 클라이언트)에
+적으면 조용히 무시하지 않고 거절한다. 하나의 값이 방언·capability preset·기본 request
+path 를 모두 정하므로 새 축이 생기지 않는다.
+
+규칙은 모델 쪽과 같은 모양이다 — **카탈로그가 아는 것은 카탈로그가, 모르는 것은 배포가
+말한다.**
+
 ## 남은 것
 
-**하나. 구독 CLI 가 매 부팅마다 거절 목록에 오른다.**
-`exact_output_targets_of_runtimes`(`server_runtime_bootstrap.ml:420`)는 필터 없이
-모든 런타임을 타깃으로 만든다. 구독 CLI 는 `Binding.resolve_exact` 에서
-`Provider_missing` 으로 떨어지고, `Exclude_unbound_targets` 정책이 이를
-`rejected_target_bindings` 에 담아 부팅 로그로 내보낸다
-(`server_runtime_bootstrap.ml:390`). 조용히 사라지지는 않으니 결함은 아니다.
+**하나. 마법사 provider 는 exact-output 타깃이 될 수 없고, 그게 설정 오류처럼 보고된다.**
+구독 CLI 는 걸러냈다(엔드포인트가 없으니 타깃일 수 없다). 남은 건 마법사가 만든 HTTP
+provider 다 — 카탈로그에 영원히 없으므로 `kind` 를 적어도 `Binding.resolve_exact` 가
+`Provider_missing` 으로 떨어뜨리고, 거절 사유가 "카탈로그에 이 provider 가 없다"로
+찍힌다. 사실은 "이 런타임은 exact output 을 하지 않는다"인데 같은 말로 보고된다.
+거르려면 타깃을 만드는 자리에서 카탈로그를 봐야 하는데 그 시점엔 아직 해석 전이라,
+거절 어휘를 나누는 쪽이 맞아 보인다. 이 RFC 는 그것까지 하지 않는다.
 
-다만 거절 사유가 `Target_provider`("카탈로그에 이 provider 가 없다")여서, 설정
-오류와 "이 종류의 런타임은 exact output 을 하지 않는다"가 같은 말로 보고된다.
-`Agent_core` 만 타깃으로 만들면 없어진다. 이 RFC 는 그 한 줄을 포함한다.
+**둘. 기존 설치는 하드컷이다.**
+이 계약 이전에 마법사가 쓴 연결에는 capability 표도 `kind` 도 없다. 업그레이드하면
+부팅이 막힌다. 저장소 규칙대로 호환 리더나 마이그레이션 코드는 만들지 않되, 거절
+문구가 무엇을 선언해야 하는지와 마법사를 다시 돌리면 써준다는 것을 말하도록 고쳤다.
+운영자가 읽고 스스로 빠져나올 수 있는지는 실제로 겪어 봐야 안다.
 
-**둘. 이름.**
+**셋. 이름.**
 `Official_client` 는 *누가 만든 앱인가*를 부르는데, 실제로 갈리는 축은 *턴을 무엇이
 소유하는가*와 *어떤 계정으로 결제되는가*다. variant 이름과 20여 파일에 걸쳐 있어
 리네임 비용이 이득보다 크다. 이 RFC 는 이름을 바꾸지 않는다.

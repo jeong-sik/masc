@@ -325,7 +325,7 @@ related: ["keeper-context-window-in-tokens", "claude-code-context-overflow-bound
 | §7 | 이 RFC 에서 |
 |---|---|
 | 1. 창은 토큰으로 선언한다 | `W` 하나를 쓴다 |
-| 2. 본문 상한은 판정에만 쓴다 | `max-prompt-bytes` 는 씨앗 판정에만 쓴다 |
+| 2. 본문 상한은 판정에만 쓴다 | `max-prompt-bytes` 는 Claude Code 씨앗 판정에만 쓴다. Antigravity 경로에서는 2026-09-18 에 없앴다 |
 | 5. 앞부분 흔들림을 재고 그 이상 늘리지 않는다 | 매 턴 새 세션은 고정부와 씨앗을 매번 다시 쓴다. 지금 resume 턴의 재기록 비율은 0.001 이다. §11 에서 잰다 |
 | 6. 도구 호출과 결과는 같이 남거나 같이 빠진다 | §5.6 이 짝을 id 로 남긴다. 씨앗 자르기는 지금 규칙 그대로다 |
 | 7. 요약하지 않는다 | §5.7 뒤에 `DISABLE_COMPACT=1`. 대화 원문은 체크포인트에 있다 |

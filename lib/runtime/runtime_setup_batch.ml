@@ -194,19 +194,13 @@ let configure_locked ~pending_credentials ~binary ~base ~expected_revision ~spec
   if not (List.for_all (fun id -> List.mem id available) selected) then Error Invalid_selection else
   let added = String.concat "" (List.map (fun (r:Runtime_setup_spec.rendered) -> r.runtime_toml) additions) in
   let overlay_added = String.concat "" (List.map (fun (r:Runtime_setup_spec.rendered) -> r.model_overlay_toml) additions) in
-  (* [runtime.exact_output_lanes] is one region every render speaks for, so
-     concatenating the fragments whole would define the librarian table once
-     per addition and the staged file would not parse. The lane travels beside
-     its fragment; the composition appends the primary's table alone -- the
-     primary is the runtime this selection defaulted to, and a primary the
-     batch did not render leaves the workspace's own lane as it is. *)
-  let lane = match selected with
-    | primary :: _ ->
-      (match List.find_opt (fun (r:Runtime_setup_spec.rendered) -> String.equal r.runtime_id primary) additions with
-       | Some primary_render -> primary_render.Runtime_setup_spec.librarian_lane_toml
-       | None -> "")
-    | [] -> "" in
-  let runtime_text = content first ^ (if added="" then "" else "\n" ^ added ^ lane) in
+  (* Every table a fragment carries is keyed by its own provider hash, so
+     concatenation composes. The shared [runtime.exact_output_lanes] region is
+     not a fragment's to name: the lane setup the batch runs after writing --
+     [Runtime.set_first_run_runtime] through [runtime-default-set
+     --setup-lanes] -- writes every exact-output lane for the selection's
+     primary, one table each, creating or updating it (#36885, #36894). *)
+  let runtime_text = content first ^ (if added="" then "" else "\n" ^ added) in
   let overlay_text = content second ^ overlay_added in
   let* validated = with_stage (fun stage ->
     let _,runtime,overlay = paths stage in

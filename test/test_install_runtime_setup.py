@@ -1209,9 +1209,10 @@ class CompiledRuntimeSetup(unittest.TestCase):
                 self.assertEqual(configured['runtime']['default'],ids[1])
                 self.assertEqual(configured['runtime']['assignments']['imp'],ids[1])
                 self.assertEqual(configured['runtime']['lanes'][ids[1]]['candidates'],[ids[1],ids[0]])
-                # A two-model selection defines the shared librarian table once,
-                # from the default's render: a second definition would make the
-                # file unparseable, so reaching this assert already proves one.
+                # The save's lane setup writes the shared librarian table once,
+                # for the selection's default; a fragment that named the region
+                # would define it per selected model and the file would not
+                # parse, so reaching this assert already proves exactly-once.
                 lane = configured['runtime']['exact_output_lanes']['librarian_exact']
                 self.assertEqual(lane['slots'],[ids[1]])
                 self.assertEqual(lane['cli_slots'],[])
@@ -1220,6 +1221,29 @@ class CompiledRuntimeSetup(unittest.TestCase):
                 self.assertTrue(set(ids) <= {row['id'] for row in inventory['runtimes']})
                 configured = tomllib.loads((config / 'runtime.toml').read_text())
                 self.assertEqual(configured['runtime']['assignments']['imp'],ids[0])
+
+    def test_a_later_save_with_a_new_default_keeps_one_lane_table(self):
+        import tomllib
+        fixture = ROOT / 'scripts/fixtures/release-evidence'
+        with tempfile.TemporaryDirectory(prefix='runtime-second-save-') as tmp:
+            base = Path(tmp)
+            config = base / '.masc/config'
+            config.mkdir(parents=True)
+            for name in ('runtime.toml', 'agent-core-models-overlay.toml'):
+                (config / name).write_bytes((fixture / name).read_bytes())
+            first = spec()
+            id1 = SETUP.render(first, BINARY)[0]
+            env = {k:v for k,v in os.environ.items() if not k.startswith(('MASC_', 'AGENT_CORE_'))}
+            with patch.dict(os.environ,env,clear=True):
+                SETUP.configure_many(BINARY,base,[first],[id1],default_id=id1)
+                second = dict(spec(), model='later-owned-model')
+                id2 = SETUP.render(second, BINARY)[0]
+                SETUP.configure_many(BINARY,base,[second,first],[id2,id1],default_id=id2)
+                text = (config / 'runtime.toml').read_text()
+                self.assertEqual(text.count('librarian_exact'),1)
+                configured = tomllib.loads(text)
+                self.assertEqual(configured['runtime']['default'],id2)
+                self.assertEqual(configured['runtime']['exact_output_lanes']['librarian_exact']['slots'],[id2])
 
     def test_real_validator_accepts_each_transport_and_reuses_identical_connection(self):
         fixture = ROOT / 'scripts/fixtures/release-evidence'

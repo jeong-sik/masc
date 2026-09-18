@@ -11,10 +11,7 @@ let test_existing_installer_contract () =
       (row |> member "runtime_toml" |> to_string) rendered.runtime_toml;
     Alcotest.check Alcotest.string "same capability/provider/target declarations"
       (row |> member "model_overlay_toml" |> to_string) rendered.model_overlay_toml;
-    Alcotest.check Alcotest.string "same librarian lane table"
-      (row |> member "librarian_lane_toml" |> to_string) rendered.librarian_lane_toml;
-    let whole = "[runtime]\ndefault = " ^ Yojson.Safe.to_string (`String rendered.runtime_id)
-      ^ "\n" ^ rendered.runtime_toml ^ rendered.librarian_lane_toml in
+    let whole = "[runtime]\ndefault = " ^ Yojson.Safe.to_string (`String rendered.runtime_id) ^ "\n" ^ rendered.runtime_toml in
     match Runtime_toml.parse_string whole with
     | Ok _ -> () | Error _ -> Alcotest.fail "rendered fragment is not native runtime TOML") rows
 let test_rejects_invalid_transport_claims () =
@@ -46,18 +43,17 @@ let test_native_fractional_identity () =
     shortest.runtime_id roundtrip.runtime_id;
   Alcotest.check Alcotest.string "equivalent number renders the same configuration"
     shortest.runtime_toml roundtrip.runtime_toml;
-  Alcotest.check Alcotest.string "equivalent number renders the same librarian lane"
-    shortest.librarian_lane_toml roundtrip.librarian_lane_toml;
-  let whole = "[runtime]\ndefault = " ^ Yojson.Safe.to_string (`String shortest.runtime_id)
-    ^ "\n" ^ shortest.runtime_toml ^ shortest.librarian_lane_toml in
+  let whole = "[runtime]\ndefault = " ^ Yojson.Safe.to_string (`String shortest.runtime_id) ^ "\n" ^ shortest.runtime_toml in
   Alcotest.check Alcotest.bool "native fractional output parses as configuration"
     true (Result.is_ok (Runtime_toml.parse_string whole))
-(* A workspace whose librarian_exact lane has no slot boots with one WARN and
-   curates nothing, and setup is the only place that knows which runtime this
-   machine actually has. An official client is admitted by its runtime id and
-   an HTTP runtime by its overlay target id; both are the runtime_id here, so
-   what changes between the two is which key carries it. *)
-let test_setup_declares_the_librarian_lane () =
+(* The librarian lane is declared by the save's lane setup --
+   [Runtime.set_first_run_runtime] walks every exact-output lane for the
+   selection's primary -- never by a rendered fragment. A fragment that named
+   the shared [runtime.exact_output_lanes] region would define it once per
+   selected model, and the concatenated file would not parse (#36885, #36894).
+   Both transports are pinned because the lane's slot key differs between
+   them, which is the writer's decision to make, not the fragment's. *)
+let test_a_fragment_names_no_shared_lane_region () =
   let render input =
     match Runtime_setup_spec.of_json (Yojson.Safe.from_string input) with
     | Ok spec -> Runtime_setup_spec.render spec
@@ -68,35 +64,23 @@ let test_setup_declares_the_librarian_lane () =
     n = 0 || scan 0 in
   let client =
     render {|{"choice":"claude_code","model":"claude-sonnet-5","max_context":200000,"tools":true,"streaming":true}|} in
-  Alcotest.check Alcotest.bool "an official client is declared as a cli slot" true
-    (contains client.librarian_lane_toml
-       ({|"cli_slots" = ["|} ^ client.runtime_id ^ {|"]|}));
-  Alcotest.check Alcotest.bool "and carries no catalog slot" true
-    (contains client.librarian_lane_toml {|"slots" = []|});
-  Alcotest.check Alcotest.bool "the fragment leaves the shared lane region to the composition" true
-    (not (contains client.runtime_toml "librarian_exact"));
   let http =
     render {|{"choice":"ollama","model":"fixture-model","max_context":8192,"tools":true,"streaming":true,"endpoint":"https://fixture.invalid/v1"}|} in
-  Alcotest.check Alcotest.bool "an HTTP runtime is declared as a catalog slot" true
-    (contains http.librarian_lane_toml ({|"slots" = ["|} ^ http.runtime_id ^ {|"]|}));
-  Alcotest.check Alcotest.bool "and carries no cli slot" true
-    (contains http.librarian_lane_toml {|"cli_slots" = []|});
-  Alcotest.check Alcotest.bool "the fragment leaves the shared lane region to the composition" true
-    (not (contains http.runtime_toml "librarian_exact"));
   List.iter
     (fun rendered ->
+       Alcotest.check Alcotest.bool "the fragment names no shared lane region" true
+         (not (contains rendered.Runtime_setup_spec.runtime_toml "exact_output_lanes"));
        let whole =
          "[runtime]\ndefault = "
          ^ Yojson.Safe.to_string (`String rendered.Runtime_setup_spec.runtime_id)
-         ^ "\n" ^ rendered.Runtime_setup_spec.runtime_toml
-         ^ rendered.Runtime_setup_spec.librarian_lane_toml in
+         ^ "\n" ^ rendered.Runtime_setup_spec.runtime_toml in
        match Runtime_toml.parse_string whole with
        | Ok _ -> ()
-       | Error _ -> Alcotest.fail "declared librarian lane is not native runtime TOML")
+       | Error _ -> Alcotest.fail "rendered fragment is not native runtime TOML")
     [ client; http ]
 
 let () = Alcotest.run "native runtime setup spec" ["contract",[
   Alcotest.test_case "representative installer identity and TOML parity" `Quick test_existing_installer_contract;
   Alcotest.test_case "native fractional number identity" `Quick test_native_fractional_identity;
   Alcotest.test_case "typed input rejects incompatible declarations" `Quick test_rejects_invalid_transport_claims;
-  Alcotest.test_case "setup declares the librarian lane" `Quick test_setup_declares_the_librarian_lane]]
+  Alcotest.test_case "a fragment names no shared lane region" `Quick test_a_fragment_names_no_shared_lane_region]]

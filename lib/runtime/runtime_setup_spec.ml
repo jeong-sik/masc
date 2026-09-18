@@ -111,7 +111,7 @@ let unverified_capabilities = ["supports_tool_choice";"supports_required_tool_ch
   "supports_parallel_tool_calls";"supports_reasoning";"supports_response_format_json";"supports_structured_output";
   "supports_multimodal_inputs";"supports_image_input";"supports_audio_input";"supports_video_input";
   "supports_document_input";"supports_prompt_caching";"supports_top_k";"supports_min_p";"supports_seed"]
-type rendered = {runtime_id:string;runtime_toml:string;model_overlay_toml:string;librarian_lane_toml:string}
+type rendered = {runtime_id:string;runtime_toml:string;model_overlay_toml:string}
 let render spec =
   let name = choice_name spec.choice in
   let provider = "setup_" ^ name ^ "_" ^ Digestif.SHA256.(to_hex (digest_string spec.canonical_spec)) in
@@ -143,34 +143,13 @@ let render spec =
     ^ table ~array:true ["providers"] ["id",`String provider;"kind",`String kind;"base_url",`String h.endpoint;
       "request_path",`String h.request_path;"api_key_env",`String h.api_key_env;"capabilities_base",`String base]
     ^ table ~array:true ["targets"] ["id",`String runtime_id;"provider_ref",`String provider;"model_id",`String spec.model] in
-  (* The Librarian is the only thing that retires a memory, and it runs on its
-     own exact-output lane. A workspace that declares no slot for that lane
-     boots with one WARN and curates nothing, so the store the keeper writes
-     grows without anything reading it back -- the failure setup is least able
-     to explain, because every screen looks healthy. The runtime this setup
-     just verified is the one runtime this workspace is known to have, so it
-     is the slot. An HTTP runtime is admitted by its overlay target id and an
-     official client by its runtime id, which are the same string here.
-
-     Declared, not defaulted: the lane is a line an operator can read in
-     runtime.toml and replace with a cheaper model, and a fleet that wants no
-     Librarian empties it rather than discovering the feature was never on.
-
-     The lane travels beside the fragment, not inside it: the table names a
-     region every render speaks for, and the batch that concatenates
-     fragments appends the lane once, from the primary's render, so a
-     multi-model selection cannot define the table twice. *)
-  let librarian_lane =
-    let slots, cli_slots =
-      match spec.transport with
-      | Client _ -> [], [ `String runtime_id ]
-      | Http _ -> [ `String runtime_id ], []
-    in
-    table [ "runtime"; "exact_output_lanes"; "librarian_exact" ]
-      [ "slots", `List slots; "cli_slots", `List cli_slots ]
-  in
-  {runtime_id;runtime_toml=runtime;model_overlay_toml=overlay;librarian_lane_toml=librarian_lane}
+  (* A fragment names no shared region. [runtime.exact_output_lanes] is
+     written by the save's lane setup alone -- [Runtime.set_first_run_runtime]
+     walks every exact-output lane for the selection's primary -- so a
+     fragment that carried the librarian table would define it once per
+     selected model and the concatenated file would not parse (#36885). *)
+  {runtime_id;runtime_toml=runtime;model_overlay_toml=overlay}
 let render_json value = `Assoc ["runtime_id",`String value.runtime_id;"runtime_toml",`String value.runtime_toml;
-  "model_overlay_toml",`String value.model_overlay_toml;"librarian_lane_toml",`String value.librarian_lane_toml]
+  "model_overlay_toml",`String value.model_overlay_toml]
 
 let model_id spec = spec.model

@@ -77,6 +77,19 @@ val load_context_from_checkpoint
   -> base_dir:string
   -> session_context * working_context option
 
+(** What a checkpoint load found ({!Keeper_context_core.checkpoint_load}).
+    [Checkpoint_unread] is any failure other than a missing file: the saved
+    history was not seen and may still hold what it held. *)
+type checkpoint_load = Keeper_context_core.checkpoint_load =
+  | Checkpoint_loaded of working_context
+  | Checkpoint_absent
+  | Checkpoint_unread
+
+val load_context_from_checkpoint_classified
+  :  trace_id:string
+  -> base_dir:string
+  -> session_context * checkpoint_load
+
 val apply_post_turn_lifecycle
   :  config:Workspace.config
   -> meta:keeper_meta

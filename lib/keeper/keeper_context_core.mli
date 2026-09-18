@@ -125,9 +125,25 @@ val save_agent_core_checkpoint_classified :
 val context_of_agent_core_checkpoint :
   Agent_core.Checkpoint.t -> working_context
 
-(** Load the canonical AGENT_CORE checkpoint for a given
-    [trace_id]. Returns the session plus the recovered
-    working_context (or [None] when nothing was found). *)
+(** What a checkpoint load found. *)
+type checkpoint_load =
+  | Checkpoint_loaded of working_context
+  | Checkpoint_absent  (** No checkpoint is saved for the trace. *)
+  | Checkpoint_unread
+      (** The load failed for any other reason: a superseded version, a parse,
+          store, I/O or agent-core error. The saved history was not seen and
+          may still hold what it held. *)
+
+(** Load the canonical AGENT_CORE checkpoint of [trace_id] and say which of the
+    three it was. Every failure is logged and counted here. *)
+val load_context_from_checkpoint_classified :
+  trace_id:string ->
+  base_dir:string ->
+  session_context * checkpoint_load
+
+(** {!load_context_from_checkpoint_classified} for a caller that only needs a
+    context to start from: [None] for [Checkpoint_absent] and for
+    [Checkpoint_unread] alike. *)
 val load_context_from_checkpoint :
   trace_id:string ->
   base_dir:string ->

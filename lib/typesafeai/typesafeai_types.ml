@@ -128,18 +128,18 @@ let answer_of_yojson json =
        (match List.assoc_opt "noul" fields with
         | Some (`Float n) -> Ok (Noul_answer { noul = n })
         | Some (`Int i) -> Ok (Noul_answer { noul = float_of_int i })
-        | _ -> Error "typesafe: noul answer missing numeric 'noul' field")
+        | _ -> Error "typesafeai: noul answer missing numeric 'noul' field")
      | Some (`String "choice") ->
        let* choice =
          match List.assoc_opt "choice" fields with
          | Some (`String s) -> Ok s
-         | _ -> Error "typesafe: choice answer missing 'choice' field"
+         | _ -> Error "typesafeai: choice answer missing 'choice' field"
        in
        let* confidence =
          match List.assoc_opt "confidence" fields with
          | Some (`Float f) -> Ok f
          | Some (`Int i) -> Ok (float_of_int i)
-         | _ -> Error "typesafe: choice answer missing numeric 'confidence' field"
+         | _ -> Error "typesafeai: choice answer missing numeric 'confidence' field"
        in
        let* probabilities =
          match List.assoc_opt "probabilities" fields with
@@ -149,10 +149,10 @@ let answer_of_yojson json =
              | (k, `Float v) :: rest -> parse_probs ((k, v) :: acc) rest
              | (k, `Int v) :: rest -> parse_probs ((k, float_of_int v) :: acc) rest
              | (k, _) :: _ ->
-               Error (Printf.sprintf "typesafe: probability for %S must be a number" k)
+               Error (Printf.sprintf "typesafeai: probability for %S must be a number" k)
            in
            parse_probs [] probs
-         | _ -> Error "typesafe: choice answer missing 'probabilities' map"
+         | _ -> Error "typesafeai: choice answer missing 'probabilities' map"
        in
        Ok (Choice_answer { choice; probabilities; confidence })
      | Some (`String "score") ->
@@ -160,13 +160,13 @@ let answer_of_yojson json =
          match List.assoc_opt "score" fields with
          | Some (`Float f) -> Ok f
          | Some (`Int i) -> Ok (float_of_int i)
-         | _ -> Error "typesafe: score answer missing numeric 'score' field"
+         | _ -> Error "typesafeai: score answer missing numeric 'score' field"
        in
        let* confidence =
          match List.assoc_opt "confidence" fields with
          | Some (`Float f) -> Ok f
          | Some (`Int i) -> Ok (float_of_int i)
-         | _ -> Error "typesafe: score answer missing numeric 'confidence' field"
+         | _ -> Error "typesafeai: score answer missing numeric 'confidence' field"
        in
        let* probabilities =
          match List.assoc_opt "probabilities" fields with
@@ -175,16 +175,16 @@ let answer_of_yojson json =
              | [] -> Ok (List.rev acc)
              | (`Float v) :: rest -> parse_probs (v :: acc) rest
              | (`Int v) :: rest -> parse_probs (float_of_int v :: acc) rest
-             | _ :: _ -> Error "typesafe: score probability must be a number"
+             | _ :: _ -> Error "typesafeai: score probability must be a number"
            in
            parse_probs [] probs
          | _ -> Ok []
        in
        Ok (Score_answer { score; probabilities; confidence })
      | Some (`String other) ->
-       Error (Printf.sprintf "typesafe: unknown answer type %S" other)
-     | _ -> Error "typesafe: answer missing 'type' field")
-  | _ -> Error "typesafe: answer must be a JSON object"
+       Error (Printf.sprintf "typesafeai: unknown answer type %S" other)
+     | _ -> Error "typesafeai: answer missing 'type' field")
+  | _ -> Error "typesafeai: answer must be a JSON object"
 ;;
 
 let usage_of_yojson = function
@@ -209,7 +209,7 @@ let eval_response_of_yojson json =
     let* model =
       match List.assoc_opt "model" fields with
       | Some (`String m) -> Ok m
-      | _ -> Error "typesafe: response missing 'model' string"
+      | _ -> Error "typesafeai: response missing 'model' string"
     in
     let* answers =
       match List.assoc_opt "answers" fields with
@@ -221,7 +221,7 @@ let eval_response_of_yojson json =
             parse_answers ((id, ans) :: acc) rest
         in
         parse_answers [] ans_list
-      | _ -> Error "typesafe: response missing 'answers' map"
+      | _ -> Error "typesafeai: response missing 'answers' map"
     in
     let usage =
       match List.assoc_opt "usage" fields with
@@ -229,5 +229,5 @@ let eval_response_of_yojson json =
       | None -> None
     in
     Ok { model; answers; usage }
-  | _ -> Error "typesafe: response must be a JSON object"
+  | _ -> Error "typesafeai: response must be a JSON object"
 ;;

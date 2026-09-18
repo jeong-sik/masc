@@ -1,8 +1,8 @@
 let ( let* ) = Result.bind
 
 let evaluate
-      ?(endpoint = Typesafe_config.endpoint ())
-      ?(model = Typesafe_config.model ())
+      ?(endpoint = Typesafeai_config.endpoint ())
+      ?(model = Typesafeai_config.model ())
       ?(timeout_sec = 15.0)
       ?clock
       ~api_key
@@ -10,7 +10,7 @@ let evaluate
       ~questions
       ()
   =
-  let request_json = Typesafe_types.request_to_yojson ~model ~state ~questions in
+  let request_json = Typesafeai_types.request_to_yojson ~model ~state ~questions in
   let body = Yojson.Safe.to_string request_json in
   let headers =
     [ "authorization", "Bearer " ^ api_key
@@ -33,13 +33,13 @@ let evaluate
       match Yojson.Safe.from_string response_body with
       | json -> Ok json
       | exception Yojson.Json_error msg ->
-        Error (Printf.sprintf "typesafe: invalid response JSON: %s" msg)
+        Error (Printf.sprintf "typesafeai: invalid response JSON: %s" msg)
     in
-    Typesafe_types.eval_response_of_yojson parsed_json
+    Typesafeai_types.eval_response_of_yojson parsed_json
   else
     Error
       (Printf.sprintf
-         "typesafe: HTTP %d returned by %s: %s"
+         "typesafeai: HTTP %d returned by %s: %s"
          status
          endpoint
          response_body)

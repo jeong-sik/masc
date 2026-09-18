@@ -8,6 +8,6 @@ val evaluate :
   ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   api_key:string ->
   state:Yojson.Safe.t ->
-  questions:(string * Typesafe_types.question) list ->
+  questions:(string * Typesafeai_types.question) list ->
   unit ->
-  (Typesafe_types.eval_response, string) result
+  (Typesafeai_types.eval_response, string) result

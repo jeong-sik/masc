@@ -1,8 +1,8 @@
 (** Unit tests for TypeSafe AI System One integration and Board Attention adapter. *)
 
-module T = Masc.Typesafe_types
-module C = Masc.Typesafe_config
-module B = Masc.Typesafe_board_attention
+module T = Masc.Typesafeai_types
+module C = Masc.Typesafeai_config
+module B = Masc.Typesafeai_board_attention
 module J = Masc.Keeper_board_attention_judgment
 
 let test_request_encoding () =
@@ -103,7 +103,7 @@ let test_config_defaults () =
 ;;
 
 let () =
-  Alcotest.run "typesafe"
+  Alcotest.run "typesafeai"
     [ ( "codecs"
       , [ Alcotest.test_case "request_encoding" `Quick test_request_encoding
         ; Alcotest.test_case "response_decoding" `Quick test_response_decoding

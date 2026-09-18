@@ -22,7 +22,7 @@ Large Language Models (LLMs) are autoregressive text generators trained for conv
   - `Score`: Continuous rating along a defined rubric + confidence.
   - `Noul`: Calibrated true/false probability (0.0 to 1.0).
 
-This specification defines the opt-in integration of TypeSafe AI Jev into MASC's exact-output decision paths.
+This specification defines the opt-in integration of TypeSafe AI Jev into MASC's exact-output decision paths under the `typesafeai` namespace.
 
 ---
 
@@ -31,28 +31,28 @@ This specification defines the opt-in integration of TypeSafe AI Jev into MASC's
 ### 2.1 Opt-in Invariant
 By default, TypeSafe AI is **completely inert and disabled**.
 It activates only when:
-- `MASC_TYPESAFE_ENABLED=true` (or `1`), OR
-- `TYPESAFE_API_KEY` is provided in the environment and `MASC_TYPESAFE_ENABLED` is not explicitly set to `false`.
+- `MASC_TYPESAFEAI_ENABLED=true` (or `1`), OR
+- `TYPESAFEAI_API_KEY` (or legacy `TYPESAFE_API_KEY`) is provided in the environment and `MASC_TYPESAFEAI_ENABLED` is not explicitly set to `false`.
 
 ### 2.2 Transparent Fallback
 When opted in:
-1. MASC attempts the TypeSafe Jev evaluation first.
-2. If the API returns success with a confident decision (`confidence >= 0.5`), the verdict is immediately returned (`slot_id = "typesafe.jev-latest"`).
-3. If the API call fails, times out, or reports low confidence (`confidence < 0.5`), MASC logs the reason and falls back seamlessly to the standard exact-output execution pipeline (`Exact_output.execute_flow_once` via GLM/DeepSeek).
+1. MASC attempts the TypeSafe AI Jev evaluation first.
+2. If the API returns success with a confident decision (`confidence >= 0.5`), the verdict is immediately returned (`slot_id = "typesafeai.jev-latest"`).
+3. If the API call fails, times out, or reports low confidence (`confidence < 0.5`), MASC logs `board_attention_typesafeai_fallback` and falls back seamlessly to the standard exact-output execution pipeline (`Exact_output.execute_flow_once` via GLM/DeepSeek).
 
 ---
 
 ## 3. Modules Added
 
-- `lib/typesafe/typesafe_types.mli` / `.ml`: System One primitives (`Choice`, `Score`, `Noul`), payload builders, and response parsers.
-- `lib/typesafe/typesafe_config.mli` / `.ml`: Opt-in detection and configuration resolution.
-- `lib/typesafe/typesafe_client.mli` / `.ml`: Outbound HTTP client over `Masc_http_client.post_sync`.
-- `lib/typesafe/typesafe_board_attention.mli` / `.ml`: Board attention candidate relevance judgment adapter.
+- `lib/typesafeai/typesafeai_types.mli` / `.ml`: System One primitives (`Choice`, `Score`, `Noul`), payload builders, and response parsers.
+- `lib/typesafeai/typesafeai_config.mli` / `.ml`: Opt-in resolution and configuration defaults.
+- `lib/typesafeai/typesafeai_client.mli` / `.ml`: Outbound HTTP client over `Masc_http_client.post_sync`.
+- `lib/typesafeai/typesafeai_board_attention.mli` / `.ml`: Board attention candidate relevance judgment adapter.
 
 ---
 
 ## 4. Operational Invariants
 
 1. **Closed Sum Types**: All verdicts map directly to OCaml variants (`Relevant | Not_relevant`). No raw string matching is exposed to callers.
-2. **Deterministic Fallback**: Failure of the external TypeSafe endpoint never crashes the worker; it logs `board_attention_typesafe_fallback` and proceeds with the configured exact catalog slots.
-3. **Zero Blast Radius**: Existing tests and pipelines without `TYPESAFE_API_KEY` continue to run unaffected.
+2. **Deterministic Fallback**: Failure of the external TypeSafe AI endpoint never crashes the worker; it logs a fallback event and proceeds with the configured exact catalog slots.
+3. **Zero Blast Radius**: Existing tests and pipelines without `TYPESAFEAI_API_KEY` continue to run completely unaffected.

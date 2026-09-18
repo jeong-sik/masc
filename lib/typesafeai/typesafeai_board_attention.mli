@@ -12,6 +12,6 @@ val judge_candidate :
   material:Keeper_board_attention_candidate.judgment_material ->
   unit ->
   (Keeper_board_attention_judgment.t, string) result
-(** Evaluates a pending candidate using TypeSafe Jev.
+(** Evaluates a pending candidate using TypeSafe AI Jev.
     Returns [Error reason] if the HTTP call fails, JSON parsing fails,
     or confidence is below [confidence_threshold], allowing transparent fallback. *)

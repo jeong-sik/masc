@@ -20,7 +20,7 @@ let make_attention_question candidate =
       )
     ]
   in
-  question_id, Typesafe_types.Choice { instructions; criteria }
+  question_id, Typesafeai_types.Choice { instructions; criteria }
 ;;
 
 let judge_candidate
@@ -38,7 +38,7 @@ let judge_candidate
   in
   let q_id, q = make_attention_question candidate in
   let* response =
-    Typesafe_client.evaluate
+    Typesafeai_client.evaluate
       ?clock
       ~api_key
       ~state
@@ -46,12 +46,12 @@ let judge_candidate
       ()
   in
   match List.assoc_opt q_id response.answers with
-  | Some (Typesafe_types.Choice_answer { choice; confidence; probabilities }) ->
+  | Some (Typesafeai_types.Choice_answer { choice; confidence; probabilities }) ->
     if confidence < confidence_threshold
     then
       Error
         (Printf.sprintf
-           "typesafe: low confidence %.3f < %.3f for candidate %s, requesting fallback"
+           "typesafeai: low confidence %.3f < %.3f for candidate %s, requesting fallback"
            confidence
            confidence_threshold
            candidate.candidate_id)
@@ -67,7 +67,7 @@ let judge_candidate
               Keeper_board_attention_judgment.Relevant
           ; rationale =
               Printf.sprintf
-                "TypeSafe Jev: relevant (confidence=%.2f, %s)"
+                "TypeSafe AI Jev: relevant (confidence=%.2f, %s)"
                 confidence
                 prob_str
           }
@@ -81,17 +81,17 @@ let judge_candidate
               Keeper_board_attention_judgment.Not_relevant
           ; rationale =
               Printf.sprintf
-                "TypeSafe Jev: not_relevant (confidence=%.2f, %s)"
+                "TypeSafe AI Jev: not_relevant (confidence=%.2f, %s)"
                 confidence
                 prob_str
           }
       | other ->
         Error
           (Printf.sprintf
-             "typesafe: unexpected choice %S for board-attention"
+             "typesafeai: unexpected choice %S for board-attention"
              other))
   | Some _ ->
-    Error "typesafe: expected choice answer for relevance question"
+    Error "typesafeai: expected choice answer for relevance question"
   | None ->
-    Error "typesafe: response missing answer for relevance question"
+    Error "typesafeai: response missing answer for relevance question"
 ;;

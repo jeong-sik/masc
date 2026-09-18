@@ -10,8 +10,8 @@
  (deps (alias runtest-test_dashboard_observation_quota)))
 
 (test
- (name test_typesafe)
- (modules test_typesafe)
+ (name test_typesafeai)
+ (modules test_typesafeai)
  (libraries alcotest masc masc_test_deps))
 
 (test

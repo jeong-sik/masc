@@ -60,8 +60,8 @@ media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
 
 # TypeSafe AI (System One Jev) Opt-in Integration
 # Fast (70-100ms), calibrated probabilistic decision models for exact output lanes.
-# Activate by setting MASC_TYPESAFE_ENABLED=true or setting TYPESAFE_API_KEY.
-# When enabled, exact lanes attempt TypeSafe Jev first, with transparent fallback
+# Activate by setting MASC_TYPESAFEAI_ENABLED=true or setting TYPESAFEAI_API_KEY.
+# When enabled, exact lanes attempt TypeSafe AI Jev first, with transparent fallback
 # to the declared slots below.
 
 [runtime.exact_output_lanes.librarian_exact]

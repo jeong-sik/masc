@@ -556,15 +556,15 @@ let execute_current ?cli_runner ?clock ~before_dispatch ~before_advance prepared
          | Ok (slot_id, judgment) -> cli_selected_slot := Some slot_id; Ok judgment
          | Error _ -> Error (Exact_execution_failed []))
       | Http_flow attempt ->
-        let typesafe_judgment_opt =
-          if Typesafe_config.is_enabled ()
+        let typesafeai_judgment_opt =
+          if Typesafeai_config.is_enabled ()
           then
-            match Typesafe_config.api_key () with
+            match Typesafeai_config.api_key () with
             | Some api_key ->
               (match prepared.candidate.status with
                | Keeper_board_attention_candidate.Pending { material; _ } ->
                  (match
-                    Typesafe_board_attention.judge_candidate
+                    Typesafeai_board_attention.judge_candidate
                       ?clock
                       ~api_key
                       ~candidate:prepared.candidate
@@ -579,19 +579,19 @@ let execute_current ?cli_runner ?clock ~before_dispatch ~before_advance prepared
                     in
                     let judgment =
                       { Keeper_board_attention_candidate.verdict
-                      ; slot_id = "typesafe.jev-latest"
+                      ; slot_id = "typesafeai.jev-latest"
                       ; source = Keeper_board_attention_candidate.Cli_lane_slot
                       ; judged_at = now
                       }
                     in
                     Log.Keeper.info
-                      "board_attention_typesafe_jev_judged keeper=%s candidate=%s"
+                      "board_attention_typesafeai_jev_judged keeper=%s candidate=%s"
                       prepared.candidate.keeper_name
                       prepared.candidate.candidate_id;
                     Some judgment
                   | Error reason ->
                     Log.Keeper.info
-                      "board_attention_typesafe_fallback keeper=%s candidate=%s reason=%s"
+                      "board_attention_typesafeai_fallback keeper=%s candidate=%s reason=%s"
                       prepared.candidate.keeper_name
                       prepared.candidate.candidate_id
                       reason;
@@ -600,7 +600,7 @@ let execute_current ?cli_runner ?clock ~before_dispatch ~before_advance prepared
             | None -> None
           else None
         in
-        match typesafe_judgment_opt with
+        match typesafeai_judgment_opt with
         | Some judgment -> Ok judgment
         | None ->
         match

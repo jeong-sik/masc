@@ -644,10 +644,9 @@ supports_reasoning = true
 # 2026-08-15: this row declared Ollama's native /api/chat think toggle
 # (ollama_think) even though it is served through ollama_cloud's OpenAI-compat
 # /v1/chat/completions, which cannot encode it — same defect as qwen3.5:397b
-# (PR #28748), already confirmed and corrected for this exact model in the live
-# overlay (~/me/.masc/config/agent-core-models-overlay.toml, 2026-07-20 audit,
-# 2026-08-04 live probe: message keys ['role','content','reasoning']). This row
-# just carried the buggy default forward in the embedded catalog. Closes #28749.
+# (PR #28748). Probed live 2026-08-04: the message keys came back
+# ['role','content','reasoning']. This row had carried the buggy default
+# forward. Closes #28749.
 reasoning_streaming_format = "delta:reasoning"
 # DeepSeek function calling with thinking requires the intermediate
 # assistant's reasoning to be passed back on every request of a tool-call
@@ -1171,8 +1170,8 @@ max_context_tokens = 262144
 supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
-# 2026-08-05 live probe of this alias (agent-core-models-overlay.toml comment):
-# the response carries reasoning in the typed "reasoning" field (message keys
+# Probed live 2026-08-05: this alias carries reasoning in the typed
+# "reasoning" field (message keys
 # ['content','reasoning','role']), not "reasoning_content". Declare what the
 # wire actually sends; the sibling ":397b" rows declare the same member.
 reasoning_streaming_format = "delta:reasoning"
@@ -3423,11 +3422,6 @@ supports_parallel_tool_calls = false
 # unchanged a required-tool turn fails the request instead of degrading.
 supports_required_tool_choice = false
 supports_named_tool_choice = false
-
-# ── Rows a deployment carried in its overlay until 2026-09-18 ────────────────
-# Each of these was written in a deployment's agent-core-models-overlay.toml
-# because this catalog had no row for the pair. A second copy of a model fact
-# is a second thing to keep in step, so the fact lives here now.
 
 # Z.AI coding plan. Window 1M (docs.z.ai). The 131072 output ceiling is the
 # value the endpoint named when it refused an out-of-range max_tokens with

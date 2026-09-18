@@ -60,6 +60,26 @@ type lane_terminal_error =
   }
 
 val deferred_runtime_ids : deferred_runtime_lane -> string list
+
+(** How the lane that dispatched a turn continues after the turn fails
+    (RFC last-path-resumes-after-progress §3.5).
+    - [Resume_operation_checkpoint]: the chat lane. The named operation resumes
+      from its latest saved checkpoint, so tool results it saved are not run
+      again. It carries the operation because only a lane that has one can
+      resume: the heartbeat lane runs no chat operation, and a cycle that
+      resumed a path this way would never end (§3.5). The driver reports the
+      operation when it defers one to the path it failed on.
+    - [Restart_cycle]: the heartbeat lane. The next cycle is a new turn. *)
+type failure_continuation =
+  | Resume_operation_checkpoint of { operation_id : Keeper_operation_id.t }
+  | Restart_cycle
+
+(** Where a lane walk hands the suffix a failed turn defers to, and how that
+    lane continues. A walk without one defers nothing. *)
+type runtime_retry_deferral =
+  { continuation : failure_continuation
+  ; on_deferred : deferred_runtime_lane -> unit
+  }
 val quota_ordered_deferred_runtime_lane :
   now:float -> deferred_runtime_lane -> deferred_runtime_lane
 (** Apply active quota-window ordering to a frozen deferred suffix while
@@ -105,8 +125,10 @@ val deferred_lane_rest : now:float -> deferred_runtime_lane -> walk_rest
     Nothing else reorders it: a success leaves no preference behind, so the
     cycle after a failover starts from the declared head again. The walk may
     still replace the head for an input modality it cannot take (RFC-0265);
-    a turn that failed and deferred its input walks its remaining candidates
-    instead. *)
+    a turn that failed and deferred its input walks the suffix it deferred
+    instead: the candidates after the one that failed, or, for a chat
+    operation whose last candidate failed after saving tool results, that
+    candidate again. *)
 type walk_order =
   { lane_id : string
   ; declared : string list
@@ -281,12 +303,14 @@ val run_named :
     (measurement:Turn_record.model_input_measurement
      -> Runtime_model_input_tail_window.window_observation
      -> unit) ->
-  ?carried_front_seed:(unit -> Keeper_carried_front.seed option) ->
+  ?carried_front_seed:(unit -> Keeper_carried_front.seed_read) ->
   ?runtime_manifest_context:Keeper_runtime_manifest.turn_context ->
   ?runtime_manifest_append:(Keeper_runtime_manifest.t -> unit) ->
   ?deferred_runtime_lane:deferred_runtime_lane ->
   ?on_runtime_attempt:(runtime_attempt -> unit) ->
-  ?on_runtime_retry_deferred:(deferred_runtime_lane -> unit) ->
+  ?runtime_retry_deferral:runtime_retry_deferral ->
+  ?checkpoint_progress:
+    Keeper_turn_driver_try_provider.checkpoint_progress Atomic.t ->
   ?on_runtime_attempt_error:
     (runtime_id:string ->
     attempt:int ->
@@ -487,7 +511,8 @@ module For_testing : sig
       (runtime_id:string -> attempt:int -> Agent_core.Error.t -> bool) ->
     ?allow_accept_no_progress_retry:
       (runtime_id:string -> attempt:int -> Agent_core.Error.t -> bool) ->
-    ?on_retry_deferred:(deferred_runtime_lane -> unit) ->
+    ?retry_deferral:runtime_retry_deferral ->
+    ?tool_results_saved:(unit -> bool) ->
     ?on_attempt_error:
       (runtime_id:string ->
       attempt:int ->
@@ -517,11 +542,31 @@ module For_testing : sig
       * Keeper_attempt_dispatch.t) ->
     'candidate list ->
     ('result, Agent_core.Error.t) result
+  (** [tool_results_saved] reads whether the attempt that just failed saved
+      tool results; without it the walk reads [false]. A [retry_deferral] with
+      [Resume_operation_checkpoint] defers the last candidate to itself only
+      when it reads [true] and the failure's route passes with time. *)
 
   val observe_checkpoint_stage :
-    bool Atomic.t -> Agent_core.Agent.checkpoint_stage -> unit
+    Keeper_turn_driver_try_provider.checkpoint_progress Atomic.t ->
+    Agent_core.Agent.checkpoint_stage ->
+    unit
 
-  val same_run_retry_allowed : bool Atomic.t -> bool
+  val observing_checkpoint_sink :
+    Keeper_turn_driver_try_provider.checkpoint_progress Atomic.t ->
+    Agent_core.Agent.checkpoint_sink option ->
+    Agent_core.Agent.checkpoint_sink
+
+  val observe_checkpoint_saved :
+    Keeper_turn_driver_try_provider.checkpoint_progress Atomic.t ->
+    Agent_core.Agent.checkpoint_stage ->
+    unit
+
+  val same_run_retry_allowed :
+    Keeper_turn_driver_try_provider.checkpoint_progress Atomic.t -> bool
+
+  val tool_results_saved :
+    Keeper_turn_driver_try_provider.checkpoint_progress Atomic.t -> bool
 
   val accept_no_progress_should_try_next : Agent_core.Error.t -> bool
 

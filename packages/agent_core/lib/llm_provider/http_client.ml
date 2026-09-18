@@ -119,6 +119,7 @@ type provider_failure_kind =
       ; kind : provider_wire_error_kind
       }
   | Provider_reported_error of { error_type : string option }
+  | Provider_interrupted
   | Response_body_too_large of { limit_bytes : int }
   (* agent-core boundary: the provider returned a 200 with no deliverable content (no
      thinking, text, or tool_calls). Distinct from a parse error. Preserve the
@@ -216,6 +217,7 @@ let provider_failure_kind_to_string = function
   | Provider_reported_error { error_type = Some error_type } ->
     Printf.sprintf "provider_reported_error:%s" error_type
   | Provider_reported_error { error_type = None } -> "provider_reported_error"
+  | Provider_interrupted -> "provider_interrupted"
   | Response_body_too_large { limit_bytes } ->
     Printf.sprintf "response_body_too_large:%d" limit_bytes
   | Empty_completion { stop_reason } ->

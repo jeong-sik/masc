@@ -534,6 +534,7 @@ let test_accumulate_keeps_declared_status () =
        { message = "Provider disconnected"
        ; error_type = None
        ; provider_status = Some { status = 502; error_body }
+       ; report = Provider_stated
        ; raw = {|{"error":{"code":502,"message":"Provider disconnected"},"choices":[]}|}
        });
   match Streaming.finalize_stream_acc acc with
@@ -554,7 +555,13 @@ let test_accumulate_ignores_ping () =
   Streaming.accumulate_event acc Ping;
   Streaming.accumulate_event
     acc
-    (SSEError { message = "oops"; error_type = None; provider_status = None; raw = "oops" });
+    (SSEError
+       { message = "oops"
+       ; error_type = None
+       ; provider_status = None
+       ; report = Provider_stated
+       ; raw = "oops"
+       });
   Streaming.accumulate_event acc MessageStop;
   Streaming.accumulate_event acc (ContentBlockStop { index = 0 });
   Alcotest.(check bool)

@@ -173,7 +173,14 @@ let parse_sse_event event_type data_str =
            | None -> data_str
          in
          let error_type = err |> member "type" |> to_string_option in
-         Some (SSEError { message; error_type; provider_status = None; raw = data_str })
+         Some
+           (SSEError
+              { message
+              ; error_type
+              ; provider_status = None
+              ; report = Types.Provider_stated
+              ; raw = data_str
+              })
        | other -> Some (SSEUnknownEventType { event_type = other; raw = data_str }))
   with
   | Yojson.Safe.Util.Type_error (msg, _) ->
@@ -393,6 +400,7 @@ type openai_sse_parse_result =
       { message : string
       ; error_type : string option
       ; provider_status : Types.provider_status option
+      ; report : Types.provider_report
       ; raw : string
       }
   | Openai_parse_failed of openai_chunk_parse_error
@@ -616,6 +624,7 @@ let openai_provider_error_of_envelope ~raw (envelope : Openai_error_envelope.t) 
     { message = envelope.message
     ; error_type = envelope.error_type
     ; provider_status = envelope.provider_status
+    ; report = envelope.report
     ; raw
     }
 ;;
@@ -1464,8 +1473,8 @@ let openai_sse_parse_result_to_events state = function
   | Openai_chunk chunk -> openai_chunk_to_events state chunk
   | Openai_done -> [ MessageStop ], None
   | Openai_empty -> [], None
-  | Openai_provider_error { message; error_type; provider_status; raw } ->
-    [ SSEError { message; error_type; provider_status; raw } ], None
+  | Openai_provider_error { message; error_type; provider_status; report; raw } ->
+    [ SSEError { message; error_type; provider_status; report; raw } ], None
   | Openai_parse_failed { reason; raw } -> [ SSEParseFailed { reason; raw } ], None
   | Openai_undeclared_reasoning_member { declared; member; raw } ->
     (* The stream fails on the chunk that exposed the row: the raw payload is
@@ -2149,6 +2158,7 @@ let responses_sse_to_events (state : openai_stream_state) event_type data_str
               { message = responses_error_message json
               ; error_type = responses_error_type json
               ; provider_status = None
+              ; report = Types.Provider_stated
               ; raw = data_str
               })
        | "response.in_progress"

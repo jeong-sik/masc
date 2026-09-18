@@ -9,8 +9,11 @@
     until the next usage, and the newest block is never evicted, so a request
     always carries the turn it is in.
 
-    Two triggers, one walk. After a response, the ledger's total against the
-    high-water mark. On a provider refusal, the walk runs regardless of the
+    Two triggers, one walk. At a turn boundary, before the candidate's first
+    composition of the turn, the ledger's total against the high-water mark:
+    every request of the turn then composes from one front, and the prefix
+    the provider cached for the turn's first request still matches the
+    next. On a provider refusal, the walk runs at once regardless of the
     total, and without marks it takes exactly one block.
 
     The caller applies an [Evicted] step to the ledger with
@@ -35,12 +38,16 @@ type step =
       ; evicted_tokens : int option
             (** Known when every evicted block was measured. *)
       ; first_atom : int  (** The oldest carried atom after the eviction. *)
+      ; front_digest : string
+            (** The opening-message digest of [first_atom], from the block
+                the walk stopped at: what {!Keeper_model_input_ledger.move_front}
+                records the moved front with. *)
       ; projected_total : int option
             (** The last measured total minus the evicted tokens, when both
                 were known; the next usage replaces it either way. *)
       }
 
-val after_response
+val at_turn_boundary
   :  marks:Runtime_schema.context_marks
   -> Keeper_model_input_ledger.t
   -> step

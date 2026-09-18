@@ -19,8 +19,8 @@ let emit_stream_event on_event evt =
 ;;
 
 let stream_error_event = function
-  | Types.Stream_provider_error { message; error_type; provider_status; raw } ->
-    Types.SSEError { message; error_type; provider_status; raw }
+  | Types.Stream_provider_error { message; error_type; provider_status; report; raw } ->
+    Types.SSEError { message; error_type; provider_status; report; raw }
   | Types.Stream_parse_failed { reason; raw } ->
     Types.SSEParseFailed { reason; raw }
   | Types.Stream_ndjson_parse_failed { reason; raw } ->

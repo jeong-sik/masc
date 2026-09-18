@@ -24,12 +24,13 @@ type parse_error =
       { message : string
       ; error_type : string option
       ; provider_status : Types.provider_status option
+      ; report : Types.provider_report
       }
   | Unreadable_response of string
   | Empty_completion of empty_completion
 
 let parse_error_to_string = function
-  | Provider_error { message; error_type = _; provider_status = _ } -> message
+  | Provider_error { message; error_type = _; provider_status = _; report = _ } -> message
   | Unreadable_response message -> message
   | Empty_completion { stop_reason; model; _ } ->
     Printf.sprintf
@@ -322,6 +323,7 @@ let provider_error (envelope : Openai_error_envelope.t) =
     { message = envelope.message
     ; error_type = envelope.error_type
     ; provider_status = envelope.provider_status
+    ; report = envelope.report
     }
 ;;
 
@@ -473,6 +475,16 @@ let%test "a top-level error that is neither an object nor a string is unreadable
   | Error _ | Ok _ -> false
 ;;
 
+let%test "an error finish with no object says the generation was interrupted" =
+  match
+    parse_openai_response_result
+      {|{"id":"c","model":"m","choices":[{"index":0,"finish_reason":"error","message":{"content":"partial"}}]}|}
+  with
+  | Error (Provider_error { report = Types.Unstated_errored_choice; provider_status = None; _ })
+    -> true
+  | Error _ | Ok _ -> false
+;;
+
 let%test "an error finish carries the envelope's type and provider condition" =
   match
     parse_openai_response_result
@@ -488,6 +500,7 @@ let%test "an error finish carries the envelope's type and provider condition" =
               ; error_body =
                   {|{"error":{"code":503,"message":"overloaded","metadata":{"error_type":"provider_overloaded"}}}|}
               }
+        ; report = Types.Provider_stated
         }) -> true
   | Error _ | Ok _ -> false
 ;;

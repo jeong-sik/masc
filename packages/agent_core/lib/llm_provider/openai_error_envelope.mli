@@ -38,6 +38,11 @@ type t =
         shapes are read; only the first can declare a status.
         (https://openrouter.ai/docs/api_reference/errors-and-debugging.md,
         https://openrouter.ai/docs/api_reference/streaming.md) *)
+  ; report : Types.provider_report
+    (** Whether an [error] member arrived at all. The values above are read
+        from one; a choice that finished with [error] and carried none has
+        nothing to read, and says so here rather than through an absent
+        [error_type], which an object without a [type] also produces. *)
   }
 
 (** An [error] member's value: an object, or a bare message string

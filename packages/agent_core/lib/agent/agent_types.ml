@@ -191,6 +191,54 @@ let update_state t f =
   Eio.Mutex.use_rw ~protect:true t.mu (fun () -> t.state <- f t.state)
 ;;
 
+let rank_in order name =
+  let rec find index = function
+    | [] -> None
+    | candidate :: rest ->
+      if String.equal candidate name then Some index else find (index + 1) rest
+  in
+  find 0 order
+;;
+
+(* Each ranked tool goes right after the last held tool [order] ranks before
+   it; with none, right before the first it ranks after; with neither, at the
+   end. An unranked tool goes at the end. Tools already held never move. *)
+let insert_ranked ~order held fresh =
+  let rank (tool : Tool.t) = rank_in order tool.schema.name in
+  let insert tools (tool : Tool.t) =
+    match rank tool with
+    | None -> tools @ [ tool ]
+    | Some position ->
+      let indexed = List.mapi (fun index held -> index, rank held) tools in
+      let last_before =
+        List.fold_left
+          (fun found (index, held_rank) ->
+             match held_rank with
+             | Some held_position when held_position < position -> Some index
+             | Some _ | None -> found)
+          None
+          indexed
+      in
+      let first_after =
+        List.find_map
+          (fun (index, held_rank) ->
+             match held_rank with
+             | Some held_position when held_position > position -> Some index
+             | Some _ | None -> None)
+          indexed
+      in
+      let at =
+        match last_before, first_after with
+        | Some index, (Some _ | None) -> index + 1
+        | None, Some index -> index
+        | None, None -> List.length tools
+      in
+      List.filteri (fun index _ -> index < at) tools
+      @ (tool :: List.filteri (fun index _ -> index >= at) tools)
+  in
+  List.fold_left insert held fresh
+;;
+
 (** Widen the callable tool set, under the same mutex as [state].
 
     Only widening is offered. A turn that removed a tool would leave any
@@ -206,8 +254,14 @@ let update_state t f =
     — the model would have called the old definition and been answered by the
     new one. Filtering inside the critical section is what makes that
     impossible rather than unlikely: [Tool_set.mem] is read against the same
-    set the write publishes. *)
-let extend_tools t added =
+    set the write publishes.
+
+    Where a widened tool goes matters to a provider that caches the request's
+    tool array as a prefix: the array a caller composes for the next turn puts
+    it in its own order, and one appended here at the end differs from that
+    array, so the turn boundary changes the prefix a second time. [order]
+    names that order; see [insert_ranked]. *)
+let extend_tools ?order t added =
   match added with
   | [] -> ()
   | _ :: _ ->
@@ -217,9 +271,15 @@ let extend_tools t added =
           (fun (tool : Tool.t) -> not (Tool_set.mem tool.schema.name t.tools))
           added
       in
-      match fresh with
-      | [] -> ()
-      | _ :: _ -> t.tools <- Tool_set.merge t.tools (Tool_set.of_list fresh))
+      match fresh, order with
+      | [], (Some _ | None) -> ()
+      | _ :: _, None -> t.tools <- Tool_set.merge t.tools (Tool_set.of_list fresh)
+      | _ :: _, Some order ->
+        (* Deduplicated first, so a name given twice keeps its last tool as
+           [Tool_set.merge] would. *)
+        let fresh = Tool_set.to_list (Tool_set.of_list fresh) in
+        t.tools <-
+          Tool_set.of_list (insert_ranked ~order (Tool_set.to_list t.tools) fresh))
 ;;
 
 let description t = t.options.description

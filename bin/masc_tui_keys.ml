@@ -1093,18 +1093,40 @@ let footer_hints_git_diff =
 (* The Memory fact browser drawn over the health table. Its own row because
    the keys change with it: the cursor moves rows instead of scrolling the
    table, [c] narrows by the categories the loaded store holds, and Esc
-   closes the browser rather than leaving the surface. *)
-let footer_hints_memory_facts =
-  hints_of_bindings
-    ([ b Navigate "j/k" "move"
-     ; b Act "c / C" "category" ~help:"cycle category filter (forward / backward)"
-     ; b Act "s" "sort" ~help:"cycle sort (recency, last retrieved, retrieved count, category, claim)"
-     ; b Act "a / A" "all fleet" ~help:"switch to consolidated memory across entire fleet"
-     ; b Search "/" "filter" ~help:"live text filter / search"
-     ; b Search "n / N" "next / previous match"
-     ; b Act "Esc" "close / clear" ~help:"clear filter or exit to health table"
-     ]
-     @ row_list_edges @ listing_meta)
+   closes the browser rather than leaving the surface.
+
+   The footer row and the sheet read this one list. The keys are not the
+   health row's under these names -- Enter opens the reading, s reorders
+   instead of pausing a keeper -- so a reader who has not pressed them learns
+   them only from [?], which is what [?] answers. *)
+let bindings_memory_facts =
+  [ b Navigate "j/k" "move"
+  ; b Act "Enter" "detail"
+      ~help:"read the whole fact in a wide overlay that owns the terminal"
+  ; b Act "c / C" "category" ~help:"cycle category filter (forward / backward)"
+  ; b Act "s" "sort" ~help:"cycle sort (recency, last retrieved, retrieved count, category, claim)"
+  ; b Act "a / A" "all fleet" ~help:"switch to consolidated memory across entire fleet"
+  ; b Search "/" "filter" ~help:"live text filter / search"
+  ; b Search "n / N" "next / previous match"
+  ; b Act "Esc" "close / clear" ~help:"clear filter or exit to health table"
+  ]
+  @ row_list_edges @ listing_meta
+
+let footer_hints_memory_facts = hints_of_bindings bindings_memory_facts
+
+(* The reading the browser's Enter opens. One fact scrolls under the cursor
+   instead of the cursor moving rows, so it owns page and edge keys the
+   browser row has none of. The window marker it leads with is not a key, and
+   the renderer adds it. *)
+let bindings_memory_fact_detail =
+  [ b Navigate "j/k" "scroll"
+  ; b Navigate "PgUp/PgDn" "page"
+  ; b Navigate "g / G" "top/bottom"
+      ~help:"jump to the first or last line of the fact"
+  ; b Act "Esc" "close" ~help:"return to the fact list"
+  ]
+
+let memory_fact_detail_hints = hints_of_bindings bindings_memory_fact_detail
 
 (* One section per surface family; the strip's spelling names it. Keepers
    sub-modes collapse into the two sections an operator thinks in. *)
@@ -1263,6 +1285,17 @@ let help_sections ?current () =
                              help ))
                       (entries (keeper_detail_tab_bindings tab)))
                  Masc_tui_types.keeper_detail_tabs
+           (* The fact browser and the reading its Enter opens have the same
+              problem the tabs above have: keys the surface list cannot hold,
+              on screens the reader is standing on. The Memory section is
+              where they look, so both rows go there with the screen named. *)
+           | Memory ->
+               List.map
+                 (fun (key, help) -> (key, "in the facts browser: " ^ help))
+                 (entries bindings_memory_facts)
+               @ List.map
+                   (fun (key, help) -> (key, "in the fact detail: " ^ help))
+                   (entries bindings_memory_fact_detail)
            | _ -> []
          in
          (surface, (title, entries (sheet_bindings surface) @ tab_entries)))

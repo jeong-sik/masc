@@ -444,6 +444,19 @@ let test_exact_cut_when_no_quantized_cut_fits () =
   fits_budget ~capacity_bytes ~reserved_bytes:0 projected
 ;;
 
+(* [Window.observe] over [history]'s own positions. A projection that carried
+   atoms always names its front, so [None] here is a failure. *)
+let observed_window ~history ~history_atom_count projection =
+  match
+    Window.observe
+      ~digest_at:(Window.atom_opening_digest history)
+      ~history_atom_count
+      projection
+  with
+  | Some observed -> observed
+  | None -> Alcotest.fail "a projection that carried atoms reported no window"
+;;
+
 (* The keeper's own history is the thing being reported on, so the assertion is
    stated against the input the caller handed in — not against a number the
    projection also produced. A share computed only from the transmitted list
@@ -464,7 +477,7 @@ let test_projection_reports_how_much_history_it_carried () =
       Alcotest.failf "reported cut: %s" (Window.budget_error_to_string error)
   in
   let observed =
-    Window.observe ~history_atom_count:projected.Window.atom_count projected
+    observed_window ~history ~history_atom_count:projected.Window.atom_count projected
   in
   Alcotest.(check int)
     "total is the history the caller handed in"
@@ -498,7 +511,7 @@ let test_uncut_history_reports_everything_carried () =
       Alcotest.failf "uncut: %s" (Window.budget_error_to_string error)
   in
   let observed =
-    Window.observe ~history_atom_count:projected.Window.atom_count projected
+    observed_window ~history ~history_atom_count:projected.Window.atom_count projected
   in
   Alcotest.(check int)
     "nothing was dropped" observed.Window.total_atoms observed.Window.transmitted_atoms;
@@ -534,8 +547,14 @@ let test_chained_cut_keeps_the_whole_history_as_denominator () =
       first.Window.messages
   in
   let observed =
-    Window.observe ~history_atom_count:first.Window.atom_count second
+    observed_window ~history ~history_atom_count:first.Window.atom_count second
   in
+  Alcotest.(check (option string))
+    "the front is named by the whole history's atom at total - transmitted"
+    (Window.atom_opening_digest
+       history
+       (observed.Window.total_atoms - observed.Window.transmitted_atoms))
+    (Some observed.Window.front_atom_digest);
   Alcotest.(check int)
     "denominator is the whole history, not the survivors"
     (count_atoms history)
@@ -938,6 +957,55 @@ let test_from_atom_view_past_the_newest_atom_keeps_it () =
   Alcotest.(check int) "a negative front is the whole history" 0 projection.Window.dropped_atoms
 ;;
 
+(* A position is the atom index plus the message that opens the atom. The
+   opener is the first message [annotate] gives the index: pinned context is
+   no atom and shifts nothing, and a tool result joins the assistant's atom
+   without becoming its opener. *)
+let test_opening_digest_names_the_first_message_of_each_atom () =
+  let history = [ user 0; extra_context; assistant 1; tool 1 ] in
+  let digest_at = Window.atom_opening_digest history in
+  let alone message = Window.atom_opening_digest [ message ] 0 in
+  Alcotest.(check (option string)) "atom 0 opens with the user message" (alone (user 0))
+    (digest_at 0);
+  Alcotest.(check (option string))
+    "atom 1 opens with the assistant, past the pinned context" (alone (assistant 1))
+    (digest_at 1);
+  Alcotest.(check bool) "different messages, different digests" true
+    (digest_at 0 <> digest_at 1);
+  let joined = Window.atom_opening_digest (history @ [ tool 2 ]) in
+  Alcotest.(check (option string)) "a later tool result leaves atom 1's opener" (digest_at 1)
+    (joined 1);
+  Alcotest.(check (option string)) "no atom 2" None (digest_at 2);
+  Alcotest.(check (option string)) "no negative atom" None (digest_at (-1));
+  match digest_at 0 with
+  | Some digest -> Alcotest.(check int) "sha256 hex" 64 (String.length digest)
+  | None -> Alcotest.fail "atom 0 exists"
+;;
+
+(* A projection that carried no atom has no front to name: its front index is
+   the history's atom count, which the lookup over that history has no atom
+   at. The same history carrying its newest atom does name one, so the [None]
+   is the index, not the lookup. *)
+let test_a_window_without_an_atom_is_no_observation () =
+  let history = atoms 5 in
+  let atom_count = count_atoms history in
+  let digest_at = Window.atom_opening_digest history in
+  let observe ~dropped_atoms =
+    Window.observe
+      ~digest_at
+      ~history_atom_count:atom_count
+      { Window.messages = []; dropped_atoms; atom_count }
+  in
+  Alcotest.(check bool) "every atom dropped, nothing observed" true
+    (Option.is_none (observe ~dropped_atoms:atom_count));
+  match observe ~dropped_atoms:(atom_count - 1) with
+  | None -> Alcotest.fail "the newest atom alone is a window"
+  | Some observed ->
+    Alcotest.(check (option string)) "named by the newest atom"
+      (digest_at (atom_count - 1))
+      (Some observed.Window.front_atom_digest)
+;;
+
 let () =
   Alcotest.run
     "runtime_model_input_tail_window"
@@ -990,6 +1058,10 @@ let () =
             test_uncut_history_reports_everything_carried
         ; Alcotest.test_case "chained cut keeps the whole history as denominator"
             `Quick test_chained_cut_keeps_the_whole_history_as_denominator
+        ; Alcotest.test_case "opening digest names the first message of each atom"
+            `Quick test_opening_digest_names_the_first_message_of_each_atom
+        ; Alcotest.test_case "a window without an atom is no observation" `Quick
+            test_a_window_without_an_atom_is_no_observation
         ; Alcotest.test_case "dropping unsent reasoning widens the window"
             `Quick test_dropping_unsent_reasoning_widens_the_window
         ; Alcotest.test_case "tool results stay with their call" `Quick

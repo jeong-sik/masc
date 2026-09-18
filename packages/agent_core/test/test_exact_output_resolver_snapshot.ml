@@ -15,6 +15,7 @@ let _load_resolver_snapshot_contract
 let _catalog_input_contract : EO.resolver_catalog_input -> unit = function
   | EO.Embedded_default
   | EO.Embedded_with_overlay _
+  | EO.Embedded_with_targets _
   | EO.Full_replacement _
   | EO.Full_replacement_file _ -> ()
 [@@warning "+8"]
@@ -120,7 +121,14 @@ let target_catalog
     provider
     model
     (option_line "enable_thinking" string_of_bool enable_thinking)
-    (option_line "connect_timeout_s" toml_float connect_timeout_s)
+    (* Every admission-expecting case here reaches [ready] -> [EO.admit], and
+       #36984 made admission reject a plan whose connect and body budgets are
+       both absent (validate_deadline_coverage). This fixture declared no
+       budget, so the suite went red as soon as a PR edit made CI select it.
+       Default the connect budget the way the flow suite does
+       (test_exact_output_flow.ml), while callers still pass a bare float. *)
+    (option_line "connect_timeout_s" toml_float
+       (Some (Option.value connect_timeout_s ~default:30.0)))
     (option_line "body_timeout_s" toml_float body_timeout_s)
 ;;
 

@@ -159,6 +159,14 @@ val route_of_error : boundary:error_boundary -> Agent_core.Error.t -> route
 val retry_after_of_route : route -> float option
 (** [Some hint] only for [Retry_after_observed] carrying a provider hint. *)
 
+val usable_retry_after : float option -> float option
+(** The provider hint that names a wait: present, a number, above zero. A
+    hint that is absent, zero, negative or NaN names none, and every reader of
+    a hint answers from this one rule — {!path_rest_sec} rests the class's own
+    default for it, {!route_resumes_on_same_path} refuses to resume a quota on
+    it, and the driver records a quota it cannot date as observed rather than
+    planting a window that is already over. *)
+
 val path_rest_sec :
   cap_sec:float -> retry_class:retry_class -> retry_after_hint:float option -> float
 (** How long a path rests after it answered [retry_class]
@@ -198,3 +206,16 @@ val response_observed : route -> bool
     [Internal_opaque] is [false] although it also holds an accept rejection
     without a no-progress hint: the route cannot tell that apart from an
     unhandled exception, so the evidence keeps its wake. *)
+
+val route_resumes_on_same_path : route -> bool
+(** Whether a failure passes with time on the path that answered it, so a chat
+    operation whose last candidate failed after saving tool results continues
+    on that same path (RFC last-path-resumes-after-progress §3.3).
+
+    [true]: [Rate_limited], [Capacity_backpressure], [Server_error],
+    [Network_transient], [Provider_timeout], and [Hard_quota] with a usable
+    reset hint (positive, not NaN).
+
+    [false]: [Hard_quota] without one, every rotation, and every terminal
+    class. How long the path rests is not read here: the chat lane's wait
+    follows the rest recorded on the path. *)

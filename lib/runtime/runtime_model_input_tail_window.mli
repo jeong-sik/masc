@@ -56,6 +56,12 @@ val preamble_marker_key : string
     exists only in the transmitted copy; nothing writes it to durable
     state. *)
 
+val is_extra_context : Agent_core.Types.message -> bool
+(** Whether the per-turn context assembler authored the message: any
+    extra-system-context provenance, including an [Invalid] or [Duplicate]
+    tag. Such a message is {!Pinned}, and a request carrying it is not a
+    sample of the carried history's size. *)
+
 type label =
   | Pinned
       (** Survives every cut: [System] entries and messages carrying
@@ -75,6 +81,25 @@ val annotate
     {!project} and needs to reason about age must use the same labelling, and
     a second implementation of it would let the two stages disagree about
     where an atom begins. *)
+
+val atom_opening_digest : Agent_core.Types.message list -> int -> string option
+(** [atom_opening_digest history atom] is the SHA-256 hex of the message that
+    opens atom [atom] of [history], as {!annotate} numbers the atoms: the
+    first message labelled with that index. [None] when [history] has no
+    such atom.
+
+    A carried position is this index together with this digest (RFC
+    keeper-context-window-in-tokens §10.4): the index alone cannot tell a
+    history whose unsaved tail was dropped from one whose older atoms were
+    purged, and the digest can. Only the opening message is hashed, so a
+    [Tool] message that later joins the same atom leaves the position as it
+    was. The bytes hashed are {!Agent_core.Checkpoint.message_to_json} of
+    that message, the durable encoding, so [history] must be the checkpoint
+    history before any wire projection or tool-result demotion.
+
+    Apply it to [history] once and keep the lookup: the labelling runs at
+    that application, and each lookup encodes and hashes a single
+    message. *)
 
 val first_atom_at_or_after
   :  Agent_core.Types.message list
@@ -165,13 +190,25 @@ type projection =
 type window_observation =
   { transmitted_atoms : int
   ; total_atoms : int
+  ; front_atom_digest : string
+        (** {!atom_opening_digest} of the oldest carried atom, index
+            [total_atoms - transmitted_atoms] of the history. *)
   }
 (** How much of a history one projection carried, kept without the messages so
     an observer can hold it for the length of a turn. *)
 
-val observe : history_atom_count:int -> projection -> window_observation
-(** [observe ~history_atom_count projection] pairs what [projection]
-    transmitted with the history it was measured against.
+val observe
+  :  digest_at:(int -> string option)
+  -> history_atom_count:int
+  -> projection
+  -> window_observation option
+(** [observe ~digest_at ~history_atom_count projection] pairs what [projection]
+    transmitted with the history it was measured against, and names the
+    front it carried from by [digest_at], {!atom_opening_digest} applied to
+    that history. [None] when [digest_at] has no atom at the front index
+    [history_atom_count - transmitted]: a projection that carried no atom puts
+    it at [history_atom_count], past the history's last atom, and a window
+    without a front atom has no position to report.
 
     [history_atom_count] is passed in rather than read off [projection]
     because a projection only knows the list it was handed. The demotion

@@ -19,6 +19,9 @@ type output_admission_error =
   | Global_admission_not_allowed
   | Invalid_connect_timeout of float
   | Invalid_body_timeout of float
+  | Missing_deadline
+      (** Neither a connect nor a body timeout is declared, so the wire runs
+          with no deadline at all. At least one budget must be declared. *)
   | Caller_supplied_header_not_allowed of string
   | Unsupported_image_input
   | Unsupported_document_input
@@ -50,7 +53,11 @@ type output_normalization_error =
   | Invalid_json of string
 
 (** Run every pure exact-output contract check and freeze the final generation
-    request before any provider-native token measurement can dispatch. *)
+    request before any provider-native token measurement can dispatch. The
+    accepted combination of connect and body deadlines is enforced here: each
+    budget alone passes, but when neither is declared preflight fails with
+    {!Missing_deadline} so the wire can never run without any deadline. The
+    header budget may be caller-supplied; see {!Caller_supplied_header_not_allowed}. *)
 (** Resolve credentials once and freeze them with the request. A delayed plan
     does not renew expiring credentials during execution, because that would
     invalidate its fingerprint. Callers must prepare a new plan when fresh
@@ -66,14 +73,22 @@ val preflight
     this value rather than reconstructing a request. *)
 val prepared_request : preflight -> Prepared_completion_request.t
 
+(** Rebuild the provider-native count-tokens request from the frozen
+    [preflight]. Fails only when that reconstruction is itself rejected, via
+    {!Exact_output_count_tokens.completion_request_error}. *)
 val measurement_request
   :  preflight
   -> ( Exact_output_count_tokens.exact_completion_measurement_request
        , Exact_output_count_tokens.completion_request_error )
        result
 
+(** The serving constraint observed when the body was frozen, if any. *)
 val serving_constraint : preflight -> Serving_constraint.t option
+(** The connect budget declared for the wire, if any. Preflight requires at
+    least one of the two budgets; see {!preflight}. *)
 val preflight_connect_timeout_s : preflight -> float option
+(** The body budget declared for the wire, if any. Preflight requires at
+    least one of the two budgets; see {!preflight}. *)
 val preflight_body_timeout_s : preflight -> float option
 val preflight_request_body_sha256 : preflight -> string
 val preflight_request_body_bytes : preflight -> int
@@ -82,15 +97,22 @@ val resolve_context_limit
   :  preflight
   -> (int, Prepared_completion_request.fit_error) result
 
+(** Produce the generation plan from an unmeasured preflight. Fails via
+    {!finalization_error}: {!Token_measurement_required} when the frozen
+    request belongs to a contract that demands a provider-native measurement
+    first, {!Measured_request_mismatch} otherwise. *)
 val finalize_unmeasured : preflight -> (t, finalization_error) result
 
 (** Attach token admission only when it belongs to the request owned by this
-    preflight. The frozen generation body is never serialized again. *)
+    preflight. The frozen generation body is never serialized again. The same
+    two failure constructors as {!finalize_unmeasured} apply. *)
 val finalize_measured
   :  preflight
   -> Prepared_completion_request.admitted
   -> (t, finalization_error) result
 
+(** Freeze the fingerprint used to detect drift between the plan and any
+    later execution evidence. *)
 val fingerprint : t -> fingerprint
 val response_format : t -> Types.response_format
 val request_body_sha256 : t -> string
@@ -103,6 +125,10 @@ val connect_timeout_s : t -> float option
 val body_timeout_s : t -> float option
 val verify_frozen_request : t -> bool
 
+(** Decode and normalize the provider response against the frozen output
+    contract. Fails via {!output_normalization_error} — {!Invalid_json} when
+    the body is not the JSON the contract asked for, the structured-text
+    constructors when the decoded shape does not match it. *)
 val normalize
   :  t
   -> Types.api_response

@@ -88,7 +88,10 @@ type provider =
       well as on the stream; a declared value narrows it. Declared on the
       provider, not the model, because it is a transport property.
       agent-core boundary, Agent Core contract I2: MASC declares the budget;
-      AGENT_CORE owns enforcement and phase=Http_operation attribution. *)
+      AGENT_CORE owns enforcement and phase=Http_operation attribution.
+      On an exact-output lane a target with neither this key nor a body
+      budget is rejected at plan admission (Missing_deadline, #36979): the
+      wire would otherwise carry no deadline at all. *)
   ; antigravity_cli : antigravity_cli_options option
     (** Typed [antigravity-cli] process options. Present exactly for providers
         using that protocol; absent for every other transport. *)

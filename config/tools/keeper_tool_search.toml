@@ -4,8 +4,8 @@ Make a held-back tool callable. This Keeper is offered more tools than one \
 request can carry, so their argument schemas are left out and only their names \
 are listed below. Pass the exact names you need in "names"; each becomes \
 callable from your next message in this same turn, and the answer says what \
-each one does. A name below that you have not passed here is not callable -- \
-calling it does nothing at all.
+each one does. A name below that is not already among your tools is not \
+callable until you pass it here; a call to it before then is refused.
 
 Tools that can be loaded:"""
 

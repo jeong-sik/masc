@@ -2,6 +2,7 @@ type t =
   { message : string
   ; error_type : string option
   ; provider_status : Types.provider_status option
+  ; report : Types.provider_report
   }
 
 (* RFC 6585 section 4. *)
@@ -62,8 +63,15 @@ let of_error_value ~fallback_message = function
       { message = Option.value (string_member "message" error) ~default:fallback_message
       ; error_type = error_type_of_object error
       ; provider_status = provider_status_of_object error
+      ; report = Types.Provider_stated
       }
-  | `String message -> Some { message; error_type = None; provider_status = None }
+  | `String message ->
+    Some
+      { message
+      ; error_type = None
+      ; provider_status = None
+      ; report = Types.Provider_stated
+      }
   | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None
 ;;
 
@@ -71,6 +79,7 @@ let without_error_object =
   { message = "the provider ended the choice with finish_reason error and no error object"
   ; error_type = None
   ; provider_status = None
+  ; report = Types.Unstated_errored_choice
   }
 ;;
 
@@ -94,6 +103,7 @@ let%test "OpenRouter's documented mid-stream error keeps its object as the body"
             ; error_body =
                 {|{"error":{"code":502,"message":"Provider disconnected","metadata":{"error_type":"provider_unavailable"}}}|}
             }
+      ; report = Types.Provider_stated
       }
 ;;
 
@@ -132,12 +142,22 @@ let%test "OpenAI's own error object falls back for a missing message" =
   of_error_value
     ~fallback_message:"raw"
     (Yojson.Safe.from_string {|{"type":"rate_limit_exceeded","code":"rate_limit_exceeded"}|})
-  = Some { message = "raw"; error_type = Some "rate_limit_exceeded"; provider_status = None }
+  = Some
+      { message = "raw"
+      ; error_type = Some "rate_limit_exceeded"
+      ; provider_status = None
+      ; report = Types.Provider_stated
+      }
 ;;
 
 let%test "a bare string error declares no status" =
   of_error_value ~fallback_message:"raw" (`String "model failed")
-  = Some { message = "model failed"; error_type = None; provider_status = None }
+  = Some
+      { message = "model failed"
+      ; error_type = None
+      ; provider_status = None
+      ; report = Types.Provider_stated
+      }
   && of_error_value ~fallback_message:"raw" (`Int 502) = None
 ;;
 
@@ -157,5 +177,6 @@ let%test "an errored choice without an error object still reads as the provider 
              { Types.status = 429
              ; error_body = {|{"error":{"code":429,"message":"slow down","retry_after":7.0}}|}
              }
+       ; report = Types.Provider_stated
        }
 ;;

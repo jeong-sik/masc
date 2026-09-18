@@ -107,6 +107,7 @@ let parse_sync_response
              { provider_status = Some { Types.status; error_body }
              ; message = _
              ; error_type = _
+             ; report = _
              }) ->
          Error
            (Http_client.HttpError
@@ -116,10 +117,27 @@ let parse_sync_response
               })
        | Error
            (Backend_openai_parse.Provider_error
-             { provider_status = None; message; error_type }) ->
+             { provider_status = None
+             ; message
+             ; error_type
+             ; report = Types.Provider_stated
+             }) ->
          Error
            (Http_client.ProviderFailure
               { kind = Http_client.Provider_reported_error { error_type }; message })
+       (* The choice said the generation failed and the response carried no
+          error object: there is no envelope to read a type or a status from,
+          and the answer stopped part-way for a reason the provider kept to
+          itself. *)
+       | Error
+           (Backend_openai_parse.Provider_error
+             { provider_status = None
+             ; message
+             ; error_type = _
+             ; report = Types.Unstated_errored_choice
+             }) ->
+         Error
+           (Http_client.ProviderFailure { kind = Http_client.Provider_interrupted; message })
        | Error (Backend_openai_parse.Unreadable_response message) ->
          provider_parse_failure
            ~parser:(Provider_config.string_of_provider_kind provider_kind)
@@ -138,7 +156,7 @@ let parse_sync_response
           after that stays a glm parse failure, as it always has. *)
        | Error
            (Backend_openai_parse.Provider_error
-             { message; error_type = _; provider_status = _ })
+             { message; error_type = _; provider_status = _; report = _ })
        | Error (Backend_openai_parse.Unreadable_response message) ->
          provider_parse_failure ~parser:"glm" message)
   with

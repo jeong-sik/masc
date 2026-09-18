@@ -1672,6 +1672,10 @@ type provider_status =
   ; error_body : string
   }
 
+type provider_report =
+  | Provider_stated
+  | Unstated_errored_choice
+
 type sse_event =
   | MessageStart of
       { id : string
@@ -1707,6 +1711,11 @@ type sse_event =
         (** The provider condition declared inside the envelope, since the
                 stream's own [200] is already on the wire. [None] when the
                 envelope declares none. *)
+      ; report : provider_report
+        (** Whether an error object arrived at all. A choice that finished
+                with [error] and carried none says so here; the fields above
+                are then what the reader supplied, not what the provider
+                said. *)
       ; raw : string
         (** Original error payload JSON, carried verbatim for diagnostics.
                 It is the whole chunk: a declared provider condition is
@@ -1762,6 +1771,7 @@ type stream_error =
       { message : string
       ; error_type : string option
       ; provider_status : provider_status option
+      ; report : provider_report
       ; raw : string
       }
   | Stream_parse_failed of

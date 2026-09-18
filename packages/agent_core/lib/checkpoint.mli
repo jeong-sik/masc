@@ -118,6 +118,13 @@ val of_json : Yojson.Safe.t -> (t, Error.t) result
 (** Serialize checkpoint to a JSON string. *)
 val to_string : t -> string
 
+(** The JSON one message is written as inside a checkpoint's [messages]: the
+    same encoder {!to_json} maps over them, for a caller that needs one
+    message's durable bytes (a digest of it, say) without a checkpoint
+    around it. Unlike {!to_json_result} it does not validate [json]
+    payloads. *)
+val message_to_json : Types.message -> Yojson.Safe.t
+
 (** Encodings of the messages written by earlier saves of one checkpoint
     lineage. One memo serves one sequence of saves; it is not safe to use from
     two saves at once. *)

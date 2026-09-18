@@ -1,10 +1,20 @@
 (** Keeper_model_input_ledger — see the interface for the contract. *)
 
+type carried_ends =
+  | No_atom_carried
+  | Carried_atoms of
+      { front_digest : string
+      ; end_digest : string
+      }
+
 type request =
   { prefix_digest : string
   ; first_atom : int
   ; atom_count : int
+  ; ends : carried_ends
   ; tail_bytes : int
+  ; turn_context : bool
+  ; demote_before : int
   }
 
 type usage =
@@ -15,6 +25,7 @@ type usage =
 type block =
   { block_first_atom : int
   ; block_end_atom : int
+  ; block_first_digest : string
   ; tokens : int option
   }
 
@@ -22,6 +33,7 @@ type t =
   { prefix_digest : string
   ; total_tokens : int option
   ; measured_end_atom : int option
+  ; measured_demote_before : int option
   ; blocks : block list
   ; last : request
   ; last_usage : usage option
@@ -50,11 +62,19 @@ type observation =
   ; tail_delta_bytes : int
   }
 
-let base_block (request : request) =
-  { block_first_atom = request.first_atom
-  ; block_end_atom = request.atom_count
-  ; tokens = None
-  }
+(* The carried range of a request as one block of unknown size, opened by the
+   request's own front message. A request that carried no atom has no range
+   and no block. *)
+let base_blocks (request : request) =
+  match request.ends with
+  | No_atom_carried -> []
+  | Carried_atoms { front_digest; end_digest = _ } ->
+    [ { block_first_atom = request.first_atom
+      ; block_end_atom = request.atom_count
+      ; block_first_digest = front_digest
+      ; tokens = None
+      }
+    ]
 ;;
 
 (* A ledger that knows nothing but the request in hand. The whole carried
@@ -64,7 +84,8 @@ let start (request : request) (usage : usage option) =
   { prefix_digest = request.prefix_digest
   ; total_tokens = Option.map (fun (u : usage) -> u.input_tokens) usage
   ; measured_end_atom = Option.map (fun (_ : usage) -> request.atom_count) usage
-  ; blocks = [ base_block request ]
+  ; measured_demote_before = Option.map (fun (_ : usage) -> request.demote_before) usage
+  ; blocks = base_blocks request
   ; last = request
   ; last_usage = usage
   }
@@ -104,55 +125,89 @@ let assign_tail blocks ~from_atom ~delta =
     before
     @ [ { block_first_atom = first.block_first_atom
         ; block_end_atom = last.block_end_atom
+        ; block_first_digest = first.block_first_digest
         ; tokens = Some delta
         }
       ]
 ;;
 
-let rec observe (previous : t option) (request : request) (usage : usage option)
-  : observation
-  =
-  let restart event =
-    { ledger = start request usage
-    ; event
-    ; delta_tokens = None
-    ; tail_delta_bytes =
-        (match previous with
-         | Some t -> request.tail_bytes - t.last.tail_bytes
-         | None -> 0)
-    }
-  in
-  match previous with
-  | None -> restart Started
-  | Some t when request.prefix_digest <> t.prefix_digest -> restart Prefix_changed
-  | Some t when request.atom_count < t.last.atom_count -> restart History_reset
-  | Some t when request.first_atom < t.last.first_atom -> restart Front_widened
-  | Some t ->
-    let evicted_atoms = request.first_atom - t.last.first_atom in
-    (match trim_front t.blocks ~first_atom:request.first_atom with
-     | `Cut -> restart (Front_cut_through_block { evicted_atoms })
-     | `Trimmed (kept, evicted_tokens) ->
-       observe_trimmed t request usage ~evicted_atoms ~kept ~evicted_tokens)
+(* The demotion boundary moved between the sample the total describes and
+   this one, so the atoms from [changed_from] on are carried in another form
+   than they were measured in. Those blocks and the atoms appended since the
+   sample become one block. The difference is exactly the appended atoms plus
+   the change of the reformed ones, so adding back what the reformed blocks
+   weighed leaves what they and the appended atoms weigh now. Unknown when a
+   reformed block was never measured. *)
+let merge_reformed blocks ~changed_from ~measured_end ~delta =
+  let before, after = List.partition (fun b -> b.block_end_atom <= changed_from) blocks in
+  match after with
+  | [] -> blocks, false
+  | first :: _ ->
+    let last = List.nth after (List.length after - 1) in
+    (* Blocks past [measured_end] are the appended atoms [delta] measures. *)
+    let reformed = List.filter (fun b -> b.block_first_atom < measured_end) after in
+    let weighed =
+      List.fold_left
+        (fun sum b ->
+           match sum, b.tokens with
+           | Some total, Some tokens -> Some (total + tokens)
+           | Some _, None | None, (Some _ | None) -> None)
+        (Some 0)
+        reformed
+    in
+    let tokens =
+      match weighed with
+      | Some old when old + delta >= 0 -> Some (old + delta)
+      | Some _ | None -> None
+    in
+    ( before
+      @ [ { block_first_atom = first.block_first_atom
+          ; block_end_atom = last.block_end_atom
+          ; block_first_digest = first.block_first_digest
+          ; tokens
+          }
+        ]
+    , Option.is_some tokens )
+;;
 
-and observe_trimmed (t : t) (request : request) (usage : usage option)
-      ~evicted_atoms ~kept ~evicted_tokens
+(* Whether the history in hand still opens [atom] with the message the ledger
+   recorded there. An index the history no longer has does not hold. *)
+let position_holds ~digest_at ~atom recorded =
+  match digest_at atom with
+  | Some found -> String.equal found recorded
+  | None -> false
+;;
+
+(* The atoms the ledger counted are the ones in this history only while the
+   front and the last atom of the last request still open with the messages
+   that request carried. A shorter history misses the last index; a purge
+   before the front, or an unsaved attempt's atom replaced by another at the
+   same index, changes a digest. Nothing here can prove the atoms between the
+   two, so no rule keeps part of the blocks after either check fails. A
+   request that carried no atom named no position, and nothing it counted
+   can have moved. *)
+let history_holds ~digest_at (last : request) =
+  match last.ends with
+  | No_atom_carried -> true
+  | Carried_atoms { front_digest; end_digest } ->
+    position_holds ~digest_at ~atom:last.first_atom front_digest
+    && position_holds ~digest_at ~atom:(last.atom_count - 1) end_digest
+;;
+
+let observe_trimmed
+      (t : t)
+      (request : request)
+      (usage : usage option)
+      ~evicted_atoms
+      ~kept
+      ~evicted_tokens
+      ~(appended : block option)
   =
     let tail_delta_bytes = request.tail_bytes - t.last.tail_bytes in
-    (* Atoms carried for the first time. A front that moved past everything
-       previously carried starts the new block at the front, not at the old
-       end: the atoms in between were never on the wire. *)
-    let new_block_start = max t.last.atom_count request.first_atom in
-    let new_atoms = request.atom_count - new_block_start in
-    let blocks =
-      if new_atoms > 0
-      then
-        kept
-        @ [ { block_first_atom = new_block_start
-            ; block_end_atom = request.atom_count
-            ; tokens = None
-            }
-          ]
-      else kept
+    let new_atoms, blocks =
+      match appended with
+      | Some block -> block.block_end_atom - block.block_first_atom, kept @ [ block ]
+      | None -> 0, kept
     in
     (* The previous total still describes the carried atoms only when the
        atoms that left it were measured. *)
@@ -166,26 +221,36 @@ and observe_trimmed (t : t) (request : request) (usage : usage option)
       | Some u, Some total -> Some (u.input_tokens - total)
       | Some _, None | None, (Some _ | None) -> None
     in
-    (* A negative difference is a tail that shrank by more than the new atoms
-       added; it is reported but not written into a block. *)
-    let blocks, measured =
-      match delta_tokens, t.measured_end_atom with
-      | Some delta, Some from_atom when new_atoms > 0 && delta >= 0 ->
-        assign_tail blocks ~from_atom ~delta, true
-      | Some _, (Some _ | None) | None, (Some _ | None) -> blocks, false
+    let reformed_from =
+      match t.measured_demote_before with
+      | Some before when before <> request.demote_before ->
+        Some (min before request.demote_before)
+      | Some _ | None -> None
     in
-    let total_tokens, measured_end_atom =
+    (* A negative difference with no reformed atoms is reported but not
+       written into a block. *)
+    let blocks, measured =
+      match delta_tokens, t.measured_end_atom, reformed_from with
+      | Some delta, Some measured_end, Some changed_from ->
+        merge_reformed blocks ~changed_from ~measured_end ~delta
+      | Some delta, Some from_atom, None when new_atoms > 0 && delta >= 0 ->
+        assign_tail blocks ~from_atom ~delta, true
+      | Some _, Some _, None | Some _, None, (Some _ | None) | None, (Some _ | None), (Some _ | None)
+        -> blocks, false
+    in
+    let total_tokens, measured_end_atom, measured_demote_before =
       match usage with
-      | Some u -> Some u.input_tokens, Some request.atom_count
+      | Some u -> Some u.input_tokens, Some request.atom_count, Some request.demote_before
       | None ->
         (match previous_total, t.measured_end_atom with
-         | Some total, Some at -> Some total, Some at
-         | Some _, None | None, (Some _ | None) -> None, None)
+         | Some total, Some at -> Some total, Some at, t.measured_demote_before
+         | Some _, None | None, (Some _ | None) -> None, None, None)
     in
     let ledger =
       { prefix_digest = t.prefix_digest
       ; total_tokens
       ; measured_end_atom
+      ; measured_demote_before
       ; blocks
       ; last = request
       ; last_usage = (match usage with Some _ -> usage | None -> t.last_usage)
@@ -201,31 +266,104 @@ and observe_trimmed (t : t) (request : request) (usage : usage option)
     { ledger; event; delta_tokens; tail_delta_bytes }
 ;;
 
+let observe ~digest_at (previous : t option) (request : request) (usage : usage option)
+  : observation
+  =
+  (* The turn context's tokens belong to no atom, so a request that carried
+     it is read like one without usage: its atoms wait for the next sample. *)
+  let usage = if request.turn_context then None else usage in
+  let restart event =
+    { ledger = start request usage
+    ; event
+    ; delta_tokens = None
+    ; tail_delta_bytes =
+        (match previous with
+         | Some t -> request.tail_bytes - t.last.tail_bytes
+         | None -> 0)
+    }
+  in
+  match previous with
+  | None -> restart Started
+  | Some t when request.prefix_digest <> t.prefix_digest -> restart Prefix_changed
+  | Some t when not (history_holds ~digest_at t.last) -> restart History_reset
+  | Some t when request.first_atom < t.last.first_atom -> restart Front_widened
+  | Some t ->
+    let evicted_atoms = request.first_atom - t.last.first_atom in
+    (match trim_front t.blocks ~first_atom:request.first_atom with
+     | `Cut -> restart (Front_cut_through_block { evicted_atoms })
+     | `Trimmed (kept, evicted_tokens) ->
+       (* Atoms carried for the first time. A front that moved past everything
+          previously carried starts the new block at the front, not at the
+          old end: the atoms in between were never on the wire. The block is
+          named by the message that opens its first atom in this history; a
+          history that has no atom there is not the one the request counted. *)
+       let new_block_start = max t.last.atom_count request.first_atom in
+       if request.atom_count <= new_block_start
+       then
+         observe_trimmed t request usage ~evicted_atoms ~kept ~evicted_tokens ~appended:None
+       else (
+         match digest_at new_block_start with
+         | None -> restart History_reset
+         | Some block_first_digest ->
+           observe_trimmed
+             t
+             request
+             usage
+             ~evicted_atoms
+             ~kept
+             ~evicted_tokens
+             ~appended:
+               (Some
+                  { block_first_atom = new_block_start
+                  ; block_end_atom = request.atom_count
+                  ; block_first_digest
+                  ; tokens = None
+                  })))
+;;
+
+let holds ~digest_at (t : t) = history_holds ~digest_at t.last
+
 (* Apply an eviction the carried range decided: the same trimming a request
-   would report as [Front_moved], applied now so a decision taken before the
-   next usage (a refusal retry) sees the moved front. A front that does not
-   advance leaves the ledger as it is; a front inside a block restarts the
-   blocks from the new front with the total unknown, as [observe] would. *)
-let move_front (t : t) ~first_atom =
-  if first_atom <= t.last.first_atom
-  then t
-  else (
-    let last = { t.last with first_atom } in
-    match trim_front t.blocks ~first_atom with
-    | `Cut ->
-      { t with
-        total_tokens = None
-      ; measured_end_atom = None
-      ; blocks = [ base_block last ]
-      ; last
-      }
-    | `Trimmed (kept, evicted_tokens) ->
-      let total_tokens, measured_end_atom =
-        match t.total_tokens, evicted_tokens with
-        | Some total, Some evicted -> Some (total - evicted), t.measured_end_atom
-        | Some _, None | None, (Some _ | None) -> None, None
-      in
-      { t with total_tokens; measured_end_atom; blocks = kept; last })
+   would report as [Front_moved], applied now so the next composition (the
+   turn's first, or a refusal retry) sees the moved front. A front inside a
+   block restarts the blocks from the new front with the total unknown, as
+   [observe] would. The moved front is recorded with the message that opens
+   it, so the next composition and the next [observe] check the position
+   they compose from; the last atom's digest stays the last request's.
+
+   [None] when nothing moves, so a caller that retries on a move never asks
+   again with the front it already had: a front at or behind the current one,
+   a front at or past the last request's atom count (there is no atom there to
+   carry from), or a ledger whose last request carried no atom and so has no
+   front. *)
+let move_front (t : t) ~first_atom ~front_digest =
+  match t.last.ends with
+  | No_atom_carried -> None
+  | Carried_atoms { front_digest = _; end_digest }
+    when first_atom > t.last.first_atom && first_atom < t.last.atom_count ->
+    let last =
+      { t.last with first_atom; ends = Carried_atoms { front_digest; end_digest } }
+    in
+    (match trim_front t.blocks ~first_atom with
+     | `Cut ->
+       Some
+         { t with
+           total_tokens = None
+         ; measured_end_atom = None
+         ; measured_demote_before = None
+         ; blocks = base_blocks last
+         ; last
+         }
+     | `Trimmed (kept, evicted_tokens) ->
+       let total_tokens, measured_end_atom, measured_demote_before =
+         match t.total_tokens, evicted_tokens with
+         | Some total, Some evicted ->
+           Some (total - evicted), t.measured_end_atom, t.measured_demote_before
+         | Some _, None | None, (Some _ | None) -> None, None, None
+       in
+       Some
+         { t with total_tokens; measured_end_atom; measured_demote_before; blocks = kept; last })
+  | Carried_atoms _ -> None
 ;;
 
 let known_tokens t =
@@ -281,6 +419,8 @@ let to_json t =
     ; "first_atom", `Int t.last.first_atom
     ; "atom_count", `Int t.last.atom_count
     ; "tail_bytes", `Int t.last.tail_bytes
+    ; "turn_context", `Bool t.last.turn_context
+    ; "demote_before", `Int t.last.demote_before
     ; "blocks", `Int (List.length t.blocks)
     ; ( "measured_blocks"
       , `Int (List.length (List.filter (fun b -> Option.is_some b.tokens) t.blocks)) )
@@ -332,10 +472,10 @@ module Table = struct
     keeper_name ^ "\000" ^ runtime_id ^ "\000" ^ session_id
   ;;
 
-  let observe ~keeper_name ~runtime_id ~session_id ~request ~usage =
+  let observe ~keeper_name ~runtime_id ~session_id ~digest_at ~request ~usage =
     let key = key ~keeper_name ~runtime_id ~session_id in
     Eio.Mutex.use_rw ~protect:true global.mutex (fun () ->
-      let observation = observe (M.find_opt key global.ledgers) request usage in
+      let observation = observe ~digest_at (M.find_opt key global.ledgers) request usage in
       global.ledgers <- M.add key observation.ledger global.ledgers;
       observation)
   ;;
@@ -345,14 +485,45 @@ module Table = struct
       M.find_opt (key ~keeper_name ~runtime_id ~session_id) global.ledgers)
   ;;
 
+  type in_history =
+    | Holds of t
+    | Dropped_stale of t
+    | Absent
+
+  (* The digests are read outside the lock; the removal happens only if the
+     ledger that failed the check is still the pair's, so a ledger another
+     observation wrote in between is not the one dropped. *)
+  let lookup_in_history ~keeper_name ~runtime_id ~session_id ~digest_at =
+    match lookup ~keeper_name ~runtime_id ~session_id with
+    | None -> Absent
+    | Some t when holds ~digest_at t -> Holds t
+    | Some stale ->
+      let key = key ~keeper_name ~runtime_id ~session_id in
+      Eio.Mutex.use_rw ~protect:true global.mutex (fun () ->
+        match M.find_opt key global.ledgers with
+        | Some current when current == stale -> global.ledgers <- M.remove key global.ledgers
+        | Some _ | None -> ());
+      Dropped_stale stale
+  ;;
+
+  type move =
+    | Moved
+    | Not_moved
+    | No_pair_ledger
+
   (* [move_front] in the body is the ledger function above: this binding is
      not recursive. *)
-  let move_front ~keeper_name ~runtime_id ~session_id ~first_atom =
+  let move_front ~keeper_name ~runtime_id ~session_id ~first_atom ~front_digest =
     let key = key ~keeper_name ~runtime_id ~session_id in
     Eio.Mutex.use_rw ~protect:true global.mutex (fun () ->
       match M.find_opt key global.ledgers with
-      | None -> ()
-      | Some t -> global.ledgers <- M.add key (move_front t ~first_atom) global.ledgers)
+      | None -> No_pair_ledger
+      | Some t ->
+        (match move_front t ~first_atom ~front_digest with
+         | Some moved ->
+           global.ledgers <- M.add key moved global.ledgers;
+           Moved
+         | None -> Not_moved))
   ;;
 
   module For_testing = struct

@@ -8,7 +8,7 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["keeper-context-window-in-tokens", "memory-os-bounded-context-and-librarian-curator", "0456", "0363"]
-implementation_prs: []
+implementation_prs: ["#37020"]
 ---
 
 # RFC: Librarian 생명주기

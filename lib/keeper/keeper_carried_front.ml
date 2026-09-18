@@ -3,7 +3,7 @@
 type source =
   | Ledger
   | Turn_record of { turn : int }
-  | Refused_range of { turn : int }
+  | Unfinished_turn of { turn : int }
   | Halved_after_refusal of { retry : int }
 
 type seed =
@@ -69,7 +69,7 @@ let of_records ~composer ~trace_id (records : Turn_record.t list) =
             let source =
               match finish_reason with
               | Some _ -> Turn_record { turn }
-              | None -> Refused_range { turn }
+              | None -> Unfinished_turn { turn }
             in
             Some
               ( turn
@@ -161,7 +161,7 @@ let halve ~first_atom ~atom_count =
 let source_to_string = function
   | Ledger -> "ledger"
   | Turn_record { turn } -> Printf.sprintf "turn_record#%d" turn
-  | Refused_range { turn } -> Printf.sprintf "refused_range#%d" turn
+  | Unfinished_turn { turn } -> Printf.sprintf "unfinished_turn#%d" turn
   | Halved_after_refusal { retry } -> Printf.sprintf "halved_after_refusal#%d" retry
 ;;
 
@@ -182,8 +182,8 @@ let origin_to_json = function
   | Carried Ledger -> `Assoc [ "kind", `String "ledger" ]
   | Carried (Turn_record { turn }) ->
     `Assoc [ "kind", `String "turn_record"; "turn", `Int turn ]
-  | Carried (Refused_range { turn }) ->
-    `Assoc [ "kind", `String "refused_range"; "turn", `Int turn ]
+  | Carried (Unfinished_turn { turn }) ->
+    `Assoc [ "kind", `String "unfinished_turn"; "turn", `Int turn ]
   | Carried (Halved_after_refusal { retry }) ->
     `Assoc [ "kind", `String "halved_after_refusal"; "retry", `Int retry ]
   | Whole_history -> `Assoc [ "kind", `String "whole_history" ]

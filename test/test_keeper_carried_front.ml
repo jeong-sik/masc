@@ -129,21 +129,21 @@ let test_an_official_client_or_unmaterialized_record_is_skipped () =
   check source "turn 10" (Front.Turn_record { turn = 10 }) src
 ;;
 
-(* A turn that never finished still measured what it sent, and the provider
-   refused it: that range is the largest one known to be too big. Skipping it
-   is what kept five keepers sending the whole history every turn on
-   2026-09-18, because the halving a refusal forces lived only inside the
-   attempt. It is read as a ceiling, named apart from a completed seed. *)
-let test_a_refused_record_is_read_as_a_ceiling () =
+(* A turn that never finished still measured what it sent, and that range is
+   a position in the same history. Skipping it is what kept five keepers
+   sending the whole history every turn on 2026-09-18, because the halving a
+   refusal forces lived only inside the attempt. It is read, named apart from
+   a completed seed so a reader can tell which turn reached that position. *)
+let test_an_unfinished_record_is_read_and_named_apart () =
   let records = [ record ~turn:10 (Some (30, 100)); record ~turn:12 ~finish:None (Some (5, 110)) ] in
   let first_atom, src = seed (of_records records) in
   check int "total minus transmitted of turn 12" 105 first_atom;
-  check source "named apart from a completed seed" (Front.Refused_range { turn = 12 }) src
+  check source "named apart from a completed seed" (Front.Unfinished_turn { turn = 12 }) src
 ;;
 
-(* Acceptance is the newer evidence: a completed turn after a refusal says
-   that range served, so it seeds instead of bounding. *)
-let test_a_completed_record_after_a_refusal_seeds_the_front () =
+(* Acceptance is the newer evidence: a completed turn after an unfinished one
+   says that range served, so it names the front and the older one does not. *)
+let test_a_completed_record_after_an_unfinished_one_seeds_the_front () =
   let records = [ record ~turn:12 ~finish:None (Some (5, 110)); record ~turn:13 (Some (40, 115)) ] in
   let _, src = seed (of_records records) in
   check source "turn 13 completed" (Front.Turn_record { turn = 13 }) src
@@ -361,8 +361,8 @@ let test_origin_json_names_its_kind () =
   in
   check string "ledger" "ledger" (kind (Front.Carried Front.Ledger));
   check string "turn record" "turn_record" (kind (Front.Carried (Front.Turn_record { turn = 3 })));
-  check string "refused range" "refused_range"
-    (kind (Front.Carried (Front.Refused_range { turn = 7 })));
+  check string "unfinished turn" "unfinished_turn"
+    (kind (Front.Carried (Front.Unfinished_turn { turn = 7 })));
   check string "halved" "halved_after_refusal"
     (kind (Front.Carried (Front.Halved_after_refusal { retry = 1 })));
   check string "whole" "whole_history" (kind Front.Whole_history)
@@ -376,10 +376,10 @@ let () =
             test_the_newest_completed_record_on_the_trace_seeds_the_front
         ; test_case "errored or official client skipped" `Quick
             test_an_official_client_or_unmaterialized_record_is_skipped
-        ; test_case "a refused record is a ceiling" `Quick
-            test_a_refused_record_is_read_as_a_ceiling
-        ; test_case "a completed record after a refusal seeds" `Quick
-            test_a_completed_record_after_a_refusal_seeds_the_front
+        ; test_case "an unfinished record is read and named apart" `Quick
+            test_an_unfinished_record_is_read_and_named_apart
+        ; test_case "a completed record after an unfinished one seeds" `Quick
+            test_a_completed_record_after_an_unfinished_one_seeds_the_front
         ; test_case "wire observation names the runtime" `Quick
             test_the_wire_observation_names_the_runtime_when_present
         ; test_case "no record" `Quick test_no_record_means_no_seed

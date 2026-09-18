@@ -15,7 +15,7 @@
     starts from the range the last completed turn carried rather than from
     the whole history.
     With neither, the range an unfinished turn on the same trace reached
-    ({!Refused_range}); with none of the three the caller has no atom to
+    ({!Unfinished_turn}); with none of the three the caller has no atom to
     start from and carries the whole history; the provider judges it, and the turn driver owns the one move a
     refusal forces before any usage has been counted, which
     {!Halved_after_refusal} names.
@@ -33,13 +33,15 @@ type source =
   | Turn_record of { turn : int }
       (** The newest completed Agent Core turn record on the trace that
           measured its carried atoms, whichever runtime ran it. *)
-  | Refused_range of { turn : int }
-      (** The newest Agent Core turn record on the trace whose turn never
-          finished: the narrowest range that turn tried, since every
-          candidate of a turn shares the front a refusal moves. The
-          composition starts there, at the position the turn reached, and
-          moves no further on its own — a turn ends for reasons that say
-          nothing about size, and those repeat
+  | Unfinished_turn of { turn : int }
+      (** The newest Agent Core turn record on the trace that wrote no stop
+          reason: the narrowest range that turn tried, since every candidate
+          of a turn shares the front a refusal moves. The record says the
+          turn ended before a stop reason was written
+          ({!Turn_record.finish_reason}) and never why, so this names a
+          position and claims no cause. The composition starts there, at the
+          position the turn reached, and moves no further on its own — a turn
+          ends for reasons that say nothing about size, and those repeat
           ({!Keeper_turn_driver_try_provider.compose_carried_model_input}).
           Without this record a keeper whose seeds are gone repeats the whole
           history every turn: the halving a refusal forces lives only inside
@@ -95,11 +97,11 @@ val of_records
   -> trace_id:string
   -> Turn_record.t list
   -> seed option
-(** The newest completed record of session [trace_id] carrying a
-    [model_input_window] whose runtime {!Composes_from_the_history}, in any
-    order. An errored turn's record names the runtime that was asked, not
-    the lane whose request it measured, so only a record with a stop reason
-    is read; a record of another session measured another history; a record
+(** The newest record of session [trace_id] carrying a [model_input_window]
+    whose runtime {!Composes_from_the_history}, in any order, tagged
+    {!Turn_record} when the turn recorded a stop reason and
+    {!Unfinished_turn} when it did not. Both name a range of the same
+    history; a record of another session measured another history; a record
     whose runtime {!Hands_over_its_own_list} counted another list; and one
     whose runtime is {!Not_materialized} is not read, since nothing says
     which it was. *)
@@ -184,4 +186,5 @@ val origin_to_string : origin -> string
 
 val origin_to_json : origin -> Yojson.Safe.t
 (** One object with a [kind]: [ledger], [turn_record] with [turn],
-    [halved_after_refusal] with [retry], or [whole_history]. *)
+    [unfinished_turn] with [turn], [halved_after_refusal] with [retry], or
+    [whole_history]. *)

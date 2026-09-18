@@ -964,6 +964,17 @@ let run_turn
         (`Assoc
           [ "loaded_checkpoint_present", `Bool ctx.loaded_checkpoint_present ]))
     Keeper_runtime_manifest.Checkpoint_loaded;
+  (* [ctx.ctx_work] is the history this turn starts from; the [ctx_work] bound
+     below already carries this turn's input. *)
+  let history_at_start =
+    Keeper_turn_boundaries.history_at_start_of_messages
+      (Keeper_context_runtime.messages_of_context ctx.ctx_work)
+  in
+  Turn_helpers.record_empty_history_at_turn_start
+    ~config
+    ~keeper_name:meta.name
+    ~trace_id
+    history_at_start;
   (* Steps 5-6: turn prompt, memory/temporal context, prompt metrics,
      and user message append — Keeper_run_prompt. *)
   let prompt_user_turn_record =
@@ -1892,13 +1903,7 @@ let run_turn
                              ~runtime_id_string:selected_runtime_id
                              ~max_context:selected_max_context
                              ~checkpoint_owner
-                             ~history_at_start:
-                               (* [ctx.ctx_work] is the history this turn
-                                  started from; the local [ctx_work] already
-                                  carries this turn's input. *)
-                               (Keeper_turn_boundaries.history_at_start_of_messages
-                                  (Keeper_context_runtime.messages_of_context
-                                     ctx.ctx_work))
+                             ~history_at_start
                              ~official_client_settlement:selected_run.official_client_settlement
                              ~history_messages
                              ~prompt_metrics ~ctx_composition ~usage

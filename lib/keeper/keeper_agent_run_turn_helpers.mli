@@ -72,6 +72,17 @@ val make_append_manifest :
   seq_ref:int Atomic.t ->
   append_manifest_fn
 
+(** Append a [History_empty] line when the turn starts from a history with no
+    atom (RFC librarian-lifecycle 4.6); nothing for a continued history. Never
+    fails the turn: a line that cannot be written is logged and counted. Only a
+    cancellation escapes. *)
+val record_empty_history_at_turn_start :
+  config:Workspace.config ->
+  keeper_name:string ->
+  trace_id:string ->
+  Keeper_turn_boundaries.history_at_start ->
+  unit
+
 val turn_progress_callbacks :
   config:Workspace.config ->
   keeper_name:string ->

@@ -18,12 +18,11 @@ type outcome =
       ; marker : (unit, string) result
             (** Whether the [History_empty] line was written. [Error] does
                 not undo or fail the clear, as a turn's line does not fail the
-                turn. Until the keeper's next turn ends and says
-                [Fresh_history] itself, nothing in the store explains why the
-                history started over; if that turn dies first, nothing ever
-                does (RFC §6). A store that ends mid-line refuses every
-                append until it is repaired, so clearing again does not help
-                there. *)
+                turn. The keeper's next turn starts from the emptied history
+                and writes the same line when it starts; until then nothing in
+                the store explains why the history started over. A store that
+                ends mid-line refuses every append until it is repaired, so
+                neither that turn nor clearing again helps there (RFC §6). *)
       }
       (** The emptied checkpoint is the canonical one on disk. *)
   | Superseded of

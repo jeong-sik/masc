@@ -5,12 +5,15 @@
     [<keeper>.turn-boundaries.jsonl], after its checkpoint is saved. The line
     names the turn and the end of the saved history in the atom vocabulary of
     {!Runtime_model_input_tail_window}: how many atoms the checkpoint holds and
-    the digest of the message that opens the last one. A turn's start is not
-    written; the end an earlier line states is that start.
+    the digest of the message that opens the last one. Where a turn started is
+    not written; the end an earlier line states is that start.
 
-    [masc_keeper_clear] is the other writer. It empties a history, not as part
-    of a turn, and appends a [History_empty] line once the emptied checkpoint
-    is saved.
+    A history with no atom has no such earlier line, so whoever sees one says
+    so with a [History_empty] line. Two writers do. A turn that starts from a
+    history with no atom appends the line before it runs, so the record that
+    its atoms are numbered from zero is there even if the turn saves and then
+    dies before its own line. [masc_keeper_clear] empties a history, not as
+    part of a turn, and appends the line once the emptied checkpoint is saved.
 
     {2 What a reader may rely on}
 
@@ -29,8 +32,11 @@
       of one keeper that finish together both take the next turn number.
     - Two lines say that the atoms of a trace are numbered from zero again: a
       [Turn_ended] line with [Fresh_history], and a [History_empty] line.
-      Both are written after the save they describe, so a reader that sees
-      one and then loads the checkpoint loads that save or a later one. What a
+      Each is written after the history became what it describes: a
+      [Turn_ended] line and a clear's [History_empty] line after the save, a
+      turn's [History_empty] line after the load that showed no atom and
+      before any save of that turn. So a reader that sees one and then loads
+      the checkpoint loads the restarted history or a later one. What a
       reader does with them is RFC §4.4.
     - The lines of an earlier history of the same trace stay in the file, and
       so can a line whose history was never stored (the last bullet, and a
@@ -92,20 +98,23 @@ type event =
       ; position : position
       }
   | History_empty of { trace_id : string }
-      (** The saved history of this trace held no atom when the line was
-          written. The line is named for what its writer saw, not for who
-          wrote it, because a reader has no use for the difference.
-          [masc_keeper_clear] writes it once it has saved the emptied
-          checkpoint ({!Keeper_history_clear}). The turn after a clear starts
-          from that empty history and says [Fresh_history] in its own line,
-          if it reaches its end. The clear says so at once: a reader is not
-          left with a position nothing explains while the keeper sits idle, or
-          for good when that turn dies before it writes a line.
+      (** The saved history of this trace held no atom when its writer looked.
+          The line is named for what its writer saw, not for who wrote it,
+          because a reader has no use for the difference.
 
-          The line is appended after the emptied checkpoint is saved, never
-          before. It does not say the history is still empty: a turn that was
-          running during the clear saves its own, full history over the
-          emptied one (masc #37021). *)
+          A turn writes it when the history it starts from holds no atom,
+          before it runs. If the turn reaches its end, its own line says
+          [Fresh_history] as well; if it saves and then dies, this is the only
+          line that says its atoms are numbered from zero.
+
+          [masc_keeper_clear] writes it once it has saved the emptied
+          checkpoint ({!Keeper_history_clear}), never before. The clear says
+          so at once, so that a reader is not left with a position nothing
+          explains while the keeper sits idle.
+
+          The line does not say the history is still empty: a turn that was
+          running during a clear saves its own, full history over the emptied
+          one (masc #37021). *)
 
 type record =
   { recorded_at : float (** Unix seconds, when the writer built the line. *)

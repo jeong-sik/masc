@@ -498,6 +498,44 @@ let test_a_wire_that_cannot_stop_thinking_drops_instead_of_retrying () =
    instead of continuing the turn — observed on the Terminal-Bench anthropic
    smoke against v0.35.7. Effort is a thinking modifier, so the retry strips
    it from the candidate it re-dispatches. *)
+(* The recovery decision is fed a boolean, and this is where that boolean comes
+   from. Testing the decision alone leaves the question unasked: does the gate
+   read this candidate's own contract, or does it answer the same either way?
+   The two rows below differ in exactly one declared value -- whether the off
+   effort is in the ladder -- so a gate that ignored the row would fail one of
+   them. *)
+let test_the_retry_gate_reads_this_candidate_s_ladder () =
+  let router_caps =
+    match Llm_provider.Capabilities.capabilities_for_provider_label "openrouter" with
+    | Some caps -> caps
+    | None -> Alcotest.fail "the router base is no longer reachable by label"
+  in
+  let candidate caps =
+    Runtime_candidate.of_provider_config
+      (Llm_provider.Provider_config.make
+         ~kind:Llm_provider.Provider_config.OpenAI_compat
+         ~model_id:"gate-row"
+         ~base_url:"https://openrouter.ai/api/v1"
+         ~model_capabilities_override:caps
+         ())
+  in
+  Alcotest.(check bool)
+    "a ladder with no off value cannot take the retry"
+    false
+    (Masc.Keeper_turn_driver_try_provider.For_testing.retry_without_thinking_admitted
+       (candidate router_caps));
+  let with_off_declared =
+    { router_caps with
+      Llm_provider.Capabilities.accepted_reasoning_efforts =
+        Some [ Llm_provider.Reasoning_effort.None_; Llm_provider.Reasoning_effort.Low ]
+    }
+  in
+  Alcotest.(check bool)
+    "the same row declaring the off value can"
+    true
+    (Masc.Keeper_turn_driver_try_provider.For_testing.retry_without_thinking_admitted
+       (candidate with_off_declared))
+
 let test_truncation_retry_candidate_drops_reasoning_effort () =
   let cfg =
     Llm_provider.Provider_config.make
@@ -2364,6 +2402,10 @@ let () =
             "truncation retry candidate drops reasoning effort"
             `Quick
             test_truncation_retry_candidate_drops_reasoning_effort;
+          Alcotest.test_case
+            "the retry gate reads this candidate's ladder"
+            `Quick
+            test_the_retry_gate_reads_this_candidate_s_ladder;
           Alcotest.test_case
             "truncation recovery is scoped to max-tokens rejections"
             `Quick

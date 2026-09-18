@@ -96,6 +96,12 @@ type entry = {
   style : style;
   timestamp : string;
   timeline_bucket : timeline_bucket option;
+  span_clock : string option;
+      (** The pane-level span clock for a turn block's head row
+          ([Rail_opens]). Folded into the body text *before* wrapping, so it
+          consumes body budget like any other word and no row exceeds the
+          block's wrap width. [None] on every other row; nothing shifts when
+          a turn has no span to say. *)
   role_label : string;
   role_label_mark_cells : int;
   request_label : string;
@@ -1424,6 +1430,17 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
     match drop_empty (List.rev body_chunks) with
     | [] -> [ "" ]
     | chunks -> chunks
+  in
+  (* A turn block's head row opens with the span clock in the body. The
+     gutter's width is what every row's wrap width is taken from, so a wider
+     span clock there would wrap this block's body narrower than the rows
+     around it. Folded into the text *before* wrapping, it consumes body
+     budget like any other word: no row exceeds [body_width], and the block
+     keeps the same wrap width as the rows it sits among. *)
+  let body_chunks =
+    match entry.span_clock, entry.turn_rail with
+    | Some span, Rail_opens -> wrap_words ~max_cells:body_width span @ body_chunks
+    | _ -> body_chunks
   in
   let body_rows =
     let margin, rail_cells, label_at, clock_cells =

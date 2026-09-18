@@ -38,7 +38,8 @@ let catalog_entry ~id ~base_url ~api_key_env =
      [[targets]]\n\
      id = %S\n\
      provider_ref = %S\n\
-     model_id = %S\n"
+     model_id = %S\n\
+     %s"
     id
     base_url
     api_key_env
@@ -47,6 +48,10 @@ let catalog_entry ~id ~base_url ~api_key_env =
     id
     id
     (id ^ "-model")
+    (* #36984 rejects a plan whose target declares no connect and no body
+       budget (Missing_deadline). This fixture predates that admission rule;
+       30.0 mirrors the flow suite's default (test_exact_output_flow.ml). *)
+    "connect_timeout_s = 30.0\n"
 ;;
 
 let with_catalog ~base_url f =
@@ -167,6 +172,7 @@ let with_server f =
     Eio.Switch.run
     @@ fun sw ->
     let net = Eio.Stdenv.net env in
+    let clock = Eio.Stdenv.clock env in
     let port = fresh_port () in
     let handler _conn _request body =
       ignore (Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) : string);
@@ -189,7 +195,7 @@ let with_server f =
     let server = Cohttp_eio.Server.make ~callback:handler () in
     Eio.Fiber.fork_daemon ~sw (fun () ->
       Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
-    f ~net ~base_url:(Printf.sprintf "http://127.0.0.1:%d" port)
+    f ~net ~clock ~base_url:(Printf.sprintf "http://127.0.0.1:%d" port)
   in
   result, Atomic.get posts
 ;;
@@ -200,11 +206,12 @@ let candidate_id (success : EO.flow_success) =
 
 let run_mixed_flow () =
   with_server
-  @@ fun ~net ~base_url ->
+  @@ fun ~net ~clock ~base_url ->
   with_catalog ~base_url
   @@ fun snapshot ->
   EO.execute_flow_once
     ~net
+    ~clock
     ~before_measurement_dispatch:(fun _ -> Ok ())
     ~on_measurement_terminal:(fun _ -> Ok ())
     ~before_dispatch:(fun _ -> Ok ())
@@ -340,6 +347,7 @@ let with_rate_limited_first_server f =
     Eio.Switch.run
     @@ fun sw ->
     let net = Eio.Stdenv.net env in
+    let clock = Eio.Stdenv.clock env in
     let port = fresh_port () in
     let handler _conn _request body =
       ignore (Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) : string);
@@ -367,7 +375,7 @@ let with_rate_limited_first_server f =
     let server = Cohttp_eio.Server.make ~callback:handler () in
     Eio.Fiber.fork_daemon ~sw (fun () ->
       Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
-    f ~net ~base_url:(Printf.sprintf "http://127.0.0.1:%d" port)
+    f ~net ~clock ~base_url:(Printf.sprintf "http://127.0.0.1:%d" port)
   in
   result, Atomic.get posts
 ;;
@@ -375,11 +383,12 @@ let with_rate_limited_first_server f =
 let test_rate_limited_advance_survives_the_durable_round_trip () =
   let result, posts =
     with_rate_limited_first_server
-    @@ fun ~net ~base_url ->
+    @@ fun ~net ~clock ~base_url ->
     with_catalog ~base_url
     @@ fun snapshot ->
     EO.execute_flow_once
       ~net
+      ~clock
       ~before_measurement_dispatch:(fun _ -> Ok ())
       ~on_measurement_terminal:(fun _ -> Ok ())
       ~before_dispatch:(fun _ -> Ok ())

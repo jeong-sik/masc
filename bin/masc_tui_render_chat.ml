@@ -1345,6 +1345,7 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
              timeline_bucket =
                Option.map keeper_message_timeline_bucket
                  timeline_at;
+             span_clock = None;
              role_label;
              role_label_mark_cells =
                Message_layout.role_label_mark_cells
@@ -1455,6 +1456,7 @@ let chat_tail_entries (state : state) ~keeper_name ~role_label_column =
     ({ style
      ; timestamp = keeper_message_clock at
      ; timeline_bucket = Some (keeper_message_timeline_bucket at)
+     ; span_clock = None
      ; role_label =
          Message_layout.align_role_label ~column:role_label_column ~style label
      ; role_label_mark_cells =
@@ -2148,6 +2150,24 @@ let render_keeper_message (state : state) =
                   Message_layout.Markdown_growing
                     { keeper_name; request_id; entry_index }
                 in
+                let span_clock =
+                  (* The block's clock stays the dispatch moment. The span
+                     ("16:38→" running, "16:38→16:41" settled) rides in the
+                     entry's [span_clock], which the layout folds into the
+                     body *before* wrapping: it consumes body budget like any
+                     other word, so no row exceeds the block's wrap width and
+                     nothing truncates on a tight pane. A span in the gutter
+                     would have wrapped this block's body narrower than the
+                     rows around it. The transcript records the settle instant
+                     (settled_at). The 2026-09-10 misread it answers: a 16:38
+                     turn drawn under a 16:41 reply read as out-of-order. *)
+                  let start = keeper_message_clock started_at in
+                  match Keeper_chat_transcript.settled_at transcript with
+                  | Some settled ->
+                      let finish = keeper_message_clock settled in
+                      Some (Printf.sprintf "%s→%s" start finish)
+                  | None -> Some (Printf.sprintf "%s→" start)
+                in
                 let entry style role_label body =
                   (* One alignment, on the label the row actually carries.
                      Aligning the continuation mark and then aligning the
@@ -2157,6 +2177,7 @@ let render_keeper_message (state : state) =
                     ({ style;
                        timestamp = keeper_message_clock started_at;
                        timeline_bucket;
+                       span_clock;
                        role_label =
                          Message_layout.align_role_label
                            ~column:role_label_column

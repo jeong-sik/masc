@@ -4015,22 +4015,24 @@ let progress_label = function
    progress out of that answer. *)
 let test_a_sink_answer_is_not_progress () =
   let sinks =
-    [ "no sink", None
-    ; "a save that answers Ok", Some (fun _ -> Ok ())
-    ; "a save that fails", Some (fun _ -> Error "disk full")
+    [ "no sink", None, Ok ()
+    ; "a save that answers Ok", Some (fun _ -> Ok ()), Ok ()
+    ; "a save that fails", Some (fun _ -> Error "disk full"), Error "disk full"
     ]
   in
   List.iter
     (fun stage ->
        List.iter
-         (fun (sink_label, sink) ->
+         (fun (sink_label, sink, answer) ->
             let progress = Atomic.make Try_provider.No_checkpoint_stage in
-            let (_ : (unit, string) result) =
+            let returned =
               Driver.For_testing.observing_checkpoint_sink progress sink (progress_snapshot stage)
             in
             let label =
               Agent_core.Agent.checkpoint_stage_to_string stage ^ " with " ^ sink_label
             in
+            Alcotest.(check (result unit string)) (label ^ ": the sink's answer passes through")
+              answer returned;
             Alcotest.(check string) label
               (progress_label Try_provider.Checkpoint_stage_reached)
               (progress_label (Atomic.get progress));
@@ -4225,7 +4227,14 @@ let test_no_same_path_hint_unless_every_condition_holds () =
 
 (* §3.4: the wait of a same-path suffix is the rest recorded on the path. A
    server error records none, so the retry dispatches at once; a 429 that
-   stated its wait holds the path until then. *)
+   stated its wait holds the path until then.
+
+   This pins a branch the resume relies on and does not change: it passes on
+   main too, because a suffix naming one path already read that path's rest.
+   It is here as the record of what the resume inherits -- in particular that
+   a server error, a dropped stream and a timeout resume with no wait at all,
+   which is the case RFC §1.1 was written about (RFC §7 measures how often a
+   resume with no wait fails again before running a tool). *)
 let test_a_same_path_suffix_waits_only_for_a_recorded_rest () =
   with_runtime_config runtime_toml_quota_lane (fun () ->
     reset_quota_lane_rests ();

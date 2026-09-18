@@ -30,6 +30,8 @@ let keeper_toml_fields =
   ; "network_mode", Field_string
   ; "remote_endpoint", Field_string
   ; "microvm_backend", Field_string
+  ; "microvm_memory", Field_string
+  ; "microvm_cpus", Field_int
   ; "observation_run", Field_string
   ; "max_context_override", Field_int
   ; "telemetry_feedback_enabled", Field_bool
@@ -329,9 +331,38 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
       Keeper_config.validate_max_context_override_value value
       |> Result.map Option.some
   in
+  (* The guest's size, each dimension on its own: an unset one takes the
+     workspace default (runtime.toml [sandbox]). A value that does not parse
+     fails the load, as an unknown [microvm_backend] does, instead of booting
+     the keeper on a size it did not ask for. *)
+  let guest_dimension key parse raw =
+    match raw with
+    | None -> Ok None
+    | Some raw ->
+      parse raw
+      |> Result.map Option.some
+      |> Result.map_error (fun detail ->
+        Printf.sprintf "%s_invalid: keeper.%s: %s" key key detail)
+  in
+  let microvm_memory_result =
+    guest_dimension
+      "microvm_memory"
+      Keeper_microvm_guest_size.memory_of_string
+      (str "microvm_memory")
+  in
+  let microvm_cpus_result =
+    guest_dimension "microvm_cpus" Keeper_microvm_guest_size.cpus_of_int (int_ "microvm_cpus")
+  in
+  let scalar_results =
+    Result.bind max_context_override_result (fun max_context_override ->
+      Result.bind microvm_memory_result (fun microvm_memory ->
+        Result.map
+          (fun microvm_cpus -> max_context_override, microvm_memory, microvm_cpus)
+          microvm_cpus_result))
+  in
   Result.bind result (fun () ->
     Result.map
-      (fun max_context_override ->
+      (fun (max_context_override, microvm_memory, microvm_cpus) ->
       {
         id = None;
         manifest_path = None;
@@ -346,6 +377,8 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         remote_endpoint = str "remote_endpoint";
         microvm_backend =
           Option.bind (str "microvm_backend") Keeper_microvm_backend.of_string;
+        microvm_memory;
+        microvm_cpus;
         observation_run =
           Option.bind (str "observation_run") observation_run_of_string;
         max_context_override;
@@ -360,7 +393,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         tool_deny;
         agent_core_env;
       })
-      max_context_override_result)
+      scalar_results)
 
 (** Fields actually read by [profile_defaults_of_toml] from the [[keeper]]
     TOML table.  Keep this a subset of [canonical_keeper_toml_key_names] —
@@ -395,6 +428,8 @@ let merge_keeper_profile_defaults
     network_mode = prefer overlay.network_mode base.network_mode;
     remote_endpoint = prefer overlay.remote_endpoint base.remote_endpoint;
     microvm_backend = prefer overlay.microvm_backend base.microvm_backend;
+    microvm_memory = prefer overlay.microvm_memory base.microvm_memory;
+    microvm_cpus = prefer overlay.microvm_cpus base.microvm_cpus;
     observation_run = prefer overlay.observation_run base.observation_run;
     max_context_override =
       prefer overlay.max_context_override base.max_context_override;

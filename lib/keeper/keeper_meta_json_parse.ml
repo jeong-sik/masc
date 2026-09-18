@@ -451,6 +451,10 @@ let decode_current_meta fields =
          value here that is safe to dispatch on — a stored name would be the
          drift the comment above describes, in a second field. *)
       ; microvm_backend = None
+      (* TOML-owned like the backend: [None] here, and the profile overlay
+         supplies the keeper's own size. *)
+      ; microvm_memory = None
+      ; microvm_cpus = None
       ; mention_targets = []
       ; always_allow = None
       ; voice_always_allow = None

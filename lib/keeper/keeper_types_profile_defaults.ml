@@ -14,6 +14,8 @@ type keeper_profile_defaults = {
      Phase 1 task 2. *)
   remote_endpoint : string option;
   microvm_backend : Keeper_microvm_backend.t option;
+  microvm_memory : Keeper_microvm_guest_size.memory option;
+  microvm_cpus : Keeper_microvm_guest_size.cpus option;
   (* RFC-0422 §3.4: which box a tool_execute runs in before the judge is
      asked. [None] is [Observe]. Read where the route is built, not carried
      on keeper meta, as [remote_endpoint] is. *)
@@ -65,6 +67,8 @@ let empty_keeper_profile_defaults =
     network_mode = None;
     remote_endpoint = None;
     microvm_backend = None;
+    microvm_memory = None;
+    microvm_cpus = None;
     observation_run = None;
     max_context_override = None;
     telemetry_feedback_enabled = None;

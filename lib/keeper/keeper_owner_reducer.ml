@@ -44,6 +44,8 @@ type profile_update =
   ; sandbox_profile : Keeper_types_profile.sandbox_profile
   ; sandbox_image : string option
   ; microvm_backend : Keeper_microvm_backend.t option
+  ; microvm_memory : Keeper_microvm_guest_size.memory option
+  ; microvm_cpus : Keeper_microvm_guest_size.cpus option
   ; network_mode : Keeper_types_profile.network_mode
   ; mention_targets : string list
   ; max_context_override : int option
@@ -442,6 +444,8 @@ let apply_existing (state : state) meta command =
          ; sandbox_profile = update.sandbox_profile
          ; sandbox_image = update.sandbox_image
          ; microvm_backend = update.microvm_backend
+         ; microvm_memory = update.microvm_memory
+         ; microvm_cpus = update.microvm_cpus
          ; network_mode = update.network_mode
          ; mention_targets = update.mention_targets
          ; max_context_override = update.max_context_override

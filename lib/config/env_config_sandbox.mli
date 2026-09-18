@@ -101,18 +101,33 @@ module Runtime : sig
       Empty -- an unreadable resolv.conf, or an explicit empty override --
       passes no [--dns]. *)
 
-  val microvm_memory : unit -> string
-  (** Memory for a keeper-lifetime microvm guest
-      ([MASC_KEEPER_MICROVM_MEMORY], e.g. "8g"). Empty falls back to the
-      shared sandbox cap [Hardening.memory], so raising only the guests
-      does not touch the docker lane. The guest holds this allocation for
-      its whole keeper lifetime — size it for the heaviest build the
-      keeper runs, not the average turn. *)
+  val microvm_memory_default : string
+  val microvm_cpus_default : int
+  (** What a guest boots with when neither the keeper nor the workspace names
+      a size. The registry row displays these rather than restating them. *)
 
-  val microvm_cpus : unit -> string
-  (** CPU count for a microvm guest ([MASC_KEEPER_MICROVM_CPUS], e.g.
-      "8"). Empty passes no [--cpus] and takes the container CLI's
-      default allocation. *)
+  val microvm_memory : unit -> (Keeper_microvm_guest_size.memory, string) result
+  (** The workspace's guest memory: [MASC_KEEPER_MICROVM_MEMORY], which
+      [runtime.toml] [sandbox.microvm_memory] seeds, else
+      {!microvm_memory_default}. Blank counts as unset. A set value that does
+      not parse is [Error] naming the variable, never the default. The guest
+      holds this allocation for its whole keeper lifetime -- size it for the
+      heaviest build the keeper runs, not the average turn. *)
+
+  val microvm_cpus : unit -> (Keeper_microvm_guest_size.cpus, string) result
+  (** The workspace's guest CPU count: [MASC_KEEPER_MICROVM_CPUS], which
+      [runtime.toml] [sandbox.microvm_cpus] seeds, else
+      {!microvm_cpus_default}. Same blank and refusal rules as
+      {!microvm_memory}. *)
+
+  val microvm_guest_size :
+    memory:Keeper_microvm_guest_size.memory option ->
+    cpus:Keeper_microvm_guest_size.cpus option ->
+    (Keeper_microvm_guest_size.t, string) result
+  (** The size a keeper's guest boots with: the keeper's own [microvm_memory]
+      and [microvm_cpus] where it set them, {!microvm_memory} and
+      {!microvm_cpus} for the rest. The boot and the sandbox status both ask
+      this, so what the dashboard shows is what the guest was given. *)
 
   val microvm_work_volume_size : unit -> string
   (** [MASC_KEEPER_MICROVM_WORK_VOLUME_SIZE], default [256g]. Ceiling of the

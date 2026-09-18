@@ -289,6 +289,21 @@ let test_pure_reducer_adds_deltas_and_preserves_pause () =
   check bool "pause latch retained" true (Option.is_some meta.latched_reason)
 ;;
 
+(* A microvm keeper's guest size travels with the rest of the profile, so an
+   update that raises it reaches the owner's projection rather than being
+   dropped where the reducer rebuilds the meta. *)
+let profile_update_memory =
+  match Keeper_microvm_guest_size.memory_of_string "8g" with
+  | Ok memory -> Some memory
+  | Error detail -> failwith detail
+;;
+
+let profile_update_cpus =
+  match Keeper_microvm_guest_size.cpus_of_int 6 with
+  | Ok cpus -> Some cpus
+  | Error detail -> failwith detail
+;;
+
 let test_profile_update_preserves_owner_runtime_state () =
   let original = make_meta "profile" in
   let state =
@@ -302,6 +317,8 @@ let test_profile_update_preserves_owner_runtime_state () =
     ; sandbox_profile = Keeper_types_profile_sandbox.Micro_vm
     ; sandbox_image = current.sandbox_image
     ; microvm_backend = Some Keeper_microvm_backend.Nerdctl_kata
+    ; microvm_memory = profile_update_memory
+    ; microvm_cpus = profile_update_cpus
     ; network_mode = current.network_mode
     ; mention_targets = [ "profile-target" ]
     ; activation_mode = Masc.Keeper_activation_mode.Autonomous
@@ -319,6 +336,10 @@ let test_profile_update_preserves_owner_runtime_state () =
   check string "profile instructions updated" update.instructions committed.instructions;
   check bool "profile backend reaches owner projection" true
     (committed.microvm_backend = Some Keeper_microvm_backend.Nerdctl_kata);
+  check (option int) "profile guest memory reaches owner projection" (Some 8192)
+    (Option.map Keeper_microvm_guest_size.memory_mib committed.microvm_memory);
+  check (option int) "profile guest cpus reach owner projection" (Some 6)
+    (Option.map Keeper_microvm_guest_size.cpus_count committed.microvm_cpus);
   check int
     "profile update preserves additive turns"
     current.runtime.usage.total_turns

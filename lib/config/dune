@@ -20,6 +20,7 @@
   env_config_snapshot
   env_config_snapshot_collector
   env_config_snapshot_core
+  keeper_microvm_guest_size
   keeper_runtime_setting_registry
   keeper_sandbox_config
   masc_grpc_transport

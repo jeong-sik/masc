@@ -171,6 +171,33 @@ let test_stopped_instance_is_not_reported_as_not_started () =
   Alcotest.(check bool) "not a never-started VM" false
     (contains rendered "NOT STARTED")
 
+(* A size the keeper or the workspace wrote and nothing can parse refuses the
+   next boot. The sandbox screen says so before a turn runs into it. *)
+let test_unresolved_guest_size_is_shown () =
+  let json =
+    Yojson.Safe.from_string
+      {|{
+        "sandbox_live": {
+          "sandbox_profile": "microvm",
+          "containers": [],
+          "resource_config": {
+            "memory": null,
+            "cpus": null,
+            "guest_size_error": "MASC_KEEPER_MICROVM_MEMORY: \"12\" is not a guest memory size",
+            "work_volume_size": "256g",
+            "pids_limit": null,
+            "tmpfs_size": null
+          }
+        }
+      }|}
+  in
+  let rendered = render json in
+  (* Single tokens: the row wraps at 47 cells, so a phrase can straddle two
+     lines while the words themselves stay whole. *)
+  Alcotest.(check bool) "the row is labelled" true (contains rendered "Guest size");
+  Alcotest.(check bool) "it names where the size came from" true
+    (contains rendered "MASC_KEEPER_MICROVM_MEMORY")
+
 let test_unknown_profile_fails_closed () =
   let json =
     Yojson.Safe.from_string
@@ -441,6 +468,8 @@ let () =
             test_live_container_and_errors_are_visible
         ; Alcotest.test_case "stopped instance stays distinct" `Quick
             test_stopped_instance_is_not_reported_as_not_started
+        ; Alcotest.test_case "an unresolved guest size is shown" `Quick
+            test_unresolved_guest_size_is_shown
         ; Alcotest.test_case "unknown profile fails closed" `Quick
             test_unknown_profile_fails_closed
         ; Alcotest.test_case "terminal controls sanitized" `Quick

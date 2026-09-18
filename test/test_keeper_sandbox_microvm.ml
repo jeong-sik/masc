@@ -41,6 +41,14 @@ let apple_network_args ~dns network =
   | Error detail ->
     Alcotest.failf "Apple's runtime refused a network mode it can spell: %s" detail
 
+let guest_size ~memory ~cpus =
+  match
+    ( Keeper_microvm_guest_size.memory_of_string memory
+    , Keeper_microvm_guest_size.cpus_of_int cpus )
+  with
+  | Ok memory, Ok cpus -> { Keeper_microvm_guest_size.memory; cpus }
+  | Error detail, (Ok _ | Error _) | Ok _, Error detail -> Alcotest.fail detail
+
 let argv ?(network = Profile.Network_none) () =
   apple_boot_argv
   @@ M.turn_start_argv_for
@@ -49,8 +57,7 @@ let argv ?(network = Profile.Network_none) () =
     ~label_args:[ "--label"; "masc.mcp.kind=keeper-vm" ]
     ~uid:501
     ~gid:20
-    ~memory:"2g"
-    ~cpus:None
+    ~guest_size:(guest_size ~memory:"2g" ~cpus:4)
     ~network_args:(apple_network_args ~dns:(Some "1.1.1.1") network)
     ~mount_args:probe_mount_args
     ~image:"masc-keeper-sandbox:local"
@@ -98,7 +105,7 @@ let test_keeps_the_hardening_container_accepts () =
   Alcotest.(check bool) "read-only rootfs" true (contains "--read-only" a);
   Alcotest.(check bool) "removes the container" true (contains "--rm" a);
   Alcotest.(check bool) "runs as the caller" true (adjacent ~flag:"--user" ~value:"501:20" a);
-  Alcotest.(check bool) "caps memory" true (adjacent ~flag:"--memory" ~value:"2g" a)
+  Alcotest.(check bool) "caps memory" true (adjacent ~flag:"--memory" ~value:"2048m" a)
 
 (* RFC-0400: the guest's tree is its work volume. A host playground path on
    the boot argv would put the tree back on virtiofs, where every file the
@@ -596,8 +603,7 @@ let test_turn_start_argv_shape () =
       ~label_args:[ "--label"; "masc.mcp.kind=turn" ]
       ~uid:501
       ~gid:20
-      ~memory:"2g"
-      ~cpus:None
+      ~guest_size:(guest_size ~memory:"2g" ~cpus:4)
       ~network_args:(apple_network_args ~dns:None Profile.Network_none)
       ~mount_args:[ "-v"; "/base/.masc/config:/home/keeper/.masc/config:ro" ]
       ~image:"masc-keeper-sandbox:local"
@@ -632,8 +638,8 @@ let test_turn_start_argv_shape () =
        if not (contains needle a)
        then Alcotest.failf "turn_start_argv is missing %s" needle)
     [ "-d"; "--rm"; "--read-only"; "--tmpfs"; "--label" ];
-  if contains "--cpus" a
-  then Alcotest.fail "cpus:None must pass no --cpus";
+  if not (adjacent ~flag:"--cpus" ~value:"4" a)
+  then Alcotest.fail "the CPU count must reach --cpus on every boot";
   let sized =
     apple_boot_argv
     @@ M.turn_start_argv_for
@@ -642,17 +648,16 @@ let test_turn_start_argv_shape () =
       ~label_args:[]
       ~uid:501
       ~gid:20
-      ~memory:"8g"
-      ~cpus:(Some "8")
+      ~guest_size:(guest_size ~memory:"8g" ~cpus:8)
       ~network_args:[]
       ~mount_args:[]
       ~image:"masc-keeper-sandbox:local"
       ~constraints:Backend.all_guest_constraints
   in
   if not (adjacent ~flag:"--cpus" ~value:"8" sized)
-  then Alcotest.fail "cpus:Some must pass --cpus <count>";
-  if not (adjacent ~flag:"--memory" ~value:"8g" sized)
-  then Alcotest.fail "memory must reach --memory"
+  then Alcotest.fail "the CPU count must reach --cpus <count>";
+  if not (adjacent ~flag:"--memory" ~value:"8192m" sized)
+  then Alcotest.fail "memory must reach --memory in MiB"
 
 let test_inspect_state_parser () =
   let running =

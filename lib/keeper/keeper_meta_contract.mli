@@ -205,6 +205,8 @@ type keeper_meta = {
   sandbox_image : string option;
   network_mode : Keeper_types_profile.network_mode;
   microvm_backend : Keeper_microvm_backend.t option;
+  microvm_memory : Keeper_microvm_guest_size.memory option;
+  microvm_cpus : Keeper_microvm_guest_size.cpus option;
   mention_targets : string list;
   (* Lifecycle *)
   created_at : string;

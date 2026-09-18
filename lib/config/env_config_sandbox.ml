@@ -154,9 +154,48 @@ module Runtime = struct
     | configured -> configured
   ;;
 
-  let microvm_memory () = get_string ~default:"" "MASC_KEEPER_MICROVM_MEMORY"
+  (* Measured 2026-09-18: a keeper build inside a 2 GiB guest timed out or was
+     killed (exit 137). The defaults stay what guests booted with until now;
+     a keeper that builds names its own size, or the workspace raises these
+     in runtime.toml ([sandbox]). *)
+  let microvm_memory_env = "MASC_KEEPER_MICROVM_MEMORY"
+  let microvm_memory_default = "2g"
+  let microvm_cpus_env = "MASC_KEEPER_MICROVM_CPUS"
+  let microvm_cpus_default = 4
 
-  let microvm_cpus () = get_string ~default:"" "MASC_KEEPER_MICROVM_CPUS"
+  (* Blank is unset, as it is for [get_int]. A value that is set and does not
+     parse is refused rather than read as the default: the operator asked for
+     a size, and booting on another one would say nothing. *)
+  let configured_guest_dimension env_name ~default parse =
+    let raw =
+      match raw_value_opt env_name with
+      | Some value when String.trim value <> "" -> value
+      | Some _ | None -> default
+    in
+    parse raw |> Result.map_error (fun detail -> env_name ^ ": " ^ detail)
+  ;;
+
+  let microvm_memory () =
+    configured_guest_dimension
+      microvm_memory_env
+      ~default:microvm_memory_default
+      Keeper_microvm_guest_size.memory_of_string
+  ;;
+
+  let microvm_cpus () =
+    configured_guest_dimension
+      microvm_cpus_env
+      ~default:(string_of_int microvm_cpus_default)
+      Keeper_microvm_guest_size.cpus_of_string
+  ;;
+
+  let microvm_guest_size ~memory ~cpus =
+    Keeper_microvm_guest_size.resolve
+      ~memory
+      ~cpus
+      ~default_memory:microvm_memory
+      ~default_cpus:microvm_cpus
+  ;;
 
   let microvm_work_volume_size () =
     get_string ~default:"256g" "MASC_KEEPER_MICROVM_WORK_VOLUME_SIZE"

@@ -557,6 +557,14 @@ let effective_setting_value (row : Keeper_runtime_setting_registry.setting) =
          display_int (Env_config_keeper.KeeperGeneratedMedia.dir_max_bytes ())
        | "MASC_KEEPER_GENERATED_MEDIA_RETENTION_SEC" ->
          display_float (Env_config_keeper.KeeperGeneratedMedia.retention_seconds ())
+       | "MASC_KEEPER_MICROVM_MEMORY" ->
+         (match Env_config_sandbox.Runtime.microvm_memory () with
+          | Ok memory -> Keeper_microvm_guest_size.memory_argv memory
+          | Error detail -> raise (Env_config_core.Config_error detail))
+       | "MASC_KEEPER_MICROVM_CPUS" ->
+         (match Env_config_sandbox.Runtime.microvm_cpus () with
+          | Ok cpus -> display_int (Keeper_microvm_guest_size.cpus_count cpus)
+          | Error detail -> raise (Env_config_core.Config_error detail))
        | "MASC_KEEPER_GRPC_RECONNECT_BACKOFF_SEC" ->
          display_float Env_config_keeper.KeeperGrpc.reconnect_backoff_sec
        | "MASC_KEEPER_AUTONOMOUS_WAKE_PROMPT" ->

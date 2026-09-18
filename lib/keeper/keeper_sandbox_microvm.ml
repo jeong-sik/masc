@@ -717,8 +717,7 @@ let turn_start_argv_for
       ~label_args
       ~uid
       ~gid
-      ~memory
-      ~cpus
+      ~(guest_size : Keeper_microvm_guest_size.t)
       ~network_args
       ~mount_args
       ~image
@@ -768,10 +767,15 @@ let turn_start_argv_for
           | Backend.Apple_container | Backend.Nerdctl_kata ->
             [ "--user"; Printf.sprintf "%d:%d" uid gid ])
        @ expressed
-       @ [ "--memory"; memory ]
-       @ (match cpus with
-          | Some count -> [ "--cpus"; count ]
-          | None -> [])
+       (* Always both. Leaving [--cpus] off took the CLI's own default, which
+          is a size nobody configured and the status surface could not show. *)
+       @ [ "--memory"
+         ; Keeper_microvm_guest_size.memory_argv guest_size.Keeper_microvm_guest_size.memory
+         ]
+       @ [ "--cpus"
+         ; string_of_int
+             (Keeper_microvm_guest_size.cpus_count guest_size.Keeper_microvm_guest_size.cpus)
+         ]
        @ Backend.run_runtime_args backend
        @ mount_args
        @ [ "--workdir"; work_volume_guest_root ]

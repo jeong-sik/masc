@@ -41,6 +41,12 @@ type provider_progress_sample =
             answered; nobody had. *)
   }
 
+(* What this dispatch's checkpoints have recorded so far, strongest last. *)
+type checkpoint_progress =
+  | No_checkpoint_stage
+  | Checkpoint_stage_reached
+  | Tool_results_saved
+
 (** Explicit context record for the extracted [try_provider] function.
 
     Each field corresponds to a variable captured by the original closure.
@@ -60,6 +66,11 @@ type try_provider_ctx =
        turn record on the trace measured, whichever runtime ran it. Read once
        per attempt, on that path only. *)
     carried_front_seed : unit -> Keeper_carried_front.seed_read
+  ; (* Where a front halved after a refusal is kept for the rest of the
+       turn. The position is a fact about the history, not about the
+       candidate that was refused, so the lane's next candidate composes
+       from it instead of starting at the whole history again. *)
+    hold_carried_front : Keeper_carried_front.seed -> unit
   ; base_path : string
   ; keeper_name : string
   ; name : string
@@ -137,7 +148,7 @@ type try_provider_ctx =
   ; cache_system_prompt : bool
   ; yield_on_tool : bool
   ; checkpoint_sink : Agent_core.Agent.checkpoint_sink option
-  ; checkpoint_stage_observed : bool Atomic.t
+  ; checkpoint_progress : checkpoint_progress Atomic.t
   ; context_injector : Agent_core.Hooks.context_injector option
   ; context : Agent_core.Context.t option
   ; enable_thinking : bool option
@@ -293,11 +304,78 @@ let apply_accept
     @return [(result, checkpoint_after, liveness_success_sample)] tuple. The
     sample is not recorded here; the caller records it only after the runtime
     accept predicate accepts the response. *)
-let observe_checkpoint_stage observed (_ : Agent_core.Agent.checkpoint_stage) =
-  Atomic.set observed true
+(* Progress only moves forward: a later stage never erases a saved tool
+   result, and a stage reached after one does not lower it. *)
+let progress_advances ~current ~next =
+  match current, next with
+  | No_checkpoint_stage, (Checkpoint_stage_reached | Tool_results_saved)
+  | Checkpoint_stage_reached, Tool_results_saved ->
+    true
+  | No_checkpoint_stage, No_checkpoint_stage
+  | Checkpoint_stage_reached, (No_checkpoint_stage | Checkpoint_stage_reached)
+  | Tool_results_saved, (No_checkpoint_stage | Checkpoint_stage_reached | Tool_results_saved) ->
+    false
 ;;
 
-let same_run_retry_allowed observed = not (Atomic.get observed)
+let rec advance_checkpoint_progress progress next =
+  let current = Atomic.get progress in
+  if progress_advances ~current ~next
+     && not (Atomic.compare_and_set progress current next)
+  then advance_checkpoint_progress progress next
+;;
+
+let observe_checkpoint_stage progress (_ : Agent_core.Agent.checkpoint_stage) =
+  advance_checkpoint_progress progress Checkpoint_stage_reached
+;;
+
+(* RFC last-path-resumes-after-progress §3.2: a chat operation resumes from its
+   latest saved checkpoint, so only a stage written after tools ran, and
+   written to that checkpoint, is progress a resumed attempt does not repeat.
+   [After_assistant_collected] is saved before accept judges the answer and
+   keeps a refused one, so counting it would resume into the same refusal.
+
+   Only the sink's owner may call this. A sink answers [Ok ()] for a write it
+   skipped as well as for one it made: the keeper's checkpoint store answers
+   [Stale_noop] when the canonical checkpoint is already ahead of the incoming
+   turn, and the keeper's sink turns that into [Ok ()]
+   ([Keeper_agent_run], [Keeper_checkpoint_store.Stale_noop]). Reading progress
+   off that answer would claim a checkpoint the operation would not resume
+   from, and the tools it holds would run a second time. *)
+let observe_checkpoint_saved progress (stage : Agent_core.Agent.checkpoint_stage) =
+  match stage with
+  | Agent_core.Agent.After_tool_results_appended
+  | Agent_core.Agent.After_context_injection ->
+    advance_checkpoint_progress progress Tool_results_saved
+  | Agent_core.Agent.After_assistant_collected
+  | Agent_core.Agent.After_rejected_response_dropped ->
+    ()
+;;
+
+(* The stage is marked before the save is delegated: a failed save still ends
+   same-run retry, because the attempt may already hold effects. What the sink
+   did with the checkpoint is not read here -- its answer does not say whether
+   anything was written -- so the sink's owner marks that itself with
+   [observe_checkpoint_saved]. A dispatch whose owner marks nothing holds no
+   saved tool results, and its lane's last candidate ends the turn as it did
+   before this observation existed. *)
+let observing_checkpoint_sink progress sink (snapshot : Agent_core.Agent.checkpoint_snapshot) =
+  observe_checkpoint_stage progress snapshot.stage;
+  match sink with
+  | None -> Ok ()
+  | Some sink -> sink snapshot
+;;
+
+let same_run_retry_allowed progress =
+  match Atomic.get progress with
+  | No_checkpoint_stage -> true
+  | Checkpoint_stage_reached | Tool_results_saved -> false
+;;
+
+let tool_results_saved progress =
+  match Atomic.get progress with
+  | Tool_results_saved -> true
+  | No_checkpoint_stage | Checkpoint_stage_reached -> false
+;;
 
 (* #28417: how often the stall watchdog samples the progress signal while a
    provider attempt runs. Small enough that the reported stall time stays
@@ -626,6 +704,15 @@ let compose_carried_model_input
       let first_atom =
         Keeper_carried_front.clamp ~atom_count:history_atom_count seed.first_atom
       in
+      (* A turn that did not finish is read at the position it reached, not
+         ahead of it. Every candidate of a turn shares the front a refusal
+         moved (RFC keeper-context-window-in-tokens §10.4), so the record of an
+         unfinished turn already names the narrowest range that turn tried, and
+         the next refusal is answered by the in-turn ladder. Moving the front
+         again here would also move it for the turns that ended for reasons
+         that say nothing about size — a quota answer, a reset connection —
+         and those repeat, so the range would shrink to nothing while the
+         history stood still. *)
       let projection, transmitted_bytes =
         Runtime_model_input_tail_window.project_from_atom
           ~measure_message_bytes
@@ -1101,11 +1188,8 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
     ~status:"resolved"
     ~decision:(`Assoc [ "resolved_lane", `String resolved_lane ])
     Keeper_runtime_manifest.Provider_lane_resolved;
-  let checkpoint_sink (snapshot : Agent_core.Agent.checkpoint_snapshot) =
-    observe_checkpoint_stage ctx.checkpoint_stage_observed snapshot.stage;
-    match ctx.checkpoint_sink with
-    | Some sink -> sink snapshot
-    | None -> Ok ()
+  let checkpoint_sink =
+    observing_checkpoint_sink ctx.checkpoint_progress ctx.checkpoint_sink
   in
   (* The attempt's bounded wait for the binding's admission permit, as Agent
      Core writes it: on while the wait is on, then the instant it settled.
@@ -1619,7 +1703,7 @@ let default_context_overflow_shrink_capacity ~capacity =
    doc comment for why the byte-axis and token-axis siblings are excluded.
    [same_run_retry_authorized] mirrors the exact same-run authority gate
    [Keeper_turn_driver]'s declared-lane walk applies before rotating
-   candidates ([same_run_retry_allowed] / [checkpoint_stage_observed]): a
+   candidates ([same_run_retry_allowed] / [checkpoint_progress]): a
    shrink retry is a same-run retry too, so it must not fire once AGENT_CORE has
    mutated agent state at a durable checkpoint stage. *)
 let context_overflow_shrink_sequence
@@ -1703,15 +1787,28 @@ let context_overflow_shrink_sequence
 let refusal_evicts = function
   | Agent_core.Error.Api (ContextOverflow _)
   | Agent_core.Error.Api
-      (InvalidRequest { reason = Request_body_refused_by_provider _; _ }) ->
+      (InvalidRequest { reason = Request_body_refused_by_provider _; _ })
+  (* A refusal whose reason agent core does not model is still a refusal OF
+     THIS REQUEST: the provider read it and declined it. Resending the same
+     bytes draws the same answer, so the only lever left is to carry less.
+     The sequence retries only while the front moves strictly later and
+     returns the refusal once a single atom is left, so this bounds at
+     log2(atoms) attempts rather than looping.
+
+     2026-09-18: five keepers sat in that loop. After the turn-record hard
+     cut (#36955) every seed was unreadable, each turn composed the whole
+     history, the provider refused the 15 MB body (a modelled body refusal,
+     one halving), and then refused 9.5 MB with an error body whose only
+     field is prose naming the prompt tokens and the model limit. That prose
+     stays Unknown_invalid_request on purpose -- Retry.classify_error has
+     tests pinning it, because reading the sentence would be a string
+     classifier. The turn ended and the next turn started over. *)
+  | Agent_core.Error.Api (InvalidRequest { reason = Unknown_invalid_request; _ }) ->
     true
   | Agent_core.Error.Api
       ( InvalidRequest
           { reason =
-              ( Json_parse_error
-              | Attempt_rejected
-              | Refusal_body_not_received
-              | Unknown_invalid_request )
+              (Json_parse_error | Attempt_rejected | Refusal_body_not_received)
           ; _
           }
       | InputCapacity _
@@ -1865,7 +1962,8 @@ let halve_front ~digest_at ~move_ledger ~hold ~first_atom ~retry =
     declared-lane candidate rotation and cascade fallback for every other
     error and for a refusal that survives every move. The front the retry
     composes from is the ledger's after the eviction, or, before any usage
-    on this pair, the halved range held for the rest of this attempt. *)
+    on this pair, the halved range, which the turn holds for every
+    candidate the lane walks to. *)
 (* The marks, judged once per candidate turn before its first composition
    (RFC keeper-context-window-in-tokens §10.5): above the high-water mark the
    oldest blocks leave until the projected total is under the low-water mark,
@@ -1923,18 +2021,6 @@ let run_try_provider_with_carried_range_eviction
        position on the atom axis, stops at a single atom, and without it a
        history that outgrew the provider would be refused every turn with
        nothing declared to move the front. *)
-    let seed = ctx.carried_front_seed in
-    let halved_front = ref None in
-    let ctx =
-      { ctx with
-        carried_front_seed =
-          (fun () ->
-             match !halved_front with
-             | Some halved ->
-               { Keeper_carried_front.seed = Some halved; unreadable = None }
-             | None -> seed ())
-      }
-    in
     let state = new_attempt_state () in
     let last_resort_used = ref false in
     let checkpoint_after = ref None in
@@ -1942,7 +2028,7 @@ let run_try_provider_with_carried_range_eviction
     let result =
       carried_range_eviction_sequence
         ~same_run_retry_authorized:(fun () ->
-          same_run_retry_allowed ctx.checkpoint_stage_observed)
+          same_run_retry_allowed ctx.checkpoint_progress)
         ~ledger:(fun () ->
           Keeper_model_input_ledger.Table.lookup
             ~keeper_name:ctx.keeper_name
@@ -1967,8 +2053,10 @@ let run_try_provider_with_carried_range_eviction
           | Keeper_carried_range.Unchanged _ -> false)
         ~halve:(fun ~first_atom ~atom_count:_ ~retry ->
           (* With a ledger, the move cuts through its one block and the
-             blocks restart from the new front; without one, the halved
-             seed is what the next composition on this attempt reads. *)
+             blocks restart from the new front, and that ledger is this
+             candidate's; without one, the halved seed is what the next
+             composition reads, on this candidate and on every later one the
+             lane walks to in this turn. *)
           halve_front
             ~digest_at:
               (Option.map (fun (sent : sent_request) -> sent.digest_at) !(state.last_request))
@@ -1977,7 +2065,7 @@ let run_try_provider_with_carried_range_eviction
                  ~keeper_name:ctx.keeper_name
                  ~runtime_id:ctx.runtime_id
                  ~session_id:(ledger_session ctx))
-            ~hold:(fun halved -> halved_front := Some halved)
+            ~hold:ctx.hold_carried_front
             ~first_atom
             ~retry)
         ~last_resort:(fun ~retry:_ ->
@@ -2080,9 +2168,18 @@ let thinking_was_enabled = function
    one condition here, and only one of them is about thinking.
 
    Turning thinking off is the remedy for a budget spent thinking, so it is
-   worth a second attempt only when thinking was on. Dropping the rejected
-   response is owed either way: accept judged it unusable, and a checkpoint
-   that keeps it feeds it back as input on every later turn.
+   worth a second attempt only when thinking was on and this candidate's wire
+   can be told to stop. The second half is not rhetorical: some rows declare a
+   thinking control that has no off state, and a categorical effort row whose
+   ladder omits the off value cannot spell the disable at all. Which surfaces
+   those are is catalog data, recorded in agent_core's
+   docs/design/provider-reasoning-dialects.md; the decision here reads the
+   typed answer. Attempting the retry on such a row spends the turn on a
+   request refused before dispatch, and on a lane with one candidate there is
+   nothing to rotate to (#36972).
+   Dropping the rejected response is owed either way: accept judged it
+   unusable, and a checkpoint that keeps it feeds it back as input on every
+   later turn.
 
    Measured on a live keeper, 2026-09-03, with thinking off throughout: the model
    collapsed into one repeated word, accept rejected it at max_tokens, and
@@ -2097,13 +2194,13 @@ type truncation_recovery =
   | Retry_without_thinking of Agent_core.Checkpoint.t
   | Drop_rejected_response of Agent_core.Checkpoint.t
 
-let truncation_recovery ~enable_thinking ~result ~checkpoint =
+let truncation_recovery ~enable_thinking ~thinking_can_be_disabled ~result ~checkpoint =
   match result, checkpoint with
   | Error error, Some checkpoint when max_tokens_truncation_error error -> (
     match checkpoint_before_incomplete_response checkpoint with
     | None -> Recovery_not_applicable
     | Some cut ->
-      if thinking_was_enabled enable_thinking
+      if thinking_was_enabled enable_thinking && thinking_can_be_disabled
       then Retry_without_thinking cut
       else Drop_rejected_response cut)
   | Error _, _ | Ok _, _ -> Recovery_not_applicable
@@ -2146,6 +2243,27 @@ let candidate_without_reasoning_effort (candidate : Runtime_candidate.t) : Runti
     }
 ;;
 
+(* Asked of the request the retry would actually send, not of an approximation
+   of it: the same candidate, effort stripped, thinking off.
+
+   [Complete_common.validate_all] is the admission every request meets on its
+   way out ([Complete.complete], [Complete_sync], [Complete_stream] all begin
+   there), and it routes the thinking question by provider kind, each kind to
+   the rule that actually governs it. A narrower predicate would answer for
+   some kinds and guess for the rest: read on its own,
+   [thinking_control_request_rejection] calls a row whose thinking control
+   lives on a separate capability axis unable to disable, when that wire turns
+   thinking off by sending no thinking field at all. *)
+let retry_without_thinking_admitted (candidate : Runtime_candidate.t) =
+  let retry_cfg =
+    { (Runtime_candidate.provider_cfg (candidate_without_reasoning_effort candidate)) with
+      Llm_provider.Provider_config.enable_thinking = Some false
+    ; preserve_thinking = Some false
+    }
+  in
+  Result.is_ok (Llm_provider.Complete_common.validate_all retry_cfg)
+;;
+
 let run_try_provider_with_truncation_recovery
       ?continuation_checkpoint
       (ctx : try_provider_ctx)
@@ -2154,9 +2272,11 @@ let run_try_provider_with_truncation_recovery
   let first_result, checkpoint_after, success_sample =
     run_try_provider_with_carried_range_eviction ?continuation_checkpoint ctx candidate
   in
+  let thinking_can_be_disabled = retry_without_thinking_admitted candidate in
   match
     truncation_recovery
       ~enable_thinking:ctx.enable_thinking
+      ~thinking_can_be_disabled
       ~result:first_result
       ~checkpoint:checkpoint_after
   with
@@ -2194,7 +2314,11 @@ let run_try_provider_with_truncation_recovery
       ~decision:
         (`Assoc
           ([ "continuation", `String "none"
-           ; "thinking", `String "already_disabled"
+           ; ( "thinking"
+             , `String
+                 (if thinking_can_be_disabled
+                  then "already_disabled"
+                  else "cannot_be_disabled") )
            ; ( "checkpoint_write"
              , `String
                  (match persisted with
@@ -2223,6 +2347,7 @@ module For_testing = struct
   let truncation_recovery = truncation_recovery
   let persist_dropped_response = persist_dropped_response
   let candidate_without_reasoning_effort = candidate_without_reasoning_effort
+  let retry_without_thinking_admitted = retry_without_thinking_admitted
   let memoize_message_measurement = memoize_message_measurement
   let carried_front = carried_front
   let halve_front = halve_front

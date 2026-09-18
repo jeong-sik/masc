@@ -3,6 +3,7 @@
 type source =
   | Ledger
   | Turn_record of { turn : int }
+  | Unfinished_turn of { turn : int }
   | Halved_after_refusal of { retry : int }
 
 type seed =
@@ -51,6 +52,17 @@ let composer_to_string = function
   | Not_materialized -> "not_materialized"
 ;;
 
+(* An official client's record is read too. Its window is measured where the
+   Agent Core path measures its own: the three official-client runtimes count
+   atoms of the message list masc handed the agent and name the front with
+   that list's opening digest (keeper_claude_code_runtime.ml:85-99,
+   keeper_codex_runtime.ml:116-127, keeper_antigravity_runtime.ml:158-181),
+   and that list is the keeper's checkpoint history — the projection runs over
+   [agent.state.messages] (pipeline_stage_prepare.ml:148-154). What it cannot
+   answer is a runtime the catalog no longer has, because nothing then says
+   which list was counted. Skipping the official ones cost a keeper that had
+   run 20 turns on claude_code the whole history on its first Agent Core turn
+   after them (2026-09-18: code-reviewer turn 4059, 13 MB per candidate). *)
 let of_records ~composer ~trace_id (records : Turn_record.t list) =
   List.fold_left
     (fun newest (record : Turn_record.t) ->
@@ -59,23 +71,26 @@ let of_records ~composer ~trace_id (records : Turn_record.t list) =
          , record.Turn_record.finish_reason
          , composer (record_runtime record) )
        with
-       | Some window, Some _, Composes_from_the_history
+       | Some window, finish_reason, (Composes_from_the_history | Hands_over_its_own_list)
          when String.equal record.Turn_record.trace_id trace_id ->
          let turn = record.Turn_record.absolute_turn in
          (match newest with
           | Some (newest_turn, _) when newest_turn >= turn -> newest
           | Some _ | None ->
+            let source =
+              match finish_reason with
+              | Some _ -> Turn_record { turn }
+              | None -> Unfinished_turn { turn }
+            in
             Some
               ( turn
               , { first_atom =
                     window.Turn_record.total_atoms - window.Turn_record.transmitted_atoms
                 ; front_digest = window.Turn_record.front_atom_digest
-                ; source = Turn_record { turn }
+                ; source
                 } ))
-       | ( Some _
-         , Some _
-         , (Composes_from_the_history | Hands_over_its_own_list | Not_materialized) )
-       | Some _, None, _
+       | Some _, _, Not_materialized
+       | Some _, _, (Composes_from_the_history | Hands_over_its_own_list)
        | None, _, _ -> newest)
     None
     records
@@ -155,6 +170,7 @@ let halve ~first_atom ~atom_count =
 let source_to_string = function
   | Ledger -> "ledger"
   | Turn_record { turn } -> Printf.sprintf "turn_record#%d" turn
+  | Unfinished_turn { turn } -> Printf.sprintf "unfinished_turn#%d" turn
   | Halved_after_refusal { retry } -> Printf.sprintf "halved_after_refusal#%d" retry
 ;;
 
@@ -175,6 +191,8 @@ let origin_to_json = function
   | Carried Ledger -> `Assoc [ "kind", `String "ledger" ]
   | Carried (Turn_record { turn }) ->
     `Assoc [ "kind", `String "turn_record"; "turn", `Int turn ]
+  | Carried (Unfinished_turn { turn }) ->
+    `Assoc [ "kind", `String "unfinished_turn"; "turn", `Int turn ]
   | Carried (Halved_after_refusal { retry }) ->
     `Assoc [ "kind", `String "halved_after_refusal"; "retry", `Int retry ]
   | Whole_history -> `Assoc [ "kind", `String "whole_history" ]

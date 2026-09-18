@@ -271,7 +271,7 @@ let parse_empty json : Parse.empty_completion =
 
 let parse_provider_error label body =
   match Parse.parse_openai_response_result body with
-  | Error (Parse.Provider_error { message; error_type; provider_status }) ->
+  | Error (Parse.Provider_error { message; error_type; provider_status; report = _ }) ->
     message, error_type, provider_status
   | Error (Parse.Unreadable_response reason) ->
     Alcotest.failf "%s: read as unreadable (%s)" label reason

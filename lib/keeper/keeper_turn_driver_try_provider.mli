@@ -445,6 +445,12 @@ module For_testing : sig
       reject it with thinking disabled. *)
   val candidate_without_reasoning_effort : Runtime_candidate.t -> Runtime_candidate.t
 
+  (** Whether the no-thinking retry would be admitted on this candidate, asked
+      of the request it would send and answered by the admission every request
+      meets ([Complete_common.validate_all]). This is what
+      {!truncation_recovery} reads as [thinking_can_be_disabled]. *)
+  val retry_without_thinking_admitted : Runtime_candidate.t -> bool
+
   val apply_accept :
     runtime_id:string ->
     accept:(Agent_core.Types.api_response -> bool) ->

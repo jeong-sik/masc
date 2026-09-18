@@ -1,6 +1,6 @@
 ---
 rfc: "librarian-is-the-brain"
-title: "Keeper 가 몸이면 Librarian 은 뇌다 — 자기 루프로 돌고, 끝난 턴을 빠짐없이 순서대로 읽는다"
+title: "Keeper 가 몸이면 Librarian 은 뇌에 기록하는 존재다 — 자기 루프로 돌고, 끝난 턴을 빠짐없이 순서대로 읽는다"
 status: Draft
 created: 2026-09-18
 updated: 2026-09-18
@@ -11,7 +11,7 @@ related: ["keeper-context-window-in-tokens", "memory-os-bounded-context-and-libr
 implementation_prs: []
 ---
 
-# RFC: Keeper 가 몸이면 Librarian 은 뇌다
+# RFC: Keeper 가 몸이면 Librarian 은 뇌에 기록하는 존재다
 
 - 상태: Draft
 - 작성: 2026-09-18. 코드는 origin/main `84fb520c34`, 실측은 같은 날 라이브 `<base-path>/.masc`.
@@ -19,7 +19,7 @@ implementation_prs: []
 
 ## 1. 결정 (운영자, 2026-09-18)
 
-1. **Keeper 가 몸이면 Librarian 은 뇌다.** 몸은 세상에서 움직이고, 뇌는 몸이 겪은 것을 수시로 읽어 기억과 맥락을 정리한다. 특정 주기나 조건표로 도는 부업이 아니다. 몸이 뇌에게 일을 시키지 않는다.
+1. **Keeper 가 몸이면 Librarian 은 뇌에 기록하는 존재다.** 몸은 세상에서 움직인다. 뇌는 Keeper 가 생각할 때 쓰는 기억이다(facts, 하던 일, 받은 일 정리). Librarian 은 몸이 겪은 것을 수시로 읽어 뇌에 적는다. 생각을 대신하지 않고 기록한다. 특정 주기나 조건표로 도는 부업이 아니고, 몸이 Librarian 에게 일을 시키지도 않는다.
 2. 흡수 지점을 지나간 턴에서 살아남는 것은 **지식(facts)과 하던 일**이다.
 3. Librarian 이 하는 일을 **셋으로 나눈다**: ① 턴 읽기 ② 기억 접기 ③ 받은 일 정리.
 4. "수시로"는 세 가지를 뜻한다 — (가) 자기 루프로 돈다 (나) 턴 도중에도 읽는다 (다) 한가할 때도 정리한다. 셋 다 목표이고 **하나씩** 넣는다. 이 RFC 가 이행까지 다루는 범위는 (가)이고, (나)(다)는 §7 에 목표 모양으로 적는다.
@@ -33,7 +33,7 @@ implementation_prs: []
 
 | # | 결함 | 근거 |
 |---|---|---|
-| D0 | 몸이 뇌를 부린다. Keeper 턴 끝 경로가 Librarian 입력을 만들어 큐에 넣는다. Keeper 재기동은 앞선 Librarian 작업이 끝나길 기다린다. 서버 재시작에 끊긴 회차는 이어지지 않는다 | `keeper_agent_run_post_turn_memory.ml` `run`, `keeper_memory_lane.ml` `begin_librarian_lifecycle`, `exact_lane_run_registry.ml` `restart_reason` |
+| D0 | 몸이 Librarian 을 부린다. Keeper 턴 끝 경로가 Librarian 입력을 만들어 큐에 넣는다. Keeper 재기동은 앞선 Librarian 작업이 끝나길 기다린다. 서버 재시작에 끊긴 회차는 이어지지 않는다 | `keeper_agent_run_post_turn_memory.ml` `run`, `keeper_memory_lane.ml` `begin_librarian_lifecycle`, `exact_lane_run_registry.ml` `restart_reason` |
 | D1 | 읽은 위치가 없다. 매번 "맨 뒤 72개 메시지"만 읽는다. 72 는 서로 상관없는 두 설정값의 곱이다(24 × 3) | `keeper_librarian_runtime.ml` `prompt_max_messages`, `select_recent_messages` |
 | D2 | 3턴마다 돌고, 실패하면 3턴 더 밀린다 | 같은 파일 `cadence_step`, `cadence_record_attempt` |
 | D3 | 호출 한 번이 다 한다 — 대화 읽기, facts 전체 읽기, 쓰기, 접기, 받은 일 정리. 출력 세 칸이 전부 필수다 | `config/prompts/librarian.md`, `keeper_structured_output_schema.ml` `librarian_current_output_schema` |
@@ -76,11 +76,12 @@ Memory OS RFC 의 세 문장은 §8 의 문서 PR 에서 고친다. 창 RFC 의 
 
 ## 4. 설계
 
-### 4.1 뇌는 자기 루프로 돈다
+### 4.1 Librarian 은 자기 루프로 돈다
 
-- Librarian 은 **서버가 소유한 상시 루프**다. Keeper 마다 하나다. 서버가 뜨면 같이 뜨고, 뜨자마자 한 번 돈다. 그래서 재시작 뒤에도 읽던 자리에서 이어간다.
+- **Librarian 은 Keeper 마다 따로다.** 루프도, 읽은 위치도, 하던 일도, facts 도 Keeper 별이다. Librarian 끼리는 상태를 나누지 않고 서로 기다리지 않는다.
+- 루프의 수명은 서버가 쥔다. Keeper keepalive 가 아니라 서버 스위치에 매단다. 서버가 뜨면 같이 뜨고, 뜨자마자 한 번 돈다. 그래서 서버 재시작 뒤에도 읽던 자리에서 이어가고, Keeper 가 재기동해도 그 Keeper 의 Librarian 은 같이 죽지 않는다.
 - 몸이 하는 일은 하나뿐이다. **턴이 끝났다는 사실을 기록한다**(§4.3). Librarian 입력을 만들거나 큐에 넣지 않는다.
-- 뇌는 신호에 깨어나고, 깨어나면 **저장된 상태를 직접 읽어** 할 일을 고른다. 신호는 귀띔일 뿐이라 놓쳐도 잃는 것이 없다. 깨우는 신호는 셋이다: 턴 끝이 기록됨, 기억이 커밋됨(`Keeper_memory_commit_notifications`), 받은 일이 바뀜(`Keeper_librarian_queue_signal`).
+- Librarian 은 신호에 깨어나고, 깨어나면 **저장된 상태를 직접 읽어** 할 일을 고른다. 신호는 귀띔일 뿐이라 놓쳐도 잃는 것이 없다. 깨우는 신호는 셋이다: 턴 끝이 기록됨, 기억이 커밋됨(`Keeper_memory_commit_notifications`), 받은 일이 바뀜(`Keeper_librarian_queue_signal`).
 - 할 일이 남아 있는 동안 **한 번에 LLM 호출 하나씩** 계속 돈다. 없으면 신호를 기다린다. 주기도 타이머도 cadence 도 없다.
 - 종료 때는 루프를 취소한다. 위치는 저장이 끝난 뒤에만 옮기므로 도중에 끊겨도 잃는 것이 없다. Keeper 재기동이 Librarian 을 기다릴 이유도 사라진다. `begin_librarian_lifecycle`·`abort_librarian`·`drain_and_join_librarian` 과 그 호출자(`keeper_supervisor.ml`, `keeper_supervisor_supervise_keepalive.ml`, `keeper_keepalive_launch_transaction.ml`, `keeper_shutdown_prepare_join.ml`)를 걷어낸다.
 - 같은 모양이 저장소에 있다: 서버 소유 daemon, wake, promise 로 잠들기(`server_workspace_memory_curator.ml` `start_with`). Workspace Curator 는 기능이 완성되지 않았으므로 모양만 빌리고 루프 테스트는 새로 쓴다.
@@ -95,7 +96,8 @@ Memory OS RFC 의 세 문장은 §8 의 문서 PR 에서 고친다. 창 RFC 의 
 - **I4 밀림이 보인다** — `끝난 턴 − 읽은 턴` 이 typed 값으로 TUI 와 대시보드에 뜬다. Gate 가 아니다.
 - **I5 실패는 위치를 막지 않는다** — ②·③ 이 실패해도 ① 은 돈다. ②·③ 이 도는 동안 끝난 턴은 그 호출이 끝난 뒤에 읽힌다. 호출 시간 제한만큼 늦는다. Keeper 하나에 루프 하나만 두는 대가다.
 - **I6 코드에 고른 숫자 없음** — 72, cadence 3, "실패하면 3턴 뒤"를 지운다. confidence 문턱도 두지 않는다.
-- **I7 몸은 뇌를 기다리지 않는다** — Keeper 기동, 재기동, 턴 진행 어디에도 Librarian 완료를 기다리는 자리가 없다.
+- **I7 몸은 Librarian 을 기다리지 않는다** — Keeper 기동, 재기동, 턴 진행 어디에도 Librarian 완료를 기다리는 자리가 없다.
+- **I8 Keeper 마다 따로** — 한 Keeper 의 Librarian 이 밀리거나 멈추거나 호출이 오래 걸려도 다른 Keeper 의 Librarian 과 턴은 늦어지지 않는다.
 
 ### 4.3 파일 둘을 새로 둔다
 
@@ -104,7 +106,7 @@ Memory OS RFC 의 세 문장은 §8 의 문서 PR 에서 고친다. 창 RFC 의 
 1. **턴 끝 기록** `<keepers_dir>/<keeper>.turn-boundaries.jsonl`
    - 끝난 턴마다 한 줄: `turn_ref`, `end_atom`, 그 atom 을 여는 메시지 digest, 끝난 시각.
    - checkpoint 가 없는 턴(공식 클라이언트)은 typed "atom 이력 없음" 줄을 남긴다.
-   - checkpoint 저장 뒤에 쓰고(`keeper_agent_run_finalize_response.ml` 의 checkpoint 저장 바로 다음), 쓴 뒤 뇌를 깨운다.
+   - checkpoint 저장 뒤에 쓰고(`keeper_agent_run_finalize_response.ml` 의 checkpoint 저장 바로 다음), 쓴 뒤 Librarian 을 깨운다.
    - 어휘는 기존 `Runtime_model_input_tail_window.atom_opening_digest` 를 그대로 쓴다. 창 조립의 `project_from_atom ~first_atom` 과 같은 단위다.
    - 턴의 시작은 적지 않는다. 직전 턴의 끝이 곧 시작이다. `demote_before` 는 resume·HITL 턴에서 안전한 하한이 아니다(그 턴들은 user 메시지가 이미 checkpoint 에 들어간 채로 시작한다).
 2. **진행 파일** `<keepers_dir>/<keeper>.librarian-progress.json`
@@ -116,7 +118,7 @@ Memory OS RFC 의 세 문장은 §8 의 문서 PR 에서 고친다. 창 RFC 의 
 
 두 파일 모두 Keeper purge 변형(`keeper_shutdown_types.ml`, `server_dashboard_http_delete_actions.ml`)과 배포 preflight 의 저장소 목록(`bin/deployment_preflight_helper.ml`)에 등록한다.
 
-### 4.4 뇌가 하는 세 가지 일
+### 4.4 Librarian 이 하는 세 가지 일
 
 루프는 돌 때마다 저장된 상태를 보고 ① > ③ > ② 순으로 하나를 고른다.
 
@@ -138,7 +140,8 @@ Memory OS RFC 의 세 문장은 §8 의 문서 PR 에서 고친다. 창 RFC 의 
 
 ### 4.5 하던 일
 
-- ① 이 턴을 읽고 나서 고쳐 적는 글이다. 지금 무슨 일을 하고 있는지, 어디까지 했는지, 다음에 할 일이 무엇인지를 담는다. 현재 상태만 적으므로 쌓이지 않는다.
+- ① 이 턴을 읽고 나서 고쳐 적는 글이다. Keeper 가 무슨 일을 하고 있었는지, 어디까지 했는지, 무엇을 하겠다고 했는지를 담는다. 현재 상태만 적으므로 쌓이지 않는다.
+- Librarian 은 적는 존재다. 다음 행동을 지어내지 않는다. Keeper 가 말한 것과 한 것만 적는다. 그래서 이 글의 `next_steps` 는 Librarian 의 제안이 아니라 Keeper 가 남긴 계획과 약속의 기록이다.
 - 읽은 위치와 같은 파일에 같이 적는다. 그래서 이 글이 다루는 범위는 늘 "위치까지"다. 위치 뒤의 일은 창에 실린 원문이 말한다. 둘은 겹치지도 비지도 않는다.
 - Keeper 턴의 첫 요청에 본문으로 싣는다. 기존 `Memory_os_recall` 블록과 같은 자리다(`keeper_run_tools_hooks.ml`).
 - pocket 저장소(working-context)에는 담지 않는다. pocket 은 미처리 source 가 있어야만 존재하고(`keeper_librarian_context.ml` `select`·`commit`), Keeper 에게는 작은 artifact 참조만 주기로 한 설계이며(`docs/design/librarian-working-context.md`), `next_steps` 는 다음 턴이 시작하면 가려진다. 받은 일 정리(③)는 그 설계대로 둔다.
@@ -173,7 +176,7 @@ Memory OS RFC 의 세 문장은 §8 의 문서 PR 에서 고친다. 창 RFC 의 
 
 (가)가 라이브에서 확인된 뒤 하나씩 연다.
 
-- **(나) 턴 도중에도 읽는다.** 도구 경계 checkpoint 가 저장될 때도 뇌를 깨운다. 그때까지를 읽어 하던 일만 새로 고친다. 창이 보는 위치는 턴 끝에서만 옮긴다. 턴 도중에 옮기면 Keeper 가 방금 받은 결과를 잃고 접두사 캐시가 깨진다. 진행 파일에 "뇌가 읽은 곳"과 "창이 보는 곳" 두 위치가 생긴다.
+- **(나) 턴 도중에도 읽는다.** 도구 경계 checkpoint 가 저장될 때도 Librarian 을 깨운다. 그때까지를 읽어 하던 일만 새로 고친다. 창이 보는 위치는 턴 끝에서만 옮긴다. 턴 도중에 옮기면 Keeper 가 방금 받은 결과를 잃고 접두사 캐시가 깨진다. 진행 파일에 "Librarian 이 읽은 곳"과 "창이 보는 곳" 두 위치가 생긴다.
 - **(다) 한가할 때도 정리한다.** 읽을 것도 접을 것도 없으면 아직 다시 보지 않은 기억 묶음을 하나씩 본다. 묶음마다 "이 revision 에서 봤다"를 남긴다. 새 정보 없이 같은 기억을 되풀이 판정하지 않기 위해서다. 통째 재작성은 내용이 무너진다(RFC-0456 §4.4, 창 RFC §6.4 의 ACE). 다 봤으면 쉰다.
 
 ## 8. 이행

@@ -175,6 +175,15 @@ type provider_failure_kind =
   (** The provider sent a structurally valid error envelope inside an
       otherwise accepted response.  [error_type] is provider-owned diagnostic
       data; AGENT_CORE does not infer rate-limit or retry semantics from it. *)
+  | Provider_interrupted
+  (** The provider accepted the request, began a choice and ended it with an
+      error it did not describe: the choice's finish reason says [error]
+      ({!Stop_reason_wire.is_provider_error_finish}) and no error object
+      arrived anywhere in the response. Distinct from
+      [Provider_reported_error], which has an envelope to read a type or a
+      status from, and from [Provider_wire_error], where what arrived breaks
+      the declared wire contract. The generation stopped part-way for a
+      reason the provider kept to itself. *)
   | Response_body_too_large of { limit_bytes : int }
   (** The provider response exceeded the explicit in-memory parser boundary.
       The connection is closed immediately; AGENT_CORE never drains an unbounded

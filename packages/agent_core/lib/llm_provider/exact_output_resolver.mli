@@ -19,11 +19,38 @@ type catalog_document =
   ; contents : string
   }
 
+(** One exact-output slot: which binding it names, and the deadlines that
+    binding runs under. The caller already holds these as typed values -- a
+    deployment's runtime bindings -- so they arrive as values rather than as a
+    TOML document to re-parse. [target_ref] is the slot id the lane
+    configuration names, conventionally "<provider>.<model>". *)
+type declared_target =
+  { target_ref : string
+  ; provider_ref : string
+  ; model_id : string
+  ; enable_thinking : bool option
+  ; connect_timeout_s : float option
+  ; body_timeout_s : float option
+  }
+
 type resolver_catalog_input =
   | Embedded_default
   | Embedded_with_overlay of catalog_document
+      (** The embedded catalog with a second document merged over it. A
+          deployment supplies no such document: its provider and model facts
+          are catalog rows, and its slots arrive as {!Embedded_with_targets}.
+          The callers left are tests that assemble a synthetic catalog. *)
+  | Embedded_with_targets of declared_target list
+      (** The embedded catalog for provider and model facts, plus the slots the
+          caller declares. The embedded catalog carries no [[targets]] of its
+          own, so these are the whole target set. *)
   | Full_replacement of catalog_document
   | Full_replacement_file of string
+(** Which catalog bytes [load_resolver_snapshot] starts from. The overlay
+    variants layer declared rows on top of the embedded default; a full
+    replacement supplies the whole catalog. The overlay's model identities
+    must stay unique against the base — a colliding overlay row is rejected
+    during snapshot loading rather than silently shadowing. *)
 
 type target_ref_error =
   | Empty_target_ref
@@ -128,6 +155,11 @@ val selected_target_identity : selected_target -> target_identity
 val selected_target_catalog_generation : selected_target -> catalog_generation
 val selected_target_catalog_evidence : selected_target -> catalog_evidence
 val selected_target_model_admitted : selected_target -> bool
+(** Whether the selected model may serve an exact request at all —
+    {!Exact_output_catalog_binding.target_model_admitted} applied to the
+    target's own capabilities and catalog id. A [false] here becomes
+    {!Exact_output_ready_admission.wire_admission_error.Unsupported_target_model}
+    at admission. *)
 val hash_parts : string list -> string
 val option_float : float option -> string
 
@@ -137,15 +169,34 @@ val load_resolver_snapshot
   -> ?catalog:resolver_catalog_input
   -> unit
   -> (resolver_snapshot, resolver_snapshot_error) result
+(** Read, parse, and freeze the target catalog in one step: every later stage
+    resolves against this snapshot, so a run cannot mix catalog generations.
+    Reads go through [io] (never the environment directly — an unread
+    variable surfaces as {!Environment_read_failed}), and every declared
+    target is bound and endpoint-checked under [target_binding_policy]:
+    [Require_all_target_bindings] (the default) rejects the snapshot with
+    {!Target_binding_missing} when a component is unbound, while
+    [Exclude_unbound_targets] drops it and reports it via
+    {!resolver_rejected_target_bindings}. The failure constructors
+    {!Catalog_read_failed}, {!Catalog_parse_failed}, {!Target_catalog_invalid},
+    {!Catalog_collision}, {!Target_binding_missing}, and
+    {!Target_endpoint_invalid} partition everything this can reject. *)
 
 val resolver_rejected_target_bindings
   :  resolver_snapshot
   -> rejected_target_binding list
+(** Targets dropped by [Exclude_unbound_targets] at snapshot build time, in
+    declaration order; empty under [Require_all_target_bindings]. *)
 
 val admit_target_ref
   :  resolver_snapshot
   -> string
   -> (admitted_target, target_catalog_admission_error) result
+(** Check a target reference against the frozen snapshot without reading any
+    credential: fails with {!Target_ref_rejected} for a malformed or empty
+    reference and {!Target_not_in_catalog} when no declared target carries
+    it. The credential itself is only demanded later, by
+    {!resolve_target}. *)
 
 (** Return the credential-free immutable request projection captured by
     [admit_target_ref]. This value may be used only for pure wire-size
@@ -153,3 +204,8 @@ val admit_target_ref
 val projection_target : admitted_target -> projection_target
 
 val resolve_target : admitted_target -> (selected_target, target_selection_error) result
+(** Demand and freeze the credential: the target's environment variable is
+    read through the snapshot's [io] and a missing, empty, or unread value
+    fails with {!Missing_target_credential}, {!Target_credential_invalid}, or
+    {!Target_credential_read_failed}. On success the key is frozen into the
+    [selected_target]; later stages never re-read the environment. *)

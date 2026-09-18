@@ -264,7 +264,7 @@ base = "{capabilities_base}"
 supports_reasoning = true
 supports_tools = true
 supports_native_streaming = true
-{accepted_efforts_lines}{thinking_control}{sampling_lines}{max_output_lines}supports_parallel_tool_calls = {parallel}
+{thinking_control}{sampling_lines}{max_output_lines}supports_parallel_tool_calls = {parallel}
 """
 
 OPENROUTER_ENDPOINTS_URL = "https://openrouter.ai/api/v1/models/{model}/endpoints"
@@ -406,17 +406,26 @@ def is_official_client(provider: str) -> bool:
 #   dialect and the accepted ladder (Capabilities.openrouter_capabilities).
 EFFORT_CAPABLE_BASES = {"anthropic", "openai", "openrouter"}
 
-# An accepted_reasoning_efforts contract has to exist before the validator will
-# carry any reasoning-effort at all (provider_config.ml
-# Undeclared_reasoning_effort_capability). Where the catalog base declares one,
-# nothing belongs here — the bench is a consumer of those facts like any other
-# caller, and a ladder written here is a capability claim the benchmark made up
-# about someone else's API. The two entries below are the bases that still have
-# no catalog ladder; each is a gap to close there, not a value to maintain here.
-ACCEPTED_EFFORTS_BY_BASE = {
-    "anthropic": ["low", "medium", "high", "xhigh", "max"],
-    "openai": ["low", "medium", "high", "xhigh", "max"],
-}
+# No accepted_reasoning_efforts table lives here, and none should.
+#
+# For the two bases this file used to write one for, the accepted set is a
+# model fact, not a provider one, and the vendors publish it that way
+# (2026-09-18):
+#
+# - gpt-6-astra takes low..max and rejects `none` with HTTP 400; gpt-5.6 takes
+#   `none`; gpt-5.5 has no `max`; gpt-5 has `minimal` and neither `xhigh` nor
+#   `max`. One list covering "openai" is wrong for three of those four, and
+#   wrong here means a 400 mid-run rather than a refusal before dispatch.
+# - Anthropic's enum is low..max with no `none` (thinking is turned off by
+#   `thinking.type`, not by an effort), and "Not every model that supports
+#   `max` supports `xhigh`". The catalog already declares exactly that set for
+#   claude-fable-5, which is the model this benchmark names, so a copy here
+#   would be a second place to keep one fact right.
+#
+# A model whose ladder nobody has declared is refused by
+# Undeclared_reasoning_effort_capability, which names the model and says what
+# is missing. That refusal is the correct outcome, and the fix for it is a
+# catalog row, not a value maintained beside the benchmark.
 
 
 def seed_skills_block() -> str:
@@ -596,15 +605,8 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
     sampling_lines = (
         'ignored_sampling_parameters = ["temperature", "top_p"]\n'
         if pcfg["capabilities_base"] in ("kimi", "anthropic") else "")
-    accepted_efforts = ACCEPTED_EFFORTS_BY_BASE.get(pcfg["capabilities_base"])
-    accepted_efforts_lines = (
-        "accepted_reasoning_efforts = ["
-        + ", ".join(f'"{effort}"' for effort in accepted_efforts)
-        + "]\n"
-        if accepted_efforts else "")
     (root / "agent-core-models-overlay.toml").write_text(OVERLAY_TOML.format(
         provider=provider, model_alias=model_alias,
-        accepted_efforts_lines=accepted_efforts_lines,
         thinking_control=thinking_control,
         sampling_lines=sampling_lines,
         max_output_lines=max_output_lines,

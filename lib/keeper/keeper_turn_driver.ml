@@ -2513,6 +2513,9 @@ module For_testing = struct
   let observing_checkpoint_sink =
     Keeper_turn_driver_try_provider.observing_checkpoint_sink
 
+  let observe_checkpoint_saved =
+    Keeper_turn_driver_try_provider.observe_checkpoint_saved
+
   let tool_results_saved =
     Keeper_turn_driver_try_provider.tool_results_saved
 

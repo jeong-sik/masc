@@ -557,6 +557,11 @@ module For_testing : sig
     Agent_core.Agent.checkpoint_sink option ->
     Agent_core.Agent.checkpoint_sink
 
+  val observe_checkpoint_saved :
+    Keeper_turn_driver_try_provider.checkpoint_progress Atomic.t ->
+    Agent_core.Agent.checkpoint_stage ->
+    unit
+
   val same_run_retry_allowed :
     Keeper_turn_driver_try_provider.checkpoint_progress Atomic.t -> bool
 

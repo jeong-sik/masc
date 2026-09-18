@@ -43,6 +43,7 @@ type parse_error =
       { message : string
       ; error_type : string option
       ; provider_status : Types.provider_status option
+      ; report : Types.provider_report
       }
   | Unreadable_response of string
   | Empty_completion of empty_completion

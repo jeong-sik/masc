@@ -10,7 +10,7 @@ MASC 하네스 자체를 Terminal-Bench 4.0.0 전체로 잰다.
 
 ## 준비
 
-    ./image/fetch_masc.sh                         # 최신 릴리스, linux-x64 와 linux-arm64 둘 다
+    ./image/fetch_masc.sh                         # 최신 릴리스(`image/min_masc_version` 이상), linux-x64 와 linux-arm64 둘 다
     uv venv -p 3.12 && uv pip install -r requirements.txt   # harbor 0.23.0 고정
     export ANTHROPIC_API_KEY=...                  # 모델 제공자 키 (아래 레인 표)
 
@@ -25,7 +25,7 @@ MASC 하네스 자체를 Terminal-Bench 4.0.0 전체로 잰다.
   masc keeper 작업 레인 안에서는 rootless podman 이 이미지를 받은 뒤 컨테이너 실행 단계
   (`mount proc`)에서 권한 거부로 멈췄다(#36905 리뷰 실측).
 - `GH_TOKEN` 은 선택이다. 주면 keeper 가 GitHub 로그인을 갖고 `gh` 도 같이 올라간다.
-  주지 않으면 remote_ssh 사전 점검이 신원 확인을 건너뛴다(v0.35.15+, #35488).
+  주지 않으면 remote_ssh 사전 점검이 신원 확인을 건너뛴다(#35488).
   주면 전체 실행의 모든 태스크 컨테이너에 그 토큰이 들어간다.
 
 ## 한 태스크 스모크
@@ -175,19 +175,35 @@ harbor 없이 컨테이너 하나에서 arm K 의 기계 경로 전체를 확인
 있는지만 본다. API 키도 태스크도 서버도 필요 없다. 플랫폼은 4.0.0 태스크 이미지와 같은
 `linux/amd64` 가 기본이고 `PROBE_PLATFORM` 으로 바꾼다.
 
-deps.sh 는 패키지 매니저 계열(apt/dnf/apk)을 감지하고, 런타임 라이브러리는
+deps.sh 는 패키지 매니저 계열(apt/dnf)을 감지하고, 런타임 라이브러리는
 `masc --version` 이 실패할 때만 설치하며, 안 되면 배포판 이름과 이유(아키텍처·glibc·
 라이브러리)를 찍고 끝난다. 릴리스 바이너리의 glibc 바닥값은 2.35 다
 (`scripts/check-glibc-floor.sh`, v0.35.19 실측).
 
+## keeper 명령이 도는 계정과 환경
+
+harbor 기본 에이전트는 태스크 명령을 `exec_as_agent` 로 돌린다. 4.0.0 `task.toml` 은 사용자를
+정하지 않으므로 이미지의 `USER` 로 돈다(`rs-archive-clone` 은 `agent`, `risk-scorer-replay` 는
+`nobody`, 나머지 대부분은 root). keeper 명령도 같은 계정으로 돌게 맞춘다.
+
+- remote_ssh 엔드포인트는 root 로 접속한다. `nobody` 처럼 로그인 셸이 없는 계정이 있어서다.
+- 엔드포인트가 이름으로 부르는 `/usr/local/bin/masc-exec-shim` 은 래퍼다. `setpriv` 로 PID 1 의
+  uid·gid(`/proc/1/status`)가 되어 릴리스 shim(`/usr/local/libexec/masc-exec-shim`)을 띄운다
+  (`driver/endpoint_account.sh`). passwd 항목이 있으면 그 계정의 HOME·보조 그룹과 이름(`USER`)을,
+  없으면 docker 와 같게 `HOME=/` 과 보조 그룹 없음을 쓴다. 이때 `USER` 는 docker 와 다르다.
+  docker 는 `USER` 를 넣지 않지만 shim 은 늘 채우므로 uid 가 들어간다.
+- 태스크가 `[agent] user` 로 계정을 정하면 harbor 기본 에이전트는 그 계정으로 돈다. 벤치는 그
+  계정을 따르지 않으므로, 그런 태스크는 설치 단계에서 거부한다. 4.0.0 에는 없다.
+- keeper 의 작업 디렉터리는 `/opt/masc-bench/remote/<name>` 이고 그 계정 소유다.
+- 환경변수는 bootstrap 이 PID 1 의 환경을 PID 1 소유자 권한으로 읽어 shim `env_file=` 로 옮기고
+  (`driver/endpoint_env.sh`), `PATH` 는 `path=` 로 넘긴다.
+
 ## 4.0.0 에서 아직 맞지 않는 조건
 
-- keeper 명령은 태스크 이미지가 선언한 환경변수(`VIRTUAL_ENV`, `PYTHONPATH`, 서비스 주소 등)를
-  보지 못한다. `masc-exec-shim` 이 페이로드 환경을 새로 만들기 때문이다 — #36907.
-- `PATH` 는 bootstrap 이 컨테이너의 PATH 를 shim 설정 `path=` 로 넘긴다. 다만 릴리스
-  v0.35.19 의 shim 은 argv 로 부른 프로그램을 자기 프로세스 PATH(sshd 세션)에서 찾기
-  때문에, 지금은 `sh -c` 로 실행한 명령에만 효과가 있다. shim 이 `path=` 에서 찾도록
-  고친 #36916 이 릴리스되면 argv 명령에도 적용된다.
+- 태스크 이미지가 선언한 환경변수 가운데 shim 이 받지 않는 이름(GitHub 토큰 이름,
+  `GH_CONFIG_DIR`·`GIT_TERMINAL_PROMPT`)과 여러 줄 값은 keeper 명령에 닿지 않는다.
+  뺀 이름과 이유는 harbor trial 결과의 `agent_result.metadata.endpoint_env_left_out` 에 남는다
+  (arm K 도 같다). `PATH` 는 `path=` 로 넘어가므로 여기에 적지 않는다.
 - 태스크가 선언한 `mcp_servers`(medical-claims-processing)와 `skills_dir`
   (cumulative-layout-shift)를 keeper 에 연결하지 않는다 — #36908
 - GPU 태스크 3개는 GPU 를 주는 환경(`BENCH_ENV=modal`)에서만 돈다. 이 호스트에는 Modal

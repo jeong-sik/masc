@@ -25,6 +25,7 @@ from pathlib import Path
 
 from harbor.agents.installed.claude_code import ClaudeCode
 from harbor.environments.base import BaseEnvironment
+from harbor.models.agent.context import AgentContext
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -32,6 +33,8 @@ from masc_sidecar import (  # noqa: E402
     MASC_MCP_URL,
     MCP_SERVER_NAME,
     MascSidecar,
+    merge_endpoint_env_left_out,
+    merge_keeper_usage,
     pool_names,
     pool_prompt,
     read_token_guard,
@@ -62,6 +65,16 @@ class KeeperToolsAgent(MascSidecar, ClaudeCode):
         self.keeper_runtime_id = keeper_runtime_id or runtime_id_from_model(
             self.model_name
         )
+
+    async def run(
+        self, instruction: str, environment: BaseEnvironment, context: AgentContext
+    ) -> None:
+        await super().run(instruction, environment, context)
+        # What the keepers spent is not in what Claude Code reports, and the arm
+        # is compared on cost. The opencode variant merged it; this one did not,
+        # so it read as cheaper than the baseline by the keepers' whole spend.
+        await merge_keeper_usage(self, environment, context)
+        await merge_endpoint_env_left_out(environment, context)
 
     @staticmethod
     def name() -> str:

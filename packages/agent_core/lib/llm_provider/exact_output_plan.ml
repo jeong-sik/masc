@@ -15,6 +15,14 @@ type output_admission_error =
   | Global_admission_not_allowed
   | Invalid_connect_timeout of float
   | Invalid_body_timeout of float
+  | Missing_deadline
+      (** Neither a connect nor a body timeout is declared. The measurement
+          transport arms no deadline in this state, so a provider that holds
+          the connection open without completing its response hangs the
+          request for the life of the connection — measured at 13.3h on an
+          exact-output lane whose provider section declared no
+          [connect-timeout-s] (#36979). At least one of the two budgets must
+          be declared. *)
   | Caller_supplied_header_not_allowed of string
   | Unsupported_image_input
   | Unsupported_document_input
@@ -122,6 +130,35 @@ let%test "timeout validation preserves the invalid value" =
   | Ok () -> false
 ;;
 
+(* Each [validate_timeout] accepts [None] on its own because either budget
+   alone bounds the request: on the non-streaming path the connect deadline
+   is the effective ceiling for headers and body together, and the body
+   deadline is a total ceiling. Both absent is the one combination that
+   leaves the wire with no deadline at all. *)
+let validate_deadline_coverage
+      ~connect_timeout_s
+      ~body_timeout_s
+      : (unit, [ `Missing_deadline ]) result
+  =
+  match connect_timeout_s, body_timeout_s with
+  | None, None -> Error `Missing_deadline
+  | _ -> Ok ()
+;;
+
+let%test "deadline coverage rejects only the both-absent case" =
+  match
+    validate_deadline_coverage ~connect_timeout_s:None ~body_timeout_s:(Some 1.0)
+  with
+  | Ok () -> true
+  | Error `Missing_deadline -> false
+;;
+
+let%test "deadline coverage rejects when no budget is declared" =
+  match validate_deadline_coverage ~connect_timeout_s:None ~body_timeout_s:None with
+  | Error `Missing_deadline -> true
+  | Ok () -> false
+;;
+
 (* Inline %tests that match on [error] must surface the constructor they hit
    instead of folding it into [false]: an unlabeled rejection reads as "the
    happy path failed", which is what hid the caller-supplied-header gate
@@ -133,6 +170,7 @@ let[@warning "-32"] rejection_name = function
   | Global_admission_not_allowed -> "global_admission_not_allowed"
   | Invalid_connect_timeout _ -> "invalid_connect_timeout"
   | Invalid_body_timeout _ -> "invalid_body_timeout"
+  | Missing_deadline -> "missing_deadline"
   | Caller_supplied_header_not_allowed name ->
     "caller_supplied_header_not_allowed:" ^ name
   | Unsupported_image_input -> "unsupported_image_input"
@@ -442,6 +480,12 @@ let preflight
           ~invalid:(fun seconds -> Invalid_body_timeout seconds)
           request.body_timeout_s
       in
+      let* () =
+        validate_deadline_coverage
+          ~connect_timeout_s:config.connect_timeout_s
+          ~body_timeout_s:request.body_timeout_s
+        |> Result.map_error (fun `Missing_deadline -> Missing_deadline)
+      in
       if not (contract_is_supported config capabilities)
     then
       Error
@@ -716,6 +760,7 @@ let%test "exact preflight freezes refreshed credentials until a new plan is prep
   let calls = ref 0 in
   let config = Provider_config.make ~kind:OpenAI_compat ~model_id:"fixture"
     ~base_url:"https://example.test" ~max_tokens:16
+    ~connect_timeout_s:30.0
     ~model_capabilities_override:Capabilities.default_capabilities
     ~auth_scheme:Bearer_token
     ~credential_source:(Refreshable_credential (fun () ->
@@ -741,6 +786,7 @@ let%test "exact preflight still rejects genuinely caller-supplied headers" =
     let config =
       Provider_config.make ~kind:OpenAI_compat ~model_id:"fixture"
         ~base_url:"https://example.test" ~max_tokens:16
+        ~connect_timeout_s:30.0
         ~model_capabilities_override:Capabilities.default_capabilities
         ~auth_scheme:Bearer_token ~headers () in
     match

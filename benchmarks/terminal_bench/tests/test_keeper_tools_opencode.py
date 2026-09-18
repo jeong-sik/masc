@@ -151,6 +151,9 @@ def test_install_adds_masc_on_top_of_opencode(tmp_path, monkeypatch):
     for name in ("masc", "masc-exec-shim"):
         (fake_root / "dist" / "linux-x64" / name).write_bytes(b"")
     (fake_root / "driver" / "bootstrap.sh").write_text("")
+    # A fetched release at the floor, as image/fetch_masc.sh records it.
+    import masc_dist
+    (fake_root / "dist" / ".version").write_text(masc_dist.MIN_VERSION_FILE.read_text())
     monkeypatch.setattr(masc_sidecar, "BENCH_ROOT", fake_root)
 
     async def go():
@@ -344,3 +347,45 @@ def test_the_container_env_names_the_pool(tmp_path):
     # in api-name, so keeper_up has to be given the slug.
     assert env["BENCH_RUNTIME_ID"] == "openrouter.z-ai-glm-4.7-flash"
     assert env["OPENROUTER_API_KEY"] == "test-key"
+
+
+# --- the image variables the keepers ran without ---------------------------
+#
+# Arm K never runs collect_result.sh, so the bootstrap's record is read from the
+# container after the run. Harbor's docker environment returns stderr inside
+# stdout, so only the marked line is JSON.
+
+
+class RecordEnv:
+    def __init__(self, stdout, return_code=0, stderr=""):
+        self.stdout, self.return_code, self.stderr = stdout, return_code, stderr
+        self.calls = []
+
+    async def exec(self, command, **kw):
+        self.calls.append((command, kw))
+        return type("R", (), {"stdout": self.stdout, "stderr": self.stderr,
+                              "return_code": self.return_code})()
+
+
+def merged(env):
+    import masc_sidecar
+    context = AgentContext()
+    asyncio.run(masc_sidecar.merge_endpoint_env_left_out(env, context))
+    return context.metadata["endpoint_env_left_out"]
+
+
+def test_the_record_is_read_from_its_marked_line():
+    env = RecordEnv("bash: warning: setlocale: LC_ALL: cannot change locale\n"
+                    'MASC_ENDPOINT_ENV_LEFT_OUT=[{"name":"GH_TOKEN","reason":"refused_by_shim"}]\n')
+    assert merged(env) == [{"name": "GH_TOKEN", "reason": "refused_by_shim"}]
+    assert env.calls[0][1] == {"user": "root"}
+
+
+@pytest.mark.parametrize("stdout, return_code", [
+    ("", 0),
+    ("MASC_ENDPOINT_ENV_LEFT_OUT=[]\n", 1),
+    ("MASC_ENDPOINT_ENV_LEFT_OUT=not json\n", 0),
+])
+def test_an_unreadable_record_says_so_instead_of_reading_as_none_left_out(stdout, return_code):
+    assert "read_failed" in merged(RecordEnv(stdout, return_code))
+

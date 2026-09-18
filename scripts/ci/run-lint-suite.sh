@@ -84,7 +84,8 @@ blocking_lints() {
   # suite changes the correct answer without touching this script, which is
   # how both MSX fixtures came to name two suites while test_tui_msx_tick.ml
   # existed -- red on main, and only seen when #34637 edited the script for
-  # another reason. It costs about a second.
+  # another reason. Measured 2026-09-17 on a laptop: 34s before the module and
+  # file-name mappings (RFC-0428), 54s with them.
   run_lint "Edited-tests selector self-test" \
     bash scripts/ci/run-edited-tests.sh --self-test
   run_self_test_when_changed "Prompt source words self-test" \
@@ -126,6 +127,12 @@ blocking_lints() {
   run_self_test_when_changed "Dune suite scope self-test (RFC-0428)" \
     scripts/ci/dune_suite_scope.py \
     python3 scripts/ci/test_dune_suite_scope.py
+  # The same step runs what this helper says calls or names a change. A
+  # comment it mistakes for code runs a suite for nothing; a call it misses
+  # merges a change without its suite. Its fixtures are synthetic.
+  run_self_test_when_changed "Referencing suites self-test (RFC-0428)" \
+    scripts/ci/referencing_suites.py \
+    python3 scripts/ci/test_referencing_suites.py
   # test.yml's targeted path runs a suite's executable outside dune, so the
   # stanza's (setenv ...) does not apply and has to be read out. A stanza this
   # reader cannot parse would otherwise surface as a dispatch that ran the
@@ -228,6 +235,16 @@ blocking_lints() {
   run_lint "Spec Mirrors: references resolve" bash scripts/check-spec-truth.sh
   run_lint "docs/spec names files that exist" \
     python3 scripts/ci/check-spec-file-refs.py
+  # The RFC index table is not committed (#35498): when it was, every RFC pull
+  # request carried the same README hunk, so concurrently open RFCs conflicted
+  # pairwise. What is gated instead is the frontmatter the table derives from:
+  # a number two documents claim, a filename/frontmatter mismatch, an invalid
+  # reference, a sub-doc parent that disagrees with the filename. One number
+  # names one document, so a "RFC-NNNN §4.1" citation in the code names
+  # exactly one file. Reads the checkout only; it used to run as a step in the
+  # build job, but it needs no toolchain, so it belongs here.
+  run_lint "RFC frontmatter consistency" \
+    python3 scripts/rfc-generate-index.py --check
   # --self-test only, which is what the deleted step ran too: the real check
   # shells out to `dune describe` and this job has no OCaml toolchain. It runs
   # in the dune build @check job instead, where the switch is already built.

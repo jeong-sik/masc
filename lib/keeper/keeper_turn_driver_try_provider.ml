@@ -626,6 +626,26 @@ let compose_carried_model_input
       let first_atom =
         Keeper_carried_front.clamp ~atom_count:history_atom_count seed.first_atom
       in
+      (* A range the provider refused is a ceiling, not a start. The turn that
+         carried it never finished, so its front is the largest range known to
+         be too big, and starting there again sends that range plus whatever
+         the history gained since. The move is the one a refusal forces inside
+         a turn (RFC keeper-context-window-in-tokens §10.4), continued across
+         the turn boundary instead of restarting: halfway toward the newest
+         atom. When one atom is left the ceiling itself stands, and the
+         in-turn ladder answers the next refusal. *)
+      let first_atom =
+        match seed.source with
+        | Keeper_carried_front.Refused_range _ ->
+          (match
+             Keeper_carried_front.halve ~first_atom ~atom_count:history_atom_count
+           with
+           | Some halved -> halved
+           | None -> first_atom)
+        | Keeper_carried_front.Ledger
+        | Keeper_carried_front.Turn_record _
+        | Keeper_carried_front.Halved_after_refusal _ -> first_atom
+      in
       let projection, transmitted_bytes =
         Runtime_model_input_tail_window.project_from_atom
           ~measure_message_bytes
@@ -1693,15 +1713,28 @@ let context_overflow_shrink_sequence
 let refusal_evicts = function
   | Agent_core.Error.Api (ContextOverflow _)
   | Agent_core.Error.Api
-      (InvalidRequest { reason = Request_body_refused_by_provider _; _ }) ->
+      (InvalidRequest { reason = Request_body_refused_by_provider _; _ })
+  (* A refusal whose reason agent core does not model is still a refusal OF
+     THIS REQUEST: the provider read it and declined it. Resending the same
+     bytes draws the same answer, so the only lever left is to carry less.
+     The sequence retries only while the front moves strictly later and
+     returns the refusal once a single atom is left, so this bounds at
+     log2(atoms) attempts rather than looping.
+
+     2026-09-18: five keepers sat in that loop. After the turn-record hard
+     cut (#36955) every seed was unreadable, each turn composed the whole
+     history, the provider refused the 15 MB body (a modelled body refusal,
+     one halving), and then refused 9.5 MB with an error body whose only
+     field is prose naming the prompt tokens and the model limit. That prose
+     stays Unknown_invalid_request on purpose -- Retry.classify_error has
+     tests pinning it, because reading the sentence would be a string
+     classifier. The turn ended and the next turn started over. *)
+  | Agent_core.Error.Api (InvalidRequest { reason = Unknown_invalid_request; _ }) ->
     true
   | Agent_core.Error.Api
       ( InvalidRequest
           { reason =
-              ( Json_parse_error
-              | Attempt_rejected
-              | Refusal_body_not_received
-              | Unknown_invalid_request )
+              (Json_parse_error | Attempt_rejected | Refusal_body_not_received)
           ; _
           }
       | InputCapacity _

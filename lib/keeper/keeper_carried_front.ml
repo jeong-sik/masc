@@ -3,6 +3,7 @@
 type source =
   | Ledger
   | Turn_record of { turn : int }
+  | Refused_range of { turn : int }
   | Halved_after_refusal of { retry : int }
 
 type seed =
@@ -59,23 +60,28 @@ let of_records ~composer ~trace_id (records : Turn_record.t list) =
          , record.Turn_record.finish_reason
          , composer (record_runtime record) )
        with
-       | Some window, Some _, Composes_from_the_history
+       | Some window, finish_reason, Composes_from_the_history
          when String.equal record.Turn_record.trace_id trace_id ->
          let turn = record.Turn_record.absolute_turn in
          (match newest with
           | Some (newest_turn, _) when newest_turn >= turn -> newest
           | Some _ | None ->
+            let source =
+              match finish_reason with
+              | Some _ -> Turn_record { turn }
+              | None -> Refused_range { turn }
+            in
             Some
               ( turn
               , { first_atom =
                     window.Turn_record.total_atoms - window.Turn_record.transmitted_atoms
                 ; front_digest = window.Turn_record.front_atom_digest
-                ; source = Turn_record { turn }
+                ; source
                 } ))
        | ( Some _
-         , Some _
-         , (Composes_from_the_history | Hands_over_its_own_list | Not_materialized) )
-       | Some _, None, _
+         , _
+         , (Hands_over_its_own_list | Not_materialized) )
+       | Some _, _, Composes_from_the_history
        | None, _, _ -> newest)
     None
     records
@@ -155,6 +161,7 @@ let halve ~first_atom ~atom_count =
 let source_to_string = function
   | Ledger -> "ledger"
   | Turn_record { turn } -> Printf.sprintf "turn_record#%d" turn
+  | Refused_range { turn } -> Printf.sprintf "refused_range#%d" turn
   | Halved_after_refusal { retry } -> Printf.sprintf "halved_after_refusal#%d" retry
 ;;
 
@@ -175,6 +182,8 @@ let origin_to_json = function
   | Carried Ledger -> `Assoc [ "kind", `String "ledger" ]
   | Carried (Turn_record { turn }) ->
     `Assoc [ "kind", `String "turn_record"; "turn", `Int turn ]
+  | Carried (Refused_range { turn }) ->
+    `Assoc [ "kind", `String "refused_range"; "turn", `Int turn ]
   | Carried (Halved_after_refusal { retry }) ->
     `Assoc [ "kind", `String "halved_after_refusal"; "retry", `Int retry ]
   | Whole_history -> `Assoc [ "kind", `String "whole_history" ]

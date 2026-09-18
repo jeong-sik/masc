@@ -465,7 +465,6 @@ path = "~/.gemini/antigravity-cli/antigravity-oauth-token"
 [models.antigravity-gemini-3-7-flash-high]
 api-name = "gemini-3.7-flash-high"
 max-context = 1000000
-max-prompt-bytes = 131072
 tools-support = true
 streaming = true
 

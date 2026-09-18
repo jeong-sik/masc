@@ -201,6 +201,23 @@ overlay 를 합치는 방법도 둘이다.
 - **masc RFC-0342** — D1 overlay 구조는 그대로 둔다. D2 는 "`runtime.toml` 선언을 바꿀 때 표현 못 하는 필드는 로드 실패로, 기본값으로 채우지 않는다" 고 정했다. `runtime_adapter.ml:478-512` 는 지금 `default_capabilities` 위에 얹는다. 3.c·3.e 가 이 자리를 D2 에 맞춘다. §4 "unknown 모델에 permissive default 금지" 와도 같은 방향이다.
 - **masc RFC-0370 §3.2** — 턴 타임아웃 300.0 을 "선언이 없을 때의 fallback" 으로 남겼다. 이것은 masc 런타임의 운영 상한이지 공급자·모델 사실이 아니다. 이 RFC 범위 밖이고 서로 어긋나지 않는다.
 
+### 2.2 카탈로그와 `runtime.toml` 이 갈라지는 축
+
+원칙 1의 "한 곳" 은 카탈로그 계층을 가리킨다. 배포가 자기 엔드포인트를 `runtime.toml` 로 묶으면 그 선언이 원칙 1과 싸우는 것처럼 보인다. 갈라지는 축은 이렇다.
+
+- **카탈로그** — 그 모델의 사실. 누가 서빙하든 같은 값.
+- **`runtime.toml`** — 이 배포가 묶은 엔드포인트의 사실. 같은 가중치라도 서빙하는 쪽이 다르면 값이 다르다.
+
+같은 무게를 두 엔드포인트가 서빙하면 답이 둘이다. DeepSeek 자체 API 는 `tools` 가 실린 요청에 이전 턴 `reasoning_content` 를 전부 되돌려 보내라고 요구하고, 안 보내면 400 을 낸다 (api-docs.deepseek.com/guides/thinking_mode/, 2026-09-18 확인). 같은 모델을 Ollama 가 서빙할 때는 그 요구가 없고, 클라우드 모델 카드는 오히려 반대로 적는다 — 이전 턴 생각은 다음 사용자 턴 앞에 넣지 말라 (ollama.com/library/gemma4:31b-cloud, 2026-09-18 확인).
+
+그래서 재전송 정책은 모델의 성질이 아니라 엔드포인트의 성질이다. 내장 카탈로그 행은 `provider_name` 으로 엔드포인트를 이미 가르고 있어서 답할 수 있다. 배포가 새 엔드포인트를 묶으면 그 행이 없다. 이때 답을 적을 자리가 `runtime.toml` 이다.
+
+2026-09-18 에 이 구멍이 실측으로 드러났다. Ollama 가 서빙하는 deepseek 행이 DeepSeek 의 규칙을 물려받고 있어서, 라이브 keeper lane 요청 7.83 MB 중 4.7 MB(60%)가 그 엔드포인트가 만들지도 않은 reasoning 이었다. `reasoning-streaming-format`, `thinking-control-format`, `reasoning-effort`, `reasoning-uncontrolled` 는 `runtime.toml` 에 적을 수 있는데 이 축만 키가 없었다.
+
+**규칙.** 원칙 3의 "이 wire 를 쓰는 모든 모델에 늘 참인가" 옆에 하나를 더 둔다. **"같은 모델을 다른 곳이 서빙해도 같은 값인가."** 같으면 카탈로그 행에 둔다. 서빙하는 쪽에 따라 달라지면, 카탈로그 행은 내장 엔드포인트의 답만 적고 같은 키를 `runtime.toml` 에도 연다. `runtime.toml` 에 키가 없는 것은 값이 아니다 — 카탈로그가 계속 답한다. 키가 있는데 적힌 값을 어휘가 모르면 로드를 거절한다 (RFC-0342 D2).
+
+이 축을 지금 밟고 있는 PR 은 #36980(masc `runtime.toml` 에 키를 연다)과 #36981(내장 `ollama_cloud` deepseek 행을 고친다)이다. §4.4 에 겹침을 적는다.
+
 ## 3. 설계
 
 단계마다 PR 하나다. 앞 단계가 머지된 뒤에 다음 단계를 연다.
@@ -398,7 +415,11 @@ preset 을 fixture 바탕이나 인자로만 쓰는 파일이 20개다. `capabil
 
 ### 4.4 다른 PR 과 겹침
 
-- 2026-09-18 기준 열린 PR 15개 중 `packages/agent_core/lib/llm_provider/`, `models.toml`, overlay 를 건드리는 PR 은 없다.
+- 2026-09-18 기준 열린 PR 19개 중 `packages/agent_core/lib/llm_provider/`, `models.toml`, overlay 를 건드리는 것은 넷이다. (이 문단의 앞선 판은 "없다" 고 적었다. 그 뒤에 열린 PR 들이다.)
+  - **#36980** — masc `runtime.toml` 에 `reasoning-replay` 키를 연다. 바꾸는 파일이 §3 이 이름을 적은 자리와 겹친다 (`runtime_toml.ml`, `runtime_schema.ml(i)`, `runtime_adapter.ml`). §2.2 의 축을 실행한다.
+  - **#36981** — 내장 `models.toml` 의 `ollama_cloud` deepseek 4행을 고친다. 3.a 가 세는 "preset 과 다른 값" 목록을 바꾸므로, 3.a 를 열 때 개수를 다시 잰다.
+  - **#36969** — overlay 의 Kimi 행을 건드리고, `keeper_turn_driver_try_provider.ml` 에서 이력 범위를 자른다. 원칙 2와 부딪히는지는 그 PR 에서 본다. 행이 아니라 요청 조립 쪽 변경이라 3.a~3.f 와 직접 겹치지는 않는다.
+  - **#36984** — `exact_output.ml`, `exact_output_plan.ml(i)`, `exact_output_ready_admission.ml(i)` 와 overlay 를 건드린다. §3 이 이름을 적은 `exact_output_catalog_binding.ml` 은 안 건드린다.
 - 요청에서 언급된 #36944 는 2026-09-17T17:06:37Z 에 머지됐다. 바꾼 파일은 `agent.mli`, `agent_types.ml(i)`, `test_agent_core.ml`, keeper 도구 검색 파일들이다. 이 RFC 의 파일과 겹치지 않는다.
 - 최근 머지된 PR 중 이 RFC 와 방향이 같은 것: #36512 (OpenAI 호환 preset 에서 context 값을 뺐다. 원칙 2의 선례), #36412 (`uncontrolled_reasoning` 도입, 키는 만들지 않았다), #35254 (1.7 의 두 resolver 어긋남), #36139 (스트리밍 파서가 선언된 멤버만 읽는다).
 - `docs/rfc/` 의 frontmatter 검사(#36898)는 `docs/rfc/RFC-*.md` 만 본다 (`scripts/rfc-generate-index.py:23`, `:231`). 이 파일은 대상이 아니다. 형식은 RFC-AC-039 의 머리 표를 따랐다.

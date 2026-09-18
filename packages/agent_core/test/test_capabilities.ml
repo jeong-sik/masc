@@ -856,7 +856,11 @@ let test_ollama_cloud_current_catalog_resolves () =
    The two are pinned together because the rows drifted by being copied: the
    direct rows took this value from the ollama_cloud rows (#33593). *)
 let test_deepseek_replay_contract_differs_by_who_serves_it () =
-  let replay ~provider_label ~model_id =
+  (* The resolved policy, not the row's override, the way the frontier table
+     below reads it. It is what the request is built from, and it also fails
+     when a row loses its declaration: without one, the [Ollama_think]
+     dialect answers [no_replay]. *)
+  let replay_policy ~provider_label ~model_id =
     match
       Capabilities.for_provider_model_id
         ~wire:None
@@ -865,22 +869,22 @@ let test_deepseek_replay_contract_differs_by_who_serves_it () =
         ~model_id
     with
     | None -> failf "%s/%s should resolve" provider_label model_id
-    | Some c -> c.reasoning_replay_override
+    | Some c ->
+      Reasoning_dialect.replay_policy_to_string
+        (Reasoning_dialect.of_capabilities c).replay_policy
   in
   List.iter
     (fun model_id ->
        check
-         bool
+         string
          (model_id ^ " on ollama_cloud replays the active sequence only")
-         true
-         (replay ~provider_label:"ollama_cloud" ~model_id
-          = Capabilities.Force_latest_user_turn_tool_calls);
+         "latest_user_turn_tool_calls"
+         (replay_policy ~provider_label:"ollama_cloud" ~model_id);
        check
-         bool
+         string
          (model_id ^ " on deepseek replays every prior turn")
-         true
-         (replay ~provider_label:"deepseek" ~model_id
-          = Capabilities.Force_drop_without_tool_preserve_with_tool))
+         "drop_without_tool_preserve_with_tool"
+         (replay_policy ~provider_label:"deepseek" ~model_id))
     [ "deepseek-v4-flash"; "deepseek-v4-pro" ]
 ;;
 

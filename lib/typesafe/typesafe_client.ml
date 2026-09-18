@@ -1,0 +1,46 @@
+let ( let* ) = Result.bind
+
+let evaluate
+      ?(endpoint = Typesafe_config.endpoint ())
+      ?(model = Typesafe_config.model ())
+      ?(timeout_sec = 15.0)
+      ?clock
+      ~api_key
+      ~state
+      ~questions
+      ()
+  =
+  let request_json = Typesafe_types.request_to_yojson ~model ~state ~questions in
+  let body = Yojson.Safe.to_string request_json in
+  let headers =
+    [ "authorization", "Bearer " ^ api_key
+    ; "content-type", "application/json"
+    ; "accept", "application/json"
+    ]
+  in
+  let* status, response_body =
+    Masc_http_client.post_sync
+      ?clock
+      ~timeout_sec
+      ~url:endpoint
+      ~headers
+      ~body
+      ()
+  in
+  if status = 200
+  then
+    let* parsed_json =
+      match Yojson.Safe.from_string response_body with
+      | json -> Ok json
+      | exception Yojson.Json_error msg ->
+        Error (Printf.sprintf "typesafe: invalid response JSON: %s" msg)
+    in
+    Typesafe_types.eval_response_of_yojson parsed_json
+  else
+    Error
+      (Printf.sprintf
+         "typesafe: HTTP %d returned by %s: %s"
+         status
+         endpoint
+         response_body)
+;;

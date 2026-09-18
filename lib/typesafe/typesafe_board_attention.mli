@@ -1,0 +1,17 @@
+(** TypeSafe AI System One adapter for Board Attention Candidate judgment.
+    Evaluates relevance in 70-100ms with calibrated confidence, bypassing free-text LLM generation. *)
+
+val min_confidence_threshold : float
+(** Minimum confidence required to accept a Jev judgment without fallback (default 0.5). *)
+
+val judge_candidate :
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?confidence_threshold:float ->
+  api_key:string ->
+  candidate:Keeper_board_attention_candidate.candidate ->
+  material:Keeper_board_attention_candidate.judgment_material ->
+  unit ->
+  (Keeper_board_attention_judgment.t, string) result
+(** Evaluates a pending candidate using TypeSafe Jev.
+    Returns [Error reason] if the HTTP call fails, JSON parsing fails,
+    or confidence is below [confidence_threshold], allowing transparent fallback. *)

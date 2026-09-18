@@ -556,18 +556,65 @@ let execute_current ?cli_runner ?clock ~before_dispatch ~before_advance prepared
          | Ok (slot_id, judgment) -> cli_selected_slot := Some slot_id; Ok judgment
          | Error _ -> Error (Exact_execution_failed []))
       | Http_flow attempt ->
-      match
-        Exact_output.execute_flow_once
-          ~net:prepared.net
-          ?clock
-          ~before_measurement_dispatch:(fun _ -> Ok ())
-          ~on_measurement_terminal:(fun _ -> Ok ())
-          ~before_dispatch:agent_core_before_dispatch
-          ~before_advance:agent_core_before_advance
-          ~validate
-          attempt
-      with
-      | Ok success -> Ok success.accepted
+        let typesafe_judgment_opt =
+          if Typesafe_config.is_enabled ()
+          then
+            match Typesafe_config.api_key () with
+            | Some api_key ->
+              (match prepared.candidate.status with
+               | Keeper_board_attention_candidate.Pending { material; _ } ->
+                 (match
+                    Typesafe_board_attention.judge_candidate
+                      ?clock
+                      ~api_key
+                      ~candidate:prepared.candidate
+                      ~material
+                      ()
+                  with
+                  | Ok verdict ->
+                    let now =
+                      match clock with
+                      | Some clk -> Eio.Time.now clk
+                      | None -> Unix.gettimeofday ()
+                    in
+                    let judgment =
+                      { Keeper_board_attention_candidate.verdict
+                      ; slot_id = "typesafe.jev-latest"
+                      ; source = Keeper_board_attention_candidate.Cli_lane_slot
+                      ; judged_at = now
+                      }
+                    in
+                    Log.Keeper.info
+                      "board_attention_typesafe_jev_judged keeper=%s candidate=%s"
+                      prepared.candidate.keeper_name
+                      prepared.candidate.candidate_id;
+                    Some judgment
+                  | Error reason ->
+                    Log.Keeper.info
+                      "board_attention_typesafe_fallback keeper=%s candidate=%s reason=%s"
+                      prepared.candidate.keeper_name
+                      prepared.candidate.candidate_id
+                      reason;
+                    None)
+               | _ -> None)
+            | None -> None
+          else None
+        in
+        match typesafe_judgment_opt with
+        | Some judgment -> Ok judgment
+        | None ->
+        match
+          Exact_output.execute_flow_once
+            ~net:prepared.net
+            ?clock
+            ~before_measurement_dispatch:(fun _ -> Ok ())
+            ~on_measurement_terminal:(fun _ -> Ok ())
+            ~before_dispatch:agent_core_before_dispatch
+            ~before_advance:agent_core_before_advance
+            ~validate
+            attempt
+        with
+        | Ok success -> Ok success.accepted
       | Error (Exact_output.Flow_execution_terminal { cause; _ }) ->
         terminal_error cause
       | Error

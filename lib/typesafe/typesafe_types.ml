@@ -1,0 +1,233 @@
+type model =
+  | Jev_latest
+  | Jev_preview
+  | Custom of string
+
+let model_to_string = function
+  | Jev_latest -> "jev-latest"
+  | Jev_preview -> "jev-preview"
+  | Custom s -> s
+;;
+
+let model_of_string = function
+  | "jev-latest" -> Jev_latest
+  | "jev-preview" -> Jev_preview
+  | s -> Custom s
+;;
+
+type choice_question =
+  { instructions : string
+  ; criteria : (string * string option) list
+  }
+
+type score_question =
+  { instructions : string
+  ; criteria : string list
+  }
+
+type noul_question =
+  { instructions : string
+  ; criteria : (string * string) option
+  }
+
+type question =
+  | Choice of choice_question
+  | Score of score_question
+  | Noul of noul_question
+
+type choice_answer =
+  { choice : string
+  ; probabilities : (string * float) list
+  ; confidence : float
+  }
+
+type score_answer =
+  { score : float
+  ; probabilities : float list
+  ; confidence : float
+  }
+
+type noul_answer =
+  { noul : float
+  }
+
+type answer =
+  | Choice_answer of choice_answer
+  | Score_answer of score_answer
+  | Noul_answer of noul_answer
+
+type usage =
+  { input_tokens : int
+  ; output_tokens : int
+  }
+
+type eval_response =
+  { model : string
+  ; answers : (string * answer) list
+  ; usage : usage option
+  }
+
+let ( let* ) = Result.bind
+
+let question_to_yojson = function
+  | Choice { instructions; criteria } ->
+    let criteria_assoc =
+      List.map
+        (fun (opt, desc) ->
+          let v =
+            match desc with
+            | None -> `Null
+            | Some d -> `String d
+          in
+          opt, v)
+        criteria
+    in
+    `Assoc
+      [ "type", `String "choice"
+      ; "instructions", `String instructions
+      ; "criteria", `Assoc criteria_assoc
+      ]
+  | Score { instructions; criteria } ->
+    let criteria_list = List.map (fun level -> `String level) criteria in
+    `Assoc
+      [ "type", `String "score"
+      ; "instructions", `String instructions
+      ; "criteria", `List criteria_list
+      ]
+  | Noul { instructions; criteria } ->
+    let fields =
+      [ "type", `String "noul"
+      ; "instructions", `String instructions
+      ]
+    in
+    let fields =
+      match criteria with
+      | None -> fields
+      | Some (t_meaning, f_meaning) ->
+        fields @ [ "criteria", `Assoc [ "true", `String t_meaning; "false", `String f_meaning ] ]
+    in
+    `Assoc fields
+;;
+
+let request_to_yojson ~model ~state ~questions =
+  let questions_assoc =
+    List.map (fun (id, q) -> id, question_to_yojson q) questions
+  in
+  `Assoc
+    [ "model", `String model
+    ; "state", state
+    ; "questions", `Assoc questions_assoc
+    ]
+;;
+
+let answer_of_yojson json =
+  match json with
+  | `Assoc fields ->
+    (match List.assoc_opt "type" fields with
+     | Some (`String "noul") ->
+       (match List.assoc_opt "noul" fields with
+        | Some (`Float n) -> Ok (Noul_answer { noul = n })
+        | Some (`Int i) -> Ok (Noul_answer { noul = float_of_int i })
+        | _ -> Error "typesafe: noul answer missing numeric 'noul' field")
+     | Some (`String "choice") ->
+       let* choice =
+         match List.assoc_opt "choice" fields with
+         | Some (`String s) -> Ok s
+         | _ -> Error "typesafe: choice answer missing 'choice' field"
+       in
+       let* confidence =
+         match List.assoc_opt "confidence" fields with
+         | Some (`Float f) -> Ok f
+         | Some (`Int i) -> Ok (float_of_int i)
+         | _ -> Error "typesafe: choice answer missing numeric 'confidence' field"
+       in
+       let* probabilities =
+         match List.assoc_opt "probabilities" fields with
+         | Some (`Assoc probs) ->
+           let rec parse_probs acc = function
+             | [] -> Ok (List.rev acc)
+             | (k, `Float v) :: rest -> parse_probs ((k, v) :: acc) rest
+             | (k, `Int v) :: rest -> parse_probs ((k, float_of_int v) :: acc) rest
+             | (k, _) :: _ ->
+               Error (Printf.sprintf "typesafe: probability for %S must be a number" k)
+           in
+           parse_probs [] probs
+         | _ -> Error "typesafe: choice answer missing 'probabilities' map"
+       in
+       Ok (Choice_answer { choice; probabilities; confidence })
+     | Some (`String "score") ->
+       let* score =
+         match List.assoc_opt "score" fields with
+         | Some (`Float f) -> Ok f
+         | Some (`Int i) -> Ok (float_of_int i)
+         | _ -> Error "typesafe: score answer missing numeric 'score' field"
+       in
+       let* confidence =
+         match List.assoc_opt "confidence" fields with
+         | Some (`Float f) -> Ok f
+         | Some (`Int i) -> Ok (float_of_int i)
+         | _ -> Error "typesafe: score answer missing numeric 'confidence' field"
+       in
+       let* probabilities =
+         match List.assoc_opt "probabilities" fields with
+         | Some (`List probs) ->
+           let rec parse_probs acc = function
+             | [] -> Ok (List.rev acc)
+             | (`Float v) :: rest -> parse_probs (v :: acc) rest
+             | (`Int v) :: rest -> parse_probs (float_of_int v :: acc) rest
+             | _ :: _ -> Error "typesafe: score probability must be a number"
+           in
+           parse_probs [] probs
+         | _ -> Ok []
+       in
+       Ok (Score_answer { score; probabilities; confidence })
+     | Some (`String other) ->
+       Error (Printf.sprintf "typesafe: unknown answer type %S" other)
+     | _ -> Error "typesafe: answer missing 'type' field")
+  | _ -> Error "typesafe: answer must be a JSON object"
+;;
+
+let usage_of_yojson = function
+  | `Assoc fields ->
+    let input_tokens =
+      match List.assoc_opt "input_tokens" fields with
+      | Some (`Int i) -> i
+      | _ -> 0
+    in
+    let output_tokens =
+      match List.assoc_opt "output_tokens" fields with
+      | Some (`Int i) -> i
+      | _ -> 0
+    in
+    Some { input_tokens; output_tokens }
+  | _ -> None
+;;
+
+let eval_response_of_yojson json =
+  match json with
+  | `Assoc fields ->
+    let* model =
+      match List.assoc_opt "model" fields with
+      | Some (`String m) -> Ok m
+      | _ -> Error "typesafe: response missing 'model' string"
+    in
+    let* answers =
+      match List.assoc_opt "answers" fields with
+      | Some (`Assoc ans_list) ->
+        let rec parse_answers acc = function
+          | [] -> Ok (List.rev acc)
+          | (id, ans_json) :: rest ->
+            let* ans = answer_of_yojson ans_json in
+            parse_answers ((id, ans) :: acc) rest
+        in
+        parse_answers [] ans_list
+      | _ -> Error "typesafe: response missing 'answers' map"
+    in
+    let usage =
+      match List.assoc_opt "usage" fields with
+      | Some u -> usage_of_yojson u
+      | None -> None
+    in
+    Ok { model; answers; usage }
+  | _ -> Error "typesafe: response must be a JSON object"
+;;

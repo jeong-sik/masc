@@ -431,7 +431,6 @@ Authored configuration lives under `<base-path>/.masc/config` unless
 | `keepers/<name>.toml` | One Keeper: operational settings, prompt instructions, tool posture |
 | `tools/*.toml` | Declarative schemas for the tools the server registers |
 | `repositories.toml` | Registered repositories for the Workspace surface |
-| `agent-core-models-overlay.toml` | Optional model-capability rows over the embedded catalog |
 | `<base-path>/.masc/skills/<name>/SKILL.md` | A capability a Keeper can be handed by name; `name` in the frontmatter must equal the directory name |
 
 [`docs/ENV-CONTRACT.md`](docs/ENV-CONTRACT.md) lists the environment

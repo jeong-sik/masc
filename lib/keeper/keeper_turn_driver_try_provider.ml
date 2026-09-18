@@ -66,6 +66,11 @@ type try_provider_ctx =
        turn record on the trace measured, whichever runtime ran it. Read once
        per attempt, on that path only. *)
     carried_front_seed : unit -> Keeper_carried_front.seed_read
+  ; (* Where a front halved after a refusal is kept for the rest of the
+       turn. The position is a fact about the history, not about the
+       candidate that was refused, so the lane's next candidate composes
+       from it instead of starting at the whole history again. *)
+    hold_carried_front : Keeper_carried_front.seed -> unit
   ; base_path : string
   ; keeper_name : string
   ; name : string
@@ -699,26 +704,15 @@ let compose_carried_model_input
       let first_atom =
         Keeper_carried_front.clamp ~atom_count:history_atom_count seed.first_atom
       in
-      (* A range the provider refused is a ceiling, not a start. The turn that
-         carried it never finished, so its front is the largest range known to
-         be too big, and starting there again sends that range plus whatever
-         the history gained since. The move is the one a refusal forces inside
-         a turn (RFC keeper-context-window-in-tokens §10.4), continued across
-         the turn boundary instead of restarting: halfway toward the newest
-         atom. When one atom is left the ceiling itself stands, and the
-         in-turn ladder answers the next refusal. *)
-      let first_atom =
-        match seed.source with
-        | Keeper_carried_front.Refused_range _ ->
-          (match
-             Keeper_carried_front.halve ~first_atom ~atom_count:history_atom_count
-           with
-           | Some halved -> halved
-           | None -> first_atom)
-        | Keeper_carried_front.Ledger
-        | Keeper_carried_front.Turn_record _
-        | Keeper_carried_front.Halved_after_refusal _ -> first_atom
-      in
+      (* A turn that did not finish is read at the position it reached, not
+         ahead of it. Every candidate of a turn shares the front a refusal
+         moved (RFC keeper-context-window-in-tokens §10.4), so the record of an
+         unfinished turn already names the narrowest range that turn tried, and
+         the next refusal is answered by the in-turn ladder. Moving the front
+         again here would also move it for the turns that ended for reasons
+         that say nothing about size — a quota answer, a reset connection —
+         and those repeat, so the range would shrink to nothing while the
+         history stood still. *)
       let projection, transmitted_bytes =
         Runtime_model_input_tail_window.project_from_atom
           ~measure_message_bytes
@@ -1958,7 +1952,8 @@ let halve_front ~digest_at ~move_ledger ~hold ~first_atom ~retry =
     declared-lane candidate rotation and cascade fallback for every other
     error and for a refusal that survives every move. The front the retry
     composes from is the ledger's after the eviction, or, before any usage
-    on this pair, the halved range held for the rest of this attempt. *)
+    on this pair, the halved range, which the turn holds for every
+    candidate the lane walks to. *)
 (* The marks, judged once per candidate turn before its first composition
    (RFC keeper-context-window-in-tokens §10.5): above the high-water mark the
    oldest blocks leave until the projected total is under the low-water mark,
@@ -2016,18 +2011,6 @@ let run_try_provider_with_carried_range_eviction
        position on the atom axis, stops at a single atom, and without it a
        history that outgrew the provider would be refused every turn with
        nothing declared to move the front. *)
-    let seed = ctx.carried_front_seed in
-    let halved_front = ref None in
-    let ctx =
-      { ctx with
-        carried_front_seed =
-          (fun () ->
-             match !halved_front with
-             | Some halved ->
-               { Keeper_carried_front.seed = Some halved; unreadable = None }
-             | None -> seed ())
-      }
-    in
     let state = new_attempt_state () in
     let last_resort_used = ref false in
     let checkpoint_after = ref None in
@@ -2060,8 +2043,10 @@ let run_try_provider_with_carried_range_eviction
           | Keeper_carried_range.Unchanged _ -> false)
         ~halve:(fun ~first_atom ~atom_count:_ ~retry ->
           (* With a ledger, the move cuts through its one block and the
-             blocks restart from the new front; without one, the halved
-             seed is what the next composition on this attempt reads. *)
+             blocks restart from the new front, and that ledger is this
+             candidate's; without one, the halved seed is what the next
+             composition reads, on this candidate and on every later one the
+             lane walks to in this turn. *)
           halve_front
             ~digest_at:
               (Option.map (fun (sent : sent_request) -> sent.digest_at) !(state.last_request))
@@ -2070,7 +2055,7 @@ let run_try_provider_with_carried_range_eviction
                  ~keeper_name:ctx.keeper_name
                  ~runtime_id:ctx.runtime_id
                  ~session_id:(ledger_session ctx))
-            ~hold:(fun halved -> halved_front := Some halved)
+            ~hold:ctx.hold_carried_front
             ~first_atom
             ~retry)
         ~last_resort:(fun ~retry:_ ->

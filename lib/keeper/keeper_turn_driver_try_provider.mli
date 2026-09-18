@@ -46,6 +46,12 @@ type try_provider_ctx =
             keeper-context-window-in-tokens §10.5), as the binding declares
             them; [None] leaves eviction to a refusal. *)
   ; carried_front_seed : unit -> Keeper_carried_front.seed_read
+  ; hold_carried_front : Keeper_carried_front.seed -> unit
+        (** Keeps a front halved after a refusal for the rest of the turn,
+            so the lane's next candidate reads it through
+            {!carried_front_seed} rather than composing the whole history
+            again. A halved position names an atom of the history, which
+            every Agent Core candidate of the turn composes from. *)
         (** Where the carried range starts when no ledger holds this
             (keeper, runtime) pair yet: the range the newest completed Agent
             Core turn record on the trace measured, whichever runtime ran it,

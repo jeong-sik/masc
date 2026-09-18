@@ -2972,6 +2972,7 @@ let test_exception_after_durable_rejection_stops_before_successor () =
              ignore
                (execute_with_accepting_test_validator
                   ~net
+                  ~clock
                   ~on_measurement_terminal:(fun _ -> Ok ())
                   ~before_measurement_dispatch:(fun _ -> Ok ())
                   ~before_dispatch:(fun candidate ->
@@ -3170,6 +3171,7 @@ let test_exception_after_durable_advance_stops_before_successor () =
              ignore
                (execute_with_accepting_test_validator
                   ~net
+                  ~clock
                   ~on_measurement_terminal:(fun _ -> Ok ())
                   ~before_measurement_dispatch:(fun _ -> Ok ())
                   ~before_dispatch:(fun candidate ->

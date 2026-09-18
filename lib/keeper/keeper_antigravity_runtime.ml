@@ -102,12 +102,6 @@ let current_goal_label () =
 
 let prompt_section_separator = "\n\n"
 
-let measure_model_input_message_bytes (message : Agent_core.Types.message) =
-  String.length (history_role_label message.role)
-  + String.length (Host.encode_history_message message)
-  + String.length prompt_section_separator
-;;
-
 (* agy states no prompt size limit: it is in no flag of `agy --help` and in
    no field of its stream. A 2,078,915-byte prompt went end to end and the
    model answered from markers placed at 0, 25, 50, 75 and 100 percent of it

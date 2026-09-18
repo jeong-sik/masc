@@ -76,8 +76,4 @@ module For_testing : sig
     (int, string) result
   (** Render through the production start-turn formatter and return the exact
       transmitted prompt byte count. *)
-
-endered empty-history prompt: the reserve charges
-      both separators (the with-history worst case), while an empty-history
-      render joins its two sections with one. *)
 end

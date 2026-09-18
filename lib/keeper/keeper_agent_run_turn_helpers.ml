@@ -305,10 +305,14 @@ let make_append_manifest
 (* RFC librarian-lifecycle 4.6. A turn that starts from a history with no atom
    says so before it can save anything, so the record that its atoms are
    numbered from zero does not wait for the turn to reach its end. Whichever
-   save first puts atoms into that history -- a stage save, the finalize save,
-   the official client host's reject flush -- the line is already there. A line
-   that cannot be written does not fail the turn: it is logged and counted, and
-   the turn's own line says [Fresh_history] again if the turn finishes. *)
+   save inside [run_turn] first puts atoms into that history -- a stage save,
+   the finalize save, the approval-input admission, the official client host's
+   reject flush -- the line is already there. A line that cannot be written
+   does not fail the turn: it is logged and counted, and the turn's own line
+   says [Fresh_history] again if the turn finishes.
+
+   The history is also empty here when the checkpoint could not be loaded, and
+   then the saved one may still hold atoms (RFC librarian-lifecycle 6). *)
 let record_empty_history_at_turn_start
       ~(config : Workspace.config)
       ~keeper_name

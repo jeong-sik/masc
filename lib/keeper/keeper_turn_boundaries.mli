@@ -8,12 +8,18 @@
     the digest of the message that opens the last one. Where a turn started is
     not written; the end an earlier line states is that start.
 
-    A history with no atom has no such earlier line, so whoever sees one says
-    so with a [History_empty] line. Two writers do. A turn that starts from a
-    history with no atom appends the line before it runs, so the record that
-    its atoms are numbered from zero is there even if the turn saves and then
-    dies before its own line. [masc_keeper_clear] empties a history, not as
-    part of a turn, and appends the line once the emptied checkpoint is saved.
+    A history with no atom has no such earlier line, so whoever has one in
+    hand says so with a [History_empty] line. Two writers do. A turn that
+    starts from a history with no atom appends the line before it runs, so the
+    record that its atoms are numbered from zero is there even if the turn
+    saves and then dies before its own line. [masc_keeper_clear] empties a
+    history, not as part of a turn, and appends the line once the emptied
+    checkpoint is saved.
+
+    A turn also starts with no atom when its checkpoint could not be loaded (a
+    version cut, a read or parse error): the loader answers those like a
+    missing checkpoint. That turn writes the line about a history it did not
+    see, and the saved history may still hold atoms (RFC §6).
 
     {2 What a reader may rely on}
 
@@ -25,19 +31,25 @@
       ([Fs_compat.recover_private_jsonl_durable_locked_result]) truncates the
       torn tail. That call belongs to the reader's boot path (RFC §8 step 4),
       not to this module; until it runs, turns of that keeper go unrecorded.
-    - File order is not turn order. The checkpoint save is serialized by the
-      session lock; this append happens after that lock is released. A reader
-      orders the [Atom_history] lines of one trace by [end_atom], not by their
-      position in the file, and must not assume [turn_ref] is unique: two turns
-      of one keeper that finish together both take the next turn number.
+    - A reader orders the [Atom_history] lines of one trace by [end_atom], not
+      by their position in the file: a position is a value, and a value does
+      not depend on when a line reached the file. Turns of one keeper do not
+      overlap -- the Keeper Owner runs one child turn at a time
+      ({!Keeper_owner}) -- and the reader rules of RFC §4.4 rely on that.
+      [masc_keeper_clear] is not a turn and can append its line while a turn
+      runs. [turn_ref] is not a key: the turn number is read from the keeper's
+      meta when the turn starts, and nothing here makes it unique in the file.
     - Two lines say that the atoms of a trace are numbered from zero again: a
       [Turn_ended] line with [Fresh_history], and a [History_empty] line.
-      Each is written after the history became what it describes: a
-      [Turn_ended] line and a clear's [History_empty] line after the save, a
-      turn's [History_empty] line after the load that showed no atom and
-      before any save of that turn. So a reader that sees one and then loads
-      the checkpoint loads the restarted history or a later one. What a
-      reader does with them is RFC §4.4.
+      A [Turn_ended] line and a clear's [History_empty] line are written
+      after the save they describe; a turn's [History_empty] line is written
+      after the load that gave the turn no atom and before any save made
+      inside [run_turn]. When that load succeeded, or found no checkpoint, a
+      reader that sees the line and then loads the checkpoint loads the
+      restarted history or a later one. When that load failed, the line is
+      ahead of the restart: the old history is still saved, and is replaced
+      only if a save of this turn is accepted (RFC §6). What a reader does
+      with these lines is RFC §4.4.
     - The lines of an earlier history of the same trace stay in the file, and
       so can a line whose history was never stored (the last bullet, and a
       turn that reused its last save while a clear landed). A line is a cut
@@ -98,14 +110,16 @@ type event =
       ; position : position
       }
   | History_empty of { trace_id : string }
-      (** The saved history of this trace held no atom when its writer looked.
-          The line is named for what its writer saw, not for who wrote it,
-          because a reader has no use for the difference.
+      (** Its writer had a history of this trace with no atom in hand. The
+          line is named for that, not for who wrote it, because a reader has
+          no use for the difference.
 
           A turn writes it when the history it starts from holds no atom,
-          before it runs. If the turn reaches its end, its own line says
-          [Fresh_history] as well; if it saves and then dies, this is the only
-          line that says its atoms are numbered from zero.
+          before it runs. That is the saved history when the load succeeded
+          or found no checkpoint, and nothing at all when the load failed. If
+          the turn reaches its end, its own line says [Fresh_history] as
+          well; if it saves and then dies, this is the only line that says
+          its atoms are numbered from zero.
 
           [masc_keeper_clear] writes it once it has saved the emptied
           checkpoint ({!Keeper_history_clear}), never before. The clear says

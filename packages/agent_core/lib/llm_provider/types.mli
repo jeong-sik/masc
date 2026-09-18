@@ -742,6 +742,18 @@ type provider_status =
   ; error_body : string
   }
 
+(** Where an error a provider reported inside an accepted response came from.
+    - [Provider_stated]: an [error] member arrived and the values beside this
+      one are what it said.
+    - [Unstated_errored_choice]: the choice finished with [error]
+      ({!Stop_reason_wire.is_provider_error_finish}) and no [error] member
+      arrived anywhere in the response. The provider ended the generation and
+      kept the reason to itself, so there is nothing to read a type or a
+      status from. *)
+type provider_report =
+  | Provider_stated
+  | Unstated_errored_choice
+
 type sse_event =
   | MessageStart of
       { id : string
@@ -769,6 +781,7 @@ type sse_event =
       { message : string
       ; error_type : string option
       ; provider_status : provider_status option
+      ; report : provider_report
       ; raw : string
       }
   (** A provider-reported error delivered mid-stream. [error_type] is the
@@ -859,6 +872,7 @@ type stream_error =
       { message : string
       ; error_type : string option
       ; provider_status : provider_status option
+      ; report : provider_report
       ; raw : string
       }
   | Stream_parse_failed of

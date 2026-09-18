@@ -44,12 +44,18 @@ type projection =
 type window_observation =
   { transmitted_atoms : int
   ; total_atoms : int
+  ; front_atom_digest : string
   }
 
-let observe ~history_atom_count (projection : projection) =
-  { transmitted_atoms = projection.atom_count - projection.dropped_atoms
-  ; total_atoms = history_atom_count
-  }
+(* A window names its front by the message that opens it. A projection that
+   carried no atom puts its front at [history_atom_count], an index the
+   history's lookup has no atom at, so it is no observation. *)
+let observe ~digest_at ~history_atom_count (projection : projection) =
+  let transmitted_atoms = projection.atom_count - projection.dropped_atoms in
+  Option.map
+    (fun front_atom_digest ->
+       { transmitted_atoms; total_atoms = history_atom_count; front_atom_digest })
+    (digest_at (history_atom_count - transmitted_atoms))
 ;;
 
 let budget_error_to_string = function
@@ -132,6 +138,37 @@ let annotate (messages : Agent_core.Types.message list) :
       messages
   in
   (List.rev labelled_rev, atom_count)
+;;
+
+(* The atom's position is its index plus the message that opens it: the
+   first message [annotate] labels with that index, a [User] or [Assistant]
+   message (or the orphan [Tool] that heads a history cut upstream). A [Tool]
+   message that joins the atom later carries an index the atom already has,
+   so it never becomes the opener. The digest is over the checkpoint
+   encoding of that one message, the bytes a save writes for it.
+
+   Partial application does the labelling once; each lookup encodes and
+   hashes one message. *)
+let atom_opening_digest (messages : Agent_core.Types.message list) =
+  let labelled, _atom_count = annotate messages in
+  let openers_rev, _next =
+    List.fold_left
+      (fun (openers, next) (message, label) ->
+         match label with
+         | Atom index when index = next -> message :: openers, next + 1
+         | Atom _ | Pinned -> openers, next)
+      ([], 0)
+      labelled
+  in
+  let openers = Array.of_list (List.rev openers_rev) in
+  fun atom ->
+    if atom < 0 || atom >= Array.length openers
+    then None
+    else (
+      let encoded =
+        Yojson.Safe.to_string (Agent_core.Checkpoint.message_to_json openers.(atom))
+      in
+      Some Digestif.SHA256.(digest_string encoded |> to_hex))
 ;;
 
 let first_atom_at_or_after messages ~message_index =

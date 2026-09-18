@@ -344,17 +344,21 @@ jobs:
           docker image inspect masc-sandbox:general --format '{{.Id}}'
 
       - name: Run the tests this pull request edits
-        # Bounded twice, because a hung suite must not read as a break: the
-        # deadline below ends the step, and the script gives each suite its
-        # own timeout on top of that.
-        timeout-minutes: 12
+        # The script holds the budget: every suite it selects runs, and one the
+        # budget does not reach is named and fails the step (RFC-0428, "넓힌
+        # 선택"). The step's own deadline sits two minutes above that budget
+        # so the script, not the runner, ends a step that runs out and the
+        # log says which suites did not run. The job is bounded at 30 minutes,
+        # and in run 35216373548 this step started 7m55s into it.
+        timeout-minutes: 20
         env:
           GH_TOKEN: ${{ github.token }}
           DUNE_JOBS: "4"
           MASC_TEST_ALLOW_REAL_DOCKER: "1"
         run: |
           bash scripts/ci/run-edited-tests.sh \
-            "${{ github.event.pull_request.number }}"
+            "${{ github.event.pull_request.number }}" \
+            --budget-seconds 1080
 
 
   # dashboard/ ships a `typecheck` script and no lane calls it.

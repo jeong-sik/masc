@@ -339,10 +339,11 @@ let%test "an errored choice with no object reads as an interrupted generation" =
          (Types.Stream_provider_error
             { message; error_type; provider_status; report; raw })
      with
-     | Http_client.ProviderFailure { kind = Http_client.Provider_interrupted; message } ->
-       (* The reason the provider kept to itself is not invented here: the
-          message says exactly that, and carries the chunk for diagnosis. *)
-       String.length message > 0
+     (* The kind is the fact under test. The message is display text built by
+        the same printf as its siblings, and the wire-format test below covers
+        that shape. *)
+     | Http_client.ProviderFailure { kind = Http_client.Provider_interrupted; message = _ } ->
+       true
      | Http_client.ProviderFailure _ | Http_client.HttpError _
      | Http_client.NetworkError _ | Http_client.TimeoutError _
      | Http_client.AcceptRejected _ | Http_client.ProviderTerminal _ -> false)

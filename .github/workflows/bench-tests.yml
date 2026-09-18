@@ -1,0 +1,58 @@
+name: Terminal-Bench harness tests
+# benchmarks/terminal_bench/tests had no CI: they ran only when someone ran
+# pytest by hand before a bench run.
+#
+# Its own workflow behind paths: rather than a job in pr-check.yml, which runs
+# on every pull request: the suite installs harbor and its dependencies, and
+# almost no pull request touches the bench. The paths are everything the suite
+# reads: the bench directory; config/ and skills/, which
+# configs/render_configs.py copies into every rendered arm; and the two OCaml
+# sources tests/test_endpoint_env.py compares the env_file refusals with.
+on:
+  pull_request:
+    paths:
+      - 'benchmarks/terminal_bench/**'
+      - 'config/**'
+      - 'skills/**'
+      - 'lib/exec_shim/exec_shim.ml'
+      - 'lib/exec_ssh_protocol/exec_ssh_protocol.ml'
+      - '.github/workflows/bench-tests.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: bench-tests-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: benchmarks/terminal_bench
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install harbor and pytest
+        run: python -m pip install -r requirements.txt
+      - name: Run the bench tests
+        run: python -m pytest tests -q -rs --junitxml="${RUNNER_TEMP}/bench-tests.xml"
+      - name: Refuse skipped tests
+        # Some tests skip when a tool such as jq is missing, which pytest
+        # counts as a pass. Here every test must run.
+        run: |
+          python - "${RUNNER_TEMP}/bench-tests.xml" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          skipped = [
+              f"{case.get('classname')}::{case.get('name')}"
+              for case in ET.parse(sys.argv[1]).iter("testcase")
+              if case.find("skipped") is not None
+          ]
+          for name in skipped:
+              print(f"::error::skipped in CI: {name}")
+          sys.exit(1 if skipped else 0)
+          PY

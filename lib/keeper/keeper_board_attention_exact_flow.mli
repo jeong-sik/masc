@@ -116,7 +116,7 @@ val run_cli_tail :
 
 val execute :
   ?cli_runner:Keeper_lane_cli_oneshot.runner ->
-  ?clock:_ Eio.Time.clock ->
+  clock:_ Eio.Time.clock ->
   before_dispatch:
     (attempt_provenance -> (unit, 'callback_error) result) ->
   before_advance:

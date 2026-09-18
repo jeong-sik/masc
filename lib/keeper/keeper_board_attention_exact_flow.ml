@@ -456,7 +456,7 @@ let observe_terminal prepared result =
     (result |> terminal_outcome |> terminal_outcome_to_string)
 ;;
 
-let execute_current ?cli_runner ?clock ~before_dispatch ~before_advance prepared =
+let execute_current ?cli_runner ~clock ~before_dispatch ~before_advance prepared =
   let registry = Exact_lane_run_registry.global () in
   let run_id = Random_id.prefixed ~prefix:"exact-board-attention-" ~bytes:16 in
   let started_at = Time_compat.now () in
@@ -565,18 +565,17 @@ let execute_current ?cli_runner ?clock ~before_dispatch ~before_advance prepared
                | Keeper_board_attention_candidate.Pending { material; _ } ->
                  (match
                     Typesafeai_board_attention.judge_candidate
-                      ?clock
+                      ~clock
                       ~api_key
                       ~candidate:prepared.candidate
                       ~material
                       ()
                   with
                   | Ok verdict ->
-                    let now =
-                      match clock with
-                      | Some clk -> Eio.Time.now clk
-                      | None -> Unix.gettimeofday ()
-                    in
+                    (* The lane's clock, never the wall: both entries into this
+                       flow hold one, so a judgment's time comes from the same
+                       source the rest of the turn is measured against. *)
+                    let now = Eio.Time.now clock in
                     let judgment =
                       { Keeper_board_attention_candidate.verdict
                       ; slot_id = "typesafeai.jev-latest"
@@ -606,7 +605,7 @@ let execute_current ?cli_runner ?clock ~before_dispatch ~before_advance prepared
         match
           Exact_output.execute_flow_once
             ~net:prepared.net
-            ?clock
+            ~clock
             ~before_measurement_dispatch:(fun _ -> Ok ())
             ~on_measurement_terminal:(fun _ -> Ok ())
             ~before_dispatch:agent_core_before_dispatch
@@ -651,6 +650,6 @@ let execute_current ?cli_runner ?clock ~before_dispatch ~before_advance prepared
   result
 ;;
 
-let execute ?cli_runner ?clock ~before_dispatch ~before_advance prepared =
-  execute_current ?cli_runner ?clock ~before_dispatch ~before_advance prepared
+let execute ?cli_runner ~clock ~before_dispatch ~before_advance prepared =
+  execute_current ?cli_runner ~clock ~before_dispatch ~before_advance prepared
 ;;

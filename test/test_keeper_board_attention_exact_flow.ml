@@ -605,7 +605,7 @@ let prepared_with_cli_tail ~net ~cli_slot_ids candidate =
 let test_cli_only_executes_without_http_provenance () =
   Fixture.with_official_client_runtimes (fun () ->
   with_prompt_registry (fun () ->
-    run_eio (fun ~sw:_ ~net ~clock:_ ->
+    run_eio (fun ~sw:_ ~net ~clock ->
       let candidate = candidate "board-attention-cli-only" in
       publish_lane ~cli_slot_ids:[ Fixture.cli_primary_runtime ] [];
       let prepared = match prepare_exact ~net:(Some net) candidate with
@@ -617,6 +617,7 @@ let test_cli_only_executes_without_http_provenance () =
         incr calls;
         Ok (Yojson.Safe.to_string (judgment_output ~candidate_id:candidate.Candidate.candidate_id)) in
       match Exact_flow.execute ~cli_runner:runner
+        ~clock
         ~before_dispatch:(fun _ -> Alcotest.fail "CLI-only must not bind an HTTP receipt")
         ~before_advance:(fun ~failed:_ ~next:_ -> Alcotest.fail "CLI-only must not advance HTTP")
         prepared with

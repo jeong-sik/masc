@@ -1,52 +1,25 @@
+(* Reads go through the config layer, which is where this repository keeps the
+   environment: [Env_config_core.raw_value_opt] also answers from the boot
+   override store, so a value seeded from runtime.toml reaches these knobs the
+   same way a exported variable does, and CI's env-read floor stays where it
+   is. *)
+
 let default_endpoint = "https://api.typesafe.ai/v1/systemone"
 let default_model = "jev-latest"
 
-let api_key () =
-  match Sys.getenv_opt "TYPESAFEAI_API_KEY" with
-  | Some k when String.trim k <> "" -> Some (String.trim k)
-  | _ ->
-    (match Sys.getenv_opt "TYPESAFE_API_KEY" with
-     | Some k when String.trim k <> "" -> Some (String.trim k)
-     | _ -> None)
-;;
+let api_key () = Env_config_core.trim_opt (Env_config_core.raw_value_opt "TYPESAFEAI_API_KEY")
 
 let endpoint () =
-  match Sys.getenv_opt "MASC_TYPESAFEAI_ENDPOINT" with
-  | Some ep when String.trim ep <> "" -> String.trim ep
-  | _ ->
-    (match Sys.getenv_opt "MASC_TYPESAFE_ENDPOINT" with
-     | Some ep when String.trim ep <> "" -> String.trim ep
-     | _ -> default_endpoint)
+  Env_config_core.get_string ~default:default_endpoint "MASC_TYPESAFEAI_ENDPOINT"
 ;;
 
-let model () =
-  match Sys.getenv_opt "MASC_TYPESAFEAI_MODEL" with
-  | Some m when String.trim m <> "" -> String.trim m
-  | _ ->
-    (match Sys.getenv_opt "MASC_TYPESAFE_MODEL" with
-     | Some m when String.trim m <> "" -> String.trim m
-     | _ -> default_model)
-;;
+let model () = Env_config_core.get_string ~default:default_model "MASC_TYPESAFEAI_MODEL"
 
+(* The variable turns the lane off; it cannot turn it on without a key, and a
+   key alone is enough to opt in. [get_bool] reads the same spellings this
+   module used to match by hand (true/1/yes/on, false/0/no/off) and warns on
+   anything else instead of silently reading it as off. *)
 let is_enabled () =
-  let is_explicitly_disabled v =
-    match v with
-    | Some ("0" | "false" | "no" | "off") -> true
-    | _ -> false
-  in
-  let is_explicitly_enabled v =
-    match v with
-    | Some ("1" | "true" | "yes" | "on") -> true
-    | _ -> false
-  in
-  let env_val =
-    match Sys.getenv_opt "MASC_TYPESAFEAI_ENABLED" with
-    | Some _ as v -> v
-    | None -> Sys.getenv_opt "MASC_TYPESAFE_ENABLED"
-  in
-  if is_explicitly_disabled env_val
-  then false
-  else if is_explicitly_enabled env_val
-  then Option.is_some (api_key ())
-  else Option.is_some (api_key ())
+  Env_config_core.get_bool ~default:true "MASC_TYPESAFEAI_ENABLED"
+  && Option.is_some (api_key ())
 ;;

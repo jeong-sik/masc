@@ -45,6 +45,30 @@ Task 하나에는 서로 다른 사실 세 가지가 들어 있다.
 목표 모델은 `specs/task-lifecycle/TaskOwnership.tla` 에 있고, 위 결함 각각을 버그 모델로 넣어
 불변식이 실제로 잡는지 TLC 로 확인했다(§4.1).
 
+### 0.1 이 문서가 쓰는 말
+
+코드에 있는 이름은 영어 그대로 쓴다. 아래 우리말은 그 이름을 문장 안에서 부르는 말이다.
+
+| 이 문서의 말 | 코드 이름 | 뜻 |
+|---|---|---|
+| 요청 | Task 자체 | 누군가 해 달라고 올린 일 하나 |
+| 요청자 | `created_by` | 그 Task 를 만든 쪽. 만들 때 한 번 적히고 바뀌지 않는다 |
+| 맡다, 맡은 쪽 | `Claim`, `Claimed`·`InProgress` 의 `assignee` | 지금 그 일을 하고 있는 에이전트. 한 에이전트는 하나만 맡는다 |
+| 놓다 | `Release` | 맡은 쪽이 Task 를 `Todo` 로 돌려놓는 것 |
+| 제출, 제출자 | `Submit_for_verification`, `AwaitingVerification` | 맡은 쪽이 증거와 함께 "끝났다"고 내는 것. 제출하면 더는 맡고 있지 않다. 제안하는 칸 이름은 `submitter` |
+| 심사 | 판정 lane 의 review 한 번 | 판정자가 제출과 증거를 읽는 일 |
+| 판정, 판정자 | `completion_verdict`, `completion_authority` | 제출에 대한 답과 그 답을 내는 쪽. 시스템 판정 에이전트(`System_llm_agent`)이거나 운영자(`Human_operator`)다. Keeper 는 판정자가 아니다 |
+| 승인, 거절 | `Verdict_approved`, `Verdict_rejected` | 판정의 두 값 |
+| 거두다 | 제안: `Withdraw`. 지금의 `Cancel` 을 대신한다 | 요청 자체를 물리는 것. 요청자와 운영자만 한다 |
+| 취소 청구 | `AwaitingVerification { intent = Cancel_task }` | 지금 코드에서 맡은 쪽이 cancel 하면 생기는 대기. 이 RFC 가 없앤다 |
+| 운영자 | `Human_operator` | 사람. TUI 나 dashboard 로 들어오고, 판정은 인증된 HTTP 경로로만 낸다 |
+| 운영자 목록 | `Operator_task_attention.item` | 운영자만 풀 수 있는 Task 를 모아 보여 주는 목록 |
+| handoff | `handoff_context` | Task 에 붙어 다니는 인계 메모. 나갈 때 쓰고 들어올 때 읽는다 |
+| 멈춘 제출 | 재시도 없는 `not_reviewed` 같은 실행 결과 | 심사가 실패했고 다시 시도되지 않는 제출 |
+| 전달 의무 | `pending_completion_rejections` | 거절을 제출자에게 알릴 때까지 backlog 에 남는 항목 |
+| 세탁 | RFC-0417 의 anti-laundering | 하기로 한 일을 판정 없이 없던 일로 만드는 것 |
+| 하드컷 | hard cut | 옛 저장 형식을 읽는 코드를 만들지 않는 전환 |
+
 ## 1. 실측 (2026-09-18 11:27Z, `<base-path>/.masc`, backlog version 6573)
 
 Task 1,126건: `todo` 640, `done` 347, `awaiting_verification` 66, `cancelled` 56, `in_progress` 17.
@@ -497,7 +521,7 @@ OCaml 쪽은 임의의 액션·판정 열을 돌려 `OneTaskPerAgent` 를 확인
 | 1 | 거절 판정 → `Todo`. `set_current = None`. 제출자의 handoff 를 두고 사유를 더하기. `cycle_count`. 제출 증거를 호출에서만 읽기. 전달 의무를 세 값으로 지우기. `release_unroutable_rejected_task_r` 삭제. 알림 문장. 운영자 판정 요청에 `verification_id` | 속성 테스트 `OneTaskPerAgent`. §4.2 첫 줄이 새 판정에서 0 |
 | 2 | `intent` 삭제. `assignee` → `submitter`, 기본값 없는 디코드. `Operator_routed` 와 취소 사유를 나르던 것 삭제. 도구 설명 | "이미 끝나 있다"는 제출이 시스템 판정을 받는 테스트 |
 | 3 | `Cancel` → `Withdraw`. 자격을 `decide` 의 인자로. 인증된 운영자 경로와 TUI·dashboard 이전. `keeper_task_withdraw`. 맡은 쪽 알림·기록·지표. 사라진 물음을 멈춤으로 알리지 않기 | `release` → `withdraw` 가 요청자 아닌 쪽에서 거절되는 테스트 |
-| 4 | 운영자 목록(`Awaiting_verdict`), 헌법 개정, `docs/spec/02-types-and-invariants.md` 정정, `Done_action` 과 `TaskLifecycle.tla` 삭제 | §4.2 셋째 줄 0 |
+| 4 | 운영자 목록(`Awaiting_verdict`), 헌법 개정, `docs/spec/00-glossary.md` 의 Task Lifecycle 절과 `docs/spec/02-types-and-invariants.md` 정정, `Done_action` 과 `TaskLifecycle.tla` 삭제 | §4.2 셋째 줄 0 |
 
 2와 3은 같이 배포한다. 2만 나가면 "하면 안 되는 일" 갈래가 잠시 `release` 하나로 줄어든다.
 

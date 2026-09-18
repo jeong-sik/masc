@@ -7,7 +7,7 @@ updated: 2026-09-18
 author: vincent
 supersedes: []
 superseded_by: null
-related: ["0206", "0342", "AC-040"]
+related: ["0206", "0342", "AC-040", "one-provider-two-wires", "0390"]
 implementation_prs: []
 ---
 
@@ -173,17 +173,74 @@ goo-yang-bong = "librarian_exact"
 - keeper 배정 의미는 그대로다
 - 카탈로그의 능력 필드 집합은 이 RFC 에서 늘리지 않는다 — 옮기기만 한다
 
-## 열린 질문
+## 이미 답이 난 것
 
-1. **`enable-thinking` 의 집**: 지금은 `[models.X] thinking-support` 에서 슬롯의 `enable_thinking` 이 파생된다. 바인딩 키로 올리면 되지만, "모델이 생각을 지원하는가"(카탈로그)와 "이 슬롯에서 켤 것인가"(배포)가 한 이름을 쓰고 있어 분리해야 한다.
-2. **`[providers.X]` 의 `protocol`**: 카탈로그 `kind` 와 같은 사실이다. 배포가 적을 이유가 없어 보이는데, CLI provider(`claude_code`, `codex`)는 카탈로그에 행이 없다. 그쪽을 어떻게 다룰지 정해야 한다.
-3. **`identity_kinds` 선택**: 한 provider 가 두 wire 를 겸할 때 배포가 어느 쪽을 쓰는지 말할 자리가 필요하다. 지금은 `request_path` 로 암묵적으로 갈린다.
+초안에서 열린 질문으로 적었던 셋 중 둘은 기록이 있다.
 
-## 근거
+**`enable-thinking` 의 집 — 답: 갈라져 있고, 갈린 곳이 맞다.**
+PR #36985(머지)가 정리했다. "끌 수 있는가"는 wire 가 아니라 **모델·표면의 성질**이고 — Grok 은 `reasoning cannot be disabled`, Kimi k3·k2.7-code 는 `thinking.type` 이 `"enabled"` 만, GLM-5.3 은 `can only be enabled`(전부 공식 문서, 2026-09-18 확인, 표면별 사실은 #36990) — 그 판정은 `Complete_common.validate_all` 하나가 답한다. 실제 요청이 통과하는 관문이 거기다.
 
-- 층 계수와 섹션 계수: `config/runtime.toml` @ `45b4db68a9`
-- 능력 통로 분해: `runtime_adapter.ml:411/440/478`, `provider_config.ml:213`, `runtime_agent.ml:743`
-- wire 별 `tool_choice`: `backend_ollama.ml:27` (`No [tool_choice] support`) 대 `backend_openai.ml` 52곳
-- 상한 없는 대기: #36979 (timeout 미설정 provider 7/10, curator 최대 13.3h, failover 미발동)
-- 요청마다 거절: #37004 (librarian_exact 94회 `missing_deadline`)
-- 배포 overlay 제거: #37016
+따라서 카탈로그가 `accepted_reasoning_efforts` 와 `thinking_control_format` 으로 "끌 수 있는가"를 말하고, 바인딩은 "이 슬롯에서 끌 것인가"만 말한다. 이 RFC 는 그 분리를 만드는 게 아니라 **이름만 정리한다** — 지금 `[models.X] thinking-support` 라는 한 이름이 두 질문에 걸쳐 있다.
+
+남은 진짜 구멍은 #36989 이다: **"끄기를 받지만 지키지 않는다"를 표현할 capability 값이 없다**(MiniMax M2.x). 이 RFC 는 그 값을 추가하지 않는다.
+
+**두 wire 겸용 provider — 답: 배포가 고르지 않는다.**
+`RFC-one-provider-two-wires`(Implemented, 2026-08-27) §4.3 이 이미 구현했다. wire 는 `runtime_adapter.ml:244-248` 이 계산해서 해석에 넘긴다. 배포가 선언할 자리는 필요 없고, 카탈로그가 `capabilities_base_by_identity_kind` 로 wire 별 사실을 갈라 적는다.
+
+그 RFC §8 "Deployment cleanup" 은 배포 overlay 의 `thinking_control_format` 덮어쓰기를 **지우라고 이미 적어두었다**. #37016 이 그 이행이다.
+
+## 이 RFC 의 범위 — 구독 CLI 는 애초에 다른 물건이다
+
+`claude_code`·`codex_subscription`·`antigravity_subscription` 은 카탈로그에 행이
+없다. 없는 게 결함이 아니라 **타입이 갈라놓은 것**이다.
+
+```ocaml
+(* runtime_execution.mli *)
+type t =
+  | Agent_core of Llm_provider.Provider_config.t
+  | Codex_app_server of codex_app_server
+  | Antigravity_cli of antigravity_cli
+  | Claude_code of claude_code
+```
+
+카탈로그는 `Llm_provider` 의 것이고, `Provider_config.t` 는 `Agent_core` 변형
+**안에만** 들어 있다. `runtime.ml:21-23` 이 그 의도를 적어두었다 — official client
+runtimes remain distinct and can never be dispatched as a fake LLM provider config.
+
+같은 경계가 세 곳에서 되풀이된다.
+
+| 갈리는 지점 | HTTP 바인딩 | 구독 CLI |
+| --- | --- | --- |
+| 능력 해석 (`capabilities_for_runtime`, `runtime.ml:897`) | 카탈로그가 답한다 | `None` |
+| 미등록 모델 판정 (`missing_runtime_model_capabilities`, `runtime.ml:1071`) | 카탈로그에 없으면 부팅 거부 | 첫 팔에서 제외 |
+| 쿼터 소유자 (`quota_scope_of_materialized`, `runtime.ml:263`) | 레지스트리 API 키 기본값까지 해석 | `Claude_code`·`Codex_app_server` 는 `None` |
+
+셋째 줄이 구독 계정 대응이다. 주석이 이유를 적어놨다 — *Official clients own
+subscription login. A registry API-key default with the same provider label is a
+different account authority.* `claude_code` 라는 라벨에 API 키 기본값이 있어도 이
+구독의 쿼터로 세지 않는다. 같은 이름이지만 다른 지갑이다. `antigravity_subscription`
+만 `credentials` 를 그대로 쓰는데, 그건 키가 아니라 CLI 가 써둔 OAuth 토큰 파일이다.
+
+**따라서 이 RFC 의 두 층 규칙은 `Agent_core` 바인딩에만 적용된다.** 판단이 아니라
+변형 경계다. 구독 CLI 의 `[providers.X]` 는 `protocol` 과 `command` 를 계속 들고
+있고, `[models.X]` 의 `api-name` 은 wire 위의 모델 이름이 아니라 CLI 플래그 값이다
+(`agy --model gemini-3.7-flash-high`). 옮길 카탈로그가 없는 게 아니라, 옮길 사실이
+카탈로그의 종류가 아니다.
+
+## 남은 것
+
+**하나. 구독 CLI 가 매 부팅마다 거절 목록에 오른다.**
+`exact_output_targets_of_runtimes`(`server_runtime_bootstrap.ml:420`)는 필터 없이
+모든 런타임을 타깃으로 만든다. 구독 CLI 는 `Binding.resolve_exact` 에서
+`Provider_missing` 으로 떨어지고, `Exclude_unbound_targets` 정책이 이를
+`rejected_target_bindings` 에 담아 부팅 로그로 내보낸다
+(`server_runtime_bootstrap.ml:390`). 조용히 사라지지는 않으니 결함은 아니다.
+
+다만 거절 사유가 `Target_provider`("카탈로그에 이 provider 가 없다")여서, 설정
+오류와 "이 종류의 런타임은 exact output 을 하지 않는다"가 같은 말로 보고된다.
+`Agent_core` 만 타깃으로 만들면 없어진다. 이 RFC 는 그 한 줄을 포함한다.
+
+**둘. 이름.**
+`Official_client` 는 *누가 만든 앱인가*를 부르는데, 실제로 갈리는 축은 *턴을 무엇이
+소유하는가*와 *어떤 계정으로 결제되는가*다. variant 이름과 20여 파일에 걸쳐 있어
+리네임 비용이 이득보다 크다. 이 RFC 는 이름을 바꾸지 않는다.

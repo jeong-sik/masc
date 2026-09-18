@@ -218,6 +218,8 @@ overlay 를 합치는 방법도 둘이다.
 
 이 축을 지금 밟고 있는 PR 은 #36980(masc `runtime.toml` 에 키를 연다)과 #36981(내장 `ollama_cloud` deepseek 행을 고친다)이다. §4.4 에 겹침을 적는다.
 
+지금 이 규칙을 적용할 수 있는 필드는 넷뿐이다. `runtime_schema.ml:130-156` 에서 `max_output_tokens`, `declared_thinking_control_format`, `reasoning_streaming_format`, `reasoning_replay_override` 만 `option` 이고, `supports_*` 15개와 `emits_usage_tokens` 는 평범한 `bool` 이다. presence 가 없으니 "안 적음" 과 "false 로 적음" 이 구별되지 않고, 카탈로그 행이 있는 모델에서는 `runtime_adapter.ml:456-490` 이 그 필드들을 아예 얹지 않는다 — 적어도 조용히 안 먹는다. #36994 가 이것을 든다. 원칙 2를 필드 단위로 실행하려면 presence 가 먼저다.
+
 ## 3. 설계
 
 단계마다 PR 하나다. 앞 단계가 머지된 뒤에 다음 단계를 연다.

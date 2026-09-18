@@ -464,7 +464,6 @@ let execute_with_accepting_test_validator
 
 let execute_ok ~net ?clock flow =
   execute_with_accepting_test_validator
-    ~clock
     ~net
     ?clock
     ~on_measurement_terminal:(fun _ -> Ok ())

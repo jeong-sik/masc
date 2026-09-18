@@ -492,7 +492,8 @@ let test_deepseek_catalog_is_json_only_before_dispatch () =
           "[[targets]]\n\
            id = %S\n\
            provider_ref = \"deepseek\"\n\
-           model_id = \"deepseek-v4-pro\"\n"
+           model_id = \"deepseek-v4-pro\"\n\
+           connect_timeout_s = 30.0\n"
           target_id
     }
   in
@@ -966,7 +967,9 @@ let check_receipt label ~phase ~dispatch_count ~http_status receipt =
 let test_public_receipt_phase_matrix () =
   let pre_result, pre_posts, _, _ =
     with_server ~response:"unused"
-    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    (* This sub-case asserts the clock-required refusal, so unlike the
+       dispatch sub-cases below it must not forward the runner clock. *)
+    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
     let entry =
       catalog_entry
         ~id:"pre-dispatch-surface"
@@ -979,7 +982,7 @@ let test_public_receipt_phase_matrix () =
     in
     with_catalog [ entry ]
     @@ fun snapshot ->
-    execute_once ~net ~clock (attempt (flow snapshot "pre-dispatch-surface" EO.Json_syntax))
+    execute_once ~net (attempt (flow snapshot "pre-dispatch-surface" EO.Json_syntax))
   in
   check int "pre-dispatch has zero POSTs" 0 pre_posts;
   (match pre_result with

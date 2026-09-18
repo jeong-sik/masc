@@ -511,23 +511,6 @@ reasoning-streaming-format = "delta:reasoning"
 supports-image-input = false
 supports-multimodal-inputs = false
 
-[models.glm-4-7-coding]
-api-name = "glm-4.7"
-max-context = 200000
-tools-support = true
-thinking-support = true
-# Keep long-running keeper turns on non-preserved reasoning by default. AGENT_CORE owns
-# GLM's clear_thinking wire contract; enabling preserved thinking here replays
-# historical reasoning into every subsequent keeper turn.
-preserve-thinking = false
-streaming = true
-
-[models.glm-4-7-coding.capabilities]
-max-output-tokens = 128000
-supports-tool-choice = false
-supports-response-format-json = true
-supports-structured-output = false
-
 [models.gemma4-26b-a4b-qat]
 api-name = "hf.co/unsloth/gemma-4-26B-A4B-it-qat-GGUF:UD-Q4_K_XL"
 max-context = 262144
@@ -610,48 +593,17 @@ supports-multimodal-inputs = true
 [deepseek.deepseek-v4-flash]
 wizard-default = true
 
-[glm-coding.glm-4-7-coding]
-wizard-default = true
-
-[models.glm-5-turbo]
-# Mirrors the AGENT_CORE catalog window. Was 203000, above the catalog's
-# 200000, so the resolver clamped it away and the declaration only read as
-# authoritative — #28737 cited it as this model's window while the number in
-# effect was the catalog's (#28738). Kept in step by the
-# repo-runtime-toml-declares-no-clamped-max-context gate.
-max-context = 200000
-api-name = "GLM-5-Turbo"
-tools-support = true
-thinking-support = true
-# Keep long-running keeper turns on non-preserved reasoning by default. AGENT_CORE owns
-# GLM's clear_thinking wire contract; enabling preserved thinking here replays
-# historical reasoning into every subsequent keeper turn.
-preserve-thinking = false
-streaming = true
-
-[models.glm-5-turbo.capabilities]
-# Catalog says 128000. 131072 is 128 * 1024, which is how the two came to
-# disagree; the catalog wins because it is what the adapter reads whenever the
-# model is in it (#28738).
-max-output-tokens = 128000
-supports-tool-choice = false
-supports-response-format-json = true
-supports-structured-output = false
-
-[glm-coding.glm-5-turbo]
-
 # GLM-5.3 — primary slot of the exact-output judgement lanes (Z.AI 2026-08-14).
-# Mirrors the glm-5-turbo judge row it replaces at the head of each lane. The
-# api-name is the exact z.ai coding-plan id, confirmed against
+# The api-name is the exact z.ai coding-plan id, confirmed against
 # GET /coding/paas/v4/models on 2026-08-30 (glm-5.3 present; a json_object
-# completion answered on that wire). Window mirrors the AGENT_CORE catalog like
-# the glm-5-turbo row above.
+# completion answered on that wire). Window mirrors the AGENT_CORE catalog.
 [models.glm-5-3]
 max-context = 200000
 api-name = "glm-5.3"
 tools-support = true
 thinking-support = true
-# Non-preserved reasoning by default, same contract as the glm-5-turbo judge row.
+# Non-preserved reasoning by default: AGENT_CORE owns GLM's clear_thinking wire
+# contract, and preserved thinking replays history into every later keeper turn.
 preserve-thinking = false
 streaming = true
 
@@ -712,35 +664,35 @@ supports-multimodal-inputs = true
 
 [ollama_cloud.minimax-m3]
 
-# Kimi K2.7 Code (Ollama Cloud) — vision-capable Cloud runtime. The model name
-# is kept separate from Kimi's direct API route; AGENT_CORE owns provider/model wire
-# details and MASC declares only runtime-local concrete model capabilities.
-# Official Kimi docs checked 2026-07-04: kimi-k2.7-code is the latest
-# code-focused thinking model; keep the short Kimi seed on the current model.
-[models.kimi-k2-7-code]
-reasoning-uncontrolled = true
-api-name = "kimi-k2.7-code"
-max-context = 262144
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.kimi-k2-7-code.capabilities]
-max-output-tokens = 32768
-supports-tool-choice = false
-thinking-control-format = "none"
-# SSOT = AGENT_CORE models.toml; Ollama Cloud Kimi rows do not currently advertise a
-# native schema/response_format guarantee.
-supports-response-format-json = false
-supports-structured-output = false
-supports-image-input = true
-supports-multimodal-inputs = true
-
-[ollama_cloud.kimi-k2-7-code]
-
 # Ollama Cloud canonical model seeds
 # Source: https://ollama.com/api/tags + /api/show, checked 2026-06-20 KST.
 # Runtime model keys are TOML-safe slugs; api-name preserves the official Cloud model id.
+
+# DeepSeek V4.1 Flash. /api/show 2026-09-18: caps=[completion,thinking,tools,
+# vision], context_length=1048576. Unlike the other Cloud rows this one states an
+# effort instead of reasoning-uncontrolled, because ollama.com /v1 turns
+# reasoning on whenever the request carries no control value.
+[models.ollama-cloud-deepseek-v4-1-flash]
+api-name = "deepseek-v4.1-flash"
+max-context = 1048576
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "low"
+
+[models.ollama-cloud-deepseek-v4-1-flash.capabilities]
+supports-tool-choice = false
+supports-reasoning-budget = false
+thinking-control-format = "reasoning-effort"
+# ollama.com /v1 streams the reasoning delta under "reasoning" (probe, #26788).
+# thinking-control-format above is the request axis only; without this line the
+# response axis resolves to reading no field and the reasoning is discarded.
+reasoning-streaming-format = "delta:reasoning"
+supports-image-input = true
+supports-multimodal-inputs = true
+
+# No wizard-default: this binding is selectable without changing the fleet default.
+[ollama_cloud.ollama-cloud-deepseek-v4-1-flash]
 
 [models.ollama-cloud-deepseek-v4-flash]
 reasoning-uncontrolled = true
@@ -946,22 +898,6 @@ supports-multimodal-inputs = true
 
 [ollama_cloud.ollama-cloud-kimi-k2-6]
 
-[models.ollama-cloud-kimi-k2-7-code]
-reasoning-uncontrolled = true
-api-name = "kimi-k2.7-code"
-max-context = 262144
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.ollama-cloud-kimi-k2-7-code.capabilities]
-supports-tool-choice = false
-thinking-control-format = "none"
-supports-image-input = true
-supports-multimodal-inputs = true
-
-[ollama_cloud.ollama-cloud-kimi-k2-7-code]
-
 # Moonshot Kimi K3 through Ollama Cloud. /api/show 2026-08-29:
 # caps=[vision,thinking,completion,tools], context_length=1048576.
 # The name is provider-qualified because kimi_coding also serves a model called
@@ -998,24 +934,6 @@ supports-image-input = false
 supports-multimodal-inputs = false
 
 [ollama_cloud.ollama-cloud-minimax-m2-7]
-
-[models.ollama-cloud-minimax-m3]
-reasoning-uncontrolled = true
-api-name = "minimax-m3"
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.ollama-cloud-minimax-m3.capabilities]
-supports-tool-choice = false
-thinking-control-format = "none"
-# SSOT = agent-core models.toml per official MiniMax Chat documentation.
-supports-response-format-json = false
-supports-structured-output = false
-supports-image-input = true
-supports-multimodal-inputs = true
-
-[ollama_cloud.ollama-cloud-minimax-m3]
 
 [models.ollama-cloud-mistral-large-3-675b]
 api-name = "mistral-large-3:675b"

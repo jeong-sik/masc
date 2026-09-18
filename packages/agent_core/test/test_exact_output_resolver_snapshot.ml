@@ -15,6 +15,7 @@ let _load_resolver_snapshot_contract
 let _catalog_input_contract : EO.resolver_catalog_input -> unit = function
   | EO.Embedded_default
   | EO.Embedded_with_overlay _
+  | EO.Embedded_with_targets _
   | EO.Full_replacement _
   | EO.Full_replacement_file _ -> ()
 [@@warning "+8"]

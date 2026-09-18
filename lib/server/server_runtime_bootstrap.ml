@@ -205,11 +205,6 @@ let exact_output_snapshot_error_to_string = function
     Printf.sprintf "failed to read environment variable %s" environment_variable
 ;;
 
-let read_exact_output_overlay path =
-  try Ok (In_channel.with_open_bin path In_channel.input_all) with
-  | Sys_error detail -> Error detail
-;;
-
 let load_exact_output_lane_declarations ?config_root () =
   let runtime_config_path =
     match config_root with
@@ -417,6 +412,25 @@ let warn_optional_exact_output_lane registry ~lane_id ~feature =
       lane_id
 ;;
 
+(* An exact-output slot names a runtime binding: the lane configuration and the
+   binding table use the same "<provider>.<model>" id. Restating that binding in
+   a second file is how a slot came to point at a declaration nobody had
+   written, and how a binding's declared connect timeout stopped reaching the
+   slot that runs on it (#37004). The slots are the bindings. *)
+let exact_output_targets_of_runtimes () =
+  let runtimes, (_ : string list) = Runtime.runtimes_and_media_failover () in
+  List.map
+    (fun (rt : Runtime.t) : Exact_output.declared_target ->
+       { target_ref = rt.id
+       ; provider_ref = rt.provider.Runtime_schema.id
+       ; model_id = rt.model.Runtime_schema.api_name
+       ; enable_thinking = rt.model.Runtime_schema.thinking_support
+       ; connect_timeout_s = rt.provider.Runtime_schema.connect_timeout_s
+       ; body_timeout_s = None
+       })
+    runtimes
+;;
+
 let configure_exact_output_registry ?config_root () =
   let config_path, lanes =
     load_exact_output_lane_declarations ?config_root ()
@@ -426,17 +440,11 @@ let configure_exact_output_registry ?config_root () =
     match nonempty_env Sys.getenv_opt agent_core_model_catalog_env_var_name with
     | Some path -> Exact_output.Full_replacement_file path, " from full replacement " ^ path
     | None ->
-      (match resolve_agent_core_model_catalog_overlay_path ?config_root () with
-       | None -> Exact_output.Embedded_default, " from AGENT_CORE embedded catalog"
-       | Some path ->
-         (match read_exact_output_overlay path with
-          | Ok contents ->
-            ( Exact_output.Embedded_with_overlay { source = path; contents }
-            , " with deployment overlay " ^ path )
-          | Error detail ->
-            raise
-              (Env_config_core.Config_error
-                 (Printf.sprintf "exact-output catalog overlay %s: %s" path detail))))
+      let targets = exact_output_targets_of_runtimes () in
+      ( Exact_output.Embedded_with_targets targets
+      , Printf.sprintf
+          " from AGENT_CORE embedded catalog with %d runtime binding(s) as targets"
+          (List.length targets) )
   in
   let io : Exact_output.resolver_io =
     { getenv =

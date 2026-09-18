@@ -60,9 +60,32 @@ type catalog_document =
   ; contents : string
   }
 
+(** One exact-output slot: which binding it names, and the deadlines that
+    binding runs under. A caller that already holds these as typed values --
+    a deployment's runtime bindings -- passes them directly instead of
+    rendering a TOML document for this module to parse back. [target_ref] is
+    the slot id the lane configuration names, conventionally
+    "<provider>.<model>". *)
+type declared_target =
+  { target_ref : string
+  ; provider_ref : string
+  ; model_id : string
+  ; enable_thinking : bool option
+  ; connect_timeout_s : float option
+  ; body_timeout_s : float option
+  }
+
 type resolver_catalog_input =
   | Embedded_default
   | Embedded_with_overlay of catalog_document
+      (** The embedded catalog with a second document merged over it. A
+          deployment supplies no such document: its provider and model facts
+          are catalog rows, and its slots arrive as {!Embedded_with_targets}.
+          The callers left are tests that assemble a synthetic catalog. *)
+  | Embedded_with_targets of declared_target list
+      (** The embedded catalog for provider and model facts, plus the slots the
+          caller declares. The embedded catalog carries no [[targets]] rows of
+          its own, so these are the whole target set. *)
   | Full_replacement of catalog_document
   | Full_replacement_file of string
 

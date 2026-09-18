@@ -281,6 +281,7 @@ let expected_default_provider_names =
   ; "glm-coding"
   ; "groq"
   ; "kimi"
+  ; "kimi_coding"
   ; "mimo"
   ; "mistral"
   ; "nous"

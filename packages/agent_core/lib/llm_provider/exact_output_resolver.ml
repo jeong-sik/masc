@@ -22,9 +22,19 @@ type catalog_document =
   ; contents : string
   }
 
+type declared_target =
+  { target_ref : string
+  ; provider_ref : string
+  ; model_id : string
+  ; enable_thinking : bool option
+  ; connect_timeout_s : float option
+  ; body_timeout_s : float option
+  }
+
 type resolver_catalog_input =
   | Embedded_default
   | Embedded_with_overlay of catalog_document
+  | Embedded_with_targets of declared_target list
   | Full_replacement of catalog_document
   | Full_replacement_file of string
 
@@ -680,15 +690,55 @@ let load_resolver_snapshot
     ; contents = Model_catalog_embedded.contents
     }
   in
-  let* base_source, base_document, overlay =
+  (* A caller's slots arrive as values. [target_ref] is still validated here:
+     it is the only field whose shape the type does not already carry. *)
+  let admit_declared (declared : declared_target) =
+    match target_ref declared.target_ref with
+    | Error _ ->
+      Error
+        (Target_catalog_invalid
+           { source = Embedded_catalog
+           ; detail =
+               Printf.sprintf "declared target %S is not a target ref" declared.target_ref
+           })
+    | Ok target_ref ->
+      let timeout field value =
+        Binding.validate_timeout ~target_label:declared.target_ref ~field value
+        |> Result.map_error (fun detail ->
+          Target_catalog_invalid { source = Embedded_catalog; detail })
+      in
+      let* () = timeout "connect_timeout_s" declared.connect_timeout_s in
+      let* () = timeout "body_timeout_s" declared.body_timeout_s in
+      Ok
+        { target_ref
+        ; provider_ref = declared.provider_ref
+        ; model_id = declared.model_id
+        ; enable_thinking = declared.enable_thinking
+        ; connect_timeout_s = declared.connect_timeout_s
+        ; body_timeout_s = declared.body_timeout_s
+        }
+  in
+  let* base_source, base_document, overlay, declared_targets =
     match catalog with
-    | Embedded_default -> Ok (Embedded_catalog, embedded_document, None)
+    | Embedded_default -> Ok (Embedded_catalog, embedded_document, None, [])
     | Embedded_with_overlay overlay ->
-      Ok (Embedded_catalog, embedded_document, Some overlay)
-    | Full_replacement document -> Ok (Full_replacement_catalog, document, None)
+      Ok (Embedded_catalog, embedded_document, Some overlay, [])
+    | Embedded_with_targets declared ->
+      let* targets =
+        List.fold_left
+          (fun result declared ->
+             let* targets = result in
+             let* target = admit_declared declared in
+             Ok (target :: targets))
+          (Ok [])
+          declared
+        |> Result.map List.rev
+      in
+      Ok (Embedded_catalog, embedded_document, None, targets)
+    | Full_replacement document -> Ok (Full_replacement_catalog, document, None, [])
     | Full_replacement_file path ->
       let* document = read_full_replacement_file path in
-      Ok (Full_replacement_catalog, document, None)
+      Ok (Full_replacement_catalog, document, None, [])
   in
   let* base =
     parse_model_catalog
@@ -696,9 +746,12 @@ let load_resolver_snapshot
       ~parser_source:base_document.source
       base_document.contents
   in
+  (* A replacement document still declares its slots inline; the embedded
+     catalog carries none, so for it [file_targets] is empty and the caller's
+     declarations are the whole set. *)
   let* base_targets = parse_target_catalog ~source:base_source base_document.contents in
   let* () = validate_catalog_source base base_targets in
-  let* catalog_models_and_targets =
+  let* catalog, model_entries, file_targets =
     match overlay with
     | None -> Ok (base, Model_catalog.model_entries base, base_targets)
     | Some overlay ->
@@ -726,7 +779,19 @@ let load_resolver_snapshot
             ~overlay:(Model_catalog.model_entries overlay_catalog)
         , merge_target_declarations ~base:base_targets ~overlay:overlay_targets )
   in
-  let catalog, model_entries, target_declarations = catalog_models_and_targets in
+  let target_declarations = file_targets @ declared_targets in
+  let* () =
+    let rec unique seen = function
+      | [] -> Ok ()
+      | (target : target_declaration) :: rest ->
+        let identity = target_ref_id target.target_ref |> String.lowercase_ascii in
+        if String_set.mem identity seen
+        then Error (Catalog_collision Duplicate_target_identity)
+        else unique (String_set.add identity seen) rest
+    in
+    unique String_set.empty target_declarations
+  in
+
   let* structural, rejected_target_bindings =
     List.fold_left
       (fun result (target : target_declaration) ->

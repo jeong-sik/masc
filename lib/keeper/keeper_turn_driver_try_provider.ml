@@ -2104,11 +2104,14 @@ let thinking_was_enabled = function
 
    Turning thinking off is the remedy for a budget spent thinking, so it is
    worth a second attempt only when thinking was on and this candidate's wire
-   can be told to stop. The second half is not rhetorical: Grok's reasoning has
-   no off switch, Kimi's coding rows return thinking nobody asked for, and a
-   [Reasoning_effort] row whose ladder omits "none" cannot spell the disable.
-   Attempting it there spends the turn on a request refused before dispatch,
-   and on a lane with one candidate there is nothing to rotate to (#36972).
+   can be told to stop. The second half is not rhetorical: some rows declare a
+   thinking control that has no off state, and a categorical effort row whose
+   ladder omits the off value cannot spell the disable at all. Which surfaces
+   those are is catalog data, recorded in agent_core's
+   docs/design/provider-reasoning-dialects.md; the decision here reads the
+   typed answer. Attempting the retry on such a row spends the turn on a
+   request refused before dispatch, and on a lane with one candidate there is
+   nothing to rotate to (#36972).
    Dropping the rejected response is owed either way: accept judged it
    unusable, and a checkpoint that keeps it feeds it back as input on every
    later turn.
@@ -2180,10 +2183,10 @@ let candidate_without_reasoning_effort (candidate : Runtime_candidate.t) : Runti
    from the row's dialect and effort ladder, which is where "this wire has no
    way to say stop thinking" lives.
 
-   The Anthropic-side pair rule ([Backend_anthropic.validate_thinking_controls],
-   reached inside [build_request_artifact]) is a second validator this question
-   does not reach. [candidate_without_reasoning_effort] above is what answers
-   it, by removing the effort that rule forbids alongside an explicit disable. *)
+   The pair rule enforced by backend_anthropic.validate_thinking_controls,
+   reached inside the request builder, is a second validator this question does
+   not reach. [candidate_without_reasoning_effort] above is what answers it, by
+   removing the effort that rule forbids alongside an explicit disable. *)
 let retry_without_thinking_admitted (candidate : Runtime_candidate.t) =
   let retry_cfg =
     { (Runtime_candidate.provider_cfg (candidate_without_reasoning_effort candidate)) with

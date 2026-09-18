@@ -224,14 +224,15 @@ let without_response_format (provider_cfg : Llm_provider.Provider_config.t) =
    response format; the tool schema carries the verdict enum SSOT. *)
 let anti_rationalization_reviewer_provider_config = without_response_format
 
-(* Not every wire can be told to stop thinking: Grok's reasoning has no off
-   switch, Kimi's coding models return thinking nobody asked for, and a
-   [Reasoning_effort] row whose ladder omits "none" cannot spell the disable at
-   all. Asking for it there is fail-closed in agent_core, so the sub-call dies
-   before dispatch instead of running deterministically — the shape that broke
-   every image analysis in 2026-08 and that
-   [Keeper_vision_tool] still answers by hardcoding [enable_thinking = None]
-   for one fleet.
+(* Not every wire can be told to stop thinking. Some rows declare a thinking
+   control with no off state, and a categorical effort row whose ladder omits
+   the off value cannot spell the disable at all; which surfaces those are is
+   catalog data, recorded in agent_core's
+   docs/design/provider-reasoning-dialects.md. Asking for it there is
+   fail-closed in agent_core, so the sub-call dies before dispatch instead of
+   running deterministically — the shape that broke every image analysis in
+   2026-08 and that [Keeper_vision_tool] still answers by hardcoding
+   [enable_thinking = None] for one fleet.
 
    So ask the predicate the request itself will face, about the request itself,
    and drop only the toggle when the answer is no. What is left is the same

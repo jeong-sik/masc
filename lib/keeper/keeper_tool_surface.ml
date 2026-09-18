@@ -309,7 +309,7 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
         (Keeper_turn_failure_streak.reset
            ~base_path:config.base_path
            ~keeper_name:name);
-      (* [line_error]: the history was emptied and its [history_cleared] line
+      (* [line_error]: the history was emptied and its [history_empty] line
          could not be written. That does not fail the clear, as a turn's line
          does not fail the turn: it is logged, counted and named in the
          result. *)
@@ -321,7 +321,7 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
           (`Assoc
             ((match line_error with
               | None -> []
-              | Some detail -> [ "history_cleared_line_error", `String detail ])
+              | Some detail -> [ "history_empty_line_error", `String detail ])
              @ [
                  ("name", `String name);
                  ("phase_before", `String phase_before);
@@ -364,11 +364,11 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
           ->
           Log.Keeper.error
             "%s: context cleared by operator (reason=%s, cleared=%d msgs) but the \
-             history_cleared line was not written: %s"
+             history_empty line was not written: %s"
             name reason cleared_message_count detail;
           Otel_metric_store.inc_counter
             Keeper_metrics.(to_string TurnBoundaryFailures)
-            ~labels:[ "keeper", name; "site", "history_cleared" ]
+            ~labels:[ "keeper", name; "site", "clear" ]
             ();
           cleared ~line_error:detail ~cleared_message_count ()
         | Clear_attempted

@@ -29,7 +29,7 @@ let kept_messages ~preserve_system (messages : Agent_core.Types.message list) =
 let append_marker ~keepers_dir ~keeper_name ~trace_id =
   let record : Keeper_turn_boundaries.record =
     { recorded_at = Time_compat.now ()
-    ; event = Keeper_turn_boundaries.History_cleared { trace_id }
+    ; event = Keeper_turn_boundaries.History_empty { trace_id }
     }
   in
   match Keeper_turn_boundaries.append ~keepers_dir ~keeper_id:keeper_name record with

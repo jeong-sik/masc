@@ -9,7 +9,7 @@
     written; the end an earlier line states is that start.
 
     [masc_keeper_clear] is the other writer. It empties a history, not as part
-    of a turn, and appends a [History_cleared] line once the emptied checkpoint
+    of a turn, and appends a [History_empty] line once the emptied checkpoint
     is saved.
 
     {2 What a reader may rely on}
@@ -28,7 +28,7 @@
       position in the file, and must not assume [turn_ref] is unique: two turns
       of one keeper that finish together both take the next turn number.
     - Two lines say that the atoms of a trace are numbered from zero again: a
-      [Turn_ended] line with [Fresh_history], and a [History_cleared] line.
+      [Turn_ended] line with [Fresh_history], and a [History_empty] line.
       Both are written after the save they describe, so a reader that sees
       one and then loads the checkpoint loads that save or a later one. What a
       reader does with them is RFC §4.4.
@@ -91,13 +91,16 @@ type event =
       ; history_at_start : history_at_start
       ; position : position
       }
-  | History_cleared of { trace_id : string }
-      (** [masc_keeper_clear] saved the checkpoint of this trace with no atom
-          in it ({!Keeper_history_clear}). The turn after a clear starts from
-          that empty history and says [Fresh_history] in its own line, if it
-          reaches its end. The clear says so at once: a reader is not left
-          with a position nothing explains while the keeper sits idle, or for
-          good when that turn dies before it writes a line.
+  | History_empty of { trace_id : string }
+      (** The saved history of this trace held no atom when the line was
+          written. The line is named for what its writer saw, not for who
+          wrote it, because a reader has no use for the difference.
+          [masc_keeper_clear] writes it once it has saved the emptied
+          checkpoint ({!Keeper_history_clear}). The turn after a clear starts
+          from that empty history and says [Fresh_history] in its own line,
+          if it reaches its end. The clear says so at once: a reader is not
+          left with a position nothing explains while the keeper sits idle, or
+          for good when that turn dies before it writes a line.
 
           The line is appended after the emptied checkpoint is saved, never
           before. It does not say the history is still empty: a turn that was

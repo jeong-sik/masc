@@ -2337,6 +2337,7 @@ module For_testing = struct
   let truncation_recovery = truncation_recovery
   let persist_dropped_response = persist_dropped_response
   let candidate_without_reasoning_effort = candidate_without_reasoning_effort
+  let retry_without_thinking_admitted = retry_without_thinking_admitted
   let memoize_message_measurement = memoize_message_measurement
   let carried_front = carried_front
   let halve_front = halve_front

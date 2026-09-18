@@ -72,15 +72,41 @@ val make_append_manifest :
   seq_ref:int Atomic.t ->
   append_manifest_fn
 
-(** Append a [History_restarted] line when the turn starts from a history with no
-    atom (RFC librarian-lifecycle 4.6); nothing for a continued history. Never
-    fails the turn: a line that cannot be written is logged and counted. Only a
-    cancellation escapes. *)
-val record_empty_history_at_turn_start :
+(** When a turn says that the atoms of its trace are numbered from zero (RFC
+    librarian-lifecycle 4.6). A reader may act on a restart line as soon as it
+    sees it, so the line must not be ahead of the restart. *)
+type restart_notice =
+  | No_restart_notice  (** The turn continues a history with atoms. *)
+  | Notice_at_turn_start
+      (** The turn starts from no atom and the saved history is known to hold
+          none: nothing can be saved before the line. *)
+  | Notice_after_first_save
+      (** The turn starts from no atom because its checkpoint could not be
+          loaded. What is saved may still hold atoms; the restart happens only
+          if a save of this turn is accepted, so the line follows the first
+          accepted stage save. If the first accepted save is the finalize
+          save, the turn's own [Fresh_history] line is that line. *)
+
+(** Pure. Every pair is listed. *)
+val restart_notice :
+  Keeper_turn_boundaries.history_at_start ->
+  Keeper_run_context.saved_history ->
+  restart_notice
+
+type restart_site =
+  | At_turn_start
+  | After_first_save
+
+(** The [site] label of the failure counter. *)
+val restart_site_label : restart_site -> string
+
+(** Append a [History_restarted] line. Never fails the turn: a line that cannot
+    be written is logged and counted. Only a cancellation escapes. *)
+val record_history_restart :
   config:Workspace.config ->
   keeper_name:string ->
   trace_id:string ->
-  Keeper_turn_boundaries.history_at_start ->
+  restart_site ->
   unit
 
 val turn_progress_callbacks :

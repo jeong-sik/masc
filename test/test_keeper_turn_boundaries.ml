@@ -1,8 +1,8 @@
 (** Tests for {!Masc.Keeper_turn_boundaries} (RFC librarian-lifecycle §4.6):
     the line a finished keeper turn leaves to say where its saved atom history
-    ended, and the line that says a history holds no atom, which
-    {!Masc.Keeper_history_clear} leaves once it has emptied one and a turn
-    leaves when it starts from one. *)
+    ended, and the line that says the atoms of a trace are numbered from zero
+    again, which {!Masc.Keeper_history_clear} leaves once it has emptied a
+    history and a turn leaves when it starts one over. *)
 
 open Alcotest
 
@@ -589,52 +589,87 @@ let with_workspace f =
          ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path))
 ;;
 
-let start_turn ~config history_at_start =
-  Turn_helpers.record_empty_history_at_turn_start
+module Run_context = Masc.Keeper_run_context
+
+let describe_notice = function
+  | Turn_helpers.No_restart_notice -> "none"
+  | Turn_helpers.Notice_at_turn_start -> "at turn start"
+  | Turn_helpers.Notice_after_first_save -> "after the first accepted save"
+;;
+
+(* A reader may act on a restart line as soon as it sees it, so the line must
+   not be ahead of the restart. A turn that knows the saved history holds no
+   atom can say so at once. A turn whose checkpoint could not be loaded has not
+   seen the saved history, which may still hold atoms: if it said so at its
+   start, a reader could re-read the old history, pass the line, and have no
+   line left when a save of that turn then replaces the history. *)
+let test_the_notice_follows_what_the_turn_saw () =
+  let expect label history_at_start saved_history notice =
+    check string label notice
+      (describe_notice (Turn_helpers.restart_notice history_at_start saved_history))
+  in
+  expect "loaded, and it holds no atom" Boundaries.Fresh_history
+    Run_context.Saved_history_loaded "at turn start";
+  expect "nothing is saved" Boundaries.Fresh_history Run_context.Saved_history_absent
+    "at turn start";
+  expect "the load failed" Boundaries.Fresh_history Run_context.Saved_history_unread
+    "after the first accepted save";
+  expect "a history with atoms" Boundaries.Continued_history
+    Run_context.Saved_history_loaded "none";
+  (* A continued history is a loaded one; the other two pairs cannot arise and
+     are listed so that the function is total without a wildcard. *)
+  expect "continued, absent" Boundaries.Continued_history Run_context.Saved_history_absent
+    "none";
+  expect "continued, unread" Boundaries.Continued_history Run_context.Saved_history_unread
+    "none"
+;;
+
+let record_restart ~config site =
+  Turn_helpers.record_history_restart
     ~config
     ~keeper_name:keeper_id
     ~trace_id:started_trace
-    history_at_start
+    site
 ;;
 
-let turn_start_failures () =
+let restart_failures site =
   Masc.Otel_metric_store.metric_value_or_zero
     Keeper_metrics.(to_string TurnBoundaryFailures)
-    ~labels:[ "keeper", keeper_id; "site", "turn_start" ]
+    ~labels:[ "keeper", keeper_id; "site", Turn_helpers.restart_site_label site ]
     ()
 ;;
 
-(* The turn has saved nothing yet. Whatever it saves first, and whether or not
-   it reaches its end, the store already says its atoms are numbered from
-   zero. *)
-let test_a_turn_that_starts_from_no_atom_says_so () =
+(* Both sites write the same line: a reader has no use for which one it was. *)
+let test_a_restart_is_recorded_from_either_site () =
   with_workspace
   @@ fun ~config ~keepers_dir ->
-  start_turn ~config Boundaries.Fresh_history;
+  record_restart ~config Turn_helpers.At_turn_start;
+  record_restart ~config Turn_helpers.After_first_save;
   match read_lines ~keepers_dir with
-  | [ (1, { Boundaries.recorded_at = _; event = Boundaries.History_restarted { trace_id } }) ]
-    -> check string "the line names the turn's trace" started_trace trace_id
-  | lines -> failf "expected one restart line, read %d" (List.length lines)
+  | [ (1, { Boundaries.recorded_at = _; event = Boundaries.History_restarted { trace_id = first } })
+    ; (2, { Boundaries.recorded_at = _; event = Boundaries.History_restarted { trace_id = second } })
+    ] ->
+    check string "the first line names the turn's trace" started_trace first;
+    check string "the second line names the turn's trace" started_trace second
+  | lines -> failf "expected two restart lines, read %d" (List.length lines)
 ;;
 
-(* The end an earlier line states is where this turn starts. *)
-let test_a_turn_that_continues_a_history_writes_nothing () =
-  with_workspace
-  @@ fun ~config ~keepers_dir ->
-  start_turn ~config Boundaries.Continued_history;
-  check int "no line" 0 (List.length (read_lines ~keepers_dir))
-;;
-
-(* The turn has not run yet, and a line the store refuses is no reason not to
-   run it: the refusal is counted, nothing is raised, and the store is left as
-   it was. *)
+(* A line the store refuses is no reason to stop the turn: the refusal is
+   counted under the site that tried, nothing is raised, and the store is left
+   as it was. *)
 let test_a_refused_line_does_not_stop_the_turn () =
   with_workspace
   @@ fun ~config ~keepers_dir ->
   plant_torn_tail ~keepers_dir;
-  let before = turn_start_failures () in
-  start_turn ~config Boundaries.Fresh_history;
-  check (float 0.0001) "the refusal is counted" (before +. 1.0) (turn_start_failures ());
+  List.iter
+    (fun site ->
+       let before = restart_failures site in
+       record_restart ~config site;
+       check (float 0.0001)
+         ("the refusal is counted: " ^ Turn_helpers.restart_site_label site)
+         (before +. 1.0)
+         (restart_failures site))
+    [ Turn_helpers.At_turn_start; Turn_helpers.After_first_save ];
   match Boundaries.read ~keepers_dir ~keeper_id with
   | Ok [ (1, Error Boundaries.Incomplete_line) ] -> ()
   | Ok _ | Error _ -> fail "the refused line changed the store"
@@ -677,11 +712,11 @@ let () =
         ; test_case "a clear whose line is refused says so" `Quick
             test_a_clear_whose_line_is_refused_says_so
         ] )
-    ; ( "turn start"
-      , [ test_case "a turn that starts from no atom says so" `Quick
-            test_a_turn_that_starts_from_no_atom_says_so
-        ; test_case "a turn that continues a history writes nothing" `Quick
-            test_a_turn_that_continues_a_history_writes_nothing
+    ; ( "restart notice"
+      , [ test_case "the notice follows what the turn saw" `Quick
+            test_the_notice_follows_what_the_turn_saw
+        ; test_case "a restart is recorded from either site" `Quick
+            test_a_restart_is_recorded_from_either_site
         ; test_case "a refused line does not stop the turn" `Quick
             test_a_refused_line_does_not_stop_the_turn
         ] )

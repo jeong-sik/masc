@@ -18,8 +18,8 @@ type outcome =
       ; marker : (unit, string) result
             (** Whether the [History_restarted] line was written. [Error] does
                 not undo or fail the clear, as a turn's line does not fail the
-                turn. The keeper's next turn starts from the emptied history
-                and writes the same line when it starts; until then nothing in
+                turn. The keeper's next turn loads the emptied history and
+                writes the same line when it starts; until then nothing in
                 the store explains why the history started over. A store that
                 ends mid-line refuses every append until it is repaired, so
                 neither that turn nor clearing again helps there (RFC §6). *)

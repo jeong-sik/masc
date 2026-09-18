@@ -108,22 +108,21 @@ status: reference
   History 안에는 turn의 경계가 없으므로, turn이라는 사건을 History 안의 위치로
   옮겨 적는 유일한 기록이다. turn이 Atom이 없는 History에서 시작했는지
   (`fresh`/`continued`)도 같이 적는다. Checkpoint 파일이 있었는지가 아니라 Atom이
-  있었는지로 정한다. Keeper는 빈 Checkpoint를 갖고 만들어지기 때문이다. 파일에
-  쌓인 순서는 turn 순서가 아닐 수 있어서 읽는 쪽은 Atom 수로 줄을 세운다.
-  같은 파일에 `history_restarted` 줄도 쌓인다. "이 trace의 History에 지금 Atom이
-  없다"를 말하는 줄이고, Atom이 없는 History를 손에 든 쪽이 쓴다. Atom이 없는
-  History에서 시작하는 turn은 시작할 때 쓴다. 그 turn이 저장만 하고 끝을 못 내도
-  줄은 남는다. Checkpoint를 못 읽어서 빈 History로 시작한 turn도 이 줄을 쓰는데,
-  그때는 저장된 History에 Atom이 남아 있을 수 있다.
-  `masc_keeper_clear`는 비운 Checkpoint가 저장된 뒤에 쓴다. `fresh` 줄과
-  `history_restarted` 줄은 둘 다 "이 trace의 Atom 번호가 0에서 다시 시작했다"를
-  말한다.
+  있었는지로 정한다. Keeper는 빈 Checkpoint를 갖고 만들어지기 때문이다. 읽는 쪽은
+  줄이 파일에 쌓인 순서가 아니라 Atom 수로 줄을 세운다.
+  같은 파일에 `history_restarted` 줄도 쌓인다. "이 trace의 Atom 번호가 이 줄부터
+  0에서 다시 시작한다"를 말하는 줄이고, History를 다시 시작하게 만든 쪽이 쓴다.
+  `masc_keeper_clear`는 비운 Checkpoint가 저장된 뒤에 쓴다. Atom이 없는 History에서
+  시작하는 turn은, 저장된 History에 Atom이 없는 것을 알면 시작할 때 쓰고,
+  Checkpoint를 못 읽어서 모르면 처음 받아들여진 저장 뒤에 쓴다. 읽는 쪽은 이 줄을
+  보는 즉시 0부터 읽어도 되므로, 어느 쪽도 다시 시작하기 전에 쓰지 않는다. `fresh`
+  줄과 `history_restarted` 줄은 읽는 쪽에 같은 말을 한다.
 
 **Read Position**
 : Librarian이 History를 어디까지 읽었는지 적은 값(`<keeper>.librarian-progress.json`).
   Turn Boundary 파일의 줄 번호가 아니라 값이다: trace, 읽은 Atom 수, 마지막으로
-  읽은 Atom을 여는 Message의 digest. 파일에 쌓인 순서가 turn 순서가 아니라서 줄
-  번호로는 이것을 말할 수 없다. 파일이 없으면 아직 읽은 적이 없다는 뜻이다. 못
+  읽은 Atom을 여는 Message의 digest. 그 파일에는 지난 History의 줄도 남아 있어서
+  줄 번호로는 지금 History 안의 자리를 말할 수 없다. 파일이 없으면 아직 읽은 적이 없다는 뜻이다. 못
   읽는 파일은 "읽은 적 없음"으로 치지 않고 오류로 다룬다. 그렇게 치면 History
   전체가 안 읽은 것으로 보인다.
 

@@ -302,54 +302,81 @@ let make_append_manifest
     ~site
     event
 
-(* RFC librarian-lifecycle 4.6. A turn that starts from a history with no atom
-   says so before it can save anything, so the record that its atoms are
-   numbered from zero does not wait for the turn to reach its end. Whichever
-   save inside [run_turn] first puts atoms into that history -- a stage save,
-   the finalize save, the approval-input admission, the official client host's
-   reject flush -- the line is already there. A line that cannot be written
-   does not fail the turn: it is logged and counted, and the turn's own line
-   says [Fresh_history] again if the turn finishes.
+(* RFC librarian-lifecycle 4.6. A reader learns that the atoms of a trace are
+   numbered from zero again from a restart line, and it may act on the line as
+   soon as it sees it. So the line must not be ahead of the restart.
 
-   The history is also empty here when the checkpoint could not be loaded, and
-   then the saved one may still hold atoms (RFC librarian-lifecycle 6). *)
-let record_empty_history_at_turn_start
-      ~(config : Workspace.config)
-      ~keeper_name
-      ~trace_id
+   A turn that starts from no atom and knows the saved history holds none --
+   it loaded an empty one, or the store has none -- says so at once: nothing
+   can be saved before the line, whichever save inside [run_turn] comes first
+   (a stage save, the finalize save, the approval-input admission, the official
+   client host's reject flush).
+
+   A turn that starts from no atom because its checkpoint could not be loaded
+   has not seen the saved history, which may still hold atoms. The restart
+   happens only if a save of this turn is accepted and replaces it, so the
+   line follows the first accepted save. When that first accepted save is the
+   finalize save, the turn's own [Fresh_history] line is that line. *)
+type restart_notice =
+  | No_restart_notice
+  | Notice_at_turn_start
+  | Notice_after_first_save
+
+let restart_notice
       (history_at_start : Keeper_turn_boundaries.history_at_start)
+      (saved_history : Keeper_run_context.saved_history)
   =
-  match history_at_start with
-  | Keeper_turn_boundaries.Continued_history -> ()
-  | Keeper_turn_boundaries.Fresh_history ->
-    let not_recorded detail =
-      Log.Keeper.error
-        ~keeper_name
-        "empty history not recorded at turn start: %s"
-        detail;
-      Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string TurnBoundaryFailures)
-        ~labels:[ "keeper", keeper_name; "site", "turn_start" ]
-        ()
-    in
-    let record : Keeper_turn_boundaries.record =
-      { recorded_at = Time_compat.now ()
-      ; event = Keeper_turn_boundaries.History_restarted { trace_id }
-      }
-    in
-    (match
-       Keeper_turn_boundaries.append
-         ~keepers_dir:
-           (Config_dir_resolver.keepers_dir_for_base_path
-              ~base_path:config.Workspace.base_path)
-         ~keeper_id:keeper_name
-         record
-     with
-     | Ok () -> ()
-     | Error error ->
-       not_recorded (Keeper_turn_boundaries.append_error_to_string error)
-     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-     | exception exn -> not_recorded (Printexc.to_string exn))
+  match history_at_start, saved_history with
+  | ( Keeper_turn_boundaries.Continued_history
+    , ( Keeper_run_context.Saved_history_loaded
+      | Keeper_run_context.Saved_history_absent
+      | Keeper_run_context.Saved_history_unread ) ) -> No_restart_notice
+  | ( Keeper_turn_boundaries.Fresh_history
+    , (Keeper_run_context.Saved_history_loaded | Keeper_run_context.Saved_history_absent) )
+    -> Notice_at_turn_start
+  | Keeper_turn_boundaries.Fresh_history, Keeper_run_context.Saved_history_unread ->
+    Notice_after_first_save
+;;
+
+type restart_site =
+  | At_turn_start
+  | After_first_save
+
+let restart_site_label = function
+  | At_turn_start -> "turn_start"
+  | After_first_save -> "first_save"
+;;
+
+(* A line that cannot be written does not fail the turn: it is logged and
+   counted. Only a cancellation escapes. *)
+let record_history_restart ~(config : Workspace.config) ~keeper_name ~trace_id site =
+  let not_recorded detail =
+    Log.Keeper.error
+      ~keeper_name
+      "history restart not recorded site=%s: %s"
+      (restart_site_label site)
+      detail;
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string TurnBoundaryFailures)
+      ~labels:[ "keeper", keeper_name; "site", restart_site_label site ]
+      ()
+  in
+  let record : Keeper_turn_boundaries.record =
+    { recorded_at = Time_compat.now ()
+    ; event = Keeper_turn_boundaries.History_restarted { trace_id }
+    }
+  in
+  match
+    Keeper_turn_boundaries.append
+      ~keepers_dir:
+        (Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path)
+      ~keeper_id:keeper_name
+      record
+  with
+  | Ok () -> ()
+  | Error error -> not_recorded (Keeper_turn_boundaries.append_error_to_string error)
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+  | exception exn -> not_recorded (Printexc.to_string exn)
 ;;
 
 let turn_progress_callbacks ~config ~keeper_name ~downstream ~turn_id =

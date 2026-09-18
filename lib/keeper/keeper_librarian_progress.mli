@@ -4,8 +4,9 @@
     to the keeper's turn-boundary log ({!Keeper_turn_boundaries}). It is a
     value, not a pointer into that log: the trace, how many atoms of its saved
     history have been read, and the digest of the message that opens the last
-    of them. The log's file order is not turn order, so a line number could
-    not say this.
+    of them. The log keeps the lines of earlier histories of the trace, and the
+    text a round reads always comes from the checkpoint, so a line number
+    could not say where in the current history the reader is.
 
     {2 What the store promises}
 

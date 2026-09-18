@@ -446,6 +446,12 @@ let execute_with_accepting_test_validator
       ~before_advance
       flow
   =
+  (* Fixture targets now declare a connect budget by default, and a flow
+     with a declared budget refuses to run without a measurement clock.
+     Every case here executes inside Eio_main.run, whose context carries the
+     stdenv clock, so default to it exactly the way the production callers
+     resolve their clock. *)
+  let clock = Option.first_some clock (Eio_context.get_clock_opt ()) in
   EO.execute_flow_once
     ~net
     ?clock
@@ -468,9 +474,11 @@ let execute_ok ~net flow =
     flow
 ;;
 
-let execute_with_validator ~net ~before_advance ~validate flow =
+let execute_with_validator ~net ?clock ~before_advance ~validate flow =
+  let clock = Option.first_some clock (Eio_context.get_clock_opt ()) in
   EO.execute_flow_once
     ~net
+    ?clock
     ~on_measurement_terminal:(fun _ -> Ok ())
     ~before_measurement_dispatch:(fun _ -> Ok ())
     ~before_dispatch:(fun _ -> Ok ())
@@ -4009,7 +4017,10 @@ let test_structural_predispatch_failure_does_not_advance () =
     let terminals = ref 0 in
     let advances = ref 0 in
     let result =
-      execute_with_accepting_test_validator
+      (* This case must run with no clock at all, so it calls the flow
+         directly instead of through the helpers, which now default their
+         clock from the Eio context. *)
+      EO.execute_flow_once
         ~net
         ~before_measurement_dispatch:(fun _ ->
           incr intents;
@@ -4021,10 +4032,23 @@ let test_structural_predispatch_failure_does_not_advance () =
         ~before_advance:(fun ~failed:_ ~next:_ ->
           incr advances;
           Ok ())
+        ~validate:accepting_test_validator
         flow
+      |> transport_test_result
+    in
+    let replay =
+      EO.execute_flow_once
+        ~net
+        ~before_measurement_dispatch:(fun _ -> Ok ())
+        ~on_measurement_terminal:(fun _ -> Ok ())
+        ~before_dispatch:(fun _ -> Ok ())
+        ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+        ~validate:accepting_test_validator
+        flow
+      |> transport_test_result
     in
     ( result
-    , execute_ok ~net flow
+    , replay
     , EO.flow_attempt_evidence flow
     , !intents
     , !terminals

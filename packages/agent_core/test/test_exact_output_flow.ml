@@ -3780,7 +3780,9 @@ let test_missing_deadline_rejects_every_candidate_before_dispatch () =
   in
   check int "missing-deadline candidates never reach the provider" 0 posts;
   match result with
-  | Error (EO.Flow_candidates_exhausted { rejection; _ } as error) ->
+  | Error
+      (EO.Flow_execution_terminal
+         { cause = (EO.Flow_candidates_exhausted { rejection; _ } as error); _ }) ->
     check
       bool
       "missing-deadline rejection starts no outward dispatch"

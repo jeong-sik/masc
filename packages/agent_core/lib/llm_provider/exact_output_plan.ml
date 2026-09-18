@@ -146,12 +146,13 @@ let%test "deadline coverage rejects only the both-absent case" =
     validate_deadline_coverage ~connect_timeout_s:None ~body_timeout_s:(Some 1.0)
   with
   | Ok () -> true
-  | Error Missing_deadline -> false
+  | Error _ -> false
 ;;
 
 let%test "deadline coverage rejects when no budget is declared" =
   match validate_deadline_coverage ~connect_timeout_s:None ~body_timeout_s:None with
   | Error Missing_deadline -> true
+  | Error _ -> false
   | Ok () -> false
 ;;
 

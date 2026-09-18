@@ -135,6 +135,16 @@ function vqGateStats(item: VqQueueItem, checks: VqChecks) {
   return { total, confirmed, allConfirmed: total > 0 && confirmed === total }
 }
 
+// A stop is judged on the sentence the producer gave, not on the completion
+// contract: the gate checklist is about finishing, so it must not hold a stop
+// shut. The backend refuses a stop without a stated reason
+// (workspace_task_transitions.ml), and a completion drops the field entirely
+// rather than sending a null (verification_protocol.ml), so a non-empty
+// cancellationReason is a reliable "this is a stop".
+function vqIsCancel(item: VqQueueItem): boolean {
+  return item.cancellationReason != null
+}
+
 // ── gate checklist ────────────────────────────────────────────
 
 function VqGate({
@@ -213,6 +223,9 @@ function VqActions({
   const [reason, setReason] = useState('')
   const [reasonError, setReasonError] = useState<string | null>(null)
   const st = vqGateStats(item, checks)
+  const isCancel = vqIsCancel(item)
+  // The gate is about finishing; a stop is approvable without it.
+  const canApprove = isCancel || st.allConfirmed
   const doReject = () => {
     const trimmed = reason.trim()
     if (trimmed === '') {
@@ -228,12 +241,14 @@ function VqActions({
     <div class="vq-actions">
       <button
         class="vq-act approve"
-        disabled=${!st.allConfirmed || pending}
-        title=${st.allConfirmed
-          ? '모든 게이트 확인됨 — 통과 처리 (task → done)'
-          : `게이트 ${st.total - st.confirmed}건 미확인 — 통과 불가`}
+        disabled=${!canApprove || pending}
+        title=${isCancel
+          ? '중단 승인 — task → cancelled (완료 게이트와 무관)'
+          : st.allConfirmed
+            ? '모든 게이트 확인됨 — 통과 처리 (task → done)'
+            : `게이트 ${st.total - st.confirmed}건 미확인 — 통과 불가`}
         onClick=${() => onResolve(item, 'approve', null)}
-      >✓ 승인 · 통과</button>
+      >${isCancel ? '✓ 중단 승인' : '✓ 승인 · 통과'}</button>
       <button
         class="vq-act reject ${compact ? 'mini' : ''}"
         disabled=${pending}
@@ -475,9 +490,9 @@ function VqTriage(props: VqBodyProps) {
               <div class="vq-tri-actions">
                 <button
                   class="vq-act approve mini"
-                  disabled=${!st.allConfirmed || props.pendingFor(item.task.id)}
+                  disabled=${!(vqIsCancel(item) || st.allConfirmed) || props.pendingFor(item.task.id)}
                   onClick=${() => props.onResolve(item, 'approve', null)}
-                >✓ 통과</button>
+                >${vqIsCancel(item) ? '✓ 중단' : '✓ 통과'}</button>
                 <button class="vq-act reject mini" onClick=${() => setExpand(item.task.id)}>✕ 반려</button>
               </div>
               <button class="vq-tri-more" onClick=${() => setExpand(item.task.id)}>게이트 증거 검토 →</button>

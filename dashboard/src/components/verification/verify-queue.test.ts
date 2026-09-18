@@ -268,6 +268,30 @@ describe('VerifyQueue', () => {
     expect(notes.some(t => t.includes('중단 요청'))).toBe(false)
   })
 
+  // A stop is judged on its sentence, not on the completion contract: the
+  // approve must not wait on gate rows that describe finishing.
+  it('approves a stop without confirming the completion gates', async () => {
+    tasks.value = [makeTask()]
+    mockState.value = {
+      loading: false,
+      error: null,
+      data: requestsResponse([{
+        cancellation_reason: '이 태스크가 답하는 이슈가 상류에서 닫혔다',
+      }]),
+    }
+    const { container } = render(html`<${VerifyQueue} />`)
+
+    const approve = screen.getByText('✓ 중단 승인') as HTMLButtonElement
+    expect(approve.disabled).toBe(false)
+    // the completion gate is untouched and still unconfirmed
+    expect(container.querySelector('.vq-gate-h .n')?.textContent).toBe('0/2 확인')
+
+    fireEvent.click(approve)
+    await waitFor(() => {
+      expect(submitVerificationVerdict).toHaveBeenCalledWith({ taskId: 'task-1', decision: 'approve' })
+    })
+  })
+
   it('renders a rerun note and handoff note from task fields', () => {
     tasks.value = [makeTask({
       predecessor_task_id: 'task-0',

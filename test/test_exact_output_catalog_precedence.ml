@@ -70,7 +70,7 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
 
   let overlay_snapshot =
     load_control_snapshot
-      (Exact_output.Embedded_with_overlay
+      (Exact_output.Full_replacement
          { source = overlay_path; contents = overlay_catalog })
   in
   require_admitted overlay_snapshot overlay_target;
@@ -923,13 +923,10 @@ let test_repo_seed_board_attention_lane_admits () =
   Unix.putenv "AGENT_CORE_MODEL_CATALOG" "";
   (* This case represents a fresh process. Earlier bootstrap cases install
      explicit global replacements, which unsetting the environment does not
-     clear. Follow production startup: embedded catalog, deployment overlay,
-     then runtime loading; the seed relies on overlay context declarations. *)
+     clear. Follow production startup: embedded catalog, then runtime
+     loading. *)
   Llm_provider.Model_catalog.clear_global ();
   ignore (Server_runtime_bootstrap.configure_agent_core_model_catalog_env ());
-  ignore
-    (Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
-       ~config_root ());
   (match Runtime.init_default ~config_path:runtime_path with
    | Ok () -> ()
    | Error detail -> Alcotest.failf "repo runtime seed failed to load: %s" detail);
@@ -1015,7 +1012,7 @@ let test_catalog_absent_assignments_names_only_retired_targets () =
   write_file overlay_path overlay_catalog;
   let snapshot =
     load_control_snapshot
-      (Exact_output.Embedded_with_overlay
+      (Exact_output.Full_replacement
          { source = overlay_path; contents = overlay_catalog })
   in
   require_admitted snapshot overlay_target;

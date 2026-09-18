@@ -38,10 +38,9 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 [[ -x "$BINARY" ]] || { echo "release-evidence: binary not executable: $BINARY" >&2; exit 1; }
-[[ -f config/agent-core-models-overlay.toml ]] || { echo "release-evidence: config/agent-core-models-overlay.toml missing" >&2; exit 1; }
 
 readonly SMOKE_FIXTURE_DIR="$repo_root/scripts/fixtures/release-evidence"
-for smoke_fixture in runtime.toml agent-core-models-overlay.toml; do
+for smoke_fixture in runtime.toml; do
   [[ -f "$SMOKE_FIXTURE_DIR/$smoke_fixture" ]] || {
     echo "release-evidence: smoke fixture missing: scripts/fixtures/release-evidence/$smoke_fixture" >&2
     exit 1
@@ -261,12 +260,10 @@ copy_install_smoke() {
   # invisible to the compiler and to every test, so a new startup requirement —
   # such as the mandatory exact-output lanes added in #25671 — drifts silently
   # and only fails here, on a step that runs on push-to-main and never on a PR
-  # (#25663). As files, these are checked against
+  # (#25663). As a file, it is checked against
   # Server_runtime_bootstrap.mandatory_exact_output_lane_ids by
   # test_runtime_config_validity, which runs in every PR.
   cp "$SMOKE_FIXTURE_DIR/runtime.toml" "$base_path/.masc/config/runtime.toml"
-  cp "$SMOKE_FIXTURE_DIR/agent-core-models-overlay.toml" \
-    "$base_path/.masc/config/agent-core-models-overlay.toml"
 }
 
 capture_installed_version() {

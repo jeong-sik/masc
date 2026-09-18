@@ -9,8 +9,6 @@ let test_existing_installer_contract () =
       (row |> member "runtime_id" |> to_string) rendered.runtime_id;
     Alcotest.check Alcotest.string "same appended runtime fragment"
       (row |> member "runtime_toml" |> to_string) rendered.runtime_toml;
-    Alcotest.check Alcotest.string "same capability/provider/target declarations"
-      (row |> member "model_overlay_toml" |> to_string) rendered.model_overlay_toml;
     let whole = "[runtime]\ndefault = " ^ Yojson.Safe.to_string (`String rendered.runtime_id) ^ "\n" ^ rendered.runtime_toml in
     match Runtime_toml.parse_string whole with
     | Ok _ -> () | Error _ -> Alcotest.fail "rendered fragment is not native runtime TOML") rows

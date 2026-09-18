@@ -116,7 +116,6 @@ harness_seed_server_config() {
   local repo_root="$1"
   local base_path="$2"
   local config_dir="${base_path%/}/.masc/config"
-  local seeded_runtime=0
 
   # The boot-path config lives in files rather than heredocs so
   # [test_runtime_config_validity] discovers it and checks the lane ids against
@@ -126,7 +125,7 @@ harness_seed_server_config() {
   # #25727). Missing fixtures fail here rather than seeding an empty config.
   local TRANSPORT_HARNESS_FIXTURE_DIR="$repo_root/scripts/fixtures/transport-harness"
   local fixture
-  for fixture in runtime.toml agent-core-models-overlay.toml; do
+  for fixture in runtime.toml; do
     if [[ ! -f "$TRANSPORT_HARNESS_FIXTURE_DIR/$fixture" ]]; then
       echo "harness: fixture missing: scripts/fixtures/transport-harness/$fixture" >&2
       return 1
@@ -140,12 +139,6 @@ harness_seed_server_config() {
 
   if [[ ! -f "$config_dir/runtime.toml" ]]; then
     cp "$TRANSPORT_HARNESS_FIXTURE_DIR/runtime.toml" "$config_dir/runtime.toml"
-    seeded_runtime=1
-  fi
-
-  if [[ "$seeded_runtime" == "1" && ! -f "$config_dir/agent-core-models-overlay.toml" ]]; then
-    cp "$TRANSPORT_HARNESS_FIXTURE_DIR/agent-core-models-overlay.toml" \
-      "$config_dir/agent-core-models-overlay.toml"
   fi
 }
 

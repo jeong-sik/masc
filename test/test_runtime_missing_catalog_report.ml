@@ -22,7 +22,8 @@ let test_missing_catalog_report_names_runtime_and_model () =
   check bool "runtime/model label" true
     (contains msg "custom.uncatalogued (provider_label=openai_compat, model=uncatalogued)");
   check bool "count" true (contains msg "1 runtime model(s)");
-  check bool "overlay filename" true (contains msg "agent-core-models-overlay.toml")
+  check bool "names where a row is written" true
+    (contains msg "AGENT_CORE embedded catalog")
 ;;
 
 let test_missing_catalog_report_joins_multiple_models () =

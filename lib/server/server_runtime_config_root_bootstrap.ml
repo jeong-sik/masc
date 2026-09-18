@@ -59,13 +59,6 @@ let copy_file_if_missing ~src ~dst =
     Fs_compat.save_file dst (Fs_compat.load_file src))
 ;;
 
-let agent_core_models_overlay_toml_filename = "agent-core-models-overlay.toml"
-
-let existing_file path =
-  try Sys.file_exists path && not (Sys.is_directory path) with
-  | Sys_error _ -> false
-;;
-
 let existing_directory path =
   try Sys.file_exists path && Sys.is_directory path with
   | Sys_error _ -> false
@@ -124,23 +117,6 @@ let copy_missing_prompt_seed ~src_config_root ~dst_config_root =
   let dst = Filename.concat dst_config_root "prompts" in
   if Sys.file_exists src && Sys.is_directory src
   then copy_missing_tree_count ~src ~dst
-  else 0
-;;
-
-let copy_missing_model_catalog_overlay_seed ~src_config_root ~dst_config_root =
-  let src = Filename.concat src_config_root agent_core_models_overlay_toml_filename in
-  let dst = Filename.concat dst_config_root agent_core_models_overlay_toml_filename in
-  if existing_file src && not (Sys.file_exists dst)
-  then (
-    copy_file_if_missing ~src ~dst;
-    1)
-  else if existing_file src && existing_directory dst
-  then (
-    Log.Server.warn
-      "config bootstrap: refusing to replace directory with model catalog overlay file (%s -> %s)"
-      src
-      dst;
-    0)
   else 0
 ;;
 
@@ -254,16 +230,11 @@ let seed_missing_from_embedded ~dst =
 ;;
 
 (* An existing config root is operator-owned and is deliberately not refilled.
-   These two files are the exception, because their absence is not a preference:
-   without runtime.toml the server refuses to start at all, and the overlay is
-   what the frozen model catalog is read from. Restricted to the pair the
-   versioned backfill above already covers — this only adds a source for hosts
-   that have no repo to copy from. *)
+   runtime.toml is the exception, because its absence is not a preference: the
+   server refuses to start without it. This only adds a source for hosts that
+   have no repo to copy from. *)
 let backfill_startup_required_from_embedded ~config_root =
-  [ Config_dir_resolver.runtime_toml_filename
-  ; agent_core_models_overlay_toml_filename
-  ]
-  |> write_missing_embedded ~dst:config_root
+  [ Config_dir_resolver.runtime_toml_filename ] |> write_missing_embedded ~dst:config_root
 ;;
 
 let builtin_skills () =
@@ -417,29 +388,22 @@ let bootstrap_initial_config_root ~base_path ~created =
       if Sys.is_directory config_root
       then (
         ensure_config_root_scaffold config_root;
-        let backfilled_prompts, backfilled_model_catalog_overlay =
+        let backfilled_prompts =
           match versioned_config_root_candidates () |> List.find_opt Sys.file_exists with
           | Some source ->
-            ( copy_missing_prompt_seed
-                ~src_config_root:source
-                ~dst_config_root:config_root
-            , copy_missing_model_catalog_overlay_seed
-                ~src_config_root:source
-                ~dst_config_root:config_root
-            )
-          | None -> 0, 0
+            copy_missing_prompt_seed ~src_config_root:source ~dst_config_root:config_root
+          | None -> 0
         in
         (* Last resort for a root that exists but cannot start: no repo to copy
            from, so the startup-required pair comes out of the binary. *)
         let backfilled_from_embedded =
           backfill_startup_required_from_embedded ~config_root
         in
-        if backfilled_prompts + backfilled_model_catalog_overlay > 0
+        if backfilled_prompts > 0
         then
           Log.Server.info
-            "backfilled %d missing prompt seed file(s) and %d model catalog overlay seed file(s) into existing base-path config root: %s"
+            "backfilled %d missing prompt seed file(s) into existing base-path config root: %s"
             backfilled_prompts
-            backfilled_model_catalog_overlay
             config_root;
         if backfilled_from_embedded > 0
         then
@@ -447,9 +411,7 @@ let bootstrap_initial_config_root ~base_path ~created =
             "backfilled %d startup-required config file(s) from binary-embedded assets into existing base-path config root: %s"
             backfilled_from_embedded
             config_root;
-        if backfilled_prompts + backfilled_model_catalog_overlay
-           + backfilled_from_embedded
-           > 0
+        if backfilled_prompts + backfilled_from_embedded > 0
         then Config_dir_resolver.reset ()
         else
           Log.Server.info

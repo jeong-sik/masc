@@ -107,11 +107,7 @@ let table ?(array=false) path fields =
   "\n" ^ (if array then "[[" else "[") ^ String.concat "." (List.map quoted path)
   ^ (if array then "]]\n" else "]\n")
   ^ String.concat "" (List.map (fun (key,value) -> quoted key ^ " = " ^ Yojson.Safe.to_string value ^ "\n") fields)
-let unverified_capabilities = ["supports_tool_choice";"supports_required_tool_choice";"supports_named_tool_choice";
-  "supports_parallel_tool_calls";"supports_reasoning";"supports_response_format_json";"supports_structured_output";
-  "supports_multimodal_inputs";"supports_image_input";"supports_audio_input";"supports_video_input";
-  "supports_document_input";"supports_prompt_caching";"supports_top_k";"supports_min_p";"supports_seed"]
-type rendered = {runtime_id:string;runtime_toml:string;model_overlay_toml:string}
+type rendered = {runtime_id:string;runtime_toml:string}
 let render spec =
   let name = choice_name spec.choice in
   let provider = "setup_" ^ name ^ "_" ^ Digestif.SHA256.(to_hex (digest_string spec.canonical_spec)) in
@@ -133,18 +129,7 @@ let render spec =
   let runtime = runtime ^ table ["models";model_key] ["api-name",`String spec.model;"max-context",`Int spec.context;
     "tools-support",`Bool spec.tools;"streaming",`Bool spec.streaming]
     ^ table [provider;model_key] (["wizard-default",`Bool true] @ if spec.choice=Ollama then ["num-ctx",`Int spec.context] else []) in
-  let overlay = match spec.transport with Client _ -> "" | Http h ->
-    let kind,base = match h.kind with Openai_compat -> "openai_compat","openai_chat" | Anthropic -> "anthropic","anthropic"
-      | Kimi -> "kimi","kimi" | Glm -> "glm","glm" | Ollama_kind -> "ollama","ollama" in
-    table ~array:true ["models"] (["id_prefix",`String spec.model;"provider_name",`String provider;"base",`String base;
-      "max_context_tokens",`Int spec.context;"supports_tools",`Bool spec.tools;"supports_native_streaming",`Bool spec.streaming]
-      @ List.map (fun key -> key,`Bool false) unverified_capabilities
-      @ ["thinking_control_format",`String "none";"reasoning_streaming_format",`String "none"])
-    ^ table ~array:true ["providers"] ["id",`String provider;"kind",`String kind;"base_url",`String h.endpoint;
-      "request_path",`String h.request_path;"api_key_env",`String h.api_key_env;"capabilities_base",`String base]
-    ^ table ~array:true ["targets"] ["id",`String runtime_id;"provider_ref",`String provider;"model_id",`String spec.model] in
-  {runtime_id;runtime_toml=runtime;model_overlay_toml=overlay}
-let render_json value = `Assoc ["runtime_id",`String value.runtime_id;"runtime_toml",`String value.runtime_toml;
-  "model_overlay_toml",`String value.model_overlay_toml]
+  {runtime_id;runtime_toml=runtime}
+let render_json value = `Assoc ["runtime_id",`String value.runtime_id;"runtime_toml",`String value.runtime_toml]
 
 let model_id spec = spec.model

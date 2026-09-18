@@ -77,11 +77,6 @@ type declared_target =
 
 type resolver_catalog_input =
   | Embedded_default
-  | Embedded_with_overlay of catalog_document
-      (** The embedded catalog with a second document merged over it. A
-          deployment supplies no such document: its provider and model facts
-          are catalog rows, and its slots arrive as {!Embedded_with_targets}.
-          The callers left are tests that assemble a synthetic catalog. *)
   | Embedded_with_targets of declared_target list
       (** The embedded catalog for provider and model facts, plus the slots the
           caller declares. The embedded catalog carries no [[targets]] rows of
@@ -96,7 +91,6 @@ type target_ref_error =
 type resolver_catalog_source =
   | Embedded_catalog
   | Full_replacement_catalog
-  | Overlay_catalog
 
 type resolver_collision =
   | Duplicate_provider_identity
@@ -409,11 +403,9 @@ val snapshot_flow
   -> (flow_snapshot, flow_snapshot_error) result
 
 (** Parse exactly one typed catalog input and freeze a private immutable target
-    map. The default input is the embedded AGENT_CORE catalog. [Embedded_with_overlay]
-    applies the existing sparse exact-output overlay precedence to that
-    embedded base. A full replacement, supplied as owned bytes or a file path,
-    suppresses every embedded and overlay row; the input type provides no way
-    to combine a full replacement with an overlay.
+    map. The default input is the embedded AGENT_CORE catalog, whose rows are
+    the only place a provider or model fact is written. A full replacement,
+    supplied as owned bytes or a file path, suppresses every embedded row.
     [io.getenv] is observed exactly once per referenced environment name during
     this call and is never retained. Invalid paths, syntax, collisions,
     base-URL environment reads, and endpoint declarations fail closed.

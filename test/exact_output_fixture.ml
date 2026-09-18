@@ -220,7 +220,7 @@ let resolver_snapshot
   match
     EO.load_resolver_snapshot
       ~io
-      ~catalog:(EO.Embedded_with_overlay overlay)
+      ~catalog:(EO.Full_replacement overlay)
       ()
   with
   | Ok snapshot -> snapshot

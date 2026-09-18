@@ -12,7 +12,6 @@ let bootstrap_base_path_config_root = Config_root_bootstrap.bootstrap_base_path_
 let startup_config_resolution = Config_root_bootstrap.startup_config_resolution
 
 let agent_core_model_catalog_env_var_name = "AGENT_CORE_MODEL_CATALOG"
-let agent_core_models_overlay_toml_filename = "agent-core-models-overlay.toml"
 
 (* Seconds withheld from tool-blob maintenance so the boot stages that follow
    it (Runtime_params restore, credential audit, Domain_pool, Keeper gate
@@ -81,60 +80,10 @@ let warn_ignored_config_root_full_catalogs
       if Option.is_some (existing_file path)
       then
         Log.Misc.warn
-          "model_catalog: ignoring retired config-root full catalog %s; AGENT_CORE embedded catalog plus agent-core-models-overlay.toml is the deployment SSOT (set AGENT_CORE_MODEL_CATALOG explicitly only for a deliberate full replacement)"
+          "model_catalog: ignoring retired config-root full catalog %s; the AGENT_CORE embedded catalog is the only place a provider or model fact is written (set AGENT_CORE_MODEL_CATALOG explicitly only for a deliberate full replacement)"
           path)
 
-(* RFC-0342 D1 / Agent Core contract: deployment-local capability deltas live in a
-   config-root overlay merged onto the embedded catalog
-   ([Model_catalog.set_global_overlay]), instead of a full-catalog fork that
-   shadows every embedded row and goes stale on each AGENT_CORE release. Only an
-   operator-supplied [AGENT_CORE_MODEL_CATALOG] keeps full-replacement precedence. *)
-let resolve_agent_core_model_catalog_overlay_path ?config_root () =
-  match config_root with
-  | None -> None
-  | Some root ->
-    let root = String.trim root in
-    if String.equal root "" then
-      None
-    else
-      existing_file (Filename.concat root agent_core_models_overlay_toml_filename)
-
-(* Per-row degradation: a poisoned overlay row (e.g. a stale field left by
-   another release) is excluded with one WARN per row instead of failing the
-   whole boot — install must not be blocked by config residue. Whole-file
-   failures (unreadable, broken TOML, duplicate surviving rows) still raise
-   [Config_error], as does the [AGENT_CORE_MODEL_CATALOG] full-replacement
-   path, which keeps the strict loader. *)
-let configure_agent_core_model_catalog_overlay
-      ?config_root
-      ?(load_catalog = Llm_provider.Model_catalog.load_file_lenient)
-      ?(set_overlay = Llm_provider.Model_catalog.set_global_overlay)
-      ()
-  =
-  match resolve_agent_core_model_catalog_overlay_path ?config_root () with
-  | None -> None
-  | Some path ->
-    (match load_catalog path with
-     | Ok (overlay, skipped) ->
-       List.iter
-         (fun (skip : Llm_provider.Model_catalog.skipped_entry) ->
-            Log.Misc.warn
-              "model_catalog: overlay %s skipping entry %s: %s"
-              path
-              skip.entry_label
-              skip.skip_reason)
-         skipped;
-       set_overlay overlay;
-       Log.Misc.info
-         "model_catalog: deployment overlay %s installed onto embedded catalog"
-         path;
-       Some path
-     | Error detail ->
-       raise
-         (Env_config_core.Config_error
-            (Printf.sprintf "catalog overlay %s: %s" path detail)))
-
-(* A config-load failure (catalog overlay, runtime.toml) must not be reported
+(* A config-load failure (runtime.toml) must not be reported
    as a model connection problem: the model was never reached. The diagnostic
    names the class, carries the underlying file-path-bearing detail verbatim,
    and states the next action. *)
@@ -148,7 +97,6 @@ let config_load_failure_diagnostic ~detail =
 let exact_output_catalog_source_to_string = function
   | Exact_output.Embedded_catalog -> "embedded"
   | Exact_output.Full_replacement_catalog -> "full replacement"
-  | Exact_output.Overlay_catalog -> "overlay"
 ;;
 
 let exact_output_collision_to_string = function
@@ -640,7 +588,6 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
   Server_slack_connector_config.configure ~config_root;
   warn_ignored_config_root_full_catalogs ~config_root ();
   let (_ : string option) = configure_agent_core_model_catalog_env () in
-  let (_ : string option) = configure_agent_core_model_catalog_overlay ~config_root () in
   apply_runtime_toml ~base_path;
   Keeper_runtime_resolved.init ();
   (* Boot-time observability: emit the resolved runtime knobs once, right after
@@ -1535,13 +1482,8 @@ let resume_model_configuration () =
   | Some path ->
     let resumed = Runtime.with_config_lock ~runtime_config_path:path (fun () ->
       let initialized =
-        match
-          configure_agent_core_model_catalog_overlay ~config_root:(Filename.dirname path) ()
-        with
-        | (_ : string option) ->
-          Runtime.init_default_degraded_report ~config_path:path
-          |> Result.map_error Runtime.strict_init_error_to_string
-        | exception Env_config_core.Config_error detail -> Error detail
+        Runtime.init_default_degraded_report ~config_path:path
+        |> Result.map_error Runtime.strict_init_error_to_string
       in
       match initialized with
       | Error detail ->

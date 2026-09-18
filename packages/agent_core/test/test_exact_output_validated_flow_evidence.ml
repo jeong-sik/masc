@@ -69,7 +69,7 @@ let with_catalog ~base_url f =
     { source = "validated-flow-evidence-test"; contents }
   in
   let io : EO.resolver_io = { getenv = (fun _ -> Ok None) } in
-  match EO.load_resolver_snapshot ~io ~catalog:(EO.Embedded_with_overlay document) () with
+  match EO.load_resolver_snapshot ~io ~catalog:(EO.Full_replacement document) () with
   | Ok snapshot -> f snapshot
   | Error _ -> fail "evidence catalog did not load"
 ;;

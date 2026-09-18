@@ -1176,7 +1176,7 @@ let prompt_only_snapshot base_url =
   match
     EO.load_resolver_snapshot
       ~io
-      ~catalog:(EO.Embedded_with_overlay { source = "hitl-incapable"; contents })
+      ~catalog:(EO.Full_replacement { source = "hitl-incapable"; contents })
       ()
   with
   | Ok snapshot -> snapshot

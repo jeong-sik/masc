@@ -151,7 +151,7 @@ let with_catalog ?(getenv = fun _ -> Ok None) entries f =
     }
   in
   let io : EO.resolver_io = { getenv } in
-  match EO.load_resolver_snapshot ~io ~catalog:(EO.Embedded_with_overlay overlay) () with
+  match EO.load_resolver_snapshot ~io ~catalog:(EO.Full_replacement overlay) () with
   | Error _ -> fail "resolver snapshot should load"
   | Ok snapshot -> f snapshot
 ;;
@@ -502,7 +502,7 @@ let test_deepseek_catalog_is_json_only_before_dispatch () =
       (if String.equal name "DEEPSEEK_API_KEY" then Some "deepseek-fixture-key" else None)
   in
   let io : EO.resolver_io = { getenv } in
-  match EO.load_resolver_snapshot ~io ~catalog:(EO.Embedded_with_overlay overlay) () with
+  match EO.load_resolver_snapshot ~io ~catalog:(EO.Full_replacement overlay) () with
   | Error _ -> fail "DeepSeek exact-output target should resolve"
   | Ok snapshot ->
     let selected = target snapshot target_id in
@@ -2043,7 +2043,7 @@ let test_gemini_nonempty_request_path_rejected_before_resolution () =
         catalog_fixture_toml (gemini_exact_entry ~id ~request_path:"/interactions" ())
     }
   in
-  match EO.load_resolver_snapshot ~io ~catalog:(EO.Embedded_with_overlay overlay) () with
+  match EO.load_resolver_snapshot ~io ~catalog:(EO.Full_replacement overlay) () with
   | Error
       (EO.Target_endpoint_invalid
          { target_ref; cause = EO.Unsupported_gemini_request_path }) ->

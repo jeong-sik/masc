@@ -732,7 +732,7 @@ let decide_capability_gate ~(config_path : string) (entries : (string * bool) li
       (Printf.sprintf
          "%s: %d runtime model(s) absent from the AGENT_CORE capability catalog; they \
           would use provider_default and silently drop thinking/sampling control. \
-          Add deployment rows to agent-core-models-overlay.toml or update the AGENT_CORE embedded catalog: %s"
+          Add a row for each to the AGENT_CORE embedded catalog: %s"
          config_path
          (List.length unknown)
          (String.concat ", " (List.map fst unknown)))
@@ -797,7 +797,7 @@ let missing_catalog_report_to_string (report : missing_catalog_report) =
   Printf.sprintf
     "%s: %d runtime model(s) absent from the AGENT_CORE capability catalog; they \
      would use provider_default and silently drop thinking/sampling control. \
-     Add deployment rows to agent-core-models-overlay.toml or update the AGENT_CORE embedded catalog: %s"
+     Add a row for each to the AGENT_CORE embedded catalog: %s"
     report.config_path
     (List.length report.missing_models)
     (String.concat ", " (List.map missing_catalog_model_to_string report.missing_models))
@@ -1162,8 +1162,8 @@ let missing_reference_error
   in
   Printf.sprintf
     "%s: cannot use degraded runtime boot because catalog-missing runtime ids \
-     are referenced by routing config: %s. %s Add catalog rows to \
-     agent-core-models-overlay.toml (or upstream AGENT_CORE) or remove those routing references; MASC will not erase \
+     are referenced by routing config: %s. %s Add catalog rows to the AGENT_CORE \
+     embedded catalog or remove those routing references; MASC will not erase \
      explicit runtime intent into [runtime].default fallback."
     config_path
     (String.concat "; " references)

@@ -733,10 +733,6 @@ let test_release_requires_advertised_binary_assets () =
     "release fails when required asset is absent"
     workflow
     "required release asset missing: $asset";
-  assert_contains
-    "release hashes seeded model catalog overlay"
-    workflow
-    "(cd ../config && sha256sum agent-core-models-overlay.toml) >> SHA256SUMS"
 ;;
 
 let test_quickstart_defaults_to_workspace_only () =
@@ -1777,10 +1773,6 @@ let test_release_checksums_include_model_catalog_overlay_seed () =
     "release checksum includes runtime config seeds"
     workflow
     "(cd ../config && sha256sum runtime.toml) >> SHA256SUMS";
-  assert_contains
-    "release checksum includes model catalog overlay seed"
-    workflow
-    "(cd ../config && sha256sum agent-core-models-overlay.toml) >> SHA256SUMS"
 ;;
 
 let test_team_flag_and_seed_exist () =

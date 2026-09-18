@@ -110,14 +110,6 @@ let () =
     ~cwd_default:(Eio.Stdenv.cwd env)
     ~proc_mgr:(Eio.Stdenv.process_mgr env)
     ~clock:(Eio.Stdenv.clock env);
-  (* The server installs the deployment capability overlay at boot and a CLI
-     does not; keeper_capability_probe_cli carries the same call for the same
-     reason. *)
-  ignore
-    (Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
-       ~config_root:(Filename.dirname config_path)
-       ()
-     : string option);
   (match Runtime.init_default ~config_path with
    | Error detail ->
      Printf.eprintf "runtime init failed (%s): %s

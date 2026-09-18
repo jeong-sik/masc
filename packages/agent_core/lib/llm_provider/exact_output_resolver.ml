@@ -33,7 +33,6 @@ type declared_target =
 
 type resolver_catalog_input =
   | Embedded_default
-  | Embedded_with_overlay of catalog_document
   | Embedded_with_targets of declared_target list
   | Full_replacement of catalog_document
   | Full_replacement_file of string
@@ -45,7 +44,6 @@ type target_ref_error =
 type resolver_catalog_source =
   | Embedded_catalog
   | Full_replacement_catalog
-  | Overlay_catalog
 
 type resolver_collision =
   | Duplicate_provider_identity
@@ -395,149 +393,6 @@ let validate_catalog_source catalog targets =
   Ok ()
 ;;
 
-let validate_overlay_collisions ~base ~base_targets ~overlay ~overlay_targets =
-  let* base_namespace = provider_namespace (Model_catalog.provider_entries base) in
-  let* () =
-    List.fold_left
-      (fun result (provider : Model_catalog.provider_entry) ->
-         let* () = result in
-         List.fold_left
-           (fun result label ->
-              let* () = result in
-              match String_map.find_opt (normalize_identity label) base_namespace with
-              | None -> Ok ()
-              | Some owner when String.equal owner provider.id -> Ok ()
-              | Some _ -> Error (Catalog_collision Provider_alias_shadow))
-           (Ok ())
-           (provider.id :: provider.aliases))
-      (Ok ())
-      (Model_catalog.provider_entries overlay)
-  in
-  let base_targets =
-    List.fold_left
-      (fun values entry ->
-         let id = target_ref_id entry.target_ref in
-         String_map.add (normalize_identity id) id values)
-      String_map.empty
-      base_targets
-  in
-  let* () =
-    List.fold_left
-      (fun result entry ->
-         let* () = result in
-         let id = target_ref_id entry.target_ref in
-         match String_map.find_opt (normalize_identity id) base_targets with
-         | None -> Ok ()
-         | Some base_id when String.equal base_id id -> Ok ()
-         | Some _ -> Error (Catalog_collision Target_identity_shadow))
-      (Ok ())
-      overlay_targets
-  in
-  if
-    Binding.validate_overlay_model_identities
-      ~base:(Model_catalog.model_entries base)
-      ~overlay:(Model_catalog.model_entries overlay)
-  then Ok ()
-  else Error (Catalog_collision Model_identity_shadow)
-;;
-
-let merge_target_declarations ~base ~overlay =
-  let overlay_ids = List.map (fun target -> target_ref_id target.target_ref) overlay in
-  overlay
-  @ List.filter
-      (fun target -> not (List.mem (target_ref_id target.target_ref) overlay_ids))
-      base
-;;
-
-let%test "exact target id overlay replaces the complete base declaration" =
-  let fixture ~model_id ~target_id =
-    Printf.sprintf
-      "[[providers]]\n\
-       id = \"inline-provider\"\n\
-       kind = \"openai_compat\"\n\
-       base_url = \"https://inline.example\"\n\
-       request_path = \"/v1/chat/completions\"\n\
-       api_key_env = \"\"\n\n\
-       [[models]]\n\
-       id_prefix = %S\n\
-       provider_name = \"inline-provider\"\n\
-       supports_response_format_json = true\n\n\
-       [[targets]]\n\
-       id = %S\n\
-       provider_ref = \"inline-provider\"\n\
-       model_id = %S\n"
-      model_id
-      target_id
-      model_id
-  in
-  let parse source contents =
-    match
-      ( Model_catalog.of_toml_string
-          ~source:"exact target replacement inline test"
-          contents
-      , parse_target_catalog ~source contents )
-    with
-    | Ok catalog, Ok targets ->
-      (match validate_catalog_source catalog targets with
-       | Ok () -> Some (catalog, targets)
-       | Error _ -> None)
-    | Error _, _ | _, Error _ -> None
-  in
-  match
-    ( parse Embedded_catalog (fixture ~model_id:"base-model" ~target_id:"inline-target")
-    , parse Overlay_catalog (fixture ~model_id:"overlay-model" ~target_id:"inline-target")
-    )
-  with
-  | Some (base, base_targets), Some (overlay, overlay_targets) ->
-    (match validate_overlay_collisions ~base ~base_targets ~overlay ~overlay_targets with
-     | Ok () ->
-       merge_target_declarations ~base:base_targets ~overlay:overlay_targets
-       = overlay_targets
-     | Error _ -> false)
-  | None, _ | _, None -> false
-;;
-
-let%test "case-only target overlay shadow fails closed" =
-  let fixture target_id =
-    Printf.sprintf
-      "[[providers]]\n\
-       id = \"inline-provider\"\n\
-       kind = \"openai_compat\"\n\
-       base_url = \"https://inline.example\"\n\
-       request_path = \"/v1/chat/completions\"\n\
-       api_key_env = \"\"\n\n\
-       [[models]]\n\
-       id_prefix = \"inline-model\"\n\
-       provider_name = \"inline-provider\"\n\
-       supports_response_format_json = true\n\n\
-       [[targets]]\n\
-       id = %S\n\
-       provider_ref = \"inline-provider\"\n\
-       model_id = \"inline-model\"\n"
-      target_id
-  in
-  let parse source contents =
-    match
-      ( Model_catalog.of_toml_string ~source:"target shadow inline test" contents
-      , parse_target_catalog ~source contents )
-    with
-    | Ok catalog, Ok targets ->
-      (match validate_catalog_source catalog targets with
-       | Ok () -> Some (catalog, targets)
-       | Error _ -> None)
-    | Error _, _ | _, Error _ -> None
-  in
-  match
-    ( parse Embedded_catalog (fixture "inline-target")
-    , parse Overlay_catalog (fixture "INLINE-TARGET") )
-  with
-  | Some (base, base_targets), Some (overlay, overlay_targets) ->
-    (match validate_overlay_collisions ~base ~base_targets ~overlay ~overlay_targets with
-     | Error (Catalog_collision Target_identity_shadow) -> true
-     | Ok () | Error _ -> false)
-  | None, _ | _, None -> false
-;;
-
 let endpoint_result ~target_ref =
   Result.map_error (fun cause ->
     Target_endpoint_invalid { target_ref = target_ref_id target_ref; cause })
@@ -718,11 +573,9 @@ let load_resolver_snapshot
         ; body_timeout_s = declared.body_timeout_s
         }
   in
-  let* base_source, base_document, overlay, declared_targets =
+  let* base_source, base_document, declared_targets =
     match catalog with
-    | Embedded_default -> Ok (Embedded_catalog, embedded_document, None, [])
-    | Embedded_with_overlay overlay ->
-      Ok (Embedded_catalog, embedded_document, Some overlay, [])
+    | Embedded_default -> Ok (Embedded_catalog, embedded_document, [])
     | Embedded_with_targets declared ->
       let* targets =
         List.fold_left
@@ -734,11 +587,11 @@ let load_resolver_snapshot
           declared
         |> Result.map List.rev
       in
-      Ok (Embedded_catalog, embedded_document, None, targets)
-    | Full_replacement document -> Ok (Full_replacement_catalog, document, None, [])
+      Ok (Embedded_catalog, embedded_document, targets)
+    | Full_replacement document -> Ok (Full_replacement_catalog, document, [])
     | Full_replacement_file path ->
       let* document = read_full_replacement_file path in
-      Ok (Full_replacement_catalog, document, None, [])
+      Ok (Full_replacement_catalog, document, [])
   in
   let* base =
     parse_model_catalog
@@ -751,35 +604,9 @@ let load_resolver_snapshot
      declarations are the whole set. *)
   let* base_targets = parse_target_catalog ~source:base_source base_document.contents in
   let* () = validate_catalog_source base base_targets in
-  let* catalog, model_entries, file_targets =
-    match overlay with
-    | None -> Ok (base, Model_catalog.model_entries base, base_targets)
-    | Some overlay ->
-      let* overlay_catalog =
-        parse_model_catalog
-          ~source:Overlay_catalog
-          ~parser_source:overlay.source
-          overlay.contents
-      in
-      let* overlay_targets =
-        parse_target_catalog ~source:Overlay_catalog overlay.contents
-      in
-      let* () = validate_catalog_source overlay_catalog overlay_targets in
-      let* () =
-        validate_overlay_collisions
-          ~base
-          ~base_targets
-          ~overlay:overlay_catalog
-          ~overlay_targets
-      in
-      Ok
-        ( Model_catalog.merge ~base ~overlay:overlay_catalog
-        , Binding.merge_exact_model_entries
-            ~base:(Model_catalog.model_entries base)
-            ~overlay:(Model_catalog.model_entries overlay_catalog)
-        , merge_target_declarations ~base:base_targets ~overlay:overlay_targets )
-  in
-  let target_declarations = file_targets @ declared_targets in
+  let catalog = base in
+  let model_entries = Model_catalog.model_entries base in
+  let target_declarations = base_targets @ declared_targets in
   let* () =
     let rec unique seen = function
       | [] -> Ok ()

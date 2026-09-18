@@ -166,7 +166,7 @@ def directory_execution(traces):
     raise RuntimeError('no matched Execute input/output proves the current path and directory listing in the Docker sandbox')
 
 
-PRESERVED_CONFIGURATION = ('runtime.toml', 'agent-core-models-overlay.toml', 'keepers/imp.toml')
+PRESERVED_CONFIGURATION = ('runtime.toml', 'keepers/imp.toml')
 
 
 def outstanding_chat_operations(keeper):

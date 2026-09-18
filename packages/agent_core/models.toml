@@ -3036,6 +3036,7 @@ supports_tools = true
 supports_tool_choice = true
 supports_named_tool_choice = true
 supports_reasoning = true
+reasoning_streaming_format = "delta:reasoning_content"
 supports_native_streaming = true
 
 [[models]]
@@ -3496,4 +3497,56 @@ reasoning_streaming_format = "delta:reasoning_content"
 accepted_reasoning_efforts = ["none"]
 supports_image_input = true
 supports_multimodal_inputs = true
+supports_native_streaming = true
+
+# Z.AI coding plan's kimi-for-coding. Window and output ceiling from the
+# endpoint; no tool_choice on this wire.
+[[models]]
+id_prefix = "kimi-for-coding"
+provider_name = "kimi_coding"
+base = "openai_chat"
+max_context_tokens = 262144
+max_output_tokens = 131072
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_response_format_json = true
+supports_structured_output = true
+supports_native_streaming = true
+
+# Local Ollama Gemma 4 QAT build, probed 2026-06-12. Reads images and audio.
+[[models]]
+id_prefix = "hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL"
+provider_name = "ollama"
+base = "ollama"
+max_context_tokens = 131072
+supports_tools = true
+supports_reasoning = true
+thinking_control_format = "chat_template_token"
+thinking_control_token = "<|think|>"
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_audio_input = true
+modality_priority = "visual_first"
+supports_response_format_json = true
+supports_native_streaming = true
+supports_seed = true
+input_per_million = 0.0
+output_per_million = 0.0
+
+# vllm-qwen3-mtp serving contract. Reasoning rides chat_template_kwargs, and a
+# turn without a tool call drops its reasoning on replay.
+[[models]]
+id_prefix = "qwen36-35b-a3b-mtp"
+provider_name = "runpod_mtp"
+base = "openai_chat"
+max_context_tokens = 131072
+supports_tools = true
+supports_tool_choice = true
+supports_parallel_tool_calls = true
+supports_reasoning = true
+thinking_control_format = "chat_template_kwargs"
+preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
+reasoning_streaming_format = "delta:reasoning_content"
+reasoning_replay = "drop_without_tool_preserve_with_tool"
 supports_native_streaming = true

@@ -151,7 +151,6 @@ let test_seeds_admits_distribution_assets () =
     (fun rel ->
        check bool rel true (Common.seeds_into_fresh_config_root rel))
     [ "runtime.toml"
-    ; "agent-core-models-overlay.toml"
     ; "prompts/keeper.md"
     ; "tools/masc_status.toml"
     ; "mcp/prompts.toml"

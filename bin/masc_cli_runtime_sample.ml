@@ -107,10 +107,6 @@ let run ~config_path ~scenario_path ~runtime_ids =
           let (_ : string option) =
             Server_runtime_bootstrap.configure_agent_core_model_catalog_env ()
           in
-          let (_ : string option) =
-            Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
-              ~config_root:(Filename.dirname config_path) ()
-          in
           Runtime.load_config_observation ~runtime_config_path:config_path ()
         with Env_config_core.Config_error detail -> Error detail
       in

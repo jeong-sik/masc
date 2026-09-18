@@ -154,7 +154,7 @@ let with_catalog ?(getenv = fun _ -> Ok None) entries f =
     }
   in
   let io : EO.resolver_io = { getenv } in
-  match EO.load_resolver_snapshot ~io ~catalog:(EO.Embedded_with_overlay document) () with
+  match EO.load_resolver_snapshot ~io ~catalog:(EO.Full_replacement document) () with
   (* Naming the rejected field beats "should load". Discarding the error made a
      catalog that the resolver refuses indistinguishable from any other load
      failure, so a fixture drift showed up only as an assertion label. *)

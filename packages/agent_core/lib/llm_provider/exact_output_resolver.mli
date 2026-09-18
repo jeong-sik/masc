@@ -35,11 +35,6 @@ type declared_target =
 
 type resolver_catalog_input =
   | Embedded_default
-  | Embedded_with_overlay of catalog_document
-      (** The embedded catalog with a second document merged over it. A
-          deployment supplies no such document: its provider and model facts
-          are catalog rows, and its slots arrive as {!Embedded_with_targets}.
-          The callers left are tests that assemble a synthetic catalog. *)
   | Embedded_with_targets of declared_target list
       (** The embedded catalog for provider and model facts, plus the slots the
           caller declares. The embedded catalog carries no [[targets]] of its
@@ -54,7 +49,6 @@ type target_ref_error =
 type resolver_catalog_source =
   | Embedded_catalog
   | Full_replacement_catalog
-  | Overlay_catalog
 
 type resolver_collision =
   | Duplicate_provider_identity

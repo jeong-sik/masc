@@ -1621,20 +1621,19 @@ if [ "$DRY_RUN" -eq 0 ] && [ "$SEED_CONFIG" -eq 1 ]; then
 fi
 
 # --- 4. seed minimum config ---------------------------------------------------
-# Record existing workspaces even when an overlay is missing or seeding is disabled.
+# Record existing workspaces even when config is missing or seeding is disabled.
 [ ! -d "$BASE_PATH/.masc/config" ] || CONFIG_PREEXISTING=1
 if [ "$SEED_CONFIG" -eq 1 ]; then
   CONFIG_DIR="$BASE_PATH/.masc/config"
   RUNTIME_FILE="$CONFIG_DIR/runtime.toml"
-  MODEL_CATALOG_OVERLAY_FILE="$CONFIG_DIR/agent-core-models-overlay.toml"
 
   # Package publication waits until the binary/dashboard transaction commits.
   # Config seeding is needed by the wizard before that boundary.
-  if [ -e "$RUNTIME_FILE" ] && [ -e "$MODEL_CATALOG_OVERLAY_FILE" ] && [ "$RESET_CONFIG" -eq 0 ]; then
+  if [ -e "$RUNTIME_FILE" ] && [ "$RESET_CONFIG" -eq 0 ]; then
     CONFIG_PREEXISTING=1
     log "preserving existing config at $CONFIG_DIR; builtin Skills refresh after bundle commit"
   elif [ "$DRY_RUN" -eq 1 ]; then
-    log "[dry-run] would seed configs and model catalog overlay to $CONFIG_DIR from release"
+    log "[dry-run] would seed configs to $CONFIG_DIR from release"
   else
     # The binary carries the whole config/ tree it was built from, so the seed
     # is `masc init` rather than a fetch of the same files from the repo. Three
@@ -1642,7 +1641,7 @@ if [ "$SEED_CONFIG" -eq 1 ]; then
     # from the binary's contract the way a raw fetch at a different tag could,
     # and no checksum is needed for files that arrived inside a verified binary.
     # `init` writes what is missing and leaves the rest; --force overwrites.
-    log "seeding configs and model catalog overlay to $CONFIG_DIR from the binary"
+    log "seeding configs to $CONFIG_DIR from the binary"
     mkdir -p "$CONFIG_DIR"
     # --record-default only when a person runs the installer on a terminal:
     # that workspace is theirs, so later commands should find it without being

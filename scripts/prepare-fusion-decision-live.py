@@ -8,7 +8,6 @@ import hashlib
 import json
 from pathlib import Path
 import secrets
-import shutil
 import socket
 import subprocess
 import tomllib
@@ -74,8 +73,6 @@ def main():
     selected['models']['kimi-for-coding']['thinking-support'] = True
     (config / 'runtime.toml').write_text(toml_document(selected))
     (config / 'runtime.toml').chmod(0o600)
-    shutil.copyfile(args.source_config / 'agent-core-models-overlay.toml', config / 'agent-core-models-overlay.toml')
-    (config / 'agent-core-models-overlay.toml').chmod(0o600)
     token = args.base / 'operator-token.private'
     token.write_text(secrets.token_hex(32))
     token.chmod(0o600)

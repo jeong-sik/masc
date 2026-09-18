@@ -140,11 +140,8 @@ else
   echo "install-smoke: no guest shim in this release dir; installer skipped it as asked"
 fi
 
-# What the installer's own seed had to produce. runtime.toml AND the
-# model-catalog overlay both matter: without the overlay the exact-output lanes
-# (e.g. hitl_auto_judge) reference glm slots the ambient catalog does not admit,
-# and the server exits FATAL before /health.
-for f in runtime.toml agent-core-models-overlay.toml; do
+# What the installer's own seed had to produce.
+for f in runtime.toml; do
   [ -f "$base/.masc/config/$f" ] || {
     echo "install-smoke: installer seeded no $f" >&2; exit 1; }
 done

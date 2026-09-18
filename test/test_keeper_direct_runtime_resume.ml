@@ -185,7 +185,10 @@ is-default = true
         ?agent_core_checkpoint:(Option.map Continuation.checkpoint admission)
         ~continue_from_checkpoint:(Option.is_some admission)
         ?deferred_runtime_lane:(Option.map Continuation.lane admission)
-        ~on_runtime_retry_deferred:(fun value -> deferred := Some value) () in
+        ~runtime_retry_deferral:
+          { Keeper_turn_driver.continuation =
+              Keeper_turn_driver.Resume_operation_checkpoint { operation_id }
+          ; on_deferred = (fun value -> deferred := Some value) } () in
       match result, !deferred with
       | Error _, Some lane ->
         check bool "only the original attempt may defer" false resume;
@@ -314,6 +317,219 @@ is-default = true
       (List.filter (function `String text -> String.starts_with ~prefix:"Resume the original direct operation " text
         | _ -> false) contents |> List.length)))
 
+
+(* RFC last-path-resumes-after-progress §7, on a lane with one path. The model
+   runs a tool and the next call gets a 502, so the operation is deferred to
+   that same path. After an owner restart the same operation resumes on it from
+   the saved tool result. When the resumed call fails before any tool runs,
+   nothing new was saved to resume from, and the operation fails. *)
+let test_http_same_path_resume_after_tool_result ~resume_fails () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  Masc_test_deps.init_eio_clock ~sw env;
+  Fs_compat.set_fs env#fs;
+  ignore (Server_startup_state.mark_state_ready ());
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  let catalog_snapshot = Llm_provider.Model_catalog.global () in
+  let base_path = Filename.temp_file "same-path-resume-" "" in
+  Unix.unlink base_path; Unix.mkdir base_path 0o700;
+  Eio.Switch.on_release sw (fun () ->
+    Runtime.For_testing.restore runtime_snapshot;
+    (match catalog_snapshot with None -> Llm_provider.Model_catalog.clear_global ()
+     | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
+    remove base_path);
+  let request_bodies = ref [] and effects = ref 0 in
+  let bad_gateway () =
+    Cohttp_eio.Server.respond_string ~status:`Bad_gateway
+      ~body:{|{"error":{"message":"fixture upstream dropped the call","type":"server_error"}}|} () in
+  let callback _connection _request body =
+    let body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+    request_bodies := !request_bodies @ [body];
+    match List.length !request_bodies with
+    | 1 ->
+      Cohttp_eio.Server.respond_string ~status:`OK
+        ~body:{|{"id":"tool-once","model":"resume-fixture","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"effect-once","type":"function","function":{"name":"record_effect","arguments":"{}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}|} ()
+    | 2 -> bad_gateway ()
+    | _ when resume_fails -> bad_gateway ()
+    | _ ->
+      Cohttp_eio.Server.respond_string ~status:`OK
+        ~body:{|{"id":"completed","model":"resume-fixture","choices":[{"index":0,"message":{"role":"assistant","content":"Original task completed on the same path."},"finish_reason":"stop"}],"usage":{"prompt_tokens":7,"completion_tokens":3,"total_tokens":10}}|} ()
+  in
+  let socket = Eio.Net.listen env#net ~sw ~backlog:8 ~reuse_addr:true
+    (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0)) in
+  let port = match Eio.Net.listening_addr socket with
+    | `Tcp (_, port) -> port | `Unix _ -> fail "expected TCP socket" in
+  let server = Cohttp_eio.Server.make ~callback () in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Cohttp_eio.Server.run socket server ~on_error:raise);
+  let catalog_path = Filename.concat base_path "models.toml" in
+  write catalog_path
+    "[[models]]\nid_prefix = \"resume-fixture\"\nprovider_name = \"primary\"\nbase = \"openai_chat\"\nmax_context_tokens = 200000\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n";
+  Llm_provider.Model_catalog.load_file catalog_path |> require "catalog" |> Llm_provider.Model_catalog.set_global;
+  let runtime_path = Filename.concat base_path "runtime.toml" in
+  write runtime_path (Printf.sprintf {|[runtime]
+default = "primary.sample"
+[runtime.lanes.direct]
+candidates = ["primary.sample"]
+[providers.primary]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:%d/primary"
+[models.sample]
+api-name = "resume-fixture"
+max-context = 200000
+tools-support = true
+streaming = false
+[primary.sample]
+is-default = true
+|} port);
+  Runtime.init_default ~config_path:runtime_path |> require "runtime";
+  let config = Workspace.default_config base_path in
+  ignore (Workspace.init config ~agent_name:(Some "continuation-test"));
+  let keeper_name = "same-path-resume-proof" and session_id = "same-path-resume-session" in
+  let meta = Masc_test_deps.meta_of_json_fixture (`Assoc [
+    "name", `String keeper_name; "trace_id", `String session_id;
+    "activation_mode", `String "manual"]) |> require "meta" in
+  Keeper_meta_store.replace_snapshot config meta |> require "persist meta";
+  let session_dir = Filename.concat base_path session_id in
+  Unix.mkdir session_dir 0o700;
+  let operation_id = Keeper_chat_operation.Operation_id.of_string "kmsg-same-path-resume"
+    |> require "operation ID" in
+  let source = `Assoc ["kind", `String "keeper"; "asked_by", `String "original-asker"]
+    |> Keeper_chat_operation.canonical_json |> require "canonical source" in
+  let input = Keeper_chat_operation_payload.input_to_json ~message:"Finish original task"
+    ~user_blocks:[] ~turn_instructions:None ~surface_context:None ~attachments:[]
+    |> Keeper_chat_operation.canonical_json |> require "canonical input" in
+  let tool = Agent_core.Tool.create ~name:"record_effect" ~description:"Record one effect"
+      ~parameters:[] (fun _ -> incr effects; Ok {content="effect receipt: already completed"; content_blocks = None; _meta = None}) in
+  let deferred_lanes = ref [] in
+  let expected_failure = ref None in
+  let run_phase ~resume =
+    Eio.Switch.run @@ fun owner_sw ->
+    let settled, resolve_settled = Eio.Promise.create () in
+    let ready = ref true in
+    let execute ~sw:turn_sw ~keeper_name:_ ~claim =
+      let operation : Keeper_chat_operation.t = match claim () |> require "claim" with
+        | Some operation -> operation | None -> fail "operation lost at restart" in
+      check bool "same original operation" true
+        (Keeper_chat_operation.Operation_id.equal operation_id operation.operation_id);
+      let operation_state () = Registry.exact_operation ~base_path ~keeper_name operation_id
+        |> Result.map_error Registry.command_error_to_string
+        |> fun result -> Result.bind result (function Some operation -> Ok operation.Keeper_chat_operation.state
+          | None -> Error "fixture operation disappeared") in
+      let admission = Continuation.load ~base_path ~keeper_name ~operation_id ~session_dir ~session_id
+        |> require "load continuation" in
+      check bool "restart restores the pending continuation" resume (Option.is_some admission);
+      let context = Agent_core.Context.create_sync () in
+      let scope = Keeper_execution_scope_id.direct_operation operation_id in
+      let frame = Keeper_repetition_snapshot.admit Keeper_repetition_snapshot.empty
+          (Keeper_repetition_snapshot.Fresh scope) |> require "scope" in
+      Keeper_repetition_scope.save context frame;
+      (* As production does (Keeper_agent_run): the write's own answer decides
+         what is marked. A [Stale_noop] answers [Ok ()] and leaves the
+         canonical checkpoint untouched, so it marks nothing. *)
+      let checkpoint_progress =
+        Atomic.make Keeper_turn_driver_try_provider.No_checkpoint_stage in
+      let checkpoint_sink (snapshot : Agent_core.Agent.checkpoint_snapshot) =
+        let checkpoint = {snapshot.checkpoint with session_id} in
+        match Checkpoint.save_agent_core_classified
+                ~history_retained:(history_retained ()) ~session_dir checkpoint with
+        | Ok (Checkpoint.Saved _) ->
+          Keeper_turn_driver_try_provider.observe_checkpoint_saved
+            checkpoint_progress snapshot.stage;
+          Ok ()
+        | Ok (Checkpoint.Stale_noop _) -> Ok ()
+        | Error detail -> Error detail in
+      let deferred = ref None in
+      Option.iter (fun admission -> Continuation.consume ~base_path ~keeper_name ~operation_id admission
+        |> require "consume same checkpoint") admission;
+      let result = Keeper_turn_driver.run_named
+        ~checkpoint_progress
+        ~runtime_id:(match admission with None -> "direct" | Some value -> (Continuation.lane value).next_runtime_id)
+        ~keeper_name ~base_path ~session_id ~goal:"Finish original task"
+        ~system_prompt:"Use the effect receipt to finish the original task."
+        ~agent_core_tools:[tool] ~context ~checkpoint_sink ~sw:turn_sw ~net:env#net
+        ?agent_core_checkpoint:(Option.map Continuation.checkpoint admission)
+        ~continue_from_checkpoint:(Option.is_some admission)
+        ?deferred_runtime_lane:(Option.map Continuation.lane admission)
+        ~runtime_retry_deferral:
+          { Keeper_turn_driver.continuation =
+              Keeper_turn_driver.Resume_operation_checkpoint { operation_id }
+          ; on_deferred = (fun value -> deferred := Some value) } () in
+      let outcome_execution outcome delivery =
+        Server_routes_http_keeper_stream.For_testing.operation_execution_of_outcome
+          ~operation_state ~pending_continuation:(fun () -> Keeper_direct_gate_continuation.pending
+            ~base_path ~keeper_name ~operation_id)
+          ~outcome:(Some outcome) ~delivery in
+      match result, !deferred with
+      | Error _, Some lane ->
+        check bool "only the original attempt defers" false resume;
+        deferred_lanes := lane :: !deferred_lanes;
+        Continuation.defer ~base_path ~keeper_name ~operation_id ~session_dir ~session_id lane
+          |> require "durable same-path deferral";
+        ready := false;
+        outcome_execution (Server_routes_http_keeper_stream.Delivered {outcome_ref="same-path-retry"}) (Ok ())
+      | Ok _, None ->
+        check bool "the same path completes after the restart" true (resume && not resume_fails);
+        Owner.Operation_succeeded {outcome_ref="same-path-completion"}
+      | Error error, None when resume && resume_fails ->
+        ready := false;
+        let detail = Agent_core.Error.to_string error in
+        let execution = outcome_execution
+          (Server_routes_http_keeper_stream.Failed {kind=Turn_failed; detail}) (Error detail) in
+        expected_failure := Some execution;
+        execution
+      | Error error, None -> fail (Agent_core.Error.to_string error)
+      | Ok _, Some _ -> fail "successful inference unexpectedly retained a deferred failure"
+    in
+    let runner : Owner.operation_runner = {ready=(fun ~keeper_name:_ -> !ready); execute;
+      on_execution_settled=(fun ~keeper_name:_ ~claimed_operation_id:_ ~execution ->
+        match execution with
+        | Owner.Operation_failed {detail; _} when Some execution <> !expected_failure ->
+          Eio.Promise.resolve resolve_settled (Error detail)
+        | Owner.Operation_failed _ | Owner.Operation_deferred | Owner.Operation_succeeded _ ->
+          Eio.Promise.resolve resolve_settled (Ok ()))} in
+    Registry.install_from_store ~sw:owner_sw ~operation_runner:(Some runner)
+      ~on_turn_slot_released:None config |> require "install owner" |> ignore;
+    if not resume then Registry.submit_operation ~base_path ~keeper_name ~operation_id ~source ~input
+      |> require "submit original operation" |> ignore;
+    (match Eio.Promise.await settled with Ok () -> () | Error detail -> fail detail)
+  in
+  run_phase ~resume:false;
+  check int "the tool ran before the 502" 1 !effects;
+  check int "the tool call and the failed call" 2 (List.length !request_bodies);
+  (match !deferred_lanes with
+   | [ lane ] ->
+     check string "the failed path" "primary.sample" lane.Keeper_turn_driver.failed_runtime_id;
+     check (list string) "the deferred suffix is that same path" ["primary.sample"]
+       (Keeper_turn_driver.deferred_runtime_ids lane)
+   | lanes -> failf "expected one deferral, got %d" (List.length lanes));
+  let store_path =
+    Store.path_for_keeper
+      ~keepers_runtime_dir:(Workspace.keepers_runtime_dir config)
+      ~keeper_name
+  in
+  let store = Store.open_or_create ~path:store_path |> require "open store after defer" in
+  check bool "a 502 records no rest, so the retry is claimable at once" true
+    (Store.has_claimable_queued store ~now:(Time_compat.now ()) |> require "has_claimable_queued");
+  Store.close store |> require "close store";
+  run_phase ~resume:true;
+  check int "the saved tool is not run again" 1 !effects;
+  check int "one resumed call on the same path" 3 (List.length !request_bodies);
+  let resumed = List.nth !request_bodies 2 |> Yojson.Safe.from_string in
+  let contents = Yojson.Safe.Util.(resumed |> member "messages" |> to_list)
+    |> List.map (Yojson.Safe.Util.member "content") in
+  check bool "the resumed call carries the saved tool result" true
+    (List.mem (`String "effect receipt: already completed") contents);
+  let store = Store.open_or_create ~path:store_path |> require "read final state" in
+  let original = Store.get store operation_id |> require "original state" |> Option.get in
+  Store.close store |> require "close final store";
+  if resume_fails then
+    check bool "a resumed call that failed before any tool ends the operation" true
+      (match original.state with Keeper_chat_operation.Failed _ -> true | _ -> false)
+  else
+    check bool "the operation completed on the same path" true
+      (match original.state with Keeper_chat_operation.Succeeded _ -> true | _ -> false)
+
 let test_checkpoint_requires_original_active_scope () =
   let id value = Keeper_chat_operation.Operation_id.of_string value |> require "scope operation" in
   let original = id "original-operation" and other = id "other-operation" in
@@ -390,6 +606,11 @@ let () = run "direct runtime continuation" ["http", [test_case
     (test_http_effect_checkpoint_owner_restart_alternate ~interleave:true ~lose_retained:false ~projection_failure:true);
   test_case "missing original checkpoint terminalizes and releases queued peer after restart" `Quick
     (test_http_effect_checkpoint_owner_restart_alternate ~interleave:true ~lose_retained:true ~projection_failure:false)];
+  "same path", [test_case
+    "a 502 after a tool result resumes the same operation on its only path" `Quick
+    (test_http_same_path_resume_after_tool_result ~resume_fails:false);
+  test_case "a resumed call that fails before any tool ends the operation" `Quick
+    (test_http_same_path_resume_after_tool_result ~resume_fails:true)];
   "authority", [test_case "active original operation owns checkpoint" `Quick
     test_checkpoint_requires_original_active_scope;
     test_case "server persistence keeps final answer and both tool attempts" `Quick

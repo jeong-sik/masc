@@ -1,7 +1,8 @@
 (* The forecast runs the turn's own composition forward. These cases pin
    the arithmetic on a synthetic history so the numbers are checkable by
-   hand: a seeded front carries everything from it, a front the history
-   shrank under is dropped, and without a front everything goes. The
+   hand: a seeded front carries everything from it, a front whose atom is
+   gone or opens with another message is dropped, and without a front
+   everything goes. The
    assembly cases pin the order the request carries its parts. *)
 
 open Masc
@@ -24,8 +25,11 @@ let atom_bytes messages =
   let measure = Keeper_context_core.message_measurer () in
   List.fold_left (fun sum m -> sum + measure m) 0 messages
 
-let seed ~atom_count first_atom : Keeper_carried_front.seed =
-  { first_atom; atom_count; source = Keeper_carried_front.Ledger }
+(* A front measured on [messages]: its index and the message that opens it. *)
+let seed ~messages first_atom : Keeper_carried_front.seed =
+  match Runtime_model_input_tail_window.atom_opening_digest messages first_atom with
+  | Some front_digest -> { first_atom; front_digest; source = Keeper_carried_front.Ledger }
+  | None -> Alcotest.fail "the seed's own history has the atom"
 
 let carry ?front ?counted_tokens messages =
   Keeper_next_request_forecast.carry
@@ -42,7 +46,7 @@ let carried (c : Keeper_next_request_forecast.carried) = c
    the last fourteen. *)
 let test_a_seeded_front_carries_everything_from_it () =
   let messages = history ~exchanges:10 ~text_bytes:100 in
-  let c = carried (carry ~front:(seed ~atom_count:10 6) ~counted_tokens:9_000 messages) in
+  let c = carried (carry ~front:(seed ~messages 6) ~counted_tokens:9_000 messages) in
   Alcotest.(check int) "front" 6 c.first_atom;
   Alcotest.(check int) "fourteen atoms" 14 c.kept_atoms;
   Alcotest.(check bool) "its bytes are a proper part of the history" true
@@ -57,7 +61,7 @@ let test_a_seeded_front_carries_everything_from_it () =
    the range prepends the constant preamble and counts it in the bytes. *)
 let test_a_range_opening_on_an_assistant_measures_its_preamble () =
   let messages = history ~exchanges:10 ~text_bytes:100 in
-  let c = carried (carry ~front:(seed ~atom_count:20 7) messages) in
+  let c = carried (carry ~front:(seed ~messages 7) messages) in
   Alcotest.(check int) "thirteen atoms" 13 c.kept_atoms;
   match c.preamble_bytes with
   | None -> Alcotest.fail "a preamble rides when the oldest carried atom is an assistant's"
@@ -67,16 +71,30 @@ let test_a_range_opening_on_an_assistant_measures_its_preamble () =
       (preamble + atom_bytes (List.filteri (fun index _ -> index >= 7) messages))
       c.transmitted_bytes
 
-(* The front was measured against 3,395 atoms; a purge left ten. The position
-   names nothing here, so the request starts over without a front. *)
+(* The front was measured at atom 3,100 of a longer history; a purge left ten.
+   The position names nothing here, so the request starts over without a
+   front. *)
 let test_a_front_the_history_shrank_under_is_dropped () =
   let messages = history ~exchanges:5 ~text_bytes:100 in
-  let c = carried (carry ~front:(seed ~atom_count:3_395 3_100) ~counted_tokens:91_000 messages) in
+  let long = history ~exchanges:1_600 ~text_bytes:1 in
+  let c = carried (carry ~front:(seed ~messages:long 3_100) ~counted_tokens:91_000 messages) in
   Alcotest.(check int) "from the first atom" 0 c.first_atom;
   Alcotest.(check int) "all ten" 10 c.kept_atoms;
   Alcotest.(check bool) "the origin says no front" true
     (c.origin = Keeper_carried_front.Whole_history);
   Alcotest.(check (option int)) "and no count rides along" None c.counted_tokens
+
+(* The history still has atom 6, but it opens with another message: atoms
+   before the front were removed. The count is irrelevant; the position does
+   not hold. *)
+let test_a_front_that_opens_with_another_message_is_dropped () =
+  let messages = history ~exchanges:10 ~text_bytes:100 in
+  let measured_on = history ~exchanges:10 ~text_bytes:50 in
+  let c = carried (carry ~front:(seed ~messages:measured_on 6) ~counted_tokens:9_000 messages) in
+  Alcotest.(check int) "from the first atom" 0 c.first_atom;
+  Alcotest.(check int) "all twenty" 20 c.kept_atoms;
+  Alcotest.(check bool) "the origin says no front" true
+    (c.origin = Keeper_carried_front.Whole_history)
 
 let test_without_a_front_everything_goes () =
   let messages = history ~exchanges:5 ~text_bytes:100 in
@@ -519,6 +537,8 @@ let () =
             test_a_range_opening_on_an_assistant_measures_its_preamble
         ; Alcotest.test_case "a front the history shrank under is dropped" `Quick
             test_a_front_the_history_shrank_under_is_dropped
+        ; Alcotest.test_case "a front that opens with another message is dropped" `Quick
+            test_a_front_that_opens_with_another_message_is_dropped
         ; Alcotest.test_case "without a front everything goes" `Quick
             test_without_a_front_everything_goes
         ] )

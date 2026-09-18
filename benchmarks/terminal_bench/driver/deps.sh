@@ -48,8 +48,6 @@ bench_install_deps() {
       dnf install -y -q "$@" >/dev/null
     elif command -v microdnf >/dev/null 2>&1; then
       microdnf install -y "$@" >/dev/null
-    elif command -v apk >/dev/null 2>&1; then
-      apk add --no-cache "$@" >/dev/null
     else
       return 1
     fi
@@ -58,7 +56,6 @@ bench_install_deps() {
   pm_refresh() {
     if command -v apt-get >/dev/null 2>&1; then apt-get update -qq
     elif command -v dnf >/dev/null 2>&1; then dnf makecache -q >/dev/null 2>&1 || true
-    elif command -v apk >/dev/null 2>&1; then apk update >/dev/null 2>&1 || true
     fi
   }
 
@@ -73,10 +70,8 @@ bench_install_deps() {
     pm_install openssh-server jq curl ca-certificates git ripgrep || true
   elif command -v dnf >/dev/null 2>&1 || command -v microdnf >/dev/null 2>&1; then
     pm_install openssh-server openssh-clients jq curl ca-certificates git ripgrep || true
-  elif command -v apk >/dev/null 2>&1; then
-    pm_install openssh jq curl ca-certificates git ripgrep bash || true
   else
-    echo "no supported package manager (apt/dnf/apk) on $(distro_id)" >&2
+    echo "no supported package manager (apt/dnf) on $(distro_id)" >&2
     exit 1
   fi
 
@@ -107,8 +102,6 @@ bench_install_deps() {
       pm_install libssl3t64 libgmp10 libzstd1 || pm_install libssl3 libgmp10 libzstd1 || true
     elif command -v dnf >/dev/null 2>&1 || command -v microdnf >/dev/null 2>&1; then
       pm_install openssl-libs gmp libzstd || true
-    elif command -v apk >/dev/null 2>&1; then
-      pm_install libssl3 libcrypto3 gmp zstd-libs gcompat || true
     fi
   fi
 

@@ -29,6 +29,14 @@ type declared_lane_failure =
 (* Only the context-window axis classifies as [Provider_context_overflow]:
    the blocker below publishes the [Agent_core_context_window_exceeded] class,
    which would be wrong for a declared-byte refusal. *)
+(* How this lane continues after a failed turn. It restarts its cycle: the next
+   cycle is a new turn, and a hint that named the path this one failed on would
+   become [turn_state.deferred_runtime_lane] below, replacing the next cycle's
+   candidates with that single path and taking its failover with it
+   (RFC last-path-resumes-after-progress §3.5). Read by a test, because the
+   only caller of [run] is production.  *)
+let lane_retry_continuation = Keeper_turn_driver.Restart_cycle
+
 let declared_lane_failure_of_error err =
   match capacity_refusal_of_error err with
   | Some (Provider_context_window { limit_tokens }) ->
@@ -150,7 +158,9 @@ let run (ctx : ctx)
       [test_keeper_turn_driver_failover] proves both directions: transport
       failure before any stage may fall back, while every typed stage blocks a
       same-run fallback. *)
-   let checkpoint_stage_observed = Atomic.make false in
+   let checkpoint_progress =
+     Atomic.make Keeper_turn_driver_try_provider.No_checkpoint_stage
+   in
    (* The tool rows of a continuation turn, collected from the same stream
       the chat lane persists from and appended once the turn settles. Only a
       turn that continues an approval replay collects: it is the one turn
@@ -265,8 +275,10 @@ let run (ctx : ctx)
                    (List.rev turn_state.runtime_rotation_attempts)
                  ?deferred_runtime_lane:
                    (if is_retry then None else deferred_runtime_lane)
-                 ~on_runtime_retry_deferred:
-                   (fun hint -> deferred_runtime_lane_ref := Some hint)
+                 ~runtime_retry_deferral:
+                   { Keeper_turn_driver.continuation = lane_retry_continuation
+                   ; on_deferred = (fun hint -> deferred_runtime_lane_ref := Some hint)
+                   }
                  ~on_runtime_attempt_failed:
                    (fun ~runtime_id ~dispatch ~error ->
                       runtime_attempt_errors_ref
@@ -290,7 +302,7 @@ let run (ctx : ctx)
                  ?trace_link:(trace_link ())
                  ~on_checkpoint_stage:
                    (Keeper_turn_driver_try_provider.observe_checkpoint_stage
-                      checkpoint_stage_observed)
+                      checkpoint_progress)
                    (* This module is the autonomous lane's turn runner
                       ([Keeper_unified_turn.run_keeper_cycle] → here, only ever
                       reached via the Keeper Owner child); the chat
@@ -389,7 +401,7 @@ let run (ctx : ctx)
       let checkpoint_observed =
         not
           (Keeper_turn_driver_try_provider.same_run_retry_allowed
-             checkpoint_stage_observed)
+             checkpoint_progress)
       in
       let same_run_retry_has_input_authority = not checkpoint_observed in
       if not same_run_retry_has_input_authority

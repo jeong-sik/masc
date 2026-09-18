@@ -411,7 +411,7 @@ let test_memory_footer_offers_the_fact_browser () =
 
 let test_memory_facts_footer_names_filter_and_way_back () =
   check str "the browser names movement, the category cycle, and Esc"
-    "j/k:move  Home/End:top/bottom  c / C:category  s:sort  a / A:all fleet  Esc:close / clear  /:filter  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  Home/End:top/bottom  Enter:detail  c / C:category  s:sort  a / A:all fleet  Esc:close / clear  /:filter  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     Masc_tui_keys.footer_hints_memory_facts
 
 let sample_memory_fact ~category ~claim : Tui_decode.memory_fact =
@@ -1599,6 +1599,44 @@ let test_help_documents_what_was_missing () =
   Alcotest.(check bool) "Logs documents only what is bound" false
     (List.mem "g / G" logs)
 
+(* The fact browser's Enter opens a reading whose keys the surface list cannot
+   carry: one fact scrolls under the cursor, so it owns page and edge keys the
+   browser row has none of, and the browser row's Enter means something else
+   under that name. A reader who has not pressed them learns them from [?], so
+   the sheet files both rows under Memory with the screen named -- and the
+   footer the reading draws projects that same binding table, so the two cannot
+   teach different keys. *)
+let test_the_sheet_carries_the_fact_detail_keys () =
+  let memory = section "Memory" in
+  let detail =
+    List.filter
+      (fun (_, help) -> String.starts_with ~prefix:"in the fact detail: " help)
+      memory
+  in
+  Alcotest.(check int) "the sheet files the reading's four keys" 4
+    (List.length detail);
+  List.iter
+    (fun pair ->
+      Alcotest.(check bool)
+        (Printf.sprintf "the sheet files %S" (fst pair))
+        true
+        (List.mem pair detail))
+    [ ("j/k", "in the fact detail: scroll")
+    ; ("PgUp/PgDn", "in the fact detail: page")
+    ; ("g / G", "in the fact detail: jump to the first or last line of the fact")
+    ; ("Esc", "in the fact detail: return to the fact list")
+    ];
+  Alcotest.(check bool) "the browser row is filed under Memory too" true
+    (List.exists
+       (fun (_, help) ->
+         String.starts_with
+           ~prefix:"in the facts browser: read the whole fact"
+           help)
+       memory);
+  Alcotest.(check string) "the footer projects the same binding table"
+    "j/k:scroll  PgUp/PgDn:page  g / G:top/bottom  Esc:close"
+    Masc_tui_keys.memory_fact_detail_hints
+
 let test_keepers_jump_uses_one_binding_for_dispatch_and_help () =
   let global_twos =
     List.filter
@@ -2619,6 +2657,8 @@ let () =
             test_fleet_total_cost
         ; Alcotest.test_case "help documents what was missing" `Quick
             test_help_documents_what_was_missing
+        ; Alcotest.test_case "the sheet files the fact detail keys" `Quick
+            test_the_sheet_carries_the_fact_detail_keys
         ; Alcotest.test_case "Keeper detail reserves u for channel unbind"
             `Quick test_keeper_detail_reserves_lowercase_u_for_channel_unbind
         ; Alcotest.test_case "Keepers jump shares dispatch and help" `Quick

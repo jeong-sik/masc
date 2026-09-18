@@ -213,7 +213,13 @@ let ownership_of_provider_failure ~binding = function
      or the connection. *)
   | Http.Repeating_generation _ -> Runtime_binding
   | Http.Cli_startup_failed { reason } -> ownership_of_cli_startup ~binding reason
-  | Http.Provider_reported_error _ | Http.Unknown_provider_failure _ -> Unclassified
+  (* An interruption names no owner: the provider stopped generating and said
+     nothing about which of its parts failed. Whether it belongs to the
+     endpoint, the region or the provider is unmeasured, so it stays with the
+     other unowned provider evidence. *)
+  | Http.Provider_interrupted
+  | Http.Provider_reported_error _
+  | Http.Unknown_provider_failure _ -> Unclassified
 ;;
 
 let attribution_of_http_error ~binding = function
@@ -363,6 +369,7 @@ let provider_failure_to_yojson = function
       [ "kind", `String "provider_reported_error"
       ; "error_type_known", `Bool (Option.is_some error_type)
       ]
+  | Http.Provider_interrupted -> `Assoc [ "kind", `String "provider_interrupted" ]
   | Http.Response_body_too_large { limit_bytes } ->
     `Assoc [ "kind", `String "response_body_too_large"; "limit_bytes", `Int limit_bytes ]
   | Http.Empty_completion { stop_reason } ->

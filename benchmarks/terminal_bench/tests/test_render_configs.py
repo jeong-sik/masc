@@ -246,9 +246,19 @@ def test_no_lane_writes_a_ladder_of_its_own():
     # The catalog is where that fact lives; a lane whose model has no row is
     # refused by name (Undeclared_reasoning_effort_capability), which is the
     # outcome to keep.
-    for runtime_id in ("anthropic.claude-fable-5", "openai.gpt-6-astra"):
+    # An absence on its own is the weak kind of assertion this file is being
+    # cleaned of: an empty render, or one that dropped the row entirely, would
+    # satisfy it. So the row is pinned present first, and the ladder absent
+    # from that row.
+    for runtime_id, model_alias in (
+            ("anthropic.claude-fable-5", "claude-fable-5"),
+            ("openai.gpt-6-astra", "gpt-6-astra")):
+        provider = runtime_id.split(".", 1)[0]
         out = render_arm("b", runtime_id=runtime_id, effort="high")
         overlay = (out / "agent-core-models-overlay.toml").read_text()
+        assert f'provider_name = "{provider}"' in overlay, runtime_id
+        assert f'id_prefix = "{model_alias}"' in overlay, runtime_id
+        assert "supports_reasoning = true" in overlay, runtime_id
         assert "accepted_reasoning_efforts" not in overlay, runtime_id
 
 

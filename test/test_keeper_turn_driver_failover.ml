@@ -2747,6 +2747,36 @@ let test_payment_required_still_exhausts_the_quota_scope () =
            ~now:(Unix.gettimeofday ()))))
 ;;
 
+(* A hint that names no time -- zero, negative, NaN -- must not be planted as
+   a reset: that window is already over, and it replaces the observation the
+   scope was carrying, leaving an exhausted account looking available. *)
+let test_a_quota_hint_that_names_no_time_is_recorded_as_observed () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    List.iter
+      (fun retry_after ->
+         reset_quota_lane_rests ();
+         let id = "other.test_model" in
+         let (_ : (unit, Agent_core.Error.t) result) =
+           walk_once
+             (fun _ ->
+                Error
+                  (Agent_core.Error.Provider
+                     (Llm_provider.Error.HardQuota
+                        { provider = "other"; retry_after; detail = "out of credit" })))
+             [ id ]
+         in
+         Alcotest.(check bool)
+           (match retry_after with
+            | None -> "no hint"
+            | Some hint -> Printf.sprintf "a hint of %.1f" hint)
+           true
+           (Runtime_quota_window.is_exhausted
+              ~scope:(Option.get (Runtime.quota_scope_of_runtime_id id))
+              ~now:(Unix.gettimeofday () +. 1.0)))
+      [ None; Some 0.0; Some (-30.0); Some Float.nan ];
+    reset_quota_lane_rests ())
+;;
+
 let test_the_production_answer_test_reads_provider_turns () =
   let yielded = Runtime_agent.yielded_pre_first_token ~session_id:"session" in
   Alcotest.(check bool) "a pre-first-token yield did not hear the candidate" false
@@ -4083,6 +4113,14 @@ let bad_gateway =
     (Agent_core.Retry.ServerError { status = 502; message = "bad gateway" })
 ;;
 
+let same_path_manifest_rows events =
+  List.filter_map
+    (function
+      | _, Some "deferred_same_path", Some decision -> Some (string_member "runtime_id" decision)
+      | _, _, _ -> None)
+    (List.rev !events)
+;;
+
 (* What a keeper's checkpoint write did, as its sink sees it. *)
 type write_outcome =
   | Wrote
@@ -4094,6 +4132,7 @@ type write_outcome =
    error; the walk reads progress from the same value the driver does. *)
 let same_path_walk ~continuation candidates attempt =
   let deferred = ref [] in
+  let events = ref [] in
   let progress = Atomic.make Try_provider.No_checkpoint_stage in
   (* As the keeper's own sink does: the stage goes through the wrapper, and the
      owner marks what its write actually reached. [Wrote_nothing] is the
@@ -4122,12 +4161,12 @@ let same_path_walk ~continuation candidates attempt =
       ~tool_results_saved:(fun () -> Driver.For_testing.tool_results_saved progress)
       ~runtime_id:"lane.chat"
       ~runtime_id_of:Fun.id
-      ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+      ~emit_runtime_manifest:(emit_manifest_collector events)
       ~run_attempt:(fun ~idx:_ ~runtime_id:_ candidate ->
         attempt_without_effect (Error (attempt ~save candidate)) None)
       candidates
   in
-  result, List.rev !deferred
+  result, List.rev !deferred, same_path_manifest_rows events
 ;;
 
 let describe_hint (hint : Driver.deferred_runtime_lane) =
@@ -4144,16 +4183,18 @@ let test_a_chat_operation_resumes_its_last_candidate_after_saved_tool_results ()
     save Agent_core.Agent.After_tool_results_appended Wrote;
     bad_gateway
   in
-  let result, hints =
+  let result, hints, rows =
     same_path_walk ~continuation:resume_chat_operation [ "only" ]
       tools_then_bad_gateway
   in
   Alcotest.(check (list string)) "a lone candidate defers to itself"
     [ "lane.chat: only -> [only]" ] (List.map describe_hint hints);
+  Alcotest.(check (list string)) "and the walk records that decision"
+    [ "only" ] rows;
   Alcotest.(check (result string string)) "the turn still fails with its own error"
     (Error (Agent_core.Error.to_string bad_gateway))
     (Result.map_error Agent_core.Error.to_string result);
-  let _result, hints =
+  let _result, hints, _rows =
     same_path_walk ~continuation:resume_chat_operation [ "first"; "last" ]
       (fun ~save candidate ->
          match candidate with
@@ -4220,9 +4261,21 @@ let test_no_same_path_hint_unless_every_condition_holds () =
   in
   List.iter
     (fun (label, continuation, candidates, attempt) ->
-       let _result, hints = same_path_walk ~continuation candidates attempt in
-       Alcotest.(check (list string)) label [] (List.map describe_hint hints))
+       let _result, hints, rows = same_path_walk ~continuation candidates attempt in
+       Alcotest.(check (list string)) label [] (List.map describe_hint hints);
+       Alcotest.(check (list string)) (label ^ ": and no decision is recorded") [] rows)
     cases
+;;
+
+(* The heartbeat lane must never ask to resume an operation: its hint replaces
+   the next cycle's candidates, so a hint naming the path this cycle failed on
+   would leave that cycle one candidate and no failover. Its only caller is
+   production, so the value it passes is read here instead. *)
+let test_the_heartbeat_lane_restarts_its_cycle () =
+  Alcotest.(check bool) "the autonomous lane restarts instead of resuming" true
+    (match Masc.Keeper_unified_turn_execution.lane_retry_continuation with
+     | Driver.Restart_cycle -> true
+     | Driver.Resume_operation_checkpoint _ -> false)
 ;;
 
 (* §3.4: the wait of a same-path suffix is the rest recorded on the path. A
@@ -4705,6 +4758,8 @@ let () =
             test_a_path_that_only_failed_walks_before_one_told_to_rest;
           Alcotest.test_case "402 still exhausts the quota scope" `Quick
             test_payment_required_still_exhausts_the_quota_scope;
+          Alcotest.test_case "a quota hint that names no time is recorded as observed" `Quick
+            test_a_quota_hint_that_names_no_time_is_recorded_as_observed;
           Alcotest.test_case "a deferred suffix waits only while its walk head rests" `Quick
             test_a_deferred_suffix_waits_only_while_its_walk_head_rests;
           Alcotest.test_case "a failure without a suffix waits until a fresh walk head serves"
@@ -4821,6 +4876,10 @@ let () =
             "no same-path hint unless every condition holds"
             `Quick
             test_no_same_path_hint_unless_every_condition_holds;
+          Alcotest.test_case
+            "the heartbeat lane restarts its cycle"
+            `Quick
+            test_the_heartbeat_lane_restarts_its_cycle;
           Alcotest.test_case
             "deferred hint refs are not shared"
             `Quick

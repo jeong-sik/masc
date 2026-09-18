@@ -787,7 +787,13 @@ let attempt_runtime_candidates
           provider hint as candidate-only ordering evidence. A shared
           credential quota requires the distinct HardQuota/402 contract. *)
        let note_quota retry_after =
-         match attempt_quota_scope, retry_after with
+         (* A hint the provider did not really state -- zero, negative, NaN --
+            named no reset. Planting it as a window would date the quota to a
+            moment already past, and that window replaces an observation the
+            scope already carried ([Runtime_quota_window]), leaving the scope
+            looking available. The rule for reading a hint is the one
+            [path_rest_sec] and [route_resumes_on_same_path] read. *)
+         match attempt_quota_scope, Keeper_runtime_failure_route.usable_retry_after retry_after with
          | None, _ -> ()
          | Some scope, Some retry_after_s ->
            Runtime_quota_window.note_exhausted
@@ -1001,6 +1007,23 @@ let attempt_runtime_candidates
                 runtime_id
                 (Keeper_runtime_failure_route.route_kind_label route)
                 (Keeper_runtime_failure_route.route_class_label route);
+              (* The row a reader counts this decision by. Only a lane that
+                 named an operation reaches it, so a lane that must not resume
+                 is the lane whose walks never carry this status. *)
+              emit_runtime_manifest
+                ~status:"deferred_same_path"
+                ~decision:
+                  (`Assoc
+                    [ "idx", `Int idx
+                    ; "runtime_id", `String attempt_runtime_id
+                    ; "operation_id", `String (Keeper_operation_id.to_string operation_id)
+                    ; ( "route"
+                      , `String
+                          (Keeper_runtime_failure_route.route_kind_label route
+                           ^ ":"
+                           ^ Keeper_runtime_failure_route.route_class_label route) )
+                    ])
+                Keeper_runtime_manifest.Runtime_routed;
               on_deferred
                 { assignment_id = runtime_id
                 ; failed_runtime_id = attempt_runtime_id

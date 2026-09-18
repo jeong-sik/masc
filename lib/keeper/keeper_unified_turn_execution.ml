@@ -29,6 +29,14 @@ type declared_lane_failure =
 (* Only the context-window axis classifies as [Provider_context_overflow]:
    the blocker below publishes the [Agent_core_context_window_exceeded] class,
    which would be wrong for a declared-byte refusal. *)
+(* How this lane continues after a failed turn. It restarts its cycle: the next
+   cycle is a new turn, and a hint that named the path this one failed on would
+   become [turn_state.deferred_runtime_lane] below, replacing the next cycle's
+   candidates with that single path and taking its failover with it
+   (RFC last-path-resumes-after-progress §3.5). Read by a test, because the
+   only caller of [run] is production.  *)
+let lane_retry_continuation = Keeper_turn_driver.Restart_cycle
+
 let declared_lane_failure_of_error err =
   match capacity_refusal_of_error err with
   | Some (Provider_context_window { limit_tokens }) ->
@@ -268,7 +276,7 @@ let run (ctx : ctx)
                  ?deferred_runtime_lane:
                    (if is_retry then None else deferred_runtime_lane)
                  ~runtime_retry_deferral:
-                   { Keeper_turn_driver.continuation = Keeper_turn_driver.Restart_cycle
+                   { Keeper_turn_driver.continuation = lane_retry_continuation
                    ; on_deferred = (fun hint -> deferred_runtime_lane_ref := Some hint)
                    }
                  ~on_runtime_attempt_failed:

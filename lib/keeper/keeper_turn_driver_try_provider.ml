@@ -1973,8 +1973,10 @@ let run_try_provider_with_carried_range_eviction
           | Keeper_carried_range.Unchanged _ -> false)
         ~halve:(fun ~first_atom ~atom_count:_ ~retry ->
           (* With a ledger, the move cuts through its one block and the
-             blocks restart from the new front; without one, the halved
-             seed is what the next composition on this attempt reads. *)
+             blocks restart from the new front, and that ledger is this
+             candidate's; without one, the halved seed is what the next
+             composition reads, on this candidate and on every later one the
+             lane walks to in this turn. *)
           halve_front
             ~digest_at:
               (Option.map (fun (sent : sent_request) -> sent.digest_at) !(state.last_request))

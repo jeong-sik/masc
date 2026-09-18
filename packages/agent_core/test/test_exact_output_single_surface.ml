@@ -247,7 +247,9 @@ let execute_once ~net ?clock execution =
   (* Fixture targets declare a connect budget by default and a declared
      budget refuses to run without a measurement clock; default to the
      context clock the same way the production callers resolve theirs. *)
-  let clock = Option.first_some clock (Eio_context.get_clock_opt ()) in
+  let clock =
+    match clock with Some _ as passed -> passed | None -> Eio_context.get_clock_opt ()
+  in
   let before_dispatch (candidate : EO.flow_attempt_receipt) =
     Atomic.set execution.receipt (Some candidate.EO.receipt);
     Ok ()

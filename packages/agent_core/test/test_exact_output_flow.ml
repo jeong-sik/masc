@@ -451,7 +451,9 @@ let execute_with_accepting_test_validator
      Every case here executes inside Eio_main.run, whose context carries the
      stdenv clock, so default to it exactly the way the production callers
      resolve their clock. *)
-  let clock = Option.first_some clock (Eio_context.get_clock_opt ()) in
+  let clock =
+    match clock with Some _ as passed -> passed | None -> Eio_context.get_clock_opt ()
+  in
   EO.execute_flow_once
     ~net
     ?clock
@@ -475,7 +477,9 @@ let execute_ok ~net flow =
 ;;
 
 let execute_with_validator ~net ?clock ~before_advance ~validate flow =
-  let clock = Option.first_some clock (Eio_context.get_clock_opt ()) in
+  let clock =
+    match clock with Some _ as passed -> passed | None -> Eio_context.get_clock_opt ()
+  in
   EO.execute_flow_once
     ~net
     ?clock

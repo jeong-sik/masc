@@ -218,6 +218,29 @@ type task_status =
 | `Withdraw` | 자격 있으면 → `Cancelled` | 자격 있으면 → `Cancelled` | 자격 있으면 → `Cancelled` | | 그대로 |
 | `Done_action` | | `Verification_submission_required` | | 그대로 | |
 
+```mermaid
+stateDiagram-v2
+    [*] --> Todo
+    Todo --> Claimed: claim, 맡은 것이 없을 때만
+    Claimed --> InProgress: start
+    Claimed --> Todo: release
+    InProgress --> Todo: release
+    Claimed --> AwaitingVerification: submit + basis
+    InProgress --> AwaitingVerification: submit + basis
+    AwaitingVerification --> AwaitingVerification: 제출자가 고쳐 냄
+    AwaitingVerification --> Done: 승인
+    AwaitingVerification --> Todo: 거절, 사유는 handoff 로
+    Todo --> Cancelled: withdraw
+    Claimed --> Cancelled: withdraw
+    InProgress --> Cancelled: withdraw
+    AwaitingVerification --> Cancelled: withdraw
+    Done --> [*]
+    Cancelled --> [*]
+```
+
+`withdraw` 는 요청자와 운영자만 한다. 판정에서 나가는 화살표는 `Done` 과 `Todo` 둘뿐이고, 어느 것도
+누군가의 `InProgress` 로 가지 않는다.
+
 지금과 달라진 칸은 셋이다. `Withdraw` 줄 전체, `Submit` 이 `basis` 를 받는 것, 그리고 예전 `Cancel` 이
 `AwaitingVerification` 으로 가던 칸이 없어진 것이다. 자격은 §3.5 에 있다.
 
@@ -415,8 +438,9 @@ OCaml 쪽은 임의의 액션·판정 열을 돌려 `OneTaskPerAgent` 를 확인
 
 **배포 전 조건(2단계).** 새 reader 는 `intent` 와 `AwaitingVerification.assignee` 를 모른다. 이 저장소는
 과거 데이터용 reader 를 만들지 않으므로, 2단계를 배포하는 시점에 `awaiting_verification` 줄이 하나도
-없어야 한다. 남아 있으면 배포 전 검사(`bin/deployment_preflight_helper.ml`)가 거절한다. turn record 에
-이미 쓰는 방식이다. 비우는 순서는 이렇다.
+없어야 한다. 2단계는 배포 전 검사(`bin/deployment_preflight_helper.ml`)에 backlog 읽기를 더해서, 새
+reader 가 못 읽는 줄이 남아 있으면 배포를 거절하게 한다. 지금 이 검사는 turn record 만 읽는다
+(`:972-1019`). 바꾸지 않고 거절만 하므로 변환 코드가 아니다. 비우는 순서는 이렇다.
 
 1. 취소 청구 65건을 비운다. 방법은 소유자 결정이다(§7 D3).
 2. Keeper 를 멈춰 새 제출이 들어오지 않게 한다.

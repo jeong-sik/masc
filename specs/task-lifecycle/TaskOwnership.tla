@@ -16,6 +16,14 @@
 \*
 \* A verdict reads a submission and answers it. It never chooses who works
 \* next. The bug models below are what the code did when this was written.
+\*
+\* How the three facts read as [task_status] (lib/types/types_core.mli):
+\*   Open, nobody holds, nothing pending   Todo
+\*   Open, own[t] is an agent              Claimed or InProgress (Start does not
+\*                                         change who holds, so it is not modelled)
+\*   Open, pending[t]                      AwaitingVerification
+\*   Accepted                              Done
+\*   Withdrawn                             Cancelled
 
 EXTENDS Integers, FiniteSets
 

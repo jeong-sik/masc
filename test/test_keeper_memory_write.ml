@@ -1252,11 +1252,12 @@ let test_corrupt_snapshot_is_a_dependency_failure () =
 let test_a_torn_tail_does_not_stop_the_next_absorb () =
   let keeper_id = "torn-tail-keeper" in
   let absorbed digit =
+    let f = fact (Printf.sprintf "an absorbed claim %c" digit) in
     { Masc.Keeper_memory_absorbed.recorded_at = Time_compat.now ()
     ; trace_id = "torn-tail"
-    ; memory_id = memory_id digit
+    ; memory_id = Masc.Keeper_memory_os_types.memory_id f
     ; into = memory_id 'c'
-    ; fact = fact "an absorbed claim"
+    ; fact = f
     }
   in
   let append ~keepers_dir record =

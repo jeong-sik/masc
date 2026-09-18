@@ -839,19 +839,15 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
                  raw
                  Llm_provider.Capability_vocab.reasoning_streaming_format_syntax)))
   in
-  (* The catalog spells these values with underscores; a TOML key here is
-     spelled with dashes, so an operator writes one or the other. Both reach
-     the same vocabulary rather than one of them failing on punctuation. *)
+  (* The written value goes to the vocabulary as it was written. The spellings
+     this axis takes belong to the module that defines them, the way
+     [reasoning-streaming-format] above hands its value over. *)
   let reasoning_replay_result =
     match typed_find "a string" path tbl "reasoning-replay" Otoml.get_string with
     | Error errors -> Error errors
     | Ok None -> Ok None
     | Ok (Some raw) ->
-      let spelled_with_underscores = String.map (function '-' -> '_' | c -> c) raw in
-      (match
-         Llm_provider.Capability_vocab.reasoning_replay_override_of_string
-           spelled_with_underscores
-       with
+      (match Llm_provider.Capability_vocab.reasoning_replay_override_of_string raw with
        | Some override -> Ok (Some override)
        | None ->
          Error

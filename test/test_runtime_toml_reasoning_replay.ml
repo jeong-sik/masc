@@ -36,27 +36,23 @@ max-context = 1000
 max-output-tokens = 2048
 |}
 
-(* A local substring check keeps this suite linking the runtime library alone,
-   as its sibling [test_thinking_control_format_unknown_error] does. *)
-let contains haystack needle =
-  let haystack_length = String.length haystack in
-  let needle_length = String.length needle in
-  let rec scan index =
-    if index + needle_length > haystack_length
-    then false
-    else if String.equal (String.sub haystack index needle_length) needle
-    then true
-    else scan (index + 1)
-  in
-  needle_length = 0 || scan 0
-;;
-
 let render_errors errors =
   errors
   |> List.map (fun (error : Runtime_toml.parse_error) ->
     Printf.sprintf "%s: %s" error.path error.message)
   |> String.concat "\n"
 ;;
+
+(* A refusal is read by the key it names. The prose is for the operator and is
+   not what this suite holds still. *)
+let refusal_paths toml =
+  match Runtime_toml.parse_string toml with
+  | Ok _ -> None
+  | Error errors ->
+    Some (List.map (fun (error : Runtime_toml.parse_error) -> error.path) errors)
+;;
+
+let replay_key_path = "models.m.capabilities.reasoning-replay"
 
 let capabilities_of_toml toml =
   match Runtime_toml.parse_string toml with
@@ -101,45 +97,34 @@ let test_every_catalog_spelling_loads () =
     ]
 ;;
 
-(* The key is spelled with dashes here and the value with underscores in the
-   catalog. An operator writing the key's punctuation in the value is asking
-   for the same thing. *)
-let test_dashes_and_case_read_as_the_same_value () =
-  List.iter
-    (fun written ->
-       check
-         (option replay_testable)
-         written
-         (Some Runtime_schema.Force_latest_user_turn_tool_calls)
-         (replay_of_toml (toml_with_replay written)))
-    [ "latest-user-turn-tool-calls"; "Latest_User_Turn_Tool_Calls" ];
+(* The vocabulary decides what a written value means, and it reads case and
+   surrounding space. Punctuation it does not spell is not a near miss to be
+   repaired here: the key is written with dashes and the value is not, and a
+   value this parser rewrote would be a spelling no catalog file uses. *)
+let test_the_vocabulary_decides_what_a_value_means () =
+  check
+    (option replay_testable)
+    "case is the vocabulary's to read"
+    (Some Runtime_schema.Force_latest_user_turn_tool_calls)
+    (replay_of_toml (toml_with_replay "Latest_User_Turn_Tool_Calls"));
   check
     (option replay_testable)
     "surrounding spaces are trimmed"
     (Some Runtime_schema.Force_preserve_always)
-    (replay_of_toml (toml_with_replay " preserve_always "))
+    (replay_of_toml (toml_with_replay " preserve_always "));
+  check
+    (option (list string))
+    "a spelling the vocabulary does not take is refused at this key"
+    (Some [ replay_key_path ])
+    (refusal_paths (toml_with_replay "latest-user-turn-tool-calls"))
 ;;
 
 let test_unknown_value_fails_the_load () =
-  match Runtime_toml.parse_string (toml_with_replay "keep_everything") with
-  | Ok _ -> fail "an unknown reasoning-replay value loaded"
-  | Error errors ->
-    let rendered = render_errors errors in
-    check
-      bool
-      "the refusal names the key"
-      true
-      (contains rendered "models.m.capabilities.reasoning-replay");
-    check
-      bool
-      "the refusal quotes what was written"
-      true
-      (contains rendered "\"keep_everything\"");
-    check
-      bool
-      "the refusal lists what it would have taken"
-      true
-      (contains rendered "latest_user_turn_tool_calls")
+  check
+    (option (list string))
+    "an unknown value is refused at this key"
+    (Some [ replay_key_path ])
+    (refusal_paths (toml_with_replay "keep_everything"))
 ;;
 
 let test_a_non_string_fails_as_a_parse_error () =
@@ -151,14 +136,11 @@ max-context = 1000
 reasoning-replay = 3
 |}
   in
-  match Runtime_toml.parse_string toml with
-  | Ok _ -> fail "a non-string reasoning-replay loaded"
-  | Error errors ->
-    check
-      bool
-      "the refusal says a string was expected"
-      true
-      (contains (render_errors errors) "a string")
+  check
+    (option (list string))
+    "a non-string is refused at this key"
+    (Some [ replay_key_path ])
+    (refusal_paths toml)
 ;;
 
 (* Absence is not a value: the catalog keeps answering for this model. *)
@@ -179,9 +161,9 @@ let () =
     [ ( "parse_string"
       , [ test_case "every catalog spelling loads" `Quick test_every_catalog_spelling_loads
         ; test_case
-            "dashes and case read as the same value"
+            "the vocabulary decides what a value means"
             `Quick
-            test_dashes_and_case_read_as_the_same_value
+            test_the_vocabulary_decides_what_a_value_means
         ; test_case "unknown value fails the load" `Quick test_unknown_value_fails_the_load
         ; test_case
             "a non-string fails as a parse error"

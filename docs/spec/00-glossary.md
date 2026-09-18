@@ -117,6 +117,14 @@ status: reference
   `history_empty` 줄은 둘 다 "이 trace의 Atom 번호가 0에서 다시 시작했다"를
   말한다.
 
+**Read Position**
+: Librarian이 History를 어디까지 읽었는지 적은 값(`<keeper>.librarian-progress.json`).
+  Turn Boundary 파일의 줄 번호가 아니라 값이다: trace, 읽은 Atom 수, 마지막으로
+  읽은 Atom을 여는 Message의 digest. 파일에 쌓인 순서가 turn 순서가 아니라서 줄
+  번호로는 이것을 말할 수 없다. 파일이 없으면 아직 읽은 적이 없다는 뜻이다. 못
+  읽는 파일은 "읽은 적 없음"으로 치지 않고 오류로 다룬다. 그렇게 치면 History
+  전체가 안 읽은 것으로 보인다.
+
 **Generation**
 : 같은 Keeper가 새 trace로 이어진 횟수. 초기값은 0이다.
 

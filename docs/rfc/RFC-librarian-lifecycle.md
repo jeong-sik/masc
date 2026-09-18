@@ -358,7 +358,7 @@ flowchart TD
    - purge 는 두 파일을 같이 지운다. purge 가 회차 도중에 일어나면 루프가 옛 위치를 되살려 쓸 수 있다. 막는 것은 순서다. purge 는 그 Keeper 의 루프를 취소하고 끝난 것을 확인한 뒤에 두 파일을 지운다(§8 의 4단계). 잠금으로는 막지 못한다. purge 는 턴 끝 기록을 잠금 없이 지우므로(`server_dashboard_http_delete_actions.ml`), 잠금 아래에서 줄이 그대로인지 확인해도 그 확인과 진행 파일 쓰기 사이에 purge 가 낄 수 있다. 그래서 진행 파일 쓰기는 턴 끝 기록의 잠금과 엮지 않는다.
    - 이 파일이 갖는 것은 읽은 위치다. 창이 보는 위치는 §7 (라)의 파일이 따로 갖는다. 창 조립은 이 파일을 직접 쓰지 않는다.
 
-두 파일 모두 Keeper purge 변형(`keeper_shutdown_types.ml`, `server_dashboard_http_delete_actions.ml`)에 등록한다. 배포 preflight 의 저장소 목록(`bin/deployment_preflight_helper.ml`)에는 읽는 쪽이 들어가는 2단계에서 등록한다. 그 목록의 `on_refusal` 칸은 "읽는 쪽이 못 읽는 줄을 어떻게 하는가"를 적는 자리라서, 읽는 쪽이 없는 1단계에서 적으면 거짓 문장이 된다. preflight lint 가 `exact_field_names_result` 로 읽는 저장소를 못 보는 빈틈(#37019)도 그때 같이 본다.
+두 파일 모두 Keeper purge 변형(`keeper_shutdown_types.ml`, `server_dashboard_http_delete_actions.ml`)에 등록한다. 배포 preflight 의 저장소 목록(`bin/deployment_preflight_helper.ml`)에는 두 파일을 읽는 루프가 들어가는 4단계에서 등록한다. 그 목록의 `on_refusal` 칸은 "돌고 있는 서버가 못 읽는 줄을 어떻게 하는가"를 적는 자리다. 2단계의 고르는 함수는 그 답(§4.4 의 2c, §4.6 의 진행 파일 오류)을 구현하지만 부르는 곳이 없어서, 그때 적으면 돌고 있는 서버에 대한 거짓 문장이 된다. preflight lint 가 `exact_field_names_result` 로 읽는 저장소를 못 보는 빈틈(#37019)도 그때 같이 본다.
 
 ### 4.7 회차의 입력
 
@@ -447,7 +447,7 @@ TUI Memory 헤더, health JSON, 대시보드에 밀린 턴 수, 마지막 성공
 | 1 | 턴 끝 기록. 쓰기만 하고 읽는 곳은 없다. purge 등록 | 동작이 바뀌지 않는다 |
 | 1b | `keeper_clear` 가 비운 checkpoint 를 저장한 뒤 `history_empty` 줄을 남긴다(§4.6). 저장이 stale no-op 이거나 실패한 비우기는 성공이 아니라 오류로 보고한다. `Fresh_history` 를 "atom 이 없는 이력에서 시작했다"로 고쳐 정한다 | 줄을 읽는 곳이 없다. 도구의 보고가 사실과 맞게 바뀐다. 4단계 전에 있어야 한다 |
 | 1c | 빈 이력에서 시작하는 턴이 시작할 때 `history_empty` 줄을 쓴다. 그 턴이 저장만 하고 끝을 못 내도 재시작이 기록에 남는다(§4.6). 1b 와 같은 줄 종류다. 뜻이 겹치는 줄 종류를 하나 더 두지 않는다 | 읽는 곳이 없다. 4단계 전에 있어야 한다 |
-| 2a | 진행 파일 저장소. purge 에 등록하고, 두 파일을 배포 preflight 에 등록한다(#37019 같이) | 부르는 곳이 없다 |
+| 2a | 진행 파일 저장소. purge 에 등록한다 | 부르는 곳이 없다 |
 | 2b | 순수 함수 둘: (턴 끝 기록, 진행 파일, checkpoint)에서 다음에 읽을 범위를 고르기, (checkpoint, 범위)에서 메시지를 자르기. I1·I9 와 §4.4 의 1b·2~5(2a·2c·3c·3d 포함)를 여기서 테스트한다 | 부르는 곳이 없다 |
 | 3 | 하네스(§9) | 저장소 밖 실행 |
 | 4 | 서버 소유 루프. 회차는 지금의 프롬프트, 스키마, 레인, 저장 경로를 그대로 쓰고 입력만 §4.7 로 바꾼다. 같은 PR 에서 Keeper 턴 끝 경로의 제출을 끈다. #36979·#37004·#37021 이 닫히고 §10 의 2 와 3 이 정해진 뒤에 넣는다 | 두 경로가 같이 돌면 같은 턴을 두 번 읽는다. 그래서 한 PR 에서 바꾼다 |
@@ -458,6 +458,7 @@ TUI Memory 헤더, health JSON, 대시보드에 밀린 턴 수, 마지막 성공
 **4단계 PR 이 닫아야 하는 것.** 이 RFC 는 아래를 아직 정하지 않았다. 4단계의 설계 메모가 정하고, 정한 내용을 이 RFC 에 되적는다.
 
 - 서버가 뜰 때 Keeper 목록을 어디서 읽는가. 나중에 만든 Keeper 의 루프는 누가 띄우는가.
+- 두 파일의 배포 preflight 등록(§4.6). #37019 도 같이 본다.
 - Keeper 를 지울 때의 순서. purge 는 그 Keeper 의 루프를 취소하고 끝난 것을 확인한 뒤에 두 파일을 지운다. 순서가 없으면 지운 진행 파일을 루프가 다시 만든다(§4.6).
 - exact-output registry 가 공개되기 전에 루프가 돌지 않게 하는 방법.
 - 멈춘 Keeper 의 역할(instructions)과 task 를 어디서 읽는가. 지금은 메모리의 owner projection 에서만 읽고, 없으면 기록 없이 끝난다(§2.3 의 L4). 디스크의 meta 에서 읽어야 한다.

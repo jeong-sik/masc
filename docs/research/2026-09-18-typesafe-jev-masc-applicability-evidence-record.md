@@ -7,7 +7,8 @@
 
 - API 실호출 35회: `POST https://api.typesafe.ai/v1/systemone`, 모델 `jev-latest`, 응답 모델명 `jev-1.13.0`.
 - 문서: docs.typesafe.ai introduction / primitives / confidence / patterns / quickstart, typesafe.ai (2026-09-18 열람).
-- 판정 이력(피실험 데이터): `~/me/masc-workspaces/wkbl/.masc/board_attention_candidates/wkbl-builder.jsonl`
+- 판정 이력(피실험 데이터): `<base-path>/.masc/board_attention_candidates/wkbl-builder.jsonl`
+  (base-path = wkbl 워크스페이스 루트, MASC_BASE_PATH)
   — 기존 judge 판정 보유 25건(consumed 17 + judged 8, 전부 `relevant`, rationale 포함).
 - 재현 스크립트와 호출별 원시 기록: 아래 부록 A(스크립트), 부록 B(results.jsonl 전문).
 
@@ -84,10 +85,11 @@ Jev 실측 $0.00006과 비교해 30~250배. 배치로 묶는 원 구조를 감�
 """
 import json, subprocess, time, urllib.request, urllib.error, sys, os
 
-CAND_FILE = os.path.expanduser(
-    "~/me/masc-workspaces/wkbl/.masc/board_attention_candidates/wkbl-builder.jsonl"
+CAND_FILE = os.path.join(
+    os.environ.get("MASC_BASE_PATH", ""), ".masc",
+    "board_attention_candidates", "wkbl-builder.jsonl",
 )
-OUT_DIR = os.path.expanduser("~/me/.tmp/jev-replay")
+OUT_DIR = os.environ.get("OUT_DIR", "/tmp/jev-replay")
 
 def get_key():
     k = os.environ.get("JEV_API_KEY")

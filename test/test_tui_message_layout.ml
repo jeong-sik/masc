@@ -23,6 +23,7 @@ let entry ?(timestamp = "12:34:56") ?timeline_bucket
   { style
   ; timestamp
   ; timeline_bucket
+  ; span_clock = None
   ; role_label = role
   ; role_label_mark_cells =
       Layout.role_label_mark_cells ~style ()
@@ -710,6 +711,7 @@ let transcript count =
       { Layout.style = Layout.Keeper;
         timestamp = Printf.sprintf "12:%02d:00" (index mod 60);
         timeline_bucket = None;
+        span_clock = None;
         role_label = "code-reviewer";
         request_label = Printf.sprintf "turn-%d" index;
         body =
@@ -2252,6 +2254,82 @@ let test_a_span_fits_a_six_cell_column () =
         (Layout.display_width text <= 6))
     [ 59.; 3599.; day -. 1.; (100. *. day) -. 1.; 99_999. *. day ]
 
+(* task-1516: a turn block's span clock rides in the body, folded in before
+   wrapping. It must consume body budget like any other word -- no row of the
+   block may exceed the budget every row around it obeys, the rows must keep
+   the block's wrap width whatever the span does, and a narrow pane must wrap
+   the span rather than cut it. *)
+let test_a_turn_span_wraps_inside_the_block_budget () =
+  let span = "16:38→16:41" in
+  let body = String.concat " " (List.init 40 (fun i -> Printf.sprintf "w%02d" i)) in
+  let opens =
+    { (entry Layout.Keeper "keeper.one" "tui-..cccccccc" body) with
+      Layout.span_clock = Some span
+    ; Layout.turn_rail = Layout.Rail_opens
+    }
+  in
+  let plain = entry Layout.Keeper "keeper.one" "tui-..cccccccc" body in
+  List.iter
+    (fun inner ->
+       let rows =
+         Layout.visible_rows ~origin:Layout.Origin_inline ~inner_width:inner
+           ~height:200 [ opens ]
+       in
+       (* Asserted first: a budget compared over no rows passes whatever the
+          span does. *)
+       check bool
+         (Printf.sprintf "%d columns draw the block" inner)
+         true (List.length rows > 1);
+       List.iter
+         (fun (row : Layout.row) ->
+            check bool
+              (Printf.sprintf "%d columns keep every row inside the budget" inner)
+              true
+              (Layout.display_width row.text <= inner))
+         rows)
+    [ 24; 40; 80 ];
+  let rows_at inner e =
+    Layout.visible_rows ~origin:Layout.Origin_inline ~inner_width:inner
+      ~height:200 [ e ]
+  in
+  (* Wide pane: the block's head row opens with the whole span. *)
+  check bool "the head row opens with the span" true
+    (List.exists
+       (fun (row : Layout.row) -> String.equal row.text ("  " ^ span))
+       (rows_at 80 opens));
+  (* Narrow pane: the span wraps rather than carries the cut mark, and its
+     bytes survive the wrap whole -- here the label column leaves a four-cell
+     body budget, so the span arrives as several rows. *)
+  let narrow = rows_at 24 opens in
+  let body_pieces =
+    narrow
+    |> List.filter_map (fun (row : Layout.row) ->
+           if String.starts_with ~prefix:"  " row.text then
+             Some (String.sub row.text 2 (String.length row.text - 2))
+           else None)
+  in
+  let rec join_upto acc = function
+    | _ when String.length acc >= String.length span -> acc
+    | piece :: rest -> join_upto (acc ^ piece) rest
+    | [] -> acc
+  in
+  check string "a narrow pane still says the whole span" span
+    (join_upto "" body_pieces);
+  List.iter
+    (fun (row : Layout.row) ->
+       check bool "a wrapped span is never cut" false (carries_cut_mark row.text))
+    narrow;
+  (* The span never widens the block: its widest row is no wider than the
+     widest row the body alone determines, which is the wrap width the rows
+     around the block already obey. *)
+  let widest rows =
+    List.fold_left
+      (fun widest (row : Layout.row) -> max widest (Layout.display_width row.text))
+      0 rows
+  in
+  check bool "the span does not widen the block"
+    true (widest (rows_at 80 opens) <= widest (rows_at 80 plain))
+
 let () =
   run "tui_message_layout"
     [
@@ -2345,6 +2423,8 @@ let () =
             test_trailing_newlines_do_not_hide_reply
         ; test_case "trailing whitespace lines keep reply visible" `Quick
             test_trailing_whitespace_lines_do_not_hide_reply
+        ; test_case "a turn span wraps inside the block budget" `Quick
+            test_a_turn_span_wraps_inside_the_block_budget
         ] )
     ; ( "composer"
       , [ test_case "splits on newlines only" `Quick

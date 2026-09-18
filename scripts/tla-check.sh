@@ -166,6 +166,17 @@ run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskLifecycle.tla"
 run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskLifecycle.tla" \
   "TaskLifecycle-supersede-buggy.cfg" "supersede-buggy"
 
+# Several Tasks and several agents: who holds what, and what a verdict may
+# change. Each bug model names one property in its own cfg so that property
+# has to catch the bug alone.
+run_tlc "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla"
+run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla"
+for label in verdict-assigns stop-submission anyone-withdraws \
+  accept-without-verdict superseded-verdict; do
+  run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla" \
+    "TaskOwnership-${label}-buggy.cfg" "${label}-buggy"
+done
+
 # Server lifecycle product invariants across lifecycle/lazy/readiness axes.
 run_tlc "$REPO_ROOT/specs/server-state" "ServerState.tla"
 run_tlc_buggy "$REPO_ROOT/specs/server-state" "ServerState.tla"

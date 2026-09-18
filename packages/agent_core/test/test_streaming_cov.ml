@@ -245,7 +245,13 @@ let test_accumulate_other_events () =
   Streaming.accumulate_event acc Types.Ping;
   Streaming.accumulate_event
     acc
-    (Types.SSEError { message = "test error"; error_type = None; provider_status = None; raw = "test error" });
+    (Types.SSEError
+       { message = "test error"
+       ; error_type = None
+       ; provider_status = None
+       ; report = Types.Provider_stated
+       ; raw = "test error"
+       });
   match Streaming.finalize_stream_acc acc with
   | Error (Types.Stream_provider_error { message = "test error"; _ }) -> ()
   | Error _ -> Alcotest.fail "expected provider error"

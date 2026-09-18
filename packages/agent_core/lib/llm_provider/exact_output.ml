@@ -646,6 +646,7 @@ let wire_admission_error_disposition = function
   | Global_admission_not_allowed
   | Invalid_connect_timeout
   | Invalid_body_timeout
+  | Missing_deadline
   | Context_limit_unavailable
   | Invalid_context_limit
   | Unsupported_target_model _ -> Runtime_contract_rejected
@@ -836,6 +837,7 @@ let wire_admission_error_evidence_json = function
     `Assoc [ "kind", `String "global_admission_not_allowed" ]
   | Invalid_connect_timeout -> `Assoc [ "kind", `String "invalid_connect_timeout" ]
   | Invalid_body_timeout -> `Assoc [ "kind", `String "invalid_body_timeout" ]
+  | Missing_deadline -> `Assoc [ "kind", `String "missing_deadline" ]
   | Caller_supplied_header_not_allowed ->
     `Assoc [ "kind", `String "caller_supplied_header_not_allowed" ]
   | Unsupported_image_input -> `Assoc [ "kind", `String "unsupported_image_input" ]
@@ -905,6 +907,7 @@ let wire_admission_error_reason = function
   | Global_admission_not_allowed -> "global_admission_not_allowed"
   | Invalid_connect_timeout -> "invalid_connect_timeout"
   | Invalid_body_timeout -> "invalid_body_timeout"
+  | Missing_deadline -> "missing_deadline"
   | Caller_supplied_header_not_allowed ->
     "caller_supplied_header_not_allowed"
   | Unsupported_image_input -> "unsupported_image_input"

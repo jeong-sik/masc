@@ -48,18 +48,47 @@ let history =
   ]
 ;;
 
-let seed first_atom : Front.seed = { first_atom; atom_count = 7; source = Front.Ledger }
+(* A front measured on [history]: its index and the message that opens it. *)
+let seed first_atom : Front.seed =
+  match Window.atom_opening_digest history first_atom with
+  | Some front_digest -> { first_atom; front_digest; source = Front.Ledger }
+  | None -> Alcotest.fail "the history has the seed's atom"
+;;
 
 let view ~front history : Try_provider.request_view =
   Try_provider.For_testing.request_view
     ~provider_config
     ~measure_message_bytes
     ~front
+    ~history_digest_at:(Window.atom_opening_digest history)
     ~last_resort:false
     ~base_path:""
     ~demote_before:0
     ~materialize:(fun ~pending:_ messages -> messages)
     history
+;;
+
+(* A turn that did not finish is read at the position it reached. The range it
+   tried is what the next turn sends, so a turn that failed for a reason that
+   says nothing about size keeps its range instead of giving up half of it. *)
+let test_an_unfinished_turns_range_is_read_where_it_stopped () =
+  let ceiling = { (seed 0) with Front.source = Front.Unfinished_turn { turn = 9 } } in
+  let v = view ~front:(Some ceiling) history in
+  let composed = v.Try_provider.composed in
+  let observation =
+    match
+      Window.observe
+        ~digest_at:(Window.atom_opening_digest history)
+        ~history_atom_count:composed.Try_provider.history_atom_count
+        composed.Try_provider.projection
+    with
+    | Some observation -> observation
+    | None -> Alcotest.fail "a range that carried atoms reports its window"
+  in
+  Alcotest.(check int) "the recorded front carries all seven atoms" 7
+    observation.Window.transmitted_atoms;
+  Alcotest.(check string) "the origin names the unfinished turn" "unfinished_turn#9"
+    (Front.origin_to_string composed.Try_provider.origin)
 ;;
 
 let declined error =
@@ -74,12 +103,20 @@ let test_the_window_counts_atoms_of_the_history_whatever_the_wire_deletes () =
   let v = view ~front:(Some (seed 2)) history in
   let composed = v.Try_provider.composed in
   let observation =
-    Window.observe
-      ~history_atom_count:composed.Try_provider.history_atom_count
-      composed.Try_provider.projection
+    match
+      Window.observe
+        ~digest_at:(Window.atom_opening_digest history)
+        ~history_atom_count:composed.Try_provider.history_atom_count
+        composed.Try_provider.projection
+    with
+    | Some observation -> observation
+    | None -> Alcotest.fail "a range that carried atoms reports its window"
   in
   Alcotest.(check int) "seven atoms in the history" 7 observation.Window.total_atoms;
   Alcotest.(check int) "five carried" 5 observation.Window.transmitted_atoms;
+  Alcotest.(check string) "the front is named by the history's atom 2"
+    (seed 2).Front.front_digest
+    observation.Window.front_atom_digest;
   Alcotest.(check int) "five messages carried" 5 (List.length v.Try_provider.carried);
   match v.Try_provider.wire with
   | Error error -> declined error
@@ -87,8 +124,9 @@ let test_the_window_counts_atoms_of_the_history_whatever_the_wire_deletes () =
 ;;
 
 (* The contrast the order exists for: projected first, the same history has
-   six atoms, and a front measured against seven falls under [for_history]
-   there and starts the whole history over. *)
+   six atoms, every atom after the deleted one moves back one index, and a
+   front measured on the history past that point opens with another message
+   there: [for_history] drops it and the whole history starts over. *)
 let test_projected_first_the_atom_count_would_be_the_dialects () =
   match
     Agent_core.Llm_provider.Complete_common.transmitted_history
@@ -100,7 +138,8 @@ let test_projected_first_the_atom_count_would_be_the_dialects () =
     let _, atoms = Window.annotate projected in
     Alcotest.(check int) "one atom fewer" 6 atoms;
     Alcotest.(check bool) "a front measured on the history is dropped there" true
-      (Option.is_none (Front.for_history ~atom_count:atoms (seed 2)))
+      (Front.for_history ~digest_at:(Window.atom_opening_digest projected) (seed 4)
+       = Error Front.Front_message_differs)
 ;;
 
 (* Reasoning provenance on a [User] message is a malformed history: the
@@ -141,6 +180,8 @@ let () =
             test_the_window_counts_atoms_of_the_history_whatever_the_wire_deletes
         ; Alcotest.test_case "projected first the count would be the dialect's" `Quick
             test_projected_first_the_atom_count_would_be_the_dialects
+        ; Alcotest.test_case "an unfinished turn reads where it stopped" `Quick
+            test_an_unfinished_turns_range_is_read_where_it_stopped
         ; Alcotest.test_case "a declined projection hands over the carried range" `Quick
             test_a_declined_projection_hands_over_the_carried_range
         ] )

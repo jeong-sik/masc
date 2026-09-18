@@ -95,10 +95,18 @@ val state : t -> Types.agent_state
 val lifecycle : t -> lifecycle_snapshot option
 val tools : t -> Tool_set.t
 
-val extend_tools : t -> Tool.t list -> unit
+val extend_tools : ?order:string list -> t -> Tool.t list -> unit
 (** Widen the callable tool set mid-turn. A deferred tool surface hands the
     model an index and supplies a schema only when it is asked for, so the set
     the agent can call is not known when the turn starts.
+
+    Without [order] the added tools go at the end. With it, each added tool
+    whose name [order] ranks goes right after the last held tool ranked before
+    it (or right before the first ranked after it), so a set widened one tool
+    at a time comes out in the order a caller composing the whole set in
+    [order] would send. A provider that caches the tool array as a request
+    prefix then sees the next turn's array unchanged. Held tools never move;
+    a name [order] does not rank goes at the end.
 
     Widening only. Removing a tool mid-turn would leave a [tool_use] the model
     already emitted to be dropped by the admission index rather than answered,

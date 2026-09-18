@@ -7,6 +7,9 @@
 module Try_provider = Masc.Keeper_turn_driver_try_provider
 module Range = Masc.Keeper_carried_range
 module Ledger = Masc.Keeper_model_input_ledger
+module Front = Masc.Keeper_carried_front
+module Window = Runtime_model_input_tail_window
+module Types = Agent_core.Types
 
 open Alcotest
 
@@ -22,10 +25,29 @@ let body_refused_by_provider =
        })
 ;;
 
+let unattributed_refusal =
+  Agent_core.Error.Api
+    (Agent_core.Retry.InvalidRequest
+       { message = "refused, reason not modelled"
+       ; reason = Agent_core.Retry.Unknown_invalid_request
+       })
+;;
+
 let unrelated = Agent_core.Error.Api (Agent_core.Retry.Timeout { message = "slow"; phase = None })
 
+(* Atom [i] of the synthetic history opens with the message ["m<i>"]. *)
+let opener i = Printf.sprintf "m%d" i
+
+let ends ~first_atom ~atom_count =
+  if first_atom < atom_count
+  then
+    Ledger.Carried_atoms
+      { front_digest = opener first_atom; end_digest = opener (atom_count - 1) }
+  else Ledger.No_atom_carried
+;;
+
 let block ~first ~end_ tokens : Ledger.block =
-  { block_first_atom = first; block_end_atom = end_; tokens }
+  { block_first_atom = first; block_end_atom = end_; block_first_digest = opener first; tokens }
 ;;
 
 let ledger ?(total = Some 1_000) (blocks : Ledger.block list) : Ledger.t =
@@ -34,14 +56,30 @@ let ledger ?(total = Some 1_000) (blocks : Ledger.block list) : Ledger.t =
   { prefix_digest = "f"
   ; total_tokens = total
   ; measured_end_atom = Option.map (fun _ -> atom_count) total
+  ; measured_demote_before = Option.map (fun _ -> 0) total
   ; blocks
-  ; last = { prefix_digest = "f"; first_atom; atom_count; tail_bytes = 0 }
+  ; last =
+      { prefix_digest = "f"
+      ; first_atom
+      ; atom_count
+      ; ends = ends ~first_atom ~atom_count
+      ; tail_bytes = 0
+      ; turn_context = false
+      ; demote_before = 0
+      }
   ; last_usage = None
   }
 ;;
 
 let request ~first_atom ~atom_count : Ledger.request =
-  { prefix_digest = "f"; first_atom; atom_count; tail_bytes = 0 }
+  { prefix_digest = "f"
+  ; first_atom
+  ; atom_count
+  ; ends = ends ~first_atom ~atom_count
+  ; tail_bytes = 0
+  ; turn_context = false
+  ; demote_before = 0
+  }
 ;;
 
 type trace =
@@ -70,10 +108,13 @@ let run
       ~last_request
       ~marks
       ~evict:(function
-        | Range.Evicted { first_atom; _ } -> trace.evictions <- first_atom :: trace.evictions
-        | Range.Unchanged _ -> ())
+        | Range.Evicted { first_atom; _ } ->
+          trace.evictions <- first_atom :: trace.evictions;
+          true
+        | Range.Unchanged _ -> false)
       ~halve:(fun ~first_atom ~atom_count:_ ~retry ->
-        trace.halvings <- (first_atom, retry) :: trace.halvings)
+        trace.halvings <- (first_atom, retry) :: trace.halvings;
+        true)
       ~last_resort
       ~on_retry:(fun ~retry _ -> trace.retries <- retry)
       ~attempt:(fun () ->
@@ -132,6 +173,17 @@ let test_with_marks_the_refusal_walks_down_to_the_low_water_mark () =
   check (list int) "three blocks left" [ 30 ] trace.evictions
 ;;
 
+(* A refusal agent core cannot attribute is still a refusal of this request:
+   the same bytes draw the same answer, so the range shrinks. 2026-09-18:
+   ollama_cloud answered a 9.5 MB request with prose the classifier leaves
+   unknown, and the turn ended instead of carrying less. *)
+let test_an_unattributed_refusal_shrinks_the_range () =
+  let _, trace =
+    run ~ledger_of:(fun _ -> Some four_blocks) [ Error unattributed_refusal; Ok "fits" ]
+  in
+  check (list int) "the unattributed refusal moved the front" [ 10 ] trace.evictions
+;;
+
 let test_a_body_refusal_evicts_like_an_overflow () =
   let _, trace = run ~ledger_of:(fun _ -> Some four_blocks) [ Error body_refused_by_provider; Ok "fits" ] in
   check (list int) "the wire's refusal moved the front" [ 10 ] trace.evictions
@@ -161,10 +213,11 @@ let test_without_a_ledger_the_range_halves_until_it_fits () =
       ~ledger:(fun () -> None)
       ~last_request:(fun () -> Some (request ~first_atom:!front ~atom_count:16))
       ~marks:None
-      ~evict:(fun _ -> ())
+      ~evict:(fun _ -> false)
       ~halve:(fun ~first_atom ~atom_count:_ ~retry ->
         front := first_atom;
-        trace.halvings <- (first_atom, retry) :: trace.halvings)
+        trace.halvings <- (first_atom, retry) :: trace.halvings;
+        true)
       ~last_resort:(fun ~retry:_ -> false)
       ~on_retry:(fun ~retry _ -> trace.retries <- retry)
       ~attempt:(fun () ->
@@ -187,8 +240,10 @@ let test_halving_ends_at_one_atom_when_every_request_is_refused () =
       ~ledger:(fun () -> None)
       ~last_request:(fun () -> Some (request ~first_atom:!front ~atom_count:16))
       ~marks:None
-      ~evict:(fun _ -> ())
-      ~halve:(fun ~first_atom ~atom_count:_ ~retry:_ -> front := first_atom)
+      ~evict:(fun _ -> false)
+      ~halve:(fun ~first_atom ~atom_count:_ ~retry:_ ->
+        front := first_atom;
+        true)
       ~last_resort:(fun ~retry:_ -> false)
       ~on_retry:(fun ~retry:_ _ -> ())
       ~attempt:(fun () -> incr attempts; Error overflow)
@@ -198,6 +253,29 @@ let test_halving_ends_at_one_atom_when_every_request_is_refused () =
   (* 0 → 8 → 12 → 14 → 15: four halvings, five requests, then one atom. *)
   check int "five attempts" 5 !attempts;
   check int "the front ends on the newest atom" 15 !front
+;;
+
+(* The halved front is named by the message that opens it in the refused
+   request's history. When that history has no atom there to name, nothing
+   moves, and asking again would compose the same refused request: the
+   refusal stands. *)
+let test_a_halving_that_cannot_name_its_front_ends_the_sequence () =
+  let attempts = ref 0 in
+  let outcome =
+    Try_provider.carried_range_eviction_sequence
+      ~same_run_retry_authorized:(fun () -> true)
+      ~ledger:(fun () -> None)
+      ~last_request:(fun () -> Some (request ~first_atom:0 ~atom_count:16))
+      ~marks:None
+      ~evict:(fun _ -> false)
+      ~halve:(fun ~first_atom:_ ~atom_count:_ ~retry:_ -> false)
+      ~last_resort:(fun ~retry:_ -> false)
+      ~on_retry:(fun ~retry:_ _ -> fail "no retry is recorded for a move that did not happen")
+      ~attempt:(fun () -> incr attempts; Error overflow)
+      ()
+  in
+  check bool "the refusal stands" true (Result.is_error outcome);
+  check int "one attempt" 1 !attempts
 ;;
 
 let test_a_single_atom_ends_the_sequence_with_the_refusal () =
@@ -287,7 +365,190 @@ let test_nothing_to_demote_ends_the_sequence () =
   check int "one attempt" 1 trace.attempts
 ;;
 
+(* An eviction that reports no move leaves the front where the refused
+   request had it; asking again would send that request again. *)
+let test_an_eviction_that_did_not_move_ends_the_sequence () =
+  let attempts = ref 0 in
+  let outcome =
+    Try_provider.carried_range_eviction_sequence
+      ~same_run_retry_authorized:(fun () -> !attempts < 5)
+      ~ledger:(fun () -> Some four_blocks)
+      ~last_request:(fun () -> None)
+      ~marks:None
+      ~evict:(fun _ -> false)
+      ~halve:(fun ~first_atom:_ ~atom_count:_ ~retry:_ -> fail "nothing halves after an eviction step")
+      ~last_resort:(fun ~retry:_ -> false)
+      ~on_retry:(fun ~retry:_ _ -> fail "no retry follows a move that did not happen")
+      ~attempt:(fun () ->
+        incr attempts;
+        Error overflow)
+      ()
+  in
+  check bool "the refusal stands" true (Result.is_error outcome);
+  check int "one attempt" 1 !attempts
+;;
+
+(* [halve_front] answers whether the retry carries a strictly later front. *)
+let test_a_halving_answers_whether_the_retry_moves () =
+  let held = ref None in
+  let lookup i = if i >= 0 && i < 16 then Some (opener i) else None in
+  let halve ?(digest_at = Some lookup) move =
+    held := None;
+    Try_provider.For_testing.halve_front
+      ~digest_at
+      ~move_ledger:(fun ~first_atom:_ ~front_digest:_ -> move)
+      ~hold:(fun seed -> held := Some seed)
+      ~first_atom:8
+      ~retry:1
+  in
+  check bool "no history to name the front: no retry" false
+    (halve ~digest_at:None Ledger.Table.No_pair_ledger);
+  check bool "no atom at the front: no retry" false
+    (halve ~digest_at:(Some (fun _ -> None)) Ledger.Table.No_pair_ledger);
+  check bool "a ledger that did not move: no retry" false (halve Ledger.Table.Not_moved);
+  check bool "nothing held for a ledger" true (Option.is_none !held);
+  check bool "a ledger that moved: retry" true (halve Ledger.Table.Moved);
+  check bool "no ledger: retry from the held seed" true (halve Ledger.Table.No_pair_ledger);
+  match !held with
+  | Some (seed : Front.seed) ->
+    check int "held at the halved front" 8 seed.first_atom;
+    check string "named by the message that opens it" (opener 8) seed.front_digest
+  | None -> fail "the halved seed was not held"
+;;
+
+let text_message role text : Types.message =
+  { role; content = [ Types.Text text ]; name = None; tool_call_id = None; metadata = [] }
+;;
+
+(* Exchanges [from] to [from + n - 1], two atoms each. *)
+let exchanges ~from n =
+  List.concat_map
+    (fun i ->
+       [ text_message Types.User (Printf.sprintf "ask %d" i)
+       ; text_message Types.Assistant (Printf.sprintf "answer %d" i)
+       ])
+    (List.init n (fun i -> from + i))
+;;
+
+let ends_from (digest_at : int -> string option) ~first_atom ~atom_count =
+  match digest_at first_atom, digest_at (atom_count - 1) with
+  | Some front_digest, Some end_digest -> Ledger.Carried_atoms { front_digest; end_digest }
+  | None, (Some _ | None) | Some _, None -> Ledger.No_atom_carried
+;;
+
+(* The loop this replaces: the pair's ledger was measured on a history whose
+   first two exchanges a purge later removed. Its front, atom 30, opens with
+   another message in the history the attempt composes from, so every
+   composition dropped the front and sent the whole history; the refusal was
+   answered from the stale ledger, the halving picked a front behind the
+   ledger's, nothing moved, and the same whole history went out again.
+
+   The composition and the refusal path below are the turn driver's own
+   ([carried_front], [compose_carried_model_input], [halve_front], the pair
+   table), with the provider replaced by a refusal. The retry gate would stop
+   an endless sequence at [attempt_cap]; the sequence has to end before it,
+   every request after a strictly later front than the one before. *)
+let test_a_ledger_the_history_does_not_hold_does_not_steer_the_retries () =
+  Ledger.Table.For_testing.reset ();
+  let keeper_name = "alpha" and runtime_id = "r" and session_id = "trace-1" in
+  let before_purge = exchanges ~from:0 22 in
+  let history = exchanges ~from:2 20 in
+  let lookup_before = Window.atom_opening_digest before_purge in
+  let digest_at = Window.atom_opening_digest history in
+  let (_ : Ledger.observation) =
+    Ledger.Table.observe
+      ~keeper_name
+      ~runtime_id
+      ~session_id
+      ~digest_at:lookup_before
+      ~request:
+        { Ledger.prefix_digest = "f"
+        ; first_atom = 30
+        ; atom_count = 44
+        ; ends = ends_from lookup_before ~first_atom:30 ~atom_count:44
+        ; tail_bytes = 0
+        ; turn_context = false
+        ; demote_before = 0
+        }
+      ~usage:(Some { Ledger.input_tokens = 50_000; cache_read_input_tokens = 0 })
+  in
+  let attempt_cap = 20 in
+  let attempts = ref 0 in
+  let halved = ref None in
+  let last = ref None in
+  let fronts = ref [] in
+  let dropped = ref 0 in
+  let outcome =
+    Try_provider.carried_range_eviction_sequence
+      ~same_run_retry_authorized:(fun () -> !attempts < attempt_cap)
+      ~ledger:(fun () -> Ledger.Table.lookup ~keeper_name ~runtime_id ~session_id)
+      ~last_request:(fun () -> Option.map fst !last)
+      ~marks:None
+      ~evict:(function
+        | Range.Evicted { first_atom; front_digest; _ } ->
+          Ledger.Table.move_front ~keeper_name ~runtime_id ~session_id ~first_atom ~front_digest
+          = Ledger.Table.Moved
+        | Range.Unchanged _ -> false)
+      ~halve:(fun ~first_atom ~atom_count:_ ~retry ->
+        Try_provider.For_testing.halve_front
+          ~digest_at:(Option.map snd !last)
+          ~move_ledger:(Ledger.Table.move_front ~keeper_name ~runtime_id ~session_id)
+          ~hold:(fun seed -> halved := Some seed)
+          ~first_atom
+          ~retry)
+      ~last_resort:(fun ~retry:_ -> false)
+      ~on_retry:(fun ~retry:_ _ -> ())
+      ~attempt:(fun () ->
+        incr attempts;
+        let front, stale =
+          Try_provider.For_testing.carried_front
+            ~keeper_name
+            ~runtime_id
+            ~session_id
+            ~digest_at
+            ~cold:(fun () -> !halved)
+        in
+        if Option.is_some stale then incr dropped;
+        let composed =
+          Try_provider.For_testing.compose_carried_model_input
+            ~measure_message_bytes:(fun _ -> 1)
+            ~front
+            ~history_digest_at:digest_at
+            ~last_resort:false
+            ~base_path:""
+            ~demote_before:0
+            history
+        in
+        let first_atom = composed.Try_provider.projection.Window.dropped_atoms in
+        let atom_count = composed.Try_provider.history_atom_count in
+        fronts := first_atom :: !fronts;
+        last
+        := Some
+             ( { Ledger.prefix_digest = "f"
+               ; first_atom
+               ; atom_count
+               ; ends = ends_from digest_at ~first_atom ~atom_count
+               ; tail_bytes = 0
+               ; turn_context = false
+               ; demote_before = 0
+               }
+             , digest_at );
+        Error overflow)
+      ()
+  in
+  check bool "the refusal stands" true (Result.is_error outcome);
+  check bool "the sequence ended before the retry gate" true (!attempts < attempt_cap);
+  check int "the stale ledger was dropped once, when it was first seen" 1 !dropped;
+  check (list int) "the whole history, then each halving strictly later"
+    [ 0; 20; 30; 35; 37; 38; 39 ]
+    (List.rev !fronts);
+  Ledger.Table.For_testing.reset ()
+;;
+
+(* The pair table sits behind an Eio mutex. *)
 let () =
+  Eio_main.run
+  @@ fun _ ->
   Alcotest.run
     "keeper_carried_range_eviction"
     [ ( "sequence"
@@ -298,10 +559,14 @@ let () =
         ; test_case "marks walk to the low-water mark" `Quick
             test_with_marks_the_refusal_walks_down_to_the_low_water_mark
         ; test_case "body refusal evicts" `Quick test_a_body_refusal_evicts_like_an_overflow
+        ; test_case "an unattributed refusal shrinks the range" `Quick
+            test_an_unattributed_refusal_shrinks_the_range
         ; test_case "single block halves" `Quick test_a_single_block_halves_the_last_request
         ; test_case "no ledger halves" `Quick test_without_a_ledger_the_range_halves_until_it_fits
         ; test_case "halving ends at one atom" `Quick
             test_halving_ends_at_one_atom_when_every_request_is_refused
+        ; test_case "halving without a nameable front ends" `Quick
+            test_a_halving_that_cannot_name_its_front_ends_the_sequence
         ; test_case "single atom ends" `Quick test_a_single_atom_ends_the_sequence_with_the_refusal
         ; test_case "single atom arms the last resort" `Quick
             test_a_refused_single_atom_arms_the_last_resort_once
@@ -311,6 +576,12 @@ let () =
         ; test_case "gate" `Quick test_the_gate_blocks_a_retry_after_a_durable_checkpoint
         ; test_case "refusal past the newest block" `Quick
             test_a_refusal_that_survives_the_newest_block_is_returned
+        ; test_case "an eviction that did not move ends" `Quick
+            test_an_eviction_that_did_not_move_ends_the_sequence
+        ; test_case "halving answers whether the retry moves" `Quick
+            test_a_halving_answers_whether_the_retry_moves
+        ; test_case "a stale ledger does not steer the retries" `Quick
+            test_a_ledger_the_history_does_not_hold_does_not_steer_the_retries
         ] )
     ]
 ;;

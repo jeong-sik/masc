@@ -2407,13 +2407,120 @@ let test_assignment_materialize_failure_surfaces_reason () =
     true
     (string_contains msg "messages-http");
   Alcotest.(check bool)
-    "error explains the missing provider-registry SSOT entry"
+    "error explains that neither authority answered"
     true
-    (string_contains msg "no AGENT_CORE provider registry entry");
+    (string_contains msg "nor a declared kind exists");
+  Alcotest.(check bool)
+    "error names the key the operator can set"
+    true
+    (string_contains msg "kind = \"anthropic\"");
   Alcotest.(check bool)
     "error does NOT fall back to the misleading bare not-found wording"
     false
     (string_contains msg "not found among")
+;;
+
+(* An endpoint AGENT_CORE has no provider row for is exactly what the install
+   wizard builds — its provider id is a hash of the operator's answers. Nothing
+   can name the dialect for it, and messages-http has no safe default, so the
+   deployment says it. These three cases fix where that value is read: once
+   where it is the only answer, and twice where declaring it would be a second
+   authority the loader must refuse rather than quietly ignore. *)
+let with_declared_kind ~provider ~kind content =
+  let needle = Printf.sprintf "[providers.%s]\n" provider in
+  let width = String.length needle in
+  let rec insert_after index =
+    if index + width > String.length content
+    then Alcotest.fail ("fixture has no " ^ needle)
+    else if String.equal (String.sub content index width) needle
+    then
+      String.sub content 0 (index + width)
+      ^ Printf.sprintf "kind = %S\n" kind
+      ^ String.sub content (index + width) (String.length content - index - width)
+    else insert_after (index + 1)
+  in
+  insert_after 0
+;;
+
+let test_messages_http_materializes_on_a_declared_kind () =
+  let content =
+    with_declared_kind
+      ~provider:"local"
+      ~kind:"anthropic"
+      runtime_config_messages_http_assignment
+  in
+  with_temp_dir "runtime-declared-kind" @@ fun dir ->
+  let path = Filename.concat dir "runtime.toml" in
+  write_file path content;
+  match load_list_text ~config_path:path with
+  | Ok _ -> ()
+  | Error msg -> Alcotest.fail ("declared kind should materialize the binding: " ^ msg)
+;;
+
+let test_declared_kind_is_refused_when_the_catalog_owns_the_fact () =
+  (* [openrouter] is a shipped catalog provider, so the catalog already states
+     its dialect; a deployment restating it would be a second authority. *)
+  let msg =
+    load_list_error
+      {|
+[runtime]
+default = "openrouter.model"
+
+[providers.openrouter]
+display-name = "OpenRouter"
+protocol = "openai-compatible-http"
+kind = "glm"
+endpoint = "https://openrouter.ai/api/v1"
+
+[models.model]
+api-name = "model"
+max-context = 8000
+tools-support = true
+streaming = true
+
+[openrouter.model]
+is-default = true
+max-concurrent = 1
+|}
+  in
+  Alcotest.(check bool)
+    "refusal names the provider that restated the dialect"
+    true
+    (string_contains msg "provider \"openrouter\" declares kind");
+  Alcotest.(check bool)
+    "refusal says the catalog owns that fact"
+    true
+    (string_contains msg "owns that fact")
+;;
+
+let test_declared_kind_is_refused_where_the_protocol_fixes_it () =
+  let msg =
+    load_list_error
+      {|
+[runtime]
+default = "local.model"
+
+[providers.local]
+display-name = "Local Ollama"
+protocol = "ollama-http"
+kind = "ollama"
+endpoint = "https://ollama.example"
+
+[models.model]
+api-name = "model"
+max-context = 8000
+tools-support = true
+streaming = true
+
+[local.model]
+is-default = true
+max-concurrent = 1
+|}
+  in
+  Alcotest.(check bool)
+    "refusal explains that the protocol already fixes the dialect"
+    true
+    (string_contains msg "already fixes the dialect")
 ;;
 
 let test_assignment_typo_keeps_not_found () =
@@ -2858,6 +2965,18 @@ let () =
             "assignment to an unmaterializable binding surfaces the reason"
             `Quick
             test_assignment_materialize_failure_surfaces_reason
+        ; Alcotest.test_case
+            "messages-http materializes once the deployment declares the dialect"
+            `Quick
+            test_messages_http_materializes_on_a_declared_kind
+        ; Alcotest.test_case
+            "a dialect the catalog already owns is refused, not ignored"
+            `Quick
+            test_declared_kind_is_refused_when_the_catalog_owns_the_fact
+        ; Alcotest.test_case
+            "a dialect the protocol already fixes is refused, not ignored"
+            `Quick
+            test_declared_kind_is_refused_where_the_protocol_fixes_it
         ; Alcotest.test_case
             "assignment typo keeps the not-found-among-runtimes message"
             `Quick

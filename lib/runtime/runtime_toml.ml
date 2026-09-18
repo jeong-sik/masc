@@ -673,6 +673,32 @@ let parse_provider (id : string) (tbl : Otoml.t)
        in
        (* Optional per-provider connect/headers timeout override (agent-core boundary).
           Absent (most providers) leaves the AGENT_CORE kind-based default in force. *)
+       (* The dialect an endpoint speaks, for an endpoint AGENT_CORE has no
+          provider row for. Only [protocol] is required: it names the request
+          shape, and for a catalogued provider the catalog row names the
+          dialect. The two are not the same fact — glm-coding speaks GLM over
+          an OpenAI-compatible shape — so an uncatalogued endpoint has to say
+          which one it is or nothing can choose its capability base. *)
+       let wire_kind_result =
+         match typed_find "a string" path tbl "kind" Otoml.get_string with
+         | Error errors -> Error errors
+         | Ok None -> Ok None
+         | Ok (Some raw) ->
+           (match Llm_provider.Provider_config.provider_kind_of_string raw with
+            | Some kind -> Ok (Some kind)
+            | None ->
+              Error
+                (error
+                   (path ^ ".kind")
+                   (Printf.sprintf
+                      "unknown kind %S — expected one of %s"
+                      raw
+                      (String.concat
+                         ", "
+                         (List.map
+                            Llm_provider.Provider_config.string_of_provider_kind
+                            Llm_provider.Provider_config.all_provider_kinds)))))
+       in
        let connect_timeout_key = Runtime_schema.connect_timeout_s_key in
        let connect_timeout_result =
          strict_float_find path tbl connect_timeout_key
@@ -683,18 +709,21 @@ let parse_provider (id : string) (tbl : Otoml.t)
           , enabled_result
           , healthcheck_result
           , connect_timeout_result
-          , is_non_interactive_result )
+          , is_non_interactive_result
+          , wire_kind_result )
         with
-        | Error errs, _, _, _, _
-        | _, Error errs, _, _, _
-        | _, _, Error errs, _, _
-        | _, _, _, Error errs, _
-        | _, _, _, _, Error errs -> Error errs
+        | Error errs, _, _, _, _, _
+        | _, Error errs, _, _, _, _
+        | _, _, Error errs, _, _, _
+        | _, _, _, Error errs, _, _
+        | _, _, _, _, Error errs, _
+        | _, _, _, _, _, Error errs -> Error errs
         | ( Ok capabilities
           , Ok enabled_opt
           , Ok healthcheck_path
           , Ok connect_timeout_s
-          , Ok is_non_interactive ) ->
+          , Ok is_non_interactive
+          , Ok wire_kind ) ->
           let enabled = match enabled_opt with Some value -> value | None -> true in
           Ok
             { Runtime_schema.id
@@ -702,6 +731,7 @@ let parse_provider (id : string) (tbl : Otoml.t)
             ; display_name
             ; protocol
             ; api_format
+            ; wire_kind
             ; transport
             ; is_non_interactive
             ; credentials

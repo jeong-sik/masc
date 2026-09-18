@@ -34,6 +34,7 @@ let runpod_provider =
   ; display_name = "RunPod"
   ; protocol = "openai-compatible-http"
   ; api_format = Chat_completions_api
+  ; wire_kind = None
   ; transport = Http "https://example-runpod.proxy.runpod.net/v1"
   ; is_non_interactive = true
   ; credentials = Some (Inline "rp-test-token")
@@ -1688,6 +1689,7 @@ let test_dashboard_runtime_probe_auth_header_follows_provider_kind () =
     ; display_name = "Gemini"
     ; protocol = "gemini-http"
     ; api_format = Runtime_schema.Gemini_api
+    ; wire_kind = None
     ; transport = Runtime_schema.Http "https://generativelanguage.googleapis.com/v1beta"
     ; credentials = Some (Runtime_schema.Inline "gm-test-key")
     }
@@ -1732,6 +1734,7 @@ let test_dashboard_runtime_probe_vertex_is_a_stated_skip () =
       display_name = "Vertex"
     ; protocol = "vertex-gemini"
     ; api_format = Runtime_schema.Vertex_gemini_api
+    ; wire_kind = None
     ; transport = Runtime_schema.Http base_url
     ; credentials = None
     }

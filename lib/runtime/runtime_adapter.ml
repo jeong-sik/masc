@@ -282,6 +282,16 @@ let registry_provider_kind = function
   | None -> None
 ;;
 
+(* The catalog answers for a provider it has a row for; a deployment's [kind]
+   answers only for an endpoint it does not. Preferring the registry keeps the
+   catalog the single authority, so a restated kind is dead weight rather than
+   a rival — and the loader refuses it outright. *)
+let effective_provider_kind ?registry_entry (provider : Runtime_schema.provider) =
+  match registry_provider_kind registry_entry with
+  | Some _ as kind -> kind
+  | None -> provider.Runtime_schema.wire_kind
+;;
+
 let messages_api_compatible_provider_kind = function
   | Llm_provider.Provider_config.Anthropic | Llm_provider.Provider_config.Kimi -> true
   | Llm_provider.Provider_config.OpenAI_compat
@@ -290,8 +300,43 @@ let messages_api_compatible_provider_kind = function
   | Llm_provider.Provider_config.Glm -> false
 ;;
 
+(* A declared [kind] that nobody reads is worse than one that is missing: the
+   operator believes they set the dialect and the deployment quietly uses
+   another. So every position where the value cannot be read refuses it instead
+   of ignoring it — the catalog already answering, the protocol already fixing
+   the dialect, or the provider not being an HTTP one at all. *)
+let refuse_unread_wire_kind ~reason (provider : Runtime_schema.provider) =
+  match provider.Runtime_schema.wire_kind with
+  | None -> Ok ()
+  | Some kind ->
+    Error
+      (Printf.sprintf
+         "provider %S declares kind %S, but %s"
+         provider.id
+         (Llm_provider.Provider_config.string_of_provider_kind kind)
+         reason)
+;;
+
 let provider_kind_for_http_provider ?registry_entry (provider : Runtime_schema.provider)
     : (Llm_provider.Provider_config.provider_kind, string) result =
+  let ( let* ) = Result.bind in
+  let* () =
+    match provider.api_format, registry_provider_kind registry_entry with
+    | (Codex_app_server_runtime | Claude_code_runtime | Antigravity_cli_runtime), _ ->
+      refuse_unread_wire_kind
+        provider
+        ~reason:"an official client speaks no HTTP dialect"
+    | (Gemini_api | Vertex_gemini_api | Ollama_api), _ ->
+      refuse_unread_wire_kind
+        provider
+        ~reason:
+          (Printf.sprintf "protocol %s already fixes the dialect" provider.protocol)
+    | (Chat_completions_api | Messages_api), Some _ ->
+      refuse_unread_wire_kind
+        provider
+        ~reason:"the AGENT_CORE catalog has a row for it and owns that fact"
+    | (Chat_completions_api | Messages_api), None -> Ok ()
+  in
   match provider.api_format with
   | Codex_app_server_runtime | Claude_code_runtime | Antigravity_cli_runtime ->
     Error
@@ -307,13 +352,13 @@ let provider_kind_for_http_provider ?registry_entry (provider : Runtime_schema.p
        registry metadata is absent. Messages API deliberately fails closed
        below because there is no safe Anthropic-style default. *)
     Ok
-      (match registry_provider_kind registry_entry with
+      (match effective_provider_kind ?registry_entry provider with
        | Some Llm_provider.Provider_config.Ollama ->
          Llm_provider.Provider_config.OpenAI_compat
        | Some kind -> kind
        | None -> Llm_provider.Provider_config.OpenAI_compat)
   | Messages_api ->
-    (match registry_provider_kind registry_entry with
+    (match effective_provider_kind ?registry_entry provider with
      | Some kind when messages_api_compatible_provider_kind kind -> Ok kind
      | Some kind ->
        Error
@@ -326,8 +371,10 @@ let provider_kind_for_http_provider ?registry_entry (provider : Runtime_schema.p
      | None ->
        Error
          (Printf.sprintf
-            "provider %S uses protocol %s, but no AGENT_CORE provider registry entry exists; \
-             messages-http requires registry kind SSOT"
+            "provider %S uses protocol %s, but neither an AGENT_CORE provider \
+             registry entry nor a declared kind exists; messages-http has no \
+             safe default dialect, so an endpoint the catalog does not know \
+             must declare kind = \"anthropic\" or kind = \"kimi\""
             provider.id
             provider.protocol))
 ;;
@@ -478,7 +525,12 @@ let model_capabilities_override_of_model_spec
   | None ->
     Option.map
       (fun (caps : Runtime_schema.model_capabilities) ->
-         let base = Llm_provider.Capabilities.default_capabilities in
+         (* The wire's own preset, not the bare defaults: an uncatalogued model
+            still runs on a known dialect, and that dialect decides the fields
+            no runtime block states (tool content shape, output budget field,
+            reasoning replay). Fields the block does state are assigned below
+            and override it. *)
+         let base = Llm_provider.Capabilities.capabilities_of_kind wire in
          { base with
            max_context_tokens = spec.max_context
          ; max_output_tokens = caps.max_output_tokens

@@ -365,6 +365,21 @@ let warn_optional_exact_output_lane registry ~lane_id ~feature =
    slot that runs on it (#37004). The slots are the bindings. *)
 let exact_output_targets_of_runtimes () =
   let runtimes, (_ : string list) = Runtime.runtimes_and_media_failover () in
+  (* An exact-output slot resolves against the AGENT_CORE catalog, which speaks
+     only of endpoints. A subscription CLI has none — it is a local binary named
+     by [command] — so declaring one as a target only to have the binding
+     resolver reject it reports a missing catalog provider where the truth is
+     that this kind of runtime does no exact output. *)
+  let runtimes =
+    List.filter
+      (fun (rt : Runtime.t) ->
+         match rt.execution with
+         | Runtime_execution.Agent_core _ -> true
+         | Runtime_execution.Codex_app_server _
+         | Runtime_execution.Claude_code _
+         | Runtime_execution.Antigravity_cli _ -> false)
+      runtimes
+  in
   List.map
     (fun (rt : Runtime.t) : Exact_output.declared_target ->
        { target_ref = rt.id

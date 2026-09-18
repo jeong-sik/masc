@@ -102,6 +102,25 @@ let of_json ?home_dir = function
     let canonical_spec = Yojson.Safe.to_string (`Assoc (List.sort (fun (a,_) (b,_) -> String.compare a b) fields)) in
     Ok {choice;model;context;tools;streaming;transport;canonical_spec}
   | _ -> invalid "object or duplicate fields"
+(* Mirrors the loader's rule: a protocol that already determines the dialect
+   refuses a restated one rather than ignoring it, so the wizard writes [kind]
+   only where it will be read. Listed per choice so a new transport has to
+   decide rather than inherit a catch-all. *)
+let protocol_fixes_dialect = function
+  | Ollama -> true
+  | Llama_cpp | Vllm | Openai_compatible | Messages -> false
+  | Claude_code | Codex | Antigravity -> true
+
+(* The operator's endpoint is one AGENT_CORE has no provider row for, so the
+   deployment has to name the dialect itself; [protocol] only names the request
+   shape. Same spellings as the catalog's own [kind]. *)
+let wire_kind_name = function
+  | Openai_compat -> "openai_compat"
+  | Anthropic -> "anthropic"
+  | Kimi -> "kimi"
+  | Glm -> "glm"
+  | Ollama_kind -> "ollama"
+
 let quoted value = Yojson.Safe.to_string (`String value)
 let table ?(array=false) path fields =
   "\n" ^ (if array then "[[" else "[") ^ String.concat "." (List.map quoted path)
@@ -115,7 +134,9 @@ let render spec =
   let runtime_id = provider ^ "." ^ model_key in
   let fields = ["display-name",`String (name ^ " / " ^ spec.model);"protocol",`String (protocol spec.choice)] in
   let transport_fields,credential = match spec.transport with
-    | Http h -> ["endpoint",`String h.endpoint],h.credential
+    | Http h ->
+      (if protocol_fixes_dialect spec.choice then [] else ["kind",`String (wire_kind_name h.kind)])
+      @ ["endpoint",`String h.endpoint],h.credential
     | Client c -> ["command",`String c.command;"is-non-interactive",`Bool true]
       @ (match c.timeout with None -> [] | Some timeout -> ["timeout-s",`Float timeout]),
       Option.map (fun path -> File_reference path) c.oauth in
@@ -131,11 +152,14 @@ let render spec =
     (* The wizard's provider id carries a hash of the operator's answers, so no
        catalog row can ever name it and the binding's model is one AGENT_CORE
        has no entry for. Declaring the table is how a deployment says "these
-       are this model's capabilities, defaults where I stated nothing":
-       [Provider_config.capabilities_for_config_model] answers from the
-       declaration and never reaches the catalog, which is what keeps the
-       startup gate from rejecting the binding as catalog-missing. *)
-    ^ table ["models";model_key;"capabilities"] []
+       are this model's capabilities, the dialect's preset where I stated
+       nothing": [Provider_config.capabilities_for_config_model] answers from
+       the declaration and never reaches the catalog, which is what keeps the
+       startup gate from rejecting the binding as catalog-missing. Nobody
+       verified this model's reasoning stream, so it is declared off rather
+       than left to the wire default. *)
+    ^ table ["models";model_key;"capabilities"]
+        ["reasoning-streaming-format",`String "none"]
     ^ table [provider;model_key] (["wizard-default",`Bool true] @ if spec.choice=Ollama then ["num-ctx",`Int spec.context] else []) in
   {runtime_id;runtime_toml=runtime}
 let render_json value = `Assoc ["runtime_id",`String value.runtime_id;"runtime_toml",`String value.runtime_toml]

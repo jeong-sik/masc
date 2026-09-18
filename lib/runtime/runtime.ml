@@ -1162,9 +1162,13 @@ let missing_reference_error
   in
   Printf.sprintf
     "%s: cannot use degraded runtime boot because catalog-missing runtime ids \
-     are referenced by routing config: %s. %s Add catalog rows to the AGENT_CORE \
-     embedded catalog or remove those routing references; MASC will not erase \
-     explicit runtime intent into [runtime].default fallback."
+     are referenced by routing config: %s. %s A model AGENT_CORE ships no row \
+     for is declared by the deployment that runs it: give its [models.<id>] a \
+     [models.<id>.capabilities] table, which is how a deployment vouches for a \
+     model of its own. A connection the install wizard wrote before this became \
+     the contract has no such table, and re-running the wizard writes one. \
+     Otherwise remove those routing references; MASC will not erase explicit \
+     runtime intent into [runtime].default fallback."
     config_path
     (String.concat "; " references)
     default_fallback_explanation

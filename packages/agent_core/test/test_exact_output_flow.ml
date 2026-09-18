@@ -2196,6 +2196,7 @@ let test_measurement_predispatch_failure_records_zero_dispatch () =
     Eio_main.run
     @@ fun env ->
     let net = Eio.Stdenv.net env in
+    let clock = Eio.Stdenv.clock env in
     let dead_url = Printf.sprintf "http://127.0.0.1:%d" (fresh_port ()) in
     with_catalog
       [ catalog_entry

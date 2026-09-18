@@ -3,7 +3,7 @@ rfc: "keeper-context-window-in-tokens"
 title: "Size the Keeper transmission window in tokens; the request-body cap only judges"
 status: Active
 created: 2026-09-15
-updated: 2026-09-17
+updated: 2026-09-18
 author: vincent
 related: ["memory-os-bounded-context-and-librarian-curator", "tool-results-age-out-of-context"]
 ---
@@ -496,3 +496,156 @@ origin/main `64ef87af83` 의 원장은 T 를 실은 usage 로도 전체와 묶�
 - 과제 성공률과 Librarian 사실의 갱신·모순 오류(§6.4 의 약점).
 - 지연 p50/p90 을 cache read 토큰으로 나누어 본다.
 - usage 미보고 턴 비율(레인별).
+
+## 13. 개정 (2026-09-18) — 한 사실은 한 벌만 적는다
+
+라이브에서 하루 동안 세 건이 터졌고, 셋 다 이 RFC 의 §1 결정 위에 있었다. 결정 1·2 를 뒤집는다.
+
+### 13.0 원칙 (운영자, 2026-09-18)
+
+**한 사실은 한 곳에만 적는다.** 오늘 터진 것은 전부 같은 사실이 두 벌 있어서 생긴 일이다.
+
+| 사실 | 지금 몇 벌 | 결과 |
+|---|---|---|
+| 어느 provider 로 어느 모델을 부른다 | 2 (`runtime.toml` 바인딩 / overlay `[[targets]]`) | `librarian_exact` 가 선언 없는 슬롯을 가리킨 채 돌았고, `#36984` 이 deadline 을 요구하자 세 슬롯이 한꺼번에 떨어졌다 |
+| 이 모델의 창은 얼마인가 | 2 (`runtime.toml max-context` / overlay `max_context_tokens`) | 둘이 싸우면 작은 쪽이 이긴다(`Override_clamped_by_capability`). 그래서 배포가 카탈로그 값을 받아 적는 8행이 생겼다 |
+| 이 요청은 얼마나 커도 되나 | 3 (`max-prompt-bytes` / `context-high·low-water-tokens` / 공급자 판정) | 셋이 각자 답해서 `critic` 이 2시간 죽었다 |
+| 어디서부터 실을까 | 4 (`Ledger` / `Turn_record` / `Unfinished_turn` / `Whole_history`) | 넷 다 못 찾으면 이력 전체(22.7 MB) |
+| 남은 예산은 얼마인가 | 20 (`*_bytes` 이름, 전부 `int`) | `capacity - reserved - undroppable` 을 잘못 써도 컴파일러가 안 잡는다 |
+
+두 벌을 맞춰 두라고 주석으로 부탁하는 자리가 여러 곳이다. 부탁은 지켜지지 않는다.
+
+이 개정의 모든 항목은 같은 조치다 — **두 번째 벌을 지운다.**
+
+### 13.1 무엇이 일어났나 (실측)
+
+`system_log_2026-09-18.jsonl` 과 `provider-inputs/2026-09/18.jsonl` 기준.
+
+| 관측 | 값 |
+|---|---|
+| `origin=whole_history` | 288회 |
+| `halved_after_refusal` | 101회 (`#1` 56 · `#2` 44 · `#3` 1) |
+| 한 요청 최대 조립 | 22,737,531 B (`atoms=8487/8487`) |
+| CLI 턴 조립 최대 | 45,331,049 B (`msx-retro-mania`) |
+| CLI 턴 조립 중앙값 | 131 B |
+| 2h20m 업로드 합 | 2,408.5 MB / 227 요청 |
+| 도구 결과가 메시지 바이트에서 차지하는 몫 | 71% (RFC-0363 측정, 5,540개 20.0MB 중 externalize 임계값을 넘은 것은 1개) |
+
+중앙값 131 B 와 최대 45 MB 는 같은 분포가 아니다. 정상 턴은 사실상 아무것도 싣지 않고, 씨앗을 잃은 턴이 이력 전체를 싣는다.
+
+### 13.2 결정 1 을 뒤집는다 — 창 크기를 숫자로 정하지 않는다
+
+`context-high-water-tokens` / `context-low-water-tokens` 를 없앤다. 라이브는 11개 바인딩 중 9개가 `100000` / `70000` 을 적고 있었고, 그 값을 고른 근거는 어디에도 없다.
+
+같은 이유로 `max-prompt-bytes` 를 없앤다. 이 값이 없는 두 바인딩(`claude_code.claude-sonnet-5`, `antigravity_subscription.gemini-3-8-flash-high`)에만 eviction mark 가 없었다 — 밀어내기가 없는 자리에 바이트 캡을 대신 박아 둔 것이고, 대체재로 동작하지 않았다. `critic` 은 `undroppable_bytes=169,918 > capacity_bytes=131,072` 로 2시간 동안 120회 실패했다. 이력을 0으로 잘라도 들어갈 수 없는 상태였다.
+
+두 값이 사라지면 그 값을 나눠 쓰던 중간값도 사라진다. `runtime_model_input_tail_window` 한 모듈에 `*_bytes` 이름이 20종 있고 전부 `int` 다. `capacity - reserved - undroppable` 을 `capacity - undroppable` 로 잘못 써도 컴파일러가 잡지 않는다.
+
+### 13.3 결정 2 를 뒤집는다 — 이분을 폐기한다
+
+§10 은 "이유를 우리 타입으로 못 읽는 거절"을 근거로 범위를 절반씩 좁히기로 했다. 이 추론에 비약이 있다. **거절 사유를 못 읽는 것과 크기를 모르는 것은 다르다.**
+
+```ocaml
+let halve ~first_atom ~atom_count =
+  let carried = atom_count - first_atom in
+  if carried <= 1 then None else Some (first_atom + (carried / 2))
+```
+
+인자에 바이트가 없다. 거절은 바이트 때문인데 자르는 것은 atom 개수다. 큰 도구 결과 하나와 작은 atom 8,000개가 있으면 반으로 접어도 범인이 남고 무관한 대화만 버려진다.
+
+호출자는 `measure_message_bytes` 를 이미 받고 있고, 직전에 성공한 요청의 크기도 안다. 그리고 §92 는 HTTP 층의 "C' 절반"을 이미 **부당**으로 판정했다 — §10 은 같은 모양을 atom 축에 복제했다.
+
+탐색 비용도 비대칭이다. 한 번 틀릴 때마다 22.7 MB 를 올려 보내고 거절을 받는다.
+
+`halve`, `Halved_after_refusal`, `Refused_range`, `last_resort` 를 없앤다. 거절은 오류로 올린다.
+
+### 13.4 `Whole_history` 를 없앤다
+
+```ocaml
+type origin =
+  | Carried of source
+  | Whole_history  (** No front to start from: everything, ... *)
+```
+
+"시작할 자리가 없다"를 "전부 보낸다"로 매핑한다. `software-development.md` §AI 코드 생성 안티패턴 2 가 금지하는 형태다 — unknown 을 편리한 기본값으로 압축하지 않는다.
+
+틀리는 비용도 한쪽으로만 크다. 작게 틀리면 맥락이 조금 모자라고 다음 턴에 보태면 된다. 크게 틀리면 22.7 MB 를 올리고 거절당하고 턴이 죽고 다음 턴에 같은 일이 반복된다.
+
+타입도 축이 섞여 있다. `Carried of source` 는 앞머리가 *어디서 왔는지*를 말하는데 `Whole_history` 는 *무엇을 실었는지*를 말한다.
+
+### 13.5 §1.3 은 이미 답을 적어 두었다
+
+> masc 에는 컴팩션(LLM 요약)이 없다. librarian 이 수시로 기억을 정리하고, **창은 최근 원문만 담는다.**
+
+창이 최근 원문만 담으면 8,487 atom / 22.7 MB 가 나올 수 없다. 아래 3,438줄은 그 선언이 지켜지지 않는 동안 이력을 매 턴 구겨 넣으려는 장치다.
+
+| 모듈 | 줄 | 답하려는 질문 |
+|---|---|---|
+| `runtime_model_input_tail_window` | 908 | 이 요청에 몇 바이트가 들어가나 |
+| `keeper_model_input_ledger` | 816 | 지난 요청은 어디서 시작했나 |
+| `keeper_next_request_forecast` | 618 | 다음 요청은 얼마나 될까 |
+| `keeper_model_input_demotion` | 399 | 무엇을 마커로 바꾸나 |
+| `keeper_carried_front` | 392 | 이번엔 어디서 시작하나 |
+| `keeper_carried_range` | 209 | 앞머리를 얼마나 미나 |
+| `keeper_context_overflow_shrink_state` | 96 | 다음엔 얼마로 줄이나 |
+| 합계 | **3,438** | 전용 테스트 8종 |
+
+### 13.6 남는 설계
+
+운영자 결정(2026-09-18): **librarian 이 대화 이력까지 정리한다.**
+
+- 보내는 범위는 librarian 이 마지막으로 흡수한 지점부터 지금까지다.
+- 그 앞은 이미 기억에 있으므로 다시 보내지 않는다.
+- 도구 결과는 조립 시점에 늘 마커로 나간다 (이력 바이트의 71%). 지금은 거절 경로의 `last_resort` 에서만 켜진다 — #28845 이 조립 시점에서 거절 경로로 옮긴 것을 되돌린다.
+- 거절은 오류로 올린다. 범위를 좁혀 다시 보내지 않는다.
+
+경계가 고른 숫자가 아니라 **일어난 일**이라는 점이 핵심이다. `context-high-water-tokens = 100000` 은 왜 10만인지 아무도 답하지 못한다. "librarian 이 흡수한 지점"은 고를 것이 없고 틀릴 수도 없다.
+
+지우는 것은 *전송*이지 *기록*이 아니다. durable 이력은 evidence 로 남긴다. 달라지는 것은 이미 기억으로 옮겨진 것을 매 턴 다시 실어 보내지 않는다는 것뿐이다.
+
+### 13.7 선행 조건
+
+지금 librarian 은 Memory OS 스냅숏만 갈아끼우고 keeper 이력에는 아무 표시도 남기지 않는다. "어디까지 흡수됐나"를 물어볼 자리가 없다.
+
+**만들 것은 그 표시 하나다.** 표시가 라이브에서 도는 것을 확인한 뒤에 13.2~13.4 를 걷어낸다. 순서를 바꾸면 대체할 것이 없는 상태에서 45 MB 가 아무 제지 없이 나간다.
+
+### 13.8 overlay 를 비운다
+
+`agent-core-models-overlay.toml` 은 183줄에 세 종류가 섞여 있다. 세 종류 모두 두 번째 벌이다.
+
+| 섹션 | 개수 | 첫 번째 벌은 어디 |
+|---|---|---|
+| `[[models]]` | 8 | 모델 사실은 카탈로그, 이 배포가 쓰는 창은 `runtime.toml max-context` |
+| `[[providers]]` | 1 | `runtime.toml [providers.*]` |
+| `[[targets]]` | 2 | 이 배포의 레인 배선. 가리키는 `exact_output_lanes` 가 `runtime.toml` 에 있다 |
+
+`[[models]]` 8행이 존재하는 이유는 파일 머리 주석이 적어 둔 한 문장이다 — "행이 없으면 provider 기본 프리셋의 context(OpenAI 호환 128K 추정값)가 `runtime.toml max-context` 를 잘라낸다."
+
+그 추정값은 코드에 더 이상 없다. `openai_compat_chat_capabilities` 는 `max_context_tokens = None` 이고, 주석이 이유까지 적어 두었다 — *"A family-level guess becomes the limit of every catalog-silent model ... Unknown means unknown."* **설정 파일의 경고만 옛날 것으로 남아 있다.**
+
+남은 것은 clamp 다.
+
+```ocaml
+(* runtime.ml:931-935 *)
+match rt.model.max_context, capability_cap with
+| Some o, Some c when o > c -> Some (c, Override_clamped_by_capability)
+| Some o, (Some _ | None)   -> Some (o, Override)
+| None,   Some c            -> Some (c, Capability)
+| None,   None              -> None
+```
+
+배포가 선언한 창이 카탈로그가 아는 값보다 크면 **선언이 진다.** 그래서 배포는 카탈로그 값을 자기 값과 같게 맞춰 두는 수밖에 없었고, 그것이 8행이다. 방패를 없애려면 clamp 를 먼저 없애야 한다.
+
+**순서**
+
+1. clamp 제거. 첫 줄을 `Some (o, Override)` 로 바꾼다 — 선언이 이기고, 카탈로그는 선언이 없을 때만 답한다. `None, None` 이 로드 실패인 것은 그대로 둔다(RFC-0206 §2.1, 조용한 fallback 없음).
+2. `[[models]]` 8행 삭제.
+3. `[[providers]]` · `[[targets]]` 를 `runtime.toml` 로 옮긴다.
+4. overlay 파일 삭제.
+
+`max-context` 는 모델 사실의 복사본이 아니라 **바인딩의 선택**이다. 라이브가 이미 그렇게 쓰고 있다 — `glm-5.3-flash` 하나를 로컬 이름 둘로 잡아 창을 1,048,576 과 1,000,000 로 다르게 준다. 같은 모델을 좁은 창으로 쓰고 싶으면 바인딩을 하나 더 만드는 것이 답이고, overlay 행을 고치는 것이 아니다.
+
+### 13.9 이 개정이 닫지 않는 것
+
+- `pinned` 169 KB 의 구성. `critic` 이 다시 커지면 같은 벽을 만난다.
+- `#36984` 이 요구하는 deadline 을 `[[targets]]` 두 슬롯이 선언하지 않은 문제(#37004). 13.8 의 3번에서 같이 정리된다.

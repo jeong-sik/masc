@@ -124,6 +124,15 @@ type reasoning_streaming_format =
   | Template_reasoning_streaming
 [@@deriving show, eq]
 
+type reasoning_replay_override =
+  Llm_provider.Capabilities.reasoning_replay_override =
+  | Default_reasoning_replay
+  | Force_no_replay
+  | Force_drop_without_tool_preserve_with_tool
+  | Force_latest_user_turn_tool_calls
+  | Force_preserve_always
+[@@deriving show, eq]
+
 (** Per-model capabilities, mirroring AGENT_CORE [Llm_provider.Capabilities] for the
     fields callers branch on. Fields already present on {!model_spec}
     ([tools_support]/[thinking_support]/[max_context]/[streaming]) are not
@@ -137,6 +146,7 @@ type model_capabilities =
   ; thinking_control_format : thinking_control_format
   ; declared_thinking_control_format : thinking_control_format option
   ; reasoning_streaming_format : reasoning_streaming_format option
+  ; reasoning_replay_override : reasoning_replay_override option
   ; supports_image_input : bool
   ; supports_audio_input : bool
   ; supports_video_input : bool
@@ -161,6 +171,7 @@ let model_capabilities_default =
   ; thinking_control_format = No_thinking_control
   ; declared_thinking_control_format = None
   ; reasoning_streaming_format = None
+  ; reasoning_replay_override = None
   ; supports_image_input = false
   ; supports_audio_input = false
   ; supports_video_input = false

@@ -839,6 +839,31 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
                  raw
                  Llm_provider.Capability_vocab.reasoning_streaming_format_syntax)))
   in
+  (* The catalog spells these values with underscores; a TOML key here is
+     spelled with dashes, so an operator writes one or the other. Both reach
+     the same vocabulary rather than one of them failing on punctuation. *)
+  let reasoning_replay_result =
+    match typed_find "a string" path tbl "reasoning-replay" Otoml.get_string with
+    | Error errors -> Error errors
+    | Ok None -> Ok None
+    | Ok (Some raw) ->
+      let spelled_with_underscores = String.map (function '-' -> '_' | c -> c) raw in
+      (match
+         Llm_provider.Capability_vocab.reasoning_replay_override_of_string
+           spelled_with_underscores
+       with
+       | Some override -> Ok (Some override)
+       | None ->
+         Error
+           (error
+              (path ^ ".reasoning-replay")
+              (Printf.sprintf
+                 "unknown reasoning-replay %S — expected one of %s"
+                 raw
+                 (String.concat
+                    ", "
+                    Llm_provider.Capability_vocab.reasoning_replay_values))))
+  in
   let b_default_true key =
     typed_find_or "a boolean" path tbl key Otoml.get_boolean ~default:true
   in
@@ -874,6 +899,7 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
   let ( let* ) = Result.bind in
   let* thinking_control_format = thinking_control_format_result in
   let* reasoning_streaming_format = reasoning_streaming_format_result in
+  let* reasoning_replay_override = reasoning_replay_result in
   let* max_output_tokens = positive_int_opt_field "max-output-tokens" in
   let* supports_tool_choice = b "supports-tool-choice" in
   let* supports_required_tool_choice = b "supports-required-tool-choice" in
@@ -903,6 +929,7 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
          | None -> None
          | Some _ -> Some thinking_control_format)
     ; reasoning_streaming_format
+    ; reasoning_replay_override
     ; supports_image_input
     ; supports_audio_input
     ; supports_video_input

@@ -495,6 +495,14 @@ thinking-control-format = "none"
 # thinking-control-format above is the request axis only; without this line the
 # response axis resolves to reading no field and the reasoning is discarded.
 reasoning-streaming-format = "delta:reasoning"
+# Which prior-turn reasoning this endpoint gets back. Absent keeps the
+# catalog's answer for the model. Declare it where the endpoint's rule differs
+# from the model's own API: DeepSeek's API requires every prior
+# reasoning_content on a request carrying tools and returns 400 without it
+# (api-docs.deepseek.com/guides/thinking_mode/, read 2026-09-18), while the
+# same weights served by ollama.com carry no such rule and its cloud model
+# cards say thoughts from previous turns must not be in the history.
+# reasoning-replay = "latest_user_turn_tool_calls"
 supports-image-input = false
 supports-multimodal-inputs = false
 

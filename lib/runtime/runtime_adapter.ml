@@ -456,10 +456,14 @@ let model_capabilities_override_of_model_spec
        (match
           runtime_caps.declared_thinking_control_format,
           runtime_caps.reasoning_streaming_format,
+          runtime_caps.reasoning_replay_override,
           runtime_caps.max_output_tokens
         with
-        | None, None, None -> None
-        | thinking_control_format, reasoning_streaming_format, max_output_tokens ->
+        | None, None, None, None -> None
+        | ( thinking_control_format
+          , reasoning_streaming_format
+          , reasoning_replay_override
+          , max_output_tokens ) ->
           Some
             { catalog_caps with
               max_output_tokens =
@@ -474,6 +478,10 @@ let model_capabilities_override_of_model_spec
                 Option.value
                   reasoning_streaming_format
                   ~default:catalog_caps.reasoning_streaming_format
+            ; reasoning_replay_override =
+                Option.value
+                  reasoning_replay_override
+                  ~default:catalog_caps.reasoning_replay_override
             }))
   | None ->
     Option.map
@@ -496,6 +504,10 @@ let model_capabilities_override_of_model_spec
              Option.value
                caps.reasoning_streaming_format
                ~default:base.reasoning_streaming_format
+         ; reasoning_replay_override =
+             Option.value
+               caps.reasoning_replay_override
+               ~default:base.reasoning_replay_override
          ; supports_response_format_json = caps.supports_response_format_json
          ; supports_structured_output = caps.supports_structured_output
          ; supports_multimodal_inputs = caps.supports_multimodal_inputs

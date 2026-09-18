@@ -110,6 +110,23 @@ type reasoning_streaming_format =
   | Template_reasoning_streaming
 [@@deriving show, eq]
 
+(** Which prior-turn reasoning a request replays. Pinned on the model for the
+    same reason as the thinking-control shape: one physical model served by
+    two endpoints can owe two different answers. DeepSeek's own API requires
+    every prior [reasoning_content] back on a tools request and refuses with
+    400 otherwise; the same weights served elsewhere carry no such rule.
+
+    Re-exports the AGENT_CORE enum so a variant change breaks the build here
+    rather than leaving a stale mirror. *)
+type reasoning_replay_override =
+  Llm_provider.Capabilities.reasoning_replay_override =
+  | Default_reasoning_replay
+  | Force_no_replay
+  | Force_drop_without_tool_preserve_with_tool
+  | Force_latest_user_turn_tool_calls
+  | Force_preserve_always
+[@@deriving show, eq]
+
 type model_capabilities =
   { max_output_tokens : int option
   ; supports_tool_choice : bool
@@ -121,6 +138,9 @@ type model_capabilities =
       (** Exact TOML presence. [None] preserves an Agent Core catalog value. *)
   ; reasoning_streaming_format : reasoning_streaming_format option
       (** Exact streaming side-channel for this transport binding. *)
+  ; reasoning_replay_override : reasoning_replay_override option
+      (** Exact TOML presence. [None] preserves the AGENT_CORE catalog's
+          answer for this model. *)
   ; supports_image_input : bool
   ; supports_audio_input : bool
   ; supports_video_input : bool

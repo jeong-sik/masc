@@ -672,9 +672,6 @@ reasoning_streaming_format = "delta:reasoning"
 # same boundary: this endpoint's rule covers the active sequence, not every
 # prior turn.
 reasoning_replay = "latest_user_turn_tool_calls"
-# The endpoint takes no thinking-control field; the dialect's own default is
-# what runs.
-thinking_control_format = "none"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true

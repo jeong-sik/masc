@@ -1142,6 +1142,14 @@ class CompiledRuntimeSetup(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertIn(b'operator/model-exact', first[1])
 
+    def test_a_credential_file_spec_lands_in_the_binding_credentials_table(self):
+        import tomllib
+        configured = dict(spec('messages'), credential_file='/private/saved-key', request_path='/v1/messages')
+        _, runtime = SETUP.render(configured, BINARY)
+        providers = tomllib.loads(runtime.decode())['providers']
+        self.assertEqual(next(iter(providers.values()))['credentials'],
+                         dict(type='file', path='/private/saved-key'))
+
     def test_selection_revision_detects_later_workspace_edit_before_any_publish(self):
         fixture = ROOT / 'scripts/fixtures/release-evidence'
         with tempfile.TemporaryDirectory(prefix='runtime-native-cas-') as directory:

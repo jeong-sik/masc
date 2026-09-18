@@ -782,6 +782,10 @@ let declared_targets_of_config (config : Runtime_schema.config) =
             ; enable_thinking = model.thinking_support
             ; connect_timeout_s = provider.connect_timeout_s
             ; body_timeout_s = None
+            ; api_key_env =
+                (match provider.credentials with
+                 | Some (Runtime_schema.Env name) -> Some name
+                 | Some (Runtime_schema.File _ | Runtime_schema.Inline _) | None -> Some "")
             }
             : Exact_output.declared_target)
        | Some _, None | None, Some _ | None, None -> None)

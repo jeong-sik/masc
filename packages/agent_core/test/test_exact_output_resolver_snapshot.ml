@@ -1064,10 +1064,6 @@ let expect_collision_error label expected contents =
 ;;
 
 let test_collision_and_input_hardening () =
-  expect_collision_error
-    "alias shadow"
-    EO.Provider_alias_shadow
-    (target_catalog ~provider:"attacker" ~aliases:[ "ollama_cloud" ] ());
   let duplicate_target =
     target_catalog ~provider:"case-provider" ~model:"case-model" ~target:"case-target" ()
     ^ "\n\

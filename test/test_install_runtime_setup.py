@@ -377,7 +377,7 @@ class RuntimeSetupAdapter(unittest.TestCase):
             payload = json.loads(path.read_text())
             self.requests.append((path, payload))
         if command == 'runtime-setup-render':
-            value = dict(runtime_id='native.' + payload['model'], runtime_toml='native runtime', model_overlay_toml='native overlay')
+            value = dict(runtime_id='native.' + payload['model'], runtime_toml='native runtime')
         elif command == 'runtime-setup-inventory':
             value = dict(runtimes=[dict(id='original.model')], setup_revision=self.revision)
         elif command == 'runtime-setup-batch':
@@ -389,8 +389,8 @@ class RuntimeSetupAdapter(unittest.TestCase):
 
     def test_native_identity_and_private_transport_are_used_without_local_rendering(self):
         with patch.object(SETUP.subprocess, 'run', side_effect=self.native):
-            identity, runtime, overlay = SETUP.render(spec(), '/fixture/masc')
-        self.assertEqual((identity, runtime, overlay), ('native.operator/model-exact', b'native runtime', b'native overlay'))
+            identity, runtime = SETUP.render(spec(), '/fixture/masc')
+        self.assertEqual((identity, runtime), ('native.operator/model-exact', b'native runtime'))
         self.assertFalse(self.requests[0][0].exists())
         with self.assertRaises(SETUP.SetupError):
             SETUP.render(spec(), None)
@@ -701,12 +701,11 @@ class NamedCatalogSources(unittest.TestCase):
         self.assertIn(b'"enable_thinking" = false', overlay)
 
     def test_render_skips_the_provider_section_the_workspace_config_declares(self):
-        _, runtime, overlay = SETUP.render(dict(named_spec('z-ai/glm-5.3'), provider_declared=True,
-                                                thinking_disable_encodable=False, reasoning_effort=None))
+        _, runtime = SETUP.render(dict(named_spec('z-ai/glm-5.3'), provider_declared=True,
+                                      thinking_disable_encodable=False, reasoning_effort=None))
         self.assertNotIn(b'"providers"', runtime)
         self.assertNotIn(b'reasoning-effort', runtime)
         self.assertNotIn(b'wizard-default', runtime)
-        self.assertNotIn(b'enable_thinking', overlay)
 
     def test_resolve_rejects_a_served_id_the_catalog_does_not_curate(self):
         source = self.catalog_sources(self.INVENTORY)[0]
@@ -1168,17 +1167,16 @@ class CompiledRuntimeSetup(unittest.TestCase):
             base = Path(directory)
             config = base / '.masc/config'
             config.mkdir(parents=True)
-            for name in ('runtime.toml', 'agent-core-models-overlay.toml'):
-                (config / name).write_bytes((fixture / name).read_bytes())
+            (config / 'runtime.toml').write_bytes((fixture / 'runtime.toml').read_bytes())
             env = {k:v for k,v in os.environ.items() if not k.startswith(('MASC_', 'AGENT_CORE_'))}
             with patch.dict(os.environ, env, clear=True):
                 original_selection = SETUP.configured_inventory(BINARY, base)
                 runtime = config / 'runtime.toml'
                 runtime.write_bytes(runtime.read_bytes() + b'\n# later operator edit\n')
-                before = [p.read_bytes() for p in (runtime, config / 'agent-core-models-overlay.toml')]
+                before = runtime.read_bytes()
                 with self.assertRaisesRegex(SETUP.SetupError, 'Configuration changed'):
                     SETUP.configure_many(BINARY, base, [spec()], expected_revision=original_selection['setup_revision'])
-                self.assertEqual(before, [p.read_bytes() for p in (runtime, config / 'agent-core-models-overlay.toml')])
+                self.assertEqual(before, runtime.read_bytes())
 
     def test_messages_kind_and_path_are_preserved_in_native_catalog_overlay(self):
         import tomllib
@@ -1198,8 +1196,7 @@ class CompiledRuntimeSetup(unittest.TestCase):
             base = Path(tmp)
             config = base / '.masc/config'
             config.mkdir(parents=True)
-            for name in ('runtime.toml', 'agent-core-models-overlay.toml'):
-                (config / name).write_bytes((fixture / name).read_bytes())
+            (config / 'runtime.toml').write_bytes((fixture / 'runtime.toml').read_bytes())
             models = [spec(), dict(spec(), model='second-owned-model')]
             ids = [SETUP.render(model, BINARY)[0] for model in models]
             env = {k:v for k,v in os.environ.items() if not k.startswith(('MASC_', 'AGENT_CORE_'))}
@@ -1224,8 +1221,7 @@ class CompiledRuntimeSetup(unittest.TestCase):
         def seeded(tmp):
             config = Path(tmp) / '.masc/config'
             config.mkdir(parents=True)
-            for name in ('runtime.toml', 'agent-core-models-overlay.toml'):
-                (config / name).write_bytes((ROOT / 'config' / name).read_bytes())
+            (config / 'runtime.toml').write_bytes((ROOT / 'config/runtime.toml').read_bytes())
             return Path(tmp), config / 'runtime.toml'
         def librarian(runtime):
             return tomllib.loads(runtime.read_text())['runtime']['exact_output_lanes']['librarian_exact']
@@ -1255,8 +1251,7 @@ class CompiledRuntimeSetup(unittest.TestCase):
                 base = Path(tmp)
                 config = base / '.masc/config'
                 config.mkdir(parents=True)
-                for name in ('runtime.toml', 'agent-core-models-overlay.toml'):
-                    (config / name).write_bytes((fixture / name).read_bytes())
+                (config / 'runtime.toml').write_bytes((fixture / 'runtime.toml').read_bytes())
                 selected = spec(choice)
                 if choice == 'antigravity':
                     token = base / 'credential-file'
@@ -1267,10 +1262,10 @@ class CompiledRuntimeSetup(unittest.TestCase):
                     result = SETUP.configure(BINARY, base, selected)
                     self.assertEqual(result['validation'], 'passed')
                     self.assertEqual(result['readiness'], 'not_probed')
-                    before = [(config / name).read_bytes() for name in ('runtime.toml', 'agent-core-models-overlay.toml')]
+                    before = (config / 'runtime.toml').read_bytes()
                     second = SETUP.configure(BINARY, base, selected)
                     self.assertEqual(second['runtime_id'], result['runtime_id'])
-                    self.assertEqual(before, [(config / name).read_bytes() for name in ('runtime.toml', 'agent-core-models-overlay.toml')])
+                    self.assertEqual(before, (config / 'runtime.toml').read_bytes())
 
 @unittest.skipUnless(BINARY, 'actual binary is supplied by targeted CI')
 class CompiledLocalVoiceSetup(unittest.TestCase):
@@ -1302,8 +1297,7 @@ base_url = "https://voice.fixture.invalid/v1"
             base = Path(directory)
             config = base / '.masc/config'
             config.mkdir(parents=True)
-            for name in ('runtime.toml', 'agent-core-models-overlay.toml'):
-                (config / name).write_bytes((fixture / name).read_bytes())
+            (config / 'runtime.toml').write_bytes((fixture / 'runtime.toml').read_bytes())
             runtime = config / 'runtime.toml'
             runtime.write_text(runtime.read_text() + voice)
             yield base, runtime

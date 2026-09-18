@@ -165,20 +165,15 @@ def render(spec, binary=None):
         runtime += table(('models', model_key), model_fields)
         binding = {'wizard-default': True} if spec.get('wizard_default') is True else {}
         runtime += table((provider, model_key), binding)
-        target = {'id': provider + '.' + model_key, 'provider_ref': provider, 'model_id': model}
-        if spec.get('thinking_disable_encodable') is True:
-            target['enable_thinking'] = False
-        overlay = table(('targets',), target, array=True)
-        return provider + '.' + model_key, runtime.encode(), overlay.encode()
+        return provider + '.' + model_key, runtime.encode()
 
     if not binary:
         raise SetupError('Runtime setup requires the installed MASC executable')
     rendered = native_setup_command(binary, 'runtime-setup-render', spec)
     if (not model_text(rendered.get('runtime_id'))
-            or not isinstance(rendered.get('runtime_toml'), str)
-            or not isinstance(rendered.get('model_overlay_toml'), str)):
+            or not isinstance(rendered.get('runtime_toml'), str)):
         raise SetupError('MASC returned an invalid runtime specification')
-    return rendered['runtime_id'], rendered['runtime_toml'].encode(), rendered['model_overlay_toml'].encode()
+    return rendered['runtime_id'], rendered['runtime_toml'].encode()
 
 
 def atomic_write(path, content, mode):

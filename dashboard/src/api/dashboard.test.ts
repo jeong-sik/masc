@@ -4577,7 +4577,7 @@ describe('fetchRuntimeProviders', () => {
           dropped_lanes: [
             { lane_id: 'mimo-only', runtime_ids: ['mimo.mimo-v2.5-pro'] },
           ],
-          next_action: 'Add deployment rows to agent-core-models-overlay.toml (or upstream Agent Core).',
+          next_action: 'Add a row for each to the AGENT_CORE embedded catalog.',
         },
         config_path: '/tmp/masc-test/runtime.toml',
       }), {

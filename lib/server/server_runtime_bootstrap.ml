@@ -104,8 +104,6 @@ let exact_output_collision_to_string = function
   | Exact_output.Duplicate_model_identity -> "duplicate model identity"
   | Exact_output.Duplicate_target_identity -> "duplicate target identity"
   | Exact_output.Provider_alias_shadow -> "provider alias shadow"
-  | Exact_output.Target_identity_shadow -> "target identity shadow"
-  | Exact_output.Model_identity_shadow -> "model identity shadow"
 ;;
 
 let exact_output_binding_component_to_string = function
@@ -375,6 +373,13 @@ let exact_output_targets_of_runtimes () =
        ; enable_thinking = rt.model.Runtime_schema.thinking_support
        ; connect_timeout_s = rt.provider.Runtime_schema.connect_timeout_s
        ; body_timeout_s = None
+       ; (* A slot's credential is the one its binding names; the catalog row
+            carries the provider's usual environment name, not this
+            deployment's. *)
+         api_key_env =
+           (match rt.provider.Runtime_schema.credentials with
+            | Some (Runtime_schema.Env name) -> Some name
+            | Some (Runtime_schema.File _ | Runtime_schema.Inline _) | None -> Some "")
        })
     runtimes
 ;;

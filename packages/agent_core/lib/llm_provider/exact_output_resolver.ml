@@ -29,6 +29,7 @@ type declared_target =
   ; enable_thinking : bool option
   ; connect_timeout_s : float option
   ; body_timeout_s : float option
+  ; api_key_env : string option
   }
 
 type resolver_catalog_input =
@@ -50,8 +51,6 @@ type resolver_collision =
   | Duplicate_model_identity
   | Duplicate_target_identity
   | Provider_alias_shadow
-  | Target_identity_shadow
-  | Model_identity_shadow
 
 type resolver_binding_component =
   | Target_provider
@@ -106,6 +105,11 @@ type target_declaration =
   ; enable_thinking : bool option
   ; connect_timeout_s : float option
   ; body_timeout_s : float option
+  ; api_key_env : string option
+      (* Which environment name holds this slot's credential. A catalog row
+         names the provider's usual one; a deployment that reads a different
+         one says so in its binding, and that is the authority. [None] keeps
+         the catalog's name. *)
   }
 
 type credential_outcome =
@@ -288,6 +292,9 @@ let parse_target_declaration ~source toml =
     ; enable_thinking
     ; connect_timeout_s
     ; body_timeout_s
+    ; (* A document declares its slots next to the provider rows they name, so
+         the catalog's credential name is the only one in play. *)
+      api_key_env = None
     }
 ;;
 
@@ -571,6 +578,7 @@ let load_resolver_snapshot
         ; enable_thinking = declared.enable_thinking
         ; connect_timeout_s = declared.connect_timeout_s
         ; body_timeout_s = declared.body_timeout_s
+        ; api_key_env = declared.api_key_env
         }
   in
   let* base_source, base_document, declared_targets =
@@ -644,6 +652,11 @@ let load_resolver_snapshot
          | Error Binding.Provider_missing -> reject Target_provider
          | Error Binding.Model_missing -> reject Target_model
          | Ok (provider, model) ->
+           let provider =
+             match target.api_key_env with
+             | None -> provider
+             | Some api_key_env -> { provider with Model_catalog.api_key_env }
+           in
            Ok ((target, provider, model) :: bindings, rejected))
       (Ok ([], []))
       target_declarations

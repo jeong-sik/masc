@@ -23,8 +23,7 @@ def main():
         base = Path(temporary)
         config = base / '.masc/config'
         config.mkdir(parents=True)
-        for name in ('runtime.toml', 'agent-core-models-overlay.toml'):
-            shutil.copyfile(fixtures / name, config / name)
+        shutil.copyfile(fixtures / 'runtime.toml', config / 'runtime.toml')
         assets = base / 'assets/dashboard/assets'
         assets.mkdir(parents=True)
         (assets / 'fixture.js').write_text('/* quota observation fixture */\n')

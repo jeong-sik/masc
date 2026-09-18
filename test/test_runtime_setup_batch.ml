@@ -78,12 +78,7 @@ let test_cas () = fixture (fun base runtime binary spec original ->
   Alcotest.check Alcotest.bool "concurrent update refused after validator" true
     (apply base binary specs ids revision false=Error Batch.Changed_configuration);
   Alcotest.check Alcotest.string "concurrent bytes preserved" "operator concurrent update" (text runtime);
-  save runtime original;
-  let revision=get (Batch.observe ~base_path:base) in
-  let overlay=Filename.concat (Filename.dirname runtime) "agent-core-models-overlay.toml" in
-  save overlay "# independently added overlay\n";
-  Alcotest.check Alcotest.bool "overlay participates in revision" true
-    (apply base binary specs ids revision false=Error Batch.Changed_configuration))
+  save runtime original)
 (* Proves a refusing validator reports how it ended and what it said: exit 2
    with stderr arrives as [Validation_failed { exit; stderr }]. On origin/main
    the same child reports a payload-free [Validation_failed]. *)
@@ -94,9 +89,7 @@ let test_refusal () = fixture (fun base runtime binary spec original ->
   Alcotest.check Alcotest.bool "native validation failure carries exit and stderr" true
     (apply base binary specs ids revision false
      = Error (Batch.Validation_failed { exit = Unix.WEXITED 2; stderr = "fixture: stage rejected\n" }));
-  Alcotest.check Alcotest.string "runtime bytes untouched" original (text runtime);
-  Alcotest.check Alcotest.bool "overlay not published" false
-    (Sys.file_exists (Filename.concat (Filename.dirname runtime) "agent-core-models-overlay.toml")))
+  Alcotest.check Alcotest.string "runtime bytes untouched" original (text runtime))
 (* Proves the verification child's report is read back typed instead of
    string-matched: a failing report carries its code and detail, an unmeasured
    report carries the command's own code, and a document whose status says
@@ -132,7 +125,7 @@ let test_verification_report () = fixture (fun base _runtime binary spec _origin
   Alcotest.check Alcotest.bool "a report naming another runtime is refused" true
     (unreadable "print(report('other.runtime'))"))
 let test_rollback () = fixture (fun _base runtime _binary _spec original ->
-  let overlay = Filename.concat (Filename.dirname runtime) "agent-core-models-overlay.toml" in
+  let sibling = Filename.concat (Filename.dirname runtime) "sibling.toml" in
   let real path mode contents = Fs_compat.write_file_atomic_strict_staged path ~write:(fun out ->
     Unix.fchmod (Unix.descr_of_out_channel out) mode; output_string out contents) in
   List.iter (fun stage ->
@@ -146,9 +139,9 @@ let test_rollback () = fixture (fun _base runtime _binary _spec original ->
                backtrace=Printexc.get_callstack 0})
       else real path mode contents in
     Alcotest.check Alcotest.bool "reported write failure restores both files" true
-      (Batch.For_testing.publish ~replace ~files:[overlay,"new overlay";runtime,"new runtime"] = Error Batch.Write_failed);
+      (Batch.For_testing.publish ~replace ~files:[sibling,"new sibling";runtime,"new runtime"] = Error Batch.Write_failed);
     Alcotest.check Alcotest.string "runtime restored even after visible failed rename" original (text runtime);
-    Alcotest.check Alcotest.bool "new overlay removed by rollback" false (Sys.file_exists overlay);
+    Alcotest.check Alcotest.bool "new sibling removed by rollback" false (Sys.file_exists sibling);
     Alcotest.check Alcotest.int "rollback retains permissions" 0o640 (Unix.stat runtime).st_perm)
     [Fs_compat.Before_rename;Fs_compat.After_rename])
 let test_credential_commit_join () = fixture (fun base _runtime binary _spec _original ->
@@ -190,7 +183,7 @@ let test_error_summary_is_one_line () =
     at 0 in
   let killed = Batch.Verification_unreadable
     { runtime_id = "setup.runtime"; exit = Unix.WSIGNALED Sys.sigkill
-    ; stderr = "[INFO] catalog loaded\n[INFO] overlay installed\n"
+    ; stderr = "[INFO] catalog loaded\n[INFO] bindings loaded\n"
     ; reason = "stdout is not JSON: Blank input data" } in
   let summary = Batch.error_message killed in
   Alcotest.check Alcotest.bool "the summary has no newline" false (String.contains summary '\n');
@@ -198,7 +191,7 @@ let test_error_summary_is_one_line () =
     (contains summary "killed by SIGKILL" && not (contains summary "-7"));
   Alcotest.check Alcotest.bool "the summary leaves the child's log out" false (contains summary "catalog loaded");
   Alcotest.check Alcotest.(option string) "the detail keeps the child's log"
-    (Some "[INFO] catalog loaded\n[INFO] overlay installed") (Batch.error_detail killed);
+    (Some "[INFO] catalog loaded\n[INFO] bindings loaded") (Batch.error_detail killed);
   let refused = Batch.Validation_failed { exit = Unix.WEXITED 3; stderr = " \n" } in
   Alcotest.check Alcotest.string "a validation refusal says how the validator ended"
     "Selected runtime configuration did not pass validation (exit 3)" (Batch.error_message refused);
@@ -208,7 +201,7 @@ let test_error_summary_is_one_line () =
 let () = Alcotest.run "runtime setup batch" ["workspace",[
   Alcotest.test_case "an error summary is one line and names the signal" `Quick test_error_summary_is_one_line;
   Alcotest.test_case "ordered multi-selection and existing bytes" `Quick test_batch;
-  Alcotest.test_case "runtime and overlay compare-and-swap" `Quick test_cas;
+  Alcotest.test_case "runtime compare-and-swap" `Quick test_cas;
   Alcotest.test_case "native refusal publishes nothing" `Quick test_refusal;
   Alcotest.test_case "verification report is read back typed" `Quick test_verification_report;
   Alcotest.test_case "before and after rename failures restore pair" `Quick test_rollback;

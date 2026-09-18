@@ -73,6 +73,10 @@ type declared_target =
   ; enable_thinking : bool option
   ; connect_timeout_s : float option
   ; body_timeout_s : float option
+  ; api_key_env : string option
+      (** Which environment name holds this slot's credential. [None] keeps the
+          catalog row's name; a deployment that reads a different one says so
+          in its binding, and that is the authority. *)
   }
 
 type resolver_catalog_input =
@@ -97,8 +101,6 @@ type resolver_collision =
   | Duplicate_model_identity
   | Duplicate_target_identity
   | Provider_alias_shadow
-  | Target_identity_shadow
-  | Model_identity_shadow
 
 type resolver_binding_component =
   | Target_provider

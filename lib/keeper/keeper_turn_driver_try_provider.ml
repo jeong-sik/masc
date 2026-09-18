@@ -2179,14 +2179,16 @@ let candidate_without_reasoning_effort (candidate : Runtime_candidate.t) : Runti
 ;;
 
 (* Asked of the request the retry would actually send, not of an approximation
-   of it: the same candidate, effort stripped, thinking off. AGENT_CORE answers
-   from the row's dialect and effort ladder, which is where "this wire has no
-   way to say stop thinking" lives.
+   of it: the same candidate, effort stripped, thinking off.
 
-   The pair rule enforced by backend_anthropic.validate_thinking_controls,
-   reached inside the request builder, is a second validator this question does
-   not reach. [candidate_without_reasoning_effort] above is what answers it, by
-   removing the effort that rule forbids alongside an explicit disable. *)
+   [Complete_common.validate_all] is the admission every request meets on its
+   way out ([Complete.complete], [Complete_sync], [Complete_stream] all begin
+   there), and it routes the thinking question by provider kind, each kind to
+   the rule that actually governs it. A narrower predicate would answer for
+   some kinds and guess for the rest: read on its own,
+   [thinking_control_request_rejection] calls a row whose thinking control
+   lives on a separate capability axis unable to disable, when that wire turns
+   thinking off by sending no thinking field at all. *)
 let retry_without_thinking_admitted (candidate : Runtime_candidate.t) =
   let retry_cfg =
     { (Runtime_candidate.provider_cfg (candidate_without_reasoning_effort candidate)) with
@@ -2194,8 +2196,7 @@ let retry_without_thinking_admitted (candidate : Runtime_candidate.t) =
     ; preserve_thinking = Some false
     }
   in
-  Option.is_none
-    (Llm_provider.Complete_common.thinking_control_request_rejection_reason retry_cfg)
+  Result.is_ok (Llm_provider.Complete_common.validate_all retry_cfg)
 ;;
 
 let run_try_provider_with_truncation_recovery

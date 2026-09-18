@@ -215,6 +215,13 @@ let keeper_reset_body ~(config : Workspace.config) args : tool_result =
 let handle_keeper_reset ctx args : tool_result =
   keeper_reset_body ~config:ctx.config args
 
+(* What [masc_keeper_clear] found and did. A keeper meta that cannot be read
+   is not a keeper with nothing to clear: its checkpoint was never looked up. *)
+type keeper_clear_report =
+  | Clear_meta_unreadable of string
+  | Clear_no_checkpoint
+  | Clear_attempted of Keeper_history_clear.outcome
+
 (* A clear that did not end as an emptied history with its line written.
    [effect_disposition] says whether the checkpoint on disk changed. *)
 let keeper_clear_failure
@@ -225,19 +232,13 @@ let keeper_clear_failure
       fields
   : tool_result
   =
-  let data =
-    error_assoc
-      (("error_code", `String (error_code_to_string code))
-       :: ("message", `String message)
-       :: fields)
-  in
-  Tool_result.make_err
-    ~tool_name:""
+  tool_result_error_data
     ~class_
-    ~start_time:(Time_compat.now ())
-    ~data
     ~effect_disposition
-    (Yojson.Safe.to_string data)
+    (error_assoc
+       (("error_code", `String (error_code_to_string code))
+        :: ("message", `String message)
+        :: fields))
 ;;
 
 (** Last-resort context clear.
@@ -269,35 +270,35 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
       let phase_before = Keeper_state_machine.phase_to_string entry.phase in
       let base_dir = Keeper_types_profile.session_base_dir config in
       (* The checkpoint lives under the keeper's own trace id
-         ([meta.runtime.trace_id]), so a keeper whose meta cannot be read has
-         no checkpoint to look for. *)
-      let loaded =
+         ([meta.runtime.trace_id]). *)
+      let report =
         match read_meta_resolved config name with
+        | Error detail -> Clear_meta_unreadable detail
+        | Ok None -> Clear_no_checkpoint
         | Ok (Some (_, meta)) ->
           let session, ctx_opt =
             Keeper_context_runtime.load_context_from_checkpoint
               ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
               ~base_dir
           in
-          Option.map (fun wctx -> meta, session, wctx) ctx_opt
-        | Ok None | Error _ -> None
+          (match ctx_opt with
+           | None -> Clear_no_checkpoint
+           | Some wctx ->
+             Clear_attempted
+               (Keeper_history_clear.clear
+                  ~keepers_dir:
+                    (Config_dir_resolver.keepers_dir_for_base_path
+                       ~base_path:config.base_path)
+                  ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta meta)
+                  ~keeper_name:meta.name
+                  ~session
+                  ~preserve_system
+                  wctx))
       in
-      let checkpoint_found = Option.is_some loaded in
-      (* [None] when there was no checkpoint to clear. *)
-      let outcome =
-        match loaded with
-        | None -> None
-        | Some (meta, session, wctx) ->
-          Some
-            (Keeper_history_clear.clear
-               ~keepers_dir:
-                 (Config_dir_resolver.keepers_dir_for_base_path
-                    ~base_path:config.base_path)
-               ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta meta)
-               ~keeper_name:meta.name
-               ~session
-               ~preserve_system
-               wctx)
+      let checkpoint_found =
+        match report with
+        | Clear_attempted _ -> true
+        | Clear_meta_unreadable _ | Clear_no_checkpoint -> false
       in
       (* Dispatch FSM event to clear overflow conditions *)
       Keeper_context_runtime.dispatch_keeper_phase_event
@@ -331,11 +332,27 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
       (* Only an emptied checkpoint with its line written is a cleared history;
          every other outcome of the store is reported as what it was. *)
       let result =
-        match outcome with
-        | None -> cleared ~cleared_message_count:0
-        | Some (Keeper_history_clear.Cleared { cleared_message_count; marker = Ok () }) ->
+        match report with
+        | Clear_meta_unreadable detail ->
+          Log.Keeper.error
+            "%s: operator clear did not look for a checkpoint (reason=%s): keeper meta \
+             could not be read: %s"
+            name reason detail;
+          keeper_clear_failure
+            ~class_:Tool_result.Runtime_failure
+            ~effect_disposition:Tool_result.Proven_pre_effect
+            ~code:Tool_args.Internal_error
+            ~message:
+              (Printf.sprintf
+                 "history not cleared: the keeper meta could not be read, so its \
+                  checkpoint was not looked up: %s"
+                 detail)
+            []
+        | Clear_no_checkpoint -> cleared ~cleared_message_count:0
+        | Clear_attempted
+            (Keeper_history_clear.Cleared { cleared_message_count; marker = Ok () }) ->
           cleared ~cleared_message_count
-        | Some
+        | Clear_attempted
             (Keeper_history_clear.Cleared { cleared_message_count; marker = Error detail })
           ->
           Log.Keeper.error
@@ -353,12 +370,14 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
             ~message:
               (Printf.sprintf
                  "history cleared (%d messages), but the history_cleared line could \
-                  not be written: %s. Run masc_keeper_clear again to write it."
+                  not be written: %s. Run masc_keeper_clear again now: it writes the \
+                  line if this failure was transient. The same error again means the \
+                  turn-boundary store is damaged and every append to it is refused."
                  cleared_message_count
                  detail)
             [ "cleared_message_count", `Int cleared_message_count ]
-        | Some (Keeper_history_clear.Superseded { incoming_turn_count; known_turn_count })
-          ->
+        | Clear_attempted
+            (Keeper_history_clear.Superseded { incoming_turn_count; known_turn_count }) ->
           Log.Keeper.warn
             "%s: operator clear wrote nothing (reason=%s): the checkpoint on disk has \
              turn_count %d, the one this clear loaded has %d"
@@ -377,7 +396,7 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
             [ "incoming_turn_count", `Int incoming_turn_count
             ; "known_turn_count", `Int known_turn_count
             ]
-        | Some (Keeper_history_clear.Not_saved { detail }) ->
+        | Clear_attempted (Keeper_history_clear.Not_saved { detail }) ->
           Log.Keeper.error
             "%s: operator clear could not save the emptied checkpoint (reason=%s): %s"
             name reason detail;
@@ -387,8 +406,8 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
             ~code:Tool_args.Internal_error
             ~message:
               (Printf.sprintf
-                 "history not cleared: the emptied checkpoint could not be saved: %s. \
-                  Run masc_keeper_clear again."
+                 "the emptied checkpoint was not saved cleanly, so the history may or \
+                  may not have been cleared: %s. Run masc_keeper_clear again."
                  detail)
             []
       in

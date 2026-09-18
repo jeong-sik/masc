@@ -293,6 +293,27 @@ let test_position_agrees_with_the_window () =
       (position_of "user, assistant and tool" history)
 ;;
 
+(* What a reader asks of [history_at_start] is whether the atoms this turn saved
+   are numbered from zero, so it is read off the history the turn started from
+   and not off whether a checkpoint file was there. A keeper is created with a
+   checkpoint that holds no message, and a cleared history is a checkpoint too:
+   both used to be written as a continued history, which left a new keeper's
+   trace with no line to say its history began at atom zero. *)
+let test_a_history_with_no_atom_is_a_fresh_start () =
+  let history_at_start_t : Boundaries.history_at_start testable =
+    testable
+      (fun fmt start -> print_record fmt (record ~history_at_start:start atom_history))
+      ( = )
+  in
+  check history_at_start_t "no message" Boundaries.Fresh_history
+    (Boundaries.history_at_start_of_messages []);
+  check history_at_start_t "pinned messages only" Boundaries.Fresh_history
+    (Boundaries.history_at_start_of_messages [ message ~role:Types.System "system" ]);
+  check history_at_start_t "one atom" Boundaries.Continued_history
+    (Boundaries.history_at_start_of_messages
+       [ message ~role:Types.System "system"; message ~role:Types.User "question" ])
+;;
+
 (* A turn that reaches the boundary line with no saved checkpoint is one of two
    things, and the checkpoint owner says which: an official client, which keeps
    no Agent-Core checkpoint, or an agent-core turn whose save was a stale no-op.
@@ -555,6 +576,8 @@ let () =
         ] )
     ; ( "position"
       , [ test_case "agrees with the window" `Quick test_position_agrees_with_the_window
+        ; test_case "a history with no atom is a fresh start" `Quick
+            test_a_history_with_no_atom_is_a_fresh_start
         ; test_case "a turn without a saved checkpoint" `Quick
             test_a_turn_without_a_saved_checkpoint
         ] )

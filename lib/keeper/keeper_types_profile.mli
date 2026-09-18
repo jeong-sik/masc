@@ -33,6 +33,7 @@ val tool_result_error :
   ?tool_name:string -> class_:Tool_result.tool_failure_class -> string -> tool_result
 val tool_result_error_data :
   ?tool_name:string ->
+  ?effect_disposition:Tool_result.failure_effect_disposition ->
   class_:Tool_result.tool_failure_class ->
   Yojson.Safe.t ->
   tool_result

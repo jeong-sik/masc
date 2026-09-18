@@ -8,9 +8,9 @@
     the digest of the message that opens the last one. A turn's start is not
     written; the end an earlier line states is that start.
 
-    [masc_keeper_clear] is the other writer. It empties a history outside any
-    turn, and appends a [History_cleared] line once the emptied checkpoint is
-    saved.
+    [masc_keeper_clear] is the other writer. It empties a history, not as part
+    of a turn, and appends a [History_cleared] line once the emptied checkpoint
+    is saved.
 
     {2 What a reader may rely on}
 
@@ -27,17 +27,23 @@
       orders the [Atom_history] lines of one trace by [end_atom], not by their
       position in the file, and must not assume [turn_ref] is unique: two turns
       of one keeper that finish together both take the next turn number.
-    - A history starts over in two ways, and each leaves a line that is written
-      after the fact: a [Turn_ended] line with [Fresh_history], or a
-      [History_cleared] line. Neither moves a reader's position by itself. A
-      reader whose position no longer matches the checkpoint (the digest of
-      atom [end_atom - 1] differs, or that atom is gone) looks for such a line
-      of the same trace that was appended after it last confirmed its
-      position. With one, it starts again from atom zero; without one, the
-      mismatch has no explanation and the reader stops. A position that still
-      matches is kept whatever lines there are: the clear was undone by a turn
-      that saved over it.
-    - [last_atom_digest] is computed from the checkpoint the save returned. On
+    - Two lines say that the atoms of a trace are numbered from zero again: a
+      [Turn_ended] line with [Fresh_history], and a [History_cleared] line.
+      Both are written after the save they describe, so a reader that sees
+      one and then loads the checkpoint loads that save or a later one. What a
+      reader does with them is RFC §4.4.
+    - The lines of an earlier history of the same trace stay in the file, and
+      so can a line whose history was never stored (the last bullet, and a
+      turn that reused its last save while a clear landed). A line is a cut
+      point of the history a reader loaded only when its [end_atom] and
+      [last_atom_digest] match that checkpoint. The content a reader takes is
+      always the checkpoint's, so a line that does not match costs a cut
+      point, never content.
+    - [last_atom_digest] is computed from the checkpoint the turn takes to be
+      stored: the one its final save returned, or, when the final save is
+      skipped because an earlier save of the turn already stored the same
+      checkpoint, that one. Nothing re-reads the disk, so a clear that lands
+      after that earlier save leaves a line for a history that is gone. On
       the store's payload-encode recovery path the bytes on disk are a recovery
       copy with the unencodable json dropped, while the save still returns the
       original (masc #37018). If the message that opens the last atom carried
@@ -64,14 +70,15 @@ type position =
           not in the durable history. The line is kept, with no span of its
           own, because a reader counts finished turns in lines. *)
 
-(** Whether the turn began from a durable history. The keeper run context
-    already knows this ([Keeper_run_context.loaded_checkpoint_present]); a
-    reader cannot infer it. [Fresh_history] covers every way a history starts
-    over without a marker of its own: a new trace, a purged or superseded
-    checkpoint, and a checkpoint that could not be read. *)
+(** Whether the atoms this turn saved are numbered from zero. A reader cannot
+    infer it. [Fresh_history] is every way a history is empty when a turn
+    starts, and the turn does not tell them apart: no checkpoint was loaded (a
+    new trace, a purged or superseded checkpoint, one that could not be read),
+    or the loaded one held no atom (the checkpoint a keeper is created with, a
+    history [masc_keeper_clear] emptied). *)
 type history_at_start =
-  | Fresh_history  (** No checkpoint was loaded: the history began empty. *)
-  | Continued_history  (** A checkpoint was loaded and the turn appended to it. *)
+  | Fresh_history  (** The history the turn started from held no atom. *)
+  | Continued_history  (** It held atoms, and the turn appended to them. *)
 
 (** What a line states. The wire form carries a [kind] tag from the first line
     ever written, so a kind of line is a constructor rather than a field on a
@@ -86,15 +93,16 @@ type event =
       }
   | History_cleared of { trace_id : string }
       (** [masc_keeper_clear] saved the checkpoint of this trace with no atom
-          in it ({!Keeper_history_clear}). The turn after a clear loads that
-          checkpoint, so its line says [Continued_history] while its
-          [end_atom] starts over near zero; only the clear knows why, and this
-          line is where it says so.
+          in it ({!Keeper_history_clear}). The turn after a clear starts from
+          that empty history and says [Fresh_history] in its own line, if it
+          reaches its end. The clear says so at once: a reader is not left
+          with a position nothing explains while the keeper sits idle, or for
+          good when that turn dies before it writes a line.
 
           The line is appended after the emptied checkpoint is saved, never
           before. It does not say the history is still empty: a turn that was
           running during the clear saves its own, full history over the
-          emptied one. *)
+          emptied one (masc #37021). *)
 
 type record =
   { recorded_at : float (** Unix seconds, when the writer built the line. *)
@@ -104,6 +112,9 @@ type record =
 val path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
 
 (** {1 Position} *)
+
+(** {!history_at_start} of the messages a turn started from. Pure. *)
+val history_at_start_of_messages : Agent_core.Types.message list -> history_at_start
 
 (** The position of a saved checkpoint's messages. Pure. No atom is
     [Empty_atom_history]. [Error] when

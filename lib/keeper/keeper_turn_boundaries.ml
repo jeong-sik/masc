@@ -37,6 +37,13 @@ type record =
   ; event : event
   }
 
+let history_at_start_of_messages messages =
+  let _labelled, atom_count = Window.annotate messages in
+  match atom_count with
+  | 0 -> Fresh_history
+  | _ -> Continued_history
+;;
+
 let position_of_messages messages =
   let _labelled, atom_count = Window.annotate messages in
   match atom_count with

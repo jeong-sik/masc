@@ -17,8 +17,10 @@ type outcome =
       { cleared_message_count : int
       ; marker : (unit, string) result
             (** Whether the [History_cleared] line was written. On [Error] the
-                history started over with no line to say why; running the
-                clear again writes one. *)
+                history started over with no line to say why. Running the
+                clear again writes one when the failure was transient. A store
+                that ends mid-line refuses every append until it is repaired,
+                so there the same error comes back. *)
       }
       (** The emptied checkpoint is the canonical one on disk. *)
   | Superseded of
@@ -28,18 +30,21 @@ type outcome =
       (** A newer writer owns the canonical checkpoint: the store's stale
           no-op. Nothing was written. *)
   | Not_saved of { detail : string }
-      (** The save failed and no line was written. The store reports a save
-          only once the payload, the rename and the directory fsync all
-          succeeded, so a failure does not prove the checkpoint on disk is
-          unchanged. *)
+      (** The save failed or raised, and no line was written. The store
+          reports a save only once the payload, the rename and the directory
+          fsync all succeeded, so a failure does not prove the checkpoint on
+          disk is unchanged: the emptied one may already be the canonical
+          one. *)
 
 (** Empty the history [ctx] holds and save it as the checkpoint of [session].
     [preserve_system] keeps the [System] messages, which are not atoms, so
     either way the saved history holds no atom. The trace the line names is
     [session.session_id], the value the checkpoint is saved under.
 
-    A failure to write the line is reported in [marker], never raised; only a
-    cancellation escapes the append. *)
+    Nothing but a cancellation is raised: a save that raises is [Not_saved],
+    and a line that cannot be written is [marker]. A cancellation the store
+    re-raises after it has written the checkpoint leaves an emptied history
+    with no line, the one state this module cannot report. *)
 val clear
   :  keepers_dir:string
   -> runtime_id:string

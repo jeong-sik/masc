@@ -64,6 +64,8 @@ let clear
       ~agent_name:keeper_name
       ~ctx:emptied
   with
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+  | exception exn -> Not_saved { detail = Printexc.to_string exn }
   | Ok (_checkpoint, Keeper_checkpoint_store.Saved _) ->
     Cleared
       { cleared_message_count = List.length existing - List.length kept

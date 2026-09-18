@@ -153,6 +153,28 @@ describe('VerifyQueue', () => {
     expect(container.querySelector('.vq-clear')).toBeTruthy()
   })
 
+  // task-1612: an approved STOP is a cancellation, not a completion. The
+  // session banner must say so — otherwise the operator's one click, made
+  // precisely to stop the task, reads back as "task → done".
+  it('labels an approved stop as task → cancelled, never task → done', async () => {
+    tasks.value = [makeTask({ contract: { completion_contract: [] }, verification_intent: 'cancel' })]
+    mockState.value = {
+      loading: false,
+      error: null,
+      data: requestsResponse([{ cancellation_reason: null }]),
+    }
+    const { container } = render(html`<${VerifyQueue} />`)
+
+    fireEvent.click(screen.getByText('✓ 중단 승인'))
+    await waitFor(() => {
+      expect(container.querySelector('.vq-verdict.approved')).toBeTruthy()
+    })
+    const body = container.querySelector('.vq-verdict-body')?.textContent ?? ''
+    expect(body).toContain('중단 승인')
+    expect(body).toContain('task → cancelled')
+    expect(body).not.toContain('task → done')
+  })
+
   it('collects a reject reason via chips and commits a reject verdict', async () => {
     tasks.value = [makeTask()]
     const { container } = render(html`<${VerifyQueue} />`)

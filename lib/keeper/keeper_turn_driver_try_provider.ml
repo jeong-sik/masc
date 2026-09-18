@@ -1723,7 +1723,7 @@ let refusal_evicts = function
 
      2026-09-18: five keepers sat in that loop. After the turn-record hard
      cut (#36955) every seed was unreadable, each turn composed the whole
-     history, ollama_cloud refused the 15 MB body (a modelled body refusal,
+     history, the provider refused the 15 MB body (a modelled body refusal,
      one halving), and then refused 9.5 MB with an error body whose only
      field is prose naming the prompt tokens and the model limit. That prose
      stays Unknown_invalid_request on purpose -- Retry.classify_error has

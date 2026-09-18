@@ -253,6 +253,11 @@ type wire_event =
       ; state : step_state
       ; step_type : step_type
       ; tool_name : string option
+      ; (* The piece of the answer this frame carries. agy sends it on the
+           [Agent_response] steps as the model writes, so the text reaches a
+           reader while the turn runs rather than only in the result event
+           (measured 2026-09-18, agy 1.2.6). *)
+        text_delta : string option
       }
   | Result of
       { (* [None] two ways: the CLI refuses a bad invocation with a single
@@ -392,7 +397,8 @@ let parse_step_update fields =
   let* step_type_string = required_string stage "step_type" step_fields in
   let* step_type = parse_step_type stage step_type_string in
   let* tool_name = optional_string stage "tool_name" step_fields in
-  Ok (Step_update { conversation_id; step_index; state; step_type; tool_name })
+  let* text_delta = optional_string stage "text_delta" step_fields in
+  Ok (Step_update { conversation_id; step_index; state; step_type; tool_name; text_delta })
 ;;
 
 let parse_result fields =
@@ -621,10 +627,21 @@ type protocol_state =
   ; tool_errors : int
   ; last_step : (step_type * step_state) option
     (* The step the CLI reported last; [read_phase] is its only reader. *)
+  ; text_streamed : bool
+    (* Whether any step update carried a piece of the answer. The result
+       event repeats the whole response, so forwarding it again would show
+       the answer twice; it is forwarded only when nothing was streamed,
+       which keeps a CLI that reports only a result readable. *)
   }
 
 let initial_protocol_state =
-  { init = None; result = None; tool_steps = 0; tool_errors = 0; last_step = None }
+  { init = None
+  ; result = None
+  ; tool_steps = 0
+  ; tool_errors = 0
+  ; last_step = None
+  ; text_streamed = false
+  }
 ;;
 
 (* Only a tool step's ACTIVE update opens the exemption. Every other step
@@ -720,6 +737,7 @@ let apply_event (config : config) ~conversation_mode ~on_conversation_ready
       ; state = step_state
       ; step_type
       ; tool_name
+      ; text_delta
       } ->
     let stage = "step_update event" in
     (match state.init with
@@ -729,6 +747,16 @@ let apply_event (config : config) ~conversation_mode ~on_conversation_ready
        if Option.is_some state.result
        then protocol_error stage "received step_update after result"
        else
+         (* The answer reaches the reader as the model writes it. An empty
+            delta says nothing, so it is not forwarded; [text_streamed]
+            records that the result event has nothing left to add. *)
+         let streamed =
+           match text_delta with
+           | Some text when text <> "" ->
+             emit_stream_event on_stream_event (Text_delta text);
+             true
+           | Some _ | None -> false
+         in
          let is_tool = step_type = Tool in
          if is_tool
          then (
@@ -760,6 +788,7 @@ let apply_event (config : config) ~conversation_mode ~on_conversation_ready
                state.tool_errors
                + if is_tool && step_state = Step_error then 1 else 0
            ; last_step = Some (step_type, step_state)
+           ; text_streamed = state.text_streamed || streamed
            })
   | Result { conversation_id; status; response; error; num_turns; usage } ->
     let stage = "result event" in
@@ -782,13 +811,18 @@ let apply_event (config : config) ~conversation_mode ~on_conversation_ready
        if Option.is_some state.result
        then protocol_error stage "received more than one result event"
        else (
-         (match status with
-          | Success -> emit_stream_event on_stream_event (Text_delta response)
-          | Result_error ->
-            if Agent_core.Response_shape.has_deliverable_content
-                 (Agent_core.Response_shape.summarize_blocks
-                    [ Agent_core.Types.Text response ])
-            then emit_stream_event on_stream_event (Text_delta response));
+         (* The result repeats the whole response the step updates already
+            carried, so it is forwarded only when none of them did. *)
+         (if state.text_streamed
+          then ()
+          else
+            match status with
+            | Success -> emit_stream_event on_stream_event (Text_delta response)
+            | Result_error ->
+              if Agent_core.Response_shape.has_deliverable_content
+                   (Agent_core.Response_shape.summarize_blocks
+                      [ Agent_core.Types.Text response ])
+              then emit_stream_event on_stream_event (Text_delta response));
          Ok { state with result = Some (status, response, error, num_turns, usage) }))
 ;;
 

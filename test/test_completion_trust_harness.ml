@@ -382,7 +382,10 @@ let test_completion_denied_when_unclaimed () =
     | Some { task_status = Masc_domain.Todo; _ } -> ()
     | _ -> fail "task-001 must remain Todo after the rejected completion")
 
-(* Local note length and evidence shape never decide completion. *)
+(* Local note length never decides completion — the tool layer accepts a short
+   note and lets the reviewer decide. But a note-only submission the reviewer
+   approves without opening any checkable evidence is refused by the RFC-0417
+   criteria-3 guard, so it must NOT reach Done. *)
 let test_short_notes_without_evidence_follow_llm_approval () =
   with_ws "completion_llm_short_notes"
     (fun ~sw:_ ~net:_ ~clock ~config ~meta ~publication_recovery ~ctx_work ->
@@ -410,11 +413,19 @@ let test_short_notes_without_evidence_follow_llm_approval () =
     in
     check string "evidence submission succeeds" "success"
       (outcome_label result.KTE.disposition);
-    match await_authority_verdict ~clock config "task-001" with
-    | Some { task_status = Masc_domain.Done _; _ } -> ()
+    (* RFC-0417 criteria-3: a note-only submission whose controlled reviewer
+       approves without a single successful evidence lookup is refused at the
+       completion boundary. The tool layer still accepted the short note (the
+       reviewer ran), but the guard refuses the unbacked verdict, so the task
+       never reaches Done — it stays AwaitingVerification for the operator. *)
+    await_condition ~clock "controlled reviewer ran" (fun () -> !reviewer_calls <> []);
+    Eio.Time.sleep clock 0.5;
+    match find_task config "task-001" with
+    | Some { task_status = Masc_domain.AwaitingVerification _; _ } -> ()
     | Some task ->
       fail
-        ("expected Done after controlled reviewer approval, got "
+        ("a note-only approval with zero successful lookups must not complete \
+          the task, got "
          ^ Masc_domain.task_status_to_string task.task_status)
     | None -> fail "task-001 missing after completion")
 
@@ -537,6 +548,14 @@ let test_completion_with_evidence_refs_succeeds () =
     in
     check string "self-claim precondition succeeds" "success"
       (outcome_label claim.KTE.disposition);
+    (* The RFC-0417 criteria-3 guard refuses a note-only approval with zero
+       successful lookups, so this plumbing case submits a real, readable
+       artifact in the producer tree: its posture is Usable_artifacts and the
+       controlled verdict is committed exactly as before. *)
+    let root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
+    Fs_compat.save_file
+      (Filename.concat root "completion.txt")
+      "the deliverable the producer recorded in its tree";
     let result =
       attempt_done
         ~config
@@ -545,13 +564,13 @@ let test_completion_with_evidence_refs_succeeds () =
         ~ctx_work
         ~task_id:"task-001"
         ~result:"Implemented the deliverable and recorded completion evidence."
-        ~evidence_refs:[ "note:completion-trust-harness" ]
+        ~evidence_refs:[ "artifact:completion.txt" ]
         ()
     in
     check string "completion outcome" "success"
       (outcome_label result.KTE.disposition);
     check_submitted_evidence config (single_submission ())
-      [ "note:completion-trust-harness"
+      [ "artifact:completion.txt"
       ; "note:Implemented the deliverable and recorded completion evidence."
       ];
     match await_authority_verdict ~clock config "task-001" with
@@ -575,10 +594,15 @@ let test_rejection_delivery_then_changed_submission_completes () =
       ~task_id:"task-001" in
     check string "self-claim succeeds" "success" (outcome_label claim.KTE.disposition);
     let reason = "deliverable requires corrected evidence" in
+    (* Usable artifacts on both submissions: the RFC-0417 criteria-3 guard only
+       gates note-only evidence, and this case exercises the repair round trip
+       (a delivered rejection, then a changed submission reaching Done). *)
+    let root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
+    Fs_compat.save_file (Filename.concat root "first.txt") "first attempt";
     reviewer_response := Reviewer_verdict (AR.Reject reason);
     let first = attempt_done ~config ~meta ~publication_recovery ~ctx_work
       ~task_id:"task-001" ~result:"Initial completion claim"
-      ~evidence_refs:[ "note:first completion review" ] () in
+      ~evidence_refs:[ "artifact:first.txt" ] () in
     check string "first submission succeeds" "success" (outcome_label first.KTE.disposition);
     let first_id = single_submission () in
     (match await_authority_verdict ~clock config "task-001" with
@@ -613,7 +637,10 @@ let test_rejection_delivery_then_changed_submission_completes () =
        check string "world event reason" reason rejection.car_reason
      | _ -> fail "delivered rejection did not reach the world observation");
     reviewer_response := Reviewer_verdict (AR.Approve "solid evidence");
-    let revised_refs = [ "note:corrected completion evidence after rejection" ] in
+    Fs_compat.save_file
+      (Filename.concat root "corrected.txt")
+      "corrected completion evidence after rejection";
+    let revised_refs = [ "artifact:corrected.txt" ] in
     let second = attempt_done ~config ~meta ~publication_recovery ~ctx_work
       ~task_id:"task-001" ~result:"Corrected the rejected evidence"
       ~evidence_refs:revised_refs () in

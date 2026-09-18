@@ -21,6 +21,22 @@ type provider_progress_sample =
             excluding it here leaves nothing unbounded. *)
   }
 
+(** What one dispatch's checkpoints have recorded so far. It only moves
+    forward, in this order.
+    - [No_checkpoint_stage]: AGENT_CORE has not reached a checkpoint stage, so
+      the agent state is as the dispatch began and another candidate may take
+      the same run.
+    - [Checkpoint_stage_reached]: a stage was reached, whether or not its save
+      succeeded. The attempt may hold effects, so no same-run retry.
+    - [Tool_results_saved]: a stage written after tools ran
+      ([After_tool_results_appended], [After_context_injection]) was saved. A
+      chat operation resumed from its latest checkpoint does not run those
+      tools again (RFC last-path-resumes-after-progress §3.2). *)
+type checkpoint_progress =
+  | No_checkpoint_stage
+  | Checkpoint_stage_reached
+  | Tool_results_saved
+
 type try_provider_ctx =
   { runtime_id : string
   ; error_runtime_id : string
@@ -77,7 +93,7 @@ type try_provider_ctx =
   ; cache_system_prompt : bool
   ; yield_on_tool : bool
   ; checkpoint_sink : Agent_core.Agent.checkpoint_sink option
-  ; checkpoint_stage_observed : bool Atomic.t
+  ; checkpoint_progress : checkpoint_progress Atomic.t
   ; context_injector : Agent_core.Hooks.context_injector option
   ; context : Agent_core.Context.t option
   ; enable_thinking : bool option
@@ -142,9 +158,31 @@ val apply_accept :
   (Runtime_agent.run_result, Agent_core.Error.t) result
 
 val observe_checkpoint_stage :
-  bool Atomic.t -> Agent_core.Agent.checkpoint_stage -> unit
+  checkpoint_progress Atomic.t -> Agent_core.Agent.checkpoint_stage -> unit
+(** Marks that a stage was reached. Called before the stage is saved. *)
 
-val same_run_retry_allowed : bool Atomic.t -> bool
+val observe_checkpoint_saved :
+  checkpoint_progress Atomic.t -> Agent_core.Agent.checkpoint_stage -> unit
+(** Marks [Tool_results_saved] for a stage written after tools ran. Only the
+    owner of the checkpoint sink may call it, and only for a write it made:
+    a sink answers [Ok ()] for a write it skipped as well
+    ([Keeper_checkpoint_store.Stale_noop], which leaves the canonical
+    checkpoint untouched), and a resumed operation would not read the
+    checkpoint that write claimed. *)
+
+val observing_checkpoint_sink :
+  checkpoint_progress Atomic.t ->
+  Agent_core.Agent.checkpoint_sink option ->
+  Agent_core.Agent.checkpoint_sink
+(** The sink an attempt hands AGENT_CORE: marks the stage, then delegates to
+    the caller's sink and returns its answer unread. Saved tool results are
+    not marked here — see {!observe_checkpoint_saved}. *)
+
+val same_run_retry_allowed : checkpoint_progress Atomic.t -> bool
+(** [true] only at [No_checkpoint_stage]. *)
+
+val tool_results_saved : checkpoint_progress Atomic.t -> bool
+(** [true] only at [Tool_results_saved]. *)
 
 type provider_lease_phase =
   | Provider_active_since of float

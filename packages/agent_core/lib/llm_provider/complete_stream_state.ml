@@ -789,13 +789,19 @@ let transition_open state = function
        | Terminal_without_stop_reason, None
        | Terminal_without_stop_reason, Some _ ->
          terminal_event_failure "message_delta_after_message_stop" state)
-  | Types.SSEError { message; error_type; provider_status; raw } ->
+  | Types.SSEError { message; error_type; provider_status; report; raw } ->
     capture_failure
-      (Types.Stream_provider_error { message; error_type; provider_status; raw })
+      (Types.Stream_provider_error { message; error_type; provider_status; report; raw })
       state
   | Types.NDJSONError { message; error_type; raw } ->
     capture_failure
-      (Types.Stream_provider_error { message; error_type; provider_status = None; raw })
+      (Types.Stream_provider_error
+         { message
+         ; error_type
+         ; provider_status = None
+         ; report = Types.Provider_stated
+         ; raw
+         })
       state
   | Types.SSEParseFailed { raw; reason } ->
     capture_failure (Types.Stream_parse_failed { reason; raw }) state
@@ -1206,7 +1212,12 @@ let%test "first terminal failure is sticky" =
     transition
       state
       (Types.SSEError
-         { message = "second"; error_type = None; provider_status = None; raw = "second-raw" })
+         { message = "second"
+         ; error_type = None
+         ; provider_status = None
+         ; report = Types.Provider_stated
+         ; raw = "second-raw"
+         })
   in
   match finalize state with
   | Failed failure -> failure = first

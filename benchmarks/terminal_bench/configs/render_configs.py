@@ -264,9 +264,6 @@ base = "{capabilities_base}"
 supports_reasoning = true
 supports_tools = true
 supports_native_streaming = true
-# Without an accepted_reasoning_efforts contract the request validator rejects
-# any reasoning-effort (provider_config.ml Undeclared_reasoning_effort_capability).
-accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
 {thinking_control}{sampling_lines}{max_output_lines}supports_parallel_tool_calls = {parallel}
 """
 
@@ -347,13 +344,41 @@ PROVIDERS = {
                       api_key_env="ANTHROPIC_API_KEY",
                       kind="anthropic",
                       request_path="/v1/messages",
-                      capabilities_base="anthropic"),
+                      capabilities_base="anthropic",
+                      carries_effort=True,
+                      # adaptive_only = the wire gets {"type":"adaptive"} when
+                      # thinking is on and NO thinking field when off; the model
+                      # decides depth. fable-5 rejects {"type":"disabled"}
+                      # outright (observed v0.35.8 smoke, anthropic4:
+                      # '"thinking.type.disabled" is not supported for this
+                      # model'), which the no-thinking truncation retry would
+                      # otherwise emit under adaptive_default.
+                      thinking_control_line='anthropic_thinking_control = "adaptive_only"\n',
+                      # The anthropic base preset caps output at 8192 ("higher
+                      # for newer models" — capabilities.ml
+                      # anthropic_capabilities). With adaptive thinking on, a
+                      # turn burns 8k before finishing: observed v0.35.8 smoke
+                      # anthropic5, "Provider output reached its maximum token
+                      # boundary before completion" at 775s after the truncation
+                      # recovery exhausted the same ceiling. fable-5 takes 64k.
+                      max_output_tokens=64000,
+                      # Anthropic under adaptive thinking answers "temperature
+                      # may only be set to 1 when thinking is enabled or in
+                      # adaptive mode" (observed v0.35.6 smoke, turn_failed at
+                      # 12s). Dropped from the wire entirely.
+                      ignored_sampling_parameters=["temperature", "top_p"]),
     "openai": dict(protocol="openai-compatible-http",
                    endpoint="https://api.openai.com/v1",
                    api_key_env="OPENAI_API_KEY",
                    kind="openai_compat",
                    request_path="/chat/completions",
-                   capabilities_base="openai"),
+                   capabilities_base="openai",
+                   carries_effort=True,
+                   # Chat completions carries an effort only when the model row
+                   # declares the reasoning_effort dialect
+                   # (reasoning_dialect.validate_request_control_inputs:
+                   # Chat_completions + Reasoning_effort is the admitted pair).
+                   thinking_control_line='thinking_control_format = "reasoning_effort"\n'),
     # 한 계정 크레딧으로 여러 vendor 모델을 태우는 스윕 레인. 모델 id 에
     # 슬래시가 들어가므로 --model openrouter/z-ai/glm-5.3 처럼 주면
     # runtime_id 는 openrouter.z-ai/glm-5.3 이 된다. glm/deepseek 계열은
@@ -368,13 +393,21 @@ PROVIDERS = {
                        api_key_env="OPENROUTER_API_KEY",
                        kind="openai_compat",
                        request_path="/chat/completions",
-                       capabilities_base="openai"),
+                       capabilities_base="openrouter",
+                       # The router's base declares both the dialect and the
+                       # accepted ladder, so nothing about either is repeated
+                       # into the rendered row.
+                       carries_effort=True),
     "kimi_coding": dict(protocol="openai-compatible-http",
                         endpoint="https://api.kimi.com/coding/v1",
                         api_key_env="KIMI_API_KEY",
                         kind="openai_compat",
                         request_path="/chat/completions",
-                        capabilities_base="kimi"),
+                        capabilities_base="kimi",
+                        # kimi-for-coding accepts only temperature=1 ("invalid
+                        # temperature: only 1 is allowed for this model"), so
+                        # the sampling fields leave the wire entirely.
+                        ignored_sampling_parameters=["temperature", "top_p"]),
     # Claude Code subscription lane: `--model claude_code/claude-sonnet-5`
     # gives runtime_id claude_code.claude-sonnet-5; the alias doubles as the
     # CLI api-name. bootstrap.sh installs the unmodified CLI (native
@@ -405,7 +438,36 @@ def is_official_client(provider: str) -> bool:
 #   No_thinking_control, so any reasoning_effort is rejected by
 #   reasoning_dialect.validate_request_control_inputs. K2.7-code thinks
 #   always-on anyway (supports_thinking_type="only").
-EFFORT_CAPABLE_BASES = {"anthropic", "openai"}
+# - openrouter: the router's own base, which declares the reasoning_effort
+#   dialect and the accepted ladder (Capabilities.openrouter_capabilities).
+#
+# Which of them that is reads as carries_effort on the provider entry, so this
+# note stays an explanation and does not become a second list to keep in step.
+
+# No accepted_reasoning_efforts table lives here, and none should.
+#
+# For the two bases this file used to write one for, the accepted set is a
+# model fact, not a provider one, and the vendors publish it that way
+# (2026-09-18):
+#
+# - gpt-6-astra takes low..max and does not take `none`, answering HTTP 400 to
+#   it; gpt-5.6-sol, -terra and -luna take `none` as well, and document
+#   `medium (default)` where astra's page documents no default at all. The
+#   other five values are the same across all four, so the split is one value
+#   wide -- and one value is enough: a list under "openai" either carries
+#   `none` and is wrong for the flagship, where wrong means a 400 mid-run
+#   rather than a refusal before dispatch, or omits it and is wrong for the
+#   other three.
+# - Anthropic's enum is low..max with no `none` (thinking is turned off by
+#   `thinking.type`, not by an effort), and "Not every model that supports
+#   `max` supports `xhigh`". The catalog already declares exactly that set for
+#   claude-fable-5, which is the model this benchmark names, so a copy here
+#   would be a second place to keep one fact right.
+#
+# A model whose ladder nobody has declared is refused by
+# Undeclared_reasoning_effort_capability, which names the model and says what
+# is missing. That refusal is the correct outcome, and the fix for it is a
+# catalog row, not a value maintained beside the benchmark.
 
 
 def seed_skills_block() -> str:
@@ -531,7 +593,7 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
         remote_root=REMOTE_ROOT,
         effort_lines=(
             f'reasoning-effort = "{effort}"\nthinking-support = true\n'
-            if pcfg["capabilities_base"] in EFFORT_CAPABLE_BASES else ""),
+            if pcfg.get("carries_effort") else ""),
         max_context_line=(
             f"max-context = {openrouter.max_context}\n" if openrouter else ""),
         **pcfg)
@@ -554,31 +616,22 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
     # the reasoning_effort thinking-control dialect
     # (reasoning_dialect.validate_request_control_inputs:
     # Chat_completions + Reasoning_effort is the admitted pair).
-    if pcfg["capabilities_base"] == "anthropic":
-        thinking_control = 'anthropic_thinking_control = "adaptive_only"\n'
-        # The anthropic base preset caps output at 8192 ("higher for newer
-        # models" — capabilities.ml anthropic_capabilities). With adaptive
-        # thinking on, a turn burns 8k before finishing: observed v0.35.8
-        # smoke anthropic5, "Provider output reached its maximum token
-        # boundary before completion" at 775s after the truncation recovery
-        # exhausted the same ceiling. fable-5 takes 64k.
-        max_output_lines = "max_output_tokens = 64000\n"
-    elif pcfg["capabilities_base"] == "openai":
-        thinking_control = 'thinking_control_format = "reasoning_effort"\n'
-        max_output_lines = (
-            f"max_output_tokens = {openrouter.max_output}\n" if openrouter else "")
-    else:
-        thinking_control = ""
-        max_output_lines = ""
-    # kimi-for-coding accepts only temperature=1 ("invalid temperature: only
-    # 1 is allowed for this model"), and Anthropic under adaptive thinking
-    # answers "temperature may only be set to 1 when thinking is enabled or
-    # in adaptive mode" (observed v0.35.6 smoke, turn_failed at 12s — after
-    # the oneOf projection fix let the request through). Both are handled the
-    # repo's own way: drop the sampling fields from the wire entirely.
+    # What each provider needs is declared on its own entry above, beside the
+    # observation that put it there. Read here rather than re-derived from the
+    # base label: a name in a branch is a classifier, and this file already has
+    # one place that knows which provider is which.
+    thinking_control = pcfg.get("thinking_control_line", "")
+    max_output = pcfg.get("max_output_tokens")
+    if max_output is None and openrouter is not None:
+        max_output = openrouter.max_output
+    max_output_lines = (
+        f"max_output_tokens = {max_output}\n" if max_output is not None else "")
+    ignored_sampling = pcfg.get("ignored_sampling_parameters")
     sampling_lines = (
-        'ignored_sampling_parameters = ["temperature", "top_p"]\n'
-        if pcfg["capabilities_base"] in ("kimi", "anthropic") else "")
+        "ignored_sampling_parameters = ["
+        + ", ".join(f'"{name}"' for name in ignored_sampling)
+        + "]\n"
+        if ignored_sampling else "")
     (root / "agent-core-models-overlay.toml").write_text(OVERLAY_TOML.format(
         provider=provider, model_alias=model_alias,
         thinking_control=thinking_control,

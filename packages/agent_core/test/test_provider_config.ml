@@ -1388,6 +1388,130 @@ let test_validate_reasoning_effort_checks_the_explicit_disable () =
       (Result.is_ok (validate "effort-off-object-model")))
 ;;
 
+(* The ladder answers, but the admission predicate is what a caller asks before
+   it builds a request at all. Until 2026-09-18 its disable arm read
+   [thinking_control_format] alone: a [Reasoning_effort] row whose ladder omits
+   "none" was admitted here and refused by the wire builder a moment later, so
+   the caller learned at dispatch what this predicate exists to tell it
+   beforehand. On a lane holding one candidate that costs the whole turn
+   (#36972, after #26787, #30701 and #28447). *)
+let test_thinking_admission_asks_the_effort_ladder_about_a_disable () =
+  let manifest =
+    Yojson.Safe.from_string
+      {|{"schema_version":1,"models":[
+          {"id_prefix":"admit-off-model","base":"openai_chat_extended","thinking_control_format":"reasoning_effort","accepted_reasoning_efforts":["low"]},
+          {"id_prefix":"admit-off-ok-model","base":"openai_chat_extended","thinking_control_format":"reasoning_effort","accepted_reasoning_efforts":["none","low"]}]}|}
+    |> Capability_manifest.of_json
+    |> Result.get_ok
+  in
+  Fun.protect ~finally:Capability_manifest.clear_global (fun () ->
+    Capability_manifest.set_global manifest;
+    let cfg model_id =
+      let declared_capabilities =
+        match Capabilities.for_model_id model_id with
+        | Some capabilities -> capabilities
+        | None -> Alcotest.failf "fixture capability %s was not declared" model_id
+      in
+      Provider_config.make
+        ~kind:OpenAI_compat
+        ~model_id
+        ~base_url:"https://api.openai.com/v1"
+        ~model_capabilities_override:declared_capabilities
+        ~enable_thinking:false
+        ()
+    in
+    let rejection model_id =
+      let config = cfg model_id in
+      let caps =
+        match Provider_config.capabilities_for_config_model config with
+        | Some caps -> caps
+        | None -> Alcotest.failf "fixture capability %s did not resolve" model_id
+      in
+      Complete_common.thinking_control_request_rejection ~caps config
+    in
+    (* The rejection is a value, so it is checked as one. Reading the prose
+       instead would pass on any message that happens to contain the word, and
+       would go red when the wording changes without the contract changing. *)
+    (match rejection "admit-off-model" with
+     | Some
+         (Complete_common.Disable_outside_effort_ladder
+            { accepted = Some [ Provider_config.Low ] }) -> ()
+     | Some other ->
+       Alcotest.failf
+         "expected the ladder refusal naming this row's one accepted effort, got %s"
+         (match other with
+          | Complete_common.Enable_not_declared -> "Enable_not_declared"
+          | Complete_common.Enable_not_encodable -> "Enable_not_encodable"
+          | Complete_common.Disable_not_encodable -> "Disable_not_encodable"
+          | Complete_common.Disable_outside_effort_ladder _ ->
+            "Disable_outside_effort_ladder with another ladder"
+          | Complete_common.Request_control_invalid _ -> "Request_control_invalid")
+     | None ->
+       Alcotest.fail
+         "a ladder without none cannot carry the disable, and admission must say so");
+    match rejection "admit-off-ok-model" with
+    | None -> ()
+    | Some _ -> Alcotest.fail "a ladder carrying none admits the disable")
+;;
+
+(* The router's ladder is declared once, on its base. What matters is not that
+   the list holds the values it was written from -- that compares a literal to
+   itself -- but that a model row naming that base is answered by it. So ask
+   the validator, whose verdict is the thing the request will meet. *)
+let test_the_router_base_answers_a_row_that_names_it () =
+  let manifest =
+    Yojson.Safe.from_string
+      {|{"schema_version":1,"models":[{"id_prefix":"router-row","base":"openrouter"}]}|}
+    |> Capability_manifest.of_json
+    |> Result.get_ok
+  in
+  Fun.protect ~finally:Capability_manifest.clear_global (fun () ->
+    Capability_manifest.set_global manifest;
+    let cfg ?enable_thinking ?reasoning_effort () =
+      let declared_capabilities =
+        match Capabilities.for_model_id "router-row" with
+        | Some capabilities -> capabilities
+        | None -> Alcotest.fail "the fixture row did not resolve the router base"
+      in
+      Provider_config.make
+        ~kind:OpenAI_compat
+        ~model_id:"router-row"
+        ~base_url:"https://openrouter.ai/api/v1"
+        ~model_capabilities_override:declared_capabilities
+        ?enable_thinking
+        ?reasoning_effort
+        ()
+    in
+    (* Two levels, because the router's set is wider than the one the benchmark
+       used to write by hand: minimal was outside it. *)
+    List.iter
+      (fun effort ->
+         match
+           Provider_config.validate_reasoning_effort_request_typed
+             (cfg ~reasoning_effort:effort ())
+         with
+         | Ok () -> ()
+         | Error rejection ->
+           Alcotest.failf
+             "the router accepts %s, so a row on its base must carry it: %s"
+             (Reasoning_effort.to_string effort)
+             (Provider_config.reasoning_effort_request_rejection_to_message rejection))
+      [ Reasoning_effort.Minimal; Reasoning_effort.High ];
+    (* And the off value is refused, which is what keeps a caller from taking a
+       thinking-free answer on trust from a router that only maps the value to
+       its nearest neighbour. *)
+    match
+      Provider_config.validate_reasoning_effort_request_typed
+        (cfg ~enable_thinking:false ())
+    with
+    | Error (Provider_config.Explicit_disable_outside_ladder _) -> ()
+    | Error rejection ->
+      Alcotest.failf
+        "expected the disable to fall outside the ladder, got %s"
+        (Provider_config.reasoning_effort_request_rejection_to_message rejection)
+    | Ok () -> Alcotest.fail "the router's ladder must not claim it can stop thinking")
+;;
+
 let test_validate_reasoning_effort_fails_closed_without_declaration () =
   let config =
     Provider_config.make
@@ -2622,6 +2746,14 @@ let () =
             "reasoning effort checks the explicit disable"
             `Quick
             test_validate_reasoning_effort_checks_the_explicit_disable
+        ; Alcotest.test_case
+            "thinking admission asks the effort ladder about a disable"
+            `Quick
+            test_thinking_admission_asks_the_effort_ladder_about_a_disable
+        ; Alcotest.test_case
+            "the router base answers a row that names it"
+            `Quick
+            test_the_router_base_answers_a_row_that_names_it
         ; Alcotest.test_case
             "an auto-enabling wire needs a declared effort"
             `Quick

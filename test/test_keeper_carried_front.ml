@@ -88,7 +88,7 @@ let source =
 
 (* The lane walked glm, kimi, deepseek over one history. The newest completed
    record seeds the front whichever runtime measured it: a position in the
-   checkpoint history is the same position on every Agent Core runtime. *)
+   checkpoint history is the same position on every runtime. *)
 let test_the_newest_completed_record_on_the_trace_seeds_the_front () =
   let records =
     [ record ~turn:10 ~runtime:"glm" (Some (30, 100))
@@ -113,22 +113,40 @@ let test_another_sessions_record_is_another_history () =
     (fst (seed (Front.of_records ~trace_id:"trace-2" ~composer records)))
 ;;
 
-(* An errored turn's record has no stop reason; an official client's window
-   counts a list of its own, so its newer record is not this history's; a
-   runtime the catalog no longer has could be either, so its record is not
-   read. *)
-let test_an_errored_or_official_client_record_is_skipped () =
+(* An official client cuts the same history, so its record names a position
+   here and is read. A runtime the catalog no longer has could have counted
+   anything, so its record is not; a record with no window says nothing. *)
+let test_an_official_clients_record_is_read_and_an_unmaterialized_one_is_not () =
   let records =
     [ record ~turn:10 (Some (30, 100))
-    ; record ~turn:12 ~finish:None (Some (5, 110))
     ; record ~turn:13 ~runtime:"claude_code" (Some (5, 120))
-    ; record ~turn:14 (None)
+    ; record ~turn:14 None
     ; record ~turn:15 ~runtime:"gone" (Some (5, 130))
     ]
   in
   let first_atom, src = seed (of_records records) in
-  check int "only turn 10 qualifies" 70 first_atom;
-  check source "turn 10" (Front.Turn_record { turn = 10 }) src
+  check int "the official client's turn 13 is the newest read" 115 first_atom;
+  check source "turn 13" (Front.Turn_record { turn = 13 }) src
+;;
+
+(* A turn that never finished still measured what it sent, and that range is
+   a position in the same history. Skipping it is what kept five keepers
+   sending the whole history every turn on 2026-09-18, because the halving a
+   refusal forces lived only inside the attempt. It is read, named apart from
+   a completed seed so a reader can tell which turn reached that position. *)
+let test_an_unfinished_record_is_read_and_named_apart () =
+  let records = [ record ~turn:10 (Some (30, 100)); record ~turn:12 ~finish:None (Some (5, 110)) ] in
+  let first_atom, src = seed (of_records records) in
+  check int "total minus transmitted of turn 12" 105 first_atom;
+  check source "named apart from a completed seed" (Front.Unfinished_turn { turn = 12 }) src
+;;
+
+(* Acceptance is the newer evidence: a completed turn after an unfinished one
+   says that range served, so it names the front and the older one does not. *)
+let test_a_completed_record_after_an_unfinished_one_seeds_the_front () =
+  let records = [ record ~turn:12 ~finish:None (Some (5, 110)); record ~turn:13 (Some (40, 115)) ] in
+  let _, src = seed (of_records records) in
+  check source "turn 13 completed" (Front.Turn_record { turn = 13 }) src
 ;;
 
 (* The record's runtime names the runtime that was asked; the wire
@@ -136,12 +154,12 @@ let test_an_errored_or_official_client_record_is_skipped () =
    the latter. *)
 let test_the_wire_observation_names_the_runtime_when_present () =
   let records =
-    [ record ~turn:10 ~runtime:"glm" ~wire_runtime:(Some "claude_code") (Some (30, 100)) ]
+    [ record ~turn:10 ~runtime:"glm" ~wire_runtime:(Some "gone") (Some (30, 100)) ]
   in
-  check bool "measured by an official client: skipped" true
+  check bool "measured by a runtime the catalog lost: skipped" true
     (Option.is_none (of_records records));
   let records =
-    [ record ~turn:10 ~runtime:"claude_code" ~wire_runtime:(Some "deepseek") (Some (30, 100)) ]
+    [ record ~turn:10 ~runtime:"gone" ~wire_runtime:(Some "deepseek") (Some (30, 100)) ]
   in
   check int "measured by deepseek: read" 70 (fst (seed (of_records records)))
 ;;
@@ -343,6 +361,8 @@ let test_origin_json_names_its_kind () =
   in
   check string "ledger" "ledger" (kind (Front.Carried Front.Ledger));
   check string "turn record" "turn_record" (kind (Front.Carried (Front.Turn_record { turn = 3 })));
+  check string "unfinished turn" "unfinished_turn"
+    (kind (Front.Carried (Front.Unfinished_turn { turn = 7 })));
   check string "halved" "halved_after_refusal"
     (kind (Front.Carried (Front.Halved_after_refusal { retry = 1 })));
   check string "whole" "whole_history" (kind Front.Whole_history)
@@ -354,8 +374,12 @@ let () =
     [ ( "of_records"
       , [ test_case "newest completed record on the trace" `Quick
             test_the_newest_completed_record_on_the_trace_seeds_the_front
-        ; test_case "errored or official client skipped" `Quick
-            test_an_errored_or_official_client_record_is_skipped
+        ; test_case "an official client is read, an unmaterialized runtime is not" `Quick
+            test_an_official_clients_record_is_read_and_an_unmaterialized_one_is_not
+        ; test_case "an unfinished record is read and named apart" `Quick
+            test_an_unfinished_record_is_read_and_named_apart
+        ; test_case "a completed record after an unfinished one seeds" `Quick
+            test_a_completed_record_after_an_unfinished_one_seeds_the_front
         ; test_case "wire observation names the runtime" `Quick
             test_the_wire_observation_names_the_runtime_when_present
         ; test_case "no record" `Quick test_no_record_means_no_seed

@@ -112,8 +112,9 @@ On every pull request (`pr-check.yml`):
   advisory set follows and is recorded, not enforced.
 - **check**: source text integrity, the RFC index,
   `scripts/check-doc-truth.sh`, release and namespace fixtures,
-  `dune build @check`, then the tests the pull request edits
-  (`scripts/ci/run-edited-tests.sh`) and the suites that need no build.
+  `dune build @check`, then every suite the pull request's changes select,
+  within an 18-minute budget that names the suites it could not run
+  (`scripts/ci/run-edited-tests.sh`), and the suites that need no build.
 - **dashboard-types**: type-checks the SPA.
 
 The full test suite is `test.yml`, on a daily schedule and on dispatch, not

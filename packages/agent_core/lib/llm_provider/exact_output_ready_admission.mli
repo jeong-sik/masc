@@ -78,6 +78,9 @@ type wire_admission_error =
   | Global_admission_not_allowed
   | Invalid_connect_timeout
   | Invalid_body_timeout
+  | Missing_deadline
+      (** No connect or body timeout reached the plan; the wire would run
+          unbounded. See {!Exact_output_plan.output_admission_error}. *)
   | Caller_supplied_header_not_allowed
   | Unsupported_image_input
   | Unsupported_document_input

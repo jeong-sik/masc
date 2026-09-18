@@ -21,6 +21,22 @@ type provider_progress_sample =
             excluding it here leaves nothing unbounded. *)
   }
 
+(** What one dispatch's checkpoints have recorded so far. It only moves
+    forward, in this order.
+    - [No_checkpoint_stage]: AGENT_CORE has not reached a checkpoint stage, so
+      the agent state is as the dispatch began and another candidate may take
+      the same run.
+    - [Checkpoint_stage_reached]: a stage was reached, whether or not its save
+      succeeded. The attempt may hold effects, so no same-run retry.
+    - [Tool_results_saved]: a stage written after tools ran
+      ([After_tool_results_appended], [After_context_injection]) was saved. A
+      chat operation resumed from its latest checkpoint does not run those
+      tools again (RFC last-path-resumes-after-progress §3.2). *)
+type checkpoint_progress =
+  | No_checkpoint_stage
+  | Checkpoint_stage_reached
+  | Tool_results_saved
+
 type try_provider_ctx =
   { runtime_id : string
   ; error_runtime_id : string
@@ -30,6 +46,12 @@ type try_provider_ctx =
             keeper-context-window-in-tokens §10.5), as the binding declares
             them; [None] leaves eviction to a refusal. *)
   ; carried_front_seed : unit -> Keeper_carried_front.seed_read
+  ; hold_carried_front : Keeper_carried_front.seed -> unit
+        (** Keeps a front halved after a refusal for the rest of the turn,
+            so the lane's next candidate reads it through
+            {!carried_front_seed} rather than composing the whole history
+            again. A halved position names an atom of the history, which
+            every Agent Core candidate of the turn composes from. *)
         (** Where the carried range starts when no ledger holds this
             (keeper, runtime) pair yet: the range the newest completed Agent
             Core turn record on the trace measured, whichever runtime ran it,
@@ -77,7 +99,7 @@ type try_provider_ctx =
   ; cache_system_prompt : bool
   ; yield_on_tool : bool
   ; checkpoint_sink : Agent_core.Agent.checkpoint_sink option
-  ; checkpoint_stage_observed : bool Atomic.t
+  ; checkpoint_progress : checkpoint_progress Atomic.t
   ; context_injector : Agent_core.Hooks.context_injector option
   ; context : Agent_core.Context.t option
   ; enable_thinking : bool option
@@ -142,9 +164,31 @@ val apply_accept :
   (Runtime_agent.run_result, Agent_core.Error.t) result
 
 val observe_checkpoint_stage :
-  bool Atomic.t -> Agent_core.Agent.checkpoint_stage -> unit
+  checkpoint_progress Atomic.t -> Agent_core.Agent.checkpoint_stage -> unit
+(** Marks that a stage was reached. Called before the stage is saved. *)
 
-val same_run_retry_allowed : bool Atomic.t -> bool
+val observe_checkpoint_saved :
+  checkpoint_progress Atomic.t -> Agent_core.Agent.checkpoint_stage -> unit
+(** Marks [Tool_results_saved] for a stage written after tools ran. Only the
+    owner of the checkpoint sink may call it, and only for a write it made:
+    a sink answers [Ok ()] for a write it skipped as well
+    ([Keeper_checkpoint_store.Stale_noop], which leaves the canonical
+    checkpoint untouched), and a resumed operation would not read the
+    checkpoint that write claimed. *)
+
+val observing_checkpoint_sink :
+  checkpoint_progress Atomic.t ->
+  Agent_core.Agent.checkpoint_sink option ->
+  Agent_core.Agent.checkpoint_sink
+(** The sink an attempt hands AGENT_CORE: marks the stage, then delegates to
+    the caller's sink and returns its answer unread. Saved tool results are
+    not marked here — see {!observe_checkpoint_saved}. *)
+
+val same_run_retry_allowed : checkpoint_progress Atomic.t -> bool
+(** [true] only at [No_checkpoint_stage]. *)
+
+val tool_results_saved : checkpoint_progress Atomic.t -> bool
+(** [true] only at [Tool_results_saved]. *)
 
 type provider_lease_phase =
   | Provider_active_since of float
@@ -378,9 +422,10 @@ module For_testing : sig
 
   (** What a max-tokens rejection owes the checkpoint. Retrying without
       thinking is a remedy for a budget spent thinking and applies only when
-      thinking was on; dropping the rejected response is owed either way,
-      because accept judged it unusable and a checkpoint that keeps it feeds
-      it back as input on every later turn. *)
+      thinking was on and the candidate's wire can be told to stop; dropping
+      the rejected response is owed either way, because accept judged it
+      unusable and a checkpoint that keeps it feeds it back as input on every
+      later turn. *)
   type truncation_recovery =
     | Recovery_not_applicable
     | Retry_without_thinking of Agent_core.Checkpoint.t
@@ -388,6 +433,7 @@ module For_testing : sig
 
   val truncation_recovery :
     enable_thinking:bool option ->
+    thinking_can_be_disabled:bool ->
     result:(Runtime_agent.run_result, Agent_core.Error.t) result ->
     checkpoint:Agent_core.Checkpoint.t option ->
     truncation_recovery
@@ -404,6 +450,12 @@ module For_testing : sig
       but for [reasoning_effort = None], because the wires that admit effort
       reject it with thinking disabled. *)
   val candidate_without_reasoning_effort : Runtime_candidate.t -> Runtime_candidate.t
+
+  (** Whether the no-thinking retry would be admitted on this candidate, asked
+      of the request it would send and answered by the admission every request
+      meets ([Complete_common.validate_all]). This is what
+      {!truncation_recovery} reads as [thinking_can_be_disabled]. *)
+  val retry_without_thinking_admitted : Runtime_candidate.t -> bool
 
   val apply_accept :
     runtime_id:string ->

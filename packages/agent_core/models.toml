@@ -370,9 +370,13 @@ cache_read_multiplier = 1.0
 [[models]]
 # 2026-09-06 RFC-0430 Phase 0: 2026-08-16 peak pricing (off-peak 50%).
 # Cache-hit input bills at ~1/30 of the miss price (docs: kv_cache,
-# pricing). reasoning_replay mirrors the ollama_cloud deepseek rows:
-# docs require re-sending every prior turn's reasoning_content on
-# tools requests (400 otherwise) and ignore it without tools.
+# pricing). reasoning_replay is this API's own rule: the docs require
+# re-sending every prior turn's reasoning_content on tools requests and
+# return 400 otherwise, and ignore it without tools
+# (api-docs.deepseek.com/guides/thinking_mode/, re-read 2026-09-18).
+# The ollama_cloud rows for the same weights deliberately differ: that
+# endpoint states no such requirement, so they replay the active tool-call
+# sequence only.
 id_prefix = "deepseek-v4-pro"
 base = "openai_chat"
 provider_name = "deepseek"
@@ -398,9 +402,13 @@ cache_read_multiplier = 0.0333
 [[models]]
 # 2026-09-06 RFC-0430 Phase 0: 2026-08-16 peak pricing (off-peak 50%).
 # Cache-hit input bills at ~1/30 of the miss price (docs: kv_cache,
-# pricing). reasoning_replay mirrors the ollama_cloud deepseek rows:
-# docs require re-sending every prior turn's reasoning_content on
-# tools requests (400 otherwise) and ignore it without tools.
+# pricing). reasoning_replay is this API's own rule: the docs require
+# re-sending every prior turn's reasoning_content on tools requests and
+# return 400 otherwise, and ignore it without tools
+# (api-docs.deepseek.com/guides/thinking_mode/, re-read 2026-09-18).
+# The ollama_cloud rows for the same weights deliberately differ: that
+# endpoint states no such requirement, so they replay the active tool-call
+# sequence only.
 id_prefix = "deepseek-ai/deepseek-v4-pro"
 base = "openai_chat"
 provider_name = "deepseek"
@@ -426,9 +434,13 @@ cache_read_multiplier = 0.0333
 [[models]]
 # 2026-09-06 RFC-0430 Phase 0: 2026-08-16 peak pricing (off-peak 50%).
 # Cache-hit input bills at ~1/30 of the miss price (docs: kv_cache,
-# pricing). reasoning_replay mirrors the ollama_cloud deepseek rows:
-# docs require re-sending every prior turn's reasoning_content on
-# tools requests (400 otherwise) and ignore it without tools.
+# pricing). reasoning_replay is this API's own rule: the docs require
+# re-sending every prior turn's reasoning_content on tools requests and
+# return 400 otherwise, and ignore it without tools
+# (api-docs.deepseek.com/guides/thinking_mode/, re-read 2026-09-18).
+# The ollama_cloud rows for the same weights deliberately differ: that
+# endpoint states no such requirement, so they replay the active tool-call
+# sequence only.
 id_prefix = "deepseek-v4-flash"
 base = "openai_chat"
 provider_name = "deepseek"
@@ -456,9 +468,13 @@ cache_read_multiplier = 0.0333
 [[models]]
 # 2026-09-06 RFC-0430 Phase 0: 2026-08-16 peak pricing (off-peak 50%).
 # Cache-hit input bills at ~1/30 of the miss price (docs: kv_cache,
-# pricing). reasoning_replay mirrors the ollama_cloud deepseek rows:
-# docs require re-sending every prior turn's reasoning_content on
-# tools requests (400 otherwise) and ignore it without tools.
+# pricing). reasoning_replay is this API's own rule: the docs require
+# re-sending every prior turn's reasoning_content on tools requests and
+# return 400 otherwise, and ignore it without tools
+# (api-docs.deepseek.com/guides/thinking_mode/, re-read 2026-09-18).
+# The ollama_cloud rows for the same weights deliberately differ: that
+# endpoint states no such requirement, so they replay the active tool-call
+# sequence only.
 id_prefix = "deepseek-ai/deepseek-v4-flash"
 base = "openai_chat"
 provider_name = "deepseek"
@@ -620,11 +636,22 @@ reasoning_streaming_format = "delta:reasoning"
 # sequence (api-docs.deepseek.com/guides/thinking_mode, checked 2026-08-24);
 # plain user turns drop it. Ollama's /v1 layer maps incoming assistant
 # [reasoning] to the template's thinking slot (ollama/openai/openai.go), so
-# the replay is wire-effective here. Without this row the dialect fell back
-# to No_replay and the model re-derived its plan on every tool round
+# the replay is wire-effective here. Without any replay the dialect falls
+# back to No_replay and the model re-derives its plan on every tool round
 # (live: sangsu turn 163/165, 2026-08-24, 36 single-call rounds restating
 # the same answer).
-reasoning_replay = "drop_without_tool_preserve_with_tool"
+#
+# The sequence, not the history. The rule above is about one tool-call
+# sequence; DeepSeek's own API extends it to every prior turn because its
+# server refuses a tools request with 400 when an earlier reasoning_content
+# is missing, and that refusal is DeepSeek's, not this endpoint's. Ollama
+# documents no such requirement for incoming thinking, and its cloud model
+# cards say the opposite -- "Thoughts from previous model turns must not be
+# added before the next user turn begins"
+# (ollama.com/library/gemma4:31b-cloud, read 2026-09-18).
+# Carrying all of history cost a live keeper 4.7 MB of a 7.83 MB request on
+# 2026-09-18, on a binding whose own thinking is disabled.
+reasoning_replay = "latest_user_turn_tool_calls"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
@@ -641,8 +668,10 @@ supports_reasoning = true
 # Same correction as deepseek-v4-flash above; see that row's comment. Confirmed
 # by the live overlay's deepseek-v4-pro row (2026-08-04 live probe).
 reasoning_streaming_format = "delta:reasoning"
-# Same tool-call replay contract as the deepseek-v4-flash row above.
-reasoning_replay = "drop_without_tool_preserve_with_tool"
+# Same tool-call replay contract as the deepseek-v4-flash row above, and the
+# same boundary: this endpoint's rule covers the active sequence, not every
+# prior turn.
+reasoning_replay = "latest_user_turn_tool_calls"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true

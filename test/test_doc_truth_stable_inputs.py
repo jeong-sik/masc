@@ -107,17 +107,20 @@ class StableDocumentationInputs(unittest.TestCase):
     def test_a_pin_on_the_published_release_still_needs_the_notice(self):
         # The bump rewrites the notice rather than adding it, so a README that
         # lost it while pinned to a published release must fail here instead
-        # of at the next bump.
+        # of at the next bump. On a release branch the bump has already moved
+        # the pin to the candidate, so pin the README to the published release
+        # here rather than assuming the branch already does.
         readme = self.repo / "README.md"
         original = readme.read_text()
-        tag = first_group(r"(?m)^TAG=v(.+)$", original)
         published = first_group(r"(?m)^> Latest published GitHub release: v([^ ]+)",
                                 (self.repo / "ROADMAP.md").read_text())
-        self.assertEqual(tag, published, "fixture needs a pin on the published release")
-        notice = f"> Installation target: v{tag} (check tag availability on GitHub Releases)."
+        notice = f"> Installation target: v{published} (check tag availability on GitHub Releases)."
+        pinned = re.sub(r"(?m)^TAG=v[^ ]+$", f"TAG=v{published}", original)
+        pinned = re.sub(r"(?m)^> Installation target: v[^ ]+ .*$", notice, pinned)
         try:
-            self.assertEqual(original.count(notice), 1)
-            readme.write_text(original.replace(notice, ""))
+            readme.write_text(pinned)
+            self.assertEqual(pinned.count(notice), 1)
+            readme.write_text(pinned.replace(notice, ""))
             refused = self.run_script("check-doc-truth.sh")
             self.assertNotEqual(refused.returncode, 0)
             self.assertIn("Installation target:", refused.stderr)

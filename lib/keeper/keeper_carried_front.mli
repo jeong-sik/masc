@@ -4,18 +4,19 @@
     The front is the oldest atom the request carries; everything from it to
     the newest atom goes out, and it only ever moves toward the newest atom.
     It is a position in the keeper's checkpoint history — the trace — and
-    every Agent Core runtime composes its request from that one history, so
-    a position measured on one runtime names the same atom on the next.
+    every runtime cuts its request from that one history, so a position
+    measured on one names the same atom on the next.
     While the process holds a ledger for the (keeper, runtime) pair, the
     front is the ledger's: the last request's front as every eviction since
     moved it. Without one, the first turn after a boot or the first on this
-    runtime, the seed is the range the newest completed Agent Core turn
-    record on the trace measured, whichever runtime measured it, read as
+    runtime, the seed is the range the newest completed turn record on the
+    trace measured, whichever runtime measured it — an official client's
+    record counts the same history as an Agent Core one — read as
     [total_atoms - transmitted_atoms]; a lane walking to its next candidate
     starts from the range the last completed turn carried rather than from
     the whole history.
-    With neither, a refused range from the same trace is read as a ceiling
-    ({!Refused_range}); with none of the three the caller has no atom to
+    With neither, the range an unfinished turn on the same trace reached
+    ({!Unfinished_turn}); with none of the three the caller has no atom to
     start from and carries the whole history; the provider judges it, and the turn driver owns the one move a
     refusal forces before any usage has been counted, which
     {!Halved_after_refusal} names.
@@ -31,18 +32,22 @@
 type source =
   | Ledger  (** The pair's ledger, moved by every eviction since its last request. *)
   | Turn_record of { turn : int }
-      (** The newest completed Agent Core turn record on the trace that
-          measured its carried atoms, whichever runtime ran it. *)
-  | Refused_range of { turn : int }
-      (** The newest Agent Core turn record on the trace whose turn never
-          finished: the range it carried is the largest one known to be too
-          big for that provider. It is read as a ceiling, so the composition
-          starts halfway between it and the newest atom rather than at it
+      (** The newest completed turn record on the trace that measured its
+          carried atoms, whichever runtime ran it. *)
+  | Unfinished_turn of { turn : int }
+      (** The newest turn record on the trace that wrote no stop
+          reason: the narrowest range that turn tried, since every candidate
+          of a turn shares the front a refusal moves. The record says the
+          turn ended before a stop reason was written
+          ({!Turn_record.finish_reason}) and never why, so this names a
+          position and claims no cause. The composition starts there, at the
+          position the turn reached, and moves no further on its own — a turn
+          ends for reasons that say nothing about size, and those repeat
           ({!Keeper_turn_driver_try_provider.compose_carried_model_input}).
-          Without this, a keeper whose seeds are gone repeats the whole
+          Without this record a keeper whose seeds are gone repeats the whole
           history every turn: the halving a refusal forces lives only inside
-          the attempt, and the record that would carry it forward was
-          skipped for having no finish reason (2026-09-18: five keepers). *)
+          the turn, and the record that carries it forward was skipped for
+          having no finish reason (2026-09-18: five keepers). *)
   | Halved_after_refusal of { retry : int }
       (** A provider or wire refusal before any usage: the range was halved
           toward the newest atom, [retry] times so far. *)
@@ -74,8 +79,10 @@ type composer =
           history. *)
   | Hands_over_its_own_list
       (** An official client: masc hands over a list and the client
-          assembles the request, so the window's counts are positions in
-          that list, not in the checkpoint history. *)
+          assembles the request. The window it records is still a range of
+          the checkpoint history, because the cut masc measures runs over
+          the same [agent.state.messages] the Agent Core path cuts; what the
+          client does with the list afterwards is not in the record. *)
   | Not_materialized
       (** The catalog has no such runtime; which kind it was is unknown. *)
 
@@ -93,14 +100,14 @@ val of_records
   -> trace_id:string
   -> Turn_record.t list
   -> seed option
-(** The newest completed record of session [trace_id] carrying a
-    [model_input_window] whose runtime {!Composes_from_the_history}, in any
-    order. An errored turn's record names the runtime that was asked, not
-    the lane whose request it measured, so only a record with a stop reason
-    is read; a record of another session measured another history; a record
-    whose runtime {!Hands_over_its_own_list} counted another list; and one
-    whose runtime is {!Not_materialized} is not read, since nothing says
-    which it was. *)
+(** The newest record of session [trace_id] carrying a [model_input_window]
+    whose runtime the catalog materializes, in any order, tagged
+    {!Turn_record} when the turn recorded a stop reason and
+    {!Unfinished_turn} when it did not. Both name a range of the same
+    history, and so does an official client's record
+    ({!Hands_over_its_own_list}). A record of another session measured
+    another history, and one whose runtime is {!Not_materialized} is not
+    read, since nothing says which list it counted. *)
 
 type unreadable_records =
   { count : int  (** At least 1. *)
@@ -163,9 +170,9 @@ val for_history
 val dropped_front_to_string : dropped_front -> string
 
 val records_read : int
-(** How many records {!read_seed} reads. Every completed Agent Core turn
-    leaves one, so the read has to reach back only past errored turns and
-    official-client turns. *)
+(** How many records {!read_seed} reads. Every completed turn leaves one,
+    whichever runtime ran it, so the read has to reach back only past turns
+    whose runtime the catalog no longer has. *)
 
 val clamp : atom_count:int -> int -> int
 (** The front as a position in a history of [atom_count] atoms: at least 0,
@@ -182,4 +189,5 @@ val origin_to_string : origin -> string
 
 val origin_to_json : origin -> Yojson.Safe.t
 (** One object with a [kind]: [ledger], [turn_record] with [turn],
-    [halved_after_refusal] with [retry], or [whole_history]. *)
+    [unfinished_turn] with [turn], [halved_after_refusal] with [retry], or
+    [whole_history]. *)

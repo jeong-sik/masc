@@ -154,7 +154,13 @@ let rec forget_microvm_work_root container_name =
    Across a server restart none of this is knowable, but neither is the
    identity snapshot: [bind_registered_microvm_identity] finds nothing and the
    guest is already replaced on that account. This table therefore only has
-   to answer for guests booted by the process asking. *)
+   to answer for guests booted by the process asking.
+
+   What it compares is what this process asked for, not what the guest got.
+   [container list --format json] reports a running guest's [resources.cpus],
+   [resources.memoryInBytes] and [image.reference], so the size axis could
+   read the fact instead of the memory; the other two backends answer inspect
+   in their own shapes and are unmeasured. #36993 carries that. *)
 type microvm_boot =
   { policy_port : int option
   ; image : string

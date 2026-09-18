@@ -14,7 +14,13 @@ val memory_of_string : string -> (memory, string) result
     [g]/[G] (GiB): ["512m"], ["8g"]. No whitespace, sign, fraction, bare
     number or other suffix. A bare number is refused because [container]
     reads it as bytes and Docker's grammar does too, which is not what an
-    operator writing ["8"] means. The error names the value and this form. *)
+    operator writing ["8"] means. The error names the value and this form.
+
+    Only the arithmetic bounds the size from above: a value that would
+    overflow [int] is refused. A size larger than the host can give is not,
+    and the runtime refuses it at boot instead. The host's capacity is not a
+    fact this module is given, and a ceiling written here would be a number
+    about one machine. *)
 
 val memory_mib : memory -> int
 

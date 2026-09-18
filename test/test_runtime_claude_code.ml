@@ -2054,9 +2054,12 @@ let test_system_file_keeps_large_context_off_argv () =
 
 let test_native_posture_selects_tools_flag () =
   let argv posture = native_argv ~native:posture ~dynamic_tools:[] in
-  check (option string) "none disables the built-in set" (Some "")
+  (* Every posture names ToolSearch (#36798): a --tools list without it also
+     turns off the CLI's deferred MCP schema loading. [none] still disables
+     every built-in that touches the machine; the lookup observes nothing. *)
+  check (option string) "none keeps only the schema lookup" (Some "ToolSearch")
     (flag_value (argv Runtime_native_tools.Native_none) "--tools");
-  check (option string) "read allowlists the read set" (Some "Read,Glob,Grep")
+  check (option string) "read adds the schema lookup to the read set" (Some "Read,Glob,Grep,ToolSearch")
     (flag_value (argv Runtime_native_tools.Native_read) "--tools");
   check (option string) "full enables the default set" (Some "default")
     (flag_value (argv Runtime_native_tools.Native_full) "--tools")

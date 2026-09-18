@@ -70,6 +70,10 @@ type accept_rejection_kind =
 val network_error_kind_to_string :
   Llm_provider.Http_client.network_error_kind -> string
 
+val network_error_kind_of_string :
+  string -> Llm_provider.Http_client.network_error_kind option
+(** [None] for any spelling {!network_error_kind_to_string} does not emit. *)
+
 type accept_response_shape =
   | Accept_response_empty
   | Accept_response_thinking_only

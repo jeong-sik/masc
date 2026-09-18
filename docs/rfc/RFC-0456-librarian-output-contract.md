@@ -3,12 +3,12 @@ rfc: "0456"
 title: "Librarian 의 출력 계약이 무변경을 가장 안전한 답으로 만든다 — 점호를 없애고 퇴장 경로를 가른다"
 status: Draft
 created: 2026-09-16
-updated: 2026-09-16
+updated: 2026-09-17
 author: claude
 supersedes: []
 superseded_by: null
 related: ["0418"]
-implementation_prs: []
+implementation_prs: ["#36829"]
 ---
 
 # RFC-0456 — Librarian 의 출력 계약이 무변경을 가장 안전한 답으로 만든다
@@ -39,7 +39,7 @@ Librarian 이 게으른 것이 아니다. **출력 계약이 무변경을 유일
 읽는 곳은 `Memory`(현재 스냅샷) / `History`(원본 사용자 메시지) / `All` 뿐이고,
 `dropped` 된 사실에 도달하는 경로가 없다. 저널에 전부 남아 있지만 읽는 도구가 없다.
 
-이 RFC 는 세 가지를 바꾼다. 새 저장 형식도, 새 상태도 만들지 않는다.
+이 RFC 는 세 가지를 바꾼다. 현재 스냅샷과 저널의 형식은 그대로 두고, 흡수된 사실의 원문만 키퍼별 새 파일 하나에 남긴다(§4.2).
 
 1. **점호를 없앤다.** `retained_memory_ids` 를 요구하지 않는다. 판정자는 바뀌는 것만 말한다.
 2. **퇴장 경로를 가른다.** `dropped`(틀렸다)와 `absorbed`(더 큰 사실에 흡수됐다)를 나누고,
@@ -215,30 +215,88 @@ id 하나다. `translate_revisions` (`:448-466`) 도 1:1 로 매핑한다. 24개
 
 ```
 { "dropped":     [ { memory_id, reason } ... ],
-  "absorbed":    [ { memory_id, into } ... ],
   "new_claims":  [ { claim, category, absorbs: [memory_id ...] } ... ] }
 ```
 
-적용은 이미 keep-by-default 이므로 **`keeper_memory_os_current.ml` 의 적용 로직은
-바뀌지 않는다.** 없어지는 것은 `Missing_disposition` 강제와 그것을 요구하는 프롬프트
-조항이다.
+적용은 이미 keep-by-default 다. 없어지는 것은 `Missing_disposition` 강제와 그것을 요구하는
+프롬프트 조항이다. 흡수된 사실을 스냅샷에서 빼는 일은 §4.2 가 적용에 더한다.
 
-무결성 검사는 남는다 — 모르는 id 지목, 같은 id 두 번 지목, `absorbed` 의 `into` 가
-이번 답의 `new_claims` 를 가리키지 않는 경우는 전부 거부한다.
+무결성 검사는 남는다. 모르는 id 지목, 같은 id 두 번 지목은 전부 거부한다. `absorbs` 의
+검사는 §4.2 에 있다.
 
 ### 4.2 퇴장 경로를 가른다
 
 | | 뜻 | 어디로 |
 |---|---|---|
 | `dropped` | 틀렸거나 쓸모없다 | 사라진다 (지금과 같음) |
-| `absorbed` | 더 큰 사실이 대신 말한다 | 근거 층. 검색으로 도달 |
+| `absorbs` 로 지목됨 | 새 claim 이 대신 말한다 | 흡수 기록 파일. 검색으로 도달 |
 
-`keeper_memory_search` 에 근거 층을 가리키는 source 를 추가한다. 강등된 사실은 **매
-요청에 주입되지 않는다** — 현재 스냅샷에서는 빠지고, 물어볼 때만 나온다. 따라서
-컨텍스트 오염은 생기지 않는다.
+강등된 사실은 **매 요청에 주입되지 않는다.** 현재 스냅샷에서는 빠지고, 물어볼 때만 나온다.
+그래서 컨텍스트 오염은 생기지 않는다.
 
-`new_claims` 의 `absorbs` 목록이 §3.3 의 1:1 제약을 대신한다. `supersedes` 는
-`absorbs` 로 흡수되어 사라진다.
+착수 전 재측정(2026-09-17): #36855 이후 지워진 사실 2,409개 중 원문을 키퍼 도구로 다시
+읽을 수 있는 것은 0개다. 아래 저장 위치, 쓰기 실패, 정정과 합침, 검색 범위는 운영자가
+정했다(2026-09-17).
+
+**링크는 한 곳에만 적는다.** 새 claim 은 답 안에서 아직 id 가 없어 `into` 가 가리킬 것이
+없다. 판정자는 `new_claims[].absorbs` 에만 적고, 파서가 `into = memory_id(새 claim)` 을
+채운다. 다음은 답 전체를 거부한다.
+
+- `absorbs` 의 id 가 지금 현재 사실이 아니다.
+- 같은 id 가 `dropped` 에도 있다.
+- 두 new claim 이 같은 id 를 흡수한다.
+
+**흡수 기록은 키퍼별 새 파일에 둔다.** `<keepers>/<keeper>.memory-absorbed.jsonl` 에
+덧붙이기만 한다. 한 줄이 흡수된 사실 하나다.
+
+```
+{ recorded_at, trace_id, memory_id, into, fact }
+```
+
+`fact` 는 스냅샷의 사실 행 그대로다. 다른 두 자리를 고르지 않은 이유:
+
+- 저널은 턴 경로에서 읽지 않는다는 계약이 있다(`keeper_memory_os_current.mli`,
+  "Never read on the turn path"). 크기도 키퍼당 10~13MB 다.
+- 스냅샷은 형식이 고정돼 있어 hard cut 이 필요하다.
+
+**커밋 전에, 같은 잠금 안에서 쓴다.** 쓰기가 실패하면 이번 정리를 적용하지 않는다. 답을
+거부할 때와 같은 길이다. 원문을 잃는 일은 없고 정리가 한 번 미뤄진다. `Revised` 이벤트처럼
+커밋 뒤에 쓰면, 쓰기 실패가 그 사실의 유일한 원문을 지운다.
+
+쓰는 때는 다음 스냅샷을 만들고 출력까지 끝낸 뒤, 교체 바로 앞이다. 쓰기는 fsync 하는
+추가이고, 실패하면 되돌린다. 스냅샷 교체도 fsync 하므로 전원이 나가도 스냅샷만 남고 원문이
+사라지는 순서가 없다. 출력은 풀에서 기다리는 동안 취소될 수 있어서 그보다 앞에 쓰지 않는다.
+
+그래도 기록을 쓴 뒤 교체가 실패하면, 커밋되지 않은 회차의 기록이 남는다. 그런 기록은
+셋 중 하나다. (a) 아직 현재인 사실을 가리킨다. (b) 뒤 회차가 커밋한 기록과 `memory_id`·`into`
+가 같다. (c) 그 사실이 나중에 다른 길로 빠져서, 한 번도 현재가 된 적 없는 `into` 를 가리킨다.
+검색은 (a)를 결과에 넣지 않고, (b)를 한 건으로 센다. (c)는 `into_current = false` 로 보인다.
+
+**적용이 흡수된 id 도 스냅샷에서 뺀다.** `dropped` 와 달리 이유를 요구하지 않는다. 이유는
+새 claim 자체다. 저널의 `change.removed` 에는 지금처럼 나간 행이 전부 남는다.
+
+**정정과 합침은 다르다.** `supersedes`(1:1)는 남긴다. 정정은 원래 사실이 틀렸다는 뜻이고,
+합침은 원래 사실이 여전히 맞다는 뜻이다. `Revised` 이벤트와 대시보드·TUI 의
+"Revised from" 은 바뀌지 않는다. 합침의 1:N 은 `absorbs` 가 맡는다.
+
+**검색한다.** `keeper_memory_search` 의 source 에 `absorbed` 를 더하고, `all` 도 흡수 기록을
+읽는다. 결과 한 건:
+
+```
+{ text, category, memory_id, into, into_current, absorbed_at, store: "absorbed_memory" }
+```
+
+`into_current` 는 `into` 가 지금 현재 사실인지다. `into` 가 나중에 다시 흡수되거나 지워져도
+사슬을 따라가지 않는다. `into_current = false` 가 그 사실을 알린다. 흡수 기록을 찾은 검색은
+`Retrieved` 이벤트를 남기지 않는다. 이벤트는 현재 사실에만 붙는다
+(`keeper_memory_os_events.mli`).
+
+**프롬프트는 같은 PR 에서 옮긴다.** `librarian.md` 의 모으기 절(#36855)은 모은 사실을
+`dropped` 에 넣게 한다. 그 절을 `absorbs` 로 옮긴다. 그 전에 모아서 지운 사실은 되살리지
+않는다. reason 문장을 읽어 흡수였는지 추측하는 규칙을 만들지 않기 위해서다.
+
+**흡수 기록은 줄지 않는다.** §5 가 정원과 상한을 금지하므로 자르지 않는다. 크기는 배포 뒤
+재서 §8 에 적는다.
 
 ### 4.3 판정자의 눈을 뜬다
 
@@ -301,7 +359,7 @@ type summary =
   시그니처 2번).
 - 사실 개수 정원. 크기는 상한이 아니라 접는 능력으로 통제한다.
 - 사실 정체성 변경. `memory_id = SHA256(claim)` 은 그대로 둔다 (§3.2).
-- 저장 형식 변경. hard cut 이 필요 없다.
+- 현재 스냅샷과 저널의 형식 변경. hard cut 이 필요 없다. 흡수 기록 파일은 없던 것을 더할 뿐이다.
 
 20개 메모리 파일 전수 스윕 결과, **유사도 계수·가중치·관련도/중요도/신뢰도 점수·decay·
 랭킹 공식은 한 곳도 없다.** `List.sort` 는 전부 `String.compare`(id·이름) 나
@@ -317,7 +375,7 @@ type summary =
 
 | 자리 | 규칙 | 왜 의심스러운가 |
 |---|---|---|
-| `keeper_memory_os_current.ml:703-722` | `maintain_supported_facts` — 전제가 사라진 derived fact 를 자동 무효화 | 판정자 없이 잊는다. 라이브에서 16,000 회차에 6번 발동 (code-reviewer 0 / analyst 1 / rondo 2 / lane-smith 3) |
+| `keeper_memory_os_current.ml:703-722` | `maintain_supported_facts` — 전제가 사라진 derived fact 를 자동 무효화 | 판정자 없이 잊는다. 라이브에서 16,000 회차에 6번 발동 (code-reviewer 0 / analyst 1 / rondo 2 / lane-smith 3). `absorbs` 도 전제를 빼므로 같은 규칙이 돈다. 흡수 기록은 흡수된 사실에만 남고, 그 때문에 무효화된 derived fact 에는 남지 않는다. Librarian 입력에는 전제가 보이지 않아 미리 피할 수 없다. 2026-09-17 스냅샷 24개, 사실 2,813개 중 전제를 가진 사실은 최대 10개(0.36%) |
 | `keeper_memory_os_current.ml:729-737` | `merge_observation` — Board 가 Transcript 를 이기는 우선순위표 | "두 번째 읽기는 첫 번째가 주지 않은 것을 주지 않는다"는 판단이 match 로 굳어 있다. 내용이 아니라 출처 표기라 경계선 |
 | `keeper_librarian_runtime.ml:394-435` | `fitted_messages` — body 한도에 맞을 때까지 메시지를 이분 탐색으로 줄인다 | 한도 자체는 바깥이 강제하는 물리값이지만, **무엇을 버릴지**를 코드가 정한다 (오래된 것부터) |
 | `keeper_librarian_runtime.ml:458-494` | `fit_context_input` — source 를 탐욕적으로 채운다 | 같음. 무엇이 들어갈지를 코드가 정한다 |
@@ -350,6 +408,8 @@ add-only" 라고 적은 어떤 문서도 믿을 수 없다. 별도 이슈로 판
 |---|---|---|
 | Librarian 무변경 회차 비율 | 3,928 / 5,102 (77%) | 내려간다 |
 | `absorbs` 가 2개 이상을 지목한 회차 | 0 (칸이 없음) | 0 보다 크다 |
+| 현재 스냅샷에서 빠진 사실 중 원문을 키퍼 도구로 읽을 수 있는 비율 | 0% (2026-09-17, #36855 이후 2,409개 중 0) | 흡수된 것은 100% |
+| 흡수 기록 파일 크기 | 없음 | 배포 뒤 측정 |
 | 현재 사실 수 | 378, 14일에 +250 | 증가율이 꺾인다 |
 | 답 거부로 인한 cadence 후퇴 | 미측정 | 내려간다 (점호가 없어지므로) |
 
@@ -388,7 +448,9 @@ add-only" 라고 적은 어떤 문서도 믿을 수 없다. 별도 이슈로 판
 ## 9. 순서
 
 1. **§4.1 점호 제거** — 출력 스키마와 프롬프트. 적용 로직 무변경. 효과를 단독 측정.
-2. **§4.2 퇴장 경로 분리** — `absorbed` 와 근거 층, `keeper_memory_search` source 추가.
+2. **§4.2 퇴장 경로 분리** — 한 PR: `absorbs` 파싱과 거부 조건, 커밋 전 흡수 기록 쓰기,
+   적용에서 흡수된 id 제거, `keeper_memory_search` 의 `absorbed` source 와 `all` 포함,
+   `librarian.md` 모으기 절 이동.
 3. **§4.3 이력 노출** — 렌더 함수 하나.
 4. **§6 재판정** — 위 셋이 자리 잡은 뒤, 남은 규칙들을 하나씩.
 

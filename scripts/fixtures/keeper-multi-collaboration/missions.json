@@ -61,21 +61,21 @@
     "masc_goal_list",
     "masc_fusion",
     "masc_schedule_get",
-    "keeper_compose_mission-snapshot",
-    "keeper_compose_background-snapshot",
+    "keeper_compose_acceptance-inline-probe",
+    "keeper_compose_acceptance-async-probe",
     "keeper_composition_status",
     "tool_execute"
   ],
   "keeper_required_skill_identities": [
     {
       "source_id": "project-masc",
-      "package_id": "mission-snapshot",
-      "name": "mission-snapshot"
+      "package_id": "acceptance-inline-probe",
+      "name": "acceptance-inline-probe"
     },
     {
       "source_id": "project-masc",
-      "package_id": "background-snapshot",
-      "name": "background-snapshot"
+      "package_id": "acceptance-async-probe",
+      "name": "acceptance-async-probe"
     }
   ],
   "missions": [

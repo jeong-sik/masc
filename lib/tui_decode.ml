@@ -2371,8 +2371,6 @@ type runtime_option = {
 type runtime_resolved_lane = {
   rrl_id : string;
   rrl_runtime_ids : string list;
-  rrl_preferred_candidate : string option;
-  rrl_preferred_at_ts : float option;
 }
 
 type runtime_resolved_snapshot = {
@@ -2388,7 +2386,6 @@ type runtime_candidate_row = {
   rcr_position : int;
   rcr_candidate_count : int;
   rcr_runtime : runtime_option;
-  rcr_preferred_at_ts : float option;
   rcr_probe : runtime_provider_probe option;
 }
 
@@ -4305,12 +4302,6 @@ let decode_runtime_resolved_lane json =
         | bad -> field_type_error "runtime_ids" "a string" bad)
       runtime_ids
   in
-  let* rrl_preferred_candidate =
-    required_nullable_string_field json "preferred_candidate"
-  in
-  let* rrl_preferred_at_ts =
-    required_nullable_float_field json "preferred_at_ts"
-  in
   let* () =
     match rrl_runtime_ids with
     | [] -> Error (Printf.sprintf "runtime lane %S has no candidates" rrl_id)
@@ -4332,30 +4323,7 @@ let decode_runtime_resolved_lane json =
     in
     loop rrl_runtime_ids
   in
-  let* () =
-    match rrl_preferred_candidate, rrl_preferred_at_ts with
-    | None, None -> Ok ()
-    | Some candidate, Some at
-      when at >= 0.0 && List.mem candidate rrl_runtime_ids -> Ok ()
-    | Some candidate, Some at when at < 0.0 ->
-        Error
-          (Printf.sprintf "runtime lane %S has negative preferred_at_ts" rrl_id)
-    | Some candidate, Some _ ->
-        Error
-          (Printf.sprintf "runtime lane %S prefers absent candidate %S" rrl_id
-             candidate)
-    | Some _, None | None, Some _ ->
-        Error
-          (Printf.sprintf
-             "runtime lane %S preferred_candidate and preferred_at_ts disagree"
-             rrl_id)
-  in
-  Ok
-    { rrl_id
-    ; rrl_runtime_ids
-    ; rrl_preferred_candidate
-    ; rrl_preferred_at_ts
-    }
+  Ok { rrl_id; rrl_runtime_ids }
 
 let decode_runtime_resolved_snapshot json =
   let* rrs_generated_at_iso = required_string_field json "generated_at_iso" in
@@ -4472,18 +4440,11 @@ let join_runtime_surface ~probe ~probe_error ~resolved =
                  (Printf.sprintf "runtime lane %S names absent runtime %S"
                     lane.rrl_id runtime_id)
            | Some runtime ->
-               let rcr_preferred_at_ts =
-                 match lane.rrl_preferred_candidate with
-                 | Some preferred when String.equal preferred runtime_id ->
-                     lane.rrl_preferred_at_ts
-                 | Some _ | None -> None
-               in
                loop (position + 1)
                  ({ rcr_lane_id = lane.rrl_id
                   ; rcr_position = position
                   ; rcr_candidate_count = candidate_count
                   ; rcr_runtime = runtime
-                  ; rcr_preferred_at_ts
                   ; rcr_probe = Hashtbl.find_opt probe_by_runtime runtime_id
                   }
                   :: acc)

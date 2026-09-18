@@ -2,6 +2,9 @@ type capability_availability =
   | Active
   | Outside_skill_surface
   | Not_model_invocable
+  | Denied_by_profile
+  | Refused_by_sandbox of { detail : string }
+  | Node_tools_outside_surface of { tools : string list }
   | Invalid_definition
   | Missing_task_skill
   | Missing_configured_skill
@@ -50,10 +53,17 @@ let valid_skill_availability
   if Keeper_skill_catalog.exact_is_executable skill_projection valid.reference
   then Active
   else
-    match skill_names with
-    | Some names when not (List.exists (String.equal valid.reference.identity.name) names) ->
-      Outside_skill_surface
-    | None | Some _ -> Not_model_invocable
+    match
+      Keeper_skill_catalog.withheld_composition skill_projection valid.reference
+    with
+    | Some withheld ->
+      Node_tools_outside_surface { tools = withheld.outside_node_tools }
+    | None ->
+      (match skill_names with
+       | Some names
+         when not (List.exists (String.equal valid.reference.identity.name) names) ->
+         Outside_skill_surface
+       | None | Some _ -> Not_model_invocable)
 ;;
 
 let skill_capability ~skill_names ~skill_projection = function
@@ -99,55 +109,84 @@ let missing_skill_capabilities ~skill_names ~skill_inventory =
           })
 ;;
 
+(* Physical identity, because the surface holds the canonical descriptor values
+   and a descriptor that merely shares a name or id is not the one admitted. *)
+let descriptor_admitted descriptors descriptor =
+  List.exists (fun admitted -> admitted == descriptor) descriptors
+;;
+
 let create
       ~tool_deny
+      ~sandbox_profile
       ~skill_names
       ~global_skill_catalog
       ~skill_inventory
       ~task_skills
   =
-  (* [tool_deny] names model-visible tool names the profile refuses. A denied
-     descriptor leaves the surface entirely -- not listed to the model, not in
-     the dispatch bundle the surface feeds -- rather than staying on the
-     capability list under a new availability: the #31728 comment below
-     records why "present but unreachable" arms are removed from this type,
-     and a denied tool is exactly as absent to the turn as one whose schema
-     failed. The setup site logs any deny entry that named nothing. *)
+  (* Two reasons take a model-visible tool off this turn: the profile's
+     [tool_deny] names it, or the sandbox profile refuses what it does. Either
+     way it is not listed to the model and not in the dispatch bundle. Its
+     inventory row stays, under the reason, so an operator reading the
+     inventory sees why the tool is absent; a row is not an invocation, and
+     [candidate_invocation_name] answers only for an active candidate. A deny
+     entry that names nothing is refused where the profile loads. *)
   let denied descriptor =
     tool_deny <> []
     && List.exists
          (fun name -> List.mem name tool_deny)
          (Keeper_tool_descriptor.keeper_model_names descriptor)
   in
+  (* The spawn tools are refused together when the sandbox profile cannot start
+     a process: the handler refuses every start with the rule applied here.
+     Read, wait and stop address handles in the turn's spawn registry, which is
+     created per turn and filled only by a start, so on such a profile they
+     could only answer that the handle is unknown. Every one of the four
+     carries the start refusal, the reason none of them can do anything. Like a
+     deny, it applies only to a descriptor the model could otherwise call. *)
+  let sandbox_refusal descriptor =
+    if
+      descriptor.Keeper_tool_descriptor.runtime_handler
+      = Keeper_tool_descriptor.Tool_keeper_spawn_dispatch
+      && Keeper_tool_descriptor.keeper_model_names descriptor <> []
+    then (
+      match Keeper_spawn_boundary.of_sandbox_profile sandbox_profile with
+      | Keeper_spawn_boundary.Refuses_start { detail } -> Some detail
+      | Keeper_spawn_boundary.Starts_in_container -> None)
+    else None
+  in
+  let off_turn_availability descriptor =
+    match denied descriptor, sandbox_refusal descriptor with
+    | true, _ -> Some Denied_by_profile
+    | false, Some detail -> Some (Refused_by_sandbox { detail })
+    | false, None -> None
+  in
   let descriptors =
     Keeper_tool_descriptor.model_visible_descriptors ()
-    |> List.filter (fun descriptor -> not (denied descriptor))
+    |> List.filter (fun descriptor ->
+      Option.is_none (off_turn_availability descriptor))
   in
   let skill_projection =
     Keeper_skill_catalog.project_turn
       ~names:skill_names
       ~global:global_skill_catalog
       ~task:task_skills
+    |> Keeper_skill_catalog.withhold_compositions_outside
+         ~admits:(descriptor_admitted descriptors)
   in
   let tool_capabilities =
     Keeper_tool_descriptor.all_descriptors ()
-    |> List.filter (fun descriptor -> not (denied descriptor))
     |> List.map (fun descriptor ->
       { descriptor
-        (* A descriptor that names itself to the model is in the surface, and
-           nothing left can take it back out. Until #31728 a Keeper could
-           narrow its own surface by declaring tool groups, and what fell
-           outside was carried here as [Outside_tool_surface]; that
-           declaration was removed because no Keeper ever wrote one. What
-           names itself is exactly what [model_visible_descriptors] holds --
-           [keeper_model_names] answers [] for a descriptor with schema
-           errors, which is the only other way those two lists could differ --
-           so the arm that said "outside" could not be reached, and the
-           surface it named does not exist. *)
+        (* [keeper_model_names] answers [] for an operator-only descriptor and
+           for one with schema errors, the two ways a descriptor is outside
+           [model_visible_descriptors]. *)
       ; availability =
-          (match Keeper_tool_descriptor.keeper_model_names descriptor with
-           | [] -> Not_model_invocable
-           | _ :: _ -> Active)
+          (match off_turn_availability descriptor with
+           | Some availability -> availability
+           | None ->
+             (match Keeper_tool_descriptor.keeper_model_names descriptor with
+              | [] -> Not_model_invocable
+              | _ :: _ -> Active))
       })
   in
   let skill_capabilities =
@@ -168,6 +207,23 @@ let create
 ;;
 
 let descriptors surface = surface.descriptors
+let admits surface descriptor = descriptor_admitted surface.descriptors descriptor
+
+let tool_row_availability surface descriptor =
+  List.find_map
+    (fun (capability : tool_capability) ->
+       if capability.descriptor == descriptor then Some capability.availability else None)
+    surface.tool_capabilities
+;;
+
+let tool_row_availability_for_name surface name =
+  List.find_map
+    (fun (capability : tool_capability) ->
+       if List.mem name (Keeper_tool_descriptor.keeper_model_names capability.descriptor)
+       then Some capability.availability
+       else None)
+    surface.tool_capabilities
+;;
 let skill_projection surface = surface.skill_projection
 let skill_catalog surface = surface.skill_projection.catalog
 let tool_capabilities surface = surface.tool_capabilities
@@ -196,6 +252,9 @@ let capability_availability_to_string = function
   | Active -> "active"
   | Outside_skill_surface -> "outside_skill_surface"
   | Not_model_invocable -> "not_model_invocable"
+  | Denied_by_profile -> "denied_by_profile"
+  | Refused_by_sandbox _ -> "refused_by_sandbox"
+  | Node_tools_outside_surface _ -> "node_tools_outside_surface"
   | Invalid_definition -> "invalid_definition"
   | Missing_task_skill -> "missing_task_skill"
   | Missing_configured_skill -> "missing_configured_skill"
@@ -220,6 +279,19 @@ let catalog_status_to_string = function
   | Keeper_skill_inventory.Shadowed -> "shadowed"
 ;;
 
+let availability_detail_fields = function
+  | Refused_by_sandbox { detail } -> [ "sandbox_refusal", `String detail ]
+  | Node_tools_outside_surface { tools } ->
+    [ "outside_node_tools", Json_util.json_string_list tools ]
+  | Active
+  | Outside_skill_surface
+  | Not_model_invocable
+  | Denied_by_profile
+  | Invalid_definition
+  | Missing_task_skill
+  | Missing_configured_skill -> []
+;;
+
 let tool_capability_to_yojson capability =
   `Assoc
     (Keeper_tool_descriptor.discovery_fields capability.descriptor
@@ -229,7 +301,8 @@ let tool_capability_to_yojson capability =
        ; ( "availability"
          , `String
              (capability_availability_to_string capability.availability) )
-       ])
+       ]
+     @ availability_detail_fields capability.availability)
 ;;
 
 let invalid_reference_fields (invalid : Keeper_skill_inventory.invalid_skill) =
@@ -276,6 +349,7 @@ let skill_capability_to_yojson capability =
        ; "exposure", `String (skill_exposure_to_string capability.exposure)
        ; "availability", `String availability
        ]
+       @ availability_detail_fields capability.availability
        @ skill_kind_to_fields valid.kind)
   | Exact_skill (Keeper_skill_inventory.Invalid invalid) ->
     `Assoc
@@ -313,13 +387,40 @@ let candidate_description = function
     "Configured Skill is absent from the frozen catalog."
 ;;
 
+(* A name the model could call, so only for an active candidate. A row kept
+   for an operator under another availability -- denied, refused by the
+   sandbox, withheld, outside the Skill selection -- names no invocation. *)
 let candidate_invocation_name = function
-  | Ordinary_tool capability ->
+  | Ordinary_tool { availability = (Not_model_invocable
+                                   | Denied_by_profile
+                                   | Refused_by_sandbox _
+                                   | Outside_skill_surface
+                                   | Node_tools_outside_surface _
+                                   | Invalid_definition
+                                   | Missing_task_skill
+                                   | Missing_configured_skill)
+                  ; _
+                  }
+  | Skill { availability = (Not_model_invocable
+                           | Denied_by_profile
+                           | Refused_by_sandbox _
+                           | Outside_skill_surface
+                           | Node_tools_outside_surface _
+                           | Invalid_definition
+                           | Missing_task_skill
+                           | Missing_configured_skill)
+          ; _
+          } -> None
+  | Ordinary_tool ({ availability = Active; _ } as capability) ->
     (match Keeper_tool_descriptor.keeper_model_names capability.descriptor with
      | [ name ] -> Some name
      | [] -> None
      | _ :: _ :: _ -> None)
-  | Skill { identity = Exact_skill (Keeper_skill_inventory.Valid valid); _ } ->
+  | Skill
+      { identity = Exact_skill (Keeper_skill_inventory.Valid valid)
+      ; availability = Active
+      ; _
+      } ->
     (match valid.kind with
      | Keeper_skill_inventory.Instruction -> Some "keeper_skill"
      | Keeper_skill_inventory.Composition entry ->

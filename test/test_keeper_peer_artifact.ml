@@ -143,6 +143,43 @@ let test_an_oversize_export_is_refused_rather_than_shortened () =
    pipe EOF; without an Eio runtime it degrades to the Unix fallback and every
    read fails before the ceiling is ever consulted. So the suite boots one,
    the way the sandbox read backend's own suite does. *)
+(* An unwritable store root must come back as the export's own failure, the
+   same typed path a failed atomic replacement takes: the handler translates
+   [Sys_error] into the Failed Runtime_failure result that says why the bytes
+   could not be stored. Before the store normalized directory creation the
+   same setup escaped as a raw [Unix.Unix_error], skipping the handler's
+   [Sys_error] arm and landing in the generic dispatch net with a message that
+   never mentioned the store. *)
+let test_an_unwritable_store_root_fails_the_export_not_the_dispatch () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> remove_tree base) @@ fun () ->
+  let masc_dir = Filename.concat base ".masc" in
+  ensure_dir masc_dir;
+  write_file (Filename.concat masc_dir "tool_blobs") "not a directory";
+  let execution = run_export ~base ~emitting:8 in
+  (match execution.Keeper_tool_execution.disposition with
+   | Tool_result.Failed Tool_result.Runtime_failure -> ()
+   | Tool_result.Failed _ ->
+     Alcotest.failf "a failed store put is a runtime failure, not: %s"
+       execution.Keeper_tool_execution.raw_output
+   | Tool_result.Completed _ | Tool_result.Deferred _ ->
+     Alcotest.fail "an export whose store root is not a directory was accepted");
+  let said = execution.Keeper_tool_execution.raw_output in
+  Alcotest.(check bool)
+    "the failure names the store path it could not create"
+    true
+    (String_util.contains_substring said "tool_blobs");
+  Alcotest.(check bool)
+    "and names the operating system's reason"
+    true
+    (String_util.contains_substring said "mkdir");
+  Alcotest.(check bool)
+    "with the reason's readable message, as the store contract renders it \
+     (not the raw exception's ENOTDIR spelling)"
+    true
+    (String_util.contains_substring said "Not a directory")
+;;
+
 let () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -158,6 +195,8 @@ let () =
     [ ( "export ceiling"
       , [ Alcotest.test_case "an oversize export is refused" `Quick
             test_an_oversize_export_is_refused_rather_than_shortened
+        ; Alcotest.test_case "an unwritable store root fails the export" `Quick
+            test_an_unwritable_store_root_fails_the_export_not_the_dispatch
         ] )
     ]
 ;;

@@ -254,8 +254,22 @@ let route_of_provider_error ~err (p : Llm_provider.Error.provider_error) =
   | Llm_provider.Error.MissingApiKey _ -> exhaust_failure Config_mismatch
   | Llm_provider.Error.InvalidConfig _ -> exhaust_failure Config_mismatch
   | Llm_provider.Error.InvalidRequest _ -> exhaust_failure Deterministic_request
+  (* The stream ended before the completion contract's stop reason. The
+     provider accepted the request and the bytes that would have said why the
+     generation stopped never arrived, which is what a dropped transport looks
+     like; the other wire kinds are defects in what did arrive, and the same
+     bytes arrive again on the next call. *)
+  | Llm_provider.Error.ProviderWireError
+      { kind = Llm_provider.Http_client.Incomplete_stream; _ } ->
+    observe_retry Network_transient
+  | Llm_provider.Error.ProviderWireError
+      { kind =
+          ( Llm_provider.Http_client.Malformed_payload
+          | Llm_provider.Http_client.Unknown_event
+          | Llm_provider.Http_client.Oversized_payload )
+      ; _
+      }
   | Llm_provider.Error.ParseError _
-  | Llm_provider.Error.ProviderWireError _
   | Llm_provider.Error.ProviderReportedError _
   | Llm_provider.Error.UnknownVariant _
   | Llm_provider.Error.ProviderTerminal _ ->
@@ -312,6 +326,13 @@ let retry_after_of_route = function
   | Rotate_now _ -> None
   | Exhausted_visible_alive _ -> None
 
+(* A provider's retry hint that names a wait: present, a number, above zero. *)
+let usable_retry_after = function
+  | None -> None
+  | Some hint when Float.is_nan hint || hint <= 0.0 -> None
+  | Some _ as hint -> hint
+;;
+
 (* How long a path rests after a provider refused it (RFC-provider-path-rest).
    The rest belongs to the path that received the answer, so its length comes
    from that answer alone: the keeper's cadence spaces periodic turns and says
@@ -337,9 +358,8 @@ let path_rest_sec ~cap_sec ~retry_class ~retry_after_hint =
       Env_config_keeper.KeeperKeepalive.rate_limit_backoff_floor_sec
   in
   let base =
-    match retry_after_hint with
+    match usable_retry_after retry_after_hint with
     | None -> unstated ()
-    | Some hint when Float.is_nan hint || hint <= 0.0 -> unstated ()
     | Some hint -> Float.max hint 1.0
   in
   Float.min cap_sec base
@@ -500,3 +520,61 @@ let response_observed = function
           rejections: the model answered, the correction round did not
           land. *)
        true)
+
+let route_resumes_on_same_path = function
+  | Retry_after_observed { retry_class; retry_after } ->
+    (match retry_class with
+     | Rate_limited
+     (* 429: the provider lifts the throttle over time. A weekly limit sent as
+        a 429 fails the resumed attempt before it runs a tool, which ends the
+        operation. *)
+     | Capacity_backpressure
+     (* the provider's or MASC's own slot was full for the moment. *)
+     | Server_error
+     (* 5xx, provider unavailable, or an empty completion. A model that keeps
+        answering empty fails the resumed attempt the same way. *)
+     | Network_transient
+     (* the transport dropped. *)
+     | Provider_timeout ->
+       (* a deadline expired. *)
+       true
+     | Hard_quota ->
+       (* a quota comes back by itself only when the provider said when; one
+          with no reset may stay closed until the account is paid. *)
+       Option.is_some (usable_retry_after retry_after))
+  | Rotate_now { rotate } ->
+    (match rotate with
+     | Auth_failed
+     | Model_unavailable
+     | Resumable_cli_session
+     | Candidates_filtered
+     | Runtime_exhausted
+     | No_progress_empty
+     | No_progress_thinking_only
+     | No_progress_truncated
+     | Refusal_body_not_received
+     | Generation_repeated
+     | Attempt_rejected ->
+       (* the credential, the model, the client session or the model's own
+          answer: the same path answers the same way after any wait. *)
+       false)
+  | Exhausted_visible_alive { terminal; provenance = _; detail = _ } ->
+    (match terminal with
+     | Deterministic_request
+     | Context_overflow
+     | Contract_violation
+     | Protocol_error
+     | Config_mismatch
+     | Provider_integration
+     | Terminal_effect_dependency_unavailable
+     | Terminal_effect_policy_rejection
+     | Terminal_effect_runtime_failure
+     | Terminal_effect_workflow_rejection
+     | Terminal_effect_operator_cancelled
+     | Provider_attempt_effect_fenced
+         (Fenced_effect_attempted | Fenced_observation_unavailable)
+     | Tool_correction_lost (Fenced_effect_attempted | Fenced_observation_unavailable)
+     | Internal_opaque ->
+       (* the request, its size, the configuration, a tool, or MASC itself
+          failed: sending it again to the same path fails the same way. *)
+       false)

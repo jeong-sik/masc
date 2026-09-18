@@ -35,10 +35,10 @@ type turn_state =
     (** Every candidate the runtime walk attempted and that ended in an
         error this turn, in walk order, each with its own error and dispatch
         disposition. [last_execution] and [deferred_runtime_lane] both name
-        the lane the turn was budgeted under, which sticky ordering can route
-        to a different candidate; this list is the only record of which
-        candidates the walk actually reached. Empty until a candidate
-        errors. *)
+        the lane the turn was budgeted under, whose walk can dispatch a
+        different candidate first when the head rests; this list is the only
+        record of which candidates the walk actually reached. Empty until a
+        candidate errors. *)
   ; lane_terminal_error : Keeper_turn_driver.lane_terminal_error option
     (** The candidate error the runtime walk returned as the lane's error,
         with the candidate that produced it. [None] when the walk never
@@ -105,9 +105,9 @@ type keeper_cycle_failed_runtime_attribution =
     the runtime a failure report should name. [lane_runtime_id] (typically
     [execution.runtime_id]) names the deferred-lane assignment this cycle was
     budgeted under, not necessarily the concrete candidate
-    [attempt_runtime_candidates] actually dispatched: [Runtime_lane_preference]
-    sticky ordering can route a lane keyed by one runtime id to a different
-    candidate first. The reported runtime is the last [Dispatched] entry of
+    [attempt_runtime_candidates] actually dispatched: a lane keyed by one
+    runtime id walks a different candidate first when the head rests or a
+    deferred suffix starts elsewhere. The reported runtime is the last [Dispatched] entry of
     [runtime_attempt_errors]; with no dispatched entry it is
     [No_candidate_dispatched]. The lane id is never substituted for a
     candidate. [deferred_runtime_lane] only supplies

@@ -140,10 +140,10 @@ bash /tmp/masc-install.sh --base-path "$HOME/masc-workspace"
 ```
 
 To install one specific release instead of the latest one, take that tag's
-installer and pin it:
+installer and pin it. Check that the tag is listed on GitHub Releases first:
 
 ```bash
-TAG=v0.35.14
+TAG=v0.35.19
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh &&
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"

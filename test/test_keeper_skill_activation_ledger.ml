@@ -185,6 +185,55 @@ let test_empty_record_and_idempotent_readback () =
     (Ledger.ledger_revision_to_string (Ledger.revision second))
 ;;
 
+(* [record] returns the ledger it wrote instead of reading the file back to
+   compare revisions, because that readback decoded the whole document a second
+   time on the caller's domain under the session lock. What it was checking is
+   that the codec reads back what it writes, so that property is checked here:
+   several activations are recorded, and the ledger loaded from the file must
+   equal the one [record] returned — revision, activations and all. *)
+let test_a_recorded_ledger_loads_back_as_it_was_returned () =
+  with_session @@ fun config trace_id _session_dir ->
+  let recorded =
+    List.fold_left
+      (fun _ candidate ->
+         match Ledger.record ~config ~trace_id candidate with
+         | Ok (ledger, Ledger.Recorded _) -> ledger
+         | Ok (_, Ledger.Already_recorded _) -> fail "a distinct activation was a repeat"
+         | Error error -> fail ("record failed: " ^ Ledger.store_error_to_string error))
+      (Ledger.empty ~workspace_root:"" ~trace_id)
+      [ activation ()
+      ; activation ~source:"user" ()
+      ; activation ~revision:'b' ()
+      ; (* The default id spells call-<source>-<revision>, so a fixture that
+           varies only [name] must say its id: the record key compares
+           skill_tool_use_id alone, and two activations sharing one with
+           different identities are an Invocation_id_collision, not a
+           repeat. *)
+        activation ~name:"polish" ~skill_tool_use_id:"call-polish" ()
+      ]
+  in
+  let loaded =
+    match Ledger.load ~config ~trace_id with
+    | Ok ledger -> ledger
+    | Error error -> fail ("load failed: " ^ Ledger.store_error_to_string error)
+  in
+  check string "the revision the write returned is the one on disk"
+    (Ledger.ledger_revision_to_string (Ledger.revision recorded))
+    (Ledger.ledger_revision_to_string (Ledger.revision loaded));
+  check int "every activation survived the round trip"
+    (List.length (Ledger.activations recorded))
+    (List.length (Ledger.activations loaded));
+  check bool "and each one came back identical" true
+    (List.length (Ledger.activations recorded) = List.length (Ledger.activations loaded)
+     && List.for_all2
+          (fun left right ->
+             Yojson.Safe.equal
+               (Ledger.activation_to_yojson left)
+               (Ledger.activation_to_yojson right))
+          (Ledger.activations recorded)
+          (Ledger.activations loaded))
+;;
+
 let test_same_name_different_identity_or_revision_is_distinct () =
   with_session @@ fun config trace_id _session_dir ->
   let values =
@@ -982,6 +1031,8 @@ let () =
             test_receipt_projection_revision_binds_full_unicode_id
         ; test_case "store error string keeps decode detail" `Quick
             test_store_error_decode_detail_is_kept
+        ; test_case "a recorded ledger loads back as it was returned" `Quick
+            test_a_recorded_ledger_loads_back_as_it_was_returned
         ] )
     ]
 ;;

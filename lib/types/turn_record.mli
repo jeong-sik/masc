@@ -66,23 +66,37 @@ type request_wire_observation =
 
 type model_input_measurement =
   | Wire_shape
-      (** Blocks the target's dialect will not replay were removed before the
-          history was sized, so the budget counted what the request carries. *)
+      (** Agent Core composed the request from the keeper's checkpoint
+          history: the atoms are positions in that history, and the wire's
+          reasoning projection ran over the carried range before the body was
+          serialized. *)
   | Durable_shape
-      (** The projection declined and the budget counted the checkpoint's
-          shape instead, which includes reasoning the wire deletes. The turn
-          is correct and its window is narrower than it needs to be — a
-          keeper can sit here indefinitely, because nothing about the decline
-          ages out, so this is recorded rather than only logged. *)
+      (** An official client assembled the request itself from the list masc
+          handed over, so the atoms are positions in that list, not in the
+          checkpoint history; a resumed client session already holds the
+          earlier turns. *)
 
 type model_input_window =
   { transmitted_atoms : int
   ; total_atoms : int
   ; measurement : model_input_measurement
+  ; front_atom_digest : string
+        (** SHA-256 hex of the message that opens the front atom, index
+            [total_atoms - transmitted_atoms]
+            ([Runtime_model_input_tail_window.atom_opening_digest]). The
+            index and this digest together are the position a later turn
+            resumes from: the position holds only while that index still
+            opens with the same message, whatever the history's atom count
+            is now. *)
   }
 (** How much of the keeper's own history the dispatched request carried, in
     atoms — one organic user message, or one assistant message together with
-    the tool messages answering it.
+    the tool messages answering it. For an Agent Core request the atoms are
+    positions in the keeper's checkpoint history, whatever reasoning the
+    wire's dialect replays or deletes, so [total_atoms - transmitted_atoms]
+    is the front the request carried from and a front on every Agent Core
+    runtime; an official client hands over a list of its own, and its counts
+    are positions in that list.
 
     Reported beside {!request_wire_observation}, never in place of it: that one
     counts the bytes the provider admitted, this one counts how much
@@ -97,7 +111,12 @@ type model_input_window =
     transmitted messages alone: dropped atoms leave no trace, so a reader given
     only the request cannot distinguish a keeper that sent all of a short
     history from one that sent the tail of a long one. Pinned messages are not
-    atoms and appear in neither count. *)
+    atoms and appear in neither count.
+
+    The four fields are written as the keys [transmitted_atoms],
+    [total_atoms], [model_input_measurement] and [front_atom_digest], all
+    present or all null. A record without the [front_atom_digest] key does not
+    decode. *)
 
 type turn_kind =
   | Autonomous

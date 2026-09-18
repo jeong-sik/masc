@@ -557,7 +557,7 @@ let plan_honours_a_monotonic_boundary () =
    멀티바이트에서 특히 그렇고, 버퍼를 비우지 않으면 두 번째 측정부터 커진다. *)
 let measurer_counts_the_same_bytes_as_to_string () =
   let measure =
-    Masc.Keeper_turn_driver_try_provider.For_testing.message_measurer ()
+    Masc.Keeper_context_core.message_measurer ()
   in
   let cases =
     [ "empty body", assistant ""
@@ -693,14 +693,20 @@ module Try_provider = Masc.Keeper_turn_driver_try_provider
    [front] is the oldest atom the range starts at and [last_resort] is the
    refusal path's arm. *)
 let compose ~base_path ~front ~last_resort ~demote_before messages =
+  let front_digest =
+    match Window.atom_opening_digest messages front with
+    | Some digest -> digest
+    | None -> Alcotest.fail "the front is an atom of the history"
+  in
   Try_provider.For_testing.compose_carried_model_input
     ~measure_message_bytes
     ~front:
       (Some
          { Masc.Keeper_carried_front.first_atom = front
-         ; atom_count = front + 1
+         ; front_digest
          ; source = Masc.Keeper_carried_front.Ledger
          })
+    ~history_digest_at:(Window.atom_opening_digest messages)
     ~last_resort
     ~base_path
     ~demote_before
@@ -789,7 +795,16 @@ let an_ordinary_composition_keeps_the_current_turn_verbatim () =
   in
   Alcotest.(check int) "nothing is demoted" 0
     (List.length composed.Try_provider.planned.Demotion.pending);
-  Alcotest.(check int) "the newest atom goes whole" newest_bytes composed.Try_provider.transmitted_bytes
+  (* A range that starts mid-history goes out with the window's synthetic
+     preamble in front of it, so the request is the newest atom verbatim plus
+     that one message — not the atom's bytes alone. *)
+  let projected = composed.Try_provider.projection.Window.messages in
+  let newest = List.filter (fun m -> not (List.mem m earlier)) messages in
+  let preamble = List.filter (fun m -> not (List.mem m newest)) projected in
+  Alcotest.(check int) "one preamble rides with the range"
+    (List.length newest + 1) (List.length projected);
+  Alcotest.(check int) "the newest atom goes whole beside the preamble"
+    (newest_bytes + bytes_of preamble) composed.Try_provider.transmitted_bytes
 ;;
 
 (* The last resort is not a blank cheque: an atom with nothing demotable in it
@@ -840,8 +855,9 @@ let still_oversized_after_demotion_is_transmitted_demoted () =
     (composed.Try_provider.transmitted_bytes < bytes_of newest)
 ;;
 
-(* A front measured against a longer history names no atom of this one: the
-   composition starts over without it and says which seed it dropped. *)
+(* A front measured at an atom this history does not have names no atom of
+   it: the composition starts over without it and says which seed it dropped
+   and why. *)
 let a_front_the_history_shrank_under_starts_over () =
   let _, messages, _ = oversized_newest_history () in
   let composed =
@@ -850,9 +866,10 @@ let a_front_the_history_shrank_under_starts_over () =
       ~front:
         (Some
            { Masc.Keeper_carried_front.first_atom = 3_100
-           ; atom_count = 3_395
+           ; front_digest = String.make 64 'f'
            ; source = Masc.Keeper_carried_front.Ledger
            })
+      ~history_digest_at:(Window.atom_opening_digest messages)
       ~last_resort:false
       ~base_path:""
       ~demote_before:0
@@ -861,8 +878,41 @@ let a_front_the_history_shrank_under_starts_over () =
   Alcotest.(check bool) "the whole history goes" true
     (composed.Try_provider.origin = Masc.Keeper_carried_front.Whole_history);
   Alcotest.(check int) "nothing dropped" 0 composed.Try_provider.projection.Window.dropped_atoms;
-  Alcotest.(check bool) "the dropped seed is on record" true
-    (Option.is_some composed.Try_provider.outlived_seed)
+  Alcotest.(check bool) "the dropped seed is on record, with the missing atom as its reason" true
+    (match composed.Try_provider.outlived_seed with
+     | Some (_, Masc.Keeper_carried_front.Front_atom_missing) -> true
+     | Some (_, Masc.Keeper_carried_front.Front_message_differs) | None -> false)
+;;
+
+(* The history has an atom at the front, but it opens with another message
+   than the one the front was measured on: atoms before it were removed. The
+   composition starts over and records that reason, not the missing-atom one. *)
+let a_front_that_opens_with_another_message_starts_over () =
+  let _, messages, _ = oversized_newest_history () in
+  let composed =
+    Try_provider.For_testing.compose_carried_model_input
+      ~measure_message_bytes
+      ~front:
+        (Some
+           { Masc.Keeper_carried_front.first_atom = 1
+           ; front_digest = String.make 64 'f'
+           ; source = Masc.Keeper_carried_front.Ledger
+           })
+      ~history_digest_at:(Window.atom_opening_digest messages)
+      ~last_resort:false
+      ~base_path:""
+      ~demote_before:0
+      messages
+  in
+  Alcotest.(check bool) "atom 1 exists" true
+    (Option.is_some (Window.atom_opening_digest messages 1));
+  Alcotest.(check bool) "the whole history goes" true
+    (composed.Try_provider.origin = Masc.Keeper_carried_front.Whole_history);
+  Alcotest.(check int) "nothing dropped" 0 composed.Try_provider.projection.Window.dropped_atoms;
+  Alcotest.(check bool) "the dropped seed is on record, with the other message as its reason" true
+    (match composed.Try_provider.outlived_seed with
+     | Some (_, Masc.Keeper_carried_front.Front_message_differs) -> true
+     | Some (_, Masc.Keeper_carried_front.Front_atom_missing) | None -> false)
 ;;
 
 let () =
@@ -944,6 +994,10 @@ let () =
             "a front the history shrank under starts over"
             `Quick
             a_front_the_history_shrank_under_starts_over
+        ; Alcotest.test_case
+            "a front that opens with another message starts over"
+            `Quick
+            a_front_that_opens_with_another_message_starts_over
         ] )
     ; ( "measurement"
       , [ Alcotest.test_case

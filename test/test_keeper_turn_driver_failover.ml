@@ -8,6 +8,7 @@ let load_list_text ~config_path =
 
 module Runtime_manifest = Masc.Keeper_runtime_manifest
 module Driver = Masc.Keeper_turn_driver
+module Try_provider = Masc.Keeper_turn_driver_try_provider
 module Deferred_store = Masc.Keeper_deferred_runtime_lane_store
 module Agent_run_receipt = Masc.Keeper_agent_run_receipt.For_testing
 module Run_tools_setup = Masc.Keeper_run_tools_setup
@@ -110,6 +111,21 @@ let attempt_without_effect result checkpoint =
   , checkpoint
   , Masc.Keeper_provider_attempt_effect.No_effect_observed
   , Masc.Keeper_attempt_dispatch.Dispatched )
+;;
+
+let collecting_deferral continuation deferred =
+  { Driver.continuation; on_deferred = (fun hint -> deferred := hint :: !deferred) }
+;;
+
+(* The chat lane's continuation names the operation that would resume; only a
+   lane running one can build it. *)
+let resume_chat_operation =
+  Driver.Resume_operation_checkpoint
+    { operation_id =
+        (match Keeper_operation_id.of_string "kmsg-walk-under-test" with
+         | Ok operation_id -> operation_id
+         | Error detail -> failwith detail)
+    }
 ;;
 
 (* A candidate the walk refuses before invoking anything: its error is the
@@ -481,6 +497,66 @@ let test_lanes_accessor_returns_declared_lanes () =
         (Runtime_lane.id lane)
     | _ -> Alcotest.fail "expected exactly one lane")
 
+(* The order the forecast shows is the order the walk takes: the declared
+   order, demoted only by quota and backpressure. Nothing is remembered from
+   an earlier success, so a lane always starts from its head (#36858). *)
+let test_assignment_walk_order_is_the_declared_order () =
+  with_runtime_config runtime_toml_with_lane (fun () ->
+    let now = Unix.gettimeofday () in
+    match Driver.assignment_walk_order ~now "resilient" with
+    | Error _ -> Alcotest.fail "the lane resolves"
+    | Ok walk ->
+      Alcotest.(check string) "the lane" "resilient" walk.Driver.lane_id;
+      Alcotest.(check (list string)) "as declared"
+        [ "primary.test_model"; "fallback.test_model" ] walk.Driver.declared;
+      Alcotest.(check (list string)) "the walk is the declared order"
+        [ "primary.test_model"; "fallback.test_model" ] walk.Driver.order)
+
+(* A head under 429 backpressure walks behind its sibling. The declaration
+   does not move; only the order does, and it says so (RFC-0457 §3). *)
+let test_assignment_walk_order_demotes_a_resting_head () =
+  with_runtime_config runtime_toml_with_lane (fun () ->
+    let head = Option.get (Runtime.get_runtime_by_id "primary.test_model") in
+    Runtime_candidate_backpressure.note_rate_limit
+      ~candidate:head.Runtime.candidate_backpressure ~retry_after:None;
+    match Driver.assignment_walk_order ~now:(Unix.gettimeofday ()) "resilient" with
+    | Error _ -> Alcotest.fail "the lane resolves"
+    | Ok walk ->
+      Alcotest.(check (list string)) "the declaration is untouched"
+        [ "primary.test_model"; "fallback.test_model" ] walk.Driver.declared;
+      Alcotest.(check (list string)) "the resting head walks last"
+        [ "fallback.test_model"; "primary.test_model" ] walk.Driver.order)
+
+let test_assignment_walk_order_refuses_a_missing_assignment () =
+  with_runtime_config runtime_toml_with_lane (fun () ->
+    match Driver.assignment_walk_order ~now:(Unix.gettimeofday ()) "not.configured" with
+    | Error Driver.Assignment_missing -> ()
+    | Error (Driver.Catalog_unavailable _) -> Alcotest.fail "missing, not unavailable"
+    | Ok _ -> Alcotest.fail "an id that names nothing is refused, not walked")
+
+(* A route is a routing label; the binding a turn opens is the lane's entry
+   candidate. Callers that need a materialized runtime resolve it here rather
+   than handing the label to [get_runtime_by_id], which answers [None] for a
+   lane name. *)
+let test_entry_runtime_id_resolves_a_route_to_the_binding_it_opens () =
+  with_runtime_config runtime_toml_with_lane (fun () ->
+    Alcotest.(check (option string))
+      "a lane name resolves to its first candidate"
+      (Some "primary.test_model")
+      (Runtime.entry_runtime_id_of_route "resilient");
+    Alcotest.(check (option string))
+      "a bare runtime id resolves to itself"
+      (Some "primary.test_model")
+      (Runtime.entry_runtime_id_of_route "primary.test_model");
+    Alcotest.(check (option string))
+      "a name that is neither resolves to nothing"
+      None
+      (Runtime.entry_runtime_id_of_route "no-such-route");
+    Alcotest.(check bool)
+      "the lane name itself names no binding, which is why this exists"
+      true
+      (Option.is_none (Runtime.get_runtime_by_id "resilient")))
+
 let test_resolve_assignment_prefers_lane_over_runtime () =
   with_runtime_config runtime_toml_lane_shadows_runtime (fun () ->
     match Runtime.resolve_assignment "primary.test_model" with
@@ -496,7 +572,7 @@ let test_resolve_assignment_prefers_lane_over_runtime () =
         (Runtime_lane.ordered_candidates lane))
 
 (* A keeper assigned to a bare runtime id used to dispatch without a lane, which
-   turned off failover, sticky candidate preference and quota demotion at once.
+   turned off failover and quota demotion at once.
    It now gets a lane of its own that ends at [runtime].default. *)
 let test_bare_runtime_assignment_gets_a_lane_with_somewhere_to_go () =
   with_runtime_config runtime_toml_with_lane (fun () ->
@@ -611,25 +687,29 @@ max-concurrent = 1
 max-concurrent = 1
 |}
 
-(* Pins the current assignment contract: [runtime.assignments] targets must be
-   runtime ids, so a keeper can only reach a lane when the lane id shadows a
-   runtime id ([resolve_assignment] prefers lanes on collision). Direct lane
-   assignment also has no pre-dispatch context budget resolution
-   ([resolve_max_context_resolution_for_runtime_id] resolves runtime ids only),
-   so accepting it at load would just move this failure to every turn. *)
-let test_assignment_to_lane_id_rejected_at_load () =
+(* RFC-0457: [runtime.assignments] targets name a declared lane or a runtime.
+   A lane target loads, and the pre-dispatch context budget resolves through
+   the lane's entry binding ([entry_runtime_id_of_route]) — the failure the
+   old contract refused this config for rather than hit at every turn. *)
+let test_assignment_to_lane_id_loads () =
   let path = Filename.temp_file "runtime_failover_lane_assign_" ".toml" in
   write_file path runtime_toml_assignment_to_lane;
   Fun.protect
     ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
     (fun () ->
        match load_list_text ~config_path:path with
-       | Ok _ -> Alcotest.fail "expected load to fail on lane-targeted assignment"
        | Error msg ->
+         Alcotest.failf "a lane-targeted assignment must load: %s" msg
+       | Ok (_runtimes, _default, assignments, _media_failover, lanes) ->
+         Alcotest.(check (option string))
+           "the assignment keeps its lane target" (Some "resilient")
+           (List.assoc_opt "canary" assignments);
          Alcotest.(check bool)
-           "error names the assignment"
+           "the named lane is materialized"
            true
-           (contains ~needle:"[runtime.assignments].canary" msg))
+           (List.exists
+              (fun lane -> String.equal (Runtime_lane.id lane) "resilient")
+              lanes))
 
 let test_unknown_lane_candidate_rejected_at_load () =
   let path = Filename.temp_file "runtime_failover_bad_" ".toml" in
@@ -1740,46 +1820,6 @@ let test_media_turn_starts_from_the_live_walk_head () =
               ~first_runtime:assigned
               ~remaining_runtimes:[ text_only ]))))
 
-(* The media walk reaches past the lane, so a winner can be a runtime the lane
-   does not declare. Recording it for the lane erases the last in-lane success
-   and promotes nothing in its place: prefer_order reorders the lane's own
-   candidates, and the winner is in none of them. The next text turn then
-   starts from the declared head again (#34823). *)
-let test_an_out_of_lane_winner_keeps_the_lanes_own_preference () =
-  with_runtime_config runtime_toml_with_lane (fun () ->
-    Runtime_lane_preference.reset_for_testing ();
-    (* An in-lane success the lane is entitled to keep. *)
-    Runtime_lane_preference.note_success ~lane_id:"resilient"
-      ~candidate:"fallback.test_model";
-    let events = ref [] in
-    let result =
-      Driver.For_testing.attempt_runtime_candidates
-        ~lane_id:"resilient"
-        ~runtime_id:"resilient"
-        ~runtime_id_of:(fun runtime_id -> runtime_id)
-        ~emit_runtime_manifest:(emit_manifest_collector events)
-        ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
-          attempt_without_effect (Ok runtime_id) None)
-        [ "media.out_of_lane_model" ]
-    in
-    (match result with
-     | Ok runtime_id ->
-       Alcotest.(check string)
-         "the out-of-lane candidate served the turn"
-         "media.out_of_lane_model"
-         runtime_id
-     | Error error ->
-       Alcotest.failf "expected candidate success, got %s"
-         (Agent_core.Error.to_string error));
-    match Runtime.get_lane_by_id "resilient" with
-    | None -> Alcotest.fail "expected lane 'resilient' to be configured"
-    | Some lane ->
-      Alcotest.(check (list string))
-        "the in-lane success still leads the lane's order"
-        [ "fallback.test_model"; "primary.test_model" ]
-        (Runtime_lane_preference.prefer_order ~lane_id:"resilient"
-           (Runtime_lane.ordered_candidates lane)))
-
 (* RFC-0440 §3: a 402 belongs to the candidate's account, so the walk moves to
    the next candidate in the same turn and does not call the first one again. *)
 let test_attempt_loop_moves_past_payment_required () =
@@ -1935,14 +1975,14 @@ let test_failed_lane_receipt_counts_missing_tail () =
 let test_attempt_loop_retries_transport_failure_before_checkpoint () =
   let attempts = ref [] in
   let events = ref [] in
-  let checkpoint_stage_observed = Atomic.make false in
+  let checkpoint_progress = Atomic.make Try_provider.No_checkpoint_stage in
   let result =
     Driver.For_testing.attempt_runtime_candidates
       ~runtime_id:"resilient"
       ~runtime_id_of:(fun runtime_id -> runtime_id)
       ~emit_runtime_manifest:(emit_manifest_collector events)
       ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _error ->
-        Driver.For_testing.same_run_retry_allowed checkpoint_stage_observed)
+        Driver.For_testing.same_run_retry_allowed checkpoint_progress)
       ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
         attempts := !attempts @ [ runtime_id ];
         match candidate with
@@ -1968,7 +2008,7 @@ let test_attempt_loop_retries_transport_failure_before_checkpoint () =
   Alcotest.(check bool)
     "transport failed before any checkpoint stage"
     true
-    (Driver.For_testing.same_run_retry_allowed checkpoint_stage_observed);
+    (Driver.For_testing.same_run_retry_allowed checkpoint_progress);
   let events = List.rev !events in
   Alcotest.(check (list string))
     "manifest events"
@@ -2098,7 +2138,10 @@ let test_attempt_loop_retries_provider_wire_failure_same_turn () =
       ~runtime_id:"resilient"
       ~runtime_id_of:(fun runtime_id -> runtime_id)
       ~emit_runtime_manifest:(emit_manifest_collector events)
-      ~on_retry_deferred:(fun _ -> incr deferred)
+      ~retry_deferral:
+        { Driver.continuation = Driver.Restart_cycle
+        ; on_deferred = (fun _ -> incr deferred)
+        }
       ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
         attempts := !attempts @ [ runtime_id ];
         match candidate with
@@ -2135,7 +2178,7 @@ let check_effect_disposition_blocks_same_turn_retry label effect_disposition =
   let result =
     Driver.For_testing.attempt_runtime_candidates
       ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _ -> true)
-      ~on_retry_deferred:(fun hint -> deferred := hint :: !deferred)
+      ~retry_deferral:(collecting_deferral Driver.Restart_cycle deferred)
       ~runtime_id:"primary.test_model"
       ~runtime_id_of:Fun.id
       ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
@@ -2359,8 +2402,8 @@ let rate_limit_error_from_a_429 ?(retry_after_header = None) ~body () =
 
 let observed_candidate runtime_id =
   let runtime = Option.get (Runtime.get_runtime_by_id runtime_id) in
-  Runtime_lane_preference.candidate_backpressure
-    ~now:(Unix.gettimeofday ()) ~candidate:runtime.candidate_preference
+  Runtime_candidate_backpressure.candidate_backpressure
+    ~now:(Unix.gettimeofday ()) ~candidate:runtime.candidate_backpressure
 ;;
 
 let backpressure_order runtime_ids =
@@ -2401,8 +2444,12 @@ let test_http_429_preserves_unknown_scope_and_fallback () =
        | Error error -> Alcotest.failf "fallback failed: %s" (Agent_core.Error.to_string error));
       List.iter (fun id ->
         (match observed_candidate id with
-         | Some (Runtime_lane_preference.Unknown_scope_rate_limit { retry_after = None; _ }) -> ()
-         | Some (Runtime_lane_preference.Unknown_scope_rate_limit _) | None ->
+         | Some
+             { Runtime_candidate_backpressure.rate_limit =
+                 Some (Runtime_candidate_backpressure.Unknown_scope_rate_limit { retry_after = None; _ })
+             ; failed_attempt = None
+             } -> ()
+         | Some _ | None ->
            Alcotest.fail "rate limit must retain unknown scope and absent hint");
         let scope = Option.get (Runtime.quota_scope_of_runtime_id id) in
         Alcotest.(check bool) "no credential quota inferred" false
@@ -2418,7 +2465,7 @@ let test_rate_limit_order_never_excludes_and_success_clears () =
     let ids = ["shared_a.test_model"; "shared_b.test_model"] in
     List.iter (fun id ->
       let runtime = Option.get (Runtime.get_runtime_by_id id) in
-      Runtime_lane_preference.note_rate_limit ~candidate:runtime.candidate_preference
+      Runtime_candidate_backpressure.note_rate_limit ~candidate:runtime.candidate_backpressure
         ~retry_after:(Some 300.)) ids;
     Alcotest.(check (list string)) "all observed candidates remain in declared order"
       ids (backpressure_order ids);
@@ -2438,24 +2485,27 @@ let test_rate_limit_order_never_excludes_and_success_clears () =
     Alcotest.(check bool) "success clears even an unexpired hint" true
       (Option.is_none (observed_candidate "shared_b.test_model"));
     match observed_candidate "shared_a.test_model" with
-    | Some (Runtime_lane_preference.Unknown_scope_rate_limit { retry_after = Some seconds; _ }) ->
+    | Some
+        { Runtime_candidate_backpressure.rate_limit =
+            Some (Runtime_candidate_backpressure.Unknown_scope_rate_limit { retry_after = Some seconds; _ })
+        ; failed_attempt = _
+        } ->
         Alcotest.(check (float 0.)) "actual HTTP header survives driver ingress" 300. seconds
-    | Some (Runtime_lane_preference.Unknown_scope_rate_limit _) | None ->
+    | Some _ | None ->
         Alcotest.fail "actual Retry-After hint was lost")
 ;;
 
 let quota_lane_candidate id =
-  (Option.get (Runtime.get_runtime_by_id id)).Runtime.candidate_preference
+  (Option.get (Runtime.get_runtime_by_id id)).Runtime.candidate_backpressure
 ;;
 
 (* Every quota_lane path starts serving: no candidate observation, no quota
-   window, no sticky preference. *)
+   window. *)
 let reset_quota_lane_rests () =
   Runtime_quota_window.reset_for_testing ();
-  Runtime_lane_preference.reset_for_testing ();
   List.iter
     (fun id ->
-       Runtime_lane_preference.note_candidate_success ~candidate:(quota_lane_candidate id))
+       Runtime_candidate_backpressure.note_candidate_success ~candidate:(quota_lane_candidate id))
     [ "shared_a.test_model"; "shared_b.test_model"; "other.test_model" ]
 ;;
 
@@ -2482,6 +2532,263 @@ let describe_dispatch ~now = function
        | Driver.Path_release -> "path")
 ;;
 
+let failed_attempt_of runtime_id =
+  match observed_candidate runtime_id with
+  | Some
+      { Runtime_candidate_backpressure.failed_attempt =
+          Some (Runtime_candidate_backpressure.Failed_attempt { failure; noted_at = _ })
+      ; rate_limit = _
+      } -> Some failure
+  | Some { Runtime_candidate_backpressure.failed_attempt = None; rate_limit = _ } | None -> None
+;;
+
+let attempt_failure : Runtime_candidate_backpressure.attempt_failure option Alcotest.testable =
+  Alcotest.testable
+    (fun fmt failure ->
+       Format.pp_print_string fmt
+         (match failure with
+          | None -> "none"
+          | Some Runtime_candidate_backpressure.Server_error -> "server_error"
+          | Some Runtime_candidate_backpressure.Network_transient -> "network_transient"
+          | Some Runtime_candidate_backpressure.Provider_timeout -> "provider_timeout"))
+    ( = )
+;;
+
+let walk_once ?provider_answered outcomes ids =
+  Driver.For_testing.attempt_runtime_candidates
+    ?provider_answered
+    ~runtime_id:"quota_lane" ~runtime_id_of:Fun.id
+    ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+    ~run_attempt:(fun ~idx:_ ~runtime_id _ -> attempt_without_effect (outcomes runtime_id) None)
+    ids
+;;
+
+(* RFC-0458 §3.4: a timeout, a server error and a network failure leave the
+   same kind of evidence a 429 does, carry no time and make no dispatch wait,
+   and an answer from that candidate clears it. Before, the driver recorded
+   only 429, 402 and HardQuota, and the next turn led with the dead head. *)
+let test_failed_attempts_demote_until_the_candidate_answers () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    reset_quota_lane_rests ();
+    Fun.protect ~finally:reset_quota_lane_rests (fun () ->
+      let ids = ["shared_a.test_model"; "shared_b.test_model"; "other.test_model"] in
+      let result =
+        walk_once
+          (function
+            | "shared_a.test_model" ->
+              Error (Agent_core.Error.Api
+                (Agent_core.Retry.Timeout { message = "no first token"; phase = None }))
+            | "shared_b.test_model" ->
+              Error (Agent_core.Error.Api
+                (Agent_core.Retry.ServerError { status = 503; message = "unavailable" }))
+            | "other.test_model" -> Ok ()
+            | other -> Alcotest.failf "unexpected candidate %s" other)
+          ids
+      in
+      (match result with
+       | Ok () -> ()
+       | Error error -> Alcotest.failf "fallback failed: %s" (Agent_core.Error.to_string error));
+      Alcotest.check attempt_failure "a timeout is evidence"
+        (Some Runtime_candidate_backpressure.Provider_timeout) (failed_attempt_of "shared_a.test_model");
+      Alcotest.check attempt_failure "a server error is evidence"
+        (Some Runtime_candidate_backpressure.Server_error) (failed_attempt_of "shared_b.test_model");
+      Alcotest.check attempt_failure "the candidate that answered holds none"
+        None (failed_attempt_of "other.test_model");
+      Alcotest.(check (list string)) "the next walk leads with the candidate that answered"
+        ["other.test_model"; "shared_a.test_model"; "shared_b.test_model"]
+        (backpressure_order ids);
+      let now = Unix.gettimeofday () in
+      List.iter
+        (fun id ->
+           match Driver.path_rest ~now id with
+           | Driver.Path_serving -> ()
+           | Driver.Path_resting _ -> Alcotest.failf "%s: a failed attempt made the path rest" id)
+        ["shared_a.test_model"; "shared_b.test_model"];
+      let (_ : (unit, Agent_core.Error.t) result) =
+        walk_once
+          (function
+            | "shared_a.test_model" -> Ok ()
+            | other -> Alcotest.failf "unexpected candidate %s" other)
+          ["shared_a.test_model"]
+      in
+      Alcotest.check attempt_failure "an answer clears the timeout"
+        None (failed_attempt_of "shared_a.test_model");
+      Alcotest.(check (list string)) "the answered candidate returns to its declared place"
+        ["shared_a.test_model"; "other.test_model"; "shared_b.test_model"]
+        (backpressure_order ids)))
+;;
+
+(* The evidence follows the failure route. A closed runtime connection is
+   routed as a server error, so it is evidence; MASC's own capacity, a
+   candidate that answered badly, and a failure of the turn's input are not
+   facts about the candidate. *)
+let test_only_the_candidates_own_failures_are_evidence () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    reset_quota_lane_rests ();
+    Fun.protect ~finally:reset_quota_lane_rests (fun () ->
+      let one id error =
+        let (_ : (unit, Agent_core.Error.t) result) =
+          walk_once (fun _ -> Error error) [id]
+        in
+        failed_attempt_of id
+      in
+      Alcotest.check attempt_failure "a closed runtime connection"
+        (Some Runtime_candidate_backpressure.Server_error)
+        (one "shared_a.test_model"
+           (Keeper_internal_error.core_error_of_masc_internal_error
+              (Keeper_internal_error.Runtime_connection_closed
+                 { runtime_id = "shared_a.test_model"; detail = "stdout closed"; turn_accepted = true })));
+      Alcotest.check attempt_failure "a network failure"
+        (Some Runtime_candidate_backpressure.Network_transient)
+        (one "shared_b.test_model" (retryable_network_error "connection refused"));
+      reset_quota_lane_rests ();
+      Alcotest.check attempt_failure "a provider that sent no first token"
+        (Some Runtime_candidate_backpressure.Provider_timeout)
+        (one "shared_a.test_model"
+           (Agent_core.Error.Provider
+              (Llm_provider.Error.Timeout
+                 { provider = "shared_a"
+                 ; timeout_phase = Some Llm_provider.Http_client.First_token
+                 ; detail = "no first token"
+                 })));
+      reset_quota_lane_rests ();
+      List.iter
+        (fun (label, error) ->
+           Alcotest.check attempt_failure label None (one "other.test_model" error);
+           Alcotest.(check bool) (label ^ " leaves no rate limit either") true
+             (Option.is_none (observed_candidate "other.test_model")))
+        [ "a permit that MASC's own queue never granted"
+        , Agent_core.Error.Provider
+            (Llm_provider.Error.Timeout
+               { provider = "other"
+               ; timeout_phase = Some Llm_provider.Http_client.Queue
+               ; detail = "no admission permit"
+               })
+        ; "local capacity that expired before sending"
+        , Agent_core.Error.Api
+            (Agent_core.Retry.Timeout
+               { message = "capacity"; phase = Some Llm_provider.Http_client.Capacity_backpressure })
+        ; "provider overload is MASC-side capacity"
+        , Agent_core.Error.Api (Agent_core.Retry.Overloaded { message = "overloaded" })
+        ; "a model the provider does not know rotates"
+        , Agent_core.Error.Api (Agent_core.Retry.NotFound { message = "no such model" })
+        ; "a context overflow is the turn's input"
+        , Agent_core.Error.Api
+            (Agent_core.Retry.ContextOverflow { message = "too long"; limit = None })
+        ]))
+;;
+
+(* An attempt that yielded before its first token never heard from the
+   candidate, so it must not clear evidence that it was down. *)
+let test_a_yield_before_the_first_token_clears_no_evidence () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    reset_quota_lane_rests ();
+    Fun.protect ~finally:reset_quota_lane_rests (fun () ->
+      let id = "shared_a.test_model" in
+      let runtime = Option.get (Runtime.get_runtime_by_id id) in
+      Runtime_candidate_backpressure.note_failed_attempt
+        ~candidate:runtime.candidate_backpressure
+        ~failure:Runtime_candidate_backpressure.Provider_timeout;
+      Runtime_candidate_backpressure.note_rate_limit
+        ~candidate:runtime.candidate_backpressure ~retry_after:None;
+      let scope = Option.get (Runtime.quota_scope_of_runtime_id id) in
+      Runtime_quota_window.note_observed_exhausted ~scope;
+      let (_ : (unit, Agent_core.Error.t) result) =
+        walk_once ~provider_answered:(fun () -> false) (fun _ -> Ok ()) [id]
+      in
+      Alcotest.(check bool) "the observed quota survives the yield" true
+        (Runtime_quota_window.is_exhausted ~scope ~now:(Unix.gettimeofday ()));
+      Alcotest.check attempt_failure "the timeout survives the yield"
+        (Some Runtime_candidate_backpressure.Provider_timeout) (failed_attempt_of id);
+      Alcotest.(check bool) "the rate limit survives the yield" true
+        (match observed_candidate id with
+         | Some { Runtime_candidate_backpressure.rate_limit = Some _; failed_attempt = _ } -> true
+         | Some { Runtime_candidate_backpressure.rate_limit = None; failed_attempt = _ } | None -> false)))
+;;
+
+(* The review of this change found a failed path waiting for a resting one:
+   with the failed attempt behind a path told to rest, the next dispatch waited
+   for that head's release though the failed path could serve now. *)
+let test_a_path_that_only_failed_walks_before_one_told_to_rest () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    reset_quota_lane_rests ();
+    Fun.protect ~finally:reset_quota_lane_rests (fun () ->
+      let resting = "shared_a.test_model" and failed = "other.test_model" in
+      Runtime_quota_window.note_observed_exhausted
+        ~scope:(Option.get (Runtime.quota_scope_of_runtime_id resting));
+      Runtime_candidate_backpressure.note_failed_attempt
+        ~candidate:(quota_lane_candidate failed)
+        ~failure:Runtime_candidate_backpressure.Provider_timeout;
+      Alcotest.(check (list string)) "the failed path walks before the resting one"
+        [ failed; resting ]
+        (backpressure_order [ resting; failed ]);
+      let now = Unix.gettimeofday () in
+      Alcotest.(check string) "and the next dispatch goes to it now"
+        ("dispatch " ^ failed)
+        (describe_dispatch ~now
+           (Driver.next_dispatch_after_failure ~now ~route:rate_limited_route
+              ~assignment_id:"quota_lane" (Some (quota_lane_suffix [ resting; failed ]))))))
+;;
+
+(* 402 still records through the route: the credential's quota window. *)
+let test_payment_required_still_exhausts_the_quota_scope () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    reset_quota_lane_rests ();
+    Fun.protect ~finally:reset_quota_lane_rests (fun () ->
+      let id = "other.test_model" in
+      let (_ : (unit, Agent_core.Error.t) result) =
+        walk_once
+          (fun _ -> Error (Agent_core.Error.Api (Agent_core.Retry.PaymentRequired { message = "pay" })))
+          [ id ]
+      in
+      Alcotest.(check bool) "the quota scope is exhausted" true
+        (Runtime_quota_window.is_exhausted
+           ~scope:(Option.get (Runtime.quota_scope_of_runtime_id id))
+           ~now:(Unix.gettimeofday ()))))
+;;
+
+(* A hint that names no time -- zero, negative, NaN -- must not be planted as
+   a reset: that window is already over, and it replaces the observation the
+   scope was carrying, leaving an exhausted account looking available. *)
+let test_a_quota_hint_that_names_no_time_is_recorded_as_observed () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    List.iter
+      (fun retry_after ->
+         reset_quota_lane_rests ();
+         let id = "other.test_model" in
+         let (_ : (unit, Agent_core.Error.t) result) =
+           walk_once
+             (fun _ ->
+                Error
+                  (Agent_core.Error.Provider
+                     (Llm_provider.Error.HardQuota
+                        { provider = "other"; retry_after; detail = "out of credit" })))
+             [ id ]
+         in
+         Alcotest.(check bool)
+           (match retry_after with
+            | None -> "no hint"
+            | Some hint -> Printf.sprintf "a hint of %.1f" hint)
+           true
+           (Runtime_quota_window.is_exhausted
+              ~scope:(Option.get (Runtime.quota_scope_of_runtime_id id))
+              ~now:(Unix.gettimeofday () +. 1.0)))
+      [ None; Some 0.0; Some (-30.0); Some Float.nan ];
+    reset_quota_lane_rests ())
+;;
+
+let test_the_production_answer_test_reads_provider_turns () =
+  let yielded = Runtime_agent.yielded_pre_first_token ~session_id:"session" in
+  Alcotest.(check bool) "a pre-first-token yield did not hear the candidate" false
+    (Driver.For_testing.run_result_answered yielded);
+  Alcotest.(check bool) "a yield after a provider turn did" true
+    (Driver.For_testing.run_result_answered
+       { yielded with stop_reason = Runtime_agent.Yielded_to_durable_stimulus { turns_used = 1 } });
+  Alcotest.(check bool) "a completed run did" true
+    (Driver.For_testing.run_result_answered
+       { yielded with stop_reason = Runtime_agent.Completed })
+;;
+
 (* RFC-provider-path-rest §3.3 and #34653: the head of a deferred suffix in
    walk order decides whether a failed cycle waits. A serving head takes the
    input at once. A resting head waits until the next turn's head can serve,
@@ -2492,9 +2799,9 @@ let test_a_deferred_suffix_waits_only_while_its_walk_head_rests () =
     Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
       reset_quota_lane_rests ();
       let now = Unix.gettimeofday () in
-      Runtime_lane_preference.note_rate_limit
+      Runtime_candidate_backpressure.note_rate_limit
         ~candidate:(quota_lane_candidate "shared_a.test_model") ~retry_after:(Some 300.);
-      Runtime_lane_preference.note_rate_limit
+      Runtime_candidate_backpressure.note_rate_limit
         ~candidate:(quota_lane_candidate "shared_b.test_model") ~retry_after:(Some 120.);
       let describe = function
         | Driver.Walk_head_serving { runtime_id } -> "serving " ^ runtime_id
@@ -2518,9 +2825,9 @@ let test_a_deferred_suffix_waits_only_while_its_walk_head_rests () =
       (* An unstated rest ends the wait but not the demotion, so the walk keeps
          that path behind the resting head: waiting for its shorter release
          would dispatch the head while it still rests. *)
-      Runtime_lane_preference.note_candidate_success
+      Runtime_candidate_backpressure.note_candidate_success
         ~candidate:(quota_lane_candidate "shared_b.test_model");
-      Runtime_lane_preference.note_rate_limit
+      Runtime_candidate_backpressure.note_rate_limit
         ~candidate:(quota_lane_candidate "shared_b.test_model") ~retry_after:None;
       Alcotest.(check string) "an unstated rest behind the head does not shorten the wait"
         "resting shared_a.test_model for 300s"
@@ -2574,9 +2881,9 @@ let test_a_failure_without_a_suffix_waits_until_a_fresh_walk_head_serves () =
       Alcotest.(check string) "a serving fresh walk head waits only for the failed path"
         (Printf.sprintf "wait %.0fs for quota_lane (path)" floor_sec)
         (decide ());
-      Runtime_lane_preference.note_rate_limit
+      Runtime_candidate_backpressure.note_rate_limit
         ~candidate:(quota_lane_candidate "shared_a.test_model") ~retry_after:(Some 600.);
-      Runtime_lane_preference.note_rate_limit
+      Runtime_candidate_backpressure.note_rate_limit
         ~candidate:(quota_lane_candidate "shared_b.test_model") ~retry_after:None;
       Runtime_quota_window.note_exhausted
         ~scope:(Option.get (Runtime.quota_scope_of_runtime_id "other.test_model"))
@@ -2595,7 +2902,7 @@ let test_a_chat_retry_follows_the_shared_next_dispatch () =
     Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
       reset_quota_lane_rests ();
       let now = Unix.gettimeofday () in
-      Runtime_lane_preference.note_rate_limit
+      Runtime_candidate_backpressure.note_rate_limit
         ~candidate:(quota_lane_candidate "shared_a.test_model") ~retry_after:(Some 300.);
       let not_before lane =
         match Masc.Keeper_direct_runtime_continuation.For_testing.retry_not_before ~now lane with
@@ -2636,7 +2943,7 @@ let test_rate_limit_candidate_survives_unchanged_reload_only () =
       let result = Driver.For_testing.attempt_runtime_candidates
         ~runtime_id:"quota_lane" ~runtime_id_of:(fun (rt : Runtime.t) -> rt.id)
         ~quota_scope_of:(fun rt -> Some (Runtime.quota_scope_of_runtime rt))
-        ~candidate_preference_of:(fun (rt : Runtime.t) -> Some rt.candidate_preference)
+        ~candidate_backpressure_of:(fun (rt : Runtime.t) -> Some rt.candidate_backpressure)
         ~candidate_dispatchable:(fun _ -> true)
         ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
         ~run_attempt:(fun ~idx:_ ~runtime_id:_ _ ->
@@ -2661,8 +2968,8 @@ let test_rate_limit_candidate_survives_unchanged_reload_only () =
     attempt old (fun () -> reload_runtime_config
       (runtime_toml_quota_lane_with_shared_credential "REBOUND_QUOTA_TEST_KEY"));
     Alcotest.(check bool) "old response remains on old frozen binding" true
-      (Option.is_some (Runtime_lane_preference.candidate_backpressure
-        ~now:(Unix.gettimeofday ()) ~candidate:old.candidate_preference));
+      (Option.is_some (Runtime_candidate_backpressure.candidate_backpressure
+        ~now:(Unix.gettimeofday ()) ~candidate:old.candidate_backpressure));
     Alcotest.(check bool) "replacement does not inherit old response" true
       (Option.is_none (observed_candidate "shared_a.test_model"));
     Alcotest.(check (list string)) "replacement starts in declared order"
@@ -2683,7 +2990,7 @@ let test_rate_limit_credential_rotation_under_same_reference () =
         let result = Driver.For_testing.attempt_runtime_candidates
           ~runtime_id:"quota_lane" ~runtime_id_of:(fun (rt : Runtime.t) -> rt.id)
           ~quota_scope_of:(fun rt -> Some (Runtime.quota_scope_of_runtime rt))
-          ~candidate_preference_of:(fun (rt : Runtime.t) -> Some rt.candidate_preference)
+          ~candidate_backpressure_of:(fun (rt : Runtime.t) -> Some rt.candidate_backpressure)
           ~candidate_dispatchable:(fun _ -> true)
           ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
           ~run_attempt:(fun ~idx:_ ~runtime_id:_ _ ->
@@ -2695,8 +3002,8 @@ let test_rate_limit_credential_rotation_under_same_reference () =
          | Error (Agent_core.Error.Api (Llm_provider.Retry.RateLimited _)) -> ()
          | Error _ | Ok _ -> Alcotest.fail "expected actual transport rate limit");
         Alcotest.(check bool) "old observation stays attached to dispatched value" true
-          (Option.is_some (Runtime_lane_preference.candidate_backpressure
-            ~now:(Unix.gettimeofday ()) ~candidate:old.candidate_preference));
+          (Option.is_some (Runtime_candidate_backpressure.candidate_backpressure
+            ~now:(Unix.gettimeofday ()) ~candidate:old.candidate_backpressure));
         Alcotest.(check bool) "same reference with new resolved credential has no old observation" true
           (Option.is_none (observed_candidate "shared_a.test_model"))))
 ;;
@@ -2922,48 +3229,47 @@ let test_official_client_does_not_inherit_registry_api_key_scope () =
               ~scope:registry_api_key_scope
               ~now:100.0)))
 
-let test_attempt_loop_without_lane_id_does_not_update_sticky_preference () =
-  Runtime_lane_preference.reset_for_testing ();
-  let events = ref [] in
-  let result =
-    Driver.For_testing.attempt_runtime_candidates
-      ~runtime_id:"resilient"
-      ~runtime_id_of:(fun runtime_id -> runtime_id)
-      ~emit_runtime_manifest:(emit_manifest_collector events)
-      ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
-        attempt_without_effect (Ok runtime_id) None)
-      [ "media.fallback_model" ]
-  in
-  (match result with
-   | Ok runtime_id ->
-     Alcotest.(check string)
-       "rerouted candidate can still serve turn"
-       "media.fallback_model"
-       runtime_id
-   | Error e ->
-     Alcotest.failf
-       "expected candidate success, got %s"
-       (Agent_core.Error.to_string e));
-  Alcotest.(check (list string))
-    "lane preference remains declared order without lane id"
-    [ "primary.text_model"; "media.fallback_model" ]
-    (Runtime_lane_preference.prefer_order
-       ~lane_id:"resilient"
-       [ "primary.text_model"; "media.fallback_model" ])
+(* A success leaves no trace on the walk: the next assignment_walk_order is
+   the declared order whichever candidate served the previous turn. *)
+let test_a_success_leaves_the_next_walk_declared () =
+  with_runtime_config runtime_toml_with_lane (fun () ->
+    let events = ref [] in
+    let result =
+      Driver.For_testing.attempt_runtime_candidates
+        ~runtime_id:"resilient"
+        ~runtime_id_of:(fun runtime_id -> runtime_id)
+        ~emit_runtime_manifest:(emit_manifest_collector events)
+        ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
+          attempt_without_effect (Ok runtime_id) None)
+        [ "fallback.test_model" ]
+    in
+    (match result with
+     | Ok runtime_id ->
+       Alcotest.(check string) "the fallback served the turn"
+         "fallback.test_model" runtime_id
+     | Error e ->
+       Alcotest.failf "expected candidate success, got %s"
+         (Agent_core.Error.to_string e));
+    match Driver.assignment_walk_order ~now:(Unix.gettimeofday ()) "resilient" with
+    | Error _ -> Alcotest.fail "the lane resolves"
+    | Ok walk ->
+      Alcotest.(check (list string)) "the next walk starts from the declared head"
+        [ "primary.test_model"; "fallback.test_model" ] walk.Driver.order)
 
 let test_typed_checkpoint_is_the_same_run_retry_authority () =
   let stages =
     [ Agent_core.Agent.After_assistant_collected
     ; Agent_core.Agent.After_tool_results_appended
     ; Agent_core.Agent.After_context_injection
+    ; Agent_core.Agent.After_rejected_response_dropped
     ]
   in
   List.iter
     (fun stage ->
        let attempts = ref [] in
        let events = ref [] in
-       let checkpoint_stage_observed = Atomic.make false in
-       Driver.For_testing.observe_checkpoint_stage checkpoint_stage_observed stage;
+       let checkpoint_progress = Atomic.make Try_provider.No_checkpoint_stage in
+       Driver.For_testing.observe_checkpoint_stage checkpoint_progress stage;
        let primary_error = retryable_network_error "response-stage failure" in
        let result =
          Driver.For_testing.attempt_runtime_candidates
@@ -2971,7 +3277,7 @@ let test_typed_checkpoint_is_the_same_run_retry_authority () =
            ~runtime_id_of:(fun runtime_id -> runtime_id)
            ~emit_runtime_manifest:(emit_manifest_collector events)
            ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _error ->
-             Driver.For_testing.same_run_retry_allowed checkpoint_stage_observed)
+             Driver.For_testing.same_run_retry_allowed checkpoint_progress)
            ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
              attempts := !attempts @ [ runtime_id ];
              match candidate with
@@ -3571,7 +3877,7 @@ let test_deferred_hint_after_a_repeat_names_a_different_model () =
     let result =
       Driver.For_testing.attempt_runtime_candidates
         ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _ -> false)
-        ~on_retry_deferred:(fun hint -> deferred := hint :: !deferred)
+        ~retry_deferral:(collecting_deferral Driver.Restart_cycle deferred)
         ~runtime_id:"lane.glm"
         ~runtime_id_of:Fun.id
         ~model_of:flash_or_plus
@@ -3614,7 +3920,7 @@ let test_checkpoint_denial_defers_exact_frozen_suffix_once () =
   let result =
     Driver.For_testing.attempt_runtime_candidates
       ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _ -> false)
-      ~on_retry_deferred:(fun hint -> deferred := hint :: !deferred)
+      ~retry_deferral:(collecting_deferral Driver.Restart_cycle deferred)
       ~runtime_id:"lane.frozen"
       ~runtime_id_of:Fun.id
       ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
@@ -3676,7 +3982,7 @@ let test_deferred_cycle_post_checkpoint_replaces_hint_with_tail () =
   let result =
     Driver.For_testing.attempt_runtime_candidates
       ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _ -> false)
-      ~on_retry_deferred:(fun hint -> deferred := hint :: !deferred)
+      ~retry_deferral:(collecting_deferral Driver.Restart_cycle deferred)
       ~runtime_id:"runtime.b"
       ~runtime_id_of:Fun.id
       ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
@@ -3702,7 +4008,7 @@ let test_single_candidate_checkpoint_failure_has_no_hint () =
   let result =
     Driver.For_testing.attempt_runtime_candidates
       ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _ -> false)
-      ~on_retry_deferred:(fun hint -> deferred := hint :: !deferred)
+      ~retry_deferral:(collecting_deferral Driver.Restart_cycle deferred)
       ~runtime_id:"runtime.only"
       ~runtime_id_of:Fun.id
       ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
@@ -3714,6 +4020,302 @@ let test_single_candidate_checkpoint_failure_has_no_hint () =
   in
   (match result with Error _ -> () | Ok _ -> Alcotest.fail "expected failure");
   Alcotest.(check int) "no successor means no hint" 0 (List.length !deferred)
+
+
+let progress_snapshot stage =
+  { Agent_core.Agent.stage
+  ; turn = 1
+  ; timestamp = 1.
+  ; checkpoint =
+      Masc.Keeper_context_runtime.checkpoint_of_context
+        (Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"progress")
+  }
+;;
+
+let progress_label = function
+  | Try_provider.No_checkpoint_stage -> "no checkpoint stage"
+  | Try_provider.Checkpoint_stage_reached -> "checkpoint stage reached"
+  | Try_provider.Tool_results_saved -> "tool results saved"
+;;
+
+(* RFC last-path-resumes-after-progress §3.2: reaching a stage ends same-run
+   retry whatever the sink answers, and only the sink's owner marks the tool
+   results it actually wrote. A sink answers [Ok ()] for a write it skipped as
+   well ([Keeper_checkpoint_store.Stale_noop]), so the wrapper never reads
+   progress out of that answer. *)
+let test_a_sink_answer_is_not_progress () =
+  let sinks =
+    [ "no sink", None, Ok ()
+    ; "a save that answers Ok", Some (fun _ -> Ok ()), Ok ()
+    ; "a save that fails", Some (fun _ -> Error "disk full"), Error "disk full"
+    ]
+  in
+  List.iter
+    (fun stage ->
+       List.iter
+         (fun (sink_label, sink, answer) ->
+            let progress = Atomic.make Try_provider.No_checkpoint_stage in
+            let returned =
+              Driver.For_testing.observing_checkpoint_sink progress sink (progress_snapshot stage)
+            in
+            let label =
+              Agent_core.Agent.checkpoint_stage_to_string stage ^ " with " ^ sink_label
+            in
+            Alcotest.(check (result unit string)) (label ^ ": the sink's answer passes through")
+              answer returned;
+            Alcotest.(check string) label
+              (progress_label Try_provider.Checkpoint_stage_reached)
+              (progress_label (Atomic.get progress));
+            Alcotest.(check bool) (label ^ ": no same-run retry") false
+              (Driver.For_testing.same_run_retry_allowed progress);
+            Alcotest.(check bool) (label ^ ": no tool results") false
+              (Driver.For_testing.tool_results_saved progress))
+         sinks)
+    [ Agent_core.Agent.After_assistant_collected
+    ; Agent_core.Agent.After_tool_results_appended
+    ; Agent_core.Agent.After_context_injection
+    ; Agent_core.Agent.After_rejected_response_dropped
+    ]
+;;
+
+(* What the owner marks: a stage written after tools ran counts, the answer
+   stages do not, and a later answer stage does not erase it. *)
+let test_the_sink_owner_marks_written_tool_results () =
+  List.iter
+    (fun (stage, counts) ->
+       let progress = Atomic.make Try_provider.No_checkpoint_stage in
+       Driver.For_testing.observe_checkpoint_saved progress stage;
+       Alcotest.(check string)
+         (Agent_core.Agent.checkpoint_stage_to_string stage)
+         (progress_label
+            (if counts then Try_provider.Tool_results_saved else Try_provider.No_checkpoint_stage))
+         (progress_label (Atomic.get progress)))
+    [ Agent_core.Agent.After_tool_results_appended, true
+    ; Agent_core.Agent.After_context_injection, true
+    ; Agent_core.Agent.After_assistant_collected, false
+    ; Agent_core.Agent.After_rejected_response_dropped, false
+    ];
+  let progress = Atomic.make Try_provider.No_checkpoint_stage in
+  Driver.For_testing.observe_checkpoint_saved progress Agent_core.Agent.After_tool_results_appended;
+  let (_ : (unit, string) result) =
+    Driver.For_testing.observing_checkpoint_sink
+      progress
+      (Some (fun _ -> Ok ()))
+      (progress_snapshot Agent_core.Agent.After_assistant_collected)
+  in
+  Alcotest.(check string) "a later answer stage keeps the written tool results"
+    (progress_label Try_provider.Tool_results_saved)
+    (progress_label (Atomic.get progress))
+;;
+
+let bad_gateway =
+  Agent_core.Error.Api
+    (Agent_core.Retry.ServerError { status = 502; message = "bad gateway" })
+;;
+
+let same_path_manifest_rows events =
+  List.filter_map
+    (function
+      | _, Some "deferred_same_path", Some decision -> Some (string_member "runtime_id" decision)
+      | _, _, _ -> None)
+    (List.rev !events)
+;;
+
+(* What a keeper's checkpoint write did, as its sink sees it. *)
+type write_outcome =
+  | Wrote
+  | Wrote_nothing
+  | Write_failed
+
+(* One chat-lane walk. [attempt ~save candidate] may save checkpoint stages
+   through the production sink wrapper before it returns the candidate's
+   error; the walk reads progress from the same value the driver does. *)
+let same_path_walk ~continuation candidates attempt =
+  let deferred = ref [] in
+  let events = ref [] in
+  let progress = Atomic.make Try_provider.No_checkpoint_stage in
+  (* As the keeper's own sink does: the stage goes through the wrapper, and the
+     owner marks what its write actually reached. [Wrote_nothing] is the
+     store's stale no-op, which answers [Ok ()] and leaves the canonical
+     checkpoint as it was. *)
+  let save stage outcome =
+    let answer =
+      match outcome with
+      | Wrote | Wrote_nothing -> Ok ()
+      | Write_failed -> Error "disk full"
+    in
+    let (_ : (unit, string) result) =
+      Driver.For_testing.observing_checkpoint_sink progress
+        (Some (fun _ -> answer))
+        (progress_snapshot stage)
+    in
+    match outcome with
+    | Wrote -> Driver.For_testing.observe_checkpoint_saved progress stage
+    | Wrote_nothing | Write_failed -> ()
+  in
+  let result =
+    Driver.For_testing.attempt_runtime_candidates
+      ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _ ->
+        Driver.For_testing.same_run_retry_allowed progress)
+      ~retry_deferral:(collecting_deferral continuation deferred)
+      ~tool_results_saved:(fun () -> Driver.For_testing.tool_results_saved progress)
+      ~runtime_id:"lane.chat"
+      ~runtime_id_of:Fun.id
+      ~emit_runtime_manifest:(emit_manifest_collector events)
+      ~run_attempt:(fun ~idx:_ ~runtime_id:_ candidate ->
+        attempt_without_effect (Error (attempt ~save candidate)) None)
+      candidates
+  in
+  result, List.rev !deferred, same_path_manifest_rows events
+;;
+
+let describe_hint (hint : Driver.deferred_runtime_lane) =
+  Printf.sprintf "%s: %s -> [%s]" hint.Driver.assignment_id hint.Driver.failed_runtime_id
+    (String.concat "; " (Driver.deferred_runtime_ids hint))
+;;
+
+(* RFC last-path-resumes-after-progress §3.1: the last candidate of a chat
+   operation saved tool results and then failed on a server error, so the
+   operation continues on that candidate. The hint keeps the assignment and
+   names nothing but the failed candidate, alone or at the end of a lane. *)
+let test_a_chat_operation_resumes_its_last_candidate_after_saved_tool_results () =
+  let tools_then_bad_gateway ~save _candidate =
+    save Agent_core.Agent.After_tool_results_appended Wrote;
+    bad_gateway
+  in
+  let result, hints, rows =
+    same_path_walk ~continuation:resume_chat_operation [ "only" ]
+      tools_then_bad_gateway
+  in
+  Alcotest.(check (list string)) "a lone candidate defers to itself"
+    [ "lane.chat: only -> [only]" ] (List.map describe_hint hints);
+  Alcotest.(check (list string)) "and the walk records that decision"
+    [ "only" ] rows;
+  Alcotest.(check (result string string)) "the turn still fails with its own error"
+    (Error (Agent_core.Error.to_string bad_gateway))
+    (Result.map_error Agent_core.Error.to_string result);
+  let _result, hints, _rows =
+    same_path_walk ~continuation:resume_chat_operation [ "first"; "last" ]
+      (fun ~save candidate ->
+         match candidate with
+         | "first" -> retryable_network_error "first dropped before any stage"
+         | _ -> tools_then_bad_gateway ~save candidate)
+  in
+  Alcotest.(check (list string)) "the end of a lane defers to that candidate only"
+    [ "lane.chat: last -> [last]" ] (List.map describe_hint hints)
+;;
+
+(* §3.1–§3.5: each condition alone withholds the same-path hint. *)
+let test_no_same_path_hint_unless_every_condition_holds () =
+  let overflow =
+    Agent_core.Error.Api
+      (Agent_core.Retry.ContextOverflow { message = "too long"; limit = Some 32768 })
+  in
+  let cases =
+    [ ( "no stage saved"
+      , resume_chat_operation
+      , [ "only" ]
+      , fun ~save:_ _ -> bad_gateway )
+    ; ( "only the answer saved"
+      , resume_chat_operation
+      , [ "only" ]
+      , fun ~save _ ->
+          save Agent_core.Agent.After_assistant_collected Wrote;
+          bad_gateway )
+    ; ( "the tool-results save failed"
+      , resume_chat_operation
+      , [ "only" ]
+      , fun ~save _ ->
+          save Agent_core.Agent.After_tool_results_appended Write_failed;
+          bad_gateway )
+    (* The store's stale no-op: the sink answered [Ok ()] and the canonical
+       checkpoint the operation would resume from was left as it was. *)
+    ; ( "the tool-results write was skipped as stale"
+      , resume_chat_operation
+      , [ "only" ]
+      , fun ~save _ ->
+          save Agent_core.Agent.After_tool_results_appended Wrote_nothing;
+          bad_gateway )
+    ; ( "a heartbeat cycle restarts"
+      , Driver.Restart_cycle
+      , [ "only" ]
+      , fun ~save _ ->
+          save Agent_core.Agent.After_tool_results_appended Wrote;
+          bad_gateway )
+    ; ( "a failure that waiting does not change"
+      , resume_chat_operation
+      , [ "only" ]
+      , fun ~save _ ->
+          save Agent_core.Agent.After_context_injection Wrote;
+          Agent_core.Error.Api (Agent_core.Retry.NotFound { message = "no such model" }) )
+    ; ( "an earlier candidate overflowed"
+      , resume_chat_operation
+      , [ "wide"; "narrow" ]
+      , fun ~save candidate ->
+          match candidate with
+          | "wide" -> overflow
+          | _ ->
+            save Agent_core.Agent.After_tool_results_appended Wrote;
+            bad_gateway )
+    ]
+  in
+  List.iter
+    (fun (label, continuation, candidates, attempt) ->
+       let _result, hints, rows = same_path_walk ~continuation candidates attempt in
+       Alcotest.(check (list string)) label [] (List.map describe_hint hints);
+       Alcotest.(check (list string)) (label ^ ": and no decision is recorded") [] rows)
+    cases
+;;
+
+(* The heartbeat lane must never ask to resume an operation: its hint replaces
+   the next cycle's candidates, so a hint naming the path this cycle failed on
+   would leave that cycle one candidate and no failover. Its only caller is
+   production, so the value it passes is read here instead. *)
+let test_the_heartbeat_lane_restarts_its_cycle () =
+  Alcotest.(check bool) "the autonomous lane restarts instead of resuming" true
+    (match Masc.Keeper_unified_turn_execution.lane_retry_continuation with
+     | Driver.Restart_cycle -> true
+     | Driver.Resume_operation_checkpoint _ -> false)
+;;
+
+(* §3.4: the wait of a same-path suffix is the rest recorded on the path. A
+   server error records none, so the retry dispatches at once; a 429 that
+   stated its wait holds the path until then.
+
+   This pins a branch the resume relies on and does not change: it passes on
+   main too, because a suffix naming one path already read that path's rest.
+   It is here as the record of what the resume inherits -- in particular that
+   a server error, a dropped stream and a timeout resume with no wait at all,
+   which is the case RFC §1.1 was written about (RFC §7 measures how often a
+   resume with no wait fails again before running a tool). *)
+let test_a_same_path_suffix_waits_only_for_a_recorded_rest () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    reset_quota_lane_rests ();
+    Fun.protect ~finally:reset_quota_lane_rests (fun () ->
+      let path = "other.test_model" in
+      let same_path failure =
+        Driver.For_testing.make_deferred_runtime_lane
+          ~assignment_id:"quota_lane" ~failed_runtime_id:path ~next_runtime_id:path
+          ~later_runtime_ids:[] ~failure
+      in
+      let next ~route failure =
+        let now = Unix.gettimeofday () in
+        describe_dispatch ~now
+          (Driver.next_dispatch_after_failure ~now ~route ~assignment_id:"quota_lane"
+             (Some (same_path failure)))
+      in
+      let server_route =
+        Keeper_runtime_failure_route.route_of_error
+          ~boundary:Keeper_runtime_failure_route.Agent_core_execution bad_gateway
+      in
+      Alcotest.(check string) "a server error dispatches the same path at once"
+        ("dispatch " ^ path) (next ~route:server_route bad_gateway);
+      Runtime_candidate_backpressure.note_rate_limit
+        ~candidate:(quota_lane_candidate path) ~retry_after:(Some 120.);
+      Alcotest.(check string) "a stated 429 rest holds the same path until it ends"
+        ("wait 120s for " ^ path ^ " (path)")
+        (next ~route:rate_limited_route bad_gateway)))
+;;
 
 let test_deferred_hint_refs_are_not_shared () =
   let failure = retryable_network_error "checkpoint failure" in
@@ -3932,7 +4534,7 @@ let test_access_failover_preserves_effect_and_caller_authority () =
     let deferred = ref [] in
     let result = Driver.For_testing.attempt_runtime_candidates
       ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _ -> false)
-      ~on_retry_deferred:(fun hint -> deferred := hint :: !deferred)
+      ~retry_deferral:(collecting_deferral Driver.Restart_cycle deferred)
       ~runtime_id:"access-lane" ~runtime_id_of:Fun.id
       ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
       ~run_attempt:(fun ~idx:_ ~runtime_id:_ _ ->
@@ -3987,6 +4589,22 @@ let () =
             `Quick
             test_resolve_assignment_prefers_lane_over_runtime;
           Alcotest.test_case
+            "assignment_walk_order is the declared order"
+            `Quick
+            test_assignment_walk_order_is_the_declared_order;
+          Alcotest.test_case
+            "assignment_walk_order demotes a resting head"
+            `Quick
+            test_assignment_walk_order_demotes_a_resting_head;
+          Alcotest.test_case
+            "assignment_walk_order refuses a missing assignment"
+            `Quick
+            test_assignment_walk_order_refuses_a_missing_assignment;
+          Alcotest.test_case
+            "entry_runtime_id_of_route resolves a route to the binding it opens"
+            `Quick
+            test_entry_runtime_id_resolves_a_route_to_the_binding_it_opens;
+          Alcotest.test_case
             "a bare runtime assignment gets a lane with somewhere to go"
             `Quick
             test_bare_runtime_assignment_gets_a_lane_with_somewhere_to_go;
@@ -4003,9 +4621,9 @@ let () =
             `Quick
             test_unknown_lane_candidate_rejected_at_load;
           Alcotest.test_case
-            "assignment to lane id rejected at load"
+            "assignment to lane id loads"
             `Quick
-            test_assignment_to_lane_id_rejected_at_load;
+            test_assignment_to_lane_id_loads;
           Alcotest.test_case
             "lane media degrade uses first candidate runtime id"
             `Quick
@@ -4062,10 +4680,6 @@ let () =
             "attempt loop moves past a 402"
             `Quick
             test_attempt_loop_moves_past_payment_required;
-          Alcotest.test_case
-            "an out-of-lane winner keeps the lane's own preference"
-            `Quick
-            test_an_out_of_lane_winner_keeps_the_lanes_own_preference;
           Alcotest.test_case
             "runtime dedupe preserves first occurrence"
             `Quick
@@ -4132,12 +4746,28 @@ let () =
             test_http_429_preserves_unknown_scope_and_fallback;
           Alcotest.test_case "rate limit never excludes and success clears" `Quick
             test_rate_limit_order_never_excludes_and_success_clears;
+          Alcotest.test_case "failed attempts demote until the candidate answers" `Quick
+            test_failed_attempts_demote_until_the_candidate_answers;
+          Alcotest.test_case "only the candidate's own failures are evidence" `Quick
+            test_only_the_candidates_own_failures_are_evidence;
+          Alcotest.test_case "a yield before the first token clears no evidence" `Quick
+            test_a_yield_before_the_first_token_clears_no_evidence;
+          Alcotest.test_case "the production answer test reads provider turns" `Quick
+            test_the_production_answer_test_reads_provider_turns;
+          Alcotest.test_case "a path that only failed walks before one told to rest" `Quick
+            test_a_path_that_only_failed_walks_before_one_told_to_rest;
+          Alcotest.test_case "402 still exhausts the quota scope" `Quick
+            test_payment_required_still_exhausts_the_quota_scope;
+          Alcotest.test_case "a quota hint that names no time is recorded as observed" `Quick
+            test_a_quota_hint_that_names_no_time_is_recorded_as_observed;
           Alcotest.test_case "a deferred suffix waits only while its walk head rests" `Quick
             test_a_deferred_suffix_waits_only_while_its_walk_head_rests;
           Alcotest.test_case "a failure without a suffix waits until a fresh walk head serves"
             `Quick test_a_failure_without_a_suffix_waits_until_a_fresh_walk_head_serves;
           Alcotest.test_case "a chat retry follows the shared next dispatch" `Quick
             test_a_chat_retry_follows_the_shared_next_dispatch;
+          Alcotest.test_case "a same-path suffix waits only for a recorded rest" `Quick
+            test_a_same_path_suffix_waits_only_for_a_recorded_rest;
           Alcotest.test_case "rate limit survives only unchanged binding reload" `Quick
             test_rate_limit_candidate_survives_unchanged_reload_only;
           Alcotest.test_case "rate limit identity detects same-reference credential rotation" `Quick
@@ -4159,9 +4789,9 @@ let () =
             `Quick
             test_official_client_does_not_inherit_registry_api_key_scope;
           Alcotest.test_case
-            "attempt loop without lane id does not update sticky preference"
+            "a success leaves the next walk declared"
             `Quick
-            test_attempt_loop_without_lane_id_does_not_update_sticky_preference;
+            test_a_success_leaves_the_next_walk_declared;
           Alcotest.test_case
             "typed checkpoint is same-run retry authority"
             `Quick
@@ -4230,6 +4860,26 @@ let () =
             "single candidate checkpoint failure has no hint"
             `Quick
             test_single_candidate_checkpoint_failure_has_no_hint;
+          Alcotest.test_case
+            "a sink answer is not progress"
+            `Quick
+            test_a_sink_answer_is_not_progress;
+          Alcotest.test_case
+            "the sink owner marks written tool results"
+            `Quick
+            test_the_sink_owner_marks_written_tool_results;
+          Alcotest.test_case
+            "a chat operation resumes its last candidate after saved tool results"
+            `Quick
+            test_a_chat_operation_resumes_its_last_candidate_after_saved_tool_results;
+          Alcotest.test_case
+            "no same-path hint unless every condition holds"
+            `Quick
+            test_no_same_path_hint_unless_every_condition_holds;
+          Alcotest.test_case
+            "the heartbeat lane restarts its cycle"
+            `Quick
+            test_the_heartbeat_lane_restarts_its_cycle;
           Alcotest.test_case
             "deferred hint refs are not shared"
             `Quick

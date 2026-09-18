@@ -8,6 +8,13 @@
 module Finalize = Masc.Keeper_replay_checkpoint
 module Replay_prefix = Masc.Keeper_replay_prefix
 
+(* What the operator's window currently says. The store takes the window as an
+   argument -- it is reachable from a raw Domain, where reading a setting
+   raises -- so every caller names it. These cases are not about the window and
+   pass what production passes. *)
+let history_retained () =
+  Masc.Runtime_params.get Masc.Runtime_settings.keeper_checkpoint_history_retained
+
 let message role content =
   Agent_core.Types.{ role; content; name = None; tool_call_id = None; metadata = [] }
 ;;
@@ -206,7 +213,8 @@ let test_finalization_persists_context_only_progress () =
   with_temp_dir (fun session_dir ->
     let save checkpoint =
       match
-        Masc.Keeper_checkpoint_store.save_agent_core_classified ~session_dir checkpoint
+        Masc.Keeper_checkpoint_store.save_agent_core_classified
+          ~history_retained:(history_retained ()) ~session_dir checkpoint
         |> expect_ok
       with
       | Masc.Keeper_checkpoint_store.Saved _ -> ()
@@ -598,6 +606,7 @@ let test_media_degraded_projection_persists_canonical_checkpoint () =
   with_temp_dir (fun session_dir ->
     (match
        Masc.Keeper_checkpoint_store.save_agent_core_classified
+         ~history_retained:(history_retained ())
          ~session_dir
          checkpoint_for_save
      with
@@ -757,7 +766,8 @@ let test_two_autonomous_cycles_do_not_grow_the_conversation () =
   in
   with_temp_dir (fun session_dir ->
     (match
-       Masc.Keeper_checkpoint_store.save_agent_core_classified ~session_dir first
+       Masc.Keeper_checkpoint_store.save_agent_core_classified
+         ~history_retained:(history_retained ()) ~session_dir first
      with
      | Ok (Masc.Keeper_checkpoint_store.Saved _) -> ()
      | Ok (Masc.Keeper_checkpoint_store.Stale_noop _) ->

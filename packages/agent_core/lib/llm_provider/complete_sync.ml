@@ -97,10 +97,51 @@ let parse_sync_response
            body
        with
        | Ok response -> Ok response
-       | Error (Backend_openai_parse.Provider_error message) ->
+       (* The same reading as the streaming path
+          ([Complete_stream_error.http_error_of_stream_error]): a 429 or 5xx
+          the error object declared inside the 200 is the refusal that status
+          line would have been, classified from the error object alone; any
+          other provider-reported error is provider-owned diagnostic data. *)
+       | Error
+           (Backend_openai_parse.Provider_error
+             { provider_status = Some { Types.status; error_body }
+             ; message = _
+             ; error_type = _
+             ; report = _
+             }) ->
          Error
            (Http_client.HttpError
-              { code = 400; body = Http_client.Received message; retry_after_header = None })
+              { code = status
+              ; body = Http_client.Received error_body
+              ; retry_after_header = None
+              })
+       | Error
+           (Backend_openai_parse.Provider_error
+             { provider_status = None
+             ; message
+             ; error_type
+             ; report = Types.Provider_stated
+             }) ->
+         Error
+           (Http_client.ProviderFailure
+              { kind = Http_client.Provider_reported_error { error_type }; message })
+       (* The choice said the generation failed and the response carried no
+          error object: there is no envelope to read a type or a status from,
+          and the answer stopped part-way for a reason the provider kept to
+          itself. *)
+       | Error
+           (Backend_openai_parse.Provider_error
+             { provider_status = None
+             ; message
+             ; error_type = _
+             ; report = Types.Unstated_errored_choice
+             }) ->
+         Error
+           (Http_client.ProviderFailure { kind = Http_client.Provider_interrupted; message })
+       | Error (Backend_openai_parse.Unreadable_response message) ->
+         provider_parse_failure
+           ~parser:(Provider_config.string_of_provider_kind provider_kind)
+           message
        | Error (Backend_openai_parse.Empty_completion empty) ->
          Error (Http_client.empty_completion_error ~stop_reason:empty.stop_reason))
     | Provider_http_codec.Gemini_generate_content ->
@@ -110,7 +151,13 @@ let parse_sync_response
        | Ok response -> Ok response
        | Error (Backend_openai_parse.Empty_completion empty) ->
          Error (Http_client.empty_completion_error ~stop_reason:empty.stop_reason)
-       | Error (Backend_openai_parse.Provider_error message) ->
+       (* glm reports its own errors through [check_glm_error_json] (raised as
+          [Glm_api_error] below); an error the OpenAI-compatible reader finds
+          after that stays a glm parse failure, as it always has. *)
+       | Error
+           (Backend_openai_parse.Provider_error
+             { message; error_type = _; provider_status = _; report = _ })
+       | Error (Backend_openai_parse.Unreadable_response message) ->
          provider_parse_failure ~parser:"glm" message)
   with
   | Yojson.Json_error message
@@ -169,6 +216,83 @@ let parse_sync_response
          ; body = Http_client.Received ("Unexpected parsing exception: " ^ message)
          ; retry_after_header = None
          })
+;;
+
+let%test "sync: an error finish without a provider condition is provider-reported" =
+  let parse body =
+    parse_sync_response
+      ~http_codec:
+        (Provider_http_codec.of_config
+           (Provider_config.make ~kind:Provider_config.OpenAI_compat ~model_id:"m" ~base_url:"u" ()))
+      ~provider_kind:Provider_config.OpenAI_compat
+      body
+  in
+  (match
+     parse
+       {|{"id":"c","model":"m","choices":[{"index":0,"finish_reason":"error","message":{"content":"partial"},"error":{"message":"Provider disconnected","metadata":{"error_type":"provider_unavailable"}}}]}|}
+   with
+   | Error
+       (Http_client.ProviderFailure
+         { kind =
+             Http_client.Provider_reported_error { error_type = Some "provider_unavailable" }
+         ; message = "Provider disconnected"
+         }) -> true
+   | Ok _ | Error _ -> false)
+  && (match
+        parse
+          {|{"id":"c","model":"m","choices":[{"index":0,"finish_reason":"error","message":{"content":"partial"},"error":{"code":400,"message":"bad"}}]}|}
+      with
+      | Error
+          (Http_client.ProviderFailure
+            { kind = Http_client.Provider_reported_error { error_type = None }
+            ; message = "bad"
+            }) -> true
+      | Ok _ | Error _ -> false)
+  &&
+  match parse {|{"error":{"message":"Invalid API key","type":"invalid_request_error"}}|} with
+  | Error
+      (Http_client.ProviderFailure
+        { kind =
+            Http_client.Provider_reported_error { error_type = Some "invalid_request_error" }
+        ; message = "Invalid API key"
+        }) -> true
+  | Ok _ | Error _ -> false
+;;
+
+let%test "sync: a top-level 502 is that refusal with the error object as its body" =
+  match
+    parse_sync_response
+      ~http_codec:
+        (Provider_http_codec.of_config
+           (Provider_config.make ~kind:Provider_config.OpenAI_compat ~model_id:"m" ~base_url:"u" ()))
+      ~provider_kind:Provider_config.OpenAI_compat
+      {|{"id":"c","model":"m","error":{"code":502,"message":"Provider disconnected"},"choices":[{"index":0,"finish_reason":"error","message":{"content":"partial"}}]}|}
+  with
+  | Error
+      (Http_client.HttpError
+        { code = 502; body = Http_client.Received body; retry_after_header = None }) ->
+    String.equal body {|{"error":{"code":502,"message":"Provider disconnected"}}|}
+  | Ok _ | Error _ -> false
+;;
+
+let%test "sync: an unreadable response is a provider parse failure" =
+  match
+    parse_sync_response
+      ~http_codec:
+        (Provider_http_codec.of_config
+           (Provider_config.make ~kind:Provider_config.OpenAI_compat ~model_id:"m" ~base_url:"u" ()))
+      ~provider_kind:Provider_config.OpenAI_compat
+      {|{"id":"c","model":"m","choices":[{"message":{"content":"ok"}}]}|}
+  with
+  | Error
+      (Http_client.ProviderFailure
+        { kind = Http_client.Provider_parse_error { parser = Some parser }
+        ; message = "malformed_openai_response:missing_finish_reason"
+        }) ->
+    String.equal
+      parser
+      (Provider_config.string_of_provider_kind Provider_config.OpenAI_compat)
+  | Ok _ | Error _ -> false
 ;;
 
 type resolved_sync_transport =

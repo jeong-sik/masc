@@ -16,3 +16,10 @@ val message_to_json : Agent_core.Types.message -> Yojson.Safe.t
 val message_of_json : Yojson.Safe.t -> Agent_core.Types.message
 
 val text_of_history_jsonl_json : Yojson.Safe.t -> string
+
+val message_measurer : unit -> (Agent_core.Types.message -> int)
+(** A measurer of how many bytes {!message_to_json} serializes a message to,
+    as [Yojson.Safe.to_string] would count them, without building the string.
+    Each call returns a measurer owning one buffer it reuses, so it belongs to
+    one walk over a history and is not shared between fibers. Measuring a
+    single message wants one too: the buffer costs more than one string. *)

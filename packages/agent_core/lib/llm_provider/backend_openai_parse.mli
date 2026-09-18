@@ -18,11 +18,34 @@ type empty_completion =
   ; telemetry : Types.inference_telemetry option
   }
 
-(** Parse failure. [Provider_error] is a provider-reported API error (the JSON
-    [error] body). [Empty_completion] is a fail-closed all-empty 200 that would
-    otherwise have parsed as [Ok content=[]] and stormed downstream. *)
+(** Parse failure.
+
+    [Provider_error] is an error the provider reported: a top-level [error]
+    object or string, or the [error] of a choice that finished with [error]
+    (a choice that finished with [error] and carries no error object is one
+    too). [error_type] is the object's [type], or OpenRouter's
+    [metadata.error_type]; it is diagnostic only. [provider_status] is set only
+    when the object's numeric [code] is 429 or 5xx, the statuses that describe
+    the provider and mean the same whether or not the response had started;
+    any other code, a string code, or no code leaves it [None]
+    ({!Types.provider_status} carries the body the refusal is classified
+    from).
+
+    [Unreadable_response] is a body this parser cannot read: no
+    [finish_reason], malformed tool calls or reasoning, or a top-level [error]
+    that is neither an object nor a string. It is not the provider reporting
+    anything.
+
+    [Empty_completion] is a fail-closed all-empty 200 that would otherwise have
+    parsed as [Ok content=[]] and stormed downstream. *)
 type parse_error =
-  | Provider_error of string
+  | Provider_error of
+      { message : string
+      ; error_type : string option
+      ; provider_status : Types.provider_status option
+      ; report : Types.provider_report
+      }
+  | Unreadable_response of string
   | Empty_completion of empty_completion
 
 (** Human-readable rendering of a {!parse_error} for logs / test failures. *)
@@ -30,7 +53,8 @@ val parse_error_to_string : parse_error -> string
 
 (** Parse an OpenAI-compatible JSON response (from an already-parsed
     [Yojson.Safe.t]).  [Ok api_response] on success; [Error (Provider_error _)]
-    on API error; [Error (Empty_completion _)] when the completion has no
+    when the provider reported an error; [Error (Unreadable_response _)] when
+    the body cannot be read; [Error (Empty_completion _)] when the completion has no
     thinking/text/tool_calls (agent-core boundary). Blank text WITH tool_calls stays [Ok]
     (content is non-empty). Use when the caller already holds the parsed JSON to
     avoid re-parsing.

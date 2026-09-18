@@ -63,6 +63,7 @@ shim_sources=(
   lib/exec_shim/shim_build_id.mli
   lib/exec_shim/fdpass_stub.c
   lib/exec_shim/shim_fdpass.ml
+  lib/exec_shim/shim_libraries.inc
   bin/masc_exec_shim.ml
 )
 
@@ -130,36 +131,17 @@ cat > "$stage/src/dune-project" <<'EOF'
 (lang dune 3.0)
 EOF
 
+# The shim's own libraries come from lib/exec_shim/shim_libraries.inc, the
+# file lib/exec_shim/dune includes, so a library or stub added there reaches
+# this build too. Only what differs is written here: exec_ssh_protocol without
+# the repo's package name, and the executable with its static link flag.
 cat > "$stage/src/dune" <<'EOF'
 (library
  (name exec_ssh_protocol)
  (modules exec_ssh_protocol)
  (libraries yojson base64))
 
-(library
- (name shim_clock)
- (wrapped false)
- (modules shim_clock)
- (foreign_stubs
-  (language c)
-  (names monotonic_stub)))
-
-(library
- (name shim_fdpass)
- (wrapped false)
- (modules shim_fdpass)
- (libraries unix)
- (foreign_stubs
-  (language c)
-  (names fdpass_stub)))
-
-(library
- (name exec_shim)
- (modules exec_shim shim_build_id)
- (libraries exec_ssh_protocol shim_clock unix)
- (foreign_stubs
-  (language c)
-  (names prctl_stub observe_stub)))
+(include shim_libraries.inc)
 
 (executable
  (name masc_exec_shim)

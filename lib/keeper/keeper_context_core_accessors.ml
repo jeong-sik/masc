@@ -115,6 +115,7 @@ let sync_agent_core_context (ctx : working_context) : working_context =
 let role_to_string = Message_json.role_to_string
 let role_of_string_opt = Message_json.role_of_string_opt
 let message_to_json = Message_json.message_to_json
+let message_measurer = Message_json.message_measurer
 let message_of_json = Message_json.message_of_json
 let text_of_history_jsonl_json = Message_json.text_of_history_jsonl_json
 

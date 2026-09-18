@@ -294,7 +294,11 @@ let parse_response_result
 let parse_response ?content_inline_reasoning body =
   match parse_response_result ?content_inline_reasoning body with
   | Ok resp -> resp
-  | Error (Backend_openai_parse.Provider_error msg) -> raise (glm_parse_error msg)
+  | Error
+      (Backend_openai_parse.Provider_error
+        { message; error_type = _; provider_status = _; report = _ })
+  | Error (Backend_openai_parse.Unreadable_response message) ->
+    raise (glm_parse_error message)
   | Error (Backend_openai_parse.Empty_completion empty_comp) ->
     let stop_reason_str = Types.stop_reason_to_string empty_comp.stop_reason in
     raise

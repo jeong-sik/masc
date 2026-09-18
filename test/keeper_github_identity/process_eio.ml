@@ -35,3 +35,32 @@ let run_argv_with_status_split_streaming
   if not (String.equal stderr "") then on_stderr_chunk stderr;
   status, stdout, stderr
 ;;
+
+let run_argv_with_stdin_and_status_split
+    ?timeout_sec:_
+    ?env
+    ?cwd:_
+    ?output_capture:_
+    ?on_stdout_chunk:_
+    ?on_stderr_chunk:_
+    ~stdin_content
+    = function
+  | [] -> Unix.WEXITED 127, "", "argv must not be empty"
+  | command :: _ as argv ->
+    let env =
+      match env with
+      | Some e -> e
+      | None -> Unix.environment ()
+    in
+    let stdout_channel, stdin_channel, stderr_channel =
+      Unix.open_process_args_full command (Array.of_list argv) env
+    in
+    output_string stdin_channel stdin_content;
+    close_out_noerr stdin_channel;
+    let stdout = read_all stdout_channel in
+    let stderr = read_all stderr_channel in
+    let status =
+      Unix.close_process_full (stdout_channel, stdin_channel, stderr_channel)
+    in
+    status, stdout, stderr
+;;

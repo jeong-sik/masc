@@ -41,6 +41,9 @@ type login_lane =
       on_stdout_chunk:(string -> unit)
       -> on_stderr_chunk:(string -> unit)
       -> Unix.process_status * string * string
+  ; run_login_with_token :
+      token:string
+      -> Unix.process_status * string * string
   ; secure_after_login : unit -> (unit, string) result
   ; observe_after_login : unit -> (observation, string) result
   }
@@ -155,6 +158,8 @@ val login_timeout_sec : float
     of the flow is a person's, so this bounds a person rather than a program. *)
 
 val login_argv : hostname:string -> string list
+val login_with_token_argv : hostname:string -> string list
+(** The [gh auth login --with-token] argv for authenticating via fine-grained PAT or personal access token. *)
 (** The [gh auth login] argv every lane runs. It names no config directory:
     the lane places [GH_CONFIG_DIR] in the environment its own machine sees.
     It allocates no terminal and asks for none, so [gh] writes plain lines
@@ -229,5 +234,21 @@ val run_cli_login : lane:login_lane -> int
     the host lane collects the child's output and replays it after exit, and the
     remote lane has no runtime to open a switch on. Answers 0 only when the
     login exited 0 and the observation could be read. *)
+val set_token :
+  lane:login_lane ->
+  base_path:string ->
+  keeper_name:string ->
+  token:string ->
+  (observation, string) result
+(** Set a personal access token (e.g. Fine-grained PAT) for the keeper on [lane]. *)
+
+val run_cli_set_token :
+  lane:login_lane ->
+  base_path:string ->
+  keeper_name:string ->
+  token:string ->
+  int
+(** Run token login on [lane] with [token] and print the resulting observation. *)
+
 val run_cli_status : config:Workspace.config -> keeper_name:string -> hostname:string -> int
 val run_cli_logout : config:Workspace.config -> keeper_name:string -> hostname:string -> int

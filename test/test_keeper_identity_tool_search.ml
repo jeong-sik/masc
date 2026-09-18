@@ -544,24 +544,125 @@ let two_offered =
   [ "jira_search", "Search issues"; "confluence_search", "Search pages" ]
 ;;
 
-(* A tool already placed with its schema need not also occupy the deferred
-   listing. The other offered tools remain discoverable there. *)
-let test_a_carried_tool_is_not_also_named_in_the_listing () =
-  let tool =
-    match search ~history:[ called "atlassian_jira_search" ] (offered two_offered) with
-    | Some tool -> tool
+(* The listing sits in the tool array, the head of the provider's cache
+   prefix. A tool loaded on one turn is placed on the next, so a listing that
+   depended on what is placed would read differently across that boundary. *)
+let test_the_listing_reads_the_same_whatever_is_placed () =
+  let description_after history =
+    match search ~history (offered two_offered) with
+    | Some tool -> tool.Agent_core.Tool.schema.description
     | None -> fail "expected a listing tool"
   in
-  let description = tool.Agent_core.Tool.schema.description in
-  check bool "the carried tool is not listed again" false
-    (contains description "atlassian_jira_search");
-  check bool "the tool that was not carried is still listed" true
-    (contains description "atlassian_confluence_search")
+  let nothing_placed = description_after [] in
+  check string "a carried tool leaves the listing as it was"
+    nothing_placed
+    (description_after [ called "atlassian_jira_search" ]);
+  check bool "the carried tool is still named" true
+    (contains nothing_placed "atlassian_jira_search")
 ;;
 
-(* Omitted from the prose, not from the surface: a model that names a tool it
-   already has must be answered, not refused, or the omission would turn a
-   redundant line into a dead end. *)
+(* The rest of a turn that loads tools and the turn after it send the same
+   tools in the same order. The bundle places an unranked always-loaded tool,
+   then the listing, then the placed entries in offering order; a load mid-turn
+   has to land in that slot rather than at the end, or the turn boundary
+   changes the provider's cached prefix a second time. *)
+let test_a_loaded_tool_takes_the_slot_the_next_turn_places_it_in () =
+  Eio_main.run
+  @@ fun env ->
+  let offering =
+    offered
+      [ "jira_search", "Search issues"
+      ; "confluence_search", "Search pages"
+      ; "bitbucket_search", "Search code"
+      ]
+  in
+  let always = build (List.hd (offered [ "plan", "Record the execution plan" ])) in
+  let array_of (p : Keeper_identity_tool_search.placement) =
+    always :: p.Keeper_identity_tool_search.tool :: p.Keeper_identity_tool_search.already_used
+  in
+  let placed ?agent_cell history =
+    match placement ?agent_cell ~history offering with
+    | Some p -> p
+    | None -> fail "an attached service was offered and produced no placement"
+  in
+  let agent_cell = ref None in
+  let this_turn = placed ~agent_cell [ called "atlassian_confluence_search" ] in
+  let agent =
+    Agent_core.Agent.create
+      ~config:(Agent_core.Types.default_config ~model:"test-model")
+      ~tools:(array_of this_turn)
+      ~net:env#net
+      ()
+  in
+  agent_cell := Some agent;
+  (match
+     execute
+       this_turn.Keeper_identity_tool_search.tool
+       (names_input [ "atlassian_bitbucket_search"; "atlassian_jira_search" ])
+   with
+   | Ok _ -> ()
+   | Error e -> failf "loading two offered tools failed: %s" e.Agent_core.Types.message);
+  let next_turn =
+    placed
+      [ called "atlassian_confluence_search"
+      ; called "atlassian_bitbucket_search"
+      ; called "atlassian_jira_search"
+      ]
+  in
+  let names tools = List.map (fun (tool : Agent_core.Tool.t) -> tool.Agent_core.Tool.schema.name) tools in
+  check (list string) "the loaded tools sit in offering order after the listing"
+    [ "atlassian_plan"
+    ; "keeper_tool_search"
+    ; "atlassian_jira_search"
+    ; "atlassian_confluence_search"
+    ; "atlassian_bitbucket_search"
+    ]
+    (Agent_core.Tool_set.names (Agent_core.Agent.tools agent));
+  check (list string) "the next turn sends the same array"
+    (Agent_core.Tool_set.names (Agent_core.Agent.tools agent))
+    (names (array_of next_turn))
+;;
+
+(* The listing names placed tools too. Asking for one the agent already holds
+   answers that it is callable and records no load: a receipt would keep the
+   tool placed past the carry window with nothing having been loaded. *)
+let test_naming_a_held_tool_records_no_load () =
+  Eio_main.run
+  @@ fun env ->
+  let offering = offered two_offered in
+  let receipts = make_receipts ~context:(Agent_core.Context.create_sync ()) offering in
+  let agent_cell = ref None in
+  let this_turn =
+    match
+      placement ~agent_cell ~receipts ~history:[ called "atlassian_jira_search" ] offering
+    with
+    | Some p -> p
+    | None -> fail "an attached service was offered and produced no placement"
+  in
+  let agent =
+    Agent_core.Agent.create
+      ~config:(Agent_core.Types.default_config ~model:"test-model")
+      ~tools:
+        (this_turn.Keeper_identity_tool_search.tool
+         :: this_turn.Keeper_identity_tool_search.already_used)
+      ~net:env#net
+      ()
+  in
+  agent_cell := Some agent;
+  (match
+     execute
+       this_turn.Keeper_identity_tool_search.tool
+       (names_input [ "atlassian_jira_search" ])
+   with
+   | Ok { content; _ } ->
+     check bool "the answer says it is already callable" true
+       (String.starts_with ~prefix:"already callable:" content)
+   | Error e -> failf "naming a held tool was refused: %s" e.Agent_core.Types.message);
+  check (list string) "no load was recorded" [] (Load_receipts.pending_names receipts)
+;;
+
+(* A model that names a tool this conversation carries must be answered, not
+   refused, or a redundant request would turn into a dead end. *)
 let test_a_carried_tool_can_still_be_named () =
   Eio_main.run
   @@ fun env ->
@@ -673,10 +774,9 @@ let test_a_tool_outside_the_window_is_not_placed () =
        (offered two_offered))
 ;;
 
-(* A dropped tool is not stranded. The listing omits exactly the names placed
-   with schemas, so dropping one puts it back into the listing on the same
-   request, one load away. *)
-let test_a_dropped_tool_returns_to_the_listing () =
+(* A dropped tool is not stranded: the listing names it on the same request,
+   one load away. *)
+let test_a_dropped_tool_is_still_named_in_the_listing () =
   let tool =
     match
       search
@@ -690,9 +790,9 @@ let test_a_dropped_tool_returns_to_the_listing () =
     | None -> fail "expected a listing tool"
   in
   let description = tool.Agent_core.Tool.schema.description in
-  check bool "the dropped tool is named again" true
+  check bool "the dropped tool is named" true
     (contains description "atlassian_jira_search");
-  check bool "the carried tool is still not named" false
+  check bool "the carried tool is named too" true
     (contains description "atlassian_confluence_search")
 ;;
 
@@ -1229,8 +1329,12 @@ let () =
             test_repeated_calls_place_the_tool_once
         ; test_case "a built-in call is not mistaken for an attached one" `Quick
             test_a_builtin_call_is_not_mistaken_for_an_attached_one
-        ; test_case "a carried tool is not also named in the listing" `Quick
-            test_a_carried_tool_is_not_also_named_in_the_listing
+        ; test_case "the listing reads the same whatever is placed" `Quick
+            test_the_listing_reads_the_same_whatever_is_placed
+        ; test_case "a loaded tool takes the slot the next turn places it in" `Quick
+            test_a_loaded_tool_takes_the_slot_the_next_turn_places_it_in
+        ; test_case "naming a held tool records no load" `Quick
+            test_naming_a_held_tool_records_no_load
         ; test_case "a carried tool can still be named" `Quick
             test_a_carried_tool_can_still_be_named
         ] )
@@ -1255,8 +1359,8 @@ let () =
     ; ( "the carry window"
       , [ test_case "drops a tool whose last call is outside it" `Quick
             test_a_tool_outside_the_window_is_not_placed
-        ; test_case "returns a dropped tool to the listing" `Quick
-            test_a_dropped_tool_returns_to_the_listing
+        ; test_case "still names a dropped tool in the listing" `Quick
+            test_a_dropped_tool_is_still_named_in_the_listing
         ; test_case "does not cut without a new tool" `Quick
             test_the_carry_is_not_cut_without_a_new_tool
         ; test_case "does not cut on a call to a tool it already carries" `Quick

@@ -503,10 +503,11 @@ let render_section_tools ~cols (state : state) : string list =
     | Some mhs ->
         let total_facts = mhs.mhs_total_facts in
         let header =
-          Printf.sprintf "    Ordinary facts: %d · source facts: %d · ordinary snapshots: %s"
+          Printf.sprintf "    Ordinary facts: %d · source facts: %d · ordinary recall: %s tok"
             total_facts
             mhs.mhs_total_source_facts
-            (Masc_tui_context_inspector.format_bytes (List.fold_left (fun acc (k : Decode.memory_keeper_health) -> acc + k.mkh_snapshot_bytes) 0 mhs.mhs_keepers))
+            (Masc_tui_token_scale.format_estimate Masc_tui_token_scale.fleet
+               (List.fold_left (fun acc (k : Decode.memory_keeper_health) -> acc + k.mkh_snapshot_bytes) 0 mhs.mhs_keepers))
         in
         let rows =
           if mhs.mhs_keepers = [] then
@@ -516,11 +517,12 @@ let render_section_tools ~cols (state : state) : string list =
               (fun (k : Decode.memory_keeper_health) ->
                 let pct = if total_facts = 0 then 0 else (k.mkh_facts * 100) / total_facts in
                 let bar = Chart.gauge ~width:16 ~value:pct ~max_value:100 ~label:"" () in
-                Printf.sprintf "    %-16s  %4d facts  %s  %s%s"
+                Printf.sprintf "    %-16s  %4d facts  %s  %s tok%s"
                   (Layout.fit_width k.mkh_keeper_id 16)
                   k.mkh_facts
                   bar
-                  (Masc_tui_context_inspector.format_bytes k.mkh_snapshot_bytes)
+                  (Masc_tui_token_scale.format_estimate
+                     Masc_tui_token_scale.fleet k.mkh_snapshot_bytes)
                   Ansi.reset)
               mhs.mhs_keepers
         in

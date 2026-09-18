@@ -68,10 +68,11 @@ def main():
     refs = image_refs + ['artifact:memory_proposal_guide.pdf', 'artifact:verify_summary.txt', 'artifact:source-receipt.json']
     expected_images = ['data:image/png;base64,' + base64.b64encode((artifact_root / ref.removeprefix('artifact:')).read_bytes()).decode() for ref in image_refs]
     source_runtime = tomllib.loads((a.live_config_dir / 'runtime.toml').read_text())
-    source_overlay = tomllib.loads((a.live_config_dir / 'agent-core-models-overlay.toml').read_text())
+    catalog = tomllib.loads((Path(__file__).resolve().parent.parent
+                             / 'packages/agent_core/models.toml').read_text())
     model_config = source_runtime['models']['kimi-for-coding']
     assert model_config['capabilities']['supports-image-input'] is True
-    upstream_provider = next(p for p in source_overlay['providers'] if p['id'] == 'kimi_coding')
+    upstream_provider = next(p for p in catalog['providers'] if p['id'] == 'kimi_coding')
     upstream_model = model_config['api-name']
     upstream_url = upstream_provider['base_url'].rstrip('/') + upstream_provider['request_path']
     assert upstream_url == 'https://api.kimi.com/coding/v1/chat/completions'
@@ -189,17 +190,7 @@ def main():
     for key, value in model_config['capabilities'].items():
         runtime += key + ' = ' + json.dumps(value) + '\n'
     runtime += '\n[kimi_coding.kimi-for-coding]\n'
-    overlay = (fixtures / 'agent-core-models-overlay.toml').read_text()
-    for provider_id, cap_base in [('image_fixture', 'openai_chat'), ('kimi_coding', upstream_provider['capabilities_base'])]:
-        overlay += f'\n[[providers]]\nid = "{provider_id}"\nkind = "openai_compat"\nbase_url = "http://127.0.0.1:{provider.server_port}/v1"\nrequest_path = "/chat/completions"\napi_key_env = ""\ncapabilities_base = "{cap_base}"\n'
-    overlay += '\n[[models]]\nid_prefix = "image-producer"\nprovider_name = "image_fixture"\nbase = "openai_chat"\nmax_context_tokens = 131072\nmax_output_tokens = 4096\nsupports_tools = true\nsupports_tool_choice = true\nsupports_native_streaming = true\n[[targets]]\nid = "image_fixture.producer"\nprovider_ref = "image_fixture"\nmodel_id = "image-producer"\n'
-    selected_model = next(m for m in source_overlay['models'] if m['id_prefix'] == upstream_model and m.get('provider_name') == 'kimi_coding')
-    overlay += '\n[[models]]\n'
-    for key, value in selected_model.items():
-        overlay += key + ' = ' + json.dumps(value) + '\n'
-    overlay += f'\n[[targets]]\nid = "kimi_coding.kimi-for-coding"\nprovider_ref = "kimi_coding"\nmodel_id = "{upstream_model}"\n'
     (config / 'runtime.toml').write_text(runtime)
-    (config / 'agent-core-models-overlay.toml').write_text(overlay)
     env = {k: v for k, v in os.environ.items() if k in ['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'USER', 'SHELL']}
     env.update(MASC_ADMIN_TOKEN=token, MASC_BASE_PATH=str(base), MASC_GRPC_ENABLED='0', MASC_WS_ENABLED='0', MASC_KEEPER_AUTONOMOUS_ENABLED='false')
     with socket.socket() as probe:

@@ -3439,10 +3439,10 @@ id_prefix = "glm-5.3-flash"
 provider_name = "ollama_cloud"
 max_context_tokens = 1048576
 
-# id_prefix matches the exact-output target's model_id character for character,
-# ":cloud" included. Window from a live ollama show.
+# ollama.com serves this model under both the bare name and a ":cloud" suffix,
+# and a prefix match covers the pair from one row. Window from a live ollama show.
 [[models]]
-id_prefix = "deepseek-v4.1-flash:cloud"
+id_prefix = "deepseek-v4.1-flash"
 provider_name = "ollama_cloud"
 base = "ollama_cloud"
 max_context_tokens = 1048576
@@ -3570,3 +3570,126 @@ supports_native_streaming = true
 supports_seed = true
 input_per_million = 0.0
 output_per_million = 0.0
+
+# Harness fixture rows. The verification harnesses under scripts/ and
+# test/test_setup_cli.py stand up a local HTTP stub on an ephemeral port and
+# point a runtime binding at it; these rows are what make the binding's model
+# resolvable so the startup capability gate admits it. The endpoint is the
+# binding's, so no [[providers]] row is owed here.
+
+[[models]]
+id_prefix = "resume-fixture"
+provider_name = "primary"
+base = "openai_chat"
+max_context_tokens = 131072
+max_output_tokens = 1024
+supports_tools = true
+supports_native_streaming = false
+
+[[models]]
+id_prefix = "resume-fixture"
+provider_name = "alternate"
+base = "openai_chat"
+max_context_tokens = 131072
+max_output_tokens = 1024
+supports_tools = true
+supports_native_streaming = false
+
+[[models]]
+id_prefix = "goal-fixture"
+provider_name = "goal_fixture"
+base = "openai_chat"
+max_context_tokens = 131072
+max_output_tokens = 1024
+supports_tools = true
+supports_tool_choice = true
+supports_response_format_json = true
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "search-fixture"
+provider_name = "search_fixture"
+base = "openai_chat"
+max_context_tokens = 131072
+max_output_tokens = 1024
+supports_tools = true
+supports_tool_choice = true
+supports_response_format_json = true
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "image-producer"
+provider_name = "image_fixture"
+base = "openai_chat"
+max_context_tokens = 131072
+max_output_tokens = 4096
+supports_tools = true
+supports_tool_choice = true
+supports_response_format_json = true
+supports_native_streaming = true
+supports_image_input = false
+
+[[models]]
+id_prefix = "image-verifier"
+provider_name = "image_fixture"
+base = "openai_chat"
+max_context_tokens = 131072
+max_output_tokens = 4096
+supports_tools = true
+supports_tool_choice = true
+supports_response_format_json = true
+supports_native_streaming = true
+supports_image_input = true
+
+[[models]]
+id_prefix = "setup-fixture-owned-model"
+provider_name = "setup_fixture"
+base = "openai_chat"
+max_context_tokens = 32768
+supports_tools = true
+supports_native_streaming = true
+
+# Local Ollama Qwen3.8 27B build, probed 2026-09-12.
+[[models]]
+id_prefix = "hf.co/unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL"
+provider_name = "ollama"
+base = "ollama"
+max_context_tokens = 262144
+supports_tools = true
+# Native /api/chat does not serialize tool_choice, so a forced choice would be
+# dropped with no error. Declared false rather than inherited.
+supports_tool_choice = false
+supports_reasoning = true
+# Answers the native /api/chat top-level "think" field, not a template token.
+thinking_control_format = "ollama_think"
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+supports_seed = true
+supports_top_k = true
+input_per_million = 0.0
+output_per_million = 0.0
+
+# ollama.com's glm-5.3. Its /v1 wire streams reasoning under delta.reasoning;
+# the glm-coding row for the same model spells it reasoning_content, because
+# Z.AI's wire does.
+[[models]]
+id_prefix = "glm-5.3"
+provider_name = "ollama_cloud"
+base = "ollama_cloud"
+max_context_tokens = 1048576
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+# No thinking_control_format here on purpose: ollama_cloud spans the native
+# /api/chat and the OpenAI-compatible /v1 wire, so a row that names one is
+# guessing. capabilities_base_by_identity_kind answers at resolution time.
+reasoning_streaming_format = "delta:reasoning"
+# The replay contract belongs to the model, not the wire: GLM keeps reasoning
+# across the tool-call rounds of one user turn and drops it at the next.
+reasoning_replay = "latest_user_turn_tool_calls"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_response_format_json = false
+supports_structured_output = false
+supports_native_streaming = true

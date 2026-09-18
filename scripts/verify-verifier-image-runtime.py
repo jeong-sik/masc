@@ -132,13 +132,9 @@ def main():
     runtime = (fixtures / 'runtime.toml').read_text()
     runtime += '\n[runtime.exact_output_lanes.verifier_exact]\nslots = ["image_fixture.vision"]\n'
     runtime += f'\n[providers.image_fixture]\nprotocol = "openai-compatible-http"\nendpoint = "http://127.0.0.1:{provider.server_port}/v1"\n'
-    overlay = (fixtures / 'agent-core-models-overlay.toml').read_text()
-    overlay += f'\n[[providers]]\nid = "image_fixture"\nkind = "openai_compat"\nbase_url = "http://127.0.0.1:{provider.server_port}/v1"\nrequest_path = "/chat/completions"\napi_key_env = ""\ncapabilities_base = "openai_chat"\n'
     for slot, model, vision in [('producer', 'image-producer', False), ('vision', 'image-verifier', True)]:
         runtime += f'\n[models.{slot}]\napi-name = "{model}"\nmax-context = 131072\ntools-support = true\nstreaming = true\n[models.{slot}.capabilities]\nsupports-image-input = {str(vision).lower()}\n[image_fixture.{slot}]\n'
-        overlay += f'\n[[models]]\nid_prefix = "{model}"\nprovider_name = "image_fixture"\nbase = "openai_chat"\nmax_context_tokens = 131072\nmax_output_tokens = 4096\nsupports_tools = true\nsupports_tool_choice = true\nsupports_response_format_json = true\nsupports_native_streaming = true\nsupports_image_input = {str(vision).lower()}\n[[targets]]\nid = "image_fixture.{slot}"\nprovider_ref = "image_fixture"\nmodel_id = "{model}"\n'
     (config / 'runtime.toml').write_text(runtime)
-    (config / 'agent-core-models-overlay.toml').write_text(overlay)
     env = {k: v for k, v in os.environ.items() if k in ['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'USER', 'SHELL']}
     env.update(MASC_ADMIN_TOKEN=token, MASC_BASE_PATH=str(base), MASC_GRPC_ENABLED='0', MASC_WS_ENABLED='0', MASC_KEEPER_AUTONOMOUS_ENABLED='false')
     with socket.socket() as probe:

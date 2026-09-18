@@ -128,7 +128,7 @@ def render(spec, binary=None):
         allowed = {'choice', 'model', 'max_context', 'tools', 'streaming',
                    'endpoint', 'api_key_env', 'credential_file', 'provider_kind', 'request_path',
                    'provider_id', 'provider_display_name', 'model_key', 'provider_declared',
-                   'reasoning_effort', 'thinking_disable_encodable', 'wizard_default'}
+                   'reasoning_effort', 'wizard_default'}
         if set(spec) - allowed:
             raise SetupError('unexpected setup fields: ' + ', '.join(sorted(set(spec) - allowed)))
         model = text(spec, 'model')
@@ -1262,8 +1262,7 @@ def resolve_model_spec(source, model, timeout, binary=None):
                     endpoint=source['endpoint'], api_key_env=source['api_key_env'],
                     provider_id=source['provider_id'], provider_display_name=source['label'],
                     model_key=model_slug(model['id']),
-                    provider_declared=source['catalog_provider'].get('declared') is True,
-                    thinking_disable_encodable='none' in (catalog.get('accepted_reasoning_efforts') or []))
+                    provider_declared=source['catalog_provider'].get('declared') is True)
         if catalog.get('default_reasoning_effort'):
             spec['reasoning_effort'] = catalog['default_reasoning_effort']
         return render(spec, binary)[0], spec

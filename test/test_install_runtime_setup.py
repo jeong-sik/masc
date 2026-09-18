@@ -42,7 +42,7 @@ def named_spec(model_id, provider='openrouter', endpoint='https://openrouter.ai/
     result = dict(choice='openai_compatible', model=model_id, max_context=1000000, tools=True, streaming=True,
                   endpoint=endpoint, api_key_env=key, provider_id=provider,
                   provider_display_name=provider, model_key=SETUP.model_slug(model_id),
-                  provider_declared=False, thinking_disable_encodable=True, reasoning_effort='high')
+                  provider_declared=False, reasoning_effort='high')
     return result
 
 
@@ -682,27 +682,9 @@ class NamedCatalogSources(unittest.TestCase):
     def test_an_older_binary_without_integrations_yields_no_catalog_sources(self):
         self.assertEqual(self.catalog_sources({'runtimes': []}), [])
 
-    def test_render_names_the_provider_and_writes_a_target_only_overlay(self):
-        identity, runtime, overlay = SETUP.render(named_spec('anthropic/claude-opus-5'))
-        self.assertEqual(identity, 'openrouter.openrouter-anthropic-claude-opus-5')
-        self.assertIn(b'["providers"."openrouter"]', runtime)
-        self.assertIn(b'"display-name" = "openrouter"', runtime)
-        self.assertIn(b'"endpoint" = "https://openrouter.ai/api/v1"', runtime)
-        self.assertIn(b'["models"."openrouter-anthropic-claude-opus-5"]', runtime)
-        self.assertIn(b'"api-name" = "anthropic/claude-opus-5"', runtime)
-        self.assertIn(b'"reasoning-effort" = "high"', runtime)
-        # The catalog row owns the window; the runtime entry does not restate it.
-        self.assertNotIn(b'max-context', runtime)
-        self.assertIn(b'["openrouter"."openrouter-anthropic-claude-opus-5"]', runtime)
-        self.assertNotIn(b'"models"', overlay)
-        self.assertNotIn(b'"providers"', overlay)
-        self.assertIn(b'"targets"', overlay)
-        self.assertIn(b'"model_id" = "anthropic/claude-opus-5"', overlay)
-        self.assertIn(b'"enable_thinking" = false', overlay)
-
     def test_render_skips_the_provider_section_the_workspace_config_declares(self):
         _, runtime = SETUP.render(dict(named_spec('z-ai/glm-5.3'), provider_declared=True,
-                                      thinking_disable_encodable=False, reasoning_effort=None))
+                                      reasoning_effort=None))
         self.assertNotIn(b'"providers"', runtime)
         self.assertNotIn(b'reasoning-effort', runtime)
         self.assertNotIn(b'wizard-default', runtime)
@@ -738,7 +720,6 @@ class NamedCatalogSources(unittest.TestCase):
         self.assertEqual(runtime_id, 'openrouter.openrouter-anthropic-claude-opus-5')
         self.assertEqual(spec['max_context'], 1000000)
         self.assertTrue(spec['tools'])
-        self.assertTrue(spec['thinking_disable_encodable'])
         self.assertEqual(spec['reasoning_effort'], 'high')
 
     def test_source_models_leads_with_curated_rows_and_keeps_discovery_extras(self):
@@ -1177,17 +1158,6 @@ class CompiledRuntimeSetup(unittest.TestCase):
                 with self.assertRaisesRegex(SETUP.SetupError, 'Configuration changed'):
                     SETUP.configure_many(BINARY, base, [spec()], expected_revision=original_selection['setup_revision'])
                 self.assertEqual(before, runtime.read_bytes())
-
-    def test_messages_kind_and_path_are_preserved_in_native_catalog_overlay(self):
-        import tomllib
-        configured = dict(spec('messages'), credential_file='/private/saved-key', request_path='/v1/messages')
-        _, runtime, overlay = SETUP.render(configured, BINARY)
-        self.assertNotIn(b'hidden-secret', runtime + overlay)
-        catalog = tomllib.loads(overlay.decode())
-        self.assertEqual(catalog['providers'][0]['kind'], 'anthropic')
-        self.assertEqual(catalog['providers'][0]['request_path'], '/v1/messages')
-        providers = tomllib.loads(runtime.decode())['providers']
-        self.assertEqual(next(iter(providers.values()))['credentials'], dict(type='file', path='/private/saved-key'))
 
     def test_multiple_models_bind_imp_and_reselection_preserves_both_connections(self):
         import tomllib

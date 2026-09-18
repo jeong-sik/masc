@@ -93,32 +93,7 @@ def main():
     runtime = (fixtures / 'runtime.toml').read_text()
     runtime += '\n[runtime.exact_output_lanes.verifier_exact]\nslots = ["goal_fixture.proof"]\n'
     runtime += f'\n[providers.goal_fixture]\nprotocol = "openai-compatible-http"\nendpoint = "http://127.0.0.1:{provider.server_port}/v1"\n[models.proof]\napi-name = "goal-fixture"\nmax-context = 131072\ntools-support = true\nstreaming = true\n[goal_fixture.proof]\n'
-    overlay = (fixtures / 'agent-core-models-overlay.toml').read_text()
-    overlay += f'''
-[[providers]]
-id = "goal_fixture"
-kind = "openai_compat"
-base_url = "http://127.0.0.1:{provider.server_port}/v1"
-request_path = "/chat/completions"
-api_key_env = ""
-capabilities_base = "openai_chat"
-[[models]]
-id_prefix = "goal-fixture"
-provider_name = "goal_fixture"
-base = "openai_chat"
-max_context_tokens = 131072
-max_output_tokens = 1024
-supports_tools = true
-supports_tool_choice = true
-supports_response_format_json = true
-supports_native_streaming = true
-[[targets]]
-id = "goal_fixture.proof"
-provider_ref = "goal_fixture"
-model_id = "goal-fixture"
-'''
     (config / 'runtime.toml').write_text(runtime)
-    (config / 'agent-core-models-overlay.toml').write_text(overlay)
     env = {k: v for k, v in os.environ.items() if k in ['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'USER', 'SHELL']}
     env.update(MASC_ADMIN_TOKEN=token, MASC_BASE_PATH=str(base), MASC_GRPC_ENABLED='0', MASC_WS_ENABLED='0', MASC_KEEPER_AUTONOMOUS_ENABLED='false')
     with socket.socket() as probe:

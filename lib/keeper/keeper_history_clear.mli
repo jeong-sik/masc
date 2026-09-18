@@ -3,7 +3,7 @@
     The clear saves the checkpoint of one trace with its conversation messages
     removed, and then says so in the keeper's turn-boundary store (RFC
     librarian-lifecycle §4.6). The order is the contract: the
-    [History_empty] line is appended only after the store reports the emptied
+    [History_restarted] line is appended only after the store reports the emptied
     checkpoint as saved, so a reader that sees the line knows the history was
     already emptied. A clear the store refused, or could not write, leaves no
     line.
@@ -16,7 +16,7 @@ type outcome =
   | Cleared of
       { cleared_message_count : int
       ; marker : (unit, string) result
-            (** Whether the [History_empty] line was written. [Error] does
+            (** Whether the [History_restarted] line was written. [Error] does
                 not undo or fail the clear, as a turn's line does not fail the
                 turn. The keeper's next turn starts from the emptied history
                 and writes the same line when it starts; until then nothing in

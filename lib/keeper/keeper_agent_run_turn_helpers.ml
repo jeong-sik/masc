@@ -334,7 +334,7 @@ let record_empty_history_at_turn_start
     in
     let record : Keeper_turn_boundaries.record =
       { recorded_at = Time_compat.now ()
-      ; event = Keeper_turn_boundaries.History_empty { trace_id }
+      ; event = Keeper_turn_boundaries.History_restarted { trace_id }
       }
     in
     (match

@@ -72,7 +72,7 @@ val make_append_manifest :
   seq_ref:int Atomic.t ->
   append_manifest_fn
 
-(** Append a [History_empty] line when the turn starts from a history with no
+(** Append a [History_restarted] line when the turn starts from a history with no
     atom (RFC librarian-lifecycle 4.6); nothing for a continued history. Never
     fails the turn: a line that cannot be written is logged and counted. Only a
     cancellation escapes. *)

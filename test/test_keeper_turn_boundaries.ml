@@ -48,8 +48,8 @@ let record
   }
 ;;
 
-let history_empty ?(trace_id = "trace") () : Boundaries.record =
-  { Boundaries.recorded_at = 200.0; event = Boundaries.History_empty { trace_id } }
+let history_restarted ?(trace_id = "trace") () : Boundaries.record =
+  { Boundaries.recorded_at = 200.0; event = Boundaries.History_restarted { trace_id } }
 ;;
 
 let atom_history = Boundaries.Atom_history { end_atom = 2; last_atom_digest = "digest" }
@@ -80,11 +80,11 @@ let record_equal (left : Boundaries.record) (right : Boundaries.record) =
     Ids.Turn_ref.equal left_ref right_ref
     && left_start = right_start
     && left_position = right_position
-  | ( Boundaries.History_empty { trace_id = left_trace }
-    , Boundaries.History_empty { trace_id = right_trace } ) ->
+  | ( Boundaries.History_restarted { trace_id = left_trace }
+    , Boundaries.History_restarted { trace_id = right_trace } ) ->
     String.equal left_trace right_trace
-  | Boundaries.Turn_ended _, Boundaries.History_empty _
-  | Boundaries.History_empty _, Boundaries.Turn_ended _ -> false
+  | Boundaries.Turn_ended _, Boundaries.History_restarted _
+  | Boundaries.History_restarted _, Boundaries.Turn_ended _ -> false
 ;;
 
 let record_t : Boundaries.record testable = testable print_record record_equal
@@ -105,9 +105,9 @@ let test_every_position_kind_round_trips () =
               failf "round trip rejected: %s" (Wire.wire_error_to_string error))
          every_position)
     every_history_at_start;
-  let written = history_empty () in
+  let written = history_restarted () in
   match Boundaries.record_of_json (Boundaries.record_to_json written) with
-  | Ok decoded -> check record_t "an empty history round trips" written decoded
+  | Ok decoded -> check record_t "a restart line round trips" written decoded
   | Error error -> failf "round trip rejected: %s" (Wire.wire_error_to_string error)
 ;;
 
@@ -129,10 +129,10 @@ let test_the_line_a_turn_writes () =
 (* The line is not a turn's, so it names the trace and nothing of a turn: no
    turn reference, and no position, since a history with no atom has only one.
    Its kind says what the writer saw and not that the writer was a clear. *)
-let test_the_line_for_an_empty_history () =
-  check string "an empty history"
-    {|{"kind":"history_empty","recorded_at":200.0,"trace_id":"trace"}|}
-    (Yojson.Safe.to_string (Boundaries.record_to_json (history_empty ())))
+let test_the_line_for_a_restart () =
+  check string "a restart line"
+    {|{"kind":"history_restarted","recorded_at":200.0,"trace_id":"trace"}|}
+    (Yojson.Safe.to_string (Boundaries.record_to_json (history_restarted ())))
 ;;
 
 let fields_of label (json : Yojson.Safe.t) =
@@ -199,24 +199,24 @@ let test_decode_refuses_what_its_kind_does_not_carry () =
     (with_fields (replacing "kind" (`String "no_such_line")) (record atom_history));
   (* A kind names its own field set: a turn's fields under another kind are the
      wrong fields, not a turn line with a different tag. *)
-  check_rejection "a turn's fields under the kind of an empty history"
+  check_rejection "a turn's fields under the kind of a restart line"
     ~path:[]
     ~reason:
       (Wire.Field_set_mismatch
          { missing = [ "trace_id" ]
          ; unexpected = [ "history_at_start"; "position"; "turn_ref" ]
          })
-    (with_fields (replacing "kind" (`String "history_empty")) (record atom_history));
-  check_rejection "an empty history that does not name its trace"
+    (with_fields (replacing "kind" (`String "history_restarted")) (record atom_history));
+  check_rejection "a restart line that does not name its trace"
     ~path:[]
     ~reason:(Wire.Field_set_mismatch { missing = [ "trace_id" ]; unexpected = [] })
-    (with_fields (without "trace_id") (history_empty ()));
-  check_rejection "an empty history that states a position"
+    (with_fields (without "trace_id") (history_restarted ()));
+  check_rejection "a restart line that states a position"
     ~path:[]
     ~reason:(Wire.Field_set_mismatch { missing = []; unexpected = [ "position" ] })
     (with_fields
        (fun fields -> fields @ [ "position", `Assoc [ "kind", `String "empty_atom_history" ] ])
-       (history_empty ()));
+       (history_restarted ()));
   check_rejection "a line without its kind"
     ~path:[]
     ~reason:(Wire.Field_set_mismatch { missing = [ "kind" ]; unexpected = [] })
@@ -238,10 +238,10 @@ let test_decode_refuses_what_its_kind_does_not_carry () =
 ;;
 
 let test_decode_refuses_values_no_writer_writes () =
-  check_rejection "an empty history of no trace"
+  check_rejection "a restart line of no trace"
     ~path:[ Wire.Wire_field "trace_id" ]
     ~reason:Wire.Blank_string
-    (with_fields (replacing "trace_id" (`String " ")) (history_empty ()));
+    (with_fields (replacing "trace_id" (`String " ")) (history_restarted ()));
   check_rejection "an atom history that ends before its first atom"
     ~path:[ Wire.Wire_field "position"; Wire.Wire_field "end_atom" ]
     ~reason:Wire.Not_positive
@@ -354,7 +354,7 @@ let test_appended_lines_read_back_in_order () =
     (List.length (read_lines ~keepers_dir));
   let written =
     List.mapi (fun index position -> record ~turn:(index + 1) position) every_position
-    @ [ history_empty () ]
+    @ [ history_restarted () ]
   in
   List.iter
     (fun line ->
@@ -384,7 +384,7 @@ let test_a_line_no_reader_decodes_is_not_written () =
            (Boundaries.append_error_to_string error)
        | Ok () -> failf "%s: written" label)
     [ "a turn reference no reader can parse", record ~trace_id:"" Boundaries.No_atom_history
-    ; "an empty history of no trace", history_empty ~trace_id:"" ()
+    ; "a restart line of no trace", history_restarted ~trace_id:"" ()
     ];
   check int "nothing was written" 0 (List.length (read_lines ~keepers_dir))
 ;;
@@ -528,11 +528,11 @@ let test_a_clear_empties_the_history_and_then_says_so () =
   check position_t "the saved history holds no atom" Boundaries.Empty_atom_history
     (position_of "cleared history" after);
   match read_lines ~keepers_dir with
-  | [ (1, { Boundaries.recorded_at = _; event = Boundaries.History_empty { trace_id } })
+  | [ (1, { Boundaries.recorded_at = _; event = Boundaries.History_restarted { trace_id } })
     ] ->
     check string "the line names the trace the checkpoint is saved under" cleared_trace
       trace_id
-  | lines -> failf "expected one history_empty line, read %d" (List.length lines)
+  | lines -> failf "expected one history_restarted line, read %d" (List.length lines)
 ;;
 
 (* The store refuses a checkpoint older than the one it holds: a turn saved
@@ -612,9 +612,9 @@ let test_a_turn_that_starts_from_no_atom_says_so () =
   @@ fun ~config ~keepers_dir ->
   start_turn ~config Boundaries.Fresh_history;
   match read_lines ~keepers_dir with
-  | [ (1, { Boundaries.recorded_at = _; event = Boundaries.History_empty { trace_id } }) ]
+  | [ (1, { Boundaries.recorded_at = _; event = Boundaries.History_restarted { trace_id } }) ]
     -> check string "the line names the turn's trace" started_trace trace_id
-  | lines -> failf "expected one empty-history line, read %d" (List.length lines)
+  | lines -> failf "expected one restart line, read %d" (List.length lines)
 ;;
 
 (* The end an earlier line states is where this turn starts. *)
@@ -647,8 +647,8 @@ let () =
       , [ test_case "every position kind round trips" `Quick
             test_every_position_kind_round_trips
         ; test_case "the line a turn writes" `Quick test_the_line_a_turn_writes
-        ; test_case "the line for an empty history" `Quick
-            test_the_line_for_an_empty_history
+        ; test_case "the line for a restart" `Quick
+            test_the_line_for_a_restart
         ; test_case "refuses what its kind does not carry" `Quick
             test_decode_refuses_what_its_kind_does_not_carry
         ; test_case "refuses values no writer writes" `Quick

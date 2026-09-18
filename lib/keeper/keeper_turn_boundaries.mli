@@ -9,7 +9,7 @@
     not written; the end an earlier line states is that start.
 
     A history with no atom has no such earlier line, so whoever has one in
-    hand says so with a [History_empty] line. Two writers do. A turn that
+    hand says so with a [History_restarted] line. Two writers do. A turn that
     starts from a history with no atom appends the line before it runs, so the
     record that its atoms are numbered from zero is there even if the turn
     saves and then dies before its own line. [masc_keeper_clear] empties a
@@ -42,9 +42,9 @@
       keeper's meta when the turn starts, and a trace rotation changes the
       trace while that count keeps running.
     - Two lines say that the atoms of a trace are numbered from zero again: a
-      [Turn_ended] line with [Fresh_history], and a [History_empty] line.
-      A [Turn_ended] line and a clear's [History_empty] line are written
-      after the save they describe; a turn's [History_empty] line is written
+      [Turn_ended] line with [Fresh_history], and a [History_restarted] line.
+      A [Turn_ended] line and a clear's [History_restarted] line are written
+      after the save they describe; a turn's [History_restarted] line is written
       after the load that gave the turn no atom and before any save made
       inside [run_turn]. When that load succeeded, or found no checkpoint, a
       reader that sees the line and then loads the checkpoint loads the
@@ -123,7 +123,7 @@ type event =
       ; history_at_start : history_at_start
       ; position : position
       }
-  | History_empty of { trace_id : string }
+  | History_restarted of { trace_id : string }
       (** Its writer had a history of this trace with no atom in hand. The
           line is named for that, not for who wrote it, because a reader has
           no use for the difference.

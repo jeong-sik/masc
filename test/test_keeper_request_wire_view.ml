@@ -68,6 +68,30 @@ let view ~front history : Try_provider.request_view =
     history
 ;;
 
+(* A range the provider refused is a ceiling: the composition starts halfway
+   between it and the newest atom, the same move a refusal forces inside a
+   turn, so a keeper whose seeds are gone shrinks across turns instead of
+   resending the whole history. *)
+let test_a_refused_ceiling_starts_halfway_toward_the_newest_atom () =
+  let ceiling = { (seed 0) with Front.source = Front.Refused_range { turn = 9 } } in
+  let v = view ~front:(Some ceiling) history in
+  let composed = v.Try_provider.composed in
+  let observation =
+    match
+      Window.observe
+        ~digest_at:(Window.atom_opening_digest history)
+        ~history_atom_count:composed.Try_provider.history_atom_count
+        composed.Try_provider.projection
+    with
+    | Some observation -> observation
+    | None -> Alcotest.fail "a range that carried atoms reports its window"
+  in
+  Alcotest.(check int) "halfway of seven atoms leaves four" 4
+    observation.Window.transmitted_atoms;
+  Alcotest.(check string) "the origin names the refused range" "refused_range#9"
+    (Front.origin_to_string composed.Try_provider.origin)
+;;
+
 let declined error =
   Alcotest.fail
     (Agent_core.Llm_provider.Reasoning_history_projection.error_to_string error)
@@ -157,6 +181,8 @@ let () =
             test_the_window_counts_atoms_of_the_history_whatever_the_wire_deletes
         ; Alcotest.test_case "projected first the count would be the dialect's" `Quick
             test_projected_first_the_atom_count_would_be_the_dialects
+        ; Alcotest.test_case "a refused ceiling starts halfway" `Quick
+            test_a_refused_ceiling_starts_halfway_toward_the_newest_atom
         ; Alcotest.test_case "a declined projection hands over the carried range" `Quick
             test_a_declined_projection_hands_over_the_carried_range
         ] )

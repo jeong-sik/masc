@@ -626,6 +626,26 @@ let compose_carried_model_input
       let first_atom =
         Keeper_carried_front.clamp ~atom_count:history_atom_count seed.first_atom
       in
+      (* A range the provider refused is a ceiling, not a start. The turn that
+         carried it never finished, so its front is the largest range known to
+         be too big, and starting there again sends that range plus whatever
+         the history gained since. The move is the one a refusal forces inside
+         a turn (RFC keeper-context-window-in-tokens §10.4), continued across
+         the turn boundary instead of restarting: halfway toward the newest
+         atom. When one atom is left the ceiling itself stands, and the
+         in-turn ladder answers the next refusal. *)
+      let first_atom =
+        match seed.source with
+        | Keeper_carried_front.Refused_range _ ->
+          (match
+             Keeper_carried_front.halve ~first_atom ~atom_count:history_atom_count
+           with
+           | Some halved -> halved
+           | None -> first_atom)
+        | Keeper_carried_front.Ledger
+        | Keeper_carried_front.Turn_record _
+        | Keeper_carried_front.Halved_after_refusal _ -> first_atom
+      in
       let projection, transmitted_bytes =
         Runtime_model_input_tail_window.project_from_atom
           ~measure_message_bytes

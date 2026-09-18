@@ -36,6 +36,7 @@ if [ "${self_test_only}" = false ]; then
 fi
 scope_tool="${repo_root}/scripts/ci/dune_suite_scope.py"
 stanza_reader="${repo_root}/scripts/ci/stanza_env.py"
+reference_tool="${repo_root}/scripts/ci/referencing_suites.py"
 
 python_suite_is_runnable() {
   local stem candidate_dir
@@ -158,8 +159,15 @@ CANDIDATES
   # which needs the PR to be told.
   tools_changed=$( { printf '%s\n' "${changed}" \
     | grep -E '^config/tools/' || [ $? -eq 1 ]; } | head -1)
+  #
+  # And a fourth guard over the same files: whether a tool is deferred is
+  # declared in its own config/tools file, and test_tool_loading_declarations
+  # pins what those declarations say. #36681 deferred twelve built-ins by
+  # editing twelve of those files and nothing else; the suite went red on
+  # keeper_tools_list and stayed red until #36773.
   tool_definition_guards="test/test_keeper_tool_definition_source.ml
 test/test_keeper_tool_schema_bytes.ml
+test/test_tool_loading_declarations.ml
 test/test_tools_coverage.ml"
 
   # The per-description bound, one axis in from the whole-surface ceiling.
@@ -393,13 +401,54 @@ DECLARED
   declared_suites=$( { printf '%s\n' "${declared_suites}" \
     | grep -v '^[[:space:]]*$' || [ $? -eq 1 ]; } | sort -u)
 
+  # Every mapping above asks a suite for its name, its stanza or a quoted
+  # path. None asks what its code calls, and three pull requests merged with a
+  # suite red that only that question reaches: #29365 changed
+  # Env_config_keeper, which test_runtime_toml_overrides calls; #36885 changed
+  # Runtime_setup_spec, which test_runtime_setup_batch and
+  # test_server_runtime_setup_actions call, and scripts/install-runtime-setup.py,
+  # which test_install_runtime_setup.py runs. referencing_suites.py reads the
+  # code with comments and strings removed for a changed module, and every
+  # suite's text for a changed file whose name no other tracked file has.
+  #
+  # No per-module cap. The caps above drop what they cannot attribute; this
+  # selects what calls the change, and whatever it selects runs -- a pull
+  # request whose suites do not fit the step fails naming them rather than
+  # passing without them. Measured 2026-09-17 over origin/main's last 80
+  # pull requests with the other mappings: 18 of them had a suite the name
+  # and link mappings chose that the module rule alone does not, so those
+  # stay.
+  #
+  # A helper failure ends the step here. This function is called under ||,
+  # which turns off errexit, and an empty answer would read as "nothing calls
+  # this".
+  if ! referenced=$(printf '%s\n' "${changed}" | python3 "${reference_tool}"); then
+    echo "referencing_suites.py failed"
+    exit 1
+  fi
+  referencing_suites=$(printf '%s\n' "${referenced}" | sed -n 's/^module //p')
+  named_file_candidates=$(printf '%s\n' "${referenced}" | sed -n 's/^file //p')
+  named_file_suites=""
+  while IFS= read -r candidate; do
+    [ -n "${candidate}" ] || continue
+    case "${candidate}" in
+      *.py) python_suite_is_runnable "${candidate}" || continue ;;
+    esac
+    named_file_suites=$(printf '%s\n%s\n' "${named_file_suites}" "${candidate}")
+  done <<NAMEDFILES
+${named_file_candidates}
+NAMEDFILES
+  named_file_suites=$( { printf '%s\n' "${named_file_suites}" \
+    | grep -v '^[[:space:]]*$' || [ $? -eq 1 ]; } | sort -u)
+
   # [themes_changed] stands beside [assets] here: the tool and prompt triggers
   # ride that variable, which matches config/(prompts|tools|mcp), and a theme
   # is none of those. Left out, a theme-only pull request returned here before
   # reaching the trigger below and reported no suite at all.
   if [ -z "${sources}" ] && [ -z "${assets}" ] && [ -z "${themes_changed}" ] \
     && [ -z "${module_suites}" ] && [ -z "${library_suites}" ] \
-    && [ -z "${declared_suites}" ]; then
+    && [ -z "${declared_suites}" ] && [ -z "${referencing_suites}" ] \
+    && [ -z "${named_file_suites}" ]; then
     echo "no test source, config asset or named suite in this pull request"
       return 1
   fi
@@ -454,6 +503,20 @@ DECLARED
     echo "guards that name the sources this pull request edits:"
     printf '%s\n' "${declared_suites}" | sed 's/^/  /'
     sources=$(printf '%s\n%s\n' "${sources}" "${declared_suites}" \
+      | grep -v '^[[:space:]]*$' | sort -u)
+  fi
+
+  if [ -n "${referencing_suites}" ]; then
+    echo "suites whose code calls a module this pull request edits:"
+    printf '%s\n' "${referencing_suites}" | sed 's/^/  /'
+    sources=$(printf '%s\n%s\n' "${sources}" "${referencing_suites}" \
+      | grep -v '^[[:space:]]*$' | sort -u)
+  fi
+
+  if [ -n "${named_file_suites}" ]; then
+    echo "suites that name a file this pull request edits:"
+    printf '%s\n' "${named_file_suites}" | sed 's/^/  /'
+    sources=$(printf '%s\n%s\n' "${sources}" "${named_file_suites}" \
       | grep -v '^[[:space:]]*$' | sort -u)
   fi
 
@@ -823,13 +886,16 @@ self_test() {
   check_required "the shared chrome selects the strip scenario" \
     "test/test_tui_tab_strip_pty.py" \
     "bin/masc_tui_ansi.ml"
-  check "a guard that opens its input is selected too" \
+  # The five cases below were exact before the module rule: each module is
+  # also called by suites that neither carry its name nor quote its path, and
+  # those now run too. What each case pins is the suite it was written for.
+  check_required "a guard that opens its input is selected too" \
     "test/test_blocker_class_mirror.ml" \
     "lib/keeper/keeper_meta_contract.ml"
   # A package source names its suites the same way, in whichever test root
   # holds them. event_bus has one in each, which is why it is the fixture:
   # before this, an edit under packages/ selected nothing by name.
-  check "a package source selects its suites in both test roots" \
+  check_required "a package source selects its suites in both test roots" \
     "packages/agent_core/test/test_event_bus.ml test/test_event_bus_subscription_contract.ml" \
     "packages/agent_core/lib/event_bus.ml"
   # A suite with its own directory is named for its module the same way, and
@@ -837,7 +903,7 @@ self_test() {
   # is where it was measured: #36098 and #36124 both changed lib/voice_setup
   # and lib/voice_wizard, both merged green, and both had to have these suites
   # run by hand afterwards -- the first time, after main was already red.
-  check "a module with its own test directory selects the suite in it" \
+  check_required "a module with its own test directory selects the suite in it" \
     "test/voice_wizard/test_voice_wizard.ml" \
     "lib/voice_wizard/voice_wizard.ml"
   # The path matters: "docs/x.md" used to be the fixture here and stopped
@@ -866,7 +932,7 @@ self_test() {
     test/test_wide_13.ml
 
   check "thirteen edited suites retain both themselves and asset guards" \
-    "test/test_keeper_tool_definition_source.ml test/test_keeper_tool_schema_bytes.ml test/test_managed_assets_sync_from_binary.ml test/test_tools_coverage.ml ${wide_sources}" \
+    "test/test_keeper_tool_definition_source.ml test/test_keeper_tool_schema_bytes.ml test/test_managed_assets_sync_from_binary.ml test/test_tool_loading_declarations.ml test/test_tools_coverage.ml ${wide_sources}" \
     test/test_wide_01.ml test/test_wide_02.ml test/test_wide_03.ml \
     test/test_wide_04.ml test/test_wide_05.ml test/test_wide_06.ml \
     test/test_wide_07.ml test/test_wide_08.ml test/test_wide_09.ml \
@@ -874,8 +940,21 @@ self_test() {
     test/test_wide_13.ml config/tools/foo.toml
 
   check "a tool definition reaches every guard over it" \
-    "test/test_keeper_tool_definition_source.ml test/test_keeper_tool_schema_bytes.ml test/test_managed_assets_sync_from_binary.ml test/test_tools_coverage.ml" \
+    "test/test_keeper_tool_definition_source.ml test/test_keeper_tool_schema_bytes.ml test/test_managed_assets_sync_from_binary.ml test/test_tool_loading_declarations.ml test/test_tools_coverage.ml" \
     "config/tools/foo.toml"
+  # The three regressions the module and file-name rules exist for, with the
+  # source files each pull request changed.
+  check_required "#29365: a module edit reaches the suite that calls it" \
+    "test/test_runtime_toml_overrides.ml" \
+    lib/config/env_config_keeper.ml lib/config/env_config_keeper.mli \
+    lib/config/keeper_runtime_setting_registry.ml \
+    lib/keeper/keeper_heartbeat_stimulus_intake.ml \
+    lib/schedule/schedule_domain.ml lib/schedule/schedule_domain.mli
+  check_required "#36885: a module and a script reach the suites that call and run them" \
+    "test/test_install_runtime_setup.py test/test_runtime_setup_batch.ml test/test_server_runtime_setup_actions.ml" \
+    lib/runtime/runtime_setup_spec.ml scripts/install-runtime-setup.py
+  check "a file name many files share selects nothing by name" "" \
+    "packages/agent_core/lib/dune"
   # Only tool definitions reach the second one; a prompt asset has no first
   # line to fit.
   check "a prompt asset reaches the asset guard and the prompt golden" \
@@ -896,7 +975,7 @@ self_test() {
     "test/keeper_chat_operations/test_keeper_chat_operation_store.ml"
   # An interface is the same module: #36279 re-documented this one and the
   # suite over the function it documents did not run.
-  check "an interface edit selects the suites named after its module" \
+  check_required "an interface edit selects the suites named after its module" \
     "packages/agent_core/test/test_provider_admission.ml" \
     "packages/agent_core/lib/llm_provider/provider_admission.mli"
   # The third way: the suite's dune stanza links the module. Neither rule
@@ -909,8 +988,10 @@ self_test() {
   # And the cap holds on that rule too. 34 suites link masc_tui_message_layout,
   # so the link says nothing about an edit there and only the suite named
   # after the module is left. Without the cap this answer would be 34 suites.
-  check "a module many suites link is too broad to attribute" \
-    "test/test_tui_message_layout.ml" \
+  # The link mapping still drops this module -- 34 suites link it -- and the
+  # module rule selects the suites that call it, which include its own.
+  check_required "a module many suites link still reaches the suites that call it" \
+    "test/test_tui_markdown.ml test/test_tui_message_layout.ml" \
     "bin/masc_tui_message_layout.ml"
   # Both halves together, deduplicated.
   check "a source and its own suite are one entry" \

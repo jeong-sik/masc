@@ -1,4 +1,22 @@
 # Unified Model Catalog Configuration
+#
+# This file is the only place a provider or model fact is written. A row says
+# what a model IS -- its window, which controls its wire encodes, what it can
+# read. A deployment's runtime.toml says which rows it uses, under what local
+# name, with which endpoint and credential; it does not restate what a row
+# says.
+#
+# A row is scoped to a provider with provider_name when the same model differs
+# by endpoint: 41 model ids here appear under more than one provider, because
+# the same weights reached through a different wire have a different window or
+# a different way of being told to think.
+#
+# Serving a model this file has no row for: add the row. There is no
+# deployment-side overlay; a second copy of a fact is a second thing to keep in
+# step, and the one that used to exist ended up disagreeing with this file on
+# tool support, on replay policy, and on one window by a factor of five.
+# AGENT_CORE_MODEL_CATALOG replaces this file wholesale for a deployment that
+# must not edit it, and then owns every row.
 
 # Anthropic Models
 # Current Claude model limits and thinking modes are sourced from the official

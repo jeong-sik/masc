@@ -33,7 +33,7 @@ val configure_agent_core_model_catalog_env :
 (** Install only an operator-supplied [AGENT_CORE_MODEL_CATALOG] as a full catalog
     replacement. Without it, require AGENT_CORE's packaged catalog.
     Config-root and executable-parent full catalogs are deliberately not
-    discovered (RFC-0342 D1). *)
+    discovered. *)
 
 val config_load_failure_diagnostic : detail:string -> string
 (** Operator-facing diagnostic for configuration load failures (catalog overlay,

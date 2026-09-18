@@ -94,6 +94,7 @@ let to_json_result = Checkpoint_codec.to_json_result
 let drop_unencodable_json = Checkpoint_codec.drop_unencodable_json
 let of_json = Checkpoint_codec.of_json
 let to_string = Checkpoint_codec.to_string
+let message_to_json = Checkpoint_codec.message_to_json
 
 type encoding_memo = Checkpoint_codec.encoding_memo
 

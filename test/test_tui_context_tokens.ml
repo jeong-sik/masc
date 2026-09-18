@@ -233,7 +233,12 @@ let test_no_body_names_what_masc_handed_over () =
 let with_window measurement turn =
   { turn with
     Turn_record.model_input_window =
-      Some { transmitted_atoms = 26; total_atoms = 9137; measurement }
+      Some
+        { transmitted_atoms = 26
+        ; total_atoms = 9137
+        ; measurement
+        ; front_atom_digest = String.make 64 'd'
+        }
   }
 
 let test_a_wire_shape_cut_is_labelled_sent () =

@@ -386,8 +386,11 @@ let memory_fact_detail_lines ~cols (row : memory_fact_row) =
                fact.mf_origin (Theme.recede ()) Ansi.reset
                (memory_fact_age_label fact.mf_first_seen)
                (memory_fact_age_label fact.mf_last_seen))
-        ; detail_field "Use:"
-            (Printf.sprintf "Retrieved %d · %s · last %s · Cited %d · Revised from %d"
+        (* The only Cited producer is a successful keeper_memory_retract.
+           Events survive removal and re-adding the same claim, so this is
+           past retraction history, not evidence of the current fact's quality. *)
+        ; detail_field "History:"
+            (Printf.sprintf "Retrieved %d · %s · last %s · Previously retracted %d · Revised from %d"
                fact.mf_events.mfe_retrieved_count
                (Message_layout.count_noun
                   fact.mf_events.mfe_retrieved_distinct_days "day")

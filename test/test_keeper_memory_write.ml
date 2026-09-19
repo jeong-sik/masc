@@ -1608,12 +1608,13 @@ let test_retract_records_a_citation () =
   let keepers_dir =
     Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
   in
-  let written =
+  let write () =
     Runtime.keeper_memory_write_with_outcome
       ~config
       ~meta
       ~args:(make_args ~title:"" ~content:"the deploy needs assets")
   in
+  let written = write () in
   let written_id =
     string_field
       "memory_id"
@@ -1641,7 +1642,24 @@ let test_retract_records_a_citation () =
   Alcotest.(check int)
     "a retract of an unknown id records nothing"
     1
-    (List.length (events_for ~keepers_dir ~keeper_id:meta.name))
+    (List.length (events_for ~keepers_dir ~keeper_id:meta.name));
+  Alcotest.(check int) "the retracted fact is no longer current" 0
+    (List.length (current_facts ~keepers_dir ~keeper_id:meta.name));
+  let rewritten = (write ()).Masc.Keeper_tool_execution.raw_output
+      |> Yojson.Safe.from_string in
+  Alcotest.(check bool) "the same claim can be stored again" true
+    (json_field "ok" rewritten = `Bool true);
+  Alcotest.(check string) "the same claim has the original identity" written_id
+    (string_field "memory_id" rewritten);
+  (match current_facts ~keepers_dir ~keeper_id:meta.name with
+   | [ current ] ->
+       let current_id = Masc.Keeper_memory_os_types.memory_id current in
+       Alcotest.(check string) "the current fact reuses that identity" written_id current_id;
+       let history = Events.summary_for ~memory_id:current_id
+           (events_for ~keepers_dir ~keeper_id:meta.name) in
+       Alcotest.(check int) "current fact retains the previous retraction" 1 history.cited_count;
+       Alcotest.(check int) "re-adding is not a retrieval" 0 history.retrieved_count
+   | _ -> Alcotest.fail "expected only the re-added fact")
 ;;
 
 let test_source_snapshot_commit_notifications () =

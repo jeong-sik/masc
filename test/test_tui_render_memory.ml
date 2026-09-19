@@ -97,12 +97,13 @@ let test_detail_names_the_use_record () =
     Render_memory.memory_fact_detail_lines ~cols:120 (Types.Memory_row_fact fact)
     |> List.map Masc_tui_theme.strip_sgr
   in
-  match List.find_opt (fun line -> contains "Use:" line) lines with
-  | None -> fail "the detail has no Use line"
+  match List.find_opt (fun line -> contains "History:" line) lines with
+  | None -> fail "the detail has no History line"
   | Some line ->
     check bool "retrieval count and days" true (contains "Retrieved 4 · 2 days" line);
     check bool "last retrieval as an age" true (contains "last 2h" line);
-    check bool "citations and predecessors" true (contains "Cited 1 · Revised from 1" line)
+    check bool "past retractions and predecessors" true
+      (contains "Previously retracted 1 · Revised from 1" line)
 ;;
 
 let test_detail_lines () =

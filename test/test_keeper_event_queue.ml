@@ -1998,9 +1998,39 @@ let () =
         1
         (int_field "unclassified_count" json);
       Alcotest.(check bool)
-        "unknown lifecycle counts are incomplete"
-        false
-        (bool_field "counts_complete" json));
+        "unknown lifecycle does not make readable queue counts incomplete"
+        true
+        (bool_field "counts_complete" json);
+      Alcotest.(check int) "owner lookup failure is not a queue read error" 0
+        (int_field "read_error_count" json);
+      let summary = keeper_summary keeper_name json in
+      Alcotest.(check string) "unknown lifecycle keeps its cause"
+        "durable keeper metadata missing"
+        (string_field "owner_lifecycle_detail" summary);
+      (match list_field "unclassified_by_keeper" json with
+       | [ backlog ] ->
+         Alcotest.(check string) "backlog row also keeps the owner cause"
+           "durable keeper metadata missing"
+           (string_field "owner_lifecycle_detail" backlog)
+       | _ -> Alcotest.fail "expected one unclassified keeper");
+      (* Exercise the production producer and health consumer together; the
+         hand-built health fixture had hidden this contradictory contract. *)
+      let health =
+        Server_routes_http_runtime_health_fleet.keeper_event_queue_health_dimensions
+          ~source_unavailable:false json
+      in
+      let storage = Option.get (json_field "storage_integrity" health) in
+      let work = Option.get (json_field "work_liveness" health) in
+      Alcotest.(check string) "readable queue storage is healthy" "ok"
+        (string_field "status" storage);
+      Alcotest.(check string) "unclassified work remains a warning" "warning"
+        (string_field "status" work);
+      Alcotest.(check string) "unclassified work is blocked, not unreadable" "blocked"
+        (string_field "state" work);
+      Alcotest.(check bool) "unknown-owner backlog still needs an answer" true
+        (bool_field "operator_action_required" health);
+      Alcotest.(check bool) "only the work classification needs an answer" true
+        (list_field "operator_action_reasons" health = [ `String "unclassified_backlog=1" ]));
 
   (* --- durable fleet summary: an empty orphan queue has no lifecycle-bound
      work to classify, so missing owner metadata is not a storage failure. --- *)
@@ -2072,7 +2102,21 @@ let () =
       Alcotest.(check bool)
         "corrupt orphan retains a read error"
         true
-        (int_field "read_error_count" json > 0));
+        (int_field "read_error_count" json > 0);
+      let summary = keeper_summary keeper_name json in
+      Alcotest.(check string) "corrupt queue also preserves the independent owner cause"
+        "durable keeper metadata missing"
+        (string_field "owner_lifecycle_detail" summary);
+      let health =
+        Server_routes_http_runtime_health_fleet.keeper_event_queue_health_dimensions
+          ~source_unavailable:false json
+      in
+      let storage = Option.get (json_field "storage_integrity" health) in
+      Alcotest.(check string) "unreadable queue storage remains degraded" "degraded"
+        (string_field "status" storage);
+      Alcotest.(check bool) "storage read error remains actionable" true
+        (List.mem (`String "storage_read_error")
+           (list_field "operator_action_reasons" health)));
 
   (* Build the meta through the shared fixture, not a hand-written object: it
      fills every field of the current schema from

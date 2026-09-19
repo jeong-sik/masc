@@ -618,8 +618,12 @@ let test_prompt_contains_exact_current_selection () =
     (String_util.contains_substring current_memory "\"memory_id\": \"m2\"");
   check bool "cryptographic identity is not prompt context" false
     (String_util.contains_substring current_memory current_a_id);
-  check bool "presentation timestamp is not prompt context" false
-    (String_util.contains_substring current_memory "first_seen")
+  let first_fact =
+    Yojson.Safe.from_string current_memory |> Yojson.Safe.Util.member "facts"
+    |> Yojson.Safe.Util.to_list |> List.hd |> Yojson.Safe.Util.member "fact"
+  in
+  check bool "stored timestamp reaches current input" true
+    (Yojson.Safe.Util.member "first_seen" first_fact = `Float current_a.first_seen)
 ;;
 
 let test_prompt_carries_keeper_instructions () =
@@ -1309,6 +1313,158 @@ let test_keeper_memory_io_offload_fallback_and_domain_safety env () =
         Domain_pool_ref.clear_for_tests ()))
 ;;
 
+let test_current_provenance_survives_store_prompt_and_decisions () =
+  let keepers_dir = Filename.temp_dir "librarian-current-provenance-" "" in
+  Fun.protect ~finally:(fun () -> rm_rf keepers_dir) (fun () ->
+    let keeper_id = "provenance" in
+    let require = function Ok value -> value | Error detail -> fail detail in
+    let board =
+      match Memory.board_ref_of_ids ~post_id:"p-0123456789abcdef0123456789abcdef"
+              ~comment_id:(Some "c-0123456789abcdef0123456789abcdef") with
+      | Ok board -> board
+      | Error error -> fail (Memory.wire_error_to_string error)
+    in
+    let primary = { (fact ~claim:"primary approval") with first_seen = 10.; last_seen = 20. } in
+    let emergency =
+      { (fact ~claim:"emergency approval") with
+        first_seen = 100.; last_seen = 200.
+      ; origin = { kind = Memory.Authored; trace_id = "trace-explicit" }
+      ; basis = Memory.Observed (Memory.Board board) }
+    in
+    let conclusion =
+      Memory.derived ~claim:"deployment has a supported approval"
+        ~category:Memory.Validated_approach ~now:300.
+        ~origin:{ kind = Memory.Injected; trace_id = "trace-derived" }
+        ~derivations:
+          [ { rule_id = "primary"; premise_ids = [Memory.memory_id primary] }
+          ; { rule_id = "emergency"; premise_ids = [Memory.memory_id emergency] } ]
+      |> require
+    in
+    let temporary =
+      { (fact ~claim:"temporary queue notice") with
+        first_seen = 250.; last_seen = 250.
+      ; origin = { kind = Memory.Injected; trace_id = "trace-notice" } }
+    in
+    let seeded = Current.replace ~keepers_dir ~keeper_id ~expected_revision:None
+        ~now:300. ~source:{ kind = Current.Explicit_write; trace_id = "trace-seed" }
+        ~facts:[primary; emergency; conclusion; temporary] () |> require in
+    ignore (Current.replace ~keepers_dir ~keeper_id
+      ~expected_revision:(Some seeded.revision) ~now:400.
+      ~source:{ kind = Current.Explicit_write; trace_id = "trace-retract" }
+      ~facts:[emergency; conclusion; temporary] () |> require : Current.t);
+    let read () =
+      match Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require with
+      | Some snapshot -> snapshot
+      | None -> fail "current snapshot disappeared"
+    in
+    let stored = read () in
+    let inp = { (input ()) with current = Some { Librarian.facts = stored.facts } } in
+    let rows input =
+      List.assoc "current_memory" (Librarian.prompt_variables input)
+      |> Yojson.Safe.from_string |> Yojson.Safe.Util.member "facts"
+      |> Yojson.Safe.Util.to_list
+    in
+    let row_for claim rows =
+      List.find (fun row ->
+        Yojson.Safe.Util.(row |> member "fact" |> member "claim" |> to_string) = claim) rows
+    in
+    let check_projection input expected_premise =
+      let rows = rows input in
+      let emergency_row = row_for emergency.claim rows in
+      let details = Yojson.Safe.Util.member "fact" emergency_row in
+      check bool "stored origin reaches prompt" true
+        (Yojson.Safe.Util.member "origin" details
+         = `Assoc ["kind", `String "authored"; "trace_id", `String "trace-explicit"]);
+      check bool "insertion and re-observation times remain distinct" true
+        (Yojson.Safe.Util.member "first_seen" details = `Float 100.
+         && Yojson.Safe.Util.member "last_seen" details = `Float 200.);
+      check bool "Board evidence is preserved exactly" true
+        (Yojson.Safe.Util.member "basis" details = Memory.basis_to_json emergency.basis);
+      let derived = row_for conclusion.claim rows |> Yojson.Safe.Util.member "fact" in
+      check bool "Librarian origin is preserved too" true
+        (Yojson.Safe.Util.member "origin" derived
+         = `Assoc ["kind", `String "injected"; "trace_id", `String "trace-derived"]);
+      let basis = Yojson.Safe.Util.member "basis" derived in
+      check string "derived basis remains typed" "derived"
+        Yojson.Safe.Util.(basis |> member "kind" |> to_string);
+      let proofs = Yojson.Safe.Util.(basis |> member "derivations" |> to_list) in
+      check int "both alternative proofs remain visible" 2 (List.length proofs);
+      let premises rule_id =
+        List.find (fun proof ->
+          Yojson.Safe.Util.(proof |> member "rule_id" |> to_string) = rule_id) proofs
+        |> Yojson.Safe.Util.member "premise_ids"
+      in
+      check bool "missing premise stays explicit" true (premises "primary" = `List [`Null]);
+      check bool "current premise uses its input surrogate" true
+        (premises "emergency" = `List [`String expected_premise]);
+      let current_memory = List.assoc "current_memory" (Librarian.prompt_variables input) in
+      (match Runtime.messages_for_librarian input with
+       | Error detail -> fail detail
+       | Ok messages ->
+         let rendered = user_text_of_messages messages in
+         check bool "actual model-input renderer carries the same metadata JSON" true
+           (String_util.contains_substring rendered current_memory);
+         List.iter (fun fact ->
+           check bool "memory identities remain absent from model input" false
+             (String_util.contains_substring rendered (Memory.memory_id fact)))
+           [primary; emergency; conclusion; temporary]);
+      let temporary_row = row_for temporary.claim rows in
+      check bool "transcript basis remains explicit" true
+        (Yojson.Safe.Util.(temporary_row |> member "fact" |> member "basis")
+         = `Assoc ["kind", `String "observed"]);
+      Yojson.Safe.Util.(temporary_row |> member "memory_id" |> to_string)
+    in
+    let _ = check_projection inp "m1" in
+    let reordered = { inp with current = Some { Librarian.facts = List.rev stored.facts } } in
+    let dropped_token = check_projection reordered "m3" in
+    check string "reordered fact has its new surrogate" "m1" dropped_token;
+    let commit input answer now =
+      let selection =
+        match Librarian.selection_of_json_result ~now input answer with
+        | Ok selection -> selection
+        | Error error -> fail (Librarian.parse_error_to_string error)
+      in
+      Current.apply_disposition ~keepers_dir ~keeper_id ~now
+        ~source:{ kind = Current.Librarian; trace_id = "trace-selection" }
+        ~dropped_statements:selection.dropped ~absorbed:selection.absorbed
+        ~new_claims:selection.new_claims () |> require
+    in
+    let committed = commit reordered
+        (selection_json ~dropped:[dropped_json ~reason:"temporary notice is no longer useful" dropped_token] ())
+        500. in
+    check (list string) "the selected short id retires only its current fact"
+      [emergency.claim; conclusion.claim] (List.map (fun (fact : Memory.fact) -> fact.claim) committed.facts);
+    let expected = List.map Memory.fact_to_json committed.facts in
+    List.iter (fun now ->
+      let current = read () in
+      let next_input = { inp with current = Some { Librarian.facts = current.facts } } in
+      let next = commit next_input (selection_json ~dropped:[] ()) now in
+      check bool "later unchanged decisions preserve all stored provenance" true
+        (List.map Memory.fact_to_json next.facts = expected)) [600.; 700.])
+;;
+
+let test_input_metadata_is_not_accepted_as_claim_output () =
+  let fields =
+    [ "claim", `String "new claim"; "category", `String "fact"
+    ; "board_post_id", `Null; "board_comment_id", `Null
+    ; "supersedes", `Null; "absorbs", `List [] ]
+  in
+  (match parse (selection_json ~new_claims:[`Assoc fields] ~dropped:[] ()) with
+   | Ok _ -> ()
+   | Error error -> fail (Librarian.parse_error_to_string error));
+  List.iter (fun (field, value) ->
+    let claim = `Assoc (fields @ [field, value]) in
+    match parse (selection_json ~new_claims:[claim] ~dropped:[] ()) with
+    | Error (Librarian.Unexpected_field rejected) ->
+      check string "only the input metadata field is rejected" field rejected
+    | Error error -> fail (Librarian.parse_error_to_string error)
+    | Ok _ -> failf "input-only metadata %s was accepted as output" field)
+    [ "origin", `Assoc ["kind", `String "authored"; "trace_id", `String "forged"]
+    ; "first_seen", `Float 1.
+    ; "last_seen", `Float 2.
+    ; "basis", `Assoc ["kind", `String "observed"] ]
+;;
+
 let () =
   Eio_main.run @@ fun env ->
   run
@@ -1367,6 +1523,10 @@ let () =
             test_duplicate_object_fields_reject
         ; test_case "removed contract fields reject" `Quick
             test_removed_contract_fields_reject
+        ; test_case "current provenance survives store prompt and decisions" `Quick
+            test_current_provenance_survives_store_prompt_and_decisions
+        ; test_case "input metadata is not accepted as claim output" `Quick
+            test_input_metadata_is_not_accepted_as_claim_output
         ; test_case "prompt carries exact current selection" `Quick
             test_prompt_contains_exact_current_selection
         ; test_case "prompt carries Keeper instructions" `Quick

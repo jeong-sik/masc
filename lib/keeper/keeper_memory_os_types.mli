@@ -8,6 +8,13 @@ val wire_field_claim : string
 val wire_field_category : string
 val wire_field_memory_id : string
 val wire_field_reason : string
+val wire_field_first_seen : string
+val wire_field_last_seen : string
+val wire_field_origin : string
+val wire_field_basis : string
+val wire_field_derivations : string
+val wire_field_rule_id : string
+val wire_field_premise_ids : string
 
 (** On a librarian claim: the short id of the dropped memory this claim
     continues (RFC-0418). *)
@@ -187,8 +194,11 @@ type origin =
   ; trace_id : string
   }
 
+val origin_to_json : origin -> Yojson.Safe.t
+
 (** One independently sufficient proof of a derived fact. Every [premise_id]
-    is the exact {!memory_id} of another current fact. [rule_id] is an opaque
+    is the exact {!memory_id} of another fact. An inactive alternative may
+    reference facts that are no longer current. [rule_id] is an opaque
     producer-owned identity used for explanation and rule evolution; Memory OS
     never branches on its spelling. *)
 type derivation =

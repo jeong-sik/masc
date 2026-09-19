@@ -2581,6 +2581,16 @@ let test_launch_callback_failure_rolls_back_restart_transaction () =
        (match Memory_lane.submit ~base_path:config.base_path ~keeper_name:name ignore with
         | Memory_lane.Rejected_draining -> ()
         | _ -> fail "failed launch left Librarian admission open");
+       (match
+          Memory_lane.drain_and_join_librarian
+            ~base_path:config.base_path
+            ~keeper_name:name
+        with
+        | Ok Memory_lane.Librarian_drained
+        | Error (Memory_lane.Librarian_interrupted _) -> ()
+        | Ok Memory_lane.No_librarian_work ->
+          fail "submitted catch-up had no Librarian owner to join"
+        | Error error -> fail (Memory_lane.librarian_drain_error_to_string error));
        match
          Launch_transaction.run
            ~base_path:config.base_path

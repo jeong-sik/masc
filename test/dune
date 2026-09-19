@@ -6464,3 +6464,5 @@
  (name test_tui_fork_guard)
  (modules test_tui_fork_guard)
  (libraries alcotest masc_tui_fork_guard eio eio_main))
+
+(include stanzas/test_exact_output_runtime_reasoning.inc)

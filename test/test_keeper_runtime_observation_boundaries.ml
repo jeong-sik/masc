@@ -256,21 +256,17 @@ let test_transient_network_failure_advances_crash_streak () =
             (KSM.phase_to_string phase)
         | None -> Alcotest.fail "expected registered keeper phase"))
 
-(* Exercise the failure producer, heartbeat projection and public blocker
-   surface together, including a later failure and successful reset. *)
+(* Exercise the failure producer, the production heartbeat cause refresh and
+   public blocker surface, including a later failure and successful reset.
+   The live loop's event dispatch and late-event filtering are not run here. *)
 let record_failed_turn ~config ~meta err =
   let error_text = Agent_core.Error.to_string err in
   let terminal_reason = Keeper_turn_terminal.of_failure ~raw_error:error_text err in
   KUF.record_failure_observation ~config ~meta ~terminal_reason ~err ~error_text
 
-let finish_failure_tick ~base_path ~keeper_name =
-  let count = R.get_turn_failures ~base_path keeper_name in
-  ignore (R.dispatch_event ~base_path keeper_name (KHL.turn_status_event ~turn_fail_count:count));
-  let current =
-    Option.bind (R.get ~base_path keeper_name) (fun entry -> entry.R.last_failure_reason)
-  in
-  R.set_failure_reason ~base_path keeper_name
-    (KHL.failure_reason_after_turn_status ~turn_fail_count:count current)
+let refresh_failure_reason ~base_path ~keeper_name =
+  KHL.refresh_failure_reason_after_turn ~base_path ~keeper_name
+    ~turn_fail_count:(R.get_turn_failures ~base_path keeper_name)
 
 let failure_reason ~base_path ~keeper_name =
   match Option.bind (R.get ~base_path keeper_name) (fun entry -> entry.R.last_failure_reason) with
@@ -289,7 +285,7 @@ let test_failed_ticks_preserve_current_runtime_cause () =
            { runtime_id = "runtime.test"; reason = KTD.No_providers_available })
     in
     record_failed_turn ~config ~meta exhausted;
-    finish_failure_tick ~base_path ~keeper_name:meta.name;
+    refresh_failure_reason ~base_path ~keeper_name:meta.name;
     (match failure_reason ~base_path ~keeper_name:meta.name with
      | R.Provider_runtime_error { reason = Some Keeper_meta_contract.No_providers_available; _ } -> ()
      | reason -> Alcotest.failf "exhaustion cause lost: %s" (R.failure_reason_to_string reason));
@@ -301,7 +297,7 @@ let test_failed_ticks_preserve_current_runtime_cause () =
       (raw_provider_timeout_error
          ~phase:(Some (Llm_provider.Http_client.Stream_idle
                         Llm_provider.Http_client.Streaming_thinking)));
-    finish_failure_tick ~base_path ~keeper_name:meta.name;
+    refresh_failure_reason ~base_path ~keeper_name:meta.name;
     Alcotest.(check int) "both failures counted" 2 (R.get_turn_failures ~base_path meta.name);
     (match failure_reason ~base_path ~keeper_name:meta.name with
      | R.Provider_runtime_error { reason = None; code; detail; agent_core_timeout; _ } ->
@@ -323,9 +319,9 @@ let test_crashed_tick_replaces_previous_configuration_cause () =
     ignore (R.For_testing.register ~base_path meta.name meta);
     record_failed_turn ~config ~meta
       (Agent_core.Error.Config (MissingEnvVar { var_name = "TEST_PROVIDER_KEY" }));
-    finish_failure_tick ~base_path ~keeper_name:meta.name;
+    refresh_failure_reason ~base_path ~keeper_name:meta.name;
     KHL.record_crashed_cycle_failure ~base_path ~keeper_name:meta.name (Failure "synthetic cycle crash");
-    finish_failure_tick ~base_path ~keeper_name:meta.name;
+    refresh_failure_reason ~base_path ~keeper_name:meta.name;
     Alcotest.(check int) "both failures counted" 2 (R.get_turn_failures ~base_path meta.name);
     match failure_reason ~base_path ~keeper_name:meta.name with
     | R.Exception _ -> ()

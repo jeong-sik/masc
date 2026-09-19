@@ -23,9 +23,12 @@ let record_failure_observation
     ~agent_name:meta.name
     ~reason:(Keeper_types_profile.short_preview error_text);
   let reason =
-    Keeper_unified_turn_types.registry_failure_reason_of_terminal_reason
-      ~core_error:err terminal_reason ~raw_error:error_text
-    |> Option.value ~default:(Keeper_registry.Turn_consecutive_failures count)
+    match
+      Keeper_unified_turn_types.registry_failure_reason_of_terminal_reason
+        ~core_error:err terminal_reason ~raw_error:error_text
+    with
+    | Some typed_cause -> typed_cause
+    | None -> Keeper_registry.Turn_consecutive_failures count
   in
   Keeper_registry.set_failure_reason ~base_path meta.name (Some reason);
   Log.Keeper.warn

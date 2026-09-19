@@ -15,4 +15,6 @@ val sync_keeper_presence :
   meta_current:Keeper_meta_contract.keeper_meta ->
   consecutive_failures:int ref ->
   Keeper_meta_contract.keeper_meta
-(** Publish keeper heartbeat presence and update failure counters. *)
+(** Publish keeper heartbeat presence and update failure counters. A successful
+    sync clears the typed heartbeat failure reason; existing turn-failure debt
+    is restored as its own typed count. *)

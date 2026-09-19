@@ -143,7 +143,9 @@ let attempt_advance_state_is_valid (attempt : attempt) (failure : transport_fail
     && Option.is_some attempt.provider_trace_sha256
     && Option.is_some attempt.raw_response_sha256
   | Server_error { http_status }, Response_received ->
-    Cohttp.Code.is_server_error http_status && http_status <> 529
+    (* HTTP's 5xx class includes unregistered codes such as 520. Cohttp's
+       [is_server_error] only recognizes its enumerated status constructors. *)
+    http_status >= 500 && http_status <= 599 && http_status <> 529
     && attempt.dispatch_count = 1
     && attempt.http_status = Some http_status
     && Option.is_some attempt.provider_trace_sha256

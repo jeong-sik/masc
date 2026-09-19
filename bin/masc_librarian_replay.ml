@@ -236,7 +236,9 @@ let replay_keeper ~extent ~base_path ~keepers_dir keeper_id =
      | None -> Skipped "no_ended_turn_in_log"
      | Some trace_id ->
        let session_dir =
-         Filename.concat (Filename.concat base_path "traces") trace_id
+         Filename.concat
+           (Filename.concat (Config_dir_resolver.masc_root ~base_path) "traces")
+           trace_id
        in
        (match
           Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id:trace_id

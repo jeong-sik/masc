@@ -1,6 +1,6 @@
 (** How far a keeper's Librarian has read (RFC librarian-lifecycle §4.6).
 
-    One JSON object in [<keepers_dir>/<keeper>.librarian-progress.json], next
+    One JSON object in [<runtime-root>/keepers/<keeper>.librarian-progress.json], next
     to the keeper's turn-boundary log ({!Keeper_turn_boundaries}). It is a
     value, not a pointer into that log: the trace, how many atoms of its saved
     history have been read, and the digest of the message that opens the last

@@ -416,16 +416,12 @@ let keeper_artifact_path config keeper_name artifact =
   | Keeper_turn_boundaries_artifact ->
     Some
       (Keeper_turn_boundaries.path_for_keepers_dir
-         ~keepers_dir:
-           (Config_dir_resolver.keepers_dir_for_base_path
-              ~base_path:config.Workspace.base_path)
+         ~keepers_dir:(Workspace.keepers_runtime_dir config)
          ~keeper_id:keeper_name)
   | Keeper_librarian_progress_artifact ->
     Some
       (Keeper_librarian_progress.path_for_keepers_dir
-         ~keepers_dir:
-           (Config_dir_resolver.keepers_dir_for_base_path
-              ~base_path:config.Workspace.base_path)
+         ~keepers_dir:(Workspace.keepers_runtime_dir config)
          ~keeper_id:keeper_name)
   | Keeper_playground_bundles_artifact -> None
   | Keeper_configuration_artifact ->

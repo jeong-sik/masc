@@ -1146,6 +1146,7 @@ let initialize_owner_state_blocking
       | Env_config_core.Config_error _ ->
         Log.Server.warn "Exact-output authority unavailable; conversational runtime remains available. Configure internal lanes to enable affected features.")
    | Error _, _ | Ok _, None -> ());
+  Keeper_librarian_queue_refresh.start_existing ~base_path;
   let t1 = Eio.Time.now clock in
   Log.Server.info "State created (runtime state) in %.1fs" (t1 -. t0);
   bootstrap_server_state_blocking state;

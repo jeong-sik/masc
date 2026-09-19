@@ -2,7 +2,7 @@
     librarian-lifecycle §4.6).
 
     A finished turn appends one line to a per-keeper append-only
-    [<keeper>.turn-boundaries.jsonl], after its checkpoint is saved. The line
+    [<runtime-root>/keepers/<keeper>.turn-boundaries.jsonl], after its checkpoint is saved. The line
     names the turn and the end of the saved history in the atom vocabulary of
     {!Runtime_model_input_tail_window}: how many atoms the checkpoint holds and
     the digest of the message that opens the last one. Where a turn started is

@@ -244,8 +244,9 @@ let keeper_clear_failure
 (** Last-resort context clear.
 
     Drops all conversation messages from the keeper's checkpoint file,
-    optionally preserving the system prompt.  Dispatches
-    [Operator_clear_requested] to reset overflow-related FSM conditions. *)
+    optionally preserving the system prompt. The Owner's maintenance slot
+    excludes turns from the checkpoint read through its save and restart line.
+    A busy Owner refuses the clear without cancelling its current turn. *)
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let keeper_clear_body ~(config : Workspace.config) args : tool_result =
   match resolve_keeper_name_config ~config args with
@@ -257,6 +258,7 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
         (validation_error_data
            "reason is required for masc_keeper_clear (audit trail)")
     else
+    let clear_idle () =
     (* Registry race guard: if the keeper disappeared between
        [resolve_keeper_name] and [get], abort cleanly rather than silently
        proceed with a half-applied clear. *)
@@ -300,7 +302,7 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
         | Clear_attempted _ -> true
         | Clear_meta_unreadable _ | Clear_no_checkpoint -> false
       in
-      (* Dispatch FSM event to clear overflow conditions *)
+      (* Record the operator event; it changes no lifecycle condition. *)
       Keeper_context_runtime.dispatch_keeper_phase_event
         ~config ~keeper_name:name
         (Keeper_state_machine.Operator_clear_requested { preserve_system; reason });
@@ -410,6 +412,39 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
         ~labels:[("keeper", name);
                  ("preserve_system", Bool.to_string preserve_system)] ();
       result
+    in
+    match
+      Keeper_owner_registry.run_maintenance_if_idle
+        ~base_path:config.base_path ~keeper_name:name clear_idle
+    with
+    | Ok (`Ran result) -> result
+    | Ok (`Busy block) ->
+      keeper_clear_failure
+        ~class_:Tool_result.Workflow_rejection
+        ~effect_disposition:Tool_result.Proven_pre_effect
+        ~code:Tool_args.Conflict
+        ~message:
+          ("history not cleared: " ^ Keeper_owner.autonomous_block_to_string block
+           ^ ". Wait for or stop the current turn, then retry the clear.")
+        [ "name", `String name ]
+    | Error error ->
+      let effect_disposition, message =
+        match error with
+        | Keeper_owner_registry.Command_lookup_failed _
+        | Keeper_owner_registry.Command_lifecycle_reserved _ ->
+            Tool_result.Proven_pre_effect, "history not cleared: Keeper owner unavailable: "
+        | Keeper_owner_registry.Command_rejected _ ->
+            (* Owner shutdown can interrupt maintenance after its save. *)
+            Tool_result.Effect_outcome_unknown,
+            "history clear was not confirmed; the checkpoint may have changed: "
+      in
+      keeper_clear_failure
+        ~class_:Tool_result.Dependency_unavailable
+        ~effect_disposition
+        ~code:Tool_args.Precondition_failed
+        ~message:
+          (message ^ Keeper_owner_registry.command_error_to_string error)
+        [ "name", `String name ]
 
 let handle_keeper_clear ctx args : tool_result =
   keeper_clear_body ~config:ctx.config args

@@ -66,7 +66,8 @@ type try_provider_ctx =
        turn record on the trace measured, whichever runtime ran it. Read once
        per attempt, on that path only. *)
     carried_front_seed : unit -> Keeper_carried_front.seed_read
-  ; (* Where a front halved after a refusal is kept for the rest of the
+  ; carried_front_after_refusal : unit -> Keeper_carried_front.seed option
+  ; (* Where a front moved after a refusal is kept for the rest of the
        turn. The position is a fact about the history, not about the
        candidate that was refused, so the lane's next candidate composes
        from it instead of starting at the whole history again. *)
@@ -806,7 +807,14 @@ let request_view
    on every request while its stale blocks and front still answered the
    refusal path, which then retried the whole history without end. The cold
    seed is read only when no ledger answers. *)
-let carried_front ~keeper_name ~runtime_id ~session_id ~digest_at ~cold =
+let carried_front ~keeper_name ~runtime_id ~session_id ~digest_at ~after_refusal ~cold =
+  let after_refusal =
+    Option.bind after_refusal (fun seed ->
+      Result.to_option (Keeper_carried_front.for_history ~digest_at seed))
+  in
+  let without_ledger () =
+    match after_refusal with Some _ as front -> front | None -> cold ()
+  in
   match
     Keeper_model_input_ledger.Table.lookup_in_history
       ~keeper_name
@@ -814,9 +822,15 @@ let carried_front ~keeper_name ~runtime_id ~session_id ~digest_at ~cold =
       ~session_id
       ~digest_at
   with
-  | Keeper_model_input_ledger.Table.Holds ledger -> Keeper_carried_front.of_ledger ledger, None
-  | Keeper_model_input_ledger.Table.Dropped_stale stale -> cold (), Some stale
-  | Keeper_model_input_ledger.Table.Absent -> cold (), None
+  | Keeper_model_input_ledger.Table.Holds ledger ->
+    let front = Keeper_carried_front.of_ledger ledger in
+    (match after_refusal, front with
+     | Some refused, Some carried when refused.first_atom > carried.first_atom ->
+       Some refused, None
+     | Some refused, None -> Some refused, None
+     | (Some _ | None), (Some _ | None) -> front, None)
+  | Keeper_model_input_ledger.Table.Dropped_stale stale -> without_ledger (), Some stale
+  | Keeper_model_input_ledger.Table.Absent -> without_ledger (), None
 ;;
 
 (* The carried range runs here rather than in the caller because its front
@@ -915,6 +929,7 @@ let bounded_model_input_projection
         ~runtime_id:ctx.runtime_id
         ~session_id:(ledger_session ctx)
         ~digest_at:history_digest_at
+        ~after_refusal:(ctx.carried_front_after_refusal ())
         ~cold:(fun () -> (Lazy.force cold_seed).Keeper_carried_front.seed)
     in
     Option.iter
@@ -1867,6 +1882,7 @@ let carried_range_eviction_sequence
       ~(last_request : unit -> Keeper_model_input_ledger.request option)
       ~marks
       ~(evict : Keeper_carried_range.step -> bool)
+      ~hold_front
       ~(halve : first_atom:int -> atom_count:int -> retry:int -> bool)
       ~(last_resort : retry:int -> bool)
       ~(on_retry : retry:int -> eviction_retry -> unit)
@@ -1908,9 +1924,24 @@ let carried_range_eviction_sequence
         match ledger () with
         | Some ledger ->
           (match Keeper_carried_range.after_overflow ~marks ledger with
-           | Keeper_carried_range.Evicted _ as step ->
-             if evict step
+           | Keeper_carried_range.Evicted { first_atom; front_digest; _ } as step ->
+             (* Another candidate may have moved this turn's front beyond
+                this ledger's blocks. Evicting one of those blocks would
+                resend the same carried range. Halve the actual request. *)
+             let advances_request =
+               match last_request () with
+               | Some request -> first_atom > request.Keeper_model_input_ledger.first_atom
+               | None -> true
+             in
+             if not advances_request
+             then halve_last_request ~retry ~failed ~continue_
+             else if evict step
              then (
+               hold_front
+                 { Keeper_carried_front.first_atom
+                 ; front_digest
+                 ; source = Keeper_carried_front.Evicted_after_refusal { retry }
+                 };
                on_retry ~retry (Evicted_blocks step);
                continue_ ())
              else failed
@@ -1925,25 +1956,20 @@ let carried_range_eviction_sequence
    the refused request carried; [digest_at] is the lookup over the history
    that request was composed from, which the retry composes from again.
    - No digest at [first_atom]: nothing names the new front. [false].
-   - The pair has a ledger: the next composition reads the ledger, so the
-     answer is whether the ledger's front moved. A stale ledger was dropped
-     when the refused request was composed, so a ledger here holds.
-   - No ledger: the halved seed is what the next composition reads, and it is
-     after the refused front by construction. [true]. *)
+   The seed is held whether the pair's ledger moves or not: it may predate
+   this position, or be absent. The composition reads the held position on
+   every candidate, so the next request advances in all three cases. *)
 let halve_front ~digest_at ~move_ledger ~hold ~first_atom ~retry =
   match Option.bind digest_at (fun digest_at -> digest_at first_atom) with
   | None -> false
   | Some front_digest ->
-    (match move_ledger ~first_atom ~front_digest with
-     | Keeper_model_input_ledger.Table.Moved -> true
-     | Keeper_model_input_ledger.Table.Not_moved -> false
-     | Keeper_model_input_ledger.Table.No_pair_ledger ->
-       hold
-         { Keeper_carried_front.first_atom
-         ; front_digest
-         ; source = Keeper_carried_front.Halved_after_refusal { retry }
-         };
-       true)
+    let (_ : Keeper_model_input_ledger.Table.move) = move_ledger ~first_atom ~front_digest in
+    hold
+      { Keeper_carried_front.first_atom
+      ; front_digest
+      ; source = Keeper_carried_front.Halved_after_refusal { retry }
+      };
+    true
 ;;
 
 (** Same as [run_try_provider], except a refusal that says the request
@@ -2027,6 +2053,7 @@ let run_try_provider_with_carried_range_eviction
         ~last_request:(fun () ->
           Option.map (fun (sent : sent_request) -> sent.request) !(state.last_request))
         ~marks:ctx.context_marks
+        ~hold_front:ctx.hold_carried_front
         ~evict:(function
           | Keeper_carried_range.Evicted { first_atom; front_digest; _ } ->
             (match

@@ -28,8 +28,7 @@ let turn_boundary_position ~checkpoint_owner saved_checkpoint =
    built or written is reported and the turn still finishes. That holds for an
    exception as well as an [Error]: past this point the turn has a saved
    checkpoint and no receipt yet, so nothing raised here may escape except a
-   cancellation. After a transient failure the next line's span covers both
-   turns; a torn tail is different, see {!Keeper_turn_boundaries}. *)
+   cancellation. After a failure the next line's span covers both turns. *)
 let record_turn_boundary
       ~config
       ~(meta : Keeper_meta_contract.keeper_meta)

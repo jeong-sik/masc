@@ -1243,6 +1243,65 @@ let test_corrupt_snapshot_is_a_dependency_failure () =
   Alcotest.(check bool) "the detail names the file" true (mentions_path 0)
 ;;
 
+(* A crash mid-append leaves a line with no newline. The next absorb commits
+   anyway: the append cuts the torn line back to the last complete row before
+   it writes. A librarian that could not commit would spend a provider call
+   every cadence and never get past the torn line on its own. *)
+let test_a_torn_tail_does_not_stop_the_next_absorb () =
+  let keeper_id = "torn-tail-keeper" in
+  let absorbed digit =
+    let f = fact (Printf.sprintf "an absorbed claim %c" digit) in
+    { Masc.Keeper_memory_absorbed.recorded_at = Time_compat.now ()
+    ; trace_id = "torn-tail"
+    ; memory_id = Masc.Keeper_memory_os_types.memory_id f
+    ; into = memory_id 'c'
+    ; fact = f
+    }
+  in
+  let append ~keepers_dir record =
+    Masc.Keeper_memory_absorbed.append_all ~keepers_dir ~keeper_id [ record ]
+  in
+  let path_in keepers_dir =
+    Masc.Keeper_memory_absorbed.path_for_keepers_dir ~keepers_dir ~keeper_id
+  in
+  (* One row as the store itself writes it, so the fixture below is not a
+     hand-built guess at the format. *)
+  let complete_row =
+    with_temp_dir (fun donor ->
+      match append ~keepers_dir:donor (absorbed 'a') with
+      | Error error ->
+        Alcotest.fail (Masc.Keeper_memory_absorbed.append_error_to_string error)
+      | Ok () -> In_channel.with_open_text (path_in donor) In_channel.input_all)
+  in
+  with_temp_dir (fun keepers_dir ->
+    let path = path_in keepers_dir in
+    (* the complete row, then the head of one a crash never finished *)
+    Out_channel.with_open_text path (fun oc ->
+      Out_channel.output_string oc (complete_row ^ "{\"recorded_at\":\"2026-09-18"));
+    (match append ~keepers_dir (absorbed 'b') with
+     | Ok () -> ()
+     | Error error ->
+       Alcotest.failf
+         "a torn tail must not stop the next absorb: %s"
+         (Masc.Keeper_memory_absorbed.append_error_to_string error));
+    let lines =
+      In_channel.with_open_text path In_channel.input_all
+      |> String.split_on_char '\n'
+      |> List.filter (fun line -> line <> "")
+    in
+    Alcotest.(check int)
+      "the complete row and the new one, the torn head gone"
+      2
+      (List.length lines);
+    List.iter
+      (fun line ->
+         match Yojson.Safe.from_string line with
+         | _ -> ()
+         | exception Yojson.Json_error detail ->
+           Alcotest.failf "a line left behind does not decode: %s (%s)" line detail)
+      lines)
+;;
+
 (* RFC-0456 §4.2: a fact a librarian pass absorbed is found through
    source=absorbed and source=all, named with the claim that now says it. Rows a
    pass wrote before a replace that failed are recognised: a row for a fact
@@ -1809,6 +1868,10 @@ let () =
             "corrupt snapshot is a dependency failure"
             `Quick
             test_corrupt_snapshot_is_a_dependency_failure
+        ; Alcotest.test_case
+            "a torn tail does not stop the next absorb"
+            `Quick
+            test_a_torn_tail_does_not_stop_the_next_absorb
         ; Alcotest.test_case
             "absorbed facts are searchable"
             `Quick

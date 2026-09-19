@@ -37,6 +37,8 @@ let append_failure_detail : Fs_compat.private_jsonl_append_error -> string =
   function
   | Fs_compat.Incomplete_jsonl_tail ->
     "the ledger does not end at a line boundary"
+  | Fs_compat.Incomplete_jsonl_tail_truncate_failed _ ->
+    "the ledger's unfinished last line could not be cut"
   | Fs_compat.Invalid_jsonl_suffix -> "the entry is not one complete JSONL line"
   | Fs_compat.Negative_expected_end_offset offset ->
     Printf.sprintf "the caller passed a negative end offset (%d)" offset

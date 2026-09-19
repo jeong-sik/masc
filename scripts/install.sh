@@ -43,8 +43,8 @@
 #   MASC_RELEASE_BASE_URL  Override the release asset base URL (mirror or
 #                  air-gapped install; file:// works). Defaults to
 #                  https://github.com/<repo>/releases/download
-#   AGENT_CORE_MODEL_CATALOG  Explicit full model catalog override. When unset, AGENT_CORE's
-#                  embedded catalog is merged with the deployment overlay.
+#   AGENT_CORE_MODEL_CATALOG  Explicit full model catalog override, owning every
+#                  row. When unset, AGENT_CORE's embedded catalog is the only one.
 #   MASC_RUNTIME_EVENTS=0/1  Override OCaml Runtime_events. When unset, the
 #                  generated server command keeps the binary's default.
 #   MASC_WIZARD=0/1  Same as --no-wizard / --wizard

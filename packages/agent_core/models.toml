@@ -12,10 +12,11 @@
 # a different way of being told to think.
 #
 # Serving a model this file has no row for: add the row. A deployment does not
-# restate a row that exists here -- a second copy of a fact is a second thing to
-# keep in step, and the overlay that used to hold those copies ended up
-# disagreeing with this file on tool support, on replay policy, and on one
-# window by a factor of five.
+# restate a row that exists here. A partial second copy is a second thing to
+# keep in step and nothing reads both, so the two drift: the last one to exist
+# disagreed with this file on tool support, on replay policy, and on one
+# window by a factor of five, and every disagreement went to whichever side
+# the resolver happened to reach.
 #
 # One endpoint cannot be given a row here. The install wizard builds its
 # provider id from a hash of the operator's answers, so no row can ever name it,
@@ -26,7 +27,11 @@
 # refused outright if it states the same facts.
 #
 # AGENT_CORE_MODEL_CATALOG replaces this file wholesale for a deployment that
-# must not edit it, and then owns every row.
+# must not edit it, and then owns every row. That is a substitution, not a
+# second copy: exactly one catalog answers either way, and the deployment
+# that substitutes carries the cost of staying current knowingly. No
+# deployment sets this variable today; the installer forwards it when an
+# operator does.
 
 # Anthropic Models
 # Current Claude model limits and thinking modes are sourced from the official
@@ -693,7 +698,7 @@ supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
 # Same correction as deepseek-v4-flash above; see that row's comment. Confirmed
-# by the live overlay's deepseek-v4-pro row (2026-08-04 live probe).
+# by a live probe of this row on 2026-08-04.
 reasoning_streaming_format = "delta:reasoning"
 # Same tool-call replay contract as the deepseek-v4-flash row above, and the
 # same boundary: this endpoint's rule covers the active sequence, not every
@@ -947,8 +952,8 @@ supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
 # Same ollama_think/Enable_not_encodable defect as deepseek-v4-flash above
-# (2026-08-15, closes #28749); confirmed by the live overlay's kimi-k2.6 row
-# (2026-08-04 live probe: message keys ['role','content','reasoning']).
+# (2026-08-15, closes #28749); confirmed by a live probe of this row on
+# 2026-08-04: message keys ['role','content','reasoning'].
 reasoning_streaming_format = "delta:reasoning"
 # Kimi K2 docs: reasoning content must be replayed (hard-required on tool turns,
 # recommended on all turns). Without this, the base replay policy is no_replay.
@@ -969,8 +974,8 @@ max_context_tokens = 262144
 supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
-# Same correction as kimi-k2.6 above; confirmed by the live overlay's
-# kimi-k2.7-code row (2026-08-04 live probe, same field shape).
+# Same correction as kimi-k2.6 above; confirmed by a live probe of the
+# kimi-k2.7-code row on 2026-08-04, same field shape.
 reasoning_streaming_format = "delta:reasoning"
 # Kimi K2.7-code docs: Preserved Thinking is always-on (keep reasoning_content of
 # every historical assistant message) and thinking cannot be disabled.
@@ -1034,7 +1039,7 @@ supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
 # Same ollama_think/Enable_not_encodable defect as deepseek-v4-flash above
-# (2026-08-15, closes #28749); confirmed by the live overlay's minimax-m3 row.
+# (2026-08-15, closes #28749); confirmed by a live probe of this row.
 # reasoning_streaming_format was already correct here — only the control-wire
 # axis and the coupled budget flag were wrong.
 reasoning_streaming_format = "delta:reasoning"
@@ -2567,7 +2572,7 @@ identity_hosts = ["ollama.com"]
 
 # Kimi's coding-plan endpoint. Separate row from [id = "kimi"]: a different
 # base URL, a different key, and an OpenAI-compatible wire rather than Kimi's
-# own. Carried by deployments in an overlay until 2026-09-18.
+# own.
 [[providers]]
 id = "kimi_coding"
 kind = "openai_compat"
@@ -3593,7 +3598,7 @@ supports_native_streaming = true
 # Local Ollama Gemma 4 26B-A4B QAT build, probed 2026-06-12. No
 # supports_tool_choice here: the ollama preset says false because native
 # /api/chat does not serialize the field, so a row claiming true would have a
-# forced choice dropped with no error. The deleted overlay claimed true.
+# forced choice dropped with no error.
 [[models]]
 id_prefix = "hf.co/unsloth/gemma-4-26B-A4B-it-qat-GGUF:UD-Q4_K_XL"
 provider_name = "ollama"

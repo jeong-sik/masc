@@ -138,7 +138,6 @@
   test_mcp_session
   test_metrics
   test_model_catalog_default
-  test_model_catalog_overlay
   test_model_identifiers
   test_module_check
   test_multimodal
@@ -280,7 +279,6 @@
   test_mcp_session
   test_metrics
   test_model_catalog_default
-  test_model_catalog_overlay
   test_model_identifiers
   test_module_check
   test_multimodal

@@ -12,7 +12,6 @@ let bootstrap_base_path_config_root = Config_root_bootstrap.bootstrap_base_path_
 let startup_config_resolution = Config_root_bootstrap.startup_config_resolution
 
 let agent_core_model_catalog_env_var_name = "AGENT_CORE_MODEL_CATALOG"
-let agent_core_models_overlay_toml_filename = "agent-core-models-overlay.toml"
 
 (* Seconds withheld from tool-blob maintenance so the boot stages that follow
    it (Runtime_params restore, credential audit, Domain_pool, Keeper gate
@@ -81,60 +80,10 @@ let warn_ignored_config_root_full_catalogs
       if Option.is_some (existing_file path)
       then
         Log.Misc.warn
-          "model_catalog: ignoring retired config-root full catalog %s; AGENT_CORE embedded catalog plus agent-core-models-overlay.toml is the deployment SSOT (set AGENT_CORE_MODEL_CATALOG explicitly only for a deliberate full replacement)"
+          "model_catalog: ignoring retired config-root full catalog %s; the AGENT_CORE embedded catalog is the only place a provider or model fact is written (set AGENT_CORE_MODEL_CATALOG explicitly only for a deliberate full replacement)"
           path)
 
-(* RFC-0342 D1 / Agent Core contract: deployment-local capability deltas live in a
-   config-root overlay merged onto the embedded catalog
-   ([Model_catalog.set_global_overlay]), instead of a full-catalog fork that
-   shadows every embedded row and goes stale on each AGENT_CORE release. Only an
-   operator-supplied [AGENT_CORE_MODEL_CATALOG] keeps full-replacement precedence. *)
-let resolve_agent_core_model_catalog_overlay_path ?config_root () =
-  match config_root with
-  | None -> None
-  | Some root ->
-    let root = String.trim root in
-    if String.equal root "" then
-      None
-    else
-      existing_file (Filename.concat root agent_core_models_overlay_toml_filename)
-
-(* Per-row degradation: a poisoned overlay row (e.g. a stale field left by
-   another release) is excluded with one WARN per row instead of failing the
-   whole boot — install must not be blocked by config residue. Whole-file
-   failures (unreadable, broken TOML, duplicate surviving rows) still raise
-   [Config_error], as does the [AGENT_CORE_MODEL_CATALOG] full-replacement
-   path, which keeps the strict loader. *)
-let configure_agent_core_model_catalog_overlay
-      ?config_root
-      ?(load_catalog = Llm_provider.Model_catalog.load_file_lenient)
-      ?(set_overlay = Llm_provider.Model_catalog.set_global_overlay)
-      ()
-  =
-  match resolve_agent_core_model_catalog_overlay_path ?config_root () with
-  | None -> None
-  | Some path ->
-    (match load_catalog path with
-     | Ok (overlay, skipped) ->
-       List.iter
-         (fun (skip : Llm_provider.Model_catalog.skipped_entry) ->
-            Log.Misc.warn
-              "model_catalog: overlay %s skipping entry %s: %s"
-              path
-              skip.entry_label
-              skip.skip_reason)
-         skipped;
-       set_overlay overlay;
-       Log.Misc.info
-         "model_catalog: deployment overlay %s installed onto embedded catalog"
-         path;
-       Some path
-     | Error detail ->
-       raise
-         (Env_config_core.Config_error
-            (Printf.sprintf "catalog overlay %s: %s" path detail)))
-
-(* A config-load failure (catalog overlay, runtime.toml) must not be reported
+(* A config-load failure (runtime.toml) must not be reported
    as a model connection problem: the model was never reached. The diagnostic
    names the class, carries the underlying file-path-bearing detail verbatim,
    and states the next action. *)
@@ -148,7 +97,6 @@ let config_load_failure_diagnostic ~detail =
 let exact_output_catalog_source_to_string = function
   | Exact_output.Embedded_catalog -> "embedded"
   | Exact_output.Full_replacement_catalog -> "full replacement"
-  | Exact_output.Overlay_catalog -> "overlay"
 ;;
 
 let exact_output_collision_to_string = function
@@ -156,8 +104,6 @@ let exact_output_collision_to_string = function
   | Exact_output.Duplicate_model_identity -> "duplicate model identity"
   | Exact_output.Duplicate_target_identity -> "duplicate target identity"
   | Exact_output.Provider_alias_shadow -> "provider alias shadow"
-  | Exact_output.Target_identity_shadow -> "target identity shadow"
-  | Exact_output.Model_identity_shadow -> "model identity shadow"
 ;;
 
 let exact_output_binding_component_to_string = function
@@ -297,7 +243,7 @@ let warn_rejected_exact_output_slots registry =
        match diagnosis with
        | Runtime_exact_output_registry.Declared_target_binding_rejected ->
          Log.Server.warn
-           "exact_output: lane %S slot %d (%S) ignored because the overlay declares that target but its provider binding was rejected (see the target binding report above); fix the binding, the slot needs no change"
+           "exact_output: lane %S slot %d (%S) ignored because the binding it names resolved to no AGENT_CORE catalog row (see the target binding report above); an endpoint the install wizard created can never match one, so point the slot at a binding the catalog knows or add the row"
            slot.lane_id
            slot.position
            slot.slot_id
@@ -308,7 +254,7 @@ let warn_rejected_exact_output_slots registry =
             registries; #32653 measured the catalog-id form failing at
             dispatch 27 times on 2026-08-29. *)
          Log.Server.warn
-           "exact_output: lane %S slot %d (%S) ignored because it is a runtime.toml runtime id (provider %S, api-name %S) with no overlay [[targets]] row of the same id; this lane dispatches by configured runtime id, so keep the id and add an overlay target with the same id for model %S"
+           "exact_output: lane %S slot %d (%S) names a binding (provider %S, api-name %S) that is not an exact-output target; this lane dispatches by runtime id, so a slot must resolve as both a runtime and a target, and a subscription CLI resolves only as a runtime; give the lane an HTTP binding for model %S"
            slot.lane_id
            slot.position
            slot.slot_id
@@ -317,7 +263,7 @@ let warn_rejected_exact_output_slots registry =
            api_name
        | Runtime_exact_output_registry.Configured_runtime_only { provider_id; api_name } ->
          Log.Server.warn
-           "exact_output: lane %S slot %d (%S) ignored because it is a runtime.toml runtime id (provider %S, api-name %S), not an exact-output target; this lane dispatches by admitted target, so name the overlay [[targets]] id that declares model %S"
+           "exact_output: lane %S slot %d (%S) names a binding (provider %S, api-name %S) that is not an exact-output target; this lane dispatches by admitted target, and a subscription CLI has no endpoint to resolve against the catalog, so name an HTTP binding for model %S"
            slot.lane_id
            slot.position
            slot.slot_id
@@ -326,7 +272,7 @@ let warn_rejected_exact_output_slots registry =
            api_name
        | Runtime_exact_output_registry.Unknown_to_both_registries ->
          Log.Server.warn
-           "exact_output: lane %S slot %d (%S) ignored because it is neither an overlay target nor an enabled configured runtime; the catalog moved on, the runtime is disabled, or the id is mistyped"
+           "exact_output: lane %S slot %d (%S) ignored because no enabled binding carries that id; the binding is disabled, it was removed, or the id is mistyped"
            slot.lane_id
            slot.position
            slot.slot_id)
@@ -349,7 +295,7 @@ let warn_rejected_exact_output_slots registry =
        List.length (List.filter (fun (_, diagnosis) -> predicate diagnosis) diagnoses)
      in
      Log.Server.error
-       "exact_output: %d slot(s) ignored across %d lane(s) (%s): %d unknown to both registries, %d runtime.toml runtime id(s) without a same-id overlay target, %d declared target(s) whose binding was rejected — fix runtime.toml or the overlay"
+       "exact_output: %d slot(s) ignored across %d lane(s) (%s): %d naming no enabled binding, %d naming a binding that does no exact output, %d whose binding resolved to no catalog row — fix runtime.toml"
        (List.length rejected)
        (List.length lanes)
        (String.concat ", " lanes)
@@ -419,6 +365,21 @@ let warn_optional_exact_output_lane registry ~lane_id ~feature =
    slot that runs on it (#37004). The slots are the bindings. *)
 let exact_output_targets_of_runtimes () =
   let runtimes, (_ : string list) = Runtime.runtimes_and_media_failover () in
+  (* An exact-output slot resolves against the AGENT_CORE catalog, which speaks
+     only of endpoints. A subscription CLI has none — it is a local binary named
+     by [command] — so declaring one as a target only to have the binding
+     resolver reject it reports a missing catalog provider where the truth is
+     that this kind of runtime does no exact output. *)
+  let runtimes =
+    List.filter
+      (fun (rt : Runtime.t) ->
+         match rt.execution with
+         | Runtime_execution.Agent_core _ -> true
+         | Runtime_execution.Codex_app_server _
+         | Runtime_execution.Claude_code _
+         | Runtime_execution.Antigravity_cli _ -> false)
+      runtimes
+  in
   List.map
     (fun (rt : Runtime.t) : Exact_output.declared_target ->
        { target_ref = rt.id
@@ -427,6 +388,13 @@ let exact_output_targets_of_runtimes () =
        ; enable_thinking = rt.model.Runtime_schema.thinking_support
        ; connect_timeout_s = rt.provider.Runtime_schema.connect_timeout_s
        ; body_timeout_s = None
+       ; (* A slot's credential is the one its binding names; the catalog row
+            carries the provider's usual environment name, not this
+            deployment's. *)
+         api_key_env =
+           (match rt.provider.Runtime_schema.credentials with
+            | Some (Runtime_schema.Env name) -> Some name
+            | Some (Runtime_schema.File _ | Runtime_schema.Inline _) | None -> Some "")
        })
     runtimes
 ;;
@@ -640,7 +608,6 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
   Server_slack_connector_config.configure ~config_root;
   warn_ignored_config_root_full_catalogs ~config_root ();
   let (_ : string option) = configure_agent_core_model_catalog_env () in
-  let (_ : string option) = configure_agent_core_model_catalog_overlay ~config_root () in
   apply_runtime_toml ~base_path;
   Keeper_runtime_resolved.init ();
   (* Boot-time observability: emit the resolved runtime knobs once, right after
@@ -1535,13 +1502,8 @@ let resume_model_configuration () =
   | Some path ->
     let resumed = Runtime.with_config_lock ~runtime_config_path:path (fun () ->
       let initialized =
-        match
-          configure_agent_core_model_catalog_overlay ~config_root:(Filename.dirname path) ()
-        with
-        | (_ : string option) ->
-          Runtime.init_default_degraded_report ~config_path:path
-          |> Result.map_error Runtime.strict_init_error_to_string
-        | exception Env_config_core.Config_error detail -> Error detail
+        Runtime.init_default_degraded_report ~config_path:path
+        |> Result.map_error Runtime.strict_init_error_to_string
       in
       match initialized with
       | Error detail ->

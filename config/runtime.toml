@@ -46,8 +46,9 @@ access = "read-write"
 # same ollama_cloud wire (no new credential): GLM-5.3-Flash is the newest flash
 # coding model (Z.AI 2026-08-14, /api/show 2026-08-29), 1M context, tools+vision.
 default = "ollama_cloud.ollama-cloud-glm-5-3-flash"
-# Vision read fleet (RFC-0414). When a keeper's assigned runtime cannot take an
-# image, analyze_image's eager read walks these first. gemma4-31b (Gemma 4,
+# Vision read fleet (RFC-0414). When no runtime in a keeper's lane can take an
+# image, the eager read and analyze_image read it with these, in order. They
+# never take the keeper's turn. gemma4-31b (Gemma 4,
 # strong OCR/vision) is a cloud runtime fast enough to be usable; a local 27B
 # measured 5+ min per read under load, so it is deliberately not here.
 # gemma4-31b declares image input and an explicit image payload limit below.
@@ -479,7 +480,6 @@ streaming = true
 
 [models.deepseek-v4-pro.capabilities]
 max-output-tokens = 384000
-supports-tool-choice = true
 # DeepSeek Chat Completions toggles thinking.type; reasoning_effort is a
 # separate effort control (https://api-docs.deepseek.com/guides/thinking_mode/).
 thinking-control-format = "thinking-object"
@@ -496,7 +496,6 @@ streaming = true
 
 [models.deepseek-v4-flash.capabilities]
 max-output-tokens = 384000
-supports-tool-choice = false
 thinking-control-format = "none"
 # ollama.com /v1 streams the reasoning delta under "reasoning" (probe, #26788).
 # thinking-control-format above is the request axis only; without this line the
@@ -521,7 +520,6 @@ streaming = true
 # agent_core models.toml's supports_tool_choice=false (provider_runtime_binding.ml
 # applies this override last) while the transport silently drops forced tool
 # choice. Do not re-enable without a serializer path + model-side proof.
-supports-tool-choice = false
 thinking-control-format = "chat_template_token"
 thinking-control-token = "<|think|>"
 supports-top-k = true
@@ -542,7 +540,6 @@ streaming = true
 [models.gemma4-e2b-it-qat.capabilities]
 # This exact local model reports 131072 context and tools/vision/audio via
 # `ollama show hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL`.
-supports-tool-choice = false
 thinking-control-format = "chat_template_token"
 thinking-control-token = "<|think|>"
 supports-top-k = true
@@ -565,7 +562,6 @@ streaming = true
 # Same transport constraint as the gemma4 rows above: AGENT_CORE native Ollama
 # /api/chat does not serialize tool_choice (agent_core backend_ollama.ml:24), so
 # a forced tool choice would be dropped without an error.
-supports-tool-choice = false
 # Qwen3.8 answers the generic Ollama top-level `think` field rather than a
 # chat-template token. Probed 2026-09-12: `"think": false` suppressed the
 # reasoning block, and a tools request returned get_weather(city="Seoul").
@@ -603,11 +599,17 @@ streaming = true
 
 [models.glm-5-3.capabilities]
 max-output-tokens = 128000
-supports-tool-choice = false
 supports-response-format-json = true
 supports-structured-output = false
 
 [glm-coding.glm-5-3]
+# The deployment has carried these three since before this table existed, and
+# an empty binding does not mean "defaults" — it means whatever the runtime
+# falls back to. #37039 measured that shape on another lane: a runtime that
+# declares no capacity takes max_int and sends the whole history every turn.
+context-high-water-tokens = 100000
+context-low-water-tokens = 70000
+max-concurrent = 4
 
 # Kimi For Coding — second slot of the exact-output judgement lanes since the
 # 2026-08-28 swap (json_schema+strict probed live; quota independent of
@@ -647,7 +649,6 @@ streaming = true
 
 [models.minimax-m3.capabilities]
 max-output-tokens = 131072
-supports-tool-choice = false
 thinking-control-format = "none"
 # SSOT = agent-core models.toml per official MiniMax Chat documentation; Chat
 # tool_choice, response_format, and structured output are not documented.
@@ -675,7 +676,6 @@ streaming = true
 reasoning-effort = "low"
 
 [models.ollama-cloud-deepseek-v4-1-flash.capabilities]
-supports-tool-choice = false
 supports-reasoning-budget = false
 thinking-control-format = "reasoning-effort"
 # ollama.com /v1 streams the reasoning delta under "reasoning" (probe, #26788).
@@ -697,7 +697,6 @@ thinking-support = true
 streaming = true
 
 [models.ollama-cloud-deepseek-v4-flash.capabilities]
-supports-tool-choice = false
 thinking-control-format = "none"
 # ollama.com /v1 streams the reasoning delta under "reasoning" (probe, #26788).
 # thinking-control-format above is the request axis only; without this line the
@@ -734,7 +733,6 @@ thinking-support = true
 streaming = true
 
 [models.ollama-cloud-deepseek-v4-pro.capabilities]
-supports-tool-choice = false
 thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
@@ -750,7 +748,6 @@ thinking-support = true
 streaming = true
 
 [models.ollama-cloud-gemma4-31b.capabilities]
-supports-tool-choice = false
 thinking-control-format = "none"
 supports-image-input = true
 supports-multimodal-inputs = true
@@ -766,7 +763,6 @@ thinking-support = true
 streaming = true
 
 [models.ollama-cloud-glm-5-1.capabilities]
-supports-tool-choice = false
 thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
@@ -781,7 +777,6 @@ thinking-support = true
 streaming = true
 
 [models.ollama-cloud-glm-5-2.capabilities]
-supports-tool-choice = false
 thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
@@ -802,7 +797,6 @@ thinking-support = true
 streaming = true
 
 [models.ollama-cloud-glm-5-3.capabilities]
-supports-tool-choice = false
 thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
@@ -827,13 +821,11 @@ thinking-support = true
 streaming = true
 
 [models.ollama-cloud-glm-5-3-flash.capabilities]
-supports-tool-choice = false
 thinking-control-format = "none"
 # ollama.com /v1 streams the reasoning delta under "reasoning" (probe,
 # 2026-08-29; same contract as the deepseek rows above). thinking-control-format
 # above is the request axis only; without this line the response axis resolves
-# to reading no field and the reasoning is discarded. Mirrors the overlay row
-# (config/agent-core-models-overlay.toml, glm-5.3-flash).
+# to reading no field and the reasoning is discarded.
 reasoning-streaming-format = "delta:reasoning"
 supports-image-input = true
 supports-multimodal-inputs = true
@@ -853,7 +845,6 @@ thinking-support = true
 streaming = true
 
 [models.ollama-cloud-gpt-oss-20b.capabilities]
-supports-tool-choice = false
 thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
@@ -869,7 +860,6 @@ thinking-support = true
 streaming = true
 
 [models.ollama-cloud-gpt-oss-120b.capabilities]
-supports-tool-choice = false
 thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
@@ -885,7 +875,6 @@ thinking-support = true
 streaming = true
 
 [models.ollama-cloud-kimi-k2-6.capabilities]
-supports-tool-choice = false
 thinking-control-format = "none"
 supports-image-input = true
 supports-multimodal-inputs = true
@@ -906,7 +895,6 @@ thinking-support = true
 streaming = true
 
 [models.ollama-cloud-kimi-k3.capabilities]
-supports-tool-choice = false
 thinking-control-format = "none"
 supports-image-input = true
 supports-multimodal-inputs = true
@@ -922,7 +910,6 @@ thinking-support = true
 streaming = true
 
 [models.ollama-cloud-minimax-m2-7.capabilities]
-supports-tool-choice = false
 thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
@@ -937,7 +924,6 @@ thinking-support = false
 streaming = true
 
 [models.ollama-cloud-mistral-large-3-675b.capabilities]
-supports-tool-choice = false
 thinking-control-format = "none"
 supports-image-input = true
 supports-multimodal-inputs = true
@@ -953,7 +939,6 @@ thinking-support = true
 streaming = true
 
 [models.ollama-cloud-nemotron-3-nano-30b.capabilities]
-supports-tool-choice = false
 thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
@@ -969,7 +954,6 @@ thinking-support = true
 streaming = true
 
 [models.ollama-cloud-nemotron-3-super.capabilities]
-supports-tool-choice = false
 thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
@@ -985,7 +969,6 @@ thinking-support = true
 streaming = true
 
 [models.ollama-cloud-nemotron-3-ultra.capabilities]
-supports-tool-choice = false
 thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
@@ -1001,7 +984,6 @@ thinking-support = true
 streaming = true
 
 [models.ollama-cloud-qwen3-5-397b.capabilities]
-supports-tool-choice = false
 # ollama.com exposes this binding through its OpenAI-compatible /v1 endpoint.
 # Reasoning is inherent/default-on and no explicit thinking-control field is
 # accepted on this wire. The native provider keeps the catalog's Ollama control.
@@ -1058,8 +1040,8 @@ candidates = [
 # (<provider>.<model>). A lane of that name is taken first, so a lane named
 # after a runtime still wins. A name that is neither is rejected at load — which
 # is why a lane with a name of its own is worth more than one that copies a
-# runtime id: delete it and the load fails instead of quietly falling back to
-# [this runtime, [runtime].default].
+# runtime id: delete it and the load fails instead of quietly walking that
+# runtime alone.
 [runtime.assignments]
 # example: pin a test keeper to an explicit runtime
 # canary = "deepseek.deepseek-v4-pro"

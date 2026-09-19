@@ -1188,30 +1188,10 @@ let load_embedded_once () =
 
 let runtime_override : t option Atomic.t = Atomic.make None
 
-(* Deployment overlay merged onto the embedded catalog by [global]. Kept
-   separate from [runtime_override] so a full replacement (tests, explicit
-   AGENT_CORE_MODEL_CATALOG-style callers) still wins outright, and so the merged
-   result can be cached and invalidated independently. *)
-let overlay_catalog : t option Atomic.t = Atomic.make None
-
-(* The cache pairs the merged result with the exact overlay value it was
-   derived from. Readers accept a hit only when the cached overlay is
-   physically the current one, so a racing writer that publishes a merge of a
-   just-replaced overlay can never pin stale capabilities: the identity check
-   fails and the next call recomputes from the fresh overlay. The worst case
-   under contention is a redundant pure merge, never a stale read. *)
-let merged_cache : (t * t) option Atomic.t = Atomic.make None
 let set_global t = Atomic.set runtime_override (Some t)
-
-let set_global_overlay t =
-  Atomic.set overlay_catalog (Some t);
-  Atomic.set merged_cache None
-;;
 
 let clear_global () =
   Atomic.set runtime_override None;
-  Atomic.set overlay_catalog None;
-  Atomic.set merged_cache None;
   Atomic.set embedded_catalog Unloaded
 ;;
 
@@ -1220,16 +1200,9 @@ let global () =
   | Some _ as o -> o
   | None ->
     let embedded_value = load_embedded_once () in
+    (* Re-read: [set_global] may have landed while the embedded catalog loaded,
+       and a full replacement wins over the embedded rows. *)
     (match Atomic.get runtime_override with
      | Some _ as o -> o
-     | None ->
-       (match Atomic.get overlay_catalog with
-        | None -> Some embedded_value
-        | Some overlay ->
-          (match Atomic.get merged_cache with
-           | Some (cached_overlay, merged) when cached_overlay == overlay -> Some merged
-           | Some _ | None ->
-             let merged = merge ~base:embedded_value ~overlay in
-             Atomic.set merged_cache (Some (overlay, merged));
-             Some merged)))
+     | None -> Some embedded_value)
 ;;

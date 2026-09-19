@@ -8,8 +8,8 @@ install boots zero keepers until an operator opts a team in.
 `scripts/seed-team.sh <preset> <base-path>` copies a preset's `keepers/` and
 into `<base-path>/.masc/config/`. A preset's keepers inherit
 `[runtime].default` from `runtime.toml` and never name a model themselves, so a
-preset never edits the model catalog and stays coherent with `runtime.toml` and AGENT_CORE's embedded catalog plus the
-deployment `agent-core-models-overlay.toml` by construction.
+preset never edits the model catalog and stays coherent with `runtime.toml`
+and AGENT_CORE's embedded catalog by construction.
 
 Presets live at the repo top level (`presets/`), not under `config/`, so the
 server's config-root bootstrap never copies them into a live runtime config

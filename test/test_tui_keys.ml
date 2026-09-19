@@ -1351,9 +1351,14 @@ let test_runtime_footer_is_the_tables () =
   List.iter
     (fun piece ->
       Alcotest.(check bool) ("keeper lanes name " ^ piece) true (has lanes piece))
-    [ "c:clients"; "Left / Esc:back"; "p:all runtimes"; "e:add failover"; "r:refresh" ];
+    [ "c:clients"; "Left / Esc:back"; "p:all runtimes"; "e:add failover"; "r:refresh"
+    ; "a:new lane"; "x:drop candidate"; "J/K:move candidate"; "D:remove lane" ];
   Alcotest.(check bool) "all runtimes name where p goes" true (has all "p:service lanes");
   Alcotest.(check bool) "and offer no failover to append" false (has all "e:add failover");
+  List.iter
+    (fun piece ->
+      Alcotest.(check bool) ("all runtimes offer no lane edit " ^ piece) false (has all piece))
+    [ "a:new lane"; "x:drop candidate"; "J/K:move candidate"; "D:remove lane" ];
   Alcotest.(check bool) "the refresh is not called live" false (has lanes "live refresh");
   (* The sheet reads the same table and names the whole walk once, because it
      is not drawn from either reading. *)

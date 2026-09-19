@@ -62,25 +62,25 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
   List.iter
     (fun name -> mkdir_p (Filename.concat config_root name))
     [ "keepers"; "prompts" ];
-  let overlay_path = Filename.concat config_root "agent-core-models-overlay.toml" in
+  let deployment_path = Filename.concat config_root "deployment-models.toml" in
   let replacement_path = Filename.concat root "replacement-models.toml" in
   let runtime_path = Filename.concat config_root "runtime.toml" in
-  write_file overlay_path overlay_catalog;
+  write_file deployment_path deployment_catalog;
   write_file replacement_path replacement_catalog;
 
-  let overlay_snapshot =
+  let deployment_snapshot =
     load_control_snapshot
-      (Exact_output.Embedded_with_overlay
-         { source = overlay_path; contents = overlay_catalog })
+      (Exact_output.Full_replacement
+         { source = deployment_path; contents = deployment_catalog })
   in
-  require_admitted overlay_snapshot overlay_target;
+  require_admitted deployment_snapshot deployment_target;
   let replacement_snapshot =
     load_control_snapshot
       (Exact_output.Full_replacement
          { source = replacement_path; contents = replacement_catalog })
   in
   require_admitted replacement_snapshot replacement_target;
-  require_not_admitted replacement_snapshot overlay_target;
+  require_not_admitted replacement_snapshot deployment_target;
 
   Unix.putenv "MASC_CONFIG_DIR" config_root;
   Unix.putenv "AGENT_CORE_MODEL_CATALOG" replacement_path;
@@ -141,7 +141,7 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
   require_missing_mandatory_lane_rejected
     ~lane_id:"board_attention_exact"
     (runtime_toml ~include_board_attention:false replacement_target);
-  require_bootstrap_rejected "overlay target is suppressed" overlay_target;
+  require_bootstrap_rejected "deployment target is suppressed" deployment_target;
 
   write_file runtime_path (runtime_toml replacement_target);
   create_server_state ();
@@ -726,7 +726,7 @@ let test_hitl_auto_judge_lane_bootstrap ~clock ~mono_clock ~net ~proc_mgr ~fs ()
   write_file
     runtime_path
     (runtime_toml
-       ~auxiliary_slots:[ overlay_target; replacement_target ]
+       ~auxiliary_slots:[ deployment_target; replacement_target ]
        replacement_target);
   create_server_state ();
   let degraded_optional_registry =
@@ -744,7 +744,7 @@ let test_hitl_auto_judge_lane_bootstrap ~clock ~mono_clock ~net ~proc_mgr ~fs ()
        "auxiliary_exact"
        rejected.lane_id;
      Alcotest.(check int) "rejected position" 1 rejected.position;
-     Alcotest.(check string) "rejected slot" overlay_target rejected.slot_id
+     Alcotest.(check string) "rejected slot" deployment_target rejected.slot_id
    | rejected ->
      Alcotest.failf
        "expected one typed rejected slot, got %d"
@@ -911,25 +911,17 @@ let test_repo_seed_board_attention_lane_admits () =
   let repo_root = Masc_test_deps.find_project_root () in
   let source_config = Filename.concat repo_root "config" in
   let runtime_path = Filename.concat config_root "runtime.toml" in
-  let overlay_path = Filename.concat config_root "agent-core-models-overlay.toml" in
   write_file
     runtime_path
     (Fs_compat.load_file (Filename.concat source_config "runtime.toml"));
-  write_file
-    overlay_path
-    (Fs_compat.load_file
-       (Filename.concat source_config "agent-core-models-overlay.toml"));
   Unix.putenv "MASC_CONFIG_DIR" config_root;
   Unix.putenv "AGENT_CORE_MODEL_CATALOG" "";
   (* This case represents a fresh process. Earlier bootstrap cases install
      explicit global replacements, which unsetting the environment does not
-     clear. Follow production startup: embedded catalog, deployment overlay,
-     then runtime loading; the seed relies on overlay context declarations. *)
+     clear. Follow production startup: embedded catalog, then runtime
+     loading. *)
   Llm_provider.Model_catalog.clear_global ();
   ignore (Server_runtime_bootstrap.configure_agent_core_model_catalog_env ());
-  ignore
-    (Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
-       ~config_root ());
   (match Runtime.init_default ~config_path:runtime_path with
    | Ok () -> ()
    | Error detail -> Alcotest.failf "repo runtime seed failed to load: %s" detail);
@@ -984,25 +976,12 @@ let test_repo_seed_board_attention_lane_admits () =
            lanes
        in
        List.iter (fun credential_env -> Unix.putenv credential_env "") credential_envs;
-       require_published_seed "credential-free repo config plus deployment overlay";
+       require_published_seed "credential-free repo config";
        List.iter
          (fun credential_env ->
             Unix.putenv credential_env "exact-output-seed-test")
          credential_envs;
-       require_published_seed "credential-populated repo config plus deployment overlay";
-       let overlay_without_pricing =
-         Fs_compat.load_file
-           (Filename.concat source_config "agent-core-models-overlay.toml")
-         |> String.split_on_char '\n'
-         |> List.filter (fun line ->
-           let line = String.trim line in
-           not
-             (String.starts_with ~prefix:"input_per_million =" line
-              || String.starts_with ~prefix:"output_per_million =" line))
-         |> String.concat "\n"
-       in
-       write_file overlay_path overlay_without_pricing;
-       require_published_seed "pricing-free deployment overlay")
+       require_published_seed "credential-populated repo config")
 ;;
 
 (* An assignment whose target left the frozen catalog does not fail a lane
@@ -1011,20 +990,20 @@ let test_repo_seed_board_attention_lane_admits () =
    them. The classifier must name exactly those, and only those. *)
 let test_catalog_absent_assignments_names_only_retired_targets () =
   with_temp_dir "catalog-absent-assignments" @@ fun root ->
-  let overlay_path = Filename.concat root "agent-core-models-overlay.toml" in
-  write_file overlay_path overlay_catalog;
+  let deployment_path = Filename.concat root "deployment-models.toml" in
+  write_file deployment_path deployment_catalog;
   let snapshot =
     load_control_snapshot
-      (Exact_output.Embedded_with_overlay
-         { source = overlay_path; contents = overlay_catalog })
+      (Exact_output.Full_replacement
+         { source = deployment_path; contents = deployment_catalog })
   in
-  require_admitted snapshot overlay_target;
+  require_admitted snapshot deployment_target;
   Alcotest.(check (list (pair string string)))
     "only the catalog-absent assignment is named"
     [ ("keeper-ghost", "ghost_provider.retired-model") ]
     (Registry.catalog_absent_assignments snapshot
        ~assignments:
-         [ ("keeper-live", overlay_target)
+         [ ("keeper-live", deployment_target)
          ; ("keeper-ghost", "ghost_provider.retired-model")
          ])
 ;;
@@ -1048,7 +1027,7 @@ let () =
             `Quick
             test_offline_runtime_save_converges_by_write_stage
         ; Alcotest.test_case
-            "full replacement suppresses overlay targets"
+            "full replacement suppresses deployment targets"
             `Quick
             (test_full_replacement_precedence
                ~clock
@@ -1087,7 +1066,7 @@ let () =
             `Quick
             test_runtime_after_rename_converges_state
         ; Alcotest.test_case
-            "repo config and deployment overlay admit the Board attention seed lane"
+            "repo config admits the Board attention seed lane"
             `Quick
             test_repo_seed_board_attention_lane_admits
         ; Alcotest.test_case

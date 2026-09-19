@@ -292,7 +292,6 @@ let base_receipt : R.t =
   ; degraded_retry_applied = false
   ; degraded_retry_runtime = None
   ; fallback_reason = None
-  ; runtime_rotation_attempts = []
   ; stop_reason = None
   ; error_kind = None
   ; error_message = None

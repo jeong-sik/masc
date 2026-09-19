@@ -212,27 +212,23 @@ val provider_label_for_endpoint
 
     Resolution order:
     - runtime override installed with {!set_global} (full replacement)
-    - build-time embedded AGENT_CORE [models.toml], merged with the deployment
-      overlay installed with {!set_global_overlay} when one is present
+    - build-time embedded AGENT_CORE [models.toml]
 
-    The embedded result and the merged result are cached after first
-    computation. Invalid generated data raises {!Invalid_embedded_catalog}; it
-    never becomes [None] or an empty catalog. AGENT_CORE does not inspect an
-    environment variable for an alternate catalog. Callers that need a custom
-    catalog must call {!load_file} and {!set_global} or {!set_global_overlay}
-    explicitly.
+    A provider or model fact is written in the embedded catalog and nowhere
+    else. A deployment names which rows it uses in its runtime configuration;
+    it does not restate what a row says. The second copy this module used to
+    accept disagreed with the first on tool support, on replay policy, and on
+    one model's window by a factor of five.
 
-    {!clear_global} clears the runtime override, the overlay, and both
-    caches. *)
+    The embedded result is cached after first computation. Invalid generated
+    data raises {!Invalid_embedded_catalog}; it never becomes [None] or an
+    empty catalog. AGENT_CORE does not inspect an environment variable for an
+    alternate catalog. Callers that need a custom catalog must call
+    {!load_file} and {!set_global} explicitly.
+
+    {!clear_global} clears the runtime override and the cache. *)
 val global : unit -> t option
 
 val set_global : t -> unit
-
-(** Install a deployment overlay {!merge}d onto the embedded default catalog
-    by {!global}. Unlike {!set_global}, embedded rows not shadowed by the
-    overlay stay visible, so the overlay carries only deployment-local deltas
-    (Agent Core contract). A full {!set_global} override, when installed, takes
-    precedence over the overlay. *)
-val set_global_overlay : t -> unit
 
 val clear_global : unit -> unit

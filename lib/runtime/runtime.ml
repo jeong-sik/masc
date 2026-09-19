@@ -3228,12 +3228,24 @@ let set_exact_output_lane_slots ?runtime_config_path ~lane ~slots () =
   else
     edit_runtime_lanes ?runtime_config_path (fun ~content config ->
       let* () = exact_lane_editable ~content config lane in
-      Ok
-        (Toml_line_editor.edit_table_multiline_array
-           content
-           ~path:(exact_lane_table_path lane)
-           ~key:"slots"
-           ~values:slots))
+      let cli_slots =
+        match exact_lane_decl config lane with
+        | Some decl -> decl.cli_slot_ids
+        | None -> []
+      in
+      (* Checked here, not left to the registry: before the registry is
+         published the commit writes the file without it, and the next
+         publication then fails for every lane. *)
+      match List.find_opt (fun slot -> List.mem slot cli_slots) slots with
+      | Some slot ->
+        Error (Printf.sprintf "%s is already a CLI slot of %s" slot (exact_lane_id lane))
+      | None ->
+        Ok
+          (Toml_line_editor.edit_table_multiline_array
+             content
+             ~path:(exact_lane_table_path lane)
+             ~key:"slots"
+             ~values:slots))
 ;;
 
 (* The order an operator extends is the one the file declares. The standalone

@@ -1331,8 +1331,9 @@ let test_an_exact_slot_append_keeps_the_declared_order () =
 ;;
 
 (* A CLI slot is declared on the lane too. The registry refuses the same id as
-   a slot and a CLI slot only as a lane it cannot publish, so the append names
-   the duplicate itself. *)
+   a slot and a CLI slot only as a lane it cannot publish -- and before it is
+   published the file is written anyway -- so append and set name the
+   duplicate themselves. *)
 let test_an_exact_append_refuses_a_declared_cli_slot () =
   with_runtime_file (fun path ->
     write_file path
@@ -1343,7 +1344,12 @@ let test_an_exact_append_refuses_a_declared_cli_slot () =
       ~names:[ "openai.gpt is already a CLI slot of board_attention_exact" ]
       (fun () ->
          Runtime.append_exact_output_lane_slot ~runtime_config_path:path
-           ~lane:Runtime.Board_attention ~slot:"openai.gpt" ()))
+           ~lane:Runtime.Board_attention ~slot:"openai.gpt" ());
+    lane_write_refused "set a declared CLI slot" ~path
+      ~names:[ "openai.gpt is already a CLI slot of board_attention_exact" ]
+      (fun () ->
+         Runtime.set_exact_output_lane_slots ~runtime_config_path:path
+           ~lane:Runtime.Board_attention ~slots:[ "catalog.only"; "openai.gpt" ] ()))
 ;;
 
 (* The editor writes an exact lane as its own table. A lane declared inline has
@@ -3180,7 +3186,7 @@ let () =
             `Quick
             test_an_exact_slot_append_keeps_the_declared_order
         ; Alcotest.test_case
-            "an exact append refuses a declared CLI slot"
+            "an exact append or set refuses a declared CLI slot"
             `Quick
             test_an_exact_append_refuses_a_declared_cli_slot
         ; Alcotest.test_case

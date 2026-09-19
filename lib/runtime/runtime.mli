@@ -913,7 +913,8 @@ val set_exact_output_lane_slots :
     to nothing is not the edit an operator is making. A lane the file does not
     declare yet gets its table; [lane] is one of the lanes the server runs, so
     that table is read. A lane the file declares other than as its own table
-    (inline, or through dotted keys) is refused rather than declared twice. *)
+    (inline, or through dotted keys) is refused rather than declared twice, and
+    so is a slot the lane already declares as a CLI slot. *)
 
 val append_exact_output_lane_slot :
   ?runtime_config_path:string ->

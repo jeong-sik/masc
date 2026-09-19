@@ -10,14 +10,22 @@ type shape =
   | Rect
   | Round
   | Diamond
+  | Bar
+
+(* Where a state diagram's [[*]] was written: at the top of the diagram, or
+   inside the composite state of that id. Each has a start and an end of
+   its own. *)
+type scope =
+  | Top_level
+  | Inside of string
 
 (* What names a node. [Named] is an id the source wrote. A state diagram's
-   [[*]] names no state: on the left of a transition it is where the diagram
-   starts, on the right where it ends, and those are two nodes. *)
+   [[*]] names no state: on the left of a transition it is where its scope
+   starts, on the right where it ends, and those are nodes of their own. *)
 type node_id =
   | Named of string
-  | Initial
-  | Final
+  | Initial of scope
+  | Final of scope
 
 type node = {
   id : node_id;
@@ -118,13 +126,19 @@ let pseudo_state_mark = "[*]"
    stood for a start or an end. *)
 let node_id_text = function
   | Named id -> id
-  | Initial | Final -> pseudo_state_mark
+  | Initial _ | Final _ -> pseudo_state_mark
+
+let scope_equal a b =
+  match (a, b) with
+  | Top_level, Top_level -> true
+  | Inside a, Inside b -> String.equal a b
+  | (Top_level | Inside _), _ -> false
 
 let node_id_equal a b =
   match (a, b) with
   | Named a, Named b -> String.equal a b
-  | Initial, Initial | Final, Final -> true
-  | (Named _ | Initial | Final), _ -> false
+  | Initial a, Initial b | Final a, Final b -> scope_equal a b
+  | (Named _ | Initial _ | Final _), _ -> false
 
 let direction_word = function
   | Top_down -> "TD"
@@ -656,8 +670,9 @@ let state_id text =
   let text = String.trim text in
   if text <> "" && String.for_all is_id_char text then Some text else None
 
-(* One end of a transition. [[*]] is where the diagram starts on the left of
-   an arrow and where it ends on the right; [pseudo] says which end this is. *)
+(* One end of a transition. [[*]] is where its scope starts on the left of
+   an arrow and where it ends on the right; [pseudo] says which end this
+   is. *)
 let state_ref text ~pseudo =
   let text = String.trim text in
   if String.equal text pseudo_state_mark then Some pseudo
@@ -667,6 +682,69 @@ let state_ref text ~pseudo =
    keeps it (stateDb.addState adds a description only when one is given). *)
 let declare_state declared id =
   declare declared id ~label:(node_id_text id) ~shape:Round ~explicit:false
+
+(* [state X <<choice>>], [<<fork>>], [<<join>>]: a state the diagram passes
+   through rather than rests in. *)
+let pseudo_state_open = "<<"
+let pseudo_state_close = ">>"
+
+let pseudo_state_shape tag =
+  match String.lowercase_ascii tag with
+  | "choice" -> Some Diamond
+  | "fork" | "join" -> Some Bar
+  | _ -> None
+
+(* [state X {] and [state "Title" as X {]: a composite state, whose
+   statements up to the matching [}] are its members. Mermaid opens one only
+   after [state]; this is the text after that word, brace and all. *)
+let composite_header statement =
+  let word, rest = first_word statement in
+  let length = String.length rest in
+  if String.equal word "state" && length > 0 && rest.[length - 1] = '{' then Some rest else None
+
+(* The id, and the title when the header gives one. *)
+let parse_composite_state_header header =
+  let rest = String.trim (String.sub header 0 (String.length header - 1)) in
+  let id_before_brace id =
+    match state_id id with
+    | Some id -> Ok id
+    | None -> Error "expected state id before '{'"
+  in
+  if rest <> "" && rest.[0] = '"' then
+    match String.index_from_opt rest 1 '"' with
+    | Some close -> (
+        let desc = String.sub rest 1 (close - 1) in
+        let after = String.trim (String.sub rest (close + 1) (String.length rest - close - 1)) in
+        match first_word after with
+        | "as", id -> Result.map (fun id -> (id, Some desc)) (id_before_brace id)
+        | _ -> Error "expected 'as <id>' after state description")
+    | None -> Error "unclosed quote in state description"
+  else Result.map (fun id -> (id, None)) (id_before_brace rest)
+
+(* A composite state, [state X {] … [}]. Mermaid keeps one state per id
+   (stateDb.ts, dataFetcher.ts), so a block may open on an id the source
+   already named, and one that opens again adds to the same box. Where the
+   box is drawn is decided once the whole source is read. *)
+type composite = {
+  cs_id : string;
+  mutable cs_title : string option;  (* from [state "Title" as X {] *)
+  mutable cs_direction : direction option;
+}
+
+(* A state named inside a composite state is drawn in it. Named in several,
+   it is drawn in the last one, and naming it at the top level moves
+   nothing: Mermaid sets a node's parent each time a composite names it and
+   never clears it (dataFetcher.ts, [insertOrUpdateNode]). A [[*]] belongs
+   to the scope it was written in, which its id already says. *)
+let place stack homes id =
+  match (id, stack) with
+  | Named name, composite :: _ -> Hashtbl.replace homes name composite.cs_id
+  | Named _, [] | (Initial _ | Final _), _ -> ()
+
+let home_of homes = function
+  | Named name -> Hashtbl.find_opt homes name
+  | Initial Top_level | Final Top_level -> None
+  | Initial (Inside id) | Final (Inside id) -> Some id
 
 let is_digit = function
   | '0' .. '9' -> true
@@ -678,13 +756,28 @@ type state_step =
   | Read
   | Note_opened
 
-let parse_state_statement line current_dir declared edges =
+let parse_state_statement stack homes line current_dir declared edges =
+  let scope =
+    match !stack with
+    | [] -> Top_level
+    | composite :: _ -> Inside composite.cs_id
+  in
+  let described id ~label ~shape =
+    declare declared id ~label ~shape ~explicit:true;
+    place !stack homes id
+  in
+  let mentioned id =
+    declare_state declared id;
+    place !stack homes id
+  in
   let word, rest = first_word line in
   match word with
   | "direction" -> (
       match direction_of_word (String.uppercase_ascii rest) with
       | Some d ->
-          current_dir := d;
+          (match !stack with
+           | [] -> current_dir := d
+           | composite :: _ -> composite.cs_direction <- Some d);
           Ok Read
       | None -> Error ("unknown direction: " ^ rest))
   (* Styling names what it styles first: [class A,B name], [classDef name …],
@@ -714,7 +807,7 @@ let parse_state_statement line current_dir declared edges =
       let of_word, target = first_word placement in
       match (side, of_word, state_id target) with
       | ("left" | "right"), "of", Some id ->
-          declare_state declared (Named id);
+          mentioned (Named id);
           Ok
             (match text with
              | Some _ -> Read
@@ -731,34 +824,52 @@ let parse_state_statement line current_dir declared edges =
             let as_word, id = first_word after in
             match (as_word, state_id id) with
             | "as", Some id ->
-                declare declared (Named id) ~label:desc ~shape:Round ~explicit:true;
+                described (Named id) ~label:desc ~shape:Round;
                 Ok Read
             | _ -> Error "expected 'as <id>' after state description")
         | None -> Error "unclosed quote in state description"
       else
-        let name, desc = split_at_colon rest in
-        match (state_id name, desc) with
-        | Some id, Some desc ->
-            declare declared (Named id) ~label:desc ~shape:Round ~explicit:true;
-            Ok Read
-        | Some id, None ->
-            declare_state declared (Named id);
-            Ok Read
-        | None, (Some _ | None) -> Error ("not a state id: " ^ name))
+        match find_from rest 0 pseudo_state_open with
+        | Some opens -> (
+            let tag_start = opens + String.length pseudo_state_open in
+            match find_from rest tag_start pseudo_state_close with
+            | None -> Error ("unclosed " ^ pseudo_state_open ^ " in pseudo-state")
+            | Some closes -> (
+                let tag = String.trim (String.sub rest tag_start (closes - tag_start)) in
+                let after = closes + String.length pseudo_state_close in
+                let trailing = String.trim (String.sub rest after (String.length rest - after)) in
+                match (state_id (String.sub rest 0 opens), pseudo_state_shape tag, trailing) with
+                | Some id, Some shape, "" ->
+                    described (Named id) ~label:id ~shape;
+                    Ok Read
+                | None, _, _ -> Error ("expected state id before " ^ pseudo_state_open)
+                | Some _, None, _ ->
+                    Error ("not a pseudo-state: " ^ pseudo_state_open ^ tag ^ pseudo_state_close)
+                | Some _, Some _, _ -> Error ("text after the pseudo-state: " ^ trailing)))
+        | None -> (
+            let name, desc = split_at_colon rest in
+            match (state_id name, desc) with
+            | Some id, Some desc ->
+                described (Named id) ~label:desc ~shape:Round;
+                Ok Read
+            | Some id, None ->
+                mentioned (Named id);
+                Ok Read
+            | None, (Some _ | None) -> Error ("not a state id: " ^ name)))
   | _ -> (
       let names, text = split_at_colon line in
       match split_on_arrow names with
       (* A line that is only [[*]] is a start: Mermaid's stateDb names it the
          start of its scope and draws the start shape for it. *)
       | [ name ] -> (
-          match (state_ref name ~pseudo:Initial, text) with
+          match (state_ref name ~pseudo:(Initial scope), text) with
           | Some (Named id), Some desc ->
-              declare declared (Named id) ~label:desc ~shape:Round ~explicit:true;
+              described (Named id) ~label:desc ~shape:Round;
               Ok Read
           | Some id, None ->
-              declare_state declared id;
+              mentioned id;
               Ok Read
-          | Some (Initial | Final), Some _ | None, (Some _ | None) ->
+          | Some (Initial _ | Final _), Some _ | None, (Some _ | None) ->
               Error ("not a state statement: " ^ line))
       | ends ->
           let label =
@@ -768,10 +879,12 @@ let parse_state_statement line current_dir declared edges =
           in
           let rec transitions = function
             | source :: (target :: _ as more) -> (
-                match (state_ref source ~pseudo:Initial, state_ref target ~pseudo:Final) with
+                match
+                  (state_ref source ~pseudo:(Initial scope), state_ref target ~pseudo:(Final scope))
+                with
                 | Some from_id, Some to_id ->
-                    declare_state declared from_id;
-                    declare_state declared to_id;
+                    mentioned from_id;
+                    mentioned to_id;
                     edges := { from_id; to_id; directed = true; style = Solid; label } :: !edges;
                     transitions more
                 | Some _, None | None, (Some _ | None) ->
@@ -794,6 +907,14 @@ let parse_state_diagram ?(initial_dir = Top_down) lines =
   let declared = { order = []; table = Hashtbl.create 16 } in
   let edges = ref [] in
   let current_dir = ref initial_dir in
+  (* Every composite state by id, and the same records in the order each
+     first opened, newest first. *)
+  let composites = Hashtbl.create 8 in
+  let opening_order = ref [] in
+  (* The composite state each state id was last named in. *)
+  let homes = Hashtbl.create 16 in
+  (* The composite states opened and not yet closed, innermost first. *)
+  let stack = ref [] in
   let rec go reading = function
     | [] -> (
         match reading with
@@ -801,24 +922,103 @@ let parse_state_diagram ?(initial_dir = Top_down) lines =
         | Note_text opened ->
             Error (Parse_error { line = opened; what = "a note that no end note closes" }))
     | (number, statement) :: more -> (
+        let fail what = Error (Parse_error { line = number; what }) in
         match reading with
         | Note_text _ -> go (if closes_note statement then Statements else reading) more
         | Statements -> (
-            match parse_state_statement statement current_dir declared edges with
-            | Ok Read -> go Statements more
-            | Ok Note_opened -> go (Note_text number) more
-            | Error what -> Error (Parse_error { line = number; what })))
+            match composite_header statement with
+            | Some header -> (
+                match parse_composite_state_header header with
+                | Error what -> fail what
+                | Ok (id, title) ->
+                    if List.exists (fun composite -> String.equal composite.cs_id id) !stack then
+                      fail ("state " ^ id ^ " is already open")
+                    else
+                      let composite =
+                        match Hashtbl.find_opt composites id with
+                        | Some composite -> composite
+                        | None ->
+                            let composite = { cs_id = id; cs_title = None; cs_direction = None } in
+                            Hashtbl.replace composites id composite;
+                            opening_order := composite :: !opening_order;
+                            composite
+                      in
+                      Option.iter (fun title -> composite.cs_title <- Some title) title;
+                      place !stack homes (Named id);
+                      stack := composite :: !stack;
+                      go Statements more)
+            | None when String.equal statement "}" -> (
+                match !stack with
+                | [] -> fail "} with no matching state block"
+                | _ :: rest ->
+                    stack := rest;
+                    go Statements more)
+            | None -> (
+                match parse_state_statement stack homes statement current_dir declared edges with
+                | Ok Read -> go Statements more
+                | Ok Note_opened -> go (Note_text number) more
+                | Error what -> fail what)))
   in
   let* () = go Statements (split_statements lines) in
-  let nodes =
-    List.rev declared.order |> List.map (fun id -> Hashtbl.find declared.table id)
+  let* () =
+    match !stack with
+    | [] -> Ok ()
+    | composite :: _ -> Error (Unsupported ("state " ^ composite.cs_id ^ " with no }"))
   in
-  Ok
-    { direction = !current_dir
-    ; nodes
-    ; edges = List.rev !edges
-    ; groups = []
+  let composites_in_order = List.rev !opening_order in
+  (* A composite state takes over its id: the box is the state, and no node
+     of that id is drawn beside it. *)
+  let states =
+    List.rev declared.order
+    |> List.filter (function
+         | Named name -> not (Hashtbl.mem composites name)
+         | Initial _ | Final _ -> true)
+  in
+  let placed_in here id = Option.equal String.equal (home_of homes id) here in
+  (* Its title is the header's, else the description the state was given on
+     a line of its own, as Mermaid labels a group with its one description. *)
+  let rec group_of composite =
+    let here = Some composite.cs_id in
+    { group_id = composite.cs_id
+    ; group_label =
+        (match (composite.cs_title, Hashtbl.find_opt declared.table (Named composite.cs_id)) with
+         | Some title, _ -> title
+         | None, Some node -> node.label
+         | None, None -> composite.cs_id)
+    ; group_direction = composite.cs_direction
+    ; group_nodes = List.filter (placed_in here) states
+    ; group_children =
+        List.filter_map
+          (fun child -> if placed_in here (Named child.cs_id) then Some (group_of child) else None)
+          composites_in_order
     }
+  in
+  (* A composite state named inside one of its own members has nowhere to be
+     drawn: following where each one is placed comes back to it. *)
+  let rec reaches_top seen id =
+    match Hashtbl.find_opt homes id with
+    | None -> true
+    | Some parent ->
+        (not (List.exists (String.equal parent) seen)) && reaches_top (parent :: seen) parent
+  in
+  match
+    List.find_opt
+      (fun composite -> not (reaches_top [ composite.cs_id ] composite.cs_id))
+      composites_in_order
+  with
+  | Some composite ->
+      Error (Unsupported ("state " ^ composite.cs_id ^ " would be drawn inside itself"))
+  | None ->
+      Ok
+        { direction = !current_dir
+        ; nodes = List.filter_map (Hashtbl.find_opt declared.table) states
+        ; edges = List.rev !edges
+        ; groups =
+            List.filter_map
+              (fun composite ->
+                if placed_in None (Named composite.cs_id) then Some (group_of composite) else None)
+              composites_in_order
+        }
 
 let parse text =
   match source_lines text with
@@ -1087,10 +1287,17 @@ let box_pad = 2 (* one border and one space each side *)
 let item_gap = 3 (* cells between two boxes of one layer *)
 let ordering_sweeps = 4
 
+(* A fork or a join is a bar across the flow. Mermaid draws it 70 by 10
+   pixels with its label cleared (forkJoin.ts): one cell thick here, so
+   seven cells long, in whichever axis crosses the flow. *)
+let bar_length = 7
+let bar_thickness = 1
+
 let shown_label node =
   match node.shape with
   | Diamond -> "\xe2\x9f\xa8" ^ node.label ^ "\xe2\x9f\xa9"
   | Rect | Round -> node.label
+  | Bar -> ""
 
 let box_width node = Layout.display_width (shown_label node) + (2 * box_pad)
 
@@ -1319,13 +1526,17 @@ let rec layout_scope ~cols ~direction ~node_of ~nodes ~groups ~edges =
       done;
       let flow_axis = along_flow direction in
       let extents item =
-        let cross, flow =
-          match item with
-          | Real node -> (box_width node, box_height)
-          | Cluster c -> (cluster_width c, cluster_height c)
-          | Dummy -> (1, 0)
+        let across_and_along (width, height) =
+          match flow_axis with `Rows -> (width, height) | `Cols -> (height, width)
         in
-        match flow_axis with `Rows -> (cross, flow) | `Cols -> (flow, cross)
+        match item with
+        | Real node -> (
+            match node.shape with
+            (* Across the flow whichever way the flow runs. *)
+            | Bar -> (bar_length, bar_thickness)
+            | Rect | Round | Diamond -> across_and_along (box_width node, box_height))
+        | Cluster c -> across_and_along (cluster_width c, cluster_height c)
+        | Dummy -> across_and_along (1, 0)
       in
       let items = ref [] in
       let item_count = ref 0 in
@@ -1523,25 +1734,32 @@ let rec layout_scope ~cols ~direction ~node_of ~nodes ~groups ~edges =
           (fun p ->
             match p.item with
             | Dummy -> ()
-            | Real node ->
+            | Real node -> (
                 let r0, c0 = rc (p.flow_start, p.cross_start) in
                 let r1, c1 = rc (p.flow_start + p.flow_extent - 1, p.cross_start + p.cross_extent - 1) in
                 let top = min r0 r1 and bottom = max r0 r1 and lft = min c0 c1 and rgt = max c0 c1 in
-                let round = node.shape = Round in
-                let line = Solid in
-                add_bits canvas top lft ~style:line ~round (down lor right);
-                add_bits canvas top rgt ~style:line ~round (down lor left);
-                add_bits canvas bottom lft ~style:line ~round (up lor right);
-                add_bits canvas bottom rgt ~style:line ~round (up lor left);
-                for c = lft + 1 to rgt - 1 do
-                  add_bits canvas top c ~style:line ~round:false (left lor right);
-                  add_bits canvas bottom c ~style:line ~round:false (left lor right)
-                done;
-                for r = top + 1 to bottom - 1 do
-                  add_bits canvas r lft ~style:line ~round:false (up lor down);
-                  add_bits canvas r rgt ~style:line ~round:false (up lor down)
-                done;
-                put_text canvas (top + 1) (lft + 2) (shown_label node)
+                let box ~round =
+                  let line = Solid in
+                  add_bits canvas top lft ~style:line ~round (down lor right);
+                  add_bits canvas top rgt ~style:line ~round (down lor left);
+                  add_bits canvas bottom lft ~style:line ~round (up lor right);
+                  add_bits canvas bottom rgt ~style:line ~round (up lor left);
+                  for c = lft + 1 to rgt - 1 do
+                    add_bits canvas top c ~style:line ~round:false (left lor right);
+                    add_bits canvas bottom c ~style:line ~round:false (left lor right)
+                  done;
+                  for r = top + 1 to bottom - 1 do
+                    add_bits canvas r lft ~style:line ~round:false (up lor down);
+                    add_bits canvas r rgt ~style:line ~round:false (up lor down)
+                  done;
+                  put_text canvas (top + 1) (lft + 2) (shown_label node)
+                in
+                match node.shape with
+                (* One thick run, one cell deep; the edges meet it as they
+                   meet a border. *)
+                | Bar -> draw_line canvas ~style:Thick (r0, c0) (r1, c1)
+                | Round -> box ~round:true
+                | Rect | Diamond -> box ~round:false)
             | Cluster c ->
                 let r0, c0 = rc (p.flow_start, p.cross_start) in
                 let r1, c1 =

@@ -34,24 +34,28 @@ let unavailable_runtime_json =
 let test_unavailable_assignment_reaches_both_keeper_surfaces () =
   match Tui_decode.decode_runtime_resolved_full unavailable_runtime_json with
   | Error detail -> Alcotest.fail detail
-  | Ok (_, lanes, [ assignment ]) ->
-    let label = Masc_tui_render_prim.runtime_assignment_label ~runtime_lanes:lanes assignment in
-    (match label.ral_kind with
-     | Runtime_assignment_unavailable reason ->
+  | Ok (_, _, [ assignment ]) ->
+    (match assignment.ra_resolution with
+     | Runtime_assignment_unavailable { runtime_id; reason } ->
+       Alcotest.(check string) "typed unavailable runtime" "fixture.missing" runtime_id;
        Alcotest.(check string)
          "typed unavailable reason"
          "Capability catalog entry unavailable"
          reason
-     | Runtime_assignment_lane | Runtime_assignment_model | Runtime_assignment_default ->
+     | Runtime_assignment_lane _ | Runtime_assignment_missing ->
        Alcotest.fail "decoded unavailable assignment was reclassified");
     Alcotest.(check string)
       "operations preview"
       " \xc2\xb7 target fixture.missing (unavailable: Capability catalog entry unavailable, explicit)"
-      (Masc_tui_render_prim.runtime_assignment_operations_note label);
+      (Masc_tui_render_prim.runtime_assignment_operations_note assignment);
     Alcotest.(check string)
       "Keeper Runtime Stats"
       "fixture.missing (unavailable: Capability catalog entry unavailable, explicit)"
-      (Masc_tui_render_prim.runtime_assignment_stats_value label)
+      (Masc_tui_render_prim.runtime_assignment_stats_value assignment);
+    Alcotest.(check string)
+      "runtime picker"
+      "fixture.missing (unavailable: Capability catalog entry unavailable, explicit)"
+      (Masc_tui_render_prim.runtime_assignment_label assignment)
   | Ok (_, _, assignments) ->
     Alcotest.failf "expected one unavailable assignment, got %d" (List.length assignments)
 ;;

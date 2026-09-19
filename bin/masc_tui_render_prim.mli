@@ -30,24 +30,9 @@ module Retained_view = Masc_tui_retained_view
 module Span = Masc_tui_span
 module Status = Masc.Keeper_status_runtime
 
-type runtime_assignment_kind =
-  | Runtime_assignment_lane
-  | Runtime_assignment_model
-  | Runtime_assignment_default
-  | Runtime_assignment_unavailable of string
-
-type runtime_assignment_label =
-  { ral_target : string
-  ; ral_source : string
-  ; ral_kind : runtime_assignment_kind
-  }
-
-val runtime_assignment_label :
-  runtime_lanes:runtime_resolved_lane list -> runtime_assignment -> runtime_assignment_label
-
-val runtime_assignment_operations_note : runtime_assignment_label -> string
-val runtime_assignment_stats_value : runtime_assignment_label -> string
-val runtime_assignment_is_lane : runtime_assignment_label -> bool
+val runtime_assignment_label : runtime_assignment -> string
+val runtime_assignment_operations_note : runtime_assignment -> string
+val runtime_assignment_stats_value : runtime_assignment -> string
 
 type planning_tab =
   Render_schedule.planning_tab =

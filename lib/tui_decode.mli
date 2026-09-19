@@ -1810,13 +1810,21 @@ val decode_keeper_turns :
 
 (** Where one keeper points today. [ra_source] is the server's word:
     ["default"] rides the fleet default, ["explicit"] was assigned. *)
-type runtime_assignment = {
-  ra_keeper : string;
-  ra_source : string;
-  ra_target_id : string option;
-  ra_unavailable_reason : string option;
-      (** Resolved lane id, or [None] when the assignment is missing. *)
-}
+type runtime_assignment_resolution =
+  | Runtime_assignment_lane of string
+  | Runtime_assignment_missing
+  | Runtime_assignment_unavailable of
+      { runtime_id : string
+      ; reason : string
+      }
+(** The server's closed [resolved.kind] sum. Consumers match this value directly;
+    membership in a separately projected lane catalogue does not reclassify it. *)
+
+type runtime_assignment =
+  { ra_keeper : string
+  ; ra_source : string
+  ; ra_resolution : runtime_assignment_resolution
+  }
 
 val decode_runtime_resolved_full :
   Yojson.Safe.t ->

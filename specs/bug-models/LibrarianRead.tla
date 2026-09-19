@@ -349,6 +349,13 @@ NextBuggy ==
 
 SpecBuggy == Init /\ [][NextBuggy]_vars
 
+\* A purge removes messages from anywhere in the history, not only from its
+\* front, and every atom after the one it took is renumbered. Taking one atom
+\* from an arbitrary place covers that: whether the shift starts at the front
+\* or in the middle, a position counted against the old numbering names a
+\* different atom afterwards.
+WithoutAtom(h, j) == SubSeq(h, 1, j - 1) \o SubSeq(h, j + 1, Len(h))
+
 \* Bug witness 4: an offline purge rewrites the history shorter and writes no
 \* line (RFC-0351 S1; RFC librarian-lifecycle 10, the second open decision).
 \* Dropping the oldest atom renumbers every atom after it, so the position's
@@ -361,7 +368,7 @@ PurgeTrimKeepingProgress ==
     /\ ~clearHalf
     /\ snap = -1
     /\ Len(hist) > 1
-    /\ hist' = SubSeq(hist, 2, Len(hist))
+    /\ \E j \in 1..Len(hist) : hist' = WithoutAtom(hist, j)
     /\ UNCHANGED << ckTurns, log, turn, progress, readIds, nextId, budget,
                     clearHalf, snap >>
 
@@ -385,7 +392,7 @@ PurgeTrimGuardedByTurns ==
     /\ Len(hist) > 1
     /\ progress # NoProgress
     /\ \A c \in CutsOf(log, hist) : c <= progress.end
-    /\ hist' = SubSeq(hist, 2, Len(hist))
+    /\ \E j \in 1..Len(hist) : hist' = WithoutAtom(hist, j)
     /\ progress' = [end |-> Len(hist) - 1, seen |-> Len(log)]
     /\ UNCHANGED << ckTurns, log, turn, readIds, nextId, budget, clearHalf, snap >>
 
@@ -410,7 +417,7 @@ PurgeTrimAtEndCountingLines ==
     /\ Len(hist) > 1
     /\ progress # NoProgress
     /\ progress.end = Len(hist)
-    /\ hist' = SubSeq(hist, 2, Len(hist))
+    /\ \E j \in 1..Len(hist) : hist' = WithoutAtom(hist, j)
     /\ progress' = [end |-> Len(hist) - 1, seen |-> Len(log)]
     /\ UNCHANGED << ckTurns, log, turn, readIds, nextId, budget, clearHalf, snap >>
 
@@ -434,7 +441,7 @@ PurgeTrimAtEnd ==
     /\ Len(hist) > 1
     /\ progress # NoProgress
     /\ progress.end = Len(hist)
-    /\ hist' = SubSeq(hist, 2, Len(hist))
+    /\ \E j \in 1..Len(hist) : hist' = WithoutAtom(hist, j)
     /\ progress' = [end |-> Len(hist) - 1, seen |-> progress.seen]
     /\ UNCHANGED << ckTurns, log, turn, readIds, nextId, budget, clearHalf, snap >>
 

@@ -269,10 +269,12 @@ type task_status =
 - **`=` 로 상태를 견주는 자리 세 곳은 컴파일러가 절대 못 짚는다.** `match` 가 아니라 구조적 동등
   비교라 타입이 그대로여서 조용히 지나간다. 셋 다 "열려 있고 아무도 안 맡은 일"을 세는 자리이고,
   셋 다 `Rejected` 를 빼놓는다. 이건 D1 이 기대는 바로 그 신호다.
-  `lib/keeper/keeper_world_observation_inputs.ml:196-201`(Keeper 가 매 턴 읽는 프레임의 미claim 수),
-  `lib/orchestrator.ml:43`(우선순위 높은 미claim 이 있으면 오케스트레이션을 깨우는 조건),
-  `lib/dashboard/dashboard_attention.ml:91`(노는 에이전트와 함께 주의를 올리는 조건). 1단계에서
-  셋 다 고친다. 비슷해 보이는 `workspace_task.ml:329`·`:468` 은 레코드를 짓는 자리라 해당 없다.
+  `lib/keeper/keeper_world_observation_inputs.ml:196-201`(Keeper 가 매 턴 읽는 프레임의 미claim 수)와
+  `lib/dashboard/dashboard_attention.ml:91`(노는 에이전트와 함께 주의를 올리는 조건). 1단계에서 둘 다
+  고친다. 세 번째로 같은 모양인 `lib/orchestrator.ml:43` 은 고치지 않는다. `should_orchestrate` 를
+  부르는 곳이 `test/test_orchestrator_coverage.ml` 밖에 없어서 지금 돌지 않는 코드다. 고치면 죽은
+  코드에 새 상태를 태우는 꼴이라 §5 에 지울 것으로 적어 둔다. 비슷해 보이는
+  `workspace_task.ml:329`·`:468` 은 레코드를 짓는 자리라 해당 없다.
 - **집계가 고정 튜플이면 컴파일러는 "빈칸을 채워라"까지만 시킨다.** 대시보드 rollup 은 다섯 칸짜리
   튜플로 접고 JSON 키도 다섯으로 고정이다(`server_dashboard_http.ml:604-616`, `:627-634`).
   `| Todo | Rejected _ -> todo + 1` 로 채우면 컴파일도 통과하고 키도 그대로라, 반려된 Task 가
@@ -416,8 +418,9 @@ type cancel_standing =
   로 누가 만든 Task 든 혼자 끝낼 수 있으므로 지금보다는 좁다. 판정을 기다리는 동안 제출자 본인의 cancel
   을 막는 방안은 넣지 않았다. 반려된 직후에는 어차피 취소할 수 있어서 막는 것은 늦추기만 하고, 늦추는
   장치는 사실을 지키지 않는다.
-- **이름을 같이 쓰는 만든 쪽.** 열린 723건 중 333건의 `created_by` 가 `codex-mcp-client` 다. 여러 세션이
-  같이 쓰는 이름이라, 그 이름으로 들어온 세션은 누구든 이 333건을 취소할 수 있다. 자격 검사는 이름
+- **이름을 같이 쓰는 만든 쪽.** §1 을 잰 시점에 열린 723건 중 333건, 2026-09-19 backlog 6694 에서는
+  열린 656건 중 299건의 `created_by` 가 `codex-mcp-client` 다. 절반 가까이가 한 이름이라는 결론은
+  같다. 여러 세션이 같이 쓰는 이름이라, 그 이름으로 들어온 세션은 누구든 그 줄들을 취소할 수 있다. 자격 검사는 이름
   비교이고 다른 소유 검사(`same_task_actor`)와 강도가 같다. Keeper 도구는 서버가 아는 이름
   (`keeper_agent_sender ~meta`)으로 호출되므로 속일 수 없지만, MCP 클라이언트는 이름을 스스로 적는다
   (#18965 에서 세션 결합을 뺐다). 이름을 속이는 호출자를 막는 일은 이 RFC 범위 밖이다.
@@ -641,6 +644,8 @@ OCaml 쪽은 임의의 액션·판정 열을 돌려 `OneTaskPerAgent` 를 확인
 | `Cancel` 을 `Withdraw` 로 이름 바꾸기 | 초안에 있었고 뺐다. 액션만 Withdraw 이고 상태·wire·알림은 Cancelled 로 남아 같은 것을 두 이름으로 부르게 된다. 뜻이 바뀐 것은 도구 설명과 반려 문장이 알려 준다 |
 | 제출자 칸에 새 이름(`submitter`) | 초안에 있었고 뺐다. 코드가 이미 `producer` 라고 부른다(§1.7) |
 | `cycle_count` 를 반려에도 올리기 | 검토 중에 넣었다가 뺐다. TUI 한 줄에만 쓰이는 값에 일을 더하는 것이다. 이 RFC 는 이 값을 건드리지 않는다 |
+| `Orchestrator.should_orchestrate` 고치기 | `lib/orchestrator.ml:43` 이 `= Todo` 로 세는 자리이지만 부르는 곳이 테스트뿐이다(`lib/`·`bin/` 0건). 죽은 코드에 새 상태를 태우지 않는다. **지울 대상으로 따로 다룬다** |
+| `scripts/tla-check.sh` 의 SKIP 고치기 | cfg 파일이 없으면 `SKIP` 찍고 0 으로 돌아온다(`:72-75`, `:96-99`). 라벨에 오타가 나면 0단계 증거가 조용히 통과한다. 이 RFC 가 만든 문제가 아니고, 하네스 배선은 별도 작업에서 cfg 단위 게이트로 다루고 있다. 여기서 고치면 그 작업과 부딪친다 |
 | 담당에 시간 제한(lease, visibility timeout) | `no_wall_clock_death`. SQS 식 설계는 이 저장소에서 금지다 |
 | 세션이 끝나면 맡은 Task 를 놓기 | 재 보니 이 경로로 생긴 방치가 17건 중 0건이다. `end_session` 은 `lib/` 와 `bin/` 에 호출하는 곳이 없고, 여러 세션이 한 이름(`codex-mcp-client`)을 쓰므로 한 세션의 종료가 다른 세션의 Task 를 놓게 된다. Keeper 종료는 이미 놓는다(`keeper_shutdown_finalize.ml:137-169`). 나머지는 `Held_without_actor` 가 보여 준다 |
 | 반려된 Task 를 제출자에게 먼저 주기 | 제출자 몫으로 남겨 두는 것은 이름 없는 담당이다. 이 RFC 가 없애려는 바로 그것이다 |
@@ -656,9 +661,9 @@ OCaml 쪽은 임의의 액션·판정 열을 돌려 `OneTaskPerAgent` 를 확인
 | 단계 | 내용 | 끝났다는 증거 |
 |---|---|---|
 | 0 | 이 문서와 `TaskOwnership.tla` | `scripts/tla-check.sh` 에서 깨끗한 모델 통과, 버그 모델 11개와 도달성 검사 2개(들어가는 길·나가는 길)가 기대대로 위반 |
-| 1 | **저장 형식이 바뀌는 묶음.** `Rejected` 추가, 반려 판정이 그리로 보내고 `set_current = None`. `intent` 삭제. `AwaitingVerification` 의 `assignee` 를 `producer` 로, 기본값 없는 디코드. 제출자의 handoff 를 두고 사유를 `reason` 에만 넣기. 제출 증거를 호출에서만 읽기. 전달 전 반려 알림을 세 값으로 지우기. `release_unroutable_rejected_task_r` 와 `Operator_routed` 삭제. 알림 문장에 id. 운영자 판정 요청에 `verification_id`. **맡는 축과 권하는 축 가르기**(§3.2). **`Rejected_unclaimed` 목록과 대시보드 칸**(§3.7, §3.8) | 속성 테스트 `OneTaskPerAgent`. §4.2 첫 줄이 새 판정에서 0. `claim_next` 가 `Rejected` 를 권하지 않고 id 로는 맡아지는 테스트. 반려된 Task 가 목록과 대시보드 양쪽에 보이는 테스트 |
+| 1 | **저장 형식이 바뀌는 묶음.** `Rejected` 추가, 반려 판정이 그리로 보내고 `set_current = None`. `intent` 삭제. `AwaitingVerification` 의 `assignee` 를 `producer` 로, 기본값 없는 디코드. 제출자의 handoff 를 두고 사유를 `reason` 에만 넣기. 제출 증거를 호출에서만 읽기. 전달 전 반려 알림을 세 값으로 지우기. `release_unroutable_rejected_task_r` 와 `Operator_routed` 삭제. 알림 문장에 id. 운영자 판정 요청에 `verification_id`. **맡는 축과 권하는 축 가르기**(§3.2). **`Rejected_unclaimed` 목록과 대시보드 칸**(§3.7, §3.8). **글로서리에서 1단계가 없애는 말 지우기** — `Assignee`(`:69-71`), `Intent`(`:91-93`), `Verdict`(`:103-105`) | 속성 테스트 `OneTaskPerAgent`. §4.2 첫 줄이 새 판정에서 0. `claim_next` 가 `Rejected` 를 권하지 않고 id 로는 맡아지는 테스트. 반려된 Task 가 목록과 대시보드 양쪽에 보이는 테스트 |
 | 2 | `Cancel` 의 자격을 `decide` 의 인자로. 인증된 운영자 경로와 TUI·dashboard 이전. 맡은 쪽 알림·기록·지표. 사라진 물음을 멈춤으로 알리지 않기. 도구 설명 | `release` 다음 `cancel` 이 만든 쪽 아닌 호출자에게 거절되는 테스트 |
-| 3 | 운영자 목록에 `Awaiting_verdict` 추가, 헌법 개정, `docs/spec/00-glossary.md` 의 Task Lifecycle 절 정정(`Rejected` 항목은 여기서 들어간다. 글로서리는 코드에 있는 말만 싣는다)과 `docs/spec/02-types-and-invariants.md` 정정, `Done_action` 과 `TaskLifecycle.tla` 삭제 | §4.2 셋째 줄 0 |
+| 3 | 운영자 목록에 `Awaiting_verdict` 추가, 헌법 개정, `docs/spec/00-glossary.md` 에 `Rejected` 항목 추가(글로서리는 코드에 있는 말만 싣는다)와 `docs/spec/02-types-and-invariants.md` 정정, `Done_action` 과 `TaskLifecycle.tla` 삭제 | §4.2 셋째 줄 0 |
 | 4 | D6 을 하기로 하면: `Claimed` 와 `Start` 삭제 | `test_task_status_vocabulary` 와 화면 집계가 다섯 상태로 통과 |
 
 초안은 1단계를 저장 형식 변경 없이 잡았는데, D1 로 `Rejected` 가 생기면서 그럴 수 없게 됐다. 새 상태
@@ -694,6 +699,12 @@ OCaml 쪽은 임의의 액션·판정 열을 돌려 `OneTaskPerAgent` 를 확인
 (`workspace_task.ml:230-320`). 그래서 1단계 배포 뒤 반려가 한 건이라도 나면, 되돌리려면 backlog 를
 손으로 고쳐야 한다. 이건 받아들일 만한 절차가 아니다. 1단계에서 `recover_owned_task_to_todo_r` 가
 `Rejected` 도 받게 한다. 이때 `expected_assignee` 는 맡은 쪽이 아니라 `producer` 와 맞춘다.
+
+그래도 되돌리기 조건은 하나가 아니라 둘이다. 1단계는 옛 바이너리가 못 읽는 줄을 **두 종류** 만든다.
+`Rejected` 줄과, `intent` 가 빠진 새 형식의 대기 줄이다(옛 디코더는 `intent` 를 필수로 본다,
+`types_core.ml:462-466`). 복구 도구를 넓혀도 대기 줄은 못 빼낸다. 대기 줄을 비우는 길은 판정을
+받는 것뿐이고, 그건 앞으로 갈 때의 2번과 같은 일이다. 그러니 되돌리기 조건은 `rejected` 줄 0
+**그리고** 대기 줄 0 이다.
 
 이미 `InProgress` 로 돌아와 있는 것들(2026-09-18 기준 13건)은 운영자 복구 도구
 (`masc_operator_task_recovery_resolve`)로 `Todo` 에 돌린다. 그 도구는 `Rejected` 를 만들지 못하므로,

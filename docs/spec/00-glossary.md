@@ -163,7 +163,7 @@ status: reference
   `keeper_memory_search` 결과에 나온 것, `revised`는 `supersedes`로 고쳐 써진
   것이다. `cited`는 Keeper가 `keeper_memory_retract`로 그 Fact를 id로 지목해
   철회한 것이다. 철회 뒤 같은 claim을 다시 저장하면 같은 Memory ID에 과거 기록이
-  붙는다. TUI의 `Previously retracted`는 그 철회 횟수이며, 현재 Fact의 신뢰도나
+  붙는다. TUI의 `History: Retracted`는 그 철회 횟수이며, 현재 Fact의 신뢰도나
   강화 정도를 뜻하지 않는다.
 
 **Librarian**

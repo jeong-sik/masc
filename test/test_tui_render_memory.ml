@@ -103,7 +103,7 @@ let test_detail_names_the_use_record () =
     check bool "retrieval count and days" true (contains "Retrieved 4 · 2 days" line);
     check bool "last retrieval as an age" true (contains "last 2h" line);
     check bool "past retractions and predecessors" true
-      (contains "Previously retracted 1 · Revised from 1" line)
+      (contains "Retracted 1 · Revised from 1" line)
 ;;
 
 let test_detail_lines () =

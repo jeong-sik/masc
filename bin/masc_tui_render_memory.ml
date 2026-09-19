@@ -390,7 +390,7 @@ let memory_fact_detail_lines ~cols (row : memory_fact_row) =
            Events survive removal and re-adding the same claim, so this is
            past retraction history, not evidence of the current fact's quality. *)
         ; detail_field "History:"
-            (Printf.sprintf "Retrieved %d · %s · last %s · Previously retracted %d · Revised from %d"
+            (Printf.sprintf "Retrieved %d · %s · last %s · Retracted %d · Revised from %d"
                fact.mf_events.mfe_retrieved_count
                (Message_layout.count_noun
                   fact.mf_events.mfe_retrieved_distinct_days "day")

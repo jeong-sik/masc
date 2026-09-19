@@ -10,7 +10,6 @@ let publish_cascade_resolution
     ~keeper_name
     ~runtime_id
     ~reason
-    ~attempt
     ~error_kind
     ~error_message
   =
@@ -18,7 +17,6 @@ let publish_cascade_resolution
     [ "keeper_name", `String keeper_name
     ; "runtime_id", `String runtime_id
     ; "reason", `String reason
-    ; "attempt", `Int attempt
     ; "error_kind",
       (match error_kind with Some k -> `String k | None -> `Null)
     ; "error_message",

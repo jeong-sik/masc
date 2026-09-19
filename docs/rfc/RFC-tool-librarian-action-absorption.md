@@ -3,7 +3,7 @@ rfc: "tool-librarian-action-absorption"
 title: "Tool Librarian: 도구 호출 궤적을 읽어 반복 패턴을 컴포지션으로 흡수(Absorb)한다"
 status: Draft
 created: 2026-09-17
-updated: 2026-09-17
+updated: 2026-09-19
 author: jeong-sik
 supersedes: ["keeper-writes-own-compositions"]
 superseded_by: null
@@ -19,7 +19,7 @@ Memory OS의 Librarian이 파편화된 개별 관측(`m1`, `m2`)을 읽어 하�
 
 이 RFC는:
 1. `tools-as-shell-commands` (Shell IR)의 실패(16일간 59,500회 호출 중 채택률 0%)와,
-2. `keeper-writes-own-compositions`의 한계(일하는 키퍼의 집중 분산, 샌드박스 호환성 미검증, 1회성 과적합)
+2. `keeper-writes-own-compositions`의 우려(일하는 키퍼의 집중 분산, 1회성 과적합)
 
 를 모두 극복하고, **데이터 기반의 오프라인 마이닝 + 샌드박스 사전 검증(Dry-run) + HITL 승인**을 거쳐 살아있는 고효율 컴포지션 카탈로그를 유지하는 아키텍처를 정의한다.
 
@@ -44,13 +44,12 @@ Memory OS의 Librarian이 파편화된 개별 관측(`m1`, `m2`)을 읽어 하�
   1. **작성의 병목**: 지금까지 카탈로그는 12개뿐이며, 전부 사람이 손으로 100~200줄의 TOML을 작성했다.
   2. **검증 부재로 인한 지뢰 도구 배포**: 사람이 손으로 짠 `run-and-read`는 샌드박스 경계 검증을 거치지 않아, `microvm`에서 `keeper_spawn` 정책 거부(`policy_rejection`)로 **오늘 호출된 5건 모두 실패**했다.
 
-### 1.3 왜 일하는 Keeper가 직접 만들면 안 되는가? (`keeper-writes-own-compositions`의 비판적 검토)
-`RFC-keeper-writes-own-compositions`는 일하는 키퍼가 런타임에 `keeper_compose_save`로 제안하자고 했다. 하지만:
-1. **작업 방해(Task Distraction)**: 코딩/디버깅 턴에 복잡한 TOML DAG를 조립하느라 에이전트의 주의력과 토큰이 낭비된다.
-2. **환각과 샌드박스 불일치**: 키퍼는 자신이 속한 환경(`microvm` vs `host`), 도구 스키마의 필수 인자를 오해하여 깨진 도구(`run-and-read` 사태)를 양산한다.
-3. **1회성 과적합(Catalog Pollution)**: 단 한 번 마주친 특수 상황을 컴포지션으로 제안하여 시스템 프롬프트의 Tool Definition을 오염시킨다.
+### 1.3 일하는 Keeper가 직접 만들 때의 우려 (`keeper-writes-own-compositions` 검토)
+`RFC-keeper-writes-own-compositions`는 일하는 키퍼가 런타임에 `keeper_compose_save`로 제안하자고 했다. 이 RFC가 보는 우려는 둘이다. `keeper_compose_save`는 구현된 적이 없어서 둘 다 잰 값은 없다.
+1. **작업 방해(Task Distraction)**: 코딩/디버깅 턴에 복잡한 TOML DAG를 조립하느라 에이전트의 주의력과 토큰이 그쪽으로 샐 수 있다.
+2. **1회성 과적합(Catalog Pollution)**: 단 한 번 마주친 특수 상황을 컴포지션으로 제안하여 시스템 프롬프트의 Tool Definition을 불릴 수 있다.
 
-따라서 **"일하는 키퍼"와 "도구를 흡수/합성하는 분석자"는 분리되어야 한다.**
+이 RFC는 이 두 우려를 근거로 **"일하는 키퍼"와 "도구를 흡수/합성하는 분석자"를 나누자고 제안한다.**
 
 ---
 

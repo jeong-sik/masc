@@ -1682,6 +1682,7 @@ max-concurrent = 1
 
 [ollama_cloud.thinkdefault]
 max-concurrent = 1
+disable-parallel-tool-use = true
 
 [ollama_cloud.thinkexplicitoff]
 max-concurrent = 1
@@ -2095,6 +2096,14 @@ let test_runtime_inventory_surfaces_declared_spec () =
       "binding max concurrency"
       1
       (binding |> J.member "max_concurrent" |> J.to_int);
+    Alcotest.(check bool) "declared parallel suppression" true
+      (binding |> J.member "disable_parallel_tool_use" |> J.to_bool);
+    Alcotest.(check bool) "effective request carries parallel suppression" true
+      (thinkdefault |> J.member "request_config"
+       |> J.member "disable_parallel_tool_use" |> J.to_bool);
+    Alcotest.(check bool) "model still supports parallel calls" true
+      (thinkdefault |> J.member "effective_capabilities"
+       |> J.member "supports_parallel_tool_calls" |> J.to_bool);
     (match binding |> J.member "keep_alive", binding |> J.member "num_ctx" with
      | `Null, `Null -> ()
      | _ -> Alcotest.fail "unset binding keep_alive/num_ctx must remain null");

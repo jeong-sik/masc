@@ -30,9 +30,9 @@ This specification defines the opt-in integration of TypeSafe AI Jev into MASC's
 
 ### 2.1 Opt-in Invariant
 By default, TypeSafe AI is **completely inert and disabled**.
-It activates only when:
-- `MASC_TYPESAFEAI_ENABLED=true` (or `1`), OR
-- `TYPESAFEAI_API_KEY` is provided in the environment and `MASC_TYPESAFEAI_ENABLED` is not explicitly set to `false`.
+It activates only when `TYPESAFEAI_API_KEY` holds a non-blank value.
+`MASC_TYPESAFEAI_ENABLED=false` (or `0`, `no`, `off`) turns it off even with a key;
+the variable alone cannot turn it on.
 
 ### 2.2 Transparent Fallback
 When opted in:

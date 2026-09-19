@@ -72,6 +72,16 @@ type selection =
           asked about; the caller decides which trace to read. *)
   | Stop of stop
 
+val may_have_unread :
+  lines:
+    (int * (Keeper_turn_boundaries.record, Keeper_turn_boundaries.read_error) result) list ->
+  progress:Keeper_librarian_progress.t option ->
+  bool
+(** Cheap conservative check before loading the checkpoint. [false] proves
+    that the append-only boundary snapshot contains no position beyond the
+    durable cursor. A changed row count, later restart, or later atom position
+    returns [true]; the full selector still validates checkpoint digests. *)
+
 (** [lines] is {!Keeper_turn_boundaries.read}'s answer. [messages] are the
     messages of the checkpoint of [trace_id], loaded after [lines] were read.
     Only lines of [trace_id] take part; a line that cannot be decoded stops the

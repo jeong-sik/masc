@@ -59,6 +59,45 @@ let complete_line_count lines =
     lines
 ;;
 
+let may_have_unread ~lines ~progress =
+  match progress with
+  | None -> complete_line_count lines > 0
+  | Some ({ P.position; boundary_lines_seen } : P.t) ->
+    let line_count_changed = complete_line_count lines <> boundary_lines_seen in
+    line_count_changed
+    || List.exists
+         (fun (line, decoded) ->
+            match decoded with
+            | Error _ -> false
+            | Ok (written : B.record) ->
+              (match written.event with
+               | B.History_restarted { trace_id } ->
+                 line > boundary_lines_seen
+                 && String.equal trace_id position.trace_id
+               | B.Turn_ended
+                   { turn_ref; history_at_start; position = boundary_position } ->
+                 let same_trace =
+                   String.equal
+                     (Ids.Turn_ref.trace_id turn_ref)
+                     position.trace_id
+                 in
+                 let restarted_after_progress =
+                   line > boundary_lines_seen
+                   && match history_at_start with
+                      | B.Fresh_history -> true
+                      | B.Continued_history -> false
+                 in
+                 let extends_position =
+                   match boundary_position with
+                   | B.Atom_history { end_atom; last_atom_digest = _ } ->
+                     end_atom > position.end_atom
+                   | B.Empty_atom_history | B.No_atom_history | B.Stale_noop ->
+                     false
+                 in
+                 same_trace && (restarted_after_progress || extends_position)))
+         lines
+;;
+
 let lines_of_trace ~trace_id lines =
   List.filter_map
     (fun (line, read) ->

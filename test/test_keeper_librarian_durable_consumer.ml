@@ -249,6 +249,19 @@ let test_failed_commit_and_restart_retry_the_same_range () =
   check (list string) "restart reads identical range" !first !after_restart
 ;;
 
+let test_unchanged_boundaries_do_not_require_checkpoint () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-no-new-boundary" in
+  establish_progress config ~trace_id "before";
+  let session_dir = Masc.Keeper_fs.keeper_session_dir config trace_id in
+  Sys.remove (Store.agent_core_checkpoint_path ~session_dir ~session_id:trace_id);
+  match consume config (fun ~expected_revision:_ _ -> fail "commit was called") with
+  | Consumer.Nothing_to_read -> ()
+  | Consumer.Baseline_advanced _
+  | Consumer.Memory_not_committed
+  | Consumer.Progress_advanced _ -> fail "unchanged boundaries did not stop before checkpoint"
+;;
+
 let test_failed_long_range_retries_only_oldest_cut_point () =
   with_workspace @@ fun config ->
   let trace_id = "trace-bounded-retry" in
@@ -488,6 +501,8 @@ let () =
             test_n_tick_reads_every_intermediate_turn
         ; test_case "failed commit and restart retry exact range" `Quick
             test_failed_commit_and_restart_retry_the_same_range
+        ; test_case "unchanged boundaries skip checkpoint" `Quick
+            test_unchanged_boundaries_do_not_require_checkpoint
         ; test_case "failed growing range retries oldest cut" `Quick
             test_failed_long_range_retries_only_oldest_cut_point
         ; test_case "last boundary wins when wall clock goes backward" `Quick

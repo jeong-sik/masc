@@ -224,6 +224,9 @@ let consume_one_with_extent ~extent ~config ~keeper_name ~commit =
       P.read ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name)
     |> Result.map_error (fun error -> Progress_unreadable error)
   in
+  if not (R.may_have_unread ~lines ~progress)
+  then Ok Nothing_to_read
+  else
   let* meta =
     match
       Domain_pool_ref.submit_io_or_inline (fun () ->

@@ -113,15 +113,19 @@ val record_history_restart :
 
 (** Whether a turn that owed [Notice_after_first_save] still has to write its
     restart line when it ends. True when the notice is still pending -- no
-    stage save was accepted -- and [position] says this turn's own save
-    replaced the history ([Atom_history] or [Empty_atom_history]). A
-    [Stale_noop] replaced nothing and restarts nothing; an official client's
-    [No_atom_history] saved nothing at all. In both the notice dies with the
-    turn. Pure, and every constructor is named, so a new position has to state
-    which it is. *)
+    stage save was accepted -- and this turn's own save was, because that save
+    is then the one that replaced the history. A save the store refused as
+    stale replaced nothing, and an official client saved nothing at all; in
+    both the notice dies with the turn.
+
+    The turn's position says the same thing ([Atom_history] and
+    [Empty_atom_history] are the saves that landed), but a position can fail
+    to be computed and this cannot. The restart line carries no position, so
+    it must not wait on one: a turn whose digest cannot be built would
+    otherwise lose its restart line and its end line together. Pure. *)
 val restart_line_owed_at_finalize
   :  notice_pending:bool
-  -> position:Keeper_turn_boundaries.position
+  -> saved_checkpoint_present:bool
   -> bool
 
 val turn_progress_callbacks :

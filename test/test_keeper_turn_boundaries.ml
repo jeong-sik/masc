@@ -675,30 +675,26 @@ let test_a_refused_line_does_not_stop_the_turn () =
   | Ok _ | Error _ -> fail "the refused line changed the store"
 ;;
 
-(* Every pair, so the one that is easy to get wrong is written down: a turn
-   whose finalize save the store refused as stale replaced nothing, so it
-   restarts nothing and owes no line. Getting that pair wrong writes a restart
-   line for a history that never changed, which makes a reader drop every atom
-   the earlier lines describe. *)
+(* Every pair. The one that is easy to get wrong is a turn whose finalize save
+   the store refused as stale: it replaced nothing, so it restarts nothing and
+   owes no line. Writing one there puts a restart ahead of lines that are
+   still live, and a reader drops every atom before a restart.
+
+   The turn's position says the same thing, but this does not read it: a
+   position can fail to be built and this cannot, and both records of one
+   restart -- this line and the turn's end line -- must not fail together. *)
 let test_only_an_accepted_finalize_save_owes_the_line () =
-  let owed ~notice_pending position =
-    Turn_helpers.restart_line_owed_at_finalize ~notice_pending ~position
+  let owed ~notice_pending ~saved_checkpoint_present =
+    Turn_helpers.restart_line_owed_at_finalize ~notice_pending ~saved_checkpoint_present
   in
-  (* Every position, so the two that are easy to read as a restart are
-     written down rather than inferred from "a checkpoint came back". *)
-  check bool "pending, and this turn's save holds atoms" true
-    (owed ~notice_pending:true atom_history);
-  check bool "pending, and this turn's save holds none" true
-    (owed ~notice_pending:true Boundaries.Empty_atom_history);
-  check bool "pending, but the store refused the save as stale" false
-    (owed ~notice_pending:true Boundaries.Stale_noop);
-  check bool "pending, but an official client saved nothing" false
-    (owed ~notice_pending:true Boundaries.No_atom_history);
-  List.iter
-    (fun position ->
-       check bool "a stage save already wrote the line" false
-         (owed ~notice_pending:false position))
-    every_position
+  check bool "pending, and this turn's save landed" true
+    (owed ~notice_pending:true ~saved_checkpoint_present:true);
+  check bool "pending, but the store kept its own checkpoint" false
+    (owed ~notice_pending:true ~saved_checkpoint_present:false);
+  check bool "a stage save already wrote the line" false
+    (owed ~notice_pending:false ~saved_checkpoint_present:true);
+  check bool "nothing pending and nothing saved" false
+    (owed ~notice_pending:false ~saved_checkpoint_present:false)
 ;;
 
 let () =

@@ -50,28 +50,28 @@ let record_turn_boundary
       ~labels:[ "keeper", meta.name; "site", site ]
       ()
   in
+  let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+  (* Outside the position below, and before the line that ends the turn.
+     Before, because a reader takes a restart that follows a line as proof
+     that the line's history is gone and would drop this turn's own atoms.
+     Outside, because this line carries no position: a turn whose digest
+     cannot be built still restarted the history, and tying the two together
+     would lose both records of that restart on one failure. *)
+  if
+    Keeper_agent_run_turn_helpers.restart_line_owed_at_finalize
+      ~notice_pending:(Atomic.exchange restart_notice_pending false)
+      ~saved_checkpoint_present:(Option.is_some saved_checkpoint)
+  then
+    Keeper_agent_run_turn_helpers.record_history_restart
+      ~config
+      ~keeper_name:meta.name
+      ~trace_id
+      Keeper_agent_run_turn_helpers.After_first_save;
   match turn_boundary_position ~checkpoint_owner saved_checkpoint with
   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
   | exception exn -> not_recorded ~site:"position" (Printexc.to_string exn)
   | Error detail -> not_recorded ~site:"position" detail
   | Ok position ->
-    let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
-    (* The restart goes on record before the line that ends the turn, never
-       after: a reader takes a restart that follows a line as proof that the
-       line's history is gone, and would drop this turn's own atoms. The
-       notice is still pending only when no stage save was accepted, and
-       [position] says whether the save this turn just made replaced the
-       history at all. The notice is taken either way -- the turn is over. *)
-    if
-      Keeper_agent_run_turn_helpers.restart_line_owed_at_finalize
-        ~notice_pending:(Atomic.exchange restart_notice_pending false)
-        ~position
-    then
-      Keeper_agent_run_turn_helpers.record_history_restart
-        ~config
-        ~keeper_name:meta.name
-        ~trace_id
-        Keeper_agent_run_turn_helpers.After_first_save;
     let record : Keeper_turn_boundaries.record =
       { recorded_at = Time_compat.now ()
       ; event =

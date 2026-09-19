@@ -273,39 +273,6 @@ let test_context_commits_when_memory_store_fails () =
        journal)
 ;;
 
-(* The decision layer, pure. *)
-let test_lane_projection_excludes_structural_failures () =
-  let lane =
-    Runtime.lane_projection_decision
-      [ ("slot-a", Runtime.Slot_admitted)
-      ; ("slot-bad", Runtime.Slot_unusable "wire_admission_rejected:unsupported_image_input")
-      ; ("slot-c", Runtime.Slot_admitted)
-      ]
-  in
-  check (list string) "usable keeps ladder order minus refusals"
-    [ "slot-a"; "slot-c" ] lane.Runtime.usable;
-  check (list (pair string string)) "the refusal carries its slot and reason"
-    [ ("slot-bad", "wire_admission_rejected:unsupported_image_input") ]
-    lane.Runtime.unusable;
-  check string "the report line names slot and reason"
-    "slot-bad: wire_admission_rejected:unsupported_image_input"
-    (Runtime.slot_reason_pairs lane.Runtime.unusable)
-;;
-
-let test_every_slot_refused_leaves_no_usable_slot () =
-  let lane =
-    Runtime.lane_projection_decision
-      [ ("slot-a", Runtime.Slot_unusable "invalid_connect_timeout")
-      ; ("slot-b", Runtime.Slot_unusable "request_serialization_rejected")
-      ]
-  in
-  check (list string) "no usable slot remains" [] lane.Runtime.usable;
-  check (list (pair string string)) "every refusal is reported"
-    [ ("slot-a", "invalid_connect_timeout")
-    ; ("slot-b", "request_serialization_rejected") ]
-    lane.Runtime.unusable
-;;
-
 (* 2026-09-11 regression: a failover slot whose request cannot be projected
    at all -- a structural refusal, not a size -- must not fail the lane's
    pre-flight. The appended openrouter.openrouter-deepseek-v4-flash refused
@@ -313,7 +280,7 @@ let test_every_slot_refused_leaves_no_usable_slot () =
    slots down with it. A model with enable_thinking=true but no thinking
    capability contract is the exact structural refusal (request_serialization_rejected)
    that hit openrouter-deepseek-v4-flash in production. *)
-let test_unusable_slot_leaves_the_usable_slots_running () =
+let test_excluded_last_slot_preserves_domain_failure () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let net = Eio.Stdenv.net env in
@@ -324,9 +291,13 @@ let test_unusable_slot_leaves_the_usable_slots_running () =
     ~mono_clock:(Eio.Stdenv.mono_clock env)
     ~sw
   @@ fun () ->
-  let server =
+  let first =
+    (* A completed but contract-invalid answer advances the exact flow to its
+       next candidate. The filtered flow has no next candidate and therefore
+       reports the domain rejection; the old wiring entered the structurally
+       unusable slot and changed the failure class. *)
     Fixture.start_server ~sw ~net ~clock
-      (Fixture.Reply (Fixture.openai_response selection_output))
+      (Fixture.Reply (Fixture.openai_response (`Assoc [])))
   in
   let message text =
     Agent_core.Types.make_message
@@ -338,8 +309,8 @@ let test_unusable_slot_leaves_the_usable_slots_running () =
       Fixture.resolver_snapshot
         ~source:"librarian-preflight-exclusion"
         ~enable_thinkings:[ ("librarian-bad", true) ]
-        [ { Fixture.id = "librarian-ok"; base_url = server.base_url }
-        ; { Fixture.id = "librarian-bad"; base_url = server.base_url }
+        [ { Fixture.id = "librarian-first"; base_url = first.base_url }
+        ; { Fixture.id = "librarian-bad"; base_url = first.base_url }
         ]
     in
     (match
@@ -367,17 +338,47 @@ let test_unusable_slot_leaves_the_usable_slots_running () =
          fail
            (Runtime_exact_output_registry.lane_resolution_error_to_string error))
   in
-  let selected_slots = publish [ "librarian-ok"; "librarian-bad" ] in
+  let selected_slots =
+    publish [ "librarian-first"; "librarian-bad" ]
+  in
   (match
      Runtime.preflight_slots ~selected_slots ~messages:[ message "one small prompt" ]
    with
-   | Ok unusable ->
+   | Ok preflight ->
+     check (list string)
+       "only projectable slots remain in execution order"
+       [ "librarian-first" ]
+       (List.map
+          (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id)
+          preflight.Runtime.selected_slots);
      check (list (pair string string))
        "the refused slot is reported, not fatal"
        [ ("librarian-bad", "wire_admission_rejected:target_request_rejected") ]
-       unusable
+       preflight.Runtime.unusable
    | Error error ->
      fail (Runtime.extraction_error_to_string error));
+  with_temp_base "librarian-preflight-execution" @@ fun base_path ->
+  (match
+     Runtime.For_testing.execute_exact_output_classified
+       ~clock
+       ~net
+       ~base_path
+       ~keeper_id:"librarian-preflight-execution"
+       ~selected_input:(input ())
+       ~messages:[ message "one small prompt" ]
+       ()
+   with
+   | Ok ((_selection, _output), selected_slot) ->
+     failf "contract-invalid only usable slot unexpectedly answered as %s" selected_slot
+   | Error error ->
+     check bool "filtered flow reports domain rejection" true
+       (Runtime.For_testing.classified_error_kind error
+        = Keeper_memory_os_current.Domain_output_invalid);
+     check bool "failure retains the domain boundary" true
+       (Astring.String.is_prefix
+          ~affix:"librarian domain output invalid:"
+          (Runtime.For_testing.classified_error_detail error));
+     check int "the only usable slot was attempted" 1 (Fixture.post_count first));
   let selected_slots = publish [ "librarian-bad" ] in
   match
     Runtime.preflight_slots ~selected_slots ~messages:[ message "one small prompt" ]
@@ -400,7 +401,9 @@ let test_an_empty_ladder_reports_nothing () =
       [ Agent_core.Types.Text "one small prompt" ]
   in
   match Runtime.preflight_slots ~selected_slots:[] ~messages:[ message ] with
-  | Ok unusable -> check (list (pair string string)) "nothing to exclude" [] unusable
+  | Ok preflight ->
+    check int "no selected slots" 0 (List.length preflight.Runtime.selected_slots);
+    check (list (pair string string)) "nothing to exclude" [] preflight.Runtime.unusable
   | Error error -> fail (Runtime.extraction_error_to_string error)
 ;;
 
@@ -416,12 +419,8 @@ let () =
             "working context commits despite Memory OS store failure"
             `Quick
             test_context_commits_when_memory_store_fails
-        ; test_case "lane projection excludes structural failures" `Quick
-            test_lane_projection_excludes_structural_failures
-        ; test_case "every slot refused leaves no usable slot" `Quick
-            test_every_slot_refused_leaves_no_usable_slot
-        ; test_case "unusable slot leaves the usable slots running" `Quick
-            test_unusable_slot_leaves_the_usable_slots_running
+        ; test_case "excluded last slot preserves domain failure" `Quick
+            test_excluded_last_slot_preserves_domain_failure
         ; test_case "an empty ladder reports nothing" `Quick
             test_an_empty_ladder_reports_nothing
         ] )

@@ -99,6 +99,86 @@ let test_a_timestamp_value_never_starts_at_the_colon () =
     "  reviewed: 2026-08-27 20:36"
     (Detail.timestamp_line ~label:"reviewed" "2026-08-27 20:36")
 
+let confirmation_fixture ?(goal_id = "goal-1") ?(revision = "revision-1")
+    ?(metric = "passing scenarios") ?(run_id = "run-1") ?(confirmed = false) () =
+  let criterion = Goal_store.Criterion
+      { revision = "revision-1"; title = "Harness";
+        metric = Some "passing scenarios"; target_value = Some "10" } in
+  let verdict : Goal_verification.verdict =
+    { outcome = Proven; request_id = "request-1"; criterion;
+      verification_run_id = run_id;
+      authority = Masc_domain.System_llm_agent { agent_run_id = run_id };
+      evidence = "10 scenarios passed\nObserved result retained";
+      recorded_at = "2026-09-19T08:00:00Z" } in
+  let completion =
+    if confirmed then Goal_verification.Human_confirmed
+      (verdict, { operator_id = "operator"; confirmed_at = "2026-09-19T08:01:00Z" })
+    else Goal_verification.Proof_proven verdict in
+  let record = { (Goal_verification.default_record ~goal_id) with completion } in
+  `Assoc
+    [ "goal", `Assoc
+        [ "id", `String goal_id
+        ; "phase", Goal_phase.to_yojson (if confirmed then Completed else Awaiting_confirmation)
+        ; "title", `String "Harness"
+        ; "criterion_revision", `String revision
+        ; "metric", `String metric
+        ; "target_value", `String "10"
+        ]
+    ; "verification", Goal_verification.record_to_yojson record
+    ]
+
+let confirmation_exn json =
+  match Detail.decode_confirmation ~goal_id:"goal-1" json with
+  | Ok confirmation -> confirmation
+  | Error detail -> Alcotest.fail detail
+
+let test_confirmation_retains_the_displayed_proof () =
+  let read = confirmation_exn (confirmation_fixture ()) in
+  let sent = Detail.confirmation_body read in
+  check_bool "POST binds the inspected proof" true
+    (sent = `Assoc
+       [ "goal_id", `String "goal-1"; "criterion_revision", `String "revision-1";
+         "request_id", `String "request-1"; "verification_run_id", `String "run-1" ]);
+  let newer = confirmation_exn (confirmation_fixture ~run_id:"run-2" ()) in
+  check_bool "a newer verifier run cannot replace the inspected one" false
+    (Detail.same_confirmation_binding read newer);
+  let confirmed = confirmation_exn (confirmation_fixture ~confirmed:true ()) in
+  check_bool "the server confirmed the same binding" true
+    (Detail.same_confirmation_binding read confirmed);
+  let rendered = texts (Detail.confirmation_lines ~width:80 read) in
+  check_bool "operator sees exact run" true (List.mem "Verifier run: run-1" rendered);
+  check_bool "evidence keeps its second line" true (List.mem "Observed result retained" rendered)
+
+let test_confirmation_refuses_unrelated_or_changed_proof () =
+  List.iter
+    (fun json -> check_bool "unrelated or changed proof refused" true
+      (Result.is_error (Detail.decode_confirmation ~goal_id:"goal-1" json)))
+    [ confirmation_fixture ~goal_id:"goal-2" ()
+    ; confirmation_fixture ~revision:"revision-2" ()
+    ; confirmation_fixture ~metric:"other criterion" ()
+    ; `Assoc ["goal", `Null]
+    ];
+  let stale = confirmation_fixture () |> function
+    | `Assoc fields -> `Assoc (List.map (fun (key, value) ->
+        if String.equal key "verification" then
+          key, `Assoc ["goal_id", `String "goal-1";
+            "completion", `Assoc ["state", `String "stale_criterion"]]
+        else key, value) fields)
+    | _ -> Alcotest.fail "fixture must be an object" in
+  check_bool "historical proof never arms confirmation" true
+    (Result.is_error (Detail.decode_confirmation ~goal_id:"goal-1" stale))
+
+let test_confirmation_read_cannot_rearm_after_cancel () =
+  let module Read = Masc_tui_fetched in
+  match Read.start ~equal:String.equal Read.initial ~key:"goal-1" with
+  | Already_loading -> Alcotest.fail "initial read did not start"
+  | Started (loading, request) ->
+      let cancelled = Read.clear loading in
+      let late = Read.complete ~equal:String.equal cancelled request
+          (Ok (confirmation_exn (confirmation_fixture ()))) in
+      check_bool "late evidence cannot rearm a cancelled confirmation" true
+        (Read.view_for ~equal:String.equal late ~key:"goal-1" = Absent)
+
 let () =
   Alcotest.run "tui_planning_detail"
     [ ( "body"
@@ -115,5 +195,11 @@ let () =
             test_a_narrow_pane_still_produces_rows
         ; Alcotest.test_case "a timestamp value never starts at the colon" `Quick
             test_a_timestamp_value_never_starts_at_the_colon
+        ; Alcotest.test_case "confirmation retains the displayed proof" `Quick
+            test_confirmation_retains_the_displayed_proof
+        ; Alcotest.test_case "confirmation refuses unrelated or changed proof" `Quick
+            test_confirmation_refuses_unrelated_or_changed_proof
+        ; Alcotest.test_case "cancelled confirmation ignores late read" `Quick
+            test_confirmation_read_cannot_rearm_after_cancel
         ] )
     ]

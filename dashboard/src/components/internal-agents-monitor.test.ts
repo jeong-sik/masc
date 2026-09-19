@@ -557,6 +557,36 @@ describe('InternalAgentsMonitor', () => {
     },
   )
 
+  it('shows the durable exact failure code and detail', async () => {
+    const run = parseExactLaneRunResponse({
+      generated_at: '2026-09-20T00:00:00Z',
+      run: {
+        run_id: 'failed-exact', run_kind: 'exact_output', lane: 'librarian_exact',
+        subject_id: null, actor: 'keeper-fixture', started_at: 1, status: 'failed',
+        elapsed_s: 0.1, selected_slot: 'glm-coding.glm-5.3-flash',
+        code: 'missing_deadline', detail: 'target has no finite request window',
+        input: { kind: 'exact', payload: { request: 'input' } },
+        output: { state: 'failed' },
+        payload_availability: {
+          input: { state: 'available' }, output: { state: 'available' },
+        },
+        skill_evidence: { state: 'no_keeper_skills' },
+      },
+    })
+    api.fetchExactLaneRun.mockResolvedValue(run)
+    api.fetchExactLaneRuns.mockResolvedValue({
+      runs: [run], count: 1, total: 1, hasMore: false, generatedAt: 'now',
+    })
+    api.fetchFusionRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+    api.fetchVerificationRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+
+    const { container } = render(html`<${InternalAgentsMonitor} />`)
+    fireEvent.click(await screen.findByRole('button', { name: /failed-exact/i }))
+    await screen.findByText('Exact-output registry metadata', { exact: false })
+    expect(container.textContent).toContain('missing_deadline')
+    expect(container.textContent).toContain('target has no finite request window')
+  })
+
   it('states that exact lanes and RAW require an Admin bearer', async () => {
     api.fetchExactLaneRuns.mockRejectedValue(new ApiRequestError({
       method: 'GET',

@@ -21,9 +21,11 @@ type outcome =
                 turn. Until the keeper's next turn ends and says
                 [Fresh_history] itself, nothing in the store explains why the
                 history started over; if that turn dies first, nothing ever
-                does (RFC §6). A store that ends mid-line refuses every
-                append until it is repaired, so clearing again does not help
-                there. *)
+                does (RFC §6). RFC step 1c closes that: the next turn writes
+                the same line when it {e starts} from the emptied history, so
+                it no longer has to survive to its end. A store that ends
+                mid-line refuses every append until it is repaired, so
+                clearing again does not help there. *)
       }
       (** The emptied checkpoint is the canonical one on disk. *)
   | Superseded of
@@ -32,19 +34,22 @@ type outcome =
       }
       (** A newer writer owns the canonical checkpoint: the store's stale
           no-op. Nothing was written. *)
-  | Not_saved of { detail : string }
-      (** The save failed or raised, and no line was written. The store
-          reports a save only once the payload, the rename and the directory
-          fsync all succeeded, so a failure does not prove the checkpoint on
-          disk is unchanged: the emptied one may already be the canonical
-          one. *)
+  | Save_unconfirmed of { detail : string }
+      (** The save failed or raised, and no line was written. Whether the
+          history was emptied is unknown, which is why the name does not
+          claim it was not: the store reports a save only once the payload,
+          the rename and the directory fsync all succeeded, so a failure
+          before the last of those still leaves the emptied checkpoint as the
+          canonical one. The tool surface answers with
+          [Effect_outcome_unknown] and asks the operator to run the clear
+          again, which is safe either way. *)
 
 (** Empty the history [ctx] holds and save it as the checkpoint of [session].
     [preserve_system] keeps the [System] messages, which are not atoms, so
     either way the saved history holds no atom. The trace the line names is
     [session.session_id], the value the checkpoint is saved under.
 
-    Nothing but a cancellation is raised: a save that raises is [Not_saved],
+    Nothing but a cancellation is raised: a save that raises is [Save_unconfirmed],
     and a line that cannot be written is [marker]. A cancellation the store
     re-raises after it has written the checkpoint leaves an emptied history
     with no line, the one state this module cannot report. *)

@@ -391,9 +391,9 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
             [ "incoming_turn_count", `Int incoming_turn_count
             ; "known_turn_count", `Int known_turn_count
             ]
-        | Clear_attempted (Keeper_history_clear.Not_saved { detail }) ->
+        | Clear_attempted (Keeper_history_clear.Save_unconfirmed { detail }) ->
           Log.Keeper.error
-            "%s: operator clear could not save the emptied checkpoint (reason=%s): %s"
+            "%s: operator clear did not confirm the save of the emptied checkpoint (reason=%s): %s"
             name reason detail;
           keeper_clear_failure
             ~class_:Tool_result.Runtime_failure

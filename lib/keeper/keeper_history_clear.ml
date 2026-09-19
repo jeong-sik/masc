@@ -9,7 +9,7 @@ type outcome =
       { incoming_turn_count : int
       ; known_turn_count : int
       }
-  | Not_saved of { detail : string }
+  | Save_unconfirmed of { detail : string }
 
 let kept_messages ~preserve_system (messages : Agent_core.Types.message list) =
   if preserve_system
@@ -65,7 +65,7 @@ let clear
       ~ctx:emptied
   with
   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-  | exception exn -> Not_saved { detail = Printexc.to_string exn }
+  | exception exn -> Save_unconfirmed { detail = Printexc.to_string exn }
   | Ok (_checkpoint, Keeper_checkpoint_store.Saved _) ->
     Cleared
       { cleared_message_count = List.length existing - List.length kept
@@ -80,7 +80,7 @@ let clear
       , Keeper_checkpoint_store.Stale_noop { incoming_turn_count; known_turn_count } ) ->
     Superseded { incoming_turn_count; known_turn_count }
   | Error error ->
-    Not_saved
+    Save_unconfirmed
       { detail =
           Keeper_context_core.checkpoint_write_error_to_string
             ~persistence_error_to_string:Fun.id

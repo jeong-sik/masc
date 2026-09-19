@@ -54,7 +54,7 @@ graph TB
 
 | File | Title | Description | Status |
 |------|-------|-------------|--------|
-| `00-glossary.md` | Glossary | 용어 정의, 약어 목록 | Draft |
+| `00-glossary.md` | Glossary | 용어 정의 | Draft |
 | `01-system-overview.md` | System Overview | 문제 정의, 배포 모델, 기술 스택, sub-library 의존성 | Draft |
 | `02-types-and-invariants.md` | Types and Invariants | 핵심 타입 정의, 상태 전이, 불변식 | Draft |
 | `03-workspace-state.md` | Workspace State | Workspace 생명주기, session 관리, agent join/leave | Draft |

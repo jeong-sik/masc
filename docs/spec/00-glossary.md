@@ -33,6 +33,11 @@ status: reference
 : 저장된 Keeper 이력을 읽는 단계. 파일 없음은 새 이력을 뜻하지만 읽기·파싱 오류는
   새 이력을 허용하지 않는다. 명시적인 checkpoint 버전 교체만 기존 파일을 남겨 두고
   새 이력을 시작하며, 첫 저장이 받아들여진 뒤 재시작을 기록한다.
+**agent core**
+: MASC에 내장된 재사용 모델 실행 패키지(`packages/agent_core`, 라이브러리 표면
+  `Agent_core`). Agent 구성, tool turn, provider 요청, typed 응답과 실패를
+  소유한다. MASC는 tool descriptor, 권한, handler와 제품 조율을 소유한다.
+  agent core는 MASC 개념에 의존하지 않는다(`13-agent-core.md`).
 
 **agent core Turn**
 : 하나의 agent core Agent run 내부에서 provider response와 tool 실행이 진행되는 한
@@ -45,6 +50,17 @@ status: reference
 
 **Board**
 : 공유 발견, 질문, 답변, 의견과 결정을 게시하는 durable 협업 표면.
+
+**Broadcast**
+: 이 저장소에서 서로 다른 넷을 가리킨다. 문장에 어느 것인지 함께 적는다.
+  (1) SSE broadcast: 서버가 연결된 client 전부의 stream에 event를 밀어 넣는
+  전송 동작(`09-server-transport.md`). (2) 워크스페이스 broadcast:
+  `Workspace.broadcast ~audience:Workspace_broadcast.Fleet_conversation`으로
+  모든 Keeper의 대화창에 닿는 발화. 입구는 Keeper 도구 `keeper_broadcast`와 MCP
+  도구 `masc_broadcast` 둘이고, 둘은 같은 함수를 같은 audience로 부른다. 개념은
+  하나이고 도구 이름은 입구다. (3) Board `audience`의 `Broadcast`: 글을 특정 대상
+  없이 모두에게 라우팅하는 값(`lib/board_types/board_types.mli`). (4) 로그 분류
+  `Log.Broadcast`(`lib/masc_log/log.ml`).
 
 **Task**
 : 실제 작업의 소유권과 검증 상태를 기록하는 단위. 상태는 `Todo`, `Claimed`,

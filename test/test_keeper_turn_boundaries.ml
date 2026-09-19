@@ -416,7 +416,8 @@ let test_purge_plan_removes_the_turn_boundary_log () =
 
 (* A store no append can open: a directory sits where the file goes. *)
 let block_the_store ~keepers_dir =
-  Fs_compat.mkdir_p keepers_dir;
+  Fs_compat.mkdir_p (Filename.dirname
+    (Boundaries.path_for_keepers_dir ~keepers_dir ~keeper_id));
   Unix.mkdir (Boundaries.path_for_keepers_dir ~keepers_dir ~keeper_id) 0o700
 ;;
 

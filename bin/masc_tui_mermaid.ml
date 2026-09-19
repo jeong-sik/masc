@@ -677,6 +677,8 @@ let state_ref text ~pseudo =
   if String.equal text pseudo_state_mark then Some pseudo
   else Option.map (fun id -> Named id) (state_id (strip_quotes text))
 
+(* A state named again with no description keeps the one it has, as Mermaid
+   keeps it (stateDb.addState adds a description only when one is given). *)
 let declare_state declared id =
   declare declared id ~label:(node_id_text id) ~shape:Round ~explicit:false
 
@@ -717,6 +719,10 @@ let parse_composite_state_header header =
     | None -> Error "unclosed quote in state description"
   else Result.map (fun id -> (id, id)) (id_before_brace rest)
 
+let is_digit = function
+  | '0' .. '9' -> true
+  | _ -> false
+
 (* A [note left of X] or [note right of X] with no colon opens a note whose
    text runs to an [end note] line. *)
 type state_step =
@@ -755,7 +761,24 @@ let parse_state_statement stack line current_dir declared edges =
            | frame :: _ -> frame.f_direction <- Some d);
           Ok Read
       | None -> Error ("unknown direction: " ^ rest))
-  | "classdef" | "class" | "style" | "linkstyle" | "click" -> Ok Read
+  (* Styling names what it styles first: [class A,B name], [classDef name …],
+     [style A …], [click A …]. Mermaid reads these words in any case, so
+     [Class --> X] is not a transition from a state called Class; it is
+     refused there and here, not dropped. *)
+  | "classdef" | "class" | "style" | "linkstyle" | "click" ->
+      let targets, _ = first_word rest in
+      if List.for_all (fun target -> Option.is_some (state_id target)) (String.split_on_char ',' targets)
+      then Ok Read
+      else Error ("not a styling statement: " ^ line)
+  (* [hide empty description] and [scale N width] trim and size the boxes in
+     a browser. A box here is one row whatever they say. *)
+  | "hide" when String.equal (String.lowercase_ascii rest) "empty description" -> Ok Read
+  | "scale" ->
+      let number, measure = first_word rest in
+      if number <> "" && String.for_all is_digit number
+         && String.equal (String.lowercase_ascii measure) "width"
+      then Ok Read
+      else Error ("not a scale statement: " ^ line)
   (* The text of a note is not drawn. The state it is about is a state all
      the same, as Mermaid reads it. *)
   | "note" -> (
@@ -816,6 +839,8 @@ let parse_state_statement stack line current_dir declared edges =
   | _ -> (
       let names, text = split_at_colon line in
       match split_on_arrow names with
+      (* A line that is only [[*]] is a start: Mermaid's stateDb names it the
+         start of its scope and draws the start shape for it. *)
       | [ name ] -> (
           match (state_ref name ~pseudo:(Initial scope), text) with
           | Some (Named id), Some desc ->

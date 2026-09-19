@@ -340,6 +340,17 @@ def run(executable: str) -> None:
             process, fd, output, b"K",
             b"lane write refused: the lane list may be stale",
         )
+        # The conversation-lane picker uses the same whole stale order when it
+        # adds a candidate. Opening it refreshes only the catalog. Enter must
+        # refuse locally too, without restoring runtime-a beside the new id.
+        mark = mark_output(fd, output)
+        h.send_and_wait(process, fd, output, b"e", b"adding a failover candidate to primary")
+        h.wait_for_output(process, fd, output, b"> runtime-c", start=mark, timeout=5.0)
+        h.send_and_wait(
+            process, fd, output, b"\r",
+            b"lane write refused: the lane list may be stale",
+        )
+        os.write(fd, b"esc")
 
         # The request log is appended after the response goes out, so the
         # last post can trail the frame it produced.

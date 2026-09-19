@@ -7371,26 +7371,31 @@ let launch_runtime_lane_pick state ~mailbox ~(pick : Masc_tui_types.runtime_lane
        [existing] is the order the list last read; writing it before the
        previous write is read back would undo that write. *)
     state.runtime_lane_notice <- Some Masc_tui_types.Lane_write_pending
-  else if List.exists (String.equal runtime_id) existing then
-    state.runtime_lane_notice <-
-      Some
-        (Masc_tui_types.Lane_write_refused
-           (runtime_id ^ " is already a candidate on " ^ lane))
   else
-    launch_runtime_lane_write state ~mailbox ~written (fun ~host ~port ->
-      match pick with
-      | Masc_tui_types.Pick_conversation_lane lane ->
-          Masc_tui_http.set_runtime_lane_slots ~host ~port ~lane
-            ~runtime_ids:(existing @ [ runtime_id ])
-      | Masc_tui_types.Pick_exact_lane name ->
-          (* Only the one slot is sent: the server appends it to the order
-             the file declares, so a declared slot the registry dropped is
-             kept. [existing] is used above only to refuse an id the lane
-             already names. *)
-          Masc_tui_http.append_exact_lane_slot ~host ~port ~name ~runtime_id
-      | Masc_tui_types.Pick_new_lane lane ->
-          Masc_tui_http.create_runtime_lane ~host ~port ~lane
-            ~runtime_ids:[ runtime_id ])
+    match pick, Masc_tui_types.runtime_lane_candidate_write_refusal state with
+    | Masc_tui_types.Pick_conversation_lane _, Some notice ->
+        state.runtime_lane_notice <- Some notice
+    | _ ->
+        if List.exists (String.equal runtime_id) existing then
+          state.runtime_lane_notice <-
+            Some
+              (Masc_tui_types.Lane_write_refused
+                 (runtime_id ^ " is already a candidate on " ^ lane))
+        else
+          launch_runtime_lane_write state ~mailbox ~written (fun ~host ~port ->
+            match pick with
+            | Masc_tui_types.Pick_conversation_lane lane ->
+                Masc_tui_http.set_runtime_lane_slots ~host ~port ~lane
+                  ~runtime_ids:(existing @ [ runtime_id ])
+            | Masc_tui_types.Pick_exact_lane name ->
+                (* Only the one slot is sent: the server appends it to the order
+                   the file declares, so a declared slot the registry dropped is
+                   kept. [existing] is used above only to refuse an id the lane
+                   already names. *)
+                Masc_tui_http.append_exact_lane_slot ~host ~port ~name ~runtime_id
+            | Masc_tui_types.Pick_new_lane lane ->
+                Masc_tui_http.create_runtime_lane ~host ~port ~lane
+                  ~runtime_ids:[ runtime_id ])
 ;;
 
 let launch_runtime_catalog_load state ~mailbox =

@@ -908,7 +908,7 @@ type memory_health_snapshot = {
 
 (** What the keeper did with one fact, as the server projected it from the
     memory-events sidecar (RFC-0418): how often a search returned it, on how
-    many distinct UTC days, when last, how often a tool cited it by id, and
+    many distinct UTC days, when last, how often it was retracted, and
     which dropped facts it continues. No strength or score; the numbers are
     the record. *)
 type memory_fact_events = {

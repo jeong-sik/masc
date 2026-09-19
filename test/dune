@@ -2311,6 +2311,7 @@
  (libraries masc_test_deps))
 (include stanzas/test_verification_collaboration_evidence.inc)
 (include stanzas/test_keeper_microvm_backend.inc)
+(include stanzas/test_keeper_microvm_guest_size.inc)
 (include stanzas/test_keeper_paste_delivery.inc)
 (include stanzas/test_keeper_registry_admission_no_suspend.inc)
 

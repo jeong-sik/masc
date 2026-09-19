@@ -204,7 +204,9 @@ function flagText(
 }
 
 function numberText(value: number | null | undefined): string | null {
-  return typeof value === 'number' ? formatNumber(value) : null
+  if (typeof value !== 'number') return null
+  if (Number.isFinite(value) && !Number.isInteger(value)) return String(value)
+  return formatNumber(value)
 }
 
 function textList(values: readonly (string | null | undefined)[]): string | null {

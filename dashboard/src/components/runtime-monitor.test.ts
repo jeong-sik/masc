@@ -21,6 +21,12 @@ async function waitFor(assertion: () => boolean, label: string): Promise<void> {
   throw new Error(`Timed out waiting for ${label}`)
 }
 
+function parameterValue(container: HTMLElement, label: string): string | undefined {
+  const row = Array.from(container.querySelectorAll('[aria-label="runtime parameter detail"] > div'))
+    .find(candidate => candidate.firstElementChild?.textContent === label)
+  return row?.lastElementChild?.textContent?.trim()
+}
+
 describe('RuntimeMonitor', () => {
   let container: HTMLDivElement
 
@@ -120,7 +126,7 @@ describe('RuntimeMonitor', () => {
             num_ctx: 131072,
             seed: 42,
             has_previous_response_id: true,
-            connect_timeout_s: 120,
+            connect_timeout_s: 120.125,
           },
           effective_capabilities: {
             source: 'agent-core-provider-config-model',
@@ -179,7 +185,7 @@ describe('RuntimeMonitor', () => {
                 uses_anthropic_caching: true,
               },
               custom_header_count: 2,
-              connect_timeout_s: 120,
+              connect_timeout_s: 120.375,
             },
             model: {
               id: 'qwen',
@@ -444,6 +450,10 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('agent-core-provider-config-model')
     expect(container.textContent).toContain('effective · max context')
     expect(container.textContent).toContain('131,072')
+    expect(parameterValue(container, 'effective · max context')).toBe('131,072')
+    expect(parameterValue(container, 'declared model · temperature')).toBe('0.65')
+    expect(parameterValue(container, 'request · connect timeout')).toBe('120.125')
+    expect(parameterValue(container, 'declared provider · connect timeout')).toBe('120.375')
     expect(container.textContent).toContain('effective · tools')
     expect(container.textContent).toContain('tools,tool-choice,required,named,parallel,runtime-mcp,runtime-events')
     expect(container.textContent).toContain('effective · reasoning')
@@ -462,6 +472,29 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('native-stream,system-prompt')
     expect(container.textContent).toContain('effective · ignored sampling')
     expect(container.textContent).toContain('temperature,top_p,presence_penalty,frequency_penalty')
+  })
+
+  it.each([
+    [NaN, '--'],
+    [Infinity, '--'],
+    [-Infinity, '--'],
+    [null, undefined],
+    [undefined, undefined],
+  ])('preserves the existing missing or non-finite parameter display for %s', async (value, expected) => {
+    const baseline = await apiMocks.fetchRuntimeProviders()
+    apiMocks.fetchRuntimeProviders.mockResolvedValue({
+      ...baseline,
+      providers: baseline.providers.map((provider: typeof baseline.providers[number]) => ({
+        ...provider,
+        request_config: { ...provider.request_config, connect_timeout_s: value },
+      })),
+    })
+    render(h(RuntimeMonitor, {}), container)
+    await waitFor(
+      () => container.textContent?.includes('runpod_mtp.qwen') ?? false,
+      'runtime parameter missing or non-finite value',
+    )
+    expect(parameterValue(container, 'request · connect timeout')).toBe(expected)
   })
 
   it('shows per-turn cache read/write tokens in recent model entries', async () => {

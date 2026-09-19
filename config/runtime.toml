@@ -490,9 +490,10 @@ path = "~/.gemini/antigravity-cli/antigravity-oauth-token"
 [models.antigravity-gemini-3-7-flash-high]
 api-name = "gemini-3.7-flash-high"
 max-context = 1000000
-# Largest prompt proven end to end with agy 1.2.6 on 2026-09-18. Long-lived
-# Keepers later reached 21-48 MB and failed before their first turn (#37123),
-# so this measured boundary is admission authority, not a tokenizer estimate.
+# Last prompt size proven end to end with agy 1.2.6 on 2026-09-18. Long-lived
+# Keepers later reached 21-48 MB and failed before their first turn (#37123).
+# This conservative ceiling is a measured success point, not the CLI maximum
+# or a tokenizer estimate; raise it only after a larger end-to-end probe.
 max-prompt-bytes = 2078915
 tools-support = true
 streaming = true

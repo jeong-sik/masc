@@ -51,9 +51,11 @@ val run :
     Antigravity turn's input attribution as zero (masc#32995).
 
     It reports [Whole_input_transmitted] only when the conversation starts,
-    because only then does the rendered prompt carry the whole list. A resumed
-    conversation reports [Held_by_client_session]: the CLI re-sends just the
-    new turn, so what the model reads is not this process's to measure. *)
+    because only then does the rendered prompt carry the whole list. The
+    admission window and its observation likewise apply only to that fresh
+    input. A resumed conversation reports [Held_by_client_session]: the CLI
+    re-sends just the new turn, so what the model reads is not this process's
+    to measure. *)
 
 module For_testing : sig
   val capacity_bounded_model_input_projection

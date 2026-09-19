@@ -167,6 +167,7 @@ path = %S
 [models.gemini]
 api-name = "gemini-fixture"
 max-context = 128000
+max-prompt-bytes = 1048576
 
 [antigravity.gemini]
 
@@ -287,6 +288,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
       in
       let observed_trace_ref = ref None in
       let transmitted_inputs = ref [] in
+      let input_window_observations = ref [] in
       let record_transmitted ~runtime_id:_ ~tools:_ ~transmitted =
         transmitted_inputs := transmitted :: !transmitted_inputs
       in
@@ -384,6 +386,10 @@ let test_keeper_projects_mcp_tool_and_settles () =
                       ~agent_core_tools:[ tool ]
                       ~initial_messages:large_history
                       ~on_request_attribution:record_transmitted
+                      ~on_model_input_window_observation:
+                        (fun ~measurement:_ reading ->
+                           input_window_observations :=
+                             reading :: !input_window_observations)
                       ~hooks
                       ~context:(Agent_core.Context.create ())
                       ~raw_trace
@@ -506,6 +512,10 @@ let test_keeper_projects_mcp_tool_and_settles () =
                         ~agent_core_tools:[ tool ]
                         ~initial_messages:large_history
                         ~on_request_attribution:record_transmitted
+                        ~on_model_input_window_observation:
+                          (fun ~measurement:_ reading ->
+                             input_window_observations :=
+                               reading :: !input_window_observations)
                         ~hooks
                         ~context:(Agent_core.Context.create ())
                         ~raw_trace
@@ -551,6 +561,10 @@ let test_keeper_projects_mcp_tool_and_settles () =
          check bool "fresh transmission contains prepared history" true
            (List.length messages > 0)
        | _ -> fail "successful start/resume did not each report their exact input mode");
+      check int
+        "only the fresh input reports a history window"
+        1
+        (List.length !input_window_observations);
       check string
         "tool arguments"
         {|{"marker":"from-antigravity"}|}
@@ -789,6 +803,8 @@ let test_spawn_failure_is_pre_dispatch () =
       Unix.mkdir (Filename.concat base_path ".masc") 0o700;
       Masc_test_deps.declare_fixture_keeper
         ~base_path ~sandbox_profile:None "antigravity-pre-dispatch";
+      Masc_test_deps.declare_fixture_keeper
+        ~base_path ~sandbox_profile:None "antigravity-capacity-override";
       let oauth_source = Filename.concat base_path "operator-oauth-token" in
       write_file ~mode:0o600 oauth_source "operator-oauth-fixture";
       let missing_cli = Filename.concat base_path "missing-antigravity" in
@@ -822,6 +838,60 @@ let test_spawn_failure_is_pre_dispatch () =
                     | Some _ | None -> fail "Antigravity runtime fixture did not resolve"
                   in
                   let reports = ref [] in
+                  let oversized_system_prompt = String.make 1_048_577 'x' in
+                  let hooks =
+                    { Agent_core.Hooks.empty with
+                      before_turn_params =
+                        Some
+                          (function
+                            | Agent_core.Hooks.BeforeTurnParams
+                                { current_params; _ } ->
+                              Agent_core.Hooks.AdjustParams
+                                { current_params with
+                                  system_prompt_override =
+                                    Some oversized_system_prompt
+                                }
+                            | _ -> Agent_core.Hooks.Continue)
+                    }
+                  in
+                  let oversized_attempt =
+                    Keeper_antigravity_runtime.run
+                      ~accepts_image_input:
+                        (Runtime_agent.runtime_accepts_image_input
+                           ~runtime:
+                             (Runtime.get_runtime_by_id "antigravity.gemini"
+                              |> Option.get))
+                      ~pre_tool_rejects:(ref [])
+                      ~runtime_id:"antigravity.gemini"
+                      ~keeper_name:"antigravity-capacity-override"
+                      ~base_path
+                      ~goal:"override must be bounded"
+                      ~goal_blocks:None
+                      ~system_prompt:"small original prompt"
+                      ~tools:[]
+                      ~initial_messages:[]
+                      ~model_input_projection:None
+                      ~on_transmitted_model_input:
+                        (fun report -> reports := report :: !reports)
+                      ~hooks:(Some hooks)
+                      ~context_injector:None
+                      ~context:None
+                      ~event_bus:None
+                      ~raw_trace:None
+                      ~on_event:None
+                      ~config
+                      ()
+                  in
+                  (match oversized_attempt.result with
+                   | Error
+                       (Agent_core.Error.Config
+                          (Agent_core.Error.InvalidConfig { field; _ })) ->
+                     check string "override refused field" "max_prompt_bytes" field
+                   | Error error ->
+                     fail
+                       ("oversized system prompt override produced the wrong error: "
+                        ^ Agent_core.Error.to_string error)
+                   | Ok _ -> fail "oversized system prompt override reached the CLI");
                   let attempt =
                     Keeper_antigravity_runtime.run
                     ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
@@ -1002,11 +1072,37 @@ let test_undeclared_capacity_is_refused () =
 
 let test_declared_capacity_windows_history_and_reports_the_cut () =
   let observed = ref None in
+  let assistant_tool_use : Agent_core.Types.message =
+    { role = Assistant
+    ; content = [ ToolUse { id = "call-latest"; name = "lookup"; input = `Null } ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = []
+    }
+  in
+  let tool_result : Agent_core.Types.message =
+    { role = Tool
+    ; content =
+        [ ToolResult
+            { tool_use_id = "call-latest"
+            ; content = "latest result"
+            ; outcome = Tool_succeeded
+            ; json = None
+            ; content_blocks = None
+            }
+        ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = []
+    }
+  in
   let history =
     List.init 10 (fun index ->
       plain_user_message
         (Printf.sprintf "history-%02d:%s" index (String.make 1024 'x')))
+    @ [ assistant_tool_use; tool_result ]
   in
+  let _labelled, history_atoms = Runtime_model_input_tail_window.annotate history in
   match
     Keeper_antigravity_runtime.For_testing.capacity_bounded_model_input_projection
       ~declared_max_prompt_bytes:(Some 8192)
@@ -1032,12 +1128,22 @@ let test_declared_capacity_windows_history_and_reports_the_cut () =
          |> Result.get_ok
        in
        check bool "rendered prompt is bounded" true (prompt_bytes <= 8192);
-       check bool "old history was dropped" true (List.length projected < 10);
+       check bool "old history was dropped" true (List.length projected < List.length history);
        check bool "a recent suffix remains" true (List.length projected > 0);
+       (match List.rev projected with
+        | { Agent_core.Types.role = Tool; _ }
+          :: { Agent_core.Types.role = Assistant; _ }
+          :: _ ->
+          ()
+        | _ -> fail "the newest Assistant+Tool atom was split by the window");
        (match !observed with
         | None -> fail "the projection reported no window"
         | Some reading ->
-          check int "all source atoms are counted" 10 reading.total_atoms;
+          check
+            int
+            "all source atoms are counted"
+            history_atoms
+            reading.total_atoms;
           check int "reported count is what ships" projected_atoms
             reading.transmitted_atoms;
           check
@@ -1045,7 +1151,7 @@ let test_declared_capacity_windows_history_and_reports_the_cut () =
             "the reported front is the first retained atom"
             (Runtime_model_input_tail_window.atom_opening_digest
                history
-               (10 - projected_atoms))
+               (history_atoms - projected_atoms))
             (Some reading.front_atom_digest)))
 ;;
 

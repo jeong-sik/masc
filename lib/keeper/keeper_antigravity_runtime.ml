@@ -463,13 +463,14 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     let declared_max_prompt_bytes =
       Runtime_inference.resolve_max_prompt_bytes ~runtime_id
     in
-    let* model_input_projection =
-      capacity_bounded_model_input_projection
-        ~declared_max_prompt_bytes
-        ~system_prompt
-        ~goal
-        ?on_model_input_window_observation
-        model_input_projection
+    let* capacity_bytes =
+      match declared_max_prompt_bytes with
+      | Some capacity_bytes -> Ok capacity_bytes
+      | None ->
+        Error
+          (config_error
+             ~field:"max_prompt_bytes"
+             "Antigravity requires max-prompt-bytes because the CLI has no typed oversized-input refusal")
     in
     let* () = match official_task_reference with
       | None -> Ok ()
@@ -502,6 +503,33 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
              ~field:"reasoning_effort"
              "Antigravity effort must be declared by its runtime provider")
     in
+    let* prepared =
+      if is_resume
+      then Ok prepared
+      else
+        let* capacity_projection =
+          capacity_bounded_model_input_projection
+            ~declared_max_prompt_bytes
+            ~system_prompt:prepared.system_prompt
+            ~goal
+            ?on_model_input_window_observation
+            None
+        in
+        let* messages =
+          match capacity_projection with
+          | None -> Ok prepared.messages
+          | Some project ->
+            (try project prepared.messages with
+             | Eio.Cancel.Cancelled _ as exn -> raise exn
+             | exn ->
+               Error
+                 (Host.internal_error
+                    (runtime_label
+                     ^ " runtime model input projection raised: "
+                     ^ Printexc.to_string exn)))
+        in
+        Ok { prepared with messages }
+    in
     (* [prompt_for_turn] renders [prepared.system_prompt] as the
        system-instructions section; [Host.prepare_turn] has already refused a
        blank one, so the section is always present on a start (#33165). *)
@@ -514,6 +542,18 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
          else Host.Whole_input_transmitted prepared.messages)
     in
     let* prompt = prompt_for_turn ~is_resume ~goal prepared in
+    let* () =
+      if String.length prompt <= capacity_bytes
+      then Ok ()
+      else
+        Error
+          (config_error
+             ~field:"max_prompt_bytes"
+             (Printf.sprintf
+                "Antigravity final prompt measures %d bytes, above max-prompt-bytes %d"
+                (String.length prompt)
+                capacity_bytes))
+    in
     (* Recording the half this process controls, mirroring the Codex and
        Claude Code composition lines: an oversized prompt was invisible until
        the client's own log showed promptLength=11,386,764 (2026-08-14). *)
@@ -526,9 +566,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
       (String.length prompt)
       (String.length prepared.system_prompt)
       (String.length goal)
-      (match declared_max_prompt_bytes with
-       | Some bytes -> string_of_int bytes
-       | None -> "undeclared");
+      (string_of_int capacity_bytes);
     let terminal_error = ref None in
     let* dynamic_tools =
       Host.dynamic_tools

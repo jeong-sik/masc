@@ -27,6 +27,7 @@
 - TUI: `Enter` on a Memory fact opens the whole claim across the terminal; `j`/`k`, `PgUp`/`PgDn` and `g`/`G` move through it, `Esc` returns to the list, and the `?` sheet lists both screens' keys (#36960, #36983).
 - TUI: Mermaid `stateDiagram` and `stateDiagram-v2` render — direction, `[*]` start and end states, labelled transitions, and state descriptions and aliases — where they were refused as unsupported; styling statements and notes are skipped (#36964).
 - TUI: a turn block's head carries its span, `16:38→` while it runs and `16:38→16:41` once settled, wrapped inside the block's width so the gutter does not widen (#37011).
+- TUI: a Goal waiting in `Awaiting_confirmation` can be confirmed from the Planning detail. The first `a` reads the proven evidence from `GET /api/v1/goals/confirmation` and shows it; the second sends that exact criterion, request and verifier run to `POST /api/v1/goals/confirmation`, and a proof that changed in between is refused. While the confirmation is being sent further presses send nothing, and a reply that arrives after cancelling or moving to another Goal does not arm it again. Before this the TUI had no way to send the human's final confirmation, so a proven Goal stopped there (#37076).
 
 ### Changed
 
@@ -48,6 +49,7 @@
 - Storage: a durable JSONL append without an offset check cuts a torn last line, left by a crash mid-append, under the path lock, syncs, and continues, with a WARN naming the path and the bytes cut. The absorbed-memory store, approval audit, chat event log, channel gate bindings, run registry and turn boundaries no longer refuse every later append after one crash; an append that checks the end offset still refuses (#36999).
 - Schedule: an interval wake that was durably queued before owner activation or acceptance failed is retried on the next tick instead of deferring itself forever (#37100).
 - Schedule: `POST /api/v1/tools/masc_schedule_cancel` records the authenticated caller as the canceller and overwrites the `cancelled_by_*` fields in the request, where a token for one actor could name another; the response carries the recorded actor (#37149).
+- Health: a readable keeper queue whose owner lifecycle could not be looked up is no longer reported as a storage read failure. Queue storage reads alone set `counts_complete` and `read_errors`, and the owner cause is kept in `owner_lifecycle_detail` on the keeper and backlog rows, so its pending work stays counted and is still flagged for the operator. The served summary's `schema` moves to `masc.keeper_event_queue.fleet_summary.v7` and the raw summary to `v5`; the queue's stored files are unchanged (#37125).
 - Librarian: when every API slot is refused while its request is built, as with `missing_deadline`, the walk continues into the declared `cli_slots` (#37070); a slot the preflight excluded is no longer executed (#37147); and every working context in the output schema needs at least one source, as the domain parser already required (#37099).
 
 ## [0.35.20] - 2026-09-17

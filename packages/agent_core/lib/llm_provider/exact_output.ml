@@ -900,6 +900,8 @@ let admission_error_evidence_json = function
    so a grep finds both spellings. The match is exhaustive on purpose: a
    new wire error variant must be named here to compile, not fall into an
    unnamed bucket. *)
+let quoted_dynamic value = Printf.sprintf "%S" value
+
 let wire_admission_error_reason = function
   | Capability_snapshot_missing -> "capability_snapshot_missing"
   | Output_contract_unavailable -> "output_contract_unavailable"
@@ -923,7 +925,7 @@ let wire_admission_error_reason = function
     "measured_serving_constraint_rejected"
   | Token_measurement_failed -> "token_measurement_failed"
   | Unsupported_target_model { model_id } ->
-    Printf.sprintf "unsupported_target_model(%s)" model_id
+    Printf.sprintf "unsupported_target_model(%s)" (quoted_dynamic model_id)
   | Target_request_rejected -> "target_request_rejected"
   | Request_serialization_rejected -> "request_serialization_rejected"
 ;;
@@ -931,12 +933,36 @@ let wire_admission_error_reason = function
 let admission_error_reason = function
   | Provider_schema_unavailable -> "provider_schema_unavailable"
   | Unsupported_schema_keyword keyword ->
-    Printf.sprintf "unsupported_schema_keyword(%s)" keyword
+    Printf.sprintf "unsupported_schema_keyword(%s)" (quoted_dynamic keyword)
   | Unsupported_schema_type schema_type ->
-    Printf.sprintf "unsupported_schema_type(%s)" schema_type
+    Printf.sprintf "unsupported_schema_type(%s)" (quoted_dynamic schema_type)
   | Invalid_schema -> "invalid_schema"
   | Wire_admission_rejected cause ->
     "wire_admission_rejected:" ^ wire_admission_error_reason cause
+;;
+
+let target_selection_error_reason = function
+  | Missing_target_credential { target_ref; environment_variable } ->
+    Printf.sprintf
+      "missing_target_credential(target_ref=%s environment_variable=%s)"
+      (quoted_dynamic target_ref)
+      (quoted_dynamic environment_variable)
+  | Target_credential_invalid { target_ref; environment_variable } ->
+    Printf.sprintf
+      "target_credential_invalid(target_ref=%s environment_variable=%s)"
+      (quoted_dynamic target_ref)
+      (quoted_dynamic environment_variable)
+  | Target_credential_read_failed { target_ref; environment_variable } ->
+    Printf.sprintf
+      "target_credential_read_failed(target_ref=%s environment_variable=%s)"
+      (quoted_dynamic target_ref)
+      (quoted_dynamic environment_variable)
+;;
+
+let candidate_rejection_reason (receipt : candidate_rejection_receipt) =
+  match receipt.cause with
+  | Target_selection_rejected cause -> target_selection_error_reason cause
+  | Request_admission_rejected cause -> admission_error_reason cause
 ;;
 
 let target_selection_error_evidence_json = function

@@ -10,7 +10,7 @@
     candidate visit ("slot=... call_id=..."; "advance=a->b kind=..."). *)
 val flow_evidence_detail : Agent_core.Exact_output.flow_evidence -> string
 
-(** "slot=<id> <disposition>" for one rejected candidate. *)
+(** "slot=<id> <disposition> cause=<typed reason>" for one rejected candidate. *)
 val candidate_rejection_detail
   :  Agent_core.Exact_output.candidate_rejection_receipt
   -> string

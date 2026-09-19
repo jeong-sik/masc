@@ -21,15 +21,14 @@ let execution_cause_detail : Exact_output.execution_error_cause -> string = func
   | Internal_non_json_output -> "internal non-json output"
 ;;
 
-(* [flow_evidence] is a private agent-core type with no constructor outside agent core,
-   so the assembled line cannot be built in a test. The part that decides what
-   the line says is split out here, where it can. That gap is why the label
-   collapse below survived: the leaf renderer [execution_cause_detail] was
-   covered, and the caller that failed to use it was not. *)
+(* [flow_evidence] is a private agent-core type with no constructor outside
+   agent core. Tests must obtain it through an actual flow, which keeps this
+   caller wiring covered instead of testing only its leaf renderers. *)
 let advance_failure_kind : Exact_output.flow_advance_failure_snapshot -> string * string
   = function
   | Exact_output.Flow_advance_candidate_rejected rejection ->
-    (Exact_output.candidate_rejection_identity rejection).candidate_id, "candidate_rejected"
+    ( (Exact_output.candidate_rejection_identity rejection).candidate_id
+    , "candidate_rejected cause=" ^ Exact_output.candidate_rejection_reason rejection )
   (* [execution_error_cause] distinguishes eleven outcomes — a quota refusal,
      an output budget spent before the answer, invalid JSON, an HTTP refusal
      with its status. Rendering only "execution_failed" collapsed all eleven
@@ -140,12 +139,12 @@ let rejection_disposition_detail : Exact_output.candidate_rejection_disposition 
 
 let candidate_rejection_detail (rejection : Exact_output.candidate_rejection_receipt) =
   Printf.sprintf
-    "slot=%s %s"
+    "slot=%s %s cause=%s"
     (Exact_output.candidate_rejection_identity rejection).candidate_id
     (Exact_output.candidate_rejection_disposition rejection
      |> rejection_disposition_detail)
+    (Exact_output.candidate_rejection_reason rejection)
 ;;
-
 
 (* Log lines are single-line records; the excerpt bound keeps one failed call
    from flooding them while the sha256 keeps the full body identifiable in

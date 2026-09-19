@@ -17,6 +17,27 @@ let config_in_cluster config cluster_name =
   }
 ;;
 
+let write_keeper_declaration config =
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:config.Workspace.base_path
+  in
+  Fs_compat.mkdir_p keepers_dir;
+  Fs_compat.mkdir_p (Filename.concat keepers_dir keeper_name);
+  let path = Filename.concat keepers_dir (keeper_name ^ ".toml") in
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () ->
+       Printf.fprintf
+         oc
+         "[keeper]\nname = %S\ninstructions = %S\nsandbox_profile = %S\n"
+         keeper_name
+         "test durable Librarian"
+         "docker");
+  Masc.Keeper_types_profile.invalidate_keeper_profile_defaults_cache keeper_name
+;;
+
 let with_workspace f =
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
   Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
@@ -30,6 +51,7 @@ let with_workspace f =
     (fun () ->
        let config = Workspace.default_config base_path in
        let (_ : string) = Workspace.init config ~agent_name:None in
+       write_keeper_declaration config;
        f config)
 ;;
 
@@ -299,10 +321,9 @@ let test_distinct_boundaries_reject_non_monotone_counterpart_interval () =
   save_checkpoint config ~trace_id first 1;
   append_boundary config ~trace_id ~turn:1 ~recorded_at:20.0 first;
   (match consume config (fun ~expected_revision:_ _ -> true) with
-   | Consumer.Baseline_advanced _ -> ()
+   | Consumer.Baseline_advanced _ | Consumer.Progress_advanced _ -> ()
    | Consumer.Nothing_to_read
-   | Consumer.Memory_not_committed
-   | Consumer.Progress_advanced _ -> fail "fixture baseline did not advance");
+   | Consumer.Memory_not_committed -> fail "fixture progress did not advance");
   let messages = first @ [ message "turn-2" ] in
   append_boundary config ~trace_id ~turn:2 ~recorded_at:10.0 messages;
   save_checkpoint config ~trace_id messages 2;

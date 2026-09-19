@@ -572,7 +572,7 @@ let test_resolve_assignment_prefers_lane_over_runtime () =
         (Runtime_lane.ordered_candidates lane))
 
 (* A keeper assigned to a runtime that no lane names walks that runtime and
-   nothing else: [runtime].default is not a fallback for it. *)
+   nothing else. *)
 let test_bare_runtime_assignment_walks_only_itself () =
   with_runtime_config runtime_toml_with_lane (fun () ->
     match Runtime.resolve_assignment "fallback.test_model" with

@@ -688,8 +688,8 @@ let validate_lanes
          })
 ;;
 
-(* A lane is exactly the candidates it declares. Nothing is appended: a keeper
-   reaches another runtime only when a lane names it. *)
+(* A lane is exactly the candidates it declares: a keeper reaches another
+   runtime only when a lane names it. *)
 let lanes_of_decls
     ~(dropped_bindings : (string * drop_reason) list)
     (runtimes : t list)
@@ -1784,9 +1784,8 @@ let max_context_of_runtime (rt : t) : int =
 
 (* Resolve a keeper assignment to a lane. Declared lanes are preferred so a lane
    id can shadow a runtime id (lanes are explicit operator routing constructs).
-   An assignment naming a bare runtime gets a lane holding that runtime alone:
-   the lane is what carries quota demotion, and failover is only ever what a
-   declared lane names.
+   An assignment naming a bare runtime resolves to a lane holding that runtime
+   alone.
    [Unavailable] retains a configured ID whose capability catalog entry is
    absent; [Missing] means no configured lane or runtime has that ID. *)
 let resolve_assignment (assigned_id : string) =

@@ -2603,9 +2603,8 @@ nu = "coding"
   ^ lane_fixture_bindings
 ;;
 
-(* Two ladders start at the same runtime under names of their own. [careful]
-   ends at [runtime].default because it names it; [fast] does not, and nothing
-   is appended to it. *)
+(* Two ladders start at the same runtime under names of their own and keep
+   their own tails. *)
 let runtime_config_two_lanes_one_head =
   {|
 [runtime]

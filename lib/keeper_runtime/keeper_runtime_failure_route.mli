@@ -30,6 +30,9 @@ type retry_class =
   | Hard_quota  (** account-level quota/balance exhaustion (402 family) *)
   | Capacity_backpressure
       (** typed provider overload / capacity-exhausted pools *)
+  | Empty_completion
+      (** provider completed the request with no thinking, text, or tool calls;
+          retryable like a server failure, but the model observed the input *)
   | Server_error  (** typed server failure / provider unavailable *)
   | Network_transient  (** transport-level network failure *)
   | Provider_timeout  (** provider or transport deadline expiry *)
@@ -193,15 +196,15 @@ val response_observed : route -> bool
     (#32956: one approval rode 24 turns in 51 minutes, every turn ending at
     [MaxTokens]).
 
-    [true]: the three [No_progress_*] rotations (the accept gate rejected an
-    answer), [Contract_violation] (an incomplete tool transcript or a proven
-    pre-effect tool failure), the five [Terminal_effect_*] classes (a tool
-    the model called failed terminally), and the two effect fences with
-    [Fenced_effect_attempted] (a tool handler was entered, so the model had
-    answered).
+    [true]: [Empty_completion], the three [No_progress_*] rotations (the
+    accept gate rejected an answer), [Contract_violation] (an incomplete tool
+    transcript or a proven pre-effect tool failure), the five
+    [Terminal_effect_*] classes (a tool the model called failed terminally),
+    and the two effect fences with [Fenced_effect_attempted] (a tool handler
+    was entered, so the model had answered).
 
-    [false]: every [Retry_after_observed] class, every other rotation and
-    terminal class, and the two effect fences with
+    [false]: every other [Retry_after_observed] class, every other rotation
+    and terminal class, and the two effect fences with
     [Fenced_observation_unavailable], which the lanes set before any answer.
     [Internal_opaque] is [false] although it also holds an accept rejection
     without a no-progress hint: the route cannot tell that apart from an
@@ -212,9 +215,9 @@ val route_resumes_on_same_path : route -> bool
     operation whose last candidate failed after saving tool results continues
     on that same path (RFC last-path-resumes-after-progress §3.3).
 
-    [true]: [Rate_limited], [Capacity_backpressure], [Server_error],
-    [Network_transient], [Provider_timeout], and [Hard_quota] with a usable
-    reset hint (positive, not NaN).
+    [true]: [Rate_limited], [Capacity_backpressure], [Empty_completion],
+    [Server_error], [Network_transient], [Provider_timeout], and [Hard_quota]
+    with a usable reset hint (positive, not NaN).
 
     [false]: [Hard_quota] without one, every rotation, and every terminal
     class. How long the path rests is not read here: the chat lane's wait

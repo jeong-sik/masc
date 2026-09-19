@@ -4,6 +4,7 @@ type retry_class =
   | Rate_limited
   | Hard_quota
   | Capacity_backpressure
+  | Empty_completion
   | Server_error
   | Network_transient
   | Provider_timeout
@@ -233,8 +234,8 @@ let route_of_provider_error ~err (p : Llm_provider.Error.provider_error) =
   | Llm_provider.Error.HardQuota { retry_after; _ } -> observe_retry ?retry_after Hard_quota
   | Llm_provider.Error.CapacityExhausted { retry_after; _ } ->
     observe_retry ?retry_after Capacity_backpressure
-  | Llm_provider.Error.ProviderUnavailable _
-  | Llm_provider.Error.EmptyCompletion _ -> observe_retry Server_error
+  | Llm_provider.Error.ProviderUnavailable _ -> observe_retry Server_error
+  | Llm_provider.Error.EmptyCompletion _ -> observe_retry Empty_completion
   | Llm_provider.Error.ServerError { transient = true; _ } ->
     observe_retry Server_error
   | Llm_provider.Error.ServerError { transient = false; _ } ->
@@ -352,6 +353,7 @@ let path_rest_sec ~cap_sec ~retry_class ~retry_after_hint =
     | Hard_quota -> cap_sec
     | Rate_limited
     | Capacity_backpressure
+    | Empty_completion
     | Server_error
     | Network_transient
     | Provider_timeout ->
@@ -374,6 +376,7 @@ let retry_class_label = function
   | Rate_limited -> "rate_limited"
   | Hard_quota -> "hard_quota"
   | Capacity_backpressure -> "capacity_backpressure"
+  | Empty_completion -> "empty_completion"
   | Server_error -> "server_error"
   | Network_transient -> "network_transient"
   | Provider_timeout -> "provider_timeout"
@@ -432,9 +435,13 @@ let response_observed = function
      (* 402: refused before any generation. *)
      | Capacity_backpressure
      (* overload / capacity pool exhausted: refused before any generation. *)
+     | Empty_completion ->
+       (* The provider completed the turn with a modeled stop reason and an
+          empty assistant answer. The model saw the input even though it made
+          no usable progress. *)
+       true
      | Server_error
-     (* 5xx, provider unavailable, or an empty completion: nothing the model
-        said is on record. *)
+     (* 5xx or provider unavailable: nothing the model said is on record. *)
      | Network_transient
      (* the transport failed; no answer arrived. *)
      | Provider_timeout ->
@@ -530,9 +537,10 @@ let route_resumes_on_same_path = function
         operation. *)
      | Capacity_backpressure
      (* the provider's or MASC's own slot was full for the moment. *)
+     | Empty_completion
+     (* the provider completed the request but returned no usable content. *)
      | Server_error
-     (* 5xx, provider unavailable, or an empty completion. A model that keeps
-        answering empty fails the resumed attempt the same way. *)
+     (* 5xx or provider unavailable. *)
      | Network_transient
      (* the transport dropped. *)
      | Provider_timeout ->

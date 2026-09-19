@@ -147,6 +147,9 @@ let test_other_failures_without_a_suffix_keep_the_cadence () =
     [ ( "network transient"
       , KFR.Retry_after_observed
           { retry_class = KFR.Network_transient; retry_after = None } )
+    ; ( "empty completion"
+      , KFR.Retry_after_observed
+          { retry_class = KFR.Empty_completion; retry_after = None } )
     ; ( "server error"
       , KFR.Retry_after_observed { retry_class = KFR.Server_error; retry_after = None } )
     ; ( "provider timeout"
@@ -210,7 +213,17 @@ let exhausted_route label terminal =
 ;;
 
 let observed_failure_routes =
-  [ "no progress truncated", KFR.Rotate_now { rotate = KFR.No_progress_truncated }
+  let empty_completion =
+    Agent_core.Error.Provider
+      (Llm_provider.Error.EmptyCompletion
+         { provider = "openrouter"
+         ; stop_reason = Agent_core.Types.EndTurn
+         ; detail = "empty assistant turn"
+         })
+    |> KFR.route_of_error ~boundary:KFR.Agent_core_execution
+  in
+  [ "typed empty completion", empty_completion
+  ; "no progress truncated", KFR.Rotate_now { rotate = KFR.No_progress_truncated }
   ; "no progress empty", KFR.Rotate_now { rotate = KFR.No_progress_empty }
   ; ( "no progress thinking only"
     , KFR.Rotate_now { rotate = KFR.No_progress_thinking_only } )

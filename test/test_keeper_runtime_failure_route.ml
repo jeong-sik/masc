@@ -197,6 +197,28 @@ let test_provider_quota_family_threads_hint () =
           ; detail = "pool saturated"
           }))
 
+let empty_completion_error =
+  Agent_core.Error.Provider
+    (Llm_provider.Error.EmptyCompletion
+       { provider = "openrouter"
+       ; stop_reason = Agent_core.Types.EndTurn
+       ; detail = "empty assistant turn"
+       })
+;;
+
+let test_empty_completion_keeps_answer_observation () =
+  let route = route_of_agent_core_error empty_completion_error in
+  check_route
+    "typed empty completion keeps its own retry class"
+    (KFR.Retry_after_observed
+       { retry_class = KFR.Empty_completion; retry_after = None })
+    empty_completion_error;
+  Alcotest.(check bool)
+    "the provider completed the request, so the input was observed"
+    true
+    (KFR.response_observed route)
+;;
+
 let test_provider_config_judges () =
   match
     route_of_agent_core_error
@@ -430,7 +452,8 @@ let test_response_observed_per_class () =
     ];
   List.iter
     (check_observed true)
-    [ rotate KFR.No_progress_empty
+    [ retry KFR.Empty_completion
+    ; rotate KFR.No_progress_empty
     ; rotate KFR.No_progress_thinking_only
     ; rotate KFR.No_progress_truncated
     ; rotate KFR.Generation_repeated
@@ -568,6 +591,7 @@ let test_route_resumes_on_same_path_per_class () =
     [ "", retry KFR.Rate_limited
     ; "with a hint", retry ~retry_after:30.0 KFR.Rate_limited
     ; "", retry KFR.Capacity_backpressure
+    ; "", retry KFR.Empty_completion
     ; "", retry KFR.Server_error
     ; "", retry KFR.Network_transient
     ; "", retry KFR.Provider_timeout
@@ -639,6 +663,10 @@ let () =
             "wire error is provider integration"
             `Quick
             test_provider_wire_error_is_provider_integration
+        ; Alcotest.test_case
+            "empty completion keeps answer observation"
+            `Quick
+            test_empty_completion_keeps_answer_observation
         ; Alcotest.test_case
             "wire error kinds split on what arrived"
             `Quick

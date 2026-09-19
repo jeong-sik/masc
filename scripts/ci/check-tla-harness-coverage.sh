@@ -138,7 +138,44 @@ runs_buggy_cfg() {
   return 1
 }
 
+# The same question of the clean cfgs. A spec may state more than one model
+# that must hold, and only <spec>.cfg is reached by a default run_tlc line or
+# by the bug-models glob; any other clean cfg has to be named. Left unnamed it
+# is as quiet as an unrun bug model, and quieter in its consequence: nobody
+# even learns that the model it states was never checked.
+runs_clean_cfg() {
+  local dir="$1" cfg="$2" stem="$3"
+  local line
+
+  [[ "$cfg" == "$stem.cfg" ]] || {
+    while IFS= read -r line; do
+      [[ "$line" == *run_tlc* ]] || continue
+      [[ "$line" == *"\"\$REPO_ROOT/$dir\""* ]] || continue
+      [[ "$line" == *"\"$cfg\""* ]] && return 0
+    done < <(harness_lines)
+    return 1
+  }
+
+  [[ "$dir" == "specs/bug-models" ]] && return 0
+  while IFS= read -r line; do
+    [[ "$line" == *run_tlc* && "$line" != *run_tlc_buggy* ]] || continue
+    [[ "$line" == *"\"\$REPO_ROOT/$dir\""* ]] || continue
+    [[ "$line" == *"\"$stem.tla\""* ]] && return 0
+  done < <(harness_lines)
+  return 1
+}
+
 unrun=()
+while IFS= read -r cfg; do
+  [[ -n "$cfg" ]] || continue
+  dir="${cfg%/*}"
+  file="${cfg##*/}"
+  [[ "$file" == *-buggy*.cfg ]] && continue
+  stem="$(spec_of_cfg "$dir" "$file")" || continue
+  is_known_unchecked "$dir/$stem.tla" && continue
+  runs_clean_cfg "$dir" "$file" "$stem" || unrun+=("$cfg")
+done < <(find specs -name '*.cfg' -type f | sort)
+
 while IFS= read -r cfg; do
   [[ -n "$cfg" ]] || continue
   dir="${cfg%/*}"
@@ -150,11 +187,13 @@ while IFS= read -r cfg; do
 done < <(find specs -name '*-buggy*.cfg' -type f | sort)
 
 if ((${#unrun[@]} > 0)); then
-  echo "FAIL: buggy TLA+ cfgs that scripts/tla-check.sh never runs:" >&2
+  echo "FAIL: TLA+ cfgs that scripts/tla-check.sh never runs:" >&2
   printf '  %s\n' "${unrun[@]}" >&2
   echo >&2
-  echo "A buggy cfg that does not run proves nothing: the clean run passes either way." >&2
-  echo "Add a run_tlc_buggy line naming the cfg, or record the spec as known unchecked debt." >&2
+  echo "A cfg that does not run states a model nobody checks, and a buggy one" >&2
+  echo "that does not run proves nothing at all: the clean run passes either way." >&2
+  echo "Add a run_tlc / run_tlc_cfg / run_tlc_buggy line naming the cfg, or record" >&2
+  echo "the spec as known unchecked debt." >&2
   exit 1
 fi
 

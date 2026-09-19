@@ -304,9 +304,10 @@ let record_crashed_cycle_failure ~base_path ~keeper_name exn =
   (* Capture the backtrace before any other call can clobber it. *)
   let backtrace = Printexc.get_backtrace () in
   ignore (Keeper_turn_failure_streak.increment ~base_path ~keeper_name);
-  Health.record_failure
-    ~agent_name:keeper_name
-    ~reason:(Keeper_types_profile.short_preview (Printexc.to_string exn));
+  let detail = Keeper_types_profile.short_preview (Printexc.to_string exn) in
+  Keeper_registry.set_failure_reason ~base_path keeper_name
+    (Some (Keeper_registry.Exception detail));
+  Health.record_failure ~agent_name:keeper_name ~reason:detail;
   Otel_metric_store.inc_counter
     Keeper_metrics.(to_string CycleExceptions)
     ~labels:[ "keeper", keeper_name ]
@@ -509,9 +510,30 @@ let failure_reason_after_turn_status ~turn_fail_count current =
   then current
   else
     match current with
-    | Some (Keeper_registry.Turn_configuration_error _)
-    | Some (Keeper_registry.Official_client_recovery_required _) -> current
-    | Some _ | None -> Some (Keeper_registry.Turn_consecutive_failures turn_fail_count)
+    | Some (Keeper_registry.Turn_consecutive_failures _) | None ->
+      Some (Keeper_registry.Turn_consecutive_failures turn_fail_count)
+    | Some
+        ( Keeper_registry.Heartbeat_consecutive_failures _
+          (* Phase 1 records this while workspace I/O is failing now. *)
+        | Keeper_registry.Stale_termination_storm _
+        | Keeper_registry.Provider_runtime_error _
+        | Keeper_registry.Turn_configuration_error _
+        | Keeper_registry.Official_client_recovery_required _
+        | Keeper_registry.Fiber_unresolved _
+        | Keeper_registry.Exception _
+        | Keeper_registry.Turn_overflow_failure
+        | Keeper_registry.Operator_interrupt ) -> current
+;;
+
+let refresh_failure_reason_after_turn ~base_path ~keeper_name ~turn_fail_count =
+  if turn_fail_count > 0
+  then (
+    let current =
+      Option.bind (Keeper_registry.get ~base_path keeper_name) (fun entry ->
+        entry.last_failure_reason)
+    in
+    Keeper_registry.set_failure_reason ~base_path keeper_name
+      (failure_reason_after_turn_status ~turn_fail_count current))
 ;;
 
 (* Whether the event queue still holds any pending entry. Read errors are
@@ -1431,20 +1453,10 @@ let run_heartbeat_loop
                ~keeper_name:m.name
                (turn_status_event
                   ~turn_fail_count);
-             if turn_fail_count > 0
-             then (
-               let current_failure_reason =
-                 Keeper_registry.get
-                   ~base_path:ctx.config.base_path
-                   m.name
-                 |> fun entry -> Option.bind entry (fun entry -> entry.last_failure_reason)
-               in
-               Keeper_registry.set_failure_reason
-                 ~base_path:ctx.config.base_path
-                 m.name
-                 (failure_reason_after_turn_status
-                    ~turn_fail_count
-                    current_failure_reason));
+             refresh_failure_reason_after_turn
+               ~base_path:ctx.config.base_path
+               ~keeper_name:m.name
+               ~turn_fail_count;
              (* Phase 1: work-as-heartbeat — renew point (b).
                 After turn, call Workspace.heartbeat to prove workspace I/O health.
                 On success: reset consecutive_failures.

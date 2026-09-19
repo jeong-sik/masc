@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Fresh state required
+
+- Model catalog overlay, `<base>/.masc/config/agent-core-models-overlay.toml`
+  (#37016): nothing loads it. Provider and model facts live in AGENT_CORE's
+  embedded catalog, and a deployment names the rows it uses in `runtime.toml`
+  rather than restating what a row says. No boot error names this file, because
+  no reader is left to raise one — a copy left in the config root simply sits
+  there looking live. Delete it. A model the embedded catalog does not carry is
+  declared with a `[models.<id>.capabilities]` block in `runtime.toml`;
+  without one the capability gate refuses the binding at boot.
+- Connections the install wizard wrote (#37016): delete their `setup_*` provider,
+  model and binding entries from `runtime.toml` before re-running the wizard. A
+  connection's id now comes from the parsed answers rather than the JSON that
+  carried them, so the same answers produce a different `setup_*` id. The wizard
+  appends an id it has not seen and leaves the old entry in place, which then
+  fails the capability gate at boot while the new one works.
+
 ## [0.35.20] - 2026-09-17
 
 ### Upgrade notes

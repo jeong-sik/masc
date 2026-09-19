@@ -191,6 +191,7 @@ type t =
   | WireCaptureResponseSuppressed
   | WireCaptureWriteFailures
   | WireCaptureRecordSkipped
+  | TurnBoundaryFailures
 
 val to_string : t -> string
 

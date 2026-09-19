@@ -403,15 +403,6 @@ let () =
   let clock = Eio.Stdenv.clock env in
   Eio_context.set_env env;
   Eio_context.set_clock clock;
-  (* The server installs the deployment capability overlay at boot and a CLI
-     does not, so without this an Agent Core runtime that exists in
-     runtime.toml still resolves as "absent from the AGENT_CORE capability
-     catalog". fusion_run.ml carries the same call for the same reason. *)
-  ignore
-    (Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
-       ~config_root:(Filename.dirname config_path)
-       ()
-     : string option);
   (match Runtime.init_default ~config_path with
    | Error msg ->
      Printf.eprintf "runtime init failed (%s): %s\n" config_path msg;

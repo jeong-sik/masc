@@ -413,6 +413,13 @@ let keeper_artifact_path config keeper_name artifact =
            (Config_dir_resolver.keepers_dir_for_base_path
               ~base_path:config.Workspace.base_path)
          ~keeper_id:keeper_name)
+  | Keeper_turn_boundaries_artifact ->
+    Some
+      (Keeper_turn_boundaries.path_for_keepers_dir
+         ~keepers_dir:
+           (Config_dir_resolver.keepers_dir_for_base_path
+              ~base_path:config.Workspace.base_path)
+         ~keeper_id:keeper_name)
   | Keeper_playground_bundles_artifact -> None
   | Keeper_configuration_artifact ->
     Some
@@ -544,6 +551,7 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
             | Keeper_working_context_recall_artifact
             | Keeper_working_context_artifact
             | Keeper_memory_absorbed_artifact
+            | Keeper_turn_boundaries_artifact
             | Keeper_playground_bundles_artifact
             | Keeper_runtime_configuration_artifact
             | Keeper_configuration_artifact
@@ -569,6 +577,7 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
                | Keeper_working_context_artifact
                | Keeper_memory_journal_artifact
                | Keeper_memory_absorbed_artifact
+               | Keeper_turn_boundaries_artifact
                | Keeper_playground_bundles_artifact
                | Keeper_runtime_configuration_artifact
                | Keeper_configuration_artifact

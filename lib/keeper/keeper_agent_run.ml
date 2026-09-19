@@ -1892,6 +1892,13 @@ let run_turn
                              ~runtime_id_string:selected_runtime_id
                              ~max_context:selected_max_context
                              ~checkpoint_owner
+                             ~history_at_start:
+                               (* [ctx.ctx_work] is the history this turn
+                                  started from; the local [ctx_work] already
+                                  carries this turn's input. *)
+                               (Keeper_turn_boundaries.history_at_start_of_messages
+                                  (Keeper_context_runtime.messages_of_context
+                                     ctx.ctx_work))
                              ~official_client_settlement:selected_run.official_client_settlement
                              ~history_messages
                              ~prompt_metrics ~ctx_composition ~usage

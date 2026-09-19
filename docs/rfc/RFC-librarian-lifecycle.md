@@ -400,6 +400,22 @@ flowchart TD
 - checkpoint 를 디스크에서 읽는 비용은 하네스와 라이브에서 잰다. 크면 깨우는 신호에 메모리 속 메시지를 귀띔으로 같이 넘기되, 범위 양 끝 digest 가 맞을 때만 쓴다.
 - 읽은 위치부터만 읽으면 지금(맨 뒤 72개)보다 앞 맥락이 적다. 그 영향도 하네스로 잰다(§9).
 
+**요청을 채우는 것이 무엇인지 재 봤다**(09-19, 턴 기록 1,317건의 `input_components` 합계 1.9 GB. 턴마다 다시 실리는 양을 더한 값이라 저장량이 아니라 **보낸 양**이다).
+
+| 구성 | 합 | 몫 |
+|---|---|---|
+| `message_tool_result` | 650 MB | **32%** |
+| `message_tool_use` | 611 MB | **30%** |
+| `message_thinking` | 271 MB | 13% |
+| `message_assistant_text` | 230 MB | 11% |
+| `tool_schemas` | 108 MB | 5% |
+| `prompt.memory_os_recall` | 58 MB | **2%** |
+| `message_user` | 18 MB | 0% |
+
+**도구가 오간 것이 62%** 이고, 사람과 모델이 주고받은 말은 11% 다. 회차가 읽는 것이 그 11% 이고(도구 결과 본문은 `[tool result omitted]` 로 뺀다), 회차가 만들어 다음 턴에 실리는 기억은 **2%** 다.
+
+이 비율이 뜻하는 것 두 가지. 첫째, Librarian 의 값어치를 "요청을 얼마나 줄이나"로 재면 상한이 11% 다. 둘째, 이력이 커지는 이유는 대화가 아니라 **도구 트래픽**이므로, 창을 줄이는 일과 기억을 남기는 일은 **다른 문제**다. RFC-0351 의 오프라인 purge 가 R3 에서 도구 결과 본문을 지우는 것이 가장 큰 덩어리를 겨냥한다.
+
 ### 4.8 공식 클라이언트 턴
 
 이 턴들은 checkpoint 가 없어 atom 이력이 없다(`No_atom_history`). 읽을 거리는 trace 디렉터리의 두 파일에 있다(`keeper_context_core_history.ml` `persist_message`, `classify_history_entry`).

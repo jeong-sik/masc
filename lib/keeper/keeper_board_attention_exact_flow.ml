@@ -563,6 +563,10 @@ let execute_current ?cli_runner ~clock ~before_dispatch ~before_advance prepared
             | Some api_key ->
               (match prepared.candidate.status with
                | Keeper_board_attention_candidate.Pending { material; _ } ->
+                 (* A direct-style Eio request on this keeper's board-attention
+                    worker fiber: the wait suspends that fiber alone, as the
+                    [Exact_output] request below does, so it delays this
+                    candidate's judgment and nothing else on the domain. *)
                  (match
                     Typesafeai_board_attention.judge_candidate
                       ~clock

@@ -1,5 +1,6 @@
 (** TypeSafe AI System One adapter for Board Attention Candidate judgment.
-    Evaluates relevance in 70-100ms with calibrated confidence, bypassing free-text LLM generation. *)
+    Evaluates relevance in one System One request that returns a choice with
+    calibrated confidence, bypassing free-text LLM generation. *)
 
 val min_confidence_threshold : float
 (** Minimum confidence required to accept a Jev judgment without fallback (default 0.5). *)

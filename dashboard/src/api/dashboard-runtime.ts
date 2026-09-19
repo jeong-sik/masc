@@ -80,6 +80,8 @@ export interface DashboardRuntimeDeclaredProviderSpec {
   behavior_capabilities?: DashboardRuntimeProviderBehaviorCapabilities | null
   custom_header_count?: number | null
   connect_timeout_s?: number | null
+  /** Total Exact request timeout, including response headers. */
+  exact_body_timeout_s?: number | null
 }
 
 export interface DashboardRuntimeDeclaredModelCapabilities {
@@ -523,6 +525,7 @@ function decodeRuntimeDeclaredProviderSpec(raw: unknown): DashboardRuntimeDeclar
     behavior_capabilities: decodeRuntimeProviderBehaviorCapabilities(raw.behavior_capabilities),
     custom_header_count: asNumber(raw.custom_header_count) ?? null,
     connect_timeout_s: asNumber(raw.connect_timeout_s) ?? null,
+    exact_body_timeout_s: asNumber(raw.exact_body_timeout_s) ?? null,
   }
 }
 

@@ -784,7 +784,7 @@ let declared_targets_of_config (config : Runtime_schema.config) =
             ; model_id = model.api_name
             ; enable_thinking = model.thinking_support
             ; connect_timeout_s = provider.connect_timeout_s
-            ; body_timeout_s = None
+            ; body_timeout_s = provider.exact_body_timeout_s
             ; api_key_env =
                 (match provider.credentials with
                  | Some (Runtime_schema.Env name) -> Some name

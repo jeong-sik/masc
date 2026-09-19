@@ -440,6 +440,7 @@ function runtimeParameterDetailRows(
     detailRow('declared provider', 'behavior', runtimeProviderBehaviorText(provider)),
     detailRow('declared provider', 'custom headers', numberText(spec?.provider?.custom_header_count)),
     detailRow('declared provider', 'connect timeout', numberText(spec?.provider?.connect_timeout_s)),
+    detailRow('declared provider', 'Exact timeout (s)', spec?.provider?.exact_body_timeout_s?.toString()),
     detailRow('declared model', 'model id', declaredModel?.id),
     detailRow('declared model', 'api name', declaredModel?.api_name),
     detailRow('declared model', 'context', numberText(declaredModel?.max_context)),

@@ -58,6 +58,7 @@ type capabilities =
 [@@deriving show, eq]
 
 val connect_timeout_s_key : string
+val exact_body_timeout_s_key : string
 
 type antigravity_effort =
   | Antigravity_low
@@ -103,6 +104,11 @@ type provider =
       provider, not the model, because it is a transport property.
       agent-core boundary, Agent Core contract I2: MASC declares the budget;
       AGENT_CORE owns enforcement and phase=Http_operation attribution. *)
+  ; exact_body_timeout_s : float option
+    (** Explicit total HTTP request deadline for Exact-output calls through
+        this provider, including connection, response headers and the full
+        response body. [None] declares no body deadline. This does not replace
+        [connect_timeout_s] or ordinary Keeper per-call body deadlines. *)
   ; antigravity_cli : antigravity_cli_options option
     (** Present exactly when [protocol = "antigravity-cli"]. *)
   }

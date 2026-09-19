@@ -180,6 +180,7 @@ describe('RuntimeMonitor', () => {
               },
               custom_header_count: 2,
               connect_timeout_s: 120,
+              exact_body_timeout_s: 0.125,
             },
             model: {
               id: 'qwen',
@@ -437,6 +438,11 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('agent-core-provider-config')
     expect(container.textContent).toContain('request · system prompt')
     expect(container.textContent).toContain('declared provider · capabilities block')
+    expect(container.textContent).toContain('declared provider · Exact timeout (s)')
+    expect(container.textContent).toContain('Exact timeout:0.125s')
+    const exactTimeout = Array.from(container.querySelectorAll('[aria-label="runtime parameter detail"] span'))
+      .find(span => span.textContent === 'declared provider · Exact timeout (s)')
+    expect(exactTimeout?.nextElementSibling?.textContent).toBe('0.125')
     expect(container.textContent).toContain('declared model · capability source')
     expect(container.textContent).toContain('binding · provider.model')
     expect(container.textContent).toContain('runpod_mtp,qwen')

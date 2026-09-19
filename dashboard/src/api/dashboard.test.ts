@@ -4473,6 +4473,7 @@ describe('fetchRuntimeProviders', () => {
                 },
                 custom_header_count: 2,
                 connect_timeout_s: 120,
+                exact_body_timeout_s: 0.125,
               },
               model: {
                 id: 'qwen',
@@ -4643,6 +4644,8 @@ describe('fetchRuntimeProviders', () => {
     ])
     expect(result.providers[0]?.declared_spec?.source).toBe('runtime.toml')
     expect(result.providers[0]?.declared_spec?.provider?.api_format).toBe('chat-completions')
+    expect(result.providers[0]?.declared_spec?.provider?.connect_timeout_s).toBe(120)
+    expect(result.providers[0]?.declared_spec?.provider?.exact_body_timeout_s).toBe(0.125)
     expect(
       result.providers[0]?.declared_spec?.provider?.behavior_capabilities
         ?.supports_inline_tools,

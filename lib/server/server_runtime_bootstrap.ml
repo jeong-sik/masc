@@ -387,7 +387,7 @@ let exact_output_targets_of_runtimes () =
        ; model_id = rt.model.Runtime_schema.api_name
        ; enable_thinking = rt.model.Runtime_schema.thinking_support
        ; connect_timeout_s = rt.provider.Runtime_schema.connect_timeout_s
-       ; body_timeout_s = None
+       ; body_timeout_s = rt.provider.Runtime_schema.exact_body_timeout_s
        ; (* A slot's credential is the one its binding names; the catalog row
             carries the provider's usual environment name, not this
             deployment's. *)

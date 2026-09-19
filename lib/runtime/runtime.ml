@@ -396,9 +396,11 @@ let find_declared_lane (lanes : Runtime_lane.t list) (id : string) =
 ;;
 
 (* Each [runtime] reference is validated under its field's admission contract:
-   - [Runtime_only] requires a declared runtime id. media_failover is the only
-     field on it: its entries name runtimes that can read an image, and the
-     order of that list is the whole walk. No lane expands underneath it.
+   - [Runtime_only] requires a declared runtime id. media_failover is on it:
+     its entries name runtimes that can read an image, and the order of that
+     list is the whole walk. verifier_exact slots are on it: judgement admits
+     each slot as a direct runtime and dispatches that id alone. No lane
+     expands underneath either.
    - [Lane_then_runtime] admits a declared lane name or a runtime id. Keeper
      assignments and route ids are on it, so validation judges the same target
      [resolve_assignment] hands the consumer: lane first, runtime second.
@@ -1001,9 +1003,10 @@ let verifier_exact_slot_ids_of_lane_decls
 
 (* [verifier_exact] is the one exact-output lane whose slot ids are read
    twice. The exact registry admits them against the AGENT_CORE catalog, and
-   completion-authority judgement dispatches them through
-   [resolve_assignment], which knows only configured runtimes and lanes. An id
-   that satisfies the catalog but names no configured route is admitted at
+   completion-authority judgement admits each one through
+   [verifier_exact_slot_admission], which takes a configured direct runtime
+   (or a CLI slot) and never a lane, then dispatches that id alone. An id
+   that satisfies the catalog but names no configured runtime is admitted at
    boot and then fails at every judgement: on 2026-09-02 a degraded first slot
    sent judgements to such an id 113 times, one failure each, and the trace
    was a Board post per attempt rather than a config that refused to load.
@@ -1022,7 +1025,7 @@ let verifier_exact_slot_references
              verifier_exact_lane_id
        ; shape = List_entry
        ; id
-       ; domain = Lane_then_runtime
+       ; domain = Runtime_only
        })
     (verifier_exact_slot_ids_of_lane_decls decls)
 ;;
@@ -3120,23 +3123,18 @@ let create_runtime_lane ?runtime_config_path ~lane_id ~runtime_ids () =
     else Ok (write_lane_candidates ~content ~lane_id ~runtime_ids))
 ;;
 
-(* What still reaches a lane through its id. Each of these is a route
-   [resolve_assignment] reads lane first, so removing the lane would hand it
-   the bare runtime of the same id, or nothing at all. [media_failover] is not
-   here: its entries resolve as runtimes only. *)
+(* What still reaches a lane through its id. A keeper's route is its
+   assignment or, without one, the default, and [resolve_assignment] reads a
+   lane before a runtime of the same id -- so removing the lane would hand the
+   keeper the bare runtime of that id, or nothing at all. media_failover and
+   verifier_exact slots name runtimes only and never reach a lane. *)
 type lane_reference =
   | Keeper_assignment of string
   | Default_runtime
-  | Verifier_exact_slot of int  (* 1-based position in the slots *)
 
 let lane_reference_to_string = function
   | Keeper_assignment keeper_name -> Printf.sprintf "[runtime.assignments].%s" keeper_name
   | Default_runtime -> "[runtime].default, which every keeper without an assignment walks"
-  | Verifier_exact_slot position ->
-    Printf.sprintf
-      "[runtime.exact_output_lanes.%s].slots entry %d"
-      verifier_exact_lane_id
-      position
 ;;
 
 let lane_references (config : Runtime_schema.config) ~lane_id =
@@ -3152,13 +3150,7 @@ let lane_references (config : Runtime_schema.config) ~lane_id =
     | Some id when names id -> [ Default_runtime ]
     | Some _ | None -> []
   in
-  let verifier_slots =
-    verifier_exact_slot_ids_of_lane_decls config.exact_output_lane_decls
-    |> List.mapi (fun index id -> index + 1, id)
-    |> List.filter_map (fun (position, id) ->
-      if names id then Some (Verifier_exact_slot position) else None)
-  in
-  assignments @ default @ verifier_slots
+  assignments @ default
 ;;
 
 let remove_runtime_lane ?runtime_config_path ~lane_id () =

@@ -1143,22 +1143,6 @@ let test_a_lane_the_default_walks_is_not_removed () =
       Runtime.remove_runtime_lane ~runtime_config_path:path ~lane_id:"runpod_mtp.qwen" ()))
 ;;
 
-(* verifier_exact slots resolve lane first too: a slot naming a runtime that
-   has its own lane walks that lane. *)
-let test_a_lane_a_verifier_slot_walks_is_not_removed () =
-  with_runtime_file (fun path ->
-    Runtime.set_runtime_lane_candidates ~runtime_config_path:path
-      ~lane_id:"openai.small" ~runtime_ids:[ "openai.small"; "openai.gpt" ] ()
-    |> lane_write_ok "write the runtime's lane";
-    Runtime.set_exact_output_lane_slots ~runtime_config_path:path
-      ~lane_name:"verifier_exact" ~slots:[ "openai.gpt"; "openai.small" ] ()
-    |> lane_write_ok "name it in a verifier slot";
-    lane_write_refused "remove" ~path
-      ~names:[ "[runtime.exact_output_lanes.verifier_exact].slots entry 2" ]
-      (fun () ->
-         Runtime.remove_runtime_lane ~runtime_config_path:path ~lane_id:"openai.small" ()))
-;;
-
 (* A new lane under a runtime id would take over that runtime for every keeper
    that names it. That runtime's own lane is what [set] writes. *)
 let test_a_new_lane_under_a_runtime_id_is_refused () =
@@ -1180,6 +1164,22 @@ let test_an_inline_lane_is_not_reported_removed () =
        ^ "\n\n[runtime.lanes]\ncoding = { candidates = [\"openai.gpt\"] }");
     lane_write_refused "remove" ~path ~names:[ "not written as its own" ] (fun () ->
       Runtime.remove_runtime_lane ~runtime_config_path:path ~lane_id:"coding" ()))
+;;
+
+(* Judgement admits a verifier_exact slot as a direct runtime
+   ([Runtime.verifier_exact_slot_admission]) and dispatches that id alone. A
+   slot naming a lane that is no runtime used to load and then fail at every
+   judgement; the load refuses it now. *)
+let test_a_verifier_slot_naming_a_lane_is_refused () =
+  with_runtime_file (fun path ->
+    Runtime.create_runtime_lane ~runtime_config_path:path ~lane_id:"judge"
+      ~runtime_ids:[ "openai.gpt" ] ()
+    |> lane_write_ok "create the lane";
+    lane_write_refused "name the lane in a verifier slot" ~path
+      ~names:[ {|[runtime.exact_output_lanes.verifier_exact].slots entry "judge"|} ]
+      (fun () ->
+         Runtime.set_exact_output_lane_slots ~runtime_config_path:path
+           ~lane_name:"verifier_exact" ~slots:[ "judge" ] ()))
 ;;
 
 let test_lane_candidates_create_the_lane_table () =
@@ -3067,10 +3067,6 @@ let () =
             `Quick
             test_a_lane_the_default_walks_is_not_removed
         ; Alcotest.test_case
-            "a lane a verifier slot walks is not removed"
-            `Quick
-            test_a_lane_a_verifier_slot_walks_is_not_removed
-        ; Alcotest.test_case
             "a new lane under a runtime id is refused"
             `Quick
             test_a_new_lane_under_a_runtime_id_is_refused
@@ -3078,6 +3074,10 @@ let () =
             "an inline lane is not reported removed"
             `Quick
             test_an_inline_lane_is_not_reported_removed
+        ; Alcotest.test_case
+            "a verifier slot naming a lane is refused"
+            `Quick
+            test_a_verifier_slot_naming_a_lane_is_refused
         ; Alcotest.test_case
             "a second write replaces the ladder"
             `Quick

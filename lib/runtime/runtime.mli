@@ -891,13 +891,13 @@ val remove_runtime_lane :
   unit ->
   (config_commit_receipt, string) result
 (** Remove the [\[runtime.lanes."<lane_id>"\]] table through the runtime.toml
-    SSOT writer. Refused while anything still routes through the lane id,
-    naming each: an entry of [\[runtime.assignments\]], [\[runtime\].default]
-    (which every unassigned keeper walks), or a
-    [\[runtime.exact_output_lanes.verifier_exact\]] slot. Each of these reads a
-    lane before a runtime, so removing the lane would either fail the load or
-    silently hand them the runtime of the same id. Refused when the file does
-    not declare the lane as its own table. *)
+    SSOT writer. Refused while a keeper still routes through the lane id,
+    naming each way it does: an entry of [\[runtime.assignments\]], or
+    [\[runtime\].default], which every unassigned keeper walks. A keeper's
+    route is read as a lane before a runtime ({!resolve_assignment}), so
+    removing the lane would either fail the load or silently hand those
+    keepers the runtime of the same id. Refused when the file does not declare
+    the lane as its own table. *)
 
 val set_exact_output_lane_slots :
   ?runtime_config_path:string ->

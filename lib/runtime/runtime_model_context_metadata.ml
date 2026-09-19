@@ -6,7 +6,7 @@ let find ~provider_id ~model entries =
       let provider = match entry.provider_name with
         | Some name -> name=binding.id || List.mem name binding.aliases
         | None -> false in
-      let exact = entry.id_prefix=model || Option.fold ~none:false ~some:(List.mem model) entry.supported_models in
+      let exact = Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix = model || Option.fold ~none:false ~some:(List.mem model) entry.supported_models in
       match entry.max_context_tokens with
       | Some context when provider && exact && context>0 -> Some context
       | _ -> None) |> List.sort_uniq Int.compare in

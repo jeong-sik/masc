@@ -209,6 +209,31 @@ let test_librarian_dropped_schema_is_closed () =
     (allows_additional_properties dropped_schema)
 ;;
 
+let test_librarian_source_requirement_matches_the_domain () =
+  let module Context = Keeper_librarian_context in
+  let source : Context.source = { reference = "event:new"; content = `Null } in
+  let pocket references = `Assoc
+    [ "merge_contexts", `List []; "sources", `List (List.map (fun s -> `String s) references)
+    ; "context", `String "Pending input"; "next_steps", `List [] ] in
+  List.iter (fun (label, sources, pockets, accepted) ->
+    let working_contexts = `List pockets in
+    let output = `Assoc
+      [ "working_contexts", working_contexts
+      ; Keeper_librarian.wire_field_new_claims, `List []
+      ; Keeper_librarian.wire_field_dropped, `List [] ] in
+    let schema_result = Tool_input_validation.validate
+      ~schema:Keeper_structured_output_schema.librarian_current_output_schema
+      ~name:"librarian_output" ~args:output () in
+    check bool (label ^ ": declared JSON schema") accepted (Result.is_ok schema_result);
+    let input = { Context.empty with sources } in
+    check bool (label ^ ": domain selection") accepted
+      (Result.is_ok (Context.select input working_contexts)))
+    [ "no current input needs no pocket", [], [], true
+    ; "a pocket without any input is invalid", [], [pocket []], false
+    ; "a current input cannot be replaced by an empty source list", [source], [pocket []], false
+    ; "a source-backed pocket is accepted", [source], [pocket ["s1"]], true ]
+;;
+
 (* The reviewer config must reach json_object-only providers. Counterfactual
    first: a native schema request on a Glm-kind config is rejected by the AGENT_CORE
    contract — that rejection is exactly what left every task nonterminal
@@ -363,6 +388,10 @@ let () =
         ] )
     ; ( "librarian schemas"
       , [ test_case
+            "working contexts require a source in both schema and domain"
+            `Quick
+            test_librarian_source_requirement_matches_the_domain
+        ; test_case
             "minimal claim fields remain required"
             `Quick
             test_librarian_claim_schema_is_closed

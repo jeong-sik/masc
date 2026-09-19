@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Routing
+
+- A lane walks exactly the candidates it declares (#37064). `[runtime].default`
+  is no longer added to the end of every lane, and a keeper assigned to a runtime
+  that no lane names walks that runtime alone. `[runtime].default` only names the
+  runtime of a keeper with no assignment. A keeper that should fail over to
+  another runtime needs a `[runtime.lanes]` entry listing it.
+
 ### Fresh state required
 
 - Model catalog overlay, `<base>/.masc/config/agent-core-models-overlay.toml`

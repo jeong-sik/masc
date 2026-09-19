@@ -1958,7 +1958,8 @@ type async_msg =
   | Tools_loaded of int * string option * (Masc.Tui_decode.tool_snapshot, string) result
   | Skills_catalog_loaded of int * (Masc.Tui_decode.skills_catalog, string) result
   | Tools_async_observation_loaded of int * (Tui_decode.async_request_observation, string) result
-  | Runtime_lane_slots_written of (unit, string) result
+  | Runtime_lane_slots_written of
+      Masc_tui_types.runtime_lane_list * (unit, string) result
   | Runtime_catalog_loaded of
       ( Masc.Tui_decode.runtime_option list
         * Masc.Tui_decode.runtime_resolved_lane list
@@ -5901,6 +5902,14 @@ let launch_lanes_load state ~mailbox =
              (standalone_generation, Error "Eio switch is unavailable"))
   end
 
+(* A re-read that has to happen: a write's read-back, or the operator's [r].
+   A load already out may have left before the change it has to show, so
+   one more is queued behind it instead of the request being dropped. *)
+let launch_lanes_reread state ~mailbox =
+  if state.standalone_lanes_inflight
+  then state.standalone_lanes_reread_pending <- true
+  else launch_lanes_load state ~mailbox
+
 let launch_clients_load state ~mailbox =
   if state.clients_surface_inflight then ()
   else begin
@@ -7299,22 +7308,20 @@ let runtime_lane_picker_rows (state : state) =
           state.runtime_catalog )
 ;;
 
-let launch_runtime_lane_append state ~mailbox ~lane ~runtime_id ~existing =
+(* One lane write off the render loop. Every lane edit -- a pick, a removed
+   or moved candidate, a removed lane -- answers through the same message,
+   naming the list it changed so that list is the one re-read. *)
+let launch_runtime_lane_write state ~mailbox ~written write =
   let host = server_peer_host in
   let port = state.port in
+  state.runtime_lane_write <- Masc_tui_types.Lane_write_posting;
   let run () =
     let result =
-      if List.exists (String.equal runtime_id) existing then
-        Error (runtime_id ^ " is already a candidate on " ^ lane)
-      else
-        try
-          Masc_tui_http.set_runtime_lane_slots ~host ~port ~lane
-            ~runtime_ids:(existing @ [ runtime_id ])
-        with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
+      try write ~host ~port with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Runtime_lane_slots_written result)
+    enqueue_async mailbox (Runtime_lane_slots_written (written, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -7323,7 +7330,40 @@ let launch_runtime_lane_append state ~mailbox ~lane ~runtime_id ~existing =
           `Stop_daemon)
   | None ->
       enqueue_async mailbox
-        (Runtime_lane_slots_written (Error "Eio switch is unavailable"))
+        (Runtime_lane_slots_written (written, Error "Eio switch is unavailable"))
+;;
+
+let launch_runtime_lane_pick state ~mailbox ~(pick : Masc_tui_types.runtime_lane_pick)
+    ~runtime_id ~existing =
+  let lane = Masc_tui_types.runtime_lane_pick_name pick in
+  let written =
+    match pick with
+    | Masc_tui_types.Pick_exact_lane _ -> Masc_tui_types.Standalone_lanes_list
+    | Masc_tui_types.Pick_conversation_lane _ | Masc_tui_types.Pick_new_lane _ ->
+        Masc_tui_types.Runtime_surface_list
+  in
+  if Masc_tui_types.runtime_lane_write_busy state then
+    (* [existing] is the order the list last read; appending to it before
+       the previous write is read back would undo that write. *)
+    state.runtime_lane_notice <- Some Masc_tui_types.Lane_write_pending
+  else if List.exists (String.equal runtime_id) existing then
+    state.runtime_lane_notice <-
+      Some
+        (Masc_tui_types.Lane_write_refused
+           (runtime_id ^ " is already a candidate on " ^ lane))
+  else
+    launch_runtime_lane_write state ~mailbox ~written (fun ~host ~port ->
+      match pick with
+      | Masc_tui_types.Pick_conversation_lane lane ->
+          Masc_tui_http.set_runtime_lane_slots ~host ~port ~lane
+            ~runtime_ids:(existing @ [ runtime_id ])
+      | Masc_tui_types.Pick_exact_lane name ->
+          Masc_tui_http.set_runtime_lane_slots ~host ~port
+            ~lane:(Masc_tui_http.exact_lane_route name)
+            ~runtime_ids:(existing @ [ runtime_id ])
+      | Masc_tui_types.Pick_new_lane lane ->
+          Masc_tui_http.create_runtime_lane ~host ~port ~lane
+            ~runtime_ids:[ runtime_id ])
 ;;
 
 let launch_runtime_catalog_load state ~mailbox =
@@ -7345,6 +7385,33 @@ let launch_runtime_catalog_load state ~mailbox =
   | None ->
       enqueue_async mailbox
         (Runtime_catalog_loaded (Error "Eio switch is unavailable"))
+
+(* Apply a lane-editing key. [Masc_tui_types.plan_runtime_lane_edit] decides
+   what it does; each write sends the lane's whole order and the server decides
+   whether the result is a lane it can load -- an emptied lane or a lane still
+   in use is refused there, with the reason drawn on the refusal row. *)
+let handle_runtime_lane_edit state ~mailbox edit =
+  match Masc_tui_types.plan_runtime_lane_edit state edit with
+  | Masc_tui_types.Open_lane_name_field ->
+      state.runtime_lane_name_draft <- Some "";
+      state.runtime_lane_notice <- None;
+      launch_runtime_catalog_load state ~mailbox
+  | Masc_tui_types.Arm_lane_removal lane ->
+      state.runtime_lane_remove_armed <- Some lane;
+      state.runtime_lane_notice <- None
+  | Masc_tui_types.Send_lane_write { lane; request; cursor_after } ->
+      (match request with
+       | Masc_tui_types.Write_lane_removal -> state.runtime_lane_remove_armed <- None
+       | Masc_tui_types.Write_lane_order _ -> ());
+      state.runtime_lane_cursor_after_write <- cursor_after;
+      launch_runtime_lane_write state ~mailbox
+        ~written:Masc_tui_types.Runtime_surface_list (fun ~host ~port ->
+        match request with
+        | Masc_tui_types.Write_lane_order runtime_ids ->
+            Masc_tui_http.set_runtime_lane_slots ~host ~port ~lane ~runtime_ids
+        | Masc_tui_types.Write_lane_removal ->
+            Masc_tui_http.remove_runtime_lane ~host ~port ~lane)
+  | Masc_tui_types.Refuse_lane_edit notice -> state.runtime_lane_notice <- Some notice
 
 let launch_runtime_assignment_set state ~mailbox ~keeper_name ~runtime_id =
   let host = server_peer_host in
@@ -14247,29 +14314,24 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           state.tools_async_observation <- Some observation;
           state.tools_async_observation_error <- None
       | Error detail -> state.tools_async_observation_error <- Some detail)
-  | Runtime_lane_slots_written result ->
-      (* An "exact/<lane>" write redraws the standalone-lane matrix too; a
-         conversation-lane write leaves it alone. Re-read whichever surface
-         drew the order rather than patching the local snapshot: a
-         hand-applied edit and a rejected write look the same on screen. *)
-      let exact_write =
-        Option.map
-          (fun lane ->
-            String.length lane > 6 && String.equal (String.sub lane 0 6) "exact/")
-          state.runtime_lane_pick
-        |> Option.value ~default:false
-      in
+  | Runtime_lane_slots_written (written, result) ->
+      (* Re-read the list the write changed rather than patching the local
+         snapshot: a hand-applied edit and a rejected write look the same on
+         screen. Lane edits wait for that re-read
+         ([Masc_tui_types.settle_runtime_lane_write]). *)
+      let cursor_after = state.runtime_lane_cursor_after_write in
+      state.runtime_lane_cursor_after_write <- None;
+      Masc_tui_types.settle_runtime_lane_write state ~written result;
       (match result with
        | Ok () ->
-           state.runtime_lane_error <- None;
-           state.lanes_action_error <- None;
            state.runtime_lane_pick <- None;
            state.runtime_lane_pick_cursor <- 0;
-           launch_runtime_surface_load state ~mailbox ~force:true;
-           if exact_write then launch_lanes_load state ~mailbox
-       | Error detail ->
-           if state.view = Lanes then state.lanes_action_error <- Some detail
-           else state.runtime_lane_error <- Some detail)
+           Option.iter (fun row -> state.runtime_cursor <- row) cursor_after;
+           (match written with
+            | Masc_tui_types.Runtime_surface_list ->
+                launch_runtime_surface_load state ~mailbox ~force:true
+            | Masc_tui_types.Standalone_lanes_list -> launch_lanes_reread state ~mailbox)
+       | Error _ -> ())
   | Runtime_catalog_loaded result -> (
       match result with
       | Ok (runtimes, lanes, assignments) ->
@@ -14435,12 +14497,19 @@ let apply_async_message state ~base_path ~http_refresh_inflight
               with
               | Ok snapshot ->
                   state.runtime_surface <- Some snapshot;
-                  state.runtime_surface_error <- probe_error
-              | Error detail -> state.runtime_surface_error <- Some detail)
+                  state.runtime_surface_error <- probe_error;
+                  Masc_tui_types.runtime_lane_list_reread state
+                    ~list:Masc_tui_types.Runtime_surface_list ~generation (Ok ())
+              | Error detail ->
+                  state.runtime_surface_error <- Some detail;
+                  Masc_tui_types.runtime_lane_list_reread state
+                    ~list:Masc_tui_types.Runtime_surface_list ~generation (Error detail))
          | Error detail ->
              (* The last joined reading remains visible. An authority read or
                 decode failure is not an empty lane inventory. *)
-             state.runtime_surface_error <- Some detail);
+             state.runtime_surface_error <- Some detail;
+             Masc_tui_types.runtime_lane_list_reread state
+               ~list:Masc_tui_types.Runtime_surface_list ~generation (Error detail));
       if is_current && state.runtime_surface_force_pending then begin
         state.runtime_surface_force_pending <- false;
         launch_runtime_surface_load state ~mailbox ~force:true
@@ -14634,8 +14703,17 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             state.lanes_standalone_cursor <-
               max 0
                 (min state.lanes_standalone_cursor
-                   (List.length snapshot.Tui_decode.sls_lanes - 1))
-        | Error detail -> state.standalone_lanes_error <- Some detail)
+                   (List.length snapshot.Tui_decode.sls_lanes - 1));
+            Masc_tui_types.runtime_lane_list_reread state
+              ~list:Masc_tui_types.Standalone_lanes_list ~generation (Ok ())
+        | Error detail ->
+            state.standalone_lanes_error <- Some detail;
+            Masc_tui_types.runtime_lane_list_reread state
+              ~list:Masc_tui_types.Standalone_lanes_list ~generation (Error detail));
+      if state.standalone_lanes_reread_pending then begin
+        state.standalone_lanes_reread_pending <- false;
+        launch_lanes_load state ~mailbox
+      end
   | Clients_loaded (generation, result) ->
       state.clients_surface_inflight <- false;
       if generation = state.clients_surface_generation then (
@@ -17064,6 +17142,10 @@ and is loaded on demand through keeper_skill.
                 state.preset_save_draft <-
                   Some
                     (Option.value state.preset_save_draft ~default:"" ^ text)
+            | Some Text_runtime_lane_name ->
+                state.runtime_lane_name_draft <-
+                  Some
+                    (Option.value state.runtime_lane_name_draft ~default:"" ^ text)
             (* The first paste replaces the selected current value; later
                pastes append, matching typed input. *)
             | Some Text_runtime_param ->
@@ -17296,9 +17378,11 @@ and is loaded on demand through keeper_skill.
            (* A restore rewrites three surfaces; its arm must not outlive the
               keypress that set it. *)
            if cancelled [ "u"; "U" ] then state.preset_restore_armed <- None
+       | Runtime ->
+           if cancelled [ "D" ] then state.runtime_lane_remove_armed <- None
        | Overview | Acting | Metrics | Lanes | Clients | Harness | Memory | Fusion
        | Repositories
-       | Changes | Connectors | Runtime | Resources | Tools
+       | Changes | Connectors | Resources | Tools
        | System_logs | Code -> ());
       (* Destructive binding removal deliberately requires two consecutive
          [u] presses. Any intervening action invalidates the ownership
@@ -17615,6 +17699,34 @@ and is loaded on demand through keeper_skill.
                    state.preset_save_draft <- Some (String.sub draft 0 (length - 1))
                | s when String.length s = 1 && Char.code s.[0] >= 32 ->
                  state.preset_save_draft <- Some (draft ^ s)
+               | _ -> ()))
+       (* Typing a new lane's name. Enter opens the failover picker on the
+          name, and the first runtime picked there declares the lane: a lane
+          is its candidates, so it comes to exist with one rather than empty.
+          Every printable key is the field's while it is open, so a name with
+          an x or a D in it does not fire the lane keys under it. *)
+       | Some k
+         when text_input_target state ~compact_viewport
+              = Some Text_runtime_lane_name ->
+           (match state.runtime_lane_name_draft with
+            | None -> ()
+            | Some draft ->
+              (match k with
+               | "esc" -> state.runtime_lane_name_draft <- None
+               | "\r" | "\n" | "enter" ->
+                 let name = String.trim draft in
+                 if not (String.equal name "") then begin
+                   state.runtime_lane_name_draft <- None;
+                   state.runtime_lane_pick <- Some (Masc_tui_types.Pick_new_lane name);
+                   state.runtime_lane_pick_cursor <- 0;
+                   state.runtime_lane_notice <- None
+                 end
+               | "\127" | "\b" | "backspace" ->
+                 let length = String.length draft in
+                 if length > 0 then
+                   state.runtime_lane_name_draft <- Some (String.sub draft 0 (length - 1))
+               | s when String.length s = 1 && Char.code s.[0] >= 32 ->
+                 state.runtime_lane_name_draft <- Some (draft ^ s)
                | _ -> ()))
        | Some k
          when text_input_target state ~compact_viewport
@@ -18747,12 +18859,13 @@ and is loaded on demand through keeper_skill.
                       || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
                  set (current ^ s)
                | _ -> ()))
-       | Some "j" | Some "k" | Some "e" | Some "E" | Some "\r"
+       | Some "j" | Some "k" | Some "e" | Some "E" | Some "esc" | Some "\r"
          when (state.view = Runtime || state.view = Lanes)
               && Option.is_some state.runtime_lane_pick ->
-           (* The picker is open: j/k move it, Enter appends, e closes. The
-              Runtime surface opens it for a conversation lane, the Lanes
-              surface for a standalone lane's exact/ walk order. *)
+           (* The picker is open: j/k move it, Enter appends, e or Esc closes.
+              The Runtime surface opens it for a conversation lane or a lane
+              being created, the Lanes surface for a standalone lane's walk
+              order. *)
            let already, catalog = runtime_lane_picker_rows state in
            let count = List.length catalog in
            (match key with
@@ -18765,12 +18878,12 @@ and is loaded on demand through keeper_skill.
                    ( state.runtime_lane_pick
                    , List.nth_opt catalog state.runtime_lane_pick_cursor )
                  with
-                 | Some lane, Some runtime ->
-                     launch_runtime_lane_append state ~mailbox:async_messages
-                       ~lane ~runtime_id:runtime.Masc.Tui_decode.ro_id
+                 | Some pick, Some runtime ->
+                     launch_runtime_lane_pick state ~mailbox:async_messages
+                       ~pick ~runtime_id:runtime.Masc.Tui_decode.ro_id
                        ~existing:already
                  | _ -> ())
-            | Some "e" | Some "E" ->
+            | Some "e" | Some "E" | Some "esc" ->
                 state.runtime_lane_pick <- None;
                 state.runtime_lane_pick_cursor <- 0
             | _ -> ())
@@ -18792,25 +18905,36 @@ and is loaded on demand through keeper_skill.
                  | None -> ()
                  | Some row ->
                      state.runtime_lane_pick <-
-                       Some row.Masc.Tui_decode.rcr_lane_id;
+                       Some
+                         (Masc_tui_types.Pick_conversation_lane
+                            row.Masc.Tui_decode.rcr_lane_id);
                      state.runtime_lane_pick_cursor <- 0;
-                     state.runtime_lane_error <- None;
+                     state.runtime_lane_notice <- None;
                      launch_runtime_catalog_load state ~mailbox:async_messages))
+       | Some k
+         when state.view = Runtime
+              && state.runtime_mode = Masc_tui_types.Runtime_lanes
+              && Option.is_none state.runtime_detail_target
+              && Option.is_none state.runtime_lane_pick
+              && Option.is_some (Masc_tui_types.runtime_lane_edit_of_key k) ->
+           Option.iter
+             (handle_runtime_lane_edit state ~mailbox:async_messages)
+             (Masc_tui_types.runtime_lane_edit_of_key k)
        | Some "a"
          when state.view = Lanes
               && state.lanes_mode = Lanes_overview
               && Option.is_none state.runtime_lane_pick ->
            (* Append a failover candidate to the standalone lane under the
-              cursor. The pick names "exact/<lane>" so the routing write
-              resolves the walk-order table rather than the conversation
-              lane of the same-looking id. *)
+              cursor. The pick is typed as a standalone lane so the routing
+              write resolves the walk-order table rather than the
+              conversation lane of the same-looking id. *)
            (match Masc_tui_types.selected_standalone_lane state with
             | None -> ()
             | Some lane ->
                 state.runtime_lane_pick <-
-                  Some ("exact/" ^ lane.Masc.Tui_decode.sl_lane_id);
+                  Some (Masc_tui_types.Pick_exact_lane lane.Masc.Tui_decode.sl_lane_id);
                 state.runtime_lane_pick_cursor <- 0;
-                state.runtime_lane_error <- None;
+                state.runtime_lane_notice <- None;
                 state.lanes_action_error <- None;
                 launch_runtime_catalog_load state ~mailbox:async_messages)
         | Some ("T" | "t")
@@ -20853,7 +20977,7 @@ and is loaded on demand through keeper_skill.
              | Clients ->
                  launch_clients_load state ~mailbox:async_messages
              | Lanes ->
-                launch_lanes_load state ~mailbox:async_messages;
+                launch_lanes_reread state ~mailbox:async_messages;
                 (match state.lanes_mode with
                  | Lanes_run_list lane_id ->
                      launch_lane_runs_load state ~mailbox:async_messages

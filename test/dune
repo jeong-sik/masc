@@ -9,6 +9,11 @@
  (deps (alias runtest-test_dashboard_observation_quota)))
 
 (test
+ (name test_typesafeai)
+ (modules test_typesafeai)
+ (libraries alcotest masc masc_test_deps))
+
+(test
  (name test_keeper_peer_artifact)
  (modules test_keeper_peer_artifact)
  (libraries masc_test_deps))
@@ -131,6 +136,9 @@
    (MASC_BASE_PATH "")
    ; Avoid non-deterministic external network calls during unit tests.
    (ZAI_API_KEY "")
+   ; A key exported in the shell would turn TypeSafe AI Jev on in every
+   ; board-attention test; the cases that need it set it themselves.
+   (TYPESAFEAI_API_KEY "")
    (MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED false)
    ; Standard tests keep the Docker playground disabled. A dedicated
    ; regression test below pins that sandbox_profile=local still resolves
@@ -2569,10 +2577,8 @@
 
 (include stanzas/test_keeper_checkpoint_stale_guard.inc)
 (include stanzas/test_keeper_owned_checkpoint.inc)
-(include stanzas/test_keeper_recovery_work.inc)
 (include stanzas/test_keeper_recovery_projection.inc)
 (include stanzas/test_keeper_recovery_transmission.inc)
-(include stanzas/test_keeper_recovery_worker.inc)
 
 
 
@@ -5184,6 +5190,7 @@
 (include stanzas/test_tui_schedules_empty_row_names_its_key.inc)
 (include stanzas/test_tui_activity_title_dot_belongs_to_the_strip.inc)
 (include stanzas/test_tui_feed_row_counts_events.inc)
+(include stanzas/test_tui_runtime_lane_editor.inc)
 (include stanzas/test_tui_lane_addon_reading.inc)
 (include stanzas/test_tui_lane_heading_keeps_its_reading.inc)
 (include stanzas/test_tui_mermaid.inc)

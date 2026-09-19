@@ -319,7 +319,9 @@ let test_deployment_agent_core_model_catalog_covers_glm_streaming_reasoning () =
   List.iter
     (fun (entry : Llm_provider.Model_catalog.model_entry) ->
        let provider_label = Option.value entry.provider_name ~default:"" in
-       let model_id = entry.id_prefix in
+       let model_id =
+         Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix
+       in
        let label = provider_label ^ "/" ^ model_id in
        match
          Llm_provider.Capabilities.for_provider_model_id
@@ -631,7 +633,8 @@ let test_repo_runtime_bindings_resolve_through_agent_core_provider_config () =
    with
    | None -> fail "expected exact Ollama Cloud deepseek-v4-pro catalog row"
    | Some entry ->
-     check string "deepseek pro exact model" "deepseek-v4-pro" entry.id_prefix;
+     check string "deepseek pro exact model" "deepseek-v4-pro"
+       (Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix);
      check (option string) "deepseek pro exact provider" (Some "ollama_cloud")
        entry.provider_name;
      check (option int) "deepseek pro context" (Some 1048576)
@@ -861,6 +864,9 @@ let test_deployment_agent_core_model_catalog_modality_priorities_resolve () =
        | None -> ()
        | Some raw ->
          let expected =
+           let id_prefix =
+             Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix
+           in
            match String.lowercase_ascii (String.trim raw) with
            | "visual_first" | "visual-first" -> Llm_provider.Modality.Visual_first
            | "preserve_input_order" | "preserve-input-order" | "preserve" ->
@@ -870,28 +876,31 @@ let test_deployment_agent_core_model_catalog_modality_priorities_resolve () =
                "unsupported modality_priority %S (normalized %S) in %s"
                raw
                normalized
-               entry.id_prefix
+               id_prefix
          in
          let capabilities =
            match entry.provider_name with
            | None ->
-             Llm_provider.Capabilities.for_model_id_catalog entry.id_prefix
+             Llm_provider.Capabilities.for_model_id_catalog
+               (Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix)
            | Some provider_label ->
              Llm_provider.Capabilities.for_provider_model_id
                ~wire:None
                ~allow_bare_fallback:false
                ~provider_label
-               ~model_id:entry.id_prefix
+               ~model_id:
+                 (Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix)
          in
          (match capabilities with
           | None ->
             failf
               "modality_priority row %s must resolve through deployment AGENT_CORE catalog"
-              entry.id_prefix
+              (Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix)
           | Some caps ->
             check
               bool
-              (entry.id_prefix ^ " modality_priority resolves")
+              (Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix
+               ^ " modality_priority resolves")
               true
               (caps.modality_priority = expected)))
     rows
@@ -3173,10 +3182,11 @@ let test_runtime_binding_disable_excludes_only_that_binding () =
 ;;
 
 (* verifier_exact slots are read twice: the exact registry admits them against
-   the AGENT_CORE catalog, and completion-authority judgement dispatches them
-   through resolve_assignment, which knows only configured runtimes and lanes.
-   A slot that satisfies the catalog and names no configured route used to
-   load, then fail at every judgement — 113 of them on 2026-09-02. *)
+   the AGENT_CORE catalog, and completion-authority judgement admits each one
+   as a configured direct runtime (Runtime.verifier_exact_slot_admission) and
+   dispatches that id alone. A slot that satisfies the catalog and names no
+   configured runtime used to load, then fail at every judgement — 113 of them
+   on 2026-09-02. *)
 let exact_lane_runtime_toml ~lane ~slot =
   Printf.sprintf
     "[providers.local]\n\

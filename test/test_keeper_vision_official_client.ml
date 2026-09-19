@@ -71,7 +71,7 @@ supports-image-input = true
 [runtime]
 default = "official.vision"
 media_failover = %s
-[runtime.exact_output_lanes.hitl_auto_judge]
+[runtime.exact_output_lanes.verifier_exact]
 slots = []
 cli_slots = ["official.vision"]
 |} command fallback media
@@ -154,7 +154,7 @@ let test_response mode = with_fixture mode @@ fun ~root:_ ~load ~run ~execute:_ 
 
 let test_selection () = with_fixture "malformed" @@ fun ~root:_ ~load ~run ~execute:_ ~capture ~fallback_capture ->
   load "[]";
-  (match run () with V.Vo_no_runtime _ -> () | _ -> fail "an exact-lane CLI slot leaked into media candidates");
+  (match run () with V.Vo_no_runtime _ -> () | _ -> fail "verifier CLI slot leaked into media candidates");
   check bool "no undeclared dispatch" false (Sys.file_exists capture);
   load "[\"official.vision\", \"fallback.vision\"]";
   (match run ~runtime_id:"official.vision" () with

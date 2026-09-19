@@ -842,12 +842,6 @@ require_lane_slots
         | Error detail -> Alcotest.failf "first-run CLI selection failed: %s" detail);
        create_server_state ();
        let registry = current_registry "CLI-only server bootstrap" in
-       (* Judgement cannot use Codex, which cannot suppress its native tools,
-          and the load refuses such a verifier CLI slot, so first-run setup
-          leaves verifier_exact out for it. *)
-       let judged_lanes =
-         if String.equal protocol "codex-app-server" then [] else [ "verifier_exact" ]
-       in
        List.iter
          (fun lane_id ->
             match Registry.resolve_lane registry ~lane_id with
@@ -857,13 +851,11 @@ require_lane_slots
             | Ok _ -> Alcotest.fail "CLI bootstrap fabricated an HTTP slot"
             | Error error -> Alcotest.failf "CLI bootstrap lane failed: %s"
                 (Registry.lane_resolution_error_to_string error))
-         ([ "hitl_auto_judge"; "board_attention_exact"; "librarian_exact" ] @ judged_lanes);
+         [ "hitl_auto_judge"; "board_attention_exact"; "librarian_exact"; "verifier_exact" ];
        (match protocol, Runtime.verifier_exact_lane_slot_ids () with
         | "codex-app-server", Error detail ->
-          Alcotest.(check string) "Codex setup declares no verifier lane"
-            (Registry.lane_resolution_error_to_string
-               (Registry.Exact_lane_unconfigured { lane_id = "verifier_exact" }))
-            detail
+          Alcotest.(check string) "Codex still requires native-tool suppression"
+            (runtime_id ^ ": completion verifier requires native-tool suppression, which this client does not support") detail
         | "codex-app-server", Ok _ -> Alcotest.fail "unsafe Codex verifier was admitted"
         | _, Error detail -> Alcotest.fail detail
         | _, Ok slots -> Alcotest.(check (list string))

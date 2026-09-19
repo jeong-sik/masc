@@ -45,10 +45,11 @@
       handled (#8396).
     - {b SSE-event row patchers}
       ({!patch_keeper_row},
-      {!patch_surface_json_for_running_keepers},
-      {!render_execution_surface},
-      {!publish_refreshed_execution_surface}) —
-      pinned because [test/test_dashboard_http_core] drives them directly.
+      {!patch_surface_json_for_running_keepers}) —
+      pinned because [test/test_dashboard_execution]
+      tests their null-agent-shape tolerance directly
+      (test_patch_keeper_row_tolerates_null_agent_shape /
+      test_patch_surface_json_for_running_keepers_tolerates_null_agent).
 
     Internal helpers stay private at this boundary
     ([shell_prewarm_timeout_s],
@@ -59,7 +60,6 @@
     [_transport_health_cache],
     [keeper_top_level_status_opt] / [patched_keeper_status],
     [patch_runtime_row] / [patch_keeper_rows] SSE-event row patcher helpers,
-    [map_execution_surface] / [drop_execution_snapshot_caches],
     [running_keeper_names],
     [patchexecution_cache_for_keeper],
     [transport_health_cache_diagnostics]). *)
@@ -289,34 +289,8 @@ val paused_of_lifecycle_event :
 
 val seed_execution_cache_for_test : unit -> unit
 
-(** A freshly rendered execution surface after the running-keeper
-    reconciliation. [Snapshot_predates_boot] is a surface whose operator
-    snapshot still lists a now-running Keeper as a declaration row: it is kept
-    only to answer the request waiting on it and is never published. *)
-type execution_surface =
-  | Current_surface of Yojson.Safe.t
-  | Snapshot_predates_boot of { keeper_name : string; surface : Yojson.Safe.t }
-
 val patch_surface_json_for_running_keepers :
-  Workspace.config -> Yojson.Safe.t -> execution_surface
-(** Reconciles each running Keeper's row with its live keepalive. A running
-    Keeper whose row is still a declaration row is left as the snapshot
-    described it, and the result is [Snapshot_predates_boot]. *)
-
-val render_execution_surface :
-  config:Workspace.config -> (unit -> execution_surface) -> execution_surface
-(** Runs one render. When it predates a Keeper's boot, drops the operator
-    snapshot caches and renders once more; a second [Snapshot_predates_boot]
-    is returned as it is, after dropping the caches again. *)
-
-val current_execution_publication_generation : unit -> int
-(** The generation a publication must carry to land. Invalidation and the
-    lifecycle patch advance it. *)
-
-val publish_refreshed_execution_surface :
-  generation:int -> execution_surface -> bool
-(** Publishes a [Current_surface] if [generation] is still current; never
-    publishes a [Snapshot_predates_boot]. *)
+  Workspace.config -> Yojson.Safe.t -> Yojson.Safe.t
 
 (** What a lifecycle event does to a published keeper list. A declaration row
     ({!Keeper_declared_roster.row_kind_of_json}) is a Keeper the snapshot saw
@@ -335,10 +309,8 @@ val patch_keeper_row :
   Yojson.Safe.t ->
   Yojson.Safe.t row_patch
 (** A row that is not [keeper_name]'s comes back [Patched] unchanged. Raises
-    [Invalid_argument] for [keeper_name]'s row when its [declaration_only] is
-    not a boolean, and for its runtime row when [keepalive_running] is [true],
-    [event] sets no status of its own, and the row's current status is missing
-    or not a control-plane status. *)
+    [Invalid_argument] for [keeper_name]'s runtime row when its status is
+    missing or unknown, or when its [declaration_only] is not a boolean. *)
 
 val broadcast_operator_snapshot :
   Server_dashboard_http_core_operator.operator_snapshot_publication -> unit

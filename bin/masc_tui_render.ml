@@ -2978,7 +2978,7 @@ let planning_detail_tone (tone : Planning_detail.tone) =
   | Planning_detail.Note | Planning_detail.Quiet -> Ansi.dim
 
 let planning_detail_pane (state : state)
-    ~(armed : Goal_phase.Public_action.t option) ~rows ~cols
+    ~(armed : Goal_phase.Public_action.t option) ~confirmation ~rows ~cols
     (goal : planning_goal) buf =
 
   let status_color = planning_phase_color goal.pg_phase in
@@ -3109,15 +3109,15 @@ let planning_detail_pane (state : state)
      less than the row it was opened from. They wrap, so this is what the
      surface's scroll moves through. *)
   let body =
-    (match Masc_tui_fetched.view_for ~equal:String.equal
-             state.goal_confirmation ~key:goal.pg_id with
-     | Ready confirmation -> Planning_detail.confirmation_lines ~width:(cols - 6) confirmation
-     | Loading -> [{ Planning_detail.tone = Waiting; text = "Reading the proof to confirm..." }]
-     | Failed detail ->
+    (match confirmation with
+     | `Submitting -> [{ Planning_detail.tone = Waiting; text = "Sending proof confirmation..." }]
+     | `Inspect (Masc_tui_fetched.Ready confirmation) -> Planning_detail.confirmation_lines ~width:(cols - 6) confirmation
+     | `Inspect Loading -> [{ Planning_detail.tone = Waiting; text = "Reading the proof to confirm..." }]
+     | `Inspect (Failed detail) ->
          Masc_tui_message_layout.wrap_words ~max_cells:(cols - 6)
            (Terminal_text.single_line detail)
          |> List.map (fun text -> { Planning_detail.tone = Unreadable; text })
-     | Absent -> Planning_detail.body ~width:(cols - 6) goal.pg_proof goal.pg_last_review_note)
+     | `Inspect Absent -> Planning_detail.body ~width:(cols - 6) goal.pg_proof goal.pg_last_review_note)
     @ Planning_detail.timeline ~width:(cols - 6) ~goal_id:goal.pg_id
         state.goal_timeline
   in
@@ -3207,7 +3207,7 @@ let planning_detail_pane (state : state)
    split width there is no room for both and the detail keeps the screen,
    which is the rule the Board read pane already follows. *)
 let render_planning_detail (state : state)
-    ~(armed : Goal_phase.Public_action.t option) (goal : planning_goal) =
+    ~(armed : Goal_phase.Public_action.t option) ~confirmation (goal : planning_goal) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
      lays out fits above it. *)
@@ -3215,7 +3215,7 @@ let render_planning_detail (state : state)
   let buf = Buffer.create 4096 in
   let scroll =
     if cols < keeper_split_threshold_cols then
-      planning_detail_pane state ~armed ~rows ~cols goal buf
+      planning_detail_pane state ~armed ~confirmation ~rows ~cols goal buf
     else begin
       let left_cols = keeper_roster_pane_cols in
       let goals =
@@ -3252,7 +3252,7 @@ let render_planning_detail (state : state)
         ~labels:(List.map format_sidebar_goal goals)
         ~selected;
       let scroll =
-        planning_detail_pane state ~armed ~rows ~cols:(cols - left_cols) goal
+        planning_detail_pane state ~armed ~confirmation ~rows ~cols:(cols - left_cols) goal
           right_buf
       in
       write_two_panes buf ~left_cols ~left:left_buf ~right:right_buf;
@@ -14293,8 +14293,16 @@ let render_surface (state : state) =
            let goals = match state.planning with None -> [] | Some p -> p.pl_goals in
            match List.find_opt (fun g -> g.pg_id = goal_id) goals with
            | Some goal ->
+               let confirmation =
+                 match state.goal_confirmation with
+                 | Planning_detail.Inspecting read ->
+                     `Inspect (Masc_tui_fetched.view_for ~equal:String.equal read ~key:goal_id)
+                 | Planning_detail.Submitting (submitted_goal, _)
+                   when String.equal submitted_goal goal_id -> `Submitting
+                 | Planning_detail.Submitting _ -> `Inspect Absent
+               in
                render_planning_detail state
-                 ~armed:(goal_action_armed_for state goal_id) goal
+                 ~armed:(goal_action_armed_for state goal_id) ~confirmation goal
            | None -> render_planning_list state)
   | Approvals when (match state.ask_answer_mode with Ask_answering _ -> true | Ask_browsing -> false) ->
       render_question_reader state

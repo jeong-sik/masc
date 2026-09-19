@@ -942,7 +942,7 @@
  (name masc_tui_planning_detail)
  (wrapped false)
  (modules masc_tui_planning_detail)
- (libraries masc masc.masc_goal masc_tui_message_layout yojson))
+ (libraries masc masc.masc_goal masc_tui_message_layout masc_tui_fetched yojson))
 
 (library
  (name masc_tui_planning_selection)

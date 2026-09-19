@@ -29,6 +29,12 @@ type confirmation = {
   verdict : Goal_verification.verdict;
 }
 
+type confirmation_state =
+  | Inspecting of (string, confirmation) Masc_tui_fetched.t
+  (* Keep the read generation while the write is in flight. Navigation can
+     cancel inspection, but cannot cancel a confirmation already sent. *)
+  | Submitting of string * (string, confirmation) Masc_tui_fetched.t
+
 let decode_confirmation ~goal_id json =
   let ( let* ) = Result.bind in
   let field name = function

@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 
 import test_tui_keyboard_input as h
 
@@ -48,6 +49,8 @@ def run(executable: str, *, replace_proof: bool) -> None:
     fixtures[h.PLANNING_PATH] = h.planning_snapshot([goal])
     read_count = 0
     posted: list[object] = []
+    submit_entered = threading.Event()
+    release_submit = threading.Event()
 
     def read() -> h.HttpResponse:
         nonlocal read_count
@@ -56,6 +59,9 @@ def run(executable: str, *, replace_proof: bool) -> None:
 
     def submit(body: bytes) -> h.HttpResponse:
         posted.append(json.loads(body))
+        submit_entered.set()
+        if not release_submit.wait(timeout=15.0):
+            return 500, {"error": "test did not release the confirmation response"}
         expected = {
             "goal_id": goal_id,
             "criterion_revision": "revision-1",
@@ -118,7 +124,36 @@ def run(executable: str, *, replace_proof: bool) -> None:
         needle = (
             b"confirmation proof changed" if replace_proof else b"reached its target"
         )
-        result_frame = h.send_and_wait(process, master_fd, output, b"a", needle)
+        try:
+            submitting_frame = h.send_and_wait(
+                process, master_fd, output, b"a", b"Sending proof confirmation..."
+            )
+            if not h.wait_for_fixture_event(
+                process, master_fd, output, submit_entered, timeout=3.0
+            ):
+                raise AssertionError("confirmation POST never reached the server")
+            # Repeated input and leaving/reopening the detail cannot unsend
+            # the pending POST or permit a second request while it is held.
+            h.write_all(master_fd, output, b"aa")
+            h.send_and_wait(process, master_fd, output, b"\x1b", h.PLANNING_LIST_HEADER)
+            h.send_and_wait(
+                process, master_fd, output, b"\r", b"Sending proof confirmation..."
+            )
+            result_start = len(output)
+        finally:
+            release_submit.set()
+        h.wait_for_output(
+            process, master_fd, output, needle, start=result_start, timeout=5.0
+        )
+        h.wait_for_output(
+            process,
+            master_fd,
+            output,
+            h.FRAME_END,
+            start=h.end_of_needle(output, needle, result_start),
+            timeout=3.0,
+        )
+        result_frame = bytes(output[result_start:])
         if read_count != 1 or len(posted) != 1:
             raise AssertionError(
                 "second key must post once without reading a new proof"
@@ -142,6 +177,7 @@ def run(executable: str, *, replace_proof: bool) -> None:
                     "post_requests": posted,
                     "encoding": "base64",
                     "proof_frame": base64.b64encode(proof_frame).decode(),
+                    "submitting_frame": base64.b64encode(submitting_frame).decode(),
                     "result_frame": base64.b64encode(result_frame).decode(),
                 }
             )

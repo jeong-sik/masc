@@ -2066,6 +2066,7 @@ type async_msg =
     }
   | Board_vote_done of (string, string) result
   | Goal_transition_done of (string, string) result
+  | Goal_confirmation_submitted of (string, string) result
   | Goal_confirmation_loaded of
       string Goal_confirmation_read.request * (Goal_confirmation.confirmation, string) result
   | Schedules_loaded of Snapshot_read.request * (schedule_snapshot, string) result
@@ -11157,10 +11158,13 @@ let handle_goal_confirmation_key state ~mailbox =
       with_async_switch state ~action:"Goal confirmation" @@ fun sw ->
       let host = server_peer_host and port = state.port in
       state.goal_action_armed <- None;
-      (match Goal_confirmation_read.view_for ~equal:String.equal
-               state.goal_confirmation ~key:goal_id with
+      (match state.goal_confirmation with
+       | Goal_confirmation.Submitting _ -> ()
+       | Goal_confirmation.Inspecting read ->
+      match Goal_confirmation_read.view_for ~equal:String.equal read ~key:goal_id with
        | Ready confirmation ->
-           state.goal_confirmation <- Goal_confirmation_read.clear state.goal_confirmation;
+           state.goal_confirmation <- Goal_confirmation.Submitting
+               (goal_id, Goal_confirmation_read.clear read);
            Eio.Fiber.fork ~sw (fun () ->
              let result =
                let ( let* ) = Result.bind in
@@ -11172,14 +11176,14 @@ let handle_goal_confirmation_key state ~mailbox =
                    Ok "completion confirmed"
                | _ -> Error "goal confirmation: server did not confirm completion"
              in
-             enqueue_async mailbox (Goal_transition_done result))
+             enqueue_async mailbox (Goal_confirmation_submitted result))
        | Loading -> ()
        | Absent | Failed _ ->
            (match Goal_confirmation_read.start ~equal:String.equal
-                    state.goal_confirmation ~key:goal_id with
+                    read ~key:goal_id with
             | Already_loading -> ()
             | Started (loading, request) ->
-                state.goal_confirmation <- loading;
+                state.goal_confirmation <- Goal_confirmation.Inspecting loading;
                 state.goal_action_error <- None;
                 state.planning_scroll <- 0;
                 Eio.Fiber.fork ~sw (fun () ->
@@ -12813,7 +12817,11 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       | Error err ->
           state.board_vote_armed <- None;
           add_event state "error" ("Board vote failed: " ^ err))
-  | Goal_transition_done result -> (
+  | (Goal_transition_done result | Goal_confirmation_submitted result) as message -> (
+      (match message, state.goal_confirmation with
+       | Goal_confirmation_submitted _, Goal_confirmation.Submitting (_, read) ->
+           state.goal_confirmation <- Goal_confirmation.Inspecting read
+       | _ -> ());
       match result with
       | Ok message ->
           state.goal_action_armed <- None;
@@ -12831,9 +12839,11 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           state.goal_action_armed <- None;
           state.goal_action_error <- Some err)
   | Goal_confirmation_loaded (request, result) ->
-      state.goal_confirmation <-
-        Goal_confirmation_read.complete ~equal:String.equal
-          state.goal_confirmation request result
+      (match state.goal_confirmation with
+       | Goal_confirmation.Inspecting read ->
+           state.goal_confirmation <- Goal_confirmation.Inspecting
+             (Goal_confirmation_read.complete ~equal:String.equal read request result)
+       | Goal_confirmation.Submitting _ -> ())
   | Verification_evidence_loaded (task_id, result) ->
       (match verification_cursor_row state, state.verification_detail_request_id with
        | Some row, Some _ when String.equal row.Masc.Tui_decode.vr_task_id task_id ->
@@ -17348,8 +17358,12 @@ and is loaded on demand through keeper_skill.
               reads as well as an already displayed confirmation binding. *)
            if cancelled [ "a"; "A"; "j"; "k"; "up"; "down";
                           "pageup"; "pagedown"; "wheel-up"; "wheel-down" ] then
-             state.goal_confirmation <-
-               Goal_confirmation_read.clear state.goal_confirmation
+             (match state.goal_confirmation with
+              | Goal_confirmation.Inspecting read ->
+                  state.goal_confirmation <- Goal_confirmation.Inspecting
+                    (Goal_confirmation_read.clear read)
+              (* Leaving the proof cancels a read, but cannot unsend a POST. *)
+              | Goal_confirmation.Submitting _ -> ())
        | Schedules ->
            if cancelled [ "x"; "X" ] then state.schedule_cancel_armed <- None
        | Verification ->

@@ -148,6 +148,165 @@ let test_schedule_write_actor_is_stamped_from_auth () =
     (stamped |> member "message" |> to_string)
 ;;
 
+let rec remove_tree path =
+  match Unix.lstat path with
+  | { Unix.st_kind = Unix.S_DIR; _ } ->
+    Array.iter
+      (fun name -> remove_tree (Filename.concat path name))
+      (Sys.readdir path);
+    Unix.rmdir path
+  | _ -> Unix.unlink path
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+;;
+
+let loopback_request_authority () =
+  match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
+  | Ok authority -> authority
+  | Error `Malformed -> fail "failed to construct loopback request authority"
+;;
+
+let dispatch_schedule_cancel ~router ~token ~schedule_id =
+  Server_request_authority.with_current
+    (loopback_request_authority ())
+    (fun () ->
+       let output = Buffer.create 1024 in
+       let connection =
+         Httpun.Server_connection.create (fun reqd ->
+           Http.Router.dispatch router (Httpun.Reqd.request reqd) reqd)
+       in
+       let body =
+         `Assoc
+           [ "schedule_id", `String schedule_id
+           ; "cancelled_by_id", `String "forged-body-actor"
+           ; "cancelled_by_kind", `String "system"
+           ; "reason", `String "duplicate"
+           ]
+         |> Yojson.Safe.to_string
+       in
+       let raw_request =
+         Printf.sprintf
+           "POST /api/v1/tools/masc_schedule_cancel HTTP/1.1\r\n\
+            Host: 127.0.0.1:8935\r\n\
+            Origin: http://127.0.0.1:8935\r\n\
+            Authorization: Bearer %s\r\n\
+            X-Masc-Agent: forged-header-actor\r\n\
+            Content-Type: application/json\r\n\
+            Content-Length: %d\r\n\
+            \r\n\
+            %s"
+           token
+           (String.length body)
+           body
+       in
+       let input =
+         Bigstringaf.of_string ~off:0 ~len:(String.length raw_request) raw_request
+       in
+       ignore
+         (Httpun.Server_connection.read_eof connection input ~off:0
+            ~len:(Bigstringaf.length input));
+       let rec drain () =
+         match Httpun.Server_connection.next_write_operation connection with
+         | `Write iovecs ->
+           let bytes =
+             List.fold_left
+               (fun total (iov : Bigstringaf.t Httpun.IOVec.t) ->
+                  Buffer.add_string output
+                    (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len);
+                  total + iov.len)
+               0
+               iovecs
+           in
+           Httpun.Server_connection.report_write_result connection (`Ok bytes);
+           drain ()
+         | `Yield | `Close _ -> ()
+       in
+       drain ();
+       let raw = Buffer.contents output in
+       let status =
+         int_of_string (List.nth (String.split_on_char ' ' raw) 1)
+       in
+       let rec body_offset index =
+         if index + 4 > String.length raw then fail ("no HTTP body: " ^ raw)
+         else if String.sub raw index 4 = "\r\n\r\n" then index + 4
+         else body_offset (index + 1)
+       in
+       let offset = body_offset 0 in
+       ( status
+       , Yojson.Safe.from_string
+           (String.sub raw offset (String.length raw - offset)) ))
+;;
+
+let test_schedule_cancel_actor_is_stamped_from_auth () =
+  let base_path = Filename.temp_dir "schedule-cancel-http-actor-" "" in
+  let previous_state = Server_auth.For_testing.snapshot_server_state () in
+  Fun.protect
+    ~finally:(fun () ->
+      Server_auth.For_testing.restore_server_state previous_state;
+      remove_tree base_path)
+    (fun () ->
+       Eio_main.run
+       @@ fun env ->
+       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       Eio.Switch.run
+       @@ fun sw ->
+       let state = Masc.Mcp_server.For_testing.create_state ~base_path in
+       let config = Masc.Mcp_server.workspace_config state in
+       ignore (Workspace.init config ~agent_name:(Some "test"));
+       Server_auth.For_testing.restore_server_state (Some state);
+       Auth.save_auth_config base_path
+         { Masc_domain.default_auth_config with
+           enabled = true
+         ; require_token = true
+         };
+       let token =
+         match
+           Auth.create_token base_path ~agent_name:"credential-owner"
+             ~role:Masc_domain.Admin
+         with
+         | Ok (token, _) -> token
+         | Error error -> fail (Masc_domain.masc_error_to_string error)
+       in
+       let actor : Schedule_domain.actor =
+         { id = "test"
+         ; kind = Schedule_domain.Human_operator
+         ; display_name = None
+         }
+       in
+       let schedule =
+         match
+           Schedule_service.create config ~now:100.0 ~schedule_id:"sched-http-auth"
+             ~requested_at:100.0 ~requested_by:actor ~scheduled_by:actor
+             ~due_at:200.0
+             ~payload:
+               (`Assoc
+                  [ "kind", `String "consumer.note"
+                  ; "body", `Assoc [ "text", `String "cancel me" ]
+                  ])
+             ~source:Schedule_domain.Operator_request ()
+         with
+         | Ok schedule -> schedule
+         | Error error -> fail (Schedule_service.service_error_to_string error)
+       in
+       let clock = Eio.Stdenv.clock env in
+       let router =
+         Server_routes_http_routes_activity.add_routes
+           ~sw
+           ~clock
+           (Http.Router.create ())
+       in
+       let status, response =
+         dispatch_schedule_cancel ~router ~token ~schedule_id:schedule.schedule_id
+       in
+       let open Yojson.Safe.Util in
+       check int "cancel accepted" 200 status;
+       check string "credential owner is the canceller" "credential-owner"
+         (response |> member "data" |> member "cancelled_by" |> member "id"
+          |> to_string);
+       check string "terminal bridge uses typed human operator" "human_operator"
+         (response |> member "data" |> member "cancelled_by" |> member "kind"
+          |> to_string))
+;;
+
 let test_dashboard_board_reaction_routes_registered () =
   with_router (fun router ->
     List.iter
@@ -369,6 +528,8 @@ let () =
             test_no_tools_route_drift
         ; test_case "schedule write actor comes from auth" `Quick
             test_schedule_write_actor_is_stamped_from_auth
+        ; test_case "schedule cancel actor comes from auth" `Quick
+            test_schedule_cancel_actor_is_stamped_from_auth
         ; test_case
             "dashboard board reaction routes registered"
             `Quick

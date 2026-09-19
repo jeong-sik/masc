@@ -626,7 +626,7 @@ let test_board_context_inference_uses_current_owner_contract_and_actor () =
       Masc.Board_dispatch.create_post
         ~author:keeper_name
         ~content:"Infer this post through the registered Keeper"
-        ~post_kind:Masc.Board.Keeper_post
+        ~post_kind:Masc.Board.Automation_post
         ()
     with
     | Ok post -> post

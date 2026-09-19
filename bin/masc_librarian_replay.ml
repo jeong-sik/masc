@@ -37,10 +37,15 @@ let boundary_suffix =
 ;;
 
 let usage =
-  "usage: masc-librarian-replay [--base-path DIR] [--keeper NAME]...\n\
+  "usage: masc-librarian-replay [--base-path DIR] [--keeper NAME]... [--extent \
+   all|cut-points]\n\
   \  --base-path DIR   workspace to read (default: the resolved MASC base path)\n\
   \  --keeper NAME     replay only this keeper; repeatable, default every one\n\
-  \                    that has a turn-boundary log\n"
+  \                    that has a turn-boundary log\n\
+  \  --extent all         each round takes the whole backlog (default)\n\
+  \  --extent cut-points  each round takes to the first cut point, which is\n\
+  \                       what a round takes after one failed on a longer\n\
+  \                       range: the worst-case round count for the backlog\n"
 ;;
 
 type round =
@@ -49,10 +54,27 @@ type round =
   ; lines_seen : int
   }
 
+(** Why a replay ended. A closed set, so the output names the case and its
+    fields separately: a reader of this JSON never splits a sentence on ':'
+    to find out which one it was. *)
+type stop_reason =
+  | Nothing_to_read
+  | Position_in_other_trace
+  | Baseline_without_progress
+  | No_advance of
+      { end_atom : int
+      ; already_reached : int
+      }
+  | Unreadable_line of
+      { line : int
+      ; error : string
+      }
+  | Position_mismatch of { atom_count : int }
+
 type outcome =
   | Replayed of
       { rounds : round list
-      ; stopped_by : string
+      ; stopped_by : stop_reason
       ; reached : int
       ; atoms_total : (int, string) result
       }
@@ -77,14 +99,29 @@ let trace_of_lines lines =
     lines
 ;;
 
-let stop_to_string = function
+let stop_of_selection_stop = function
   | Keeper_librarian_range.Unreadable_line { line; error } ->
-    Printf.sprintf
-      "unreadable_line:%d:%s"
-      line
-      (Keeper_turn_boundaries.read_error_to_string error)
+    Unreadable_line { line; error = Keeper_turn_boundaries.read_error_to_string error }
   | Keeper_librarian_range.Position_mismatch { atom_count; _ } ->
-    Printf.sprintf "position_mismatch:atom_count=%d" atom_count
+    Position_mismatch { atom_count }
+;;
+
+let stop_reason_to_json = function
+  | Nothing_to_read -> `Assoc [ "kind", `String "nothing_to_read" ]
+  | Position_in_other_trace -> `Assoc [ "kind", `String "position_in_other_trace" ]
+  | Baseline_without_progress ->
+    `Assoc [ "kind", `String "baseline_without_progress" ]
+  | No_advance { end_atom; already_reached } ->
+    `Assoc
+      [ "kind", `String "no_advance"
+      ; "end_atom", `Int end_atom
+      ; "already_reached", `Int already_reached
+      ]
+  | Unreadable_line { line; error } ->
+    `Assoc
+      [ "kind", `String "unreadable_line"; "line", `Int line; "error", `String error ]
+  | Position_mismatch { atom_count } ->
+    `Assoc [ "kind", `String "position_mismatch"; "atom_count", `Int atom_count ]
 ;;
 
 (** Round after round until the rules say there is nothing left, threading the
@@ -104,8 +141,17 @@ let stop_to_string = function
     what a finished backlog looks like and what a backlog with atoms past the
     last cut point looks like. So the result carries [reached] and the
     checkpoint's atom count beside the reason, and the two together answer the
-    question the spec calls [AtomsUpToLastCutRead]. *)
-let replay ~trace_id ~lines ~messages =
+    question the spec calls [AtomsUpToLastCutRead].
+
+    [extent] decides what a round takes, and it is what makes the round count
+    mean anything. With [All_unread] a clean log has exactly one reading round
+    -- the round takes everything and the next one finds no cut point past it
+    -- so the round count is one and no atom can be carried twice whatever the
+    data says. [To_first_cut_point] is what a round takes after one failed on
+    a longer range ({!Keeper_librarian_range.extent}), so replaying every round
+    as if it had failed makes the round count the number of cut points in the
+    backlog: the worst case for clearing it, counted without a model. *)
+let replay ~extent ~trace_id ~lines ~messages =
   (* Counted through [Keeper_turn_boundaries.position_of_messages], which is
      the same [Runtime_model_input_tail_window.annotate] the selection counts
      with. That is deliberate -- the two numbers have to be in one numbering
@@ -130,7 +176,7 @@ let replay ~trace_id ~lines ~messages =
         ~lines
         ~progress
         ~messages
-        Keeper_librarian_range.All_unread
+        extent
     in
     match selection with
     | Keeper_librarian_range.Read { range; boundary_lines_seen } ->
@@ -139,10 +185,7 @@ let replay ~trace_id ~lines ~messages =
         stop
           ~rounds:acc
           ~reached
-          (Printf.sprintf
-             "no_advance:end_atom=%d:already_reached=%d"
-             range.end_atom
-             reached)
+          (No_advance { end_atom = range.end_atom; already_reached = reached })
       else (
         let round =
           { start_atom = range.start_atom
@@ -162,7 +205,7 @@ let replay ~trace_id ~lines ~messages =
     | Keeper_librarian_range.Baseline { position; boundary_lines_seen } ->
       let next = Keeper_librarian_range.progress_after ~trace_id selection in
       if next = progress
-      then stop ~rounds:acc ~reached "baseline_without_progress"
+      then stop ~rounds:acc ~reached Baseline_without_progress
       else (
         (* A baseline round reads nothing and moves the position to the
            smallest cut point: the history before it predates the log and is
@@ -175,16 +218,16 @@ let replay ~trace_id ~lines ~messages =
           ~reached:(max reached at)
           ({ start_atom = at; end_atom = at; lines_seen = boundary_lines_seen } :: acc))
     | Keeper_librarian_range.Nothing_to_read ->
-      stop ~rounds:acc ~reached "nothing_to_read"
+      stop ~rounds:acc ~reached Nothing_to_read
     | Keeper_librarian_range.Position_in_other_trace _ ->
-      stop ~rounds:acc ~reached "position_in_other_trace"
+      stop ~rounds:acc ~reached Position_in_other_trace
     | Keeper_librarian_range.Stop reason ->
-      stop ~rounds:acc ~reached (stop_to_string reason)
+      stop ~rounds:acc ~reached (stop_of_selection_stop reason)
   in
   loop ~progress:None ~reached:0 []
 ;;
 
-let replay_keeper ~base_path ~keepers_dir keeper_id =
+let replay_keeper ~extent ~base_path ~keepers_dir keeper_id =
   match Keeper_turn_boundaries.read ~keepers_dir ~keeper_id with
   | Error detail -> Skipped ("boundary_log_unreadable:" ^ detail)
   | Ok [] -> Skipped "boundary_log_empty"
@@ -204,6 +247,7 @@ let replay_keeper ~base_path ~keepers_dir keeper_id =
              ^ Keeper_checkpoint_store.checkpoint_load_error_to_string error)
         | Ok checkpoint ->
           replay
+            ~extent
             ~trace_id
             ~lines
             ~messages:checkpoint.Agent_core.Checkpoint.messages))
@@ -242,16 +286,20 @@ let outcome_to_json keeper = function
       | Ok total -> [ "atoms_in_checkpoint", `Int total; "atoms_left", `Int (total - reached) ]
       | Error detail -> [ "atoms_in_checkpoint", `String detail ]
     in
+    (* Ordered by what the data actually changes. A replay that ends in a
+       [Stop] is a keeper the rules cannot get past, and atoms_left is the
+       backlog nothing reached: those two are the answer. The round and atom
+       counts below them only vary under To_first_cut_point -- All_unread
+       takes the whole backlog in one round, so there the count is one and
+       nothing can be carried twice whatever the log holds. *)
     `Assoc
-      ([ "keeper", `String keeper
-       ; "rounds", `Int (List.length rounds)
-       ; "atoms_carried", `Int atoms
-       ; "atoms_distinct", `Int distinct
-       ; "atoms_carried_twice", `Int (atoms - distinct)
-       ; "reached_atom", `Int reached
-       ]
+      ([ "keeper", `String keeper; "stopped_by", stop_reason_to_json stopped_by ]
        @ left_behind
-       @ [ "stopped_by", `String stopped_by
+       @ [ "reached_atom", `Int reached
+         ; "rounds", `Int (List.length rounds)
+         ; "atoms_carried", `Int atoms
+         ; "atoms_distinct", `Int distinct
+         ; "atoms_carried_twice", `Int (atoms - distinct)
          ; "round", `List (List.map round_to_json rounds)
          ])
 ;;
@@ -274,6 +322,7 @@ let keepers_with_a_log keepers_dir =
 let () =
   let base_path = ref None in
   let wanted = ref [] in
+  let extent = ref Keeper_librarian_range.All_unread in
   let rec parse = function
     | [] -> Ok ()
     | "--help" :: _ | "-h" :: _ ->
@@ -285,6 +334,14 @@ let () =
     | "--keeper" :: name :: rest ->
       wanted := name :: !wanted;
       parse rest
+    | "--extent" :: "all" :: rest ->
+      extent := Keeper_librarian_range.All_unread;
+      parse rest
+    | "--extent" :: "cut-points" :: rest ->
+      extent := Keeper_librarian_range.To_first_cut_point;
+      parse rest
+    | "--extent" :: other :: _ ->
+      Error ("--extent takes all or cut-points, not: " ^ other)
     | arg :: _ -> Error ("unexpected argument: " ^ arg)
   in
   match parse (List.tl (Array.to_list Sys.argv)) with
@@ -309,13 +366,20 @@ let () =
     let results =
       List.map
         (fun keeper ->
-          outcome_to_json keeper (replay_keeper ~base_path ~keepers_dir keeper))
+          outcome_to_json
+            keeper
+            (replay_keeper ~extent:!extent ~base_path ~keepers_dir keeper))
         keepers
     in
     print_endline
       (Yojson.Safe.pretty_to_string
          (`Assoc
            [ "keepers_dir", `String keepers_dir
+           ; ( "extent"
+             , `String
+                 (match !extent with
+                  | Keeper_librarian_range.All_unread -> "all"
+                  | Keeper_librarian_range.To_first_cut_point -> "cut-points") )
            ; "keeper", `List results
            ]))
 ;;

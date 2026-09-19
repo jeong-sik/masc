@@ -49,26 +49,23 @@ status: reference
   → [Runtime.t](../../lib/runtime/runtime.mli)
 
 **Lane**
-: 서로 다른 축에 쓰이는 말이므로 문장에 종류를 함께 적는다. Runtime Lane은
-  후보 순서, Runtime Execution은 모델·도구 루프의 소유자, 서버의 Exact-output
-  Lane과 Memory Lane은 각각 작업 목적과 작업 제출·직렬화를 말한다.
-
-**Runtime Lane**
-: Keeper turn이 Runtime 후보를 시도할 순서.
+: Keeper turn이 Runtime 후보를 시도할 순서. Runtime Lane도 같은 뜻이다.
   → [Runtime_lane.t](../../lib/runtime/runtime_lane.mli)
 
-**Runtime Execution**
+**Runtime execution**
 : 모델·도구·재개 상태를 Agent Core가 소유하는지 공식 클라이언트가 소유하는지의 구분.
   → [Runtime_execution.t](../../lib/runtime/runtime_execution.mli)
 
-**Exact-output Lane**
+**Exact-output route**
 : Librarian 같은 단독 모델 작업의 목적별 실행 경로. 해당 설정은 API slot과
-  후속 CLI 후보 순서를 선언한다. → [선언](../../lib/runtime/runtime_schema.mli),
+  후속 CLI 후보 순서를 선언한다. 코드 이름은 `exact_output_lane_decl`이다.
+  → [선언](../../lib/runtime/runtime_schema.mli),
   [작업 기록](../../lib/exact_lane_run_registry.mli)
 
-**Memory Lane**
+**Memory queue**
 : Keeper별 Librarian 작업을 직렬화하는 제출 경로. 현재 실행 하나와 교체 가능한
-  최신 대기 하나를 가진다. → [Keeper_memory_lane](../../lib/keeper/keeper_memory_lane.mli)
+  최신 대기 하나를 가진다. 코드 이름은 `Keeper_memory_lane`이다.
+  → [Keeper_memory_lane](../../lib/keeper/keeper_memory_lane.mli)
 
 **Skill**
 : `SKILL.md`로 선언한 재사용 지시 또는 Tool 합성. 출처·패키지·이름·문서 revision으로
@@ -127,16 +124,15 @@ status: reference
 ## Continuity
 
 **Checkpoint**
-: agent core conversation과 Keeper working context의 durable 저장점. trace당 파일
-  하나(`<trace 디렉터리>/<trace id>.json`)다.
-
-**Keeper working context**
-: History를 담은 Agent Core checkpoint의 실행 중 wrapper.
+: History와 설정을 담은 Agent Core의 durable 저장점. trace당 파일 하나
+  (`<trace 디렉터리>/<trace id>.json`)다. 실행 중에는
+  `Keeper_types.working_context`가 이 checkpoint 하나를 감싼다.
   → [Keeper_types.working_context](../../lib/keeper_types/keeper_types.mli)
 
-**Librarian working context**
+**받은 일 정리**
 : 미처리 event·chat 요청의 원본에 묶인 파생 맥락과 다음 행동 제안. 실행 권한이나
-  checkpoint 이력이 아니다. → [Keeper_librarian_context](../../lib/keeper/keeper_librarian_context.mli)
+  checkpoint 이력이 아니다. 코드 이름은 `Keeper_librarian_context`다.
+  → [Keeper_librarian_context](../../lib/keeper/keeper_librarian_context.mli)
 
 **History**
 : Checkpoint의 `messages`. 그 trace에서 오간 message가 시간순으로 쌓인 목록이다.
@@ -219,5 +215,5 @@ status: reference
 **Librarian**
 : Keeper마다 따로 도는 기억 정리자. Keeper의 History와 현재 facts를 읽고 LLM을
   한 번 불러, 더할 fact와 버릴 fact와 합칠 fact를 정해 Memory OS에 적는다. 같은
-  호출에서 Keeper가 받은 요청을 묶어 working context로 정리한다. Keeper의 판단을
+  호출에서 미처리 요청을 묶고 다음 행동을 제안한다. Keeper의 판단을
   대신하지 않는다.

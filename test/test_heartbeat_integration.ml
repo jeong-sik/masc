@@ -668,7 +668,7 @@ let test_fresh_presence_clears_only_the_heartbeat_failure_reason () =
           entry.R.last_failure_reason)
       with
       | Some (R.Turn_consecutive_failures 1 as reason) ->
-        (match Keeper_status_bridge.runtime_blocker_surface_of_failure_reason reason with
+        (match Masc.Keeper_status_bridge.runtime_blocker_surface_of_failure_reason reason with
          | Some surface -> check string "public blocker follows remaining turn debt"
              "turn_failures" surface.blocker_class
          | None -> fail "remaining turn debt has no public blocker")

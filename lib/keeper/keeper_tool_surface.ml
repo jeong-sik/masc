@@ -428,13 +428,22 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
            ^ ". Wait for or stop the current turn, then retry the clear.")
         [ "name", `String name ]
     | Error error ->
+      let effect_disposition, message =
+        match error with
+        | Keeper_owner_registry.Command_lookup_failed _
+        | Keeper_owner_registry.Command_lifecycle_reserved _ ->
+            Tool_result.Proven_pre_effect, "history not cleared: Keeper owner unavailable: "
+        | Keeper_owner_registry.Command_rejected _ ->
+            (* Owner shutdown can interrupt maintenance after its save. *)
+            Tool_result.Effect_outcome_unknown,
+            "history clear was not confirmed; the checkpoint may have changed: "
+      in
       keeper_clear_failure
         ~class_:Tool_result.Dependency_unavailable
-        ~effect_disposition:Tool_result.Proven_pre_effect
+        ~effect_disposition
         ~code:Tool_args.Precondition_failed
         ~message:
-          ("history not cleared: Keeper owner unavailable: "
-           ^ Keeper_owner_registry.command_error_to_string error)
+          (message ^ Keeper_owner_registry.command_error_to_string error)
         [ "name", `String name ]
 
 let handle_keeper_clear ctx args : tool_result =

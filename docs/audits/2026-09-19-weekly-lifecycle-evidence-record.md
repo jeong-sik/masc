@@ -11,7 +11,7 @@ status: audit
 - 결정 ID: masc-weekly-lifecycle-20260919
 - 적용 대상: MASC 소스, 해당 배포의 `.masc`, TUI, Terminal-Bench 어댑터
 - 결정 상태: 추적 필요
-- Delta: 최근 변경을 현재 실행 경로와 대조해 네 수정 PR과 운영 설정 회귀를 찾았다. 전체 기능과 벤치마크의 완료 증명은 아직 없다.
+- Delta: 최근 변경을 현재 실행 경로와 대조해 작은 수정 PR들과 운영 설정 회귀를 찾았다. 전체 기능과 벤치마크의 완료 증명은 아직 없다.
 
 ## 근거 (Evidence)
 
@@ -51,7 +51,7 @@ git diff <base> <head> -- lib/keeper lib/runtime lib/runtime_model docs/spec
 | 경계 | 사실을 소유하는 곳 | 다음 회차에 보존해야 할 것 | 이번 확인 범위 |
 |---|---|---|---|
 | Runtime Attempt → 다음 후보 | 실제 요청 범위와 후보별 provider usage | 거절 후 좁힌 History가 후보를 바꿔 다시 넓어지지 않음 | #37073 재현·수정, CI 추적 |
-| Keeper Turn → 다음 Turn | checkpoint와 turn boundary | message/tool-result Atom 경계, trace와 digest의 일치 | 변경 흐름 확인; clear/read 실패는 #37021·#37029 잔여 |
+| Keeper Turn → 다음 Turn | checkpoint와 turn boundary | message/tool-result Atom 경계, trace와 digest의 일치 | 읽기 실패 수정 #37089; clear 경합은 #37021 잔여 |
 | History → Librarian | History/boundary와 read position | 읽지 않은 구간 보존, 실패를 읽기 성공으로 처리하지 않음 | #37031 및 #37061 추적; 완결된 runtime loop 증거 없음 |
 | Librarian → Memory | current snapshot의 잠금된 disposition 적용 | 동시 explicit write 보존, 흡수 원문 기록 실패 시 commit 거절 | 소스 대조, 문서의 옛 retain/CAS 계약 정정 |
 | Memory → Recall | current facts, absorbed archive | current premise와 archived provenance 구분 | search schema와 writer 대조; 반복 재주입 억제 실측 미완료 |
@@ -70,6 +70,8 @@ git diff <base> <head> -- lib/keeper lib/runtime lib/runtime_model docs/spec
 - [#37073](https://github.com/jeong-sik/masc/pull/37073): 원장이 있는 후보의 overflow 축소가 다음 warm/cold 후보로 전달되지 않던 경로. halving·block eviction·오래된 원장 범위를 한 불변식으로 수정했다.
 - [#37076](https://github.com/jeong-sik/masc/pull/37076): TUI에서 검증된 Goal의 최종 확인을 보낼 수 없던 연결. 먼저 exact proof를 읽고 같은 binding을 기존 admin API로 확인한다. 이 누락은 9/10에 도입되어 이번 주에도 남아 있던 happy-path gap이다.
 - [#37077](https://github.com/jeong-sik/masc/pull/37077): Harbor의 per-agent key를 무시하고 host key만 읽던 설치 경로. 세 어댑터 × 두 환경 조합을 재현하고 Harbor resolver를 사용했다.
+- [#37089](https://github.com/jeong-sik/masc/pull/37089): checkpoint 읽기 실패를 빈 Context로 바꾸던 경로. 실패 원인을 보존해 턴 시작 전에 반환하고, 파일 없음·명시적 버전 교체·승인된 continuation을 구분한다. 다음 Tick에서 원래 이력을 다시 읽는 회귀를 포함한다.
+- [#37090](https://github.com/jeong-sik/masc/pull/37090): 병렬 호출을 끈 벤치 arm의 설정이 catalog 모델에 적용되지 않던 경로. 모델의 능력과 binding의 요청 정책을 분리해 실제 serializer까지 전달한다. 전달할 수 없는 runtime은 거절한다. arm 사이에는 spawn·concurrency 차이도 있으므로 단일 변수 실험이라고 해석하지 않는다.
 - [#37074](https://github.com/jeong-sik/masc/issues/37074): overlay 제거 뒤 live `deepseek-v4.1-flash:cloud`가 exact catalog lookup에서 제외됨. 공식 `/api/tags`는 `deepseek-v4.1-flash`를 반환했다. 08:57Z 기존 admin 설정 API로 해당 `api-name` 한 줄을 교정하고 reload했다. Librarian/HITL/Board 슬롯 복귀는 확인했으나, 후속 Librarian 종단 4건은 provider rate limit으로 실패했다. 설정 복구와 실제 기억 생산 성공은 다르다.
 - 기존 [#37063](https://github.com/jeong-sik/masc/pull/37063), #37064, #37066, #37069는 각각 Claude overflow와 Lane 밖 후보 선택을 다룬다. 중복 PR을 만들지 않고 검토 대상으로 유지했다.
 
@@ -81,6 +83,14 @@ git diff <base> <head> -- lib/keeper lib/runtime lib/runtime_model docs/spec
 
 기존 Keeper `critic`에게 관측을 요청했고 operation `kmsg-b29e444510413e5e89a94b11859f6edb`는 Succeeded, turn `trace-1788609342544-00000#2964`로 응답했다. 반복 기록·Memory Recall 재주입·Fusion 실패라는 제보는 후속 조사 입력이다. Keeper의 설명만으로 원인 관계를 확정하지 않았다.
 
+10:43Z 추가 확인: `.masc/exact-lane-runs-v6.jsonl`의 register/complete를 ID로 결합했다. Librarian 완료 2,102건 중 성공 701건이고, 실패 detail에 `wire_admission_rejected:missing_deadline`이 기록된 것은 1,288건이다. 해당 실패의 시작 시각은 9/18 06:17:01~9/19 08:57:44 UTC에 걸친다. reload 완료 응답(08:57:55.759Z) 이후 시작하고 완료한 26건은 성공 11, 실패 15였다. 성공 슬롯은 모두 `glm-coding.glm-5.3-flash`이며, 실패 중 HTTP 429는 13건, domain validation은 1건, missing_deadline은 0건이다. 초기 네 실패 표본만으로 기억 생산이 계속 멈췄다고 판단할 수 없다. exact execution 성공과 Memory snapshot·read position의 commit 완료도 구별해야 한다. 원본 집계 조건과 결과는 `/tmp/masc-week-audit/librarian-after-reload-counts.json`에 보관했다.
+
+### Memory에서 Skill까지의 구현 경계
+
+main `e50d28963b`의 실제 event producer를 확인했다. `Retrieved`는 검색, `Cited`는 성공한 Memory 철회, `Revised`는 Librarian commit에서 나온다. 특히 `Cited`를 좋은 기억의 강화 횟수로 읽으면 의미가 뒤집힌다. RFC-0418은 이 관측을 recall·소거·Librarian 판단에 넣지 않는다고 명시한다. 날짜·출처·관측 이력을 입력에 싣는 RFC-0456은 후속 제안이며 현재 renderer가 구현했다고 볼 수 없다.
+
+현재 Skill 경로는 admin editor의 발행 → frozen instruction 읽기·activation 또는 composition 실행·evidence다. `keeper_skill_publish`, `keeper_compose_save`, 자동 분석·합성·sandbox 검증·발행 순환은 현재 handler가 없는 제안(#32369, #36925)이다. PR #36925의 Draft 정책 숫자나 옛 `dropped`/`supersedes` 흡수 설명을 현재 계약으로 옮기지 않는다. 흡수의 의미 손실과 원문 재검색은 기존 #37079에서 추적하며, 이번 감사가 그 이슈의 품질 측정을 재현한 것은 아니다.
+
 ### 벤치마크 현재성
 
 [공식 실행 안내](https://www.tbench.ai/run)는 `terminal-bench/terminal-bench@4.0.0`, GPU sandbox와 `-k 5`를 제시한다. [공식 목록](https://www.tbench.ai/benchmarks)은 4.0 공개일을 2026-08-28로, Science 0.1을 2026-08-27로 적는다. [Harbor 환경 문서](https://docs.harborframework.com/core-concepts/jobs/environment-variables)는 `--agent-env`가 host credential보다 우선한다고 명시한다. 확인: 2026-09-19, 신뢰도 High.
@@ -89,12 +99,14 @@ git diff <base> <head> -- lib/keeper lib/runtime lib/runtime_model docs/spec
 
 전체 4.0 실행에는 GPU를 포함한 적합한 환경, 일치하는 릴리스와 어댑터, task가 선언한 MCP/Skills 연결(#36908), 원본 verifier 결과가 필요하다. 작은 설치 테스트 통과, 내부 fixture 점수, 일부 task의 성공을 전체 벤치 통과로 부르지 않는다.
 
+추가 검증에서는 0.35.20 릴리스 두 아키텍처를 내려받고 4.0 task 66개의 자원 선언을 읽었다. 이 Docker보다 큰 CPU/메모리를 요구하는 task 10개와 GPU task 3개가 있다. 전체 실행은 코드 검증 후 사용자가 Runpod에서 진행할 예정이다. 현재 호스트의 `openrouter.z-ai/glm-5.3-flash` 단일 Keeper 점검은 public MCP 제출 → `Execute ["touch", "/tmp/arm-k-keeper-was-here"]` → `remote_ssh`, `sandbox_applied`, exit 0과 파일 생성을 확인했다. 이는 도구 연결 증거이며 벤치 점수 또는 여러 Tick의 연속성 증거가 아니다. 기본 Anthropic arm의 provider/model 계약 해상 실패는 #37086으로 별도 기록했다.
+
 ## 검증 (Verification)
 
 - 1차: Git 날짜별 고정 구간과 producer → store → consumer 코드를 대조했다.
 - 2차: 실제 포트의 health, Keeper MCP 상태, exact lane 기록, pinned Harbor 구현과 공식 문서를 읽었다.
 - 3차: Harbor 인증 6개 실패 재현 뒤 관련 67개 테스트 통과. GitHub의 #37077 `pytest`도 success. TUI 설치본은 새 확인 키를 찾지 못하는 PTY 실패를 재현했다. OCaml candidate는 로컬 빌드 없이 PR CI로 검증 중이다.
-- 재현 결과: 네 개의 좁은 수정 PR과 live catalog mismatch를 확인했다. 모든 PR이 통과·병합·배포됐다는 뜻은 아니다. 각 PR의 현재 head/check/review가 마무리 판정의 근거다.
+- 재현 결과: 여러 개의 좁은 수정 PR과 live catalog mismatch를 확인했다. 모든 PR이 통과·병합·배포됐다는 뜻은 아니다. 각 PR의 현재 head/check/review가 마무리 판정의 근거다.
 
 ## 불확실성 (Uncertainty)
 

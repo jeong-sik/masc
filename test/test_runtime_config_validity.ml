@@ -3381,6 +3381,7 @@ let test_of_binding_reports_an_undeclared_provider () =
     ; is_default = false
     ; wizard_default = false
     ; max_concurrent = None
+    ; disable_parallel_tool_use = false
     ; context_marks = None
     ; max_tokens = None
     ; price_input = None

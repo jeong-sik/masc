@@ -1798,6 +1798,7 @@ max-concurrent = 1
 
 [ollama_cloud.thinkdefault]
 max-concurrent = 1
+disable-parallel-tool-use = true
 
 [ollama_cloud.thinkexplicitoff]
 max-concurrent = 1
@@ -1815,6 +1816,16 @@ max-concurrent = 1
 
 let runtime_thinking_model_catalog =
   {|
+# This isolated inventory fixture declares its own provider contract; the
+# shipped Ollama provider remains undeclared and refuses suppression.
+[[providers]]
+id = "ollama_cloud"
+kind = "openai_compat"
+base_url = "https://ollama.example/v1"
+request_path = "/chat/completions"
+api_key_env = ""
+supports_parallel_tool_suppression = true
+
 [[models]]
 id_prefix = "qwen36-35b-a3b-mtp"
 provider_name = "ollama_cloud"
@@ -2211,6 +2222,14 @@ let test_runtime_inventory_surfaces_declared_spec () =
       "binding max concurrency"
       1
       (binding |> J.member "max_concurrent" |> J.to_int);
+    Alcotest.(check bool) "declared parallel suppression" true
+      (binding |> J.member "disable_parallel_tool_use" |> J.to_bool);
+    Alcotest.(check bool) "effective request carries parallel suppression" true
+      (thinkdefault |> J.member "request_config"
+       |> J.member "disable_parallel_tool_use" |> J.to_bool);
+    Alcotest.(check bool) "model still supports parallel calls" true
+      (thinkdefault |> J.member "effective_capabilities"
+       |> J.member "supports_parallel_tool_calls" |> J.to_bool);
     (match binding |> J.member "keep_alive", binding |> J.member "num_ctx" with
      | `Null, `Null -> ()
      | _ -> Alcotest.fail "unset binding keep_alive/num_ctx must remain null");

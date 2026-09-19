@@ -18,7 +18,10 @@ side derives memory from a model-authored state envelope.
 | Tool/history logs | MASC | observable evidence and recall source |
 
 Memory OS snapshot path:
-`<base-path>/.masc/keepers/<keeper_name>.memory-current.json`.
+`<resolved-config-root>/keepers/<keeper_name>.memory-current.json`.
+`Config_dir_resolver.keepers_dir_for_base_path` resolves that directory; the
+default is `<base-path>/.masc/config/keepers`, and a configured `MASC_CONFIG_DIR`
+changes the config root.
 A missing snapshot means fresh empty state. Memory OS does not import, migrate,
 or fall back to alternate store layouts.
 

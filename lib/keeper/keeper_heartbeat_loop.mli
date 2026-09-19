@@ -226,9 +226,9 @@ val failure_reason_after_turn_status :
   turn_fail_count:int ->
   Keeper_registry.failure_reason option ->
   Keeper_registry.failure_reason option
-(** Preserve a typed configuration root cause when the post-turn heartbeat
-    records its generic consecutive-failure observation. Other failures keep
-    the existing consecutive-count projection. *)
+(** Preserve the current failure cause when the post-turn heartbeat records
+    its status. Refresh a generic count only when no specific cause exists.
+    Failure producers replace the reason when a new failure occurs. *)
 
 (** Runs one keepalive turn (event intake, scheduling, optional cycle dispatch).
     The caller classifies lifecycle state and fd/disk pressure

@@ -304,6 +304,9 @@ let record_crashed_cycle_failure ~base_path ~keeper_name exn =
   (* Capture the backtrace before any other call can clobber it. *)
   let backtrace = Printexc.get_backtrace () in
   ignore (Keeper_turn_failure_streak.increment ~base_path ~keeper_name);
+  Keeper_registry.set_failure_reason ~base_path keeper_name
+    (Some (Keeper_registry.Exception
+       (Keeper_types_profile.short_preview (Printexc.to_string exn))));
   Health.record_failure
     ~agent_name:keeper_name
     ~reason:(Keeper_types_profile.short_preview (Printexc.to_string exn));
@@ -509,8 +512,9 @@ let failure_reason_after_turn_status ~turn_fail_count current =
   then current
   else
     match current with
-    | Some (Keeper_registry.Turn_configuration_error _) -> current
-    | Some _ | None -> Some (Keeper_registry.Turn_consecutive_failures turn_fail_count)
+    | Some (Keeper_registry.Turn_consecutive_failures _) | None ->
+      Some (Keeper_registry.Turn_consecutive_failures turn_fail_count)
+    | Some _ -> current
 ;;
 
 (* Whether the event queue still holds any pending entry. Read errors are

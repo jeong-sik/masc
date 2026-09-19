@@ -56,6 +56,21 @@ let record_turn_boundary
   | Error detail -> not_recorded ~site:"position" detail
   | Ok position ->
     let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+    (* The restart goes on record before the line that ends the turn, never
+       after: a reader takes a restart that follows a line as proof that the
+       line's history is gone, and would drop this turn's own atoms. The
+       notice is still pending only when no stage save was accepted, so the
+       save this turn just made is the restart. *)
+    if
+      Keeper_agent_run_turn_helpers.restart_line_owed_at_finalize
+        ~notice_pending:(Atomic.exchange restart_notice_pending false)
+        ~saved_checkpoint_present:(Option.is_some saved_checkpoint)
+    then
+      Keeper_agent_run_turn_helpers.record_history_restart
+        ~config
+        ~keeper_name:meta.name
+        ~trace_id
+        Keeper_agent_run_turn_helpers.After_first_save;
     let record : Keeper_turn_boundaries.record =
       { recorded_at = Time_compat.now ()
       ; event =
@@ -74,12 +89,7 @@ let record_turn_boundary
          ~keeper_id:meta.name
          record
      with
-     | Ok () ->
-       (* The notice is still pending only when no stage save of this turn was
-          accepted, so the line just appended is the restart line. Consumed
-          here as well as at the stage sink, so it is answered exactly once. *)
-       if Atomic.compare_and_set restart_notice_pending true false
-       then Keeper_agent_run_turn_helpers.note_restart_line_stood_in ~keeper_name:meta.name
+     | Ok () -> ()
      | Error error ->
        not_recorded ~site:"append" (Keeper_turn_boundaries.append_error_to_string error)
      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn

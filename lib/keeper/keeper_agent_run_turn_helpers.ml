@@ -379,18 +379,13 @@ let record_history_restart ~(config : Workspace.config) ~keeper_name ~trace_id s
   | exception exn -> not_recorded (Printexc.to_string exn)
 ;;
 
-(* A turn owing [Notice_after_first_save] writes no restart line of its own
-   when no stage save was accepted before the finalize save: its
-   [Fresh_history] end line is the restart line. A reader gets the same
-   answer either way, so nothing is missing -- but the branch leaves no trace
-   of itself, and someone reading the log later stops at "why has this turn no
-   restart line". Counting it answers that, and a zero says the branch does
-   not run. *)
-let note_restart_line_stood_in ~keeper_name =
-  Otel_metric_store.inc_counter
-    Keeper_metrics.(to_string HistoryRestartStoodIn)
-    ~labels:[ "keeper", keeper_name ]
-    ()
+(* A turn owing [Notice_after_first_save] that reaches its end with the notice
+   unconsumed had no stage save accepted, so the finalize save is the one that
+   replaced the history. The line is owed then, and only then: a save the
+   store refused as stale replaced nothing and restarted nothing. Pure, so the
+   Stale_noop case is pinned by a test rather than by reading the call site. *)
+let restart_line_owed_at_finalize ~notice_pending ~saved_checkpoint_present =
+  notice_pending && saved_checkpoint_present
 ;;
 
 let turn_progress_callbacks ~config ~keeper_name ~downstream ~turn_id =

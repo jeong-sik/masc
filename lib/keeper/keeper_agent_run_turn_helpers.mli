@@ -84,10 +84,10 @@ type restart_notice =
       (** The turn starts from no atom because its checkpoint could not be
           loaded. What is saved may still hold atoms; the restart happens only
           if a save of this turn is accepted, so the line follows the first
-          accepted stage save. If the first accepted save is the finalize
-          save, this turn writes no restart line of its own and its
-          [Fresh_history] end line is that line, counted by
-          {!note_restart_line_stood_in} so the branch is not silent. *)
+          accepted stage save, or, when no stage save was accepted, the
+          finalize save -- see {!restart_line_owed_at_finalize}. Either way
+          the line is written, and it is written before the line that ends
+          the turn. *)
 
 (** Pure. Every pair is listed. *)
 val restart_notice :
@@ -111,12 +111,16 @@ val record_history_restart :
   restart_site ->
   unit
 
-(** Count a turn that owed [Notice_after_first_save] and reached its end with
-    the notice unconsumed: no stage save was accepted, so its own
-    [Fresh_history] line stood in for the restart line. Not a failure -- a
-    reader is told the same thing -- but the only record that this branch
-    ran. *)
-val note_restart_line_stood_in : keeper_name:string -> unit
+(** Whether a turn that owed [Notice_after_first_save] still has to write its
+    restart line when it ends. True when the notice is still pending -- no
+    stage save was accepted -- and the finalize save was, because that save is
+    then the one that replaced the history. A save the store refused as stale
+    replaced nothing, so it restarts nothing and the notice dies with the
+    turn. Pure. *)
+val restart_line_owed_at_finalize
+  :  notice_pending:bool
+  -> saved_checkpoint_present:bool
+  -> bool
 
 val turn_progress_callbacks :
   config:Workspace.config ->

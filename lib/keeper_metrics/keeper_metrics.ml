@@ -202,7 +202,6 @@ type t =
   | WireCaptureWriteFailures    (* counter: wire-capture write raised an exception *)
   | WireCaptureRecordSkipped    (* counter: wire-capture record dropped — rotation name space exhausted or append guard refused *)
   | TurnBoundaryFailures        (* counter: a turn-boundary line (a turn's end line, or a restart line from a turn or a clear) was not built or not written *)
-  | HistoryRestartStoodIn       (* counter: a turn owing a restart line after its first accepted save had no stage save, so its own Fresh_history end line stood in *)
 [@@deriving enumerate]
 
 (** String conversion
@@ -419,7 +418,6 @@ let to_string = function
   | WireCaptureWriteFailures -> "masc_keeper_wire_capture_write_failures_total"
   | WireCaptureRecordSkipped -> "masc_keeper_wire_capture_record_skipped_total"
   | TurnBoundaryFailures -> "masc_keeper_turn_boundary_failures_total"
-  | HistoryRestartStoodIn -> "masc_keeper_history_restart_stood_in_total"
 ;;
 
 type collection =

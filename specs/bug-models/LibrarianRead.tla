@@ -496,4 +496,35 @@ NextPositionFirst ==
 
 SpecPositionFirst == Init /\ [][NextPositionFirst]_vars
 
+\* ------------------------------------------------- a round that never returns
+
+\* NoAtomPassedUnread cannot see a round that stops for good. A round standing
+\* on a refused line passes nothing over, because it delivers nothing, so that
+\* invariant holds while the Keeper's memory stops being written. What the
+\* design promises is the other half: a round comes back to what it could not
+\* read.
+\*
+\* It promises that up to the last cut point only. An atom a turn saved before
+\* it died has no line that ends it, so no round can name it, and reading it is
+\* not owed. The property therefore asks about the atoms a cut point covers.
+AtomsUpToLastCutRead ==
+    LET cuts == CutsOf(log, hist)
+    IN cuts = {} \/ \A i \in 1..Min({Max(cuts), Len(hist)}) : hist[i] \in readIds
+
+EveryReachableAtomEventuallyRead == <>[]AtomsUpToLastCutRead
+
+\* Strong fairness on the apply: a round that failed puts the snapshot back, so
+\* the apply is enabled again and again rather than continuously, and weak
+\* fairness would let the failures take every turn.
+SpecLive ==
+    /\ Init
+    /\ [][Next]_vars
+    /\ WF_vars(RoundSnap)
+    /\ SF_vars(RoundApply)
+
+\* There is no bug to plant here. SpecLive is the reader as it stands and it
+\* already violates the property, so the cfg that runs it is named for what it
+\* shows. When the stall is closed the cfg stops violating and the harness says
+\* so, which is when it becomes a clean cfg.
+
 ====

@@ -417,7 +417,7 @@ let create_routed_keeper_wake_schedule ?recurrence config channel =
     fail ("create failed: " ^ Schedule_service.service_error_to_string err)
 ;;
 
-let create_named_keeper_wake_schedule config ~schedule_id ~keeper_name =
+let create_named_keeper_wake_schedule ?recurrence config ~schedule_id ~keeper_name =
   match
     Schedule_service.create
       config
@@ -429,6 +429,7 @@ let create_named_keeper_wake_schedule config ~schedule_id ~keeper_name =
       ~due_at:200.0
       ~payload:(keeper_wake_payload_for keeper_name)
       ~source:Schedule_domain.Operator_request
+      ?recurrence
       ()
   with
   | Ok request -> request
@@ -2205,6 +2206,115 @@ let test_deferred_keeper_wake_not_running_is_retryable () =
             (Keeper_registry_event_queue.snapshot ~base_path keeper_name)))
 ;;
 
+(* An interval wake may already be in the durable queue when activation or
+   the schedule acceptance fails. Self-clocking must not defer that same
+   occurrence's repair; it holds only a later firing back. *)
+let test_interval_wake_retries_activation_before_holding_the_next_occurrence () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "offline-interval-keeper" in
+  let base_path = config.Workspace_utils.base_path in
+  register_offline_keeper ~proactive_enabled:true config keeper_name;
+  Fun.protect
+    ~finally:(fun () -> Keeper_registry.For_testing.unregister ~base_path keeper_name)
+    (fun () ->
+       let request = create_named_keeper_wake_schedule
+           ~recurrence:(Schedule_domain.Interval { interval_sec = 60 })
+           config ~schedule_id:"interval-activation-retry" ~keeper_name in
+       let first = tick_ok config ~now:201.0 in
+       let occurrence_id = single_occurrence_id first in
+       check bool "first dispatch fails after enqueue" true
+         ((List.hd first.dispatches).status = Schedule_runner.Dispatch_failed);
+       let pending_ids () =
+         Keeper_registry_event_queue.snapshot ~base_path keeper_name
+         |> Keeper_event_queue.to_list
+         |> List.map (fun (stimulus : Keeper_event_queue.stimulus) -> stimulus.post_id)
+       in
+       check (list string) "failed activation retains durable occurrence"
+         [ occurrence_id ] (pending_ids ());
+       let retried = tick_ok config ~now:202.0 in
+       check bool "same occurrence retries activation while owner is offline" true
+         ((List.hd retried.dispatches).status = Schedule_runner.Dispatch_failed);
+       check int "retry does not emit another signal" 0 (List.length retried.emitted);
+       check string "retry has the same occurrence identity" occurrence_id
+         (Schedule_occurrence_id.to_string (List.hd retried.dispatches).occurrence_id);
+       (match Keeper_registry.prepare_fiber_launch ~base_path keeper_name with
+        | Ok _ -> ()
+        | Error error -> fail (Keeper_state_machine.transition_error_to_string error));
+       let repaired = tick_ok config ~now:203.0 in
+       check bool "running owner accepts the retried occurrence" true
+         ((List.hd repaired.dispatches).status = Schedule_runner.Dispatch_succeeded);
+       check (list string) "repair keeps one copy in the queue"
+         [ occurrence_id ] (pending_ids ());
+       (match Keeper_registry.get ~base_path keeper_name with
+        | Some entry -> check bool "repair signals the owner" true
+            (Atomic.get entry.fiber_wakeup)
+        | None -> fail "registered owner disappeared");
+       (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+        | Some stored ->
+          check bool "acceptance advances the recurring schedule" true
+            (stored.status = Schedule_domain.Scheduled);
+          check (float 0.001) "next occurrence keeps its due" 260.0 stored.due_at
+        | None -> fail "schedule disappeared after repair");
+       let next = tick_ok config ~now:261.0 in
+       check bool "a different occurrence waits for the pending one" true
+         ((List.hd next.dispatches).status = Schedule_runner.Dispatch_deferred);
+       check int "held next occurrence emits no signal" 0 (List.length next.emitted);
+       check (list string) "next tick keeps the repaired occurrence"
+         [ occurrence_id ] (pending_ids ()))
+;;
+
+let test_interval_wake_retries_acceptance_commit ~complete_before_retry () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "schedule-keeper" in
+  let base_path = config.Workspace_utils.base_path in
+  ignore (persist_keeper_meta config keeper_name : Keeper_meta_contract.keeper_meta);
+  let request = create_keeper_wake_schedule
+      ~recurrence:(Schedule_domain.Interval { interval_sec = 60 }) config in
+  let consumer = Server_schedule_consumers.consumer in
+  let first_consumer = { consumer with Schedule_runner.dispatch =
+      (fun config ~now signal request ~commit_acceptance:_ ->
+         consumer.dispatch config ~now signal request
+           ~commit_acceptance:(fun _ ->
+             Error (Schedule_runner.Retryable_dispatch_failure "acceptance commit fixture"))) } in
+  let first = match Schedule_runner.tick ~consumer:first_consumer config ~now:201.0
+      ~retention_days:Schedule_store.terminal_schedule_retention_days with
+    | Ok result -> result | Error error -> fail (Schedule_runner.runner_error_to_string error) in
+  let occurrence_id = single_occurrence_id first in
+  check bool "acceptance failure is retryable" true
+    ((List.hd first.dispatches).status = Schedule_runner.Dispatch_failed);
+  check int "queue was durably enqueued before acceptance failed" 1
+    (Keeper_registry_event_queue.snapshot ~base_path keeper_name |> Keeper_event_queue.length);
+  if complete_before_retry then (
+    let selection = pending_selection_exn ~base_path ~keeper_name in
+    match Keeper_registry_event_queue.terminalize_pending_turn_completed_result
+        ~base_path keeper_name ~applied_at:201.5 ~selection with
+    | Ok (Keeper_registry_event_queue.Acked _)
+    | Ok (Keeper_registry_event_queue.Already_acked _) -> ()
+    | Ok (Keeper_registry_event_queue.Ack_committed_followup_failed { detail; _ })
+    | Error detail -> fail detail);
+  let repaired = tick_ok config ~now:202.0 in
+  check bool "the next tick commits acceptance" true
+    ((List.hd repaired.dispatches).status = Schedule_runner.Dispatch_succeeded);
+  check string "repair uses the original occurrence" occurrence_id
+    (Schedule_occurrence_id.to_string (List.hd repaired.dispatches).occurrence_id);
+  check int "repair emits no duplicate signal" 0 (List.length repaired.emitted);
+  check int "repair preserves pending or completed queue disposition"
+    (if complete_before_retry then 0 else 1)
+    (Keeper_registry_event_queue.snapshot ~base_path keeper_name |> Keeper_event_queue.length);
+  if complete_before_retry then (
+    match (List.hd repaired.dispatches).detail with
+    | Some detail -> check string "repair recognizes the completed occurrence"
+        "already_acked"
+        Yojson.Safe.Util.(detail |> member "occurrence_status" |> to_string)
+    | None -> fail "completed occurrence repair has no receipt");
+  (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+   | Some stored -> check bool "repaired schedule has advanced" true
+       (stored.status = Schedule_domain.Scheduled)
+   | None -> fail "schedule disappeared after acceptance repair")
+;;
+
 let test_due_schedule_wakes_live_keeper_with_proactive_disabled () =
   with_workspace
   @@ fun config ->
@@ -3022,6 +3132,12 @@ let () =
         ; test_case "deferred keeper wake when not running is retryable"
             `Quick
             test_deferred_keeper_wake_not_running_is_retryable
+        ; test_case "interval wake retries activation before holding the next occurrence"
+            `Quick test_interval_wake_retries_activation_before_holding_the_next_occurrence
+        ; test_case "interval wake retries acceptance commit"
+            `Quick (test_interval_wake_retries_acceptance_commit ~complete_before_retry:false)
+        ; test_case "completed interval wake retries acceptance without enqueue"
+            `Quick (test_interval_wake_retries_acceptance_commit ~complete_before_retry:true)
         ; test_case "due wake bypasses proactive policy" `Quick
             test_due_schedule_wakes_live_keeper_with_proactive_disabled
         ; test_case "keeper wake queue evidence rejects stale occurrence" `Quick

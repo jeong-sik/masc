@@ -1468,6 +1468,41 @@ let set_runtime_lane_slots ~(host : string) ~(port : int) ~(lane : string)
   | Ok json ->
     decode_runtime_config_commit_receipt json
     |> Result.map (fun (_receipt : runtime_config_commit_receipt) -> ())
+
+(* The routing API names a standalone lane's walk order "exact/<name>", which
+   keeps its names apart from conversation-lane ids. *)
+let exact_lane_route name = "exact/" ^ name
+
+let post_runtime_lane_action ~host ~port fields =
+  match
+    post_json ~host ~port ~path:"/api/v1/runtime/config/routing"
+      ~body:(Yojson.Safe.to_string (`Assoc fields))
+  with
+  | Error detail -> Error detail
+  | Ok json ->
+    decode_runtime_config_commit_receipt json
+    |> Result.map (fun (_receipt : runtime_config_commit_receipt) -> ())
+;;
+
+(** POST /api/v1/runtime/config/routing with [action = "create"]: declare a
+    lane under [lane] with [runtime_ids] as its candidates. The server refuses
+    a name the file already declares. *)
+let create_runtime_lane ~(host : string) ~(port : int) ~(lane : string)
+      ~(runtime_ids : string list) : (unit, string) result =
+  post_runtime_lane_action ~host ~port
+    [ "lane", `String lane
+    ; "action", `String "create"
+    ; "runtime_ids", `List (List.map (fun id -> `String id) runtime_ids)
+    ]
+
+(** POST /api/v1/runtime/config/routing with [action = "remove"]: delete the
+    declared lane [lane]. The server refuses while a keeper still routes
+    through it -- an assignment, or [\[runtime\].default] for every keeper
+    without one -- and names each. *)
+let remove_runtime_lane ~(host : string) ~(port : int) ~(lane : string)
+    : (unit, string) result =
+  post_runtime_lane_action ~host ~port
+    [ "lane", `String lane; "action", `String "remove" ]
 ;;
 
 (** GET /api/v1/keepers/tool-approvals — the tool calls keepers are holding. *)
@@ -1706,6 +1741,15 @@ let post_board_new ~(host : string) ~(port : int) ~(title : string)
   post_json ~host ~port ~path:"/api/v1/tools/masc_board_post"
     ~body:(Yojson.Safe.to_string payload)
 
+let fetch_goal_confirmation ~host ~port ~goal_id =
+  get_json ~host ~port
+    ~path:("/api/v1/goals/confirmation?goal_id=" ^ percent_encode_query_value goal_id)
+
+let post_goal_confirmation ~host ~port confirmation =
+  post_json ~host ~port ~path:"/api/v1/goals/confirmation"
+    ~body:(Yojson.Safe.to_string
+      (Masc_tui_planning_detail.confirmation_body confirmation))
+
 (** POST /api/v1/tools/masc_goal_transition. The action travels as the tool's
     own wire word via [Goal_phase.Public_action.to_string] rather than a
     local literal, so the TUI and the tool cannot disagree about what
@@ -1794,17 +1838,15 @@ let post_schedule_update ~(host : string) ~(port : int) ~(body_json : string) =
   post_json ~host ~port ~path:"/api/v1/tools/masc_schedule_update"
     ~body:body_json
 
-(** POST /api/v1/tools/masc_schedule_cancel. The payload is the tool's own
-    argument contract, so validation is the tool's, not duplicated here.
-    [cancelled_by_kind] is omitted: the tool defaults it to human operator,
-    which is what a terminal operator is. The reason is a fixed audit phrase --
-    the arm display already named which schedule the second press cancels. *)
+(** POST /api/v1/tools/masc_schedule_cancel. The authenticated HTTP boundary
+    supplies the canceller identity before the tool validates its argument
+    contract. The reason is a fixed audit phrase -- the arm display already
+    named which schedule the second press cancels. *)
 let post_schedule_cancel ~(host : string) ~(port : int) ~(schedule_id : string)
     : (Yojson.Safe.t, string) result =
   let payload =
     `Assoc
       [ ("schedule_id", `String schedule_id)
-      ; ("cancelled_by_id", `String default_agent_name)
       ; ("reason", `String "cancelled from the TUI")
       ]
   in

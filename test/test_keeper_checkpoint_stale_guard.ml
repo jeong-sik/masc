@@ -302,6 +302,9 @@ let test_run_context_binds_generation_before_agent_core_checkpoint () =
       ~runtime_id:"unconfigured-test-runtime"
       ~shared_context
       ()
+    |> function
+    | Ok context -> context
+    | Error error -> fail (Keeper_checkpoint_store.checkpoint_load_error_to_string error)
   in
   check bool "caller-owned context remains the AGENT_CORE context" true
     (run_context.shared_context == shared_context);
@@ -472,6 +475,145 @@ let test_newer_canonical_is_not_replaced () =
      | Error _ -> ());
     check bool "the newer canonical is untouched" true
       (String.equal before (Fs_compat.load_file canonical_path)))
+
+let with_run_checkpoint f =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.with_test_env
+    ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env)
+    ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw
+  @@ fun () ->
+  let base_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_dir) @@ fun () ->
+  let meta =
+    match Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ "name", `String "read-error-context" ]) with
+    | Ok meta -> meta
+    | Error detail -> fail detail
+  in
+  let session_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+  let session_dir = Filename.concat base_dir session_id in
+  Fs_compat.mkdir_p session_dir;
+  let checkpoint = make_checkpoint ~session_id ~turn_count:1 ~marker:"saved memory" in
+  save_ok ~session_dir checkpoint "seed young Keeper history";
+  let path = Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id in
+  let config = Workspace.default_config base_dir in
+  let prepare ?checkpoint () =
+    Keeper_run_context.prepare_run_context ~config ~meta
+      ~profile_defaults:Keeper_types_profile_defaults.empty_keeper_profile_defaults
+      ~base_dir ~runtime_id:"unconfigured-test-runtime" ?checkpoint ()
+  in
+  f ~config ~meta ~base_dir ~session_dir ~checkpoint ~path ~prepare
+;;
+
+(* The same young Keeper has a valid history before and after a failed read.
+   A rejected owned-file read models a temporary filesystem fault without
+   relying on process privileges or a race. The production turn entrypoint
+   must return before building a prompt or reaching a checkpoint writer. *)
+let test_checkpoint_read_error_stops_turn ~io_failure () =
+  with_run_checkpoint
+  @@ fun ~config ~meta ~base_dir ~session_dir ~checkpoint ~path ~prepare ->
+  let original = Fs_compat.load_file path in
+  let held = path ^ ".held" in
+  if io_failure then (
+    Unix.rename path held;
+    Unix.symlink held path)
+  else Fs_compat.save_file path "{ unreadable checkpoint";
+  let unread_bytes = Fs_compat.load_file path in
+  let expected_error =
+    match Keeper_checkpoint_store.load_agent_core ~session_dir
+      ~session_id:checkpoint.session_id with
+    | Error (Keeper_checkpoint_store.Io_error _ as error) when io_failure -> error
+    | Error (Keeper_checkpoint_store.Parse_error _ as error) when not io_failure -> error
+    | Error error -> fail (Keeper_checkpoint_store.checkpoint_load_error_to_string error)
+    | Ok _ -> fail "fixture did not cause a checkpoint read error"
+  in
+  let prompt_built = ref false in
+  let result =
+    Keeper_agent_run.run_turn ~config ~meta ~base_dir
+      ~publication_recovery:
+        { Keeper_publication_recovery_availability.provider =
+            Keeper_publication_recovery_availability.non_runtime_provider
+        ; keeper_name = meta.name }
+      ~profile_defaults:Keeper_types_profile_defaults.empty_keeper_profile_defaults
+      ~turn_ctx_cell:(Keeper_tool_call_log.create_turn_ctx_cell ())
+      ~max_context:4096
+      ~build_turn_prompt:(fun ~base_system_prompt:_ ~messages:_ ->
+        prompt_built := true;
+        fail "a failed checkpoint read reached prompt construction")
+      ~user_message:"continue the saved work" ~turn_kind:Turn_record.Direct
+      ~skill_snapshot:(Skill_catalog_snapshot.config_unreadable ~detail:"unused fixture")
+      ~task_skill_selection:(Ok Keeper_task_skill_turn.empty)
+      ~runtime_id:"unconfigured-test-runtime" ()
+  in
+  (match result with
+   | Error (Agent_core.Error.Io (FileOpFailed { op; path = failed_path; detail })) ->
+     check string "the failed operation is a checkpoint load" "load checkpoint" op;
+     check string "the failure names the canonical file" path failed_path;
+     check string "the store's diagnosed cause survives"
+       (Keeper_checkpoint_store.checkpoint_load_error_to_string expected_error) detail
+   | Error error -> fail (Agent_core.Error.to_string error)
+   | Ok _ -> fail "an unreadable checkpoint allowed a turn");
+  check bool "no prompt or model turn ran" false !prompt_built;
+  check string "the failed turn did not overwrite the saved file" unread_bytes
+    (Fs_compat.load_file path);
+  if io_failure then (Unix.unlink path; Unix.rename held path)
+  else Fs_compat.save_file path original;
+  match prepare () with
+  | Error error -> fail (Keeper_checkpoint_store.checkpoint_load_error_to_string error)
+  | Ok ctx ->
+    check int "the next tick resumes the original turn count" 1 ctx.start_turn_count;
+    check bool "the next tick keeps the original messages" true
+      (Keeper_context_runtime.messages_of_context ctx.ctx_work = checkpoint.messages)
+;;
+
+let test_unreadable_path_is_not_an_absent_checkpoint () =
+  with_run_checkpoint
+  @@ fun ~config:_ ~meta:_ ~base_dir:_ ~session_dir:_ ~checkpoint:_ ~path ~prepare ->
+  let held = path ^ ".held" in
+  Unix.rename path held;
+  Unix.symlink (path ^ ".missing") path;
+  (match prepare () with
+   | Error (Keeper_checkpoint_store.Io_error _) -> ()
+   | Error error -> fail (Keeper_checkpoint_store.checkpoint_load_error_to_string error)
+   | Ok _ -> fail "a failed path lookup was treated as an absent checkpoint");
+  check bool "the unreadable canonical path was not replaced" true
+    ((Unix.lstat path).Unix.st_kind = Unix.S_LNK);
+  Unix.unlink path;
+  Unix.rename held path
+;;
+
+let test_superseded_context_can_start_fresh () =
+  with_run_checkpoint
+  @@ fun ~config:_ ~meta:_ ~base_dir:_ ~session_dir ~checkpoint ~path ~prepare ->
+  let (_ : string) = with_canonical_at_version ~session_dir
+      ~session_id:checkpoint.session_id
+      ~version:(Agent_core.Checkpoint.checkpoint_version - 1) in
+  let original = Fs_compat.load_file path in
+  match prepare () with
+  | Error error -> fail (Keeper_checkpoint_store.checkpoint_load_error_to_string error)
+  | Ok ctx ->
+    check int "the deliberate version cut starts fresh" 0 ctx.start_turn_count;
+    check bool "restart evidence follows the first accepted save" true
+      (ctx.saved_history = Keeper_run_context.Saved_history_superseded);
+    check string "preparation alone does not replace the old checkpoint" original
+      (Fs_compat.load_file path)
+;;
+
+let test_admitted_checkpoint_is_the_run_history_source () =
+  with_run_checkpoint
+  @@ fun ~config:_ ~meta:_ ~base_dir:_ ~session_dir:_ ~checkpoint ~path ~prepare ->
+  Fs_compat.save_file path "{ unreadable checkpoint";
+  match prepare ~checkpoint () with
+  | Error error -> fail (Keeper_checkpoint_store.checkpoint_load_error_to_string error)
+  | Ok ctx ->
+    check int "the admitted continuation retains its turn count" 1 ctx.start_turn_count;
+    check bool "the admitted continuation supplies its full history" true
+      (Keeper_context_runtime.messages_of_context ctx.ctx_work = checkpoint.messages);
+    check string "preparation does not write the canonical file" "{ unreadable checkpoint"
+      (Fs_compat.load_file path)
+;;
 
 (* The AGENT_CORE per-turn pipeline builds checkpoints with an empty session_id (the
    AGENT_CORE agent carries no session field). The keeper sink stamps a validated,
@@ -1721,6 +1863,16 @@ let () =
             test_history_window_follows_the_runtime_setting;
           test_case "run context binds generation before AGENT_CORE checkpoint" `Quick
             test_run_context_binds_generation_before_agent_core_checkpoint;
+          test_case "checkpoint I/O failure stops the turn and preserves history" `Quick
+            (test_checkpoint_read_error_stops_turn ~io_failure:true);
+          test_case "checkpoint parse failure stops the turn and preserves history" `Quick
+            (test_checkpoint_read_error_stops_turn ~io_failure:false);
+          test_case "an unreadable path is not an absent checkpoint" `Quick
+            test_unreadable_path_is_not_an_absent_checkpoint;
+          test_case "a deliberate checkpoint version cut still starts fresh" `Quick
+            test_superseded_context_can_start_fresh;
+          test_case "an admitted checkpoint is the continuation history source" `Quick
+            test_admitted_checkpoint_is_the_run_history_source;
           test_case "forward and equal saves pass, stale save is no-op" `Quick
             test_forward_equal_and_stale;
           test_case "canonical disk is the watermark SSOT" `Quick

@@ -14,14 +14,6 @@ include Keeper_turn_helpers
 include Keeper_turn_runtime_budget
 include Keeper_unified_turn_types
 
-type retry_loop_input =
-  { run_meta : keeper_meta
-  ; execution : runtime_execution
-  ; attempt : int
-  ; is_retry : bool
-  ; attempted_runtimes : string list
-  }
-
 type declared_lane_failure =
   | Provider_context_overflow of { limit_tokens : int option }
   | Declared_runtime_lane_exhausted
@@ -68,8 +60,7 @@ let run_provider_dispatch_if_authorized ~before_dispatch_authority dispatch =
     accumulator instead of casual [ref] cells. *)
 
 type ctx =
-  { attempt : int
-  ; base_dir : string
+  { base_dir : string
   ; build_turn_prompt :
       base_system_prompt:string -> messages:Agent_core.Types.message list ->
       Keeper_agent_run.turn_prompt
@@ -109,7 +100,6 @@ let run (ctx : ctx)
       ~(initial_execution : runtime_execution)
       ~(turn_state : turn_state)
       ~(before_dispatch_authority : unit -> (unit, string) result)
-      ~(current_turn_phase_elapsed_ms : float option -> int * int option)
       ~(user_message : string)
       ~(registry_base_path : string)
       ~(record_streaming_cancelled_observation : config:Workspace.config -> run_meta:keeper_meta -> runtime_id:string -> keeper_turn_id:int -> unit -> unit)
@@ -139,7 +129,6 @@ let run (ctx : ctx)
       ; event_bus
       ; event_bus_integrity_error_snapshot = _
       ; tool_completed_count_snapshot = _
-      ; attempt = _attempt
       ; deferred_runtime_lane
       ; on_deferred_runtime_consumed
       } =
@@ -197,7 +186,6 @@ let run (ctx : ctx)
   let do_run
         ~(execution : runtime_execution)
         ~run_meta
-        ~is_retry
         ~(turn_state : turn_state)
     =
     let turn_state =
@@ -212,7 +200,6 @@ let run (ctx : ctx)
           (Keeper_id.Trace_id.to_string run_meta.runtime.trace_id)
         ~max_context:execution.max_context
         ~channel:(Keeper_world_observation.channel_to_string channel)
-        ~is_retry
         ~current_task_id:
           (Option.map
              Keeper_id.Task_id.to_string
@@ -271,10 +258,7 @@ let run (ctx : ctx)
                       (fun (retry : EC.degraded_retry) ->
                          retry.fallback_reason)
                       turn_state.degraded_retry_info)
-                 ~runtime_rotation_attempts:
-                   (List.rev turn_state.runtime_rotation_attempts)
-                 ?deferred_runtime_lane:
-                   (if is_retry then None else deferred_runtime_lane)
+                 ?deferred_runtime_lane
                  ~runtime_retry_deferral:
                    { Keeper_turn_driver.continuation = lane_retry_continuation
                    ; on_deferred = (fun hint -> deferred_runtime_lane_ref := Some hint)
@@ -286,11 +270,9 @@ let run (ctx : ctx)
                          :: !runtime_attempt_errors_ref)
                  ~on_runtime_lane_terminal_error:
                    (fun terminal -> lane_terminal_error_ref := Some terminal)
-                 ?on_deferred_runtime_consumed:
-                   (if is_retry then None else on_deferred_runtime_consumed)
+                 ?on_deferred_runtime_consumed
                  ~temperature:execution.temperature
                  ~trajectory_acc
-                 ~is_retry
                  ?shared_context
                  ?event_bus
                  ?on_event:
@@ -324,16 +306,7 @@ let run (ctx : ctx)
     in
     result, turn_state
   in
-  let retry_loop (input : retry_loop_input) (turn_state : turn_state) =
-    let { run_meta
-        ; execution
-        ; attempt
-        ; is_retry
-        ; attempted_runtimes
-        }
-      =
-      input
-    in
+  let run_once (turn_state : turn_state) =
     let mark_terminal_error err =
       match EC.extract_input_required err with
       | Some ir ->
@@ -359,15 +332,13 @@ let run (ctx : ctx)
         Keeper_unified_turn_terminal_error.handle
           ~config
           ~keeper_name:meta.name
-          ~attempt
-          ~attempted_runtimes
+          ~runtime_id:initial_execution.runtime_id
           err
     in
     let attempt_result, turn_state =
       do_run
-        ~execution
-        ~run_meta
-        ~is_retry
+        ~execution:initial_execution
+        ~run_meta:meta
         ~turn_state
     in
     match attempt_result with
@@ -438,11 +409,8 @@ let run (ctx : ctx)
       | None when Option.is_some deferred_runtime_lane ->
         Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
           ~keeper_name:meta.name
-          ~runtime_id:execution.runtime_id
-          ~decision:No_degraded_retry
+          ~runtime_id:initial_execution.runtime_id
           ~reason:"frozen_runtime_suffix_exhausted"
-          ~next_runtime:None
-          ~attempt
           ~error_kind:(Some Agent_core.Error.(category err |> category_label))
           ~error_message:(Some (Agent_core.Error.to_string err));
         mark_terminal_error err;
@@ -452,11 +420,8 @@ let run (ctx : ctx)
          | Provider_context_overflow { limit_tokens } ->
           Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
             ~keeper_name:meta.name
-            ~runtime_id:execution.runtime_id
-            ~decision:No_degraded_retry
+            ~runtime_id:initial_execution.runtime_id
             ~reason:"provider_context_overflow"
-            ~next_runtime:None
-            ~attempt
             ~error_kind:(Some Agent_core.Error.(category err |> category_label))
             ~error_message:(Some (Agent_core.Error.to_string err));
           let current_turn_event_bus =
@@ -489,8 +454,8 @@ let run (ctx : ctx)
               ]
             ();
           Log.Keeper.warn
-            "%s: provider returned typed context overflow after runtime \
-             rotation: %s"
+            "%s: provider returned typed context overflow after the lane \
+             walk: %s"
             meta.name
             (short_preview (Agent_core.Error.to_string err));
           (* Return the typed provider error and mark this attempt terminal.
@@ -500,34 +465,19 @@ let run (ctx : ctx)
          | Declared_runtime_lane_exhausted ->
           Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
             ~keeper_name:meta.name
-            ~runtime_id:execution.runtime_id
-            ~decision:No_degraded_retry
+            ~runtime_id:initial_execution.runtime_id
             ~reason:"declared_runtime_lane_exhausted"
-            ~next_runtime:None
-            ~attempt
             ~error_kind:(Some Agent_core.Error.(category err |> category_label))
             ~error_message:(Some (Agent_core.Error.to_string err));
           mark_terminal_error err;
           Error err, turn_state)
   in
   (* Do not wrap the full keeper turn in a cumulative wall-clock timeout.
-     Long voice/AGENT_CORE turns can keep making stream or tool progress beyond the
-     legacy 600s cap. Runaway detection is owned by stream idle, provider
-     attempt liveness, tool-level timeouts, max-turn limits, and the optional
-     supervisor stale-turn watchdog. Retry admission must not reintroduce the
-     cumulative wall-clock cap between provider attempts. *)
-  let result, turn_state =
-    retry_loop
-      { run_meta = meta
-      ; execution = initial_execution
-      ; attempt = 1
-      ; is_retry = false
-      ; attempted_runtimes =
-          [ initial_execution.runtime_id
-          ]
-      }
-      turn_state
-  in
+     Long voice/AGENT_CORE turns can keep making stream or tool progress for a
+     long time. Runaway detection is owned by stream idle, provider attempt
+     liveness, tool-level timeouts, max-turn limits, and the optional
+     supervisor stale-turn watchdog. *)
+  let result, turn_state = run_once turn_state in
   (* A continuation turn follows an approval replay, so its tool rows are
      delivered under that approval's identity, beside the lifecycle rows the
      queue already wrote for it. Any other autonomous turn has no delivery

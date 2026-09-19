@@ -118,6 +118,11 @@ let attempt_advance_state_is_valid (attempt : attempt) (failure : transport_fail
     && Option.is_none attempt.http_status
     && Option.is_none attempt.provider_trace_sha256
     && Option.is_none attempt.raw_response_sha256
+  | Response_body_deadline_exceeded, Response_received ->
+    attempt.dispatch_count = 1
+    && successful_http_status attempt.http_status
+    && Option.is_none attempt.provider_trace_sha256
+    && Option.is_none attempt.raw_response_sha256
   | Serialized_request_refused { http_status }, Response_received ->
     http_status = 413
     && attempt.dispatch_count = 1
@@ -156,6 +161,7 @@ let attempt_advance_state_is_valid (attempt : attempt) (failure : transport_fail
     && Option.is_some attempt.raw_response_sha256
   | Candidate_rejected, _
   | Completion_failed_before_dispatch, (Response_received | Terminal)
+  | Response_body_deadline_exceeded, (Before_dispatch | Terminal)
   | Serialized_request_refused _, (Before_dispatch | Terminal)
   | Rate_limited _, (Before_dispatch | Terminal)
   | (Overloaded _ | Server_error _), (Before_dispatch | Terminal)

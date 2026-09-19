@@ -85,6 +85,7 @@ type attempt =
 type transport_failure =
   | Candidate_rejected
   | Completion_failed_before_dispatch
+  | Response_body_deadline_exceeded
   | Serialized_request_refused of { http_status : int }
   | Rate_limited of { http_status : int }
   | Overloaded of { http_status : int }

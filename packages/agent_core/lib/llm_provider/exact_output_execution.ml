@@ -39,6 +39,7 @@ type one_dispatch_receipt =
 type execute_once_error_cause =
   | Clock_required_for_timeout
   | Frozen_request_mismatch
+  | Response_body_deadline_exceeded
   | Provider_error of Http_client.http_error
   | Output_normalization_failed of output_normalization_error
 
@@ -172,6 +173,17 @@ let execute_once_with_evidence ~net ?clock ?on_phase plan =
                   }))
       in
       (match post_result with
+       | Error
+           (Http_client.Response_received_error
+              { status
+              ; error = Http_client.TimeoutError { phase = Http_client.Wall_clock; _ }
+              })
+         when Cohttp.Code.is_success status ->
+         (* The transport closes the incomplete response before returning this
+            owned deadline. Non-success statuses retain their separate
+            Not_received_in_window refusal contract. Observer exceptions are
+            Unknown_provider_failure, not this typed transport outcome. *)
+         error (response_received_receipt status) Response_body_deadline_exceeded
        | Error transport_error ->
          let receipt, provider_error = transport_error_receipt transport_error in
          error receipt (Provider_error provider_error)

@@ -280,14 +280,14 @@ let capture_response ~base_path ~masc_root ~keeper_name ~turn_id ~agent_core_tur
    and no message or schema text, so it is written without the secret redaction
    the text rows need. *)
 let capture_request_projection_change ~masc_root ~keeper_name ~turn_id
-    ~agent_core_turn ~trace_id ~runtime_profile ~previous ~tools ~messages =
+    ~agent_core_turn ~trace_id ~runtime_profile ~memo ~previous ~tools ~messages =
   if not (enabled ()) then Keeper_projection_change.Request_not_digested
   else
     let turn_label = string_of_int turn_id in
     match
       Domain_pool_ref.submit_cpu_or_inline (fun () ->
         let current =
-          Keeper_projection_change.digest_request ~tools ~messages
+          Keeper_projection_change.digest_request ~memo ~tools ~messages
         in
         current, Keeper_projection_change.compare_requests ~previous ~current)
     with

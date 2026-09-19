@@ -15,14 +15,27 @@
 type request_digests
 (** The digests of one request. *)
 
+type digest_memo
+(** The message digests already computed in one keeper turn, keyed by message
+    value. *)
+
+val create_digest_memo : unit -> digest_memo
+(** One memo per keeper turn. A message's encoding does not depend on the
+    runtime, so the memo holds across the turn's runtime attempts. It is not
+    safe to share between keepers or between turns that run at the same
+    time. *)
+
 val digest_request :
+  memo:digest_memo ->
   tools:Agent_core.Tool.t list ->
   messages:Agent_core.Types.message list ->
   request_digests
-(** Serializes and hashes every tool schema and every message, in order. The
-    work is proportional to the request, and is done again for every request:
-    nothing is reused from the previous request's digests. Pure and CPU-bound;
-    safe on any domain. *)
+(** Serializes and hashes every tool schema, and every message [memo] has not
+    seen, in order; a message equal in value to one an earlier request of the
+    turn carried takes that digest. The encoding and SHA-256 are therefore paid
+    for the messages that are new or rewritten since, and each message still
+    costs one memo lookup. CPU-bound; writes only [memo], so one caller at a
+    time may use a memo, on any domain. *)
 
 val message_count : request_digests -> int
 

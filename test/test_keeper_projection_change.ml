@@ -16,7 +16,10 @@ let tool name =
 ;;
 
 let fixture_tools = [ tool "masc_status" ]
-let digest ?(tools = fixture_tools) messages = Change.digest_request ~tools ~messages
+
+let digest ?(tools = fixture_tools) ?(memo = Change.create_digest_memo ()) messages =
+  Change.digest_request ~memo ~tools ~messages
+;;
 
 let numbered label count =
   List.init count (fun index -> user (Printf.sprintf "%s-%d" label index))
@@ -29,12 +32,15 @@ let payload_bytes message =
 ;;
 
 (* Compares two message lists under the fixture tools, and checks the whole
-   change, the tools flag included, through its JSON rendering. *)
+   change, the tools flag included, through its JSON rendering. Both lists are
+   digested through one memo, as two requests of one keeper turn are; most
+   fixtures build equal messages as separate records, as projection does. *)
 let check_messages label ~previous ~current expected =
+  let memo = Change.create_digest_memo () in
   let actual =
     Change.compare_requests
-      ~previous:(Change.Request_digested (digest previous))
-      ~current:(digest current)
+      ~previous:(Change.Request_digested (digest ~memo previous))
+      ~current:(digest ~memo current)
   in
   check
     string

@@ -129,6 +129,7 @@ val capture_request_projection_change :
   agent_core_turn:int ->
   trace_id:Keeper_id.Trace_id.t ->
   runtime_profile:string ->
+  memo:Keeper_projection_change.digest_memo ->
   previous:Keeper_projection_change.previous_request ->
   tools:Agent_core.Tool.t list ->
   messages:Agent_core.Types.message list ->
@@ -148,8 +149,9 @@ val capture_request_projection_change :
     capture is off is not compared across once capture is on again.
 
     The caller waits for it before the request is dispatched. While capture is
-    on, every request therefore pays one more serialization and SHA-256 of all
-    its messages and tool schemas, in proportion to its size.
+    on, every request therefore pays one serialization and SHA-256 of its tool
+    schemas and of the messages [memo] has not seen in this keeper turn, plus
+    one [memo] lookup per message.
 
     [trace_id], [turn_id] and [agent_core_turn] are the values the cost
     ledger records as [trace_id], [keeper_turn_id] and

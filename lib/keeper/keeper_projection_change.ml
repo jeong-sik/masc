@@ -9,22 +9,44 @@ type request_digests =
   ; messages : message_digest array
   }
 
-let message_digest message =
-  let payload = Keeper_provider_input_snapshot.message_payload message in
-  { role = message.Agent_core.Types.role
-  ; bytes = String.length payload.Keeper_provider_input_snapshot.payload_bytes
-  ; sha256 = payload.Keeper_provider_input_snapshot.payload_sha256
-  }
+(* Keyed by message value, not by record: every request passes its history
+   through [Reasoning_history_projection.project], which allocates a new record
+   for every message, so no message of one request is physically the one the
+   previous request held. The key compares with [Stdlib.compare], which stops
+   at content the rebuilt record still shares, and hashes a string by a fixed
+   number of sampled bytes, so a hit costs neither the encoding nor the
+   SHA-256. Two messages that compare equal serialize to the same bytes except
+   for a float zero and its negative inside a raw JSON payload; such a pair
+   shares one digest. *)
+module Message_digest_memo = Hashtbl.Make (Agent_core.Types.Message_value)
+
+type digest_memo = message_digest Message_digest_memo.t
+
+let create_digest_memo () = Message_digest_memo.create 128
+
+let message_digest memo message =
+  match Message_digest_memo.find_opt memo message with
+  | Some digest -> digest
+  | None ->
+    let payload = Keeper_provider_input_snapshot.message_payload message in
+    let digest =
+      { role = message.Agent_core.Types.role
+      ; bytes = String.length payload.Keeper_provider_input_snapshot.payload_bytes
+      ; sha256 = payload.Keeper_provider_input_snapshot.payload_sha256
+      }
+    in
+    Message_digest_memo.add memo message digest;
+    digest
 ;;
 
-let digest_request ~tools ~messages =
+let digest_request ~memo ~tools ~messages =
   { tool_schema_sha256s =
       List.map
         (fun tool ->
            (Keeper_provider_input_snapshot.tool_schema_payload tool)
              .Keeper_provider_input_snapshot.payload_sha256)
         tools
-  ; messages = Array.of_list (List.map message_digest messages)
+  ; messages = Array.of_list (List.map (message_digest memo) messages)
   }
 ;;
 

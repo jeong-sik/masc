@@ -1252,6 +1252,13 @@ let run_turn
     let previous_request_projection_ref =
       ref Keeper_projection_change.No_request_yet
     in
+    (* The message digests this keeper turn has computed. Kept apart from the
+       comparison state above: a request left undigested breaks the pair the
+       next row compares, not the digest of a message that did not change.
+       Written by the one fiber that runs this turn's requests, and each
+       digest job is awaited before the next request, so the jobs never
+       overlap even when they land on different domains. *)
+    let request_digest_memo = Keeper_projection_change.create_digest_memo () in
     (* Kept apart from the evidence cells rather than folded into them: the
        window cut is observed before serialization, so a turn whose request was
        refused at the wire has a real cut and no wire observation. Sharing one
@@ -1725,6 +1732,7 @@ let run_turn
                                      ~agent_core_turn:acc.current_turn
                                      ~trace_id:meta.runtime.trace_id
                                      ~runtime_profile:runtime_id
+                                     ~memo:request_digest_memo
                                      ~previous:!previous_request_projection_ref
                                      ~tools:request_tools
                                      ~messages:provider_content

@@ -16,13 +16,9 @@ type output_admission_error =
   | Invalid_connect_timeout of float
   | Invalid_body_timeout of float
   | Missing_deadline
-      (** Neither a connect nor a body timeout is declared. The measurement
-          transport arms no deadline in this state, so a provider that holds
-          the connection open without completing its response hangs the
-          request for the life of the connection — measured at 13.3h on an
-          exact-output lane whose provider section declared no
-          [connect-timeout-s] (#36979). At least one of the two budgets must
-          be declared. *)
+      (** Neither a connect nor a body timeout is declared. Exact execution
+          promotes a lone connect timeout to the total body deadline; with
+          neither value there is no finite request window to freeze. *)
   | Caller_supplied_header_not_allowed of string
   | Unsupported_image_input
   | Unsupported_document_input
@@ -130,11 +126,10 @@ let%test "timeout validation preserves the invalid value" =
   | Ok () -> false
 ;;
 
-(* Each [validate_timeout] accepts [None] on its own because either budget
-   alone bounds the request: on the non-streaming path the connect deadline
-   is the effective ceiling for headers and body together, and the body
-   deadline is a total ceiling. Both absent is the one combination that
-   leaves the wire with no deadline at all. *)
+(* Each [validate_timeout] accepts [None] on its own because exact execution
+   promotes a lone connect deadline to its total body deadline. A declared
+   body deadline already covers headers and body. Both absent is the one
+   combination that leaves the wire with no finite request window. *)
 let validate_deadline_coverage
       ~connect_timeout_s
       ~body_timeout_s
@@ -143,6 +138,12 @@ let validate_deadline_coverage
   match connect_timeout_s, body_timeout_s with
   | None, None -> Error `Missing_deadline
   | _ -> Ok ()
+;;
+
+let effective_body_timeout_s ~connect_timeout_s ~body_timeout_s =
+  match body_timeout_s with
+  | Some _ -> body_timeout_s
+  | None -> connect_timeout_s
 ;;
 
 let%test "deadline coverage rejects only the both-absent case" =
@@ -487,6 +488,15 @@ let preflight
           ~body_timeout_s:request.body_timeout_s
         |> Result.map_error (fun `Missing_deadline -> Missing_deadline)
       in
+      let body_timeout_s =
+        effective_body_timeout_s
+          ~connect_timeout_s:config.connect_timeout_s
+          ~body_timeout_s:request.body_timeout_s
+      in
+      let prepared =
+        Prepared_completion_request.prepare ~config ~messages ?body_timeout_s ()
+      in
+      let request = Prepared_completion_request.request prepared in
       if not (contract_is_supported config capabilities)
     then
       Error

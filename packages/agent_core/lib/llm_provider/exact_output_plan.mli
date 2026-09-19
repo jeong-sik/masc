@@ -20,8 +20,8 @@ type output_admission_error =
   | Invalid_connect_timeout of float
   | Invalid_body_timeout of float
   | Missing_deadline
-      (** Neither a connect nor a body timeout is declared, so the wire runs
-          with no deadline at all. At least one budget must be declared. *)
+      (** Neither a connect nor a body timeout is declared. A lone connect
+          timeout is promoted to Exact's total body deadline. *)
   | Caller_supplied_header_not_allowed of string
   | Unsupported_image_input
   | Unsupported_document_input
@@ -53,11 +53,11 @@ type output_normalization_error =
   | Invalid_json of string
 
 (** Run every pure exact-output contract check and freeze the final generation
-    request before any provider-native token measurement can dispatch. The
-    accepted combination of connect and body deadlines is enforced here: each
-    budget alone passes, but when neither is declared preflight fails with
-    {!Missing_deadline} so the wire can never run without any deadline. The
-    header budget may be caller-supplied; see {!Caller_supplied_header_not_allowed}. *)
+    request before any provider-native token measurement can dispatch. A body
+    deadline is already total; when only a connect deadline is declared it is
+    also frozen as the total body deadline. When neither is declared preflight
+    fails with {!Missing_deadline}. The header budget may be caller-supplied;
+    see {!Caller_supplied_header_not_allowed}. *)
 (** Resolve credentials once and freeze them with the request. A delayed plan
     does not renew expiring credentials during execution, because that would
     invalidate its fingerprint. Callers must prepare a new plan when fresh
@@ -87,8 +87,8 @@ val serving_constraint : preflight -> Serving_constraint.t option
 (** The connect budget declared for the wire, if any. Preflight requires at
     least one of the two budgets; see {!preflight}. *)
 val preflight_connect_timeout_s : preflight -> float option
-(** The body budget declared for the wire, if any. Preflight requires at
-    least one of the two budgets; see {!preflight}. *)
+(** The total body budget frozen for the wire. This is the declared body
+    timeout, or the connect timeout when no body timeout was declared. *)
 val preflight_body_timeout_s : preflight -> float option
 val preflight_request_body_sha256 : preflight -> string
 val preflight_request_body_bytes : preflight -> int

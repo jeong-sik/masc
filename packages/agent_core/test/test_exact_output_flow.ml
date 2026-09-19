@@ -3667,6 +3667,62 @@ let test_stalled_server_refusal_body_does_not_advance () =
   | Ok _ | Error _ -> fail "stalled refusal did not remain a typed terminal failure"
 ;;
 
+let test_connect_only_budget_caps_success_body () =
+  let candidate_id = "connect-only-total-deadline" in
+  let successor_id = "connect-only-must-not-run" in
+  let ((result, elapsed, advances, evidence), posts) =
+    with_server
+      ~first_stalled_response:(`OK, {|{"name":"unfinished|})
+      ~response:(openai_response {|{"name":"must-not-run"}|})
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_catalog
+      [ catalog_entry
+          ~connect_timeout_s:(Some 0.05)
+          ~id:candidate_id
+          ~base_url
+          ~native:true
+          ~json:true
+          ()
+      ; catalog_entry
+          ~id:successor_id
+          ~base_url
+          ~native:true
+          ~json:true
+          ()
+      ]
+    @@ fun snapshot ->
+    let flow = start_flow (frozen_flow snapshot [ candidate_id; successor_id ]) in
+    let advances = ref 0 in
+    let started_at = Unix.gettimeofday () in
+    let result =
+      execute_with_accepting_test_validator
+        ~clock
+        ~net
+        ~on_measurement_terminal:(fun _ -> Ok ())
+        ~before_measurement_dispatch:(fun _ -> Ok ())
+        ~before_dispatch:(fun _ -> Ok ())
+        ~before_advance:(fun ~failed:_ ~next:_ ->
+          incr advances;
+          Ok ())
+        flow
+    in
+    result, Unix.gettimeofday () -. started_at, !advances, EO.flow_attempt_evidence flow
+  in
+  check int "connect-only request dispatched once" 1 posts;
+  check bool "connect-only body wait is finite" true (elapsed < 2.0);
+  check int "ambiguous body timeout does not advance" 0 advances;
+  check int "body timeout records one attempt" 1 (List.length evidence.attempts);
+  match result with
+  | Error (EO.Flow_exact_execution_failed failure) ->
+    check bool "body timeout has no complete response" true
+      (Option.is_none failure.cause.raw_response);
+    check bool "body timeout remains a transport completion failure" true
+      (failure.cause.cause = EO.Completion_failed);
+    check bool "response headers were received before the body timeout" true
+      (EO.receipt_phase failure.cause.receipt = EO.Response_received)
+  | Ok _ | Error _ -> fail "connect-only stalled body did not fail at its finite deadline"
+;;
+
 let test_generic_400_remains_terminal_without_advance () =
   let (result, advances, evidence), posts =
     with_server ~status:`Bad_request ~response:{|{"error":"generic request rejection"}|}
@@ -4441,6 +4497,10 @@ let () =
             "HTTP 503 with a stalled body does not advance"
             `Quick
             test_stalled_server_refusal_body_does_not_advance
+        ; test_case
+            "connect-only budget caps a successful response body"
+            `Quick
+            test_connect_only_budget_caps_success_body
         ; test_case
             "generic 400 remains terminal"
             `Quick

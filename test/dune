@@ -5019,8 +5019,8 @@
  (action
   (run python3 %{dep:test_tui_goal_confirmation_pty.py} %{dep:../bin/masc_tui.exe})))
 
-(rule
- (alias runtest)
+(alias
+ (name runtest)
  (deps (alias runtest-test_tui_goal_confirmation_pty)))
 
 (test

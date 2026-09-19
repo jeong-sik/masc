@@ -1117,9 +1117,13 @@ let build_graph_json ~events ~events_store_total ~limit ~timeline_limit
           let (count, agents_tbl, tasks_done) = buckets.(idx) in
           let new_tasks_done =
             tasks_done
-            + (if String.equal e.kind
-                 (Event_kind.Task.to_string Event_kind.Task.Done)
-               then 1 else 0)
+            + Event_kind.Task.(
+                match of_string e.kind with
+                | Some (Done | Approved) -> 1
+                | Some
+                    (Created | Claimed | Started | Released | Cancelled
+                    | Submit_for_verification | Rejected | Linked)
+                | None -> 0)
           in
           (match e.actor with
            | Some actor -> Hashtbl.replace agents_tbl actor.id true

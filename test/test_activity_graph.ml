@@ -571,6 +571,34 @@ let test_graph_json_reports_kind_counts_and_heatmap_totals () =
       check bool "heatmap rows expose 24 hours" true
         (List.for_all (fun row -> List.length (to_list row) = 24) matrix))
 
+let test_stats_history_counts_completed_tasks () =
+  let cases =
+    Event_kind.Task.
+      [ Done, 1; Approved, 1; Cancelled, 0; Submit_for_verification, 0; Rejected, 0 ]
+  in
+  List.iter
+    (fun (kind, expected) ->
+      with_config (fun config ->
+        let kind = Event_kind.Task.to_string kind in
+        ignore
+          (Activity_graph.emit config ~kind
+             ~actor:(Activity_graph.entity ~kind:"agent" "reviewer")
+             ~subject:(Activity_graph.entity ~kind:"task" "task-count")
+             ~payload:(`Assoc [ "task_id", `String "task-count" ]) ());
+        let json = Activity_graph.graph_json config () in
+        let open Yojson.Safe.Util in
+        check int (kind ^ " is in the stored event slice") 1
+          (json |> member "kind_counts" |> member kind |> to_int);
+        let completed =
+          json |> member "stats_history" |> to_list
+          |> List.fold_left
+               (fun total bucket -> total + (bucket |> member "tasks_done" |> to_int))
+               0
+        in
+        check int (kind ^ " completed task count") expected completed))
+    cases
+;;
+
 let test_agent_spans_json_honors_since_ms () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1378,6 +1406,8 @@ let () =
             test_graph_json_tracks_runtime_activity_kinds;
           test_case "graph summary exposes kind counts and full heatmap totals"
             `Quick test_graph_json_reports_kind_counts_and_heatmap_totals;
+          test_case "stats history counts completed tasks"
+            `Quick test_stats_history_counts_completed_tasks;
           test_case "agent spans honor since filter" `Quick
             test_agent_spans_json_honors_since_ms;
           test_case "task.approved completes graph and span" `Quick

@@ -532,7 +532,7 @@ let test_naming_a_session_does_not_open_one () =
 let describe_load = function
   | C.Checkpoint_loaded _ -> "loaded"
   | C.Checkpoint_absent -> "absent"
-  | C.Checkpoint_unread -> "unread"
+  | C.Checkpoint_unread _ -> "unread"
 ;;
 
 let test_a_missing_checkpoint_is_not_an_unreadable_one () =

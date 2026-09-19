@@ -1459,6 +1459,80 @@ type runtime_mode =
   | Runtime_lanes
   | Runtime_all
 
+(* What the failover picker adds the chosen runtime to. A conversation lane
+   and a standalone lane's walk order both take it at the end; a new lane
+   takes it as its first candidate, which is how the lane comes to exist. *)
+type runtime_lane_pick =
+  | Pick_conversation_lane of string
+  | Pick_exact_lane of string
+  | Pick_new_lane of string
+
+let runtime_lane_pick_name = function
+  | Pick_conversation_lane lane | Pick_exact_lane lane | Pick_new_lane lane -> lane
+;;
+
+(* The lane-editing keys on the Runtime lanes reading. [a] needs no row; the
+   rest act on the lane and candidate under the cursor. *)
+type runtime_lane_move =
+  | Move_down
+  | Move_up
+
+type runtime_lane_row_edit =
+  | Drop_candidate
+  | Move_candidate of runtime_lane_move
+  | Remove_lane
+
+type runtime_lane_edit =
+  | New_lane
+  | Row_edit of runtime_lane_row_edit
+
+let runtime_lane_edit_of_key = function
+  | "a" -> Some New_lane
+  | "x" -> Some (Row_edit Drop_candidate)
+  | "J" -> Some (Row_edit (Move_candidate Move_down))
+  | "K" -> Some (Row_edit (Move_candidate Move_up))
+  | "D" -> Some (Row_edit Remove_lane)
+  | _ -> None
+;;
+
+(* The list a lane write changes, and so the one it has to be read back
+   from: conversation lanes come from the Runtime surface, standalone lanes'
+   walk orders from the standalone lanes list. *)
+type runtime_lane_list =
+  | Runtime_surface_list
+  | Standalone_lanes_list
+
+(* Where the last lane write stands. A write sends the lane's whole order,
+   built from the list's last reading, so a second write sent before the
+   first is read back is built from the order the first replaced and undoes
+   it. *)
+type runtime_lane_write =
+  | Lane_write_idle
+  | Lane_write_posting
+  | Lane_write_rereading of runtime_lane_list * int
+      (* The list's load generation when the write answered. A load of that
+         list launched after it is the first to carry the write. *)
+
+(* What the lane editor says about its last key or write. Both the Runtime
+   and the Lanes view draw it. *)
+type runtime_lane_notice =
+  | Lane_write_refused of string
+      (* The server's sentence, or the editor's own for a key it did not
+         send. *)
+  | Lane_write_pending
+      (* A key that would write, pressed while the previous write is out. *)
+  | Lane_list_unread of string
+      (* The re-read after a write failed; the list on screen is the one
+         from before the write. *)
+
+let runtime_lane_notice_text = function
+  | Lane_write_refused detail -> "lane write refused: " ^ detail
+  | Lane_write_pending ->
+    "lane write refused: the previous lane change is still being written; \
+     press again once the list reloads"
+  | Lane_list_unread detail ->
+    "the lane list could not be re-read after the change and may be stale: " ^ detail
+
 (** Stable identity of the Runtime row opened for detail. The cursor is only a
     position and can move to another runtime after refresh; detail stays bound
     to the exact lane/runtime pair the operator opened. *)
@@ -2409,9 +2483,10 @@ let listing_chrome ~error = if Option.is_some error then 9 else 7
 let lanes_listing_chrome ~load_error ~action_error =
   listing_chrome ~error:load_error + if Option.is_some action_error then 2 else 0
 
-let runtime_listing_chrome ~error ~action_error ~picker_rows =
+let runtime_listing_chrome ~error ~action_error ~prompt ~picker_rows =
   listing_chrome ~error + 2
   + (if Option.is_some action_error then 2 else 0)
+  + (if prompt then 2 else 0)
   + (match picker_rows with None -> 0 | Some count -> 2 + max 1 count)
 
 (** Dashboard state *)
@@ -5087,6 +5162,8 @@ type state = {
   mutable goal_action_armed:
     (string * Goal_phase.Public_action.t) option;
   mutable goal_action_error: string option;
+  mutable goal_confirmation:
+    Masc_tui_planning_detail.confirmation_state;
   (* The schedule list and its cursor. The snapshot keeps the server's
      ok/unknown split so a failed store read never draws as "no schedules". *)
   mutable schedules: schedule_snapshot option;
@@ -5118,6 +5195,9 @@ type state = {
   mutable standalone_lanes: Tui_decode.standalone_lanes_snapshot option;
   mutable standalone_lanes_error: string option;
   mutable standalone_lanes_inflight: bool;
+  (* A re-read asked for while a load was out. That load may have left before
+     the change it has to show, so one more follows it. *)
+  mutable standalone_lanes_reread_pending: bool;
   mutable standalone_lanes_generation: int;
   (* The clients roster, off the ring under Runtime. Lanes is a top-level
      workspace. A
@@ -5191,9 +5271,21 @@ type state = {
   (* The lane a fallback is being added to, and where the picker sits in the
      runtime catalogue. Both are cleared when the picker closes: a cursor kept
      across visits opens the list part-way down for no reason the reader gave. *)
-  mutable runtime_lane_pick: string option;
+  mutable runtime_lane_pick: runtime_lane_pick option;
   mutable runtime_lane_pick_cursor: int;
-  mutable runtime_lane_error: string option;
+  mutable runtime_lane_notice: runtime_lane_notice option;
+  (* The name typed for a new lane, before its first candidate is picked. *)
+  mutable runtime_lane_name_draft: string option;
+  (* The lane a second [D] removes. Captured at the first press and dropped
+     by any other key, so the second press removes the lane the prompt
+     named. *)
+  mutable runtime_lane_remove_armed: string option;
+  (* Where the cursor goes once a lane write lands: the moved candidate's new
+     row, or the row left in place of a dropped candidate or a removed lane.
+     Held until the write settles, so a refused write leaves the cursor on the
+     row the operator pressed. *)
+  mutable runtime_lane_cursor_after_write: int option;
+  mutable runtime_lane_write: runtime_lane_write;
   mutable runtime_cursor: int;
   mutable runtime_surface_generation: int;
   mutable runtime_surface_inflight: int option;
@@ -5714,6 +5806,7 @@ type text_input_target =
   | Text_browser_url
   | Text_ask_answer
   | Text_preset_name
+  | Text_runtime_lane_name
   | Text_runtime_param
   | Text_voice_wizard
   | Text_palette
@@ -5744,6 +5837,8 @@ let text_input_target (state : state) ~compact_viewport =
     && state.config_pane = Config_presets
     && Option.is_some state.preset_save_draft
   then Some Text_preset_name
+  else if state.view = Runtime && Option.is_some state.runtime_lane_name_draft then
+    Some Text_runtime_lane_name
   else if Option.is_some state.runtime_param_edit then Some Text_runtime_param
   (* A wizard is only ever open on its own pane and closing it clears this, so
      its presence is the whole condition -- except that the pane is not drawn at
@@ -6760,6 +6855,7 @@ let create_state
   planning_sort = Planning_sort_phase_priority;
   goal_action_armed = None;
   goal_action_error = None;
+  goal_confirmation = Masc_tui_planning_detail.Inspecting Masc_tui_fetched.initial;
   schedules = None;
   schedules_error = None;
   schedules_read = Snapshot_read.idle;
@@ -6779,6 +6875,7 @@ let create_state
   standalone_lanes = None;
   standalone_lanes_error = None;
   standalone_lanes_inflight = false;
+  standalone_lanes_reread_pending = false;
   standalone_lanes_generation = 0;
   clients_surface = None;
   clients_surface_error = None;
@@ -6838,7 +6935,11 @@ let create_state
   runtime_detail_scroll = 0;
   runtime_lane_pick = None;
   runtime_lane_pick_cursor = 0;
-  runtime_lane_error = None;
+  runtime_lane_notice = None;
+  runtime_lane_name_draft = None;
+  runtime_lane_remove_armed = None;
+  runtime_lane_cursor_after_write = None;
+  runtime_lane_write = Lane_write_idle;
   runtime_cursor = 0;
   runtime_surface_generation = 0;
   runtime_surface_inflight = None;
@@ -7625,6 +7726,7 @@ let lanes_scrolled (state : state) =
            | None -> false
            | Some snapshot -> snapshot.sls_exact_run_projection_truncated)
       + (if Option.is_some state.lanes_action_error then 1 else 0)
+      + (if Option.is_some state.runtime_lane_notice then 1 else 0)
   ; sc_overflow_takes_row = true
   ; sc_preview_keep = None
   }
@@ -8020,41 +8122,52 @@ let prev_memory_category (current : memory_category_filter)
 
 type runtime_picker_projection = {
   rlp_lane : string;
+  rlp_pick : runtime_lane_pick;
   rlp_already : string list;
   rlp_providers : string list;
   rlp_choices : Tui_decode.runtime_option list;
 }
 
-(* The picker serves both lane kinds. A conversation lane names its runtime id
-   and reads its current order from the runtime surface's resolved lanes; an
-   exact-output lane arrives as "exact/<name>" and reads its walk order from
-   the standalone-lane observation, which carries the admitted slots. *)
-let lane_picker_existing_slots (state : state) (lane : string) =
-  let exact_prefix = "exact/" in
-  if String.length lane > String.length exact_prefix
-     && String.equal (String.sub lane 0 (String.length exact_prefix)) exact_prefix
-  then
-    let name = String.sub lane (String.length exact_prefix) (String.length lane - String.length exact_prefix) in
-    match state.standalone_lanes with
-    | None -> []
-    | Some snapshot ->
-        snapshot.Tui_decode.sls_lanes
-        |> List.find_opt (fun (row : Tui_decode.standalone_lane) ->
-             String.equal row.Tui_decode.sl_lane_id name)
-        |> Option.map (fun row -> row.Tui_decode.sl_admitted_slots)
-        |> Option.value ~default:[]
+(* A conversation lane's candidates as the runtime surface last resolved
+   them. *)
+let conversation_lane_candidates (state : state) lane =
+  match state.runtime_surface with
+  | None -> []
+  | Some snapshot ->
+      snapshot.Tui_decode.rss_resolved.rrs_lanes
+      |> List.find_opt (fun row -> String.equal row.Tui_decode.rrl_id lane)
+      |> Option.map (fun row -> row.Tui_decode.rrl_runtime_ids)
+      |> Option.value ~default:[]
+
+(* [order] with the candidates at [i] and [j] exchanged, or [None] when either
+   position is outside it: a move past either end of a lane is no move. *)
+let swap_candidates order i j =
+  let count = List.length order in
+  if i < 0 || j < 0 || i >= count || j >= count || i = j then None
   else
-    match state.runtime_surface with
-    | None -> []
-    | Some snapshot ->
-        snapshot.Tui_decode.rss_resolved.rrs_lanes
-        |> List.find_opt (fun row -> String.equal row.Tui_decode.rrl_id lane)
-        |> Option.map (fun row -> row.Tui_decode.rrl_runtime_ids)
-        |> Option.value ~default:[]
+    let at_i = List.nth order i and at_j = List.nth order j in
+    Some (List.mapi (fun k id -> if k = i then at_j else if k = j then at_i else id) order)
+
+(* The picker serves both lane kinds. A conversation lane reads its current
+   order from the runtime surface's resolved lanes; an exact-output lane reads
+   its walk order from the standalone-lane observation, which carries the
+   admitted slots. A lane being created has no candidates yet. *)
+let lane_picker_existing_slots (state : state) = function
+  | Pick_exact_lane name ->
+    (match state.standalone_lanes with
+     | None -> []
+     | Some snapshot ->
+         snapshot.Tui_decode.sls_lanes
+         |> List.find_opt (fun (row : Tui_decode.standalone_lane) ->
+              String.equal row.Tui_decode.sl_lane_id name)
+         |> Option.map (fun row -> row.Tui_decode.sl_admitted_slots)
+         |> Option.value ~default:[])
+  | Pick_conversation_lane lane -> conversation_lane_candidates state lane
+  | Pick_new_lane _ -> []
 
 let runtime_picker_projection (state : state) =
-  Option.map (fun lane ->
-    let already = lane_picker_existing_slots state lane in
+  Option.map (fun pick ->
+    let already = lane_picker_existing_slots state pick in
     let providers = already |> List.filter_map (fun id ->
       state.runtime_catalog
       |> List.find_opt (fun runtime -> String.equal runtime.Tui_decode.ro_id id)
@@ -8062,8 +8175,137 @@ let runtime_picker_projection (state : state) =
     let choices = runtimes_for_lane_picker ~lane_providers:providers ~already state.runtime_catalog
       |> List.filteri (fun i _ -> i >= state.runtime_lane_pick_cursor && i < state.runtime_lane_pick_cursor + 3)
     in
-    { rlp_lane = lane; rlp_already = already; rlp_providers = providers; rlp_choices = choices })
+    { rlp_lane = runtime_lane_pick_name pick; rlp_pick = pick; rlp_already = already;
+      rlp_providers = providers; rlp_choices = choices })
     state.runtime_lane_pick
+
+(* The one-line prompt the lane editor puts above the Runtime rows: the name
+   being typed for a new lane, or the lane a second [D] would remove. *)
+type runtime_lane_prompt =
+  | Lane_name_prompt of string
+  | Lane_remove_prompt of string
+
+let runtime_lane_prompt (state : state) =
+  match state.runtime_lane_name_draft, state.runtime_lane_remove_armed with
+  | Some draft, _ -> Some (Lane_name_prompt draft)
+  | None, Some lane -> Some (Lane_remove_prompt lane)
+  | None, None -> None
+
+let runtime_lane_write_busy (state : state) =
+  match state.runtime_lane_write with
+  | Lane_write_idle -> false
+  | Lane_write_posting | Lane_write_rereading _ -> true
+
+let runtime_lane_list_generation (state : state) = function
+  | Runtime_surface_list -> state.runtime_surface_generation
+  | Standalone_lanes_list -> state.standalone_lanes_generation
+
+let same_runtime_lane_list a b =
+  match a, b with
+  | Runtime_surface_list, Runtime_surface_list
+  | Standalone_lanes_list, Standalone_lanes_list -> true
+  | Runtime_surface_list, Standalone_lanes_list
+  | Standalone_lanes_list, Runtime_surface_list -> false
+
+(* A lane write answered. A refusal ends it here. A success keeps lane edits
+   waiting for a re-read of the list it changed that starts after this
+   point; the caller launches that re-read. *)
+let settle_runtime_lane_write (state : state) ~written = function
+  | Ok () ->
+    state.runtime_lane_notice <- None;
+    state.runtime_lane_write <-
+      Lane_write_rereading (written, runtime_lane_list_generation state written)
+  | Error detail ->
+    state.runtime_lane_notice <- Some (Lane_write_refused detail);
+    state.runtime_lane_write <- Lane_write_idle
+
+(* A load of [list] with [generation] landed. When it is the re-read a write
+   waits for, lane edits open again: with the "still being written" line
+   cleared if the list came back, or with a line saying it did not. *)
+let runtime_lane_list_reread (state : state) ~list ~generation result =
+  match state.runtime_lane_write with
+  | Lane_write_rereading (written, answered_at)
+    when same_runtime_lane_list written list && generation > answered_at ->
+    state.runtime_lane_write <- Lane_write_idle;
+    (match result, state.runtime_lane_notice with
+     | Error detail, _ -> state.runtime_lane_notice <- Some (Lane_list_unread detail)
+     | Ok (), Some Lane_write_pending -> state.runtime_lane_notice <- None
+     | Ok (), (Some (Lane_write_refused _ | Lane_list_unread _) | None) -> ())
+  | Lane_write_rereading _ | Lane_write_posting | Lane_write_idle -> ()
+
+type runtime_lane_write_request =
+  | Write_lane_order of string list
+  | Write_lane_removal
+
+(* What a lane-editing key does, decided from the state alone so the caller
+   only applies it. A refusal is drawn on the refusal row; nothing is dropped
+   without a word. *)
+type runtime_lane_edit_plan =
+  | Open_lane_name_field
+  | Arm_lane_removal of string
+  | Send_lane_write of
+      { lane : string
+      ; request : runtime_lane_write_request
+      ; cursor_after : int option
+          (* Where the cursor goes once the write lands: the moved candidate's
+             new row, or the row left in place of a dropped candidate or a
+             removed lane. *)
+      }
+  | Refuse_lane_edit of runtime_lane_notice
+
+let plan_runtime_lane_edit (state : state) = function
+  | New_lane -> Open_lane_name_field
+  | Row_edit row_edit ->
+    let row =
+      Option.bind state.runtime_surface (fun snapshot ->
+        List.nth_opt snapshot.Tui_decode.rss_candidates state.runtime_cursor)
+    in
+    (match row with
+     | None -> Refuse_lane_edit (Lane_write_refused "no lane row is under the cursor")
+     | Some row ->
+       let lane = row.Tui_decode.rcr_lane_id in
+       let position = row.Tui_decode.rcr_position in
+       let runtime_id = row.Tui_decode.rcr_runtime.Tui_decode.ro_id in
+       let order = conversation_lane_candidates state lane in
+       let write request ~cursor_after =
+         if runtime_lane_write_busy state
+         then Refuse_lane_edit Lane_write_pending
+         else Send_lane_write { lane; request; cursor_after }
+       in
+       (match row_edit with
+        | Drop_candidate ->
+          (* Dropping the lane's last row leaves the cursor on the row that
+             will be the lane's new last one, not on whatever follows it. *)
+          let cursor_after =
+            if position = row.Tui_decode.rcr_candidate_count && position > 1
+            then Some (state.runtime_cursor - 1)
+            else None
+          in
+          write
+            (Write_lane_order
+               (List.filter (fun id -> not (String.equal id runtime_id)) order))
+            ~cursor_after
+        | Move_candidate move ->
+          let by, edge =
+            match move with
+            | Move_down -> 1, "last"
+            | Move_up -> -1, "first"
+          in
+          (match swap_candidates order (position - 1) (position - 1 + by) with
+           | None ->
+             Refuse_lane_edit
+               (Lane_write_refused
+                  (Printf.sprintf "%s is already %s in %s" runtime_id edge lane))
+           | Some moved ->
+             write (Write_lane_order moved) ~cursor_after:(Some (state.runtime_cursor + by)))
+        | Remove_lane ->
+          (match state.runtime_lane_remove_armed with
+           | Some armed when String.equal armed lane ->
+             (* The lane's rows leave the list; the cursor goes to the row
+                just above them rather than past the end of a shorter list. *)
+             let first_row = state.runtime_cursor - (position - 1) in
+             write Write_lane_removal ~cursor_after:(Some (max 0 (first_row - 1)))
+           | Some _ | None -> Arm_lane_removal lane)))
 
 type runtime_pick_item =
   | Pick_lane of Tui_decode.runtime_resolved_lane
@@ -8083,7 +8325,8 @@ let runtime_pick_item_id = function
 
 let runtime_surface_listing_chrome state =
   runtime_listing_chrome ~error:state.runtime_surface_error
-    ~action_error:state.runtime_lane_error
+    ~action_error:state.runtime_lane_notice
+    ~prompt:(Option.is_some (runtime_lane_prompt state))
     ~picker_rows:(Option.map (fun picker -> List.length picker.rlp_choices)
       (runtime_picker_projection state))
 

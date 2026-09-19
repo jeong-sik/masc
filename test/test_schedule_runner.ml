@@ -147,7 +147,7 @@ let accepting_consumer
             (fun acceptance_commit ->
                Work_accepted { detail; acceptance_commit })
             (commit_acceptance detail))
-  ; defer_wake = (fun _config _request -> false)
+  ; defer_wake = (fun _config ~occurrence_id:_ _request -> false)
   }
 ;;
 
@@ -667,7 +667,7 @@ let test_tick_retries_same_occurrence_without_blocking_other_schedule () =
            else (
              incr healthy_calls;
              accept (`Assoc [ "healthy", `Bool true ])))
-    ; defer_wake = (fun _config _request -> false)
+    ; defer_wake = (fun _config ~occurrence_id:_ _request -> false)
     }
   in
   let first = tick_ok config ~now:201.0 ~consumer in
@@ -930,7 +930,7 @@ let test_tick_defers_held_wake_without_advancing () =
            Result.map
              (fun acceptance_commit -> Work_accepted { detail = `Assoc []; acceptance_commit })
              (commit_acceptance (`Assoc [])))
-    ; defer_wake = (fun _config _request -> true)
+    ; defer_wake = (fun _config ~occurrence_id:_ _request -> true)
     }
   in
   let result = tick_ok config ~now:201.0 ~consumer in

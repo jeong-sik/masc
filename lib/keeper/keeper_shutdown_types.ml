@@ -525,7 +525,18 @@ let dashboard_purge_artifact_plan ~keeper_name context =
   ; Keeper_turn_boundaries_artifact
     (* The Librarian's read position is a value in the coordinates of that log
        and of the history it describes. The two go together: a position left
-       behind would be read against another keeper's history. *)
+       behind would be read against another keeper's history.
+
+       It is not only a same-name successor that this protects. The position
+       holds how many lines of the log it counted, and a round takes a restart
+       line into account only when its line number is beyond that count (RFC
+       librarian-lifecycle 4.4 row 3c). Remove the log alone and numbering
+       starts at one again, so every restart line appended afterwards sits at a
+       number the position has already passed and no round ever sees it. The
+       same keeper then loses the atoms of its next replaced history, silently.
+       specs/bug-models/LibrarianRead-purge-split-buggy.cfg takes the two
+       apart and has to violate that spec's one invariant, so the harness
+       reports what the separation costs and this comment does not. *)
   ; Keeper_librarian_progress_artifact
     (* A Keeper can change sandbox profiles across lifetimes. Remove every
        backend-scoped root for the exact name so a same-name successor cannot

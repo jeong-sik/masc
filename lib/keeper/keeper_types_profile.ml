@@ -60,8 +60,12 @@ let tool_result_error
     body
 ;;
 
+(* [effect_disposition] is passed through as given. Left out, the failure
+   reads as [Effect_outcome_unknown] ([Tool_result.make_err]), so a caller
+   that knows whether its effect happened says so. *)
 let tool_result_error_data
       ?(tool_name = "")
+      ?effect_disposition
       ~class_
       data
   : tool_result
@@ -71,6 +75,7 @@ let tool_result_error_data
     ~class_
     ~start_time:(Time_compat.now ())
     ~data
+    ?effect_disposition
     (Yojson.Safe.to_string data)
 ;;
 

@@ -30,6 +30,10 @@ type confirmation = {
   verdict : Goal_verification.verdict;
 }
 
+type confirmation_state =
+  | Inspecting of (string, confirmation) Masc_tui_fetched.t
+  | Submitting of string * (string, confirmation) Masc_tui_fetched.t
+
 val decode_confirmation : goal_id:string -> Yojson.Safe.t -> (confirmation, string) result
 val confirmation_body : confirmation -> Yojson.Safe.t
 val same_confirmation_binding : confirmation -> confirmation -> bool

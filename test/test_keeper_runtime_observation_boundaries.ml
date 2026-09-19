@@ -80,7 +80,7 @@ let test_raw_agent_core_api_timeout_preserves_typed_observation () =
   | KPB.Provider_timeout { source = KPB.Agent_core_api; phase = None } -> ()
   | _ -> Alcotest.fail "expected typed phase-free AGENT_CORE API timeout observation"
 
-let check_registry_observation terminal ~core_error ~expected =
+let check_registry_observation terminal ~core_error ~expected ~expected_timeout_prefix =
   with_temp_dir "timeout-observation" @@ fun base_path ->
   let meta = make_meta "timeout-observation" in
   let raw_error = "synthetic observation" in
@@ -114,12 +114,12 @@ let check_registry_observation terminal ~core_error ~expected =
     Alcotest.(check bool) "registry retains the timeout source and phase"
       true (observed = expected);
     let expected_summary =
-      match expected with
-      | KPB.Provider_timeout _ ->
+      match expected_timeout_prefix with
+      | Some prefix ->
         Printf.sprintf
-          "Provider timeout (%s): %s; keeper can soft-fail and retry with provider cooldown."
-          code raw_error
-      | KPB.Not_provider_runtime_failure ->
+          "%s (%s): %s; keeper can soft-fail and retry with provider cooldown."
+          prefix code raw_error
+      | None ->
         Printf.sprintf
           "Provider runtime catch-all (%s): %s; inspect typed provider/auth/DNS/timeout/capacity cause."
           code raw_error
@@ -130,11 +130,12 @@ let check_registry_observation terminal ~core_error ~expected =
         expected_summary surface.summary
     | None -> Alcotest.fail "registry cause was missing from public status")
 
-let check_error_observation err expected () =
+let check_error_observation err expected expected_timeout_prefix () =
   Alcotest.(check bool) "raw error retains the timeout source and phase"
     true (KPB.classify_core_error err = expected);
   let terminal = Keeper_turn_terminal.of_failure ~raw_error:"synthetic observation" err in
   check_registry_observation terminal ~core_error:(Some err) ~expected
+    ~expected_timeout_prefix
 
 let timeout_observation_cases =
   let api phase =
@@ -147,24 +148,38 @@ let timeout_observation_cases =
          { provider = "fixture"; kind; timeout_phase; detail = "synthetic timeout" })
   in
   [ "API timeout without phase", api None,
-      KPB.Provider_timeout { source = KPB.Agent_core_api; phase = None }
+      KPB.Provider_timeout { source = KPB.Agent_core_api; phase = None },
+      Some "API timeout"
   ; "API timeout with phase", api (Some Llm_provider.Http_client.Non_streaming_body),
       KPB.Provider_timeout
-        { source = KPB.Agent_core_api; phase = Some KPB.Non_streaming_body }
+        { source = KPB.Agent_core_api; phase = Some KPB.Non_streaming_body },
+      Some "API timeout during non_streaming_body"
+  ; "API stream idle timeout",
+      api (Some (Llm_provider.Http_client.Stream_idle Llm_provider.Http_client.Streaming_thinking)),
+      KPB.Provider_timeout
+        { source = KPB.Agent_core_api; phase = Some (KPB.Stream_idle KPB.Streaming_thinking) },
+      Some "API timeout during stream_idle:streaming_thinking"
+  ; "API explicit unknown phase", api (Some Llm_provider.Http_client.Unknown_timeout),
+      KPB.Provider_timeout
+        { source = KPB.Agent_core_api; phase = Some KPB.Unknown_timeout },
+      Some "API timeout during unknown_timeout"
   ; "Provider timeout without phase", raw_provider_timeout_error ~phase:None,
-      KPB.Provider_timeout { source = KPB.Agent_core_provider; phase = None }
+      KPB.Provider_timeout { source = KPB.Agent_core_provider; phase = None },
+      Some "Provider timeout"
   ; "Provider timeout with phase",
       raw_provider_timeout_error ~phase:(Some Llm_provider.Http_client.First_token),
       KPB.Provider_timeout
-        { source = KPB.Agent_core_provider; phase = Some KPB.First_token }
+        { source = KPB.Agent_core_provider; phase = Some KPB.First_token },
+      Some "Provider timeout during first_token"
   ; "Provider network timeout with phase",
       network Llm_provider.Http_client.Timeout
         (Some Llm_provider.Http_client.Http_operation),
       KPB.Provider_timeout
-        { source = KPB.Agent_core_provider; phase = Some KPB.Http_operation }
+        { source = KPB.Agent_core_provider; phase = Some KPB.Http_operation },
+      Some "Provider timeout during http_operation"
   ; "Provider network error without timeout evidence",
       network Llm_provider.Http_client.Dns_failure None,
-      KPB.Not_provider_runtime_failure
+      KPB.Not_provider_runtime_failure, None
   ]
 
 let test_wire_only_api_timeout_does_not_invent_evidence () =
@@ -175,6 +190,18 @@ let test_wire_only_api_timeout_does_not_invent_evidence () =
   in
   check_registry_observation terminal ~core_error:None
     ~expected:KPB.Not_provider_runtime_failure
+    ~expected_timeout_prefix:None
+
+let test_wire_only_provider_timeout_keeps_its_known_phase () =
+  let terminal =
+    Keeper_turn_terminal.of_disposition
+      (Keeper_turn_disposition.Provider_error
+         (Keeper_turn_terminal_code.of_core_error_wire "provider_error_timeout:caller_budget"))
+  in
+  check_registry_observation terminal ~core_error:None
+    ~expected:
+      (KPB.Provider_timeout { source = KPB.Agent_core_provider; phase = Some KPB.Caller_budget })
+    ~expected_timeout_prefix:(Some "Provider timeout during caller_budget")
 
 let test_api_specific_bridge_preserves_timeout_phase () =
   let error =
@@ -190,6 +217,7 @@ let test_api_specific_bridge_preserves_timeout_phase () =
     ~core_error:(Some (Agent_core.Error.Api error))
     ~expected:
       (KPB.Provider_timeout { source = KPB.Agent_core_api; phase = Some KPB.Queue })
+    ~expected_timeout_prefix:(Some "API timeout during queue")
 
 let test_provider_network_timeout_without_phase_reaches_registry () =
   let error =
@@ -204,6 +232,7 @@ let test_provider_network_timeout_without_phase_reaches_registry () =
   let terminal = Keeper_turn_terminal.of_failure ~raw_error:"synthetic observation" error in
   check_registry_observation terminal ~core_error:(Some error)
     ~expected:(KPB.Provider_timeout { source = KPB.Agent_core_provider; phase = None })
+    ~expected_timeout_prefix:(Some "Provider timeout")
 
 let test_tls_handshake_internal_error_is_transient () =
   let err = tls_handshake_internal_error () in
@@ -400,13 +429,16 @@ let () =
   [
     ( "terminal to registry to status",
       List.map
-        (fun (name, error, expected) ->
-          Alcotest.test_case name `Quick (check_error_observation error expected))
+        (fun (name, error, expected, expected_timeout_prefix) ->
+          Alcotest.test_case name `Quick
+            (check_error_observation error expected expected_timeout_prefix))
         timeout_observation_cases
       @ [ Alcotest.test_case "wire-only API timeout retains missing evidence" `Quick
             test_wire_only_api_timeout_does_not_invent_evidence
         ; Alcotest.test_case "API-specific producer retains phase" `Quick
             test_api_specific_bridge_preserves_timeout_phase
+        ; Alcotest.test_case "wire-only Provider timeout keeps its known phase" `Quick
+            test_wire_only_provider_timeout_keeps_its_known_phase
         ; Alcotest.test_case "Provider network timeout without phase reaches registry" `Quick
             test_provider_network_timeout_without_phase_reaches_registry
         ] );

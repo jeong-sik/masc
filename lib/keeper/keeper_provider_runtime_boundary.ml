@@ -36,6 +36,35 @@ type timeout_phase =
   | Queue
   | Unknown_timeout
 
+let timeout_phase_label phase =
+  let module Http = Llm_provider.Http_client in
+  let label = Http.timeout_phase_to_label in
+  match phase with
+  | First_token -> label Http.First_token
+  | Http_operation -> label Http.Http_operation
+  | Non_streaming_body -> label Http.Non_streaming_body
+  | Stream_body -> label Http.Stream_body
+  | Stream_idle production ->
+    let production =
+      match production with
+      | Streaming_answer -> Http.Streaming_answer
+      | Streaming_thinking -> Http.Streaming_thinking
+      | Streaming_tool_call -> Http.Streaming_tool_call
+      | Streaming_heartbeat -> Http.Streaming_heartbeat
+      | Streaming_substrate -> Http.Streaming_substrate
+      | Streaming_done -> Http.Streaming_done
+      | Streaming_unknown -> Http.Streaming_unknown
+    in
+    label (Http.Stream_idle production)
+  | Provider_step -> label Http.Provider_step
+  | Cli_stdout_idle -> label Http.Cli_stdout_idle
+  | Caller_budget -> "caller_budget"
+  | Wall_clock -> label Http.Wall_clock
+  | Capacity_backpressure -> label Http.Capacity_backpressure
+  | Queue -> label Http.Queue
+  | Unknown_timeout -> label Http.Unknown_timeout
+;;
+
 let timeout_phase_of_label label =
   let normalize label =
     label

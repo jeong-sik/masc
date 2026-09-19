@@ -33,6 +33,10 @@ type timeout_phase =
           before the permit was granted; nothing was sent. *)
   | Unknown_timeout
 
+val timeout_phase_label : timeout_phase -> string
+(** Canonical phase label for public observations. Shared phases use the
+    HTTP client's formatter; [Caller_budget] belongs to the MASC vocabulary. *)
+
 type timeout_source = Keeper_turn_terminal_code.timeout_source =
   | Agent_core_api
   | Agent_core_provider

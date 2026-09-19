@@ -124,7 +124,9 @@ run_tlc_buggy() {
 
 # Run all keeper state machine specs
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperStateMachine.tla"
+run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperStateMachine.tla"
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperTurnCycle.tla"
+run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperTurnCycle.tla"
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperDecisionPipeline.tla"
 run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperDecisionPipeline.tla"
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperHeartbeat.tla"
@@ -172,18 +174,23 @@ run_tlc_buggy "$REPO_ROOT/specs/server-state" "ServerState.tla"
 
 # Cycle 24 — Multimodal artifact GADT well-formedness (Tier B8 catch-up).
 run_tlc "$REPO_ROOT/specs/multimodal" "MultimodalArtifact.tla"
+run_tlc_buggy "$REPO_ROOT/specs/multimodal" "MultimodalArtifact.tla"
 
 # Cycle 27 — Multimodal hydrator provenance DAG (Tier B9 catch-up).
 run_tlc "$REPO_ROOT/specs/multimodal" "MultimodalHydrator.tla"
+run_tlc_buggy "$REPO_ROOT/specs/multimodal" "MultimodalHydrator.tla"
 
 # Cycle 19 — Shared_audit Merkle chain integrity (Tier I6 catch-up).
 run_tlc "$REPO_ROOT/specs/shared" "SharedAudit.tla"
+run_tlc_buggy "$REPO_ROOT/specs/shared" "SharedAudit.tla"
 
 # Cycle 27 — Autonomous phase taxonomy + 19 transitions (Tier B5 catch-up).
 run_tlc "$REPO_ROOT/specs/autonomous" "AutonomousPhase.tla"
+run_tlc_buggy "$REPO_ROOT/specs/autonomous" "AutonomousPhase.tla"
 
 # Cycle 27 — Autonomous loop wirein non-invasive contract (Tier A5 catch-up).
 run_tlc "$REPO_ROOT/specs/autonomous" "AutonomousLoop.tla"
+run_tlc_buggy "$REPO_ROOT/specs/autonomous" "AutonomousLoop.tla"
 
 
 # RFC-0160 G6 — Shell IR carries decision invariant.
@@ -213,9 +220,19 @@ if [ -d "$BUG_MODELS_DIR" ]; then
     if [ -f "$BUG_MODELS_DIR/${base}.cfg" ]; then
       run_tlc "$BUG_MODELS_DIR" "$tla_name"
     fi
-    if [ -f "$BUG_MODELS_DIR/${base}-buggy.cfg" ]; then
-      run_tlc_buggy "$BUG_MODELS_DIR" "$tla_name"
-    fi
+    # Every buggy cfg of this spec, not only the one named <base>-buggy.cfg.
+    # A spec may state more than one way to be wrong, and the extra ones are
+    # named for what they break (KeeperWorktreeContainment-server-root-buggy).
+    # Matching only the default name skipped those without saying so, which
+    # left KeeperWorktreeContainment with no bug model running at all while
+    # the pair ratchet and the coverage gate both stayed green.
+    for bug_cfg_path in "$BUG_MODELS_DIR/${base}"-*buggy.cfg; do
+      [ -e "$bug_cfg_path" ] || continue
+      bug_cfg="$(basename "$bug_cfg_path")"
+      bug_label="${bug_cfg%.cfg}"
+      bug_label="${bug_label#"${base}"-}"
+      run_tlc_buggy "$BUG_MODELS_DIR" "$tla_name" "$bug_cfg" "$bug_label"
+    done
   done
 fi
 

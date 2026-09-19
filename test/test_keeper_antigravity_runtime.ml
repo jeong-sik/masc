@@ -976,98 +976,130 @@ let plain_user_message text : Agent_core.Types.message =
   }
 ;;
 
-(* The window reading is what a turn record carries and what /context reads.
-   Before this was wired, the official-client adapters measured the history
-   and threw the counts away, so every one of their turn records was written
-   with no window -- and /context answered "no turn has an exact provider-input
-   composition" for keepers that had been running all day. Nothing is cut
-   here, so the reading says the whole history went, which is the fact the
-   next turn starts from. *)
-let test_the_window_reports_the_whole_history () =
-  let observed = ref None in
-  let messages = List.init 40 (fun i -> plain_user_message (Printf.sprintf "m%02d" i)) in
-  let project =
-    Keeper_antigravity_runtime.For_testing.observed_history_projection
-      ~on_model_input_window_observation:(fun o -> observed := Some o)
+let capacity_projection ~declared_max_prompt_bytes ~system_prompt ~goal source =
+  Keeper_antigravity_runtime.For_testing.capacity_bounded_model_input_projection
+    ~declared_max_prompt_bytes
+    ~system_prompt
+    ~goal
+    source
+;;
+
+let test_undeclared_capacity_is_refused () =
+  match
+    capacity_projection
+      ~declared_max_prompt_bytes:None
+      ~system_prompt:"system"
+      ~goal:"goal"
       None
-  in
-  match project messages with
+  with
+  | Error
+      (Agent_core.Error.Config
+         (Agent_core.Error.InvalidConfig { field = "max_prompt_bytes"; _ })) ->
+    ()
   | Error error -> fail (Agent_core.Error.to_string error)
-  | Ok carried ->
-    check int "every message is handed over" (List.length messages) (List.length carried);
-    (match !observed with
-     | None -> fail "the projection reported no window"
-     | Some observation ->
-       check int "the reading counts the history it was offered" (List.length messages)
-         observation.Runtime_model_input_tail_window.total_atoms;
-       check int "and reports all of it as carried" (List.length messages)
-         observation.Runtime_model_input_tail_window.transmitted_atoms)
+  | Ok _ -> fail "Antigravity admitted history without max-prompt-bytes"
 ;;
 
-(* The reading counts atoms, not messages. An assistant message and the tool
-   results answering it are one atom, so a history of such exchanges has
-   fewer atoms than messages, and the front the window names by its opening
-   message has to be an atom index for the digest to be that atom's. With the
-   whole history carried the front is the oldest atom. *)
-let test_the_reading_counts_atoms_and_names_its_front () =
+let test_declared_capacity_windows_history_and_reports_the_cut () =
   let observed = ref None in
-  let message role text : Agent_core.Types.message =
-    { role; content = [ Text text ]; name = None; tool_call_id = None; metadata = [] }
+  let history =
+    List.init 10 (fun index ->
+      plain_user_message
+        (Printf.sprintf "history-%02d:%s" index (String.make 1024 'x')))
   in
-  let messages =
-    List.concat
-      (List.init 20 (fun i ->
-         [ message User (Printf.sprintf "ask %02d" i)
-         ; message Assistant (Printf.sprintf "call %02d" i)
-         ; { (message Tool (Printf.sprintf "result %02d" i)) with
-             Agent_core.Types.tool_call_id = Some (Printf.sprintf "call-%02d" i)
-           }
-         ]))
-  in
-  let atoms = 40 in
-  let project =
-    Keeper_antigravity_runtime.For_testing.observed_history_projection
-      ~on_model_input_window_observation:(fun o -> observed := Some o)
+  match
+    Keeper_antigravity_runtime.For_testing.capacity_bounded_model_input_projection
+      ~declared_max_prompt_bytes:(Some 8192)
+      ~system_prompt:"system"
+      ~goal:"goal"
+      ~on_model_input_window_observation:(fun reading -> observed := Some reading)
       None
-  in
-  match project messages with
+  with
   | Error error -> fail (Agent_core.Error.to_string error)
-  | Ok _ ->
-    (match !observed with
-     | None -> fail "the projection reported no window"
-     | Some observation ->
-       check int "the total is the atoms, not the 60 messages" atoms
-         observation.Runtime_model_input_tail_window.total_atoms;
-       check int "all of them carried" atoms
-         observation.Runtime_model_input_tail_window.transmitted_atoms;
-       check (option string) "the front is the oldest atom"
-         (Runtime_model_input_tail_window.atom_opening_digest messages 0)
-         (Some observation.Runtime_model_input_tail_window.front_atom_digest))
+  | Ok None -> fail "declared capacity produced no projection"
+  | Ok (Some project) ->
+    (match project history with
+     | Error error -> fail (Agent_core.Error.to_string error)
+     | Ok projected ->
+       let _labelled, projected_atoms =
+         Runtime_model_input_tail_window.annotate projected
+       in
+       let prompt_bytes =
+         Keeper_antigravity_runtime.For_testing.start_prompt_bytes
+           ~system_prompt:"system"
+           ~goal:"goal"
+           projected
+         |> Result.get_ok
+       in
+       check bool "rendered prompt is bounded" true (prompt_bytes <= 8192);
+       check bool "old history was dropped" true (List.length projected < 10);
+       check bool "a recent suffix remains" true (List.length projected > 0);
+       (match !observed with
+        | None -> fail "the projection reported no window"
+        | Some reading ->
+          check int "all source atoms are counted" 10 reading.total_atoms;
+          check int "reported count is what ships" projected_atoms
+            reading.transmitted_atoms;
+          check
+            (option string)
+            "the reported front is the first retained atom"
+            (Runtime_model_input_tail_window.atom_opening_digest
+               history
+               (10 - projected_atoms))
+            (Some reading.front_atom_digest)))
 ;;
 
-(* The one production source appends a bounded typed Gate replay reference
-   (keeper_agent_run.ml). It runs first and what it appends ships, so the
-   reading has to count the appended list rather than the one handed in. *)
-let test_an_appending_source_projection_is_counted () =
-  let observed = ref None in
-  let messages = List.init 10 (fun i -> plain_user_message (Printf.sprintf "m%02d" i)) in
-  let appended = plain_user_message "gate replay reference" in
-  let project =
-    Keeper_antigravity_runtime.For_testing.observed_history_projection
-      ~on_model_input_window_observation:(fun o -> observed := Some o)
-      (Some (fun ms -> Ok (ms @ [ appended ])))
+let test_appended_gate_reference_is_inside_the_window () =
+  let history =
+    List.init 10 (fun index ->
+      plain_user_message
+        (Printf.sprintf "history-%02d:%s" index (String.make 1024 'x')))
   in
-  match project messages with
+  let marker = plain_user_message "gate replay reference" in
+  let source = Some (fun messages -> Ok (messages @ [ marker ])) in
+  match
+    capacity_projection
+      ~declared_max_prompt_bytes:(Some 8192)
+      ~system_prompt:"system"
+      ~goal:"goal"
+      source
+  with
   | Error error -> fail (Agent_core.Error.to_string error)
-  | Ok carried ->
-    check int "the appended message ships" (List.length messages + 1) (List.length carried);
-    (match !observed with
-     | None -> fail "the projection reported no window"
-     | Some observation ->
-       check int "and is counted" (List.length messages + 1)
-         observation.Runtime_model_input_tail_window.total_atoms)
+  | Ok None -> fail "declared capacity produced no projection"
+  | Ok (Some project) ->
+    (match project history with
+     | Error error -> fail (Agent_core.Error.to_string error)
+     | Ok projected ->
+       (match List.rev projected with
+        | last :: _ ->
+          check
+            bool
+            "the appended newest material survives the cut"
+            true
+            (last.Agent_core.Types.content = marker.content)
+        | [] -> fail "the declared window removed the appended Gate reference"))
 ;;
 
+let test_fixed_sections_at_capacity_are_refused () =
+  let capacity =
+    Keeper_antigravity_runtime.For_testing.reserved_prompt_bytes
+      ~system_prompt:"system"
+      ~goal:"goal"
+  in
+  match
+    capacity_projection
+      ~declared_max_prompt_bytes:(Some capacity)
+      ~system_prompt:"system"
+      ~goal:"goal"
+      None
+  with
+  | Error
+      (Agent_core.Error.Config
+         (Agent_core.Error.InvalidConfig { field = "max_prompt_bytes"; _ })) ->
+    ()
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok _ -> fail "fixed sections filled the declared capacity"
+;;
 
 let () =
   run
@@ -1092,17 +1124,21 @@ let () =
         ] )
     ; ( "model input window"
         , [ test_case
-              "the window reports the whole history"
+              "an undeclared capacity is refused"
               `Quick
-              test_the_window_reports_the_whole_history
+              test_undeclared_capacity_is_refused
           ; test_case
-              "the reading counts atoms and names its front"
+              "declared capacity windows history and reports the cut"
               `Quick
-              test_the_reading_counts_atoms_and_names_its_front
+              test_declared_capacity_windows_history_and_reports_the_cut
           ; test_case
-              "an appending source projection is counted"
+              "the appended Gate reference stays inside the window"
               `Quick
-              test_an_appending_source_projection_is_counted
+              test_appended_gate_reference_is_inside_the_window
+          ; test_case
+              "fixed sections at capacity are refused"
+              `Quick
+              test_fixed_sections_at_capacity_are_refused
         ] )
     ]
 ;;

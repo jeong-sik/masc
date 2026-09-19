@@ -180,16 +180,6 @@ let rec record_microvm_boot container_name boot =
   then record_microvm_boot container_name boot
 ;;
 
-(* For a guest this call did not see its own boot succeed for: a record
-   already present is the booting call's, and is kept. *)
-let rec record_microvm_boot_if_absent container_name boot =
-  let current = Atomic.get microvm_boots in
-  if List.mem_assoc container_name current
-  then ()
-  else if not (Atomic.compare_and_set microvm_boots current ((container_name, boot) :: current))
-  then record_microvm_boot_if_absent container_name boot
-;;
-
 let rec forget_microvm_boot container_name =
   let current = Atomic.get microvm_boots in
   let updated = List.remove_assoc container_name current in
@@ -1354,6 +1344,11 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
           ?timeout_sec
           (Keeper_sandbox_microvm.delete_force_argv_for backend ~container_name)
       in
+      (* No guest runs under the name here, so a record still held for it
+         describes one that stopped or vanished without passing through
+         [stop_and_delete_microvm_container]. Dropped before the boot: only
+         this boot's own success writes the name's record again. *)
+      forget_microvm_boot container_name;
       let image_timeout =
         match timeout_sec with
         | Some sec -> sec
@@ -1566,13 +1561,15 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
                  container_name
              with
              | Ok Keeper_sandbox_runtime.Docker_container_running ->
-               (* The run that booted this guest is another start of this
-                  keeper, which records its own boot on success and whose
-                  record is kept here, or this one: a run that reported
-                  failure -- a timeout, say -- while the guest came up. Either
-                  way it was booted from this keeper's argv, and with no
-                  record it would be replaced on the next start. *)
-               record_microvm_boot_if_absent container_name booted;
+               (* No boot is recorded for this guest. [booted] is what this
+                  call asked for, and the run that booted the guest may be
+                  another one: an earlier start whose run timed out before
+                  its guest came up, from a TOML that has changed since, or
+                  a start in another server process. Nothing here tells those
+                  apart from this call's own run failing while its guest came
+                  up. The name's record was dropped before this boot, so the
+                  next start finds none and replaces the guest rather than
+                  adopting an image or size nobody can vouch for. *)
                (* The stable-name race adopted the snapshot claimed before
                   either launch. Both launch argv values therefore point at
                   the same immutable directory.

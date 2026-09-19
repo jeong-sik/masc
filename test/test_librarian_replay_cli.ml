@@ -66,13 +66,16 @@ let rec files_under dir =
     else [ path, Digest.to_hex (Digest.file path) ])
 ;;
 
-let test_workspace_checkpoint_is_replayed () =
+let test_workspace_checkpoint_is_replayed cluster_name () =
   Eio_main.run @@ fun env ->
   let base_path = Filename.temp_dir "librarian-replay-cli-" "" in
   Fun.protect
     ~finally:(fun () -> Fs_compat.remove_tree base_path)
     (fun () ->
       let config = Masc.Workspace.default_config base_path in
+      let config =
+        { config with backend_config = { config.backend_config with cluster_name } }
+      in
       let session_dir = Masc.Keeper_fs.keeper_session_dir config trace_id in
       let config_root =
         Filename.concat (Masc.Workspace.masc_root_dir config) "config"
@@ -97,7 +100,10 @@ let test_workspace_checkpoint_is_replayed () =
       List.iter (fun (extent, expected_ranges) ->
           let output =
             Eio.Process.parse_out
-              ~env:[| "MASC_CONFIG_DIR=" ^ config_root; "MASC_BASE_PATH=" ^ base_path |]
+              ~env:[| "MASC_CONFIG_DIR=" ^ config_root
+                    ; "MASC_BASE_PATH=" ^ base_path
+                    ; "MASC_CLUSTER_NAME=" ^ cluster_name
+                    |]
               (Eio.Stdenv.process_mgr env) Eio.Buf_read.take_all
               [ Sys.getenv "MASC_TEST_LIBRARIAN_REPLAY_EXE"
               ; "--base-path"; base_path; "--keeper"; keeper_id; "--extent"; extent
@@ -130,5 +136,10 @@ let test_workspace_checkpoint_is_replayed () =
 
 let () =
   run "librarian replay CLI"
-    [ "workspace", [ test_case "producer checkpoint, both extents, no writes" `Quick
-        test_workspace_checkpoint_is_replayed ] ]
+    [ "workspace",
+        [ test_case "default cluster: producer checkpoint, both extents, no writes" `Quick
+            (test_workspace_checkpoint_is_replayed "default")
+        ; test_case "named cluster: producer checkpoint, both extents, no writes" `Quick
+            (test_workspace_checkpoint_is_replayed "Replay/Cluster")
+        ]
+    ]

@@ -227,7 +227,7 @@ let replay ~extent ~trace_id ~lines ~messages =
   loop ~progress:None ~reached:0 []
 ;;
 
-let replay_keeper ~extent ~base_path ~keepers_dir keeper_id =
+let replay_keeper ~extent ~runtime_root ~keepers_dir keeper_id =
   match Keeper_turn_boundaries.read ~keepers_dir ~keeper_id with
   | Error detail -> Skipped ("boundary_log_unreadable:" ^ detail)
   | Ok [] -> Skipped "boundary_log_empty"
@@ -237,7 +237,7 @@ let replay_keeper ~extent ~base_path ~keepers_dir keeper_id =
      | Some trace_id ->
        let session_dir =
          Filename.concat
-           (Filename.concat (Config_dir_resolver.masc_root ~base_path) "traces")
+           (Filename.concat runtime_root "traces")
            trace_id
        in
        (match
@@ -360,6 +360,8 @@ let () =
     let keepers_dir =
       Config_dir_resolver.keepers_dir_for_base_path ~base_path
     in
+    (* Use the writer's cluster resolution without opening a storage backend. *)
+    let runtime_root = (Masc.Workspace.backend_config_for base_path).base_path in
     let keepers =
       match List.rev !wanted with
       | [] -> keepers_with_a_log keepers_dir
@@ -370,7 +372,7 @@ let () =
         (fun keeper ->
           outcome_to_json
             keeper
-            (replay_keeper ~extent:!extent ~base_path ~keepers_dir keeper))
+            (replay_keeper ~extent:!extent ~runtime_root ~keepers_dir keeper))
         keepers
     in
     print_endline

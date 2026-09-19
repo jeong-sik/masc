@@ -603,6 +603,13 @@ supports-response-format-json = true
 supports-structured-output = false
 
 [glm-coding.glm-5-3]
+# The deployment has carried these three since before this table existed, and
+# an empty binding does not mean "defaults" — it means whatever the runtime
+# falls back to. #37039 measured that shape on another lane: a runtime that
+# declares no capacity takes max_int and sends the whole history every turn.
+context-high-water-tokens = 100000
+context-low-water-tokens = 70000
+max-concurrent = 4
 
 # Kimi For Coding — second slot of the exact-output judgement lanes since the
 # 2026-08-28 swap (json_schema+strict probed live; quota independent of

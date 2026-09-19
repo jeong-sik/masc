@@ -305,6 +305,43 @@ let test_failure_reaches_journal ~cli_only ~cli_slot_ids ~answer ~failure ~calls
   | Ok (Some _) | Error _ -> fail "failure must leave the current snapshot absent"
 ;;
 
+let test_cli_prompt_drift_is_not_reported_as_no_cli_declaration () =
+  with_eio
+  @@ fun ~net ~clock ~base_path ->
+  Fixture.with_official_client_runtimes
+  @@ fun () ->
+  publish_unreachable_lane
+    ~cli_only:true
+    ~cli_slot_ids:[ Fixture.cli_primary_runtime ]
+    ~source:"librarian cli prompt drift"
+    ();
+  let calls = ref 0 in
+  let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+    incr calls;
+    Error "must not run"
+  in
+  match
+    Runtime.For_testing.execute_exact_output_classified
+      ~cli_runner:runner
+      ~clock
+      ~net
+      ~base_path
+      ~keeper_id:"librarian-cli-test"
+      ~selected_input:(input ())
+      ~messages:[]
+      ()
+  with
+  | Ok _ -> fail "a missing fitted prompt must not produce a selection"
+  | Error error ->
+    check int "prompt drift does not call the CLI runner" 0 !calls;
+    check bool
+      "prompt drift keeps its own terminal reason"
+      true
+      (Astring.String.is_infix
+         ~affix:"fallback skipped: fitted prompt is not one text message"
+         (Runtime.For_testing.classified_error_detail error))
+;;
+
 let () =
   run
     "keeper_librarian_cli_lane"
@@ -350,6 +387,10 @@ let () =
             (fun () -> test_failure_reaches_journal ~cli_only:true
               ~cli_slot_ids:[Fixture.cli_primary_runtime] ~answer:(Ok "{}")
               ~failure:(Some (invalid_domain_failure ())) ~calls:1 ())
+        ; test_case
+            "CLI prompt drift remains distinct from no CLI declaration"
+            `Quick
+            test_cli_prompt_drift_is_not_reported_as_no_cli_declaration
         ] )
     ]
 ;;

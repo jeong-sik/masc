@@ -12,14 +12,31 @@ let with_keeper ~paused ~install_owner f =
   Eio_main.run @@ fun env ->
   if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_path = Filename.temp_dir "keeper-clear-admission-" "" in
+  let runtime_before = Runtime.For_testing.snapshot () in
+  let startup_before = Runtime_startup_state.get () in
   Fun.protect
     ~finally:(fun () ->
+      Runtime.For_testing.restore runtime_before;
+      Runtime_startup_state.set startup_before;
       Keeper_registry.For_testing.clear ();
       Fs_compat.remove_tree base_path)
   @@ fun () ->
   Eio.Switch.run @@ fun sw ->
   let config = Workspace.default_config base_path in
   ignore (Workspace.init config ~agent_name:(Some "operator"));
+  let runtime_path = Filename.concat base_path "runtime.toml" in
+  Fs_compat.save_file runtime_path {|[runtime]
+default = "clear_fixture.model"
+[providers.clear_fixture]
+protocol = "claude-code"
+command = "/fixture-must-not-run-a-model"
+is-non-interactive = true
+[models.model]
+api-name = "clear-fixture"
+max-context = 4096
+[clear_fixture.model]
+|};
+  Runtime.init_default ~config_path:runtime_path |> require_ok;
   let meta =
     Masc_test_deps.meta_of_json_fixture
       (`Assoc [ "name", `String "clear-admission-fixture"

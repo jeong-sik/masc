@@ -1063,6 +1063,125 @@ let test_runtime_route_writer_rejects_unknown_default_without_write () =
    those names are runtime ids. Before this writer existed the picker had
    nowhere to post: the route parser admitted only "default" and
    "media_failover", so every pick came back "unknown runtime routing lane". *)
+(* A lane created under a name of its own takes a keeper assignment, and while
+   one names it the lane cannot be removed: the assignment would otherwise point
+   at nothing and the next load would fail. Once no keeper names it, removal
+   takes the table out of the file and the resolver forgets it. *)
+let test_a_created_lane_is_assigned_then_removed () =
+  with_runtime_file (fun path ->
+    let ok label = function
+      | Ok _ -> ()
+      | Error msg -> Alcotest.failf "%s: %s" label msg
+    in
+    Runtime.create_runtime_lane ~runtime_config_path:path ~lane_id:"coding"
+      ~runtime_ids:[ "openai.gpt"; "runpod_mtp.qwen" ] ()
+    |> ok "create";
+    (match Runtime.get_lane_by_id "coding" with
+     | None -> Alcotest.fail "the created lane does not resolve"
+     | Some lane ->
+       Alcotest.(check (list string)) "the created lane walks what it was given"
+         [ "openai.gpt"; "runpod_mtp.qwen" ] (Runtime_lane.ordered_candidates lane));
+    (match
+       Runtime.create_runtime_lane ~runtime_config_path:path ~lane_id:"coding"
+         ~runtime_ids:[ "openai.gpt" ] ()
+     with
+     | Ok _ -> Alcotest.fail "a second create replaced an existing lane"
+     | Error _ -> ());
+    Runtime.set_runtime_id_for_keeper ~runtime_config_path:path ~keeper_name:"routingtest"
+      ~runtime_id:"coding" ()
+    |> ok "assign the lane";
+    Alcotest.(check (option string)) "the keeper is assigned the lane"
+      (Some "coding") (Runtime.runtime_id_for_keeper "routingtest");
+    (match Runtime.remove_runtime_lane ~runtime_config_path:path ~lane_id:"coding" () with
+     | Ok _ -> Alcotest.fail "an assigned lane was removed"
+     | Error msg ->
+       Alcotest.(check bool) "the refusal names the keeper" true
+         (string_contains msg "routingtest"));
+    Runtime.set_runtime_id_for_keeper ~runtime_config_path:path ~keeper_name:"routingtest"
+      ~runtime_id:"openai.gpt" ()
+    |> ok "assign a runtime";
+    Runtime.remove_runtime_lane ~runtime_config_path:path ~lane_id:"coding" ()
+    |> ok "remove";
+    Alcotest.(check bool) "the table left the file" false
+      (string_contains (Fs_compat.load_file path) "[runtime.lanes.coding]");
+    Alcotest.(check bool) "the resolver forgot the lane" true
+      (Option.is_none (Runtime.get_lane_by_id "coding"));
+    match Runtime.remove_runtime_lane ~runtime_config_path:path ~lane_id:"coding" () with
+    | Ok _ -> Alcotest.fail "removing an undeclared lane reported success"
+    | Error _ -> ())
+;;
+
+let lane_write_ok label = function
+  | Ok _ -> ()
+  | Error msg -> Alcotest.failf "%s: %s" label msg
+;;
+
+(* A refused write names what refused it, and leaves the file as it was. *)
+let lane_write_refused label ~path ~names result =
+  let before = Fs_compat.load_file path in
+  (match result () with
+   | Ok _ -> Alcotest.failf "%s: the write went through" label
+   | Error msg ->
+     List.iter
+       (fun needle ->
+          if not (string_contains msg needle)
+          then Alcotest.failf "%s: %S does not name %S" label msg needle)
+       names);
+  Alcotest.(check string) (label ^ ": the file is unchanged") before
+    (Fs_compat.load_file path)
+;;
+
+(* Every keeper without an assignment walks [runtime].default, and a lane of
+   that id is read before the runtime. Removing it would move all of them onto
+   the bare runtime with nothing in the refusal to say so. *)
+let test_a_lane_the_default_walks_is_not_removed () =
+  with_runtime_file (fun path ->
+    Runtime.set_runtime_lane_candidates ~runtime_config_path:path
+      ~lane_id:"runpod_mtp.qwen" ~runtime_ids:[ "runpod_mtp.qwen"; "openai.gpt" ] ()
+    |> lane_write_ok "write the default's lane";
+    lane_write_refused "remove" ~path ~names:[ "[runtime].default" ] (fun () ->
+      Runtime.remove_runtime_lane ~runtime_config_path:path ~lane_id:"runpod_mtp.qwen" ()))
+;;
+
+(* A new lane under a runtime id would take over that runtime for every keeper
+   that names it. That runtime's own lane is what [set] writes. *)
+let test_a_new_lane_under_a_runtime_id_is_refused () =
+  with_runtime_file (fun path ->
+    lane_write_refused "create" ~path ~names:[ "is a runtime id" ] (fun () ->
+      Runtime.create_runtime_lane ~runtime_config_path:path ~lane_id:"openai.small"
+        ~runtime_ids:[ "openai.gpt" ] ());
+    Alcotest.(check bool) "no lane was declared" true
+      (Option.is_none (Runtime.get_lane_by_id "openai.small")))
+;;
+
+(* A lane written inline has no header for the line editor to remove. With no
+   final newline, comparing the edited text with the input used to call that a
+   removal, and the lane stayed. *)
+let test_an_inline_lane_is_not_reported_removed () =
+  with_runtime_file (fun path ->
+    write_file path
+      (String.trim runtime_config
+       ^ "\n\n[runtime.lanes]\ncoding = { candidates = [\"openai.gpt\"] }");
+    lane_write_refused "remove" ~path ~names:[ "not written as its own" ] (fun () ->
+      Runtime.remove_runtime_lane ~runtime_config_path:path ~lane_id:"coding" ()))
+;;
+
+(* Judgement admits a verifier_exact slot as a direct runtime
+   ([Runtime.verifier_exact_slot_admission]) and dispatches that id alone. A
+   slot naming a lane that is no runtime used to load and then fail at every
+   judgement; the load refuses it now. *)
+let test_a_verifier_slot_naming_a_lane_is_refused () =
+  with_runtime_file (fun path ->
+    Runtime.create_runtime_lane ~runtime_config_path:path ~lane_id:"judge"
+      ~runtime_ids:[ "openai.gpt" ] ()
+    |> lane_write_ok "create the lane";
+    lane_write_refused "name the lane in a verifier slot" ~path
+      ~names:[ {|[runtime.exact_output_lanes.verifier_exact].slots entry "judge"|} ]
+      (fun () ->
+         Runtime.set_exact_output_lane_slots ~runtime_config_path:path
+           ~lane_name:"verifier_exact" ~slots:[ "judge" ] ()))
+;;
+
 let test_lane_candidates_create_the_lane_table () =
   with_runtime_file (fun path ->
     (match
@@ -1118,12 +1237,9 @@ let test_lane_candidates_replace_rather_than_append () =
     match Runtime.resolve_assignment "openai.gpt" with
     | `Missing | `Unavailable _ -> Alcotest.fail "the lane disappeared"
     | `Lane lane ->
-      (* [with_terminal_default] appends the default, so a single declared
-         candidate resolves to two. That is the point of the terminal: a lane
-         is never shorter than "this runtime, then the default". *)
       Alcotest.(check (list string))
         "the second write replaced the first"
-        [ "openai.gpt"; "runpod_mtp.qwen" ]
+        [ "openai.gpt" ]
         (Runtime_lane.ordered_candidates lane))
 ;;
 
@@ -2606,9 +2722,8 @@ nu = "coding"
   ^ lane_fixture_bindings
 ;;
 
-(* Two ladders start at the same runtime under names of their own. [careful]
-   already ends at [runtime].default, [fast] does not — so only [fast] has the
-   terminal default appended. *)
+(* Two ladders start at the same runtime under names of their own and keep
+   their own tails. *)
 let runtime_config_two_lanes_one_head =
   {|
 [runtime]
@@ -2684,8 +2799,8 @@ let test_an_assignment_names_a_lane_of_its_own_name () =
       (Some "coding")
       (List.assoc_opt "nu" assignments);
     Alcotest.(check (list string))
-      "the lane walks its own candidates and ends at [runtime].default"
-      [ "openai.gpt"; "openai.small"; "runpod_mtp.qwen" ]
+      "the lane walks exactly its own candidates"
+      [ "openai.gpt"; "openai.small" ]
       (candidates_of lanes "coding")
     (* The dispatch-reachability projection this test also consulted was the
        local request-cap validation's; #36828 removed both when body size
@@ -2700,7 +2815,7 @@ let test_two_lanes_may_start_at_the_same_runtime () =
   | Ok (_runtimes, _default, _assignments, _media_failover, lanes) ->
     Alcotest.(check (list string))
       "[fast] keeps its own tail"
-      [ "openai.gpt"; "openai.small"; "runpod_mtp.qwen" ]
+      [ "openai.gpt"; "openai.small" ]
       (candidates_of lanes "fast");
     Alcotest.(check (list string))
       "[careful] keeps a different tail from the same head"
@@ -2728,7 +2843,7 @@ let test_a_lane_named_after_its_head_still_wins () =
   | Ok (_runtimes, _default, _assignments, _media_failover, lanes) ->
     Alcotest.(check (list string))
       "the lane is taken over the same-named runtime"
-      [ "openai.gpt"; "openai.small"; "runpod_mtp.qwen" ]
+      [ "openai.gpt"; "openai.small" ]
       (candidates_of lanes "openai.gpt")
 ;;
 
@@ -2943,6 +3058,26 @@ let () =
             "a picked lane gets its own table"
             `Quick
             test_lane_candidates_create_the_lane_table
+        ; Alcotest.test_case
+            "a created lane is assigned, then removed once no keeper names it"
+            `Quick
+            test_a_created_lane_is_assigned_then_removed
+        ; Alcotest.test_case
+            "a lane the default walks is not removed"
+            `Quick
+            test_a_lane_the_default_walks_is_not_removed
+        ; Alcotest.test_case
+            "a new lane under a runtime id is refused"
+            `Quick
+            test_a_new_lane_under_a_runtime_id_is_refused
+        ; Alcotest.test_case
+            "an inline lane is not reported removed"
+            `Quick
+            test_an_inline_lane_is_not_reported_removed
+        ; Alcotest.test_case
+            "a verifier slot naming a lane is refused"
+            `Quick
+            test_a_verifier_slot_naming_a_lane_is_refused
         ; Alcotest.test_case
             "a second write replaces the ladder"
             `Quick

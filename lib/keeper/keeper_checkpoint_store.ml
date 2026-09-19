@@ -403,11 +403,9 @@ let publish_summary_after_write ~canonical_path checkpoint =
 
 let load_agent_core ~(session_dir : string) ~(session_id : string) :
     (Agent_core.Checkpoint.t, checkpoint_load_error) result =
-  (* RFC-0089 G4: typed ENOENT classification at the OS boundary.
-     [Fs_compat.file_exists] answers cold-start absence as a [bool] before
-     any read, so a missing checkpoint is never inferred from a stringified
-     error detail and [classify_core_error] keeps no [Not_found] arm.
-
+  (* Absence comes from [read_checkpoint_bytes]'s typed owned-file read, not
+     [file_exists], whose boolean also covers stat failures. An unreadable
+     existing checkpoint must not become a fresh Keeper history.
      One read path for Eio and non-Eio contexts: [read_checkpoint_bytes]
      reads on a system thread when the fs capability is installed, and the
      decode is routed off the calling fiber (#25077). The previous
@@ -421,8 +419,7 @@ let load_agent_core ~(session_dir : string) ~(session_id : string) :
     Error (Store_error "session_id is not a real path segment")
   else
   let path = agent_core_checkpoint_path ~session_dir ~session_id in
-  if Fs_compat.file_exists path then
-    let identity_before = canonical_identity_opt path in
+  let identity_before = canonical_identity_opt path in
     try
       match read_checkpoint_bytes ~session_dir path with
       | Error e -> Error e
@@ -435,7 +432,6 @@ let load_agent_core ~(session_dir : string) ~(session_id : string) :
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn -> Error (Io_error (Printexc.to_string exn))
-  else Error Not_found
 
 (** Message count of the canonical checkpoint. Answered from the canonical
     summary while the file on disk is the one the summary was taken from;

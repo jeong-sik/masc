@@ -296,36 +296,6 @@ type slot_projection =
         (** The projection refused the request outright -- a capability or
             serialization refusal. *)
 
-type lane_projection =
-  { usable : string list
-        (** Slot ids whose request projected, in ladder order. *)
-  ; unusable : (string * string) list
-        (** Slot id and refusal reason for each structurally unusable slot. *)
-  }
-
-(* Pure over one projection per slot in ladder order. A slot whose request
-   cannot be projected at all is structurally unusable and is excluded rather
-   than fatal. Until 2026-09-11 one such slot failed the whole pre-flight and
-   took down every slot the run would actually have used -- the appended
-   openrouter.openrouter-deepseek-v4-flash refused projection on every
-   librarian run of the evening while the first two slots were healthy. A
-   ladder with no projectable slot left is a misconfiguration; naming that
-   is the caller's job. *)
-let lane_projection_decision (projections : (string * slot_projection) list)
-  : lane_projection
-  =
-  List.fold_left
-    (fun (lane : lane_projection) (slot_id, projection) ->
-      match projection with
-      | Slot_admitted -> { lane with usable = slot_id :: lane.usable }
-      | Slot_unusable reason ->
-        { lane with unusable = (slot_id, reason) :: lane.unusable })
-    { usable = []; unusable = [] }
-    projections
-  |> fun lane ->
-  { usable = List.rev lane.usable; unusable = List.rev lane.unusable }
-;;
-
 let slot_reason_pairs ?(sep = "; ") (unusable : (string * string) list) : string =
   String.concat sep
     (List.map (fun (slot_id, reason) -> slot_id ^ ": " ^ reason) unusable)
@@ -343,32 +313,41 @@ let project_slot ~(slot : Runtime_exact_output_registry.selected_slot) ~messages
   | Ok (_ : Exact_output.request_body_projection) -> Slot_admitted
 ;;
 
-let project_lane ~selected_slots ~messages : lane_projection =
-  lane_projection_decision
-    (List.map
-       (fun (slot : Runtime_exact_output_registry.selected_slot) ->
-         (slot.slot_id, project_slot ~slot ~messages))
-       selected_slots)
-;;
+type preflight_selection =
+  { selected_slots : Runtime_exact_output_registry.selected_slot list
+  ; unusable : (string * string) list
+  }
 
-(* The pre-flight over the ladder: which slots this run is without, or the
-   error naming every refusal when no slot projects. An empty ladder reports
-   nothing -- the production caller routes an empty slot list to the cli lane
-   before it gets here. *)
+(* The pre-flight over the ladder: the exact slots this run can use and the
+   slots it is without, or the error naming every refusal when no slot
+   projects. An empty ladder reports nothing -- the production caller routes
+   an empty slot list to the cli lane before it gets here. *)
 let preflight_slots ~selected_slots ~messages =
   match selected_slots with
-  | [] -> Ok []
+  | [] -> Ok { selected_slots = []; unusable = [] }
   | (first : Runtime_exact_output_registry.selected_slot) :: _ ->
-    let lane = project_lane ~selected_slots ~messages in
-    (match lane.usable with
+    let selected_slots, unusable =
+      List.fold_left
+        (fun (selected_slots, unusable)
+             (slot : Runtime_exact_output_registry.selected_slot) ->
+           match project_slot ~slot ~messages with
+           | Slot_admitted -> slot :: selected_slots, unusable
+           | Slot_unusable reason ->
+             selected_slots, (slot.slot_id, reason) :: unusable)
+        ([], [])
+        selected_slots
+      |> fun (selected_slots, unusable) ->
+      List.rev selected_slots, List.rev unusable
+    in
+    (match selected_slots with
      | [] ->
        Error
          (Exact_setup_failed
             (Exact_request_projection_failed
                { slot_id = first.slot_id
-               ; reason = slot_reason_pairs lane.unusable
+               ; reason = slot_reason_pairs unusable
                }))
-     | _ :: _ -> Ok lane.unusable)
+     | _ :: _ -> Ok { selected_slots; unusable })
 ;;
 
 let resolve_librarian_slots ~base_path ~keeper_id =
@@ -533,13 +512,25 @@ let execute_exact_output_classified
      | Some (runtime_id, selection, output) -> Ok ((selection, output), runtime_id)
      | None -> Error Cli_slots_exhausted)
   | _ :: _ ->
-  let* lane_unusable = preflight_slots ~selected_slots ~messages in
-  (if lane_unusable <> [] then
+  match preflight_slots ~selected_slots ~messages with
+  | Error error ->
+    (* No API slot can project this request. The independently admitted CLI
+       slots still own a chance to answer, just as after API exhaustion. *)
+    (match try_cli_slots ~keeper_id ~base_path ~cli_runner ~cli_slots
+       ~selected_input ~messages with
+     | Some (runtime_id, selection, output) ->
+       Log.Keeper.warn ~keeper_name:keeper_id
+         "librarian lane=%s every API slot refused projection; answered by cli slot=%s: %s"
+         exact_lane_id runtime_id (extraction_error_to_string error);
+       Ok ((selection, output), runtime_id)
+     | None -> Error error)
+  | Ok preflight ->
+  (if preflight.unusable <> [] then
      Log.Keeper.warn ~keeper_name:keeper_id
        "librarian lane=%s pre-flight excluded slot(s) from this run: %s"
        exact_lane_id
-       (slot_reason_pairs ~sep:", " lane_unusable));
-  let* attempt = prepare_attempt ~selected_slots messages in
+       (slot_reason_pairs ~sep:", " preflight.unusable));
+  let* attempt = prepare_attempt ~selected_slots:preflight.selected_slots messages in
   let validate flow_success =
     let output = Exact_output.flow_success_output flow_success in
     match
@@ -1043,6 +1034,7 @@ module For_testing = struct
   type classified_error = extraction_error
 
   let classified_error_detail = extraction_error_to_string
+  let classified_error_kind = extraction_error_kind
   let execute_exact_output_classified = execute_exact_output_classified
   let record_failure = record_failure
 end

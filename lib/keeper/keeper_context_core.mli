@@ -129,7 +129,7 @@ val context_of_agent_core_checkpoint :
 type checkpoint_load =
   | Checkpoint_loaded of working_context
   | Checkpoint_absent  (** No checkpoint is saved for the trace. *)
-  | Checkpoint_unread
+  | Checkpoint_unread of Keeper_checkpoint_store.checkpoint_load_error
       (** The load failed for any other reason: a superseded version, a parse,
           store, I/O or agent-core error. The saved history was not seen and
           may still hold what it held. *)
@@ -141,9 +141,9 @@ val load_context_from_checkpoint_classified :
   base_dir:string ->
   session_context * checkpoint_load
 
-(** {!load_context_from_checkpoint_classified} for a caller that only needs a
-    context to start from: [None] for [Checkpoint_absent] and for
-    [Checkpoint_unread] alike. *)
+(** Optional projection for callers acting only on a loaded context. [None]
+    covers absence and a diagnosed failure; it cannot authorize a fresh turn.
+    Turn execution uses {!load_context_from_checkpoint_classified}. *)
 val load_context_from_checkpoint :
   trace_id:string ->
   base_dir:string ->

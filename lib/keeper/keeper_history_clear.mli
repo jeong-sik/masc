@@ -20,9 +20,7 @@ type outcome =
                 not undo or fail the clear, as a turn's line does not fail the
                 turn. The keeper's next turn loads the emptied history and
                 writes the same line when it starts; until then nothing in
-                the store explains why the history started over. A store that
-                ends mid-line refuses every append until it is repaired, so
-                neither that turn nor clearing again helps there (RFC §6). *)
+                the store explains why the history started over. *)
       }
       (** The emptied checkpoint is the canonical one on disk. *)
   | Superseded of

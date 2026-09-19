@@ -213,6 +213,26 @@ let test_incremental_campaign_merges_existing_context () = with_store @@ fun kee
   let third = append second 21 in
   check int "two incremental passes retain all twenty-two arrivals" 22 (List.length third.sources)
 
+let test_unrelated_prior_contexts_need_no_empty_source_output () = with_store @@ fun keepers_dir ->
+  let keeper_id = "one-new-two-prior" in
+  let a = source "event:a" "first pending task" in
+  let b = source "event:b" "second pending task" in
+  let previous = ok (Context.commit ~keepers_dir ~keeper_id ~expected_version:None
+    ~sources:[a; b]
+    [pocket [a.reference] "First task" []; pocket [b.reference] "Second task" []]) in
+  let selected = ok (Context.select (input [question] (Some previous))
+    (Context.pockets_to_json [pocket ["s1"] "New question" ["Answer"]])) in
+  let next = ok (Context.commit ~keepers_dir ~keeper_id
+    ~expected_version:(Some (Context.version previous))
+    ~observed_sources:[a; b; question] ~sources:[question] selected) in
+  check int "the host retains two prior contexts beside the new one" 3 (List.length next.pockets);
+  List.iter (fun (prior : Context.pocket) ->
+    check bool "omitting an unrelated prior context keeps its identity and content" true
+      (List.exists (fun (p : Context.pocket) ->
+        p.id = prior.id && p.sources = prior.sources && p.context = prior.context) next.pockets)) previous.pockets;
+  check bool "the same complete snapshot survives reading it back" true
+    (ok (Context.read ~keepers_dir ~keeper_id) = Some next)
+
 let test_invalid_merge_targets () =
   let a = source "event:a" "campaign" in
   let prior : Context.snapshot = {generation = "test"; revision = 1; execution_basis = None;
@@ -288,6 +308,7 @@ let test_new_basis_cannot_launder_untouched_advice () = with_store @@ fun keeper
 
 let () = run "Librarian working contexts"
   ["scenarios", [
+    test_case "one new source preserves two unrelated prior contexts" `Quick test_unrelated_prior_contexts_need_no_empty_source_output;
     test_case "new execution basis cannot launder untouched advice" `Quick test_new_basis_cannot_launder_untouched_advice;
     test_case "incremental campaign retains one context" `Quick test_incremental_campaign_merges_existing_context;
     test_case "unknown and reused merge targets rejected" `Quick test_invalid_merge_targets;

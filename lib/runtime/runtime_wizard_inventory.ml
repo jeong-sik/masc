@@ -280,7 +280,9 @@ let provider_model_rows (provider_id : string) : (Yojson.Safe.t, string) result 
                      ~wire:(Some provider.kind)
                      ~allow_bare_fallback:false
                      ~provider_label:provider.id
-                     ~model_id:entry.id_prefix
+                     ~model_id:
+                       (Llm_provider.Model_identifiers.Id_prefix.to_string
+                          entry.id_prefix)
                  with
                  | None -> None
                  | Some capabilities ->
@@ -307,10 +309,17 @@ let provider_model_rows (provider_id : string) : (Yojson.Safe.t, string) result 
                    in
                    Some
                      (`Assoc
-                        [ ("id", `String entry.id_prefix)
-                        ; ("label", `String (match entry.base_label with
-                                               Some label -> label
-                                             | None -> entry.id_prefix))
+                        [ ( "id"
+                          , `String
+                              (Llm_provider.Model_identifiers.Id_prefix.to_string
+                                 entry.id_prefix) )
+                        ; ( "label"
+                          , `String
+                              (match entry.base_label with
+                               Some label -> label
+                               | None ->
+                                 Llm_provider.Model_identifiers.Id_prefix.to_string
+                                   entry.id_prefix) )
                         ; ("max_context", `Int context)
                         ; ( "accepted_reasoning_efforts"
                           , (match entry.accepted_reasoning_efforts with

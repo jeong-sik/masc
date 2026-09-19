@@ -142,7 +142,7 @@ let normalize_identity value = String.lowercase_ascii (String.trim value)
 let model_identity_key (entry : Model_catalog.model_entry) =
   normalize_identity (Option.value entry.provider_name ~default:"")
   ^ "\x00"
-  ^ normalize_identity entry.id_prefix
+  ^ normalize_identity (Model_identifiers.Id_prefix.to_string entry.id_prefix)
 ;;
 
 let model_identities_unique entries =
@@ -163,7 +163,8 @@ let validate_overlay_model_identities ~base ~overlay =
       (fun values (entry : Model_catalog.model_entry) ->
          String_map.add
            (model_identity_key entry)
-           (entry.provider_name, entry.id_prefix)
+           ( entry.provider_name
+           , Model_identifiers.Id_prefix.to_string entry.id_prefix )
            values)
       String_map.empty
       base
@@ -173,7 +174,10 @@ let validate_overlay_model_identities ~base ~overlay =
        match String_map.find_opt (model_identity_key entry) base_models with
        | None -> true
        | Some (provider_name, id_prefix) ->
-         provider_name = entry.provider_name && String.equal id_prefix entry.id_prefix)
+         provider_name = entry.provider_name
+         && String.equal
+              id_prefix
+              (Model_identifiers.Id_prefix.to_string entry.id_prefix))
     overlay
 ;;
 
@@ -189,7 +193,9 @@ let resolve_exact ~catalog ~model_entries ~provider_ref ~model_id =
        List.find_opt
          (fun (entry : Model_catalog.model_entry) ->
             entry.provider_name = Some provider.id
-            && String.equal entry.id_prefix model_id)
+            && String.equal
+                 (Model_identifiers.Id_prefix.to_string entry.id_prefix)
+                 model_id)
          model_entries
      with
      | None -> Error Model_missing
@@ -298,7 +304,8 @@ let merge_exact_model_entry
 ;;
 
 let model_row_key (entry : Model_catalog.model_entry) =
-  Option.map normalize_identity entry.provider_name, normalize_identity entry.id_prefix
+  Option.map normalize_identity entry.provider_name,
+  normalize_identity (Model_identifiers.Id_prefix.to_string entry.id_prefix)
 ;;
 
 let merge_exact_model_entries

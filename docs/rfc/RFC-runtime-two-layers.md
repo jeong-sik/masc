@@ -191,9 +191,21 @@ goo-yang-bong = "librarian_exact"
 
 ## Hard cut
 
-호환 reader·converter·migration 코드를 만들지 않는다. 옛 모양의 `runtime.toml` 은 로드 시 거절하고, 무엇이 달라졌는지와 새 모양을 출력한다.
+호환 reader·converter·migration 코드를 만들지 않는다. 옛 모양의 `runtime.toml` 은 로드 시 거절한다.
 
-`config/runtime.toml` 씨앗과 설치 마법사(`install-runtime-setup.py`, `runtime_setup_spec.ml`)를 새 모양으로 다시 쓴다.
+**지금은 거절이 없다.** `[models.X]` 와 `[models.X.capabilities]` 를 읽는 함수는 아는 키만 골라 읽고 표를 한 번도 훑지 않는다(`runtime_toml.ml` 의 `parse_model`, `parse_model_capabilities`). 오타든 지운 키든 모르는 키는 오류 없이 사라진다. 구현 PR 은 새 모양에 남는 표마다 모르는 키를 오류로 돌려준다. 바인딩은 이미 그렇게 한다(`unknown_binding_keys`).
+
+거절은 키마다 한 줄이다. 한 줄에는 경로(`models.X.<key>`)와 그 줄에 걸리는 **지금 규칙**을 적는다.
+
+| 걸린 줄 | 출력 |
+|---|---|
+| 카탈로그에 행이 있는 모델의 능력 키 | 이 모델은 카탈로그 행 `<provider>@<model>` 이 있고, 능력은 카탈로그가 말한다. 줄을 지운다. 지우면 쓰일 카탈로그 값을 같이 적는다 — 파일 값과 다르면 운영자가 여기서 알아챈다 |
+| 받는 키 목록에 없는 키 | 이 표가 받는 키 목록 |
+| 이 모양에 없는 표 | 새 모양의 뼈대(바인딩 한 개 예시) |
+
+옛 키 → 새 자리 대응표는 코드에 두지 않는다. 대응표를 가진 로더는 옛 모양을 계속 알아야 하고, 그건 자동으로 옮겨 주지 않을 뿐인 converter 다. 한 번만 필요한 대응표는 구현 PR 본문에 적는다.
+
+손으로 옮길 파일은 적다. 위 실측의 `[models]` 43블록과 능력 표 27블록(125키)은 전부 저장소의 `config/runtime.toml` 에 있다. 이 파일과 설치 마법사(`install-runtime-setup.py`, `runtime_setup_spec.ml`)는 구현 PR 이 새 모양으로 다시 쓴다. 마법사가 만든 항목은 지우고 마법사를 다시 돌린다. 남는 것은 운영자가 손으로 고친 배포 파일뿐이다.
 
 ## 하지 않는 것
 

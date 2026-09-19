@@ -955,9 +955,14 @@ supports_reasoning = true
 # (2026-08-15, closes #28749); confirmed by a live probe of this row on
 # 2026-08-04: message keys ['role','content','reasoning'].
 reasoning_streaming_format = "delta:reasoning"
-# Kimi K2 docs: reasoning content must be replayed (hard-required on tool turns,
-# recommended on all turns). Without this, the base replay policy is no_replay.
-reasoning_replay = "preserve_always"
+# Kimi K2 docs ask for reasoning content to be replayed: required on tool
+# turns, recommended on all turns. That is Moonshot's own API rule. This row
+# rides Ollama's /v1 wire, where the boundary is the one the deepseek-v4-flash
+# row above states: the active tool-call sequence, not every prior turn. This
+# value keeps the reasoning of the latest user turn's tool calls, so the model
+# still sees what it just called inside a turn (#31424), and drops the
+# thinking of completed turns. The kimi-k3 row on this provider does the same.
+reasoning_replay = "latest_user_turn_tool_calls"
 supports_response_format_json = true
 supports_multimodal_inputs = true
 supports_image_input = true

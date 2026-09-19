@@ -522,6 +522,21 @@ SpecLive ==
     /\ WF_vars(RoundSnap)
     /\ SF_vars(RoundApply)
 
+\* The same question asked of an offline purge, which is the second open
+\* decision in the RFC. With MaxBad = 0 no line is ever unreadable, so the stop
+\* above cannot happen and a violation here belongs to the purge alone.
+SpecPurgeTrimLive ==
+    /\ Init
+    /\ [][NextPurgeTrim]_vars
+    /\ WF_vars(RoundSnap)
+    /\ SF_vars(RoundApply)
+
+SpecPurgeTrimAtEndLive ==
+    /\ Init
+    /\ [][NextPurgeTrimAtEnd]_vars
+    /\ WF_vars(RoundSnap)
+    /\ SF_vars(RoundApply)
+
 \* There is no bug to plant here. SpecLive is the reader as it stands and it
 \* already violates the property, so the cfg that runs it is named for what it
 \* shows. When the stall is closed the cfg stops violating and the harness says

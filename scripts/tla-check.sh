@@ -248,5 +248,9 @@ fi
 # once. That gate reports the wrong reason for a variable; masc#37048.
 run_tlc_cfg "$REPO_ROOT/specs/bug-models" "LibrarianRead.tla" \
   "LibrarianRead-purge-trim-at-end.cfg" "purge-trim-at-end"
+run_tlc_cfg "$REPO_ROOT/specs/bug-models" "LibrarianRead.tla" \
+  "LibrarianRead-live-without-bad-lines.cfg" "live-without-bad-lines"
+run_tlc_cfg "$REPO_ROOT/specs/bug-models" "LibrarianRead.tla" \
+  "LibrarianRead-purge-trim-at-end-live.cfg" "purge-trim-at-end-live"
 
 echo "All TLA+ checks passed."

@@ -95,8 +95,10 @@ Claim(t, a) ==
     /\ Held(a) = {}
     /\ holder' = [holder EXCEPT ![t] = a]
     /\ claimed_by' = [claimed_by EXCEPT ![t] = @ \cup {a}]
+    \* Taking a returned Task ends the returned state: somebody holds it again.
+    /\ returned' = [returned EXCEPT ![t] = FALSE]
     /\ UNCHANGED <<created_by, outcome, pending, judgeable, producer, sub, verdict,
-                   verdict_for, cancelled_by, stalled, returned>>
+                   verdict_for, cancelled_by, stalled>>
 
 \* The holder gives the Task back. An operator releasing a Task for an agent
 \* that no longer exists has the same effect and is not modelled apart.
@@ -202,8 +204,9 @@ ApplyRejected(t) ==
     /\ verdict' = [verdict EXCEPT ![t] = "none"]
     /\ verdict_for' = [verdict_for EXCEPT ![t] = 0]
     /\ stalled' = [stalled EXCEPT ![t] = FALSE]
+    /\ returned' = [returned EXCEPT ![t] = TRUE]
     /\ UNCHANGED <<created_by, outcome, holder, judgeable, producer, sub,
-                   cancelled_by, returned, claimed_by>>
+                   cancelled_by, claimed_by>>
 
 \* ------------------------------------------------------------- cancellation
 
@@ -351,6 +354,20 @@ BugSupersededVerdictCompletes(t) ==
     /\ UNCHANGED <<created_by, holder, judgeable, producer, sub, verdict,
                    verdict_for, cancelled_by, returned, claimed_by>>
 
+\* A claim that takes a returned Task but leaves the returned mark standing.
+\* The Task is then held and returned at once, which is the state the operator
+\* list is built to exclude.
+BugClaimKeepsReturned(t, a) ==
+    /\ outcome[t] = "Open"
+    /\ holder[t] = NoOne
+    /\ ~pending[t]
+    /\ returned[t]
+    /\ Held(a) = {}
+    /\ holder' = [holder EXCEPT ![t] = a]
+    /\ claimed_by' = [claimed_by EXCEPT ![t] = @ \cup {a}]
+    /\ UNCHANGED <<created_by, outcome, pending, judgeable, producer, sub, verdict,
+                   verdict_for, cancelled_by, stalled, returned>>
+
 SpecClean == Init /\ [][NextClean]_vars
 SpecBugVerdictReturns ==
     Init /\ [][NextClean \/ \E t \in Tasks : BugVerdictReturnsTaskToProducer(t)]_vars
@@ -373,6 +390,9 @@ SpecBugDoneWithoutVerdict ==
                               BugDoneWithoutVerdict(t, a)]_vars
 SpecBugSupersededVerdict ==
     Init /\ [][NextClean \/ \E t \in Tasks : BugSupersededVerdictCompletes(t)]_vars
+SpecBugClaimKeepsReturned ==
+    Init /\ [][NextClean \/ \E t \in Tasks, a \in Agents :
+                              BugClaimKeepsReturned(t, a)]_vars
 
 \* ================================================================ properties
 

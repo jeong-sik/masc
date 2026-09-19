@@ -11811,6 +11811,7 @@ def runtime_resolved_runtime(
         "effective_max_context": 200_000,
         "max_context_source": "capability",
         "max_output_tokens": 8192,
+        "reasoning_effort": None,
         "is_local": False,
         # This binding flag is independent of the fleet's top-level default.
         "is_default": False,

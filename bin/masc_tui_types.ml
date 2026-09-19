@@ -8081,6 +8081,34 @@ let runtime_pick_item_id = function
   | Pick_lane lane -> lane.Tui_decode.rrl_id
   | Pick_model model -> model.Tui_decode.ro_id
 
+(* Target and route column widths for the runtime picker. Bindings of one
+   model that differ only in reasoning effort share provider, model and
+   context; their ids ([claude_code.claude-sonnet-5-low], [-high]) are the
+   text that tells them apart, and at a fixed 24 cells every one of them was
+   cut to the same [claude_code.claude-sonn…]. The target column therefore
+   takes the longest id, and the route column, which repeats provider and
+   model, gives up that room. Neither goes below the 24 cells both had. *)
+let runtime_pick_min_column_cells = 24
+
+let runtime_pick_column_widths ~cols items =
+  let longest_id =
+    List.fold_left
+      (fun longest item ->
+        max longest
+          (Masc_tui_message_layout.display_width
+             (Tui_decode.sanitize_terminal_text (runtime_pick_item_id item))))
+      0 items
+  in
+  let shared =
+    runtime_pick_min_column_cells
+    + max runtime_pick_min_column_cells (cols - 62)
+  in
+  let target =
+    max runtime_pick_min_column_cells
+      (min longest_id (shared - runtime_pick_min_column_cells))
+  in
+  target, shared - target
+
 let runtime_surface_listing_chrome state =
   runtime_listing_chrome ~error:state.runtime_surface_error
     ~action_error:state.runtime_lane_error

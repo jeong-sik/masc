@@ -2361,6 +2361,7 @@ type runtime_option = {
   ro_effective_max_context : int;
   ro_max_context_source : runtime_context_source;
   ro_max_output_tokens : int option;
+  ro_reasoning_effort : Llm_provider.Reasoning_effort.t option;
   ro_is_local : bool;
   ro_is_default : bool;
   ro_quota_exhausted : bool;
@@ -4228,6 +4229,8 @@ let runtime_context_source_label = function
   | Runtime_context_capability -> "capability"
   | Runtime_context_clamped -> "override_clamped_by_capability"
 
+let runtime_reasoning_effort_label = Llm_provider.Reasoning_effort.to_string
+
 let decode_runtime_context_source = function
   | "override" -> Ok Runtime_context_override
   | "capability" -> Ok Runtime_context_capability
@@ -4247,6 +4250,15 @@ let decode_runtime_option ~default_id json =
   let* context_source = required_string_field json "max_context_source" in
   let* ro_max_context_source = decode_runtime_context_source context_source in
   let* ro_max_output_tokens = required_nullable_int_field json "max_output_tokens" in
+  let* ro_reasoning_effort =
+    let* effort = required_nullable_string_field json "reasoning_effort" in
+    match effort with
+    | None -> Ok None
+    | Some value ->
+      (match Llm_provider.Reasoning_effort.of_string value with
+       | Some effort -> Ok (Some effort)
+       | None -> Error (Printf.sprintf "unknown runtime reasoning_effort %S" value))
+  in
   let* ro_is_local = required_bool_field json "is_local" in
   let* () =
     if ro_effective_max_context <= 0
@@ -4276,6 +4288,7 @@ let decode_runtime_option ~default_id json =
     ; ro_effective_max_context
     ; ro_max_context_source
     ; ro_max_output_tokens
+    ; ro_reasoning_effort
     ; ro_is_local
     ; ro_is_default
     ; ro_quota_exhausted
@@ -4380,6 +4393,9 @@ let decode_runtime_resolved_snapshot json =
                 && Int.equal default.ro_effective_max_context listed.ro_effective_max_context
                 && default.ro_max_context_source = listed.ro_max_context_source
                 && Option.equal Int.equal default.ro_max_output_tokens listed.ro_max_output_tokens
+                && Option.equal
+                     (fun a b -> Llm_provider.Reasoning_effort.compare a b = 0)
+                     default.ro_reasoning_effort listed.ro_reasoning_effort
                 && Bool.equal default.ro_is_local listed.ro_is_local -> Ok ()
          | Some _ ->
              Error "default_runtime disagrees with its resolved runtime row")

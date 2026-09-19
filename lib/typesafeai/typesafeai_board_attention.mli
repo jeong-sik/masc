@@ -4,9 +4,9 @@
 
 type judged =
   { verdict : Keeper_board_attention_judgment.t
-  ; model : string
-      (** The model the System One response says answered, which is not
-          necessarily the one the request named. *)
+  ; provenance : Keeper_board_attention_candidate.system_one_provenance
+      (** The configured destination, exact request-body digest, and the model
+          the System One response says answered. *)
   }
 
 val judge_candidate :

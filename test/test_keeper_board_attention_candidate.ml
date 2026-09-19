@@ -231,6 +231,12 @@ let test_status_view_preserves_resumability_and_quarantine () =
 
 let invalid_judgment_fixtures () =
   let valid = judgment J.Not_relevant in
+  let vendor_provenance : A.system_one_provenance =
+    { destination_uri = "https://api.typesafe.ai/v1/systemone"
+    ; answering_model_id = "jev-latest"
+    ; request_body_sha256 = String.make 64 'a'
+    }
+  in
   [ ( "blank verdict rationale"
     , { valid with
         verdict = { valid.verdict with rationale = " \t" }
@@ -263,8 +269,27 @@ let invalid_judgment_fixtures () =
             ; request_body_sha256 = "\r\n"
             }
       } )
-  ; ( "blank vendor model"
-    , { valid with source = A.Vendor_system_one { model = "\t" } } )
+  ; ( "blank vendor destination"
+    , { valid with
+        source =
+          A.Vendor_system_one { vendor_provenance with destination_uri = "\t" }
+      } )
+  ; ( "blank vendor answering model"
+    , { valid with
+        source =
+          A.Vendor_system_one
+            { vendor_provenance with answering_model_id = "\t" }
+      } )
+  ; ( "blank vendor request digest"
+    , { valid with
+        source =
+          A.Vendor_system_one
+            { vendor_provenance with request_body_sha256 = "\t" }
+      } )
+  ; ( "vendor answering model differs from slot_id"
+    , { valid with
+        source = A.Vendor_system_one vendor_provenance
+      } )
   ; "NaN judged_at", { valid with judged_at = Float.nan }
   ; "+Infinity judged_at", { valid with judged_at = Float.infinity }
   ; "-Infinity judged_at", { valid with judged_at = Float.neg_infinity }
@@ -616,14 +641,20 @@ let test_cli_lane_slot_judgment_round_trips_without_a_receipt () =
    | Ok _ -> Alcotest.fail "a cli source carrying a receipt key was accepted")
 ;;
 
-(* A vendor judgment names the model that answered. The decoder keeps that
-   model and refuses a source without one, and refuses a receipt key, which
-   would say an AGENT_CORE attempt happened when none did. *)
-let test_vendor_judgment_round_trips_with_its_model () =
+(* A vendor judgment names the exact outbound request and the response that
+   answered it. The decoder keeps those coordinates and refuses an incomplete
+   source or an AGENT_CORE receipt key. *)
+let test_vendor_judgment_round_trips_with_its_provenance () =
+  let expected_digest = String.make 64 'a' in
   let judgment : A.judgment =
     { verdict = { J.decision = J.Not_relevant; rationale = "answered by a vendor" }
     ; slot_id = "jev-latest"
-    ; source = A.Vendor_system_one { model = "jev-latest" }
+    ; source =
+        A.Vendor_system_one
+          { destination_uri = "https://api.typesafe.ai/v1/systemone"
+          ; answering_model_id = "jev-latest"
+          ; request_body_sha256 = expected_digest
+          }
     ; judged_at = 4.0
     }
   in
@@ -631,11 +662,19 @@ let test_vendor_judgment_round_trips_with_its_model () =
    | Error detail -> Alcotest.failf "vendor judgment did not round-trip: %s" detail
    | Ok decoded ->
      (match decoded.source with
-      | A.Vendor_system_one { model } ->
+      | A.Vendor_system_one provenance ->
+        Alcotest.(check string)
+          "the destination survives the round trip"
+          "https://api.typesafe.ai/v1/systemone"
+          provenance.destination_uri;
         Alcotest.(check string)
           "the answering model survives the round trip"
           "jev-latest"
-          model
+          provenance.answering_model_id;
+        Alcotest.(check string)
+          "the exact request digest survives the round trip"
+          expected_digest
+          provenance.request_body_sha256
       | A.Cli_lane_slot -> Alcotest.fail "a vendor judgment decoded as a cli slot"
       | A.Exact_attempt _ ->
         Alcotest.fail "a vendor judgment decoded as an exact attempt"));
@@ -658,10 +697,12 @@ let test_vendor_judgment_round_trips_with_its_model () =
     [ ( "a vendor source carrying a receipt key"
       , `Assoc
           [ "kind", `String "vendor_system_one"
+          ; "endpoint", `String "https://api.typesafe.ai/v1/systemone"
           ; "model", `String "jev-latest"
+          ; "request_body_sha256", `String expected_digest
           ; "call_id", `String "call-invented"
           ] )
-    ; ( "a vendor source without a model"
+    ; ( "an incomplete vendor source"
       , `Assoc [ "kind", `String "vendor_system_one" ] )
     ]
 ;;
@@ -1260,9 +1301,9 @@ let () =
             `Quick
             test_cli_lane_slot_judgment_round_trips_without_a_receipt
         ; Alcotest.test_case
-            "a vendor judgment round trips with its model"
+            "a vendor judgment round trips with its provenance"
             `Quick
-            test_vendor_judgment_round_trips_with_its_model
+            test_vendor_judgment_round_trips_with_its_provenance
         ; Alcotest.test_case
             "non-finite lifecycle times are rejected"
             `Quick

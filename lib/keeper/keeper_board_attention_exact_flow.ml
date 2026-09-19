@@ -463,12 +463,12 @@ type jev_first =
       (** Jev is on, but the candidate is not [Pending], so there is no
           material to send. *)
   | Jev_relevant of
-      { model : string
+      { provenance : Keeper_board_attention_candidate.system_one_provenance
       ; verdict : Keeper_board_attention_judgment.t
       ; judged_at : float
       }
   | Jev_not_relevant of
-      { model : string
+      { provenance : Keeper_board_attention_candidate.system_one_provenance
       ; rationale : string
       }
   | Jev_failed of { reason : string }
@@ -501,16 +501,17 @@ let ask_jev ~clock prepared =
                  ()
              with
              | Error reason -> Jev_failed { reason }
-             | Ok { Typesafeai_board_attention.verdict; model } ->
+             | Ok { Typesafeai_board_attention.verdict; provenance } ->
                (match verdict.Keeper_board_attention_judgment.decision with
                 | Keeper_board_attention_judgment.Relevant ->
                   (* The lane's clock, never the wall: both entries into this
                      flow hold one, so a judgment's time comes from the same
                      source the rest of the turn is measured against. *)
-                  Jev_relevant { model; verdict; judged_at = Eio.Time.now clock }
+                  Jev_relevant
+                    { provenance; verdict; judged_at = Eio.Time.now clock }
                 | Keeper_board_attention_judgment.Not_relevant ->
                   Jev_not_relevant
-                    { model
+                    { provenance
                     ; rationale = verdict.Keeper_board_attention_judgment.rationale
                     })))))
 ;;
@@ -533,11 +534,19 @@ let jev_answer_label = function
    worker may still ask a CLI slot after that, which this entry does not see. *)
 let jev_first_to_yojson jev_first result =
   let answer = "answer", `String (jev_answer_label jev_first) in
+  let with_provenance provenance fields =
+    `Assoc
+      (fields
+       @ [ ( "provenance"
+           , Keeper_board_attention_candidate.system_one_provenance_to_yojson
+               provenance ) ])
+  in
   match jev_first with
   | Jev_off | Jev_cli_only | Jev_not_pending -> `Assoc [ answer ]
-  | Jev_relevant { model; _ } -> `Assoc [ answer; "model", `String model ]
+  | Jev_relevant { provenance; _ } ->
+    with_provenance provenance [ answer ]
   | Jev_failed { reason } -> `Assoc [ answer; "reason", `String reason ]
-  | Jev_not_relevant { model; rationale } ->
+  | Jev_not_relevant { provenance; rationale } ->
     let rejudged =
       match result with
       | Ok (judgment : Keeper_board_attention_candidate.judgment) ->
@@ -546,9 +555,9 @@ let jev_first_to_yojson jev_first result =
              judgment.Keeper_board_attention_candidate.verdict.Keeper_board_attention_judgment.decision)
       | Error _ -> `Null
     in
-    `Assoc
+    with_provenance
+      provenance
       [ answer
-      ; "model", `String model
       ; "rationale", `String rationale
       ; "rejudged", rejudged
       ]
@@ -675,11 +684,12 @@ let execute_current ?cli_runner ~clock ~before_dispatch ~before_advance prepared
            | Error _ -> Error (Exact_execution_failed []))
         | Http_flow attempt ->
           (match jev_first with
-           | Jev_relevant { model; verdict; judged_at } ->
+           | Jev_relevant { provenance; verdict; judged_at } ->
              Ok
                { Keeper_board_attention_candidate.verdict
-               ; slot_id = model
-               ; source = Keeper_board_attention_candidate.Vendor_system_one { model }
+               ; slot_id = provenance.answering_model_id
+               ; source =
+                   Keeper_board_attention_candidate.Vendor_system_one provenance
                ; judged_at
                }
            | Jev_off | Jev_cli_only | Jev_not_pending | Jev_not_relevant _ | Jev_failed _ ->

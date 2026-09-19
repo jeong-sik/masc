@@ -62,8 +62,21 @@ media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
 # Calibrated probabilistic decisions for the board_attention_exact lane only.
 # A non-blank TYPESAFEAI_API_KEY turns it on. MASC_TYPESAFEAI_ENABLED=false
 # turns it off even with a key; the variable cannot turn it on without one.
-# When enabled, MASC sends the candidate id, Board signal, full post, comments,
-# and keeper context to the configured TypeSafe AI endpoint.
+# When enabled, MASC POSTs the TYPESAFEAI_API_KEY as an Authorization bearer
+# credential to the configured TypeSafe AI endpoint. The JSON body's top-level
+# fields are model, state, and questions. state.items[0] contains candidate_id;
+# signal fields kind, post_id, author, title, content, hearth, updated_at,
+# reaction (target_type, target_id, user_id, emoji, reacted) and optional vote
+# (target_kind, target_id, target_author, voter, direction); post fields id,
+# author, title, body, post_kind, visibility, created_at, updated_at, expires_at,
+# votes_up, votes_down, reply_count, pinned, and optional hearth, thread_id,
+# origin, classification_reason, arbitrary meta; and every comment's id,
+# post_id, parent_id, author, content, created_at, expires_at, votes_up,
+# votes_down.
+# state.keeper_context sends lane_keeper_name, keeper_record_id,
+# keeper_runtime_uid, the Keeper's full instructions, current_task_id, and
+# mention_keeper_ids. questions.relevance sends type=choice, the Keeper-naming
+# instructions, and relevant/not_relevant criteria descriptions.
 # When on, board attention asks Jev first. A relevant answer is kept; a
 # not-relevant answer or a failed call is judged again by the
 # board_attention_exact slots below. So only a relevant answer saves an

@@ -2,7 +2,7 @@ module Judgment = Keeper_board_attention_judgment
 
 type judged =
   { verdict : Judgment.t
-  ; model : string
+  ; provenance : Keeper_board_attention_candidate.system_one_provenance
   }
 
 let ( let* ) = Result.bind
@@ -61,7 +61,7 @@ let judge_candidate ?clock ~api_key ~candidate ~material () =
       candidate
       material
   in
-  let* response =
+  let* evaluated =
     Typesafeai_client.evaluate
       ?clock
       ~api_key
@@ -69,6 +69,7 @@ let judge_candidate ?clock ~api_key ~candidate ~material () =
       ~questions:[ relevance_question_id, relevance_question ~choices candidate ]
       ()
   in
+  let response = evaluated.Typesafeai_client.response in
   let* answer =
     match List.assoc_opt relevance_question_id response.answers with
     | Some answer -> Ok answer
@@ -82,6 +83,11 @@ let judge_candidate ?clock ~api_key ~candidate ~material () =
         { Judgment.decision = decided.Typesafeai_types.choice
         ; rationale = rationale decided
         }
-    ; model = response.model
+    ; provenance =
+        { Keeper_board_attention_candidate.destination_uri =
+            evaluated.destination_uri
+        ; answering_model_id = response.model
+        ; request_body_sha256 = evaluated.request_body_sha256
+        }
     }
 ;;

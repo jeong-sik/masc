@@ -36,23 +36,60 @@ the variable alone cannot turn it on.
 
 ### 2.2 Data sent outside the MASC instance
 
-Opting in sends each pending Board-attention candidate to the configured TypeSafe AI endpoint (default: `https://api.typesafe.ai/v1/systemone`). The request state contains:
+Opting in sends an HTTP POST to the configured TypeSafe AI endpoint (default:
+`https://api.typesafe.ai/v1/systemone`). The request carries these headers:
 
-- the candidate id and Board signal;
-- the complete Board post and every comment attached to the candidate;
-- the candidate's `keeper_context`, which identifies the Keeper and its partition;
-- a relevance question that names the Keeper.
+- `Authorization: Bearer <TYPESAFEAI_API_KEY>` — the configured credential is
+  sent to that endpoint;
+- `Content-Type: application/json` and `Accept: application/json`.
 
-This is the same `singleton_judgment_request` used by the regular exact-output judgment path. Operators should enable the integration only when sending that Board and Keeper context to the configured endpoint is acceptable.
+The JSON body has exactly three top-level fields:
+
+- `model`: the configured `MASC_TYPESAFEAI_MODEL` value (`jev-latest` by
+  default);
+- `state`: one `singleton_judgment_request`;
+- `questions`: one `relevance` choice question.
+
+`state.keeper_context` contains every field below, including the Keeper's full
+instructions rather than only an identifier:
+
+- `lane_keeper_name`, `keeper_record_id`, `keeper_runtime_uid`;
+- `instructions`;
+- `current_task_id`;
+- `mention_keeper_ids`.
+
+`state.items[0]` contains:
+
+- `candidate_id`;
+- `signal`, including `kind`, `post_id`, `author`, `title`, `content`,
+  `hearth`, `updated_at`, `reaction`, and, for a vote signal, `vote`;
+  `reaction` contains `target_type`, `target_id`, `user_id`, `emoji`, and
+  `reacted`, while `vote` contains `target_kind`, `target_id`,
+  `target_author`, `voter`, and `direction`;
+- the complete `post`: `id`, `author`, `title`, `body`, `post_kind`,
+  `visibility`, `created_at`, `updated_at`, `expires_at`, `votes_up`,
+  `votes_down`, `reply_count`, `pinned`, and any present `hearth`, `thread_id`,
+  `origin`, `classification_reason`, or arbitrary `meta` JSON;
+- every attached `comment`, each with `id`, `post_id`, `parent_id`, `author`,
+  `content`, `created_at`, `expires_at`, `votes_up`, and `votes_down`.
+
+`questions.relevance` contains `type = choice`, an `instructions` string that
+names the Keeper, and a `criteria` object with the `relevant` and
+`not_relevant` labels and their descriptions.
+
+This is the same singleton state used by the regular exact-output judgment
+path. Operators should enable the integration only when sending the credential
+and all Board, Keeper, and question data above to the configured endpoint is
+acceptable.
 
 ### 2.3 Transparent Fallback
 When opted in:
 1. MASC attempts the TypeSafe AI Jev evaluation first. The request is bounded by `Masc_http_client.default_request_timeout_sec`, the deadline the other outbound clients share.
 2. The kind of decision Jev picks decides what happens next. No confidence value is compared against a number; the confidence and probabilities Jev reported are written into the verdict's rationale for the record.
-   - `Relevant`: the verdict is returned. The durable judgment records `source = Vendor_system_one { model }`, where `model` is the model the System One response says answered; no catalog slot or AGENT_CORE receipt is claimed.
+   - `Relevant`: the verdict is returned. The durable judgment records a typed `Vendor_system_one` source containing the configured endpoint, the model named by the System One response, and the SHA-256 of the exact serialized request body. No catalog slot or AGENT_CORE receipt is claimed.
    - `Not_relevant`: MASC runs the standard exact-output pipeline (`Exact_output.execute_flow_once` via GLM/DeepSeek) for the same candidate. A not-relevant verdict drops the post for that keeper, so it is the one Jev does not settle alone. Jev confirms only "send it to the keeper"; "don't send it" is always judged again by the LLM lane.
 3. If the API call fails, times out, or the answer does not decode (including a choice the question did not offer), MASC runs the same exact-output pipeline.
-4. What Jev answered is recorded on the flow's existing terminal log entry (`board_attention exact_flow.execute terminal`), whose `details` carry `candidate_id`, `outcome` and a `jev` object. `jev.answer` is one of `off`, `cli_only`, `not_pending`, `relevant`, `not_relevant`, `failed`. After `not_relevant`, `jev.rejudged` holds the decision the LLM lane returned (`null` when the flow returned none), so an overturned Jev answer is one entry with `answer = not_relevant` and `rejudged = relevant`. The judgment record itself is unchanged: it names the lane that answered, not what Jev said first.
+4. What Jev answered is recorded on the flow's existing terminal log entry (`board_attention exact_flow.execute terminal`), whose `details` carry `candidate_id`, `outcome` and a `jev` object. `jev.answer` is one of `off`, `cli_only`, `not_pending`, `relevant`, `not_relevant`, `failed`. A decoded Jev answer also carries `jev.provenance` with the same `endpoint`, response `model`, and `request_body_sha256` written to a durable relevant judgment. After `not_relevant`, `jev.rejudged` holds the decision the LLM lane returned (`null` when the flow returned none), so an overturned Jev answer is one entry with `answer = not_relevant` and `rejudged = relevant`. The judgment record itself names the lane that ultimately answered; the terminal entry preserves the prior Jev request when the LLM lane rejudges it.
 
 ---
 

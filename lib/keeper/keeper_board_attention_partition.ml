@@ -1002,8 +1002,25 @@ let validate_judgment (judgment : Candidate.judgment) =
   let* () =
     match judgment.source with
     | Candidate.Cli_lane_slot -> Ok ()
-    | Candidate.Vendor_system_one { model } ->
-      nonempty "partition judgment model" model
+    | Candidate.Vendor_system_one provenance ->
+      let* () =
+        nonempty
+          "partition judgment vendor destination"
+          provenance.destination_uri
+      in
+      let* () =
+        nonempty
+          "partition judgment vendor answering identity"
+          provenance.answering_model_id
+      in
+      let* () =
+        nonempty
+          "partition judgment vendor request digest"
+          provenance.request_body_sha256
+      in
+      if String.equal judgment.slot_id provenance.answering_model_id
+      then Ok ()
+      else Error "partition judgment vendor identity must equal slot_id"
     | Candidate.Exact_attempt { call_id; plan_fingerprint; request_body_sha256 } ->
       let* () = nonempty "partition judgment call_id" call_id in
       let* () = nonempty "partition judgment plan_fingerprint" plan_fingerprint in

@@ -13,6 +13,12 @@ type delivery_failure =
   ; failed_at : float
   }
 
+type system_one_provenance =
+  { destination_uri : string
+  ; answering_model_id : string
+  ; request_body_sha256 : string
+  }
+
 type judgment_source =
   | Exact_attempt of
       { call_id : string
@@ -20,7 +26,7 @@ type judgment_source =
       ; request_body_sha256 : string
       }
   | Cli_lane_slot
-  | Vendor_system_one of { model : string }
+  | Vendor_system_one of system_one_provenance
 
 type judgment =
   { verdict : Keeper_board_attention_judgment.t
@@ -458,6 +464,17 @@ let delivery_failure_to_yojson failure =
     ]
 ;;
 
+let system_one_provenance_fields provenance =
+  [ "endpoint", `String provenance.destination_uri
+  ; "model", `String provenance.answering_model_id
+  ; "request_body_sha256", `String provenance.request_body_sha256
+  ]
+;;
+
+let system_one_provenance_to_yojson provenance =
+  `Assoc (system_one_provenance_fields provenance)
+;;
+
 let judgment_source_to_yojson = function
   | Exact_attempt { call_id; plan_fingerprint; request_body_sha256 } ->
     `Assoc
@@ -467,8 +484,10 @@ let judgment_source_to_yojson = function
       ; "request_body_sha256", `String request_body_sha256
       ]
   | Cli_lane_slot -> `Assoc [ "kind", `String "cli_lane_slot" ]
-  | Vendor_system_one { model } ->
-    `Assoc [ "kind", `String "vendor_system_one"; "model", `String model ]
+  | Vendor_system_one provenance ->
+    `Assoc
+      (("kind", `String "vendor_system_one")
+       :: system_one_provenance_fields provenance)
 ;;
 
 let judgment_to_yojson judgment =
@@ -728,12 +747,30 @@ let validate_judgment ~context (judgment : judgment) =
      completion is matched against, so each must be present. The CLI arm has
      nothing further to check: inventing a receipt for it would put an attempt
      that never happened into the durable record. The vendor arm names the
-     model that answered, so that name must be present. *)
+     request and response, so all three coordinates must be present. *)
   let* () =
     match judgment.source with
     | Cli_lane_slot -> Ok ()
-    | Vendor_system_one { model } ->
-      nonblank_string ~context:(context ^ ".source.model") model
+    | Vendor_system_one provenance ->
+      let context = context ^ ".source" in
+      let* () =
+        nonblank_string
+          ~context:(context ^ ".endpoint")
+          provenance.destination_uri
+      in
+      let* () =
+        nonblank_string
+          ~context:(context ^ ".model")
+          provenance.answering_model_id
+      in
+      let* () =
+        nonblank_string
+          ~context:(context ^ ".request_body_sha256")
+          provenance.request_body_sha256
+      in
+      if String.equal judgment.slot_id provenance.answering_model_id
+      then Ok ()
+      else Error (context ^ ".model must equal judgment slot_id")
     | Exact_attempt { call_id; plan_fingerprint; request_body_sha256 } ->
       let context = context ^ ".source" in
       let* () = nonblank_string ~context:(context ^ ".call_id") call_id in
@@ -1020,10 +1057,27 @@ let judgment_source_of_yojson ~context json =
     let* () = exact_fields ~context [ "kind" ] fields in
     Ok Cli_lane_slot
   | "vendor_system_one" ->
-    let* () = exact_fields ~context [ "kind"; "model" ] fields in
+    let* () =
+      exact_fields
+        ~context
+        [ "kind"; "endpoint"; "model"; "request_body_sha256" ]
+        fields
+    in
+    let* destination_json = field ~context "endpoint" fields in
+    let* destination_uri =
+      string_json ~context:(context ^ ".endpoint") destination_json
+    in
     let* model_json = field ~context "model" fields in
-    let* model = string_json ~context:(context ^ ".model") model_json in
-    Ok (Vendor_system_one { model })
+    let* answering_model_id =
+      string_json ~context:(context ^ ".model") model_json
+    in
+    let* request_json = field ~context "request_body_sha256" fields in
+    let* request_body_sha256 =
+      string_json ~context:(context ^ ".request_body_sha256") request_json
+    in
+    Ok
+      (Vendor_system_one
+         { destination_uri; answering_model_id; request_body_sha256 })
   | other -> Error (context ^ ".kind is not a judgment source: " ^ other)
 ;;
 
@@ -1841,7 +1895,9 @@ let same_judgment_source left right =
   match left, right with
   | Cli_lane_slot, Cli_lane_slot -> true
   | Vendor_system_one left, Vendor_system_one right ->
-    String.equal left.model right.model
+    String.equal left.destination_uri right.destination_uri
+    && String.equal left.answering_model_id right.answering_model_id
+    && String.equal left.request_body_sha256 right.request_body_sha256
   | ( Exact_attempt left
     , Exact_attempt right ) ->
     String.equal left.call_id right.call_id

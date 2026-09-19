@@ -815,6 +815,11 @@ let json_string_field name = function
   | _ -> None
 ;;
 
+let json_field name = function
+  | `Assoc fields -> List.assoc_opt name fields
+  | _ -> None
+;;
+
 let last_log_seq () =
   match Log.Ring.recent ~limit:1 () with
   | (entry : Log.Ring.entry) :: _ -> entry.seq
@@ -837,6 +842,8 @@ let terminal_jev_entries ~since_seq ~candidate_id =
 type jev_run =
   { result : (Candidate.judgment, string Exact_flow.execution_error) result
   ; jev_posts : int
+  ; jev_destination : string
+  ; jev_request_bodies : string list
   ; llm_posts : int
   ; terminal_jev : Yojson.Safe.t list
   }
@@ -876,6 +883,8 @@ let execute_behind_jev ~name ~jev_choice =
         in
         { result
         ; jev_posts = Fixture.post_count jev
+        ; jev_destination = jev.base_url
+        ; jev_request_bodies = Fixture.request_bodies jev
         ; llm_posts = Fixture.post_count llm
         ; terminal_jev =
             terminal_jev_entries ~since_seq ~candidate_id:candidate.candidate_id
@@ -900,6 +909,30 @@ let check_terminal_jev label ~answer ~rejudged run =
       (List.length entries)
 ;;
 
+let expected_jev_provenance run : Candidate.system_one_provenance =
+  match run.jev_request_bodies with
+  | [ body ] ->
+    { destination_uri = run.jev_destination
+    ; answering_model_id = "jev-latest"
+    ; request_body_sha256 = Digestif.SHA256.(digest_string body |> to_hex)
+    }
+  | bodies ->
+    Alcotest.failf
+      "expected one exact Jev request body, saw %d"
+      (List.length bodies)
+;;
+
+let check_terminal_provenance label run provenance =
+  match run.terminal_jev with
+  | [ jev ] ->
+    Alcotest.(check bool)
+      (label ^ ": terminal evidence repeats the request provenance")
+      true
+      (json_field "provenance" jev
+       = Some (Candidate.system_one_provenance_to_yojson provenance))
+  | _ -> Alcotest.failf "%s: terminal evidence is missing" label
+;;
+
 let test_jev_relevant_is_kept () =
   let run = execute_behind_jev ~name:"board-attention-jev-relevant" ~jev_choice:"relevant" in
   check_terminal_jev "relevant" ~answer:"relevant" ~rejudged:None run;
@@ -908,8 +941,21 @@ let test_jev_relevant_is_kept () =
     Alcotest.(check int) "Jev asked once" 1 run.jev_posts;
     Alcotest.(check int) "the LLM lane is not asked" 0 run.llm_posts;
     (match judgment.Candidate.source with
-     | Candidate.Vendor_system_one { model } ->
-       Alcotest.(check string) "the model Jev's response named" "jev-latest" model
+     | Candidate.Vendor_system_one provenance ->
+       let expected = expected_jev_provenance run in
+       Alcotest.(check string)
+         "the configured destination is durable"
+         run.jev_destination
+         provenance.destination_uri;
+       Alcotest.(check string)
+         "the model Jev's response named"
+         "jev-latest"
+         provenance.answering_model_id;
+       Alcotest.(check string)
+         "the exact request bytes are durable"
+         expected.request_body_sha256
+         provenance.request_body_sha256;
+       check_terminal_provenance "relevant" run provenance
      | Candidate.Exact_attempt _ | Candidate.Cli_lane_slot ->
        Alcotest.fail "a relevant Jev answer must be recorded as Jev's")
   | Error _ -> Alcotest.fail "a relevant Jev answer did not complete the flow"
@@ -938,7 +984,8 @@ let test_jev_not_relevant_is_judged_again () =
     execute_behind_jev ~name:"board-attention-jev-not-relevant" ~jev_choice:"not_relevant"
   in
   check_judged_by_the_llm_lane "not_relevant" run;
-  check_terminal_jev "not_relevant" ~answer:"not_relevant" ~rejudged:(Some "relevant") run
+  check_terminal_jev "not_relevant" ~answer:"not_relevant" ~rejudged:(Some "relevant") run;
+  check_terminal_provenance "not_relevant" run (expected_jev_provenance run)
 ;;
 
 let test_jev_choice_outside_the_question_is_judged_again () =
@@ -963,22 +1010,36 @@ let test_jev_adapter_sends_the_decisions_and_reads_not_relevant () =
       Fixture.start_server ~sw ~net ~clock (Fixture.Reply (jev_response ~choice:"not_relevant"))
     in
     with_jev ~endpoint:jev.base_url (fun () ->
-      (match
-         Typesafeai_board_attention.judge_candidate
-           ~clock
-           ~api_key:"test-typesafeai-key"
-           ~candidate
-           ~material
-           ()
-       with
-       | Ok { Typesafeai_board_attention.verdict; model } ->
-         Alcotest.(check string) "the model Jev's response named" "jev-latest" model;
-         (match verdict.Judgment.decision with
-          | Judgment.Not_relevant -> ()
-          | Judgment.Relevant -> Alcotest.fail "a not_relevant answer decoded as Relevant")
-       | Error detail -> Alcotest.failf "the not_relevant answer did not decode: %s" detail);
+      let judged =
+        match
+          Typesafeai_board_attention.judge_candidate
+            ~clock
+            ~api_key:"test-typesafeai-key"
+            ~candidate
+            ~material
+            ()
+        with
+        | Ok judged -> judged
+        | Error detail ->
+          Alcotest.failf "the not_relevant answer did not decode: %s" detail
+      in
+      Alcotest.(check string)
+        "the destination used by the adapter"
+        jev.base_url
+        judged.provenance.destination_uri;
+      Alcotest.(check string)
+        "the model Jev's response named"
+        "jev-latest"
+        judged.provenance.answering_model_id;
+      (match judged.verdict.Judgment.decision with
+       | Judgment.Not_relevant -> ()
+       | Judgment.Relevant -> Alcotest.fail "a not_relevant answer decoded as Relevant");
       match Fixture.request_bodies jev with
       | [ body ] ->
+        Alcotest.(check string)
+          "the adapter hashes the exact serialized body"
+          Digestif.SHA256.(digest_string body |> to_hex)
+          judged.provenance.request_body_sha256;
         let relevance =
           match Yojson.Safe.from_string body with
           | `Assoc fields ->

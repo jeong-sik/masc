@@ -52,6 +52,8 @@ type outcome =
   | Replayed of
       { rounds : round list
       ; stopped_by : string
+      ; reached : int
+      ; atoms_total : (int, string) result
       }
   | Skipped of string
 
@@ -88,11 +90,32 @@ let stop_to_string = function
     progress each round would have saved.
 
     The loop ends on its own for every selection but [Read]. For [Read] it ends
-    when a round does not reach further than the one before it: that is a fixed
-    point, not a budget, so no count has to be chosen here. A round that does
-    not advance would repeat forever, and reporting it is the point -- it is
-    the shape issue #37061 pins in the model. *)
+    when a round does not reach further than the one before it: a fixed point,
+    not a budget, so no count has to be chosen here. That guard is a safety
+    net for a shape the rules should not produce, and nothing more -- the
+    permanent stop issue #37061 pins arrives as [Stop (Unreadable_line _)],
+    which a line that stops one round keeps producing for every later one
+    (see {!Keeper_librarian_range.stop}), and that already ends the loop with
+    its own reason.
+
+    What no stop reason states on its own is whether anything was left behind.
+    [Nothing_to_read] means no cut point lies beyond the start, which is both
+    what a finished backlog looks like and what a backlog with atoms past the
+    last cut point looks like. So the result carries [reached] and the
+    checkpoint's atom count beside the reason, and the two together answer the
+    question the spec calls [AtomsUpToLastCutRead]. *)
 let replay ~trace_id ~lines ~messages =
+  let atoms_total =
+    match Keeper_turn_boundaries.position_of_messages messages with
+    | Ok (Keeper_turn_boundaries.Atom_history { end_atom; _ }) -> Ok end_atom
+    | Ok Keeper_turn_boundaries.Empty_atom_history -> Ok 0
+    | Ok Keeper_turn_boundaries.No_atom_history -> Error "no_atom_history"
+    | Ok Keeper_turn_boundaries.Stale_noop -> Error "stale_noop"
+    | Error detail -> Error detail
+  in
+  let stop ~rounds ~reached stopped_by =
+    Replayed { rounds = List.rev rounds; stopped_by; reached; atoms_total }
+  in
   let rec loop ~progress ~reached acc =
     let selection =
       Keeper_librarian_range.select
@@ -106,14 +129,13 @@ let replay ~trace_id ~lines ~messages =
     | Keeper_librarian_range.Read { range; boundary_lines_seen } ->
       if range.end_atom <= reached
       then
-        Replayed
-          { rounds = List.rev acc
-          ; stopped_by =
-              Printf.sprintf
-                "no_advance:end_atom=%d:already_reached=%d"
-                range.end_atom
-                reached
-          }
+        stop
+          ~rounds:acc
+          ~reached
+          (Printf.sprintf
+             "no_advance:end_atom=%d:already_reached=%d"
+             range.end_atom
+             reached)
       else (
         let round =
           { start_atom = range.start_atom
@@ -133,20 +155,18 @@ let replay ~trace_id ~lines ~messages =
     | Keeper_librarian_range.Baseline { boundary_lines_seen; _ } ->
       let next = Keeper_librarian_range.progress_after ~trace_id selection in
       if next = progress
-      then
-        Replayed
-          { rounds = List.rev acc; stopped_by = "baseline_without_progress" }
+      then stop ~rounds:acc ~reached "baseline_without_progress"
       else
         loop
           ~progress:next
           ~reached
           ({ start_atom = 0; end_atom = 0; lines_seen = boundary_lines_seen } :: acc)
     | Keeper_librarian_range.Nothing_to_read ->
-      Replayed { rounds = List.rev acc; stopped_by = "nothing_to_read" }
+      stop ~rounds:acc ~reached "nothing_to_read"
     | Keeper_librarian_range.Position_in_other_trace _ ->
-      Replayed { rounds = List.rev acc; stopped_by = "position_in_other_trace" }
-    | Keeper_librarian_range.Stop stop ->
-      Replayed { rounds = List.rev acc; stopped_by = stop_to_string stop }
+      stop ~rounds:acc ~reached "position_in_other_trace"
+    | Keeper_librarian_range.Stop reason ->
+      stop ~rounds:acc ~reached (stop_to_string reason)
   in
   loop ~progress:None ~reached:0 []
 ;;
@@ -187,7 +207,7 @@ let round_to_json r =
 
 let outcome_to_json keeper = function
   | Skipped reason -> `Assoc [ "keeper", `String keeper; "skipped", `String reason ]
-  | Replayed { rounds; stopped_by } ->
+  | Replayed { rounds; stopped_by; reached; atoms_total } ->
     let atoms = List.fold_left (fun n r -> n + (r.end_atom - r.start_atom)) 0 rounds in
     (* Every atom the replay carried, counted once per round it appeared in.
        The rules are meant to hand each atom to exactly one round, so this
@@ -201,15 +221,26 @@ let outcome_to_json keeper = function
       |> List.sort_uniq compare
       |> List.length
     in
+    (* The stop reason does not say whether anything was left behind:
+       [nothing_to_read] is both a finished backlog and one whose remaining
+       atoms have no cut point. These three say which. *)
+    let left_behind =
+      match atoms_total with
+      | Ok total -> [ "atoms_in_checkpoint", `Int total; "atoms_left", `Int (total - reached) ]
+      | Error detail -> [ "atoms_in_checkpoint", `String detail ]
+    in
     `Assoc
-      [ "keeper", `String keeper
-      ; "rounds", `Int (List.length rounds)
-      ; "atoms_carried", `Int atoms
-      ; "atoms_distinct", `Int distinct
-      ; "atoms_carried_twice", `Int (atoms - distinct)
-      ; "stopped_by", `String stopped_by
-      ; "round", `List (List.map round_to_json rounds)
-      ]
+      ([ "keeper", `String keeper
+       ; "rounds", `Int (List.length rounds)
+       ; "atoms_carried", `Int atoms
+       ; "atoms_distinct", `Int distinct
+       ; "atoms_carried_twice", `Int (atoms - distinct)
+       ; "reached_atom", `Int reached
+       ]
+       @ left_behind
+       @ [ "stopped_by", `String stopped_by
+         ; "round", `List (List.map round_to_json rounds)
+         ])
 ;;
 
 let keepers_with_a_log keepers_dir =

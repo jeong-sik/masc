@@ -1231,6 +1231,51 @@ let test_visible_surface_ring_declutter () =
   Alcotest.(check bool) "Approvals shown when pending items exist" true
     (List.exists (fun (s, _) -> s = Approvals) ring_with_pending)
 
+(* The smallest row and snapshot the asks wire can carry; the shape mirrors
+   test_tui_ask_projection's fixtures so both suites read the same wire. *)
+let ask_row ?(resolution = Tui_decode.Ask_open) id : Tui_decode.ask_row =
+  { Tui_decode.ar_keeper = "asker"
+  ; ar_id = id
+  ; ar_asked_at = 1.0
+  ; ar_context = None
+  ; ar_questions =
+      [ { Tui_decode.aq_id = "q1"
+        ; aq_header = "Header"
+        ; aq_prompt = "run?"
+        ; aq_mode = Tui_decode.Ask_single
+        ; aq_free_text = Tui_decode.Ask_choices_only
+        ; aq_choices = []
+        }
+      ]
+  ; ar_resolution = resolution
+  }
+
+let asks_snapshot rows : Tui_decode.asks_snapshot =
+  { Tui_decode.asn_keeper = None
+  ; asn_open_count = List.length rows
+  ; asn_rows = rows
+  }
+
+(* masc-tui's report (board p-79218d27): approvals at zero and one open ask
+   hid the Approvals tab itself, and with it the only surface a question
+   renders on. A question a Keeper waits on is waiting-on-me work, so it
+   keeps the destination up the way a pending approval does -- and an
+   answered or withdrawn question stops keeping it. *)
+let test_open_ask_keeps_the_approvals_tab () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.view <- Overview;
+  state.asks_snapshot <- Some (asks_snapshot [ ask_row "a1" ]);
+  Alcotest.(check bool) "one open ask keeps the tab up" true
+    (List.exists (fun (s, _) -> s = Approvals) (visible_surface_ring state));
+  let answered =
+    ask_row
+      ~resolution:(Tui_decode.Ask_answered { aa_answered_at = 2.0; aa_question_ids = [ "q1" ] })
+      "a1"
+  in
+  state.asks_snapshot <- Some (asks_snapshot [ answered ]);
+  Alcotest.(check bool) "an answered ask no longer keeps the tab up" false
+    (List.exists (fun (s, _) -> s = Approvals) (visible_surface_ring state))
+
 (* The sheet is the only place the keeper marks are named where a reader
    can read all of them at once: the Keepers rows pair each glyph with its word
    but show only the states the fleet is in, and the 34-cell roster pane beside
@@ -2651,6 +2696,8 @@ let () =
             test_browser_lanes_highlight_config
         ; Alcotest.test_case "smart declutter hides empty approvals" `Quick
             test_visible_surface_ring_declutter
+        ; Alcotest.test_case "an open ask keeps the Approvals tab" `Quick
+            test_open_ask_keeps_the_approvals_tab
         ; Alcotest.test_case "braille sparkline renders levels" `Quick
             test_braille_sparkline
         ; Alcotest.test_case "fleet total cost sums correctly" `Quick

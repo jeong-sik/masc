@@ -655,7 +655,17 @@ let surface_strip (state : state) ~cols =
   let badge surface =
     match (surface : surface) with
     | Approvals ->
-        (match List.length (Masc_tui_types.approval_items state) with
+        (* The count is the population the surface renders: the approval
+           rows and the open asks beside them (masc_tui_types.approval_items
+           plus Ask_projection.open_rows). Counting only the approvals made
+           the badge say nothing about the question that was the sole
+           reason the tab was up. *)
+        let open_asks =
+          match state.asks_snapshot with
+          | Some snapshot -> List.length (Ask_projection.open_rows snapshot)
+          | None -> 0
+        in
+        (match List.length (Masc_tui_types.approval_items state) + open_asks with
          | 0 -> ""
          | pending -> Printf.sprintf "\xc2\xb7%d" pending)
     | Planning ->
@@ -715,7 +725,12 @@ let surface_strip (state : state) ~cols =
     let surface, _ = ring.(i) in
     let is_alert =
       match surface with
-      | Approvals -> List.length (Masc_tui_types.approval_items state) > 0
+      | Approvals ->
+          List.length (Masc_tui_types.approval_items state) > 0
+          || (match state.asks_snapshot with
+              | Some snapshot ->
+                  Ask_projection.open_rows snapshot <> []
+              | None -> false)
       | _ -> false
     in
     if i = active then

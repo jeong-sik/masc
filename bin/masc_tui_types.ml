@@ -8308,11 +8308,21 @@ let approval_items (state : state) =
   @ List.map (fun pending -> Gate_row pending) state.gate_pending
   @ List.map (fun item -> Operator_row item) (operator_approval_items state)
 
+(* The ring keeps a destination while work waits on it there: pending
+   approvals, or a question a Keeper is waiting on. Asks ride every refresh
+   (masc_tui.ml, "Asks ride every refresh"), so this predicate is the last
+   thing deciding whether an operator can see a question at all -- filtering
+   Approvals out on a zero-approvals count hid the one surface a question
+   renders on, exactly when the question was the only thing waiting. *)
 let is_surface_active (state : state) (s : surface) =
   match s with
   | Metrics -> false
   | Approvals ->
-      state.view = Approvals || List.length (approval_items state) > 0
+      state.view = Approvals
+      || List.length (approval_items state) > 0
+      || (match state.asks_snapshot with
+          | Some snapshot -> Masc_tui_ask_projection.open_rows snapshot <> []
+          | None -> false)
   | _ -> true
 ;;
 

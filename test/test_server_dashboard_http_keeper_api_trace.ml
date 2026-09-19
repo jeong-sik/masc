@@ -561,7 +561,7 @@ let test_history_delete_preserves_session_files () =
     rejected (ids "refused_snapshot_ids" json);
   check (list string) "a valid archive that cannot be unlinked reports failure"
     [ failed_id ] (ids "failed_snapshot_ids" json);
-  check bool "the failed removal remains present" true (Sys.is_directory (path failed_id));
+  check bool "the failed removal remains present" true (Sys.is_directory (Filename.concat session_dir failed_id));
   check string "canonical remains available in returned inventory" "available"
     (json |> member "inventory" |> member "current_status" |> to_string);
   check_preserved ();

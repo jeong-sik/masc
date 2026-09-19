@@ -46,8 +46,10 @@ status: reference
   `InProgress`, `AwaitingVerification`, `Done`, `Cancelled`다.
 
 **Goal**
-: 장기 의도와 Task 연결을 기록하는 단위. phase는 `Executing`, `Blocked`,
-  `Paused`, `Completed`, `Dropped`다.
+: 장기 의도와 Task 연결을 기록하는 단위. phase는 `Executing`, `Verifying`,
+  `Awaiting_confirmation`, `Completed`, `Dropped`다. 완료를 요청하면
+  `Verifying`으로 들어가고, verifier가 증명을 통과시킨 뒤 사람이 확인해야
+  `Completed`가 된다(`lib/goal/goal_phase.mli`).
 
 **Schedule**
 : 미래 시점에 Keeper를 깨우는 durable 요청. 현재 동작은 create, list, get,

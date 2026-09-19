@@ -102,7 +102,7 @@ status: reference
 
 **Verdict**
 : `Verdict_approved` 또는 `Verdict_rejected { reason }`. 완료 제출의 승인은 `Done`, 취소
-  요청의 승인은 `Cancelled`, 거절은 어느 쪽이든 Producer 의 `InProgress` 다.
+  요청의 승인은 `Cancelled`, 반려는 어느 쪽이든 Producer 의 `InProgress` 다.
 
 **Handoff Context**
 : Task 에 붙어 다니는 인계 메모. summary, reason, next_step, evidence_refs, updated_by

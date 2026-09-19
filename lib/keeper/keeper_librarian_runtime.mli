@@ -28,42 +28,27 @@ type extraction_error
 
 val extraction_error_to_string : extraction_error -> string
 
-(** What one slot's pre-flight projection said: the request projected, or
-    the projection refused it outright -- a capability or serialization
-    refusal, which is structural. Size is the provider's verdict, not this
-    pre-flight's. *)
-type slot_projection =
-  | Slot_admitted
-  | Slot_unusable of string
-
-(** The ladder's pre-flight verdict: which slot ids projected, in ladder
-    order, and which are structurally unusable (with the refusal reason). *)
-type lane_projection = {
-  usable : string list;
-  unusable : (string * string) list;
-}
-
-(** Pure over one projection per slot in ladder order. Structurally unusable
-    slots are excluded rather than fatal: one such slot used to fail the
-    whole pre-flight, taking every usable slot down with it (2026-09-11,
-    openrouter.openrouter-deepseek-v4-flash). *)
-val lane_projection_decision : (string * slot_projection) list -> lane_projection
-
 (** Slot ids and refusal reasons on one line, for the exclusion WARN and the
     all-slots-refused error. *)
 val slot_reason_pairs : ?sep:string -> (string * string) list -> string
 
+type preflight_selection =
+  { selected_slots : Runtime_exact_output_registry.selected_slot list
+  ; unusable : (string * string) list
+  }
+
 val preflight_slots
   :  selected_slots:Runtime_exact_output_registry.selected_slot list
   -> messages:Agent_core.Types.message list
-  -> ((string * string) list, extraction_error) result
-(** The pre-flight over the ladder: the slots this run is without (id and
-    refusal reason), so the caller can say which slots it excluded; a ladder
-    with no projectable slot at all is [Exact_request_projection_failed],
-    naming each refusal. An empty ladder reports nothing -- the caller routes
-    it to the cli lane. The execution caller also tries declared CLI slots
-    after all API projections are refused, preserving this error if no CLI
-    answer is accepted. *)
+  -> (preflight_selection, extraction_error) result
+(** The pre-flight over the ladder: the selected slots whose request projected
+    and the slots this run is without (id and refusal reason). The execution
+    flow receives only [selected_slots]; a ladder with no projectable slot at
+    all is [Exact_request_projection_failed], naming each refusal. An empty
+    ladder reports two empty lists -- the caller routes it to the cli lane.
+    The execution caller also tries declared CLI slots after all API
+    projections are refused, preserving this error if no CLI answer is
+    accepted. *)
 
 
 (** Which failure kind this error records in the memory journal. The vocabulary
@@ -92,6 +77,7 @@ module For_testing : sig
   type classified_error
 
   val classified_error_detail : classified_error -> string
+  val classified_error_kind : classified_error -> Keeper_memory_os_current.librarian_failure_kind
 
   val execute_exact_output_classified
     :  ?cli_runner:Keeper_lane_cli_oneshot.runner

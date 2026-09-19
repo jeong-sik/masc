@@ -9,7 +9,9 @@
 
 샌프란시스코 소재 TypeSafe AI의 첫 모델. LLM과 달리 텍스트를 생성하지 않고,
 상태(state) 텍스트와 타입화된 질문들(questions)을 넣으면 제약된 답(확률 분포)을 반환한다.
-API는 `POST https://api.typesafe.ai/v1/systemone`, 모델 `jev-latest`(실측 응답 jev-1.13.0).
+API는 `POST https://api.typesafe.ai/v1/systemone`, 요청 모델은 `jev-latest`다.
+실행자는 응답 모델명 `jev-1.13.0`을 관측했지만 당시 결과 파일에 저장하지
+않았으므로 커밋된 증거로 확인되는 값은 아니다.
 
 | 프리미티브 | 입력 | 반환 | 용도 |
 |---|---|---|---|

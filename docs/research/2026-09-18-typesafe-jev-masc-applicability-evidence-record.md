@@ -3,9 +3,25 @@
 - 대상 연구: [2026-09-18-typesafe-jev-masc-applicability-r1.md](2026-09-18-typesafe-jev-masc-applicability-r1.md)
 - 실험일: 2026-09-18 (KST)
 
-## Evidence
+## 공통 헤더
 
-- API 실호출 35회: `POST https://api.typesafe.ai/v1/systemone`, 모델 `jev-latest`, 응답 모델명 `jev-1.13.0`.
+- 날짜(ISO8601): 2026-09-18T09:38:00+09:00
+- 작성자: MASC research session (개별 agent identity는 기록되지 않음)
+- 결정 ID: typesafe-jev-applicability-r1
+- 적용 대상: board_attention exact-output 판단 레인 연구
+- 결정 상태: 보류
+
+## 근거 (Evidence)
+
+- 항목: Jev가 이 표본에서 기존 board_attention judge와 같은 판정을 내리는지 측정
+- 출처: https://docs.typesafe.ai 및 아래 고정 SHA-256 원장과 35개 원시 결과
+- 확인일시: 2026-09-18T09:38:00+09:00
+- 신뢰도: Medium
+- 제한조건: historical baseline이 전부 relevant이며 인간 정답 라벨과 production 적용 증거가 없음
+
+- API 실호출 35회: `POST https://api.typesafe.ai/v1/systemone`, 요청 모델
+  `jev-latest`. 실행자는 응답 모델명 `jev-1.13.0`을 관측했지만 당시
+  결과 파일에 이 필드를 저장하지 않아 커밋된 증거로는 확인할 수 없다.
 - 문서: docs.typesafe.ai introduction / primitives / confidence / patterns / quickstart, typesafe.ai (2026-09-18 열람).
 - 판정 이력(피실험 데이터): `<base-path>/.masc/board_attention_candidates/wkbl-builder.jsonl`
   (base-path = wkbl 워크스페이스 루트, MASC_BASE_PATH)
@@ -30,6 +46,25 @@
 
 masc의 exact-output 레인 6종과 개념이 겹친다는 점에서, 레인 모델 선택지에
 "판단 전용 저가 모델" 축이 생겼다. 본 기록 시점까지 코드 반영은 없다(연구만).
+
+## 검증 (Verification)
+
+- 1차: TypeSafe 공식 문서의 API, primitive, confidence, 가격 설명을 확인
+- 2차: 원장 SHA-256과 historical 호출 수 25개, 고유 후보 수 17개를 재계산
+- 3차: Jev API 35회 호출과 합성 negative 10개를 실행
+- 재현 결과: 커밋된 결과 35행의 합의, 토큰, 지연, 오류 수는 재계산 가능. 응답 모델 버전은 저장되지 않아 재검증 불가
+
+## 불확실성 (Uncertainty)
+
+- 미확인 항목: 응답 모델의 정확한 버전, 인간 라벨 정확도, 실제 기존 judge 비용
+- 영향: 이 결과만으로 production 기본 레인이나 외부효과 권한 판단을 바꾸면 과대 적용이 됨
+- 추가 확인 필요: 인간 라벨과 음성 실데이터를 포함한 shadow replay 및 응답 provenance 저장
+
+## 적용범위 (Scope)
+
+- 영향 받는 영역: board_attention과 유사한 저비용 typed judgment 후보 평가
+- 제약/배제: turn FSM, admission, HITL 권위, 기존 exact-output 레인의 production 동작
+- 롤백 조건: 고정 표본 검증 실패, 데이터 반출 승인 부재, shadow replay 불일치
 
 ## 실험 설계
 
@@ -93,18 +128,24 @@ Jev 실측 $0.00006과 비교해 30~250배. 배치로 묶는 원 구조를 감�
 
 출력: results.jsonl (호출별 전체 응답), summary.json
 """
-import json, subprocess, time, urllib.request, urllib.error, sys, os
+import hashlib, json, time, urllib.request, urllib.error, sys, os
 
 CAND_FILE = os.path.join(
     os.environ.get("MASC_BASE_PATH", ""), ".masc",
     "board_attention_candidates", "wkbl-builder.jsonl",
 )
 OUT_DIR = os.environ.get("OUT_DIR", "/tmp/jev-replay")
+SOURCE_SHA256 = "92002ecf13cff43575995be2724bbc70f572b630bcd9260c68836ed160bc1ad0"
+EXPECTED_HISTORICAL_CALLS = 25
+EXPECTED_UNIQUE_CANDIDATES = 17
 
 def get_key():
     k = os.environ.get("JEV_API_KEY")
     if not k:
-        raise SystemExit("JEV_API_KEY not set (read via: op item get hhg5kjbfcu4h5uf4rsbpsauwri --fields credential --reveal)")
+        raise SystemExit(
+            "JEV_API_KEY not set "
+            "(read it from the approved secret item with --reveal)"
+        )
     return k
 
 # 판정 기준은 기존 judge의 rationale에서 추출한 문구를 따름:
@@ -147,7 +188,7 @@ def build_state(keeper_name, keeper_context, signal):
         "board_signal": signal,
     }, ensure_ascii=False)
 
-def call_jev(key, state, qid_tag):
+def call_jev(key, state):
     body = json.dumps({
         "model": "jev-latest",
         "state": state,
@@ -193,9 +234,18 @@ NEGATIVES = [
 
 def main():
     key = get_key()
+    os.makedirs(OUT_DIR, exist_ok=True)
+    with open(CAND_FILE, "rb") as f:
+        source_bytes = f.read()
+    actual_source_sha256 = hashlib.sha256(source_bytes).hexdigest()
+    if actual_source_sha256 != SOURCE_SHA256:
+        raise SystemExit(
+            "candidate ledger does not match the frozen experiment source: "
+            f"expected sha256={SOURCE_SHA256}, got {actual_source_sha256}"
+        )
     candidates = []
-    with open(CAND_FILE) as f:
-        for line in f:
+    for line in source_bytes.decode("utf-8").splitlines():
+        if line:
             rec = json.loads(line)
             j = rec.get("status", {}).get("judgment")
             if j:
@@ -207,6 +257,15 @@ def main():
                     "baseline": j["verdict"]["decision"],
                     "baseline_source": j.get("source"),
                 })
+    unique_candidate_count = len({row["candidate_id"] for row in candidates})
+    if (
+        len(candidates) != EXPECTED_HISTORICAL_CALLS
+        or unique_candidate_count != EXPECTED_UNIQUE_CANDIDATES
+    ):
+        raise SystemExit(
+            "frozen source selected an unexpected sample: "
+            f"calls={len(candidates)} unique={unique_candidate_count}"
+        )
     print(f"historical judged: {len(candidates)}", file=sys.stderr)
 
     rows = list(candidates) + [
@@ -225,7 +284,7 @@ def main():
     out = open(os.path.join(OUT_DIR, "results.jsonl"), "w")
     for i, row in enumerate(rows):
         state = build_state(row["keeper_name"], row["keeper_context"], row["signal"])
-        resp, dt, err = call_jev(key, state, row["candidate_id"])
+        resp, dt, err = call_jev(key, state)
         rec = {
             "candidate_id": row["candidate_id"],
             "baseline": row["baseline"],
@@ -242,6 +301,8 @@ def main():
             rec["jev_noul"] = a["relevance_noul"]["noul"]
             rec["jev_score"] = a["confidence_probe"]["score"]
             rec["usage"] = resp["usage"]
+            if isinstance(resp.get("model"), str):
+                rec["response_model"] = resp["model"]
         results.append(rec)
         out.write(json.dumps(rec, ensure_ascii=False) + "\n")
         out.flush()
@@ -259,8 +320,16 @@ def main():
     in_tok = sum(r.get("usage", {}).get("input_tokens", 0) for r in results if "usage" in r)
     lat = [r["latency_s"] for r in results if "error" not in r]
     summary = {
-        "model": "jev-latest",
+        "requested_model": "jev-latest",
+        "response_models": sorted({
+            r["response_model"] for r in results if "response_model" in r
+        }),
         "date": "2026-09-18",
+        "source": {
+            "sha256": actual_source_sha256,
+            "historical_calls": len(candidates),
+            "unique_candidates": unique_candidate_count,
+        },
         "historical": {
             "n": len(hist), "ok": len(h_ok),
             "baseline_all": sorted(set(r["baseline"] for r in hist)),

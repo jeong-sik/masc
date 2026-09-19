@@ -935,20 +935,11 @@ let run_keeper_invocation_turn_admitted_inner
                  ()
                with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn
                  ~label:"trajectory finalize (agent_run ok)" exn);
-              (* Same reading as a unified cycle ([degraded_retry_applied_for_turn]):
-                 the runtime a deferred suffix named for this resume, and whether
-                 the turn ran on it. A lane candidate that served after the head
-                 failed in this same turn is [runtime_fallback_applied] on the
-                 receipt, not a degraded retry. *)
-              let degraded_retry_runtime =
-                Option.map
-                  (fun admission ->
-                     (Keeper_direct_runtime_continuation.lane admission)
-                       .Keeper_turn_driver.next_runtime_id)
-                  runtime_resume
-              in
               let degraded_retry_applied =
-                Option.equal String.equal degraded_retry_runtime (Some result.runtime_id)
+                not (String.equal result.runtime_id initial_execution.runtime_id)
+              in
+              let degraded_retry_runtime =
+                if degraded_retry_applied then Some result.runtime_id else None
               in
               let execution_outcome =
                 Keeper_execution_outcome.create

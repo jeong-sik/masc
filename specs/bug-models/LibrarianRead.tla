@@ -12,6 +12,17 @@
 \* one digest, "this line describes the history I loaded" is just
 \* end_atom <= atom count, so a line of an older history can pass.
 \*
+\* An append that fails needs no action of its own: a turn that finished its
+\* saves and left no line is the same state as a turn that died after them,
+\* which TurnDie already reaches.
+\*
+\* The clean model is explored to the end, so its state count is the same on
+\* every run. A buggy model stops at the first violation, and what a parallel
+\* search had explored by then is not: run those with -workers 1 to get the
+\* same answer twice. Measured that way, the shortest counterexample is 9
+\* steps for the refused line, 12 for the position taken over a restart line,
+\* and 9 for the log purged without the read position.
+\*
 \* Not modelled: how much of what is unread one round takes (row 3a) and which
 \* trace the caller reads (row 1b). Neither decides whether an atom is lost --
 \* they decide how many rounds it takes and how many rounds stop for nothing.
@@ -294,6 +305,26 @@ NextBuggy ==
     \/ RoundApplyDroppingRefused
 
 SpecBuggy == Init /\ [][NextBuggy]_vars
+
+\* Bug witness 3: the turn-boundary file is deleted while the read position that
+\* counted its lines is kept. Line numbers start at one again, so a restart line
+\* appended after the deletion sits at a number the position has already passed
+\* and row 3c never sees it. The purge plan removes the progress file with the
+\* boundary file for exactly this reason; this action takes the two apart.
+PurgeBoundariesKeepingProgress ==
+    /\ turn = NoTurn
+    /\ ~clearHalf
+    /\ snap = -1
+    /\ log # << >>
+    /\ log' = << >>
+    /\ UNCHANGED << hist, ckTurns, turn, progress, readIds, nextId, budget,
+                    clearHalf, snap >>
+
+NextPurgeSplit ==
+    \/ Next
+    \/ PurgeBoundariesKeepingProgress
+
+SpecPurgeSplit == Init /\ [][NextPurgeSplit]_vars
 
 \* Bug witness 2: a round takes a read position that matches the checkpoint over
 \* a restart line it has not counted. The position matches because the digest of

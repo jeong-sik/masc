@@ -11,6 +11,7 @@ open Alcotest
 module Range = Masc.Keeper_librarian_range
 module Boundaries = Masc.Keeper_turn_boundaries
 module Progress = Masc.Keeper_librarian_progress
+module Wire = Masc.Keeper_memory_os_types
 module Window = Runtime_model_input_tail_window
 module Types = Agent_core.Types
 
@@ -273,6 +274,24 @@ let test_a_restart_after_an_unreadable_line_lets_the_rounds_go_on () =
          ; 2, Error (Boundaries.Not_json "{")
          ; 3, Ok (turn_ended ~fresh:true saved)
          ; 4, Error (Boundaries.Not_json "{")
+         ]
+       saved);
+  (* The same shape with the two refusals of different kinds and no read
+     position, as the review of this file put it: the decoder refuses on its
+     own terms and both terms have to be asked. *)
+  let malformed =
+    Boundaries.Malformed
+      { Wire.path = []; reason = Wire.Expected_object }
+  in
+  check string "the kind of refusal does not change which line stops the round"
+    "stop: line 5 unreadable"
+    (select
+       ~lines:
+         [ 1, Ok (turn_ended ~fresh:true (history 1))
+         ; 2, Error (Boundaries.Not_json "x")
+         ; 3, Ok (restarted ())
+         ; 4, Ok (turn_ended ~turn:2 ~fresh:true saved)
+         ; 5, Error malformed
          ]
        saved)
 ;;

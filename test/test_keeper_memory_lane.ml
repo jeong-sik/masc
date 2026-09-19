@@ -707,7 +707,11 @@ let test_finished_switch_drops_without_leak () =
      Alcotest.fail "expected Dropped, got Rejected_draining");
   match Lane.For_testing.pending ~base_path ~keeper_name:"k1" with
   | Some 0 ->
-    (match Lane.drain_and_join_librarian ~base_path ~keeper_name:"k1" with
+    let drain () =
+      Eio_main.run (fun _env ->
+        Lane.drain_and_join_librarian ~base_path ~keeper_name:"k1")
+    in
+    (match drain () with
      | Error (Lane.Librarian_interrupted (Keeper_lane.Failed _)) -> ()
      | Error error ->
        Alcotest.failf
@@ -723,7 +727,7 @@ let test_finished_switch_drops_without_leak () =
        Alcotest.fail
          ("finished-switch receipt prevented lifecycle reopen: "
           ^ Lane.lifecycle_open_error_to_string error));
-    (match Lane.drain_and_join_librarian ~base_path ~keeper_name:"k1" with
+    (match drain () with
      | Ok Lane.No_librarian_work -> ()
      | Ok Lane.Librarian_drained ->
        Alcotest.fail "reopened empty lifecycle retained stale completed work"

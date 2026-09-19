@@ -181,7 +181,7 @@ done
 # Reachability guard: the clean model must be able to reach a returned Task.
 # Expects a violation, so it goes red the day that stops being true.
 run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla" \
-  "TaskOwnership-rejected-reachable.cfg" "rejected-reachable"
+  "TaskOwnership-rejected-reachable-buggy.cfg" "rejected-reachable"
 
 
 # Server lifecycle product invariants across lifecycle/lazy/readiness axes.

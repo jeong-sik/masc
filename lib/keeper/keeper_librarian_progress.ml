@@ -4,10 +4,8 @@
 module W = Keeper_memory_os_types
 
 let ( let* ) = Result.bind
-let suffix = ".librarian-progress.json"
-
 let path_for_keepers_dir ~keepers_dir ~keeper_id =
-  Filename.concat keepers_dir (keeper_id ^ suffix)
+  Filename.concat (Filename.concat keepers_dir keeper_id) "librarian-progress.json"
 ;;
 
 type position =
@@ -148,7 +146,7 @@ let write ~keepers_dir ~keeper_id progress =
     let path = path_for_keepers_dir ~keepers_dir ~keeper_id in
     let failed message = Error (Write_failed { path; message }) in
     (match
-       Fs_compat.mkdir_p keepers_dir;
+       Fs_compat.mkdir_p (Filename.dirname path);
        Fs_compat.save_file_atomic_strict path (Yojson.Safe.to_string (to_json progress))
      with
      | Ok () -> Ok ()

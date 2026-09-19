@@ -108,7 +108,8 @@ status: reference
   크기는 고르지 않아서 Atom 개수는 위치를 말할 뿐 요청 크기를 말하지 않는다.
 
 **Turn Boundary**
-: 끝난 Keeper turn이 남기는 한 줄(`<keeper>.turn-boundaries.jsonl`). 그 turn이
+: 끝난 Keeper turn이 남기는 한 줄(`keepers/<keeper>/turn-boundaries.jsonl`).
+  선택한 cluster의 runtime root 아래에 저장한다. 그 turn이
   끝났을 때 저장된 History가 몇 Atom인지와 마지막 Atom의 digest를 적는다.
   History 안에는 turn의 경계가 없으므로, turn이라는 사건을 History 안의 위치로
   옮겨 적는 유일한 기록이다. turn이 Atom이 없는 History에서 시작했는지
@@ -124,7 +125,8 @@ status: reference
   줄과 `history_restarted` 줄은 읽는 쪽에 같은 말을 한다.
 
 **Read Position**
-: Librarian이 History를 어디까지 읽었는지 적은 값(`<keeper>.librarian-progress.json`).
+: Librarian이 History를 어디까지 읽었는지 적은 값(`keepers/<keeper>/librarian-progress.json`).
+  Turn Boundary와 같은 cluster의 Keeper runtime 디렉터리에 저장한다.
   Turn Boundary 파일의 줄 번호가 아니라 값이다: trace, 읽은 Atom 수, 마지막으로
   읽은 Atom을 여는 Message의 digest. 그 파일에는 지난 History의 줄도 남아 있어서
   줄 번호로는 지금 History 안의 자리를 말할 수 없다. 파일이 없으면 아직 읽은 적이 없다는 뜻이다. 못

@@ -84,9 +84,7 @@ let record_turn_boundary
     in
     (match
        Keeper_turn_boundaries.append
-         ~keepers_dir:
-           (Config_dir_resolver.keepers_dir_for_base_path
-              ~base_path:config.Workspace.base_path)
+         ~keepers_dir:(Workspace.keepers_runtime_dir config)
          ~keeper_id:meta.name
          record
      with

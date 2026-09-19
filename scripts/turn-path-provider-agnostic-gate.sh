@@ -118,10 +118,16 @@ scan() {
     echo "the globs no longer match anything, so the gate would pass vacuously" >&2
     return 2
   fi
-  local raw_hit allowed_stripped
+  local raw_hit allowed_stripped hit_text
   while IFS= read -r raw_hit; do
     [ -z "${raw_hit}" ] && continue
-    allowed_stripped="$(strip_allowed "${raw_hit#*: *: }")"
+    # rg prints `path:line:text` with no space after either colon, so a
+    # pattern that asks for colon-space never matched and the path stayed in
+    # the text the vendor check re-reads. A worktree under fix/glm-… then
+    # failed this gate with no source change at all. Drop the two fields.
+    hit_text="${raw_hit#*:}"
+    hit_text="${hit_text#*:}"
+    allowed_stripped="$(strip_allowed "${hit_text}")"
     # Re-run the vendor pattern on the stripped text; report the line only
     # when a vendor name survives the strip.
     if printf '%s' "${allowed_stripped}" | rg -q --ignore-case "${VENDOR_PATTERN}"; then

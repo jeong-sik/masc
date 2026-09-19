@@ -72,6 +72,7 @@ type provider_entry = Model_provider_catalog.entry =
   ; capabilities_base : string option
   ; capabilities_base_by_identity_kind : (Provider_kind.t * string) list
   ; identity_hosts : string list
+  ; supports_parallel_tool_suppression : bool
   }
 
 type t =

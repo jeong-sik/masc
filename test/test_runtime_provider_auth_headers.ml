@@ -2794,6 +2794,50 @@ disable-parallel-tool-use = "true"
       (List.exists (fun (error : Runtime_toml.parse_error) ->
            String.equal error.path "p.m.disable-parallel-tool-use") errors)
 
+let test_parallel_policy_requires_provider_contract () =
+  List.iter (fun provider_id ->
+    let cfg, binding = parallel_policy_runtime ~provider_id
+        ~protocol:"openai-compatible-http" ~model_id:"glm-5.3"
+        ~policy:"disable-parallel-tool-use = true" in
+    let expected = Printf.sprintf
+        "binding %s.probe declares disable-parallel-tool-use = true, but provider %S has no catalog-declared parallel tool suppression contract"
+        provider_id provider_id in
+    let check_refusal = function
+      | Error error -> check string "missing provider contract is explicit" expected error
+      | Ok _ -> fail "wire compatibility silently accepted suppression" in
+    check_refusal (Runtime_adapter.binding_to_execution cfg binding);
+    check_refusal (Runtime_adapter.binding_to_provider_config cfg binding)
+  ) [ "glm-coding"; "unregistered-endpoint" ];
+  let cfg, _ = parallel_policy_runtime ~provider_id:"claude"
+      ~protocol:"messages-http" ~model_id:"claude-fable-5" ~policy:"" in
+  let provider = { (List.hd cfg.providers) with Runtime_schema.id = "fixture-alias" } in
+  let catalog value = Printf.sprintf {|[[providers]]
+id = "fixture-provider"
+aliases = ["fixture-alias"]
+kind = "anthropic"
+base_url = "https://fixture.invalid"
+request_path = "/v1/messages"
+api_key_env = ""
+%s
+|} value in
+  List.iter (fun (declaration, supported) ->
+    with_model_catalog (catalog declaration) (fun () ->
+      let result = Runtime_adapter.validate_parallel_tool_policy provider
+          ~model_id:"probe" ~disable_parallel_tool_use:true in
+      check bool "canonical alias uses only the provider contract" supported
+        (Result.is_ok result);
+      check bool "no suppression request needs no contract" true
+        (Result.is_ok (Runtime_adapter.validate_parallel_tool_policy provider
+          ~model_id:"probe" ~disable_parallel_tool_use:false)))
+  ) [ "", false; "supports_parallel_tool_suppression = false", false;
+      "supports_parallel_tool_suppression = true", true ];
+  match Llm_provider.Model_catalog.of_toml_string ~source:"parallel-contract-type"
+      (catalog "supports_parallel_tool_suppression = \"true\"") with
+  | Error error -> check string "provider contract rejects a string"
+      "provider entry \"fixture-provider\" field \"supports_parallel_tool_suppression\" expected bool"
+      error
+  | Ok _ -> fail "provider contract silently accepted a string"
+
 let () =
   run "runtime_provider_auth_headers"
     [ ( "provider_config"
@@ -2803,6 +2847,8 @@ let () =
             `Quick test_parallel_policy_rejects_unsupported_runtimes
         ; test_case "parallel policy rejects a wrong-typed value"
             `Quick test_parallel_policy_wrong_type_is_rejected
+        ; test_case "parallel policy requires a canonical provider contract"
+            `Quick test_parallel_policy_requires_provider_contract
         ; test_case
             "runtime binding materialization preserves failure reason"
             `Quick

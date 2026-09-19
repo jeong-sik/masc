@@ -97,6 +97,8 @@ keeper TOML `tools.deny` 로 막는다.
 HTTP 레인의 b·c·d는 runtime binding(`[<provider>.<model>]`)에
 `disable-parallel-tool-use = true`를 적는다. e 이후는 `false`다.
 이 값은 요청 정책이며, 카탈로그의 `supports_parallel_tool_calls`는 바꾸지 않는다.
+provider catalog에 `supports_parallel_tool_suppression = true`인 서비스만 이
+정책을 허용한다. 미선언 서비스는 같은 HTTP 프로토콜을 써도 설정을 거절한다.
 Anthropic 요청에서는 `tool_choice.disable_parallel_tool_use`, OpenAI 요청에서는
 `parallel_tool_calls = false`로 전달된다. `false`는 카탈로그가 허용한 병렬 호출을
 억제하지 않는다는 뜻이다. 실제로 몇 개를 호출했는지는 실행 기록으로 확인한다.

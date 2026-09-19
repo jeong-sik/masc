@@ -486,6 +486,81 @@ let test_board_read_scroll_reaches_hidden_comments () =
   check int "negative scroll normalizes to zero" 0
     negative.normalized_scroll
 
+(* Below the minimum the post column would be too narrow to read once the
+   comment column takes its fixed share, so the pane falls back to the
+   stacked layout instead of drawing an unreadable post. At and above it, the
+   two columns always add back up to the pane's own width -- nothing is
+   dropped between them, and nothing is drawn twice. *)
+let test_board_read_side_layout_falls_back_when_narrow () =
+  check bool "79 cols keeps the stacked layout" true
+    (Schedule.board_read_side_layout ~cols:79 = None);
+  check bool "99 cols keeps the stacked layout" true
+    (Schedule.board_read_side_layout ~cols:99 = None);
+  for cols = Schedule.board_read_side_minimum_cols to 220 do
+    match Schedule.board_read_side_layout ~cols with
+    | None -> failf "cols=%d: expected a side layout at or above the minimum" cols
+    | Some (body_cols, comment_cols) ->
+        if body_cols + comment_cols <> cols then
+          failf "cols=%d: columns do not sum to the pane width (%d + %d)"
+            cols body_cols comment_cols;
+        if comment_cols < 24 then
+          failf "cols=%d: comment column is too narrow to read (%d)" cols
+            comment_cols;
+        if body_cols < 40 then
+          failf "cols=%d: post column is too narrow to read (%d)" cols
+            body_cols
+  done
+
+(* The heading is drawn from the comment column's own share, so a column with
+   any thread in it always has room for the heading and at least one line
+   under it -- never a heading alone. *)
+let test_board_read_side_allocation_reserves_the_heading () =
+  for terminal_rows = 9 to 40 do
+    for comment_count = 0 to 12 do
+      let allocation =
+        Schedule.allocate_board_read_side ~terminal_rows ~body_line_count:20
+          ~comment_count
+      in
+      if comment_count > 0 && allocation.comment_rows > 0
+         && allocation.comment_rows < 2
+      then
+        failf
+          "rows=%d comments=%d: comment column has a heading with no room \
+           under it (%d rows)"
+          terminal_rows comment_count allocation.comment_rows;
+      if allocation.body_rows < 0 || allocation.comment_rows < 0 then
+        failf "rows=%d comments=%d: negative row allocation" terminal_rows
+          comment_count
+    done
+  done;
+  let no_comments =
+    Schedule.allocate_board_read_side ~terminal_rows:30 ~body_line_count:20
+      ~comment_count:0
+  in
+  check int "no thread spends no row on a heading" 0 no_comments.comment_rows
+
+(* The side layout does not own a scroll of its own: it windows through
+   [project_board_read_scroll], the same function the stacked layout always
+   used, with the side allocation's rows in place of the stacked ones. So a
+   post beside its thread opens exactly like a post above its thread --
+   both columns at their head -- and a keyboard scenario that presses Enter
+   and expects the oldest comment waiting at the top, before anything has
+   scrolled, sees it either way. *)
+let test_board_read_side_layout_opens_head_first () =
+  let allocation =
+    Schedule.allocate_board_read_side ~terminal_rows:16 ~body_line_count:20
+      ~comment_count:20
+  in
+  check bool "this allocation has room for a heading and a line under it"
+    true (allocation.comment_rows >= 2);
+  let comment_rows = allocation.comment_rows - 1 (* the heading's own row *) in
+  let opening =
+    Schedule.project_board_read_scroll ~body_line_count:20
+      ~body_rows:allocation.body_rows ~comment_count:20 ~comment_rows 0
+  in
+  check int "post opens at its head" 0 opening.body_offset;
+  check int "thread opens at its head, not its tail" 0 opening.comment_offset
+
 let test_keeper_detail_scroll_normalizes_across_bounds () =
   let normalize = Schedule.normalize_keeper_detail_scroll in
   let bottom = normalize ~line_count:29 ~content_height:14 max_int in
@@ -1814,6 +1889,12 @@ let () =
             test_board_read_rows_reserve_comments_and_footer
         ; test_case "board read reaches hidden comments" `Quick
             test_board_read_scroll_reaches_hidden_comments
+        ; test_case "board read side layout falls back when narrow" `Quick
+            test_board_read_side_layout_falls_back_when_narrow
+        ; test_case "board read side allocation reserves the heading" `Quick
+            test_board_read_side_allocation_reserves_the_heading
+        ; test_case "board read side layout opens head-first" `Quick
+            test_board_read_side_layout_opens_head_first
         ; test_case "keeper detail scroll follows current bounds" `Quick
             test_keeper_detail_scroll_normalizes_across_bounds
         ; test_case "overview events follow and preserve manual anchor" `Quick

@@ -338,6 +338,72 @@ let project_board_read_scroll ~body_line_count ~body_rows ~comment_count
   in
   { normalized_scroll; body_offset; comment_offset }
 
+(* The thread beside the post needs the post column to stay a reading column
+   and the comment column to be more than a gutter: below this width the
+   stacked layout keeps both readable, so it is what the surface falls back
+   to. The comment column is fixed, not a share -- a thread column that
+   changes width as the terminal does would re-wrap its entries under the
+   reader. *)
+let board_read_side_minimum_cols = 100
+let board_read_side_comment_cols = 40
+
+let board_read_side_layout ~cols =
+  let comment_cols = min board_read_side_comment_cols (max 0 (cols / 3)) in
+  let body_cols = cols - comment_cols - 2 in
+  if cols >= board_read_side_minimum_cols && body_cols >= 40 && comment_cols >= 24
+  then Some (body_cols, comment_cols + 2)
+  else None
+
+type board_read_side_allocation = {
+  body_rows : int;
+  comment_rows : int;
+}
+
+let allocate_board_read_side ~terminal_rows ~body_line_count ~comment_count =
+  let body_line_count = max 0 body_line_count in
+  let comment_count = max 0 comment_count in
+  let available =
+    max 0
+      (terminal_rows - board_read_box_rows - board_read_footer_rows
+       - board_read_position_rows)
+  in
+  let minimum_body_rows = if body_line_count > 0 then 1 else 0 in
+  (* The heading spends the comment column's own first row, so a column that
+     shows any thread content needs the heading plus at least one line under
+     it -- one row alone would be the heading with nothing readable below. *)
+  let comment_header_rows = if comment_count > 0 then 1 else 0 in
+  let minimum_comment_rows =
+    if comment_count > 0 then comment_header_rows + 1 else 0
+  in
+  let comment_target =
+    comment_header_rows
+    + min comment_count (max 0 ((available / 2) - comment_header_rows))
+  in
+  let comment_rows =
+    min (max 0 (available - minimum_body_rows))
+      (max minimum_comment_rows comment_target)
+  in
+  (* A viewport too short to afford the heading's own minimum collapses the
+     column instead of drawing the heading alone -- a label with nothing
+     readable under it is worse than not drawing the column at all, and the
+     row goes back to the post, which can always use one. *)
+  let comment_rows =
+    if comment_rows > 0 && comment_rows < minimum_comment_rows then 0
+    else comment_rows
+  in
+  let body_rows = max 0 (available - comment_rows) in
+  { body_rows; comment_rows }
+
+(* Windowing the side columns is the same problem [project_board_read_scroll]
+   already solves for the stacked layout -- one scalar, body consumed before
+   comments, both counted in rows. The heading is not part of [comment_rows]
+   here; the caller passes the comment column's rows under it. Opening a post
+   reads the same either way: this used to default to the thread's tail
+   instead, and the read of "Comment 000" waiting at the top the moment a
+   post opens -- something a keyboard scenario already depended on -- was
+   never true beside the post until this went back to reusing the one
+   function everything else here already relies on. *)
+
 (* Keeper roster columns.
 
    Cell widths, not text. Every width here is a plain-text budget the renderer

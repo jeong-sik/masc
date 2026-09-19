@@ -13,7 +13,7 @@ type range =
 
 type extent =
   | All_unread
-  | Oldest_turn_only
+  | To_first_cut_point
 
 type stop =
   | Unreadable_line of
@@ -196,8 +196,8 @@ let select ~trace_id ~lines ~progress ~messages extent =
           in
           let chosen =
             match extent, beyond with
-            | (All_unread | Oldest_turn_only), [] -> None
-            | Oldest_turn_only, first :: _ -> Some first
+            | (All_unread | To_first_cut_point), [] -> None
+            | To_first_cut_point, first :: _ -> Some first
             | All_unread, first :: rest -> Some (List.fold_left (fun _ next -> next) first rest)
           in
           (match chosen with

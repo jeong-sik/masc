@@ -311,7 +311,7 @@ let test_after_a_failed_round_only_the_oldest_turn_is_read () =
   check string "everything unread" "read [0,6) seen=4" (select ~lines saved);
   check string "the oldest turn only"
     "read [0,2) seen=4"
-    (select ~extent:Range.Oldest_turn_only ~lines saved)
+    (select ~extent:Range.To_first_cut_point ~lines saved)
 ;;
 
 (* {1 The shortest counterexamples of the model} *)

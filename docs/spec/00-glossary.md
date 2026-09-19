@@ -118,7 +118,7 @@ status: reference
 
 **Current Task**
 : 에이전트 기록의 `current_task`, Keeper meta 의 `current_task_id`, planning 의 current
-  task. 권위는 backlog 이고 이 셋은 거기서 다시 계산되는 표시다.
+  task. 기준은 backlog 이고 이 셋은 거기서 다시 계산되는 표시다.
 
 ## Repository Execution
 

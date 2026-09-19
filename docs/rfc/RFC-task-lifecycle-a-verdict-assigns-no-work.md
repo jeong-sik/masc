@@ -37,7 +37,7 @@ Task 하나에는 서로 다른 사실 세 가지가 들어 있다.
 | # | 지금 | 바꾼 뒤 |
 |---|---|---|
 | 1 | 거절 판정이 Task 를 제출자의 `InProgress` 로 돌린다. handoff 는 판정 사유로 덮어쓴다 | 거절 판정은 Task 를 `Todo` 로 돌린다. 제출자가 남긴 handoff 는 두고 사유를 더한다 |
-| 2 | 맡은 쪽의 `Cancel` 은 판정을 기다리고 운영자만 승인한다 | 없앤다. 손을 떼는 길은 §3.4 의 세 갈래다 |
+| 2 | 맡은 쪽의 `Cancel` 은 판정을 기다리고 운영자만 승인한다 | 없앤다. 맡은 일을 더 하지 않게 되는 길은 §3.4 의 세 갈래다 |
 | 3 | `Todo` 의 `Cancel` 은 누구나 즉시 된다 | `Cancel` 은 만든 쪽과 운영자만 한다. 어느 상태에서든 즉시 된다 |
 | 4 | 제출에 `intent = Complete_task \| Cancel_task` 가 있다 | `intent` 를 지운다. 판정을 기다리는 것은 완료 제출뿐이다 |
 
@@ -52,7 +52,7 @@ Task 하나에는 서로 다른 사실 세 가지가 들어 있다.
 | 이 문서의 말 | 코드 이름 | 뜻 |
 |---|---|---|
 | 만든 쪽 | `created_by` | 그 Task 를 만든 에이전트나 사람. 만들 때 한 번 적히고 바뀌지 않는다 |
-| 맡다, 맡은 쪽 | `Claim`, `Claimed`·`InProgress` 의 `assignee` | 지금 그 일을 하고 있는 에이전트. 한 에이전트는 하나만 맡는다 |
+| 맡다, 맡은 쪽, 담당 | `Claim`, `Claimed`·`InProgress` 의 `assignee` | 지금 그 일을 하고 있는 에이전트와 그 사실. 한 에이전트는 하나만 맡는다 |
 | 놓다 | `Release` | 맡은 쪽이 Task 를 `Todo` 로 돌려놓는 것 |
 | 제출, 제출자 | `Submit_for_verification`, `producer` | 맡은 쪽이 증거와 함께 "끝났다"고 내는 것과 낸 쪽. 제출하면 더는 맡고 있지 않다 |
 | 판정 | `completion_verdict` | 제출에 대한 답. 승인(`Verdict_approved`)이거나 거절(`Verdict_rejected`)이다 |
@@ -63,6 +63,11 @@ Task 하나에는 서로 다른 사실 세 가지가 들어 있다.
 
 `handoff` 는 `handoff_context` 를 줄여 부른 것이다.
 
+표준국어대사전에서 확인한 것 둘. `Release` 를 "놓다" 로 쓰는 것은 "계속해 오던 일을 그만두다"(놓다
+「2」)에 기댄다. `Cancel` 을 "철회" 라 하지 않는 것은 철회가 "이미 제출하였던 것이나 주장하였던
+것을 다시 회수하거나 번복함" 이라, 한 번도 제출된 적 없는 `Todo` 에는 맞지 않기 때문이다. "취소" 는
+"예정된 일을 없애 버림" 이라 어느 상태에나 맞는다.
+
 ## 1. 실측 (2026-09-18 11:27Z, `<base-path>/.masc`, backlog version 6573)
 
 Task 1,126건: `todo` 640, `done` 347, `awaiting_verification` 66, `cancelled` 56, `in_progress` 17.
@@ -71,7 +76,7 @@ Task 1,126건: `todo` 640, `done` 347, `awaiting_verification` 66, `cancelled` 5
 
 ### 1.1 판정이 돌려보낸 Task 가 쌓인다
 
-맡겨진 Task 17건을 누가 몇 개 들고 있는지 보면 이렇다.
+맡겨진 Task 17건을 누가 몇 개 맡고 있는지 보면 이렇다.
 
 | 맡은 쪽 | 개수 | 마지막 handoff 를 쓴 쪽 | 어떻게 왔나 |
 |---|---|---|---|
@@ -81,7 +86,7 @@ Task 1,126건: `todo` 640, `done` 347, `awaiting_verification` 66, `cancelled` 5
 | 나머지 4명 | 각 1 | 본인 또는 없음 | 직접 claim |
 
 한 번에 하나만 맡는다는 규칙을 어긴 12건은 전부 판정이 돌려보낸 것이다. 직접 claim 해서 둘 이상을
-들고 있는 경우는 없다.
+맡은 경우는 없다.
 
 - 한 번에 하나만 맡는지 보는 검사는 claim 에만 있다: `workspace_task_claim.ml:20-35` 가 본인의
   `Claimed`·`InProgress` 를 세고, 적용 지점은 `claim_task_r`, `transition(Claim)`, `claim_next_r` 셋이다.
@@ -190,9 +195,9 @@ gate `evaluator_unavailable` 로 끝냈다: "The admitted verifier slot cannot c
 
 ## 2. 원칙
 
-1. **사실마다 쓰는 쪽이 정해져 있다.** §0 의 첫 표가 그것이다. Task 가 닫히면 맡음과 제출도 같이
-   끝난다. 닫힌 Task 는 빚진 것도 기다리는 것도 없다. 그래서 Task 를 닫을 수 있는 쪽은 맡은 쪽과 제출도
-   비운다. 선을 넘는 쓰기는 이것 하나다.
+1. **사실마다 쓰는 쪽이 정해져 있다.** §0 의 첫 표가 그것이다. Task 가 닫히면 담당과 제출도 같이
+   끝난다. 닫힌 Task 는 누구에게 일을 남기지도, 무엇을 기다리지도 않는다. 그래서 Task 를 닫을 수 있는
+   쪽은 담당과 제출도 함께 비운다. 선을 넘는 쓰기는 이것 하나다.
 2. **판정은 제출에 답할 뿐이다.** 승인이면 Task 를 닫고, 거절이면 Task 를 아무도 안 맡은 자리로 돌려
    놓는다. 누가 다음에 일할지는 정하지 않는다. 이 저장소의 자율성 원칙 그대로다: 원장은 사실을
    기록하고, 다음 행동은 Keeper 가 고른다.
@@ -290,7 +295,7 @@ cancel 을 권하거나 만든 쪽에게도 안 보여 주게 된다.
 | 거절(사유 필수) | **`Todo`**. handoff 는 아래 설명대로 | **`None`** | 알림 한 건(§3.6). 의무는 없다 |
 | 판정하지 못함(판정 에이전트 장애, 설정 오류) | 그대로 `AwaitingVerification` | — | §3.7 |
 
-- **거절의 handoff.** 제출자가 제출하면서 남긴 `summary` 와 `evidence_refs` 는 그대로 둔다. 다음에 잡는
+- **거절의 handoff.** 제출자가 제출하면서 남긴 `summary` 와 `evidence_refs` 는 그대로 둔다. 다음에 맡는
   쪽이 브랜치와 PR 위치를 거기서 읽는다. 판정 사유는 `reason` 에만 넣고 `updated_by` 는 판정한 쪽이다.
   `evidence_refs` 에 `verification_id` 를 넣지 않는다. 열 수 없는 참조이기 때문이다. 그 id 는 거절 알림과
   전이 로그에 있다.
@@ -313,7 +318,7 @@ cancel 을 권하거나 만든 쪽에게도 안 보여 주게 된다.
   다시 제출되면 클릭이 N+1번째에 적용된다. 판정 에이전트 쪽에는 이미 있는 검사다
   (`Verification_id_mismatch`).
 
-### 3.4 맡은 쪽이 손을 떼는 세 갈래
+### 3.4 맡은 일을 더 하지 않게 되는 세 갈래
 
 | 맡은 쪽의 사정 | 하는 일 | 걸리는 시간 |
 |---|---|---|
@@ -381,7 +386,7 @@ type cancel_standing =
 
 아직 전달되지 않은 거절 알림(`pending_completion_rejections` 의 항목)은 `(task_id, verification_id,
 producer)` 로 지운다. 지금은 그 Task 의 다음 `Release`·`Submit` 등이 `task_id` 만 보고 지운다
-(`workspace_task_transitions.ml:423-437`). 거절된 Task 를 남이 잡았다 놓으면 제출자의 알림이 전달되기 전에
+(`workspace_task_transitions.ml:423-437`). 거절된 Task 를 남이 맡았다 놓으면 제출자의 알림이 전달되기 전에
 사라진다. 지금은 거절 뒤 Task 가 제출자 것이라 생기지 않던 경우다.
 
 ### 3.7 운영자 목록
@@ -449,14 +454,14 @@ producer)` 로 지운다. 지금은 그 Task 의 다음 `Release`·`Submit` 등�
 | 0417 | 원칙은 유지, 수단은 대체. 취소 **판정**이 없어지므로 운영자 전용 승인도 없어진다. 운영자는 어떤 Task 든 직접 취소할 수 있다 |
 | 0455 | §3.2 를 일반 규칙으로 올리고, §3.3 의 `Cancel_claim` 을 `Awaiting_verdict` 로 바꾼다. §3.4 는 대상이 없어진다 |
 | 0445, 0446 | 건드리지 않는다. `next_actor` 어휘와 계약 없는 제출 거절은 이 설계 위에서 그대로 성립한다 |
-| 0221, 0365 | 그대로 따른다. 결과의 권위는 `task_status` 하나이고, handoff 는 나갈 때 쓰고 들어올 때 읽는다 |
+| 0221, 0365 | 그대로 따른다. 결과를 말하는 것은 `task_status` 하나이고, handoff 는 나갈 때 쓰고 들어올 때 읽는다 |
 
 ## 4. 검증
 
 ### 4.1 TLA+ (이 PR 에 포함, `scripts/tla-check.sh` 에 연결)
 
 `specs/task-lifecycle/TaskOwnership.tla`: Task 2개, 에이전트 2명, 제출 2회. 한 에이전트가 Task 둘을
-들게 되는 가장 작은 모델이다. 변수와 액션 이름은 코드를 따른다(`created_by`, `holder`, `producer`,
+맡게 되는 가장 작은 모델이다. 변수와 액션 이름은 코드를 따른다(`created_by`, `holder`, `producer`,
 `Cancel`, approved, rejected). 깨끗한 모델에는 판정 에이전트가 답하지 못하고 멈추는 경우
 (`JudgeCannotAnswer`)와 운영자가 직접 답하는 경우(`OperatorReturns`)가 들어 있다. 버그 모델마다 cfg 를 따로
 두고 속성을 하나만 적었다. 묶어 두면 TLC 가 가장 짧은 반례 하나만 보고해서 나머지 속성이 일을 안 한다.
@@ -482,7 +487,7 @@ producer)` 로 지운다. 지금은 그 Task 의 다음 `Release`·`Submit` 등�
 - `NoOperatorOnlySubmissionKind` 는 제출의 **종류**에 대한 말이다. 판정이 고장 나서 운영자가 고쳐야 하는
   경우는 깨끗한 모델에도 있고, 이 속성은 그것을 막지 않는다. 기다리는 시간에 대한 주장은 스펙에 없다.
 - `-buggy` 의 반례는 §1.1 의 실제 경로와 같다: a1 이 t1 을 맡는다. 제출한다. t2 를 맡는다. t1 이
-  거절된다. a1 이 t1 과 t2 를 든다.
+  거절된다. a1 이 t1 과 t2 를 맡고 있다.
 
 ### 4.2 구현이 끝났는지 재는 값
 
@@ -507,12 +512,12 @@ OCaml 쪽은 임의의 액션·판정 열을 돌려 `OneTaskPerAgent` 를 확인
 | `Cancel` 을 `Withdraw` 로 이름 바꾸기 | 초안에 있었고 뺐다. 액션만 Withdraw 이고 상태·wire·알림은 Cancelled 로 남아 같은 것을 두 이름으로 부르게 된다. 뜻이 바뀐 것은 도구 설명과 거절 문장이 알려 준다 |
 | 제출자 칸에 새 이름(`submitter`) | 초안에 있었고 뺐다. 코드가 이미 `producer` 라고 부른다(§1.7) |
 | `cycle_count` 를 거절에도 올리기 | 검토 중에 넣었다가 뺐다. TUI 한 줄에만 쓰이는 값에 일을 더하는 것이다. 이 RFC 는 이 값을 건드리지 않는다 |
-| 맡음에 시간 제한(lease, visibility timeout) | `no_wall_clock_death`. SQS 식 설계는 이 저장소에서 금지다 |
+| 담당에 시간 제한(lease, visibility timeout) | `no_wall_clock_death`. SQS 식 설계는 이 저장소에서 금지다 |
 | 세션이 끝나면 맡은 Task 를 놓기 | 재 보니 이 경로로 생긴 방치가 17건 중 0건이다. `end_session` 은 `lib/` 와 `bin/` 에 호출하는 곳이 없고, 여러 세션이 한 이름(`codex-mcp-client`)을 쓰므로 한 세션의 종료가 다른 세션의 Task 를 놓게 된다. Keeper 종료는 이미 놓는다(`keeper_shutdown_finalize.ml:137-169`). 나머지는 `Held_without_actor` 가 보여 준다 |
-| 거절된 Task 를 제출자에게 먼저 주기 | 제출자 몫으로 잡아 두는 것은 숨은 맡음이다. 이 RFC 가 없애려는 바로 그것이다 |
+| 거절된 Task 를 제출자에게 먼저 주기 | 제출자 몫으로 남겨 두는 것은 이름 없는 담당이다. 이 RFC 가 없애려는 바로 그것이다 |
 | 판정 토큰을 셋으로(`REFUTED`/`UNVERIFIABLE`) | 두 거절의 결과가 같다. 판정 품질은 calibration 기록으로 따로 본다 |
 | 거절 사유 글자 수·내용 검사 | "no reason" 이 통과했다. 성의는 검사로 만들 수 없고, 거절이 남에게 일을 떠넘기지 못하게 하면 성의 없는 거절의 해가 사라진다 |
-| Task 를 사건 기록(event sourcing)으로 다시 짜기 | 결과의 권위는 `task_status` 하나다(RFC-0221) |
+| Task 를 사건 기록(event sourcing)으로 다시 짜기 | 결과는 `task_status` 하나로만 정한다(RFC-0221) |
 | 쌓인 `todo` 640건 정리 | 생애주기가 아니라 Task 를 만드는 쪽의 문제다. 이 RFC 뒤에는 만든 쪽이 자기 Task 를 바로 취소할 수 있다 |
 
 ## 6. 단계
@@ -567,16 +572,16 @@ OCaml 쪽은 임의의 액션·판정 열을 돌려 `OneTaskPerAgent` 를 확인
 
 ## 8. 반론과 답
 
-**거절된 일을 아무도 다시 안 잡으면?** 지금도 같다. 2026-09-12 와 09-16 에 돌아온 12건은 그대로다.
-`Todo` 에 있으면 누구나 잡을 수 있고, 제출자도 알림을 받아 다시 잡을 수 있다. `InProgress` 에 묶여 있으면
-아무도 못 잡는다.
+**거절된 일을 아무도 다시 안 맡으면?** 지금도 같다. 2026-09-12 와 09-16 에 돌아온 12건은 그대로다.
+`Todo` 에 있으면 누구나 맡을 수 있고, 제출자도 알림을 받아 다시 맡을 수 있다. `InProgress` 에 묶여 있으면
+아무도 못 맡는다.
 
-**다른 Keeper 가 먼저 잡아서 같은 일을 다시 하면?** 생길 수 있다. 돌아온 Task 는 priority 와 생성 시각이
+**다른 Keeper 가 먼저 맡아서 같은 일을 다시 하면?** 생길 수 있다. 돌아온 Task 는 priority 와 생성 시각이
 그대로라 같은 priority 안에서 앞쪽에 서고(`workspace_task_schedule.ml:216-229`), 쉬고 있던 Keeper 가
-제출자보다 먼저 잡을 수 있다. claimable 목록은 `task_id` 만 보여 주므로 사유는 잡은 뒤에야 "Prior handoff"
-줄에서 읽는다. 그래서 §3.3 이 제출자의 summary 와 evidence_refs 를 handoff 에 남긴다. 잡은 쪽은 브랜치와
+제출자보다 먼저 맡을 수 있다. claimable 목록은 `task_id` 만 보여 주므로 사유는 맡은 뒤에야 "Prior handoff"
+줄에서 읽는다. 그래서 §3.3 이 제출자의 summary 와 evidence_refs 를 handoff 에 남긴다. 맡은 쪽은 브랜치와
 PR 위치, 그리고 판정 사유를 같이 본다. 제출자가 이미 다른 Task 를 맡고 있었다면 지금 방식으로도 그
-제출자는 돌아온 Task 를 할 수 없다. 보이지도 않는 Task 를 하나 더 들고 있을 뿐이다.
+제출자는 돌아온 Task 를 할 수 없다. 보이지도 않는 Task 를 하나 더 맡고 있을 뿐이다.
 
 **같은 Keeper 가 같은 증거로 계속 다시 내면?** 지금도 생긴다(task-174, 2시간에 59회). 그때의 답은
 횟수 상한이 아니라 읽을 수 없는 증거 참조를 제출 경계에서 거절하는 것이었고, 그 검사는 그대로 있다.
@@ -623,5 +628,5 @@ PR 을 닫힌 이슈라고 적음)이 바로 판정이 걸러야 하는 경우�
   handoff, `basis` 삭제, 운영자 자격을 만드는 자리, 운영자 목록의 출처, 배포 절차, 스펙의 버그 모델 셋이다.
 - 선행 사례: GitHub PR 리뷰는 Comment·Approve·Request changes 세 가지이고 어느 것도 담당자를 바꾸지
   않는다. Gerrit 의 Code-Review 0 은 "아직 의견 없음"이다. Jira 는 상태와 종결 사유(resolution)를
-  따로 둔다. SQS 의 visibility timeout 은 시간으로 맡음을 푸는 설계이고, 이 저장소의
+  따로 둔다. SQS 의 visibility timeout 은 시간으로 담당을 푸는 설계이고, 이 저장소의
   `no_wall_clock_death` 와 맞지 않아 쓰지 않는다.

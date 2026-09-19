@@ -406,8 +406,32 @@ type cancel_standing =
   | Operator of { operator_id : string } (* 인증된 운영자 경로에서만 *)
 ```
 
-`Named_by_state` 는 새 계산이 아니다. "이 상태에 누가 있는가" 는 이미 `task_actor_of_status` 하나가
-답한다(`types_core.ml:303-309`). 자격 검사는 그 답과 호출자를 견주는 한 줄이다.
+`Named_by_state` 는 자기 함수를 갖는다. 있는 함수를 그대로 쓰면 안 된다는 것이 2026-09-19 리뷰에서
+나왔다.
+
+```ocaml
+let cancel_standing_name = function
+  | Todo -> None
+  | Claimed { assignee; _ } | InProgress { assignee; _ } -> Some assignee
+  | AwaitingVerification { producer; _ } | Rejected { producer; _ } -> Some producer
+  | Done _ | Cancelled _ -> None
+```
+
+갈래를 다 적어서 상태가 늘면 컴파일러가 여기를 짚게 한다.
+
+왜 있는 것을 못 쓰는지가 중요하다. `task_actor_of_status` 는 `Done` 에 `Completer name`, `Cancelled` 에
+`Canceller name` 을 돌려준다. 이름을 들고 있다. 그걸 그대로 자격으로 읽으면 끝낸 사람이 자기 `Done` 을
+뒤집을 수 있다. 한 칸 아래 `task_assignee_of_status` 는 그 둘에 `None` 을 답해서 그 문제가 없는데
+(`types_core.ml:314-319`), 이번에는 `Rejected` 에서 갈린다. §3.1 이 `Rejected` 의 소유를 `None` 으로
+정했기 때문이다. 아무도 안 맡은 Task 가 다시 "네 것" 이 되지 않게 하려는 결정이었다.
+
+**"누가 이 일을 지고 있나" 와 "누가 이 일을 접을 수 있나" 는 다른 물음이고, `Rejected` 한 자리에서
+갈린다.** 반려된 Task 를 지고 있는 사람은 없지만, 더 안 하기로 정할 수 있는 사람은 낸 쪽이다. 두 물음을
+한 함수로 합치면 둘 중 하나가 틀린다.
+
+끝 상태는 전이 표가 먼저 막는다. `Cancel` 은 `Done` 에서 `Invalid_transition` 이고
+(`workspace_task_lifecycle.ml:152`), `Cancelled` 에서는 상태를 그대로 돌려주는 멱등이다(`:112`). 그래서
+위 함수의 `None` 두 줄은 두 번째 자물쇠다.
 
 | 상태 | 취소할 수 있는 쪽 | 왜 |
 |---|---|---|

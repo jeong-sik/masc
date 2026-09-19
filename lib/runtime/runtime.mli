@@ -865,7 +865,7 @@ val set_runtime_lane_candidates :
     SSOT writer, validate the resulting config, atomically write it, and refresh
     the in-process runtime cache. The list order is the failover order. Creates
     the lane table when the id has none — a runtime whose lane was synthesized
-    ([self, default]) becomes a declared lane the first time an operator adds a
+    ([self]) becomes a declared lane the first time an operator adds a
     candidate to it. An empty [runtime_ids] is rejected: a lane that resolves to
     nothing is not the same edit as removing the lane. *)
 

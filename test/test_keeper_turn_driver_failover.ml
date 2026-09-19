@@ -567,14 +567,13 @@ let test_resolve_assignment_prefers_lane_over_runtime () =
         "primary.test_model"
         (Runtime_lane.id lane);
       Alcotest.(check (list string))
-        "declared candidates keep their order, then the default terminates"
-        [ "fallback.test_model"; "primary.test_model" ]
+        "the lane walks exactly its declared candidates"
+        [ "fallback.test_model" ]
         (Runtime_lane.ordered_candidates lane))
 
-(* A keeper assigned to a bare runtime id used to dispatch without a lane, which
-   turned off failover and quota demotion at once.
-   It now gets a lane of its own that ends at [runtime].default. *)
-let test_bare_runtime_assignment_gets_a_lane_with_somewhere_to_go () =
+(* A keeper assigned to a runtime that no lane names walks that runtime and
+   nothing else: [runtime].default is not a fallback for it. *)
+let test_bare_runtime_assignment_walks_only_itself () =
   with_runtime_config runtime_toml_with_lane (fun () ->
     match Runtime.resolve_assignment "fallback.test_model" with
     | `Missing | `Unavailable _ -> Alcotest.fail "expected runtime to resolve"
@@ -584,19 +583,8 @@ let test_bare_runtime_assignment_gets_a_lane_with_somewhere_to_go () =
         "fallback.test_model"
         (Runtime_lane.id lane);
       Alcotest.(check (list string))
-        "the assigned runtime is head, the default terminates the walk"
-        [ "fallback.test_model"; "primary.test_model" ]
-        (Runtime_lane.ordered_candidates lane))
-
-(* The default must not be appended twice when a lane already names it. *)
-let test_lane_already_naming_the_default_is_unchanged () =
-  with_runtime_config runtime_toml_with_lane (fun () ->
-    match Runtime.resolve_assignment "resilient" with
-    | `Missing | `Unavailable _ -> Alcotest.fail "expected lane to resolve"
-    | `Lane lane ->
-      Alcotest.(check (list string))
-        "declared candidates already terminate at the default"
-        [ "primary.test_model"; "fallback.test_model" ]
+        "the assigned runtime is the whole walk"
+        [ "fallback.test_model" ]
         (Runtime_lane.ordered_candidates lane))
 
 let test_attempt_inference_policy_uses_attempt_runtime () =
@@ -4605,13 +4593,9 @@ let () =
             `Quick
             test_entry_runtime_id_resolves_a_route_to_the_binding_it_opens;
           Alcotest.test_case
-            "a bare runtime assignment gets a lane with somewhere to go"
+            "a bare runtime assignment walks only itself"
             `Quick
-            test_bare_runtime_assignment_gets_a_lane_with_somewhere_to_go;
-          Alcotest.test_case
-            "a lane already naming the default is unchanged"
-            `Quick
-            test_lane_already_naming_the_default_is_unchanged;
+            test_bare_runtime_assignment_walks_only_itself;
           Alcotest.test_case
             "resolve_assignment reports missing id"
             `Quick

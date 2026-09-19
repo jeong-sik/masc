@@ -271,9 +271,9 @@ type task_status =
   셋 다 `Rejected` 를 빼놓는다. 이건 D1 이 기대는 바로 그 신호다.
   `lib/keeper/keeper_world_observation_inputs.ml:196-201`(Keeper 가 매 턴 읽는 프레임의 미claim 수)와
   `lib/dashboard/dashboard_attention.ml:91`(노는 에이전트와 함께 주의를 올리는 조건). 1단계에서 둘 다
-  고친다. 세 번째로 같은 모양인 `lib/orchestrator.ml:43` 은 고치지 않는다. `should_orchestrate` 를
-  부르는 곳이 `test/test_orchestrator_coverage.ml` 밖에 없어서 지금 돌지 않는 코드다. 고치면 죽은
-  코드에 새 상태를 태우는 꼴이라 §5 에 지울 것으로 적어 둔다. 비슷해 보이는
+  고친다. 세 번째로 같은 모양인 `lib/orchestrator.ml:43` 은 고치지 않는다. 부르는 곳은 같은 파일 `:87`
+  의 소비자뿐이고, 그건 `MASC_ORCHESTRATOR_ENABLED`(기본 꺼짐, `:20-22`) 뒤에서 info 로그 한 줄만
+  낸다. 동작은 이미 지워졌다. 껍데기에 새 상태를 태우지 않고 §5 로 넘긴다. 비슷해 보이는
   `workspace_task.ml:329`·`:468` 은 레코드를 짓는 자리라 해당 없다.
 - **집계가 고정 튜플이면 컴파일러는 "빈칸을 채워라"까지만 시킨다.** 대시보드 rollup 은 다섯 칸짜리
   튜플로 접고 JSON 키도 다섯으로 고정이다(`server_dashboard_http.ml:604-616`, `:627-634`).
@@ -644,7 +644,7 @@ OCaml 쪽은 임의의 액션·판정 열을 돌려 `OneTaskPerAgent` 를 확인
 | `Cancel` 을 `Withdraw` 로 이름 바꾸기 | 초안에 있었고 뺐다. 액션만 Withdraw 이고 상태·wire·알림은 Cancelled 로 남아 같은 것을 두 이름으로 부르게 된다. 뜻이 바뀐 것은 도구 설명과 반려 문장이 알려 준다 |
 | 제출자 칸에 새 이름(`submitter`) | 초안에 있었고 뺐다. 코드가 이미 `producer` 라고 부른다(§1.7) |
 | `cycle_count` 를 반려에도 올리기 | 검토 중에 넣었다가 뺐다. TUI 한 줄에만 쓰이는 값에 일을 더하는 것이다. 이 RFC 는 이 값을 건드리지 않는다 |
-| `Orchestrator.should_orchestrate` 고치기 | `lib/orchestrator.ml:43` 이 `= Todo` 로 세는 자리이지만 부르는 곳이 테스트뿐이다(`lib/`·`bin/` 0건). 죽은 코드에 새 상태를 태우지 않는다. **지울 대상으로 따로 다룬다** |
+| `Orchestrator.should_orchestrate` 고치기 | `lib/orchestrator.ml:43` 이 `= Todo` 로 세는 자리다. 부르는 곳은 같은 파일 `:87` 의 소비자뿐이고, 그건 `MASC_ORCHESTRATOR_ENABLED`(기본 꺼짐) 뒤에서 info 로그 한 줄만 낸다. 새 상태를 태우지 않고 **`should_orchestrate`·`make_orchestrator_check_consumer`·`orchestrator_pulse`·그 환경변수 키를 함께 지울 대상으로 따로 다룬다(#37047)** |
 | `scripts/tla-check.sh` 의 SKIP 고치기 | cfg 파일이 없으면 `SKIP` 찍고 0 으로 돌아온다(`:72-75`, `:96-99`). 이 RFC 가 만든 문제가 아니고, main 의 `648c2b3b0d` 가 이미 다른 쪽에서 막았다. 새 게이트 `scripts/ci/check-tla-harness-coverage.sh` 가 어느 줄에서도 이름이 불리지 않는 cfg 를 찾아 실패시킨다. 파일이 사라지는 경우는 여전히 SKIP 이지만, 등록이 빠지는 경우는 이제 빨개진다 |
 | 담당에 시간 제한(lease, visibility timeout) | `no_wall_clock_death`. SQS 식 설계는 이 저장소에서 금지다 |
 | 세션이 끝나면 맡은 Task 를 놓기 | 재 보니 이 경로로 생긴 방치가 17건 중 0건이다. `end_session` 은 `lib/` 와 `bin/` 에 호출하는 곳이 없고, 여러 세션이 한 이름(`codex-mcp-client`)을 쓰므로 한 세션의 종료가 다른 세션의 Task 를 놓게 된다. Keeper 종료는 이미 놓는다(`keeper_shutdown_finalize.ml:137-169`). 나머지는 `Held_without_actor` 가 보여 준다 |

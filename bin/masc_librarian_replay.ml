@@ -362,7 +362,7 @@ let () =
         |> Masc.Workspace.runtime_base_path_for_request
       | None ->
         Config_dir_resolver.base_path_or_cwd ()
-        |> Masc.Workspace.runtime_base_path_for
+        |> Masc.Workspace.runtime_base_path_for_request
     in
     let keepers_dir =
       Config_dir_resolver.keepers_dir_for_base_path ~base_path

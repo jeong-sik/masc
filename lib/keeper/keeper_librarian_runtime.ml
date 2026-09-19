@@ -194,8 +194,12 @@ let rec extraction_error_to_string = function
       detail
   | Cli_slots_exhausted { prior_error; failures } ->
     let cli_detail =
-      "librarian official-client slots exhausted: "
-      ^ String.concat "; " (List.map Keeper_lane_cli_oneshot.failure_to_string failures)
+      let summary = "librarian official-client slots exhausted" in
+      match failures with
+      | [] -> summary
+      | _ :: _ ->
+        summary ^ ": "
+        ^ String.concat "; " (List.map Keeper_lane_cli_oneshot.failure_to_string failures)
     in
     (match prior_error with
      | None -> cli_detail

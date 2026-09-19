@@ -51,7 +51,11 @@ type 'callback_error execution_error =
       ; next : candidate_visit
       ; evidence : attempt_provenance list
       }
-  | Exact_execution_failed of
+  | Providers_exhausted of
+      { attempts : attempt_provenance list
+      ; detail : string
+      }
+  | Flow_bookkeeping_failed of
       { attempts : attempt_provenance list
       ; detail : string
       }
@@ -421,6 +425,7 @@ type terminal_outcome =
   | Before_dispatch_persistence_failure
   | Before_advance_persistence_failure
   | Exact_execution_failure
+  | Flow_bookkeeping_failure
   | Execution_provenance_mismatch
   | Invalid_domain_output
 
@@ -430,6 +435,7 @@ let terminal_outcome_to_string = function
   | Before_dispatch_persistence_failure -> "before_dispatch_persistence_failure"
   | Before_advance_persistence_failure -> "before_advance_persistence_failure"
   | Exact_execution_failure -> "exact_execution_failure"
+  | Flow_bookkeeping_failure -> "flow_bookkeeping_failure"
   | Execution_provenance_mismatch -> "execution_provenance_mismatch"
   | Invalid_domain_output -> "invalid_domain_output"
 ;;
@@ -441,7 +447,8 @@ let terminal_outcome = function
     Before_dispatch_persistence_failure
   | Error (Before_advance_persistence_failed _) ->
     Before_advance_persistence_failure
-  | Error (Exact_execution_failed _) -> Exact_execution_failure
+  | Error (Providers_exhausted _) -> Exact_execution_failure
+  | Error (Flow_bookkeeping_failed _) -> Flow_bookkeeping_failure
   | Error (Provenance_mismatch _) -> Execution_provenance_mismatch
   | Error (Domain_output_invalid _) -> Invalid_domain_output
 ;;
@@ -669,11 +676,16 @@ let execute_current ?cli_runner ~clock ~before_dispatch ~before_advance prepared
     | ( Exact_output.Flow_attempt_start_failed { evidence; _ }
       | Exact_output.Flow_measurement_start_failed { evidence; _ }
       | Exact_output.Flow_before_measurement_dispatch_callback_failed { evidence; _ }
-      | Exact_output.Flow_measurement_terminal_callback_failed { evidence; _ }
-      | Exact_output.Flow_candidates_exhausted { evidence; _ }
+      | Exact_output.Flow_measurement_terminal_callback_failed { evidence; _ } ) as cause ->
+      Error
+        (Flow_bookkeeping_failed
+           { attempts = evidence_provenance evidence
+           ; detail = Keeper_exact_flow_detail.flow_execution_error_detail cause
+           })
+    | ( Exact_output.Flow_candidates_exhausted { evidence; _ }
       | Exact_output.Flow_exact_execution_failed { evidence; _ } ) as cause ->
       Error
-        (Exact_execution_failed
+        (Providers_exhausted
            { attempts = evidence_provenance evidence
            ; detail = Keeper_exact_flow_detail.flow_execution_error_detail cause
            })
@@ -688,7 +700,7 @@ let execute_current ?cli_runner ~clock ~before_dispatch ~before_advance prepared
            | Ok (slot_id, judgment) -> cli_selected_slot := Some slot_id; Ok judgment
            | Error error ->
              Error
-               (Exact_execution_failed
+               (Providers_exhausted
                   { attempts = []; detail = cli_tail_error_to_string error }))
         | Http_flow attempt ->
           (match jev_first with
@@ -727,9 +739,10 @@ let execute_current ?cli_runner ~clock ~before_dispatch ~before_advance prepared
                      ( Flow_already_started _
                      | Before_dispatch_persistence_failed _
                      | Before_advance_persistence_failed _
+                     | Flow_bookkeeping_failed _
                      | Provenance_mismatch _
                      | Domain_output_invalid _ ) as terminal -> terminal
-                 | Error (Exact_execution_failed { attempts; detail }) as exhausted ->
+                 | Error (Providers_exhausted { attempts; detail }) as exhausted ->
                    (match
                       run_cli_tail
                         ?runner:cli_runner
@@ -750,7 +763,7 @@ let execute_current ?cli_runner ~clock ~before_dispatch ~before_advance prepared
                         prepared.candidate.keeper_name
                         (cli_tail_error_to_string error);
                       Error
-                        (Exact_execution_failed
+                        (Providers_exhausted
                            { attempts
                            ; detail =
                                detail ^ "; cli tail: " ^ cli_tail_error_to_string error
@@ -786,7 +799,9 @@ let execute_current ?cli_runner ~clock ~before_dispatch ~before_advance prepared
      let code = result |> terminal_outcome |> terminal_outcome_to_string in
      let detail =
        match error with
-       | Exact_execution_failed { detail; _ } -> detail
+       | Providers_exhausted { detail; _ }
+       | Flow_bookkeeping_failed { detail; _ } ->
+         detail
        | Flow_already_started _
        | Before_dispatch_persistence_failed _
        | Before_advance_persistence_failed _

@@ -61,11 +61,17 @@ type 'callback_error execution_error =
       ; next : candidate_visit
       ; evidence : attempt_provenance list
       }
-  | Exact_execution_failed of
+  | Providers_exhausted of
       { attempts : attempt_provenance list
       ; detail : string
-          (** Why the lane gave up: the flow error's label and payload, and
+          (** Why both transports gave up: the provider error's label and payload, and
               the CLI tail's failures when it walked one. *)
+      }
+  | Flow_bookkeeping_failed of
+      { attempts : attempt_provenance list
+      ; detail : string
+          (** An attempt or measurement could not establish its durable
+              bookkeeping boundary. No second transport is tried. *)
       }
   | Provenance_mismatch of string
   | Domain_output_invalid of string
@@ -101,7 +107,7 @@ val execute :
   result
 (** Execute the prepared affine flow exactly once. Domain identity and
     provenance failures are terminal results and never request AGENT_CORE
-    advancement. When every HTTP slot is exhausted ([Exact_execution_failed]),
+    advancement. When every HTTP slot is exhausted ([Providers_exhausted]),
     the lane's declared official clients are walked as one-shots
     ([cli_runner], default the real client) before this returns; a CLI-only
     lane walks them directly. The run record is closed after that walk and

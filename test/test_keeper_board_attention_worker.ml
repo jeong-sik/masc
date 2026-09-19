@@ -1133,7 +1133,7 @@ let test_execution_error_preserves_bound_progress_without_hot_retry () =
   let execute ~before_dispatch ~before_advance:_ _candidate =
     incr calls;
     ok "bind terminal attempt" (before_dispatch exact);
-    Error (E.Exact_execution_failed { attempts = [ exact ]; detail = "provider exhausted" })
+    Error (E.Providers_exhausted { attempts = [ exact ]; detail = "provider exhausted" })
   in
   (match
      ok
@@ -1431,7 +1431,7 @@ let test_terminal_root_does_not_strand_ready_sibling () =
        ~execute:(fun ~before_dispatch ~before_advance:_ observed ->
          calls := !calls @ [ observed.A.candidate_id ];
          if String.equal observed.candidate_id first.candidate_id
-         then Error (E.Exact_execution_failed { attempts = []; detail = "provider exhausted" })
+         then Error (E.Providers_exhausted { attempts = []; detail = "provider exhausted" })
          else (
            ok "bind sibling" (before_dispatch sibling_exact);
            Ok (judgment sibling_exact J.Not_relevant))))
@@ -2488,7 +2488,7 @@ let test_reconcile_quarantines_settles_a_blocked_partition_whose_candidate_was_r
   let attempt = provenance "quarantine-retired" in
   let execute ~before_dispatch ~before_advance:_ _prepared =
     ok "bind quarantine attempt" (before_dispatch attempt);
-    Error (E.Exact_execution_failed { attempts = [ attempt ]; detail = "provider exhausted" })
+    Error (E.Providers_exhausted { attempts = [ attempt ]; detail = "provider exhausted" })
   in
   (match
      ok

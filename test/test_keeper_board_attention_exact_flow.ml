@@ -752,7 +752,7 @@ let test_cli_tail_without_declared_slots_is_typed () =
       in
       let runner, seen = recording_runner (fun _ -> Ok "{}") in
       match execute_with_tail ~clock ~runner prepared with
-      | Error (Exact_flow.Exact_execution_failed { detail; _ }) ->
+      | Error (Exact_flow.Providers_exhausted { detail; _ }) ->
         Alcotest.(check bool) "no client was asked" true (Option.is_none !seen);
         Alcotest.(check bool)
           "the failure is the HTTP one, with no tail walked"
@@ -780,7 +780,7 @@ let test_cli_tail_rejects_a_verdict_for_another_candidate () =
                (judgment_output ~candidate_id:"some-other-candidate")))
       in
       match execute_with_tail ~clock ~runner prepared with
-      | Error (Exact_flow.Exact_execution_failed { detail; _ }) ->
+      | Error (Exact_flow.Providers_exhausted { detail; _ }) ->
         Alcotest.(check bool)
           "the rejecting slot is named"
           true

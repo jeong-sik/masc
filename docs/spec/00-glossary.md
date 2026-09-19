@@ -36,6 +36,50 @@ status: reference
 **Runtime Attempt**
 : Keeper turn에서 하나의 resolved runtime 후보를 실행하는 시도.
 
+**Tool**
+: 이름·입력 schema·handler로 노출되는 호출 단위. MASC가 descriptor와 권한을
+  소유한다. → [Tool boundary](13-agent-core.md#tool-boundary)
+
+**Provider**
+: 모델에 접속하는 protocol·transport·credential을 소유하는 설정 항목.
+  → [Runtime_schema.provider](../../lib/runtime/runtime_schema.mli)
+
+**Runtime**
+: Provider·Model·Binding을 해석해 얻은 실행 후보 하나.
+  → [Runtime.t](../../lib/runtime/runtime.mli)
+
+**Lane**
+: 서로 다른 축에 쓰이는 말이므로 문장에 종류를 함께 적는다. Runtime Lane은
+  후보 순서, Runtime Execution은 모델·도구 루프의 소유자, 서버의 Exact-output
+  Lane과 Memory Lane은 각각 작업 목적과 작업 제출·직렬화를 말한다.
+
+**Runtime Lane**
+: Keeper turn이 선언된 Runtime 후보를 시도하는 순서.
+  → [Runtime_lane.t](../../lib/runtime/runtime_lane.mli)
+
+**Runtime Execution**
+: 모델·도구·재개 상태를 Agent Core가 소유하는지 공식 클라이언트가 소유하는지의 구분.
+  → [Runtime_execution.t](../../lib/runtime/runtime_execution.mli)
+
+**Exact-output Lane**
+: Librarian 같은 단독 모델 작업의 목적별 실행 경로. 해당 설정은 API slot과
+  후속 CLI 후보 순서를 선언한다. → [선언](../../lib/runtime/runtime_schema.mli),
+  [작업 기록](../../lib/exact_lane_run_registry.mli)
+
+**Memory Lane**
+: Keeper별 Librarian 작업을 직렬화하는 제출 경로. 현재 실행 하나와 교체 가능한
+  최신 대기 하나를 가진다. → [Keeper_memory_lane](../../lib/keeper/keeper_memory_lane.mli)
+
+**Skill**
+: `SKILL.md`로 선언한 재사용 지시 또는 Tool 합성. 출처·패키지·이름·문서 revision으로
+  식별한다. → [Keeper_skill_catalog](../../lib/keeper/keeper_skill_catalog.mli),
+  [Skill_reference](../../lib/skill_reference/skill_reference.mli)
+
+**Composition**
+: Tool 노드 사이의 실행 선후 관계와 결과 참조를 명시한 검증된 계획. 합성 Skill은
+  허용된 계획을 Tool로 노출한다. → [선언 문법](../../lib/keeper/keeper_tool_composition_catalog.mli),
+  [실행 계획](../../lib/keeper/keeper_tool_plan.mli)
+
 ## Collaboration State
 
 **Board**
@@ -85,6 +129,14 @@ status: reference
 **Checkpoint**
 : agent core conversation과 Keeper working context의 durable 저장점. trace당 파일
   하나(`<trace 디렉터리>/<trace id>.json`)다.
+
+**Keeper working context**
+: History를 담은 Agent Core checkpoint의 실행 중 wrapper.
+  → [Keeper_types.working_context](../../lib/keeper_types/keeper_types.mli)
+
+**Librarian working context**
+: 미처리 event·chat 요청의 원본에 묶인 파생 맥락과 다음 행동 제안. 실행 권한이나
+  checkpoint 이력이 아니다. → [Keeper_librarian_context](../../lib/keeper/keeper_librarian_context.mli)
 
 **History**
 : Checkpoint의 `messages`. 그 trace에서 오간 message가 시간순으로 쌓인 목록이다.

@@ -417,6 +417,8 @@ restart puts every Keeper back on `auto`.
 
 ### Lanes
 
+Domain meanings are defined in the [Glossary](spec/00-glossary.md#core): Runtime candidate order, execution ownership, and server work lanes are separate axes.
+
 For TOML package installations, open `/addons` from the composer or choose
 `go Lane Add-ons` in the palette. The [Lane Add-on guide](guides/tui-lane-addons.md)
 covers configuration editing, connections, Skills, actions and cross-Lane evidence.

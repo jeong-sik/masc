@@ -306,6 +306,101 @@ NextBuggy ==
 
 SpecBuggy == Init /\ [][NextBuggy]_vars
 
+\* Bug witness 4: an offline purge rewrites the history shorter and writes no
+\* line (RFC-0351 S1; RFC librarian-lifecycle 10, the second open decision).
+\* Dropping the oldest atom renumbers every atom after it, so the position's
+\* end_atom names a different atom than the one it was taken from, and a digest
+\* carries no index to tell them apart. The recommendation on that decision is
+\* to refuse a purge while any turn is unread; this measures what the refusal
+\* is worth rather than leaving it as advice.
+PurgeTrimKeepingProgress ==
+    /\ turn = NoTurn
+    /\ ~clearHalf
+    /\ snap = -1
+    /\ Len(hist) > 1
+    /\ hist' = SubSeq(hist, 2, Len(hist))
+    /\ UNCHANGED << ckTurns, log, turn, progress, readIds, nextId, budget,
+                    clearHalf, snap >>
+
+NextPurgeTrim ==
+    \/ Next
+    \/ PurgeTrimKeepingProgress
+
+SpecPurgeTrim == Init /\ [][NextPurgeTrim]_vars
+
+\* Bug witness 5: the same purge under the guard RFC librarian-lifecycle 10
+\* recommends for its second open decision -- refuse while a turn is unread,
+\* and otherwise make the end of the rewritten history the new baseline. It
+\* still loses atoms, in ten steps, because the guard asks about turns while
+\* the thing at risk is atoms: a turn that saved and then died leaves atoms
+\* that no line ever names, so "no turn is unread" is true while an atom is
+\* not. The purge then moves the position over it.
+PurgeTrimGuardedByTurns ==
+    /\ turn = NoTurn
+    /\ ~clearHalf
+    /\ snap = -1
+    /\ Len(hist) > 1
+    /\ progress # NoProgress
+    /\ \A c \in CutsOf(log, hist) : c <= progress.end
+    /\ hist' = SubSeq(hist, 2, Len(hist))
+    /\ progress' = [end |-> Len(hist) - 1, seen |-> Len(log)]
+    /\ UNCHANGED << ckTurns, log, turn, readIds, nextId, budget, clearHalf, snap >>
+
+NextPurgeTrimGuardedByTurns ==
+    \/ Next
+    \/ PurgeTrimGuardedByTurns
+
+SpecPurgeTrimGuardedByTurns == Init /\ [][NextPurgeTrimGuardedByTurns]_vars
+
+\* Bug witness 6: the guard stated over atoms -- refuse unless the read
+\* position is the end of the history -- with the position rewritten the way
+\* the recommendation puts it, counting every line the log now holds. It still
+\* loses atoms. The guard is not what fails here: raising the counted lines to
+\* the end of the log swallows a restart line no round has taken in, and that
+\* line was the one thing that would have sent the next round back to atom
+\* zero. A purge may move where a round reads; it may not decide what a round
+\* has already seen.
+PurgeTrimAtEndCountingLines ==
+    /\ turn = NoTurn
+    /\ ~clearHalf
+    /\ snap = -1
+    /\ Len(hist) > 1
+    /\ progress # NoProgress
+    /\ progress.end = Len(hist)
+    /\ hist' = SubSeq(hist, 2, Len(hist))
+    /\ progress' = [end |-> Len(hist) - 1, seen |-> Len(log)]
+    /\ UNCHANGED << ckTurns, log, turn, readIds, nextId, budget, clearHalf, snap >>
+
+NextPurgeTrimAtEndCountingLines ==
+    \/ Next
+    \/ PurgeTrimAtEndCountingLines
+
+SpecPurgeTrimAtEndCountingLines ==
+    Init /\ [][NextPurgeTrimAtEndCountingLines]_vars
+
+\* The guard that does hold: refuse unless the read position is the end of the
+\* history being rewritten, and leave the counted lines alone. Then no atom
+\* lies beyond the position, the clean rules already say it passed none, and a
+\* restart line the position has not counted still sends the next round back to
+\* zero -- which re-reads the rewritten history, losing nothing.
+\* SpecPurgeTrimAtEnd must NOT violate.
+PurgeTrimAtEnd ==
+    /\ turn = NoTurn
+    /\ ~clearHalf
+    /\ snap = -1
+    /\ Len(hist) > 1
+    /\ progress # NoProgress
+    /\ progress.end = Len(hist)
+    /\ hist' = SubSeq(hist, 2, Len(hist))
+    /\ progress' = [end |-> Len(hist) - 1, seen |-> progress.seen]
+    /\ UNCHANGED << ckTurns, log, turn, readIds, nextId, budget, clearHalf, snap >>
+
+NextPurgeTrimAtEnd ==
+    \/ Next
+    \/ PurgeTrimAtEnd
+
+SpecPurgeTrimAtEnd == Init /\ [][NextPurgeTrimAtEnd]_vars
+
 \* Bug witness 3: the turn-boundary file is deleted while the read position that
 \* counted its lines is kept. Line numbers start at one again, so a restart line
 \* appended after the deletion sits at a number the position has already passed

@@ -27,9 +27,9 @@ val agent_core_history_snapshot_id_of_checkpoint :
 (** Delete AGENT_CORE history archive entries by [snapshot_ids]. Returns
     [(deleted, missing)] in input-order, with [missing] containing
     every snapshot id whose file was absent OR removal failed. An id
-    that is not one real path segment (empty / "." / ".." / separator /
-    NUL) can never name a history entry and is reported [missing]
-    without touching the filesystem. *)
+    outside the archive filename contract used by
+    [list_agent_core_history_files], or not one real path segment, is
+    reported [missing] without touching the filesystem. *)
 val delete_agent_core_history_files :
   session_dir:string ->
   snapshot_ids:string list ->

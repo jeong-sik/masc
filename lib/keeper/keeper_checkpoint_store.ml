@@ -179,11 +179,10 @@ let delete_agent_core_history_files ~(session_dir : string) ~(snapshot_ids : str
     : string list * string list =
   List.fold_left
     (fun (deleted, missing) snapshot_id ->
-      (* [snapshot_ids] arrive verbatim from the dashboard POST body; a
-         non-segment id ("../..") would aim [Sys.remove] outside the
-         session directory. Such an id can never name a history entry, so
-         it is reported [missing] without touching the filesystem. *)
-      if not (leaf_is_real_segment snapshot_id) then
+      (* The dashboard supplies filenames. Both containment and the same
+         archive identity used by listing/pruning must hold before unlink;
+         other files in this session are not checkpoint history entries. *)
+      if not (leaf_is_real_segment snapshot_id && is_agent_core_history_file snapshot_id) then
         (deleted, snapshot_id :: missing)
       else
       let path = agent_core_history_path ~session_dir ~snapshot_id in

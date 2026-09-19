@@ -159,6 +159,20 @@ let test_snapshot_reads_follow_the_writer_directory_alias () =
     check_snapshot_revisions ~keepers_dir:alias (Some 1))
 ;;
 
+let test_snapshot_reads_preserve_file_aliases () =
+  with_readable_memory_stores @@ fun keepers_dir ->
+  let paths =
+    [ Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+    ; Masc.Keeper_memory_source_current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+    ]
+  in
+  List.iter (fun path ->
+    let target = path ^ ".target" in
+    Unix.rename path target;
+    Unix.symlink target path) paths;
+  check_snapshot_revisions ~keepers_dir (Some 1)
+;;
+
 let test_snapshot_reads_reject_non_directory_parents () =
   with_readable_memory_stores @@ fun keepers_dir ->
   let file = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
@@ -197,6 +211,35 @@ let test_snapshot_reads_preserve_leaf_permission_failure () =
     with_denied_mode source 0o000 (fun () ->
       check_snapshot_read_errors ~keepers_dir));
   check_snapshot_revisions ~keepers_dir (Some 1)
+;;
+
+let with_memory_read_fs fs test () =
+  let previous = Fs_compat.get_fs_opt () in
+  let install = function
+    | None -> Fs_compat.clear_fs ()
+    | Some fs -> Fs_compat.set_fs fs
+  in
+  install fs;
+  Fun.protect ~finally:(fun () -> install previous) (fun () ->
+    check bool "requested filesystem branch is active"
+      (Option.is_some fs) (Fs_compat.has_fs ());
+    test ())
+;;
+
+let in_memory_read_eio test () =
+  Eio_main.run (fun env ->
+    with_memory_read_fs (Some (Eio.Stdenv.fs env)) test ())
+;;
+
+let snapshot_read_cases =
+  [ "fresh directories are absent", test_snapshot_reads_preserve_missing_directories
+  ; "missing files are absent", test_snapshot_reads_preserve_missing_files
+  ; "directory aliases remain readable", test_snapshot_reads_follow_the_writer_directory_alias
+  ; "file aliases remain readable", test_snapshot_reads_preserve_file_aliases
+  ; "non-directory parents are errors", test_snapshot_reads_reject_non_directory_parents
+  ; "parent permission failure is an error", test_snapshot_reads_preserve_parent_permission_failure
+  ; "leaf permission failure remains an error", test_snapshot_reads_preserve_leaf_permission_failure
+  ]
 ;;
 
 let fact_ids facts =
@@ -2060,19 +2103,11 @@ let () =
             test_a_commit_parses_and_prints_on_the_pool
         ] )
     ; ( "snapshot read failures"
-      , [ test_case "fresh directories are absent" `Quick
-            test_snapshot_reads_preserve_missing_directories
-        ; test_case "missing files are absent" `Quick
-            test_snapshot_reads_preserve_missing_files
-        ; test_case "directory aliases remain readable" `Quick
-            test_snapshot_reads_follow_the_writer_directory_alias
-        ; test_case "non-directory parents are errors" `Quick
-            test_snapshot_reads_reject_non_directory_parents
-        ; test_case "parent permission failure is an error" `Quick
-            test_snapshot_reads_preserve_parent_permission_failure
-        ; test_case "leaf permission failure remains an error" `Quick
-            test_snapshot_reads_preserve_leaf_permission_failure
-        ] )
+      , List.map (fun (name, test) -> test_case name `Quick (with_memory_read_fs None test))
+          snapshot_read_cases )
+    ; ( "snapshot read failures Eio"
+      , List.map (fun (name, test) -> test_case name `Quick (in_memory_read_eio test))
+          snapshot_read_cases )
     ; ( "commit notification"
       , [ test_case "all writers notify outside locks" `Quick test_commit_notifications_follow_all_writers_outside_locks
         ; test_case "snapshot authority independent of journal" `Quick test_commit_notifications_do_not_depend_on_journal

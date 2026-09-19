@@ -637,26 +637,12 @@ let read_for_keepers_dir ~keepers_dir ~keeper_id =
     Printf.sprintf "current Memory OS read failed path=%s: %s" snapshot_path message
   in
   try
-    (* Writers accept directory aliases and publish into their physical
-       directory. Resolve that same root before the owned-file read. *)
-    let physical_dir =
-      try Some (Fs_compat.realpath keepers_dir) with
-      | Unix.Unix_error (Unix.ENOENT, _, _) -> None
-    in
-    let* contents =
-      match physical_dir with
-      | None -> Ok None
-      | Some ownership_root ->
-        Fs_compat.load_owned_regular_file
-          ~ownership_root
-          (path_for_keepers_dir ~keepers_dir:ownership_root ~keeper_id)
-        |> Result.map_error (fun error ->
-          read_error (Fs_compat.owned_regular_file_read_error_to_string error))
-    in
-    match contents with
-    | None -> Ok None
-    | Some content ->
-      let+ snapshot = parse snapshot_path content in
+    match Fs_compat.exact_path_kind snapshot_path with
+    | Fs_compat.Exact_missing -> Ok None
+    | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
+      (* Keep the descriptor-pinned read: a concurrent atomic replacement
+         does not invalidate the complete snapshot already opened. *)
+      let+ snapshot = parse snapshot_path (Fs_compat.load_file snapshot_path) in
       Some snapshot
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn

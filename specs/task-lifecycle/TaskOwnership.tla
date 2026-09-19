@@ -85,6 +85,14 @@ Init ==
 
 Held(a) == {t \in Tasks : holder[t] = a}
 
+\* The agent this state names, which is who may cancel it besides the operator.
+\* Mirrors task_actor_of_status: a held Task names its holder, a Task before the
+\* authority or returned from it names the producer, and Todo names nobody.
+StateNames(t) ==
+    IF holder[t] # NoOne THEN holder[t]
+    ELSE IF pending[t] \/ returned[t] THEN producer[t]
+    ELSE NoOne
+
 \* ---------------------------------------------------------------- ownership
 
 \* One Task at a time, and only a Task nobody holds and nobody is judging.
@@ -215,7 +223,7 @@ ApplyRejected(t) ==
 \* pending submission too: a closed Task owes nothing and awaits nothing.
 Cancel(t, who) ==
     /\ outcome[t] = "Open"
-    /\ who = created_by[t] \/ who = Operator
+    /\ who = Operator \/ (who # NoOne /\ who = StateNames(t))
     /\ outcome' = [outcome EXCEPT ![t] = "Cancelled"]
     /\ cancelled_by' = [cancelled_by EXCEPT ![t] = who]
     /\ holder' = [holder EXCEPT ![t] = NoOne]
@@ -267,13 +275,15 @@ BugCancelRequestOnlyOperatorAnswers(t, a) ==
     /\ UNCHANGED <<created_by, outcome, verdict, verdict_for, cancelled_by, stalled,
                    returned, claimed_by>>
 
-\* The code when this was written: any agent may cancel a Todo it did not ask
-\* for.
+\* The code when this was written: any agent may cancel an unheld Task. After
+\* release that includes a Task somebody else worked on, which is how the
+\* operator gate is walked around in two calls.
 BugAnyoneCancels(t, a) ==
     /\ outcome[t] = "Open"
     /\ holder[t] = NoOne
     /\ ~pending[t]
-    /\ a # created_by[t]
+    /\ a # Operator
+    /\ a # StateNames(t)
     /\ outcome' = [outcome EXCEPT ![t] = "Cancelled"]
     /\ cancelled_by' = [cancelled_by EXCEPT ![t] = a]
     /\ UNCHANGED <<created_by, holder, pending, judgeable, producer, sub, verdict,
@@ -283,7 +293,7 @@ BugAnyoneCancels(t, a) ==
 \* agent that held the Task is left holding it.
 BugCancelKeepsHolder(t, who) ==
     /\ outcome[t] = "Open"
-    /\ who = created_by[t] \/ who = Operator
+    /\ who = Operator \/ (who # NoOne /\ who = StateNames(t))
     /\ outcome' = [outcome EXCEPT ![t] = "Cancelled"]
     /\ cancelled_by' = [cancelled_by EXCEPT ![t] = who]
     /\ pending' = [pending EXCEPT ![t] = FALSE]
@@ -434,10 +444,14 @@ DoneRequiresLiveApproval ==
     \A t \in Tasks :
         outcome[t] = "Done" => (verdict[t] = "approved" /\ verdict_for[t] = sub[t])
 
-\* Cancelled only by whoever created the Task, or by the operator.
-CancelledRequiresStanding ==
-    \A t \in Tasks :
-        outcome[t] = "Cancelled" => cancelled_by[t] \in {created_by[t], Operator}
+\* Cancelled only by the operator, or by the agent the state named at that
+\* moment. It has to be an action property: once the Task is Cancelled the
+\* state that named the canceller is gone, so no predicate on the result can
+\* tell a standing cancel from one without standing.
+CancelNeedsStanding ==
+    [][\A t \in Tasks :
+        (outcome[t] = "Open" /\ outcome'[t] = "Cancelled")
+          => (cancelled_by'[t] = Operator \/ cancelled_by'[t] = StateNames(t))]_vars
 
 \* Reachability guard, not a safety property. It is written as something that
 \* must FAIL: its cfg expects a violation. If a future edit stops the clean
@@ -458,7 +472,6 @@ Safety ==
     /\ RejectedNamesItsProducer
     /\ SubmissionRequiresHold
     /\ DoneRequiresLiveApproval
-    /\ CancelledRequiresStanding
 
 \* A step that answers a submission never gives the Task to anyone: a Task
 \* gains a holder only in a step that started with no submission pending.

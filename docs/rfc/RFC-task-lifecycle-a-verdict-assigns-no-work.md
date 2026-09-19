@@ -395,43 +395,63 @@ cancel 을 권하거나 만든 쪽에게도 안 보여 주게 된다.
 
 ### 3.5 취소할 자격
 
+초안은 자격을 `created_by` 로 정했다. 2026-09-19 교차 리뷰가 그걸 깼다. `created_by` 는 클라이언트가
+스스로 적어 보낸 문자열이고, claim 은 서버가 중재한 원자적 사건이다. 같은 "누구냐" 인데 믿을 수 있는
+정도가 다르다. 문자열로 자격을 가르면 `codex-mcp-client` 라는 한 이름을 공유하는 299건이 한꺼번에
+열린다. 그래서 자격의 근거를 **상태가 들고 있는 이름**으로 옮긴다.
+
 ```ocaml
 type cancel_standing =
-  | Task_creator                       (* task.created_by = 호출자 *)
-  | Operator of { operator_id : string }
+  | Named_by_state                       (* 그 상태가 이름을 들고 있는 바로 그 에이전트 *)
+  | Operator of { operator_id : string } (* 인증된 운영자 경로에서만 *)
 ```
 
-- 자격은 Task 의 상태가 아니라 **누가 만들었는가**로 정한다. 지금은 반대다. 아무도 안 맡았으면 누구나
-  되고, 누가 맡았으면 맡은 쪽만 요청할 수 있고 만든 쪽은 못 한다.
+`Named_by_state` 는 새 계산이 아니다. "이 상태에 누가 있는가" 는 이미 `task_actor_of_status` 하나가
+답한다(`types_core.ml:303-309`). 자격 검사는 그 답과 호출자를 견주는 한 줄이다.
+
+| 상태 | 취소할 수 있는 쪽 | 왜 |
+|---|---|---|
+| `Todo` | 운영자만 | 상태가 아무 이름도 안 들고 있다 |
+| `Claimed`·`InProgress` | 맡은 쪽, 운영자 | 자기가 하던 일을 접는 것이다. 남의 일을 지우는 게 아니다 |
+| `AwaitingVerification` | 낸 쪽, 운영자 | 자기가 낸 제출을 물리는 것이다 |
+| `Rejected` | 낸 쪽, 운영자 | 반려를 받고 더 안 하기로 하는 것이다 |
+| `Done`·`Cancelled` | 아무도 | 끝났다 |
+
+- **취소 요청이 없어진다.** 자격 있는 쪽이 어느 상태에서든 즉시 취소한다. 345시간짜리 줄은 맡은 쪽이
+  **물어봐야** 해서 생겼다. 그냥 하게 하면 물어볼 일이 없으므로 줄이 구조적으로 안 생긴다.
+- **`release` 다음 `cancel` 구멍이 닫힌다.** 새 칸을 만들지 않고 닫힌다. 놓고 나면 상태가 `Todo` 이고
+  `Todo` 는 아무 이름도 안 들고 있으므로, 놓은 본인도 더는 취소하지 못한다. 운영자만 남는다.
 - **`Operator` 는 인증된 운영자 경로에서만 만든다.** 판정의 `Human_operator` 가 만들어지는 방식과 같다
   (`server_routes_http_routes_verification.ml:134-145`). `masc_transition` 과 Keeper 도구는
-  `Task_creator` 만 만들 수 있다. 지금 TUI 의 Task 취소는 `masc_transition` MCP 호출이고
+  `Named_by_state` 만 만들 수 있다. 지금 TUI 의 Task 취소는 `masc_transition` MCP 호출이고
   (`bin/masc_tui.ml:3640-3646`, `bin/masc_tui_mcp.ml:293-298`) 호출자 이름은 세션이 스스로 적는다. 이름이
-  `masc-tui` 면 운영자로 치는 식으로 구현하면 아무 MCP 클라이언트나 열린 Task 전부를 취소할 수 있게
-  된다. TUI 와 dashboard 의 취소는 인증된 경로로 옮긴다.
-- 취소는 판정을 거치지 않는다. 남의 제출에 답하는 일이 아니라 자기가 만든 Task 를 물리는 일이다.
-  RFC-0417 의 원칙("일이 존재를 멈추는 허락은 시스템 LLM 이 내리지 않는다")은 그대로 지켜진다.
-- **판정 없이 혼자 끝내기.** Keeper 가 혼자 닿을 수 있는 끝 상태가 생긴다. 범위는 좁지 않다. 완료된
-  347건 중 199건은 만든 쪽 본인이 맡아 끝낸 것이라, 자기가 만든 Task 를 스스로 맡는 일이 절반을 넘는다.
-  제출해 놓고 판정을 기다리는 중에 취소하면 판정 없이 끝난다. 그래도 그 끝은 `Cancelled` 로 기록되고
-  `Done` 이 아니다. 운영자나 다른 에이전트가 만든 Task 는 취소하지 못한다. 지금은 `release` 다음 `cancel`
-  로 누가 만든 Task 든 혼자 끝낼 수 있으므로 지금보다는 좁다. 판정을 기다리는 동안 제출자 본인의 cancel
-  을 막는 방안은 넣지 않았다. 반려된 직후에는 어차피 취소할 수 있어서 막는 것은 늦추기만 하고, 늦추는
-  장치는 사실을 지키지 않는다.
-- **이름을 같이 쓰는 만든 쪽.** §1 을 잰 시점에 열린 723건 중 333건, 2026-09-19 backlog 6694 에서는
-  열린 656건 중 299건의 `created_by` 가 `codex-mcp-client` 다. 절반 가까이가 한 이름이라는 결론은
-  같다. 여러 세션이 같이 쓰는 이름이라, 그 이름으로 들어온 세션은 누구든 그 줄들을 취소할 수 있다. 자격 검사는 이름
-  비교이고 다른 소유 검사(`same_task_actor`)와 강도가 같다. Keeper 도구는 서버가 아는 이름
-  (`keeper_agent_sender ~meta`)으로 호출되므로 속일 수 없지만, MCP 클라이언트는 이름을 스스로 적는다
-  (#18965 에서 세션 결합을 뺐다). 이름을 속이는 호출자를 막는 일은 이 RFC 범위 밖이다.
-- `created_by` 가 비어 있는 Task 는 운영자만 취소할 수 있다. 모르는 값을 허용으로 읽지 않는다. 지금 그런
-  Task 는 0건이다.
-- 만든 쪽이 남이 맡고 있는 Task 를 취소하면 세 가지를 같이 한다. 맡고 있던 쪽에 알린다(§3.6). 맡고 있던
+  `masc-tui` 면 운영자로 치는 식으로 구현하면 아무 MCP 클라이언트나 운영자가 된다. TUI 와 dashboard 의
+  취소는 인증된 경로로 옮긴다.
+- **`created_by` 는 자격에서 빠진다.** 자동 claim 대상에서 자기가 만든 `Todo` 를 빼는 데는 계속 쓴다.
+  그건 편의이지 권한이 아니다.
+
+**무엇이 넓어지고 무엇이 좁아지나.** 지금보다 좁아지는 쪽이 위험한 쪽이다.
+
+| | 지금 | 바꾼 뒤 |
+|---|---|---|
+| 아무도 안 맡은 Task | 누구나 취소 | 운영자만 |
+| 맡은 Task | 맡은 쪽이 요청하고 승인을 기다림 | 맡은 쪽이 즉시 취소 |
+| 놓고 나서 | 누구나 즉시 취소(승인 우회) | 운영자만 |
+
+**대가.** Keeper 가 판정 없이 자기 일을 끝낼 수 있다. 제출해 놓고 판정을 기다리는 중에도 그렇다. 그래도
+그 끝은 `Cancelled` 이고 `Done` 이 아니므로 완료 실적으로 세탁되지는 않는다. 그리고 남의 일에는 손댈
+수 없다. 지금은 `release` 다음 `cancel` 로 누구의 Task 든 끝낼 수 있으므로, 이 대가는 지금보다 작다.
+
+**쌓인 `Todo` 를 치우는 일이 운영자에게 몰린다.** 641건이 있고, 이제 운영자만 취소할 수 있다. 그래서
+**운영자 쪽은 배치로 할 수 있어야 한다.** 한 건씩 누르게 만들면 이 설계는 성립하지 않는다. §3.11 에
+적는다.
+
+- 남이 맡고 있는 Task 를 운영자가 취소하면 세 가지를 같이 한다. 맡고 있던 쪽에 알린다(§3.6). 맡고 있던
   쪽의 에이전트 기록(`current_task`)을 비운다. 지금 전이 코드는 호출자 기록만 고치고
   (`workspace_task_transitions.ml:489-498`), 모든 기록에서 그 Task 를 지우는 함수는 이미 있다
   (`Task_cache_invariant.clear_stale_agent_task_for_task_result`, `workspace_task.ml:61`). 그리고 실패 지표와
   cancel hook 은 취소한 쪽이 맡은 쪽일 때만 돌린다. 지금은 호출자 이름과 Task 의 시작 시각으로 실패 1건을
-  적는데(`lib/task/tool_task.ml:328-347`), 그대로 두면 일한 적 없는 만든 쪽이 남의 작업 시간만큼의 실패를
+  적는데(`lib/task/tool_task.ml:328-347`), 그대로 두면 일한 적 없는 운영자가 남의 작업 시간만큼의 실패를
   얻는다.
 
 ### 3.6 알림
@@ -543,12 +563,34 @@ awaiting_verification" 문장뿐이다(`config/tools/masc_tasks.toml:5`, `:14-16
 | `<task>` 규칙 추가 | — | "Task 를 취소하는 것은 만든 쪽과 운영자만 한다. 판정을 거치지 않는다" |
 | `<task>` 규칙 추가 | — | "운영자만 답할 수 있는 종류의 제출을 두지 않는다" |
 
-### 3.11 기존 RFC 와의 관계
+### 3.11 운영자가 여러 건을 한 번에
+
+자격을 좁히면 치우는 일이 운영자에게 몰린다. `Todo` 641건을 이제 운영자만 취소할 수 있다. 한 건씩
+누르게 만들면 §3.5 의 설계는 성립하지 않고, 345시간 줄이 이름만 바꿔 돌아온다.
+
+지금 배치로 할 수 있는 것은 Task 를 **만드는** 일뿐이다(`masc_batch_add_tasks`). 취소에는 배치가 없다.
+2026-09-19 에 취소 요청 65건을 승인할 때도 일회용 스크립트로 65번 POST 를 돌렸고, 그건 도구가 아니었다.
+
+| 필요한 것 | 지금 | 하는 일 |
+|---|---|---|
+| 운영자의 일괄 취소 | 없다 | id 여러 개와 사유 하나를 받아 한 번에 취소한다. 건마다 성공·실패를 돌려준다 |
+| 끝난 Task 를 되살리기 | 단건만 된다 | `predecessor_task_id` 로 후속 Task 를 만드는 길은 있다(`tool_task_handlers.ml:366-406`). 배치 항목 스키마에 그 칸이 없어서 한 번에 못 한다 |
+
+되살리기는 새 전이가 아니다. `Cancelled` 는 끝 상태로 두고, 끝난 Task 를 가리키는 후속 Task 를 만든다.
+그 경로는 predecessor 가 끝 상태가 아니면 거절한다(`workspace_task_create.ml:34-70`). `Done` 재실행에
+대해 RFC-0323 이 이미 같은 결론을 냈다. `handoff_context` 는 상태 안이 아니라 Task 수준 필드라
+(`types_core.ml:612`) 취소돼도 살아남으므로, 되살릴 때 맥락이 따라온다.
+
+대가는 id 가 바뀌는 것이다. Goal 연결과 Board 글과 알림이 옛 id 를 가리키게 된다. `Cancelled → Todo`
+전이를 새로 만들면 id 는 지키지만 끝 상태의 종결성이 깨지고, 헌법의 상태 목록과 §4.1 의
+`ClosedOwesNothing` 을 같이 손봐야 한다. 후속 Task 쪽이 싸고, 저장소가 이미 그 답을 택했다.
+
+### 3.12 기존 RFC 와의 관계
 
 | RFC | 관계 |
 |---|---|
 | 0416 | `intent` 로 취소 요청을 표현한다는 결정을 대체한다. 새 상태를 만들지 않는다는 결론은 그대로다 |
-| 0417 | 원칙은 유지, 수단은 대체. 취소 **판정**이 없어지므로 운영자 전용 승인도 없어진다. 운영자는 어떤 Task 든 직접 취소할 수 있다 |
+| 0417 | **정면으로 어긋난다. 개정이 필요하다.** 그 문서 §0 은 "취소 판정 권한은 운영자의 클릭 하나에만 있다" 고 못박았고, §7 은 "시스템 LLM이 취소도 심사" 를 세탁 경로라고 이름 붙여 거절했다. 이 RFC 는 맡은 쪽이 자기 일을 직접 취소하게 한다. 근거는 그 문서의 전제가 실측으로 깨졌다는 것이다. §7 은 "타이머로 자동 취소" 를 거절하면서 "진짜 원인(운영자 주의)" 을 갚아야 한다고 했는데, 취소 요청 65건이 345시간까지 쌓인 것이 그 주의가 오지 않았다는 증거다. 다만 세탁 경로 자체는 이 RFC 에서도 막혀 있다. 판정 LLM 에이전트는 취소 권한을 받지 않고, 취소는 판정을 아예 거치지 않는다. 바뀌는 것은 **자기 일을 접는 데 남의 승인이 필요한가** 하나다 |
 | 0455 | §3.2 를 일반 규칙으로 올리고, §3.3 의 `Cancel_claim` 을 `Awaiting_verdict` 로 바꾼다. §3.4 는 대상이 없어진다 |
 | 0445, 0446 | 건드리지 않는다. `next_actor` 어휘와 계약 없는 제출 거절은 이 설계 위에서 그대로 성립한다 |
 | 0221, 0365 | 그대로 따른다. 결과를 말하는 것은 `task_status` 하나이고, handoff 는 나갈 때 쓰고 들어올 때 읽는다 |
@@ -565,11 +607,11 @@ awaiting_verification" 문장뿐이다(`config/tools/masc_tasks.toml:5`, `:14-16
 
 | cfg | 모델 | 검사한 것 | 결과 |
 |---|---|---|---|
-| `TaskOwnership.cfg` | 목표 생애주기 | `Safety` 전체와 `VerdictNeverAssigns` | 오류 없음. 서로 다른 상태 146,304개, 깊이 17 |
+| `TaskOwnership.cfg` | 목표 생애주기 | `Safety` 전체, `VerdictNeverAssigns`, `CancelNeedsStanding` | 오류 없음. 서로 다른 상태 165,312개, 깊이 17 |
 | `-buggy` | 반려가 제출자에게 돌려줌(지금 코드) | `OneTaskPerAgent` | 위반, 반례 6상태 |
 | `-verdict-assigns-buggy` | 같은 버그 | `VerdictNeverAssigns` | 위반, 반례 5상태 |
 | `-cancel-request-buggy` | 운영자만 답하는 취소 요청(지금 코드) | `NoOperatorOnlySubmissionKind` | 위반, 반례 3상태 |
-| `-anyone-cancels-buggy` | 남이 만든 Task 를 취소(지금 코드) | `CancelledRequiresStanding` | 위반, 반례 2상태 |
+| `-anyone-cancels-buggy` | 자격 없는 쪽이 아무도 안 맡은 Task 를 취소(지금 코드) | `CancelNeedsStanding` | 위반, 반례 2상태 |
 | `-cancel-keeps-holder-buggy` | Task 는 닫혔는데 맡은 쪽이 남음 | `ClosedOwesNothing` | 위반, 반례 3상태 |
 | `-submit-keeps-hold-buggy` | 제출하고도 놓지 않음 | `HeldOrPendingNotBoth` | 위반, 반례 3상태 |
 | `-submit-without-hold-buggy` | 맡은 적 없는 쪽이 제출 | `SubmissionRequiresHold` | 위반, 반례 2상태 |
@@ -595,8 +637,12 @@ awaiting_verification" 문장뿐이다(`config/tools/masc_tasks.toml:5`, `:14-16
   있었다) `RejectedIsOpenAndUnheld` 와 `RejectedNamesItsProducer` 둘 다 공허하게 참이었다. 두 속성이
   아무것도 검사하지 않는 동안 깨끗한 모델은 통과했고, 그 통과를 근거로 썼다. 2026-09-19 교차 리뷰에서
   나왔다.
-- 고친 뒤 깨끗한 모델은 146,304개 상태를 돈다. 17,856개가 늘었고, 그게 반려된 Task 가 실제로 만드는
-  경우의 수다. `-claim-keeps-returned-buggy` 의 반례는 `Claim` → `Submit` → `JudgeReturns` →
+- 고친 뒤 깨끗한 모델은 146,304개 상태를 돌았다. 17,856개가 늘었고, 그게 반려된 Task 가 실제로 만드는
+  경우의 수다. D2 로 취소 자격을 상태가 들고 있는 이름으로 바꾼 뒤에는 165,312개다. 맡은 쪽과 낸 쪽이
+  취소할 수 있게 되면서 갈 수 있는 길이 더 늘었다.
+- **취소 자격은 상태 술어로 못 쓴다.** Task 가 `Cancelled` 가 되는 순간 취소한 쪽을 지목했던 상태가
+  사라져서, 결과만 보고는 자격 있는 취소와 없는 취소를 구별할 수 없다. 그래서 `CancelNeedsStanding` 은
+  불변식이 아니라 액션 속성이고, 전이 직전 상태의 이름과 견준다. `VerdictNeverAssigns` 와 같은 모양이다. `-claim-keeps-returned-buggy` 의 반례는 `Claim` → `Submit` → `JudgeReturns` →
   `ApplyRejected` → 버그 순으로 가므로, 깨끗한 경로를 지나 온 자리에서 속성이 깨진다. 속성이 일을
   한다는 증거는 이것이지 상태 수가 아니다.
 - 코드의 `Todo` 는 낸 사람의 이름을 들고 있을 칸이 없고, `-rejected-forgets-producer-buggy` 가 그때
@@ -662,7 +708,7 @@ OCaml 쪽은 임의의 액션·판정 열을 돌려 `OneTaskPerAgent` 를 확인
 |---|---|---|
 | 0 | 이 문서와 `TaskOwnership.tla` | `scripts/tla-check.sh` 에서 깨끗한 모델 통과, 버그 모델 11개와 도달성 검사 2개(들어가는 길·나가는 길)가 기대대로 위반 |
 | 1 | **저장 형식이 바뀌는 묶음.** `Rejected` 추가, 반려 판정이 그리로 보내고 `set_current = None`. `intent` 삭제. `AwaitingVerification` 의 `assignee` 를 `producer` 로, 기본값 없는 디코드. 제출자의 handoff 를 두고 사유를 `reason` 에만 넣기. 제출 증거를 호출에서만 읽기. 전달 전 반려 알림을 세 값으로 지우기. `release_unroutable_rejected_task_r` 와 `Operator_routed` 삭제. 알림 문장에 id. 운영자 판정 요청에 `verification_id`. **맡는 축과 권하는 축 가르기**(§3.2). **`Rejected_unclaimed` 목록과 대시보드 칸**(§3.7, §3.8). **글로서리에서 1단계가 없애는 말 지우기** — `Assignee`(`:69-71`), `Intent`(`:91-93`), `Verdict`(`:103-105`) | 속성 테스트 `OneTaskPerAgent`. §4.2 첫 줄이 새 판정에서 0. `claim_next` 가 `Rejected` 를 권하지 않고 id 로는 맡아지는 테스트. 반려된 Task 가 목록과 대시보드 양쪽에 보이는 테스트 |
-| 2 | `Cancel` 의 자격을 `decide` 의 인자로. 인증된 운영자 경로와 TUI·dashboard 이전. 맡은 쪽 알림·기록·지표. 사라진 물음을 멈춤으로 알리지 않기. 도구 설명 | `release` 다음 `cancel` 이 만든 쪽 아닌 호출자에게 거절되는 테스트 |
+| 2 | `Cancel` 의 자격을 `decide` 의 인자로(`Named_by_state` 와 `Operator`). 인증된 운영자 경로와 TUI·dashboard 이전. 맡은 쪽 알림·기록·지표. 사라진 물음을 멈춤으로 알리지 않기. 도구 설명. **운영자 일괄 취소와 배치 항목의 `predecessor_task_id`**(§3.11) | `release` 다음 `cancel` 이 놓은 본인에게도 거절되는 테스트. 일괄 취소가 건마다 성공·실패를 돌려주는 테스트 |
 | 3 | 운영자 목록에 `Awaiting_verdict` 추가, 헌법 개정, `docs/spec/00-glossary.md` 에 `Rejected` 항목 추가(글로서리는 코드에 있는 말만 싣는다)와 `docs/spec/02-types-and-invariants.md` 정정, `Done_action` 과 `TaskLifecycle.tla` 삭제 | §4.2 셋째 줄 0 |
 | 4 | D6 을 하기로 하면: `Claimed` 와 `Start` 삭제 | `test_task_status_vocabulary` 와 화면 집계가 다섯 상태로 통과 |
 
@@ -716,7 +762,7 @@ OCaml 쪽은 임의의 액션·판정 열을 돌려 `OneTaskPerAgent` 를 확인
 | # | 질문 | 권고 | 다른 선택 |
 |---|---|---|---|
 | D1 | 반려된 Task 를 어디에 두는가 | **정해짐(2026-09-19): `Rejected` 상태를 두고 `claim_next` 가 자동으로 권하지 않는다.** 낸 사람은 알림의 id 로, 다른 쪽은 목록에서 골라 맡는다 | — |
-| D2 | Task 를 취소할 자격 | 만든 쪽과 운영자 | 운영자만(지금의 줄이 그대로 남는다). 또는 운영자가 설정으로 지정한 정리 담당 Keeper 추가(에이전트가 만든 640건을 정리할 길이 넓어진다) |
+| D2 | Task 를 취소할 자격 | **정해짐(2026-09-19): 상태가 이름을 들고 있는 에이전트와 인증된 운영자.** `created_by` 문자열은 자격에서 뺀다. 판정 LLM 에이전트에게는 취소 권한을 주지 않는다. 운영자 쪽은 배치로 한다(§3.5, §3.11). RFC-0417 개정이 따라온다(§3.12) | — |
 | D3 | 대기 중인 취소 요청 65건 | **정해짐(2026-09-19): 운영자 일괄 승인, 65건 모두 `Cancelled`** | — |
 | D4 | §3.10 헌법 문구. `Done.assignee` 의 뜻 포함 | 표대로 | — |
 | D5 | 판정을 기다리는 줄의 `assignee` 를 저장 형식에서도 `producer` 로 바꾸는가 | 바꾼다. Keeper 가 읽는 목록 행에 제출한 Task 가 `assignee: 나` 로 보이는 것이 "아직 내 것"이라는 오해의 한 뿌리다 | 저장 키는 그대로 둔다. 그러면 배포 전에 대기 줄을 비울 필요가 없어진다. 다만 backlog 를 못 읽게 될 위험 자체는 남는다. D1 로 `Rejected` 가 생긴 이상 옛 바이너리는 그 줄에서 어차피 멈춘다 |

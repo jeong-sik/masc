@@ -2,7 +2,7 @@
 
 **Date**: 2026-09-18  
 **Status**: Experimental / Opt-in  
-**Primary Target**: Exact-Output Lanes (`board_attention_exact`, `hitl_auto_judge`, `librarian_exact`, `verifier_exact`)
+**Primary Target**: `board_attention_exact`
 
 ---
 

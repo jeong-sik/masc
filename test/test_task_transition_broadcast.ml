@@ -330,10 +330,11 @@ let with_captured_activity f =
        f (fun () -> List.rev !emitted))
 ;;
 
-let cancelled_event_reasons emitted =
+let cancellation_request_reasons emitted =
   List.filter_map
     (fun (kind, payload) ->
-       if String.equal kind (Event_kind.Task.to_string Event_kind.Task.Cancelled)
+       if String.equal kind
+            (Event_kind.Task.to_string Event_kind.Task.Submit_for_verification)
        then Some (Yojson.Safe.Util.member "reason" payload)
        else None)
     (emitted ())
@@ -386,7 +387,7 @@ let test_cancel_does_not_borrow_the_previous_owners_note () =
       [ "Cancellation requested for task-14 - the premise is gone" ]
       (contents config ~baseline_seq);
     Alcotest.(check bool) "the activity event carries the same reason" true
-      (cancelled_event_reasons emitted = [ `String "the premise is gone" ]);
+      (cancellation_request_reasons emitted = [ `String "the premise is gone" ]);
     Alcotest.(check bool) "the transition log row carries the same reason" true
       (transition_log_reasons config ~task_id:"task-14"
        = [ `String "the premise is gone" ]);
@@ -437,7 +438,7 @@ let test_cancel_stated_in_the_summary_reaches_every_surface () =
       [ "Cancellation requested for task-15 - the premise this rests on is gone" ]
       (contents config ~baseline_seq);
     Alcotest.(check bool) "the activity event carries the summary, not null" true
-      (cancelled_event_reasons emitted = [ `String "the premise this rests on is gone" ]);
+      (cancellation_request_reasons emitted = [ `String "the premise this rests on is gone" ]);
     Alcotest.(check bool) "the transition log row carries the summary, not null" true
       (transition_log_reasons config ~task_id:"task-15"
        = [ `String "the premise this rests on is gone" ]);
@@ -476,6 +477,84 @@ let test_rejected_transition_is_silent () =
       (contents config ~baseline_seq))
 ;;
 
+let test_verdict_activity_tracks_the_committed_terminal () =
+  List.iter
+    (fun (action, verdict, terminal, span_terminal, active, terminal_kind) ->
+      with_test_env (fun config ~baseline_seq:_ ->
+        let previous = Atomic.get Workspace_hooks.activity_emit_fn in
+        let entity (value : Workspace_hooks.activity_entity) =
+          Activity_graph.entity ~kind:value.kind value.id
+        in
+        Fun.protect
+          ~finally:(fun () -> Atomic.set Workspace_hooks.activity_emit_fn previous)
+          (fun () ->
+            Atomic.set Workspace_hooks.activity_emit_fn
+              (fun config ~actor ?subject ~kind ~payload ~tags () ->
+                ignore (Activity_graph.emit config ~actor:(entity actor)
+                  ?subject:(Option.map entity subject) ~kind ~payload ~tags ()));
+            let task_id = "task-16" in
+            seed config (make_task ~id:task_id ~status:D.Todo);
+            check_ok "claim" (transition config ~task_id ~action:D.Claim ());
+            check_ok "start" (transition config ~task_id ~action:D.Start ());
+            check_ok "submit"
+              (transition config ~task_id ~action
+                 ~reason:"the premise is gone" ~notes:"measured evidence" ());
+            let status () =
+              (List.find (fun (task : D.task) -> String.equal task.id task_id)
+                 (Workspace.get_tasks_raw config)).task_status
+            in
+            let verification_id =
+              match status () with
+              | D.AwaitingVerification { verification_id; _ } -> verification_id
+              | _ -> Alcotest.fail "submission must remain awaiting verification"
+            in
+            let open Yojson.Safe.Util in
+            let assert_projection ~status ~active ~span_status =
+              let graph = Activity_graph.graph_json config ~limit:20 () in
+              let task = graph |> member "nodes" |> to_list |> List.find (fun row ->
+                row |> member "id" |> to_string = "task:" ^ task_id) in
+              Alcotest.(check string) "task projection" status
+                (task |> member "status" |> to_string);
+              let work = graph |> member "edges" |> to_list |> List.filter (fun row ->
+                row |> member "kind" |> to_string = "works_on") in
+              Alcotest.(check int) "the authority never owns task work" 1 (List.length work);
+              let edge = List.hd work in
+              Alcotest.(check string) "work belongs to producer" ("agent:" ^ owner)
+                (edge |> member "source" |> to_string);
+              Alcotest.(check bool) "producer work active" active
+                (edge |> member "active" |> to_bool);
+              let spans = Activity_graph.agent_spans_json config ~since_ms:0 ~limit:20 ()
+                |> member "spans" |> to_list in
+              Alcotest.(check int) "one task span" 1 (List.length spans);
+              let span = List.hd spans in
+              Alcotest.(check string) "span belongs to producer" owner
+                (span |> member "agent" |> to_string);
+              Alcotest.(check string) "span outcome" span_status
+                (span |> member "status" |> to_string)
+            in
+            assert_projection ~status:"in_progress" ~active:true ~span_status:"open";
+            (match Workspace.commit_verdict_r config ~task_id ~verification_id
+                ~authority:(D.Human_operator { operator_id = "operator-reviewer" })
+                ~verdict ~notes:"reviewed request" () with
+             | Ok _ -> ()
+             | Error error -> Alcotest.fail (D.masc_error_to_string error));
+            Alcotest.(check string) "committed terminal" terminal
+              (D.task_status_to_string (status ()));
+            assert_projection ~status:terminal ~active ~span_status:span_terminal;
+            let events = Activity_graph.list_events config ~after_seq:0 ~limit:20
+              ~keep:(fun event -> match event.Activity_graph.subject with
+                | Some subject -> String.equal subject.kind "task" && String.equal subject.id task_id
+                | None -> false) () in
+            Alcotest.(check (list string)) "events describe committed states"
+              [ "task.claimed"; "task.started"; "task.submit_for_verification"; terminal_kind ]
+              (List.map (fun (event : Activity_graph.event) -> event.kind) events))))
+    [ D.Cancel, D.Verdict_approved, "cancelled", "cancelled", false, "task.cancelled"
+    ; D.Submit_for_verification, D.Verdict_approved, "done", "completed", false, "task.approved"
+    ; D.Cancel, D.Verdict_rejected { reason = "the work is still needed" },
+        "in_progress", "open", true, "task.rejected"
+    ]
+;;
+
 let () =
   Alcotest.run
     "task transition broadcast"
@@ -501,6 +580,8 @@ let () =
             test_cancel_stated_in_the_summary_reaches_every_surface
         ; Alcotest.test_case "explicit reason outranks handoff context" `Quick
             test_explicit_reason_outranks_handoff_context
+        ; Alcotest.test_case "verdict activity follows the committed terminal" `Quick
+            test_verdict_activity_tracks_the_committed_terminal
         ] )
     ; ( "uncommitted transitions"
       , [ Alcotest.test_case "no-op is silent" `Quick test_noop_transition_is_silent

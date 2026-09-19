@@ -543,20 +543,20 @@ let transition_task_outcome_r
                   agent_name
                   action_s
                   (Printexc.to_string exn)));
-          (match action with
-           | Masc_domain.Claim ->
+          (match new_status with
+           | Masc_domain.Claimed _ ->
              emit_task_activity config ~agent_name ~task_id
                ~kind:(Event_kind.Task.to_string Event_kind.Task.Claimed)
                ~payload:(`Assoc [ "task_id", `String task_id ])
-           | Masc_domain.Start ->
+           | Masc_domain.InProgress _ ->
              emit_task_activity config ~agent_name ~task_id
                ~kind:(Event_kind.Task.to_string Event_kind.Task.Started)
                ~payload:(`Assoc [ "task_id", `String task_id ])
-           | Masc_domain.Done_action ->
+           | Masc_domain.Done _ ->
              emit_task_activity config ~agent_name ~task_id
                ~kind:(Event_kind.Task.to_string Event_kind.Task.Done)
                ~payload:(`Assoc [ "task_id", `String task_id; ("notes", if notes = "" then `Null else `String notes) ])
-           | Masc_domain.Cancel ->
+           | Masc_domain.Cancelled _ ->
              emit_task_activity
                config
                ~agent_name
@@ -570,7 +570,7 @@ let transition_task_outcome_r
                          | None -> `Null
                          | Some reason -> `String reason )
                      ])
-           | Masc_domain.Release ->
+           | Masc_domain.Todo ->
              emit_task_activity
                config
                ~agent_name
@@ -586,10 +586,18 @@ let transition_task_outcome_r
                           , Masc_domain.task_handoff_context_to_yojson handoff_context )
                         ]
                       | None -> []))
-           | Masc_domain.Submit_for_verification ->
+           | Masc_domain.AwaitingVerification { intent; _ } ->
+             let claim_fields =
+               match intent with
+               | Masc_domain.Complete_task -> []
+               | Masc_domain.Cancel_task ->
+                 [ "reason", (match stated_reason with
+                     | None -> `Null
+                     | Some reason -> `String reason) ]
+             in
              let payload =
                `Assoc
-                 ([ "task_id", `String task_id ]
+                 ([ "task_id", `String task_id ] @ claim_fields
                   @
                   match handoff_context with
                   | Some handoff_context ->
@@ -1066,7 +1074,14 @@ let commit_verdict_r
             | Masc_domain.AwaitingVerification _ -> ());
            let event_kind =
              match verdict with
-             | Masc_domain.Verdict_approved -> Event_kind.Task.Approved
+             | Masc_domain.Verdict_approved ->
+               (match new_status with
+                | Masc_domain.Cancelled _ -> Event_kind.Task.Cancelled
+                | Masc_domain.Todo
+                | Masc_domain.Claimed _
+                | Masc_domain.InProgress _
+                | Masc_domain.AwaitingVerification _
+                | Masc_domain.Done _ -> Event_kind.Task.Approved)
              | Masc_domain.Verdict_rejected _ -> Event_kind.Task.Rejected
            in
            (* [authority_actor] is a fresh id per review, so it identifies the

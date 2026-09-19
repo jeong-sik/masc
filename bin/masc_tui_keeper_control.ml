@@ -211,7 +211,7 @@ let purge_artifacts =
   ; "decision, feedback and state-transition logs including rotations"
   ; "runtime directory"
   ; "Memory OS snapshots and journal"
-  ; "turn boundary log"
+  ; "turn boundary log and Librarian read position"
   ; "sandbox workspaces"
   ; "runtime assignment and Keeper egress configuration"
   ; "TOML configuration"

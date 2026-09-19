@@ -57,6 +57,7 @@ type dashboard_purge_artifact =
   | Keeper_memory_journal_artifact
   | Keeper_memory_absorbed_artifact
   | Keeper_turn_boundaries_artifact
+  | Keeper_librarian_progress_artifact
   | Keeper_playground_bundles_artifact
   | Keeper_runtime_configuration_artifact
   | Keeper_configuration_artifact
@@ -522,6 +523,10 @@ let dashboard_purge_artifact_plan ~keeper_name context =
        a later keeper with the same name would read the atom positions of
        another history as its own. *)
   ; Keeper_turn_boundaries_artifact
+    (* The Librarian's read position is a value in the coordinates of that log
+       and of the history it describes. The two go together: a position left
+       behind would be read against another keeper's history. *)
+  ; Keeper_librarian_progress_artifact
     (* A Keeper can change sandbox profiles across lifetimes. Remove every
        backend-scoped root for the exact name so a same-name successor cannot
        inherit files from an earlier Local, Docker, microVM, or SSH lane. *)

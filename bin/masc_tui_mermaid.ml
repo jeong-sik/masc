@@ -690,8 +690,9 @@ let parse_state_statement line current_dir declared edges =
   (* Styling names what it styles first: [class A,B name], [classDef name …],
      [style A …], [click A …]. Mermaid reads these words in any case, so
      [Class --> X] is not a transition from a state called Class; it is
-     refused there and here, not dropped. *)
-  | "classdef" | "class" | "style" | "linkstyle" | "click" ->
+     refused there and here, not dropped. [linkStyle] is a flowchart word
+     that Mermaid's state grammar does not have, so there it is a state id. *)
+  | "classdef" | "class" | "style" | "click" ->
       let targets, _ = first_word rest in
       if List.for_all (fun target -> Option.is_some (state_id target)) (String.split_on_char ',' targets)
       then Ok Read

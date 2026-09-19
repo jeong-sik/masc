@@ -650,13 +650,16 @@ let test_state_diagram_line_that_names_no_state_is_refused () =
 (* What Mermaid itself does with these lines, read from its stateDb: a line
    that is only [[*]] is a start; naming a state again with no description
    keeps the one it has; a note about a state no other line names declares
-   it. Styling, [hide empty description] and [scale] change nothing. *)
+   it. Styling, [hide empty description] and [scale] change nothing. The
+   state grammar has no [linkStyle], so a line that starts with it is a
+   transition from a state of that name. *)
 let test_state_diagram_reads_lines_as_mermaid_does () =
   let graph =
     parsed
       "stateDiagram-v2\n\
        [*]\n\
        \"Quoted\" --> B --> C\n\
+       linkStyle --> C\n\
        note right of Lonely : about a state no other line names\n\
        C : described\n\
        state C\n\
@@ -671,11 +674,13 @@ let test_state_diagram_reads_lines_as_mermaid_does () =
       ; (Named "Quoted", "Quoted")
       ; (Named "B", "B")
       ; (Named "C", "described")
+      ; (Named "linkStyle", "linkStyle")
       ; (Named "Lonely", "Lonely")
       ]
     (List.map (fun (n : Mermaid.node) -> (n.id, n.label)) graph.nodes);
   Alcotest.(check (list (pair node_id node_id))) "a chain is one transition per arrow"
-    Mermaid.[ (Named "Quoted", Named "B"); (Named "B", Named "C") ]
+    Mermaid.
+      [ (Named "Quoted", Named "B"); (Named "B", Named "C"); (Named "linkStyle", Named "C") ]
     (List.map (fun (e : Mermaid.edge) -> (e.from_id, e.to_id)) graph.edges)
 
 let () =

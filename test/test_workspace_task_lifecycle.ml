@@ -307,6 +307,77 @@ let test_operator_approval_still_cancels_a_cancel_claim () =
     failwith "operator approval must still end a cancel claim as Cancelled"
 ;;
 
+(* issue #32863 (comment 5530991457) records three dispositions the cancel lane
+   has actually shown: an approval, a rejection, and the operator's own
+   re-judgment. All three converge on the same commit funnel, so this drives
+   each one through it on the same obligation -- a change that routes any of
+   them through the wrong door fails here rather than in production. The
+   operator-unanswered case is (3): with no operator signature the system
+   lane's approval is refused and the claim is left where it was. *)
+let test_contract4_three_judgements_of_a_cancel_claim () =
+  let system = D.System_llm_agent { agent_run_id = "fusion-run-9" } in
+  let operator = D.Human_operator { operator_id = "op-1" } in
+  (* (1) rejection: the system lane may reject a cancel claim; the task returns
+     to its producer with the reason carried. *)
+  (match
+     L.decide_verdict
+       ~authority:system
+       ~verdict:(D.Verdict_rejected { reason = "the upstream schema landed instead" })
+       ~task_id:"task-1"
+       ~verification_id:"vrf-1"
+       ~task_status:awaiting_cancel
+       ~now
+       ~notes:"the upstream schema landed instead"
+   with
+   | Ok
+       { decision =
+           { new_status = D.InProgress { assignee; _ }; set_current = Some id }
+       ; authority = D.System_llm_agent _
+       ; _
+       }
+     when String.equal assignee owner && String.equal id "task-1" -> ()
+   | Ok _ | Error _ ->
+     failwith
+       "a reason-carrying rejection must return the cancel claim to its producer");
+  (* (2) approval: only the operator's signature ends a cancel claim, and it
+     ends it as Cancelled with the operator as authority. *)
+  (match
+     L.decide_verdict
+       ~authority:operator
+       ~verdict:D.Verdict_approved
+       ~task_id:"task-1"
+       ~verification_id:"vrf-1"
+       ~task_status:awaiting_cancel
+       ~now
+       ~notes:"the operator withdrew the task"
+   with
+   | Ok
+       { decision = { new_status = D.Cancelled { cancelled_by; _ }; _ }
+       ; authority = D.Human_operator { operator_id }
+       ; _
+       }
+     when String.equal cancelled_by owner && String.equal operator_id "op-1" -> ()
+   | Ok _ | Error _ ->
+     failwith "an operator approval must end a cancel claim as Cancelled");
+  (* (3) operator re-judgment / operator unanswered: the system lane cannot end
+     it, so the operator's later verdict is the only path; with no operator
+     signature the claim stays [AwaitingVerification] and the refusal is the
+     seam the re-judgment sits behind. *)
+  (match
+     L.decide_verdict
+       ~authority:system
+       ~verdict:D.Verdict_approved
+       ~task_id:"task-1"
+       ~verification_id:"vrf-1"
+       ~task_status:awaiting_cancel
+       ~now
+       ~notes:"the operator has not answered"
+   with
+   | Error L.Verdict_cancel_requires_operator -> ()
+   | Ok _ | Error _ ->
+     failwith "a system signature must not pre-empt the operator re-judgment")
+;;
+
 (* The verdict path is separate from agent actions. The producer boundary owns
    authentication; the leaf still refuses empty provenance so audit identity
    cannot disappear. *)
@@ -455,6 +526,7 @@ let () =
   test_cancel_cannot_undo_a_finished_task ();
   test_approval_ends_the_task_the_way_it_was_asked ();
   test_a_rejected_cancellation_returns_to_its_producer ();
+  test_contract4_three_judgements_of_a_cancel_claim ();
   test_system_approval_of_cancel_claim_is_refused ();
   test_operator_approval_still_cancels_a_cancel_claim ();
   Printf.printf "workspace_task_lifecycle: all tests passed\n%!"

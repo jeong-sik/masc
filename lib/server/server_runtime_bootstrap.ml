@@ -243,7 +243,7 @@ let warn_rejected_exact_output_slots registry =
        match diagnosis with
        | Runtime_exact_output_registry.Declared_target_binding_rejected ->
          Log.Server.warn
-           "exact_output: lane %S slot %d (%S) ignored because the overlay declares that target but its provider binding was rejected (see the target binding report above); fix the binding, the slot needs no change"
+           "exact_output: lane %S slot %d (%S) ignored because the binding it names resolved to no AGENT_CORE catalog row (see the target binding report above); an endpoint the install wizard created can never match one, so point the slot at a binding the catalog knows or add the row"
            slot.lane_id
            slot.position
            slot.slot_id
@@ -254,7 +254,7 @@ let warn_rejected_exact_output_slots registry =
             registries; #32653 measured the catalog-id form failing at
             dispatch 27 times on 2026-08-29. *)
          Log.Server.warn
-           "exact_output: lane %S slot %d (%S) ignored because it is a runtime.toml runtime id (provider %S, api-name %S) with no overlay [[targets]] row of the same id; this lane dispatches by configured runtime id, so keep the id and add an overlay target with the same id for model %S"
+           "exact_output: lane %S slot %d (%S) names a binding (provider %S, api-name %S) that is not an exact-output target; a subscription CLI has no endpoint to resolve against the catalog, so this lane needs an HTTP binding for model %S"
            slot.lane_id
            slot.position
            slot.slot_id
@@ -263,7 +263,7 @@ let warn_rejected_exact_output_slots registry =
            api_name
        | Runtime_exact_output_registry.Configured_runtime_only { provider_id; api_name } ->
          Log.Server.warn
-           "exact_output: lane %S slot %d (%S) ignored because it is a runtime.toml runtime id (provider %S, api-name %S), not an exact-output target; this lane dispatches by admitted target, so name the overlay [[targets]] id that declares model %S"
+           "exact_output: lane %S slot %d (%S) names a binding (provider %S, api-name %S) that is not an exact-output target; a subscription CLI has no endpoint to resolve against the catalog, so name an HTTP binding for model %S"
            slot.lane_id
            slot.position
            slot.slot_id
@@ -272,7 +272,7 @@ let warn_rejected_exact_output_slots registry =
            api_name
        | Runtime_exact_output_registry.Unknown_to_both_registries ->
          Log.Server.warn
-           "exact_output: lane %S slot %d (%S) ignored because it is neither an overlay target nor an enabled configured runtime; the catalog moved on, the runtime is disabled, or the id is mistyped"
+           "exact_output: lane %S slot %d (%S) ignored because no enabled binding carries that id; the binding is disabled, it was removed, or the id is mistyped"
            slot.lane_id
            slot.position
            slot.slot_id)
@@ -295,7 +295,7 @@ let warn_rejected_exact_output_slots registry =
        List.length (List.filter (fun (_, diagnosis) -> predicate diagnosis) diagnoses)
      in
      Log.Server.error
-       "exact_output: %d slot(s) ignored across %d lane(s) (%s): %d unknown to both registries, %d runtime.toml runtime id(s) without a same-id overlay target, %d declared target(s) whose binding was rejected — fix runtime.toml or the overlay"
+       "exact_output: %d slot(s) ignored across %d lane(s) (%s): %d naming no enabled binding, %d naming a binding that does no exact output, %d whose binding resolved to no catalog row — fix runtime.toml"
        (List.length rejected)
        (List.length lanes)
        (String.concat ", " lanes)

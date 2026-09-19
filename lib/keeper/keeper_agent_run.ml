@@ -800,7 +800,6 @@ let run_turn
       ?(degraded_retry_applied = false)
       ?degraded_retry_runtime
       ?fallback_reason
-      ?(runtime_rotation_attempts = [])
       ?direct_resume
       ?official_task_reference
       ?on_gate_evidence_admitted
@@ -2002,7 +2001,6 @@ let run_turn
            ~degraded_retry_applied
            ~degraded_retry_runtime:receipt_degraded_retry_runtime
            ~fallback_reason:receipt_fallback_reason
-           ~runtime_rotation_attempts
            ~turn_result
            ~receipt_agent_core_turn_count_ref
            ~receipt_stop_reason_ref

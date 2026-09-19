@@ -142,15 +142,6 @@ let test_dispatch_accepts_runtime_without_serialized_request_cap () =
           | Error error -> Alcotest.failf "uncapped runtime should resolve for dispatch: %s"
               (Agent_core.Error.to_string error)))
 
-type direct_retry_observed_attempt =
-  { observed_runtime_id : string
-  ; observed_max_context : int
-  ; observed_is_retry : bool
-  ; observed_degraded_retry_runtime : string option
-  ; observed_fallback_reason : string option
-  ; observed_rotation_attempt_count : int
-  }
-
 let test_keeper_hook_relaxes_strict_tool_choice () =
   let open Agent_core.Types in
   let relax = Masc.Keeper_run_tools_hooks.relax_strict_tool_choice_for_keeper in

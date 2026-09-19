@@ -68,15 +68,17 @@ let write_metadata config ~trace_id =
   path
 ;;
 
-let run_cli env ~base_path ~config_root ~cluster_name ~extent =
+let run_cli ?base_argument ?env_base_path env ~base_path ~config_root ~cluster_name ~extent =
   Eio.Process.parse_out
+    ~cwd:Eio.Path.(Eio.Stdenv.fs env / base_path)
     ~env:[| "MASC_CONFIG_DIR=" ^ config_root
-          ; "MASC_BASE_PATH=" ^ base_path
+          ; "MASC_BASE_PATH=" ^ Option.value ~default:base_path env_base_path
           ; "MASC_CLUSTER_NAME=" ^ cluster_name
           |]
     (Eio.Stdenv.process_mgr env) Eio.Buf_read.take_all
     [ Sys.getenv "MASC_TEST_LIBRARIAN_REPLAY_EXE"
-    ; "--base-path"; base_path; "--keeper"; keeper_id; "--extent"; extent
+    ; "--base-path"; Option.value ~default:base_path base_argument
+    ; "--keeper"; keeper_id; "--extent"; extent
     ]
   |> Yojson.Safe.from_string
 ;;
@@ -97,12 +99,36 @@ let rec files_under dir =
     else [ path, Digest.to_hex (Digest.file path) ])
 ;;
 
-let test_workspace_checkpoint_is_replayed ?(shared_config = false) cluster_name () =
+type base_argument = Absolute | Relative | Linked_worktree | Conflicting_environment
+
+let test_workspace_checkpoint_is_replayed ?(shared_config = false)
+    ?(argument = Absolute) cluster_name () =
+  Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
+  Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
   Eio_main.run @@ fun env ->
   let base_path = Filename.temp_dir "librarian-replay-cli-" "" in
   Fun.protect
     ~finally:(fun () -> Fs_compat.remove_tree base_path)
     (fun () ->
+      let base_argument = match argument with
+        | Absolute | Conflicting_environment -> base_path
+        | Relative -> "."
+        | Linked_worktree ->
+          let run args = Eio.Process.run (Eio.Stdenv.process_mgr env)
+            ([ "git"; "-c"; "core.hooksPath=/dev/null"
+             ; "-c"; "commit.gpgsign=false" ] @ args) in
+          run [ "init"; "--quiet"; base_path ];
+          run [ "-C"; base_path; "-c"; "user.name=Replay fixture"
+              ; "-c"; "user.email=replay@example.invalid"
+              ; "commit"; "--quiet"; "--allow-empty"; "-m"; "fixture" ];
+          let path = Filename.concat base_path ".worktrees/replay" in
+          run [ "-C"; base_path; "worktree"; "add"; "--quiet"; "--detach"; path ];
+          path
+      in
+      let env_base_path = match argument with
+        | Conflicting_environment -> Filename.concat base_path "other-workspace"
+        | Absolute | Relative | Linked_worktree -> base_path
+      in
       let config = Masc.Workspace.default_config base_path in
       let config =
         { config with backend_config = { config.backend_config with cluster_name } }
@@ -156,7 +182,7 @@ let test_workspace_checkpoint_is_replayed ?(shared_config = false) cluster_name 
       let before = files_under base_path in
       List.iter (fun (extent, expected_ranges) ->
           let output =
-            run_cli env ~base_path ~config_root ~cluster_name ~extent
+            run_cli ~base_argument ~env_base_path env ~base_path ~config_root ~cluster_name ~extent
           in
           check string "resolved fixture keepers" keepers_dir
             (output |> U.member "keepers_dir" |> U.to_string);
@@ -227,6 +253,20 @@ let test_workspace_checkpoint_is_replayed ?(shared_config = false) cluster_name 
           before_unreadable (files_under base_path)))
 ;;
 
+let test_missing_store_is_not_an_empty_replay keeper_argument () =
+  Eio_main.run @@ fun env ->
+  let base_path = Filename.temp_dir "librarian-replay-missing-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) @@ fun () ->
+  let output = Eio.Process.parse_out
+    ~env:[| "MASC_BASE_PATH=" ^ base_path; "MASC_CONFIG_DIR=" ^ base_path ^ "/config" |]
+    ~is_success:(Int.equal 2)
+    (Eio.Stdenv.process_mgr env) Eio.Buf_read.take_all
+    ([ Sys.getenv "MASC_TEST_LIBRARIAN_REPLAY_EXE"; "--base-path"; base_path ]
+     @ keeper_argument) in
+  check string "a failed directory read is not a successful JSON result" "" output;
+  check (list (pair string string)) "failed read creates no files" [] (files_under base_path)
+;;
+
 let () =
   run "librarian replay CLI"
     [ "workspace",
@@ -236,5 +276,15 @@ let () =
             (test_workspace_checkpoint_is_replayed "Replay/Cluster")
         ; test_case "shared config: active cluster trace, unreadable log, metadata required" `Quick
             (test_workspace_checkpoint_is_replayed ~shared_config:true "Replay/Cluster")
+        ; test_case "relative base: producer checkpoint, both extents, no writes" `Quick
+            (test_workspace_checkpoint_is_replayed ~argument:Relative "Replay/Cluster")
+        ; test_case "linked worktree: producer checkpoint, both extents, no writes" `Quick
+            (test_workspace_checkpoint_is_replayed ~argument:Linked_worktree "Replay/Cluster")
+        ; test_case "explicit base wins over a different environment base" `Quick
+            (test_workspace_checkpoint_is_replayed ~argument:Conflicting_environment "Replay/Cluster")
+        ; test_case "missing store fails instead of reporting no Keepers" `Quick
+            (test_missing_store_is_not_an_empty_replay [])
+        ; test_case "named Keeper cannot hide a missing store" `Quick
+            (test_missing_store_is_not_an_empty_replay [ "--keeper"; keeper_id ])
         ]
     ]

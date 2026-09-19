@@ -233,7 +233,7 @@ let replay ~extent ~trace_id ~lines ~messages =
   loop ~progress:None ~reached:0 []
 ;;
 
-let replay_keeper ~extent ~runtime_root ~keepers_dir keeper_id =
+let replay_keeper ~extent ~runtime_root ~session_store ~keepers_dir keeper_id =
   match Keeper_turn_boundaries.read ~keepers_dir ~keeper_id with
   | Error detail -> Skipped ("boundary_log_unreadable:" ^ detail)
   | Ok [] -> Skipped "boundary_log_empty"
@@ -241,11 +241,7 @@ let replay_keeper ~extent ~runtime_root ~keepers_dir keeper_id =
     (match trace_of_metadata ~runtime_root keeper_id with
      | Error detail -> Skipped detail
      | Ok trace_id ->
-       let session_dir =
-         Filename.concat
-           (Filename.concat runtime_root "traces")
-           trace_id
-       in
+       let session_dir = Filename.concat session_store trace_id in
        (match
           Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id:trace_id
         with
@@ -314,17 +310,17 @@ let outcome_to_json keeper = function
 
 let keepers_with_a_log keepers_dir =
   match Sys.readdir keepers_dir with
-  | exception Sys_error detail ->
-    prerr_endline ("cannot list " ^ keepers_dir ^ ": " ^ detail);
-    []
+  | exception Sys_error detail -> Error detail
   | entries ->
-    Array.to_list entries
-    |> List.filter_map (fun entry ->
-      let suffix_at = String.length entry - String.length boundary_suffix in
-      if suffix_at > 0 && String.sub entry suffix_at (String.length boundary_suffix) = boundary_suffix
-      then Some (String.sub entry 0 suffix_at)
-      else None)
-    |> List.sort compare
+    Ok
+      (Array.to_list entries
+       |> List.filter_map (fun entry ->
+         let suffix_at = String.length entry - String.length boundary_suffix in
+         if suffix_at > 0
+            && String.sub entry suffix_at (String.length boundary_suffix) = boundary_suffix
+         then Some (String.sub entry 0 suffix_at)
+         else None)
+       |> List.sort compare)
 ;;
 
 let () =
@@ -360,17 +356,30 @@ let () =
   | Ok () ->
     let base_path =
       match !base_path with
-      | Some dir -> dir
-      | None -> Config_dir_resolver.base_path_or_cwd ()
+      | Some dir ->
+        dir
+        |> Config_dir_resolver.absolute_path
+        |> Masc.Workspace.runtime_base_path_for_request
+      | None ->
+        Config_dir_resolver.base_path_or_cwd ()
+        |> Masc.Workspace.runtime_base_path_for
     in
     let keepers_dir =
       Config_dir_resolver.keepers_dir_for_base_path ~base_path
     in
     (* Use the writer's cluster resolution without opening a storage backend. *)
     let runtime_root = (Masc.Workspace.backend_config_for base_path).base_path in
+    let session_store = Masc.Keeper_fs.session_store_path_for_base_path base_path in
+    let keepers_with_logs =
+      match keepers_with_a_log keepers_dir with
+      | Ok keepers -> keepers
+      | Error detail ->
+        prerr_endline ("cannot list " ^ keepers_dir ^ ": " ^ detail);
+        exit 2
+    in
     let keepers =
       match List.rev !wanted with
-      | [] -> keepers_with_a_log keepers_dir
+      | [] -> keepers_with_logs
       | named -> named
     in
     let results =
@@ -378,7 +387,8 @@ let () =
         (fun keeper ->
           outcome_to_json
             keeper
-            (replay_keeper ~extent:!extent ~runtime_root ~keepers_dir keeper))
+            (replay_keeper
+               ~extent:!extent ~runtime_root ~session_store ~keepers_dir keeper))
         keepers
     in
     print_endline

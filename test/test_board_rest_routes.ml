@@ -596,6 +596,13 @@ let test_board_context_inference_uses_current_owner_contract_and_actor () =
   with_board_store ~base_path
   @@ fun () ->
   let keeper_name = "context-inference-target" in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path
+  in
+  Fs_compat.mkdir_p keepers_dir;
+  Fs_compat.save_file
+    (Filename.concat keepers_dir (keeper_name ^ ".toml"))
+    "[keeper]\nactivation_mode = \"manual\"\nsandbox_profile = \"docker\"\nnetwork_mode = \"inherit\"\ninstructions = \"Test context inference.\"\n";
   let meta =
     match
       Masc_test_deps.meta_of_json_fixture
@@ -611,6 +618,9 @@ let test_board_context_inference_uses_current_owner_contract_and_actor () =
   (match Masc.Keeper_meta_store.replace_snapshot config meta with
    | Ok () -> ()
    | Error error -> fail error);
+  ignore (Masc.Keeper_registry.register_offline ~base_path keeper_name meta);
+  Eio.Switch.on_release sw (fun () ->
+    Masc.Keeper_registry.For_testing.unregister ~base_path keeper_name);
   (match
      Masc.Keeper_owner_registry.install_from_store
        ~sw
@@ -626,7 +636,7 @@ let test_board_context_inference_uses_current_owner_contract_and_actor () =
       Masc.Board_dispatch.create_post
         ~author:keeper_name
         ~content:"Infer this post through the registered Keeper"
-        ~post_kind:Masc.Board.Keeper_post
+        ~post_kind:Masc.Board.Automation_post
         ()
     with
     | Ok post -> post
@@ -645,7 +655,12 @@ let test_board_context_inference_uses_current_owner_contract_and_actor () =
       ()
   in
   let open Yojson.Safe.Util in
-  check int "context inference accepted" 202 status;
+  if status <> 202
+  then
+    failf
+      "context inference returned %d: %s"
+      status
+      (Yojson.Safe.to_string response);
   check string "resolved target keeper" keeper_name
     (response |> member "keeper_name" |> to_string);
   check string "current Owner state is projected" "queued"

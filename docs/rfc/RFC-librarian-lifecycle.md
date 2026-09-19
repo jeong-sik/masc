@@ -404,6 +404,10 @@ flowchart TD
 
 이 턴들은 checkpoint 가 없어 atom 이력이 없다(`No_atom_history`). 읽을 거리는 trace 디렉터리의 두 파일에 있다(`keeper_context_core_history.ml` `persist_message`, `classify_history_entry`).
 
+**얼마나 되는지 재 봤다(09-19 라이브, 턴 기록 1,479건 / 09-16~19).** 공식 클라이언트 턴이 **829건, 56%** 다(`antigravity_subscription…` 455 + `claude_code…` 374). agent core 턴은 650건(43%)이다. 즉 **지금 도는 턴의 절반 이상이 이 절에 해당한다.** 이 턴들에는 turn boundary 줄이 남아도 자르는 자리가 없고(`No_atom_history`), 회차가 받는 메시지도 checkpoint 가 아니라 그 턴의 assistant 하나뿐이다(`keeper_agent_run_finalize_response.ml` 의 `None -> Option.to_list assistant_msg`).
+
+그래서 1~2b 단계가 사는 것은 **agent core 턴에 대해서**다. 공식 클라이언트 레인을 어떻게 읽을지는 §10 의 3 이 정하고, 그 결정 전까지 "턴을 놓치지 않는다"는 이 43% 에 대한 문장으로 읽어야 한다.
+
 | 턴 | 남는 줄 |
 |---|---|
 | 사람이 말을 건 턴 | `history.jsonl` 에 user 줄과 assistant 줄 |

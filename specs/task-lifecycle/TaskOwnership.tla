@@ -465,4 +465,12 @@ Safety ==
 VerdictNeverAssigns ==
     [][\A t \in Tasks : (holder[t] = NoOne /\ holder'[t] # NoOne) => ~pending[t]]_vars
 
+\* Reachability guard for the way OUT, expecting a violation like
+\* RejectedNeverHappens guards the way in. Those two are different questions:
+\* a model can reach a returned Task and still never let anyone take it, which
+\* is the graveyard D1 is judged against. Written as something that must FAIL,
+\* so it goes quiet the day Claim stops admitting a returned Task.
+RejectedNeverResumed ==
+    [][\A t \in Tasks : ~(returned[t] /\ holder[t] = NoOne /\ holder'[t] # NoOne)]_vars
+
 ==============================================================================

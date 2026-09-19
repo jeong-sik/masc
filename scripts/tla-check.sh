@@ -182,6 +182,10 @@ done
 # Expects a violation, so it goes red the day that stops being true.
 run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla" \
   "TaskOwnership-rejected-reachable-buggy.cfg" "rejected-reachable"
+# The other half: a reachable Rejected state that nobody can claim is a
+# graveyard. Expects a violation too.
+run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla" \
+  "TaskOwnership-rejected-resumable-buggy.cfg" "rejected-resumable"
 
 
 # Server lifecycle product invariants across lifecycle/lazy/readiness axes.

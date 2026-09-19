@@ -266,6 +266,17 @@ type task_status =
   (`assigned_to`), `lib/task/tool_task.ml:137`·`:268`, `workspace_task_transitions.ml:272`·`:509`,
   `lib/server/server_routes_http_runtime_fleet_scan.ml:873`. `task_performer_of_status` 는 그대로
   제출자를 답한다.
+- **`=` 로 상태를 견주는 자리 세 곳은 컴파일러가 절대 못 짚는다.** `match` 가 아니라 구조적 동등
+  비교라 타입이 그대로여서 조용히 지나간다. 셋 다 "열려 있고 아무도 안 맡은 일"을 세는 자리이고,
+  셋 다 `Rejected` 를 빼놓는다. 이건 D1 이 기대는 바로 그 신호다.
+  `lib/keeper/keeper_world_observation_inputs.ml:196-201`(Keeper 가 매 턴 읽는 프레임의 미claim 수),
+  `lib/orchestrator.ml:43`(우선순위 높은 미claim 이 있으면 오케스트레이션을 깨우는 조건),
+  `lib/dashboard/dashboard_attention.ml:91`(노는 에이전트와 함께 주의를 올리는 조건). 1단계에서
+  셋 다 고친다. 비슷해 보이는 `workspace_task.ml:329`·`:468` 은 레코드를 짓는 자리라 해당 없다.
+- **집계가 고정 튜플이면 컴파일러는 "빈칸을 채워라"까지만 시킨다.** 대시보드 rollup 은 다섯 칸짜리
+  튜플로 접고 JSON 키도 다섯으로 고정이다(`server_dashboard_http.ml:604-616`, `:627-634`).
+  `| Todo | Rejected _ -> todo + 1` 로 채우면 컴파일도 통과하고 키도 그대로라, 반려된 Task 가
+  `todo` 로 세어진다. D1 이 없애려는 혼동이 빌드 초록인 채로 생긴다. 여섯째 칸과 새 키가 필요하다.
 - `Rejected` 는 열려 있고 아무도 안 맡은 자리다. `Todo` 와 다른 점은 누가 냈던 것인지를 Task 자신이
   말한다는 것 하나다. 반려 사유는 지금처럼 handoff 에 있고 여기 옮겨 적지 않는다. 한 사실을 두 곳에
   적지 않기 위해서다.
@@ -470,12 +481,22 @@ Task 는 맡은 사람도 없고 목록에도 없어서, 낸 사람이 알림을
 | `keeper.md` | `world.current_task.status.awaiting_verification` 문구 삭제(제출하면 current 가 아니다). §3.6 의 두 문장 |
 | TUI·dashboard | Task 취소를 인증된 운영자 경로로 옮긴다. 목록 행의 `assignee` 는 판정을 기다리는 줄에서 `producer` 로 보인다 |
 
-**Keeper 가 보는 목록은 안전하다. 대시보드는 아니다.** 서버 쪽 두 표면은 새 상태를 저절로 따라온다.
+**Keeper 가 *도구로 부르는* 목록은 안전하다. 가만히 읽는 프레임은 아니다.** 서버 쪽 두 표면은 새
+상태를 저절로 따라온다.
 `keeper_tasks_list` 의 상태 목록은 변형에서 뽑은 것과 같은지를 테스트가 붙잡고 있고
 (`config/tools/keeper_tasks_list.toml:25-29`), 기본 목록은 `Done` 과 `Cancelled` 만 숨기는 식이라
 (`workspace_query.ml:500-511`) 반려된 Task 는 손대지 않아도 목록에 나온다. 두 `match` 모두 빠짐없이
-적혀 있어 컴파일러가 짚는다. 고칠 것은 `masc_tasks` 설명글의 "기본은 todo/claimed/in_progress/
+적혀 있어 컴파일러가 짚는다. 여기서 고칠 것은 `masc_tasks` 설명글의 "기본은 todo/claimed/in_progress/
 awaiting_verification" 문장뿐이다(`config/tools/masc_tasks.toml:5`, `:14-16`).
+
+그런데 Keeper 는 도구를 안 불러도 매 턴 프레임을 읽고, 그 프레임의 미claim 수는 `=` 비교로 세어진다
+(`keeper_world_observation_inputs.ml:196-201`). 하필 그 값이 "열려 있는데 너한테 안 권해지는 일이
+있다"를 알리는 줄의 피감수다(`keeper_unified_prompt.ml:1827-1831`, 문구는 `config/prompts/keeper.md:344-345`).
+`Rejected` 를 안 세면 그 뺄셈이 0 이 되어 줄 자체가 안 나온다. 낸 사람이 세션을 닫고 떠난 뒤라면
+다른 Keeper 에게는 아무 신호도 없다. D1 이 "목록이 유일한 입구" 라고 했는데, 그 목록을 열어 볼
+이유가 프레임 어디에도 없게 된다. `unclaimed_task_count` 가 `Rejected` 를 세게 하면 그 줄이 저절로
+알린다. `keeper_unified_prompt.ml:1827` 의 "exactly two things" 주석과 `keeper.md:345` 의 괄호에
+셋째를 더한다. 1단계.
 
 대시보드는 사정이 다르다. 타입의 상태 목록(`dashboard/src/types/core.ts:57`)과 런타임 목록
 (`dashboard/src/lib/core-parsers.ts:23-33`)은 컴파일 때 서로 맞춰진다(`:34-36`). 거기까지는 걸린다.
@@ -554,6 +575,7 @@ awaiting_verification" 문장뿐이다(`config/tools/masc_tasks.toml:5`, `:14-16
 | `-superseded-verdict-buggy` | 교체된 제출에 대한 판정이 완료시킴 | `DoneRequiresLiveApproval` | 위반, 반례 6상태 |
 | `-claim-keeps-returned-buggy` | 반려된 Task 를 맡으면서 반려 표시를 안 지움 | `RejectedIsOpenAndUnheld` | 위반, 반례 6상태 |
 | `-rejected-reachable-buggy` | 깨끗한 모델(버그 없음) | `RejectedNeverHappens` — 깨져야 하는 것 | 위반, 반례 5상태 |
+| `-rejected-resumable-buggy` | 깨끗한 모델(버그 없음) | `RejectedNeverResumed` — 깨져야 하는 것 | 위반, 반례 6상태 |
 
 - 스펙은 `Claimed` 와 `InProgress` 를 하나로 본다. `Start` 는 누가 맡는지를 바꾸지 않는다. 운영자가
   놓아 주는 것은 `Release` 와 결과가 같아 따로 두지 않았다.
@@ -580,6 +602,13 @@ awaiting_verification" 문장뿐이다(`config/tools/masc_tasks.toml:5`, `:14-16
   "반려된 Task 는 생기지 않는다"를 걸고 **깨지기를 기대한다**. 누가 `ApplyRejected` 를 다시 건드려
   반려에 닿지 못하게 만들면 이 cfg 가 조용해지고 `scripts/tla-check.sh` 가 거기서 멈춘다. 공허한
   불변식은 통과로 보이지 실패로 안 보이기 때문에, 알람을 반대로 걸어야 한다.
+- 들어가는 길과 나가는 길은 다른 물음이다. 교차 리뷰가 `Claim` 에 `~returned[t]` 한 줄을 더해
+  변이시켜 봤는데, 반려된 Task 를 아무도 못 맡게 되는 그 변이가 **깨끗한 모델을 통과했다**
+  (104,904 상태, 오류 없음). §3.2 가 D1 의 근거로 든 실패, 곧 "권하지 않게 하면 무덤이 된다"를
+  모델이 못 본 것이다. `-rejected-reachable-buggy` 는 닿는지만 지킨다. 그래서
+  `-rejected-resumable-buggy` 를 따로 뒀고, 같은 변이를 걸면 이쪽이 조용해져서 러너가 멈춘다.
+  직접 걸어서 확인했다. 변이 상태에서 `-rejected-resumable` 은 조용하고 `-rejected-reachable` 은
+  그대로 운다.
 - 다만 **이 알람은 CI 에서 울리지 않는다.** PR 검사는 구조만 본다. 짝이 있는지, cfg 에 부모가 있는지,
   하네스가 덮는지까지다. TLC 자체는 어느 PR 에서도 돌지 않는다. 그래서 위 결과는 손으로 돌린 값이고,
   누가 `ApplyRejected` 를 되돌려도 PR 은 초록으로 지나간다. cfg 이름에 `-buggy` 를 넣은 것도 그래서다.
@@ -626,7 +655,7 @@ OCaml 쪽은 임의의 액션·판정 열을 돌려 `OneTaskPerAgent` 를 확인
 
 | 단계 | 내용 | 끝났다는 증거 |
 |---|---|---|
-| 0 | 이 문서와 `TaskOwnership.tla` | `scripts/tla-check.sh` 에서 깨끗한 모델 통과, 버그 모델 11개와 도달성 검사 1개가 기대대로 위반 |
+| 0 | 이 문서와 `TaskOwnership.tla` | `scripts/tla-check.sh` 에서 깨끗한 모델 통과, 버그 모델 11개와 도달성 검사 2개(들어가는 길·나가는 길)가 기대대로 위반 |
 | 1 | **저장 형식이 바뀌는 묶음.** `Rejected` 추가, 반려 판정이 그리로 보내고 `set_current = None`. `intent` 삭제. `AwaitingVerification` 의 `assignee` 를 `producer` 로, 기본값 없는 디코드. 제출자의 handoff 를 두고 사유를 `reason` 에만 넣기. 제출 증거를 호출에서만 읽기. 전달 전 반려 알림을 세 값으로 지우기. `release_unroutable_rejected_task_r` 와 `Operator_routed` 삭제. 알림 문장에 id. 운영자 판정 요청에 `verification_id`. **맡는 축과 권하는 축 가르기**(§3.2). **`Rejected_unclaimed` 목록과 대시보드 칸**(§3.7, §3.8) | 속성 테스트 `OneTaskPerAgent`. §4.2 첫 줄이 새 판정에서 0. `claim_next` 가 `Rejected` 를 권하지 않고 id 로는 맡아지는 테스트. 반려된 Task 가 목록과 대시보드 양쪽에 보이는 테스트 |
 | 2 | `Cancel` 의 자격을 `decide` 의 인자로. 인증된 운영자 경로와 TUI·dashboard 이전. 맡은 쪽 알림·기록·지표. 사라진 물음을 멈춤으로 알리지 않기. 도구 설명 | `release` 다음 `cancel` 이 만든 쪽 아닌 호출자에게 거절되는 테스트 |
 | 3 | 운영자 목록에 `Awaiting_verdict` 추가, 헌법 개정, `docs/spec/00-glossary.md` 의 Task Lifecycle 절 정정(`Rejected` 항목은 여기서 들어간다. 글로서리는 코드에 있는 말만 싣는다)과 `docs/spec/02-types-and-invariants.md` 정정, `Done_action` 과 `TaskLifecycle.tla` 삭제 | §4.2 셋째 줄 0 |

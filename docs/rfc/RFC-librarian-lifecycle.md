@@ -183,6 +183,13 @@ Keeper 는 다음 턴의 첫 요청에서 facts 전부를 `Memory OS Recall` 블
 
 부분 문자열 검사가 아닌 것도 적어 둔다. agent_core 는 provider 의 종료 사유 토큰을 경계에서 한 번 variant 로 바꾼다(`packages/agent_core/lib/llm_provider/types.ml` `stop_reason_of_string`). HTTP 400 본문의 글을 읽어 overflow 를 추측하지 않으며, 그 사실을 고정하는 테스트가 있다(`retry.ml` 의 "HTTP 400 prose does not synthesize ContextOverflow"). 새 생명주기가 provider 거절을 다룰 때는 이 typed 값만 쓴다.
 
+**새로 들어간 모듈 셋에 무엇이 없는지 세 봤다**(09-19). `keeper_turn_boundaries`, `keeper_librarian_progress`, `keeper_librarian_range` 에 고른 숫자가 **0개**, 시계·`sleep`·타임아웃이 **0개**다. 문자열 비교는 JSON 디코더 안에만 있고, 모르는 토큰은 기본값이 아니라 오류로 돌아간다(`Unknown_token`). JSON 모양을 가르는 match 도 `_ ->` 없이 생성자를 전부 적는다. 다시 세려면:
+
+```bash
+rg -n '\b[0-9]{2,}\b' lib/keeper/keeper_turn_boundaries.ml lib/keeper/keeper_librarian_progress.ml lib/keeper/keeper_librarian_range.ml
+rg -n 'Eio\.Time|sleep|timeout|Time_compat' lib/keeper/keeper_turn_boundaries.ml lib/keeper/keeper_librarian_progress.ml lib/keeper/keeper_librarian_range.ml
+```
+
 ### 2.5 생명주기 밖의 결함
 
 | # | 결함 | 근거 | 어디서 닫나 |

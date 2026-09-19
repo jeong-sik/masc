@@ -250,6 +250,7 @@ let supervise_keepalive
   let run_launch_transaction ~register ~rollback =
     match
       Keeper_keepalive_launch_transaction.run
+        ~on_lifecycle_open:Keeper_librarian_queue_refresh.submit_durable
         ~base_path
         ~keeper_name:meta.name
         ~register

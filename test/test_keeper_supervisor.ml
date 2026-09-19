@@ -2368,6 +2368,58 @@ let register_restart ~base_path ~name ~meta token intake_token =
     meta
 ;;
 
+let test_durable_catchup_runs_between_lifecycle_open_and_launch () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  ensure_test_runtime ();
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.For_testing.clear ();
+      Memory_lane.For_testing.reset ();
+      Masc.Keeper_shutdown_intake_fence.For_testing.reset ();
+      Masc.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       ignore (Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name));
+       Memory_lane.For_testing.reset ();
+       let name = "durable-catchup-order" in
+       let offline = Reg.register_offline ~base_path:config.base_path name (make_meta name) in
+       let order = ref [] in
+       let result =
+         Launch_transaction.run
+           ~on_lifecycle_open:(fun ~base_path ~keeper_name ->
+             check string "catch-up base path" config.base_path base_path;
+             check string "catch-up keeper" name keeper_name;
+             order := "catch-up" :: !order;
+             match Memory_lane.submit ~base_path ~keeper_name ignore with
+             | Memory_lane.Ran_inline -> ()
+             | Memory_lane.Submitted
+             | Memory_lane.Coalesced
+             | Memory_lane.Dropped
+             | Memory_lane.Rejected_draining ->
+               fail "admitted catch-up did not enter the opened memory lane")
+           ~base_path:config.base_path
+           ~keeper_name:name
+           ~register:(fun _token _intake_token ->
+             order := "register" :: !order;
+             Ok offline)
+           ~rollback:Launch_transaction.Retain_registered
+           (fun _intake_token _token entry ->
+              order := "launch" :: !order;
+              entry)
+       in
+       (match result with
+        | Ok entry ->
+          check bool "launch retains registered entry" true
+            (Lane.Id.equal (Lane.id entry.lane) (Lane.id offline.lane))
+        | Error _ -> fail "ordered catch-up launch transaction failed");
+       check (list string) "registration, catch-up, launch order"
+         [ "register"; "catch-up"; "launch" ]
+         (List.rev !order))
+;;
+
 let test_launch_callback_failure_rolls_back_restart_transaction () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -2848,6 +2900,8 @@ let () =
         test_active_librarian_abort_defers_then_retries_restart;
       test_case "unexpected cleanup preserves reopened Librarian lifecycle" `Quick
         test_unexpected_cleanup_cannot_close_reopened_librarian_lifecycle;
+      test_case "durable catch-up follows lifecycle admission before launch" `Quick
+        test_durable_catchup_runs_between_lifecycle_open_and_launch;
       test_case "launch callback failure rolls back restart transaction" `Quick
         test_launch_callback_failure_rolls_back_restart_transaction;
       test_case "launch callback cancellation rolls back restart transaction" `Quick

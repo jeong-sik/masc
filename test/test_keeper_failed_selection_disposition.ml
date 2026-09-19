@@ -149,7 +149,10 @@ let test_other_failures_without_a_suffix_keep_the_cadence () =
           { retry_class = KFR.Network_transient; retry_after = None } )
     ; ( "empty completion"
       , KFR.Retry_after_observed
-          { retry_class = KFR.Empty_completion; retry_after = None } )
+          { retry_class =
+              KFR.Empty_completion { stop_reason = Agent_core.Types.EndTurn }
+          ; retry_after = None
+          } )
     ; ( "server error"
       , KFR.Retry_after_observed { retry_class = KFR.Server_error; retry_after = None } )
     ; ( "provider timeout"

@@ -197,26 +197,49 @@ let test_provider_quota_family_threads_hint () =
           ; detail = "pool saturated"
           }))
 
-let empty_completion_error =
+let empty_completion stop_reason = KFR.Empty_completion { stop_reason }
+
+let empty_completion_error stop_reason =
   Agent_core.Error.Provider
     (Llm_provider.Error.EmptyCompletion
        { provider = "openrouter"
-       ; stop_reason = Agent_core.Types.EndTurn
+       ; stop_reason
        ; detail = "empty assistant turn"
        })
 ;;
 
 let test_empty_completion_keeps_answer_observation () =
-  let route = route_of_agent_core_error empty_completion_error in
-  check_route
-    "typed empty completion keeps its own retry class"
-    (KFR.Retry_after_observed
-       { retry_class = KFR.Empty_completion; retry_after = None })
-    empty_completion_error;
-  Alcotest.(check bool)
-    "the provider completed the request, so the input was observed"
-    true
-    (KFR.response_observed route)
+  List.iter
+    (fun stop_reason ->
+       let error = empty_completion_error stop_reason in
+       let route = route_of_agent_core_error error in
+       check_route
+         "typed empty completion keeps its stop reason"
+         (KFR.Retry_after_observed
+            { retry_class = empty_completion stop_reason; retry_after = None })
+         error;
+       Alcotest.(check bool)
+         "the provider completed the request, so the input was observed"
+         true
+         (KFR.response_observed route);
+       Alcotest.(check string)
+         "the low-cardinality class label keeps the typed reason"
+         ("empty_completion_"
+          ^ Llm_provider.Types.stop_reason_to_metric_label stop_reason)
+         (KFR.route_class_label route))
+    [ Agent_core.Types.EndTurn
+    ; Agent_core.Types.StopToolUse
+    ; Agent_core.Types.MaxTokens
+    ; Agent_core.Types.StopSequence
+    ; Agent_core.Types.Refusal
+    ; Agent_core.Types.ContentFilter
+    ; Agent_core.Types.RepetitionTruncation
+    ; Agent_core.Types.PauseTurn
+    ; Agent_core.Types.Compaction
+    ; Agent_core.Types.ContextWindowExceeded
+    ; Agent_core.Types.UnmatchedToolCalls
+    ; Agent_core.Types.Unknown "future_provider_reason"
+    ]
 ;;
 
 let test_provider_config_judges () =
@@ -452,7 +475,7 @@ let test_response_observed_per_class () =
     ];
   List.iter
     (check_observed true)
-    [ retry KFR.Empty_completion
+    [ retry (empty_completion Agent_core.Types.EndTurn)
     ; rotate KFR.No_progress_empty
     ; rotate KFR.No_progress_thinking_only
     ; rotate KFR.No_progress_truncated
@@ -591,7 +614,7 @@ let test_route_resumes_on_same_path_per_class () =
     [ "", retry KFR.Rate_limited
     ; "with a hint", retry ~retry_after:30.0 KFR.Rate_limited
     ; "", retry KFR.Capacity_backpressure
-    ; "", retry KFR.Empty_completion
+    ; "end turn", retry (empty_completion Agent_core.Types.EndTurn)
     ; "", retry KFR.Server_error
     ; "", retry KFR.Network_transient
     ; "", retry KFR.Provider_timeout
@@ -600,6 +623,20 @@ let test_route_resumes_on_same_path_per_class () =
   List.iter
     (check_resumes false)
     [ "without a reset", retry KFR.Hard_quota
+    ; "tool use", retry (empty_completion Agent_core.Types.StopToolUse)
+    ; "max tokens", retry (empty_completion Agent_core.Types.MaxTokens)
+    ; "stop sequence", retry (empty_completion Agent_core.Types.StopSequence)
+    ; "refusal", retry (empty_completion Agent_core.Types.Refusal)
+    ; "content filter", retry (empty_completion Agent_core.Types.ContentFilter)
+    ; ( "repetition truncation"
+      , retry (empty_completion Agent_core.Types.RepetitionTruncation) )
+    ; "pause turn", retry (empty_completion Agent_core.Types.PauseTurn)
+    ; "compaction", retry (empty_completion Agent_core.Types.Compaction)
+    ; ( "context window exceeded"
+      , retry (empty_completion Agent_core.Types.ContextWindowExceeded) )
+    ; "unmatched tool calls", retry (empty_completion Agent_core.Types.UnmatchedToolCalls)
+    ; ( "unknown"
+      , retry (empty_completion (Agent_core.Types.Unknown "future_provider_reason")) )
     ; "with a zero reset", retry ~retry_after:0.0 KFR.Hard_quota
     ; "with a negative reset", retry ~retry_after:(-5.0) KFR.Hard_quota
     ; "with a NaN reset", retry ~retry_after:Float.nan KFR.Hard_quota

@@ -4,7 +4,7 @@ type retry_class =
   | Rate_limited
   | Hard_quota
   | Capacity_backpressure
-  | Empty_completion
+  | Empty_completion of { stop_reason : Llm_provider.Types.stop_reason }
   | Server_error
   | Network_transient
   | Provider_timeout
@@ -235,7 +235,8 @@ let route_of_provider_error ~err (p : Llm_provider.Error.provider_error) =
   | Llm_provider.Error.CapacityExhausted { retry_after; _ } ->
     observe_retry ?retry_after Capacity_backpressure
   | Llm_provider.Error.ProviderUnavailable _ -> observe_retry Server_error
-  | Llm_provider.Error.EmptyCompletion _ -> observe_retry Empty_completion
+  | Llm_provider.Error.EmptyCompletion { stop_reason; _ } ->
+    observe_retry (Empty_completion { stop_reason })
   | Llm_provider.Error.ServerError { transient = true; _ } ->
     observe_retry Server_error
   | Llm_provider.Error.ServerError { transient = false; _ } ->
@@ -353,7 +354,7 @@ let path_rest_sec ~cap_sec ~retry_class ~retry_after_hint =
     | Hard_quota -> cap_sec
     | Rate_limited
     | Capacity_backpressure
-    | Empty_completion
+    | Empty_completion _
     | Server_error
     | Network_transient
     | Provider_timeout ->
@@ -376,7 +377,8 @@ let retry_class_label = function
   | Rate_limited -> "rate_limited"
   | Hard_quota -> "hard_quota"
   | Capacity_backpressure -> "capacity_backpressure"
-  | Empty_completion -> "empty_completion"
+  | Empty_completion { stop_reason } ->
+    "empty_completion_" ^ Llm_provider.Types.stop_reason_to_metric_label stop_reason
   | Server_error -> "server_error"
   | Network_transient -> "network_transient"
   | Provider_timeout -> "provider_timeout"
@@ -429,17 +431,17 @@ let route_class_label = function
 let response_observed = function
   | Retry_after_observed { retry_class; retry_after = _ } ->
     (match retry_class with
+     | Empty_completion _ ->
+       (* The provider completed the turn with a modeled stop reason and an
+          empty assistant answer. The model saw the input even though it made
+          no usable progress. *)
+       true
      | Rate_limited
      (* 429: the request was refused before any generation. *)
      | Hard_quota
      (* 402: refused before any generation. *)
      | Capacity_backpressure
      (* overload / capacity pool exhausted: refused before any generation. *)
-     | Empty_completion ->
-       (* The provider completed the turn with a modeled stop reason and an
-          empty assistant answer. The model saw the input even though it made
-          no usable progress. *)
-       true
      | Server_error
      (* 5xx or provider unavailable: nothing the model said is on record. *)
      | Network_transient
@@ -537,8 +539,11 @@ let route_resumes_on_same_path = function
         operation. *)
      | Capacity_backpressure
      (* the provider's or MASC's own slot was full for the moment. *)
-     | Empty_completion
-     (* the provider completed the request but returned no usable content. *)
+     | Empty_completion { stop_reason = Llm_provider.Types.EndTurn }
+     (* A natural end with no content is the one empty answer that may make
+        progress when the saved operation is retried. Every other reason
+        below requires a different recovery action or repeats a deterministic
+        terminal decision. *)
      | Server_error
      (* 5xx or provider unavailable. *)
      | Network_transient
@@ -546,6 +551,23 @@ let route_resumes_on_same_path = function
      | Provider_timeout ->
        (* a deadline expired. *)
        true
+     | Empty_completion
+         { stop_reason =
+             ( Llm_provider.Types.StopToolUse | Llm_provider.Types.MaxTokens
+             | Llm_provider.Types.StopSequence | Llm_provider.Types.Refusal
+             | Llm_provider.Types.ContentFilter
+             | Llm_provider.Types.RepetitionTruncation
+             | Llm_provider.Types.PauseTurn | Llm_provider.Types.Compaction
+             | Llm_provider.Types.ContextWindowExceeded
+             | Llm_provider.Types.UnmatchedToolCalls | Llm_provider.Types.Unknown _ )
+         } ->
+       (* [PauseTurn] and [Compaction] require replaying the provider's actual
+          assistant response. An [EmptyCompletion] error carries no response
+          content, so replaying the pre-response checkpoint is not that
+          continuation. Context overflow and unknown reasons normally become
+          typed API errors before this boundary; keep injected values closed
+          rather than guessing a same-path recovery. *)
+       false
      | Hard_quota ->
        (* a quota comes back by itself only when the provider said when; one
           with no reset may stay closed until the account is paid. *)

@@ -30,9 +30,10 @@ type retry_class =
   | Hard_quota  (** account-level quota/balance exhaustion (402 family) *)
   | Capacity_backpressure
       (** typed provider overload / capacity-exhausted pools *)
-  | Empty_completion
+  | Empty_completion of { stop_reason : Llm_provider.Types.stop_reason }
       (** provider completed the request with no thinking, text, or tool calls;
-          retryable like a server failure, but the model observed the input *)
+          the typed stop reason remains available to scheduling policy and
+          telemetry, and the model observed the input *)
   | Server_error  (** typed server failure / provider unavailable *)
   | Network_transient  (** transport-level network failure *)
   | Provider_timeout  (** provider or transport deadline expiry *)
@@ -215,10 +216,14 @@ val route_resumes_on_same_path : route -> bool
     operation whose last candidate failed after saving tool results continues
     on that same path (RFC last-path-resumes-after-progress §3.3).
 
-    [true]: [Rate_limited], [Capacity_backpressure], [Empty_completion],
-    [Server_error], [Network_transient], [Provider_timeout], and [Hard_quota]
-    with a usable reset hint (positive, not NaN).
+    [true]: [Rate_limited], [Capacity_backpressure], [Empty_completion
+    {stop_reason=EndTurn}], [Server_error], [Network_transient],
+    [Provider_timeout], and [Hard_quota] with a usable reset hint (positive,
+    not NaN).
 
-    [false]: [Hard_quota] without one, every rotation, and every terminal
-    class. How long the path rests is not read here: the chat lane's wait
-    follows the rest recorded on the path. *)
+    [false]: every other [Empty_completion] stop reason, [Hard_quota] without
+    a reset, every rotation, and every terminal class. [PauseTurn] and
+    [Compaction] need the provider's assistant response to continue; an empty
+    completion error carries no such response, so replaying its pre-response
+    checkpoint is not a valid continuation. How long the path rests is not
+    read here: the chat lane's wait follows the rest recorded on the path. *)

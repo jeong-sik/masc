@@ -417,7 +417,7 @@ let next_dispatch_after_failure ~now ~route ~assignment_id deferred =
   | ( ( Route.Retry_after_observed
           { retry_class =
               ( Route.Rate_limited | Route.Hard_quota | Route.Server_error
-              | Route.Empty_completion | Route.Network_transient
+              | Route.Empty_completion _ | Route.Network_transient
               | Route.Provider_timeout )
           ; _
           }
@@ -443,7 +443,7 @@ let next_dispatch_after_failure ~now ~route ~assignment_id deferred =
     Some (Wait_until { release_at; waiting_on; wait = Path_release })
   | ( ( Route.Retry_after_observed
           { retry_class =
-              Route.Empty_completion | Route.Server_error
+              Route.Empty_completion _ | Route.Server_error
               | Route.Network_transient | Route.Provider_timeout
           ; _
           }
@@ -863,12 +863,15 @@ let attempt_runtime_candidates
             { retry_class = Keeper_runtime_failure_route.Hard_quota; retry_after } ->
           note_quota retry_after
         | Keeper_runtime_failure_route.Retry_after_observed
-            { retry_class = Keeper_runtime_failure_route.Empty_completion
-            ; retry_after = _
-            }
-        | Keeper_runtime_failure_route.Retry_after_observed
             { retry_class = Keeper_runtime_failure_route.Server_error; retry_after = _ } ->
           note_failed_attempt Runtime_candidate_backpressure.Server_error
+        | Keeper_runtime_failure_route.Retry_after_observed
+            { retry_class = Keeper_runtime_failure_route.Empty_completion _
+            ; retry_after = _
+            } ->
+          (* The provider answered. Do not record the "failed without
+             answering" backpressure evidence used by server failures. *)
+          ()
         | Keeper_runtime_failure_route.Retry_after_observed
             { retry_class = Keeper_runtime_failure_route.Network_transient; retry_after = _ } ->
           note_failed_attempt Runtime_candidate_backpressure.Network_transient

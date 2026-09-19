@@ -791,123 +791,11 @@ let run_keeper_invocation_turn_admitted_inner
                       match consume with
                       | Error detail -> Error (Agent_core.Error.Internal detail)
                       | Ok () ->
-	                  match Eio_context.get_clock () with
-	                  | Error msg -> Error (Agent_core.Error.Internal msg)
-	                  | Ok clock ->
-	                  let { Keeper_unified_turn_retry_setup.current_turn_phase_elapsed_ms
-	                      ; _
-	                      }
-	                    =
-	                    Keeper_unified_turn_retry_setup.build
-	                      ~now:(fun () -> Eio.Time.now clock)
-	                  in
-	                  let publish_direct_cascade_resolution
-	                      ~runtime_id
-	                      ~decision
-	                      ~reason
-	                      ~next_runtime
-	                      ~attempt
-	                      err =
-	                    Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
-	                      ~keeper_name:meta.name
-	                      ~runtime_id
-	                      ~decision
-	                      ~reason
-	                      ~next_runtime
-	                      ~attempt
-	                      ~error_kind:
-	                        (Some Agent_core.Error.(category err |> category_label))
-	                      ~error_message:(Some (Agent_core.Error.to_string err))
-	                  in
-	                  let setup_direct_retry_runtime runtime_id =
-	                    Keeper_unified_turn_pre_dispatch.build_runtime_execution
-	                      ~meta
-	                      ~runtime_id
-	                  in
-
-		                  run_direct_turn_with_fsm
-		                    ~keeper_name:meta.name
-		                    ~turn_id:keeper_turn_id
-		                    (fun () ->
-	                       Keeper_turn_runtime_budget.run_direct_no_progress_retry_loop
-	                         ~keeper_name:meta.name
-	                         ~base_runtime:initial_execution.runtime_id
-	                         ~initial_execution
-	                         ~current_turn_phase_elapsed_ms
-		                         ~now_s:(fun () -> Eio.Time.now clock)
-		                         ~setup_retry_runtime:setup_direct_retry_runtime
-		                         ~publish_cascade_resolution:
-		                           publish_direct_cascade_resolution
-		                         ~emit_runtime_selected:
-		                           (fun ~runtime_id ~fallback_reason ->
-		                              Keeper_metrics.emit_runtime_selected
-		                                ~keeper_name:meta.name
-		                                ~runtime_id
-		                                ~fallback_reason)
-		                         ~emit_runtime_rotation:
-		                           (fun ~from_runtime ~to_runtime ~reason ->
-		                              Keeper_metrics.emit_runtime_rotation
-		                                ~keeper_name:meta.name
-		                                ~from_runtime
-		                                ~to_runtime
-		                                ~reason)
-		                         ~record_retry_setup_failure:
-		                           (fun ~from_runtime ~retry ~rotation_attempt
-		                                ~fail_open_err ->
-		                              let reason =
-		                                Keeper_error_classify
-		                                .degraded_retry_reason_to_string
-		                                  retry.fallback_reason
-		                              in
-		                              Log.Keeper.warn
-		                                "%s: direct keeper_msg no-progress response \
-		                                 from runtime=%s suggested retry to %s \
-		                                 (reason=%s), but retry setup failed: %s"
-		                                meta.name
-		                                from_runtime
-		                                retry.next_runtime
-		                                reason
-		                                (short_preview
-		                                   (Agent_core.Error.to_string
-		                                      fail_open_err));
-		                              Keeper_turn_helpers.record_pre_dispatch_terminal_observation
-		                                ~config:ctx.config
-		                                ~meta
-		                                ~runtime_id:retry.next_runtime
-		                                ~outcome:`Error
-		                                ~terminal_reason_code:
-		                                  (Printf.sprintf
-		                                     "direct_retry_setup_%s"
-		                                     (Keeper_agent_error
-		                                      .terminal_reason_code_of_core_error
-		                                        fail_open_err))
-		                                ~activity_kind:
-		                                  "direct_no_progress_retry_setup"
-		                                ~trajectory_outcome:
-		                                  (Trajectory.Failed
-		                                     (Agent_core.Error.to_string
-		                                        fail_open_err))
-		                                ~error_kind:
-		                                  (Agent_core.Error.(
-		                                     category fail_open_err |> category_label)
-		                                   |> Keeper_execution_receipt.error_kind_of_string)
-		                                ~error_message:
-		                                  (Agent_core.Error.to_string fail_open_err)
-		                                ~degraded_retry_applied:true
-		                                ~degraded_retry_runtime:retry.next_runtime
-		                                ~fallback_reason:retry.fallback_reason
-		                                ~runtime_rotation_attempts:
-		                                  [ rotation_attempt ]
-		                                ~keeper_turn_id
-		                                ())
-		                         ~before_retry:
-		                           Keeper_turn_runtime_budget
-		                           .yield_before_direct_no_progress_retry
-		                         ~run_once:
-		                           (fun ~runtime_id ~max_context ~is_retry
-		                                ~degraded_retry_runtime ~fallback_reason
-		                                ~runtime_rotation_attempts ->
-			                              Keeper_agent_run.run_turn
+                  run_direct_turn_with_fsm
+                    ~keeper_name:meta.name
+                    ~turn_id:keeper_turn_id
+                    (fun () ->
+                      Keeper_agent_run.run_turn
                                       ?direct_resume
                                       ?official_task_reference
                                       ?hitl_resolution:(Option.map Keeper_direct_gate_continuation.resolution gate_resume)
@@ -937,7 +825,7 @@ let run_keeper_invocation_turn_admitted_inner
 			                                ~profile_defaults
 			                                ~turn_ctx_cell
 		                                ~base_dir
-		                                ~max_context
+		                                ~max_context:initial_execution.max_context
 		                                ~build_turn_prompt
 		                                ~user_message:(match official_checkpoint_resume with
                                       | Some _ -> Keeper_direct_checkpoint_continuation.official_resume_message ~operation_id
@@ -947,21 +835,18 @@ let run_keeper_invocation_turn_admitted_inner
 		                                ~skill_snapshot
 			                                ~task_skill_selection
 			                                ?user_blocks
-			                                ~runtime_id
+			                                ~runtime_id:initial_execution.runtime_id
 			                                ~world_observation
 		                                ?on_event
 		                                ?on_tool_stream_observation
 		                                ?on_tool_result_ready
 		                                ?approval_gate
 		                                ~trajectory_acc
-		                                ?degraded_retry_runtime
-		                                ?fallback_reason
-                                ~runtime_rotation_attempts
-                                ~is_retry
                                 ?event_bus
                                 ?continuation_channel
-                                ())
-		                         ()))
+                                ()
+                      |> Result.map (fun result ->
+                        result, initial_execution.max_context)))
 		            in
                 let run_result = match gate_resume with
                   | None -> run_result

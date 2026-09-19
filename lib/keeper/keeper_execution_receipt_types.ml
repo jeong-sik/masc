@@ -50,9 +50,9 @@ let assert_receipt_authoritative ~outcome ~turn_state =
 type tool_surface =
   { turn_lane : Keeper_agent_tool_surface.turn_lane }
 
-(* Terminal classification of a runtime rotation attempt.  Producer-side
-   closed set in [keeper_unified_turn.ml]; JSON wire form is the lowercase
-   string via [runtime_rotation_outcome_to_string].
+(* Terminal classification of a runtime rotation attempt. No producer builds
+   one; JSON wire form is the lowercase string via
+   [runtime_rotation_outcome_to_string].
 
    This type intentionally has no [@@deriving tla]; following the precedent
    in [keeper_types_profile.ml], a follow-up can wrap a TLA mirror in a

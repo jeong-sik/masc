@@ -2394,6 +2394,86 @@ let test_attempt_loop_blocks_no_progress_when_gate_denies () =
        ])
     (List.map (fun (event, _, _) -> event_name event) events)
 
+let accept_no_progress_error ~response_shape ~stop_reason scope =
+  Driver.core_error_of_masc_internal_error
+    (Driver.Accept_rejected
+       { scope
+       ; model = Some "runtime"
+       ; reason_kind = Some Driver.Accept_no_usable_progress
+       ; response_shape
+       ; stop_reason
+       ; reason = "no usable progress"
+       })
+
+(* The three answers the accept gate reads as no progress: nothing, thinking
+   only, and a reply cut off at the token limit. *)
+let no_progress_heads =
+  [ ( "empty"
+    , accept_no_progress_error
+        ~response_shape:(Some Driver.Accept_response_empty)
+        ~stop_reason:None )
+  ; ( "thinking only"
+    , accept_no_progress_error
+        ~response_shape:(Some Driver.Accept_response_thinking_only)
+        ~stop_reason:None )
+  ; ( "truncated"
+    , accept_no_progress_error
+        ~response_shape:(Some Driver.Accept_response_blank_text_only)
+        ~stop_reason:(Some Agent_core.Types.MaxTokens) )
+  ]
+
+(* This pins a premise the deletion of the direct-path rotation relies on, not
+   code that deletion changed: with that rotation gone, the lane walk is the
+   only way a turn reaches another runtime after a head that made no progress.
+   If the walk ever stops at the head, the deletion becomes a regression, and
+   this test is what breaks.
+
+   With the walk's default gates, a head that made no progress moves the same
+   turn to the lane's next candidate. The defaults are what the one production
+   caller passes while no checkpoint stage has been reached: [allow_retry] is
+   [same_run_retry_allowed], which is true before a checkpoint and false after
+   it, and then the head defers to the next keeper cycle instead. *)
+let test_attempt_loop_moves_past_no_progress_by_default () =
+  List.iter
+    (fun (shape, head_error) ->
+       Alcotest.(check bool)
+         (shape ^ " is a no-progress answer")
+         true
+         (Driver.For_testing.accept_no_progress_should_try_next
+            (head_error "primary.test_model"));
+       let attempts = ref [] in
+       let events = ref [] in
+       let result =
+         Driver.For_testing.attempt_runtime_candidates
+           ~runtime_id:"resilient"
+           ~runtime_id_of:(fun runtime_id -> runtime_id)
+           ~emit_runtime_manifest:(emit_manifest_collector events)
+           ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
+             attempts := !attempts @ [ runtime_id ];
+             match candidate with
+             | "primary.test_model" ->
+               attempt_without_effect (Error (head_error "primary.test_model")) None
+             | "fallback.test_model" -> attempt_without_effect (Ok runtime_id) None
+             | other -> Alcotest.failf "unexpected candidate %s" other)
+           [ "primary.test_model"; "fallback.test_model" ]
+       in
+       (match result with
+        | Ok runtime_id ->
+          Alcotest.(check string)
+            (shape ^ ": the next lane candidate served")
+            "fallback.test_model"
+            runtime_id
+        | Error err ->
+          Alcotest.failf
+            "%s: no-progress head ended the walk: %s"
+            shape
+            (Agent_core.Error.to_string err));
+       Alcotest.(check (list string))
+         (shape ^ ": the walk tried the head, then the next lane candidate")
+         [ "primary.test_model"; "fallback.test_model" ]
+         !attempts)
+    no_progress_heads
+
 let test_attempt_loop_does_not_gate_network_retry () =
   let attempts = ref [] in
   let gate_called = ref false in
@@ -4777,6 +4857,10 @@ let () =
             "attempt loop blocks no-progress when gate denies"
             `Quick
             test_attempt_loop_blocks_no_progress_when_gate_denies;
+          Alcotest.test_case
+            "attempt loop moves past no-progress by default"
+            `Quick
+            test_attempt_loop_moves_past_no_progress_by_default;
           Alcotest.test_case
             "attempt loop does not gate network retry"
             `Quick

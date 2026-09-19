@@ -24,16 +24,20 @@ val agent_core_history_path :
 val agent_core_history_snapshot_id_of_checkpoint :
   Agent_core.Checkpoint.t -> string
 
-(** Delete AGENT_CORE history archive entries by [snapshot_ids]. Returns
-    [(deleted, missing)] in input-order, with [missing] containing
-    every snapshot id whose file was absent OR removal failed. An id
-    outside the archive filename contract used by
-    [list_agent_core_history_files], or not one real path segment, is
-    reported [missing] without touching the filesystem. *)
+(** One input-ordered result from an explicit history deletion request. *)
+type history_delete_result =
+  | History_deleted of string
+  | History_missing of string
+  | History_refused of string
+  | History_removal_failed of string
+
+(** Delete AGENT_CORE history archive entries by [snapshot_ids]. The result
+    keeps an absent file, a filename outside the exact producer contract, and
+    a failed removal distinct. *)
 val delete_agent_core_history_files :
   session_dir:string ->
   snapshot_ids:string list ->
-  string list * string list
+  history_delete_result list
 
 (** Relation between an incoming checkpoint and the current known high
     watermark for the same canonical AGENT_CORE checkpoint path. *)

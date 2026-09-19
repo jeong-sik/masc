@@ -21,12 +21,27 @@ let agent_core_history_suffix = ".json"
 
 let before_history_link_hook : (unit -> unit) option Atomic.t = Atomic.make None
 
-let is_agent_core_history_file (filename : string) : bool =
+let archive_created_ms_of_filename (filename : string) : int option =
   let len = String.length filename in
-  len > String.length agent_core_history_prefix + String.length agent_core_history_suffix
-  && String.sub filename 0 (String.length agent_core_history_prefix) = agent_core_history_prefix
-  && String.sub filename (len - String.length agent_core_history_suffix)
-       (String.length agent_core_history_suffix) = agent_core_history_suffix
+  let prefix_len = String.length agent_core_history_prefix in
+  let suffix_len = String.length agent_core_history_suffix in
+  let created_ms_digits = 13 in
+  if len <> prefix_len + created_ms_digits + suffix_len
+     || not (String.starts_with ~prefix:agent_core_history_prefix filename)
+     || not (String.ends_with ~suffix:agent_core_history_suffix filename)
+  then None
+  else
+    let raw = String.sub filename prefix_len created_ms_digits in
+    if String.for_all (fun char -> Char.compare char '0' >= 0 && Char.compare char '9' <= 0) raw
+    then int_of_string_opt raw
+    else None
+;;
+
+let is_agent_core_history_file ~(session_dir : string) (filename : string) : bool =
+  let canonical_filename = Filename.basename session_dir ^ ".json" in
+  (not (String.equal filename canonical_filename))
+  && Option.is_some (archive_created_ms_of_filename filename)
+;;
 
 let list_agent_core_history_files ~(session_dir : string) : string list =
   if not (Fs_compat.file_exists session_dir) then []
@@ -34,7 +49,7 @@ let list_agent_core_history_files ~(session_dir : string) : string list =
     Eio_guard.run_in_systhread ~label:"keeper.checkpoint.history.list" (fun () ->
     Sys.readdir session_dir
     |> Array.to_list
-    |> List.filter is_agent_core_history_file
+    |> List.filter (is_agent_core_history_file ~session_dir)
     |> List.sort (fun a b -> compare b a))
 
 (* Each entry is a whole checkpoint of the session, and a live keeper's runs
@@ -175,21 +190,29 @@ let save_agent_core_history
       ()
   end
 
+type history_delete_result =
+  | History_deleted of string
+  | History_missing of string
+  | History_refused of string
+  | History_removal_failed of string
+
 let delete_agent_core_history_files ~(session_dir : string) ~(snapshot_ids : string list)
-    : string list * string list =
-  List.fold_left
-    (fun (deleted, missing) snapshot_id ->
+    : history_delete_result list =
+  List.map
+    (fun snapshot_id ->
       (* The dashboard supplies filenames. Both containment and the same
          archive identity used by listing/pruning must hold before unlink;
          other files in this session are not checkpoint history entries. *)
-      if not (leaf_is_real_segment snapshot_id && is_agent_core_history_file snapshot_id) then
-        (deleted, snapshot_id :: missing)
+      if not
+           (leaf_is_real_segment snapshot_id
+            && is_agent_core_history_file ~session_dir snapshot_id)
+      then History_refused snapshot_id
       else
       let path = agent_core_history_path ~session_dir ~snapshot_id in
       if Fs_compat.file_exists path then (
         try
           Sys.remove path;
-          (snapshot_id :: deleted, missing)
+          History_deleted snapshot_id
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->
@@ -199,12 +222,11 @@ let delete_agent_core_history_files ~(session_dir : string) ~(snapshot_ids : str
               Keeper_metrics.(to_string CheckpointFailures)
               ~labels:[("site", Keeper_checkpoint_store_failure_site.(to_label Agent_core_delete))]
               ();
-            (deleted, snapshot_id :: missing))
+            History_removal_failed snapshot_id)
       else
-        (deleted, snapshot_id :: missing))
-    ([], [])
+        History_missing snapshot_id)
     snapshot_ids
-  |> fun (deleted, missing) -> (List.rev deleted, List.rev missing)
+;;
 
 (* Delta Checkpoint Shadow-Apply removed: Agent_core.Checkpoint.delta
    type was removed upstream. Functions had zero callers. *)

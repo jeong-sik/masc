@@ -528,6 +528,7 @@ let test_history_delete_preserves_session_files () =
   let previous_id = Store.agent_core_history_snapshot_id_of_checkpoint previous in
   let selected_id = Store.agent_core_history_snapshot_id_of_checkpoint current in
   let absent_id = Store.agent_core_history_snapshot_id_of_checkpoint (checkpoint 3) in
+  let failed_id = Store.agent_core_history_snapshot_id_of_checkpoint (checkpoint 4) in
   let path id = Filename.concat session_dir id in
   let canonical = Store.agent_core_checkpoint_path ~session_dir ~session_id:trace_id in
   check int "selected archive is a hardlink of current canonical"
@@ -536,23 +537,31 @@ let test_history_delete_preserves_session_files () =
                     ; "agent-core-snapshot-.json" ] in
   List.iter (fun id -> Fs_compat.save_file (path id) ("retained " ^ id)) other_files;
   let rejected = Filename.basename canonical :: other_files in
+  Fs_compat.mkdir_p (path failed_id);
   let preserved = List.map (fun id -> id, Fs_compat.load_file (path id))
       (previous_id :: rejected) in
   let check_preserved () =
     List.iter (fun (id, bytes) ->
       check string (id ^ " retains its bytes") bytes (Fs_compat.load_file (path id)))
       preserved;
-    check (list string) "only the requested archive was removed" [ previous_id ]
+    check (list string)
+      "only the requested archive was removed"
+      [ failed_id; previous_id ]
       (Store.list_agent_core_history_files ~session_dir) in
   let status, json = post_checkpoint_history state ~keeper_name
-      (selected_id :: rejected @ [ absent_id ]) in
+      (selected_id :: rejected @ [ absent_id; failed_id ]) in
   let open Yojson.Safe.Util in
   let ids field json = json |> member field |> to_list |> List.map to_string in
   check int "mixed deletion HTTP status" 200 status;
   check (list string) "HTTP reports only the archive as deleted" [ selected_id ]
     (ids "deleted_snapshot_ids" json);
-  check (list string) "non-archive and absent targets use the existing missing projection"
-    (rejected @ [ absent_id ]) (ids "missing_snapshot_ids" json);
+  check (list string) "only the absent archive is missing"
+    [ absent_id ] (ids "missing_snapshot_ids" json);
+  check (list string) "non-archive names are refused"
+    rejected (ids "refused_snapshot_ids" json);
+  check (list string) "a valid archive that cannot be unlinked reports failure"
+    [ failed_id ] (ids "failed_snapshot_ids" json);
+  check bool "the failed removal remains present" true (Sys.is_directory (path failed_id));
   check string "canonical remains available in returned inventory" "available"
     (json |> member "inventory" |> member "current_status" |> to_string);
   check_preserved ();
@@ -561,7 +570,38 @@ let test_history_delete_preserves_session_files () =
   check (list string) "repeat deletes nothing" [] (ids "deleted_snapshot_ids" repeated);
   check (list string) "repeat reports the absent archive" [ selected_id ]
     (ids "missing_snapshot_ids" repeated);
+  check (list string) "repeat refuses nothing" [] (ids "refused_snapshot_ids" repeated);
+  check (list string) "repeat fails nothing" [] (ids "failed_snapshot_ids" repeated);
   check_preserved ()
+;;
+
+let test_history_archive_identity_excludes_canonical_filename () =
+  with_temp_dir @@ fun dir ->
+  let module Store = Keeper_checkpoint_store in
+  let session_id = "agent-core-snapshot-0000000000001" in
+  let session_dir = Filename.concat dir session_id in
+  let checkpoint =
+    make_inventory_checkpoint ~session_id ~turn_count:1 ~created_at:2.0
+  in
+  (match Store.save_agent_core_classified ~session_dir ~history_retained:0 checkpoint with
+   | Ok (Store.Saved _) -> ()
+   | Ok (Store.Stale_noop _) -> fail "fresh canonical checkpoint was stale"
+   | Error detail -> fail detail);
+  let canonical = Store.agent_core_checkpoint_path ~session_dir ~session_id in
+  check bool "canonical checkpoint exists" true (Sys.file_exists canonical);
+  check (list string)
+    "canonical name shaped like an archive is not listed"
+    []
+    (Store.list_agent_core_history_files ~session_dir);
+  (match
+     Store.delete_agent_core_history_files
+       ~session_dir
+       ~snapshot_ids:[ Filename.basename canonical ]
+   with
+   | [ Store.History_refused id ] ->
+     check string "canonical filename is the refused input" (Filename.basename canonical) id
+   | _ -> fail "archive-shaped canonical filename was not refused");
+  check bool "refused canonical remains" true (Sys.file_exists canonical)
 ;;
 
 let check_checkpoint_error_projection error ~status ~kind ~detail =
@@ -828,6 +868,10 @@ let () =
             "history deletion preserves canonical and conversation files"
             `Quick
             test_history_delete_preserves_session_files
+        ; test_case
+            "archive-shaped canonical is never history"
+            `Quick
+            test_history_archive_identity_excludes_canonical_filename
         ; test_case
             "projects every typed checkpoint load error"
             `Quick

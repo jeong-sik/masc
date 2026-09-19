@@ -153,7 +153,11 @@ template_variables: [working_context, current_memory, conversation_history, coun
 사건의 정리이며, 사건 완료·삭제·실행 허가가 아닙니다. 아래 `working_context`
 자료의 현재 `sources`에 있는 짧은 ID(s1, s2, …)를 각 맥락의 `sources`에
 정확히 한 번씩 넣습니다. 모든 ID를 포함하며 새 ID를 만들지 않습니다.
-이전 맥락의 ID를 현재 ID로 사용하지 마세요. 현재 source가 없으면 빈 배열입니다.
+이전 맥락의 ID를 현재 ID로 사용하지 마세요. 현재 source가 없으면
+`working_contexts`를 빈 배열로 반환합니다.
+출력하는 각 맥락에는 현재 source가 하나 이상 있어야 합니다. `sources: []`인
+항목은 만들지 마세요. 현재 source와 관계없는 이전 맥락을 보존하려고 다시
+출력할 필요는 없습니다. 호스트가 원본이 남아 있는 이전 맥락을 따로 보존합니다.
 
 같은 진행 상황을 알리는 반복 신호는 한 맥락으로 묶되 각각의 원본 ID는
 남깁니다. 같은 제목이라는 이유만으로 독립적인 명령·예약 회차를 합치거나

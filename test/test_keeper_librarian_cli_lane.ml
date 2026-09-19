@@ -56,7 +56,8 @@ let valid_selection_json =
     ]
 ;;
 
-let publish_unreachable_lane ?(cli_only = false) ~cli_slot_ids ~source () =
+let publish_unreachable_lane ?(cli_only = false) ?(projection_refused = false)
+      ~cli_slot_ids ~source () =
   ignore
     (Fixture.publish_registry
        ~cli_slot_ids
@@ -64,6 +65,8 @@ let publish_unreachable_lane ?(cli_only = false) ~cli_slot_ids ~source () =
        ~slot_ids:(if cli_only then [] else [ "librarian-cli-unreachable" ])
        (Fixture.resolver_snapshot
           ~source
+          ~enable_thinkings:(if projection_refused
+            then [ "librarian-cli-unreachable", true ] else [])
           [ { Fixture.id = "librarian-cli-unreachable"
             ; base_url = "http://127.0.0.1:1"
             }
@@ -190,6 +193,53 @@ let test_domain_invalid_cli_answer_advances_to_valid_selection () =
       (Yojson.Safe.equal output valid_selection_json)
 ;;
 
+let test_projection_refusal_tries_cli_slots () =
+  with_eio @@ fun ~net ~clock ~base_path ->
+  Fixture.with_official_client_runtimes @@ fun () ->
+  (* The catalog admits the target, but its model has no thinking capability.
+     Enabling thinking makes request projection refuse it before any HTTP. *)
+  publish_unreachable_lane ~projection_refused:true
+    ~cli_slot_ids:[ Fixture.cli_primary_runtime; Fixture.cli_secondary_runtime ]
+    ~source:"librarian projection refusal" ();
+  let attempts = ref [] in
+  let runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+    attempts := !attempts @ [runtime_id];
+    if String.equal runtime_id Fixture.cli_primary_runtime then Ok "{}"
+    else Ok (Yojson.Safe.to_string valid_selection_json)
+  in
+  match execute ~net ~clock ~base_path ~runner with
+  | Error error -> fail (Runtime.For_testing.classified_error_detail error)
+  | Ok ((selection, output), slot) ->
+    check (list string) "projection refusal still walks declared CLI slots"
+      [Fixture.cli_primary_runtime; Fixture.cli_secondary_runtime] !attempts;
+    check string "the valid CLI answer owns the result" Fixture.cli_secondary_runtime slot;
+    check (list string) "the CLI answer changes memory through the same domain contract"
+      [current_a.claim] (List.map (fun (fact : Memory.fact) -> fact.claim) selection.facts);
+    check bool "the accepted output remains observable" true
+      (Yojson.Safe.equal output valid_selection_json)
+;;
+
+let test_projection_refusal_survives_failed_cli_slots () =
+  with_eio @@ fun ~net ~clock ~base_path ->
+  Fixture.with_official_client_runtimes @@ fun () ->
+  publish_unreachable_lane ~projection_refused:true
+    ~cli_slot_ids:[ Fixture.cli_primary_runtime ]
+    ~source:"librarian projection refusal without a valid CLI answer" ();
+  let attempts = ref [] in
+  let runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+    attempts := runtime_id :: !attempts;
+    Ok "{}"
+  in
+  (match execute ~net ~clock ~base_path ~runner with
+   | Ok _ -> fail "a domain-invalid CLI answer must not be accepted"
+   | Error error ->
+     check string "the original projection failure remains available"
+       "librarian request projection failed for slot=librarian-cli-unreachable reason=librarian-cli-unreachable: wire_admission_rejected:target_request_rejected"
+       (Runtime.For_testing.classified_error_detail error));
+  check (list string) "the declared CLI slot was attempted"
+    [Fixture.cli_primary_runtime] !attempts
+;;
+
 let () =
   run
     "keeper_librarian_cli_lane"
@@ -197,6 +247,12 @@ let () =
       , [ test_case "CLI-only librarian selects memory without an HTTP attempt" `Quick
           (fun () -> test_cli_slot_answers_after_catalog_exhaustion ~cli_only:true ())
       ; test_case
+            "API projection refusal advances through CLI slots"
+            `Quick test_projection_refusal_tries_cli_slots
+        ; test_case
+            "failed CLI slots preserve the API projection failure"
+            `Quick test_projection_refusal_survives_failed_cli_slots
+        ; test_case
             "domain-invalid CLI output advances to a valid selection"
             `Quick test_domain_invalid_cli_answer_advances_to_valid_selection
         ; test_case

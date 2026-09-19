@@ -248,6 +248,42 @@ let lookup_section lookup =
       [ "lookup_tools", tool_names schemas; "lookup_root_layout", lookup_root_layout ]
 ;;
 
+(* A successful lookup is typed by [Tool_result.Completed]. Preserve that
+   authority while making the observation visible in the model-facing data.
+   The prompt tells the judge that every review starts with no successful
+   lookup; this envelope is the only transition to [true]. Failed and deferred
+   results stay unchanged, so neither can be mistaken for checked evidence.
+   Nothing in MASC parses this projection back or overrides the judge's
+   structured verdict. *)
+let lookup_with_evidence_observation = function
+  | No_lookup_surface -> No_lookup_surface
+  | Lookup_tools { schemas; dispatch; root_layout } ->
+    let dispatch ~name ~args =
+      match dispatch ~name ~args with
+      | Tool_result.Completed payload ->
+        let success_observation =
+          `Assoc [ "evidence_lookup_succeeded", `Bool true ]
+        in
+        Tool_result.Completed
+          { payload with
+            data =
+              `Assoc
+                [ "evidence_lookup_succeeded", `Bool true
+                ; "lookup_result", payload.data
+                ]
+          ; content_blocks =
+              Option.map
+                (fun blocks ->
+                   Agent_core.Types.Text
+                     (Yojson.Safe.to_string success_observation)
+                   :: blocks)
+                payload.content_blocks
+          }
+      | (Tool_result.Deferred _ | Tool_result.Failed _) as result -> result
+    in
+    Lookup_tools { schemas; dispatch; root_layout }
+;;
+
 (* The image-evidence section: data lines (reference, hash, size, media
    type) assembled here under the template's header prose. An empty list
    renders an empty section, so a review without image artifacts reads
@@ -651,8 +687,9 @@ let review
            Agent_core.Types.image_block
              ~media_type:img.image_media_type
              ~data:img.image_body_base64
-             ())
+           ())
   in
+  let lookup_for_judge = lookup_with_evidence_observation lookup in
   run
     ?evaluator_runtime
     ?generator_runtime
@@ -665,7 +702,7 @@ let review
     ~log_warn:(fun message ->
       Log.Task.warn "task_id=%s [task-completion-review] %s" req.task_id message)
     ~render_prompt:(fun () -> build_prompt ~question ~lookup req)
-    ~lookup
+    ~lookup:lookup_for_judge
     ~base_path
     ()
 ;;

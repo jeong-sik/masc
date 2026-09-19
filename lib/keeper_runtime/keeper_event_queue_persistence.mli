@@ -443,7 +443,7 @@ val drop_by_post_id :
 type queue_residence_unknown_reason =
   | First_admission_not_recorded
   | Queue_observation_incomplete
-      (** Queue storage or owner-lifecycle observation is unavailable/incomplete. *)
+      (** Queue storage observation is unavailable/incomplete. *)
 
 type queue_residence = Unknown of queue_residence_unknown_reason
 (** Diagnostic evidence only. Persisted queue entries do not record their first
@@ -466,7 +466,11 @@ type owner_lifecycle =
     owner truth with durable demand but no live fiber. Disabled, paused/dead,
     and shutdown-fenced owners remain distinct closed variants. Queue
     persistence deliberately does not infer owner truth from event contents or
-    elapsed time. The document reports counts and read errors only: it carries
+    elapsed time. [counts_complete] and [read_errors] report queue storage
+    reads only. [Lifecycle_unknown] leaves successfully read counts complete
+    and retains its cause as [owner_lifecycle_detail] on the keeper and backlog
+    rows; its pending work remains in [unclassified_count].
+    The document reports observations only: it carries
     no [status] and no [operator_action_required], because deciding which
     backlog needs an operator belongs to the health surface that serves it. *)
 val fleet_summary_json :

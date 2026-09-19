@@ -1471,6 +1471,41 @@ let runtime_lane_pick_name = function
   | Pick_conversation_lane lane | Pick_exact_lane lane | Pick_new_lane lane -> lane
 ;;
 
+(* The lane-editing keys on the Runtime lanes reading. [a] needs no row; the
+   rest act on the lane and candidate under the cursor. *)
+type runtime_lane_move =
+  | Move_down
+  | Move_up
+
+type runtime_lane_row_edit =
+  | Drop_candidate
+  | Move_candidate of runtime_lane_move
+  | Remove_lane
+
+type runtime_lane_edit =
+  | New_lane
+  | Row_edit of runtime_lane_row_edit
+
+let runtime_lane_edit_of_key = function
+  | "a" -> Some New_lane
+  | "x" -> Some (Row_edit Drop_candidate)
+  | "J" -> Some (Row_edit (Move_candidate Move_down))
+  | "K" -> Some (Row_edit (Move_candidate Move_up))
+  | "D" -> Some (Row_edit Remove_lane)
+  | _ -> None
+;;
+
+(* Where the last lane write stands. A write sends the lane's whole order,
+   built from the surface's last reading, so a second write sent before the
+   first is read back is built from the order the first replaced and undoes
+   it. *)
+type runtime_lane_write =
+  | Lane_write_idle
+  | Lane_write_posting
+  | Lane_write_rereading of int
+      (* The surface generation when the write landed. A load launched after
+         it is the first to carry the write. *)
+
 (** Stable identity of the Runtime row opened for detail. The cursor is only a
     position and can move to another runtime after refresh; detail stays bound
     to the exact lane/runtime pair the operator opened. *)
@@ -5218,6 +5253,7 @@ type state = {
      Held until the write settles, so a refused write leaves the cursor on the
      row the operator pressed. *)
   mutable runtime_lane_cursor_after_write: int option;
+  mutable runtime_lane_write: runtime_lane_write;
   mutable runtime_cursor: int;
   mutable runtime_surface_generation: int;
   mutable runtime_surface_inflight: int option;
@@ -6869,6 +6905,7 @@ let create_state
   runtime_lane_name_draft = None;
   runtime_lane_remove_armed = None;
   runtime_lane_cursor_after_write = None;
+  runtime_lane_write = Lane_write_idle;
   runtime_cursor = 0;
   runtime_surface_generation = 0;
   runtime_surface_inflight = None;
@@ -8118,6 +8155,86 @@ let runtime_lane_prompt (state : state) =
   | Some draft, _ -> Some (Lane_name_prompt draft)
   | None, Some lane -> Some (Lane_remove_prompt lane)
   | None, None -> None
+
+let runtime_lane_write_busy_message =
+  "the previous lane change is still being written; press again once the list reloads"
+
+let runtime_lane_write_busy (state : state) =
+  match state.runtime_lane_write with
+  | Lane_write_idle -> false
+  | Lane_write_posting | Lane_write_rereading _ -> true
+
+type runtime_lane_write_request =
+  | Write_lane_order of string list
+  | Write_lane_removal
+
+(* What a lane-editing key does, decided from the state alone so the caller
+   only applies it. A refusal is drawn on the refusal row; nothing is dropped
+   without a word. *)
+type runtime_lane_edit_plan =
+  | Open_lane_name_field
+  | Arm_lane_removal of string
+  | Send_lane_write of
+      { lane : string
+      ; request : runtime_lane_write_request
+      ; cursor_after : int option
+          (* Where the cursor goes once the write lands: the moved candidate's
+             new row, or the row left in place of a dropped candidate or a
+             removed lane. *)
+      }
+  | Refuse_lane_edit of string
+
+let plan_runtime_lane_edit (state : state) = function
+  | New_lane -> Open_lane_name_field
+  | Row_edit row_edit ->
+    let row =
+      Option.bind state.runtime_surface (fun snapshot ->
+        List.nth_opt snapshot.Tui_decode.rss_candidates state.runtime_cursor)
+    in
+    (match row with
+     | None -> Refuse_lane_edit "no lane row is under the cursor"
+     | Some row ->
+       let lane = row.Tui_decode.rcr_lane_id in
+       let position = row.Tui_decode.rcr_position in
+       let runtime_id = row.Tui_decode.rcr_runtime.Tui_decode.ro_id in
+       let order = conversation_lane_candidates state lane in
+       let write request ~cursor_after =
+         if runtime_lane_write_busy state
+         then Refuse_lane_edit runtime_lane_write_busy_message
+         else Send_lane_write { lane; request; cursor_after }
+       in
+       (match row_edit with
+        | Drop_candidate ->
+          (* Dropping the lane's last row leaves the cursor on the row that
+             will be the lane's new last one, not on whatever follows it. *)
+          let cursor_after =
+            if position = row.Tui_decode.rcr_candidate_count && position > 1
+            then Some (state.runtime_cursor - 1)
+            else None
+          in
+          write
+            (Write_lane_order
+               (List.filter (fun id -> not (String.equal id runtime_id)) order))
+            ~cursor_after
+        | Move_candidate move ->
+          let by, edge =
+            match move with
+            | Move_down -> 1, "last"
+            | Move_up -> -1, "first"
+          in
+          (match swap_candidates order (position - 1) (position - 1 + by) with
+           | None ->
+             Refuse_lane_edit (Printf.sprintf "%s is already %s in %s" runtime_id edge lane)
+           | Some moved ->
+             write (Write_lane_order moved) ~cursor_after:(Some (state.runtime_cursor + by)))
+        | Remove_lane ->
+          (match state.runtime_lane_remove_armed with
+           | Some armed when String.equal armed lane ->
+             (* The lane's rows leave the list; the cursor goes to the row
+                just above them rather than past the end of a shorter list. *)
+             let first_row = state.runtime_cursor - (position - 1) in
+             write Write_lane_removal ~cursor_after:(Some (max 0 (first_row - 1)))
+           | Some _ | None -> Arm_lane_removal lane)))
 
 type runtime_pick_item =
   | Pick_lane of Tui_decode.runtime_resolved_lane

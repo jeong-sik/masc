@@ -66,6 +66,86 @@ let test_a_move_past_either_end_is_no_move () =
   Alcotest.(check (option (list string))) "past the head" None (swap_candidates order 0 (-1));
   Alcotest.(check (option (list string))) "past the tail" None (swap_candidates order 2 3)
 
+(* Two lanes on the lanes reading: primary is rows 0 and 1, solo is row 2. *)
+let lane_state () =
+  let state = state () in
+  let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
+    { rrs_generated_at_iso = "fixture"; rrs_config_path = None;
+      rrs_default_runtime_id = Some "a";
+      rrs_runtimes = [runtime "a"; runtime "b"; runtime "c"];
+      rrs_lanes =
+        [{rrl_id = "primary"; rrl_runtime_ids = ["a"; "b"]};
+         {rrl_id = "solo"; rrl_runtime_ids = ["c"]}] } in
+  (match Masc.Tui_decode.join_runtime_surface ~probe:None ~probe_error:None ~resolved with
+   | Ok snapshot -> state.runtime_surface <- Some snapshot
+   | Error detail -> Alcotest.fail detail);
+  state.runtime_mode <- Runtime_lanes;
+  state
+
+let plan_text = function
+  | Open_lane_name_field -> "open the name field"
+  | Arm_lane_removal lane -> "arm " ^ lane
+  | Send_lane_write { lane; request; cursor_after } ->
+    Printf.sprintf "write %s %s, cursor %s" lane
+      (match request with
+       | Write_lane_order ids -> "[" ^ String.concat "; " ids ^ "]"
+       | Write_lane_removal -> "removal")
+      (match cursor_after with Some row -> string_of_int row | None -> "stays")
+  | Refuse_lane_edit reason -> "refuse: " ^ reason
+
+let expect_plan label state edit expected =
+  Alcotest.(check string) label expected (plan_text (plan_runtime_lane_edit state edit))
+
+let drop = Row_edit Drop_candidate
+let down = Row_edit (Move_candidate Move_down)
+let up = Row_edit (Move_candidate Move_up)
+let remove = Row_edit Remove_lane
+
+let test_a_lane_edit_sends_the_whole_order () =
+  let state = lane_state () in
+  expect_plan "a needs no row" state New_lane "open the name field";
+  expect_plan "J on the head" state down "write primary [b; a], cursor 1";
+  expect_plan "K on the head" state up "refuse: a is already first in primary";
+  state.runtime_cursor <- 1;
+  expect_plan "x on the tail" state drop "write primary [a], cursor 0";
+  expect_plan "J on the tail" state down "refuse: b is already last in primary";
+  state.runtime_cursor <- 2;
+  expect_plan "the first D arms" state remove "arm solo";
+  state.runtime_lane_remove_armed <- Some "solo";
+  expect_plan "the second D removes" state remove "write solo removal, cursor 1";
+  state.runtime_lane_remove_armed <- Some "primary";
+  expect_plan "a D armed for another lane arms this one" state remove "arm solo";
+  state.runtime_cursor <- 3;
+  expect_plan "no row under the cursor" state drop
+    "refuse: no lane row is under the cursor"
+
+(* Each write is built from the surface's last reading. Until the previous
+   write is read back, a write would be built from the order it replaced. *)
+let test_a_lane_edit_waits_for_the_previous_write () =
+  let busy = "refuse: " ^ runtime_lane_write_busy_message in
+  List.iter (fun (phase, write) ->
+    let state = lane_state () in
+    state.runtime_lane_write <- write;
+    expect_plan (phase ^ ": J") state down busy;
+    expect_plan (phase ^ ": x") state drop busy;
+    expect_plan (phase ^ ": the first D still arms") state remove "arm primary";
+    state.runtime_lane_remove_armed <- Some "primary";
+    expect_plan (phase ^ ": the second D") state remove busy;
+    expect_plan (phase ^ ": a still opens the name field") state New_lane
+      "open the name field")
+    [ "posting", Lane_write_posting; "rereading", Lane_write_rereading 3 ];
+  let state = lane_state () in
+  state.runtime_lane_write <- Lane_write_idle;
+  expect_plan "idle: J" state down "write primary [b; a], cursor 1"
+
+let test_lane_keys_parse_to_edits () =
+  let parsed key = Option.map (fun edit -> plan_text (plan_runtime_lane_edit (lane_state ()) edit))
+      (runtime_lane_edit_of_key key) in
+  Alcotest.(check (option string)) "a" (Some "open the name field") (parsed "a");
+  Alcotest.(check (option string)) "J" (Some "write primary [b; a], cursor 1") (parsed "J");
+  Alcotest.(check (option string)) "D" (Some "arm primary") (parsed "D");
+  Alcotest.(check (option string)) "j is the cursor's, not an edit" None (parsed "j")
+
 let test_cli_probe_is_a_note () =
   let detail = "CLI runtimes do not expose an HTTP reachability endpoint" in
   Alcotest.(check bool) "typed CLI exclusion remains informational" true
@@ -123,5 +203,8 @@ let () = Alcotest.run "runtime list geometry"
       Alcotest.test_case "empty picker explanation" `Quick test_empty_picker_keeps_its_explanation;
       Alcotest.test_case "lane prompt reserves footer space" `Quick test_lane_prompt_keeps_footer_space;
       Alcotest.test_case "a move past either end is no move" `Quick test_a_move_past_either_end_is_no_move;
+      Alcotest.test_case "a lane edit sends the whole order" `Quick test_a_lane_edit_sends_the_whole_order;
+      Alcotest.test_case "a lane edit waits for the previous write" `Quick test_a_lane_edit_waits_for_the_previous_write;
+      Alcotest.test_case "lane keys parse to edits" `Quick test_lane_keys_parse_to_edits;
       Alcotest.test_case "CLI probe is informational" `Quick test_cli_probe_is_a_note;
       Alcotest.test_case "search follows Runtime mode and cursor order" `Quick test_search_follows_the_runtime_mode]]

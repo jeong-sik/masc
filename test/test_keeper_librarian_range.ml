@@ -402,6 +402,26 @@ let test_slice_returns_the_atoms_of_the_range () =
        (Range.slice saved range))
 ;;
 
+(* A range is two atom numbers in one list's numbering. Handed another list it
+   still slices, so the pairing is the caller's to keep -- and the digest that
+   would have caught the swap is sitting in the range, unread. *)
+let test_slice_trusts_the_caller_to_pass_the_same_history () =
+  let tool : Types.message = message ~role:Types.Tool "result" in
+  let saved =
+    [ message ~role:Types.System "pinned"; user "u0"; assistant "a1"; tool; user "u2" ]
+  in
+  let other =
+    [ message ~role:Types.System "pinned"; user "x0"; assistant "x1"; tool; user "x2" ]
+  in
+  let range : Range.range =
+    { Range.start_atom = 1; end_atom = 3; last_atom_digest = digest_of saved 2 }
+  in
+  check bool "the two histories differ at the atom the range ends on" true
+    (not (String.equal (digest_of other 2) range.Range.last_atom_digest));
+  check int "and the wrong history slices without complaint" 3
+    (List.length (Range.slice other range))
+;;
+
 let () =
   run
     "keeper_librarian_range"
@@ -445,6 +465,8 @@ let () =
             test_progress_moves_only_when_something_was_read
         ; test_case "slice returns the atoms of the range" `Quick
             test_slice_returns_the_atoms_of_the_range
+        ; test_case "slice trusts the caller to pass the same history" `Quick
+            test_slice_trusts_the_caller_to_pass_the_same_history
         ] )
     ]
 ;;

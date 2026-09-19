@@ -102,5 +102,10 @@ val progress_after
 
 (** The messages of the atoms in [range], in order, tool results included.
     [System] messages and extra-context messages belong to no atom and are
-    left out. *)
+    left out.
+
+    The list must be the one {!select} was given. A range is two atom numbers
+    in that list's numbering, so another list slices without complaint and
+    returns text the round never selected. The range carries the digest that
+    tells the two apart and this function does not read it. *)
 val slice : Agent_core.Types.message list -> range -> Agent_core.Types.message list

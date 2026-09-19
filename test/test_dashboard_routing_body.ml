@@ -177,6 +177,19 @@ let () =
                 ~message:
                   {|"runpod_mtp.qwen" is not an exact-output lane; append adds a slot to exact/<name>|}
                 {|{"lane":"runpod_mtp.qwen","action":"append","runtime_id":"openai.gpt"}|})
+        ; Alcotest.test_case "an exact lane the server does not run is refused" `Quick
+            (fun () ->
+              List.iter
+                (fun body ->
+                  expect_error "exact-unknown"
+                    ~message:
+                      "unknown exact-output lane: verifer_exact (expected one of \
+                       librarian_exact, hitl_auto_judge, board_attention_exact, \
+                       workspace_curator_exact, verifier_exact)"
+                    body)
+                [ {|{"lane":"exact/verifer_exact","runtime_ids":["runpod_mtp.qwen"]}|}
+                ; {|{"lane":"exact/verifer_exact","action":"append","runtime_id":"runpod_mtp.qwen"}|}
+                ])
         ; Alcotest.test_case "append needs the slot it adds" `Quick
             (fun () ->
               expect_error "append-no-id" ~message:"runtime_id required"

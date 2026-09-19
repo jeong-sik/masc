@@ -541,28 +541,38 @@ type runtime_route_lane =
           [\[runtime.lanes."<id>"\]] lane, whose name is the operator's own
           (RFC-0457), or a configured runtime id, whose order a [set] writes as
           a lane of that id. *)
-  | Runtime_exact_lane of string
-      (** A [\[runtime.exact_output_lanes."<name>"\]] walk order, e.g.
-          verifier_exact or librarian_exact. The "exact/" prefix keeps the
-          name space disjoint from conversation-lane names. *)
+  | Runtime_exact_lane of Runtime.exact_lane
+      (** A [\[runtime.exact_output_lanes.<id>\]] walk order, one of the
+          closed set {!Runtime.exact_lane} (verifier_exact, librarian_exact,
+          ...). The "exact/" prefix keeps the name space disjoint from
+          conversation-lane names. *)
 
 let runtime_route_lane_to_string = function
   | Runtime_default -> "default"
   | Runtime_media_failover -> "media_failover"
   | Runtime_named_lane lane_id -> lane_id
-  | Runtime_exact_lane name -> "exact/" ^ name
+  | Runtime_exact_lane lane -> "exact/" ^ Runtime.exact_lane_id lane
 
 (* A name is admitted when the runtime resolver knows it: a declared lane,
    whatever its name, or a configured runtime id. [resolve_assignment] answers
    [`Missing] for anything else, so a typo is refused with the name it could
    not find. An exact-output lane name never reaches that resolver: the prefix
-   names which name space the rest of the string belongs to, and the setter's
-   own validation rejects a name the loaded config does not declare. *)
+   names which name space the rest of the string belongs to, and the name must
+   be one of the exact lanes the server runs ({!Runtime.exact_lane_of_id}), so
+   a typo is refused here instead of becoming a table nothing reads. *)
 let parse_runtime_route_lane = function
   | "default" -> Ok Runtime_default
   | "media_failover" -> Ok Runtime_media_failover
   | lane when String.length lane > 6 && String.equal (String.sub lane 0 6) "exact/" ->
-    Ok (Runtime_exact_lane (String.sub lane 6 (String.length lane - 6)))
+    let name = String.sub lane 6 (String.length lane - 6) in
+    (match Runtime.exact_lane_of_id name with
+     | Some exact -> Ok (Runtime_exact_lane exact)
+     | None ->
+       Error
+         (Printf.sprintf
+            "unknown exact-output lane: %s (expected one of %s)"
+            name
+            (String.concat ", " (List.map Runtime.exact_lane_id Runtime.all_exact_lanes))))
   | lane ->
     (match Runtime.resolve_assignment lane with
      | `Lane _ -> Ok (Runtime_named_lane lane)
@@ -580,7 +590,7 @@ type runtime_route_body =
   | Runtime_route_runtime_ids of runtime_route_lane * string list
   | Runtime_route_lane_created of string * string list
   | Runtime_route_lane_removed of string
-  | Runtime_route_exact_slot_appended of string * string
+  | Runtime_route_exact_slot_appended of Runtime.exact_lane * string
 
 (* What a routing body asks of a lane. [set], the action a body without one
    names, replaces the order of a lane or route the resolver already knows.
@@ -679,10 +689,10 @@ let parse_remove_route_body lane =
 
 let parse_append_route_body json lane =
   match parse_runtime_route_lane lane with
-  | Ok (Runtime_exact_lane lane_name) ->
+  | Ok (Runtime_exact_lane exact) ->
     (match required_string_field json "runtime_id" with
      | Error _ as err -> err
-     | Ok runtime_id -> Ok (Runtime_route_exact_slot_appended (lane_name, runtime_id)))
+     | Ok runtime_id -> Ok (Runtime_route_exact_slot_appended (exact, runtime_id)))
   | Ok (Runtime_default | Runtime_media_failover | Runtime_named_lane _) ->
     Error (Printf.sprintf "%S is not an exact-output lane; append adds a slot to exact/<name>" lane)
   | Error _ as err -> err
@@ -734,7 +744,7 @@ type runtime_config_write_operation =
   | Runtime_config_routing_list of runtime_route_lane * string list
   | Runtime_config_lane_created of string * string list
   | Runtime_config_lane_removed of string
-  | Runtime_config_exact_slot_appended of string * string
+  | Runtime_config_exact_slot_appended of Runtime.exact_lane * string
   | Runtime_config_assignment of string * string option
 
 let runtime_config_write_operation_details = function
@@ -770,9 +780,9 @@ let runtime_config_write_operation_details = function
     ; ("lane", `String lane_id)
     ; ("action", `String "remove")
     ]
-  | Runtime_config_exact_slot_appended (lane_name, runtime_id) ->
+  | Runtime_config_exact_slot_appended (exact, runtime_id) ->
     [ ("operation", `String "routing")
-    ; ("lane", `String (runtime_route_lane_to_string (Runtime_exact_lane lane_name)))
+    ; ("lane", `String (runtime_route_lane_to_string (Runtime_exact_lane exact)))
     ; ("action", `String "append")
     ; ("runtime_id", `String runtime_id)
     ]
@@ -1078,14 +1088,14 @@ let handle_runtime_routing_post state agent_name req reqd body_str =
   | Ok (Runtime_route_runtime_id (Runtime_exact_lane _, _)) ->
     respond_dashboard_error ~status:`Bad_request ~request:req reqd
       "exact-output lane runtime_ids required"
-  | Ok (Runtime_route_runtime_ids (Runtime_exact_lane lane_name, slots))
+  | Ok (Runtime_route_runtime_ids (Runtime_exact_lane exact, slots))
     ->
-    (match Runtime.set_exact_output_lane_slots ~lane_name ~slots () with
+    (match Runtime.set_exact_output_lane_slots ~lane:exact ~slots () with
      | Error msg ->
        audit_runtime_config_write state agent_name
          ~operation:
            (Runtime_config_routing_list
-              (Runtime_exact_lane lane_name, slots))
+              (Runtime_exact_lane exact, slots))
          ~text:body_str
          ~outcome:(Audit_log.Failure msg) ();
        respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
@@ -1093,7 +1103,7 @@ let handle_runtime_routing_post state agent_name req reqd body_str =
        respond_runtime_config_commit state agent_name
          ~operation:
            (Runtime_config_routing_list
-              (Runtime_exact_lane lane_name, slots))
+              (Runtime_exact_lane exact, slots))
          ~receipt req reqd)
   | Ok (Runtime_route_runtime_ids (lane, _)) ->
     respond_dashboard_error ~status:`Bad_request ~request:req reqd
@@ -1118,9 +1128,9 @@ let handle_runtime_routing_post state agent_name req reqd body_str =
        respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
      | Ok receipt ->
        respond_runtime_config_commit state agent_name ~operation ~receipt req reqd)
-  | Ok (Runtime_route_exact_slot_appended (lane_name, runtime_id)) ->
-    let operation = Runtime_config_exact_slot_appended (lane_name, runtime_id) in
-    (match Runtime.append_exact_output_lane_slot ~lane_name ~slot:runtime_id () with
+  | Ok (Runtime_route_exact_slot_appended (exact, runtime_id)) ->
+    let operation = Runtime_config_exact_slot_appended (exact, runtime_id) in
+    (match Runtime.append_exact_output_lane_slot ~lane:exact ~slot:runtime_id () with
      | Error msg ->
        audit_runtime_config_write state agent_name ~operation ~text:body_str
          ~outcome:(Audit_log.Failure msg) ();
@@ -1177,7 +1187,7 @@ module For_testing = struct
   let lane_string = function
     | Runtime_default -> "default"
     | Runtime_media_failover -> "media_failover"
-    | Runtime_exact_lane name -> "exact/" ^ name
+    | Runtime_exact_lane exact -> "exact/" ^ Runtime.exact_lane_id exact
     | Runtime_named_lane id -> id
 
   let parse_runtime_route_body body =
@@ -1193,8 +1203,8 @@ module For_testing = struct
     | Ok (Runtime_route_lane_created (lane_id, runtime_ids)) ->
         Ok (lane_id, "create", runtime_ids)
     | Ok (Runtime_route_lane_removed lane_id) -> Ok (lane_id, "remove", [])
-    | Ok (Runtime_route_exact_slot_appended (lane_name, runtime_id)) ->
-        Ok ("exact/" ^ lane_name, "append", [ runtime_id ])
+    | Ok (Runtime_route_exact_slot_appended (exact, runtime_id)) ->
+        Ok ("exact/" ^ Runtime.exact_lane_id exact, "append", [ runtime_id ])
   type nonrec gate_mode_recovery = gate_mode_recovery =
     | Recovery_completed of Keeper_gate.operator_recovery_report
     | Recovery_failed of string

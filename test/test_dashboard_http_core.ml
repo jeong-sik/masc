@@ -5005,7 +5005,8 @@ let test_direct_assignment_route_rejects_stale_revision_without_write () =
    lands in runtime.toml; a lane under a runtime id, and a lane the default
    walks, are refused with 400 and the writer's own sentence; a removed lane
    leaves the file; an exact-lane append adds its slot once and refuses it the
-   second time. *)
+   second time; an exact lane the server does not run is refused before any
+   write. *)
 let test_runtime_routing_creates_and_removes_a_lane () =
   with_direct_assignment_model_catalog @@ fun () ->
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
@@ -5058,7 +5059,14 @@ let test_runtime_routing_creates_and_removes_a_lane () =
     (in_file "[runtime.exact_output_lanes.board_attention_exact]");
   check string "a declared slot is refused"
     "test_provider.test_model is already a slot of board_attention_exact"
-    (refusal (post "append a declared slot" 400 append))
+    (refusal (post "append a declared slot" 400 append));
+  check string "an exact lane the server does not run is refused"
+    "unknown exact-output lane: verifer_exact (expected one of librarian_exact, \
+     hitl_auto_judge, board_attention_exact, workspace_curator_exact, verifier_exact)"
+    (refusal
+       (post "append to a misspelled exact lane" 400
+          {|{"lane":"exact/verifer_exact","action":"append","runtime_id":"test_provider.test_model"}|}));
+  check bool "the misspelled lane left no table" false (in_file "verifer_exact")
 
 let test_direct_assignment_intervening_write_fences_keeper_config_post () =
   with_direct_assignment_model_catalog @@ fun () ->

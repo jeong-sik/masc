@@ -901,30 +901,32 @@ val remove_runtime_lane :
 
 val set_exact_output_lane_slots :
   ?runtime_config_path:string ->
-  lane_name:string ->
+  lane:exact_lane ->
   slots:string list ->
   unit ->
   (config_commit_receipt, string) result
-(** Persist [\[runtime.exact_output_lanes."<lane_name>"\]].slots the same way
+(** Persist [\[runtime.exact_output_lanes.<id>\]].slots the same way
     {!set_runtime_lane_candidates} persists conversation-lane candidates: the
     SSOT writer, full validation, atomic write, cache refresh. The list order
-    is the walk order of the lane. Creates the lane table when the name has
-    none. An empty [slots] is rejected — mandatory exact lanes fail the boot
-    fail-closed without one, so a lane that resolves to nothing is not the
-    edit an operator is making. *)
+    is the walk order of the lane. An empty [slots] is rejected — mandatory
+    exact lanes fail the boot fail-closed without one, so a lane that resolves
+    to nothing is not the edit an operator is making. A lane the file does not
+    declare yet gets its table; [lane] is one of the lanes the server runs, so
+    that table is read. A lane the file declares other than as its own table
+    (inline, or through dotted keys) is refused rather than declared twice. *)
 
 val append_exact_output_lane_slot :
   ?runtime_config_path:string ->
-  lane_name:string ->
+  lane:exact_lane ->
   slot:string ->
   unit ->
   (config_commit_receipt, string) result
-(** Add [slot] to the end of [\[runtime.exact_output_lanes."<lane_name>"\]].slots
-    as the file declares them, read under the runtime.toml write lock, and
-    commit the result like {!set_exact_output_lane_slots}. Declared slots the
-    exact-output registry did not admit stay in place. Refused when [slot] is
-    already declared on the lane. Creates the lane table when the name has
-    none. *)
+(** Add [slot] to the end of [\[runtime.exact_output_lanes.<id>\]].slots as
+    the file declares them, read under the runtime.toml write lock, and commit
+    the result like {!set_exact_output_lane_slots}. Declared slots the
+    exact-output registry did not admit stay in place. Refused, by name, when
+    the lane already declares [slot] as a slot or as a CLI slot. Tables are
+    created and refused as {!set_exact_output_lane_slots} says. *)
 
 val enter_setup_required : reason:Runtime_startup_state.reason -> unit -> unit
 (** Clear model dispatch state after startup configuration failure. Owner and

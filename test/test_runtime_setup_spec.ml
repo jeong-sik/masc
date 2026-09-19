@@ -44,7 +44,35 @@ let test_native_fractional_identity () =
   let whole = "[runtime]\ndefault = " ^ Yojson.Safe.to_string (`String shortest.runtime_id) ^ "\n" ^ shortest.runtime_toml in
   Alcotest.check Alcotest.bool "native fractional output parses as configuration"
     true (Result.is_ok (Runtime_toml.parse_string whole))
+(* The sibling of the fractional case above: an answer left out and the same
+   answer written with its default are one answer, so they are one connection.
+   The inventory fills [provider_kind] on every round trip, so before identity
+   came from the parsed value, adding an endpoint and reconfiguring it produced
+   two ids for one endpoint — the second arriving as a duplicate row beside a
+   stale one, because the batch appends an id it has not seen. *)
+let test_one_answer_is_one_connection () =
+  let id input =
+    match Runtime_setup_spec.of_json (Yojson.Safe.from_string input) with
+    | Ok spec -> (Runtime_setup_spec.render spec).runtime_id
+    | Error error -> Alcotest.fail (Runtime_setup_spec.error_message error) in
+  let base = {|"choice":"vllm","model":"m","max_context":8192,"tools":true,"streaming":false,"endpoint":"http://h:9/v1"|} in
+  let bare = id ("{" ^ base ^ "}") in
+  Alcotest.check Alcotest.string "a dialect written as its own default is the same connection"
+    bare (id ("{" ^ base ^ {|,"provider_kind":"openai_compat"|} ^ "}"));
+  Alcotest.check Alcotest.string "an empty credential name is no credential, not another one"
+    bare (id ("{" ^ base ^ {|,"api_key_env":""|} ^ "}"));
+  List.iter (fun (label, changed) ->
+    Alcotest.check Alcotest.bool label true (bare <> id ("{" ^ changed ^ "}")))
+    [ "a different dialect is a different connection",
+      base ^ {|,"provider_kind":"glm"|}
+    ; "a different endpoint is a different connection",
+      {|"choice":"vllm","model":"m","max_context":8192,"tools":true,"streaming":false,"endpoint":"http://other:9/v1"|}
+    ; "a different model is a different connection",
+      {|"choice":"vllm","model":"m2","max_context":8192,"tools":true,"streaming":false,"endpoint":"http://h:9/v1"|}
+    ; "a different window is a different connection",
+      {|"choice":"vllm","model":"m","max_context":4096,"tools":true,"streaming":false,"endpoint":"http://h:9/v1"|} ]
 let () = Alcotest.run "native runtime setup spec" ["contract",[
   Alcotest.test_case "representative installer identity and TOML parity" `Quick test_existing_installer_contract;
   Alcotest.test_case "native fractional number identity" `Quick test_native_fractional_identity;
-  Alcotest.test_case "typed input rejects incompatible declarations" `Quick test_rejects_invalid_transport_claims]]
+  Alcotest.test_case "typed input rejects incompatible declarations" `Quick test_rejects_invalid_transport_claims;
+  Alcotest.test_case "one answer is one connection" `Quick test_one_answer_is_one_connection]]

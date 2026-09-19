@@ -1,7 +1,7 @@
 (** Keeper_unified_turn_execution — Execution body for unified keeper cycles.
 
     Extracted from [Keeper_unified_turn.run_keeper_cycle]. Contains the
-    [do_run] closure, runtime rotation loop, and cleanup/finalization logic.
+    [do_run] closure, the runtime attempt, and cleanup/finalization logic.
 
     @since God file decomposition *)
 

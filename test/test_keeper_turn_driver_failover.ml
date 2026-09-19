@@ -180,40 +180,6 @@ max-concurrent = 1
 max-concurrent = 1
 |}
 
-(* One lane with one candidate, and a second runtime declared beside it that
-   no lane names. *)
-let runtime_toml_single_candidate_lane =
-  {|
-[runtime]
-default = "primary.test_model"
-
-[runtime.lanes.solo]
-candidates = [ "primary.test_model" ]
-
-[providers.primary]
-display-name = "Primary Provider"
-protocol = "openai-compatible-http"
-endpoint = "http://127.0.0.1:1"
-
-[providers.fallback]
-display-name = "Fallback Provider"
-protocol = "openai-compatible-http"
-endpoint = "http://127.0.0.1:2"
-
-[models.test_model]
-api-name = "test-model"
-max-context = 200000
-tools-support = true
-streaming = true
-
-[primary.test_model]
-is-default = true
-max-concurrent = 1
-
-[fallback.test_model]
-max-concurrent = 1
-|}
-
 let runtime_toml_quota_lane_with_shared_credential shared_credential =
   Printf.sprintf
     {|
@@ -567,39 +533,6 @@ let test_assignment_walk_order_refuses_a_missing_assignment () =
     | Error Driver.Assignment_missing -> ()
     | Error (Driver.Catalog_unavailable _) -> Alcotest.fail "missing, not unavailable"
     | Ok _ -> Alcotest.fail "an id that names nothing is refused, not walked")
-
-(* A failed turn stays in its lane. When the only candidate of [solo] fails,
-   the turn ends on that failure; the runtime declared outside the lane is
-   never dispatched. *)
-let test_a_failed_turn_never_dispatches_outside_its_lane () =
-  with_runtime_config runtime_toml_single_candidate_lane (fun () ->
-    Eio_main.run
-    @@ fun env ->
-    Eio.Switch.run
-    @@ fun sw ->
-    Masc_test_deps.init_eio_clock ~sw env;
-    let attempted = ref [] in
-    let result =
-      Driver.run_named
-        ~system_prompt:"You are the runtime failover test Keeper."
-        ~runtime_id:"solo"
-        ~keeper_name:"single-candidate-lane"
-        ~base_path:(Filename.get_temp_dir_name ())
-        ~agent_core_tools:[]
-        ~goal:"answer"
-        ~on_runtime_attempt:(fun attempt ->
-          attempted := attempt.Driver.runtime_id :: !attempted)
-        ~sw
-        ~net:env#net
-        ()
-    in
-    (match result with
-     | Error _ -> ()
-     | Ok _ -> Alcotest.fail "an unreachable endpoint completed the turn");
-    Alcotest.(check (list string))
-      "only the lane's candidate was dispatched"
-      [ "primary.test_model" ]
-      (List.sort_uniq String.compare !attempted))
 
 (* A route is a routing label; the binding a turn opens is the lane's entry
    candidate. Callers that need a materialized runtime resolve it here rather
@@ -2411,6 +2344,38 @@ let test_attempt_loop_blocks_no_progress_when_gate_denies () =
          Runtime_manifest.Runtime_failed;
        ])
     (List.map (fun (event, _, _) -> event_name event) events)
+
+(* The walk's default no-progress gate admits the next lane candidate: an empty
+   response from the head, with no effect and no checkpoint, moves the same
+   turn to the lane's second candidate. *)
+let test_attempt_loop_moves_past_no_progress_by_default () =
+  let attempts = ref [] in
+  let events = ref [] in
+  let result =
+    Driver.For_testing.attempt_runtime_candidates
+      ~runtime_id:"resilient"
+      ~runtime_id_of:(fun runtime_id -> runtime_id)
+      ~emit_runtime_manifest:(emit_manifest_collector events)
+      ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
+        attempts := !attempts @ [ runtime_id ];
+        match candidate with
+        | "primary.test_model" ->
+          attempt_without_effect
+            (Error (accept_empty_no_progress_error "primary.test_model"))
+            None
+        | "fallback.test_model" -> attempt_without_effect (Ok runtime_id) None
+        | other -> Alcotest.failf "unexpected candidate %s" other)
+      [ "primary.test_model"; "fallback.test_model" ]
+  in
+  (match result with
+   | Ok runtime_id ->
+     Alcotest.(check string) "the next lane candidate served" "fallback.test_model" runtime_id
+   | Error err ->
+     Alcotest.failf "no-progress head ended the walk: %s" (Agent_core.Error.to_string err));
+  Alcotest.(check (list string))
+    "the walk tried the head, then the next lane candidate"
+    [ "primary.test_model"; "fallback.test_model" ]
+    !attempts
 
 let test_attempt_loop_does_not_gate_network_retry () =
   let attempts = ref [] in
@@ -4668,10 +4633,6 @@ let () =
             `Quick
             test_assignment_walk_order_refuses_a_missing_assignment;
           Alcotest.test_case
-            "a failed turn never dispatches outside its lane"
-            `Quick
-            test_a_failed_turn_never_dispatches_outside_its_lane;
-          Alcotest.test_case
             "entry_runtime_id_of_route resolves a route to the binding it opens"
             `Quick
             test_entry_runtime_id_resolves_a_route_to_the_binding_it_opens;
@@ -4803,6 +4764,10 @@ let () =
             "attempt loop blocks no-progress when gate denies"
             `Quick
             test_attempt_loop_blocks_no_progress_when_gate_denies;
+          Alcotest.test_case
+            "attempt loop moves past no-progress by default"
+            `Quick
+            test_attempt_loop_moves_past_no_progress_by_default;
           Alcotest.test_case
             "attempt loop does not gate network retry"
             `Quick

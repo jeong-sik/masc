@@ -1,8 +1,9 @@
 (** Keeper_unified_turn_cascade_resolution — Telemetry-event publishing
     for cascade (retry/rotation) resolution decisions.
 
-    Publishes a [telemetry_event] on the MASC Event_bus each time a keeper
-    turn ends without another runtime to try, with the reason it stopped.
+    Publishes a [telemetry_event] on the MASC Event_bus each time a unified
+    keeper cycle ends without another lane candidate to try, with the reason
+    it stopped. Direct [masc_keeper_msg] turns do not publish it.
 
     [keeper_telemetry_consumer] observes [Custom("telemetry_event", _)]
     on the bus and increments

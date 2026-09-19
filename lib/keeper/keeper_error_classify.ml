@@ -371,24 +371,22 @@ let recoverable_runtime_failure_reason (err : Agent_core.Error.t) =
     | Some (Keeper_turn_driver.Gate_replay_repair_required _) ->
         None
     | None ->
-        (* Typed runtime rotation: raw provider API errors that are
-           not wrapped in a MASC internal error (e.g. single-provider runtimes
-           where AGENT_CORE surfaces the error directly) should still trigger rotation
-           when a different runtime may succeed.
+        (* Raw provider API errors that are not wrapped in a MASC internal
+           error (e.g. single-provider runtimes where AGENT_CORE surfaces the
+           error directly) get a label too, so the deferred lane suffix records
+           why the turn continued on its next lane candidate.
 
-           429 rate-limit (non-hard-quota): rotate through explicitly declared
-           candidates. The error type does not carry model/account/provider
-           scope, so this boundary must not infer a broader blocked set.
+           429 rate-limit (non-hard-quota): [Rate_limit]. The error type does
+           not carry model/account/provider scope, so this boundary does not
+           infer a broader blocked set.
 
-           [ServerError]: the provider is unhealthy or overloaded; a
-           different runtime may be healthy.
+           [ServerError]: [Server_error]; the provider is unhealthy or
+           overloaded.
 
-           401/403 auth errors: the credential for this runtime is invalid; a
-           different runtime with different credentials may succeed.
+           401/403: [Auth_error]; the credential for this runtime is invalid.
 
            [PaymentRequired] and provider [HardQuota] are handled above by
-           [core_error_is_hard_quota]. Rate limits intentionally keep [Rate_limit]
-           so declared runtime fallback remains available. *)
+           [core_error_is_hard_quota]. *)
         (match err with
          | Agent_core.Error.Api (Llm_provider.Retry.RateLimited _) ->
              Some Rate_limit

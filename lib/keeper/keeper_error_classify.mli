@@ -17,9 +17,9 @@ val is_transient_internal_runner_error : Agent_core.Error.t -> bool
 
 (** Detect request body parse errors from either the provider or the API
     (e.g. Ollama yyjson rejecting a malformed request body or the API
-    rejecting invalid JSON). The typed distinction is used for observability
-    and runtime rotation; it never exempts a committed mutation from explicit
-    partial-commit handling. *)
+    rejecting invalid JSON). The typed distinction is used for observability;
+    it never exempts a committed mutation from explicit partial-commit
+    handling. *)
 val is_server_rejected_parse_error : Agent_core.Error.t -> bool
 
 (** [true] for provider-side request-body parse rejections. *)
@@ -116,12 +116,12 @@ type degraded_retry =
 (** Classifies an agent-core error into the reason label a turn records when
     it continues on the next runtime of its lane.
     Returns [None] for terminal errors (e.g. generic accept-rejected,
-    ambiguous post-commit) that should not trigger same-turn escalation. A
-    narrow built-in progress-contract rejection is recoverable only when the
-    response was thinking-only after a read-only tool.
+    ambiguous post-commit) that carry no continuation label. A narrow built-in
+    progress-contract rejection is labelled only when the response was
+    thinking-only after a read-only tool.
 
-    Typed rotation: raw API errors that are not wrapped in a MASC
-    internal error are also classified when a different runtime may succeed:
+    Raw API errors that are not wrapped in a MASC internal error are also
+    labelled:
     - [PaymentRequired] / provider [HardQuota] → ["hard_quota"]
     - [RateLimited] provider throttles → ["rate_limit"]
     - [Overloaded] / [CapacityExhausted] → ["capacity_backpressure"]
@@ -129,7 +129,9 @@ type degraded_retry =
     - [AuthError] → ["auth_error"]
 
     Production callers label the deferred lane suffix
-    ([Keeper_unified_turn], [Keeper_unified_turn_execution]). *)
+    ([Keeper_unified_turn], [Keeper_unified_turn_execution],
+    [Keeper_agent_run]) and read the capacity blocker
+    ([Keeper_status_bridge_blocker]). *)
 val recoverable_runtime_failure_reason :
   Agent_core.Error.t -> degraded_retry_reason option
 

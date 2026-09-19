@@ -142,16 +142,22 @@ let () =
   in
   let base_path =
     match !base with
-    | Some value -> Config_dir_resolver.absolute_path value
-    | None -> Config_dir_resolver.base_path_or_cwd ()
+    | Some value ->
+      value
+      |> Config_dir_resolver.absolute_path
+      |> Masc.Workspace.runtime_base_path_for_request
+    | None ->
+      Config_dir_resolver.base_path_or_cwd ()
+      |> Masc.Workspace.runtime_base_path_for
   in
   (* The save below prunes the session's checkpoint history to the window the
      operator set, and that window lives in this workspace's overrides. Without
      this the purge would answer with the shipped default and trim a history
      the operator asked to keep. *)
   Masc.Runtime_params.restore ~base_path;
-  let runtime_root = (Masc.Workspace.backend_config_for base_path).base_path in
-  let session_dir = Filename.concat (Filename.concat runtime_root "traces") trace in
+  let session_store = Masc.Keeper_fs.session_store_path_for_base_path base_path in
+  let runtime_root = Filename.dirname session_store in
+  let session_dir = Filename.concat session_store trace in
   let checkpoint_path = Store.agent_core_checkpoint_path ~session_dir ~session_id:trace in
   if not (Sys.file_exists checkpoint_path)
   then error ("no canonical checkpoint at " ^ checkpoint_path);

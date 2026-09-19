@@ -450,11 +450,23 @@ let rec workspace_contents dir =
       (path, None) :: workspace_contents path
     else [ path, Some (In_channel.with_open_bin path In_channel.input_all) ])
 
-let test_cli_workspace cluster_name () =
+let test_cli_workspace ?(linked_worktree = false) cluster_name () =
   Eio_main.run @@ fun env ->
-  let base_path = Filename.temp_dir "checkpoint-purge-cli-" "" in
+  let owner_root = Filename.temp_dir "checkpoint-purge-cli-" "" in
+  let base_path =
+    if not linked_worktree then owner_root
+    else
+      let main_root = Filename.concat owner_root "main" in
+      let worktree_root = Filename.concat owner_root "worktree" in
+      Unix.mkdir main_root 0o700;
+      Unix.mkdir (Filename.concat main_root ".git") 0o700;
+      Unix.mkdir worktree_root 0o700;
+      Out_channel.with_open_text (Filename.concat worktree_root ".git") (fun output ->
+        Printf.fprintf output "gitdir: %s/.git/worktrees/checkpoint-purge\n" main_root);
+      worktree_root
+  in
   Fun.protect
-    ~finally:(fun () -> Fs_compat.remove_tree base_path)
+    ~finally:(fun () -> Fs_compat.remove_tree owner_root)
     (fun () ->
       Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
       Masc_test_deps.with_process_env "MASC_CLUSTER_NAME" cluster_name @@ fun () ->
@@ -473,11 +485,12 @@ let test_cli_workspace cluster_name () =
            Alcotest.fail "fixture checkpoint was not saved"
        | Error detail -> Alcotest.failf "fixture checkpoint: %s" detail);
       let original = In_channel.with_open_bin checkpoint_path In_channel.input_all in
-      let before = workspace_contents base_path in
+      let before = workspace_contents owner_root in
       let runtime_entries = Sys.readdir runtime_root |> Array.to_list in
       let run_cli args =
+        let runtime_base_path = Masc.Workspace.runtime_base_path_for base_path in
         let child_env =
-          [ "MASC_BASE_PATH=" ^ base_path ]
+          [ "MASC_BASE_PATH=" ^ runtime_base_path ]
           @ (match cluster_name with
              | None -> []
              | Some name -> [ "MASC_CLUSTER_NAME=" ^ name ])
@@ -492,11 +505,11 @@ let test_cli_workspace cluster_name () =
       run_cli [ "--base"; base_path ];
       Alcotest.(check (list (pair string (option string))))
         "dry-run leaves all workspace files and directories unchanged"
-        before (workspace_contents base_path);
+        before (workspace_contents owner_root);
       run_cli [];
       Alcotest.(check (list (pair string (option string))))
         "MASC_BASE_PATH dry-run uses the same workspace without writes"
-        before (workspace_contents base_path);
+        before (workspace_contents owner_root);
       run_cli [ "--base"; base_path; "--apply" ];
       let backup_dirs =
         Sys.readdir runtime_root |> Array.to_list
@@ -598,6 +611,8 @@ let () =
       , [ Alcotest.test_case "default cluster: workspace dry-run and apply" `Quick
             (test_cli_workspace None)
         ; Alcotest.test_case "named cluster: workspace dry-run and apply" `Quick
-            (test_cli_workspace (Some "Purge/Cluster"))
+            (test_cli_workspace (Some "  Purge/Cluster  "))
+        ; Alcotest.test_case "linked worktree: shared runtime dry-run and apply" `Quick
+            (test_cli_workspace ~linked_worktree:true None)
         ] )
     ]

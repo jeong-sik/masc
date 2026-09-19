@@ -1,6 +1,6 @@
 (* keeper_event_queue_schema.ml
 
-   Single source of truth for the durable event-queue store generations.
+   Single source of truth for event-queue store and projection generations.
 
    #25867 (cluster: durable-schema-migration-enforcement): hard-cut schema
    changes shipped without a migration story froze the fleet three times
@@ -23,7 +23,11 @@ let state = "keeper.event_queue.state.v18"
 
 let transition_wal = "masc.keeper_event_queue.transition.v8"
 
-let fleet_summary = "masc.keeper_event_queue.fleet_summary.v4"
+(* Read-only projections: raw queue counts and the externally served health
+   verdict have different wire shapes. Neither marker versions a store. *)
+let fleet_summary = "masc.keeper_event_queue.fleet_summary.v5"
+
+let fleet_health_summary = "masc.keeper_event_queue.fleet_summary.v7"
 
 (* The filename generation is deliberately independent of the payload
    marker: bump it when the store LAYOUT changes (path, companion files),

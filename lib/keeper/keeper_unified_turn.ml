@@ -1053,8 +1053,7 @@ let run_keeper_cycle
                        start_background_turn_event_bus_drain ~clock;
                        let run_result, turn_state =
                          Keeper_unified_turn_execution.run
-                           { attempt = 1
-                           ; base_dir
+                           { base_dir
                            ; build_turn_prompt
                            ; channel
                            ; continuation_channel = continuation_channel_of_wake wake

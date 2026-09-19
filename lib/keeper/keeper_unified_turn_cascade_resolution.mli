@@ -15,10 +15,9 @@ val publish_cascade_resolution :
   keeper_name:string ->
   runtime_id:string ->
   reason:string ->
-  attempt:int ->
   error_kind:string option ->
   error_message:string option ->
   unit
 (** Publishes a [telemetry_event] with payload
-    [{ keeper_name, runtime_id, reason, attempt, error_kind, error_message,
+    [{ keeper_name, runtime_id, reason, error_kind, error_message,
        timestamp }]. *)

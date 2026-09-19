@@ -1002,6 +1002,8 @@ let validate_judgment (judgment : Candidate.judgment) =
   let* () =
     match judgment.source with
     | Candidate.Cli_lane_slot -> Ok ()
+    | Candidate.Vendor_system_one { model } ->
+      nonempty "partition judgment model" model
     | Candidate.Exact_attempt { call_id; plan_fingerprint; request_body_sha256 } ->
       let* () = nonempty "partition judgment call_id" call_id in
       let* () = nonempty "partition judgment plan_fingerprint" plan_fingerprint in
@@ -1082,11 +1084,12 @@ let validate_advance_source = function
   | Predispatch_rejection visit -> validate_candidate_visit visit
 ;;
 
-(* A CLI-slot judgment has no attempt to project: [None] is the answer, not a
-   blank record. Its completion is checked by a different rule below. *)
+(* A CLI-slot or vendor judgment has no attempt to project: [None] is the
+   answer, not a blank record. Its completion is checked by a different rule
+   below. *)
 let judgment_provenance (judgment : Candidate.judgment) =
   match judgment.source with
-  | Candidate.Cli_lane_slot -> None
+  | Candidate.Cli_lane_slot | Candidate.Vendor_system_one _ -> None
   | Candidate.Exact_attempt { call_id; plan_fingerprint; request_body_sha256 } ->
     Some
       { slot_id = judgment.slot_id
@@ -1468,10 +1471,11 @@ let complete ~now ~worker_epoch ~base_path ~partition ~item =
         -> Ok (Completed { item; completed_at = now })
       | Some _, Bound _ ->
         Error "judgment provenance differs from the durable exact binding"
-      (* A CLI judgment owns no HTTP receipt. The durable candidate claim and
-         worker epoch authorize completion both for CLI-only lanes and for a
-         CLI tail after an HTTP attempt. Pending advancement still cannot be
-         bypassed. *)
+      (* A CLI or vendor judgment owns no HTTP receipt. The durable candidate
+         claim and worker epoch authorize completion both for CLI-only lanes
+         and for a CLI tail after an HTTP attempt, and for a vendor answer,
+         which the flow asks for before its HTTP slots. Pending advancement
+         still cannot be bypassed. *)
       | None, (Bound _ | Unbound) -> Ok (Completed { item; completed_at = now })
       | Some _, Unbound ->
         Error "partition completion requires a durable exact binding"

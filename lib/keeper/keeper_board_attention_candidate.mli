@@ -34,6 +34,11 @@ type judgment_source =
           catalog slot was exhausted (RFC cli-runtimes-as-lane-slots). No
           AGENT_CORE attempt was allocated, so no receipt exists to name and
           none is invented: the slot id is the whole provenance. *)
+  | Vendor_system_one of { model : string }
+      (** TypeSafe AI System One answered before any catalog slot was tried.
+          It is not a slot and no AGENT_CORE attempt was allocated, so there
+          is no receipt. [model] is the model the System One response says
+          answered. *)
 
 type judgment =
   { verdict : Keeper_board_attention_judgment.t
@@ -43,7 +48,8 @@ type judgment =
   }
 (** [slot_id] names whichever slot answered; [source] says which kind of slot
     it was, because the two carry different evidence and only one of them has
-    a receipt to bind a completion to. *)
+    a receipt to bind a completion to. A [Vendor_system_one] answer has no
+    slot: its [slot_id] holds the same string as its [model]. *)
 
 type delivery =
   | Enqueued_to_keeper_lane

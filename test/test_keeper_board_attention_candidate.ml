@@ -263,6 +263,8 @@ let invalid_judgment_fixtures () =
             ; request_body_sha256 = "\r\n"
             }
       } )
+  ; ( "blank vendor model"
+    , { valid with source = A.Vendor_system_one { model = "\t" } } )
   ; "NaN judged_at", { valid with judged_at = Float.nan }
   ; "+Infinity judged_at", { valid with judged_at = Float.infinity }
   ; "-Infinity judged_at", { valid with judged_at = Float.neg_infinity }
@@ -594,7 +596,9 @@ let test_cli_lane_slot_judgment_round_trips_without_a_receipt () =
      (match decoded.source with
       | A.Cli_lane_slot -> ()
       | A.Exact_attempt _ ->
-        Alcotest.fail "a cli judgment decoded as an exact attempt"));
+        Alcotest.fail "a cli judgment decoded as an exact attempt"
+      | A.Vendor_system_one _ ->
+        Alcotest.fail "a cli judgment decoded as a vendor answer"));
   let with_receipt =
     match A.judgment_to_yojson judgment with
     | `Assoc fields ->
@@ -610,6 +614,56 @@ let test_cli_lane_slot_judgment_round_trips_without_a_receipt () =
   (match A.judgment_of_yojson with_receipt with
    | Error _ -> ()
    | Ok _ -> Alcotest.fail "a cli source carrying a receipt key was accepted")
+;;
+
+(* A vendor judgment names the model that answered. The decoder keeps that
+   model and refuses a source without one, and refuses a receipt key, which
+   would say an AGENT_CORE attempt happened when none did. *)
+let test_vendor_judgment_round_trips_with_its_model () =
+  let judgment : A.judgment =
+    { verdict = { J.decision = J.Not_relevant; rationale = "answered by a vendor" }
+    ; slot_id = "jev-latest"
+    ; source = A.Vendor_system_one { model = "jev-latest" }
+    ; judged_at = 4.0
+    }
+  in
+  (match A.judgment_of_yojson (A.judgment_to_yojson judgment) with
+   | Error detail -> Alcotest.failf "vendor judgment did not round-trip: %s" detail
+   | Ok decoded ->
+     (match decoded.source with
+      | A.Vendor_system_one { model } ->
+        Alcotest.(check string)
+          "the answering model survives the round trip"
+          "jev-latest"
+          model
+      | A.Cli_lane_slot -> Alcotest.fail "a vendor judgment decoded as a cli slot"
+      | A.Exact_attempt _ ->
+        Alcotest.fail "a vendor judgment decoded as an exact attempt"));
+  let with_source source =
+    match A.judgment_to_yojson judgment with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (function
+             | "source", _ -> "source", source
+             | field -> field)
+           fields)
+    | other -> other
+  in
+  List.iter
+    (fun (label, source) ->
+       match A.judgment_of_yojson (with_source source) with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.fail (label ^ " was accepted"))
+    [ ( "a vendor source carrying a receipt key"
+      , `Assoc
+          [ "kind", `String "vendor_system_one"
+          ; "model", `String "jev-latest"
+          ; "call_id", `String "call-invented"
+          ] )
+    ; ( "a vendor source without a model"
+      , `Assoc [ "kind", `String "vendor_system_one" ] )
+    ]
 ;;
 
 let test_direct_judgment_decoder_enforces_invariant () =
@@ -1205,6 +1259,10 @@ let () =
             "a cli-slot judgment round trips without a receipt"
             `Quick
             test_cli_lane_slot_judgment_round_trips_without_a_receipt
+        ; Alcotest.test_case
+            "a vendor judgment round trips with its model"
+            `Quick
+            test_vendor_judgment_round_trips_with_its_model
         ; Alcotest.test_case
             "non-finite lifecycle times are rejected"
             `Quick

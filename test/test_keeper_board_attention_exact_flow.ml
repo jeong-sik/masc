@@ -338,7 +338,7 @@ let test_explicit_lane_failover_and_success_provenance () =
            && String.equal judgment.slot_id third_bound.slot_id
            &&
            match judgment.source with
-           | Candidate.Cli_lane_slot -> false
+           | Candidate.Cli_lane_slot | Candidate.Vendor_system_one _ -> false
            | Candidate.Exact_attempt attempt ->
              String.equal attempt.call_id third_bound.call_id
              && String.equal attempt.plan_fingerprint third_bound.plan_fingerprint
@@ -626,7 +626,9 @@ let test_cli_only_executes_without_http_provenance () =
         Alcotest.(check int) "one actual CLI dispatch" 1 !calls;
         (match judgment.Candidate.source with
          | Candidate.Cli_lane_slot -> ()
-         | Candidate.Exact_attempt _ -> Alcotest.fail "fabricated HTTP provenance"))))
+         | Candidate.Exact_attempt _ -> Alcotest.fail "fabricated HTTP provenance"
+         | Candidate.Vendor_system_one _ ->
+           Alcotest.fail "a CLI answer recorded as a vendor answer"))))
 ;;
 
 let test_cli_tail_judges_with_its_own_provenance () =
@@ -667,7 +669,9 @@ let test_cli_tail_judges_with_its_own_provenance () =
         (match judgment.Candidate.source with
          | Candidate.Cli_lane_slot -> ()
          | Candidate.Exact_attempt _ ->
-           Alcotest.fail "a cli judgment must not claim an exact attempt");
+           Alcotest.fail "a cli judgment must not claim an exact attempt"
+         | Candidate.Vendor_system_one _ ->
+           Alcotest.fail "a cli judgment must not claim a vendor answer");
         (match !seen with
          | None -> Alcotest.fail "the runner was never called"
          | Some (_, output_schema, prompt) ->
@@ -708,7 +712,9 @@ let test_cli_tail_advances_after_wrong_candidate () =
           slot_id judgment.Candidate.slot_id;
         (match judgment.Candidate.source with
          | Candidate.Cli_lane_slot -> ()
-         | Candidate.Exact_attempt _ -> Alcotest.fail "CLI answer forged HTTP provenance"))))
+         | Candidate.Exact_attempt _ -> Alcotest.fail "CLI answer forged HTTP provenance"
+         | Candidate.Vendor_system_one _ ->
+           Alcotest.fail "CLI answer recorded as a vendor answer"))))
 ;;
 
 let test_cli_tail_without_declared_slots_is_typed () =

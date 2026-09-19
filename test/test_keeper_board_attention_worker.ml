@@ -1553,7 +1553,7 @@ let test_existing_judgment_skips_exact_flow () =
   match (load_one_partition ~base_path).state with
   | P.Completed { item = { judgment = observed; _ }; _ }
     when (match observed.source with
-          | A.Cli_lane_slot -> false
+          | A.Cli_lane_slot | A.Vendor_system_one _ -> false
           | A.Exact_attempt attempt -> String.equal attempt.call_id exact.call_id)
     -> ()
   | _ -> Alcotest.fail "existing judgment was not durably projected to Completed"

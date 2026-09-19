@@ -37,7 +37,7 @@ the variable alone cannot turn it on.
 ### 2.2 Transparent Fallback
 When opted in:
 1. MASC attempts the TypeSafe AI Jev evaluation first.
-2. If the API returns success with a confident decision (`confidence >= 0.5`), the verdict is immediately returned (`slot_id = "typesafeai.jev-latest"`).
+2. If the API returns success with a confident decision (`confidence >= 0.5`), the verdict is immediately returned. The durable judgment records `source = Vendor_system_one { model }`, where `model` is the model the System One response says answered; no catalog slot or AGENT_CORE receipt is claimed.
 3. If the API call fails, times out, or reports low confidence (`confidence < 0.5`), MASC logs `board_attention_typesafeai_fallback` and falls back seamlessly to the standard exact-output execution pipeline (`Exact_output.execute_flow_once` via GLM/DeepSeek).
 
 ---

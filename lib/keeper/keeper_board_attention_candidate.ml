@@ -20,6 +20,7 @@ type judgment_source =
       ; request_body_sha256 : string
       }
   | Cli_lane_slot
+  | Vendor_system_one of { model : string }
 
 type judgment =
   { verdict : Keeper_board_attention_judgment.t
@@ -466,6 +467,8 @@ let judgment_source_to_yojson = function
       ; "request_body_sha256", `String request_body_sha256
       ]
   | Cli_lane_slot -> `Assoc [ "kind", `String "cli_lane_slot" ]
+  | Vendor_system_one { model } ->
+    `Assoc [ "kind", `String "vendor_system_one"; "model", `String model ]
 ;;
 
 let judgment_to_yojson judgment =
@@ -724,10 +727,13 @@ let validate_judgment ~context (judgment : judgment) =
   (* Only the exact arm has a receipt, and its three fields are the identity a
      completion is matched against, so each must be present. The CLI arm has
      nothing further to check: inventing a receipt for it would put an attempt
-     that never happened into the durable record. *)
+     that never happened into the durable record. The vendor arm names the
+     model that answered, so that name must be present. *)
   let* () =
     match judgment.source with
     | Cli_lane_slot -> Ok ()
+    | Vendor_system_one { model } ->
+      nonblank_string ~context:(context ^ ".source.model") model
     | Exact_attempt { call_id; plan_fingerprint; request_body_sha256 } ->
       let context = context ^ ".source" in
       let* () = nonblank_string ~context:(context ^ ".call_id") call_id in
@@ -1013,6 +1019,11 @@ let judgment_source_of_yojson ~context json =
   | "cli_lane_slot" ->
     let* () = exact_fields ~context [ "kind" ] fields in
     Ok Cli_lane_slot
+  | "vendor_system_one" ->
+    let* () = exact_fields ~context [ "kind"; "model" ] fields in
+    let* model_json = field ~context "model" fields in
+    let* model = string_json ~context:(context ^ ".model") model_json in
+    Ok (Vendor_system_one { model })
   | other -> Error (context ^ ".kind is not a judgment source: " ^ other)
 ;;
 
@@ -1829,12 +1840,16 @@ let same_delivery_failure left right =
 let same_judgment_source left right =
   match left, right with
   | Cli_lane_slot, Cli_lane_slot -> true
+  | Vendor_system_one left, Vendor_system_one right ->
+    String.equal left.model right.model
   | ( Exact_attempt left
     , Exact_attempt right ) ->
     String.equal left.call_id right.call_id
     && String.equal left.plan_fingerprint right.plan_fingerprint
     && String.equal left.request_body_sha256 right.request_body_sha256
-  | Cli_lane_slot, Exact_attempt _ | Exact_attempt _, Cli_lane_slot -> false
+  | Cli_lane_slot, (Exact_attempt _ | Vendor_system_one _)
+  | Exact_attempt _, (Cli_lane_slot | Vendor_system_one _)
+  | Vendor_system_one _, (Cli_lane_slot | Exact_attempt _) -> false
 ;;
 
 let same_judgment left right =

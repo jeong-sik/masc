@@ -23,6 +23,42 @@ module Http = Masc.Http_server_eio
 
 let () = Mirage_crypto_rng_unix.use_default ()
 
+let runtime_toml =
+  {|
+[runtime]
+default = "test_provider.test_model"
+
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[test_provider.test_model]
+is-default = true
+max-concurrent = 1
+|}
+;;
+
+let init_runtime_default_for_tests () =
+  let path = Filename.temp_file "board_rest_routes_runtime_" ".toml" in
+  Fun.protect
+    ~finally:(fun () ->
+      try Sys.remove path with
+      | Sys_error _ -> ())
+    (fun () ->
+       Out_channel.with_open_bin path (fun channel ->
+         output_string channel runtime_toml);
+       match Runtime.init_default ~config_path:path with
+       | Ok () -> ()
+       | Error detail -> failf "Runtime.init_default failed: %s" detail)
+;;
+
 let with_reaction_auth_base f =
   let base_path = Filename.temp_dir "board-reaction-auth-" "" in
   Auth.save_auth_config
@@ -600,6 +636,7 @@ let test_goal_transition_uses_authenticated_actor () =
 ;;
 
 let test_board_context_inference_uses_current_owner_contract_and_actor () =
+  init_runtime_default_for_tests ();
   with_authenticated_activity_router
     ~prefix:"board-context-inference-http-actor-"
     ~agent_name:"credential-owner"

@@ -262,6 +262,40 @@ let test_unchanged_boundaries_do_not_require_checkpoint () =
   | Consumer.Progress_advanced _ -> fail "unchanged boundaries did not stop before checkpoint"
 ;;
 
+let test_trace_change_is_not_hidden_by_preflight () =
+  with_workspace @@ fun config ->
+  let trace_a = "trace-preflight-a" in
+  establish_progress config ~trace_id:trace_a "a";
+  let trace_b = "trace-preflight-b" in
+  let messages_b = [ message "b" ] in
+  append_boundary config ~trace_id:trace_b ~turn:1 ~recorded_at:2.0 messages_b;
+  let progress_a =
+    match read_progress config with
+    | Some progress -> progress
+    | None -> fail "trace-change fixture lost progress"
+  in
+  (match
+     Progress.write
+       ~keepers_dir:(Workspace.keepers_runtime_dir config)
+       ~keeper_id:keeper_name
+       { progress_a with boundary_lines_seen = 2 }
+   with
+   | Ok () -> ()
+   | Error error -> fail (Progress.write_error_to_string error));
+  write_meta config trace_b;
+  save_checkpoint config ~trace_id:trace_b messages_b 1;
+  match
+    Consumer.consume_one
+      ~config
+      ~keeper_name
+      ~commit:(fun ~expected_revision:_ _ -> fail "trace mismatch called commit")
+  with
+  | Error (Consumer.Position_in_other_trace position) ->
+    check string "prior trace remains visible" trace_a position.trace_id
+  | Error error -> fail (Consumer.error_to_string error)
+  | Ok _ -> fail "trace change was hidden as no unread range"
+;;
+
 let test_failed_long_range_retries_only_oldest_cut_point () =
   with_workspace @@ fun config ->
   let trace_id = "trace-bounded-retry" in
@@ -503,6 +537,8 @@ let () =
             test_failed_commit_and_restart_retry_the_same_range
         ; test_case "unchanged boundaries skip checkpoint" `Quick
             test_unchanged_boundaries_do_not_require_checkpoint
+        ; test_case "trace change is not hidden by preflight" `Quick
+            test_trace_change_is_not_hidden_by_preflight
         ; test_case "failed growing range retries oldest cut" `Quick
             test_failed_long_range_retries_only_oldest_cut_point
         ; test_case "last boundary wins when wall clock goes backward" `Quick

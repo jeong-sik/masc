@@ -224,9 +224,6 @@ let consume_one_with_extent ~extent ~config ~keeper_name ~commit =
       P.read ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name)
     |> Result.map_error (fun error -> Progress_unreadable error)
   in
-  if not (R.may_have_unread ~lines ~progress)
-  then Ok Nothing_to_read
-  else
   let* meta =
     match
       Domain_pool_ref.submit_io_or_inline (fun () ->
@@ -239,6 +236,9 @@ let consume_one_with_extent ~extent ~config ~keeper_name ~commit =
     | Error detail -> Error (Keeper_meta_unreadable detail)
   in
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+  if not (R.may_have_unread ~trace_id ~lines ~progress)
+  then Ok Nothing_to_read
+  else
   let session_dir = Filename.concat (Keeper_fs.session_store_path config) trace_id in
   let* checkpoint =
     Domain_pool_ref.submit_io_or_inline (fun () ->

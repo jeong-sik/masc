@@ -59,12 +59,14 @@ let complete_line_count lines =
     lines
 ;;
 
-let may_have_unread ~lines ~progress =
+let may_have_unread ~trace_id ~lines ~progress =
   match progress with
   | None -> complete_line_count lines > 0
   | Some ({ P.position; boundary_lines_seen } : P.t) ->
+    let trace_changed = not (String.equal trace_id position.trace_id) in
     let line_count_changed = complete_line_count lines <> boundary_lines_seen in
-    line_count_changed
+    trace_changed
+    || line_count_changed
     || List.exists
          (fun (line, decoded) ->
             match decoded with
@@ -79,7 +81,7 @@ let may_have_unread ~lines ~progress =
                  let same_trace =
                    String.equal
                      (Ids.Turn_ref.trace_id turn_ref)
-                     position.trace_id
+                     trace_id
                  in
                  let restarted_after_progress =
                    line > boundary_lines_seen

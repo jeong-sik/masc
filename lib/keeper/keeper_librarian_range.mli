@@ -73,11 +73,14 @@ type selection =
   | Stop of stop
 
 val may_have_unread :
+  trace_id:string ->
   lines:
     (int * (Keeper_turn_boundaries.record, Keeper_turn_boundaries.read_error) result) list ->
   progress:Keeper_librarian_progress.t option ->
   bool
-(** Cheap conservative check before loading the checkpoint. [false] proves
+(** Cheap conservative check before loading the checkpoint. [trace_id] is the
+    current metadata trace; a cursor from another trace always returns [true]
+    so the full selector can report the mismatch. [false] proves
     that the append-only boundary snapshot contains no position beyond the
     durable cursor. A changed row count, later restart, or later atom position
     returns [true]; the full selector still validates checkpoint digests. *)

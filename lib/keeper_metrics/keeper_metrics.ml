@@ -201,7 +201,7 @@ type t =
   | WireCaptureResponseSuppressed (* counter: keeper-visible response suppressed before wire capture *)
   | WireCaptureWriteFailures    (* counter: wire-capture write raised an exception *)
   | WireCaptureRecordSkipped    (* counter: wire-capture record dropped — rotation name space exhausted or append guard refused *)
-  | TurnBoundaryFailures        (* counter: a turn-boundary line (a turn's at its start or its end, or a clear's) was not built or not written *)
+  | TurnBoundaryFailures        (* counter: a turn-boundary line (a turn's end line, or a restart line from a turn or a clear) was not built or not written *)
 [@@deriving enumerate]
 
 (** String conversion

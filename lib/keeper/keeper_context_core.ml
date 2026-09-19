@@ -134,7 +134,16 @@ let save_agent_core_checkpoint
 (* Checkpoint Loading                                                *)
 (* ================================================================ *)
 
-let load_context_from_checkpoint ~trace_id ~base_dir =
+(* What a load found. [Checkpoint_unread] is every failure other than a missing
+   file: the saved history was not seen, and may still be there. A caller that
+   only needs a context to start from reads it like [Checkpoint_absent]; a
+   caller that states something about the saved history must not. *)
+type checkpoint_load =
+  | Checkpoint_loaded of working_context
+  | Checkpoint_absent
+  | Checkpoint_unread
+
+let load_context_from_checkpoint_classified ~trace_id ~base_dir =
   let session = create_session ~session_id:trace_id ~base_dir in
   let agent_core_result =
     Keeper_checkpoint_store.load_agent_core ~session_dir:session.session_dir
@@ -181,24 +190,26 @@ let load_context_from_checkpoint ~trace_id ~base_dir =
    | Error Not_found ->
        Log.Keeper.debug "keeper:%s AGENT_CORE checkpoint not found" trace_id
    | Ok _ -> ());
-  let agent_core_checkpoint =
-    (match agent_core_result with
-     | Ok v -> Some v
-     | Error Not_found -> None
-     | Error _ ->
-       Log.Keeper.warn
-         "keeper:%s AGENT_CORE checkpoint unavailable after explicit load diagnostics"
-         trace_id;
-       None)
-  in
-  match agent_core_checkpoint with
-  | Some checkpoint ->
-      let ctx = context_of_agent_core_checkpoint checkpoint in
-      (session, Some ctx)
-  | None ->
-      (* No canonical AGENT_CORE checkpoint is available. Non-trivial AGENT_CORE errors
-         were already logged above at error level. *)
-      (session, None)
+  match agent_core_result with
+  | Ok checkpoint -> session, Checkpoint_loaded (context_of_agent_core_checkpoint checkpoint)
+  | Error Not_found -> session, Checkpoint_absent
+  | Error
+      ( Superseded_version _
+      | Parse_error _
+      | Store_error _
+      | Io_error _
+      | Agent_core_error _ ) ->
+    (* Each was logged above with its own diagnostics. *)
+    Log.Keeper.warn
+      "keeper:%s AGENT_CORE checkpoint unavailable after explicit load diagnostics"
+      trace_id;
+    session, Checkpoint_unread
+
+let load_context_from_checkpoint ~trace_id ~base_dir =
+  let session, load = load_context_from_checkpoint_classified ~trace_id ~base_dir in
+  match load with
+  | Checkpoint_loaded ctx -> session, Some ctx
+  | Checkpoint_absent | Checkpoint_unread -> session, None
 
 (** Patch an AGENT_CORE checkpoint: unify session_id and normalize the last assistant
     message's visible text. AGENT_CORE-owned internal replay blocks (reasoning/tool blocks) stay

@@ -3985,7 +3985,7 @@ let assert_official_client_turn_boundary ~base_path ~trace_id =
       [ ( 1
         , Ok
             { Keeper_turn_boundaries.recorded_at = _
-            ; event = Keeper_turn_boundaries.History_empty { trace_id = empty_trace }
+            ; event = Keeper_turn_boundaries.History_restarted { trace_id = empty_trace }
             } )
       ; ( 2
         , Ok
@@ -4004,7 +4004,7 @@ let assert_official_client_turn_boundary ~base_path ~trace_id =
   | Ok lines ->
     fail
       (Printf.sprintf
-         "expected an empty-history line and a turn line, read: %s"
+         "expected a restart line and a turn line, read: %s"
          (String.concat
             "; "
             (List.map

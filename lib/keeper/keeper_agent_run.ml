@@ -915,7 +915,7 @@ let run_turn
       { ctx with Keeper_run_context.ctx_work =
           Keeper_context_runtime.context_of_agent_core_checkpoint checkpoint
       ; resume_agent_core_checkpoint = Some checkpoint
-      ; loaded_checkpoint_present = true
+      ; saved_history = Keeper_run_context.Saved_history_loaded
       ; start_turn_count = checkpoint.turn_count }
   in
   let meta = ctx.meta in
@@ -962,7 +962,9 @@ let run_turn
     ~decision:
       (Keeper_runtime_manifest.with_payload_role ~payload_role:Checkpoint
         (`Assoc
-          [ "loaded_checkpoint_present", `Bool ctx.loaded_checkpoint_present ]))
+          [ "loaded_checkpoint_present"
+          , `Bool (Keeper_run_context.loaded_checkpoint_present ctx)
+          ]))
     Keeper_runtime_manifest.Checkpoint_loaded;
   (* [ctx.ctx_work] is the history this turn starts from; the [ctx_work] bound
      below already carries this turn's input. *)
@@ -970,11 +972,22 @@ let run_turn
     Keeper_turn_boundaries.history_at_start_of_messages
       (Keeper_context_runtime.messages_of_context ctx.ctx_work)
   in
-  Turn_helpers.record_empty_history_at_turn_start
-    ~config
-    ~keeper_name:meta.name
-    ~trace_id
-    history_at_start;
+  (* RFC librarian-lifecycle 4.6: a restart line must not be ahead of the
+     restart. A turn that knows the saved history holds no atom says so now; a
+     turn whose checkpoint could not be loaded says so after the first stage
+     save the store accepts ([checkpoint_sink] below). *)
+  let restart_notice_after_first_save =
+    match Turn_helpers.restart_notice history_at_start ctx.saved_history with
+    | Turn_helpers.No_restart_notice -> Atomic.make false
+    | Turn_helpers.Notice_at_turn_start ->
+      Turn_helpers.record_history_restart
+        ~config
+        ~keeper_name:meta.name
+        ~trace_id
+        Turn_helpers.At_turn_start;
+      Atomic.make false
+    | Turn_helpers.Notice_after_first_save -> Atomic.make true
+  in
   (* Steps 5-6: turn prompt, memory/temporal context, prompt metrics,
      and user message append — Keeper_run_prompt. *)
   let prompt_user_turn_record =
@@ -1165,7 +1178,9 @@ let run_turn
       ~site:"context_injected"
       ~keeper_turn_id:manifest_keeper_turn_id
       ?checkpoint_path:
-        (if ctx.loaded_checkpoint_present then Some checkpoint_path else None)
+        (if Keeper_run_context.loaded_checkpoint_present ctx
+         then Some checkpoint_path
+         else None)
       ~decision:
         (Keeper_runtime_manifest.with_payload_role
            ~payload_role:Model_input
@@ -1516,6 +1531,13 @@ let run_turn
                 with
                 | Ok (Keeper_checkpoint_store.Saved _) ->
                   last_persisted_checkpoint_ref := Some checkpoint;
+                  if Atomic.compare_and_set restart_notice_after_first_save true false
+                  then
+                    Turn_helpers.record_history_restart
+                      ~config
+                      ~keeper_name:meta.name
+                      ~trace_id
+                      Turn_helpers.After_first_save;
                   Keeper_turn_driver_try_provider.observe_checkpoint_saved
                     checkpoint_progress
                     snapshot.stage;
@@ -1904,6 +1926,7 @@ let run_turn
                              ~max_context:selected_max_context
                              ~checkpoint_owner
                              ~history_at_start
+                             ~restart_notice_pending:restart_notice_after_first_save
                              ~official_client_settlement:selected_run.official_client_settlement
                              ~history_messages
                              ~prompt_metrics ~ctx_composition ~usage

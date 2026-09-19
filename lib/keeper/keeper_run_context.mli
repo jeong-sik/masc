@@ -4,6 +4,16 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
+(** What the turn knows, when it starts, about the history saved for its trace.
+    A turn starts from an empty context in the last two cases alike, but only
+    the first of them says that nothing is saved. *)
+type saved_history =
+  | Saved_history_loaded  (** The turn starts from it. It may hold no atom. *)
+  | Saved_history_absent  (** The store has no checkpoint for the trace. *)
+  | Saved_history_unread
+      (** The load failed ({!Keeper_context_core.checkpoint_load}): what is
+          saved was not seen and may still hold atoms. *)
+
 (** Resolved inference and session context needed before prompt construction. *)
 type run_context =
   { meta : keeper_meta
@@ -12,7 +22,7 @@ type run_context =
   ; shared_context : Agent_core.Context.t
   ; session_dir : string
   ; session : Keeper_types.session_context
-  ; loaded_checkpoint_present : bool
+  ; saved_history : saved_history
   ; base_system_prompt : string
   ; ctx_work : working_context
   ; resume_agent_core_checkpoint : Agent_core.Checkpoint.t option
@@ -43,3 +53,6 @@ val prepare_run_context :
 (** Resolve [temperature] as the caller fallback; a temperature declared by the
     selected runtime model always wins. [profile_defaults] is the immutable
     pre-dispatch snapshot. *)
+
+(** Whether the turn starts from a checkpoint it loaded. *)
+val loaded_checkpoint_present : run_context -> bool

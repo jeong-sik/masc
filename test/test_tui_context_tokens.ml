@@ -107,6 +107,77 @@ let approx = "\xe2\x89\x88"
 
 let per_request = Runtime_usage_scope.Per_request
 
+let forecast_success : Masc_tui_context_inspector.forecast =
+  { checkpoint_messages = 1
+  ; wake_line_bytes = 32
+  ; walk =
+      Ok
+        { lane_id = "context-forecast-fixture"
+        ; declared = [ "forecast.runtime" ]
+        }
+  ; candidates =
+      [ { runtime_id = "forecast.runtime"
+        ; lane = Masc_tui_context_inspector.Lane_agent_core
+        ; marks = None
+        ; parts = Error "fixed parts unavailable in fixture"
+        ; history_atoms = 0
+        ; carried = None
+        ; assembly = None
+        ; place =
+            { walks_at = 0
+            ; declared_at = Some 0
+            ; rest = Masc_tui_context_inspector.Rest_serving
+            }
+        }
+      ]
+  }
+
+let context_pane_lines turn =
+  let state =
+    Masc_tui_types.create_state ~workspace:"" ~port:0 ~refresh_interval:0. ()
+  in
+  state.context_inspector_reading <-
+    Some
+      ( "alpha"
+      , { Masc_tui_context_inspector.turn
+        ; provider_input = Error "provider input not needed by this tab"
+        ; response = Error "response not needed by this tab"
+        ; forecast = Ok forecast_success
+        } );
+  match Masc_tui_render_prim.context_inspector_content_lines ~cols:140 state with
+  | Masc_tui_render_prim.Plain (rows, _) -> rows
+  | Masc_tui_render_prim.Split _ ->
+      Alcotest.fail "the composition tab must render one pane"
+
+let check_forecast_survives_turn_failure ~label ~failure ~turn =
+  let rows = context_pane_lines turn in
+  Alcotest.(check bool)
+    (label ^ " keeps the historical failure visible")
+    true
+    (says ("Composition unavailable: " ^ failure) rows);
+  Alcotest.(check bool)
+    (label ^ " keeps the independent forecast band")
+    true
+    (says "NEXT REQUEST" rows);
+  Alcotest.(check bool)
+    (label ^ " keeps the forecast candidate")
+    true
+    (says "forecast.runtime" rows)
+
+let test_empty_turn_record_keeps_forecast () =
+  check_forecast_survives_turn_failure
+    ~label:"empty turn record"
+    ~failure:"turn-records returned no rows"
+    ~turn:
+      (Masc_tui_context_inspector.decode_turn_records
+         (`Assoc [ "entries", `List [] ]))
+
+let test_turn_read_error_keeps_forecast () =
+  check_forecast_survives_turn_failure
+    ~label:"turn read error"
+    ~failure:"turn-record read failed"
+    ~turn:(Error "turn-record read failed")
+
 (* 8,192 schema bytes at 18,000 tokens over 560,513 wire bytes is 263 tokens. *)
 let test_rows_read_at_this_turns_ratio () =
   let rows = lines (record ~wire:(Some 560_513) ~scope:per_request ()) in
@@ -342,6 +413,10 @@ let () =
         ; Alcotest.test_case
             "attributed rows read at the attributed turn's ratio" `Quick
             test_attributed_rows_read_at_the_attributed_turns_ratio
+        ; Alcotest.test_case "empty turn record keeps the next request forecast"
+            `Quick test_empty_turn_record_keeps_forecast
+        ; Alcotest.test_case "turn read error keeps the next request forecast"
+            `Quick test_turn_read_error_keeps_forecast
         ] )
     ; ( "serialized request"
       , [ Alcotest.test_case "the band leads with the provider's count" `Quick

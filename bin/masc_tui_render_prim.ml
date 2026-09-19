@@ -3129,8 +3129,43 @@ let context_split_width cols =
   min 62 (max 44 (available * 45 / 100))
 
 
-let context_composition_lines ~cols ~turn_back
-    ~(forecast : (Masc_tui_context_inspector.forecast, string) result)
+let context_composition_record ~turn_back
+    (selection : Masc_tui_context_inspector.selection) =
+  match List.nth_opt selection.Masc_tui_context_inspector.rows turn_back with
+  | Some stepped -> stepped
+  | None -> selection.Masc_tui_context_inspector.latest
+
+
+let context_composition_scale ~turn_back
+    (selection : Masc_tui_context_inspector.selection) =
+  let record = context_composition_record ~turn_back selection in
+  Masc_tui_token_scale.of_turn
+    ~rows:selection.Masc_tui_context_inspector.rows
+    record
+
+
+let context_next_request_lines ~cols ~scale
+    (forecast : (Masc_tui_context_inspector.forecast, string) result) =
+  let width = max 1 (framed_inner_width cols - 2) in
+  let prose text =
+    List.map
+      (fun line -> "  " ^ Ansi.dim ^ line ^ Ansi.reset)
+      (Context_bars.wrap ~width text)
+  in
+  let fact text =
+    List.map (fun line -> "  " ^ line) (Context_bars.wrap ~width text)
+  in
+  [ "  "
+    ^ Context_bars.band ~width ~title:"NEXT REQUEST"
+        ~caption:"what the next Agent Core request would carry, computed now"
+  ]
+  @ Masc_tui_next_request_band.lines ~prose ~fact
+      ~safe:Keeper_chat.terminal_safe_text ~scale forecast
+  @ [ "" ]
+
+
+let context_composition_lines_with_next_request ~cols ~turn_back ~scale
+    ~next_request_lines
     (selection : Masc_tui_context_inspector.selection) =
   let module Inspector = Masc_tui_context_inspector in
   (* The usable cells after the two-space indent every row carries. No floor
@@ -3145,11 +3180,7 @@ let context_composition_lines ~cols ~turn_back
   (* The row the operator stepped back to, or the newest one. Every
      reading in this stack describes this record; the composition band
      below keeps its own rule about which row it measured. *)
-  let record =
-    match List.nth_opt selection.Inspector.rows turn_back with
-    | Some stepped -> stepped
-    | None -> selection.Inspector.latest
-  in
+  let record = context_composition_record ~turn_back selection in
   (* The sentences under a bar carry what its number means, so they are folded
      to the pane rather than cut by it. *)
   let prose text =
@@ -3189,7 +3220,6 @@ let context_composition_lines ~cols ~turn_back
      dispatch. The scale is this record's own wire body over its
      per-request count when it has both, else the page's median, else the
      fleet figure; the sentence under the rows names which. *)
-  let scale = Masc_tui_token_scale.of_turn ~rows:selection.Inspector.rows record in
   (* The count the provider made leads the band; the estimate from the
      prepared body follows it, with the bytes it was read from. *)
   let wire_lines =
@@ -3642,10 +3672,6 @@ let context_composition_lines ~cols ~turn_back
     @ velocity_lines
     @ List.concat (List.mapi row selection.Inspector.recent)
   in
-  let next_request_lines =
-    Masc_tui_next_request_band.lines ~prose ~fact
-      ~safe:Keeper_chat.terminal_safe_text ~scale forecast
-  in
   (* Read top to bottom as the turn is built: what came in, what was sent,
      how far back it reached, and what the provider counted on the turns
      before it. The request stood above the components it is made of, so the
@@ -3670,16 +3696,22 @@ let context_composition_lines ~cols ~turn_back
     ]
   @ history_lines
   @ [ "" ]
-  @ [ "  "
-      ^ Context_bars.band ~width ~title:"NEXT REQUEST"
-          ~caption:"what the next Agent Core request would carry, computed now"
-    ]
   @ next_request_lines
-  @ [ "" ]
   @ recent_turns_lines @ [ "" ]
   @ prose
       "Three measurements of one turn, not three views of one number: none of \
        them is a breakdown of another, and they do not add up."
+
+
+let context_composition_lines ~cols ~turn_back ~forecast selection =
+  let scale = context_composition_scale ~turn_back selection in
+  let next_request_lines = context_next_request_lines ~cols ~scale forecast in
+  context_composition_lines_with_next_request
+    ~cols
+    ~turn_back
+    ~scale
+    ~next_request_lines
+    selection
 
 
 
@@ -4332,19 +4364,36 @@ let context_inspector_content_lines ~cols state : context_pane_body =
   | Some (_, reading) ->
       (match state.context_inspector_tab with
        | Masc_tui_context_inspector.Composition ->
+           let scale =
+             match reading.turn with
+             | Ok selection ->
+                 context_composition_scale
+                   ~turn_back:state.context_inspector_turn_back
+                   selection
+             | Error _ -> Masc_tui_token_scale.fleet
+           in
+           let next_request_lines =
+             context_next_request_lines
+               ~cols
+               ~scale
+               reading.Masc_tui_context_inspector.forecast
+           in
            (match reading.turn with
             | Ok selection ->
                 Plain
-                  ( context_composition_lines ~cols
+                  ( context_composition_lines_with_next_request ~cols
                       ~turn_back:state.context_inspector_turn_back
-                      ~forecast:reading.Masc_tui_context_inspector.forecast
+                      ~scale
+                      ~next_request_lines
                       selection
                   , None )
             | Error detail ->
                 Plain
                   ( [ (Theme.bad ()) ^ "  Composition unavailable: "
                       ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset
+                    ; ""
                     ]
+                    @ next_request_lines
                   , None ))
        | Masc_tui_context_inspector.Exact_input ->
            (match reading.provider_input with

@@ -2501,7 +2501,7 @@ type memory_fact_events = {
   mfe_retrieved_count : int;
   mfe_retrieved_distinct_days : int;
   mfe_last_retrieved_at : float option;
-  mfe_cited_count : int;
+  mfe_retracted_count : int;
   mfe_revised_from : string list;
 }
 
@@ -2509,7 +2509,7 @@ let no_memory_fact_events =
   { mfe_retrieved_count = 0
   ; mfe_retrieved_distinct_days = 0
   ; mfe_last_retrieved_at = None
-  ; mfe_cited_count = 0
+  ; mfe_retracted_count = 0
   ; mfe_revised_from = []
   }
 
@@ -5057,13 +5057,13 @@ let decode_memory_fact_events json =
   let* mfe_retrieved_count = required_int_field json "retrieved_count" in
   let* mfe_retrieved_distinct_days = required_int_field json "retrieved_distinct_days" in
   let* mfe_last_retrieved_at = optional_float_field json "last_retrieved_at" in
-  let* mfe_cited_count = required_int_field json "cited_count" in
+  let* mfe_retracted_count = required_int_field json "retracted_count" in
   let* mfe_revised_from = require_string_list json "revised_from" in
   Ok
     { mfe_retrieved_count
     ; mfe_retrieved_distinct_days
     ; mfe_last_retrieved_at
-    ; mfe_cited_count
+    ; mfe_retracted_count
     ; mfe_revised_from
     }
 

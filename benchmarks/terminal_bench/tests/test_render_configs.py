@@ -1,4 +1,5 @@
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -97,13 +98,14 @@ def test_skills_tree_copied_only_for_skills_arms():
     assert not (out_b / "skills").exists()
 
 
-def test_arm_e_parallel_on():
-    rt_e = render_arm("e", runtime_id="anthropic.claude-fable-5", effort="high")
-    assert "supports-parallel-tool-calls = true" in (rt_e / "runtime.toml").read_text()
-    rt_b = render_arm("b", runtime_id="anthropic.claude-fable-5", effort="high")
-    runtime_b = (rt_b / "runtime.toml").read_text()
-    assert "supports-parallel-tool-calls = false" in runtime_b
-    assert "max-concurrent = 1" in runtime_b
+@pytest.mark.parametrize("arm", list(ARMS))
+def test_parallel_arm_sets_request_policy_without_changing_model_facts(arm):
+    root = render_arm(arm, runtime_id="anthropic.claude-fable-5", effort="high")
+    config = tomllib.loads((root / "runtime.toml").read_text())
+    binding = config["anthropic"]["claude-fable-5"]
+    assert binding["disable-parallel-tool-use"] is (not ARMS[arm]["parallel"])
+    capabilities = config["models"]["claude-fable-5"]["capabilities"]
+    assert "supports-parallel-tool-calls" not in capabilities
 
 
 def test_arm_c_runtime_keeps_skills_sources():
@@ -150,7 +152,7 @@ def test_claude_code_lane_renders_official_client_provider():
     # and no credentials table — the CLI owns the login. Effort lands on the
     # model row (CLI --effort), and the lane declares no capabilities of its
     # own: the embedded catalog answers for these models by api-name.
-    out = render_arm("b", runtime_id="claude_code.claude-sonnet-5", effort="high")
+    out = render_arm("e", runtime_id="claude_code.claude-sonnet-5", effort="high")
     rt = (out / "runtime.toml").read_text()
     assert 'default = "claude_code.claude-sonnet-5"' in rt
     assert 'protocol = "claude-code"' in rt
@@ -164,7 +166,7 @@ def test_claude_code_lane_renders_official_client_provider():
     assert "turn-timeout-s = 0.0" in rt
     assert "wall-clock-ceiling-s = 28800.0" in rt
     assert '[claude_code."claude-sonnet-5"]' in rt
-    assert "max-concurrent = 1" in rt
+    assert "max-concurrent = 4" in rt
     assert "[exec.ssh.endpoints.local]" in rt
     assert '[models."claude-sonnet-5".capabilities]' not in rt
     keeper = (out / "keepers" / "bench-1.toml").read_text()
@@ -186,6 +188,13 @@ def test_claude_code_lane_rejects_minimal_effort():
     import pytest
     with pytest.raises(ValueError, match="minimal"):
         render_arm("b", runtime_id="claude_code.claude-sonnet-5", effort="minimal")
+
+
+@pytest.mark.parametrize("arm", ["b", "c", "d"])
+def test_claude_code_refuses_parallel_off_before_writing_configs(arm, tmp_path):
+    with pytest.raises(ValueError, match="requires disabling parallel tool calls"):
+        render_arm(arm, "claude_code.claude-sonnet-5", "high", out_root=tmp_path)
+    assert list(tmp_path.iterdir()) == []
 
 
 @pytest.fixture

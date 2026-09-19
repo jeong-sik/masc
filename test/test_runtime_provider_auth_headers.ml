@@ -72,6 +72,7 @@ let runpod_binding =
   ; is_default = true
   ; wizard_default = false
   ; max_concurrent = None
+  ; disable_parallel_tool_use = false
   ; context_marks = None
   ; max_tokens = None
   ; price_input = None
@@ -2659,10 +2660,150 @@ let test_clock_failfast_names_idle_when_both_deadlines_set () =
     fail (Printf.sprintf "expected InvalidConfig, got %s" (Agent_core.Error.to_string err))
   | Ok _ -> fail "expected typed error when both deadlines set without clock"
 
+(* The binding is execution intent. The catalog still says these models can
+   return several tool calls, while fresh and resumed Keeper requests can ask
+   for one. Assert the actual provider bodies, not a rendered TOML spelling. *)
+let parallel_policy_runtime ~provider_id ~protocol ~model_id ~policy =
+  let toml = Printf.sprintf
+    {|[runtime]
+default = "%s.probe"
+[providers.%s]
+protocol = "%s"
+endpoint = "http://127.0.0.1:1"
+[providers.%s.credentials]
+type = "inline"
+value = "fixture-no-account"
+[models.probe]
+api-name = "%s"
+tools-support = true
+reasoning-uncontrolled = true
+[models.probe.capabilities]
+max-output-tokens = 64000
+[%s.probe]
+max-tokens = 4096
+%s
+|} provider_id provider_id protocol provider_id model_id provider_id policy
+  in
+  match Runtime_toml.parse_string toml with
+  | Error errors -> failf "parallel policy config failed: %s"
+      (String.concat "; " (List.map (fun (e : Runtime_toml.parse_error) ->
+           e.path ^ ": " ^ e.message) errors))
+  | Ok cfg ->
+    match cfg.bindings with
+    | [ binding ] -> cfg, binding
+    | _ -> fail "expected one parallel policy binding"
+
+let test_parallel_policy_survives_fresh_resume_and_wire_serialization () =
+  let module Json = Yojson.Safe.Util in
+  let tool_json = `Assoc
+      [ "name", `String "inspect"
+      ; "description", `String "Inspect an artifact"
+      ; "input_schema", `Assoc
+          [ "type", `String "object"; "properties", `Assoc [] ] ]
+  in
+  let bodies =
+    [ "claude", "messages-http", "claude-fable-5",
+      (fun config -> Llm_provider.Backend_anthropic.build_request
+          ~config ~messages:[] ~tools:[ tool_json ] () |> Yojson.Safe.from_string),
+      (fun body -> match Json.member "tool_choice" body with
+         | `Null -> `Null
+         | choice -> Json.member "disable_parallel_tool_use" choice),
+      `Bool true
+    ; "openrouter", "openai-compatible-http", "z-ai/glm-4.7-flash",
+      (fun config -> Llm_provider.Backend_openai.build_request_assoc
+          ~config ~messages:[] ~tools:[ tool_json ] ()),
+      Json.member "parallel_tool_calls", `Bool false
+    ; "openai-responses", "openai-compatible-http", "gpt-5.6-luna",
+      (fun config -> Llm_provider.Backend_openai_responses.build_request
+          ~config ~messages:[] ~tools:[ tool_json ] () |> Yojson.Safe.from_string),
+      Json.member "parallel_tool_calls", `Bool false
+    ]
+  in
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  List.iter (fun (provider_id, protocol, model_id, body, wire_policy, disabled) ->
+    List.iter (fun (policy, expected) ->
+      let cfg, binding = parallel_policy_runtime ~provider_id ~protocol ~model_id ~policy in
+      let provider_cfg =
+        match Runtime_adapter.binding_to_execution cfg binding with
+        | Ok (Runtime_execution.Agent_core config) -> config
+        | Ok _ -> fail "HTTP policy selected an official client"
+        | Error detail -> fail detail
+      in
+      (match Llm_provider.Provider_config.capabilities_for_config_model provider_cfg with
+       | None -> fail "parallel policy test requires a real catalog row or provider base"
+       | Some caps -> check bool "catalog capability remains true" true caps.supports_parallel_tool_calls);
+      let config = Runtime_agent.default_config
+          ~name:"parallel-policy" ~provider_cfg ~system_prompt:"inspect" ~tools:[] in
+      let builder = Runtime_agent_context.builder ~net:(Eio.Stdenv.net env) ~config () in
+      let agent = match Agent_core.Builder.build_safe builder with
+        | Ok agent -> agent | Error e -> fail (Agent_core.Error.to_string e) in
+      Eio.Switch.on_release sw (fun () -> Agent_core.Agent.close agent);
+      let check_wire label agent_config =
+        let request = Agent_core.Agent_turn.provider_config_with_agent_config
+            ~config:agent_config provider_cfg |> body in
+        check string (provider_id ^ " " ^ label) (Yojson.Safe.to_string
+            (if expected then disabled else `Null))
+          (Yojson.Safe.to_string (wire_policy request))
+      in
+      check_wire "fresh request" (Agent_core.Agent.state agent).config;
+      let checkpoint = { (Agent_core.Agent.checkpoint agent) with
+          disable_parallel_tool_use = not expected } in
+      let prepared = Runtime_agent_context.prepare_resume ~config ~checkpoint in
+      check bool "resume replaces stale checkpoint policy" expected
+        prepared.patched_checkpoint.disable_parallel_tool_use;
+      check_wire "resumed request" prepared.agent_config
+    ) [ "", false; "disable-parallel-tool-use = true", true;
+        "disable-parallel-tool-use = false", false ]
+  ) bodies
+
+let test_parallel_policy_rejects_unsupported_runtimes () =
+  let cfg, binding = parallel_policy_runtime ~provider_id:"claude"
+      ~protocol:"messages-http" ~model_id:"claude-fable-5"
+      ~policy:"disable-parallel-tool-use = true" in
+  let provider = List.hd cfg.providers in
+  List.iter (fun (api_format, protocol) ->
+    let provider = { provider with Runtime_schema.api_format; protocol } in
+    let cfg = { cfg with Runtime_schema.providers = [ provider ] } in
+    let expected = Printf.sprintf
+        "binding claude.probe declares disable-parallel-tool-use = true, but protocol %s cannot carry that request policy"
+        protocol in
+    let check_refusal = function
+      | Error error -> check string "unsupported policy is named" expected error
+      | Ok _ -> failf "%s silently accepted the parallel-disable policy" protocol in
+    check_refusal (Runtime_adapter.binding_to_execution cfg binding);
+    check_refusal (Runtime_adapter.binding_to_provider_config cfg binding)
+  ) [ Runtime_schema.Claude_code_runtime, "claude-code"
+    ; Codex_app_server_runtime, "codex-app-server"
+    ; Antigravity_cli_runtime, "antigravity-cli"
+    ; Ollama_api, "ollama-http"
+    ; Gemini_api, "gemini-http"
+    ; Vertex_gemini_api, "vertex-gemini" ]
+
+let test_parallel_policy_wrong_type_is_rejected () =
+  let toml = {|[providers.p]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+[models.m]
+[p.m]
+disable-parallel-tool-use = "true"
+|} in
+  match Runtime_toml.parse_string toml with
+  | Ok _ -> fail "string parallel policy silently loaded"
+  | Error errors -> check bool "wrong-type error names the binding key" true
+      (List.exists (fun (error : Runtime_toml.parse_error) ->
+           String.equal error.path "p.m.disable-parallel-tool-use") errors)
+
 let () =
   run "runtime_provider_auth_headers"
     [ ( "provider_config"
-      , [ test_case
+      , [ test_case "parallel policy reaches fresh and resumed provider requests"
+            `Quick test_parallel_policy_survives_fresh_resume_and_wire_serialization
+        ; test_case "unsupported runtimes refuse parallel policy"
+            `Quick test_parallel_policy_rejects_unsupported_runtimes
+        ; test_case "parallel policy rejects a wrong-typed value"
+            `Quick test_parallel_policy_wrong_type_is_rejected
+        ; test_case
             "runtime binding materialization preserves failure reason"
             `Quick
             test_runtime_of_binding_preserves_failure_reason

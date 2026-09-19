@@ -84,7 +84,7 @@ CPU 24개가 필요하다. CPU 가 16개인 Mac 에서는 로컬 docker 로 동�
 | a | 같은 모델, harbor 기본 에이전트 (anthropic → `claude-code`, kimi_coding → `kimi-cli`) |
 | b | keeper 1, skills·composition·parallel·fusion 끔 |
 | c | b + skills |
-| d | c + composition (spawn 도구) |
+| d | c + composition (Skill이 정의한 조합 도구) |
 | e | d + parallel tool calls |
 | f | e 를 keeper 4 로 |
 | g | e 를 keeper 8 로 |
@@ -93,6 +93,16 @@ CPU 24개가 필요하다. CPU 가 16개인 Mac 에서는 로컬 docker 로 동�
 
 spawn 도구는 parallel 이 꺼진 arm(b, c, d)에서, delegate 도구는 keeper 1 인 arm(b–e)에서
 keeper TOML `tools.deny` 로 막는다.
+
+HTTP 레인의 b·c·d는 runtime binding(`[<provider>.<model>]`)에
+`disable-parallel-tool-use = true`를 적는다. e 이후는 `false`다.
+이 값은 요청 정책이며, 카탈로그의 `supports_parallel_tool_calls`는 바꾸지 않는다.
+Anthropic 요청에서는 `tool_choice.disable_parallel_tool_use`, OpenAI 요청에서는
+`parallel_tool_calls = false`로 전달된다. `false`는 카탈로그가 허용한 병렬 호출을
+억제하지 않는다는 뜻이다. 실제로 몇 개를 호출했는지는 실행 기록으로 확인한다.
+`max-concurrent`는 동시 모델 요청 수, spawn은 별도 에이전트 실행이므로
+둘 중 하나를 제한했다고 한 응답의 병렬 도구 호출까지 꺼지는 것은 아니다.
+이 binding 키를 모르는 구버전 MASC는 설정을 거절하므로 새 빌드가 필요하다.
 
 ## 모델 레인
 
@@ -114,7 +124,10 @@ keeper 의 모델 런타임을 수정하지 않은 Claude Code CLI 로 쓴다(ma
 
     claude setup-token                      # 호스트에서 1회, 토큰을 복사
     export CLAUDE_CODE_OAUTH_TOKEN=...
-    BENCH_MODEL=claude_code/claude-sonnet-5 CONCURRENCY=1 ./run_matrix.sh b 1
+    BENCH_MODEL=claude_code/claude-sonnet-5 CONCURRENCY=1 ./run_matrix.sh e 1
+
+- b·c·d는 설정 생성 단계에서 거절한다. MASC의 공식 CLI 경로에는 한 응답의 병렬
+  도구 호출을 끄는 요청 제어가 없다. spawn 도구 제한으로 이 조건을 대신하지 않는다.
 
 - effort 는 `--ak effort=high|max` 로 준다(CLI 의 --effort; minimal 은 거부).
 - bootstrap.sh 가 native 설치본을 깔고 `claude auth status --json` 이 `oauth_token` 을
@@ -124,6 +137,12 @@ keeper 의 모델 런타임을 수정하지 않은 Claude Code CLI 로 쓴다(ma
 - 정책: OAuth 는 "ordinary use of Claude Code" 용도다
   (code.claude.com/docs/en/legal-and-compliance). 매트릭스 규모로 돌릴지는 운영자
   판단이고, 제출 런은 API 키 레인으로 남긴다.
+
+[근거] [Anthropic parallel tool use](https://platform.claude.com/docs/en/agents-and-tools/tool-use/parallel-tool-use),
+[Claude Code CLI reference](https://code.claude.com/docs/en/cli-reference),
+[settings](https://code.claude.com/docs/en/settings), `claude --version` / `claude --help`
+(2.1.278): 2026-09-19 18:05 KST 확인, High. CLI 경로의 미지원 판정은 MASC adapter가
+제공하는 제어를 기준으로 한다.
 
 ## arm K — keeper 를 도구로 부리는 레인
 

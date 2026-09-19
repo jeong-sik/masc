@@ -37,8 +37,8 @@ status: reference
 : Keeper turn에서 하나의 resolved runtime 후보를 실행하는 시도.
 
 **Tool**
-: 이름·입력 schema·handler로 노출되는 호출 단위. MASC가 descriptor와 권한을
-  소유한다. → [Tool boundary](13-agent-core.md#tool-boundary)
+: 이름·입력 schema·handler로 노출되는 호출 단위. MASC가 제공하는 Tool의
+  descriptor와 권한 검사는 MASC가 소유한다. → [Tool boundary](13-agent-core.md#tool-boundary)
 
 **Provider**
 : 모델에 접속하는 protocol·transport·credential을 소유하는 설정 항목.

@@ -38,16 +38,19 @@ status: reference
 : Workspace에 참여해 typed capability를 호출하는 실행 주체.
 
 **Keeper**
-: 독립된 agent core checkpoint와 MASC lifecycle을 가진 장기 실행 Agent. 현재 typed
-  event와 tool schema를 관찰하고 자율 turn을 실행한다.
+: MASC가 lifecycle을 관리하는 장기 실행 Agent. 현재 typed event와 tool schema를
+  관찰하고 자율 turn을 실행한다. 이어 실행할 상태는 runtime에 따라 AGENT_CORE 또는
+  공식 클라이언트가 관리한다([`Runtime_execution.checkpoint_owner`](../../lib/runtime/runtime_execution.mli)).
 
 **Keeper Cycle**
 : 현재 상태와 event를 관찰하고 Keeper turn 실행 여부를 결정하는 서버 loop의
   한 회차. 모든 cycle이 모델 호출을 실행하지는 않는다.
 
 **Keeper Turn**
-: 하나의 Keeper 작업 시도 단위. MASC가 agent core 레인 또는 공식 클라이언트
-  레인을 통해 실행하고, 해당 레인의 결과를 조율·기록한다.
+: MASC가 하나의 Keeper 작업을 시도하는 단위. 선택한 runtime에 따라 AGENT_CORE
+  Agent run 또는 공식 클라이언트의 모델·도구 실행을 사용한다
+  ([`Runtime_execution.t`](../../lib/runtime/runtime_execution.mli)). MASC는 해당 레인의 결과를
+  조율·기록한다.
 
 **Checkpoint Load**
 : 저장된 Keeper 이력을 읽는 단계. 파일 없음은 새 이력을 뜻하지만 읽기·파싱 오류는
@@ -200,6 +203,10 @@ status: reference
 : History와 설정을 담은 Agent Core의 durable 저장점. trace당 파일 하나
   (`<trace 디렉터리>/<trace id>.json`)다. 실행 중에는
   `Keeper_types.working_context`가 이 checkpoint 하나를 감싼다.
+  공식 클라이언트의 대화 이력은 이 파일에 옮겨 저장하지 않는다. MASC는
+  클라이언트 세션 식별자와 turn 진행 상태를 별도의
+  [공식 클라이언트 세션 저장소](../../lib/keeper/keeper_official_client_session_store.mli)에
+  기록한다.
   → [Keeper_types.working_context](../../lib/keeper_types/keeper_types.mli)
 
 **받은 일 정리**

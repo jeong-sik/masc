@@ -7371,8 +7371,10 @@ let launch_runtime_lane_pick state ~mailbox ~(pick : Masc_tui_types.runtime_lane
           Masc_tui_http.set_runtime_lane_slots ~host ~port ~lane
             ~runtime_ids:(existing @ [ runtime_id ])
       | Masc_tui_types.Pick_exact_lane name ->
-          (* [existing] is the admitted view; the server appends to the
-             declared order so a slot the registry dropped is not lost. *)
+          (* Only the one slot is sent: the server appends it to the order
+             the file declares, so a declared slot the registry dropped is
+             kept. [existing] is used above only to refuse an id the lane
+             already names. *)
           Masc_tui_http.append_exact_lane_slot ~host ~port ~name ~runtime_id
       | Masc_tui_types.Pick_new_lane lane ->
           Masc_tui_http.create_runtime_lane ~host ~port ~lane

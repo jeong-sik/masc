@@ -8185,10 +8185,10 @@ let swap_candidates order i j =
    order from the runtime surface's resolved lanes, and a pick writes that
    order back with the new candidate on the end. An exact-output lane's ids
    are every one the standalone-lane observation names -- admitted slots, CLI
-   slots and the declared slots the registry dropped -- so the picker offers
-   none the lane already declares. Its pick is an append the server applies
-   to the declared order, never a write of this list. A lane being created has
-   no candidates yet. *)
+   slots and the declared slots the registry dropped. The picker ranks those
+   last, and picking one is refused before anything is sent. The pick itself
+   is an append the server applies to the declared order, never a write of
+   this list. A lane being created has no candidates yet. *)
 let lane_picker_existing_slots (state : state) = function
   | Pick_exact_lane name ->
     (match state.standalone_lanes with

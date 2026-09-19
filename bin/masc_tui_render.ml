@@ -10818,12 +10818,31 @@ let render_runtime (state : state) =
        c.push_styled ~style:(Theme.bad ())
          ("  lane write refused: " ^ Keeper_chat.terminal_safe_text detail);
        c.push_divider ());
+  (* Counted in [runtime_surface_listing_chrome] as two rows, like the refusal
+     above, so the footer keeps its row while the prompt is up. *)
+  (match Masc_tui_types.runtime_lane_prompt state with
+   | None -> ()
+   | Some (Masc_tui_types.Lane_name_prompt draft) ->
+       c.push_styled ~style:(Theme.info ())
+         (Printf.sprintf "  new lane name: %s_  — Enter pick its first runtime, Esc cancel"
+            (Terminal_text.single_line draft));
+       c.push_divider ()
+   | Some (Masc_tui_types.Lane_remove_prompt lane) ->
+       c.push_styled ~style:(Theme.warn ())
+         (Printf.sprintf "  press D again to remove lane %s"
+            (Terminal_text.single_line lane));
+       c.push_divider ());
   (match runtime_picker_projection state with
    | None -> ()
    | Some picker ->
        c.push_styled ~style:(Theme.info ())
-         (Printf.sprintf "  adding a failover candidate to %s — j/k move, Enter append, e cancel"
-            (Terminal_text.single_line picker.rlp_lane));
+         (match picker.rlp_pick with
+          | Masc_tui_types.Pick_new_lane lane ->
+              Printf.sprintf "  first runtime of new lane %s — j/k move, Enter create, e cancel"
+                (Terminal_text.single_line lane)
+          | Masc_tui_types.Pick_conversation_lane lane | Masc_tui_types.Pick_exact_lane lane ->
+              Printf.sprintf "  adding a failover candidate to %s — j/k move, Enter append, e cancel"
+                (Terminal_text.single_line lane));
        if picker.rlp_choices = [] then
          c.push_styled ~style:(Theme.recede ()) "  (runtime catalogue unread)"
        else

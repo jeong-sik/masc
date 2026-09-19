@@ -21,7 +21,7 @@ let test_picker_and_refusal_keep_footer_space () =
   let state = state () in
   state.runtime_catalog <- [runtime "a"; runtime "b"; runtime "c"];
   check_layout state 9;
-  state.runtime_lane_pick <- Some "primary";
+  state.runtime_lane_pick <- Some (Pick_conversation_lane "primary");
   (* Three choices, prompt and divider consume five additional rows. *)
   check_layout state 14;
   state.runtime_lane_error <- Some "route write rejected";
@@ -35,8 +35,36 @@ let test_picker_and_refusal_keep_footer_space () =
 
 let test_empty_picker_keeps_its_explanation () =
   let state = state () in
-  state.runtime_lane_pick <- Some "primary";
+  state.runtime_lane_pick <- Some (Pick_conversation_lane "primary");
   check_layout state 12
+
+(* The lane editor's prompt row -- a name being typed, a lane armed for
+   removal -- is two rows the footer has to be moved for, like the refusal. *)
+let test_lane_prompt_keeps_footer_space () =
+  let state = state () in
+  check_layout state 9;
+  state.runtime_lane_name_draft <- Some "coding";
+  check_layout state 11;
+  state.runtime_lane_name_draft <- None;
+  state.runtime_lane_remove_armed <- Some "coding";
+  check_layout state 11;
+  state.runtime_lane_error <- Some "lane \"coding\" is assigned to alpha";
+  check_layout state 13;
+  state.runtime_lane_remove_armed <- None;
+  state.runtime_lane_error <- None;
+  state.runtime_lane_pick <- Some (Pick_new_lane "coding");
+  (* A lane being created has no candidates to note, and the catalogue is
+     unread here: prompt, divider and the explanation row. *)
+  check_layout state 12
+
+let test_a_move_past_either_end_is_no_move () =
+  let order = [ "a"; "b"; "c" ] in
+  Alcotest.(check (option (list string))) "down" (Some [ "b"; "a"; "c" ])
+    (swap_candidates order 0 1);
+  Alcotest.(check (option (list string))) "up" (Some [ "a"; "c"; "b" ])
+    (swap_candidates order 2 1);
+  Alcotest.(check (option (list string))) "past the head" None (swap_candidates order 0 (-1));
+  Alcotest.(check (option (list string))) "past the tail" None (swap_candidates order 2 3)
 
 let test_cli_probe_is_a_note () =
   let detail = "CLI runtimes do not expose an HTTP reachability endpoint" in
@@ -93,5 +121,7 @@ let () = Alcotest.run "runtime list geometry"
   ["operator states", [
       Alcotest.test_case "picker and failures reserve footer space" `Quick test_picker_and_refusal_keep_footer_space;
       Alcotest.test_case "empty picker explanation" `Quick test_empty_picker_keeps_its_explanation;
+      Alcotest.test_case "lane prompt reserves footer space" `Quick test_lane_prompt_keeps_footer_space;
+      Alcotest.test_case "a move past either end is no move" `Quick test_a_move_past_either_end_is_no_move;
       Alcotest.test_case "CLI probe is informational" `Quick test_cli_probe_is_a_note;
       Alcotest.test_case "search follows Runtime mode and cursor order" `Quick test_search_follows_the_runtime_mode]]

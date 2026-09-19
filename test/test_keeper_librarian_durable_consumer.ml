@@ -5,6 +5,9 @@ module Consumer = Masc.Keeper_librarian_durable_consumer
 module Boundaries = Masc.Keeper_turn_boundaries
 module Progress = Masc.Keeper_librarian_progress
 module Store = Masc.Keeper_checkpoint_store
+module Keeper_chat_store = Masc.Keeper_chat_store
+module Keeper_external_attention = Masc.Keeper_external_attention
+module Keeper_counterpart_observation = Masc.Keeper_counterpart_observation
 
 let keeper_name = "durable-reader"
 

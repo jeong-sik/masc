@@ -119,6 +119,10 @@ let test_body_only_declaration_reaches_exact () =
   with_runtime @@ fun load ->
   let connect, body = None, Some 91.5 in
   let actual = load ~connect ~body |> ready in
+  check (option (float 0.0)) "body-only plan has no connection deadline" None
+    (EO.connect_timeout_s actual);
+  check (option (float 0.0)) "body-only plan preserves its total deadline" body
+    (EO.body_timeout_s actual);
   check string "bootstrap and direct declared body produce the same plan"
     (EO.plan_fingerprint (expected_plan ~connect ~body)) (EO.plan_fingerprint actual)
 
@@ -135,6 +139,14 @@ let test_deadlines_are_independent_and_frozen () =
   let _, omitted = capture None in
   let first_target, first = capture (Some 91.5) in
   let _, second = capture (Some 55.5) in
+  check (option (float 0.0)) "connect-only plan preserves its header deadline" connect
+    (EO.connect_timeout_s omitted);
+  check (option (float 0.0)) "connect-only plan does not invent a body deadline" None
+    (EO.body_timeout_s omitted);
+  check (option (float 0.0)) "explicit body deadline leaves connection independent" connect
+    (EO.connect_timeout_s first);
+  check (option (float 0.0)) "explicit body deadline reaches the frozen plan" (Some 91.5)
+    (EO.body_timeout_s first);
   check bool "declared body differs from absent body" true
     (EO.plan_fingerprint omitted <> EO.plan_fingerprint first);
   check bool "changing only body changes the frozen plan" true

@@ -156,6 +156,9 @@ connect-timeout-s = 600.0
 # [providers.<id>] table. Saving that file does not rebuild existing Exact
 # targets: the value takes effect when server bootstrap rebuilds the registry.
 # This seed intentionally supplies no numeric body deadline.
+# Each visited Exact candidate retains its own deadline. Their HTTP wait can
+# accumulate across sequential candidates; this is not a deadline for the
+# whole Librarian pass, its CLI tail, or Memory processing.
 # AGENT_CORE_MODEL_CATALOG replacements keep their own target body_timeout_s;
 # this key does not set an official-client CLI timeout.
 

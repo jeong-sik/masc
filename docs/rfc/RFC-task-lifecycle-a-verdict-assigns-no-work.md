@@ -662,7 +662,7 @@ OCaml 쪽은 임의의 액션·판정 열을 돌려 `OneTaskPerAgent` 를 확인
 | D2 | Task 를 취소할 자격 | 만든 쪽과 운영자 | 운영자만(지금의 줄이 그대로 남는다). 또는 운영자가 설정으로 지정한 정리 담당 Keeper 추가(에이전트가 만든 640건을 정리할 길이 넓어진다) |
 | D3 | 대기 중인 취소 요청 65건 | **정해짐(2026-09-19): 운영자 일괄 승인, 65건 모두 `Cancelled`** | — |
 | D4 | §3.10 헌법 문구. `Done.assignee` 의 뜻 포함 | 표대로 | — |
-| D5 | 판정을 기다리는 줄의 `assignee` 를 저장 형식에서도 `producer` 로 바꾸는가 | 바꾼다. Keeper 가 읽는 목록 행에 제출한 Task 가 `assignee: 나` 로 보이는 것이 "아직 내 것"이라는 오해의 한 뿌리다 | 저장 키는 그대로 둔다. 그러면 배포 전 조건이 "`intent = cancel` 줄 0"으로 줄고 backlog 를 못 읽게 될 위험이 없어진다 |
+| D5 | 판정을 기다리는 줄의 `assignee` 를 저장 형식에서도 `producer` 로 바꾸는가 | 바꾼다. Keeper 가 읽는 목록 행에 제출한 Task 가 `assignee: 나` 로 보이는 것이 "아직 내 것"이라는 오해의 한 뿌리다 | 저장 키는 그대로 둔다. 그러면 배포 전에 대기 줄을 비울 필요가 없어진다. 다만 backlog 를 못 읽게 될 위험 자체는 남는다. D1 로 `Rejected` 가 생긴 이상 옛 바이너리는 그 줄에서 어차피 멈춘다 |
 | D6 | `Claimed` 를 없애고 claim 이 곧바로 `InProgress` 를 만들게 하는가. `Start` 도 같이 없어진다 | 없앤다. 마지막 단계로. 허용 여부를 가르는 곳이 `Start` 하나이고, Keeper 는 이미 claim 직후 Start 를 보내며, 지금 `claimed` 줄이 0건이라 저장 형식 비용이 없다 | 둔다. 화면의 "claimed but not in-progress" 집계(`dashboard.ml:454-461`), `masc_status` 집계, 프롬프트 문구, `test_task_status_vocabulary` 를 고치는 일이 든다 |
 
 ## 8. 반론과 답

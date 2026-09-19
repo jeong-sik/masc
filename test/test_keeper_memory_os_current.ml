@@ -1877,10 +1877,10 @@ let test_a_failed_absorbed_write_commits_nothing () =
     (List.sort compare (fact_ids current.facts))
 ;;
 
-(* A crash during an append leaves a last line with no newline. The durable
-   append refuses to write after it, so the pass fails and the snapshot keeps
-   the facts, and the reader reports the fragment as the line it is. *)
-let test_an_absorbing_pass_refuses_a_store_that_ends_mid_line () =
+(* A crash during an append leaves a last line with no newline. A read reports
+   it as the line it is; the pass's append cuts it back to the last complete
+   row and the same pass commits. *)
+let test_an_absorbing_pass_recovers_a_store_that_ends_mid_line () =
   with_temp_keepers @@ fun keepers_dir ->
   let a, b, c = seed_three ~keepers_dir in
   let path = Absorbed.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
@@ -1888,23 +1888,21 @@ let test_an_absorbing_pass_refuses_a_store_that_ends_mid_line () =
   output_string channel "{\"recorded_at\": 1";
   close_out channel;
   let together = fact ~claim:"A and B" () in
-  (match
-     apply_disposition
-       ~keepers_dir
-       ~absorbed:[ { Types.absorbed = Types.memory_id a; into = Types.memory_id together } ]
-       ~new_claims:[ together ]
-       ()
-   with
-   | Ok _ -> fail "a pass appended after a line that never completed"
-   | Error _ -> ());
-  let current = apply_disposition ~keepers_dir () |> require_ok in
-  check (list string) "the snapshot still holds A, B and C and not the new claim"
-    (List.sort compare (fact_ids [ a; b; c ]))
+  let current =
+    apply_disposition
+      ~keepers_dir
+      ~absorbed:[ { Types.absorbed = Types.memory_id a; into = Types.memory_id together } ]
+      ~new_claims:[ together ]
+      ()
+    |> require_ok
+  in
+  check (list string) "the snapshot holds A and B absorbed into the new claim, plus C"
+    (List.sort compare (fact_ids [ b; c; together ]))
     (List.sort compare (fact_ids current.facts));
   match Absorbed.read ~keepers_dir ~keeper_id:"keeper" with
   | Error message -> failf "absorbed store: %s" message
-  | Ok [ (1, Error Absorbed.Incomplete_line) ] -> ()
-  | Ok lines -> failf "expected one incomplete line, read %d lines" (List.length lines)
+  | Ok [ (1, Ok _) ] -> ()
+  | Ok lines -> failf "expected the single recovered row, read %d lines" (List.length lines)
 ;;
 
 let test_an_absorbed_fact_no_longer_current_writes_no_row () =
@@ -2164,9 +2162,9 @@ let () =
             `Quick
             test_a_failed_absorbed_write_commits_nothing
         ; test_case
-            "an absorbing pass refuses a store that ends mid-line"
+            "an absorbing pass recovers a store that ends mid-line"
             `Quick
-            test_an_absorbing_pass_refuses_a_store_that_ends_mid_line
+            test_an_absorbing_pass_recovers_a_store_that_ends_mid_line
         ; test_case
             "an absorbed fact no longer current writes no row"
             `Quick

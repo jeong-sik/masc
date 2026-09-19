@@ -21,6 +21,12 @@ async function waitFor(assertion: () => boolean, label: string): Promise<void> {
   throw new Error(`Timed out waiting for ${label}`)
 }
 
+function parameterValue(container: HTMLElement, label: string): string | undefined {
+  const row = Array.from(container.querySelectorAll('[aria-label="runtime parameter detail"] > div'))
+    .find(candidate => candidate.firstElementChild?.textContent === label)
+  return row?.lastElementChild?.textContent?.trim()
+}
+
 describe('RuntimeMonitor', () => {
   let container: HTMLDivElement
 
@@ -120,7 +126,7 @@ describe('RuntimeMonitor', () => {
             num_ctx: 131072,
             seed: 42,
             has_previous_response_id: true,
-            connect_timeout_s: 120,
+            connect_timeout_s: 120.125,
           },
           effective_capabilities: {
             source: 'agent-core-provider-config-model',
@@ -179,7 +185,7 @@ describe('RuntimeMonitor', () => {
                 uses_anthropic_caching: true,
               },
               custom_header_count: 2,
-              connect_timeout_s: 120,
+              connect_timeout_s: 120.375,
               exact_body_timeout_s: 0.125,
             },
             model: {
@@ -438,11 +444,6 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('agent-core-provider-config')
     expect(container.textContent).toContain('request · system prompt')
     expect(container.textContent).toContain('declared provider · capabilities block')
-    expect(container.textContent).toContain('declared provider · Exact timeout (s)')
-    expect(container.textContent).toContain('Exact timeout:0.125s')
-    const exactTimeout = Array.from(container.querySelectorAll('[aria-label="runtime parameter detail"] span'))
-      .find(span => span.textContent === 'declared provider · Exact timeout (s)')
-    expect(exactTimeout?.nextElementSibling?.textContent).toBe('0.125')
     expect(container.textContent).toContain('declared model · capability source')
     expect(container.textContent).toContain('binding · provider.model')
     expect(container.textContent).toContain('runpod_mtp,qwen')
@@ -450,6 +451,12 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('agent-core-provider-config-model')
     expect(container.textContent).toContain('effective · max context')
     expect(container.textContent).toContain('131,072')
+    expect(parameterValue(container, 'effective · max context')).toBe('131,072')
+    expect(parameterValue(container, 'declared model · temperature')).toBe('0.65')
+    expect(parameterValue(container, 'request · connect timeout')).toBe('120.125')
+    expect(parameterValue(container, 'declared provider · connect timeout')).toBe('120.375')
+    expect(parameterValue(container, 'declared provider · Exact timeout (s)')).toBe('0.125')
+    expect(container.textContent).toContain('Exact timeout:0.125s')
     expect(container.textContent).toContain('effective · tools')
     expect(container.textContent).toContain('tools,tool-choice,required,named,parallel,runtime-mcp,runtime-events')
     expect(container.textContent).toContain('effective · reasoning')
@@ -468,6 +475,38 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('native-stream,system-prompt')
     expect(container.textContent).toContain('effective · ignored sampling')
     expect(container.textContent).toContain('temperature,top_p,presence_penalty,frequency_penalty')
+  })
+
+  it.each([
+    [1200, '1200'],
+    [1200.5, '1200.5'],
+    [NaN, '--'],
+    [Infinity, '--'],
+    [-Infinity, '--'],
+    [null, undefined],
+    [undefined, undefined],
+  ])('shows setting values without count formatting for %s', async (value, expected) => {
+    const baseline = await apiMocks.fetchRuntimeProviders()
+    apiMocks.fetchRuntimeProviders.mockResolvedValue({
+      ...baseline,
+      providers: baseline.providers.map((provider: typeof baseline.providers[number]) => ({
+        ...provider,
+        request_config: { ...provider.request_config, connect_timeout_s: value },
+        declared_spec: {
+          ...provider.declared_spec,
+          provider: { ...provider.declared_spec.provider, connect_timeout_s: value, exact_body_timeout_s: value },
+        },
+      })),
+    })
+    render(h(RuntimeMonitor, {}), container)
+    await waitFor(
+      () => container.textContent?.includes('runpod_mtp.qwen') ?? false,
+      'runtime parameter missing or non-finite value',
+    )
+    expect(parameterValue(container, 'request · connect timeout')).toBe(expected)
+    expect(parameterValue(container, 'declared provider · connect timeout')).toBe(expected)
+    expect(parameterValue(container, 'declared provider · Exact timeout (s)')).toBe(expected)
+    expect(parameterValue(container, 'effective · max context')).toBe('131,072')
   })
 
   it('shows per-turn cache read/write tokens in recent model entries', async () => {

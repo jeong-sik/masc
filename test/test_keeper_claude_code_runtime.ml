@@ -43,7 +43,7 @@ let prompt_too_long_statusless_result =
   {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-statusless-overflow-1","result":"Prompt is too long"}|}
 ;;
 
-(* CLI 2.1.278 refuses to send a request its own count puts past the window:
+(* CLI 2.1.278 refuses to send when its count reaches the window minus 3000:
    it emits a synthetic API-error assistant message and ends the loop with
    [terminal_reason = "blocking_limit"] and no API status. Seen live on
    2026-09-19 as "terminal subtype=success api_status=unknown
@@ -54,6 +54,16 @@ let blocking_limit_diagnostic =
 
 let blocking_limit_result =
   {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-blocking-limit-1","result":"Prompt is too long","terminal_reason":"blocking_limit"}|}
+;;
+
+(* The same CLI context_limit stop cause, with a different diagnostic. The
+   typed terminal reason, not either sentence, selects the shrink path. *)
+let rapid_refill_breaker_diagnostic =
+  {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-rapid-refill-1","is_api_error_message":true,"message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"Autocompact is thrashing"}]}}|}
+;;
+
+let rapid_refill_breaker_result =
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-rapid-refill-1","result":"Autocompact is thrashing","terminal_reason":"rapid_refill_breaker"}|}
 ;;
 
 let mcp_initialize =
@@ -1687,16 +1697,16 @@ let repeated_tool () =
       Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
 ;;
 
-(* The CLI refused to send (blocking_limit) and an empty history leaves no
-   smaller view to try, so the attempt ends on the overflow. Nothing was sent
-   and no tool ran, so the attempt must report no effect: that is what lets
+(* A context-limit refusal and an empty history leave no smaller view to try,
+   so the attempt ends on the overflow. No answer or tool activity was
+   observed, so the attempt must report no effect: that is what lets
    the lane move to its next runtime instead of fencing the turn. *)
-let test_unshrinkable_blocking_limit_reports_no_effect () =
+let test_unshrinkable_context_limit_reports_no_effect ~overflow_frames () =
   let base_path = temp_workspace () in
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
-       with_fixture [ Emit blocking_limit_diagnostic; Emit blocking_limit_result ]
+       with_fixture (List.map (fun frame -> Emit frame) overflow_frames)
          (fun cli_path ->
             let attempt =
               run_direct_attempt ~base_path ~cli_path ~goal:"BLOCKED" ~tools:[] ()
@@ -1704,10 +1714,10 @@ let test_unshrinkable_blocking_limit_reports_no_effect () =
             (match attempt.result with
              | Error (Agent_core.Error.Api (Llm_provider.Retry.ContextOverflow _)) -> ()
              | Error error -> fail (Agent_core.Error.to_string error)
-             | Ok _ -> fail "a blocking_limit refusal completed the attempt");
+             | Ok _ -> fail "a context-limit refusal completed the attempt");
             check
               string
-              "a refusal before sending has no effect"
+              "a refusal without observed activity has no effect"
               "no_effect_observed"
               (Keeper_provider_attempt_effect.to_string attempt.effect_disposition)))
 ;;
@@ -1945,6 +1955,11 @@ let () =
             (test_keeper_shrinks_history_after_statusless_context_error
                ~overflow_frames:[ blocking_limit_diagnostic; blocking_limit_result ])
         ; test_case
+            "shrinks history after the CLI's rapid_refill_breaker refusal"
+            `Quick
+            (test_keeper_shrinks_history_after_statusless_context_error
+               ~overflow_frames:[ rapid_refill_breaker_diagnostic; rapid_refill_breaker_result ])
+        ; test_case
             "projects typed tool history and lifecycle"
             `Quick
             test_keeper_projects_typed_tool_history_and_lifecycle
@@ -2001,7 +2016,13 @@ let () =
         ; test_case
             "unshrinkable blocking_limit reports no effect"
             `Quick
-            test_unshrinkable_blocking_limit_reports_no_effect
+            (test_unshrinkable_context_limit_reports_no_effect
+               ~overflow_frames:[ blocking_limit_diagnostic; blocking_limit_result ])
+        ; test_case
+            "unshrinkable rapid_refill_breaker without activity reports no effect"
+            `Quick
+            (test_unshrinkable_context_limit_reports_no_effect
+               ~overflow_frames:[ rapid_refill_breaker_diagnostic; rapid_refill_breaker_result ])
         ; test_case
             "blank system prompt is refused not defaulted"
             `Quick

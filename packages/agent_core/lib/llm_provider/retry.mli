@@ -73,10 +73,22 @@ type api_error =
       ; phase : Http_client.timeout_phase option
       }
 
+type server_status_class =
+  | Overloaded_status
+  | Server_error_status
+(** Typed classification of the complete HTTP server-error status class.
+    HTTP 529 is the provider overload signal; every other code in 500..599 is
+    a server error. Codes outside that closed interval are not server status
+    refusals, even when a transport accepts an unregistered integer code. *)
+
 (** {1 Error classification} *)
 
 val is_retryable : api_error -> bool
 val error_message : api_error -> string
+
+val server_status_class_of_code : int -> server_status_class option
+(** Single status-only source used by refusal classification, Exact failover,
+    and durable-evidence validation. *)
 
 (** Verdict for a provider turn that produced no content blocks.
 

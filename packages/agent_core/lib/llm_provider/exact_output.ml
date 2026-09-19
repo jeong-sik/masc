@@ -1744,8 +1744,15 @@ let execution_failure_may_advance (error : execution_error) =
        declared successor may serve the same input. Keep the failed dispatch
        and response as evidence; an interrupted/unknown dispatch is not this
        case, and neither is a status whose refusal body was not received. *)
-    http_status >= 500 && http_status <= 599
-    && receipt_dispatch_count error.receipt = 1
+    let refusal_matches_status =
+      match Retry.server_status_class_of_code http_status, error.cause with
+      | Some Retry.Overloaded_status,
+        Provider_response_refused { refusal = Overloaded; _ }
+      | Some Retry.Server_error_status,
+        Provider_response_refused { refusal = Server_error; _ } -> true
+      | (Some Retry.Overloaded_status | Some Retry.Server_error_status | None), _ -> false
+    in
+    refusal_matches_status && receipt_dispatch_count error.receipt = 1
   | Invalid_json_output, (Response_received | Terminal) ->
     receipt_dispatch_count error.receipt = 1
   (* The response arrived and terminated, but this binding routed the whole

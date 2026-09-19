@@ -109,7 +109,6 @@ let run (ctx : ctx)
       ~(initial_execution : runtime_execution)
       ~(turn_state : turn_state)
       ~(before_dispatch_authority : unit -> (unit, string) result)
-      ~(current_turn_phase_elapsed_ms : float option -> int * int option)
       ~(user_message : string)
       ~(registry_base_path : string)
       ~(record_streaming_cancelled_observation : config:Workspace.config -> run_meta:keeper_meta -> runtime_id:string -> keeper_turn_id:int -> unit -> unit)
@@ -437,9 +436,7 @@ let run (ctx : ctx)
         Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
           ~keeper_name:meta.name
           ~runtime_id:execution.runtime_id
-          ~decision:No_degraded_retry
           ~reason:"frozen_runtime_suffix_exhausted"
-          ~next_runtime:None
           ~attempt
           ~error_kind:(Some Agent_core.Error.(category err |> category_label))
           ~error_message:(Some (Agent_core.Error.to_string err));
@@ -451,9 +448,7 @@ let run (ctx : ctx)
           Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
             ~keeper_name:meta.name
             ~runtime_id:execution.runtime_id
-            ~decision:No_degraded_retry
             ~reason:"provider_context_overflow"
-            ~next_runtime:None
             ~attempt
             ~error_kind:(Some Agent_core.Error.(category err |> category_label))
             ~error_message:(Some (Agent_core.Error.to_string err));
@@ -499,9 +494,7 @@ let run (ctx : ctx)
           Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
             ~keeper_name:meta.name
             ~runtime_id:execution.runtime_id
-            ~decision:No_degraded_retry
             ~reason:"declared_runtime_lane_exhausted"
-            ~next_runtime:None
             ~attempt
             ~error_kind:(Some Agent_core.Error.(category err |> category_label))
             ~error_message:(Some (Agent_core.Error.to_string err));

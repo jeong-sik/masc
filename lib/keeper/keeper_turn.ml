@@ -844,9 +844,7 @@ let run_keeper_invocation_turn_admitted_inner
 		                                ~trajectory_acc
                                 ?event_bus
                                 ?continuation_channel
-                                ()
-                      |> Result.map (fun result ->
-                        result, initial_execution.max_context)))
+                                ()))
 		            in
                 let run_result = match gate_resume with
                   | None -> run_result
@@ -854,13 +852,13 @@ let run_keeper_invocation_turn_admitted_inner
                     Keeper_direct_gate_continuation.finish_run ~config:ctx.config
                       ~keeper_name:meta.name ~operation_id admission run_result in
                 let source = match run_result with
-                  | Ok ({Keeper_agent_run.checkpoint=Some checkpoint; _}, _) ->
+                  | Ok {Keeper_agent_run.checkpoint=Some checkpoint; _} ->
                     Ok (Keeper_direct_gate_continuation.Returned_agent_core checkpoint)
-                  | Ok ({Keeper_agent_run.checkpoint=None; official_client_settlement=Some settled_session; _}, _) ->
+                  | Ok {Keeper_agent_run.checkpoint=None; official_client_settlement=Some settled_session; _} ->
                     (match Keeper_repetition_scope.Execution.snapshot repetition_execution with
                      | Ok frame -> Ok (Keeper_direct_gate_continuation.Returned_official_client {settled_session;frame})
                      | Error error -> Error (Keeper_repetition_snapshot.error_to_string error))
-                  | Ok ({Keeper_agent_run.checkpoint=None; official_client_settlement=None; _}, _) ->
+                  | Ok {Keeper_agent_run.checkpoint=None; official_client_settlement=None; _} ->
                     Error "official-client producer omitted its settled continuation receipt"
                   | Error _ ->
                     (match !produced_checkpoint with
@@ -930,18 +928,27 @@ let run_keeper_invocation_turn_admitted_inner
               restart_keepalive_after_message_turn ctx meta;
               Progress.stop_tracking turn_task_id;
               dispatch_failed ~class_:Tool_result.Runtime_failure cause
-            | Ok (result, _) ->
+            | Ok result ->
               (try
                  let _ = Trajectory.finalize trajectory_acc
                    Trajectory.Completed in
                  ()
                with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn
                  ~label:"trajectory finalize (agent_run ok)" exn);
-              let degraded_retry_applied =
-                not (String.equal result.runtime_id initial_execution.runtime_id)
-              in
+              (* Same reading as a unified cycle ([degraded_retry_applied_for_turn]):
+                 the runtime a deferred suffix named for this resume, and whether
+                 the turn ran on it. A lane candidate that served after the head
+                 failed in this same turn is [runtime_fallback_applied] on the
+                 receipt, not a degraded retry. *)
               let degraded_retry_runtime =
-                if degraded_retry_applied then Some result.runtime_id else None
+                Option.map
+                  (fun admission ->
+                     (Keeper_direct_runtime_continuation.lane admission)
+                       .Keeper_turn_driver.next_runtime_id)
+                  runtime_resume
+              in
+              let degraded_retry_applied =
+                Option.equal String.equal degraded_retry_runtime (Some result.runtime_id)
               in
               let execution_outcome =
                 Keeper_execution_outcome.create

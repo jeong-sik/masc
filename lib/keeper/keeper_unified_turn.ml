@@ -553,7 +553,6 @@ let run_keeper_cycle
     ; degraded_retry_info
     ; deferred_runtime_lane = None
     ; failure_reason = None
-    ; retry_phase_started_at = None
     ; runtime_attempt_errors = []
     ; lane_terminal_error = None
     }
@@ -1052,11 +1051,6 @@ let run_keeper_cycle
                      | Error msg -> Error (Agent_core.Error.Internal msg), turn_state
                      | Ok clock ->
                        start_background_turn_event_bus_drain ~clock;
-                       let { Keeper_unified_turn_retry_setup.current_turn_phase_elapsed_ms }
-                         =
-                         Keeper_unified_turn_retry_setup.build
-                           ~now:(fun () -> Eio.Time.now clock)
-                       in
                        let run_result, turn_state =
                          Keeper_unified_turn_execution.run
                            { attempt = 1
@@ -1093,7 +1087,6 @@ let run_keeper_cycle
                            ~initial_execution
                            ~turn_state
                            ~before_dispatch_authority
-                           ~current_turn_phase_elapsed_ms
                            ~user_message
                            ~registry_base_path
                            ~record_streaming_cancelled_observation

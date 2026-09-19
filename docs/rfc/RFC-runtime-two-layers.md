@@ -3,7 +3,7 @@ rfc: "runtime-two-layers"
 title: "런타임 설정을 두 층으로 — 카탈로그는 무엇인지 말하고, 배포는 무엇을 쓰는지만 말한다"
 status: Draft
 created: 2026-09-18
-updated: 2026-09-18
+updated: 2026-09-19
 author: vincent
 supersedes: []
 superseded_by: null
@@ -103,7 +103,7 @@ supports_image_input = false
 # … 능력 사실 전부. provider 별로 다르면 provider_name 으로 갈라 적는다.
 ```
 
-능력은 **여기에만** 적는다. provider 마다 다른 사실은 `provider_name` 으로, 한 provider 가 두 wire 를 겸하면 `capabilities_base_by_identity_kind` 로 가른다. 이미 201행 중 40개 모델이 그렇게 갈려 있다.
+카탈로그에 행이 있는 provider·모델 쌍의 능력은 **여기에만** 적는다. provider 마다 다른 사실은 `provider_name` 으로 행을 나눈다(이미 201행 중 40개 모델이 그렇게 갈려 있다). 한 provider 가 두 wire 를 겸하면 이미 있는 `capabilities_base_by_identity_kind` 로 가른다(`RFC-one-provider-two-wires` 가 넣은 필드, `models.toml` 의 `ollama_cloud` 행). 카탈로그에 행이 없는 모델은 아래 '우리가 안 싣는 모델'을 따른다.
 
 ### 2층 — 배포의 `runtime.toml` (이 배포)
 
@@ -113,7 +113,7 @@ supports_image_input = false
 [providers.glm-coding]
 endpoint = "https://api.z.ai/api/coding/paas/v4"   # 생략하면 카탈로그 base_url
 credentials = { type = "env", key = "ZAI_API_KEY" }
-connect-timeout-s = 180.0                          # 필수 (아래 참조)
+connect-timeout-s = 180.0                          # exact-output 슬롯이 쓰면 필수 (아래 규칙 3)
 max-concurrent = 4
 
 ["glm-coding.glm-5.3"]                             # 바인딩 키 = provider.실제모델명
@@ -138,11 +138,11 @@ goo-yang-bong = "librarian_exact"
 | | 근거 |
 |---|---|
 | `[models.<local>]` 43블록 | `api-name` 별칭층. 바인딩 키가 대신한다 |
-| `[models.<local>.capabilities]` 27블록 | 능력은 카탈로그 한 곳 |
+| 카탈로그에 행이 있는 모델의 `[models.<local>.capabilities]` | 능력은 카탈로그가 답한다. 카탈로그에 없는 모델만 능력 표를 남긴다 — '우리가 안 싣는 모델' |
 | 지어낸 로컬 이름 | `glm-5.3` 만 4개였다 |
 | provider 주소·자격증명 이중 선언 | 카탈로그가 기본, 배포가 덮는다. 한 방향 |
 
-**모델 1개 × provider 1개 = 4곳 → 2곳** (카탈로그 행 + 바인딩). 카탈로그에 이미 있으면 **1곳**.
+**모델 1개 × provider 1개 = 4곳 → 2곳** (카탈로그 행 + 바인딩). 카탈로그에 이미 있으면 **1곳**. 카탈로그에 없는 모델은 능력 표 하나가 더 붙는다.
 
 ### 옮겨가는 것
 
@@ -155,22 +155,39 @@ goo-yang-bong = "librarian_exact"
 
 ## 설정을 읽을 때 거절한다
 
-지금은 설정이 잘못돼도 **요청할 때마다** 거절된다. librarian 은 그렇게 94번 거절당하며 몇 시간을 죽어 있었다. 배포자가 보는 자리에서 한 번 거절해야 한다.
+마감이 없는 exact-output 슬롯은 지금 **요청할 때마다** 거절된다. librarian 은 그렇게 94번 거절당하며 몇 시간을 죽어 있었다(#37004). 배포자가 보는 자리에서 한 번 거절해야 한다.
 
-`runtime.toml` 로드 시 거절하고 이름을 댄다.
+`runtime.toml` 로드 시 거절하고 이름을 댄다. 네 규칙 중 둘은 이미 있다. 아래 `파일:줄` 은 `origin/main` `c40b50ef7a` 기준이다.
 
-1. 레인 슬롯이 선언된 바인딩을 가리키지 않음 → 레인·슬롯 이름을 댄다
-2. 바인딩이 카탈로그의 provider·모델 쌍을 가리키지 않음 → 쌍을 댄다
-3. provider 가 deadline(`connect-timeout-s` 또는 `body-timeout-s`)을 하나도 선언하지 않음 → provider 이름을 댄다. 상한 없는 요청은 실패하지 않고 기다리기만 해서 failover 가 뛰지 않는다(#36979: curator 최대 13.3시간)
-4. 바인딩의 `max-context` 가 카탈로그 값보다 큼 → 낮추기만 가능
+| # | 규칙 | 지금 |
+|---|---|---|
+| 1 | 레인 슬롯이 선언된 바인딩을 가리키지 않음 → 레인·슬롯 이름을 댄다 | 있다. `validate_lanes`(`runtime.ml:665`)가 `Lane_candidate_unresolved` 로 거절한다 |
+| 2 | 바인딩이 카탈로그의 provider·모델 쌍을 가리키지 않고 능력 표도 없음 → 쌍을 댄다 | 있다. 부팅 때 `missing_runtime_model_capabilities`(`runtime.ml:1068`)가 찾는다. 서버는 그 바인딩을 빼고 degraded 로 뜬다(`init_default_degraded_report`, `runtime.ml:1565`) |
+| 3 | exact-output 레인 슬롯이 가리키는 바인딩의 provider 가 `connect-timeout-s` 를 선언하지 않음 → 레인·슬롯·provider 이름을 댄다 | 없다. 요청마다 `Missing_deadline` 으로 거절된다 |
+| 4 | 바인딩의 `max-context` 가 카탈로그 값보다 큼 → 낮추기만 가능 | 없다. 지금은 조용히 카탈로그 값으로 깎는다(`Override_clamped_by_capability`, `runtime.ml:932`) |
 
-`decide_capability_gate` 가 이미 이 모양인데 **프로덕션 호출자가 없다**(2026-09-18 확인). 이 RFC 는 그것을 꽂는 일을 포함한다.
+**규칙 3 이 exact-output 슬롯에만 걸리는 이유.** exact-output 슬롯의 타깃은 바인딩에서 만들어진다. 타깃은 provider 의 `connect-timeout-s` 를 그대로 받고 body 마감은 비워 둔다(`server_runtime_bootstrap.ml:428-429`). 두 마감이 다 없으면 plan admission 이 `Missing_deadline` 으로 거절한다(`exact_output_plan.ml:144`). 대신 들어갈 기본값은 없다. HTTP 클라이언트는 마감이 없으면 무제한으로 둔다(`http_client.ml:290`). 상한 없는 요청은 실패하지 않고 기다리기만 해서 failover 가 뛰지 않는다(#36979: curator 최대 13.3시간).
+
+일반 keeper 턴은 다르다. 이 키가 없으면 연결 단계를 keeper 의 첫 이벤트 예산이 막는다(`runtime_schema.ml:84-88`). 없어도 합법이므로 모든 provider 에 걸면 계약과 부딪힌다. 씨앗 `config/runtime.toml` 의 exact-output 슬롯은 `glm-coding`·`ollama_cloud` 두 provider 만 가리키고(`config/runtime.toml:61-71`), 둘 다 이 키를 선언한다(`:122`, `:154`).
+
+`AGENT_CORE_MODEL_CATALOG` 로 카탈로그를 통째로 바꾼 배포는 타깃을 그 파일의 `[[targets]]` 에서 읽는다(`server_runtime_bootstrap.ml:441`). 그 경로의 마감은 그 행의 `connect_timeout_s`·`body_timeout_s` 다.
+
+`decide_capability_gate`(`runtime.ml:724`)는 이 표의 규칙이 아니다. 규칙 2 하나만 보고, 부르는 곳이 테스트뿐이다(`test/test_runtime_provider_auth_headers.ml:2659-2690`). 같은 검사는 부팅 경로의 `missing_runtime_model_capabilities` 가 이미 한다. 구현은 이 함수를 꽂지 않고 지운다. 규칙 3·4 는 로드 경로에 새로 쓴다.
 
 ## 우리가 안 싣는 모델
 
-배포자가 로컬 모델을 돌리면 카탈로그에 행을 더한다. 소스 체크아웃이면 파일 편집이고, 설치된 바이너리면 `AGENT_CORE_MODEL_CATALOG` 로 통째 교체한다(그 경우 모든 행을 그 파일이 소유한다).
+능력도 아래 '정체성도 같은 문제였다'의 끝에 적은 규칙을 따른다. 카탈로그가 아는 것은 카탈로그가, 모르는 것은 배포가 말한다.
 
-이 RFC 는 **배포 쪽 능력 선언을 없앤다.** 그 대가로 로컬 모델 등록이 카탈로그 편집이 된다. 지금도 `[models.X.capabilities]` 블록이 없으면 부팅이 거절되므로(`Option.map ... spec.capabilities` 가 `None` 을 낸다) 선언 자체는 이미 의무였고, 장소만 바뀐다.
+- **카탈로그에 행이 있는 provider·모델 쌍** — 능력은 카탈로그만 말한다. 배포는 바인딩만 적는다.
+- **카탈로그에 행이 없는 모델** — 로컬 llama-server, 설치 마법사가 만든 endpoint. 배포가 능력 표를 선언한다. 표가 없으면 부팅 때 `missing_runtime_model_capabilities`(`runtime.ml:1068`)가 그 바인딩을 카탈로그에 없는 모델로 잡는다. #37016 이 이 길을 쓴다. 마법사는 `[models.X.capabilities]` 를 쓰고(`runtime_setup_spec.ml` 의 `render`), `docs/LLAMA-SERVER-RUNBOOK.md` §3.1 은 로컬 모델을 `runtime.toml` 만으로 등록한다.
+
+두 번째 경우에 카탈로그 행을 더하는 길은 쓸 수 없다.
+
+- 설치된 바이너리에는 내장 카탈로그에 행을 덧붙일 파일이 없다(#37016 뒤).
+- `AGENT_CORE_MODEL_CATALOG` 는 내장 카탈로그를 통째로 바꾼다(`server_runtime_bootstrap.ml:441`). 행 하나를 더하려다 모든 행을 그 파일이 떠안고, 바이너리를 올려도 그 파일의 행은 그대로 남는다.
+- 마법사가 만드는 provider id 는 운영자 답의 해시라(`setup_<choice>_<sha256>`) 어떤 카탈로그 행과도 맞지 않는다.
+
+그래서 이 RFC 는 배포 쪽 능력 선언을 **카탈로그가 모르는 모델에만** 남긴다. `[models.X]` 가 사라지면(위 '사라지는 것') 이 표를 어디에 둘지는 구현 PR 이 정한다.
 
 ## Hard cut
 
@@ -260,6 +277,20 @@ different account authority.* `claude_code` 라는 라벨에 API 키 기본값�
 적으면 조용히 무시하지 않고 거절한다. `kind` 하나가 방언·capability preset·기본
 request path 를 모두 정하므로 새 축이 생기지 않는다.
 
+`kind` 를 빼고 카탈로그 행으로 대신할 수는 없다. 이유는 능력 표와 같다('우리가 안
+싣는 모델'). 설치된 바이너리에는 행을 덧붙일 파일이 없고, `AGENT_CORE_MODEL_CATALOG` 는
+모든 행을 떠안게 하며, 마법사 provider id 는 어떤 행과도 맞지 않는다. 같은
+`openai-compatible-http` 라도 방언이 `openai_compat` 인지 `glm` 인지는 운영자만 안다.
+그 말을 적을 곳이 배포밖에 없다.
+
+이 규칙에는 대가가 있다. 배포 설정이 유효한지가 카탈로그 버전에 달린다. 사람이 이름
+붙인 provider 에 `kind` 를 적어 두었는데 다음 릴리스의 카탈로그가 그 provider 행을
+더하면, 같은 `runtime.toml` 이 로드 때 거절된다. 거절 문구는 `provider "<id>" declares
+kind "<kind>", but the AGENT_CORE catalog has a row for it and owns that fact` 다(#37016 의
+`runtime_adapter.ml` `refuse_unread_wire_kind`). 운영자는 그 줄을 지우면 된다. 마법사
+provider 는 id 가 해시라 이 일이 생기지 않는다. 그래도 무시하지 않고 거절하는 이유는,
+안 읽히는 방언을 운영자는 적었다고 믿기 때문이다.
+
 `request_path` 에는 집을 주지 않고 **없앴다.** 먼저 집을 줬다가 되돌린 것이라 이유를
 적어둔다. 저장소 어디에도 비기본값이 없다 — 픽스처가 주는 값은 그 선택지의 기본값
 `/chat/completions` 이고, 그 필드를 세우는 다른 테스트도 `/v1/messages` 로 역시
@@ -306,6 +337,19 @@ provider 다 — 카탈로그에 영원히 없으므로 `kind` 를 적어도 `Bi
 부팅이 막힌다. 저장소 규칙대로 호환 리더나 마이그레이션 코드는 만들지 않되, 거절
 문구가 무엇을 선언해야 하는지와 마법사를 다시 돌리면 써준다는 것을 말하도록 고쳤다.
 운영자가 읽고 스스로 빠져나올 수 있는지는 실제로 겪어 봐야 안다.
+
+마법사를 다시 돌리기 전에 옛 항목을 먼저 지워야 한다. 정체성 계산이 바뀌어 같은
+endpoint 도 새 id 를 받고, 배치는 처음 보는 id 를 덧붙이기만 한다
+(`runtime_setup_batch.ml` 의 `additions`). 옛 항목을 남기면 그대로 고아가 된다. 마법사가
+쓰는 이름에는 전부 `setup_` 이 붙는다 — `[providers.setup_*]`, `[models.setup_*_model]`,
+바인딩 `[setup_*.setup_*_model]`(`runtime_setup_spec.ml` 의 `render`). 배포 절차:
+
+1. `runtime.toml` 에서 이름에 `setup_` 이 붙은 provider·모델·바인딩 섹션을 지우고,
+   `[runtime]`·레인·배정에서 그 id 를 가리키는 값도 지운다.
+2. 설치 마법사를 다시 돌린다.
+
+사람이 이름 붙인 provider(`glm-coding` 등)는 id 가 해시가 아니라 바뀌지 않는다.
+지우지 않는다.
 
 **셋. 이름.**
 `Official_client` 는 *누가 만든 앱인가*를 부르는데, 실제로 갈리는 축은 *턴을 무엇이

@@ -6113,6 +6113,27 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
        else Ansi.dim ^ "no" ^ Ansi.reset);
     add_empty ();
 
+    (* The live roster owns this reading, including its absence after a
+       successful turn. Neither historical last_error nor the last outcome
+       can answer for the current failure. *)
+    add_section "Current failure";
+    let failure_tone, failure_text =
+      match (keeper_reading state k).Keeper_control.liveness with
+      | Keeper_control.Present runtime ->
+          (match runtime.kr_runtime_blocker_summary with
+           | Some summary -> Theme.bad (), summary
+           | None -> Ansi.dim, "none")
+      | Keeper_control.Unobserved -> Ansi.dim, "unread"
+      | Keeper_control.Absent -> Ansi.dim, "absent from live roster"
+      | Keeper_control.Invalid detail -> Theme.bad (), "config error: " ^ detail
+    in
+    let indent = "  " in
+    Message_layout.wrap_words
+      ~max_cells:(max 1 (inner - Message_layout.display_width indent))
+      (Terminal_text.single_line failure_text)
+    |> List.iter (fun line -> add_line (indent ^ failure_tone ^ line ^ Ansi.reset));
+    add_empty ();
+
     (* Gate section. Two settings with similar names decide different things,
        so both are named rather than merged: YOLO is the in-memory stance that
        stops this chat asking and a restart clears, while the Gate mode is

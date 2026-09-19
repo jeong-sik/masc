@@ -1,8 +1,10 @@
 import { KEEPER_ACTIVATION_MODES } from '../../lib/keeper-activation-mode'
+import { SANDBOX_PROFILE_OPTIONS } from '../../types/core'
 import { Data, Effect, ParseResult, Schema } from 'effect'
 
 const KeeperMetaWireSchema = Schema.Struct({
   name: Schema.NonEmptyString,
+  sandbox_profile: Schema.Literal(...SANDBOX_PROFILE_OPTIONS),
   trace_id: Schema.NonEmptyString,
   created_at: Schema.NonEmptyString,
   updated_at: Schema.NonEmptyString,
@@ -20,6 +22,7 @@ const GateKeeperWireSchema = Schema.Struct({
   health: Schema.NonEmptyString,
   paused: Schema.Boolean,
   next_action: Schema.NullOr(Schema.String),
+  runtime_blocker_summary: Schema.NullOr(Schema.String),
   keepalive_running: Schema.Boolean,
   activation_mode: Schema.Literal(...KEEPER_ACTIVATION_MODES),
   runtime_id: Schema.NonEmptyString,

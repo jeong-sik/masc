@@ -145,6 +145,23 @@ let reduce_event ~nodes ~edges (value : event) =
         | None -> ())
     | None -> ()
   in
+  let finish_task status =
+    set_subject_status status;
+    (* A verdict's actor is its authority; the committed task's producer
+       owns the work. Direct transitions use their actor. *)
+    let producer_id =
+      match payload_string "producer" value.payload with
+      | Some name ->
+          Some (ensure_entity_node nodes { kind = "agent"; id = name }
+            ~fallback_status:Active ~ts_iso:value.ts_iso ~meta:value.payload)
+      | None -> actor_id
+    in
+    match producer_id, subject_id with
+    | Some source, Some target ->
+        ensure_edge edges ~source ~target ~kind:"works_on" ~active:false
+          ~ts_iso:value.ts_iso ~meta:value.payload
+    | None, _ | _, None -> ()
+  in
   (match tool_execution_event_kind_of_string value.kind with
   | Some (External_tool_called | Keeper_in_turn_tool_executed) ->
     (match actor_id, subject_id with
@@ -190,35 +207,8 @@ let reduce_event ~nodes ~edges (value : event) =
           ensure_edge edges ~source ~target ~kind:"works_on" ~active:false
             ~ts_iso:value.ts_iso ~meta:value.payload
       | (None, _) | (_, None) -> ())
-  | "task.approved" ->
-      (* RFC-0323 G-3: approve-produced Done completes the task like
-         task.done. The event actor is the VERIFIER; the assignee rides the
-         payload (emitted since G-3), and its works_on edge is the one to
-         close. Events from before G-3 lack the field — fall back to the
-         actor so the subject status still flips for historical replays. *)
-      set_subject_status Done;
-      let completer_id =
-        match payload_string "assignee" value.payload with
-        | Some name ->
-            Some
-              (ensure_entity_node nodes
-                 { kind = "agent"; id = name }
-                 ~fallback_status:Active ~ts_iso:value.ts_iso
-                 ~meta:value.payload)
-        | None -> actor_id
-      in
-      (match (completer_id, subject_id) with
-      | Some source, Some target ->
-          ensure_edge edges ~source ~target ~kind:"works_on" ~active:false
-            ~ts_iso:value.ts_iso ~meta:value.payload
-      | (None, _) | (_, None) -> ())
-  | "task.cancelled" ->
-      set_subject_status Cancelled;
-      (match (actor_id, subject_id) with
-      | Some source, Some target ->
-          ensure_edge edges ~source ~target ~kind:"works_on" ~active:false
-            ~ts_iso:value.ts_iso ~meta:value.payload
-      | (None, _) | (_, None) -> ())
+  | "task.approved" -> finish_task Done
+  | "task.cancelled" -> finish_task Cancelled
   | "message.broadcast" ->
       (match actor_id with
       | Some source ->

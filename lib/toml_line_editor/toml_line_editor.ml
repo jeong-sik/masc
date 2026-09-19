@@ -833,15 +833,27 @@ let remove_table_array_entry content ~path ~id_key ~id =
   join_lines (loop [] outside lines) ~trailing_newline:true
 ;;
 
+type table_removal =
+  | Table_removed of string
+  | Table_absent
+
+(* Whether a header was matched is decided while walking the lines, not by
+   comparing the result with the input: the join adds a final newline the input
+   may not have had, so a file without one would read as edited when nothing
+   was removed. *)
 let remove_table content ~path =
   let lines, _trailing = split_lines content in
   let segments = path_segments path in
-  let rec loop acc state = function
-    | [] -> List.rev acc
+  let rec loop acc ~removed state = function
+    | [] -> List.rev acc, removed
     | line :: rest when is_structural state && is_table ~path line ->
       let body, after = split_entry_body ~segments rest in
-      loop (List.rev_append (documentation_of_next_header body) acc) outside after
-    | line :: rest -> loop (line :: acc) (scan_line state line) rest
+      loop
+        (List.rev_append (documentation_of_next_header body) acc)
+        ~removed:true outside after
+    | line :: rest -> loop (line :: acc) ~removed (scan_line state line) rest
   in
-  join_lines (loop [] outside lines) ~trailing_newline:true
+  match loop [] ~removed:false outside lines with
+  | kept, true -> Table_removed (join_lines kept ~trailing_newline:true)
+  | _, false -> Table_absent
 ;;

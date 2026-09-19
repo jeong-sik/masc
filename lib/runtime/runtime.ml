@@ -3095,43 +3095,94 @@ let set_runtime_lane_candidates ?runtime_config_path ~lane_id ~runtime_ids () =
     Ok (write_lane_candidates ~content ~lane_id ~runtime_ids))
 ;;
 
+(* A lane shadows the runtime of the same id ([resolve_assignment] reads lanes
+   first), so a lane created under a runtime id would silently hand its
+   candidates to every keeper that names that runtime -- and to every keeper
+   without an assignment when it is the default. A runtime's own lane is
+   edited through [set_runtime_lane_candidates], which says what it does. *)
+let declares_runtime (config : Runtime_schema.config) id =
+  List.exists
+    (fun (binding : Runtime_schema.binding) -> String.equal (id_of_binding binding) id)
+    config.bindings
+;;
+
 let create_runtime_lane ?runtime_config_path ~lane_id ~runtime_ids () =
   let* lane_id = validated_lane_id lane_id in
   let* runtime_ids = validated_lane_candidates runtime_ids in
   edit_runtime_lanes ?runtime_config_path (fun ~content config ->
     if lane_is_declared config lane_id
     then Error (Printf.sprintf "lane %S already exists" lane_id)
+    else if declares_runtime config lane_id
+    then
+      Error
+        (Printf.sprintf
+           "%S is a runtime id; a new lane needs a name of its own" lane_id)
     else Ok (write_lane_candidates ~content ~lane_id ~runtime_ids))
+;;
+
+(* What still reaches a lane through its id. Each of these is a route
+   [resolve_assignment] reads lane first, so removing the lane would hand it
+   the bare runtime of the same id, or nothing at all. [media_failover] is not
+   here: its entries resolve as runtimes only. *)
+type lane_reference =
+  | Keeper_assignment of string
+  | Default_runtime
+  | Verifier_exact_slot of int  (* 1-based position in the slots *)
+
+let lane_reference_to_string = function
+  | Keeper_assignment keeper_name -> Printf.sprintf "[runtime.assignments].%s" keeper_name
+  | Default_runtime -> "[runtime].default, which every keeper without an assignment walks"
+  | Verifier_exact_slot position ->
+    Printf.sprintf
+      "[runtime.exact_output_lanes.%s].slots entry %d"
+      verifier_exact_lane_id
+      position
+;;
+
+let lane_references (config : Runtime_schema.config) ~lane_id =
+  let names id = String.equal id lane_id in
+  let assignments =
+    List.filter_map
+      (fun (keeper_name, target) ->
+         if names target then Some (Keeper_assignment keeper_name) else None)
+      config.keeper_assignments
+  in
+  let default =
+    match config.default_runtime_id with
+    | Some id when names id -> [ Default_runtime ]
+    | Some _ | None -> []
+  in
+  let verifier_slots =
+    verifier_exact_slot_ids_of_lane_decls config.exact_output_lane_decls
+    |> List.mapi (fun index id -> index + 1, id)
+    |> List.filter_map (fun (position, id) ->
+      if names id then Some (Verifier_exact_slot position) else None)
+  in
+  assignments @ default @ verifier_slots
 ;;
 
 let remove_runtime_lane ?runtime_config_path ~lane_id () =
   let* lane_id = validated_lane_id lane_id in
   edit_runtime_lanes ?runtime_config_path (fun ~content config ->
-    let assigned =
-      List.filter_map
-        (fun (keeper_name, target) ->
-           if String.equal target lane_id then Some keeper_name else None)
-        config.keeper_assignments
-    in
     if not (lane_is_declared config lane_id)
     then Error (Printf.sprintf "lane %S is not declared in [runtime.lanes]" lane_id)
-    else if assigned <> []
-    then
-      Error
-        (Printf.sprintf
-           "lane %S is assigned to %s; assign them elsewhere before removing the lane"
-           lane_id
-           (String.concat ", " assigned))
-    else (
-      let next = Toml_line_editor.remove_table content ~path:(lane_table_path lane_id) in
-      if String.equal next content
-      then
+    else
+      match lane_references config ~lane_id with
+      | _ :: _ as references ->
         Error
           (Printf.sprintf
-             "lane %S is not written as its own [runtime.lanes] table, so it cannot be \
-              removed here"
-             lane_id)
-      else Ok next))
+             "lane %S is in use by %s"
+             lane_id
+             (String.concat ", " (List.map lane_reference_to_string references)))
+      | [] ->
+        (match Toml_line_editor.remove_table content ~path:(lane_table_path lane_id) with
+         | Toml_line_editor.Table_removed next -> Ok next
+         | Toml_line_editor.Table_absent ->
+           Error
+             (Printf.sprintf
+                "lane %S is not written as its own [runtime.lanes] table, so it cannot be \
+                 removed here"
+                lane_id)))
 ;;
 
 (* Exact-output lanes name their walk order in [slots]; the routing API edits

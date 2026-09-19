@@ -1111,6 +1111,77 @@ let test_a_created_lane_is_assigned_then_removed () =
     | Error _ -> ())
 ;;
 
+let lane_write_ok label = function
+  | Ok _ -> ()
+  | Error msg -> Alcotest.failf "%s: %s" label msg
+;;
+
+(* A refused write names what refused it, and leaves the file as it was. *)
+let lane_write_refused label ~path ~names result =
+  let before = Fs_compat.load_file path in
+  (match result () with
+   | Ok _ -> Alcotest.failf "%s: the write went through" label
+   | Error msg ->
+     List.iter
+       (fun needle ->
+          if not (string_contains msg needle)
+          then Alcotest.failf "%s: %S does not name %S" label msg needle)
+       names);
+  Alcotest.(check string) (label ^ ": the file is unchanged") before
+    (Fs_compat.load_file path)
+;;
+
+(* Every keeper without an assignment walks [runtime].default, and a lane of
+   that id is read before the runtime. Removing it would move all of them onto
+   the bare runtime with nothing in the refusal to say so. *)
+let test_a_lane_the_default_walks_is_not_removed () =
+  with_runtime_file (fun path ->
+    Runtime.set_runtime_lane_candidates ~runtime_config_path:path
+      ~lane_id:"runpod_mtp.qwen" ~runtime_ids:[ "runpod_mtp.qwen"; "openai.gpt" ] ()
+    |> lane_write_ok "write the default's lane";
+    lane_write_refused "remove" ~path ~names:[ "[runtime].default" ] (fun () ->
+      Runtime.remove_runtime_lane ~runtime_config_path:path ~lane_id:"runpod_mtp.qwen" ()))
+;;
+
+(* verifier_exact slots resolve lane first too: a slot naming a runtime that
+   has its own lane walks that lane. *)
+let test_a_lane_a_verifier_slot_walks_is_not_removed () =
+  with_runtime_file (fun path ->
+    Runtime.set_runtime_lane_candidates ~runtime_config_path:path
+      ~lane_id:"openai.small" ~runtime_ids:[ "openai.small"; "openai.gpt" ] ()
+    |> lane_write_ok "write the runtime's lane";
+    Runtime.set_exact_output_lane_slots ~runtime_config_path:path
+      ~lane_name:"verifier_exact" ~slots:[ "openai.gpt"; "openai.small" ] ()
+    |> lane_write_ok "name it in a verifier slot";
+    lane_write_refused "remove" ~path
+      ~names:[ "[runtime.exact_output_lanes.verifier_exact].slots entry 2" ]
+      (fun () ->
+         Runtime.remove_runtime_lane ~runtime_config_path:path ~lane_id:"openai.small" ()))
+;;
+
+(* A new lane under a runtime id would take over that runtime for every keeper
+   that names it. That runtime's own lane is what [set] writes. *)
+let test_a_new_lane_under_a_runtime_id_is_refused () =
+  with_runtime_file (fun path ->
+    lane_write_refused "create" ~path ~names:[ "is a runtime id" ] (fun () ->
+      Runtime.create_runtime_lane ~runtime_config_path:path ~lane_id:"openai.small"
+        ~runtime_ids:[ "openai.gpt" ] ());
+    Alcotest.(check bool) "no lane was declared" true
+      (Option.is_none (Runtime.get_lane_by_id "openai.small")))
+;;
+
+(* A lane written inline has no header for the line editor to remove. With no
+   final newline, comparing the edited text with the input used to call that a
+   removal, and the lane stayed. *)
+let test_an_inline_lane_is_not_reported_removed () =
+  with_runtime_file (fun path ->
+    write_file path
+      (String.trim runtime_config
+       ^ "\n\n[runtime.lanes]\ncoding = { candidates = [\"openai.gpt\"] }");
+    lane_write_refused "remove" ~path ~names:[ "not written as its own" ] (fun () ->
+      Runtime.remove_runtime_lane ~runtime_config_path:path ~lane_id:"coding" ()))
+;;
+
 let test_lane_candidates_create_the_lane_table () =
   with_runtime_file (fun path ->
     (match
@@ -2991,6 +3062,22 @@ let () =
             "a created lane is assigned, then removed once no keeper names it"
             `Quick
             test_a_created_lane_is_assigned_then_removed
+        ; Alcotest.test_case
+            "a lane the default walks is not removed"
+            `Quick
+            test_a_lane_the_default_walks_is_not_removed
+        ; Alcotest.test_case
+            "a lane a verifier slot walks is not removed"
+            `Quick
+            test_a_lane_a_verifier_slot_walks_is_not_removed
+        ; Alcotest.test_case
+            "a new lane under a runtime id is refused"
+            `Quick
+            test_a_new_lane_under_a_runtime_id_is_refused
+        ; Alcotest.test_case
+            "an inline lane is not reported removed"
+            `Quick
+            test_an_inline_lane_is_not_reported_removed
         ; Alcotest.test_case
             "a second write replaces the ladder"
             `Quick

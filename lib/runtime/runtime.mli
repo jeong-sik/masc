@@ -876,10 +876,14 @@ val create_runtime_lane :
   (config_commit_receipt, string) result
 (** Declare a new [\[runtime.lanes."<lane_id>"\]] with [runtime_ids] as its
     candidates, through the same validated write as
-    {!set_runtime_lane_candidates}. The id may be any name, not only a runtime
-    id. Refused when the file already declares that lane, read under the write
-    lock: a create that landed on an existing lane would replace its
-    candidates without the operator having seen them. *)
+    {!set_runtime_lane_candidates}. Both refusals read the file under the
+    write lock:
+    - the file already declares that lane: a create that landed on it would
+      replace its candidates without the operator having seen them;
+    - [lane_id] is a declared runtime id: the lane would shadow that runtime
+      for every keeper that names it, and for every unassigned keeper when it
+      is the default. A runtime's own lane is edited with
+      {!set_runtime_lane_candidates}. *)
 
 val remove_runtime_lane :
   ?runtime_config_path:string ->
@@ -887,9 +891,12 @@ val remove_runtime_lane :
   unit ->
   (config_commit_receipt, string) result
 (** Remove the [\[runtime.lanes."<lane_id>"\]] table through the runtime.toml
-    SSOT writer. Refused, naming the keepers, when [\[runtime.assignments\]]
-    names the lane: an assignment to a lane that is gone either fails the load
-    or silently walks a runtime of the same name. Refused when the file does
+    SSOT writer. Refused while anything still routes through the lane id,
+    naming each: an entry of [\[runtime.assignments\]], [\[runtime\].default]
+    (which every unassigned keeper walks), or a
+    [\[runtime.exact_output_lanes.verifier_exact\]] slot. Each of these reads a
+    lane before a runtime, so removing the lane would either fail the load or
+    silently hand them the runtime of the same id. Refused when the file does
     not declare the lane as its own table. *)
 
 val set_exact_output_lane_slots :

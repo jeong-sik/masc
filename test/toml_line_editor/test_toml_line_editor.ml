@@ -426,8 +426,13 @@ candidates = ["b.two"]
 (* Removing a lane takes its header and its candidates. The note above its
    header stays, as it does for an array-of-tables entry, and so does the note
    documenting the next lane. *)
+let removed content ~path =
+  match Toml_line_editor.remove_table content ~path with
+  | Toml_line_editor.Table_removed out -> out
+  | Toml_line_editor.Table_absent -> Alcotest.failf "no table %s was found" path
+
 let test_remove_table_drops_one_lane () =
-  let out = Toml_line_editor.remove_table lanes_fixture ~path:{|runtime.lanes."a.one"|} in
+  let out = removed lanes_fixture ~path:{|runtime.lanes."a.one"|} in
   Alcotest.(check bool) "the header is gone" false (has_line out {|[runtime.lanes."a.one"]|});
   Alcotest.(check bool) "its candidates went with it" false (has_line out {|  "a.one",|});
   Alcotest.(check bool) "the next lane stays" true (has_line out "[runtime.lanes.coding]");
@@ -436,9 +441,27 @@ let test_remove_table_drops_one_lane () =
   Alcotest.(check bool) "the note above the removed header stays" true
     (has_line out "# polisher.")
 
-let test_remove_table_of_an_absent_path_changes_nothing () =
-  Alcotest.(check string) "unchanged" lanes_fixture
-    (Toml_line_editor.remove_table lanes_fixture ~path:"runtime.lanes.absent")
+let is_absent content ~path =
+  match Toml_line_editor.remove_table content ~path with
+  | Toml_line_editor.Table_absent -> true
+  | Toml_line_editor.Table_removed _ -> false
+
+let test_remove_table_of_an_absent_path_is_absent () =
+  Alcotest.(check bool) "absent" true (is_absent lanes_fixture ~path:"runtime.lanes.absent")
+
+(* A lane written inline has no header of its own. With no final newline the
+   rejoined text differs from the input, which is how comparing the two used
+   to report a removal that never happened. *)
+let test_an_inline_table_without_a_final_newline_is_absent () =
+  let inline = {|[runtime.lanes]
+coding = { candidates = ["b.two"] }|} in
+  Alcotest.(check bool) "absent" true (is_absent inline ~path:"runtime.lanes.coding")
+
+let test_a_table_without_a_final_newline_is_removed () =
+  let source = {|[runtime.lanes.coding]
+candidates = ["b.two"]|} in
+  Alcotest.(check bool) "the header is gone" false
+    (has_line (removed source ~path:"runtime.lanes.coding") "[runtime.lanes.coding]")
 
 (* [a.b] and [[a.b]] carry the same path and mean different things to a loader,
    so an editor that confused them would write a field into the wrong shape. *)
@@ -904,8 +927,12 @@ let () =
             test_a_duplicated_id_addresses_every_match
         ; Alcotest.test_case "remove_table drops one lane" `Quick
             test_remove_table_drops_one_lane
-        ; Alcotest.test_case "remove_table of an absent path changes nothing" `Quick
-            test_remove_table_of_an_absent_path_changes_nothing
+        ; Alcotest.test_case "remove_table of an absent path is absent" `Quick
+            test_remove_table_of_an_absent_path_is_absent
+        ; Alcotest.test_case "an inline table without a final newline is absent" `Quick
+            test_an_inline_table_without_a_final_newline_is_absent
+        ; Alcotest.test_case "a table without a final newline is removed" `Quick
+            test_a_table_without_a_final_newline_is_removed
         ] )
     ; ( "keys the writer has to quote"
       , [ Alcotest.test_case "a key that is not bare is quoted" `Quick

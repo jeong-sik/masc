@@ -45,25 +45,3 @@ let ensure_masc_dir () =
   ensure_dir dir
 ;;
 
-(** Max JSONL file size before rotation (10 MB).
-    Prevents unbounded disk growth from agent feedback loops. *)
-let max_jsonl_bytes = 10 * 1024 * 1024
-
-(** Rotate a JSONL file if it exceeds [max_jsonl_bytes].
-    Keeps one backup (.1) and truncates the active file.
-    Safe: uses rename (atomic on same filesystem). *)
-let rotate_if_needed path =
-  try
-    let st = Unix.stat path in
-    if st.Unix.st_size > max_jsonl_bytes
-    then (
-      let backup = path ^ ".1" in
-      (try Sys.rename backup (path ^ ".2") with
-       | Sys_error _ -> ());
-      Sys.rename path backup;
-      Log.BoardLog.info "rotated %s (was %d bytes)" path st.Unix.st_size)
-  with
-  | Unix.Unix_error (e, fn, arg) ->
-    Log.BoardLog.warn "rotate error: %s(%s): %s" fn arg (Unix.error_message e)
-  | Sys_error msg -> Log.BoardLog.warn "rotate error: %s" msg
-;;

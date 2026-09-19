@@ -597,6 +597,53 @@ let test_flush_failure_keeps_the_vote_log_scheduled () =
    used to swallow the Error, so a failed rewrite left the orphan with nothing
    scheduled to retry and a restart revived a post that never reached memory.
    Blocking only the posts snapshot path exercises that branch on its own. *)
+(* A well-formed vote whose post is not loaded survives the restart and the
+   next flush. On 2026-09-19 the posts file had been renamed away, the board
+   loaded no posts, the loader skipped all 225 votes as targetless, and the
+   first flush wrote the empty ledger over the file. *)
+let test_restart_keeps_a_vote_whose_post_is_absent () =
+  let present =
+    create_post_exn ~author:"present-author" ~content:"a post that loads"
+  in
+  let absent_post_id = "p-0123456789abcdef0123456789abcdef" in
+  Fs_compat.save_file
+    (Board_votes.vote_log_path ())
+    (Yojson.Safe.to_string
+       (vote_row
+          ~post_id:absent_post_id
+          ~voter:"absent-voter"
+          ~direction:"up"
+          ~ts:(Time_compat.now ()))
+     ^ "\n");
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Board_dispatch.init_jsonl ();
+  let store =
+    match Board_dispatch.backend () with
+    | Board_dispatch.Jsonl store -> store
+  in
+  Alcotest.(check int) "the vote is loaded" 1 (Hashtbl.length store.vote_log);
+  (* A vote on the loaded post marks it dirty, so the flush rewrites the
+     whole ledger from memory. *)
+  (match
+     Board_dispatch.vote
+       ~voter:"present-voter"
+       ~post_id:(Board.Post_id.to_string present.id)
+       ~direction:Board.Up
+   with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  Board_votes.flush_dirty store;
+  let rows = read_ts_rows (Board_votes.vote_log_path ()) in
+  Alcotest.(check bool)
+    "the vote is still on disk after the flush"
+    true
+    (Option.is_some
+       (find_row
+          ~target:("post:" ^ absent_post_id ^ ":absent-voter")
+          ~voter:"absent-voter"
+          rows))
+
 let test_rewrite_posts_failure_stays_scheduled () =
   let post = create_post_exn ~author:"rewrite-retry-author" ~content:"rewrite retry body" in
   ignore post;
@@ -660,5 +707,9 @@ let () =
             "flush: cancellation cannot cut the write"
             `Quick
             (with_eio test_flush_under_cancellation_still_writes);
+          Alcotest.test_case
+            "restart keeps a vote whose post is absent"
+            `Quick
+            (with_eio test_restart_keeps_a_vote_whose_post_is_absent);
         ] );
     ]

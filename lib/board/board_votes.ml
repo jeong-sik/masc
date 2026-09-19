@@ -360,13 +360,6 @@ let recalculate_reply_counts store =
   let total = Hashtbl.fold (fun _ (p : post) acc -> acc + p.reply_count) store.posts 0 in
   Log.BoardLog.debug "recalculated reply_counts: %d total comments across posts" total
 
-let vote_target_exists store vote =
-  let target_id = Board_vote_key.target_id vote in
-  match Board_vote_key.target_kind vote with
-  | Board_vote_key.Post -> Hashtbl.mem store.posts target_id
-  | Board_vote_key.Comment -> Hashtbl.mem store.comments target_id
-;;
-
 let recalculate_vote_counts store =
   Hashtbl.iter
     (fun key (post : post) ->
@@ -433,13 +426,21 @@ let load_persisted_votes store =
         (fun json ->
            match persisted_vote_row_of_yojson json with
            | None -> ()
-           | Some (vote, direction, ts) when vote_target_exists store vote ->
+           (* A vote is kept whether or not its post or comment is loaded.
+              The snapshot writes [store.vote_log] back whole, so a vote
+              skipped here is gone from disk at the next flush. On
+              2026-09-19 the posts file had been renamed away, the board
+              loaded no posts, and all 225 votes were skipped and then
+              overwritten. Deleting a post already removes its votes
+              ([delete_post]); a vote whose target is absent at load is not
+              stale data but a sign the target failed to load, and
+              [recalculate_vote_counts] leaves it out of every count. *)
+           | Some (vote, direction, ts) ->
              Hashtbl.replace
                store.vote_log
                (Board_vote_key.to_string vote)
                (direction, ts);
-             Stdlib.incr loaded
-           | Some _ -> ())
+             Stdlib.incr loaded)
         lines;
       recalculate_vote_counts store;
       if !loaded > 0 then

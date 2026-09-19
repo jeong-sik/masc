@@ -72,7 +72,14 @@ let config
     ~top_k:40
     ~system_prompt:"Count the exact projected input."
     ~cache_system_prompt:true
-    ~tool_choice:Any
+    (* Advisory, not forced. No catalog row names "input-count-fixture", so
+       nothing declares it can take a forced choice and build_request refuses
+       one before it serializes anything. [Any] reached the wire here only
+       because supports_tool_choice_override asserted the capability from the
+       config; that channel is gone. Both builders project this through the
+       same [tool_choice_to_json], so the shared-field comparison below is
+       unchanged, and [disable_parallel_tool_use] still nests in the object. *)
+    ~tool_choice:Auto
     ~disable_parallel_tool_use:true
     ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
     ?max_concurrent_requests

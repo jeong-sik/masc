@@ -2335,6 +2335,9 @@ capabilities_base = "openai_chat_extended"
 
 [[providers]]
 id = "claude"
+# 2026-09-19: documented request suppression, independent of model capability.
+# https://platform.claude.com/docs/en/agents-and-tools/tool-use/parallel-tool-use
+supports_parallel_tool_suppression = true
 kind = "anthropic"
 base_url = "https://api.anthropic.com"
 request_path = "/v1/messages"
@@ -2369,6 +2372,9 @@ capabilities_base = "openai_chat"
 
 [[providers]]
 id = "openai-responses"
+# 2026-09-19: documented request suppression, independent of model capability.
+# https://developers.openai.com/api/docs/guides/function-calling#parallel-function-calling
+supports_parallel_tool_suppression = true
 kind = "openai_compat"
 base_url = "https://api.openai.com"
 request_path = "/v1/responses"

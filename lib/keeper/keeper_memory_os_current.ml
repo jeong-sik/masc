@@ -633,20 +633,36 @@ let parse path content =
 
 let read_for_keepers_dir ~keepers_dir ~keeper_id =
   let snapshot_path = path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let read_error message =
+    Printf.sprintf "current Memory OS read failed path=%s: %s" snapshot_path message
+  in
   try
-    match Fs_compat.load_file_opt snapshot_path with
+    (* Writers accept directory aliases and publish into their physical
+       directory. Resolve that same root before the owned-file read. *)
+    let physical_dir =
+      try Some (Fs_compat.realpath keepers_dir) with
+      | Unix.Unix_error (Unix.ENOENT, _, _) -> None
+    in
+    let* contents =
+      match physical_dir with
+      | None -> Ok None
+      | Some ownership_root ->
+        Fs_compat.load_owned_regular_file
+          ~ownership_root
+          (path_for_keepers_dir ~keepers_dir:ownership_root ~keeper_id)
+        |> Result.map_error (fun error ->
+          read_error (Fs_compat.owned_regular_file_read_error_to_string error))
+    in
+    match contents with
     | None -> Ok None
     | Some content ->
       let+ snapshot = parse snapshot_path content in
       Some snapshot
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | Sys_error message ->
-    Error
-      (Printf.sprintf
-         "current Memory OS read failed path=%s: %s"
-         snapshot_path
-         message)
+  | Unix.Unix_error (error, operation, path) ->
+    Error (read_error (Printf.sprintf "%s %s: %s" operation path (Unix.error_message error)))
+  | Sys_error message -> Error (read_error message)
 ;;
 
 let map_facts facts =

@@ -16,6 +16,7 @@ implementation_prs: ["#37020", "#37024", "#37027", "#37030", "#37028", "#37031"]
 - 상태: Draft
 - 작성: 2026-09-18, 고침: 2026-09-19. 코드는 origin/main `84fb520c34`, 실측은 작성일 라이브 `<base-path>/.masc`. 뒤에 더한 실측은 문장마다 잰 날을 적었다.
 - 관련: 창 RFC(`keeper-context-window-in-tokens`) §13 개정 Draft #37008, Memory OS RFC(`memory-os-bounded-context-and-librarian-curator`), RFC-0456, RFC-0363, 이슈 #37004·#36979
+- 구현 상태(2026-09-19, main `e50d28963b`): 턴 끝 기록과 진행 파일 저장소, 순수 범위 선택 함수까지 들어왔다. 현재 Librarian 회차는 진행 파일을 읽거나 쓰지 않는다. §4의 루프와 §4.9의 밀림 표시는 §8의 4~6단계 계획이다. 현재 동작은 §2를 따르며, 이 구분은 #37104에서 추적한다.
 
 ## 읽기 전에 — 말의 뜻
 
@@ -166,9 +167,11 @@ Keeper 는 다음 턴의 첫 요청에서 facts 전부를 `Memory OS Recall` 블
 
 놓친 턴의 메시지는 checkpoint 에 남아 있다. 그래서 다음 회차의 "맨 뒤 72개"에 들어오면 읽히고, 못 들어오면 영영 읽히지 않는다. 어느 쪽이었는지는 어디에도 남지 않는다. 읽은 위치가 없으므로 창은 Librarian 에게 물을 것이 없다.
 
-**이 스택(1~2b)이 어디까지 닫는가** (09-19 확인). 일곱 자리 **전부 정보는 더 이상 잃지 않는다.** 턴 끝 줄은 checkpoint 저장 바로 뒤, 큐·레인·owner 를 건드리기 **전에** 조건 없이 쓴다(`keeper_agent_run_finalize_response.ml`). 그래서 L2·L4 처럼 제출 쪽이 거절해도 기록은 남는다. L1·L3 의 덮어쓰기는 append-only 파일이라 일어나지 않는다. L5 는 매 턴 줄이 남으니 나중 회차가 위치부터 따라잡는다. L6 은 위치가 `Read`·`Baseline` 에서만 움직이고 그것도 회차가 배운 것을 저장한 뒤라는 계약이다(`keeper_librarian_range.mli` 의 `progress_after`). L7 은 둘 다 파일이라 재시작을 넘는다.
+**이 스택(1~2b)에 들어온 것** (09-19 확인). 턴 끝 줄은 checkpoint 저장 바로 뒤, 큐·레인·owner 를 건드리기 **전에** 쓴다(`keeper_agent_run_finalize_response.ml`). 쓰기가 성공한 줄은 L2·L4의 제출 거절이나 L1·L3의 제출 덮어쓰기와 별개로 파일에 남는다. 진행 파일 저장소와 순수 범위 선택 함수도 있지만, `Keeper_librarian_range.select`·`slice`·`progress_after`를 부르는 생산 경로는 아직 없다. `progress_after`는 다음 위치를 계산하는 함수이며, 회차의 기억 저장 성공이나 진행 파일 쓰기를 실행하지 않는다.
 
-**기계는 하나도 안 지웠다.** cadence, 1칸, 대기 칸은 4단계와 5단계가 지운다. 지금 스택이 사는 것은 "잃지 않음"이지 "안 도는 자리를 없앰"이 아니다.
+**현재 회차가 읽는 것은 여전히 최근 메시지 창이다.** 턴 끝 클로저 한 칸과 memory lane의 대기 한 칸을 거쳐, `prompt_input_for_librarian`이 `max_messages × cadence_turns`만큼 뒤에서 고른다. 성공과 실패 모두 cadence 카운터를 초기화하고, `attempt_remembered`는 저장 성공을 확인하지 않고 시도한 것으로 표시한다. 따라서 L5의 건너뛴 턴 따라잡기, L6의 저장 실패 후 같은 범위 재시도, L7의 재시작 후 읽던 위치 복원은 현재 보장이 아니다. 턴 끝 파일이 남는 것만으로 뒤의 회차가 그 내용을 읽었다고 말할 수 없다.
+
+registry의 `Succeeded`는 facts의 `apply_disposition` 성공을 뜻한다. working context는 별도로 저장하며 그 실패가 facts 저장을 막지 않는다. 이 성공 표시는 진행 파일 전진을 뜻하지 않는다. §8의 4단계에서 루프를 연결하고 성공한 저장 뒤에만 위치를 쓰는지 검증하며, 5단계에서 cadence·1칸·대기 칸을 지운다. 그 전에는 L1~L7의 기록 기반 전달을 완료했다고 표시하지 않는다.
 
 **L3 은 고장이 아니라 부하의 표시다**(09-19 실측). 대기 칸 덮어쓰기(`coalesced latest snapshot (lane=librarian)`)를 날짜별로 세면 이렇다.
 

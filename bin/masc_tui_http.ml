@@ -1468,6 +1468,41 @@ let set_runtime_lane_slots ~(host : string) ~(port : int) ~(lane : string)
   | Ok json ->
     decode_runtime_config_commit_receipt json
     |> Result.map (fun (_receipt : runtime_config_commit_receipt) -> ())
+
+(* The routing API names a standalone lane's walk order "exact/<name>", which
+   keeps its names apart from conversation-lane ids. *)
+let exact_lane_route name = "exact/" ^ name
+
+let post_runtime_lane_action ~host ~port fields =
+  match
+    post_json ~host ~port ~path:"/api/v1/runtime/config/routing"
+      ~body:(Yojson.Safe.to_string (`Assoc fields))
+  with
+  | Error detail -> Error detail
+  | Ok json ->
+    decode_runtime_config_commit_receipt json
+    |> Result.map (fun (_receipt : runtime_config_commit_receipt) -> ())
+;;
+
+(** POST /api/v1/runtime/config/routing with [action = "create"]: declare a
+    lane under [lane] with [runtime_ids] as its candidates. The server refuses
+    a name the file already declares. *)
+let create_runtime_lane ~(host : string) ~(port : int) ~(lane : string)
+      ~(runtime_ids : string list) : (unit, string) result =
+  post_runtime_lane_action ~host ~port
+    [ "lane", `String lane
+    ; "action", `String "create"
+    ; "runtime_ids", `List (List.map (fun id -> `String id) runtime_ids)
+    ]
+
+(** POST /api/v1/runtime/config/routing with [action = "remove"]: delete the
+    declared lane [lane]. The server refuses while a keeper still routes
+    through it -- an assignment, or [\[runtime\].default] for every keeper
+    without one -- and names each. *)
+let remove_runtime_lane ~(host : string) ~(port : int) ~(lane : string)
+    : (unit, string) result =
+  post_runtime_lane_action ~host ~port
+    [ "lane", `String lane; "action", `String "remove" ]
 ;;
 
 (** GET /api/v1/keepers/tool-approvals — the tool calls keepers are holding. *)

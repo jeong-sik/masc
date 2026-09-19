@@ -401,7 +401,7 @@ describe('RuntimeHealthSnapshot', () => {
         dropped_media_failover: [],
         dropped_lane_candidates: [],
         dropped_lanes: [],
-        next_action: 'Add deployment rows to agent-core-models-overlay.toml (or upstream Agent Core).',
+        next_action: 'Add a row for each to the AGENT_CORE embedded catalog.',
       },
     })
     const { RuntimeHealthSnapshot } = await import('./runtime-health-snapshot')
@@ -418,7 +418,7 @@ describe('RuntimeHealthSnapshot', () => {
     expect(container.textContent).toContain('effective default: glm-coding.glm-5-turbo')
     expect(container.textContent).toContain('disabled runtimes: mimo.mimo-v2.5-pro, mimo.mimo-v2.5')
     expect(container.textContent).toContain('missing catalog: mimo.mimo-v2.5-pro, mimo.mimo-v2.5')
-    expect(container.textContent).toContain('next: Add deployment rows to agent-core-models-overlay.toml (or upstream Agent Core).')
+    expect(container.textContent).toContain('next: Add a row for each to the AGENT_CORE embedded catalog.')
   })
 
   it('uses force=1 when the operator clicks Live probe', async () => {

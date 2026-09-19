@@ -99,9 +99,6 @@ let read_file path =
 
 let repo_runtime_toml = "# repo runtime seed\n"
 let local_runtime_toml = "# local runtime seed\n"
-let repo_model_catalog_overlay_toml =
-  "[[models]]\nid_prefix = \"repo-runtime\"\nprovider_name = \"repo-provider\"\n"
-
 let test_grpc_tool_arguments_fail_closed_before_dispatch () =
   let dispatch_calls = ref 0 in
   let dispatch _arguments =
@@ -245,9 +242,6 @@ let make_config_root root =
   let config = Filename.concat root "config" in
   mkdir_p (Filename.concat config "prompts");
   mkdir_p (Filename.concat config "keepers");
-  write_file
-    (Filename.concat config "agent-core-models-overlay.toml")
-    repo_model_catalog_overlay_toml;
   write_file (Filename.concat root "agent-core-models.toml") "legacy full catalog must be ignored";
   write_file (Filename.concat config "runtime.toml") repo_runtime_toml;
   write_file (Filename.concat config "prompts/keeper.md") "prompt";
@@ -260,9 +254,6 @@ let make_base_path_config_root root =
   in
   mkdir_p (Filename.concat config "prompts");
   mkdir_p (Filename.concat config "keepers");
-  write_file
-    (Filename.concat config "agent-core-models-overlay.toml")
-    repo_model_catalog_overlay_toml;
   write_file (Filename.concat config "runtime.toml") repo_runtime_toml;
   write_file (Filename.concat config "prompts/keeper.md") "prompt";
   write_example_keeper config;
@@ -319,78 +310,12 @@ let test_model_catalog_configuration_ignores_legacy_discovery_inputs () =
   Alcotest.(check int) "legacy catalog not loaded" 0 !load_calls;
   Alcotest.(check int) "legacy catalog not installed" 0 !set_calls
 
-let test_model_catalog_overlay_installs_config_root_overlay () =
-  with_temp_dir "model-catalog-overlay-install" (fun dir ->
-    let config_root = Filename.concat dir "config-root" in
-    let overlay = Filename.concat config_root "agent-core-models-overlay.toml" in
-    mkdir_p config_root;
-    write_file overlay "[[models]]\nid_prefix = \"deployment-delta\"\n";
-    let load_calls = ref [] in
-    let set_overlay_calls = ref 0 in
-    let result =
-      Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
-        ~config_root
-        ~load_catalog:(fun path ->
-          load_calls := path :: !load_calls;
-          Ok (Llm_provider.Model_catalog.empty, []))
-        ~set_overlay:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_overlay_calls)
-        ()
-    in
-    (match result with
-     | None -> Alcotest.fail "expected config-root overlay resolution"
-     | Some path ->
-       Alcotest.(check string) "path" (canonical_path overlay) (canonical_path path));
-    Alcotest.(check (list string)) "load overlay" [ overlay ] (List.rev !load_calls);
-    Alcotest.(check int) "set overlay" 1 !set_overlay_calls)
-
-let test_model_catalog_overlay_absent_is_noop () =
-  with_temp_dir "model-catalog-overlay-absent" (fun dir ->
-    let config_root = Filename.concat dir "config-root" in
-    mkdir_p config_root;
-    let load_calls = ref [] in
-    let set_overlay_calls = ref 0 in
-    let result =
-      Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
-        ~config_root
-        ~load_catalog:(fun path ->
-          load_calls := path :: !load_calls;
-          Ok (Llm_provider.Model_catalog.empty, []))
-        ~set_overlay:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_overlay_calls)
-        ()
-    in
-    Alcotest.(check bool) "no overlay resolved" true (Option.is_none result);
-    Alcotest.(check (list string)) "no load" [] !load_calls;
-    Alcotest.(check int) "no install" 0 !set_overlay_calls)
-
-let test_model_catalog_overlay_invalid_fails_loud () =
-  with_temp_dir "model-catalog-overlay-invalid" (fun dir ->
-    let config_root = Filename.concat dir "config-root" in
-    let overlay = Filename.concat config_root "agent-core-models-overlay.toml" in
-    mkdir_p config_root;
-    write_file overlay "not toml";
-    let set_overlay_calls = ref 0 in
-    match
-      Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
-        ~config_root
-        ~load_catalog:(fun (_ : string) -> Error "parse failed")
-        ~set_overlay:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_overlay_calls)
-        ()
-    with
-    | (_ : string option) ->
-      Alcotest.fail "expected Config_error for invalid overlay"
-    | exception Env_config_core.Config_error message ->
-      Alcotest.(check bool)
-        "error names overlay path"
-        true
-        (String_util.contains_substring message "agent-core-models-overlay.toml");
-      Alcotest.(check int) "no install" 0 !set_overlay_calls)
-
 let test_config_load_failure_diagnostic_attributes_to_config () =
   let output =
     Server_runtime_bootstrap.config_load_failure_diagnostic
       ~detail:
-        "catalog overlay /ws/.masc/config/agent-core-models-overlay.toml: model entry \
-         \"m\" contains unknown field(s): supports_extended_thinking"
+        "/ws/.masc/config/runtime.toml: model entry \"m\" contains unknown \
+         field(s): supports_extended_thinking"
   in
   Alcotest.(check bool)
     "names the configuration class, not a connection problem"
@@ -399,7 +324,7 @@ let test_config_load_failure_diagnostic_attributes_to_config () =
   Alcotest.(check bool)
     "carries the config file path verbatim"
     true
-    (String_util.contains_substring output "agent-core-models-overlay.toml");
+    (String_util.contains_substring output "runtime.toml");
   Alcotest.(check bool)
     "names the next action"
     true
@@ -408,117 +333,6 @@ let test_config_load_failure_diagnostic_attributes_to_config () =
     "never claims a model connection failure"
     false
     (String_util.contains_substring output "Model connection failed")
-let test_model_catalog_overlay_skips_poisoned_entries () =
-  with_temp_dir "model-catalog-overlay-lenient" (fun dir ->
-    let config_root = Filename.concat dir "config-root" in
-    let overlay = Filename.concat config_root "agent-core-models-overlay.toml" in
-    mkdir_p config_root;
-    write_file
-      overlay
-      "[[models]]\n\
-       id_prefix = \"lenient-good-model\"\n\
-       supports_tools = true\n\
-       [[models]]\n\
-       id_prefix = \"lenient-stale-model\"\n\
-       supports_extended_thinking = true\n";
-    let installed = ref None in
-    let result =
-      Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
-        ~config_root
-        ~set_overlay:(fun catalog -> installed := Some catalog)
-        ()
-    in
-    (match result with
-     | None -> Alcotest.fail "expected config-root overlay resolution"
-     | Some path ->
-       Alcotest.(check string) "path" (canonical_path overlay) (canonical_path path));
-    match !installed with
-    | None -> Alcotest.fail "expected the surviving overlay rows to install"
-    | Some catalog ->
-      Alcotest.(check bool)
-        "valid row survives"
-        true
-        (Option.is_some (Llm_provider.Model_catalog.lookup catalog "lenient-good-model"));
-      Alcotest.(check bool)
-        "poisoned row skipped"
-        true
-        (Option.is_none (Llm_provider.Model_catalog.lookup catalog "lenient-stale-model")))
-
-let test_model_catalog_overlay_broken_toml_still_fails_loud () =
-  with_temp_dir "model-catalog-overlay-broken-toml" (fun dir ->
-    let config_root = Filename.concat dir "config-root" in
-    let overlay = Filename.concat config_root "agent-core-models-overlay.toml" in
-    mkdir_p config_root;
-    write_file overlay "not toml";
-    let set_overlay_calls = ref 0 in
-    match
-      Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
-        ~config_root
-        ~set_overlay:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_overlay_calls)
-        ()
-    with
-    | (_ : string option) ->
-      Alcotest.fail "expected Config_error for broken-TOML overlay"
-    | exception Env_config_core.Config_error message ->
-      Alcotest.(check bool)
-        "error names overlay path"
-        true
-        (String_util.contains_substring message "agent-core-models-overlay.toml");
-      Alcotest.(check int) "no install" 0 !set_overlay_calls)
-
-let test_explicit_model_catalog_replacement_precedes_overlay () =
-  with_temp_dir "model-catalog-explicit-precedence" (fun config_root ->
-    let overlay_path = Filename.concat config_root "agent-core-models-overlay.toml" in
-    write_file overlay_path "overlay fixture";
-    let parse source toml =
-      match Llm_provider.Model_catalog.of_toml_string ~source toml with
-      | Ok catalog -> catalog
-      | Error detail -> Alcotest.failf "%s catalog fixture invalid: %s" source detail
-    in
-    let explicit =
-      parse
-        "explicit"
-        "[[models]]\nid_prefix = \"explicit-model\"\nbase = \"openai_chat\"\n"
-    in
-    let overlay =
-      parse
-        "overlay"
-        "[[models]]\nid_prefix = \"overlay-model\"\nbase = \"openai_chat\"\n"
-    in
-    let previous = Llm_provider.Model_catalog.global () in
-    Fun.protect
-      ~finally:(fun () ->
-        match previous with
-        | Some catalog -> Llm_provider.Model_catalog.set_global catalog
-        | None -> Llm_provider.Model_catalog.clear_global ())
-      (fun () ->
-        Llm_provider.Model_catalog.clear_global ();
-        ignore
-          (Server_runtime_bootstrap.configure_agent_core_model_catalog_env
-             ~env:(function
-               | "AGENT_CORE_MODEL_CATALOG" -> Some "/explicit/catalog.toml"
-               | _ -> None)
-             ~load_catalog:(fun _ -> Ok explicit)
-             ());
-        ignore
-          (Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
-             ~config_root
-             ~load_catalog:(fun _ -> Ok (overlay, []))
-             ());
-        match Llm_provider.Model_catalog.global () with
-        | None -> Alcotest.fail "expected explicit global catalog"
-        | Some effective ->
-          Alcotest.(check bool)
-            "explicit row remains"
-            true
-            (Option.is_some
-               (Llm_provider.Model_catalog.lookup effective "explicit-model"));
-          Alcotest.(check bool)
-            "overlay row does not override explicit full replacement"
-            true
-            (Option.is_none
-               (Llm_provider.Model_catalog.lookup effective "overlay-model"))))
-
 let test_model_catalog_configuration_delegates_to_agent_core_ambient () =
   let env _ = None in
   let result =
@@ -1033,10 +847,6 @@ let test_bootstrap_base_path_config_root_copies_shared_seed_but_not_keepers () =
       Alcotest.(check bool) "config root created" true (Sys.is_directory config_root);
       Alcotest.(check string) "runtime copied" repo_runtime_toml
         (read_file (Filename.concat config_root "runtime.toml"));
-      Alcotest.(check string)
-        "model catalog overlay copied"
-        repo_model_catalog_overlay_toml
-        (read_file (Filename.concat config_root "agent-core-models-overlay.toml"));
       Alcotest.(check bool)
         "legacy full model catalog not copied"
         false
@@ -1075,7 +885,7 @@ let test_created_root_populated_before_lock_is_not_fresh_seeded () =
     Alcotest.(check bool) "populated root does not receive a fresh default roster" false
       (Sys.file_exists (Filename.concat config_root "keepers/default-imp.toml")))
 
-let test_bootstrap_base_path_config_root_backfills_missing_prompts_and_overlay () =
+let test_bootstrap_base_path_config_root_backfills_missing_prompts () =
   with_temp_dir "startup-config-preserve" (fun dir ->
       let repo = Filename.concat dir "repo" in
       mkdir_p repo;
@@ -1100,10 +910,6 @@ let test_bootstrap_base_path_config_root_backfills_missing_prompts_and_overlay (
            (Filename.concat config_root "prompts/keeper.md"));
       Alcotest.(check string) "backfilled prompt content" "prompt"
         (read_file (Filename.concat config_root "prompts/keeper.md"));
-      Alcotest.(check string)
-        "model catalog overlay backfilled"
-        repo_model_catalog_overlay_toml
-        (read_file (Filename.concat config_root "agent-core-models-overlay.toml"));
       Alcotest.(check bool)
         "legacy full model catalog not backfilled"
         false
@@ -5447,26 +5253,8 @@ let () =
             "model catalog ignores legacy discovery inputs"
             `Quick test_model_catalog_configuration_ignores_legacy_discovery_inputs;
           Alcotest.test_case
-            "model catalog overlay installs config-root overlay"
-            `Quick test_model_catalog_overlay_installs_config_root_overlay;
-          Alcotest.test_case
-            "model catalog overlay absent is a no-op"
-            `Quick test_model_catalog_overlay_absent_is_noop;
-          Alcotest.test_case
-            "model catalog overlay invalid fails loud"
-            `Quick test_model_catalog_overlay_invalid_fails_loud;
-          Alcotest.test_case
             "config load failure diagnostic attributes to config"
             `Quick test_config_load_failure_diagnostic_attributes_to_config;
-          Alcotest.test_case
-            "model catalog overlay skips poisoned entries"
-            `Quick test_model_catalog_overlay_skips_poisoned_entries;
-          Alcotest.test_case
-            "model catalog overlay broken TOML still fails loud"
-            `Quick test_model_catalog_overlay_broken_toml_still_fails_loud;
-          Alcotest.test_case
-            "explicit model catalog replacement precedes overlay"
-            `Quick test_explicit_model_catalog_replacement_precedes_overlay;
           Alcotest.test_case
             "model catalog configuration delegates to agent_core ambient catalog"
             `Quick
@@ -5476,9 +5264,9 @@ let () =
             `Quick
             test_bootstrap_base_path_config_root_copies_shared_seed_but_not_keepers;
           Alcotest.test_case
-            "bootstrap base-path config backfills prompts and catalog overlay"
+            "bootstrap base-path config backfills prompts"
             `Quick
-            test_bootstrap_base_path_config_root_backfills_missing_prompts_and_overlay;
+            test_bootstrap_base_path_config_root_backfills_missing_prompts;
           Alcotest.test_case
             "bootstrap base-path config skips explicit override"
             `Quick

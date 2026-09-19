@@ -28,9 +28,7 @@ type turn_state =
   ; last_execution : Keeper_turn_runtime_budget.runtime_execution option
   ; degraded_retry_info : Keeper_error_classify.degraded_retry option
   ; deferred_runtime_lane : Keeper_turn_driver.deferred_runtime_lane option
-  ; runtime_rotation_attempts : Keeper_execution_receipt.runtime_rotation_attempt list
   ; failure_reason : Keeper_turn_fsm.failure_reason option
-  ; retry_phase_started_at : float option
   ; runtime_attempt_errors : runtime_attempt_error list
     (** Every candidate the runtime walk attempted and that ended in an
         error this turn, in walk order, each with its own error and dispatch

@@ -1,26 +1,23 @@
-(** RFC-0136 PR-4-b: terminal error side effects extracted from
-    [keeper_unified_turn] retry loop.
+(** Terminal error side effects of a unified keeper cycle whose turn failed.
 
     Two paths based on [Keeper_error_classify.is_runtime_exhausted_error]:
 
     - [Runtime_exhausted] — calls [Keeper_registry.mark_turn_runtime_exhausted],
       increments the [kcl_to_ktc_exhaustion] FSM edge counter, logs a
-      structured WARN listing the attempted runtimes, and increments
+      structured WARN naming the cycle's runtime, and increments
       the [agent_core_execution_errors] counter with phase [Runtime_exhausted].
 
     - Otherwise — sets the turn phase to [Turn_finalizing], increments
       the [agent_core_execution_errors] counter with phase
       [Terminal_non_exhaustion], and logs a structured WARN.
 
-    Side effects only.  The function is unit-returning to keep the 9
-    retry-loop call sites unchanged: they invoke a [mark_terminal_error]
-    closure that adapts {!handle} to the loop-scoped [attempt] /
-    [attempted_runtimes] values.  Cycle 52 narrative behavior preserved. *)
+    Side effects only. [runtime_id] is the runtime or lane the cycle was
+    assigned; the lane walk inside the turn records each candidate it tried
+    in the runtime manifest. *)
 
 val handle
   :  config:Workspace.config
   -> keeper_name:string
-  -> attempt:int
-  -> attempted_runtimes:string list
+  -> runtime_id:string
   -> Agent_core.Error.t
   -> unit

@@ -764,10 +764,7 @@ let capture_skill_snapshot ~base_path =
     @param runtime_id Runtime profile name for model selection
     @param temperature Subsystem temperature fallback; a selected runtime model
            declaration takes precedence. When omitted,
-           [Keeper_config.keeper_unified_temperature] is the fallback.
-    @param is_retry When [true], replays the current user message into the
-           working context without persisting it again, so transient retry
-           attempts do not duplicate the user entry in session history *)
+           [Keeper_config.keeper_unified_temperature] is the fallback. *)
 let run_turn
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
@@ -800,7 +797,6 @@ let run_turn
       ?(degraded_retry_applied = false)
       ?degraded_retry_runtime
       ?fallback_reason
-      ?(runtime_rotation_attempts = [])
       ?direct_resume
       ?official_task_reference
       ?on_gate_evidence_admitted
@@ -810,7 +806,6 @@ let run_turn
       ?on_produced_checkpoint
       ?on_runtime_lane_terminal_error
       ?on_deferred_runtime_consumed
-      ?(is_retry = false)
       ?shared_context
       ?repetition_execution
       ?event_bus
@@ -896,9 +891,11 @@ let run_turn
   Lsp_turn_pool.with_turn_pool ~servers:(Runtime.lsp_servers ())
   @@ fun () ->
   let runtime_id_string = runtime_id in
+  let direct_resume_checkpoint = Option.bind direct_resume direct_checkpoint in
+  let ( let* ) = Result.bind in
   (* Steps 0–4: inference params, session dir, checkpoint, base prompt,
      working context, checkpoint hygiene — all in Keeper_run_context. *)
-  let ctx =
+  let* ctx =
     Keeper_run_context.prepare_run_context
       ~config
       ~meta
@@ -907,15 +904,27 @@ let run_turn
       ~runtime_id
       ?temperature
       ?shared_context
+      ?checkpoint:direct_resume_checkpoint
       ()
+    |> Result.map_error (fun error ->
+      Agent_core.Error.Io
+        (FileOpFailed
+          { op = "load checkpoint"
+          ; path =
+              Keeper_checkpoint_store.agent_core_checkpoint_path
+                ~session_dir:(Filename.concat base_dir
+                  (Keeper_id.Trace_id.to_string meta.runtime.trace_id))
+                ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+          ; detail = Keeper_checkpoint_store.checkpoint_load_error_to_string error
+          }))
   in
-  let ctx = match Option.bind direct_resume direct_checkpoint with
+  let ctx = match direct_resume_checkpoint with
     | None -> ctx
     | Some checkpoint ->
       { ctx with Keeper_run_context.ctx_work =
           Keeper_context_runtime.context_of_agent_core_checkpoint checkpoint
       ; resume_agent_core_checkpoint = Some checkpoint
-      ; loaded_checkpoint_present = true
+      ; saved_history = Keeper_run_context.Saved_history_loaded
       ; start_turn_count = checkpoint.turn_count }
   in
   let meta = ctx.meta in
@@ -962,8 +971,32 @@ let run_turn
     ~decision:
       (Keeper_runtime_manifest.with_payload_role ~payload_role:Checkpoint
         (`Assoc
-          [ "loaded_checkpoint_present", `Bool ctx.loaded_checkpoint_present ]))
+          [ "loaded_checkpoint_present"
+          , `Bool (Keeper_run_context.loaded_checkpoint_present ctx)
+          ]))
     Keeper_runtime_manifest.Checkpoint_loaded;
+  (* [ctx.ctx_work] is the history this turn starts from; the [ctx_work] bound
+     below already carries this turn's input. *)
+  let history_at_start =
+    Keeper_turn_boundaries.history_at_start_of_messages
+      (Keeper_context_runtime.messages_of_context ctx.ctx_work)
+  in
+  (* RFC librarian-lifecycle 4.6: a restart line must not be ahead of the
+     restart. A turn that knows the saved history holds no atom says so now; a
+     turn whose checkpoint version was superseded says so after the first stage
+     save the store accepts ([checkpoint_sink] below). *)
+  let restart_notice_after_first_save =
+    match Turn_helpers.restart_notice history_at_start ctx.saved_history with
+    | Turn_helpers.No_restart_notice -> Atomic.make false
+    | Turn_helpers.Notice_at_turn_start ->
+      Turn_helpers.record_history_restart
+        ~config
+        ~keeper_name:meta.name
+        ~trace_id
+        Turn_helpers.At_turn_start;
+      Atomic.make false
+    | Turn_helpers.Notice_after_first_save -> Atomic.make true
+  in
   (* Steps 5-6: turn prompt, memory/temporal context, prompt metrics,
      and user message append — Keeper_run_prompt. *)
   let prompt_user_turn_record =
@@ -980,7 +1013,6 @@ let run_turn
       ~meta
       ~history_user_source
       ~user_turn_record:prompt_user_turn_record
-      ~is_retry
       ~start_turn_count
   in
   let turn_system_prompt = prompt_ctx.Keeper_run_prompt.turn_system_prompt in
@@ -1041,7 +1073,6 @@ let run_turn
       ~keeper_turn_id:manifest_keeper_turn_id
       ~turn_kind
       ~runtime_id
-      ~is_retry
       ~config_root
       ~runtime_config_path
       ~skill_snapshot
@@ -1154,7 +1185,9 @@ let run_turn
       ~site:"context_injected"
       ~keeper_turn_id:manifest_keeper_turn_id
       ?checkpoint_path:
-        (if ctx.loaded_checkpoint_present then Some checkpoint_path else None)
+        (if Keeper_run_context.loaded_checkpoint_present ctx
+         then Some checkpoint_path
+         else None)
       ~decision:
         (Keeper_runtime_manifest.with_payload_role
            ~payload_role:Model_input
@@ -1505,6 +1538,13 @@ let run_turn
                 with
                 | Ok (Keeper_checkpoint_store.Saved _) ->
                   last_persisted_checkpoint_ref := Some checkpoint;
+                  if Atomic.compare_and_set restart_notice_after_first_save true false
+                  then
+                    Turn_helpers.record_history_restart
+                      ~config
+                      ~keeper_name:meta.name
+                      ~trace_id
+                      Turn_helpers.After_first_save;
                   Keeper_turn_driver_try_provider.observe_checkpoint_saved
                     checkpoint_progress
                     snapshot.stage;
@@ -1892,6 +1932,8 @@ let run_turn
                              ~runtime_id_string:selected_runtime_id
                              ~max_context:selected_max_context
                              ~checkpoint_owner
+                             ~history_at_start
+                             ~restart_notice_pending:restart_notice_after_first_save
                              ~official_client_settlement:selected_run.official_client_settlement
                              ~history_messages
                              ~prompt_metrics ~ctx_composition ~usage
@@ -1967,7 +2009,6 @@ let run_turn
            ~degraded_retry_applied
            ~degraded_retry_runtime:receipt_degraded_retry_runtime
            ~fallback_reason:receipt_fallback_reason
-           ~runtime_rotation_attempts
            ~turn_result
            ~receipt_agent_core_turn_count_ref
            ~receipt_stop_reason_ref

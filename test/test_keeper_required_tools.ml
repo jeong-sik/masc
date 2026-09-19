@@ -106,16 +106,12 @@ candidates = ["native.no_tools", "binding.sample"]
        | None -> fail (Agent_core.Error.to_string error));
       check bool "rendered prose is not a retry authority" false
         (Required.should_try_next (Agent_core.Error.Internal (Agent_core.Error.to_string error))) in
-  (match Runtime.save_config_text ~runtime_config_path:config_path (config_text "binding.sample") with
-   | Ok _ -> () | Error e -> fail e);
   (match Runtime.get_lane_by_id "unsupported_tools_fixture" with
    | Some lane -> check (list string) "all resolved candidates are actually unsupported"
        ["native.no_tools";"binding.sample"] (Runtime_lane.ordered_candidates lane)
    | None -> fail "unsupported fixture lane disappeared");
   run ~tool_requirement:Required.Required ~tools:[tool] "unsupported_tools_fixture"
   |> expect Required.Binding_tools_unsupported;
-  (match Runtime.save_config_text ~runtime_config_path:config_path (config_text "good.sample") with
-   | Ok _ -> () | Error e -> fail e);
   run ~tool_requirement:Required.Required ~tools:[] "good.sample" |> expect Required.No_tools_supplied;
   let transform (cfg:Llm_provider.Provider_config.t) =
     Ok {cfg with model_id="no-tools-model";model_capabilities_override=None} in
@@ -137,10 +133,10 @@ candidates = ["native.no_tools", "binding.sample"]
     (Yojson.Safe.Util.member "response_format" body = `Null);
   (* The completion verifier reaches the driver through this wrapper
      (workspace_metric_hooks.ml), so a requirement the wrapper drops is a
-     requirement the verdict tool never had. The turn itself may still succeed:
-     Required refuses the candidate before dispatch and the driver walks on,
-     which is the point -- left Optional this runtime is dispatched with its
-     tools replaced by [] and no channel left to report a verdict on. *)
+     requirement the verdict tool never had. The turn itself fails: Required
+     refuses the only candidate before dispatch, which is the point -- left
+     Optional this runtime is dispatched with its tools replaced by [] and no
+     channel left to report a verdict on. *)
   let wrapper_attempts = ref [] in
   ignore
     (Keeper_turn_driver_wrappers.run_named_with_masc_tools

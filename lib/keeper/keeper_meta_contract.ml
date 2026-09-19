@@ -253,6 +253,8 @@ type keeper_meta =
   ; sandbox_image : string option
   ; network_mode : Keeper_types_profile.network_mode
   ; microvm_backend : Keeper_microvm_backend.t option
+  ; microvm_memory : Keeper_microvm_guest_size.memory option
+  ; microvm_cpus : Keeper_microvm_guest_size.cpus option
   ; mention_targets : string list
   ; (* -- Lifecycle -- *)
     created_at : string
@@ -414,6 +416,17 @@ let effective_meta_of_profile_defaults
                (match defaults.microvm_backend with
                 | Some _ as declared -> declared
                 | None -> Keeper_microvm_backend.default_for_host ())
+             | Docker | Remote_ssh -> None);
+          (* The guest's size is TOML-owned for the same reason, and only a
+             Micro_vm keeper has a guest to size. [None] is the workspace
+             default, resolved where the guest boots. *)
+          microvm_memory =
+            (match sandbox_profile with
+             | Micro_vm -> defaults.microvm_memory
+             | Docker | Remote_ssh -> None);
+          microvm_cpus =
+            (match sandbox_profile with
+             | Micro_vm -> defaults.microvm_cpus
              | Docker | Remote_ssh -> None);
           (* RFC vision-delegation §2.4: TOML profile overrides the carried
              value; absent -> keep [meta]'s (defaults to Inherit). *)

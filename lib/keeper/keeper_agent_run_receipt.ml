@@ -59,7 +59,6 @@ let finalize
     ~degraded_retry_applied
     ~degraded_retry_runtime
     ~fallback_reason
-    ~runtime_rotation_attempts
     ~turn_result
     ~receipt_agent_core_turn_count_ref
     ~receipt_stop_reason_ref
@@ -172,7 +171,6 @@ let finalize
         Option.bind degraded_retry_runtime
           (degraded_retry_runtime_of_wire ~keeper_name:meta.name)
     ; fallback_reason
-    ; runtime_rotation_attempts
     ; stop_reason = !receipt_stop_reason_ref
     ; error_kind
     ; error_message

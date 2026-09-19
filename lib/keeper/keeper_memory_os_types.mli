@@ -34,9 +34,10 @@ type wire_step =
   | Wire_index of int
 
 (** Why one node did not decode. Closed, so a new rejection has to name itself
-    here before a decoder can make it. [Not_ascending] and [Not_positive] are
-    produced only by the snapshot codec in {!Keeper_memory_os_current}, which
-    shares this vocabulary rather than keeping a parallel one. *)
+    here before a decoder can make it. [Not_ascending] is produced only by the
+    snapshot codec in {!Keeper_memory_os_current}, [Not_a_turn_ref] only by
+    {!Keeper_turn_boundaries}, and [Not_positive] by both; they share this
+    vocabulary rather than keeping a parallel one. *)
 type wire_reason =
   | Expected_object
   | Expected_array
@@ -53,6 +54,7 @@ type wire_reason =
   | Not_a_memory_id of string
   | Not_a_board_post_id of string
   | Not_a_board_comment_id of string
+  | Not_a_turn_ref of string
   | Not_finite
   | Negative
   | Not_positive

@@ -29,6 +29,11 @@ status: reference
 **Keeper Turn**
 : 하나의 Keeper 작업 시도를 위해 MASC가 agent core Agent run을 실행하는 단위.
 
+**Checkpoint Load**
+: 저장된 Keeper 이력을 읽는 단계. 파일 없음은 새 이력을 뜻하지만 읽기·파싱 오류는
+  새 이력을 허용하지 않는다. 명시적인 checkpoint 버전 교체만 기존 파일을 남겨 두고
+  새 이력을 시작하며, 첫 저장이 받아들여진 뒤 재시작을 기록한다.
+
 **agent core Turn**
 : 하나의 agent core Agent run 내부에서 provider response와 tool 실행이 진행되는 한
   단계. Keeper turn과 동일한 단위가 아니다.
@@ -102,6 +107,30 @@ status: reference
   갈라지면 provider가 요청을 거절하므로 자르는 자리는 Atom 경계에만 온다. Atom의
   크기는 고르지 않아서 Atom 개수는 위치를 말할 뿐 요청 크기를 말하지 않는다.
 
+**Turn Boundary**
+: 끝난 Keeper turn이 남기는 한 줄(`<keeper>.turn-boundaries.jsonl`). 그 turn이
+  끝났을 때 저장된 History가 몇 Atom인지와 마지막 Atom의 digest를 적는다.
+  History 안에는 turn의 경계가 없으므로, turn이라는 사건을 History 안의 위치로
+  옮겨 적는 유일한 기록이다. turn이 Atom이 없는 History에서 시작했는지
+  (`fresh`/`continued`)도 같이 적는다. Checkpoint 파일이 있었는지가 아니라 Atom이
+  있었는지로 정한다. Keeper는 빈 Checkpoint를 갖고 만들어지기 때문이다. 읽는 쪽은
+  줄이 파일에 쌓인 순서가 아니라 Atom 수로 줄을 세운다.
+  같은 파일에 `history_restarted` 줄도 쌓인다. "이 trace의 Atom 번호가 이 줄부터
+  0에서 다시 시작한다"를 말하는 줄이고, History를 다시 시작하게 만든 쪽이 쓴다.
+  `masc_keeper_clear`는 비운 Checkpoint가 저장된 뒤에 쓴다. Atom이 없는 History에서
+  시작하는 turn은, 저장된 History에 Atom이 없는 것을 알면 시작할 때 쓰고,
+  Checkpoint를 못 읽어서 모르면 처음 받아들여진 저장 뒤에 쓴다. 읽는 쪽은 이 줄을
+  보는 즉시 0부터 읽어도 되므로, 어느 쪽도 다시 시작하기 전에 쓰지 않는다. `fresh`
+  줄과 `history_restarted` 줄은 읽는 쪽에 같은 말을 한다.
+
+**Read Position**
+: Librarian이 History를 어디까지 읽었는지 적은 값(`<keeper>.librarian-progress.json`).
+  Turn Boundary 파일의 줄 번호가 아니라 값이다: trace, 읽은 Atom 수, 마지막으로
+  읽은 Atom을 여는 Message의 digest. 그 파일에는 지난 History의 줄도 남아 있어서
+  줄 번호로는 지금 History 안의 자리를 말할 수 없다. 파일이 없으면 아직 읽은 적이 없다는 뜻이다. 못
+  읽는 파일은 "읽은 적 없음"으로 치지 않고 오류로 다룬다. 그렇게 치면 History
+  전체가 안 읽은 것으로 보인다.
+
 **Generation**
 : 같은 Keeper가 새 trace로 이어진 횟수. 초기값은 0이다.
 
@@ -111,6 +140,34 @@ status: reference
 
 **Memory OS**
 : Keeper의 durable personal facts와 recall을 소유하는 typed memory store.
+
+**Fact**
+: Memory OS의 기억 하나. 문장(`claim`), `category`, 처음·마지막으로 본 시각,
+  `origin`, `basis`로 이뤄진다. id 필드는 없고 Memory ID는 `claim` 글자의
+  SHA-256이다. 글자가 하나라도 다르면 다른 Fact다.
+
+**Origin**
+: Fact를 누가 적었나. `authored`는 Keeper가 `memory_write`로 직접 적은 것,
+  `injected`는 Librarian이 대화에서 뽑아 넣은 것이다.
+
+**Basis**
+: Fact가 무엇에 근거하나. `observed`는 읽은 곳(자기 대화 또는 Board 글)을 갖고,
+  `derived`는 근거가 된 다른 Fact의 Memory ID를 갖는다. 근거가 사라지면 `derived`
+  Fact도 무효가 된다.
+
+**Dropped / Supersedes / Absorbs**
+: Librarian이 기억을 바꾸는 세 가지 말. `dropped`는 이유를 적고 버린다.
+  `supersedes`는 옛 Fact 하나를 새 claim 하나로 고쳐 쓰며(1:1) 옛 id는 `dropped`
+  에도 있어야 한다. `absorbs`는 Fact 여러 개를 새 claim 하나가 대신 말하며(N:1)
+  그 id들은 `dropped`에 없어야 한다. 흡수된 원문은
+  `<keeper>.memory-absorbed.jsonl`에 남는다. Librarian이 말하지 않은 Fact는
+  그대로 남고, 규칙을 어긴 답은 통째로 거절된다.
+
+**Memory Event**
+: Fact에 일어난 일의 기록(`<keeper>.memory-events.jsonl`). `retrieved`는
+  `keeper_memory_search` 결과에 나온 것, `revised`는 `supersedes`로 고쳐 써진
+  것이다. `cited`는 Keeper가 `keeper_memory_retract`로 그 Fact를 id로 지목해
+  철회한 것이다. 기록하는 곳이 그 하나뿐이라 살아 있는 Fact의 `cited`는 0이다.
 
 **Librarian**
 : Keeper마다 따로 도는 기억 정리자. Keeper의 History와 현재 facts를 읽고 LLM을

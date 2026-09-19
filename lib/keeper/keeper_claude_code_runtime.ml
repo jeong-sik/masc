@@ -1033,11 +1033,16 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
               | _ -> false);
            (* A provider can reject after the child process spawned but
               before any response or MCP tool effect. Preserve the typed
-              no-effect fact so failover is allowed for that narrow case. *)
+              no-effect fact so failover is allowed for that narrow case.
+              An overflow with no activity is the same fact: when the halving
+              walk finds no view that fits, the lane moves to its next runtime
+              instead of fencing the turn as if the client might have acted. *)
            (match error with
             | Runtime_claude_code.Turn_failed_with_observation
                 { tool_effect_attempted = false; response_emitted = false; _ }
             | Runtime_claude_code.Quota_blocked
+                { tool_effect_attempted = false; response_emitted = false; _ }
+            | Runtime_claude_code.Context_window_exceeded
                 { tool_effect_attempted = false; response_emitted = false; _ } ->
               Atomic.set
                 effect_disposition

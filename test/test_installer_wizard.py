@@ -106,7 +106,6 @@ if sys.argv[1]=='workspace-upgrade':
 assert sys.argv[1]=='init'
 config=base/'.masc/config';config.mkdir(parents=True,exist_ok=True)
 (config/'runtime.toml').write_text('[runtime]\\n')
-(config/'agent-core-models-overlay.toml').write_text('')
 print('init complete')
 ''')
             binary.chmod(0o755)

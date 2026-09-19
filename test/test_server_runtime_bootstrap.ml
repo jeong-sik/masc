@@ -2000,6 +2000,7 @@ let test_health_json_keeps_awaiting_verification_in_system_llm_lane () =
             running_names = [];
             recovering_names = [];
             configuration_blocked_names = [];
+            official_client_recovery_required_names = [];
             phase_values = [];
             phase_details = [];
           }
@@ -2338,6 +2339,7 @@ let test_health_json_owner_rows_answer_from_each_keepers_own_reads () =
             running_names = [ "omega" ];
             recovering_names = [];
             configuration_blocked_names = [];
+            official_client_recovery_required_names = [];
             phase_values = [];
             phase_details = [];
           }
@@ -2418,6 +2420,7 @@ let test_health_json_preserves_active_task_owner_meta_read_error () =
             running_names = [];
             recovering_names = [];
             configuration_blocked_names = [];
+            official_client_recovery_required_names = [];
             phase_values = [];
             phase_details = [];
           }
@@ -2676,6 +2679,7 @@ let test_health_json_capacity_uses_execution_snapshot () =
         ; running_names
         ; recovering_names
         ; configuration_blocked_names = []
+        ; official_client_recovery_required_names = []
         ; phase_values = []
         ; phase_details = []
         }
@@ -2921,6 +2925,102 @@ let test_health_json_distinguishes_failing_executable_keepers () =
           Alcotest.(check bool) "health still asks for operator action" true
             (fleet_safety |> member "operator_action_required" |> to_bool))))
 
+let test_fleet_official_client_recovery ~paused ~autoboot () =
+  with_temp_dir "fleet-official-recovery" (fun dir ->
+    let config = Workspace.default_config dir in
+    let native =
+      List.map
+        (fun (name, reason) -> make_keeper_meta ~name ~paused (), reason)
+        [ "session-effect", Keeper_internal_error.Effect_fenced
+        ; "session-floor", Keeper_internal_error.Bootstrap_floor_exceeded ]
+    in
+    let retrying = make_keeper_meta ~name:"retrying" () in
+    let configuration = make_keeper_meta ~name:"configuration" () in
+    let running = make_keeper_meta ~name:"running" () in
+    let metas = List.map fst native @ [ retrying; configuration; running ] in
+    with_running_keeper_metas ~owner_inventory:false config metas (fun () ->
+      List.iter
+        (fun (meta, reason) ->
+          let error = Keeper_internal_error.core_error_of_masc_internal_error
+              (Keeper_internal_error.Official_client_recovery_required
+                 { runtime_id = "synthetic-runtime"; recovery_id = "synthetic-recovery"; reason })
+          in
+          let raw_error = Agent_core.Error.to_string error in
+          let terminal = Keeper_turn_terminal.of_failure ~raw_error error in
+          let failure = Keeper_unified_turn_types.registry_failure_reason_of_terminal_reason
+              ~core_error:error terminal ~raw_error in
+          Keeper_registry.set_failure_reason ~base_path:dir meta.Keeper_meta_contract.name failure;
+          mark_keeper_failing config meta)
+        native;
+      mark_keeper_failing config retrying;
+      Keeper_registry.set_failure_reason ~base_path:dir retrying.name
+        (Some (Keeper_registry.Turn_consecutive_failures 1));
+      mark_keeper_failing config configuration;
+      Keeper_registry.set_failure_reason ~base_path:dir configuration.name
+        (Some (Keeper_registry.Turn_configuration_error
+                 { code = "synthetic-config"; field = None; detail = "synthetic configuration error" }));
+      (* A previous reason alone cannot turn a Running entry into a current
+         session-recovery failure. The phase is part of the projection. *)
+      Keeper_registry.set_failure_reason ~base_path:dir running.name
+        (Some (Keeper_registry.Official_client_recovery_required
+                 { runtime_id = "previous-runtime"; recovery_id = "previous-recovery"
+                 ; reason = Keeper_internal_error.Effect_fenced }));
+      let snapshot = Server_routes_http_runtime_fleet_scan.keeper_phase_snapshot ~base_path:dir () in
+      let names = List.map (fun (meta : Keeper_meta_contract.keeper_meta) -> meta.name) metas in
+      let json = Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
+          ~base_path:dir ~bootable_names:names
+          ~autoboot_scan:{ autoboot_names = (if autoboot then names else []); read_errors = [] }
+          ~phase_snapshot:snapshot ~phase_counts:snapshot.counts
+          ~execution_snapshot:{ owners = []; executable_names = names }
+          ~paused_keepers_json:(`Assoc [ "count", `Int (if paused then 2 else 0) ]) () in
+      Printf.printf "FLEET_OFFICIAL_RECOVERY %s\n%!" (Yojson.Safe.to_string json);
+      let open Yojson.Safe.Util in
+      let count key = json |> member key |> to_int in
+      let names key = json |> member key |> to_list |> List.map to_string in
+      Alcotest.(check int) "registry retains failing phase" (if paused then 2 else 4)
+        (count "failing_keeper_fiber_count");
+      Alcotest.(check int) "only ordinary failure is recovering" 1
+        (count "recovering_keeper_fiber_count");
+      Alcotest.(check (list string)) "recovering names match count" [ retrying.name ]
+        (names "recovering_keeper_names");
+      let required_names = if paused then [] else [ "session-effect"; "session-floor" ] in
+      Alcotest.(check int) "session recovery count" (List.length required_names)
+        (count "official_client_recovery_required_keeper_count");
+      Alcotest.(check (list string)) "session recovery names are not autoboot scoped"
+        required_names (names "official_client_recovery_required_keeper_names");
+      Alcotest.(check (list string)) "configuration classification is unchanged"
+        [ configuration.name ] (names "turn_configuration_error_keeper_names");
+      Alcotest.(check int) "all failing causes remain visible"
+        (count "failing_keeper_fiber_count")
+        (count "recovering_keeper_fiber_count"
+         + count "official_client_recovery_required_keeper_count"
+         + count "turn_configuration_error_keeper_count");
+      Alcotest.(check int) "execution inventory is unchanged" (List.length metas)
+        (count "executable_keeper_fiber_count");
+      Alcotest.(check int) "paused inventory stays separate" (if paused then 2 else 0)
+        (count "paused_keeper_count");
+      let needs_action = autoboot || not paused in
+      Alcotest.(check string) "fleet health includes session recovery"
+        (if needs_action then "degraded" else "ok")
+        (json |> member "status" |> to_string);
+      Alcotest.(check bool) "operator action agrees with health" needs_action
+        (json |> member "operator_action_required" |> to_bool);
+      let expected_blocker =
+        if autoboot then `String "turn_configuration_error"
+        else if paused then `Null
+        else `String "official_client_recovery_required"
+      in
+      Alcotest.(check bool) "native cause independently explains manual fleet health" true
+        ((json |> member "blocker") = expected_blocker);
+      match Tui_decode.decode_fleet_safety (`Assoc [ "keeper_fleet_safety", json ]) with
+      | Error error -> Alcotest.fail error
+      | Ok fleet ->
+        Alcotest.(check int) "TUI retains the recovering count" 1 fleet.fs_recovering_count;
+        Alcotest.(check int) "TUI retains session recovery count" (List.length required_names)
+          fleet.fs_official_client_recovery_required_count;
+        Alcotest.(check (list string)) "TUI retains session recovery names" required_names
+          fleet.fs_official_client_recovery_required_names))
+
 let test_phase_snapshot_separates_terminal_configuration_from_recovery () =
   with_temp_dir "terminal-config-not-recovering" (fun dir ->
     let config = Workspace.default_config dir in
@@ -2961,6 +3061,7 @@ let test_health_json_blocks_terminal_configuration_failures () =
     ; running_names = []
     ; recovering_names = []
     ; configuration_blocked_names = [ keeper_name ]
+    ; official_client_recovery_required_names = []
     ; phase_values = [ keeper_name, Keeper_state_machine.Failing ]
     ; phase_details = []
     }
@@ -3060,6 +3161,7 @@ let test_health_json_counts_configuration_blocker_outside_autoboot () =
     ; running_names = []
     ; recovering_names = []
     ; configuration_blocked_names = [ keeper_name ]
+    ; official_client_recovery_required_names = []
     ; phase_values = [ keeper_name, Keeper_state_machine.Failing ]
     ; phase_details = []
     }
@@ -5240,6 +5342,16 @@ let () =
   Eio_guard.enable ();
   Alcotest.run "Server_runtime_bootstrap"
     [
+      ( "official recovery fleet",
+        [ Alcotest.test_case "mixed typed failures" `Quick
+            (test_fleet_official_client_recovery ~paused:false ~autoboot:true)
+        ; Alcotest.test_case "manual keepers outside autoboot" `Quick
+            (test_fleet_official_client_recovery ~paused:false ~autoboot:false)
+        ; Alcotest.test_case "paused recovery stays separate" `Quick
+            (test_fleet_official_client_recovery ~paused:true ~autoboot:true)
+        ; Alcotest.test_case "paused manual recovery does not degrade fleet" `Quick
+            (test_fleet_official_client_recovery ~paused:true ~autoboot:false)
+        ] );
       ( "bootstrap",
         [
           Alcotest.test_case

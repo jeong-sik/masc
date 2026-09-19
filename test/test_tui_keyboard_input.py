@@ -1138,10 +1138,14 @@ def fleet_safety_fixture() -> HttpResponse:
 
     Without it the poll fails and the TUI records a "fleet safety data
     unreliable" event, which is correct behaviour but adds a row to scenarios
-    that are counting the event list. Only "status" is required; the rest of
-    the section defaults.
+    that are counting the event list. The current session-recovery fields
+    are explicit: a missing observation must not become a zero count.
     """
-    return (200, {"keeper_fleet_safety": {"status": "ok"}})
+    return (200, {"keeper_fleet_safety": {
+        "status": "ok",
+        "official_client_recovery_required_keeper_count": 0,
+        "official_client_recovery_required_keeper_names": [],
+    }})
 
 
 def with_workspace_identity(

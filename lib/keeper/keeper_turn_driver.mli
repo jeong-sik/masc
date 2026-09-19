@@ -337,8 +337,8 @@ val run_named :
     its runtime manifest row is emitted, with [dispatch] saying whether the
     candidate's provider or client was invoked or the walk refused the
     candidate first. It does not change candidate selection or the final
-    error; verifier callers use it to aggregate retryability across a bare
-    runtime and its terminal default fallback.
+    error; verifier callers use it to learn whether an attempt on the one
+    runtime a [Tool_verdict] turn dispatches failed retryably.
 
     [on_runtime_lane_terminal_error] observes the candidate error the walk
     returns as the lane's error, with the candidate that produced it, once per

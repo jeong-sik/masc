@@ -7,11 +7,9 @@
     @since task-786 *)
 
 type cascade_decision_kind =
-  | Degraded_retry_allowed
   | No_degraded_retry
 
 let decision_kind_to_string : cascade_decision_kind -> string = function
-  | Degraded_retry_allowed -> "degraded_retry_allowed"
   | No_degraded_retry -> "no_degraded_retry"
 
 let publish_cascade_resolution

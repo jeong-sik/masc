@@ -1,9 +1,8 @@
 (** Keeper_unified_turn_cascade_resolution — Telemetry-event publishing
     for cascade (retry/rotation) resolution decisions.
 
-    Publishes a [telemetry_event] on the MASC Event_bus each time the
-    keeper runtime rotation resolves a cascade decision — degraded retry
-    allowed or no degraded retry.
+    Publishes a [telemetry_event] on the MASC Event_bus each time a keeper
+    turn ends without another runtime to try, with the reason it stopped.
 
     [keeper_telemetry_consumer] observes [Custom("telemetry_event", _)]
     on the bus and increments
@@ -14,7 +13,6 @@
 (** {1 Decision kind} *)
 
 type cascade_decision_kind =
-  | Degraded_retry_allowed
   | No_degraded_retry
 (** Kind of cascade resolution decision. *)
 

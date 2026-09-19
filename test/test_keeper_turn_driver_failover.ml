@@ -180,6 +180,40 @@ max-concurrent = 1
 max-concurrent = 1
 |}
 
+(* One lane with one candidate, and a second runtime declared beside it that
+   no lane names. *)
+let runtime_toml_single_candidate_lane =
+  {|
+[runtime]
+default = "primary.test_model"
+
+[runtime.lanes.solo]
+candidates = [ "primary.test_model" ]
+
+[providers.primary]
+display-name = "Primary Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[providers.fallback]
+display-name = "Fallback Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:2"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 200000
+tools-support = true
+streaming = true
+
+[primary.test_model]
+is-default = true
+max-concurrent = 1
+
+[fallback.test_model]
+max-concurrent = 1
+|}
+
 let runtime_toml_quota_lane_with_shared_credential shared_credential =
   Printf.sprintf
     {|
@@ -533,6 +567,39 @@ let test_assignment_walk_order_refuses_a_missing_assignment () =
     | Error Driver.Assignment_missing -> ()
     | Error (Driver.Catalog_unavailable _) -> Alcotest.fail "missing, not unavailable"
     | Ok _ -> Alcotest.fail "an id that names nothing is refused, not walked")
+
+(* A failed turn stays in its lane. When the only candidate of [solo] fails,
+   the turn ends on that failure; the runtime declared outside the lane is
+   never dispatched. *)
+let test_a_failed_turn_never_dispatches_outside_its_lane () =
+  with_runtime_config runtime_toml_single_candidate_lane (fun () ->
+    Eio_main.run
+    @@ fun env ->
+    Eio.Switch.run
+    @@ fun sw ->
+    Masc_test_deps.init_eio_clock ~sw env;
+    let attempted = ref [] in
+    let result =
+      Driver.run_named
+        ~system_prompt:"You are the runtime failover test Keeper."
+        ~runtime_id:"solo"
+        ~keeper_name:"single-candidate-lane"
+        ~base_path:(Filename.get_temp_dir_name ())
+        ~agent_core_tools:[]
+        ~goal:"answer"
+        ~on_runtime_attempt:(fun attempt ->
+          attempted := attempt.Driver.runtime_id :: !attempted)
+        ~sw
+        ~net:env#net
+        ()
+    in
+    (match result with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "an unreachable endpoint completed the turn");
+    Alcotest.(check (list string))
+      "only the lane's candidate was dispatched"
+      [ "primary.test_model" ]
+      (List.sort_uniq String.compare !attempted))
 
 (* A route is a routing label; the binding a turn opens is the lane's entry
    candidate. Callers that need a materialized runtime resolve it here rather
@@ -4600,6 +4667,10 @@ let () =
             "assignment_walk_order refuses a missing assignment"
             `Quick
             test_assignment_walk_order_refuses_a_missing_assignment;
+          Alcotest.test_case
+            "a failed turn never dispatches outside its lane"
+            `Quick
+            test_a_failed_turn_never_dispatches_outside_its_lane;
           Alcotest.test_case
             "entry_runtime_id_of_route resolves a route to the binding it opens"
             `Quick

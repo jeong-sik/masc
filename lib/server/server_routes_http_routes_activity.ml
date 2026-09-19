@@ -1483,14 +1483,12 @@ let add_routes ~sw ~clock router =
 
   (* Goal lifecycle from the terminal (#29684). The workspace tool already owns
      the transition rules ([Goal_phase.decide_transition] inside
-     [handle_goal_transition]); this route only pipes HTTP into it, the same
-     shape the four Board tool routes above take. No identity is injected:
-     the tool records the acting agent from the context, and an invalid
-     phase transition is the tool's rejection to make, not the route's. *)
+     [handle_goal_transition]); this route supplies the credential-bound actor
+     as the tool context. An invalid phase transition remains the tool's
+     rejection to make, not the route's. *)
   |> Http.Router.post "/api/v1/tools/masc_goal_transition" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_goal_transition"
-         (fun state _req reqd ->
-         let agent_name = board_tool_agent_name_from_request request in
+       with_tool_actor_auth ~tool_name:"masc_goal_transition"
+         (fun state agent_name _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let ( let* ) r f =

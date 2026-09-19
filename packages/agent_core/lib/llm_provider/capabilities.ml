@@ -1575,7 +1575,7 @@ let%test "for_model_id glm-4.5-flash has GLM-4.5 thinking limits" =
    corresponding [models.toml] entries at the time of writing. The fixture
    is a deterministic snapshot, not auto-synced with [models.toml]. *)
 let test_catalog_entry id_prefix : Model_catalog.model_entry =
-  { id_prefix
+  { id_prefix = Model_identifiers.Id_prefix.of_string_exn id_prefix
   ; base_label = None
   ; provider_name = None
   ; max_context_tokens = None

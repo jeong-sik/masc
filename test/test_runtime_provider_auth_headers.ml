@@ -1013,8 +1013,6 @@ let test_runtime_adapter_materializes_glm_coding_provider () =
     check (option int) "max_context" (Some 200000) provider_cfg.max_context;
     check (option int) "max_tokens is not synthesized from capability" None
       provider_cfg.max_tokens;
-    check (option bool) "tool choice override" (Some false)
-      provider_cfg.supports_tool_choice_override;
     check int "Authorization header count" 0
       (normalized_header_count "Authorization" provider_cfg.headers))
 

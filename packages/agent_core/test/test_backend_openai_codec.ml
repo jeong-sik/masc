@@ -2358,8 +2358,7 @@ let test_responses_build_request_warns_on_dialect_suppressed_sampling () =
 ;;
 
 (* Regression: the Responses builder routes advisory [Auto] tool_choice
-   through the same capability gate as the Chat builder
-   ([supports_tool_choice_override] wins over the capability record). *)
+   through the same capability gate as the Chat builder. *)
 let test_responses_tool_choice_respects_capability_gate () =
   let make_config ~supports =
     Provider_config.make
@@ -2369,7 +2368,8 @@ let test_responses_tool_choice_respects_capability_gate () =
       ~request_path:"/v1/responses"
       ~max_tokens:128
       ~tool_choice:Auto
-      ~supports_tool_choice_override:supports
+      ~model_capabilities_override:
+        { Capabilities.default_capabilities with supports_tool_choice = supports }
       ()
   in
   let responses_body ~supports =

@@ -573,9 +573,9 @@ let mimo_capabilities =
    Design choice here: declaration-over-probing. The default stays
    conservative (supports_tool_choice = false → contract relaxes to
    Allow_text_or_tool, text-only replies accepted even when the consumer
-   asked for a tool). Consumers who have verified their model-side
-   support declare it per Provider_config via
-   [Provider_config.supports_tool_choice_override]. Agent Core does not
+   asked for a tool). A consumer that has verified its model-side support
+   states it on the model's catalog row, or -- for a model no row names --
+   in its own runtime capability table. Agent Core does not
    match on [model_id] to guess model-side behavior — the consumer
    (e.g. a config loader that knows it deployed Qwen3.5 w/ the Jinja
    chat template) owns that policy. This is stricter than LiteLLM's

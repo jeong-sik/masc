@@ -142,7 +142,8 @@ let run
           Log.Keeper.warn
             ~keeper_name:meta.name
             "memory os librarian skipped: current snapshot unavailable: %s"
-            detail
+            detail;
+          Keeper_librarian_queue_refresh.Not_entered
         | Ok current ->
           let current_selection, expected_revision =
             match current with
@@ -169,14 +170,15 @@ let run
             ~keepers_dir
             ~keeper_id:meta.name
             ~expected_revision
-            librarian_input
+            librarian_input;
+          Keeper_librarian_queue_refresh.Entered
       in
       let librarian_series ~meta:live_meta trigger =
         (* Submission is asynchronous. Re-check the same live SSOT at the
            execution boundary so an ON -> OFF/INVALID change while queued
            remains a real kill switch before snapshot I/O or provider work. *)
         match Env_config.KeeperMemoryOs.librarian_config_state () with
-        | Disabled | Invalid -> ()
+        | Disabled | Invalid -> Keeper_librarian_queue_refresh.Not_entered
         | Enabled -> run_admitted_librarian ~live_meta trigger
       in
       Keeper_librarian_queue_refresh.remember_turn

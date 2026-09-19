@@ -143,7 +143,8 @@ val load_file_lenient : string -> (t * skipped_entry list, string) result
 val load_default : unit -> (t, string) result
 
 (** Longest-prefix lookup across provider-independent rows using the catalog's
-    exact declared [id_prefix] syntax. Provider-scoped rows are excluded. *)
+    exact declared [id_prefix] syntax. Provider-scoped rows are excluded.
+    Empty or whitespace-padded model ids do not match. *)
 val lookup : t -> string -> model_entry option
 
 (** Exact normalized lookup across provider-scoped rows. Both

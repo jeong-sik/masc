@@ -17,10 +17,10 @@
    is a contract with the outside system (models.toml:2870 is a
    HuggingFace path whose mixed case is the name ollama knows), so
    normalizing at storage would be irreversible.  Case-insensitive
-   matching lives at the comparison edge: [equal] and [starts_with]
-   fold ASCII case.  No trim there — [of_string] already rejects padded
-   input.  [to_string] is the boundary escape hatch (TUI rows, JSON/TOML
-   wire, logs) and returns the original bytes, so
+   matching lives at the comparison edge: [equal], [starts_with], and
+   [matches_model_id] fold ASCII case. No trim there — [of_string] already
+   rejects padded input. [to_string] is the boundary escape hatch (TUI rows,
+   JSON/TOML wire, logs) and returns the original bytes, so
    [to_string (of_string x) = x]. *)
 
 module type LABELS = sig
@@ -54,6 +54,15 @@ module Make (L : LABELS) = struct
   let to_string t = t
 end
 
+module Model_id =
+  Make (struct
+      let empty = "model_id must not be empty"
+
+      let padded = "model_id must not have leading or trailing whitespace"
+
+      let label = "Model_identifiers.Model_id"
+    end)
+
 module Id_prefix = struct
   include
     Make (struct
@@ -65,11 +74,14 @@ module Id_prefix = struct
         let label = "Model_identifiers.Id_prefix"
       end)
 
-  let starts_with ~prefix t =
+  let starts_with_bytes ~prefix value =
     String.starts_with
       ~prefix:(String.lowercase_ascii prefix)
-      (String.lowercase_ascii t)
+      (String.lowercase_ascii value)
   ;;
+
+  let starts_with ~prefix t = starts_with_bytes ~prefix t
+  let matches_model_id ~prefix model_id = starts_with_bytes ~prefix model_id
 end
 
 module Api_name =
@@ -79,13 +91,4 @@ module Api_name =
       let padded = "api_name must not have leading or trailing whitespace"
 
       let label = "Model_identifiers.Api_name"
-    end)
-
-module Model_id =
-  Make (struct
-      let empty = "model_id must not be empty"
-
-      let padded = "model_id must not have leading or trailing whitespace"
-
-      let label = "Model_identifiers.Model_id"
     end)

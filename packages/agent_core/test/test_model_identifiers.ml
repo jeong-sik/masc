@@ -11,6 +11,12 @@ let starts_with ~prefix raw =
     (prefix_of raw)
 ;;
 
+let matches_model_id ~prefix raw =
+  Llm_provider.Model_identifiers.Id_prefix.matches_model_id
+    ~prefix:(prefix_of prefix)
+    (Llm_provider.Model_identifiers.Model_id.of_string_exn raw)
+;;
+
 let test_starts_with_exact () =
   Alcotest.(check bool) "claude- matches exactly" true
     (starts_with ~prefix:"claude-" "claude-opus-5");
@@ -25,6 +31,8 @@ let test_starts_with_normalization () =
     (starts_with ~prefix:"CLAUDE-" "claude-opus-5");
   Alcotest.(check bool) "case-different value matches" true
     (starts_with ~prefix:"claude-" "CLAUDE-opus-5");
+  Alcotest.(check bool) "catalog prefix matches a typed model id" true
+    (matches_model_id ~prefix:"CLAUDE-" "claude-opus-5");
   Alcotest.(check string) "of_string preserves the original spelling"
     "GLM-5.3"
     (Llm_provider.Model_identifiers.Id_prefix.to_string (prefix_of "GLM-5.3"))

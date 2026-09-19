@@ -918,23 +918,22 @@ let load_default () =
   of_toml_string ~source:"embedded default model catalog" Model_catalog_embedded.contents
 ;;
 
-let lookup_entries entries model_id =
-  let sorted_t =
-    List.fast_sort
-      (fun a b ->
-         compare
-           (String.length (Model_identifiers.Id_prefix.to_string b.id_prefix))
-           (String.length (Model_identifiers.Id_prefix.to_string a.id_prefix)))
-      entries
-  in
-  let model_id = String.lowercase_ascii (String.trim model_id) in
-  List.find_opt
-    (fun entry ->
-       let prefix =
-         String.lowercase_ascii (Model_identifiers.Id_prefix.to_string entry.id_prefix)
-       in
-       String.starts_with ~prefix model_id)
-    sorted_t
+let lookup_entries entries raw_model_id =
+  match Model_identifiers.Model_id.of_string raw_model_id with
+  | Error _ -> None
+  | Ok model_id ->
+    let sorted_t =
+      List.fast_sort
+        (fun a b ->
+           compare
+             (String.length (Model_identifiers.Id_prefix.to_string b.id_prefix))
+             (String.length (Model_identifiers.Id_prefix.to_string a.id_prefix)))
+        entries
+    in
+    List.find_opt
+      (fun entry ->
+         Model_identifiers.Id_prefix.matches_model_id ~prefix:entry.id_prefix model_id)
+      sorted_t
 ;;
 
 let lookup t model_id =

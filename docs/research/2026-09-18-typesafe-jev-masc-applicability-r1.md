@@ -107,13 +107,14 @@ wkbl 워크스페이스 board_attention 후보 중 기존 judge 판정 보유 25
 | 합성 negative 10건 | specificity 10/10 (전부 not_relevant 정판) |
 | Noul↔Choice 교차 일관성 | 35/35 |
 | 비용 | 총 input 48,742 tokens = $0.002 (호출당 $0.00006) |
-| 지연 | 평균 0.66s / 최대 1.03s |
+| 지연 | 평균 0.66s / 최대 1.03s (클라이언트에서 잼, 호출마다 새 연결) |
 | 에러 | 0건 |
 
-경계선 관측: 명백한 negative는 confidence 1.0 / noul 0.03~0.11로 즉시 판정됐고,
-유일하게 어려운 negative("다른 프로젝트의 Railway 상태 이야기", 주제는 인접하나 keeper 업무와 무관)만
-confidence 0.55 / noul 0.39로 망설였다. 망설여야 맞는 항목에서만 confidence가 떨어진다는 것은
-캘리브레이션이 동작한다는 직접 증거다.
+경계선 관측: 명백한 negative 8건은 confidence 0.99~1.0 / noul 0.03~0.16 이었고,
+가장 어려운 negative("다른 프로젝트의 Railway 상태 이야기", 주제는 인접하나 keeper 업무와 무관)가
+confidence 0.55 / noul 0.39 로 가장 낮았다. 다른 경계선 negative(다중 에이전트 프레임워크 잡담)는 0.99 였고,
+historical relevant 한 건(`7881ef0a…`)도 0.83/0.84 로 내려갔다. 35호출 전부가 기준선과 일치해
+틀린 답이 없으므로, 이 표본으로는 confidence 가 정답률과 맞는지(캘리브레이션)를 잴 수 없다.
 
 ### 실험의 한계
 
@@ -126,8 +127,8 @@ confidence 0.55 / noul 0.39로 망설였다. 망설여야 맞는 항목에서만
 
 ### 결론
 
-"Jev가 정확하다"가 아니라 **"이 질문 모양에서 Jev의 판정과 캘리브레이션이 기존 전체-LLM judge와
-등가이며, 비용은 자릿수 아래"**가 확인됐다. board routing이 이미 Unlisted를 사전 필터링해
+"Jev가 정확하다"가 아니라 **"이 질문 모양에서 Jev의 판정이 기존 전체-LLM judge와
+일치하며, 비용은 자릿수 아래"**가 확인됐다. board routing이 이미 Unlisted를 사전 필터링해
 judge 도달 집단이 예비선별되어 있으므로(`lib/keeper/keeper_board_audience.mli`),
 confidence가 높으면 통과·낮으면 기존 judge로 올리는 이중 판단 구조가 자연스러운 후속이다.
 

@@ -313,6 +313,7 @@ const TURN_TERMINAL_FAILURE_CODES = new Set<string>([
   'heartbeat_consecutive_failures',
   'turn_consecutive_failures',
   'provider_runtime_error',
+  'official_client_recovery_required',
   'fiber_unresolved',
   'provider_attempt_effect_fenced',
 ])

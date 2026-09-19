@@ -126,6 +126,8 @@ status: reference
   Checkpoint를 못 읽어서 모르면 처음 받아들여진 저장 뒤에 쓴다. 읽는 쪽은 이 줄을
   보는 즉시 0부터 읽어도 되므로, 어느 쪽도 다시 시작하기 전에 쓰지 않는다. `fresh`
   줄과 `history_restarted` 줄은 읽는 쪽에 같은 말을 한다.
+  이 파일의 Atom 위치는 선택한 cluster의 History만 가리키는
+  cluster-scoped 좌표다. 같은 이름의 Keeper라도 다른 cluster와 공유하지 않는다.
 
 **Read Position**
 : Librarian이 History를 어디까지 읽었는지 적은 값(`keepers/<keeper>/librarian-progress.json`).
@@ -135,6 +137,8 @@ status: reference
   줄 번호로는 지금 History 안의 자리를 말할 수 없다. 파일이 없으면 아직 읽은 적이 없다는 뜻이다. 못
   읽는 파일은 "읽은 적 없음"으로 치지 않고 오류로 다룬다. 그렇게 치면 History
   전체가 안 읽은 것으로 보인다.
+  이 값도 선택한 cluster의 Turn Boundary와 History에만 의미가 있으며, 다른
+  cluster의 같은 이름 Keeper가 이어서 쓰는 공유 진행도가 아니다.
 
 **Generation**
 : 같은 Keeper가 새 trace로 이어진 횟수. 초기값은 0이다.
@@ -145,6 +149,14 @@ status: reference
 
 **Memory OS**
 : Keeper의 durable personal facts와 recall을 소유하는 typed memory store.
+  현재 Memory OS와 working context는 operator config의 Keeper 이름에 귀속되어,
+  같은 base path에서 같은 이름을 쓰는 Keeper는 cluster가 달라도 공유한다.
+  Turn Boundary와 Read Position만 cluster runtime 좌표로 분리된다.
+
+**Working Context**
+: Librarian이 Keeper가 받은 요청을 묶어 저장한 현재 작업 맥락. Memory OS와 같은
+  operator-config Keeper 이름 범위이므로 같은 이름의 Keeper는 cluster 간에 공유한다.
+  cluster별 Librarian Read Position과는 별개의 상태다.
 
 **Fact**
 : Memory OS의 기억 하나. 문장(`claim`), `category`, 처음·마지막으로 본 시각,

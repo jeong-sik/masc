@@ -119,6 +119,15 @@ let test_purge_preserves_other_cluster () =
   store_boundary b "trace-b";
   write_progress a "trace-a";
   write_progress b "trace-b";
+  let config_keepers =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:a.base_path
+  in
+  let legacy_paths =
+    [ Filename.concat config_keepers (keeper_name ^ ".turn-boundaries.jsonl")
+    ; Filename.concat config_keepers (keeper_name ^ ".librarian-progress.json")
+    ]
+  in
+  List.iter (fun path -> Out_channel.write_all path ~data:"legacy-hard-cut\n") legacy_paths;
   let paths config =
     let keepers_dir = Workspace.keepers_runtime_dir config in
     [ Boundaries.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name
@@ -132,6 +141,9 @@ let test_purge_preserves_other_cluster () =
    | Error detail -> failf "artifact purge: %s" detail);
   List.iter (fun path -> check bool "A runtime artifact removed" false (Sys.file_exists path))
     (paths a);
+  List.iter
+    (fun path -> check bool "legacy config artifact removed" false (Sys.file_exists path))
+    legacy_paths;
   List.iter (fun (path, bytes) -> check string "B artifact bytes unchanged" bytes
     (In_channel.with_open_bin path In_channel.input_all)) b_before;
   check bool "B progress still decodes" true (read_progress b = Some (value "trace-b"));

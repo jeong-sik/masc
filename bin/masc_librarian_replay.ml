@@ -75,13 +75,13 @@ type outcome =
       }
   | Skipped of string
 
-(** Boundary logs may be shared through [MASC_CONFIG_DIR]. The selected
-    cluster's typed metadata owns its current trace. This reader neither
-    creates directories nor repairs metadata, and opens no storage backend. *)
-let trace_of_metadata ~runtime_root keeper_id =
+(** The selected cluster's typed metadata owns its current trace. This reader
+    neither creates directories nor repairs metadata, and opens no storage
+    backend. *)
+let trace_of_metadata ~runtime_root ~keepers_dir keeper_id =
   let path =
     Filename.concat
-      (Filename.concat runtime_root Common.keepers_runtime_dirname)
+      keepers_dir
       (Masc.Keeper_runtime_root_entry.keeper_basename
          ~keeper_name:keeper_id Masc.Keeper_runtime_root_entry.Metadata)
   in
@@ -231,7 +231,7 @@ let replay_keeper ~extent ~runtime_root ~session_store ~keepers_dir keeper_id =
   | Error detail -> Skipped ("boundary_log_unreadable:" ^ detail)
   | Ok [] -> Skipped "boundary_log_empty"
   | Ok lines ->
-    (match trace_of_metadata ~runtime_root keeper_id with
+    (match trace_of_metadata ~runtime_root ~keepers_dir keeper_id with
      | Error detail -> Skipped detail
      | Ok trace_id ->
        let session_dir = Filename.concat session_store trace_id in

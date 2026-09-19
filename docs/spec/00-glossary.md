@@ -29,6 +29,11 @@ status: reference
 **Keeper Turn**
 : 하나의 Keeper 작업 시도를 위해 MASC가 agent core Agent run을 실행하는 단위.
 
+**Checkpoint Load**
+: 저장된 Keeper 이력을 읽는 단계. 파일 없음은 새 이력을 뜻하지만 읽기·파싱 오류는
+  새 이력을 허용하지 않는다. 명시적인 checkpoint 버전 교체만 기존 파일을 남겨 두고
+  새 이력을 시작하며, 첫 저장이 받아들여진 뒤 재시작을 기록한다.
+
 **agent core Turn**
 : 하나의 agent core Agent run 내부에서 provider response와 tool 실행이 진행되는 한
   단계. Keeper turn과 동일한 단위가 아니다.

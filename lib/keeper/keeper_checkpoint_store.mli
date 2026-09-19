@@ -129,10 +129,10 @@ val load_agent_core_history_file :
   (Agent_core.Checkpoint.t, checkpoint_load_error) result
 
 (** Load the canonical AGENT_CORE checkpoint for [session_id]. One read path
-    for Eio and non-Eio contexts: presence is a typed
-    [Fs_compat.file_exists] check, the read is Eio-native when the fs
-    capability is installed, and the JSON decode runs off the calling
-    fiber. A [session_id] that is not one real path segment is refused
+    for Eio and non-Eio contexts: the owned-file read distinguishes an absent
+    file from a read failure. The read and JSON decode run off the calling
+    fiber when the Eio capability is installed.
+    A [session_id] that is not one real path segment is refused
     as [Store_error] (the same rejection agent core store applied). *)
 val load_agent_core :
   session_dir:string ->

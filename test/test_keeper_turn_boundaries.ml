@@ -614,7 +614,7 @@ let describe_notice = function
 
 (* A reader may act on a restart line as soon as it sees it, so the line must
    not be ahead of the restart. A turn that knows the saved history holds no
-   atom can say so at once. A turn whose checkpoint could not be loaded has not
+   atom can say so at once. A turn whose checkpoint version was superseded has not
    seen the saved history, which may still hold atoms: if it said so at its
    start, a reader could re-read the old history, pass the line, and have no
    line left when a save of that turn then replaces the history. *)
@@ -627,7 +627,7 @@ let test_the_notice_follows_what_the_turn_saw () =
     Run_context.Saved_history_loaded "at turn start";
   expect "nothing is saved" Boundaries.Fresh_history Run_context.Saved_history_absent
     "at turn start";
-  expect "the load failed" Boundaries.Fresh_history Run_context.Saved_history_unread
+  expect "the checkpoint version was superseded" Boundaries.Fresh_history Run_context.Saved_history_superseded
     "after the first accepted save";
   expect "a history with atoms" Boundaries.Continued_history
     Run_context.Saved_history_loaded "none";
@@ -635,7 +635,7 @@ let test_the_notice_follows_what_the_turn_saw () =
      are listed so that the function is total without a wildcard. *)
   expect "continued, absent" Boundaries.Continued_history Run_context.Saved_history_absent
     "none";
-  expect "continued, unread" Boundaries.Continued_history Run_context.Saved_history_unread
+  expect "continued, superseded" Boundaries.Continued_history Run_context.Saved_history_superseded
     "none"
 ;;
 

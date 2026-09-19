@@ -333,6 +333,32 @@ let task_display_assignee status =
   | Unassigned -> "unclaimed"
   | Holder name | Submitter name | Completer name | Canceller name -> name
 
+(** Who may cancel a Task. Standing is the agent the state names, or an
+    operator the caller authenticated. [created_by] is not standing: it is a
+    string the client writes, and one shared name covers hundreds of Tasks. A
+    claim is an event the server mediated, so the state's own name is the fact
+    to read. *)
+type cancel_standing =
+  | Named_by_state
+  | Operator of { operator_id : string }
+
+(** The agent this state names as still carrying the work, which is who may
+    stop it besides an operator.
+
+    Not [task_assignee_of_status], though today they agree. That one answers
+    who owes work, and the two questions part as soon as a state names an agent
+    that owes nothing — a returned submission being the case that is coming.
+    Keeping them separate also keeps [Done] and [Cancelled] out: both carry a
+    name, and reading it as standing would let whoever finished a Task reverse
+    their own completion. The transition table refuses those first; this is the
+    second lock. *)
+let cancel_standing_name = function
+  | Todo -> None
+  | Claimed { assignee; _ } | InProgress { assignee; _ } -> Some assignee
+  | AwaitingVerification { assignee; _ } -> Some assignee
+  | Done _ | Cancelled _ -> None
+;;
+
 (** Terminal states: [Done] or [Cancelled]. No further transitions possible.
     Exhaustive match — adding a constructor forces an update here. *)
 let task_status_is_terminal = function

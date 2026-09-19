@@ -148,6 +148,16 @@ val task_assignee_of_status : task_status -> string option
 (** Who did or is doing the work, including after completion. [Cancelled]
     answers [None]: its canceller ended the work rather than performing it. *)
 val task_performer_of_status : task_status -> string option
+type cancel_standing =
+  | Named_by_state
+  | Operator of { operator_id : string }
+
+(** The agent this state names as still carrying the work. [Todo] names nobody,
+    so only an operator may cancel it. [Done] and [Cancelled] carry a name and
+    still answer [None]: a finished Task is not something its finisher may
+    reverse. *)
+val cancel_standing_name : task_status -> string option
+
 val task_status_is_terminal : task_status -> bool
 val task_status_is_done : task_status -> bool
 val valid_task_status_strings : string list

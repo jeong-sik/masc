@@ -621,12 +621,8 @@ let test_terminal_hook_degradation_does_not_invalidate_task_commit () =
            let task = Masc.Workspace.get_tasks_raw config
              |> List.find (fun (task : Masc_domain.task) -> String.equal task.id task_id) in
            (match task.task_status with
-            | Masc_domain.AwaitingVerification { verification_id; intent = Masc_domain.Cancel_task; _ } ->
-              Masc.Workspace.commit_verdict_r config
-                ~authority:(Masc_domain.Human_operator { operator_id = "fixture-operator" })
-                ~verdict:Masc_domain.Verdict_approved ~task_id ~verification_id ()
-              |> Result.map (fun _ -> "operator cancellation committed")
-            | _ -> fail "cancellation did not persist an operator-review request")
+            | Masc_domain.Cancelled _ -> Ok "cancellation committed"
+            | _ -> fail "cancellation did not end the Task")
          | Ok _, _ -> submitted
        in
        let terminal_with hook title =

@@ -10,6 +10,10 @@ type invalid =
           the completion-authority entry point owns its verdict. *)
   | Verdict_authority_identity_required
   | Verdict_rejection_reason_required
+  | Cancel_requires_standing
+      (** The caller is neither an authenticated operator nor the agent the
+          state names. A [Todo] names nobody, so only an operator may end it;
+          that is what closes release-then-cancel. *)
   | Verdict_cancel_requires_operator
       (** RFC-0417 §4.4: the terminal [Cancelled] record of a cancel claim may
           carry only an operator's signature. A system-lane approval of a
@@ -43,6 +47,7 @@ val resolve_claim
 val decide
   :  new_verification_id:(unit -> string)
   -> same_agent:(string -> bool)
+  -> cancel_standing:Masc_domain.cancel_standing
   -> agent_name:string
   -> task_id:string
   -> task_status:Masc_domain.task_status

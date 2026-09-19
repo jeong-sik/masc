@@ -1550,24 +1550,22 @@ let test_cancel_writes_the_record_the_authority_reads () =
      with
      | Ok _ -> ()
      | Error _ -> Alcotest.fail "a cancel with a reason must be accepted");
-    let verification_id = verification_id_for_task config "task-001" in
-    match Verification.load_request config.Workspace.base_path verification_id with
-    | Error e -> Alcotest.fail ("the authority would defer on: " ^ e)
-    | Ok (_ : Verification.verification_request) ->
-      (* The record keeps no copy of the reason; the message log is the
-         reader this environment has. *)
-      Alcotest.(check bool) "the message log carries the producer's reason" true
-        (List.exists
-           (fun (message : Types.message) ->
-              String.equal message.content
-                "Cancellation requested for task-001 - the defect no longer reproduces")
-           (Workspace.get_all_messages_raw config ~since_seq:0));
-      (* Which question was asked is the Task's to answer, not the record's. *)
-      (match find_task config "task-001" with
-       | Some { task_status = Masc_domain.AwaitingVerification
-                  { intent = Masc_domain.Cancel_task; _ }; _ } -> ()
-       | Some _ | None ->
-         Alcotest.fail "the task must be awaiting a verdict on a cancellation"))
+    (* Nobody is asked, so no request is written. The reason still has to reach
+       a reader, and the message log is the reader this environment has. *)
+    Alcotest.(check bool) "the message log carries the reason" true
+      (List.exists
+         (fun (message : Types.message) ->
+            String.equal message.content
+              "Cancelled task-001 - the defect no longer reproduces")
+         (Workspace.get_all_messages_raw config ~since_seq:0));
+    (match find_task config "task-001" with
+     | Some { task_status = Masc_domain.Cancelled { cancelled_by; _ }; _ } ->
+       Alcotest.(check string) "the holder signed its own stop" test_agent_a cancelled_by
+     | Some task ->
+       Alcotest.failf
+         "task-001 is %s, not stopped"
+         (Masc_domain.task_status_to_string task.task_status)
+     | None -> Alcotest.fail "task-001 not found"))
 
 (* RFC-0417 §4.2/§6.2: the operator's one click closes a cancellation. The
    evidence card must name the question it answers (intent=cancellation), and

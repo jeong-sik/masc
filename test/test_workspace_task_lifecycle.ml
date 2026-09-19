@@ -7,6 +7,7 @@ let now = "2026-07-13T00:00:00Z"
 let decide
       ?(notes = "evidence at /tmp/proof")
       ?(reason = "")
+      ?(cancel_standing = D.Named_by_state)
       ~same_agent
       ~task_status
       ~action
@@ -15,6 +16,7 @@ let decide
   L.decide
     ~new_verification_id:(fun () -> "vrf-1")
     ~same_agent:(fun _ -> same_agent)
+    ~cancel_standing
     ~agent_name:owner
     ~task_id:"task-1"
     ~task_status
@@ -65,43 +67,26 @@ let test_done_has_no_non_verification_lane () =
   |> expect_error L.Verification_submission_required
 ;;
 
-(* Cancel had no test of its own. It now answers the way Done does: a
-   producer submits the stop and waits for a verdict, and the same verdict
-   path ends the Task as Cancelled rather than Done because the obligation
-   records which question was asked. *)
-let awaiting_cancel = function
-  | Ok { L.new_status = D.AwaitingVerification { intent = D.Cancel_task; verification_id; _ }; _ } ->
-    verification_id
-  | Ok { L.new_status = D.AwaitingVerification { intent = D.Complete_task; _ }; _ } ->
-    failwith "cancel submitted as a completion"
-  | Ok _ -> failwith "cancel did not wait for a verdict"
+(* Cancel answers from the state, not from a queue. Whoever the state names
+   ends the Task then and there; whoever it does not name is refused unless
+   they came in as an operator. *)
+let cancelled_by = function
+  | Ok { L.new_status = D.Cancelled { cancelled_by; _ }; _ } -> cancelled_by
+  | Ok { L.new_status = D.AwaitingVerification _; _ } ->
+    failwith "cancel queued for a verdict instead of ending the Task"
+  | Ok _ -> failwith "cancel did not end the Task"
   | Error _ -> failwith "cancel was refused"
 ;;
 
-let test_cancel_waits_for_a_verdict_like_done_does () =
-  let vrf = awaiting_cancel (decide ~same_agent:true ~task_status:in_progress ~action:D.Cancel ()) in
-  if not (String.equal vrf "vrf-1") then failwith "cancel must mint a verification id";
-  (* Neither terminal is reachable alone from the same state. *)
+let test_the_holder_ends_its_own_work_without_asking () =
+  let who = cancelled_by (decide ~same_agent:true ~task_status:in_progress ~action:D.Cancel ()) in
+  if not (String.equal who owner) then failwith "the canceller is the holder";
+  (* Finishing is the part that still needs an answer from someone else. *)
   decide ~same_agent:true ~task_status:in_progress ~action:D.Done_action ()
   |> expect_error L.Verification_submission_required
 ;;
 
-let test_cancel_of_someone_elses_task_is_refused () =
-  decide ~same_agent:false ~task_status:in_progress ~action:D.Cancel ()
-  |> expect_error L.Invalid_transition;
-  decide ~same_agent:false ~task_status:awaiting ~action:D.Cancel ()
-  |> expect_error L.Invalid_transition
-;;
-
-(* A stop asked for while a submission is pending supersedes it. Ending the
-   Task here would let submit-then-cancel reach a terminal state alone.
-
-   The pending status is built here rather than reusing [awaiting] because the
-   shared fixture carries [started_at = now] and [verification_id = "vrf-1"],
-   which are the same values the transition would produce if it preserved
-   neither: both assertions would hold for code that restated the start time
-   and reused the old id. These two differ from what the transition mints. *)
-let test_cancel_of_a_pending_submission_waits_for_a_verdict () =
+let test_the_producer_of_a_pending_submission_may_stop_it () =
   let began = "2026-07-12T00:00:00Z" in
   let pending =
     D.AwaitingVerification
@@ -112,20 +97,46 @@ let test_cancel_of_a_pending_submission_waits_for_a_verdict () =
       ; verification_id = "vrf-0"
       }
   in
-  match decide ~same_agent:true ~task_status:pending ~action:D.Cancel () with
-  | Ok
-      { L.new_status =
-          D.AwaitingVerification
-            { intent = D.Cancel_task; started_at; verification_id; _ }
-      ; _
-      } ->
-    if not (String.equal started_at began)
-    then failwith "the work began once; a stop must not restate when";
-    if String.equal verification_id "vrf-0"
-    then failwith "a superseding stop must mint its own verification id"
-  | Ok { L.new_status = D.Cancelled _; _ } ->
-    failwith "a pending submission was cancelled without a verdict"
-  | Ok _ | Error _ -> failwith "cancel of a pending submission must wait for a verdict"
+  let who = cancelled_by (decide ~same_agent:true ~task_status:pending ~action:D.Cancel ()) in
+  if not (String.equal who owner) then failwith "the canceller is the producer"
+;;
+
+let test_cancel_of_someone_elses_task_is_refused () =
+  decide ~same_agent:false ~task_status:in_progress ~action:D.Cancel ()
+  |> expect_error L.Cancel_requires_standing;
+  decide ~same_agent:false ~task_status:awaiting ~action:D.Cancel ()
+  |> expect_error L.Cancel_requires_standing
+;;
+
+(* Nobody holds a Todo, so the state names nobody and no agent has standing.
+   This is what shuts release-then-cancel: after a release the Task is a Todo,
+   and the agent that just let go has no more claim on it than anyone else. *)
+let test_a_todo_takes_an_operator () =
+  decide ~same_agent:true ~task_status:D.Todo ~action:D.Cancel ()
+  |> expect_error L.Cancel_requires_standing;
+  let who =
+    cancelled_by
+      (decide
+         ~cancel_standing:(D.Operator { operator_id = "op-1" })
+         ~same_agent:false
+         ~task_status:D.Todo
+         ~action:D.Cancel
+         ())
+  in
+  if not (String.equal who "op-1") then failwith "an operator cancel is signed by the operator"
+;;
+
+let test_an_operator_may_end_work_it_never_held () =
+  let who =
+    cancelled_by
+      (decide
+         ~cancel_standing:(D.Operator { operator_id = "op-1" })
+         ~same_agent:false
+         ~task_status:in_progress
+         ~action:D.Cancel
+         ())
+  in
+  if not (String.equal who "op-1") then failwith "an operator cancel is signed by the operator"
 ;;
 
 let test_cancel_cannot_undo_a_finished_task () =
@@ -449,9 +460,11 @@ let () =
   test_verdict_rejects_stale_verification_id ();
   test_claim_on_awaiting_is_refused ();
   test_awaiting_is_claimable_by_nobody ();
-  test_cancel_waits_for_a_verdict_like_done_does ();
+  test_the_holder_ends_its_own_work_without_asking ();
+  test_a_todo_takes_an_operator ();
+  test_an_operator_may_end_work_it_never_held ();
   test_cancel_of_someone_elses_task_is_refused ();
-  test_cancel_of_a_pending_submission_waits_for_a_verdict ();
+  test_the_producer_of_a_pending_submission_may_stop_it ();
   test_cancel_cannot_undo_a_finished_task ();
   test_approval_ends_the_task_the_way_it_was_asked ();
   test_a_rejected_cancellation_returns_to_its_producer ();

@@ -3,6 +3,7 @@ type invalid =
   | Verification_pending_verdict
   | Verdict_authority_identity_required
   | Verdict_rejection_reason_required
+  | Cancel_requires_standing
   | Verdict_cancel_requires_operator
   | Verification_id_mismatch of { expected : string; actual : string }
   | Invalid_transition
@@ -53,9 +54,27 @@ let resolve_claim ~same_actor ~agent_name ~now (task : Masc_domain.task) =
        Held_terminal task_status)
 ;;
 
+(* Standing to cancel: an operator may cancel anything the transition table
+   allows, and otherwise the caller has to be the agent the state names. *)
+let cancel_permitted ~same_agent ~cancel_standing task_status =
+  match cancel_standing with
+  | Masc_domain.Operator _ -> true
+  | Masc_domain.Named_by_state ->
+    (match Masc_domain.cancel_standing_name task_status with
+     | None -> false
+     | Some name -> same_agent name)
+;;
+
+let cancel_actor ~agent_name ~cancel_standing =
+  match cancel_standing with
+  | Masc_domain.Operator { operator_id } -> operator_id
+  | Masc_domain.Named_by_state -> agent_name
+;;
+
 let decide
       ~new_verification_id
       ~same_agent
+      ~cancel_standing
       ~agent_name
       ~task_id
       ~task_status
@@ -110,45 +129,25 @@ let decide
       | Masc_domain.Cancelled _ ) ) ->
     Error Invalid_transition
   | Masc_domain.Cancel, Masc_domain.Cancelled _ -> ok task_status
-  | Masc_domain.Cancel, Masc_domain.Todo ->
-    ok (cancelled_status ~agent_name ~now ~reason)
-  (* A producer stops its own work the same way it finishes it: by submitting
-     the claim and waiting for a verdict. Cancelling outright would give a
-     Keeper one terminal state it can reach alone while [Done_action] refuses
-     every lane that is not a submission — "I could not do this" would settle
-     itself and "I did this" would not. *)
+  (* Standing decides, and the answer is the terminal state itself. The queue
+     this used to open existed because a holder had to ask, and asking is what
+     left 65 claims waiting up to 345 hours. Stopping work you hold is not a
+     permission to ask for. Ending work you do not hold still is, and that is
+     narrower than before: a Todo used to take anyone and now takes an
+     operator, which also shuts the release-then-cancel walk-around. *)
   | ( Masc_domain.Cancel
-    , Masc_domain.Claimed { assignee; claimed_at = started_at } )
-  | ( Masc_domain.Cancel
-    , Masc_domain.InProgress { assignee; started_at } ) ->
-    if same_agent assignee
+    , ( Masc_domain.Todo
+      | Masc_domain.Claimed _
+      | Masc_domain.InProgress _
+      | Masc_domain.AwaitingVerification _ ) ) ->
+    if cancel_permitted ~same_agent ~cancel_standing task_status
     then
       ok
-        (Masc_domain.AwaitingVerification
-           { assignee
-           ; started_at
-           ; submitted_at = now
-           ; intent = Masc_domain.Cancel_task
-           ; verification_id = new_verification_id ()
-           })
-    else Error Invalid_transition
-  (* A stop asked for while a submission is pending supersedes that
-     submission the way a resubmission does: fresh verification id, same
-     producer, [started_at] kept. Ending the Task here outright would hand the
-     producer the one terminal state the arm above denies it — submit, then
-     cancel, and no verdict is ever waited for. *)
-  | Masc_domain.Cancel, Masc_domain.AwaitingVerification { assignee; started_at; _ } ->
-    if same_agent assignee
-    then
-      ok
-        (Masc_domain.AwaitingVerification
-           { assignee
-           ; started_at
-           ; submitted_at = now
-           ; intent = Masc_domain.Cancel_task
-           ; verification_id = new_verification_id ()
-           })
-    else Error Invalid_transition
+        (cancelled_status
+           ~agent_name:(cancel_actor ~agent_name ~cancel_standing)
+           ~now
+           ~reason)
+    else Error Cancel_requires_standing
   | Masc_domain.Cancel, Masc_domain.Done _ -> Error Invalid_transition
   | ( Masc_domain.Release
     , (Masc_domain.Claimed { assignee; _ } | Masc_domain.InProgress { assignee; _}) ) ->
@@ -312,6 +311,7 @@ let valid_next_actions ~same_agent ~task_status =
       decide
         ~new_verification_id:(fun () -> "")
         ~same_agent:same_agent_pred
+        ~cancel_standing:Masc_domain.Named_by_state
         ~agent_name:""
         ~task_id:""
         ~task_status

@@ -80,11 +80,10 @@ let transition_broadcast_content ~new_status ~task_id ~(stated_reason : string o
      Board through [Verification_protocol.notify_submit_for_verification]; a
      message row would restate a strictly poorer version of that post.
 
-     A stop is the other way round. Its whole payload is one sentence, and the
-     Board post carrying it is [Unlisted] — reachable by id, absent from the
-     feed. The measurement that put cancellations in this log in the first
-     place is the same one: a reason no reader sees is a reason that did not
-     arrive. So it keeps its row, worded as the request it is. *)
+     A stop used to be the other way round, waiting on a verdict with its whole
+     payload in one sentence. It is terminal now, so the [Cancelled] arm above
+     carries that sentence and the reason still reaches a reader. No transition
+     produces the arm below any more; it stays only until [intent] goes. *)
   | Masc_domain.AwaitingVerification { intent = Masc_domain.Complete_task; _ } -> None
   | Masc_domain.AwaitingVerification { intent = Masc_domain.Cancel_task; _ } ->
     with_reason "Cancellation requested for"
@@ -213,6 +212,7 @@ let transition_task_outcome_r
             Workspace_task_lifecycle.decide
               ~new_verification_id:(fun () -> Random_id.prefixed ~prefix:"vrf-" ~bytes:16)
               ~same_agent:(same_task_actor config agent_name)
+              ~cancel_standing:Masc_domain.Named_by_state
               ~agent_name
               ~task_id
               ~task_status:task.task_status
@@ -236,6 +236,18 @@ let transition_task_outcome_r
                        "Task %s awaits a completion authority's verdict and is not \
                         claimable by any agent (%s included). A Keeper is not a \
                         verifier."
+                       task_id
+                       agent_name)))
+          | Error Workspace_task_lifecycle.Cancel_requires_standing ->
+            Error
+              (Masc_domain.Task
+                 (Masc_domain.Task_error.InvalidState
+                    (Printf.sprintf
+                       "Task %s is not %s's to cancel. A Task is cancelled by \
+                        whoever holds it, by whoever submitted it, or by an \
+                        operator. Nobody holds a Todo, so an operator ends \
+                        those. To stop work you do not hold, release it or say \
+                        so on the board."
                        task_id
                        agent_name)))
           | Error Workspace_task_lifecycle.Verdict_rejection_reason_required ->
@@ -886,6 +898,9 @@ let commit_verdict_r
                           actual)))
              | Error Workspace_task_lifecycle.Verification_pending_verdict
              | Error Workspace_task_lifecycle.Verification_submission_required
+             (* A verdict never asks about cancel standing; the arm is here so
+                the match stays exhaustive over [invalid]. *)
+             | Error Workspace_task_lifecycle.Cancel_requires_standing
              | Error Workspace_task_lifecycle.Invalid_transition ->
                Error
                  (Masc_domain.Task

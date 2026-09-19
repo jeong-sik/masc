@@ -34,7 +34,18 @@ It activates only when `TYPESAFEAI_API_KEY` holds a non-blank value.
 `MASC_TYPESAFEAI_ENABLED=false` (or `0`, `no`, `off`) turns it off even with a key;
 the variable alone cannot turn it on.
 
-### 2.2 Transparent Fallback
+### 2.2 Data sent outside the MASC instance
+
+Opting in sends each pending Board-attention candidate to the configured TypeSafe AI endpoint (default: `https://api.typesafe.ai/v1/systemone`). The request state contains:
+
+- the candidate id and Board signal;
+- the complete Board post and every comment attached to the candidate;
+- the candidate's `keeper_context`, which identifies the Keeper and its partition;
+- a relevance question that names the Keeper.
+
+This is the same `singleton_judgment_request` used by the regular exact-output judgment path. Operators should enable the integration only when sending that Board and Keeper context to the configured endpoint is acceptable.
+
+### 2.3 Transparent Fallback
 When opted in:
 1. MASC attempts the TypeSafe AI Jev evaluation first. The request is bounded by `Masc_http_client.default_request_timeout_sec`, the deadline the other outbound clients share.
 2. The kind of decision Jev picks decides what happens next. No confidence value is compared against a number; the confidence and probabilities Jev reported are written into the verdict's rationale for the record.

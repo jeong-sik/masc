@@ -62,6 +62,8 @@ media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
 # Calibrated probabilistic decisions for the board_attention_exact lane only.
 # A non-blank TYPESAFEAI_API_KEY turns it on. MASC_TYPESAFEAI_ENABLED=false
 # turns it off even with a key; the variable cannot turn it on without one.
+# When enabled, MASC sends the candidate id, Board signal, full post, comments,
+# and keeper context to the configured TypeSafe AI endpoint.
 # When on, board attention asks Jev first. A relevant answer is kept; a
 # not-relevant answer or a failed call is judged again by the
 # board_attention_exact slots below. So only a relevant answer saves an

@@ -61,7 +61,9 @@ val preflight_slots
     refusal reason), so the caller can say which slots it excluded; a ladder
     with no projectable slot at all is [Exact_request_projection_failed],
     naming each refusal. An empty ladder reports nothing -- the caller routes
-    it to the cli lane. *)
+    it to the cli lane. The execution caller also tries declared CLI slots
+    after all API projections are refused, preserving this error if no CLI
+    answer is accepted. *)
 
 
 (** Which failure kind this error records in the memory journal. The vocabulary

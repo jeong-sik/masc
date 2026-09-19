@@ -8,8 +8,6 @@ val wire_field_claim : string
 val wire_field_category : string
 val wire_field_memory_id : string
 val wire_field_reason : string
-val wire_field_first_seen : string
-val wire_field_last_seen : string
 val wire_field_origin : string
 val wire_field_basis : string
 val wire_field_derivations : string
@@ -194,8 +192,6 @@ type origin =
   ; trace_id : string
   }
 
-val origin_to_json : origin -> Yojson.Safe.t
-
 (** One independently sufficient proof of a derived fact. Every [premise_id]
     is the exact {!memory_id} of another fact. An inactive alternative may
     reference facts that are no longer current. [rule_id] is an opaque
@@ -205,6 +201,9 @@ type derivation =
   { rule_id : string
   ; premise_ids : string list
   }
+
+(** Canonical premise ordering; this does not validate the proof. *)
+val normalize_derivation : derivation -> derivation
 
 (** Where an observed fact was read from. [Transcript] is the keeper's own
     turn history, which was the only source before Board provenance existed.

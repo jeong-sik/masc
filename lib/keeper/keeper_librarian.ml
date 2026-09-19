@@ -146,7 +146,8 @@ let basis_for_prompt ~by_identity = function
     `Assoc
       [ wire_field_kind, `String "derived"
       ; wire_field_derivations,
-        `List (List.map (fun (proof : derivation) ->
+        `List (List.map (fun proof ->
+          let proof = normalize_derivation proof in
           `Assoc
             [ wire_field_rule_id, `String proof.rule_id
             ; wire_field_premise_ids,
@@ -164,9 +165,8 @@ let current_fact_json ~by_identity index fact =
       , `Assoc
           [ wire_field_claim, `String fact.claim
           ; wire_field_category, `String (category_to_string fact.category)
-          ; wire_field_first_seen, `Float fact.first_seen
-          ; wire_field_last_seen, `Float fact.last_seen
-          ; wire_field_origin, origin_to_json fact.origin
+          ; wire_field_origin,
+            `Assoc [ wire_field_kind, `String (origin_kind_to_string fact.origin.kind) ]
           ; wire_field_basis, basis_for_prompt ~by_identity fact.basis
           ] )
     ]

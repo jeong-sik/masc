@@ -622,8 +622,9 @@ let test_prompt_contains_exact_current_selection () =
     Yojson.Safe.from_string current_memory |> Yojson.Safe.Util.member "facts"
     |> Yojson.Safe.Util.to_list |> List.hd |> Yojson.Safe.Util.member "fact"
   in
-  check bool "stored timestamp reaches current input" true
-    (Yojson.Safe.Util.member "first_seen" first_fact = `Float current_a.first_seen)
+  let fields = Yojson.Safe.Util.to_assoc first_fact in
+  check bool "timing metadata fields are omitted" false
+    (List.mem_assoc "first_seen" fields || List.mem_assoc "last_seen" fields)
 ;;
 
 let test_prompt_carries_keeper_instructions () =
@@ -1359,6 +1360,24 @@ let test_current_provenance_survives_store_prompt_and_decisions () =
     in
     let stored = read () in
     let inp = { (input ()) with current = Some { Librarian.facts = stored.facts } } in
+    let report_input_size scenario facts =
+      let measured = { inp with current = Some { Librarian.facts } } in
+      let current_memory = List.assoc "current_memory" (Librarian.prompt_variables measured) in
+      let rendered = match Runtime.messages_for_librarian measured with
+        | Ok messages -> user_text_of_messages messages
+        | Error detail -> fail detail
+      in
+      Printf.printf "%s\n%!"
+        (Yojson.Safe.to_string (`Assoc
+           [ "scenario", `String scenario; "fact_count", `Int (List.length facts)
+           ; "current_memory_bytes", `Int (String.length current_memory)
+           ; "rendered_user_bytes", `Int (String.length rendered) ]))
+    in
+    report_input_size "one_transcript" [fact ~claim:"Service uses port 8080."];
+    report_input_size "one_board" [emergency];
+    report_input_size "stored_alternative_proofs" stored.facts;
+    report_input_size "one_hundred_transcripts"
+      (List.init 100 (fun index -> fact ~claim:(Printf.sprintf "Service %d uses port 8080." index)));
     let rows input =
       List.assoc "current_memory" (Librarian.prompt_variables input)
       |> Yojson.Safe.from_string |> Yojson.Safe.Util.member "facts"
@@ -1372,18 +1391,28 @@ let test_current_provenance_survives_store_prompt_and_decisions () =
       let rows = rows input in
       let emergency_row = row_for emergency.claim rows in
       let details = Yojson.Safe.Util.member "fact" emergency_row in
-      check bool "stored origin reaches prompt" true
-        (Yojson.Safe.Util.member "origin" details
-         = `Assoc ["kind", `String "authored"; "trace_id", `String "trace-explicit"]);
-      check bool "insertion and re-observation times remain distinct" true
-        (Yojson.Safe.Util.member "first_seen" details = `Float 100.
-         && Yojson.Safe.Util.member "last_seen" details = `Float 200.);
-      check bool "Board evidence is preserved exactly" true
+      check bool "origin kind reaches prompt without the opaque trace id" true
+        (Yojson.Safe.Util.member "origin" details = `Assoc ["kind", `String "authored"]);
+      let fields = Yojson.Safe.Util.to_assoc details in
+      check bool "timing metadata fields are omitted" false
+        (List.mem_assoc "first_seen" fields || List.mem_assoc "last_seen" fields);
+      check bool "Board source ids remain available for new claim provenance" true
         (Yojson.Safe.Util.member "basis" details = Memory.basis_to_json emergency.basis);
+      let source = Yojson.Safe.Util.(details |> member "basis" |> member "board") in
+      let post_id = Yojson.Safe.Util.(source |> member "post_id" |> to_string) in
+      let comment_id = Yojson.Safe.Util.(source |> member "comment_id" |> to_string) in
+      let answer = selection_json ~dropped:[]
+          ~new_claims:[board_claim ~post_id ~comment_id "approval source supports this new claim"] () in
+      (match Librarian.selection_of_json_result ~now:450. input answer with
+       | Ok { new_claims = [claim]; _ } ->
+         check bool "projected Board ids pass the existing new-claim contract" true
+           (claim.basis = emergency.basis)
+       | Ok _ -> fail "expected exactly one new Board claim"
+       | Error error -> fail (Librarian.parse_error_to_string error));
       let derived = row_for conclusion.claim rows |> Yojson.Safe.Util.member "fact" in
       check bool "Librarian origin is preserved too" true
         (Yojson.Safe.Util.member "origin" derived
-         = `Assoc ["kind", `String "injected"; "trace_id", `String "trace-derived"]);
+         = `Assoc ["kind", `String "injected"]);
       let basis = Yojson.Safe.Util.member "basis" derived in
       check string "derived basis remains typed" "derived"
         Yojson.Safe.Util.(basis |> member "kind" |> to_string);
@@ -1434,7 +1463,9 @@ let test_current_provenance_survives_store_prompt_and_decisions () =
         500. in
     check (list string) "the selected short id retires only its current fact"
       [emergency.claim; conclusion.claim] (List.map (fun (fact : Memory.fact) -> fact.claim) committed.facts);
-    let expected = List.map Memory.fact_to_json committed.facts in
+    let expected = List.map Memory.fact_to_json [emergency; conclusion] in
+    check bool "input projection does not alter retained store provenance" true
+      (List.map Memory.fact_to_json committed.facts = expected);
     List.iter (fun now ->
       let current = read () in
       let next_input = { inp with current = Some { Librarian.facts = current.facts } } in

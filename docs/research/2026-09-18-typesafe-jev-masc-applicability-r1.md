@@ -3,7 +3,7 @@
 - 작성: 2026-09-18
 - 근거: [2026-09-18-typesafe-jev-masc-applicability-evidence-record.md](2026-09-18-typesafe-jev-masc-applicability-evidence-record.md)
 - 대상 문서: docs.typesafe.ai (introduction / primitives / confidence / patterns / quickstart), typesafe.ai
-- 방법: 공식 문서 열람 + masc 코드 탐색(lib/, packages/agent_core/, docs/) + board_attention 판정 replay 실험 35건
+- 방법: 공식 문서 열람 + masc 코드 탐색(lib/, packages/agent_core/, docs/) + board_attention 판정 replay 실험 35호출(고유 후보 27건)
 
 ## 1. TypeSafe Jev 요약
 
@@ -97,15 +97,16 @@ TypeSafe(출력 공간을 API에서 종혀 파싱을 없앰)는 같은 철학의
 
 ## 4. Replay 실험 요약 (상세는 근거 기록)
 
-wkbl 워크스페이스 board_attention 후보 중 기존 judge 판정 보유 25건(전부 relevant)과
-합성 negative 대조군 10건을 실 API로 재생했다. baseline에 음성이 0건이라 specificity 측정을
+wkbl 워크스페이스 board_attention 후보 중 기존 judge 판정이 있는 고유 후보 17건(전부 relevant)과
+합성 negative 대조군 10건을 실 API로 재생했다. 판정 원장이 후보 8건을 두 줄씩 담고 있어서
+historical 쪽 호출은 25번이다. baseline에 음성이 0건이라 specificity 측정을
 위해 대조군을 만들었다.
 
 | 항목 | 결과 |
 |---|---|
-| Historical 재생 25건 | 기존 judge와 합의 25/25 |
+| Historical 재생(고유 후보 17건, 호출 25번) | 기존 judge와 합의: 호출 25/25, 후보 17/17 |
 | 합성 negative 10건 | specificity 10/10 (전부 not_relevant 정판) |
-| Noul↔Choice 교차 일관성 | 35/35 |
+| Noul↔Choice 교차 일관성 | 호출 35/35 |
 | 비용 | 총 input 48,742 tokens = $0.002 (호출당 $0.00006) |
 | 지연 | 평균 0.66s / 최대 1.03s (클라이언트에서 잼, 호출마다 새 연결) |
 | 에러 | 0건 |
@@ -135,5 +136,5 @@ confidence가 높으면 통과·낮으면 기존 judge로 올리는 이중 판�
 ## 5. 리스크
 
 - early access 단독 벤더, 단일 모델, SLA 없음. 검증 안 된 자체 벤치마크.
-- 데이터 반출: 판단 대상 상태가 외부로 나간다. 본 실험에서도 wkbl board 원문 35건이 전송됐다.
+- 데이터 반출: 판단 대상 상태가 외부로 나간다. 본 실험에서도 요청 35번이 나갔고, 그중 25번에 wkbl board 원문(고유 후보 17건)이 실렸다.
 - jaggedness: 능력이 작업류별로 고르지 않다. 도입 전 우리 판단 분포에서의 replay 측정이 유일한 근거다.

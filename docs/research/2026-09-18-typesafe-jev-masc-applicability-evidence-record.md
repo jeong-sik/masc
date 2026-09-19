@@ -9,7 +9,9 @@
 - 문서: docs.typesafe.ai introduction / primitives / confidence / patterns / quickstart, typesafe.ai (2026-09-18 열람).
 - 판정 이력(피실험 데이터): `<base-path>/.masc/board_attention_candidates/wkbl-builder.jsonl`
   (base-path = wkbl 워크스페이스 루트, MASC_BASE_PATH)
-  — 기존 judge 판정 보유 25건(consumed 17 + judged 8, 전부 `relevant`, rationale 포함).
+  — 기존 judge 판정이 담긴 줄 25개(consumed 17 + judged 8, 전부 `relevant`, rationale 포함).
+  원장은 상태가 바뀔 때마다 줄을 덧붙인다. 그래서 judged 뒤 consumed 된 후보는 두 줄에 나온다.
+  `candidate_id` 로 세면 고유 후보는 17건이고, 그중 8건은 두 번 재생됐다(부록 B).
 - 재현 스크립트와 호출별 원시 기록: 아래 부록 A(스크립트), 부록 B(results.jsonl 전문).
 
 ## Timestamp
@@ -21,7 +23,7 @@
 
 - 문서 내용: High (공식 문서 직접 열람)
 - 가격·성능 주장(238배/444배 등): Low (회사 자체 벤치마크, 조건 미공개)
-- replay 등가성: Medium (합성 음성 포함, n=35, 인간 라벨 없음)
+- replay 등가성: Medium (합성 음성 포함, 호출 35번·고유 후보 27건, 인간 라벨 없음)
 - 비용 비교 배수(30~250배): Low (원 judge 실측 usage 부재, 가격 대입 추정)
 
 ## Delta
@@ -40,15 +42,16 @@ masc의 exact-output 레인 6종과 개념이 겹친다는 점에서, 레인 모
 - 합성 negative 10건: wkbl-builder 업무(서비스 복구, 광고 수익)와 무관한 일상 주제 8건 +
   주제가 인접한 경계선 2건(다른 프로젝트의 Railway 상태, 다중 에이전트 프레임워크 잡담).
   baseline에 음성이 0건이라 specificity 측정을 위해 연구자가 직접 만들었다.
-- 데이터 반출: 이 실험으로 wkbl board 원문과 keeper context 35건이 api.typesafe.ai로 전송됐다.
+- 데이터 반출: 이 실험으로 api.typesafe.ai 에 요청 35번이 나갔다. 모든 요청에 wkbl keeper context 가 실렸고,
+  wkbl board 원문은 고유 후보 17건이 25번 실렸다(나머지 10번은 합성 negative).
 
 ## 결과 요약
 
 | 항목 | 값 |
 |---|---|
-| historical 합의(relevant 25건) | 25/25 |
+| historical 합의(고유 후보 17건, 호출 25번, 전부 relevant) | 호출 25/25, 후보 17/17 |
 | 합성 negative specificity | 10/10 |
-| Noul↔Choice 교차 일관성 | 35/35 |
+| Noul↔Choice 교차 일관성 | 호출 35/35 |
 | 총 input / output tokens | 48,742 / 2,635 |
 | 총 비용 | $0.002 (호출당 $0.00006) |
 | 지연 평균 / 최대 | 0.66s / 1.03s (클라이언트에서 잼, `urllib` 이 호출마다 새 연결을 연다) |
@@ -85,7 +88,7 @@ Jev 실측 $0.00006과 비교해 30~250배. 배치로 묶는 원 구조를 감�
 #!/usr/bin/env python3
 """Jev replay: masc board attention 판정 재현 실험.
 
-기존 judge(Exact_output 레인, 전체 LLM)의 historical 판정 25건을 Jev에 재생하고
+기존 judge(Exact_output 레인, 전체 LLM)의 historical 판정 줄 25개(고유 후보 17건)를 Jev에 재생하고
 합성 negative 대조군 10건으로 specificity를 측정한다.
 
 출력: results.jsonl (호출별 전체 응답), summary.json

@@ -769,6 +769,22 @@ let refresh_execution_default_light_http_body ~config =
     ~prepare:Http_response_payload.prepare ~config ()
 ;;
 
+(* A freshly rendered execution surface, after the running-keeper
+   reconciliation. The render reads an operator snapshot that is cached for
+   seconds, so a Keeper that booted after that snapshot can still be listed as
+   a declaration row while it already runs. That surface describes a moment
+   before the boot, so it is not published: [Snapshot_predates_boot] names the
+   Keeper and keeps the surface only for the one requester waiting on it. *)
+type execution_surface =
+  | Current_surface of Yojson.Safe.t
+  | Snapshot_predates_boot of { keeper_name : string; surface : Yojson.Safe.t }
+
+let map_execution_surface f = function
+  | Current_surface json -> Current_surface (f json)
+  | Snapshot_predates_boot stale ->
+    Snapshot_predates_boot { stale with surface = f stale.surface }
+;;
+
 let cached_execution_or_first_success_json ~clock ~timeout_sec compute =
   let cached_success () =
     with_execution_publication_lock (fun () ->
@@ -782,9 +798,13 @@ let cached_execution_or_first_success_json ~clock ~timeout_sec compute =
     let compute_and_track () =
       let generation = begin_execution_publication_attempt () in
       try
-        let json = compute () in
-        let (_ : bool) = publish_execution_success_if_current ~generation json in
-        json
+        match compute () with
+        | Current_surface json ->
+          let (_ : bool) = publish_execution_success_if_current ~generation json in
+          json
+        | Snapshot_predates_boot { surface; _ } ->
+          (* Answers this request without becoming the published surface. *)
+          surface
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
@@ -1075,11 +1095,13 @@ let patch_surface_json_for_running_keepers (config : Workspace.config) = functio
   | `Assoc fields as json ->
     let running = running_keeper_names config in
     if running = []
-    then json
+    then Current_surface json
     else (
+      (* Each running Keeper's row is reconciled on its own; a declaration row
+         is left as the snapshot described it and its Keeper is recorded. *)
       let patch_rows rows =
         List.fold_left
-          (fun acc keeper_name ->
+          (fun (acc, booted_after_snapshot) keeper_name ->
              match
                patch_keeper_rows
                  ~keeper_name
@@ -1091,50 +1113,89 @@ let patch_surface_json_for_running_keepers (config : Workspace.config) = functio
                  ~keepalive_running:true
                  acc
              with
-             | Patched rows -> rows
-             | Declaration_row_is_stale ->
-               (* The snapshot this surface was computed from predates this
-                  Keeper's boot. Its declaration row stays as the snapshot
-                  described it. The boot also published a lifecycle event, and
-                  that event's patch of the published surface finds this same
-                  row and invalidates the surface; the publication generation
-                  it advances drops this computation if it has not published
-                  yet. *)
-               acc)
-          rows
+             | Patched rows -> rows, booted_after_snapshot
+             | Declaration_row_is_stale -> acc, keeper_name :: booted_after_snapshot)
+          (rows, [])
           running
+      in
+      let surface json booted_after_snapshot =
+        match List.rev booted_after_snapshot with
+        | [] -> Current_surface json
+        | keeper_name :: _ -> Snapshot_predates_boot { keeper_name; surface = json }
       in
       match List.assoc_opt "keepers" fields with
       | Some (`List rows) ->
-        let keeper_rows = patch_rows rows in
+        let keeper_rows, booted_after_snapshot = patch_rows rows in
         if keeper_rows = rows
-        then json
+        then surface json booted_after_snapshot
         else
-          `Assoc
-            (replace_keeper_rows_and_rebuild_briefs
-               ~now_ts:(Time_compat.now ())
-               ~keeper_rows
-               ~keepers_json:(`List keeper_rows)
-               fields)
+          surface
+            (`Assoc
+              (replace_keeper_rows_and_rebuild_briefs
+                 ~now_ts:(Time_compat.now ())
+                 ~keeper_rows
+                 ~keepers_json:(`List keeper_rows)
+                 fields))
+            booted_after_snapshot
       | Some (`Assoc keeper_fields) ->
         (match List.assoc_opt "items" keeper_fields with
          | Some (`List rows) ->
-           let keeper_rows = patch_rows rows in
+           let keeper_rows, booted_after_snapshot = patch_rows rows in
            if keeper_rows = rows
-           then json
+           then surface json booted_after_snapshot
            else (
              let keeper_fields =
                upsert_assoc_field "items" (`List keeper_rows) keeper_fields
              in
-             `Assoc
-               (replace_keeper_rows_and_rebuild_briefs
-                  ~now_ts:(Time_compat.now ())
-                  ~keeper_rows
-                  ~keepers_json:(`Assoc keeper_fields)
-                  fields))
-         | _ -> json)
-      | _ -> json)
-  | other -> other
+             surface
+               (`Assoc
+                 (replace_keeper_rows_and_rebuild_briefs
+                    ~now_ts:(Time_compat.now ())
+                    ~keeper_rows
+                    ~keepers_json:(`Assoc keeper_fields)
+                    fields))
+               booted_after_snapshot)
+         | _ -> Current_surface json)
+      | _ -> Current_surface json)
+  | other -> Current_surface other
+;;
+
+(* The operator snapshot caches an execution render reads. Dropping them makes
+   the next render read the Keepers as they are now. This runs on the calling
+   fiber, not inside the offloaded render: the projection cache's invalidation
+   notifies its observer. *)
+let drop_execution_snapshot_caches ~config =
+  Operator_control_snapshot.invalidate_snapshot_cache ();
+  Dashboard_projection_cache.invalidate_snapshot_json ~config
+;;
+
+(* [render] is one full render: the execution projection plus the
+   running-keeper reconciliation. A render whose snapshot predates a Keeper's
+   boot drops the snapshot caches and renders once more, so the answer comes
+   from a snapshot taken after the boot. The second render can only predate a
+   boot again if another Keeper booted while it ran; that answer is returned
+   as it is, and its caller does not publish it. *)
+let render_execution_surface ~config render =
+  let observe = function
+    | Current_surface _ as current -> current
+    | Snapshot_predates_boot { keeper_name; _ } as stale ->
+      drop_execution_snapshot_caches ~config;
+      Log.Dashboard.info
+        "execution render: keeper %s booted after the operator snapshot; \
+         snapshot caches dropped"
+        keeper_name;
+      stale
+  in
+  match observe (render ()) with
+  | Current_surface _ as current -> current
+  | Snapshot_predates_boot _ -> observe (render ())
+;;
+
+(* What a refresh publishes: only a surface rendered from a snapshot taken
+   after every running Keeper booted. *)
+let publish_refreshed_execution_surface ~generation = function
+  | Current_surface json -> publish_execution_success_if_current ~generation json
+  | Snapshot_predates_boot _ -> false
 ;;
 
 let patchexecution_cache_for_keeper ~keeper_name ~event ~keepalive_running =
@@ -1213,26 +1274,28 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
     Atomic.set attempt_generation generation;
     let started_at = Unix.gettimeofday () in
     try
-      let json =
-        run_dashboard_compute
-          ~mode:Offloaded_readonly
-          ~sw
-          ~clock
-          ~net
-          ~mono_clock
-          ~config:workspace_config
-          (fun ~config ~sw ->
-             Dashboard_execution.json ~light:true ~config ~sw ~clock ~proc_mgr ()
-             |> patch_surface_json_for_running_keepers config
-             |> Server_dashboard_http_core_cache.with_projection_diagnostics
-                  ~surface:"execution"
-                  ~started_at
-                  ~extra:
-                    [ ( "readonly_pool"
-                      , Workspace_utils.domain_local_pg_backend_diagnostics_json () )
-                    ])
+      let surface =
+        render_execution_surface ~config:workspace_config (fun () ->
+          run_dashboard_compute
+            ~mode:Offloaded_readonly
+            ~sw
+            ~clock
+            ~net
+            ~mono_clock
+            ~config:workspace_config
+            (fun ~config ~sw ->
+               Dashboard_execution.json ~light:true ~config ~sw ~clock ~proc_mgr ()
+               |> patch_surface_json_for_running_keepers config
+               |> map_execution_surface
+                    (Server_dashboard_http_core_cache.with_projection_diagnostics
+                       ~surface:"execution"
+                       ~started_at
+                       ~extra:
+                         [ ( "readonly_pool"
+                           , Workspace_utils.domain_local_pg_backend_diagnostics_json () )
+                         ])))
       in
-      generation, json
+      generation, surface
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
@@ -1255,8 +1318,8 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
       ; warm_delay_s = 0.0
       }
     ~compute
-    ~on_result:(fun (generation, json) ->
-      if publish_execution_success_if_current ~generation json
+    ~on_result:(fun (generation, surface) ->
+      if publish_refreshed_execution_surface ~generation surface
       then (
         broadcast_cached_surface
           ~encoding:Encode_inline
@@ -1447,30 +1510,32 @@ let dashboard_execution_http_response ~sw ~clock context =
   in
   let compute ?actor ?fixture ~light () =
     let started_at = Unix.gettimeofday () in
-    run_dashboard_compute
-      ~mode:Offloaded_readonly
-      ?net
-      ?mono_clock
-      ~sw
-      ~clock
-      ~config
-      (fun ~config ~sw ->
-         Dashboard_execution.json
-           ?actor
-           ?fixture
-           ~light
-           ~config
-           ~sw
-           ~clock
-           ~proc_mgr:state.Mcp_server.proc_mgr
-           ()
-         |> patch_surface_json_for_running_keepers config
-         |> Server_dashboard_http_core_cache.with_projection_diagnostics
-              ~surface:"execution"
-              ~started_at
-              ~extra:
-                [ "readonly_pool", Workspace_utils.domain_local_pg_backend_diagnostics_json ()
-                ])
+    render_execution_surface ~config (fun () ->
+      run_dashboard_compute
+        ~mode:Offloaded_readonly
+        ?net
+        ?mono_clock
+        ~sw
+        ~clock
+        ~config
+        (fun ~config ~sw ->
+           Dashboard_execution.json
+             ?actor
+             ?fixture
+             ~light
+             ~config
+             ~sw
+             ~clock
+             ~proc_mgr:state.Mcp_server.proc_mgr
+             ()
+           |> patch_surface_json_for_running_keepers config
+           |> map_execution_surface
+                (Server_dashboard_http_core_cache.with_projection_diagnostics
+                   ~surface:"execution"
+                   ~started_at
+                   ~extra:
+                     [ "readonly_pool", Workspace_utils.domain_local_pg_backend_diagnostics_json ()
+                     ])))
   in
   match fixture, actor, full_mode with
   | None, None, false when force ->
@@ -1487,14 +1552,18 @@ let dashboard_execution_http_response ~sw ~clock context =
       let this_attempt = begin_execution_attempt () in
       attempt := Some this_attempt;
       try
-        let json = compute ~light:true () in
-        if publish_execution_attempt_success this_attempt json
-        then (
-          let (_ : Yojson.Safe.t) =
-            refresh_execution_default_light_http_body ~config
-          in
-          dashboard_execution_snapshot_json ())
-        else json
+        match compute ~light:true () with
+        | Current_surface json ->
+          if publish_execution_attempt_success this_attempt json
+          then (
+            let (_ : Yojson.Safe.t) =
+              refresh_execution_default_light_http_body ~config
+            in
+            dashboard_execution_snapshot_json ())
+          else json
+        | Snapshot_predates_boot { surface; _ } ->
+          (* Answers this forced request only; never published. *)
+          surface
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
@@ -1571,7 +1640,13 @@ let dashboard_execution_http_response ~sw ~clock context =
                `Int generation; query ])
     in
     let compute_with_generation () =
-      compute ?actor ?fixture ~light ()
+      (match compute ?actor ?fixture ~light () with
+       | Current_surface json -> json
+       | Snapshot_predates_boot { surface; _ } ->
+         (* Only after a second render also predated a boot. This key is
+            scoped to the publication generation, which the boot's lifecycle
+            event advances, and it expires with the deep-surface TTL. *)
+         surface)
       |> with_execution_publication_generation ~generation
       |> with_execution_metadata ~config ~cache_key ~query
     in

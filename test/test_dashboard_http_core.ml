@@ -4233,6 +4233,11 @@ let patched_runtime_row ~keeper_name ~event ~keepalive_running row =
   | Server_dashboard_http_execution_surfaces.Declaration_row_is_stale ->
     fail "a runtime row was reported as a stale declaration row"
 
+let current_surface = function
+  | Server_dashboard_http_execution_surfaces.Current_surface json -> json
+  | Server_dashboard_http_execution_surfaces.Snapshot_predates_boot { keeper_name; _ } ->
+    failf "the surface reported %s as booted after its snapshot" keeper_name
+
 (* The [paused] lifecycle event patches with [keepalive_running = true], so the
    row goes through the keepalive branch of the status patcher. That branch used
    to classify against the surface vocabulary alone, where "paused" is not a
@@ -4420,6 +4425,7 @@ let test_running_keeper_reconciliation_rebuilds_continuity_brief () =
              [ "keepers", `List [ keeper_row ]
              ; "continuity_briefs", `List [ stale_brief ]
              ])
+         |> current_surface
        in
        let open Yojson.Safe.Util in
        let patched_keeper = patched |> member "keepers" |> to_list |> List.hd in
@@ -4463,9 +4469,10 @@ let test_running_keeper_reconciliation_rebuilds_continuity_brief () =
          true
          (unrelated_surface
           =
-          Server_dashboard_http_execution_surfaces.patch_surface_json_for_running_keepers
-            config
-            unrelated_surface))
+          current_surface
+            (Server_dashboard_http_execution_surfaces.patch_surface_json_for_running_keepers
+               config
+               unrelated_surface)))
 
 (* A Keeper declared in config that has never booted rides in the same
    [keepers] list as a declaration row: no diagnostic, so no health. The
@@ -4530,6 +4537,7 @@ let test_running_keeper_reconciliation_skips_declaration_rows () =
              [ "keepers", `List [ running_row; declared_row ]
              ; "continuity_briefs", `List []
              ])
+         |> current_surface
        in
        let open Yojson.Safe.Util in
        let names key =
@@ -4625,20 +4633,17 @@ let test_lifecycle_event_for_a_declared_keeper_invalidates_the_execution_cache (
              |> member "keepers" |> to_list |> List.hd)))
     boot_lifecycle_events
 
-(* Route 2: a fresh render whose operator snapshot predates the boot. The
-   Keeper already runs, so the running-keeper reconciliation reaches its row,
-   which is still the declaration row. It stays as the snapshot described it;
-   the boot's own lifecycle event invalidates the published surface. *)
-let test_running_keeper_reconciliation_leaves_a_stale_declaration_row () =
+(* A Keeper registered as running whose meta exists, for the reconciliation to
+   find in [running_keeper_names]. *)
+let with_running_keeper keeper_name f =
   let dir = test_dir () in
   let config = Workspace.default_config dir in
-  let keeper_name = "continuity-booted-declared-fixture" in
   let meta =
     match
       Masc_test_deps.meta_of_json_fixture
         (`Assoc
           [ "name", `String keeper_name
-          ; "trace_id", `String "continuity-booted-declared-trace"
+          ; "trace_id", `String (keeper_name ^ "-trace")
           ])
     with
     | Ok meta -> meta
@@ -4659,20 +4664,102 @@ let test_running_keeper_reconciliation_leaves_a_stale_declaration_row () =
             ~base_path:config.base_path
             keeper_name
             meta);
-       let surface =
-         `Assoc
-           [ "keepers", `List [ declared_keeper_row keeper_name ]
-           ; "continuity_briefs", `List []
-           ]
-       in
-       check bool
-         "the surface comes back as the snapshot described it"
-         true
-         (Yojson.Safe.equal
-            surface
-            (Server_dashboard_http_execution_surfaces.patch_surface_json_for_running_keepers
-               config
-               surface)))
+       f config)
+
+let surface_with_declaration_row keeper_name =
+  `Assoc
+    [ "keepers", `List [ declared_keeper_row keeper_name ]
+    ; "continuity_briefs", `List []
+    ]
+
+(* Route 2: a fresh render whose operator snapshot predates the boot. The
+   Keeper already runs, so the running-keeper reconciliation reaches its row,
+   which is still the declaration row. The row is left as the snapshot
+   described it and the surface is reported as predating that boot. *)
+let test_running_keeper_reconciliation_reports_a_snapshot_that_predates_boot () =
+  let keeper_name = "continuity-booted-declared-fixture" in
+  with_running_keeper keeper_name @@ fun config ->
+  let surface = surface_with_declaration_row keeper_name in
+  match
+    Server_dashboard_http_execution_surfaces.patch_surface_json_for_running_keepers
+      config
+      surface
+  with
+  | Server_dashboard_http_execution_surfaces.Snapshot_predates_boot stale ->
+    check string "the booted keeper is named" keeper_name stale.keeper_name;
+    check bool "the declaration row stays as the snapshot described it" true
+      (Yojson.Safe.equal surface stale.surface)
+  | Server_dashboard_http_execution_surfaces.Current_surface json ->
+    failf "a snapshot that predates the boot came back current: %s"
+      (Yojson.Safe.to_string json)
+
+(* The same reconciliation inside a refresh must not depend on the boot's
+   lifecycle event, which a full subscription or a failing listener batch can
+   lose. The render drops the operator snapshot caches and renders once more;
+   a surface that still predates the boot is not published. On 9947417dcd the
+   reconciled surface, declaration row and all, went straight to
+   publication and the caches stayed. *)
+let test_refresh_does_not_publish_a_surface_that_predates_boot () =
+  let keeper_name = "refresh-booted-declared-fixture" in
+  with_test_env @@ fun ~env:_ ~sw:_ ~config:_ ->
+  with_running_keeper keeper_name @@ fun config ->
+  let renders = ref 0 in
+  let generation_before =
+    Dashboard_projection_cache.snapshot_invalidation_generation ()
+  in
+  let surface =
+    Server_dashboard_http_execution_surfaces.render_execution_surface
+      ~config
+      (fun () ->
+        incr renders;
+        Server_dashboard_http_execution_surfaces.patch_surface_json_for_running_keepers
+          config
+          (surface_with_declaration_row keeper_name))
+  in
+  check int "a render that predates the boot is rendered once more" 2 !renders;
+  check bool "both renders dropped the snapshot caches" true
+    (Dashboard_projection_cache.snapshot_invalidation_generation ()
+     >= generation_before + 2);
+  let published = `Assoc [ "published_marker", `String "before-refresh" ] in
+  with_cached_surface_success
+    Server_dashboard_http_execution_surfaces.execution_cache
+    published
+  @@ fun () ->
+  let generation =
+    Server_dashboard_http_execution_surfaces.current_execution_publication_generation ()
+  in
+  check bool "the refresh publishes nothing at the current generation" false
+    (Server_dashboard_http_execution_surfaces.publish_refreshed_execution_surface
+       ~generation
+       surface);
+  check bool "the published surface is the one from before the refresh" true
+    (Yojson.Safe.equal
+       published
+       (Server_dashboard_http_cache.snapshot
+          Server_dashboard_http_execution_surfaces.execution_cache).json)
+
+(* Once the snapshot caches are dropped, the second render reads the Keeper
+   as it is now, and that render is the answer. *)
+let test_render_after_a_predating_snapshot_returns_the_fresh_render () =
+  let fresh = `Assoc [ "keepers", `List []; "fresh_marker", `Bool true ] in
+  let renders = ref 0 in
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  match
+    Server_dashboard_http_execution_surfaces.render_execution_surface
+      ~config
+      (fun () ->
+        incr renders;
+        if !renders = 1
+        then
+          Server_dashboard_http_execution_surfaces.Snapshot_predates_boot
+            { keeper_name = "imp"; surface = surface_with_declaration_row "imp" }
+        else Server_dashboard_http_execution_surfaces.Current_surface fresh)
+  with
+  | Server_dashboard_http_execution_surfaces.Current_surface json ->
+    check int "rendered twice" 2 !renders;
+    check bool "the fresh render is the answer" true (Yojson.Safe.equal fresh json)
+  | Server_dashboard_http_execution_surfaces.Snapshot_predates_boot _ ->
+    fail "the fresh render was discarded"
 
 let test_composite_preserves_runtime_attempt_scopes () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
@@ -6251,8 +6338,12 @@ let () =
           test_case "declared keeper's boot event invalidates the execution cache"
             `Quick
             test_lifecycle_event_for_a_declared_keeper_invalidates_the_execution_cache;
-          test_case "reconciliation leaves a booted keeper's declaration row" `Quick
-            test_running_keeper_reconciliation_leaves_a_stale_declaration_row;
+          test_case "reconciliation reports a snapshot that predates a boot" `Quick
+            test_running_keeper_reconciliation_reports_a_snapshot_that_predates_boot;
+          test_case "refresh does not publish a surface that predates a boot" `Quick
+            test_refresh_does_not_publish_a_surface_that_predates_boot;
+          test_case "render after a predating snapshot returns the fresh render" `Quick
+            test_render_after_a_predating_snapshot_returns_the_fresh_render;
         ] );
       ( "context-window shrink guard (#25062/#25268)",
         [ test_case "success clears the previous error" `Quick

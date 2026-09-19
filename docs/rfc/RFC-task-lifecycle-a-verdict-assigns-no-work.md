@@ -36,12 +36,13 @@ Task 하나에는 서로 다른 사실 세 가지가 들어 있다.
 
 | # | 지금 | 바꾼 뒤 |
 |---|---|---|
-| 1 | 반려 판정이 Task 를 제출자의 `InProgress` 로 돌린다. handoff 는 판정 사유로 덮어쓴다 | 반려 판정은 Task 를 `Todo` 로 돌린다. 제출자가 남긴 handoff 는 두고 사유를 더한다 |
+| 1 | 반려 판정이 Task 를 제출자의 `InProgress` 로 돌린다. handoff 는 판정 사유로 덮어쓴다 | 반려 판정은 Task 를 아무도 안 맡은 `Rejected` 로 놓는다. 제출자가 남긴 handoff 는 두고 사유를 더한다 |
 | 2 | 맡은 쪽의 `Cancel` 은 판정을 기다리고 운영자만 승인한다 | 없앤다. 맡은 일을 더 하지 않게 되는 길은 §3.4 의 세 갈래다 |
 | 3 | `Todo` 의 `Cancel` 은 누구나 즉시 된다 | `Cancel` 은 만든 쪽과 운영자만 한다. 어느 상태에서든 즉시 된다 |
 | 4 | 제출에 `intent = Complete_task \| Cancel_task` 가 있다 | `intent` 를 지운다. 판정을 기다리는 것은 완료 제출뿐이다 |
 
-새 상태·새 타이머·새 Gate·새 필드·새 액션 이름은 없다. 지워지는 것이 더 많다(§3.9).
+새 상태는 `Rejected` 하나다(소유자 결정 D1). 타이머·Gate·액션 이름은 더하지 않고, 지워지는 것이 더
+많다(§3.9).
 목표 모델은 `specs/task-lifecycle/TaskOwnership.tla` 에 있고, 위 결함 각각을 버그 모델로 넣어
 속성이 실제로 잡는지 TLC 로 확인했다(§4.1).
 
@@ -56,6 +57,7 @@ Task 하나에는 서로 다른 사실 세 가지가 들어 있다.
 | 놓다 | `Release` | 맡은 쪽이 Task 를 `Todo` 로 돌려놓는 것 |
 | 제출, 제출자 | `Submit_for_verification`, `producer` | 맡은 쪽이 증거와 함께 "끝났다"고 내는 것과 낸 쪽. 제출하면 더는 맡고 있지 않다 |
 | 판정 | `completion_verdict` | 제출에 대한 답. 승인(`Verdict_approved`)이거나 반려(`Verdict_rejected`)이다 |
+| 반려된 Task | `Rejected` | 반려를 받고 아무도 안 맡고 있는 Task. 목록에서 골라야 맡는다 |
 | 판정 에이전트, 운영자 | `System_llm_agent`, `Human_operator` | 판정을 내리는 두 쪽(`completion_authority`). Keeper 는 판정하지 못한다 |
 | 취소 | `Cancel`, `Cancelled` | Task 를 없던 일로 하는 것 |
 | 취소 요청 | `AwaitingVerification { intent = Cancel_task }` | 지금 코드에서 맡은 쪽이 cancel 하면 생기는 대기. 이 RFC 가 없앤다 |
@@ -231,6 +233,11 @@ type task_status =
       ; submitted_at : string
       ; verification_id : string    (* intent 칸은 없다 *)
       }
+  | Rejected of
+      { producer : string           (* 반려된 제출을 낸 쪽. 지금 맡고 있지는 않다 *)
+      ; verification_id : string    (* 반려된 그 제출 *)
+      ; rejected_at : string
+      }
   | Done of { assignee : string; completed_at : string; notes : string option }
   | Cancelled of { cancelled_by : string; cancelled_at : string; reason : string }
 ```
@@ -245,6 +252,9 @@ type task_status =
   (`assigned_to`), `lib/task/tool_task.ml:137`·`:268`, `workspace_task_transitions.ml:272`·`:509`,
   `lib/server/server_routes_http_runtime_fleet_scan.ml:873`. `task_performer_of_status` 는 그대로
   제출자를 답한다.
+- `Rejected` 는 열려 있고 아무도 안 맡은 자리다. `Todo` 와 다른 점은 누가 냈던 것인지를 Task 자신이
+  말한다는 것 하나다. 반려 사유는 지금처럼 handoff 에 있고 여기 옮겨 적지 않는다. 한 사실을 두 곳에
+  적지 않기 위해서다.
 - `producer` 는 기본값 없이 디코드한다. 지금 디코더는 빠진 문자열을 `""` 로 읽는다
   (`types_core.ml:439`, `:473`). 그대로 두면 `producer` 가 없는 옛 줄이 빈 이름의 제출로 읽힌다.
   `strict_parse_no_default` 위반이고 같은 단계에서 고친다.
@@ -258,13 +268,13 @@ type task_status =
 
 `본인` 은 `same_task_actor` 가 참인 호출자다. 빈칸은 `Invalid_transition`.
 
-| 액션 \ 상태 | `Todo` | `Claimed`·`InProgress` | `AwaitingVerification` | `Done` | `Cancelled` |
-|---|---|---|---|---|---|
-| `Claim` | 맡은 것이 없으면 `Claimed` 가 된다 | 본인: 그대로. 남: 거절 | `Verification_pending_verdict` | 그대로 | |
-| `Start` | | 본인의 `Claimed` 가 `InProgress` 가 된다 | | 그대로 | |
-| `Release` | 그대로 | 본인: `Todo` 가 된다 | | | |
-| `Submit_for_verification` | | 본인: `AwaitingVerification { producer }` 가 된다 | 제출자 본인: 새 `verification_id` 로 교체 | | |
-| `Cancel` | 자격이 있으면 `Cancelled` | 자격이 있으면 `Cancelled` | 자격이 있으면 `Cancelled` | | 그대로 |
+| 액션 \ 상태 | `Todo` | `Claimed`·`InProgress` | `AwaitingVerification` | `Rejected` | `Done` | `Cancelled` |
+|---|---|---|---|---|---|---|
+| `Claim` | 맡은 것이 없으면 `Claimed` 가 된다 | 본인: 그대로. 남: 거절 | `Verification_pending_verdict` | `Todo` 와 같다. 다만 자동으로 권하지 않는다 | 그대로 | |
+| `Start` | | 본인의 `Claimed` 가 `InProgress` 가 된다 | | | 그대로 | |
+| `Release` | 그대로 | 본인: `Todo` 가 된다 | | | | |
+| `Submit_for_verification` | | 본인: `AwaitingVerification { producer }` 가 된다 | 제출자 본인: 새 `verification_id` 로 교체 | | | |
+| `Cancel` | 자격이 있으면 `Cancelled` | 자격이 있으면 `Cancelled` | 자격이 있으면 `Cancelled` | 자격이 있으면 `Cancelled` | | 그대로 |
 
 ```mermaid
 stateDiagram-v2
@@ -277,8 +287,10 @@ stateDiagram-v2
     InProgress --> AwaitingVerification: submit
     AwaitingVerification --> AwaitingVerification: 제출자가 고쳐 냄
     AwaitingVerification --> Done: 승인
-    AwaitingVerification --> Todo: 반려, 사유는 handoff 에 더함
+    AwaitingVerification --> Rejected: 반려, 사유는 handoff 에 더함
+    Rejected --> Claimed: claim, 목록에서 골라야 한다
     Todo --> Cancelled: cancel
+    Rejected --> Cancelled: cancel
     Claimed --> Cancelled: cancel
     InProgress --> Cancelled: cancel
     AwaitingVerification --> Cancelled: cancel
@@ -286,8 +298,9 @@ stateDiagram-v2
     Cancelled --> [*]
 ```
 
-`cancel` 은 만든 쪽과 운영자만 한다. 판정에서 나가는 화살표는 `Done` 과 `Todo` 둘뿐이고, 어느 것도
-누군가의 `InProgress` 로 가지 않는다.
+`cancel` 은 만든 쪽과 운영자만 한다. 판정에서 나가는 화살표는 `Done` 과 `Rejected` 둘뿐이고, 어느
+것도 누군가의 `InProgress` 로 가지 않는다. `Rejected` 는 `claim_next` 가 자동으로 권하지 않는다.
+낸 사람이 알림에 붙은 id 로 다시 맡거나, 목록을 보고 고른 Keeper 가 맡는다(§3.7).
 
 지금과 달라진 것은 `Cancel` 줄이다. 맡은 쪽의 `Cancel` 이 `AwaitingVerification` 으로 가던 칸이 없어지고,
 어느 상태에서든 자격이 있는 쪽만 즉시 취소한다. `Cancel` 은 이제 상태만으로 정해지지 않으므로 `decide` 가
@@ -300,7 +313,7 @@ cancel 을 권하거나 만든 쪽에게도 안 보여 주게 된다.
 | 판정 | 결과 | `set_current` | 제출자에게 |
 |---|---|---|---|
 | 승인 | `Done { assignee = producer }` | `None` | 지금과 같은 승인 알림 |
-| 반려(사유 필수) | **`Todo`**. handoff 는 아래 설명대로 | **`None`** | 알림 한 건(§3.6). 의무는 없다 |
+| 반려(사유 필수) | **`Rejected { producer; verification_id; rejected_at }`**. handoff 는 아래 설명대로 | **`None`** | 알림 한 건(§3.6). 의무는 없다 |
 | 판정하지 못함(판정 에이전트 장애, 설정 오류) | 그대로 `AwaitingVerification` | — | §3.7 |
 
 - **반려의 handoff.** 제출자가 제출하면서 남긴 `summary` 와 `evidence_refs` 는 그대로 둔다. 다음에 맡는
@@ -387,7 +400,7 @@ type cancel_standing =
 
 | 사건 | 받는 쪽 | 지금 있는 경로 | 바뀌는 문장 |
 |---|---|---|---|
-| 제출이 반려됨 | 제출자 Keeper | `pending_completion_rejections` 에서 `Completion_authority_rejected` 로 | `config/prompts/keeper.md:290-293` 의 문장에 "Task 는 backlog 로 돌아갔다. 이어서 하려면 다시 claim 한다"를 더한다 |
+| 제출이 반려됨 | 제출자 Keeper | `pending_completion_rejections` 에서 `Completion_authority_rejected` 로 | `config/prompts/keeper.md:290-293` 의 문장에 "Task 는 아무도 안 맡은 상태로 놓였다. 이어서 하려면 이 id 로 다시 claim 한다"를 더한다. 자동으로 권해지지 않으므로 id 가 반드시 붙어야 한다 |
 | 제출이 승인됨 | 제출자 Keeper | `Task_outcome` | 그대로 |
 | Task 가 취소됨 | 만든 쪽(본인이 아니면) | `Task_cancelled` | 그대로 |
 | Task 가 취소됨 | **맡고 있던 쪽** | 없음 | 새 문장이 필요하다. 지금 문장은 "which you created" 라서 맡은 쪽에는 틀린 말이다(`keeper.md:305`) |
@@ -407,6 +420,11 @@ producer)` 로 지운다. 지금은 그 Task 의 다음 `Release`·`Submit` 등�
 | `Held_without_actor` | 그대로 |
 | `Producer_record_unreadable` | 그대로 |
 | (완료 제출은 일부러 뺀다) | `Awaiting_verdict` — 판정을 기다리는 제출 전부. 오래 기다린 순이고, 실행 기록이 남아 있으면 마지막 결과를 붙인다 |
+| (없음) | `Rejected_unclaimed` — 반려된 채 아무도 안 맡은 Task. 자동으로 권하지 않기로 했으므로(D1) 이 목록이 유일한 입구다 |
+
+`Rejected` 는 `claim_next` 가 권하지 않으므로 이 목록이 없으면 아무에게도 안 보인다. 그래서 목록은
+운영자 화면과 Keeper 의 `keeper_tasks_list` 양쪽에 있어야 한다. 낸 사람에게는 알림이 id 를 들고 가므로
+목록을 거치지 않고 바로 맡을 수 있다(§3.6).
 
 목록은 backlog 에서 만든다. 실행 기록에서 만들면 안 된다. 실행 기록은 끝난 줄을 최근 64개만 남기므로
 (`verification_run_registry.ml:155`), 판정이 멈춘 제출이 밀려나면 목록에서 다시 사라진다. 전부 보여 주면
@@ -447,8 +465,9 @@ producer)` 로 지운다. 지금은 그 Task 의 다음 `Release`·`Submit` 등�
 
 | 자리 | 지금 | 개정안 |
 |---|---|---|
+| `<task><lifecycle>` 상태 목록 | `Todo`, `Claimed`, `InProgress`, `AwaitingVerification`, `Done`, `Cancelled` | `Rejected of { producer, verification_id, rejected_at }` 를 더한다. 열려 있고 아무도 안 맡은 자리이며 `claim_next` 가 권하지 않는다 |
 | `<task><lifecycle>` `AwaitingVerification` 필드 | `assignee, started_at, submitted_at, verification_id` | `producer, started_at, submitted_at, verification_id` |
-| `started_at` 불변식 | "제출·거절을 관통해 원래 작업 시작 시각을 보존한다"(헌법 원문) | "제출을 관통해 보존한다. 반려된 Task 는 `Todo` 로 돌아가고, 다시 맡으면 새 시작 시각을 쓴다. 이전 시각은 전이 로그에 남는다(보존 30일)" |
+| `started_at` 불변식 | "제출·거절을 관통해 원래 작업 시작 시각을 보존한다"(헌법 원문) | "제출을 관통해 보존한다. 반려된 Task 는 `Rejected` 로 놓이고 시작 시각을 들고 있지 않다. 다시 맡으면 새 시작 시각을 쓰고, 이전 시각은 전이 로그에 남는다(보존 30일)" |
 | `Done` 의 `assignee` | (뜻이 적혀 있지 않다) | "승인된 제출을 낸 쪽" |
 | `<task>` 규칙 추가 | — | "판정은 제출에 답할 뿐 누구에게도 Task 를 맡기지 않는다. Task 를 맡는 길은 claim 하나다" |
 | `<task>` 규칙 추가 | — | "Task 를 취소하는 것은 만든 쪽과 운영자만 한다. 판정을 거치지 않는다" |
@@ -484,6 +503,7 @@ producer)` 로 지운다. 지금은 그 Task 의 다음 `Release`·`Submit` 등�
 | `-cancel-keeps-holder-buggy` | Task 는 닫혔는데 맡은 쪽이 남음 | `ClosedOwesNothing` | 위반, 반례 3상태 |
 | `-submit-keeps-hold-buggy` | 제출하고도 놓지 않음 | `HeldOrPendingNotBoth` | 위반, 반례 3상태 |
 | `-submit-without-hold-buggy` | 맡은 적 없는 쪽이 제출 | `SubmissionRequiresHold` | 위반, 반례 2상태 |
+| `-rejected-forgets-producer-buggy` | 반려된 Task 를 `Todo` 로 보내 누가 냈는지를 잃음 | `RejectedNamesItsProducer` | 위반, 반례 5상태 |
 | `-done-without-verdict-buggy` | 판정 없이 완료 | `DoneRequiresLiveApproval` | 위반, 반례 3상태 |
 | `-superseded-verdict-buggy` | 교체된 제출에 대한 판정이 완료시킴 | `DoneRequiresLiveApproval` | 위반, 반례 6상태 |
 
@@ -494,6 +514,10 @@ producer)` 로 지운다. 지금은 그 Task 의 다음 `Release`·`Submit` 등�
   `BugSkipClaim` 과 `BugSupersededVerdictCompletes` 도 같이 옮겼다.
 - `NoOperatorOnlySubmissionKind` 는 제출의 **종류**에 대한 말이다. 판정이 고장 나서 운영자가 고쳐야 하는
   경우는 깨끗한 모델에도 있고, 이 속성은 그것을 막지 않는다. 기다리는 시간에 대한 주장은 스펙에 없다.
+- 깨끗한 모델의 상태 수는 `Rejected` 를 넣기 전과 똑같은 128,448개다. 새 상태가 새로운 경우를 만들지
+  않는다는 뜻이다. 모델 안에서는 "열려 있고, 아무도 안 맡았고, 제출도 없는데, 낸 사람이 있다" 로
+  이미 구별되던 자리에 이름을 붙였을 뿐이다. 값은 다른 데 있다. 코드의 `Todo` 는 칸이 없어서 그
+  이름을 들고 있을 수 없고, `-rejected-forgets-producer-buggy` 가 그때 무엇을 잃는지 보여 준다.
 - `-buggy` 의 반례는 §1.1 의 실제 경로와 같다: a1 이 t1 을 맡는다. 제출한다. t2 를 맡는다. t1 이
   반려된다. a1 이 t1 과 t2 를 맡고 있다.
 
@@ -507,6 +531,7 @@ producer)` 로 지운다. 지금은 그 Task 의 다음 `Release`·`Submit` 등�
 | `release` 다음 `cancel` 로 혼자 끝내기 | 가능 | 거절됨 | 전이 테스트 |
 | 반려된 Task 의 handoff 에 제출자의 작업 위치가 남는가 | 안 남는다 | 남는다 | 전이 테스트 |
 | claim 거절 중 "already holds" 비율 | 77건 중 38건(한 주, 코드 주석) | 줄어듦. 관찰만 한다 | 전이 로그 |
+| 아무도 안 맡은 `Rejected` 의 최고 나이 | — | 관찰한다. 늘어나면 D1 을 다시 본다 | `backlog.json` |
 
 OCaml 쪽은 임의의 액션·판정 열을 돌려 `OneTaskPerAgent` 를 확인하는 속성 테스트를 전이 계층에 둔다.
 스펙의 속성과 같은 이름을 쓴다.
@@ -515,7 +540,7 @@ OCaml 쪽은 임의의 액션·판정 열을 돌려 `OneTaskPerAgent` 를 확인
 
 | 하지 않는 것 | 이유 |
 |---|---|
-| 새 상태(`Rejected`, `CancelRequested`, `Blocked`) | 담을 사실이 기존 필드에 다 있다(RFC-0416 과 같은 결론) |
+| 새 상태 `CancelRequested`, `Blocked` | 담을 사실이 기존 필드에 다 있다(RFC-0416 과 같은 결론). `Rejected` 는 예외이고 이유는 §3.1 과 §4.1 에 있다 |
 | 제출에 근거 종류 칸(`basis = 했다 \| 찾았다`) | 초안에 있었고 뺐다. 판정이 묻는 것은 같고, 위치는 증거가 말한다. 읽는 쪽이 판정 프롬프트와 화면뿐이라 없어도 사실이 망가지지 않는다. 대가는 §8 에 적었다 |
 | `Cancel` 을 `Withdraw` 로 이름 바꾸기 | 초안에 있었고 뺐다. 액션만 Withdraw 이고 상태·wire·알림은 Cancelled 로 남아 같은 것을 두 이름으로 부르게 된다. 뜻이 바뀐 것은 도구 설명과 반려 문장이 알려 준다 |
 | 제출자 칸에 새 이름(`submitter`) | 초안에 있었고 뺐다. 코드가 이미 `producer` 라고 부른다(§1.7) |
@@ -534,16 +559,18 @@ OCaml 쪽은 임의의 액션·판정 열을 돌려 `OneTaskPerAgent` 를 확인
 
 | 단계 | 내용 | 끝났다는 증거 |
 |---|---|---|
-| 0 | 이 문서와 `TaskOwnership.tla` | `scripts/tla-check.sh` 에서 깨끗한 모델 통과, 버그 모델 9개 위반 |
-| 1 | 반려 판정이 `Todo` 로 돌린다. `set_current = None`. 제출자의 handoff 를 두고 사유를 `reason` 에만 넣기. 제출 증거를 호출에서만 읽기. 전달 전 반려 알림을 세 값으로 지우기. `release_unroutable_rejected_task_r` 삭제. 알림 문장. 운영자 판정 요청에 `verification_id` | 속성 테스트 `OneTaskPerAgent`. §4.2 첫 줄이 새 판정에서 0 |
-| 2 | `intent` 삭제. `assignee` 를 `producer` 로, 기본값 없는 디코드. `Operator_routed` 와 취소 사유를 나르던 것 삭제. 도구 설명 | "이미 끝나 있다"는 제출이 판정 에이전트의 판정을 받는 테스트 |
-| 3 | `Cancel` 의 자격을 `decide` 의 인자로. 인증된 운영자 경로와 TUI·dashboard 이전. 맡은 쪽 알림·기록·지표. 사라진 물음을 멈춤으로 알리지 않기 | `release` 다음 `cancel` 이 만든 쪽 아닌 호출자에게 거절되는 테스트 |
-| 4 | 운영자 목록(`Awaiting_verdict`), 헌법 개정, `docs/spec/00-glossary.md` 의 Task Lifecycle 절과 `docs/spec/02-types-and-invariants.md` 정정, `Done_action` 과 `TaskLifecycle.tla` 삭제 | §4.2 셋째 줄 0 |
-| 5 | D6 을 하기로 하면: `Claimed` 와 `Start` 삭제 | `test_task_status_vocabulary` 와 화면 집계가 다섯 상태로 통과 |
+| 0 | 이 문서와 `TaskOwnership.tla` | `scripts/tla-check.sh` 에서 깨끗한 모델 통과, 버그 모델 10개 위반 |
+| 1 | **저장 형식이 바뀌는 묶음.** `Rejected` 추가, 반려 판정이 그리로 보내고 `set_current = None`. `intent` 삭제. `AwaitingVerification` 의 `assignee` 를 `producer` 로, 기본값 없는 디코드. 제출자의 handoff 를 두고 사유를 `reason` 에만 넣기. 제출 증거를 호출에서만 읽기. 전달 전 반려 알림을 세 값으로 지우기. `release_unroutable_rejected_task_r` 와 `Operator_routed` 삭제. 알림 문장에 id. 운영자 판정 요청에 `verification_id` | 속성 테스트 `OneTaskPerAgent`. §4.2 첫 줄이 새 판정에서 0. `claim_next` 가 `Rejected` 를 권하지 않는 테스트 |
+| 2 | `Cancel` 의 자격을 `decide` 의 인자로. 인증된 운영자 경로와 TUI·dashboard 이전. 맡은 쪽 알림·기록·지표. 사라진 물음을 멈춤으로 알리지 않기. 도구 설명 | `release` 다음 `cancel` 이 만든 쪽 아닌 호출자에게 거절되는 테스트 |
+| 3 | 운영자 목록(`Awaiting_verdict`, `Rejected_unclaimed`), 헌법 개정, `docs/spec/00-glossary.md` 의 Task Lifecycle 절과 `docs/spec/02-types-and-invariants.md` 정정, `Done_action` 과 `TaskLifecycle.tla` 삭제 | §4.2 셋째 줄 0 |
+| 4 | D6 을 하기로 하면: `Claimed` 와 `Start` 삭제 | `test_task_status_vocabulary` 와 화면 집계가 다섯 상태로 통과 |
 
-2와 3은 같이 배포한다. 2만 나가면 "하면 안 되는 일" 갈래가 잠시 `release` 하나로 줄어든다.
+초안은 1단계를 저장 형식 변경 없이 잡았는데, D1 로 `Rejected` 가 생기면서 그럴 수 없게 됐다. 새 상태
+값을 쓴 줄은 옛 바이너리가 못 읽기 때문이다. 그래서 형식이 바뀌는 것을 1단계 하나로 모았다. 대신
+조건을 한 번만 치르면 된다.
 
-**2단계의 배포 전 조건.** 새 reader 는 `intent` 와 `AwaitingVerification.assignee` 를 모른다. 이 저장소는
+**1단계의 배포 전 조건.** 새 reader 는 `intent` 와 `AwaitingVerification.assignee` 를 모르고, 옛 reader 는
+`Rejected` 를 모른다. 이 저장소는
 과거 데이터용 reader 를 만들지 않으므로, 2단계를 배포하는 시점에 `awaiting_verification` 줄이 하나도
 없어야 한다. 한 줄이라도 남으면 그 줄 하나의 디코드 실패가 backlog 전체를 못 읽게 만든다
 (`types_core.ml:1236-1244`). claim, 전이, 판정, Keeper 관측이 모두 멈춘다. 그래서 순서를 지킨다.
@@ -564,14 +591,16 @@ OCaml 쪽은 임의의 액션·판정 열을 돌려 `OneTaskPerAgent` 를 확인
 `verification-runs.jsonl` 은 거기 없다. 2단계가 둘을 더한다. 바꾸지 않고 거절만 하므로 변환 코드가
 아니다. 되돌릴 때도 조건이 같다. 새 형식의 대기 줄이 있으면 옛 바이너리가 backlog 를 못 읽는다.
 
-1단계는 저장 형식을 바꾸지 않으므로 이 조건이 없다. 이미 `InProgress` 로 돌아와 있는 13건은 운영자 복구
-도구(`masc_operator_task_recovery_resolve`)로 `Todo` 에 돌린다.
+이미 `InProgress` 로 돌아와 있는 것들(2026-09-18 기준 13건)은 운영자 복구 도구
+(`masc_operator_task_recovery_resolve`)로 `Todo` 에 돌린다. 그 도구는 `Rejected` 를 만들지 못하므로,
+지난 반려의 흔적은 `Rejected` 가 아니라 handoff 로만 남는다. 과거 데이터를 새 모양으로 고치는 코드는
+만들지 않는다.
 
 ## 7. 소유자 결정이 필요한 것
 
 | # | 질문 | 권고 | 다른 선택 |
 |---|---|---|---|
-| D1 | 제출자가 Keeper 여도 반려된 Task 를 `Todo` 로 돌리는가 | 그렇다. 예외를 두면 §1.1 이 Keeper 에게만 남는다 | Keeper 에게는 지금처럼 돌려주되 하나만 맡는지를 판정에서도 검사한다. 그러면 검사에 걸린 판정을 어디로 보낼지가 다시 문제다 |
+| D1 | 반려된 Task 를 어디에 두는가 | **정해짐(2026-09-19): `Rejected` 상태를 두고 `claim_next` 가 자동으로 권하지 않는다.** 낸 사람은 알림의 id 로, 다른 쪽은 목록에서 골라 맡는다 | — |
 | D2 | Task 를 취소할 자격 | 만든 쪽과 운영자 | 운영자만(지금의 줄이 그대로 남는다). 또는 운영자가 설정으로 지정한 정리 담당 Keeper 추가(에이전트가 만든 640건을 정리할 길이 넓어진다) |
 | D3 | 대기 중인 취소 요청 65건 | **정해짐(2026-09-19): 운영자 일괄 승인, 65건 모두 `Cancelled`** | — |
 | D4 | §3.10 헌법 문구. `Done.assignee` 의 뜻 포함 | 표대로 | — |
@@ -584,12 +613,17 @@ OCaml 쪽은 임의의 액션·판정 열을 돌려 `OneTaskPerAgent` 를 확인
 `Todo` 에 있으면 누구나 맡을 수 있고, 제출자도 알림을 받아 다시 맡을 수 있다. `InProgress` 에 묶여 있으면
 아무도 못 맡는다.
 
-**다른 Keeper 가 먼저 맡아서 같은 일을 다시 하면?** 생길 수 있다. 돌아온 Task 는 priority 와 생성 시각이
-그대로라 같은 priority 안에서 앞쪽에 서고(`workspace_task_schedule.ml:216-229`), 쉬고 있던 Keeper 가
-제출자보다 먼저 맡을 수 있다. claimable 목록은 `task_id` 만 보여 주므로 사유는 맡은 뒤에야 "Prior handoff"
-줄에서 읽는다. 그래서 §3.3 이 제출자의 summary 와 evidence_refs 를 handoff 에 남긴다. 맡은 쪽은 브랜치와
-PR 위치, 그리고 판정 사유를 같이 본다. 제출자가 이미 다른 Task 를 맡고 있었다면 지금 방식으로도 그
-제출자는 돌아온 Task 를 할 수 없다. 보이지도 않는 Task 를 하나 더 맡고 있을 뿐이다.
+**다른 Keeper 가 먼저 맡아서 같은 일을 다시 하면?** 그래서 `Rejected` 를 `claim_next` 가 권하지 않는다
+(D1). 초안은 `Todo` 로 보냈는데, 그러면 돌아온 Task 가 priority 와 생성 시각 그대로 claim 순서 앞쪽에
+서고(`workspace_task_schedule.ml:216-229`), 맥락 없는 Keeper 가 제출자보다 먼저 집을 수 있었다.
+claimable 줄은 `task_id` 만 보여 주므로 사유는 맡은 뒤에야 읽힌다. 지금 설계에서는 낸 사람이 알림에
+붙은 id 로 바로 다시 맡고, 그 밖에는 목록을 보고 고른 쪽만 맡는다. 어느 쪽이든 handoff 에 남은
+제출자의 summary 와 evidence_refs 로 브랜치와 PR 위치를 먼저 본다(§3.3).
+
+**아무도 목록을 안 보면 두 번째 방치 더미가 되지 않나?** 그 위험은 있다. 지금도 `todo` 641건이 쌓여
+있다. 다만 `Rejected` 는 낸 사람이 알림을 받은 Task 라서 임자가 분명하고, 운영자 목록에도 올라간다
+(§3.7). RFC-0455 의 규칙("끝나지 않은 상태에는 확인된 행위자가 있거나 운영자 목록에 투영이 있다")을
+두 가지로 다 만족한다. 재는 값은 §4.2 에 넣었다.
 
 **같은 Keeper 가 같은 증거로 계속 다시 내면?** 지금도 생긴다(task-174, 2시간에 59회). 그때의 답은
 횟수 상한이 아니라 읽을 수 없는 증거 참조를 제출 경계에서 거절하는 것이었고, 그 검사는 그대로 있다.

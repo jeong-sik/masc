@@ -100,6 +100,11 @@ status: reference
   경로로 들어온 운영자(`Human_operator`)다. Keeper 는 판정하지 못한다. 취소 요청은
   운영자만 승인한다.
 
+**Rejected**
+: RFC `task-lifecycle-a-verdict-assigns-no-work` 가 더하자고 하는 상태. 반려를 받고 아무도
+  맡고 있지 않은 Task 이며, 낸 쪽(`producer`)과 그 `verification_id` 를 들고 있다. `claim_next` 가
+  자동으로 권하지 않는다. 지금 코드에는 없다.
+
 **Verdict**
 : `Verdict_approved` 또는 `Verdict_rejected { reason }`. 완료 제출의 승인은 `Done`, 취소
   요청의 승인은 `Cancelled`, 반려는 어느 쪽이든 Producer 의 `InProgress` 다.

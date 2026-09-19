@@ -44,11 +44,12 @@ VARIABLES
     verdict_for,   \* which submission the returned verdict read
     cancelled_by,  \* who cancelled the Task
     stalled,       \* the judge cannot answer the pending submission right now
+    returned,      \* the last submission came back rejected and nobody took it since
     claimed_by     \* every agent that has held the Task
 
 vars ==
     <<created_by, outcome, holder, pending, judgeable, producer, sub, verdict,
-      verdict_for, cancelled_by, stalled, claimed_by>>
+      verdict_for, cancelled_by, stalled, returned, claimed_by>>
 
 Creators == Agents \cup {Operator}
 
@@ -64,6 +65,7 @@ TypeOK ==
     /\ verdict_for \in [Tasks -> 0..MaxSubmissions]
     /\ cancelled_by \in [Tasks -> Creators \cup {NoOne}]
     /\ stalled \in [Tasks -> BOOLEAN]
+    /\ returned \in [Tasks -> BOOLEAN]
     /\ claimed_by \in [Tasks -> SUBSET Agents]
 
 Init ==
@@ -78,6 +80,7 @@ Init ==
     /\ verdict_for = [t \in Tasks |-> 0]
     /\ cancelled_by = [t \in Tasks |-> NoOne]
     /\ stalled = [t \in Tasks |-> FALSE]
+    /\ returned = [t \in Tasks |-> FALSE]
     /\ claimed_by = [t \in Tasks |-> {}]
 
 Held(a) == {t \in Tasks : holder[t] = a}
@@ -93,7 +96,7 @@ Claim(t, a) ==
     /\ holder' = [holder EXCEPT ![t] = a]
     /\ claimed_by' = [claimed_by EXCEPT ![t] = @ \cup {a}]
     /\ UNCHANGED <<created_by, outcome, pending, judgeable, producer, sub, verdict,
-                   verdict_for, cancelled_by, stalled>>
+                   verdict_for, cancelled_by, stalled, returned>>
 
 \* The holder gives the Task back. An operator releasing a Task for an agent
 \* that no longer exists has the same effect and is not modelled apart.
@@ -101,7 +104,7 @@ Release(t, a) ==
     /\ holder[t] = a
     /\ holder' = [holder EXCEPT ![t] = NoOne]
     /\ UNCHANGED <<created_by, outcome, pending, judgeable, producer, sub, verdict,
-                   verdict_for, cancelled_by, stalled, claimed_by>>
+                   verdict_for, cancelled_by, stalled, returned, claimed_by>>
 
 \* --------------------------------------------------------------- submission
 
@@ -117,7 +120,7 @@ Submit(t, a) ==
     /\ verdict' = [verdict EXCEPT ![t] = "none"]
     /\ verdict_for' = [verdict_for EXCEPT ![t] = 0]
     /\ stalled' = [stalled EXCEPT ![t] = FALSE]
-    /\ UNCHANGED <<created_by, outcome, cancelled_by, claimed_by>>
+    /\ UNCHANGED <<created_by, outcome, cancelled_by, returned, claimed_by>>
 
 \* The producer may replace its holder submission while nobody has answered it.
 \* This is a right over the submission, not over the Task: holder[t] stays NoOne.
@@ -131,7 +134,7 @@ Resubmit(t, a) ==
     /\ verdict_for' = [verdict_for EXCEPT ![t] = 0]
     /\ stalled' = [stalled EXCEPT ![t] = FALSE]
     /\ UNCHANGED <<created_by, outcome, holder, pending, judgeable, producer,
-                   cancelled_by, claimed_by>>
+                   cancelled_by, returned, claimed_by>>
 
 \* ------------------------------------------------------------------ verdict
 
@@ -144,7 +147,7 @@ JudgeReturns(t) ==
          /\ verdict' = [verdict EXCEPT ![t] = v]
          /\ verdict_for' = [verdict_for EXCEPT ![t] = s]
     /\ UNCHANGED <<created_by, outcome, holder, pending, judgeable, producer, sub,
-                   cancelled_by, stalled, claimed_by>>
+                   cancelled_by, stalled, returned, claimed_by>>
 
 \* The review could not be carried out: the evaluator is misconfigured, its
 \* lookup surface failed, and nothing will retry. The submission stays where
@@ -156,7 +159,7 @@ JudgeCannotAnswer(t) ==
     /\ verdict[t] = "none"
     /\ stalled' = [stalled EXCEPT ![t] = TRUE]
     /\ UNCHANGED <<created_by, outcome, holder, pending, judgeable, producer, sub,
-                   verdict, verdict_for, cancelled_by, claimed_by>>
+                   verdict, verdict_for, cancelled_by, returned, claimed_by>>
 
 \* The operator may answer any pending submission, stalled or not. The answer
 \* names the submission the operator read, so a click that raced a
@@ -168,7 +171,7 @@ OperatorReturns(t) ==
          /\ verdict' = [verdict EXCEPT ![t] = v]
          /\ verdict_for' = [verdict_for EXCEPT ![t] = s]
     /\ UNCHANGED <<created_by, outcome, holder, pending, judgeable, producer, sub,
-                   cancelled_by, stalled, claimed_by>>
+                   cancelled_by, stalled, returned, claimed_by>>
 
 DiscardSuperseded(t) ==
     /\ pending[t]
@@ -177,7 +180,7 @@ DiscardSuperseded(t) ==
     /\ verdict' = [verdict EXCEPT ![t] = "none"]
     /\ verdict_for' = [verdict_for EXCEPT ![t] = 0]
     /\ UNCHANGED <<created_by, outcome, holder, pending, judgeable, producer, sub,
-                   cancelled_by, stalled, claimed_by>>
+                   cancelled_by, stalled, returned, claimed_by>>
 
 ApplyApproved(t) ==
     /\ pending[t]
@@ -187,7 +190,7 @@ ApplyApproved(t) ==
     /\ pending' = [pending EXCEPT ![t] = FALSE]
     /\ stalled' = [stalled EXCEPT ![t] = FALSE]
     /\ UNCHANGED <<created_by, holder, judgeable, producer, sub, verdict,
-                   verdict_for, cancelled_by, claimed_by>>
+                   verdict_for, cancelled_by, returned, claimed_by>>
 
 \* The submission was rejected. The Task is simply open and unheld again;
 \* the reason travels with it as context. Nobody is put to work by this step.
@@ -200,7 +203,7 @@ ApplyRejected(t) ==
     /\ verdict_for' = [verdict_for EXCEPT ![t] = 0]
     /\ stalled' = [stalled EXCEPT ![t] = FALSE]
     /\ UNCHANGED <<created_by, outcome, holder, judgeable, producer, sub,
-                   cancelled_by, claimed_by>>
+                   cancelled_by, returned, claimed_by>>
 
 \* ------------------------------------------------------------- cancellation
 
@@ -217,6 +220,7 @@ Cancel(t, who) ==
     /\ verdict' = [verdict EXCEPT ![t] = "none"]
     /\ verdict_for' = [verdict_for EXCEPT ![t] = 0]
     /\ stalled' = [stalled EXCEPT ![t] = FALSE]
+    /\ returned' = [returned EXCEPT ![t] = FALSE]
     /\ UNCHANGED <<created_by, judgeable, producer, sub, claimed_by>>
 
 NextClean ==
@@ -245,7 +249,7 @@ BugVerdictReturnsTaskToProducer(t) ==
     /\ verdict_for' = [verdict_for EXCEPT ![t] = 0]
     /\ stalled' = [stalled EXCEPT ![t] = FALSE]
     /\ UNCHANGED <<created_by, outcome, judgeable, producer, sub, cancelled_by,
-                   claimed_by>>
+                   returned, claimed_by>>
 
 \* The code when this was written: a holder that wants out for good places a
 \* cancel request that only the operator may answer.
@@ -258,7 +262,7 @@ BugCancelRequestOnlyOperatorAnswers(t, a) ==
     /\ producer' = [producer EXCEPT ![t] = a]
     /\ sub' = [sub EXCEPT ![t] = @ + 1]
     /\ UNCHANGED <<created_by, outcome, verdict, verdict_for, cancelled_by, stalled,
-                   claimed_by>>
+                   returned, claimed_by>>
 
 \* The code when this was written: any agent may cancel a Todo it did not ask
 \* for.
@@ -270,7 +274,7 @@ BugAnyoneCancels(t, a) ==
     /\ outcome' = [outcome EXCEPT ![t] = "Cancelled"]
     /\ cancelled_by' = [cancelled_by EXCEPT ![t] = a]
     /\ UNCHANGED <<created_by, holder, pending, judgeable, producer, sub, verdict,
-                   verdict_for, stalled, claimed_by>>
+                   verdict_for, stalled, returned, claimed_by>>
 
 \* A slip the new transitions make possible: the Task is closed but the
 \* agent that held the Task is left holding it.
@@ -283,7 +287,7 @@ BugCancelKeepsHolder(t, who) ==
     /\ verdict' = [verdict EXCEPT ![t] = "none"]
     /\ verdict_for' = [verdict_for EXCEPT ![t] = 0]
     /\ stalled' = [stalled EXCEPT ![t] = FALSE]
-    /\ UNCHANGED <<created_by, holder, judgeable, producer, sub, claimed_by>>
+    /\ UNCHANGED <<created_by, holder, judgeable, producer, sub, returned, claimed_by>>
 
 \* A slip: submitting without letting go, so the Task is held and pending.
 BugSubmitKeepsHold(t, a) ==
@@ -295,7 +299,23 @@ BugSubmitKeepsHold(t, a) ==
     /\ sub' = [sub EXCEPT ![t] = @ + 1]
     /\ verdict' = [verdict EXCEPT ![t] = "none"]
     /\ verdict_for' = [verdict_for EXCEPT ![t] = 0]
-    /\ UNCHANGED <<created_by, outcome, holder, cancelled_by, stalled, claimed_by>>
+    /\ UNCHANGED <<created_by, outcome, holder, cancelled_by, stalled, returned, claimed_by>>
+
+\* The design this replaces: a rejected Task goes to Todo, so the record no
+\* longer names the agent whose submission was refused. The reason survives in
+\* a free-text memo; the name does not.
+BugRejectedForgetsProducer(t) ==
+    /\ pending[t]
+    /\ verdict[t] = "rejected"
+    /\ verdict_for[t] = sub[t]
+    /\ pending' = [pending EXCEPT ![t] = FALSE]
+    /\ verdict' = [verdict EXCEPT ![t] = "none"]
+    /\ verdict_for' = [verdict_for EXCEPT ![t] = 0]
+    /\ stalled' = [stalled EXCEPT ![t] = FALSE]
+    /\ returned' = [returned EXCEPT ![t] = TRUE]
+    /\ producer' = [producer EXCEPT ![t] = NoOne]
+    /\ UNCHANGED <<created_by, outcome, holder, judgeable, sub, cancelled_by,
+                   claimed_by>>
 
 \* Carried over from TaskLifecycle.tla (BugSkipClaim): work is submitted by an
 \* agent that never held the Task.
@@ -311,7 +331,7 @@ BugSubmitWithoutHold(t, a) ==
     /\ sub' = [sub EXCEPT ![t] = @ + 1]
     /\ verdict' = [verdict EXCEPT ![t] = "none"]
     /\ verdict_for' = [verdict_for EXCEPT ![t] = 0]
-    /\ UNCHANGED <<created_by, outcome, holder, cancelled_by, stalled, claimed_by>>
+    /\ UNCHANGED <<created_by, outcome, holder, cancelled_by, stalled, returned, claimed_by>>
 
 \* Carried over from TaskLifecycle.tla.
 BugDoneWithoutVerdict(t, a) ==
@@ -319,7 +339,7 @@ BugDoneWithoutVerdict(t, a) ==
     /\ outcome' = [outcome EXCEPT ![t] = "Done"]
     /\ holder' = [holder EXCEPT ![t] = NoOne]
     /\ UNCHANGED <<created_by, pending, judgeable, producer, sub, verdict,
-                   verdict_for, cancelled_by, stalled, claimed_by>>
+                   verdict_for, cancelled_by, stalled, returned, claimed_by>>
 
 BugSupersededVerdictCompletes(t) ==
     /\ pending[t]
@@ -329,7 +349,7 @@ BugSupersededVerdictCompletes(t) ==
     /\ pending' = [pending EXCEPT ![t] = FALSE]
     /\ stalled' = [stalled EXCEPT ![t] = FALSE]
     /\ UNCHANGED <<created_by, holder, judgeable, producer, sub, verdict,
-                   verdict_for, cancelled_by, claimed_by>>
+                   verdict_for, cancelled_by, returned, claimed_by>>
 
 SpecClean == Init /\ [][NextClean]_vars
 SpecBugVerdictReturns ==
@@ -344,6 +364,8 @@ SpecBugCancelKeepsHolder ==
                               BugCancelKeepsHolder(t, who)]_vars
 SpecBugSubmitKeepsHold ==
     Init /\ [][NextClean \/ \E t \in Tasks, a \in Agents : BugSubmitKeepsHold(t, a)]_vars
+SpecBugRejectedForgetsProducer ==
+    Init /\ [][NextClean \/ \E t \in Tasks : BugRejectedForgetsProducer(t)]_vars
 SpecBugSubmitWithoutHold ==
     Init /\ [][NextClean \/ \E t \in Tasks, a \in Agents : BugSubmitWithoutHold(t, a)]_vars
 SpecBugDoneWithoutVerdict ==
@@ -370,6 +392,16 @@ ClosedOwesNothing ==
 \* (JudgeCannotAnswer), and then the operator is who repairs it.
 NoOperatorOnlySubmissionKind == \A t \in Tasks : pending[t] => judgeable[t]
 
+\* A Rejected Task is open, unheld and not pending. It is claimable, like Todo.
+RejectedIsOpenAndUnheld ==
+    \A t \in Tasks :
+        returned[t] => (outcome[t] = "Open" /\ holder[t] = NoOne /\ ~pending[t])
+
+\* A Rejected Task still names the agent whose submission was refused. This is
+\* the whole reason it is a state of its own and not a return to Todo.
+RejectedNamesItsProducer ==
+    \A t \in Tasks : returned[t] => producer[t] # NoOne
+
 \* A stall is a property of a pending submission and ends with it.
 StalledOnlyWhilePending == \A t \in Tasks : stalled[t] => pending[t]
 
@@ -394,6 +426,8 @@ Safety ==
     /\ ClosedOwesNothing
     /\ NoOperatorOnlySubmissionKind
     /\ StalledOnlyWhilePending
+    /\ RejectedIsOpenAndUnheld
+    /\ RejectedNamesItsProducer
     /\ SubmissionRequiresHold
     /\ DoneRequiresLiveApproval
     /\ CancelledRequiresStanding

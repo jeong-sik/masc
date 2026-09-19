@@ -18,6 +18,8 @@ mermaid: classDiagram is not drawn here; the source follows
 ```
 
 상태 머신은 `stateDiagram-v2` 로 쓰거나 `graph TD` 로 쓴다. `[*]` 는 시작/종료 상태로 그려진다.
+전이 화살표는 `-->` 하나다. `note` 는 읽기만 하고 TUI 에 그려지지 않으니, 꼭 보여야 하는 말은
+전이 라벨이나 상태 설명(`상태 : 설명`)에 넣는다.
 
 ## 폭이 제일 자주 문제다
 

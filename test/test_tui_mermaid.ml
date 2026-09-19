@@ -8,6 +8,30 @@ module Mermaid = Masc_tui_mermaid
 
 let rows = Alcotest.(list string)
 
+let node_id =
+  let scope_text = function
+    | Mermaid.Top_level -> ""
+    | Mermaid.Inside id -> " of " ^ id
+  in
+  let scope_equal a b =
+    match (a, b) with
+    | Mermaid.Top_level, Mermaid.Top_level -> true
+    | Mermaid.Inside a, Mermaid.Inside b -> String.equal a b
+    | (Mermaid.Top_level | Mermaid.Inside _), _ -> false
+  in
+  Alcotest.testable
+    (fun formatter id ->
+      Format.pp_print_string formatter
+        (match id with
+         | Mermaid.Named name -> name
+         | Mermaid.Initial scope -> "[*] start" ^ scope_text scope
+         | Mermaid.Final scope -> "[*] end" ^ scope_text scope))
+    (fun a b ->
+      match (a, b) with
+      | Mermaid.Named a, Mermaid.Named b -> String.equal a b
+      | Mermaid.Initial a, Mermaid.Initial b | Mermaid.Final a, Mermaid.Final b -> scope_equal a b
+      | (Mermaid.Named _ | Mermaid.Initial _ | Mermaid.Final _), _ -> false)
+
 let render ?(cols = 80) source =
   match Mermaid.render ~cols source with
   | Ok drawn -> drawn
@@ -310,11 +334,11 @@ let parsed source =
 
 let test_statements_split_on_semicolons_and_skip_comments () =
   let graph = parsed "graph LR\n%% not a statement\n  %% nor this\nA & B --> C; C --> D" in
-  Alcotest.(check (list string)) "nodes in order of appearance"
-    [ "A"; "B"; "C"; "D" ]
+  Alcotest.(check (list node_id)) "nodes in order of appearance"
+    Mermaid.[ Named "A"; Named "B"; Named "C"; Named "D" ]
     (List.map (fun (node : Mermaid.node) -> node.id) graph.nodes);
-  Alcotest.(check (list (pair string string))) "one edge per pair"
-    [ ("A", "C"); ("B", "C"); ("C", "D") ]
+  Alcotest.(check (list (pair node_id node_id))) "one edge per pair"
+    Mermaid.[ (Named "A", Named "C"); (Named "B", Named "C"); (Named "C", Named "D") ]
     (List.map (fun (edge : Mermaid.edge) -> (edge.from_id, edge.to_id)) graph.edges)
 
 let test_both_label_spellings_read_the_same () =
@@ -558,8 +582,15 @@ let test_state_diagram_keeper_fsm_parses () =
   | Ok (Mermaid.Graph g) ->
       Alcotest.(check int) "5 distinct states" 5 (List.length g.nodes);
       Alcotest.(check int) "5 transitions" 5 (List.length g.edges);
-      Alcotest.(check bool) "has start state" true (List.exists (fun (n : Mermaid.node) -> n.id = "[*]") g.nodes);
-      Alcotest.(check bool) "has end state" true (List.exists (fun (n : Mermaid.node) -> n.id = "[*]_end") g.nodes)
+      Alcotest.(check (list node_id)) "the start and the end are nodes of their own"
+        Mermaid.
+          [ Initial Top_level
+          ; Named "Offline"
+          ; Named "Running"
+          ; Named "Stopped"
+          ; Final Top_level
+          ]
+        (List.map (fun (n : Mermaid.node) -> n.id) g.nodes)
   | Ok (Mermaid.Sequence _) -> Alcotest.fail "parsed as sequence instead of graph"
   | Error (Mermaid.Unsupported what) -> Alcotest.failf "unsupported: %s" what
   | Error (Mermaid.Parse_error { line; what }) -> Alcotest.failf "line %d: %s" line what
@@ -570,13 +601,19 @@ let test_state_diagram_skips_classdef_and_notes () =
     "stateDiagram-v2\n\
      [*] --> Active\n\
      note right of Active : this is skipped\n\
+     note left of Active\n\
+     Waiting\n\
+     }\n\
+     end note\n\
      classDef c1 fill:#fff\n\
      class Active c1\n\
      Active --> [*]"
   in
   match Mermaid.parse src with
   | Ok (Mermaid.Graph g) ->
-      Alcotest.(check int) "3 nodes" 3 (List.length g.nodes);
+      Alcotest.(check (list node_id)) "a note's text is not a state"
+        Mermaid.[ Initial Top_level; Named "Active"; Final Top_level ]
+        (List.map (fun (n : Mermaid.node) -> n.id) g.nodes);
       Alcotest.(check int) "2 edges" 2 (List.length g.edges)
   | _ -> Alcotest.fail "expected Ok Graph"
 
@@ -621,11 +658,79 @@ let test_nested_composite_states () =
   Alcotest.(check bool) "renders inner box" true (List.exists (contains "Inner") drawn);
   Alcotest.(check bool) "renders deep node" true (List.exists (contains "Deep") drawn)
 
+(* Each composite state has a start and an end of its own, apart from the
+   diagram's, and they are members of its box. *)
+let test_composite_state_has_its_own_start_and_end () =
+  let graph =
+    parsed
+      "stateDiagram-v2\n\
+       state Parent {\n\
+       [*] --> Child\n\
+       Child --> [*]\n\
+       }\n\
+       [*] --> Parent\n\
+       Parent --> [*]"
+  in
+  let inside = Mermaid.Inside "Parent" in
+  Alcotest.(check (list (list node_id))) "the members of Parent"
+    Mermaid.[ [ Initial inside; Named "Child"; Final inside ] ]
+    (List.map (fun (g : Mermaid.group) -> g.group_nodes) graph.groups);
+  Alcotest.(check (list (pair node_id node_id))) "four transitions, two scopes"
+    Mermaid.
+      [ (Initial inside, Named "Child")
+      ; (Named "Child", Final inside)
+      ; (Initial Top_level, Named "Parent")
+      ; (Named "Parent", Final Top_level)
+      ]
+    (List.map (fun (e : Mermaid.edge) -> (e.from_id, e.to_id)) graph.edges)
+
 let test_unclosed_composite_state_is_refused () =
   match failure "stateDiagram-v2\nstate OpenBlock {\n[*] --> S1" with
   | Mermaid.Unsupported what ->
       Alcotest.(check bool) "mentions open state" true (contains "state OpenBlock with no }" what)
   | Mermaid.Parse_error _ | Mermaid.Too_wide _ -> Alcotest.fail "not Unsupported"
+
+let test_state_diagram_note_with_no_end_is_refused () =
+  match failure "stateDiagram-v2\n[*] --> Idle\nnote right of Idle\nwaits here" with
+  | Mermaid.Parse_error { line; _ } -> Alcotest.(check int) "the line the note opened on" 3 line
+  | Mermaid.Unsupported _ | Mermaid.Too_wide _ -> Alcotest.fail "not a Parse_error"
+
+(* An arrow inside a quoted description or after the colon is text. The
+   colon ends the names, and [state] is read before any arrow is looked
+   for. *)
+let test_state_diagram_arrow_in_text_is_text () =
+  let graph =
+    parsed
+      "stateDiagram-v2\n\
+       state \"retry --> giveup\" as Backoff\n\
+       Waiting : retry->giveup\n\
+       Backoff --> Waiting : x-->y"
+  in
+  Alcotest.(check (list (pair node_id string))) "two states, each with its description"
+    Mermaid.[ (Named "Backoff", "retry --> giveup"); (Named "Waiting", "retry->giveup") ]
+    (List.map (fun (n : Mermaid.node) -> (n.id, n.label)) graph.nodes);
+  Alcotest.(check (list (option string))) "the label keeps its arrow" [ Some "x-->y" ]
+    (List.map (fun (e : Mermaid.edge) -> e.label) graph.edges)
+
+(* A line whose names are not one state id each is refused on its own line,
+   not drawn as a box of whatever it held. [->] is not a state transition in
+   Mermaid. *)
+let test_state_diagram_line_that_names_no_state_is_refused () =
+  List.iter
+    (fun line ->
+      match failure ("stateDiagram-v2\n" ^ line ^ "\n[*] --> A") with
+      | Mermaid.Parse_error { line = number; _ } -> Alcotest.(check int) line 2 number
+      | Mermaid.Unsupported _ | Mermaid.Too_wide _ -> Alcotest.failf "%s: not a Parse_error" line)
+    [ "}"
+    ; "end note"
+    ; "--"
+    ; "A B"
+    ; "A -> B"
+    ; "state A B"
+    ; "A --> B C : go"
+    ; "state A <<nope>>"
+    ; "A {"
+    ]
 
 let () =
   Alcotest.run "tui mermaid"
@@ -725,7 +830,15 @@ let () =
             test_state_diagram_choice_pseudo_state
         ; Alcotest.test_case "nested composite states" `Quick
             test_nested_composite_states
+        ; Alcotest.test_case "composite state has its own start and end" `Quick
+            test_composite_state_has_its_own_start_and_end
         ; Alcotest.test_case "unclosed composite state is refused" `Quick
             test_unclosed_composite_state_is_refused
+        ; Alcotest.test_case "a note with no end note is refused" `Quick
+            test_state_diagram_note_with_no_end_is_refused
+        ; Alcotest.test_case "an arrow in text is text" `Quick
+            test_state_diagram_arrow_in_text_is_text
+        ; Alcotest.test_case "a line that names no state is refused" `Quick
+            test_state_diagram_line_that_names_no_state_is_refused
         ] )
     ]

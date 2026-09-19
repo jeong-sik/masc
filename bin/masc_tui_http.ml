@@ -1829,17 +1829,15 @@ let post_schedule_update ~(host : string) ~(port : int) ~(body_json : string) =
   post_json ~host ~port ~path:"/api/v1/tools/masc_schedule_update"
     ~body:body_json
 
-(** POST /api/v1/tools/masc_schedule_cancel. The payload is the tool's own
-    argument contract, so validation is the tool's, not duplicated here.
-    [cancelled_by_kind] is omitted: the tool defaults it to human operator,
-    which is what a terminal operator is. The reason is a fixed audit phrase --
-    the arm display already named which schedule the second press cancels. *)
+(** POST /api/v1/tools/masc_schedule_cancel. The authenticated HTTP boundary
+    supplies the canceller identity before the tool validates its argument
+    contract. The reason is a fixed audit phrase -- the arm display already
+    named which schedule the second press cancels. *)
 let post_schedule_cancel ~(host : string) ~(port : int) ~(schedule_id : string)
     : (Yojson.Safe.t, string) result =
   let payload =
     `Assoc
       [ ("schedule_id", `String schedule_id)
-      ; ("cancelled_by_id", `String default_agent_name)
       ; ("reason", `String "cancelled from the TUI")
       ]
   in

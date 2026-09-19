@@ -1687,6 +1687,31 @@ let repeated_tool () =
       Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
 ;;
 
+(* The CLI refused to send (blocking_limit) and an empty history leaves no
+   smaller view to try, so the attempt ends on the overflow. Nothing was sent
+   and no tool ran, so the attempt must report no effect: that is what lets
+   the lane move to its next runtime instead of fencing the turn. *)
+let test_unshrinkable_blocking_limit_reports_no_effect () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture [ Emit blocking_limit_diagnostic; Emit blocking_limit_result ]
+         (fun cli_path ->
+            let attempt =
+              run_direct_attempt ~base_path ~cli_path ~goal:"BLOCKED" ~tools:[] ()
+            in
+            (match attempt.result with
+             | Error (Agent_core.Error.Api (Llm_provider.Retry.ContextOverflow _)) -> ()
+             | Error error -> fail (Agent_core.Error.to_string error)
+             | Ok _ -> fail "a blocking_limit refusal completed the attempt");
+            check
+              string
+              "a refusal before sending has no effect"
+              "no_effect_observed"
+              (Keeper_provider_attempt_effect.to_string attempt.effect_disposition)))
+;;
+
 (* A blank composition must not reach [Runtime_claude_code.config.system_prompt]
    as [None]. [None] means "omit --system-prompt", which since #33072 hands the
    turn Claude Code's built-in coding-agent prompt while masc's tool set and
@@ -1973,6 +1998,10 @@ let () =
             "unbounded turn keeps subscription probe bounded"
             `Quick
             test_unbounded_turn_keeps_subscription_probe_bounded
+        ; test_case
+            "unshrinkable blocking_limit reports no effect"
+            `Quick
+            test_unshrinkable_blocking_limit_reports_no_effect
         ; test_case
             "blank system prompt is refused not defaulted"
             `Quick

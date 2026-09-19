@@ -184,9 +184,9 @@ val append_error_to_string : append_error -> string
 
 (** One record in one durable append -- fsynced, and rolled back when the
     write fails -- or an error and nothing written. A record {!record_of_json}
-    would reject is not written. A store that ends mid-line refuses the
-    append, as every durable JSONL store here does, so a crash during an
-    append is reported rather than written over. *)
+    would reject is not written. A store that ends mid-line holds the remains
+    of an append a crash cut short; the append cuts them back to the last
+    complete line before it writes. *)
 val append
   :  keepers_dir:string
   -> keeper_id:string

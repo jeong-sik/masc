@@ -1636,6 +1636,7 @@ let rec read_fd_chunks fd buffer =
   | exception Unix.Unix_error (Unix.EINTR, _, _) -> read_fd_chunks fd buffer
 
 type durable_append_operation =
+  | Incomplete_tail_read
   | Incomplete_tail_truncate
   | Incomplete_tail_fsync
   | Write
@@ -1658,6 +1659,7 @@ type durable_append_error =
   }
 
 let durable_append_operation_to_string = function
+  | Incomplete_tail_read -> "incomplete tail read"
   | Incomplete_tail_truncate -> "incomplete tail truncate"
   | Incomplete_tail_fsync -> "incomplete tail fsync"
   | Write -> "write"
@@ -3545,35 +3547,42 @@ let private_jsonl_append_error_to_string = function
 
 (* A final fragment with no '\n' is what an append leaves when the process
    dies part way through it, so it is never a row. The caller holds the path
-   mutex and the exclusive [lockf], so no append or locked read is in the file
-   while it is cut back to the last '\n' and fsynced. Returns the length the
-   append then starts from. *)
+   mutex, which the other appenders here also take ([append_file],
+   [append_jsonl], [update_private_file_durable_locked_result]), and the
+   exclusive [lockf], which every durable writer in another process takes. No
+   such writer is in the file while it is cut back to the last '\n' and
+   fsynced; a writer in another process that takes neither lock is not
+   excluded. Returns the length the append then starts from. *)
 let truncate_incomplete_jsonl_tail ~path ~fd ~end_offset =
-  (* See Unix.lseek: only the file-position side effect is required. *)
-  ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
-  let bytes = read_fd_chunks fd (Buffer.create end_offset) in
-  let rows_end =
-    match String.rindex_opt bytes '\n' with
-    | Some newline -> newline + 1
-    | None -> 0
-  in
-  let truncated =
+  let read_rows_end () =
     match
-      run_unix_io ~operation:Incomplete_tail_truncate (fun () ->
-        Unix.ftruncate fd rows_end)
+      (* See Unix.lseek: only the file-position side effect is required. *)
+      ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
+      read_fd_chunks fd (Buffer.create end_offset)
     with
-    | Error _ as error -> error
-    | Ok () -> run_unix_io ~operation:Incomplete_tail_fsync (fun () -> Unix.fsync fd)
+    | bytes ->
+      Ok
+        (match String.rindex_opt bytes '\n' with
+         | Some newline -> newline + 1
+         | None -> 0)
+    | exception Unix.Unix_error (error, function_name, argument) ->
+      Error
+        (unix_failure ~operation:Incomplete_tail_read error function_name argument)
   in
-  Result.map
-    (fun () ->
-       Stdlib.Printf.eprintf
-         "[fs_compat] WARN: cut an incomplete JSONL tail path=%s cut_bytes=%d kept_bytes=%d\n%!"
-         path
-         (end_offset - rows_end)
-         rows_end;
-       rows_end)
-    truncated
+  Result.bind (read_rows_end ()) (fun rows_end ->
+    Result.bind
+      (run_unix_io ~operation:Incomplete_tail_truncate (fun () ->
+         Unix.ftruncate fd rows_end))
+      (fun () ->
+         Result.map
+           (fun () ->
+              Stdlib.Printf.eprintf
+                "[fs_compat] WARN: cut an incomplete JSONL tail path=%s cut_bytes=%d kept_bytes=%d\n%!"
+                path
+                (end_offset - rows_end)
+                rows_end;
+              rows_end)
+           (run_unix_io ~operation:Incomplete_tail_fsync (fun () -> Unix.fsync fd))))
 ;;
 
 let append_private_jsonl_durable_locked_with_expected_end_offset_with_io

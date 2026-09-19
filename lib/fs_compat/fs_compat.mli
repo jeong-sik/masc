@@ -1009,6 +1009,7 @@ module Private_jsonl_slice : sig
 end
 
 type durable_append_operation =
+  | Incomplete_tail_read
   | Incomplete_tail_truncate
   | Incomplete_tail_fsync
   | Write
@@ -1359,8 +1360,8 @@ type private_jsonl_append_error =
       (** The file ends with a row that has no ['\n'] and the caller asked for
           an exact end offset. *)
   | Incomplete_jsonl_tail_truncate_failed of durable_append_failure
-      (** Cutting a final row that has no ['\n'] failed. The suffix was not
-          written. *)
+      (** Reading the file to find the last ['\n'], cutting the final row that
+          has none, or fsyncing the cut failed. The suffix was not written. *)
   | Invalid_jsonl_suffix
   | Negative_expected_end_offset of int
   | End_offset_mismatch of

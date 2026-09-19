@@ -1,8 +1,10 @@
 """The Runtime lanes reading edits lanes: a, x, J, K and D, pressed for real.
 
 A new lane is named, given its first runtime, grown, reordered, trimmed and
-removed, and a lane a keeper is assigned to is refused. Each press is judged by
-the body it posts to the routing API and by the list the surface re-reads.
+removed; an edit pressed while the previous write is still out is refused on
+screen; and the server's refusal to remove a lane a keeper is assigned to is
+drawn as the server wrote it. The main judgement is the body each press posts
+to the routing API, compared whole at the end.
 """
 import json
 import os
@@ -25,6 +27,9 @@ ROUTING_PATH = "/api/v1/runtime/config/routing"
 # Its name carries an [a] and an [e]: while the name field is open those are
 # letters of the name, not the new-lane and add-candidate keys.
 NEW_LANE = "ci-lane"
+# Masc_tui_types.runtime_lane_write_busy_message: the line a lane key draws
+# while the previous lane write is still being written or read back.
+BUSY = b"the previous lane change is still being written"
 
 
 def commit_receipt() -> dict[str, object]:
@@ -59,16 +64,36 @@ def commit_receipt() -> dict[str, object]:
     }
 
 
+def in_use_refusal(lane_id: str, keepers: list[str]) -> str:
+    """The sentence Runtime.remove_runtime_lane answers for a lane keepers are
+    assigned to (lane_reference_to_string in lib/runtime/runtime.ml)."""
+    sites = ", ".join(f"[runtime.assignments].{keeper}" for keeper in keepers)
+    return f'lane "{lane_id}" is in use by {sites}'
+
+
 class LaneStore:
-    """The lanes the fixture server reads back after each write, changed by
-    the routing posts the way runtime.toml is: create refuses a declared
-    name, and remove refuses a lane a keeper is assigned to."""
+    """A stand-in for the routing API's writer, Runtime's lane functions over
+    runtime.toml. It applies a post to the lanes the next /resolved read
+    returns, the way a committed write reaches that read on the server:
+
+    - create declares the lane with the candidates it was given;
+    - set replaces a lane's candidates with the list it was given;
+    - remove drops the lane, and is refused while [runtime.assignments]
+      names it, with the server's sentence.
+
+    A lane here is exactly its candidates, as it is on the server since
+    #37064: nothing appends the default runtime. The server's other checks --
+    runtime ids, the default, verifier slots, the whole-file validation --
+    are not repeated; the unit tests of Runtime cover them. What this
+    scenario judges is the TUI: the body each key posts, and that a refusal
+    reaches the screen as the server wrote it."""
 
     def __init__(self) -> None:
         _status, body = h.runtime_resolved_response()
         self.body = body
         self.lanes = [dict(lane) for lane in body["lanes"]]
         self.lock = threading.Lock()
+        self.held: tuple[threading.Event, threading.Event] | None = None
 
     def resolved(self) -> h.HttpResponse:
         with self.lock:
@@ -78,21 +103,32 @@ class LaneStore:
             ]
         return 200, {**self.body, "lanes": lanes}
 
+    def hold_next_post(self) -> tuple[threading.Event, threading.Event]:
+        """Hold the next routing post until the second event is set. The first
+        is set once that post has arrived."""
+        arrived, release = threading.Event(), threading.Event()
+        with self.lock:
+            self.held = (arrived, release)
+        return arrived, release
+
     def route(self, raw: bytes) -> h.HttpResponse:
+        with self.lock:
+            held, self.held = self.held, None
+        if held is not None:
+            arrived, release = held
+            arrived.set()
+            if not release.wait(timeout=10.0):
+                return 504, {"error": "fixture hold was never released"}
         request = json.loads(raw)
         lane_id = request["lane"]
         action = request.get("action", "set")
         with self.lock:
             declared = [lane for lane in self.lanes if lane["id"] == lane_id]
             if action == "create":
-                if declared:
-                    return 400, {"error": f'lane "{lane_id}" already exists'}
                 self.lanes.append(
                     {"id": lane_id, "runtime_ids": list(request["runtime_ids"])}
                 )
             elif action == "set":
-                if not declared:
-                    return 400, {"error": f'unknown lane "{lane_id}"'}
                 declared[0]["runtime_ids"] = list(request["runtime_ids"])
             elif action == "remove":
                 assigned = [
@@ -101,15 +137,10 @@ class LaneStore:
                     if assignment["resolved"] == {"kind": "lane", "id": lane_id}
                 ]
                 if assigned:
-                    return 400, {
-                        "error": (
-                            f'lane "{lane_id}" is assigned to {", ".join(assigned)}; '
-                            "assign them elsewhere before removing the lane"
-                        )
-                    }
+                    return 400, {"error": in_use_refusal(lane_id, assigned)}
                 self.lanes.remove(declared[0])
             else:
-                return 400, {"error": f"unknown action {action!r}"}
+                raise AssertionError(f"the TUI posted an unknown action {action!r}")
         return 200, commit_receipt()
 
 
@@ -182,7 +213,21 @@ def run(executable: str) -> None:
         h.send_and_wait(process, fd, output, b"\r", b"2/2 runtime-e")
 
         # [J] moves runtime-a below runtime-e, and the cursor goes with it.
-        h.send_and_wait(process, fd, output, b"J", b"1/2 runtime-e")
+        # The post is held: an [x] pressed before the move is read back would
+        # be built from the order the move replaced, so it is refused on
+        # screen and posts nothing, and it does not move the cursor the move
+        # will leave on runtime-a.
+        arrived, release = store.hold_next_post()
+        os.write(fd, b"J")
+        if not arrived.wait(timeout=5.0):
+            raise AssertionError("J posted nothing")
+        h.send_and_wait(
+            process, fd, output, b"x",
+            b"lane write refused: " + BUSY,
+        )
+        mark = mark_output(fd, output)
+        release.set()
+        h.wait_for_output(process, fd, output, b"1/2 runtime-e", start=mark, timeout=5.0)
         # [x] drops the row the cursor followed: runtime-a, not runtime-e.
         h.send_and_wait(process, fd, output, b"x", b"1/1 runtime-e")
 
@@ -196,18 +241,17 @@ def run(executable: str) -> None:
         if NEW_LANE.encode() in h.screen_text(bytes(output)):
             raise AssertionError(f"{NEW_LANE} is still on screen after its removal")
 
-        # A lane a keeper is assigned to is refused, and the refusal says
-        # which keeper holds it.
+        # A lane a keeper is assigned to is refused by the server, and the
+        # TUI draws the server's sentence as it came.
         for _ in range(3):
             press(process, fd, output, b"k")
         h.send_and_wait(
             process, fd, output, b"D", b"press D again to remove lane primary",
         )
-        h.send_and_wait(process, fd, output, b"D", b"lane write refused: HTTP 400")
-        h.read_available(fd, output)
-        screen = h.screen_text(bytes(output))
-        if b"is assigned to sangsu" not in screen:
-            raise AssertionError(f"the refusal did not name the keeper: {screen!r}")
+        h.send_and_wait(
+            process, fd, output, b"D",
+            b"lane write refused: HTTP 400: " + in_use_refusal("primary", ["sangsu"]).encode(),
+        )
 
         # The request log is appended after the response goes out, so the
         # last post can trail the frame it produced.

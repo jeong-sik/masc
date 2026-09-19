@@ -1032,8 +1032,8 @@ candidates = [
 # (<provider>.<model>). A lane of that name is taken first, so a lane named
 # after a runtime still wins. A name that is neither is rejected at load — which
 # is why a lane with a name of its own is worth more than one that copies a
-# runtime id: delete it and the load fails instead of quietly falling back to
-# [this runtime, [runtime].default].
+# runtime id: delete it and the load fails instead of quietly walking that
+# runtime alone.
 [runtime.assignments]
 # example: pin a test keeper to an explicit runtime
 # canary = "deepseek.deepseek-v4-pro"

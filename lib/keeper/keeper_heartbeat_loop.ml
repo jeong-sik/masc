@@ -509,7 +509,8 @@ let failure_reason_after_turn_status ~turn_fail_count current =
   then current
   else
     match current with
-    | Some (Keeper_registry.Turn_configuration_error _) -> current
+    | Some (Keeper_registry.Turn_configuration_error _)
+    | Some (Keeper_registry.Official_client_recovery_required _) -> current
     | Some _ | None -> Some (Keeper_registry.Turn_consecutive_failures turn_fail_count)
 ;;
 

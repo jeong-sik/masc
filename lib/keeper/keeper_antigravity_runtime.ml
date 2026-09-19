@@ -365,8 +365,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         ~expected:stored_session
         ~client_kind:Antigravity
         ~runtime_id
-      |> Result.map_error (fun detail ->
-        config_error ~field:"official_client_session.claim" detail)
+      |> Result.map_error Session_store.core_error_of_claim_error
     in
     (* Before the plan is read; see the note in keeper_codex_runtime.ml. A
        moved surface has to change conversation_mode and the ordinal too, not

@@ -143,6 +143,9 @@ let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_
      which runtime is tried next, so it answers the same. *)
   | Keeper_internal_error.Runtime_connection_closed _ ->
     observe_retry Server_error
+  (* A local claim refuses the durable session before a provider attempt.
+     Keep the turn exhausted without implying a new attempted effect. *)
+  | Keeper_internal_error.Official_client_recovery_required _
   | Keeper_internal_error.Incomplete_tool_transcript _ ->
     exhaust_failure Contract_violation
   | Keeper_internal_error.Terminal_effect_failed

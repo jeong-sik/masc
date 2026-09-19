@@ -17,6 +17,7 @@ type failure_reason =
     }
   | Turn_configuration_error of { code : string; field : string option;
       detail : string; }
+  | Official_client_recovery_required of Keeper_internal_error.official_client_recovery
   | Fiber_unresolved of fiber_drop_cause
   | Exception of string
   | Turn_overflow_failure

@@ -407,6 +407,7 @@ export interface ProviderHealth {
 export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
   'runtime_exhausted',
   'provider_runtime_error',
+  'official_client_recovery_required',
   'fiber_unresolved',
   'stale_termination_storm',
   'heartbeat_failures',

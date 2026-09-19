@@ -90,6 +90,7 @@ let of_masc_internal_kind wire = function
      reached this classifier, and each keeps the bucket it had: a host stop
      used to arrive as the bare ["internal_error"] wire, and a closed runtime
      connection as a [provider_error_*] one. *)
+  | Keeper_internal_error.Wire_official_client_recovery_required -> Internal_error wire
   | Keeper_internal_error.Wire_host_stopped_turn -> Internal_error wire
   | Keeper_internal_error.Wire_runtime_connection_closed ->
     Provider_runtime_failure wire

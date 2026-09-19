@@ -150,11 +150,7 @@ let carry ~measure ~front ~counted_tokens messages =
       , Keeper_carried_front.Carried seed.source
       , counted_tokens )
     | Some (Error (Keeper_carried_front.Front_atom_missing | Keeper_carried_front.Front_message_differs))
-    | None ->
-      let first_atom =
-        max 0 (atom_count - Runtime_model_input_tail_window.atoms_per_window)
-      in
-      first_atom, Keeper_carried_front.Whole_history, None
+    | None -> 0, Keeper_carried_front.Whole_history, None
   in
   let projection, transmitted_bytes =
     Runtime_model_input_tail_window.project_from_atom

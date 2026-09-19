@@ -172,20 +172,6 @@ let test_a_declined_projection_hands_over_the_carried_range () =
   Alcotest.(check int) "the carried range stands in" 3 (List.length v.Try_provider.carried)
 ;;
 
-(* When a keeper has no front (e.g. initial turn, or unreadable turn records),
-   a long history from thousands of prior turns is bounded to the most recent
-   tail window (60 atoms) rather than sending all thousands of atoms on the wire. *)
-let test_no_front_on_long_history_bounds_to_tail_window () =
-  let make_atom i = user (Printf.sprintf "msg-%d" i) in
-  let long_history = List.init 80 make_atom in
-  let v = view ~front:None long_history in
-  let composed = v.Try_provider.composed in
-  Alcotest.(check int) "80 atoms in history" 80 composed.Try_provider.history_atom_count;
-  Alcotest.(check int) "dropped older atoms" 20 composed.Try_provider.projection.Window.dropped_atoms;
-  Alcotest.(check int) "carried newest 60 atoms" 60
-    (composed.Try_provider.history_atom_count - composed.Try_provider.projection.Window.dropped_atoms)
-;;
-
 let () =
   Alcotest.run
     "keeper_request_wire_view"
@@ -198,8 +184,6 @@ let () =
             test_an_unfinished_turns_range_is_read_where_it_stopped
         ; Alcotest.test_case "a declined projection hands over the carried range" `Quick
             test_a_declined_projection_hands_over_the_carried_range
-        ; Alcotest.test_case "no front on long history bounds to tail window" `Quick
-            test_no_front_on_long_history_bounds_to_tail_window
         ] )
     ]
 ;;

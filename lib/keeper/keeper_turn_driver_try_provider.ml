@@ -721,20 +721,10 @@ let compose_carried_model_input
       in
       projection, transmitted_bytes, Keeper_carried_front.Carried seed.source
     | None ->
-      (* A composition with no front (initial request of a fresh keeper, or
-         unreadable / reset turn records) carries the whole history when it fits
-         within one window ([atoms_per_window = 60]), or bounds to the most
-         recent window when history already spans hundreds or thousands of atoms.
-         This prevents a multi-thousand-turn checkpoint whose seed was dropped
-         from projecting thousands of atoms (megabytes / millions of tokens)
-         onto the wire. *)
-      let first_atom =
-        max 0 (history_atom_count - Runtime_model_input_tail_window.atoms_per_window)
-      in
       let projection, transmitted_bytes =
         Runtime_model_input_tail_window.project_from_atom
           ~measure_message_bytes
-          ~first_atom
+          ~first_atom:0
           planned.Keeper_model_input_demotion.messages
       in
       projection, transmitted_bytes, Keeper_carried_front.Whole_history

@@ -27,8 +27,8 @@ ROUTING_PATH = "/api/v1/runtime/config/routing"
 # Its name carries an [a] and an [e]: while the name field is open those are
 # letters of the name, not the new-lane and add-candidate keys.
 NEW_LANE = "ci-lane"
-# Masc_tui_types.runtime_lane_write_busy_message: the line a lane key draws
-# while the previous lane write is still being written or read back.
+# Masc_tui_types.runtime_lane_notice_text Lane_write_pending: the line a lane
+# key draws while the previous lane write is still being written or read back.
 BUSY = b"the previous lane change is still being written"
 
 
@@ -77,7 +77,9 @@ class LaneStore:
     returns, the way a committed write reaches that read on the server:
 
     - create declares the lane with the candidates it was given;
-    - set replaces a lane's candidates with the list it was given;
+    - set replaces a lane's candidates with the list it was given, and an
+      "exact/<name>" set replaces that standalone lane's admitted slots
+      (Runtime.set_exact_output_lane_slots);
     - remove drops the lane, and is refused while [runtime.assignments]
       names it, with the server's sentence.
 
@@ -94,14 +96,41 @@ class LaneStore:
         self.lanes = [dict(lane) for lane in body["lanes"]]
         self.lock = threading.Lock()
         self.held: tuple[threading.Event, threading.Event] | None = None
+        self.fail_next_resolved = False
+        _status, standalone = h.standalone_lanes_response()
+        self.standalone = standalone
+        self.standalone_held: tuple[threading.Event, threading.Event] | None = None
 
     def resolved(self) -> h.HttpResponse:
         with self.lock:
+            if self.fail_next_resolved:
+                self.fail_next_resolved = False
+                return 503, {"error": "resolved unavailable"}
             lanes = [
                 {"id": lane["id"], "runtime_ids": list(lane["runtime_ids"])}
                 for lane in self.lanes
             ]
         return 200, {**self.body, "lanes": lanes}
+
+    def standalone_lanes(self) -> h.HttpResponse:
+        """The standalone lanes as they stand when the read arrives. A held
+        read answers with that, after the release: a load that left before a
+        write and lands after it."""
+        with self.lock:
+            held, self.standalone_held = self.standalone_held, None
+            body = json.loads(json.dumps(self.standalone))
+        if held is not None:
+            arrived, release = held
+            arrived.set()
+            if not release.wait(timeout=10.0):
+                return 504, {"error": "fixture hold was never released"}
+        return 200, body
+
+    def hold_next_standalone_read(self) -> tuple[threading.Event, threading.Event]:
+        arrived, release = threading.Event(), threading.Event()
+        with self.lock:
+            self.standalone_held = (arrived, release)
+        return arrived, release
 
     def hold_next_post(self) -> tuple[threading.Event, threading.Event]:
         """Hold the next routing post until the second event is set. The first
@@ -123,6 +152,12 @@ class LaneStore:
         lane_id = request["lane"]
         action = request.get("action", "set")
         with self.lock:
+            if lane_id.startswith("exact/"):
+                name = lane_id[len("exact/"):]
+                for lane in self.standalone["lanes"]:
+                    if lane["lane_id"] == name:
+                        lane["admitted_slots"] = list(request["runtime_ids"])
+                return 200, commit_receipt()
             declared = [lane for lane in self.lanes if lane["id"] == lane_id]
             if action == "create":
                 self.lanes.append(
@@ -253,6 +288,17 @@ def run(executable: str) -> None:
             b"lane write refused: HTTP 400: " + in_use_refusal("primary", ["sangsu"]).encode(),
         )
 
+        # A refused write ends at once: J posts. Its read-back fails, and that
+        # ends it too, with a line saying the list may be stale -- the screen
+        # still shows the order from before J.
+        store.fail_next_resolved = True
+        h.send_and_wait(
+            process, fd, output, b"J", b"the lane list could not be re-read",
+        )
+        # K is sent, not refused. It is built from that stale list, where
+        # runtime-b is still second, and the read-back after it lands.
+        h.send_and_wait(process, fd, output, b"K", b"1/2 runtime-b")
+
         # The request log is appended after the response goes out, so the
         # last post can trail the frame it produced.
         expected = [
@@ -262,6 +308,8 @@ def run(executable: str) -> None:
             {"lane": NEW_LANE, "runtime_ids": ["runtime-e"]},
             {"lane": NEW_LANE, "action": "remove"},
             {"lane": "primary", "action": "remove"},
+            {"lane": "primary", "runtime_ids": ["runtime-b", "runtime-a"]},
+            {"lane": "primary", "runtime_ids": ["runtime-b", "runtime-a"]},
         ]
         deadline = time.monotonic() + 3.0
         while True:
@@ -282,6 +330,96 @@ def run(executable: str) -> None:
     )
 
 
+EXACT_LANE = "board_attention_exact"
+
+
+def screen_lacks(process, fd, output, needle: bytes, timeout: float) -> None:
+    """Wait until [needle] is gone from the screen the pane last painted."""
+    deadline = time.monotonic() + timeout
+    while True:
+        h.drain_until_quiet(process, fd, output)
+        if needle not in h.screen_text(bytes(output)):
+            return
+        if time.monotonic() > deadline:
+            raise AssertionError(f"{needle!r} stayed on screen")
+
+
+def run_exact(executable: str) -> None:
+    """A standalone lane's slots are read back from the standalone lanes list.
+    A load of that list already out when the write answers may have left
+    before it, so the read-back is queued behind it; the next pick is built
+    from what the queued read returns."""
+    store = LaneStore()
+    fixtures = h.overview_event_http_fixtures()
+    fixtures[h.RUNTIME_PROBE_PATH] = h.runtime_probe_response(fresh=True)
+    fixtures[h.RUNTIME_PROBE_FORCE_PATH] = h.runtime_probe_response(fresh=True)
+    fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved
+    fixtures[h.STANDALONE_LANES_PATH] = store.standalone_lanes
+    fixtures[ROUTING_PATH] = h.RequestHttpResponse(store.route)
+    requests: h.HttpRequests = []
+    picker = f"adding a failover candidate to {EXACT_LANE}".encode()
+
+    def exact_posts() -> list[object]:
+        return [json.loads(body) for path, body in requests if path == ROUTING_PATH]
+
+    def wait_for_posts(count: int) -> list[object]:
+        deadline = time.monotonic() + 5.0
+        while len(exact_posts()) < count:
+            if time.monotonic() > deadline:
+                raise AssertionError(f"routing posts: {exact_posts()!r}")
+            time.sleep(0.05)
+        return exact_posts()
+
+    def interact(process, fd, _slave, output, _base):
+        h.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
+        h.wait_for_output(process, fd, output, b"Board Attention", start=0, timeout=10)
+        # [r] sends a load of the list and the fixture holds it: it has left
+        # before the write below.
+        arrived, release = store.hold_next_standalone_read()
+        os.write(fd, b"r")
+        if not arrived.wait(timeout=5.0):
+            raise AssertionError("r read no standalone lanes")
+        mark = mark_output(fd, output)
+        h.send_and_wait(process, fd, output, b"a", picker)
+        h.wait_for_output(process, fd, output, b"> runtime-a", start=mark, timeout=5.0)
+        os.write(fd, b"\r")
+        wait_for_posts(1)
+        # The write answered once the picker closes. Only then is the held
+        # load let go: it lands with the slots from before the write.
+        screen_lacks(process, fd, output, picker, timeout=5.0)
+        mark = mark_output(fd, output)
+        release.set()
+        # The queued read-back is what draws the new slot. The held load
+        # lands first, with slots that do not name runtime-a, and the picker
+        # that did is closed.
+        h.wait_for_output(process, fd, output, b"runtime-a", start=mark, timeout=5.0)
+        # The second pick is built from that list, so runtime-a stays.
+        mark = mark_output(fd, output)
+        h.send_and_wait(process, fd, output, b"a", picker)
+        h.wait_for_output(process, fd, output, b"> runtime-b", start=mark, timeout=5.0)
+        os.write(fd, b"\r")
+        posted = wait_for_posts(2)
+        expected = [
+            {"lane": f"exact/{EXACT_LANE}",
+             "runtime_ids": ["glm-coding.glm-5-turbo", "runtime-a"]},
+            {"lane": f"exact/{EXACT_LANE}",
+             "runtime_ids": ["glm-coding.glm-5-turbo", "runtime-a", "runtime-b"]},
+        ]
+        if posted != expected:
+            raise AssertionError(f"exact posts: {posted!r}, expected {expected!r}")
+        screen_lacks(process, fd, output, picker, timeout=5.0)
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(
+        executable,
+        description="Standalone lane picks wait for the standalone list",
+        interact=interact,
+        http_fixtures=fixtures,
+        http_requests=requests,
+    )
+
+
 if __name__ == "__main__":
     run(os.path.abspath(sys.argv[1]))
+    run_exact(os.path.abspath(sys.argv[1]))
     print("runtime lane editor: PASS")

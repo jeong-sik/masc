@@ -42,10 +42,10 @@
 | Situation | Use CLI-Tool-A / ADK | Use MASC |
 |---|---|---|
 | One-shot script, single provider, developer machine | Direct SDK call is sufficient | Overhead exceeds value |
-| Multi-step workflow with tool failure retry | SDK runner with retry config | Keeper turn walks its declared lane candidates, with a receipt per attempt |
+| Multi-step workflow with tool failure retry | SDK runner with retry config | Keeper turn walks its declared lane candidates; the turn's one receipt counts the attempts and the runtime manifest records each |
 | Fleet of agents with different policies | Manage N SDK clients externally | Single agent stream with per-keeper phase and runtime rules |
 | Operator must approve or audit every action | Not supported natively | Phase gate blocks autonomous turns until operator releases |
-| Cross-provider failover (Provider-D down → Provider-K) | Manual fallback code | Runtime router materializes alternatives automatically |
+| Cross-provider failover (Provider-D down → Provider-K) | Manual fallback code | Declare both in the keeper's lane; the turn moves to the next candidate, and nothing outside the lane is tried |
 
 ## References
 

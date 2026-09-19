@@ -21,12 +21,26 @@
 \* chooses who works next. The bug models below are what the code did when
 \* this was written, or slips the design has to exclude.
 \*
-\* How the three facts read as [task_status] (lib/types/types_core.mli):
-\*   Open, nobody holds, nothing pending   Todo
+\* How the facts read as [task_status] (lib/types/types_core.mli):
+\*   Open, nobody holds, nothing pending,
+\*     ~returned[t]                        Todo
+\*   Open, nobody holds, nothing pending,
+\*     returned[t]                         Rejected, with producer[t] as its
+\*                                         producer. A flag here, a constructor
+\*                                         in the code: see the note below.
 \*   Open, holder[t] is an agent           Claimed or InProgress (Start does not
 \*                                         change who holds, so it is not modelled)
 \*   Open, pending[t]                      AwaitingVerification
 \*   Done, Cancelled                       the same names
+\*
+\* Why the shapes differ. [returned] partitions the open-unheld-unpending space
+\* in two, which is the same content as two states, so the model is faithful
+\* either way. The code does not get that choice. Written as a field on Todo,
+\* every [| Todo _ ->] arm written afterwards silently covers both, and the two
+\* do not behave alike: a Todo names nobody and only the operator may cancel it,
+\* while a Rejected Task names its producer, who may. Written as a constructor,
+\* no arm can lump them without the compiler asking. The model has no such
+\* readers, so it keeps the cheaper shape.
 
 EXTENDS Integers, FiniteSets
 

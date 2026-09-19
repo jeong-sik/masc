@@ -20,14 +20,17 @@ let usage =
 Deterministic offline checkpoint purge (RFC-0351 S1). Dry-run by default.
 
 Options:
-  --trace ID               trace/session id (directory under {base}/traces/)
-  --base DIR               masc base dir (default: MASC_BASE_PATH or cwd)
+  --trace ID               trace/session id in the selected cluster runtime root
+  --base DIR               workspace root (default: MASC_BASE_PATH or cwd)
   --apply                  back up, then write the purged checkpoint
   --keep-recent N          protected tail length in messages (default 20)
   --dup-threshold N        duplicate collapse threshold (default 3, >= 2)
   --no-strip-thinking      keep unsigned Thinking/ReasoningDetails blocks
   --no-clear-tool-results  keep ToolResult payloads
   -h, --help               print this help
+
+The runtime root is the selected cluster under {workspace}/.masc.
+MASC_CLUSTER_NAME selects the cluster. Backups are stored in its runtime root.
 
 --apply requires the keeper to be stopped (masc_keeper_down); a live keeper
 overwrites the purge on its next save.
@@ -147,7 +150,8 @@ let () =
      this the purge would answer with the shipped default and trim a history
      the operator asked to keep. *)
   Masc.Runtime_params.restore ~base_path;
-  let session_dir = Filename.concat (Filename.concat base_path "traces") trace in
+  let runtime_root = (Masc.Workspace.backend_config_for base_path).base_path in
+  let session_dir = Filename.concat (Filename.concat runtime_root "traces") trace in
   let checkpoint_path = Store.agent_core_checkpoint_path ~session_dir ~session_id:trace in
   if not (Sys.file_exists checkpoint_path)
   then error ("no canonical checkpoint at " ^ checkpoint_path);
@@ -192,7 +196,7 @@ let () =
        else (
          let backup_dir =
            Filename.concat
-             base_path
+             runtime_root
              (Printf.sprintf "backups-checkpoint-purge-%s-%s" trace (timestamp_utc ()))
          in
          (match Sys.is_directory backup_dir with

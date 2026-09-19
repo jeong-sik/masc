@@ -45,6 +45,15 @@ let runtime_resolution_json (rt : Runtime.t) : Yojson.Safe.t =
     ; "effective_max_context", `Int effective_max_context
     ; "max_context_source", `String (Runtime.max_context_source_to_string source)
     ; "max_output_tokens", int_opt_json (Runtime.max_output_tokens_of_runtime_id rt.id)
+      (* The effort a request on this runtime carries: the same resolver the
+         request path reads ([Runtime_inference.resolve_reasoning_effort]).
+         Bindings of one model that differ only in effort share provider,
+         model and context, so without it the picker draws them as identical
+         rows. [null] is an unset effort, not an unknown one. *)
+    ; ( "reasoning_effort"
+      , match Runtime.reasoning_effort_of_runtime_id rt.id with
+        | Some effort -> `String (Llm_provider.Reasoning_effort.to_string effort)
+        | None -> `Null )
     ; "is_local", `Bool (Runtime.is_local_runtime rt)
     ; "is_default", `Bool rt.binding.is_default
     ; "quota_exhausted", `Bool quota_exhausted

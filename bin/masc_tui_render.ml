@@ -11684,6 +11684,9 @@ let render_runtime_pick (state : state) =
   in
   let items = Masc_tui_types.runtime_picker_items state in
   let count = List.length items in
+  let target_width, route_width =
+    Masc_tui_types.runtime_pick_column_widths ~cols items
+  in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"runtime-pick"
     ~title:
       (Printf.sprintf "%s  %scurrent: %s%s"
@@ -11701,10 +11704,12 @@ let render_runtime_pick (state : state) =
             c.push (Ansi.dim ^ "  (loading runtime catalogue\xe2\x80\xa6)" ^ Ansi.reset);
             1
         | None ->
+            (* The kind badge is 7 cells ("[LANE] ", "[MODEL]"), so the
+               first header cell spans badge and target, as the rows do. *)
             let header =
               Printf.sprintf "  %s  %s  %s"
-                (fit_width "KIND   TARGET" 33)
-                (fit_width "CONFIGURED ROUTE / MODEL" (max 24 (cols - 62)))
+                (fit_width "KIND   TARGET" (7 + target_width))
+                (fit_width "CONFIGURED ROUTE / MODEL" route_width)
                 "PROPERTIES / FAILOVER"
             in
             c.push (Ansi.dim ^ header ^ Ansi.reset);
@@ -11723,7 +11728,9 @@ let render_runtime_pick (state : state) =
               match item with
               | Masc_tui_types.Pick_lane lane ->
                   let kind_badge = Ansi.cyan ^ "[LANE] " ^ Ansi.reset in
-                  let target = fit_width (Terminal_text.single_line lane.rrl_id) 24 in
+                  let target =
+                    fit_width (Terminal_text.single_line lane.rrl_id) target_width
+                  in
                   let chain =
                     String.concat " \xe2\x86\x92 "
                       (List.map
@@ -11734,28 +11741,39 @@ let render_runtime_pick (state : state) =
                          lane.rrl_runtime_ids)
                   in
                   let hops = Printf.sprintf "(%d hops)" (List.length lane.rrl_runtime_ids) in
-                  let route_col = fit_width (Terminal_text.single_line chain) (max 24 (cols - 62)) in
+                  let route_col =
+                    fit_width (Terminal_text.single_line chain) route_width
+                  in
                   Printf.sprintf "%s%s  %s  %s" kind_badge target route_col hops
               | Masc_tui_types.Pick_model option ->
                   let kind_badge = Ansi.dim ^ "[MODEL]" ^ Ansi.reset in
-                  let target = fit_width (Terminal_text.single_line option.ro_id) 24 in
+                  let target =
+                    fit_width (Terminal_text.single_line option.ro_id) target_width
+                  in
                   let model_desc =
                     fit_width
                       (Terminal_text.single_line
                          (option.ro_provider ^ " / " ^ option.ro_model))
-                      (max 24 (cols - 62))
+                      route_width
                   in
                   let ctx =
                     Printf.sprintf "[%s ctx]"
                       (format_context_tokens option.ro_effective_max_context)
+                  in
+                  let effort =
+                    match option.ro_reasoning_effort with
+                    | Some effort ->
+                      Printf.sprintf " [effort %s]"
+                        (Tui_decode.runtime_reasoning_effort_label effort)
+                    | None -> ""
                   in
                   let def = if option.ro_is_default then " [default]" else "" in
                   let quota =
                     if option.ro_quota_exhausted then " " ^ (Theme.warn ()) ^ "[quota exhausted]" ^ Ansi.reset
                     else ""
                   in
-                  Printf.sprintf "%s%s  %s  %s%s%s"
-                    kind_badge target model_desc ctx def quota
+                  Printf.sprintf "%s%s  %s  %s%s%s%s"
+                    kind_badge target model_desc ctx effort def quota
             in
             c.push
               (if idx = state.runtime_pick_cursor then

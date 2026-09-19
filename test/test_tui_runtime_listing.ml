@@ -5,7 +5,7 @@ let expect label wanted actual = Alcotest.(check int) label wanted actual
 let runtime id : Masc.Tui_decode.runtime_option =
   { ro_id = id; ro_provider = "provider"; ro_model = "model";
     ro_effective_max_context = 200000; ro_max_context_source = Runtime_context_capability;
-    ro_max_output_tokens = Some 8192; ro_is_local = false;
+    ro_max_output_tokens = Some 8192; ro_reasoning_effort = None; ro_is_local = false;
     ro_is_default = false;
     ro_quota_exhausted = false; ro_quota_resets_at = None; ro_quota_scope = None }
 
@@ -89,9 +89,31 @@ let test_search_follows_the_runtime_mode () =
   Alcotest.(check (option (list string))) "runtime detail has no list cursor" None
     (surface_row_texts state Runtime)
 
+(* Bindings of one model that differ only in reasoning effort share provider,
+   model and context, so their ids are the only text that tells them apart.
+   At a fixed 24-cell target column both ids below drew as
+   [claude_code.claude-sonn…]. *)
+let test_picker_target_column_fits_the_longest_id () =
+  let effort_pair =
+    [ Pick_model { (runtime "claude_code.claude-sonnet-5-low") with ro_model = "claude-sonnet-5" }
+    ; Pick_model { (runtime "claude_code.claude-sonnet-5-high") with ro_model = "claude-sonnet-5" }
+    ]
+  in
+  let longest = String.length "claude_code.claude-sonnet-5-high" in
+  let target, route = runtime_pick_column_widths ~cols:200 effort_pair in
+  expect "wide terminal: the target column holds the longest id" longest target;
+  expect "wide terminal: the route column gives up the room" (24 + (200 - 62)) (target + route);
+  let target, route = runtime_pick_column_widths ~cols:80 effort_pair in
+  expect "narrow terminal: target keeps its floor" runtime_pick_min_column_cells target;
+  expect "narrow terminal: route keeps its floor" runtime_pick_min_column_cells route;
+  let target, _ = runtime_pick_column_widths ~cols:200 [ Pick_model (runtime "short") ] in
+  expect "short ids keep the floor" runtime_pick_min_column_cells target
+
 let () = Alcotest.run "runtime list geometry"
   ["operator states", [
       Alcotest.test_case "picker and failures reserve footer space" `Quick test_picker_and_refusal_keep_footer_space;
       Alcotest.test_case "empty picker explanation" `Quick test_empty_picker_keeps_its_explanation;
       Alcotest.test_case "CLI probe is informational" `Quick test_cli_probe_is_a_note;
-      Alcotest.test_case "search follows Runtime mode and cursor order" `Quick test_search_follows_the_runtime_mode]]
+      Alcotest.test_case "search follows Runtime mode and cursor order" `Quick test_search_follows_the_runtime_mode;
+      Alcotest.test_case "picker target column fits the longest id" `Quick
+        test_picker_target_column_fits_the_longest_id]]

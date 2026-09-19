@@ -34,11 +34,13 @@
     - A reader orders the [Atom_history] lines of one trace by [end_atom], not
       by their position in the file: a position is a value, and a value does
       not depend on when a line reached the file. Turns of one keeper do not
-      overlap -- the Keeper Owner runs one child turn at a time
+      overlap -- the Keeper Owner runs one child turn at a time and holds that
+      slot until the whole child returns, so the append is inside it
       ({!Keeper_owner}) -- and the reader rules of RFC §4.4 rely on that.
       [masc_keeper_clear] is not a turn and can append its line while a turn
-      runs. [turn_ref] is not a key: the turn number is read from the keeper's
-      meta when the turn starts, and nothing here makes it unique in the file.
+      runs. [turn_ref] is not a key either: the turn number is read from the
+      keeper's meta when the turn starts, and a trace rotation changes the
+      trace while that count keeps running.
     - Two lines say that the atoms of a trace are numbered from zero again: a
       [Turn_ended] line with [Fresh_history], and a [History_empty] line.
       A [Turn_ended] line and a clear's [History_empty] line are written
@@ -67,7 +69,19 @@
       original (masc #37018). If the message that opens the last atom carried
       that json, the digest describes bytes that were not stored. Rare.
 
-    The file is never rewritten or trimmed by this module. *)
+    The file is never rewritten or trimmed -- not by this module and not by
+    anything else. The one thing that removes it removes it whole: the keeper
+    purge, whose artifact list is fixed in code and not chosen per run
+    ({!Keeper_shutdown_types.dashboard_purge_artifact_plan}). So line [n] of this
+    file is line [n] for as long as the file exists, and a reader that counts
+    lines is counting something that does not shift under it.
+
+    That is the trade this file makes, so the size is worth stating. One line
+    per finished turn, 266 bytes for a line whose digest is a sha256; the live
+    fleet ran 61 turns per keeper per day over 2026-09-18..19, which is 5.9 MB
+    per keeper per year. If that ever has to be bounded, the bound cannot be a
+    trim -- it has to drop the whole file, the way the purge does, together
+    with whatever reads it. *)
 
 type position =
   | Atom_history of

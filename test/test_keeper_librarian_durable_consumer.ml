@@ -663,6 +663,122 @@ let test_restart_cut_never_commits_a_current_unfinished_turn () =
   check int "one further Memory commit" 3 (snapshot ()).revision
 ;;
 
+(* Establish real durable progress in a shorter restarted history. Setup uses
+   the commit result seam; checkpoint access below is the production store path. *)
+let with_consumed_shorter_history f =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-preflight-restarted" in
+  let old = List.map message ["old first"; "old middle"; "old end"] in
+  write_meta config trace_id;
+  save_checkpoint config ~trace_id old 1;
+  append_boundary config ~trace_id ~turn:1 ~recorded_at:1. old;
+  (match consume config (fun ~expected_revision:_ _ -> true) with
+   | Consumer.Progress_advanced _ -> () | _ -> fail "old history was not consumed");
+  save_checkpoint config ~trace_id [] 2;
+  let current = [message "current"] in
+  save_checkpoint config ~trace_id current 3;
+  let position = match Boundaries.position_of_messages current with
+    | Ok position -> position | Error detail -> fail detail in
+  (match Boundaries.append ~keepers_dir:(Workspace.keepers_runtime_dir config)
+      ~keeper_id:keeper_name
+      { recorded_at = 3.; event = Boundaries.Turn_ended
+          { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:2;
+            history_at_start = Boundaries.Fresh_history; position } } with
+   | Ok () -> () | Error error -> fail (Boundaries.append_error_to_string error));
+  (match consume config (fun ~expected_revision:_ _ -> true) with
+   | Consumer.Progress_advanced progress ->
+     check int "shorter current history consumed" 1 progress.position.end_atom;
+     check int "both boundary lines seen" 2 progress.boundary_lines_seen
+   | _ -> fail "current history was not consumed");
+  let session_dir = Masc.Keeper_fs.keeper_session_dir config trace_id in
+  let checkpoint_path = Store.agent_core_checkpoint_path ~session_dir ~session_id:trace_id in
+  f config trace_id current session_dir checkpoint_path
+;;
+
+type checkpoint_fault = Missing_checkpoint | Corrupt_checkpoint
+
+let damage_checkpoint fault ~session_dir ~trace_id checkpoint_path =
+  (match fault with
+   | Missing_checkpoint -> Sys.remove checkpoint_path
+   | Corrupt_checkpoint ->
+     (match Fs_compat.save_file_atomic checkpoint_path "{" with
+      | Ok () -> () | Error detail -> fail detail));
+  (* Positive control: loading this very file through the real store fails.
+     A quiet consumer tick must stop before that loader, not hide its error. *)
+  match fault, Store.load_agent_core ~session_dir ~session_id:trace_id with
+  | Missing_checkpoint, Error Store.Not_found
+  | Corrupt_checkpoint, Error (Store.Parse_error _) -> ()
+  | _, Error error -> fail (Store.checkpoint_load_error_to_string error)
+  | _, Ok _ -> fail "damaged checkpoint unexpectedly loaded"
+;;
+
+let test_seen_restart_skips_checkpoint fault () =
+  with_consumed_shorter_history @@ fun config trace_id _current session_dir path ->
+  damage_checkpoint fault ~session_dir ~trace_id path;
+  let progress_path = Progress.path_for_keepers_dir
+      ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name in
+  let before = Fs_compat.load_file progress_path in
+  List.iter (fun _tick ->
+      (match Consumer.consume_one ~config ~keeper_name
+          ~commit:(fun ~expected_revision:_ _ -> fail "quiet tick called commit") with
+       | Ok Consumer.Nothing_to_read -> ()
+       | Ok _ -> fail "quiet tick changed progress"
+       | Error error -> fail (Consumer.error_to_string error));
+      check string "quiet tick preserves actual progress bytes" before
+        (Fs_compat.load_file progress_path)) [1; 2; 3]
+;;
+
+let test_new_completed_cut_still_reads_checkpoint () =
+  with_consumed_shorter_history @@ fun config trace_id current session_dir path ->
+  damage_checkpoint Corrupt_checkpoint ~session_dir ~trace_id path;
+  append_boundary config ~trace_id ~turn:3 ~recorded_at:4.
+    (current @ [message "next completed"]);
+  match Consumer.consume_one ~config ~keeper_name
+      ~commit:(fun ~expected_revision:_ _ -> fail "corrupt checkpoint called commit") with
+  | Error (Consumer.Checkpoint_unreadable (Store.Parse_error _)) -> ()
+  | Error error -> fail (Consumer.error_to_string error)
+  | Ok _ -> fail "new completed cut skipped checkpoint validation"
+;;
+
+let test_unseen_restart_still_reads_checkpoint () =
+  with_consumed_shorter_history @@ fun config trace_id _current session_dir path ->
+  damage_checkpoint Corrupt_checkpoint ~session_dir ~trace_id path;
+  (match Boundaries.append ~keepers_dir:(Workspace.keepers_runtime_dir config)
+      ~keeper_id:keeper_name
+      { recorded_at = 4.; event = Boundaries.History_restarted { trace_id } } with
+   | Ok () -> () | Error error -> fail (Boundaries.append_error_to_string error));
+  match Consumer.consume_one ~config ~keeper_name
+      ~commit:(fun ~expected_revision:_ _ -> fail "unreadable restart called commit") with
+  | Error (Consumer.Checkpoint_unreadable (Store.Parse_error _)) -> ()
+  | Error error -> fail (Consumer.error_to_string error)
+  | Ok _ -> fail "unseen restart skipped checkpoint validation"
+;;
+
+let test_trace_change_still_reads_its_own_checkpoint () =
+  with_consumed_shorter_history @@ fun config _trace_id _current _session_dir _path ->
+  write_meta config "trace-preflight-new";
+  match Consumer.consume_one ~config ~keeper_name
+      ~commit:(fun ~expected_revision:_ _ -> fail "missing trace checkpoint called commit") with
+  | Error (Consumer.Checkpoint_unreadable Store.Not_found) -> ()
+  | Error error -> fail (Consumer.error_to_string error)
+  | Ok _ -> fail "trace change skipped its own checkpoint validation"
+;;
+
+let test_new_unreadable_boundary_is_not_hidden_by_preflight () =
+  with_consumed_shorter_history @@ fun config _trace_id _current _session_dir _path ->
+  let path = Boundaries.path_for_keepers_dir
+      ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name in
+  let oc = open_out_gen [Open_wronly; Open_append; Open_binary] 0o600 path in
+  Fun.protect ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc "{\n");
+  match Consumer.consume_one ~config ~keeper_name
+      ~commit:(fun ~expected_revision:_ _ -> fail "unreadable boundary called commit") with
+  | Error (Consumer.Range_stopped (Masc.Keeper_librarian_range.Unreadable_line
+      { line = 3; error = Boundaries.Not_json _ })) -> ()
+  | Error error -> fail (Consumer.error_to_string error)
+  | Ok _ -> fail "new unreadable boundary was hidden as a quiet tick"
+;;
+
 let () =
   run
     "Keeper Librarian durable consumer"
@@ -691,6 +807,18 @@ let () =
             test_counterpart_range_includes_upper_boundary_once
         ; test_case "restart cut excludes current unfinished turn" `Quick
             test_restart_cut_never_commits_a_current_unfinished_turn
+        ; test_case "seen restart skips absent checkpoint" `Quick
+            (test_seen_restart_skips_checkpoint Missing_checkpoint)
+        ; test_case "seen restart skips corrupt checkpoint" `Quick
+            (test_seen_restart_skips_checkpoint Corrupt_checkpoint)
+        ; test_case "new completed cut reads checkpoint" `Quick
+            test_new_completed_cut_still_reads_checkpoint
+        ; test_case "unseen restart reads checkpoint" `Quick
+            test_unseen_restart_still_reads_checkpoint
+        ; test_case "trace change reads its own checkpoint" `Quick
+            test_trace_change_still_reads_its_own_checkpoint
+        ; test_case "new unreadable boundary remains visible" `Quick
+            test_new_unreadable_boundary_is_not_hidden_by_preflight
         ] )
     ]
 ;;

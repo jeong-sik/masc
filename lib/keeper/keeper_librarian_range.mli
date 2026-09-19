@@ -81,9 +81,11 @@ val may_have_unread :
 (** Cheap conservative check before loading the checkpoint. [trace_id] is the
     current metadata trace; a cursor from another trace always returns [true]
     so the full selector can report the mismatch. [false] proves
-    that the append-only boundary snapshot contains no position beyond the
-    durable cursor. A changed row count, later restart, or later atom position
-    returns [true]; the full selector still validates checkpoint digests. *)
+    that the current restart segment contains no position beyond the durable
+    cursor. Segment selection is shared with {!select}; already-seen restarts
+    still exclude earlier histories. A changed whole-log row count, later
+    restart, or later current-segment atom position returns [true]; the full
+    selector still validates unreadable lines and checkpoint digests. *)
 
 (** [lines] is {!Keeper_turn_boundaries.read}'s answer. [messages] are the
     messages of the checkpoint of [trace_id], loaded after [lines] were read.

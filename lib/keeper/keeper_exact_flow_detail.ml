@@ -206,3 +206,25 @@ let candidates_exhausted_detail ~rejection ~evidence =
     (candidate_rejection_detail rejection)
     (flow_evidence_detail evidence)
 ;;
+
+(* One line for a terminal flow error. The static labels stay as prefixes so
+   log greps keep working; the payload a branch carries (failing slot, typed
+   cause, raw provider body, flow journey) follows the label instead of being
+   dropped. The callback arms read "unexpected" because every caller that
+   renders through here passes callbacks that cannot fail; a lane whose
+   callbacks can fail maps those arms to its own errors first. *)
+let flow_execution_error_detail : _ Exact_output.flow_execution_error -> string =
+  function
+  | Flow_attempt_already_started _ -> "attempt_already_started"
+  | Flow_attempt_start_failed _ -> "attempt_start_failed"
+  | Flow_measurement_start_failed _ -> "measurement_start_failed"
+  | Flow_candidates_exhausted { rejection; evidence } ->
+    "candidates_exhausted: " ^ candidates_exhausted_detail ~rejection ~evidence
+  | Flow_before_measurement_dispatch_callback_failed _
+  | Flow_measurement_terminal_callback_failed _
+  | Flow_before_dispatch_callback_failed _
+  | Flow_before_advance_callback_failed _ -> "unexpected_callback_failure"
+  | Flow_exact_execution_failed { candidate; cause; evidence } ->
+    "agent_core_execution_failed: "
+    ^ execution_failure_detail ~candidate ~cause ~evidence
+;;

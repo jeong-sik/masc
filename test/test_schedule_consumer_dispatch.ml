@@ -2264,7 +2264,7 @@ let test_interval_wake_retries_activation_before_holding_the_next_occurrence () 
          [ occurrence_id ] (pending_ids ()))
 ;;
 
-let test_interval_wake_retries_acceptance_commit () =
+let test_interval_wake_retries_acceptance_commit ~complete_before_retry () =
   with_workspace
   @@ fun config ->
   let keeper_name = "schedule-keeper" in
@@ -2286,12 +2286,29 @@ let test_interval_wake_retries_acceptance_commit () =
     ((List.hd first.dispatches).status = Schedule_runner.Dispatch_failed);
   check int "queue was durably enqueued before acceptance failed" 1
     (Keeper_registry_event_queue.snapshot ~base_path keeper_name |> Keeper_event_queue.length);
+  if complete_before_retry then (
+    let selection = pending_selection_exn ~base_path ~keeper_name in
+    match Keeper_registry_event_queue.terminalize_pending_turn_completed_result
+        ~base_path keeper_name ~applied_at:201.5 ~selection with
+    | Ok (Keeper_registry_event_queue.Acked _)
+    | Ok (Keeper_registry_event_queue.Already_acked _) -> ()
+    | Ok (Keeper_registry_event_queue.Ack_committed_followup_failed { detail; _ })
+    | Error detail -> fail detail);
   let repaired = tick_ok config ~now:202.0 in
   check bool "the next tick commits acceptance" true
     ((List.hd repaired.dispatches).status = Schedule_runner.Dispatch_succeeded);
   check string "repair uses the original occurrence" occurrence_id
     (Schedule_occurrence_id.to_string (List.hd repaired.dispatches).occurrence_id);
   check int "repair emits no duplicate signal" 0 (List.length repaired.emitted);
+  check int "repair preserves pending or completed queue disposition"
+    (if complete_before_retry then 0 else 1)
+    (Keeper_registry_event_queue.snapshot ~base_path keeper_name |> Keeper_event_queue.length);
+  if complete_before_retry then (
+    match (List.hd repaired.dispatches).detail with
+    | Some detail -> check string "repair recognizes the completed occurrence"
+        "already_acked"
+        Yojson.Safe.Util.(detail |> member "occurrence_status" |> to_string)
+    | None -> fail "completed occurrence repair has no receipt");
   (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
    | Some stored -> check bool "repaired schedule has advanced" true
        (stored.status = Schedule_domain.Scheduled)
@@ -3118,7 +3135,9 @@ let () =
         ; test_case "interval wake retries activation before holding the next occurrence"
             `Quick test_interval_wake_retries_activation_before_holding_the_next_occurrence
         ; test_case "interval wake retries acceptance commit"
-            `Quick test_interval_wake_retries_acceptance_commit
+            `Quick (test_interval_wake_retries_acceptance_commit ~complete_before_retry:false)
+        ; test_case "completed interval wake retries acceptance without enqueue"
+            `Quick (test_interval_wake_retries_acceptance_commit ~complete_before_retry:true)
         ; test_case "due wake bypasses proactive policy" `Quick
             test_due_schedule_wakes_live_keeper_with_proactive_disabled
         ; test_case "keeper wake queue evidence rejects stale occurrence" `Quick

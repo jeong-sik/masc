@@ -1523,14 +1523,14 @@ let run_named
 	  (* Lane-aware dispatch: resolve a runtime id or ordered failover lane, then
 	     attempt candidates sequentially with manifest evidence per attempt. *)
 	  let runtime_id = String.trim runtime_id in
-	  (* A front halved after a refusal is a position in this history, so it
+	  (* A front moved after a refusal is a position in this history, so it
 	     holds for every Agent Core candidate of this turn. Kept here, at the
 	     turn, because the lane walks candidates one by one: held inside a
 	     candidate's own run it was lost at the walk's next step, and the
 	     next candidate composed the whole history again (2026-09-18:
 	     pr-updater shrank 16 MB to 3.7 MB on one candidate and sent 16 MB
 	     to the next). *)
-	  let halved_carried_front = ref None in
+	  let refused_carried_front = ref None in
 	  (* Audit F8: removed dead routing knobs from the signature so callers cannot
 	     pass values that would be silently ignored. *)
   let routing_run_id = Random_id.hex ~bytes:16 in
@@ -2344,14 +2344,11 @@ let run_named
                  history. *)
               carried_front_seed =
                 (fun () ->
-                   match !halved_carried_front with
-                   | Some seed ->
-                     { Keeper_carried_front.seed = Some seed; unreadable = None }
-                   | None ->
-                     (match carried_front_seed with
-                      | Some read -> read ()
-                      | None -> Keeper_carried_front.no_seed_read))
-            ; hold_carried_front = (fun seed -> halved_carried_front := Some seed)
+                   match carried_front_seed with
+                   | Some read -> read ()
+                   | None -> Keeper_carried_front.no_seed_read)
+            ; carried_front_after_refusal = (fun () -> !refused_carried_front)
+            ; hold_carried_front = (fun seed -> refused_carried_front := Some seed)
             ; base_path
             ; keeper_name
             ; name

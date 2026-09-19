@@ -1179,7 +1179,7 @@ let test_a_verifier_slot_naming_a_lane_is_refused () =
       ~names:[ {|[runtime.exact_output_lanes.verifier_exact].slots entry "judge"|} ]
       (fun () ->
          Runtime.set_exact_output_lane_slots ~runtime_config_path:path
-           ~lane_name:"verifier_exact" ~slots:[ "judge" ] ()))
+           ~lane:Runtime.Verifier ~slots:[ "judge" ] ()))
 ;;
 
 let test_lane_candidates_create_the_lane_table () =
@@ -1251,7 +1251,7 @@ let test_exact_lane_slots_writer () =
     (match
        Runtime.set_exact_output_lane_slots
          ~runtime_config_path:path
-         ~lane_name:"verifier_exact"
+         ~lane:Runtime.Verifier
          ~slots:[ "openai.gpt"; "runpod_mtp.qwen" ]
          ()
      with
@@ -1276,7 +1276,7 @@ let test_exact_lane_slots_writer () =
     match
       Runtime.set_exact_output_lane_slots
         ~runtime_config_path:path
-        ~lane_name:"verifier_exact"
+        ~lane:Runtime.Verifier
         ~slots:[]
         ()
     with
@@ -1286,6 +1286,91 @@ let test_exact_lane_slots_writer () =
         "the refusal names the empty-slot rule"
         true
         (string_contains msg "at least one slot"))
+;;
+
+(* The slots the file declares for an exact lane, read by the parser the
+   server loads it with. *)
+let exact_lane_slots path lane =
+  match Runtime_toml.parse_string (Fs_compat.load_file path) with
+  | Error _ -> Alcotest.failf "the written %s does not parse" path
+  | Ok config ->
+    (match
+       List.find_opt
+         (fun (decl : Runtime_schema.exact_output_lane_decl) -> String.equal decl.id lane)
+         config.Runtime_schema.exact_output_lane_decls
+     with
+     | Some decl -> decl.slot_ids
+     | None -> Alcotest.failf "the file declares no exact lane %s" lane)
+;;
+
+(* An exact lane lists only the slots the registry admitted, so a pick that
+   rewrote the whole order from that list deleted every declared slot the
+   registry dropped. [append] reads the declaration under the write lock and
+   adds to its end. *)
+let test_an_exact_slot_append_keeps_the_declared_order () =
+  with_runtime_file (fun path ->
+    Runtime.set_exact_output_lane_slots ~runtime_config_path:path
+      ~lane:Runtime.Board_attention ~slots:[ "catalog.only"; "openai.gpt" ] ()
+    |> lane_write_ok "declare the lane";
+    Runtime.append_exact_output_lane_slot ~runtime_config_path:path
+      ~lane:Runtime.Board_attention ~slot:"runpod_mtp.qwen" ()
+    |> lane_write_ok "append a slot";
+    Alcotest.(check (list string)) "the declared slots stay in front, in order"
+      [ "catalog.only"; "openai.gpt"; "runpod_mtp.qwen" ]
+      (exact_lane_slots path "board_attention_exact");
+    lane_write_refused "append a declared slot" ~path
+      ~names:[ "runpod_mtp.qwen is already a slot of board_attention_exact" ]
+      (fun () ->
+         Runtime.append_exact_output_lane_slot ~runtime_config_path:path
+           ~lane:Runtime.Board_attention ~slot:"runpod_mtp.qwen" ());
+    Runtime.append_exact_output_lane_slot ~runtime_config_path:path
+      ~lane:Runtime.Hitl_auto_judge ~slot:"openai.gpt" ()
+    |> lane_write_ok "append to an undeclared lane";
+    Alcotest.(check (list string)) "an undeclared lane starts with the slot"
+      [ "openai.gpt" ] (exact_lane_slots path "hitl_auto_judge"))
+;;
+
+(* A CLI slot is declared on the lane too. The registry refuses the same id as
+   a slot and a CLI slot only as a lane it cannot publish -- and before it is
+   published the file is written anyway -- so append and set name the
+   duplicate themselves. *)
+let test_an_exact_append_refuses_a_declared_cli_slot () =
+  with_runtime_file (fun path ->
+    write_file path
+      (String.trim runtime_config
+       ^ "\n\n[runtime.exact_output_lanes.board_attention_exact]\n\
+          slots = [\"catalog.only\"]\ncli_slots = [\"openai.gpt\"]\n");
+    lane_write_refused "append a declared CLI slot" ~path
+      ~names:[ "openai.gpt is already a CLI slot of board_attention_exact" ]
+      (fun () ->
+         Runtime.append_exact_output_lane_slot ~runtime_config_path:path
+           ~lane:Runtime.Board_attention ~slot:"openai.gpt" ());
+    lane_write_refused "set a declared CLI slot" ~path
+      ~names:[ "openai.gpt is already a CLI slot of board_attention_exact" ]
+      (fun () ->
+         Runtime.set_exact_output_lane_slots ~runtime_config_path:path
+           ~lane:Runtime.Board_attention ~slots:[ "catalog.only"; "openai.gpt" ] ()))
+;;
+
+(* The editor writes an exact lane as its own table. A lane declared inline has
+   no header to write under, and a second table would declare it twice and fail
+   the file, so both writers refuse it. *)
+let test_an_inline_exact_lane_is_refused () =
+  with_runtime_file (fun path ->
+    write_file path
+      (String.trim runtime_config
+       ^ "\n\n[runtime.exact_output_lanes]\n\
+          board_attention_exact = { slots = [\"catalog.only\"] }");
+    lane_write_refused "append to an inline lane" ~path
+      ~names:[ "board_attention_exact is not written as its own" ]
+      (fun () ->
+         Runtime.append_exact_output_lane_slot ~runtime_config_path:path
+           ~lane:Runtime.Board_attention ~slot:"openai.gpt" ());
+    lane_write_refused "set an inline lane" ~path
+      ~names:[ "board_attention_exact is not written as its own" ]
+      (fun () ->
+         Runtime.set_exact_output_lane_slots ~runtime_config_path:path
+           ~lane:Runtime.Board_attention ~slots:[ "openai.gpt" ] ()))
 ;;
 
 let test_lane_candidates_reject_an_empty_ladder () =
@@ -2790,6 +2875,24 @@ let candidates_of lanes name =
   | Some lane -> Runtime_lane.ordered_candidates lane
 ;;
 
+(* [cli_slots] of verifier_exact go through the same direct-runtime admission
+   as its slots, and one unknown id fails the whole lane at every judgement,
+   so the load refuses a CLI slot that names a lane rather than a runtime. *)
+let test_a_verifier_cli_slot_naming_a_lane_is_refused () =
+  let config =
+    String.trim runtime_config
+    ^ "\n\n[runtime.lanes.judge]\ncandidates = [\"openai.gpt\"]\n\
+       \n[runtime.exact_output_lanes.verifier_exact]\n\
+       slots = [\"openai.gpt\"]\ncli_slots = [\"judge\"]\n"
+  in
+  match load_lane_config config with
+  | Ok _ -> Alcotest.fail "a verifier CLI slot naming a lane loaded"
+  | Error msg ->
+    let needle = {|[runtime.exact_output_lanes.verifier_exact].cli_slots entry "judge"|} in
+    if not (string_contains msg needle)
+    then Alcotest.failf "the refusal %S does not name %S" msg needle
+;;
+
 let test_an_assignment_names_a_lane_of_its_own_name () =
   match load_lane_config runtime_config_lane_named_freely with
   | Error msg -> Alcotest.failf "a freely named lane must load: %s" msg
@@ -3078,6 +3181,22 @@ let () =
             "a verifier slot naming a lane is refused"
             `Quick
             test_a_verifier_slot_naming_a_lane_is_refused
+        ; Alcotest.test_case
+            "an exact slot append keeps the declared order"
+            `Quick
+            test_an_exact_slot_append_keeps_the_declared_order
+        ; Alcotest.test_case
+            "an exact append or set refuses a declared CLI slot"
+            `Quick
+            test_an_exact_append_refuses_a_declared_cli_slot
+        ; Alcotest.test_case
+            "an inline exact lane is refused"
+            `Quick
+            test_an_inline_exact_lane_is_refused
+        ; Alcotest.test_case
+            "a verifier CLI slot naming a lane is refused"
+            `Quick
+            test_a_verifier_cli_slot_naming_a_lane_is_refused
         ; Alcotest.test_case
             "a second write replaces the ladder"
             `Quick

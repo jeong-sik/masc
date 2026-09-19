@@ -1514,24 +1514,29 @@ type runtime_lane_write =
          list launched after it is the first to carry the write. *)
 
 (* What the lane editor says about its last key or write. Both the Runtime
-   and the Lanes view draw it. *)
+   and the Lanes view draw it, and a new view, a moved cursor or a newly
+   opened field ends it. *)
 type runtime_lane_notice =
   | Lane_write_refused of string
       (* The server's sentence, or the editor's own for a key it did not
          send. *)
   | Lane_write_pending
       (* A key that would write, pressed while the previous write is out. *)
-  | Lane_list_unread of string
-      (* The re-read after a write failed; the list on screen is the one
-         from before the write. *)
 
 let runtime_lane_notice_text = function
   | Lane_write_refused detail -> "lane write refused: " ^ detail
   | Lane_write_pending ->
     "lane write refused: the previous lane change is still being written; \
      press again once the list reloads"
-  | Lane_list_unread detail ->
-    "the lane list could not be re-read after the change and may be stale: " ^ detail
+
+(* Whether a list on screen carries the last lane write. It is not about a
+   key, so it is kept apart from the notice: only a load of that list sets it.
+   The awaited re-read failing leaves the order from before the write on
+   screen, and the next load of the list that comes back ends it. No key and
+   no dismissal reaches it. *)
+type runtime_lane_list_freshness =
+  | Lane_list_read
+  | Lane_list_unread of string
 
 (** Stable identity of the Runtime row opened for detail. The cursor is only a
     position and can move to another runtime after refresh; detail stays bound
@@ -2483,9 +2488,10 @@ let listing_chrome ~error = if Option.is_some error then 9 else 7
 let lanes_listing_chrome ~load_error ~action_error =
   listing_chrome ~error:load_error + if Option.is_some action_error then 2 else 0
 
-let runtime_listing_chrome ~error ~action_error ~prompt ~picker_rows =
+let runtime_listing_chrome ?(stale_rows = 0) ~error ~action_error ~prompt ~picker_rows () =
   listing_chrome ~error + 2
   + (if Option.is_some action_error then 2 else 0)
+  + (if stale_rows > 0 then stale_rows + 1 else 0)
   + (if prompt then 2 else 0)
   + (match picker_rows with None -> 0 | Some count -> 2 + max 1 count)
 
@@ -5274,6 +5280,9 @@ type state = {
   mutable runtime_lane_pick: runtime_lane_pick option;
   mutable runtime_lane_pick_cursor: int;
   mutable runtime_lane_notice: runtime_lane_notice option;
+  (* Per list: whether it was read back after the last lane write. *)
+  mutable runtime_surface_lane_freshness: runtime_lane_list_freshness;
+  mutable standalone_lanes_lane_freshness: runtime_lane_list_freshness;
   (* The name typed for a new lane, before its first candidate is picked. *)
   mutable runtime_lane_name_draft: string option;
   (* The lane a second [D] removes. Captured at the first press and dropped
@@ -6936,6 +6945,8 @@ let create_state
   runtime_lane_pick = None;
   runtime_lane_pick_cursor = 0;
   runtime_lane_notice = None;
+  runtime_surface_lane_freshness = Lane_list_read;
+  standalone_lanes_lane_freshness = Lane_list_read;
   runtime_lane_name_draft = None;
   runtime_lane_remove_armed = None;
   runtime_lane_cursor_after_write = None;
@@ -7691,6 +7702,30 @@ let standalone_lanes_chrome ~row_count ~error ~truncated =
   2 + evidence_rows + stale_error_row + (if truncated then 1 else 0)
 ;;
 
+let dismiss_runtime_lane_notice (state : state) = state.runtime_lane_notice <- None
+
+let set_runtime_lane_list_freshness (state : state) list freshness =
+  match list with
+  | Runtime_surface_list -> state.runtime_surface_lane_freshness <- freshness
+  | Standalone_lanes_list -> state.standalone_lanes_lane_freshness <- freshness
+
+(* The lines saying a list may be stale, one per list whose read-back failed.
+   Both views draw them under the notice. *)
+let runtime_lane_stale_lines (state : state) =
+  let line name = function
+    | Lane_list_read -> None
+    | Lane_list_unread detail ->
+      Some
+        (Printf.sprintf
+           "the %s could not be re-read after the change and may be stale: %s"
+           name
+           detail)
+  in
+  List.filter_map Fun.id
+    [ line "lane list" state.runtime_surface_lane_freshness
+    ; line "standalone lane list" state.standalone_lanes_lane_freshness
+    ]
+
 let lanes_scrolled (state : state) =
   match state.lanes_mode with
   | Lanes_run_list _ ->
@@ -7727,6 +7762,7 @@ let lanes_scrolled (state : state) =
            | Some snapshot -> snapshot.sls_exact_run_projection_truncated)
       + (if Option.is_some state.lanes_action_error then 1 else 0)
       + (if Option.is_some state.runtime_lane_notice then 1 else 0)
+      + List.length (runtime_lane_stale_lines state)
   ; sc_overflow_takes_row = true
   ; sc_preview_keep = None
   }
@@ -8149,9 +8185,13 @@ let swap_candidates order i j =
     Some (List.mapi (fun k id -> if k = i then at_j else if k = j then at_i else id) order)
 
 (* The picker serves both lane kinds. A conversation lane reads its current
-   order from the runtime surface's resolved lanes; an exact-output lane reads
-   its walk order from the standalone-lane observation, which carries the
-   admitted slots. A lane being created has no candidates yet. *)
+   order from the runtime surface's resolved lanes, and a pick writes that
+   order back with the new candidate on the end. An exact-output lane's ids
+   are every one the standalone-lane observation names -- admitted slots, CLI
+   slots and the declared slots the registry dropped. The picker ranks those
+   last, and picking one is refused before anything is sent. The pick itself
+   is an append the server applies to the declared order, never a write of
+   this list. A lane being created has no candidates yet. *)
 let lane_picker_existing_slots (state : state) = function
   | Pick_exact_lane name ->
     (match state.standalone_lanes with
@@ -8160,7 +8200,9 @@ let lane_picker_existing_slots (state : state) = function
          snapshot.Tui_decode.sls_lanes
          |> List.find_opt (fun (row : Tui_decode.standalone_lane) ->
               String.equal row.Tui_decode.sl_lane_id name)
-         |> Option.map (fun row -> row.Tui_decode.sl_admitted_slots)
+         |> Option.map (fun row ->
+              row.Tui_decode.sl_admitted_slots @ row.Tui_decode.sl_cli_slots
+              @ row.Tui_decode.sl_dropped_slots)
          |> Option.value ~default:[])
   | Pick_conversation_lane lane -> conversation_lane_candidates state lane
   | Pick_new_lane _ -> []
@@ -8219,18 +8261,23 @@ let settle_runtime_lane_write (state : state) ~written = function
     state.runtime_lane_notice <- Some (Lane_write_refused detail);
     state.runtime_lane_write <- Lane_write_idle
 
-(* A load of [list] with [generation] landed. When it is the re-read a write
-   waits for, lane edits open again: with the "still being written" line
-   cleared if the list came back, or with a line saying it did not. *)
+(* A load of [list] with [generation] landed. Any load of it that comes back
+   ends the line saying it may be stale. When it is the re-read a write waits
+   for, lane edits open again, and a failed one leaves that line. *)
 let runtime_lane_list_reread (state : state) ~list ~generation result =
+  (match result with
+   | Ok () -> set_runtime_lane_list_freshness state list Lane_list_read
+   | Error _ -> ());
   match state.runtime_lane_write with
   | Lane_write_rereading (written, answered_at)
     when same_runtime_lane_list written list && generation > answered_at ->
     state.runtime_lane_write <- Lane_write_idle;
-    (match result, state.runtime_lane_notice with
-     | Error detail, _ -> state.runtime_lane_notice <- Some (Lane_list_unread detail)
-     | Ok (), Some Lane_write_pending -> state.runtime_lane_notice <- None
-     | Ok (), (Some (Lane_write_refused _ | Lane_list_unread _) | None) -> ())
+    (match result with
+     | Error detail -> set_runtime_lane_list_freshness state list (Lane_list_unread detail)
+     | Ok () -> ());
+    (match state.runtime_lane_notice with
+     | Some Lane_write_pending -> state.runtime_lane_notice <- None
+     | Some (Lane_write_refused _) | None -> ())
   | Lane_write_rereading _ | Lane_write_posting | Lane_write_idle -> ()
 
 type runtime_lane_write_request =
@@ -8285,6 +8332,10 @@ let plan_runtime_lane_edit (state : state) = function
             (Write_lane_order
                (List.filter (fun id -> not (String.equal id runtime_id)) order))
             ~cursor_after
+        | Move_candidate _ when runtime_lane_write_busy state ->
+          (* The order on screen is the one before the write that is out, so
+             it cannot say where the candidate stands now. *)
+          Refuse_lane_edit Lane_write_pending
         | Move_candidate move ->
           let by, edge =
             match move with
@@ -8326,9 +8377,11 @@ let runtime_pick_item_id = function
 let runtime_surface_listing_chrome state =
   runtime_listing_chrome ~error:state.runtime_surface_error
     ~action_error:state.runtime_lane_notice
+    ~stale_rows:(List.length (runtime_lane_stale_lines state))
     ~prompt:(Option.is_some (runtime_lane_prompt state))
     ~picker_rows:(Option.map (fun picker -> List.length picker.rlp_choices)
       (runtime_picker_projection state))
+    ()
 
 let scrolled_surface_rows (state : state) : surface -> scrolled option =
   let listing ~error count =

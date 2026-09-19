@@ -125,6 +125,15 @@ type boot_refusal =
   | Network_refused of string
   | Constraints_refused of Microvm.constraint_refusal list
 
+(* The size every guest booted before a keeper could name one. *)
+let default_guest_size =
+  match
+    ( Keeper_microvm_guest_size.memory_of_string "2g"
+    , Keeper_microvm_guest_size.cpus_of_int 4 )
+  with
+  | Ok memory, Ok cpus -> { Keeper_microvm_guest_size.memory; cpus }
+  | Error detail, (Ok _ | Error _) | Ok _, Error detail -> Alcotest.fail detail
+
 let boot ?(network = Profile.Network_none) ?(constraints = Backend.all_guest_constraints)
       backend
   : (string list, boot_refusal) result
@@ -139,8 +148,7 @@ let boot ?(network = Profile.Network_none) ?(constraints = Backend.all_guest_con
          ~label_args:[ "--label"; "masc.mcp.kind=keeper-vm" ]
          ~uid:501
          ~gid:20
-         ~memory:"2g"
-         ~cpus:None
+         ~guest_size:default_guest_size
          ~network_args
          ~mount_args:[ "-v"; "h:c:ro" ]
          ~image:"img"
@@ -171,7 +179,7 @@ let test_boot_argv_is_each_runtimes_own () =
      @ [ "--label"; "masc.mcp.microvm_backend=apple_container" ]
      @ [ "--user"; "501:20" ]
      @ [ "--cap-drop"; "ALL"; "--read-only"; "--rm"; "--tmpfs"; "/tmp" ]
-     @ [ "--memory"; "2g" ]
+     @ [ "--memory"; "2048m"; "--cpus"; "4" ]
      @ [ "-v"; "h:c:ro" ]
      @ [ "--workdir"; Microvm.work_volume_guest_root ]
      @ [ "--network"; "none" ]
@@ -188,7 +196,7 @@ let test_boot_argv_is_each_runtimes_own () =
      @ [ "--label"; "masc.mcp.microvm_dropped=remove_on_exit" ]
      @ [ "--user"; "501:20" ]
      @ [ "--cap-drop"; "ALL"; "--read-only"; "--tmpfs"; "/tmp" ]
-     @ [ "--memory"; "2g" ]
+     @ [ "--memory"; "2048m"; "--cpus"; "4" ]
      @ [ "--runtime"; "io.containerd.kata.v2" ]
      @ [ "-v"; "h:c:ro" ]
      @ [ "--workdir"; Microvm.work_volume_guest_root ]

@@ -44,7 +44,8 @@ type wire_step =
 
 (** Why one node did not decode. Closed, so a new rejection has to name itself
     here before a decoder can make it. Every constructor is produced by at
-    least one site in this module or in {!Keeper_memory_os_current}. *)
+    least one site in this module, in {!Keeper_memory_os_current} or in
+    {!Keeper_turn_boundaries}. *)
 type wire_reason =
   | Expected_object
   | Expected_array
@@ -63,6 +64,7 @@ type wire_reason =
   | Not_a_memory_id of string
   | Not_a_board_post_id of string
   | Not_a_board_comment_id of string
+  | Not_a_turn_ref of string
   | Not_finite
   | Negative
   | Not_positive
@@ -113,6 +115,7 @@ let wire_reason_to_string = function
   | Not_a_board_post_id value -> Printf.sprintf "expected a Board post id, got %S" value
   | Not_a_board_comment_id value ->
     Printf.sprintf "expected a Board comment id, got %S" value
+  | Not_a_turn_ref value -> Printf.sprintf "expected a turn reference, got %S" value
   | Not_finite -> "expected a finite number"
   | Negative -> "expected a non-negative value"
   | Not_positive -> "expected a value of at least one"

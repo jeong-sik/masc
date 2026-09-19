@@ -356,6 +356,20 @@ let full_fields
          (Keeper_microvm_backend.to_string backend)) :: fields
   in
   let fields =
+    match meta.microvm_memory with
+    | None -> fields
+    | Some memory ->
+      ("microvm_memory", Keeper_toml_loader.Toml_string
+         (Keeper_microvm_guest_size.memory_argv memory)) :: fields
+  in
+  let fields =
+    match meta.microvm_cpus with
+    | None -> fields
+    | Some cpus ->
+      ("microvm_cpus", Keeper_toml_loader.Toml_int
+         (Keeper_microvm_guest_size.cpus_count cpus)) :: fields
+  in
+  let fields =
     match meta.max_context_override with
     | Some value ->
       ("max_context_override", Keeper_toml_loader.Toml_int value) :: fields

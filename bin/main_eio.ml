@@ -1565,10 +1565,6 @@ let runtime_default_set_cmd_exit base_path runtime_id setup_lanes fallback_runti
       let (_ : string option) =
         Server_runtime_bootstrap.configure_agent_core_model_catalog_env ()
       in
-      let (_ : string option) =
-        Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
-          ~config_root:(Filename.dirname runtime_config_path) ()
-      in
       if setup_lanes then
         Runtime.set_first_run_runtime ~runtime_config_path ~fallback_runtime_ids ~bind_imp ~runtime_id ()
       else if bind_imp then Error "--setup-imp requires --setup-lanes"
@@ -1802,8 +1798,6 @@ let runtime_verify_cmd_exit base_path runtime_id timeout_s =
     let config_path = runtime_config_path_for_base_path base_path in
     let loaded = try
       let (_ : string option) = Server_runtime_bootstrap.configure_agent_core_model_catalog_env () in
-      let (_ : string option) = Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
-        ~config_root:(Filename.dirname config_path) () in
       Runtime.load_list ~config_path
       |> Result.map_error (Runtime.to_diagnostic_text ~config_path)
       with Env_config_core.Config_error message -> Error message in
@@ -3268,8 +3262,6 @@ let setup_validate_runtime base_path =
   let loaded =
     try
       let (_ : string option) = Server_runtime_bootstrap.configure_agent_core_model_catalog_env () in
-      let (_ : string option) = Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
-        ~config_root:(Filename.dirname config_path) () in
       Runtime.load_list ~config_path
       |> Result.map_error (Runtime.to_diagnostic_text ~config_path)
     with Env_config_core.Config_error message -> Error message

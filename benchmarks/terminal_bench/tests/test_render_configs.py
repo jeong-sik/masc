@@ -99,12 +99,11 @@ def test_skills_tree_copied_only_for_skills_arms():
 
 def test_arm_e_parallel_on():
     rt_e = render_arm("e", runtime_id="anthropic.claude-fable-5", effort="high")
-    overlay = (rt_e / "agent-core-models-overlay.toml").read_text()
-    assert "supports_parallel_tool_calls = true" in overlay
+    assert "supports-parallel-tool-calls = true" in (rt_e / "runtime.toml").read_text()
     rt_b = render_arm("b", runtime_id="anthropic.claude-fable-5", effort="high")
-    overlay_b = (rt_b / "agent-core-models-overlay.toml").read_text()
-    assert "supports_parallel_tool_calls = false" in overlay_b
-    assert "max-concurrent = 1" in (rt_b / "runtime.toml").read_text()
+    runtime_b = (rt_b / "runtime.toml").read_text()
+    assert "supports-parallel-tool-calls = false" in runtime_b
+    assert "max-concurrent = 1" in runtime_b
 
 
 def test_arm_c_runtime_keeps_skills_sources():
@@ -149,7 +148,8 @@ def test_claude_code_lane_renders_official_client_provider():
     # masc protocol "claude-code" (runtime_adapter.claude_code_execution): the
     # provider is a CLI command with is-non-interactive = true, no endpoint
     # and no credentials table — the CLI owns the login. Effort lands on the
-    # model row (CLI --effort), and no overlay deployment row is written.
+    # model row (CLI --effort), and the lane declares no capabilities of its
+    # own: the embedded catalog answers for these models by api-name.
     out = render_arm("b", runtime_id="claude_code.claude-sonnet-5", effort="high")
     rt = (out / "runtime.toml").read_text()
     assert 'default = "claude_code.claude-sonnet-5"' in rt
@@ -166,8 +166,7 @@ def test_claude_code_lane_renders_official_client_provider():
     assert '[claude_code."claude-sonnet-5"]' in rt
     assert "max-concurrent = 1" in rt
     assert "[exec.ssh.endpoints.local]" in rt
-    overlay = (out / "agent-core-models-overlay.toml").read_text()
-    assert "[[providers]]" not in overlay and "[[models]]" not in overlay
+    assert '[models."claude-sonnet-5".capabilities]' not in rt
     keeper = (out / "keepers" / "bench-1.toml").read_text()
     assert 'sandbox_profile = "remote_ssh"' in keeper
 
@@ -217,25 +216,25 @@ def test_a_slashed_wire_model_binds_by_slug_and_keeps_the_wire_name(openrouter_l
     # The wire name survives, because that is what reaches the provider.
     assert 'api-name = "z-ai/glm-4.7-flash"' in rt
     assert '[models."z-ai/glm-4.7-flash"]' not in rt
-    # Capability lookup reads api_name, so the overlay row keeps the wire name.
-    overlay = (out / "agent-core-models-overlay.toml").read_text()
-    assert 'id_prefix = "z-ai/glm-4.7-flash"' in overlay
 
 
 def test_the_router_lane_inherits_its_ladder_instead_of_declaring_one(
         openrouter_lists):
     # An accepted_reasoning_efforts list written here is a capability claim the
     # benchmark makes up about someone else's API. The router publishes one
-    # contract for everything it serves, so the catalog base carries it
-    # (Capabilities.openrouter_capabilities) and this lane names that base.
+    # contract for everything it serves, so the catalog carries it
+    # (Capabilities.openrouter_capabilities) and this lane inherits it.
     out = render_arm("b", runtime_id="openrouter.z-ai/glm-4.7-flash", effort="high")
-    overlay = (out / "agent-core-models-overlay.toml").read_text()
-    assert 'base = "openrouter"' in overlay
-    assert "accepted_reasoning_efforts" not in overlay
-    # The dialect comes with the base too, so it is not repeated either.
-    assert "thinking_control_format" not in overlay
-    # The effort still reaches the runtime; inheriting is not disabling.
     rt = (out / "runtime.toml").read_text()
+    # Pin the capability block present first: a render that dropped it would
+    # satisfy the absences below without inheriting anything.
+    assert '[models."z-ai-glm-4.7-flash".capabilities]' in rt
+    for spelling in ("accepted_reasoning_efforts", "accepted-reasoning-efforts"):
+        assert spelling not in rt
+    # The dialect is inherited too, so it is not declared either — unlike the
+    # openai lane, which has to declare it (see PROVIDERS).
+    assert "thinking-control-format" not in rt
+    # The effort still reaches the runtime; inheriting is not disabling.
     assert 'reasoning-effort = "high"' in rt
 
 
@@ -255,11 +254,12 @@ def test_no_lane_writes_a_ladder_of_its_own():
             ("openai.gpt-6-astra", "gpt-6-astra")):
         provider = runtime_id.split(".", 1)[0]
         out = render_arm("b", runtime_id=runtime_id, effort="high")
-        overlay = (out / "agent-core-models-overlay.toml").read_text()
-        assert f'provider_name = "{provider}"' in overlay, runtime_id
-        assert f'id_prefix = "{model_alias}"' in overlay, runtime_id
-        assert "supports_reasoning = true" in overlay, runtime_id
-        assert "accepted_reasoning_efforts" not in overlay, runtime_id
+        rt = (out / "runtime.toml").read_text()
+        assert f'[{provider}."{model_alias}"]' in rt, runtime_id
+        assert f'api-name = "{model_alias}"' in rt, runtime_id
+        assert "thinking-support = true" in rt, runtime_id
+        for spelling in ("accepted_reasoning_efforts", "accepted-reasoning-efforts"):
+            assert spelling not in rt, runtime_id
 
 
 def test_effective_runtime_id_is_what_masc_resolves():
@@ -307,10 +307,10 @@ def test_an_openrouter_lane_declares_the_window_and_output_budget(openrouter_lis
     out = render_arm("b", runtime_id="openrouter.z-ai/glm-4.7-flash", effort="high",
                      out_root=tmp_path)
     runtime = tomllib.loads((out / "runtime.toml").read_text())
-    assert runtime["models"]["z-ai-glm-4.7-flash"]["max-context"] == 111616
+    model = runtime["models"]["z-ai-glm-4.7-flash"]
+    assert model["max-context"] == 111616
     assert "max-context" not in runtime["providers"]["openrouter"]
-    overlay = tomllib.loads((out / "agent-core-models-overlay.toml").read_text())
-    assert overlay["models"][0]["max_output_tokens"] == 16384
+    assert model["capabilities"]["max-output-tokens"] == 16384
     assert openrouter_lists == ["z-ai/glm-4.7-flash"]
 
 

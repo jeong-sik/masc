@@ -89,6 +89,8 @@ trace 하나에 atom 이 112개 쌓여 있고, 사람이 rondo 에게 말을 걸
 
 **Librarian 이 턴이 아니라 이력을 보는 이유.** 첫째, 오간 말이 남는 곳이 이력뿐이다. 턴은 실행이지 저장소가 아니다. 둘째, 줄이려는 것이 이력이다. Keeper 의 요청은 system, tools, 이력의 일부, facts, 새 입력으로 이뤄지고 그중 자라는 것이 이력이다. "여기서부터만 보낸다"는 이력 안의 위치로만 말할 수 있다. 셋째, Librarian 의 "여기까지 읽었다"와 창의 "여기서부터 보낸다"가 같은 자(atom 번호)를 써야 바꿔 읽을 필요가 없다. 턴이 쓰이는 곳은 하나다. 읽은 위치를 옮겨도 되는 자리가 턴 끝이다. 그래서 §4.6 의 턴 끝 기록은 "턴 41 이 끝났다"는 사건을 "이력 120 번"이라는 위치로 옮겨 적는 한 줄이다.
 
+**앞머리는 Librarian 의 게이트가 아니다**(09-19 확인). 창의 앞머리(`keeper_carried_front.ml`)는 *요청이 싣는* 가장 오래된 atom 을 정할 뿐, 저장되는 이력을 자르지 않는다. 앞머리를 다루는 모듈 넷(`keeper_carried_front`, `keeper_turn_driver`, `keeper_turn_driver_try_provider`, `keeper_next_request_forecast`) 가운데 checkpoint 를 저장하는 것은 **하나도 없다**. 라이브가 같은 말을 한다 — 창은 100000 토큰인데 checkpoint 한 개가 73 MB 다. 앞머리가 지나간 구간도 이력에는 그대로 있고, Librarian 은 그 이력을 읽는다(`keeper_agent_run_finalize_response.ml` 이 `saved_checkpoint.messages` 를 넘긴다). 이력에서 실제로 지우는 것은 오프라인 purge 와 `masc_keeper_clear` 둘뿐이고, 읽은 위치와의 순서는 §10 의 2 가 정한다.
+
 ## 1. 결정 (운영자, 2026-09-18)
 
 1. **Keeper 가 몸이면 Librarian 은 뇌에 기록하는 존재다.** Keeper 는 세상에서 움직인다. 뇌는 Keeper 가 생각할 때 쓰는 기억이다(facts, 받은 일 정리). Librarian 은 Keeper 가 겪은 것을 수시로 읽어 거기에 적는다. 생각을 대신하지 않는다. Librarian 은 Keeper 마다 따로다.

@@ -10,6 +10,13 @@ open Masc_tui_loader
    than this is reported rather than held. *)
 let gh_open_timeout_sec = 15.0
 
+(* [run_with_eio_context] owns the UI switch. An unavailable async context
+   must not turn an operator action into blocking HTTP on the key path. *)
+let with_async_switch state ~action start =
+  match Eio_context.get_switch_opt () with
+  | Some sw -> start sw
+  | None -> report_action state "error" (action ^ ": asynchronous runtime unavailable")
+
 (* One place decides how an aborted $EDITOR form reads. Only the cancel
    differs by caller, because only the action's own name belongs in it; an
    editor that never ran and a temp file that could not be read are the same
@@ -11147,18 +11154,14 @@ let handle_goal_confirmation_key state ~mailbox =
   match state.planning_mode with
   | Planning_list -> ()
   | Planning_detail goal_id ->
+      with_async_switch state ~action:"Goal confirmation" @@ fun sw ->
       let host = server_peer_host and port = state.port in
-      let run_async run =
-        match Eio_context.get_switch_opt () with
-        | Some sw -> Eio.Fiber.fork ~sw run
-        | None -> run ()
-      in
       state.goal_action_armed <- None;
       (match Goal_confirmation_read.view_for ~equal:String.equal
                state.goal_confirmation ~key:goal_id with
        | Ready confirmation ->
            state.goal_confirmation <- Goal_confirmation_read.clear state.goal_confirmation;
-           run_async (fun () ->
+           Eio.Fiber.fork ~sw (fun () ->
              let result =
                let ( let* ) = Result.bind in
                let* json = Masc_tui_http.post_goal_confirmation ~host ~port confirmation in
@@ -11179,7 +11182,7 @@ let handle_goal_confirmation_key state ~mailbox =
                 state.goal_confirmation <- loading;
                 state.goal_action_error <- None;
                 state.planning_scroll <- 0;
-                run_async (fun () ->
+                Eio.Fiber.fork ~sw (fun () ->
                   let result =
                     let ( let* ) = Result.bind in
                     let* json = Masc_tui_http.fetch_goal_confirmation ~host ~port ~goal_id in
@@ -15869,9 +15872,8 @@ let main
       in
       enqueue_async async_messages (Harness_label_done result)
     in
-    match Eio_context.get_switch_opt () with
-    | Some sw -> Eio.Fiber.fork ~sw run
-    | None -> run ()
+    with_async_switch state ~action:"Harness label" (fun sw ->
+      Eio.Fiber.fork ~sw run)
   in
   let handle_harness_agree () =
     match harness_cursor_verdict () with

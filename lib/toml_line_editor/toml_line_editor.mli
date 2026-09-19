@@ -153,10 +153,15 @@ val remove_table_array_entry
 
     Every entry carrying [id] is dropped, not only the first. *)
 
-val remove_table : string -> path:string -> string
+type table_removal =
+  | Table_removed of string  (** The content without the table. *)
+  | Table_absent
+      (** No line opens [[path]] as a standard table. A table written inline in
+          its parent ([[a]] then [b = { ... }]) is absent here: this editor
+          removes only a table that has its own header. *)
+
+val remove_table : string -> path:string -> table_removal
 (** Drop the standard table [[path]]: its header, its body, and any table named
     under its path. Comments above the header and a comment block documenting
     the next header stay where they are, for the reasons
-    {!remove_table_array_entry} gives. Content that does not open [[path]] comes
-    back unchanged, so a caller that must remove something compares the result
-    with its input. *)
+    {!remove_table_array_entry} gives. *)

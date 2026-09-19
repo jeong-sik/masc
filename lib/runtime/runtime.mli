@@ -555,9 +555,8 @@ val resolve_assignment :
   string -> [ `Lane of Runtime_lane.t | `Unavailable of missing_catalog_model | `Missing ]
 (** Resolve a keeper assignment to a lane. The id names a declared lane or a
     runtime, and a lane of that name is taken first; an id naming a bare runtime
-    gets a lane of its own, because the lane is what carries failover and quota
-    demotion. Every lane ends
-    at [\[runtime\].default], so a walk always has a next candidate.
+    resolves to a lane holding that runtime alone. A lane walks exactly the
+    candidates it declares.
     [Unavailable] preserves the configured identity when its capability catalog
     entry is absent. [Missing] means the id was not configured. Neither selects
     the default in place of the requested runtime. *)
@@ -865,7 +864,7 @@ val set_runtime_lane_candidates :
     SSOT writer, validate the resulting config, atomically write it, and refresh
     the in-process runtime cache. The list order is the failover order. Creates
     the lane table when the id has none — a runtime whose lane was synthesized
-    ([self, default]) becomes a declared lane the first time an operator adds a
+    ([self]) becomes a declared lane the first time an operator adds a
     candidate to it. An empty [runtime_ids] is rejected: a lane that resolves to
     nothing is not the same edit as removing the lane. *)
 
@@ -877,10 +876,14 @@ val create_runtime_lane :
   (config_commit_receipt, string) result
 (** Declare a new [\[runtime.lanes."<lane_id>"\]] with [runtime_ids] as its
     candidates, through the same validated write as
-    {!set_runtime_lane_candidates}. The id may be any name, not only a runtime
-    id. Refused when the file already declares that lane, read under the write
-    lock: a create that landed on an existing lane would replace its
-    candidates without the operator having seen them. *)
+    {!set_runtime_lane_candidates}. Both refusals read the file under the
+    write lock:
+    - the file already declares that lane: a create that landed on it would
+      replace its candidates without the operator having seen them;
+    - [lane_id] is a declared runtime id: the lane would shadow that runtime
+      for every keeper that names it, and for every unassigned keeper when it
+      is the default. A runtime's own lane is edited with
+      {!set_runtime_lane_candidates}. *)
 
 val remove_runtime_lane :
   ?runtime_config_path:string ->
@@ -888,9 +891,12 @@ val remove_runtime_lane :
   unit ->
   (config_commit_receipt, string) result
 (** Remove the [\[runtime.lanes."<lane_id>"\]] table through the runtime.toml
-    SSOT writer. Refused, naming the keepers, when [\[runtime.assignments\]]
-    names the lane: an assignment to a lane that is gone either fails the load
-    or silently walks a runtime of the same name. Refused when the file does
+    SSOT writer. Refused while anything still routes through the lane id,
+    naming each: an entry of [\[runtime.assignments\]], [\[runtime\].default]
+    (which every unassigned keeper walks), or a
+    [\[runtime.exact_output_lanes.verifier_exact\]] slot. Each of these reads a
+    lane before a runtime, so removing the lane would either fail the load or
+    silently hand them the runtime of the same id. Refused when the file does
     not declare the lane as its own table. *)
 
 val set_exact_output_lane_slots :

@@ -513,7 +513,7 @@ let tick ?consumer ?clock config ~now ~retention_days =
       match consumer with
       | Some consumer ->
         List.partition
-          (fun (request, signal) ->
+          (fun (request, (signal : wake_signal)) ->
              consumer.defer_wake config ~occurrence_id:signal.occurrence_id request)
           all_candidates
       | None -> [], all_candidates

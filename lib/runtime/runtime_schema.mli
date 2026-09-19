@@ -223,6 +223,13 @@ type binding =
   ; is_default : bool
   ; wizard_default : bool
   ; max_concurrent : int option
+  ; disable_parallel_tool_use : bool
+        (** Request policy for this binding. [true] asks the provider for at
+            most one tool call per response; [false] (the default) leaves
+            parallel calls permitted by the model's catalog capability.
+            This does not change that capability or serialize spawned agents.
+            Official-client, native Ollama and Gemini runtimes cannot carry
+            this policy and refuse [true]. *)
   ; context_marks : context_marks option
         (** [context-high-water-tokens] and [context-low-water-tokens] on the
             binding table, declared together or not at all. Absent means the

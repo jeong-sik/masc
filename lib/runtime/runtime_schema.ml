@@ -328,6 +328,7 @@ type binding =
   ; is_default : bool
   ; wizard_default : bool
   ; max_concurrent : int option
+  ; disable_parallel_tool_use : bool
   ; context_marks : context_marks option
   ; max_tokens : int option
     (** Request-side output budget for this binding ([max_tokens] on Chat

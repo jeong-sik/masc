@@ -517,6 +517,10 @@ type validated_sync_request
     response-header evidence stay together through downstream parsing. *)
 type sync_transport_receipt =
   { response : raw_sync_response
+  ; body_receipt : refusal_body
+      (** Whether the full body was received inside the caller's window.
+          [response.body] remains the text projection for compatibility; a
+          decision about a refusal reads this variant. *)
   ; response_header_evidence : response_header_evidence
   }
 

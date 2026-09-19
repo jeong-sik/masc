@@ -86,6 +86,7 @@ type raw_response = Trace.raw_response =
 
 type provider_refusal =
   | Request_body_refused
+  | Refusal_body_not_received
   | Rate_limited
   | Overloaded
   | Server_error
@@ -101,6 +102,7 @@ type provider_refusal =
 
 let provider_refusal_to_string = function
   | Request_body_refused -> "request_body_refused"
+  | Refusal_body_not_received -> "refusal_body_not_received"
   | Rate_limited -> "rate_limited"
   | Overloaded -> "overloaded"
   | Server_error -> "server_error"
@@ -1598,6 +1600,8 @@ let record_provider_trace = Generation_receipt.record_provider_trace
 let provider_refusal_of_api_error : Retry.api_error -> provider_refusal = function
   | Retry.InvalidRequest { reason = Retry.Request_body_refused_by_provider _; _ } ->
     Request_body_refused
+  | Retry.InvalidRequest { reason = Retry.Refusal_body_not_received; _ } ->
+    Refusal_body_not_received
   | Retry.InvalidRequest _ -> Invalid_request
   | Retry.RateLimited _ -> Rate_limited
   | Retry.Overloaded _ -> Overloaded
@@ -1774,6 +1778,7 @@ let execution_failure_may_advance (error : execution_error) =
             | Authorization_refused
             | Payment_required
             | Invalid_request
+            | Refusal_body_not_received
             | Not_found
             | Context_overflow
             | Input_capacity

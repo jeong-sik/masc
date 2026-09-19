@@ -249,6 +249,16 @@ type task_status =
 - `assignee` 를 `producer` 로 바꾸면 이 생성자를 패턴 매치하는 자리는 컴파일러가 짚는다: orphan 점검
   (`workspace_query.ml:247-252`), Keeper 설정 제거 거절(`keeper_configuration_removal.ml:170-178`),
   대시보드 rollup(`server_dashboard_http.ml:607-613`), `task_actor_of_status`(`types_core.ml:303-309`).
+- **`task_actor_of_status` 는 어느 갈래를 주느냐가 곧 설계다.** "이 Task 에 누가 있나"의 기준이 저
+  함수 하나이고, 세 갈래가 거기서 파생된다. 소유(`task_assignee_of_status`, `:314`), 수행자
+  (`task_performer_of_status`, `:325`), 화면 표시(`task_display_assignee`, `:331`). 있는 값 중에는
+  맞는 것이 없다. `Submitter producer` 를 주면 `task_assignee_of_status` 가 `Some producer` 라고
+  답하고, 아무도 안 맡은 Task 가 다시 "네 것" 이 된다. 이 RFC 가 없애려는 바로 그 문장이다.
+  `Unassigned` 를 주면 낸 사람 이름이 세 갈래 모두에서 사라져서, 상태에 칸을 만든 이유가 없어진다.
+  그래서 `task_actor` 에 갈래를 하나 더한다. 소유에는 `None`, 수행자에는 `Some producer`, 화면에는
+  이름을 준다. 1단계에 넣는다.
+- 맡은 개수를 세는 자리는 `task_status` 를 직접 보므로(`workspace_task_claim.ml:20-35`) 컴파일러가
+  짚어 준다. `Rejected` 는 세지 않는다.
 - 컴파일러가 못 짚는 자리가 더 크다. `task_assignee_of_status` 가 `AwaitingVerification` 에 `None` 을
   답하게 되는데 반환형이 같아서 호출자는 그대로 컴파일된다. 손으로 봐야 하는 호출자:
   `lib/fusion/fusion_decision.ml:144` 와 `lib/fusion/fusion_request_context.ml:97`(제출한 Keeper 의
@@ -336,7 +346,10 @@ cancel 을 권하거나 만든 쪽에게도 안 보여 주게 된다.
 - **제출의 증거는 제출 호출이 실은 handoff 와 notes 에서만 읽는다.** 지금은 호출에 handoff 가 없으면
   Task 에 저장된 handoff 를 대신 읽는다(`workspace_task_verification.ml:29-45`). 돌아온 Task 를 남이
   이어받는 이 설계에서는 앞사람의 증거와 판정 사유가 새 제출의 증거로 들어가게 된다. 저장된 handoff 는
-  증거로 읽지 않는다.
+  증거로 읽지 않는다. 이걸 떼면 증거 없는 제출이 생기지 않느냐는 물음이 나왔는데, 안 생긴다. 제출은
+  이미 그 앞에서 막힌다. `notes` 도 비고 호출에 온 handoff 의 `summary` 도 비면 `InvalidState` 로
+  거절되고, 그 검사는 저장된 handoff 를 보지 않는다(`workspace_task_transitions.ml:325-337`). 그
+  검사를 지나온 제출은 호출에 `notes` 나 `summary` 중 하나를 들고 있고, 둘 다 증거 목록에 들어간다.
 - 판정 토큰은 그대로 `APPROVE | REJECT(reason)` 다(`config/tools/report_review_verdict.toml`).
   바뀌는 것은 반려가 **하는 일**이다. 반려는 기록이고, 일을 맡기는 행위가 아니다.
 - `Verdict_cancel_requires_operator`, `admission_of_status` 의 `Operator_routed` 갈래,

@@ -2808,9 +2808,11 @@ let test_parallel_policy_requires_provider_contract () =
     check_refusal (Runtime_adapter.binding_to_execution cfg binding);
     check_refusal (Runtime_adapter.binding_to_provider_config cfg binding)
   ) [ "glm-coding"; "unregistered-endpoint" ];
-  let cfg, _ = parallel_policy_runtime ~provider_id:"claude"
+  let cfg, binding = parallel_policy_runtime ~provider_id:"claude"
       ~protocol:"messages-http" ~model_id:"claude-fable-5" ~policy:"" in
   let provider = { (List.hd cfg.providers) with Runtime_schema.id = "fixture-alias" } in
+  let cfg = { cfg with Runtime_schema.providers = [ provider ] } in
+  let binding = { binding with Runtime_schema.provider_id = provider.id } in
   let catalog value = Printf.sprintf {|[[providers]]
 id = "fixture-provider"
 aliases = ["fixture-alias"]
@@ -2822,13 +2824,13 @@ api_key_env = ""
 |} value in
   List.iter (fun (declaration, supported) ->
     with_model_catalog (catalog declaration) (fun () ->
-      let result = Runtime_adapter.validate_parallel_tool_policy provider
-          ~model_id:"probe" ~disable_parallel_tool_use:true in
+      let result = Runtime_adapter.binding_to_execution cfg
+          { binding with disable_parallel_tool_use = true } in
       check bool "canonical alias uses only the provider contract" supported
         (Result.is_ok result);
       check bool "no suppression request needs no contract" true
-        (Result.is_ok (Runtime_adapter.validate_parallel_tool_policy provider
-          ~model_id:"probe" ~disable_parallel_tool_use:false)))
+        (Result.is_ok (Runtime_adapter.binding_to_execution cfg
+          { binding with disable_parallel_tool_use = false })))
   ) [ "", false; "supports_parallel_tool_suppression = false", false;
       "supports_parallel_tool_suppression = true", true ];
   match Llm_provider.Model_catalog.of_toml_string ~source:"parallel-contract-type"

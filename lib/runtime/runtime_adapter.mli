@@ -97,6 +97,8 @@ val binding_to_provider_config
 
     The binding's [disable_parallel_tool_use] is request policy. It reaches
     [Provider_config] without replacing the model's catalog capability.
+    The canonical provider must declare suppression support in its catalog;
+    HTTP wire compatibility alone is not a support contract.
     Native Ollama and Gemini cannot carry it and refuse [true].
 
     Returns [Error reason] (no silent fallback) when the provider or model id

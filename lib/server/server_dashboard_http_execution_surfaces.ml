@@ -1093,13 +1093,49 @@ let patch_surface_json_for_running_keepers (config : Workspace.config) = functio
              with
              | Patched rows -> rows
              | Declaration_row_is_stale ->
-               (* The snapshot this surface was computed from predates this
-                  Keeper's boot. Its declaration row stays as the snapshot
-                  described it. The boot also published a lifecycle event, and
-                  that event's patch of the published surface finds this same
-                  row and invalidates the surface; the publication generation
-                  it advances drops this computation if it has not published
-                  yet. *)
+               (* The snapshot this render read was taken before this Keeper
+                  booted, so its row is still a declaration row. It stays as
+                  the snapshot described it: it has no diagnostic or trust to
+                  build a runtime row from.
+
+                  The boot publishes a lifecycle event. Its handler
+                  ([Server_dashboard_http_keeper_api.refresh_keeper_execution_surfaces])
+                  drops the operator snapshot caches and the [execution:] read
+                  caches, then patches the cached surface
+                  ([patchexecution_cache_for_keeper]). The patch advances the
+                  publication generation, so a render that began before it
+                  can no longer publish, and it invalidates the cached surface
+                  when that surface holds this declaration row.
+
+                  When the event is lost -- the listener's subscription drops
+                  the oldest past its capacity, a raise elsewhere in the same
+                  batch loses the rest of it (#37175), or the bus is unset --
+                  the row stays until a render reads a snapshot taken after
+                  the boot. The execution refresh loop renders every 60s
+                  ([interval_s] in [start_execution_refresh_loop]). A render
+                  reads the projection snapshot
+                  ([Dashboard_projection_cache.snapshot_cache_ttl_s], 10s, then
+                  served stale for [Dashboard_cache.stale_factor] times that,
+                  30s), whose compute reads the operator snapshot
+                  ([Env_config_runtime_services.Operator.cache_ttl_sec], 30s by
+                  default, then served stale for [cache_stale_grace_factor]
+                  times that, 90s). A stale read starts the recompute the next
+                  read gets, so the row usually clears within one or two
+                  refresh intervals and at most after about
+                  60 + 40 + 120 = 220s at the defaults ([Dashboard_cache]
+                  jitters its TTLs by 10%).
+
+                  On a cold start the cached surface can still be the
+                  initializing placeholder. It has no keepers row, so the
+                  patch has nothing to invalidate in it; with the event
+                  delivered, the handler's cache drops above are what clear a
+                  pre-boot render. With the event lost, a read before the
+                  refresh loop's first publication is answered by
+                  [cached_execution_or_first_success_json], which keeps its
+                  render under [execution_default_light_cache_key] for
+                  [deep_surface_cache_ttl_s] (120s).
+
+                  Lost events are fixed in the listener (#37175), not here. *)
                acc)
           rows
           running

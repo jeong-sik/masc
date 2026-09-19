@@ -1,10 +1,9 @@
 import { KEEPER_ACTIVATION_MODES } from '../../lib/keeper-activation-mode'
-import { SANDBOX_PROFILE_OPTIONS } from '../../types/core'
 import { Data, Effect, ParseResult, Schema } from 'effect'
 
 const KeeperMetaWireSchema = Schema.Struct({
   name: Schema.NonEmptyString,
-  sandbox_profile: Schema.Literal(...SANDBOX_PROFILE_OPTIONS),
+  sandbox_profile: Schema.NonEmptyString,
   trace_id: Schema.NonEmptyString,
   created_at: Schema.NonEmptyString,
   updated_at: Schema.NonEmptyString,

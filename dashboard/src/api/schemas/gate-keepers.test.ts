@@ -93,6 +93,26 @@ describe('decodeGateKeepers', () => {
     expect(data.keepers).toEqual([{ name: 'planner', status: 'running' }])
   })
 
+  it('accepts a nonempty sandbox name this consumer does not interpret', () => {
+    const wire = keeperWire()
+    wire.meta.sandbox_profile = 'uninterpreted-sandbox'
+    const data = Effect.runSync(decodeGateKeepers({
+      count: 1, keepers: [wire], ...listingWire(1),
+    }))
+    expect(data.keepers).toEqual([{ name: 'planner', status: 'running' }])
+  })
+
+  it.each(['missing', 'empty'] as const)('rejects a %s sandbox name', kind => {
+    const wire = keeperWire()
+    const meta: Record<string, unknown> = { ...wire.meta }
+    if (kind === 'missing') delete meta.sandbox_profile
+    else meta.sandbox_profile = ''
+    const error = expectDrift({
+      count: 1, keepers: [{ ...wire, meta }], ...listingWire(1),
+    })
+    expect(error.issues.some(issue => issue.path.join('.') === 'keepers.0.meta.sandbox_profile')).toBe(true)
+  })
+
   it('rejects an omitted current failure field', () => {
     const wire: Record<string, unknown> = keeperWire()
     delete wire.runtime_blocker_summary

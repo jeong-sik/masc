@@ -1118,12 +1118,9 @@ let test_lane_candidates_replace_rather_than_append () =
     match Runtime.resolve_assignment "openai.gpt" with
     | `Missing | `Unavailable _ -> Alcotest.fail "the lane disappeared"
     | `Lane lane ->
-      (* [with_terminal_default] appends the default, so a single declared
-         candidate resolves to two. That is the point of the terminal: a lane
-         is never shorter than "this runtime, then the default". *)
       Alcotest.(check (list string))
         "the second write replaced the first"
-        [ "openai.gpt"; "runpod_mtp.qwen" ]
+        [ "openai.gpt" ]
         (Runtime_lane.ordered_candidates lane))
 ;;
 
@@ -2606,9 +2603,8 @@ nu = "coding"
   ^ lane_fixture_bindings
 ;;
 
-(* Two ladders start at the same runtime under names of their own. [careful]
-   already ends at [runtime].default, [fast] does not — so only [fast] has the
-   terminal default appended. *)
+(* Two ladders start at the same runtime under names of their own and keep
+   their own tails. *)
 let runtime_config_two_lanes_one_head =
   {|
 [runtime]
@@ -2684,8 +2680,8 @@ let test_an_assignment_names_a_lane_of_its_own_name () =
       (Some "coding")
       (List.assoc_opt "nu" assignments);
     Alcotest.(check (list string))
-      "the lane walks its own candidates and ends at [runtime].default"
-      [ "openai.gpt"; "openai.small"; "runpod_mtp.qwen" ]
+      "the lane walks exactly its own candidates"
+      [ "openai.gpt"; "openai.small" ]
       (candidates_of lanes "coding")
     (* The dispatch-reachability projection this test also consulted was the
        local request-cap validation's; #36828 removed both when body size
@@ -2700,7 +2696,7 @@ let test_two_lanes_may_start_at_the_same_runtime () =
   | Ok (_runtimes, _default, _assignments, _media_failover, lanes) ->
     Alcotest.(check (list string))
       "[fast] keeps its own tail"
-      [ "openai.gpt"; "openai.small"; "runpod_mtp.qwen" ]
+      [ "openai.gpt"; "openai.small" ]
       (candidates_of lanes "fast");
     Alcotest.(check (list string))
       "[careful] keeps a different tail from the same head"
@@ -2728,7 +2724,7 @@ let test_a_lane_named_after_its_head_still_wins () =
   | Ok (_runtimes, _default, _assignments, _media_failover, lanes) ->
     Alcotest.(check (list string))
       "the lane is taken over the same-named runtime"
-      [ "openai.gpt"; "openai.small"; "runpod_mtp.qwen" ]
+      [ "openai.gpt"; "openai.small" ]
       (candidates_of lanes "openai.gpt")
 ;;
 

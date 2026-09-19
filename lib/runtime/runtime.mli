@@ -364,8 +364,8 @@ val load_list :
     [\[runtime\].media_failover] entry does not resolve, or if any
     [\[runtime.lanes.<id>\]] candidate does not resolve (mirrors default
     validation — no silent fallback for a typo'd id). [keeper_assignments] is the
-    keeper→lane-name-or-runtime-id list; [media_failover] is the RFC-0265 ordered reroute
-    list; [lanes] is the ordered failover candidate lists. *)
+    keeper→lane-name-or-runtime-id list; [media_failover] is the vision read fleet;
+    [lanes] is the ordered failover candidate lists. *)
 
 
 (** {1 Lazy default runtime singleton}
@@ -533,10 +533,10 @@ val verifier_exact_slot_admission : runtime_id:string -> (unit, string) result
     execution-kind constraint; a replacing registry cannot grant admission. *)
 
 val media_failover : unit -> string list
-(** [\[runtime\].media_failover] (RFC-0265) — ordered runtime ids consulted when a
-    turn's input modality exceeds the assigned runtime's declared capabilities;
-    the turn reroutes to the first that admits it. [[]] = derive capable runtimes
-    from declared [\[models.*.capabilities\]] in declaration order. Every entry is
+(** [\[runtime\].media_failover] — the vision read fleet: ordered runtime ids the
+    vision tool calls, including the image readings made for a runtime that
+    cannot take the image. A keeper turn never dispatches to them; its image
+    reroute stays inside its lane. [[]] = no vision fleet. Every entry is
     validated at load so each resolves to a configured runtime. *)
 
 val lanes : unit -> Runtime_lane.t list
@@ -555,9 +555,8 @@ val resolve_assignment :
   string -> [ `Lane of Runtime_lane.t | `Unavailable of missing_catalog_model | `Missing ]
 (** Resolve a keeper assignment to a lane. The id names a declared lane or a
     runtime, and a lane of that name is taken first; an id naming a bare runtime
-    gets a lane of its own, because the lane is what carries failover and quota
-    demotion. Every lane ends
-    at [\[runtime\].default], so a walk always has a next candidate.
+    resolves to a lane holding that runtime alone. A lane walks exactly the
+    candidates it declares.
     [Unavailable] preserves the configured identity when its capability catalog
     entry is absent. [Missing] means the id was not configured. Neither selects
     the default in place of the requested runtime. *)
@@ -865,7 +864,7 @@ val set_runtime_lane_candidates :
     SSOT writer, validate the resulting config, atomically write it, and refresh
     the in-process runtime cache. The list order is the failover order. Creates
     the lane table when the id has none — a runtime whose lane was synthesized
-    ([self, default]) becomes a declared lane the first time an operator adds a
+    ([self]) becomes a declared lane the first time an operator adds a
     candidate to it. An empty [runtime_ids] is rejected: a lane that resolves to
     nothing is not the same edit as removing the lane. *)
 

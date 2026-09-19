@@ -688,14 +688,10 @@ let validate_lanes
          })
 ;;
 
-let with_terminal_default ~default_runtime_id candidates =
-  if List.exists (String.equal default_runtime_id) candidates
-  then candidates
-  else candidates @ [ default_runtime_id ]
-;;
-
+(* A lane is exactly the candidates it declares: a keeper reaches another
+   runtime only when a lane names it. *)
 let lanes_of_decls
-    ~(dropped_bindings : (string * drop_reason) list) ~(default_runtime_id : string)
+    ~(dropped_bindings : (string * drop_reason) list)
     (runtimes : t list)
     (lane_decls : Runtime_schema.lane_decl list)
   : (Runtime_lane.t list, load_failure) result
@@ -704,7 +700,7 @@ let lanes_of_decls
   Ok
     (List.map
        (fun ({ Runtime_schema.id; candidate_ids } : Runtime_schema.lane_decl) ->
-          Runtime_lane.make ~id (with_terminal_default ~default_runtime_id candidate_ids))
+          Runtime_lane.make ~id candidate_ids)
        lane_decls)
 ;;
 
@@ -1317,7 +1313,7 @@ let materialize_config
      A typo'd lane candidate can now surface before a typo'd assignment — the
      lane list the assignment names is the thing that had to exist first. *)
   let* lanes =
-    lanes_of_decls ~dropped_bindings ~default_runtime_id:rt.id runtimes cfg.lane_decls
+    lanes_of_decls ~dropped_bindings runtimes cfg.lane_decls
   in
   let* () =
     validate_runtime_references ~dropped_bindings runtimes lanes
@@ -1724,9 +1720,8 @@ let verifier_exact_lane_readiness () =
                    selected_slots @ List.rev rejected))))
 ;;
 
-(* [runtime].media_failover ordered runtime ids for RFC-0265 modality-gated
-   reroute. [[]] = derive capable runtimes from declared capabilities. Reads the
-   Atomic ref set by [init_default]. *)
+(* [runtime].media_failover: the vision read fleet. Reads the Atomic ref set
+   by [init_default]. *)
 let media_failover () = (runtime_state ()).media_failover
 
 (* [runtime.lanes.<id>] ordered failover candidate lists. Reads the Atomic ref
@@ -1788,9 +1783,8 @@ let max_context_of_runtime (rt : t) : int =
 
 (* Resolve a keeper assignment to a lane. Declared lanes are preferred so a lane
    id can shadow a runtime id (lanes are explicit operator routing constructs).
-   An assignment naming a bare runtime gets a lane of its own rather than a
-   bare dispatch target: the lane is what carries failover and quota demotion,
-   so without one those mechanisms are simply off for that keeper.
+   An assignment naming a bare runtime resolves to a lane holding that runtime
+   alone.
    [Unavailable] retains a configured ID whose capability catalog entry is
    absent; [Missing] means no configured lane or runtime has that ID. *)
 let resolve_assignment (assigned_id : string) =
@@ -1799,14 +1793,7 @@ let resolve_assignment (assigned_id : string) =
   | Some lane -> `Lane lane
   | None ->
     (match List.find_opt (fun (runtime : t) -> String.equal runtime.id assigned_id) state.runtimes with
-     | Some runtime ->
-       let candidates =
-         match state.default_runtime with
-         | Some default ->
-           with_terminal_default ~default_runtime_id:default.id [ runtime.id ]
-         | None -> [ runtime.id ]
-       in
-       `Lane (Runtime_lane.make ~id:runtime.id candidates)
+     | Some runtime -> `Lane (Runtime_lane.make ~id:runtime.id [ runtime.id ])
      | None ->
        (match Option.bind state.startup_degradation (fun degradation ->
           List.find_opt (fun (missing : missing_catalog_model) ->

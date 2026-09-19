@@ -2813,6 +2813,7 @@ let test_parallel_policy_requires_provider_contract () =
 id = "fixture-provider"
 aliases = ["fixture-alias"]
 kind = "anthropic"
+capabilities_base = "anthropic"
 base_url = "https://fixture.invalid"
 request_path = "/v1/messages"
 api_key_env = ""

@@ -463,12 +463,6 @@ let keeper_phase_snapshot ?base_path () =
               when capacity_eligible -> true
             | _ -> false
           in
-          let acc =
-            if requires_session_recovery then
-              { acc with official_client_recovery_required_names =
-                  entry.name :: acc.official_client_recovery_required_names }
-            else acc
-          in
           (* Phase inventory is not execution truth. Executability is projected
              separately through the shared closed owner-execution ADT. A
              configuration or session recovery cause is failing but not
@@ -494,6 +488,11 @@ let keeper_phase_snapshot ?base_path () =
             then entry.name :: acc.configuration_blocked_names
             else acc.configuration_blocked_names
           in
+          let official_client_recovery_required_names =
+            if requires_session_recovery
+            then entry.name :: acc.official_client_recovery_required_names
+            else acc.official_client_recovery_required_names
+          in
           match entry.phase with
           | Keeper_state_machine.Running when capacity_eligible ->
             {
@@ -502,6 +501,7 @@ let keeper_phase_snapshot ?base_path () =
               running_names = entry.name :: acc.running_names;
               recovering_names;
               configuration_blocked_names;
+              official_client_recovery_required_names;
             }
           | Keeper_state_machine.Running ->
             acc
@@ -512,6 +512,7 @@ let keeper_phase_snapshot ?base_path () =
                 { counts with failing = counts.failing + 1; recovering };
               recovering_names;
               configuration_blocked_names;
+              official_client_recovery_required_names;
             }
           | Keeper_state_machine.Failing ->
             acc

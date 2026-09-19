@@ -3021,6 +3021,68 @@ let test_fleet_official_client_recovery ~paused ~autoboot () =
         Alcotest.(check (list string)) "TUI retains session recovery names" required_names
           fleet.fs_official_client_recovery_required_names))
 
+let test_fleet_official_client_recovery_clears_after_success reason () =
+  with_temp_dir "fleet-official-recovery-success" (fun dir ->
+    let config = Workspace.default_config dir in
+    let meta = make_keeper_meta ~name:"session-recovered" () in
+    with_running_keeper_metas ~owner_inventory:false config [ meta ] (fun () ->
+      let error = Keeper_internal_error.core_error_of_masc_internal_error
+          (Keeper_internal_error.Official_client_recovery_required
+             { runtime_id = "synthetic-runtime"; recovery_id = "synthetic-recovery"; reason })
+      in
+      let raw_error = Agent_core.Error.to_string error in
+      let terminal_reason = Keeper_turn_terminal.of_failure ~raw_error error in
+      Keeper_unified_turn_failure.record_failure_observation
+        ~config ~meta ~terminal_reason ~err:error ~error_text:raw_error;
+      mark_keeper_failing config meta;
+      let health () =
+        let snapshot =
+          Server_routes_http_runtime_fleet_scan.keeper_phase_snapshot ~base_path:dir ()
+        in
+        Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
+          ~base_path:dir ~bootable_names:[ meta.name ]
+          ~autoboot_scan:{ autoboot_names = [ meta.name ]; read_errors = [] }
+          ~phase_snapshot:snapshot ~phase_counts:snapshot.counts
+          ~execution_snapshot:{ owners = []; executable_names = [ meta.name ] }
+          ~paused_keepers_json:(`Assoc [ "count", `Int 0 ]) ()
+      in
+      let open Yojson.Safe.Util in
+      let before = health () in
+      Alcotest.(check string) "current refusal degrades fleet health" "degraded"
+        (before |> member "status" |> to_string);
+      Alcotest.(check int) "current refusal contributes one recovery" 1
+        (before |> member "official_client_recovery_required_keeper_count" |> to_int);
+      (* The parent terminal-reason fixture covers durable session resolution
+         through Completed. Here the same success reset and the registry's
+         completion event feed a fresh fleet projection; no live loop runs. *)
+      Alcotest.(check bool) "production success reset commits" true
+        (Keeper_turn_failure_streak.reset ~base_path:dir ~keeper_name:meta.name);
+      dispatch_keeper_event config meta Keeper_state_machine.Turn_succeeded;
+      Keeper_heartbeat_loop.refresh_failure_reason_after_turn
+        ~base_path:dir ~keeper_name:meta.name
+        ~turn_fail_count:(Keeper_registry.get_turn_failures ~base_path:dir meta.name);
+      let after = health () in
+      Alcotest.(check int) "successful keeper returns to running" 1
+        (after |> member "running_keeper_fiber_count" |> to_int);
+      Alcotest.(check int) "successful keeper has no recovery count" 0
+        (after |> member "official_client_recovery_required_keeper_count" |> to_int);
+      Alcotest.(check (list string)) "successful keeper has no recovery names" []
+        (after |> member "official_client_recovery_required_keeper_names"
+         |> to_list |> List.map to_string);
+      Alcotest.(check string) "successful keeper restores fleet health" "ok"
+        (after |> member "status" |> to_string);
+      Alcotest.(check bool) "successful keeper needs no operator action" false
+        (after |> member "operator_action_required" |> to_bool);
+      Alcotest.(check bool) "successful keeper leaves no fleet blocker" true
+        ((after |> member "blocker") = `Null);
+      match Tui_decode.decode_fleet_safety (`Assoc [ "keeper_fleet_safety", after ]) with
+      | Error error -> Alcotest.fail error
+      | Ok fleet ->
+        Alcotest.(check int) "TUI clears session recovery count" 0
+          fleet.fs_official_client_recovery_required_count;
+        Alcotest.(check (list string)) "TUI clears session recovery names" []
+          fleet.fs_official_client_recovery_required_names))
+
 let test_phase_snapshot_separates_terminal_configuration_from_recovery () =
   with_temp_dir "terminal-config-not-recovering" (fun dir ->
     let config = Workspace.default_config dir in
@@ -5351,6 +5413,12 @@ let () =
             (test_fleet_official_client_recovery ~paused:true ~autoboot:true)
         ; Alcotest.test_case "paused manual recovery does not degrade fleet" `Quick
             (test_fleet_official_client_recovery ~paused:true ~autoboot:false)
+        ; Alcotest.test_case "effect-fenced recovery clears after success" `Quick
+            (test_fleet_official_client_recovery_clears_after_success
+               Keeper_internal_error.Effect_fenced)
+        ; Alcotest.test_case "bootstrap-floor recovery clears after success" `Quick
+            (test_fleet_official_client_recovery_clears_after_success
+               Keeper_internal_error.Bootstrap_floor_exceeded)
         ] );
       ( "bootstrap",
         [

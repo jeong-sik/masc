@@ -553,6 +553,7 @@ awaiting_verification" 문장뿐이다(`config/tools/masc_tasks.toml:5`, `:14-16
 | `-done-without-verdict-buggy` | 판정 없이 완료 | `DoneRequiresLiveApproval` | 위반, 반례 3상태 |
 | `-superseded-verdict-buggy` | 교체된 제출에 대한 판정이 완료시킴 | `DoneRequiresLiveApproval` | 위반, 반례 6상태 |
 | `-claim-keeps-returned-buggy` | 반려된 Task 를 맡으면서 반려 표시를 안 지움 | `RejectedIsOpenAndUnheld` | 위반, 반례 6상태 |
+| `-rejected-reachable` | 깨끗한 모델(버그 없음) | `RejectedNeverHappens` — 깨져야 하는 것 | 위반, 반례 5상태 |
 
 - 스펙은 `Claimed` 와 `InProgress` 를 하나로 본다. `Start` 는 누가 맡는지를 바꾸지 않는다. 운영자가
   놓아 주는 것은 `Release` 와 결과가 같아 따로 두지 않았다.
@@ -575,6 +576,10 @@ awaiting_verification" 문장뿐이다(`config/tools/masc_tasks.toml:5`, `:14-16
   한다는 증거는 이것이지 상태 수가 아니다.
 - 코드의 `Todo` 는 낸 사람의 이름을 들고 있을 칸이 없고, `-rejected-forgets-producer-buggy` 가 그때
   무엇을 잃는지 보여 준다.
+- 같은 일이 다시 생기지 않게 `-rejected-reachable` 을 뒀다. 버그를 안 섞은 깨끗한 모델에
+  "반려된 Task 는 생기지 않는다"를 걸고 **깨지기를 기대한다**. 누가 `ApplyRejected` 를 다시 건드려
+  반려에 닿지 못하게 만들면 이 cfg 가 조용해지고 `scripts/tla-check.sh` 가 거기서 멈춘다. 공허한
+  불변식은 통과로 보이지 실패로 안 보이기 때문에, 알람을 반대로 걸어야 한다.
 - `-buggy` 의 반례는 §1.1 의 실제 경로와 같다: a1 이 t1 을 맡는다. 제출한다. t2 를 맡는다. t1 이
   반려된다. a1 이 t1 과 t2 를 맡고 있다.
 
@@ -616,7 +621,7 @@ OCaml 쪽은 임의의 액션·판정 열을 돌려 `OneTaskPerAgent` 를 확인
 
 | 단계 | 내용 | 끝났다는 증거 |
 |---|---|---|
-| 0 | 이 문서와 `TaskOwnership.tla` | `scripts/tla-check.sh` 에서 깨끗한 모델 통과, 버그 모델 11개 위반 |
+| 0 | 이 문서와 `TaskOwnership.tla` | `scripts/tla-check.sh` 에서 깨끗한 모델 통과, 버그 모델 11개와 도달성 검사 1개가 기대대로 위반 |
 | 1 | **저장 형식이 바뀌는 묶음.** `Rejected` 추가, 반려 판정이 그리로 보내고 `set_current = None`. `intent` 삭제. `AwaitingVerification` 의 `assignee` 를 `producer` 로, 기본값 없는 디코드. 제출자의 handoff 를 두고 사유를 `reason` 에만 넣기. 제출 증거를 호출에서만 읽기. 전달 전 반려 알림을 세 값으로 지우기. `release_unroutable_rejected_task_r` 와 `Operator_routed` 삭제. 알림 문장에 id. 운영자 판정 요청에 `verification_id`. **맡는 축과 권하는 축 가르기**(§3.2). **`Rejected_unclaimed` 목록과 대시보드 칸**(§3.7, §3.8) | 속성 테스트 `OneTaskPerAgent`. §4.2 첫 줄이 새 판정에서 0. `claim_next` 가 `Rejected` 를 권하지 않고 id 로는 맡아지는 테스트. 반려된 Task 가 목록과 대시보드 양쪽에 보이는 테스트 |
 | 2 | `Cancel` 의 자격을 `decide` 의 인자로. 인증된 운영자 경로와 TUI·dashboard 이전. 맡은 쪽 알림·기록·지표. 사라진 물음을 멈춤으로 알리지 않기. 도구 설명 | `release` 다음 `cancel` 이 만든 쪽 아닌 호출자에게 거절되는 테스트 |
 | 3 | 운영자 목록에 `Awaiting_verdict` 추가, 헌법 개정, `docs/spec/00-glossary.md` 의 Task Lifecycle 절 정정(`Rejected` 항목은 여기서 들어간다. 글로서리는 코드에 있는 말만 싣는다)과 `docs/spec/02-types-and-invariants.md` 정정, `Done_action` 과 `TaskLifecycle.tla` 삭제 | §4.2 셋째 줄 0 |

@@ -178,6 +178,11 @@ for label in verdict-assigns cancel-request anyone-cancels \
   run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla" \
     "TaskOwnership-${label}-buggy.cfg" "${label}-buggy"
 done
+# Reachability guard: the clean model must be able to reach a returned Task.
+# Expects a violation, so it goes red the day that stops being true.
+run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla" \
+  "TaskOwnership-rejected-reachable.cfg" "rejected-reachable"
+
 
 # Server lifecycle product invariants across lifecycle/lazy/readiness axes.
 run_tlc "$REPO_ROOT/specs/server-state" "ServerState.tla"

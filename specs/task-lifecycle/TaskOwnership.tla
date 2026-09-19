@@ -439,6 +439,14 @@ CancelledRequiresStanding ==
     \A t \in Tasks :
         outcome[t] = "Cancelled" => cancelled_by[t] \in {created_by[t], Operator}
 
+\* Reachability guard, not a safety property. It is written as something that
+\* must FAIL: its cfg expects a violation. If a future edit stops the clean
+\* model from reaching a returned Task, this cfg goes quiet and the runner
+\* reports it. Without it, RejectedIsOpenAndUnheld and RejectedNamesItsProducer
+\* can go back to being vacuously true and the clean run still passes, which is
+\* how they shipped in the first place.
+RejectedNeverHappens == \A t \in Tasks : ~returned[t]
+
 Safety ==
     /\ TypeOK
     /\ OneTaskPerAgent

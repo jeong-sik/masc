@@ -52,6 +52,12 @@ val persist_error_count : unit -> int
 (** Record and log a board persistence failure. *)
 val record_persist_error : where:string -> string -> unit
 
+val require_persisted_snapshot_readable :
+  (unit, string) result -> (unit, board_error) result
+(** Reject a mutation whose full-snapshot source did not load completely.
+    Board_votes uses this same persistence guard so vote and reaction rewrites
+    cannot diverge from post and sub-board rewrites. *)
+
 (** {1 Configuration} *)
 
 (** Re-export of [Env_config.Board.flush_interval_sec].  How

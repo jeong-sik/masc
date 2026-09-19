@@ -486,6 +486,9 @@ let () =
         ; test_case "server error 503 advance round trip" `Quick
             (test_refusal_advance_survives_the_durable_round_trip
                ~http_status:503 ~kind:"server_error")
+        ; test_case "server error 520 advance round trip" `Quick
+            (test_refusal_advance_survives_the_durable_round_trip
+               ~http_status:520 ~kind:"server_error")
         ; test_case "overload 529 advance round trip" `Quick
             (test_refusal_advance_survives_the_durable_round_trip
                ~http_status:529 ~kind:"overloaded")

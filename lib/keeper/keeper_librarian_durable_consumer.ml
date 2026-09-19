@@ -21,6 +21,10 @@ type error =
   | Range_end_boundary_missing of R.range
   | Progress_boundary_missing of P.position
   | Memory_snapshot_unreadable of string
+  | Counterpart_interval_non_monotone of
+      { after : float
+      ; before : float
+      }
   | Counterpart_observations_unreadable of Keeper_librarian_input_sources.read_error
   | Progress_write_failed of P.write_error
 
@@ -65,6 +69,11 @@ let error_to_string = function
       position.last_atom_digest
   | Memory_snapshot_unreadable detail ->
     "current Memory OS snapshot is unreadable: " ^ detail
+  | Counterpart_interval_non_monotone { after; before } ->
+    Printf.sprintf
+      "counterpart interval is not monotone: after=%.06f before=%.06f"
+      after
+      before
   | Counterpart_observations_unreadable error ->
     Keeper_librarian_input_sources.read_error_to_string error
   | Progress_write_failed error -> P.write_error_to_string error
@@ -277,6 +286,12 @@ let consume_one_with_extent ~extent ~config ~keeper_name ~commit =
     in
     let selected_messages = R.slice messages range in
     let* current, expected_revision = current_memory ~keepers_dir:memory_keepers_dir ~keeper_name in
+    let* () =
+      match after with
+      | Some after when after >= ended_at ->
+        Error (Counterpart_interval_non_monotone { after; before = ended_at })
+      | None | Some _ -> Ok ()
+    in
     let* counterpart_observations =
       Keeper_librarian_input_sources.counterpart_observations_between_offloaded
         ~base_dir:config.Workspace.base_path

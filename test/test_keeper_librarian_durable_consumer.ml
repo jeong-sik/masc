@@ -291,6 +291,39 @@ let test_last_matching_boundary_wins_when_clock_moves_backward () =
   check (option int) "last appended boundary is authoritative" (Some 3) !selected_turn
 ;;
 
+let test_distinct_boundaries_reject_non_monotone_counterpart_interval () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-non-monotone-counterpart" in
+  write_meta config trace_id;
+  let first = [ message "turn-1" ] in
+  save_checkpoint config ~trace_id first 1;
+  append_boundary config ~trace_id ~turn:1 ~recorded_at:20.0 first;
+  (match consume config (fun ~expected_revision:_ _ -> true) with
+   | Consumer.Baseline_advanced _ -> ()
+   | Consumer.Nothing_to_read
+   | Consumer.Memory_not_committed
+   | Consumer.Progress_advanced _ -> fail "fixture baseline did not advance");
+  let messages = first @ [ message "turn-2" ] in
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:10.0 messages;
+  save_checkpoint config ~trace_id messages 2;
+  let commit_called = ref false in
+  (match
+     Consumer.consume_one ~config ~keeper_name
+       ~commit:(fun ~expected_revision:_ _ ->
+         commit_called := true;
+         true)
+   with
+   | Error (Consumer.Counterpart_interval_non_monotone { after; before }) ->
+     check (float 0.001) "prior boundary time" 20.0 after;
+     check (float 0.001) "range end time" 10.0 before
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "non-monotone interval advanced as empty evidence");
+  check bool "memory commit is not attempted" false !commit_called;
+  match read_progress config with
+  | Some progress -> check int "cursor stays before rejected range" 1 progress.position.end_atom
+  | None -> fail "rejected interval removed progress"
+;;
+
 let test_same_name_clusters_keep_independent_ranges () =
   with_workspace @@ fun default ->
   let a = config_in_cluster default "Durable/A" in
@@ -438,6 +471,8 @@ let () =
             test_failed_long_range_retries_only_oldest_cut_point
         ; test_case "last boundary wins when wall clock goes backward" `Quick
             test_last_matching_boundary_wins_when_clock_moves_backward
+        ; test_case "distinct backward clocks do not erase counterpart evidence" `Quick
+            test_distinct_boundaries_reject_non_monotone_counterpart_interval
         ; test_case "same-name clusters isolate range progress" `Quick
             test_same_name_clusters_keep_independent_ranges
         ; test_case "selected range bypasses recent window" `Quick

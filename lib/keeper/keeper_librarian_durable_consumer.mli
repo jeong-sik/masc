@@ -22,6 +22,10 @@ type error =
   | Range_end_boundary_missing of Keeper_librarian_range.range
   | Progress_boundary_missing of Keeper_librarian_progress.position
   | Memory_snapshot_unreadable of string
+  | Counterpart_interval_non_monotone of
+      { after : float
+      ; before : float
+      }
   | Counterpart_observations_unreadable of Keeper_librarian_input_sources.read_error
   | Progress_write_failed of Keeper_librarian_progress.write_error
 

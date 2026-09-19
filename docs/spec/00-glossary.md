@@ -55,8 +55,8 @@ status: reference
   `Paused`, `Completed`, `Dropped`다.
 
 **Schedule**
-: 미래 시점에 Keeper를 깨우는 durable 요청. 현재 동작은 create, list, get,
-  cancel이다. Schedule은 이후 외부 효과를 자동 승인하지 않는다.
+: 미래 시점에 Keeper를 깨우는 durable 요청. 만들기, 조회, 수정, 취소와
+  기록 추가·조회 도구가 있다. Schedule은 이후 외부 효과를 자동 승인하지 않는다.
 
 **Fusion**
 : 여러 독립 판단을 비동기로 수집하고 하나의 결론으로 합성하는 실행.

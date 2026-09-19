@@ -18,15 +18,19 @@ side derives memory from a model-authored state envelope.
 | Tool/history logs | MASC | observable evidence and recall source |
 
 Memory OS snapshot path:
-`<base-path>/.masc/keepers/<keeper_name>.memory-current.json`.
+`<resolved-config-root>/keepers/<keeper_name>.memory-current.json`.
+`Config_dir_resolver.keepers_dir_for_base_path` resolves that directory; the
+default is `<base-path>/.masc/config/keepers`, and a configured `MASC_CONFIG_DIR`
+changes the config root.
 A missing snapshot means fresh empty state. Memory OS does not import, migrate,
 or fall back to alternate store layouts.
 
 ## Write Contract
 
 A memory claim must come from an explicit memory operation or the librarian
-lane's typed result. A claim stores only its exact text, typed category, and
-insertion timestamp. Its `memory_id` is the SHA-256 digest of the exact claim
+lane's typed result. A fact stores its exact claim text, typed category,
+`first_seen` and `last_seen` timestamps, writer origin, and observed or derived
+basis (`Keeper_memory_os_types.fact`). Its `memory_id` is the SHA-256 digest of the exact claim
 bytes and is used for exact write receipts, derivation premises, duplicate
 rejection, retraction, recall evidence, and observability. An observed fact has
 no premises. A derived fact carries one or more typed derivations, each with an
@@ -104,7 +108,7 @@ every supported claim in stored order. It does not rank, trim, or hide claims
 behind a byte threshold. A malformed snapshot is reported as unavailable
 rather than silently treated as empty memory.
 
-Explicit Memory OS search filters exact query substrings and preserves snapshot
+Explicit Memory OS search filters case-insensitive query substrings and preserves snapshot
 order. It does not emit a relevance score or reorder facts by timestamp.
 It returns exact fact identities and derivation support. The
 `keeper_memory_retract` tool accepts one of those ordinary-current identities
@@ -112,18 +116,37 @@ plus a non-empty reason, atomically removes it, and records every derived fact
 invalidated by the resulting support fixed point. Source-bound facts remain a
 separate exact-bytes store and are not accepted by this retraction surface.
 
+Search with `source="absorbed"` reads facts a Librarian combined into another
+claim from `<keeper_name>.memory-absorbed.jsonl`. These results carry
+`store="absorbed_memory"`, the successor identity `into`, and `into_current`.
+An archived fact is not a current derivation premise. An archive row alone does
+not prove that the successor snapshot committed; `into_current` is checked
+against current memory. `source="all"` includes the stores with those identities
+kept distinct.
+
 The runtime may inject selected memory into a future prompt as context. That
 context is advisory and cannot mutate task, goal, lifecycle, HITL, connector,
 or scheduler state.
 
 ## Librarian disposition
 
-The librarian LLM returns exactly one retain/drop disposition for every current
-memory ID plus any new claims. Missing or duplicate dispositions invalidate the
-result. Deterministic code validates the exact schema and claim identities,
-then atomically replaces the snapshot only if its observed revision still
-matches. No threshold, priority score, recency rule, or capacity heuristic
-decides which memories survive.
+The Librarian returns changes: `new_claims`, explicit `dropped` statements,
+and `working_contexts`. A new claim may name a `supersedes` identity or
+`absorbs` identities. Unmentioned facts are retained subject to derivation
+support; there is no per-fact retain response. Superseded identities must also be dropped; absorbed
+identities must not be dropped. Unknown identities, duplicate dispositions,
+and invalid schema values reject the answer (`Keeper_librarian`).
+
+`Keeper_memory_os_current.apply_disposition` applies the changes to the current
+snapshot under its write lock. A fact the Keeper wrote while the model was
+answering is preserved unless the answer explicitly retires that identity
+or its derivation loses all support;
+an already-present new claim is not inserted twice. Absorbed facts are appended
+to the archive before replacing the snapshot, and an archive write failure
+fails the memory commit. A failed snapshot replacement can therefore leave an
+archive row whose successor is not current. Working context has a separate
+revision and does not roll back a memory commit. No threshold, priority score,
+recency rule, or capacity heuristic decides which memories survive.
 
 ## Generation and Handoff
 

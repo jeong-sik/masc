@@ -73,7 +73,7 @@ let timeout_phase_of_label label =
     | _ -> None
 ;;
 
-type timeout_source =
+type timeout_source = Keeper_turn_terminal_code.timeout_source =
   | Agent_core_api
   | Agent_core_provider
 
@@ -181,9 +181,9 @@ let classify_provider_runtime_error_record ?agent_core_timeout ~code ~detail () 
      consulted. The prefix parse below survives only for records rehydrated
      from persisted wire, where the string is all that remains. *)
   match agent_core_timeout with
-  | Some { Keeper_turn_terminal_code.phase } ->
+  | Some { Keeper_turn_terminal_code.source; phase } ->
     Provider_timeout
-      { source = Agent_core_provider
+      { source
       ; phase = Option.map timeout_phase_of_agent_core_phase phase
       }
   | None ->
@@ -263,8 +263,9 @@ let classify_core_error (err : Agent_core.Error.t) : t =
   | Some _ as internal_error -> classify_masc_internal_error internal_error
   | None ->
     (match err with
-     | Agent_core.Error.Api (Timeout _) ->
-       provider_timeout ~source:Agent_core_api ~phase:None
+     | Agent_core.Error.Api (Timeout { phase; _ }) ->
+       provider_timeout ~source:Agent_core_api
+         ~phase:(Option.map timeout_phase_of_agent_core_phase phase)
      | Agent_core.Error.Provider provider_error ->
        classify_provider_error provider_error
      | Agent_core.Error.Api (NetworkError _ | Overloaded _ | ServerError _

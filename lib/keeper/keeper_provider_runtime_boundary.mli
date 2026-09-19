@@ -33,7 +33,7 @@ type timeout_phase =
           before the permit was granted; nothing was sent. *)
   | Unknown_timeout
 
-type timeout_source =
+type timeout_source = Keeper_turn_terminal_code.timeout_source =
   | Agent_core_api
   | Agent_core_provider
 
@@ -54,10 +54,10 @@ val classify_provider_runtime_error_record
   -> detail:string
   -> unit
   -> t
-(** Classify a persisted [Provider_runtime_error] catch-all record.  This is
-    narrower than parsing arbitrary messages: it only recognizes the AGENT_CORE
-    provider timeout wire markers such as
-    ["provider_error_timeout:http_operation"]. [detail] remains in the
-    signature for existing callers, but is not trusted for classification. *)
+(** Classify a registry [Provider_runtime_error] from its typed timeout
+    observation when present, preserving the API/provider source and phase.
+    Without typed evidence, only existing provider timeout wire markers such as
+    ["provider_error_timeout:http_operation"] are recognized. [detail] is
+    not trusted for classification. *)
 
 val is_provider_timeout_error : Agent_core.Error.t -> bool

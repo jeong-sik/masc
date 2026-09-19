@@ -311,6 +311,8 @@ flowchart TD
 
 **trace 가 바뀐 Keeper(1b).** Keeper 의 trace id 를 새로 만드는 곳은 Keeper 를 만드는 자리 하나다(`keeper_turn_up_create.ml`). `keeper_turn_up.ml` 의 `handle_keeper_up` 은 meta 가 없을 때만 그 자리로 간다. 그래서 같은 이름의 trace 가 바뀌는 길은 meta 가 지워진 뒤 다시 만드는 것뿐이다. dashboard purge 는 턴 끝 기록과 진행 파일을 같이 지우므로 남는 것이 없다. meta 만 지우는 멈춤(`keeper_shutdown_types.ml` 의 `Operator_stop_remove_meta`)은 두 파일을 남긴다. 기억 파일은 이름 기준이라 새 trace 의 Keeper 가 그대로 이어받는다. 같은 뇌이므로 옛 trace 의 안 읽은 턴도 읽을 거리다. 옛 trace 에는 턴이 더 붙지 않으므로 마저 읽는 일은 끝이 있고, 기다리는 시간을 정할 필요가 없다. 옛 trace 의 checkpoint 가 지워졌으면 그 trace 의 줄은 모두 2a 에서 떨어져 읽을 턴이 없다. 그때는 `keeper_clear` 때와 같은 저널 줄을 남기고 넘어간다. 새 trace 는 첫 턴이 시작할 때 쓴 `history_restarted` 줄이 있어 0 부터 읽힌다(§4.6).
 
+얼마나 자주 있는 일인지 재 봤다(09-19, 라이브 작업 공간 `<base-path>/.masc` 를 읽기만 했다). Keeper 17개의 meta trace 와 checkpoint 의 `session_id` 는 17/17 이 같다. 지금 1b 에 걸리는 Keeper 는 없다는 뜻이다. 그런데 **어느 Keeper 의 meta 도 가리키지 않는 trace 디렉터리가 9개**이고, 아홉 전부 checkpoint(합계 49.6 MB)와 history 파일을 아직 들고 있다. trace 가 바뀌는 일은 일어났고, 바뀔 때마다 옛 이력이 그대로 남았다. "지금 안 보인다"가 "안 일어난다"는 아니다.
+
 ### 4.5 지켜야 할 것
 
 각 항목은 테스트로 증명한다.
@@ -489,7 +491,7 @@ atom digest 는 전부 겹치는 것으로 둔다. 2a 와 5 에는 그것이 최
 
 | 재는 것 | 뜻 |
 |---|---|
-| 회차 수, 회차당 시간, checkpoint 읽는 시간 | 턴마다 도는 Librarian 이 Keeper 를 따라잡는가. 지금은 p50 21초·p90 583초 |
+| 회차 수, 회차당 시간, checkpoint 읽는 시간 | 턴마다 도는 Librarian 이 Keeper 를 따라잡는가. 지금은 p50 21초·p90 583초. 읽을 양은 재 볼 것: 09-19 라이브 17 Keeper 의 checkpoint 합계가 04시 517 MB → 09시 548.8 MB 였고 한 개 최대는 69.6 → 75.1 MB 다. 회차마다 checkpoint 를 통째로 읽으면 그 비용이 이 속도로 는다 |
 | 출력 거절률 | 입력 범위가 바뀌어도 모델이 스키마를 지키는가. 밀린 구간이 길 때는 어떤가 |
 | 읽은 위치부터 읽을 때와 맨 뒤 72개를 읽을 때의 claim 차이 | 앞 맥락이 줄어든 영향 |
 | 같은 지식을 되풀이해 넣는 양 | I2 의 중복이 실제로 얼마나 생기는가 |

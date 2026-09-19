@@ -1,7 +1,8 @@
 (** Tests for {!Masc.Keeper_turn_boundaries} (RFC librarian-lifecycle §4.6):
     the line a finished keeper turn leaves to say where its saved atom history
-    ended, and the line {!Masc.Keeper_history_clear} leaves once it has emptied
-    one. *)
+    ended, and the line that says a history holds no atom, which
+    {!Masc.Keeper_history_clear} leaves once it has emptied one and a turn
+    leaves when it starts from one. *)
 
 open Alcotest
 
@@ -399,6 +400,25 @@ let test_purge_plan_removes_the_turn_boundary_log () =
     (List.exists (fun entry -> entry = Shutdown.Keeper_turn_boundaries_artifact) plan)
 ;;
 
+(* A store whose last append never completed: it ends mid-line, and refuses
+   every append until process-start recovery truncates the torn tail. *)
+let plant_torn_tail ~keepers_dir =
+  let torn = {|{"kind":"turn_ended"|} in
+  Fs_compat.mkdir_p keepers_dir;
+  let store =
+    Unix.openfile
+      (Boundaries.path_for_keepers_dir ~keepers_dir ~keeper_id)
+      [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC ]
+      0o600
+  in
+  let written = Unix.write_substring store torn 0 (String.length torn) in
+  Unix.close store;
+  check int "the fixture line was written whole" (String.length torn) written;
+  match Boundaries.read ~keepers_dir ~keeper_id with
+  | Ok [ (1, Error Boundaries.Incomplete_line) ] -> ()
+  | Ok _ | Error _ -> fail "the fixture store does not end mid-line"
+;;
+
 (* {1 The clear} *)
 
 module Clear = Masc.Keeper_history_clear
@@ -535,30 +555,89 @@ let test_a_superseded_clear_writes_nothing () =
 ;;
 
 (* A store that ends mid-line refuses every append. The history is emptied all
-   the same, so the outcome has to say the line is missing: until the next turn
-   ends and says so itself, nothing explains why the history started over. *)
+   the same, so the outcome has to say the line is missing: the turns that
+   follow are refused their lines as well, so until the torn tail is repaired
+   nothing explains why the history started over. *)
 let test_a_clear_whose_line_is_refused_says_so () =
   with_saved_history ~turn_count:3
   @@ fun ~keepers_dir ~base_dir ~session context ->
-  let torn = {|{"kind":"turn_ended"|} in
-  let store =
-    Unix.openfile
-      (Boundaries.path_for_keepers_dir ~keepers_dir ~keeper_id)
-      [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC ]
-      0o600
-  in
-  let written = Unix.write_substring store torn 0 (String.length torn) in
-  Unix.close store;
-  check int "the fixture line was written whole" (String.length torn) written;
-  (match Boundaries.read ~keepers_dir ~keeper_id with
-   | Ok [ (1, Error Boundaries.Incomplete_line) ] -> ()
-   | Ok _ | Error _ -> fail "the fixture store does not end mid-line");
+  plant_torn_tail ~keepers_dir;
   (match clear ~keepers_dir ~session context with
    | Clear.Cleared { cleared_message_count = _; marker = Error _ } -> ()
    | (Clear.Cleared { marker = Ok (); _ } | Clear.Superseded _ | Clear.Save_unconfirmed _) as
      other -> failf "expected a cleared history with no line: %s" (describe_outcome other));
   check bool "the history was emptied" true
     (List.for_all is_system (saved_messages ~base_dir))
+;;
+
+(* {1 The start of a turn} *)
+
+module Turn_helpers = Masc.Keeper_agent_run_turn_helpers
+
+let started_trace = "trace-started"
+
+(* A workspace, and the keepers directory the turns of its keepers write to. *)
+let with_workspace f =
+  Eio_main.run
+  @@ fun _env ->
+  let base_path = Filename.temp_dir "turn-start-" "" in
+  Fun.protect
+    ~finally:(fun () -> Fs_compat.remove_tree base_path)
+    (fun () ->
+       f
+         ~config:(Masc.Workspace.default_config base_path)
+         ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path))
+;;
+
+let start_turn ~config history_at_start =
+  Turn_helpers.record_empty_history_at_turn_start
+    ~config
+    ~keeper_name:keeper_id
+    ~trace_id:started_trace
+    history_at_start
+;;
+
+let turn_start_failures () =
+  Masc.Otel_metric_store.metric_value_or_zero
+    Keeper_metrics.(to_string TurnBoundaryFailures)
+    ~labels:[ "keeper", keeper_id; "site", "turn_start" ]
+    ()
+;;
+
+(* The turn has saved nothing yet. Whatever it saves first, and whether or not
+   it reaches its end, the store already says its atoms are numbered from
+   zero. *)
+let test_a_turn_that_starts_from_no_atom_says_so () =
+  with_workspace
+  @@ fun ~config ~keepers_dir ->
+  start_turn ~config Boundaries.Fresh_history;
+  match read_lines ~keepers_dir with
+  | [ (1, { Boundaries.recorded_at = _; event = Boundaries.History_empty { trace_id } }) ]
+    -> check string "the line names the turn's trace" started_trace trace_id
+  | lines -> failf "expected one empty-history line, read %d" (List.length lines)
+;;
+
+(* The end an earlier line states is where this turn starts. *)
+let test_a_turn_that_continues_a_history_writes_nothing () =
+  with_workspace
+  @@ fun ~config ~keepers_dir ->
+  start_turn ~config Boundaries.Continued_history;
+  check int "no line" 0 (List.length (read_lines ~keepers_dir))
+;;
+
+(* The turn has not run yet, and a line the store refuses is no reason not to
+   run it: the refusal is counted, nothing is raised, and the store is left as
+   it was. *)
+let test_a_refused_line_does_not_stop_the_turn () =
+  with_workspace
+  @@ fun ~config ~keepers_dir ->
+  plant_torn_tail ~keepers_dir;
+  let before = turn_start_failures () in
+  start_turn ~config Boundaries.Fresh_history;
+  check (float 0.0001) "the refusal is counted" (before +. 1.0) (turn_start_failures ());
+  match Boundaries.read ~keepers_dir ~keeper_id with
+  | Ok [ (1, Error Boundaries.Incomplete_line) ] -> ()
+  | Ok _ | Error _ -> fail "the refused line changed the store"
 ;;
 
 let () =
@@ -597,6 +676,14 @@ let () =
             test_a_superseded_clear_writes_nothing
         ; test_case "a clear whose line is refused says so" `Quick
             test_a_clear_whose_line_is_refused_says_so
+        ] )
+    ; ( "turn start"
+      , [ test_case "a turn that starts from no atom says so" `Quick
+            test_a_turn_that_starts_from_no_atom_says_so
+        ; test_case "a turn that continues a history writes nothing" `Quick
+            test_a_turn_that_continues_a_history_writes_nothing
+        ; test_case "a refused line does not stop the turn" `Quick
+            test_a_refused_line_does_not_stop_the_turn
         ] )
     ]
 ;;

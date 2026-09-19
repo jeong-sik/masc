@@ -111,9 +111,13 @@ status: reference
   있었는지로 정한다. Keeper는 빈 Checkpoint를 갖고 만들어지기 때문이다. 파일에
   쌓인 순서는 turn 순서가 아닐 수 있어서 읽는 쪽은 Atom 수로 줄을 세운다.
   같은 파일에 `history_empty` 줄도 쌓인다. "이 trace의 History에 지금 Atom이
-  없다"를 말하는 줄이고, 그것을 본 쪽이 쓴다. `masc_keeper_clear`는 비운
-  Checkpoint가 저장된 뒤에 쓴다. `fresh` 줄과 `history_empty` 줄은 둘 다 "이
-  trace의 Atom 번호가 0에서 다시 시작했다"를 말한다.
+  없다"를 말하는 줄이고, Atom이 없는 History를 손에 든 쪽이 쓴다. Atom이 없는
+  History에서 시작하는 turn은 시작할 때 쓴다. 그 turn이 저장만 하고 끝을 못 내도
+  줄은 남는다. Checkpoint를 못 읽어서 빈 History로 시작한 turn도 이 줄을 쓰는데,
+  그때는 저장된 History에 Atom이 남아 있을 수 있다.
+  `masc_keeper_clear`는 비운 Checkpoint가 저장된 뒤에 쓴다. `fresh` 줄과
+  `history_empty` 줄은 둘 다 "이 trace의 Atom 번호가 0에서 다시 시작했다"를
+  말한다.
 
 **Generation**
 : 같은 Keeper가 새 trace로 이어진 횟수. 초기값은 0이다.

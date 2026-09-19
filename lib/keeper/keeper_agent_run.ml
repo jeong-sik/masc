@@ -1340,8 +1340,8 @@ let run_turn
        client that assembles the wire itself.
 
        The receipt distinguishes retransmitted MASC input from history held
-       by the client; it does not distinguish Start from Resume. A resumed
-       client can send the canonical snapshot again, as documented by
+       by the client; it does not distinguish Start from Resume. On resume,
+       MASC can retransmit the canonical snapshot, as documented by
        Keeper_official_client_host.transmitted_model_input. Client-owned
        native history outside that snapshot is not measured here.
        Held_by_client_session becomes an explicit attribution gap rather than

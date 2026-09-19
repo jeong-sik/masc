@@ -44,4 +44,3 @@ let ensure_masc_dir () =
   ensure_dir base;
   ensure_dir dir
 ;;
-

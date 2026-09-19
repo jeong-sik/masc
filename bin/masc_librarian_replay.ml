@@ -29,13 +29,6 @@ module Keeper_librarian_range = Masc.Keeper_librarian_range
 module Keeper_librarian_progress = Masc.Keeper_librarian_progress
 module Keeper_checkpoint_store = Masc.Keeper_checkpoint_store
 
-let boundary_suffix =
-  (* Asked of the module that writes the file instead of spelled out here, so
-     renaming the artifact cannot leave this tool scanning for the old name. *)
-  Filename.basename
-    (Keeper_turn_boundaries.path_for_keepers_dir ~keepers_dir:"." ~keeper_id:"")
-;;
-
 let usage =
   "usage: masc-librarian-replay [--base-path DIR] [--keeper NAME]... [--extent \
    all|cut-points]\n\
@@ -315,11 +308,22 @@ let keepers_with_a_log keepers_dir =
     Ok
       (Array.to_list entries
        |> List.filter_map (fun entry ->
-         let suffix_at = String.length entry - String.length boundary_suffix in
-         if suffix_at > 0
-            && String.sub entry suffix_at (String.length boundary_suffix) = boundary_suffix
-         then Some (String.sub entry 0 suffix_at)
-         else None)
+         match Keeper_id.Keeper_name.of_string entry with
+         | Error _ -> None
+         | Ok name ->
+           let keeper_id = Keeper_id.Keeper_name.to_string name in
+           let path =
+             Keeper_turn_boundaries.path_for_keepers_dir
+               ~keepers_dir ~keeper_id
+           in
+           (match Unix.lstat path with
+            | _ -> Some keeper_id
+            | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) ->
+              None
+            | exception Unix.Unix_error (error, fn, arg) ->
+              prerr_endline
+                (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message error));
+              exit 2))
        |> List.sort compare)
 ;;
 
@@ -364,12 +368,9 @@ let () =
         Config_dir_resolver.base_path_or_cwd ()
         |> Masc.Workspace.runtime_base_path_for
     in
-    let keepers_dir =
-      Config_dir_resolver.keepers_dir_for_base_path ~base_path
-    in
-    (* Use the writer's cluster resolution without opening a storage backend. *)
-    let runtime_root = (Masc.Workspace.backend_config_for base_path).base_path in
     let session_store = Masc.Keeper_fs.session_store_path_for_base_path base_path in
+    let runtime_root = Filename.dirname session_store in
+    let keepers_dir = Masc.Workspace.keepers_runtime_dir_for_base_path base_path in
     let keepers_with_logs =
       match keepers_with_a_log keepers_dir with
       | Ok keepers -> keepers

@@ -380,7 +380,7 @@ let test_appended_lines_read_back_in_order () =
   check (list (pair int record_t)) "one numbered line per append, in the order appended"
     (List.mapi (fun index line -> index + 1, line) written)
     (read_lines ~keepers_dir);
-  check string "the file the RFC names" "keeper.turn-boundaries.jsonl"
+  check string "the file the RFC names" "turn-boundaries.jsonl"
     (Filename.basename (Boundaries.path_for_keepers_dir ~keepers_dir ~keeper_id))
 ;;
 
@@ -404,9 +404,8 @@ let test_a_line_no_reader_decodes_is_not_written () =
   check int "nothing was written" 0 (List.length (read_lines ~keepers_dir))
 ;;
 
-(* The log lives in the config keepers directory, outside the runtime
-   directory the purge removes: without a plan entry a purged keeper leaves it
-   to a later keeper with the same name. *)
+(* The cluster-local log and read position are named together in the artifact
+   plan, so a same-name successor cannot inherit only half of the pair. *)
 let test_purge_plan_removes_the_turn_boundary_log () =
   let module Shutdown = Masc.Keeper_shutdown_types in
   let context = { Shutdown.requested_name = keeper_id } in
@@ -430,7 +429,8 @@ let the_store_is_still_blocked ~keepers_dir =
 (* A store whose last append never completed: it ends mid-line. *)
 let plant_torn_tail ~keepers_dir =
   let torn = {|{"kind":"turn_ended"|} in
-  Fs_compat.mkdir_p keepers_dir;
+  Fs_compat.mkdir_p (Filename.dirname
+    (Boundaries.path_for_keepers_dir ~keepers_dir ~keeper_id));
   let store =
     Unix.openfile
       (Boundaries.path_for_keepers_dir ~keepers_dir ~keeper_id)
@@ -619,15 +619,15 @@ let started_trace = "trace-started"
 
 (* A workspace, and the keepers directory the turns of its keepers write to. *)
 let with_workspace f =
+  Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
   Eio_main.run
   @@ fun _env ->
   let base_path = Filename.temp_dir "turn-start-" "" in
   Fun.protect
     ~finally:(fun () -> Fs_compat.remove_tree base_path)
     (fun () ->
-       f
-         ~config:(Masc.Workspace.default_config base_path)
-         ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path))
+       let config = Masc.Workspace.default_config base_path in
+       f ~config ~keepers_dir:(Masc.Workspace.keepers_runtime_dir config))
 ;;
 
 module Run_context = Masc.Keeper_run_context

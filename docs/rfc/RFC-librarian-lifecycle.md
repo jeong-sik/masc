@@ -3,18 +3,18 @@ rfc: "librarian-lifecycle"
 title: "Librarian 생명주기 — 끝난 턴을 빠짐없이 순서대로 읽고, 읽은 위치를 남긴다"
 status: Draft
 created: 2026-09-18
-updated: 2026-09-18
+updated: 2026-09-19
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["keeper-context-window-in-tokens", "memory-os-bounded-context-and-librarian-curator", "0456", "0363"]
-implementation_prs: ["#37020", "#37024", "#37027"]
+implementation_prs: ["#37020", "#37024", "#37027", "#37030", "#37028", "#37031"]
 ---
 
 # RFC: Librarian 생명주기
 
 - 상태: Draft
-- 작성: 2026-09-18. 코드는 origin/main `84fb520c34`, 실측은 같은 날 라이브 `<base-path>/.masc`.
+- 작성: 2026-09-18, 고침: 2026-09-19. 코드는 origin/main `84fb520c34`, 실측은 작성일 라이브 `<base-path>/.masc`. 뒤에 더한 실측은 문장마다 잰 날을 적었다.
 - 관련: 창 RFC(`keeper-context-window-in-tokens`) §13 개정 Draft #37008, Memory OS RFC(`memory-os-bounded-context-and-librarian-curator`), RFC-0456, RFC-0363, 이슈 #37004·#36979
 
 ## 읽기 전에 — 말의 뜻

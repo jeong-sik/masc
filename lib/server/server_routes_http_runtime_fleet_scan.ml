@@ -1346,7 +1346,7 @@ let keeper_fleet_safety_health_json
   let status =
     if no_executable_keeper_fibers then "blocked"
     else if all_target_keepers_configuration_blocked then "blocked"
-    else if configuration_blocked_count > 0 then "degraded"
+    else if turn_configuration_error_count > 0 then "degraded"
     else if official_client_recovery_required_count > 0 then "degraded"
     else if reaction_capacity_below_target then "degraded"
     else if active_task_owner_without_executable_fiber then "degraded"
@@ -1359,7 +1359,7 @@ let keeper_fleet_safety_health_json
   let blocker =
     if keeper_bootstrap_blocked then Some "keeper_bootstrap_disabled"
     else if no_executable_keeper_fibers then Some "no_executable_keeper_fibers"
-    else if configuration_blocked_count > 0 then Some "turn_configuration_error"
+    else if turn_configuration_error_count > 0 then Some "turn_configuration_error"
     else if official_client_recovery_required_count > 0
     then Some "official_client_recovery_required"
     else if reaction_capacity_below_target then Some "reaction_capacity_below_target"
@@ -1490,7 +1490,7 @@ let keeper_fleet_safety_health_json
     ; ( "operator_action_required"
       , `Bool
           (no_executable_keeper_fibers
-           || configuration_blocked_count > 0
+           || turn_configuration_error_count > 0
            || official_client_recovery_required_count > 0
            || reaction_capacity_below_target
            || keeper_bootstrap_blocked

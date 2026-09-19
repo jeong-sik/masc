@@ -2999,19 +2999,14 @@ let test_fleet_official_client_recovery ~paused ~autoboot () =
         (count "executable_keeper_fiber_count");
       Alcotest.(check int) "paused inventory stays separate" (if paused then 2 else 0)
         (count "paused_keeper_count");
-      let needs_action = autoboot || not paused in
-      Alcotest.(check string) "fleet health includes session recovery"
-        (if needs_action then "degraded" else "ok")
-        (json |> member "status" |> to_string);
-      Alcotest.(check bool) "operator action agrees with health" needs_action
+      (* The configuration Keeper is active in every mixed case, including
+         when both session-recovery Keepers are paused or manually started. *)
+      Alcotest.(check string) "active configuration failure remains visible"
+        "degraded" (json |> member "status" |> to_string);
+      Alcotest.(check bool) "operator action agrees with health" true
         (json |> member "operator_action_required" |> to_bool);
-      let expected_blocker =
-        if autoboot then `String "turn_configuration_error"
-        else if paused then `Null
-        else `String "official_client_recovery_required"
-      in
-      Alcotest.(check bool) "native cause independently explains manual fleet health" true
-        ((json |> member "blocker") = expected_blocker);
+      Alcotest.(check string) "configuration keeps its existing blocker priority"
+        "turn_configuration_error" (json |> member "blocker" |> to_string);
       match Tui_decode.decode_fleet_safety (`Assoc [ "keeper_fleet_safety", json ]) with
       | Error error -> Alcotest.fail error
       | Ok fleet ->
@@ -3082,6 +3077,56 @@ let test_fleet_official_client_recovery_clears_after_success reason () =
           fleet.fs_official_client_recovery_required_count;
         Alcotest.(check (list string)) "TUI clears session recovery names" []
           fleet.fs_official_client_recovery_required_names))
+
+let test_manual_keeper_failure_health ~paused ~phase ~reason
+    ~expected_config_count ~expected_blocker () =
+  with_temp_dir "manual-keeper-health" (fun dir ->
+    let config = Workspace.default_config dir in
+    let meta =
+      { (make_keeper_meta ~name:"manual-health" ~paused ()) with
+        activation_mode = Keeper_activation_mode.Manual }
+    in
+    with_running_keeper_metas ~owner_inventory:false config [ meta ] (fun () ->
+      Keeper_registry.set_failure_reason ~base_path:dir meta.name (Some reason);
+      (match phase with
+       | Keeper_state_machine.Failing -> mark_keeper_failing config meta
+       | Keeper_state_machine.Running -> ()
+       | _ -> Alcotest.fail "fixture requires Running or Failing");
+      let snapshot = Server_routes_http_runtime_fleet_scan.keeper_phase_snapshot ~base_path:dir () in
+      let executable_names = if paused then [] else [ meta.name ] in
+      let json = Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
+          ~base_path:dir ~bootable_names:[ meta.name ]
+          ~autoboot_scan:{ autoboot_names = []; read_errors = [] }
+          ~phase_snapshot:snapshot ~phase_counts:snapshot.counts
+          ~execution_snapshot:{ owners = []; executable_names }
+          ~paused_keepers_json:(`Assoc [ "count", `Int (if paused then 1 else 0) ]) () in
+      (* Reuse this actual synthetic producer JSON in the browser regression. *)
+      Printf.printf "MANUAL_CONFIG_FLEET %s\n%!" (Yojson.Safe.to_string json);
+      let open Yojson.Safe.Util in
+      let count key = json |> member key |> to_int in
+      Alcotest.(check int) "manual Keeper is not an autoboot target" 0
+        (count "autoboot_enabled_keeper_count");
+      Alcotest.(check int) "target-scoped configuration count remains zero" 0
+        (count "configuration_blocked_keeper_count");
+      Alcotest.(check bool) "empty target set is not wholly configuration blocked" false
+        (json |> member "all_target_keepers_configuration_blocked" |> to_bool);
+      Alcotest.(check int) "unscoped current configuration observation" expected_config_count
+        (count "turn_configuration_error_keeper_count");
+      Alcotest.(check (list string)) "configuration count retains its name"
+        (if expected_config_count = 0 then [] else [ meta.name ])
+        (json |> member "turn_configuration_error_keeper_names" |> to_list |> List.map to_string);
+      Alcotest.(check int) "execution projection is preserved" (List.length executable_names)
+        (count "executable_keeper_fiber_count");
+      Alcotest.(check int) "paused inventory remains separate" (if paused then 1 else 0)
+        (count "paused_keeper_count");
+      Alcotest.(check string) "operator health uses current cause, not target membership"
+        (if Option.is_some expected_blocker then "degraded" else "ok")
+        (json |> member "status" |> to_string);
+      Alcotest.(check bool) "explicit operator action agrees with health"
+        (Option.is_some expected_blocker)
+        (json |> member "operator_action_required" |> to_bool);
+      Alcotest.(check bool) "exact cause is preserved" true
+        ((json |> member "blocker") = Json_util.string_opt_to_json expected_blocker)))
 
 let test_phase_snapshot_separates_terminal_configuration_from_recovery () =
   with_temp_dir "terminal-config-not-recovering" (fun dir ->
@@ -5404,6 +5449,30 @@ let () =
   Eio_guard.enable ();
   Alcotest.run "Server_runtime_bootstrap"
     [
+      ( "manual configuration health",
+        let configuration = Keeper_registry.Turn_configuration_error
+            { code = "synthetic-config"; field = None; detail = "synthetic configuration error" } in
+        [ Alcotest.test_case "active manual configuration failure needs action" `Quick
+            (test_manual_keeper_failure_health ~paused:false ~phase:Keeper_state_machine.Failing
+               ~reason:configuration ~expected_config_count:1
+               ~expected_blocker:(Some "turn_configuration_error"))
+        ; Alcotest.test_case "paused configuration failure is excluded" `Quick
+            (test_manual_keeper_failure_health ~paused:true ~phase:Keeper_state_machine.Failing
+               ~reason:configuration ~expected_config_count:0 ~expected_blocker:None)
+        ; Alcotest.test_case "Running previous configuration cause is excluded" `Quick
+            (test_manual_keeper_failure_health ~paused:false ~phase:Keeper_state_machine.Running
+               ~reason:configuration ~expected_config_count:0 ~expected_blocker:None)
+        ; Alcotest.test_case "ordinary manual retry does not need operator action" `Quick
+            (test_manual_keeper_failure_health ~paused:false ~phase:Keeper_state_machine.Failing
+               ~reason:(Keeper_registry.Turn_consecutive_failures 1)
+               ~expected_config_count:0 ~expected_blocker:None)
+        ; Alcotest.test_case "native recovery remains independently visible" `Quick
+            (test_manual_keeper_failure_health ~paused:false ~phase:Keeper_state_machine.Failing
+               ~reason:(Keeper_registry.Official_client_recovery_required
+                  { runtime_id = "synthetic-runtime"; recovery_id = "synthetic-recovery"
+                  ; reason = Keeper_internal_error.Effect_fenced })
+               ~expected_config_count:0 ~expected_blocker:(Some "official_client_recovery_required"))
+        ] );
       ( "official recovery fleet",
         [ Alcotest.test_case "mixed typed failures" `Quick
             (test_fleet_official_client_recovery ~paused:false ~autoboot:true)
@@ -5411,7 +5480,7 @@ let () =
             (test_fleet_official_client_recovery ~paused:false ~autoboot:false)
         ; Alcotest.test_case "paused recovery stays separate" `Quick
             (test_fleet_official_client_recovery ~paused:true ~autoboot:true)
-        ; Alcotest.test_case "paused manual recovery does not degrade fleet" `Quick
+        ; Alcotest.test_case "manual configuration remains visible after session recovery is paused" `Quick
             (test_fleet_official_client_recovery ~paused:true ~autoboot:false)
         ; Alcotest.test_case "effect-fenced recovery clears after success" `Quick
             (test_fleet_official_client_recovery_clears_after_success

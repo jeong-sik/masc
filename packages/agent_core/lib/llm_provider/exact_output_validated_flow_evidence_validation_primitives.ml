@@ -136,16 +136,15 @@ let attempt_advance_state_is_valid (attempt : attempt) (failure : transport_fail
   (* These status classes match [Retry.classify_error]: 529 is the provider's
      explicit overload response; other 5xx responses are server errors. A
      complete refusal body must have been recorded in either case. *)
-  | Overloaded { http_status }, Response_received ->
-    http_status = 529
-    && attempt.dispatch_count = 1
-    && attempt.http_status = Some http_status
-    && Option.is_some attempt.provider_trace_sha256
-    && Option.is_some attempt.raw_response_sha256
-  | Server_error { http_status }, Response_received ->
-    (* HTTP's 5xx class includes unregistered codes such as 520. Cohttp's
-       [is_server_error] only recognizes its enumerated status constructors. *)
-    http_status >= 500 && http_status <= 599 && http_status <> 529
+  | (Overloaded { http_status } | Server_error { http_status }) as failure,
+    Response_received ->
+    let status_matches_failure =
+      match Retry.server_status_class_of_code http_status, failure with
+      | Some Retry.Overloaded_status, Overloaded _
+      | Some Retry.Server_error_status, Server_error _ -> true
+      | (Some Retry.Overloaded_status | Some Retry.Server_error_status | None), _ -> false
+    in
+    status_matches_failure
     && attempt.dispatch_count = 1
     && attempt.http_status = Some http_status
     && Option.is_some attempt.provider_trace_sha256

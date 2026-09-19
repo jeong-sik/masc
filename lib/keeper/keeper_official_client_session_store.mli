@@ -162,6 +162,11 @@ val load : base_path:string -> keeper_name:string -> (t option, string) result
 (** Missing state is [Ok None]. Malformed, retired, or ambiguous state is an
     error and never degrades to a new session. *)
 
+val clear : base_path:string -> keeper_name:string -> (unit, string) result
+(** Durably remove the Keeper's current official-client session binding under
+    the store lock. Missing state is success, so an operator may safely retry
+    a clear whose outcome was not confirmed. *)
+
 val plan_claim :
   expected:t option ->
   client_kind:client_kind ->

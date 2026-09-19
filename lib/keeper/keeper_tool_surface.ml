@@ -219,6 +219,7 @@ let handle_keeper_reset ctx args : tool_result =
    is not a keeper with nothing to clear: its checkpoint was never looked up. *)
 type keeper_clear_report =
   | Clear_meta_unreadable of string
+  | Clear_meta_missing
   | Clear_no_checkpoint
   | Clear_attempted of Keeper_history_clear.outcome
 
@@ -244,9 +245,11 @@ let keeper_clear_failure
 (** Last-resort context clear.
 
     Drops all conversation messages from the keeper's checkpoint file,
-    optionally preserving the system prompt. The Owner's maintenance slot
-    excludes turns from the checkpoint read through its save and restart line.
-    A busy Owner refuses the clear without cancelling its current turn. *)
+    optionally preserving the system prompt, and removes the official-client
+    session binding so the next provider turn starts fresh. The Owner's
+    maintenance slot excludes turns from the checkpoint read through both
+    durable mutations and the restart line. A busy Owner refuses the clear
+    without cancelling its current turn. *)
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let keeper_clear_body ~(config : Workspace.config) args : tool_result =
   match resolve_keeper_name_config ~config args with
@@ -276,7 +279,7 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
       let report =
         match read_meta_resolved config name with
         | Error detail -> Clear_meta_unreadable detail
-        | Ok None -> Clear_no_checkpoint
+        | Ok None -> Clear_meta_missing
         | Ok (Some (_, meta)) ->
           let session, ctx_opt =
             Keeper_context_runtime.load_context_from_checkpoint
@@ -300,7 +303,7 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
       let checkpoint_found =
         match report with
         | Clear_attempted _ -> true
-        | Clear_meta_unreadable _ | Clear_no_checkpoint -> false
+        | Clear_meta_unreadable _ | Clear_meta_missing | Clear_no_checkpoint -> false
       in
       (* Record the operator event; it changes no lifecycle condition. *)
       Keeper_context_runtime.dispatch_keeper_phase_event
@@ -334,9 +337,34 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
                       | None -> "unknown") );
                  ("cleared_message_count", `Int cleared_message_count);
                  ("checkpoint_found", `Bool checkpoint_found);
+                 ("official_client_session_cleared", `Bool true);
                  ("preserve_system_prompt", `Bool preserve_system);
               ("reason", `String reason);
             ]))
+      in
+      let reset_official_client_session ?line_error ~cleared_message_count () =
+        match
+          Keeper_official_client_session_store.clear
+            ~base_path:config.base_path
+            ~keeper_name:name
+        with
+        | Ok () -> cleared ?line_error ~cleared_message_count ()
+        | Error detail ->
+          Log.Keeper.error
+            "%s: canonical history was cleared but the official-client session reset was not confirmed (reason=%s): %s"
+            name reason detail;
+          keeper_clear_failure
+            ~class_:Tool_result.Runtime_failure
+            ~effect_disposition:Tool_result.Effect_outcome_unknown
+            ~code:Tool_args.Internal_error
+            ~message:
+              (Printf.sprintf
+                 "history was cleared, but the official-client session reset was not confirmed: %s. Run masc_keeper_clear again."
+                 detail)
+            [ "name", `String name
+            ; "cleared_message_count", `Int cleared_message_count
+            ; "official_client_session_clear", `String "unknown"
+            ]
       in
       (* A clear the store did not save is reported as what it was, never as a
          message count. *)
@@ -357,10 +385,22 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
                   checkpoint was not looked up: %s"
                  detail)
             []
-        | Clear_no_checkpoint -> cleared ~cleared_message_count:0 ()
+        | Clear_meta_missing ->
+          Log.Keeper.error
+            "%s: operator clear did not look for a checkpoint (reason=%s): keeper meta disappeared after name resolution"
+            name reason;
+          keeper_clear_failure
+            ~class_:Tool_result.Workflow_rejection
+            ~effect_disposition:Tool_result.Proven_pre_effect
+            ~code:Tool_args.Precondition_failed
+            ~message:
+              "history not cleared: the keeper meta disappeared after name resolution, so its checkpoint and official-client session were left untouched. Run masc_keeper_clear again."
+            []
+        | Clear_no_checkpoint ->
+          reset_official_client_session ~cleared_message_count:0 ()
         | Clear_attempted
             (Keeper_history_clear.Cleared { cleared_message_count; marker = Ok () }) ->
-          cleared ~cleared_message_count ()
+          reset_official_client_session ~cleared_message_count ()
         | Clear_attempted
             (Keeper_history_clear.Cleared { cleared_message_count; marker = Error detail })
           ->
@@ -372,7 +412,10 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
             Keeper_metrics.(to_string TurnBoundaryFailures)
             ~labels:[ "keeper", name; "site", "clear" ]
             ();
-          cleared ~line_error:detail ~cleared_message_count ()
+          reset_official_client_session
+            ~line_error:detail
+            ~cleared_message_count
+            ()
         | Clear_attempted
             (Keeper_history_clear.Superseded { incoming_turn_count; known_turn_count }) ->
           Log.Keeper.warn

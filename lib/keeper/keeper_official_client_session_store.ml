@@ -798,6 +798,14 @@ let with_store_lock ~base_path ~keeper_name f =
   | Error error -> Error (File_lock_eio.durable_lock_error_to_string error)
 ;;
 
+let clear ~base_path ~keeper_name =
+  with_store_lock ~base_path ~keeper_name (fun directory ->
+    let state_path = Filename.concat directory filename in
+    match Keeper_fs.remove_file_durable ~ownership_root:directory state_path with
+    | Ok () -> Ok ()
+    | Error error -> Error (Keeper_fs.durable_remove_error_to_string error))
+;;
+
 let transition ~base_path ~keeper_name ~expected next =
   let* () = validate next in
   with_store_lock ~base_path ~keeper_name (fun directory ->

@@ -3173,10 +3173,11 @@ let test_runtime_binding_disable_excludes_only_that_binding () =
 ;;
 
 (* verifier_exact slots are read twice: the exact registry admits them against
-   the AGENT_CORE catalog, and completion-authority judgement dispatches them
-   through resolve_assignment, which knows only configured runtimes and lanes.
-   A slot that satisfies the catalog and names no configured route used to
-   load, then fail at every judgement — 113 of them on 2026-09-02. *)
+   the AGENT_CORE catalog, and completion-authority judgement admits each one
+   as a configured direct runtime (Runtime.verifier_exact_slot_admission) and
+   dispatches that id alone. A slot that satisfies the catalog and names no
+   configured runtime used to load, then fail at every judgement — 113 of them
+   on 2026-09-02. *)
 let exact_lane_runtime_toml ~lane ~slot =
   Printf.sprintf
     "[providers.local]\n\

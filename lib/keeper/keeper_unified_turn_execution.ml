@@ -18,7 +18,6 @@ type retry_loop_input =
   { run_meta : keeper_meta
   ; execution : runtime_execution
   ; attempt : int
-  ; is_retry : bool
   ; attempted_runtimes : string list
   }
 
@@ -196,7 +195,6 @@ let run (ctx : ctx)
   let do_run
         ~(execution : runtime_execution)
         ~run_meta
-        ~is_retry
         ~(turn_state : turn_state)
     =
     let turn_state =
@@ -211,7 +209,6 @@ let run (ctx : ctx)
           (Keeper_id.Trace_id.to_string run_meta.runtime.trace_id)
         ~max_context:execution.max_context
         ~channel:(Keeper_world_observation.channel_to_string channel)
-        ~is_retry
         ~current_task_id:
           (Option.map
              Keeper_id.Task_id.to_string
@@ -270,8 +267,7 @@ let run (ctx : ctx)
                       (fun (retry : EC.degraded_retry) ->
                          retry.fallback_reason)
                       turn_state.degraded_retry_info)
-                 ?deferred_runtime_lane:
-                   (if is_retry then None else deferred_runtime_lane)
+                 ?deferred_runtime_lane
                  ~runtime_retry_deferral:
                    { Keeper_turn_driver.continuation = lane_retry_continuation
                    ; on_deferred = (fun hint -> deferred_runtime_lane_ref := Some hint)
@@ -283,11 +279,9 @@ let run (ctx : ctx)
                          :: !runtime_attempt_errors_ref)
                  ~on_runtime_lane_terminal_error:
                    (fun terminal -> lane_terminal_error_ref := Some terminal)
-                 ?on_deferred_runtime_consumed:
-                   (if is_retry then None else on_deferred_runtime_consumed)
+                 ?on_deferred_runtime_consumed
                  ~temperature:execution.temperature
                  ~trajectory_acc
-                 ~is_retry
                  ?shared_context
                  ?event_bus
                  ?on_event:
@@ -325,7 +319,6 @@ let run (ctx : ctx)
     let { run_meta
         ; execution
         ; attempt
-        ; is_retry
         ; attempted_runtimes
         }
       =
@@ -364,7 +357,6 @@ let run (ctx : ctx)
       do_run
         ~execution
         ~run_meta
-        ~is_retry
         ~turn_state
     in
     match attempt_result with
@@ -512,7 +504,6 @@ let run (ctx : ctx)
       { run_meta = meta
       ; execution = initial_execution
       ; attempt = 1
-      ; is_retry = false
       ; attempted_runtimes =
           [ initial_execution.runtime_id
           ]

@@ -764,10 +764,7 @@ let capture_skill_snapshot ~base_path =
     @param runtime_id Runtime profile name for model selection
     @param temperature Subsystem temperature fallback; a selected runtime model
            declaration takes precedence. When omitted,
-           [Keeper_config.keeper_unified_temperature] is the fallback.
-    @param is_retry When [true], replays the current user message into the
-           working context without persisting it again, so transient retry
-           attempts do not duplicate the user entry in session history *)
+           [Keeper_config.keeper_unified_temperature] is the fallback. *)
 let run_turn
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
@@ -809,7 +806,6 @@ let run_turn
       ?on_produced_checkpoint
       ?on_runtime_lane_terminal_error
       ?on_deferred_runtime_consumed
-      ?(is_retry = false)
       ?shared_context
       ?repetition_execution
       ?event_bus
@@ -1003,7 +999,6 @@ let run_turn
       ~meta
       ~history_user_source
       ~user_turn_record:prompt_user_turn_record
-      ~is_retry
       ~start_turn_count
   in
   let turn_system_prompt = prompt_ctx.Keeper_run_prompt.turn_system_prompt in
@@ -1064,7 +1059,6 @@ let run_turn
       ~keeper_turn_id:manifest_keeper_turn_id
       ~turn_kind
       ~runtime_id
-      ~is_retry
       ~config_root
       ~runtime_config_path
       ~skill_snapshot

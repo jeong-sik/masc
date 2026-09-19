@@ -230,7 +230,6 @@ end
            declaration takes precedence
     @param on_event Optional event callback
     @param trajectory_acc Optional trajectory accumulator for recording
-    @param is_retry When [true], replays current user message without persisting
     @param shared_context Optional shared AGENT_CORE context for cross-turn state
     @param event_bus Optional MASC event bus *)
 val run_turn
@@ -288,7 +287,6 @@ val run_turn
        (* Called once per runtime walk that returns a candidate's error as
           the lane's error, with the candidate that produced it. *)
   -> ?on_deferred_runtime_consumed:(unit -> unit)
-  -> ?is_retry:bool
   -> ?shared_context:Agent_core.Context.t
   -> ?repetition_execution:Keeper_repetition_scope.Execution.t
   -> ?event_bus:Agent_core.Event_bus.t

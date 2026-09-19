@@ -633,22 +633,20 @@ let parse path content =
 
 let read_for_keepers_dir ~keepers_dir ~keeper_id =
   let snapshot_path = path_for_keepers_dir ~keepers_dir ~keeper_id in
-  let read_error message =
-    Printf.sprintf "current Memory OS read failed path=%s: %s" snapshot_path message
-  in
   try
-    match Fs_compat.exact_path_kind snapshot_path with
-    | Fs_compat.Exact_missing -> Ok None
-    | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
-      (* Keep the descriptor-pinned read: a concurrent atomic replacement
-         does not invalidate the complete snapshot already opened. *)
-      let+ snapshot = parse snapshot_path (Fs_compat.load_file snapshot_path) in
+    match Fs_compat.load_file_opt snapshot_path with
+    | None -> Ok None
+    | Some content ->
+      let+ snapshot = parse snapshot_path content in
       Some snapshot
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | Unix.Unix_error (error, operation, path) ->
-    Error (read_error (Printf.sprintf "%s %s: %s" operation path (Unix.error_message error)))
-  | Sys_error message -> Error (read_error message)
+  | Sys_error message ->
+    Error
+      (Printf.sprintf
+         "current Memory OS read failed path=%s: %s"
+         snapshot_path
+         message)
 ;;
 
 let map_facts facts =

@@ -324,22 +324,16 @@ let parse path content =
 
 let read_for_keepers_dir ~keepers_dir ~keeper_id =
   let path = path_for_keepers_dir ~keepers_dir ~keeper_id in
-  let read_error message =
-    Printf.sprintf "source-bound memory read failed path=%s: %s" path message
-  in
   try
-    match Fs_compat.exact_path_kind path with
-    | Fs_compat.Exact_missing -> Ok None
-    | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
-      (* The writer replaces snapshots atomically; retain the opened file
-         rather than requiring its inode to remain at the current path. *)
-      let+ snapshot = parse path (Fs_compat.load_file path) in
+    match Fs_compat.load_file_opt path with
+    | None -> Ok None
+    | Some content ->
+      let+ snapshot = parse path content in
       Some snapshot
   with
   | Eio.Cancel.Cancelled _ as error -> raise error
-  | Unix.Unix_error (error, operation, path) ->
-    Error (read_error (Printf.sprintf "%s %s: %s" operation path (Unix.error_message error)))
-  | Sys_error message -> Error (read_error message)
+  | Sys_error message ->
+    Error (Printf.sprintf "source-bound memory read failed path=%s: %s" path message)
 ;;
 
 let read_source ~config ~meta ~source_path =

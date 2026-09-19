@@ -2512,9 +2512,6 @@ capabilities_base = "glm"
 
 [[providers]]
 id = "openrouter"
-# 2026-09-19: documented request suppression, independent of model capability.
-# https://openrouter.ai/docs/api_reference/parameters#parallel-tool-calls
-supports_parallel_tool_suppression = true
 kind = "openai_compat"
 base_url = "https://openrouter.ai/api/v1"
 request_path = "/chat/completions"

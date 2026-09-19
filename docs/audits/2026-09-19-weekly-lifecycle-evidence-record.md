@@ -83,11 +83,11 @@ git diff <base> <head> -- lib/keeper lib/runtime lib/runtime_model docs/spec
 
 기존 Keeper `critic`에게 관측을 요청했고 operation `kmsg-b29e444510413e5e89a94b11859f6edb`는 Succeeded, turn `trace-1788609342544-00000#2964`로 응답했다. 반복 기록·Memory Recall 재주입·Fusion 실패라는 제보는 후속 조사 입력이다. Keeper의 설명만으로 원인 관계를 확정하지 않았다.
 
-10:43Z 추가 확인: `.masc/exact-lane-runs-v6.jsonl`의 register/complete를 ID로 결합했다. Librarian 완료 2,102건 중 성공 701건이고, 실패 detail에 `wire_admission_rejected:missing_deadline`이 기록된 것은 1,288건이다. 해당 실패의 시작 시각은 9/18 06:17:01~9/19 08:57:44 UTC에 걸친다. reload 완료 응답(08:57:55.759Z) 이후 시작하고 완료한 26건은 성공 11, 실패 15였다. 성공 슬롯은 모두 `glm-coding.glm-5.3-flash`이며, 실패 중 HTTP 429는 13건, domain validation은 1건, missing_deadline은 0건이다. 초기 네 실패 표본만으로 기억 생산이 계속 멈췄다고 판단할 수 없다. exact execution 성공과 Memory snapshot·read position의 commit 완료도 구별해야 한다. 원본 집계 조건과 결과는 `/tmp/masc-week-audit/librarian-after-reload-counts.json`에 보관했다.
+10:43Z 추가 확인: `.masc/exact-lane-runs-v6.jsonl`의 register/complete를 ID로 결합했다. Librarian 완료 2,102건 중 성공 701건이고, 실패 detail에 `wire_admission_rejected:missing_deadline`이 기록된 것은 1,288건이다. 해당 실패의 시작 시각은 9/18 06:17:01~9/19 08:57:44 UTC에 걸친다. reload 완료 응답(08:57:55.759Z) 이후 시작하고 완료한 26건은 성공 11, 실패 15였다. 성공 슬롯은 모두 `glm-coding.glm-5.3-flash`이며, 실패 중 HTTP 429는 13건, domain validation은 1건, missing_deadline은 0건이다. 초기 네 실패 표본만으로 기억 생산이 계속 멈췄다고 판단할 수 없다. exact execution 성공과 Memory snapshot·read position의 commit 완료도 구별해야 한다. 집계 조건: `register.registration.lane == "librarian_exact"`인 ID의 `complete` 줄을 결합하고, reload 전후는 `register.started_at`으로 나눈다. 실패 사유 수는 원본 `completion.detail`의 명시된 오류를 센 값이다.
 
 ### Memory에서 Skill까지의 구현 경계
 
-main `e50d28963b`의 실제 event producer를 확인했다. `Retrieved`는 검색, `Cited`는 성공한 Memory 철회, `Revised`는 Librarian commit에서 나온다. 특히 `Cited`를 좋은 기억의 강화 횟수로 읽으면 의미가 뒤집힌다. RFC-0418은 이 관측을 recall·소거·Librarian 판단에 넣지 않는다고 명시한다. 날짜·출처·관측 이력을 입력에 싣는 RFC-0456은 후속 제안이며 현재 renderer가 구현했다고 볼 수 없다.
+main `e50d28963b`의 실제 event producer를 확인했다. `Retrieved`는 검색, `Cited`는 성공한 Memory 철회, `Revised`는 Librarian commit의 명시적 `supersedes` 관계에서 나온다. 특히 `Cited`를 좋은 기억의 강화 횟수로 읽으면 의미가 뒤집힌다. TUI가 이 값을 인용처럼 표시하는 결함은 [#37097](https://github.com/jeong-sik/masc/issues/37097)에서 추적한다. RFC-0418은 이 관측을 recall·소거·Librarian 판단에 넣지 않는다고 명시한다. 날짜·출처·관측 이력을 입력에 싣는 RFC-0456은 후속 제안이며 현재 renderer가 구현했다고 볼 수 없다.
 
 현재 Skill 경로는 admin editor의 발행 → frozen instruction 읽기·activation 또는 composition 실행·evidence다. `keeper_skill_publish`, `keeper_compose_save`, 자동 분석·합성·sandbox 검증·발행 순환은 현재 handler가 없는 제안(#32369, #36925)이다. PR #36925의 Draft 정책 숫자나 옛 `dropped`/`supersedes` 흡수 설명을 현재 계약으로 옮기지 않는다. 흡수의 의미 손실과 원문 재검색은 기존 #37079에서 추적하며, 이번 감사가 그 이슈의 품질 측정을 재현한 것은 아니다.
 

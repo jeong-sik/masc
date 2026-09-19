@@ -339,15 +339,18 @@ let consume_one ~config ~keeper_name ~commit =
   let runtime_keepers_dir = Workspace.keepers_runtime_dir config in
   let key = range_key ~runtime_keepers_dir ~keeper_name in
   let extent = if failed_before key then R.To_first_cut_point else R.All_unread in
-  (* Leave the marker set across exceptions and cancellation. A completed
-     attempt clears it only after it either advances or proves there is no
-     range to read. *)
+  (* Leave the marker set across exceptions and cancellation. After a failed
+     wide range, keep taking one cut point until a later pass proves that the
+     backlog is empty. Clearing after the first small success would alternate
+     large failures with small successes while the backlog keeps growing. *)
   mark_failed key;
   let result = consume_one_with_extent ~extent ~config ~keeper_name ~commit in
-  (match result with
-   | Ok Memory_not_committed | Error _ -> ()
-   | Ok (Nothing_to_read | Baseline_advanced _ | Progress_advanced _) ->
-     clear_failed key);
+  (match result, extent with
+   | Ok (Nothing_to_read | Baseline_advanced _), _
+   | Ok (Progress_advanced _), R.All_unread -> clear_failed key
+   | Ok (Progress_advanced _), R.To_first_cut_point
+   | Ok Memory_not_committed, _
+   | Error _, _ -> ());
   result
 ;;
 

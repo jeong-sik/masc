@@ -332,11 +332,28 @@ let test_failed_long_range_retries_only_oldest_cut_point () =
        true)
    with
    | Consumer.Progress_advanced progress ->
-     check int "success clears bounded retry" 4 progress.position.end_atom
+     check int "bounded catch-up reaches next cut" 3 progress.position.end_atom
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Memory_not_committed -> fail "remaining range did not advance");
-  check (list string) "later turns remain readable" [ "turn-3"; "turn-4" ] !remaining
+  check (list string) "bounded catch-up remains active" [ "turn-3" ] !remaining;
+  let final = ref [] in
+  (match
+     consume config (fun ~expected_revision:_ input ->
+       final := text_markers input;
+       true)
+   with
+   | Consumer.Progress_advanced progress ->
+     check int "bounded catch-up reaches final cut" 4 progress.position.end_atom
+   | Consumer.Nothing_to_read
+   | Consumer.Baseline_advanced _
+   | Consumer.Memory_not_committed -> fail "final range did not advance");
+  check (list string) "final turn remains readable" [ "turn-4" ] !final;
+  (match consume config (fun ~expected_revision:_ _ -> fail "empty range called commit") with
+   | Consumer.Nothing_to_read -> ()
+   | Consumer.Baseline_advanced _
+   | Consumer.Progress_advanced _
+   | Consumer.Memory_not_committed -> fail "empty pass did not clear bounded catch-up")
 ;;
 
 let test_last_matching_boundary_wins_when_clock_moves_backward () =

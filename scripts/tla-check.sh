@@ -204,6 +204,8 @@ run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla" \
 # graveyard. Expects a violation too.
 run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla" \
   "TaskOwnership-rejected-resumable-buggy.cfg" "rejected-resumable"
+run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla" \
+  "TaskOwnership-done-reversed-buggy.cfg" "done-reversed"
 
 
 # Server lifecycle product invariants across lifecycle/lazy/readiness axes.

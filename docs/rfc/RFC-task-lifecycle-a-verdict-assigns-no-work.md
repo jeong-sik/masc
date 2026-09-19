@@ -632,7 +632,7 @@ awaiting_verification" 문장뿐이다(`config/tools/masc_tasks.toml:5`, `:14-16
 
 | cfg | 모델 | 검사한 것 | 결과 |
 |---|---|---|---|
-| `TaskOwnership.cfg` | 목표 생애주기 | `Safety` 전체, `VerdictNeverAssigns`, `CancelNeedsStanding` | 오류 없음. 서로 다른 상태 165,312개, 깊이 17 |
+| `TaskOwnership.cfg` | 목표 생애주기 | `Safety` 전체, `VerdictNeverAssigns`, `CancelNeedsStanding`, `TerminalOutcomeIsFinal` | 오류 없음. 서로 다른 상태 165,312개, 깊이 17 |
 | `-buggy` | 반려가 제출자에게 돌려줌(지금 코드) | `OneTaskPerAgent` | 위반, 반례 6상태 |
 | `-verdict-assigns-buggy` | 같은 버그 | `VerdictNeverAssigns` | 위반, 반례 5상태 |
 | `-cancel-request-buggy` | 운영자만 답하는 취소 요청(지금 코드) | `NoOperatorOnlySubmissionKind` | 위반, 반례 3상태 |
@@ -646,6 +646,7 @@ awaiting_verification" 문장뿐이다(`config/tools/masc_tasks.toml:5`, `:14-16
 | `-claim-keeps-returned-buggy` | 반려된 Task 를 맡으면서 반려 표시를 안 지움 | `RejectedIsOpenAndUnheld` | 위반, 반례 6상태 |
 | `-rejected-reachable-buggy` | 깨끗한 모델(버그 없음) | `RejectedNeverHappens` — 깨져야 하는 것 | 위반, 반례 5상태 |
 | `-rejected-resumable-buggy` | 깨끗한 모델(버그 없음) | `RejectedNeverResumed` — 깨져야 하는 것 | 위반, 반례 6상태 |
+| `-done-reversed-buggy` | 끝낸 사람이 자기 `Done` 을 뒤집음 | `TerminalOutcomeIsFinal` | 위반, 반례 6상태 |
 
 - 스펙은 `Claimed` 와 `InProgress` 를 하나로 본다. `Start` 는 누가 맡는지를 바꾸지 않는다. 운영자가
   놓아 주는 것은 `Release` 와 결과가 같아 따로 두지 않았다.
@@ -731,7 +732,7 @@ OCaml 쪽은 임의의 액션·판정 열을 돌려 `OneTaskPerAgent` 를 확인
 
 | 단계 | 내용 | 끝났다는 증거 |
 |---|---|---|
-| 0 | 이 문서와 `TaskOwnership.tla` | `scripts/tla-check.sh` 에서 깨끗한 모델 통과, 버그 모델 11개와 도달성 검사 2개(들어가는 길·나가는 길)가 기대대로 위반 |
+| 0 | 이 문서와 `TaskOwnership.tla` | `scripts/tla-check.sh` 에서 깨끗한 모델 통과, 버그 모델 12개와 도달성 검사 2개(들어가는 길·나가는 길)가 기대대로 위반 |
 | 1 | **저장 형식이 바뀌는 묶음.** `Rejected` 추가, 반려 판정이 그리로 보내고 `set_current = None`. `intent` 삭제. `AwaitingVerification` 의 `assignee` 를 `producer` 로, 기본값 없는 디코드. 제출자의 handoff 를 두고 사유를 `reason` 에만 넣기. 제출 증거를 호출에서만 읽기. 전달 전 반려 알림을 세 값으로 지우기. `release_unroutable_rejected_task_r` 와 `Operator_routed` 삭제. 알림 문장에 id. 운영자 판정 요청에 `verification_id`. **맡는 축과 권하는 축 가르기**(§3.2). **`Rejected_unclaimed` 목록과 대시보드 칸**(§3.7, §3.8). **글로서리에서 1단계가 없애는 말 지우기** — `Assignee`(`:69-71`), `Intent`(`:91-93`), `Verdict`(`:103-105`) | 속성 테스트 `OneTaskPerAgent`. §4.2 첫 줄이 새 판정에서 0. `claim_next` 가 `Rejected` 를 권하지 않고 id 로는 맡아지는 테스트. 반려된 Task 가 목록과 대시보드 양쪽에 보이는 테스트 |
 | 2 | `Cancel` 의 자격을 `decide` 의 인자로(`Named_by_state` 와 `Operator`). 인증된 운영자 경로와 TUI·dashboard 이전. 맡은 쪽 알림·기록·지표. 사라진 물음을 멈춤으로 알리지 않기. 도구 설명. **운영자 일괄 취소와 배치 항목의 `predecessor_task_id`**(§3.11) | `release` 다음 `cancel` 이 놓은 본인에게도 거절되는 테스트. 일괄 취소가 건마다 성공·실패를 돌려주는 테스트 |
 | 3 | 운영자 목록에 `Awaiting_verdict` 추가, 헌법 개정, `docs/spec/00-glossary.md` 에 `Rejected` 항목 추가(글로서리는 코드에 있는 말만 싣는다)와 `docs/spec/02-types-and-invariants.md` 정정, `Done_action` 과 `TaskLifecycle.tla` 삭제 | §4.2 셋째 줄 0 |

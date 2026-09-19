@@ -378,6 +378,17 @@ BugClaimKeepsReturned(t, a) ==
     /\ UNCHANGED <<created_by, outcome, pending, judgeable, producer, sub, verdict,
                    verdict_for, cancelled_by, stalled, returned>>
 
+\* Whoever finished a Task reverses their own Done. No clean action can do
+\* this, but nothing said so: every guard that stops it is a separate
+\* outcome = "Open" test, and a property has to state the shared rule those
+\* tests are keeping. Raised in review of PR #37046.
+BugDoneReversedToCancelled(t, who) ==
+    /\ outcome[t] = "Done"
+    /\ outcome' = [outcome EXCEPT ![t] = "Cancelled"]
+    /\ cancelled_by' = [cancelled_by EXCEPT ![t] = who]
+    /\ UNCHANGED <<created_by, holder, pending, judgeable, producer, sub, verdict,
+                   verdict_for, stalled, returned, claimed_by>>
+
 SpecClean == Init /\ [][NextClean]_vars
 SpecBugVerdictReturns ==
     Init /\ [][NextClean \/ \E t \in Tasks : BugVerdictReturnsTaskToProducer(t)]_vars
@@ -403,6 +414,9 @@ SpecBugSupersededVerdict ==
 SpecBugClaimKeepsReturned ==
     Init /\ [][NextClean \/ \E t \in Tasks, a \in Agents :
                               BugClaimKeepsReturned(t, a)]_vars
+SpecBugDoneReversed ==
+    Init /\ [][NextClean \/ \E t \in Tasks, who \in Creators :
+                              BugDoneReversedToCancelled(t, who)]_vars
 
 \* ================================================================ properties
 
@@ -448,6 +462,12 @@ DoneRequiresLiveApproval ==
 \* moment. It has to be an action property: once the Task is Cancelled the
 \* state that named the canceller is gone, so no predicate on the result can
 \* tell a standing cancel from one without standing.
+\* An outcome that is not Open never changes again. Cancel standing is stated
+\* only for the step out of Open (CancelNeedsStanding below), so without this
+\* a Task could leave Done by some other route and no property would notice.
+TerminalOutcomeIsFinal ==
+    [][\A t \in Tasks : outcome[t] # "Open" => outcome'[t] = outcome[t]]_vars
+
 CancelNeedsStanding ==
     [][\A t \in Tasks :
         (outcome[t] = "Open" /\ outcome'[t] = "Cancelled")

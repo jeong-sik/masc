@@ -3,7 +3,7 @@ rfc: "keeper-context-window-in-tokens"
 title: "Size the Keeper transmission window in tokens; the request-body cap only judges"
 status: Active
 created: 2026-09-15
-updated: 2026-09-18
+updated: 2026-09-19
 author: vincent
 related: ["memory-os-bounded-context-and-librarian-curator", "tool-results-age-out-of-context"]
 ---
@@ -537,7 +537,7 @@ origin/main `64ef87af83` 의 원장은 T 를 실은 usage 로도 전체와 묶�
 
 `context-high-water-tokens` / `context-low-water-tokens` 를 없앤다. 라이브는 11개 바인딩 중 9개가 `100000` / `70000` 을 적고 있었고, 그 값을 고른 근거는 어디에도 없다.
 
-같은 이유로 `max-prompt-bytes` 를 없앤다. 이 값이 없는 두 바인딩(`claude_code.claude-sonnet-5`, `antigravity_subscription.gemini-3-8-flash-high`)에만 eviction mark 가 없었다 — 밀어내기가 없는 자리에 바이트 캡을 대신 박아 둔 것이고, 대체재로 동작하지 않았다. `critic` 은 `undroppable_bytes=169,918 > capacity_bytes=131,072` 로 2시간 동안 120회 실패했다. 이력을 0으로 잘라도 들어갈 수 없는 상태였다.
+같은 이유로 `max-prompt-bytes` 를 없앤다. 이 값이 없는 두 바인딩(`claude_code.claude-sonnet-5`, `antigravity_subscription.gemini-3-8-flash-high`)에만 eviction mark 가 없었다 — 밀어내기가 없는 자리에 바이트 캡을 대신 박아 둔 것이고, 대체재로 동작하지 않았다. `critic` 은 `undroppable_bytes=169,918 > capacity_bytes=131,072` 로 2시간 동안 30턴이 실패했다(04:12:53Z~06:11:44Z, `system_log_2026-09-18.jsonl` 의 `turn terminal` 줄 30개. 턴마다 로그가 네 줄씩 남아 줄 수로는 120 이다). 이력을 0으로 잘라도 들어갈 수 없는 상태였다.
 
 두 값이 사라지면 그 값을 나눠 쓰던 중간값도 사라진다. `runtime_model_input_tail_window` 한 모듈에 `*_bytes` 이름이 20종 있고 전부 `int` 다. `capacity - reserved - undroppable` 을 `capacity - undroppable` 로 잘못 써도 컴파일러가 잡지 않는다.
 
@@ -553,7 +553,7 @@ let halve ~first_atom ~atom_count =
 
 인자에 바이트가 없다. 거절은 바이트 때문인데 자르는 것은 atom 개수다. 큰 도구 결과 하나와 작은 atom 8,000개가 있으면 반으로 접어도 범인이 남고 무관한 대화만 버려진다.
 
-호출자는 `measure_message_bytes` 를 이미 받고 있고, 직전에 성공한 요청의 크기도 안다. 그리고 §92 는 HTTP 층의 "C' 절반"을 이미 **부당**으로 판정했다 — §10 은 같은 모양을 atom 축에 복제했다.
+호출자는 `measure_message_bytes` 를 이미 받고 있고, 직전에 성공한 요청의 크기도 안다. 그리고 §4 의 3번은 HTTP 층의 "C' 절반"을 이미 **부당**으로 판정했다 — §10 은 같은 모양을 atom 축에 복제했다.
 
 탐색 비용도 비대칭이다. 한 번 틀릴 때마다 22.7 MB 를 올려 보내고 거절을 받는다.
 
@@ -605,9 +605,7 @@ type origin =
 
 ### 13.7 선행 조건
 
-지금 librarian 은 Memory OS 스냅숏만 갈아끼우고 keeper 이력에는 아무 표시도 남기지 않는다. "어디까지 흡수됐나"를 물어볼 자리가 없다.
-
-**만들 것은 그 표시 하나다.** 표시가 라이브에서 도는 것을 확인한 뒤에 13.2~13.4 를 걷어낸다. 순서를 바꾸면 대체할 것이 없는 상태에서 45 MB 가 아무 제지 없이 나간다.
+13.2~13.4 를 걷어내기 시작하는 때는 Librarian 생명주기 RFC(`RFC-librarian-lifecycle.md`) §7 (라)가 정한다. 그 조건과 진행은 그 RFC 에만 적는다. 순서를 바꾸면 대체할 것이 없는 상태에서 45 MB 가 아무 제지 없이 나간다.
 
 ### 13.8 overlay 를 비운다
 
@@ -647,5 +645,7 @@ match rt.model.max_context, capability_cap with
 
 ### 13.9 이 개정이 닫지 않는 것
 
-- `pinned` 169 KB 의 구성. `critic` 이 다시 커지면 같은 벽을 만난다.
+- 이력을 빼고 남는 부분(`pinned` 메시지: 매 턴 새로 붙는 system·facts·브리핑 블록)이 혼자 provider 한도를 넘는 경우. 13.2 가 바이트 창을 없애면 이것을 알려 주는 것은 provider 의 typed 거절뿐이다. 턴은 그 오류로 끝나고(13.6), 다음 사이클도 같은 요청으로 같은 거절을 받는다. 이 개정에는 그 반복을 멈추는 장치가 없다. 줄일 것은 이력이 아니라 그 부분이고, facts 는 Librarian 의 `absorbs`·`dropped` 가 줄인다(Librarian RFC §6).
+  - `critic` 의 30턴(13.2)은 이 경우가 아니었다. 거절한 쪽은 provider 가 아니라 `antigravity_subscription.gemini-3-8-flash-high` 레인의 masc 바이트 창(`max-prompt-bytes` 131,072)이었고, 그 모델의 `max-context` 는 1,048,576 토큰이다(`<base-path>/.masc/config/runtime.toml` 의 `[models.gemini-3-8-flash-high]`). 그 레인은 지금 이력을 자르지 않고 넘긴다(§4 의 5번).
+- Librarian 이 서 있을 때. 창이 보는 위치가 움직이지 않는 동안 이력은 자라고, 좁혀 다시 보내는 길은 13.3 이 지웠다. 그래서 요청은 끝내 provider 한도에서 거절되고 턴마다 오류로 끝난다. 이 대가와 원인별로 푸는 방법은 Librarian RFC §4.10 에 있다. 밀림 표시(Librarian RFC 의 I4)는 창이 그 위치에 기대기 전에 화면에 떠 있어야 한다.
 - `#36984` 이 요구하는 deadline 을 `[[targets]]` 두 슬롯이 선언하지 않은 문제(#37004). 13.8 의 3번에서 같이 정리된다.

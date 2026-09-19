@@ -520,6 +520,10 @@ atom digest 는 전부 겹치는 것으로 둔다. 2a 와 5 에는 그것이 최
    | 안 읽은 **atom** 이 없을 때만 + 센 줄 수를 지금 줄 수로 올림 | **잃는다**(최단 12단계) |
    | 안 읽은 atom 이 없을 때만 + 센 줄 수는 그대로 | **잃지 않는다**(157,827 상태 전수) |
 
+   **"내려가 있는 Keeper"라는 전제는 코드가 지킨다**(09-19 확인). purge 를 부르는 곳은 둘이다 — CLI `bin/masc_checkpoint_purge.ml` 과 대시보드 HTTP. 뒤쪽은 돌고 있는 Keeper 에 적용을 거절한다(`server_dashboard_http_keeper_api_checkpoints.ml` 의 `Purge_keeper_active`). 그래서 이 결정은 내려가 있는 Keeper 만 다루면 된다.
+
+   결정이 나기 전까지 `LibrarianRead-purge-trim*` 버그 모델 셋은 **코드에 대응물이 없다**. 증명은 있는데 그 증명을 지키는 검사가 아직 없다는 뜻이다. 함께 삭제하는 쪽(`-purge-split-buggy`)은 `keeper_shutdown_types.ml` 의 purge 계획과 `test_keeper_librarian_progress.ml` 의 검사가 지킨다.
+
    자르기는 이력의 아무 자리에서나 atom 하나를 떼는 것으로 모델링했다. 실제 purge 는 앞에서만 걷어 내지 않고 중간의 중복 메시지도 걷어 내므로, 어디서 떼든 그 뒤의 번호가 밀리는 것이 같은 위험이다.
 
    권고가 틀린 자리는 **턴과 atom 을 같은 것으로 본 것**이다. 저장하고 죽은 턴은 끝 줄을 남기지 않으므로 그 atom 에는 자르는 자리가 없고, 그래서 "밀린 턴 없음"이 참인 채로 안 읽은 atom 이 남는다. purge 가 위치를 끝으로 옮기면 그 atom 을 지나간다. 반례는 열 걸음이다 — 턴이 atom 하나를 저장하고 끝나고, 다음 턴이 atom 하나를 더 저장하고 **죽고**, 회차가 첫 atom 만 읽고, 자르는 자리가 하나뿐이라 방어가 통과한다.

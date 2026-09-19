@@ -534,8 +534,9 @@ let dashboard_purge_artifact_plan ~keeper_name context =
        starts at one again, so every restart line appended afterwards sits at a
        number the position has already passed and no round ever sees it. The
        same keeper then loses the atoms of its next replaced history, silently.
-       specs/bug-models/LibrarianRead.tla asserts this: taking the two apart
-       violates its one invariant in nine steps. *)
+       specs/bug-models/LibrarianRead-purge-split-buggy.cfg takes the two
+       apart and has to violate that spec's one invariant, so the harness
+       reports what the separation costs and this comment does not. *)
   ; Keeper_librarian_progress_artifact
     (* A Keeper can change sandbox profiles across lifetimes. Remove every
        backend-scoped root for the exact name so a same-name successor cannot

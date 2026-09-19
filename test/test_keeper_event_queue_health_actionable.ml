@@ -68,6 +68,16 @@ let string_list name fields =
 let reasons fields = string_list "status_reasons" fields
 let action_reasons fields = string_list "operator_action_reasons" fields
 
+let test_unavailable_health_schema () =
+  let projected =
+    match Fleet.keeper_event_queue_health_dimensions ~source_unavailable:true (queue ()) with
+    | `Assoc fields -> fields
+    | _ -> fail "expected unavailable health object"
+  in
+  check string "unavailable projection carries the served health schema"
+    Keeper_event_queue_schema.fleet_health_summary (string_field "schema" projected)
+;;
+
 let test_paused_dead_is_not_actionable () =
   let fields = dimensions (queue ~paused_dead:74 ()) in
   check bool "a paused keeper alone does not demand operator action" false
@@ -196,7 +206,9 @@ let test_a_storage_read_error_needs_an_answer () =
 
 let () =
   run "Keeper event queue health actionability"
-    [ ( "operator_intended"
+    [ ( "schema"
+      , [ test_case "unavailable health" `Quick test_unavailable_health_schema ] )
+    ; ( "operator_intended"
       , [ test_case "paused_dead" `Quick test_paused_dead_is_not_actionable
         ; test_case "retained_disabled" `Quick test_retained_disabled_is_not_actionable
         ; test_case "stays visible" `Quick test_paused_dead_stays_visible

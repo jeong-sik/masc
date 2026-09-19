@@ -282,16 +282,6 @@ val of_binding : config -> binding -> (t, drop_reason) result
     validation can report a dropped target's materialize failure instead of a
     bare "not found among N runtimes" that points at a non-existent typo. *)
 
-val decide_capability_gate :
-  config_path:string -> (string * bool) list -> (unit, string) result
-(** Pure capability-gate decision applied at startup by [init_default_strict]
-    (not by [load_list], which keeps only RFC-0206 routing validation so unit
-    tests stay catalog-independent), exposed for testing. [entries] is
-    [(label, known_to_agent_core_catalog)] per runtime binding. Returns [Error] when any
-    configured model is unknown to the AGENT_CORE capability catalog: an unknown model
-    resolves to [provider_default] and silently drops thinking/sampling control
-    required by the binding. Empty entries are allowed for focused config
-    probes. *)
 
 type missing_catalog_model =
   { runtime_id : string
@@ -400,10 +390,11 @@ val publish_exact_output_registry :
     validation happens before the global publication changes. *)
 
 val init_default_strict : config_path:string -> (unit, string) result
-(** Fail-closed startup entry point: {!init_default} PLUS the AGENT_CORE
-    capability-catalog gate ({!decide_capability_gate}). Rejects ([Error]) a
-    runtime whose model is absent from the catalog before boot. Used by strict
-    validation callers such as fusion run. *)
+(** Fail-closed startup entry point: {!init_default} plus the capability check
+    on the materialized runtime list. Rejects ([Error]) a binding whose model
+    the AGENT_CORE catalog does not carry and whose runtime block declares no
+    capabilities of its own. Used by strict validation callers such as fusion
+    run. *)
 
 val init_default_strict_report :
   config_path:string -> (unit, strict_init_error) result

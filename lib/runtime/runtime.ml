@@ -708,35 +708,6 @@ let lanes_of_decls
        lane_decls)
 ;;
 
-(* Pure decision for the capability gate, separated from the global AGENT_CORE catalog
-   lookup so it is unit-testable. [entries] is [(label, known_to_agent_core)] per runtime.
-
-   An unknown model resolves to AGENT_CORE [provider_default], whose guessed capabilities
-   (notably [thinking_control_format = No_thinking_control]) silently drop
-   thinking/sampling control a binding may require. Reject such a binding at
-   load instead of discovering corruption at runtime
-   (Unknown->Permissive anti-pattern; mirrors [runtime].default validation,
-   RFC-0206 §2.1 no-silent-fallback).
-
-   An empty runtime list is allowed for focused unit tests/config probes, but any
-   configured runtime whose model is absent from the catalog is rejected before it
-   can inherit guessed provider_default capabilities. *)
-let decide_capability_gate ~(config_path : string) (entries : (string * bool) list)
-  : (unit, string) result
-  =
-  let unknown = List.filter (fun (_, known) -> not known) entries in
-  match unknown with
-  | [] -> Ok ()
-  | _ ->
-    Error
-      (Printf.sprintf
-         "%s: %d runtime model(s) absent from the AGENT_CORE capability catalog; they \
-          would use provider_default and silently drop thinking/sampling control. \
-          Add a row for each to the AGENT_CORE embedded catalog: %s"
-         config_path
-         (List.length unknown)
-         (String.concat ", " (List.map fst unknown)))
-;;
 
 type missing_catalog_model =
   { runtime_id : string

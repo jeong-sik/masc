@@ -671,8 +671,12 @@ let parse_provider (id : string) (tbl : Otoml.t)
          | None -> None
          | Some h_tbl -> Some (parse_headers h_tbl (path ^ ".headers"))
        in
-       (* Optional per-provider connect/headers timeout override (agent-core boundary).
-          Absent (most providers) leaves the AGENT_CORE kind-based default in force. *)
+       (* Optional per-provider bound on the phase before the response headers
+          (agent-core boundary). There is no kind-based default behind it:
+          [resolve_explicit_deadline] maps [None] to [Unbounded]
+          (http_client.ml). A keeper turn is still bounded by the keeper's
+          first-event budget, but an exact-output slot is not, which is why
+          plan admission refuses a target carrying neither deadline. *)
        (* The dialect an endpoint speaks, for an endpoint AGENT_CORE has no
           provider row for. Only [protocol] is required: it names the request
           shape, and for a catalogued provider the catalog row names the

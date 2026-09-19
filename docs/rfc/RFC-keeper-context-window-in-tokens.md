@@ -1,6 +1,6 @@
 ---
 rfc: "keeper-context-window-in-tokens"
-title: "Size the Keeper transmission window in tokens; the request-body cap only judges"
+title: "Carry the Keeper window from where the Librarian absorbed; the provider judges request size"
 status: Active
 created: 2026-09-15
 updated: 2026-09-19
@@ -8,7 +8,7 @@ author: vincent
 related: ["memory-os-bounded-context-and-librarian-curator", "tool-results-age-out-of-context"]
 ---
 
-# RFC: Keeper 전송 창은 토큰으로 정하고, 요청 본문 상한은 창을 만들지 않는다
+# RFC: Keeper 창은 Librarian 이 흡수한 지점부터 싣고, 요청이 너무 큰지는 공급자가 판정한다
 
 - 상태: Active. §1 은 결정, §2~§9 는 문제 정의와 적대적 검토, §10~§12 는 설계·이행·측정, §13 은 §1 의 근거와 코드에 넣는 순서다.
 - 작성: 2026-09-15. §2~§9 는 코드 origin/main 5fb0fbe190 대조와 논문·업계·기억 구조 조사(§6.2~6.4)를 거쳤다. §1 의 1·2·5·6 과 §13 은 2026-09-18 라이브 실측(§13.1)을 보고 적었다.
@@ -598,12 +598,12 @@ type origin =
 
 §1 의 1·2 를 이렇게 짓는다.
 
-- 보내는 범위는 librarian 이 마지막으로 흡수한 지점부터 지금까지다.
-- 그 앞은 이미 기억에 있으므로 다시 보내지 않는다.
-- 도구 결과는 조립 시점에 늘 마커로 나간다 (이력 바이트의 71%). 지금은 거절 경로의 `last_resort` 에서만 켜진다 — #28845 이 조립 시점에서 거절 경로로 옮긴 것을 되돌린다.
+- 보내는 범위는 librarian 이 마지막으로 흡수한 지점부터 지금까지다. 그 지점은 Librarian 이 빠짐없이 읽은 턴만 지나간다(Librarian RFC §4.5 I1·I3).
+- 그 앞은 다시 보내지 않는다. 그 앞이 기억에 남는 것은 Librarian RFC §7 (라)가 끝난 뒤다. 지금 Librarian 은 턴 진행과 현재 상태를 facts 에 적지 않고(`config/prompts/librarian.md` §남길 지식과 증거), 도구 결과는 `[tool result omitted: …]` 한 줄로만 읽는다(`keeper_librarian.ml` `text_of_content`). §1 의 6 이 그 조건을 기다리는 이유다.
+- 도구 결과는 조립 시점에 늘 마커로 나간다 (이력 바이트의 71%). 끝난 턴의 결과는 이미 그렇게 나간다(RFC-0363, `keeper.model_input_demotion_enabled` 기본 `true`). 지금 턴의 결과는 거절 경로의 `last_resort` 에서만 마커가 된다. #28845 의 강등을 조립 시점에서 거절 경로로 옮긴 것(§11 1d)을 되돌려, 지금 턴의 결과도 조립 때 마커로 나가게 한다.
 - 거절은 오류로 올린다. 범위를 좁혀 다시 보내지 않는다.
 
-경계가 고른 숫자가 아니라 **일어난 일**이라는 점이 핵심이다. `context-high-water-tokens = 100000` 은 왜 10만인지 아무도 답하지 못한다. "librarian 이 흡수한 지점"은 고를 것이 없고 틀릴 수도 없다.
+경계가 고른 숫자가 아니라 **일어난 일**이라는 점이 핵심이다. `context-high-water-tokens = 100000` 은 왜 10만인지 아무도 답하지 못한다. "librarian 이 흡수한 지점"은 고를 것이 없다. 그 지점이 읽지 않은 턴을 넘어가지 않는 한 틀리지도 않는다.
 
 지우는 것은 *전송*이지 *기록*이 아니다. durable 이력은 evidence 로 남긴다. 달라지는 것은 이미 기억으로 옮겨진 것을 매 턴 다시 실어 보내지 않는다는 것뿐이다.
 

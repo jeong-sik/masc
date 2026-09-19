@@ -133,9 +133,7 @@ status: reference
   줄 번호로는 지금 History 안의 자리를 말할 수 없다. 파일이 없으면 아직 읽은 적이 없다는 뜻이다. 못
   읽는 파일은 "읽은 적 없음"으로 치지 않고 오류로 다룬다. 그렇게 치면 History
   전체가 안 읽은 것으로 보인다.
-  현재 구현은 저장소와 순수 범위 선택 함수까지다. Librarian runtime은 이 값을
-  읽거나 쓰지 않으며, 현재 회차의 성공이 Read Position 전진을 뜻하지 않는다.
-  생산 경로 연결은 `RFC-librarian-lifecycle` §8의 4단계다.
+  Librarian이 이 값을 언제부터 읽고 쓰는지는 `RFC-librarian-lifecycle` §8을 본다.
 
 **Generation**
 : 같은 Keeper가 새 trace로 이어진 횟수. 초기값은 0이다.
@@ -180,5 +178,4 @@ status: reference
   한 번 불러, 더할 fact와 버릴 fact와 합칠 fact를 정해 Memory OS에 적는다. 같은
   호출에서 Keeper가 받은 요청을 묶어 working context로 정리한다. Keeper의 판단을
   대신하지 않는다.
-  현재는 턴 끝 제출과 cadence를 거쳐 최근 메시지 범위를 읽는다. 저장된 Read
-  Position부터 누락된 턴을 따라 읽는 루프는 아직 연결되지 않았다.
+  History를 읽는 경로의 구현 진척은 `RFC-librarian-lifecycle` §8을 본다.

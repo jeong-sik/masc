@@ -9,11 +9,13 @@ let policy_equal left right =
 
 type attempt_state = Pending | Attempted of policy
 
+type runtime_entry = Not_entered | Entered
+
 type remembered =
   { trace_id : string
   ; identity : unit ref
   ; attempt_state : attempt_state
-  ; process : meta:Keeper_meta_contract.keeper_meta -> Keeper_librarian_runtime.trigger -> unit
+  ; process : meta:Keeper_meta_contract.keeper_meta -> Keeper_librarian_runtime.trigger -> runtime_entry
   }
 
 let remembered : (string * remembered) list Atomic.t = Atomic.make []
@@ -33,17 +35,19 @@ let attempt_remembered ~base_path ~keeper_name ~trace_id ~meta ~sources_changed 
     (match evidence.attempt_state, sources_changed with
      | Attempted policy, false when policy_equal policy (policy_of_meta meta) -> ()
      | Pending, _ | Attempted _, _ ->
-       evidence.process ~meta trigger;
-       (* Unit return only proves an attempt. In particular run_best_effort can
-          return without committing. Exceptions, including cancellation, leave
-          evidence pending; a newer turn arriving during this call stays dirty. *)
-       Stdlib.Mutex.protect mu (fun () ->
-         match List.assoc_opt key (Atomic.get remembered) with
-         | Some latest when latest.identity == evidence.identity ->
-           Atomic.set remembered
-             ((key, {latest with attempt_state = Attempted (policy_of_meta meta)}) ::
-              List.remove_assoc key (Atomic.get remembered))
-         | Some _ | None -> ()));
+       (match evidence.process ~meta trigger with
+        | Not_entered -> ()
+        | Entered ->
+          (* Runtime entry preserves the existing attempt policy even when
+             cadence or failure returns without committing. Exceptions leave
+             evidence pending; a newer turn arriving here stays pending too. *)
+          Stdlib.Mutex.protect mu (fun () ->
+            match List.assoc_opt key (Atomic.get remembered) with
+            | Some latest when latest.identity == evidence.identity ->
+              Atomic.set remembered
+                ((key, {latest with attempt_state = Attempted (policy_of_meta meta)}) ::
+                 List.remove_assoc key (Atomic.get remembered))
+            | Some _ | None -> ())));
     true
   | Some _ | None -> false
 

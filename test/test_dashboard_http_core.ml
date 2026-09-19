@@ -4775,22 +4775,15 @@ let post_config ?(inject_revision = true) ~sw ~clock ~state ~name body =
   in
   raw, Yojson.Safe.from_string body
 
-let post_runtime_assignment ?set_assignment ~state body =
+(* One POST through a handler the route calls after authentication, read back
+   as the status line and the JSON body. *)
+let post_to_handler ~target handle body =
   let output = Buffer.create 512 in
   let connection =
     Httpun.Server_connection.create (fun reqd ->
-      match set_assignment with
-      | None ->
-        Server_routes_http_routes_dashboard.For_testing.handle_runtime_assignment_post
-          state "dashboard-test" (Httpun.Reqd.request reqd) reqd body
-      | Some set_assignment ->
-        Server_routes_http_routes_dashboard.For_testing
-        .handle_runtime_assignment_post_with
-          ~set_assignment state "dashboard-test" (Httpun.Reqd.request reqd) reqd body)
+      handle (Httpun.Reqd.request reqd) reqd body)
   in
-  let request =
-    "POST /api/v1/runtime/config/assignment HTTP/1.1\r\nHost: x\r\n\r\n"
-  in
+  let request = Printf.sprintf "POST %s HTTP/1.1\r\nHost: x\r\n\r\n" target in
   let input = Bigstringaf.of_string ~off:0 ~len:(String.length request) request in
   ignore
     (Httpun.Server_connection.read_eof connection input ~off:0
@@ -4818,6 +4811,26 @@ let post_runtime_assignment ?set_assignment ~state body =
     | [] -> fail "HTTP response has no body"
   in
   raw, Yojson.Safe.from_string body
+
+let post_runtime_assignment ?set_assignment ~state body =
+  post_to_handler ~target:"/api/v1/runtime/config/assignment"
+    (fun request reqd body ->
+      match set_assignment with
+      | None ->
+        Server_routes_http_routes_dashboard.For_testing.handle_runtime_assignment_post
+          state "dashboard-test" request reqd body
+      | Some set_assignment ->
+        Server_routes_http_routes_dashboard.For_testing
+        .handle_runtime_assignment_post_with
+          ~set_assignment state "dashboard-test" request reqd body)
+    body
+
+let post_runtime_routing ~state body =
+  post_to_handler ~target:"/api/v1/runtime/config/routing"
+    (fun request reqd body ->
+      Server_routes_http_routes_dashboard.For_testing.handle_runtime_routing_post
+        state "dashboard-test" request reqd body)
+    body
 
 let expect_http_status label status raw =
   let prefix = Printf.sprintf "HTTP/1.1 %d" status in
@@ -4987,6 +5000,55 @@ let test_direct_assignment_route_rejects_stale_revision_without_write () =
   ignore
     (Masc.Keeper_keepalive.stop_keepalive_and_await
        ~base_path:config.base_path name)
+
+(* The routing handler's create and remove branches. A created lane lands in
+   runtime.toml; a lane under a runtime id, and a lane the default walks, are
+   refused with 400 and the writer's own sentence; a removed lane leaves the
+   file. *)
+let test_runtime_routing_creates_and_removes_a_lane () =
+  with_direct_assignment_model_catalog @@ fun () ->
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let runtime_path =
+    Config_dir_resolver.runtime_toml_path_for_base_path
+      ~base_path:config.base_path
+  in
+  mkdir_p (Filename.dirname runtime_path);
+  write_file runtime_path config_sync_runtime_toml;
+  (match Runtime.init_default ~config_path:runtime_path with
+   | Ok () -> ()
+   | Error error -> fail ("runtime init: " ^ error));
+  (* The handler writes the runtime.toml the resolver finds, as the server
+     does; point the resolver at this fixture's. *)
+  with_env "MASC_CONFIG_DIR" (Filename.dirname runtime_path) @@ fun () ->
+  Config_dir_resolver.reset ();
+  Fun.protect ~finally:(fun () -> Config_dir_resolver.reset ()) @@ fun () ->
+  let state = Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path in
+  let post label status body =
+    let raw, json = post_runtime_routing ~state body in
+    expect_http_status label status raw;
+    json
+  in
+  let refusal json = Yojson.Safe.Util.(json |> member "error" |> to_string) in
+  let in_file text = String_util.contains_substring (read_file runtime_path) text in
+  ignore
+    (post "create" 200
+       {|{"lane":"coding","action":"create","runtime_ids":["test_provider.test_model"]}|});
+  check bool "the created lane is in the file" true (in_file "[runtime.lanes.coding]");
+  check string "a lane under a runtime id is refused"
+    {|"test_provider.test_model" is a runtime id; a new lane needs a name of its own|}
+    (refusal
+       (post "create under a runtime id" 400
+          {|{"lane":"test_provider.test_model","action":"create","runtime_ids":["test_provider.test_model"]}|}));
+  ignore (post "remove" 200 {|{"lane":"coding","action":"remove"}|});
+  check bool "the removed lane left the file" false (in_file "[runtime.lanes.coding]");
+  ignore
+    (post "write the default's lane" 200
+       {|{"lane":"test_provider.test_model","runtime_ids":["test_provider.test_model"]}|});
+  check string "a lane the default walks is refused"
+    {|lane "test_provider.test_model" is in use by [runtime].default, which every keeper without an assignment walks|}
+    (refusal
+       (post "remove the default's lane" 400
+          {|{"lane":"test_provider.test_model","action":"remove"}|}))
 
 let test_direct_assignment_intervening_write_fences_keeper_config_post () =
   with_direct_assignment_model_catalog @@ fun () ->
@@ -6044,6 +6106,8 @@ let () =
             test_config_post_rejects_second_writer_with_same_revision;
           test_case "direct assignment stale writer loses without a write" `Quick
             test_direct_assignment_route_rejects_stale_revision_without_write;
+          test_case "routing POST creates and removes a lane" `Quick
+            test_runtime_routing_creates_and_removes_a_lane;
           test_case "direct assignment fences stale Keeper config POST" `Quick
             test_direct_assignment_intervening_write_fences_keeper_config_post;
           test_case "direct assignment response preserves lock warning" `Quick

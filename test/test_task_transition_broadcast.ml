@@ -479,7 +479,7 @@ let test_rejected_transition_is_silent () =
 
 let test_verdict_activity_tracks_the_committed_terminal () =
   List.iter
-    (fun (action, terminal, span_terminal, terminal_kind) ->
+    (fun (action, verdict, terminal, span_terminal, active, terminal_kind) ->
       with_test_env (fun config ~baseline_seq:_ ->
         let previous = Atomic.get Workspace_hooks.activity_emit_fn in
         let entity (value : Workspace_hooks.activity_entity) =
@@ -535,12 +535,12 @@ let test_verdict_activity_tracks_the_committed_terminal () =
             assert_projection ~status:"in_progress" ~active:true ~span_status:"open";
             (match Workspace.commit_verdict_r config ~task_id ~verification_id
                 ~authority:(D.Human_operator { operator_id = "operator-reviewer" })
-                ~verdict:D.Verdict_approved ~notes:"approved request" () with
+                ~verdict ~notes:"reviewed request" () with
              | Ok _ -> ()
              | Error error -> Alcotest.fail (D.masc_error_to_string error));
             Alcotest.(check string) "committed terminal" terminal
               (D.task_status_to_string (status ()));
-            assert_projection ~status:terminal ~active:false ~span_status:span_terminal;
+            assert_projection ~status:terminal ~active ~span_status:span_terminal;
             let events = Activity_graph.list_events config ~after_seq:0 ~limit:20
               ~keep:(fun event -> match event.Activity_graph.subject with
                 | Some subject -> String.equal subject.kind "task" && String.equal subject.id task_id
@@ -548,8 +548,10 @@ let test_verdict_activity_tracks_the_committed_terminal () =
             Alcotest.(check (list string)) "events describe committed states"
               [ "task.claimed"; "task.started"; "task.submit_for_verification"; terminal_kind ]
               (List.map (fun (event : Activity_graph.event) -> event.kind) events))))
-    [ D.Cancel, "cancelled", "cancelled", "task.cancelled"
-    ; D.Submit_for_verification, "done", "completed", "task.approved"
+    [ D.Cancel, D.Verdict_approved, "cancelled", "cancelled", false, "task.cancelled"
+    ; D.Submit_for_verification, D.Verdict_approved, "done", "completed", false, "task.approved"
+    ; D.Cancel, D.Verdict_rejected { reason = "the work is still needed" },
+        "in_progress", "open", true, "task.rejected"
     ]
 ;;
 

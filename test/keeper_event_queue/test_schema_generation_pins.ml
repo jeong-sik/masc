@@ -33,11 +33,19 @@ let fail fmt =
 let golden_event_queue_state_schema = "keeper.event_queue.state.v18"
 let golden_event_queue_wal_schema = "masc.keeper_event_queue.transition.v8"
 let golden_event_queue_snapshot_filename = "event-queue-v19.json"
+let golden_fleet_summary_schema = "masc.keeper_event_queue.fleet_summary.v5"
+let golden_fleet_health_summary_schema = "masc.keeper_event_queue.fleet_summary.v7"
 
 (* ── Marker pins (the typed version comparison, made load-bearing) ─ *)
 
 let test_event_queue_state_schema_marker_is_pinned () =
   assert (String.equal Keeper_event_queue_state.schema golden_event_queue_state_schema)
+
+let test_read_only_projection_schema_markers_are_pinned () =
+  assert (String.equal Keeper_event_queue_schema.fleet_summary golden_fleet_summary_schema);
+  assert
+    (String.equal Keeper_event_queue_schema.fleet_health_summary
+       golden_fleet_health_summary_schema)
 
 let contains needle haystack =
   let n = String.length needle and h = String.length haystack in
@@ -179,7 +187,7 @@ let test_registry_is_the_single_source_of_truth () =
     fail "keeper_event_queue_persistence.ml embeds the WAL schema literal";
   if contains "\"event-queue-v19.json\"" persistence then
     fail "keeper_event_queue_persistence.ml embeds the snapshot filename literal";
-  if contains "\"masc.keeper_event_queue.fleet_summary.v4\"" persistence then
+  if contains "\"masc.keeper_event_queue.fleet_summary.v5\"" persistence then
     fail "keeper_event_queue_persistence.ml embeds the fleet summary literal";
   if contains "\"event-queue-transitions-v8.jsonl\"" persistence then
     fail "keeper_event_queue_persistence.ml embeds the WAL filename literal";
@@ -193,6 +201,7 @@ let test_registry_is_the_single_source_of_truth () =
 
 let () =
   test_event_queue_state_schema_marker_is_pinned ();
+  test_read_only_projection_schema_markers_are_pinned ();
   test_event_queue_wal_row_schema_marker_is_pinned ();
   test_event_queue_snapshot_filename_pins_store_generation ();
   test_registry_is_the_single_source_of_truth ();

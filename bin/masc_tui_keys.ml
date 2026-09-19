@@ -515,6 +515,8 @@ let for_surface = function
           ~help:"while a detail is open, step to the row before or after it"
       ; b Act "c" "request completion"
           ~help:"send the goal to the completion judge; press again to submit"
+      ; b Act "a" "confirm proof"
+          ~help:"read the proven Goal evidence; press again to confirm that exact proof"
       ; b Act "x" "drop"
       ; b Act "o" "reopen"
       ; b Act "Y" "copy link" ~help:"copy the selected goal reference"

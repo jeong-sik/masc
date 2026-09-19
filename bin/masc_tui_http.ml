@@ -1706,6 +1706,15 @@ let post_board_new ~(host : string) ~(port : int) ~(title : string)
   post_json ~host ~port ~path:"/api/v1/tools/masc_board_post"
     ~body:(Yojson.Safe.to_string payload)
 
+let fetch_goal_confirmation ~host ~port ~goal_id =
+  get_json ~host ~port
+    ~path:("/api/v1/goals/confirmation?goal_id=" ^ percent_encode_query_value goal_id)
+
+let post_goal_confirmation ~host ~port confirmation =
+  post_json ~host ~port ~path:"/api/v1/goals/confirmation"
+    ~body:(Yojson.Safe.to_string
+      (Masc_tui_planning_detail.confirmation_body confirmation))
+
 (** POST /api/v1/tools/masc_goal_transition. The action travels as the tool's
     own wire word via [Goal_phase.Public_action.to_string] rather than a
     local literal, so the TUI and the tool cannot disagree about what

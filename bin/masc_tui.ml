@@ -43,6 +43,8 @@ module Keeper_control = Masc_tui_keeper_control
 module Ask = Masc_tui_ask_projection
 module Metrics_tail = Masc_tui_metrics_tail
 module Planning_selection = Masc_tui_planning_selection
+module Goal_confirmation = Masc_tui_planning_detail
+module Goal_confirmation_read = Masc_tui_fetched
 module Render_schedule = Masc_tui_render_schedule
 module Link = Masc_tui_link
 module Terminal_profile = Masc_tui_terminal_profile
@@ -2057,6 +2059,8 @@ type async_msg =
     }
   | Board_vote_done of (string, string) result
   | Goal_transition_done of (string, string) result
+  | Goal_confirmation_loaded of
+      string Goal_confirmation_read.request * (Goal_confirmation.confirmation, string) result
   | Schedules_loaded of Snapshot_read.request * (schedule_snapshot, string) result
   (* Carries the schedule it was asked about: the reader can step to the next
      row or close the detail while a load is in flight, and an answer that did
@@ -11137,10 +11141,57 @@ let start_goal_transition state ~mailbox ~(goal_id : string)
   | Some sw -> Eio.Fiber.fork ~sw run_transition
   | None -> run_transition ()
 
-(* The lifecycle keys on a goal detail. Arming is the pattern the keeper
-   lifecycle already uses: the first press names the action, the same press
-   again submits it, and any other key disarms. [Goal_phase.Public_action.t]
-   rides along so no string name of an action exists in this file. *)
+(* Confirmation uses the operator route and the exact proof read here, never
+   the public MCP action set or a proof obtained at the second keypress. *)
+let handle_goal_confirmation_key state ~mailbox =
+  match state.planning_mode with
+  | Planning_list -> ()
+  | Planning_detail goal_id ->
+      let host = server_peer_host and port = state.port in
+      let run_async run =
+        match Eio_context.get_switch_opt () with
+        | Some sw -> Eio.Fiber.fork ~sw run
+        | None -> run ()
+      in
+      state.goal_action_armed <- None;
+      (match Goal_confirmation_read.view_for ~equal:String.equal
+               state.goal_confirmation ~key:goal_id with
+       | Ready confirmation ->
+           state.goal_confirmation <- Goal_confirmation_read.clear state.goal_confirmation;
+           run_async (fun () ->
+             let result =
+               let ( let* ) = Result.bind in
+               let* json = Masc_tui_http.post_goal_confirmation ~host ~port confirmation in
+               let* confirmed = Goal_confirmation.decode_confirmation ~goal_id json in
+               match confirmed.phase with
+               | Goal_phase.Completed
+                 when Goal_confirmation.same_confirmation_binding confirmation confirmed ->
+                   Ok "completion confirmed"
+               | _ -> Error "goal confirmation: server did not confirm completion"
+             in
+             enqueue_async mailbox (Goal_transition_done result))
+       | Loading -> ()
+       | Absent | Failed _ ->
+           (match Goal_confirmation_read.start ~equal:String.equal
+                    state.goal_confirmation ~key:goal_id with
+            | Already_loading -> ()
+            | Started (loading, request) ->
+                state.goal_confirmation <- loading;
+                state.goal_action_error <- None;
+                state.planning_scroll <- 0;
+                run_async (fun () ->
+                  let result =
+                    let ( let* ) = Result.bind in
+                    let* json = Masc_tui_http.fetch_goal_confirmation ~host ~port ~goal_id in
+                    let* confirmation = Goal_confirmation.decode_confirmation ~goal_id json in
+                    match confirmation.phase with
+                    | Goal_phase.Awaiting_confirmation -> Ok confirmation
+                    | _ -> Error "goal is not awaiting confirmation"
+                  in
+                  enqueue_async mailbox (Goal_confirmation_loaded (request, result)))))
+
+(* The lifecycle keys on a goal detail. The first press names the action, the
+   same press again submits it, and any other key disarms. *)
 let handle_goal_action_key state ~mailbox ~(action : Goal_phase.Public_action.t)
     =
   match state.planning_mode with
@@ -12776,6 +12827,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       | Error err ->
           state.goal_action_armed <- None;
           state.goal_action_error <- Some err)
+  | Goal_confirmation_loaded (request, result) ->
+      state.goal_confirmation <-
+        Goal_confirmation_read.complete ~equal:String.equal
+          state.goal_confirmation request result
   | Verification_evidence_loaded (task_id, result) ->
       (match verification_cursor_row state, state.verification_detail_request_id with
        | Some row, Some _ when String.equal row.Masc.Tui_decode.vr_task_id task_id ->
@@ -17286,7 +17341,13 @@ and is loaded on demand through keeper_skill.
        | Board -> if cancelled [ "v"; "V" ] then state.board_vote_armed <- None
        | Planning ->
            if cancelled [ "c"; "C"; "x"; "X"; "o"; "O" ] then
-             state.goal_action_armed <- None
+             state.goal_action_armed <- None;
+           (* Scrolling reads the exact proof; leaving it invalidates pending
+              reads as well as an already displayed confirmation binding. *)
+           if cancelled [ "a"; "A"; "j"; "k"; "up"; "down";
+                          "pageup"; "pagedown"; "wheel-up"; "wheel-down" ] then
+             state.goal_confirmation <-
+               Goal_confirmation_read.clear state.goal_confirmation
        | Schedules ->
            if cancelled [ "x"; "X" ] then state.schedule_cancel_armed <- None
        | Verification ->
@@ -22808,6 +22869,8 @@ and is loaded on demand through keeper_skill.
                           reenter_terminal ();
                           add_event state "system"
                             (Printf.sprintf "closed %s:%d" path line))))
+       | Some ("a" | "A") when state.view = Planning ->
+           handle_goal_confirmation_key state ~mailbox:async_messages
        | Some "c" | Some "C" | Some "x" | Some "X" | Some "o" | Some "O" when state.view = Planning ->
            (* Goal lifecycle, detail only: the list keeps j/k/Enter and the
               letters stay navigation-free there. The first press arms, the

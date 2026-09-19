@@ -2555,11 +2555,8 @@ let planning_next_step (goal : planning_goal) =
   | Goal_phase.Verifying, _ ->
     ( (Theme.warn ())
     , "with the completion judge - nothing to press; [c] re-arms the request" )
-  (* Named by path: "goal confirmation CLI" is not a command anyone can type.
-     This screen has no key for the step it is asking for (#35996), and the
-     row has to fit the split pane, so the path is the whole instruction. *)
   | Goal_phase.Awaiting_confirmation, _ ->
-    (Theme.warn (), "proof passed - confirm via scripts/goal-confirmation.py")
+    (Theme.warn (), "proof passed - [a] reads the proof for your final confirmation")
   | Goal_phase.Completed, _ -> (Ansi.dim, "reached its target - [o] reopens it")
   | Goal_phase.Dropped, _ -> (Ansi.dim, "abandoned - [o] reopens it")
 ;;
@@ -3060,7 +3057,10 @@ let planning_detail_pane (state : state)
   box_line buf cols
     ("  Actions:  "
      ^ String.concat "   "
-         (List.map action_item Goal_phase.Public_action.all));
+         (List.map action_item Goal_phase.Public_action.all)
+     ^ (if Goal_phase.moves_goal ~phase:goal.pg_phase ~action:Goal_phase.Confirm_completion
+        then "   " ^ Theme.ok () ^ "[a] Confirm proof" ^ Ansi.reset
+        else ""));
   (* The goal's own timeline, dim like the Board read pane's timestamps:
      when it was opened, when it last moved, when it was last reviewed. *)
   let timestamp_lines =
@@ -3109,7 +3109,15 @@ let planning_detail_pane (state : state)
      less than the row it was opened from. They wrap, so this is what the
      surface's scroll moves through. *)
   let body =
-    Planning_detail.body ~width:(cols - 6) goal.pg_proof goal.pg_last_review_note
+    (match Masc_tui_fetched.view_for ~equal:String.equal
+             state.goal_confirmation ~key:goal.pg_id with
+     | Ready confirmation -> Planning_detail.confirmation_lines ~width:(cols - 6) confirmation
+     | Loading -> [{ Planning_detail.tone = Waiting; text = "Reading the proof to confirm..." }]
+     | Failed detail ->
+         Masc_tui_message_layout.wrap_words ~max_cells:(cols - 6)
+           (Terminal_text.single_line detail)
+         |> List.map (fun text -> { Planning_detail.tone = Unreadable; text })
+     | Absent -> Planning_detail.body ~width:(cols - 6) goal.pg_proof goal.pg_last_review_note)
     @ Planning_detail.timeline ~width:(cols - 6) ~goal_id:goal.pg_id
         state.goal_timeline
   in

@@ -5011,7 +5011,7 @@
 (test
  (name test_tui_planning_detail)
  (modules test_tui_planning_detail)
- (libraries alcotest masc masc_tui_planning_detail))
+ (libraries alcotest masc masc.masc_goal masc_tui_planning_detail masc_tui_fetched))
 
 (test
  (name test_tui_roster_pane)

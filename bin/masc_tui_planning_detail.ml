@@ -23,6 +23,80 @@ let wrapped ~width tone text =
   Message_layout.wrap_words ~max_cells:width text
   |> List.map (fun text -> { tone; text })
 
+type confirmation = {
+  goal_id : string;
+  phase : Goal_phase.t;
+  verdict : Goal_verification.verdict;
+}
+
+let decode_confirmation ~goal_id json =
+  let ( let* ) = Result.bind in
+  let field name = function
+    | `Assoc fields ->
+        (match List.assoc_opt name fields with
+         | Some value -> Ok value
+         | None -> Error ("goal confirmation: missing " ^ name))
+    | _ -> Error "goal confirmation: expected object"
+  in
+  let* goal = field "goal" json in
+  let* id = field "id" goal in
+  let* verification = field "verification" json in
+  let* proof_goal = field "goal_id" verification in
+  let* () =
+    if id = `String goal_id && proof_goal = `String goal_id then Ok ()
+    else Error "goal confirmation: goal identity mismatch"
+  in
+  let* phase_json = field "phase" goal in
+  let* phase = Goal_phase.of_yojson phase_json in
+  let* completion = field "completion" verification in
+  let* completion = Goal_verification.completion_state_of_yojson completion in
+  let* verdict =
+    match phase, completion with
+    | Goal_phase.Awaiting_confirmation, Goal_verification.Proof_proven verdict
+    | Goal_phase.Completed, Goal_verification.Human_confirmed (verdict, _) -> Ok verdict
+    | _ -> Error "goal confirmation: no current proven completion to confirm"
+  in
+  let* revision = field "criterion_revision" goal in
+  let* title = field "title" goal in
+  let* metric = field "metric" goal in
+  let* target = field "target_value" goal in
+  let* criterion = Goal_store.criterion_of_yojson
+      (`Assoc ["revision", revision; "title", title; "metric", metric; "target_value", target]) in
+  if Goal_store.criterion_equal criterion verdict.criterion then Ok { goal_id; phase; verdict }
+  else Error "goal confirmation: criterion mismatch"
+
+let confirmation_body { goal_id; verdict; _ } =
+  let Goal_store.Criterion criterion = verdict.Goal_verification.criterion in
+  `Assoc
+    [ "goal_id", `String goal_id
+    ; "criterion_revision", `String criterion.revision
+    ; "request_id", `String verdict.request_id
+    ; "verification_run_id", `String verdict.verification_run_id
+    ]
+
+let same_confirmation_binding left right =
+  String.equal left.goal_id right.goal_id
+  && Goal_store.criterion_equal left.verdict.criterion right.verdict.criterion
+  && String.equal left.verdict.request_id right.verdict.request_id
+  && String.equal left.verdict.verification_run_id right.verdict.verification_run_id
+
+let confirmation_lines ~width { goal_id; verdict; _ } =
+  let Goal_store.Criterion criterion = verdict.Goal_verification.criterion in
+  [ "CONFIRM THIS PROOF — [a] confirms; Esc cancels"
+  ; "Goal: " ^ goal_id
+  ; "Title: " ^ criterion.title
+  ; "Target: " ^ Option.value criterion.metric ~default:"not declared"
+    ^ " = " ^ Option.value criterion.target_value ~default:"not declared"
+  ; "Criterion: " ^ criterion.revision
+  ; "Request: " ^ verdict.request_id
+  ; "Verifier run: " ^ verdict.verification_run_id
+  ; "Evidence: " ^ verdict.evidence
+  ]
+  |> List.concat_map (fun text ->
+       Message_layout.wrap_body ~max_cells:width
+         ~sanitize:Tui_decode.sanitize_terminal_text text
+       |> List.map (fun text -> { tone = Waiting; text }))
+
 (* A verdict is a headline and, when the judge left one, the measurement it
    rests on. They are separate rows because the reason wraps and the headline
    should stay findable at the top of the block. *)

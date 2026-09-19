@@ -1108,22 +1108,24 @@ let dedupe_runtimes_preserve_order runtimes =
   in
   loop [] [] runtimes
 
-(* RFC-0440: a live lane reroutes over the lane, then [runtime.media_failover],
-   then the other declared runtimes, so an image turn on a lane whose capable
-   head is down reaches a capable runtime declared elsewhere. The set is held
-   in the same quota and backpressure order the lane itself uses
-   ([demote_unavailable_candidates]): a candidate whose account answered a hard
-   quota rejection earlier moves behind the live ones, so the reroute picks a
-   live candidate instead of the first declared one. A deferred lane offers no
-   candidates: its walk dispatches the frozen suffix ([lane_candidate_ids] in
-   [run_agent_turn]), so a decision that moved the head would be recorded as a
-   reroute the walk never performs. *)
+(* A live lane reroutes an image turn over its own candidates only. The lane is
+   the whole list of runtimes this keeper may call; [runtime.media_failover] is
+   the vision tool's fleet and never a turn's dispatch target. When no lane
+   candidate takes the image, the decision is [No_capable_runtime] and the
+   per-attempt projection turns the image into a reading for the runtime that
+   runs the turn. The set is held in the same quota and backpressure order the
+   lane itself uses ([demote_unavailable_candidates]): a candidate whose
+   account answered a hard quota rejection earlier moves behind the live ones,
+   so the reroute picks a live candidate instead of the first declared one. A
+   deferred lane offers no candidates: its walk dispatches the frozen suffix
+   ([lane_candidate_ids] in [run_agent_turn]), so a decision that moved the
+   head would be recorded as a reroute the walk never performs. *)
 let modality_reroute_candidates ~now ~deferred_runtime_lane ~first_candidate
     ~remaining_runtimes =
   match deferred_runtime_lane with
   | Some _ -> []
   | None ->
-    Runtime_agent.media_candidates ~lane:(first_candidate :: remaining_runtimes)
+    dedupe_runtimes_preserve_order (first_candidate :: remaining_runtimes)
     |> demote_unavailable_candidates
          ~now
          ~quota_scope_of:(fun (runtime : Runtime.t) ->
@@ -1131,30 +1133,27 @@ let modality_reroute_candidates ~now ~deferred_runtime_lane ~first_candidate
          ~candidate_backpressure_of:(fun (runtime : Runtime.t) ->
            Some runtime.Runtime.candidate_backpressure)
 
-(* RFC-0440 §3: the media walk (every candidate that takes the media, live ones
-   first), then the lane's remaining candidates as the degrade tail — per-attempt
-   projection drops the image there (PR-C replaces this tail with delegation). A
-   text turn has an empty media walk and keeps [first_runtime :: remaining_runtimes].
+(* The media walk (every lane candidate that takes the media, live ones first),
+   then the lane's remaining candidates as the degrade tail, where per-attempt
+   projection turns the image into a reading. A text turn has an empty media
+   walk and keeps [first_runtime :: remaining_runtimes].
 
-   The walk leads, [first_runtime] does not. Putting the dispatch head at 0
-   unconditionally undid the liveness ordering in the one case it is needed:
-   when the assigned runtime takes the media itself,
-   [decide_modality_reroute_for_runtime_candidates] answers [No_reroute_needed]
-   on capability alone and never looks at the account, so a head already
-   exhausted by a 402/429 stayed in front of the live out-of-lane candidate and
-   every image turn hit it first again. When the head is live it is the walk's
-   own head, so leading with the walk changes nothing; after a reroute the
-   target is the walk head for the same reason, and the dedupe drops the second
-   mention either way.
+   The walk leads, [first_runtime] does not. When the assigned runtime takes
+   the media itself, [decide_modality_reroute_for_runtime_candidates] answers
+   [No_reroute_needed] on capability alone and never looks at the account, so a
+   head exhausted by a 402/429 would stay in front of a live capable candidate.
+   When the head is live it is the walk's own head, so leading with the walk
+   changes nothing; after a reroute the target is the walk head for the same
+   reason, and the dedupe drops the second mention either way.
 
-   [assigned_runtime] closes the list. A reroute replaces the head with an
-   out-of-lane media runtime, so on a single-candidate text lane the assigned
-   runtime appeared nowhere: every media candidate answering 402 exhausted the
-   loop into an error instead of reaching the assigned runtime, whose
-   per-attempt projection is what drops the image and delegates. It is the last
-   entry because it is the degrade, not a candidate for the media. Whenever it
-   is already the head or already in the walk the dedupe drops this mention, so
-   a text turn and an un-rerouted media turn keep the list they had. *)
+   [assigned_runtime] closes the list. A reroute moves the head to another lane
+   candidate, and [remaining_runtimes] never held the assigned runtime, so
+   without this entry a turn whose media candidates all answer 402 would end in
+   an error instead of reaching the assigned runtime, whose per-attempt
+   projection turns the image into a reading. It is the last entry because it
+   is the degrade, not a candidate for the media. Whenever it is already the
+   head or already in the walk the dedupe drops this mention, so a text turn
+   and an un-rerouted media turn keep the list they had. *)
 let attempt_runtimes_for_turn ~media_walk ~assigned_runtime ~first_runtime
     ~remaining_runtimes =
   dedupe_runtimes_preserve_order

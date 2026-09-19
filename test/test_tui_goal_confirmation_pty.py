@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import copy
 import json
 import os
@@ -101,7 +102,9 @@ def run(executable: str, *, replace_proof: bool) -> None:
         )
         h.open_loaded_planning(process, master_fd, output)
         h.send_and_wait(process, master_fd, output, b"\r", b"[a] Confirm proof")
-        h.send_and_wait(process, master_fd, output, b"a", b"CONFIRM THIS PROOF")
+        proof_frame = h.send_and_wait(
+            process, master_fd, output, b"a", b"CONFIRM THIS PROOF"
+        )
         h.wait_for_output(
             process, master_fd, output, b"Verifier run: run-1", start=0, timeout=5.0
         )
@@ -110,9 +113,9 @@ def run(executable: str, *, replace_proof: bool) -> None:
         if replace_proof:
             verdict["verification_run_id"] = "run-2"
         needle = (
-            b"confirmation proof changed" if replace_proof else b"completion confirmed"
+            b"confirmation proof changed" if replace_proof else b"reached its target"
         )
-        h.send_and_wait(process, master_fd, output, b"a", needle)
+        result_frame = h.send_and_wait(process, master_fd, output, b"a", needle)
         if read_count != 1 or len(posted) != 1:
             raise AssertionError(
                 "second key must post once without reading a new proof"
@@ -126,6 +129,20 @@ def run(executable: str, *, replace_proof: bool) -> None:
             raise AssertionError(
                 f"confirmation changed the displayed binding: {posted!r}"
             )
+        print(
+            "GOAL_CONFIRMATION_PTY_EVIDENCE "
+            + json.dumps(
+                {
+                    "server": "controlled_http_fixture",
+                    "proof_changed": replace_proof,
+                    "get_requests": read_count,
+                    "post_requests": posted,
+                    "encoding": "base64",
+                    "proof_frame": base64.b64encode(proof_frame).decode(),
+                    "result_frame": base64.b64encode(result_frame).decode(),
+                }
+            )
+        )
         os.write(master_fd, b"q")
 
     h.run_terminal_scenario(

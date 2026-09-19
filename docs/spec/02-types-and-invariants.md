@@ -127,7 +127,7 @@ type task_status =
   | Cancelled of { cancelled_by: string; cancelled_at: string; reason: string option }
 ```
 
-각 variant가 메타데이터(who, when)를 직접 보유한다. 이 설계는 "상태와 컨텍스트를 분리하지 않는다"는 원칙을 따른다. 상태 전이 규칙은 [INV-TYPE-002] 참조.
+각 variant가 메타데이터(who, when)를 직접 보유한다. 이 설계는 "상태와 컨텍스트를 분리하지 않는다"는 원칙을 따른다. 상태 전이 규칙은 [INV-TYPE-003] 참조.
 
 ### 2.7 Task
 
@@ -565,11 +565,9 @@ type rate_limit_error = {
 
 ## 11. Global Invariants
 
-아래 불변식은 MASC 도메인 전체에 적용되며, 각 행의 `검증 방법` 열이 현재 근거를 지정한다. `INV-TYPE-*` ID 자체는 이 문서 안의 앵커이며 코드·테스트 식별자와 자동으로 연결된다는 뜻은 아니다. 연결이 필요한 항목은 검증 방법에 실제 코드 또는 테스트 좌표를 적는다.
+`INV-TYPE-*` ID는 이 문서 안의 앵커다. 코드나 테스트 좌표로 확인할 수 있는 불변식에만 ID를 붙이고, 좌표는 표의 `검증 좌표` 열에 적는다.
 
 ### Evidence-backed invariants
-
-좌표를 확인할 수 있는 불변식만 이 목록에 둔다. 문서 설명이나 일반적인 테스트 방법만 남은 항목은 불변식 ID를 부여하지 않는다.
 
 | ID | 불변식 | 검증 좌표 |
 |----|--------|----------|

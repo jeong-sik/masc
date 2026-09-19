@@ -1496,8 +1496,9 @@ let create_runtime_lane ~(host : string) ~(port : int) ~(lane : string)
     ]
 
 (** POST /api/v1/runtime/config/routing with [action = "remove"]: delete the
-    declared lane [lane]. The server refuses while a keeper is assigned to it,
-    and names the keepers. *)
+    declared lane [lane]. The server refuses while a keeper still routes
+    through it -- an assignment, or [\[runtime\].default] for every keeper
+    without one -- and names each. *)
 let remove_runtime_lane ~(host : string) ~(port : int) ~(lane : string)
     : (unit, string) result =
   post_runtime_lane_action ~host ~port

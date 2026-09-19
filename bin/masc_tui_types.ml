@@ -1495,16 +1495,43 @@ let runtime_lane_edit_of_key = function
   | _ -> None
 ;;
 
+(* The list a lane write changes, and so the one it has to be read back
+   from: conversation lanes come from the Runtime surface, standalone lanes'
+   walk orders from the standalone lanes list. *)
+type runtime_lane_list =
+  | Runtime_surface_list
+  | Standalone_lanes_list
+
 (* Where the last lane write stands. A write sends the lane's whole order,
-   built from the surface's last reading, so a second write sent before the
+   built from the list's last reading, so a second write sent before the
    first is read back is built from the order the first replaced and undoes
    it. *)
 type runtime_lane_write =
   | Lane_write_idle
   | Lane_write_posting
-  | Lane_write_rereading of int
-      (* The surface generation when the write landed. A load launched after
-         it is the first to carry the write. *)
+  | Lane_write_rereading of runtime_lane_list * int
+      (* The list's load generation when the write answered. A load of that
+         list launched after it is the first to carry the write. *)
+
+(* What the lane editor says about its last key or write. Both the Runtime
+   and the Lanes view draw it. *)
+type runtime_lane_notice =
+  | Lane_write_refused of string
+      (* The server's sentence, or the editor's own for a key it did not
+         send. *)
+  | Lane_write_pending
+      (* A key that would write, pressed while the previous write is out. *)
+  | Lane_list_unread of string
+      (* The re-read after a write failed; the list on screen is the one
+         from before the write. *)
+
+let runtime_lane_notice_text = function
+  | Lane_write_refused detail -> "lane write refused: " ^ detail
+  | Lane_write_pending ->
+    "lane write refused: the previous lane change is still being written; \
+     press again once the list reloads"
+  | Lane_list_unread detail ->
+    "the lane list could not be re-read after the change and may be stale: " ^ detail
 
 (** Stable identity of the Runtime row opened for detail. The cursor is only a
     position and can move to another runtime after refresh; detail stays bound
@@ -5166,6 +5193,9 @@ type state = {
   mutable standalone_lanes: Tui_decode.standalone_lanes_snapshot option;
   mutable standalone_lanes_error: string option;
   mutable standalone_lanes_inflight: bool;
+  (* A re-read asked for while a load was out. That load may have left before
+     the change it has to show, so one more follows it. *)
+  mutable standalone_lanes_reread_pending: bool;
   mutable standalone_lanes_generation: int;
   (* The clients roster, off the ring under Runtime. Lanes is a top-level
      workspace. A
@@ -5241,7 +5271,7 @@ type state = {
      across visits opens the list part-way down for no reason the reader gave. *)
   mutable runtime_lane_pick: runtime_lane_pick option;
   mutable runtime_lane_pick_cursor: int;
-  mutable runtime_lane_error: string option;
+  mutable runtime_lane_notice: runtime_lane_notice option;
   (* The name typed for a new lane, before its first candidate is picked. *)
   mutable runtime_lane_name_draft: string option;
   (* The lane a second [D] removes. Captured at the first press and dropped
@@ -6842,6 +6872,7 @@ let create_state
   standalone_lanes = None;
   standalone_lanes_error = None;
   standalone_lanes_inflight = false;
+  standalone_lanes_reread_pending = false;
   standalone_lanes_generation = 0;
   clients_surface = None;
   clients_surface_error = None;
@@ -6901,7 +6932,7 @@ let create_state
   runtime_detail_scroll = 0;
   runtime_lane_pick = None;
   runtime_lane_pick_cursor = 0;
-  runtime_lane_error = None;
+  runtime_lane_notice = None;
   runtime_lane_name_draft = None;
   runtime_lane_remove_armed = None;
   runtime_lane_cursor_after_write = None;
@@ -7692,6 +7723,7 @@ let lanes_scrolled (state : state) =
            | None -> false
            | Some snapshot -> snapshot.sls_exact_run_projection_truncated)
       + (if Option.is_some state.lanes_action_error then 1 else 0)
+      + (if Option.is_some state.runtime_lane_notice then 1 else 0)
   ; sc_overflow_takes_row = true
   ; sc_preview_keep = None
   }
@@ -8156,13 +8188,47 @@ let runtime_lane_prompt (state : state) =
   | None, Some lane -> Some (Lane_remove_prompt lane)
   | None, None -> None
 
-let runtime_lane_write_busy_message =
-  "the previous lane change is still being written; press again once the list reloads"
-
 let runtime_lane_write_busy (state : state) =
   match state.runtime_lane_write with
   | Lane_write_idle -> false
   | Lane_write_posting | Lane_write_rereading _ -> true
+
+let runtime_lane_list_generation (state : state) = function
+  | Runtime_surface_list -> state.runtime_surface_generation
+  | Standalone_lanes_list -> state.standalone_lanes_generation
+
+let same_runtime_lane_list a b =
+  match a, b with
+  | Runtime_surface_list, Runtime_surface_list
+  | Standalone_lanes_list, Standalone_lanes_list -> true
+  | Runtime_surface_list, Standalone_lanes_list
+  | Standalone_lanes_list, Runtime_surface_list -> false
+
+(* A lane write answered. A refusal ends it here. A success keeps lane edits
+   waiting for a re-read of the list it changed that starts after this
+   point; the caller launches that re-read. *)
+let settle_runtime_lane_write (state : state) ~written = function
+  | Ok () ->
+    state.runtime_lane_notice <- None;
+    state.runtime_lane_write <-
+      Lane_write_rereading (written, runtime_lane_list_generation state written)
+  | Error detail ->
+    state.runtime_lane_notice <- Some (Lane_write_refused detail);
+    state.runtime_lane_write <- Lane_write_idle
+
+(* A load of [list] with [generation] landed. When it is the re-read a write
+   waits for, lane edits open again: with the "still being written" line
+   cleared if the list came back, or with a line saying it did not. *)
+let runtime_lane_list_reread (state : state) ~list ~generation result =
+  match state.runtime_lane_write with
+  | Lane_write_rereading (written, answered_at)
+    when same_runtime_lane_list written list && generation > answered_at ->
+    state.runtime_lane_write <- Lane_write_idle;
+    (match result, state.runtime_lane_notice with
+     | Error detail, _ -> state.runtime_lane_notice <- Some (Lane_list_unread detail)
+     | Ok (), Some Lane_write_pending -> state.runtime_lane_notice <- None
+     | Ok (), (Some (Lane_write_refused _ | Lane_list_unread _) | None) -> ())
+  | Lane_write_rereading _ | Lane_write_posting | Lane_write_idle -> ()
 
 type runtime_lane_write_request =
   | Write_lane_order of string list
@@ -8182,7 +8248,7 @@ type runtime_lane_edit_plan =
              new row, or the row left in place of a dropped candidate or a
              removed lane. *)
       }
-  | Refuse_lane_edit of string
+  | Refuse_lane_edit of runtime_lane_notice
 
 let plan_runtime_lane_edit (state : state) = function
   | New_lane -> Open_lane_name_field
@@ -8192,7 +8258,7 @@ let plan_runtime_lane_edit (state : state) = function
         List.nth_opt snapshot.Tui_decode.rss_candidates state.runtime_cursor)
     in
     (match row with
-     | None -> Refuse_lane_edit "no lane row is under the cursor"
+     | None -> Refuse_lane_edit (Lane_write_refused "no lane row is under the cursor")
      | Some row ->
        let lane = row.Tui_decode.rcr_lane_id in
        let position = row.Tui_decode.rcr_position in
@@ -8200,7 +8266,7 @@ let plan_runtime_lane_edit (state : state) = function
        let order = conversation_lane_candidates state lane in
        let write request ~cursor_after =
          if runtime_lane_write_busy state
-         then Refuse_lane_edit runtime_lane_write_busy_message
+         then Refuse_lane_edit Lane_write_pending
          else Send_lane_write { lane; request; cursor_after }
        in
        (match row_edit with
@@ -8224,7 +8290,9 @@ let plan_runtime_lane_edit (state : state) = function
           in
           (match swap_candidates order (position - 1) (position - 1 + by) with
            | None ->
-             Refuse_lane_edit (Printf.sprintf "%s is already %s in %s" runtime_id edge lane)
+             Refuse_lane_edit
+               (Lane_write_refused
+                  (Printf.sprintf "%s is already %s in %s" runtime_id edge lane))
            | Some moved ->
              write (Write_lane_order moved) ~cursor_after:(Some (state.runtime_cursor + by)))
         | Remove_lane ->
@@ -8254,7 +8322,7 @@ let runtime_pick_item_id = function
 
 let runtime_surface_listing_chrome state =
   runtime_listing_chrome ~error:state.runtime_surface_error
-    ~action_error:state.runtime_lane_error
+    ~action_error:state.runtime_lane_notice
     ~prompt:(Option.is_some (runtime_lane_prompt state))
     ~picker_rows:(Option.map (fun picker -> List.length picker.rlp_choices)
       (runtime_picker_projection state))

@@ -173,13 +173,29 @@ run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskLifecycle.tla" \
 # has to catch the bug alone.
 run_tlc "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla"
 run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla"
-for label in verdict-assigns cancel-request anyone-cancels \
-  cancel-keeps-holder submit-keeps-hold submit-without-hold \
-  rejected-forgets-producer done-without-verdict superseded-verdict \
-  claim-keeps-returned; do
-  run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla" \
-    "TaskOwnership-${label}-buggy.cfg" "${label}-buggy"
-done
+# One line per cfg, naming the file. A loop building the name from a label
+# reads the same but hides it: the coverage gate cannot see the cfg, and a
+# cfg whose label nobody added would run nowhere without saying so.
+run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla" \
+  "TaskOwnership-verdict-assigns-buggy.cfg" "verdict-assigns-buggy"
+run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla" \
+  "TaskOwnership-cancel-request-buggy.cfg" "cancel-request-buggy"
+run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla" \
+  "TaskOwnership-anyone-cancels-buggy.cfg" "anyone-cancels-buggy"
+run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla" \
+  "TaskOwnership-cancel-keeps-holder-buggy.cfg" "cancel-keeps-holder-buggy"
+run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla" \
+  "TaskOwnership-submit-keeps-hold-buggy.cfg" "submit-keeps-hold-buggy"
+run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla" \
+  "TaskOwnership-submit-without-hold-buggy.cfg" "submit-without-hold-buggy"
+run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla" \
+  "TaskOwnership-rejected-forgets-producer-buggy.cfg" "rejected-forgets-producer-buggy"
+run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla" \
+  "TaskOwnership-done-without-verdict-buggy.cfg" "done-without-verdict-buggy"
+run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla" \
+  "TaskOwnership-superseded-verdict-buggy.cfg" "superseded-verdict-buggy"
+run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla" \
+  "TaskOwnership-claim-keeps-returned-buggy.cfg" "claim-keeps-returned-buggy"
 # Reachability guard: the clean model must be able to reach a returned Task.
 # Expects a violation, so it goes red the day that stops being true.
 run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla" \

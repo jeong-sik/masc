@@ -645,7 +645,7 @@ OCaml 쪽은 임의의 액션·판정 열을 돌려 `OneTaskPerAgent` 를 확인
 | 제출자 칸에 새 이름(`submitter`) | 초안에 있었고 뺐다. 코드가 이미 `producer` 라고 부른다(§1.7) |
 | `cycle_count` 를 반려에도 올리기 | 검토 중에 넣었다가 뺐다. TUI 한 줄에만 쓰이는 값에 일을 더하는 것이다. 이 RFC 는 이 값을 건드리지 않는다 |
 | `Orchestrator.should_orchestrate` 고치기 | `lib/orchestrator.ml:43` 이 `= Todo` 로 세는 자리이지만 부르는 곳이 테스트뿐이다(`lib/`·`bin/` 0건). 죽은 코드에 새 상태를 태우지 않는다. **지울 대상으로 따로 다룬다** |
-| `scripts/tla-check.sh` 의 SKIP 고치기 | cfg 파일이 없으면 `SKIP` 찍고 0 으로 돌아온다(`:72-75`, `:96-99`). 라벨에 오타가 나면 0단계 증거가 조용히 통과한다. 이 RFC 가 만든 문제가 아니고, 하네스 배선은 별도 작업에서 cfg 단위 게이트로 다루고 있다. 여기서 고치면 그 작업과 부딪친다 |
+| `scripts/tla-check.sh` 의 SKIP 고치기 | cfg 파일이 없으면 `SKIP` 찍고 0 으로 돌아온다(`:72-75`, `:96-99`). 이 RFC 가 만든 문제가 아니고, main 의 `648c2b3b0d` 가 이미 다른 쪽에서 막았다. 새 게이트 `scripts/ci/check-tla-harness-coverage.sh` 가 어느 줄에서도 이름이 불리지 않는 cfg 를 찾아 실패시킨다. 파일이 사라지는 경우는 여전히 SKIP 이지만, 등록이 빠지는 경우는 이제 빨개진다 |
 | 담당에 시간 제한(lease, visibility timeout) | `no_wall_clock_death`. SQS 식 설계는 이 저장소에서 금지다 |
 | 세션이 끝나면 맡은 Task 를 놓기 | 재 보니 이 경로로 생긴 방치가 17건 중 0건이다. `end_session` 은 `lib/` 와 `bin/` 에 호출하는 곳이 없고, 여러 세션이 한 이름(`codex-mcp-client`)을 쓰므로 한 세션의 종료가 다른 세션의 Task 를 놓게 된다. Keeper 종료는 이미 놓는다(`keeper_shutdown_finalize.ml:137-169`). 나머지는 `Held_without_actor` 가 보여 준다 |
 | 반려된 Task 를 제출자에게 먼저 주기 | 제출자 몫으로 남겨 두는 것은 이름 없는 담당이다. 이 RFC 가 없애려는 바로 그것이다 |

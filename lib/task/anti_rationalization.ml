@@ -274,7 +274,7 @@ let lookup_with_evidence_observation = function
           ; content_blocks =
               Option.map
                 (fun blocks ->
-                   Llm_provider.Types.Text
+                   Agent_core.Types.Text
                      (Yojson.Safe.to_string success_observation)
                    :: blocks)
                 payload.content_blocks

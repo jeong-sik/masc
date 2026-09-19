@@ -768,9 +768,46 @@ let test_state_diagram_line_that_names_no_state_is_refused () =
     ; "A -> B"
     ; "state A B"
     ; "A --> B C : go"
+    ; "[*] : a start takes no description"
+    ; "Class --> X"
+    ; "Style --> X"
+    ; "Click --> X"
+    ; "classDef"
+    ; "title Keeper phases"
     ; "state A <<nope>>"
     ; "A {"
     ]
+
+(* What Mermaid itself does with these lines, read from its stateDb: a line
+   that is only [[*]] is a start; naming a state again with no description
+   keeps the one it has; a note about a state no other line names declares
+   it. Styling, [hide empty description] and [scale] change nothing. *)
+let test_state_diagram_reads_lines_as_mermaid_does () =
+  let graph =
+    parsed
+      "stateDiagram-v2\n\
+       [*]\n\
+       \"Quoted\" --> B --> C\n\
+       note right of Lonely : about a state no other line names\n\
+       C : described\n\
+       state C\n\
+       C\n\
+       hide empty description\n\
+       scale 350 width\n\
+       class B,C highlighted"
+  in
+  Alcotest.(check (list (pair node_id string))) "states and their labels"
+    Mermaid.
+      [ (Initial Top_level, "[*]")
+      ; (Named "Quoted", "Quoted")
+      ; (Named "B", "B")
+      ; (Named "C", "described")
+      ; (Named "Lonely", "Lonely")
+      ]
+    (List.map (fun (n : Mermaid.node) -> (n.id, n.label)) graph.nodes);
+  Alcotest.(check (list (pair node_id node_id))) "a chain is one transition per arrow"
+    Mermaid.[ (Named "Quoted", Named "B"); (Named "B", Named "C") ]
+    (List.map (fun (e : Mermaid.edge) -> (e.from_id, e.to_id)) graph.edges)
 
 let () =
   Alcotest.run "tui mermaid"
@@ -890,5 +927,7 @@ let () =
             test_state_diagram_arrow_in_text_is_text
         ; Alcotest.test_case "a line that names no state is refused" `Quick
             test_state_diagram_line_that_names_no_state_is_refused
+        ; Alcotest.test_case "reads lines as mermaid does" `Quick
+            test_state_diagram_reads_lines_as_mermaid_does
         ] )
     ]

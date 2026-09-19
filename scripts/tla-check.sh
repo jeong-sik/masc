@@ -236,17 +236,11 @@ if [ -d "$BUG_MODELS_DIR" ]; then
   done
 fi
 
-# LibrarianRead states more than one way to be wrong and one guard that holds,
-# so it carries cfgs the bug-models glob above does not reach: that glob takes
-# <spec>.cfg and <spec>-buggy.cfg only. masc#37034 widens it; until that lands
-# these are named here, and once it lands these lines are the redundant half.
-LIBRARIAN_READ_DIR="$REPO_ROOT/specs/bug-models"
-run_tlc_cfg "$LIBRARIAN_READ_DIR" "LibrarianRead.tla" \
+# The loop above reaches every LibrarianRead cfg whose name ends in buggy.cfg.
+# This one names a guard that holds rather than a way to be wrong, so it ends
+# in .cfg and no glob above takes it: <spec>.cfg is already spoken for by
+# LibrarianRead.cfg. It is named here, and expects no violation.
+run_tlc_cfg "$REPO_ROOT/specs/bug-models" "LibrarianRead.tla" \
   "LibrarianRead-purge-trim-at-end.cfg" "purge-trim-at-end"
-for librarian_read_cfg in first-refused-only position-first purge-split \
-                          purge-trim purge-trim-by-turns purge-trim-counting-lines; do
-  run_tlc_buggy "$LIBRARIAN_READ_DIR" "LibrarianRead.tla" \
-    "LibrarianRead-${librarian_read_cfg}-buggy.cfg" "${librarian_read_cfg}-buggy"
-done
 
 echo "All TLA+ checks passed."

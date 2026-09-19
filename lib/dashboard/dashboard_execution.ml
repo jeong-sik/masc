@@ -266,49 +266,58 @@ let upsert_keeper_trust_fields fields trust =
 let enrich_keeper_with_diagnostic ~(config : Workspace.config) (keeper_json : Yojson.Safe.t) =
   let result = match keeper_json with
   | `Assoc fields ->
-    (* The upstream operator snapshot already carries these for most keeper rows.
-       Reuse them before falling back to per-keeper file reads. *)
-    let existing_diagnostic = assoc_member_if_object "diagnostic" keeper_json in
-    let existing_trust = existing_keeper_trust_json keeper_json in
-    (match existing_diagnostic, existing_trust with
-     | Some _, Some trust -> `Assoc (upsert_keeper_trust_fields fields trust)
-     | _ ->
-       (match Option.value ~default:`Null (Json_util.assoc_member_opt "name" keeper_json) with
-        | `String name ->
-          (match Keeper_meta_store.read_meta_resolved config name with
-           | Ok (Some (_resolved_name, meta)) ->
-             let now_ts = Time_compat.now () in
-             let diagnostic =
-               match existing_diagnostic with
-               | Some diagnostic -> diagnostic
-               | None ->
-                 (* Health needs the phase itself, which the row's
-                    [keepalive_running] boolean cannot give back: Running and
-                    Failing both publish [true]. *)
-                 Keeper_status_runtime.keeper_diagnostic_json
-                   ~meta
-                   ~phase:(Keeper_status_bridge.runtime_phase config meta)
-                   ~history_items:[]
-                   ~now_ts
-             in
-             let trust =
-               match existing_trust with
-               | Some trust -> trust
-               | None ->
-                 (try compact_keeper_trust_json ~config ~meta with
-                  | Eio.Cancel.Cancelled _ as exn -> raise exn
-                  | exn ->
-                    Log.Dashboard.warn
-                      "dashboard_execution trust enrich failed for keeper %s: %s"
-                      meta.name
-                      (Printexc.to_string exn);
-                    `Null)
-             in
-             let fields = assoc_upsert fields "diagnostic" diagnostic in
-             let fields = upsert_keeper_trust_fields fields trust in
-             `Assoc fields
-           | Ok None | Error _ -> keeper_json)
-        | _ -> keeper_json))
+    (match Keeper_declared_roster.row_kind_of_json keeper_json with
+     | Error detail ->
+       invalid_arg (Printf.sprintf "dashboard execution: %s" detail)
+     | Ok Keeper_declared_roster.Declaration_row ->
+       (* A Keeper declared in config that has never booted has no metadata,
+          so there is no diagnostic or trust to read for it. The row stays in
+          the surface's keeper list as it came. *)
+       keeper_json
+     | Ok Keeper_declared_roster.Runtime_row ->
+       (* The upstream operator snapshot already carries these for most keeper rows.
+          Reuse them before falling back to per-keeper file reads. *)
+       let existing_diagnostic = assoc_member_if_object "diagnostic" keeper_json in
+       let existing_trust = existing_keeper_trust_json keeper_json in
+       (match existing_diagnostic, existing_trust with
+        | Some _, Some trust -> `Assoc (upsert_keeper_trust_fields fields trust)
+        | _ ->
+          (match Option.value ~default:`Null (Json_util.assoc_member_opt "name" keeper_json) with
+           | `String name ->
+             (match Keeper_meta_store.read_meta_resolved config name with
+              | Ok (Some (_resolved_name, meta)) ->
+                let now_ts = Time_compat.now () in
+                let diagnostic =
+                  match existing_diagnostic with
+                  | Some diagnostic -> diagnostic
+                  | None ->
+                    (* Health needs the phase itself, which the row's
+                       [keepalive_running] boolean cannot give back: Running and
+                       Failing both publish [true]. *)
+                    Keeper_status_runtime.keeper_diagnostic_json
+                      ~meta
+                      ~phase:(Keeper_status_bridge.runtime_phase config meta)
+                      ~history_items:[]
+                      ~now_ts
+                in
+                let trust =
+                  match existing_trust with
+                  | Some trust -> trust
+                  | None ->
+                    (try compact_keeper_trust_json ~config ~meta with
+                     | Eio.Cancel.Cancelled _ as exn -> raise exn
+                     | exn ->
+                       Log.Dashboard.warn
+                         "dashboard_execution trust enrich failed for keeper %s: %s"
+                         meta.name
+                         (Printexc.to_string exn);
+                       `Null)
+                in
+                let fields = assoc_upsert fields "diagnostic" diagnostic in
+                let fields = upsert_keeper_trust_fields fields trust in
+                `Assoc fields
+              | Ok None | Error _ -> keeper_json)
+           | _ -> keeper_json)))
   | _ -> keeper_json
   in
   (* Surface the autoboot exclusion reason so the roster can show *why* a keeper

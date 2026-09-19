@@ -4226,7 +4226,7 @@ let test_lifecycle_event_display_values () =
    row goes through the keepalive branch of the status patcher. That branch used
    to classify against the surface vocabulary alone, where "paused" is not a
    member, and fell through to "idle" — producing a row that said [status =
-   "idle"] and [paused = true] at the same time. [rebuild_continuity_briefs]
+   "idle"] and [paused = true] at the same time. The rebuilt continuity brief
    then read the row as live. *)
 let test_paused_lifecycle_event_keeps_paused_status () =
   let patched =
@@ -4455,6 +4455,84 @@ let test_running_keeper_reconciliation_rebuilds_continuity_brief () =
           Server_dashboard_http_execution_surfaces.patch_surface_json_for_running_keepers
             config
             unrelated_surface))
+
+(* A Keeper declared in config that has never booted rides in the same
+   [keepers] list as a declaration row: no diagnostic, so no health. The
+   reconciliation that rebuilds continuity for a running keeper walked every
+   row and raised on that one, so the whole execution surface answered 500
+   (live 2026-09-19, row [imp]). The declaration row stays in [keepers] and
+   gets no brief. *)
+let test_running_keeper_reconciliation_skips_declaration_rows () =
+  let dir = test_dir () in
+  let config = Workspace.default_config dir in
+  let keeper_name = "continuity-declared-fixture" in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ "name", `String keeper_name
+          ; "trace_id", `String "continuity-declared-trace"
+          ])
+    with
+    | Ok meta -> meta
+    | Error error -> fail ("meta fixture: " ^ error)
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_registry.For_testing.unregister
+        ~base_path:config.base_path
+        keeper_name;
+      cleanup_dir dir)
+    (fun () ->
+       (match Masc.Keeper_meta_store.replace_snapshot config meta with
+        | Ok () -> ()
+        | Error error -> fail ("write meta: " ^ error));
+       ignore
+         (Masc.Keeper_registry.For_testing.register
+            ~base_path:config.base_path
+            keeper_name
+            meta);
+       let now = Masc_domain.now_iso () in
+       let running_row =
+         `Assoc
+           [ "name", `String keeper_name
+           ; "status", `String "active"
+           ; "diagnostic", `Assoc [ "health_state", `String "healthy" ]
+           ; "keepalive_running", `Bool false
+           ; "turn_count", `Int 1
+           ; "updated_at", `String now
+           ; "tool_audit_at", `String now
+           ; "recent_tool_names", `List []
+           ; "latest_tool_names", `List []
+           ]
+       in
+       let declared_row =
+         Masc.Keeper_declared_roster.to_json
+           { Masc.Keeper_declared_roster.name = "imp"
+           ; requirements = [ Masc.Keeper_declared_roster.Runtime_check_required ]
+           }
+       in
+       let patched =
+         Server_dashboard_http_execution_surfaces.patch_surface_json_for_running_keepers
+           config
+           (`Assoc
+             [ "keepers", `List [ running_row; declared_row ]
+             ; "continuity_briefs", `List []
+             ])
+       in
+       let open Yojson.Safe.Util in
+       let names key =
+         patched |> member key |> to_list
+         |> List.map (fun row -> row |> member "name" |> to_string)
+       in
+       check (list string)
+         "the declaration row stays in the keeper list"
+         [ keeper_name; "imp" ]
+         (names "keepers");
+       check (list string)
+         "only the running keeper gets a continuity brief"
+         [ keeper_name ]
+         (names "continuity_briefs"))
 
 let test_composite_preserves_runtime_attempt_scopes () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
@@ -6026,6 +6104,8 @@ let () =
             test_lifecycle_cache_patch_rejects_missing_or_unknown_status;
           test_case "running keeper reconciliation rebuilds continuity brief" `Quick
             test_running_keeper_reconciliation_rebuilds_continuity_brief;
+          test_case "reconciliation skips declaration rows" `Quick
+            test_running_keeper_reconciliation_skips_declaration_rows;
         ] );
       ( "context-window shrink guard (#25062/#25268)",
         [ test_case "success clears the previous error" `Quick

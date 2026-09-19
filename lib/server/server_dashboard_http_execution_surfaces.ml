@@ -952,7 +952,7 @@ let patched_keeper_status row ~event ~keepalive_running =
        SSOT. busy/active/listening/idle pass through; inactive/offline collapse
        to "offline"; an operator pause survives the patch, because a running
        keepalive fiber does not un-pause a keeper — collapsing it here made
-       [rebuild_continuity_briefs] read the row as live. Missing or unknown
+       the rebuilt continuity brief read the row as live. Missing or unknown
        values fail loudly instead of manufacturing an idle keeper. *)
     let status =
       match keeper_top_level_status_opt row with
@@ -1018,26 +1018,6 @@ let patch_keeper_rows ~keeper_name ~event ~keepalive_running rows =
   List.map (patch_keeper_row ~keeper_name ~event ~keepalive_running) rows
 ;;
 
-let rebuild_continuity_briefs ~now_ts ~keeper_rows =
-  keeper_rows
-  |> List.filter_map (fun keeper ->
-    match Json_util.assoc_string_opt "name" keeper with
-    | Some _ ->
-      Some (Dashboard_execution_builders.continuity_row_of_keeper ~now_ts keeper)
-    | None -> None)
-  |> List.sort
-       (fun
-         (left : Dashboard_execution_helpers.continuity_context)
-         (right : Dashboard_execution_helpers.continuity_context)
-       ->
-         let by_tone = Int.compare right.tone_rank left.tone_rank in
-         if by_tone <> 0
-         then by_tone
-         else Float.compare right.last_signal_ts left.last_signal_ts)
-  |> List.map
-       (fun (row : Dashboard_execution_helpers.continuity_context) -> row.json)
-;;
-
 let replace_keeper_rows_and_rebuild_briefs ~now_ts ~keeper_rows ~keepers_json fields =
   let fields = upsert_assoc_field "keepers" keepers_json fields in
   match List.assoc_opt "continuity_briefs" fields with
@@ -1045,9 +1025,9 @@ let replace_keeper_rows_and_rebuild_briefs ~now_ts ~keeper_rows ~keepers_json fi
     upsert_assoc_field
       "continuity_briefs"
       (`List
-        (rebuild_continuity_briefs
-           ~now_ts
-           ~keeper_rows))
+        (Dashboard_execution_builders.build_continuity_briefs ~now_ts keeper_rows
+         |> List.map (fun (row : Dashboard_execution_helpers.continuity_context) ->
+           row.json)))
       fields
   | Some _ | None -> fields
 ;;

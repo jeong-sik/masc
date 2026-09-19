@@ -396,9 +396,11 @@ let find_declared_lane (lanes : Runtime_lane.t list) (id : string) =
 ;;
 
 (* Each [runtime] reference is validated under its field's admission contract:
-   - [Runtime_only] requires a declared runtime id. media_failover is the only
-     field on it: its entries name runtimes that can read an image, and the
-     order of that list is the whole walk. No lane expands underneath it.
+   - [Runtime_only] requires a declared runtime id. media_failover is on it:
+     its entries name runtimes that can read an image, and the order of that
+     list is the whole walk. verifier_exact slots are on it: judgement admits
+     each slot as a direct runtime and dispatches that id alone. No lane
+     expands underneath either.
    - [Lane_then_runtime] admits a declared lane name or a runtime id. Keeper
      assignments and route ids are on it, so validation judges the same target
      [resolve_assignment] hands the consumer: lane first, runtime second.
@@ -1023,7 +1025,7 @@ let verifier_exact_slot_references
              verifier_exact_lane_id
        ; shape = List_entry
        ; id
-       ; domain = Lane_then_runtime
+       ; domain = Runtime_only
        })
     (verifier_exact_slot_ids_of_lane_decls decls)
 ;;

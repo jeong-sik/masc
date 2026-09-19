@@ -1166,6 +1166,22 @@ let test_an_inline_lane_is_not_reported_removed () =
       Runtime.remove_runtime_lane ~runtime_config_path:path ~lane_id:"coding" ()))
 ;;
 
+(* Judgement admits a verifier_exact slot as a direct runtime
+   ([Runtime.verifier_exact_slot_admission]) and dispatches that id alone. A
+   slot naming a lane that is no runtime used to load and then fail at every
+   judgement; the load refuses it now. *)
+let test_a_verifier_slot_naming_a_lane_is_refused () =
+  with_runtime_file (fun path ->
+    Runtime.create_runtime_lane ~runtime_config_path:path ~lane_id:"judge"
+      ~runtime_ids:[ "openai.gpt" ] ()
+    |> lane_write_ok "create the lane";
+    lane_write_refused "name the lane in a verifier slot" ~path
+      ~names:[ {|[runtime.exact_output_lanes.verifier_exact].slots entry "judge"|} ]
+      (fun () ->
+         Runtime.set_exact_output_lane_slots ~runtime_config_path:path
+           ~lane_name:"verifier_exact" ~slots:[ "judge" ] ()))
+;;
+
 let test_lane_candidates_create_the_lane_table () =
   with_runtime_file (fun path ->
     (match
@@ -3058,6 +3074,10 @@ let () =
             "an inline lane is not reported removed"
             `Quick
             test_an_inline_lane_is_not_reported_removed
+        ; Alcotest.test_case
+            "a verifier slot naming a lane is refused"
+            `Quick
+            test_a_verifier_slot_naming_a_lane_is_refused
         ; Alcotest.test_case
             "a second write replaces the ladder"
             `Quick

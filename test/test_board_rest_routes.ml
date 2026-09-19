@@ -251,7 +251,7 @@ let test_schedule_cancel_actor_is_stamped_from_auth () =
        @@ fun sw ->
        let state = Masc.Mcp_server.For_testing.create_state ~base_path in
        let config = Masc.Mcp_server.workspace_config state in
-       ignore (Workspace.init config ~agent_name:(Some "test"));
+       ignore (Masc.Workspace.init config ~agent_name:(Some "test"));
        Server_auth.For_testing.restore_server_state (Some state);
        Auth.save_auth_config base_path
          { Masc_domain.default_auth_config with

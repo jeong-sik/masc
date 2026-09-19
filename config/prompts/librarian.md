@@ -33,8 +33,7 @@ template_variables: [working_context, current_memory, conversation_history, coun
   다시 쓰세요. 같은 대상을 다룬 기억이 여러 개 모이면 중심이 되는 말을 정하고,
   그 대상에 대해 무엇이 중요한지를 정리합니다. 묶어서 쓴 기억을 `new_claims`에
   넣고, 재료가 된 기억의 짧은 ID는 모두 그 claim의 `absorbs`에 적습니다.
-  `absorbs`에 적은 기억은 현재 기억에서 빠지고, Keeper 는 앞으로 이 claim 만
-  봅니다. 같은 ID를 `dropped`에 넣지 말고, 한 ID는 한 claim에만 적습니다.
+  `absorbs`에 적은 기억은 현재 기억에서 빠집니다. 같은 ID를 `dropped`에 넣지 말고, 한 ID는 한 claim에만 적습니다.
   묶을 거리가 없으면 묶지 않습니다.
 - 교정할 때는 옛 ID를 `dropped`에 넣고 새 claim의 `supersedes`에 같은 ID를
   적습니다. `STALE`·`RESOLVED` 같은 표식을 붙여 낡은 사실을 남기지 마세요.

@@ -1115,6 +1115,14 @@ let evidence_transport_failure ~ordinal = function
       ; _
       } ->
     Ok (Validated_flow_evidence.Rate_limited { http_status }, raw_response_sha256)
+  | Flow_advance_execution_failed
+      { cause = Provider_response_refused { http_status; refusal = Overloaded }
+      ; raw_response_sha256; _ } ->
+    Ok (Validated_flow_evidence.Overloaded { http_status }, raw_response_sha256)
+  | Flow_advance_execution_failed
+      { cause = Provider_response_refused { http_status; refusal = Server_error }
+      ; raw_response_sha256; _ } ->
+    Ok (Validated_flow_evidence.Server_error { http_status }, raw_response_sha256)
   | Flow_advance_execution_failed { cause = Invalid_json_output; raw_response_sha256; _ }
     -> Ok (Validated_flow_evidence.Invalid_json_output, raw_response_sha256)
   | Flow_advance_execution_failed { cause; _ } ->
@@ -1729,6 +1737,15 @@ let execution_failure_may_advance (error : execution_error) =
        until the refusal kind survived classification the lane could not reach
        it — a 429 arrived here as [Completion_failed] and ended the flow. *)
     receipt_dispatch_count error.receipt = 1
+  | Provider_response_refused
+      { http_status; refusal = Overloaded | Server_error }, Response_received ->
+    (* The provider returned a complete failure response. Exact requests have
+       no tools and this failure has not entered the domain validator, so the
+       declared successor may serve the same input. Keep the failed dispatch
+       and response as evidence; an interrupted/unknown dispatch is not this
+       case, and neither is a status whose refusal body was not received. *)
+    http_status >= 500 && http_status <= 599
+    && receipt_dispatch_count error.receipt = 1
   | Invalid_json_output, (Response_received | Terminal) ->
     receipt_dispatch_count error.receipt = 1
   (* The response arrived and terminated, but this binding routed the whole
@@ -1746,9 +1763,7 @@ let execution_failure_may_advance (error : execution_error) =
      successor can serve the same input, which this change does not make. *)
   | ( Provider_response_refused
         { refusal =
-            ( Overloaded
-            | Server_error
-            | Auth_failed
+            ( Auth_failed
             | Authorization_refused
             | Payment_required
             | Invalid_request
@@ -1761,7 +1776,8 @@ let execution_failure_may_advance (error : execution_error) =
         }
     , (Not_started | Before_dispatch | Dispatch_started | Response_received | Terminal) )
   | Completion_failed, (Not_started | Dispatch_started | Response_received | Terminal)
-  | ( Provider_response_refused { refusal = Request_body_refused | Rate_limited; _ }
+  | ( Provider_response_refused
+        { refusal = Request_body_refused | Rate_limited | Overloaded | Server_error; _ }
     , (Not_started | Before_dispatch | Dispatch_started | Terminal) )
   | Invalid_json_output, (Not_started | Before_dispatch | Dispatch_started)
   | ( ( Attempt_already_started

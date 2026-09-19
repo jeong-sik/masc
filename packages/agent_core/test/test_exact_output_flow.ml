@@ -3557,6 +3557,17 @@ let test_rate_limited_429_refusal_advances_once_to_successor () =
       | _ -> fail "HTTP 429 lost its typed rate-limit cause")
 ;;
 
+let test_server_refusal_advances_once_to_successor status =
+  assert_typed_capacity_refusal_advances_once
+    ~label:(Printf.sprintf "server-refusal-%d" status)
+    ~first_response:(Cohttp.Code.status_of_code status, {|{"error":"unavailable"}|})
+    ~assert_cause:(function
+      | EO.Provider_response_refused { http_status; refusal }
+        when http_status = status
+             && refusal = (if status = 529 then EO.Overloaded else EO.Server_error) -> ()
+      | _ -> fail "HTTP server refusal lost its typed cause")
+;;
+
 let test_generic_400_remains_terminal_without_advance () =
   let (result, advances, evidence), posts =
     with_server ~status:`Bad_request ~response:{|{"error":"generic request rejection"}|}
@@ -3650,11 +3661,9 @@ let test_postdispatch_and_structural_outcomes_never_advance () =
     | Ok _ | Error _ -> fail (label ^ " did not remain terminal")
   in
   run ~abort_completion:true "partial" "unused";
-  (* A 429 used to sit here, pinning the behaviour of the era when every
-     unclassified HTTP failure became [Completion_failed]. It advances now and
-     is covered by its own case; 500 keeps a post-dispatch response failure
-     under this assertion. *)
-  run ~status:`Internal_server_error "response" "server error";
+  (* A definite server refusal advances; an authentication failure still
+     requires configuration repair and remains terminal. *)
+  run ~status:`Unauthorized "response" "authentication failed";
   run "tool" tool_response
 ;;
 
@@ -4321,6 +4330,14 @@ let () =
             "HTTP 429 rate limit advances with one dispatch per candidate"
             `Quick
             test_rate_limited_429_refusal_advances_once_to_successor
+        ; test_case "HTTP 500 advances once to the declared successor" `Quick
+            (fun () -> test_server_refusal_advances_once_to_successor 500)
+        ; test_case "HTTP 503 advances once to the declared successor" `Quick
+            (fun () -> test_server_refusal_advances_once_to_successor 503)
+        ; test_case "HTTP 520 advances once to the declared successor" `Quick
+            (fun () -> test_server_refusal_advances_once_to_successor 520)
+        ; test_case "HTTP 529 advances once to the declared successor" `Quick
+            (fun () -> test_server_refusal_advances_once_to_successor 529)
         ; test_case
             "generic 400 remains terminal"
             `Quick

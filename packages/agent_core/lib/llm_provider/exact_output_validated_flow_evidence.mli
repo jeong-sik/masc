@@ -96,6 +96,8 @@ type transport_failure =
   | Completion_failed_before_dispatch
   | Serialized_request_refused of { http_status : int }
   | Rate_limited of { http_status : int }
+  | Overloaded of { http_status : int }
+  | Server_error of { http_status : int }
   | Invalid_json_output
 
 type advance =

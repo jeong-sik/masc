@@ -161,10 +161,12 @@ let consume_one ~config ~keeper_name ~commit =
   let* meta =
     match
       Domain_pool_ref.submit_io_or_inline (fun () ->
-        Keeper_meta_store.read_meta config keeper_name)
+        Keeper_meta_store.read_effective_meta_presence config keeper_name)
     with
-    | Ok (Some meta) -> Ok meta
-    | Ok None -> Error Keeper_meta_absent
+    | Ok (Keeper_meta_store.Meta_present meta) -> Ok meta
+    | Ok Keeper_meta_store.Meta_absent -> Error Keeper_meta_absent
+    | Ok (Keeper_meta_store.Meta_not_current detail) ->
+      Error (Keeper_meta_unreadable detail)
     | Error detail -> Error (Keeper_meta_unreadable detail)
   in
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in

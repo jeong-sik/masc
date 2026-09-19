@@ -537,6 +537,57 @@ let test_sub_board_routes_use_authenticated_owner () =
     (deleted |> member "deleted" |> to_bool)
 ;;
 
+let test_goal_transition_uses_authenticated_actor () =
+  with_authenticated_activity_router
+    ~prefix:"goal-transition-http-actor-"
+    ~agent_name:"credential-owner"
+  @@ fun ~base_path:_ ~config ~router ~token ->
+  let goal =
+    match
+      Goal_store.upsert_goal config
+        ~title:"Canonical actor transition"
+        ~metric:"transition"
+        ~target_value:"recorded"
+        ()
+    with
+    | Ok (goal, `created) -> goal
+    | Ok (_, `updated) -> fail "goal fixture unexpectedly updated an existing row"
+    | Error error -> fail (Goal_store.write_error_to_string error)
+  in
+  let status, _ =
+    dispatch_json ~router ~token
+      ~path:"/api/v1/tools/masc_goal_transition"
+      ~extra_headers:[ "X-Masc-Agent", "forged-header-actor" ]
+      ~body:
+        (Yojson.Safe.to_string
+           (`Assoc
+              [ "goal_id", `String goal.id
+              ; "action", `String "drop"
+              ; "note", `String "route actor audit"
+              ]))
+      ()
+  in
+  check int "goal transition accepted" 200 status;
+  let events_path =
+    Filename.concat (Workspace_utils.masc_dir config) "goal_events.jsonl"
+  in
+  let events =
+    In_channel.with_open_bin events_path In_channel.input_all
+    |> String.split_on_char '\n'
+    |> List.filter_map (fun line ->
+           let line = String.trim line in
+           if String.equal line "" then None else Some (Yojson.Safe.from_string line))
+  in
+  let event =
+    match List.rev events with
+    | event :: _ -> event
+    | [] -> fail "goal transition wrote no durable event"
+  in
+  let open Yojson.Safe.Util in
+  check string "goal event actor" "credential-owner"
+    (event |> member "payload" |> member "actor" |> to_string)
+;;
+
 let test_dashboard_board_reaction_routes_registered () =
   with_router (fun router ->
     List.iter
@@ -764,6 +815,8 @@ let () =
             test_board_write_routes_use_authenticated_actor
         ; test_case "sub-board owner comes from auth" `Quick
             test_sub_board_routes_use_authenticated_owner
+        ; test_case "goal transition actor comes from auth" `Quick
+            test_goal_transition_uses_authenticated_actor
         ; test_case
             "dashboard board reaction routes registered"
             `Quick

@@ -68,20 +68,20 @@ let error_to_string = function
 ;;
 
 let turn_boundary_for_position ?through ~trace_id ~end_atom ~last_atom_digest lines =
-  let matches =
-    List.filter_map
-    (fun (line, decoded) ->
+  let latest =
+    List.fold_left
+      (fun latest (line, decoded) ->
        let admitted =
          match through with
          | None -> true
          | Some last_seen -> line <= last_seen
        in
        if not admitted
-       then None
+       then latest
        else
        match decoded with
-       | Error _ -> None
-       | Ok ({ B.event = B.History_restarted _; _ } : B.record) -> None
+       | Error _ -> latest
+       | Ok ({ B.event = B.History_restarted _; _ } : B.record) -> latest
        | Ok
            ({ recorded_at
             ; event =
@@ -95,8 +95,8 @@ let turn_boundary_for_position ?through ~trace_id ~end_atom ~last_atom_digest li
            String.equal (Ids.Turn_ref.trace_id turn_ref) trace_id
            && boundary.end_atom = end_atom
            && String.equal boundary.last_atom_digest last_atom_digest
-         then Some (recorded_at, turn_ref)
-         else None
+         then Some (line, recorded_at, turn_ref)
+         else latest
        | Ok
            { B.event =
                B.Turn_ended
@@ -105,13 +105,13 @@ let turn_boundary_for_position ?through ~trace_id ~end_atom ~last_atom_digest li
                  ; position = B.Empty_atom_history | B.No_atom_history | B.Stale_noop
                  }
            ; _
-           } -> None)
+           } -> latest)
+      None
       lines
-    |> List.sort (fun (left, _) (right, _) -> Float.compare right left)
   in
-  match matches with
-  | [] -> None
-  | latest :: _ -> Some latest
+  match latest with
+  | None -> None
+  | Some (_line, recorded_at, turn_ref) -> Some (recorded_at, turn_ref)
 ;;
 
 let tool_observations messages =

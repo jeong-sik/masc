@@ -224,6 +224,27 @@ let test_failed_commit_and_restart_retry_the_same_range () =
   check (list string) "restart reads identical range" !first !after_restart
 ;;
 
+let test_last_matching_boundary_wins_when_clock_moves_backward () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-clock-regression" in
+  establish_progress config ~trace_id "before";
+  let messages = [ message "before"; message "after" ] in
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:20.0 messages;
+  append_boundary config ~trace_id ~turn:3 ~recorded_at:10.0 messages;
+  save_checkpoint config ~trace_id messages 3;
+  let selected_turn = ref None in
+  (match
+     consume config (fun ~expected_revision:_ input ->
+       selected_turn := Some (Ids.Turn_ref.absolute_turn input.turn_ref);
+       true)
+   with
+   | Consumer.Progress_advanced _ -> ()
+   | Consumer.Nothing_to_read
+   | Consumer.Baseline_advanced _
+   | Consumer.Memory_not_committed -> fail "clock regression range did not advance");
+  check (option int) "last appended boundary is authoritative" (Some 3) !selected_turn
+;;
+
 let test_same_name_clusters_keep_independent_ranges () =
   with_workspace @@ fun default ->
   let a = config_in_cluster default "Durable/A" in
@@ -289,6 +310,8 @@ let () =
             test_n_tick_reads_every_intermediate_turn
         ; test_case "failed commit and restart retry exact range" `Quick
             test_failed_commit_and_restart_retry_the_same_range
+        ; test_case "last boundary wins when wall clock goes backward" `Quick
+            test_last_matching_boundary_wins_when_clock_moves_backward
         ; test_case "same-name clusters isolate range progress" `Quick
             test_same_name_clusters_keep_independent_ranges
         ; test_case "selected range bypasses recent window" `Quick

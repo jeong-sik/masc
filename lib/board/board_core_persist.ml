@@ -367,8 +367,6 @@ let reactions_path = Board_paths.reactions_path
 let sub_boards_path = Board_paths.sub_boards_path
 let ensure_dir = Board_paths.ensure_dir
 let ensure_masc_dir = Board_paths.ensure_masc_dir
-let max_jsonl_bytes = Board_paths.max_jsonl_bytes
-let rotate_if_needed = Board_paths.rotate_if_needed
 include Board_core_json
 
 (** {1 Rewrite Helpers} *)
@@ -461,7 +459,6 @@ let append_post (p : post) =
     ensure_masc_dir ();
     let path = persist_path () in
     Fs_compat.append_file path (Yojson.Safe.to_string (post_to_yojson p) ^ "\n");
-    rotate_if_needed path;
     Ok ()
   with
   | Sys_error msg -> persist_io_error ~where:"append_post" msg
@@ -471,7 +468,6 @@ let append_comment (c : comment) =
     ensure_masc_dir ();
     let path = comments_path () in
     Fs_compat.append_file path (Yojson.Safe.to_string (comment_to_yojson c) ^ "\n");
-    rotate_if_needed path;
     Ok ()
   with
   | Sys_error msg -> persist_io_error ~where:"append_comment" msg

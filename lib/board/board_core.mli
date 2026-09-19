@@ -29,7 +29,7 @@
     Internal helpers stay private at this boundary
     ([persist_errors] atomic counter, [record_persist_error],
     [remove_from_list_index], [maybe_sweep],
-    [board_masc_dir], [ensure_dir], [max_jsonl_bytes],
+    [board_masc_dir], [ensure_dir],
     [append_post], [append_comment]). *)
 
 include module type of struct
@@ -121,13 +121,6 @@ val reactions_path : unit -> string
 (** Idempotent [.masc] directory creation; called before
     every JSONL append. *)
 val ensure_masc_dir : unit -> unit
-
-(** Rotates the JSONL file at [path] when it exceeds
-    [max_jsonl_bytes] (10 MiB).  The previous file is
-    renamed with a timestamp suffix; rotation failures are
-    routed through the persist-error counter so the runtime
-    keeps appending to the live file rather than aborting. *)
-val rotate_if_needed : string -> unit
 
 (** {1 Append-only persistence} *)
 

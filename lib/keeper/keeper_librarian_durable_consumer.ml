@@ -19,6 +19,7 @@ type error =
   | Position_in_other_trace of P.position
   | Range_stopped of R.stop
   | Range_end_boundary_missing of R.range
+  | Progress_boundary_missing of P.position
   | Memory_snapshot_unreadable of string
   | Progress_write_failed of P.write_error
 
@@ -55,14 +56,28 @@ let error_to_string = function
       "selected range end has no matching boundary end_atom=%d digest=%s"
       range.R.end_atom
       range.last_atom_digest
+  | Progress_boundary_missing position ->
+    Printf.sprintf
+      "read position has no matching turn boundary trace=%s end_atom=%d digest=%s"
+      position.P.trace_id
+      position.end_atom
+      position.last_atom_digest
   | Memory_snapshot_unreadable detail ->
     "current Memory OS snapshot is unreadable: " ^ detail
   | Progress_write_failed error -> P.write_error_to_string error
 ;;
 
-let turn_boundary_for_position ~trace_id ~end_atom ~last_atom_digest lines =
+let turn_boundary_for_position ?through ~trace_id ~end_atom ~last_atom_digest lines =
   List.filter_map
-    (fun (_, decoded) ->
+    (fun (line, decoded) ->
+       let admitted =
+         match through with
+         | None -> true
+         | Some last_seen -> line <= last_seen
+       in
+       if not admitted
+       then None
+       else
        match decoded with
        | Error _ -> None
        | Ok ({ B.event = B.History_restarted _; _ } : B.record) -> None
@@ -158,18 +173,6 @@ let write_progress ~keepers_dir ~keeper_name progress outcome =
 
 let consume_one ~config ~keeper_name ~commit =
   let ( let* ) = Result.bind in
-  let* meta =
-    match
-      Domain_pool_ref.submit_io_or_inline (fun () ->
-        Keeper_meta_store.read_effective_meta_presence config keeper_name)
-    with
-    | Ok (Keeper_meta_store.Meta_present meta) -> Ok meta
-    | Ok Keeper_meta_store.Meta_absent -> Error Keeper_meta_absent
-    | Ok (Keeper_meta_store.Meta_not_current detail) ->
-      Error (Keeper_meta_unreadable detail)
-    | Error detail -> Error (Keeper_meta_unreadable detail)
-  in
-  let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let runtime_keepers_dir = Workspace.keepers_runtime_dir config in
   let memory_keepers_dir =
     Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path
@@ -186,6 +189,18 @@ let consume_one ~config ~keeper_name ~commit =
       P.read ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name)
     |> Result.map_error (fun error -> Progress_unreadable error)
   in
+  let* meta =
+    match
+      Domain_pool_ref.submit_io_or_inline (fun () ->
+        Keeper_meta_store.read_effective_meta_presence config keeper_name)
+    with
+    | Ok (Keeper_meta_store.Meta_present meta) -> Ok meta
+    | Ok Keeper_meta_store.Meta_absent -> Error Keeper_meta_absent
+    | Ok (Keeper_meta_store.Meta_not_current detail) ->
+      Error (Keeper_meta_unreadable detail)
+    | Error detail -> Error (Keeper_meta_unreadable detail)
+  in
+  let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let session_dir = Filename.concat (Keeper_fs.session_store_path config) trace_id in
   let* checkpoint =
     Domain_pool_ref.submit_io_or_inline (fun () ->
@@ -219,16 +234,20 @@ let consume_one ~config ~keeper_name ~commit =
       | Some boundary -> Ok boundary
       | None -> Error (Range_end_boundary_missing range)
     in
-    let after =
+    let* after =
       match progress with
-      | None -> None
-      | Some { P.position; boundary_lines_seen = _ } ->
-        turn_boundary_for_position
-          ~trace_id:position.trace_id
-          ~end_atom:position.end_atom
-          ~last_atom_digest:position.last_atom_digest
-          lines
-        |> Option.map fst
+      | None -> Ok None
+      | Some { P.position; boundary_lines_seen } ->
+        (match
+           turn_boundary_for_position
+             ~through:boundary_lines_seen
+             ~trace_id:position.trace_id
+             ~end_atom:position.end_atom
+             ~last_atom_digest:position.last_atom_digest
+             lines
+         with
+         | Some (recorded_at, _) -> Ok (Some recorded_at)
+         | None -> Error (Progress_boundary_missing position))
     in
     let selected_messages = R.slice messages range in
     let* current, expected_revision = current_memory ~keepers_dir:memory_keepers_dir ~keeper_name in

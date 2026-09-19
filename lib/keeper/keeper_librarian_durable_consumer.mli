@@ -20,6 +20,7 @@ type error =
   | Position_in_other_trace of Keeper_librarian_progress.position
   | Range_stopped of Keeper_librarian_range.stop
   | Range_end_boundary_missing of Keeper_librarian_range.range
+  | Progress_boundary_missing of Keeper_librarian_progress.position
   | Memory_snapshot_unreadable of string
   | Progress_write_failed of Keeper_librarian_progress.write_error
 

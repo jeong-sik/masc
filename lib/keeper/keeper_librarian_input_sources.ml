@@ -34,7 +34,7 @@ let counterpart_observations_between ~base_dir ~keeper_name ~after ~before =
     &&
     match after with
     | None -> true
-    | Some lower -> ts >= lower
+    | Some lower -> ts > lower
   in
   let user_rows =
     (Keeper_chat_store.load_page ~base_dir ~keeper_name ~before ()).messages

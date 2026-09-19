@@ -277,14 +277,14 @@ let with_authenticated_activity_router ~prefix ~agent_name f =
            ~clock
            (Http.Router.create ())
        in
-       f ~base_path ~config ~router ~token)
+       f ~base_path ~config ~state ~sw ~router ~token)
 ;;
 
 let test_schedule_cancel_actor_is_stamped_from_auth () =
   with_authenticated_activity_router
     ~prefix:"schedule-cancel-http-actor-"
     ~agent_name:"credential-owner"
-  @@ fun ~base_path:_ ~config ~router ~token ->
+  @@ fun ~base_path:_ ~config ~state:_ ~sw:_ ~router ~token ->
   let actor : Schedule_domain.actor =
     { id = "test"
     ; kind = Schedule_domain.Human_operator
@@ -355,7 +355,7 @@ let test_board_write_routes_use_authenticated_actor () =
   with_authenticated_activity_router
     ~prefix:"board-write-http-actor-"
     ~agent_name:"credential-owner"
-  @@ fun ~base_path ~config:_ ~router ~token ->
+  @@ fun ~base_path ~config:_ ~state:_ ~sw:_ ~router ~token ->
   with_board_store ~base_path
   @@ fun () ->
   let post_json path fields =
@@ -480,7 +480,7 @@ let test_sub_board_routes_use_authenticated_owner () =
   with_authenticated_activity_router
     ~prefix:"sub-board-http-owner-"
     ~agent_name:"credential-owner"
-  @@ fun ~base_path ~config:_ ~router ~token ->
+  @@ fun ~base_path ~config:_ ~state:_ ~sw:_ ~router ~token ->
   with_board_store ~base_path
   @@ fun () ->
   let request ?meth path fields =
@@ -541,7 +541,7 @@ let test_goal_transition_uses_authenticated_actor () =
   with_authenticated_activity_router
     ~prefix:"goal-transition-http-actor-"
     ~agent_name:"credential-owner"
-  @@ fun ~base_path:_ ~config ~router ~token ->
+  @@ fun ~base_path:_ ~config ~state:_ ~sw:_ ~router ~token ->
   let goal =
     match
       Goal_store.upsert_goal config
@@ -586,6 +586,90 @@ let test_goal_transition_uses_authenticated_actor () =
   let open Yojson.Safe.Util in
   check string "goal event actor" "credential-owner"
     (event |> member "payload" |> member "actor" |> to_string)
+;;
+
+let test_board_context_inference_uses_current_owner_contract_and_actor () =
+  with_authenticated_activity_router
+    ~prefix:"board-context-inference-http-actor-"
+    ~agent_name:"credential-owner"
+  @@ fun ~base_path ~config ~state:_ ~sw ~router ~token ->
+  with_board_store ~base_path
+  @@ fun () ->
+  let keeper_name = "context-inference-target" in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+           [ "name", `String keeper_name
+           ; "trace_id", `String "trace-context-inference-target"
+           ; "activation_mode", `String "manual"
+           ])
+    with
+    | Ok meta -> meta
+    | Error error -> fail error
+  in
+  (match Masc.Keeper_meta_store.replace_snapshot config meta with
+   | Ok () -> ()
+   | Error error -> fail error);
+  (match
+     Masc.Keeper_owner_registry.install_from_store
+       ~sw
+       ~operation_runner:None
+       ~on_turn_slot_released:None
+       config
+   with
+   | Ok _ -> ()
+   | Error error ->
+     fail (Masc.Keeper_owner_registry.install_error_to_string error));
+  let post =
+    match
+      Masc.Board_dispatch.create_post
+        ~author:keeper_name
+        ~content:"Infer this post through the registered Keeper"
+        ~post_kind:Masc.Board.Automation_post
+        ()
+    with
+    | Ok post -> post
+    | Error error -> fail (Board_tool.board_error_to_string error)
+  in
+  let status, response =
+    dispatch_json ~router ~token
+      ~path:"/api/v1/board/context-inference"
+      ~extra_headers:[ "X-Masc-Agent", "forged-header-actor" ]
+      ~body:
+        (Yojson.Safe.to_string
+           (`Assoc
+              [ "post_id", `String (Masc.Board.Post_id.to_string post.id)
+              ; "target_keeper", `String keeper_name
+              ]))
+      ()
+  in
+  let open Yojson.Safe.Util in
+  check int "context inference accepted" 202 status;
+  check string "resolved target keeper" keeper_name
+    (response |> member "keeper_name" |> to_string);
+  check string "current Owner state is projected" "queued"
+    (response |> member "status" |> to_string);
+  let request_id = response |> member "request_id" |> to_string in
+  let operation_id =
+    match Keeper_chat_operation.Operation_id.of_string request_id with
+    | Ok operation_id -> operation_id
+    | Error error -> fail error
+  in
+  let operation =
+    match
+      Masc.Keeper_owner_registry.exact_operation
+        ~base_path
+        ~keeper_name
+        operation_id
+    with
+    | Ok (Some operation) -> operation
+    | Ok None -> fail "context inference operation was not queued"
+    | Error error ->
+      fail (Masc.Keeper_owner_registry.command_error_to_string error)
+  in
+  check string "credential owner is the durable submitter" "credential-owner"
+    (operation.source |> member "submitted_by" |> to_string)
 ;;
 
 let test_dashboard_board_reaction_routes_registered () =
@@ -817,6 +901,8 @@ let () =
             test_sub_board_routes_use_authenticated_owner
         ; test_case "goal transition actor comes from auth" `Quick
             test_goal_transition_uses_authenticated_actor
+        ; test_case "board context inference uses current Owner contract and auth" `Quick
+            test_board_context_inference_uses_current_owner_contract_and_actor
         ; test_case
             "dashboard board reaction routes registered"
             `Quick

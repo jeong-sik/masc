@@ -245,6 +245,10 @@ type provider_refusal =
   | Request_body_refused
       (** The provider refused this request's size. A smaller input may succeed
           and the frozen lane's successor may accept this one. *)
+  | Refusal_body_not_received
+      (** The status and headers arrived, but the refusal body did not finish
+          inside the caller's window. Its cause remains unknown and does not
+          authorize successor dispatch. *)
   | Rate_limited
       (** The provider's quota for this binding is spent. The request itself was
           acceptable, so a successor binding with its own quota may serve it. *)

@@ -249,10 +249,35 @@ let missing_output_response =
   {|{"id":"resp-missing","model":"flow","choices":[{"index":0,"message":{"role":"assistant","content":"","reasoning_content":"{\"name\":\"answer-routed-into-reasoning\"}"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}|}
 ;;
 
+module Stalling_response_body = struct
+  type t = { mutable pending : string option }
+
+  let read_methods = []
+
+  let single_read t dst =
+    match t.pending with
+    | Some bytes ->
+      t.pending <- None;
+      let len = min (String.length bytes) (Cstruct.length dst) in
+      Cstruct.blit_from_string bytes 0 dst 0 len;
+      if len < String.length bytes
+      then t.pending <- Some (String.sub bytes len (String.length bytes - len));
+      len
+    | None -> Eio.Fiber.await_cancel ()
+  ;;
+end
+
+let stalling_response_body bytes =
+  Eio.Resource.T
+    ( { Stalling_response_body.pending = Some bytes }
+    , Eio.Flow.Pi.source (module Stalling_response_body) )
+;;
+
 let with_server
       ?response_delay_s
       ?(status = `OK)
       ?first_response
+      ?first_stalled_response
       ?(abort_completion = false)
       ~response
       f
@@ -271,12 +296,19 @@ let with_server
       let post_index = Atomic.fetch_and_add completion_posts 1 in
       if abort_completion then raise Exit;
       Option.iter (Eio.Time.sleep clock) response_delay_s;
-      let response_status, response_body =
-        match first_response, post_index with
-        | Some first, 0 -> first
-        | Some _, _ | None, _ -> status, response
-      in
-      Cohttp_eio.Server.respond_string ~status:response_status ~body:response_body ()
+      match first_stalled_response, post_index with
+      | Some (response_status, first_bytes), 0 ->
+        Cohttp_eio.Server.respond
+          ~status:response_status
+          ~body:(stalling_response_body first_bytes)
+          ()
+      | Some _, _ | None, _ ->
+        let response_status, response_body =
+          match first_response, post_index with
+          | Some first, 0 -> first
+          | Some _, _ | None, _ -> status, response
+        in
+        Cohttp_eio.Server.respond_string ~status:response_status ~body:response_body ()
     in
     let socket =
       Eio.Net.listen
@@ -3568,6 +3600,73 @@ let test_server_refusal_advances_once_to_successor status =
       | _ -> fail "HTTP server refusal lost its typed cause")
 ;;
 
+let test_stalled_server_refusal_body_does_not_advance () =
+  let refused_id = "stalled-refusal" in
+  let successor_id = "stalled-refusal-successor" in
+  let ((result, advances, evidence), posts) =
+    with_server
+      ~first_stalled_response:
+        (Cohttp.Code.status_of_code 503, {|{"error":"unfinished|})
+      ~response:(openai_response {|{"name":"must-not-run"}|})
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_catalog
+      [ catalog_entry
+          ~body_timeout_s:0.05
+          ~id:refused_id
+          ~base_url
+          ~native:true
+          ~json:true
+          ()
+      ; catalog_entry
+          ~id:successor_id
+          ~base_url
+          ~native:true
+          ~json:true
+          ()
+      ]
+    @@ fun snapshot ->
+    let flow = start_flow (frozen_flow snapshot [ refused_id; successor_id ]) in
+    let advances = ref 0 in
+    let result =
+      execute_with_accepting_test_validator
+        ~clock
+        ~net
+        ~on_measurement_terminal:(fun _ -> Ok ())
+        ~before_measurement_dispatch:(fun _ -> Ok ())
+        ~before_dispatch:(fun _ -> Ok ())
+        ~before_advance:(fun ~failed:_ ~next:_ ->
+          incr advances;
+          Ok ())
+        flow
+    in
+    result, !advances, EO.flow_attempt_evidence flow
+  in
+  check int "stalled refusal dispatched only the first candidate" 1 posts;
+  check int "stalled refusal requested no advance" 0 advances;
+  check int "stalled refusal recorded no advance" 0 (List.length evidence.advances);
+  check
+    int
+    "stalled refusal records one dispatch"
+    1
+    (EO.generation_receipt_snapshot_dispatch_count
+       (attempt_for evidence refused_id).receipt);
+  match result with
+  | Error (EO.Flow_exact_execution_failed failure) ->
+    check
+      bool
+      "stalled refusal body remains unread"
+      true
+      (Option.is_none failure.cause.raw_response);
+    check
+      bool
+      "stalled refusal is not promoted to a server refusal"
+      true
+      (failure.cause.cause
+       = EO.Provider_response_refused
+           { http_status = 503; refusal = EO.Refusal_body_not_received })
+  | Ok _ | Error _ -> fail "stalled refusal did not remain a typed terminal failure"
+;;
+
 let test_generic_400_remains_terminal_without_advance () =
   let (result, advances, evidence), posts =
     with_server ~status:`Bad_request ~response:{|{"error":"generic request rejection"}|}
@@ -4338,6 +4437,10 @@ let () =
             (fun () -> test_server_refusal_advances_once_to_successor 520)
         ; test_case "HTTP 529 advances once to the declared successor" `Quick
             (fun () -> test_server_refusal_advances_once_to_successor 529)
+        ; test_case
+            "HTTP 503 with a stalled body does not advance"
+            `Quick
+            test_stalled_server_refusal_body_does_not_advance
         ; test_case
             "generic 400 remains terminal"
             `Quick

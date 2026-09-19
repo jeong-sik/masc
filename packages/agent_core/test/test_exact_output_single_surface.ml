@@ -9,7 +9,7 @@ let _preserve_public_raw_sync_response_surface
 ;;
 
 let _preserve_public_sync_transport_receipt_surface
-      ({ response = _; response_header_evidence = _ } :
+      ({ response = _; body_receipt = _; response_header_evidence = _ } :
         Http_client.sync_transport_receipt)
   =
   ()

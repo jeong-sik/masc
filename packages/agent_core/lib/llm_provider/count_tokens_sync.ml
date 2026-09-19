@@ -86,7 +86,7 @@ let count_anthropic_staged
                Error
                  (Http_client.HttpError
                     { code = response.status
-                    ; body = Http_client.Received response.body
+                    ; body = receipt.body_receipt
                     ; retry_after_header = response.retry_after_header
                     })
            in

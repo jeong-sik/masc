@@ -9,6 +9,14 @@ type t =
   ; rationale : string
   }
 
+val all_of_decision : decision list
+(** Every decision, derived from the type, so a new constructor is offered
+    wherever this list is. *)
+
+val decision_to_string : decision -> string
+(** The wire label of a decision. Every judge that offers the decisions by
+    name — the LLM lane's schema and the System One question — uses this. *)
+
 val decision_tokens : string list
 val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result

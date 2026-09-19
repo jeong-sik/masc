@@ -32,7 +32,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import shutil
 import sys
 from pathlib import Path
@@ -128,6 +127,7 @@ class MascSidecar:
         # mixin's requirement on its host is visible and type-checked rather
         # than discovered at run time.
         exec_as_root: Callable[..., Awaitable[Any]]
+        _get_env: Callable[..., str | None]
 
     def masc_container_env(self) -> dict[str, str]:
         provider = self.keeper_runtime_id.split(".", 1)[0]
@@ -135,9 +135,9 @@ class MascSidecar:
             raise ValueError(
                 f"unknown provider {provider!r}; expected one of {sorted(PROVIDERS)}")
         key_env = PROVIDERS[provider]["api_key_env"]
-        key = os.environ.get(key_env)
+        key = self._get_env(key_env)
         if not key:
-            raise RuntimeError(f"{key_env} not set in harbor process env")
+            raise RuntimeError(f"{key_env} not set in Harbor agent environment")
         env = {
             key_env: key,
             # MASC resolves `<provider>.<binding id>`, and the binding id is a

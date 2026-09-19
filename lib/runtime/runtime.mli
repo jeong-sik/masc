@@ -364,8 +364,8 @@ val load_list :
     [\[runtime\].media_failover] entry does not resolve, or if any
     [\[runtime.lanes.<id>\]] candidate does not resolve (mirrors default
     validation — no silent fallback for a typo'd id). [keeper_assignments] is the
-    keeper→lane-name-or-runtime-id list; [media_failover] is the RFC-0265 ordered reroute
-    list; [lanes] is the ordered failover candidate lists. *)
+    keeper→lane-name-or-runtime-id list; [media_failover] is the vision read fleet;
+    [lanes] is the ordered failover candidate lists. *)
 
 
 (** {1 Lazy default runtime singleton}
@@ -533,10 +533,10 @@ val verifier_exact_slot_admission : runtime_id:string -> (unit, string) result
     execution-kind constraint; a replacing registry cannot grant admission. *)
 
 val media_failover : unit -> string list
-(** [\[runtime\].media_failover] (RFC-0265) — ordered runtime ids consulted when a
-    turn's input modality exceeds the assigned runtime's declared capabilities;
-    the turn reroutes to the first that admits it. [[]] = derive capable runtimes
-    from declared [\[models.*.capabilities\]] in declaration order. Every entry is
+(** [\[runtime\].media_failover] — the vision read fleet: ordered runtime ids the
+    vision tool calls, including the image readings made for a runtime that
+    cannot take the image. A keeper turn never dispatches to them; its image
+    reroute stays inside its lane. [[]] = no vision fleet. Every entry is
     validated at load so each resolves to a configured runtime. *)
 
 val lanes : unit -> Runtime_lane.t list
@@ -867,6 +867,37 @@ val set_runtime_lane_candidates :
     ([self]) becomes a declared lane the first time an operator adds a
     candidate to it. An empty [runtime_ids] is rejected: a lane that resolves to
     nothing is not the same edit as removing the lane. *)
+
+val create_runtime_lane :
+  ?runtime_config_path:string ->
+  lane_id:string ->
+  runtime_ids:string list ->
+  unit ->
+  (config_commit_receipt, string) result
+(** Declare a new [\[runtime.lanes."<lane_id>"\]] with [runtime_ids] as its
+    candidates, through the same validated write as
+    {!set_runtime_lane_candidates}. Both refusals read the file under the
+    write lock:
+    - the file already declares that lane: a create that landed on it would
+      replace its candidates without the operator having seen them;
+    - [lane_id] is a declared runtime id: the lane would shadow that runtime
+      for every keeper that names it, and for every unassigned keeper when it
+      is the default. A runtime's own lane is edited with
+      {!set_runtime_lane_candidates}. *)
+
+val remove_runtime_lane :
+  ?runtime_config_path:string ->
+  lane_id:string ->
+  unit ->
+  (config_commit_receipt, string) result
+(** Remove the [\[runtime.lanes."<lane_id>"\]] table through the runtime.toml
+    SSOT writer. Refused while a keeper still routes through the lane id,
+    naming each way it does: an entry of [\[runtime.assignments\]], or
+    [\[runtime\].default], which every unassigned keeper walks. A keeper's
+    route is read as a lane before a runtime ({!resolve_assignment}), so
+    removing the lane would either fail the load or silently hand those
+    keepers the runtime of the same id. Refused when the file does not declare
+    the lane as its own table. *)
 
 val set_exact_output_lane_slots :
   ?runtime_config_path:string ->

@@ -3093,15 +3093,24 @@ let wizard_model_entries client catalog =
   |> List.filter (fun (entry : Llm_provider.Model_catalog.model_entry) ->
     match client, entry.provider_name with
     | Wizard_claude_code, (None | Some "anthropic") ->
-      String.starts_with ~prefix:"claude-" entry.id_prefix
+      Llm_provider.Model_identifiers.Id_prefix.starts_with
+        ~prefix:
+          (Llm_provider.Model_identifiers.Id_prefix.of_string_exn "claude-")
+        entry.id_prefix
     | Wizard_codex, (None | Some "openai-responses") ->
-      String.starts_with ~prefix:"gpt-" entry.id_prefix
+      Llm_provider.Model_identifiers.Id_prefix.starts_with
+        ~prefix:
+          (Llm_provider.Model_identifiers.Id_prefix.of_string_exn "gpt-")
+        entry.id_prefix
     | _ -> false)
 
 let wizard_model_context model entries =
   let contexts = entries
     |> List.filter_map (fun (entry : Llm_provider.Model_catalog.model_entry) ->
-      let exact = String.equal entry.id_prefix model
+      let exact =
+        String.equal
+          (Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix)
+          model
         || Option.fold ~none:false ~some:(List.mem model) entry.supported_models in
       match entry.max_context_tokens with
       | Some context when exact && context > 0 -> Some context
@@ -3130,7 +3139,8 @@ let runtime_model_list_cmd =
            Ok
              (`List
                (entries
-                |> List.map (fun (entry : Llm_provider.Model_catalog.model_entry) -> entry.id_prefix)
+                |> List.map (fun (entry : Llm_provider.Model_catalog.model_entry) ->
+                       Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix)
                 |> List.sort_uniq String.compare
                 |> List.filter_map (fun model ->
                      Option.map (fun context -> `Assoc [ "id", `String model

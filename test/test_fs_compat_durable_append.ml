@@ -430,10 +430,48 @@ let test_private_jsonl_slice_rejects_incomplete_tail () =
   | _ -> fail "incomplete JSONL tail was not rejected"
 ;;
 
-let test_private_jsonl_append_rejects_incomplete_tail () =
-  with_temp_jsonl "{\"row\":1}" @@ fun path ->
+(* A crash between an append's write and its rollback leaves a last row with
+   no newline. The next plain append cuts it back to the last complete row and
+   writes from there; the rows before it stay as they were. *)
+let test_private_jsonl_append_cuts_incomplete_tail () =
+  let suffix = "{\"row\":3}\n" in
+  let cut_then_append ~complete ~fragment =
+    with_temp_jsonl (complete ^ fragment) @@ fun path ->
+    (match
+       Fs_compat.append_private_jsonl_durable_locked_with_end_offset_result
+         path
+         suffix
+     with
+     | Fs_compat.Private_file_succeeded end_offset ->
+       check int
+         (Printf.sprintf "after %S the append starts where the complete rows end"
+            fragment)
+         (String.length complete + String.length suffix)
+         end_offset
+     | Fs_compat.Private_file_failed error ->
+       fail (Fs_compat.private_jsonl_append_error_to_string error)
+     | Fs_compat.Private_file_succeeded_with_cleanup_failure _
+     | Fs_compat.Private_file_failed_with_cleanup_failure _ ->
+       fail "unexpected descriptor settlement failure");
+    check string
+      (Printf.sprintf "%S is cut and the complete rows kept" fragment)
+      (complete ^ suffix)
+      (Fs_compat.load_file path)
+  in
+  cut_then_append ~complete:"{\"row\":1}\n" ~fragment:"{\"row\":2";
+  cut_then_append ~complete:"" ~fragment:"{\"row\":1}"
+;;
+
+(* An offset-checked caller conditioned its write on the length it saw,
+   fragment included, so the fragment is refused and left in place. *)
+let test_private_jsonl_append_at_end_offset_refuses_incomplete_tail () =
+  let original = "{\"row\":1}\n{\"row\":2" in
+  with_temp_jsonl original @@ fun path ->
   (match
-     Fs_compat.append_private_jsonl_durable_locked_result path "{\"row\":2}\n"
+     Fs_compat.append_private_jsonl_durable_locked_at_end_offset_result
+       path
+       ~expected_end_offset:(String.length original)
+       "{\"row\":3}\n"
    with
    | Fs_compat.Private_file_failed Fs_compat.Incomplete_jsonl_tail -> ()
    | Fs_compat.Private_file_failed error ->
@@ -441,8 +479,8 @@ let test_private_jsonl_append_rejects_incomplete_tail () =
    | Fs_compat.Private_file_succeeded _
    | Fs_compat.Private_file_succeeded_with_cleanup_failure _
    | Fs_compat.Private_file_failed_with_cleanup_failure _ ->
-     fail "append accepted an incomplete existing JSONL row");
-  check string "incomplete bytes unchanged" "{\"row\":1}" (Fs_compat.load_file path)
+     fail "an offset-checked append wrote after an incomplete row");
+  check string "incomplete bytes unchanged" original (Fs_compat.load_file path)
 ;;
 
 let test_private_jsonl_append_rejects_incomplete_suffix () =
@@ -1202,9 +1240,13 @@ let () =
             `Quick
             test_private_jsonl_rows_reads_complete_rows_and_reports_torn_tail
         ; test_case
-            "private JSONL append rejects incomplete tail"
+            "private JSONL append cuts incomplete tail"
             `Quick
-            test_private_jsonl_append_rejects_incomplete_tail
+            test_private_jsonl_append_cuts_incomplete_tail
+        ; test_case
+            "private JSONL offset append refuses incomplete tail"
+            `Quick
+            test_private_jsonl_append_at_end_offset_refuses_incomplete_tail
         ; test_case
             "private JSONL append rejects incomplete suffix"
             `Quick

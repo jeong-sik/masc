@@ -1512,38 +1512,20 @@ type keeper_summary =
 
 let keeper_summary ~base_path ~owner_lifecycle keeper_name =
   let owner_lifecycle = owner_lifecycle ~keeper_name in
-  let lifecycle_read_errors () =
-    match owner_lifecycle with
-    | Runnable
-    | Recoverable
-    | Retained_disabled
-    | Paused_dead
-    | Shutdown_fenced -> []
-    | Lifecycle_unknown detail ->
-      [ Printf.sprintf "keeper lifecycle unavailable keeper=%s: %s" keeper_name detail ]
-  in
   match load_state_result ~base_path ~keeper_name with
   | Ok state ->
     let pending = State.pending state in
     let pending_oldest_source = queue_oldest_source_arrived_at pending in
     let outbox = State.transition_outbox state in
-    let lifecycle_read_errors =
-      if
-        Keeper_event_queue.is_empty pending
-        && outbox = []
-      then []
-      else lifecycle_read_errors ()
-    in
     { keeper_name
     ; owner_lifecycle
     ; pending_count = Keeper_event_queue.length pending
     ; pending_oldest_source
     ; outbox_count = List.length outbox
-    ; counts_complete = lifecycle_read_errors = []
-    ; read_errors = lifecycle_read_errors
+    ; counts_complete = true
+    ; read_errors = []
     }
   | Error message ->
-    let lifecycle_read_errors = lifecycle_read_errors () in
     let read_errors =
       diagnose_snapshot_read_error ~base_path ~keeper_name message
       |> List.map (fun error -> error.message)
@@ -1554,7 +1536,7 @@ let keeper_summary ~base_path ~owner_lifecycle keeper_name =
     ; pending_oldest_source = None
     ; outbox_count = 0
     ; counts_complete = false
-    ; read_errors = lifecycle_read_errors @ read_errors
+    ; read_errors
     }
 ;;
 
@@ -1567,10 +1549,16 @@ let owner_lifecycle_wire = function
   | Lifecycle_unknown _ -> "unclassified"
 ;;
 
+let owner_lifecycle_detail_json = function
+  | Lifecycle_unknown detail -> `String detail
+  | Runnable | Recoverable | Retained_disabled | Paused_dead | Shutdown_fenced -> `Null
+;;
+
 let keeper_summary_json ~now (summary : keeper_summary) =
   `Assoc
     [ "keeper_name", `String summary.keeper_name
     ; "owner_lifecycle", `String (owner_lifecycle_wire summary.owner_lifecycle)
+    ; "owner_lifecycle_detail", owner_lifecycle_detail_json summary.owner_lifecycle
     ; "pending_count", `Int summary.pending_count
     ; "total_count", `Int summary.pending_count
     ; "oldest_source_arrived_at_unix", Json_util.float_opt_to_json summary.pending_oldest_source
@@ -1600,6 +1588,7 @@ let compact_pending_count_json ~now (summary : keeper_summary) =
 let compact_backlog_count_json ~now (summary : keeper_summary) =
   `Assoc
     [ "keeper_name", `String summary.keeper_name
+    ; "owner_lifecycle_detail", owner_lifecycle_detail_json summary.owner_lifecycle
     ; "pending_count", `Int summary.pending_count
     ; "total_count", `Int summary.pending_count
     ; "oldest_source_age_seconds", age_seconds_json ~now summary.pending_oldest_source

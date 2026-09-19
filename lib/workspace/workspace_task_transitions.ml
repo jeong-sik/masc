@@ -1073,11 +1073,16 @@ let commit_verdict_r
             | Masc_domain.InProgress _
             | Masc_domain.AwaitingVerification _ -> ());
            let event_kind =
-             match verdict, new_status with
-             | Masc_domain.Verdict_approved, Masc_domain.Cancelled _ ->
-               Event_kind.Task.Cancelled
-             | Masc_domain.Verdict_approved, _ -> Event_kind.Task.Approved
-             | Masc_domain.Verdict_rejected _, _ -> Event_kind.Task.Rejected
+             match verdict with
+             | Masc_domain.Verdict_approved ->
+               (match new_status with
+                | Masc_domain.Cancelled _ -> Event_kind.Task.Cancelled
+                | Masc_domain.Todo
+                | Masc_domain.Claimed _
+                | Masc_domain.InProgress _
+                | Masc_domain.AwaitingVerification _
+                | Masc_domain.Done _ -> Event_kind.Task.Approved)
+             | Masc_domain.Verdict_rejected _ -> Event_kind.Task.Rejected
            in
            (* [authority_actor] is a fresh id per review, so it identifies the
               run and nothing else — grouping 74 verdicts by it yields 74 groups.

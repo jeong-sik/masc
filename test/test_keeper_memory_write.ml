@@ -1568,7 +1568,7 @@ let test_search_records_a_retrieval_per_ordinary_match () =
        (match e.kind with
         | Events.Retrieved { query } ->
           Alcotest.(check string) "the query is recorded" "alpha beta" query
-        | Events.Cited _ | Events.Revised _ ->
+        | Events.Retracted | Events.Revised _ ->
           Alcotest.fail "a search records retrievals only");
        Alcotest.(check string)
          "the turn is recorded"
@@ -1597,10 +1597,9 @@ let test_search_records_a_retrieval_per_ordinary_match () =
   | _ -> Alcotest.fail "expected one decision-log line per search"
 ;;
 
-(* RFC-0418: a retract names the fact by id and the store found it, so the id
-   was cited; the event outlives the fact. A retract of an id no fact has
-   records nothing. *)
-let test_retract_records_a_citation () =
+(* A successful retract records removal; the event outlives the fact.
+   A retract of an id no fact has records nothing. *)
+let test_retract_records_a_retraction () =
   with_temp_dir
   @@ fun base_path ->
   let config = Masc.Workspace.default_config base_path in
@@ -1632,11 +1631,10 @@ let test_retract_records_a_citation () =
   Alcotest.(check bool) "retraction succeeds" true (json_field "ok" response = `Bool true);
   (match events_for ~keepers_dir ~keeper_id:meta.name with
    | [ e ] ->
-     Alcotest.(check string) "the retracted id is the cited one" written_id e.memory_id;
+     Alcotest.(check string) "the event names the retracted id" written_id e.memory_id;
      (match e.kind with
-      | Events.Cited { tool } ->
-        Alcotest.(check string) "cited through the retract tool" "keeper_memory_retract" tool
-      | Events.Retrieved _ | Events.Revised _ -> Alcotest.fail "a retract records a citation")
+      | Events.Retracted -> ()
+      | Events.Retrieved _ | Events.Revised _ -> Alcotest.fail "a retract records removal")
    | events -> Alcotest.failf "expected one event, got %d" (List.length events));
   ignore (retract (memory_id 'f'));
   Alcotest.(check int)
@@ -1657,7 +1655,7 @@ let test_retract_records_a_citation () =
        Alcotest.(check string) "the current fact reuses that identity" written_id current_id;
        let history = Events.summary_for ~memory_id:current_id
            (events_for ~keepers_dir ~keeper_id:meta.name) in
-       Alcotest.(check int) "current fact retains the previous retraction" 1 history.cited_count;
+       Alcotest.(check int) "current fact retains the previous retraction" 1 history.retracted_count;
        Alcotest.(check int) "re-adding is not a retrieval" 0 history.retrieved_count
    | _ -> Alcotest.fail "expected only the re-added fact")
 ;;
@@ -1806,9 +1804,9 @@ let () =
             `Quick
             test_search_records_a_retrieval_per_ordinary_match
         ; Alcotest.test_case
-            "retract records a citation"
+            "retract records removal and survives re-adding the claim"
             `Quick
-            test_retract_records_a_citation
+            test_retract_records_a_retraction
         ; Alcotest.test_case
             "source parser accepts every supported value"
             `Quick

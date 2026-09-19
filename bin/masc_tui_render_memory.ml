@@ -378,6 +378,23 @@ let memory_fact_detail_lines ~cols (row : memory_fact_row) =
         Message_layout.split_cells ~max_cells:inner_width (Terminal_text.single_line fact.mf_claim)
         |> List.map (fun line -> "    " ^ line)
       in
+      let history =
+        Printf.sprintf "Retrieved %d · %s · last %s · Retracted %d · Revised from %d"
+          fact.mf_events.mfe_retrieved_count
+          (Message_layout.count_noun fact.mf_events.mfe_retrieved_distinct_days "day")
+          (match fact.mf_events.mfe_last_retrieved_at with
+           | None -> "never"
+           | Some at -> memory_fact_age_label at)
+          fact.mf_events.mfe_retracted_count
+          (List.length fact.mf_events.mfe_revised_from)
+      in
+      let history_prefix = detail_field "History:" "" in
+      let prefix_width = Message_layout.display_width history_prefix in
+      let history_lines =
+        Message_layout.wrap_words ~max_cells:(max 1 (cols - prefix_width)) history
+        |> List.mapi (fun index line ->
+             (if index = 0 then history_prefix else String.make prefix_width ' ') ^ line)
+      in
       [ Printf.sprintf "  %s%sFact Detail%s" Ansi.bold (Theme.info ()) Ansi.reset ]
       @ claim_lines
       @ [ detail_field "Category:" fact.mf_category
@@ -386,21 +403,9 @@ let memory_fact_detail_lines ~cols (row : memory_fact_row) =
                fact.mf_origin (Theme.recede ()) Ansi.reset
                (memory_fact_age_label fact.mf_first_seen)
                (memory_fact_age_label fact.mf_last_seen))
-        (* The only Cited producer is a successful keeper_memory_retract.
-           Events survive removal and re-adding the same claim, so this is
-           past retraction history, not evidence of the current fact's quality. *)
-        ; detail_field "History:"
-            (Printf.sprintf "Retrieved %d · %s · last %s · Retracted %d · Revised from %d"
-               fact.mf_events.mfe_retrieved_count
-               (Message_layout.count_noun
-                  fact.mf_events.mfe_retrieved_distinct_days "day")
-               (match fact.mf_events.mfe_last_retrieved_at with
-                | None -> "never"
-                | Some at -> memory_fact_age_label at)
-               fact.mf_events.mfe_cited_count
-               (List.length fact.mf_events.mfe_revised_from))
-        ; detail_field "Memory ID:" fact.mf_memory_id
         ]
+      @ history_lines
+      @ [ detail_field "Memory ID:" fact.mf_memory_id ]
   | Memory_row_source_fact fact ->
       let claim_lines =
         Message_layout.split_cells ~max_cells:inner_width (Terminal_text.single_line fact.msf_claim)

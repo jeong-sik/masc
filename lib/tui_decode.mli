@@ -915,7 +915,7 @@ type memory_fact_events = {
   mfe_retrieved_count : int;
   mfe_retrieved_distinct_days : int;
   mfe_last_retrieved_at : float option;
-  mfe_cited_count : int;
+  mfe_retracted_count : int;
   mfe_revised_from : string list;
 }
 

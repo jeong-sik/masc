@@ -13,12 +13,12 @@ let make_fact ?(category = "general") ?(origin = "chat") ?(first = 100.0)
   ; mf_events = events
   }
 
-let used ?(retrieved = 0) ?(days = 0) ?last ?(cited = 0) ?(revised_from = []) () :
+let used ?(retrieved = 0) ?(days = 0) ?last ?(retracted = 0) ?(revised_from = []) () :
   Decode.memory_fact_events =
   { mfe_retrieved_count = retrieved
   ; mfe_retrieved_distinct_days = days
   ; mfe_last_retrieved_at = last
-  ; mfe_cited_count = cited
+  ; mfe_retracted_count = retracted
   ; mfe_revised_from = revised_from
   }
 

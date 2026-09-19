@@ -88,7 +88,7 @@ let test_detail_names_the_use_record () =
         { mfe_retrieved_count = 4
         ; mfe_retrieved_distinct_days = 2
         ; mfe_last_retrieved_at = Some (Unix.gettimeofday () -. 7200.0)
-        ; mfe_cited_count = 1
+        ; mfe_retracted_count = 1
         ; mfe_revised_from = [ "mem-0" ]
         }
     }
@@ -123,7 +123,12 @@ let test_detail_lines () =
   List.iter
     (fun line ->
       check bool "detail line bounded" true (Layout.display_width line <= 80))
-    lines
+    lines;
+  let history = String.concat " " (List.map String.trim lines) in
+  check bool "narrow history keeps the retraction count" true
+    (contains "Retracted 0" history);
+  check bool "narrow history keeps the predecessor count" true
+    (contains "Revised from 0" history)
 ;;
 
 let test_detail_lines_source_and_invalidation () =

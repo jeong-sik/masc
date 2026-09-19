@@ -2476,9 +2476,12 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
      [Planning_detail.timeline] takes the goal id to answer one question --
      whether the timeline that came back is this goal's or the previous
      one's -- and draws the events, never the id
-     (masc_tui_planning_detail.ml). *)
+     (masc_tui_planning_detail.ml). [Masc_tui_fetched.view_for] likewise
+     compares the raw id with the cached confirmation's key; it never draws
+     the key. Sanitizing either lookup would change the goal's identity. *)
   check_fields
-    ~non_rendering_calls:[ "List.mem"; "Planning_detail.timeline" ]
+    ~non_rendering_calls:
+      [ "List.mem"; "Planning_detail.timeline"; "Masc_tui_fetched.view_for" ]
     "planning_detail_pane"
     [ "pg_id"; "pg_title"; "pg_due_date"; "pg_metric"; "pg_target_value" ];
   check_fields ~non_rendering_calls:[ "String.equal" ] "render_planning_detail"

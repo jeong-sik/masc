@@ -791,9 +791,9 @@ let media_candidates () =
 
 (* RFC-0440 §3: an image turn walks the candidates that take the image, in the
    order the candidate set gives them. A text-only candidate is not part of
-   that walk; the driver appends the lane's text candidates after it as the
-   degrade tail until delegation replaces that tail (PR-C). A run that
-   requires no media has no media walk at all and keeps its lane order. *)
+   that walk; the driver walks the rest of the lane after it, in declared
+   order, as the degrade tail. A run that requires no media has no media walk
+   at all and keeps its lane order. *)
 let media_walk ~(candidates : Runtime.t list)
     ?(checkpoint_messages = [])
     ?(initial_messages = [])

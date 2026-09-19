@@ -46,8 +46,9 @@ access = "read-write"
 # same ollama_cloud wire (no new credential): GLM-5.3-Flash is the newest flash
 # coding model (Z.AI 2026-08-14, /api/show 2026-08-29), 1M context, tools+vision.
 default = "ollama_cloud.ollama-cloud-glm-5-3-flash"
-# Vision read fleet (RFC-0414). When a keeper's assigned runtime cannot take an
-# image, analyze_image's eager read walks these first. gemma4-31b (Gemma 4,
+# Vision read fleet (RFC-0414). When no runtime in a keeper's lane can take an
+# image, the eager read and analyze_image read it with these, in order. They
+# never take the keeper's turn. gemma4-31b (Gemma 4,
 # strong OCR/vision) is a cloud runtime fast enough to be usable; a local 27B
 # measured 5+ min per read under load, so it is deliberately not here.
 # gemma4-31b declares image input and an explicit image payload limit below.

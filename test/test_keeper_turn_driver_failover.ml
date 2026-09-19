@@ -928,22 +928,9 @@ let test_lane_media_degrade_uses_first_candidate_runtime_id () =
          Alcotest.fail "text-only lane should not admit an image turn"
        | Runtime_agent.Reroute { target; _ } ->
          Alcotest.failf "text-only lane rerouted to %s" target.Runtime.id);
-      let selected_runtime_id, selected_runtime =
-        Driver.For_testing.first_runtime_after_modality_reroute
-          ~keeper_name:"test-keeper" ~assignment_id:"resilient"
-          ~first_candidate_id ~first_candidate decision_for_image
-      in
-      Alcotest.(check string)
-        "selected runtime id"
-        "primary.test_model"
-        selected_runtime_id;
-      Alcotest.(check string)
-        "selected runtime binding"
-        "primary.test_model"
-        selected_runtime.Runtime.id;
       let decision =
         Driver.For_testing.media_degrade_manifest_decision
-          ~runtime_id:selected_runtime_id
+          ~runtime_id:first_candidate_id
           [ "image", 1 ]
       in
       Alcotest.(check string)
@@ -1710,9 +1697,7 @@ let test_lane_media_reroute_stays_in_lane () =
          (Driver.For_testing.attempt_runtimes_for_turn
             ~media_walk:
               (Runtime_agent.media_walk ~candidates:text_only_lane [ image_block ])
-            ~assigned_runtime:head
-            ~first_runtime:head
-            ~remaining_runtimes:[]));
+            ~lane:[ head ]));
     let deferred =
       Driver.For_testing.make_deferred_runtime_lane
         ~assignment_id:"resilient"
@@ -1770,35 +1755,32 @@ let test_lane_media_reroute_walks_past_exhausted_candidate () =
           ; source_type = Agent_core.Types.Base64
           }
       in
-      let first_runtime =
-        match
-          Driver.For_testing.lane_modality_reroute_decision
-            ~checkpoint_messages:[]
-            ~initial_messages:[]
-            ~goal_blocks:[ image_block ]
-            ~first_candidate:head
-            ~candidates
-        with
-        | Runtime_agent.Reroute { target; _ } ->
-          Alcotest.(check string)
-            "the reroute picks the live candidate"
-            "backupvision.vision_model"
-            target.Runtime.id;
-          target
-        | Runtime_agent.No_reroute_needed ->
-          Alcotest.fail "a text-only head must reroute an image turn"
-        | Runtime_agent.No_capable_runtime _ ->
-          Alcotest.fail "two image-capable candidates are in the lane"
-      in
+      (match
+         Driver.For_testing.lane_modality_reroute_decision
+           ~checkpoint_messages:[]
+           ~initial_messages:[]
+           ~goal_blocks:[ image_block ]
+           ~first_candidate:head
+           ~candidates
+       with
+       | Runtime_agent.Reroute { target; _ } ->
+         Alcotest.(check string)
+           "the reroute picks the live candidate"
+           "backupvision.vision_model"
+           target.Runtime.id
+       | Runtime_agent.No_reroute_needed ->
+         Alcotest.fail "a text-only head must reroute an image turn"
+       | Runtime_agent.No_capable_runtime _ ->
+         Alcotest.fail "two image-capable candidates are in the lane");
       let media_walk = Runtime_agent.media_walk ~candidates [ image_block ] in
       Alcotest.(check (list string))
         "the image walk holds the image-capable candidates, live first"
         [ "backupvision.vision_model"; "lanevision.vision_model" ]
         (ids media_walk);
-      (* The assigned text-only runtime closes the list: the reroute took it out
-         of the head, and without the tail a turn whose media candidates all
-         answer 402 would end in an error instead of reaching the runtime whose
-         per-attempt projection turns the image into a reading. *)
+      (* The text-only head is still walked after the image candidates, where
+         per-attempt projection turns the image into a reading, so a turn whose
+         media candidates all answer 402 degrades instead of ending in an
+         error. *)
       Alcotest.(check (list string))
         "the turn walks the live candidate, then the exhausted one, then degrades"
         [ "backupvision.vision_model"
@@ -1808,9 +1790,19 @@ let test_lane_media_reroute_walks_past_exhausted_candidate () =
         (ids
            (Driver.For_testing.attempt_runtimes_for_turn
               ~media_walk
-              ~assigned_runtime:head
-              ~first_runtime
-              ~remaining_runtimes:[ lanevision; backupvision ]));
+              ~lane:[ head; lanevision; backupvision ]));
+      (* The degrade tail keeps the lane's declared order. Stand-ins: the
+         function orders by identity, so any three runtimes show it. *)
+      Alcotest.(check (list string))
+        "text candidates after the image walk keep the declared order"
+        [ "lanevision.vision_model"
+        ; "primary.text_model"
+        ; "backupvision.vision_model"
+        ]
+        (ids
+           (Driver.For_testing.attempt_runtimes_for_turn
+              ~media_walk:[ lanevision ]
+              ~lane:[ head; lanevision; backupvision ]));
       Alcotest.(check (list string))
         "a text turn keeps the lane order"
         [ "primary.text_model"
@@ -1822,9 +1814,7 @@ let test_lane_media_reroute_walks_past_exhausted_candidate () =
               ~media_walk:
                 (Runtime_agent.media_walk ~candidates
                    [ Agent_core.Types.Text "hello" ])
-              ~assigned_runtime:head
-              ~first_runtime:head
-              ~remaining_runtimes:[ lanevision; backupvision ]))))
+              ~lane:[ head; lanevision; backupvision ]))))
 
 (* An assigned runtime that takes the image itself never reroutes -- the
    decision reads capability, not the account -- so the exhausted head is still
@@ -1889,9 +1879,7 @@ let test_media_turn_starts_from_the_live_walk_head () =
         (ids
            (Driver.For_testing.attempt_runtimes_for_turn
               ~media_walk
-              ~assigned_runtime:assigned
-              ~first_runtime:assigned
-              ~remaining_runtimes:[ text_only; backupvision ]))))
+              ~lane:[ assigned; text_only; backupvision ]))))
 
 (* RFC-0440 §3: a 402 belongs to the candidate's account, so the walk moves to
    the next candidate in the same turn and does not call the first one again. *)

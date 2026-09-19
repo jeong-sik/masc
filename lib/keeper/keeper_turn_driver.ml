@@ -1134,30 +1134,17 @@ let modality_reroute_candidates ~now ~deferred_runtime_lane ~first_candidate
            Some runtime.Runtime.candidate_backpressure)
 
 (* The media walk (every lane candidate that takes the media, live ones first),
-   then the lane's remaining candidates as the degrade tail, where per-attempt
-   projection turns the image into a reading. A text turn has an empty media
-   walk and keeps [first_runtime :: remaining_runtimes].
+   then the rest of the lane in its declared order as the degrade tail, where
+   per-attempt projection turns the image into a reading. A text turn has an
+   empty media walk and walks the lane as declared.
 
-   The walk leads, [first_runtime] does not. When the assigned runtime takes
-   the media itself, [decide_modality_reroute_for_runtime_candidates] answers
-   [No_reroute_needed] on capability alone and never looks at the account, so a
-   head exhausted by a 402/429 would stay in front of a live capable candidate.
-   When the head is live it is the walk's own head, so leading with the walk
-   changes nothing; after a reroute the target is the walk head for the same
-   reason, and the dedupe drops the second mention either way.
-
-   [assigned_runtime] closes the list. A reroute moves the head to another lane
-   candidate, and [remaining_runtimes] never held the assigned runtime, so
-   without this entry a turn whose media candidates all answer 402 would end in
-   an error instead of reaching the assigned runtime, whose per-attempt
-   projection turns the image into a reading. It is the last entry because it
-   is the degrade, not a candidate for the media. Whenever it is already the
-   head or already in the walk the dedupe drops this mention, so a text turn
-   and an un-rerouted media turn keep the list they had. *)
-let attempt_runtimes_for_turn ~media_walk ~assigned_runtime ~first_runtime
-    ~remaining_runtimes =
-  dedupe_runtimes_preserve_order
-    (media_walk @ (first_runtime :: remaining_runtimes) @ [ assigned_runtime ])
+   The walk leads, not the lane head. When the head takes the media itself,
+   [decide_modality_reroute_for_runtime_candidates] answers [No_reroute_needed]
+   on capability alone and never looks at the account, so a head exhausted by a
+   402/429 would stay in front of a live capable candidate. A reroute target is
+   the walk's head for the same reason. *)
+let attempt_runtimes_for_turn ~media_walk ~lane =
+  dedupe_runtimes_preserve_order (media_walk @ lane)
 
 let lane_modality_reroute_decision ~checkpoint_messages ~initial_messages
     ~goal_blocks ~first_candidate ~candidates =
@@ -1168,25 +1155,18 @@ let lane_modality_reroute_decision ~checkpoint_messages ~initial_messages
     ~initial_messages
     goal_blocks
 
-(* The WARN names the runtime being left and the runtime being taken. It used to
-   print [assignment_id] on the left, which for a keeper whose assignment is a
-   bare runtime id reads as a reroute from a runtime to itself — the "<id> -> <id>"
-   lines that made a working reroute look like a no-op. The assignment is still
-   reported, as the assignment. *)
-let first_runtime_after_modality_reroute ~keeper_name ~assignment_id
-    ~first_candidate_id ~first_candidate = function
-  | Runtime_agent.No_reroute_needed | Runtime_agent.No_capable_runtime _ ->
-    first_candidate_id, first_candidate
+(* The WARN names the lane head the image turn does not start from and the lane
+   candidate it starts from, then the assignment. *)
+let log_modality_reroute ~keeper_name ~assignment_id ~first_candidate_id = function
+  | Runtime_agent.No_reroute_needed | Runtime_agent.No_capable_runtime _ -> ()
   | Runtime_agent.Reroute { target; reason } ->
-    let to_runtime_id = target.Runtime.id in
     Log.Keeper.warn
       "%s: RFC-0265 modality reroute %s -> %s (assignment %s: %s)"
       keeper_name
       first_candidate_id
-      to_runtime_id
+      target.Runtime.id
       assignment_id
-      reason;
-    to_runtime_id, target
+      reason
 
 (* The dispatch view of one candidate's input. RFC-0265 media degrade projects
    the goal, the pre-turn history and the resumed checkpoint against the input
@@ -1655,11 +1635,11 @@ let run_named
     | Some _ -> Ok []
     | None -> resolve_runtime_candidates remaining_candidate_ids
   in
-  (* This decision orders the walk: a [Reroute] moves a capable candidate to
-     the head and drops the assigned one. On a deferred lane the suffix order
+  (* This decision is reported, not applied: the image walk already leads with
+     the capable candidate a [Reroute] names. On a deferred lane the suffix order
      was frozen before pre-dispatch shaping, so [modality_reroute_candidates]
      is [[]] and the decision can only be [No_reroute_needed] or
-     [No_capable_runtime], neither of which moves the head. The media degrade
+     [No_capable_runtime], and the image walk is empty. The media degrade
      itself is not decided here for any lane: every attempt projects the input
      against the runtime it dispatches to ([project_input_for_attempt] inside
      [run_attempt] below), because the walk crosses runtimes with different
@@ -1684,11 +1664,8 @@ let run_named
       ~first_candidate
       ~candidates:reroute_candidates
   in
-  let first_runtime =
-    snd
-      (first_runtime_after_modality_reroute ~keeper_name ~assignment_id:runtime_id
-         ~first_candidate_id ~first_candidate reroute_decision)
-  in
+  log_modality_reroute ~keeper_name ~assignment_id:runtime_id ~first_candidate_id
+    reroute_decision;
   let attempt_runtimes =
     attempt_runtimes_for_turn
       ~media_walk:
@@ -1697,9 +1674,7 @@ let run_named
            ~checkpoint_messages
            ~initial_messages
            current_goal_blocks)
-      ~assigned_runtime:first_candidate
-      ~first_runtime
-      ~remaining_runtimes
+      ~lane:(first_candidate :: remaining_runtimes)
   in
   let attempt_candidates =
     match deferred_runtime_lane with
@@ -2500,8 +2475,7 @@ module For_testing = struct
   let checkpoint_after_attempt = checkpoint_after_attempt
   let success_selected_model_raw = success_selected_model_raw
   let apply_accept = Keeper_turn_driver_try_provider.For_testing.apply_accept
-  let first_runtime_after_modality_reroute =
-    first_runtime_after_modality_reroute
+  let log_modality_reroute = log_modality_reroute
 
   let modality_reroute_candidates = modality_reroute_candidates
   let attempt_runtimes_for_turn = attempt_runtimes_for_turn

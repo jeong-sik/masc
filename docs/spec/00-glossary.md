@@ -52,11 +52,15 @@ status: reference
 : 공유 발견, 질문, 답변, 의견과 결정을 게시하는 durable 협업 표면.
 
 **Broadcast**
-: 이 저장소에서 세 가지 뜻으로 쓰인다. 서로 다른 것이니 문장에 대상을 함께 적는다.
+: 이 저장소에서 서로 다른 넷을 가리킨다. 문장에 어느 것인지 함께 적는다.
   (1) SSE broadcast: 서버가 연결된 client 전부의 stream에 event를 밀어 넣는
-  전송 동작(`09-server-transport.md`). (2) Board `audience`의 `Broadcast`: 글을
-  특정 대상 없이 모두에게 라우팅하는 값(`lib/board_types/board_types.mli`).
-  (3) `keeper_broadcast`: Keeper가 부르는 도구 이름(`lib/keeper_tooling/name.ml`).
+  전송 동작(`09-server-transport.md`). (2) 워크스페이스 broadcast:
+  `Workspace.broadcast ~audience:Workspace_broadcast.Fleet_conversation`으로
+  모든 Keeper의 대화창에 닿는 발화. 입구는 Keeper 도구 `keeper_broadcast`와 MCP
+  도구 `masc_broadcast` 둘이고, 둘은 같은 함수를 같은 audience로 부른다. 개념은
+  하나이고 도구 이름은 입구다. (3) Board `audience`의 `Broadcast`: 글을 특정 대상
+  없이 모두에게 라우팅하는 값(`lib/board_types/board_types.mli`). (4) 로그 분류
+  `Log.Broadcast`(`lib/masc_log/log.ml`).
 
 **Task**
 : 실제 작업의 소유권과 검증 상태를 기록하는 단위. 상태는 `Todo`, `Claimed`,

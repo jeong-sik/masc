@@ -470,15 +470,22 @@ Task 는 맡은 사람도 없고 목록에도 없어서, 낸 사람이 알림을
 | `keeper.md` | `world.current_task.status.awaiting_verification` 문구 삭제(제출하면 current 가 아니다). §3.6 의 두 문장 |
 | TUI·dashboard | Task 취소를 인증된 운영자 경로로 옮긴다. 목록 행의 `assignee` 는 판정을 기다리는 줄에서 `producer` 로 보인다 |
 
-**대시보드는 이름을 모르는 상태를 그냥 버린다.** OCaml 쪽은 합타입이라 `Rejected` 를 더하면 모든
-`match` 가 컴파일 때 걸리지만, 대시보드는 TypeScript 라 그런 것이 없다. 상태 목록은 문자열 유니온이고
-(`dashboard/src/types/core.ts:57`), 거기에는 OCaml 이 만들지 않는 `blocked`·`paused`·`unknown` 이 이미
-들어 있다. 화면을 채우는 `tasksByStatus` 는 칸이 넷뿐이고 문자열이 정확히 같은지로만 고른다
-(`dashboard/src/store.ts:540-547`). `rejected` 는 어느 칸에도 안 들어가고, 오류도 없이 사라진다.
-이것은 가정이 아니다. 같은 일이 이미 한 번 일어났다. 계획 화면은 칸 셋만 꺼내 쓰므로
-(`dashboard/src/components/goals/planning.ts:204`) 판정을 기다리는 Task 가 지금도 거기 안 보인다.
-D1 로 `Rejected` 의 입구가 목록 하나가 됐으니, 그 목록을 그리는 화면이 상태를 버리면 입구가 없는 것과
-같다. 칸을 더하는 것으로 끝내지 않고, 모르는 상태를 조용히 버리지 않게 고친다. 1단계에 넣는다.
+**Keeper 가 보는 목록은 안전하다. 대시보드는 아니다.** 서버 쪽 두 표면은 새 상태를 저절로 따라온다.
+`keeper_tasks_list` 의 상태 목록은 변형에서 뽑은 것과 같은지를 테스트가 붙잡고 있고
+(`config/tools/keeper_tasks_list.toml:25-29`), 기본 목록은 `Done` 과 `Cancelled` 만 숨기는 식이라
+(`workspace_query.ml:500-511`) 반려된 Task 는 손대지 않아도 목록에 나온다. 두 `match` 모두 빠짐없이
+적혀 있어 컴파일러가 짚는다. 고칠 것은 `masc_tasks` 설명글의 "기본은 todo/claimed/in_progress/
+awaiting_verification" 문장뿐이다(`config/tools/masc_tasks.toml:5`, `:14-16`).
+
+대시보드는 사정이 다르다. 타입의 상태 목록(`dashboard/src/types/core.ts:57`)과 런타임 목록
+(`dashboard/src/lib/core-parsers.ts:23-33`)은 컴파일 때 서로 맞춰진다(`:34-36`). 거기까지는 걸린다.
+그런데 화면을 채우는 `tasksByStatus` 는 칸이 넷뿐이고 문자열이 정확히 같은지로만 고른다
+(`dashboard/src/store.ts:540-547`). 칸을 하나 더 만들라고 시키는 것은 아무것도 없다. 게다가 파서는
+모르는 값에 `undefined` 를 답하므로(`core-parsers.ts:40-46`) 목록에 `rejected` 를 안 넣으면 상태가
+아예 비어 버린다. 어느 쪽이든 반려된 Task 는 어느 칸에도 안 들어가고 오류 없이 사라진다.
+이건 가정이 아니다. 계획 화면은 칸 셋만 꺼내 쓰므로(`dashboard/src/components/goals/planning.ts:204`)
+판정을 기다리는 Task 가 지금도 거기 안 보인다. D1 로 `Rejected` 의 입구가 목록 하나가 됐으니, 칸을
+더하는 것으로 끝내지 않고 모르는 상태를 조용히 버리지 않게 고친다. 1단계에 넣는다.
 
 ### 3.9 지워지는 것
 

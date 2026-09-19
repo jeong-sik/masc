@@ -13,7 +13,7 @@
     measures in §9 (output rejection rate, continuity scoring) need a provider
     and an operator's choice of keeper; they are not here.
 
-    What it reads is every Keeper conversation on the machine, so what it
+    It reads the current Keeper trace in the selected workspace cluster, so what it
     prints is counts, atom numbers and digests -- never message text. Adding a
     field that carries text turns a local measurement into a disclosure.
 
@@ -42,6 +42,8 @@ let usage =
   \  --base-path DIR   workspace to read (default: the resolved MASC base path)\n\
   \  --keeper NAME     replay only this keeper; repeatable, default every one\n\
   \                    that has a turn-boundary log\n\
+  \                    Current cluster metadata is required; archived logs\n\
+  \                    without it are skipped, never guessed from log order.\n\
   \  --extent all         each round takes the whole backlog (default)\n\
   \  --extent cut-points  each round takes to the first cut point, which is\n\
   \                       what a round takes after one failed on a longer\n\
@@ -80,23 +82,27 @@ type outcome =
       }
   | Skipped of string
 
-(** The trace a round is asked about. The boundary log names it, so the tool
-    does not need the keeper's meta record and therefore does not need a
-    [Workspace.config] -- which would mean opening a storage backend to read
-    files that are already on disk. The last ended turn is the trace the
-    checkpoint on disk belongs to. *)
-let trace_of_lines lines =
-  List.fold_left
-    (fun acc (_, decoded) ->
-      match decoded with
-      | Error _ -> acc
-      | Ok (record : Keeper_turn_boundaries.record) ->
-        (match record.event with
-         | Keeper_turn_boundaries.Turn_ended { turn_ref; _ } ->
-           Some (Ids.Turn_ref.trace_id turn_ref)
-         | Keeper_turn_boundaries.History_restarted _ -> acc))
-    None
-    lines
+(** Boundary logs may be shared through [MASC_CONFIG_DIR]. The selected
+    cluster's typed metadata owns its current trace. This reader neither
+    creates directories nor repairs metadata, and opens no storage backend. *)
+let trace_of_metadata ~runtime_root keeper_id =
+  let path =
+    Filename.concat
+      (Filename.concat runtime_root Common.keepers_runtime_dirname)
+      (Masc.Keeper_runtime_root_entry.keeper_basename
+         ~keeper_name:keeper_id Masc.Keeper_runtime_root_entry.Metadata)
+  in
+  match Masc.Keeper_meta_store.read_meta_file_path_read_only
+          ~ownership_root:runtime_root path with
+  | Error (Masc.Keeper_meta_store.Unreadable detail) ->
+    Error ("metadata_unreadable:" ^ detail)
+  | Error (Masc.Keeper_meta_store.Not_current detail) ->
+    Error ("metadata_not_current:" ^ detail)
+  | Ok None -> Error "metadata_absent"
+  | Ok (Some meta) ->
+    if String.equal meta.name keeper_id
+    then Ok (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+    else Error "metadata_identity_mismatch"
 ;;
 
 let stop_of_selection_stop = function
@@ -227,16 +233,18 @@ let replay ~extent ~trace_id ~lines ~messages =
   loop ~progress:None ~reached:0 []
 ;;
 
-let replay_keeper ~extent ~base_path ~keepers_dir keeper_id =
+let replay_keeper ~extent ~runtime_root ~keepers_dir keeper_id =
   match Keeper_turn_boundaries.read ~keepers_dir ~keeper_id with
   | Error detail -> Skipped ("boundary_log_unreadable:" ^ detail)
   | Ok [] -> Skipped "boundary_log_empty"
   | Ok lines ->
-    (match trace_of_lines lines with
-     | None -> Skipped "no_ended_turn_in_log"
-     | Some trace_id ->
+    (match trace_of_metadata ~runtime_root keeper_id with
+     | Error detail -> Skipped detail
+     | Ok trace_id ->
        let session_dir =
-         Filename.concat (Filename.concat base_path "traces") trace_id
+         Filename.concat
+           (Filename.concat runtime_root "traces")
+           trace_id
        in
        (match
           Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id:trace_id
@@ -358,6 +366,8 @@ let () =
     let keepers_dir =
       Config_dir_resolver.keepers_dir_for_base_path ~base_path
     in
+    (* Use the writer's cluster resolution without opening a storage backend. *)
+    let runtime_root = (Masc.Workspace.backend_config_for base_path).base_path in
     let keepers =
       match List.rev !wanted with
       | [] -> keepers_with_a_log keepers_dir
@@ -368,7 +378,7 @@ let () =
         (fun keeper ->
           outcome_to_json
             keeper
-            (replay_keeper ~extent:!extent ~base_path ~keepers_dir keeper))
+            (replay_keeper ~extent:!extent ~runtime_root ~keepers_dir keeper))
         keepers
     in
     print_endline

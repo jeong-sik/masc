@@ -8,6 +8,20 @@ module Mermaid = Masc_tui_mermaid
 
 let rows = Alcotest.(list string)
 
+let node_id =
+  Alcotest.testable
+    (fun formatter id ->
+      Format.pp_print_string formatter
+        (match id with
+         | Mermaid.Named name -> name
+         | Mermaid.Initial -> "[*] start"
+         | Mermaid.Final -> "[*] end"))
+    (fun a b ->
+      match (a, b) with
+      | Mermaid.Named a, Mermaid.Named b -> String.equal a b
+      | Mermaid.Initial, Mermaid.Initial | Mermaid.Final, Mermaid.Final -> true
+      | (Mermaid.Named _ | Mermaid.Initial | Mermaid.Final), _ -> false)
+
 let render ?(cols = 80) source =
   match Mermaid.render ~cols source with
   | Ok drawn -> drawn
@@ -310,11 +324,11 @@ let parsed source =
 
 let test_statements_split_on_semicolons_and_skip_comments () =
   let graph = parsed "graph LR\n%% not a statement\n  %% nor this\nA & B --> C; C --> D" in
-  Alcotest.(check (list string)) "nodes in order of appearance"
-    [ "A"; "B"; "C"; "D" ]
+  Alcotest.(check (list node_id)) "nodes in order of appearance"
+    Mermaid.[ Named "A"; Named "B"; Named "C"; Named "D" ]
     (List.map (fun (node : Mermaid.node) -> node.id) graph.nodes);
-  Alcotest.(check (list (pair string string))) "one edge per pair"
-    [ ("A", "C"); ("B", "C"); ("C", "D") ]
+  Alcotest.(check (list (pair node_id node_id))) "one edge per pair"
+    Mermaid.[ (Named "A", Named "C"); (Named "B", Named "C"); (Named "C", Named "D") ]
     (List.map (fun (edge : Mermaid.edge) -> (edge.from_id, edge.to_id)) graph.edges)
 
 let test_both_label_spellings_read_the_same () =
@@ -472,6 +486,203 @@ let test_a_quoted_label_may_hold_a_bracket () =
     ]
     (render "graph TD\nA[\"fixed [HOLD: see #1]\"]")
 
+(* ── State diagrams ────────────────────────────────────────────────────── *)
+
+let state_td_rows =
+  [ {| ╭─────╮|}
+  ; {| │ [*] │|}
+  ; {| ╰──┬──╯|}
+  ; {|    │|}
+  ; {|    v|}
+  ; {|╭───┴───╮|}
+  ; {|│ Still │|}
+  ; {|╰───┬───╯|}
+  ; {|    │ EvMove|}
+  ; {|    └┐|}
+  ; {|     v|}
+  ; {|╭────┴───╮|}
+  ; {|│ Moving │|}
+  ; {|╰────┬───╯|}
+  ; {|     │|}
+  ; {|    ┌┘|}
+  ; {|    v|}
+  ; {| ╭──┴──╮|}
+  ; {| │ [*] │|}
+  ; {| ╰─────╯|}
+  ]
+
+let test_state_diagram_top_down () =
+  Alcotest.check rows "top down state diagram with [*] start and stop"
+    state_td_rows
+    (render
+       "stateDiagram-v2\n\
+        [*] --> Still\n\
+        Still --> Moving : EvMove\n\
+        Moving --> [*]")
+
+let state_lr_rows =
+  [ {|╭─────╮  ╭───────╮  ╭────────╮  ╭─────╮|}
+  ; {|│ [*] ├─>┤ First ├─>┤ Second ├─>┤ [*] │|}
+  ; {|╰─────╯  ╰───────╯  ╰────────╯  ╰─────╯|}
+  ]
+
+let test_state_diagram_left_right () =
+  Alcotest.check rows "left right state diagram"
+    state_lr_rows
+    (render
+       "stateDiagram\n\
+        direction LR\n\
+        [*] --> First\n\
+        First --> Second\n\
+        Second --> [*]")
+
+let state_desc_rows =
+  [ {|╭──────────────╮|}
+  ; {|│ Offline Host │|}
+  ; {|╰───────┬──────╯|}
+  ; {|        │ Boot|}
+  ; {|       ┌┘|}
+  ; {|       v|}
+  ; {|   ╭───┴───╮|}
+  ; {|   │ Ready │|}
+  ; {|   ╰───────╯|}
+  ]
+
+let test_state_diagram_labels_and_descriptions () =
+  Alcotest.check rows "state description and transition label"
+    state_desc_rows
+    (render
+       "stateDiagram-v2\n\
+        state \"Offline Host\" as Off\n\
+        Off --> On : Boot\n\
+        state On : Ready")
+
+let test_state_diagram_keeper_fsm_parses () =
+  let src =
+    "stateDiagram-v2\n\
+     [*] --> Offline\n\
+     Offline --> Running : Fiber_started\n\
+     Offline --> Stopped : stop while not started\n\
+     Running --> Stopped : stop requested\n\
+     Stopped --> [*]\n\
+     classDef active fill:#22c55e\n\
+     class Offline active"
+  in
+  match Mermaid.parse src with
+  | Ok (Mermaid.Graph g) ->
+      Alcotest.(check int) "5 distinct states" 5 (List.length g.nodes);
+      Alcotest.(check int) "5 transitions" 5 (List.length g.edges);
+      Alcotest.(check (list node_id)) "the start and the end are nodes of their own"
+        Mermaid.[ Initial; Named "Offline"; Named "Running"; Named "Stopped"; Final ]
+        (List.map (fun (n : Mermaid.node) -> n.id) g.nodes)
+  | Ok (Mermaid.Sequence _) -> Alcotest.fail "parsed as sequence instead of graph"
+  | Error (Mermaid.Unsupported what) -> Alcotest.failf "unsupported: %s" what
+  | Error (Mermaid.Parse_error { line; what }) -> Alcotest.failf "line %d: %s" line what
+  | Error (Mermaid.Too_wide _) -> Alcotest.fail "too wide"
+
+let test_state_diagram_skips_classdef_and_notes () =
+  let src =
+    "stateDiagram-v2\n\
+     [*] --> Active\n\
+     note right of Active : this is skipped\n\
+     note left of Active\n\
+     Waiting\n\
+     }\n\
+     end note\n\
+     classDef c1 fill:#fff\n\
+     class Active c1\n\
+     Active --> [*]"
+  in
+  match Mermaid.parse src with
+  | Ok (Mermaid.Graph g) ->
+      Alcotest.(check (list node_id)) "a note's text is not a state"
+        Mermaid.[ Initial; Named "Active"; Final ]
+        (List.map (fun (n : Mermaid.node) -> n.id) g.nodes);
+      Alcotest.(check int) "2 edges" 2 (List.length g.edges)
+  | _ -> Alcotest.fail "expected Ok Graph"
+
+let test_state_diagram_note_with_no_end_is_refused () =
+  match failure "stateDiagram-v2\n[*] --> Idle\nnote right of Idle\nwaits here" with
+  | Mermaid.Parse_error { line; _ } -> Alcotest.(check int) "the line the note opened on" 3 line
+  | Mermaid.Unsupported _ | Mermaid.Too_wide _ -> Alcotest.fail "not a Parse_error"
+
+(* An arrow inside a quoted description or after the colon is text. The
+   colon ends the names, and [state] is read before any arrow is looked
+   for. *)
+let test_state_diagram_arrow_in_text_is_text () =
+  let graph =
+    parsed
+      "stateDiagram-v2\n\
+       state \"retry --> giveup\" as Backoff\n\
+       Waiting : retry->giveup\n\
+       Backoff --> Waiting : x-->y"
+  in
+  Alcotest.(check (list (pair node_id string))) "two states, each with its description"
+    Mermaid.[ (Named "Backoff", "retry --> giveup"); (Named "Waiting", "retry->giveup") ]
+    (List.map (fun (n : Mermaid.node) -> (n.id, n.label)) graph.nodes);
+  Alcotest.(check (list (option string))) "the label keeps its arrow" [ Some "x-->y" ]
+    (List.map (fun (e : Mermaid.edge) -> e.label) graph.edges)
+
+(* A line whose names are not one state id each is refused on its own line,
+   not drawn as a box of whatever it held. [->] is not a state transition in
+   Mermaid. *)
+let test_state_diagram_line_that_names_no_state_is_refused () =
+  List.iter
+    (fun line ->
+      match failure ("stateDiagram-v2\n" ^ line ^ "\n[*] --> A") with
+      | Mermaid.Parse_error { line = number; _ } -> Alcotest.(check int) line 2 number
+      | Mermaid.Unsupported _ | Mermaid.Too_wide _ -> Alcotest.failf "%s: not a Parse_error" line)
+    [ "}"
+    ; "end note"
+    ; "--"
+    ; "A B"
+    ; "A -> B"
+    ; "state A B"
+    ; "A --> B C : go"
+    ; "[*] : a start takes no description"
+    ; "Class --> X"
+    ; "Style --> X"
+    ; "Click --> X"
+    ; "classDef"
+    ; "title Keeper phases"
+    ]
+
+(* What Mermaid itself does with these lines, read from its stateDb: a line
+   that is only [[*]] is a start; naming a state again with no description
+   keeps the one it has; a note about a state no other line names declares
+   it. Styling, [hide empty description] and [scale] change nothing. The
+   state grammar has no [linkStyle], so a line that starts with it is a
+   transition from a state of that name. *)
+let test_state_diagram_reads_lines_as_mermaid_does () =
+  let graph =
+    parsed
+      "stateDiagram-v2\n\
+       [*]\n\
+       \"Quoted\" --> B --> C\n\
+       linkStyle --> C\n\
+       note right of Lonely : about a state no other line names\n\
+       C : described\n\
+       state C\n\
+       C\n\
+       hide empty description\n\
+       scale 350 width\n\
+       class B,C highlighted"
+  in
+  Alcotest.(check (list (pair node_id string))) "states and their labels"
+    Mermaid.
+      [ (Initial, "[*]")
+      ; (Named "Quoted", "Quoted")
+      ; (Named "B", "B")
+      ; (Named "C", "described")
+      ; (Named "linkStyle", "linkStyle")
+      ; (Named "Lonely", "Lonely")
+      ]
+    (List.map (fun (n : Mermaid.node) -> (n.id, n.label)) graph.nodes);
+  Alcotest.(check (list (pair node_id node_id))) "a chain is one transition per arrow"
+    Mermaid.
+      [ (Named "Quoted", Named "B"); (Named "B", Named "C"); (Named "linkStyle", Named "C") ]
+    (List.map (fun (e : Mermaid.edge) -> (e.from_id, e.to_id)) graph.edges)
+
 let () =
   Alcotest.run "tui mermaid"
     [ ( "goldens"
@@ -555,5 +766,22 @@ let () =
             test_strokes_heads_and_shapes_are_read
         ; Alcotest.test_case "styling statements change nothing" `Quick
             test_styling_statements_change_nothing
+        ] )
+    ; ( "state"
+      , [ Alcotest.test_case "top down state diagram" `Quick test_state_diagram_top_down
+        ; Alcotest.test_case "left right state diagram" `Quick test_state_diagram_left_right
+        ; Alcotest.test_case "labels and descriptions" `Quick
+            test_state_diagram_labels_and_descriptions
+        ; Alcotest.test_case "keeper fsm parses" `Quick test_state_diagram_keeper_fsm_parses
+        ; Alcotest.test_case "skips classdef and notes" `Quick
+            test_state_diagram_skips_classdef_and_notes
+        ; Alcotest.test_case "a note with no end note is refused" `Quick
+            test_state_diagram_note_with_no_end_is_refused
+        ; Alcotest.test_case "an arrow in text is text" `Quick
+            test_state_diagram_arrow_in_text_is_text
+        ; Alcotest.test_case "a line that names no state is refused" `Quick
+            test_state_diagram_line_that_names_no_state_is_refused
+        ; Alcotest.test_case "reads lines as mermaid does" `Quick
+            test_state_diagram_reads_lines_as_mermaid_does
         ] )
     ]

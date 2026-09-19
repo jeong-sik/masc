@@ -98,34 +98,6 @@ let append_error_to_string = function
     Printf.sprintf "absorbed memory append failed path=%s: %s" path message
 ;;
 
-(* The append refuses to write behind a line with no newline, and a mid-append
-   crash leaves exactly that. The board-attention and approval-queue stores
-   answer it the same way — truncate a torn tail to the last complete row once
-   per process, while ordinary reads keep failing hard on one — and this store
-   was the only private JSONL without the call. Missing it, a single power loss
-   left the keeper's librarian failing every round that absorbs anything, one
-   provider call per cadence, forever.
-
-   Recovery is remembered only when it succeeded: a path that could not be
-   recovered is tried again on the next append, which costs what an append
-   against it already costs, and a path recovered once is not walked again. *)
-let recovered_paths : (string, unit) Hashtbl.t = Hashtbl.create 8
-let recovered_paths_mutex = Stdlib.Mutex.create ()
-
-let recover_torn_tail_once ~keeper_id path =
-  Stdlib.Mutex.protect recovered_paths_mutex (fun () ->
-    if not (Hashtbl.mem recovered_paths path)
-    then (
-      match Fs_compat.recover_private_jsonl_durable_locked_result path with
-      | Ok _ -> Hashtbl.replace recovered_paths path ()
-      | Error error ->
-        Log.Keeper.warn
-          ~keeper_name:keeper_id
-          "absorbed memory tail recovery failed path=%s: %s"
-          path
-          (Fs_compat.private_jsonl_transaction_error_to_string error)))
-;;
-
 let append_all ~keepers_dir ~keeper_id records =
   let rec validated acc = function
     | [] -> Ok (List.rev acc)
@@ -143,7 +115,6 @@ let append_all ~keepers_dir ~keeper_id records =
       String.concat "" (List.map (fun json -> Yojson.Safe.to_string json ^ "\n") lines)
     in
     let failed message = Error (Write_failed { path; message }) in
-    recover_torn_tail_once ~keeper_id path;
     (match Fs_compat.append_private_jsonl_durable_locked_result path suffix with
      | Fs_compat.Private_file_succeeded () -> Ok ()
      | Fs_compat.Private_file_succeeded_with_cleanup_failure { value = (); cleanup_failure } ->

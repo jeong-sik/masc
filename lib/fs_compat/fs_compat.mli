@@ -1009,6 +1009,8 @@ module Private_jsonl_slice : sig
 end
 
 type durable_append_operation =
+  | Incomplete_tail_truncate
+  | Incomplete_tail_fsync
   | Write
   | Append_fsync
   | Rollback_truncate
@@ -1128,9 +1130,11 @@ module Private_jsonl_rows : sig
   val error_to_string : error -> string
 end
 
-(** Read a private JSONL store through the writer's own framing rule
-    ({!append_private_jsonl_durable_locked_result} refuses to append after a
-    tail without ['\n']), while holding the same per-path in-process mutex and
+(** Read a private JSONL store through the writer's own framing rule (a tail
+    without ['\n'] is not a row: {!append_private_jsonl_durable_locked_result}
+    cuts it before writing, and
+    {!append_private_jsonl_durable_locked_at_end_offset_result} refuses to
+    append after it), while holding the same per-path in-process mutex and
     a shared cross-process lock the durable writer takes exclusively — so no
     append is in progress while the bytes are read, and the read runs in a
     systhread when the caller is an Eio fiber. The complete rows come back
@@ -1352,6 +1356,11 @@ val rewrite_private_file_durable_locked_result :
 
 type private_jsonl_append_error =
   | Incomplete_jsonl_tail
+      (** The file ends with a row that has no ['\n'] and the caller asked for
+          an exact end offset. *)
+  | Incomplete_jsonl_tail_truncate_failed of durable_append_failure
+      (** Cutting a final row that has no ['\n'] failed. The suffix was not
+          written. *)
   | Invalid_jsonl_suffix
   | Negative_expected_end_offset of int
   | End_offset_mismatch of
@@ -1360,12 +1369,17 @@ type private_jsonl_append_error =
       }
   | Durable_jsonl_append_failed of durable_append_error
 
-(** Append one or more complete JSONL rows without reading the existing file.
-    The operation holds the same in-process and cross-process path locks as
-    {!update_private_file_durable_locked_result}, verifies only that an existing
-    file ends at a newline boundary, then appends and fsyncs with rollback on
-    failure. Every transaction also fsyncs the parent directory. Runtime cost
-    is proportional to [suffix], not to historical file size. From an Eio
+(** Append one or more complete JSONL rows. The operation holds the same
+    in-process and cross-process path locks as
+    {!update_private_file_durable_locked_result}, then checks whether an
+    existing file ends at a newline boundary. When it does not, the bytes after
+    the last ['\n'] are an append a crash cut short: under the same locks they
+    are truncated and the file fsynced, a WARN with the path and the cut byte
+    count goes to stderr, and the append writes from that boundary. It then
+    appends and fsyncs with rollback on failure. Every transaction also fsyncs
+    the parent directory. Runtime cost is proportional to [suffix], not to
+    historical file size; only the append that cuts a torn tail reads the
+    existing file, once, to find the last ['\n']. From an Eio
     fiber, the entire blocking lock/write/fsync transaction runs in a system
     thread, including directory creation and in-process mutex acquisition, so
     one contended file cannot stop unrelated fibers. Non-Eio callers execute
@@ -1378,7 +1392,10 @@ val append_private_jsonl_durable_locked_with_end_offset_result :
 
 (** Append only when the file's locked byte length is exactly
     [expected_end_offset]. A stale writer receives [End_offset_mismatch] and
-    writes no bytes. The successful result is the committed newline-end byte
+    writes no bytes. A file that ends without ['\n'] is refused with
+    [Incomplete_jsonl_tail] and left as it is: the caller's condition is the
+    length it observed, so cutting bytes under it would change what that
+    condition meant. The successful result is the committed newline-end byte
     offset. *)
 val append_private_jsonl_durable_locked_at_end_offset_result :
   string ->

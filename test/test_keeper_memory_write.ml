@@ -1243,12 +1243,10 @@ let test_corrupt_snapshot_is_a_dependency_failure () =
   Alcotest.(check bool) "the detail names the file" true (mentions_path 0)
 ;;
 
-(* A crash mid-append leaves a line with no newline, and the append refuses to
-   write behind one. What this pins is not the refusal — an ordinary read still
-   fails hard on a torn line — but that the next absorb commits anyway. A
-   librarian that cannot commit spends a provider call every cadence and never
-   recovers on its own, which is what the board-attention and approval-queue
-   stores avoid by truncating a torn tail once per process. *)
+(* A crash mid-append leaves a line with no newline. The next absorb commits
+   anyway: the append cuts the torn line back to the last complete row before
+   it writes. A librarian that could not commit would spend a provider call
+   every cadence and never get past the torn line on its own. *)
 let test_a_torn_tail_does_not_stop_the_next_absorb () =
   let keeper_id = "torn-tail-keeper" in
   let absorbed digit =

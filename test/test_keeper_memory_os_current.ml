@@ -1877,11 +1877,9 @@ let test_a_failed_absorbed_write_commits_nothing () =
     (List.sort compare (fact_ids current.facts))
 ;;
 
-(* A crash during an append leaves a last line with no newline. What this pins
-   is not the refusal — an ordinary read still fails hard on the torn line and
-   reports it as the line it is — but that the pass recovers the way the
-   board-attention and approval-queue stores do: the torn tail is truncated to
-   the last complete row once per process and the same pass commits. *)
+(* A crash during an append leaves a last line with no newline. A read reports
+   it as the line it is; the pass's append cuts it back to the last complete
+   row and the same pass commits. *)
 let test_an_absorbing_pass_recovers_a_store_that_ends_mid_line () =
   with_temp_keepers @@ fun keepers_dir ->
   let a, b, c = seed_three ~keepers_dir in

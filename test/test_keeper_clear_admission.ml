@@ -181,9 +181,9 @@ let test_checkpoint_read_failure fault () =
     (fun () ->
       let result = clear () in
       check_refused result;
-      let open Yojson.Safe.Util in
       check string "failure identifies the checkpoint" path
-        (Tool_result.data result |> member "checkpoint_path" |> to_string);
+        (Tool_result.data result |> Yojson.Safe.Util.member "checkpoint_path"
+         |> Yojson.Safe.Util.to_string);
       (match fault with
        | `Malformed ->
          check string "malformed original is not overwritten" invalid_json (Fs_compat.load_file path)
@@ -207,10 +207,11 @@ let test_absent_checkpoint_is_a_noop () =
   Unix.unlink path;
   let result = clear () in
   check bool (Tool_result.message result) true (Tool_result.is_success result);
-  let open Yojson.Safe.Util in
   let data = Tool_result.data result in
-  check bool "absence is reported" false (member "checkpoint_found" data |> to_bool);
-  check int "no messages were cleared" 0 (member "cleared_message_count" data |> to_int);
+  check bool "absence is reported" false
+    (Yojson.Safe.Util.member "checkpoint_found" data |> Yojson.Safe.Util.to_bool);
+  check int "no messages were cleared" 0
+    (Yojson.Safe.Util.member "cleared_message_count" data |> Yojson.Safe.Util.to_int);
   check bool "absence does not create a checkpoint" false (Sys.file_exists path)
 ;;
 

@@ -476,16 +476,16 @@ DoneRequiresLiveApproval ==
 \* moment. It has to be an action property: once the Task is Cancelled the
 \* state that named the canceller is gone, so no predicate on the result can
 \* tell a standing cancel from one without standing.
-\* An outcome that is not Open never changes again. Cancel standing is stated
-\* only for the step out of Open (CancelNeedsStanding below), so without this
-\* a Task could leave Done by some other route and no property would notice.
-TerminalOutcomeIsFinal ==
-    [][\A t \in Tasks : outcome[t] # "Open" => outcome'[t] = outcome[t]]_vars
-
 CancelNeedsStanding ==
     [][\A t \in Tasks :
         (outcome[t] = "Open" /\ outcome'[t] = "Cancelled")
           => (cancelled_by'[t] = Operator \/ cancelled_by'[t] = StateNames(t))]_vars
+
+\* An outcome that is not Open never changes again. CancelNeedsStanding above
+\* covers only the step out of Open, so without this a Task could leave Done by
+\* some other route and no property would notice.
+TerminalOutcomeIsFinal ==
+    [][\A t \in Tasks : outcome[t] # "Open" => outcome'[t] = outcome[t]]_vars
 
 \* Reachability guard, not a safety property. It is written as something that
 \* must FAIL: its cfg expects a violation. If a future edit stops the clean
